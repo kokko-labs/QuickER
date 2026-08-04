@@ -828,4 +828,17 @@
   <data name="Tool_ListSeparator" xml:space="preserve">
     <value>, </value>
   </data>
+  <data name="Crash_DialogTitle" xml:space="preserve">
+    <value>Unexpected Error</value>
+  </data>
+  <data name="Crash_Message" xml:space="preserve">
+    <value>An unexpected error occurred and QuickER has to close. The current diagram has been saved for recovery and will be restored on the next startup.
+
+Crash log: {0}
+
+Please report the problem with the details below.</value>
+  </data>
+  <data name="Crash_CopyDetails" xml:space="preserve">
+    <value>Copy Details</value>
+  </data>
 </root>

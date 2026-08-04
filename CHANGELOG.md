@@ -6,6 +6,14 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- **Crash handling in the GUI** — on an unexpected error the diagram being edited is saved for recovery, a crash log is written to `%APPDATA%\QuickER\crash-*.log`, and a dialog shows the details with a copy button before the app closes
+
+### Changed
+
+- The recovery auto-save file is now written atomically (a temporary file is swapped in), so an interrupted write can no longer corrupt it
+
 ## [0.1.0] - 2026-08-02
 
 Initial public release.

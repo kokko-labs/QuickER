@@ -1,6 +1,8 @@
 using System.Globalization;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Threading;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Extensibility;
 using QuickER.Gui.Abstractions;
@@ -9,6 +11,7 @@ using QuickER.MySql;
 using QuickER.Oracle;
 using QuickER.PostgreSql;
 using QuickER.Provider;
+using QuickER.Resources;
 using QuickER.Services;
 using QuickER.Sqlite;
 using QuickER.SqlServer;
@@ -23,13 +26,32 @@ namespace QuickER
     /// </remarks>
     public partial class App : Application
     {
+        /// <summary>
+        /// クラッシュログを書けなかった場合に、ダイアログのログパス欄へ差し込む代替表記。
+        /// 診断向けの機械可読な短句のため UI 言語に追従させない（英語固定）。
+        /// </summary>
+        private const string CrashLogUnavailable = "(not available)";
+
         /// <summary>アプリ全体の DI コンテナ（終了時に破棄する）</summary>
         private ServiceProvider? _provider;
+
+        /// <summary>解決済みの主 ViewModel（クラッシュ時の緊急保存対象。未構築なら null）</summary>
+        /// <remarks>
+        /// クラッシュハンドラから <c>GetService</c> で取り直すと、まだ生成されていない場合に
+        /// その場でシングルトンを構築してしまう（＝空の図を復旧ファイルへ書き戻しかねない）。
+        /// 起動時に解決した実体だけを退避対象とするため、ここへ保持する。
+        /// </remarks>
+        private MainViewModel? _mainViewModel;
 
         /// <summary>DI コンテナを構築し、メインウィンドウを解決して表示する</summary>
         protected override void OnStartup(StartupEventArgs e)
         {
             base.OnStartup(e);
+
+            // 未捕捉例外の受け皿を最初期に張る（以降の初期化中に落ちても緊急保存・ログ・報告が働く）。
+            // 非 UI スレッドの即死経路（AppDomain）は Program.Main 側で購読済み。
+            DispatcherUnhandledException += OnDispatcherUnhandledException;
+            TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
 
             // 起動最初期に表示言語のカルチャを適用する。
             // 切替は再起動反映方式のため、ウィンドウ生成前のここで一度だけ設定する。
@@ -91,6 +113,7 @@ namespace QuickER
 
             // 各モジュールのツールバー寄与を集約し、主 ViewModel へ流し込む
             var mainViewModel = _provider.GetRequiredService<MainViewModel>();
+            _mainViewModel = mainViewModel;
             var toolbarItems = modules
                 .SelectMany(module => module.CreateToolbarItems(_provider))
                 .ToList();
@@ -120,9 +143,103 @@ namespace QuickER
 
             window.Show();
 
+            // クラッシュハンドラの実挙動（緊急保存・ログ・ダイアログ・終了コード）を実起動で検証するための
+            // 隠しトリガー。環境変数を立てたときだけ UI スレッドで意図的に例外を投げる（通常起動には影響しない）。
+            if (Environment.GetEnvironmentVariable("QUICKER_CRASH_TEST") == "1")
+            {
+                _ = Dispatcher.BeginInvoke(() =>
+                    throw new InvalidOperationException("Crash handler test")
+                );
+            }
+
             // 起動を阻害しない fire-and-forget での更新チェック。
             // 例外・フィード未設定・非インストール実行はすべて UpdateService 内で処理済み。
             _ = _provider.GetRequiredService<UpdateService>().CheckOnStartupAsync();
+        }
+
+        /// <summary>
+        /// UI スレッドの未捕捉例外を受け、緊急保存 → クラッシュログ → 報告ダイアログの順に処理してから終了する。
+        /// </summary>
+        /// <remarks>
+        /// 終了に <see cref="Application.Shutdown()"/> を使わないのは、MainWindow の Closing 経由で
+        /// 通常の自動保存が「壊れた ViewModel 状態」で走り、直前に採った緊急保存スナップショットを
+        /// 上書きしうるため。プロセスを即座に終える <see cref="Environment.Exit(int)"/> を用いる。
+        /// </remarks>
+        private void OnDispatcherUnhandledException(
+            object sender,
+            DispatcherUnhandledExceptionEventArgs e
+        )
+        {
+            var version = CrashHandlingService.ResolveAppVersion();
+
+            CrashHandlingService.HandleCrash(
+                e.Exception,
+                version,
+                TryEmergencySave,
+                logPath => ShowCrashDialog(e.Exception, version, logPath)
+            );
+
+            // WPF 既定の即死（未処理例外による強制終了）を抑止し、こちらの手順で終了する
+            e.Handled = true;
+            Environment.Exit(1);
+        }
+
+        /// <summary>
+        /// 取りこぼした Task 例外を記録する（アプリは継続させる）。
+        /// </summary>
+        /// <remarks>
+        /// UI の破綻を伴わないことが多く、終了させるとかえって作業を失わせるため証跡だけ残し、
+        /// <see cref="UnobservedTaskExceptionEventArgs.SetObserved"/> でプロセス終了を防ぐ。
+        /// </remarks>
+        private static void OnUnobservedTaskException(
+            object? sender,
+            UnobservedTaskExceptionEventArgs e
+        )
+        {
+            CrashHandlingService.WriteCrashLog(
+                e.Exception,
+                CrashHandlingService.ResolveAppVersion()
+            );
+            e.SetObserved();
+        }
+
+        /// <summary>現在の編集内容を復旧用の自動保存ファイルへ緊急退避する</summary>
+        private void TryEmergencySave()
+        {
+            // DI 構築前（起動最初期）のクラッシュでは退避対象そのものが無いため何もしない
+            _mainViewModel?.TryEmergencyAutoSave();
+        }
+
+        /// <summary>クラッシュの要約と詳細（コピー可能）を提示する報告ダイアログを表示する</summary>
+        /// <param name="exception">発生した未捕捉例外</param>
+        /// <param name="version">アプリのバージョン文字列</param>
+        /// <param name="logPath">書き出したクラッシュログのパス（書けなかった場合は null）</param>
+        private static void ShowCrashDialog(Exception exception, string version, string? logPath)
+        {
+            var message = string.Format(
+                CultureInfo.CurrentCulture,
+                Strings.Crash_Message,
+                logPath ?? CrashLogUnavailable
+            );
+
+            var dialog = new InformationDetailsDialog(
+                message,
+                CrashHandlingService.FormatDetails(exception, version),
+                Strings.Crash_DialogTitle,
+                isError: true,
+                copyButtonText: Strings.Crash_CopyDetails
+            );
+
+            var owner = Application.Current?.MainWindow;
+
+            // 未表示のウィンドウを Owner にすると WPF が例外を投げるため、表示済みのときだけ紐付ける
+            // （起動最初期のクラッシュでは Owner なしで中央に出す）
+            if (owner is not null && owner.IsLoaded)
+            {
+                dialog.Owner = owner;
+            }
+
+            dialog.ShowDialog();
         }
 
         /// <summary>

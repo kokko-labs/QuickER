@@ -71,4 +71,51 @@ public class InformationDetailsDialogTests
             ((TextBox)dialog.FindName("DetailsText")).Text.Should().Be("[Error] 詳細");
         });
     }
+
+    /// <summary>コピーボタン文言を省略したときにボタンが非表示のままであることを検証する（既存挙動）</summary>
+    [Fact(
+        DisplayName = "InformationDetailsDialog: copyButtonText 省略時はコピーボタンを表示しない"
+    )]
+    public void Construct_WithoutCopyButtonText_HidesCopyButton()
+    {
+        WpfApplicationTestSupport.RunSta(() =>
+        {
+            WpfApplicationTestSupport.EnsureApplicationResources();
+
+            var dialog = WpfApplicationTestSupport.LoadXamlComponent(() =>
+                new InformationDetailsDialog("要約", "詳細", "タイトル", isError: false)
+            );
+
+            ((Button)dialog.FindName("CopyButton"))
+                .Visibility.Should()
+                .Be(System.Windows.Visibility.Collapsed);
+        });
+    }
+
+    /// <summary>コピーボタン文言を指定したときにボタンが表示され、文言が反映されることを検証する</summary>
+    /// <remarks>
+    /// クリップボードへの実書き込みはシステムグローバルな状態のため断定しない（実起動で確認する）。
+    /// </remarks>
+    [Fact(DisplayName = "InformationDetailsDialog: copyButtonText 指定時はコピーボタンを表示する")]
+    public void Construct_WithCopyButtonText_ShowsCopyButton()
+    {
+        WpfApplicationTestSupport.RunSta(() =>
+        {
+            WpfApplicationTestSupport.EnsureApplicationResources();
+
+            var dialog = WpfApplicationTestSupport.LoadXamlComponent(() =>
+                new InformationDetailsDialog(
+                    "要約",
+                    "詳細",
+                    "タイトル",
+                    isError: true,
+                    copyButtonText: "詳細をコピー"
+                )
+            );
+
+            var copyButton = (Button)dialog.FindName("CopyButton");
+            copyButton.Visibility.Should().Be(System.Windows.Visibility.Visible);
+            copyButton.Content.Should().Be("詳細をコピー");
+        });
+    }
 }

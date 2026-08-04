@@ -18,7 +18,16 @@ public partial class InformationDetailsDialog : Window
     /// <param name="details">読み取り専用領域に表示する複数行の詳細（一覧本文）</param>
     /// <param name="title">ウィンドウタイトル</param>
     /// <param name="isError">エラー表示なら true（エラーアイコン＋エラー色）。情報なら false（情報アイコン）</param>
-    public InformationDetailsDialog(string message, string details, string title, bool isError)
+    /// <param name="copyButtonText">
+    /// 詳細をクリップボードへコピーするボタンの文言。null／空なら該当ボタンを表示しない（既定＝従来の OK のみ）
+    /// </param>
+    public InformationDetailsDialog(
+        string message,
+        string details,
+        string title,
+        bool isError,
+        string? copyButtonText = null
+    )
     {
         InitializeComponent();
 
@@ -38,8 +47,29 @@ public partial class InformationDetailsDialog : Window
             HeaderIcon.Text = "ℹ"; // ℹ
             HeaderIcon.Foreground = System.Windows.Media.Brushes.SteelBlue;
         }
+
+        // コピーボタンは文言が与えられたときだけ見せる（クラッシュ報告など、詳細の持ち出しが要る用途向け）
+        if (!string.IsNullOrEmpty(copyButtonText))
+        {
+            CopyButton.Content = copyButtonText;
+            CopyButton.Visibility = Visibility.Visible;
+        }
     }
 
     /// <summary>OK ボタン押下でダイアログを閉じる</summary>
     private void OnOkClick(object sender, RoutedEventArgs e) => DialogResult = true;
+
+    /// <summary>詳細本文をクリップボードへコピーする</summary>
+    private void OnCopyDetailsClick(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            Clipboard.SetText(DetailsText.Text);
+        }
+        catch (System.Runtime.InteropServices.ExternalException)
+        {
+            // 他プロセスがクリップボードをロックしている場合の失敗は無視する
+            // （報告を妨げないよう、ダイアログ自体は表示したままにする）
+        }
+    }
 }

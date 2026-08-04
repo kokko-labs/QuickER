@@ -29,8 +29,39 @@ public static class JsonStorageService
     /// <param name="document">保存対象の文書（意味モデル＋レイアウト）</param>
     public static void Save(string path, DiagramDocument document)
     {
-        File.WriteAllText(path, JsonSerializer.Serialize(document, Options));
+        File.WriteAllText(path, Serialize(document));
     }
+
+    /// <summary>保存文書をアトミックに（書き込み途中の中断で既存ファイルを壊さずに）保存する</summary>
+    /// <remarks>
+    /// 一時ファイル <c>{path}.tmp</c> へ全量を書き切ってから本体へ差し替える。素の
+    /// <see cref="Save"/>（<see cref="File.WriteAllText(string, string?)"/>）は既存ファイルを
+    /// 切り詰めてから書くため、途中でプロセスが落ちると保存先が破損した JSON になる。
+    /// クラッシュ時の緊急保存など「落ちる可能性のある文脈」からの書き込みはこちらを使う。
+    /// </remarks>
+    /// <param name="path">保存先のファイルパス</param>
+    /// <param name="document">保存対象の文書（意味モデル＋レイアウト）</param>
+    public static void SaveAtomic(string path, DiagramDocument document)
+    {
+        var temporaryPath = path + ".tmp";
+        File.WriteAllText(temporaryPath, Serialize(document));
+
+        // 既存ファイルがあれば置換（バックアップは残さない）、無ければ単純に移動する。
+        // File.Replace は保存先が存在しないと例外になるため、両者を明示的に分岐する。
+        if (File.Exists(path))
+        {
+            File.Replace(temporaryPath, path, destinationBackupFileName: null);
+        }
+        else
+        {
+            File.Move(temporaryPath, path);
+        }
+    }
+
+    /// <summary>保存文書を図ファイルの正準形（<see cref="Options"/>）で JSON 文字列へ直列化する</summary>
+    /// <remarks><see cref="Save"/> と <see cref="SaveAtomic"/> で出力を完全に一致させるための共有ヘルパ</remarks>
+    private static string Serialize(DiagramDocument document) =>
+        JsonSerializer.Serialize(document, Options);
 
     /// <summary>ファイルから保存文書を読み込む</summary>
     /// <param name="path">読み込むファイルパス</param>

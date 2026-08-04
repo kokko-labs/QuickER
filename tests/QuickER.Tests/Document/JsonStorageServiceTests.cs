@@ -517,6 +517,120 @@ public class JsonStorageServiceTests
         }
     }
 
+    /// <summary>保存先が存在しない場合に SaveAtomic が新規作成し、一時ファイルを残さないことを検証する</summary>
+    [Fact(DisplayName = "SaveAtomic: 保存先が無ければ新規作成し .tmp を残さない")]
+    public void SaveAtomic_NewFile_CreatesFileWithoutTemporaryLeftover()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"er-atomic-new-{Guid.NewGuid()}.json");
+
+        try
+        {
+            JsonStorageService.SaveAtomic(
+                path,
+                BuildDocument("Customer", DiagramDocument.CurrentVersion)
+            );
+
+            File.Exists(path).Should().BeTrue();
+            File.Exists(path + ".tmp").Should().BeFalse("一時ファイルは差し替え後に残らない");
+            JsonStorageService
+                .Load(path)
+                .Schema.Entities.Should()
+                .ContainSingle()
+                .Which.TableName.Should()
+                .Be("Customer");
+        }
+        finally
+        {
+            DeleteIfExists(path);
+            DeleteIfExists(path + ".tmp");
+        }
+    }
+
+    /// <summary>既存ファイルを SaveAtomic が置換し、一時ファイルを残さないことを検証する</summary>
+    [Fact(DisplayName = "SaveAtomic: 既存ファイルを置換し .tmp を残さない")]
+    public void SaveAtomic_ExistingFile_ReplacesContentWithoutTemporaryLeftover()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"er-atomic-replace-{Guid.NewGuid()}.json");
+
+        try
+        {
+            JsonStorageService.Save(path, BuildDocument("Old", DiagramDocument.CurrentVersion));
+            JsonStorageService.SaveAtomic(
+                path,
+                BuildDocument("New", DiagramDocument.CurrentVersion)
+            );
+
+            File.Exists(path + ".tmp").Should().BeFalse("一時ファイルは差し替え後に残らない");
+            JsonStorageService
+                .Load(path)
+                .Schema.Entities.Should()
+                .ContainSingle()
+                .Which.TableName.Should()
+                .Be("New");
+        }
+        finally
+        {
+            DeleteIfExists(path);
+            DeleteIfExists(path + ".tmp");
+        }
+    }
+
+    /// <summary>SaveAtomic と Save の出力 JSON が完全に一致することを検証する（直列化設定の共有）</summary>
+    [Fact(DisplayName = "SaveAtomic: 出力 JSON は Save と同一")]
+    public void SaveAtomic_ProducesIdenticalJsonToSave()
+    {
+        var plainPath = Path.Combine(Path.GetTempPath(), $"er-atomic-plain-{Guid.NewGuid()}.json");
+        var atomicPath = Path.Combine(Path.GetTempPath(), $"er-atomic-same-{Guid.NewGuid()}.json");
+
+        try
+        {
+            JsonStorageService.Save(
+                plainPath,
+                BuildDocument("Customer", DiagramDocument.CurrentVersion)
+            );
+            JsonStorageService.SaveAtomic(
+                atomicPath,
+                BuildDocument("Customer", DiagramDocument.CurrentVersion)
+            );
+
+            File.ReadAllText(atomicPath).Should().Be(File.ReadAllText(plainPath));
+        }
+        finally
+        {
+            DeleteIfExists(plainPath);
+            DeleteIfExists(atomicPath);
+        }
+    }
+
+    /// <summary>指定のテーブル名・フォーマットバージョンでエンティティ 1 件の保存文書を組み立てる</summary>
+    /// <remarks>エンティティ Id は固定にして、Save と SaveAtomic の出力を比較できるようにする</remarks>
+    private static DiagramDocument BuildDocument(string tableName, int version) =>
+        new()
+        {
+            Version = version,
+            Schema = new ErDiagram
+            {
+                TargetDbms = "sqlserver",
+                Entities =
+                {
+                    new Entity
+                    {
+                        Id = new Guid("22222222-0000-0000-0000-000000000001"),
+                        TableName = tableName,
+                    },
+                },
+            },
+        };
+
+    /// <summary>存在すればファイルを削除する（後始末用）</summary>
+    private static void DeleteIfExists(string path)
+    {
+        if (File.Exists(path))
+        {
+            File.Delete(path);
+        }
+    }
+
     /// <summary>CurrentVersion より新しいフォーマットバージョンでエンティティ 1 件の文書を一時ファイルへ保存する</summary>
     private static string SaveNewerFormatDocument()
     {

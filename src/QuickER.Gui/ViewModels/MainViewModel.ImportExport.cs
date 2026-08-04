@@ -461,7 +461,10 @@ public partial class MainViewModel
         {
             var dir = Path.GetDirectoryName(_autoSavePath)!;
             Directory.CreateDirectory(dir);
-            JsonStorageService.Save(_autoSavePath, ToDocument());
+
+            // 復旧ファイルはアトミックに書き換える。クラッシュ時の緊急保存もこの経路を通るため、
+            // 書き込み途中で落ちても直前の自動保存内容が壊れずに残る
+            JsonStorageService.SaveAtomic(_autoSavePath, ToDocument());
 
             // UI 表示状態・文書メタは GUI 全体設定の各セクション。他のセクション（言語など）を消さないよう
             // Load → 該当セクションのみ差し替え → Save の read-modify-write で書き込む
@@ -485,6 +488,13 @@ public partial class MainViewModel
             // 自動保存の失敗は操作を妨げないため無視する
         }
     }
+
+    /// <summary>クラッシュ時に、現在の編集内容を復旧用の自動保存ファイルへ緊急退避する</summary>
+    /// <remarks>
+    /// 中身は通常の <see cref="AutoSave"/>（失敗は握り潰す）。壊れた状態から呼ばれても
+    /// 例外を外へ出さない契約であることを呼び出し側（クラッシュハンドラ）へ明示するための公開口。
+    /// </remarks>
+    public void TryEmergencyAutoSave() => AutoSave();
 
     /// <summary>起動時に前回の自動保存ファイルから UI 状態・ダイアグラム・文書メタを復元する</summary>
     private void RestoreLastDiagram()

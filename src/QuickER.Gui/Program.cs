@@ -21,6 +21,19 @@ namespace QuickER
         [STAThread]
         private static void Main(string[] args)
         {
+            // 非 UI スレッドや WPF 初期化前（Velopack フック・単一インスタンス制御の段）で落ちた場合、
+            // プロセスは CLR により終了しダイアログは出せない。証跡としてクラッシュログだけ残す。
+            AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+            {
+                if (e.ExceptionObject is Exception exception)
+                {
+                    CrashHandlingService.WriteCrashLog(
+                        exception,
+                        CrashHandlingService.ResolveAppVersion()
+                    );
+                }
+            };
+
             // インストール/更新フックを WPF 初期化より前に処理する（Velopack 公式手順）。
             // 未インストール実行時は何もせずそのまま返る。
             VelopackApp.Build().Run();

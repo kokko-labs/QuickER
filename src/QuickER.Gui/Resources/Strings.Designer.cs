@@ -1683,5 +1683,23 @@ namespace QuickER.Resources {
             }
         }
 
+        public static string Crash_DialogTitle {
+            get {
+                return ResourceManager.GetString("Crash_DialogTitle", resourceCulture);
+            }
+        }
+
+        public static string Crash_Message {
+            get {
+                return ResourceManager.GetString("Crash_Message", resourceCulture);
+            }
+        }
+
+        public static string Crash_CopyDetails {
+            get {
+                return ResourceManager.GetString("Crash_CopyDetails", resourceCulture);
+            }
+        }
+
     }
 }

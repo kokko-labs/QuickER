@@ -838,4 +838,20 @@
   <data name="Tool_ListSeparator" xml:space="preserve">
     <value>、</value>
   </data>
+  <data name="Crash_DialogTitle" xml:space="preserve">
+    <value>予期しないエラー</value>
+    <comment>クラッシュ報告ダイアログのタイトル</comment>
+  </data>
+  <data name="Crash_Message" xml:space="preserve">
+    <value>予期しないエラーが発生したため、QuickER を終了します。現在の図は復旧用に保存済みで、次回起動時に復元されます。
+
+クラッシュログ: {0}
+
+下記の詳細を添えて問題をご報告ください。</value>
+    <comment>クラッシュ報告ダイアログの要約メッセージ（{0} = クラッシュログのパス）</comment>
+  </data>
+  <data name="Crash_CopyDetails" xml:space="preserve">
+    <value>詳細をコピー</value>
+    <comment>クラッシュ報告ダイアログの詳細コピーボタン</comment>
+  </data>
 </root>
