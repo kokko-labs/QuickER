@@ -268,6 +268,67 @@ public class ForeignKeyRelationshipBuilderTests
         rels.Select(r => r.ConstraintName).Should().Equal("FK_Order_Customer", "FK_Order_Shipper");
     }
 
+    /// <summary>異なる子テーブルが同名の制約を持つ場合でも別々のリレーションとして構築され、各々の列 ID が解決されることを検証する</summary>
+    [Fact(DisplayName = "異なる子テーブルの同名制約は別々のリレーションになる")]
+    public void SameConstraintName_OnDifferentChildTables_AreSeparated()
+    {
+        // PostgreSQL 等では制約名の一意性がテーブル単位のため、別テーブルが同名 FK 制約 "fk_customer" を持ちうる
+        var customer = Table("Customer", "Customer", Col("Id", pk: true));
+        var order = Table("Order", "Order", Col("Id", pk: true), Col("CustomerId"));
+        var invoice = Table("Invoice", "Invoice", Col("Id", pk: true), Col("CustomerId"));
+
+        var tables = new Dictionary<string, SchemaTableEntry>
+        {
+            ["Customer"] = customer,
+            ["Order"] = order,
+            ["Invoice"] = invoice,
+        };
+
+        var builder = new ForeignKeyRelationshipBuilder();
+        builder.Add(
+            "fk_customer",
+            "Order",
+            "CustomerId",
+            "Customer",
+            "Id",
+            ForeignKeyReferentialAction.NoAction,
+            ForeignKeyReferentialAction.NoAction
+        );
+        builder.Add(
+            "fk_customer",
+            "Invoice",
+            "CustomerId",
+            "Customer",
+            "Id",
+            ForeignKeyReferentialAction.NoAction,
+            ForeignKeyReferentialAction.NoAction
+        );
+
+        var rels = builder.Build(tables, NoUniqueSets());
+
+        // 制約名が同じでも子テーブルが異なるため、2 件のリレーションへ分離される
+        rels.Should().HaveCount(2);
+        rels.Should().OnlyContain(r => r.ConstraintName == "fk_customer");
+
+        var orderRel = rels.Should().ContainSingle(r => r.TargetEntityId == order.Entity.Id).Which;
+        orderRel.SourceEntityId.Should().Be(customer.Entity.Id);
+        orderRel.Type.Should().Be(RelationshipType.OneToMany);
+        orderRel.SourceColumnId.Should().Be(customer.ColumnsByName["Id"].Id);
+        orderRel.TargetColumnId.Should().Be(order.ColumnsByName["CustomerId"].Id);
+
+        var invoiceRel = rels.Should()
+            .ContainSingle(r => r.TargetEntityId == invoice.Entity.Id)
+            .Which;
+        invoiceRel.SourceEntityId.Should().Be(customer.Entity.Id);
+        invoiceRel.Type.Should().Be(RelationshipType.OneToMany);
+        invoiceRel.SourceColumnId.Should().Be(customer.ColumnsByName["Id"].Id);
+        invoiceRel.TargetColumnId.Should().Be(invoice.ColumnsByName["CustomerId"].Id);
+
+        // 双方の子テーブルの FK 列にフラグが立つ（片方だけに混線していない）
+        order.ColumnsByName["CustomerId"].IsForeignKey.Should().BeTrue();
+        invoice.ColumnsByName["CustomerId"].IsForeignKey.Should().BeTrue();
+    }
+
     /// <summary>参照先または FK 保有テーブルが解決できない FK はスキップされることを検証する</summary>
     [Fact(DisplayName = "解決できないテーブル参照の FK はスキップされる")]
     public void UnresolvableTable_IsSkipped()

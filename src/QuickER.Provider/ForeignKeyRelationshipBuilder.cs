@@ -4,14 +4,19 @@ using QuickER.Model;
 namespace QuickER.Provider;
 
 /// <summary>
-/// 外部キーの構成列行を制約名ごとに集約し、<see cref="Relationship"/> 一覧へ変換する共通ビルダー
+/// 外部キーの構成列行を「FK 保有テーブル（子）＋制約名」ごとに集約し、<see cref="Relationship"/> 一覧へ変換する共通ビルダー
 /// （DB 方言横断で同一の集約・1 対 1 判定ロジックを担う）
 /// </summary>
 /// <remarks>
 /// <para>
 /// 使い方: 外部キー構成列を序数順に読み出しながら <see cref="Add"/> で 1 行ずつ投入し、
-/// 最後に <see cref="Build"/> でリレーション一覧を得る。制約名（FK 名）単位で親子テーブル・
+/// 最後に <see cref="Build"/> でリレーション一覧を得る。「FK 保有テーブル＋制約名」単位で親子テーブル・
 /// 構成列・参照アクションを 1 件へまとめ、複合外部キーの列対応を復元する。
+/// </para>
+/// <para>
+/// 制約名はテーブルをまたいで一意とは限らない（例: PostgreSQL の制約名一意性はテーブル単位）ため、
+/// 集約キーには制約名単体ではなく FK 保有テーブルのキーを合成する。異なるテーブルが同名の FK 制約を
+/// 持っていても、別々のリレーションとして正しく分離される。
 /// </para>
 /// <para>
 /// 参照先（子側 FK 保有テーブル）の FK 列集合が、そのテーブルの主キーまたは一意制約と一致する場合は
@@ -19,17 +24,18 @@ namespace QuickER.Provider;
 /// FK 保有テーブルを終点として表現する。
 /// </para>
 /// <para>
-/// <see cref="Build"/> は投入順（=最初に各 FK 名が出現した順）を保ったリレーション一覧を返す。
+/// <see cref="Build"/> は投入順（=最初に各「FK 保有テーブル＋制約名」が出現した順）を保ったリレーション一覧を返す。
 /// </para>
 /// </remarks>
 public sealed class ForeignKeyRelationshipBuilder
 {
-    /// <summary>制約名 → 集約中の外部キー情報</summary>
+    /// <summary>「FK 保有テーブルキー::制約名」→ 集約中の外部キー情報（ConstraintName は元の制約名単体を保持する）</summary>
     private readonly Dictionary<
         string,
         (
             string ParentKey,
             string RefKey,
+            string ConstraintName,
             List<string> ParentCols,
             List<string> RefCols,
             ForeignKeyReferentialAction OnDelete,
@@ -37,8 +43,8 @@ public sealed class ForeignKeyRelationshipBuilder
         )
     > _grouped = new();
 
-    /// <summary>外部キー構成列を 1 行投入する（同一 <paramref name="fkName"/> の複合列は複数回呼ぶ）</summary>
-    /// <param name="fkName">外部キー制約名</param>
+    /// <summary>外部キー構成列を 1 行投入する（同一テーブル・同一 <paramref name="fkName"/> の複合列は複数回呼ぶ）</summary>
+    /// <param name="fkName">外部キー制約名（テーブルをまたいだ一意性は保証されない）</param>
     /// <param name="parentKey">FK 保有テーブル（子）のテーブルキー</param>
     /// <param name="parentCol">FK 保有テーブル側の構成列名</param>
     /// <param name="refKey">参照先テーブル（親・PK 側）のテーブルキー</param>
@@ -55,14 +61,25 @@ public sealed class ForeignKeyRelationshipBuilder
         ForeignKeyReferentialAction onUpdate
     )
     {
-        if (!_grouped.TryGetValue(fkName, out var g))
+        // 集約キーは「FK 保有テーブル＋制約名」の複合（制約名単体はテーブル横断で一意とは限らないため）
+        var groupKey = parentKey + "::" + fkName;
+
+        if (!_grouped.TryGetValue(groupKey, out var g))
         {
-            g = (parentKey, refKey, new List<string>(), new List<string>(), onDelete, onUpdate);
+            g = (
+                parentKey,
+                refKey,
+                fkName,
+                new List<string>(),
+                new List<string>(),
+                onDelete,
+                onUpdate
+            );
         }
 
         g.ParentCols.Add(parentCol);
         g.RefCols.Add(refCol);
-        _grouped[fkName] = g;
+        _grouped[groupKey] = g;
     }
 
     /// <summary>集約済みの外部キーをリレーション一覧へ変換する</summary>
@@ -76,7 +93,7 @@ public sealed class ForeignKeyRelationshipBuilder
     {
         var rels = new List<Relationship>();
 
-        foreach (var (fkName, g) in _grouped)
+        foreach (var (_, g) in _grouped)
         {
             if (!tables.TryGetValue(g.ParentKey, out var parent))
             {
@@ -129,7 +146,7 @@ public sealed class ForeignKeyRelationshipBuilder
                         && parent.ColumnsByName.TryGetValue(g.ParentCols[0], out var parentColumn)
                             ? parentColumn.Id
                             : null,
-                    ConstraintName = fkName,
+                    ConstraintName = g.ConstraintName,
                     OnDelete = g.OnDelete,
                     OnUpdate = g.OnUpdate,
                 }
