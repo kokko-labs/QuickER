@@ -31,16 +31,37 @@ namespace QuickER.CodeReverse.CSharp;
 /// </remarks>
 public sealed class CSharpReverseParser
 {
+    /// <summary>メッセージへ載せる構文エラーの最大件数（調査の足がかりに足りる先頭数件のみ）</summary>
+    private const int MaxReportedSyntaxErrors = 5;
+
     /// <summary>C# ソース文字列を構文解析し、意味モデルへ復元する</summary>
     /// <param name="sourceText">解析対象の C# ソース（QuickER 生成の本体 .g.cs）</param>
     /// <param name="typeCatalog">型トークンをネイティブ型へ展開する対象方言の型カタログ</param>
-    /// <exception cref="CodeReverseException">解析対象クラスが 1 件も無い場合（案内メッセージ付き）</exception>
+    /// <exception cref="CodeReverseException">
+    /// ソースに構文エラーがある場合、または解析対象クラスが 1 件も無い場合（いずれも案内メッセージ付き）
+    /// </exception>
     public CodeReverseResult Parse(string sourceText, ITypeCatalog typeCatalog)
     {
         ArgumentNullException.ThrowIfNull(sourceText);
         ArgumentNullException.ThrowIfNull(typeCatalog);
 
-        var root = CSharpSyntaxTree.ParseText(sourceText).GetRoot();
+        var tree = CSharpSyntaxTree.ParseText(sourceText);
+
+        // 構文エラーは警告ではなく致命扱いで中断する。Roslyn は不正な入力でもエラー回復して部分木を
+        // 返すため、検査せずに続行すると「途中で切れたソース（コピペ欠け・コンフリクトマーカー残り等）」
+        // から列が黙って欠落した図ができてしまう。欠落範囲は原理的に不定で「何が欠けたか」を列挙できない
+        // ため、警告に留めても利用者は取りこぼしを判断できない（名前付きクエリの「未宣言パラメータ＝拒否」
+        // と同じ線引き）。
+        var syntaxErrors = tree.GetDiagnostics()
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .ToList();
+
+        if (syntaxErrors.Count > 0)
+        {
+            throw new CodeReverseException(FormatSyntaxErrorMessage(syntaxErrors));
+        }
+
+        var root = tree.GetRoot();
         var warnings = new List<string>();
 
         // 解析対象クラス（[Table] を持ち、かつ列プロパティに [DbColumnMeta] を 1 つ以上持つ）を抽出する
@@ -129,6 +150,35 @@ public sealed class CSharpReverseParser
             Relationships = relationships,
             Warnings = warnings,
         };
+    }
+
+    /// <summary>
+    /// 構文エラーの先頭数件（<see cref="MaxReportedSyntaxErrors"/>）を「行・列・診断 ID・本文」で整形し、
+    /// どこを直せばよいか追える案内メッセージを組み立てる。
+    /// </summary>
+    private static string FormatSyntaxErrorMessage(IReadOnlyList<Diagnostic> syntaxErrors)
+    {
+        var details = syntaxErrors
+            .Take(MaxReportedSyntaxErrors)
+            .Select(error =>
+            {
+                // Roslyn の行・列は 0 起点のため、エディタ表示に合わせて 1 起点へ直す
+                var position = error.Location.GetLineSpan().StartLinePosition;
+
+                return string.Format(
+                    Strings.Reverse_SyntaxErrorDetail,
+                    position.Line + 1,
+                    position.Character + 1,
+                    error.Id,
+                    error.GetMessage()
+                );
+            });
+
+        return string.Format(
+            Strings.Reverse_SyntaxErrors,
+            syntaxErrors.Count,
+            string.Join(" / ", details)
+        );
     }
 
     /// <summary>クラスが解析対象か（<c>[Table]</c> を持ち、かつ <c>[DbColumnMeta]</c> 付きの列プロパティを持つ）</summary>

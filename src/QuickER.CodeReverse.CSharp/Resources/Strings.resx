@@ -64,6 +64,12 @@
   <data name="Reverse_NoTargetClasses" xml:space="preserve">
     <value>No classes to reverse were found. Select a main .g.cs generated with IncludeDataAnnotations ON (classes with the [Table] and [DbColumnMeta] attributes).</value>
   </data>
+  <data name="Reverse_SyntaxErrors" xml:space="preserve">
+    <value>The C# source has {0} syntax error(s), so it cannot be reversed safely (a truncated or partially pasted file would silently lose columns). Fix the source and try again. First errors: {1}</value>
+  </data>
+  <data name="Reverse_SyntaxErrorDetail" xml:space="preserve">
+    <value>line {0}, column {1}: {2} {3}</value>
+  </data>
   <data name="Reverse_ColumnMissingTypeMeta" xml:space="preserve">
     <value>Column '{0}.{1}' has no DB type metadata ([DbColumnMeta]) and was skipped.</value>
   </data>

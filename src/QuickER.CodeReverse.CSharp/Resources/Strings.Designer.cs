@@ -66,6 +66,18 @@ namespace QuickER.CodeReverse.CSharp.Resources {
             }
         }
 
+        public static string Reverse_SyntaxErrors {
+            get {
+                return ResourceManager.GetString("Reverse_SyntaxErrors", resourceCulture);
+            }
+        }
+
+        public static string Reverse_SyntaxErrorDetail {
+            get {
+                return ResourceManager.GetString("Reverse_SyntaxErrorDetail", resourceCulture);
+            }
+        }
+
         public static string Reverse_ColumnMissingTypeMeta {
             get {
                 return ResourceManager.GetString("Reverse_ColumnMissingTypeMeta", resourceCulture);

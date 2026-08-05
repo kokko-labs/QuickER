@@ -70,6 +70,46 @@ public class CSharpReverseParserTests
             .WithMessage(ReverseStrings.Reverse_NoTargetClasses);
     }
 
+    /// <summary>
+    /// 構文エラーのあるソース（途中で切れた .g.cs）は、列が黙って欠落した図を作らないよう
+    /// <see cref="CodeReverseException"/> で中断し、位置（行番号）と診断 ID を案内する
+    /// </summary>
+    [Fact(DisplayName = "構文エラーのあるソースは CodeReverseException（行・診断 ID 付き）")]
+    public void Parse_SyntaxError_ThrowsWithLocation()
+    {
+        // 20 行目の途中で切れたソース（コピペ欠け・コンフリクトマーカー残りの再現）。
+        // Roslyn はエラー回復して部分木を返すため、検査しないと name 列が黙って欠落する。
+        const string source = """
+            namespace Sample;
+
+            [Table("customers")]
+            public partial class CustomerEntity
+            {
+                [Key]
+                [Column("customer_id")]
+                [DbColumnMeta("int32")]
+                public int CustomerId
+                {
+                    get;
+                    set;
+                }
+
+                [Column("name")]
+                [DbColumnMeta("string(50)")]
+                public string Name
+                {
+                    get;
+                    set
+            """;
+
+        var act = () => Parse(source);
+
+        var message = act.Should().Throw<CodeReverseException>().Which.Message;
+        // 文言はロケール依存のため、調査に必要な情報（診断 ID・発生行）が載ることで検証する
+        message.Should().Contain("CS", "Roslyn の診断 ID がメッセージに載る");
+        message.Should().Contain("20", "構文エラーの発生行（20 行目）がメッセージに載る");
+    }
+
     /// <summary>双方向の [NavigationReference] は端点 4 つ組で 1 本のリレーションへ一意化される</summary>
     [Fact(DisplayName = "双方向ナビゲーションは 1 本のリレーションへ一意化される")]
     public void Parse_DeduplicatesBidirectionalNavigations()

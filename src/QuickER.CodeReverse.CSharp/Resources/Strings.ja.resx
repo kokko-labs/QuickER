@@ -61,6 +61,12 @@
   <data name="Reverse_NoTargetClasses" xml:space="preserve">
     <value>リバース対象のクラスが見つかりませんでした。IncludeDataAnnotations ON で生成した本体 .g.cs（[Table] と [DbColumnMeta] 属性を持つクラス）を選んでください。</value>
   </data>
+  <data name="Reverse_SyntaxErrors" xml:space="preserve">
+    <value>C# ソースに構文エラーが {0} 件あるため、安全にリバースできません（途中で切れたソースからは列が黙って欠落します）。ソースを修正してから再実行してください。先頭のエラー: {1}</value>
+  </data>
+  <data name="Reverse_SyntaxErrorDetail" xml:space="preserve">
+    <value>{0} 行 {1} 列: {2} {3}</value>
+  </data>
   <data name="Reverse_ColumnMissingTypeMeta" xml:space="preserve">
     <value>列 '{0}.{1}' に DB 型メタ（[DbColumnMeta]）が無いためスキップしました。</value>
   </data>

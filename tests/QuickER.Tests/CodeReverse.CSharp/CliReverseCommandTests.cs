@@ -154,4 +154,66 @@ public class CliReverseCommandTests
             }
         }
     }
+
+    /// <summary>
+    /// 構文エラーのあるソース（途中で切れた .g.cs）は終了コード 1 で中断し、図ファイルを書き出さない
+    /// （エラー回復のまま続行すると、列が黙って欠落した図が保存されてしまうため）
+    /// </summary>
+    [Fact(DisplayName = "構文エラーのあるソースは終了コード 1・出力を書かない")]
+    public async Task Reverse_SyntaxErrorSource_ReturnsExitCodeOne_AndWritesNothing()
+    {
+        var root = Path.Combine(
+            Path.GetTempPath(),
+            "QuickERReverseCliTests",
+            Guid.NewGuid().ToString("N")
+        );
+        Directory.CreateDirectory(root);
+        var sourcePath = Path.Combine(root, "Truncated.g.cs");
+        var outPath = Path.Combine(root, "diagram.json");
+
+        // 末尾が途中で切れた生成コード（コピペ欠け・コンフリクトマーカー残りの再現）
+        File.WriteAllText(
+            sourcePath,
+            """
+            namespace Sample;
+
+            [Table("customers")]
+            public partial class CustomerEntity
+            {
+                [Key]
+                [Column("customer_id")]
+                [DbColumnMeta("int32")]
+                public int CustomerId { get; set; }
+
+                [Column("name")]
+                [DbColumnMeta("string(50)")]
+                public string Name { get; se
+            """
+        );
+
+        // 出力は注入版オーバーロードで捕捉する（Console を差し替えるとクラス並列実行で競合するため）
+        var stdout = new StringWriter();
+        var stderr = new StringWriter();
+
+        try
+        {
+            var exit = await CliApp.InvokeAsync(
+                ["reverse", "--source", sourcePath, "--out", outPath],
+                stdout,
+                stderr
+            );
+
+            exit.Should().Be(1);
+            File.Exists(outPath).Should().BeFalse("構文エラーでは部分的な図を書き出さない");
+            // 文言はロケール依存のため、Roslyn の診断 ID が載ることで検証する
+            stderr.ToString().Should().Contain("CS");
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
 }
