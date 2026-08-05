@@ -85,6 +85,142 @@ public class DiagramVectorRendererTests
         });
     }
 
+    /// <summary>
+    /// 自己参照リレーションが（両端点が同一点で消えるゼロ長の線ではなく）
+    /// 画面と同じループ楕円として描かれることを検証する
+    /// </summary>
+    [Fact(DisplayName = "RenderDiagram は自己参照リレーションをループ楕円として描く")]
+    public void RenderDiagram_DrawsSelfLoopEllipse_ForSelfRelationship()
+    {
+        RunSta(() =>
+        {
+            var vm = CreateViewModelWithSelfRelationship();
+            var relationship = vm.Relationships[0];
+
+            var drawing = DiagramVectorRenderer.RenderDiagram(vm).Drawing;
+
+            var ellipses = EnumerateGeometries(drawing).OfType<EllipseGeometry>().ToList();
+            ellipses.Should().HaveCount(1, "自己参照 1 件ぶんのループ楕円が描かれること");
+
+            // 画面（MainWindow.xaml）の Ellipse は配置枠（SelfLoopLeft/Top・SelfLoopWidth/Height）へ
+            // 線幅ぶん食い込んで描かれるため、中心＝枠の中心・半径＝(枠サイズ − 線幅) / 2 と一致すること
+            var ellipse = ellipses[0];
+            ellipse
+                .Center.X.Should()
+                .BeApproximately(relationship.SelfLoopLeft + relationship.SelfLoopWidth / 2, 0.001);
+            ellipse
+                .Center.Y.Should()
+                .BeApproximately(relationship.SelfLoopTop + relationship.SelfLoopHeight / 2, 0.001);
+            ellipse
+                .RadiusX.Should()
+                .BeApproximately((relationship.SelfLoopWidth - RelationStrokeThickness) / 2, 0.001);
+            ellipse
+                .RadiusY.Should()
+                .BeApproximately(
+                    (relationship.SelfLoopHeight - RelationStrokeThickness) / 2,
+                    0.001
+                );
+
+            // ゼロ長の線（X1,Y1 == X2,Y2）が描かれないこと
+            EnumerateGeometries(drawing)
+                .OfType<LineGeometry>()
+                .Should()
+                .NotContain(line => line.StartPoint == line.EndPoint);
+        });
+    }
+
+    /// <summary>通常リレーションが従来どおり端点間の線として描かれることを検証する</summary>
+    [Fact(DisplayName = "RenderDiagram は通常リレーションを従来どおりの線として描く")]
+    public void RenderDiagram_DrawsLine_ForNormalRelationship()
+    {
+        RunSta(() =>
+        {
+            var vm = CreateViewModelWithTwoEntitiesAndRelationship();
+            var relationship = vm.Relationships[0];
+
+            var drawing = DiagramVectorRenderer.RenderDiagram(vm).Drawing;
+
+            var lines = EnumerateGeometries(drawing).OfType<LineGeometry>().ToList();
+            lines.Should().HaveCount(1);
+            lines[0].StartPoint.Should().Be(new Point(relationship.X1, relationship.Y1));
+            lines[0].EndPoint.Should().Be(new Point(relationship.X2, relationship.Y2));
+            EnumerateGeometries(drawing).OfType<EllipseGeometry>().Should().BeEmpty();
+        });
+    }
+
+    /// <summary>自己参照ループがページ端で欠けないよう、図の範囲がループ全体を含むことを検証する</summary>
+    [Fact(DisplayName = "CalculateDiagramBounds は自己参照ループ全体を含む")]
+    public void CalculateDiagramBounds_ContainsSelfLoop()
+    {
+        RunSta(() =>
+        {
+            var vm = CreateViewModelWithSelfRelationship();
+            var relationship = vm.Relationships[0];
+
+            var bounds = DiagramVectorRenderer.CalculateDiagramBounds(vm);
+
+            bounds
+                .Contains(
+                    new Rect(
+                        relationship.SelfLoopLeft,
+                        relationship.SelfLoopTop,
+                        relationship.SelfLoopWidth,
+                        relationship.SelfLoopHeight
+                    )
+                )
+                .Should()
+                .BeTrue("自己参照ループが範囲に含まれること");
+        });
+    }
+
+    /// <summary>リレーション線の太さ（DiagramVectorRenderer の RelationPen と同一）</summary>
+    private const double RelationStrokeThickness = 1.6;
+
+    /// <summary>エンティティ 1 件と、それ自身を指す自己参照リレーション 1 件の VM を組み立てる</summary>
+    private static MainViewModel CreateViewModelWithSelfRelationship()
+    {
+        var vm = new MainViewModel();
+        var employee = new EntityViewModel(
+            new Entity
+            {
+                TableName = "Employee",
+                Columns =
+                {
+                    new Column
+                    {
+                        Name = "Id",
+                        DataType = "int",
+                        IsPrimaryKey = true,
+                    },
+                    new Column
+                    {
+                        Name = "ManagerId",
+                        DataType = "int",
+                        IsForeignKey = true,
+                        IsNullable = true,
+                    },
+                },
+            },
+            new EntityLayout { X = 200, Y = 150 }
+        );
+
+        vm.Entities.Add(employee);
+        vm.Relationships.Add(
+            new RelationshipViewModel(
+                new Relationship
+                {
+                    SourceEntityId = employee.Id,
+                    TargetEntityId = employee.Id,
+                    Type = RelationshipType.OneToMany,
+                },
+                employee,
+                employee
+            )
+        );
+
+        return vm;
+    }
+
     /// <summary>エンティティ 2 件＋リレーション 1 件の VM を組み立てる</summary>
     private static MainViewModel CreateViewModelWithTwoEntitiesAndRelationship()
     {
@@ -145,6 +281,25 @@ public class DiagramVectorRendererTests
         );
 
         return vm;
+    }
+
+    /// <summary>Drawing ツリーを再帰走査し、含まれる図形ジオメトリを列挙する</summary>
+    private static IEnumerable<Geometry> EnumerateGeometries(Drawing? drawing)
+    {
+        switch (drawing)
+        {
+            case GeometryDrawing geometryDrawing when geometryDrawing.Geometry is not null:
+                yield return geometryDrawing.Geometry;
+                break;
+
+            case DrawingGroup group:
+                foreach (var child in group.Children.SelectMany(EnumerateGeometries))
+                {
+                    yield return child;
+                }
+
+                break;
+        }
     }
 
     /// <summary>Drawing ツリーを再帰走査し、含まれる <see cref="GlyphRunDrawing"/> の数を数える</summary>

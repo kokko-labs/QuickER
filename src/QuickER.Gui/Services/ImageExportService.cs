@@ -69,12 +69,17 @@ public static class ImageExportService
     private const double BodyBaselineOffset = 13;
     private const double DescriptionBaselineOffset = 11;
 
+    /// <summary>リレーション線の太さ（style の .rel と自己参照ループの半径計算で共有する）</summary>
+    private const double RelationStrokeThickness = 1.6;
+
     /// <summary>SVG 文字列を生成する（テスト検証のため公開する）</summary>
     /// <remarks>
     /// エンティティの高さ・行配置はキャンバス描画と同じ
     /// <see cref="DiagramMetricsService.CalculateCardLayout"/> を用いる
     /// リレーション線の端点は <see cref="EntityViewModel.DisplayHeight"/> を基礎に計算されるため、
     /// 同一計算を共有することで線とカード枠のズレを防ぐ。
+    /// 自己参照リレーションは両端点が同一点になり線が描けないため、画面（MainWindow.xaml）と同じく
+    /// <see cref="DiagramMetricsService.CalculateSelfLoopEllipse"/> のループ楕円で描く
     /// 印刷（<see cref="DiagramVectorRenderer"/>）は本メソッドと同じ見た目を DrawingContext で
     /// 描く鏡写し実装のため、配色・フォント・座標を変えるときは両方を揃えること
     /// </remarks>
@@ -89,6 +94,18 @@ public static class ImageExportService
         {
             maxX = Math.Max(maxX, e.X + e.Width + padding);
             maxY = Math.Max(maxY, e.Y + e.DisplayHeight + padding);
+        }
+
+        // 自己参照ループはエンティティの右上へはみ出すため、キャンバス範囲へ明示的に含める（右端が欠けるのを防ぐ）
+        foreach (var r in vm.Relationships)
+        {
+            if (!r.IsSelfRelationship)
+            {
+                continue;
+            }
+
+            maxX = Math.Max(maxX, r.SelfLoopLeft + r.SelfLoopWidth + padding);
+            maxY = Math.Max(maxY, r.SelfLoopTop + r.SelfLoopHeight + padding);
         }
 
         // 小数点記号がロケール依存にならないよう不変カルチャで数値整形する
@@ -112,7 +129,7 @@ public static class ImageExportService
                 + ".desc{font:italic 11px 'Segoe UI',sans-serif;fill:#6B7280}"
                 + ".pk{font:bold 13px 'Segoe UI',sans-serif;fill:#D93025}"
                 + ".fk{font:bold 13px 'Segoe UI',sans-serif;fill:#1A73E8}"
-                + ".rel{stroke:#5F6B7A;stroke-width:1.6;fill:none}"
+                + $".rel{{stroke:#5F6B7A;stroke-width:{F(RelationStrokeThickness)};fill:none}}"
                 + ".label{font:10px 'Segoe UI',sans-serif;fill:#374151}"
                 + "</style>"
         );
@@ -123,9 +140,24 @@ public static class ImageExportService
         // リレーション
         foreach (var r in vm.Relationships)
         {
-            sb.AppendLine(
-                $"  <line class=\"rel\" x1=\"{F(r.X1)}\" y1=\"{F(r.Y1)}\" x2=\"{F(r.X2)}\" y2=\"{F(r.Y2)}\" />"
-            );
+            // 自己参照は両端点が同一点になり線が消えてしまうため、画面と同じループ楕円を描く
+            if (r.IsSelfRelationship)
+            {
+                var loop = DiagramMetricsService.CalculateSelfLoopEllipse(
+                    r,
+                    RelationStrokeThickness
+                );
+                sb.AppendLine(
+                    $"  <ellipse class=\"rel\" cx=\"{F(loop.CenterX)}\" cy=\"{F(loop.CenterY)}\" rx=\"{F(loop.RadiusX)}\" ry=\"{F(loop.RadiusY)}\" />"
+                );
+            }
+            else
+            {
+                sb.AppendLine(
+                    $"  <line class=\"rel\" x1=\"{F(r.X1)}\" y1=\"{F(r.Y1)}\" x2=\"{F(r.X2)}\" y2=\"{F(r.Y2)}\" />"
+                );
+            }
+
             sb.AppendLine(
                 $"  <text class=\"label\" x=\"{F(r.LabelX)}\" y=\"{F(r.LabelY)}\" text-anchor=\"middle\">{SecurityElement.Escape(r.Label)}</text>"
             );

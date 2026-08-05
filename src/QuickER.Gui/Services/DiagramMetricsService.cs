@@ -172,6 +172,28 @@ public static class DiagramMetricsService
         );
     }
 
+    /// <summary>自己参照リレーションのループ楕円の中心と半径を求める（SVG・印刷が画面と同じ形状を描くための共通計算）</summary>
+    /// <remarks>
+    /// 画面（MainWindow.xaml）は <see cref="System.Windows.Shapes.Ellipse"/> を
+    /// <see cref="RelationshipViewModel.SelfLoopLeft"/> ほかで表す配置枠へ置いて描く
+    /// WPF の Ellipse は線の外側が配置枠の外周に一致するよう線幅ぶん内側に食い込んだ楕円を描くため、
+    /// 半径は「(枠のサイズ − 線幅) / 2」となる（中心は枠の中心で線幅に依存しない）
+    /// SVG の ellipse 要素・DrawingContext.DrawEllipse はどちらも線を輪郭の中央に振り分けるため、
+    /// この半径を渡せば画面と同じ見た目になる
+    /// </remarks>
+    /// <param name="relationship">対象の自己参照リレーション</param>
+    /// <param name="strokeThickness">描画に用いるリレーション線の太さ</param>
+    public static SelfLoopEllipse CalculateSelfLoopEllipse(
+        RelationshipViewModel relationship,
+        double strokeThickness
+    ) =>
+        new(
+            relationship.SelfLoopLeft + relationship.SelfLoopWidth / 2,
+            relationship.SelfLoopTop + relationship.SelfLoopHeight / 2,
+            Math.Max(0, relationship.SelfLoopWidth - strokeThickness) / 2,
+            Math.Max(0, relationship.SelfLoopHeight - strokeThickness) / 2
+        );
+
     /// <summary>説明テキストを指定幅で折り返した行のリストを返す（SVG など自動折返しのない出力用）</summary>
     /// <remarks>
     /// WPF の TextBlock 折返しの近似。日本語などは文字単位、英単語は行内最後の空白位置を優先して折り返す
@@ -365,6 +387,18 @@ public sealed record EntityCardLayout(
     double DescriptionLineHeight,
     IReadOnlyList<EntityCardRowLayout> Rows,
     double TotalHeight
+);
+
+/// <summary>自己参照リレーションのループ楕円の描画パラメータ（線の輪郭そのものを表す）</summary>
+/// <param name="CenterX">楕円の中心 X</param>
+/// <param name="CenterY">楕円の中心 Y</param>
+/// <param name="RadiusX">楕円の X 半径</param>
+/// <param name="RadiusY">楕円の Y 半径</param>
+public sealed record SelfLoopEllipse(
+    double CenterX,
+    double CenterY,
+    double RadiusX,
+    double RadiusY
 );
 
 /// <summary>カード内の 1 カラム行の配置情報</summary>

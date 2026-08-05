@@ -8,7 +8,8 @@ namespace QuickER.Services;
 /// <summary>ER 図全体を <see cref="MainViewModel"/> から直接ベクタ描画する印刷用レンダラ</summary>
 /// <remarks>
 /// SVG 出力（<see cref="ImageExportService.BuildSvg"/>）と同じ描画内容を
-/// <see cref="DrawingContext"/> へ直接描く（影・選択強調・鳥足マーカーなし。リレーションは線＋ラベル）。
+/// <see cref="DrawingContext"/> へ直接描く（影・選択強調・鳥足マーカーなし。リレーションは線＋ラベル、
+/// 自己参照は画面と同じループ楕円＋ラベル）。
 /// レイアウトは SVG 出力と同一の <see cref="DiagramMetricsService.CalculateCardLayout"/> を共有し、
 /// 文字は GlyphRun として XPS/PDF にベクタ保持されるため、拡大しても鮮明でファイルも小さい。
 /// VisualBrush・Effect・ビットマップを使わないことでラスタライズを一切発生させない
@@ -20,6 +21,9 @@ public static class DiagramVectorRenderer
     private const double BodyFontSize = 13;
     private const double DescriptionFontSize = 11;
     private const double RelationLabelFontSize = 10;
+
+    /// <summary>リレーション線の太さ（BuildSvg の .rel stroke-width と同一。自己参照ループの半径計算でも使う）</summary>
+    private const double RelationStrokeThickness = 1.6;
 
     // 図の外接矩形の周囲に確保するパディング（px）
     private const double BoundsPadding = 20;
@@ -62,7 +66,7 @@ public static class DiagramVectorRenderer
     private static readonly Brush ForeignKeyBrush = CreateFrozenBrush("#1A73E8");
     private static readonly Brush RelationLabelBrush = CreateFrozenBrush("#374151");
     private static readonly Pen EntityBorderPen = CreateFrozenPen("#9DB7DD", 1);
-    private static readonly Pen RelationPen = CreateFrozenPen("#5F6B7A", 1.6);
+    private static readonly Pen RelationPen = CreateFrozenPen("#5F6B7A", RelationStrokeThickness);
 
     /// <summary>全エンティティの外接矩形に周囲パディングを加えた図全体の範囲を求める</summary>
     /// <param name="vm">対象の <see cref="MainViewModel"/></param>
@@ -87,6 +91,20 @@ public static class DiagramVectorRenderer
             maxY = Math.Max(maxY, entity.Y + entity.DisplayHeight);
         }
 
+        // 自己参照ループはエンティティの右上へはみ出すため、範囲へ明示的に含める（ページ端で欠けるのを防ぐ）
+        foreach (var relationship in vm.Relationships)
+        {
+            if (!relationship.IsSelfRelationship)
+            {
+                continue;
+            }
+
+            minX = Math.Min(minX, relationship.SelfLoopLeft);
+            minY = Math.Min(minY, relationship.SelfLoopTop);
+            maxX = Math.Max(maxX, relationship.SelfLoopLeft + relationship.SelfLoopWidth);
+            maxY = Math.Max(maxY, relationship.SelfLoopTop + relationship.SelfLoopHeight);
+        }
+
         return new Rect(
             minX - BoundsPadding,
             minY - BoundsPadding,
@@ -109,11 +127,29 @@ public static class DiagramVectorRenderer
         // リレーション（線＋ラベル。カードの下に描くためエンティティより先）
         foreach (var relationship in vm.Relationships)
         {
-            dc.DrawLine(
-                RelationPen,
-                new Point(relationship.X1, relationship.Y1),
-                new Point(relationship.X2, relationship.Y2)
-            );
+            // 自己参照は両端点が同一点になり線が消えてしまうため、画面・SVG と同じループ楕円を描く
+            if (relationship.IsSelfRelationship)
+            {
+                var loop = DiagramMetricsService.CalculateSelfLoopEllipse(
+                    relationship,
+                    RelationStrokeThickness
+                );
+                dc.DrawEllipse(
+                    null,
+                    RelationPen,
+                    new Point(loop.CenterX, loop.CenterY),
+                    loop.RadiusX,
+                    loop.RadiusY
+                );
+            }
+            else
+            {
+                dc.DrawLine(
+                    RelationPen,
+                    new Point(relationship.X1, relationship.Y1),
+                    new Point(relationship.X2, relationship.Y2)
+                );
+            }
 
             // BuildSvg の text-anchor="middle"（x 中央・y ベースライン）と同じ位置に描く
             var label = CreateText(
