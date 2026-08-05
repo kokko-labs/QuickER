@@ -282,6 +282,30 @@ namespace QuickER.Cli.Resources {
             }
         }
 
+        public static string Cli_ConfigRootNull {
+            get {
+                return ResourceManager.GetString("Cli_ConfigRootNull", resourceCulture);
+            }
+        }
+
+        public static string Cli_ConfigValueInvalid {
+            get {
+                return ResourceManager.GetString("Cli_ConfigValueInvalid", resourceCulture);
+            }
+        }
+
+        public static string Cli_ConfigRepositoryDialectsNotArray {
+            get {
+                return ResourceManager.GetString("Cli_ConfigRepositoryDialectsNotArray", resourceCulture);
+            }
+        }
+
+        public static string Cli_ConfigUnknownKeyWarning {
+            get {
+                return ResourceManager.GetString("Cli_ConfigUnknownKeyWarning", resourceCulture);
+            }
+        }
+
         public static string Cli_SchemaNewerFormatWarning {
             get {
                 return ResourceManager.GetString("Cli_SchemaNewerFormatWarning", resourceCulture);

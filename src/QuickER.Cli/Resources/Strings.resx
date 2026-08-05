@@ -172,6 +172,18 @@
   <data name="Cli_ConfigFileInvalidJson" xml:space="preserve">
     <value>Could not read the config file as a JSON object: {0} ({1})</value>
   </data>
+  <data name="Cli_ConfigRootNull" xml:space="preserve">
+    <value>the root is the JSON literal null; a JSON object is required</value>
+  </data>
+  <data name="Cli_ConfigValueInvalid" xml:space="preserve">
+    <value>The config file {0} has an invalid value for the key '{1}': {2}</value>
+  </data>
+  <data name="Cli_ConfigRepositoryDialectsNotArray" xml:space="preserve">
+    <value>The config file key 'RepositoryDialects' must be an array of strings (for example ["sqlserver", "sqlite"]): {0}</value>
+  </data>
+  <data name="Cli_ConfigUnknownKeyWarning" xml:space="preserve">
+    <value>Warning: the config file {0} contains unknown key(s); they are ignored: {1}</value>
+  </data>
   <data name="Cli_SchemaNewerFormatWarning" xml:space="preserve">
     <value>Warning: the schema file was saved in a newer format (v{0}) than this version supports (up to v{1}). Unsupported data will be ignored.</value>
   </data>

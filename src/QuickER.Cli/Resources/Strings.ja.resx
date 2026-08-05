@@ -172,6 +172,18 @@
   <data name="Cli_ConfigFileInvalidJson" xml:space="preserve">
     <value>設定ファイルを JSON オブジェクトとして読み込めません: {0} ({1})</value>
   </data>
+  <data name="Cli_ConfigRootNull" xml:space="preserve">
+    <value>ルートが JSON リテラル null です。JSON オブジェクトが必要です</value>
+  </data>
+  <data name="Cli_ConfigValueInvalid" xml:space="preserve">
+    <value>設定ファイル {0} のキー '{1}' の値が不正です: {2}</value>
+  </data>
+  <data name="Cli_ConfigRepositoryDialectsNotArray" xml:space="preserve">
+    <value>設定ファイルのキー 'RepositoryDialects' は文字列の配列で指定してください（例: ["sqlserver", "sqlite"]）: {0}</value>
+  </data>
+  <data name="Cli_ConfigUnknownKeyWarning" xml:space="preserve">
+    <value>警告: 設定ファイル {0} に未知のキーがあります。無視されます: {1}</value>
+  </data>
   <data name="Cli_SchemaNewerFormatWarning" xml:space="preserve">
     <value>警告: スキーマファイルはこのバージョンが対応するより新しいフォーマット（v{0}。対応は v{1} まで）で保存されています。未対応のデータは無視されます。</value>
   </data>

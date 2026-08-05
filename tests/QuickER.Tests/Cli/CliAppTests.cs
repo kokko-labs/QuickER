@@ -263,6 +263,203 @@ public class CliAppTests
         }
     }
 
+    /// <summary>
+    /// <c>--config</c> の内容が JSON リテラル <c>null</c> の場合は、空オブジェクト（＝全キー既定値のまま
+    /// 終了コード 0）へ黙って化けず、終了コード 1 と整形メッセージ（パス入り）になることを検証する
+    /// </summary>
+    [Fact(DisplayName = "--config が JSON リテラル null は終了コード 1（整形メッセージ）")]
+    public async Task Generate_ConfigFileNullLiteral_ReturnsError()
+    {
+        var (schemaPath, outDir, root) = CreateSampleSchema();
+        var configPath = Path.Combine(root, "quicker.json");
+        // JsonNode.Parse は例外でなく null を返すため、素通りすると既定値のまま成功してしまう
+        File.WriteAllText(configPath, "null");
+        var stdout = new StringWriter();
+        var stderr = new StringWriter();
+
+        try
+        {
+            var exit = await CliApp.InvokeAsync(
+                ["generate", "--schema", schemaPath, "--out", outDir, "--config", configPath],
+                stdout,
+                stderr
+            );
+
+            exit.Should().Be(1);
+            Directory
+                .Exists(outDir)
+                .Should()
+                .BeFalse("設定読解エラーで生成前に中止するため出力は作られない");
+            stderr.ToString().Should().Contain(configPath);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// 設定キーの値の型が違う（bool キーへ文字列）場合は、System.CommandLine の既定ハンドラへ抜けて
+    /// スタックトレースが露出せず、終了コード 1 とキー名入りの整形メッセージになることを検証する
+    /// </summary>
+    [Fact(DisplayName = "--config の値の型違いは終了コード 1（キー名入り・スタックトレースなし）")]
+    public async Task Generate_ConfigValueTypeMismatch_ReturnsError()
+    {
+        var (schemaPath, outDir, root) = CreateSampleSchema();
+        var configPath = Path.Combine(root, "quicker.json");
+        // bool キーへ文字列を書いた（デシリアライズ時に JsonException になる）
+        File.WriteAllText(configPath, """{ "GenerateRepositories": "yes" }""");
+        var stdout = new StringWriter();
+        var stderr = new StringWriter();
+
+        try
+        {
+            var exit = await CliApp.InvokeAsync(
+                ["generate", "--schema", schemaPath, "--out", outDir, "--config", configPath],
+                stdout,
+                stderr
+            );
+
+            exit.Should().Be(1);
+            Directory
+                .Exists(outDir)
+                .Should()
+                .BeFalse("設定読解エラーで生成前に中止するため出力は作られない");
+
+            var error = stderr.ToString();
+            // 文言はロケール依存のため、埋め込まれるパスと失敗キー名で検証する
+            error.Should().Contain(configPath);
+            error.Should().Contain("GenerateRepositories");
+            error.Should().NotContain("   at ", "整形メッセージのみでスタックトレースは出さない");
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// <c>RepositoryDialects</c> を配列でなく文字列で書いた場合は、黙って破棄して図の方言で上書きせず
+    /// （意図と違う方言のコードが無警告で出るのを防ぐ）、終了コード 1 でエラーになることを検証する
+    /// </summary>
+    [Fact(DisplayName = "--config の RepositoryDialects が配列でないと終了コード 1")]
+    public async Task Generate_ConfigRepositoryDialectsNotArray_ReturnsError()
+    {
+        var (schemaPath, outDir, root) = CreateSampleSchema();
+        var configPath = Path.Combine(root, "quicker.json");
+        // 配列 ["sqlserver"] と書くべきところを文字列で書いた
+        File.WriteAllText(
+            configPath,
+            """{ "GenerateRepositories": true, "RepositoryDialects": "sqlserver" }"""
+        );
+        var stdout = new StringWriter();
+        var stderr = new StringWriter();
+
+        try
+        {
+            var exit = await CliApp.InvokeAsync(
+                ["generate", "--schema", schemaPath, "--out", outDir, "--config", configPath],
+                stdout,
+                stderr
+            );
+
+            exit.Should().Be(1);
+            Directory
+                .Exists(outDir)
+                .Should()
+                .BeFalse("設定読解エラーで生成前に中止するため出力は作られない");
+            // 文言はロケール依存のため、埋め込まれるキー名とパスで検証する
+            stderr.ToString().Should().Contain("RepositoryDialects").And.Contain(configPath);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// 設定ファイルに未知のキーがある場合は、前方互換のためエラーにせず標準エラーへ警告を出し、
+    /// 終了コード 0 で生成を続行することを検証する
+    /// </summary>
+    [Fact(DisplayName = "--config の未知キーは警告のみ（終了コード 0 で生成続行）")]
+    public async Task Generate_ConfigUnknownKey_WarnsAndContinues()
+    {
+        var (schemaPath, outDir, root) = CreateSampleSchema();
+        var configPath = Path.Combine(root, "quicker.json");
+        File.WriteAllText(configPath, """{ "unknownKey": 1, "RootNamespace": "Test.Ns" }""");
+        var stdout = new StringWriter();
+        var stderr = new StringWriter();
+
+        try
+        {
+            var exit = await CliApp.InvokeAsync(
+                ["generate", "--schema", schemaPath, "--out", outDir, "--config", configPath],
+                stdout,
+                stderr
+            );
+
+            exit.Should().Be(0);
+            var files = Directory.GetFiles(outDir, "*.g.cs");
+            files.Should().NotBeEmpty();
+            File.ReadAllText(files[0]).Should().Contain("namespace Test.Ns");
+            // 文言はロケール依存のため、埋め込まれるキー名で検証する
+            stderr.ToString().Should().Contain("unknownKey");
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// GUI が書き出す別名キー <c>OutputPath</c>（<c>OutputFileName</c> への橋渡し）は正当なキーとして
+    /// 未知キー警告の対象にならず、従来どおり出力ファイル名として効くことを検証する
+    /// </summary>
+    [Fact(DisplayName = "--config の OutputPath は警告なしで出力ファイル名になる")]
+    public async Task Generate_ConfigOutputPathAlias_DoesNotWarn()
+    {
+        var (schemaPath, outDir, root) = CreateSampleSchema();
+        var configPath = Path.Combine(root, "quicker.json");
+        File.WriteAllText(configPath, """{ "OutputPath": "Custom.g.cs" }""");
+        var stdout = new StringWriter();
+        var stderr = new StringWriter();
+
+        try
+        {
+            var exit = await CliApp.InvokeAsync(
+                ["generate", "--schema", schemaPath, "--out", outDir, "--config", configPath],
+                stdout,
+                stderr
+            );
+
+            exit.Should().Be(0);
+            File.Exists(Path.Combine(outDir, "Custom.g.cs")).Should().BeTrue();
+            stderr
+                .ToString()
+                .Should()
+                .NotContain("OutputPath", "OutputPath は許可集合に含む正当な別名キー");
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
     /// <summary>未対応プロバイダを指定すると終了コード 1 を返すことを検証する</summary>
     [Fact(DisplayName = "未対応プロバイダ指定は終了コード 1")]
     public async Task Generate_UnknownProvider_ReturnsError()
