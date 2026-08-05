@@ -19,6 +19,12 @@ public enum SchemaDiffKind
     /// <summary>既存列の型 / NULL 制約を ALTER する（破壊的変更のため既定では非選択）</summary>
     AlterColumn,
 
+    /// <summary>
+    /// テーブルの主キー構成を変更する（追加・解除・構成変更・順序変更をテーブル単位で 1 項目に集約。
+    /// 既存データによっては失敗しうる破壊的変更のため既定では非選択）
+    /// </summary>
+    AlterPrimaryKey,
+
     /// <summary>列を DROP する（破壊的変更のため既定では非選択）</summary>
     DropColumn,
 
@@ -111,9 +117,14 @@ public sealed class SchemaDiffItem : INotifyPropertyChanged
     }
 
     /// <summary>破壊的操作 (DROP/ALTER) の場合 true。</summary>
+    /// <remarks>
+    /// 主キー変更（<see cref="SchemaDiffKind.AlterPrimaryKey"/>）も破壊的に数える。
+    /// 主キーの解除・付け替えは重複データや NULL の存在で失敗しうるうえ、被参照 FK の張り直しを伴うため。
+    /// </remarks>
     public bool IsDestructive =>
         Kind
             is SchemaDiffKind.AlterColumn
+                or SchemaDiffKind.AlterPrimaryKey
                 or SchemaDiffKind.DropColumn
                 or SchemaDiffKind.DropTable
                 or SchemaDiffKind.DropForeignKey;

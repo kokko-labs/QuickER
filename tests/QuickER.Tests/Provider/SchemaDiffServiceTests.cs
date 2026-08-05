@@ -672,4 +672,185 @@ public class SchemaDiffServiceTests
         );
         diffNone.Items.Should().NotContain(i => i.Kind == SchemaDiffKind.ReorderColumns);
     }
+
+    // ---------------- 主キー変更（AlterPrimaryKey）の検出 ----------------
+
+    /// <summary>
+    /// 主キー指定だけを差し替えたテーブルを組み立てる（型・NULL 許容は固定＝主キー以外の差分を起こさない）。
+    /// </summary>
+    /// <param name="columns">列名（この順序がそのまま列定義順＝主キーの順序判定にも使われる）</param>
+    /// <param name="pkColumns">主キーにする列名</param>
+    private static Entity PkTbl(string name, string[] columns, params string[] pkColumns)
+    {
+        var e = new Entity { TableName = name };
+
+        foreach (var c in columns)
+        {
+            e.Columns.Add(
+                new Column
+                {
+                    Name = c,
+                    DataType = "int",
+                    IsNullable = false,
+                    IsPrimaryKey = pkColumns.Contains(c, StringComparer.OrdinalIgnoreCase),
+                }
+            );
+        }
+
+        return e;
+    }
+
+    /// <summary>主キーが無かったテーブルへ主キーを付ける変更が AlterPrimaryKey になることを検証する</summary>
+    [Fact(DisplayName = "主キーの追加は AlterPrimaryKey になり、既定では未選択かつ破壊的")]
+    public void PrimaryKeyAdded_AlterPrimaryKey_NotSelected()
+    {
+        var live = new List<Entity> { PkTbl("Customer", ["Id", "Name"]) };
+        var target = new List<Entity> { PkTbl("Customer", ["Id", "Name"], "Id") };
+
+        var diff = new SchemaDiffService().Compute(
+            live,
+            new List<Relationship>(),
+            target,
+            new List<Relationship>()
+        );
+
+        // 主キー以外は同一のため、差分は AlterPrimaryKey の 1 件だけになる
+        var item = diff.Items.Should().ContainSingle().Which;
+        item.Kind.Should().Be(SchemaDiffKind.AlterPrimaryKey);
+        item.TableName.Should().Be("Customer");
+        item.Entity.Should().BeSameAs(target[0]);
+        item.IsSelected.Should().BeFalse();
+        item.IsSelectable.Should().BeTrue();
+        item.IsDestructive.Should().BeTrue();
+
+        // 製品コードと同じ resx キーから期待値を組み立て、カルチャに依らず完全一致で検証する
+        item.Description.Should()
+            .Be(
+                string.Format(
+                    ProviderStrings.Diff_AlterPrimaryKey,
+                    "Customer",
+                    ProviderStrings.Diff_PrimaryKey_None,
+                    "Id"
+                )
+            );
+    }
+
+    /// <summary>主キーの解除が AlterPrimaryKey になり、変更後表記が「なし」になることを検証する</summary>
+    [Fact(DisplayName = "主キーの解除は AlterPrimaryKey になる")]
+    public void PrimaryKeyRemoved_AlterPrimaryKey()
+    {
+        var live = new List<Entity> { PkTbl("Customer", ["Id", "Name"], "Id") };
+        var target = new List<Entity> { PkTbl("Customer", ["Id", "Name"]) };
+
+        var diff = new SchemaDiffService().Compute(
+            live,
+            new List<Relationship>(),
+            target,
+            new List<Relationship>()
+        );
+
+        var item = diff
+            .Items.Should()
+            .ContainSingle(i => i.Kind == SchemaDiffKind.AlterPrimaryKey)
+            .Which;
+        item.Description.Should()
+            .Be(
+                string.Format(
+                    ProviderStrings.Diff_AlterPrimaryKey,
+                    "Customer",
+                    "Id",
+                    ProviderStrings.Diff_PrimaryKey_None
+                )
+            );
+    }
+
+    /// <summary>単一主キーから複合主キーへの構成変更が 1 件の AlterPrimaryKey になることを検証する</summary>
+    [Fact(DisplayName = "単一主キー → 複合主キーの構成変更は 1 件の AlterPrimaryKey になる")]
+    public void PrimaryKeyCompositionChanged_AlterPrimaryKey()
+    {
+        var live = new List<Entity> { PkTbl("OrderLine", ["OrderId", "LineNo"], "OrderId") };
+        var target = new List<Entity>
+        {
+            PkTbl("OrderLine", ["OrderId", "LineNo"], "OrderId", "LineNo"),
+        };
+
+        var diff = new SchemaDiffService().Compute(
+            live,
+            new List<Relationship>(),
+            target,
+            new List<Relationship>()
+        );
+
+        var item = diff.Items.Should().ContainSingle().Which;
+        item.Kind.Should().Be(SchemaDiffKind.AlterPrimaryKey);
+        item.Description.Should()
+            .Be(
+                string.Format(
+                    ProviderStrings.Diff_AlterPrimaryKey,
+                    "OrderLine",
+                    "OrderId",
+                    "OrderId, LineNo"
+                )
+            );
+    }
+
+    /// <summary>複合主キーの順序変更（構成列は同じ）も AlterPrimaryKey として検出されることを検証する</summary>
+    [Fact(DisplayName = "複合主キーの順序変更も AlterPrimaryKey になる")]
+    public void PrimaryKeyOrderChanged_AlterPrimaryKey()
+    {
+        // 列定義順が主キーの順序になる（live: OrderId, LineNo → target: LineNo, OrderId）
+        var live = new List<Entity>
+        {
+            PkTbl("OrderLine", ["OrderId", "LineNo"], "OrderId", "LineNo"),
+        };
+        var target = new List<Entity>
+        {
+            PkTbl("OrderLine", ["LineNo", "OrderId"], "OrderId", "LineNo"),
+        };
+
+        var diff = new SchemaDiffService().Compute(
+            live,
+            new List<Relationship>(),
+            target,
+            new List<Relationship>()
+        );
+
+        var item = diff
+            .Items.Should()
+            .ContainSingle(i => i.Kind == SchemaDiffKind.AlterPrimaryKey)
+            .Which;
+        item.Description.Should()
+            .Be(
+                string.Format(
+                    ProviderStrings.Diff_AlterPrimaryKey,
+                    "OrderLine",
+                    "OrderId, LineNo",
+                    "LineNo, OrderId"
+                )
+            );
+    }
+
+    /// <summary>主キー構成が同一なら（列名の大文字小文字差を含めて）AlterPrimaryKey を生成しないことを検証する</summary>
+    [Fact(DisplayName = "主キー構成が同じなら AlterPrimaryKey は出ない")]
+    public void SamePrimaryKey_NoAlterPrimaryKey()
+    {
+        var live = new List<Entity>
+        {
+            PkTbl("OrderLine", ["OrderId", "LineNo"], "OrderId", "LineNo"),
+        };
+        // 列名の大文字小文字だけが異なる（列差分と同じ規則で同一とみなす）
+        var target = new List<Entity>
+        {
+            PkTbl("OrderLine", ["orderid", "lineno"], "orderid", "lineno"),
+        };
+
+        var diff = new SchemaDiffService().Compute(
+            live,
+            new List<Relationship>(),
+            target,
+            new List<Relationship>()
+        );
+
+        diff.Items.Should().NotContain(i => i.Kind == SchemaDiffKind.AlterPrimaryKey);
+    }
 }

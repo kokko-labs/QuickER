@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using QuickER.Model;
+using QuickER.Provider.Resources;
 
 namespace QuickER.Provider;
 
@@ -45,12 +46,19 @@ public sealed class SyncPlanner
 {
     /// <summary>
     /// セクションの出力順序。依存関係による失敗を避けるため、
-    /// テーブル / 列の追加 → FK 解除 → 列定義変更 → 列 / テーブル削除 → FK 追加 → 説明設定の順に並べる。
+    /// テーブル / 列の追加 → FK 解除 → 列定義変更 → 主キー変更 → 列 / テーブル削除 → FK 追加 → 説明設定の順に並べる。
     /// </summary>
     /// <remarks>
+    /// <para>
     /// FK 解除（DropForeignKey）を列定義変更（AlterColumn）より前に置くのは、FK が張られた列の型を変更しようとすると
     /// 依存エラーになる方言があるため（SQL Server の Msg 5074）。「FK を外す」と「同じ列の型を変える」を同時に
     /// 選択したケースを通すには、先に FK を外しておく必要がある。
+    /// </para>
+    /// <para>
+    /// 主キー変更（AlterPrimaryKey）は列定義変更の後・列削除の前に置く。新しい主キー列の NOT NULL 化
+    /// （AlterColumn）は主キー付与より先に済ませる必要があり、旧主キー列の削除（DropColumn）は主キーを
+    /// 外した後でなければ失敗するため。
+    /// </para>
     /// </remarks>
     private static readonly SchemaDiffKind[] SectionOrder =
     [
@@ -58,6 +66,7 @@ public sealed class SyncPlanner
         SchemaDiffKind.AddColumn,
         SchemaDiffKind.DropForeignKey,
         SchemaDiffKind.AlterColumn,
+        SchemaDiffKind.AlterPrimaryKey,
         SchemaDiffKind.DropColumn,
         SchemaDiffKind.DropTable,
         SchemaDiffKind.AddForeignKey,
@@ -99,7 +108,10 @@ public sealed class SyncPlanner
                 capabilities.ColumnReorder == ColumnReorderMode.Native
                     ? BuildReorderPlans(selected, context)
                     : [];
-            return new SyncPlan { Sections = BuildSections(selected), Reorders = reorders };
+
+            // 主キー変更・（方言によっては）列定義変更に巻き込まれる live FK を、暗黙の DROP → 再 ADD として注入する
+            var sectionItems = InjectImplicitForeignKeyRebuilds(selected, capabilities, context);
+            return new SyncPlan { Sections = BuildSections(sectionItems), Reorders = reorders };
         }
 
         if (context is null)
@@ -132,6 +144,216 @@ public sealed class SyncPlanner
         }
 
         return sections;
+    }
+
+    // ---------------- 依存 FK の自動 DROP → 再 ADD（逐次 DDL 方言） ----------------
+
+    /// <summary>
+    /// 選択された変更に巻き込まれる live の外部キーを、暗黙の DROP（先頭側）と再 ADD（末尾側）として注入する。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 対象は (a) 選択済み <see cref="SchemaDiffKind.AlterPrimaryKey"/> のテーブルを<b>参照している</b> live FK（全方言）と、
+    /// (b) 選択済み <see cref="SchemaDiffKind.AlterColumn"/> の列が子側・親側いずれかとして関与する live FK
+    /// （<see cref="SyncDialectCapabilities.AlterColumnRequiresForeignKeyRebuild"/> が <c>true</c> の方言のみ）。
+    /// いずれも「FK が張られたまま」では DDL が依存エラーで失敗するため、計画側で外して戻す。
+    /// </para>
+    /// <para>
+    /// ユーザーが同じ FK の <see cref="SchemaDiffKind.DropForeignKey"/> を明示選択している場合は、自動 DROP を注入せず
+    /// 再 ADD もしない（「消す」という意図を尊重する）。live 情報（<paramref name="context"/>）が無ければ何もしない。
+    /// </para>
+    /// <para>
+    /// 注入項目は <see cref="SchemaDiffService"/> が生成する FK 差分と同じフィールド規則で埋めるため、
+    /// 方言別レンダラーは既存の <c>AppendDropForeignKey</c> / <c>AppendAddForeignKey</c> のまま SQL 化できる。
+    /// </para>
+    /// </remarks>
+    private static List<SchemaDiffItem> InjectImplicitForeignKeyRebuilds(
+        List<SchemaDiffItem> selected,
+        SyncDialectCapabilities capabilities,
+        SyncPlanContext? context
+    )
+    {
+        if (context is null)
+        {
+            // live 情報が無ければ既存 FK を復元できない（逐次方言では VM が常に渡すため実質防御）
+            return selected;
+        }
+
+        // (a) 主キー構成が変わるテーブル（そのテーブルを参照する FK は方言を問わず一旦外す必要がある）
+        var pkChangedTables = selected
+            .Where(i => i.Kind == SchemaDiffKind.AlterPrimaryKey)
+            .Select(i => i.TableName.Trim())
+            .ToHashSet(TableComparer);
+
+        // (b) 定義が変わる列（FK 参加列の型変更が依存エラーになる方言のみ対象）
+        HashSet<string> alteredColumns = capabilities.AlterColumnRequiresForeignKeyRebuild
+            ? selected
+                .Where(i => i.Kind == SchemaDiffKind.AlterColumn && i.ColumnName is not null)
+                .Select(i => ColumnKey(i.TableName, i.ColumnName!))
+                .ToHashSet()
+            : [];
+
+        if (pkChangedTables.Count == 0 && alteredColumns.Count == 0)
+        {
+            return selected;
+        }
+
+        // 明示的に DROP が選択されている FK（自動 DROP の重複も再 ADD も行わない）
+        var explicitlyDropped = new HashSet<string>();
+
+        foreach (var dropFk in selected.Where(i => i.Kind == SchemaDiffKind.DropForeignKey))
+        {
+            var signature = ResolveDroppedForeignKeySignature(dropFk);
+
+            if (signature is null || dropFk.ChildEntity is null)
+            {
+                continue;
+            }
+
+            var (childCol, parentTable, parentCol) = signature.Value;
+            explicitlyDropped.Add(
+                ForeignKeyKey(
+                    SchemaDiffService.NormalizeTable(dropFk.ChildEntity),
+                    childCol,
+                    parentTable,
+                    parentCol
+                )
+            );
+        }
+
+        var autoDrops = new List<SchemaDiffItem>();
+        var autoAdds = new List<SchemaDiffItem>();
+
+        foreach (var fk in EnumerateLiveForeignKeys(context))
+        {
+            var childTable = SchemaDiffService.NormalizeTable(fk.Child);
+            var parentTable = SchemaDiffService.NormalizeTable(fk.Parent);
+
+            // (a) 参照先テーブルの主キーが変わる / (b) FK が参加する列の定義が変わる
+            var affected =
+                pkChangedTables.Contains(parentTable)
+                || alteredColumns.Contains(ColumnKey(childTable, fk.ChildColumn))
+                || alteredColumns.Contains(ColumnKey(parentTable, fk.ParentColumn.Name));
+
+            if (!affected)
+            {
+                continue;
+            }
+
+            if (
+                explicitlyDropped.Contains(
+                    ForeignKeyKey(childTable, fk.ChildColumn, parentTable, fk.ParentColumn.Name)
+                )
+            )
+            {
+                continue;
+            }
+
+            var constraintName = ResolveForeignKeyName(fk.Relationship, childTable, parentTable);
+            var description = string.Format(Strings.Diff_AutoForeignKeyRebuild, constraintName);
+
+            autoDrops.Add(
+                new SchemaDiffItem
+                {
+                    Kind = SchemaDiffKind.DropForeignKey,
+                    TableName = childTable,
+                    Entity = fk.Child,
+                    ParentEntity = fk.Parent,
+                    ChildEntity = fk.Child,
+                    Relationship = fk.Relationship,
+                    ForeignKeyName = fk.Relationship.ConstraintName,
+                    Description = description,
+                }
+            );
+
+            autoAdds.Add(
+                new SchemaDiffItem
+                {
+                    Kind = SchemaDiffKind.AddForeignKey,
+                    TableName = childTable,
+                    ColumnName = fk.ChildColumn,
+                    Entity = fk.Child,
+                    ParentEntity = fk.Parent,
+                    ChildEntity = fk.Child,
+                    Relationship = fk.Relationship,
+                    Description = description,
+                }
+            );
+        }
+
+        if (autoDrops.Count == 0)
+        {
+            return selected;
+        }
+
+        // 自動 DROP は DropForeignKey セクションの先頭側・再 ADD は AddForeignKey セクションの末尾側へ置く
+        // （BuildSections は種別で抽出しつつ入力順を保持するため、この並びがそのままセクション内の順序になる）
+        return [.. autoDrops, .. selected, .. autoAdds];
+    }
+
+    /// <summary>テーブル・列の照合キー（大文字小文字・前後空白を無視する）</summary>
+    private static string ColumnKey(string table, string column) =>
+        $"{table.Trim().ToLowerInvariant()}|{column.Trim().ToLowerInvariant()}";
+
+    /// <summary>外部キーの照合キー（子テーブル・子列・親テーブル・親列。大文字小文字・前後空白を無視する）</summary>
+    private static string ForeignKeyKey(
+        string childTable,
+        string childColumn,
+        string parentTable,
+        string parentColumn
+    ) => $"{ColumnKey(childTable, childColumn)}|{ColumnKey(parentTable, parentColumn)}";
+
+    /// <summary>FK 制約名を解決する（未設定なら <c>FK_{子}_{親}</c> の規約名）</summary>
+    private static string ResolveForeignKeyName(
+        Relationship? relationship,
+        string childTable,
+        string parentTable
+    ) =>
+        string.IsNullOrWhiteSpace(relationship?.ConstraintName)
+            ? $"FK_{SafeName(childTable)}_{SafeName(parentTable)}"
+            : relationship!.ConstraintName!;
+
+    /// <summary>live のリレーションから、親子エンティティ・親列・子列名まで解決できた FK を列挙する</summary>
+    /// <remarks>多対多や、親子・参照列が解決できないリレーションは FK として扱えないため除外する。</remarks>
+    private static IEnumerable<(
+        Relationship Relationship,
+        Entity Parent,
+        Entity Child,
+        Column ParentColumn,
+        string ChildColumn
+    )> EnumerateLiveForeignKeys(SyncPlanContext context)
+    {
+        foreach (var rel in context.LiveRelationships)
+        {
+            if (rel.Type == RelationshipType.ManyToMany)
+            {
+                continue;
+            }
+
+            var parent = context.LiveEntities.FirstOrDefault(e => e.Id == rel.SourceEntityId);
+            var child = context.LiveEntities.FirstOrDefault(e => e.Id == rel.TargetEntityId);
+
+            if (parent is null || child is null)
+            {
+                continue;
+            }
+
+            var parentCol = SchemaDiffService.ResolveReferencedColumn(rel, parent);
+
+            if (parentCol is null)
+            {
+                continue;
+            }
+
+            var childCol = SchemaDiffService.ResolveFkColumnName(rel, child, parent, parentCol);
+
+            if (childCol is null)
+            {
+                continue;
+            }
+
+            yield return (rel, parent, child, parentCol, childCol);
+        }
     }
 
     /// <summary>
@@ -267,6 +489,9 @@ public sealed class SyncPlanner
             var newDef = live.Clone(preserveId: true);
             ApplySelectedColumnChanges(newDef, tableItems);
 
+            // 主キー変更（AlterPrimaryKey）が選択されていれば、合成後の列へ target の主キー構成を反映する
+            ApplySelectedPrimaryKeyChange(newDef, tableItems);
+
             // 列順変更（ReorderColumns）が選択されていれば、合成後の列を target の列名順へ並べ替える
             ApplySelectedReorder(newDef, tableItems);
 
@@ -329,6 +554,36 @@ public sealed class SyncPlanner
             {
                 newDef.Columns.Add(add.Column.Clone(preserveId: true));
             }
+        }
+    }
+
+    /// <summary>
+    /// 選択された AlterPrimaryKey があれば、合成後の各列の主キー指定を target の構成で上書きする。
+    /// </summary>
+    /// <remarks>
+    /// 上書きするのは <see cref="Column.IsPrimaryKey"/> のみで、列の型・NULL 許容などは他差分の選択状況に従う
+    /// （未選択の AlterColumn を主キー変更のついでに適用してしまわないため）。AlterPrimaryKey が未選択なら何もしない。
+    /// </remarks>
+    private static void ApplySelectedPrimaryKeyChange(
+        Entity newDef,
+        IReadOnlyList<SchemaDiffItem> tableItems
+    )
+    {
+        var alterPk = tableItems.FirstOrDefault(i => i.Kind == SchemaDiffKind.AlterPrimaryKey);
+
+        if (alterPk?.Entity is null)
+        {
+            return;
+        }
+
+        var pkNames = alterPk
+            .Entity.Columns.Where(c => c.IsPrimaryKey)
+            .Select(c => c.Name)
+            .ToHashSet(TableComparer);
+
+        foreach (var column in newDef.Columns)
+        {
+            column.IsPrimaryKey = pkNames.Contains(column.Name);
         }
     }
 
@@ -667,52 +922,26 @@ public sealed class SyncPlanner
         SyncPlanContext context
     )
     {
-        foreach (var rel in context.LiveRelationships)
+        foreach (var fk in EnumerateLiveForeignKeys(context))
         {
-            if (rel.Type == RelationshipType.ManyToMany)
+            if (!TableComparer.Equals(SchemaDiffService.NormalizeTable(fk.Child), childTable))
             {
                 continue;
             }
 
-            var parent = context.LiveEntities.FirstOrDefault(e => e.Id == rel.SourceEntityId);
-            var child = context.LiveEntities.FirstOrDefault(e => e.Id == rel.TargetEntityId);
-
-            if (parent is null || child is null)
-            {
-                continue;
-            }
-
-            if (!TableComparer.Equals(SchemaDiffService.NormalizeTable(child), childTable))
-            {
-                continue;
-            }
-
-            var parentCol = SchemaDiffService.ResolveReferencedColumn(rel, parent);
-
-            if (parentCol is null)
-            {
-                continue;
-            }
-
-            var childCol = SchemaDiffService.ResolveFkColumnName(rel, child, parent, parentCol);
-
-            if (childCol is null)
-            {
-                continue;
-            }
-
-            var parentTable = SchemaDiffService.NormalizeTable(parent);
-            var name = string.IsNullOrWhiteSpace(rel.ConstraintName)
-                ? $"FK_{SafeName(SchemaDiffService.NormalizeTable(child))}_{SafeName(parentTable)}"
-                : rel.ConstraintName!;
+            var parentTable = SchemaDiffService.NormalizeTable(fk.Parent);
 
             yield return new TableRebuildForeignKey(
-                name,
-                childCol,
+                ResolveForeignKeyName(
+                    fk.Relationship,
+                    SchemaDiffService.NormalizeTable(fk.Child),
+                    parentTable
+                ),
+                fk.ChildColumn,
                 parentTable,
-                parentCol.Name,
-                rel.OnDelete,
-                rel.OnUpdate
+                fk.ParentColumn.Name,
+                fk.Relationship.OnDelete,
+                fk.Relationship.OnUpdate
             );
         }
     }
@@ -734,12 +963,9 @@ public sealed class SyncPlanner
 
         var childTable = SchemaDiffService.NormalizeTable(item.ChildEntity);
         var parentTable = SchemaDiffService.NormalizeTable(item.ParentEntity);
-        var name = string.IsNullOrWhiteSpace(item.Relationship?.ConstraintName)
-            ? $"FK_{SafeName(childTable)}_{SafeName(parentTable)}"
-            : item.Relationship!.ConstraintName!;
 
         return new TableRebuildForeignKey(
-            name,
+            ResolveForeignKeyName(item.Relationship, childTable, parentTable),
             item.ColumnName!,
             parentTable,
             parentCol.Name,
@@ -785,14 +1011,15 @@ public sealed class SyncPlanner
         return (childCol, SchemaDiffService.NormalizeTable(item.ParentEntity), parentCol.Name);
     }
 
-    /// <summary>この種別が既存テーブルの再構築を要求するか（列型変更・列削除・FK 変更・列順変更）</summary>
+    /// <summary>この種別が既存テーブルの再構築を要求するか（列型変更・主キー変更・列削除・FK 変更・列順変更）</summary>
     /// <remarks>
-    /// rebuild 方言（SQLite）では列順変更もテーブル再構築で実現するため、ReorderColumns も再構築トリガーに含める
-    /// （ReorderColumns だけが選択された場合も CreateOnly=false の再構築になる）。
+    /// rebuild 方言（SQLite）では列順変更・主キー変更もテーブル再構築で実現するため、ReorderColumns /
+    /// AlterPrimaryKey も再構築トリガーに含める（それだけが選択された場合も CreateOnly=false の再構築になる）。
     /// </remarks>
     private static bool IsRebuildTriggerKind(SchemaDiffKind kind) =>
         kind
             is SchemaDiffKind.AlterColumn
+                or SchemaDiffKind.AlterPrimaryKey
                 or SchemaDiffKind.DropColumn
                 or SchemaDiffKind.DropForeignKey
                 or SchemaDiffKind.AddForeignKey

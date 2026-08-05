@@ -15,6 +15,7 @@ namespace QuickER.Oracle;
 ///   <item>AddColumn</item>
 ///   <item>DropForeignKey（FK 依存列の型変更・列/テーブル削除より前に外す）</item>
 ///   <item>AlterColumn</item>
+///   <item>AlterPrimaryKey（主キー制約の張り替え。新主キー列の NOT NULL 化を済ませた後に行う）</item>
 ///   <item>DropColumn</item>
 ///   <item>DropTable</item>
 ///   <item>AddForeignKey</item>
@@ -66,6 +67,14 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
     {
         foreach (var item in section.Items)
         {
+            // 主キー変更だけは「旧主キーの解除」「新主キーの付与」の 2 文へ展開されるため、
+            // 1 項目 = 1 文の switch には載せずリストへ直接追加する
+            if (section.Kind == SchemaDiffKind.AlterPrimaryKey)
+            {
+                AppendAlterPrimaryKey(statements, item);
+                continue;
+            }
+
             var stmt = section.Kind switch
             {
                 SchemaDiffKind.AddTable => AppendCreateTable(item),
@@ -147,6 +156,54 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
         var nullClause = col.IsPrimaryKey || !col.IsNullable ? "NOT NULL" : "NULL";
         return $"ALTER TABLE {OracleIdentifier.Quote(item.TableName)} "
             + $"MODIFY ({OracleIdentifier.QuoteSimple(col.Name)} {col.DataType} {nullClause});";
+    }
+
+    /// <summary>主キー変更（旧主キー制約の解除 → 新主キー制約の付与）の各文を追加する</summary>
+    /// <remarks>
+    /// 旧主キーの制約名は差分項目に含まれないため、テーブル名から <c>user_constraints</c> を逆引きする
+    /// PL/SQL 無名ブロックで動的に DROP する（主キーが無ければ NO_DATA_FOUND を握り潰して何もしない）。
+    /// 新しい主キー構成は <see cref="SchemaDiffItem.Entity"/>（target 側エンティティ）の主キー列を
+    /// 列定義順に読み、制約名は CREATE TABLE と同じ <c>PK_{テーブル名}</c> 規則で組み立てる。
+    /// 主キー列が 1 つも無い場合（主キーの解除のみ）は付与文を追加しない。
+    /// </remarks>
+    private static void AppendAlterPrimaryKey(List<string> statements, SchemaDiffItem item)
+    {
+        var table = OracleIdentifier.Quote(item.TableName);
+
+        // 識別子はクォート付き作成のため、大文字小文字を保持した実名でカタログを照合する
+        var tableName = OracleIdentifier.EscapeStringLiteral(
+            OracleIdentifier.TableNameOnly(item.TableName)
+        );
+        var tableQuoted = table.Replace("'", "''");
+
+        var drop = new StringBuilder();
+        drop.AppendLine("DECLARE");
+        drop.AppendLine("    v_name user_constraints.constraint_name%TYPE;");
+        drop.AppendLine("BEGIN");
+        drop.AppendLine("    SELECT c.constraint_name INTO v_name");
+        drop.AppendLine("    FROM user_constraints c");
+        drop.AppendLine($"    WHERE c.constraint_type = 'P' AND c.table_name = '{tableName}';");
+        drop.AppendLine(
+            $"    EXECUTE IMMEDIATE 'ALTER TABLE {tableQuoted} DROP CONSTRAINT \"' || v_name || '\"';"
+        );
+        drop.AppendLine("EXCEPTION");
+        drop.AppendLine("    WHEN NO_DATA_FOUND THEN NULL;");
+        drop.Append("END;");
+        statements.Add(drop.ToString());
+
+        var pks = item.Entity!.Columns.Where(c => c.IsPrimaryKey).ToList();
+
+        // 新しい主キー列が無い（＝主キーの解除のみ）場合は付与文を出さない
+        if (pks.Count == 0)
+        {
+            return;
+        }
+
+        var pkCols = string.Join(", ", pks.Select(p => OracleIdentifier.QuoteSimple(p.Name)));
+        statements.Add(
+            $"ALTER TABLE {table} ADD CONSTRAINT \"PK_{OracleIdentifier.SafeName(item.TableName)}\" "
+                + $"PRIMARY KEY ({pkCols});"
+        );
     }
 
     /// <summary>ALTER TABLE ... DROP COLUMN（列削除）文を生成する</summary>

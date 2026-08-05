@@ -14,6 +14,7 @@ namespace QuickER.SqlServer;
 ///   <item>AddColumn</item>
 ///   <item>DropForeignKey（FK 依存列の型変更・列/テーブル削除より前に外す）</item>
 ///   <item>AlterColumn</item>
+///   <item>AlterPrimaryKey（主キー制約の張り替え。新主キー列の NOT NULL 化を済ませた後に行う）</item>
 ///   <item>DropColumn</item>
 ///   <item>DropTable</item>
 ///   <item>AddForeignKey</item>
@@ -76,6 +77,46 @@ public sealed class SqlServerSyncScriptBuilder : SyncScriptBuilderBase
         sb.AppendLine(
             $"ALTER TABLE {SqlIdentifier.Bracket(item.TableName)} "
                 + $"ALTER COLUMN {SqlIdentifier.BracketSimple(col.Name)} {col.DataType} {SyncScriptBuilderHelper.GetNullabilityClause(col)};"
+        );
+        sb.AppendLine("GO");
+    }
+
+    /// <summary>主キー変更（旧主キー制約の解除 → 新主キー制約の付与）文を生成する</summary>
+    /// <remarks>
+    /// 旧主キーの制約名は差分項目に含まれないため、テーブル名から sys.key_constraints を逆引きし、
+    /// 動的 SQL で DROP する（主キーが無いテーブルなら何も実行しない）。新しい主キー構成は
+    /// <see cref="SchemaDiffItem.Entity"/>（target 側エンティティ）の主キー列を列定義順に読み、
+    /// 制約名は CREATE TABLE と同じ <c>PK_{テーブル名}</c> 規則で組み立てる。
+    /// 主キー列が 1 つも無い場合（主キーの解除のみ）は付与文を出さない。
+    /// </remarks>
+    protected override void AppendAlterPrimaryKey(StringBuilder sb, SchemaDiffItem item)
+    {
+        var table = SqlIdentifier.Bracket(item.TableName);
+
+        // 旧主キーの制約名はカタログビューを逆引きして特定する（主キーが無ければ @pk は NULL のまま）
+        sb.AppendLine("DECLARE @pk sysname;");
+        sb.AppendLine("SELECT @pk = kc.name FROM sys.key_constraints kc");
+        sb.AppendLine("  JOIN sys.tables t ON kc.parent_object_id = t.object_id");
+        sb.AppendLine(
+            $"WHERE kc.type = 'PK' AND t.name = N'{SqlIdentifier.EscapeStringLiteral(SqlIdentifier.TableNameOnly(item.TableName))}';"
+        );
+        sb.AppendLine(
+            $"IF @pk IS NOT NULL EXEC('ALTER TABLE {table} DROP CONSTRAINT [' + @pk + ']');"
+        );
+        sb.AppendLine("GO");
+
+        var pks = item.Entity!.Columns.Where(c => c.IsPrimaryKey).ToList();
+
+        // 新しい主キー列が無い（＝主キーの解除のみ）場合は付与文を出さない
+        if (pks.Count == 0)
+        {
+            return;
+        }
+
+        var pkCols = string.Join(", ", pks.Select(p => SqlIdentifier.BracketSimple(p.Name)));
+        sb.AppendLine(
+            $"ALTER TABLE {table} ADD CONSTRAINT [PK_{SqlIdentifier.SafeName(item.TableName)}] "
+                + $"PRIMARY KEY ({pkCols});"
         );
         sb.AppendLine("GO");
     }

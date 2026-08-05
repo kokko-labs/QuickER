@@ -60,7 +60,8 @@ public sealed class DdlOutputEnglishGuardTests
 
     /// <summary>
     /// 各方言の <c>SyncScriptBuilder</c> が ASCII のみの差分から出力する同期スクリプトに CJK が含まれないことを検証する。
-    /// セクション見出し・FK スキップコメント・Oracle の ON UPDATE 注意コメント・MySQL の列スキップコメントを網羅する。
+    /// セクション見出し・FK スキップコメント・Oracle の ON UPDATE 注意コメント・MySQL の列スキップコメント・
+    /// 主キー変更の DDL（4 方言はカタログ逆引きの実 DDL・未対応方言は <see cref="SyncScriptBuilderBase"/> の既定スキップコメント）を網羅する。
     /// SQLite はテーブル再構築（PRAGMA ヘッダ／フッタ・RebuildTable 見出し・補助オブジェクト再作成）を別途網羅する。
     /// </summary>
     [Fact(
@@ -357,7 +358,8 @@ public sealed class DdlOutputEnglishGuardTests
 
     /// <summary>
     /// ASCII のみで構成した検証用の差分項目一覧を組み立てる。
-    /// セクション見出し・FK スキップ・Oracle 注意コメント・MySQL 列スキップの各固定文を出力経路で通す。
+    /// セクション見出し・FK スキップ・Oracle 注意コメント・MySQL 列スキップ・主キー変更（実 DDL）の
+    /// 各固定文を出力経路で通す。
     /// </summary>
     private static IReadOnlyList<SchemaDiffItem> BuildAsciiDiffItems()
     {
@@ -430,6 +432,14 @@ public sealed class DdlOutputEnglishGuardTests
                     OnDelete = ForeignKeyReferentialAction.Cascade,
                     OnUpdate = ForeignKeyReferentialAction.SetNull,
                 },
+                IsSelected = true,
+            },
+            new SchemaDiffItem
+            {
+                // 主キー変更 → 4 方言はカタログ逆引きの実 DDL・未対応方言は既定スキップコメントを誘発する
+                Kind = SchemaDiffKind.AlterPrimaryKey,
+                TableName = "t",
+                Entity = addedTable,
                 IsSelected = true,
             },
             new SchemaDiffItem

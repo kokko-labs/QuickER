@@ -30,7 +30,13 @@ public sealed class SqlServerProvider : IDatabaseProvider
     public ISyncScriptBuilder SyncScriptBuilder { get; } = new SqlServerSyncScriptBuilder();
 
     /// <inheritdoc />
-    public SyncDialectCapabilities SyncCapabilities { get; } = new();
+    /// <remarks>
+    /// FK に参加している列の型変更は依存エラー（Msg 5074）になるため、
+    /// <see cref="SyncDialectCapabilities.AlterColumnRequiresForeignKeyRebuild"/> を立てて
+    /// プランナーに FK の自動 DROP / ADD を組ませる。
+    /// </remarks>
+    public SyncDialectCapabilities SyncCapabilities { get; } =
+        new() { AlterColumnRequiresForeignKeyRebuild = true };
 
     /// <inheritdoc />
     public ISchemaSyncExecutor SyncExecutor { get; } = new SqlServerSchemaSyncExecutor();

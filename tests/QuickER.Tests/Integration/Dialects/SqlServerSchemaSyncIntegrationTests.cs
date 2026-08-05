@@ -39,6 +39,9 @@ public class SqlServerSchemaSyncIntegrationTests : IAsyncLifetime
     /// <summary>子テーブル名（FK の保有側）</summary>
     private const string ChildTable = "_erd_sync_test_child";
 
+    /// <summary>主キー変更の検証に使う単独テーブル名（参照 FK を持たない）</summary>
+    private const string ItemTable = "_erd_sync_test_item";
+
     /// <summary>テスト DB へ接続可能かどうか（不可ならテストをスキップする）</summary>
     private bool _serverAvailable;
 
@@ -82,7 +85,8 @@ public class SqlServerSchemaSyncIntegrationTests : IAsyncLifetime
         var script =
             $@"
 IF OBJECT_ID(N'{ChildTable}', N'U') IS NOT NULL DROP TABLE [{ChildTable}];
-IF OBJECT_ID(N'{ParentTable}', N'U') IS NOT NULL DROP TABLE [{ParentTable}];";
+IF OBJECT_ID(N'{ParentTable}', N'U') IS NOT NULL DROP TABLE [{ParentTable}];
+IF OBJECT_ID(N'{ItemTable}', N'U') IS NOT NULL DROP TABLE [{ItemTable}];";
         await using var cmd = new SqlCommand(script, conn);
 
         await cmd.ExecuteNonQueryAsync(TestCancellationToken);
@@ -463,5 +467,363 @@ CREATE TABLE [{ChildTable}] (
         );
         imported2.Description.Should().Be("親テーブル(更新後)");
         imported2.Columns.First(c => c.Name == "Name").Description.Should().Be("顧客名(更新後)");
+    }
+
+    /// <summary>主キーの付け替え（Id → Code）が実 DB へ適用され、行データが温存されることを検証する</summary>
+    /// <remarks>参照してくる FK が無いテーブルで、主キー変更単体の往復を確認する</remarks>
+    [Fact(
+        DisplayName = "[Integration] AlterPrimaryKey: 主キーを Id から Code へ付け替えてもデータが温存される"
+    )]
+    public async Task PrimaryKeySync_MovesPrimaryKeyToAnotherColumn()
+    {
+        if (!_serverAvailable)
+        {
+            return;
+        }
+
+        await RunScriptAsync(
+            $@"
+CREATE TABLE [{ItemTable}] (
+    [Code] nvarchar(20) NOT NULL,
+    [Id] int NOT NULL,
+    CONSTRAINT [PK_{ItemTable}] PRIMARY KEY ([Id])
+);
+INSERT INTO [{ItemTable}] ([Code], [Id]) VALUES (N'A-001', 1);
+INSERT INTO [{ItemTable}] ([Code], [Id]) VALUES (N'A-002', 2);"
+        );
+
+        var importer = new SqlServerSchemaImporter();
+        var live = await importer.ImportAsync(Settings, TestCancellationToken);
+        var liveItem = live.Entities.Single(e =>
+            e.TableName.EndsWith(ItemTable, StringComparison.OrdinalIgnoreCase)
+        );
+
+        // 目標: 列構成・型は変えず、主キーだけ Id から Code へ移す
+        var target = liveItem.Clone(preserveId: true);
+        target.Columns.Single(c => c.Name == "Id").IsPrimaryKey = false;
+        target.Columns.Single(c => c.Name == "Code").IsPrimaryKey = true;
+
+        var capabilities = new SqlServerProvider().SyncCapabilities;
+        var diff = new SchemaDiffService().Compute(
+            live.Entities,
+            live.Relationships,
+            new[] { target },
+            new List<Relationship>(),
+            capabilities
+        );
+
+        // 主キー変更は既定で未選択のため、対象項目だけを明示的に選択する
+        var alterPk = diff
+            .Items.Should()
+            .ContainSingle(i =>
+                i.Kind == SchemaDiffKind.AlterPrimaryKey
+                && i.TableName.EndsWith(ItemTable, StringComparison.OrdinalIgnoreCase)
+            )
+            .Which;
+        alterPk.IsSelected = true;
+
+        var context = new SyncPlanContext
+        {
+            LiveEntities = live.Entities,
+            LiveRelationships = live.Relationships,
+        };
+        var script = new SqlServerSyncScriptBuilder().Build(
+            new SyncPlanner().BuildPlan(diff.Items, capabilities, context)
+        );
+        var result = await new SqlServerSchemaSyncExecutor().ExecuteAsync(
+            Settings.ToDbConnectionSettings(),
+            script,
+            TestCancellationToken
+        );
+        result.Committed.Should().BeTrue($"主キー変更に失敗: {result.Error}\nSQL:\n{script}");
+
+        // ---------- 再取込: 主キーが Code へ移っている ----------
+        var live2 = await importer.ImportAsync(Settings, TestCancellationToken);
+        var item2 = live2.Entities.Single(e =>
+            e.TableName.EndsWith(ItemTable, StringComparison.OrdinalIgnoreCase)
+        );
+        item2.Columns.Single(c => c.Name == "Code").IsPrimaryKey.Should().BeTrue();
+        item2.Columns.Single(c => c.Name == "Id").IsPrimaryKey.Should().BeFalse();
+
+        // ---------- 行データは失われない ----------
+        var rows = await QueryItemRowsAsync();
+        rows.Should().Equal(("A-001", 1), ("A-002", 2));
+    }
+
+    /// <summary>
+    /// FK に参加している列の定義変更で、依存 FK が自動 DROP → 再 ADD され同期が成功することを検証する。
+    /// </summary>
+    /// <remarks>
+    /// SQL Server は FOREIGN KEY 制約に参加している列の <c>ALTER COLUMN</c> を拒否する（Msg 5074）。
+    /// <see cref="SyncDialectCapabilities.AlterColumnRequiresForeignKeyRebuild"/> により
+    /// <see cref="SyncPlanner"/> が FK の DROP と再 ADD を注入することで、従来失敗していたこのケースが通る。
+    /// 型（長さ）を変えると再 ADD 時に参照先と型が一致せず失敗するため、ここでは NULL 許容のみを変更する。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Integration] AlterColumn: FK 参加列の定義変更で依存 FK が自動 DROP → 再 ADD される"
+    )]
+    public async Task AlterColumn_OnForeignKeyColumn_RebuildsDependentForeignKey()
+    {
+        if (!_serverAvailable)
+        {
+            return;
+        }
+
+        await RunScriptAsync(
+            $@"
+CREATE TABLE [{ParentTable}] (
+    [Code] nvarchar(20) NOT NULL,
+    CONSTRAINT [PK_{ParentTable}] PRIMARY KEY ([Code])
+);
+CREATE TABLE [{ChildTable}] (
+    [Id] int NOT NULL,
+    [ParentCode] nvarchar(20) NULL,
+    CONSTRAINT [PK_{ChildTable}] PRIMARY KEY ([Id]),
+    CONSTRAINT [FK_{ChildTable}_{ParentTable}] FOREIGN KEY ([ParentCode]) REFERENCES [{ParentTable}] ([Code])
+);
+INSERT INTO [{ParentTable}] ([Code]) VALUES (N'P-1');
+INSERT INTO [{ChildTable}] ([Id], [ParentCode]) VALUES (1, N'P-1');"
+        );
+
+        var importer = new SqlServerSchemaImporter();
+        var live = await importer.ImportAsync(Settings, TestCancellationToken);
+        var liveParent = live.Entities.Single(e =>
+            e.TableName.EndsWith(ParentTable, StringComparison.OrdinalIgnoreCase)
+        );
+        var liveChild = live.Entities.Single(e =>
+            e.TableName.EndsWith(ChildTable, StringComparison.OrdinalIgnoreCase)
+        );
+        var liveFk = live.Relationships.Single(r => r.TargetEntityId == liveChild.Id);
+
+        // 目標: FK は図上維持したまま、FK 参加列 ParentCode を NULL 許容から NOT NULL へ変更する
+        var parentTarget = liveParent.Clone(preserveId: true);
+        var childTarget = liveChild.Clone(preserveId: true);
+        childTarget.Columns.Single(c => c.Name == "ParentCode").IsNullable = false;
+
+        var relKeep = new Relationship
+        {
+            SourceEntityId = parentTarget.Id,
+            TargetEntityId = childTarget.Id,
+            Type = RelationshipType.OneToMany,
+            SourceColumnId = parentTarget.Columns.Single(c => c.Name == "Code").Id,
+            TargetColumnId = childTarget.Columns.Single(c => c.Name == "ParentCode").Id,
+            ConstraintName = liveFk.ConstraintName,
+        };
+
+        var capabilities = new SqlServerProvider().SyncCapabilities;
+        var diff = new SchemaDiffService().Compute(
+            live.Entities,
+            live.Relationships,
+            new[] { parentTarget, childTarget },
+            new[] { relKeep },
+            capabilities
+        );
+
+        // FK 差分は出ない（図上は維持）ことと、列定義変更が 1 件出ることを確認する
+        diff.Items.Should()
+            .NotContain(i =>
+                i.Kind == SchemaDiffKind.DropForeignKey
+                && i.TableName.EndsWith(ChildTable, StringComparison.OrdinalIgnoreCase)
+            );
+        var alterColumn = diff
+            .Items.Should()
+            .ContainSingle(i =>
+                i.Kind == SchemaDiffKind.AlterColumn && i.ColumnName == "ParentCode"
+            )
+            .Which;
+        alterColumn.IsSelected = true;
+
+        var context = new SyncPlanContext
+        {
+            LiveEntities = live.Entities,
+            LiveRelationships = live.Relationships,
+        };
+        var plan = new SyncPlanner().BuildPlan(diff.Items, capabilities, context);
+
+        // プランナーが依存 FK の DROP と再 ADD を注入していること
+        plan.Sections.Should().Contain(s => s.Kind == SchemaDiffKind.DropForeignKey);
+        plan.Sections.Should().Contain(s => s.Kind == SchemaDiffKind.AddForeignKey);
+
+        var script = new SqlServerSyncScriptBuilder().Build(plan);
+        var result = await new SqlServerSchemaSyncExecutor().ExecuteAsync(
+            Settings.ToDbConnectionSettings(),
+            script,
+            TestCancellationToken
+        );
+        result.Committed.Should().BeTrue($"FK 参加列の変更に失敗: {result.Error}\nSQL:\n{script}");
+
+        // ---------- 再取込: 列定義が変わり、FK は存続している ----------
+        var live2 = await importer.ImportAsync(Settings, TestCancellationToken);
+        var child2 = live2.Entities.Single(e =>
+            e.TableName.EndsWith(ChildTable, StringComparison.OrdinalIgnoreCase)
+        );
+        child2.Columns.Single(c => c.Name == "ParentCode").IsNullable.Should().BeFalse();
+        live2
+            .Relationships.Should()
+            .Contain(r => r.ConstraintName == liveFk.ConstraintName, "FK は再 ADD されているはず");
+
+        // 行データも失われない
+        (await QueryScalarIntAsync($"SELECT COUNT(*) FROM [{ChildTable}];"))
+            .Should()
+            .Be(1);
+    }
+
+    /// <summary>
+    /// 被参照列が候補キーでなくなる主キー変更は、自動再 ADD される FK が実行時に失敗し、
+    /// トランザクションごとロールバックされることを検証する（既知の限界の現状固定）。
+    /// </summary>
+    /// <remarks>
+    /// 親の主キーを Id から Code へ移すと、Id を参照している子の FK は再 ADD できない（参照先が候補キーでなくなるため）。
+    /// この場合にサイレントな破壊（FK だけ消えて主キーが変わる）が起きず、DB が元の状態のまま残ることを確認する。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Integration] AlterPrimaryKey: 被参照列が候補キーでなくなる変更は失敗しロールバックされる"
+    )]
+    public async Task PrimaryKeyChange_BreakingDependentForeignKey_RollsBack()
+    {
+        if (!_serverAvailable)
+        {
+            return;
+        }
+
+        await RunScriptAsync(
+            $@"
+CREATE TABLE [{ParentTable}] (
+    [Id] int NOT NULL,
+    [Code] nvarchar(20) NOT NULL,
+    CONSTRAINT [PK_{ParentTable}] PRIMARY KEY ([Id])
+);
+CREATE TABLE [{ChildTable}] (
+    [Id] int NOT NULL,
+    [ParentId] int NULL,
+    CONSTRAINT [PK_{ChildTable}] PRIMARY KEY ([Id]),
+    CONSTRAINT [FK_{ChildTable}_{ParentTable}] FOREIGN KEY ([ParentId]) REFERENCES [{ParentTable}] ([Id])
+);
+INSERT INTO [{ParentTable}] ([Id], [Code]) VALUES (1, N'P-1');
+INSERT INTO [{ChildTable}] ([Id], [ParentId]) VALUES (1, 1);"
+        );
+
+        var importer = new SqlServerSchemaImporter();
+        var live = await importer.ImportAsync(Settings, TestCancellationToken);
+        var liveParent = live.Entities.Single(e =>
+            e.TableName.EndsWith(ParentTable, StringComparison.OrdinalIgnoreCase)
+        );
+        var liveChild = live.Entities.Single(e =>
+            e.TableName.EndsWith(ChildTable, StringComparison.OrdinalIgnoreCase)
+        );
+        var liveFk = live.Relationships.Single(r => r.TargetEntityId == liveChild.Id);
+
+        // 目標: 親の主キーを Id から Code へ移す（子の FK は Id を参照したまま維持）
+        var parentTarget = liveParent.Clone(preserveId: true);
+        parentTarget.Columns.Single(c => c.Name == "Id").IsPrimaryKey = false;
+        parentTarget.Columns.Single(c => c.Name == "Code").IsPrimaryKey = true;
+        var childTarget = liveChild.Clone(preserveId: true);
+
+        var relKeep = new Relationship
+        {
+            SourceEntityId = parentTarget.Id,
+            TargetEntityId = childTarget.Id,
+            Type = RelationshipType.OneToMany,
+            SourceColumnId = parentTarget.Columns.Single(c => c.Name == "Id").Id,
+            TargetColumnId = childTarget.Columns.Single(c => c.Name == "ParentId").Id,
+            ConstraintName = liveFk.ConstraintName,
+        };
+
+        var capabilities = new SqlServerProvider().SyncCapabilities;
+        var diff = new SchemaDiffService().Compute(
+            live.Entities,
+            live.Relationships,
+            new[] { parentTarget, childTarget },
+            new[] { relKeep },
+            capabilities
+        );
+
+        var alterPk = diff
+            .Items.Should()
+            .ContainSingle(i =>
+                i.Kind == SchemaDiffKind.AlterPrimaryKey
+                && i.TableName.EndsWith(ParentTable, StringComparison.OrdinalIgnoreCase)
+            )
+            .Which;
+        alterPk.IsSelected = true;
+
+        var context = new SyncPlanContext
+        {
+            LiveEntities = live.Entities,
+            LiveRelationships = live.Relationships,
+        };
+        var script = new SqlServerSyncScriptBuilder().Build(
+            new SyncPlanner().BuildPlan(diff.Items, capabilities, context)
+        );
+        var result = await new SqlServerSchemaSyncExecutor().ExecuteAsync(
+            Settings.ToDbConnectionSettings(),
+            script,
+            TestCancellationToken
+        );
+
+        // 再 ADD できない FK があるため実行は失敗し、エラーが報告される
+        result
+            .Committed.Should()
+            .BeFalse($"再 ADD できない FK があるため失敗するはず\nSQL:\n{script}");
+        result.Error.Should().NotBeNullOrEmpty();
+
+        // ---------- SQL Server は単一トランザクションのため DB は元のまま ----------
+        var live2 = await importer.ImportAsync(Settings, TestCancellationToken);
+        var parent2 = live2.Entities.Single(e =>
+            e.TableName.EndsWith(ParentTable, StringComparison.OrdinalIgnoreCase)
+        );
+        parent2.Columns.Single(c => c.Name == "Id").IsPrimaryKey.Should().BeTrue();
+        parent2.Columns.Single(c => c.Name == "Code").IsPrimaryKey.Should().BeFalse();
+        live2
+            .Relationships.Should()
+            .Contain(r => r.ConstraintName == liveFk.ConstraintName, "FK も元のまま残るはず");
+        (await QueryScalarIntAsync($"SELECT COUNT(*) FROM [{ChildTable}];")).Should().Be(1);
+    }
+
+    // ---------------- ヘルパー ----------------
+
+    /// <summary>セットアップ用の T-SQL をそのまま実行する</summary>
+    private static async Task RunScriptAsync(string sql)
+    {
+        await using var conn = new SqlConnection(Settings.Build());
+
+        await conn.OpenAsync(TestCancellationToken);
+
+        await using var cmd = new SqlCommand(sql, conn);
+        await cmd.ExecuteNonQueryAsync(TestCancellationToken);
+    }
+
+    /// <summary>単一の int スカラーを取得する（件数検証用）</summary>
+    private static async Task<int> QueryScalarIntAsync(string sql)
+    {
+        await using var conn = new SqlConnection(Settings.Build());
+
+        await conn.OpenAsync(TestCancellationToken);
+
+        await using var cmd = new SqlCommand(sql, conn);
+        return (int)(await cmd.ExecuteScalarAsync(TestCancellationToken))!;
+    }
+
+    /// <summary>主キー変更の検証用テーブルの行を取得する（データ温存の確認用）</summary>
+    private static async Task<List<(string Code, int Id)>> QueryItemRowsAsync()
+    {
+        var rows = new List<(string Code, int Id)>();
+
+        await using var conn = new SqlConnection(Settings.Build());
+
+        await conn.OpenAsync(TestCancellationToken);
+
+        await using var cmd = new SqlCommand(
+            $"SELECT [Code], [Id] FROM [{ItemTable}] ORDER BY [Id];",
+            conn
+        );
+        await using var reader = await cmd.ExecuteReaderAsync(TestCancellationToken);
+
+        while (await reader.ReadAsync(TestCancellationToken))
+        {
+            rows.Add((reader.GetString(0), reader.GetInt32(1)));
+        }
+
+        return rows;
     }
 }

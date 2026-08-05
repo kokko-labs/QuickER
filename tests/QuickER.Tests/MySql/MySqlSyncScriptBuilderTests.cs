@@ -532,4 +532,89 @@ public class MySqlSyncScriptBuilderTests
         sql.Should().Contain("ALTER TABLE `t1` MODIFY COLUMN `c` int NULL AFTER `id`;");
         sql.Should().Contain("ALTER TABLE `t2` MODIFY COLUMN `z` int NULL FIRST;");
     }
+
+    // ---------------- 主キー変更（AlterPrimaryKey） ----------------
+
+    /// <summary>指定の主キー列を持つ target エンティティを組み立てる</summary>
+    private static Entity PkTarget(string table, params string[] pkColumns)
+    {
+        var e = new Entity { TableName = table };
+        e.Columns.Add(
+            new Column
+            {
+                Name = "memo",
+                DataType = "varchar(50)",
+                IsNullable = true,
+            }
+        );
+
+        foreach (var name in pkColumns)
+        {
+            e.Columns.Add(
+                new Column
+                {
+                    Name = name,
+                    DataType = "int",
+                    IsPrimaryKey = true,
+                    IsNullable = false,
+                }
+            );
+        }
+
+        return e;
+    }
+
+    /// <summary>主キー変更の差分項目を生成する（Entity＝新しい主キー構成の源）</summary>
+    private static SchemaDiffItem AlterPk(string table, Entity target) =>
+        new()
+        {
+            Kind = SchemaDiffKind.AlterPrimaryKey,
+            TableName = table,
+            Entity = target,
+            IsSelected = true,
+        };
+
+    /// <summary>主キー変更が存在確認付きの動的 DROP と ADD PRIMARY KEY を生成することを検証する</summary>
+    [Fact(DisplayName = "AlterPrimaryKey は存在確認付き DROP と複合 PK の ADD を生成する")]
+    public void AlterPrimaryKey_DropsExistingAndAddsComposite()
+    {
+        var sql = Build(AlterPk("orders", PkTarget("orders", "order_id", "line_no")));
+
+        // 主キーが無いテーブルでは DROP PRIMARY KEY がエラーになるため存在確認してから動的 SQL で外す
+        sql.Should().Contain("SET @pk = NULL;");
+        sql.Should().Contain("FROM information_schema.TABLE_CONSTRAINTS tc");
+        sql.Should()
+            .Contain(
+                "WHERE tc.CONSTRAINT_SCHEMA = DATABASE() AND tc.TABLE_NAME = 'orders' "
+                    + "AND tc.CONSTRAINT_TYPE = 'PRIMARY KEY' LIMIT 1;"
+            );
+        sql.Should()
+            .Contain(
+                "SET @sql = IF(@pk IS NULL, 'DO 0', 'ALTER TABLE `orders` DROP PRIMARY KEY');"
+            );
+        sql.Should().Contain("PREPARE stmt FROM @sql;");
+        // MySQL の主キー名は PRIMARY 固定のため CONSTRAINT 名は指定しない
+        sql.Should().Contain("ALTER TABLE `orders` ADD PRIMARY KEY (`order_id`, `line_no`);");
+        sql.Should().NotContain("ADD CONSTRAINT");
+    }
+
+    /// <summary>主キーが無いテーブルへの主キー付与でも DROP が無害な形（DO 0 へ分岐）で出ることを検証する</summary>
+    [Fact(DisplayName = "AlterPrimaryKey は PK 付与のみでも DROP を no-op 形で出す")]
+    public void AlterPrimaryKey_AddOnly_EmitsGuardedDrop()
+    {
+        var sql = Build(AlterPk("customer", PkTarget("customer", "id")));
+
+        sql.Should().Contain("IF(@pk IS NULL, 'DO 0'");
+        sql.Should().Contain("ALTER TABLE `customer` ADD PRIMARY KEY (`id`);");
+    }
+
+    /// <summary>主キーの解除のみ（新主キー列ゼロ）では付与文が出ないことを検証する</summary>
+    [Fact(DisplayName = "AlterPrimaryKey は PK 解除のみなら ADD を出さない")]
+    public void AlterPrimaryKey_DropOnly_OmitsAdd()
+    {
+        var sql = Build(AlterPk("customer", PkTarget("customer")));
+
+        sql.Should().Contain("IF(@pk IS NULL, 'DO 0'");
+        sql.Should().NotContain("ADD PRIMARY KEY");
+    }
 }

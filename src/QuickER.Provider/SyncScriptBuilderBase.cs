@@ -77,6 +77,10 @@ public abstract class SyncScriptBuilderBase : ISyncScriptBuilder
                 AppendAlterColumn(sb, item);
                 break;
 
+            case SchemaDiffKind.AlterPrimaryKey:
+                AppendAlterPrimaryKey(sb, item);
+                break;
+
             case SchemaDiffKind.DropForeignKey:
                 AppendDropForeignKey(sb, item);
                 break;
@@ -111,6 +115,17 @@ public abstract class SyncScriptBuilderBase : ISyncScriptBuilder
 
     /// <summary>列定義変更文を書き出す</summary>
     protected abstract void AppendAlterColumn(StringBuilder sb, SchemaDiffItem item);
+
+    /// <summary>主キー変更（旧主キー制約の解除 → 新主キー制約の付与）文を書き出す</summary>
+    /// <remarks>
+    /// 既定は「この方言では描画しない」スキップコメント（英語が正本）。主キー変更の DDL を実装した方言だけが
+    /// 上書きする。テーブル再構築方言（SQLite）は主キー変更を再構築へ畳むためセクションには現れない。
+    /// </remarks>
+    protected virtual void AppendAlterPrimaryKey(StringBuilder sb, SchemaDiffItem item) =>
+        sb.AppendLine(
+            $"-- Skipped '{SchemaDiffKind.AlterPrimaryKey}' on {item.TableName}: "
+                + "primary key changes are not rendered by this dialect."
+        );
 
     /// <summary>外部キー削除文を書き出す</summary>
     protected abstract void AppendDropForeignKey(StringBuilder sb, SchemaDiffItem item);

@@ -118,6 +118,15 @@
   <data name="Diff_ReorderColumns" xml:space="preserve">
     <value>テーブル [{0}] の列の並び順をダイアグラムに合わせて変更</value>
   </data>
+  <data name="Diff_AlterPrimaryKey" xml:space="preserve">
+    <value>主キーを変更します: [{0}] ({1}) → ({2})</value>
+  </data>
+  <data name="Diff_PrimaryKey_None" xml:space="preserve">
+    <value>なし</value>
+  </data>
+  <data name="Diff_AutoForeignKeyRebuild" xml:space="preserve">
+    <value>変更を可能にするため自動的に削除して再作成します: [{0}]</value>
+  </data>
   <data name="Provider_UnsupportedProvider" xml:space="preserve">
     <value>未対応のプロバイダ: '{0}'。対応プロバイダ: {1}</value>
   </data>

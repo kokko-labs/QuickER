@@ -174,6 +174,24 @@ namespace QuickER.Provider.Resources {
             }
         }
 
+        public static string Diff_AlterPrimaryKey {
+            get {
+                return ResourceManager.GetString("Diff_AlterPrimaryKey", resourceCulture);
+            }
+        }
+
+        public static string Diff_PrimaryKey_None {
+            get {
+                return ResourceManager.GetString("Diff_PrimaryKey_None", resourceCulture);
+            }
+        }
+
+        public static string Diff_AutoForeignKeyRebuild {
+            get {
+                return ResourceManager.GetString("Diff_AutoForeignKeyRebuild", resourceCulture);
+            }
+        }
+
         public static string Provider_UnsupportedProvider {
             get {
                 return ResourceManager.GetString("Provider_UnsupportedProvider", resourceCulture);

@@ -15,6 +15,7 @@ namespace QuickER.MySql;
 ///   <item>AddColumn</item>
 ///   <item>DropForeignKey（FK 依存列の型変更・列/テーブル削除より前に外す）</item>
 ///   <item>AlterColumn</item>
+///   <item>AlterPrimaryKey（主キー制約の張り替え。新主キー列の NOT NULL 化を済ませた後に行う）</item>
 ///   <item>DropColumn</item>
 ///   <item>DropTable</item>
 ///   <item>AddForeignKey</item>
@@ -33,6 +34,11 @@ namespace QuickER.MySql;
 ///   <item>
 ///   DropForeignKey は制約名既知なら <c>DROP FOREIGN KEY 名前</c> で直接外す。制約名不明時は MySQL に
 ///   DO ブロックが無いため、<c>information_schema</c> から制約名を引いてプリペアド動的 SQL で削除する。
+///   </item>
+///   <item>
+///   AlterPrimaryKey の <c>DROP PRIMARY KEY</c> は主キーが無いテーブルではエラーになるため、
+///   <c>information_schema</c> を逆引きして主キーが在るときだけプリペアド動的 SQL で実行する。
+///   付与側は MySQL の主キー名が <c>PRIMARY</c> 固定のため <c>CONSTRAINT</c> 名を指定しない。
 ///   </item>
 /// </list>
 /// </para>
@@ -96,6 +102,51 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
             $"ALTER TABLE {MySqlIdentifier.Quote(item.TableName)} "
                 + $"MODIFY COLUMN {MySqlIdentifier.QuoteSimple(col.Name)} {BuildColumnDefinition(col)};"
         );
+    }
+
+    /// <summary>主キー変更（旧主キー制約の解除 → 新主キー制約の付与）文を生成する</summary>
+    /// <remarks>
+    /// <c>ALTER TABLE ... DROP PRIMARY KEY</c> は主キーが無いテーブルに対してエラーになるため、
+    /// <c>information_schema.TABLE_CONSTRAINTS</c> を逆引きし、主キーが在るときだけプリペアド動的 SQL で
+    /// 実行する（無ければ無害な <c>DO 0</c>）。新しい主キー構成は <see cref="SchemaDiffItem.Entity"/>
+    /// （target 側エンティティ）の主キー列を列定義順に読む。MySQL の主キー名は <c>PRIMARY</c> 固定のため
+    /// 付与側に <c>CONSTRAINT</c> 名は指定しない。主キー列が 1 つも無い場合（主キーの解除のみ）は付与文を出さない。
+    /// </remarks>
+    protected override void AppendAlterPrimaryKey(StringBuilder sb, SchemaDiffItem item)
+    {
+        var table = MySqlIdentifier.Quote(item.TableName);
+        var tableName = MySqlIdentifier.EscapeStringLiteral(
+            MySqlIdentifier.TableNameOnly(item.TableName)
+        );
+
+        // 主キーの有無を information_schema で確かめてからプリペアド動的 SQL で外す。
+        // 接続文字列に AllowUserVariables=true が付与されている前提（Executor 側で付与）。
+        // SELECT ... INTO は該当行が無いとユーザー変数を書き換えないため、事前に NULL で初期化する。
+        sb.AppendLine("SET @pk = NULL;");
+        sb.AppendLine("SELECT tc.CONSTRAINT_NAME INTO @pk");
+        sb.AppendLine("FROM information_schema.TABLE_CONSTRAINTS tc");
+        sb.AppendLine(
+            $"WHERE tc.CONSTRAINT_SCHEMA = DATABASE() AND tc.TABLE_NAME = '{tableName}' "
+                + "AND tc.CONSTRAINT_TYPE = 'PRIMARY KEY' LIMIT 1;"
+        );
+        // 主キーが無ければ無害な DO 0 を実行する
+        sb.AppendLine(
+            $"SET @sql = IF(@pk IS NULL, 'DO 0', 'ALTER TABLE {table} DROP PRIMARY KEY');"
+        );
+        sb.AppendLine("PREPARE stmt FROM @sql;");
+        sb.AppendLine("EXECUTE stmt;");
+        sb.AppendLine("DEALLOCATE PREPARE stmt;");
+
+        var pks = item.Entity!.Columns.Where(c => c.IsPrimaryKey).ToList();
+
+        // 新しい主キー列が無い（＝主キーの解除のみ）場合は付与文を出さない
+        if (pks.Count == 0)
+        {
+            return;
+        }
+
+        var pkCols = string.Join(", ", pks.Select(p => MySqlIdentifier.QuoteSimple(p.Name)));
+        sb.AppendLine($"ALTER TABLE {table} ADD PRIMARY KEY ({pkCols});");
     }
 
     /// <summary>ALTER TABLE ... DROP COLUMN（列削除）文を生成する</summary>

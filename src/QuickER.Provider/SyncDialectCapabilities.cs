@@ -36,6 +36,16 @@ public sealed record SyncDialectCapabilities
     /// <summary>テーブル / 列コメント（説明）を設定する機構を持つか。</summary>
     public bool SupportsDescriptions { get; init; } = true;
 
+    /// <summary>
+    /// 列定義変更（<c>ALTER COLUMN</c>）の前に、その列が関与する外部キーを一旦外す必要があるか。
+    /// </summary>
+    /// <remarks>
+    /// SQL Server は FK に参加している列の型を変更しようとすると依存エラー（Msg 5074）になるため <c>true</c>。
+    /// <c>true</c> の方言では <see cref="SyncPlanner"/> が該当 FK の DROP / ADD を自動で計画へ注入する
+    /// （ユーザーが明示的に DROP を選択している FK は対象外＝二重削除も再作成もしない）。
+    /// </remarks>
+    public bool AlterColumnRequiresForeignKeyRebuild { get; init; }
+
     /// <summary>外部キー制約名が DB に永続化されるか（SQLite は制約名が合成名で永続化されない）。</summary>
     public bool PersistsForeignKeyConstraintNames { get; init; } = true;
 

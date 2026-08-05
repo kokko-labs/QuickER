@@ -409,4 +409,90 @@ public class PostgreSqlSyncScriptBuilderTests
         iAdd.Should().BeGreaterThan(iCreate);
         iFk.Should().BeGreaterThan(iAdd);
     }
+
+    // ---------------- 主キー変更（AlterPrimaryKey） ----------------
+
+    /// <summary>指定の主キー列を持つ target エンティティを組み立てる</summary>
+    private static Entity PkTarget(string table, params string[] pkColumns)
+    {
+        var e = new Entity { TableName = table };
+        e.Columns.Add(
+            new Column
+            {
+                Name = "memo",
+                DataType = "text",
+                IsNullable = true,
+            }
+        );
+
+        foreach (var name in pkColumns)
+        {
+            e.Columns.Add(
+                new Column
+                {
+                    Name = name,
+                    DataType = "integer",
+                    IsPrimaryKey = true,
+                    IsNullable = false,
+                }
+            );
+        }
+
+        return e;
+    }
+
+    /// <summary>主キー変更の差分項目を生成する（Entity＝新しい主キー構成の源）</summary>
+    private static SchemaDiffItem AlterPk(string table, Entity target) =>
+        new()
+        {
+            Kind = SchemaDiffKind.AlterPrimaryKey,
+            TableName = table,
+            Entity = target,
+            IsSelected = true,
+        };
+
+    /// <summary>主キー変更が DO ブロックの動的 DROP と新主キーの ADD CONSTRAINT を生成することを検証する</summary>
+    [Fact(DisplayName = "AlterPrimaryKey は DO ブロックの DROP と複合 PK の ADD を生成する")]
+    public void AlterPrimaryKey_DropsExistingAndAddsComposite()
+    {
+        var sql = Build(AlterPk("orders", PkTarget("orders", "order_id", "line_no")));
+
+        // 旧主キーの制約名は差分に無いため pg_constraint から逆引きして DO ブロックで外す
+        sql.Should().Contain("DO $$");
+        sql.Should().Contain("FROM pg_constraint con");
+        sql.Should().Contain("WHERE con.contype = 'p' AND tbl.relname = 'orders'");
+        sql.Should().Contain("AND tbl.relnamespace = 'public'::regnamespace;");
+        sql.Should().Contain("IF pk_name IS NOT NULL THEN");
+        sql.Should()
+            .Contain("EXECUTE 'ALTER TABLE \"orders\" DROP CONSTRAINT \"' || pk_name || '\"';");
+        // 新主キーは列定義順の複合キーとして CREATE TABLE と同じ制約名規則で付与する
+        sql.Should()
+            .Contain(
+                "ALTER TABLE \"orders\" ADD CONSTRAINT \"PK_orders\" PRIMARY KEY (\"order_id\", \"line_no\");"
+            );
+    }
+
+    /// <summary>主キーが無いテーブルへの主キー付与でも DROP が無害な形（存在時のみ実行）で出ることを検証する</summary>
+    [Fact(DisplayName = "AlterPrimaryKey は PK 付与のみでも DROP を no-op 形で出す")]
+    public void AlterPrimaryKey_AddOnly_EmitsGuardedDrop()
+    {
+        var sql = Build(AlterPk("customer", PkTarget("customer", "id")));
+
+        sql.Should().Contain("IF pk_name IS NOT NULL THEN");
+        sql.Should()
+            .Contain(
+                "ALTER TABLE \"customer\" ADD CONSTRAINT \"PK_customer\" PRIMARY KEY (\"id\");"
+            );
+    }
+
+    /// <summary>主キーの解除のみ（新主キー列ゼロ）では付与文が出ないことを検証する</summary>
+    [Fact(DisplayName = "AlterPrimaryKey は PK 解除のみなら ADD を出さない")]
+    public void AlterPrimaryKey_DropOnly_OmitsAdd()
+    {
+        var sql = Build(AlterPk("customer", PkTarget("customer")));
+
+        sql.Should().Contain("IF pk_name IS NOT NULL THEN");
+        sql.Should().NotContain("ADD CONSTRAINT");
+        sql.Should().NotContain("PRIMARY KEY (");
+    }
 }

@@ -278,6 +278,30 @@ public class SchemaDiffService
                 }
             }
 
+            // 主キー構成の差分（テーブル単位で 1 項目・既定では未選択）
+            var livePk = PrimaryKeyColumnNames(live);
+            var targetPk = PrimaryKeyColumnNames(target);
+
+            if (!IsSamePrimaryKey(livePk, targetPk))
+            {
+                diff.Items.Add(
+                    new SchemaDiffItem
+                    {
+                        Kind = SchemaDiffKind.AlterPrimaryKey,
+                        TableName = name,
+                        // 新しい主キー構成の源は target 側エンティティ（列順・PK フラグをそのまま参照する）
+                        Entity = target,
+                        IsSelected = false,
+                        Description = string.Format(
+                            Strings.Diff_AlterPrimaryKey,
+                            name,
+                            FormatPrimaryKey(livePk),
+                            FormatPrimaryKey(targetPk)
+                        ),
+                    }
+                );
+            }
+
             foreach (var (cname, lcol) in liveCols)
             {
                 if (!targetCols.ContainsKey(cname))
@@ -632,6 +656,33 @@ public class SchemaDiffService
 
         return parent.Columns.FirstOrDefault(c => c.IsPrimaryKey);
     }
+
+    /// <summary>主キー列の名前を、エンティティの列定義順で取り出す（順序も比較対象にするため List で返す）</summary>
+    private static List<string> PrimaryKeyColumnNames(Entity entity) =>
+        entity.Columns.Where(c => c.IsPrimaryKey).Select(c => c.Name).ToList();
+
+    /// <summary>主キー構成（列の順序付き集合）が同一かを判定する（列名の比較規則は列差分と同じ大文字小文字無視）</summary>
+    private static bool IsSamePrimaryKey(IReadOnlyList<string> live, IReadOnlyList<string> target)
+    {
+        if (live.Count != target.Count)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < live.Count; i++)
+        {
+            if (!string.Equals(live[i], target[i], StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>主キー列の一覧を表示用の文字列へ整形する（主キーなしは表示言語の「なし」ラベル）</summary>
+    private static string FormatPrimaryKey(IReadOnlyList<string> columns) =>
+        columns.Count == 0 ? Strings.Diff_PrimaryKey_None : string.Join(", ", columns);
 
     /// <summary>データ型を大文字小文字・前後空白を無視して同一とみなせるか判定する</summary>
     private static bool IsSameType(string a, string b) =>

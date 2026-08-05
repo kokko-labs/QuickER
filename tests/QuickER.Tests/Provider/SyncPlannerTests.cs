@@ -3,6 +3,7 @@ using AwesomeAssertions;
 using QuickER.Model;
 using QuickER.Provider;
 using Xunit;
+using ProviderStrings = QuickER.Provider.Resources.Strings;
 
 namespace QuickER.Tests.Provider;
 
@@ -50,6 +51,7 @@ public class SyncPlannerTests
                 Item(SchemaDiffKind.AddForeignKey),
                 Item(SchemaDiffKind.DropTable),
                 Item(SchemaDiffKind.DropColumn),
+                Item(SchemaDiffKind.AlterPrimaryKey),
                 Item(SchemaDiffKind.DropForeignKey),
                 Item(SchemaDiffKind.AlterColumn),
                 Item(SchemaDiffKind.AddColumn),
@@ -60,6 +62,8 @@ public class SyncPlannerTests
 
         // DropForeignKey が AlterColumn より先なのは意図的:
         // FK 依存列の型変更を通すため、先に FK を外しておく必要がある（SQL Server は Msg 5074 で失敗する）
+        // AlterPrimaryKey は AlterColumn の後・DropColumn の前:
+        // 新 PK 列の NOT NULL 化を先に済ませ、旧 PK 列の削除は PK を外した後に行う必要がある
         plan.Sections.Select(s => s.Kind)
             .Should()
             .Equal(
@@ -67,6 +71,7 @@ public class SyncPlannerTests
                 SchemaDiffKind.AddColumn,
                 SchemaDiffKind.DropForeignKey,
                 SchemaDiffKind.AlterColumn,
+                SchemaDiffKind.AlterPrimaryKey,
                 SchemaDiffKind.DropColumn,
                 SchemaDiffKind.DropTable,
                 SchemaDiffKind.AddForeignKey,
@@ -847,6 +852,308 @@ public class SyncPlannerTests
         var act = () => new SyncPlanner().BuildPlan([Reorder("t", target)], NativeCaps);
 
         act.Should().Throw<InvalidOperationException>();
+    }
+
+    // ---------------- 主キー変更（AlterPrimaryKey）と依存 FK の自動 DROP → 再 ADD ----------------
+
+    /// <summary>FK 参加列の型変更に FK の外し直しが必要な方言（SQL Server 相当）のケーパビリティ</summary>
+    private static readonly SyncDialectCapabilities FkRebuildCaps = new()
+    {
+        AlterColumnRequiresForeignKeyRebuild = true,
+    };
+
+    /// <summary>customer(id) ← orders(customer_id) の live スキーマと、その FK リレーションを組み立てる</summary>
+    private static (
+        Entity Customer,
+        Entity Orders,
+        Relationship Rel,
+        SyncPlanContext Context
+    ) LiveFkScenario()
+    {
+        var customer = new Entity { TableName = "customer", Columns = { PkId() } };
+        var orders = new Entity
+        {
+            TableName = "orders",
+            Columns = { PkId(), Col("customer_id", "INT") },
+        };
+        var rel = new Relationship
+        {
+            SourceEntityId = customer.Id,
+            TargetEntityId = orders.Id,
+            SourceColumnId = customer.Columns[0].Id,
+            TargetColumnId = orders.Columns[1].Id,
+            ConstraintName = "FK_orders_customer",
+        };
+
+        return (
+            customer,
+            orders,
+            rel,
+            new SyncPlanContext { LiveEntities = [customer, orders], LiveRelationships = [rel] }
+        );
+    }
+
+    /// <summary>AlterPrimaryKey 差分項目を生成する（target＝新しい主キー構成の源）</summary>
+    private static SchemaDiffItem AlterPk(string table, Entity target, bool selected = true) =>
+        new()
+        {
+            Kind = SchemaDiffKind.AlterPrimaryKey,
+            TableName = table,
+            Entity = target,
+            IsSelected = selected,
+        };
+
+    /// <summary>
+    /// 主キーを変更するテーブルを参照している live FK が、自動 DROP（先頭側）＋再 ADD（末尾側）として
+    /// 計画へ注入され、レンダラーがそのまま SQL 化できるフィールドで埋まることを検証する。
+    /// </summary>
+    [Fact(DisplayName = "主キー変更: 参照している live FK が自動で外れて再作成される")]
+    public void AlterPrimaryKey_InjectsImplicitForeignKeyDropAndReAdd()
+    {
+        var (customer, orders, rel, context) = LiveFkScenario();
+        // 新しい主キー構成（code を主キーにする）
+        var targetCustomer = new Entity
+        {
+            TableName = "customer",
+            Columns =
+            {
+                Col("id", "INT"),
+                new Column
+                {
+                    Name = "code",
+                    DataType = "INT",
+                    IsPrimaryKey = true,
+                    IsNullable = false,
+                },
+            },
+        };
+
+        var plan = new SyncPlanner().BuildPlan(
+            [AlterPk("customer", targetCustomer)],
+            new SyncDialectCapabilities(),
+            context
+        );
+
+        plan.Sections.Select(s => s.Kind)
+            .Should()
+            .Equal(
+                SchemaDiffKind.DropForeignKey,
+                SchemaDiffKind.AlterPrimaryKey,
+                SchemaDiffKind.AddForeignKey
+            );
+
+        var drop = plan
+            .Sections.Single(s => s.Kind == SchemaDiffKind.DropForeignKey)
+            .Items.Should()
+            .ContainSingle()
+            .Which;
+        drop.TableName.Should().Be("orders");
+        drop.ChildEntity.Should().BeSameAs(orders);
+        drop.ParentEntity.Should().BeSameAs(customer);
+        drop.Relationship.Should().BeSameAs(rel);
+        drop.ForeignKeyName.Should().Be("FK_orders_customer");
+        drop.IsSelected.Should().BeTrue();
+
+        var add = plan
+            .Sections.Single(s => s.Kind == SchemaDiffKind.AddForeignKey)
+            .Items.Should()
+            .ContainSingle()
+            .Which;
+        add.TableName.Should().Be("orders");
+        add.ColumnName.Should().Be("customer_id");
+        add.ChildEntity.Should().BeSameAs(orders);
+        add.ParentEntity.Should().BeSameAs(customer);
+        add.Relationship.Should().BeSameAs(rel);
+
+        // 説明は自動再作成用の専用文言（カルチャに依らず resx キーから組み立てて照合する）
+        add.Description.Should()
+            .Be(string.Format(ProviderStrings.Diff_AutoForeignKeyRebuild, "FK_orders_customer"));
+    }
+
+    /// <summary>主キーを変更するテーブル自身が子側の FK（外向き）は自動 DROP の対象外であることを検証する</summary>
+    [Fact(DisplayName = "主キー変更: 自テーブルから出ている FK は自動で外さない")]
+    public void AlterPrimaryKey_DoesNotTouchOutgoingForeignKeys()
+    {
+        var (_, _, _, context) = LiveFkScenario();
+        var targetOrders = new Entity
+        {
+            TableName = "orders",
+            Columns = { Col("id", "INT"), Col("customer_id", "INT") },
+        };
+
+        // 主キーを変えるのは子テーブル orders 自身（customer を参照する外向き FK は影響を受けない）
+        var plan = new SyncPlanner().BuildPlan(
+            [AlterPk("orders", targetOrders)],
+            new SyncDialectCapabilities(),
+            context
+        );
+
+        plan.Sections.Select(s => s.Kind).Should().Equal(SchemaDiffKind.AlterPrimaryKey);
+    }
+
+    /// <summary>
+    /// FK 参加列の型変更に FK の外し直しが必要な方言では、選択済み AlterColumn の列に紐づく live FK が
+    /// 自動 DROP ＋ 再 ADD として注入されることを検証する。
+    /// </summary>
+    [Fact(DisplayName = "AlterColumn: capability が真の方言では依存 FK が自動で外れて再作成される")]
+    public void AlterColumn_WithCapability_InjectsImplicitForeignKeyRebuild()
+    {
+        var (_, _, _, context) = LiveFkScenario();
+        var alter = new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.AlterColumn,
+            TableName = "orders",
+            ColumnName = "customer_id",
+            Column = Col("customer_id", "BIGINT"),
+            IsSelected = true,
+        };
+
+        var plan = new SyncPlanner().BuildPlan([alter], FkRebuildCaps, context);
+
+        plan.Sections.Select(s => s.Kind)
+            .Should()
+            .Equal(
+                SchemaDiffKind.DropForeignKey,
+                SchemaDiffKind.AlterColumn,
+                SchemaDiffKind.AddForeignKey
+            );
+    }
+
+    /// <summary>親側（被参照列）の型変更でも依存 FK が自動 DROP ＋ 再 ADD になることを検証する</summary>
+    [Fact(DisplayName = "AlterColumn: 親側の被参照列の変更でも依存 FK が外れて再作成される")]
+    public void AlterColumn_OnParentColumn_InjectsImplicitForeignKeyRebuild()
+    {
+        var (_, _, _, context) = LiveFkScenario();
+        var alter = new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.AlterColumn,
+            TableName = "customer",
+            ColumnName = "id",
+            Column = Col("id", "BIGINT"),
+            IsSelected = true,
+        };
+
+        var plan = new SyncPlanner().BuildPlan([alter], FkRebuildCaps, context);
+
+        plan.Sections.Should().Contain(s => s.Kind == SchemaDiffKind.DropForeignKey);
+        plan.Sections.Should().Contain(s => s.Kind == SchemaDiffKind.AddForeignKey);
+    }
+
+    /// <summary>capability が偽の方言では AlterColumn だけでは FK を自動で外さないことを検証する</summary>
+    [Fact(DisplayName = "AlterColumn: capability が偽の方言では FK を自動で外さない")]
+    public void AlterColumn_WithoutCapability_DoesNotInjectForeignKeyRebuild()
+    {
+        var (_, _, _, context) = LiveFkScenario();
+        var alter = new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.AlterColumn,
+            TableName = "orders",
+            ColumnName = "customer_id",
+            Column = Col("customer_id", "BIGINT"),
+            IsSelected = true,
+        };
+
+        var plan = new SyncPlanner().BuildPlan([alter], new SyncDialectCapabilities(), context);
+
+        plan.Sections.Select(s => s.Kind).Should().Equal(SchemaDiffKind.AlterColumn);
+    }
+
+    /// <summary>
+    /// ユーザーが同じ FK の DropForeignKey を明示選択している場合、自動 DROP を重複させず、
+    /// かつ再 ADD もしない（削除の意図を尊重する）ことを検証する。
+    /// </summary>
+    [Fact(DisplayName = "明示的に DROP された FK は自動 DROP も再作成もしない")]
+    public void ExplicitlyDroppedForeignKey_IsNeitherDuplicatedNorReAdded()
+    {
+        var (customer, orders, rel, context) = LiveFkScenario();
+        var targetCustomer = new Entity { TableName = "customer", Columns = { Col("id", "INT") } };
+        var explicitDrop = new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.DropForeignKey,
+            TableName = "orders",
+            Entity = orders,
+            ParentEntity = customer,
+            ChildEntity = orders,
+            Relationship = rel,
+            ForeignKeyName = "FK_orders_customer",
+            IsSelected = true,
+        };
+
+        var plan = new SyncPlanner().BuildPlan(
+            [AlterPk("customer", targetCustomer), explicitDrop],
+            new SyncDialectCapabilities(),
+            context
+        );
+
+        // DropForeignKey はユーザーの明示選択 1 件のみ・再 ADD セクションは生じない
+        plan.Sections.Select(s => s.Kind)
+            .Should()
+            .Equal(SchemaDiffKind.DropForeignKey, SchemaDiffKind.AlterPrimaryKey);
+        plan.Sections.Single(s => s.Kind == SchemaDiffKind.DropForeignKey)
+            .Items.Should()
+            .Equal(explicitDrop);
+    }
+
+    /// <summary>live 情報（context）が無ければ FK の自動注入を行わない（防御）ことを検証する</summary>
+    [Fact(DisplayName = "context 省略時は FK の自動注入をしない")]
+    public void NullContext_SkipsImplicitForeignKeyInjection()
+    {
+        var targetCustomer = new Entity { TableName = "customer", Columns = { Col("id", "INT") } };
+
+        var plan = new SyncPlanner().BuildPlan(
+            [AlterPk("customer", targetCustomer)],
+            FkRebuildCaps
+        );
+
+        plan.Sections.Select(s => s.Kind).Should().Equal(SchemaDiffKind.AlterPrimaryKey);
+    }
+
+    /// <summary>
+    /// rebuild 方言（SQLite）では AlterPrimaryKey がテーブル再構築へ畳まれ、
+    /// 合成後の定義に target の主キー構成が反映されることを検証する。
+    /// </summary>
+    [Fact(
+        DisplayName = "SQLite: AlterPrimaryKey は再構築へ畳まれ NewDefinition に PK が反映される"
+    )]
+    public void Rebuild_AlterPrimaryKey_IsFoldedIntoRebuild()
+    {
+        var live = new Entity
+        {
+            TableName = "t",
+            Columns = { PkId(), Col("code", "INT"), Col("note", "TEXT") },
+        };
+        // target: id は主キーでなくなり、code が主キーになる
+        var target = new Entity
+        {
+            TableName = "t",
+            Columns =
+            {
+                Col("id", "INT"),
+                new Column
+                {
+                    Name = "code",
+                    DataType = "INT",
+                    IsPrimaryKey = true,
+                    IsNullable = false,
+                },
+                Col("note", "TEXT"),
+            },
+        };
+
+        var plan = new SyncPlanner().BuildPlan(
+            [AlterPk("t", target)],
+            RebuildCaps,
+            new SyncPlanContext { LiveEntities = [live] }
+        );
+
+        plan.Sections.Should().BeEmpty();
+        var rb = plan.Rebuilds.Should().ContainSingle().Which;
+        rb.CreateOnly.Should().BeFalse();
+        rb.TableName.Should().Be("t");
+        rb.NewDefinition.Columns.Single(c => c.Name == "code").IsPrimaryKey.Should().BeTrue();
+        rb.NewDefinition.Columns.Single(c => c.Name == "id").IsPrimaryKey.Should().BeFalse();
+        // 主キー変更は列集合を変えないため、全列がデータ移送対象のまま
+        rb.CopyColumns.Should().Equal("id", "code", "note");
     }
 
     /// <summary>None 方言では ReorderColumns 項目が渡されても計画から自然に消えることを検証する</summary>

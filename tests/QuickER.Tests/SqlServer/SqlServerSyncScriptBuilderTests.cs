@@ -416,4 +416,97 @@ public class SqlServerSyncScriptBuilderTests
         sql.Should().Contain("sp_dropextendedproperty");
         sql.Should().NotContain("sp_addextendedproperty");
     }
+
+    // ---------------- 主キー変更（AlterPrimaryKey） ----------------
+
+    /// <summary>指定の主キー列を持つ target エンティティを組み立てる</summary>
+    private static Entity PkTarget(string table, params string[] pkColumns)
+    {
+        var e = new Entity { TableName = table };
+        e.Columns.Add(
+            new Column
+            {
+                Name = "Memo",
+                DataType = "nvarchar(50)",
+                IsNullable = true,
+            }
+        );
+
+        foreach (var name in pkColumns)
+        {
+            e.Columns.Add(
+                new Column
+                {
+                    Name = name,
+                    DataType = "int",
+                    IsPrimaryKey = true,
+                    IsNullable = false,
+                }
+            );
+        }
+
+        return e;
+    }
+
+    /// <summary>主キー変更の差分項目を生成する（Entity＝新しい主キー構成の源）</summary>
+    private static SchemaDiffItem AlterPk(string table, Entity target) =>
+        new()
+        {
+            Kind = SchemaDiffKind.AlterPrimaryKey,
+            TableName = table,
+            Entity = target,
+            IsSelected = true,
+        };
+
+    /// <summary>主キー変更が旧主キーの動的 DROP と新主キーの ADD CONSTRAINT を生成することを検証する</summary>
+    [Fact(DisplayName = "AlterPrimaryKey は旧 PK の動的 DROP と複合 PK の ADD を生成する")]
+    public void AlterPrimaryKey_DropsExistingAndAddsComposite()
+    {
+        var sql = BuildScript(
+            new SqlServerSyncScriptBuilder(),
+            new[] { AlterPk("Order", PkTarget("Order", "OrderId", "LineNo")) }
+        );
+
+        // 旧主キーの制約名は差分に無いため sys.key_constraints から逆引きして動的 SQL で外す
+        sql.Should().Contain("DECLARE @pk sysname;");
+        sql.Should().Contain("FROM sys.key_constraints kc");
+        sql.Should().Contain("WHERE kc.type = 'PK' AND t.name = N'Order';");
+        sql.Should()
+            .Contain(
+                "IF @pk IS NOT NULL EXEC('ALTER TABLE [Order] DROP CONSTRAINT [' + @pk + ']');"
+            );
+        // 新主キーは列定義順の複合キーとして CREATE TABLE と同じ制約名規則で付与する
+        sql.Should()
+            .Contain(
+                "ALTER TABLE [Order] ADD CONSTRAINT [PK_Order] PRIMARY KEY ([OrderId], [LineNo]);"
+            );
+    }
+
+    /// <summary>主キーが無いテーブルへの主キー付与でも DROP が無害な形（存在時のみ実行）で出ることを検証する</summary>
+    [Fact(DisplayName = "AlterPrimaryKey は PK 付与のみでも DROP を no-op 形で出す")]
+    public void AlterPrimaryKey_AddOnly_EmitsGuardedDrop()
+    {
+        var sql = BuildScript(
+            new SqlServerSyncScriptBuilder(),
+            new[] { AlterPk("Customer", PkTarget("Customer", "Id")) }
+        );
+
+        sql.Should().Contain("IF @pk IS NOT NULL EXEC(");
+        sql.Should()
+            .Contain("ALTER TABLE [Customer] ADD CONSTRAINT [PK_Customer] PRIMARY KEY ([Id]);");
+    }
+
+    /// <summary>主キーの解除のみ（新主キー列ゼロ）では付与文が出ないことを検証する</summary>
+    [Fact(DisplayName = "AlterPrimaryKey は PK 解除のみなら ADD を出さない")]
+    public void AlterPrimaryKey_DropOnly_OmitsAdd()
+    {
+        var sql = BuildScript(
+            new SqlServerSyncScriptBuilder(),
+            new[] { AlterPk("Customer", PkTarget("Customer")) }
+        );
+
+        sql.Should().Contain("IF @pk IS NOT NULL EXEC(");
+        sql.Should().NotContain("ADD CONSTRAINT");
+        sql.Should().NotContain("PRIMARY KEY (");
+    }
 }

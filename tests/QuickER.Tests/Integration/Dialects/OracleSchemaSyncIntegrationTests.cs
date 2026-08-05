@@ -263,7 +263,97 @@ public sealed class OracleSchemaSyncIntegrationTests(OracleContainerFixture fixt
         result.Error.Should().NotBeNullOrEmpty();
     }
 
+    /// <summary>
+    /// 主キーの付け替え（id → code）が実 DB へ適用され、行データが温存されることを検証する。
+    /// </summary>
+    /// <remarks>参照してくる FK が無いテーブルで、主キー変更単体の往復を確認する</remarks>
+    [Fact(DisplayName = "[Integration] C: 主キーを id から code へ付け替えてもデータが温存される")]
+    public async Task SchemaSync_AlterPrimaryKey_MovesPrimaryKeyAndKeepsRows()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        var settings = fixture.ToDbConnectionSettings();
+
+        await fixture.ExecuteAsync(
+            "CREATE TABLE \"pk_item\" (\"code\" VARCHAR2(20) NOT NULL, \"id\" NUMBER(10) NOT NULL, "
+                + "CONSTRAINT \"PK_pk_item\" PRIMARY KEY (\"id\"));",
+            Ct
+        );
+        await fixture.ExecuteAsync(
+            "INSERT INTO \"pk_item\" (\"code\", \"id\") VALUES ('A-001', 1);",
+            Ct
+        );
+        await fixture.ExecuteAsync(
+            "INSERT INTO \"pk_item\" (\"code\", \"id\") VALUES ('A-002', 2);",
+            Ct
+        );
+
+        var live = await ImportAsync();
+        var liveItem = live.Entities.Single(e => e.TableName == "pk_item");
+
+        // 目標: 列構成・型は変えず、主キーだけ id から code へ移す
+        var target = CloneAsTarget(liveItem);
+        target.Columns.Single(c => c.Name == "id").IsPrimaryKey = false;
+        target.Columns.Single(c => c.Name == "code").IsPrimaryKey = true;
+
+        var caps = new OracleProvider().SyncCapabilities;
+        var diff = _diff.Compute(
+            live.Entities,
+            live.Relationships,
+            new[] { target },
+            new List<Relationship>(),
+            caps
+        );
+
+        // 主キー変更は既定で未選択のため、対象項目だけを明示的に選択する
+        var alterPk = diff
+            .Items.Should()
+            .ContainSingle(i =>
+                i.Kind == SchemaDiffKind.AlterPrimaryKey && i.TableName == "pk_item"
+            )
+            .Which;
+        alterPk.IsSelected = true;
+
+        var context = new SyncPlanContext
+        {
+            LiveEntities = live.Entities,
+            LiveRelationships = live.Relationships,
+        };
+        var script = _builder.Build(new SyncPlanner().BuildPlan(diff.Items, caps, context));
+        var result = await _executor.ExecuteAsync(settings, script, Ct);
+        result.Committed.Should().BeTrue($"主キー変更に失敗: {result.Error}\nSQL:\n{script}");
+
+        // 再取込: 主キーが code へ移っている
+        var live2 = await ImportAsync();
+        var item2 = live2.Entities.Single(e => e.TableName == "pk_item");
+        item2.Columns.Single(c => c.Name == "code").IsPrimaryKey.Should().BeTrue();
+        item2.Columns.Single(c => c.Name == "id").IsPrimaryKey.Should().BeFalse();
+
+        // 行データは失われない
+        var rows = await QueryPkItemRowsAsync();
+        rows.Should().Equal(("A-001", 1), ("A-002", 2));
+    }
+
     // ---------------- ヘルパー ----------------
+
+    /// <summary>主キー変更の検証用テーブルの行を取得する（データ温存の確認用）</summary>
+    private async Task<List<(string Code, int Id)>> QueryPkItemRowsAsync()
+    {
+        var rows = new List<(string Code, int Id)>();
+
+        await using var conn = await fixture.OpenConnectionAsync(Ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT \"code\", \"id\" FROM \"pk_item\" ORDER BY \"id\"";
+        await using var reader = await cmd.ExecuteReaderAsync(Ct).ConfigureAwait(false);
+
+        while (await reader.ReadAsync(Ct).ConfigureAwait(false))
+        {
+            rows.Add((reader.GetString(0), reader.GetInt32(1)));
+        }
+
+        return rows;
+    }
 
     private static Column Pk(string name) =>
         new()

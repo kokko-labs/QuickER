@@ -453,6 +453,80 @@ public sealed class SqliteSchemaSyncIntegrationTests
         inserted.Should().Be(10);
     }
 
+    /// <summary>
+    /// 主キーの付け替え（id → code）がテーブル再構築へ畳まれ、行データが温存されることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// SQLite は主キー変更を逐次 DDL で表現できないため、<see cref="SyncPlanner"/> が再構築計画へ畳む。
+    /// 再構築はデータ移送を伴うため、行が失われないことの確認が特に重要になる。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Integration] SQLite 同期: 主キーを id から code へ付け替える再構築でデータを温存"
+    )]
+    public async Task Rebuild_AlterPrimaryKey_MovesPrimaryKeyAndKeepsRows()
+    {
+        using var db = SqliteTempDatabase.Create();
+        var provider = new SqliteProvider();
+
+        await RunStatementsAsync(
+            db,
+            "CREATE TABLE \"pk_item\" ("
+                + "\"code\" TEXT NOT NULL, \"id\" INTEGER NOT NULL, "
+                + "CONSTRAINT \"PK_pk_item\" PRIMARY KEY (\"id\"));",
+            "INSERT INTO \"pk_item\" (\"code\", \"id\") VALUES ('A-001', 1);",
+            "INSERT INTO \"pk_item\" (\"code\", \"id\") VALUES ('A-002', 2);"
+        );
+
+        // 目標: 列構成・型は変えず、主キーだけ id から code へ移す
+        var (result, script) = await RunSyncAsync(
+            db,
+            provider,
+            (entities, relationships) =>
+            {
+                var item = entities.Single(e => e.TableName == "pk_item");
+                item.Columns.Single(c => c.Name == "id").IsPrimaryKey = false;
+                item.Columns.Single(c => c.Name == "code").IsPrimaryKey = true;
+                return (entities, relationships);
+            }
+        );
+
+        result.Committed.Should().BeTrue(result.Error);
+
+        // 主キー変更が再構築へ畳まれていること（逐次 DDL のセクションには出ない）
+        script.Should().Contain("-- ===== RebuildTable: pk_item =====");
+
+        // 再取込: 主キーが code へ移っている
+        var reimported = await ImportAsync(db, provider);
+        var item2 = reimported.Entities.Single(e => e.TableName == "pk_item");
+        item2.Columns.Single(c => c.Name == "code").IsPrimaryKey.Should().BeTrue();
+        item2.Columns.Single(c => c.Name == "id").IsPrimaryKey.Should().BeFalse();
+
+        // 行データは失われない（再構築のデータ移送が効いている）
+        var rows = await QueryPkItemRowsAsync(db);
+        rows.Should().Equal(("A-001", 1L), ("A-002", 2L));
+    }
+
+    /// <summary>主キー変更の検証用テーブルの行を取得する（データ温存の確認用）</summary>
+    private static async Task<List<(string Code, long Id)>> QueryPkItemRowsAsync(
+        SqliteTempDatabase db
+    )
+    {
+        var rows = new List<(string Code, long Id)>();
+
+        await using var conn = new SqliteConnection(NonPooledReadOnlyConnectionString(db));
+        await conn.OpenAsync(Ct).ConfigureAwait(false);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT \"code\", \"id\" FROM \"pk_item\" ORDER BY \"id\";";
+        await using var reader = await cmd.ExecuteReaderAsync(Ct).ConfigureAwait(false);
+
+        while (await reader.ReadAsync(Ct).ConfigureAwait(false))
+        {
+            rows.Add((reader.GetString(0), reader.GetInt64(1)));
+        }
+
+        return rows;
+    }
+
     /// <summary>単一の long スカラーを取得する（新規作成同期の行挿入検証用）</summary>
     private static async Task<long> QueryScalarLongAsync(SqliteTempDatabase db, string sql)
     {
