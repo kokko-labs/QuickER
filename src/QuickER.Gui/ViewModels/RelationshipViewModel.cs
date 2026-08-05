@@ -536,19 +536,24 @@ public partial class RelationshipViewModel : ObservableObject
         _isAttached = true;
 
         Source.PropertyChanged += OnEndpointChanged;
-        Target.PropertyChanged += OnEndpointChanged;
-
         Source.Columns.CollectionChanged += OnColumnsCollectionChanged;
-        Target.Columns.CollectionChanged += OnColumnsCollectionChanged;
 
         foreach (var column in Source.Columns)
         {
             column.PropertyChanged += OnColumnPropertyChanged;
         }
 
-        foreach (var column in Target.Columns)
+        // 自己参照（Source と Target が同一インスタンス）では Target 側は同じ発生源のため購読しない
+        // （張ると同一ハンドラが 2 本になり、端点移動 1 回で通知・幾何再計算が 2 回走る）
+        if (!ReferenceEquals(Source, Target))
         {
-            column.PropertyChanged += OnColumnPropertyChanged;
+            Target.PropertyChanged += OnEndpointChanged;
+            Target.Columns.CollectionChanged += OnColumnsCollectionChanged;
+
+            foreach (var column in Target.Columns)
+            {
+                column.PropertyChanged += OnColumnPropertyChanged;
+            }
         }
 
         UpdateGeometry();
@@ -567,18 +572,23 @@ public partial class RelationshipViewModel : ObservableObject
         _isAttached = false;
 
         Source.PropertyChanged -= OnEndpointChanged;
-        Target.PropertyChanged -= OnEndpointChanged;
         Source.Columns.CollectionChanged -= OnColumnsCollectionChanged;
-        Target.Columns.CollectionChanged -= OnColumnsCollectionChanged;
 
         foreach (var column in Source.Columns)
         {
             column.PropertyChanged -= OnColumnPropertyChanged;
         }
 
-        foreach (var column in Target.Columns)
+        // 自己参照では Target 側を購読していないため、解除も Attach() と同じ条件で括る
+        if (!ReferenceEquals(Source, Target))
         {
-            column.PropertyChanged -= OnColumnPropertyChanged;
+            Target.PropertyChanged -= OnEndpointChanged;
+            Target.Columns.CollectionChanged -= OnColumnsCollectionChanged;
+
+            foreach (var column in Target.Columns)
+            {
+                column.PropertyChanged -= OnColumnPropertyChanged;
+            }
         }
     }
 }

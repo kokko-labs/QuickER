@@ -570,6 +570,32 @@ public class RelationshipViewModelTests
         rel.LabelY.Should().BeApproximately(rel.SelfLoopTop + rel.SelfLoopHeight / 2, 0.001);
     }
 
+    /// <summary>自己参照リレーションで端点購読が二重にならない（通知が 1 回で済む）ことを検証する</summary>
+    /// <remarks>Source と Target が同一インスタンスのため、両端へ無条件に購読すると通知が 2 倍になる</remarks>
+    [Fact(DisplayName = "自己参照リレーションでも端点購読は二重にならない")]
+    public void SelfRelationship_DoesNotSubscribeEndpointTwice()
+    {
+        var entity = NewEntity(100, 120);
+        var rel = new RelationshipViewModel(
+            new Relationship { Type = RelationshipType.OneToMany },
+            entity,
+            entity
+        );
+
+        var x1Notifications = 0;
+        rel.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(RelationshipViewModel.X1))
+            {
+                x1Notifications++;
+            }
+        };
+
+        entity.X = 500;
+
+        x1Notifications.Should().Be(1);
+    }
+
     /// <summary>同一カラムに主キーと外部キーを同時設定しても両状態が保持されることを検証する</summary>
     [Fact(DisplayName = "同じカラムに PK と FK が両方設定されても状態は保持できる")]
     public void Column_CanHoldPkAndFkTogether()

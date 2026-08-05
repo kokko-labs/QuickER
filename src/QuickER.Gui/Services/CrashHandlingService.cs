@@ -92,10 +92,18 @@ public static class CrashHandlingService
         return builder.ToString();
     }
 
-    /// <summary>クラッシュログを <c>%APPDATA%\QuickER\crash-yyyyMMdd-HHmmss.log</c> へ書き出す</summary>
+    /// <summary>クラッシュログを <c>%APPDATA%\QuickER\crash-yyyyMMdd-HHmmss-fff.log</c> へ書き出す</summary>
     /// <remarks>
+    /// <para>
     /// クラッシュ処理の途中で失敗しても後続（ダイアログ表示・終了）を止めないよう、
     /// 例外は外へ漏らさず null を返す。
+    /// </para>
+    /// <para>
+    /// ファイル名はミリ秒まで含め、それでも衝突する場合は短縮 GUID を付けて別名にする。
+    /// <see cref="HandleCrash"/> 経由は再入ガードで 1 回きりだが、未観測タスク例外
+    /// （<c>TaskScheduler.UnobservedTaskException</c>）はガード外で 1 回の GC から連続発火しうるため、
+    /// 秒精度のままだと同一秒の後勝ち上書きで証跡が失われる（＝こちらが主経路）。
+    /// </para>
     /// </remarks>
     /// <param name="ex">記録する例外</param>
     /// <param name="version">アプリのバージョン文字列</param>
@@ -112,9 +120,21 @@ public static class CrashHandlingService
             var folder = baseDirOverride ?? DefaultLogFolder();
             Directory.CreateDirectory(folder);
 
-            var fileName =
-                $"crash-{DateTime.Now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture)}.log";
-            var path = Path.Combine(folder, fileName);
+            var timestamp = DateTime.Now.ToString(
+                "yyyyMMdd-HHmmss-fff",
+                CultureInfo.InvariantCulture
+            );
+            var path = Path.Combine(folder, $"crash-{timestamp}.log");
+
+            // 同一ミリ秒での連続発火に備え、既存パスなら短縮 GUID を足して別ファイルへ逃がす
+            if (File.Exists(path))
+            {
+                path = Path.Combine(
+                    folder,
+                    $"crash-{timestamp}-{Guid.NewGuid().ToString("N")[..8]}.log"
+                );
+            }
+
             File.WriteAllText(path, FormatDetails(ex, version));
 
             return path;

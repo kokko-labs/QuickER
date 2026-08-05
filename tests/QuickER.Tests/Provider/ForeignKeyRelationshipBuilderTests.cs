@@ -403,6 +403,47 @@ public class ForeignKeyRelationshipBuilderTests
         invoice.ColumnsByName["CustomerId"].IsForeignKey.Should().BeTrue();
     }
 
+    /// <summary>テーブルキーに区切り文字「::」を含んでも一意制約集合が正しいテーブルへ紐付くことを検証する</summary>
+    /// <remarks>
+    /// 文字列連結キーを分解する実装では最初の「::」で誤切断され、一意制約集合が別キーへ紐付いて
+    /// 1 対 1 判定が 1 対多へ劣化する（タプルキー化による構造的解消の回帰テスト）。
+    /// </remarks>
+    [Fact(DisplayName = "テーブルキーに :: を含んでも一意制約による 1 対 1 判定が効く")]
+    public void TableKeyContainingSeparator_KeepsUniqueSetAssociation()
+    {
+        var owner = Table("db::Owner", "Owner", Col("Id", pk: true), Col("ProfileId"));
+        var profile = Table("db::Profile", "Profile", Col("Id", pk: true));
+
+        var tables = new Dictionary<string, SchemaTableEntry>
+        {
+            ["db::Owner"] = owner,
+            ["db::Profile"] = profile,
+        };
+
+        var uniqueBuilder = new UniqueColumnSetBuilder();
+        uniqueBuilder.Add("db::Owner", "UQ_Owner_ProfileId", "ProfileId");
+        var uniqueSets = uniqueBuilder.Build();
+
+        // 一意制約集合が「db」ではなく元のテーブルキーへ紐付く
+        uniqueSets.Should().ContainKey("db::Owner");
+        uniqueSets["db::Owner"].Should().ContainSingle().Which.Should().Equal("ProfileId");
+
+        var builder = new ForeignKeyRelationshipBuilder();
+        builder.Add(
+            "FK_Owner_Profile",
+            "db::Owner",
+            "ProfileId",
+            "db::Profile",
+            "Id",
+            ForeignKeyReferentialAction.NoAction,
+            ForeignKeyReferentialAction.NoAction
+        );
+
+        var rels = builder.Build(tables, uniqueSets);
+
+        rels.Should().ContainSingle().Which.Type.Should().Be(RelationshipType.OneToOne);
+    }
+
     /// <summary>参照先または FK 保有テーブルが解決できない FK はスキップされることを検証する</summary>
     [Fact(DisplayName = "解決できないテーブル参照の FK はスキップされる")]
     public void UnresolvableTable_IsSkipped()

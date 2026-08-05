@@ -1,10 +1,9 @@
 ﻿using AwesomeAssertions;
 using QuickER.UndoRedo;
-using QuickER.ViewModels;
 
 namespace QuickER.Tests.Gui.UndoRedo;
 
-/// <summary><see cref="UndoRedoManager"/> の Execute / Push / Undo / Redo と履歴集約を検証するテストクラス</summary>
+/// <summary><see cref="UndoRedoManager"/> の Execute / Push / Undo / Redo と変更世代を検証するテストクラス</summary>
 public class UndoRedoManagerTests
 {
     /// <summary>Execute / Undo の呼び出し回数を記録するテスト用コマンド</summary>
@@ -113,43 +112,5 @@ public class UndoRedoManagerTests
 
         mgr.CanRedo.Should().BeTrue("Execute / Push と違い Redo は破棄しない");
         mgr.CanUndo.Should().BeFalse();
-    }
-
-    /// <summary>同一 GroupId のプロパティ変更が 1 履歴へ集約され、まとめて Undo / Redo されることを検証する</summary>
-    [Fact(DisplayName = "同一グループの PropertyChangeCommand は 1 回の Undo/Redo で処理される")]
-    public void Push_GroupedPropertyChanges_AreHandledAsSingleStep()
-    {
-        var mgr = new UndoRedoManager();
-        var entity = new EntityViewModel(new QuickER.Model.Entity { TableName = "A" });
-        var groupId = new object();
-
-        entity.TableName = "B";
-        var tableNameProp = new TrackedProperty<EntityViewModel>(
-            nameof(EntityViewModel.TableName),
-            x => x.TableName,
-            (x, v) => x.TableName = (string)v!
-        );
-        mgr.Push(new PropertyChangeCommand(entity, tableNameProp, "A", "B") { GroupId = groupId });
-
-        entity.Description = "desc";
-        var descriptionProp = new TrackedProperty<EntityViewModel>(
-            nameof(EntityViewModel.Description),
-            x => x.Description,
-            (x, v) => x.Description = (string)v!
-        );
-        mgr.Push(
-            new PropertyChangeCommand(entity, descriptionProp, string.Empty, "desc")
-            {
-                GroupId = groupId,
-            }
-        );
-
-        mgr.Undo();
-        entity.TableName.Should().Be("A");
-        entity.Description.Should().BeEmpty();
-
-        mgr.Redo();
-        entity.TableName.Should().Be("B");
-        entity.Description.Should().Be("desc");
     }
 }

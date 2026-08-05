@@ -42,9 +42,6 @@ public class PropertyChangeCommand : IUndoableCommand
         _afterApply = afterApply;
     }
 
-    /// <summary>連動する複数変更を 1 履歴へ集約するためのグループ ID</summary>
-    public object? GroupId { get; init; }
-
     /// <summary>変更対象オブジェクト</summary>
     public object Target => _target;
 

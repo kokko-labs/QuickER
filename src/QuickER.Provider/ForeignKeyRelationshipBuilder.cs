@@ -34,9 +34,13 @@ namespace QuickER.Provider;
 /// </remarks>
 public sealed class ForeignKeyRelationshipBuilder
 {
-    /// <summary>「FK 保有テーブルキー::制約名」→ 集約中の外部キー情報（ConstraintName は元の制約名単体を保持する）</summary>
+    /// <summary>(FK 保有テーブルキー, 制約名) → 集約中の外部キー情報（ConstraintName は元の制約名単体を保持する）</summary>
+    /// <remarks>
+    /// キーはタプルで持つ（文字列連結キーは、テーブル名や制約名に区切り文字が含まれると
+    /// 別々の FK が同一キーへ潰れる／分解時に誤切断される恐れがある）。
+    /// </remarks>
     private readonly Dictionary<
-        string,
+        (string TableKey, string ConstraintName),
         (
             string ParentKey,
             string RefKey,
@@ -79,7 +83,7 @@ public sealed class ForeignKeyRelationshipBuilder
     )
     {
         // 集約キーは「FK 保有テーブル＋制約名」の複合（制約名単体はテーブル横断で一意とは限らないため）
-        var groupKey = parentKey + "::" + fkName;
+        var groupKey = (parentKey, fkName);
 
         if (!_grouped.TryGetValue(groupKey, out var g))
         {
@@ -215,8 +219,13 @@ public sealed class UniqueColumnSetBuilder
         StringComparer.OrdinalIgnoreCase
     );
 
-    /// <summary>「テーブルキー::制約名」→ 構成列（序数順に投入）</summary>
-    private readonly Dictionary<string, List<string>> _current = new();
+    /// <summary>(テーブルキー, 制約名) → 構成列（序数順に投入）</summary>
+    /// <remarks>
+    /// キーはタプルで持つ（文字列連結キーだと、区切り文字を含むテーブル名を
+    /// <see cref="Build"/> で分解する際に誤切断され、一意制約集合が別テーブルへ紐付く）。
+    /// </remarks>
+    private readonly Dictionary<(string TableKey, string ConstraintName), List<string>> _current =
+        new();
 
     /// <summary>一意制約の構成列を 1 行投入する（複合列は同一 <paramref name="constraintName"/> で複数回呼ぶ）</summary>
     /// <param name="tableKey">テーブルキー</param>
@@ -224,7 +233,7 @@ public sealed class UniqueColumnSetBuilder
     /// <param name="column">構成列名</param>
     public void Add(string tableKey, string constraintName, string column)
     {
-        var compositeKey = tableKey + "::" + constraintName;
+        var compositeKey = (tableKey, constraintName);
 
         if (!_current.TryGetValue(compositeKey, out var list))
         {
@@ -245,7 +254,7 @@ public sealed class UniqueColumnSetBuilder
     {
         foreach (var kv in _current)
         {
-            var tableKey = kv.Key.Substring(0, kv.Key.IndexOf("::", StringComparison.Ordinal));
+            var tableKey = kv.Key.TableKey;
 
             if (!_result.TryGetValue(tableKey, out var lists))
             {

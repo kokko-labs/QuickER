@@ -1,5 +1,4 @@
 ﻿using System.Collections.Generic;
-using System.Linq;
 using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace QuickER.UndoRedo;
@@ -57,33 +56,6 @@ public partial class UndoRedoManager : ObservableObject
     /// <param name="command">登録するコマンド</param>
     public void Push(IUndoableCommand command)
     {
-        // グループ ID 付きのプロパティ変更は同一グループの履歴へ集約する
-        if (command is PropertyChangeCommand propertyChange && propertyChange.GroupId is not null)
-        {
-            // スタック先頭が同一グループの複合コマンドなら、そこへマージして履歴の肥大化を防ぐ
-            if (
-                _undo.TryPeek(out var last)
-                && last is CompositeUndoableCommand composite
-                && Equals(composite.GroupId, propertyChange.GroupId)
-            )
-            {
-                composite.Upsert(propertyChange);
-                _redo.Clear();
-                NotifyStateChanged();
-                return;
-            }
-
-            var grouped = new CompositeUndoableCommand(
-                propertyChange.GroupId,
-                propertyChange.Description
-            );
-            grouped.Upsert(propertyChange);
-            _undo.Push(grouped);
-            _redo.Clear();
-            NotifyStateChanged();
-            return;
-        }
-
         _undo.Push(command);
         _redo.Clear();
         NotifyStateChanged();
@@ -140,59 +112,5 @@ public partial class UndoRedoManager : ObservableObject
         _undo.Clear();
         _redo.Clear();
         NotifyStateChanged();
-    }
-
-    /// <summary>同時に発生した複数のプロパティ変更を 1 履歴として扱う複合コマンド</summary>
-    private sealed class CompositeUndoableCommand(object groupId, string description)
-        : IUndoableCommand
-    {
-        /// <summary>集約済みの個別プロパティ変更コマンド</summary>
-        private readonly List<PropertyChangeCommand> _commands = new();
-
-        /// <summary>集約判定に用いるグループ ID</summary>
-        public object GroupId { get; } = groupId;
-
-        /// <inheritdoc />
-        public string Description { get; } = description;
-
-        /// <inheritdoc />
-        public void Execute()
-        {
-            foreach (var command in _commands)
-            {
-                command.Execute();
-            }
-        }
-
-        /// <inheritdoc />
-        public void Undo()
-        {
-            // Undo は適用と逆順で巻き戻し、相互依存するプロパティの整合性を保つ
-            for (var i = _commands.Count - 1; i >= 0; i--)
-            {
-                _commands[i].Undo();
-            }
-        }
-
-        /// <summary>同一対象・同一プロパティの変更は最新値で置換し、それ以外は追加する</summary>
-        public void Upsert(PropertyChangeCommand command)
-        {
-            var existingIndex = _commands.FindIndex(x =>
-                ReferenceEquals(x.Target, command.Target) && x.PropertyName == command.PropertyName
-            );
-
-            if (existingIndex >= 0)
-            {
-                _commands[existingIndex] = command;
-            }
-            else
-            {
-                _commands.Add(command);
-            }
-
-            var ordered = _commands.ToList();
-            _commands.Clear();
-            _commands.AddRange(ordered);
-        }
     }
 }

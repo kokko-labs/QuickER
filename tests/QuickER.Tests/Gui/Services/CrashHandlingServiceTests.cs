@@ -76,6 +76,40 @@ public class CrashHandlingServiceTests
         }
     }
 
+    /// <summary>同一秒内に連続して書き出しても互いを上書きせず別ファイルになることを検証する</summary>
+    /// <remarks>未観測タスク例外は 1 回の GC から連続発火しうるため、秒精度の名前では証跡が失われる</remarks>
+    [Fact(DisplayName = "WriteCrashLog: 同一秒内の連続書き出しでも上書きしない")]
+    public void WriteCrashLog_ConsecutiveWritesWithinSameSecond_DoNotOverwrite()
+    {
+        var folder = CreateTempFolder();
+
+        try
+        {
+            var first = CrashHandlingService.WriteCrashLog(
+                new InvalidOperationException("1 件目"),
+                "1.2.3",
+                folder
+            );
+            var second = CrashHandlingService.WriteCrashLog(
+                new InvalidOperationException("2 件目"),
+                "1.2.3",
+                folder
+            );
+
+            first.Should().NotBeNull();
+            second.Should().NotBeNull();
+            second.Should().NotBe(first);
+
+            Directory.GetFiles(folder, "crash-*.log").Should().HaveCount(2);
+            File.ReadAllText(first!).Should().Contain("1 件目");
+            File.ReadAllText(second!).Should().Contain("2 件目");
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
     /// <summary>保存先フォルダを作れない場合に例外を漏らさず null を返すことを検証する</summary>
     [Fact(DisplayName = "WriteCrashLog: 書き込み不能なパスでは null を返す")]
     public void WriteCrashLog_UnwritablePath_ReturnsNull()
