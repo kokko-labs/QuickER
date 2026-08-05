@@ -444,6 +444,30 @@ namespace QuickER.Db.UI.Resources {
             }
         }
 
+        public static string SchemaSync_ExecuteConfirmForeignKeyRebuildRisk {
+            get {
+                return ResourceManager.GetString("SchemaSync_ExecuteConfirmForeignKeyRebuildRisk", resourceCulture);
+            }
+        }
+
+        public static string SchemaSync_ExecuteConfirmRebuildBlocked {
+            get {
+                return ResourceManager.GetString("SchemaSync_ExecuteConfirmRebuildBlocked", resourceCulture);
+            }
+        }
+
+        public static string SchemaSync_CompositeForeignKeyNotice {
+            get {
+                return ResourceManager.GetString("SchemaSync_CompositeForeignKeyNotice", resourceCulture);
+            }
+        }
+
+        public static string SchemaSync_CompositeForeignKeyDiffBlocked {
+            get {
+                return ResourceManager.GetString("SchemaSync_CompositeForeignKeyDiffBlocked", resourceCulture);
+            }
+        }
+
         public static string SchemaSync_Executing {
             get {
                 return ResourceManager.GetString("SchemaSync_Executing", resourceCulture);

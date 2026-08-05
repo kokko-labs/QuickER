@@ -49,21 +49,31 @@ public abstract class SyncScriptBuilderBase : ISyncScriptBuilder
     /// <remarks>逐次 DDL 方言の骨格そのもの。再構築方言が特定セクションだけ描画する際にも再利用する。</remarks>
     protected void AppendSection(StringBuilder sb, SyncPlanSection section)
     {
-        sb.AppendLine($"-- ===== {section.Kind} ({section.Items.Count} items) =====");
+        sb.AppendLine($"-- ===== {SectionLabel(section)} ({section.Items.Count} items) =====");
 
         foreach (var item in section.Items)
         {
-            AppendItem(sb, section.Kind, item);
+            AppendItem(sb, section, item);
         }
 
         sb.AppendLine();
     }
 
+    /// <summary>セクション見出しに使う識別（主キー変更のみフェーズを併記する・固定文は英語が正本）</summary>
+    /// <remarks>
+    /// 主キー変更は Drop / Add の 2 セクションへ分かれるため、見出しだけでは区別できない。フェーズを持たない
+    /// セクション（<see cref="PrimaryKeyPhase.None"/>）は従来どおり種別名のみ＝既存出力はバイト不変。
+    /// </remarks>
+    private static string SectionLabel(SyncPlanSection section) =>
+        section.PrimaryKeyPhase == PrimaryKeyPhase.None
+            ? section.Kind.ToString()
+            : $"{section.Kind}: {section.PrimaryKeyPhase}";
+
     /// <summary>1 差分項目を種別に応じた <c>Append*</c> へディスパッチする</summary>
     /// <remarks>プランナーが除外済みのため、想定外の種別（RebuildTable など）は無視する</remarks>
-    private void AppendItem(StringBuilder sb, SchemaDiffKind kind, SchemaDiffItem item)
+    private void AppendItem(StringBuilder sb, SyncPlanSection section, SchemaDiffItem item)
     {
-        switch (kind)
+        switch (section.Kind)
         {
             case SchemaDiffKind.AddTable:
                 AppendCreateTable(sb, item);
@@ -78,7 +88,7 @@ public abstract class SyncScriptBuilderBase : ISyncScriptBuilder
                 break;
 
             case SchemaDiffKind.AlterPrimaryKey:
-                AppendAlterPrimaryKey(sb, item);
+                AppendPrimaryKeyPhase(sb, section.PrimaryKeyPhase, item);
                 break;
 
             case SchemaDiffKind.DropForeignKey:
@@ -116,14 +126,45 @@ public abstract class SyncScriptBuilderBase : ISyncScriptBuilder
     /// <summary>列定義変更文を書き出す</summary>
     protected abstract void AppendAlterColumn(StringBuilder sb, SchemaDiffItem item);
 
-    /// <summary>主キー変更（旧主キー制約の解除 → 新主キー制約の付与）文を書き出す</summary>
+    /// <summary>主キー変更の 1 項目を、セクションのフェーズに応じた解除 / 付与へ振り分ける</summary>
+    /// <remarks>
+    /// フェーズ指定の無いセクション（<see cref="PrimaryKeyPhase.None"/>＝旧形の計画や再構築方言の残余）は、
+    /// 従来どおり解除 → 付与を 1 セクション内で連続出力する（後方互換）。
+    /// </remarks>
+    private void AppendPrimaryKeyPhase(StringBuilder sb, PrimaryKeyPhase phase, SchemaDiffItem item)
+    {
+        if (phase is PrimaryKeyPhase.None or PrimaryKeyPhase.Drop)
+        {
+            AppendDropPrimaryKey(sb, item);
+        }
+
+        if (phase is PrimaryKeyPhase.None or PrimaryKeyPhase.Add)
+        {
+            AppendAddPrimaryKey(sb, item);
+        }
+    }
+
+    /// <summary>主キー変更の解除フェーズ（旧主キー制約の DROP）文を書き出す</summary>
     /// <remarks>
     /// 既定は「この方言では描画しない」スキップコメント（英語が正本）。主キー変更の DDL を実装した方言だけが
     /// 上書きする。テーブル再構築方言（SQLite）は主キー変更を再構築へ畳むためセクションには現れない。
     /// </remarks>
-    protected virtual void AppendAlterPrimaryKey(StringBuilder sb, SchemaDiffItem item) =>
+    protected virtual void AppendDropPrimaryKey(StringBuilder sb, SchemaDiffItem item) =>
+        AppendPrimaryKeyNotRendered(sb, PrimaryKeyPhase.Drop, item);
+
+    /// <summary>主キー変更の付与フェーズ（新主キー制約の ADD）文を書き出す</summary>
+    /// <remarks>既定は解除フェーズと同じくスキップコメント（英語が正本）。</remarks>
+    protected virtual void AppendAddPrimaryKey(StringBuilder sb, SchemaDiffItem item) =>
+        AppendPrimaryKeyNotRendered(sb, PrimaryKeyPhase.Add, item);
+
+    /// <summary>主キー変更を描画しない方言のスキップコメント（英語が正本）</summary>
+    private static void AppendPrimaryKeyNotRendered(
+        StringBuilder sb,
+        PrimaryKeyPhase phase,
+        SchemaDiffItem item
+    ) =>
         sb.AppendLine(
-            $"-- Skipped '{SchemaDiffKind.AlterPrimaryKey}' on {item.TableName}: "
+            $"-- Skipped '{SchemaDiffKind.AlterPrimaryKey}' ({phase} phase) on {item.TableName}: "
                 + "primary key changes are not rendered by this dialect."
         );
 

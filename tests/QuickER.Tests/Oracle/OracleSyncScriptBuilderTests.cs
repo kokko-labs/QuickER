@@ -586,4 +586,36 @@ public class OracleSyncScriptBuilderTests
         sql.Should().Contain("WHEN NO_DATA_FOUND THEN NULL;");
         sql.Should().NotContain("ADD CONSTRAINT");
     }
+
+    /// <summary>
+    /// 主キー変更が 2 フェーズへ分かれ、列定義変更を挟んで「PK DROP → MODIFY → PK ADD」の順に
+    /// 出力されることを検証する（PK 制約が残ったままの旧 PK 列の NULL 許容化は ORA-01451 で失敗する）。
+    /// </summary>
+    [Fact(DisplayName = "AlterPrimaryKey は AlterColumn を挟んで DROP → MODIFY → ADD の順に出る")]
+    public void AlterPrimaryKey_SplitsAroundAlterColumn()
+    {
+        var alterColumn = new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.AlterColumn,
+            TableName = "orders",
+            ColumnName = "old_id",
+            Column = new Column
+            {
+                Name = "old_id",
+                DataType = "NUMBER(10)",
+                IsNullable = true,
+            },
+            IsSelected = true,
+        };
+
+        var sql = Build(AlterPk("orders", PkTarget("orders", "order_id")), alterColumn);
+
+        var drop = sql.IndexOf("WHERE c.constraint_type = 'P'", StringComparison.Ordinal);
+        var alter = sql.IndexOf("MODIFY (\"old_id\"", StringComparison.Ordinal);
+        var add = sql.IndexOf("ADD CONSTRAINT \"PK_orders\"", StringComparison.Ordinal);
+
+        drop.Should().BeGreaterThan(-1);
+        alter.Should().BeGreaterThan(drop);
+        add.Should().BeGreaterThan(alter);
+    }
 }

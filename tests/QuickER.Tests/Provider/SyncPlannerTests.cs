@@ -2,6 +2,7 @@ using System.Linq;
 using AwesomeAssertions;
 using QuickER.Model;
 using QuickER.Provider;
+using QuickER.SqlServer;
 using Xunit;
 using ProviderStrings = QuickER.Provider.Resources.Strings;
 
@@ -40,7 +41,7 @@ public class SyncPlannerTests
     }
 
     /// <summary>入力が乱順でもセクションが固定順序（依存関係で失敗しない順）で並ぶことを検証する</summary>
-    [Fact(DisplayName = "セクションは固定順序で並ぶ")]
+    [Fact(DisplayName = "セクションは固定順序で並ぶ（主キー変更は 2 フェーズ）")]
     public void Sections_AreInFixedOrder()
     {
         // わざと逆順寄りに投入する
@@ -51,7 +52,7 @@ public class SyncPlannerTests
                 Item(SchemaDiffKind.AddForeignKey),
                 Item(SchemaDiffKind.DropTable),
                 Item(SchemaDiffKind.DropColumn),
-                Item(SchemaDiffKind.AlterPrimaryKey),
+                AlterPk("T", new Entity { TableName = "T", Columns = { PkId() } }),
                 Item(SchemaDiffKind.DropForeignKey),
                 Item(SchemaDiffKind.AlterColumn),
                 Item(SchemaDiffKind.AddColumn),
@@ -62,14 +63,15 @@ public class SyncPlannerTests
 
         // DropForeignKey が AlterColumn より先なのは意図的:
         // FK 依存列の型変更を通すため、先に FK を外しておく必要がある（SQL Server は Msg 5074 で失敗する）
-        // AlterPrimaryKey は AlterColumn の後・DropColumn の前:
-        // 新 PK 列の NOT NULL 化を先に済ませ、旧 PK 列の削除は PK を外した後に行う必要がある
+        // AlterPrimaryKey は 2 フェーズ: 解除は AlterColumn の前（旧 PK 列の NULL 許容化を通すため）・
+        // 付与は AlterColumn の後（新 PK 列の NOT NULL 化を先に済ませるため）。いずれも DropColumn より前
         plan.Sections.Select(s => s.Kind)
             .Should()
             .Equal(
                 SchemaDiffKind.AddTable,
                 SchemaDiffKind.AddColumn,
                 SchemaDiffKind.DropForeignKey,
+                SchemaDiffKind.AlterPrimaryKey,
                 SchemaDiffKind.AlterColumn,
                 SchemaDiffKind.AlterPrimaryKey,
                 SchemaDiffKind.DropColumn,
@@ -78,6 +80,30 @@ public class SyncPlannerTests
                 SchemaDiffKind.SetTableDescription,
                 SchemaDiffKind.SetColumnDescription
             );
+
+        // フェーズは主キー変更セクションだけが持ち、他は既定の None のまま
+        plan.Sections[3].PrimaryKeyPhase.Should().Be(PrimaryKeyPhase.Drop);
+        plan.Sections[5].PrimaryKeyPhase.Should().Be(PrimaryKeyPhase.Add);
+        plan.Sections.Where(s => s.Kind != SchemaDiffKind.AlterPrimaryKey)
+            .Should()
+            .OnlyContain(s => s.PrimaryKeyPhase == PrimaryKeyPhase.None);
+    }
+
+    /// <summary>主キーの解除のみ（新主キー列ゼロ）では付与フェーズのセクションが生じないことを検証する</summary>
+    [Fact(DisplayName = "主キー解除のみなら付与フェーズのセクションは出ない")]
+    public void AlterPrimaryKey_DropOnly_OmitsAddPhaseSection()
+    {
+        // target に主キー列が無い＝主キーの解除のみ
+        var target = new Entity { TableName = "T", Columns = { Col("id", "INT") } };
+
+        var plan = new SyncPlanner().BuildPlan(
+            [AlterPk("T", target)],
+            new SyncDialectCapabilities()
+        );
+
+        var section = plan.Sections.Should().ContainSingle().Which;
+        section.Kind.Should().Be(SchemaDiffKind.AlterPrimaryKey);
+        section.PrimaryKeyPhase.Should().Be(PrimaryKeyPhase.Drop);
     }
 
     /// <summary>同一セクション内は入力の出現順を保持することを検証する</summary>
@@ -934,13 +960,18 @@ public class SyncPlannerTests
             context
         );
 
+        // 依存 FK の自動 DROP は主キー解除より前・自動 ADD は主キー付与より後に来る
+        // （主キーが存在しない区間の外側で FK を外して戻す）
         plan.Sections.Select(s => s.Kind)
             .Should()
             .Equal(
                 SchemaDiffKind.DropForeignKey,
                 SchemaDiffKind.AlterPrimaryKey,
+                SchemaDiffKind.AlterPrimaryKey,
                 SchemaDiffKind.AddForeignKey
             );
+        plan.Sections[1].PrimaryKeyPhase.Should().Be(PrimaryKeyPhase.Drop);
+        plan.Sections[2].PrimaryKeyPhase.Should().Be(PrimaryKeyPhase.Add);
 
         var drop = plan
             .Sections.Single(s => s.Kind == SchemaDiffKind.DropForeignKey)
@@ -1108,6 +1139,151 @@ public class SyncPlannerTests
         plan.Sections.Select(s => s.Kind).Should().Equal(SchemaDiffKind.AlterPrimaryKey);
     }
 
+    // ---------------- 計画時の警告（SyncPlan.Warnings） ----------------
+
+    /// <summary>
+    /// 主キー変更で被参照列が新しい主キーから外れる場合、自動再作成する FK について
+    /// 「候補キーでなくなる恐れがある」警告が積まれることを検証する（実行はブロックしない）。
+    /// </summary>
+    [Fact(DisplayName = "主キー変更: 被参照列が新主キーから外れると候補キー喪失の警告が積まれる")]
+    public void AlterPrimaryKey_ReferencedColumnLeavesPrimaryKey_AddsWarning()
+    {
+        var (_, _, _, context) = LiveFkScenario();
+        // 新しい主キーは code のみ＝FK が参照する customer.id は主キーから外れる
+        var targetCustomer = new Entity
+        {
+            TableName = "customer",
+            Columns =
+            {
+                Col("id", "INT"),
+                new Column
+                {
+                    Name = "code",
+                    DataType = "INT",
+                    IsPrimaryKey = true,
+                    IsNullable = false,
+                },
+            },
+        };
+
+        var plan = new SyncPlanner().BuildPlan(
+            [AlterPk("customer", targetCustomer)],
+            new SyncDialectCapabilities(),
+            context
+        );
+
+        var warning = plan.Warnings.Should().ContainSingle().Which;
+        warning.Kind.Should().Be(SyncPlanWarningKind.ForeignKeyRebuildMayLoseCandidateKey);
+        warning.TableName.Should().Be("orders");
+        warning.Detail.Should().Be("FK_orders_customer");
+
+        // 一意制約は取り込んでいないため断定できず、警告に留める（FK の自動 DROP → 再 ADD は従来どおり出る）
+        plan.Sections.Should().Contain(s => s.Kind == SchemaDiffKind.AddForeignKey);
+    }
+
+    /// <summary>被参照列が新しい主キーに残る場合は警告が積まれないことを検証する</summary>
+    [Fact(DisplayName = "主キー変更: 被参照列が新主キーに残るなら警告は積まれない")]
+    public void AlterPrimaryKey_ReferencedColumnStaysInPrimaryKey_AddsNoWarning()
+    {
+        var (_, _, _, context) = LiveFkScenario();
+        // id を主キーに残したまま code を加える（複合主キー化）＝ customer.id は候補キーのまま
+        var targetCustomer = new Entity
+        {
+            TableName = "customer",
+            Columns =
+            {
+                PkId(),
+                new Column
+                {
+                    Name = "code",
+                    DataType = "INT",
+                    IsPrimaryKey = true,
+                    IsNullable = false,
+                },
+            },
+        };
+
+        var plan = new SyncPlanner().BuildPlan(
+            [AlterPk("customer", targetCustomer)],
+            new SyncDialectCapabilities(),
+            context
+        );
+
+        plan.Warnings.Should().BeEmpty();
+        plan.Sections.Should().Contain(s => s.Kind == SchemaDiffKind.AddForeignKey);
+    }
+
+    /// <summary>
+    /// rebuild 方言（SQLite）で、複合外部キーの子テーブルは再構築対象から外れて警告が積まれ、
+    /// 他テーブルの再構築は続行することを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 再構築すると列対応を失った複合外部キーが単列外部キーとして作り直される（成功して静かに壊れる）ため、
+    /// 該当テーブルだけを止める。畳み込まれなかった項目はセクションへ残り、レンダラーがスキップを明示する。
+    /// </remarks>
+    [Fact(
+        DisplayName = "SQLite: 複合外部キーの子テーブルは再構築せず警告を積む（他テーブルは続行）"
+    )]
+    public void Rebuild_CompositeForeignKeyChildTable_IsBlocked()
+    {
+        var orderLine = new Entity
+        {
+            TableName = "order_line",
+            Columns =
+            {
+                PkId(),
+                Col("order_id", "INT"),
+                Col("line_no", "INT"),
+                Col("note", "TEXT"),
+            },
+        };
+        var memo = new Entity { TableName = "memo", Columns = { PkId(), Col("note", "TEXT") } };
+        var compositeWarning = new CompositeForeignKeyImportWarning(
+            "FK_order_line_orders",
+            "order_line",
+            ["order_id", "line_no"],
+            "orders",
+            ["id", "line_no"]
+        );
+
+        var blockedAlter = new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.AlterColumn,
+            TableName = "order_line",
+            ColumnName = "note",
+            Column = Col("note", "INT"),
+            IsSelected = true,
+        };
+        var otherAlter = new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.AlterColumn,
+            TableName = "memo",
+            ColumnName = "note",
+            Column = Col("note", "INT"),
+            IsSelected = true,
+        };
+
+        var plan = new SyncPlanner().BuildPlan(
+            [blockedAlter, otherAlter],
+            RebuildCaps,
+            new SyncPlanContext
+            {
+                LiveEntities = [orderLine, memo],
+                CompositeForeignKeyWarnings = [compositeWarning],
+            }
+        );
+
+        // 複合外部キーを持たない memo だけが再構築される
+        plan.Rebuilds.Should().ContainSingle().Which.TableName.Should().Be("memo");
+
+        var warning = plan.Warnings.Should().ContainSingle().Which;
+        warning.Kind.Should().Be(SyncPlanWarningKind.RebuildBlockedByCompositeForeignKey);
+        warning.TableName.Should().Be("order_line");
+
+        // 畳み込まれなかった項目はセクションへ残る（SQLite レンダラーがスキップコメントを出す）
+        plan.Sections.Should().ContainSingle().Which.Items.Should().Equal(blockedAlter);
+    }
+
     /// <summary>
     /// rebuild 方言（SQLite）では AlterPrimaryKey がテーブル再構築へ畳まれ、
     /// 合成後の定義に target の主キー構成が反映されることを検証する。
@@ -1154,6 +1330,114 @@ public class SyncPlannerTests
         rb.NewDefinition.Columns.Single(c => c.Name == "id").IsPrimaryKey.Should().BeFalse();
         // 主キー変更は列集合を変えないため、全列がデータ移送対象のまま
         rb.CopyColumns.Should().Equal("id", "code", "note");
+    }
+
+    // ---------------- 主キー変更の 3 フェーズ出力（レンダラー経由で順序を固定する） ----------------
+
+    /// <summary>
+    /// 主キー変更と旧主キー列の NULL 許容化（AlterColumn）を同時に選択したとき、生成スクリプト上で
+    /// 「主キー解除 → 列定義変更 → 主キー付与」の順になることを SQL Server レンダラー経由で検証する。
+    /// </summary>
+    /// <remarks>
+    /// DROP と ADD を 1 セクションから連続出力する単一フェーズでは、主キー制約が残ったまま旧主キー列を
+    /// NULL 許容へ変更することになり SQL Server では Msg 5074 → 4922 で失敗する（PostgreSQL / MySQL /
+    /// Oracle も同種のエラーで、MySQL / Oracle は部分適用のまま止まる）。順序が唯一の解のためテストで固定する。
+    /// </remarks>
+    [Fact(
+        DisplayName = "主キー変更＋旧 PK 列の NULL 許容化は PK DROP → ALTER COLUMN → PK ADD の順"
+    )]
+    public void AlterPrimaryKey_WithAlterColumn_RendersDropThenAlterThenAdd()
+    {
+        // 旧主キー列 old_id を NULL 許容へ変更しつつ、主キーを code へ移す
+        var target = new Entity
+        {
+            TableName = "T",
+            Columns =
+            {
+                Col("old_id", "int"),
+                new Column
+                {
+                    Name = "code",
+                    DataType = "int",
+                    IsPrimaryKey = true,
+                    IsNullable = false,
+                },
+            },
+        };
+        var alterColumn = new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.AlterColumn,
+            TableName = "T",
+            ColumnName = "old_id",
+            Column = Col("old_id", "int"),
+            IsSelected = true,
+        };
+
+        var plan = new SyncPlanner().BuildPlan(
+            [AlterPk("T", target), alterColumn],
+            new SyncDialectCapabilities()
+        );
+        var sql = new SqlServerSyncScriptBuilder().Build(plan);
+
+        var dropPrimaryKey = sql.IndexOf("DROP CONSTRAINT [' + @pk + ']", StringComparison.Ordinal);
+        var alterColumnAt = sql.IndexOf("ALTER COLUMN [old_id]", StringComparison.Ordinal);
+        var addPrimaryKey = sql.IndexOf("ADD CONSTRAINT [PK_T]", StringComparison.Ordinal);
+
+        dropPrimaryKey.Should().BeGreaterThan(-1);
+        alterColumnAt.Should().BeGreaterThan(dropPrimaryKey);
+        addPrimaryKey.Should().BeGreaterThan(alterColumnAt);
+    }
+
+    /// <summary>
+    /// 主キー変更を含まない計画の出力が 3 フェーズ化の前後でバイト不変であることを固定する
+    /// （フェーズを持たないセクションの見出しは従来どおり種別名のみ）。
+    /// </summary>
+    [Fact(DisplayName = "主キー変更を含まない計画の出力はバイト不変")]
+    public void PlanWithoutPrimaryKeyChange_RendersUnchangedBytes()
+    {
+        var addColumn = new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.AddColumn,
+            TableName = "T",
+            ColumnName = "Email",
+            Column = new Column
+            {
+                Name = "Email",
+                DataType = "nvarchar(200)",
+                IsNullable = false,
+            },
+            IsSelected = true,
+        };
+        var alterColumn = new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.AlterColumn,
+            TableName = "T",
+            ColumnName = "Memo",
+            Column = Col("Memo", "nvarchar(50)"),
+            IsSelected = true,
+        };
+
+        var plan = new SyncPlanner().BuildPlan(
+            [alterColumn, addColumn],
+            new SyncDialectCapabilities()
+        );
+        var sql = new SqlServerSyncScriptBuilder().Build(plan);
+
+        var expected = string.Join(
+            Environment.NewLine,
+            "-- ===== AddColumn (1 items) =====",
+            "ALTER TABLE [T] ADD [Email] nvarchar(200) NOT NULL;",
+            "GO",
+            "",
+            "-- ===== AlterColumn (1 items) =====",
+            "ALTER TABLE [T] ALTER COLUMN [Memo] nvarchar(50) NULL;",
+            "GO",
+            "",
+            ""
+        );
+
+        sql.Should().Be(expected);
+        plan.Sections.Should().OnlyContain(s => s.PrimaryKeyPhase == PrimaryKeyPhase.None);
     }
 
     /// <summary>None 方言では ReorderColumns 項目が渡されても計画から自然に消えることを検証する</summary>

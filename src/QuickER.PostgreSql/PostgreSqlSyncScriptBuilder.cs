@@ -13,8 +13,9 @@ namespace QuickER.PostgreSql;
 ///   <item>AddTable</item>
 ///   <item>AddColumn</item>
 ///   <item>DropForeignKey（FK 依存列の型変更・列/テーブル削除より前に外す）</item>
+///   <item>AlterPrimaryKey / Drop フェーズ（旧主キー制約の解除。旧主キー列の NULL 許容化を通すため列定義変更より前）</item>
 ///   <item>AlterColumn</item>
-///   <item>AlterPrimaryKey（主キー制約の張り替え。新主キー列の NOT NULL 化を済ませた後に行う）</item>
+///   <item>AlterPrimaryKey / Add フェーズ（新主キー制約の付与。新主キー列の NOT NULL 化を済ませた後に行う）</item>
 ///   <item>DropColumn</item>
 ///   <item>DropTable</item>
 ///   <item>AddForeignKey</item>
@@ -86,15 +87,12 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
         sb.AppendLine($"ALTER TABLE {table} ALTER COLUMN {column} {nullClause};");
     }
 
-    /// <summary>主キー変更（旧主キー制約の解除 → 新主キー制約の付与）文を生成する</summary>
+    /// <summary>主キー変更の解除フェーズ（旧主キー制約の DROP）文を生成する</summary>
     /// <remarks>
     /// 旧主キーの制約名は差分項目に含まれないため、テーブル名から <c>pg_constraint</c> を逆引きし、
-    /// DO ブロックで動的に DROP する（主キーが無いテーブルなら何も実行しない）。新しい主キー構成は
-    /// <see cref="SchemaDiffItem.Entity"/>（target 側エンティティ）の主キー列を列定義順に読み、
-    /// 制約名は CREATE TABLE と同じ <c>PK_{テーブル名}</c> 規則で組み立てる。
-    /// 主キー列が 1 つも無い場合（主キーの解除のみ）は付与文を出さない。
+    /// DO ブロックで動的に DROP する（主キーが無いテーブルなら何も実行しない）。
     /// </remarks>
-    protected override void AppendAlterPrimaryKey(StringBuilder sb, SchemaDiffItem item)
+    protected override void AppendDropPrimaryKey(StringBuilder sb, SchemaDiffItem item)
     {
         var table = PgIdentifier.Quote(item.TableName);
         var tableName = PgIdentifier.EscapeStringLiteral(
@@ -117,8 +115,17 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
         );
         sb.AppendLine("    END IF;");
         sb.AppendLine("END $$;");
+    }
 
-        var pks = item.Entity!.Columns.Where(c => c.IsPrimaryKey).ToList();
+    /// <summary>主キー変更の付与フェーズ（新主キー制約の ADD）文を生成する</summary>
+    /// <remarks>
+    /// 新しい主キー構成は <see cref="SchemaDiffItem.Entity"/>（target 側エンティティ）の主キー列を列定義順に読み、
+    /// 制約名は CREATE TABLE と同じ <c>PK_{テーブル名}</c> 規則で組み立てる。
+    /// 主キー列が 1 つも無い場合（主キーの解除のみ）は付与文を出さない。
+    /// </remarks>
+    protected override void AppendAddPrimaryKey(StringBuilder sb, SchemaDiffItem item)
+    {
+        var pks = item.Entity?.Columns.Where(c => c.IsPrimaryKey).ToList() ?? [];
 
         // 新しい主キー列が無い（＝主キーの解除のみ）場合は付与文を出さない
         if (pks.Count == 0)
@@ -128,7 +135,7 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
 
         var pkCols = string.Join(", ", pks.Select(p => PgIdentifier.QuoteSimple(p.Name)));
         sb.AppendLine(
-            $"ALTER TABLE {table} ADD CONSTRAINT \"PK_{PgIdentifier.SafeName(item.TableName)}\" "
+            $"ALTER TABLE {PgIdentifier.Quote(item.TableName)} ADD CONSTRAINT \"PK_{PgIdentifier.SafeName(item.TableName)}\" "
                 + $"PRIMARY KEY ({pkCols});"
         );
     }

@@ -23,6 +23,16 @@ public sealed class SyncPlanContext
 
     /// <summary>DB から取得した補助オブジェクト（再構築で温存するインデックス・トリガー・一意制約）。</summary>
     public IReadOnlyList<SchemaAuxiliaryObject> AuxiliaryObjects { get; init; } = [];
+
+    /// <summary>
+    /// 取込で検出した複合外部キーの警告（テーブル再構築のブロック判定に用いる）。
+    /// </summary>
+    /// <remarks>
+    /// 複合外部キーの子テーブルを再構築すると、列対応を失った外部キーが単列外部キーとして作り直される
+    /// （成功して静かに壊れる）。<see cref="SyncPlanner"/> はここに挙がったテーブルの再構築を計画から除外する。
+    /// </remarks>
+    public IReadOnlyList<CompositeForeignKeyImportWarning> CompositeForeignKeyWarnings { get; init; } =
+    [];
 }
 
 /// <summary>
@@ -46,7 +56,8 @@ public sealed class SyncPlanner
 {
     /// <summary>
     /// セクションの出力順序。依存関係による失敗を避けるため、
-    /// テーブル / 列の追加 → FK 解除 → 列定義変更 → 主キー変更 → 列 / テーブル削除 → FK 追加 → 説明設定の順に並べる。
+    /// テーブル / 列の追加 → FK 解除 → <b>主キー解除</b> → 列定義変更 → <b>主キー付与</b> →
+    /// 列 / テーブル削除 → FK 追加 → 説明設定の順に並べる。
     /// </summary>
     /// <remarks>
     /// <para>
@@ -55,23 +66,31 @@ public sealed class SyncPlanner
     /// 選択したケースを通すには、先に FK を外しておく必要がある。
     /// </para>
     /// <para>
-    /// 主キー変更（AlterPrimaryKey）は列定義変更の後・列削除の前に置く。新しい主キー列の NOT NULL 化
-    /// （AlterColumn）は主キー付与より先に済ませる必要があり、旧主キー列の削除（DropColumn）は主キーを
-    /// 外した後でなければ失敗するため。
+    /// 主キー変更（AlterPrimaryKey）は <b>2 フェーズ</b>に分割し、列定義変更を挟む。旧主キー列の NULL 許容化や
+    /// 主キー参加列の型変更（AlterColumn）は主キー制約が残ったままでは失敗する（SQL Server の Msg 5074 → 4922・
+    /// Oracle の ORA-01451 等）ため、先に旧主キーを外す（Drop フェーズ）。新しい主キー列の NOT NULL 化は
+    /// 主キー付与より先に済ませる必要があるため、付与（Add フェーズ）は列定義変更の後に置く。旧主キー列の削除
+    /// （DropColumn）は主キーを外した後でなければ失敗するため、両フェーズとも列削除より前に置く。
+    /// </para>
+    /// <para>
+    /// 依存 FK の自動 DROP → 再 ADD（<see cref="InjectImplicitForeignKeyRebuilds"/>）と合わせると、
+    /// 「FK 解除 → 主キー解除 → 列定義変更 → 主キー付与 → …（列 / テーブル削除）… → FK 追加」となり、
+    /// 主キーを参照する FK は主キーが存在しない区間の外側で解除・再作成される。
     /// </para>
     /// </remarks>
-    private static readonly SchemaDiffKind[] SectionOrder =
+    private static readonly (SchemaDiffKind Kind, PrimaryKeyPhase Phase)[] SectionOrder =
     [
-        SchemaDiffKind.AddTable,
-        SchemaDiffKind.AddColumn,
-        SchemaDiffKind.DropForeignKey,
-        SchemaDiffKind.AlterColumn,
-        SchemaDiffKind.AlterPrimaryKey,
-        SchemaDiffKind.DropColumn,
-        SchemaDiffKind.DropTable,
-        SchemaDiffKind.AddForeignKey,
-        SchemaDiffKind.SetTableDescription,
-        SchemaDiffKind.SetColumnDescription,
+        (SchemaDiffKind.AddTable, PrimaryKeyPhase.None),
+        (SchemaDiffKind.AddColumn, PrimaryKeyPhase.None),
+        (SchemaDiffKind.DropForeignKey, PrimaryKeyPhase.None),
+        (SchemaDiffKind.AlterPrimaryKey, PrimaryKeyPhase.Drop),
+        (SchemaDiffKind.AlterColumn, PrimaryKeyPhase.None),
+        (SchemaDiffKind.AlterPrimaryKey, PrimaryKeyPhase.Add),
+        (SchemaDiffKind.DropColumn, PrimaryKeyPhase.None),
+        (SchemaDiffKind.DropTable, PrimaryKeyPhase.None),
+        (SchemaDiffKind.AddForeignKey, PrimaryKeyPhase.None),
+        (SchemaDiffKind.SetTableDescription, PrimaryKeyPhase.None),
+        (SchemaDiffKind.SetColumnDescription, PrimaryKeyPhase.None),
     ];
 
     /// <summary>テーブル名の比較は方言横断で大文字小文字を無視する</summary>
@@ -94,6 +113,9 @@ public sealed class SyncPlanner
         // 選択済みの項目のみを対象にする（未選択は完全に除外）
         var selected = items.Where(i => i.IsSelected).ToList();
 
+        // 計画の組み立て中に見つかった注意事項（実行は止めず、表示層が実行確認へ織り込む）
+        var warnings = new List<SyncPlanWarning>();
+
         // ALTER COLUMN も FK の後付けもできない方言はテーブル再構築が必要になる
         var isRebuildDialect =
             !capabilities.SupportsAlterColumn || !capabilities.SupportsForeignKeyAlter;
@@ -110,8 +132,18 @@ public sealed class SyncPlanner
                     : [];
 
             // 主キー変更・（方言によっては）列定義変更に巻き込まれる live FK を、暗黙の DROP → 再 ADD として注入する
-            var sectionItems = InjectImplicitForeignKeyRebuilds(selected, capabilities, context);
-            return new SyncPlan { Sections = BuildSections(sectionItems), Reorders = reorders };
+            var sectionItems = InjectImplicitForeignKeyRebuilds(
+                selected,
+                capabilities,
+                context,
+                warnings
+            );
+            return new SyncPlan
+            {
+                Sections = BuildSections(sectionItems),
+                Reorders = reorders,
+                Warnings = warnings,
+            };
         }
 
         if (context is null)
@@ -122,29 +154,50 @@ public sealed class SyncPlanner
             );
         }
 
-        return BuildRebuildPlan(selected, context);
+        return BuildRebuildPlan(selected, context, warnings);
     }
 
     /// <summary>固定順序のセクション一覧を組み立てる（空セクションは含まない）</summary>
+    /// <remarks>
+    /// 主キー変更は Drop / Add の 2 フェーズとして 2 回現れる（同じ差分項目群を別位置のセクションで再利用する）。
+    /// Add フェーズは「新しい主キー列がある」項目だけに絞るため、主キーの解除のみの変更では出現しない。
+    /// </remarks>
     private static List<SyncPlanSection> BuildSections(IReadOnlyList<SchemaDiffItem> selected)
     {
         var sections = new List<SyncPlanSection>();
 
-        foreach (var kind in SectionOrder)
+        foreach (var (kind, phase) in SectionOrder)
         {
             // 種別ごとに抽出する。RebuildTable 等 SectionOrder に無い種別はここで自然に除外される
             var subset = selected.Where(i => i.Kind == kind).ToList();
+
+            // 主キーの解除のみ（新主キー列ゼロ・target 不明）の項目は付与フェーズを持たない
+            if (phase == PrimaryKeyPhase.Add)
+            {
+                subset = subset.Where(HasNewPrimaryKeyColumns).ToList();
+            }
 
             if (subset.Count == 0)
             {
                 continue;
             }
 
-            sections.Add(new SyncPlanSection { Kind = kind, Items = subset });
+            sections.Add(
+                new SyncPlanSection
+                {
+                    Kind = kind,
+                    PrimaryKeyPhase = phase,
+                    Items = subset,
+                }
+            );
         }
 
         return sections;
     }
+
+    /// <summary>この主キー変更項目が新しい主キー列を持つか（＝付与フェーズを要するか）</summary>
+    private static bool HasNewPrimaryKeyColumns(SchemaDiffItem item) =>
+        item.Entity?.Columns.Any(c => c.IsPrimaryKey) == true;
 
     // ---------------- 依存 FK の自動 DROP → 再 ADD（逐次 DDL 方言） ----------------
 
@@ -166,11 +219,17 @@ public sealed class SyncPlanner
     /// 注入項目は <see cref="SchemaDiffService"/> が生成する FK 差分と同じフィールド規則で埋めるため、
     /// 方言別レンダラーは既存の <c>AppendDropForeignKey</c> / <c>AppendAddForeignKey</c> のまま SQL 化できる。
     /// </para>
+    /// <para>
+    /// 再 ADD する FK の参照先列が新しい主キー列に含まれない場合は、再作成が実行時に失敗しうるため
+    /// <paramref name="warnings"/> へ <see cref="SyncPlanWarningKind.ForeignKeyRebuildMayLoseCandidateKey"/>
+    /// を積む（一意制約は取り込んでいない＝候補キーの喪失を断定できないため、実行はブロックしない）。
+    /// </para>
     /// </remarks>
     private static List<SchemaDiffItem> InjectImplicitForeignKeyRebuilds(
         List<SchemaDiffItem> selected,
         SyncDialectCapabilities capabilities,
-        SyncPlanContext? context
+        SyncPlanContext? context,
+        List<SyncPlanWarning> warnings
     )
     {
         if (context is null)
@@ -179,11 +238,25 @@ public sealed class SyncPlanner
             return selected;
         }
 
-        // (a) 主キー構成が変わるテーブル（そのテーブルを参照する FK は方言を問わず一旦外す必要がある）
-        var pkChangedTables = selected
-            .Where(i => i.Kind == SchemaDiffKind.AlterPrimaryKey)
-            .Select(i => i.TableName.Trim())
-            .ToHashSet(TableComparer);
+        // (a) 主キー構成が変わるテーブル → 新しい主キー列名の集合
+        // （そのテーブルを参照する FK は方言を問わず一旦外す必要がある。列集合は候補キー喪失の判定に使う）
+        var pkChangedTables = new Dictionary<string, HashSet<string>>(TableComparer);
+
+        foreach (var item in selected.Where(i => i.Kind == SchemaDiffKind.AlterPrimaryKey))
+        {
+            var table = item.TableName.Trim();
+
+            if (!pkChangedTables.TryGetValue(table, out var newPkColumns))
+            {
+                newPkColumns = new HashSet<string>(TableComparer);
+                pkChangedTables[table] = newPkColumns;
+            }
+
+            foreach (var pk in item.Entity?.Columns.Where(c => c.IsPrimaryKey).ToList() ?? [])
+            {
+                newPkColumns.Add(pk.Name);
+            }
+        }
 
         // (b) 定義が変わる列（FK 参加列の型変更が依存エラーになる方言のみ対象）
         HashSet<string> alteredColumns = capabilities.AlterColumnRequiresForeignKeyRebuild
@@ -230,8 +303,9 @@ public sealed class SyncPlanner
             var parentTable = SchemaDiffService.NormalizeTable(fk.Parent);
 
             // (a) 参照先テーブルの主キーが変わる / (b) FK が参加する列の定義が変わる
+            var parentPkChanged = pkChangedTables.TryGetValue(parentTable, out var newPkColumns);
             var affected =
-                pkChangedTables.Contains(parentTable)
+                parentPkChanged
                 || alteredColumns.Contains(ColumnKey(childTable, fk.ChildColumn))
                 || alteredColumns.Contains(ColumnKey(parentTable, fk.ParentColumn.Name));
 
@@ -251,6 +325,19 @@ public sealed class SyncPlanner
 
             var constraintName = ResolveForeignKeyName(fk.Relationship, childTable, parentTable);
             var description = string.Format(Strings.Diff_AutoForeignKeyRebuild, constraintName);
+
+            // 参照先列が新しい主キーから外れる＝候補キーでなくなる恐れがあり、再 ADD が実行時に失敗しうる
+            // （一意制約は取り込んでいないため断定はできない＝警告に留める）
+            if (parentPkChanged && newPkColumns?.Contains(fk.ParentColumn.Name) != true)
+            {
+                warnings.Add(
+                    new SyncPlanWarning(
+                        SyncPlanWarningKind.ForeignKeyRebuildMayLoseCandidateKey,
+                        childTable,
+                        constraintName
+                    )
+                );
+            }
 
             autoDrops.Add(
                 new SchemaDiffItem
@@ -360,7 +447,16 @@ public sealed class SyncPlanner
     /// rebuild 方言の実行計画を組み立てる。逐次 DDL で表現できない変更をテーブル単位の再構築へ集約し、
     /// 残り（新規テーブル対象でない列追加・テーブル削除）は従来どおりセクションへ残す。
     /// </summary>
-    private static SyncPlan BuildRebuildPlan(List<SchemaDiffItem> selected, SyncPlanContext context)
+    /// <remarks>
+    /// 複合外部キーの子テーブルは再構築対象から除外し、警告を積む（<see cref="BlockCompositeForeignKeyRebuilds"/>）。
+    /// 除外されたテーブルの差分項目は畳み込まれずセクションへ残るため、レンダラーのスキップコメントで
+    /// 「同期していない」ことがプレビューにも現れる。
+    /// </remarks>
+    private static SyncPlan BuildRebuildPlan(
+        List<SchemaDiffItem> selected,
+        SyncPlanContext context,
+        List<SyncPlanWarning> warnings
+    )
     {
         // 選択済み AddTable のテーブル名（新規テーブル＝CreateOnly の対象）
         var addedTables = selected
@@ -386,6 +482,9 @@ public sealed class SyncPlanner
             .Where(liveByName.ContainsKey)
             .ToHashSet(TableComparer);
 
+        // 複合外部キーの子テーブルは再構築すると外部キーが単列へ作り替えられるため、そのテーブルだけ止める
+        BlockCompositeForeignKeyRebuilds(existingRebuildTables, context, warnings);
+
         // rebuild へ転用（畳み込み）が確定した項目の集合（SchemaDiffItem は参照同一性で比較する）
         var diverted = new HashSet<SchemaDiffItem>();
 
@@ -404,7 +503,57 @@ public sealed class SyncPlanner
         // 転用済みの項目を除いた残りをセクション化する（転用できなかった項目はレンダラーがスキップを明示する）
         var sectionItems = selected.Where(i => !diverted.Contains(i)).ToList();
 
-        return new SyncPlan { Sections = BuildSections(sectionItems), Rebuilds = rebuilds };
+        return new SyncPlan
+        {
+            Sections = BuildSections(sectionItems),
+            Rebuilds = rebuilds,
+            Warnings = warnings,
+        };
+    }
+
+    /// <summary>
+    /// 複合外部キーの子テーブルを再構築対象から取り除き、除外したテーブルごとに警告を積む。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 意味モデルは複合外部キーの列対応を保持できないため、その子テーブルを再構築すると外部キーが
+    /// 単列外部キーとして作り直される（実行は成功し、制約だけが静かに壊れる）。実行時に失敗して気づける
+    /// 他の限界と違い自動検出できないため、該当テーブルの再構築だけを計画から落とす。
+    /// </para>
+    /// <para>
+    /// ブロックの粒度は「該当テーブルのみ」で、他テーブルの同期は従来どおり続行する。除外したテーブルの
+    /// 差分項目は畳み込まれずセクションへ残り、レンダラーがスキップコメントを出す。
+    /// </para>
+    /// </remarks>
+    private static void BlockCompositeForeignKeyRebuilds(
+        HashSet<string> existingRebuildTables,
+        SyncPlanContext context,
+        List<SyncPlanWarning> warnings
+    )
+    {
+        if (context.CompositeForeignKeyWarnings.Count == 0)
+        {
+            return;
+        }
+
+        // 出力順を安定させるためテーブル名順に処理する（HashSet の列挙順に依存しない）
+        var blocked = existingRebuildTables
+            .Where(t =>
+                CompositeForeignKeyGuard.IsCompositeChildTable(
+                    t,
+                    context.CompositeForeignKeyWarnings
+                )
+            )
+            .OrderBy(t => t, TableComparer)
+            .ToList();
+
+        foreach (var table in blocked)
+        {
+            existingRebuildTables.Remove(table);
+            warnings.Add(
+                new SyncPlanWarning(SyncPlanWarningKind.RebuildBlockedByCompositeForeignKey, table)
+            );
+        }
     }
 
     /// <summary>選択済み AddTable を CreateOnly の再構築計画へ変換する（新規テーブルへの FK はインラインへ畳む）</summary>

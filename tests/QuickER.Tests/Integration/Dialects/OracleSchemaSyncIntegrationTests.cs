@@ -335,6 +335,116 @@ public sealed class OracleSchemaSyncIntegrationTests(OracleContainerFixture fixt
         rows.Should().Equal(("A-001", 1), ("A-002", 2));
     }
 
+    /// <summary>
+    /// 被参照列が候補キーでなくなる主キー変更は、自動再 ADD される FK が実行時に失敗し、
+    /// DDL の暗黙コミットにより<b>部分適用</b>（FK が消えたまま主キーだけ変わる）で残ることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 既知の限界の現状固定。SQL Server / PostgreSQL は単一トランザクションのためロールバックされる
+    /// （<c>SqlServerSchemaSyncIntegrationTests.PrimaryKeyChange_BreakingDependentForeignKey_RollsBack</c>）が、
+    /// Oracle は DDL が暗黙コミットされるため元に戻らない。計画側はこのリスクを警告として積む
+    /// （<see cref="SyncPlanWarningKind.ForeignKeyRebuildMayLoseCandidateKey"/>）。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Integration] C: AlterPrimaryKey: 被参照列が候補キーでなくなる変更は失敗し部分適用で残る"
+    )]
+    public async Task PrimaryKeyChange_BreakingDependentForeignKey_PartiallyApplies()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        var settings = fixture.ToDbConnectionSettings();
+
+        await fixture.ExecuteAsync(
+            "CREATE TABLE \"pk_parent\" (\"id\" NUMBER(10) NOT NULL, \"code\" VARCHAR2(20) NOT NULL, "
+                + "CONSTRAINT \"PK_pk_parent\" PRIMARY KEY (\"id\"))",
+            Ct
+        );
+        await fixture.ExecuteAsync(
+            "CREATE TABLE \"pk_child\" (\"id\" NUMBER(10) NOT NULL, \"parent_id\" NUMBER(10) NULL, "
+                + "CONSTRAINT \"PK_pk_child\" PRIMARY KEY (\"id\"), "
+                + "CONSTRAINT \"FK_pk_child_pk_parent\" FOREIGN KEY (\"parent_id\") "
+                + "REFERENCES \"pk_parent\" (\"id\"))",
+            Ct
+        );
+        await fixture.ExecuteAsync(
+            "INSERT INTO \"pk_parent\" (\"id\", \"code\") VALUES (1, 'P-1')",
+            Ct
+        );
+        await fixture.ExecuteAsync(
+            "INSERT INTO \"pk_child\" (\"id\", \"parent_id\") VALUES (1, 1)",
+            Ct
+        );
+
+        var live = await ImportAsync();
+        var liveParent = live.Entities.Single(e => e.TableName == "pk_parent");
+        var liveChild = live.Entities.Single(e => e.TableName == "pk_child");
+        var liveFk = live.Relationships.Single(r => r.TargetEntityId == liveChild.Id);
+
+        // 目標: 親の主キーを id から code へ移す（子の FK は id を参照したまま維持）
+        var parentTarget = CloneAsTarget(liveParent);
+        parentTarget.Columns.Single(c => c.Name == "id").IsPrimaryKey = false;
+        parentTarget.Columns.Single(c => c.Name == "code").IsPrimaryKey = true;
+        var childTarget = CloneAsTarget(liveChild);
+        var relKeep = new Relationship
+        {
+            SourceEntityId = parentTarget.Id,
+            TargetEntityId = childTarget.Id,
+            Type = RelationshipType.OneToMany,
+            SourceColumnId = parentTarget.Columns.Single(c => c.Name == "id").Id,
+            TargetColumnId = childTarget.Columns.Single(c => c.Name == "parent_id").Id,
+            ConstraintName = liveFk.ConstraintName,
+        };
+
+        var caps = new OracleProvider().SyncCapabilities;
+        var diff = _diff.Compute(
+            live.Entities,
+            live.Relationships,
+            new[] { parentTarget, childTarget },
+            new[] { relKeep },
+            caps
+        );
+        var alterPk = diff
+            .Items.Should()
+            .ContainSingle(i =>
+                i.Kind == SchemaDiffKind.AlterPrimaryKey && i.TableName == "pk_parent"
+            )
+            .Which;
+        alterPk.IsSelected = true;
+
+        var context = new SyncPlanContext
+        {
+            LiveEntities = live.Entities,
+            LiveRelationships = live.Relationships,
+        };
+        var plan = new SyncPlanner().BuildPlan(diff.Items, caps, context);
+
+        // 計画側は候補キー喪失の恐れを警告として積む（一意制約は取り込んでいないため実行はブロックしない）
+        plan.Warnings.Should()
+            .Contain(w => w.Kind == SyncPlanWarningKind.ForeignKeyRebuildMayLoseCandidateKey);
+
+        var script = _builder.Build(plan);
+        var result = await _executor.ExecuteAsync(settings, script, Ct);
+
+        // 再 ADD できない FK があるため実行は失敗する（ORA-02270: 一致する一意キー・主キーが無い）
+        result
+            .Committed.Should()
+            .BeFalse($"再 ADD できない FK があるため失敗するはず\nSQL:\n{script}");
+        result.Error.Should().NotBeNullOrEmpty();
+        // 部分適用があり得る旨の説明が付く（文言は表示言語依存のため culture 安定トークンで確認する）
+        result.Error.Should().Contain("Oracle");
+
+        // ---------- Oracle の DDL は暗黙コミット＝部分適用が残る ----------
+        var live2 = await ImportAsync();
+        var parent2 = live2.Entities.Single(e => e.TableName == "pk_parent");
+        parent2
+            .Columns.Single(c => c.Name == "code")
+            .IsPrimaryKey.Should()
+            .BeTrue("主キーの付け替えは適用済みのまま残る");
+        parent2.Columns.Single(c => c.Name == "id").IsPrimaryKey.Should().BeFalse();
+        live2.Relationships.Should().BeEmpty("自動で外した FK は戻らない（部分適用）");
+    }
+
     // ---------------- ヘルパー ----------------
 
     /// <summary>主キー変更の検証用テーブルの行を取得する（データ温存の確認用）</summary>

@@ -617,4 +617,36 @@ public class MySqlSyncScriptBuilderTests
         sql.Should().Contain("IF(@pk IS NULL, 'DO 0'");
         sql.Should().NotContain("ADD PRIMARY KEY");
     }
+
+    /// <summary>
+    /// 主キー変更が 2 フェーズへ分かれ、列定義変更を挟んで「PK DROP → MODIFY COLUMN → PK ADD」の順に
+    /// 出力されることを検証する（PK 制約が残ったままの旧 PK 列の NULL 許容化は失敗し、MySQL は部分適用で止まる）。
+    /// </summary>
+    [Fact(DisplayName = "AlterPrimaryKey は AlterColumn を挟んで DROP → MODIFY → ADD の順に出る")]
+    public void AlterPrimaryKey_SplitsAroundAlterColumn()
+    {
+        var alterColumn = new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.AlterColumn,
+            TableName = "orders",
+            ColumnName = "old_id",
+            Column = new Column
+            {
+                Name = "old_id",
+                DataType = "int",
+                IsNullable = true,
+            },
+            IsSelected = true,
+        };
+
+        var sql = Build(AlterPk("orders", PkTarget("orders", "order_id")), alterColumn);
+
+        var drop = sql.IndexOf("SET @pk = NULL;", StringComparison.Ordinal);
+        var alter = sql.IndexOf("MODIFY COLUMN `old_id`", StringComparison.Ordinal);
+        var add = sql.IndexOf("ADD PRIMARY KEY (`order_id`);", StringComparison.Ordinal);
+
+        drop.Should().BeGreaterThan(-1);
+        alter.Should().BeGreaterThan(drop);
+        add.Should().BeGreaterThan(alter);
+    }
 }

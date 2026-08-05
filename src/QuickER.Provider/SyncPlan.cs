@@ -4,20 +4,97 @@ using QuickER.Model;
 namespace QuickER.Provider;
 
 /// <summary>
+/// 主キー変更（<see cref="SchemaDiffKind.AlterPrimaryKey"/>）セクションのフェーズ。
+/// </summary>
+/// <remarks>
+/// <para>
+/// 逐次 DDL 方言では主キー変更を「旧主キーの解除（<see cref="Drop"/>）」と「新主キーの付与（<see cref="Add"/>）」の
+/// 2 セクションへ分割し、その間に列定義変更（<see cref="SchemaDiffKind.AlterColumn"/>）を挟む。旧主キー列の
+/// NULL 許容化は主キー制約が残ったままでは失敗する（SQL Server Msg 5074 → 4922・Oracle ORA-01451 等）ため。
+/// </para>
+/// <para>
+/// <see cref="None"/> は主キー変更以外の全セクション（既定値）。主キー変更セクションに <see cref="None"/> が
+/// 現れた場合、レンダラーは従来どおり DROP → ADD を 1 セクション内で連続出力する（旧形の計画への後方互換）。
+/// </para>
+/// </remarks>
+public enum PrimaryKeyPhase
+{
+    /// <summary>フェーズの概念を持たないセクション（主キー変更以外の全種別）。</summary>
+    None = 0,
+
+    /// <summary>旧主キー制約の解除フェーズ（列定義変更より前に置く）。</summary>
+    Drop,
+
+    /// <summary>新主キー制約の付与フェーズ（列定義変更より後に置く）。</summary>
+    Add,
+}
+
+/// <summary>
 /// 同期スクリプトの 1 セクション分（同一種別の差分項目の集合）を表す実行計画の単位。
 /// </summary>
 /// <remarks>
 /// セクションは <see cref="SyncPlanner"/> が固定順序で並べて <see cref="SyncPlan"/> を構成する。
 /// 方言別レンダラー（<see cref="ISyncScriptBuilder"/> の実装）はこの単位を消費して SQL 化する。
+/// 同一 <see cref="Kind"/> のセクションが複数回・別位置に現れることがある（主キー変更の 2 フェーズ）。
 /// </remarks>
 public sealed class SyncPlanSection
 {
     /// <summary>このセクションが担当する差分種別。</summary>
     public SchemaDiffKind Kind { get; init; }
 
+    /// <summary>
+    /// 主キー変更セクションのフェーズ（主キー変更以外は既定の <see cref="PrimaryKeyPhase.None"/>）。
+    /// </summary>
+    public PrimaryKeyPhase PrimaryKeyPhase { get; init; } = PrimaryKeyPhase.None;
+
     /// <summary>このセクションに含まれる差分項目（入力の出現順を保持する）。</summary>
     public IReadOnlyList<SchemaDiffItem> Items { get; init; } = [];
 }
+
+/// <summary>
+/// 実行計画に付随する警告の種別。
+/// </summary>
+/// <remarks>
+/// 表示文言は持たない（言語中立）。GUI は自前の resx で整形し、スクリプト側で示す場合は英語で書く。
+/// いずれも「実行を止めるほどの確実性は無いが、静かに壊れうる」ものを利用者へ伝えるための材料。
+/// </remarks>
+public enum SyncPlanWarningKind
+{
+    /// <summary>
+    /// 主キー変更に伴って自動再作成する外部キーの参照先列が、新しい主キー列に含まれない
+    /// （＝参照先が候補キーでなくなり、再作成が実行時に失敗しうる）。
+    /// </summary>
+    /// <remarks>
+    /// 一意制約 / 一意インデックスは取り込んでいないため「候補キーでない」と断定はできない
+    /// （UNIQUE で候補キーが保たれる構成もある）。そのため実行ブロックではなく警告に留める。
+    /// </remarks>
+    ForeignKeyRebuildMayLoseCandidateKey,
+
+    /// <summary>
+    /// 複合外部キーの子テーブルであるため、そのテーブルのテーブル再構築を計画から除外した。
+    /// </summary>
+    /// <remarks>
+    /// 意味モデルは複合外部キーの列対応を保持できない（<see cref="CompositeForeignKeyImportWarning"/>）ため、
+    /// 再構築すると複合外部キーが単列外部キーへ作り替えられる＝成功して静かに壊れる。他テーブルの同期は続行する。
+    /// </remarks>
+    RebuildBlockedByCompositeForeignKey,
+}
+
+/// <summary>
+/// 実行計画に付随する警告 1 件（言語中立）。
+/// </summary>
+/// <param name="Kind">警告種別</param>
+/// <param name="TableName">
+/// 対象テーブル。<see cref="SyncPlanWarningKind.ForeignKeyRebuildMayLoseCandidateKey"/> では
+/// 外部キーを保有する子テーブル、<see cref="SyncPlanWarningKind.RebuildBlockedByCompositeForeignKey"/> では
+/// 再構築を止めたテーブル。
+/// </param>
+/// <param name="Detail">補足（外部キー制約名など。無ければ空文字）</param>
+public sealed record SyncPlanWarning(
+    SyncPlanWarningKind Kind,
+    string TableName,
+    string Detail = ""
+);
 
 /// <summary>
 /// 差分項目から組み立てた方言中立の実行計画。
@@ -41,6 +118,15 @@ public sealed class SyncPlan
     /// （Native 方言＝MySQL のみ・他方言は空。rebuild 方言では再構築へ畳むためここは常に空）。
     /// </summary>
     public IReadOnlyList<TableReorderPlan> Reorders { get; init; } = [];
+
+    /// <summary>
+    /// この計画を実行する前に利用者へ伝えるべき警告（言語中立・SQL 生成には影響しない）。
+    /// </summary>
+    /// <remarks>
+    /// 警告があっても計画自体は実行可能な形で成立している（危険な部分は除外済み、または実行時に失敗しうると
+    /// 分かっているだけ）。表示層は実行確認の文言へ織り込む。
+    /// </remarks>
+    public IReadOnlyList<SyncPlanWarning> Warnings { get; init; } = [];
 
     /// <summary>生成対象のセクション・再構築・並べ替えが 1 件も無いか。</summary>
     public bool IsEmpty => Sections.Count == 0 && Rebuilds.Count == 0 && Reorders.Count == 0;

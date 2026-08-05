@@ -509,4 +509,40 @@ public class SqlServerSyncScriptBuilderTests
         sql.Should().NotContain("ADD CONSTRAINT");
         sql.Should().NotContain("PRIMARY KEY (");
     }
+
+    /// <summary>
+    /// 主キー変更が 2 フェーズへ分かれ、列定義変更を挟んで「PK DROP → ALTER COLUMN → PK ADD」の順に
+    /// 出力されることを検証する（PK 制約が残ったままの ALTER COLUMN は Msg 5074 → 4922 で失敗する）。
+    /// </summary>
+    [Fact(DisplayName = "AlterPrimaryKey は AlterColumn を挟んで DROP → ALTER → ADD の順に出る")]
+    public void AlterPrimaryKey_SplitsAroundAlterColumn()
+    {
+        var alterColumn = new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.AlterColumn,
+            TableName = "Order",
+            ColumnName = "OldId",
+            Column = new Column
+            {
+                Name = "OldId",
+                DataType = "int",
+                IsNullable = true,
+            },
+            IsSelected = true,
+        };
+
+        var sql = BuildScript(
+            new SqlServerSyncScriptBuilder(),
+            AlterPk("Order", PkTarget("Order", "OrderId")),
+            alterColumn
+        );
+
+        var drop = sql.IndexOf("DECLARE @pk sysname;", StringComparison.Ordinal);
+        var alter = sql.IndexOf("ALTER COLUMN [OldId]", StringComparison.Ordinal);
+        var add = sql.IndexOf("ADD CONSTRAINT [PK_Order]", StringComparison.Ordinal);
+
+        drop.Should().BeGreaterThan(-1);
+        alter.Should().BeGreaterThan(drop);
+        add.Should().BeGreaterThan(alter);
+    }
 }

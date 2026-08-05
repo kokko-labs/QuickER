@@ -1,6 +1,7 @@
 ﻿using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.Text;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -42,6 +43,9 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
 
     /// <summary>直近の取込で得た補助オブジェクト（再構築で温存するインデックス・トリガー・一意制約）</summary>
     private IReadOnlyList<SchemaAuxiliaryObject> _liveAuxiliaryObjects = [];
+
+    /// <summary>直近の取込で検出した複合外部キーの警告（案内表示・選択不可化・再構築ブロックに用いる）</summary>
+    private IReadOnlyList<CompositeForeignKeyImportWarning> _liveCompositeForeignKeys = [];
 
     /// <summary>直近の <see cref="UpdatePreview"/> で組み立てた実行計画（実行確認の文言分岐に用いる）</summary>
     private SyncPlan _currentPlan = new();
@@ -118,6 +122,7 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
             _liveEntities = live.Entities;
             _liveRelationships = live.Relationships;
             _liveAuxiliaryObjects = live.AuxiliaryObjects;
+            _liveCompositeForeignKeys = live.Warnings;
 
             // 対象方言のケーパビリティを渡す（SQLite は説明差分を抑止し FK 制約名を比較から除外する）
             var diff = new SchemaDiffService().Compute(
@@ -159,9 +164,41 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
 
             DiffItems.Clear();
 
+            // 複合外部キーは列対応を失って取り込まれるため、この画面の FK 差分は正確でない可能性がある。
+            // 一覧の先頭に選択不可の案内項目を出して、その事実をこの場で伝える
+            if (_liveCompositeForeignKeys.Count > 0)
+            {
+                DiffItems.Add(
+                    new SchemaDiffItem
+                    {
+                        Kind = SchemaDiffKind.Advisory,
+                        Description = string.Format(
+                            Strings.SchemaSync_CompositeForeignKeyNotice,
+                            _liveCompositeForeignKeys.Count
+                        ),
+                        IsSelected = false,
+                        IsSelectable = false,
+                    }
+                );
+            }
+
             foreach (var item in diff.Items)
             {
-                item.PropertyChanged += (_, e) =>
+                // 複合外部キーに関与する FK 差分は、実行すると単列 FK へ置き換わって静かに壊れるため、
+                // 選択不可の案内へ格下げして実行対象から構造的に外す
+                var entry = CompositeForeignKeyGuard.IsAffectedForeignKeyDiff(
+                    item,
+                    _liveCompositeForeignKeys
+                )
+                    ? item.ToAdvisory(
+                        string.Format(
+                            Strings.SchemaSync_CompositeForeignKeyDiffBlocked,
+                            item.Description
+                        )
+                    )
+                    : item;
+
+                entry.PropertyChanged += (_, e) =>
                 {
                     if (e.PropertyName == nameof(SchemaDiffItem.IsSelected))
                     {
@@ -169,7 +206,7 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
                     }
                 };
 
-                DiffItems.Add(item);
+                DiffItems.Add(entry);
             }
 
             HasDiff = DiffItems.Count > 0;
@@ -202,6 +239,7 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
             LiveEntities = _liveEntities,
             LiveRelationships = _liveRelationships,
             AuxiliaryObjects = _liveAuxiliaryObjects,
+            CompositeForeignKeyWarnings = _liveCompositeForeignKeys,
         };
         _currentPlan = _planner.BuildPlan(DiffItems, _provider.SyncCapabilities, context);
         ScriptPreview = _provider.SyncScriptBuilder.Build(_currentPlan);
@@ -277,6 +315,9 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
             msg = string.Format(Strings.SchemaSync_ExecuteConfirm, SyncTargetDisplayName);
         }
 
+        // 計画側で検出した注意事項（FK 自動再作成の失敗リスク・複合 FK による再構築ブロック）を追記する
+        msg += BuildPlanWarningSuffix();
+
         if (!_dialogs.ConfirmWarning(msg, Strings.Common_Confirm))
         {
             return;
@@ -318,6 +359,10 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
                     Strings.SchemaSync_ExecuteFailedMessage + "\n" + result.Error,
                     Strings.Common_Error
                 );
+
+                // 部分適用が起こりうる方言（MySQL / Oracle）では、失敗しても DB が変わっていることがある。
+                // 古い差分を出し続けないよう、エラーを読み終えた（＝モーダルを閉じた）後に取り直す
+                await RefreshAsync().ConfigureAwait(true);
             }
         }
         catch (Exception ex)
@@ -328,6 +373,56 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
         {
             IsBusy = false;
         }
+    }
+
+    /// <summary>
+    /// 実行計画の警告（<see cref="SyncPlan.Warnings"/>）を、実行確認へ追記する文言へ整形する。
+    /// </summary>
+    /// <remarks>
+    /// 警告が無ければ空文字を返す（＝確認文言は従来どおり）。文言は UI 言語追従（resx）で、
+    /// スクリプト内コメント（英語固定）とは別系統である点に注意。
+    /// </remarks>
+    private string BuildPlanWarningSuffix()
+    {
+        if (_currentPlan.Warnings.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        var sb = new StringBuilder();
+
+        // 主キー変更に巻き込まれて自動再作成される FK（参照先が候補キーでなくなると失敗しうる）
+        var rebuiltForeignKeys = _currentPlan.Warnings.Count(w =>
+            w.Kind == SyncPlanWarningKind.ForeignKeyRebuildMayLoseCandidateKey
+        );
+
+        if (rebuiltForeignKeys > 0)
+        {
+            sb.Append(Environment.NewLine)
+                .Append(Environment.NewLine)
+                .Append(
+                    string.Format(
+                        Strings.SchemaSync_ExecuteConfirmForeignKeyRebuildRisk,
+                        rebuiltForeignKeys
+                    )
+                );
+        }
+
+        // 複合外部キーのため再構築を止めたテーブル（同期されずに残る）
+        var blockedTables = _currentPlan
+            .Warnings.Where(w => w.Kind == SyncPlanWarningKind.RebuildBlockedByCompositeForeignKey)
+            .Select(w => w.TableName)
+            .ToList();
+
+        if (blockedTables.Count > 0)
+        {
+            var tableList = string.Join(Environment.NewLine, blockedTables.Select(t => "  • " + t));
+            sb.Append(Environment.NewLine)
+                .Append(Environment.NewLine)
+                .Append(string.Format(Strings.SchemaSync_ExecuteConfirmRebuildBlocked, tableList));
+        }
+
+        return sb.ToString();
     }
 
     /// <summary>ダイアログを閉じる</summary>

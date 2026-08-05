@@ -504,6 +504,259 @@ public class SchemaSyncDialogViewModelTests
         vm.DiffItems.Should().NotContain(i => i.Kind == SchemaDiffKind.ReorderColumns);
     }
 
+    // ---------------- 複合外部キー（取込で列対応が失われた FK）の扱い ----------------
+
+    /// <summary>
+    /// 複合外部キーを取り込んだ live（図側では FK が消えている＝DropForeignKey 差分が出る）を組み立てる。
+    /// </summary>
+    private static (SchemaImportResult Live, Entity[] Target) CompositeForeignKeyScenario()
+    {
+        var parent = Table("parent", Col("id", "int", pk: true));
+        var child = Table(
+            "child",
+            Col("id", "int", pk: true),
+            Col("parent_id", "int"),
+            Col("order_no", "int")
+        );
+        var rel = new Relationship
+        {
+            SourceEntityId = parent.Id,
+            TargetEntityId = child.Id,
+            Type = RelationshipType.OneToMany,
+            SourceColumnId = parent.Columns[0].Id,
+            // 複合外部キーは意味モデルが列対応を表現できず、子列の指定を失う
+            TargetColumnId = null,
+            ConstraintName = "FK_child_parent",
+        };
+        var live = new SchemaImportResult
+        {
+            Entities = [parent, child],
+            Relationships = [rel],
+            Warnings =
+            [
+                new CompositeForeignKeyImportWarning(
+                    "FK_child_parent",
+                    "child",
+                    ["parent_id", "order_no"],
+                    "parent",
+                    ["id", "order_no"]
+                ),
+            ],
+        };
+
+        // 目標はテーブル構成が同じでリレーション無し＝ DropForeignKey 差分だけが出る
+        var target = new[] { parent.Clone(preserveId: true), child.Clone(preserveId: true) };
+        return (live, target);
+    }
+
+    /// <summary>
+    /// 複合外部キーを含む取込では、一覧の先頭に案内項目が出て、関与する FK 差分が選択不可へ格下げされることを検証する。
+    /// </summary>
+    [Fact(
+        DisplayName = "複合外部キー: 案内項目が先頭に出て、関与する FK 差分は選択不可へ格下げされる"
+    )]
+    public async Task Refresh_CompositeForeignKey_AddsNoticeAndDemotesForeignKeyDiff()
+    {
+        var (live, target) = CompositeForeignKeyScenario();
+        var provider = new FakeProvider(new SqlServerProvider(), new FakeSchemaImporter(live));
+        var vm = new SchemaSyncDialogViewModel(provider, new DbConnectionSettings(), target, []);
+
+        await vm.RefreshCommand.ExecuteAsync(null);
+
+        var notice = vm.DiffItems[0];
+        notice.Kind.Should().Be(SchemaDiffKind.Advisory);
+        notice.IsSelectable.Should().BeFalse();
+        notice
+            .Description.Should()
+            .Be(string.Format(DbStrings.SchemaSync_CompositeForeignKeyNotice, 1));
+
+        var dropFk = vm
+            .DiffItems.Should()
+            .ContainSingle(i => i.Kind == SchemaDiffKind.DropForeignKey)
+            .Which;
+        dropFk.IsSelectable.Should().BeFalse();
+        dropFk.IsSelected.Should().BeFalse();
+        dropFk
+            .Description.Should()
+            .Match(string.Format(DbStrings.SchemaSync_CompositeForeignKeyDiffBlocked, "*"));
+
+        // 全選択でも実行対象にならない（誤った単列 FK への置換を構造的に封じる）
+        vm.SelectAllCommand.Execute(null);
+        dropFk.IsSelected.Should().BeFalse();
+        vm.ScriptPreview.Should().NotContain("FK_child_parent");
+    }
+
+    /// <summary>
+    /// 主キー変更で被参照列が候補キーでなくなる場合、実行確認へ FK 自動再作成の注意が追記されることを検証する。
+    /// </summary>
+    [Fact(DisplayName = "実行確認: 候補キーを失う FK 自動再作成の注意が追記される")]
+    public async Task Execute_ForeignKeyRebuildRisk_AppendsWarningToConfirm()
+    {
+        var parent = Table("parent", Col("id", "int", pk: true), Col("code", "int"));
+        var child = Table("child", Col("id", "int", pk: true), Col("parent_id", "int"));
+        var rel = new Relationship
+        {
+            SourceEntityId = parent.Id,
+            TargetEntityId = child.Id,
+            Type = RelationshipType.OneToMany,
+            SourceColumnId = parent.Columns[0].Id,
+            TargetColumnId = child.Columns[1].Id,
+            ConstraintName = "FK_child_parent",
+        };
+        var live = new SchemaImportResult { Entities = [parent, child], Relationships = [rel] };
+        var provider = new FakeProvider(new SqlServerProvider(), new FakeSchemaImporter(live));
+
+        // 目標: 親の主キーを id から code へ移す（子の FK は id を参照したまま維持する）
+        var parentTarget = parent.Clone(preserveId: true);
+        parentTarget.Columns.Single(c => c.Name == "id").IsPrimaryKey = false;
+        parentTarget.Columns.Single(c => c.Name == "code").IsPrimaryKey = true;
+        var childTarget = child.Clone(preserveId: true);
+        var relKeep = new Relationship
+        {
+            SourceEntityId = parentTarget.Id,
+            TargetEntityId = childTarget.Id,
+            Type = RelationshipType.OneToMany,
+            SourceColumnId = parentTarget.Columns.Single(c => c.Name == "id").Id,
+            TargetColumnId = childTarget.Columns.Single(c => c.Name == "parent_id").Id,
+            ConstraintName = "FK_child_parent",
+        };
+
+        var dialogs = new StubDialogService { ConfirmResult = false };
+        var vm = new SchemaSyncDialogViewModel(
+            provider,
+            new DbConnectionSettings { Database = "shop" },
+            [parentTarget, childTarget],
+            [relKeep],
+            dialogs
+        );
+
+        await vm.RefreshCommand.ExecuteAsync(null);
+        // 主キー変更は既定で未選択のため明示的に選択する（選択変更でプレビューと計画が再構築される）
+        vm.DiffItems.Single(i => i.Kind == SchemaDiffKind.AlterPrimaryKey).IsSelected = true;
+
+        await vm.ExecuteCommand.ExecuteAsync(null);
+
+        var message = dialogs.WarningConfirmMessages.Should().ContainSingle().Subject;
+        message
+            .Should()
+            .StartWith(string.Format(DbStrings.SchemaSync_ExecuteConfirmDestructive, "shop"));
+        message
+            .Should()
+            .Contain(string.Format(DbStrings.SchemaSync_ExecuteConfirmForeignKeyRebuildRisk, 1));
+    }
+
+    /// <summary>
+    /// rebuild 方言（SQLite）で複合外部キーの子テーブルは再構築されず、実行確認に対象が列挙されることを検証する。
+    /// </summary>
+    [Fact(DisplayName = "rebuild 方言: 複合外部キーの子テーブルは再構築されず実行確認へ列挙される")]
+    public async Task Execute_RebuildDialect_CompositeForeignKeyTable_IsBlockedAndListed()
+    {
+        var orderLine = Table(
+            "order_line",
+            Col("Id", "INTEGER", pk: true),
+            Col("OrderId", "INTEGER"),
+            Col("LineNo", "INTEGER"),
+            Col("Note", "TEXT")
+        );
+        var live = new SchemaImportResult
+        {
+            Entities = [orderLine],
+            Warnings =
+            [
+                new CompositeForeignKeyImportWarning(
+                    "FK_order_line_orders",
+                    "order_line",
+                    ["OrderId", "LineNo"],
+                    "orders",
+                    ["Id", "LineNo"]
+                ),
+            ],
+        };
+        var provider = new FakeSqliteProvider(new FakeSchemaImporter(live));
+        var target = new[]
+        {
+            Table(
+                "order_line",
+                Col("Id", "INTEGER", pk: true),
+                Col("OrderId", "INTEGER"),
+                Col("LineNo", "INTEGER"),
+                Col("Note", "INTEGER")
+            ),
+        };
+        var dialogs = new StubDialogService { ConfirmResult = false };
+        var vm = new SchemaSyncDialogViewModel(
+            provider,
+            new DbConnectionSettings { FilePath = "shop.db" },
+            target,
+            [],
+            dialogs
+        );
+
+        await vm.RefreshCommand.ExecuteAsync(null);
+        vm.DiffItems.Single(i => i.Kind == SchemaDiffKind.AlterColumn).IsSelected = true;
+
+        await vm.ExecuteCommand.ExecuteAsync(null);
+
+        var message = dialogs.WarningConfirmMessages.Should().ContainSingle().Subject;
+        // 再構築されないため確認文言は再構築版にならず、破壊的変更版＋ブロック注記になる
+        message
+            .Should()
+            .StartWith(string.Format(DbStrings.SchemaSync_ExecuteConfirmDestructive, "shop.db"));
+        message
+            .Should()
+            .Contain(
+                string.Format(DbStrings.SchemaSync_ExecuteConfirmRebuildBlocked, "  • order_line")
+            );
+
+        // プレビューには畳み込まれなかった項目のスキップコメントが出る（スクリプト内は英語固定）
+        vm.ScriptPreview.Should().Contain("Skipped 'AlterColumn' on order_line");
+    }
+
+    /// <summary>
+    /// 実行失敗時も、エラー表示のあとに差分を取り直すこと（MySQL / Oracle の部分適用への追従）を検証する。
+    /// </summary>
+    [Fact(DisplayName = "Execute: 失敗時もエラー表示後に差分を取り直す")]
+    public async Task Execute_Failure_RefreshesDiffAfterError()
+    {
+        var importer = new FakeSchemaImporter(
+            new SchemaImportResult
+            {
+                Entities = [Table("Customer", Col("Id", "INTEGER", pk: true))],
+            }
+        );
+        // 実行は失敗するが、部分適用で Name 列だけは適用済みになった状態を再現する
+        var executor = new FakeFailingExecutor(() =>
+            importer.Result = new SchemaImportResult
+            {
+                Entities = [Table("Customer", Col("Id", "INTEGER", pk: true), Col("Name", "TEXT"))],
+            }
+        );
+        var provider = new FakeSqliteProvider(importer, executor);
+        var target = new[]
+        {
+            Table("Customer", Col("Id", "INTEGER", pk: true), Col("Name", "TEXT")),
+        };
+        var dialogs = new StubDialogService { ConfirmResult = true };
+        var vm = new SchemaSyncDialogViewModel(
+            provider,
+            new DbConnectionSettings { FilePath = "shop.db" },
+            target,
+            [],
+            dialogs
+        );
+        var closed = false;
+        vm.CloseAction = _ => closed = true;
+
+        await vm.RefreshCommand.ExecuteAsync(null);
+        vm.DiffItems.Should().ContainSingle(i => i.Kind == SchemaDiffKind.AddColumn);
+
+        await vm.ExecuteCommand.ExecuteAsync(null);
+
+        dialogs.ErrorMessages.Should().ContainSingle();
+        vm.DiffItems.Should().BeEmpty("失敗後も取り直すため、部分適用済みの列は差分から消える");
+        closed.Should().BeFalse("失敗時にダイアログを自動で閉じない");
+    }
+
     /// <summary>内部プロバイダへ委譲しつつ SchemaImporter だけを差し替える汎用フェイクプロバイダ（実接続しない）</summary>
     private sealed class FakeProvider : IDatabaseProvider
     {
@@ -603,5 +856,25 @@ public class SchemaSyncDialogViewModelTests
             string script,
             CancellationToken ct = default
         ) => Task.FromResult(new SchemaSyncResult { Committed = true });
+    }
+
+    /// <summary>常に失敗を返すフェイク実行器（実行時の副作用＝部分適用をコールバックで再現できる）</summary>
+    private sealed class FakeFailingExecutor : ISchemaSyncExecutor
+    {
+        private readonly Action? _onExecute;
+
+        public FakeFailingExecutor(Action? onExecute = null) => _onExecute = onExecute;
+
+        public Task<SchemaSyncResult> ExecuteAsync(
+            DbConnectionSettings settings,
+            string script,
+            CancellationToken ct = default
+        )
+        {
+            _onExecute?.Invoke();
+            return Task.FromResult(
+                new SchemaSyncResult { Committed = false, Error = "statement 1 failed" }
+            );
+        }
     }
 }

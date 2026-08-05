@@ -257,6 +257,20 @@
 
 Do you want to run this against {0}?</value>
   </data>
+  <data name="SchemaSync_ExecuteConfirmForeignKeyRebuildRisk" xml:space="preserve">
+    <value>Note: {0} foreign key(s) will be dropped and recreated automatically because the primary key they reference changes. If the referenced column is no longer a candidate key, recreation fails; on MySQL / Oracle the change may be left partially applied (the foreign key gone while the primary key is already changed).</value>
+  </data>
+  <data name="SchemaSync_ExecuteConfirmRebuildBlocked" xml:space="preserve">
+    <value>The following tables are NOT synchronized: they own a composite foreign key whose column mapping was lost on import, so recreating them would silently replace it with a single-column foreign key.
+
+{0}</value>
+  </data>
+  <data name="SchemaSync_CompositeForeignKeyNotice" xml:space="preserve">
+    <value>{0} composite foreign key(s) were imported without their column mapping, so foreign key changes shown here may be inaccurate.</value>
+  </data>
+  <data name="SchemaSync_CompositeForeignKeyDiffBlocked" xml:space="preserve">
+    <value>{0} (not selectable: this foreign key is part of a composite foreign key)</value>
+  </data>
   <data name="SchemaSync_Executing" xml:space="preserve">
     <value>Executing...</value>
   </data>

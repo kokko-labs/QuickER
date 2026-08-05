@@ -14,8 +14,9 @@ namespace QuickER.MySql;
 ///   <item>AddTable</item>
 ///   <item>AddColumn</item>
 ///   <item>DropForeignKey（FK 依存列の型変更・列/テーブル削除より前に外す）</item>
+///   <item>AlterPrimaryKey / Drop フェーズ（旧主キー制約の解除。旧主キー列の NULL 許容化を通すため列定義変更より前）</item>
 ///   <item>AlterColumn</item>
-///   <item>AlterPrimaryKey（主キー制約の張り替え。新主キー列の NOT NULL 化を済ませた後に行う）</item>
+///   <item>AlterPrimaryKey / Add フェーズ（新主キー制約の付与。新主キー列の NOT NULL 化を済ませた後に行う）</item>
 ///   <item>DropColumn</item>
 ///   <item>DropTable</item>
 ///   <item>AddForeignKey</item>
@@ -104,15 +105,13 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
         );
     }
 
-    /// <summary>主キー変更（旧主キー制約の解除 → 新主キー制約の付与）文を生成する</summary>
+    /// <summary>主キー変更の解除フェーズ（旧主キー制約の DROP）文を生成する</summary>
     /// <remarks>
     /// <c>ALTER TABLE ... DROP PRIMARY KEY</c> は主キーが無いテーブルに対してエラーになるため、
     /// <c>information_schema.TABLE_CONSTRAINTS</c> を逆引きし、主キーが在るときだけプリペアド動的 SQL で
-    /// 実行する（無ければ無害な <c>DO 0</c>）。新しい主キー構成は <see cref="SchemaDiffItem.Entity"/>
-    /// （target 側エンティティ）の主キー列を列定義順に読む。MySQL の主キー名は <c>PRIMARY</c> 固定のため
-    /// 付与側に <c>CONSTRAINT</c> 名は指定しない。主キー列が 1 つも無い場合（主キーの解除のみ）は付与文を出さない。
+    /// 実行する（無ければ無害な <c>DO 0</c>）。
     /// </remarks>
-    protected override void AppendAlterPrimaryKey(StringBuilder sb, SchemaDiffItem item)
+    protected override void AppendDropPrimaryKey(StringBuilder sb, SchemaDiffItem item)
     {
         var table = MySqlIdentifier.Quote(item.TableName);
         var tableName = MySqlIdentifier.EscapeStringLiteral(
@@ -136,8 +135,17 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
         sb.AppendLine("PREPARE stmt FROM @sql;");
         sb.AppendLine("EXECUTE stmt;");
         sb.AppendLine("DEALLOCATE PREPARE stmt;");
+    }
 
-        var pks = item.Entity!.Columns.Where(c => c.IsPrimaryKey).ToList();
+    /// <summary>主キー変更の付与フェーズ（新主キー制約の ADD）文を生成する</summary>
+    /// <remarks>
+    /// 新しい主キー構成は <see cref="SchemaDiffItem.Entity"/>（target 側エンティティ）の主キー列を列定義順に読む。
+    /// MySQL の主キー名は <c>PRIMARY</c> 固定のため <c>CONSTRAINT</c> 名は指定しない。
+    /// 主キー列が 1 つも無い場合（主キーの解除のみ）は付与文を出さない。
+    /// </remarks>
+    protected override void AppendAddPrimaryKey(StringBuilder sb, SchemaDiffItem item)
+    {
+        var pks = item.Entity?.Columns.Where(c => c.IsPrimaryKey).ToList() ?? [];
 
         // 新しい主キー列が無い（＝主キーの解除のみ）場合は付与文を出さない
         if (pks.Count == 0)
@@ -146,7 +154,9 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
         }
 
         var pkCols = string.Join(", ", pks.Select(p => MySqlIdentifier.QuoteSimple(p.Name)));
-        sb.AppendLine($"ALTER TABLE {table} ADD PRIMARY KEY ({pkCols});");
+        sb.AppendLine(
+            $"ALTER TABLE {MySqlIdentifier.Quote(item.TableName)} ADD PRIMARY KEY ({pkCols});"
+        );
     }
 
     /// <summary>ALTER TABLE ... DROP COLUMN（列削除）文を生成する</summary>

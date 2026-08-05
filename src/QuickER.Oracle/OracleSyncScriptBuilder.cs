@@ -14,8 +14,9 @@ namespace QuickER.Oracle;
 ///   <item>AddTable</item>
 ///   <item>AddColumn</item>
 ///   <item>DropForeignKey（FK 依存列の型変更・列/テーブル削除より前に外す）</item>
+///   <item>AlterPrimaryKey / Drop フェーズ（旧主キー制約の解除。旧主キー列の NULL 許容化＝ORA-01451 を通すため列定義変更より前）</item>
 ///   <item>AlterColumn</item>
-///   <item>AlterPrimaryKey（主キー制約の張り替え。新主キー列の NOT NULL 化を済ませた後に行う）</item>
+///   <item>AlterPrimaryKey / Add フェーズ（新主キー制約の付与。新主キー列の NOT NULL 化を済ませた後に行う）</item>
 ///   <item>DropColumn</item>
 ///   <item>DropTable</item>
 ///   <item>AddForeignKey</item>
@@ -67,11 +68,11 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
     {
         foreach (var item in section.Items)
         {
-            // 主キー変更だけは「旧主キーの解除」「新主キーの付与」の 2 文へ展開されるため、
-            // 1 項目 = 1 文の switch には載せずリストへ直接追加する
+            // 主キー変更は「旧主キーの解除」「新主キーの付与」がセクションのフェーズで分かれ、
+            // 解除は 1 文でない（PL/SQL ブロック）ため、1 項目 = 1 文の switch には載せず直接追加する
             if (section.Kind == SchemaDiffKind.AlterPrimaryKey)
             {
-                AppendAlterPrimaryKey(statements, item);
+                AppendPrimaryKeyPhase(statements, section.PrimaryKeyPhase, item);
                 continue;
             }
 
@@ -158,23 +159,45 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
             + $"MODIFY ({OracleIdentifier.QuoteSimple(col.Name)} {col.DataType} {nullClause});";
     }
 
-    /// <summary>主キー変更（旧主キー制約の解除 → 新主キー制約の付与）の各文を追加する</summary>
+    /// <summary>主キー変更の 1 項目を、セクションのフェーズに応じた解除 / 付与の文へ振り分ける</summary>
+    /// <remarks>
+    /// フェーズ指定の無いセクション（<see cref="PrimaryKeyPhase.None"/>＝旧形の計画）は、従来どおり
+    /// 解除 → 付与を連続して追加する（後方互換）。
+    /// </remarks>
+    private static void AppendPrimaryKeyPhase(
+        List<string> statements,
+        PrimaryKeyPhase phase,
+        SchemaDiffItem item
+    )
+    {
+        if (phase is PrimaryKeyPhase.None or PrimaryKeyPhase.Drop)
+        {
+            statements.Add(BuildDropPrimaryKey(item));
+        }
+
+        if (phase is PrimaryKeyPhase.None or PrimaryKeyPhase.Add)
+        {
+            var add = BuildAddPrimaryKey(item);
+
+            if (add is not null)
+            {
+                statements.Add(add);
+            }
+        }
+    }
+
+    /// <summary>主キー変更の解除フェーズ（旧主キー制約の DROP）を PL/SQL 無名ブロックとして生成する</summary>
     /// <remarks>
     /// 旧主キーの制約名は差分項目に含まれないため、テーブル名から <c>user_constraints</c> を逆引きする
     /// PL/SQL 無名ブロックで動的に DROP する（主キーが無ければ NO_DATA_FOUND を握り潰して何もしない）。
-    /// 新しい主キー構成は <see cref="SchemaDiffItem.Entity"/>（target 側エンティティ）の主キー列を
-    /// 列定義順に読み、制約名は CREATE TABLE と同じ <c>PK_{テーブル名}</c> 規則で組み立てる。
-    /// 主キー列が 1 つも無い場合（主キーの解除のみ）は付与文を追加しない。
     /// </remarks>
-    private static void AppendAlterPrimaryKey(List<string> statements, SchemaDiffItem item)
+    private static string BuildDropPrimaryKey(SchemaDiffItem item)
     {
-        var table = OracleIdentifier.Quote(item.TableName);
-
         // 識別子はクォート付き作成のため、大文字小文字を保持した実名でカタログを照合する
         var tableName = OracleIdentifier.EscapeStringLiteral(
             OracleIdentifier.TableNameOnly(item.TableName)
         );
-        var tableQuoted = table.Replace("'", "''");
+        var tableQuoted = OracleIdentifier.Quote(item.TableName).Replace("'", "''");
 
         var drop = new StringBuilder();
         drop.AppendLine("DECLARE");
@@ -189,21 +212,27 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
         drop.AppendLine("EXCEPTION");
         drop.AppendLine("    WHEN NO_DATA_FOUND THEN NULL;");
         drop.Append("END;");
-        statements.Add(drop.ToString());
+        return drop.ToString();
+    }
 
-        var pks = item.Entity!.Columns.Where(c => c.IsPrimaryKey).ToList();
+    /// <summary>主キー変更の付与フェーズ（新主キー制約の ADD）文を生成する（解除のみなら null）</summary>
+    /// <remarks>
+    /// 新しい主キー構成は <see cref="SchemaDiffItem.Entity"/>（target 側エンティティ）の主キー列を
+    /// 列定義順に読み、制約名は CREATE TABLE と同じ <c>PK_{テーブル名}</c> 規則で組み立てる。
+    /// </remarks>
+    private static string? BuildAddPrimaryKey(SchemaDiffItem item)
+    {
+        var pks = item.Entity?.Columns.Where(c => c.IsPrimaryKey).ToList() ?? [];
 
         // 新しい主キー列が無い（＝主キーの解除のみ）場合は付与文を出さない
         if (pks.Count == 0)
         {
-            return;
+            return null;
         }
 
         var pkCols = string.Join(", ", pks.Select(p => OracleIdentifier.QuoteSimple(p.Name)));
-        statements.Add(
-            $"ALTER TABLE {table} ADD CONSTRAINT \"PK_{OracleIdentifier.SafeName(item.TableName)}\" "
-                + $"PRIMARY KEY ({pkCols});"
-        );
+        return $"ALTER TABLE {OracleIdentifier.Quote(item.TableName)} ADD CONSTRAINT \"PK_{OracleIdentifier.SafeName(item.TableName)}\" "
+            + $"PRIMARY KEY ({pkCols});";
     }
 
     /// <summary>ALTER TABLE ... DROP COLUMN（列削除）文を生成する</summary>
