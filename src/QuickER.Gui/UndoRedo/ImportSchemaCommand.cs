@@ -59,6 +59,7 @@ public class ImportSchemaCommand : IUndoableCommand
         _previousRelationships = _main.Relationships.ToList();
 
         // 退避済みリレーションのイベント購読を解除し参照を切り離す
+        // （Clear() は Reset 通知で OldItems を持たず、コレクション側の自動解除が効かないため明示的に行う）
         foreach (var r in _previousRelationships)
         {
             r.Detach();
@@ -112,6 +113,8 @@ public class ImportSchemaCommand : IUndoableCommand
     public void Undo()
     {
         // 取り込んだリレーションのイベント購読を解除してから差し替える
+        // （Clear() は Reset 通知で OldItems を持たないため明示的に行う。
+        //   復元する退避済みリレーションは Add 通知で購読が張り直される）
         foreach (var r in ImportedRelationships)
         {
             r.Detach();

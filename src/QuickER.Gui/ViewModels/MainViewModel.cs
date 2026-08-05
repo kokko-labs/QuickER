@@ -324,6 +324,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         _changeTracker.RunWithoutTracking(() =>
         {
+            // Clear() は Reset 通知で OldItems を持たず CollectionChanged 側の自動解除が効かないため、
+            // ここで明示的に購読を解除する
             foreach (var r in Relationships)
             {
                 r.Detach();
@@ -1628,7 +1630,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
-    /// <summary>リレーションの増減に応じて変更追跡を切り替え、カラムの PK/FK ルールを再適用する</summary>
+    /// <summary>リレーションの増減に応じて端点購読・変更追跡を切り替え、カラムの PK/FK ルールを再適用する</summary>
+    /// <remarks>
+    /// <c>ObservableCollection.Clear()</c> は Reset 通知で <c>OldItems</c> を持たないため、
+    /// 一括置換の経路（<see cref="ReplaceDiagram"/> / <c>ImportSchemaCommand</c>）は Clear の前に
+    /// 明示的に <see cref="RelationshipViewModel.Detach"/> を呼ぶ（購読解除の取りこぼしを防ぐ）
+    /// </remarks>
     private void OnRelationshipsCollectionChanged(
         object? sender,
         NotifyCollectionChangedEventArgs e
@@ -1638,6 +1645,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             foreach (RelationshipViewModel relationship in e.OldItems)
             {
+                // 図から外れたリレーションの端点購読を解除する
+                // （解除しないと削除済み VM が生きたエンティティのイベントから参照され続け、
+                //   エンティティ移動のたびに孤児リレーションの幾何再計算・通知が走り続ける）
+                relationship.Detach();
                 _changeTracker.DetachRelationship(relationship);
             }
         }
@@ -1646,6 +1657,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             foreach (RelationshipViewModel relationship in e.NewItems)
             {
+                // 図へ復帰したリレーションの端点購読を張り直す（Undo による削除取り消し・取込の Redo など）
+                // 生成直後の VM は購読済みのため、この呼び出しは何もしない（二重購読ガード）
+                relationship.Attach();
                 _changeTracker.AttachRelationship(relationship);
             }
         }

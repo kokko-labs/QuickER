@@ -115,23 +115,9 @@ public partial class RelationshipViewModel : ObservableObject
         Source = source;
         Target = target;
 
-        Source.PropertyChanged += OnEndpointChanged;
-        Target.PropertyChanged += OnEndpointChanged;
+        // 購読の確立は Attach() に一本化する（幾何の初期計算も Attach() が行う）
+        Attach();
 
-        Source.Columns.CollectionChanged += OnColumnsCollectionChanged;
-        Target.Columns.CollectionChanged += OnColumnsCollectionChanged;
-
-        foreach (var column in Source.Columns)
-        {
-            column.PropertyChanged += OnColumnPropertyChanged;
-        }
-
-        foreach (var column in Target.Columns)
-        {
-            column.PropertyChanged += OnColumnPropertyChanged;
-        }
-
-        UpdateGeometry();
         EnsureColumnSelectionConsistency();
         EnsureReferentialActionConsistency();
     }
@@ -525,9 +511,61 @@ public partial class RelationshipViewModel : ObservableObject
             OnUpdate = OnUpdate,
         };
 
+    /// <summary>両端エンティティ・カラムへの購読状態（<see cref="Attach"/> / <see cref="Detach"/> の多重実行ガード）</summary>
+    /// <remarks>
+    /// 生成直後は購読済み（コンストラクタが <see cref="Attach"/> を呼ぶ）
+    /// 図への追加通知（<c>CollectionChanged</c>）でも <see cref="Attach"/> が呼ばれるため、
+    /// このフラグがないと「新規生成 → コレクションへ追加」の経路で購読が二重になり通知が 2 回走る
+    /// </remarks>
+    private bool _isAttached;
+
+    /// <summary>両端エンティティ・カラムへの購読を確立する（図へ復帰したリレーションの端点追従を戻す）</summary>
+    /// <remarks>
+    /// <see cref="Detach"/> と対になる購読処理の単一正本で、購読済みなら何もしない（二重購読ガード）
+    /// 購読が切れている間に端点が移動している可能性があるため、幾何を計算し直して通知する
+    /// 列選択の整合化（<see cref="EnsureColumnSelectionConsistency"/>）はここでは行わない
+    /// ＝ Undo による復元時に既存の列選択を消さないため（生成時のみコンストラクタが実行する）
+    /// </remarks>
+    public void Attach()
+    {
+        if (_isAttached)
+        {
+            return;
+        }
+
+        _isAttached = true;
+
+        Source.PropertyChanged += OnEndpointChanged;
+        Target.PropertyChanged += OnEndpointChanged;
+
+        Source.Columns.CollectionChanged += OnColumnsCollectionChanged;
+        Target.Columns.CollectionChanged += OnColumnsCollectionChanged;
+
+        foreach (var column in Source.Columns)
+        {
+            column.PropertyChanged += OnColumnPropertyChanged;
+        }
+
+        foreach (var column in Target.Columns)
+        {
+            column.PropertyChanged += OnColumnPropertyChanged;
+        }
+
+        UpdateGeometry();
+        NotifyGeometryChanged();
+    }
+
     /// <summary>両端エンティティ・カラムへの購読をすべて解除する（画面リセットや破棄時のリーク防止）</summary>
+    /// <remarks>未購読なら何もしない（<see cref="Attach"/> と対称の多重実行ガード）</remarks>
     public void Detach()
     {
+        if (!_isAttached)
+        {
+            return;
+        }
+
+        _isAttached = false;
+
         Source.PropertyChanged -= OnEndpointChanged;
         Target.PropertyChanged -= OnEndpointChanged;
         Source.Columns.CollectionChanged -= OnColumnsCollectionChanged;

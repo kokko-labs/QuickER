@@ -330,6 +330,128 @@ public class RelationshipViewModelTests
         vm.Relationships.Should().Contain(rel);
     }
 
+    /// <summary>エンティティ 2 つと 1 対多リレーション 1 本を持つ ViewModel を用意する</summary>
+    private static (MainViewModel Vm, RelationshipViewModel Rel) NewDiagramWithRelationship()
+    {
+        var vm = new MainViewModel();
+        vm.AddEntityCommand.Execute(null);
+        vm.AddEntityCommand.Execute(null);
+        vm.StartAddOneToManyCommand.Execute(null);
+        vm.OnEntityClicked(vm.Entities[0]);
+        vm.OnEntityClicked(vm.Entities[1]);
+
+        return (vm, vm.Relationships[0]);
+    }
+
+    /// <summary>削除されたリレーションが端点エンティティの購読を残さない（イベントリークしない）ことを検証する</summary>
+    [Fact(DisplayName = "削除されたリレーションは端点エンティティの購読を解除する")]
+    public void RemovedRelationship_StopsObservingEndpoints()
+    {
+        var (vm, rel) = NewDiagramWithRelationship();
+        vm.OnRelationshipClicked(rel);
+        vm.RemoveSelectedRelationshipCommand.Execute(null);
+
+        var beforeX1 = rel.X1;
+        var changed = new List<string?>();
+        rel.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+
+        vm.Entities[0].X += 500;
+
+        // 図から外れた VM は端点の移動に一切反応しない（幾何再計算も通知も走らない）
+        changed.Should().BeEmpty();
+        rel.X1.Should().Be(beforeX1);
+    }
+
+    /// <summary>Undo で復元したリレーションが端点購読を取り戻し、幾何が追従することを検証する</summary>
+    [Fact(DisplayName = "Undo で復元したリレーションは端点の移動に再び追従する")]
+    public void RestoredRelationship_FollowsEndpointsAgain()
+    {
+        var (vm, rel) = NewDiagramWithRelationship();
+        var originalX1 = rel.X1;
+
+        vm.OnRelationshipClicked(rel);
+        vm.RemoveSelectedRelationshipCommand.Execute(null);
+
+        // 購読が切れている間に端点を動かしてから復元する
+        vm.Entities[0].X += 500;
+        vm.UndoCommand.Execute(null);
+
+        vm.Relationships.Should().Contain(rel);
+
+        // 復元時に幾何を取り直しているため、切断中の移動が反映されている
+        rel.X1.Should().NotBe(originalX1);
+
+        var restoredX1 = rel.X1;
+        var changed = new List<string?>();
+        rel.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+
+        vm.Entities[0].X += 300;
+
+        changed.Should().Contain(nameof(RelationshipViewModel.X1));
+        rel.X1.Should().NotBe(restoredX1);
+    }
+
+    /// <summary><see cref="RelationshipViewModel.Attach"/> の多重呼び出しで購読が重複しないことを検証する</summary>
+    [Fact(DisplayName = "Attach を重ねて呼んでも端点購読は二重にならない")]
+    public void Attach_IsIdempotent()
+    {
+        var a = NewEntity(0, 0);
+        var b = NewEntity(300, 0);
+        var rel = new RelationshipViewModel(
+            new Relationship { Type = RelationshipType.OneToMany },
+            a,
+            b
+        );
+
+        // コンストラクタで購読済みのため、追加の Attach は購読を増やさない
+        rel.Attach();
+        rel.Attach();
+
+        var x1Notifications = 0;
+        rel.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(RelationshipViewModel.X1))
+            {
+                x1Notifications++;
+            }
+        };
+
+        a.X = 500;
+
+        x1Notifications.Should().Be(1);
+    }
+
+    /// <summary>Detach 後に Attach すると端点追従が復活することを検証する（VM 単体の対称性）</summary>
+    [Fact(DisplayName = "Detach 後に Attach すると端点追従が復活する")]
+    public void Detach_ThenAttach_RestoresEndpointTracking()
+    {
+        var a = NewEntity(0, 0);
+        var b = NewEntity(300, 0);
+        var rel = new RelationshipViewModel(
+            new Relationship { Type = RelationshipType.OneToMany },
+            a,
+            b
+        );
+
+        rel.Detach();
+
+        // 二重解除しても状態は壊れない
+        rel.Detach();
+
+        var detachedX1 = rel.X1;
+        a.X = 500;
+        rel.X1.Should().Be(detachedX1);
+
+        rel.Attach();
+
+        // Attach 時点で幾何を取り直す
+        rel.X1.Should().NotBe(detachedX1);
+
+        var reattachedX1 = rel.X1;
+        a.X = 900;
+        rel.X1.Should().NotBe(reattachedX1);
+    }
+
     /// <summary>参照先候補（主キー列）と外部キー候補（終点側全列）が正しく取得できることを検証する</summary>
     [Fact(DisplayName = "参照先列と外部キー列の候補が取得できる")]
     public void AvailableColumns_AreResolved()
