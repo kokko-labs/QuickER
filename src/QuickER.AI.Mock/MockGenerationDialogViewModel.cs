@@ -206,7 +206,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     /// <summary>プロジェクト名の既定値</summary>
     private const string DefaultProjectName = "MockApp";
 
-    /// <summary>生成するプロジェクト名（既定は図名由来の PascalCase）</summary>
+    /// <summary>生成するプロジェクト名（既定値は固定文字列 <see cref="DefaultProjectName"/>）</summary>
     [ObservableProperty]
     private string _projectName = DefaultProjectName;
 
@@ -280,14 +280,14 @@ public partial class MockGenerationDialogViewModel : ObservableObject
 
     /// <summary>
     /// モックプロジェクト生成を開始できるか（画面あり・選択バックエンドが ready・dotnet SDK 検出・
-    /// 出力フォルダ／プロジェクト名あり・非実行中）。3 バックエンド（Claude Code / Codex / API キー）すべて可。
+    /// 出力フォルダあり／プロジェクト名が妥当・非実行中）。3 バックエンド（Claude Code / Codex / API キー）すべて可。
     /// </summary>
     public bool CanGenerateMockProject =>
         HasScreens
         && IsSelectedBackendReadyForMockGen
         && IsDotnetAvailable
         && !string.IsNullOrWhiteSpace(OutputFolder)
-        && !string.IsNullOrWhiteSpace(ProjectName)
+        && MockProjectScaffoldService.IsValidProjectName(ProjectName)
         && !IsMockGenInProgress
         && !IsTurnInProgress;
 
@@ -350,6 +350,11 @@ public partial class MockGenerationDialogViewModel : ObservableObject
             if (string.IsNullOrWhiteSpace(ProjectName))
             {
                 return Strings.Mock_DisabledReason_ProjectName;
+            }
+
+            if (!MockProjectScaffoldService.IsValidProjectName(ProjectName))
+            {
+                return Strings.Mock_DisabledReason_ProjectNameInvalid;
             }
 
             return string.Empty;

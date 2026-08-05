@@ -206,6 +206,9 @@
   <data name="Mock_DisabledReason_ProjectName" xml:space="preserve">
     <value>プロジェクト名を入力してください。</value>
   </data>
+  <data name="Mock_DisabledReason_ProjectNameInvalid" xml:space="preserve">
+    <value>プロジェクト名にフォルダ名・ファイル名として使用できない文字が含まれています。</value>
+  </data>
   <data name="Mock_ConversationStarted" xml:space="preserve">
     <value>会話を開始しました。モックへの要望を入力して送信してください（例: シンプルな管理画面で）。</value>
   </data>

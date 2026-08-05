@@ -72,9 +72,10 @@ public sealed class MockProjectScaffoldService
     /// </summary>
     /// <param name="diagram">生成元の ER 図（意味モデル）</param>
     /// <param name="outputDirectory">出力フォルダ</param>
-    /// <param name="projectName">プロジェクト名（csproj 名・ルート名前空間の由来）</param>
+    /// <param name="projectName">プロジェクト名（csproj 名・ルート名前空間の由来。単一セグメント名であること＝<see cref="IsValidProjectName"/> 参照）</param>
     /// <param name="mockFolder">デザイン仕様として同梱するモックフォルダのパス（mock.json＋画面 HTML＋共有 style.css）</param>
     /// <param name="profile">生成ターゲットのプロファイル（csproj／README のターゲット差分の正本）</param>
+    /// <exception cref="ArgumentException"><paramref name="projectName"/> が単一セグメント名として不正な場合</exception>
     /// <exception cref="InvalidOperationException">コード生成にエラーがある場合</exception>
     public MockProjectScaffoldResult Scaffold(
         ErDiagram diagram,
@@ -89,6 +90,16 @@ public sealed class MockProjectScaffoldService
         ArgumentException.ThrowIfNullOrWhiteSpace(projectName);
         ArgumentException.ThrowIfNullOrWhiteSpace(mockFolder);
         ArgumentNullException.ThrowIfNull(profile);
+
+        // プロジェクト名はプロジェクトフォルダ名・csproj 名・.sln 内の相対パスへそのまま使われるため、
+        // 出力フォルダ外への書き込みを防ぐ目的で単一セグメント名として妥当か検証する
+        if (!IsValidProjectName(projectName))
+        {
+            throw new ArgumentException(
+                $"プロジェクト名にはパス区切り文字・絶対パス・\".\"/\"..\"・フォルダ名やファイル名に使用できない文字を含められません: {projectName}",
+                nameof(projectName)
+            );
+        }
 
         Directory.CreateDirectory(outputDirectory);
         var written = new List<string>();
@@ -304,6 +315,41 @@ public sealed class MockProjectScaffoldService
     {
         var hash = MD5.HashData(Encoding.UTF8.GetBytes(projectName));
         return new Guid(hash);
+    }
+
+    /// <summary>
+    /// プロジェクト名が単一セグメントのフォルダ／ファイル名として妥当か判定する。
+    /// </summary>
+    /// <remarks>
+    /// プロジェクト名はそのまま <c>{出力フォルダ}/{ProjectName}/</c>（プロジェクトフォルダ名）・
+    /// <c>{ProjectName}.csproj</c>・.sln 内の相対パスへ使われるため、出力フォルダ外への書き込みを防ぐ目的で検証する。
+    /// パス区切り文字・絶対パス・<c>"."</c>/<c>".."</c>・<see cref="Path.GetInvalidFileNameChars"/> に含まれる文字を拒否する
+    /// （検証水準は <see cref="MockFolderStore"/> の画面ファイル名検証に合わせる。Windows 予約名 (<c>CON</c> 等) は
+    /// 画面ファイル名検証と同様に対象外＝同水準）。第2ステップの生成可否判定（<see cref="MockGenerationDialogViewModel"/>）と
+    /// <see cref="Scaffold"/> の入力検証の双方から呼ばれる共有ロジック。
+    /// </remarks>
+    internal static bool IsValidProjectName(string? projectName)
+    {
+        if (string.IsNullOrWhiteSpace(projectName))
+        {
+            return false;
+        }
+
+        if (
+            projectName.Contains('/', StringComparison.Ordinal)
+            || projectName.Contains('\\', StringComparison.Ordinal)
+            || Path.IsPathRooted(projectName)
+        )
+        {
+            return false;
+        }
+
+        if (projectName is "." or "..")
+        {
+            return false;
+        }
+
+        return projectName.IndexOfAny(Path.GetInvalidFileNameChars()) < 0;
     }
 
     /// <summary>プロジェクト名を C# 名前空間として妥当な形へ正規化する（識別子でない文字を除去・数字始まりを回避）</summary>

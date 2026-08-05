@@ -372,6 +372,12 @@ namespace QuickER.AI.Mock.Resources {
             }
         }
 
+        public static string Mock_DisabledReason_ProjectNameInvalid {
+            get {
+                return ResourceManager.GetString("Mock_DisabledReason_ProjectNameInvalid", resourceCulture);
+            }
+        }
+
         public static string Mock_ConversationStarted {
             get {
                 return ResourceManager.GetString("Mock_ConversationStarted", resourceCulture);

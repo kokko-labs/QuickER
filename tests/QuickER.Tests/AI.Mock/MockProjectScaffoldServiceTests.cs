@@ -177,6 +177,71 @@ public class MockProjectScaffoldServiceTests
         }
     }
 
+    /// <summary>不正なプロジェクト名（トラバーサル・絶対パス・パス区切り・不正文字）は ArgumentException になることを検証する</summary>
+    /// <remarks>出力フォルダ外への書き込み（<c>Path.Combine(outputDirectory, projectName)</c> 等）を防ぐための検証。</remarks>
+    [Theory(DisplayName = "不正なプロジェクト名は ArgumentException")]
+    [InlineData("..\\outside")]
+    [InlineData("../outside")]
+    [InlineData("..")]
+    [InlineData(".")]
+    [InlineData("C:\\Windows")]
+    [InlineData("sub/dir")]
+    [InlineData("sub\\dir")]
+    [InlineData("bad:name")]
+    [InlineData("bad*name")]
+    public void Scaffold_InvalidProjectName_Throws(string projectName)
+    {
+        var folder = NewTempFolder();
+        var service = new MockProjectScaffoldService(BuildRegistry());
+
+        try
+        {
+            var act = () =>
+                service.Scaffold(
+                    BuildDiagram(SqlServerProvider.ProviderName),
+                    folder,
+                    projectName,
+                    // 検証は Scaffold の入口で完結する（本テストではモックフォルダの実在は不要）
+                    "unused-mock-folder",
+                    MockProjectTargetProfile.Wpf
+                );
+
+            act.Should().Throw<ArgumentException>();
+
+            // 出力フォルダ自体も作成されない（検証は副作用の前で完結する）
+            Directory.Exists(folder).Should().BeFalse();
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary><see cref="MockProjectScaffoldService.IsValidProjectName"/> が妥当な名前を許可することを検証する</summary>
+    [Theory(DisplayName = "妥当なプロジェクト名は IsValidProjectName で許可される")]
+    [InlineData("AcmeMock")]
+    [InlineData("Acme.Mock")]
+    [InlineData("Acme_Mock2")]
+    [InlineData("MockApp")]
+    public void IsValidProjectName_AcceptsValidNames(string projectName) =>
+        MockProjectScaffoldService.IsValidProjectName(projectName).Should().BeTrue();
+
+    /// <summary><see cref="MockProjectScaffoldService.IsValidProjectName"/> が不正な名前・空文字・null を拒否することを検証する</summary>
+    [Theory(DisplayName = "不正なプロジェクト名は IsValidProjectName で拒否される")]
+    [InlineData("..\\outside")]
+    [InlineData("../outside")]
+    [InlineData("..")]
+    [InlineData(".")]
+    [InlineData("C:\\Windows")]
+    [InlineData("sub/dir")]
+    [InlineData("sub\\dir")]
+    [InlineData("bad:name")]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData(null)]
+    public void IsValidProjectName_RejectsInvalidNames(string? projectName) =>
+        MockProjectScaffoldService.IsValidProjectName(projectName).Should().BeFalse();
+
     /// <summary>SQL Server 方言の図ではQuickER の SQL Server Repository（と SqlClient 依存）が出力されることを検証する</summary>
     [Fact(DisplayName = "SQL Server 方言ではQuickER 版 Repository と SqlClient 依存を出す")]
     public void Scaffold_SqlServer_EmitsRepositoryAndAdoPackage()

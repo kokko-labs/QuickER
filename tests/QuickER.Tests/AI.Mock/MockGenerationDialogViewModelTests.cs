@@ -1058,6 +1058,47 @@ public class MockGenerationDialogViewModelTests
         }
     }
 
+    /// <summary>
+    /// 不正なプロジェクト名（トラバーサル・パス区切り等）では生成不可となり、専用の理由が案内されることを検証する。
+    /// 出力フォルダ外への書き込みを防ぐ UI 側の事前ガード（サービス層の検証は
+    /// <c>MockProjectScaffoldServiceTests.Scaffold_InvalidProjectName_Throws</c> が検証する）。
+    /// </summary>
+    [Theory(DisplayName = "不正なプロジェクト名では生成不可・専用の理由が出る")]
+    [InlineData("..\\outside")]
+    [InlineData("../outside")]
+    [InlineData("sub/dir")]
+    [InlineData("bad:name")]
+    public async Task CanGenerateMockProject_FalseForInvalidProjectName(string invalidName)
+    {
+        var (vm, engineBox, generator, baseFolder, mockFolder) = CreateVmWithGenerator(
+            NonEmptyDiagram()
+        );
+
+        try
+        {
+            generator.ClaudeAvailable = true;
+            generator.DotnetAvailable = true;
+            await vm.RefreshMockGenAvailabilityAsync();
+
+            await SaveScreenOnClaudeCode(vm, engineBox, mockFolder);
+            vm.OutputFolder = Path.Combine(baseFolder, "out");
+            vm.ProjectName = "AcmeMock";
+
+            // 妥当な名前では条件が揃う
+            vm.CanGenerateMockProject.Should().BeTrue();
+
+            // 不正な名前にすると不可になり、専用の理由が出る（空欄時の理由とは区別される）
+            vm.ProjectName = invalidName;
+            vm.CanGenerateMockProject.Should().BeFalse();
+            vm.MockGenDisabledReason.Should()
+                .Be(MockStrings.Mock_DisabledReason_ProjectNameInvalid);
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
     /// <summary>claude CLI 未検出では生成不可・理由が案内されることを検証する</summary>
     [Fact(DisplayName = "claude 未検出では生成不可")]
     public async Task CanGenerateMockProject_FalseWhenClaudeMissing()
