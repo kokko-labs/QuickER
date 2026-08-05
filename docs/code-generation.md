@@ -21,6 +21,8 @@ By default, an Entity is decorated with DataAnnotations and **DB-definition meta
 
 > **Prerequisite**: Repository generation targets a single primary key with application-assigned keys (tables with a composite key or DB auto-numbering can only use the Entity / EditModel).
 
+> **Target framework**: The generated code is developed and verified on .NET 10. It also builds on .NET 8 as things stand, but that is not guaranteed. The runtime NuGet packages target `net10.0` only, so package-reference mode requires .NET 10.
+
 ## Value objects (GenerateValueObjects)
 
 This option generates columns as a **per-column value-object type** (`CustomerIdValue` / `NameValue`, etc.) instead of a raw type (`int` / `string`, etc.) (default OFF; CLI `--generate-value-objects` / `GenerateValueObjects` in quicker.json / the "Turn all columns into value objects" checkbox in the "Value Objects" row of the GUI). It can be chosen regardless of the DB-access selection (None / QuickER Repository / EF Core Repository), and it combines with multi-target, in-memory, and remote.

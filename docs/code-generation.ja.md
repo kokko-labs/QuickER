@@ -21,6 +21,8 @@ Entity には既定で DataAnnotations と **DB 定義メタ属性**（`[DbTable
 
 > **前提**: Repository の生成は単一主キー・アプリ側採番が対象です（複合キー・DB 自動採番のテーブルは Entity / EditModel のみ利用できます）。
 
+> **対象フレームワーク**: 生成コードは .NET 10 で開発・検証しています。現状は .NET 8 でもビルドできますが、保証はしません。ランタイム NuGet パッケージは `net10.0` 単独のため、パッケージ参照モードは .NET 10 が必要です。
+
 ## 値オブジェクト（GenerateValueObjects）
 
 列を素の型（`int` / `string` など）でなく、列ごとの**値オブジェクト型**（`CustomerIdValue` / `NameValue` など）として生成するオプションです（既定 OFF。CLI の `--generate-value-objects` / quicker.json の `GenerateValueObjects` / GUI「値オブジェクト」行の「全カラムを値オブジェクト化」チェックボックス）。DB アクセスの選択（なし / QuickER 版 Repository / EF Core 版 Repository）に依らず選択でき、マルチターゲット・インメモリ・リモートとも併用できます。
