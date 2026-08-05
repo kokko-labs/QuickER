@@ -45,14 +45,19 @@ public sealed class SyncPlanner
 {
     /// <summary>
     /// セクションの出力順序。依存関係による失敗を避けるため、
-    /// テーブル / 列の追加 → FK 解除 → 列 / テーブル削除 → FK 追加 → 説明設定の順に並べる。
+    /// テーブル / 列の追加 → FK 解除 → 列定義変更 → 列 / テーブル削除 → FK 追加 → 説明設定の順に並べる。
     /// </summary>
+    /// <remarks>
+    /// FK 解除（DropForeignKey）を列定義変更（AlterColumn）より前に置くのは、FK が張られた列の型を変更しようとすると
+    /// 依存エラーになる方言があるため（SQL Server の Msg 5074）。「FK を外す」と「同じ列の型を変える」を同時に
+    /// 選択したケースを通すには、先に FK を外しておく必要がある。
+    /// </remarks>
     private static readonly SchemaDiffKind[] SectionOrder =
     [
         SchemaDiffKind.AddTable,
         SchemaDiffKind.AddColumn,
-        SchemaDiffKind.AlterColumn,
         SchemaDiffKind.DropForeignKey,
+        SchemaDiffKind.AlterColumn,
         SchemaDiffKind.DropColumn,
         SchemaDiffKind.DropTable,
         SchemaDiffKind.AddForeignKey,

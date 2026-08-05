@@ -58,13 +58,15 @@ public class SyncPlannerTests
             new SyncDialectCapabilities()
         );
 
+        // DropForeignKey が AlterColumn より先なのは意図的:
+        // FK 依存列の型変更を通すため、先に FK を外しておく必要がある（SQL Server は Msg 5074 で失敗する）
         plan.Sections.Select(s => s.Kind)
             .Should()
             .Equal(
                 SchemaDiffKind.AddTable,
                 SchemaDiffKind.AddColumn,
-                SchemaDiffKind.AlterColumn,
                 SchemaDiffKind.DropForeignKey,
+                SchemaDiffKind.AlterColumn,
                 SchemaDiffKind.DropColumn,
                 SchemaDiffKind.DropTable,
                 SchemaDiffKind.AddForeignKey,

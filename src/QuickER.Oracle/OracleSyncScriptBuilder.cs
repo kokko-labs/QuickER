@@ -13,8 +13,8 @@ namespace QuickER.Oracle;
 /// <list type="number">
 ///   <item>AddTable</item>
 ///   <item>AddColumn</item>
+///   <item>DropForeignKey（FK 依存列の型変更・列/テーブル削除より前に外す）</item>
 ///   <item>AlterColumn</item>
-///   <item>DropForeignKey（列・テーブル削除より前に外す）</item>
 ///   <item>DropColumn</item>
 ///   <item>DropTable</item>
 ///   <item>AddForeignKey</item>

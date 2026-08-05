@@ -249,6 +249,51 @@ public class SqlServerSyncScriptBuilderTests
         sql.Should().Contain("DROP CONSTRAINT [FK_Order_CustomerRef]");
     }
 
+    /// <summary>
+    /// 同一列の DropForeignKey と AlterColumn を両方選択したとき、DROP CONSTRAINT が ALTER COLUMN より
+    /// 先に出力されることを検証する（FK が張られたままの列は型変更できない＝SQL Server の Msg 5074）
+    /// </summary>
+    [Fact(DisplayName = "実行順序: 同一列の DropForeignKey → AlterColumn")]
+    public void Order_DropFk_Then_AlterColumn_OnSameColumn()
+    {
+        var customer = new Entity { TableName = "Customer" };
+        var order = new Entity { TableName = "Order" };
+
+        var items = new[]
+        {
+            // 入力は「型変更が先」の並びにして、プランナーが順序を入れ替えることを確かめる
+            new SchemaDiffItem
+            {
+                Kind = SchemaDiffKind.AlterColumn,
+                TableName = "Order",
+                ColumnName = "CustomerId",
+                Column = new Column
+                {
+                    Name = "CustomerId",
+                    DataType = "bigint",
+                    IsNullable = false,
+                },
+                IsSelected = true,
+            },
+            new SchemaDiffItem
+            {
+                Kind = SchemaDiffKind.DropForeignKey,
+                TableName = "Order",
+                ColumnName = "CustomerId",
+                ParentEntity = customer,
+                ChildEntity = order,
+                ForeignKeyName = "FK_Order_CustomerRef",
+                IsSelected = true,
+            },
+        };
+
+        var sql = BuildScript(new SqlServerSyncScriptBuilder(), items);
+        var iDropFk = sql.IndexOf("DROP CONSTRAINT [FK_Order_CustomerRef]");
+        var iAlter = sql.IndexOf("ALTER COLUMN [CustomerId]");
+        iDropFk.Should().BeGreaterThan(-1);
+        iAlter.Should().BeGreaterThan(iDropFk);
+    }
+
     /// <summary>依存関係を満たすよう CREATE → ADD COLUMN → ADD CONSTRAINT の順で出力されることを検証する</summary>
     [Fact(DisplayName = "実行順序: AddTable → AddColumn → AddForeignKey")]
     public void Order_AddTable_Then_AddColumn_Then_Fk()
