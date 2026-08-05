@@ -12,6 +12,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Metadata;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace QuickER.Tests.GeneratedBinaryFixture;
 
@@ -80,6 +81,7 @@ public static class GeneratedRemoteEndpoints
         }
         catch (Exception ex)
         {
+            LogServerError(context, ex);
             context.Response.StatusCode = StatusCodes.Status500InternalServerError;
             await context.Response.WriteAsJsonAsync(
                 new RemoteError { Type = "Error", Message = ex.Message },
@@ -103,6 +105,31 @@ public static class GeneratedRemoteEndpoints
     /// <summary>Resolves the remote-surface repository from DI.</summary>
     private static TRepository Repository<TRepository>(HttpContext context)
         where TRepository : notnull => context.RequestServices.GetRequiredService<TRepository>();
+
+    /// <summary>Logs an unhandled exception that is about to be reported to the client as a 500 response.</summary>
+    /// <remarks>
+    /// The response body carries only the exception message (so that the client can restore the exception type),
+    /// therefore the full exception - including the stack trace - is recorded here on the server side.
+    /// Logging is optional: when the host has no <c>ILoggerFactory</c> registered this is a no-op and the behavior
+    /// is unchanged.
+    /// </remarks>
+    private static void LogServerError(HttpContext context, Exception ex)
+    {
+        var loggerFactory = context.RequestServices.GetService<ILoggerFactory>();
+
+        if (loggerFactory is null)
+        {
+            return;
+        }
+
+        var logger = loggerFactory.CreateLogger("QuickER.RemoteServer");
+        logger.LogError(
+            ex,
+            "An unhandled exception occurred while handling {Method} {Path}.",
+            context.Request.Method,
+            context.Request.Path
+        );
+    }
 
     /// <summary>Restores the primary key from the URL query (<c>?id=</c>) using the same JSON rules as the client's <c>FormatKeyForQuery</c>.</summary>
     private static TKey ParseKeyFromQuery<TKey>(HttpContext context)
@@ -150,6 +177,7 @@ public static class GeneratedRemoteEndpoints
         }
         catch (Exception ex) when (!context.Response.HasStarted)
         {
+            LogServerError(context, ex);
             context.Response.StatusCode = StatusCodes.Status500InternalServerError;
             await context.Response.WriteAsJsonAsync(
                 new RemoteError { Type = "Error", Message = ex.Message },
@@ -187,6 +215,7 @@ public static class GeneratedRemoteEndpoints
         }
         catch (Exception ex) when (!context.Response.HasStarted)
         {
+            LogServerError(context, ex);
             context.Response.StatusCode = StatusCodes.Status500InternalServerError;
             await context.Response.WriteAsJsonAsync(
                 new RemoteError { Type = "Error", Message = ex.Message },
@@ -208,6 +237,7 @@ public static class GeneratedRemoteEndpoints
         }
         catch (Exception ex) when (!context.Response.HasStarted)
         {
+            LogServerError(context, ex);
             context.Response.StatusCode = StatusCodes.Status500InternalServerError;
             await context.Response.WriteAsJsonAsync(
                 new RemoteError { Type = "Error", Message = ex.Message },

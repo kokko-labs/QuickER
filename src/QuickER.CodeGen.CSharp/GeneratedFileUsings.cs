@@ -353,6 +353,7 @@ internal static class GeneratedFileUsings
             // RemoteServer: ASP.NET Core Minimal API のエンドポイントマッピング。
             //   MapGroup/MapPost（Microsoft.AspNetCore.Builder / Routing）、HttpContext・ReadFromJsonAsync・
             //   WriteAsJsonAsync（Microsoft.AspNetCore.Http）、リポジトリ解決（Microsoft.Extensions.DependencyInjection）、
+            //   500 応答時のサーバー側ログ（ILoggerFactory／LogError＝Microsoft.Extensions.Logging・共有フレームワーク内）、
             //   ハンドラの Func<Task<object?>>（System）・非同期（System.Threading.Tasks）。
             //   このバケットのファイルは FrameworkReference（Microsoft.AspNetCore.App）を持つプロジェクトに置く前提。
             case GenerationBucket.RemoteServer:
@@ -363,6 +364,7 @@ internal static class GeneratedFileUsings
                 yield return "Microsoft.AspNetCore.Http";
                 yield return "Microsoft.AspNetCore.Routing";
                 yield return "Microsoft.Extensions.DependencyInjection";
+                yield return "Microsoft.Extensions.Logging";
 
                 // 無制限バイナリ列のバイナリエンドポイント: 応答遅延ストリーム（Stream＝System.IO）・
                 // キー復元（JsonSerializer＝System.Text.Json）・CancellationToken（System.Threading）・

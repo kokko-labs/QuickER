@@ -2158,7 +2158,16 @@ public static class GeneratedHttpRemoteRepositoryServiceCollectionExtensions
     }
 
     /// <summary>Registers the HTTP client implementations using an HttpClient factory (when configuring authentication handlers etc.).</summary>
-    /// <remarks>The HttpClient returned by the factory must have a BaseAddress that includes the prefix and ends with a trailing /.</remarks>
+    /// <remarks>
+    /// <para>
+    /// The HttpClient returned by the factory must have a BaseAddress that includes the prefix and ends with a trailing /.
+    /// </para>
+    /// <para>
+    /// Ownership contract: the factory is invoked every time a repository is resolved (once per scope and per entity),
+    /// and the returned HttpClient is disposed by neither the generated code nor the DI container. Return a shared
+    /// instance, or one managed by <c>IHttpClientFactory</c>; creating a new HttpClient on every call exhausts sockets.
+    /// </para>
+    /// </remarks>
     /// <param name="services">The service collection to register into</param>
     /// <param name="httpClientFactory">A factory returning the HttpClient to use when creating a repository</param>
     public static IServiceCollection AddGeneratedHttpRemoteRepositories(

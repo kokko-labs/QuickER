@@ -458,7 +458,9 @@ app.Run();
 - **名前付きクエリは実装方式（簡易 DSL／生 SQL／手動実装）に依らず全部**リモート面経由で呼び出せます（実装の実体はサーバー側のリポジトリ）
 - **例外は型が復元されます**: サーバーの `SaveConflictException` は HTTP 409 を介してクライアントでも `SaveConflictException` として送出され（直結時と同じ catch が機能）、その他のサーバー例外は `RemoteRepositoryException`（ステータスコード・メッセージ保持）になります
 - **グラフ保存（Save）成功後はローカルの RowState も確定**します（直結時と同じ挙動）
+- **500 応答にはサーバー側例外のメッセージがそのまま載ります**。これは意図的な設計で、クライアントが失敗内容を復元し「直結時と同じ catch」を成立させるための情報です。スタックトレースを含む例外全体はサーバー側だけに記録されます（`ILoggerFactory` 経由・カテゴリ `QuickER.RemoteServer`。ロギング未構成のホストでは何もしません）。信頼境界の外へ公開する場合は、認可か例外変換ミドルウェアを併用して内部情報が応答へ漏れないようにしてください
 - 認証・TLS はスコープ外です。クライアントは `AddGeneratedHttpRemoteRepositories(Func<IServiceProvider, HttpClient>)` で認証ハンドラ付きの HttpClient を構成し、サーバーは `MapGeneratedRemoteEndpoints()` の戻り値（`RouteGroupBuilder`）へ ASP.NET Core の認可を付与してください
+- **ファクトリ版が返す HttpClient の所有権は呼び出し側にあります**。`AddGeneratedHttpRemoteRepositories(Func<IServiceProvider, HttpClient>)` はリポジトリ解決のたび（スコープ×エンティティ数だけ）ファクトリを呼び出し、返された HttpClient は生成コードも DI コンテナも破棄しません。共有インスタンスか `IHttpClientFactory` 管理のインスタンスを返してください（毎回 new するとソケットが枯渇します）。ベースアドレス版は内部で共有インスタンスを 1 つ作るため、この注意は不要です
 - サーバーファイルは ASP.NET Core の FrameworkReference（`Microsoft.AspNetCore.App`）が必要です（SDK が `Microsoft.NET.Sdk.Web` のプロジェクトなら追加設定不要）
 
 ### バイナリ転送エンドポイント（無制限バイナリ列の Stream アクセサ）

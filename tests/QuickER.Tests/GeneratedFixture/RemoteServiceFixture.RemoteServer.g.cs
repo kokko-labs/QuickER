@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace QuickER.Tests.GeneratedRemoteServiceFixture;
 
@@ -76,6 +77,7 @@ public static class GeneratedRemoteEndpoints
         }
         catch (Exception ex)
         {
+            LogServerError(context, ex);
             context.Response.StatusCode = StatusCodes.Status500InternalServerError;
             await context.Response.WriteAsJsonAsync(
                 new RemoteError { Type = "Error", Message = ex.Message },
@@ -99,6 +101,31 @@ public static class GeneratedRemoteEndpoints
     /// <summary>Resolves the remote-surface repository from DI.</summary>
     private static TRepository Repository<TRepository>(HttpContext context)
         where TRepository : notnull => context.RequestServices.GetRequiredService<TRepository>();
+
+    /// <summary>Logs an unhandled exception that is about to be reported to the client as a 500 response.</summary>
+    /// <remarks>
+    /// The response body carries only the exception message (so that the client can restore the exception type),
+    /// therefore the full exception - including the stack trace - is recorded here on the server side.
+    /// Logging is optional: when the host has no <c>ILoggerFactory</c> registered this is a no-op and the behavior
+    /// is unchanged.
+    /// </remarks>
+    private static void LogServerError(HttpContext context, Exception ex)
+    {
+        var loggerFactory = context.RequestServices.GetService<ILoggerFactory>();
+
+        if (loggerFactory is null)
+        {
+            return;
+        }
+
+        var logger = loggerFactory.CreateLogger("QuickER.RemoteServer");
+        logger.LogError(
+            ex,
+            "An unhandled exception occurred while handling {Method} {Path}.",
+            context.Request.Method,
+            context.Request.Path
+        );
+    }
 
     /// <summary>Maps the common CRUD operations (GetById / GetAll / Insert / Update / Delete / Save / SaveMany).</summary>
     private static void MapCrud<TEntity, TKey, TRepository>(
