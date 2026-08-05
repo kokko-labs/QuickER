@@ -964,6 +964,12 @@ namespace QuickER.Resources {
             }
         }
 
+        public static string Confirm_OpenDiagram {
+            get {
+                return ResourceManager.GetString("Confirm_OpenDiagram", resourceCulture);
+            }
+        }
+
         public static string Confirm_NewerDocumentFormat {
             get {
                 return ResourceManager.GetString("Confirm_NewerDocumentFormat", resourceCulture);
@@ -1039,6 +1045,18 @@ namespace QuickER.Resources {
         public static string Import_Failed {
             get {
                 return ResourceManager.GetString("Import_Failed", resourceCulture);
+            }
+        }
+
+        public static string Open_Failed {
+            get {
+                return ResourceManager.GetString("Open_Failed", resourceCulture);
+            }
+        }
+
+        public static string Save_Failed {
+            get {
+                return ResourceManager.GetString("Save_Failed", resourceCulture);
             }
         }
         

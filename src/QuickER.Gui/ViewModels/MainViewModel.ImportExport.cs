@@ -980,6 +980,9 @@ public partial class MainViewModel
     /// <remarks>
     /// 書き込み前後で監視を一時停止し、自分の保存が外部変更として跳ね返らないようにする
     /// （<see cref="DocumentFileWatcher.ExpectedHashProvider"/> のハッシュ比較と二重の抑止）。
+    /// 書き込みは <see cref="JsonStorageService.SaveAtomic"/>（一時ファイル経由の差し替え）で行い、
+    /// 途中で落ちてもユーザーのファイルが半端な JSON にならないようにする。失敗時は通知のうえ
+    /// 文書アイデンティティ（現在パス・ハッシュ・クリーン状態）を更新せず、ダーティのまま保持する。
     /// </remarks>
     private void SaveToPath(string path)
     {
@@ -987,8 +990,16 @@ public partial class MainViewModel
 
         try
         {
-            JsonStorageService.Save(path, ToDocument());
+            JsonStorageService.SaveAtomic(path, ToDocument());
             UpdateDocumentIdentity(path);
+        }
+        catch (Exception ex)
+        {
+            // 保存できていないのにクリーン扱いにすると編集内容を失う。ダーティのまま通知して再保存へ促す
+            _dialogs.ShowError(
+                Strings.Save_Failed + Environment.NewLine + ex.Message,
+                Strings.Common_Error
+            );
         }
         finally
         {
@@ -997,6 +1008,12 @@ public partial class MainViewModel
     }
 
     /// <summary>JSON ファイルからダイアグラムを読み込み、現在の図と置換する（ダイアログ表示）</summary>
+    /// <remarks>
+    /// 読込は現在の図を丸ごと置き換えるため、失うものがあるときは他の置換経路と同じ確認
+    /// （<see cref="DialogServiceExtensions.ConfirmDiscard"/>）を通す。読込自体は
+    /// <see cref="TryLoadDiagramDocument"/> 経由とし、破損 JSON・無関係な JSON・IO 失敗では
+    /// 現在の図も現在パスも一切変えずに通知するだけにする（無言の全消し・別ファイルへの誤紐付けを防ぐ）。
+    /// </remarks>
     [RelayCommand]
     private void Open()
     {
@@ -1007,7 +1024,28 @@ public partial class MainViewModel
             return;
         }
 
-        var document = JsonStorageService.Load(picked.Path);
+        // 空でクリーン（＝失うものがない）ときは従来どおり無確認で開く
+        if (
+            (Entities.Count > 0 || IsDirty)
+            && !_dialogs.ConfirmDiscard(
+                IsDirty,
+                Strings.Confirm_OpenDiagram,
+                Strings.Common_Confirm
+            )
+        )
+        {
+            return;
+        }
+
+        // 破損 JSON・非 DiagramDocument JSON・IO 失敗は現状維持のうえ通知する
+        if (!TryLoadDiagramDocument(picked.Path, out var document) || document is null)
+        {
+            _dialogs.ShowError(
+                string.Format(Strings.Open_Failed, picked.Path),
+                Strings.Common_Error
+            );
+            return;
+        }
 
         // 新しいフォーマットの文書は未対応のデータが失われる可能性があるため、開く前に確認する
         if (document.IsNewerFormat)

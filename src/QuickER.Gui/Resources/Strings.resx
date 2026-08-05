@@ -470,6 +470,9 @@
   <data name="Confirm_ClearDiagram" xml:space="preserve">
     <value>This will clear the current diagram. Are you sure?</value>
   </data>
+  <data name="Confirm_OpenDiagram" xml:space="preserve">
+    <value>Opening a file replaces the current diagram. Are you sure?</value>
+  </data>
   <data name="Confirm_NewerDocumentFormat" xml:space="preserve">
     <value>This file was saved in a newer format (v{0}) than this version of QuickER supports (up to v{1}). Unsupported data may be lost if you continue. Open anyway?</value>
   </data>
@@ -508,6 +511,12 @@
   </data>
   <data name="Import_Failed" xml:space="preserve">
     <value>Failed to import.</value>
+  </data>
+  <data name="Open_Failed" xml:space="preserve">
+    <value>Could not open "{0}". The file is not a QuickER diagram, or it is corrupted or unreadable. The current diagram was kept.</value>
+  </data>
+  <data name="Save_Failed" xml:space="preserve">
+    <value>Failed to save. Your changes were kept as unsaved; try saving again or save to another location.</value>
   </data>
   <data name="ExportFormat_Png" xml:space="preserve">
     <value>PNG Image</value>

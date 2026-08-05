@@ -480,6 +480,9 @@
   <data name="Confirm_ClearDiagram" xml:space="preserve">
     <value>現在のダイアグラムをクリアします。よろしいですか？</value>
   </data>
+  <data name="Confirm_OpenDiagram" xml:space="preserve">
+    <value>ファイルを開くと現在の図は置き換えられます。よろしいですか？</value>
+  </data>
   <data name="Confirm_NewerDocumentFormat" xml:space="preserve">
     <value>このファイルはこのバージョンの QuickER が対応するより新しいフォーマット（v{0}。対応は v{1} まで）で保存されています。続行すると未対応のデータが失われる可能性があります。開きますか？</value>
   </data>
@@ -518,6 +521,12 @@
   </data>
   <data name="Import_Failed" xml:space="preserve">
     <value>取り込めませんでした。</value>
+  </data>
+  <data name="Open_Failed" xml:space="preserve">
+    <value>「{0}」を開けませんでした。QuickER の図ファイルではないか、破損しているか、読み取れません。現在の図はそのまま維持しました。</value>
+  </data>
+  <data name="Save_Failed" xml:space="preserve">
+    <value>保存できませんでした。変更は未保存のまま維持しています。もう一度保存するか、別の場所へ保存してください。</value>
   </data>
   <data name="ExportFormat_Png" xml:space="preserve">
     <value>PNG 画像</value>
