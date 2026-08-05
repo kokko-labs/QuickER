@@ -82,6 +82,12 @@
   <data name="CodeGen_Error_EmptyTableName" xml:space="preserve">
     <value>テーブル名が空のエンティティがあります。</value>
   </data>
+  <data name="CodeGen_Error_EntityClassNameCollision" xml:space="preserve">
+    <value>テーブル {1} のエンティティクラス名がいずれも '{0}' になります。エンティティクラスは partial のため 1 つのクラスへ統合され、コンパイルできません。生成されるクラス名が異なるようテーブル名を変更してください（テーブル名は単数形化されるため、'customer' と 'customers' はどちらも 'CustomerEntity' になります）。</value>
+  </data>
+  <data name="CodeGen_Error_InvalidNamespace" xml:space="preserve">
+    <value>'{0}' オプションの名前空間 '{1}' が C# の名前空間として不正です。'.' 区切りの各セグメントは有効な識別子（先頭は文字か '_'、以降は文字・数字・'_'）である必要があります。</value>
+  </data>
   <data name="CodeGen_Warning_CompositeKey" xml:space="preserve">
     <value>テーブル '{0}' は複合主キーのため [Key] 属性生成は最小限になります。MVP では単一主キーを推奨します。</value>
   </data>

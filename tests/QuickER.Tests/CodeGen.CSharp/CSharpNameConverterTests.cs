@@ -158,6 +158,45 @@ public sealed class CSharpNameConverterTests
     }
 
     [Fact(
+        DisplayName = "単数形化の副作用で異なるテーブル名が同じエンティティ名に畳まれる（customer / customers → CustomerEntity）"
+    )]
+    public void ToEntityClassName_SingularizationCanCollideAcrossTables()
+    {
+        // 単数形化（末尾 s 除去）はテーブル名の表記ゆれを吸収する一方、綴りの違う 2 テーブルを同名クラスへ
+        // 畳んでしまう。Entity は partial クラスのため黙って統合され、コンパイル不能な出力になる。
+        // 変換規則側は現状維持とし、生成前検証（CSharpCodeGenerationService）がエラーで止める意図を固定する。
+        var diagram = new ErDiagram
+        {
+            Entities =
+            [
+                new Entity
+                {
+                    Id = Guid.NewGuid(),
+                    TableName = "customer",
+                    Columns = [Column("customer_id", primaryKey: true)],
+                },
+                new Entity
+                {
+                    Id = Guid.NewGuid(),
+                    TableName = "customers",
+                    Columns = [Column("customer_id", primaryKey: true)],
+                },
+            ],
+        };
+
+        var result = new CSharpCodeGenerationService().Generate(
+            diagram,
+            new CodeGenerationOptions { RootNamespace = "Sample.Domain" }
+        );
+
+        result.HasErrors.Should().BeTrue();
+        result.Files.Should().BeEmpty();
+        result
+            .Diagnostics.Should()
+            .Contain(diagnostic => diagnostic.Message.Contains("CustomerEntity"));
+    }
+
+    [Fact(
         DisplayName = "数字始まり・記号のみのテーブル名は、先頭に \"_\" 前置／\"Generated\" フォールバックでエンティティ名になる"
     )]
     public void ToEntityClassName_DigitLeadingAndSymbolOnlyTableNames()

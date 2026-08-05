@@ -2,7 +2,6 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
-using System.Text.RegularExpressions;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using QuickER.CodeGen.CSharp;
@@ -17,7 +16,8 @@ namespace QuickER.CodeGen.UI;
 /// <summary>C# コード生成ダイアログの ViewModel</summary>
 /// <remarks>
 /// 設定は <see cref="CSharpGenerationSettingsStore"/> で永続化し、生成確定時に保存・次回構築時に復元する。
-/// <see cref="GeneratedRegex"/> を利用するため partial クラスとして定義する
+/// MVVM ツールキットのソースジェネレーター（<c>[ObservableProperty]</c> / <c>[RelayCommand]</c>）を
+/// 利用するため partial クラスとして定義する
 /// </remarks>
 public partial class CSharpGenerationDialogViewModel : ObservableObject
 {
@@ -1000,19 +1000,12 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
         return true;
     }
 
-    /// <summary>namespace として妥当な形式かを各セグメントの識別子検証で簡易判定する</summary>
-    private static bool IsValidNamespace(string value)
-    {
-        var segments = value.Split(
-            '.',
-            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries
-        );
-        return segments.Length > 0 && segments.All(segment => IdentifierRegex().IsMatch(segment));
-    }
-
-    /// <summary>C# 識別子として有効なセグメントにマッチする正規表現</summary>
-    [GeneratedRegex(@"^[_\p{L}][\p{L}\p{Nd}_]*$", RegexOptions.CultureInvariant)]
-    private static partial Regex IdentifierRegex();
+    /// <summary>namespace として妥当な形式かを判定する</summary>
+    /// <remarks>
+    /// 判定規則は生成前検証（<c>CSharpCodeGenerationService</c>）と共有するため
+    /// <see cref="CSharpNamespaceValidator"/> へ委譲する（GUI と CLI / MCP で判定をずらさない）
+    /// </remarks>
+    private static bool IsValidNamespace(string value) => CSharpNamespaceValidator.IsValid(value);
 }
 
 /// <summary>C# コード生成ダイアログの確定結果</summary>

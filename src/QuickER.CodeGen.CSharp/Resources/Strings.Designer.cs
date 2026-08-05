@@ -102,6 +102,18 @@ namespace QuickER.CodeGen.CSharp.Resources {
             }
         }
 
+        public static string CodeGen_Error_EntityClassNameCollision {
+            get {
+                return ResourceManager.GetString("CodeGen_Error_EntityClassNameCollision", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Error_InvalidNamespace {
+            get {
+                return ResourceManager.GetString("CodeGen_Error_InvalidNamespace", resourceCulture);
+            }
+        }
+
         public static string CodeGen_Warning_CompositeKey {
             get {
                 return ResourceManager.GetString("CodeGen_Warning_CompositeKey", resourceCulture);

@@ -486,7 +486,8 @@ public sealed class CSharpCodeGenerationService
     /// </summary>
     /// <remarks>
     /// エラー: エンティティが存在しない、テーブル名が空、生成対象間の依存違反
-    /// （Mapper は EditModel が必要、Repository / EF Core / インメモリは DataAnnotations が必要）。
+    /// （Mapper は EditModel が必要、Repository / EF Core / インメモリは DataAnnotations が必要）、
+    /// 名前空間オプションの形式不正、エンティティクラス名の衝突。
     /// Entity は常時生成されるため「生成対象なし」「Repository は Entity 必須」は起こらない。
     /// 警告: 複合主キー（[Key] 属性の生成が最小限になる）
     /// </remarks>
@@ -517,6 +518,8 @@ public sealed class CSharpCodeGenerationService
             );
         }
 
+        ValidateNamespaces(options, diagnostics);
+
         if (diagram.Entities.Count == 0)
         {
             diagnostics.Add(GenerationDiagnostic.Error(Strings.CodeGen_Error_NoEntities));
@@ -538,6 +541,151 @@ public sealed class CSharpCodeGenerationService
                 );
             }
         }
+
+        ValidateEntityClassNameUniqueness(diagram, diagnostics);
+    }
+
+    /// <summary>
+    /// エンティティクラス名（テーブル名由来）が図の中で一意であることを検証する
+    /// </summary>
+    /// <remarks>
+    /// テーブル名は単数形化してからクラス名にするため、<c>customer</c> と <c>customers</c> のように
+    /// 綴りが違うテーブルでも同じクラス名（<c>CustomerEntity</c>）になりうる。生成 Entity は partial クラスのため
+    /// 同名クラスは 1 つへ統合され、EditModel の partial メソッド重複などでコンパイル不能な出力が
+    /// 診断なしに書き出される。ここで衝突を検出して生成を止める。
+    /// EditModel / Mapper / VO も同じ基底名から導出されるため、Entity クラス名の一意性検証で足りる
+    /// （射影 DTO 名の衝突は <see cref="CSharpGenerationModelBuilder"/> のクエリ検証が別途担う）。
+    /// </remarks>
+    private static void ValidateEntityClassNameUniqueness(
+        ErDiagram diagram,
+        ICollection<GenerationDiagnostic> diagnostics
+    )
+    {
+        var converter = new CSharpNameConverter();
+        // 図の並び順で最初に現れたクラス名から順に報告するため、挿入順を保つ辞書へ集約する
+        var tablesByClassName = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        var order = new List<string>();
+
+        foreach (
+            var entity in diagram.Entities.Where(entity =>
+                !string.IsNullOrWhiteSpace(entity.TableName)
+            )
+        )
+        {
+            var className = converter.ToEntityClassName(entity.TableName);
+
+            if (!tablesByClassName.TryGetValue(className, out var tables))
+            {
+                tables = [];
+                tablesByClassName.Add(className, tables);
+                order.Add(className);
+            }
+
+            tables.Add(entity.TableName);
+        }
+
+        foreach (var className in order.Where(name => tablesByClassName[name].Count > 1))
+        {
+            diagnostics.Add(
+                GenerationDiagnostic.Error(
+                    string.Format(
+                        Strings.CodeGen_Error_EntityClassNameCollision,
+                        className,
+                        string.Join(", ", tablesByClassName[className].Select(name => $"'{name}'"))
+                    )
+                )
+            );
+        }
+    }
+
+    /// <summary>
+    /// 名前空間オプションが C# の名前空間として妥当かを検証する
+    /// </summary>
+    /// <remarks>
+    /// 判定は GUI の入力検証と同じ <see cref="CSharpNamespaceValidator"/>（単一正本）で行い、CLI / MCP でも
+    /// 同じ規則を効かせる。空白のオプションは既定値（<c>Generated</c> / <c>{root}.{接尾辞}</c>）へ
+    /// フォールバックするため検証対象外。カテゴリ別名前空間は実際に使われる構成でのみ検証する
+    /// ＝分割時（<see cref="CodeGenerationOptions.SplitFilesByCategory"/>）の有効バケットのみ。
+    /// ただし Repository 名前空間は非分割のマルチ方言レイアウトでも使われるため、
+    /// Repository バケットが有効なら分割の有無に依らず検証する。
+    /// </remarks>
+    private static void ValidateNamespaces(
+        CodeGenerationOptions options,
+        ICollection<GenerationDiagnostic> diagnostics
+    )
+    {
+        AddInvalidNamespaceDiagnostic(
+            nameof(CodeGenerationOptions.RootNamespace),
+            options.RootNamespace,
+            diagnostics
+        );
+
+        var activeBuckets = GeneratedFilePlanner.ActiveBuckets(options);
+
+        (GenerationBucket Bucket, string Name, string? Value)[] categoryNamespaces =
+        [
+            (
+                GenerationBucket.Runtime,
+                nameof(CodeGenerationOptions.RuntimeNamespace),
+                options.RuntimeNamespace
+            ),
+            (
+                GenerationBucket.Entity,
+                nameof(CodeGenerationOptions.EntityNamespace),
+                options.EntityNamespace
+            ),
+            (
+                GenerationBucket.EditModel,
+                nameof(CodeGenerationOptions.EditModelNamespace),
+                options.EditModelNamespace
+            ),
+            (
+                GenerationBucket.Mapper,
+                nameof(CodeGenerationOptions.MapperNamespace),
+                options.MapperNamespace
+            ),
+            (
+                GenerationBucket.Repository,
+                nameof(CodeGenerationOptions.RepositoryNamespace),
+                options.RepositoryNamespace
+            ),
+            (
+                GenerationBucket.ValueObject,
+                nameof(CodeGenerationOptions.ValueObjectNamespace),
+                options.ValueObjectNamespace
+            ),
+        ];
+
+        foreach (var target in categoryNamespaces)
+        {
+            var used =
+                activeBuckets.Contains(target.Bucket)
+                && (options.SplitFilesByCategory || target.Bucket == GenerationBucket.Repository);
+
+            if (used)
+            {
+                AddInvalidNamespaceDiagnostic(target.Name, target.Value, diagnostics);
+            }
+        }
+    }
+
+    /// <summary>名前空間オプションが非空かつ不正な形式のときだけエラー診断を追加する</summary>
+    private static void AddInvalidNamespaceDiagnostic(
+        string optionName,
+        string? value,
+        ICollection<GenerationDiagnostic> diagnostics
+    )
+    {
+        if (string.IsNullOrWhiteSpace(value) || CSharpNamespaceValidator.IsValid(value))
+        {
+            return;
+        }
+
+        diagnostics.Add(
+            GenerationDiagnostic.Error(
+                string.Format(Strings.CodeGen_Error_InvalidNamespace, optionName, value.Trim())
+            )
+        );
     }
 
     /// <summary>

@@ -1978,6 +1978,176 @@ public class CSharpCodeGenerationServiceTests
             );
     }
 
+    /// <summary>
+    /// 単数形化で同じエンティティクラス名になるテーブル（customer / customers）はエラーになり、
+    /// コンパイル不能な出力を書き出さないことを検証する
+    /// </summary>
+    [Fact]
+    public void Generate_CollidingEntityClassNames_ShouldFailWithError()
+    {
+        var diagram = new ErDiagram
+        {
+            Entities =
+            [
+                new Entity
+                {
+                    Id = Guid.NewGuid(),
+                    TableName = "customer",
+                    Columns =
+                    [
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "customer_id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                    ],
+                },
+                new Entity
+                {
+                    Id = Guid.NewGuid(),
+                    TableName = "customers",
+                    Columns =
+                    [
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "customer_id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                    ],
+                },
+            ],
+        };
+
+        var result = new CSharpCodeGenerationService().Generate(
+            diagram,
+            new CodeGenerationOptions { RootNamespace = "Sample.Domain" }
+        );
+
+        result.HasErrors.Should().BeTrue();
+        result.Files.Should().BeEmpty();
+        result
+            .Diagnostics.Should()
+            .Contain(diagnostic =>
+                diagnostic.Severity == GenerationDiagnosticSeverity.Error
+                && diagnostic.Message.Contains("CustomerEntity")
+                && diagnostic.Message.Contains("'customer'")
+                && diagnostic.Message.Contains("'customers'")
+            );
+    }
+
+    /// <summary>クラス名が衝突しないテーブル名なら生成できることを検証する（衝突検証の偽陽性防止）</summary>
+    [Fact]
+    public void Generate_DistinctEntityClassNames_ShouldSucceed()
+    {
+        var diagram = new ErDiagram
+        {
+            Entities =
+            [
+                new Entity
+                {
+                    Id = Guid.NewGuid(),
+                    TableName = "customer",
+                    Columns =
+                    [
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "customer_id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                    ],
+                },
+                new Entity
+                {
+                    Id = Guid.NewGuid(),
+                    TableName = "customer_address",
+                    Columns =
+                    [
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "customer_address_id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                    ],
+                },
+            ],
+        };
+
+        var result = new CSharpCodeGenerationService().Generate(
+            diagram,
+            new CodeGenerationOptions { RootNamespace = "Sample.Domain" }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        result.Files[0].Content.Should().Contain("class CustomerEntity");
+        result.Files[0].Content.Should().Contain("class CustomerAddressEntity");
+    }
+
+    /// <summary>C# の名前空間として不正な RootNamespace はエラーになることを検証する</summary>
+    [Fact]
+    public void Generate_InvalidRootNamespace_ShouldFailWithError()
+    {
+        var options = new CodeGenerationOptions { RootNamespace = "Bad-Namespace" };
+
+        var result = new CSharpCodeGenerationService().Generate(SingleEntityDiagram(), options);
+
+        result.HasErrors.Should().BeTrue();
+        result.Files.Should().BeEmpty();
+        result
+            .Diagnostics.Should()
+            .Contain(diagnostic =>
+                diagnostic.Severity == GenerationDiagnosticSeverity.Error
+                && diagnostic.Message.Contains("RootNamespace")
+                && diagnostic.Message.Contains("Bad-Namespace")
+            );
+    }
+
+    /// <summary>複数セグメントの正当な RootNamespace はそのまま生成できることを検証する</summary>
+    [Fact]
+    public void Generate_ValidMultiSegmentRootNamespace_ShouldSucceed()
+    {
+        var options = new CodeGenerationOptions { RootNamespace = "My.App.Data" };
+
+        var result = new CSharpCodeGenerationService().Generate(SingleEntityDiagram(), options);
+
+        result.HasErrors.Should().BeFalse();
+        result.Files[0].Content.Should().Contain("namespace My.App.Data;");
+    }
+
+    /// <summary>分割時のカテゴリ別名前空間が不正ならエラーになることを検証する（オプション名を診断に含める）</summary>
+    [Fact]
+    public void Generate_InvalidCategoryNamespace_ShouldFailWithError()
+    {
+        var options = new CodeGenerationOptions
+        {
+            RootNamespace = "Sample.Domain",
+            SplitFilesByCategory = true,
+            EntityNamespace = "Sample.1Domain",
+        };
+
+        var result = new CSharpCodeGenerationService().Generate(SingleEntityDiagram(), options);
+
+        result.HasErrors.Should().BeTrue();
+        result.Files.Should().BeEmpty();
+        result
+            .Diagnostics.Should()
+            .Contain(diagnostic =>
+                diagnostic.Severity == GenerationDiagnosticSeverity.Error
+                && diagnostic.Message.Contains("EntityNamespace")
+            );
+    }
+
     /// <summary>多対多リレーションの警告がエンティティ数に関係なく 1 回だけ追加されることを検証する（重複解消）</summary>
     [Fact]
     public void Generate_ManyToManyWarning_ShouldNotBeDuplicated()
