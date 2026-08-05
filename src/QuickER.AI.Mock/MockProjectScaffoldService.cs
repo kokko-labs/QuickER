@@ -96,7 +96,7 @@ public sealed class MockProjectScaffoldService
         if (!IsValidProjectName(projectName))
         {
             throw new ArgumentException(
-                $"プロジェクト名にはパス区切り文字・絶対パス・\".\"/\"..\"・フォルダ名やファイル名に使用できない文字を含められません: {projectName}",
+                $"プロジェクト名にはパス区切り文字・絶対パス・\".\"/\"..\"・フォルダ名やファイル名に使用できない文字・前後の空白・末尾のピリオドを含められません: {projectName}",
                 nameof(projectName)
             );
         }
@@ -325,7 +325,9 @@ public sealed class MockProjectScaffoldService
     /// <c>{ProjectName}.csproj</c>・.sln 内の相対パスへ使われるため、出力フォルダ外への書き込みを防ぐ目的で検証する。
     /// パス区切り文字・絶対パス・<c>"."</c>/<c>".."</c>・<see cref="Path.GetInvalidFileNameChars"/> に含まれる文字を拒否する
     /// （検証水準は <see cref="MockFolderStore"/> の画面ファイル名検証に合わせる。Windows 予約名 (<c>CON</c> 等) は
-    /// 画面ファイル名検証と同様に対象外＝同水準）。第2ステップの生成可否判定（<see cref="MockGenerationDialogViewModel"/>）と
+    /// 画面ファイル名検証と同様に対象外＝同水準）。加えて前後の空白・末尾のピリオドも拒否する
+    /// （Windows がフォルダ名の末尾空白・ピリオドを切り捨てるため、指定名と実フォルダ名が食い違って
+    /// 途中の書き込みが失敗し、生成物の残骸だけが残るのを防ぐ）。第2ステップの生成可否判定（<see cref="MockGenerationDialogViewModel"/>）と
     /// <see cref="Scaffold"/> の入力検証の双方から呼ばれる共有ロジック。
     /// </remarks>
     internal static bool IsValidProjectName(string? projectName)
@@ -345,6 +347,13 @@ public sealed class MockProjectScaffoldService
         }
 
         if (projectName is "." or "..")
+        {
+            return false;
+        }
+
+        // 末尾の空白・ピリオドは Windows のフォルダ作成で切り捨てられ、指定名と実フォルダ名が食い違う
+        // （末尾空白では途中の書き込みが失敗して残骸を残す）。先頭の空白も同じ流儀で一貫して弾く
+        if (projectName != projectName.Trim() || projectName.EndsWith('.'))
         {
             return false;
         }

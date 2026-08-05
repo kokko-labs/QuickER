@@ -1,3 +1,4 @@
+using System.Text.Json;
 using QuickER.AI;
 using QuickER.Services;
 
@@ -46,6 +47,11 @@ internal sealed class FakeCodexAppServerClient : ICodexAppServerClient
 
     /// <summary>RespondToApprovalAsync に渡された決定を応答順に記録する（承認要求の扱いの検証用）</summary>
     public List<string> ApprovalDecisions { get; } = new();
+
+    /// <summary>
+    /// decision 形でない承認応答（permissions など）のペイロードを、送信される JSON 文字列として応答順に記録する。
+    /// </summary>
+    public List<string> ApprovalResultJson { get; } = new();
 
     public int RespondToolCount { get; private set; }
 
@@ -180,6 +186,19 @@ internal sealed class FakeCodexAppServerClient : ICodexAppServerClient
     )
     {
         ApprovalDecisions.Add(decision);
+        return Task.CompletedTask;
+    }
+
+    /// <summary>ペイロード形の応答は、実クライアントと同じ設定で JSON 化して記録する（送信形の検証用）</summary>
+    public Task RespondToApprovalAsync(
+        int requestId,
+        object result,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ApprovalResultJson.Add(
+            JsonSerializer.Serialize(result, new JsonSerializerOptions(JsonSerializerDefaults.Web))
+        );
         return Task.CompletedTask;
     }
 

@@ -223,6 +223,7 @@ public class MockProjectScaffoldServiceTests
     [InlineData("Acme.Mock")]
     [InlineData("Acme_Mock2")]
     [InlineData("MockApp")]
+    [InlineData("Foo")]
     public void IsValidProjectName_AcceptsValidNames(string projectName) =>
         MockProjectScaffoldService.IsValidProjectName(projectName).Should().BeTrue();
 
@@ -236,6 +237,10 @@ public class MockProjectScaffoldServiceTests
     [InlineData("sub/dir")]
     [InlineData("sub\\dir")]
     [InlineData("bad:name")]
+    // 末尾の空白・ピリオドは Windows のフォルダ作成で切り捨てられ、名前不一致・書き込み失敗を招く
+    [InlineData("Foo ")]
+    [InlineData(" Foo")]
+    [InlineData("Bar.")]
     [InlineData("")]
     [InlineData("   ")]
     [InlineData(null)]

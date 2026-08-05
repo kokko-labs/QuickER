@@ -122,6 +122,9 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
         "CLAUDE_CODE_SESSION_ID",
     ];
 
+    /// <summary>失敗 result の errors 配列から取り込む最大件数（メッセージが際限なく伸びるのを防ぐ）</summary>
+    private const int MaxReportedErrorEntries = 3;
+
     private readonly Lazy<string?> _executablePath = new(ResolveExecutablePath);
     private Process? _currentProcess;
 
@@ -431,7 +434,8 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
     /// <remarks>
     /// result イベントを受信していればその判定を正本とし、成功かつ終了コード 0 のときだけ成功を返す。
     /// result 未受信（引数エラーで stdout に何も出ないまま終了した場合など）と、result は成功なのに
-    /// 異常終了した場合は失敗として扱い、原因調査のため stderr の直近行をメッセージへ添える。
+    /// 異常終了した場合は失敗として扱う。失敗はいずれの経路でも原因調査のため stderr の直近行を
+    /// メッセージへ添える（CLI 自身が報告した失敗でも、stderr にしか出ない詳細があるため）。
     /// </remarks>
     internal static ClaudeCodeTurnOutcome EvaluateTurnOutcome(
         ClaudeCodeStreamResult stream,
@@ -444,9 +448,12 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
             // CLI 自身が報告したエラー（未ログイン等）はそのまま伝える＝終了コードより情報量が多い
             if (!stream.Success)
             {
+                // 報告文へ stderr を添えるのは他分岐と同じ扱い（報告文も stderr も無いなら null のまま返す）
+                var reported = stream.Error + BuildStandardErrorSuffix(standardErrorLines);
+
                 return new ClaudeCodeTurnOutcome(
                     false,
-                    stream.Error,
+                    string.IsNullOrEmpty(reported) ? null : reported,
                     stream.SessionId,
                     stream.NotLoggedIn
                 );
@@ -577,7 +584,7 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
     }
 
     /// <summary>result イベントから成否・エラー・未ログインを判定する</summary>
-    private static (bool Success, string? Error, bool NotLoggedIn) ParseResult(JsonElement root)
+    internal static (bool Success, string? Error, bool NotLoggedIn) ParseResult(JsonElement root)
     {
         var isError =
             root.TryGetProperty("is_error", out var isErrorEl)
@@ -588,13 +595,55 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
             return (true, null, false);
         }
 
-        var message = root.TryGetProperty("result", out var resultEl) ? resultEl.GetString() : null;
+        var message = ReadFailureMessage(root);
         var notLoggedIn =
             message is not null
             && message.Contains("Not logged in", StringComparison.OrdinalIgnoreCase);
 
         return (false, message ?? Strings.ClaudeCode_GenericError, notLoggedIn);
     }
+
+    /// <summary>失敗した result イベントの原因文言を取り出す（result 文字列 → errors 配列の順）</summary>
+    /// <remarks>
+    /// <c>--resume</c> に不在のセッション ID を渡した場合など、CLI は <c>result</c> を持たず
+    /// <c>errors</c> 配列にだけ具体的な原因（<c>No conversation found ...</c>）を載せて返す。
+    /// 文字列 <c>result</c> が無い／空のときは errors を拾わないと原因が捨てられ、汎用文言だけが残る。
+    /// </remarks>
+    private static string? ReadFailureMessage(JsonElement root)
+    {
+        if (
+            root.TryGetProperty("result", out var resultEl)
+            && resultEl.ValueKind == JsonValueKind.String
+            && resultEl.GetString() is { } message
+            && !string.IsNullOrWhiteSpace(message)
+        )
+        {
+            return message;
+        }
+
+        if (
+            !root.TryGetProperty("errors", out var errorsEl)
+            || errorsEl.ValueKind != JsonValueKind.Array
+        )
+        {
+            return null;
+        }
+
+        var entries = errorsEl
+            .EnumerateArray()
+            .Select(DescribeErrorEntry)
+            .Where(text => !string.IsNullOrWhiteSpace(text))
+            .Take(MaxReportedErrorEntries)
+            .ToArray();
+
+        return entries.Length == 0 ? null : string.Join(" | ", entries);
+    }
+
+    /// <summary>errors 配列の 1 要素を文言化する（文字列はそのまま・オブジェクト等は生 JSON で欠落させない）</summary>
+    private static string DescribeErrorEntry(JsonElement entry) =>
+        entry.ValueKind == JsonValueKind.String
+            ? entry.GetString() ?? string.Empty
+            : entry.GetRawText();
 
     /// <inheritdoc />
     public void Interrupt() => TryKill(_currentProcess);

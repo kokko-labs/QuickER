@@ -105,12 +105,26 @@ public interface ICodexAppServerClient : IAsyncDisposable
         CancellationToken cancellationToken = default
     );
 
-    /// <summary>承認リクエストに決定を応答する</summary>
+    /// <summary>承認リクエストに決定を応答する（decision 形の応答を持つ commandExecution / fileChange 用）</summary>
     /// <param name="requestId">応答先の JSON-RPC リクエスト ID</param>
-    /// <param name="decision">承認決定（accept / decline 等）</param>
+    /// <param name="decision">承認決定（approved / denied / decline 等）</param>
     Task RespondToApprovalAsync(
         int requestId,
         string decision,
+        CancellationToken cancellationToken = default
+    );
+
+    /// <summary>承認リクエストに任意形の result ペイロードで応答する</summary>
+    /// <param name="requestId">応答先の JSON-RPC リクエスト ID</param>
+    /// <param name="result">JSON-RPC レスポンスの result に載せるペイロード</param>
+    /// <remarks>
+    /// 承認の応答形は種別ごとに異なる（Codex 0.146.0 の <c>generate-json-schema</c> で検証済み）。
+    /// permissions（<c>PermissionsRequestApprovalResponse</c>）は decision を持たず
+    /// <c>permissions</c>（＋任意の <c>scope</c>）が必須のため、decision 形では応答できない
+    /// </remarks>
+    Task RespondToApprovalAsync(
+        int requestId,
+        object result,
         CancellationToken cancellationToken = default
     );
 
@@ -484,18 +498,21 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
     }
 
     /// <inheritdoc />
-    public async Task RespondToApprovalAsync(
+    public Task RespondToApprovalAsync(
         int requestId,
         string decision,
+        CancellationToken cancellationToken = default
+    ) => RespondToApprovalAsync(requestId, (object)new { decision }, cancellationToken);
+
+    /// <inheritdoc />
+    public async Task RespondToApprovalAsync(
+        int requestId,
+        object result,
         CancellationToken cancellationToken = default
     )
     {
         EnsureStarted();
-        var response = new Dictionary<string, object?>
-        {
-            ["id"] = requestId,
-            ["result"] = new { decision },
-        };
+        var response = new Dictionary<string, object?> { ["id"] = requestId, ["result"] = result };
         await SendMessageAsync(response, cancellationToken);
     }
 

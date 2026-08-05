@@ -74,16 +74,46 @@ public class CodexChatEngineTests
     }
 
     /// <summary>
-    /// 承認要求（Codex ネイティブ操作）は拒否され、その旨が活動として可視化されることを検証する。
-    /// ER 図の操作は dynamicTools 経路のため、ここへ届く要求を自動承認する必要はない。
+    /// commandExecution / fileChange の承認要求は decision:"decline" で拒否され、その旨が活動として
+    /// 可視化されることを検証する。ER 図の操作は dynamicTools 経路のため、自動承認する必要はない。
     /// </summary>
-    [Theory(DisplayName = "Codex の承認要求は拒否され活動として通知される")]
+    [Theory(
+        DisplayName = "Codex の decision 形の承認要求は decline で拒否され活動として通知される"
+    )]
     [InlineData("item/commandExecution/requestApproval", "commandExecution")]
     [InlineData("item/fileChange/requestApproval", "fileChange")]
-    [InlineData("item/permissions/requestApproval", "permissions")]
     public void ApprovalRequest_IsDeclinedAndReported(string method, string expectedLabel)
     {
         var client = new FakeCodexAppServerClient();
+        var activities = RaiseApprovalRequest(client, method);
+
+        client.ApprovalDecisions.Should().Equal("decline");
+        client.ApprovalResultJson.Should().BeEmpty();
+        AssertDeclinedActivity(activities, expectedLabel);
+    }
+
+    /// <summary>
+    /// permissions の承認要求は decision フィールドを持たない応答形（権限プロファイルが必須）のため、
+    /// 空プロファイル＝何も付与しない応答で拒否することを検証する。
+    /// </summary>
+    /// <remarks>decision で応答するとスキーマ違反になる（Codex 0.146.0 のスキーマで確認）</remarks>
+    [Fact(DisplayName = "Codex の permissions 承認要求は空の権限プロファイルで拒否される")]
+    public void PermissionsApprovalRequest_IsDeclinedWithEmptyProfile()
+    {
+        var client = new FakeCodexAppServerClient();
+        var activities = RaiseApprovalRequest(client, "item/permissions/requestApproval");
+
+        client.ApprovalDecisions.Should().BeEmpty();
+        client.ApprovalResultJson.Should().Equal("""{"permissions":{},"scope":"turn"}""");
+        AssertDeclinedActivity(activities, "permissions");
+    }
+
+    /// <summary>承認要求を 1 件発火し、通知された活動の一覧を返す</summary>
+    private static List<ErChatToolActivity> RaiseApprovalRequest(
+        FakeCodexAppServerClient client,
+        string method
+    )
+    {
         var engine = new CodexChatEngine(
             client,
             new RecordingToolHost(),
@@ -104,7 +134,15 @@ public class CodexChatEngineTests
             }
         );
 
-        client.ApprovalDecisions.Should().Equal("decline");
+        return activities;
+    }
+
+    /// <summary>拒否が 1 件だけ活動として通知されたことを検証する</summary>
+    private static void AssertDeclinedActivity(
+        List<ErChatToolActivity> activities,
+        string expectedLabel
+    )
+    {
         var activity = activities.Should().ContainSingle().Which;
         activity.ToolName.Should().Be(expectedLabel);
         activity.Success.Should().BeFalse();

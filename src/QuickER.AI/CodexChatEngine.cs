@@ -31,7 +31,15 @@ public sealed class CodexChatEngine : IErChatEngine
     private const string ClientTitle = "QuickER";
     private const string ClientVersion = "1.0.0";
     private const string ApprovalPolicyNever = "never";
+
+    /// <summary>commandExecution / fileChange 承認への拒否決定（ターンは継続する。cancel はターン中断）</summary>
     private const string ApprovalDecisionDecline = "decline";
+
+    /// <summary>権限昇格の承認要求（item/permissions/requestApproval）の種別名</summary>
+    private const string PermissionsApprovalKind = "permissions";
+
+    /// <summary>権限付与のスコープ（turn＝このターン限り）</summary>
+    private const string PermissionsScopeTurn = "turn";
 
     private readonly ICodexAppServerClient _client;
     private readonly IErDiagramToolHost? _toolHost;
@@ -584,23 +592,30 @@ public sealed class CodexChatEngine : IErChatEngine
         _ = RespondToApprovalAsync(e);
     }
 
-    /// <summary>承認要求へ decline を返し、拒否したことを活動として通知する</summary>
+    /// <summary>承認要求へ拒否相当の応答を返し、拒否したことを活動として通知する</summary>
+    /// <remarks>
+    /// 応答の形は承認種別ごとに異なる（Codex 0.146.0 の <c>generate-json-schema</c> で検証済み）。
+    /// commandExecution / fileChange は <c>decision: "decline"</c>（ユーザーが拒否・ターンは継続）で応答するが、
+    /// permissions（<c>PermissionsRequestApprovalResponse</c>）は decision を持たず
+    /// 「付与する権限プロファイル」が必須のため、空プロファイル（＝何も付与しない＝実質拒否）を返す
+    /// </remarks>
     private async Task RespondToApprovalAsync(CodexApprovalRequest request)
     {
+        var kind = DescribeApprovalKind(request.Method);
+
         ToolActivityReceived?.Invoke(
             this,
-            new ErChatToolActivity(
-                DescribeApprovalKind(request.Method),
-                Strings.Codex_ApprovalDeclined,
-                false
-            )
+            new ErChatToolActivity(kind, Strings.Codex_ApprovalDeclined, false)
         );
 
         try
         {
-            await _client
-                .RespondToApprovalAsync(request.RequestId, ApprovalDecisionDecline)
-                .ConfigureAwait(false);
+            var respond =
+                kind == PermissionsApprovalKind
+                    ? _client.RespondToApprovalAsync(request.RequestId, BuildNoPermissionsResult())
+                    : _client.RespondToApprovalAsync(request.RequestId, ApprovalDecisionDecline);
+
+            await respond.ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -610,6 +625,15 @@ public sealed class CodexChatEngine : IErChatEngine
             );
         }
     }
+
+    /// <summary>permissions 承認要求へ返す「何も付与しない」応答ペイロードを組み立てる</summary>
+    /// <remarks>空の権限プロファイルを turn スコープで返す（＝このターン限りで何の権限も与えない）</remarks>
+    private static object BuildNoPermissionsResult() =>
+        new Dictionary<string, object?>
+        {
+            ["permissions"] = new Dictionary<string, object?>(),
+            ["scope"] = PermissionsScopeTurn,
+        };
 
     /// <summary>承認要求のメソッド名（item/{種別}/requestApproval）から種別部分を表示名として取り出す</summary>
     /// <remarks>想定外の形式ならメソッド名をそのまま返す（欠落させず原文を見せる）</remarks>
