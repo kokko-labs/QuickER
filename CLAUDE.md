@@ -40,7 +40,7 @@ QuickER.Document → Model    保存単位 DiagramDocument = schema(意味) + la
 QuickER.Mcp          MCP ツール定義の正本（ToolDefinition・ErDiagramToolCatalog＝英語）と stdio サーバホスト・file 注入（依存は ModelContextProtocol SDK のみ・WPF 非依存）
 QuickER.Mcp.Tools → Model, Document, Mcp, CodeGen.CSharp    ファイルベースの ER 図ツール実行ホスト（ステートレスに読込→変更→保存。set_query の DSL/生 SQL 検証に CodeGen.CSharp の Queries を使用。CLI `quicker mcp` が合成）
 QuickER.AI       → Model, Settings, Mcp    AIチャットエンジン共通基盤 AI/MCP/ASP.NET Core（WPF非依存。VM操作は IErDiagramToolHost 経由でアプリ側）
-QuickER.Settings     設定 JSON の汎用永続化ストア JsonSettingsStore<T>（依存ゼロ・net10.0。AI / CodeGen.UI が参照）
+QuickER.Settings     設定 JSON の汎用永続化ストア JsonSettingsStore<T> と原子的ファイル書き込み AtomicFile（依存ゼロ・net10.0。AI / CodeGen.UI / Document / Db.UI が参照）
 QuickER.Extensibility → Model, Provider    フィーチャーモジュール契約（IFeatureModule / FeatureToolbarItem / IErDiagramHost。WPF 非依存・net10.0）
 QuickER.Gui.Common   → Gui.Abstractions    汎用 WPF 部品（MessageBoxDialogService / WpfFileDialogService / PasswordBoxBehavior / InformationDetailsDialog）
 

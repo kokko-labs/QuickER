@@ -68,14 +68,22 @@ public class JsonSettingsStore<TSettings>
     }
 
     /// <summary>設定を保存する（保存先フォルダが無ければ作成する）</summary>
+    /// <remarks>
+    /// 書き込みは <see cref="AtomicFile.WriteAllText"/> による原子的書き込み。素の
+    /// <c>File.WriteAllText</c> は既存ファイルを切り詰めてから書くため、途中でプロセスが落ちると
+    /// 設定ファイルが破損した JSON になる。読込側（<see cref="Load"/>）は破損を握り潰して既定値へ
+    /// フォールバックするため、直後の read-modify-write 保存で他のセクションが巻き添えで消失する
+    /// 連鎖が起きる。これを防ぐのがここでの原子的書き込みの目的。
+    /// </remarks>
     public void Save(TSettings settings)
     {
         Directory.CreateDirectory(_folder);
         var json = JsonSerializer.Serialize(settings, JsonOptions);
-        WriteAtomic(SettingsPath, json);
+        AtomicFile.WriteAllText(SettingsPath, json);
     }
 
     /// <summary>設定を任意のパスへ保存する（エクスポート用。親フォルダが無ければ作成する）</summary>
+    /// <remarks>書き込みが原子的である理由は <see cref="Save"/> と同じ</remarks>
     public void SaveTo(string path, TSettings settings)
     {
         var folder = Path.GetDirectoryName(path);
@@ -86,61 +94,7 @@ public class JsonSettingsStore<TSettings>
         }
 
         var json = JsonSerializer.Serialize(settings, JsonOptions);
-        WriteAtomic(path, json);
-    }
-
-    /// <summary>JSON 文字列を原子的に（書き込み途中の中断で既存ファイルを壊さずに）書き込む</summary>
-    /// <remarks>
-    /// <c>QuickER.Documents.JsonStorageService.SaveAtomic</c> と同型の手当てを、依存ゼロの
-    /// このプロジェクトへ自前で実装したもの。素の <c>File.WriteAllText</c> は既存ファイルを切り詰めて
-    /// から書くため、途中でプロセスが落ちると設定ファイルが破損した JSON になる。読込側（<see cref="Load"/>）
-    /// は破損を握り潰して既定値へフォールバックするため、直後の read-modify-write 保存で他のセクションが
-    /// 巻き添えで消失する連鎖が起きる。tmp ファイルへ全量を書き切ってから本体へ置換することでこれを防ぐ。
-    /// </remarks>
-    /// <param name="path">書き込み先の絶対パス</param>
-    /// <param name="json">書き込む JSON 文字列</param>
-    private static void WriteAtomic(string path, string json)
-    {
-        // 同時保存・同名衝突を避けるため GUID を挟んだ一時ファイル名にする
-        var tempPath = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
-
-        try
-        {
-            File.WriteAllText(tempPath, json);
-
-            if (File.Exists(path))
-            {
-                try
-                {
-                    File.Replace(tempPath, path, destinationBackupFileName: null);
-                }
-                catch (Exception ex) when (ex is IOException or PlatformNotSupportedException)
-                {
-                    // クラウド同期フォルダ等、File.Replace が使えない環境向けのフォールバック
-                    File.Move(tempPath, path, overwrite: true);
-                }
-            }
-            else
-            {
-                File.Move(tempPath, path);
-            }
-        }
-        finally
-        {
-            // 正常終了時は置換/移動済みで存在しない。例外発生時のみ tmp の残骸を掃除する
-            // （掃除自体の失敗で元の例外を握り潰さないよう黙殺する）
-            try
-            {
-                if (File.Exists(tempPath))
-                {
-                    File.Delete(tempPath);
-                }
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                // tmp の残骸は次回保存時に上書きされるため無害
-            }
-        }
+        AtomicFile.WriteAllText(path, json);
     }
 
     /// <summary>任意のパスから設定を読み込む（インポート用）</summary>

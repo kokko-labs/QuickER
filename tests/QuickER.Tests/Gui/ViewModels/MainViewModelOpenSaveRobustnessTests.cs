@@ -287,7 +287,11 @@ public sealed class MainViewModelOpenSaveRobustnessTests : IDisposable
         vm.IsDirty.Should().BeTrue("保存できていない変更をクリーン扱いにしない");
         vm.CurrentFilePath.Should().BeNull("保存に失敗したファイルへ紐付けない");
         File.Exists(unwritable).Should().BeFalse();
-        File.Exists(unwritable + ".tmp").Should().BeFalse("一時ファイルを残さない");
+        // 一時ファイル名は {path}.{GUID}.tmp のためワイルドカードで検出する
+        Directory
+            .GetFiles(_folder, "*.tmp", SearchOption.AllDirectories)
+            .Should()
+            .BeEmpty("一時ファイルを残さない");
     }
 
     /// <summary>保存に成功した後の失敗では、現在パスとダーティ状態が保存前の状態のまま保たれることを検証する</summary>

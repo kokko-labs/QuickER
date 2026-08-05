@@ -4,6 +4,7 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using QuickER.Settings;
 
 namespace QuickER.Db.UI;
 
@@ -88,66 +89,20 @@ public class SqlConnectionProfileStore
     }
 
     /// <summary>接続情報（プロファイル一覧＋前回接続）を保存する</summary>
+    /// <remarks>
+    /// 書き込みは <see cref="AtomicFile.WriteAllText"/> による原子的書き込み。素の
+    /// <c>File.WriteAllText</c> は既存ファイルを切り詰めてから書くため、途中でプロセスが落ちると
+    /// connections.json が破損した JSON になり、読込側（<see cref="LoadData"/>）が空データへ
+    /// フォールバックした状態のまま次の read-modify-write 保存（<see cref="SaveAll"/> /
+    /// <see cref="SaveLastUsed"/>）で他のプロファイル・前回接続情報が巻き添えで消失する。
+    /// これを防ぐのがここでの原子的書き込みの目的（なお DPAPI 暗号ファイルの書き出しは
+    /// <see cref="SaveSecret(string, string)"/> の単純書き込みのままで、本メソッドの対象外）。
+    /// </remarks>
     private void SaveData(SqlConnectionData data)
     {
         Directory.CreateDirectory(_folder);
         var json = JsonSerializer.Serialize(data, JsonOpts);
-        WriteAtomic(ConnectionsPath, json);
-    }
-
-    /// <summary>JSON 文字列を原子的に（書き込み途中の中断で既存ファイルを壊さずに）書き込む</summary>
-    /// <remarks>
-    /// <c>QuickER.Settings.JsonSettingsStore.WriteAtomic</c> と同型の実装（tmp へ全量書き切ってから
-    /// 本体へ置換）。素の <c>File.WriteAllText</c> は既存ファイルを切り詰めてから書くため、途中で
-    /// プロセスが落ちると connections.json が破損した JSON になり、読込側（<see cref="LoadData"/>）が
-    /// 空データへフォールバックした状態のまま次の read-modify-write 保存（SaveAll / SaveLastUsed）で
-    /// 他のプロファイル・前回接続情報が巻き添えで消失する。QuickER.Db.UI は QuickER.Settings への
-    /// プロジェクト参照を持たないため、新規参照を足さずここへ複製している
-    /// </remarks>
-    /// <param name="path">書き込み先の絶対パス</param>
-    /// <param name="json">書き込む JSON 文字列</param>
-    private static void WriteAtomic(string path, string json)
-    {
-        // 同時保存・同名衝突を避けるため GUID を挟んだ一時ファイル名にする
-        var tempPath = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
-
-        try
-        {
-            File.WriteAllText(tempPath, json);
-
-            if (File.Exists(path))
-            {
-                try
-                {
-                    File.Replace(tempPath, path, destinationBackupFileName: null);
-                }
-                catch (Exception ex) when (ex is IOException or PlatformNotSupportedException)
-                {
-                    // クラウド同期フォルダ等、File.Replace が使えない環境向けのフォールバック
-                    File.Move(tempPath, path, overwrite: true);
-                }
-            }
-            else
-            {
-                File.Move(tempPath, path);
-            }
-        }
-        finally
-        {
-            // 正常終了時は置換/移動済みで存在しない。例外発生時のみ tmp の残骸を掃除する
-            // （掃除自体の失敗で元の例外を握り潰さないよう黙殺する）
-            try
-            {
-                if (File.Exists(tempPath))
-                {
-                    File.Delete(tempPath);
-                }
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                // tmp の残骸は次回保存時に上書きされるため無害
-            }
-        }
+        AtomicFile.WriteAllText(ConnectionsPath, json);
     }
 
     /// <summary>すべてのプロファイルを名前順で読み込む（読み取り失敗時は空一覧を返す）</summary>

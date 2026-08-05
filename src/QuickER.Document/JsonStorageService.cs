@@ -2,6 +2,7 @@ using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using QuickER.Model;
+using QuickER.Settings;
 
 namespace QuickER.Documents;
 
@@ -41,9 +42,10 @@ public static class JsonStorageService
 
     /// <summary>保存文書をアトミックに（書き込み途中の中断で既存ファイルを壊さずに）保存する</summary>
     /// <remarks>
-    /// 一時ファイル <c>{path}.{GUID}.tmp</c> へ全量を書き切ってから本体へ差し替える。素の
-    /// <see cref="Save"/>（<see cref="File.WriteAllText(string, string?)"/>）は既存ファイルを
-    /// 切り詰めてから書くため、途中でプロセスが落ちる・ディスクが満杯になると保存先が破損した JSON になる。
+    /// 素の <see cref="Save"/>（<see cref="File.WriteAllText(string, string?)"/>）は既存ファイルを
+    /// 切り詰めてから書くため、途中でプロセスが落ちる・ディスクが満杯になるとユーザーの図ファイルが
+    /// 破損した JSON として残る。これを防ぐため、書き込みは <see cref="AtomicFile.WriteAllText"/>
+    /// （一時ファイルへ全量を書き切ってから本体へ差し替える。アルゴリズムの詳細はそちらを参照）へ委譲する。
     /// <b>プロダクションのファイル書き出し（GUI の上書き／別名保存・スキーマのみ JSON のエクスポート・
     /// MCP のツール実行・CLI のリバース出力・クラッシュ時の緊急保存）はすべてこちらを使う。</b>
     /// </remarks>
@@ -51,54 +53,7 @@ public static class JsonStorageService
     /// <param name="document">保存対象の文書（意味モデル＋レイアウト）</param>
     public static void SaveAtomic(string path, DiagramDocument document)
     {
-        // 一時ファイルは保存先と同じディレクトリに作る（別ボリュームをまたがないため、
-        // 差し替え（File.Replace / File.Move）が同一ボリューム内の操作で完結する）。
-        // 名前に GUID を挟むのは、同じ図ファイルを複数プロセス（GUI と MCP サーバ）が同時に
-        // 保存したとき tmp が衝突して「書き途中の混線した JSON を本体へ差し替える」破損へ
-        // 昇格するのを防ぐため（他 2 実装 JsonSettingsStore / SqlConnectionProfileStore と同流儀）。
-        // なお同時保存そのものは防げず、後から差し替えた側が勝つ（ロストアップデート）点は変わらない。
-        var temporaryPath = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
-
-        try
-        {
-            File.WriteAllText(temporaryPath, Serialize(document));
-
-            // 既存ファイルがあれば置換（バックアップは残さない）、無ければ単純に移動する。
-            // File.Replace は保存先が存在しないと例外になるため、両者を明示的に分岐する。
-            if (File.Exists(path))
-            {
-                try
-                {
-                    File.Replace(temporaryPath, path, destinationBackupFileName: null);
-                }
-                catch (Exception ex) when (ex is IOException or PlatformNotSupportedException)
-                {
-                    // クラウド同期フォルダ等、File.Replace が使えない環境向けのフォールバック
-                    // （OS 水準の原子性は落ちるが「全量を書き切ってから差し替える」保護は保たれる）
-                    File.Move(temporaryPath, path, overwrite: true);
-                }
-            }
-            else
-            {
-                File.Move(temporaryPath, path);
-            }
-        }
-        finally
-        {
-            // 正常終了時は置換/移動済みで存在しない。例外発生時のみ tmp の残骸を掃除する
-            // （掃除自体の失敗で元の例外を握り潰さないよう黙殺する）
-            try
-            {
-                if (File.Exists(temporaryPath))
-                {
-                    File.Delete(temporaryPath);
-                }
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                // tmp の残骸は次回保存時に上書きされるため無害
-            }
-        }
+        AtomicFile.WriteAllText(path, Serialize(document));
     }
 
     /// <summary>保存文書を図ファイルの正準形（<see cref="Options"/>）で JSON 文字列へ直列化する</summary>

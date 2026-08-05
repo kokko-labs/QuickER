@@ -17,6 +17,8 @@
     <ProjectReference Include="..\QuickER.Gui.Abstractions\QuickER.Gui.Abstractions.csproj" />
     <ProjectReference Include="..\QuickER.Gui.Common\QuickER.Gui.Common.csproj" />
     <ProjectReference Include="..\QuickER.Provider\QuickER.Provider.csproj" />
+    <!-- 原子的ファイル書き込み（AtomicFile）の共有のみに使う（接続プロファイルは JsonSettingsStore でなく専用ストア＝DPAPI シークレット分離のため） -->
+    <ProjectReference Include="..\QuickER.Settings\QuickER.Settings.csproj" />
     <ProjectReference Include="..\QuickER.Sqlite\QuickER.Sqlite.csproj" />
     <ProjectReference Include="..\QuickER.SqlServer\QuickER.SqlServer.csproj" />
   </ItemGroup>
