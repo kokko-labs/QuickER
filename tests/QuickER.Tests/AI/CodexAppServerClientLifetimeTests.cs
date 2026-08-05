@@ -24,7 +24,10 @@ public class CodexAppServerClientLifetimeTests
         await client.StopProcessAsync();
 
         var writeLock = GetWriteLock(client);
-        writeLock.Wait(0).Should().BeTrue("再接続後の送信でロックを取得できる必要がある");
+        writeLock
+            .Wait(0, TestContext.Current.CancellationToken)
+            .Should()
+            .BeTrue("再接続後の送信でロックを取得できる必要がある");
         writeLock.Release();
         client.IsStarted.Should().BeFalse();
     }

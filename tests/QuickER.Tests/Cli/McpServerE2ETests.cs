@@ -283,7 +283,7 @@ public class McpServerE2ETests
                         break;
                     }
 
-                    await Task.Delay(200);
+                    await Task.Delay(200, TestContext.Current.CancellationToken);
                 }
             }
         }
