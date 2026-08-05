@@ -166,6 +166,12 @@
   <data name="Cli_SchemaFileNotFound" xml:space="preserve">
     <value>Schema file not found: {0}</value>
   </data>
+  <data name="Cli_ConfigFileNotFound" xml:space="preserve">
+    <value>Config file not found: {0}. Check the --config path (generation is aborted instead of falling back to the default settings).</value>
+  </data>
+  <data name="Cli_ConfigFileInvalidJson" xml:space="preserve">
+    <value>Could not read the config file as a JSON object: {0} ({1})</value>
+  </data>
   <data name="Cli_SchemaNewerFormatWarning" xml:space="preserve">
     <value>Warning: the schema file was saved in a newer format (v{0}) than this version supports (up to v{1}). Unsupported data will be ignored.</value>
   </data>

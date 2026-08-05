@@ -78,6 +78,12 @@ internal static class GenerationExecutor
         {
             options = GenerationConfigLoader.LoadOptions(config, provider, parseResult, generation);
         }
+        catch (GenerationConfigException ex)
+        {
+            // 設定ファイルの不在・不正 JSON（既定値のまま黙って続行せず、生成前に中止する）
+            stderr.WriteLine(ex.Message);
+            return 1;
+        }
         catch (RepositoryDialectUnsupportedException ex)
         {
             stderr.WriteLine(ex.Message);
@@ -95,7 +101,8 @@ internal static class GenerationExecutor
     /// <remarks>
     /// 診断（stderr）と生成ファイル一覧（stdout）は、引数の <paramref name="stdout"/> / <paramref name="stderr"/>
     /// へ書き出す（呼び出し側は <see cref="StringWriter"/> を渡せばそのまま捕捉できる）。
-    /// 設定検証エラー（<see cref="RepositoryDialectUnsupportedException"/>）やその他の例外は呼び出し側へ伝播する。
+    /// 設定エラー（<see cref="GenerationConfigException"/> ＝設定ファイル不在・不正 JSON /
+    /// <see cref="RepositoryDialectUnsupportedException"/>）やその他の例外は呼び出し側へ伝播する。
     /// </remarks>
     public static int GenerateFromConfig(
         IDatabaseProvider provider,

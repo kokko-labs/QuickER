@@ -38,7 +38,8 @@ internal static class GenerationConfigLoader
     /// </para>
     /// <para>
     /// QuickER 版 Repository 生成（<c>GenerateRepositories</c>）が要求され、かつ実効方言に未対応方言が含まれる場合は
-    /// <see cref="RepositoryDialectUnsupportedException"/> を送出する。
+    /// <see cref="RepositoryDialectUnsupportedException"/> を送出する。<paramref name="config"/> が指定されたのに
+    /// 存在しない・JSON オブジェクトとして読めない場合は <see cref="GenerationConfigException"/> を送出する。
     /// </para>
     /// </remarks>
     public static CodeGenerationOptions LoadOptions(
@@ -65,11 +66,45 @@ internal static class GenerationConfigLoader
     public static CodeGenerationOptions LoadOptions(FileInfo? config, IDatabaseProvider provider) =>
         BuildOptions(LoadConfigNode(config), provider, repositoryDialectsFlag: null);
 
-    /// <summary>設定ファイル（quicker.json）を JsonObject として読み込む（無指定・不在なら空オブジェクト）</summary>
-    private static JsonObject LoadConfigNode(FileInfo? config) =>
-        config is { Exists: true }
-            ? JsonNode.Parse(File.ReadAllText(config.FullName))?.AsObject() ?? new JsonObject()
-            : new JsonObject();
+    /// <summary>設定ファイル（quicker.json）を JsonObject として読み込む（無指定なら空オブジェクト）</summary>
+    /// <remarks>
+    /// <para>
+    /// 明示されたのに存在しないパスは <see cref="GenerationConfigException"/> で中断する。「未指定」と
+    /// 同じ既定枝へ落とすと、パスのタイプミスが「全キー既定値のまま成功（終了コード 0）」として
+    /// 黙って通ってしまうため（<c>--schema</c> や MCP の generate_csharp と同じ存在チェックの水準に揃える）。
+    /// </para>
+    /// <para>
+    /// 内容が JSON として不正、または JSON オブジェクトでない（配列・スカラー）場合も同じ例外へ変換する
+    /// （生の <see cref="JsonException"/> のままだとスタックトレースで落ちるため）。
+    /// </para>
+    /// </remarks>
+    private static JsonObject LoadConfigNode(FileInfo? config)
+    {
+        if (config is null)
+        {
+            return new JsonObject();
+        }
+
+        if (!config.Exists)
+        {
+            throw new GenerationConfigException(
+                string.Format(Strings.Cli_ConfigFileNotFound, config.FullName)
+            );
+        }
+
+        try
+        {
+            return JsonNode.Parse(File.ReadAllText(config.FullName))?.AsObject()
+                ?? new JsonObject();
+        }
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException)
+        {
+            // JsonException＝JSON として壊れている／InvalidOperationException＝AsObject 不可（配列・スカラー）
+            throw new GenerationConfigException(
+                string.Format(Strings.Cli_ConfigFileInvalidJson, config.FullName, ex.Message)
+            );
+        }
+    }
 
     /// <summary>
     /// 設定 JSON ノードから <see cref="CodeGenerationOptions"/> を組み立てる共通後処理。
@@ -213,3 +248,6 @@ internal static class GenerationConfigLoader
 
 /// <summary>QuickER 版 Repository の生成が要求されたが、指定プロバイダの方言が未対応のときに送出する例外</summary>
 internal sealed class RepositoryDialectUnsupportedException(string message) : Exception(message);
+
+/// <summary>設定ファイル（<c>--config</c>）が存在しない、または JSON オブジェクトとして読めないときに送出する例外</summary>
+internal sealed class GenerationConfigException(string message) : Exception(message);

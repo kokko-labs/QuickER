@@ -270,6 +270,18 @@ namespace QuickER.Cli.Resources {
             }
         }
 
+        public static string Cli_ConfigFileNotFound {
+            get {
+                return ResourceManager.GetString("Cli_ConfigFileNotFound", resourceCulture);
+            }
+        }
+
+        public static string Cli_ConfigFileInvalidJson {
+            get {
+                return ResourceManager.GetString("Cli_ConfigFileInvalidJson", resourceCulture);
+            }
+        }
+
         public static string Cli_SchemaNewerFormatWarning {
             get {
                 return ResourceManager.GetString("Cli_SchemaNewerFormatWarning", resourceCulture);

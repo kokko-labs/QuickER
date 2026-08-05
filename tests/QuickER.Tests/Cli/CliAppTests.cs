@@ -178,6 +178,91 @@ public class CliAppTests
         }
     }
 
+    /// <summary>
+    /// <c>--config</c> に存在しないパス（タイプミス）を渡すと、既定値へ黙ってフォールバックせず
+    /// 終了コード 1 で中止し、指定パスを含むメッセージを標準エラーへ出すことを検証する
+    /// </summary>
+    [Fact(DisplayName = "--config 不在パスは終了コード 1（パス入りメッセージ）")]
+    public async Task Generate_ConfigFileNotFound_ReturnsError()
+    {
+        var (schemaPath, outDir, root) = CreateSampleSchema();
+        // quicker.json のタイプミス（ファイルは作らない）
+        var missingConfigPath = Path.Combine(root, "quciker.json");
+        // 出力は注入版オーバーロードで捕捉する（Console を差し替えるとクラス並列実行で競合するため）
+        var stdout = new StringWriter();
+        var stderr = new StringWriter();
+
+        try
+        {
+            var exit = await CliApp.InvokeAsync(
+                [
+                    "generate",
+                    "--schema",
+                    schemaPath,
+                    "--out",
+                    outDir,
+                    "--config",
+                    missingConfigPath,
+                ],
+                stdout,
+                stderr
+            );
+
+            exit.Should().Be(1);
+            Directory
+                .Exists(outDir)
+                .Should()
+                .BeFalse("設定読解エラーで生成前に中止するため出力は作られない");
+            // 文言はロケール依存のため、埋め込まれる設定ファイルのパスで検証する
+            stderr.ToString().Should().Contain(missingConfigPath);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// <c>--config</c> の JSON が壊れている場合は、スタックトレースで落ちず終了コード 1 と
+    /// 整形メッセージ（パス入り）になることを検証する
+    /// </summary>
+    [Fact(DisplayName = "--config 不正 JSON は終了コード 1（整形メッセージ）")]
+    public async Task Generate_ConfigFileInvalidJson_ReturnsError()
+    {
+        var (schemaPath, outDir, root) = CreateSampleSchema();
+        var configPath = Path.Combine(root, "quicker.json");
+        // 閉じ括弧が欠けた不正 JSON
+        File.WriteAllText(configPath, """{ "GenerateRepositories": true""");
+        var stdout = new StringWriter();
+        var stderr = new StringWriter();
+
+        try
+        {
+            var exit = await CliApp.InvokeAsync(
+                ["generate", "--schema", schemaPath, "--out", outDir, "--config", configPath],
+                stdout,
+                stderr
+            );
+
+            exit.Should().Be(1);
+            Directory
+                .Exists(outDir)
+                .Should()
+                .BeFalse("設定読解エラーで生成前に中止するため出力は作られない");
+            stderr.ToString().Should().Contain(configPath);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
     /// <summary>未対応プロバイダを指定すると終了コード 1 を返すことを検証する</summary>
     [Fact(DisplayName = "未対応プロバイダ指定は終了コード 1")]
     public async Task Generate_UnknownProvider_ReturnsError()
