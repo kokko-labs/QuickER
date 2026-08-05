@@ -130,4 +130,7 @@
   <data name="Sync_Error_SqliteForeignKeyViolation" xml:space="preserve">
     <value>Foreign key constraint violations were detected after the table rebuild, so the transaction was rolled back. Affected table(s): {0}</value>
   </data>
+  <data name="Sync_Error_RolledBack" xml:space="preserve">
+    <value>{0} (The transaction was rolled back, so no changes were applied.)</value>
+  </data>
 </root>

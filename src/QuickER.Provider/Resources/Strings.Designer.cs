@@ -197,5 +197,11 @@ namespace QuickER.Provider.Resources {
                 return ResourceManager.GetString("Sync_Error_SqliteForeignKeyViolation", resourceCulture);
             }
         }
+
+        public static string Sync_Error_RolledBack {
+            get {
+                return ResourceManager.GetString("Sync_Error_RolledBack", resourceCulture);
+            }
+        }
     }
 }

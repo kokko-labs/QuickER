@@ -462,9 +462,9 @@ namespace QuickER.Db.UI.Resources {
             }
         }
 
-        public static string SchemaSync_RollbackMessage {
+        public static string SchemaSync_ExecuteFailedMessage {
             get {
-                return ResourceManager.GetString("SchemaSync_RollbackMessage", resourceCulture);
+                return ResourceManager.GetString("SchemaSync_ExecuteFailedMessage", resourceCulture);
             }
         }
 

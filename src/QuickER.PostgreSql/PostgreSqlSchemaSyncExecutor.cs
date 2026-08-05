@@ -46,7 +46,11 @@ public sealed class PostgreSqlSchemaSyncExecutor : ISchemaSyncExecutor
         }
         catch (Exception ex)
         {
-            result.Error = ex.Message;
+            // ロールバック済みである旨は方言差があるため、表示側の見出しではなくエラー本文へ含める
+            result.Error = string.Format(
+                QuickER.Provider.Resources.Strings.Sync_Error_RolledBack,
+                ex.Message
+            );
 
             try
             {
@@ -54,7 +58,8 @@ public sealed class PostgreSqlSchemaSyncExecutor : ISchemaSyncExecutor
             }
             catch
             {
-                // ロールバック自体の失敗は最善努力で握りつぶす（元の例外情報を優先する）
+                // ロールバック自体の失敗は最善努力で握りつぶす（元の例外情報を優先する）。
+                // 明示ロールバックに失敗しても、未コミットのトランザクションは破棄時に取り消される
             }
 
             result.Batches.Add(

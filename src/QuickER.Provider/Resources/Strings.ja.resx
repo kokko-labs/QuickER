@@ -130,4 +130,7 @@
   <data name="Sync_Error_SqliteForeignKeyViolation" xml:space="preserve">
     <value>テーブル再構築後に外部キー制約違反が検出されたため、トランザクションをロールバックしました。対象テーブル: {0}</value>
   </data>
+  <data name="Sync_Error_RolledBack" xml:space="preserve">
+    <value>{0}（トランザクションはロールバックされたため、変更は適用されていません）</value>
+  </data>
 </root>

@@ -266,8 +266,8 @@
   <data name="SchemaSync_ExecuteFailedStatus" xml:space="preserve">
     <value>失敗: {0}</value>
   </data>
-  <data name="SchemaSync_RollbackMessage" xml:space="preserve">
-    <value>実行に失敗したため ROLLBACK されました:</value>
+  <data name="SchemaSync_ExecuteFailedMessage" xml:space="preserve">
+    <value>実行に失敗しました:</value>
   </data>
   <data name="SchemaSync_ExecuteError" xml:space="preserve">
     <value>実行に失敗しました: {0}</value>

@@ -297,8 +297,11 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
             else
             {
                 StatusMessage = string.Format(Strings.SchemaSync_ExecuteFailedStatus, result.Error);
+
+                // 見出しは方言中立に留める。ロールバック済みか部分適用の可能性があるかは方言によって異なり、
+                // その説明は各 Executor が result.Error に詰めている（見出しで断定すると自己矛盾表示になる）
                 _dialogs.ShowError(
-                    Strings.SchemaSync_RollbackMessage + "\n" + result.Error,
+                    Strings.SchemaSync_ExecuteFailedMessage + "\n" + result.Error,
                     Strings.Common_Error
                 );
             }
