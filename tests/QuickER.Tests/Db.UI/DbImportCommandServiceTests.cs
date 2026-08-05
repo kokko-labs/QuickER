@@ -383,6 +383,96 @@ public class DbImportCommandServiceTests
         host.LastReplacedDiagram.Should().BeNull();
     }
 
+    /// <summary>複合外部キー警告付きの取込では、置換後に一覧付きの案内ダイアログが表示される</summary>
+    [Fact(DisplayName = "複合 FK 警告ありの取込は詳細ダイアログで一覧を提示する")]
+    public async Task RunAsync_CompositeForeignKeyWarnings_ShowsDetails()
+    {
+        var host = new StubErDiagramHost { DiagramToReturn = new ErDiagram() };
+        var dialogs = new StubDialogService();
+        var provider = new FakeImportProvider(
+            ImportedEntities("Imported"),
+            [
+                new CompositeForeignKeyImportWarning(
+                    "FK_Child_Parent",
+                    "Child",
+                    ["AId", "BId"],
+                    "Parent",
+                    ["A", "B"]
+                ),
+            ]
+        );
+        var service = new DbImportCommandService(
+            host,
+            dialogs,
+            new FakeConnectionPresenter(
+                new DbConnectionDialogResult(new DbConnectionSettings(), provider)
+            )
+        );
+
+        await service.RunAsync();
+
+        // 取込自体は成功しているため、図は差し替わったうえで案内水準の詳細ダイアログが出る
+        host.LastReplacedDiagram.Should().NotBeNull();
+        var shown = dialogs.InformationDetailsMessages.Should().ContainSingle().Which;
+        shown.Message.Should().Be(DbStrings.Db_ImportCompositeForeignKeyHeader);
+        shown.Title.Should().Be(DbStrings.Db_ImportCompositeForeignKeyTitle);
+        shown
+            .Details.Should()
+            .Be(
+                string.Format(
+                    DbStrings.Db_ImportCompositeForeignKeyLine,
+                    "FK_Child_Parent",
+                    "Child",
+                    "AId, BId",
+                    "Parent",
+                    "A, B"
+                )
+            );
+        dialogs.ErrorMessages.Should().BeEmpty();
+    }
+
+    /// <summary>警告なしの取込では詳細ダイアログを出さない（従来と同一の挙動）</summary>
+    [Fact(DisplayName = "警告なしの取込では詳細ダイアログを出さない")]
+    public async Task RunAsync_NoWarnings_ShowsNoDetails()
+    {
+        var host = new StubErDiagramHost { DiagramToReturn = new ErDiagram() };
+        var dialogs = new StubDialogService();
+        var provider = new FakeImportProvider(ImportedEntities("Imported"));
+        var service = new DbImportCommandService(
+            host,
+            dialogs,
+            new FakeConnectionPresenter(
+                new DbConnectionDialogResult(new DbConnectionSettings(), provider)
+            )
+        );
+
+        await service.RunAsync();
+
+        host.LastReplacedDiagram.Should().NotBeNull();
+        dialogs.InformationDetailsMessages.Should().BeEmpty();
+    }
+
+    /// <summary>取込が例外で失敗した場合は、警告の詳細ダイアログを出さない（エラー報告のみ）</summary>
+    [Fact(DisplayName = "取込失敗時は警告の詳細ダイアログを出さない")]
+    public async Task RunAsync_ImportThrows_ShowsNoWarningDetails()
+    {
+        var host = new StubErDiagramHost { DiagramToReturn = new ErDiagram() };
+        var dialogs = new StubDialogService();
+        var provider = new FakeImportProvider(new InvalidOperationException("boom"));
+        var service = new DbImportCommandService(
+            host,
+            dialogs,
+            new FakeConnectionPresenter(
+                new DbConnectionDialogResult(new DbConnectionSettings(), provider)
+            )
+        );
+
+        await service.RunAsync();
+
+        dialogs.InformationDetailsMessages.Should().BeEmpty();
+        dialogs.ErrorMessages.Should().ContainSingle();
+    }
+
     // FakeConnectionPresenter は共有版（QuickER.Tests.Db.UI.FakeConnectionPresenter）を使用する
 
     /// <summary>スキーマ取込のみ実カに近く振る舞う擬似プロバイダ（成功結果または例外を返す）</summary>
@@ -390,8 +480,13 @@ public class DbImportCommandServiceTests
     {
         public const string ProviderName = "fakeimport";
 
-        public FakeImportProvider(IReadOnlyList<Entity> entities) =>
-            SchemaImporter = new FakeSchemaImporter(new SchemaImportResult { Entities = entities });
+        public FakeImportProvider(
+            IReadOnlyList<Entity> entities,
+            IReadOnlyList<CompositeForeignKeyImportWarning>? warnings = null
+        ) =>
+            SchemaImporter = new FakeSchemaImporter(
+                new SchemaImportResult { Entities = entities, Warnings = warnings ?? [] }
+            );
 
         public FakeImportProvider(Exception toThrow) =>
             SchemaImporter = new FakeSchemaImporter(toThrow);

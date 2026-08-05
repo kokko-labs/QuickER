@@ -285,6 +285,18 @@
   <data name="Db_ImportFailed" xml:space="preserve">
     <value>取り込みに失敗しました: {0}</value>
   </data>
+  <data name="Db_ImportCompositeForeignKeyTitle" xml:space="preserve">
+    <value>取込の警告</value>
+  </data>
+  <data name="Db_ImportCompositeForeignKeyHeader" xml:space="preserve">
+    <value>一部の複合外部キーは完全には取り込めませんでした。列の対応付けは保持されず、列対応を持たない 1 本のリレーションとして取り込まれています:</value>
+  </data>
+  <data name="Db_ImportCompositeForeignKeyLine" xml:space="preserve">
+    <value>・{0}: {1} ({2}) → {3} ({4})</value>
+  </data>
+  <data name="Db_ImportCompositeForeignKeyMoreItems" xml:space="preserve">
+    <value>…他 {0} 件</value>
+  </data>
   <data name="Db_SyncWriteBack" xml:space="preserve">
     <value>現在のダイアグラムを既存 DB に書き戻し (差分 ALTER 実行)</value>
   </data>

@@ -38,6 +38,7 @@ public class SqliteSchemaImporter : ISchemaImporter
             Entities = result.Entities,
             Relationships = result.Relationships,
             AuxiliaryObjects = result.AuxiliaryObjects,
+            Warnings = result.Warnings,
         };
     }
 
@@ -52,6 +53,9 @@ public class SqliteSchemaImporter : ISchemaImporter
 
         /// <summary>取得した補助オブジェクト（インデックス・トリガー・テーブルレベル一意制約）</summary>
         public List<SchemaAuxiliaryObject> AuxiliaryObjects { get; init; } = new();
+
+        /// <summary>意味モデルへ完全には写し取れなかった箇所の警告（現状は複合外部キーの列対応喪失のみ）</summary>
+        public List<CompositeForeignKeyImportWarning> Warnings { get; init; } = new();
     }
 
     /// <summary>既に開かれた接続でスキーマを取得する（テストや接続再利用向け）</summary>
@@ -70,7 +74,8 @@ public class SqliteSchemaImporter : ISchemaImporter
         }
 
         var uniqueSets = await LoadUniqueColumnSetsAsync(conn, tables, ct).ConfigureAwait(false);
-        var rels = await LoadForeignKeysAsync(conn, tables, uniqueSets, ct).ConfigureAwait(false);
+        var (rels, warnings) = await LoadForeignKeysAsync(conn, tables, uniqueSets, ct)
+            .ConfigureAwait(false);
         var aux = await LoadAuxiliaryObjectsAsync(conn, tables, ct).ConfigureAwait(false);
 
         return new SchemaResult
@@ -78,6 +83,7 @@ public class SqliteSchemaImporter : ISchemaImporter
             Entities = tables.Values.Select(t => t.Entity).ToList(),
             Relationships = rels,
             AuxiliaryObjects = aux,
+            Warnings = warnings,
         };
     }
 
@@ -223,8 +229,12 @@ ORDER BY name;";
     /// <remarks>
     /// foreign_key_list の列は id / seq / table（参照先）/ from（子側列）/ to（親側列）/
     /// on_update / on_delete / match。同一 id が複合 FK の構成列を表すため、id ごとに集約する。
+    /// 複合外部キーは列対応を失うため、その旨の警告もあわせて返す。
     /// </remarks>
-    private static async Task<List<Relationship>> LoadForeignKeysAsync(
+    private static async Task<(
+        List<Relationship> Relationships,
+        List<CompositeForeignKeyImportWarning> Warnings
+    )> LoadForeignKeysAsync(
         SqliteConnection conn,
         Dictionary<string, SchemaTableEntry> tables,
         Dictionary<string, List<string[]>> uniqueSets,
@@ -266,7 +276,9 @@ ORDER BY name;";
             }
         }
 
-        return builder.Build(tables, uniqueSets);
+        var rels = builder.Build(tables, uniqueSets);
+
+        return (rels, builder.CompositeForeignKeyWarnings.ToList());
     }
 
     /// <summary>

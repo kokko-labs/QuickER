@@ -30,6 +30,7 @@ public class SqlServerSchemaImporter : ISchemaImporter
         {
             Entities = result.Entities,
             Relationships = result.Relationships,
+            Warnings = result.Warnings,
         };
     }
 
@@ -41,6 +42,9 @@ public class SqlServerSchemaImporter : ISchemaImporter
 
         /// <summary>取得したリレーション一覧</summary>
         public List<Relationship> Relationships { get; init; } = new();
+
+        /// <summary>意味モデルへ完全には写し取れなかった箇所の警告（現状は複合外部キーの列対応喪失のみ）</summary>
+        public List<CompositeForeignKeyImportWarning> Warnings { get; init; } = new();
     }
 
     /// <summary>指定の接続設定で接続を開きスキーマを取得する</summary>
@@ -63,12 +67,13 @@ public class SqlServerSchemaImporter : ISchemaImporter
         await LoadColumnsAsync(conn, tables, ct).ConfigureAwait(false);
         await LoadPrimaryKeysAsync(conn, tables, ct).ConfigureAwait(false);
         await LoadDescriptionsAsync(conn, tables, ct).ConfigureAwait(false);
-        var rels = await LoadForeignKeysAsync(conn, tables, ct).ConfigureAwait(false);
+        var (rels, warnings) = await LoadForeignKeysAsync(conn, tables, ct).ConfigureAwait(false);
 
         return new SchemaResult
         {
             Entities = tables.Values.Select(t => t.Entity).ToList(),
             Relationships = rels,
+            Warnings = warnings,
         };
     }
 
@@ -308,8 +313,14 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
     }
 
     /// <summary>外部キーを読み込み、複合列を集約してリレーションへ変換する</summary>
-    /// <remarks>参照先列の集合が主キーまたは一意制約と一致する場合は 1 対 1、それ以外は 1 対多と判定する</remarks>
-    private static async Task<List<Relationship>> LoadForeignKeysAsync(
+    /// <remarks>
+    /// 参照先列の集合が主キーまたは一意制約と一致する場合は 1 対 1、それ以外は 1 対多と判定する。
+    /// 複合外部キーは列対応を失うため、その旨の警告もあわせて返す。
+    /// </remarks>
+    private static async Task<(
+        List<Relationship> Relationships,
+        List<CompositeForeignKeyImportWarning> Warnings
+    )> LoadForeignKeysAsync(
         SqlConnection conn,
         Dictionary<string, SchemaTableEntry> tables,
         CancellationToken ct
@@ -340,7 +351,9 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
             builder.Add(fkName, parentKey, parentCol, refKey, refCol, deleteAction, updateAction);
         }
 
-        return builder.Build(tables, uniqueSets);
+        var rels = builder.Build(tables, uniqueSets);
+
+        return (rels, builder.CompositeForeignKeyWarnings.ToList());
     }
 
     /// <summary>テーブルごとの一意インデックス列集合を取得する</summary>

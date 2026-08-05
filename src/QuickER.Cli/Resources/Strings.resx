@@ -178,6 +178,9 @@
   <data name="Cli_SchemaImportFailed" xml:space="preserve">
     <value>Failed to import the schema from the database: {0}</value>
   </data>
+  <data name="Cli_CompositeForeignKeyWarning" xml:space="preserve">
+    <value>Warning: composite foreign key {0} on {1} ({2}) references {3} ({4}). Column mappings are not preserved; it was imported as a single relationship without column mapping.</value>
+  </data>
   <data name="Cli_RepositoryDialectUnsupported" xml:space="preserve">
     <value>QuickER Repository (GenerateRepositories) does not support the dialect '{0}'. Supported dialects: {1}</value>
   </data>

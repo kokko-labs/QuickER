@@ -294,6 +294,12 @@ namespace QuickER.Cli.Resources {
             }
         }
 
+        public static string Cli_CompositeForeignKeyWarning {
+            get {
+                return ResourceManager.GetString("Cli_CompositeForeignKeyWarning", resourceCulture);
+            }
+        }
+
         public static string Cli_RepositoryDialectUnsupported {
             get {
                 return ResourceManager.GetString("Cli_RepositoryDialectUnsupported", resourceCulture);

@@ -285,6 +285,18 @@ Do you want to run this against {0}?</value>
   <data name="Db_ImportFailed" xml:space="preserve">
     <value>Failed to import: {0}</value>
   </data>
+  <data name="Db_ImportCompositeForeignKeyTitle" xml:space="preserve">
+    <value>Import Warning</value>
+  </data>
+  <data name="Db_ImportCompositeForeignKeyHeader" xml:space="preserve">
+    <value>Some composite foreign keys could not be fully imported. Column mappings are not preserved; each was imported as a single relationship without column mapping:</value>
+  </data>
+  <data name="Db_ImportCompositeForeignKeyLine" xml:space="preserve">
+    <value>• {0}: {1} ({2}) -&gt; {3} ({4})</value>
+  </data>
+  <data name="Db_ImportCompositeForeignKeyMoreItems" xml:space="preserve">
+    <value>…and {0} more</value>
+  </data>
   <data name="Db_SyncWriteBack" xml:space="preserve">
     <value>Write the current diagram back to the existing DB (apply diff ALTER)</value>
   </data>

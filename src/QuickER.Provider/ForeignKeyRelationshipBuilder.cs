@@ -26,6 +26,11 @@ namespace QuickER.Provider;
 /// <para>
 /// <see cref="Build"/> は投入順（=最初に各「FK 保有テーブル＋制約名」が出現した順）を保ったリレーション一覧を返す。
 /// </para>
+/// <para>
+/// 複合外部キー（列ペアが 2 組以上）は、意味モデルが単一の列ペアしか表現できないため列対応を失う。
+/// <see cref="Build"/> はその劣化を <see cref="CompositeForeignKeyWarnings"/> へ記録する（リレーション一覧の
+/// 内容自体は従来どおり）。
+/// </para>
 /// </remarks>
 public sealed class ForeignKeyRelationshipBuilder
 {
@@ -42,6 +47,18 @@ public sealed class ForeignKeyRelationshipBuilder
             ForeignKeyReferentialAction OnUpdate
         )
     > _grouped = new();
+
+    /// <summary>直近の <see cref="Build"/> で検出した複合外部キーの劣化警告（<see cref="Build"/> ごとに作り直す）</summary>
+    private readonly List<CompositeForeignKeyImportWarning> _compositeWarnings = new();
+
+    /// <summary>
+    /// 直近の <see cref="Build"/> で検出した複合外部キー（列ペア 2 組以上）の劣化警告。
+    /// </summary>
+    /// <remarks>
+    /// <see cref="Build"/> を呼ぶ前は空。表示層はこれを取込結果へ載せて利用者へ提示する。
+    /// </remarks>
+    public IReadOnlyList<CompositeForeignKeyImportWarning> CompositeForeignKeyWarnings =>
+        _compositeWarnings;
 
     /// <summary>外部キー構成列を 1 行投入する（同一テーブル・同一 <paramref name="fkName"/> の複合列は複数回呼ぶ）</summary>
     /// <param name="fkName">外部キー制約名（テーブルをまたいだ一意性は保証されない）</param>
@@ -86,12 +103,17 @@ public sealed class ForeignKeyRelationshipBuilder
     /// <param name="tables">テーブルキー → 取込中のテーブルエントリ</param>
     /// <param name="uniqueSets">テーブルキー → 主キー以外の一意制約列集合（1 対 1 判定に用いる）</param>
     /// <returns>投入順を保持したリレーション一覧。解決できないテーブル参照はスキップする</returns>
+    /// <remarks>
+    /// 複合外部キーを検出した場合は <see cref="CompositeForeignKeyWarnings"/> へ記録する
+    /// （複数回呼んでも重複しないよう、呼び出しのたびに作り直す）。
+    /// </remarks>
     public List<Relationship> Build(
         IReadOnlyDictionary<string, SchemaTableEntry> tables,
         IReadOnlyDictionary<string, List<string[]>> uniqueSets
     )
     {
         var rels = new List<Relationship>();
+        _compositeWarnings.Clear();
 
         foreach (var (_, g) in _grouped)
         {
@@ -103,6 +125,20 @@ public sealed class ForeignKeyRelationshipBuilder
             if (!tables.TryGetValue(g.RefKey, out var refer))
             {
                 continue;
+            }
+
+            // 複合外部キーは意味モデルが列対応を表現できず単一リレーションへ劣化するため、警告として記録する
+            if (g.ParentCols.Count > 1)
+            {
+                _compositeWarnings.Add(
+                    new CompositeForeignKeyImportWarning(
+                        g.ConstraintName,
+                        parent.Entity.TableName,
+                        g.ParentCols.ToArray(),
+                        refer.Entity.TableName,
+                        g.RefCols.ToArray()
+                    )
+                );
             }
 
             // FK を構成する子側の列に IsForeignKey フラグを立てる

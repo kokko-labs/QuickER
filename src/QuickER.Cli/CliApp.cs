@@ -251,6 +251,22 @@ public static class CliApp
             return null;
         }
 
+        // 意味モデルへ写し取れなかった箇所（複合外部キーの列対応喪失）は警告として知らせるだけで、
+        // 取込自体は成功しているため生成は続行する（生成前検証の「警告のみで継続」と同じ線）
+        foreach (var warning in imported.Warnings)
+        {
+            stderr.WriteLine(
+                string.Format(
+                    Strings.Cli_CompositeForeignKeyWarning,
+                    warning.ConstraintName,
+                    warning.ChildTable,
+                    string.Join(", ", warning.ChildColumns),
+                    warning.ParentTable,
+                    string.Join(", ", warning.ParentColumns)
+                )
+            );
+        }
+
         return new ErDiagram
         {
             Entities = imported.Entities.ToList(),

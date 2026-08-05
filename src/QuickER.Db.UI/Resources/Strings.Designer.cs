@@ -498,6 +498,30 @@ namespace QuickER.Db.UI.Resources {
             }
         }
 
+        public static string Db_ImportCompositeForeignKeyTitle {
+            get {
+                return ResourceManager.GetString("Db_ImportCompositeForeignKeyTitle", resourceCulture);
+            }
+        }
+
+        public static string Db_ImportCompositeForeignKeyHeader {
+            get {
+                return ResourceManager.GetString("Db_ImportCompositeForeignKeyHeader", resourceCulture);
+            }
+        }
+
+        public static string Db_ImportCompositeForeignKeyLine {
+            get {
+                return ResourceManager.GetString("Db_ImportCompositeForeignKeyLine", resourceCulture);
+            }
+        }
+
+        public static string Db_ImportCompositeForeignKeyMoreItems {
+            get {
+                return ResourceManager.GetString("Db_ImportCompositeForeignKeyMoreItems", resourceCulture);
+            }
+        }
+
         public static string Db_SyncWriteBack {
             get {
                 return ResourceManager.GetString("Db_SyncWriteBack", resourceCulture);

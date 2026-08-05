@@ -128,6 +128,80 @@ public class ForeignKeyRelationshipBuilderTests
         child.ColumnsByName["BId"].IsForeignKey.Should().BeTrue();
     }
 
+    /// <summary>複合 FK の取込で、制約名・子テーブル・列ペアを備えた劣化警告が生成されることを検証する</summary>
+    [Fact(DisplayName = "複合 FK は列対応喪失の警告を生成する")]
+    public void CompositeForeignKey_ProducesWarning()
+    {
+        var child = Table("Child", "ChildTable", Col("Id", pk: true), Col("AId"), Col("BId"));
+        var parent = Table("Parent", "ParentTable", Col("A", pk: true), Col("B", pk: true));
+
+        var tables = new Dictionary<string, SchemaTableEntry>
+        {
+            ["Child"] = child,
+            ["Parent"] = parent,
+        };
+
+        var builder = new ForeignKeyRelationshipBuilder();
+        builder.Add(
+            "FK_Child_Parent",
+            "Child",
+            "AId",
+            "Parent",
+            "A",
+            ForeignKeyReferentialAction.NoAction,
+            ForeignKeyReferentialAction.NoAction
+        );
+        builder.Add(
+            "FK_Child_Parent",
+            "Child",
+            "BId",
+            "Parent",
+            "B",
+            ForeignKeyReferentialAction.NoAction,
+            ForeignKeyReferentialAction.NoAction
+        );
+
+        builder.Build(tables, NoUniqueSets());
+
+        var warning = builder.CompositeForeignKeyWarnings.Should().ContainSingle().Which;
+        warning.ConstraintName.Should().Be("FK_Child_Parent");
+        // テーブルはキーではなくエンティティのテーブル名で報告する
+        warning.ChildTable.Should().Be("ChildTable");
+        warning.ParentTable.Should().Be("ParentTable");
+        // 列は投入順（＝序数順）で子側・親側が対応する
+        warning.ChildColumns.Should().Equal("AId", "BId");
+        warning.ParentColumns.Should().Equal("A", "B");
+    }
+
+    /// <summary>単一列 FK だけの取込では劣化警告が生成されないことを検証する</summary>
+    [Fact(DisplayName = "単一列 FK では警告を生成しない")]
+    public void SingleColumnForeignKey_ProducesNoWarning()
+    {
+        var customer = Table("Customer", "Customer", Col("Id", pk: true));
+        var order = Table("Order", "Order", Col("Id", pk: true), Col("CustomerId"));
+
+        var tables = new Dictionary<string, SchemaTableEntry>
+        {
+            ["Customer"] = customer,
+            ["Order"] = order,
+        };
+
+        var builder = new ForeignKeyRelationshipBuilder();
+        builder.Add(
+            "FK_Order_Customer",
+            "Order",
+            "CustomerId",
+            "Customer",
+            "Id",
+            ForeignKeyReferentialAction.NoAction,
+            ForeignKeyReferentialAction.NoAction
+        );
+
+        builder.Build(tables, NoUniqueSets());
+
+        builder.CompositeForeignKeyWarnings.Should().BeEmpty();
+    }
+
     /// <summary>FK 列が FK 保有テーブルの主キーと一致する場合に 1 対 1 と判定されることを検証する</summary>
     [Fact(DisplayName = "FK 列が主キーと一致すれば 1 対 1")]
     public void ForeignKeyMatchingPrimaryKey_IsOneToOne()
