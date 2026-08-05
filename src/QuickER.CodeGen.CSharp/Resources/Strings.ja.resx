@@ -88,6 +88,15 @@
   <data name="CodeGen_Error_ColumnPropertyNameCollision" xml:space="preserve">
     <value>テーブル '{0}' の列 {2} のプロパティ名がいずれも '{1}' になります。エンティティクラスと EditModel クラスに同名メンバーが重複して生成され、コンパイルできません。生成されるプロパティ名が異なるよう列名を変更してください（列名はパスカルケースへ変換されるため、'user-id'・'user_id'・'USER_ID' はいずれも 'UserId' になります）。</value>
   </data>
+  <data name="CodeGen_Error_GeneratedMemberNameCollision" xml:space="preserve">
+    <value>クラス '{0}'（テーブル '{1}'）で生成されるメンバー名 '{2}' が重複します（由来: {3}）。同名メンバーが二重に宣言されコンパイルできません（CS0102）。生成されるメンバー名が一意になるよう列名を変更してください。EditModel は 1 列につき 5 つのメンバー（Name・_name・BindingName・_bindingName・_bindingNameSnapshot）を生成するため、'binding_id' という列は 'id' という列が生成するメンバーと衝突します。また列のプロパティ名がナビゲーションプロパティ名と一致する場合（例: 'customers' を参照するテーブルにある 'customer' 列）は、エンティティクラスでも衝突します。</value>
+  </data>
+  <data name="CodeGen_Origin_Column" xml:space="preserve">
+    <value>列 '{0}'</value>
+  </data>
+  <data name="CodeGen_Origin_Navigation" xml:space="preserve">
+    <value>ナビゲーション '{0}'</value>
+  </data>
   <data name="CodeGen_Error_InvalidNamespace" xml:space="preserve">
     <value>'{0}' オプションの名前空間 '{1}' が C# の名前空間として不正です。'.' 区切りの各セグメントは有効な識別子（先頭は文字か '_'、以降は文字・数字・'_'）で、かつ C# の予約語でない必要があります。空のセグメント（先頭・末尾・連続した '.'）も使えません。</value>
   </data>

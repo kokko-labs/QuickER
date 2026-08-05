@@ -608,6 +608,10 @@ public sealed class CSharpCodeGenerationService
     /// Entity / EditModel に同名メンバーが重複宣言され（CS0102）、EditModel の partial メソッドも二重宣言になる
     /// （CS0111）ため、コンパイル不能な出力が診断なしに書き出される。ここで衝突を検出して生成を止める。
     /// 衝突判定はエンティティ単位＝別テーブルの同名列は別クラスのメンバーになるため衝突ではない。
+    /// なお、生成メンバー名の衝突全般（EditModel の派生名 <c>Binding…</c> / <c>_…</c> / <c>…Snapshot</c>、
+    /// 列とナビゲーションの衝突）は <c>CSharpGenerationModelBuilder</c> のシンボル表検証が担う。本メソッドは
+    /// 最頻の誤り（同名列）へ「どの列同士か」を挙げた具体的なメッセージで先に答える早期検証として残す。
+    /// ここでエラーになるとビルダーへ到達しないため、両者の診断が同時に出ることはない。
     /// </remarks>
     private static void ValidateColumnPropertyNameUniqueness(
         ErDiagram diagram,

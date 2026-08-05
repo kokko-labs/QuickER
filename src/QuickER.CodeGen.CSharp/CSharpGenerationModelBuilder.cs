@@ -45,7 +45,7 @@ internal sealed partial class CSharpGenerationModelBuilder
         var navigationsByEntity = ResolveAllNavigations(diagram, diagnostics);
         _valueObjects = BuildValueObjects(diagram, options, diagnostics);
 
-        return new CSharpGenerationModel
+        var model = new CSharpGenerationModel
         {
             NamespaceName = string.IsNullOrWhiteSpace(options.RootNamespace)
                 ? "Generated"
@@ -77,7 +77,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             RepositoryClasses = options.GeneratesRepositoryContract
                 ? diagram
                     .Entities.Select(entity => BuildRepositoryClass(entity, options, diagnostics))
-                    .Where(model => model is not null)
+                    .Where(repository => repository is not null)
                     .Cast<CSharpRepositoryModel>()
                     .ToList()
                 : [],
@@ -86,6 +86,13 @@ internal sealed partial class CSharpGenerationModelBuilder
                 .ToList(),
             EfCore = BuildEfCoreModel(diagram, options),
         };
+
+        // 構築直後のモデルに対し、テンプレートが発行する全メンバー名をシンボル表で突き合わせて
+        // 重複（CS0102 でコンパイル不能になる出力）を検出する。ナビゲーション名と EditModel の
+        // 派生名はここでしか確定しないため、生成前検証ではなくこの位置で行う
+        ValidateGeneratedMemberNames(model, diagnostics);
+
+        return model;
     }
 
     /// <summary>エンティティ定義と解決済みナビゲーションからエンティティクラスの生成モデルを構築する</summary>
@@ -603,6 +610,7 @@ internal sealed partial class CSharpGenerationModelBuilder
         return new CSharpEditModelPropertyModel
         {
             PropertyName = propertyName,
+            ColumnName = column.Name,
             // 表示名解決へ渡す列の説明。無指定は null（ヘルパ側でプロパティ名へフォールバックする）
             DisplayNameDescription = string.IsNullOrWhiteSpace(column.Description)
                 ? null

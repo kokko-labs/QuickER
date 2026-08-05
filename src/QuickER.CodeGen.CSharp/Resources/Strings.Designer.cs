@@ -114,6 +114,24 @@ namespace QuickER.CodeGen.CSharp.Resources {
             }
         }
 
+        public static string CodeGen_Error_GeneratedMemberNameCollision {
+            get {
+                return ResourceManager.GetString("CodeGen_Error_GeneratedMemberNameCollision", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Origin_Column {
+            get {
+                return ResourceManager.GetString("CodeGen_Origin_Column", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Origin_Navigation {
+            get {
+                return ResourceManager.GetString("CodeGen_Origin_Navigation", resourceCulture);
+            }
+        }
+
         public static string CodeGen_Error_InvalidNamespace {
             get {
                 return ResourceManager.GetString("CodeGen_Error_InvalidNamespace", resourceCulture);

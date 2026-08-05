@@ -7,9 +7,11 @@ namespace QuickER.CodeGen.CSharp;
 /// </summary>
 /// <remarks>
 /// 生成対象（Entity / EditModel / Mapper / Repository）の選択と、
-/// 出力先・属性付与の有無を指定する。全プロパティは <c>init</c> 専用で、生成中に変化しない
+/// 出力先・属性付与の有無を指定する。全プロパティは <c>init</c> 専用で、生成中に変化しない。
+/// <c>record</c> なのは <c>with</c> 式で「1 項目だけ変えた設定」を作れるようにするため
+/// （手書きの全プロパティ複製はプロパティ追加時に写し漏れて、その構成が黙って未検証になる）。
 /// </remarks>
-public sealed class CodeGenerationOptions
+public sealed record CodeGenerationOptions
 {
     /// <summary>生成コードを配置するルート名前空間。空白の場合はビルダー側で既定値 "Generated" にフォールバックする</summary>
     public string RootNamespace { get; init; } = "Generated";

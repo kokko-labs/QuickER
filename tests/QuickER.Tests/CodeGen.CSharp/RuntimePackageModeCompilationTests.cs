@@ -347,28 +347,14 @@ public class RuntimePackageModeCompilationTests
         return data;
     }
 
+    /// <summary>ケース定義のオプションをパッケージ参照モードへ切り替える（他の設定はそのまま引き継ぐ）</summary>
+    /// <remarks>
+    /// 全プロパティを手書きで複製すると、オプションが増えたときに写し漏れてその構成が黙って未検証になる
+    /// （実際に GenerateRemoteServices など 5 つが欠落していた）。<c>with</c> 式で 1 項目だけ差し替える。
+    /// </remarks>
     private static CodeGenerationOptions WithPackageMode(CodeGenerationOptions options) =>
-        new()
+        options with
         {
-            RootNamespace = options.RootNamespace,
-            OutputFileName = options.OutputFileName,
-            GenerateEditModels = options.GenerateEditModels,
-            GenerateMappers = options.GenerateMappers,
-            GenerateRepositories = options.GenerateRepositories,
-            RepositoryDialects = options.RepositoryDialects,
-            GenerateEfCore = options.GenerateEfCore,
-            IncludeDataAnnotations = options.IncludeDataAnnotations,
-            IncludeJsonIgnoreOnParentNavigation = options.IncludeJsonIgnoreOnParentNavigation,
-            GenerateValueObjects = options.GenerateValueObjects,
-            UseGuidKeyForStringPrimaryKey = options.UseGuidKeyForStringPrimaryKey,
-            SplitFilesByCategory = options.SplitFilesByCategory,
-            RuntimeNamespace = options.RuntimeNamespace,
-            EntityNamespace = options.EntityNamespace,
-            EditModelNamespace = options.EditModelNamespace,
-            MapperNamespace = options.MapperNamespace,
-            RepositoryNamespace = options.RepositoryNamespace,
-            ValueObjectNamespace = options.ValueObjectNamespace,
-            GenerateRemoteContracts = options.GenerateRemoteContracts,
             UseRuntimePackages = true,
         };
 

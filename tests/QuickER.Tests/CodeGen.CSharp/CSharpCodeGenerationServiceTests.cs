@@ -2249,6 +2249,344 @@ public class CSharpCodeGenerationServiceTests
         result.Files[0].Content.Should().Contain("class UserProfileEntity");
     }
 
+    /// <summary>
+    /// EditModel の派生名（Binding{Prop}）と衝突する列（id / binding_id）があるとエラーになり、
+    /// コンパイル不能な出力を書き出さないことを検証する（列プロパティ名同士は衝突しないため、
+    /// シンボル表検証だけが検出できる系統）
+    /// </summary>
+    [Fact]
+    public void Generate_CollidingEditModelBindingMemberNames_ShouldFailWithError()
+    {
+        var diagram = new ErDiagram
+        {
+            Entities =
+            [
+                new Entity
+                {
+                    Id = Guid.NewGuid(),
+                    TableName = "items",
+                    Columns =
+                    [
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "binding_id",
+                            DataType = "int",
+                            IsNullable = false,
+                        },
+                    ],
+                },
+            ],
+        };
+
+        var result = new CSharpCodeGenerationService().Generate(
+            diagram,
+            new CodeGenerationOptions { RootNamespace = "Sample.Domain" }
+        );
+
+        result.HasErrors.Should().BeTrue();
+        result.Files.Should().BeEmpty();
+        result
+            .Diagnostics.Should()
+            .Contain(diagnostic =>
+                diagnostic.Severity == GenerationDiagnosticSeverity.Error
+                && diagnostic.Message.Contains("ItemEditModel")
+                && diagnostic.Message.Contains("'BindingId'")
+                && diagnostic.Message.Contains("'id'")
+                && diagnostic.Message.Contains("'binding_id'")
+            );
+    }
+
+    /// <summary>
+    /// 列由来プロパティ名がナビゲーションプロパティ名と衝突する（customer 列 ＋ customers への参照）と
+    /// エラーになることを検証する。EditModel を生成しない構成でも Entity 側が壊れるため検出できる必要がある
+    /// </summary>
+    [Fact]
+    public void Generate_ColumnCollidingWithNavigationName_ShouldFailWithError()
+    {
+        var customerId = Guid.NewGuid();
+        var orderId = Guid.NewGuid();
+        var customerPk = Guid.NewGuid();
+        var orderFk = Guid.NewGuid();
+
+        var diagram = new ErDiagram
+        {
+            Entities =
+            [
+                new Entity
+                {
+                    Id = customerId,
+                    TableName = "customers",
+                    Columns =
+                    [
+                        new Column
+                        {
+                            Id = customerPk,
+                            Name = "customer_id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                    ],
+                },
+                new Entity
+                {
+                    Id = orderId,
+                    TableName = "orders",
+                    Columns =
+                    [
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "order_id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                        new Column
+                        {
+                            Id = orderFk,
+                            Name = "customer_id",
+                            DataType = "int",
+                            IsForeignKey = true,
+                            IsNullable = false,
+                        },
+                        // 親参照ナビゲーション "Customer" と同名のプロパティになる列
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "customer",
+                            DataType = "nvarchar(50)",
+                            IsNullable = false,
+                        },
+                    ],
+                },
+            ],
+            Relationships =
+            [
+                new Relationship
+                {
+                    Id = Guid.NewGuid(),
+                    Type = RelationshipType.OneToMany,
+                    SourceEntityId = customerId,
+                    TargetEntityId = orderId,
+                    SourceColumnId = customerPk,
+                    TargetColumnId = orderFk,
+                },
+            ],
+        };
+
+        // EditModel / Mapper を生成しない構成でも Entity 側で衝突するため検出できる
+        var result = new CSharpCodeGenerationService().Generate(
+            diagram,
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Sample.Domain",
+                GenerateEditModels = false,
+                GenerateMappers = false,
+            }
+        );
+
+        result.HasErrors.Should().BeTrue();
+        result.Files.Should().BeEmpty();
+        result
+            .Diagnostics.Should()
+            .Contain(diagnostic =>
+                diagnostic.Severity == GenerationDiagnosticSeverity.Error
+                && diagnostic.Message.Contains("OrderEntity")
+                && diagnostic.Message.Contains("'Customer'")
+                && diagnostic.Message.Contains("'customer'")
+            );
+    }
+
+    /// <summary>
+    /// 列・ナビゲーション・EditModel の派生名がすべて異なる図は生成できることを検証する
+    /// （シンボル表検証の偽陽性防止）
+    /// </summary>
+    [Fact]
+    public void Generate_DistinctGeneratedMemberNames_ShouldSucceed()
+    {
+        var customerId = Guid.NewGuid();
+        var orderId = Guid.NewGuid();
+        var customerPk = Guid.NewGuid();
+        var orderFk = Guid.NewGuid();
+
+        var diagram = new ErDiagram
+        {
+            Entities =
+            [
+                new Entity
+                {
+                    Id = customerId,
+                    TableName = "customers",
+                    Columns =
+                    [
+                        new Column
+                        {
+                            Id = customerPk,
+                            Name = "user_id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "user_name",
+                            DataType = "nvarchar(50)",
+                            IsNullable = false,
+                        },
+                    ],
+                },
+                new Entity
+                {
+                    Id = orderId,
+                    TableName = "orders",
+                    Columns =
+                    [
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "order_id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                        new Column
+                        {
+                            Id = orderFk,
+                            Name = "user_id",
+                            DataType = "int",
+                            IsForeignKey = true,
+                            IsNullable = false,
+                        },
+                    ],
+                },
+            ],
+            Relationships =
+            [
+                new Relationship
+                {
+                    Id = Guid.NewGuid(),
+                    Type = RelationshipType.OneToMany,
+                    SourceEntityId = customerId,
+                    TargetEntityId = orderId,
+                    SourceColumnId = customerPk,
+                    TargetColumnId = orderFk,
+                },
+            ],
+        };
+
+        var result = new CSharpCodeGenerationService().Generate(
+            diagram,
+            new CodeGenerationOptions { RootNamespace = "Sample.Domain" }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        result.Files[0].Content.Should().Contain("public int UserId");
+        result.Files[0].Content.Should().Contain("public string UserName");
+        result.Files[0].Content.Should().Contain("public CustomerEntity Customer");
+        result.Files[0].Content.Should().Contain("public string BindingUserName");
+    }
+
+    /// <summary>
+    /// 別エンティティの同名メンバー（一方は列プロパティ・他方はナビゲーション）は衝突扱いにならないことを検証する
+    /// （衝突判定はクラス単位）
+    /// </summary>
+    [Fact]
+    public void Generate_ColumnNameMatchingOtherEntityNavigation_ShouldSucceed()
+    {
+        var customerId = Guid.NewGuid();
+        var orderId = Guid.NewGuid();
+        var customerPk = Guid.NewGuid();
+        var orderFk = Guid.NewGuid();
+
+        var diagram = new ErDiagram
+        {
+            Entities =
+            [
+                new Entity
+                {
+                    Id = customerId,
+                    TableName = "customers",
+                    Columns =
+                    [
+                        new Column
+                        {
+                            Id = customerPk,
+                            Name = "customer_id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                        // CustomerEntity のプロパティ名は "Customer"。OrderEntity 側のナビゲーション名と
+                        // 同名だが、別クラスのメンバーのため衝突ではない
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "customer",
+                            DataType = "nvarchar(50)",
+                            IsNullable = false,
+                        },
+                    ],
+                },
+                new Entity
+                {
+                    Id = orderId,
+                    TableName = "orders",
+                    Columns =
+                    [
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "order_id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                        new Column
+                        {
+                            Id = orderFk,
+                            Name = "customer_id",
+                            DataType = "int",
+                            IsForeignKey = true,
+                            IsNullable = false,
+                        },
+                    ],
+                },
+            ],
+            Relationships =
+            [
+                new Relationship
+                {
+                    Id = Guid.NewGuid(),
+                    Type = RelationshipType.OneToMany,
+                    SourceEntityId = customerId,
+                    TargetEntityId = orderId,
+                    SourceColumnId = customerPk,
+                    TargetColumnId = orderFk,
+                },
+            ],
+        };
+
+        var result = new CSharpCodeGenerationService().Generate(
+            diagram,
+            new CodeGenerationOptions { RootNamespace = "Sample.Domain" }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        result.Files[0].Content.Should().Contain("public string Customer { get; set; }");
+        result.Files[0].Content.Should().Contain("public CustomerEntity Customer { get; set; }");
+    }
+
     /// <summary>C# の名前空間として不正な RootNamespace はエラーになることを検証する</summary>
     [Fact]
     public void Generate_InvalidRootNamespace_ShouldFailWithError()

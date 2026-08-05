@@ -147,6 +147,7 @@ internal sealed partial class CSharpGenerationModelBuilder
         return new CSharpEditModelPropertyModel
         {
             PropertyName = propertyName,
+            ColumnName = column.Name,
             // VO 有効プロパティの表示名は VO の静的 DisplayName を参照するため、この説明は使われない（整合のため転記のみ）
             DisplayNameDescription = string.IsNullOrWhiteSpace(column.Description)
                 ? null

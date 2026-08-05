@@ -542,6 +542,9 @@ internal sealed record CSharpEditModelPropertyModel
     /// <summary>通常プロパティ名（例: CustomerId）</summary>
     public required string PropertyName { get; init; }
 
+    /// <summary>対応するカラム名（テンプレートは参照しない。メンバー名衝突診断の由来表示に使う）</summary>
+    public required string ColumnName { get; init; }
+
     /// <summary>
     /// 表示名機構（VO 無効時の <c>GetDisplayName</c> ヘルパ）へ渡す列の説明（C# 文字列リテラルへエスケープ済み）。
     /// 説明が空・空白のみなら <c>null</c>（ヘルパ呼び出しには <c>null</c> リテラルを渡し、プロパティ名へフォールバックさせる）。
