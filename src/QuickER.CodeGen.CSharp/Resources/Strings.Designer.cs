@@ -108,6 +108,12 @@ namespace QuickER.CodeGen.CSharp.Resources {
             }
         }
 
+        public static string CodeGen_Error_ColumnPropertyNameCollision {
+            get {
+                return ResourceManager.GetString("CodeGen_Error_ColumnPropertyNameCollision", resourceCulture);
+            }
+        }
+
         public static string CodeGen_Error_InvalidNamespace {
             get {
                 return ResourceManager.GetString("CodeGen_Error_InvalidNamespace", resourceCulture);

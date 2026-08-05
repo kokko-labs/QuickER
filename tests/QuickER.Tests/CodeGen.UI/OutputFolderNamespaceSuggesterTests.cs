@@ -1,5 +1,6 @@
 using System.IO;
 using AwesomeAssertions;
+using QuickER.CodeGen.CSharp;
 using QuickER.CodeGen.UI;
 
 namespace QuickER.Tests.CodeGen.UI;
@@ -143,6 +144,33 @@ public class OutputFolderNamespaceSuggesterTests
                 .TryDerive(target)
                 .Should()
                 .Be("Base._1st_Layer.My_Folder");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    /// <summary>C# の予約語と同名のフォルダはアンダースコアを前置してサニタイズされる</summary>
+    /// <remarks>
+    /// 「導出結果は必ず namespace 検証（<see cref="CSharpNamespaceValidator"/>）を通る」不変条件を守る。
+    /// 素通しすると <c>namespace Base.class;</c> というコンパイル不能な候補を提示してしまう
+    /// </remarks>
+    [Fact(DisplayName = "予約語と同名のフォルダはサニタイズされる")]
+    public void ReservedKeywordFolderName_IsSanitized()
+    {
+        var root = CreateTempRoot();
+
+        try
+        {
+            WriteCsproj(root, "Base.csproj", rootNamespace: "Base");
+            var target = Path.Combine(root, "class");
+            Directory.CreateDirectory(target);
+
+            var derived = OutputFolderNamespaceSuggester.TryDerive(target);
+
+            derived.Should().Be("Base._class");
+            CSharpNamespaceValidator.IsValid(derived).Should().BeTrue();
         }
         finally
         {

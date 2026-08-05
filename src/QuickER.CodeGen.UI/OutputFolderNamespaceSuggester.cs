@@ -2,6 +2,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Xml.Linq;
+using QuickER.CodeGen.CSharp;
 
 namespace QuickER.CodeGen.UI;
 
@@ -46,7 +47,9 @@ internal static class OutputFolderNamespaceSuggester
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            // ディレクトリ走査・csproj 読み取りでの IO 失敗は導出不能として扱う
+            // csproj 読み取り（XDocument.Load）等での IO 失敗に対する保険。
+            // ディレクトリ走査の 1 階層のアクセス拒否は FindProjectDirectory 内で吸収されるため、
+            // ここまで来るのは走査後の読み取りが失敗したケースに限られる（導出不能として扱う）
             return null;
         }
     }
@@ -96,15 +99,33 @@ internal static class OutputFolderNamespaceSuggester
 
     /// <summary>フォルダから親方向へ走査し、最初に *.csproj を含むディレクトリを返す（ドライブルートまで）</summary>
     /// <param name="csprojPath">見つかった csproj のフルパス（複数あれば名前順で最初の 1 つ）。無ければ null</param>
+    /// <remarks>
+    /// 読めない階層（アクセス拒否・IO エラー）は「csproj 無し」とみなして走査を続ける（契約）。
+    /// 全階層が読めなければ csproj 未検出として返し、呼び出し側の
+    /// 「選択フォルダ名 1 セグメント」フォールバックへ委ねる。
+    /// </remarks>
     private static DirectoryInfo? FindProjectDirectory(DirectoryInfo start, out string? csprojPath)
     {
         for (var current = start; current is not null; current = current.Parent)
         {
-            // 名前順で安定させ、同一ディレクトリに複数 csproj があっても常に同じ 1 つを選ぶ
-            var csproj = current
-                .EnumerateFiles("*.csproj", SearchOption.TopDirectoryOnly)
-                .OrderBy(file => file.Name, StringComparer.Ordinal)
-                .FirstOrDefault();
+            FileInfo? csproj;
+
+            try
+            {
+                // 名前順で安定させ、同一ディレクトリに複数 csproj があっても常に同じ 1 つを選ぶ。
+                // EnumerateFiles は遅延列挙のため、実際の列挙（FirstOrDefault）でこの階層の IO 例外が出る
+                csproj = current
+                    .EnumerateFiles("*.csproj", SearchOption.TopDirectoryOnly)
+                    .OrderBy(file => file.Name, StringComparer.Ordinal)
+                    .FirstOrDefault();
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // 読めない階層は「csproj 無し」とみなして親方向の走査を続ける。
+                // break（走査打ち切り）にしないのは、中間の 1 階層だけ読めないケースで
+                // その上位にある本来の csproj を取りこぼさないため
+                continue;
+            }
 
             if (csproj is not null)
             {
@@ -141,7 +162,9 @@ internal static class OutputFolderNamespaceSuggester
         }
     }
 
-    /// <summary>1 セグメントを C# 識別子として妥当な形へ整える（無効文字は '_'・先頭数字は '_' 前置）</summary>
+    /// <summary>
+    /// 1 セグメントを C# 識別子として妥当な形へ整える（無効文字は '_'・先頭数字は '_' 前置・予約語は '_' 前置）
+    /// </summary>
     private static string Sanitize(string segment)
     {
         if (string.IsNullOrEmpty(segment))
@@ -163,7 +186,11 @@ internal static class OutputFolderNamespaceSuggester
             builder.Insert(0, '_');
         }
 
-        return builder.ToString();
+        var candidate = builder.ToString();
+
+        // 予約語（フォルダ名が "class" 等）はそのままだとコンパイル不能な名前空間になるためアンダースコアを前置する。
+        // 判定表は namespace 検証と同じ CSharpNamespaceValidator を使い、「導出結果は必ず検証を通る」不変条件を保つ
+        return CSharpNamespaceValidator.IsReservedKeyword(candidate) ? "_" + candidate : candidate;
     }
 
     /// <summary>C# 識別子を構成できる文字か（Unicode 文字 \p{L}・10 進数字 \p{Nd}・アンダースコア）</summary>

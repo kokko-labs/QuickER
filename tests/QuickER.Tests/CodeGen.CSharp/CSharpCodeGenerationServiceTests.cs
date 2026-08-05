@@ -2094,6 +2094,161 @@ public class CSharpCodeGenerationServiceTests
         result.Files[0].Content.Should().Contain("class CustomerAddressEntity");
     }
 
+    /// <summary>
+    /// 正規化で同じプロパティ名になる列（user-id / user_id）が同一エンティティにあるとエラーになり、
+    /// コンパイル不能な出力を書き出さないことを検証する
+    /// </summary>
+    [Fact]
+    public void Generate_CollidingColumnPropertyNames_ShouldFailWithError()
+    {
+        var diagram = new ErDiagram
+        {
+            Entities =
+            [
+                new Entity
+                {
+                    Id = Guid.NewGuid(),
+                    TableName = "users",
+                    Columns =
+                    [
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "user-id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "user_id",
+                            DataType = "int",
+                            IsNullable = false,
+                        },
+                    ],
+                },
+            ],
+        };
+
+        var result = new CSharpCodeGenerationService().Generate(
+            diagram,
+            new CodeGenerationOptions { RootNamespace = "Sample.Domain" }
+        );
+
+        result.HasErrors.Should().BeTrue();
+        result.Files.Should().BeEmpty();
+        result
+            .Diagnostics.Should()
+            .Contain(diagnostic =>
+                diagnostic.Severity == GenerationDiagnosticSeverity.Error
+                && diagnostic.Message.Contains("users")
+                && diagnostic.Message.Contains("UserId")
+                && diagnostic.Message.Contains("'user-id'")
+                && diagnostic.Message.Contains("'user_id'")
+            );
+    }
+
+    /// <summary>プロパティ名が衝突しない列なら生成できることを検証する（衝突検証の偽陽性防止）</summary>
+    [Fact]
+    public void Generate_DistinctColumnPropertyNames_ShouldSucceed()
+    {
+        var diagram = new ErDiagram
+        {
+            Entities =
+            [
+                new Entity
+                {
+                    Id = Guid.NewGuid(),
+                    TableName = "users",
+                    Columns =
+                    [
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "user_id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "user_name",
+                            DataType = "nvarchar(50)",
+                            IsNullable = false,
+                        },
+                    ],
+                },
+            ],
+        };
+
+        var result = new CSharpCodeGenerationService().Generate(
+            diagram,
+            new CodeGenerationOptions { RootNamespace = "Sample.Domain" }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        result.Files[0].Content.Should().Contain("public int UserId");
+        result.Files[0].Content.Should().Contain("public string UserName");
+    }
+
+    /// <summary>
+    /// 別エンティティに同じプロパティ名の列があっても衝突扱いにならないことを検証する
+    /// （プロパティは別クラスのメンバーになるため）
+    /// </summary>
+    [Fact]
+    public void Generate_SamePropertyNameInDifferentEntities_ShouldSucceed()
+    {
+        var diagram = new ErDiagram
+        {
+            Entities =
+            [
+                new Entity
+                {
+                    Id = Guid.NewGuid(),
+                    TableName = "users",
+                    Columns =
+                    [
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "user-id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                    ],
+                },
+                new Entity
+                {
+                    Id = Guid.NewGuid(),
+                    TableName = "user_profiles",
+                    Columns =
+                    [
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "user_id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                    ],
+                },
+            ],
+        };
+
+        var result = new CSharpCodeGenerationService().Generate(
+            diagram,
+            new CodeGenerationOptions { RootNamespace = "Sample.Domain" }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        result.Files[0].Content.Should().Contain("class UserEntity");
+        result.Files[0].Content.Should().Contain("class UserProfileEntity");
+    }
+
     /// <summary>C# の名前空間として不正な RootNamespace はエラーになることを検証する</summary>
     [Fact]
     public void Generate_InvalidRootNamespace_ShouldFailWithError()
@@ -2110,6 +2265,53 @@ public class CSharpCodeGenerationServiceTests
                 diagnostic.Severity == GenerationDiagnosticSeverity.Error
                 && diagnostic.Message.Contains("RootNamespace")
                 && diagnostic.Message.Contains("Bad-Namespace")
+            );
+    }
+
+    /// <summary>
+    /// 空セグメントを含む RootNamespace（先頭・末尾・連続したドット）はエラーになることを検証する
+    /// </summary>
+    /// <remarks>
+    /// 空セグメントを除去してから検証すると <c>namespace .Foo;</c> のようなコンパイル不能な出力が
+    /// 無警告で書き出される（本テストがその回帰を防ぐ）
+    /// </remarks>
+    [Theory]
+    [InlineData(".Sample")]
+    [InlineData("Sample.")]
+    [InlineData("Sample..Domain")]
+    [InlineData("Sample. .Domain")]
+    public void Generate_RootNamespaceWithEmptySegment_ShouldFailWithError(string rootNamespace)
+    {
+        var options = new CodeGenerationOptions { RootNamespace = rootNamespace };
+
+        var result = new CSharpCodeGenerationService().Generate(SingleEntityDiagram(), options);
+
+        result.HasErrors.Should().BeTrue();
+        result.Files.Should().BeEmpty();
+        result
+            .Diagnostics.Should()
+            .Contain(diagnostic =>
+                diagnostic.Severity == GenerationDiagnosticSeverity.Error
+                && diagnostic.Message.Contains("RootNamespace")
+            );
+    }
+
+    /// <summary>C# の予約語をセグメントに含む RootNamespace はエラーになることを検証する</summary>
+    [Fact]
+    public void Generate_RootNamespaceWithReservedKeyword_ShouldFailWithError()
+    {
+        var options = new CodeGenerationOptions { RootNamespace = "Sample.class.Domain" };
+
+        var result = new CSharpCodeGenerationService().Generate(SingleEntityDiagram(), options);
+
+        result.HasErrors.Should().BeTrue();
+        result.Files.Should().BeEmpty();
+        result
+            .Diagnostics.Should()
+            .Contain(diagnostic =>
+                diagnostic.Severity == GenerationDiagnosticSeverity.Error
+                && diagnostic.Message.Contains("RootNamespace")
+                && diagnostic.Message.Contains("Sample.class.Domain")
             );
     }
 

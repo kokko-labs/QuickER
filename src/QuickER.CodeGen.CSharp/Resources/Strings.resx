@@ -85,8 +85,11 @@
   <data name="CodeGen_Error_EntityClassNameCollision" xml:space="preserve">
     <value>Tables {1} all map to the same entity class name '{0}'. Entity classes are partial, so they would merge into a single class and fail to compile. Rename the tables so that the generated class names differ (table names are singularized, so 'customer' and 'customers' both become 'CustomerEntity').</value>
   </data>
+  <data name="CodeGen_Error_ColumnPropertyNameCollision" xml:space="preserve">
+    <value>Columns {2} of table '{0}' all map to the same property name '{1}'. The entity and EditModel classes would declare duplicate members and fail to compile. Rename the columns so that the generated property names differ (column names are converted to Pascal case, so 'user-id', 'user_id', and 'USER_ID' all become 'UserId').</value>
+  </data>
   <data name="CodeGen_Error_InvalidNamespace" xml:space="preserve">
-    <value>The '{0}' option has an invalid C# namespace: '{1}'. Each dot-separated segment must be a valid identifier (a letter or '_' first, then letters, digits, or '_').</value>
+    <value>The '{0}' option has an invalid C# namespace: '{1}'. Each dot-separated segment must be a valid identifier (a letter or '_' first, then letters, digits, or '_') and must not be a C# keyword. Empty segments (a leading, trailing, or repeated '.') are not allowed.</value>
   </data>
   <data name="CodeGen_Warning_CompositeKey" xml:space="preserve">
     <value>Table '{0}' has a composite primary key, so [Key] attribute generation is minimal. A single primary key is recommended for the MVP.</value>

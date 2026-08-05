@@ -487,7 +487,7 @@ public sealed class CSharpCodeGenerationService
     /// <remarks>
     /// エラー: エンティティが存在しない、テーブル名が空、生成対象間の依存違反
     /// （Mapper は EditModel が必要、Repository / EF Core / インメモリは DataAnnotations が必要）、
-    /// 名前空間オプションの形式不正、エンティティクラス名の衝突。
+    /// 名前空間オプションの形式不正、エンティティクラス名の衝突、列由来プロパティ名の衝突。
     /// Entity は常時生成されるため「生成対象なし」「Repository は Entity 必須」は起こらない。
     /// 警告: 複合主キー（[Key] 属性の生成が最小限になる）
     /// </remarks>
@@ -543,6 +543,7 @@ public sealed class CSharpCodeGenerationService
         }
 
         ValidateEntityClassNameUniqueness(diagram, diagnostics);
+        ValidateColumnPropertyNameUniqueness(diagram, diagnostics);
     }
 
     /// <summary>
@@ -595,6 +596,72 @@ public sealed class CSharpCodeGenerationService
                     )
                 )
             );
+        }
+    }
+
+    /// <summary>
+    /// 列由来のプロパティ名がエンティティごとに一意であることを検証する
+    /// </summary>
+    /// <remarks>
+    /// 列名はパスカルケースへ正規化してからプロパティ名にするため、<c>user-id</c> / <c>user_id</c> / <c>USER_ID</c> の
+    /// ように綴りが違う列でも同じプロパティ名（<c>UserId</c>）になりうる。同一エンティティ内で衝突すると
+    /// Entity / EditModel に同名メンバーが重複宣言され（CS0102）、EditModel の partial メソッドも二重宣言になる
+    /// （CS0111）ため、コンパイル不能な出力が診断なしに書き出される。ここで衝突を検出して生成を止める。
+    /// 衝突判定はエンティティ単位＝別テーブルの同名列は別クラスのメンバーになるため衝突ではない。
+    /// </remarks>
+    private static void ValidateColumnPropertyNameUniqueness(
+        ErDiagram diagram,
+        ICollection<GenerationDiagnostic> diagnostics
+    )
+    {
+        var converter = new CSharpNameConverter();
+
+        foreach (
+            var entity in diagram.Entities.Where(entity =>
+                !string.IsNullOrWhiteSpace(entity.TableName)
+            )
+        )
+        {
+            // 列の並び順で最初に現れたプロパティ名から順に報告するため、挿入順を保つ辞書へ集約する
+            var columnsByPropertyName = new Dictionary<string, List<string>>(
+                StringComparer.Ordinal
+            );
+            var order = new List<string>();
+
+            foreach (
+                var column in entity.Columns.Where(column =>
+                    !string.IsNullOrWhiteSpace(column.Name)
+                )
+            )
+            {
+                var propertyName = converter.ToPropertyName(column.Name);
+
+                if (!columnsByPropertyName.TryGetValue(propertyName, out var columns))
+                {
+                    columns = [];
+                    columnsByPropertyName.Add(propertyName, columns);
+                    order.Add(propertyName);
+                }
+
+                columns.Add(column.Name);
+            }
+
+            foreach (var propertyName in order.Where(name => columnsByPropertyName[name].Count > 1))
+            {
+                diagnostics.Add(
+                    GenerationDiagnostic.Error(
+                        string.Format(
+                            Strings.CodeGen_Error_ColumnPropertyNameCollision,
+                            entity.TableName,
+                            propertyName,
+                            string.Join(
+                                ", ",
+                                columnsByPropertyName[propertyName].Select(name => $"'{name}'")
+                            )
+                        )
+                    )
+                );
+            }
         }
     }
 
