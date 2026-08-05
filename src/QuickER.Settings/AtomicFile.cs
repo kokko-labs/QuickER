@@ -20,6 +20,8 @@ namespace QuickER.Settings;
 /// <para>
 /// <b>防げないもの:</b> 同一ファイルへの同時保存そのものは防がない。後から差し替えた側が勝つ
 /// （ロストアップデート＝後勝ち）。目的はあくまで<b>破損の回避</b>であって、排他制御ではない。
+/// 差し替え時の短時間リトライ（下記）も、他プロセスと衝突したときの<b>失敗率を下げる</b>だけで、
+/// どちらの内容を残すかを調停するものではない（＝並行保存は後勝ちのまま）。
 /// </para>
 /// <para>
 /// <b>収容先について:</b> 依存ゼロ・net10.0 でどの層からも参照できる汎用永続化ユーティリティ層として
@@ -30,6 +32,12 @@ namespace QuickER.Settings;
 /// </remarks>
 public static class AtomicFile
 {
+    /// <summary>差し替え（Replace / Move）の試行回数（初回＋リトライ 4 回）</summary>
+    private const int ReplaceAttemptCount = 5;
+
+    /// <summary>差し替えリトライの待ち時間（ミリ秒・試行ごとに 10ms ずつ延ばす）</summary>
+    private const int ReplaceRetryDelayStepMilliseconds = 10;
+
     /// <summary>文字列を原子的にファイルへ書き出す（全量を書き切ってから保存先へ差し替える）</summary>
     /// <remarks>
     /// 保存先フォルダの作成は行わない（呼び出し側の責務）。差し替えに失敗した場合は一時ファイルを
@@ -51,25 +59,10 @@ public static class AtomicFile
         {
             File.WriteAllText(temporaryPath, contents);
 
-            // 既存ファイルがあれば置換（バックアップは残さない）、無ければ単純に移動する。
-            // File.Replace は保存先が存在しないと例外になるため、両者を明示的に分岐する。
-            if (File.Exists(path))
-            {
-                try
-                {
-                    File.Replace(temporaryPath, path, destinationBackupFileName: null);
-                }
-                catch (Exception ex) when (ex is IOException or PlatformNotSupportedException)
-                {
-                    // クラウド同期フォルダ等、File.Replace が使えない環境向けのフォールバック
-                    // （OS 水準の原子性は落ちるが「全量を書き切ってから差し替える」保護は保たれる）
-                    File.Move(temporaryPath, path, overwrite: true);
-                }
-            }
-            else
-            {
-                File.Move(temporaryPath, path);
-            }
+            // 保存先への差し替え。別プロセス（GUI と MCP サーバ）が同じファイルを同時に保存すると
+            // 一過性の失敗（相手が保存先を開いている・保存先の有無が入れ替わる）が起きるため、
+            // 短いバックオフで数回リトライする。
+            ReplaceWithRetry(temporaryPath, path);
         }
         finally
         {
@@ -84,8 +77,66 @@ public static class AtomicFile
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                // tmp の残骸は次回保存時に上書きされるため無害
+                // 掃除に失敗した tmp は GUID 名のため次回保存で再利用されず、そのまま残り続ける
+                // （＝自動では消えない）。ただし本体の内容には一切影響せず、実測でも掃除の失敗は
+                // 観測されていないため、元の例外を握り潰してまで対処はしない。
             }
+        }
+    }
+
+    /// <summary>一時ファイルを保存先へ差し替える（同時保存による一過性の失敗は短いバックオフでリトライする）</summary>
+    /// <remarks>
+    /// リトライ対象は <see cref="IOException"/> と <see cref="UnauthorizedAccessException"/>。
+    /// 後者は「<see cref="File.Replace(string, string, string?)"/> が競合で失敗したときに実際に飛んでくる型」で、
+    /// <see cref="IOException"/> だけを見ていると素通りする。恒久的な失敗（保存先がディレクトリ・権限なし等）も
+    /// 同じ型で来るが、待ち時間の合計は 100ms 程度で、最後の試行の例外はそのまま呼び出し側へ伝播する。
+    /// </remarks>
+    private static void ReplaceWithRetry(string temporaryPath, string path)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                ReplaceOnce(temporaryPath, path);
+
+                return;
+            }
+            catch (Exception ex)
+                when (ex is IOException or UnauthorizedAccessException
+                    && attempt < ReplaceAttemptCount
+                )
+            {
+                // 競合相手が差し替えを終えるまで少し待つ（10 / 20 / 30 / 40ms）
+                Thread.Sleep(ReplaceRetryDelayStepMilliseconds * attempt);
+            }
+        }
+    }
+
+    /// <summary>一時ファイルを保存先へ 1 回だけ差し替える</summary>
+    /// <remarks>
+    /// 保存先の有無で分岐するのは <see cref="File.Replace(string, string, string?)"/> が保存先の不在で
+    /// 失敗するため。ただし有無の判定と差し替えの間に他プロセスが保存先を作ることがある（TOCTOU）ので、
+    /// 不在側も <c>overwrite: true</c> の <see cref="File.Move(string, string, bool)"/> を使い、
+    /// 「判定した直後に保存先が現れた」だけで失敗しないようにする。
+    /// </remarks>
+    private static void ReplaceOnce(string temporaryPath, string path)
+    {
+        if (File.Exists(path))
+        {
+            try
+            {
+                File.Replace(temporaryPath, path, destinationBackupFileName: null);
+            }
+            catch (Exception ex) when (ex is IOException or PlatformNotSupportedException)
+            {
+                // クラウド同期フォルダ等、File.Replace が使えない環境向けのフォールバック
+                // （OS 水準の原子性は落ちるが「全量を書き切ってから差し替える」保護は保たれる）
+                File.Move(temporaryPath, path, overwrite: true);
+            }
+        }
+        else
+        {
+            File.Move(temporaryPath, path, overwrite: true);
         }
     }
 }

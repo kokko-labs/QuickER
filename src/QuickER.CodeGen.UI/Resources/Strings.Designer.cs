@@ -828,6 +828,12 @@ namespace QuickER.CodeGen.UI.Resources {
             }
         }
 
+        public static string Reverse_DescriptionOverwriteWarning {
+            get {
+                return ResourceManager.GetString("Reverse_DescriptionOverwriteWarning", resourceCulture);
+            }
+        }
+
         public static string Reverse_Failed {
             get {
                 return ResourceManager.GetString("Reverse_Failed", resourceCulture);

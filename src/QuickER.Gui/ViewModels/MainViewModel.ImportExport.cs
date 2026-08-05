@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.IO;
+using System.Text;
 using System.Threading;
 using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -880,37 +881,59 @@ public partial class MainViewModel
         );
     }
 
-    /// <summary>マージ取込用の置換確認（構造同一かつ壊れクエリなしなら無確認・壊れクエリは削除対象名を付加する）</summary>
+    /// <summary>マージ取込用の置換確認（構造同一かつ失うものが無ければ無確認・失うものは内訳を付加する）</summary>
+    /// <remarks>
+    /// マージ取込はクエリ・レイアウトを温存するため、構造が同一なら「クエリ・レイアウトは失われない」。
+    /// ただし構造署名（<see cref="HasSameStructure"/>）はテーブル・列の説明・Memo を含まないため、
+    /// 署名一致だけを根拠に無確認で続行すると未保存の説明・Memo が取込値で無言のうちに消える。
+    /// 実差分の件数（<see cref="DiagramMergeResult.DescriptionOverwriteCount"/>）を条件へ加えてこれを防ぐ。
+    /// </remarks>
     /// <returns>置換を続行してよい場合 true</returns>
     private bool ConfirmMergedReplacement(DiagramMergeResult merged, string message)
     {
-        // マージ取込はクエリ・レイアウトを温存するため、構造が同一なら失うものはない
         var structurallySame =
             HasNothingToLose || HasSameStructure(merged.Entities, merged.Relationships);
 
-        // 構造同一かつ壊れクエリなしなら従来どおり無確認で続行する
-        if (structurallySame && merged.BrokenQueries.Count == 0)
+        // 構造同一かつ壊れクエリ・説明/Memo の上書きなしなら従来どおり無確認で続行する
+        if (
+            structurallySame
+            && merged.BrokenQueries.Count == 0
+            && merged.DescriptionOverwriteCount == 0
+        )
         {
             return true;
         }
 
-        // 壊れクエリがあれば削除対象のクエリ名を確認メッセージへ付加する（キャンセルで取込中止）
-        var fullMessage =
-            merged.BrokenQueries.Count > 0
-                ? message
-                    + Environment.NewLine
-                    + Environment.NewLine
-                    + string.Format(
-                        Strings.Import_BrokenQueriesWarning,
-                        string.Join(
-                            Environment.NewLine,
-                            merged.BrokenQueries.Select(query => "- " + query.Name)
-                        )
+        // 失うものがあれば内訳（削除対象のクエリ名・上書き件数）を確認メッセージへ付加する（キャンセルで取込中止）
+        var builder = new StringBuilder(message);
+
+        if (merged.BrokenQueries.Count > 0)
+        {
+            builder
+                .Append(Environment.NewLine)
+                .Append(Environment.NewLine)
+                .AppendFormat(
+                    Strings.Import_BrokenQueriesWarning,
+                    string.Join(
+                        Environment.NewLine,
+                        merged.BrokenQueries.Select(query => "- " + query.Name)
                     )
-                : message;
+                );
+        }
+
+        if (merged.DescriptionOverwriteCount > 0)
+        {
+            builder
+                .Append(Environment.NewLine)
+                .Append(Environment.NewLine)
+                .AppendFormat(
+                    Strings.Import_DescriptionOverwriteWarning,
+                    merged.DescriptionOverwriteCount
+                );
+        }
 
         // 未保存変更があるときは置換で編集内容が失われるため警告水準（Warning）で確認する
-        return _dialogs.ConfirmDiscard(IsDirty, fullMessage, Strings.Common_Confirm);
+        return _dialogs.ConfirmDiscard(IsDirty, builder.ToString(), Strings.Common_Confirm);
     }
 
     /// <summary>ファイル拡張子を優先し、無ければフィルター選択から出力形式を判定する</summary>

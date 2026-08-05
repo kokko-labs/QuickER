@@ -239,6 +239,119 @@ public class DbImportCommandServiceTests
         host.LastReplacedDiagram!.Queries.Should().ContainSingle().Which.Name.Should().Be("GetAll");
     }
 
+    /// <summary>構造同一でも説明が取込値で上書きされる場合は確認を出し、件数を文言へ載せる</summary>
+    /// <remarks>
+    /// 構造署名は説明を含まないため、実差分（<c>DescriptionOverwriteCount</c>）を見ないと
+    /// 手書きした説明が無確認で消える。ここではその確認が出ることと件数の表示を固定する。
+    /// </remarks>
+    [Fact(DisplayName = "構造同一でも説明が上書きされる場合は確認を出し件数を載せる")]
+    public async Task RunAsync_SameStructureWithDescriptionOverwrite_Confirms()
+    {
+        // 現在図は構造こそ取込結果と同一だが、テーブル・列に手書きの説明を持つ
+        var current = new ErDiagram
+        {
+            Entities =
+            {
+                new Entity
+                {
+                    TableName = "Customer",
+                    Description = "手書きしたテーブル説明",
+                    Columns =
+                    {
+                        new Column
+                        {
+                            Name = "Id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                            Description = "手書きした列説明",
+                        },
+                    },
+                },
+            },
+        };
+        var host = new StubErDiagramHost { DiagramToReturn = current };
+        var dialogs = new StubDialogService { ConfirmResult = false };
+        // 取込結果は同一構造だが説明を持たない（＝取り込むと現在図の説明が消える）
+        var provider = new FakeImportProvider(ImportedEntities("Customer"));
+        var service = new DbImportCommandService(
+            host,
+            dialogs,
+            new FakeConnectionPresenter(
+                new DbConnectionDialogResult(new DbConnectionSettings(), provider)
+            )
+        );
+
+        await service.RunAsync();
+
+        // テーブル 1 件＋列 1 件＝2 件が上書き対象として文言へ載る
+        var shown = dialogs.ConfirmMessages.Should().ContainSingle().Which;
+        shown.Should().StartWith(DbStrings.Db_ImportReplaceConfirm);
+        shown.Should().Contain(string.Format(DbStrings.Db_ImportDescriptionOverwriteWarning, 2));
+        host.LastReplacedDiagram.Should().BeNull();
+    }
+
+    /// <summary>構造同一かつ説明も一致する再取込は、従来どおり無確認で続行する</summary>
+    [Fact(DisplayName = "構造同一かつ説明も一致する再取込は無確認のまま")]
+    public async Task RunAsync_SameStructureAndDescriptions_NoConfirm()
+    {
+        // 現在図・取込結果とも同じ説明を持つ＝上書きで失われるものが無い
+        var current = new ErDiagram
+        {
+            Entities =
+            {
+                new Entity
+                {
+                    TableName = "Customer",
+                    Description = "顧客",
+                    Columns =
+                    {
+                        new Column
+                        {
+                            Name = "Id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                            Description = "主キー",
+                        },
+                    },
+                },
+            },
+        };
+        var host = new StubErDiagramHost { DiagramToReturn = current };
+        var dialogs = new StubDialogService();
+        var imported = new Entity
+        {
+            TableName = "Customer",
+            Description = "顧客",
+            Columns =
+            {
+                new Column
+                {
+                    Name = "Id",
+                    DataType = "int",
+                    IsPrimaryKey = true,
+                    IsNullable = false,
+                    Description = "主キー",
+                },
+            },
+        };
+        var provider = new FakeImportProvider(new[] { imported });
+        var service = new DbImportCommandService(
+            host,
+            dialogs,
+            new FakeConnectionPresenter(
+                new DbConnectionDialogResult(new DbConnectionSettings(), provider)
+            )
+        );
+
+        await service.RunAsync();
+
+        dialogs.ConfirmMessages.Should().BeEmpty();
+        dialogs.WarningConfirmMessages.Should().BeEmpty();
+        host.LastReplacedDiagram.Should().NotBeNull();
+    }
+
     /// <summary>列追加で構造差分がある再取込でも、参照が保たれるクエリは生存する（確認は承認）</summary>
     [Fact(DisplayName = "再取込でクエリが生存する（列追加で構造差分・確認を承認）")]
     public async Task RunAsync_Reimport_QuerySurvives()

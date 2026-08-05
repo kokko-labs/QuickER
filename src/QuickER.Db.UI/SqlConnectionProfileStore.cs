@@ -97,6 +97,8 @@ public class SqlConnectionProfileStore
     /// <see cref="SaveLastUsed"/>）で他のプロファイル・前回接続情報が巻き添えで消失する。
     /// これを防ぐのがここでの原子的書き込みの目的（なお DPAPI 暗号ファイルの書き出しは
     /// <see cref="SaveSecret(string, string)"/> の単純書き込みのままで、本メソッドの対象外）。
+    /// <see cref="SaveSecret(string, string)"/> が失敗すると <c>SavePassword=true</c> だけが確定するが、
+    /// 読み出しは空パスワード＝再入力へ安全に劣化するため、原子性の対象へは含めない（意図的な割り切り）。
     /// </remarks>
     private void SaveData(SqlConnectionData data)
     {

@@ -263,6 +263,228 @@ public class DiagramMergeReconcilerTests
         merged.Entities[0].Memo.Should().Be("Excel メモ");
     }
 
+    /// <summary>一致要素の説明が取込値と同じなら上書き件数は 0（＝呼び出し側は無確認で続行できる）</summary>
+    [Fact(DisplayName = "説明上書き件数: 実差分が無ければ 0 件")]
+    public void Reconcile_SameDescriptions_CountsZero()
+    {
+        var current = new ErDiagram
+        {
+            Entities =
+            {
+                new Entity
+                {
+                    Id = Guid.NewGuid(),
+                    TableName = "Customer",
+                    Description = "顧客",
+                    Columns =
+                    {
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "Id",
+                            Description = "主キー",
+                        },
+                    },
+                },
+            },
+        };
+
+        // 取込結果は Id こそ新規だが、説明は現在図と同一
+        var importedEntity = new Entity
+        {
+            Id = Guid.NewGuid(),
+            TableName = "Customer",
+            Description = "顧客",
+            Columns =
+            {
+                new Column
+                {
+                    Id = Guid.NewGuid(),
+                    Name = "Id",
+                    Description = "主キー",
+                },
+            },
+        };
+
+        var merged = DiagramMergeReconciler.Reconcile(
+            current,
+            new[] { importedEntity },
+            Array.Empty<Relationship>(),
+            preserveExistingMemo: true
+        );
+
+        merged.DescriptionOverwriteCount.Should().Be(0);
+    }
+
+    /// <summary>テーブル・列の説明が取込値で変わる場合、その要素数が上書き件数として返る</summary>
+    [Fact(DisplayName = "説明上書き件数: テーブル・列の説明が変わる要素を数える")]
+    public void Reconcile_ChangedDescriptions_CountsElements()
+    {
+        var current = new ErDiagram
+        {
+            Entities =
+            {
+                new Entity
+                {
+                    Id = Guid.NewGuid(),
+                    TableName = "Customer",
+                    Description = "手書きしたテーブル説明",
+                    Columns =
+                    {
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "Id",
+                            Description = "手書きした列説明",
+                        },
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "Name",
+                            Description = "変わらない列説明",
+                        },
+                    },
+                },
+            },
+        };
+
+        // 取込結果はテーブル説明が空・Id 列の説明が別文言・Name 列の説明は同一
+        var importedEntity = new Entity
+        {
+            Id = Guid.NewGuid(),
+            TableName = "Customer",
+            Columns =
+            {
+                new Column
+                {
+                    Id = Guid.NewGuid(),
+                    Name = "Id",
+                    Description = "DB 側の列説明",
+                },
+                new Column
+                {
+                    Id = Guid.NewGuid(),
+                    Name = "Name",
+                    Description = "変わらない列説明",
+                },
+            },
+        };
+
+        var merged = DiagramMergeReconciler.Reconcile(
+            current,
+            new[] { importedEntity },
+            Array.Empty<Relationship>(),
+            preserveExistingMemo: true
+        );
+
+        // テーブル 1 件＋Id 列 1 件＝2 件（Name 列は同一なので数えない）
+        merged.DescriptionOverwriteCount.Should().Be(2);
+    }
+
+    /// <summary>Memo 温存が有効な経路では、Memo の差だけでは上書き件数に数えない</summary>
+    [Fact(DisplayName = "説明上書き件数: Memo 温存が有効なら Memo 差は数えない")]
+    public void Reconcile_PreserveMemo_IgnoresMemoDifference()
+    {
+        var current = new ErDiagram
+        {
+            Entities =
+            {
+                new Entity
+                {
+                    Id = Guid.NewGuid(),
+                    TableName = "Customer",
+                    Memo = "現在図のメモ",
+                    Columns = { Col(Guid.NewGuid(), "Id") },
+                },
+            },
+        };
+        var importedEntity = Ent(Guid.NewGuid(), "Customer", Col(Guid.NewGuid(), "Id"));
+
+        var merged = DiagramMergeReconciler.Reconcile(
+            current,
+            new[] { importedEntity },
+            Array.Empty<Relationship>(),
+            preserveExistingMemo: true
+        );
+
+        // Memo は温存される＝失われないため上書きとして数えない
+        merged.DescriptionOverwriteCount.Should().Be(0);
+    }
+
+    /// <summary>Memo 上書きが有効な経路（Excel）では、Memo の差も上書き件数に数える</summary>
+    [Fact(DisplayName = "説明上書き件数: Memo 上書きが有効なら Memo 差も数える")]
+    public void Reconcile_OverwriteMemo_CountsMemoDifference()
+    {
+        var current = new ErDiagram
+        {
+            Entities =
+            {
+                new Entity
+                {
+                    Id = Guid.NewGuid(),
+                    TableName = "Customer",
+                    Memo = "現在図のメモ",
+                    Columns = { Col(Guid.NewGuid(), "Id") },
+                },
+            },
+        };
+
+        // Excel 定義書は Memo を持つ＝取込値で上書きされる
+        var importedEntity = new Entity
+        {
+            Id = Guid.NewGuid(),
+            TableName = "Customer",
+            Memo = "Excel のメモ",
+            Columns = { Col(Guid.NewGuid(), "Id") },
+        };
+
+        var merged = DiagramMergeReconciler.Reconcile(
+            current,
+            new[] { importedEntity },
+            Array.Empty<Relationship>(),
+            preserveExistingMemo: false
+        );
+
+        merged.DescriptionOverwriteCount.Should().Be(1);
+    }
+
+    /// <summary>一致しない（リネーム・曖昧名）要素の説明差は上書きではないため数えない</summary>
+    [Fact(DisplayName = "説明上書き件数: 一致しない要素の説明差は数えない")]
+    public void Reconcile_UnmatchedElements_NotCounted()
+    {
+        var current = new ErDiagram
+        {
+            Entities =
+            {
+                new Entity
+                {
+                    Id = Guid.NewGuid(),
+                    TableName = "Customer",
+                    Description = "顧客",
+                    Columns = { Col(Guid.NewGuid(), "Id") },
+                },
+            },
+        };
+
+        // 別テーブル名＝一致しない（新規扱い）ため、説明が違っても上書きは起きない
+        var importedEntity = new Entity
+        {
+            Id = Guid.NewGuid(),
+            TableName = "Client",
+            Description = "取引先",
+            Columns = { Col(Guid.NewGuid(), "Id") },
+        };
+
+        var merged = DiagramMergeReconciler.Reconcile(
+            current,
+            new[] { importedEntity },
+            Array.Empty<Relationship>(),
+            preserveExistingMemo: true
+        );
+
+        merged.DescriptionOverwriteCount.Should().Be(0);
+    }
+
     /// <summary>全 Guid 参照（エンティティ・列参照パラメータ・並び順）が解決できるクエリは生存する</summary>
     [Fact(DisplayName = "生存クエリ: 全 Guid 参照が解決できると温存される")]
     public void Reconcile_AllReferencesResolved_QuerySurvives()

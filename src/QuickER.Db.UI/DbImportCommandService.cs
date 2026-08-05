@@ -1,3 +1,4 @@
+using System.Text;
 using QuickER.Db.UI.Resources;
 using QuickER.Extensibility;
 using QuickER.Gui.Abstractions;
@@ -159,9 +160,12 @@ public sealed class DbImportCommandService
         return body;
     }
 
-    /// <summary>構造変更を伴う置換、または壊れクエリの削除を伴う場合のみ確認ダイアログを表示する</summary>
+    /// <summary>構造変更・壊れクエリの削除・説明の上書きを伴う場合のみ確認ダイアログを表示する</summary>
     /// <remarks>
-    /// 空の図、または構造が同一（かつ壊れクエリなし）の場合は確認なしで続行する。
+    /// 空の図、または構造が同一（かつ壊れクエリ・説明の上書きなし）の場合は確認なしで続行する。
+    /// 構造署名（<see cref="SchemaSignature"/>）はテーブル・列の説明を含まないため、署名一致だけを
+    /// 根拠に無確認で続行すると、未保存の説明が取込値で無言のうちに消える。実差分の件数
+    /// （<see cref="DiagramMergeResult.DescriptionOverwriteCount"/>）を条件へ加えてこれを防ぐ。
     /// 壊れクエリがある場合は削除対象のクエリ名一覧を確認メッセージへ付加する。
     /// </remarks>
     /// <returns>置換を続行してよい場合 true</returns>
@@ -175,26 +179,51 @@ public sealed class DbImportCommandService
             (current.Entities.Count == 0 && current.Queries.Count == 0 && !_host.IsDirty)
             || HasSameStructure(current, merged.Entities, merged.Relationships);
 
-        // 構造同一かつ壊れクエリなしなら従来どおり無確認で続行する
-        if (structurallySame && merged.BrokenQueries.Count == 0)
+        // 構造同一かつ壊れクエリ・説明の上書きなしなら従来どおり無確認で続行する
+        if (
+            structurallySame
+            && merged.BrokenQueries.Count == 0
+            && merged.DescriptionOverwriteCount == 0
+        )
         {
             return true;
         }
 
-        // 壊れクエリがあれば削除対象のクエリ名を確認メッセージへ付加する（キャンセルで取込中止）
-        var fullMessage =
-            merged.BrokenQueries.Count > 0
-                ? message
-                    + Environment.NewLine
-                    + Environment.NewLine
-                    + string.Format(
-                        Strings.Db_ImportBrokenQueriesWarning,
-                        FormatQueryNames(merged.BrokenQueries)
-                    )
-                : message;
+        // 失うものがあれば内訳を確認メッセージへ付加する（キャンセルで取込中止）
+        var fullMessage = AppendLossWarnings(message, merged);
 
         // 未保存変更があるときは置換で編集内容が失われるため警告水準（Warning）で確認する
         return _dialogs.ConfirmDiscard(_host.IsDirty, fullMessage, Strings.Common_Confirm);
+    }
+
+    /// <summary>確認メッセージへ「失うもの」の内訳（壊れクエリ名・説明の上書き件数）を追記する</summary>
+    private static string AppendLossWarnings(string message, DiagramMergeResult merged)
+    {
+        var builder = new StringBuilder(message);
+
+        if (merged.BrokenQueries.Count > 0)
+        {
+            builder
+                .Append(Environment.NewLine)
+                .Append(Environment.NewLine)
+                .AppendFormat(
+                    Strings.Db_ImportBrokenQueriesWarning,
+                    FormatQueryNames(merged.BrokenQueries)
+                );
+        }
+
+        if (merged.DescriptionOverwriteCount > 0)
+        {
+            builder
+                .Append(Environment.NewLine)
+                .Append(Environment.NewLine)
+                .AppendFormat(
+                    Strings.Db_ImportDescriptionOverwriteWarning,
+                    merged.DescriptionOverwriteCount
+                );
+        }
+
+        return builder.ToString();
     }
 
     /// <summary>壊れクエリの名前を 1 行 1 件で列挙した文字列へ整形する</summary>

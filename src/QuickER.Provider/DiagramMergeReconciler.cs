@@ -18,6 +18,13 @@ namespace QuickER.Provider;
 /// 一致エンティティの Memo は <paramref name="preserveExistingMemo"/> が真のとき現在図の値を温存する
 /// （DB には対応物がないため。Excel 定義書は Memo を持つので取込値を正とする）。
 /// </para>
+/// <para>
+/// 一致要素の説明（Description）は常に取込値が正＝現在図の値を無言で上書きする。構造署名
+/// （<c>SchemaSignature</c>）は説明・Memo を含まないため、この上書きは「構造同一なら無確認」の
+/// ショートカットをすり抜ける。呼び出し側が確認要否を判断できるよう、実際に値が変わる件数を
+/// <see cref="DiagramMergeResult.DescriptionOverwriteCount"/> として数えて返す（<c>BrokenQueries</c> と同じ
+/// 「失うものを呼び出し側へ知らせる」情報提供）。
+/// </para>
 /// </remarks>
 public static class DiagramMergeReconciler
 {
@@ -26,7 +33,7 @@ public static class DiagramMergeReconciler
     /// <param name="importedEntities">取込結果のエンティティ（Id・Memo をその場で書き換える）</param>
     /// <param name="importedRelationships">取込結果のリレーション（参照 Id をその場で書き換える）</param>
     /// <param name="preserveExistingMemo">一致エンティティの Memo に現在図の値を温存するか（DB=true / Excel=false）</param>
-    /// <returns>Id 書換え済みのエンティティ・リレーションと、生存クエリ・壊れクエリの一覧</returns>
+    /// <returns>Id 書換え済みのエンティティ・リレーションと、生存クエリ・壊れクエリの一覧・説明上書き件数</returns>
     public static DiagramMergeResult Reconcile(
         ErDiagram current,
         IReadOnlyList<Entity> importedEntities,
@@ -43,6 +50,9 @@ public static class DiagramMergeReconciler
         var columnIdMap = new Dictionary<Guid, Guid>();
         var matchedCurrentEntities = new Dictionary<Guid, Entity>();
 
+        // 一致要素のうち、説明（および Memo 上書きが有効な経路では Memo）が取込値で実際に変わる件数
+        var descriptionOverwriteCount = 0;
+
         foreach (var (name, importedEntity) in importedByName)
         {
             if (!currentByName.TryGetValue(name, out var currentEntity))
@@ -53,6 +63,12 @@ public static class DiagramMergeReconciler
             // エンティティ一致: 取込結果の Id を現在図の Guid へ寄せる
             entityIdMap[importedEntity.Id] = currentEntity.Id;
             matchedCurrentEntities[importedEntity.Id] = currentEntity;
+
+            // 説明（と Memo）が無言で書き換わるエンティティを数える（Id 書換えより前＝現在図の値が残っている間に比較する）
+            if (IsEntityTextOverwritten(currentEntity, importedEntity, preserveExistingMemo))
+            {
+                descriptionOverwriteCount++;
+            }
 
             // 列も同一エンティティ内で名前が双方一意のものだけ照合する
             var currentColumnsByName = BuildUniqueNameIndex(
@@ -69,6 +85,18 @@ public static class DiagramMergeReconciler
                 if (currentColumnsByName.TryGetValue(columnName, out var currentColumn))
                 {
                     columnIdMap[importedColumn.Id] = currentColumn.Id;
+
+                    // 列の説明も取込値が正のため、実際に変わるものを数える
+                    if (
+                        !string.Equals(
+                            currentColumn.Description,
+                            importedColumn.Description,
+                            StringComparison.Ordinal
+                        )
+                    )
+                    {
+                        descriptionOverwriteCount++;
+                    }
                 }
             }
         }
@@ -119,7 +147,35 @@ public static class DiagramMergeReconciler
             Relationships = importedRelationships,
             SurvivingQueries = surviving,
             BrokenQueries = broken,
+            DescriptionOverwriteCount = descriptionOverwriteCount,
         };
+    }
+
+    /// <summary>一致エンティティの説明（と Memo 上書きが有効なときの Memo）が取込値で変わるかを判定する</summary>
+    /// <remarks>
+    /// 数える単位は「要素 1 件」。説明と Memo が両方変わっても 1 件として数える（確認文言の
+    /// 「テーブル・列 N 件」が要素数を指すため）。<paramref name="preserveExistingMemo"/> が真の経路では
+    /// Memo は温存＝上書きが起きないので比較対象から外す。
+    /// </remarks>
+    private static bool IsEntityTextOverwritten(
+        Entity currentEntity,
+        Entity importedEntity,
+        bool preserveExistingMemo
+    )
+    {
+        if (
+            !string.Equals(
+                currentEntity.Description,
+                importedEntity.Description,
+                StringComparison.Ordinal
+            )
+        )
+        {
+            return true;
+        }
+
+        return !preserveExistingMemo
+            && !string.Equals(currentEntity.Memo, importedEntity.Memo, StringComparison.Ordinal);
     }
 
     /// <summary>名前が一意な要素だけを引ける索引を作る（重複した名前は曖昧さ回避のため除外する）</summary>
@@ -252,4 +308,11 @@ public sealed class DiagramMergeResult
 
     /// <summary>Guid 参照が解決できなくなった（＝取込時に削除される）クエリ定義</summary>
     public required IReadOnlyList<QueryDefinition> BrokenQueries { get; init; }
+
+    /// <summary>説明（Memo 上書きが有効な経路では Memo も）が取込値で実際に書き換わる一致要素の件数</summary>
+    /// <remarks>
+    /// 単位はテーブル・列を合わせた「要素数」（1 要素で説明と Memo が両方変わっても 1 件）。
+    /// 構造署名はこれらを見ないため、呼び出し側は「構造同一かつ本件数 0」を無確認続行の条件にする。
+    /// </remarks>
+    public required int DescriptionOverwriteCount { get; init; }
 }

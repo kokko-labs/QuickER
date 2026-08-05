@@ -737,7 +737,12 @@ public class JsonStorageServiceTests
                     BuildDocument("Customer", DiagramDocument.CurrentVersion)
                 );
 
-            act.Should().Throw<IOException>();
+            // 保存先がディレクトリの場合、File.Move(overwrite:true) は UnauthorizedAccessException を
+            // 投げる（OS/ランタイム依存）ため、どちらの型でも「伝播していること」を検証する
+            var thrown = act.Should().Throw<Exception>("差し替えの失敗を握り潰さない").Which;
+            (thrown is IOException or UnauthorizedAccessException)
+                .Should()
+                .BeTrue($"IO 系の例外であること（実際: {thrown.GetType().Name}）");
             FindTemporaryLeftovers(path).Should().BeEmpty("失敗時に一時ファイルを残さない");
         }
         finally

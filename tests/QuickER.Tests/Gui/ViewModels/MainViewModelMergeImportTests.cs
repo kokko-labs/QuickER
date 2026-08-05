@@ -2,6 +2,7 @@ using System.IO;
 using AwesomeAssertions;
 using QuickER.Gui.Abstractions;
 using QuickER.Model;
+using QuickER.Resources;
 using QuickER.Services;
 using QuickER.Tests.TestDoubles;
 using QuickER.ViewModels;
@@ -49,11 +50,15 @@ public class MainViewModelMergeImportTests : IDisposable
     /// 実 %APPDATA% を汚さないよう、永続化先を一時フォルダへ隔離した VM を生成する
     /// （<see cref="MainViewModel.ReplaceQueries"/> が AutoSave を呼ぶため隔離が必須）。
     /// </summary>
-    private MainViewModel CreateViewModel(IFileDialogService? files = null)
+    private MainViewModel CreateViewModel(
+        IFileDialogService? files = null,
+        StubDialogService? dialogs = null
+    )
     {
+        var resolvedDialogs = dialogs ?? new StubDialogService();
         var vm = files is null
-            ? new MainViewModel(new StubDialogService())
-            : new MainViewModel(new StubDialogService(), files: files);
+            ? new MainViewModel(resolvedDialogs)
+            : new MainViewModel(resolvedDialogs, files: files);
         vm.UsePersistenceForTests(
             new GuiAppSettingsStore(_folder),
             Path.Combine(_folder, "last_diagram.json")
@@ -230,6 +235,56 @@ public class MainViewModelMergeImportTests : IDisposable
             // 取込結果は新規 Guid だがマージで Id が現在図へ寄るため、クエリの参照が解決し生存する
             vm.Queries.Should().ContainSingle().Which.Name.Should().Be("SortById");
             vm.Entities.Should().ContainSingle().Which.Id.Should().Be(entityId);
+        }
+        finally
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+    }
+
+    /// <summary>構造同一の Excel 再取込でも、説明が取込値で上書きされる場合は確認が出て件数が載る</summary>
+    /// <remarks>
+    /// 構造署名は説明・Memo を含まないため、実差分を見ないと書き出し後に手書きした説明が
+    /// 無確認で消える。ここでは確認が出ることと件数の表示を固定する。
+    /// </remarks>
+    [Fact(DisplayName = "Excel 再取込経路: 説明の上書きがあると確認が出て件数が載る")]
+    public void ImportExcel_DescriptionOverwrite_Confirms()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"er-merge-excel-{Guid.NewGuid()}.xlsx");
+
+        try
+        {
+            var files = new StubFileDialogService
+            {
+                SaveResult = new FileDialogResult(path, 8),
+                OpenResult = new FileDialogResult(path, 3),
+            };
+            var dialogs = new StubDialogService { ConfirmResult = false };
+            var vm = CreateViewModel(files, dialogs);
+            vm.AddEntityCommand.Execute(null);
+
+            // 説明が空の状態で書き出してから、図の側にだけ説明を書き加える（構造は変わらない）
+            vm.ExportDiagramCommand.Execute(null);
+            vm.Entities[0].Description = "手書きしたテーブル説明";
+
+            vm.ImportDiagramCommand.Execute(null);
+
+            // 確認水準（通常/警告）は未保存変更の有無で決まるため、両方の記録を合わせて検査する
+            var shown = dialogs
+                .ConfirmMessages.Concat(dialogs.WarningConfirmMessages)
+                .Should()
+                .ContainSingle()
+                .Which;
+            shown.Should().Contain(string.Format(Strings.Import_DescriptionOverwriteWarning, 1));
+
+            // 確認を拒否したため取込は行われず、書き加えた説明はそのまま残る
+            vm.Entities.Should()
+                .ContainSingle()
+                .Which.Description.Should()
+                .Be("手書きしたテーブル説明");
         }
         finally
         {
