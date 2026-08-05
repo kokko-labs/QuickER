@@ -31,6 +31,7 @@ public sealed class CodexChatEngine : IErChatEngine
     private const string ClientTitle = "QuickER";
     private const string ClientVersion = "1.0.0";
     private const string ApprovalPolicyNever = "never";
+    private const string ApprovalDecisionDecline = "decline";
 
     private readonly ICodexAppServerClient _client;
     private readonly IErDiagramToolHost? _toolHost;
@@ -571,18 +572,35 @@ public sealed class CodexChatEngine : IErChatEngine
         }
     }
 
-    /// <summary>承認要求に自動承認で応答する（approvalPolicy=never の保険）</summary>
+    /// <summary>承認要求を拒否で応答する（approvalPolicy=never の保険）</summary>
+    /// <remarks>
+    /// チャット経路は approvalPolicy=never かつ ER 図の操作は dynamicTools（別チャネル）で行うため、
+    /// ここへ承認要求が届くのは「ER 図編集に不要な Codex ネイティブ操作」（コマンド実行・ファイル変更・
+    /// 権限昇格）に限られる。作業フォルダはアプリ自身のカレントディレクトリなので、無音の自動承認は危険。
+    /// 拒否したうえで <see cref="ToolActivityReceived"/> により会話へ記録し、ユーザーに見える形で残す
+    /// </remarks>
     private void OnApprovalRequested(object? sender, CodexApprovalRequest e)
     {
         _ = RespondToApprovalAsync(e);
     }
 
-    /// <summary>承認要求へ accept を返す</summary>
+    /// <summary>承認要求へ decline を返し、拒否したことを活動として通知する</summary>
     private async Task RespondToApprovalAsync(CodexApprovalRequest request)
     {
+        ToolActivityReceived?.Invoke(
+            this,
+            new ErChatToolActivity(
+                DescribeApprovalKind(request.Method),
+                Strings.Codex_ApprovalDeclined,
+                false
+            )
+        );
+
         try
         {
-            await _client.RespondToApprovalAsync(request.RequestId, "accept").ConfigureAwait(false);
+            await _client
+                .RespondToApprovalAsync(request.RequestId, ApprovalDecisionDecline)
+                .ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -591,6 +609,14 @@ public sealed class CodexChatEngine : IErChatEngine
                 string.Format(Strings.Codex_ApprovalResponseSendFailed, ex.Message)
             );
         }
+    }
+
+    /// <summary>承認要求のメソッド名（item/{種別}/requestApproval）から種別部分を表示名として取り出す</summary>
+    /// <remarks>想定外の形式ならメソッド名をそのまま返す（欠落させず原文を見せる）</remarks>
+    private static string DescribeApprovalKind(string method)
+    {
+        var segments = method.Split('/');
+        return segments.Length >= 3 ? segments[^2] : method;
     }
 
     /// <summary>アカウント更新通知を認証状態へ反映する</summary>

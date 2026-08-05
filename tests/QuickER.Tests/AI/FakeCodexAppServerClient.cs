@@ -44,6 +44,9 @@ internal sealed class FakeCodexAppServerClient : ICodexAppServerClient
     /// </summary>
     public Queue<(string Status, string? Error)> AutoTurnCompletions { get; } = new();
 
+    /// <summary>RespondToApprovalAsync に渡された決定を応答順に記録する（承認要求の扱いの検証用）</summary>
+    public List<string> ApprovalDecisions { get; } = new();
+
     public int RespondToolCount { get; private set; }
 
     public string? LastToolResult { get; private set; }
@@ -174,7 +177,11 @@ internal sealed class FakeCodexAppServerClient : ICodexAppServerClient
         int requestId,
         string decision,
         CancellationToken cancellationToken = default
-    ) => Task.CompletedTask;
+    )
+    {
+        ApprovalDecisions.Add(decision);
+        return Task.CompletedTask;
+    }
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 

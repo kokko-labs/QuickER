@@ -184,6 +184,12 @@
   <data name="ClaudeCode_GenericError" xml:space="preserve">
     <value>An error occurred in Claude Code.</value>
   </data>
+  <data name="ClaudeCode_NoResult" xml:space="preserve">
+    <value>Claude Code exited without returning a result (exit code: {0}).</value>
+  </data>
+  <data name="ClaudeCode_ExitedWithError" xml:space="preserve">
+    <value>Claude Code exited with an error (exit code: {0}).</value>
+  </data>
   <data name="Codex_NotConnected" xml:space="preserve">
     <value>Not connected</value>
   </data>
@@ -246,6 +252,9 @@
   </data>
   <data name="Codex_ToolResponseSendFailed" xml:space="preserve">
     <value>Failed to send the tool response: {0}</value>
+  </data>
+  <data name="Codex_ApprovalDeclined" xml:space="preserve">
+    <value>Declined an approval request from Codex. ER diagram editing does not need this operation, so it was rejected for safety.</value>
   </data>
   <data name="Codex_ApprovalResponseSendFailed" xml:space="preserve">
     <value>Failed to send the approval response: {0}</value>

@@ -73,6 +73,44 @@ public class CodexChatEngineTests
         client.RespondToolCount.Should().Be(1);
     }
 
+    /// <summary>
+    /// 承認要求（Codex ネイティブ操作）は拒否され、その旨が活動として可視化されることを検証する。
+    /// ER 図の操作は dynamicTools 経路のため、ここへ届く要求を自動承認する必要はない。
+    /// </summary>
+    [Theory(DisplayName = "Codex の承認要求は拒否され活動として通知される")]
+    [InlineData("item/commandExecution/requestApproval", "commandExecution")]
+    [InlineData("item/fileChange/requestApproval", "fileChange")]
+    [InlineData("item/permissions/requestApproval", "permissions")]
+    public void ApprovalRequest_IsDeclinedAndReported(string method, string expectedLabel)
+    {
+        var client = new FakeCodexAppServerClient();
+        var engine = new CodexChatEngine(
+            client,
+            new RecordingToolHost(),
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign
+        );
+        var activities = new List<ErChatToolActivity>();
+        engine.ToolActivityReceived += (_, a) => activities.Add(a);
+
+        client.RaiseApprovalRequested(
+            new CodexApprovalRequest
+            {
+                RequestId = 7,
+                Method = method,
+                ThreadId = "thr_test",
+                TurnId = "turn_test",
+                ItemId = "item_1",
+            }
+        );
+
+        client.ApprovalDecisions.Should().Equal("decline");
+        var activity = activities.Should().ContainSingle().Which;
+        activity.ToolName.Should().Be(expectedLabel);
+        activity.Success.Should().BeFalse();
+        activity.Result.Should().Be(QuickER.AI.Resources.Strings.Codex_ApprovalDeclined);
+    }
+
     /// <summary>ターン完了通知が成否に応じた共通イベントへ変換されることを検証する</summary>
     [Theory(DisplayName = "Codex のターン完了は成否に応じた結果へ変換される")]
     [InlineData("completed", true)]

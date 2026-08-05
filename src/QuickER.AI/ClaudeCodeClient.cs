@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO;
 using System.Text.Json;
@@ -46,6 +47,23 @@ public sealed record ClaudeCodeTurnOutcome(
     bool Success,
     string? Error,
     string? SessionId,
+    bool NotLoggedIn
+);
+
+/// <summary>stdout（stream-json）の読み取りだけで判明した中間結果</summary>
+/// <param name="SessionId">継続用セッション ID（取得できれば）</param>
+/// <param name="ResultReceived">
+/// <c>result</c> イベントを受信したか。未受信は「CLI が結果を返さないまま終了した」＝失敗を意味する
+/// （引数エラーで stderr のみ出力して終了した場合など）
+/// </param>
+/// <param name="Success">result イベントが成功を示したか（未受信時は false）</param>
+/// <param name="Error">result イベントのエラーメッセージ</param>
+/// <param name="NotLoggedIn">未ログインが原因か</param>
+internal sealed record ClaudeCodeStreamResult(
+    string? SessionId,
+    bool ResultReceived,
+    bool Success,
+    string? Error,
     bool NotLoggedIn
 );
 
@@ -198,16 +216,24 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
 
         _currentProcess = process;
 
+        // stderr は起動直後から常時ドレインする（読まないままだと数 KB でパイプバッファが満杯になり、
+        // 子プロセスが write でブロックして stdout も進まなくなる＝ReadLineAsync が返らなくなる）
+        var standardError = new StandardErrorDrain(process);
+
         try
         {
             await process.StandardInput.WriteAsync(prompt).ConfigureAwait(false);
             process.StandardInput.Close();
 
-            var outcome = await ReadStreamAsync(process, onAssistantText, cancellationToken)
+            var stream = await ReadStreamAsync(process, onAssistantText, cancellationToken)
                 .ConfigureAwait(false);
 
             await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
-            return outcome;
+
+            // 終了コードと stderr を判定材料に含めるため、読み切りを（上限付きで）待ってから評価する
+            await standardError.WaitForCompletionAsync().ConfigureAwait(false);
+
+            return EvaluateTurnOutcome(stream, process.ExitCode, standardError.RecentLines);
         }
         catch (OperationCanceledException)
         {
@@ -243,6 +269,10 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
             return ClaudeLoginProbeResult.Unavailable;
         }
 
+        // 実ターンと同様に stderr を常時ドレインする（読まないままだとパイプバッファ満杯で
+        // 子プロセスが停止し、stdout の読み取りが返らなくなる）
+        var standardError = new StandardErrorDrain(process);
+
         try
         {
             await process.StandardInput.WriteAsync("ping").ConfigureAwait(false);
@@ -252,6 +282,7 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
                 .StandardOutput.ReadToEndAsync(cancellationToken)
                 .ConfigureAwait(false);
             await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+            await standardError.WaitForCompletionAsync().ConfigureAwait(false);
 
             return InterpretProbe(output);
         }
@@ -326,15 +357,18 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
         return startInfo;
     }
 
-    /// <summary>stdout の stream-json 行を解析し、テキストを逐次通知しつつ最終結果を組み立てる</summary>
-    private static async Task<ClaudeCodeTurnOutcome> ReadStreamAsync(
+    /// <summary>stdout の stream-json 行を解析し、テキストを逐次通知しつつ中間結果を組み立てる</summary>
+    private static async Task<ClaudeCodeStreamResult> ReadStreamAsync(
         Process process,
         Action<string> onAssistantText,
         CancellationToken cancellationToken
     )
     {
         string? sessionId = null;
-        bool success = true;
+        // result イベントを受信して初めて成否が確定する（未受信を成功と見なすと、引数エラー等で
+        // stdout に何も出ないまま終了した場合に偽の成功を返してしまう）
+        bool resultReceived = false;
+        bool success = false;
         string? error = null;
         bool notLoggedIn = false;
 
@@ -382,12 +416,141 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
                     EmitPartialText(root, onAssistantText);
                     break;
                 case "result":
+                    resultReceived = true;
                     (success, error, notLoggedIn) = ParseResult(root);
                     break;
             }
         }
 
-        return new ClaudeCodeTurnOutcome(success, error, sessionId, notLoggedIn);
+        return new ClaudeCodeStreamResult(sessionId, resultReceived, success, error, notLoggedIn);
+    }
+
+    /// <summary>
+    /// stdout の解析結果・プロセスの終了コード・stderr の直近行から、ターンの最終結果を決定する。
+    /// </summary>
+    /// <remarks>
+    /// result イベントを受信していればその判定を正本とし、成功かつ終了コード 0 のときだけ成功を返す。
+    /// result 未受信（引数エラーで stdout に何も出ないまま終了した場合など）と、result は成功なのに
+    /// 異常終了した場合は失敗として扱い、原因調査のため stderr の直近行をメッセージへ添える。
+    /// </remarks>
+    internal static ClaudeCodeTurnOutcome EvaluateTurnOutcome(
+        ClaudeCodeStreamResult stream,
+        int exitCode,
+        IReadOnlyList<string> standardErrorLines
+    )
+    {
+        if (stream.ResultReceived)
+        {
+            // CLI 自身が報告したエラー（未ログイン等）はそのまま伝える＝終了コードより情報量が多い
+            if (!stream.Success)
+            {
+                return new ClaudeCodeTurnOutcome(
+                    false,
+                    stream.Error,
+                    stream.SessionId,
+                    stream.NotLoggedIn
+                );
+            }
+
+            if (exitCode == 0)
+            {
+                return new ClaudeCodeTurnOutcome(true, null, stream.SessionId, false);
+            }
+
+            return new ClaudeCodeTurnOutcome(
+                false,
+                string.Format(Strings.ClaudeCode_ExitedWithError, exitCode)
+                    + BuildStandardErrorSuffix(standardErrorLines),
+                stream.SessionId,
+                false
+            );
+        }
+
+        return new ClaudeCodeTurnOutcome(
+            false,
+            string.Format(Strings.ClaudeCode_NoResult, exitCode)
+                + BuildStandardErrorSuffix(standardErrorLines),
+            stream.SessionId,
+            false
+        );
+    }
+
+    /// <summary>直近の標準エラー出力を失敗メッセージへの補足文として返す</summary>
+    /// <returns>stderr が空の場合は空文字列</returns>
+    internal static string BuildStandardErrorSuffix(IReadOnlyList<string> standardErrorLines)
+    {
+        var lines = standardErrorLines
+            .Where(line => !string.IsNullOrWhiteSpace(line))
+            .Select(line => line.Trim())
+            .ToArray();
+
+        return lines.Length == 0 ? string.Empty : $" stderr: {string.Join(" | ", lines)}";
+    }
+
+    /// <summary>
+    /// 子プロセスの標準エラー出力を常時読み出し、直近行だけをリングバッファで保持するドレイナ。
+    /// </summary>
+    /// <remarks>
+    /// stderr を読まないままにすると、子プロセスが数 KB 書いた時点でパイプバッファが満杯になって
+    /// write でブロックし、stdout も進まなくなって読み取りが永久に返らない（デッドロック）。
+    /// <see cref="CodexAppServerClient"/> と同じ流儀で、読み捨てつつ診断用に直近行だけを残す。
+    /// </remarks>
+    private sealed class StandardErrorDrain
+    {
+        /// <summary>診断用に保持する直近行数</summary>
+        private const int MaxRetainedLines = 20;
+
+        /// <summary>読み切りを待つ上限（子孫プロセスがパイプを握ったままでも固まらないようにする）</summary>
+        private static readonly TimeSpan CompletionTimeout = TimeSpan.FromSeconds(2);
+
+        private readonly ConcurrentQueue<string> _lines = new();
+        private readonly Task _drainTask;
+
+        public StandardErrorDrain(Process process)
+        {
+            _drainTask = Task.Run(() => DrainAsync(process), CancellationToken.None);
+        }
+
+        /// <summary>保持している直近の stderr 行（古い順）</summary>
+        public IReadOnlyList<string> RecentLines => _lines.ToArray();
+
+        /// <summary>EOF までの読み切りを上限付きで待つ（超過しても保持済みの行はそのまま使える）</summary>
+        public async Task WaitForCompletionAsync()
+        {
+            try
+            {
+                await _drainTask.WaitAsync(CompletionTimeout).ConfigureAwait(false);
+            }
+            catch (TimeoutException)
+            {
+                // 読み切れなくても保持済みの行で診断する（待ち続けない）
+            }
+        }
+
+        /// <summary>EOF まで stderr を読み続け、直近 <see cref="MaxRetainedLines"/> 行だけを残す</summary>
+        private async Task DrainAsync(Process process)
+        {
+            try
+            {
+                while (true)
+                {
+                    var line = await process.StandardError.ReadLineAsync().ConfigureAwait(false);
+
+                    if (line is null)
+                    {
+                        break;
+                    }
+
+                    _lines.Enqueue(line);
+
+                    while (_lines.Count > MaxRetainedLines && _lines.TryDequeue(out _)) { }
+                }
+            }
+            catch
+            {
+                // 中断・プロセス破棄に伴うストリーム例外は無視する（診断目的のため取り逃しは許容）
+            }
+        }
     }
 
     /// <summary>

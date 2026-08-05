@@ -306,6 +306,18 @@ namespace QuickER.AI.Resources {
             }
         }
 
+        public static string ClaudeCode_NoResult {
+            get {
+                return ResourceManager.GetString("ClaudeCode_NoResult", resourceCulture);
+            }
+        }
+
+        public static string ClaudeCode_ExitedWithError {
+            get {
+                return ResourceManager.GetString("ClaudeCode_ExitedWithError", resourceCulture);
+            }
+        }
+
         public static string Codex_NotConnected {
             get {
                 return ResourceManager.GetString("Codex_NotConnected", resourceCulture);
@@ -429,6 +441,12 @@ namespace QuickER.AI.Resources {
         public static string Codex_ToolResponseSendFailed {
             get {
                 return ResourceManager.GetString("Codex_ToolResponseSendFailed", resourceCulture);
+            }
+        }
+
+        public static string Codex_ApprovalDeclined {
+            get {
+                return ResourceManager.GetString("Codex_ApprovalDeclined", resourceCulture);
             }
         }
 

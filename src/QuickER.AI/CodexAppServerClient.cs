@@ -178,6 +178,9 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
     /// <summary>診断用に保持する直近の標準エラー出力（最大 20 行）</summary>
     private readonly ConcurrentQueue<string> _stderrLines = new();
 
+    /// <summary>インスタンスが最終破棄済みかどうか（<see cref="DisposeAsync"/> の二重呼び出しを無害化する）</summary>
+    private bool _disposed;
+
     /// <inheritdoc />
     public event EventHandler<CodexJsonRpcNotification>? NotificationReceived;
 
@@ -227,6 +230,8 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
         CancellationToken cancellationToken = default
     )
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
         if (IsStarted)
         {
             return;
@@ -328,8 +333,9 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
         }
         catch
         {
-            // ハンドシェイク失敗時はプロセスを終了してフィールドをリセットする
-            await DisposeAsync();
+            // ハンドシェイク失敗時はプロセスだけを終了してフィールドをリセットする
+            // （インスタンスは破棄しない＝_writeLock を残し、次回の StartAsync で再接続できるようにする）
+            await StopProcessAsync();
             throw;
         }
     }
@@ -494,7 +500,29 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// インスタンスの最終破棄。プロセス停止（<see cref="StopProcessAsync"/>）に加えて
+    /// 再利用不能になる <see cref="_writeLock"/> の破棄まで行うため、再接続する可能性がある場面
+    /// （ハンドシェイク失敗時など）では呼ばず <see cref="StopProcessAsync"/> を使う。二重呼び出しは無害
+    /// </remarks>
     public async ValueTask DisposeAsync()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        await StopProcessAsync();
+        _writeLock.Dispose();
+    }
+
+    /// <summary>子プロセスと受信ループを停止し、再接続できる状態（未起動と同じ状態）へ戻す</summary>
+    /// <remarks>
+    /// <see cref="_writeLock"/> は破棄しない＝再度 <see cref="StartAsync"/> を呼べば同じインスタンスで再接続できる。
+    /// 応答待ちのリクエストは接続断として即座に解消し、タイムアウト（30 秒）まで待たせない
+    /// </remarks>
+    internal async Task StopProcessAsync()
     {
         _readerCts?.Cancel();
 
@@ -514,6 +542,8 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
             {
                 // 終了時の読み取り例外は破棄する
             }
+
+            _readerTask = null;
         }
 
         if (_process is not null)
@@ -536,7 +566,9 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
 
         _readerCts?.Dispose();
         _readerCts = null;
-        _writeLock.Dispose();
+
+        // 受信ループがキャンセル例外で抜けた場合は末尾の解消処理を通らないため、ここでも取りこぼしを解消する
+        FailPendingRequests();
     }
 
     /// <summary>account/login/start リクエストを送信し、ログイン開始結果を解析して返す</summary>
@@ -711,6 +743,12 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
             }
         }
 
+        FailPendingRequests();
+    }
+
+    /// <summary>応答待ちの全リクエストを接続断エラーで完了させ、待機側のハングを防ぐ</summary>
+    private void FailPendingRequests()
+    {
         foreach (var pending in _pendingRequests.ToArray())
         {
             if (_pendingRequests.TryRemove(pending.Key, out var request))
