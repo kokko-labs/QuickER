@@ -14,9 +14,10 @@ namespace QuickER.Tests.Gui.ViewModels;
 /// 図の読込・保存の堅牢化を検証するテストクラス。
 /// </summary>
 /// <remarks>
-/// 検証する不変条件は 3 つ。
+/// 検証する不変条件は 4 つ。
 /// <list type="bullet">
 /// <item>Open は破損 JSON・無関係な JSON を拒否し、現在の図と現在パスを一切変えない（無言の全消し・誤紐付けの防止）</item>
+/// <item>Open は形は正しいが中身に明示 null を含む図ファイルでも落ちない（読込時に既定値へ正規化される）</item>
 /// <item>Open は図を失う他の経路と同じく未保存確認（ConfirmDiscard）を通す（空でクリーンなときだけ無確認）</item>
 /// <item>保存に失敗したらエラー通知のうえダーティのまま保持する（保存できていないのにクリーン扱いにしない）</item>
 /// </list>
@@ -138,6 +139,56 @@ public sealed class MainViewModelOpenSaveRobustnessTests : IDisposable
         File.ReadAllText(unrelated)
             .Should()
             .Be("{\"name\":\"x\",\"version\":\"1.0.0\"}", "他人のファイルは書き換えない");
+    }
+
+    /// <summary>
+    /// コレクションへ明示的に <c>null</c> を書いた図ファイルを開いても落ちず、空の図として開けることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 形（Version・Schema オブジェクト）は正しいため事前検証は通過し、読込側の正規化
+    /// （<see cref="JsonStorageService.Load"/>）だけが <see cref="NullReferenceException"/> を防いでいる。
+    /// 正規化が無いと Open・外部変更の自動再読込がクラッシュハンドラ経由でアプリ強制終了になる。
+    /// </remarks>
+    [Fact(DisplayName = "Open: 明示 null 入りの図ファイルは落ちずに空の図として開ける")]
+    public void Open_ExplicitNullCollections_OpensAsEmptyDiagram()
+    {
+        var path = WriteText("Nulls.json", """{"Version":1,"Schema":{"Entities":null}}""");
+        var dialogs = new StubDialogService { ConfirmResult = true };
+        var vm = CreateIsolatedViewModel(
+            dialogs,
+            new RecordingFileDialogService { OpenResult = new(path, 1) }
+        );
+        vm.AddEntityCommand.Execute(null);
+
+        vm.OpenCommand.Execute(null);
+
+        dialogs.ErrorMessages.Should().BeEmpty("正規化で読めるため失敗通知は出さない");
+        vm.Entities.Should().BeEmpty("Entities: null は空の図として読み込まれる");
+        vm.Queries.Should().BeEmpty();
+        vm.CurrentFilePath.Should().Be(path, "読み込めたファイルへ紐付ける");
+    }
+
+    /// <summary>schema 自体が null の JSON は図文書として認めず、現状維持で拒否されることを検証する</summary>
+    /// <remarks>
+    /// 読込側の正規化は空スキーマへ修復するが、GUI は「Schema が JSON オブジェクトであること」を
+    /// 事前検証しており、その手前で拒否する（無言の全消しを防ぐ既存の安全策が優先される）。
+    /// </remarks>
+    [Fact(DisplayName = "Open: schema が null の JSON は拒否し現状維持する")]
+    public void Open_NullSchema_IsRejectedAndKeepsCurrentState()
+    {
+        var path = WriteText("NullSchema.json", """{"Version":1,"Schema":null}""");
+        var dialogs = new StubDialogService { ConfirmResult = true };
+        var vm = CreateIsolatedViewModel(
+            dialogs,
+            new RecordingFileDialogService { OpenResult = new(path, 1) }
+        );
+        vm.AddEntityCommand.Execute(null);
+
+        vm.OpenCommand.Execute(null);
+
+        dialogs.ErrorMessages.Should().ContainSingle().Which.Should().Contain(path);
+        vm.Entities.Should().ContainSingle("拒否したら現在の図を変えない");
+        vm.CurrentFilePath.Should().BeNull("拒否したファイルへ紐付けない");
     }
 
     // ---------------- Open: 未保存確認 ----------------

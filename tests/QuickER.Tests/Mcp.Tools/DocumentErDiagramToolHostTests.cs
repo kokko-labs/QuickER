@@ -266,13 +266,16 @@ public sealed class DocumentErDiagramToolHostTests : IDisposable
         Exec(DocumentErDiagramToolHost.CreateDiagramToolName, file, new { target_dbms = "sqlite" })
             .Success.Should()
             .BeTrue();
-        File.Exists(file + ".tmp").Should().BeFalse("作成直後に一時ファイルは残らない");
+        // 一時ファイル名は {path}.{GUID}.tmp のためワイルドカードで検出する
+        Directory.GetFiles(_dir, "*.tmp").Should().BeEmpty("作成直後に一時ファイルは残らない");
 
         Exec("add_entity", file, new { table_name = "Book" }).Success.Should().BeTrue();
 
-        File.Exists(file + ".tmp").Should().BeFalse("変更の保存後にも一時ファイルは残らない");
         JsonStorageService.Load(file).Schema.Entities.Single().TableName.Should().Be("Book");
-        Directory.GetFiles(_dir, "*.tmp").Should().BeEmpty("ツール実行後に一時ファイルが残らない");
+        Directory
+            .GetFiles(_dir, "*.tmp")
+            .Should()
+            .BeEmpty("変更の保存後にも一時ファイルは残らない");
     }
 
     [Fact(DisplayName = "get_diagram_summary は新しいフォーマットでも警告付きで続行する")]

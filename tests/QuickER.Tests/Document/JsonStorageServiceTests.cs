@@ -369,6 +369,149 @@ public class JsonStorageServiceTests
     }
 
     /// <summary>
+    /// コレクション・必須値へ明示的に <c>null</c> を書いた図ファイルが、既定値へ修復されて読めることを
+    /// 検証する（キー欠落と違い、明示 null はデシリアライザが初期化子を上書きするため正規化が要る）。
+    /// </summary>
+    [Fact(DisplayName = "Load: 明示 null のコレクション・TargetDbms は既定値へ正規化される")]
+    public void Load_ExplicitNulls_AreNormalizedToDefaults()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"er-null-{Guid.NewGuid()}.json");
+
+        try
+        {
+            File.WriteAllText(
+                path,
+                """
+                {
+                  "Version": 1,
+                  "Schema": {
+                    "TargetDbms": null,
+                    "Entities": null,
+                    "Relationships": null,
+                    "Queries": null
+                  },
+                  "Layout": null
+                }
+                """
+            );
+
+            var loaded = JsonStorageService.Load(path);
+
+            // 図を消費する側（GUI の Count 参照・生成器の列挙）が NRE で落ちないこと
+            loaded.Schema.Entities.Should().NotBeNull().And.BeEmpty();
+            loaded.Schema.Relationships.Should().NotBeNull().And.BeEmpty();
+            loaded.Schema.Queries.Should().NotBeNull().And.BeEmpty();
+            loaded.Schema.TargetDbms.Should().Be("sqlserver", "方言解決の起点は null を許さない");
+
+            // layout の null は「スキーマのみ文書」の正当な表現なのでそのまま残す
+            loaded.Layout.Should().BeNull();
+        }
+        finally
+        {
+            DeleteIfExists(path);
+        }
+    }
+
+    /// <summary>リスト・辞書の中に書かれた null 要素が取り除かれることを検証する</summary>
+    [Fact(DisplayName = "Load: リスト・辞書内の null 要素は取り除かれる")]
+    public void Load_NullElements_AreRemoved()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"er-null-elements-{Guid.NewGuid()}.json");
+
+        try
+        {
+            File.WriteAllText(
+                path,
+                """
+                {
+                  "Version": 1,
+                  "Schema": {
+                    "TargetDbms": "sqlite",
+                    "Entities": [
+                      null,
+                      {
+                        "Id": "33333333-0000-0000-0000-000000000001",
+                        "TableName": "Customer",
+                        "Columns": [ null, { "Name": "CustomerId", "DataType": "int" } ]
+                      },
+                      {
+                        "Id": "33333333-0000-0000-0000-000000000002",
+                        "TableName": "Order",
+                        "Columns": null
+                      }
+                    ],
+                    "Relationships": [ null ],
+                    "Queries": [
+                      null,
+                      {
+                        "EntityId": "33333333-0000-0000-0000-000000000001",
+                        "Name": "GetAll",
+                        "Parameters": [ null ],
+                        "OrderBy": null,
+                        "Fields": [ null ],
+                        "Sql": { "sqlite": null }
+                      }
+                    ]
+                  },
+                  "Layout": {
+                    "33333333-0000-0000-0000-000000000001": null,
+                    "33333333-0000-0000-0000-000000000002": { "X": 10 }
+                  }
+                }
+                """
+            );
+
+            var loaded = JsonStorageService.Load(path);
+
+            loaded.Schema.Entities.Should().HaveCount(2);
+            loaded.Schema.Entities[0].Columns.Should().ContainSingle();
+            loaded.Schema.Entities[1].Columns.Should().NotBeNull().And.BeEmpty();
+            loaded.Schema.Relationships.Should().BeEmpty();
+
+            var query = loaded.Schema.Queries.Should().ContainSingle().Which;
+            query.Parameters.Should().BeEmpty();
+            query.OrderBy.Should().NotBeNull().And.BeEmpty();
+            query.Fields.Should().BeEmpty();
+            query.Sql.Should().NotBeNull().And.BeEmpty("値が null の方言 SQL は保持しない");
+
+            // layout は値が null のエントリだけを落とし、正当な配置は残す
+            loaded.Layout.Should().HaveCount(1);
+            loaded.Layout![new Guid("33333333-0000-0000-0000-000000000002")].X.Should().Be(10);
+        }
+        finally
+        {
+            DeleteIfExists(path);
+        }
+    }
+
+    /// <summary>schema 自体が null の文書も空スキーマへ修復されることを検証する</summary>
+    /// <remarks>
+    /// GUI・MCP の読込は「Version・Schema オブジェクトを持つか」の事前検証で先に拒否するため、
+    /// この修復が効くのは事前検証を持たない経路（CLI の直接読み込み等）。どちらの経路でも
+    /// <see cref="NullReferenceException"/> で落ちないことが要点。
+    /// </remarks>
+    [Fact(DisplayName = "Load: schema が null の文書は空スキーマへ正規化される")]
+    public void Load_NullSchema_YieldsEmptySchema()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"er-null-schema-{Guid.NewGuid()}.json");
+
+        try
+        {
+            File.WriteAllText(path, """{ "Version": 1, "Schema": null }""");
+
+            var loaded = JsonStorageService.Load(path);
+
+            loaded.Schema.Should().NotBeNull();
+            loaded.Schema.Entities.Should().BeEmpty();
+            loaded.Schema.TargetDbms.Should().Be("sqlserver");
+        }
+        finally
+        {
+            DeleteIfExists(path);
+        }
+    }
+
+    /// <summary>
     /// スキーマのみ文書（<c>Layout = null</c>）を保存すると layout キーがキーごと省略され、
     /// version / schema / queries は出力されることを検証する（スキーマのみ JSON の正準形）。
     /// </summary>
@@ -531,7 +674,7 @@ public class JsonStorageServiceTests
             );
 
             File.Exists(path).Should().BeTrue();
-            File.Exists(path + ".tmp").Should().BeFalse("一時ファイルは差し替え後に残らない");
+            FindTemporaryLeftovers(path).Should().BeEmpty("一時ファイルは差し替え後に残らない");
             JsonStorageService
                 .Load(path)
                 .Schema.Entities.Should()
@@ -542,7 +685,7 @@ public class JsonStorageServiceTests
         finally
         {
             DeleteIfExists(path);
-            DeleteIfExists(path + ".tmp");
+            DeleteTemporaryLeftovers(path);
         }
     }
 
@@ -560,7 +703,7 @@ public class JsonStorageServiceTests
                 BuildDocument("New", DiagramDocument.CurrentVersion)
             );
 
-            File.Exists(path + ".tmp").Should().BeFalse("一時ファイルは差し替え後に残らない");
+            FindTemporaryLeftovers(path).Should().BeEmpty("一時ファイルは差し替え後に残らない");
             JsonStorageService
                 .Load(path)
                 .Schema.Entities.Should()
@@ -571,7 +714,7 @@ public class JsonStorageServiceTests
         finally
         {
             DeleteIfExists(path);
-            DeleteIfExists(path + ".tmp");
+            DeleteTemporaryLeftovers(path);
         }
     }
 
@@ -595,11 +738,11 @@ public class JsonStorageServiceTests
                 );
 
             act.Should().Throw<IOException>();
-            File.Exists(path + ".tmp").Should().BeFalse("失敗時に一時ファイルを残さない");
+            FindTemporaryLeftovers(path).Should().BeEmpty("失敗時に一時ファイルを残さない");
         }
         finally
         {
-            DeleteIfExists(path + ".tmp");
+            DeleteTemporaryLeftovers(path);
 
             if (Directory.Exists(path))
             {
@@ -661,6 +804,23 @@ public class JsonStorageServiceTests
         if (File.Exists(path))
         {
             File.Delete(path);
+        }
+    }
+
+    /// <summary>保存先に残った一時ファイル（<c>{path}.{GUID}.tmp</c>）を列挙する</summary>
+    /// <remarks>
+    /// 一時ファイル名には同時保存の衝突回避のため GUID が挟まるため、固定名ではなくワイルドカードで探す
+    /// （固定名 <c>{path}.tmp</c> のままだと、どんな残骸があっても常に緑になる空振りの検証になる）。
+    /// </remarks>
+    private static string[] FindTemporaryLeftovers(string path) =>
+        Directory.GetFiles(Path.GetDirectoryName(path)!, Path.GetFileName(path) + ".*.tmp");
+
+    /// <summary>保存先に残った一時ファイルをすべて削除する（後始末用）</summary>
+    private static void DeleteTemporaryLeftovers(string path)
+    {
+        foreach (var leftover in FindTemporaryLeftovers(path))
+        {
+            DeleteIfExists(leftover);
         }
     }
 
