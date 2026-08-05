@@ -546,6 +546,9 @@
     <value>The following named queries reference tables or columns that no longer exist and will be deleted:
 {0}</value>
   </data>
+  <data name="Import_QueriesRemovedWarning" xml:space="preserve">
+    <value>The {0} named queries defined in the current diagram will also be deleted (this format does not carry query definitions).</value>
+  </data>
   <data name="Import_Completed" xml:space="preserve">
     <value>Imported {0}.</value>
   </data>

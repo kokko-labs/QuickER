@@ -123,8 +123,10 @@ public sealed class CodeReverseCommandService
         IReadOnlyList<Relationship> finalRelationships
     )
     {
+        // エンティティ数だけで「空」と見なすと、クエリだけの図・未保存の編集内容を無確認で捨ててしまう
+        // （GUI 側 MainViewModel.HasNothingToLose と同じ判定。ホスト契約の IsEmpty は意味が異なるため使わない）
         var structurallySame =
-            current.Entities.Count == 0
+            (current.Entities.Count == 0 && current.Queries.Count == 0 && !_host.IsDirty)
             || HasSameStructure(current, merged.Entities, finalRelationships);
 
         // 構造同一かつ壊れクエリなしなら従来どおり無確認で続行する

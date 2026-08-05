@@ -361,6 +361,16 @@ public partial class MainViewModel
     /// </remarks>
     public bool IsDirty => _restoredDirty || UndoRedo.ChangeGeneration != _savedChangeGeneration;
 
+    /// <summary>図を丸ごと置き換えても失うものが無いか（エンティティ・名前付きクエリ・未保存変更のいずれも無い）</summary>
+    /// <remarks>
+    /// 図を置換する全経路（新規作成・開く・Mermaid/DBML 取込・Excel 定義書取込・DB 取込・コードリバース）が
+    /// 「無確認で進めてよいか」を判定する単一の述語。エンティティ数だけで判定すると、クエリだけの図や
+    /// 未保存の編集内容を無言で捨ててしまう（構造署名が一致する再取込でもクエリと手配置レイアウトは失われる）。
+    /// ホスト契約の <c>IErDiagramHost.IsEmpty</c>（＝エンティティ 0）は AI チャットの自動整列判定に
+    /// 使われており意味が異なるため、こちらを別の述語として持つ。
+    /// </remarks>
+    public bool HasNothingToLose => Entities.Count == 0 && Queries.Count == 0 && !IsDirty;
+
     /// <summary>ウィンドウタイトル（無題は「QuickER」、ファイル紐付きは「ファイル名 - QuickER」・ダーティ時は * 付き）</summary>
     /// <remarks>無題（パスなし）のダーティは * を付けず「QuickER」のままにする（保存先が無く * が意味を持たないため）</remarks>
     public string WindowTitle =>
@@ -648,8 +658,13 @@ public partial class MainViewModel
         return currentSignature == newSignature;
     }
 
-    /// <summary>構造変更を伴う置換の場合のみ確認ダイアログを表示する</summary>
-    /// <remarks>空の図、または構造が同一の場合は確認なしで続行する</remarks>
+    /// <summary>置換で失うものがある場合のみ確認ダイアログを表示する（Mermaid / DBML の丸ごと置換用）</summary>
+    /// <remarks>
+    /// 失うものが無い（<see cref="HasNothingToLose"/>）か、構造が同一で失う中身も無いときは確認なしで続行する。
+    /// 構造署名（<see cref="HasSameStructure"/>）は名前付きクエリと未保存の編集内容（手配置レイアウトを含む）を
+    /// 見ないため、署名一致だけを根拠に無確認で置換するとそれらが無言で消える。
+    /// クエリがある場合は削除件数を確認メッセージへ付加する（マージ取込の壊れクエリ列挙と同じ流儀）。
+    /// </remarks>
     /// <returns>置換を続行してよい場合 true</returns>
     private bool ConfirmDiagramReplacement(
         IReadOnlyList<Entity> entities,
@@ -657,13 +672,25 @@ public partial class MainViewModel
         string message
     )
     {
-        if (Entities.Count == 0 || HasSameStructure(entities, relationships))
+        if (
+            HasNothingToLose
+            || (Queries.Count == 0 && !IsDirty && HasSameStructure(entities, relationships))
+        )
         {
             return true;
         }
 
+        // Mermaid / DBML はクエリ定義を持たないため、置換すると現在のクエリはすべて失われる
+        var fullMessage =
+            Queries.Count > 0
+                ? message
+                    + Environment.NewLine
+                    + Environment.NewLine
+                    + string.Format(Strings.Import_QueriesRemovedWarning, Queries.Count)
+                : message;
+
         // 未保存変更があるときは置換で編集内容が失われるため警告水準（Warning）で確認する
-        return _dialogs.ConfirmDiscard(IsDirty, message, Strings.Common_Confirm);
+        return _dialogs.ConfirmDiscard(IsDirty, fullMessage, Strings.Common_Confirm);
     }
 
     /// <summary>ファイル選択ダイアログで選択したファイルの形式に応じて ER 図を取り込む</summary>
@@ -857,8 +884,9 @@ public partial class MainViewModel
     /// <returns>置換を続行してよい場合 true</returns>
     private bool ConfirmMergedReplacement(DiagramMergeResult merged, string message)
     {
+        // マージ取込はクエリ・レイアウトを温存するため、構造が同一なら失うものはない
         var structurallySame =
-            Entities.Count == 0 || HasSameStructure(merged.Entities, merged.Relationships);
+            HasNothingToLose || HasSameStructure(merged.Entities, merged.Relationships);
 
         // 構造同一かつ壊れクエリなしなら従来どおり無確認で続行する
         if (structurallySame && merged.BrokenQueries.Count == 0)
@@ -1025,9 +1053,9 @@ public partial class MainViewModel
             return;
         }
 
-        // 空でクリーン（＝失うものがない）ときは従来どおり無確認で開く
+        // 失うものがない（空・クエリなし・クリーン）ときは従来どおり無確認で開く
         if (
-            (Entities.Count > 0 || IsDirty)
+            !HasNothingToLose
             && !_dialogs.ConfirmDiscard(
                 IsDirty,
                 Strings.Confirm_OpenDiagram,

@@ -1264,6 +1264,12 @@ namespace QuickER.Resources {
             }
         }
 
+        public static string Import_QueriesRemovedWarning {
+            get {
+                return ResourceManager.GetString("Import_QueriesRemovedWarning", resourceCulture);
+            }
+        }
+
         public static string Import_Completed {
             get {
                 return ResourceManager.GetString("Import_Completed", resourceCulture);

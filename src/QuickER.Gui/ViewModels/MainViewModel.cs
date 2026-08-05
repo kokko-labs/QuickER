@@ -611,7 +611,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private void NewDiagram()
     {
         if (
-            Entities.Count > 0
+            !HasNothingToLose
             && !_dialogs.ConfirmDiscard(
                 IsDirty,
                 Strings.Confirm_ClearDiagram,
