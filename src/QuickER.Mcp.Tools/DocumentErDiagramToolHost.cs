@@ -10,7 +10,7 @@ namespace QuickER.Mcp.Tools;
 /// <summary>
 /// ファイルベースの ER 図ツール実行ホスト。各ツール呼び出しを
 /// 「<see cref="JsonStorageService.Load"/>（DiagramDocument 読込）→ 意味モデル（<see cref="ErDiagram"/>）変更 →
-/// <see cref="JsonStorageService.Save"/>（保存）」で完結させるステートレスな実行器。
+/// <see cref="JsonStorageService.SaveAtomic"/>（保存）」で完結させるステートレスな実行器。
 /// </summary>
 /// <remarks>
 /// 意味論は GUI 側 <c>QuickER.Services.ErDiagramDynamicTools</c>（ViewModel 操作）を忠実にミラーするが、
@@ -91,7 +91,9 @@ public static partial class DocumentErDiagramToolHost
 
         if (success)
         {
-            JsonStorageService.Save(file, document!);
+            // ユーザーの実ファイルへ書き戻すため原子的に差し替える（書き込み途中の中断・
+            // ディスク満杯で既存の図が半端な JSON になるのを防ぐ）
+            JsonStorageService.SaveAtomic(file, document!);
         }
 
         return (result, success);
@@ -220,7 +222,7 @@ public static partial class DocumentErDiagramToolHost
             Schema = new ErDiagram { TargetDbms = dbms },
             Layout = null,
         };
-        JsonStorageService.Save(file, document);
+        JsonStorageService.SaveAtomic(file, document);
 
         return ($"Created diagram '{file}' (target DBMS: {dbms}).", true);
     }

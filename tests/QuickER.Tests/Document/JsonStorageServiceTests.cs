@@ -575,6 +575,39 @@ public class JsonStorageServiceTests
         }
     }
 
+    /// <summary>差し替えに失敗しても一時ファイルを残さず、失敗理由を呼び出し側へ伝えることを検証する</summary>
+    /// <remarks>
+    /// 保存先と同名のディレクトリを置いて本体への差し替え（<see cref="File.Move(string, string)"/>）を
+    /// 確実に失敗させる。失敗のたびに <c>.tmp</c> が残ると、次回保存の差し替え対象と紛らわしくなる。
+    /// </remarks>
+    [Fact(DisplayName = "SaveAtomic: 差し替え失敗時は .tmp を残さず例外を投げる")]
+    public void SaveAtomic_ReplaceFailure_RemovesTemporaryAndThrows()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"er-atomic-fail-{Guid.NewGuid()}");
+        Directory.CreateDirectory(path);
+
+        try
+        {
+            var act = () =>
+                JsonStorageService.SaveAtomic(
+                    path,
+                    BuildDocument("Customer", DiagramDocument.CurrentVersion)
+                );
+
+            act.Should().Throw<IOException>();
+            File.Exists(path + ".tmp").Should().BeFalse("失敗時に一時ファイルを残さない");
+        }
+        finally
+        {
+            DeleteIfExists(path + ".tmp");
+
+            if (Directory.Exists(path))
+            {
+                Directory.Delete(path, recursive: true);
+            }
+        }
+    }
+
     /// <summary>SaveAtomic と Save の出力 JSON が完全に一致することを検証する（直列化設定の共有）</summary>
     [Fact(DisplayName = "SaveAtomic: 出力 JSON は Save と同一")]
     public void SaveAtomic_ProducesIdenticalJsonToSave()

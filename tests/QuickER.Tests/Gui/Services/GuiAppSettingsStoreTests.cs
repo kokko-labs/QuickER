@@ -145,6 +145,81 @@ public class GuiAppSettingsStoreTests
         }
     }
 
+    /// <summary>設定ファイルが無い状態からの Save がファイルを新規作成できることを検証する（原子的保存の新規作成経路）</summary>
+    [Fact(DisplayName = "未保存フォルダへの Save でファイルが新規作成される")]
+    public void Save_WhenFileMissing_CreatesFile()
+    {
+        var folder = TempFolder();
+
+        try
+        {
+            var store = new GuiAppSettingsStore(folder);
+
+            File.Exists(store.SettingsPath).Should().BeFalse();
+
+            store.Save(new GuiAppSettings { Language = "ja" });
+
+            File.Exists(store.SettingsPath).Should().BeTrue();
+            store.Load().Language.Should().Be("ja");
+        }
+        finally
+        {
+            if (Directory.Exists(folder))
+            {
+                Directory.Delete(folder, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>既存ファイルがある状態での Save が内容を正しく置換することを検証する（原子的保存の置換経路）</summary>
+    [Fact(DisplayName = "既存ファイルがある Save は内容を置換する")]
+    public void Save_WhenFileExists_ReplacesContent()
+    {
+        var folder = TempFolder();
+
+        try
+        {
+            var store = new GuiAppSettingsStore(folder);
+            store.Save(new GuiAppSettings { Language = "en" });
+
+            store.Save(new GuiAppSettings { Language = "ja" });
+
+            store.Load().Language.Should().Be("ja");
+        }
+        finally
+        {
+            if (Directory.Exists(folder))
+            {
+                Directory.Delete(folder, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>Save 後に一時ファイル（原子的保存の中間生成物）が残らないことを検証する</summary>
+    [Fact(DisplayName = "Save 後に tmp ファイルが残らない")]
+    public void Save_DoesNotLeaveTempFile()
+    {
+        var folder = TempFolder();
+
+        try
+        {
+            var store = new GuiAppSettingsStore(folder);
+
+            // 新規作成・上書きの両経路を確認する
+            store.Save(new GuiAppSettings { Language = "en" });
+            store.Save(new GuiAppSettings { Language = "ja" });
+
+            Directory.GetFiles(folder, "*.tmp").Should().BeEmpty();
+        }
+        finally
+        {
+            if (Directory.Exists(folder))
+            {
+                Directory.Delete(folder, recursive: true);
+            }
+        }
+    }
+
     /// <summary>DiagramView だけを変更する保存が Language を消さないことを検証する（read-modify-write の前提）</summary>
     [Fact(DisplayName = "DiagramView の保存は Language を消さない")]
     public void Save_DiagramView_PreservesLanguage()

@@ -148,6 +148,57 @@ public class CSharpGenerationSettingsStoreTests
         }
     }
 
+    /// <summary>SaveTo で同一パスへ再保存すると内容が正しく置換されることを検証する（原子的保存の置換経路）</summary>
+    [Fact(DisplayName = "SaveTo は同一パスへの再保存で内容を置換する")]
+    public void SaveTo_WhenFileExists_ReplacesContent()
+    {
+        var folder = TempFolder();
+
+        try
+        {
+            var store = new CSharpGenerationSettingsStore(folder);
+            var path = Path.Combine(folder, "preset", "codegen-settings.json");
+            store.SaveTo(path, new CSharpGenerationSettings { RootNamespace = "Acme.Old" });
+
+            store.SaveTo(path, new CSharpGenerationSettings { RootNamespace = "Acme.New" });
+
+            store.TryLoadFrom(path)!.RootNamespace.Should().Be("Acme.New");
+        }
+        finally
+        {
+            if (Directory.Exists(folder))
+            {
+                Directory.Delete(folder, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>SaveTo 後に一時ファイル（原子的保存の中間生成物）が残らないことを検証する</summary>
+    [Fact(DisplayName = "SaveTo 後に tmp ファイルが残らない")]
+    public void SaveTo_DoesNotLeaveTempFile()
+    {
+        var folder = TempFolder();
+
+        try
+        {
+            var store = new CSharpGenerationSettingsStore(folder);
+            var path = Path.Combine(folder, "preset", "codegen-settings.json");
+
+            // 新規作成・上書きの両経路を確認する
+            store.SaveTo(path, new CSharpGenerationSettings { RootNamespace = "Acme.Old" });
+            store.SaveTo(path, new CSharpGenerationSettings { RootNamespace = "Acme.New" });
+
+            Directory.GetFiles(Path.GetDirectoryName(path)!, "*.tmp").Should().BeEmpty();
+        }
+        finally
+        {
+            if (Directory.Exists(folder))
+            {
+                Directory.Delete(folder, recursive: true);
+            }
+        }
+    }
+
     /// <summary>存在しないパスの TryLoadFrom は null を返すことを検証する（既定値へはフォールバックしない）</summary>
     [Fact(DisplayName = "存在しないパスの TryLoadFrom は null")]
     public void TryLoadFrom_WhenMissing_ReturnsNull()

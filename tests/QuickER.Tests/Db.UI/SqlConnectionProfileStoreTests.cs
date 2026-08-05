@@ -285,6 +285,86 @@ public class SqlConnectionProfileStoreTests : IDisposable
         list[0].Port.Should().Be(5432);
     }
 
+    /// <summary>ファイル未作成の状態から Upsert（SaveData 経由）で connections.json が新規作成されることを検証する（原子的保存の新規作成経路）</summary>
+    [Fact(DisplayName = "未保存フォルダへの Upsert で connections.json が新規作成される")]
+    public void Upsert_WhenFileMissing_CreatesConnectionsFile()
+    {
+        var store = CreateStore();
+
+        File.Exists(store.ConnectionsPath).Should().BeFalse();
+
+        store.Upsert(
+            new SqlConnectionProfile
+            {
+                Name = "P",
+                Server = "s",
+                Database = "d",
+            },
+            password: ""
+        );
+
+        File.Exists(store.ConnectionsPath).Should().BeTrue();
+    }
+
+    /// <summary>既存の connections.json がある状態での保存が内容を正しく置換することを検証する（原子的保存の置換経路）</summary>
+    [Fact(DisplayName = "既存の connections.json がある保存は内容を置換する")]
+    public void SaveLastUsed_WhenFileExists_ReplacesContent()
+    {
+        var store = CreateStore();
+        store.SaveLastUsed(
+            new SqlConnectionProfile
+            {
+                Name = "Old",
+                Server = "old-host",
+                Database = "d",
+            },
+            password: ""
+        );
+
+        store.SaveLastUsed(
+            new SqlConnectionProfile
+            {
+                Name = "New",
+                Server = "new-host",
+                Database = "d",
+            },
+            password: ""
+        );
+
+        var lastUsed = store.LoadLastUsed();
+        lastUsed.Should().NotBeNull();
+        lastUsed!.Value.Profile.Server.Should().Be("new-host");
+    }
+
+    /// <summary>connections.json への保存後に一時ファイル（原子的保存の中間生成物）が残らないことを検証する</summary>
+    [Fact(DisplayName = "保存後に tmp ファイルが残らない")]
+    public void SaveData_DoesNotLeaveTempFile()
+    {
+        var store = CreateStore();
+
+        // 新規作成・上書きの両経路を確認する
+        store.Upsert(
+            new SqlConnectionProfile
+            {
+                Name = "P1",
+                Server = "s1",
+                Database = "d",
+            },
+            password: ""
+        );
+        store.Upsert(
+            new SqlConnectionProfile
+            {
+                Name = "P2",
+                Server = "s2",
+                Database = "d",
+            },
+            password: ""
+        );
+
+        Directory.GetFiles(_tempFolder, "*.tmp").Should().BeEmpty();
+    }
+
     /// <summary>前回接続情報がデータベース名・認証情報・パスワードを含めて往復保存・復元されることを検証する</summary>
     [Fact(DisplayName = "前回接続情報はデータベース名を含めて保存・復元される")]
     public void LastUsed_RoundTrip_RestoresDatabase()

@@ -36,25 +36,58 @@ public static class JsonStorageService
     /// <remarks>
     /// 一時ファイル <c>{path}.tmp</c> へ全量を書き切ってから本体へ差し替える。素の
     /// <see cref="Save"/>（<see cref="File.WriteAllText(string, string?)"/>）は既存ファイルを
-    /// 切り詰めてから書くため、途中でプロセスが落ちると保存先が破損した JSON になる。
-    /// クラッシュ時の緊急保存など「落ちる可能性のある文脈」からの書き込みはこちらを使う。
+    /// 切り詰めてから書くため、途中でプロセスが落ちる・ディスクが満杯になると保存先が破損した JSON になる。
+    /// <b>ユーザーのファイルへ書き戻す経路（GUI の上書き／別名保存・MCP のツール実行）と、
+    /// クラッシュ時の緊急保存はすべてこちらを使う。</b><see cref="Save"/> は失っても影響のない
+    /// 書き出し（スキーマのみ JSON のエクスポート等）専用。
     /// </remarks>
     /// <param name="path">保存先のファイルパス</param>
     /// <param name="document">保存対象の文書（意味モデル＋レイアウト）</param>
     public static void SaveAtomic(string path, DiagramDocument document)
     {
+        // 一時ファイルは保存先と同じディレクトリに作る（別ボリュームをまたがないため、
+        // 差し替え（File.Replace / File.Move）が同一ボリューム内の操作で完結する）
         var temporaryPath = path + ".tmp";
-        File.WriteAllText(temporaryPath, Serialize(document));
 
-        // 既存ファイルがあれば置換（バックアップは残さない）、無ければ単純に移動する。
-        // File.Replace は保存先が存在しないと例外になるため、両者を明示的に分岐する。
-        if (File.Exists(path))
+        try
         {
-            File.Replace(temporaryPath, path, destinationBackupFileName: null);
+            File.WriteAllText(temporaryPath, Serialize(document));
+
+            // 既存ファイルがあれば置換（バックアップは残さない）、無ければ単純に移動する。
+            // File.Replace は保存先が存在しないと例外になるため、両者を明示的に分岐する。
+            if (File.Exists(path))
+            {
+                try
+                {
+                    File.Replace(temporaryPath, path, destinationBackupFileName: null);
+                }
+                catch (Exception ex) when (ex is IOException or PlatformNotSupportedException)
+                {
+                    // クラウド同期フォルダ等、File.Replace が使えない環境向けのフォールバック
+                    // （OS 水準の原子性は落ちるが「全量を書き切ってから差し替える」保護は保たれる）
+                    File.Move(temporaryPath, path, overwrite: true);
+                }
+            }
+            else
+            {
+                File.Move(temporaryPath, path);
+            }
         }
-        else
+        finally
         {
-            File.Move(temporaryPath, path);
+            // 正常終了時は置換/移動済みで存在しない。例外発生時のみ tmp の残骸を掃除する
+            // （掃除自体の失敗で元の例外を握り潰さないよう黙殺する）
+            try
+            {
+                if (File.Exists(temporaryPath))
+                {
+                    File.Delete(temporaryPath);
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // tmp の残骸は次回保存時に上書きされるため無害
+            }
         }
     }
 

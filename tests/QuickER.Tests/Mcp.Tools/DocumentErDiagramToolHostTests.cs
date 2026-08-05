@@ -250,6 +250,31 @@ public sealed class DocumentErDiagramToolHostTests : IDisposable
         result.Should().Contain("refusing to modify");
     }
 
+    /// <summary>
+    /// 保存が原子的（一時ファイル経由の差し替え）でも、作成・変更の結果と後始末が従来どおりであることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// ユーザーの実ファイルへ書き戻すため、書き込み途中の中断で既存の図が壊れないよう
+    /// <see cref="JsonStorageService.SaveAtomic"/> を通す。差し替え後に <c>.tmp</c> が残ると
+    /// 外部エージェントの作業フォルダにゴミが溜まるため、残らないことを見張る。
+    /// </remarks>
+    [Fact(DisplayName = "保存は一時ファイルを残さない（create_diagram / 変更系とも）")]
+    public void Saving_LeavesNoTemporaryFile()
+    {
+        var file = PathFor("atomic.json");
+
+        Exec(DocumentErDiagramToolHost.CreateDiagramToolName, file, new { target_dbms = "sqlite" })
+            .Success.Should()
+            .BeTrue();
+        File.Exists(file + ".tmp").Should().BeFalse("作成直後に一時ファイルは残らない");
+
+        Exec("add_entity", file, new { table_name = "Book" }).Success.Should().BeTrue();
+
+        File.Exists(file + ".tmp").Should().BeFalse("変更の保存後にも一時ファイルは残らない");
+        JsonStorageService.Load(file).Schema.Entities.Single().TableName.Should().Be("Book");
+        Directory.GetFiles(_dir, "*.tmp").Should().BeEmpty("ツール実行後に一時ファイルが残らない");
+    }
+
     [Fact(DisplayName = "get_diagram_summary は新しいフォーマットでも警告付きで続行する")]
     public void Summary_NewerFormat_WarnsAndContinues()
     {
