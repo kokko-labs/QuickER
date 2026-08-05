@@ -117,6 +117,23 @@ public partial class UndoRedoManager : ObservableObject
         NotifyStateChanged();
     }
 
+    /// <summary>履歴へ積まずに変更世代だけを 1 進める（Undo 非対象だが保存文書に影響する変更用）</summary>
+    /// <remarks>
+    /// <para>
+    /// 名前付きクエリの差し替え・エンティティ表示幅の変更のように、Undo 履歴へは登録しない一方で
+    /// 保存文書（スキーマ＋レイアウト）の内容を変える操作で呼ぶ。呼ばないと「変更したのにダーティでない」
+    /// 状態になり、外部変更の自動再読込や新規作成で無警告に失われる。
+    /// </para>
+    /// <para>
+    /// Undo / Redo スタックには一切触れないため <see cref="CanUndo"/> / <see cref="CanRedo"/> は変わらず、
+    /// <see cref="ChangeGeneration"/> だけが進む（＝ダーティ判定のみが「変更あり」へ動く）。
+    /// </para>
+    /// </remarks>
+    public void MarkChanged()
+    {
+        NotifyStateChanged();
+    }
+
     /// <summary>Undo / Redo スタックをすべてクリアする</summary>
     public void Clear()
     {

@@ -131,6 +131,29 @@ public sealed class MainViewModelExternalChangeTests : IDisposable
         vm.IsDirty.Should().BeFalse("再読込後はクリーン");
     }
 
+    /// <summary>クエリ差し替え（Undo 非対象の変更）だけでもダーティ扱いになり、確認を経ることを検証する</summary>
+    /// <remarks>
+    /// クエリは Undo 履歴に積まれないが保存文書の一部なので、無確認の自動再読込に流れると
+    /// 定義が無警告で失われる。ここではその防止（確認ダイアログ経由になること）を見張る。
+    /// </remarks>
+    [Fact(DisplayName = "ダーティ: クエリ差し替えだけでも外部変更を確認する")]
+    public void QueryReplacement_MakesExternalChangeConfirmed()
+    {
+        var path = Path.Combine(_folder, "Doc.json");
+        var dialogs = new StubDialogService { ConfirmResult = false };
+        var vm = OpenClean(path, "Original", dialogs);
+
+        // エンティティ編集は行わず、名前付きクエリの差し替えだけでダーティにする
+        vm.ReplaceQueries([new QueryDefinition { EntityId = vm.Entities[0].Id, Name = "GetAll" }]);
+        vm.IsDirty.Should().BeTrue();
+
+        var externalHash = WriteDiagram(path, "External");
+        vm.RaiseExternalChangeForTests(DocumentFileChangeKind.Modified, externalHash);
+
+        dialogs.WarningConfirmMessages.Should().ContainSingle("無確認の自動再読込へ流さない");
+        vm.Queries.Should().ContainSingle("続行を選んだのでクエリは保持される");
+    }
+
     /// <summary>ダーティ時に「続行」を選ぶと未保存変更を保持し、同一内容では再確認しないことを検証する</summary>
     [Fact(DisplayName = "ダーティ: 続行を選ぶと変更を保持し同一内容は再確認しない")]
     public void Dirty_Continue_KeepsChangesAndSuppressesReconfirm()

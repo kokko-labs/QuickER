@@ -325,6 +325,7 @@ public static class DragBehavior
         var vm = _draggedVm;
         var oldX = _startX;
         var oldY = _startY;
+        var oldWidth = _startWidth;
         var wasResizing = _isResizing;
         var wasGroupDragging = _isGroupDragging;
         var groupMembers = _groupMembers;
@@ -350,7 +351,8 @@ public static class DragBehavior
 
         if (wasResizing)
         {
-            // 幅変更は軽微なため Undo 登録は行わない
+            // 幅変更は軽微なため Undo 登録は行わない。ただし保存対象なのでダーティにはする
+            MarkWidthChanged(GetUndoRedoManager(element), oldWidth, vm.Width);
             return;
         }
 
@@ -417,5 +419,28 @@ public static class DragBehavior
         {
             mainVm.RefreshCanvasSize();
         }
+    }
+
+    /// <summary>リサイズ完了時に、幅が実際に変化していれば変更世代だけを進める（履歴には積まない）</summary>
+    /// <param name="manager">対象の <see cref="UndoRedoManager"/>（添付プロパティ未設定なら null）</param>
+    /// <param name="oldWidth">リサイズ開始時の幅</param>
+    /// <param name="newWidth">リサイズ完了時の幅</param>
+    /// <remarks>
+    /// 幅は保存対象（<see cref="Documents.EntityLayout.Width"/>）なので、Undo 非対象でもダーティにしないと
+    /// 外部変更の自動再読込・新規作成で無警告に失われる。実マウス経路はヘッドレステスト不能なため、
+    /// 判定だけをこのメソッドへ切り出して単体検証可能にしている。
+    /// </remarks>
+    internal static void MarkWidthChanged(
+        UndoRedoManager? manager,
+        double oldWidth,
+        double newWidth
+    )
+    {
+        if (oldWidth == newWidth)
+        {
+            return;
+        }
+
+        manager?.MarkChanged();
     }
 }

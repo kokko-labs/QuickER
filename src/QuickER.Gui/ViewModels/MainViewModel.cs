@@ -400,11 +400,22 @@ public partial class MainViewModel : ObservableObject, IDisposable
         ColumnRenamed?.Invoke(this, new ColumnRenamedEventArgs(owner.Id, oldName, newName));
     }
 
-    /// <summary>名前付きクエリ定義を丸ごと差し替え、自動保存へ反映する</summary>
+    /// <summary>名前付きクエリ定義を丸ごと差し替え、未保存変更として記録したうえで自動保存へ反映する</summary>
     /// <param name="queries">差し替える名前付きクエリ定義の一覧</param>
+    /// <remarks>
+    /// クエリは保存文書の一部（<see cref="ToDiagramModel"/> が含める）なので、Undo 履歴に積まなくても
+    /// ダーティにはしなければならない（さもないと外部変更の自動再読込・新規作成で無警告に失われる）。
+    /// 呼び出し元は「実際に変わったときだけ呼ぶ」契約（ダイアログの確定・クエリツールの成功・
+    /// 条件式の追従書き換え発生時）なので、内容比較はせず呼ばれるたびに世代を進める。
+    /// <see cref="ToDiagramModel"/> が返すクエリ一覧は要素を共有する浅いコピーで、呼び出し元は
+    /// 定義そのものを直接書き換えてから渡してくるため、そもそも新旧の内容比較は成立しない。
+    /// </remarks>
     public void ReplaceQueries(IReadOnlyList<QueryDefinition> queries)
     {
         Queries = queries.ToList();
+
+        // Undo 非対象の変更なので、変更世代だけを進めてダーティ扱いにする
+        UndoRedo.MarkChanged();
         AutoSave();
     }
 
@@ -1266,20 +1277,40 @@ public partial class MainViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>全エンティティの表示幅を内容に合わせて自動調整する</summary>
+    /// <remarks>
+    /// 幅は Undo 履歴へ積まない（ドラッグでのリサイズと同じ扱い）が、保存対象
+    /// （<see cref="Documents.EntityLayout.Width"/>）なので実際に変化したときは未保存変更として記録する。
+    /// </remarks>
     [RelayCommand]
     private void AutoFitEntityWidths()
     {
-        AutoFitEntityWidths(Entities);
+        var changed = AutoFitEntityWidths(Entities);
         RefreshCanvasSize();
+
+        if (changed)
+        {
+            UndoRedo.MarkChanged();
+        }
     }
 
     /// <summary>指定エンティティ群の表示幅を一括で自動調整する</summary>
-    private static void AutoFitEntityWidths(IEnumerable<EntityViewModel> entities)
+    /// <returns>1 つでも幅が実際に変化した場合 true</returns>
+    private static bool AutoFitEntityWidths(IEnumerable<EntityViewModel> entities)
     {
+        var changed = false;
+
         foreach (var entity in entities)
         {
+            var before = entity.Width;
             entity.AutoFitWidth();
+
+            if (entity.Width != before)
+            {
+                changed = true;
+            }
         }
+
+        return changed;
     }
 
     /// <summary>リレーション構成に基づいて全カラムの PK/FK 編集可否と FK フラグを同期する</summary>

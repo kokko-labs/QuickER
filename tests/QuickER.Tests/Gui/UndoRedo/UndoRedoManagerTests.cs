@@ -86,6 +86,35 @@ public class UndoRedoManagerTests
         mgr.CanRedo.Should().BeFalse();
     }
 
+    /// <summary>MarkChanged が履歴に触れず変更世代だけを進めることを検証する</summary>
+    [Fact(DisplayName = "MarkChanged は履歴を変えずに変更世代だけを進める")]
+    public void MarkChanged_BumpsGenerationWithoutTouchingHistory()
+    {
+        var mgr = new UndoRedoManager();
+        var before = mgr.ChangeGeneration;
+
+        mgr.MarkChanged();
+
+        mgr.ChangeGeneration.Should().NotBe(before, "ダーティ判定が動くよう世代を進める");
+        mgr.CanUndo.Should().BeFalse("履歴には積まない");
+        mgr.CanRedo.Should().BeFalse();
+    }
+
+    /// <summary>MarkChanged が Redo スタックを破棄しないことを検証する（履歴に一切関与しない）</summary>
+    [Fact(DisplayName = "MarkChanged は Redo スタックを破棄しない")]
+    public void MarkChanged_KeepsRedoStack()
+    {
+        var mgr = new UndoRedoManager();
+        mgr.Execute(new StubCommand());
+        mgr.Undo();
+        mgr.CanRedo.Should().BeTrue();
+
+        mgr.MarkChanged();
+
+        mgr.CanRedo.Should().BeTrue("Execute / Push と違い Redo は破棄しない");
+        mgr.CanUndo.Should().BeFalse();
+    }
+
     /// <summary>同一 GroupId のプロパティ変更が 1 履歴へ集約され、まとめて Undo / Redo されることを検証する</summary>
     [Fact(DisplayName = "同一グループの PropertyChangeCommand は 1 回の Undo/Redo で処理される")]
     public void Push_GroupedPropertyChanges_AreHandledAsSingleStep()
