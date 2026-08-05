@@ -9,6 +9,7 @@ using QuickER.Gui.Abstractions;
 using QuickER.Gui.Common;
 using QuickER.Model;
 using QuickER.Provider;
+using QuickER.Sqlite;
 
 namespace QuickER.Db.UI;
 
@@ -66,6 +67,16 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
 
     /// <summary>ダイアログを閉じる際に呼ぶアクション（View が注入する）</summary>
     public Action<bool>? CloseAction { get; set; }
+
+    /// <summary>実行確認メッセージへ表示する同期先の名前（サーバー系はデータベース名・SQLite はファイルパス）</summary>
+    /// <remarks>
+    /// <see cref="DbConnectionSettings"/> は方言横断の共用型のため、SQLite 接続でも
+    /// <see cref="DbConnectionSettings.Database"/> に別方言で最後に使った値が残り得る
+    /// （対象 DB を切り替えても前回のデータベース名が表示される不具合の原因）。
+    /// 表示は方言が実際に使うフィールドから選ぶ（接続ダイアログの ShowFilePath と同じ判定）。
+    /// </remarks>
+    private string SyncTargetDisplayName =>
+        _provider.Name == SqliteProvider.ProviderName ? _settings.FilePath : _settings.Database;
 
     /// <summary>同期先プロバイダ・設定と目標スキーマを指定して ViewModel を生成する</summary>
     /// <param name="provider">同期先の DB プロバイダ</param>
@@ -250,17 +261,20 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
             var tableList = string.Join(Environment.NewLine, rebuildTables.Select(t => "  • " + t));
             msg = string.Format(
                 Strings.SchemaSync_ExecuteConfirmRebuild,
-                _settings.Database,
+                SyncTargetDisplayName,
                 tableList
             );
         }
         else if (destructive)
         {
-            msg = string.Format(Strings.SchemaSync_ExecuteConfirmDestructive, _settings.Database);
+            msg = string.Format(
+                Strings.SchemaSync_ExecuteConfirmDestructive,
+                SyncTargetDisplayName
+            );
         }
         else
         {
-            msg = string.Format(Strings.SchemaSync_ExecuteConfirm, _settings.Database);
+            msg = string.Format(Strings.SchemaSync_ExecuteConfirm, SyncTargetDisplayName);
         }
 
         if (!_dialogs.ConfirmWarning(msg, Strings.Common_Confirm))

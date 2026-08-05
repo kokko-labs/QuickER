@@ -196,7 +196,9 @@ public class SchemaSyncDialogViewModelTests
             Entities = [Table("Customer", Col("Id", "INTEGER", pk: true), Col("Age", "INTEGER"))],
         };
         var provider = new FakeSqliteProvider(new FakeSchemaImporter(live));
-        var settings = new DbConnectionSettings { Database = "shop.db" };
+
+        // SQLite の接続設定は FilePath を使う（Database はサーバー系方言用）
+        var settings = new DbConnectionSettings { FilePath = "shop.db" };
         var target = new[]
         {
             Table("Customer", Col("Id", "INTEGER", pk: true), Col("Age", "TEXT")),
@@ -219,7 +221,7 @@ public class SchemaSyncDialogViewModelTests
             .Be(
                 string.Format(
                     DbStrings.SchemaSync_ExecuteConfirmRebuild,
-                    settings.Database,
+                    settings.FilePath,
                     "  • Customer"
                 )
             );
@@ -235,7 +237,9 @@ public class SchemaSyncDialogViewModelTests
             Entities = [Table("Customer", Col("Id", "INTEGER", pk: true))],
         };
         var provider = new FakeSqliteProvider(new FakeSchemaImporter(live));
-        var settings = new DbConnectionSettings { Database = "shop.db" };
+
+        // SQLite の接続設定は FilePath を使う（Database はサーバー系方言用）
+        var settings = new DbConnectionSettings { FilePath = "shop.db" };
         var target = new[]
         {
             Table("Customer", Col("Id", "INTEGER", pk: true), Col("Name", "TEXT")),
@@ -250,7 +254,64 @@ public class SchemaSyncDialogViewModelTests
         await vm.ExecuteCommand.ExecuteAsync(null);
 
         var message = dialogs.WarningConfirmMessages.Should().ContainSingle().Subject;
-        message.Should().Be(string.Format(DbStrings.SchemaSync_ExecuteConfirm, settings.Database));
+        message.Should().Be(string.Format(DbStrings.SchemaSync_ExecuteConfirm, settings.FilePath));
+    }
+
+    /// <summary>SQLite の実行確認が、共用設定に残った別方言のデータベース名でなくファイルパスを表示することを検証する</summary>
+    /// <remarks>
+    /// 対象 DB を SQL Server から SQLite へ切り替えた直後の再現。共用の <see cref="DbConnectionSettings"/> には
+    /// SQL Server 時代の Database が残るため、表示フィールドを方言で選ばないと前の名前が出てしまう。
+    /// </remarks>
+    [Fact(
+        DisplayName = "rebuild 方言: 実行確認は残存する別方言の Database でなく FilePath を表示する"
+    )]
+    public async Task Execute_RebuildDialect_ShowsFilePath_NotStaleDatabase()
+    {
+        var live = new SchemaImportResult
+        {
+            Entities = [Table("Customer", Col("Id", "INTEGER", pk: true))],
+        };
+        var provider = new FakeSqliteProvider(new FakeSchemaImporter(live));
+        var settings = new DbConnectionSettings
+        {
+            Database = "OldSqlServerDb",
+            FilePath = @"C:\data\shop.db",
+        };
+        var target = new[]
+        {
+            Table("Customer", Col("Id", "INTEGER", pk: true), Col("Name", "TEXT")),
+        };
+        var dialogs = new StubDialogService { ConfirmResult = false };
+        var vm = new SchemaSyncDialogViewModel(provider, settings, target, [], dialogs);
+
+        await vm.RefreshCommand.ExecuteAsync(null);
+        vm.UpdatePreview();
+
+        await vm.ExecuteCommand.ExecuteAsync(null);
+
+        var message = dialogs.WarningConfirmMessages.Should().ContainSingle().Subject;
+        message.Should().Be(string.Format(DbStrings.SchemaSync_ExecuteConfirm, @"C:\data\shop.db"));
+        message.Should().NotContain("OldSqlServerDb");
+    }
+
+    /// <summary>サーバー系方言の実行確認が、共用設定に残った SQLite のファイルパスでなくデータベース名を表示することを検証する</summary>
+    [Fact(DisplayName = "サーバー系方言: 実行確認は残存する FilePath でなく Database を表示する")]
+    public async Task Execute_ServerDialect_ShowsDatabase_NotStaleFilePath()
+    {
+        // 逆方向の切替（SQLite → SQL Server）でも表示が方言のフィールドに追従することを固定する
+        var settings = new DbConnectionSettings
+        {
+            Database = "Shop",
+            FilePath = @"C:\data\stale.db",
+        };
+        var dialogs = new StubDialogService { ConfirmResult = false };
+        var vm = new SchemaSyncDialogViewModel(Provider, settings, [], [], dialogs);
+        vm.ScriptPreview = "ALTER TABLE [X] ADD [Y] int NULL;";
+
+        await vm.ExecuteCommand.ExecuteAsync(null);
+
+        var message = dialogs.WarningConfirmMessages.Should().ContainSingle().Subject;
+        message.Should().Be(string.Format(DbStrings.SchemaSync_ExecuteConfirm, "Shop"));
     }
 
     /// <summary>実行成功後の再計算で差分が 0 になったとき、ダイアログが自動で閉じることを検証する</summary>
