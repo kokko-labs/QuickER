@@ -182,21 +182,12 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
                 );
             }
 
+            // 複合外部キーの作り直しを招く変更（主キー変更・FK 関与列の定義変更）の照合範囲を一度だけ組み立てる
+            var compositeScope = CompositeForeignKeyGuard.BuildSyncScope(BuildPlanContext());
+
             foreach (var item in diff.Items)
             {
-                // 複合外部キーに関与する FK 差分は、実行すると単列 FK へ置き換わって静かに壊れるため、
-                // 選択不可の案内へ格下げして実行対象から構造的に外す
-                var entry = CompositeForeignKeyGuard.IsAffectedForeignKeyDiff(
-                    item,
-                    _liveCompositeForeignKeys
-                )
-                    ? item.ToAdvisory(
-                        string.Format(
-                            Strings.SchemaSync_CompositeForeignKeyDiffBlocked,
-                            item.Description
-                        )
-                    )
-                    : item;
+                var entry = ResolveDiffEntry(item, compositeScope);
 
                 entry.PropertyChanged += (_, e) =>
                 {
@@ -225,6 +216,53 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
         }
     }
 
+    /// <summary>
+    /// 差分項目を一覧へ載せる形へ解決する（同期すると壊れると分かっているものは選択不可の案内へ格下げする）。
+    /// </summary>
+    /// <remarks>
+    /// 格下げは「そもそも選ばせない」ための UX 側の措置で、計画側（<see cref="SyncPlanner"/>）も同じ判定で
+    /// 除外する二重防御になっている（直接 API を使う経路・ここでの格下げ漏れに備える）。
+    /// </remarks>
+    private SchemaDiffItem ResolveDiffEntry(
+        SchemaDiffItem item,
+        CompositeForeignKeySyncScope compositeScope
+    )
+    {
+        // 複合外部キーに関与する FK 差分は、実行すると単列 FK へ置き換わって静かに壊れる
+        if (CompositeForeignKeyGuard.IsAffectedForeignKeyDiff(item, _liveCompositeForeignKeys))
+        {
+            return item.ToAdvisory(
+                string.Format(Strings.SchemaSync_CompositeForeignKeyDiffBlocked, item.Description)
+            );
+        }
+
+        // 主キー変更・FK 関与列の変更は、依存 FK の自動 drop → 再 add を通じて同じ壊れ方を招く
+        if (
+            CompositeForeignKeyGuard.IsBlockedChange(
+                item,
+                _provider.SyncCapabilities,
+                compositeScope
+            )
+        )
+        {
+            return item.ToAdvisory(
+                string.Format(Strings.SchemaSync_CompositeForeignKeyChangeBlocked, item.Description)
+            );
+        }
+
+        return item;
+    }
+
+    /// <summary>直近の取込結果から、計画組み立て用の live スキーマ入力を作る</summary>
+    private SyncPlanContext BuildPlanContext() =>
+        new()
+        {
+            LiveEntities = _liveEntities,
+            LiveRelationships = _liveRelationships,
+            AuxiliaryObjects = _liveAuxiliaryObjects,
+            CompositeForeignKeyWarnings = _liveCompositeForeignKeys,
+        };
+
     /// <summary>選択中の差分から実行計画を組み立て、スクリプトプレビューを再生成する（選択変更時に呼ぶ）</summary>
     /// <remarks>
     /// rebuild 方言（SQLite）は再構築の合成に DB 現状（live）が必須で、Refresh 前に呼ばれると
@@ -234,14 +272,11 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
     /// </remarks>
     public void UpdatePreview()
     {
-        var context = new SyncPlanContext
-        {
-            LiveEntities = _liveEntities,
-            LiveRelationships = _liveRelationships,
-            AuxiliaryObjects = _liveAuxiliaryObjects,
-            CompositeForeignKeyWarnings = _liveCompositeForeignKeys,
-        };
-        _currentPlan = _planner.BuildPlan(DiffItems, _provider.SyncCapabilities, context);
+        _currentPlan = _planner.BuildPlan(
+            DiffItems,
+            _provider.SyncCapabilities,
+            BuildPlanContext()
+        );
         ScriptPreview = _provider.SyncScriptBuilder.Build(_currentPlan);
     }
 
@@ -420,6 +455,28 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
             sb.Append(Environment.NewLine)
                 .Append(Environment.NewLine)
                 .Append(string.Format(Strings.SchemaSync_ExecuteConfirmRebuildBlocked, tableList));
+        }
+
+        // 複合外部キーの作り直しを招くため計画から落とした変更（主キー変更・列定義変更）
+        var blockedChanges = _currentPlan
+            .Warnings.Where(w => w.Kind == SyncPlanWarningKind.CompositeForeignKeyBlocksChange)
+            .Select(w => string.IsNullOrEmpty(w.Detail) ? w.TableName : $"{w.TableName}.{w.Detail}")
+            .ToList();
+
+        if (blockedChanges.Count > 0)
+        {
+            var changeList = string.Join(
+                Environment.NewLine,
+                blockedChanges.Select(t => "  • " + t)
+            );
+            sb.Append(Environment.NewLine)
+                .Append(Environment.NewLine)
+                .Append(
+                    string.Format(
+                        Strings.SchemaSync_ExecuteConfirmCompositeForeignKeyBlocked,
+                        changeList
+                    )
+                );
         }
 
         return sb.ToString();

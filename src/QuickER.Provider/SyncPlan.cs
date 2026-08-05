@@ -78,6 +78,17 @@ public enum SyncPlanWarningKind
     /// 再構築すると複合外部キーが単列外部キーへ作り替えられる＝成功して静かに壊れる。他テーブルの同期は続行する。
     /// </remarks>
     RebuildBlockedByCompositeForeignKey,
+
+    /// <summary>
+    /// 複合外部キーの作り直しを招くため、その変更（主キー変更・列定義変更）を計画から除外した。
+    /// </summary>
+    /// <remarks>
+    /// 逐次 DDL 方言では、主キー変更や外部キー関与列の定義変更に巻き込まれる外部キーを自動で
+    /// DROP → 再 ADD する（<see cref="SyncPlanner"/>）。その対象が複合外部キーだと、列対応を失った定義で
+    /// 作り直されて単列外部キーへ置き換わる（MySQL は成功して静かに壊れ、Oracle は部分適用で外部キーが消える）。
+    /// テーブル再構築のブロックと同じ理由のため、該当する変更だけを計画から落とす（他の変更は続行する）。
+    /// </remarks>
+    CompositeForeignKeyBlocksChange,
 }
 
 /// <summary>
@@ -87,9 +98,13 @@ public enum SyncPlanWarningKind
 /// <param name="TableName">
 /// 対象テーブル。<see cref="SyncPlanWarningKind.ForeignKeyRebuildMayLoseCandidateKey"/> では
 /// 外部キーを保有する子テーブル、<see cref="SyncPlanWarningKind.RebuildBlockedByCompositeForeignKey"/> では
-/// 再構築を止めたテーブル。
+/// 再構築を止めたテーブル、<see cref="SyncPlanWarningKind.CompositeForeignKeyBlocksChange"/> では
+/// 計画から落とした変更のテーブル。
 /// </param>
-/// <param name="Detail">補足（外部キー制約名など。無ければ空文字）</param>
+/// <param name="Detail">
+/// 補足（外部キー制約名など。無ければ空文字）。
+/// <see cref="SyncPlanWarningKind.CompositeForeignKeyBlocksChange"/> では対象列名（主キー変更なら空文字）。
+/// </param>
 public sealed record SyncPlanWarning(
     SyncPlanWarningKind Kind,
     string TableName,

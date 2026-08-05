@@ -271,6 +271,14 @@ Do you want to run this against {0}?</value>
   <data name="SchemaSync_CompositeForeignKeyDiffBlocked" xml:space="preserve">
     <value>{0} (not selectable: this foreign key is part of a composite foreign key)</value>
   </data>
+  <data name="SchemaSync_CompositeForeignKeyChangeBlocked" xml:space="preserve">
+    <value>{0} (not selectable: applying it would drop and recreate a composite foreign key, silently replacing it with a single-column one)</value>
+  </data>
+  <data name="SchemaSync_ExecuteConfirmCompositeForeignKeyBlocked" xml:space="preserve">
+    <value>The following changes are NOT synchronized: they would drop and recreate a composite foreign key whose column mapping was lost on import, silently replacing it with a single-column foreign key.
+
+{0}</value>
+  </data>
   <data name="SchemaSync_Executing" xml:space="preserve">
     <value>Executing...</value>
   </data>
@@ -295,6 +303,9 @@ Do you want to run this against {0}?</value>
   <data name="Db_ImportBrokenQueriesWarning" xml:space="preserve">
     <value>The following named queries reference tables or columns that no longer exist and will be deleted:
 {0}</value>
+  </data>
+  <data name="Db_ImportDescriptionOverwriteWarning" xml:space="preserve">
+    <value>The descriptions of {0} tables/columns will be overwritten by the imported content.</value>
   </data>
   <data name="Db_ImportFailed" xml:space="preserve">
     <value>Failed to import: {0}</value>

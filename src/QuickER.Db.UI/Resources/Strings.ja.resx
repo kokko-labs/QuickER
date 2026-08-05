@@ -271,6 +271,14 @@
   <data name="SchemaSync_CompositeForeignKeyDiffBlocked" xml:space="preserve">
     <value>{0}（選択不可: 複合外部キーの一部です）</value>
   </data>
+  <data name="SchemaSync_CompositeForeignKeyChangeBlocked" xml:space="preserve">
+    <value>{0}（選択不可: 複合外部キーの作り直しを伴い、単列の外部キーへ静かに置き換わってしまいます）</value>
+  </data>
+  <data name="SchemaSync_ExecuteConfirmCompositeForeignKeyBlocked" xml:space="preserve">
+    <value>次の項目は複合外部キーが関わるため同期されません: 取込で列対応が失われた複合外部キーの作り直しを伴い、単列の外部キーへ静かに置き換わってしまいます。
+
+{0}</value>
+  </data>
   <data name="SchemaSync_Executing" xml:space="preserve">
     <value>実行中...</value>
   </data>
@@ -295,6 +303,9 @@
   <data name="Db_ImportBrokenQueriesWarning" xml:space="preserve">
     <value>次の名前付きクエリは参照先のテーブル・列が失われるため削除されます:
 {0}</value>
+  </data>
+  <data name="Db_ImportDescriptionOverwriteWarning" xml:space="preserve">
+    <value>テーブル・列の説明 {0} 件が取込内容で上書きされます。</value>
   </data>
   <data name="Db_ImportFailed" xml:space="preserve">
     <value>取り込みに失敗しました: {0}</value>

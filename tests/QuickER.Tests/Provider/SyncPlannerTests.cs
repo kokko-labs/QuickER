@@ -1181,12 +1181,21 @@ public class SyncPlannerTests
         plan.Sections.Should().Contain(s => s.Kind == SchemaDiffKind.AddForeignKey);
     }
 
-    /// <summary>被参照列が新しい主キーに残る場合は警告が積まれないことを検証する</summary>
-    [Fact(DisplayName = "主キー変更: 被参照列が新主キーに残るなら警告は積まれない")]
-    public void AlterPrimaryKey_ReferencedColumnStaysInPrimaryKey_AddsNoWarning()
+    /// <summary>
+    /// 被参照列が新しい主キーに残っていても、他の列と複合になるなら候補キーの根拠を失うため
+    /// 警告が積まれることを検証する（(id) → (id, code) の主キー拡張）。
+    /// </summary>
+    /// <remarks>
+    /// 注入する FK は常に単列参照のため、複合主キーは参照先の一意性を保証しない
+    /// （4 方言中 3 方言で再 ADD が実行時に失敗する）。
+    /// </remarks>
+    [Fact(
+        DisplayName = "主キー変更: 被参照列が複合主キーの一部になると候補キー喪失の警告が積まれる"
+    )]
+    public void AlterPrimaryKey_ReferencedColumnJoinsCompositePrimaryKey_AddsWarning()
     {
         var (_, _, _, context) = LiveFkScenario();
-        // id を主キーに残したまま code を加える（複合主キー化）＝ customer.id は候補キーのまま
+        // id を主キーに残したまま code を加える（複合主キー化）＝ customer.id 単独の一意性は保証されなくなる
         var targetCustomer = new Entity
         {
             TableName = "customer",
@@ -1209,8 +1218,262 @@ public class SyncPlannerTests
             context
         );
 
+        var warning = plan.Warnings.Should().ContainSingle().Which;
+        warning.Kind.Should().Be(SyncPlanWarningKind.ForeignKeyRebuildMayLoseCandidateKey);
+        warning.TableName.Should().Be("orders");
+        plan.Sections.Should().Contain(s => s.Kind == SchemaDiffKind.AddForeignKey);
+    }
+
+    /// <summary>新しい主キーが被参照列ちょうど 1 列なら警告が積まれないことを検証する</summary>
+    [Fact(DisplayName = "主キー変更: 新主キーが被参照列 1 列ちょうどなら警告は積まれない")]
+    public void AlterPrimaryKey_NewPrimaryKeyIsExactlyReferencedColumn_AddsNoWarning()
+    {
+        // live は複合主キー (id, code)・FK は customer.id を参照する
+        var code = new Column
+        {
+            Name = "code",
+            DataType = "INT",
+            IsPrimaryKey = true,
+            IsNullable = false,
+        };
+        var customer = new Entity { TableName = "customer", Columns = { PkId(), code } };
+        var orders = new Entity
+        {
+            TableName = "orders",
+            Columns = { PkId(), Col("customer_id", "INT") },
+        };
+        var rel = new Relationship
+        {
+            SourceEntityId = customer.Id,
+            TargetEntityId = orders.Id,
+            SourceColumnId = customer.Columns[0].Id,
+            TargetColumnId = orders.Columns[1].Id,
+            ConstraintName = "FK_orders_customer",
+        };
+        var context = new SyncPlanContext
+        {
+            LiveEntities = [customer, orders],
+            LiveRelationships = [rel],
+        };
+
+        // 主キーを (id) へ縮小する＝被参照列 id が単独で候補キーになる
+        var targetCustomer = new Entity
+        {
+            TableName = "customer",
+            Columns = { PkId(), Col("code", "INT") },
+        };
+
+        var plan = new SyncPlanner().BuildPlan(
+            [AlterPk("customer", targetCustomer)],
+            new SyncDialectCapabilities(),
+            context
+        );
+
         plan.Warnings.Should().BeEmpty();
         plan.Sections.Should().Contain(s => s.Kind == SchemaDiffKind.AddForeignKey);
+    }
+
+    // ---------------- 複合外部キーの作り直しを招く変更の除外（逐次 DDL 方言） ----------------
+
+    /// <summary>
+    /// 複合外部キー（取込で列対応が失われた FK）と、同じ子テーブルが持つ無関係な単列 FK を含む live を組み立てる。
+    /// </summary>
+    /// <remarks>
+    /// 複合外部キーの子側は列対応を失うため <c>TargetColumnId</c> が null になり、列の解決は命名規約の
+    /// フォールバックへ落ちる（＝列での照合が当てにならない）。照合は子テーブル名＋制約名で行う。
+    /// </remarks>
+    private static SyncPlanContext CompositeFkScenario()
+    {
+        var parent = new Entity { TableName = "parent", Columns = { PkId(), Col("code", "INT") } };
+        var vendor = new Entity { TableName = "vendor", Columns = { PkId() } };
+        var child = new Entity
+        {
+            TableName = "child",
+            Columns =
+            {
+                PkId(),
+                Col("parent_id", "INT"),
+                Col("order_no", "INT"),
+                Col("vendor_id", "INT"),
+            },
+        };
+        var composite = new Relationship
+        {
+            SourceEntityId = parent.Id,
+            TargetEntityId = child.Id,
+            SourceColumnId = parent.Columns[0].Id,
+            // 複合外部キーは意味モデルが列対応を表現できず、子列の指定を失う
+            TargetColumnId = null,
+            ConstraintName = "FK_child_parent",
+        };
+        var simple = new Relationship
+        {
+            SourceEntityId = vendor.Id,
+            TargetEntityId = child.Id,
+            SourceColumnId = vendor.Columns[0].Id,
+            TargetColumnId = child.Columns[3].Id,
+            ConstraintName = "FK_child_vendor",
+        };
+
+        return new SyncPlanContext
+        {
+            LiveEntities = [parent, vendor, child],
+            LiveRelationships = [composite, simple],
+            CompositeForeignKeyWarnings =
+            [
+                new CompositeForeignKeyImportWarning(
+                    "FK_child_parent",
+                    "child",
+                    ["parent_id", "order_no"],
+                    "parent",
+                    ["id", "code"]
+                ),
+            ],
+        };
+    }
+
+    /// <summary>
+    /// 複合外部キーが参照している親テーブルの主キー変更は、計画から除外されて警告が積まれることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 実行すると複合外部キーが単列 FK として作り直される（MySQL は成功して静かに壊れ、Oracle は
+    /// 部分適用で FK が消える）ため、暗黙の DROP → 再 ADD ごと計画へ入れない。
+    /// </remarks>
+    [Fact(DisplayName = "複合外部キー: 参照先テーブルの主キー変更は計画から除外され警告が積まれる")]
+    public void AlterPrimaryKey_OnCompositeForeignKeyParent_IsBlocked()
+    {
+        var context = CompositeFkScenario();
+        var targetParent = new Entity
+        {
+            TableName = "parent",
+            Columns =
+            {
+                Col("id", "INT"),
+                new Column
+                {
+                    Name = "code",
+                    DataType = "INT",
+                    IsPrimaryKey = true,
+                    IsNullable = false,
+                },
+            },
+        };
+
+        var plan = new SyncPlanner().BuildPlan(
+            [AlterPk("parent", targetParent)],
+            new SyncDialectCapabilities(),
+            context
+        );
+
+        // 主キー変更も、それに伴う FK の自動 DROP → 再 ADD も計画に現れない
+        plan.Sections.Should().BeEmpty();
+
+        var warning = plan.Warnings.Should().ContainSingle().Which;
+        warning.Kind.Should().Be(SyncPlanWarningKind.CompositeForeignKeyBlocksChange);
+        warning.TableName.Should().Be("parent");
+        warning.Detail.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// 複合外部キーと無関係な親テーブル（同じ子テーブルが持つ別 FK の参照先）の主キー変更は、
+    /// 従来どおり計画へ入ることを検証する（照合が子テーブル名だけに落ちていないことの担保）。
+    /// </summary>
+    [Fact(
+        DisplayName = "複合外部キー: 無関係な FK の参照先テーブルの主キー変更は従来どおり計画へ入る"
+    )]
+    public void AlterPrimaryKey_OnUnrelatedParent_IsNotBlocked()
+    {
+        var context = CompositeFkScenario();
+        // 主キー構成は変えない（差分項目の有無だけを見る合成ケース）＝候補キー喪失の警告も出ない
+        var targetVendor = new Entity { TableName = "vendor", Columns = { PkId() } };
+
+        var plan = new SyncPlanner().BuildPlan(
+            [AlterPk("vendor", targetVendor)],
+            new SyncDialectCapabilities(),
+            context
+        );
+
+        plan.Sections.Select(s => s.Kind)
+            .Should()
+            .Equal(
+                SchemaDiffKind.DropForeignKey,
+                SchemaDiffKind.AlterPrimaryKey,
+                SchemaDiffKind.AlterPrimaryKey,
+                SchemaDiffKind.AddForeignKey
+            );
+        plan.Warnings.Should().BeEmpty();
+
+        // 自動で外して戻すのは無関係な単列 FK だけ（複合外部キーは触らない）
+        plan.Sections.Single(s => s.Kind == SchemaDiffKind.AddForeignKey)
+            .Items.Should()
+            .ContainSingle()
+            .Which.Relationship!.ConstraintName.Should()
+            .Be("FK_child_vendor");
+    }
+
+    /// <summary>
+    /// FK 参加列の型変更に FK の外し直しが必要な方言では、複合外部キーが関与する列の定義変更が
+    /// 計画から除外されることを検証する（同じテーブルの無関係な列は従来どおり）。
+    /// </summary>
+    [Fact(
+        DisplayName = "複合外部キー: capability が真の方言では関与列の定義変更が計画から除外される"
+    )]
+    public void AlterColumn_OnCompositeForeignKeyColumn_IsBlockedWhenCapabilityIsTrue()
+    {
+        var context = CompositeFkScenario();
+        var alterFkColumn = new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.AlterColumn,
+            TableName = "child",
+            ColumnName = "parent_id",
+            Column = Col("parent_id", "BIGINT"),
+            IsSelected = true,
+        };
+        var alterOtherColumn = new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.AlterColumn,
+            TableName = "child",
+            ColumnName = "order_no",
+            Column = Col("order_no", "BIGINT"),
+            IsSelected = true,
+        };
+
+        var plan = new SyncPlanner().BuildPlan(
+            [alterFkColumn, alterOtherColumn],
+            FkRebuildCaps,
+            context
+        );
+
+        // 複合外部キーが関与する列だけが落ち、無関係な列の変更は残る
+        plan.Sections.Should().ContainSingle().Which.Items.Should().Equal(alterOtherColumn);
+
+        var warning = plan.Warnings.Should().ContainSingle().Which;
+        warning.Kind.Should().Be(SyncPlanWarningKind.CompositeForeignKeyBlocksChange);
+        warning.TableName.Should().Be("child");
+        warning.Detail.Should().Be("parent_id");
+    }
+
+    /// <summary>
+    /// FK の外し直しが不要な方言では、複合外部キーが関与する列の定義変更も従来どおり計画へ入ることを検証する
+    /// （そもそも FK を作り直さないため、静かに壊れる経路が無い）。
+    /// </summary>
+    [Fact(DisplayName = "複合外部キー: capability が偽の方言では関与列の定義変更を止めない")]
+    public void AlterColumn_OnCompositeForeignKeyColumn_IsNotBlockedWhenCapabilityIsFalse()
+    {
+        var context = CompositeFkScenario();
+        var alter = new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.AlterColumn,
+            TableName = "child",
+            ColumnName = "parent_id",
+            Column = Col("parent_id", "BIGINT"),
+            IsSelected = true,
+        };
+
+        var plan = new SyncPlanner().BuildPlan([alter], new SyncDialectCapabilities(), context);
+
+        plan.Sections.Should().ContainSingle().Which.Items.Should().Equal(alter);
+        plan.Warnings.Should().BeEmpty();
     }
 
     /// <summary>

@@ -123,17 +123,26 @@ public sealed class SyncPlanner
         if (!isRebuildDialect)
         {
             // 逐次 DDL 方言: 全差分をそのままセクション化する。
+            // まず、複合外部キーの作り直しを招く変更（主キー変更・FK 関与列の定義変更）を計画から落とす。
+            // 同期ダイアログでも選択不可へ格下げしているが、直接 API を使う経路・格下げ漏れに備えた最終防御
+            var planned = BlockCompositeForeignKeyChanges(
+                selected,
+                capabilities,
+                context,
+                warnings
+            );
+
             // 列順変更（ReorderColumns）は SectionOrder に無いためセクションからは自然に外れ、
             // Native 方言（MySQL）のときだけネイティブ MODIFY ... AFTER の並べ替え計画へ変換する
-            // （None 方言では Compute が ReorderColumns を生成しないため、渡されても計画から消える）。
+            // （None 方言では Compute が ReorderColumns を生成しないため、渡されても計画から消える）
             var reorders =
                 capabilities.ColumnReorder == ColumnReorderMode.Native
-                    ? BuildReorderPlans(selected, context)
+                    ? BuildReorderPlans(planned, context)
                     : [];
 
             // 主キー変更・（方言によっては）列定義変更に巻き込まれる live FK を、暗黙の DROP → 再 ADD として注入する
             var sectionItems = InjectImplicitForeignKeyRebuilds(
-                selected,
+                planned,
                 capabilities,
                 context,
                 warnings
@@ -198,6 +207,65 @@ public sealed class SyncPlanner
     /// <summary>この主キー変更項目が新しい主キー列を持つか（＝付与フェーズを要するか）</summary>
     private static bool HasNewPrimaryKeyColumns(SchemaDiffItem item) =>
         item.Entity?.Columns.Any(c => c.IsPrimaryKey) == true;
+
+    // ---------------- 複合外部キーの作り直しを招く変更の除外（逐次 DDL 方言） ----------------
+
+    /// <summary>
+    /// 複合外部キーの自動 DROP → 再 ADD を招く変更を計画から取り除き、除外した項目ごとに警告を積む。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <see cref="InjectImplicitForeignKeyRebuilds"/> は live のリレーションを直接列挙するため、UI で外部キー差分を
+    /// 選択不可へ格下げしても素通りする。その対象が複合外部キー（取込で列対応を失った外部キー）だと、
+    /// 単列の定義で作り直されて<b>成功したまま制約だけが静かに壊れる</b>（MySQL）か、部分適用で外部キーが消える
+    /// （Oracle）。テーブル再構築のブロック（<see cref="BlockCompositeForeignKeyRebuilds"/>）と同じ理由のため、
+    /// 原因となる変更そのものを計画から落とす。
+    /// </para>
+    /// <para>
+    /// 落とすのは該当する項目だけで、他の変更は従来どおり同期する。除外した項目は計画に入らない＝プレビューにも
+    /// 現れないため、レンダラー側のスキップコメントは出さず、実行確認の警告（<paramref name="warnings"/>）で伝える。
+    /// </para>
+    /// </remarks>
+    private static List<SchemaDiffItem> BlockCompositeForeignKeyChanges(
+        List<SchemaDiffItem> selected,
+        SyncDialectCapabilities capabilities,
+        SyncPlanContext? context,
+        List<SyncPlanWarning> warnings
+    )
+    {
+        if (context is null || context.CompositeForeignKeyWarnings.Count == 0)
+        {
+            return selected;
+        }
+
+        var scope = CompositeForeignKeyGuard.BuildSyncScope(context);
+
+        if (scope.IsEmpty)
+        {
+            return selected;
+        }
+
+        var kept = new List<SchemaDiffItem>(selected.Count);
+
+        foreach (var item in selected)
+        {
+            if (!CompositeForeignKeyGuard.IsBlockedChange(item, capabilities, scope))
+            {
+                kept.Add(item);
+                continue;
+            }
+
+            warnings.Add(
+                new SyncPlanWarning(
+                    SyncPlanWarningKind.CompositeForeignKeyBlocksChange,
+                    item.TableName.Trim(),
+                    item.ColumnName?.Trim() ?? string.Empty
+                )
+            );
+        }
+
+        return kept;
+    }
 
     // ---------------- 依存 FK の自動 DROP → 再 ADD（逐次 DDL 方言） ----------------
 
@@ -326,9 +394,15 @@ public sealed class SyncPlanner
             var constraintName = ResolveForeignKeyName(fk.Relationship, childTable, parentTable);
             var description = string.Format(Strings.Diff_AutoForeignKeyRebuild, constraintName);
 
-            // 参照先列が新しい主キーから外れる＝候補キーでなくなる恐れがあり、再 ADD が実行時に失敗しうる
-            // （一意制約は取り込んでいないため断定はできない＝警告に留める）
-            if (parentPkChanged && newPkColumns?.Contains(fk.ParentColumn.Name) != true)
+            // 参照先列が候補キーであり続けるのは「新しい主キーが被参照列 1 列ちょうど」のときだけ。
+            // 注入する FK は常に単列参照のため、被参照列が新主キーに含まれていても他の列と複合になっていれば
+            // 主キーは候補キーの根拠にならない（(id) → (id, code) の拡張は 4 方言中 3 方言で再 ADD が失敗する）。
+            // MySQL のプレフィックス成立や UNIQUE 制約で実際には通る構成もあるが、一意制約を取り込んでいない以上
+            // 断定できず、警告は実行を止めない＝安全側（誤警告を許容する側）へ倒す
+            var staysCandidateKey =
+                newPkColumns is { Count: 1 } && newPkColumns.Contains(fk.ParentColumn.Name);
+
+            if (parentPkChanged && !staysCandidateKey)
             {
                 warnings.Add(
                     new SyncPlanWarning(
@@ -401,8 +475,13 @@ public sealed class SyncPlanner
             : relationship!.ConstraintName!;
 
     /// <summary>live のリレーションから、親子エンティティ・親列・子列名まで解決できた FK を列挙する</summary>
-    /// <remarks>多対多や、親子・参照列が解決できないリレーションは FK として扱えないため除外する。</remarks>
-    private static IEnumerable<(
+    /// <remarks>
+    /// 多対多や、親子・参照列が解決できないリレーションは FK として扱えないため除外する。
+    /// <see cref="CompositeForeignKeyGuard.BuildSyncScope"/> も同じ解決規則で複合外部キーを見つける必要があるため
+    /// （「作り直しの対象になる条件」と「作り直しを止める条件」がずれると片方だけがすり抜ける）、
+    /// 同一アセンブリ内へ公開している。
+    /// </remarks>
+    internal static IEnumerable<(
         Relationship Relationship,
         Entity Parent,
         Entity Child,

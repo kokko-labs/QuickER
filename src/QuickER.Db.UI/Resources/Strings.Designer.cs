@@ -468,6 +468,18 @@ namespace QuickER.Db.UI.Resources {
             }
         }
 
+        public static string SchemaSync_CompositeForeignKeyChangeBlocked {
+            get {
+                return ResourceManager.GetString("SchemaSync_CompositeForeignKeyChangeBlocked", resourceCulture);
+            }
+        }
+
+        public static string SchemaSync_ExecuteConfirmCompositeForeignKeyBlocked {
+            get {
+                return ResourceManager.GetString("SchemaSync_ExecuteConfirmCompositeForeignKeyBlocked", resourceCulture);
+            }
+        }
+
         public static string SchemaSync_Executing {
             get {
                 return ResourceManager.GetString("SchemaSync_Executing", resourceCulture);
@@ -513,6 +525,12 @@ namespace QuickER.Db.UI.Resources {
         public static string Db_ImportBrokenQueriesWarning {
             get {
                 return ResourceManager.GetString("Db_ImportBrokenQueriesWarning", resourceCulture);
+            }
+        }
+
+        public static string Db_ImportDescriptionOverwriteWarning {
+            get {
+                return ResourceManager.GetString("Db_ImportDescriptionOverwriteWarning", resourceCulture);
             }
         }
 
