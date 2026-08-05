@@ -42,12 +42,6 @@ public class PropertyChangeCommand : IUndoableCommand
         _afterApply = afterApply;
     }
 
-    /// <summary>変更対象オブジェクト</summary>
-    public object Target => _target;
-
-    /// <summary>変更対象プロパティ名</summary>
-    public string PropertyName => _property.Name;
-
     /// <inheritdoc />
     public string Description => string.Format(Strings.Undo_PropertyChange, _property.Name);
 

@@ -52,6 +52,7 @@ The "DB Sync" button on the toolbar opens the "DB Schema Sync (Apply Diff)" dial
 - Adding and dropping tables
 - Adding, altering (type, nullability), and dropping columns
 - Adding and dropping foreign keys
+- Changing the primary key (adding or removing it, or changing its column set)
 - Setting, updating, and removing table and column descriptions (SQLite is out of scope)
 - Changes to the column order (syncable on SQLite / MySQL)
 
@@ -62,11 +63,18 @@ Column order is compared as the relative order of the columns common to both sid
 ### Safety by design
 
 - **Destructive differences (drops and type changes) are unselected by default**, and executing them shows a confirmation stating that destructive changes are included
-- The generated script is ordered by dependency (add tables → add columns → alter columns → drop FKs → drop columns → drop tables → add FKs → descriptions), with a heading comment per section
+- The generated script is ordered by dependency (add tables → add columns → drop FKs → drop old primary keys → alter columns → add new primary keys → drop columns → drop tables → add FKs → descriptions), with a heading comment per section
 - A foreign-key addition whose FK column cannot be resolved is emitted as a skip comment instead of invalid DDL, and the diff list says so as well
+- Foreign keys imported from a composite (multi-column) foreign key cannot be represented accurately in the diagram, so their diff items are shown for information only and are not synced. On SQLite, a table rebuild that would silently recreate such a foreign key as a single-column one is skipped with a warning
 - On SQL Server, PostgreSQL, and SQLite the script runs in a transaction and rolls back on failure. On MySQL / Oracle, DDL is implicitly committed by design, so a warning explains that a mid-script failure can leave changes partially applied
 - A SQLite run that involves rebuilds shows a dedicated confirmation listing the tables to be rebuilt
-- When the initial diff detection finds no differences at all, the dialog reports that and stays open; once a sync has been applied, it re-reads the diff and closes automatically if no differences remain
+- When the initial diff detection finds no differences at all, the dialog reports that and stays open; once a sync has been applied, it re-reads the diff and closes automatically if no differences remain. After a failed run the diff is also re-read automatically, so the list reflects any partially applied changes (relevant on MySQL / Oracle)
+
+### Primary key sync
+
+Changing a table's primary key in the diagram (adding or removing it, or changing the set of key columns) is detected as a single per-table diff item, unselected by default. The old primary-key constraint is located by querying the database catalog at run time, so imported databases with arbitrary constraint names work. The script drops the old key first, applies any selected column alterations, and then adds the new key, so a change that also makes the old key column nullable succeeds in one sync.
+
+Foreign keys that reference the changed primary key are dropped and re-created automatically around the change (on SQL Server, the same applies when altering a column that participates in a foreign key). If a referenced column is no longer part of the new key, the confirmation dialog warns that re-creating those foreign keys may fail: on SQL Server and PostgreSQL such a failure rolls the whole script back, while on MySQL / Oracle it can leave the foreign keys dropped (partially applied).
 
 ### Description sync
 
