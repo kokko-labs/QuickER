@@ -24,7 +24,12 @@ public static class JsonStorageService
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     };
 
-    /// <summary>保存文書をファイルへ保存する（JSON は <c>{ version, schema, layout }</c> 形式）</summary>
+    /// <summary>保存文書をファイルへ単純に書き出す（JSON は <c>{ version, schema, layout }</c> 形式）</summary>
+    /// <remarks>
+    /// 既存ファイルを切り詰めてから書くため、書き込み途中の中断で保存先が破損し得る。
+    /// プロダクションのファイル書き出しはすべて <see cref="SaveAtomic"/> を使うこと
+    /// （本メソッドはテストのフィクスチャ書き出し等、破損しても影響のない用途に残している）。
+    /// </remarks>
     /// <param name="path">保存先のファイルパス</param>
     /// <param name="document">保存対象の文書（意味モデル＋レイアウト）</param>
     public static void Save(string path, DiagramDocument document)
@@ -37,9 +42,8 @@ public static class JsonStorageService
     /// 一時ファイル <c>{path}.tmp</c> へ全量を書き切ってから本体へ差し替える。素の
     /// <see cref="Save"/>（<see cref="File.WriteAllText(string, string?)"/>）は既存ファイルを
     /// 切り詰めてから書くため、途中でプロセスが落ちる・ディスクが満杯になると保存先が破損した JSON になる。
-    /// <b>ユーザーのファイルへ書き戻す経路（GUI の上書き／別名保存・MCP のツール実行）と、
-    /// クラッシュ時の緊急保存はすべてこちらを使う。</b><see cref="Save"/> は失っても影響のない
-    /// 書き出し（スキーマのみ JSON のエクスポート等）専用。
+    /// <b>プロダクションのファイル書き出し（GUI の上書き／別名保存・スキーマのみ JSON のエクスポート・
+    /// MCP のツール実行・CLI のリバース出力・クラッシュ時の緊急保存）はすべてこちらを使う。</b>
     /// </remarks>
     /// <param name="path">保存先のファイルパス</param>
     /// <param name="document">保存対象の文書（意味モデル＋レイアウト）</param>

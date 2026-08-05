@@ -348,9 +348,10 @@ public static class CliApp
             TargetDbms = provider.Name,
         };
 
-        // Layout=null＝スキーマのみ文書（layout キーが JSON へ出力されない）として保存する
+        // Layout=null＝スキーマのみ文書（layout キーが JSON へ出力されない）として保存する。
+        // 既存ファイルへの上書きになり得るため、書き込み途中の中断で壊さないよう原子的に差し替える
         var document = new DiagramDocument { Schema = diagram, Layout = null };
-        JsonStorageService.Save(output.FullName, document);
+        JsonStorageService.SaveAtomic(output.FullName, document);
 
         stdout.WriteLine(string.Format(Strings.Cli_ReverseWritten, output.FullName));
 

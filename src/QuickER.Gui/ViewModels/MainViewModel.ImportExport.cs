@@ -751,8 +751,9 @@ public partial class MainViewModel
 
             case DiagramExportFormat.SchemaJson:
                 // 配置情報（layout）を持たないスキーマのみ文書。Layout = null で保存すると
-                // layout キー自体が出力されず、読込時に自動整列される可逆形式になる
-                JsonStorageService.Save(
+                // layout キー自体が出力されず、読込時に自動整列される可逆形式になる。
+                // 保存ダイアログで既存ファイルを選べるため、原子的に差し替えて上書き破損を防ぐ
+                JsonStorageService.SaveAtomic(
                     path,
                     new DiagramDocument { Schema = ToDiagramModel(), Layout = null }
                 );

@@ -26,6 +26,8 @@ The "DB Import" button on the toolbar opens the "Import from Database" connectio
 - **SQLite** — specify the file path via "Browse" (import works on existing files only)
 - **Test Connection** — runs a real schema fetch and reports the number of tables detected
 
+> **Note:** "Trust the server certificate (TrustServerCertificate)" is checked by default so that local or containerized SQL Server instances with self-signed certificates work out of the box. This setting skips server certificate validation, so when connecting to a production or remote server that has a properly issued certificate, uncheck it to keep man-in-the-middle detection effective. The setting is saved per connection profile.
+
 ### Connection profiles
 
 Connection settings can be saved under a name and recalled later from "Saved Connections". Profiles are stored in `%AppData%\QuickER\connections.json`, and passwords are stored in separate files, **encrypted with Windows DPAPI (CurrentUser scope)** — only when the "Save" checkbox is on, and never in plain text under the shipped configuration. The last-used connection is remembered automatically and restored on the next launch.
