@@ -17,13 +17,55 @@ namespace QuickER.Tests.Gui.ViewModels;
 /// 「現在図と Id が一致するエンティティのレイアウトを引き継ぎ自動整列しない・新規のみ幅自動調整」
 /// という置換規則と、名前付きクエリの透過を担う。ここではその VM 挙動を実オブジェクトで検証する。
 /// </remarks>
-public class MainViewModelMergeImportTests
+public class MainViewModelMergeImportTests : IDisposable
 {
+    /// <summary>テスト専用の一時作業フォルダ（永続化の隔離先。後始末で削除する）</summary>
+    private readonly string _folder = Path.Combine(
+        Path.GetTempPath(),
+        "quicker-merge-" + Guid.NewGuid().ToString("N")
+    );
+
+    public MainViewModelMergeImportTests()
+    {
+        Directory.CreateDirectory(_folder);
+    }
+
+    public void Dispose()
+    {
+        try
+        {
+            if (Directory.Exists(_folder))
+            {
+                Directory.Delete(_folder, recursive: true);
+            }
+        }
+        catch
+        {
+            // 後始末の失敗はテスト結果に影響させない
+        }
+    }
+
+    /// <summary>
+    /// 実 %APPDATA% を汚さないよう、永続化先を一時フォルダへ隔離した VM を生成する
+    /// （<see cref="MainViewModel.ReplaceQueries"/> が AutoSave を呼ぶため隔離が必須）。
+    /// </summary>
+    private MainViewModel CreateViewModel(IFileDialogService? files = null)
+    {
+        var vm = files is null
+            ? new MainViewModel(new StubDialogService())
+            : new MainViewModel(new StubDialogService(), files: files);
+        vm.UsePersistenceForTests(
+            new GuiAppSettingsStore(_folder),
+            Path.Combine(_folder, "last_diagram.json")
+        );
+        return vm;
+    }
+
     /// <summary>一致エンティティのレイアウト・クエリが維持され、新規は既存と重ならない空き領域へ追記配置される</summary>
     [Fact(DisplayName = "マージ置換で一致分のレイアウト・クエリが維持され新規は重ならず追記配置")]
     public void ReplaceDiagramFromModule_WithMatch_PreservesLayoutAndQueries()
     {
-        var vm = new MainViewModel(new StubDialogService());
+        var vm = CreateViewModel();
         vm.AddEntityCommand.Execute(null);
 
         var existing = vm.Entities[0];
@@ -99,7 +141,7 @@ public class MainViewModelMergeImportTests
     [Fact(DisplayName = "一致 0 件の置換は従来どおり全体自動整列される")]
     public void ReplaceDiagramFromModule_NoMatch_AutoLayouts()
     {
-        var vm = new MainViewModel(new StubDialogService());
+        var vm = CreateViewModel();
         vm.AddEntityCommand.Execute(null);
 
         // すべて新規 Id のエンティティ（現在図と交差なし）＋親子リレーションでツリー整列を誘発する
@@ -161,7 +203,7 @@ public class MainViewModelMergeImportTests
                 SaveResult = new FileDialogResult(path, 8),
                 OpenResult = new FileDialogResult(path, 3),
             };
-            var vm = new MainViewModel(new StubDialogService(), files: files);
+            var vm = CreateViewModel(files);
             vm.AddEntityCommand.Execute(null);
 
             var entity = vm.Entities[0];

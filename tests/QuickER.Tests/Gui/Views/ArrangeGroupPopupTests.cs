@@ -1,8 +1,10 @@
+using System.IO;
 using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using AwesomeAssertions;
+using QuickER.Services;
 using QuickER.Tests.TestSupport;
 using QuickER.ViewModels;
 using Xunit;
@@ -23,6 +25,38 @@ public class ArrangeGroupPopupTests
     {
         Exception? captured = null;
 
+        // MainWindow ctor の Initialize() が実 %APPDATA% の自動保存を復元し、Close の AutoSave が
+        // 書き戻すため、永続化先を一時フォルダへ隔離する（実ユーザーデータの読み書きを断つ）
+        var folder = Path.Combine(
+            Path.GetTempPath(),
+            "quicker-arrange-" + Guid.NewGuid().ToString("N")
+        );
+        Directory.CreateDirectory(folder);
+
+        try
+        {
+            RunArrangeGroupScenario(folder, ref captured);
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(folder, recursive: true);
+            }
+            catch
+            {
+                // 後始末の失敗はテスト結果に影響させない
+            }
+        }
+
+        captured.Should().BeNull();
+    }
+
+    /// <summary>STA スレッド上で実ウィンドウを表示し、整列グループの配線を検証する本体</summary>
+    private static void RunArrangeGroupScenario(string folder, ref Exception? captured)
+    {
+        Exception? threadCaptured = null;
+
         var thread = new Thread(() =>
         {
             try
@@ -30,6 +64,10 @@ public class ArrangeGroupPopupTests
                 WpfApplicationTestSupport.EnsureApplicationResources();
 
                 var vm = new MainViewModel();
+                vm.UsePersistenceForTests(
+                    new GuiAppSettingsStore(folder),
+                    Path.Combine(folder, "last_diagram.json")
+                );
                 var window = new MainWindow(vm)
                 {
                     // 画面外・非アクティブで表示する（開発者のデスクトップを妨げない。lessons.md の先例）
@@ -88,7 +126,7 @@ public class ArrangeGroupPopupTests
             }
             catch (Exception ex)
             {
-                captured = ex;
+                threadCaptured = ex;
             }
         });
 
@@ -97,7 +135,7 @@ public class ArrangeGroupPopupTests
         thread.Start();
         thread.Join();
 
-        captured.Should().BeNull();
+        captured = threadCaptured;
     }
 
     /// <summary>保留中のディスパッチャ処理（レイアウト・束縛反映）を流し切る</summary>

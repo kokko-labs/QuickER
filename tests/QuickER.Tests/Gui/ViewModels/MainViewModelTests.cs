@@ -1,7 +1,9 @@
+using System.IO;
 using AwesomeAssertions;
 using QuickER.Documents;
 using QuickER.Model;
 using QuickER.Resources;
+using QuickER.Services;
 using QuickER.Tests.TestDoubles;
 using QuickER.UndoRedo;
 using QuickER.ViewModels;
@@ -826,18 +828,50 @@ public class MainViewModelTests
         vm.WindowTitle.Should().Be("QuickER");
     }
 
+    /// <summary>実 %APPDATA% を汚さないよう、永続化先を一時フォルダへ隔離した VM を生成する</summary>
+    private static MainViewModel CreateIsolatedPersistenceViewModel(string folder)
+    {
+        var vm = new MainViewModel();
+        vm.UsePersistenceForTests(
+            new GuiAppSettingsStore(folder),
+            Path.Combine(folder, "last_diagram.json")
+        );
+        return vm;
+    }
+
     /// <summary>初期化時に説明表示状態が自動保存から復元されることを検証する</summary>
     [Fact(DisplayName = "説明表示状態は自動保存から復元される")]
     public void Initialize_RestoresShowDescriptionsState()
     {
-        var vm = new MainViewModel();
-        vm.ShowColumnDescriptionsInDiagram = true;
-        vm.AutoSave();
+        // AutoSave / Initialize は永続化ファイルへ触れるため、一時フォルダへ隔離して実 AppData を守る
+        var folder = Path.Combine(
+            Path.GetTempPath(),
+            "quicker-mainvm-" + Guid.NewGuid().ToString("N")
+        );
+        Directory.CreateDirectory(folder);
 
-        var restored = new MainViewModel();
-        restored.Initialize();
+        try
+        {
+            var vm = CreateIsolatedPersistenceViewModel(folder);
+            vm.ShowColumnDescriptionsInDiagram = true;
+            vm.AutoSave();
 
-        restored.ShowColumnDescriptionsInDiagram.Should().BeTrue();
+            var restored = CreateIsolatedPersistenceViewModel(folder);
+            restored.Initialize();
+
+            restored.ShowColumnDescriptionsInDiagram.Should().BeTrue();
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(folder, recursive: true);
+            }
+            catch
+            {
+                // 後始末の失敗はテスト結果に影響させない
+            }
+        }
     }
 
     /// <summary>簡易表示の切替が全エンティティへ伝播することを検証する</summary>
@@ -869,14 +903,35 @@ public class MainViewModelTests
     [Fact(DisplayName = "簡易表示状態は自動保存から復元される")]
     public void Initialize_RestoresCompactViewState()
     {
-        var vm = new MainViewModel();
-        vm.IsCompactViewInDiagram = true;
-        vm.AutoSave();
+        // AutoSave / Initialize は永続化ファイルへ触れるため、一時フォルダへ隔離して実 AppData を守る
+        var folder = Path.Combine(
+            Path.GetTempPath(),
+            "quicker-mainvm-" + Guid.NewGuid().ToString("N")
+        );
+        Directory.CreateDirectory(folder);
 
-        var restored = new MainViewModel();
-        restored.Initialize();
+        try
+        {
+            var vm = CreateIsolatedPersistenceViewModel(folder);
+            vm.IsCompactViewInDiagram = true;
+            vm.AutoSave();
 
-        restored.IsCompactViewInDiagram.Should().BeTrue();
+            var restored = CreateIsolatedPersistenceViewModel(folder);
+            restored.Initialize();
+
+            restored.IsCompactViewInDiagram.Should().BeTrue();
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(folder, recursive: true);
+            }
+            catch
+            {
+                // 後始末の失敗はテスト結果に影響させない
+            }
+        }
     }
 
     /// <summary>カラム並び順の変更が Undo / Redo できることを検証する</summary>

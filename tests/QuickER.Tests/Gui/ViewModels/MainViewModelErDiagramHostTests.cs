@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.IO;
 using AwesomeAssertions;
 using QuickER.Extensibility;
 using QuickER.Model;
@@ -18,13 +19,53 @@ namespace QuickER.Tests.Gui.ViewModels;
 /// 旧 <c>ErDiagramToolHost</c> が持っていた「引数 JSON 不正時のエラー文言」「実行後の
 /// RefreshCanvasSize」の検証内容を、本ホストへ移植している（実 MainViewModel を用いる）。
 /// </remarks>
-public class MainViewModelErDiagramHostTests
+public class MainViewModelErDiagramHostTests : IDisposable
 {
+    /// <summary>テスト専用の一時作業フォルダ（永続化の隔離先。後始末で削除する）</summary>
+    private readonly string _folder = Path.Combine(
+        Path.GetTempPath(),
+        "quicker-erhost-" + Guid.NewGuid().ToString("N")
+    );
+
+    public MainViewModelErDiagramHostTests()
+    {
+        Directory.CreateDirectory(_folder);
+    }
+
+    public void Dispose()
+    {
+        try
+        {
+            if (Directory.Exists(_folder))
+            {
+                Directory.Delete(_folder, recursive: true);
+            }
+        }
+        catch
+        {
+            // 後始末の失敗はテスト結果に影響させない
+        }
+    }
+
+    /// <summary>
+    /// 実 %APPDATA% を汚さないよう、永続化先を一時フォルダへ隔離した VM を生成する
+    /// （<see cref="MainViewModel.ReplaceQueries"/> が AutoSave を呼ぶため隔離が必須）。
+    /// </summary>
+    private MainViewModel CreateViewModel(DatabaseProviderRegistry? providers = null)
+    {
+        var vm = providers is null ? new MainViewModel() : new MainViewModel(providers: providers);
+        vm.UsePersistenceForTests(
+            new GuiAppSettingsStore(_folder),
+            Path.Combine(_folder, "last_diagram.json")
+        );
+        return vm;
+    }
+
     /// <summary>IsEmpty が VM のエンティティ有無を反映することを検証する</summary>
     [Fact(DisplayName = "IsEmpty は VM のエンティティ有無を反映する")]
     public void IsEmpty_ReflectsViewModelEntities()
     {
-        var vm = new MainViewModel();
+        var vm = CreateViewModel();
         var host = new MainViewModelErDiagramHost(vm);
 
         host.IsEmpty.Should().BeTrue();
@@ -38,7 +79,7 @@ public class MainViewModelErDiagramHostTests
     [Fact(DisplayName = "GetDiagram は現在の図を意味モデルで返す")]
     public void GetDiagram_ReturnsCurrentDiagram()
     {
-        var vm = new MainViewModel();
+        var vm = CreateViewModel();
         var host = new MainViewModelErDiagramHost(vm);
         host.ExecuteTool("add_entity", "{\"table_name\":\"Book\"}");
 
@@ -54,7 +95,7 @@ public class MainViewModelErDiagramHostTests
         var registry = new DatabaseProviderRegistry(
             new IDatabaseProvider[] { new SqlServerProvider() }
         );
-        var vm = new MainViewModel(providers: registry);
+        var vm = CreateViewModel(registry);
         var host = new MainViewModelErDiagramHost(vm);
 
         host.Providers.Should().BeSameAs(vm.Providers);
@@ -64,7 +105,7 @@ public class MainViewModelErDiagramHostTests
     [Fact(DisplayName = "AutoArrangeNewDiagram は VM の整列へ委譲する")]
     public void AutoArrangeNewDiagram_DelegatesToViewModel()
     {
-        var vm = new MainViewModel();
+        var vm = CreateViewModel();
         vm.AddEntityCommand.Execute(null);
         vm.AddEntityCommand.Execute(null);
         var host = new MainViewModelErDiagramHost(vm);
@@ -80,7 +121,7 @@ public class MainViewModelErDiagramHostTests
     [Fact(DisplayName = "ExecuteTool は不正 JSON でエラー文言を返す")]
     public void ExecuteTool_InvalidJson_ReturnsError()
     {
-        var vm = new MainViewModel();
+        var vm = CreateViewModel();
         var host = new MainViewModelErDiagramHost(vm);
 
         var (result, success) = host.ExecuteTool("add_entity", "{ not json");
@@ -97,7 +138,7 @@ public class MainViewModelErDiagramHostTests
     [Fact(DisplayName = "ExecuteTool は正常系で ErDiagramDynamicTools を実行する")]
     public void ExecuteTool_ValidTool_ExecutesViaDynamicTools()
     {
-        var vm = new MainViewModel();
+        var vm = CreateViewModel();
         var host = new MainViewModelErDiagramHost(vm);
 
         var (_, success) = host.ExecuteTool("add_entity", "{\"table_name\":\"Book\"}");
@@ -110,7 +151,7 @@ public class MainViewModelErDiagramHostTests
     [Fact(DisplayName = "ReplaceQueries は VM の Queries を差し替える")]
     public void ReplaceQueries_ReplacesViewModelQueries()
     {
-        var vm = new MainViewModel();
+        var vm = CreateViewModel();
         var host = new MainViewModelErDiagramHost(vm);
         var replacement = new List<QueryDefinition> { new() { Name = "FromModule" } };
 
@@ -127,7 +168,7 @@ public class MainViewModelErDiagramHostTests
         var registry = new DatabaseProviderRegistry(
             new IDatabaseProvider[] { new SqlServerProvider(), new PostgreSqlProvider() }
         );
-        var vm = new MainViewModel(providers: registry);
+        var vm = CreateViewModel(registry);
         var host = new MainViewModelErDiagramHost(vm);
 
         var diagram = new ErDiagram
@@ -148,7 +189,7 @@ public class MainViewModelErDiagramHostTests
     [Fact(DisplayName = "TargetDbms は CurrentProvider.Name を返す")]
     public void TargetDbms_ReturnsCurrentProviderName()
     {
-        var vm = new MainViewModel();
+        var vm = CreateViewModel();
         var host = new MainViewModelErDiagramHost(vm);
 
         host.TargetDbms.Should().Be(vm.CurrentProvider.Name);
@@ -162,7 +203,7 @@ public class MainViewModelErDiagramHostTests
         var registry = new DatabaseProviderRegistry(
             new IDatabaseProvider[] { new SqlServerProvider(), new PostgreSqlProvider() }
         );
-        var vm = new MainViewModel(providers: registry);
+        var vm = CreateViewModel(registry);
         var host = new MainViewModelErDiagramHost(vm);
 
         var raised = 0;
@@ -178,7 +219,7 @@ public class MainViewModelErDiagramHostTests
     [Fact(DisplayName = "列リネームで host の ColumnRenamed が中継発火する")]
     public void ColumnRenamed_RelaysFromViewModel()
     {
-        var vm = new MainViewModel();
+        var vm = CreateViewModel();
         vm.AddEntityCommand.Execute(null);
         var owner = vm.Entities[0];
         var column = owner.Columns[0];

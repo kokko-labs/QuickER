@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.IO;
 using System.Threading;
 using System.Windows;
 using System.Windows.Automation.Peers;
@@ -6,6 +7,7 @@ using System.Windows.Controls;
 using QuickER.Converters;
 using QuickER.Documents;
 using QuickER.Model;
+using QuickER.Services;
 using QuickER.Tests.TestSupport;
 using QuickER.ViewModels;
 using Xunit;
@@ -86,67 +88,93 @@ public class AutomationPeerDiagnosticsTests
         string label
     )
     {
-        var vm = new MainViewModel();
-        var window = new MainWindow(vm);
+        // MainWindow ctor の Initialize() が実 %APPDATA% の自動保存を復元し、Close の AutoSave が
+        // 書き戻すため、永続化先を一時フォルダへ隔離する（実ユーザーデータの読み書きを断つ）
+        var folder = Path.Combine(
+            Path.GetTempPath(),
+            "quicker-peers-" + Guid.NewGuid().ToString("N")
+        );
+        Directory.CreateDirectory(folder);
 
-        // MainWindow ctor の Initialize() が自動保存を復元するため、計測条件を上書きする
-        vm.Relationships.Clear();
-        vm.Entities.Clear();
-        vm.ShowColumnDescriptionsInDiagram = true;
-
-        for (var t = 0; t < entityCount; t++)
+        try
         {
-            var model = new Entity
-            {
-                TableName = $"BusinessTable_{t}",
-                Description = $"業務テーブル {t}",
-            };
+            var vm = new MainViewModel();
+            vm.UsePersistenceForTests(
+                new GuiAppSettingsStore(folder),
+                Path.Combine(folder, "last_diagram.json")
+            );
+            var window = new MainWindow(vm);
 
-            for (var c = 0; c < columnCount; c++)
+            // 隔離により Initialize() は何も復元しないが、計測条件を明示するため初期状態を整える
+            vm.Relationships.Clear();
+            vm.Entities.Clear();
+            vm.ShowColumnDescriptionsInDiagram = true;
+
+            for (var t = 0; t < entityCount; t++)
             {
-                model.Columns.Add(
-                    new Column
-                    {
-                        Name = $"ColumnName_{c}",
-                        DataType = "nvarchar(200)",
-                        IsPrimaryKey = c == 0,
-                        IsNullable = c != 0,
-                        Description = $"このカラムの業務上の説明テキスト {c}",
-                    }
-                );
+                var model = new Entity
+                {
+                    TableName = $"BusinessTable_{t}",
+                    Description = $"業務テーブル {t}",
+                };
+
+                for (var c = 0; c < columnCount; c++)
+                {
+                    model.Columns.Add(
+                        new Column
+                        {
+                            Name = $"ColumnName_{c}",
+                            DataType = "nvarchar(200)",
+                            IsPrimaryKey = c == 0,
+                            IsNullable = c != 0,
+                            Description = $"このカラムの業務上の説明テキスト {c}",
+                        }
+                    );
+                }
+
+                var layout = new EntityLayout
+                {
+                    X = 60 + (t % 8) * 320,
+                    Y = 60 + (t / 8) * 1400,
+                    Width = 280,
+                };
+                vm.Entities.Add(new EntityViewModel(model, layout));
             }
 
-            var layout = new EntityLayout
-            {
-                X = 60 + (t % 8) * 320,
-                Y = 60 + (t / 8) * 1400,
-                Width = 280,
-            };
-            vm.Entities.Add(new EntityViewModel(model, layout));
+            window.Show();
+            window.UpdateLayout();
+            DoEvents();
+
+            // UIA クライアントの初回アクセスを模擬: ルートからピアツリーを全走査（構築）する
+            var sw1 = Stopwatch.StartNew();
+            var peer = UIElementAutomationPeer.CreatePeerForElement(window);
+            var count = WalkPeers(peer);
+            sw1.Stop();
+
+            // 2 回目の走査（キャッシュ済み）との差が「初回だけ固まる」現象の説明になる
+            var sw2 = Stopwatch.StartNew();
+            WalkPeers(peer);
+            sw2.Stop();
+
+            window.Close();
+            DoEvents();
+
+            return (
+                $"{label}: 初回={sw1.ElapsedMilliseconds}ms 2回目={sw2.ElapsedMilliseconds}ms ピア数={count}",
+                count
+            );
         }
-
-        window.Show();
-        window.UpdateLayout();
-        DoEvents();
-
-        // UIA クライアントの初回アクセスを模擬: ルートからピアツリーを全走査（構築）する
-        var sw1 = Stopwatch.StartNew();
-        var peer = UIElementAutomationPeer.CreatePeerForElement(window);
-        var count = WalkPeers(peer);
-        sw1.Stop();
-
-        // 2 回目の走査（キャッシュ済み）との差が「初回だけ固まる」現象の説明になる
-        var sw2 = Stopwatch.StartNew();
-        WalkPeers(peer);
-        sw2.Stop();
-
-        window.Close();
-        DoEvents();
-
-        return (
-            $"{label}: 初回={sw1.ElapsedMilliseconds}ms 2回目={sw2.ElapsedMilliseconds}ms ピア数={count}",
-            count
-        );
+        finally
+        {
+            try
+            {
+                Directory.Delete(folder, recursive: true);
+            }
+            catch
+            {
+                // 後始末の失敗はテスト結果に影響させない
+            }
+        }
     }
 
     /// <summary>ピアツリーを再帰走査し、訪問したピア数を返す</summary>
