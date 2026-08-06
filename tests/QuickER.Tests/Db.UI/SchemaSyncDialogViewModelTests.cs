@@ -699,6 +699,54 @@ public class SchemaSyncDialogViewModelTests
     }
 
     /// <summary>
+    /// 複合外部キーの<b>副構成列</b>（子側の 2 列目 order_no）の型変更も選択不可へ格下げされることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 副構成列は意味モデルへ劣化した live リレーションからは復元できない（子側の列指定を失っている）ため、
+    /// 照合範囲を live の外部キー列挙で組み立てると素通りする。SQL Server では素通りした変更が実行時に
+    /// Msg 5074 で失敗し続けるため、取込警告の全構成列を照合範囲にして実行前に格下げする。
+    /// </remarks>
+    [Fact(DisplayName = "複合外部キー: 副構成列（2 列目）の型変更も選択不可へ格下げされる")]
+    public async Task Refresh_CompositeForeignKey_DemotesSecondaryConstituentColumnChange()
+    {
+        var (live, target, targetRelationships) = CompositeForeignKeyChangeScenario();
+        // 第 1 構成列（parent_id）に加えて第 2 構成列（order_no）も型変更する
+        var childTarget = target.Single(e => e.TableName == "child");
+        childTarget.Columns.Single(c => c.Name == "order_no").DataType = "bigint";
+
+        var provider = new FakeProvider(new SqlServerProvider(), new FakeSchemaImporter(live));
+        var vm = new SchemaSyncDialogViewModel(
+            provider,
+            new DbConnectionSettings(),
+            target,
+            targetRelationships
+        );
+
+        await vm.RefreshCommand.ExecuteAsync(null);
+
+        var alterColumns = vm.DiffItems.Where(i => i.Kind == SchemaDiffKind.AlterColumn).ToList();
+        alterColumns.Select(i => i.ColumnName).Should().BeEquivalentTo("parent_id", "order_no");
+        alterColumns.Should().OnlyContain(i => !i.IsSelectable);
+
+        foreach (var alter in alterColumns)
+        {
+            alter
+                .Description.Should()
+                .Match(string.Format(DbStrings.SchemaSync_CompositeForeignKeyChangeBlocked, "*"));
+        }
+
+        // 複合外部キーと無関係な差分（列追加）は従来どおり選択できる
+        vm.DiffItems.Should()
+            .ContainSingle(i => i.Kind == SchemaDiffKind.AddColumn)
+            .Which.IsSelectable.Should()
+            .BeTrue();
+
+        // 全選択でも実行対象にならない
+        vm.SelectAllCommand.Execute(null);
+        alterColumns.Should().OnlyContain(i => !i.IsSelected);
+    }
+
+    /// <summary>
     /// 格下げをすり抜けて選択された場合でも、計画側が変更を落として実行確認へ列挙することを検証する
     /// （UI の格下げと計画側の除外の二重防御）。
     /// </summary>

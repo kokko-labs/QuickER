@@ -475,13 +475,8 @@ public sealed class SyncPlanner
             : relationship!.ConstraintName!;
 
     /// <summary>live のリレーションから、親子エンティティ・親列・子列名まで解決できた FK を列挙する</summary>
-    /// <remarks>
-    /// 多対多や、親子・参照列が解決できないリレーションは FK として扱えないため除外する。
-    /// <see cref="CompositeForeignKeyGuard.BuildSyncScope"/> も同じ解決規則で複合外部キーを見つける必要があるため
-    /// （「作り直しの対象になる条件」と「作り直しを止める条件」がずれると片方だけがすり抜ける）、
-    /// 同一アセンブリ内へ公開している。
-    /// </remarks>
-    internal static IEnumerable<(
+    /// <remarks>多対多や、親子・参照列が解決できないリレーションは FK として扱えないため除外する。</remarks>
+    private static IEnumerable<(
         Relationship Relationship,
         Entity Parent,
         Entity Child,

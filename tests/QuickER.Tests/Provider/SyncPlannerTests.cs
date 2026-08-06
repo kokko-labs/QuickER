@@ -1280,7 +1280,8 @@ public class SyncPlannerTests
     /// </summary>
     /// <remarks>
     /// 複合外部キーの子側は列対応を失うため <c>TargetColumnId</c> が null になり、列の解決は命名規約の
-    /// フォールバックへ落ちる（＝列での照合が当てにならない）。照合は子テーブル名＋制約名で行う。
+    /// フォールバックへ落ちる（＝live のリレーションからは構成列を復元できない）。そのため照合範囲は
+    /// 取込警告（<see cref="CompositeForeignKeyImportWarning"/>）の全構成列から組み立てる。
     /// </remarks>
     private static SyncPlanContext CompositeFkScenario()
     {
@@ -1295,6 +1296,8 @@ public class SyncPlannerTests
                 Col("parent_id", "INT"),
                 Col("order_no", "INT"),
                 Col("vendor_id", "INT"),
+                // 複合外部キーにも他の FK にも関与しない列（巻き添えにならないことの担保に使う）
+                Col("memo", "TEXT"),
             },
         };
         var composite = new Relationship
@@ -1415,6 +1418,11 @@ public class SyncPlannerTests
     /// FK 参加列の型変更に FK の外し直しが必要な方言では、複合外部キーが関与する列の定義変更が
     /// 計画から除外されることを検証する（同じテーブルの無関係な列は従来どおり）。
     /// </summary>
+    /// <remarks>
+    /// 「無関係な列」には複合外部キーの構成列でない <c>memo</c> を使う。以前はここで第 2 構成列の
+    /// <c>order_no</c> を無関係な列として扱っていたが、それは誤り——構成列はどれを変えても外部キー全体が
+    /// 作り直される（<see cref="AlterColumn_OnCompositeForeignKeySecondaryColumns_IsBlocked"/> で固定）。
+    /// </remarks>
     [Fact(
         DisplayName = "複合外部キー: capability が真の方言では関与列の定義変更が計画から除外される"
     )]
@@ -1433,8 +1441,8 @@ public class SyncPlannerTests
         {
             Kind = SchemaDiffKind.AlterColumn,
             TableName = "child",
-            ColumnName = "order_no",
-            Column = Col("order_no", "BIGINT"),
+            ColumnName = "memo",
+            Column = Col("memo", "NVARCHAR(50)"),
             IsSelected = true,
         };
 
@@ -1451,6 +1459,55 @@ public class SyncPlannerTests
         warning.Kind.Should().Be(SyncPlanWarningKind.CompositeForeignKeyBlocksChange);
         warning.TableName.Should().Be("child");
         warning.Detail.Should().Be("parent_id");
+    }
+
+    /// <summary>
+    /// 複合外部キーの<b>副構成列</b>（子側の 2 列目・親側の 2 列目）の定義変更も計画から除外されることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 副構成列は意味モデルへ劣化した live リレーションからは復元できない（子側は <c>TargetColumnId</c> が
+    /// 無く命名規約フォールバックで 1 列だけが選ばれる）ため、live 列挙を照合の土台にすると素通りしていた。
+    /// 素通りすると SQL Server では暗黙の FK 再構築にも載らず、実行のたびに Msg 5074 で失敗し続ける
+    /// （ロールバックされるので壊れはしないが、説明のない恒久的な失敗になる）。照合範囲を取込警告の
+    /// 全構成列から組み立てることで、実行前に「複合外部キーのため同期できない」と伝える。
+    /// </remarks>
+    [Fact(DisplayName = "複合外部キー: 副構成列（子・親の 2 列目）の定義変更も計画から除外される")]
+    public void AlterColumn_OnCompositeForeignKeySecondaryColumns_IsBlocked()
+    {
+        var context = CompositeFkScenario();
+        // 子側の第 2 構成列（FK 列名の命名規約に合わないため live 列挙では解決されない）
+        var alterChildSecondary = new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.AlterColumn,
+            TableName = "child",
+            ColumnName = "order_no",
+            Column = Col("order_no", "BIGINT"),
+            IsSelected = true,
+        };
+        // 親側の第 2 構成列（被参照列としては主キーの 1 列目しか復元されない）
+        var alterParentSecondary = new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.AlterColumn,
+            TableName = "parent",
+            ColumnName = "code",
+            Column = Col("code", "BIGINT"),
+            IsSelected = true,
+        };
+
+        var plan = new SyncPlanner().BuildPlan(
+            [alterChildSecondary, alterParentSecondary],
+            FkRebuildCaps,
+            context
+        );
+
+        // 両方が落ちる＝暗黙の FK 再構築も注入されない
+        plan.Sections.Should().BeEmpty();
+
+        plan.Warnings.Should()
+            .OnlyContain(w => w.Kind == SyncPlanWarningKind.CompositeForeignKeyBlocksChange);
+        plan.Warnings.Select(w => (w.TableName, w.Detail))
+            .Should()
+            .Equal(("child", "order_no"), ("parent", "code"));
     }
 
     /// <summary>

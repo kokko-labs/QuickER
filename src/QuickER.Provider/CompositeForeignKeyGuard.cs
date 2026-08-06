@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using QuickER.Model;
 
 namespace QuickER.Provider;
 
@@ -37,55 +36,25 @@ public static class CompositeForeignKeyGuard
         return warnings.Any(w => NameComparer.Equals(w.ChildTable.Trim(), table));
     }
 
-    /// <summary>この外部キーが、取込で列対応を失った複合外部キーそのものか</summary>
-    /// <param name="childTable">外部キーを保有する側（子）のテーブル名</param>
-    /// <param name="constraintName">外部キー制約名（live リレーションの <see cref="Relationship.ConstraintName"/>）</param>
-    /// <param name="warnings">取込で得た複合外部キーの警告一覧</param>
-    /// <remarks>
-    /// <para>
-    /// 照合は<b>子テーブル名＋制約名</b>で行う。取込警告と live リレーションはどちらも同じ取込結果に由来し、
-    /// 制約名は同一の文字列（SQLite のように制約名を持たない方言では同じ規則で合成した名前）が入るため、
-    /// この 2 つが最も確実に同一の外部キーを指す。列での照合は使わない——複合外部キーは列対応を失っており、
-    /// 子側の列は <see cref="SchemaDiffService.ResolveFkColumnName"/> の <c>IsForeignKey</c> フォールバックで
-    /// 決まる（＝構成列のうちどれが選ばれるか、あるいは無関係な列が選ばれるかを当てにできない）ため。
-    /// </para>
-    /// <para>
-    /// 制約名が空の外部キー（取込由来なら必ず入るため実質は手組みの入力）は、複合外部キーである可能性を
-    /// 否定できないため、その子テーブルに複合外部キーの警告があれば安全側で「複合」とみなす。
-    /// </para>
-    /// </remarks>
-    public static bool IsCompositeForeignKey(
-        string childTable,
-        string? constraintName,
-        IReadOnlyList<CompositeForeignKeyImportWarning> warnings
-    )
-    {
-        var table = (childTable ?? string.Empty).Trim();
-        var name = (constraintName ?? string.Empty).Trim();
-
-        foreach (var warning in warnings)
-        {
-            if (!NameComparer.Equals(warning.ChildTable.Trim(), table))
-            {
-                continue;
-            }
-
-            if (name.Length == 0 || NameComparer.Equals(warning.ConstraintName.Trim(), name))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
     /// <summary>
-    /// live スキーマから、複合外部キーの作り直しを招く変更の照合範囲を組み立てる。
+    /// 取込警告から、複合外部キーの作り直しを招く変更の照合範囲を組み立てる。
     /// </summary>
     /// <remarks>
-    /// 外部キーの列解決は <see cref="SyncPlanner"/> の自動 DROP → 再 ADD と同じ列挙
-    /// （<see cref="SyncPlanner.EnumerateLiveForeignKeys"/>）を使う。「作り直しの対象になる条件」と
-    /// 「作り直しを止める条件」が同じ解決規則で動かないと、片方だけがすり抜けるため。
+    /// <para>
+    /// 照合範囲の正本は<b>取込警告そのもの</b>（<see cref="CompositeForeignKeyImportWarning"/>）で、
+    /// live のリレーション列挙は使わない。警告は取込時の実 FK メタデータから作られ、全構成列
+    /// （<see cref="CompositeForeignKeyImportWarning.ChildColumns"/> /
+    /// <see cref="CompositeForeignKeyImportWarning.ParentColumns"/>）を保持しているのに対し、
+    /// live 列挙は意味モデルへ劣化した後の<b>1 組の列</b>しか復元できない（＝副構成列を取りこぼす）。
+    /// 列の解決に失敗して列挙から落ちる複合外部キーも、警告からなら確実に拾える。
+    /// </para>
+    /// <para>
+    /// 構成列は 1 列でも定義が変われば外部キー全体が外して作り直される（＝列対応を失った定義で
+    /// 単列外部キーへ置き換わる）ため、副構成列も含めて全て登録する。過剰ブロックにはならない——
+    /// この判定が効く SQL Server（<see cref="SyncDialectCapabilities.AlterColumnRequiresForeignKeyRebuild"/>
+    /// が <c>true</c>）では複合外部キーの構成列はどれも外部キーを外さずに変更できず（Msg 5074）、
+    /// 止めなければ実行時に必ず失敗する。説明のない恒久的な失敗を、明示的な警告へ置き換えている。
+    /// </para>
     /// </remarks>
     public static CompositeForeignKeySyncScope BuildSyncScope(SyncPlanContext context)
     {
@@ -97,31 +66,25 @@ public static class CompositeForeignKeyGuard
         var referencedTables = new HashSet<string>(NameComparer);
         var involvedColumns = new HashSet<string>(NameComparer);
 
-        foreach (var fk in SyncPlanner.EnumerateLiveForeignKeys(context))
+        foreach (var warning in context.CompositeForeignKeyWarnings)
         {
-            var childTable = SchemaDiffService.NormalizeTable(fk.Child);
-
-            if (
-                !IsCompositeForeignKey(
-                    childTable,
-                    fk.Relationship.ConstraintName,
-                    context.CompositeForeignKeyWarnings
-                )
-            )
-            {
-                continue;
-            }
-
-            var parentTable = SchemaDiffService.NormalizeTable(fk.Parent);
+            // 警告のテーブル名は差分項目の TableName と同じ正規化形（SchemaDiffService.NormalizeTable の出力＝Trim）
+            var childTable = warning.ChildTable.Trim();
+            var parentTable = warning.ParentTable.Trim();
 
             // 親テーブルの主キーが変わると、この複合外部キーは方言を問わず一旦外して作り直される
             referencedTables.Add(parentTable);
 
-            // 解決済みの子側・親側の列は、その定義変更が外部キーの作り直しを招く（capability 依存）
-            involvedColumns.Add(CompositeForeignKeySyncScope.ColumnKey(childTable, fk.ChildColumn));
-            involvedColumns.Add(
-                CompositeForeignKeySyncScope.ColumnKey(parentTable, fk.ParentColumn.Name)
-            );
+            // 子側・親側の全構成列を登録する（副構成列の変更も同じ作り直しを招くため）
+            foreach (var column in warning.ChildColumns)
+            {
+                involvedColumns.Add(CompositeForeignKeySyncScope.ColumnKey(childTable, column));
+            }
+
+            foreach (var column in warning.ParentColumns)
+            {
+                involvedColumns.Add(CompositeForeignKeySyncScope.ColumnKey(parentTable, column));
+            }
         }
 
         return new CompositeForeignKeySyncScope(referencedTables, involvedColumns);
@@ -136,8 +99,9 @@ public static class CompositeForeignKeyGuard
     /// <remarks>
     /// <para>
     /// 対象は (a) 複合外部キーが参照している親テーブルの主キー変更（全方言で外部キーの作り直しを伴う）と、
-    /// (b) 複合外部キーが関与する列の定義変更（<see cref="SyncDialectCapabilities.AlterColumnRequiresForeignKeyRebuild"/>
-    /// が <c>true</c> の方言のみ）。どちらも列対応を失った定義で外部キーが作り直され、単列外部キーへ置き換わる。
+    /// (b) 複合外部キーの<b>全構成列</b>（子側・親側とも、第 2 列以降も含む）の定義変更
+    /// （<see cref="SyncDialectCapabilities.AlterColumnRequiresForeignKeyRebuild"/> が <c>true</c> の方言のみ）。
+    /// どちらも列対応を失った定義で外部キーが作り直され、単列外部キーへ置き換わる。
     /// </para>
     /// <para>
     /// 判定対象は逐次 DDL 方言のみ。テーブル再構築方言（SQLite）は主キー変更で子テーブルの外部キーを
@@ -256,11 +220,11 @@ public static class CompositeForeignKeyGuard
 }
 
 /// <summary>
-/// 複合外部キーの作り直しを招く変更を見分けるための照合範囲（live スキーマから 1 度だけ組み立てる）。
+/// 複合外部キーの作り直しを招く変更を見分けるための照合範囲（取込警告から 1 度だけ組み立てる）。
 /// </summary>
 /// <remarks>
 /// 計画側（<see cref="SyncPlanner"/> の除外）と表示側（同期ダイアログの選択不可化）が同じ判定を使うため、
-/// live 外部キーの列挙結果をここへ畳んで両者へ渡す（<see cref="CompositeForeignKeyGuard.BuildSyncScope"/>）。
+/// 取込警告を畳んだ結果をここへ持たせて両者へ渡す（<see cref="CompositeForeignKeyGuard.BuildSyncScope"/>）。
 /// </remarks>
 public sealed class CompositeForeignKeySyncScope
 {
