@@ -2315,12 +2315,39 @@
                                   Style="{StaticResource PropertyFieldLabel}"
                                   Text="{x:Static resources:Strings.Property_UniqueConstraintName}"
                                 />
-                                <TextBox
-                                  Grid.Column="1"
-                                  Style="{StaticResource PropertyInputTextBox}"
-                                  Text="{Binding Name, UpdateSourceTrigger=LostFocus}"
-                                  ToolTip="{x:Static resources:Strings.Property_UniqueConstraintNameTooltip}"
-                                />
+                                <Grid Grid.Column="1">
+                                  <TextBox
+                                    x:Name="ConstraintNameBox"
+                                    Style="{StaticResource PropertyInputTextBox}"
+                                    Text="{Binding Name, UpdateSourceTrigger=LostFocus}"
+                                    ToolTip="{x:Static resources:Strings.Property_UniqueConstraintNameTooltip}"
+                                  />
+                                  <!-- 未入力時は DDL 生成時に使われる合成名をプレースホルダーとして重ねる
+                                       （入力中は VM 未反映でも消えるよう、判定は TextBox の Text 自体で行う） -->
+                                  <TextBlock
+                                    Margin="11,0,0,0"
+                                    VerticalAlignment="Center"
+                                    IsHitTestVisible="False"
+                                    Text="{Binding ResolvedName}"
+                                  >
+                                    <TextBlock.Style>
+                                      <Style
+                                        TargetType="TextBlock"
+                                        BasedOn="{StaticResource PropertyHintText}"
+                                      >
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                        <Style.Triggers>
+                                          <DataTrigger
+                                            Binding="{Binding Text, ElementName=ConstraintNameBox}"
+                                            Value=""
+                                          >
+                                            <Setter Property="Visibility" Value="Visible" />
+                                          </DataTrigger>
+                                        </Style.Triggers>
+                                      </Style>
+                                    </TextBlock.Style>
+                                  </TextBlock>
+                                </Grid>
                                 <Button
                                   Grid.Column="2"
                                   Style="{StaticResource PropertyIconButton}"
@@ -2406,19 +2433,6 @@
                                   TextAlignment="Center"
                                 />
                               </Button>
-
-                              <!-- 下側の隙間（制約枠の Padding=10）と揃うよう、上にも同じだけ空ける -->
-                              <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
-                                <TextBlock
-                                  Style="{StaticResource PropertyHintText}"
-                                  Margin="0,0,4,0"
-                                  Text="{x:Static resources:Strings.Property_UniqueConstraintDdlName}"
-                                />
-                                <TextBlock
-                                  Style="{StaticResource PropertyHintText}"
-                                  Text="{Binding ResolvedName}"
-                                />
-                              </StackPanel>
                             </StackPanel>
                           </Border>
                         </DataTemplate>

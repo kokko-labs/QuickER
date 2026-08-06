@@ -372,9 +372,6 @@
   <data name="Property_UniqueConstraintNameTooltip" xml:space="preserve">
     <value>空欄なら DDL 生成時に UQ_{テーブル}_{列…} を合成します</value>
   </data>
-  <data name="Property_UniqueConstraintDdlName" xml:space="preserve">
-    <value>DDL 上の名前:</value>
-  </data>
   <data name="Property_UniqueConstraintsToggleTooltip" xml:space="preserve">
     <value>UNIQUE 制約の一覧を開閉します</value>
   </data>

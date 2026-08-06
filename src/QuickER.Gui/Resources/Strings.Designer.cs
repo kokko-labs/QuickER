@@ -691,12 +691,6 @@ namespace QuickER.Resources {
             }
         }
 
-        public static string Property_UniqueConstraintDdlName {
-            get {
-                return ResourceManager.GetString("Property_UniqueConstraintDdlName", resourceCulture);
-            }
-        }
-
         public static string Property_UniqueConstraintsToggleTooltip {
             get {
                 return ResourceManager.GetString("Property_UniqueConstraintsToggleTooltip", resourceCulture);

@@ -362,9 +362,6 @@
   <data name="Property_UniqueConstraintNameTooltip" xml:space="preserve">
     <value>Leave empty to generate UQ_{table}_{columns} when the DDL is written.</value>
   </data>
-  <data name="Property_UniqueConstraintDdlName" xml:space="preserve">
-    <value>DDL name:</value>
-  </data>
   <data name="Property_UniqueConstraintsToggleTooltip" xml:space="preserve">
     <value>Expand or collapse the unique constraint list</value>
   </data>

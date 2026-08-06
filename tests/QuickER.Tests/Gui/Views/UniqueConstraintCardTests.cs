@@ -184,6 +184,25 @@ public class UniqueConstraintCardTests
         constraint.ColumnIds.Should().ContainSingle();
         constraint.Members.Select(m => m.SelectedColumn!.Name).Should().Equal("Code");
 
+        // 制約名テキストボックスは、未入力の間だけ合成名（DDL 上の名前）をプレースホルダー表示する。
+        // 判定は TextBox.Text 直束縛の DataTrigger（VM 反映は LostFocus のため、入力中でも即座に消える）
+        var nameBox = FindVisualChildren<TextBox>(container).Single();
+        var placeholder = FindVisualChildren<TextBlock>(container)
+            .Single(text =>
+                ReferenceEquals(text.DataContext, constraint) && text.Text == "UQ_Item_Code"
+            );
+        placeholder.Visibility.Should().Be(Visibility.Visible, "未入力なら合成名を見せる");
+
+        nameBox.Text = "UQ_Custom";
+        DoEvents();
+        placeholder
+            .Visibility.Should()
+            .Be(Visibility.Collapsed, "入力があればプレースホルダーは消える");
+
+        nameBox.Text = string.Empty;
+        DoEvents();
+        placeholder.Visibility.Should().Be(Visibility.Visible);
+
         // Undo で構成列が外れ、行そのものも消える（空スロットも復元しない）
         vm.UndoRedo.Undo();
         window.UpdateLayout();
