@@ -111,6 +111,20 @@ public sealed class DiagramChangeTracker
         ),
     ];
 
+    /// <summary>追跡対象とする一意制約のプロパティ群</summary>
+    /// <remarks>
+    /// 構成列（ColumnIds）は順序付きの一覧でプロパティ差分に馴染まないため、専用コマンド
+    /// （<see cref="ChangeUniqueConstraintColumnsCommand"/>）で履歴化する。ここでは制約名だけを追跡する
+    /// </remarks>
+    private static readonly ITrackedProperty[] TrackedUniqueConstraintProperties =
+    [
+        new TrackedProperty<UniqueConstraintViewModel>(
+            nameof(UniqueConstraintViewModel.Name),
+            x => x.Name,
+            (x, v) => x.Name = (string)v!
+        ),
+    ];
+
     /// <summary>差分コマンドを積む Undo / Redo スタック</summary>
     private readonly UndoRedoManager _undoRedo;
 
@@ -163,26 +177,52 @@ public sealed class DiagramChangeTracker
     {
         entity.PropertyChanged += OnTrackedEntityPropertyChanged;
         entity.Columns.CollectionChanged += OnEntityColumnsCollectionChanged;
+        entity.UniqueConstraints.CollectionChanged += OnEntityUniqueConstraintsCollectionChanged;
         CaptureTrackedProperties(entity, TrackedEntityProperties);
 
         foreach (var column in entity.Columns)
         {
             AttachColumn(column);
         }
+
+        foreach (var constraint in entity.UniqueConstraints)
+        {
+            AttachUniqueConstraint(constraint);
+        }
     }
 
-    /// <summary>エンティティとその配下カラムの変更追跡を終了する</summary>
+    /// <summary>エンティティとその配下カラム・一意制約の変更追跡を終了する</summary>
     public void DetachEntity(EntityViewModel entity)
     {
         entity.PropertyChanged -= OnTrackedEntityPropertyChanged;
         entity.Columns.CollectionChanged -= OnEntityColumnsCollectionChanged;
+        entity.UniqueConstraints.CollectionChanged -= OnEntityUniqueConstraintsCollectionChanged;
 
         foreach (var column in entity.Columns)
         {
             DetachColumn(column);
         }
 
+        foreach (var constraint in entity.UniqueConstraints)
+        {
+            DetachUniqueConstraint(constraint);
+        }
+
         _trackedPropertySnapshots.Remove(entity);
+    }
+
+    /// <summary>一意制約単体の変更追跡を開始する</summary>
+    private void AttachUniqueConstraint(UniqueConstraintViewModel constraint)
+    {
+        constraint.PropertyChanged += OnTrackedUniqueConstraintPropertyChanged;
+        CaptureTrackedProperties(constraint, TrackedUniqueConstraintProperties);
+    }
+
+    /// <summary>一意制約単体の変更追跡を終了する</summary>
+    private void DetachUniqueConstraint(UniqueConstraintViewModel constraint)
+    {
+        constraint.PropertyChanged -= OnTrackedUniqueConstraintPropertyChanged;
+        _trackedPropertySnapshots.Remove(constraint);
     }
 
     /// <summary>カラム単体の変更追跡を開始する</summary>
@@ -261,6 +301,38 @@ public sealed class DiagramChangeTracker
                 AttachColumn(column);
             }
         }
+    }
+
+    /// <summary>エンティティの一意制約増減に追従し、出入りした制約の追跡を着脱する</summary>
+    private void OnEntityUniqueConstraintsCollectionChanged(
+        object? sender,
+        NotifyCollectionChangedEventArgs e
+    )
+    {
+        if (e.OldItems is not null)
+        {
+            foreach (UniqueConstraintViewModel constraint in e.OldItems)
+            {
+                DetachUniqueConstraint(constraint);
+            }
+        }
+
+        if (e.NewItems is not null)
+        {
+            foreach (UniqueConstraintViewModel constraint in e.NewItems)
+            {
+                AttachUniqueConstraint(constraint);
+            }
+        }
+    }
+
+    /// <summary>一意制約のプロパティ変更（制約名）を追跡する</summary>
+    private void OnTrackedUniqueConstraintPropertyChanged(
+        object? sender,
+        PropertyChangedEventArgs e
+    )
+    {
+        TrackPropertyChange(sender, e, TrackedUniqueConstraintProperties);
     }
 
     /// <summary>IsPrimaryKey 変更直前に変更前の全プロパティスナップショットを取得する</summary>
@@ -527,6 +599,7 @@ public sealed class DiagramChangeTracker
             EntityViewModel => TrackedEntityProperties,
             ColumnViewModel => TrackedColumnProperties,
             RelationshipViewModel => TrackedRelationshipProperties,
+            UniqueConstraintViewModel => TrackedUniqueConstraintProperties,
             _ => Array.Empty<ITrackedProperty>(),
         };
 
@@ -569,6 +642,14 @@ public sealed class DiagramChangeTracker
                 if (!ReferenceEquals(column, excludedTarget))
                 {
                     CaptureTrackedProperties(column, TrackedColumnProperties);
+                }
+            }
+
+            foreach (var constraint in entity.UniqueConstraints)
+            {
+                if (!ReferenceEquals(constraint, excludedTarget))
+                {
+                    CaptureTrackedProperties(constraint, TrackedUniqueConstraintProperties);
                 }
             }
         }

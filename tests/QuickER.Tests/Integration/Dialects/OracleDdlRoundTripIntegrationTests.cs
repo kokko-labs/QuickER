@@ -293,4 +293,76 @@ public sealed class OracleDdlRoundTripIntegrationTests(OracleContainerFixture fi
 
         result.Entities.Select(e => e.TableName).Should().BeEquivalentTo("CUSTOMER");
     }
+
+    /// <summary>
+    /// 名前付き単一列 UNIQUE と名前なし複合 UNIQUE を持つテーブルの DDL を生成・実行し、
+    /// 取込んだ <see cref="Entity.UniqueConstraints"/> が制約名・構成列・宣言順まで一致することを検証する。
+    /// </summary>
+    [Fact(DisplayName = "[Integration] A: UNIQUE 制約が DDL 生成→実行→取込で往復一致する")]
+    public async Task UniqueConstraints_RoundTrip()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        var inventory = new Entity { TableName = "inventory" };
+        var id = new Column
+        {
+            Name = "id",
+            DataType = "NUMBER(10)",
+            IsPrimaryKey = true,
+            IsNullable = false,
+        };
+        var sku = new Column
+        {
+            Name = "sku",
+            DataType = "VARCHAR2(30)",
+            IsNullable = false,
+        };
+        var warehouse = new Column
+        {
+            Name = "warehouse",
+            DataType = "VARCHAR2(10)",
+            IsNullable = false,
+        };
+        var slot = new Column
+        {
+            Name = "slot",
+            DataType = "NUMBER(10)",
+            IsNullable = false,
+        };
+        inventory.Columns.AddRange([id, sku, warehouse, slot]);
+
+        // 名前付き単一列 UNIQUE
+        inventory.UniqueConstraints.Add(
+            new UniqueConstraint { Name = "UQ_inventory_sku", ColumnIds = [sku.Id] }
+        );
+        // 名前なし複合 UNIQUE（合成名 UQ_inventory_warehouse_slot で出力される）
+        inventory.UniqueConstraints.Add(
+            new UniqueConstraint { ColumnIds = [warehouse.Id, slot.Id] }
+        );
+
+        var diagram = new ErDiagram { Entities = { inventory } };
+
+        await fixture.ExecuteAsync(new OracleDdlGenerator().Build(diagram), Ct);
+
+        await using var conn = await fixture.OpenConnectionAsync(Ct);
+        var result = await new OracleSchemaImporter().ImportAsync(conn, Ct);
+
+        var imported = result.Entities.Single(e => e.TableName == "inventory");
+        var columnNamesById = imported.Columns.ToDictionary(c => c.Id, c => c.Name);
+
+        imported.UniqueConstraints.Should().HaveCount(2);
+
+        var named = imported.UniqueConstraints.Single(u => u.Name == "UQ_inventory_sku");
+        named.ColumnIds.Select(cid => columnNamesById[cid]).Should().Equal("sku");
+
+        var composite = imported.UniqueConstraints.Single(u =>
+            u.Name == "UQ_inventory_warehouse_slot"
+        );
+        // 宣言順（warehouse → slot）が取込でも保たれる
+        composite
+            .ColumnIds.Select(cid => columnNamesById[cid])
+            .Should()
+            .Equal("warehouse", "slot");
+    }
 }

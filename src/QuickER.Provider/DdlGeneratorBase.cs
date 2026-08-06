@@ -12,6 +12,7 @@ namespace QuickER.Provider;
 /// <remarks>
 /// <list type="bullet">
 ///   <item>エンティティごとに <c>CREATE TABLE</c> を出力し、PK 列は <c>CONSTRAINT PK_テーブル名 PRIMARY KEY</c>（識別子は方言のクォート方式）として末尾にまとめる（複合 PK 対応）</item>
+///   <item>一意制約は PK 制約行の直後に <c>CONSTRAINT … UNIQUE (…)</c> として出力する（制約名未設定なら <see cref="UniqueConstraintNaming"/> が合成する）</item>
 ///   <item>1対多 / 1対1 のリレーションは <c>FOREIGN KEY</c> 制約として出力。多対多はジャンクションテーブルが必要なためコメント行のみ出力</item>
 ///   <item>識別子のクォート方式・エスケープ規則・FK 参照アクション句の組み立ては派生クラスが方言ごとに実装する（テンプレートメソッドパターン）</item>
 /// </list>
@@ -40,6 +41,28 @@ public abstract class DdlGeneratorBase : IDdlGenerator
             var pks = entity.Columns.Where(c => c.IsPrimaryKey).ToList();
             sb.AppendLine($"CREATE TABLE {QuoteQualifiedName(table)} (");
 
+            // 列定義の後に続く制約行（PRIMARY KEY → UNIQUE の順）を先に組み立てる。
+            // 列定義の末尾カンマ判定に「後続制約行の有無」が必要なため
+            var constraintLines = new List<string>();
+
+            // PRIMARY KEY 制約（複合 PK 対応のため列定義とは分離して出力）
+            if (pks.Count > 0)
+            {
+                var pkCols = string.Join(", ", pks.Select(p => QuoteSimpleName(p.Name)));
+                constraintLines.Add(
+                    $"    CONSTRAINT {QuoteConstraintName($"PK_{SafeName(table)}")} PRIMARY KEY ({pkCols})"
+                );
+            }
+
+            // UNIQUE 制約（制約名が未設定なら UQ_{テーブル}_{列…} を合成する）
+            foreach (var unique in UniqueConstraintNaming.ResolveAll(entity, SafeName))
+            {
+                var uniqueCols = string.Join(", ", unique.ColumnNames.Select(QuoteSimpleName));
+                constraintLines.Add(
+                    $"    CONSTRAINT {QuoteConstraintName(unique.Name)} UNIQUE ({uniqueCols})"
+                );
+            }
+
             for (var i = 0; i < entity.Columns.Count; i++)
             {
                 var col = entity.Columns[i];
@@ -48,8 +71,8 @@ public abstract class DdlGeneratorBase : IDdlGenerator
                 var line =
                     $"    {QuoteSimpleName(col.Name)} {col.DataType} {(col.IsPrimaryKey || !col.IsNullable ? "NOT NULL" : "NULL")}{BuildColumnDefinitionSuffix(col)}";
 
-                // 後続のカラム行、または PRIMARY KEY 制約行が続く場合は区切りのカンマを付ける
-                if (i < entity.Columns.Count - 1 || pks.Count > 0)
+                // 後続のカラム行、または制約行（PRIMARY KEY / UNIQUE）が続く場合は区切りのカンマを付ける
+                if (i < entity.Columns.Count - 1 || constraintLines.Count > 0)
                 {
                     line += ",";
                 }
@@ -57,13 +80,10 @@ public abstract class DdlGeneratorBase : IDdlGenerator
                 sb.AppendLine(line);
             }
 
-            // PRIMARY KEY 制約（複合 PK 対応のため列定義とは分離して出力）
-            if (pks.Count > 0)
+            for (var i = 0; i < constraintLines.Count; i++)
             {
-                var pkCols = string.Join(", ", pks.Select(p => QuoteSimpleName(p.Name)));
-                sb.AppendLine(
-                    $"    CONSTRAINT {QuoteConstraintName($"PK_{SafeName(table)}")} PRIMARY KEY ({pkCols})"
-                );
+                var isLast = i == constraintLines.Count - 1;
+                sb.AppendLine(constraintLines[i] + (isLast ? string.Empty : ","));
             }
 
             // 閉じ括弧の直後・文末セミコロンの前に方言固有のテーブルオプション（MySQL の COMMENT= 句等）を付ける

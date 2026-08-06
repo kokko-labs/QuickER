@@ -97,8 +97,7 @@ public sealed class SqliteSyncScriptBuilder : SyncScriptBuilderBase
             SqliteIdentifier.Quote(rebuild.TableName),
             rebuild.TableName,
             rebuild.NewDefinition,
-            rebuild.ForeignKeys,
-            UniqueConstraintsOf(rebuild)
+            rebuild.ForeignKeys
         );
     }
 
@@ -113,14 +112,7 @@ public sealed class SqliteSyncScriptBuilder : SyncScriptBuilderBase
         sb.AppendLine($"-- ===== RebuildTable: {table} =====");
 
         // 合成後の定義で一時テーブルを作る（制約名は元テーブル名基準＝リネーム後に自然な名前になる）
-        AppendCreateTableBody(
-            sb,
-            quotedTemp,
-            table,
-            rebuild.NewDefinition,
-            rebuild.ForeignKeys,
-            UniqueConstraintsOf(rebuild)
-        );
+        AppendCreateTableBody(sb, quotedTemp, table, rebuild.NewDefinition, rebuild.ForeignKeys);
 
         // データ移送（live と合成後の両方に存在する列のみ・型変更は SQLite の型親和性で変換される）
         if (rebuild.CopyColumns.Count > 0)
@@ -136,11 +128,7 @@ public sealed class SqliteSyncScriptBuilder : SyncScriptBuilderBase
 
         // 補助オブジェクト（インデックス・トリガー）を元の CREATE SQL 全文で再作成する。
         // 削除された列を参照する索引の再作成は実行時に失敗する（＝トランザクションがロールバックされ安全）。
-        foreach (
-            var aux in rebuild.AuxiliaryObjects.Where(a =>
-                a.Kind is SchemaAuxiliaryObjectKind.Index or SchemaAuxiliaryObjectKind.Trigger
-            )
-        )
+        foreach (var aux in rebuild.AuxiliaryObjects)
         {
             var createSql = aux.CreateSql.Trim();
 
@@ -156,30 +144,23 @@ public sealed class SqliteSyncScriptBuilder : SyncScriptBuilderBase
         sb.AppendLine();
     }
 
-    /// <summary>再構築計画から一意制約（テーブルレベル UNIQUE）だけを取り出す</summary>
-    private static IReadOnlyList<SchemaAuxiliaryObject> UniqueConstraintsOf(
-        TableRebuildPlan rebuild
-    ) =>
-        rebuild
-            .AuxiliaryObjects.Where(a => a.Kind == SchemaAuxiliaryObjectKind.UniqueConstraint)
-            .ToList();
-
     /// <summary>
     /// <c>CREATE TABLE</c> の本体（列定義 → PK → UNIQUE → FK のインライン）を書き出す。
-    /// 列定義・PK 行・FK 行は <see cref="SqliteDdlGenerator"/> と共有し、DDL 生成との整合を保つ。
+    /// 列定義・PK 行・UNIQUE 行・FK 行は <see cref="SqliteDdlGenerator"/> と共有し、DDL 生成との整合を保つ。
     /// </summary>
     /// <param name="quotedTableName">出力するテーブル名（クォート済み。再構築では一時テーブル名）</param>
-    /// <param name="constraintTableName">PK 制約名の基にするテーブル名（再構築ではリネーム後の実テーブル名）</param>
-    /// <param name="definition">合成後のテーブル定義</param>
+    /// <param name="constraintTableName">
+    /// 制約名の基にするテーブル名（再構築ではリネーム後の実テーブル名）。
+    /// 一意制約の合成名（<c>UQ_{表}_{列…}</c>）にも使うため、一時テーブル名は渡さない。
+    /// </param>
+    /// <param name="definition">合成後のテーブル定義（一意制約もここが正本）</param>
     /// <param name="foreignKeys">インライン出力する FK 仕様</param>
-    /// <param name="uniqueConstraints">テーブルレベル UNIQUE として再現する一意制約</param>
     private static void AppendCreateTableBody(
         StringBuilder sb,
         string quotedTableName,
         string constraintTableName,
         Entity definition,
-        IReadOnlyList<TableRebuildForeignKey> foreignKeys,
-        IReadOnlyList<SchemaAuxiliaryObject> uniqueConstraints
+        IReadOnlyList<TableRebuildForeignKey> foreignKeys
     )
     {
         sb.AppendLine($"CREATE TABLE {quotedTableName} (");
@@ -196,21 +177,17 @@ public sealed class SqliteSyncScriptBuilder : SyncScriptBuilderBase
             );
         }
 
-        // 一意制約は構成列がすべて残っている場合のみ再現する
-        // （列削除で構成列が消えるのは、その列削除を選んだ利用者の意図した結果とみなす）
-        var columnNames = definition
-            .Columns.Select(c => c.Name)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var unique in uniqueConstraints)
+        // 一意制約は合成後の定義（Entity.UniqueConstraints）から出す。構成列が解決できない制約
+        // （選択した列削除で構成列が消えた等）は ResolveAll が黙って除外する。
+        // 合成名 UQ_{表}_{列…} の基になるテーブル名は definition.TableName＝実テーブル名
+        // （再構築の一時テーブル名ではない）ため、リネーム後に自然な制約名になる
+        foreach (
+            var unique in UniqueConstraintNaming.ResolveAll(definition, SqliteIdentifier.SafeName)
+        )
         {
-            if (unique.Columns.Count == 0 || !unique.Columns.All(columnNames.Contains))
-            {
-                continue;
-            }
-
-            var cols = string.Join(", ", unique.Columns.Select(SqliteIdentifier.QuoteSimple));
-            trailingConstraints.Add($"    UNIQUE ({cols})");
+            trailingConstraints.Add(
+                SqliteDdlGenerator.BuildUniqueConstraintLine(unique.Name, unique.ColumnNames)
+            );
         }
 
         foreach (var fk in foreignKeys)
@@ -292,6 +269,14 @@ public sealed class SqliteSyncScriptBuilder : SyncScriptBuilderBase
     /// <inheritdoc />
     protected override void AppendDropForeignKey(StringBuilder sb, SchemaDiffItem item) =>
         AppendNotApplicable(sb, SchemaDiffKind.DropForeignKey, item.TableName);
+
+    /// <inheritdoc />
+    protected override void AppendAddUniqueConstraint(StringBuilder sb, SchemaDiffItem item) =>
+        AppendNotApplicable(sb, SchemaDiffKind.AddUniqueConstraint, item.TableName);
+
+    /// <inheritdoc />
+    protected override void AppendDropUniqueConstraint(StringBuilder sb, SchemaDiffItem item) =>
+        AppendNotApplicable(sb, SchemaDiffKind.DropUniqueConstraint, item.TableName);
 
     /// <inheritdoc />
     protected override void AppendSetTableDescription(StringBuilder sb, SchemaDiffItem item) =>

@@ -34,6 +34,8 @@ public static class ErDiagramDynamicTools
                 "add_relationship" => AddRelationship(arguments, viewModel),
                 "remove_relationship" => RemoveRelationship(arguments, viewModel),
                 "set_column_property" => SetColumnProperty(arguments, viewModel),
+                "set_unique_constraint" => SetUniqueConstraint(arguments, viewModel),
+                "remove_unique_constraint" => RemoveUniqueConstraint(arguments, viewModel),
                 _ => (string.Format(Strings.Tool_Unsupported, toolName), false),
             };
         }
@@ -90,6 +92,8 @@ public static class ErDiagramDynamicTools
                     : string.Empty;
                 sb.AppendLine($"  - {col.Name}: {col.DataType}{flagsText}{colDesc}");
             }
+
+            AppendUniqueConstraints(sb, entity);
         }
 
         if (vm.Relationships.Count > 0)
@@ -221,7 +225,7 @@ public static class ErDiagramDynamicTools
         var affected = vm.FindRelationshipsUsingColumn(column);
         vm.UndoRedo.Execute(
             new UndoRedo.RemoveColumnCommand(
-                entity.Columns,
+                entity,
                 column,
                 affected,
                 () => vm.ApplyRelationshipColumnRules()
@@ -502,6 +506,246 @@ public static class ErDiagramDynamicTools
 
         vm.UndoRedo.Execute(new UndoRedo.RemoveRelationshipCommand(vm, rel));
         return (string.Format(Strings.Tool_RelationshipRemoved, sourceTable, targetTable), true);
+    }
+
+    /// <summary>一意制約を定義する（同じ列集合の制約があれば名前・列順を差し替え、無ければ追加する）</summary>
+    /// <remarks>
+    /// 照合キーは (テーブル, 列集合) で、列の順序・大文字小文字は問わない（UNIQUE の意味論が列の並びに
+    /// 依存しないため）。既存が見つかった場合は同じ制約を再定義する（<c>set_query</c> と同じ upsert 流儀）。
+    /// 名前の変更は変更追跡が、構成列の差し替えは専用コマンドが履歴化する
+    /// </remarks>
+    private static (string, bool) SetUniqueConstraint(JsonElement args, MainViewModel vm)
+    {
+        var tableName = GetString(args, "table_name");
+
+        if (string.IsNullOrWhiteSpace(tableName))
+        {
+            return (Strings.Tool_TableNameRequired, false);
+        }
+
+        var entity = vm.Entities.FirstOrDefault(e =>
+            string.Equals(e.TableName, tableName, StringComparison.OrdinalIgnoreCase)
+        );
+
+        if (entity is null)
+        {
+            return (string.Format(Strings.Tool_TableNotFound, tableName), false);
+        }
+
+        var (columns, error) = ResolveConstraintColumns(entity, args);
+
+        if (error is not null)
+        {
+            return (error, false);
+        }
+
+        var columnIds = columns!.Select(column => column.Id).ToList();
+        var name = GetString(args, "name");
+        var normalizedName = string.IsNullOrWhiteSpace(name) ? string.Empty : name!;
+        var columnText = string.Join(", ", columns!.Select(column => column.Name));
+        var existing = FindUniqueConstraintByColumnSet(entity, columnIds);
+
+        if (existing is not null)
+        {
+            existing.Name = normalizedName;
+
+            // 列集合が同じでも宣言順は指定に合わせる（順序が変わらないなら履歴を積まない）
+            if (!existing.ColumnIds.SequenceEqual(columnIds))
+            {
+                vm.UndoRedo.Execute(
+                    new UndoRedo.ChangeUniqueConstraintColumnsCommand(
+                        existing,
+                        existing.ColumnIds.ToList(),
+                        columnIds
+                    )
+                );
+            }
+
+            return (
+                string.Format(Strings.Tool_UniqueConstraintUpdated, entity.TableName, columnText),
+                true
+            );
+        }
+
+        var constraint = new UniqueConstraintViewModel(
+            entity,
+            new UniqueConstraint
+            {
+                Name = string.IsNullOrEmpty(normalizedName) ? null : normalizedName,
+                ColumnIds = columnIds,
+            }
+        );
+        vm.UndoRedo.Execute(
+            new UndoRedo.AddUniqueConstraintCommand(entity.UniqueConstraints, constraint)
+        );
+
+        return (
+            string.Format(Strings.Tool_UniqueConstraintAdded, entity.TableName, columnText),
+            true
+        );
+    }
+
+    /// <summary>列集合で特定した一意制約を削除する</summary>
+    private static (string, bool) RemoveUniqueConstraint(JsonElement args, MainViewModel vm)
+    {
+        var tableName = GetString(args, "table_name");
+
+        if (string.IsNullOrWhiteSpace(tableName))
+        {
+            return (Strings.Tool_TableNameRequired, false);
+        }
+
+        var entity = vm.Entities.FirstOrDefault(e =>
+            string.Equals(e.TableName, tableName, StringComparison.OrdinalIgnoreCase)
+        );
+
+        if (entity is null)
+        {
+            return (string.Format(Strings.Tool_TableNotFound, tableName), false);
+        }
+
+        var (columns, error) = ResolveConstraintColumns(entity, args);
+
+        if (error is not null)
+        {
+            return (error, false);
+        }
+
+        var columnText = string.Join(", ", columns!.Select(column => column.Name));
+        var existing = FindUniqueConstraintByColumnSet(
+            entity,
+            columns!.Select(column => column.Id).ToList()
+        );
+
+        if (existing is null)
+        {
+            return (
+                string.Format(Strings.Tool_UniqueConstraintNotFound, entity.TableName, columnText),
+                false
+            );
+        }
+
+        vm.UndoRedo.Execute(
+            new UndoRedo.RemoveUniqueConstraintCommand(entity.UniqueConstraints, existing)
+        );
+
+        return (
+            string.Format(Strings.Tool_UniqueConstraintRemoved, entity.TableName, columnText),
+            true
+        );
+    }
+
+    /// <summary><c>columns</c> 引数（列名の配列）をエンティティのカラムへ解決する</summary>
+    /// <returns>解決したカラム（宣言順）と、失敗時のエラーテキスト</returns>
+    private static (List<ColumnViewModel>? Columns, string? Error) ResolveConstraintColumns(
+        EntityViewModel entity,
+        JsonElement args
+    )
+    {
+        if (
+            !args.TryGetProperty("columns", out var columnsEl)
+            || columnsEl.ValueKind != JsonValueKind.Array
+        )
+        {
+            return (null, Strings.Tool_UniqueConstraintColumnsRequired);
+        }
+
+        var resolved = new List<ColumnViewModel>();
+
+        foreach (var item in columnsEl.EnumerateArray())
+        {
+            if (
+                item.ValueKind != JsonValueKind.String
+                || string.IsNullOrWhiteSpace(item.GetString())
+            )
+            {
+                return (null, Strings.Tool_UniqueConstraintColumnsInvalid);
+            }
+
+            var columnName = item.GetString()!;
+            var column = entity.Columns.FirstOrDefault(c =>
+                string.Equals(c.Name, columnName, StringComparison.OrdinalIgnoreCase)
+            );
+
+            if (column is null)
+            {
+                return (
+                    null,
+                    string.Format(Strings.Tool_ColumnNotFoundInTable, entity.TableName, columnName)
+                );
+            }
+
+            // 同じ列を 2 回並べた制約は意味を持たないため拒否する（DB 側でもエラーになる）
+            if (resolved.Any(existing => existing.Id == column.Id))
+            {
+                return (
+                    null,
+                    string.Format(Strings.Tool_UniqueConstraintDuplicateColumn, column.Name)
+                );
+            }
+
+            resolved.Add(column);
+        }
+
+        if (resolved.Count == 0)
+        {
+            return (null, Strings.Tool_UniqueConstraintColumnsEmpty);
+        }
+
+        return (resolved, null);
+    }
+
+    /// <summary>構成列の集合（順序を問わない）が一致する一意制約を探す</summary>
+    private static UniqueConstraintViewModel? FindUniqueConstraintByColumnSet(
+        EntityViewModel entity,
+        IReadOnlyList<Guid> columnIds
+    )
+    {
+        var target = new HashSet<Guid>(columnIds);
+
+        return entity.UniqueConstraints.FirstOrDefault(constraint =>
+            target.SetEquals(constraint.ColumnIds)
+        );
+    }
+
+    /// <summary>要約テキストへエンティティの一意制約（解決済み名＋構成列）を追記する</summary>
+    /// <remarks>構成列を解決できない制約（空・壊れた参照）は DDL 生成と同じ規則で読み飛ばす</remarks>
+    private static void AppendUniqueConstraints(StringBuilder sb, EntityViewModel entity)
+    {
+        var lines = new List<string>();
+
+        foreach (var constraint in entity.UniqueConstraints)
+        {
+            var columnNames = constraint
+                .ColumnIds.Select(columnId =>
+                    entity.Columns.FirstOrDefault(column => column.Id == columnId)
+                )
+                .Where(column => column is not null)
+                .Select(column => column!.Name)
+                .ToList();
+
+            if (columnNames.Count == 0 || columnNames.Count != constraint.ColumnIds.Count)
+            {
+                continue;
+            }
+
+            var name = string.IsNullOrWhiteSpace(constraint.Name)
+                ? UniqueConstraint.SynthesizeName(entity.TableName, columnNames)
+                : constraint.Name;
+            lines.Add($"    - {name} ({string.Join(", ", columnNames)})");
+        }
+
+        if (lines.Count == 0)
+        {
+            return;
+        }
+
+        sb.AppendLine($"  {Strings.Tool_Summary_UniqueConstraintsHeader}");
+
+        foreach (var line in lines)
+        {
+            sb.AppendLine(line);
+        }
     }
 
     /// <summary>JSON 引数から文字列プロパティを取得する（無い・型不一致なら null）</summary>

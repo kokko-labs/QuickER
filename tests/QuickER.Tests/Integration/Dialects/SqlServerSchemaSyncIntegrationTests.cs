@@ -780,7 +780,200 @@ INSERT INTO [{ChildTable}] ([Id], [ParentId]) VALUES (1, 1);"
         (await QueryScalarIntAsync($"SELECT COUNT(*) FROM [{ChildTable}];")).Should().Be(1);
     }
 
+    /// <summary>図に足した一意制約が実 DB へ追加され、外した一意制約が実 DB から消えることを検証する</summary>
+    [Fact(DisplayName = "[Integration] UniqueConstraint: 追加・削除が実 DB へ反映される")]
+    public async Task UniqueConstraintSync_AddsAndDrops()
+    {
+        if (!_serverAvailable)
+        {
+            return;
+        }
+
+        await RunScriptAsync(
+            $@"
+CREATE TABLE [{ItemTable}] (
+    [Code] nvarchar(20) NOT NULL,
+    [Id] int NOT NULL,
+    CONSTRAINT [PK_{ItemTable}] PRIMARY KEY ([Id])
+);
+INSERT INTO [{ItemTable}] ([Code], [Id]) VALUES (N'A-001', 1);"
+        );
+
+        var importer = new SqlServerSchemaImporter();
+        var capabilities = new SqlServerProvider().SyncCapabilities;
+
+        // ---------- 1) 一意制約の追加 ----------
+        var live = await importer.ImportAsync(Settings, TestCancellationToken);
+        var liveItem = SingleItemEntity(live);
+        var target = liveItem.Clone(preserveId: true);
+        target.UniqueConstraints.Add(
+            new UniqueConstraint { ColumnIds = [target.Columns.Single(c => c.Name == "Code").Id] }
+        );
+
+        var addDiff = new SchemaDiffService().Compute(
+            live.Entities,
+            live.Relationships,
+            new[] { target },
+            new List<Relationship>(),
+            capabilities
+        );
+        var add = addDiff
+            .Items.Should()
+            .ContainSingle(i => i.Kind == SchemaDiffKind.AddUniqueConstraint)
+            .Which;
+        // 追加は既定で選択される（制約を増やすだけで既存定義を壊さないため）
+        add.IsSelected.Should().BeTrue();
+
+        var addScript = new SqlServerSyncScriptBuilder().Build(
+            new SyncPlanner().BuildPlan(addDiff.Items, capabilities, PlanContext(live))
+        );
+        var addResult = await new SqlServerSchemaSyncExecutor().ExecuteAsync(
+            Settings.ToDbConnectionSettings(),
+            addScript,
+            TestCancellationToken
+        );
+        addResult
+            .Committed.Should()
+            .BeTrue($"一意制約の追加に失敗: {addResult.Error}\nSQL:\n{addScript}");
+
+        (await QueryScalarIntAsync(UniqueConstraintCountSql)).Should().Be(1);
+
+        // ---------- 2) 一意制約の削除（取込 → 図から外す） ----------
+        var live2 = await importer.ImportAsync(Settings, TestCancellationToken);
+        var liveItem2 = SingleItemEntity(live2);
+        liveItem2.UniqueConstraints.Should().ContainSingle();
+
+        var target2 = liveItem2.Clone(preserveId: true);
+        target2.UniqueConstraints.Clear();
+
+        var dropDiff = new SchemaDiffService().Compute(
+            live2.Entities,
+            live2.Relationships,
+            new[] { target2 },
+            new List<Relationship>(),
+            capabilities
+        );
+        var drop = dropDiff
+            .Items.Should()
+            .ContainSingle(i => i.Kind == SchemaDiffKind.DropUniqueConstraint)
+            .Which;
+        // 削除は破壊的のため既定では未選択＝明示的に選ぶ
+        drop.IsSelected.Should().BeFalse();
+        drop.IsSelected = true;
+
+        var dropScript = new SqlServerSyncScriptBuilder().Build(
+            new SyncPlanner().BuildPlan(dropDiff.Items, capabilities, PlanContext(live2))
+        );
+        var dropResult = await new SqlServerSchemaSyncExecutor().ExecuteAsync(
+            Settings.ToDbConnectionSettings(),
+            dropScript,
+            TestCancellationToken
+        );
+        dropResult
+            .Committed.Should()
+            .BeTrue($"一意制約の削除に失敗: {dropResult.Error}\nSQL:\n{dropScript}");
+
+        (await QueryScalarIntAsync(UniqueConstraintCountSql)).Should().Be(0);
+    }
+
+    /// <summary>
+    /// 一意制約に参加している列の定義変更で、制約が自動 DROP → 再 ADD され同期が成功することを検証する。
+    /// </summary>
+    /// <remarks>
+    /// SQL Server は UNIQUE 制約に参加している列の <c>ALTER COLUMN</c> を拒否する（FK と同じ Msg 5074）。
+    /// <see cref="SyncPlanner"/> が一意制約の DROP と再 ADD を注入することで、このケースが通る。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Integration] AlterColumn: UNIQUE 構成列の定義変更で制約が自動 DROP → 再 ADD される"
+    )]
+    public async Task AlterColumn_OnUniqueConstraintColumn_RebuildsUniqueConstraint()
+    {
+        if (!_serverAvailable)
+        {
+            return;
+        }
+
+        await RunScriptAsync(
+            $@"
+CREATE TABLE [{ItemTable}] (
+    [Code] nvarchar(20) NOT NULL,
+    [Id] int NOT NULL,
+    CONSTRAINT [PK_{ItemTable}] PRIMARY KEY ([Id]),
+    CONSTRAINT [UQ_{ItemTable}_Code] UNIQUE ([Code])
+);
+INSERT INTO [{ItemTable}] ([Code], [Id]) VALUES (N'A-001', 1);"
+        );
+
+        var importer = new SqlServerSchemaImporter();
+        var capabilities = new SqlServerProvider().SyncCapabilities;
+        var live = await importer.ImportAsync(Settings, TestCancellationToken);
+        var liveItem = SingleItemEntity(live);
+        liveItem.UniqueConstraints.Should().ContainSingle();
+
+        // 目標: 一意制約はそのままに、その構成列 Code の長さを 20 → 40 へ広げる
+        var target = liveItem.Clone(preserveId: true);
+        target.Columns.Single(c => c.Name == "Code").DataType = "nvarchar(40)";
+
+        var diff = new SchemaDiffService().Compute(
+            live.Entities,
+            live.Relationships,
+            new[] { target },
+            new List<Relationship>(),
+            capabilities
+        );
+
+        // 一意制約は図と DB で一致しているため差分は出ず、列定義変更だけが出る
+        diff.Items.Should()
+            .NotContain(i =>
+                i.Kind == SchemaDiffKind.AddUniqueConstraint
+                || i.Kind == SchemaDiffKind.DropUniqueConstraint
+            );
+        var alterColumn = diff
+            .Items.Should()
+            .ContainSingle(i => i.Kind == SchemaDiffKind.AlterColumn && i.ColumnName == "Code")
+            .Which;
+        alterColumn.IsSelected = true;
+
+        var plan = new SyncPlanner().BuildPlan(diff.Items, capabilities, PlanContext(live));
+
+        // プランナーが一意制約の DROP と再 ADD を注入していること
+        plan.Sections.Should().Contain(s => s.Kind == SchemaDiffKind.DropUniqueConstraint);
+        plan.Sections.Should().Contain(s => s.Kind == SchemaDiffKind.AddUniqueConstraint);
+
+        var script = new SqlServerSyncScriptBuilder().Build(plan);
+        var result = await new SqlServerSchemaSyncExecutor().ExecuteAsync(
+            Settings.ToDbConnectionSettings(),
+            script,
+            TestCancellationToken
+        );
+        result
+            .Committed.Should()
+            .BeTrue($"UNIQUE 構成列の変更に失敗: {result.Error}\nSQL:\n{script}");
+
+        // ---------- 再取込: 列定義が変わり、一意制約は存続している ----------
+        var live2 = await importer.ImportAsync(Settings, TestCancellationToken);
+        var item2 = SingleItemEntity(live2);
+        item2.Columns.Single(c => c.Name == "Code").DataType.Should().Be("nvarchar(40)");
+        item2.UniqueConstraints.Should().ContainSingle();
+        (await QueryScalarIntAsync(UniqueConstraintCountSql)).Should().Be(1);
+    }
+
     // ---------------- ヘルパー ----------------
+
+    /// <summary>検証用テーブルに張られた UNIQUE 制約の数を数える SQL</summary>
+    private static readonly string UniqueConstraintCountSql =
+        "SELECT COUNT(*) FROM sys.key_constraints "
+        + $"WHERE type = 'UQ' AND parent_object_id = OBJECT_ID(N'{ItemTable}');";
+
+    /// <summary>取込結果から検証用テーブルのエンティティを取り出す</summary>
+    private static Entity SingleItemEntity(SqlServerSchemaImporter.SchemaResult result) =>
+        result.Entities.Single(e =>
+            e.TableName.EndsWith(ItemTable, StringComparison.OrdinalIgnoreCase)
+        );
+
+    /// <summary>取込結果から計画用の live 入力を組み立てる</summary>
+    private static SyncPlanContext PlanContext(SqlServerSchemaImporter.SchemaResult result) =>
+        new() { LiveEntities = result.Entities, LiveRelationships = result.Relationships };
 
     /// <summary>セットアップ用の T-SQL をそのまま実行する</summary>
     private static async Task RunScriptAsync(string sql)

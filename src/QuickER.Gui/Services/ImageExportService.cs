@@ -127,8 +127,9 @@ public static class ImageExportService
                 + ".col{font:13px 'Segoe UI',sans-serif;fill:#1F2937}"
                 + ".meta{font:13px 'Segoe UI',sans-serif;fill:#6B7280}"
                 + ".desc{font:italic 11px 'Segoe UI',sans-serif;fill:#6B7280}"
-                + ".pk{font:bold 13px 'Segoe UI',sans-serif;fill:#D93025}"
-                + ".fk{font:bold 13px 'Segoe UI',sans-serif;fill:#1A73E8}"
+                + $".pk{{font:bold 13px 'Segoe UI',sans-serif;fill:{ColumnKeyMarkPalette.PrimaryKeyColor}}}"
+                + $".fk{{font:bold 13px 'Segoe UI',sans-serif;fill:{ColumnKeyMarkPalette.ForeignKeyColor}}}"
+                + $".uq{{font:bold 13px 'Segoe UI',sans-serif;fill:{ColumnKeyMarkPalette.UniqueColor}}}"
                 + $".rel{{stroke:#5F6B7A;stroke-width:{F(RelationStrokeThickness)};fill:none}}"
                 + ".label{font:10px 'Segoe UI',sans-serif;fill:#374151}"
                 + "</style>"
@@ -207,13 +208,12 @@ public static class ImageExportService
                 var c = row.Column;
                 var baseline = row.TextTop + BodyBaselineOffset;
 
-                if (c.IsPrimaryKey)
+                // キー標識（PK > FK > UQ の優先度は ColumnViewModel.KeyMark が 1 本化して決める）
+                if (KeyMarkCssClass(c.KeyMark) is { } keyMarkClass)
                 {
-                    sb.AppendLine($"    <text class=\"pk\" x=\"6\" y=\"{F(baseline)}\">PK</text>");
-                }
-                else if (c.IsForeignKey)
-                {
-                    sb.AppendLine($"    <text class=\"fk\" x=\"6\" y=\"{F(baseline)}\">FK</text>");
+                    sb.AppendLine(
+                        $"    <text class=\"{keyMarkClass}\" x=\"6\" y=\"{F(baseline)}\">{c.KeyMarkText}</text>"
+                    );
                 }
 
                 sb.AppendLine(
@@ -256,6 +256,16 @@ public static class ImageExportService
         sb.AppendLine("</svg>");
         return sb.ToString();
     }
+
+    /// <summary>キー標識に対応する SVG の CSS クラス名を返す（標識なしは <c>null</c>＝出力しない）</summary>
+    private static string? KeyMarkCssClass(ColumnKeyMark mark) =>
+        mark switch
+        {
+            ColumnKeyMark.PrimaryKey => "pk",
+            ColumnKeyMark.ForeignKey => "fk",
+            ColumnKeyMark.Unique => "uq",
+            _ => null,
+        };
 
     /// <summary>説明テキストを指定幅で折り返し、1 行ずつ text 要素として追記する</summary>
     private static void AppendDescriptionLines(

@@ -527,6 +527,9 @@ public static class TableDefinitionDocumentExporter
                 relationships,
                 entitiesById
             );
+            var uniqueConstraintLabels = TableDefinitionContentBuilder.BuildUniqueConstraintLabels(
+                entity
+            );
 
             // 行1: A1 テーブル名タイトル ＋ 末尾列（H1）に一覧への戻りリンク（右寄せ）
             SetSheetTitle(worksheet, entity.TableName);
@@ -575,6 +578,9 @@ public static class TableDefinitionDocumentExporter
                     column,
                     foreignKeyLabels.TryGetValue(column.Id, out var foreignKeyLabel)
                         ? foreignKeyLabel
+                        : null,
+                    uniqueConstraintLabels.TryGetValue(column.Id, out var uniqueConstraintLabel)
+                        ? uniqueConstraintLabel
                         : null
                 );
                 worksheet.Cell(row, 7).Value = TableDefinitionContentBuilder.GetReferenceText(

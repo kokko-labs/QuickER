@@ -65,10 +65,21 @@ public enum SyncPlanWarningKind
     /// （＝参照先が候補キーでなくなり、再作成が実行時に失敗しうる）。
     /// </summary>
     /// <remarks>
-    /// 一意制約 / 一意インデックスは取り込んでいないため「候補キーでない」と断定はできない
-    /// （UNIQUE で候補キーが保たれる構成もある）。そのため実行ブロックではなく警告に留める。
+    /// 判定は「同期後に被参照列が候補キーであることを証明できたか」で行う（同期後の主キー、または同期後に
+    /// 存在する一意制約と完全に一致するか）。証明できない構成でも一意インデックス等で実際には通ることがあり、
+    /// 断定はできないため実行ブロックではなく警告に留める。
     /// </remarks>
     ForeignKeyRebuildMayLoseCandidateKey,
+
+    /// <summary>
+    /// 削除しようとしている一意制約が、既存の外部キーの被参照列そのものである
+    /// （＝候補キーが失われ、外部キーが壊れる・削除が実行時に拒否されうる）。
+    /// </summary>
+    /// <remarks>
+    /// 主キーが同じ列を覆っていれば候補キーは保たれるが、その判定には同期後の主キー構成が要る。
+    /// 過剰警告を許容して実行はブロックしない（<see cref="ForeignKeyRebuildMayLoseCandidateKey"/> と同じ方針）。
+    /// </remarks>
+    UniqueConstraintDropMayBreakForeignKey,
 
     /// <summary>
     /// 複合外部キーの子テーブルであるため、そのテーブルのテーブル再構築を計画から除外した。
@@ -99,11 +110,13 @@ public enum SyncPlanWarningKind
 /// 対象テーブル。<see cref="SyncPlanWarningKind.ForeignKeyRebuildMayLoseCandidateKey"/> では
 /// 外部キーを保有する子テーブル、<see cref="SyncPlanWarningKind.RebuildBlockedByCompositeForeignKey"/> では
 /// 再構築を止めたテーブル、<see cref="SyncPlanWarningKind.CompositeForeignKeyBlocksChange"/> では
-/// 計画から落とした変更のテーブル。
+/// 計画から落とした変更のテーブル、<see cref="SyncPlanWarningKind.UniqueConstraintDropMayBreakForeignKey"/>
+/// では一意制約を削除するテーブル（＝外部キーの参照先）。
 /// </param>
 /// <param name="Detail">
 /// 補足（外部キー制約名など。無ければ空文字）。
 /// <see cref="SyncPlanWarningKind.CompositeForeignKeyBlocksChange"/> では対象列名（主キー変更なら空文字）。
+/// <see cref="SyncPlanWarningKind.UniqueConstraintDropMayBreakForeignKey"/> では壊れうる外部キーの制約名。
 /// </param>
 public sealed record SyncPlanWarning(
     SyncPlanWarningKind Kind,
@@ -180,7 +193,11 @@ public sealed class TableRebuildPlan
     /// </summary>
     public IReadOnlyList<string> CopyColumns { get; init; } = [];
 
-    /// <summary>再構築後に再現する補助オブジェクト（インデックス・トリガー・一意制約）。</summary>
+    /// <summary>再構築後に再現する補助オブジェクト（インデックス・トリガー）。</summary>
+    /// <remarks>
+    /// 一意制約は意味モデル（<see cref="Entity.UniqueConstraints"/>）が正本のため、
+    /// <see cref="NewDefinition"/> 側で合成済み＝ここには含まれない。
+    /// </remarks>
     public IReadOnlyList<SchemaAuxiliaryObject> AuxiliaryObjects { get; init; } = [];
 
     /// <summary>この再構築の由来となった差分項目（UI の確認表示用）。</summary>

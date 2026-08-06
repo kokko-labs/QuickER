@@ -12,11 +12,13 @@ namespace QuickER.Services;
 /// 対応する記法は <see cref="DbmlExporter"/> の出力と往復可能な範囲に限定する
 /// <list type="bullet">
 ///   <item><c>Table 名前 {</c> 〜 <c>}</c> ブロック（1 行 1 カラム定義）</item>
-///   <item>カラム設定: <c>pk</c> / <c>ref</c> / <c>null</c> / <c>not null</c> / <c>note: '...'</c>（大文字小文字を区別しない）</item>
+///   <item>カラム設定: <c>pk</c> / <c>ref</c> / <c>unique</c> / <c>null</c> / <c>not null</c> / <c>note: '...'</c>（大文字小文字を区別しない）</item>
+///   <item><c>Indexes { … }</c> ブロック: <c>unique</c> 設定を持つ索引のみ一意制約として取り込む（<c>(a, b) [unique, name: '…']</c> / 単一列は括弧なしも可）</item>
 ///   <item><c>Ref:</c> 行: 多重度記号は <c>-</c>（1対1）/ <c>&lt;</c>（1対多）/ <c>&lt;&gt;</c>（多対多）のみ。<c>&gt;</c>（多対1）は未対応</item>
 ///   <item><c>//</c> 行コメント</item>
 /// </list>
-/// Project・Enum・Indexes・TableGroup・複数行 Note ブロック等の DBML 構文は未対応
+/// Project・Enum・TableGroup・複数行 Note ブロック等の DBML 構文は未対応
+/// （<c>unique</c> でない索引は「一意制約ではない」ため読み飛ばす）
 /// </remarks>
 public static partial class DbmlImporter
 {
@@ -28,6 +30,15 @@ public static partial class DbmlImporter
 
     /// <summary>カラム設定の <c>note: '...'</c> を解析する正規表現</summary>
     private static readonly Regex NoteRegex = ColumnNoteRegex();
+
+    /// <summary><c>Indexes {</c> ブロック開始行を検出する正規表現</summary>
+    private static readonly Regex IndexesHeaderRegex = IndexesHeaderLineRegex();
+
+    /// <summary><c>Indexes</c> ブロック内の索引定義行を解析する正規表現</summary>
+    private static readonly Regex IndexLineRegex = IndexDefinitionLineRegex();
+
+    /// <summary>索引設定の <c>name: '...'</c> を解析する正規表現</summary>
+    private static readonly Regex IndexNameRegex = IndexSettingNameRegex();
 
     /// <summary>
     /// DBML ファイルを読み込み ER 図へ変換する
@@ -52,7 +63,10 @@ public static partial class DbmlImporter
         var lines = text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
         var entities = new Dictionary<string, Entity>(StringComparer.OrdinalIgnoreCase);
         var relationships = new List<Relationship>();
+        // Indexes ブロックの一意索引は、列定義より前に書かれていても解決できるよう最後にまとめて紐付ける
+        var pendingUniqueIndexes = new List<(Entity Entity, string? Name, List<string> Columns)>();
         Entity? currentEntity = null;
+        var inIndexesBlock = false;
 
         // 行単位の状態機械: currentEntity が非 null の間は Table ブロック内としてカラム行を解釈する
         foreach (var rawLine in lines)
@@ -66,13 +80,50 @@ public static partial class DbmlImporter
 
             if (currentEntity is not null)
             {
+                // Indexes ブロック内は索引定義として解釈する（閉じ括弧で Table ブロックへ戻る）
+                if (inIndexesBlock)
+                {
+                    if (line == "}")
+                    {
+                        inIndexesBlock = false;
+                        continue;
+                    }
+
+                    var uniqueIndex = ParseUniqueIndex(line, currentEntity.TableName);
+
+                    if (uniqueIndex is not null)
+                    {
+                        pendingUniqueIndexes.Add(
+                            (currentEntity, uniqueIndex.Value.Name, uniqueIndex.Value.Columns)
+                        );
+                    }
+
+                    continue;
+                }
+
                 if (line == "}")
                 {
                     currentEntity = null;
                     continue;
                 }
 
-                currentEntity.Columns.Add(ParseColumn(line, currentEntity.TableName));
+                if (IndexesHeaderRegex.IsMatch(line))
+                {
+                    inIndexesBlock = true;
+                    continue;
+                }
+
+                var (column, isUnique) = ParseColumn(line, currentEntity.TableName);
+                currentEntity.Columns.Add(column);
+
+                // カラム設定の unique は「その 1 列だけの名前なし一意制約」を意味する
+                if (isUnique)
+                {
+                    currentEntity.UniqueConstraints.Add(
+                        new UniqueConstraint { ColumnIds = [column.Id] }
+                    );
+                }
+
                 continue;
             }
 
@@ -113,6 +164,7 @@ public static partial class DbmlImporter
         }
 
         EnsureEntitiesHaveColumns(entities.Values);
+        ResolveUniqueIndexes(pendingUniqueIndexes);
         ResolveRelationshipColumns(entities, relationships);
 
         return new ErDiagram { Entities = entities.Values.ToList(), Relationships = relationships };
@@ -126,8 +178,9 @@ public static partial class DbmlImporter
     /// 設定省略時は NULL 許可を既定とし、<c>pk</c> 指定時は NOT NULL を強制する。
     /// note 内のエスケープ <c>\'</c> はシングルクォートへ復元する
     /// </remarks>
+    /// <returns>復元したカラムと、カラム設定 <c>unique</c> が指定されていたか</returns>
     /// <exception cref="InvalidDataException">名前と型の 2 トークンに満たない場合</exception>
-    private static Column ParseColumn(string line, string tableName)
+    private static (Column Column, bool IsUnique) ParseColumn(string line, string tableName)
     {
         var trimmed = line.Trim();
         var bracketStart = trimmed.IndexOf('[');
@@ -152,6 +205,7 @@ public static partial class DbmlImporter
             DataType = string.Join(' ', tokens.Skip(1)),
             IsNullable = true,
         };
+        var isUnique = false;
 
         foreach (var option in SplitOptions(optionText))
         {
@@ -165,6 +219,12 @@ public static partial class DbmlImporter
             if (string.Equals(option, "ref", StringComparison.OrdinalIgnoreCase))
             {
                 column.IsForeignKey = true;
+                continue;
+            }
+
+            if (string.Equals(option, "unique", StringComparison.OrdinalIgnoreCase))
+            {
+                isUnique = true;
                 continue;
             }
 
@@ -188,7 +248,102 @@ public static partial class DbmlImporter
             }
         }
 
-        return column;
+        return (column, isUnique);
+    }
+
+    /// <summary>
+    /// <c>Indexes</c> ブロック内の 1 行を解析し、一意索引なら制約名と構成列名を返す
+    /// </summary>
+    /// <returns>一意索引なら（名前・構成列名）。<c>unique</c> でない索引は <c>null</c>（読み飛ばす）</returns>
+    /// <exception cref="InvalidDataException">索引行の構文が解釈できない場合</exception>
+    private static (string? Name, List<string> Columns)? ParseUniqueIndex(
+        string line,
+        string tableName
+    )
+    {
+        var match = IndexLineRegex.Match(line);
+
+        if (!match.Success)
+        {
+            throw new InvalidDataException(
+                string.Format(Strings.Dbml_IndexParseError, tableName, line)
+            );
+        }
+
+        // 括弧つき（複数列可）と括弧なし（単一列）のどちらの記法でも列名一覧として扱う
+        var columnsText = match.Groups["columns"].Success
+            ? match.Groups["columns"].Value
+            : match.Groups["singleColumn"].Value;
+        var columns = columnsText
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToList();
+
+        if (columns.Count == 0)
+        {
+            throw new InvalidDataException(
+                string.Format(Strings.Dbml_IndexParseError, tableName, line)
+            );
+        }
+
+        var isUnique = false;
+        string? name = null;
+
+        foreach (var option in SplitOptions(match.Groups["settings"].Value))
+        {
+            if (string.Equals(option, "unique", StringComparison.OrdinalIgnoreCase))
+            {
+                isUnique = true;
+                continue;
+            }
+
+            var nameMatch = IndexNameRegex.Match(option);
+
+            if (nameMatch.Success)
+            {
+                name = nameMatch.Groups["name"].Value.Replace("\\'", "'");
+            }
+        }
+
+        // unique でない索引は一意制約ではないため取り込まない（インデックス自体はモデルに持たない）
+        return isUnique ? (name, columns) : null;
+    }
+
+    /// <summary>
+    /// <c>Indexes</c> ブロックから集めた一意索引を、対象エンティティの一意制約として確定する
+    /// </summary>
+    /// <exception cref="InvalidDataException">索引が参照する列がテーブルに存在しない場合</exception>
+    private static void ResolveUniqueIndexes(
+        IEnumerable<(Entity Entity, string? Name, List<string> Columns)> uniqueIndexes
+    )
+    {
+        foreach (var (entity, name, columns) in uniqueIndexes)
+        {
+            var columnIds = new List<Guid>(columns.Count);
+
+            foreach (var columnName in columns)
+            {
+                var column = entity.Columns.FirstOrDefault(c =>
+                    string.Equals(c.Name, columnName, StringComparison.OrdinalIgnoreCase)
+                );
+
+                if (column is null)
+                {
+                    throw new InvalidDataException(
+                        string.Format(
+                            Strings.Dbml_IndexColumnNotFound,
+                            entity.TableName,
+                            columnName
+                        )
+                    );
+                }
+
+                columnIds.Add(column.Id);
+            }
+
+            entity.UniqueConstraints.Add(
+                new UniqueConstraint { Name = name, ColumnIds = columnIds }
+            );
+        }
     }
 
     /// <summary>
@@ -428,4 +583,24 @@ public static partial class DbmlImporter
         RegexOptions.Compiled | RegexOptions.IgnoreCase
     )]
     private static partial Regex ColumnNoteRegex();
+
+    /// <summary><c>Indexes {</c> 形式のブロック開始行に一致する正規表現を生成する</summary>
+    [GeneratedRegex(@"^Indexes\s*\{$", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
+    private static partial Regex IndexesHeaderLineRegex();
+
+    /// <summary>
+    /// 索引定義行（<c>(列, …) [設定, …]</c> または単一列の <c>列 [設定, …]</c>）に一致する正規表現を生成する
+    /// </summary>
+    [GeneratedRegex(
+        @"^(?:\((?<columns>[^)]*)\)|(?<singleColumn>[^\s\[\]()]+))\s*(?:\[(?<settings>.*)\])?$",
+        RegexOptions.Compiled
+    )]
+    private static partial Regex IndexDefinitionLineRegex();
+
+    /// <summary>索引設定の <c>name: '...'</c>（<c>\'</c> エスケープ対応）に一致する正規表現を生成する</summary>
+    [GeneratedRegex(
+        @"^name:\s*'(?<name>(?:\\'|[^'])*)'$",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase
+    )]
+    private static partial Regex IndexSettingNameRegex();
 }

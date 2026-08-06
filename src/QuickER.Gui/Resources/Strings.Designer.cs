@@ -637,12 +637,60 @@ namespace QuickER.Resources {
             }
         }
         
+        public static string Property_UniqueConstraintsHeader {
+            get {
+                return ResourceManager.GetString("Property_UniqueConstraintsHeader", resourceCulture);
+            }
+        }
+
+        public static string Property_AddUniqueConstraintTooltip {
+            get {
+                return ResourceManager.GetString("Property_AddUniqueConstraintTooltip", resourceCulture);
+            }
+        }
+
+        public static string Property_RemoveUniqueConstraintTooltip {
+            get {
+                return ResourceManager.GetString("Property_RemoveUniqueConstraintTooltip", resourceCulture);
+            }
+        }
+
+        public static string Property_UniqueConstraintHint {
+            get {
+                return ResourceManager.GetString("Property_UniqueConstraintHint", resourceCulture);
+            }
+        }
+
+        public static string Property_UniqueConstraintName {
+            get {
+                return ResourceManager.GetString("Property_UniqueConstraintName", resourceCulture);
+            }
+        }
+
+        public static string Property_UniqueConstraintNameTooltip {
+            get {
+                return ResourceManager.GetString("Property_UniqueConstraintNameTooltip", resourceCulture);
+            }
+        }
+
+        public static string Property_UniqueConstraintDdlName {
+            get {
+                return ResourceManager.GetString("Property_UniqueConstraintDdlName", resourceCulture);
+            }
+        }
+
+        public static string Property_UniqueConstraintNoColumns {
+            get {
+                return ResourceManager.GetString("Property_UniqueConstraintNoColumns", resourceCulture);
+            }
+        }
+
         public static string Property_Memo {
             get {
                 return ResourceManager.GetString("Property_Memo", resourceCulture);
             }
         }
-        
+
         public static string Property_BulkTitleBackground {
             get {
                 return ResourceManager.GetString("Property_BulkTitleBackground", resourceCulture);
@@ -880,12 +928,24 @@ namespace QuickER.Resources {
             }
         }
         
+        public static string Undo_AddUniqueConstraint {
+            get {
+                return ResourceManager.GetString("Undo_AddUniqueConstraint", resourceCulture);
+            }
+        }
+
         public static string Undo_ChangeTargetDbms {
             get {
                 return ResourceManager.GetString("Undo_ChangeTargetDbms", resourceCulture);
             }
         }
-        
+
+        public static string Undo_ChangeUniqueConstraintColumns {
+            get {
+                return ResourceManager.GetString("Undo_ChangeUniqueConstraintColumns", resourceCulture);
+            }
+        }
+
         public static string Undo_DuplicateEntity {
             get {
                 return ResourceManager.GetString("Undo_DuplicateEntity", resourceCulture);
@@ -951,7 +1011,13 @@ namespace QuickER.Resources {
                 return ResourceManager.GetString("Undo_RemoveRelationship", resourceCulture);
             }
         }
-        
+
+        public static string Undo_RemoveUniqueConstraint {
+            get {
+                return ResourceManager.GetString("Undo_RemoveUniqueConstraint", resourceCulture);
+            }
+        }
+
         public static string Undo_SnapshotChange {
             get {
                 return ResourceManager.GetString("Undo_SnapshotChange", resourceCulture);
@@ -1336,6 +1402,18 @@ namespace QuickER.Resources {
             }
         }
         
+        public static string Dbml_IndexParseError {
+            get {
+                return ResourceManager.GetString("Dbml_IndexParseError", resourceCulture);
+            }
+        }
+
+        public static string Dbml_IndexColumnNotFound {
+            get {
+                return ResourceManager.GetString("Dbml_IndexColumnNotFound", resourceCulture);
+            }
+        }
+
         public static string Dbml_RelationshipParseError {
             get {
                 return ResourceManager.GetString("Dbml_RelationshipParseError", resourceCulture);
@@ -1704,6 +1782,60 @@ namespace QuickER.Resources {
         public static string Tool_RelationshipRemoved {
             get {
                 return ResourceManager.GetString("Tool_RelationshipRemoved", resourceCulture);
+            }
+        }
+
+        public static string Tool_Summary_UniqueConstraintsHeader {
+            get {
+                return ResourceManager.GetString("Tool_Summary_UniqueConstraintsHeader", resourceCulture);
+            }
+        }
+
+        public static string Tool_UniqueConstraintColumnsRequired {
+            get {
+                return ResourceManager.GetString("Tool_UniqueConstraintColumnsRequired", resourceCulture);
+            }
+        }
+
+        public static string Tool_UniqueConstraintColumnsInvalid {
+            get {
+                return ResourceManager.GetString("Tool_UniqueConstraintColumnsInvalid", resourceCulture);
+            }
+        }
+
+        public static string Tool_UniqueConstraintColumnsEmpty {
+            get {
+                return ResourceManager.GetString("Tool_UniqueConstraintColumnsEmpty", resourceCulture);
+            }
+        }
+
+        public static string Tool_UniqueConstraintDuplicateColumn {
+            get {
+                return ResourceManager.GetString("Tool_UniqueConstraintDuplicateColumn", resourceCulture);
+            }
+        }
+
+        public static string Tool_UniqueConstraintAdded {
+            get {
+                return ResourceManager.GetString("Tool_UniqueConstraintAdded", resourceCulture);
+            }
+        }
+
+        public static string Tool_UniqueConstraintUpdated {
+            get {
+                return ResourceManager.GetString("Tool_UniqueConstraintUpdated", resourceCulture);
+            }
+        }
+
+        public static string Tool_UniqueConstraintRemoved {
+            get {
+                return ResourceManager.GetString("Tool_UniqueConstraintRemoved", resourceCulture);
+            }
+        }
+
+        public static string Tool_UniqueConstraintNotFound {
+            get {
+                return ResourceManager.GetString("Tool_UniqueConstraintNotFound", resourceCulture);
             }
         }
 

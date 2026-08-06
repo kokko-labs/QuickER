@@ -128,7 +128,7 @@ public static class DiagramMetricsService
         foreach (var column in entity.Columns)
         {
             // 簡易表示中は PK/FK 以外のカラム行を表示しないため、配置からも除外する
-            if (isCompactView && !column.IsPrimaryKey && !column.IsForeignKey)
+            if (isCompactView && !ColumnKeyMarkPalette.IsVisibleInCompactView(column.KeyMark))
             {
                 continue;
             }

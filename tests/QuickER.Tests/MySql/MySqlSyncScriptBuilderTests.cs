@@ -649,4 +649,43 @@ public class MySqlSyncScriptBuilderTests
         alter.Should().BeGreaterThan(drop);
         add.Should().BeGreaterThan(alter);
     }
+
+    /// <summary>AddUniqueConstraint が ALTER TABLE ... ADD CONSTRAINT ... UNIQUE を生成することを検証する</summary>
+    [Fact(DisplayName = "AddUniqueConstraint は ADD CONSTRAINT UNIQUE を生成する")]
+    public void AddUniqueConstraint_GeneratesAddConstraint()
+    {
+        var item = new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.AddUniqueConstraint,
+            TableName = "customer",
+            UniqueConstraintColumns = ["code", "kind"],
+            IsSelected = true,
+        };
+
+        var sql = Build(item);
+        // 制約名は未設定のため UQ_{テーブル}_{列…} が合成される
+        sql.Should()
+            .Contain(
+                "ALTER TABLE `customer` ADD CONSTRAINT `UQ_customer_code_kind` UNIQUE (`code`, `kind`);"
+            );
+    }
+
+    /// <summary>DropUniqueConstraint が DROP CONSTRAINT ではなく DROP INDEX を生成することを検証する</summary>
+    /// <remarks>MySQL の一意制約は実体が一意インデックスで、DROP CONSTRAINT は 8.0.19 未満で通らない。</remarks>
+    [Fact(DisplayName = "DropUniqueConstraint は DROP INDEX を生成する")]
+    public void DropUniqueConstraint_GeneratesDropIndex()
+    {
+        var item = new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.DropUniqueConstraint,
+            TableName = "customer",
+            UniqueConstraintName = "uq_legacy",
+            UniqueConstraintColumns = ["code"],
+            IsSelected = true,
+        };
+
+        var sql = Build(item);
+        sql.Should().Contain("ALTER TABLE `customer` DROP INDEX `uq_legacy`;");
+        sql.Should().NotContain("DROP CONSTRAINT");
+    }
 }

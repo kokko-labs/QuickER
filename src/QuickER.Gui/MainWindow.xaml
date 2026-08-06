@@ -1513,21 +1513,24 @@
                                     <Style TargetType="StackPanel">
                                       <Setter Property="Visibility" Value="Visible" />
                                       <Style.Triggers>
-                                        <!-- 簡易表示中は PK/FK 以外のカラム行を非表示にする（PK でも FK でもないとき折りたたむ） -->
+                                        <!-- 簡易表示中は PK/FK 以外のカラム行を非表示にする（標識なし・UQ のみの行を折りたたむ） -->
                                         <MultiDataTrigger>
                                           <MultiDataTrigger.Conditions>
                                             <Condition
                                               Binding="{Binding DataContext.IsCompactViewInDiagram, RelativeSource={RelativeSource AncestorType=Window}}"
                                               Value="True"
                                             />
+                                            <Condition Binding="{Binding KeyMark}" Value="None" />
+                                          </MultiDataTrigger.Conditions>
+                                          <Setter Property="Visibility" Value="Collapsed" />
+                                        </MultiDataTrigger>
+                                        <MultiDataTrigger>
+                                          <MultiDataTrigger.Conditions>
                                             <Condition
-                                              Binding="{Binding IsPrimaryKey}"
-                                              Value="False"
+                                              Binding="{Binding DataContext.IsCompactViewInDiagram, RelativeSource={RelativeSource AncestorType=Window}}"
+                                              Value="True"
                                             />
-                                            <Condition
-                                              Binding="{Binding IsForeignKey}"
-                                              Value="False"
-                                            />
+                                            <Condition Binding="{Binding KeyMark}" Value="Unique" />
                                           </MultiDataTrigger.Conditions>
                                           <Setter Property="Visibility" Value="Collapsed" />
                                         </MultiDataTrigger>
@@ -1541,37 +1544,13 @@
                                       <ColumnDefinition Width="Auto" />
                                       <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0" FontWeight="Bold">
-                                      <TextBlock.Style>
-                                        <Style TargetType="TextBlock">
-                                          <Setter Property="Text" Value="" />
-                                          <Setter Property="Foreground" Value="#374151" />
-                                          <Style.Triggers>
-                                            <DataTrigger
-                                              Binding="{Binding IsPrimaryKey}"
-                                              Value="True"
-                                            >
-                                              <Setter Property="Text" Value="PK" />
-                                              <Setter Property="Foreground" Value="#D93025" />
-                                            </DataTrigger>
-                                            <MultiDataTrigger>
-                                              <MultiDataTrigger.Conditions>
-                                                <Condition
-                                                  Binding="{Binding IsPrimaryKey}"
-                                                  Value="False"
-                                                />
-                                                <Condition
-                                                  Binding="{Binding IsForeignKey}"
-                                                  Value="True"
-                                                />
-                                              </MultiDataTrigger.Conditions>
-                                              <Setter Property="Text" Value="FK" />
-                                              <Setter Property="Foreground" Value="#1A73E8" />
-                                            </MultiDataTrigger>
-                                          </Style.Triggers>
-                                        </Style>
-                                      </TextBlock.Style>
-                                    </TextBlock>
+                                    <!-- キー標識（PK > FK > UQ の優先度・表示文字と配色は ColumnViewModel.KeyMark* が 1 本化する） -->
+                                    <TextBlock
+                                      Grid.Column="0"
+                                      FontWeight="Bold"
+                                      Text="{Binding KeyMarkText}"
+                                      Foreground="{Binding KeyMarkColor}"
+                                    />
                                     <TextBlock
                                       Grid.Column="1"
                                       Text="{Binding Name}"
@@ -2207,6 +2186,138 @@
                     </DataGrid.Columns>
                   </DataGrid>
                 </Grid>
+              </Border>
+
+              <!-- UNIQUE 制約カード: 制約の追加・削除・制約名編集と、チェックによる構成列編集 -->
+              <Border Style="{StaticResource PropertyCard}">
+                <StackPanel>
+                  <Grid Margin="0,0,0,10">
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="*" />
+                      <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock
+                      Grid.Column="0"
+                      Style="{StaticResource PropertyCardTitle}"
+                      Text="{x:Static resources:Strings.Property_UniqueConstraintsHeader}"
+                      Margin="0"
+                      VerticalAlignment="Center"
+                    />
+                    <Button
+                      Grid.Column="1"
+                      Style="{StaticResource PropertyIconButton}"
+                      ToolTip="{x:Static resources:Strings.Property_AddUniqueConstraintTooltip}"
+                      Command="{Binding AddUniqueConstraintCommand}"
+                    >
+                      <TextBlock
+                        Text="+"
+                        FontSize="16"
+                        FontWeight="Bold"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        TextAlignment="Center"
+                      />
+                    </Button>
+                  </Grid>
+
+                  <TextBlock
+                    Style="{StaticResource PropertyHintText}"
+                    Margin="0,0,0,10"
+                    Text="{x:Static resources:Strings.Property_UniqueConstraintHint}"
+                  />
+
+                  <ItemsControl
+                    x:Name="UniqueConstraintsItems"
+                    ItemsSource="{Binding SelectedEntity.UniqueConstraints}"
+                  >
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate>
+                        <Border
+                          BorderBrush="{StaticResource DividerBrush}"
+                          BorderThickness="1"
+                          CornerRadius="8"
+                          Padding="10"
+                          Margin="0,0,0,8"
+                        >
+                          <StackPanel>
+                            <Grid>
+                              <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                              </Grid.ColumnDefinitions>
+                              <TextBlock
+                                Grid.Column="0"
+                                Style="{StaticResource PropertyFieldLabel}"
+                                Text="{x:Static resources:Strings.Property_UniqueConstraintName}"
+                              />
+                              <TextBox
+                                Grid.Column="1"
+                                Style="{StaticResource PropertyInputTextBox}"
+                                Text="{Binding Name, UpdateSourceTrigger=LostFocus}"
+                                ToolTip="{x:Static resources:Strings.Property_UniqueConstraintNameTooltip}"
+                              />
+                              <Button
+                                Grid.Column="2"
+                                Style="{StaticResource PropertyIconButton}"
+                                ToolTip="{x:Static resources:Strings.Property_RemoveUniqueConstraintTooltip}"
+                                Command="{Binding DataContext.RemoveUniqueConstraintCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                CommandParameter="{Binding}"
+                              >
+                                <TextBlock
+                                  Text="-"
+                                  FontSize="18"
+                                  FontWeight="Bold"
+                                  Margin="0,-2,0,0"
+                                  HorizontalAlignment="Center"
+                                  VerticalAlignment="Center"
+                                  TextAlignment="Center"
+                                />
+                              </Button>
+                            </Grid>
+
+                            <!-- 構成列のチェックリスト: 参加状態は制約側から導出（OneWay）し、切替は Undo 可能なコマンドで適用する -->
+                            <ItemsControl ItemsSource="{Binding ColumnCandidates}" Margin="0,8,0,0">
+                              <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                  <WrapPanel Orientation="Horizontal" />
+                                </ItemsPanelTemplate>
+                              </ItemsControl.ItemsPanel>
+                              <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                  <CheckBox
+                                    Margin="0,0,12,4"
+                                    Content="{Binding Column.Name}"
+                                    IsChecked="{Binding IsMember, Mode=OneWay}"
+                                    Command="{Binding DataContext.ToggleUniqueConstraintColumnCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                    CommandParameter="{Binding}"
+                                  />
+                                </DataTemplate>
+                              </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+
+                            <TextBlock
+                              Style="{StaticResource PropertyHintText}"
+                              Margin="0,4,0,0"
+                              Text="{Binding ColumnSummary}"
+                            />
+                            <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
+                              <TextBlock
+                                Style="{StaticResource PropertyHintText}"
+                                Margin="0,0,4,0"
+                                Text="{x:Static resources:Strings.Property_UniqueConstraintDdlName}"
+                              />
+                              <TextBlock
+                                Style="{StaticResource PropertyHintText}"
+                                Text="{Binding ResolvedName}"
+                              />
+                            </StackPanel>
+                          </StackPanel>
+                        </Border>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </StackPanel>
               </Border>
 
               <Border Style="{StaticResource PropertyCard}">

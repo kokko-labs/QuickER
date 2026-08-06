@@ -32,6 +32,8 @@ public static class SchemaSignature
                             + ")"
                         )
                     )
+                    + "#"
+                    + UniqueConstraintPart(x)
                 )
         );
         var r = string.Join(
@@ -57,5 +59,38 @@ public static class SchemaSignature
                 .OrderBy(s => s)
         );
         return e + "##" + r;
+    }
+
+    /// <summary>エンティティの一意制約を署名の部分文字列へ変換する</summary>
+    /// <remarks>
+    /// 制約ごとに「制約名（未設定は空）＋宣言順の構成列名」を組み立て、制約リストの並び順に
+    /// 依存しないようソートして連結する（取込側の列挙順が変わっても署名がぶれないようにする）。
+    /// 解決できないカラム ID は ID そのものを使う（差異は差異として署名に残す）。
+    /// </remarks>
+    private static string UniqueConstraintPart(Entity entity)
+    {
+        if (entity.UniqueConstraints.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        var columnNamesById = entity.Columns.ToDictionary(c => c.Id, c => c.Name);
+
+        return string.Join(
+            ",",
+            entity
+                .UniqueConstraints.Select(u =>
+                    (u.Name ?? "")
+                    + "("
+                    + string.Join(
+                        "+",
+                        u.ColumnIds.Select(id =>
+                            columnNamesById.TryGetValue(id, out var name) ? name : id.ToString()
+                        )
+                    )
+                    + ")"
+                )
+                .OrderBy(s => s, StringComparer.Ordinal)
+        );
     }
 }

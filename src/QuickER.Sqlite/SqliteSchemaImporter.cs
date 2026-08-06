@@ -73,9 +73,9 @@ public class SqliteSchemaImporter : ISchemaImporter
             await LoadColumnsAndPrimaryKeyAsync(conn, entry, ct).ConfigureAwait(false);
         }
 
-        var uniqueSets = await LoadUniqueColumnSetsAsync(conn, tables, ct).ConfigureAwait(false);
-        var (rels, warnings) = await LoadForeignKeysAsync(conn, tables, uniqueSets, ct)
-            .ConfigureAwait(false);
+        // 一意制約は FK の 1 対 1 判定の材料になるため、外部キーより先にモデルへ載せる
+        await LoadUniqueConstraintsAsync(conn, tables, ct).ConfigureAwait(false);
+        var (rels, warnings) = await LoadForeignKeysAsync(conn, tables, ct).ConfigureAwait(false);
         var aux = await LoadAuxiliaryObjectsAsync(conn, tables, ct).ConfigureAwait(false);
 
         return new SchemaResult
@@ -166,15 +166,25 @@ ORDER BY name;";
         }
     }
 
-    /// <summary>テーブルごとの一意制約（PK 以外）列集合を PRAGMA index_list / index_info から取得する</summary>
-    /// <returns>テーブルキー → 各一意インデックスの列名配列リスト</returns>
-    private static async Task<Dictionary<string, List<string[]>>> LoadUniqueColumnSetsAsync(
+    /// <summary>テーブルレベルの UNIQUE 制約を PRAGMA index_list / index_info から読み込み、モデルへ載せる</summary>
+    /// <remarks>
+    /// <para>
+    /// 対象は <c>origin='u'</c>（<c>CREATE TABLE</c> 内の <c>UNIQUE</c> 句）のみに限定する。
+    /// <c>origin='c'</c>（<c>CREATE UNIQUE INDEX</c>）は制約ではなくインデックスなので取り込まない
+    /// （5 方言で「真の UNIQUE 制約のみ」に線引きを揃えるため）。<c>origin='pk'</c> は主キー判定側の担当。
+    /// </para>
+    /// <para>
+    /// SQLite の <c>UNIQUE</c> 句は <c>sqlite_autoindex_*</c> という自動名しか持たず、DDL へ書き戻す名前として
+    /// 意味を成さないため、モデルの制約名は <c>null</c>（＝出力時に合成する）とする。
+    /// </para>
+    /// </remarks>
+    private static async Task LoadUniqueConstraintsAsync(
         SqliteConnection conn,
         Dictionary<string, SchemaTableEntry> tables,
         CancellationToken ct
     )
     {
-        var builder = new UniqueColumnSetBuilder();
+        var builder = new UniqueConstraintImportBuilder();
 
         foreach (var entry in tables.Values)
         {
@@ -193,10 +203,7 @@ ORDER BY name;";
                     var isUnique = listReader.GetInt64(2) != 0;
                     var origin = listReader.IsDBNull(3) ? string.Empty : listReader.GetString(3);
 
-                    // 主キー由来（origin='pk'）は PK 判定側で扱うため一意制約集合からは除外する
-                    if (
-                        isUnique && !string.Equals(origin, "pk", StringComparison.OrdinalIgnoreCase)
-                    )
+                    if (isUnique && string.Equals(origin, "u", StringComparison.OrdinalIgnoreCase))
                     {
                         uniqueIndexes.Add(indexName);
                     }
@@ -213,16 +220,22 @@ ORDER BY name;";
 
                 while (await infoReader.ReadAsync(ct).ConfigureAwait(false))
                 {
-                    // index_info の列は seqno / cid / name（構成列名）
+                    // index_info の列は seqno / cid / name（構成列名。seqno 昇順で宣言順を保つ）
                     if (!infoReader.IsDBNull(2))
                     {
-                        builder.Add(entry.Key, indexName, infoReader.GetString(2));
+                        // 集約キーには自動名を使うが、モデルへ保存する名前は null にする
+                        builder.Add(
+                            entry.Key,
+                            indexName,
+                            infoReader.GetString(2),
+                            persistedName: null
+                        );
                     }
                 }
             }
         }
 
-        return builder.Build();
+        UniqueConstraintImportBuilder.Attach(tables, builder.Build());
     }
 
     /// <summary>外部キーを PRAGMA foreign_key_list で読み込み、リレーションへ変換する</summary>
@@ -237,7 +250,6 @@ ORDER BY name;";
     )> LoadForeignKeysAsync(
         SqliteConnection conn,
         Dictionary<string, SchemaTableEntry> tables,
-        Dictionary<string, List<string[]>> uniqueSets,
         CancellationToken ct
     )
     {
@@ -276,25 +288,24 @@ ORDER BY name;";
             }
         }
 
-        var rels = builder.Build(tables, uniqueSets);
+        var rels = builder.Build(tables);
 
         return (rels, builder.CompositeForeignKeyWarnings.ToList());
     }
 
     /// <summary>
-    /// テーブルに付随する補助オブジェクト（インデックス・トリガー・テーブルレベル一意制約）を収集する。
+    /// テーブルに付随する補助オブジェクト（インデックス・トリガー）を収集する。
     /// </summary>
     /// <remarks>
     /// <para>
-    /// インデックス・トリガーは <c>sqlite_master</c> から <c>sql IS NOT NULL</c>（＝ユーザー定義の CREATE 文がある）
-    /// かつ <c>sqlite_</c> 接頭辞でないものを取り込み、CREATE SQL 全文を温存する（自動インデックス
-    /// <c>sqlite_autoindex_*</c> は <c>sql IS NULL</c> のため除外される）。
+    /// <c>sqlite_master</c> から <c>sql IS NOT NULL</c>（＝ユーザー定義の CREATE 文がある）かつ <c>sqlite_</c>
+    /// 接頭辞でないものを取り込み、CREATE SQL 全文を温存する（自動インデックス <c>sqlite_autoindex_*</c> は
+    /// <c>sql IS NULL</c> のため除外される）。
     /// </para>
     /// <para>
-    /// テーブルレベルの一意制約（<c>CREATE TABLE</c> 内の <c>UNIQUE (...)</c>）は単体の SQL を持たない自動インデックス
-    /// （<c>PRAGMA index_list</c> の <c>origin='u'</c>）として現れるため、<c>PRAGMA index_info</c> で構成列を取得し
-    /// 構造化して保持する（再構築時にテーブルレベル UNIQUE 句として再現する）。標準の <c>CREATE UNIQUE INDEX</c>
-    /// （<c>origin='c'</c>）は SQL を持つのでインデックス側で温存され、二重取得にならない。
+    /// テーブルレベルの一意制約（<c>CREATE TABLE</c> 内の <c>UNIQUE (...)</c>）はここでは扱わない。
+    /// 意味モデル（<see cref="Entity.UniqueConstraints"/>）が正本で、取込は
+    /// <see cref="UniqueConstraintImportBuilder"/> が担う。
     /// </para>
     /// </remarks>
     private static async Task<List<SchemaAuxiliaryObject>> LoadAuxiliaryObjectsAsync(
@@ -338,68 +349,6 @@ ORDER BY name;";
                             ? SchemaAuxiliaryObjectKind.Trigger
                             : SchemaAuxiliaryObjectKind.Index,
                         CreateSql = sql,
-                    }
-                );
-            }
-        }
-
-        // ---- テーブルレベル一意制約（origin='u'・構成列を構造化して保持する）----
-        foreach (var entry in tables.Values)
-        {
-            var uniqueIndexNames = new List<string>();
-
-            await using (var listCmd = conn.CreateCommand())
-            {
-                listCmd.CommandText = $"PRAGMA index_list({SqliteIdentifier.Quote(entry.Key)});";
-                await using var listReader = await listCmd
-                    .ExecuteReaderAsync(ct)
-                    .ConfigureAwait(false);
-
-                while (await listReader.ReadAsync(ct).ConfigureAwait(false))
-                {
-                    var indexName = listReader.GetString(1);
-                    var isUnique = listReader.GetInt64(2) != 0;
-                    var origin = listReader.IsDBNull(3) ? string.Empty : listReader.GetString(3);
-
-                    // origin='u'＝CREATE TABLE 内の UNIQUE 制約のみ（'c'＝CREATE UNIQUE INDEX は SQL 側で温存済み）
-                    if (isUnique && string.Equals(origin, "u", StringComparison.OrdinalIgnoreCase))
-                    {
-                        uniqueIndexNames.Add(indexName);
-                    }
-                }
-            }
-
-            foreach (var indexName in uniqueIndexNames)
-            {
-                var columns = new List<string>();
-
-                await using var infoCmd = conn.CreateCommand();
-                infoCmd.CommandText = $"PRAGMA index_info({SqliteIdentifier.Quote(indexName)});";
-                await using var infoReader = await infoCmd
-                    .ExecuteReaderAsync(ct)
-                    .ConfigureAwait(false);
-
-                while (await infoReader.ReadAsync(ct).ConfigureAwait(false))
-                {
-                    // index_info の列は seqno / cid / name（構成列名）。seqno 昇順で構成順を保つ
-                    if (!infoReader.IsDBNull(2))
-                    {
-                        columns.Add(infoReader.GetString(2));
-                    }
-                }
-
-                if (columns.Count == 0)
-                {
-                    continue;
-                }
-
-                aux.Add(
-                    new SchemaAuxiliaryObject
-                    {
-                        TableName = entry.Key,
-                        Name = indexName,
-                        Kind = SchemaAuxiliaryObjectKind.UniqueConstraint,
-                        Columns = columns,
                     }
                 );
             }

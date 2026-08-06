@@ -19,7 +19,8 @@ namespace QuickER.Provider;
 /// 持っていても、別々のリレーションとして正しく分離される。
 /// </para>
 /// <para>
-/// 参照先（子側 FK 保有テーブル）の FK 列集合が、そのテーブルの主キーまたは一意制約と一致する場合は
+/// 参照先（子側 FK 保有テーブル）の FK 列集合が、そのテーブルの主キーまたは一意制約
+/// （エンティティに載った <see cref="Entity.UniqueConstraints"/>）と一致する場合は
 /// 1 対 1、それ以外は 1 対多と判定する。生成されるリレーションは参照先（PK 側）を起点、
 /// FK 保有テーブルを終点として表現する。
 /// </para>
@@ -105,16 +106,18 @@ public sealed class ForeignKeyRelationshipBuilder
 
     /// <summary>集約済みの外部キーをリレーション一覧へ変換する</summary>
     /// <param name="tables">テーブルキー → 取込中のテーブルエントリ</param>
-    /// <param name="uniqueSets">テーブルキー → 主キー以外の一意制約列集合（1 対 1 判定に用いる）</param>
     /// <returns>投入順を保持したリレーション一覧。解決できないテーブル参照はスキップする</returns>
     /// <remarks>
+    /// <para>
+    /// 1 対 1 判定に用いる一意制約は、エンティティに載った <see cref="Entity.UniqueConstraints"/> を参照する。
+    /// そのため本メソッドの呼び出し前に <see cref="UniqueConstraintImportBuilder.Attach"/> を済ませておくこと。
+    /// </para>
+    /// <para>
     /// 複合外部キーを検出した場合は <see cref="CompositeForeignKeyWarnings"/> へ記録する
     /// （複数回呼んでも重複しないよう、呼び出しのたびに作り直す）。
+    /// </para>
     /// </remarks>
-    public List<Relationship> Build(
-        IReadOnlyDictionary<string, SchemaTableEntry> tables,
-        IReadOnlyDictionary<string, List<string[]>> uniqueSets
-    )
+    public List<Relationship> Build(IReadOnlyDictionary<string, SchemaTableEntry> tables)
     {
         var rels = new List<Relationship>();
         _compositeWarnings.Clear();
@@ -163,9 +166,7 @@ public sealed class ForeignKeyRelationshipBuilder
                 .Select(c => c.Name)
                 .OrderBy(s => s, StringComparer.OrdinalIgnoreCase)
                 .ToArray();
-            var uniqueOnParent = uniqueSets.TryGetValue(g.ParentKey, out var sets)
-                ? sets
-                : new List<string[]>();
+            var uniqueOnParent = ResolveUniqueColumnSets(parent.Entity);
 
             var isOneToOne =
                 SameSet(sortedParent, pkCols) || uniqueOnParent.Any(s => SameSet(sortedParent, s));
@@ -196,75 +197,57 @@ public sealed class ForeignKeyRelationshipBuilder
         return rels;
     }
 
+    /// <summary>エンティティの一意制約を「大文字小文字無視の昇順に並べた列名配列」の一覧へ展開する</summary>
+    /// <remarks>
+    /// 判定は集合一致（順序不問）なので、<see cref="SameSet"/> が比較できるようソートして返す。
+    /// カラム ID を解決できない制約は判定材料から除外する。
+    /// </remarks>
+    private static List<string[]> ResolveUniqueColumnSets(Entity entity)
+    {
+        var sets = new List<string[]>();
+
+        if (entity.UniqueConstraints.Count == 0)
+        {
+            return sets;
+        }
+
+        var columnNamesById = new Dictionary<Guid, string>();
+
+        foreach (var column in entity.Columns)
+        {
+            columnNamesById[column.Id] = column.Name;
+        }
+
+        foreach (var constraint in entity.UniqueConstraints)
+        {
+            var names = new List<string>(constraint.ColumnIds.Count);
+            var allResolved = true;
+
+            foreach (var columnId in constraint.ColumnIds)
+            {
+                if (!columnNamesById.TryGetValue(columnId, out var name))
+                {
+                    allResolved = false;
+                    break;
+                }
+
+                names.Add(name);
+            }
+
+            if (!allResolved || names.Count == 0)
+            {
+                continue;
+            }
+
+            sets.Add(names.OrderBy(s => s, StringComparer.OrdinalIgnoreCase).ToArray());
+        }
+
+        return sets;
+    }
+
     /// <summary>2 つのソート済み列名集合が大文字小文字無視で完全一致するか判定する（空集合は不一致）</summary>
     public static bool SameSet(string[] a, string[] b) =>
         a.Length > 0
         && a.Length == b.Length
         && a.SequenceEqual(b, StringComparer.OrdinalIgnoreCase);
-}
-
-/// <summary>
-/// テーブルごとの一意制約（主キー以外）列集合を、制約単位の構成列を投入しながら組み立てる共通ビルダー
-/// （1 対 1 判定に用いる。DB 方言横断で同一の集約ロジックを担う）
-/// </summary>
-/// <remarks>
-/// 一意制約 / 一意インデックスの構成列を序数順に読み出しながら <see cref="Add"/> で 1 行ずつ投入し、
-/// <see cref="Build"/> で「テーブルキー → 各一意制約の列名配列（大文字小文字無視の昇順）リスト」を得る。
-/// 構成列が 1 件も無いテーブルでも、当該テーブルが登場していれば空リストのエントリを保持する。
-/// </remarks>
-public sealed class UniqueColumnSetBuilder
-{
-    /// <summary>テーブルキー → 一意制約の空リスト保持（列を持たない制約でもテーブル登場を記録する）</summary>
-    private readonly Dictionary<string, List<string[]>> _result = new(
-        StringComparer.OrdinalIgnoreCase
-    );
-
-    /// <summary>(テーブルキー, 制約名) → 構成列（序数順に投入）</summary>
-    /// <remarks>
-    /// キーはタプルで持つ（文字列連結キーだと、区切り文字を含むテーブル名を
-    /// <see cref="Build"/> で分解する際に誤切断され、一意制約集合が別テーブルへ紐付く）。
-    /// </remarks>
-    private readonly Dictionary<(string TableKey, string ConstraintName), List<string>> _current =
-        new();
-
-    /// <summary>一意制約の構成列を 1 行投入する（複合列は同一 <paramref name="constraintName"/> で複数回呼ぶ）</summary>
-    /// <param name="tableKey">テーブルキー</param>
-    /// <param name="constraintName">一意制約名 / 一意インデックス名</param>
-    /// <param name="column">構成列名</param>
-    public void Add(string tableKey, string constraintName, string column)
-    {
-        var compositeKey = (tableKey, constraintName);
-
-        if (!_current.TryGetValue(compositeKey, out var list))
-        {
-            list = new List<string>();
-            _current[compositeKey] = list;
-        }
-
-        list.Add(column);
-
-        if (!_result.ContainsKey(tableKey))
-        {
-            _result[tableKey] = new List<string[]>();
-        }
-    }
-
-    /// <summary>投入済みの構成列から「テーブルキー → 各一意制約の列名配列リスト」を組み立てる</summary>
-    public Dictionary<string, List<string[]>> Build()
-    {
-        foreach (var kv in _current)
-        {
-            var tableKey = kv.Key.TableKey;
-
-            if (!_result.TryGetValue(tableKey, out var lists))
-            {
-                lists = new List<string[]>();
-                _result[tableKey] = lists;
-            }
-
-            lists.Add(kv.Value.OrderBy(s => s, StringComparer.OrdinalIgnoreCase).ToArray());
-        }
-
-        return _result;
-    }
 }

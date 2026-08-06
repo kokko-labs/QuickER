@@ -13,11 +13,13 @@ namespace QuickER.PostgreSql;
 ///   <item>AddTable</item>
 ///   <item>AddColumn</item>
 ///   <item>DropForeignKey（FK 依存列の型変更・列/テーブル削除より前に外す）</item>
+///   <item>DropUniqueConstraint（構成列の定義変更・主キー変更より前に外す）</item>
 ///   <item>AlterPrimaryKey / Drop フェーズ（旧主キー制約の解除。旧主キー列の NULL 許容化を通すため列定義変更より前）</item>
 ///   <item>AlterColumn</item>
 ///   <item>AlterPrimaryKey / Add フェーズ（新主キー制約の付与。新主キー列の NOT NULL 化を済ませた後に行う）</item>
 ///   <item>DropColumn</item>
 ///   <item>DropTable</item>
+///   <item>AddUniqueConstraint（FK が候補キーとして参照しうるため FK 追加より前に張る）</item>
 ///   <item>AddForeignKey</item>
 ///   <item>SetTableDescription / SetColumnDescription（COMMENT ON）</item>
 /// </list>
@@ -137,6 +139,43 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
         sb.AppendLine(
             $"ALTER TABLE {PgIdentifier.Quote(item.TableName)} ADD CONSTRAINT \"PK_{PgIdentifier.SafeName(item.TableName)}\" "
                 + $"PRIMARY KEY ({pkCols});"
+        );
+    }
+
+    /// <summary>一意制約を追加する ALTER TABLE ... ADD CONSTRAINT ... UNIQUE 文を生成する</summary>
+    protected override void AppendAddUniqueConstraint(StringBuilder sb, SchemaDiffItem item)
+    {
+        if (item.UniqueConstraintColumns.Count == 0)
+        {
+            sb.AppendLine(SyncScriptBuilderHelper.BuildUniqueConstraintSkipComment(item));
+            return;
+        }
+
+        var name = UniqueConstraintNaming.Resolve(
+            item.UniqueConstraintName,
+            item.TableName,
+            item.UniqueConstraintColumns,
+            PgIdentifier.SafeName
+        );
+        var cols = string.Join(", ", item.UniqueConstraintColumns.Select(PgIdentifier.QuoteSimple));
+        sb.AppendLine(
+            $"ALTER TABLE {PgIdentifier.Quote(item.TableName)} ADD CONSTRAINT \"{PgIdentifier.Escape(name)}\" "
+                + $"UNIQUE ({cols});"
+        );
+    }
+
+    /// <summary>一意制約を削除する ALTER TABLE ... DROP CONSTRAINT 文を生成する</summary>
+    protected override void AppendDropUniqueConstraint(StringBuilder sb, SchemaDiffItem item)
+    {
+        var name = UniqueConstraintNaming.Resolve(
+            item.UniqueConstraintName,
+            item.TableName,
+            item.UniqueConstraintColumns,
+            PgIdentifier.SafeName
+        );
+        sb.AppendLine(
+            $"ALTER TABLE {PgIdentifier.Quote(item.TableName)} "
+                + $"DROP CONSTRAINT \"{PgIdentifier.Escape(name)}\";"
         );
     }
 

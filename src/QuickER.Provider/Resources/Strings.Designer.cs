@@ -168,6 +168,18 @@ namespace QuickER.Provider.Resources {
             }
         }
 
+        public static string Diff_AddUniqueConstraint {
+            get {
+                return ResourceManager.GetString("Diff_AddUniqueConstraint", resourceCulture);
+            }
+        }
+
+        public static string Diff_DropUniqueConstraint {
+            get {
+                return ResourceManager.GetString("Diff_DropUniqueConstraint", resourceCulture);
+            }
+        }
+
         public static string Diff_ReorderColumns {
             get {
                 return ResourceManager.GetString("Diff_ReorderColumns", resourceCulture);
@@ -189,6 +201,12 @@ namespace QuickER.Provider.Resources {
         public static string Diff_AutoForeignKeyRebuild {
             get {
                 return ResourceManager.GetString("Diff_AutoForeignKeyRebuild", resourceCulture);
+            }
+        }
+
+        public static string Diff_AutoUniqueConstraintRebuild {
+            get {
+                return ResourceManager.GetString("Diff_AutoUniqueConstraintRebuild", resourceCulture);
             }
         }
 

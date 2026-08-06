@@ -115,6 +115,12 @@
   <data name="Diff_DropForeignKey" xml:space="preserve">
     <value>外部キー [{0}] → [{1}] を削除</value>
   </data>
+  <data name="Diff_AddUniqueConstraint" xml:space="preserve">
+    <value>一意制約 [{0}] ({1}) を追加</value>
+  </data>
+  <data name="Diff_DropUniqueConstraint" xml:space="preserve">
+    <value>一意制約 [{0}] ({1}) を削除</value>
+  </data>
   <data name="Diff_ReorderColumns" xml:space="preserve">
     <value>テーブル [{0}] の列の並び順をダイアグラムに合わせて変更</value>
   </data>
@@ -126,6 +132,9 @@
   </data>
   <data name="Diff_AutoForeignKeyRebuild" xml:space="preserve">
     <value>変更を可能にするため自動的に削除して再作成します: [{0}]</value>
+  </data>
+  <data name="Diff_AutoUniqueConstraintRebuild" xml:space="preserve">
+    <value>変更を可能にするため一意制約を自動的に削除して再作成します: ({0})</value>
   </data>
   <data name="Provider_UnsupportedProvider" xml:space="preserve">
     <value>未対応のプロバイダ: '{0}'。対応プロバイダ: {1}</value>

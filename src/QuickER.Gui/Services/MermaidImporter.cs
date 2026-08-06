@@ -6,6 +6,10 @@ using QuickER.Resources;
 namespace QuickER.Services;
 
 /// <summary>Mermaid の <c>erDiagram</c> 記法を ER 図へ変換するサービス</summary>
+/// <remarks>
+/// キー標識 <c>UK</c> はその 1 列だけの一意制約として取り込む（Mermaid には複数列をまとめる構文が無いため、
+/// 複合の一意制約は表現できない＝<see cref="MermaidExporter"/> も出力しない）。
+/// </remarks>
 public static partial class MermaidImporter
 {
     /// <summary>リレーション行の解析に用いる正規表現</summary>
@@ -62,7 +66,17 @@ public static partial class MermaidImporter
                     continue;
                 }
 
-                currentEntity.Columns.Add(ParseColumn(line, currentEntity.TableName));
+                var (column, isUnique) = ParseColumn(line, currentEntity.TableName);
+                currentEntity.Columns.Add(column);
+
+                // UK 標識はその 1 列だけの一意制約を意味する（Mermaid に複合制約の構文が無いため）
+                if (isUnique)
+                {
+                    currentEntity.UniqueConstraints.Add(
+                        new UniqueConstraint { ColumnIds = [column.Id] }
+                    );
+                }
+
                 continue;
             }
 
@@ -112,8 +126,9 @@ public static partial class MermaidImporter
         return new ErDiagram { Entities = entities.Values.ToList(), Relationships = relationships };
     }
 
-    /// <summary>カラム定義行を解析して <see cref="Column"/> を生成する（PK / FK マーカーを反映する）</summary>
-    private static Column ParseColumn(string line, string tableName)
+    /// <summary>カラム定義行を解析して <see cref="Column"/> を生成する（PK / FK / UK マーカーを反映する）</summary>
+    /// <returns>復元したカラムと、<c>UK</c> マーカー（単一列の一意制約）が付いていたか</returns>
+    private static (Column Column, bool IsUnique) ParseColumn(string line, string tableName)
     {
         var content = RemoveTrailingComment(line);
         var tokens = content.Split(' ', StringSplitOptions.RemoveEmptyEntries);
@@ -131,6 +146,7 @@ public static partial class MermaidImporter
             Name = tokens[1],
             IsNullable = true,
         };
+        var isUnique = false;
 
         foreach (var token in tokens.Skip(2))
         {
@@ -151,11 +167,17 @@ public static partial class MermaidImporter
                 if (string.Equals(key, "FK", StringComparison.OrdinalIgnoreCase))
                 {
                     column.IsForeignKey = true;
+                    continue;
+                }
+
+                if (string.Equals(key, "UK", StringComparison.OrdinalIgnoreCase))
+                {
+                    isUnique = true;
                 }
             }
         }
 
-        return column;
+        return (column, isUnique);
     }
 
     /// <summary>リレーション定義行を解析して <see cref="Relationship"/> を生成する</summary>

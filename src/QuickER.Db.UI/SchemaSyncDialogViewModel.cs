@@ -443,6 +443,29 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
                 );
         }
 
+        // 一意制約の削除で、その列を参照している外部キーが壊れうる
+        var brokenForeignKeys = _currentPlan
+            .Warnings.Where(w =>
+                w.Kind == SyncPlanWarningKind.UniqueConstraintDropMayBreakForeignKey
+            )
+            .Select(w =>
+                string.IsNullOrEmpty(w.Detail) ? w.TableName : $"{w.TableName} / {w.Detail}"
+            )
+            .ToList();
+
+        if (brokenForeignKeys.Count > 0)
+        {
+            var fkList = string.Join(
+                Environment.NewLine,
+                brokenForeignKeys.Select(t => "  • " + t)
+            );
+            sb.Append(Environment.NewLine)
+                .Append(Environment.NewLine)
+                .Append(
+                    string.Format(Strings.SchemaSync_ExecuteConfirmUniqueConstraintDropRisk, fkList)
+                );
+        }
+
         // 複合外部キーのため再構築を止めたテーブル（同期されずに残る）
         var blockedTables = _currentPlan
             .Warnings.Where(w => w.Kind == SyncPlanWarningKind.RebuildBlockedByCompositeForeignKey)

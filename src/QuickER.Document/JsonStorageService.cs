@@ -109,6 +109,13 @@ public static class JsonStorageService
         foreach (var entity in schema.Entities)
         {
             entity.Columns = Compact(entity.Columns);
+            entity.UniqueConstraints = Compact(entity.UniqueConstraints);
+
+            // ColumnIds は値型リストのため要素の null を持てない。リスト自体の null だけ既定値へ寄せる
+            foreach (var constraint in entity.UniqueConstraints)
+            {
+                constraint.ColumnIds ??= new List<Guid>();
+            }
         }
 
         foreach (var query in schema.Queries)

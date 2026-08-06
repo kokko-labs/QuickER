@@ -335,6 +335,30 @@
   <data name="Property_ReorderHint" xml:space="preserve">
     <value>Drag rows to change their order.</value>
   </data>
+  <data name="Property_UniqueConstraintsHeader" xml:space="preserve">
+    <value>Unique constraints</value>
+  </data>
+  <data name="Property_AddUniqueConstraintTooltip" xml:space="preserve">
+    <value>Add unique constraint</value>
+  </data>
+  <data name="Property_RemoveUniqueConstraintTooltip" xml:space="preserve">
+    <value>Delete this unique constraint</value>
+  </data>
+  <data name="Property_UniqueConstraintHint" xml:space="preserve">
+    <value>Add a constraint with +, then check the columns it covers. The order you check them in is the declared order.</value>
+  </data>
+  <data name="Property_UniqueConstraintName" xml:space="preserve">
+    <value>Name</value>
+  </data>
+  <data name="Property_UniqueConstraintNameTooltip" xml:space="preserve">
+    <value>Leave empty to generate UQ_{table}_{columns} when the DDL is written.</value>
+  </data>
+  <data name="Property_UniqueConstraintDdlName" xml:space="preserve">
+    <value>DDL name:</value>
+  </data>
+  <data name="Property_UniqueConstraintNoColumns" xml:space="preserve">
+    <value>No columns selected (not written to the DDL)</value>
+  </data>
   <data name="Property_Memo" xml:space="preserve">
     <value>Notes</value>
   </data>
@@ -428,8 +452,14 @@
   <data name="Undo_AddRelationship" xml:space="preserve">
     <value>Add relationship</value>
   </data>
+  <data name="Undo_AddUniqueConstraint" xml:space="preserve">
+    <value>Add unique constraint</value>
+  </data>
   <data name="Undo_ChangeTargetDbms" xml:space="preserve">
     <value>Change DB type to {0}</value>
+  </data>
+  <data name="Undo_ChangeUniqueConstraintColumns" xml:space="preserve">
+    <value>Change unique constraint columns</value>
   </data>
   <data name="Undo_DuplicateEntity" xml:space="preserve">
     <value>Duplicate: {0}</value>
@@ -463,6 +493,9 @@
   </data>
   <data name="Undo_RemoveRelationship" xml:space="preserve">
     <value>Delete relationship</value>
+  </data>
+  <data name="Undo_RemoveUniqueConstraint" xml:space="preserve">
+    <value>Delete unique constraint</value>
   </data>
   <data name="Undo_SnapshotChange" xml:space="preserve">
     <value>Property change</value>
@@ -578,6 +611,12 @@
   </data>
   <data name="Dbml_ColumnParseError" xml:space="preserve">
     <value>Cannot parse column definition '{1}' of table '{0}'.</value>
+  </data>
+  <data name="Dbml_IndexParseError" xml:space="preserve">
+    <value>Cannot parse index definition '{1}' in the Indexes block of table '{0}'.</value>
+  </data>
+  <data name="Dbml_IndexColumnNotFound" xml:space="preserve">
+    <value>Column '{1}' referenced by an index of table '{0}' is not defined.</value>
   </data>
   <data name="Dbml_RelationshipParseError" xml:space="preserve">
     <value>Cannot parse relationship definition '{0}'.</value>
@@ -839,6 +878,33 @@
   </data>
   <data name="Tool_RelationshipRemoved" xml:space="preserve">
     <value>Removed relationship '{0}' → '{1}'.</value>
+  </data>
+  <data name="Tool_Summary_UniqueConstraintsHeader" xml:space="preserve">
+    <value>Unique constraints:</value>
+  </data>
+  <data name="Tool_UniqueConstraintColumnsRequired" xml:space="preserve">
+    <value>columns is required and must be an array of column names.</value>
+  </data>
+  <data name="Tool_UniqueConstraintColumnsInvalid" xml:space="preserve">
+    <value>columns must contain non-empty column names.</value>
+  </data>
+  <data name="Tool_UniqueConstraintColumnsEmpty" xml:space="preserve">
+    <value>columns must contain at least one column name.</value>
+  </data>
+  <data name="Tool_UniqueConstraintDuplicateColumn" xml:space="preserve">
+    <value>Column '{0}' is listed more than once in columns.</value>
+  </data>
+  <data name="Tool_UniqueConstraintAdded" xml:space="preserve">
+    <value>Added unique constraint on table '{0}' (columns: {1}).</value>
+  </data>
+  <data name="Tool_UniqueConstraintUpdated" xml:space="preserve">
+    <value>Updated unique constraint on table '{0}' (columns: {1}).</value>
+  </data>
+  <data name="Tool_UniqueConstraintRemoved" xml:space="preserve">
+    <value>Removed unique constraint from table '{0}' (columns: {1}).</value>
+  </data>
+  <data name="Tool_UniqueConstraintNotFound" xml:space="preserve">
+    <value>Table '{0}' has no unique constraint over exactly these columns: {1}.</value>
   </data>
   <data name="Tool_ListSeparator" xml:space="preserve">
     <value>, </value>

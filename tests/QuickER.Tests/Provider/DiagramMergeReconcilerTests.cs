@@ -32,6 +32,55 @@ public class DiagramMergeReconcilerTests
             Columns = columns.ToList(),
         };
 
+    /// <summary>一意制約の構成列 Guid が、列 Id の書換えに追従することを検証する</summary>
+    /// <remarks>
+    /// 追従しないと制約が解決不能になり、DDL・差分から黙って消える（マージ取込のたびに UNIQUE が失われる）
+    /// </remarks>
+    [Fact(DisplayName = "一意制約の構成列 Guid が列 Id の書換えに追従する")]
+    public void Reconcile_NameMatch_RemapsUniqueConstraintColumnIds()
+    {
+        var currentEntityId = Guid.NewGuid();
+        var currentCodeId = Guid.NewGuid();
+        var current = new ErDiagram
+        {
+            Entities =
+            {
+                Ent(
+                    currentEntityId,
+                    "Customer",
+                    Col(Guid.NewGuid(), "Id"),
+                    Col(currentCodeId, "Code")
+                ),
+            },
+        };
+
+        // 取込結果は同名・同名列だが Id は新規。制約は取込結果の列 Id を参照している
+        var importedCode = Col(Guid.NewGuid(), "Code");
+        var importedEntity = Ent(
+            Guid.NewGuid(),
+            "Customer",
+            Col(Guid.NewGuid(), "Id"),
+            importedCode
+        );
+        importedEntity.UniqueConstraints.Add(
+            new UniqueConstraint { Name = "UQ_Customer_Code", ColumnIds = { importedCode.Id } }
+        );
+
+        var merged = DiagramMergeReconciler.Reconcile(
+            current,
+            new[] { importedEntity },
+            Array.Empty<Relationship>(),
+            preserveExistingMemo: true
+        );
+
+        merged.Entities[0].UniqueConstraints.Should().ContainSingle();
+        merged
+            .Entities[0]
+            .UniqueConstraints[0]
+            .ColumnIds.Should()
+            .Equal([currentCodeId], "構成列は現在図の列 Guid を指すべき");
+    }
+
     /// <summary>一致エンティティ・列の Id が現在図の Guid へ書き換わることを検証する</summary>
     [Fact(DisplayName = "名前一致でエンティティ・列の Id が現在図の Guid へ引き継がれる")]
     public void Reconcile_NameMatch_AdoptsCurrentGuids()

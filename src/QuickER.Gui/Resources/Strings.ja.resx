@@ -345,6 +345,30 @@
   <data name="Property_ReorderHint" xml:space="preserve">
     <value>行のドラッグで並び順を変更できます。</value>
   </data>
+  <data name="Property_UniqueConstraintsHeader" xml:space="preserve">
+    <value>UNIQUE 制約</value>
+  </data>
+  <data name="Property_AddUniqueConstraintTooltip" xml:space="preserve">
+    <value>UNIQUE 制約を追加</value>
+  </data>
+  <data name="Property_RemoveUniqueConstraintTooltip" xml:space="preserve">
+    <value>この UNIQUE 制約を削除</value>
+  </data>
+  <data name="Property_UniqueConstraintHint" xml:space="preserve">
+    <value>+ で制約を追加し、対象の列にチェックを入れます。チェックした順が宣言順になります。</value>
+  </data>
+  <data name="Property_UniqueConstraintName" xml:space="preserve">
+    <value>制約名</value>
+  </data>
+  <data name="Property_UniqueConstraintNameTooltip" xml:space="preserve">
+    <value>空欄なら DDL 生成時に UQ_{テーブル}_{列…} を合成します</value>
+  </data>
+  <data name="Property_UniqueConstraintDdlName" xml:space="preserve">
+    <value>DDL 上の名前:</value>
+  </data>
+  <data name="Property_UniqueConstraintNoColumns" xml:space="preserve">
+    <value>構成列が未選択です（DDL には出力されません）</value>
+  </data>
   <data name="Property_Memo" xml:space="preserve">
     <value>メモ</value>
   </data>
@@ -438,8 +462,14 @@
   <data name="Undo_AddRelationship" xml:space="preserve">
     <value>リレーション追加</value>
   </data>
+  <data name="Undo_AddUniqueConstraint" xml:space="preserve">
+    <value>UNIQUE 制約の追加</value>
+  </data>
   <data name="Undo_ChangeTargetDbms" xml:space="preserve">
     <value>DB 種別を {0} へ変更</value>
+  </data>
+  <data name="Undo_ChangeUniqueConstraintColumns" xml:space="preserve">
+    <value>UNIQUE 制約の構成列変更</value>
   </data>
   <data name="Undo_DuplicateEntity" xml:space="preserve">
     <value>複製: {0}</value>
@@ -473,6 +503,9 @@
   </data>
   <data name="Undo_RemoveRelationship" xml:space="preserve">
     <value>リレーション削除</value>
+  </data>
+  <data name="Undo_RemoveUniqueConstraint" xml:space="preserve">
+    <value>UNIQUE 制約の削除</value>
   </data>
   <data name="Undo_SnapshotChange" xml:space="preserve">
     <value>プロパティ変更</value>
@@ -588,6 +621,12 @@
   </data>
   <data name="Dbml_ColumnParseError" xml:space="preserve">
     <value>テーブル '{0}' のカラム定義 '{1}' を解析できません。</value>
+  </data>
+  <data name="Dbml_IndexParseError" xml:space="preserve">
+    <value>テーブル '{0}' の Indexes ブロックの索引定義 '{1}' を解析できません。</value>
+  </data>
+  <data name="Dbml_IndexColumnNotFound" xml:space="preserve">
+    <value>テーブル '{0}' の索引が参照するカラム '{1}' が定義されていません。</value>
   </data>
   <data name="Dbml_RelationshipParseError" xml:space="preserve">
     <value>リレーション定義 '{0}' を解析できません。</value>
@@ -849,6 +888,33 @@
   </data>
   <data name="Tool_RelationshipRemoved" xml:space="preserve">
     <value>'{0}' → '{1}' のリレーションを削除しました。</value>
+  </data>
+  <data name="Tool_Summary_UniqueConstraintsHeader" xml:space="preserve">
+    <value>一意制約:</value>
+  </data>
+  <data name="Tool_UniqueConstraintColumnsRequired" xml:space="preserve">
+    <value>columns は必須で、列名の配列を指定してください。</value>
+  </data>
+  <data name="Tool_UniqueConstraintColumnsInvalid" xml:space="preserve">
+    <value>columns には空でない列名を指定してください。</value>
+  </data>
+  <data name="Tool_UniqueConstraintColumnsEmpty" xml:space="preserve">
+    <value>columns には列名を 1 つ以上指定してください。</value>
+  </data>
+  <data name="Tool_UniqueConstraintDuplicateColumn" xml:space="preserve">
+    <value>カラム '{0}' が columns に重複して指定されています。</value>
+  </data>
+  <data name="Tool_UniqueConstraintAdded" xml:space="preserve">
+    <value>テーブル '{0}' に一意制約（構成列: {1}）を追加しました。</value>
+  </data>
+  <data name="Tool_UniqueConstraintUpdated" xml:space="preserve">
+    <value>テーブル '{0}' の一意制約（構成列: {1}）を更新しました。</value>
+  </data>
+  <data name="Tool_UniqueConstraintRemoved" xml:space="preserve">
+    <value>テーブル '{0}' から一意制約（構成列: {1}）を削除しました。</value>
+  </data>
+  <data name="Tool_UniqueConstraintNotFound" xml:space="preserve">
+    <value>テーブル '{0}' には構成列が {1} と完全に一致する一意制約がありません。</value>
   </data>
   <data name="Tool_ListSeparator" xml:space="preserve">
     <value>、</value>

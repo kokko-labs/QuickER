@@ -618,4 +618,41 @@ public class OracleSyncScriptBuilderTests
         alter.Should().BeGreaterThan(drop);
         add.Should().BeGreaterThan(alter);
     }
+
+    /// <summary>AddUniqueConstraint が ALTER TABLE ... ADD CONSTRAINT ... UNIQUE を生成することを検証する</summary>
+    [Fact(DisplayName = "AddUniqueConstraint は ADD CONSTRAINT UNIQUE を生成する")]
+    public void AddUniqueConstraint_GeneratesAddConstraint()
+    {
+        var item = new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.AddUniqueConstraint,
+            TableName = "customer",
+            UniqueConstraintColumns = ["code", "kind"],
+            IsSelected = true,
+        };
+
+        var sql = Build(item);
+        // 制約名は未設定のため UQ_{テーブル}_{列…} が合成される
+        sql.Should()
+            .Contain(
+                "ALTER TABLE \"customer\" ADD CONSTRAINT \"UQ_customer_code_kind\" UNIQUE (\"code\", \"kind\");"
+            );
+    }
+
+    /// <summary>DropUniqueConstraint が live 側の実名で DROP CONSTRAINT を生成することを検証する</summary>
+    [Fact(DisplayName = "DropUniqueConstraint は実名で DROP CONSTRAINT を生成する")]
+    public void DropUniqueConstraint_GeneratesDropConstraint()
+    {
+        var item = new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.DropUniqueConstraint,
+            TableName = "customer",
+            UniqueConstraintName = "uq_legacy",
+            UniqueConstraintColumns = ["code"],
+            IsSelected = true,
+        };
+
+        var sql = Build(item);
+        sql.Should().Contain("ALTER TABLE \"customer\" DROP CONSTRAINT \"uq_legacy\";");
+    }
 }

@@ -57,6 +57,8 @@ public class PostgreSqlSchemaImporter : ISchemaImporter
         await LoadColumnsAsync(conn, tables, ct).ConfigureAwait(false);
         await LoadPrimaryKeysAsync(conn, tables, ct).ConfigureAwait(false);
         await LoadDescriptionsAsync(conn, tables, ct).ConfigureAwait(false);
+        // 一意制約は FK の 1 対 1 判定の材料になるため、外部キーより先にモデルへ載せる
+        await LoadUniqueConstraintsAsync(conn, tables, ct).ConfigureAwait(false);
         var (rels, warnings) = await LoadForeignKeysAsync(conn, tables, ct).ConfigureAwait(false);
 
         return new SchemaResult
@@ -114,8 +116,12 @@ JOIN pg_catalog.pg_attribute a ON a.attrelid = c.oid AND a.attnum = k.attnum
 WHERE con.contype = 'p' AND ns.nspname = 'public'
 ORDER BY c.relname, k.n;";
 
-    /// <summary>主キー以外の一意制約の構成列を取得するクエリ（1 対 1 判定に用いる）</summary>
-    /// <remarks>主キーと同様 conkey を unnest ... WITH ORDINALITY で展開する（contype = 'u'）</remarks>
+    /// <summary>UNIQUE 制約の構成列を宣言順に取得するクエリ（モデルの一意制約・1 対 1 判定に用いる）</summary>
+    /// <remarks>
+    /// 主キーと同様 conkey を unnest ... WITH ORDINALITY で展開する（contype = 'u'）。
+    /// ordinality の n は conkey の並び＝制約の宣言順そのものなので、これで宣言順が保たれる。
+    /// <c>CREATE UNIQUE INDEX</c> による素の一意インデックスは pg_constraint に現れないため自然に除外される
+    /// </remarks>
     private const string UniqueConstraintSql =
         @"
 SELECT c.relname AS table_name, con.conname AS constraint_name, a.attname AS column_name, k.n AS ordinal
@@ -312,9 +318,6 @@ WHERE n.nspname = 'public' AND c.relkind = 'r';";
         CancellationToken ct
     )
     {
-        // 親テーブルの一意制約列集合を取得し、1 対 1 判定に用いる
-        var uniqueSets = await LoadUniqueColumnSetsAsync(conn, ct).ConfigureAwait(false);
-
         var builder = new ForeignKeyRelationshipBuilder();
 
         await using var cmd = new NpgsqlCommand(ForeignKeysSql, conn);
@@ -337,32 +340,33 @@ WHERE n.nspname = 'public' AND c.relkind = 'r';";
             builder.Add(fkName, parentKey, parentCol, refKey, refCol, deleteAction, updateAction);
         }
 
-        var rels = builder.Build(tables, uniqueSets);
+        var rels = builder.Build(tables);
 
         return (rels, builder.CompositeForeignKeyWarnings.ToList());
     }
 
-    /// <summary>テーブルごとの一意制約列集合を取得する</summary>
-    /// <returns>テーブル名 → 各一意制約の列名配列リスト</returns>
-    private static async Task<Dictionary<string, List<string[]>>> LoadUniqueColumnSetsAsync(
+    /// <summary>UNIQUE 制約を読み込み、各エンティティの一意制約としてモデルへ載せる</summary>
+    private static async Task LoadUniqueConstraintsAsync(
         NpgsqlConnection conn,
+        Dictionary<string, SchemaTableEntry> tables,
         CancellationToken ct
     )
     {
-        var builder = new UniqueColumnSetBuilder();
+        var builder = new UniqueConstraintImportBuilder();
 
-        await using var cmd = new NpgsqlCommand(UniqueConstraintSql, conn);
-        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-
-        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        await using (var cmd = new NpgsqlCommand(UniqueConstraintSql, conn))
+        await using (var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false))
         {
-            var key = reader.GetString(0);
-            var con = reader.GetString(1);
-            var col = reader.GetString(2);
-            builder.Add(key, con, col);
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                var key = reader.GetString(0);
+                var constraintName = reader.GetString(1);
+                var col = reader.GetString(2);
+                builder.Add(key, constraintName, col, constraintName);
+            }
         }
 
-        return builder.Build();
+        UniqueConstraintImportBuilder.Attach(tables, builder.Build());
     }
 
     /// <summary>pg_constraint.confdeltype / confupdtype の 1 文字コードを参照アクションへ変換する</summary>

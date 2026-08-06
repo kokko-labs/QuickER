@@ -34,6 +34,14 @@ public static class SyncScriptBuilderHelper
     public static string GetNullabilityClause(Column column) =>
         column.IsPrimaryKey || !column.IsNullable ? "NOT NULL" : "NULL";
 
+    /// <summary>構成列を解決できない一意制約のスキップコメントを組み立てる（固定文は英語が正本）</summary>
+    /// <remarks>
+    /// 差分計算は構成列を解決できた一意制約しか出さないため通常は現れない防御。生成 SQL の決定性を保つため、
+    /// 表示用の <see cref="SchemaDiffItem.Description"/>（UI 言語で変わる）は使わない。
+    /// </remarks>
+    public static string BuildUniqueConstraintSkipComment(SchemaDiffItem item) =>
+        $"-- Skipped '{item.Kind}' on {item.TableName}: the unique constraint has no resolvable columns.";
+
     /// <summary>外部キーの ON DELETE / ON UPDATE 参照アクション句を生成する</summary>
     public static string BuildReferentialActionClause(Relationship? relationship) =>
         relationship is null

@@ -1,5 +1,6 @@
 ﻿using CommunityToolkit.Mvvm.ComponentModel;
 using QuickER.Model;
+using QuickER.Services;
 
 namespace QuickER.ViewModels;
 
@@ -39,6 +40,45 @@ public partial class ColumnViewModel : ObservableObject
 
     /// <summary>外部キーフラグがリレーション設定により自動管理されているかどうか</summary>
     public bool IsForeignKeyManagedByRelationship { get; set; }
+
+    /// <summary>いずれかの一意制約の構成列かどうかの実体フィールド</summary>
+    private bool _isUniqueConstraintMember;
+
+    /// <summary>いずれかの一意制約（UNIQUE）の構成列かどうか</summary>
+    /// <remarks>
+    /// 一意制約の正本は <see cref="EntityViewModel.UniqueConstraints"/> 側にあり、
+    /// このフラグは所有エンティティが制約の増減・構成列変更に追従して設定する派生表示状態
+    /// （ER 図カードの UQ 標識の判定に用いる。保存モデルへは書き出さない）
+    /// </remarks>
+    public bool IsUniqueConstraintMember
+    {
+        get => _isUniqueConstraintMember;
+        internal set
+        {
+            if (SetProperty(ref _isUniqueConstraintMember, value))
+            {
+                NotifyKeyMarkChanged();
+            }
+        }
+    }
+
+    /// <summary>ER 図カードのキー欄に表示する標識（PK &gt; FK &gt; UQ の優先度で 1 つに畳む）</summary>
+    public ColumnKeyMark KeyMark =>
+        ColumnKeyMarkPalette.Resolve(IsPrimaryKey, IsForeignKey, IsUniqueConstraintMember);
+
+    /// <summary>キー標識の表示文字（標識なしは空文字）</summary>
+    public string KeyMarkText => ColumnKeyMarkPalette.GetText(KeyMark);
+
+    /// <summary>キー標識の表示色（#RRGGBB）</summary>
+    public string KeyMarkColor => ColumnKeyMarkPalette.GetColor(KeyMark);
+
+    /// <summary>キー標識の派生プロパティ 3 種の変更を通知する</summary>
+    private void NotifyKeyMarkChanged()
+    {
+        OnPropertyChanged(nameof(KeyMark));
+        OnPropertyChanged(nameof(KeyMarkText));
+        OnPropertyChanged(nameof(KeyMarkColor));
+    }
 
     /// <summary>NULL 許容チェックを編集可能にするかどうか（主キーの場合は不可）</summary>
     public bool IsNullableEditable => !IsPrimaryKey;
@@ -83,6 +123,7 @@ public partial class ColumnViewModel : ObservableObject
     partial void OnIsPrimaryKeyChanged(bool value)
     {
         OnPropertyChanged(nameof(IsNullableEditable));
+        NotifyKeyMarkChanged();
 
         // 主キー化したカラムは NULL 不可とするため IsNullable を連動して落とす
         if (value && IsNullable)
@@ -93,6 +134,9 @@ public partial class ColumnViewModel : ObservableObject
         // 連動変更がすべて確定した後に完了を通知する
         IsPrimaryKeyChangeCompleted?.Invoke(this, EventArgs.Empty);
     }
+
+    /// <summary>外部キー変更時にキー標識の表示を更新する</summary>
+    partial void OnIsForeignKeyChanged(bool value) => NotifyKeyMarkChanged();
 
     /// <summary>現在の状態をモデルへコピーして返す（保存時に使用する）</summary>
     public Column ToModel() =>

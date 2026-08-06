@@ -25,19 +25,20 @@ Choosing a file from the "Import" button brings the contents into the diagram. D
 
 Imports DBML consisting of `Table` blocks and `Ref:` lines. The supported syntax is the subset that QuickER's DBML export writes: the syntax round-trips, but the column mapping of relationships is not guaranteed to (see the export section below).
 
-- Column settings: `pk` / `ref` / `null` / `not null` / `note: '...'`
+- Column settings: `pk` / `ref` / `unique` / `null` / `not null` / `note: '...'`
+- Unique constraints: the `unique` column setting (a constraint over that one column) and `unique` indexes in an `Indexes` block (`(col, …) [unique, name: '…']` — composite and named constraints). Indexes that are not `unique` are skipped
 - Relationships: `-` (one-to-one), `<` (one-to-many), and `<>` (many-to-many) on `Ref:` lines. `>` (many-to-one) is not supported
-- Not supported: `Project` / `Enum` / `Indexes` / `TableGroup` / multi-line `Note` blocks
+- Not supported: `Project` / `Enum` / `TableGroup` / multi-line `Note` blocks
 
 Tables with no columns get a default PK column (`ID int`). DBML carries no dialect information, so the diagram's target DB stays as it was before the import.
 
 ### Mermaid (.mmd / .mermaid)
 
-Imports the `erDiagram` notation. Like DBML it carries no dialect information, so the target DB is kept.
+Imports the `erDiagram` notation. Like DBML it carries no dialect information, so the target DB is kept. A `UK` key marker is imported as a unique constraint over that single column (Mermaid has no syntax for grouping several columns, so composite unique constraints cannot be expressed).
 
 ### Excel definition documents (.xlsx)
 
-Definition documents exported by QuickER can be re-imported. Sheet roles are identified by hidden definition tags, so the sheets can be renamed or translated and still import — but **Excel files created by other applications cannot be imported directly** (to migrate definition documents you already have, transcribe them into QuickER's document format once). The target DBMS is embedded in the document and restored, dialect and all, on import. Count mismatches, duplicates, and references to undefined tables are import errors.
+Definition documents exported by QuickER can be re-imported. In the key column, `UQ{n}` marks unique constraints and the same number means the same constraint, so the columns sharing a number are restored as one constraint (the constraint name is not carried by the document, so it is left unset and synthesized at DDL generation time). Sheet roles are identified by hidden definition tags, so the sheets can be renamed or translated and still import — but **Excel files created by other applications cannot be imported directly** (to migrate definition documents you already have, transcribe them into QuickER's document format once). The target DBMS is embedded in the document and restored, dialect and all, on import. Count mismatches, duplicates, and references to undefined tables are import errors.
 
 ### C# code (.cs)
 
@@ -57,11 +58,11 @@ Outputs the full set of CREATE statements in the diagram's target dialect.
 
 ### DBML / Mermaid
 
-Writes out the text formats. The DBML output is the same subset as the import above (`Table` blocks + `Ref:` lines), and the written file can be re-imported — though what round-trips is the syntax, not necessarily the relationships' column mapping: the importer does not use the column names on a `Ref:` line to restore the endpoints but re-infers them, so the columns a relationship connects can come back different (for instance when the same pair of tables has several foreign keys). Useful for working with DBML tools such as dbdiagram.org, and with GitHub and documentation tools that render Mermaid.
+Writes out the text formats. The DBML output is the same subset as the import above (`Table` blocks + `Ref:` lines), and the written file can be re-imported — though what round-trips is the syntax, not necessarily the relationships' column mapping: the importer does not use the column names on a `Ref:` line to restore the endpoints but re-infers them, so the columns a relationship connects can come back different (for instance when the same pair of tables has several foreign keys). Unique constraints are written as the `unique` column setting for unnamed single-column constraints, and as an `Indexes` block (`(col, …) [unique, name: '…']`) for composite and named ones. Mermaid's key column holds a single marker per column, so it is folded to `PK` > `FK` > `UK`, and **`UK` is written only for the columns of single-column constraints** (splitting a composite constraint per column would come back on import as N separate single-column constraints — a different meaning — so composite ones are not written). Useful for working with DBML tools such as dbdiagram.org, and with GitHub and documentation tools that render Mermaid.
 
 ### Excel definition documents (.xlsx)
 
-Outputs a definition document consisting of a table list, a relationship list, and per-table detail sheets (column types, required flags, keys, descriptions). The target DBMS is embedded in the file, so this document can be turned back into a diagram by re-importing it into QuickER.
+Outputs a definition document consisting of a table list, a relationship list, and per-table detail sheets (column types, required flags, keys, descriptions). Besides `PK` and `FK{n}`, the key column shows unique constraints as `UQ{n}` (combined as in `PK/UQ1` or `FK1/UQ2`). `n` follows the order the constraints appear in, and **the same number means the same constraint**, so a composite constraint puts the same number on every column it covers. The target DBMS is embedded in the file, so this document can be turned back into a diagram by re-importing it into QuickER.
 
 ### HTML definition documents (.html)
 

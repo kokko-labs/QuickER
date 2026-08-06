@@ -191,16 +191,25 @@ public class CommandTests
     [Fact(DisplayName = "RemoveColumnCommand: Undo で元の位置に復元される")]
     public void RemoveColumnCommand_RoundTrip()
     {
-        var first = new ColumnViewModel(new Column { Name = "A", DataType = "int" });
-        var second = new ColumnViewModel(new Column { Name = "B", DataType = "int" });
-        var third = new ColumnViewModel(new Column { Name = "C", DataType = "int" });
-        var columns = new ObservableCollection<ColumnViewModel> { first, second, third };
-        var cmd = new RemoveColumnCommand(columns, second, [], () => { });
+        var entity = new EntityViewModel(
+            new Entity
+            {
+                TableName = "T",
+                Columns =
+                {
+                    new Column { Name = "A", DataType = "int" },
+                    new Column { Name = "B", DataType = "int" },
+                    new Column { Name = "C", DataType = "int" },
+                },
+            }
+        );
+        var second = entity.Columns[1];
+        var cmd = new RemoveColumnCommand(entity, second, [], () => { });
 
         cmd.Execute();
-        columns.Select(x => x.Name).Should().Equal("A", "C");
+        entity.Columns.Select(x => x.Name).Should().Equal("A", "C");
 
         cmd.Undo();
-        columns.Select(x => x.Name).Should().Equal("A", "B", "C");
+        entity.Columns.Select(x => x.Name).Should().Equal("A", "B", "C");
     }
 }

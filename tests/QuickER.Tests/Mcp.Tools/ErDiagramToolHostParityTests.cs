@@ -12,7 +12,7 @@ namespace QuickER.Tests.Mcp.Tools;
 /// <summary>
 /// 同一のツール呼び出し列を (a) GUI 側 <see cref="ErDiagramDynamicTools"/>＋<see cref="MainViewModel"/> と
 /// (b) <see cref="DocumentErDiagramToolHost"/>＋一時ファイル の両経路へ流し、結果の意味モデル
-/// （エンティティ名・列の名前/型/PK/NULL/説明・リレーションの端点/種別）と各呼び出しの成否が
+/// （エンティティ名・列の名前/型/PK/NULL/説明・一意制約の名前/構成列・リレーションの端点/種別）と各呼び出しの成否が
 /// 一致することを検証するパリティテスト。Guid は両経路で新規生成されるため突合には使わず、名前で対応付ける。
 /// </summary>
 public sealed class ErDiagramToolHostParityTests : IDisposable
@@ -48,11 +48,15 @@ public sealed class ErDiagramToolHostParityTests : IDisposable
         string Description
     );
 
+    /// <summary>比較用の一意制約スナップショット（名前と構成列名を宣言順で保持する）</summary>
+    private sealed record UniqueSnap(string Name, List<string> Columns);
+
     /// <summary>比較用のエンティティスナップショット</summary>
     private sealed record EntitySnap(
         string TableName,
         string Description,
-        List<ColumnSnap> Columns
+        List<ColumnSnap> Columns,
+        List<UniqueSnap> UniqueConstraints
     );
 
     /// <summary>比較用のリレーションスナップショット（端点は名前・種別は文字列）</summary>
@@ -63,7 +67,7 @@ public sealed class ErDiagramToolHostParityTests : IDisposable
     )]
     public void GuiAndDocumentHosts_ProduceEquivalentModel()
     {
-        // 9 ツール全部を通る代表シナリオ（末尾に失敗系も含め成否パリティも確認する）
+        // ER 図操作 11 ツール全部を通る代表シナリオ（末尾に失敗系も含め成否パリティも確認する）
         var scenario = new (string Tool, object Args)[]
         {
             ("add_entity", new { table_name = "Customer" }),
@@ -173,7 +177,37 @@ public sealed class ErDiagramToolHostParityTests : IDisposable
                     memo = "note",
                 }
             ),
+            // 一意制約（追加・列集合一致での upsert・列集合での削除・失敗系）
+            ("set_unique_constraint", new { table_name = "Customer", columns = new[] { "Name" } }),
+            (
+                "set_unique_constraint",
+                new
+                {
+                    table_name = "Order",
+                    columns = new[] { "OrderId", "CustomerId" },
+                    name = "UQ_Order_Pair",
+                }
+            ),
+            // 同じ列集合を順序違い・大小違いで再定義（upsert＝件数は増えず列順と名前が更新される）
+            (
+                "set_unique_constraint",
+                new { table_name = "Order", columns = new[] { "customerid", "orderid" } }
+            ),
+            (
+                "set_unique_constraint",
+                new { table_name = "OrderLine", columns = new[] { "OrderId" } }
+            ),
+            // 失敗系（存在しない列・列集合が一致しない削除）
+            (
+                "set_unique_constraint",
+                new { table_name = "Customer", columns = new[] { "NoSuchColumn" } }
+            ),
+            (
+                "remove_unique_constraint",
+                new { table_name = "Customer", columns = new[] { "CustomerId" } }
+            ),
             // 列削除（Order→OrderLine の FK 列 OrderId を消し、参照クリアも通す）
+            // OrderLine.OrderId の一意制約は制約ごと消える（両ホスト共通のカスケード）
             ("remove_column", new { table_name = "OrderLine", column_name = "OrderId" }),
             // エンティティ削除（接続リレーションも巻き添え削除）
             ("remove_entity", new { table_name = "OrderLine" }),
@@ -245,6 +279,11 @@ public sealed class ErDiagramToolHostParityTests : IDisposable
                         c.IsNullable,
                         c.Description
                     ))
+                    .ToList(),
+                e.UniqueConstraints.Select(u => new UniqueSnap(
+                        u.Name,
+                        u.ColumnIds.Select(id => e.Columns.First(c => c.Id == id).Name).ToList()
+                    ))
                     .ToList()
             ))
             .ToList();
@@ -261,6 +300,13 @@ public sealed class ErDiagramToolHostParityTests : IDisposable
                         c.IsPrimaryKey,
                         c.IsNullable,
                         c.Description
+                    ))
+                    .ToList(),
+                e.UniqueConstraints.Select(u => new UniqueSnap(
+                        // VM 側は未設定名を空文字で持つため、比較のため空文字へ揃える
+                        u.Name
+                            ?? string.Empty,
+                        u.ColumnIds.Select(id => e.Columns.First(c => c.Id == id).Name).ToList()
                     ))
                     .ToList()
             ))

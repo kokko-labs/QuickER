@@ -875,7 +875,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var affected = FindRelationshipsUsingColumn(column);
         UndoRedo.Execute(
             new RemoveColumnCommand(
-                SelectedEntity.Columns,
+                SelectedEntity,
                 column,
                 affected,
                 () => ApplyRelationshipColumnRules()
@@ -901,7 +901,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var affected = FindRelationshipsUsingColumn(col);
         UndoRedo.Execute(
             new RemoveColumnCommand(
-                SelectedEntity.Columns,
+                SelectedEntity,
                 col,
                 affected,
                 () => ApplyRelationshipColumnRules()
@@ -913,6 +913,62 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// <summary>カラム削除コマンド（ツールバー）の実行可否</summary>
     private bool CanRemoveSelectedColumn() =>
         SelectedEntity is not null && SelectedColumn is not null;
+
+    /// <summary>選択中エンティティへ空の一意制約を追加する（Undo 可能）</summary>
+    /// <remarks>構成列は追加後にカードのチェックボックスで選ぶ（＝「+ → チェック」の 2 操作で単一列制約が作れる）</remarks>
+    [RelayCommand(CanExecute = nameof(CanAddUniqueConstraint))]
+    private void AddUniqueConstraint()
+    {
+        if (SelectedEntity is null)
+        {
+            return;
+        }
+
+        var constraint = new UniqueConstraintViewModel(SelectedEntity, new UniqueConstraint());
+        UndoRedo.Execute(
+            new AddUniqueConstraintCommand(SelectedEntity.UniqueConstraints, constraint)
+        );
+    }
+
+    /// <summary>一意制約追加コマンドの実行可否</summary>
+    private bool CanAddUniqueConstraint() => SelectedEntity is not null;
+
+    /// <summary>指定の一意制約を選択中エンティティから削除する（Undo 可能）</summary>
+    [RelayCommand]
+    private void RemoveUniqueConstraint(UniqueConstraintViewModel? constraint)
+    {
+        if (SelectedEntity is null || constraint is null)
+        {
+            return;
+        }
+
+        UndoRedo.Execute(
+            new RemoveUniqueConstraintCommand(SelectedEntity.UniqueConstraints, constraint)
+        );
+    }
+
+    /// <summary>一意制約の構成列チェックを切り替える（Undo 可能）</summary>
+    /// <remarks>
+    /// 追加はチェックした順で末尾へ積む（＝チェック順が宣言順）。取込済み制約の並びは
+    /// 触らなかった列について保たれる
+    /// </remarks>
+    [RelayCommand]
+    private void ToggleUniqueConstraintColumn(UniqueConstraintColumnViewModel? candidate)
+    {
+        if (candidate is null)
+        {
+            return;
+        }
+
+        var constraint = candidate.Constraint;
+        var columnId = candidate.Column.Id;
+        var before = constraint.ColumnIds.ToList();
+        var after = constraint.ContainsColumn(columnId)
+            ? before.Where(id => id != columnId).ToList()
+            : [.. before, columnId];
+
+        UndoRedo.Execute(new ChangeUniqueConstraintColumnsCommand(constraint, before, after));
+    }
 
     /// <summary>カラム選択の変化に応じてカラム操作系コマンドの実行可否を更新する</summary>
     partial void OnSelectedColumnChanged(ColumnViewModel? value)
@@ -1035,6 +1091,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         RemoveSelectedEntityCommand.NotifyCanExecuteChanged();
         AddColumnCommand.NotifyCanExecuteChanged();
+        AddUniqueConstraintCommand.NotifyCanExecuteChanged();
         CopySelectedEntityCommand.NotifyCanExecuteChanged();
         PasteCopiedColumnCommand.NotifyCanExecuteChanged();
         DuplicateSelectedEntityCommand.NotifyCanExecuteChanged();

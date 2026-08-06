@@ -127,6 +127,16 @@ public static class DiagramMergeReconciler
                     column.Id = mappedColumnId;
                 }
             }
+
+            // 一意制約は構成列を Guid 参照で持つため、列 Id の書換えに追従させる
+            // （追従させないと制約が解決不能になり、DDL・差分から黙って消える）
+            foreach (var constraint in entity.UniqueConstraints)
+            {
+                for (var i = 0; i < constraint.ColumnIds.Count; i++)
+                {
+                    constraint.ColumnIds[i] = MapId(columnIdMap, constraint.ColumnIds[i]);
+                }
+            }
         }
 
         // リレーションの参照 Id も対応表で追従書き換えする（両端エンティティ・両端列）

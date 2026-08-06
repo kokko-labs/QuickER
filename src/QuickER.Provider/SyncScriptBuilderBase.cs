@@ -95,6 +95,14 @@ public abstract class SyncScriptBuilderBase : ISyncScriptBuilder
                 AppendDropForeignKey(sb, item);
                 break;
 
+            case SchemaDiffKind.AddUniqueConstraint:
+                AppendAddUniqueConstraint(sb, item);
+                break;
+
+            case SchemaDiffKind.DropUniqueConstraint:
+                AppendDropUniqueConstraint(sb, item);
+                break;
+
             case SchemaDiffKind.DropColumn:
                 AppendDropColumn(sb, item);
                 break;
@@ -170,6 +178,17 @@ public abstract class SyncScriptBuilderBase : ISyncScriptBuilder
 
     /// <summary>外部キー削除文を書き出す</summary>
     protected abstract void AppendDropForeignKey(StringBuilder sb, SchemaDiffItem item);
+
+    /// <summary>一意制約の追加文を書き出す</summary>
+    /// <remarks>
+    /// 制約名は <see cref="SchemaDiffItem.UniqueConstraintName"/>（図側のモデル名。未設定なら
+    /// <see cref="UniqueConstraintNaming.Resolve"/> が <c>UQ_{表}_{列…}</c> を合成する）を用いる。
+    /// </remarks>
+    protected abstract void AppendAddUniqueConstraint(StringBuilder sb, SchemaDiffItem item);
+
+    /// <summary>一意制約の削除文を書き出す</summary>
+    /// <remarks>制約名は <see cref="SchemaDiffItem.UniqueConstraintName"/>（live 側の実名）を用いる。</remarks>
+    protected abstract void AppendDropUniqueConstraint(StringBuilder sb, SchemaDiffItem item);
 
     /// <summary>列削除文を書き出す</summary>
     protected abstract void AppendDropColumn(StringBuilder sb, SchemaDiffItem item);

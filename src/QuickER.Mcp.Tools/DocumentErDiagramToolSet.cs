@@ -4,7 +4,7 @@ namespace QuickER.Mcp.Tools;
 
 /// <summary>
 /// ファイルベースの ER 図操作ツール群を <see cref="McpToolSet"/> として組み立てるファクトリ。
-/// 定義は <see cref="ErDiagramToolCatalog"/> の 12 ツール（GUI チャットと共有＝ER 図操作 9＋名前付きクエリ
+/// 定義は <see cref="ErDiagramToolCatalog"/> の 14 ツール（GUI チャットと共有＝ER 図操作 9＋一意制約 2＋名前付きクエリ
 /// <c>set_query</c> / <c>list_queries</c> / <c>remove_query</c>）＋ファイルモード専用の <c>create_diagram</c> に、
 /// <see cref="FileParameterInjector"/> で <c>file</c> 引数を注入したもの。
 /// 実行は引数 JSON から <c>file</c> を取り出して <see cref="DocumentErDiagramToolHost"/> へ委譲する。

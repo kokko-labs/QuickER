@@ -14,11 +14,13 @@ namespace QuickER.Oracle;
 ///   <item>AddTable</item>
 ///   <item>AddColumn</item>
 ///   <item>DropForeignKey（FK 依存列の型変更・列/テーブル削除より前に外す）</item>
+///   <item>DropUniqueConstraint（構成列の定義変更・主キー変更より前に外す）</item>
 ///   <item>AlterPrimaryKey / Drop フェーズ（旧主キー制約の解除。旧主キー列の NULL 許容化＝ORA-01451 を通すため列定義変更より前）</item>
 ///   <item>AlterColumn</item>
 ///   <item>AlterPrimaryKey / Add フェーズ（新主キー制約の付与。新主キー列の NOT NULL 化を済ませた後に行う）</item>
 ///   <item>DropColumn</item>
 ///   <item>DropTable</item>
+///   <item>AddUniqueConstraint（FK が候補キーとして参照しうるため FK 追加より前に張る）</item>
 ///   <item>AddForeignKey</item>
 ///   <item>SetTableDescription / SetColumnDescription（COMMENT ON）</item>
 /// </list>
@@ -82,6 +84,8 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
                 SchemaDiffKind.AddColumn => AppendAddColumn(item),
                 SchemaDiffKind.AlterColumn => AppendAlterColumn(item),
                 SchemaDiffKind.DropForeignKey => AppendDropForeignKey(item),
+                SchemaDiffKind.AddUniqueConstraint => AppendAddUniqueConstraint(item),
+                SchemaDiffKind.DropUniqueConstraint => AppendDropUniqueConstraint(item),
                 SchemaDiffKind.DropColumn => AppendDropColumn(item),
                 SchemaDiffKind.DropTable => AppendDropTable(item),
                 SchemaDiffKind.AddForeignKey => AppendAddForeignKey(item),
@@ -233,6 +237,41 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
         var pkCols = string.Join(", ", pks.Select(p => OracleIdentifier.QuoteSimple(p.Name)));
         return $"ALTER TABLE {OracleIdentifier.Quote(item.TableName)} ADD CONSTRAINT \"PK_{OracleIdentifier.SafeName(item.TableName)}\" "
             + $"PRIMARY KEY ({pkCols});";
+    }
+
+    /// <summary>一意制約を追加する ALTER TABLE ... ADD CONSTRAINT ... UNIQUE 文を生成する</summary>
+    private static string AppendAddUniqueConstraint(SchemaDiffItem item)
+    {
+        if (item.UniqueConstraintColumns.Count == 0)
+        {
+            return SyncScriptBuilderHelper.BuildUniqueConstraintSkipComment(item);
+        }
+
+        var name = UniqueConstraintNaming.Resolve(
+            item.UniqueConstraintName,
+            item.TableName,
+            item.UniqueConstraintColumns,
+            OracleIdentifier.SafeName
+        );
+        var cols = string.Join(
+            ", ",
+            item.UniqueConstraintColumns.Select(OracleIdentifier.QuoteSimple)
+        );
+        return $"ALTER TABLE {OracleIdentifier.Quote(item.TableName)} ADD CONSTRAINT \"{OracleIdentifier.Escape(name)}\" "
+            + $"UNIQUE ({cols});";
+    }
+
+    /// <summary>一意制約を削除する ALTER TABLE ... DROP CONSTRAINT 文を生成する</summary>
+    private static string AppendDropUniqueConstraint(SchemaDiffItem item)
+    {
+        var name = UniqueConstraintNaming.Resolve(
+            item.UniqueConstraintName,
+            item.TableName,
+            item.UniqueConstraintColumns,
+            OracleIdentifier.SafeName
+        );
+        return $"ALTER TABLE {OracleIdentifier.Quote(item.TableName)} "
+            + $"DROP CONSTRAINT \"{OracleIdentifier.Escape(name)}\";";
     }
 
     /// <summary>ALTER TABLE ... DROP COLUMN（列削除）文を生成する</summary>
