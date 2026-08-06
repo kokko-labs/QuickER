@@ -108,7 +108,7 @@ internal sealed partial class CSharpGenerationModelBuilder
         // 列由来プロパティ名が生成する静的メンバー（DisplayName / CustomizeDisplayName）と衝突する場合は、
         // そのエンティティのみ両メンバーを省略する（生成は完走・警告診断を出す）。
         var hasDisplayNameCollision = properties.Any(property =>
-            EntityDisplayNameReservedMembers.Contains(property.PropertyName)
+            GeneratedFixedMemberNames.EntityDisplayNameReserved.Contains(property.PropertyName)
         );
 
         if (hasDisplayNameCollision)
@@ -141,24 +141,6 @@ internal sealed partial class CSharpGenerationModelBuilder
         };
     }
 
-    /// <summary>Entity が生成する静的表示名メンバー名（列由来プロパティ名がこれらと一致すると衝突とみなす）</summary>
-    private static readonly HashSet<string> EntityDisplayNameReservedMembers = new(
-        StringComparer.Ordinal
-    )
-    {
-        "DisplayName",
-        "CustomizeDisplayName",
-    };
-
-    /// <summary>EditModel が生成する表示名解決ヘルパ名（列由来プロパティ名がこれらと一致すると衝突とみなす）</summary>
-    private static readonly HashSet<string> EditModelDisplayNameReservedMembers = new(
-        StringComparer.Ordinal
-    )
-    {
-        "GetDisplayName",
-        "CustomizePropertyDisplayName",
-    };
-
     /// <summary>エンティティ定義と解決済みナビゲーションから EditModel クラスの生成モデルを構築する</summary>
     private CSharpEditModelClassModel BuildEditModelClass(
         Entity entity,
@@ -174,8 +156,10 @@ internal sealed partial class CSharpGenerationModelBuilder
         // CustomizePropertyDisplayName）と衝突する場合は、この EditModel のみ表示名機構を省略し、
         // 検証メッセージを従来どおりプロパティ名で構築する（生成は完走・警告診断を出す）。
         var hasDisplayNameCollision = properties.Any(property =>
-            EditModelDisplayNameReservedMembers.Contains(property.PropertyName)
-            || EditModelDisplayNameReservedMembers.Contains(property.BindingPropertyName)
+            GeneratedFixedMemberNames.EditModelDisplayNameHelpers.Contains(property.PropertyName)
+            || GeneratedFixedMemberNames.EditModelDisplayNameHelpers.Contains(
+                property.BindingPropertyName
+            )
         );
 
         if (hasDisplayNameCollision)

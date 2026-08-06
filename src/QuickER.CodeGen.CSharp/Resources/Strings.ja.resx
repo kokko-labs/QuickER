@@ -97,6 +97,9 @@
   <data name="CodeGen_Origin_Navigation" xml:space="preserve">
     <value>ナビゲーション '{0}'</value>
   </data>
+  <data name="CodeGen_Origin_FixedMember" xml:space="preserve">
+    <value>生成インフラの固定メンバー '{0}'</value>
+  </data>
   <data name="CodeGen_Error_InvalidNamespace" xml:space="preserve">
     <value>'{0}' オプションの名前空間 '{1}' が C# の名前空間として不正です。'.' 区切りの各セグメントは有効な識別子（先頭は文字か '_'、以降は文字・数字・'_'）で、かつ C# の予約語でない必要があります。空のセグメント（先頭・末尾・連続した '.'）も使えません。</value>
   </data>

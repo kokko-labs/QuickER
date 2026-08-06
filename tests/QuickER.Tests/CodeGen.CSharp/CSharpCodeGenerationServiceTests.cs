@@ -2587,6 +2587,171 @@ public class CSharpCodeGenerationServiceTests
         result.Files[0].Content.Should().Contain("public CustomerEntity Customer { get; set; }");
     }
 
+    // ===== 生成インフラの固定メンバーとの衝突 =====
+
+    /// <summary>
+    /// 生成インフラの固定メンバーと衝突する列名の図を既定オプションで生成する（衝突検証用の共通ヘルパ）
+    /// </summary>
+    /// <param name="tableName">テーブル名</param>
+    /// <param name="tableDescription">テーブルの説明（<c>DefaultDisplayName</c> の発行条件の出し分けに使う）</param>
+    /// <param name="columnNames">主キー <c>id</c> に続けて追加する列名</param>
+    private static CodeGenerationResult GenerateWithColumns(
+        string tableName,
+        string? tableDescription,
+        params string[] columnNames
+    )
+    {
+        var diagram = new ErDiagram
+        {
+            Entities =
+            [
+                new Entity
+                {
+                    Id = Guid.NewGuid(),
+                    TableName = tableName,
+                    Description = tableDescription ?? string.Empty,
+                    Columns =
+                    [
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                        .. columnNames.Select(columnName => new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = columnName,
+                            DataType = "int",
+                            IsNullable = false,
+                        }),
+                    ],
+                },
+            ],
+        };
+
+        return new CSharpCodeGenerationService().Generate(
+            diagram,
+            new CodeGenerationOptions { RootNamespace = "Sample.Domain" }
+        );
+    }
+
+    /// <summary>
+    /// EditModel の固定フィールド <c>_rowStateSnapshot</c> と衝突する列（row_state_snapshot）はエラーになることを検証する
+    /// </summary>
+    [Fact]
+    public void Generate_ColumnCollidingWithEditModelSnapshotField_ShouldFailWithError()
+    {
+        var result = GenerateWithColumns("items", null, "row_state_snapshot");
+
+        result.HasErrors.Should().BeTrue();
+        result.Files.Should().BeEmpty();
+        result
+            .Diagnostics.Should()
+            .Contain(diagnostic =>
+                diagnostic.Severity == GenerationDiagnosticSeverity.Error
+                && diagnostic.Message.Contains("ItemEditModel")
+                && diagnostic.Message.Contains("'_rowStateSnapshot'")
+                && diagnostic.Message.Contains("'row_state_snapshot'")
+            );
+    }
+
+    /// <summary>
+    /// EditModel の固定プロパティ <c>ParentCollection</c> と衝突する列（parent_collection）はエラーになることを検証する
+    /// </summary>
+    [Fact]
+    public void Generate_ColumnCollidingWithEditModelParentCollection_ShouldFailWithError()
+    {
+        var result = GenerateWithColumns("items", null, "parent_collection");
+
+        result.HasErrors.Should().BeTrue();
+        result.Files.Should().BeEmpty();
+        result
+            .Diagnostics.Should()
+            .Contain(diagnostic =>
+                diagnostic.Severity == GenerationDiagnosticSeverity.Error
+                && diagnostic.Message.Contains("ItemEditModel")
+                && diagnostic.Message.Contains("'ParentCollection'")
+                && diagnostic.Message.Contains("'parent_collection'")
+            );
+    }
+
+    /// <summary>
+    /// 列の値変更フック（<c>On{列}Changing</c>）と衝突する列名（a ＋ on_a_changing）はエラーになることを検証する
+    /// </summary>
+    [Fact]
+    public void Generate_ColumnCollidingWithValueChangeHook_ShouldFailWithError()
+    {
+        var result = GenerateWithColumns("items", null, "a", "on_a_changing");
+
+        result.HasErrors.Should().BeTrue();
+        result.Files.Should().BeEmpty();
+        result
+            .Diagnostics.Should()
+            .Contain(diagnostic =>
+                diagnostic.Severity == GenerationDiagnosticSeverity.Error
+                && diagnostic.Message.Contains("ItemEditModel")
+                && diagnostic.Message.Contains("'OnAChanging'")
+                && diagnostic.Message.Contains("'a'")
+                && diagnostic.Message.Contains("'on_a_changing'")
+            );
+    }
+
+    /// <summary>
+    /// テーブル説明があるとき、Entity の <c>DefaultDisplayName</c> override と衝突する列はエラーになることを検証する
+    /// </summary>
+    [Fact]
+    public void Generate_ColumnCollidingWithEntityDefaultDisplayName_ShouldFailWithError()
+    {
+        var result = GenerateWithColumns("items", "Item master", "default_display_name");
+
+        result.HasErrors.Should().BeTrue();
+        result.Files.Should().BeEmpty();
+        result
+            .Diagnostics.Should()
+            .Contain(diagnostic =>
+                diagnostic.Severity == GenerationDiagnosticSeverity.Error
+                && diagnostic.Message.Contains("ItemEntity")
+                && diagnostic.Message.Contains("'DefaultDisplayName'")
+                && diagnostic.Message.Contains("'default_display_name'")
+            );
+    }
+
+    /// <summary>
+    /// テーブル説明が無ければ <c>DefaultDisplayName</c> の override 自体が生成されないため、
+    /// 同名の列があっても診断を出さないことを検証する（発行条件に連動した出し分けの回帰防止）
+    /// </summary>
+    [Fact]
+    public void Generate_ColumnNamedDefaultDisplayNameWithoutDescription_ShouldSucceed()
+    {
+        var result = GenerateWithColumns("items", null, "default_display_name");
+
+        result.HasErrors.Should().BeFalse();
+        result.Files.Should().NotBeEmpty();
+        result
+            .Diagnostics.Should()
+            .NotContain(diagnostic => diagnostic.Message.Contains("DefaultDisplayName"));
+    }
+
+    /// <summary>
+    /// 基底クラス（EntityBase / EditModelBase）にしかないメンバー名と同名の列は診断を出さないことを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 派生クラス側は同名メンバーを宣言しないため CS0108（基底メンバーの隠蔽）の警告になるだけでコンパイルは通る。
+    /// これらを固定メンバー名簿へ入れると正当な図を軒並み弾いてしまうため、入れないことを固定する。
+    /// </remarks>
+    [Fact]
+    public void Generate_ColumnNamedAfterBaseClassOnlyMember_ShouldSucceed()
+    {
+        var result = GenerateWithColumns("items", null, "validate", "accept_changes", "mark_added");
+
+        result.HasErrors.Should().BeFalse();
+        result.Files.Should().NotBeEmpty();
+        result.Files[0].Content.Should().Contain("public int Validate { get; set; }");
+    }
+
     /// <summary>C# の名前空間として不正な RootNamespace はエラーになることを検証する</summary>
     [Fact]
     public void Generate_InvalidRootNamespace_ShouldFailWithError()
