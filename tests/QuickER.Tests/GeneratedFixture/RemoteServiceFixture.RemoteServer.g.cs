@@ -28,8 +28,13 @@ namespace QuickER.Tests.GeneratedRemoteServiceFixture;
 /// Exceptions are converted to structured JSON (RemoteError): <see cref="SaveConflictException"/> maps to 409 and
 /// everything else to 500, and the client (Http{Entity}RemoteRepository) restores the original exception type.
 /// </para>
+/// <para>
+/// The class is <c>partial</c> so additional endpoints or helpers can live alongside the generated ones,
+/// and the <c>OnServerError</c> partial method can be implemented to add custom handling (notifications,
+/// metrics, extra logging) whenever an endpoint responds with HTTP 500.
+/// </para>
 /// </remarks>
-public static class GeneratedRemoteEndpoints
+public static partial class GeneratedRemoteEndpoints
 {
     /// <summary>Maps every remote-surface endpoint under the given prefix (defaults to /quicker).</summary>
     /// <param name="endpoints">The mapping target (for example a <c>WebApplication</c>).</param>
@@ -78,6 +83,7 @@ public static class GeneratedRemoteEndpoints
         catch (Exception ex)
         {
             LogServerError(context, ex);
+            OnServerError(context, ex);
             context.Response.StatusCode = StatusCodes.Status500InternalServerError;
             await context.Response.WriteAsJsonAsync(
                 new RemoteError { Type = "Error", Message = ex.Message },
@@ -126,6 +132,18 @@ public static class GeneratedRemoteEndpoints
             context.Request.Path
         );
     }
+
+    /// <summary>Extension hook invoked - after the built-in logging - whenever an endpoint responds with HTTP 500.</summary>
+    /// <remarks>
+    /// Implement this method in another part of this partial class to add custom handling for server-side
+    /// failures (notifications, metrics, extra logging). When no implementation is provided the compiler
+    /// removes the calls entirely, so there is no runtime overhead. The 500 response body itself is not
+    /// customizable here; wrap the group returned by <c>MapGeneratedRemoteEndpoints</c> in middleware to
+    /// translate responses instead.
+    /// </remarks>
+    /// <param name="context">The HTTP context of the failed request.</param>
+    /// <param name="ex">The unhandled exception that was reported to the client.</param>
+    static partial void OnServerError(HttpContext context, Exception ex);
 
     /// <summary>Maps the common CRUD operations (GetById / GetAll / Insert / Update / Delete / Save / SaveMany).</summary>
     private static void MapCrud<TEntity, TKey, TRepository>(

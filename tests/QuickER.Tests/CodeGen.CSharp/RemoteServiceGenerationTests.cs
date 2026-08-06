@@ -129,7 +129,7 @@ public class RemoteServiceGenerationTests
             );
 
         // サーバーファイル: エンドポイントマッピング＋例外変換＋CRUD 汎用マッピング
-        server.Should().Contain("public static class GeneratedRemoteEndpoints");
+        server.Should().Contain("public static partial class GeneratedRemoteEndpoints");
         server.Should().Contain("MapGeneratedRemoteEndpoints(");
         server.Should().Contain("string prefix = \"/quicker\"");
         server.Should().Contain("MapCrud<OrderEntity, int, IOrderRemoteRepository>(");

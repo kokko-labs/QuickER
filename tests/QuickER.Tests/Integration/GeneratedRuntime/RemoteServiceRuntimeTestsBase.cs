@@ -339,6 +339,25 @@ public abstract class RemoteServiceRuntimeTestsBase : IAsyncLifetime
             .Be("Alice");
     }
 
+    /// <summary>
+    /// 10. 一般例外の 500 経路で partial 拡張点 OnServerError が発火する
+    /// （テスト側の partial 実装＝<see cref="GeneratedRemoteEndpoints"/> の別パートが受け取る）。
+    /// </summary>
+    [Fact(DisplayName = "[RemoteService] 10: 500 経路で OnServerError フックが発火する")]
+    public async Task ServerError_InvokesOnServerErrorHook()
+    {
+        await Customers.InsertAsync(NewCustomer(1, "Hook"), Ct);
+        var before = GeneratedRemoteEndpoints.ServerErrorHookCallCount;
+
+        // 同一主キーの再挿入は DB の一意制約違反＝サーバー側の一般例外→ HTTP 500 になる
+        var act = () => Customers.InsertAsync(NewCustomer(1, "Hook"), Ct);
+
+        await act.Should().ThrowAsync<RemoteRepositoryException>();
+
+        // 静的カウンタは並列実行される派生スイート間で共有されるため、増分（>= 1）で検証する
+        GeneratedRemoteEndpoints.ServerErrorHookCallCount.Should().BeGreaterThan(before);
+    }
+
     /// <summary>使い終えたクライアント DI・サーバー・一時 DB を破棄する</summary>
     public async ValueTask DisposeAsync()
     {
