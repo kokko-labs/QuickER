@@ -358,6 +358,71 @@ public abstract class RemoteServiceRuntimeTestsBase : IAsyncLifetime
         GeneratedRemoteEndpoints.ServerErrorHookCallCount.Should().BeGreaterThan(before);
     }
 
+    /// <summary>
+    /// 11. OnServerError フックの実装が例外を投げても、元例外の 500 応答（RemoteError JSON）は失われない
+    /// （フックの例外はサーバー側で隔離・ログされ、クライアントは元のメッセージを受け取る）。
+    /// </summary>
+    [Fact(
+        DisplayName = "[RemoteService] 11: OnServerError フックが例外を投げても元の 500 応答が失われない"
+    )]
+    public async Task ServerErrorHookException_DoesNotReplaceOriginalErrorResponse()
+    {
+        await Customers.InsertAsync(NewCustomer(1, "Hook"), Ct);
+
+        var baseUrl = _app!.Urls.First();
+
+        // 「フックが投げるモード」はリクエストヘッダでスコープする（静的フラグにすると並列実行される派生スイートへ漏れる）
+        using var client = new HttpClient { BaseAddress = new Uri($"{baseUrl}/quicker/") };
+        client.DefaultRequestHeaders.Add(GeneratedRemoteEndpoints.ThrowInHookHeaderName, "1");
+
+        using var provider = new ServiceCollection()
+            .AddGeneratedHttpRemoteRepositories(_ => client)
+            .BuildServiceProvider();
+
+        var customers = provider.GetRequiredService<ICustomerRemoteRepository>();
+        var throwsBefore = GeneratedRemoteEndpoints.ServerErrorHookThrowCount;
+
+        // 同一主キーの再挿入＝サーバー側の一般例外→ HTTP 500（このリクエストではフックも例外を投げる）
+        var act = () => customers.InsertAsync(NewCustomer(1, "Hook"), Ct);
+
+        var thrown = (await act.Should().ThrowAsync<RemoteRepositoryException>()).Which;
+        thrown.StatusCode.Should().Be(500);
+
+        // フックの例外が素通りしていれば RemoteError JSON は書かれず、クライアントは汎用文言へ退化する
+        thrown.Message.Should().NotContain("The remote call failed");
+
+        // このリクエストのフックが実際に投げたこと（＝隔離が効いた経路を通ったこと）も確認する
+        GeneratedRemoteEndpoints.ServerErrorHookThrowCount.Should().BeGreaterThan(throwsBefore);
+    }
+
+    /// <summary>
+    /// 12. ベースアドレス版で作られる共有 HttpClient は DI コンテナが所有し、provider の破棄と同時に破棄される
+    /// （取得済みリポジトリの呼び出しは ObjectDisposedException になる＝コンテナ所有資源の標準的な意味論）。
+    /// </summary>
+    [Fact(
+        DisplayName = "[RemoteService] 12: ベースアドレス版の共有 HttpClient は provider 破棄で破棄される"
+    )]
+    public async Task BaseAddressOverload_SharedHttpClientIsDisposedWithProvider()
+    {
+        var baseUrl = _app!.Urls.First();
+        var provider = new ServiceCollection()
+            .AddGeneratedHttpRemoteRepositories($"{baseUrl}/quicker")
+            .BuildServiceProvider();
+
+        var customers = provider.GetRequiredService<ICustomerRemoteRepository>();
+
+        // 破棄前は共有 HttpClient が生きており 1 往復できる
+        (await customers.GetAllAsync(Ct))
+            .Should()
+            .BeEmpty();
+
+        provider.Dispose();
+
+        var act = () => customers.GetAllAsync(Ct);
+
+        await act.Should().ThrowAsync<ObjectDisposedException>();
+    }
+
     /// <summary>使い終えたクライアント DI・サーバー・一時 DB を破棄する</summary>
     public async ValueTask DisposeAsync()
     {

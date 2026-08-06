@@ -460,9 +460,9 @@ app.Run();
 - **グラフ保存（Save）成功後はローカルの RowState も確定**します（直結時と同じ挙動）
 - **500 応答にはサーバー側例外のメッセージがそのまま載ります**。これは意図的な設計で、クライアントが失敗内容を復元し「直結時と同じ catch」を成立させるための情報です。スタックトレースを含む例外全体はサーバー側だけに記録されます（`ILoggerFactory` 経由・カテゴリ `QuickER.RemoteServer`。ロギング未構成のホストでは何もしません）。信頼境界の外へ公開する場合は、認可か例外変換ミドルウェアを併用して内部情報が応答へ漏れないようにしてください
 - 認証・TLS はスコープ外です。クライアントは `AddGeneratedHttpRemoteRepositories(Func<IServiceProvider, HttpClient>)` で認証ハンドラ付きの HttpClient を構成し、サーバーは `MapGeneratedRemoteEndpoints()` の戻り値（`RouteGroupBuilder`）へ ASP.NET Core の認可を付与してください
-- **ファクトリ版が返す HttpClient の所有権は呼び出し側にあります**。`AddGeneratedHttpRemoteRepositories(Func<IServiceProvider, HttpClient>)` はリポジトリ解決のたび（スコープ×エンティティ数だけ）ファクトリを呼び出し、返された HttpClient は生成コードも DI コンテナも破棄しません。共有インスタンスか `IHttpClientFactory` 管理のインスタンスを返してください（毎回 new するとソケットが枯渇します）。ベースアドレス版は内部で共有インスタンスを 1 つ作るため、この注意は不要です
+- **ファクトリ版が返す HttpClient の所有権は呼び出し側にあります**。`AddGeneratedHttpRemoteRepositories(Func<IServiceProvider, HttpClient>)` はリポジトリ解決のたび（スコープ×エンティティ数だけ）ファクトリを呼び出し、返された HttpClient は生成コードも DI コンテナも破棄しません。共有インスタンスか `IHttpClientFactory` 管理のインスタンスを返してください（毎回 new するとソケットが枯渇します）。ベースアドレス版は共有インスタンスを 1 つだけ作り、それを DI コンテナが所有します（`ServiceProvider` の破棄と同時に HttpClient も破棄されるため、破棄済み provider から取得したリポジトリを使うと `ObjectDisposedException` になります）
 - サーバーファイルは ASP.NET Core の FrameworkReference（`Microsoft.AspNetCore.App`）が必要です（SDK が `Microsoft.NET.Sdk.Web` のプロジェクトなら追加設定不要）
-- **生成サーバークラスは拡張できます。** `GeneratedRemoteEndpoints` は `partial` クラスなので、生成物と並べて独自のエンドポイントヘルパを同じクラスへ置けます。また `static partial void OnServerError(HttpContext, Exception)` フックを別パートで実装すると、エンドポイントが HTTP 500 を返すたびに独自処理（通知・メトリクス・追加ログ）を差し込めます（組み込みログの後に実行され、実装しなければコンパイル時に呼び出しごと消えるためオーバーヘッドはゼロ）。同じプレフィックス配下への追加エンドポイントは、`MapGeneratedRemoteEndpoints()` が返す `RouteGroupBuilder` へ直接 Map しても構いません
+- **生成サーバークラスは拡張できます。** `GeneratedRemoteEndpoints` は `partial` クラスなので、生成物と並べて独自のエンドポイントヘルパを同じクラスへ置けます。また `static partial void OnServerError(HttpContext, Exception)` フックを別パートで実装すると、エンドポイントが HTTP 500 を返すたびに独自処理（通知・メトリクス・追加ログ）を差し込めます（組み込みログの後に実行され、実装しなければコンパイル時に呼び出しが消えます。フック内で例外が起きても隔離され、元のエラー応答を妨げません＝フックの例外はサーバーログへ記録して握り潰します）。同じプレフィックス配下への追加エンドポイントは、`MapGeneratedRemoteEndpoints()` が返す `RouteGroupBuilder` へ直接 Map しても構いません
 
 ### バイナリ転送エンドポイント（無制限バイナリ列の Stream アクセサ）
 

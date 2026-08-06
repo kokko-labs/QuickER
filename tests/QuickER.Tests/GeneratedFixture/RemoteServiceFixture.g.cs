@@ -6639,9 +6639,11 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
                 cancellationToken
             );
         }
-        catch (JsonException)
+        catch (Exception parseError) when (parseError is JsonException or NotSupportedException)
         {
-            // If the error payload is not JSON (e.g. a response from a proxy or infrastructure), report the status only
+            // If the error payload is not JSON, report the status only. Malformed JSON surfaces as JsonException, while a
+            // non-JSON content type (text/html or text/plain from a proxy or a developer exception page, or no
+            // Content-Type at all on an empty body) surfaces as NotSupportedException from ReadFromJsonAsync
         }
 
         var statusCode = (int)response.StatusCode;
@@ -8364,7 +8366,18 @@ public sealed partial class HttpOrderRemoteRepository(HttpClient httpClient)
 /// <summary>Extensions that register the HTTP client implementations of the remote surface (I{Entity}RemoteRepository) with the DI container.</summary>
 public static class GeneratedHttpRemoteRepositoryServiceCollectionExtensions
 {
-    /// <summary>Registers the HTTP client implementations using a base address (for simple setups; the HttpClient is a shared singleton).</summary>
+    /// <summary>Registers the HTTP client implementations using a base address (for simple setups; the HttpClient is a shared singleton owned by the container).</summary>
+    /// <remarks>
+    /// <para>
+    /// The shared HttpClient is owned by the DI container: it is created lazily, when a repository is first resolved,
+    /// and disposed together with the <see cref="IServiceProvider"/>.
+    /// </para>
+    /// <para>
+    /// Because its lifetime is bound to the container, a repository that was resolved from an already disposed provider
+    /// throws <see cref="ObjectDisposedException"/> on use (the standard semantics for container-owned resources).
+    /// To control the lifetime yourself, use the factory overload instead.
+    /// </para>
+    /// </remarks>
     /// <param name="services">The service collection to register into</param>
     /// <param name="baseAddress">The base address including the server prefix (for example <c>https://server:5001/quicker</c>; a trailing / is appended automatically)</param>
     public static IServiceCollection AddGeneratedHttpRemoteRepositories(
@@ -8377,9 +8390,17 @@ public static class GeneratedHttpRemoteRepositoryServiceCollectionExtensions
 
         // A trailing / is required to resolve relative paths ("Order/GetById" etc.), so append it
         var normalized = baseAddress.EndsWith('/') ? baseAddress : baseAddress + "/";
-        var sharedClient = new HttpClient { BaseAddress = new Uri(normalized) };
 
-        return AddGeneratedHttpRemoteRepositories(services, _ => sharedClient);
+        // Register a factory rather than a ready-made instance: the container disposes only the singletons it created
+        // itself, so AddSingleton(instance) would leave the shared HttpClient undisposed when the provider is disposed
+        services.AddSingleton(_ => new OwnedHttpClient(
+            new HttpClient { BaseAddress = new Uri(normalized) }
+        ));
+
+        return AddGeneratedHttpRemoteRepositories(
+            services,
+            provider => provider.GetRequiredService<OwnedHttpClient>().Client
+        );
     }
 
     /// <summary>Registers the HTTP client implementations using an HttpClient factory (when configuring authentication handlers etc.).</summary>
@@ -8411,6 +8432,21 @@ public static class GeneratedHttpRemoteRepositoryServiceCollectionExtensions
         ));
 
         return services;
+    }
+
+    /// <summary>Container-owned holder for the shared HttpClient created by the base-address overload.</summary>
+    /// <remarks>
+    /// Registering the holder as a singleton produced by a factory is what makes the DI container the owner:
+    /// the container disposes the singletons it creates itself, so the wrapped HttpClient is disposed together
+    /// with the <see cref="IServiceProvider"/>.
+    /// </remarks>
+    private sealed class OwnedHttpClient(HttpClient client) : IDisposable
+    {
+        /// <summary>Gets the shared client handed to the generated repositories.</summary>
+        public HttpClient Client { get; } = client;
+
+        /// <summary>Disposes the shared client (called by the DI container when the provider is disposed).</summary>
+        public void Dispose() => Client.Dispose();
     }
 }
 

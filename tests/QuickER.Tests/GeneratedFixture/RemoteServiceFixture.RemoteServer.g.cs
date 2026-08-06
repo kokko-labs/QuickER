@@ -83,7 +83,7 @@ public static partial class GeneratedRemoteEndpoints
         catch (Exception ex)
         {
             LogServerError(context, ex);
-            OnServerError(context, ex);
+            RaiseServerError(context, ex);
             context.Response.StatusCode = StatusCodes.Status500InternalServerError;
             await context.Response.WriteAsJsonAsync(
                 new RemoteError { Type = "Error", Message = ex.Message },
@@ -133,13 +133,33 @@ public static partial class GeneratedRemoteEndpoints
         );
     }
 
+    /// <summary>Invokes the <c>OnServerError</c> extension hook while isolating any failure inside it.</summary>
+    /// <remarks>
+    /// The hook is user code and runs before the 500 body (<see cref="RemoteError"/>) has been written, so an exception
+    /// escaping from it would discard the original error response and leave the client with a generic failure whose
+    /// cause is lost. The hook must never replace the original failure, therefore an exception thrown by it is
+    /// reported through the same server-side logging and then swallowed.
+    /// </remarks>
+    private static void RaiseServerError(HttpContext context, Exception ex)
+    {
+        try
+        {
+            OnServerError(context, ex);
+        }
+        catch (Exception hookError)
+        {
+            LogServerError(context, hookError);
+        }
+    }
+
     /// <summary>Extension hook invoked - after the built-in logging - whenever an endpoint responds with HTTP 500.</summary>
     /// <remarks>
     /// Implement this method in another part of this partial class to add custom handling for server-side
-    /// failures (notifications, metrics, extra logging). When no implementation is provided the compiler
-    /// removes the calls entirely, so there is no runtime overhead. The 500 response body itself is not
-    /// customizable here; wrap the group returned by <c>MapGeneratedRemoteEndpoints</c> in middleware to
-    /// translate responses instead.
+    /// failures (notifications, metrics, extra logging). When no implementation is provided the compiler removes
+    /// the call itself, so nothing but an empty guard remains. An exception thrown by the hook is isolated (logged
+    /// on the server side and then swallowed) and never replaces the original 500 response. The 500 response body
+    /// itself is not customizable here; wrap the group returned by <c>MapGeneratedRemoteEndpoints</c> in middleware
+    /// to translate responses instead.
     /// </remarks>
     /// <param name="context">The HTTP context of the failed request.</param>
     /// <param name="ex">The unhandled exception that was reported to the client.</param>

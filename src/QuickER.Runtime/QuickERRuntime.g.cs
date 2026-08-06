@@ -3192,9 +3192,11 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
                 cancellationToken
             );
         }
-        catch (JsonException)
+        catch (Exception parseError) when (parseError is JsonException or NotSupportedException)
         {
-            // If the error payload is not JSON (e.g. a response from a proxy or infrastructure), report the status only
+            // If the error payload is not JSON, report the status only. Malformed JSON surfaces as JsonException, while a
+            // non-JSON content type (text/html or text/plain from a proxy or a developer exception page, or no
+            // Content-Type at all on an empty body) surfaces as NotSupportedException from ReadFromJsonAsync
         }
 
         var statusCode = (int)response.StatusCode;
