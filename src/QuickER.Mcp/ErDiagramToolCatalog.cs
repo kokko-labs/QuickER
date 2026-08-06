@@ -2,8 +2,8 @@ namespace QuickER.Mcp;
 
 /// <summary>
 /// ER 図操作ツールの定義（スキーマ）の正本。エンティティ・カラム・リレーションの追加／削除／変更・
-/// 図の要約取得（9 ツール）に加え、名前付きクエリの定義／一覧／削除（set_query / list_queries /
-/// remove_query）を含む 12 ツールを、外部 AI エージェント向けの中立言語（英語）で記述する。
+/// 一意制約の定義／削除・図の要約取得（11 ツール）に加え、名前付きクエリの定義／一覧／削除（set_query /
+/// list_queries / remove_query）を含む 14 ツールを、外部 AI エージェント向けの中立言語（英語）で記述する。
 /// </summary>
 /// <remarks>
 /// 実行（VM 操作）は app 側が担う。各 LLM SDK 形式（OpenAI / Anthropic）への変換は
@@ -24,6 +24,7 @@ public static class ErDiagramToolCatalog
         + "- Naming: unless the user requests a different convention, use PascalCase singular table names (e.g., Customer, OrderItem). When the diagram already has tables, match their existing naming style (casing and singular/plural) instead.\n"
         + "- Give each table exactly one primary key column, added first with add_column is_primary_key=true (composite primary keys are not supported by the code generator).\n"
         + "- Add foreign key columns with is_primary_key=false (usually is_nullable=false), then define the reference with add_relationship, giving source_column and target_column explicitly. One relationship references exactly one column pair; add multiple foreign keys as separate relationships.\n"
+        + "- Unique constraints: set_unique_constraint is an upsert keyed by (table_name, set of columns); the primary key already enforces uniqueness of its own columns, so add one only for other columns or column combinations that must be unique.\n"
         + "- Named queries: set_query is an upsert keyed by (table_name, query_name); definitions are validated before saving.\n"
         + "- Before writing a generation config for generate_csharp, call get_generation_config_schema to discover the available keys.\n"
         + "- When a tool returns an error, follow the message to correct the call and retry.";
@@ -37,7 +38,7 @@ public static class ErDiagramToolCatalog
             {
                 Name = "get_diagram_summary",
                 Description =
-                    "Returns a text listing of the entities (tables) and relationships (foreign keys) in the current ER diagram.",
+                    "Returns a text listing of the entities (tables), their unique constraints, and the relationships (foreign keys) in the current ER diagram.",
                 DeferLoading = false,
                 InputSchema = new
                 {
@@ -127,7 +128,8 @@ public static class ErDiagramToolCatalog
             new ToolDefinition
             {
                 Name = "remove_column",
-                Description = "Removes a column from the specified table.",
+                Description =
+                    "Removes a column from the specified table. Any UNIQUE constraint that includes the column is removed together with it (a constraint is never silently narrowed to the remaining columns).",
                 DeferLoading = false,
                 InputSchema = new
                 {
@@ -277,6 +279,63 @@ public static class ErDiagramToolCatalog
                         },
                     },
                     required = new[] { "source_table", "target_table" },
+                },
+            },
+            new ToolDefinition
+            {
+                Name = "set_unique_constraint",
+                Description =
+                    "Defines or replaces (upsert) a UNIQUE constraint on a table. Matched by (table_name, set of columns): if a constraint over the same columns already exists it is redefined (its id is preserved, and the name and the column order are taken from this call), otherwise a new one is added. Column order does not affect matching or the meaning of the constraint. Omit name to let the DDL generator synthesize one (UQ_{table}_{columns}). A single-column constraint makes that column unique; several columns make the combination unique. The primary key already enforces uniqueness of its own columns, so a constraint over exactly the primary key columns is normally unnecessary.",
+                DeferLoading = false,
+                InputSchema = new
+                {
+                    type = "object",
+                    properties = new
+                    {
+                        table_name = new
+                        {
+                            type = "string",
+                            description = "Name of the table the constraint belongs to.",
+                        },
+                        columns = new
+                        {
+                            type = "array",
+                            description = "Names of the columns that make up the constraint, in declaration order. Every name must be an existing column of this table, and the same column cannot be listed twice.",
+                            items = new { type = "string" },
+                        },
+                        name = new
+                        {
+                            type = "string",
+                            description = "Constraint name (optional; omit to synthesize it from the table and column names at generation time).",
+                        },
+                    },
+                    required = new[] { "table_name", "columns" },
+                },
+            },
+            new ToolDefinition
+            {
+                Name = "remove_unique_constraint",
+                Description =
+                    "Removes a UNIQUE constraint from a table. The constraint is identified by its set of columns (order and letter case do not matter), the same way set_unique_constraint matches. Fails if the table has no constraint over exactly those columns.",
+                DeferLoading = false,
+                InputSchema = new
+                {
+                    type = "object",
+                    properties = new
+                    {
+                        table_name = new
+                        {
+                            type = "string",
+                            description = "Name of the table the constraint belongs to.",
+                        },
+                        columns = new
+                        {
+                            type = "array",
+                            description = "Names of the columns that make up the constraint to remove.",
+                            items = new { type = "string" },
+                        },
+                    },
+                    required = new[] { "table_name", "columns" },
                 },
             },
             new ToolDefinition

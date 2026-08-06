@@ -545,4 +545,41 @@ public class SqlServerSyncScriptBuilderTests
         alter.Should().BeGreaterThan(drop);
         add.Should().BeGreaterThan(alter);
     }
+
+    /// <summary>AddUniqueConstraint が ALTER TABLE ... ADD CONSTRAINT ... UNIQUE を生成することを検証する</summary>
+    [Fact(DisplayName = "AddUniqueConstraint は ADD CONSTRAINT UNIQUE を生成する")]
+    public void AddUniqueConstraint_GeneratesAddConstraint()
+    {
+        var item = new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.AddUniqueConstraint,
+            TableName = "Customer",
+            UniqueConstraintColumns = ["Code", "Kind"],
+            IsSelected = true,
+        };
+
+        var sql = BuildScript(new SqlServerSyncScriptBuilder(), new[] { item });
+        // 制約名は未設定のため UQ_{テーブル}_{列…} が合成される
+        sql.Should()
+            .Contain(
+                "ALTER TABLE [Customer] ADD CONSTRAINT [UQ_Customer_Code_Kind] UNIQUE ([Code], [Kind]);"
+            );
+    }
+
+    /// <summary>DropUniqueConstraint が live 側の実名で DROP CONSTRAINT を生成することを検証する</summary>
+    [Fact(DisplayName = "DropUniqueConstraint は実名で DROP CONSTRAINT を生成する")]
+    public void DropUniqueConstraint_GeneratesDropConstraint()
+    {
+        var item = new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.DropUniqueConstraint,
+            TableName = "Customer",
+            UniqueConstraintName = "UQ_Legacy",
+            UniqueConstraintColumns = ["Code"],
+            IsSelected = true,
+        };
+
+        var sql = BuildScript(new SqlServerSyncScriptBuilder(), new[] { item });
+        sql.Should().Contain("ALTER TABLE [Customer] DROP CONSTRAINT [UQ_Legacy];");
+    }
 }

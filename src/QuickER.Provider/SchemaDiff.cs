@@ -37,6 +37,16 @@ public enum SchemaDiffKind
     /// <summary>既存の外部キー制約を DROP する（破壊的変更のため既定では非選択）</summary>
     DropForeignKey,
 
+    /// <summary>一意制約（<c>UNIQUE</c>）を ADD する</summary>
+    /// <remarks>
+    /// 既存データに重複があれば実行時に失敗する（トランザクションのある方言ではロールバックされる）が、
+    /// 列追加と同じく「制約を増やすだけ」で既存の定義を壊さないため既定で選択する。
+    /// </remarks>
+    AddUniqueConstraint,
+
+    /// <summary>既存の一意制約（<c>UNIQUE</c>）を DROP する（破壊的変更のため既定では非選択）</summary>
+    DropUniqueConstraint,
+
     /// <summary>テーブル説明を設定・更新・削除する</summary>
     SetTableDescription,
 
@@ -97,6 +107,23 @@ public sealed class SchemaDiffItem : INotifyPropertyChanged
     /// <summary>削除する FK 制約の名前 (DropForeignKey のみ)。</summary>
     public string? ForeignKeyName { get; init; }
 
+    /// <summary>
+    /// 対象の一意制約名 (Add/DropUniqueConstraint のみ)。
+    /// </summary>
+    /// <remarks>
+    /// <see cref="SchemaDiffKind.DropUniqueConstraint"/> では live 側（DB）の実名が入る。
+    /// <see cref="SchemaDiffKind.AddUniqueConstraint"/> では図側のモデル名で、未設定なら <c>null</c>＝
+    /// レンダラーが <see cref="UniqueConstraintNaming.Resolve"/> で <c>UQ_{表}_{列…}</c> を合成する。
+    /// </remarks>
+    public string? UniqueConstraintName { get; init; }
+
+    /// <summary>対象の一意制約の構成列名（宣言順。Add/DropUniqueConstraint のみ）。</summary>
+    /// <remarks>
+    /// 差分の同一性判定は列集合（大文字小文字・順序を無視）で行うが、DDL へは宣言順のまま出力するため
+    /// 順序を保持した一覧で運ぶ。
+    /// </remarks>
+    public IReadOnlyList<string> UniqueConstraintColumns { get; init; } = [];
+
     /// <summary>変更後の説明文 (SetTable/ColumnDescription)。空文字なら削除を意味する。</summary>
     public string? NewDescription { get; init; }
 
@@ -129,6 +156,8 @@ public sealed class SchemaDiffItem : INotifyPropertyChanged
     /// <remarks>
     /// 主キー変更（<see cref="SchemaDiffKind.AlterPrimaryKey"/>）も破壊的に数える。
     /// 主キーの解除・付け替えは重複データや NULL の存在で失敗しうるうえ、被参照 FK の張り直しを伴うため。
+    /// 一意制約の削除（<see cref="SchemaDiffKind.DropUniqueConstraint"/>）も、候補キーを失って被参照 FK を
+    /// 壊しうる（＝取り消すには重複データの解消が要る）ため破壊的に数える。
     /// </remarks>
     public bool IsDestructive =>
         Kind
@@ -136,7 +165,8 @@ public sealed class SchemaDiffItem : INotifyPropertyChanged
                 or SchemaDiffKind.AlterPrimaryKey
                 or SchemaDiffKind.DropColumn
                 or SchemaDiffKind.DropTable
-                or SchemaDiffKind.DropForeignKey;
+                or SchemaDiffKind.DropForeignKey
+                or SchemaDiffKind.DropUniqueConstraint;
 
     /// <summary>
     /// この差分を「選択不可の案内項目」へ格下げした複製を返す（説明だけ差し替え、他の内容は保持する）。
@@ -161,6 +191,8 @@ public sealed class SchemaDiffItem : INotifyPropertyChanged
             ParentEntity = ParentEntity,
             ChildEntity = ChildEntity,
             ForeignKeyName = ForeignKeyName,
+            UniqueConstraintName = UniqueConstraintName,
+            UniqueConstraintColumns = UniqueConstraintColumns,
             NewDescription = NewDescription,
             OldDescription = OldDescription,
             IsSelected = false,

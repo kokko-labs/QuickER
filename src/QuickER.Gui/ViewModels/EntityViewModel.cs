@@ -66,6 +66,17 @@ public partial class EntityViewModel : ObservableObject
     /// <summary>このエンティティに含まれるカラム一覧</summary>
     public ObservableCollection<ColumnViewModel> Columns { get; }
 
+    /// <summary>このエンティティに定義された一意制約（<c>UNIQUE</c>）の一覧</summary>
+    /// <remarks>
+    /// 主キーは <see cref="ColumnViewModel.IsPrimaryKey"/> が表現するためここには含めない
+    /// （モデル <see cref="Entity.UniqueConstraints"/> と同じ規約）
+    /// </remarks>
+    public ObservableCollection<UniqueConstraintViewModel> UniqueConstraints { get; }
+
+    /// <summary>配下の一意制約の編集行で、ユーザーが構成列を選び直したときに発火するイベント</summary>
+    /// <remarks>Undo 可能なコマンドとして履歴化するのは <see cref="MainViewModel"/> の責務</remarks>
+    internal event EventHandler<UniqueConstraintMemberViewModel>? UniqueConstraintMemberSelectionEdited;
+
     /// <summary>ダイアグラム上の見出し帯に表示する背景色（設定時に正規化する）</summary>
     public string TitleBackgroundColor
     {
@@ -170,6 +181,23 @@ public partial class EntityViewModel : ObservableObject
         {
             column.PropertyChanged += OnColumnPropertyChanged;
         }
+
+        // 一意制約は構成列候補の生成でカラム一覧を参照するため、カラムの構築後に読み込む
+        UniqueConstraints = new ObservableCollection<UniqueConstraintViewModel>(
+            model.UniqueConstraints.Select(constraint => new UniqueConstraintViewModel(
+                this,
+                constraint
+            ))
+        );
+
+        UniqueConstraints.CollectionChanged += OnUniqueConstraintsChanged;
+
+        foreach (var constraint in UniqueConstraints)
+        {
+            AttachUniqueConstraint(constraint);
+        }
+
+        RefreshUniqueConstraintColumnFlags();
     }
 
     /// <summary>内容に合わせてエンティティ幅を自動調整する</summary>
@@ -183,6 +211,9 @@ public partial class EntityViewModel : ObservableObject
 
     /// <summary>説明変更時に表示高さキャッシュを無効化する</summary>
     partial void OnDescriptionChanged(string value) => InvalidateDisplayHeight();
+
+    /// <summary>テーブル名の変更を一意制約の合成名プレビューへ反映する</summary>
+    partial void OnTableNameChanged(string value) => NotifyUniqueConstraintNames();
 
     /// <summary>カラムの増減に追従し、購読の着脱と表示高さキャッシュの無効化を行う</summary>
     private void OnColumnsChanged(object? sender, NotifyCollectionChangedEventArgs e)
@@ -203,15 +234,108 @@ public partial class EntityViewModel : ObservableObject
             }
         }
 
+        // 一意制約の編集行・選択候補はカラム一覧から導出するため、増減・並び替えのたびに作り直す
+        // （コンストラクター内のカラム構築中は制約が未生成なので触らない）
+        if (UniqueConstraints is not null)
+        {
+            foreach (var constraint in UniqueConstraints)
+            {
+                constraint.SyncColumns();
+            }
+
+            RefreshUniqueConstraintColumnFlags();
+        }
+
         InvalidateDisplayHeight();
     }
 
-    /// <summary>カラムの説明変更時に表示高さキャッシュを無効化する</summary>
+    /// <summary>カラムの説明変更時に表示高さキャッシュを無効化し、名前変更を一意制約の表示へ伝える</summary>
     private void OnColumnPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName is nameof(ColumnViewModel.Description))
         {
             InvalidateDisplayHeight();
+        }
+
+        // 構成列名はカラム Guid 参照から解決しているため、リネームは表示だけを更新すればよい
+        if (e.PropertyName is nameof(ColumnViewModel.Name))
+        {
+            NotifyUniqueConstraintNames();
+        }
+    }
+
+    /// <summary>一意制約の増減に追従し、購読の着脱と構成列フラグの再計算を行う</summary>
+    private void OnUniqueConstraintsChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        if (e.OldItems is not null)
+        {
+            foreach (UniqueConstraintViewModel constraint in e.OldItems)
+            {
+                DetachUniqueConstraint(constraint);
+            }
+        }
+
+        if (e.NewItems is not null)
+        {
+            foreach (UniqueConstraintViewModel constraint in e.NewItems)
+            {
+                AttachUniqueConstraint(constraint);
+            }
+        }
+
+        RefreshUniqueConstraintColumnFlags();
+    }
+
+    /// <summary>一意制約からの通知（構成列の変化・編集行の選択操作）を購読する</summary>
+    private void AttachUniqueConstraint(UniqueConstraintViewModel constraint)
+    {
+        constraint.ColumnIdsChanged += OnUniqueConstraintColumnIdsChanged;
+        constraint.MemberSelectionEdited += OnUniqueConstraintMemberSelectionEdited;
+    }
+
+    /// <summary>一意制約からの通知の購読を解除する</summary>
+    private void DetachUniqueConstraint(UniqueConstraintViewModel constraint)
+    {
+        constraint.ColumnIdsChanged -= OnUniqueConstraintColumnIdsChanged;
+        constraint.MemberSelectionEdited -= OnUniqueConstraintMemberSelectionEdited;
+    }
+
+    /// <summary>いずれかの一意制約の構成列が変わったときに、カラム側の標識フラグを再計算する</summary>
+    private void OnUniqueConstraintColumnIdsChanged(object? sender, EventArgs e) =>
+        RefreshUniqueConstraintColumnFlags();
+
+    /// <summary>一意制約の編集行でユーザーが列を選び直したことを所有側（<see cref="MainViewModel"/>）へ中継する</summary>
+    /// <remarks>履歴化はコマンドを持つ所有側の責務のため、ここでは素通しする</remarks>
+    private void OnUniqueConstraintMemberSelectionEdited(
+        object? sender,
+        UniqueConstraintMemberViewModel member
+    ) => UniqueConstraintMemberSelectionEdited?.Invoke(this, member);
+
+    /// <summary>各カラムの「一意制約の構成列か」フラグを現在の制約一覧から計算し直す（ER 図の UQ 標識の元）</summary>
+    private void RefreshUniqueConstraintColumnFlags()
+    {
+        var memberIds = UniqueConstraints
+            .SelectMany(constraint => constraint.ColumnIds)
+            .ToHashSet();
+
+        foreach (var column in Columns)
+        {
+            column.IsUniqueConstraintMember = memberIds.Contains(column.Id);
+        }
+    }
+
+    /// <summary>テーブル名・カラム名の変更を一意制約の表示（構成列一覧・合成名）へ伝える</summary>
+    private void NotifyUniqueConstraintNames()
+    {
+        // カラム構築中（コンストラクター内）は制約が未生成のため何もしない
+        if (UniqueConstraints is null)
+        {
+            return;
+        }
+
+        foreach (var constraint in UniqueConstraints)
+        {
+            constraint.NotifyNamesChanged();
         }
     }
 
@@ -224,6 +348,7 @@ public partial class EntityViewModel : ObservableObject
             Memo = Memo,
             Description = Description ?? string.Empty,
             Columns = Columns.Select(c => c.ToModel()).ToList(),
+            UniqueConstraints = UniqueConstraints.Select(c => c.ToModel()).ToList(),
         };
 
     /// <summary>現在の視覚情報（座標・幅・色）をレイアウトへコピーして返す</summary>

@@ -87,7 +87,7 @@ public sealed class SqliteDdlRoundTripIntegrationTests
             }
         );
 
-        // 子2: profiles（顧客への FK・ON DELETE SET NULL、customer_id が一意制約 → 1対1）
+        // 子2: profiles（顧客への FK・ON DELETE SET NULL、customer_id にモデルの一意制約 → 1対1）
         var profile = new Entity { TableName = "profiles" };
         var profileId = new Column
         {
@@ -104,6 +104,9 @@ public sealed class SqliteDdlRoundTripIntegrationTests
         };
         profile.Columns.Add(profileId);
         profile.Columns.Add(profileCustomerId);
+        // 1対1 判定の材料は「モデルの一意制約」＝CREATE TABLE 内の UNIQUE 句として出力される。
+        // 取込は origin='u' の真の UNIQUE 制約のみを対象とするため、CREATE UNIQUE INDEX では 1対1 にならない
+        profile.UniqueConstraints.Add(new UniqueConstraint { ColumnIds = [profileCustomerId.Id] });
 
         var relOrder = new Relationship
         {
@@ -135,11 +138,7 @@ public sealed class SqliteDdlRoundTripIntegrationTests
             Relationships = { relOrder, relProfile },
         };
 
-        // 1対1 判定のため、profiles.customer_id に一意インデックスを追加する DDL を後付けする
-        // （SQLite は ALTER ADD CONSTRAINT UNIQUE 非対応のため CREATE UNIQUE INDEX を使う）
-        var ddl =
-            new SqliteDdlGenerator().Build(diagram)
-            + "\nCREATE UNIQUE INDEX \"UQ_profiles_customer\" ON \"profiles\" (\"customer_id\");";
+        var ddl = new SqliteDdlGenerator().Build(diagram);
 
         // ---------- 実行 ----------
         await db.ApplyDdlAsync(ddl, Ct);
@@ -187,9 +186,16 @@ public sealed class SqliteDdlRoundTripIntegrationTests
         var importedProfile = result.Entities.Single(e => e.TableName == "profiles");
         var profileRel = result.Relationships.Single(r => r.TargetEntityId == importedProfile.Id);
         profileRel.SourceEntityId.Should().Be(importedCustomer.Id);
-        // customer_id が一意インデックスを持つため 1 対 1 と判定される
+        // customer_id が UNIQUE 制約を持つため 1 対 1 と判定される
         profileRel.Type.Should().Be(RelationshipType.OneToOne);
         profileRel.OnDelete.Should().Be(ForeignKeyReferentialAction.SetNull);
+
+        // 一意制約もモデルへ取り込まれる（SQLite は自動名しか無いため制約名は null）
+        var importedUnique = importedProfile.UniqueConstraints.Should().ContainSingle().Which;
+        importedUnique.Name.Should().BeNull();
+        importedUnique
+            .ColumnIds.Should()
+            .Equal(importedProfile.Columns.Single(c => c.Name == "customer_id").Id);
     }
 
     /// <summary>
@@ -280,5 +286,80 @@ public sealed class SqliteDdlRoundTripIntegrationTests
                 .Should()
                 .BeTrue($"取込型 '{col.DataType}'（列 c{i}）は TryParse 可能であること");
         }
+    }
+
+    /// <summary>
+    /// 名前付き単一列 UNIQUE と名前なし複合 UNIQUE を持つテーブルの DDL を生成・実行し、
+    /// 取込んだ <see cref="Entity.UniqueConstraints"/> が構成列・宣言順まで一致することを検証する。
+    /// </summary>
+    /// <remarks>
+    /// SQLite の <c>UNIQUE</c> 句は <c>sqlite_autoindex_*</c> という自動名しか持たないため、
+    /// 制約名は往復せず <c>null</c> に落ちる（名前ではなく列集合で比較する）。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Integration] A: UNIQUE 制約が DDL 生成→実行→取込で往復一致する（名前は null）"
+    )]
+    public async Task UniqueConstraints_RoundTrip()
+    {
+        using var db = SqliteTempDatabase.Create();
+
+        var inventory = new Entity { TableName = "inventory" };
+        var id = new Column
+        {
+            Name = "id",
+            DataType = "INT",
+            IsPrimaryKey = true,
+            IsNullable = false,
+        };
+        var sku = new Column
+        {
+            Name = "sku",
+            DataType = "NVARCHAR(30)",
+            IsNullable = false,
+        };
+        var warehouse = new Column
+        {
+            Name = "warehouse",
+            DataType = "NVARCHAR(10)",
+            IsNullable = false,
+        };
+        var slot = new Column
+        {
+            Name = "slot",
+            DataType = "INT",
+            IsNullable = false,
+        };
+        inventory.Columns.AddRange([id, sku, warehouse, slot]);
+
+        // 名前付き単一列 UNIQUE（DDL には名前が乗るが、SQLite は取込で名前を保持しない）
+        inventory.UniqueConstraints.Add(
+            new UniqueConstraint { Name = "UQ_inventory_sku", ColumnIds = [sku.Id] }
+        );
+        // 名前なし複合 UNIQUE（合成名 UQ_inventory_warehouse_slot で出力される）
+        inventory.UniqueConstraints.Add(
+            new UniqueConstraint { ColumnIds = [warehouse.Id, slot.Id] }
+        );
+
+        var diagram = new ErDiagram { Entities = { inventory } };
+
+        await db.ApplyDdlAsync(new SqliteDdlGenerator().Build(diagram), Ct);
+
+        await using var conn = await db.OpenReadOnlyConnectionAsync(Ct);
+        var result = await new SqliteSchemaImporter().ImportAsync(conn, Ct);
+
+        var imported = result.Entities.Single(e => e.TableName == "inventory");
+        var columnNamesById = imported.Columns.ToDictionary(c => c.Id, c => c.Name);
+
+        imported.UniqueConstraints.Should().HaveCount(2);
+        // 自動名は意味を持たないため取込では名前なしになる
+        imported.UniqueConstraints.Should().OnlyContain(u => u.Name == null);
+
+        // 列集合で比較する（宣言順 warehouse → slot も保たれる）
+        imported
+            .UniqueConstraints.Select(u =>
+                u.ColumnIds.Select(cid => columnNamesById[cid]).ToArray()
+            )
+            .Should()
+            .BeEquivalentTo(new[] { new[] { "sku" }, new[] { "warehouse", "slot" } });
     }
 }

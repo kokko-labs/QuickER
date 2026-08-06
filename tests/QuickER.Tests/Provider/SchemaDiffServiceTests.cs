@@ -1,4 +1,6 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
 using AwesomeAssertions;
 using QuickER.Model;
 using QuickER.Provider;
@@ -852,5 +854,175 @@ public class SchemaDiffServiceTests
         );
 
         diff.Items.Should().NotContain(i => i.Kind == SchemaDiffKind.AlterPrimaryKey);
+    }
+
+    // ---------------- 一意制約（UNIQUE）の差分 ----------------
+
+    /// <summary>エンティティへ一意制約を足す（構成列は列名で引き当てる）</summary>
+    private static Entity WithUnique(Entity entity, string? name, params string[] columnNames)
+    {
+        entity.UniqueConstraints.Add(
+            new UniqueConstraint
+            {
+                Name = name,
+                ColumnIds = columnNames
+                    .Select(n => entity.Columns.Single(c => c.Name == n).Id)
+                    .ToList(),
+            }
+        );
+        return entity;
+    }
+
+    /// <summary>Code / Kind 列を持つ Customer テーブルを生成する（一意制約テストの共通土台）</summary>
+    private static Entity CustomerTable() =>
+        Tbl(
+            "Customer",
+            ("Id", "int", true),
+            ("Code", "nvarchar(20)", false),
+            ("Kind", "nvarchar(10)", false)
+        );
+
+    /// <summary>図にだけ在る一意制約が AddUniqueConstraint として検出され、既定で選択されることを検証する</summary>
+    [Fact(DisplayName = "図にだけ在る一意制約は AddUniqueConstraint になり既定で選択される")]
+    public void UniqueConstraintOnlyInTarget_AddUniqueConstraint_SelectedByDefault()
+    {
+        var live = new List<Entity> { CustomerTable() };
+        var target = new List<Entity> { WithUnique(CustomerTable(), name: null, "Code") };
+
+        var diff = new SchemaDiffService().Compute(
+            live,
+            new List<Relationship>(),
+            target,
+            new List<Relationship>()
+        );
+
+        var item = diff
+            .Items.Should()
+            .ContainSingle(i => i.Kind == SchemaDiffKind.AddUniqueConstraint)
+            .Which;
+        item.TableName.Should().Be("Customer");
+        item.UniqueConstraintColumns.Should().Equal("Code");
+        item.IsSelected.Should().BeTrue();
+        item.IsDestructive.Should().BeFalse();
+        item.Description.Should()
+            .Be(string.Format(ProviderStrings.Diff_AddUniqueConstraint, "Customer", "Code"));
+    }
+
+    /// <summary>DB にだけ在る一意制約が DropUniqueConstraint（既定未選択・破壊的）になることを検証する</summary>
+    [Fact(DisplayName = "DB にだけ在る一意制約は DropUniqueConstraint になり既定で未選択")]
+    public void UniqueConstraintOnlyInLive_DropUniqueConstraint_NotSelected()
+    {
+        var live = new List<Entity> { WithUnique(CustomerTable(), "UQ_Legacy", "Code", "Kind") };
+        var target = new List<Entity> { CustomerTable() };
+
+        var diff = new SchemaDiffService().Compute(
+            live,
+            new List<Relationship>(),
+            target,
+            new List<Relationship>()
+        );
+
+        var item = diff
+            .Items.Should()
+            .ContainSingle(i => i.Kind == SchemaDiffKind.DropUniqueConstraint)
+            .Which;
+        // DROP には DB 側の実名が要る（レンダラーはこの名前をそのまま使う）
+        item.UniqueConstraintName.Should().Be("UQ_Legacy");
+        item.UniqueConstraintColumns.Should().Equal("Code", "Kind");
+        item.IsSelected.Should().BeFalse();
+        item.IsDestructive.Should().BeTrue();
+        item.Description.Should()
+            .Be(string.Format(ProviderStrings.Diff_DropUniqueConstraint, "Customer", "Code, Kind"));
+    }
+
+    /// <summary>制約名だけが違う（構成列は同じ）一意制約では差分が出ないことを検証する</summary>
+    /// <remarks>
+    /// 図側の制約名は未設定（null＝合成名）が普通で、SQLite に至っては実名を持たない。
+    /// 名前を比較に含めると恒常的な Drop＋Add の誤検出になるため、照合は列集合だけで行う。
+    /// </remarks>
+    [Fact(DisplayName = "制約名の差だけでは一意制約の差分にならない")]
+    public void UniqueConstraintNameDiffersOnly_NoDiff()
+    {
+        var live = new List<Entity> { WithUnique(CustomerTable(), "UQ_From_Db", "Code") };
+        var target = new List<Entity> { WithUnique(CustomerTable(), name: null, "Code") };
+
+        var diff = new SchemaDiffService().Compute(
+            live,
+            new List<Relationship>(),
+            target,
+            new List<Relationship>()
+        );
+
+        diff.Items.Should()
+            .NotContain(i =>
+                i.Kind == SchemaDiffKind.AddUniqueConstraint
+                || i.Kind == SchemaDiffKind.DropUniqueConstraint
+            );
+    }
+
+    /// <summary>構成列の並び順・大文字小文字の差だけでは一意制約の差分にならないことを検証する</summary>
+    [Fact(DisplayName = "構成列の順序・大文字小文字の差だけでは一意制約の差分にならない")]
+    public void UniqueConstraintColumnOrderOrCaseDiffersOnly_NoDiff()
+    {
+        var live = new List<Entity> { WithUnique(CustomerTable(), "UQ_A", "Code", "Kind") };
+        var targetTable = Tbl(
+            "Customer",
+            ("Id", "int", true),
+            ("code", "nvarchar(20)", false),
+            ("kind", "nvarchar(10)", false)
+        );
+        var target = new List<Entity> { WithUnique(targetTable, name: null, "kind", "code") };
+
+        var diff = new SchemaDiffService().Compute(
+            live,
+            new List<Relationship>(),
+            target,
+            new List<Relationship>()
+        );
+
+        diff.Items.Should()
+            .NotContain(i =>
+                i.Kind == SchemaDiffKind.AddUniqueConstraint
+                || i.Kind == SchemaDiffKind.DropUniqueConstraint
+            );
+    }
+
+    /// <summary>構成列が空・解決不能な一意制約は差分対象から外れることを検証する</summary>
+    [Fact(DisplayName = "構成列が解決できない一意制約は差分にならない")]
+    public void UniqueConstraintWithUnresolvableColumns_NoDiff()
+    {
+        var targetTable = CustomerTable();
+        // 空の制約と、このエンティティに存在しない列を指す制約（いずれも DDL 生成側も無視する）
+        targetTable.UniqueConstraints.Add(new UniqueConstraint());
+        targetTable.UniqueConstraints.Add(new UniqueConstraint { ColumnIds = [Guid.NewGuid()] });
+
+        var diff = new SchemaDiffService().Compute(
+            new List<Entity> { CustomerTable() },
+            new List<Relationship>(),
+            new List<Entity> { targetTable },
+            new List<Relationship>()
+        );
+
+        diff.Items.Should().NotContain(i => i.Kind == SchemaDiffKind.AddUniqueConstraint);
+    }
+
+    /// <summary>案内項目への格下げ（ToAdvisory）が一意制約のフィールドも引き継ぐことを検証する</summary>
+    [Fact(DisplayName = "ToAdvisory は一意制約の名前・構成列を引き継ぐ")]
+    public void ToAdvisory_CopiesUniqueConstraintFields()
+    {
+        var item = new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.DropUniqueConstraint,
+            TableName = "Customer",
+            UniqueConstraintName = "UQ_Legacy",
+            UniqueConstraintColumns = ["Code", "Kind"],
+        };
+
+        var advisory = item.ToAdvisory("blocked");
+
+        advisory.UniqueConstraintName.Should().Be("UQ_Legacy");
+        advisory.UniqueConstraintColumns.Should().Equal("Code", "Kind");
+        advisory.IsSelected.Should().BeFalse();
+        advisory.IsSelectable.Should().BeFalse();
     }
 }

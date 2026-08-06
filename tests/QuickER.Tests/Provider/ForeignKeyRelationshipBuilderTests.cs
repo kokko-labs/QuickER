@@ -37,9 +37,17 @@ public class ForeignKeyRelationshipBuilderTests
         return entry;
     }
 
-    /// <summary>空の一意制約集合を返す</summary>
-    private static IReadOnlyDictionary<string, List<string[]>> NoUniqueSets() =>
-        new Dictionary<string, List<string[]>>();
+    /// <summary>エンティティへ一意制約（構成列は列名で指定）を追加する</summary>
+    private static void AddUnique(SchemaTableEntry entry, string? name, params string[] columns)
+    {
+        entry.Entity.UniqueConstraints.Add(
+            new UniqueConstraint
+            {
+                Name = name,
+                ColumnIds = columns.Select(c => entry.ColumnsByName[c].Id).ToList(),
+            }
+        );
+    }
 
     /// <summary>単一列 FK が 1 対多として参照先起点で構築され、両側の列 ID が解決されることを検証する</summary>
     [Fact(DisplayName = "単一列 FK は 1 対多になり参照先を起点とする")]
@@ -68,7 +76,7 @@ public class ForeignKeyRelationshipBuilderTests
             ForeignKeyReferentialAction.NoAction
         );
 
-        var rels = builder.Build(tables, NoUniqueSets());
+        var rels = builder.Build(tables);
 
         var rel = rels.Should().ContainSingle().Which;
         rel.Type.Should().Be(RelationshipType.OneToMany);
@@ -115,7 +123,7 @@ public class ForeignKeyRelationshipBuilderTests
             ForeignKeyReferentialAction.NoAction
         );
 
-        var rels = builder.Build(tables, NoUniqueSets());
+        var rels = builder.Build(tables);
 
         var rel = rels.Should().ContainSingle().Which;
         // FK 列集合 (AId,BId) は Child の PK (Id) と一致しないため 1 対多
@@ -161,7 +169,7 @@ public class ForeignKeyRelationshipBuilderTests
             ForeignKeyReferentialAction.NoAction
         );
 
-        builder.Build(tables, NoUniqueSets());
+        builder.Build(tables);
 
         var warning = builder.CompositeForeignKeyWarnings.Should().ContainSingle().Which;
         warning.ConstraintName.Should().Be("FK_Child_Parent");
@@ -197,7 +205,7 @@ public class ForeignKeyRelationshipBuilderTests
             ForeignKeyReferentialAction.NoAction
         );
 
-        builder.Build(tables, NoUniqueSets());
+        builder.Build(tables);
 
         builder.CompositeForeignKeyWarnings.Should().BeEmpty();
     }
@@ -227,27 +235,26 @@ public class ForeignKeyRelationshipBuilderTests
             ForeignKeyReferentialAction.NoAction
         );
 
-        var rels = builder.Build(tables, NoUniqueSets());
+        var rels = builder.Build(tables);
 
         rels.Should().ContainSingle().Which.Type.Should().Be(RelationshipType.OneToOne);
     }
 
-    /// <summary>FK 列が一意制約と一致する場合に 1 対 1 と判定されることを検証する</summary>
-    [Fact(DisplayName = "FK 列が一意制約と一致すれば 1 対 1")]
+    /// <summary>FK 列がモデルの一意制約と一致する場合に 1 対 1 と判定されることを検証する</summary>
+    [Fact(DisplayName = "FK 列がモデルの一意制約と一致すれば 1 対 1")]
     public void ForeignKeyMatchingUniqueConstraint_IsOneToOne()
     {
         // FK 列 ProfileId は PK ではないが一意制約が張られている
         var owner = Table("Owner", "Owner", Col("Id", pk: true), Col("ProfileId"));
         var profile = Table("Profile", "Profile", Col("Id", pk: true));
 
+        // 判定材料はエンティティに載った UniqueConstraints（＝モデル正本）
+        AddUnique(owner, "UQ_Owner_ProfileId", "ProfileId");
+
         var tables = new Dictionary<string, SchemaTableEntry>
         {
             ["Owner"] = owner,
             ["Profile"] = profile,
-        };
-        var uniqueSets = new Dictionary<string, List<string[]>>
-        {
-            ["Owner"] = new List<string[]> { new[] { "ProfileId" } },
         };
 
         var builder = new ForeignKeyRelationshipBuilder();
@@ -261,7 +268,7 @@ public class ForeignKeyRelationshipBuilderTests
             ForeignKeyReferentialAction.NoAction
         );
 
-        var rels = builder.Build(tables, uniqueSets);
+        var rels = builder.Build(tables);
 
         rels.Should().ContainSingle().Which.Type.Should().Be(RelationshipType.OneToOne);
     }
@@ -290,7 +297,7 @@ public class ForeignKeyRelationshipBuilderTests
             ForeignKeyReferentialAction.NoAction
         );
 
-        var rels = builder.Build(tables, NoUniqueSets());
+        var rels = builder.Build(tables);
 
         rels.Should().ContainSingle().Which.Type.Should().Be(RelationshipType.OneToMany);
     }
@@ -336,7 +343,7 @@ public class ForeignKeyRelationshipBuilderTests
             ForeignKeyReferentialAction.NoAction
         );
 
-        var rels = builder.Build(tables, NoUniqueSets());
+        var rels = builder.Build(tables);
 
         rels.Should().HaveCount(2);
         rels.Select(r => r.ConstraintName).Should().Equal("FK_Order_Customer", "FK_Order_Shipper");
@@ -378,7 +385,7 @@ public class ForeignKeyRelationshipBuilderTests
             ForeignKeyReferentialAction.NoAction
         );
 
-        var rels = builder.Build(tables, NoUniqueSets());
+        var rels = builder.Build(tables);
 
         // 制約名が同じでも子テーブルが異なるため、2 件のリレーションへ分離される
         rels.Should().HaveCount(2);
@@ -420,13 +427,17 @@ public class ForeignKeyRelationshipBuilderTests
             ["db::Profile"] = profile,
         };
 
-        var uniqueBuilder = new UniqueColumnSetBuilder();
-        uniqueBuilder.Add("db::Owner", "UQ_Owner_ProfileId", "ProfileId");
-        var uniqueSets = uniqueBuilder.Build();
+        var uniqueBuilder = new UniqueConstraintImportBuilder();
+        uniqueBuilder.Add("db::Owner", "UQ_Owner_ProfileId", "ProfileId", "UQ_Owner_ProfileId");
+        UniqueConstraintImportBuilder.Attach(tables, uniqueBuilder.Build());
 
-        // 一意制約集合が「db」ではなく元のテーブルキーへ紐付く
-        uniqueSets.Should().ContainKey("db::Owner");
-        uniqueSets["db::Owner"].Should().ContainSingle().Which.Should().Equal("ProfileId");
+        // 一意制約が「db」ではなく元のテーブルキーのエンティティへ載る
+        owner
+            .Entity.UniqueConstraints.Should()
+            .ContainSingle()
+            .Which.ColumnIds.Should()
+            .Equal(owner.ColumnsByName["ProfileId"].Id);
+        profile.Entity.UniqueConstraints.Should().BeEmpty();
 
         var builder = new ForeignKeyRelationshipBuilder();
         builder.Add(
@@ -439,7 +450,7 @@ public class ForeignKeyRelationshipBuilderTests
             ForeignKeyReferentialAction.NoAction
         );
 
-        var rels = builder.Build(tables, uniqueSets);
+        var rels = builder.Build(tables);
 
         rels.Should().ContainSingle().Which.Type.Should().Be(RelationshipType.OneToOne);
     }
@@ -463,7 +474,7 @@ public class ForeignKeyRelationshipBuilderTests
             ForeignKeyReferentialAction.NoAction
         );
 
-        var rels = builder.Build(tables, NoUniqueSets());
+        var rels = builder.Build(tables);
 
         rels.Should().BeEmpty();
     }
@@ -503,7 +514,7 @@ public class ForeignKeyRelationshipBuilderTests
             ForeignKeyReferentialAction.SetNull
         );
 
-        var rel = builder.Build(tables, NoUniqueSets()).Should().ContainSingle().Which;
+        var rel = builder.Build(tables).Should().ContainSingle().Which;
 
         rel.OnDelete.Should().Be(ForeignKeyReferentialAction.Cascade);
         rel.OnUpdate.Should().Be(ForeignKeyReferentialAction.Cascade);
@@ -515,10 +526,7 @@ public class ForeignKeyRelationshipBuilderTests
     {
         var builder = new ForeignKeyRelationshipBuilder();
 
-        builder
-            .Build(new Dictionary<string, SchemaTableEntry>(), NoUniqueSets())
-            .Should()
-            .BeEmpty();
+        builder.Build(new Dictionary<string, SchemaTableEntry>()).Should().BeEmpty();
     }
 
     /// <summary>複合 FK の列順序が異なっても大文字小文字無視の集合一致で 1 対 1 判定されることを検証する</summary>
@@ -555,7 +563,7 @@ public class ForeignKeyRelationshipBuilderTests
             ForeignKeyReferentialAction.NoAction
         );
 
-        var rel = builder.Build(tables, NoUniqueSets()).Should().ContainSingle().Which;
+        var rel = builder.Build(tables).Should().ContainSingle().Which;
 
         rel.Type.Should().Be(RelationshipType.OneToOne);
     }
@@ -575,42 +583,125 @@ public class ForeignKeyRelationshipBuilderTests
     }
 }
 
-/// <summary><see cref="UniqueColumnSetBuilder"/> の一意制約列集合の集約を検証するテストクラス（FK の 1 対 1 判定へ供給する材料）</summary>
-public class UniqueColumnSetBuilderTests
+/// <summary>
+/// <see cref="UniqueConstraintImportBuilder"/> の一意制約集約とモデルへの反映を検証するテストクラス
+/// （5 方言のインポーターが共有する取込→モデル変換の正本）
+/// </summary>
+public class UniqueConstraintImportBuilderTests
 {
-    /// <summary>単一制約の複数列が 1 つの列配列（大小無視の昇順）へ集約されることを検証する</summary>
-    [Fact(DisplayName = "単一制約の複数列は昇順の配列へ集約される")]
-    public void SingleConstraint_AggregatesColumnsSorted()
+    /// <summary>テーブルキー・テーブル名・列名から取込用エントリを生成する</summary>
+    private static SchemaTableEntry Table(string key, params string[] columnNames)
     {
-        var builder = new UniqueColumnSetBuilder();
-        builder.Add("T", "UQ_T", "b");
-        builder.Add("T", "UQ_T", "A");
+        var entry = new SchemaTableEntry
+        {
+            Key = key,
+            Entity = new Entity { TableName = key },
+        };
 
-        var result = builder.Build();
+        foreach (var name in columnNames)
+        {
+            var column = new Column { Name = name, DataType = "int" };
+            entry.Entity.Columns.Add(column);
+            entry.ColumnsByName[name] = column;
+        }
 
-        result.Should().ContainKey("T");
-        result["T"].Should().ContainSingle().Which.Should().Equal("A", "b");
+        return entry;
     }
 
-    /// <summary>同一テーブルの複数制約がそれぞれ独立した配列として保持されることを検証する</summary>
-    [Fact(DisplayName = "同一テーブルの複数制約は別々の配列になる")]
-    public void MultipleConstraints_KeptSeparate()
+    /// <summary>単一制約の複数列が宣言順（＝投入順）のまま保持されることを検証する</summary>
+    /// <remarks>旧実装は列名をアルファベット順にソートしていたが、DDL へ書き戻すため宣言順が正本になった</remarks>
+    [Fact(DisplayName = "単一制約の複数列は宣言順のまま保持される")]
+    public void SingleConstraint_KeepsDeclarationOrder()
     {
-        var builder = new UniqueColumnSetBuilder();
-        builder.Add("T", "UQ_1", "X");
-        builder.Add("T", "UQ_2", "Y");
+        var builder = new UniqueConstraintImportBuilder();
+        builder.Add("T", "UQ_T", "b", "UQ_T");
+        builder.Add("T", "UQ_T", "A", "UQ_T");
 
         var result = builder.Build();
 
-        result["T"].Should().HaveCount(2);
-        result["T"].Should().ContainEquivalentOf(new[] { "X" });
-        result["T"].Should().ContainEquivalentOf(new[] { "Y" });
+        var constraint = result["T"].Should().ContainSingle().Which;
+        constraint.Name.Should().Be("UQ_T");
+        constraint.ColumnNames.Should().Equal("b", "A");
+    }
+
+    /// <summary>同一テーブルの複数制約がそれぞれ独立した制約として投入順に保持されることを検証する</summary>
+    [Fact(DisplayName = "同一テーブルの複数制約は投入順に分離される")]
+    public void MultipleConstraints_KeptSeparateInInsertionOrder()
+    {
+        var builder = new UniqueConstraintImportBuilder();
+        builder.Add("T", "UQ_1", "X", "UQ_1");
+        builder.Add("T", "UQ_2", "Y", "UQ_2");
+
+        var result = builder.Build();
+
+        result["T"].Select(c => c.Name).Should().Equal("UQ_1", "UQ_2");
+        result["T"][0].ColumnNames.Should().Equal("X");
+        result["T"][1].ColumnNames.Should().Equal("Y");
+    }
+
+    /// <summary>集約キーと別に保存名を指定でき、null を渡すと制約名なしとして保持されることを検証する（SQLite の自動名対策）</summary>
+    [Fact(DisplayName = "保存名に null を渡すと制約名なしとして保持される")]
+    public void NullPersistedName_IsKept()
+    {
+        var builder = new UniqueConstraintImportBuilder();
+        builder.Add("T", "sqlite_autoindex_T_1", "X", persistedName: null);
+
+        builder.Build()["T"].Should().ContainSingle().Which.Name.Should().BeNull();
     }
 
     /// <summary>投入がなければ空辞書を返すことを検証する</summary>
     [Fact(DisplayName = "投入なしなら空辞書")]
     public void NoInput_ReturnsEmpty()
     {
-        new UniqueColumnSetBuilder().Build().Should().BeEmpty();
+        new UniqueConstraintImportBuilder().Build().Should().BeEmpty();
+    }
+
+    /// <summary>Attach が列名をカラム ID へ解決してエンティティへ制約を載せることを検証する</summary>
+    [Fact(DisplayName = "Attach: 列名を解決してエンティティへ一意制約を載せる")]
+    public void Attach_ResolvesColumnIds()
+    {
+        var entry = Table("T", "A", "B", "C");
+        var tables = new Dictionary<string, SchemaTableEntry> { ["T"] = entry };
+
+        var builder = new UniqueConstraintImportBuilder();
+        builder.Add("T", "UQ_T", "C", "UQ_T");
+        builder.Add("T", "UQ_T", "A", "UQ_T");
+        UniqueConstraintImportBuilder.Attach(tables, builder.Build());
+
+        var constraint = entry.Entity.UniqueConstraints.Should().ContainSingle().Which;
+        constraint.Name.Should().Be("UQ_T");
+        // 宣言順（C→A）のまま ID へ解決される
+        constraint
+            .ColumnIds.Should()
+            .Equal(entry.ColumnsByName["C"].Id, entry.ColumnsByName["A"].Id);
+    }
+
+    /// <summary>解決できない列を含む制約は Attach でスキップされることを検証する</summary>
+    [Fact(DisplayName = "Attach: 解決できない列を含む制約はスキップされる")]
+    public void Attach_SkipsUnresolvableColumns()
+    {
+        var entry = Table("T", "A");
+        var tables = new Dictionary<string, SchemaTableEntry> { ["T"] = entry };
+
+        var builder = new UniqueConstraintImportBuilder();
+        builder.Add("T", "UQ_T", "A", "UQ_T");
+        builder.Add("T", "UQ_T", "Missing", "UQ_T");
+        UniqueConstraintImportBuilder.Attach(tables, builder.Build());
+
+        entry.Entity.UniqueConstraints.Should().BeEmpty();
+    }
+
+    /// <summary>取込対象に無いテーブルの制約は Attach で無視されることを検証する</summary>
+    [Fact(DisplayName = "Attach: 未知のテーブルの制約は無視される")]
+    public void Attach_IgnoresUnknownTable()
+    {
+        var entry = Table("T", "A");
+        var tables = new Dictionary<string, SchemaTableEntry> { ["T"] = entry };
+
+        var builder = new UniqueConstraintImportBuilder();
+        builder.Add("Other", "UQ_Other", "A", "UQ_Other");
+        UniqueConstraintImportBuilder.Attach(tables, builder.Build());
+
+        entry.Entity.UniqueConstraints.Should().BeEmpty();
     }
 }

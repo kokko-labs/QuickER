@@ -450,6 +450,12 @@ namespace QuickER.Db.UI.Resources {
             }
         }
 
+        public static string SchemaSync_ExecuteConfirmUniqueConstraintDropRisk {
+            get {
+                return ResourceManager.GetString("SchemaSync_ExecuteConfirmUniqueConstraintDropRisk", resourceCulture);
+            }
+        }
+
         public static string SchemaSync_ExecuteConfirmRebuildBlocked {
             get {
                 return ResourceManager.GetString("SchemaSync_ExecuteConfirmRebuildBlocked", resourceCulture);

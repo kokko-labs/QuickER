@@ -61,6 +61,17 @@ public static class CanvasViewportBehavior
     /// <summary>対象 ScrollViewer</summary>
     private static ScrollViewer? _scrollViewer;
 
+    /// <summary>呼び出しスレッドが所有している場合に限り対象 ScrollViewer を返す</summary>
+    /// <remarks>
+    /// 製品では UI スレッド 1 本・対象ビュー 1 つの前提だが、テストは複数の STA スレッドが
+    /// それぞれウィンドウを並行表示するため、ウィンドウ単位のイベント（Deactivated / PreviewKey*）が
+    /// 別スレッド所有の ScrollViewer を指す static 参照へ届くことがある。所有スレッド以外から
+    /// DependencyObject を触ると InvalidOperationException（テストランナーの Catastrophic failure）に
+    /// なるため、他スレッド所有の参照は「自分の対象ではない」ものとして触らない。
+    /// </remarks>
+    private static ScrollViewer? OwnedScrollViewer =>
+        _scrollViewer is not null && _scrollViewer.CheckAccess() ? _scrollViewer : null;
+
     // ---------- 添付プロパティ ----------
 
     /// <summary>ズーム・パン機能の有効・無効を表す添付プロパティ</summary>
@@ -150,9 +161,9 @@ public static class CanvasViewportBehavior
         {
             IsPanActive = false;
 
-            if (_scrollViewer is not null)
+            if (OwnedScrollViewer is { } sv)
             {
-                _scrollViewer.Cursor = null;
+                sv.Cursor = null;
             }
         }
     }
@@ -346,9 +357,9 @@ public static class CanvasViewportBehavior
         _isSpaceDown = true;
         IsPanActive = true;
 
-        if (_scrollViewer is not null)
+        if (OwnedScrollViewer is { } sv)
         {
-            _scrollViewer.Cursor = Cursors.Hand;
+            sv.Cursor = Cursors.Hand;
         }
 
         // キャンバス操作としての Space はスクロール等の既定動作を抑止する
@@ -370,9 +381,9 @@ public static class CanvasViewportBehavior
         {
             IsPanActive = false;
 
-            if (_scrollViewer is not null)
+            if (OwnedScrollViewer is { } sv)
             {
-                _scrollViewer.Cursor = null;
+                sv.Cursor = null;
             }
         }
     }

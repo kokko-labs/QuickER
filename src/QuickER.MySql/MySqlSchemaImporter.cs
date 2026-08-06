@@ -59,6 +59,8 @@ public class MySqlSchemaImporter : ISchemaImporter
         var tables = await LoadTablesAsync(conn, ct).ConfigureAwait(false);
         await LoadColumnsAsync(conn, tables, ct).ConfigureAwait(false);
         await LoadPrimaryKeysAsync(conn, tables, ct).ConfigureAwait(false);
+        // 一意制約は FK の 1 対 1 判定の材料になるため、外部キーより先にモデルへ載せる
+        await LoadUniqueConstraintsAsync(conn, tables, ct).ConfigureAwait(false);
         var (rels, warnings) = await LoadForeignKeysAsync(conn, tables, ct).ConfigureAwait(false);
 
         return new SchemaResult
@@ -101,14 +103,28 @@ FROM information_schema.KEY_COLUMN_USAGE
 WHERE TABLE_SCHEMA = DATABASE() AND CONSTRAINT_NAME = 'PRIMARY'
 ORDER BY TABLE_NAME, ORDINAL_POSITION;";
 
-    /// <summary>主キー以外の一意制約の構成列を取得するクエリ（1 対 1 判定に用いる）</summary>
-    /// <remarks>STATISTICS の NON_UNIQUE = 0 かつ主キー以外のインデックスを一意制約とみなす</remarks>
+    /// <summary>UNIQUE 制約の構成列を宣言順に取得するクエリ（モデルの一意制約・1 対 1 判定に用いる）</summary>
+    /// <remarks>
+    /// MySQL は UNIQUE 制約と一意インデックスを区別しないため、STATISTICS の
+    /// <c>NON_UNIQUE = 0</c> かつ主キー以外のインデックスを一意制約とみなす。
+    /// ただし列そのものを一意にしないもの——プレフィックスインデックス（<c>SUB_PART IS NOT NULL</c>）と
+    /// 関数インデックス（<c>COLUMN_NAME IS NULL</c>）——は、意味モデルの UNIQUE (列…) として
+    /// 再現できないためインデックスごと除外する（1 列でも該当すればそのインデックス全体を落とす）。
+    /// </remarks>
     private const string UniqueConstraintSql =
         @"
-SELECT TABLE_NAME, INDEX_NAME, COLUMN_NAME, SEQ_IN_INDEX
-FROM information_schema.STATISTICS
-WHERE TABLE_SCHEMA = DATABASE() AND NON_UNIQUE = 0 AND INDEX_NAME <> 'PRIMARY'
-ORDER BY TABLE_NAME, INDEX_NAME, SEQ_IN_INDEX;";
+SELECT s.TABLE_NAME, s.INDEX_NAME, s.COLUMN_NAME, s.SEQ_IN_INDEX
+FROM information_schema.STATISTICS s
+WHERE s.TABLE_SCHEMA = DATABASE() AND s.NON_UNIQUE = 0 AND s.INDEX_NAME <> 'PRIMARY'
+  AND NOT EXISTS (
+      SELECT 1
+      FROM information_schema.STATISTICS x
+      WHERE x.TABLE_SCHEMA = s.TABLE_SCHEMA
+        AND x.TABLE_NAME = s.TABLE_NAME
+        AND x.INDEX_NAME = s.INDEX_NAME
+        AND (x.SUB_PART IS NOT NULL OR x.COLUMN_NAME IS NULL)
+  )
+ORDER BY s.TABLE_NAME, s.INDEX_NAME, s.SEQ_IN_INDEX;";
 
     /// <summary>外部キーの親子テーブル・列・参照アクションを取得するクエリ</summary>
     /// <remarks>
@@ -242,9 +258,6 @@ ORDER BY kcu.CONSTRAINT_NAME, kcu.ORDINAL_POSITION;";
         CancellationToken ct
     )
     {
-        // 親テーブルの一意制約列集合を取得し、1 対 1 判定に用いる
-        var uniqueSets = await LoadUniqueColumnSetsAsync(conn, ct).ConfigureAwait(false);
-
         var builder = new ForeignKeyRelationshipBuilder();
 
         await using (var cmd = new MySqlCommand(ForeignKeysSql, conn))
@@ -276,31 +289,32 @@ ORDER BY kcu.CONSTRAINT_NAME, kcu.ORDINAL_POSITION;";
             }
         }
 
-        var rels = builder.Build(tables, uniqueSets);
+        var rels = builder.Build(tables);
 
         return (rels, builder.CompositeForeignKeyWarnings.ToList());
     }
 
-    /// <summary>テーブルごとの一意制約列集合を取得する</summary>
-    /// <returns>テーブル名 → 各一意制約の列名配列リスト</returns>
-    private static async Task<Dictionary<string, List<string[]>>> LoadUniqueColumnSetsAsync(
+    /// <summary>UNIQUE 制約を読み込み、各エンティティの一意制約としてモデルへ載せる</summary>
+    private static async Task LoadUniqueConstraintsAsync(
         MySqlConnection conn,
+        Dictionary<string, SchemaTableEntry> tables,
         CancellationToken ct
     )
     {
-        var builder = new UniqueColumnSetBuilder();
+        var builder = new UniqueConstraintImportBuilder();
 
-        await using var cmd = new MySqlCommand(UniqueConstraintSql, conn);
-        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-
-        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        await using (var cmd = new MySqlCommand(UniqueConstraintSql, conn))
+        await using (var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false))
         {
-            var key = reader.GetString(0);
-            var indexName = reader.GetString(1);
-            var col = reader.GetString(2);
-            builder.Add(key, indexName, col);
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                var key = reader.GetString(0);
+                var indexName = reader.GetString(1);
+                var col = reader.GetString(2);
+                builder.Add(key, indexName, col, indexName);
+            }
         }
 
-        return builder.Build();
+        UniqueConstraintImportBuilder.Attach(tables, builder.Build());
     }
 }

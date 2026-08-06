@@ -317,4 +317,150 @@ public class SqliteDdlGeneratorTests
         sql.Should().Contain("CREATE TABLE \"顧客\"");
         sql.Should().Contain("\"co\"\"l\"");
     }
+
+    /// <summary>一意制約を持つエンティティの図を組み立てる</summary>
+    /// <param name="withPrimaryKey">主キー列を含めるかどうか（PK 行との区切りカンマ検証用）</param>
+    private static (ErDiagram Diagram, Entity Entity) BuildUniqueDiagram(bool withPrimaryKey = true)
+    {
+        var entity = new Entity { TableName = "shops" };
+
+        if (withPrimaryKey)
+        {
+            entity.Columns.Add(
+                new Column
+                {
+                    Name = "id",
+                    DataType = "INT",
+                    IsPrimaryKey = true,
+                    IsNullable = false,
+                }
+            );
+        }
+
+        entity.Columns.Add(
+            new Column
+            {
+                Name = "code",
+                DataType = "NVARCHAR(20)",
+                IsNullable = false,
+            }
+        );
+        entity.Columns.Add(
+            new Column
+            {
+                Name = "region",
+                DataType = "NVARCHAR(10)",
+                IsNullable = false,
+            }
+        );
+
+        return (new ErDiagram { Entities = { entity } }, entity);
+    }
+
+    /// <summary>名前付き単一列の一意制約が PK 制約行の直後へ出力されることを検証する</summary>
+    [Fact(DisplayName = "Build: 名前付き単一列 UNIQUE が PK の直後に出力される")]
+    public void Build_NamedSingleColumnUnique_EmitsConstraint()
+    {
+        var (diagram, entity) = BuildUniqueDiagram();
+        entity.UniqueConstraints.Add(
+            new UniqueConstraint { Name = "UQ_shops_code", ColumnIds = [entity.Columns[1].Id] }
+        );
+
+        var sql = new SqliteDdlGenerator().Build(diagram);
+
+        // PK 行には後続制約があるため区切りカンマが付く
+        sql.Should().Contain("CONSTRAINT \"PK_shops\" PRIMARY KEY (\"id\"),");
+        sql.Should().Contain("CONSTRAINT \"UQ_shops_code\" UNIQUE (\"code\")");
+        // 最後の制約行に余分なカンマは付かない
+        sql.Should().NotContain("UNIQUE (\"code\"),");
+    }
+
+    /// <summary>制約名なしの複合一意制約が合成名・宣言順で出力されることを検証する</summary>
+    [Fact(DisplayName = "Build: 名前なし複合 UNIQUE は UQ_テーブル_列… の合成名になる")]
+    public void Build_UnnamedCompositeUnique_SynthesizesName()
+    {
+        var (diagram, entity) = BuildUniqueDiagram();
+        // 宣言順は region → code（列定義順とは逆）
+        entity.UniqueConstraints.Add(
+            new UniqueConstraint { ColumnIds = [entity.Columns[2].Id, entity.Columns[1].Id] }
+        );
+
+        var sql = new SqliteDdlGenerator().Build(diagram);
+
+        sql.Should().Contain("CONSTRAINT \"UQ_shops_region_code\" UNIQUE (\"region\", \"code\")");
+    }
+
+    /// <summary>PK が無くても列定義の末尾カンマが一意制約行の有無で正しく付くことを検証する</summary>
+    [Fact(DisplayName = "Build: PK なしでも UNIQUE 行の前の列にカンマが付く")]
+    public void Build_WithoutPrimaryKey_KeepsCommaBeforeUnique()
+    {
+        var (diagram, entity) = BuildUniqueDiagram(withPrimaryKey: false);
+        entity.UniqueConstraints.Add(new UniqueConstraint { ColumnIds = [entity.Columns[0].Id] });
+
+        var sql = new SqliteDdlGenerator().Build(diagram);
+
+        sql.Should().NotContain("PRIMARY KEY");
+        sql.Should().Contain("\"region\" NVARCHAR(10) NOT NULL,");
+        sql.Should().Contain("CONSTRAINT \"UQ_shops_code\" UNIQUE (\"code\")");
+    }
+
+    /// <summary>制約行が PK → UNIQUE → FK の順に並ぶことを検証する</summary>
+    [Fact(DisplayName = "Build: 制約行は PK → UNIQUE → FK の順に並ぶ")]
+    public void Build_ConstraintOrder_IsPkThenUniqueThenForeignKey()
+    {
+        var ownerId = new Column
+        {
+            Name = "id",
+            DataType = "INT",
+            IsPrimaryKey = true,
+            IsNullable = false,
+        };
+        var owner = new Entity { TableName = "owners", Columns = { ownerId } };
+
+        var (diagram, shop) = BuildUniqueDiagram();
+        var ownerRef = new Column
+        {
+            Name = "owner_id",
+            DataType = "INT",
+            IsNullable = false,
+        };
+        shop.Columns.Add(ownerRef);
+        shop.UniqueConstraints.Add(
+            new UniqueConstraint { Name = "UQ_shops_code", ColumnIds = [shop.Columns[1].Id] }
+        );
+
+        diagram.Entities.Add(owner);
+        diagram.Relationships.Add(
+            new Relationship
+            {
+                SourceEntityId = owner.Id,
+                TargetEntityId = shop.Id,
+                Type = RelationshipType.OneToMany,
+                SourceColumnId = ownerId.Id,
+                TargetColumnId = ownerRef.Id,
+                ConstraintName = "FK_shops_owners",
+            }
+        );
+
+        var sql = new SqliteDdlGenerator().Build(diagram);
+
+        var pkIndex = sql.IndexOf("CONSTRAINT \"PK_shops\"", StringComparison.Ordinal);
+        var uqIndex = sql.IndexOf("CONSTRAINT \"UQ_shops_code\"", StringComparison.Ordinal);
+        var fkIndex = sql.IndexOf("CONSTRAINT \"FK_shops_owners\"", StringComparison.Ordinal);
+
+        pkIndex.Should().BeGreaterThan(-1);
+        uqIndex.Should().BeGreaterThan(pkIndex);
+        fkIndex.Should().BeGreaterThan(uqIndex);
+        // 中間の制約行には区切りカンマが付き、最後の FK 行には付かない
+        sql.Should().Contain("CONSTRAINT \"UQ_shops_code\" UNIQUE (\"code\"),");
+    }
+
+    /// <summary>一意制約を持たない図では UNIQUE 行を 1 行も出力しないことを検証する（既存出力のバイト不変）</summary>
+    [Fact(DisplayName = "Build: 一意制約が無ければ UNIQUE を出力しない")]
+    public void Build_WithoutUniqueConstraints_EmitsNoUnique()
+    {
+        var (diagram, _) = BuildUniqueDiagram();
+
+        new SqliteDdlGenerator().Build(diagram).Should().NotContain("UNIQUE");
+    }
 }

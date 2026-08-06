@@ -260,6 +260,10 @@
   <data name="SchemaSync_ExecuteConfirmForeignKeyRebuildRisk" xml:space="preserve">
     <value>注意: 参照先の主キーが変わるため、{0} 件の外部キーを自動で外して再作成します。参照先の列が候補キーでなくなる場合は再作成に失敗し、MySQL / Oracle では部分適用（外部キーが消えたまま主キーだけ変わった状態）になり得ます。</value>
   </data>
+  <data name="SchemaSync_ExecuteConfirmUniqueConstraintDropRisk" xml:space="preserve">
+    <value>注意: 以下の一意制約は、既存の外部キーが参照している列を覆っています。削除すると候補キーが失われるため、削除自体が拒否されるか外部キーが壊れる可能性があります（主キーが同じ列を覆っている場合を除く）:
+{0}</value>
+  </data>
   <data name="SchemaSync_ExecuteConfirmRebuildBlocked" xml:space="preserve">
     <value>次のテーブルは同期されません: 取込で列対応が失われた複合外部キーを持つため、作り直すと単列の外部キーへ静かに置き換わってしまいます。
 

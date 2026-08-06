@@ -70,10 +70,11 @@ See [the EC order sample](samples/ec-order/README.md) for details. To walk throu
 
 ## Design ER models visually
 
-Design tables, columns, primary keys, foreign keys, and relationships visually in crow's foot notation.
+Design tables, columns, primary keys, foreign keys, unique constraints, and relationships visually in crow's foot notation.
 
 - One-to-one / one-to-many / many-to-many
 - Composite primary keys
+- Unique constraints (single-column and composite)
 - Cascade / SetNull / NoAction
 - Undo / Redo
 - Zoom, pan, and minimap

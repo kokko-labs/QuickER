@@ -1775,4 +1775,454 @@ public class SyncPlannerTests
         plan.Sections.Should().BeEmpty();
         plan.IsEmpty.Should().BeTrue();
     }
+
+    // ---------------- 一意制約（UNIQUE）の同期 ----------------
+
+    /// <summary>エンティティへ一意制約を足す（構成列は列名で引き当てる）</summary>
+    private static Entity WithUnique(Entity entity, string? name, params string[] columnNames)
+    {
+        entity.UniqueConstraints.Add(
+            new UniqueConstraint
+            {
+                Name = name,
+                ColumnIds = columnNames
+                    .Select(n => entity.Columns.Single(c => c.Name == n).Id)
+                    .ToList(),
+            }
+        );
+        return entity;
+    }
+
+    /// <summary>一意制約の差分項目を生成する</summary>
+    private static SchemaDiffItem UniqueItem(
+        SchemaDiffKind kind,
+        string table,
+        string? name,
+        string[] columns,
+        bool selected = true
+    ) =>
+        new()
+        {
+            Kind = kind,
+            TableName = table,
+            UniqueConstraintName = name,
+            UniqueConstraintColumns = columns,
+            IsSelected = selected,
+        };
+
+    /// <summary>
+    /// 一意制約の解除は FK 解除の直後（列・主キーの変更より前）、追加は FK 追加の直前に並ぶことを検証する。
+    /// </summary>
+    [Fact(DisplayName = "一意制約セクションは解除＝FK 解除直後・追加＝FK 追加直前に並ぶ")]
+    public void UniqueConstraintSections_AreInFixedOrder()
+    {
+        var plan = new SyncPlanner().BuildPlan(
+            [
+                Item(SchemaDiffKind.AddForeignKey),
+                UniqueItem(SchemaDiffKind.AddUniqueConstraint, "T", null, ["code"]),
+                Item(SchemaDiffKind.AlterColumn),
+                UniqueItem(SchemaDiffKind.DropUniqueConstraint, "T", "uq_old", ["memo"]),
+                Item(SchemaDiffKind.DropForeignKey),
+            ],
+            new SyncDialectCapabilities()
+        );
+
+        plan.Sections.Select(s => s.Kind)
+            .Should()
+            .Equal(
+                SchemaDiffKind.DropForeignKey,
+                SchemaDiffKind.DropUniqueConstraint,
+                SchemaDiffKind.AlterColumn,
+                SchemaDiffKind.AddUniqueConstraint,
+                SchemaDiffKind.AddForeignKey
+            );
+    }
+
+    /// <summary>
+    /// 被参照列に自然キーの一意制約が残る場合、主キーを付け替えても候補キー喪失の警告が出ないことを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 「自然キー UNIQUE ＋ 代理キー PK」への移行は実務で頻出する。旧実装は一意制約を知らず
+    /// 「新主キーが被参照列 1 列ちょうど」だけを根拠にしていたため、この構成で必ず誤警告していた。
+    /// </remarks>
+    [Fact(DisplayName = "候補キー証明: 被参照列に UNIQUE が残るなら主キー付け替えでも警告しない")]
+    public void AlterPrimaryKey_ReferencedColumnKeptUnique_AddsNoWarning()
+    {
+        var (customer, orders, rel, _) = LiveFkScenario();
+        // live: customer(id) が主キー兼 FK 被参照列。加えて自然キー code に UNIQUE が張られている
+        customer.Columns.Add(Col("code", "INT"));
+        WithUnique(customer, "UQ_customer_id", "id");
+        var context = new SyncPlanContext
+        {
+            LiveEntities = [customer, orders],
+            LiveRelationships = [rel],
+        };
+
+        // 主キーを code へ付け替える（被参照列 id は主キーから外れるが UNIQUE で候補キーのまま）
+        var targetCustomer = new Entity
+        {
+            TableName = "customer",
+            Columns =
+            {
+                Col("id", "INT"),
+                new Column
+                {
+                    Name = "code",
+                    DataType = "INT",
+                    IsPrimaryKey = true,
+                    IsNullable = false,
+                },
+            },
+        };
+
+        var plan = new SyncPlanner().BuildPlan(
+            [AlterPk("customer", targetCustomer)],
+            new SyncDialectCapabilities(),
+            context
+        );
+
+        plan.Warnings.Should().BeEmpty();
+        // 依存 FK の自動 DROP → 再 ADD 自体は従来どおり行う
+        plan.Sections.Should().Contain(s => s.Kind == SchemaDiffKind.AddForeignKey);
+    }
+
+    /// <summary>
+    /// 一意制約が在っても構成列が被参照列と一致しなければ、候補キーの根拠にならず警告が出ることを検証する。
+    /// </summary>
+    [Fact(DisplayName = "候補キー証明: UNIQUE が被参照列と一致しなければ警告する")]
+    public void AlterPrimaryKey_UniqueConstraintDoesNotCoverReferencedColumn_AddsWarning()
+    {
+        var (customer, orders, rel, _) = LiveFkScenario();
+        customer.Columns.Add(Col("code", "INT"));
+        // UNIQUE は (id, code) の複合＝id 単独の一意性は保証しない
+        WithUnique(customer, "UQ_customer_id_code", "id", "code");
+        var context = new SyncPlanContext
+        {
+            LiveEntities = [customer, orders],
+            LiveRelationships = [rel],
+        };
+
+        var targetCustomer = new Entity
+        {
+            TableName = "customer",
+            Columns =
+            {
+                Col("id", "INT"),
+                new Column
+                {
+                    Name = "code",
+                    DataType = "INT",
+                    IsPrimaryKey = true,
+                    IsNullable = false,
+                },
+            },
+        };
+
+        var plan = new SyncPlanner().BuildPlan(
+            [AlterPk("customer", targetCustomer)],
+            new SyncDialectCapabilities(),
+            context
+        );
+
+        var warning = plan.Warnings.Should().ContainSingle().Which;
+        warning.Kind.Should().Be(SyncPlanWarningKind.ForeignKeyRebuildMayLoseCandidateKey);
+        warning.TableName.Should().Be("orders");
+    }
+
+    /// <summary>
+    /// 候補キーの根拠にする一意制約が同じ同期で削除される場合は、証明が成立せず警告が出ることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 「同期後の UNIQUE 集合」は live −選択済み Drop ＋選択済み Add で厳密に合成する。
+    /// live に在るだけで証明材料にすると、消えると分かっている制約を根拠にしてしまう。
+    /// </remarks>
+    [Fact(DisplayName = "候補キー証明: 根拠の UNIQUE を同時に削除するなら警告する")]
+    public void AlterPrimaryKey_UniqueConstraintDroppedInSameSync_AddsWarning()
+    {
+        var (customer, orders, rel, _) = LiveFkScenario();
+        customer.Columns.Add(Col("code", "INT"));
+        WithUnique(customer, "UQ_customer_id", "id");
+        var context = new SyncPlanContext
+        {
+            LiveEntities = [customer, orders],
+            LiveRelationships = [rel],
+        };
+
+        var targetCustomer = new Entity
+        {
+            TableName = "customer",
+            Columns =
+            {
+                Col("id", "INT"),
+                new Column
+                {
+                    Name = "code",
+                    DataType = "INT",
+                    IsPrimaryKey = true,
+                    IsNullable = false,
+                },
+            },
+        };
+
+        var plan = new SyncPlanner().BuildPlan(
+            [
+                AlterPk("customer", targetCustomer),
+                UniqueItem(
+                    SchemaDiffKind.DropUniqueConstraint,
+                    "customer",
+                    "UQ_customer_id",
+                    ["id"]
+                ),
+            ],
+            new SyncDialectCapabilities(),
+            context
+        );
+
+        plan.Warnings.Should()
+            .Contain(w => w.Kind == SyncPlanWarningKind.ForeignKeyRebuildMayLoseCandidateKey);
+    }
+
+    /// <summary>
+    /// 未選択の一意制約追加は候補キーの証明材料にならない（＝警告が出る）ことを検証する。
+    /// </summary>
+    [Fact(DisplayName = "候補キー証明: 未選択の UNIQUE 追加はあてにしない")]
+    public void AlterPrimaryKey_UnselectedUniqueConstraintAdd_AddsWarning()
+    {
+        var (customer, orders, rel, _) = LiveFkScenario();
+        customer.Columns.Add(Col("code", "INT"));
+        var context = new SyncPlanContext
+        {
+            LiveEntities = [customer, orders],
+            LiveRelationships = [rel],
+        };
+
+        var targetCustomer = new Entity
+        {
+            TableName = "customer",
+            Columns =
+            {
+                Col("id", "INT"),
+                new Column
+                {
+                    Name = "code",
+                    DataType = "INT",
+                    IsPrimaryKey = true,
+                    IsNullable = false,
+                },
+            },
+        };
+
+        var plan = new SyncPlanner().BuildPlan(
+            [
+                AlterPk("customer", targetCustomer),
+                UniqueItem(
+                    SchemaDiffKind.AddUniqueConstraint,
+                    "customer",
+                    null,
+                    ["id"],
+                    selected: false
+                ),
+            ],
+            new SyncDialectCapabilities(),
+            context
+        );
+
+        plan.Warnings.Should()
+            .Contain(w => w.Kind == SyncPlanWarningKind.ForeignKeyRebuildMayLoseCandidateKey);
+    }
+
+    /// <summary>
+    /// SQL Server 相当の方言では、定義変更する列に張られた live の一意制約が自動 DROP → 再 ADD されることを検証する。
+    /// </summary>
+    [Fact(DisplayName = "一意制約: 構成列の定義変更で自動 DROP → 再 ADD が注入される")]
+    public void AlterColumn_OnUniqueConstraintColumn_InjectsImplicitDropAndReAdd()
+    {
+        var customer = new Entity
+        {
+            TableName = "customer",
+            Columns = { PkId(), Col("code", "INT") },
+        };
+        WithUnique(customer, "UQ_customer_code", "code");
+        var context = new SyncPlanContext { LiveEntities = [customer] };
+
+        var plan = new SyncPlanner().BuildPlan(
+            [
+                new SchemaDiffItem
+                {
+                    Kind = SchemaDiffKind.AlterColumn,
+                    TableName = "customer",
+                    ColumnName = "code",
+                    Column = Col("code", "BIGINT"),
+                    IsSelected = true,
+                },
+            ],
+            FkRebuildCaps,
+            context
+        );
+
+        plan.Sections.Select(s => s.Kind)
+            .Should()
+            .Equal(
+                SchemaDiffKind.DropUniqueConstraint,
+                SchemaDiffKind.AlterColumn,
+                SchemaDiffKind.AddUniqueConstraint
+            );
+
+        var drop = plan
+            .Sections.Single(s => s.Kind == SchemaDiffKind.DropUniqueConstraint)
+            .Items.Should()
+            .ContainSingle()
+            .Which;
+        drop.UniqueConstraintName.Should().Be("UQ_customer_code");
+        drop.UniqueConstraintColumns.Should().Equal("code");
+        drop.Description.Should()
+            .Be(string.Format(ProviderStrings.Diff_AutoUniqueConstraintRebuild, "code"));
+
+        plan.Sections.Single(s => s.Kind == SchemaDiffKind.AddUniqueConstraint)
+            .Items.Should()
+            .ContainSingle()
+            .Which.UniqueConstraintColumns.Should()
+            .Equal("code");
+    }
+
+    /// <summary>
+    /// 明示的に DROP を選択した一意制約は自動 DROP を重複させず、再 ADD もしないことを検証する。
+    /// </summary>
+    [Fact(DisplayName = "一意制約: 明示 DROP したものは自動 DROP も再作成もしない")]
+    public void ExplicitlyDroppedUniqueConstraint_IsNeitherDuplicatedNorReAdded()
+    {
+        var customer = new Entity
+        {
+            TableName = "customer",
+            Columns = { PkId(), Col("code", "INT") },
+        };
+        WithUnique(customer, "UQ_customer_code", "code");
+        var context = new SyncPlanContext { LiveEntities = [customer] };
+
+        var explicitDrop = UniqueItem(
+            SchemaDiffKind.DropUniqueConstraint,
+            "customer",
+            "UQ_customer_code",
+            ["code"]
+        );
+
+        var plan = new SyncPlanner().BuildPlan(
+            [
+                explicitDrop,
+                new SchemaDiffItem
+                {
+                    Kind = SchemaDiffKind.AlterColumn,
+                    TableName = "customer",
+                    ColumnName = "code",
+                    Column = Col("code", "BIGINT"),
+                    IsSelected = true,
+                },
+            ],
+            FkRebuildCaps,
+            context
+        );
+
+        plan.Sections.Select(s => s.Kind)
+            .Should()
+            .Equal(SchemaDiffKind.DropUniqueConstraint, SchemaDiffKind.AlterColumn);
+        plan.Sections.Single(s => s.Kind == SchemaDiffKind.DropUniqueConstraint)
+            .Items.Should()
+            .Equal(explicitDrop);
+    }
+
+    /// <summary>
+    /// 外部キーが参照している列の一意制約を削除すると、外部キーが壊れうる警告が積まれることを検証する。
+    /// </summary>
+    [Fact(DisplayName = "一意制約: 被参照列の UNIQUE 削除は FK 破壊の警告を積む")]
+    public void DropUniqueConstraint_OnReferencedColumn_AddsWarning()
+    {
+        var (customer, orders, rel, _) = LiveFkScenario();
+        WithUnique(customer, "UQ_customer_id", "id");
+        var context = new SyncPlanContext
+        {
+            LiveEntities = [customer, orders],
+            LiveRelationships = [rel],
+        };
+
+        var plan = new SyncPlanner().BuildPlan(
+            [UniqueItem(SchemaDiffKind.DropUniqueConstraint, "customer", "UQ_customer_id", ["id"])],
+            new SyncDialectCapabilities(),
+            context
+        );
+
+        var warning = plan.Warnings.Should().ContainSingle().Which;
+        warning.Kind.Should().Be(SyncPlanWarningKind.UniqueConstraintDropMayBreakForeignKey);
+        warning.TableName.Should().Be("customer");
+        warning.Detail.Should().Be("FK_orders_customer");
+
+        // 警告は実行をブロックしない（DROP 自体は計画に残る）
+        plan.Sections.Should()
+            .ContainSingle()
+            .Which.Kind.Should()
+            .Be(SchemaDiffKind.DropUniqueConstraint);
+    }
+
+    /// <summary>被参照列と関係ない一意制約の削除では FK 破壊の警告が積まれないことを検証する</summary>
+    [Fact(DisplayName = "一意制約: 被参照列と無関係な UNIQUE 削除は警告しない")]
+    public void DropUniqueConstraint_OnUnrelatedColumn_AddsNoWarning()
+    {
+        var (customer, orders, rel, _) = LiveFkScenario();
+        customer.Columns.Add(Col("code", "INT"));
+        WithUnique(customer, "UQ_customer_code", "code");
+        var context = new SyncPlanContext
+        {
+            LiveEntities = [customer, orders],
+            LiveRelationships = [rel],
+        };
+
+        var plan = new SyncPlanner().BuildPlan(
+            [
+                UniqueItem(
+                    SchemaDiffKind.DropUniqueConstraint,
+                    "customer",
+                    "UQ_customer_code",
+                    ["code"]
+                ),
+            ],
+            new SyncDialectCapabilities(),
+            context
+        );
+
+        plan.Warnings.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// 再構築方言（SQLite）では一意制約の追加・削除が合成スキーマへ畳み込まれることを検証する。
+    /// </summary>
+    [Fact(DisplayName = "再構築方言: 一意制約の追加・削除は合成スキーマへ畳まれる")]
+    public void RebuildDialect_UniqueConstraintChanges_AreFoldedIntoSynthesizedSchema()
+    {
+        var live = new Entity
+        {
+            TableName = "product",
+            Columns = { PkId(), Col("sku", "TEXT"), Col("legacy", "TEXT") },
+        };
+        WithUnique(live, name: null, "legacy");
+
+        var plan = new SyncPlanner().BuildPlan(
+            [
+                UniqueItem(SchemaDiffKind.DropUniqueConstraint, "product", null, ["legacy"]),
+                UniqueItem(SchemaDiffKind.AddUniqueConstraint, "product", null, ["sku"]),
+            ],
+            RebuildCaps,
+            new SyncPlanContext { LiveEntities = [live] }
+        );
+
+        // 一意制約の変更だけでもテーブル再構築が起きる（セクションへは残らない）
+        plan.Sections.Should().BeEmpty();
+        var rebuild = plan.Rebuilds.Should().ContainSingle().Which;
+        rebuild.CreateOnly.Should().BeFalse();
+
+        // 合成後は legacy の制約が消え、sku の制約が加わる（構成列は合成後の列 ID で解決できる）
+        var constraint = rebuild.NewDefinition.UniqueConstraints.Should().ContainSingle().Which;
+        constraint
+            .ColumnIds.Select(id => rebuild.NewDefinition.Columns.Single(c => c.Id == id).Name)
+            .Should()
+            .Equal("sku");
+    }
 }

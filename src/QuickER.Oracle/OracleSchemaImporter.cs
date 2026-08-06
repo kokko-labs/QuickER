@@ -65,6 +65,8 @@ public class OracleSchemaImporter : ISchemaImporter
         await LoadColumnsAsync(conn, tables, ct).ConfigureAwait(false);
         await LoadPrimaryKeysAsync(conn, tables, ct).ConfigureAwait(false);
         await LoadDescriptionsAsync(conn, tables, ct).ConfigureAwait(false);
+        // 一意制約は FK の 1 対 1 判定の材料になるため、外部キーより先にモデルへ載せる
+        await LoadUniqueConstraintsAsync(conn, tables, ct).ConfigureAwait(false);
         var (rels, warnings) = await LoadForeignKeysAsync(conn, tables, ct).ConfigureAwait(false);
 
         return new SchemaResult
@@ -110,7 +112,11 @@ JOIN user_cons_columns cc ON c.constraint_name = cc.constraint_name
 WHERE c.constraint_type = 'P'
 ORDER BY cc.table_name, cc.position";
 
-    /// <summary>主キー以外の一意制約の構成列を取得するクエリ（1 対 1 判定に用いる）</summary>
+    /// <summary>UNIQUE 制約の構成列を宣言順に取得するクエリ（モデルの一意制約・1 対 1 判定に用いる）</summary>
+    /// <remarks>
+    /// <c>constraint_type = 'U'</c> の真の UNIQUE 制約のみを対象とする（<c>CREATE UNIQUE INDEX</c> による
+    /// 素の一意インデックスは user_constraints に現れないため自然に除外される）。position が宣言順を表す
+    /// </remarks>
     private const string UniqueConstraintSql =
         @"SELECT cc.table_name, cc.constraint_name, cc.column_name, cc.position
 FROM user_constraints c
@@ -312,9 +318,6 @@ ORDER BY c.constraint_name, cc.position";
         CancellationToken ct
     )
     {
-        // 親テーブルの一意制約列集合を取得し、1 対 1 判定に用いる
-        var uniqueSets = await LoadUniqueColumnSetsAsync(conn, ct).ConfigureAwait(false);
-
         var builder = new ForeignKeyRelationshipBuilder();
 
         await using var cmd = conn.CreateCommand();
@@ -344,33 +347,35 @@ ORDER BY c.constraint_name, cc.position";
             );
         }
 
-        var rels = builder.Build(tables, uniqueSets);
+        var rels = builder.Build(tables);
 
         return (rels, builder.CompositeForeignKeyWarnings.ToList());
     }
 
-    /// <summary>テーブルごとの一意制約列集合を取得する</summary>
-    /// <returns>テーブル名 → 各一意制約の列名配列リスト</returns>
-    private static async Task<Dictionary<string, List<string[]>>> LoadUniqueColumnSetsAsync(
+    /// <summary>UNIQUE 制約を読み込み、各エンティティの一意制約としてモデルへ載せる</summary>
+    private static async Task LoadUniqueConstraintsAsync(
         OracleConnection conn,
+        Dictionary<string, SchemaTableEntry> tables,
         CancellationToken ct
     )
     {
-        var builder = new UniqueColumnSetBuilder();
+        var builder = new UniqueConstraintImportBuilder();
 
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = UniqueConstraintSql;
-        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-
-        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        await using (var cmd = conn.CreateCommand())
         {
-            var key = reader.GetString(0);
-            var con = reader.GetString(1);
-            var col = reader.GetString(2);
-            builder.Add(key, con, col);
+            cmd.CommandText = UniqueConstraintSql;
+            await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                var key = reader.GetString(0);
+                var constraintName = reader.GetString(1);
+                var col = reader.GetString(2);
+                builder.Add(key, constraintName, col, constraintName);
+            }
         }
 
-        return builder.Build();
+        UniqueConstraintImportBuilder.Attach(tables, builder.Build());
     }
 
     /// <summary>user_constraints.delete_rule を参照アクションへ変換する</summary>

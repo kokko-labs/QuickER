@@ -424,4 +424,99 @@ public class SqlServerDdlGeneratorTests
 
         sql.Should().NotContain("sp_addextendedproperty");
     }
+
+    /// <summary>一意制約を持つエンティティの図を組み立てる</summary>
+    /// <param name="withPrimaryKey">主キー列を含めるかどうか（PK 行との区切りカンマ検証用）</param>
+    private static (ErDiagram Diagram, Entity Entity) BuildUniqueDiagram(bool withPrimaryKey = true)
+    {
+        var entity = new Entity { TableName = "shops" };
+
+        if (withPrimaryKey)
+        {
+            entity.Columns.Add(
+                new Column
+                {
+                    Name = "id",
+                    DataType = "int",
+                    IsPrimaryKey = true,
+                    IsNullable = false,
+                }
+            );
+        }
+
+        entity.Columns.Add(
+            new Column
+            {
+                Name = "code",
+                DataType = "nvarchar(20)",
+                IsNullable = false,
+            }
+        );
+        entity.Columns.Add(
+            new Column
+            {
+                Name = "region",
+                DataType = "nvarchar(10)",
+                IsNullable = false,
+            }
+        );
+
+        return (new ErDiagram { Entities = { entity } }, entity);
+    }
+
+    /// <summary>名前付き単一列の一意制約が PK 制約行の直後へ出力されることを検証する</summary>
+    [Fact(DisplayName = "Build: 名前付き単一列 UNIQUE が PK の直後に出力される")]
+    public void Build_NamedSingleColumnUnique_EmitsConstraint()
+    {
+        var (diagram, entity) = BuildUniqueDiagram();
+        entity.UniqueConstraints.Add(
+            new UniqueConstraint { Name = "UQ_shops_code", ColumnIds = [entity.Columns[1].Id] }
+        );
+
+        var sql = new SqlServerDdlGenerator().Build(diagram);
+
+        // PK 行には後続制約があるため区切りカンマが付く
+        sql.Should().Contain("CONSTRAINT [PK_shops] PRIMARY KEY ([id]),");
+        sql.Should().Contain("CONSTRAINT [UQ_shops_code] UNIQUE ([code])");
+        // 最後の制約行に余分なカンマは付かない
+        sql.Should().NotContain("UNIQUE ([code]),");
+    }
+
+    /// <summary>制約名なしの複合一意制約が合成名・宣言順で出力されることを検証する</summary>
+    [Fact(DisplayName = "Build: 名前なし複合 UNIQUE は UQ_テーブル_列… の合成名になる")]
+    public void Build_UnnamedCompositeUnique_SynthesizesName()
+    {
+        var (diagram, entity) = BuildUniqueDiagram();
+        // 宣言順は region → code（列定義順とは逆）
+        entity.UniqueConstraints.Add(
+            new UniqueConstraint { ColumnIds = [entity.Columns[2].Id, entity.Columns[1].Id] }
+        );
+
+        var sql = new SqlServerDdlGenerator().Build(diagram);
+
+        sql.Should().Contain("CONSTRAINT [UQ_shops_region_code] UNIQUE ([region], [code])");
+    }
+
+    /// <summary>PK が無くても列定義の末尾カンマが一意制約行の有無で正しく付くことを検証する</summary>
+    [Fact(DisplayName = "Build: PK なしでも UNIQUE 行の前の列にカンマが付く")]
+    public void Build_WithoutPrimaryKey_KeepsCommaBeforeUnique()
+    {
+        var (diagram, entity) = BuildUniqueDiagram(withPrimaryKey: false);
+        entity.UniqueConstraints.Add(new UniqueConstraint { ColumnIds = [entity.Columns[0].Id] });
+
+        var sql = new SqlServerDdlGenerator().Build(diagram);
+
+        sql.Should().NotContain("PRIMARY KEY");
+        sql.Should().Contain("[region] nvarchar(10) NOT NULL,");
+        sql.Should().Contain("CONSTRAINT [UQ_shops_code] UNIQUE ([code])");
+    }
+
+    /// <summary>一意制約を持たない図では UNIQUE 行を 1 行も出力しないことを検証する（既存出力のバイト不変）</summary>
+    [Fact(DisplayName = "Build: 一意制約が無ければ UNIQUE を出力しない")]
+    public void Build_WithoutUniqueConstraints_EmitsNoUnique()
+    {
+        var (diagram, _) = BuildUniqueDiagram();
+
+        new SqlServerDdlGenerator().Build(diagram).Should().NotContain("UNIQUE");
+    }
 }

@@ -1,4 +1,5 @@
 using System.IO;
+using System.Text.RegularExpressions;
 using ClosedXML.Excel;
 using QuickER.Model;
 using QuickER.Resources;
@@ -11,8 +12,11 @@ namespace QuickER.Services;
 /// シート名がローカライズされていても（ユーザーがリネームしても）取り込める。
 /// 行位置は <see cref="TableDefinitionDocumentLayout"/> をエクスポータと共有する。
 /// </remarks>
-public static class TableDefinitionDocumentImporter
+public static partial class TableDefinitionDocumentImporter
 {
+    /// <summary>キー表記中の一意制約ラベル（<c>UQ1</c> など）に一致する正規表現</summary>
+    private static readonly Regex UniqueConstraintLabelRegex = UniqueConstraintKeyLabelRegex();
+
     /// <summary>テーブル定義書ファイルを読み込み <see cref="ErDiagram" /> として返す</summary>
     /// <param name="path">読み込む Excel ファイルパス</param>
     /// <returns>復元した ER 図</returns>
@@ -187,9 +191,16 @@ public static class TableDefinitionDocumentImporter
         return entities;
     }
 
-    /// <summary>詳細シートのカラム行を読み取り、キー表記から PK / FK を復元する</summary>
+    /// <summary>詳細シートのカラム行を読み取り、キー表記から PK / FK / 一意制約を復元する</summary>
+    /// <remarks>
+    /// キー表記の <c>UQ{n}</c> は同じ番号が同じ制約を表すため、番号ごとに構成列をまとめて 1 つの
+    /// <see cref="UniqueConstraint"/> へ復元する（制約名は定義書に載らないため未設定＝合成名になる）
+    /// </remarks>
     private static void ReadColumns(IXLWorksheet worksheet, Entity entity)
     {
+        // 一意制約の番号 → 構成列 ID（列の出現順＝宣言順）
+        var uniqueConstraintColumns = new SortedDictionary<int, List<Guid>>();
+
         for (var row = TableDefinitionDocumentLayout.DetailColumnDataStartRow; ; row++)
         {
             var columnName = GetCellText(worksheet, row, 2);
@@ -213,17 +224,27 @@ public static class TableDefinitionDocumentImporter
             }
 
             var keyText = GetCellText(worksheet, row, 6);
-            entity.Columns.Add(
-                new Column
+            var column = new Column
+            {
+                Name = columnName,
+                Description = GetCellText(worksheet, row, 3),
+                DataType = dataType,
+                IsNullable = string.IsNullOrWhiteSpace(GetCellText(worksheet, row, 5)),
+                IsPrimaryKey = keyText.Contains("PK", StringComparison.OrdinalIgnoreCase),
+                IsForeignKey = keyText.Contains("FK", StringComparison.OrdinalIgnoreCase),
+            };
+            entity.Columns.Add(column);
+
+            foreach (var number in ParseUniqueConstraintNumbers(keyText))
+            {
+                if (!uniqueConstraintColumns.TryGetValue(number, out var columnIds))
                 {
-                    Name = columnName,
-                    Description = GetCellText(worksheet, row, 3),
-                    DataType = dataType,
-                    IsNullable = string.IsNullOrWhiteSpace(GetCellText(worksheet, row, 5)),
-                    IsPrimaryKey = keyText.Contains("PK", StringComparison.OrdinalIgnoreCase),
-                    IsForeignKey = keyText.Contains("FK", StringComparison.OrdinalIgnoreCase),
+                    columnIds = [];
+                    uniqueConstraintColumns[number] = columnIds;
                 }
-            );
+
+                columnIds.Add(column.Id);
+            }
         }
 
         if (entity.Columns.Count == 0)
@@ -231,6 +252,28 @@ public static class TableDefinitionDocumentImporter
             throw new InvalidDataException(
                 string.Format(Strings.TableDoc_TableNoColumns, entity.TableName)
             );
+        }
+
+        // 番号順に制約を復元する（出力時の連番＝登場順のため、往復で制約の並びが保たれる）
+        foreach (var columnIds in uniqueConstraintColumns.Values)
+        {
+            entity.UniqueConstraints.Add(new UniqueConstraint { ColumnIds = columnIds });
+        }
+    }
+
+    /// <summary>キー表記から一意制約の番号（<c>UQ{n}</c> の n）を抽出する</summary>
+    /// <remarks>
+    /// 1 列が複数の制約に参加する場合はカンマ連結（例: <c>UQ1,UQ2</c>）で、他のキー表記とは
+    /// <c>/</c> 区切り（例: <c>PK/UQ1</c>）で並ぶ。番号なしの <c>UQ</c> は制約を特定できないため無視する
+    /// </remarks>
+    private static IEnumerable<int> ParseUniqueConstraintNumbers(string keyText)
+    {
+        foreach (Match match in UniqueConstraintLabelRegex.Matches(keyText))
+        {
+            if (int.TryParse(match.Groups["number"].Value, out var number))
+            {
+                yield return number;
+            }
         }
     }
 
@@ -402,6 +445,10 @@ public static class TableDefinitionDocumentImporter
     /// <summary>空白文字列を null へ正規化する</summary>
     private static string? NullIfWhiteSpace(string value) =>
         string.IsNullOrWhiteSpace(value) ? null : value;
+
+    /// <summary>キー表記中の一意制約ラベル（<c>UQ{n}</c>）に一致する正規表現を生成する</summary>
+    [GeneratedRegex(@"UQ(?<number>\d+)", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
+    private static partial Regex UniqueConstraintKeyLabelRegex();
 
     /// <summary>テーブル一覧シート 1 行分の情報</summary>
     private sealed record TableSummaryRow(string TableName, string Description, string Memo);

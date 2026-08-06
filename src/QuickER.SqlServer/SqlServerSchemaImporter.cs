@@ -67,6 +67,8 @@ public class SqlServerSchemaImporter : ISchemaImporter
         await LoadColumnsAsync(conn, tables, ct).ConfigureAwait(false);
         await LoadPrimaryKeysAsync(conn, tables, ct).ConfigureAwait(false);
         await LoadDescriptionsAsync(conn, tables, ct).ConfigureAwait(false);
+        // 一意制約は FK の 1 対 1 判定の材料になるため、外部キーより先にモデルへ載せる
+        await LoadUniqueConstraintsAsync(conn, tables, ct).ConfigureAwait(false);
         var (rels, warnings) = await LoadForeignKeysAsync(conn, tables, ct).ConfigureAwait(false);
 
         return new SchemaResult
@@ -142,8 +144,13 @@ JOIN sys.tables  tr ON fkc.referenced_object_id = tr.object_id
 JOIN sys.columns cr ON fkc.referenced_object_id = cr.object_id AND fkc.referenced_column_id = cr.column_id
 ORDER BY fk.name, fkc.constraint_column_id;";
 
-    /// <summary>主キー以外の一意インデックス構成列を取得するクエリ（1 対 1 判定に用いる）</summary>
-    private const string UniqueIndexSql =
+    /// <summary>UNIQUE 制約の構成列を宣言順に取得するクエリ（モデルの一意制約・1 対 1 判定に用いる）</summary>
+    /// <remarks>
+    /// <c>is_unique_constraint = 1</c> で「真の UNIQUE 制約」に限定する。
+    /// <c>CREATE UNIQUE INDEX</c> による素の一意インデックス（フィルター付きを含む）は
+    /// 制約ではないため取り込まない（5 方言で線引きを揃えるため）。
+    /// </remarks>
+    private const string UniqueConstraintSql =
         @"
 SELECT SCHEMA_NAME(t.schema_id) AS TableSchema, t.name AS TableName, i.name AS IndexName,
        c.name AS ColumnName, ic.key_ordinal AS Ordinal
@@ -151,7 +158,7 @@ FROM sys.indexes i
 JOIN sys.tables  t  ON i.object_id = t.object_id
 JOIN sys.index_columns ic ON i.object_id = ic.object_id AND i.index_id = ic.index_id
 JOIN sys.columns c ON ic.object_id = c.object_id AND ic.column_id = c.column_id
-WHERE i.is_unique = 1 AND i.is_primary_key = 0 AND ic.is_included_column = 0
+WHERE i.is_unique_constraint = 1 AND i.is_primary_key = 0 AND ic.is_included_column = 0
 ORDER BY t.schema_id, t.name, i.name, ic.key_ordinal;";
 
     /// <summary>テーブル・カラムの拡張プロパティ MS_Description を一括取得するクエリ（minor_id=0 がテーブルレベル）</summary>
@@ -326,9 +333,6 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
         CancellationToken ct
     )
     {
-        // 親テーブルの一意制約列集合を取得し、1 対 1 判定に用いる
-        var uniqueSets = await LoadUniqueColumnSetsAsync(conn, ct).ConfigureAwait(false);
-
         var builder = new ForeignKeyRelationshipBuilder();
 
         await using var cmd = new SqlCommand(ForeignKeysSql, conn);
@@ -351,32 +355,33 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
             builder.Add(fkName, parentKey, parentCol, refKey, refCol, deleteAction, updateAction);
         }
 
-        var rels = builder.Build(tables, uniqueSets);
+        var rels = builder.Build(tables);
 
         return (rels, builder.CompositeForeignKeyWarnings.ToList());
     }
 
-    /// <summary>テーブルごとの一意インデックス列集合を取得する</summary>
-    /// <returns>テーブルキー → 各一意インデックスの列名配列リスト</returns>
-    private static async Task<Dictionary<string, List<string[]>>> LoadUniqueColumnSetsAsync(
+    /// <summary>UNIQUE 制約を読み込み、各エンティティの一意制約としてモデルへ載せる</summary>
+    private static async Task LoadUniqueConstraintsAsync(
         SqlConnection conn,
+        Dictionary<string, SchemaTableEntry> tables,
         CancellationToken ct
     )
     {
-        var builder = new UniqueColumnSetBuilder();
+        var builder = new UniqueConstraintImportBuilder();
 
-        await using var cmd = new SqlCommand(UniqueIndexSql, conn);
-        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-
-        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        await using (var cmd = new SqlCommand(UniqueConstraintSql, conn))
+        await using (var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false))
         {
-            var key = TableKey(reader.GetString(0), reader.GetString(1));
-            var idx = reader.GetString(2);
-            var col = reader.GetString(3);
-            builder.Add(key, idx, col);
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                var key = TableKey(reader.GetString(0), reader.GetString(1));
+                var constraintName = reader.GetString(2);
+                var col = reader.GetString(3);
+                builder.Add(key, constraintName, col, constraintName);
+            }
         }
 
-        return builder.Build();
+        UniqueConstraintImportBuilder.Attach(tables, builder.Build());
     }
 
     /// <summary>SQL Server の型情報を <c>nvarchar(50)</c> や <c>decimal(10,2)</c> 等の表示形式へ整形する</summary>

@@ -10,7 +10,8 @@ namespace QuickER.Services;
 /// <remarks>
 /// 出力は <see cref="DbmlImporter"/> が解釈できる記法の範囲に限定する
 /// <list type="bullet">
-///   <item><c>Table</c> ブロック: カラム設定は <c>pk</c> / <c>ref</c> / <c>null</c> / <c>not null</c> / <c>note</c> のみ出力（Indexes・Enum 等は対象外）</item>
+///   <item><c>Table</c> ブロック: カラム設定は <c>pk</c> / <c>ref</c> / <c>unique</c> / <c>null</c> / <c>not null</c> / <c>note</c> のみ出力（Enum 等は対象外）</item>
+///   <item><c>Indexes</c> ブロック: 一意制約のうちカラム設定 <c>unique</c> で表せないもの（複合・名前付き）を <c>(列, …) [unique, name: '…']</c> として出力</item>
 ///   <item><c>Ref:</c> 行: 多重度を <c>-</c>（1対1）/ <c>&lt;</c>（1対多）/ <c>&lt;&gt;</c>（多対多）の記号で表現</item>
 ///   <item>note 文字列中のシングルクォートは <c>\'</c> にエスケープ</item>
 /// </list>
@@ -29,11 +30,16 @@ public static class DbmlExporter
         {
             builder.AppendLine($"Table {entity.TableName} {{");
 
+            var (inlineUniqueColumnIds, indexConstraints) = ClassifyUniqueConstraints(entity);
+
             foreach (var column in entity.Columns)
             {
-                builder.AppendLine($"  {BuildColumnLine(column)}");
+                builder.AppendLine(
+                    $"  {BuildColumnLine(column, inlineUniqueColumnIds.Contains(column.Id))}"
+                );
             }
 
+            AppendIndexesBlock(builder, indexConstraints);
             builder.AppendLine("}");
             builder.AppendLine();
         }
@@ -64,9 +70,11 @@ public static class DbmlExporter
     /// </summary>
     /// <remarks>
     /// PK 列には <c>pk</c> のみを出力し <c>ref</c> は併記しない。NULL 許可は常に
-    /// <c>null</c> / <c>not null</c> のどちらかを明示し、インポート時の既定値依存を避ける
+    /// <c>null</c> / <c>not null</c> のどちらかを明示し、インポート時の既定値依存を避ける。
+    /// <paramref name="isUnique"/> は「名前なし単一列の一意制約の構成列」を表す
+    /// （<see cref="ClassifyUniqueConstraints"/> の判定結果）
     /// </remarks>
-    private static string BuildColumnLine(Column column)
+    private static string BuildColumnLine(Column column, bool isUnique)
     {
         var settings = new List<string>();
 
@@ -80,6 +88,11 @@ public static class DbmlExporter
             settings.Add("ref");
         }
 
+        if (isUnique)
+        {
+            settings.Add("unique");
+        }
+
         settings.Add(column.IsNullable ? "null" : "not null");
 
         if (!string.IsNullOrWhiteSpace(column.Description))
@@ -88,6 +101,77 @@ public static class DbmlExporter
         }
 
         return $"{column.Name} {column.DataType} [{string.Join(", ", settings)}]";
+    }
+
+    /// <summary>
+    /// 一意制約を「カラム設定 <c>unique</c> で表せるもの」と「<c>Indexes</c> ブロックへ出すもの」へ振り分ける
+    /// </summary>
+    /// <returns>インライン出力する構成列 ID の集合と、<c>Indexes</c> ブロックへ出す制約（構成列名つき）の一覧</returns>
+    /// <remarks>
+    /// カラム設定の <c>unique</c> は制約名を持てないため、名前なし単一列の制約だけをインラインにし、
+    /// 複合制約と名前付き制約は <c>(列, …) [unique, name: '…']</c> として <c>Indexes</c> ブロックへ出す。
+    /// 構成列が空、または解決できないカラム ID を含む制約は黙って除外する（DDL 生成と同じ規則）
+    /// </remarks>
+    private static (
+        HashSet<Guid> InlineColumnIds,
+        List<(string? Name, List<string> ColumnNames)> IndexConstraints
+    ) ClassifyUniqueConstraints(Entity entity)
+    {
+        var inlineColumnIds = new HashSet<Guid>();
+        var indexConstraints = new List<(string? Name, List<string> ColumnNames)>();
+
+        foreach (var constraint in entity.UniqueConstraints)
+        {
+            var columns = constraint
+                .ColumnIds.Select(columnId =>
+                    entity.Columns.FirstOrDefault(column => column.Id == columnId)
+                )
+                .ToList();
+
+            if (columns.Count == 0 || columns.Any(column => column is null))
+            {
+                continue;
+            }
+
+            if (columns.Count == 1 && string.IsNullOrWhiteSpace(constraint.Name))
+            {
+                inlineColumnIds.Add(columns[0]!.Id);
+                continue;
+            }
+
+            indexConstraints.Add(
+                (constraint.Name, columns.Select(column => column!.Name).ToList())
+            );
+        }
+
+        return (inlineColumnIds, indexConstraints);
+    }
+
+    /// <summary>
+    /// <c>Indexes</c> ブロック（複合・名前付きの一意制約）をテーブルブロック内へ出力する
+    /// </summary>
+    private static void AppendIndexesBlock(
+        StringBuilder builder,
+        IReadOnlyList<(string? Name, List<string> ColumnNames)> indexConstraints
+    )
+    {
+        if (indexConstraints.Count == 0)
+        {
+            return;
+        }
+
+        builder.AppendLine();
+        builder.AppendLine("  Indexes {");
+
+        foreach (var (name, columnNames) in indexConstraints)
+        {
+            var settings = string.IsNullOrWhiteSpace(name)
+                ? "unique"
+                : $"unique, name: '{EscapeNote(name!)}'";
+            builder.AppendLine($"    ({string.Join(", ", columnNames)}) [{settings}]");
+        }
+
+        builder.AppendLine("  }");
     }
 
     /// <summary>

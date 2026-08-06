@@ -302,6 +302,11 @@ public class SchemaDiffService
                 );
             }
 
+            // 一意制約の差分（列集合で照合し、制約名の差だけでは差分にしない）。
+            // 図側は制約名が未設定（null＝合成名）なことが多く、SQLite に至っては実名を持たないため、
+            // 名前を比較に含めると恒常的な Drop＋Add の誤検出になる。
+            AppendUniqueConstraintDiffs(diff, name, live, target);
+
             foreach (var (cname, lcol) in liveCols)
             {
                 if (!targetCols.ContainsKey(cname))
@@ -498,6 +503,115 @@ public class SchemaDiffService
         }
 
         return diff;
+    }
+
+    /// <summary>1 テーブル分の一意制約差分（追加・削除）を <paramref name="diff"/> へ追加する</summary>
+    /// <remarks>
+    /// <para>
+    /// 照合は <see cref="UniqueConstraintNaming.ColumnSetSignature"/>（大文字小文字・順序を無視した列集合）で行う。
+    /// target 側にだけ在る組は <see cref="SchemaDiffKind.AddUniqueConstraint"/>（既定で選択）、live 側にだけ在る組は
+    /// <see cref="SchemaDiffKind.DropUniqueConstraint"/>（既定で未選択＝破壊的）になる。
+    /// </para>
+    /// <para>
+    /// 構成列が空・解決不能な制約は差分対象から除外する（DDL 生成が黙って出力しないのと同じ扱い）。
+    /// </para>
+    /// </remarks>
+    private static void AppendUniqueConstraintDiffs(
+        SchemaDiff diff,
+        string tableName,
+        Entity live,
+        Entity target
+    )
+    {
+        var liveConstraints = ResolveUniqueConstraints(live);
+        var targetConstraints = ResolveUniqueConstraints(target);
+
+        if (liveConstraints.Count == 0 && targetConstraints.Count == 0)
+        {
+            return;
+        }
+
+        var liveSignatures = liveConstraints
+            .Select(c => c.Signature)
+            .ToHashSet(StringComparer.Ordinal);
+        var targetSignatures = targetConstraints
+            .Select(c => c.Signature)
+            .ToHashSet(StringComparer.Ordinal);
+
+        foreach (var constraint in targetConstraints)
+        {
+            if (liveSignatures.Contains(constraint.Signature))
+            {
+                continue;
+            }
+
+            diff.Items.Add(
+                new SchemaDiffItem
+                {
+                    Kind = SchemaDiffKind.AddUniqueConstraint,
+                    TableName = tableName,
+                    Entity = target,
+                    // 図側の名前は未設定（null）でよい＝レンダラーが UQ_{表}_{列…} を合成する
+                    UniqueConstraintName = constraint.Name,
+                    UniqueConstraintColumns = constraint.ColumnNames,
+                    Description = string.Format(
+                        Strings.Diff_AddUniqueConstraint,
+                        tableName,
+                        string.Join(", ", constraint.ColumnNames)
+                    ),
+                }
+            );
+        }
+
+        foreach (var constraint in liveConstraints)
+        {
+            if (targetSignatures.Contains(constraint.Signature))
+            {
+                continue;
+            }
+
+            diff.Items.Add(
+                new SchemaDiffItem
+                {
+                    Kind = SchemaDiffKind.DropUniqueConstraint,
+                    TableName = tableName,
+                    Entity = live,
+                    // DROP には DB 側の実名が要る（4 逐次方言は取込済み・SQLite は再構築へ畳まれる）
+                    UniqueConstraintName = constraint.Name,
+                    UniqueConstraintColumns = constraint.ColumnNames,
+                    IsSelected = false,
+                    Description = string.Format(
+                        Strings.Diff_DropUniqueConstraint,
+                        tableName,
+                        string.Join(", ", constraint.ColumnNames)
+                    ),
+                }
+            );
+        }
+    }
+
+    /// <summary>エンティティの一意制約を「制約名・構成列名・照合シグネチャ」へ解決する（解決不能な制約は除外）</summary>
+    private static List<(
+        string? Name,
+        List<string> ColumnNames,
+        string Signature
+    )> ResolveUniqueConstraints(Entity entity)
+    {
+        var resolved = new List<(string?, List<string>, string)>();
+
+        foreach (var constraint in entity.UniqueConstraints)
+        {
+            if (!UniqueConstraintNaming.TryResolveColumnNames(entity, constraint, out var columns))
+            {
+                continue;
+            }
+
+            resolved.Add(
+                (constraint.Name, columns, UniqueConstraintNaming.ColumnSetSignature(columns))
+            );
+        }
+
+        return resolved;
     }
 
     /// <summary>共通列（追加・削除を除いた双方に存在する列）の相対順序が異なるテーブル名の一覧を返す</summary>

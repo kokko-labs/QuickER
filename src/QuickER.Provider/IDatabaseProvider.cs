@@ -13,10 +13,11 @@ public sealed class SchemaImportResult
     public IReadOnlyList<Relationship> Relationships { get; init; } = [];
 
     /// <summary>
-    /// 意味モデルでは表現しきれない補助オブジェクト（インデックス・トリガー・無名の一意制約）。
+    /// 意味モデルでは表現しきれない補助オブジェクト（インデックス・トリガー）。
     /// </summary>
     /// <remarks>
-    /// 現状は SQLite のテーブル再構築同期のためだけに収集する。他方言は空のまま（後方互換）。
+    /// 現状は SQLite のテーブル再構築同期のためだけに収集する（他方言は空のまま）。一意制約は
+    /// <see cref="Entity.UniqueConstraints"/> が正本のため、ここには含まれない。
     /// </remarks>
     public IReadOnlyList<SchemaAuxiliaryObject> AuxiliaryObjects { get; init; } = [];
 

@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using AwesomeAssertions;
 using QuickER.Model;
 using QuickER.Provider;
@@ -31,6 +32,27 @@ public class SqliteSyncScriptBuilderTests
         };
 
     private static string Build(SyncPlan plan) => new SqliteSyncScriptBuilder().Build(plan);
+
+    /// <summary>
+    /// 合成後の定義へ一意制約を足す（構成列は列名で引き当てる）。
+    /// </summary>
+    /// <remarks>
+    /// 一意制約は補助オブジェクトではなく意味モデル（<see cref="Entity.UniqueConstraints"/>）が正本のため、
+    /// テストの入力も再構築計画の <see cref="TableRebuildPlan.NewDefinition"/> 側へ組み立てる。
+    /// </remarks>
+    private static Entity WithUnique(Entity entity, string? name, params string[] columnNames)
+    {
+        entity.UniqueConstraints.Add(
+            new UniqueConstraint
+            {
+                Name = name,
+                ColumnIds = columnNames
+                    .Select(n => entity.Columns.Single(c => c.Name == n).Id)
+                    .ToList(),
+            }
+        );
+        return entity;
+    }
 
     /// <summary>空の計画は空文字列を返すことを検証する</summary>
     [Fact(DisplayName = "空の計画は空文字列を返す")]
@@ -120,16 +142,21 @@ public class SqliteSyncScriptBuilderTests
                 new TableRebuildPlan
                 {
                     TableName = "orders",
-                    NewDefinition = new Entity
-                    {
-                        TableName = "orders",
-                        Columns =
+                    // 一意制約はモデル正本（Entity.UniqueConstraints）から出力する
+                    NewDefinition = WithUnique(
+                        new Entity
                         {
-                            Pk("id"),
-                            Col("customer_id", "int"),
-                            Col("note", "varchar(100)"),
+                            TableName = "orders",
+                            Columns =
+                            {
+                                Pk("id"),
+                                Col("customer_id", "int"),
+                                Col("note", "varchar(100)"),
+                            },
                         },
-                    },
+                        name: null,
+                        "note"
+                    ),
                     ForeignKeys =
                     [
                         new TableRebuildForeignKey(
@@ -152,13 +179,6 @@ public class SqliteSyncScriptBuilderTests
                             Kind = SchemaAuxiliaryObjectKind.Index,
                             CreateSql = "CREATE INDEX \"idx_orders_note\" ON \"orders\" (\"note\")",
                         },
-                        new SchemaAuxiliaryObject
-                        {
-                            TableName = "orders",
-                            Name = "uq_orders_note",
-                            Kind = SchemaAuxiliaryObjectKind.UniqueConstraint,
-                            Columns = ["note"],
-                        },
                     ],
                 },
             ],
@@ -172,7 +192,9 @@ public class SqliteSyncScriptBuilderTests
         // FK インライン・一意制約のテーブルレベル UNIQUE 再現
         script.Should().Contain("FOREIGN KEY (\"customer_id\")");
         script.Should().Contain("REFERENCES \"customer\" (\"id\") ON DELETE CASCADE");
-        script.Should().Contain("UNIQUE (\"note\")");
+        // モデル正本化に伴い、無名の UNIQUE (...) から DDL 生成と同じ名前付き制約行へ変わった
+        // （制約名は UniqueConstraintNaming が UQ_{実テーブル名}_{列…} を合成する＝一時テーブル名を使わない）
+        script.Should().Contain("CONSTRAINT \"UQ_orders_note\" UNIQUE (\"note\")");
 
         // データ移送は交差列のみ
         script
@@ -215,6 +237,19 @@ public class SqliteSyncScriptBuilderTests
     [Fact(DisplayName = "削除列を含む一意制約は再現しない")]
     public void UniqueConstraint_ReferencingRemovedColumn_IsDropped()
     {
+        // 合成後は id と keep のみ（gone は列削除で消えている）
+        var newDefinition = new Entity
+        {
+            TableName = "t",
+            Columns = { Pk("id"), Col("keep", "int") },
+        };
+        WithUnique(newDefinition, name: null, "keep");
+
+        // 構成列が合成後の定義に存在しない一意制約（＝解決不能）は黙って除外される
+        newDefinition.UniqueConstraints.Add(
+            new UniqueConstraint { ColumnIds = [Col("gone", "int").Id] }
+        );
+
         var plan = new SyncPlan
         {
             Rebuilds =
@@ -222,39 +257,17 @@ public class SqliteSyncScriptBuilderTests
                 new TableRebuildPlan
                 {
                     TableName = "t",
-                    // 合成後は id と keep のみ（gone は削除済み）
-                    NewDefinition = new Entity
-                    {
-                        TableName = "t",
-                        Columns = { Pk("id"), Col("keep", "int") },
-                    },
+                    NewDefinition = newDefinition,
                     CreateOnly = false,
                     CopyColumns = ["id", "keep"],
-                    AuxiliaryObjects =
-                    [
-                        new SchemaAuxiliaryObject
-                        {
-                            TableName = "t",
-                            Name = "uq_keep",
-                            Kind = SchemaAuxiliaryObjectKind.UniqueConstraint,
-                            Columns = ["keep"],
-                        },
-                        new SchemaAuxiliaryObject
-                        {
-                            TableName = "t",
-                            Name = "uq_gone",
-                            Kind = SchemaAuxiliaryObjectKind.UniqueConstraint,
-                            Columns = ["gone"],
-                        },
-                    ],
                 },
             ],
         };
 
         var script = Build(plan);
 
-        script.Should().Contain("UNIQUE (\"keep\")");
-        script.Should().NotContain("UNIQUE (\"gone\")");
+        script.Should().Contain("CONSTRAINT \"UQ_t_keep\" UNIQUE (\"keep\")");
+        script.Should().NotContain("\"gone\"");
     }
 
     /// <summary>列追加・テーブル削除は逐次セクション（ADD COLUMN / DROP TABLE）として出力されることを検証する</summary>

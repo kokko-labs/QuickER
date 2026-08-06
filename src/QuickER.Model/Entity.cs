@@ -23,16 +23,40 @@ public class Entity
     /// <summary>エンティティに属するカラム一覧</summary>
     public List<Column> Columns { get; set; } = new();
 
-    /// <summary>カラムも含めてエンティティを複製する</summary>
-    /// <param name="preserveId"><c>true</c> の場合は同じ ID を維持し、<c>false</c> の場合は新しい ID を割り当てる（カラムにも同様に適用される）</param>
+    /// <summary>テーブルに定義された一意制約（主キーを除く）の一覧</summary>
+    public List<UniqueConstraint> UniqueConstraints { get; set; } = [];
+
+    /// <summary>カラム・一意制約も含めてエンティティを複製する</summary>
+    /// <param name="preserveId"><c>true</c> の場合は同じ ID を維持し、<c>false</c> の場合は新しい ID を割り当てる（カラム・一意制約にも同様に適用される）</param>
     /// <returns>複製された <see cref="Entity"/></returns>
-    public Entity Clone(bool preserveId) =>
-        new()
+    /// <remarks>
+    /// <paramref name="preserveId"/> が <c>false</c> のときはカラム ID も新規採番されるため、
+    /// 一意制約の <see cref="UniqueConstraint.ColumnIds"/> は複製後のカラム ID へ張り替える
+    /// （張り替えないと複製側の制約が元エンティティのカラムを指し続け、参照が壊れる）。
+    /// </remarks>
+    public Entity Clone(bool preserveId)
+    {
+        // 先にカラムを複製し、旧 ID → 新 ID の対応表を作る（一意制約の張り替えに使う）
+        var columns = new List<Column>(Columns.Count);
+        var columnIdMap = new Dictionary<Guid, Guid>(Columns.Count);
+
+        foreach (var column in Columns)
+        {
+            var cloned = column.Clone(preserveId);
+            columns.Add(cloned);
+            columnIdMap[column.Id] = cloned.Id;
+        }
+
+        return new Entity
         {
             Id = preserveId ? Id : Guid.NewGuid(),
             TableName = TableName,
             Memo = Memo,
             Description = Description,
-            Columns = Columns.Select(column => column.Clone(preserveId)).ToList(),
+            Columns = columns,
+            UniqueConstraints = UniqueConstraints
+                .Select(constraint => constraint.Clone(preserveId, columnIdMap))
+                .ToList(),
         };
+    }
 }

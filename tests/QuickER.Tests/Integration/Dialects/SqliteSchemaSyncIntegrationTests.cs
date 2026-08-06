@@ -81,7 +81,7 @@ public sealed class SqliteSchemaSyncIntegrationTests
         var fk = reimported.Relationships.Should().ContainSingle().Which;
         fk.OnDelete.Should().Be(ForeignKeyReferentialAction.Cascade);
 
-        // インデックス・トリガー・UNIQUE の温存（補助オブジェクトとして再取込される）
+        // インデックス・トリガーの温存（補助オブジェクトとして再取込される）
         reimported
             .AuxiliaryObjects.Should()
             .Contain(a =>
@@ -92,13 +92,13 @@ public sealed class SqliteSchemaSyncIntegrationTests
             .Contain(a =>
                 a.Kind == SchemaAuxiliaryObjectKind.Trigger && a.Name == "trg_product_ai"
             );
-        reimported
-            .AuxiliaryObjects.Should()
-            .Contain(a =>
-                a.Kind == SchemaAuxiliaryObjectKind.UniqueConstraint
-                && a.Columns.Count == 1
-                && a.Columns[0] == "sku"
-            );
+
+        // UNIQUE の温存。一意制約は補助オブジェクトではなく意味モデル（Entity.UniqueConstraints）が正本になった
+        var reimportedUnique = importedProduct.UniqueConstraints.Should().ContainSingle().Which;
+        reimportedUnique
+            .ColumnIds.Select(id => importedProduct.Columns.Single(c => c.Id == id).Name)
+            .Should()
+            .Equal("sku");
 
         // ---------- 行データの温存 ----------
         var rows = await QueryProductRowsAsync(db);
@@ -504,6 +504,70 @@ public sealed class SqliteSchemaSyncIntegrationTests
         // 行データは失われない（再構築のデータ移送が効いている）
         var rows = await QueryPkItemRowsAsync(db);
         rows.Should().Equal(("A-001", 1L), ("A-002", 2L));
+    }
+
+    /// <summary>一意制約の追加・削除がテーブル再構築へ畳まれ、実 DB へ反映されることを検証する</summary>
+    /// <remarks>
+    /// SQLite は <c>ADD / DROP CONSTRAINT</c> を持たないため、一意制約の変更もテーブル再構築で実現する。
+    /// 追加と削除を同時に指定し、1 回の再構築で両方が成立することを確認する。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Integration] SQLite 同期: 一意制約の追加・削除がテーブル再構築で反映される"
+    )]
+    public async Task Rebuild_UniqueConstraintAddAndDrop()
+    {
+        using var db = SqliteTempDatabase.Create();
+        var provider = new SqliteProvider();
+
+        await RunStatementsAsync(
+            db,
+            "CREATE TABLE \"uq_item\" ("
+                + "\"id\" INTEGER NOT NULL, "
+                + "\"code\" TEXT NOT NULL, "
+                + "\"legacy\" TEXT NULL, "
+                + "CONSTRAINT \"PK_uq_item\" PRIMARY KEY (\"id\"), "
+                + "UNIQUE (\"legacy\")"
+                + ");",
+            "INSERT INTO \"uq_item\" (\"id\", \"code\", \"legacy\") VALUES (1, 'C-1', 'L-1');"
+        );
+
+        // 目標: legacy の一意制約を外し、code へ一意制約を張る
+        var (result, script) = await RunSyncAsync(
+            db,
+            provider,
+            (entities, relationships) =>
+            {
+                var item = entities.Single(e => e.TableName == "uq_item");
+                item.UniqueConstraints.Clear();
+                item.UniqueConstraints.Add(
+                    new UniqueConstraint
+                    {
+                        ColumnIds = [item.Columns.Single(c => c.Name == "code").Id],
+                    }
+                );
+                return (entities, relationships);
+            }
+        );
+
+        result.Committed.Should().BeTrue(result.Error);
+
+        // 一意制約の変更だけでテーブル再構築が起き、名前付きの UNIQUE 行が出力される
+        script.Should().Contain("-- ===== RebuildTable: uq_item =====");
+        script.Should().Contain("CONSTRAINT \"UQ_uq_item_code\" UNIQUE (\"code\")");
+
+        // ---------- 再取込: code に一意制約が張られ legacy のものは消えている ----------
+        var reimported = await ImportAsync(db, provider);
+        var item2 = reimported.Entities.Single(e => e.TableName == "uq_item");
+        var unique = item2.UniqueConstraints.Should().ContainSingle().Which;
+        unique
+            .ColumnIds.Select(id => item2.Columns.Single(c => c.Id == id).Name)
+            .Should()
+            .Equal("code");
+
+        // ---------- 行データの温存 ----------
+        (await QueryScalarLongAsync(db, "SELECT COUNT(*) FROM \"uq_item\";"))
+            .Should()
+            .Be(1);
     }
 
     /// <summary>主キー変更の検証用テーブルの行を取得する（データ温存の確認用）</summary>

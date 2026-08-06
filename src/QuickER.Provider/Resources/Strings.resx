@@ -115,6 +115,12 @@
   <data name="Diff_DropForeignKey" xml:space="preserve">
     <value>Drop foreign key [{0}] → [{1}]</value>
   </data>
+  <data name="Diff_AddUniqueConstraint" xml:space="preserve">
+    <value>Add unique constraint [{0}] ({1})</value>
+  </data>
+  <data name="Diff_DropUniqueConstraint" xml:space="preserve">
+    <value>Drop unique constraint [{0}] ({1})</value>
+  </data>
   <data name="Diff_ReorderColumns" xml:space="preserve">
     <value>Reorder the columns of table [{0}] to match the diagram</value>
   </data>
@@ -126,6 +132,9 @@
   </data>
   <data name="Diff_AutoForeignKeyRebuild" xml:space="preserve">
     <value>Automatically dropped and re-added to allow the change: [{0}]</value>
+  </data>
+  <data name="Diff_AutoUniqueConstraintRebuild" xml:space="preserve">
+    <value>Unique constraint automatically dropped and re-added to allow the change: ({0})</value>
   </data>
   <data name="Provider_UnsupportedProvider" xml:space="preserve">
     <value>Unsupported provider: '{0}'. Supported providers: {1}</value>

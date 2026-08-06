@@ -386,6 +386,9 @@ public static class TableDefinitionHtmlExporter
                 relatedRelationships,
                 _entitiesById
             );
+            var uniqueConstraintLabels = TableDefinitionContentBuilder.BuildUniqueConstraintLabels(
+                entity
+            );
             var requiredMark = L(nameof(Strings.TableDoc_RequiredMark));
 
             builder.AppendLine($"<section class=\"table-detail\" id=\"table-{number}\">");
@@ -422,6 +425,9 @@ public static class TableDefinitionHtmlExporter
                     column,
                     foreignKeyLabels.TryGetValue(column.Id, out var foreignKeyLabel)
                         ? foreignKeyLabel
+                        : null,
+                    uniqueConstraintLabels.TryGetValue(column.Id, out var uniqueConstraintLabel)
+                        ? uniqueConstraintLabel
                         : null
                 );
 

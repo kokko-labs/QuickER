@@ -1,4 +1,5 @@
 using QuickER.Model;
+using QuickER.Provider;
 
 namespace QuickER.Services;
 
@@ -92,30 +93,73 @@ internal static class TableDefinitionContentBuilder
         );
     }
 
-    /// <summary>キー列の表示ラベルを返す（PK / FK / PK/FK の組み合わせを表現する）</summary>
-    public static string GetKeyLabel(Column column, string? foreignKeyLabel)
+    /// <summary>テーブル内の一意制約に連番（UQ1, UQ2…）を振った列 ID ごとの表示ラベルを構築する</summary>
+    /// <remarks>
+    /// 連番はテーブルが持つ一意制約の登場順で、<b>同じ番号は同じ制約</b>を意味する（複合制約は構成列すべてに
+    /// 同じ <c>UQ{n}</c> が並ぶ＝1 列 1 セルの定義書でも制約の広がりが読み取れる）。1 列が複数の制約に
+    /// 参加する場合は外部キーの連番と同じ流儀でカンマ連結する。構成列が空、または解決できないカラム ID を
+    /// 含む制約は連番を消費せずに読み飛ばす（DDL 生成と同じ規則）
+    /// </remarks>
+    public static IReadOnlyDictionary<Guid, string> BuildUniqueConstraintLabels(Entity entity)
     {
-        if (column.IsPrimaryKey && !string.IsNullOrWhiteSpace(foreignKeyLabel))
+        var labels = new Dictionary<Guid, List<string>>();
+        var number = 0;
+
+        foreach (var constraint in entity.UniqueConstraints)
         {
-            return $"PK/{foreignKeyLabel}";
+            if (!UniqueConstraintNaming.TryResolveColumnNames(entity, constraint, out _))
+            {
+                continue;
+            }
+
+            number++;
+
+            foreach (var columnId in constraint.ColumnIds)
+            {
+                if (!labels.TryGetValue(columnId, out var columnLabels))
+                {
+                    columnLabels = [];
+                    labels[columnId] = columnLabels;
+                }
+
+                columnLabels.Add($"UQ{number}");
+            }
         }
+
+        return labels.ToDictionary(pair => pair.Key, pair => string.Join(",", pair.Value));
+    }
+
+    /// <summary>キー列の表示ラベルを返す（PK / FK / UQ の組み合わせを <c>/</c> 区切りで表現する）</summary>
+    /// <remarks>例: <c>PK</c> / <c>FK1</c> / <c>PK/FK1</c> / <c>UQ1</c> / <c>PK/UQ1</c> / <c>FK1/UQ2</c></remarks>
+    public static string GetKeyLabel(
+        Column column,
+        string? foreignKeyLabel,
+        string? uniqueConstraintLabel = null
+    )
+    {
+        var parts = new List<string>();
 
         if (column.IsPrimaryKey)
         {
-            return "PK";
+            parts.Add("PK");
         }
 
         if (!string.IsNullOrWhiteSpace(foreignKeyLabel))
         {
-            return foreignKeyLabel;
+            parts.Add(foreignKeyLabel!);
         }
-
-        if (column.IsForeignKey)
+        else if (column.IsForeignKey && !column.IsPrimaryKey)
         {
-            return "FK";
+            // リレーション由来の連番が無い FK 列（列フラグだけが立っている場合）は番号なしの FK とする
+            parts.Add("FK");
         }
 
-        return string.Empty;
+        if (!string.IsNullOrWhiteSpace(uniqueConstraintLabel))
+        {
+            parts.Add(uniqueConstraintLabel!);
+        }
+
+        return string.Join("/", parts);
     }
 
     /// <summary>外部キー列の参照先（テーブル.カラム）を重複なく連結した文字列を返す</summary>

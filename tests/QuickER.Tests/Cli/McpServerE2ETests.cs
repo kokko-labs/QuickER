@@ -104,7 +104,7 @@ public class McpServerE2ETests
                 .ServerInstructions.Should()
                 .Contain("PascalCase", "初期化時にサーバ使用指針（設計既定ルール）が返される");
 
-            // --- ListTools: 16 ツール（ER 9 ＋ create_diagram ＋ クエリ定義 3 ＋ generate_csharp ＋ generate_ddl ＋ get_generation_config_schema） ---
+            // --- ListTools: 18 ツール（ER 9 ＋ 一意制約 2 ＋ create_diagram ＋ クエリ定義 3 ＋ generate_csharp ＋ generate_ddl ＋ get_generation_config_schema） ---
             var tools = await client.ListToolsAsync(cancellationToken: cts.Token);
             var toolNames = tools.Select(t => t.Name).ToHashSet();
 
@@ -122,6 +122,8 @@ public class McpServerE2ETests
                         "set_column_property",
                         "add_relationship",
                         "remove_relationship",
+                        "set_unique_constraint",
+                        "remove_unique_constraint",
                         "create_diagram",
                         "set_query",
                         "list_queries",
@@ -133,7 +135,7 @@ public class McpServerE2ETests
                     Diagnostics(stderrLines)
                 );
 
-            // 情報系ツール get_generation_config_schema だけは file 引数を取らず、他 15 ツールは file 必須
+            // 情報系ツール get_generation_config_schema だけは file 引数を取らず、他 17 ツールは file 必須
             const string schemaTool = "get_generation_config_schema";
 
             foreach (var tool in tools)
@@ -202,6 +204,36 @@ public class McpServerE2ETests
             );
             addColumn.isError.Should().BeFalse(addColumn.text);
 
+            // --- add_column (一意制約の対象列) ---
+            var addEmail = await CallAsync(
+                client,
+                "add_column",
+                new()
+                {
+                    ["file"] = diagramFile,
+                    ["table_name"] = "Customer",
+                    ["column_name"] = "Email",
+                    ["data_type"] = "nvarchar(100)",
+                    ["is_nullable"] = false,
+                },
+                cts.Token
+            );
+            addEmail.isError.Should().BeFalse(addEmail.text);
+
+            // --- set_unique_constraint: 列名配列で一意制約を定義 ---
+            var setUnique = await CallAsync(
+                client,
+                "set_unique_constraint",
+                new()
+                {
+                    ["file"] = diagramFile,
+                    ["table_name"] = "Customer",
+                    ["columns"] = new[] { "Email" },
+                },
+                cts.Token
+            );
+            setUnique.isError.Should().BeFalse(setUnique.text);
+
             // --- get_diagram_summary: 内容確認 ---
             var summary = await CallAsync(
                 client,
@@ -213,6 +245,9 @@ public class McpServerE2ETests
             summary.text.Should().Contain("Customer");
             summary.text.Should().Contain("Id");
             summary.text.Should().Contain("PK");
+            // 一意制約は名前なしなら DDL 生成と同じ合成名で並ぶ
+            summary.text.Should().Contain("Unique constraints:");
+            summary.text.Should().Contain("UQ_Customer_Email (Email)");
 
             // --- set_query: 名前付きクエリ定義（DSL・件数・パラメータ付き） ---
             var setQuery = await CallAsync(

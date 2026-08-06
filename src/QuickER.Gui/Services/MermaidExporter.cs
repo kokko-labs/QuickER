@@ -5,6 +5,11 @@ using QuickER.Model;
 namespace QuickER.Services;
 
 /// <summary>ER 図を Mermaid の <c>erDiagram</c> 記法へ変換するサービス</summary>
+/// <remarks>
+/// キー標識は Mermaid の単一キー方式（1 カラム 1 標識）に合わせ <c>PK &gt; FK &gt; UK</c> の優先度で 1 つに畳む。
+/// 一意制約は単一列のものだけを <c>UK</c> として出力し、複合制約は出力しない
+/// （<see cref="CollectSingleColumnUniqueMembers"/> 参照）。
+/// </remarks>
 public static class MermaidExporter
 {
     /// <summary>ER 図定義から Mermaid 文字列を生成する</summary>
@@ -17,9 +22,13 @@ public static class MermaidExporter
         {
             builder.AppendLine($"    {entity.TableName} {{");
 
+            var uniqueColumnIds = CollectSingleColumnUniqueMembers(entity);
+
             foreach (var column in entity.Columns)
             {
-                builder.AppendLine($"        {BuildColumnLine(column)}");
+                builder.AppendLine(
+                    $"        {BuildColumnLine(column, uniqueColumnIds.Contains(column.Id))}"
+                );
             }
 
             builder.AppendLine("    }");
@@ -64,10 +73,11 @@ public static class MermaidExporter
 
     /// <summary>Mermaid の属性行を構築する</summary>
     /// <remarks>
-    /// Mermaid は同一カラムへの PK と FK の同時指定を構文エラーとして扱うため、
-    /// 両方該当する場合は PK を優先し FK は出力しない
+    /// Mermaid は同一カラムへの PK と FK の同時指定を構文エラーとして扱うため、キー標識は
+    /// <c>PK &gt; FK &gt; UK</c> の優先度で 1 つだけ出力する（GUI のキー標識
+    /// <see cref="ColumnKeyMarkPalette"/> と同じ序列）
     /// </remarks>
-    private static string BuildColumnLine(Column column)
+    private static string BuildColumnLine(Column column, bool isUnique)
     {
         var builder = new StringBuilder();
         builder.Append(NormalizeDataType(column.DataType));
@@ -82,8 +92,41 @@ public static class MermaidExporter
         {
             builder.Append(" FK");
         }
+        else if (isUnique)
+        {
+            builder.Append(" UK");
+        }
 
         return builder.ToString();
+    }
+
+    /// <summary>単一列の一意制約に参加しているカラム ID を集める</summary>
+    /// <remarks>
+    /// Mermaid の ER 記法には複数列をひとまとめにする構文が無く、複合制約を列ごとの <c>UK</c> へ分解すると
+    /// 取込時に「単一列の一意制約 × N」という別の意味になってしまう。そのため
+    /// <b>出力するのは単一列制約の構成列だけ</b>とし、複合制約は出力しない（Mermaid はビュー用の
+    /// 表現形式であり、往復での完全性は DBML・定義書・保存 JSON が担う）
+    /// </remarks>
+    private static HashSet<Guid> CollectSingleColumnUniqueMembers(Entity entity)
+    {
+        var members = new HashSet<Guid>();
+
+        foreach (var constraint in entity.UniqueConstraints)
+        {
+            if (constraint.ColumnIds.Count != 1)
+            {
+                continue;
+            }
+
+            var columnId = constraint.ColumnIds[0];
+
+            if (entity.Columns.Any(column => column.Id == columnId))
+            {
+                members.Add(columnId);
+            }
+        }
+
+        return members;
     }
 
     /// <summary>Mermaid のリレーション行を構築する。参照先エンティティが解決できない場合は null を返す</summary>

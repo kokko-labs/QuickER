@@ -391,4 +391,81 @@ public sealed class PostgreSqlSchemaSyncIntegrationTests(PostgreSqlContainerFixt
         var result = await _executor.ExecuteAsync(settings, script, Ct);
         result.Committed.Should().BeTrue($"同期に失敗: {result.Error}\nSQL:\n{script}");
     }
+
+    /// <summary>図に足した一意制約が実 DB へ追加され、外した一意制約が実 DB から消えることを検証する</summary>
+    [Fact(DisplayName = "[Integration] C: 一意制約の追加・削除が実 DB へ反映される")]
+    public async Task UniqueConstraintSync_AddsAndDrops()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        var settings = fixture.ToDbConnectionSettings();
+
+        await fixture.ExecuteAsync(
+            "CREATE TABLE \"uq_item\" (\"id\" integer NOT NULL, \"code\" varchar(20) NOT NULL, "
+                + "CONSTRAINT \"PK_uq_item\" PRIMARY KEY (\"id\"));",
+            Ct
+        );
+
+        // ========== 追加 ==========
+        var live = await ImportAsync();
+        var target = WithUniqueOnCode(live);
+        var addDiff = _diff.Compute(
+            live.Entities,
+            live.Relationships,
+            new[] { target },
+            new List<Relationship>()
+        );
+        // 一意制約の追加は既定で選択される（制約を増やすだけで既存定義を壊さないため）
+        addDiff
+            .Items.Should()
+            .ContainSingle(i => i.Kind == SchemaDiffKind.AddUniqueConstraint)
+            .Which.IsSelected.Should()
+            .BeTrue();
+
+        await ApplyAsync(settings, addDiff.Items);
+
+        var live2 = await ImportAsync();
+        var item2 = SingleUqItem(live2);
+        var added = item2.UniqueConstraints.Should().ContainSingle().Which;
+        added
+            .ColumnIds.Select(id => item2.Columns.Single(c => c.Id == id).Name)
+            .Should()
+            .Equal("code");
+
+        // ========== 削除 ==========
+        var target2 = CloneAsTarget(item2);
+        target2.UniqueConstraints.Clear();
+        var dropDiff = _diff.Compute(
+            live2.Entities,
+            live2.Relationships,
+            new[] { target2 },
+            new List<Relationship>()
+        );
+        var drop = dropDiff
+            .Items.Should()
+            .ContainSingle(i => i.Kind == SchemaDiffKind.DropUniqueConstraint)
+            .Which;
+        // 削除は破壊的のため既定では未選択＝明示的に選ぶ
+        drop.IsSelected.Should().BeFalse();
+        drop.IsSelected = true;
+
+        await ApplyAsync(settings, dropDiff.Items);
+
+        SingleUqItem(await ImportAsync()).UniqueConstraints.Should().BeEmpty();
+    }
+
+    /// <summary>検証用テーブルの取込エンティティを取り出す</summary>
+    private static Entity SingleUqItem(SchemaImportResult result) =>
+        result.Entities.Single(e => e.TableName == "uq_item");
+
+    /// <summary>取込結果の検証用テーブルへ「code 列の一意制約」を足した目標図を作る</summary>
+    private static Entity WithUniqueOnCode(SchemaImportResult live)
+    {
+        var target = CloneAsTarget(SingleUqItem(live));
+        target.UniqueConstraints.Add(
+            new UniqueConstraint { ColumnIds = [target.Columns.Single(c => c.Name == "code").Id] }
+        );
+        return target;
+    }
 }

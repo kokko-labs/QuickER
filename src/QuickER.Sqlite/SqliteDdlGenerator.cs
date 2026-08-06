@@ -107,12 +107,18 @@ public sealed partial class SqliteDdlGenerator : DdlGeneratorBase
 
         sb.AppendLine($"CREATE TABLE {SqliteIdentifier.Quote(entity.TableName)} (");
 
-        // 末尾に別立てで出す制約行（PK・全 FK）を収集する
+        // 末尾に別立てで出す制約行（PK・UNIQUE・全 FK）を収集する
         var trailingConstraints = new List<string>();
 
         if (pks.Count > 0)
         {
             trailingConstraints.Add(BuildPrimaryKeyConstraintLine(entity.TableName, pks));
+        }
+
+        // UNIQUE 制約は PK 行と FK 行の間に出力する（他方言の並びと揃える）
+        foreach (var unique in UniqueConstraintNaming.ResolveAll(entity, SqliteIdentifier.SafeName))
+        {
+            trailingConstraints.Add(BuildUniqueConstraintLine(unique.Name, unique.ColumnNames));
         }
 
         foreach (var fk in fks)
@@ -160,6 +166,18 @@ public sealed partial class SqliteDdlGenerator : DdlGeneratorBase
     {
         var pkCols = string.Join(", ", pks.Select(p => SqliteIdentifier.QuoteSimple(p.Name)));
         return $"    CONSTRAINT \"PK_{SqliteIdentifier.SafeName(tableName)}\" PRIMARY KEY ({pkCols})";
+    }
+
+    /// <summary>一意制約行（<c>CONSTRAINT "…" UNIQUE (…)</c>）を組み立てる</summary>
+    /// <param name="constraintName">解決済みの制約名（<see cref="UniqueConstraintNaming"/> が解決したもの）</param>
+    /// <param name="columnNames">構成列名（宣言順）</param>
+    internal static string BuildUniqueConstraintLine(
+        string constraintName,
+        IReadOnlyList<string> columnNames
+    )
+    {
+        var cols = string.Join(", ", columnNames.Select(SqliteIdentifier.QuoteSimple));
+        return $"    CONSTRAINT \"{SqliteIdentifier.Escape(constraintName)}\" UNIQUE ({cols})";
     }
 
     /// <summary>1 列分の列定義を組み立てる（型・NULL 許容。宣言型は verbatim に維持する）</summary>

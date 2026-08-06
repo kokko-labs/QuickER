@@ -60,6 +60,11 @@ public static partial class DocumentErDiagramToolHost
                 "set_column_property" => Mutate(file, doc => SetColumnProperty(doc, arguments)),
                 "add_relationship" => Mutate(file, doc => AddRelationship(doc, arguments)),
                 "remove_relationship" => Mutate(file, doc => RemoveRelationship(doc, arguments)),
+                "set_unique_constraint" => Mutate(file, doc => SetUniqueConstraint(doc, arguments)),
+                "remove_unique_constraint" => Mutate(
+                    file,
+                    doc => RemoveUniqueConstraint(doc, arguments)
+                ),
                 _ => ($"Unsupported tool: {toolName}", false),
             };
         }
@@ -297,6 +302,8 @@ public static partial class DocumentErDiagramToolHost
                     : string.Empty;
                 sb.AppendLine($"  - {col.Name}: {col.DataType}{flagsText}{colDesc}");
             }
+
+            AppendUniqueConstraints(sb, entity);
         }
 
         if (schema.Relationships.Count > 0)
@@ -403,6 +410,10 @@ public static partial class DocumentErDiagramToolHost
     }
 
     /// <summary>指定テーブルからカラムを削除し、そのカラムを参照するリレーションの参照をクリアする</summary>
+    /// <remarks>
+    /// 削除カラムを構成列に含む一意制約は制約ごと削除する（構成列を 1 つ失った制約を黙って別の意味の制約へ
+    /// 変質させないため。GUI の <c>RemoveColumnCommand</c> と同じ規則）
+    /// </remarks>
     private static (string, bool) RemoveColumn(DiagramDocument document, JsonElement args)
     {
         var tableName = GetString(args, "table_name");
@@ -430,6 +441,9 @@ public static partial class DocumentErDiagramToolHost
         }
 
         entity.Columns.Remove(column);
+
+        // 削除カラムを構成列に含む一意制約は制約ごと取り除く（GUI の削除後挙動をミラー）
+        entity.UniqueConstraints.RemoveAll(constraint => constraint.ColumnIds.Contains(column.Id));
 
         // 削除カラムを参照するリレーションの外部キー参照をクリアする（GUI の削除後挙動をミラー）
         foreach (var relationship in document.Schema.Relationships)
@@ -700,6 +714,220 @@ public static partial class DocumentErDiagramToolHost
         schema.Relationships.Remove(rel);
 
         return ($"Removed relationship '{sourceTable}' → '{targetTable}'.", true);
+    }
+
+    // ---------------- unique constraint operations ----------------
+
+    /// <summary>一意制約を定義する（同じ列集合の制約があれば名前・列順を差し替え、無ければ追加する）</summary>
+    /// <remarks>
+    /// 照合キーは (テーブル, 列集合) で、列の順序・大文字小文字は問わない（UNIQUE の意味論が列の並びに
+    /// 依存しないため）。既存が見つかった場合は Id を温存したまま丸ごと再定義する（set_query と同じ upsert 流儀）。
+    /// </remarks>
+    private static (string, bool) SetUniqueConstraint(DiagramDocument document, JsonElement args)
+    {
+        var tableName = GetString(args, "table_name");
+
+        if (string.IsNullOrWhiteSpace(tableName))
+        {
+            return ("table_name is required.", false);
+        }
+
+        var entity = FindEntity(document.Schema, tableName);
+
+        if (entity is null)
+        {
+            return ($"Table '{tableName}' not found.", false);
+        }
+
+        var (columns, error) = ResolveConstraintColumns(entity, args);
+
+        if (error is not null)
+        {
+            return (error, false);
+        }
+
+        var columnIds = columns!.Select(column => column.Id).ToList();
+        var name = GetString(args, "name");
+        var normalizedName = string.IsNullOrWhiteSpace(name) ? null : name;
+        var existing = FindUniqueConstraintByColumnSet(entity, columnIds);
+        var columnText = string.Join(", ", columns!.Select(column => column.Name));
+
+        if (existing is not null)
+        {
+            existing.Name = normalizedName;
+            existing.ColumnIds = columnIds;
+
+            return (
+                $"Updated unique constraint on table '{entity.TableName}' (columns: {columnText}).",
+                true
+            );
+        }
+
+        entity.UniqueConstraints.Add(
+            new UniqueConstraint { Name = normalizedName, ColumnIds = columnIds }
+        );
+
+        return (
+            $"Added unique constraint on table '{entity.TableName}' (columns: {columnText}).",
+            true
+        );
+    }
+
+    /// <summary>列集合で特定した一意制約を削除する</summary>
+    private static (string, bool) RemoveUniqueConstraint(DiagramDocument document, JsonElement args)
+    {
+        var tableName = GetString(args, "table_name");
+
+        if (string.IsNullOrWhiteSpace(tableName))
+        {
+            return ("table_name is required.", false);
+        }
+
+        var entity = FindEntity(document.Schema, tableName);
+
+        if (entity is null)
+        {
+            return ($"Table '{tableName}' not found.", false);
+        }
+
+        var (columns, error) = ResolveConstraintColumns(entity, args);
+
+        if (error is not null)
+        {
+            return (error, false);
+        }
+
+        var columnText = string.Join(", ", columns!.Select(column => column.Name));
+        var existing = FindUniqueConstraintByColumnSet(
+            entity,
+            columns!.Select(column => column.Id).ToList()
+        );
+
+        if (existing is null)
+        {
+            return (
+                $"Table '{entity.TableName}' has no unique constraint over exactly these columns: {columnText}.",
+                false
+            );
+        }
+
+        entity.UniqueConstraints.Remove(existing);
+
+        return (
+            $"Removed unique constraint from table '{entity.TableName}' (columns: {columnText}).",
+            true
+        );
+    }
+
+    /// <summary><c>columns</c> 引数（列名の配列）をエンティティのカラムへ解決する</summary>
+    /// <returns>解決したカラム（宣言順）と、失敗時のエラーテキスト</returns>
+    private static (List<Column>? Columns, string? Error) ResolveConstraintColumns(
+        Entity entity,
+        JsonElement args
+    )
+    {
+        if (
+            !args.TryGetProperty("columns", out var columnsEl)
+            || columnsEl.ValueKind != JsonValueKind.Array
+        )
+        {
+            return (null, "columns is required and must be an array of column names.");
+        }
+
+        var resolved = new List<Column>();
+
+        foreach (var item in columnsEl.EnumerateArray())
+        {
+            if (
+                item.ValueKind != JsonValueKind.String
+                || string.IsNullOrWhiteSpace(item.GetString())
+            )
+            {
+                return (null, "columns must contain non-empty column names.");
+            }
+
+            var columnName = item.GetString()!;
+            var column = entity.Columns.FirstOrDefault(c =>
+                string.Equals(c.Name, columnName, StringComparison.OrdinalIgnoreCase)
+            );
+
+            if (column is null)
+            {
+                return (null, $"Column '{columnName}' not found in table '{entity.TableName}'.");
+            }
+
+            // 同じ列を 2 回並べた制約は意味を持たないため拒否する（DB 側でもエラーになる）
+            if (resolved.Any(existing => existing.Id == column.Id))
+            {
+                return (null, $"Column '{column.Name}' is listed more than once in columns.");
+            }
+
+            resolved.Add(column);
+        }
+
+        if (resolved.Count == 0)
+        {
+            return (null, "columns must contain at least one column name.");
+        }
+
+        return (resolved, null);
+    }
+
+    /// <summary>構成列の集合（順序を問わない）が一致する一意制約を探す</summary>
+    private static UniqueConstraint? FindUniqueConstraintByColumnSet(
+        Entity entity,
+        IReadOnlyList<Guid> columnIds
+    )
+    {
+        var target = new HashSet<Guid>(columnIds);
+
+        return entity.UniqueConstraints.FirstOrDefault(constraint =>
+            target.SetEquals(constraint.ColumnIds)
+        );
+    }
+
+    /// <summary>要約テキストへエンティティの一意制約（解決済み名＋構成列）を追記する</summary>
+    /// <remarks>構成列を解決できない制約（空・壊れた参照）は DDL 生成と同じ規則で読み飛ばす</remarks>
+    private static void AppendUniqueConstraints(StringBuilder sb, Entity entity)
+    {
+        var lines = new List<string>();
+
+        foreach (var constraint in entity.UniqueConstraints)
+        {
+            var columnNames = new List<string>();
+
+            foreach (var columnId in constraint.ColumnIds)
+            {
+                var column = entity.Columns.FirstOrDefault(c => c.Id == columnId);
+
+                if (column is not null)
+                {
+                    columnNames.Add(column.Name);
+                }
+            }
+
+            if (columnNames.Count == 0 || columnNames.Count != constraint.ColumnIds.Count)
+            {
+                continue;
+            }
+
+            var name = string.IsNullOrWhiteSpace(constraint.Name)
+                ? UniqueConstraint.SynthesizeName(entity.TableName, columnNames)
+                : constraint.Name!;
+            lines.Add($"    - {name} ({string.Join(", ", columnNames)})");
+        }
+
+        if (lines.Count == 0)
+        {
+            return;
+        }
+
+        sb.AppendLine("  Unique constraints:");
+
+        foreach (var line in lines)
+        {
+            sb.AppendLine(line);
+        }
     }
 
     // ---------------- helpers ----------------

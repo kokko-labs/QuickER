@@ -35,6 +35,12 @@ Columns are edited inline in the "Columns" grid of the properties panel.
 
 Express a composite primary key by checking PK on multiple columns.
 
+### Unique constraints
+
+Below the column grid, the properties panel has a "Unique Constraints" card per table. The card body is collapsible: it opens automatically when the selected table has constraints (or when you add one) and stays collapsed otherwise, with a toggle in the header. Add a constraint with "+", then build it up one column row at a time: the "+" under the constraint appends an empty row, and picking a column from its drop-down commits it. One column makes that column unique, several make the combination unique, and the row order is the declaration order. A drop-down only offers columns the other rows of the same constraint do not already use, so the same column cannot be picked twice; "×" takes a row back out. Leave the name empty and `UQ_{table}_{columns}` is synthesized at DDL generation time — the name box shows that synthesized name as its placeholder while it is empty; a name imported from a database is kept as it is. Deleting a column deletes the constraints that include it, together with the column (a constraint is never silently narrowed to its remaining columns), and every operation is undoable.
+
+On the canvas, a column that belongs to a constraint is marked `UQ` in the key column. One column can be a primary key, a foreign key, and part of a unique constraint at once, so the marker is folded to a single one in the order `PK` > `FK` > `UQ`.
+
 ## Relationships
 
 ### Creating

@@ -21,7 +21,11 @@ public sealed class SyncPlanContext
     /// <summary>DB から取得した現在のリレーション（既存 FK 集合の復元に用いる）。</summary>
     public IReadOnlyList<Relationship> LiveRelationships { get; init; } = [];
 
-    /// <summary>DB から取得した補助オブジェクト（再構築で温存するインデックス・トリガー・一意制約）。</summary>
+    /// <summary>DB から取得した補助オブジェクト（再構築で温存するインデックス・トリガー）。</summary>
+    /// <remarks>
+    /// 一意制約は意味モデル（<see cref="Entity.UniqueConstraints"/>）が正本のため、ここには含まれない
+    /// （<see cref="LiveEntities"/> から合成する）。
+    /// </remarks>
     public IReadOnlyList<SchemaAuxiliaryObject> AuxiliaryObjects { get; init; } = [];
 
     /// <summary>
@@ -56,8 +60,8 @@ public sealed class SyncPlanner
 {
     /// <summary>
     /// セクションの出力順序。依存関係による失敗を避けるため、
-    /// テーブル / 列の追加 → FK 解除 → <b>主キー解除</b> → 列定義変更 → <b>主キー付与</b> →
-    /// 列 / テーブル削除 → FK 追加 → 説明設定の順に並べる。
+    /// テーブル / 列の追加 → FK 解除 → <b>一意制約解除</b> → <b>主キー解除</b> → 列定義変更 → <b>主キー付与</b> →
+    /// 列 / テーブル削除 → <b>一意制約追加</b> → FK 追加 → 説明設定の順に並べる。
     /// </summary>
     /// <remarks>
     /// <para>
@@ -77,17 +81,24 @@ public sealed class SyncPlanner
     /// 「FK 解除 → 主キー解除 → 列定義変更 → 主キー付与 → …（列 / テーブル削除）… → FK 追加」となり、
     /// 主キーを参照する FK は主キーが存在しない区間の外側で解除・再作成される。
     /// </para>
+    /// <para>
+    /// 一意制約は FK の内側に置く。解除（DropUniqueConstraint）は FK 解除の直後＝構成列の定義変更・主キー変更より前
+    /// （制約が残ったままでは列を変えられない方言があるため）、追加（AddUniqueConstraint）は FK 追加の直前
+    /// （FK が一意制約を候補キーとして参照しうるため、FK より先に張っておく必要がある）。
+    /// </para>
     /// </remarks>
     private static readonly (SchemaDiffKind Kind, PrimaryKeyPhase Phase)[] SectionOrder =
     [
         (SchemaDiffKind.AddTable, PrimaryKeyPhase.None),
         (SchemaDiffKind.AddColumn, PrimaryKeyPhase.None),
         (SchemaDiffKind.DropForeignKey, PrimaryKeyPhase.None),
+        (SchemaDiffKind.DropUniqueConstraint, PrimaryKeyPhase.None),
         (SchemaDiffKind.AlterPrimaryKey, PrimaryKeyPhase.Drop),
         (SchemaDiffKind.AlterColumn, PrimaryKeyPhase.None),
         (SchemaDiffKind.AlterPrimaryKey, PrimaryKeyPhase.Add),
         (SchemaDiffKind.DropColumn, PrimaryKeyPhase.None),
         (SchemaDiffKind.DropTable, PrimaryKeyPhase.None),
+        (SchemaDiffKind.AddUniqueConstraint, PrimaryKeyPhase.None),
         (SchemaDiffKind.AddForeignKey, PrimaryKeyPhase.None),
         (SchemaDiffKind.SetTableDescription, PrimaryKeyPhase.None),
         (SchemaDiffKind.SetColumnDescription, PrimaryKeyPhase.None),
@@ -115,6 +126,9 @@ public sealed class SyncPlanner
 
         // 計画の組み立て中に見つかった注意事項（実行は止めず、表示層が実行確認へ織り込む）
         var warnings = new List<SyncPlanWarning>();
+
+        // 一意制約の削除が既存 FK の被参照列を候補キーでなくしうる場合は警告する（方言に依らず同じ危険）
+        WarnUniqueConstraintDropsBreakingForeignKeys(selected, context, warnings);
 
         // ALTER COLUMN も FK の後付けもできない方言はテーブル再構築が必要になる
         var isRebuildDialect =
@@ -146,6 +160,14 @@ public sealed class SyncPlanner
                 capabilities,
                 context,
                 warnings
+            );
+
+            // 列定義変更に巻き込まれる live の一意制約も、同じ流儀で暗黙の DROP → 再 ADD として注入する
+            sectionItems = InjectImplicitUniqueConstraintRebuilds(
+                sectionItems,
+                planned,
+                capabilities,
+                context
             );
             return new SyncPlan
             {
@@ -288,9 +310,10 @@ public sealed class SyncPlanner
     /// 方言別レンダラーは既存の <c>AppendDropForeignKey</c> / <c>AppendAddForeignKey</c> のまま SQL 化できる。
     /// </para>
     /// <para>
-    /// 再 ADD する FK の参照先列が新しい主キー列に含まれない場合は、再作成が実行時に失敗しうるため
-    /// <paramref name="warnings"/> へ <see cref="SyncPlanWarningKind.ForeignKeyRebuildMayLoseCandidateKey"/>
-    /// を積む（一意制約は取り込んでいない＝候補キーの喪失を断定できないため、実行はブロックしない）。
+    /// 再 ADD する FK の参照先列が同期後も候補キーであることを証明できない場合は、再作成が実行時に失敗しうるため
+    /// <paramref name="warnings"/> へ <see cref="SyncPlanWarningKind.ForeignKeyRebuildMayLoseCandidateKey"/> を積む
+    /// （証明は「同期後の主キーと完全一致」または「同期後の一意制約のいずれかと完全一致」。証明できなくても
+    /// 一意インデックス等で通ることがあり断定はできないため、実行はブロックしない）。
     /// </para>
     /// </remarks>
     private static List<SchemaDiffItem> InjectImplicitForeignKeyRebuilds(
@@ -338,6 +361,9 @@ public sealed class SyncPlanner
         {
             return selected;
         }
+
+        // 候補キーの証明に使う「同期後に存在する一意制約」（テーブル → 列集合シグネチャの集合）
+        var postSyncUniques = BuildPostSyncUniqueConstraints(selected, context);
 
         // 明示的に DROP が選択されている FK（自動 DROP の重複も再 ADD も行わない）
         var explicitlyDropped = new HashSet<string>();
@@ -394,13 +420,16 @@ public sealed class SyncPlanner
             var constraintName = ResolveForeignKeyName(fk.Relationship, childTable, parentTable);
             var description = string.Format(Strings.Diff_AutoForeignKeyRebuild, constraintName);
 
-            // 参照先列が候補キーであり続けるのは「新しい主キーが被参照列 1 列ちょうど」のときだけ。
-            // 注入する FK は常に単列参照のため、被参照列が新主キーに含まれていても他の列と複合になっていれば
-            // 主キーは候補キーの根拠にならない（(id) → (id, code) の拡張は 4 方言中 3 方言で再 ADD が失敗する）。
-            // MySQL のプレフィックス成立や UNIQUE 制約で実際には通る構成もあるが、一意制約を取り込んでいない以上
-            // 断定できず、警告は実行を止めない＝安全側（誤警告を許容する側）へ倒す
+            // 注入する FK は常に単列参照のため、被参照列が候補キーであり続ける根拠は
+            // 「同期後の主キーが被参照列 1 列ちょうど」か「同期後に被参照列 1 列だけの一意制約が在る」のいずれか。
+            // 被参照列が新主キーに含まれていても他の列と複合になっていれば主キーは根拠にならない
+            // （(id) → (id, code) の拡張は 4 方言中 3 方言で再 ADD が失敗する）。
+            // 一意制約はモデルの正本（Entity.UniqueConstraints）から同期後の集合を厳密に合成して判定するため、
+            // 「自然キー UNIQUE を持つ表の主キー付け替え」は誤警告しない。証明できない構成は
+            // （一意インデックス等で実際には通ることがあっても）警告する＝実行は止めない安全側へ倒す
             var staysCandidateKey =
-                newPkColumns is { Count: 1 } && newPkColumns.Contains(fk.ParentColumn.Name);
+                (newPkColumns is { Count: 1 } && newPkColumns.Contains(fk.ParentColumn.Name))
+                || IsCoveredByUniqueConstraint(postSyncUniques, parentTable, fk.ParentColumn.Name);
 
             if (parentPkChanged && !staysCandidateKey)
             {
@@ -451,6 +480,280 @@ public sealed class SyncPlanner
         // （BuildSections は種別で抽出しつつ入力順を保持するため、この並びがそのままセクション内の順序になる）
         return [.. autoDrops, .. selected, .. autoAdds];
     }
+
+    // ---------------- 一意制約（UNIQUE）の合成・注入・警告 ----------------
+
+    /// <summary>
+    /// 「同期後に存在する一意制約」をテーブルごとに合成する
+    /// （live の一意制約 − 選択済み <see cref="SchemaDiffKind.DropUniqueConstraint"/> ＋
+    /// 選択済み <see cref="SchemaDiffKind.AddUniqueConstraint"/>）。
+    /// </summary>
+    /// <returns>テーブル名 → 列集合シグネチャ（<see cref="UniqueConstraintNaming.ColumnSetSignature"/>）の集合</returns>
+    /// <remarks>
+    /// 図（target）の定義を直接見ないのは、未選択の追加をあてにしてしまうため。合成は選択済み差分だけで行い、
+    /// 「実行後に確実に存在する」ものだけを候補キーの証明材料にする。
+    /// </remarks>
+    private static Dictionary<string, HashSet<string>> BuildPostSyncUniqueConstraints(
+        IReadOnlyList<SchemaDiffItem> selected,
+        SyncPlanContext? context
+    )
+    {
+        var byTable = new Dictionary<string, HashSet<string>>(TableComparer);
+
+        if (context is null)
+        {
+            return byTable;
+        }
+
+        // live の一意制約を土台にする
+        foreach (var entity in context.LiveEntities)
+        {
+            var table = SchemaDiffService.NormalizeTable(entity);
+
+            foreach (var constraint in entity.UniqueConstraints)
+            {
+                if (
+                    !UniqueConstraintNaming.TryResolveColumnNames(
+                        entity,
+                        constraint,
+                        out var columns
+                    )
+                )
+                {
+                    continue;
+                }
+
+                Signatures(byTable, table).Add(UniqueConstraintNaming.ColumnSetSignature(columns));
+            }
+        }
+
+        // 選択済みの削除を落とす
+        foreach (var item in selected.Where(i => i.Kind == SchemaDiffKind.DropUniqueConstraint))
+        {
+            if (byTable.TryGetValue(item.TableName.Trim(), out var signatures))
+            {
+                signatures.Remove(
+                    UniqueConstraintNaming.ColumnSetSignature(item.UniqueConstraintColumns)
+                );
+            }
+        }
+
+        // 選択済みの追加を足す
+        foreach (var item in selected.Where(i => i.Kind == SchemaDiffKind.AddUniqueConstraint))
+        {
+            if (item.UniqueConstraintColumns.Count == 0)
+            {
+                continue;
+            }
+
+            Signatures(byTable, item.TableName.Trim())
+                .Add(UniqueConstraintNaming.ColumnSetSignature(item.UniqueConstraintColumns));
+        }
+
+        return byTable;
+
+        static HashSet<string> Signatures(Dictionary<string, HashSet<string>> byTable, string table)
+        {
+            if (!byTable.TryGetValue(table, out var signatures))
+            {
+                signatures = new HashSet<string>(StringComparer.Ordinal);
+                byTable[table] = signatures;
+            }
+
+            return signatures;
+        }
+    }
+
+    /// <summary>この列 1 列だけを構成列とする一意制約が同期後に存在するか（＝単列参照 FK の候補キーの証明）</summary>
+    private static bool IsCoveredByUniqueConstraint(
+        Dictionary<string, HashSet<string>> postSyncUniques,
+        string table,
+        string columnName
+    ) =>
+        postSyncUniques.TryGetValue(table, out var signatures)
+        && signatures.Contains(UniqueConstraintNaming.ColumnSetSignature([columnName]));
+
+    /// <summary>
+    /// 選択された列定義変更に巻き込まれる live の一意制約を、暗黙の DROP（先頭側）と再 ADD（末尾側）として注入する。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 対象は <see cref="SyncDialectCapabilities.AlterColumnRequiresForeignKeyRebuild"/> が <c>true</c> の方言
+    /// （SQL Server）のみ。一意制約が張られた列は制約を外さずに <c>ALTER COLUMN</c> できない（Msg 5074）ため、
+    /// FK の暗黙再構築（<see cref="InjectImplicitForeignKeyRebuilds"/>）と同じ形で外して戻す。
+    /// </para>
+    /// <para>
+    /// 利用者が同じ一意制約の <see cref="SchemaDiffKind.DropUniqueConstraint"/> を明示選択している場合は、
+    /// 列集合シグネチャで重複排除して自動 DROP を注入せず、再 ADD もしない（「消す」意図を尊重する）。
+    /// </para>
+    /// </remarks>
+    private static List<SchemaDiffItem> InjectImplicitUniqueConstraintRebuilds(
+        List<SchemaDiffItem> sectionItems,
+        IReadOnlyList<SchemaDiffItem> selected,
+        SyncDialectCapabilities capabilities,
+        SyncPlanContext? context
+    )
+    {
+        if (context is null || !capabilities.AlterColumnRequiresForeignKeyRebuild)
+        {
+            return sectionItems;
+        }
+
+        var alteredColumns = selected
+            .Where(i => i.Kind == SchemaDiffKind.AlterColumn && i.ColumnName is not null)
+            .Select(i => ColumnKey(i.TableName, i.ColumnName!))
+            .ToHashSet();
+
+        if (alteredColumns.Count == 0)
+        {
+            return sectionItems;
+        }
+
+        // 明示的に DROP が選択されている一意制約（自動 DROP の重複も再 ADD も行わない）
+        var explicitlyDropped = selected
+            .Where(i => i.Kind == SchemaDiffKind.DropUniqueConstraint)
+            .Select(i => UniqueConstraintKey(i.TableName, i.UniqueConstraintColumns))
+            .ToHashSet(StringComparer.Ordinal);
+
+        var autoDrops = new List<SchemaDiffItem>();
+        var autoAdds = new List<SchemaDiffItem>();
+
+        foreach (var entity in context.LiveEntities)
+        {
+            var table = SchemaDiffService.NormalizeTable(entity);
+
+            foreach (var constraint in entity.UniqueConstraints)
+            {
+                if (
+                    !UniqueConstraintNaming.TryResolveColumnNames(
+                        entity,
+                        constraint,
+                        out var columns
+                    )
+                )
+                {
+                    continue;
+                }
+
+                // 構成列のいずれかが定義変更の対象なら、この制約は外さないと変更できない
+                if (!columns.Any(c => alteredColumns.Contains(ColumnKey(table, c))))
+                {
+                    continue;
+                }
+
+                if (explicitlyDropped.Contains(UniqueConstraintKey(table, columns)))
+                {
+                    continue;
+                }
+
+                var description = string.Format(
+                    Strings.Diff_AutoUniqueConstraintRebuild,
+                    string.Join(", ", columns)
+                );
+
+                autoDrops.Add(
+                    new SchemaDiffItem
+                    {
+                        Kind = SchemaDiffKind.DropUniqueConstraint,
+                        TableName = table,
+                        Entity = entity,
+                        UniqueConstraintName = constraint.Name,
+                        UniqueConstraintColumns = columns,
+                        Description = description,
+                    }
+                );
+
+                autoAdds.Add(
+                    new SchemaDiffItem
+                    {
+                        Kind = SchemaDiffKind.AddUniqueConstraint,
+                        TableName = table,
+                        Entity = entity,
+                        UniqueConstraintName = constraint.Name,
+                        UniqueConstraintColumns = columns,
+                        Description = description,
+                    }
+                );
+            }
+        }
+
+        if (autoDrops.Count == 0)
+        {
+            return sectionItems;
+        }
+
+        // 自動 DROP は DropUniqueConstraint セクションの先頭側・再 ADD は AddUniqueConstraint セクションの末尾側へ置く
+        return [.. autoDrops, .. sectionItems, .. autoAdds];
+    }
+
+    /// <summary>
+    /// 選択された一意制約の削除が既存 FK の被参照列を候補キーでなくしうる場合に警告を積む。
+    /// </summary>
+    /// <remarks>
+    /// 主キーが同じ列を覆っていれば実際には壊れないが、その判定には同期後の主キー構成が要る。誤警告を許容して
+    /// 単純な「被参照列と完全一致するか」で判定し、実行はブロックしない（レンダラーは従来どおり DROP を出す）。
+    /// </remarks>
+    private static void WarnUniqueConstraintDropsBreakingForeignKeys(
+        IReadOnlyList<SchemaDiffItem> selected,
+        SyncPlanContext? context,
+        List<SyncPlanWarning> warnings
+    )
+    {
+        if (context is null)
+        {
+            return;
+        }
+
+        var drops = selected.Where(i => i.Kind == SchemaDiffKind.DropUniqueConstraint).ToList();
+
+        if (drops.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var fk in EnumerateLiveForeignKeys(context))
+        {
+            var parentTable = SchemaDiffService.NormalizeTable(fk.Parent);
+            var referencedSignature = UniqueConstraintNaming.ColumnSetSignature([
+                fk.ParentColumn.Name,
+            ]);
+
+            foreach (var drop in drops)
+            {
+                if (!TableComparer.Equals(drop.TableName.Trim(), parentTable))
+                {
+                    continue;
+                }
+
+                if (
+                    !string.Equals(
+                        UniqueConstraintNaming.ColumnSetSignature(drop.UniqueConstraintColumns),
+                        referencedSignature,
+                        StringComparison.Ordinal
+                    )
+                )
+                {
+                    continue;
+                }
+
+                warnings.Add(
+                    new SyncPlanWarning(
+                        SyncPlanWarningKind.UniqueConstraintDropMayBreakForeignKey,
+                        parentTable,
+                        ResolveForeignKeyName(
+                            fk.Relationship,
+                            SchemaDiffService.NormalizeTable(fk.Child),
+                            parentTable
+                        )
+                    )
+                );
+            }
+        }
+    }
+
+    /// <summary>一意制約の照合キー（テーブル＋列集合シグネチャ。大文字小文字・列順を無視する）</summary>
+    private static string UniqueConstraintKey(string table, IEnumerable<string> columnNames) =>
+        $"{table.Trim().ToLowerInvariant()}|{UniqueConstraintNaming.ColumnSetSignature(columnNames)}";
 
     /// <summary>テーブル・列の照合キー（大文字小文字・前後空白を無視する）</summary>
     private static string ColumnKey(string table, string column) =>
@@ -718,6 +1021,9 @@ public sealed class SyncPlanner
             // 列順変更（ReorderColumns）が選択されていれば、合成後の列を target の列名順へ並べ替える
             ApplySelectedReorder(newDef, tableItems);
 
+            // 一意制約の追加・削除が選択されていれば、合成後の一意制約集合へ反映する
+            ApplySelectedUniqueConstraintChanges(newDef, tableItems);
+
             // FK 集合 = live の子側 FK − 選択済み DropForeignKey ＋ 選択済み AddForeignKey
             var foreignKeys = SynthesizeForeignKeys(table, tableItems, context);
 
@@ -847,6 +1153,70 @@ public sealed class SyncPlanner
 
         newDef.Columns.Clear();
         newDef.Columns.AddRange(reordered);
+    }
+
+    /// <summary>
+    /// 選択された一意制約の追加・削除を、合成後の定義（<paramref name="newDef"/>）の
+    /// <see cref="Entity.UniqueConstraints"/> へ反映する。
+    /// </summary>
+    /// <remarks>
+    /// 削除は列集合シグネチャの一致で除去する（制約名は live と図で食い違うため照合に使えない）。
+    /// 追加は差分項目が運ぶ<b>列名</b>を合成後の列へ引き当てて新しい構成列 ID を作る
+    /// （差分項目の Entity は図側＝列 ID が live のクローンと一致しないため、ID をそのまま持ち込めない）。
+    /// 引き当てられない列を含む追加は黙って捨てる（DDL 生成が解決不能な制約を出力しないのと同じ流儀）。
+    /// </remarks>
+    private static void ApplySelectedUniqueConstraintChanges(
+        Entity newDef,
+        IReadOnlyList<SchemaDiffItem> tableItems
+    )
+    {
+        foreach (var drop in tableItems.Where(i => i.Kind == SchemaDiffKind.DropUniqueConstraint))
+        {
+            var signature = UniqueConstraintNaming.ColumnSetSignature(drop.UniqueConstraintColumns);
+            newDef.UniqueConstraints.RemoveAll(constraint =>
+                UniqueConstraintNaming.TryResolveColumnNames(newDef, constraint, out var columns)
+                && string.Equals(
+                    UniqueConstraintNaming.ColumnSetSignature(columns),
+                    signature,
+                    StringComparison.Ordinal
+                )
+            );
+        }
+
+        foreach (var add in tableItems.Where(i => i.Kind == SchemaDiffKind.AddUniqueConstraint))
+        {
+            if (add.UniqueConstraintColumns.Count == 0)
+            {
+                continue;
+            }
+
+            var columnIds = new List<Guid>(add.UniqueConstraintColumns.Count);
+            var allResolved = true;
+
+            foreach (var columnName in add.UniqueConstraintColumns)
+            {
+                var column = newDef.Columns.FirstOrDefault(c =>
+                    TableComparer.Equals(c.Name, columnName)
+                );
+
+                if (column is null)
+                {
+                    allResolved = false;
+                    break;
+                }
+
+                columnIds.Add(column.Id);
+            }
+
+            if (!allResolved)
+            {
+                continue;
+            }
+
+            newDef.UniqueConstraints.Add(
+                new UniqueConstraint { Name = add.UniqueConstraintName, ColumnIds = columnIds }
+            );
+        }
     }
 
     // ---------------- ネイティブ列順変更（MySQL）の集約 ----------------
@@ -1234,10 +1604,14 @@ public sealed class SyncPlanner
         return (childCol, SchemaDiffService.NormalizeTable(item.ParentEntity), parentCol.Name);
     }
 
-    /// <summary>この種別が既存テーブルの再構築を要求するか（列型変更・主キー変更・列削除・FK 変更・列順変更）</summary>
+    /// <summary>
+    /// この種別が既存テーブルの再構築を要求するか
+    /// （列型変更・主キー変更・列削除・FK 変更・列順変更・一意制約の変更）
+    /// </summary>
     /// <remarks>
-    /// rebuild 方言（SQLite）では列順変更・主キー変更もテーブル再構築で実現するため、ReorderColumns /
-    /// AlterPrimaryKey も再構築トリガーに含める（それだけが選択された場合も CreateOnly=false の再構築になる）。
+    /// rebuild 方言（SQLite）では列順変更・主キー変更・一意制約の追加削除もテーブル再構築で実現するため、
+    /// ReorderColumns / AlterPrimaryKey / Add・DropUniqueConstraint も再構築トリガーに含める
+    /// （それだけが選択された場合も CreateOnly=false の再構築になる）。
     /// </remarks>
     private static bool IsRebuildTriggerKind(SchemaDiffKind kind) =>
         kind
@@ -1246,7 +1620,9 @@ public sealed class SyncPlanner
                 or SchemaDiffKind.DropColumn
                 or SchemaDiffKind.DropForeignKey
                 or SchemaDiffKind.AddForeignKey
-                or SchemaDiffKind.ReorderColumns;
+                or SchemaDiffKind.ReorderColumns
+                or SchemaDiffKind.AddUniqueConstraint
+                or SchemaDiffKind.DropUniqueConstraint;
 
     /// <summary>制約名の安全化（"." と空白を "_" へ置換。<c>SqliteIdentifier.SafeName</c> と同一規則）</summary>
     private static string SafeName(string name) =>

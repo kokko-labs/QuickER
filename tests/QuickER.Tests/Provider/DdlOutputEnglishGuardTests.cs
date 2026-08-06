@@ -220,13 +220,6 @@ public sealed class DdlOutputEnglishGuardTests
                     CreateSql =
                         "CREATE TRIGGER \"trg_orders\" AFTER INSERT ON \"orders\" BEGIN SELECT 1; END",
                 },
-                new SchemaAuxiliaryObject
-                {
-                    TableName = "orders",
-                    Name = "sqlite_autoindex_orders_1",
-                    Kind = SchemaAuxiliaryObjectKind.UniqueConstraint,
-                    Columns = ["note"],
-                },
             ],
         };
 

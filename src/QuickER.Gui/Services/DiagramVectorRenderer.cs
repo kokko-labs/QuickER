@@ -62,8 +62,13 @@ public static class DiagramVectorRenderer
     private static readonly Brush BodyBrush = CreateFrozenBrush("#1F2937");
     private static readonly Brush MetaBrush = CreateFrozenBrush("#6B7280");
     private static readonly Brush DescriptionBrush = CreateFrozenBrush("#6B7280");
-    private static readonly Brush PrimaryKeyBrush = CreateFrozenBrush("#D93025");
-    private static readonly Brush ForeignKeyBrush = CreateFrozenBrush("#1A73E8");
+    private static readonly Brush PrimaryKeyBrush = CreateFrozenBrush(
+        ColumnKeyMarkPalette.PrimaryKeyColor
+    );
+    private static readonly Brush ForeignKeyBrush = CreateFrozenBrush(
+        ColumnKeyMarkPalette.ForeignKeyColor
+    );
+    private static readonly Brush UniqueBrush = CreateFrozenBrush(ColumnKeyMarkPalette.UniqueColor);
     private static readonly Brush RelationLabelBrush = CreateFrozenBrush("#374151");
     private static readonly Pen EntityBorderPen = CreateFrozenPen("#9DB7DD", 1);
     private static readonly Pen RelationPen = CreateFrozenPen("#5F6B7A", RelationStrokeThickness);
@@ -225,17 +230,16 @@ public static class DiagramVectorRenderer
         {
             var column = row.Column;
 
-            if (column.IsPrimaryKey)
+            // キー標識（PK > FK > UQ の優先度は ColumnViewModel.KeyMark が 1 本化して決める）
+            if (KeyMarkBrush(column.KeyMark) is { } keyMarkBrush)
             {
                 dc.DrawText(
-                    CreateText("PK", BodyFontSize, KeyIndicatorTypeface, PrimaryKeyBrush),
-                    new Point(6, row.TextTop)
-                );
-            }
-            else if (column.IsForeignKey)
-            {
-                dc.DrawText(
-                    CreateText("FK", BodyFontSize, KeyIndicatorTypeface, ForeignKeyBrush),
+                    CreateText(
+                        column.KeyMarkText,
+                        BodyFontSize,
+                        KeyIndicatorTypeface,
+                        keyMarkBrush
+                    ),
                     new Point(6, row.TextTop)
                 );
             }
@@ -286,6 +290,16 @@ public static class DiagramVectorRenderer
             }
         }
     }
+
+    /// <summary>キー標識の描画ブラシを返す（標識なしは <c>null</c>＝描かない）</summary>
+    private static Brush? KeyMarkBrush(ColumnKeyMark mark) =>
+        mark switch
+        {
+            ColumnKeyMark.PrimaryKey => PrimaryKeyBrush,
+            ColumnKeyMark.ForeignKey => ForeignKeyBrush,
+            ColumnKeyMark.Unique => UniqueBrush,
+            _ => null,
+        };
 
     /// <summary>見出し帯の形状（上角のみ丸め）を生成する（BuildSvg の path M0,hh V6 Q0,0 6,0 … と同一）</summary>
     private static StreamGeometry CreateHeaderBandGeometry(double width, double headerHeight)
