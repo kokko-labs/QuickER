@@ -73,6 +73,10 @@ public partial class EntityViewModel : ObservableObject
     /// </remarks>
     public ObservableCollection<UniqueConstraintViewModel> UniqueConstraints { get; }
 
+    /// <summary>配下の一意制約の編集行で、ユーザーが構成列を選び直したときに発火するイベント</summary>
+    /// <remarks>Undo 可能なコマンドとして履歴化するのは <see cref="MainViewModel"/> の責務</remarks>
+    internal event EventHandler<UniqueConstraintMemberViewModel>? UniqueConstraintMemberSelectionEdited;
+
     /// <summary>ダイアグラム上の見出し帯に表示する背景色（設定時に正規化する）</summary>
     public string TitleBackgroundColor
     {
@@ -190,7 +194,7 @@ public partial class EntityViewModel : ObservableObject
 
         foreach (var constraint in UniqueConstraints)
         {
-            constraint.ColumnIdsChanged += OnUniqueConstraintColumnIdsChanged;
+            AttachUniqueConstraint(constraint);
         }
 
         RefreshUniqueConstraintColumnFlags();
@@ -230,13 +234,13 @@ public partial class EntityViewModel : ObservableObject
             }
         }
 
-        // 一意制約の構成列候補はカラム一覧のミラーのため、増減・並び替えのたびに作り直す
+        // 一意制約の編集行・選択候補はカラム一覧から導出するため、増減・並び替えのたびに作り直す
         // （コンストラクター内のカラム構築中は制約が未生成なので触らない）
         if (UniqueConstraints is not null)
         {
             foreach (var constraint in UniqueConstraints)
             {
-                constraint.SyncColumnCandidates();
+                constraint.SyncColumns();
             }
 
             RefreshUniqueConstraintColumnFlags();
@@ -267,7 +271,7 @@ public partial class EntityViewModel : ObservableObject
         {
             foreach (UniqueConstraintViewModel constraint in e.OldItems)
             {
-                constraint.ColumnIdsChanged -= OnUniqueConstraintColumnIdsChanged;
+                DetachUniqueConstraint(constraint);
             }
         }
 
@@ -275,16 +279,37 @@ public partial class EntityViewModel : ObservableObject
         {
             foreach (UniqueConstraintViewModel constraint in e.NewItems)
             {
-                constraint.ColumnIdsChanged += OnUniqueConstraintColumnIdsChanged;
+                AttachUniqueConstraint(constraint);
             }
         }
 
         RefreshUniqueConstraintColumnFlags();
     }
 
+    /// <summary>一意制約からの通知（構成列の変化・編集行の選択操作）を購読する</summary>
+    private void AttachUniqueConstraint(UniqueConstraintViewModel constraint)
+    {
+        constraint.ColumnIdsChanged += OnUniqueConstraintColumnIdsChanged;
+        constraint.MemberSelectionEdited += OnUniqueConstraintMemberSelectionEdited;
+    }
+
+    /// <summary>一意制約からの通知の購読を解除する</summary>
+    private void DetachUniqueConstraint(UniqueConstraintViewModel constraint)
+    {
+        constraint.ColumnIdsChanged -= OnUniqueConstraintColumnIdsChanged;
+        constraint.MemberSelectionEdited -= OnUniqueConstraintMemberSelectionEdited;
+    }
+
     /// <summary>いずれかの一意制約の構成列が変わったときに、カラム側の標識フラグを再計算する</summary>
     private void OnUniqueConstraintColumnIdsChanged(object? sender, EventArgs e) =>
         RefreshUniqueConstraintColumnFlags();
+
+    /// <summary>一意制約の編集行でユーザーが列を選び直したことを所有側（<see cref="MainViewModel"/>）へ中継する</summary>
+    /// <remarks>履歴化はコマンドを持つ所有側の責務のため、ここでは素通しする</remarks>
+    private void OnUniqueConstraintMemberSelectionEdited(
+        object? sender,
+        UniqueConstraintMemberViewModel member
+    ) => UniqueConstraintMemberSelectionEdited?.Invoke(this, member);
 
     /// <summary>各カラムの「一意制約の構成列か」フラグを現在の制約一覧から計算し直す（ER 図の UQ 標識の元）</summary>
     private void RefreshUniqueConstraintColumnFlags()

@@ -166,6 +166,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private bool _showColumnDescriptionsInDiagram;
 
+    /// <summary>プロパティパネルの UNIQUE 制約カードを開いているかどうか</summary>
+    /// <remarks>
+    /// 既定はエンティティ選択のたびに「制約が定義されていれば開く・なければ畳む」で決まり
+    /// （<see cref="OnSelectedEntityChanged"/>）、ヘッダーのトグルで手動開閉できる。
+    /// 制約の追加操作（<see cref="AddUniqueConstraintCommand"/>）でも開く
+    /// </remarks>
+    [ObservableProperty]
+    private bool _isUniqueConstraintCardExpanded;
+
     /// <summary><see cref="ShowNullabilityInDiagram"/> のバッキングフィールド（既定は表示）</summary>
     private bool _showNullabilityInDiagram = true;
 
@@ -915,7 +924,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         SelectedEntity is not null && SelectedColumn is not null;
 
     /// <summary>選択中エンティティへ空の一意制約を追加する（Undo 可能）</summary>
-    /// <remarks>構成列は追加後にカードのチェックボックスで選ぶ（＝「+ → チェック」の 2 操作で単一列制約が作れる）</remarks>
+    /// <remarks>構成列は追加後にカードの列行（コンボボックス）で選ぶ（＝「+ → 列行の + → 列選択」で単一列制約が作れる）</remarks>
     [RelayCommand(CanExecute = nameof(CanAddUniqueConstraint))]
     private void AddUniqueConstraint()
     {
@@ -928,6 +937,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         UndoRedo.Execute(
             new AddUniqueConstraintCommand(SelectedEntity.UniqueConstraints, constraint)
         );
+
+        // 畳んだままだと追加した制約が見えないため、追加操作ではカードを開く
+        IsUniqueConstraintCardExpanded = true;
     }
 
     /// <summary>一意制約追加コマンドの実行可否</summary>
@@ -947,25 +959,69 @@ public partial class MainViewModel : ObservableObject, IDisposable
         );
     }
 
-    /// <summary>一意制約の構成列チェックを切り替える（Undo 可能）</summary>
+    /// <summary>一意制約へ未選択の構成列行（空スロット）を 1 つ足す</summary>
     /// <remarks>
-    /// 追加はチェックした順で末尾へ積む（＝チェック順が宣言順）。取込済み制約の並びは
-    /// 触らなかった列について保たれる
+    /// この時点ではモデルを変えないため履歴に残さない（列が選ばれた時点で
+    /// <see cref="SetUniqueConstraintMemberCommand"/> が 1 回の Undo 単位として確定させる）
     /// </remarks>
     [RelayCommand]
-    private void ToggleUniqueConstraintColumn(UniqueConstraintColumnViewModel? candidate)
+    private void AddUniqueConstraintMemberSlot(UniqueConstraintViewModel? constraint) =>
+        constraint?.AddPendingSlot();
+
+    /// <summary>構成列行で選ばれた列を正本へ確定する（Undo 可能）</summary>
+    /// <remarks>
+    /// 空スロットでの選択は末尾への追加、既存行での選択変更はその位置の差し替えになる
+    /// （どちらも「行の並び＝宣言順」から新しい構成列一覧を組み立てるだけで表現できる）
+    /// </remarks>
+    [RelayCommand]
+    private void SetUniqueConstraintMember(UniqueConstraintMemberViewModel? member)
     {
-        if (candidate is null)
+        if (member is null)
         {
             return;
         }
 
-        var constraint = candidate.Constraint;
-        var columnId = candidate.Column.Id;
+        ApplyUniqueConstraintColumns(
+            member.Constraint,
+            member.Constraint.BuildColumnIdsFromMembers()
+        );
+    }
+
+    /// <summary>構成列行を 1 つ取り除く（Undo 可能。空スロットはビュー状態の破棄のみ）</summary>
+    [RelayCommand]
+    private void RemoveUniqueConstraintMember(UniqueConstraintMemberViewModel? member)
+    {
+        if (member is null)
+        {
+            return;
+        }
+
+        // 空スロットはまだモデルに反映されていないため、履歴を汚さず取り消すだけでよい
+        if (member.IsPendingSlot)
+        {
+            member.Constraint.CancelPendingSlot();
+            return;
+        }
+
+        ApplyUniqueConstraintColumns(
+            member.Constraint,
+            member.Constraint.BuildColumnIdsFromMembers(excluded: member)
+        );
+    }
+
+    /// <summary>一意制約の構成列一覧を Undo 可能な差し替えとして適用する</summary>
+    private void ApplyUniqueConstraintColumns(
+        UniqueConstraintViewModel constraint,
+        IReadOnlyList<Guid> after
+    )
+    {
         var before = constraint.ColumnIds.ToList();
-        var after = constraint.ContainsColumn(columnId)
-            ? before.Where(id => id != columnId).ToList()
-            : [.. before, columnId];
+
+        // 実質的な変化がなければ履歴を汚さない
+        if (before.SequenceEqual(after))
+        {
+            return;
+        }
 
         UndoRedo.Execute(new ChangeUniqueConstraintColumnsCommand(constraint, before, after));
     }
@@ -1095,6 +1151,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         CopySelectedEntityCommand.NotifyCanExecuteChanged();
         PasteCopiedColumnCommand.NotifyCanExecuteChanged();
         DuplicateSelectedEntityCommand.NotifyCanExecuteChanged();
+
+        // UNIQUE 制約カードの開閉既定: 制約が定義されていれば開き、なければ畳む（手動開閉は選択が変わるまで有効）
+        IsUniqueConstraintCardExpanded = value is { UniqueConstraints.Count: > 0 };
 
         // 選択の変化に応じて関連ハイライト（減光／強調）を再計算する
         UpdateRelatedHighlights();
@@ -1642,6 +1701,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             foreach (EntityViewModel entity in e.OldItems)
             {
                 entity.PropertyChanged -= OnEntityPropertyChanged;
+                entity.UniqueConstraintMemberSelectionEdited -=
+                    OnUniqueConstraintMemberSelectionEdited;
                 _changeTracker.DetachEntity(entity);
             }
         }
@@ -1655,6 +1716,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 entity.ShowNullabilityInDiagram = ShowNullabilityInDiagram;
                 entity.IsCompactView = IsCompactViewInDiagram;
                 entity.PropertyChanged += OnEntityPropertyChanged;
+
+                // 一意制約カードのコンボボックス操作は VM 経由で届くため、ここで履歴化の入口へ結ぶ
+                entity.UniqueConstraintMemberSelectionEdited +=
+                    OnUniqueConstraintMemberSelectionEdited;
                 _changeTracker.AttachEntity(entity);
             }
         }
@@ -1668,6 +1733,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
         // エンティティの増減でミニマップの射影・描画データを作り直す
         RecalculateMiniMap();
     }
+
+    /// <summary>一意制約カードの構成列行で列が選び直されたときに、Undo 可能な差し替えとして確定させる</summary>
+    private void OnUniqueConstraintMemberSelectionEdited(
+        object? sender,
+        UniqueConstraintMemberViewModel member
+    ) => SetUniqueConstraintMemberCommand.Execute(member);
 
     /// <summary>エンティティの位置・サイズ変更に追従してキャンバスサイズを更新する</summary>
     private void OnEntityPropertyChanged(object? sender, PropertyChangedEventArgs e)

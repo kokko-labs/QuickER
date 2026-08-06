@@ -92,6 +92,52 @@ public class MainViewModelUniqueConstraintTests : IDisposable
         entity.UniqueConstraints.Should().ContainSingle();
     }
 
+    [Fact(
+        DisplayName = "制約カードの開閉既定: 制約なしのエンティティ選択では畳まれ、追加操作で開く"
+    )]
+    public void UniqueConstraintCard_CollapsedByDefault_ExpandsOnAdd()
+    {
+        var vm = CreateViewModelWithSelectedEntity();
+
+        // 制約が無いエンティティを選択した時点では畳まれている
+        vm.IsUniqueConstraintCardExpanded.Should().BeFalse();
+
+        // 追加すると（畳んだままでは追加した制約が見えないため）自動で開く
+        vm.AddUniqueConstraintCommand.Execute(null);
+        vm.IsUniqueConstraintCardExpanded.Should().BeTrue();
+    }
+
+    [Fact(
+        DisplayName = "制約カードの開閉既定: 制約が定義されたエンティティの選択で開き、選択のたびに再評価される"
+    )]
+    public void UniqueConstraintCard_ExpandsWhenSelectedEntityHasConstraints()
+    {
+        var vm = CreateViewModelWithSelectedEntity();
+        var withConstraint = vm.SelectedEntity!;
+        withConstraint.UniqueConstraints.Add(
+            new UniqueConstraintViewModel(
+                withConstraint,
+                new UniqueConstraint { ColumnIds = { withConstraint.Columns[1].Id } }
+            )
+        );
+
+        var without = new EntityViewModel(new Entity { TableName = "Plain" });
+        vm.Entities.Add(without);
+
+        // 制約なし → 畳む（手動で開いても、選択が変われば既定へ戻る）
+        vm.SelectedEntity = without;
+        vm.IsUniqueConstraintCardExpanded.Should().BeFalse();
+        vm.IsUniqueConstraintCardExpanded = true;
+
+        // 制約あり → 開く
+        vm.SelectedEntity = withConstraint;
+        vm.IsUniqueConstraintCardExpanded.Should().BeTrue();
+
+        // 再度制約なしへ → 畳む（直前の手動状態を引き継がない）
+        vm.SelectedEntity = without;
+        vm.IsUniqueConstraintCardExpanded.Should().BeFalse();
+    }
+
     [Fact(DisplayName = "エンティティ未選択では制約を追加できない")]
     public void AddUniqueConstraint_RequiresSelectedEntity()
     {
@@ -105,36 +151,132 @@ public class MainViewModelUniqueConstraintTests : IDisposable
         vm.AddUniqueConstraintCommand.CanExecute(null).Should().BeFalse();
     }
 
-    [Fact(DisplayName = "構成列の切替はチェック順に積まれ、Undo で元の構成へ戻る")]
-    public void ToggleUniqueConstraintColumn_UndoRedo()
+    // 構成列の編集はチェックボックスの ON/OFF から「列選択コンボボックスの行」方式へ変わったため、
+    // 空スロットの追加 → 列の選択確定 → 行の追加、という新しい操作単位で固定し直す
+    [Fact(DisplayName = "空スロットで列を選ぶと末尾へ積まれ、Undo で元の構成へ戻る")]
+    public void UniqueConstraintMembers_CommitPendingSlot_UndoRedo()
     {
         var vm = CreateViewModelWithSelectedEntity();
         var entity = vm.SelectedEntity!;
+        var code = entity.Columns.First(column => column.Name == "Code");
+        var kind = entity.Columns.First(column => column.Name == "Kind");
 
         vm.AddUniqueConstraintCommand.Execute(null);
         var constraint = entity.UniqueConstraints[0];
+        constraint.Members.Should().BeEmpty("制約を足しただけでは構成列行は無い");
 
-        // 「+ → チェック」の 2 操作で単一列制約が成立する
-        var kind = constraint.ColumnCandidates.First(c => c.Column.Name == "Kind");
-        vm.ToggleUniqueConstraintColumnCommand.Execute(kind);
-        constraint.ColumnIds.Should().Equal(kind.Column.Id);
-        kind.IsMember.Should().BeTrue();
+        // ＋（列行の追加）はビュー状態だけを変え、モデルにも履歴にも触らない
+        vm.AddUniqueConstraintMemberSlotCommand.Execute(constraint);
+        constraint.Members.Should().ContainSingle();
+        constraint.Members[0].IsPendingSlot.Should().BeTrue();
+        constraint.ColumnIds.Should().BeEmpty();
+        constraint
+            .CanAddMember.Should()
+            .BeFalse("空スロットが出ている間はもう 1 行足せない（同時に 1 つまで）");
 
-        // 追加のチェックはチェック順（＝宣言順）で末尾へ積む
-        var code = constraint.ColumnCandidates.First(c => c.Column.Name == "Code");
-        vm.ToggleUniqueConstraintColumnCommand.Execute(code);
-        constraint.ColumnIds.Should().Equal(kind.Column.Id, code.Column.Id);
-        constraint.ColumnSummary.Should().Be("Kind, Code");
+        // 空スロットで列を選んだ時点で正本へ確定する（＝コンボボックスの選択と同じ経路）
+        constraint.Members[0].SelectedColumn = kind;
+        constraint.ColumnIds.Should().Equal(kind.Id);
+        constraint.Members[0].IsPendingSlot.Should().BeFalse();
+        constraint.CanAddMember.Should().BeTrue();
 
-        // 再度のクリックは解除
-        vm.ToggleUniqueConstraintColumnCommand.Execute(kind);
-        constraint.ColumnIds.Should().Equal(code.Column.Id);
+        // 2 行目は行の並び（＝宣言順）で末尾へ積まれる
+        vm.AddUniqueConstraintMemberSlotCommand.Execute(constraint);
+        constraint.Members[1].SelectedColumn = code;
+        constraint.ColumnIds.Should().Equal(kind.Id, code.Id);
+        constraint.Members.Select(m => m.SelectedColumn).Should().Equal(kind, code);
 
         vm.UndoRedo.Undo();
-        constraint.ColumnIds.Should().Equal(kind.Column.Id, code.Column.Id);
+        constraint.ColumnIds.Should().Equal(kind.Id);
+        constraint.Members.Select(m => m.SelectedColumn).Should().Equal([kind], "行も作り直される");
 
         vm.UndoRedo.Redo();
-        constraint.ColumnIds.Should().Equal(code.Column.Id);
+        constraint.ColumnIds.Should().Equal(kind.Id, code.Id);
+        constraint.Members.Select(m => m.SelectedColumn).Should().Equal(kind, code);
+    }
+
+    [Fact(DisplayName = "既存行で列を選び直すとその位置が差し替わり、Undo で戻る")]
+    public void UniqueConstraintMembers_ReplaceSelection_IsUndoable()
+    {
+        var vm = CreateViewModelWithSelectedEntity();
+        var entity = vm.SelectedEntity!;
+        var id = entity.Columns.First(column => column.Name == "Id");
+        var code = entity.Columns.First(column => column.Name == "Code");
+        var kind = entity.Columns.First(column => column.Name == "Kind");
+
+        entity.UniqueConstraints.Add(
+            new UniqueConstraintViewModel(
+                entity,
+                new UniqueConstraint { ColumnIds = { code.Id, kind.Id } }
+            )
+        );
+        var constraint = entity.UniqueConstraints[0];
+        vm.UndoRedo.Clear();
+
+        constraint.Members[0].SelectedColumn = id;
+
+        constraint.ColumnIds.Should().Equal([id.Id, kind.Id], "位置は保ったまま列だけ差し替わる");
+        constraint
+            .Members[1]
+            .AvailableColumns.Select(c => c.Name)
+            .Should()
+            .Equal(["Code", "Kind"], "解放された Code が他行の候補へ戻る");
+
+        vm.UndoRedo.Undo();
+        constraint.ColumnIds.Should().Equal(code.Id, kind.Id);
+    }
+
+    [Fact(DisplayName = "行の × は構成列を 1 つ外し、空スロットの × は履歴を汚さず取り消すだけ")]
+    public void RemoveUniqueConstraintMember_RemovesRowOrCancelsSlot()
+    {
+        var vm = CreateViewModelWithSelectedEntity();
+        var entity = vm.SelectedEntity!;
+        var code = entity.Columns.First(column => column.Name == "Code");
+        var kind = entity.Columns.First(column => column.Name == "Kind");
+
+        entity.UniqueConstraints.Add(
+            new UniqueConstraintViewModel(
+                entity,
+                new UniqueConstraint { ColumnIds = { code.Id, kind.Id } }
+            )
+        );
+        var constraint = entity.UniqueConstraints[0];
+        vm.UndoRedo.Clear();
+
+        vm.RemoveUniqueConstraintMemberCommand.Execute(constraint.Members[0]);
+        constraint.ColumnIds.Should().Equal(kind.Id);
+
+        vm.UndoRedo.Undo();
+        constraint.ColumnIds.Should().Equal(code.Id, kind.Id);
+        vm.UndoRedo.Clear();
+
+        // 空スロットはモデル未反映のため、× しても履歴には残らない
+        vm.AddUniqueConstraintMemberSlotCommand.Execute(constraint);
+        vm.RemoveUniqueConstraintMemberCommand.Execute(constraint.Members[^1]);
+
+        constraint.Members.Should().HaveCount(2);
+        constraint.ColumnIds.Should().Equal(code.Id, kind.Id);
+        vm.UndoRedo.CanUndo.Should().BeFalse();
+    }
+
+    [Fact(DisplayName = "外部からの構成列変更で編集行が作り直され、空スロットは破棄される")]
+    public void UniqueConstraintMembers_RebuildOnExternalColumnIdsChange()
+    {
+        var vm = CreateViewModelWithSelectedEntity();
+        var entity = vm.SelectedEntity!;
+        var code = entity.Columns.First(column => column.Name == "Code");
+        var kind = entity.Columns.First(column => column.Name == "Kind");
+
+        vm.AddUniqueConstraintCommand.Execute(null);
+        var constraint = entity.UniqueConstraints[0];
+        vm.AddUniqueConstraintMemberSlotCommand.Execute(constraint);
+        constraint.Members[0].IsPendingSlot.Should().BeTrue();
+
+        // MCP・AI チャット経由の変更と同じ「正本の直接差し替え」
+        constraint.SetColumnIds([kind.Id, code.Id]);
+
+        constraint.Members.Select(m => m.SelectedColumn).Should().Equal(kind, code);
+        constraint.Members.Should().OnlyContain(m => !m.IsPendingSlot, "空スロットは破棄される");
     }
 
     [Fact(DisplayName = "制約の削除は Undo で元の位置へ戻る")]
@@ -192,8 +334,13 @@ public class MainViewModelUniqueConstraintTests : IDisposable
         vm.IsDirty.Should().BeTrue("制約の追加は保存文書を変える");
 
         vm.SaveCommand.Execute(null);
-        var candidate = entity.UniqueConstraints[0].ColumnCandidates[1];
-        vm.ToggleUniqueConstraintColumnCommand.Execute(candidate);
+
+        // 構成列の追加は「＋で空スロット → 列を選んで確定」の 2 段（空スロット自体はモデルを変えない）
+        var constraint = entity.UniqueConstraints[0];
+        vm.AddUniqueConstraintMemberSlotCommand.Execute(constraint);
+        constraint.Members[0].SelectedColumn = entity.Columns.First(column =>
+            column.Name == "Code"
+        );
         vm.IsDirty.Should().BeTrue("構成列の変更は保存文書を変える");
 
         vm.SaveCommand.Execute(null);
@@ -299,7 +446,10 @@ public class MainViewModelUniqueConstraintTests : IDisposable
                 copy.Columns.Select(column => column.Id),
                 "構成列は複製側の列 Guid へ張り替わるべき"
             );
-        copiedConstraint.ColumnSummary.Should().Be("Code");
+        copiedConstraint
+            .Members.Select(member => member.SelectedColumn!.Name)
+            .Should()
+            .Equal("Code");
     }
 
     [Fact(DisplayName = "図の置換（ファイル読込・DB 取込経路）でも一意制約が保たれる")]

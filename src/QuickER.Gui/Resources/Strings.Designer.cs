@@ -661,6 +661,24 @@ namespace QuickER.Resources {
             }
         }
 
+        public static string Property_AddUniqueConstraintColumnTooltip {
+            get {
+                return ResourceManager.GetString("Property_AddUniqueConstraintColumnTooltip", resourceCulture);
+            }
+        }
+
+        public static string Property_RemoveUniqueConstraintColumnTooltip {
+            get {
+                return ResourceManager.GetString("Property_RemoveUniqueConstraintColumnTooltip", resourceCulture);
+            }
+        }
+
+        public static string Property_UniqueConstraintColumnPlaceholder {
+            get {
+                return ResourceManager.GetString("Property_UniqueConstraintColumnPlaceholder", resourceCulture);
+            }
+        }
+
         public static string Property_UniqueConstraintName {
             get {
                 return ResourceManager.GetString("Property_UniqueConstraintName", resourceCulture);
@@ -679,9 +697,9 @@ namespace QuickER.Resources {
             }
         }
 
-        public static string Property_UniqueConstraintNoColumns {
+        public static string Property_UniqueConstraintsToggleTooltip {
             get {
-                return ResourceManager.GetString("Property_UniqueConstraintNoColumns", resourceCulture);
+                return ResourceManager.GetString("Property_UniqueConstraintsToggleTooltip", resourceCulture);
             }
         }
 

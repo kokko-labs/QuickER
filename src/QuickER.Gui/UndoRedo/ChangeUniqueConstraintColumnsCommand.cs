@@ -6,7 +6,7 @@ namespace QuickER.UndoRedo;
 
 /// <summary>一意制約の構成列（宣言順のカラム Guid 一覧）を差し替えるコマンド</summary>
 /// <remarks>
-/// チェックボックス 1 回の切替が 1 履歴になる。構成列は「順序付きの集合」で個別の差分を持たないため、
+/// 列行 1 つの確定・差し替え・削除が 1 履歴になる。構成列は「順序付きの集合」で個別の差分を持たないため、
 /// 変更前後の一覧をそのままスナップショットとして保持する
 /// </remarks>
 public sealed class ChangeUniqueConstraintColumnsCommand : IUndoableCommand

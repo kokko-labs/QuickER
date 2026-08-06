@@ -355,7 +355,16 @@
     <value>この UNIQUE 制約を削除</value>
   </data>
   <data name="Property_UniqueConstraintHint" xml:space="preserve">
-    <value>+ で制約を追加し、対象の列にチェックを入れます。チェックした順が宣言順になります。</value>
+    <value>+ で制約を追加し、構成する列を 1 行ずつ足します。行の並びが宣言順になります。</value>
+  </data>
+  <data name="Property_AddUniqueConstraintColumnTooltip" xml:space="preserve">
+    <value>この制約に列を追加</value>
+  </data>
+  <data name="Property_RemoveUniqueConstraintColumnTooltip" xml:space="preserve">
+    <value>この列を制約から外す</value>
+  </data>
+  <data name="Property_UniqueConstraintColumnPlaceholder" xml:space="preserve">
+    <value>列を選択</value>
   </data>
   <data name="Property_UniqueConstraintName" xml:space="preserve">
     <value>制約名</value>
@@ -366,8 +375,8 @@
   <data name="Property_UniqueConstraintDdlName" xml:space="preserve">
     <value>DDL 上の名前:</value>
   </data>
-  <data name="Property_UniqueConstraintNoColumns" xml:space="preserve">
-    <value>構成列が未選択です（DDL には出力されません）</value>
+  <data name="Property_UniqueConstraintsToggleTooltip" xml:space="preserve">
+    <value>UNIQUE 制約の一覧を開閉します</value>
   </data>
   <data name="Property_Memo" xml:space="preserve">
     <value>メモ</value>

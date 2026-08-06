@@ -12,19 +12,21 @@ using Xunit;
 namespace QuickER.Tests.Gui.Views;
 
 /// <summary>
-/// プロパティパネルの UNIQUE 制約カードの XAML 配線（制約一覧の実体化・構成列チェックボックスの
-/// コマンド束縛と実行）を検証するテストクラス。
+/// プロパティパネルの UNIQUE 制約カードの XAML 配線（制約一覧の実体化・構成列の行リスト＝列選択
+/// コンボボックスと ＋ / × ボタンのコマンド束縛と実行）を検証するテストクラス。
 /// </summary>
 /// <remarks>
-/// チェックボックスは「IsChecked は OneWay・切替は Undo 可能なコマンド」という構成のため、
+/// 構成列の編集は「行の並び＝宣言順、候補は他行の未使用列」という束縛の組み合わせで成り立っており、
 /// VM テストでは束縛そのものを守れない。lessons.md の先例に従い、画面外（Left/Top=-4000）・
 /// 非アクティブで Show した実ウィンドウ上で ItemsControl のコンテナを実体化して検証する。
 /// </remarks>
 public class UniqueConstraintCardTests
 {
-    /// <summary>制約カードの項目実体化・チェックボックスのコマンド束縛・実行結果を検証する</summary>
-    [Fact(DisplayName = "UNIQUE 制約カード: 制約行が実体化し、列チェックでコマンドが走る")]
-    public void UniqueConstraintCard_ChecklistWiring()
+    /// <summary>制約カードの項目実体化・行リストのコマンド束縛・選択確定の結果を検証する</summary>
+    [Fact(
+        DisplayName = "UNIQUE 制約カード: 列行が実体化し、コンボボックスの選択で構成列が確定する"
+    )]
+    public void UniqueConstraintCard_MemberRowWiring()
     {
         Exception? captured = null;
 
@@ -151,43 +153,88 @@ public class UniqueConstraintCardTests
         var container = (FrameworkElement)items.ItemContainerGenerator.ContainerFromIndex(0)!;
         container.UpdateLayout();
 
-        var checkBoxes = FindVisualChildren<CheckBox>(container).ToList();
-        checkBoxes
-            .Select(box => box.Content)
+        var constraint = vm.Entities[0].UniqueConstraints[0];
+        FindVisualChildren<ComboBox>(container)
             .Should()
-            .Equal(["Id", "Code"], "構成列候補はエンティティの全カラムを映す");
+            .BeEmpty("制約を足しただけでは構成列の行は無い");
 
-        // チェックボックスは切替コマンドへ束縛され、対象の構成列候補をパラメーターに持つ
-        // （IsChecked は OneWay＝正本は制約側）
-        var codeCheckBox = checkBoxes[1];
-        codeCheckBox
-            .Command.Should()
-            .BeSameAs(vm.ToggleUniqueConstraintColumnCommand, "切替は Undo 可能なコマンド経由");
-        codeCheckBox
-            .CommandParameter.Should()
-            .BeOfType<UniqueConstraintColumnViewModel>()
-            .Which.Column.Name.Should()
-            .Be("Code");
-        codeCheckBox.IsChecked.Should().BeFalse();
+        // 構成列の「＋」は行追加コマンドへ束縛され、対象の制約をパラメーターに持つ
+        var addMemberButton = FindCommandButton(container, vm.AddUniqueConstraintMemberSlotCommand);
+        addMemberButton.CommandParameter.Should().BeSameAs(constraint);
+        addMemberButton.IsEnabled.Should().BeTrue("未使用の列が 2 つある");
 
         // クリック時に WPF が行うのと同じ「解決済み束縛の実行」を行う
         // （ButtonBase.OnClick は Command.Execute(CommandParameter) を呼ぶ。
         //   ClickEvent の直接発火や AutomationPeer.Toggle はこの経路を通らない）
-        codeCheckBox.Command.Execute(codeCheckBox.CommandParameter);
+        addMemberButton.Command.Execute(addMemberButton.CommandParameter);
+        window.UpdateLayout();
         DoEvents();
 
-        var constraint = vm.Entities[0].UniqueConstraints[0];
-        constraint.ColumnIds.Should().ContainSingle();
-        constraint.ColumnSummary.Should().Be("Code");
-        codeCheckBox.IsChecked.Should().BeTrue("OneWay 束縛が制約側の変更を表示へ戻す");
+        var comboBox = FindVisualChildren<ComboBox>(container).Should().ContainSingle().Subject;
+        comboBox.ItemsSource.Should().BeSameAs(constraint.Members[0].AvailableColumns);
+        comboBox.Items.Count.Should().Be(2, "空スロットの候補はエンティティの全カラム");
+        comboBox.SelectedItem.Should().BeNull("追加直後は未選択の空スロット");
+        constraint.ColumnIds.Should().BeEmpty("空スロットはまだモデルへ反映しない");
 
-        // Undo で構成列が外れ、チェック表示も追従する
+        // 一覧から選ぶのと同じ経路（Selector が SetCurrentValue で SelectedItem を更新し、
+        //  TwoWay 束縛が VM へ書き戻す）で列を確定させる
+        comboBox.SelectedIndex = 1;
+        DoEvents();
+
+        constraint.ColumnIds.Should().ContainSingle();
+        constraint.Members.Select(m => m.SelectedColumn!.Name).Should().Equal("Code");
+
+        // Undo で構成列が外れ、行そのものも消える（空スロットも復元しない）
         vm.UndoRedo.Undo();
+        window.UpdateLayout();
         DoEvents();
 
         constraint.ColumnIds.Should().BeEmpty();
-        codeCheckBox.IsChecked.Should().BeFalse();
+        FindVisualChildren<ComboBox>(container).Should().BeEmpty();
+
+        vm.UndoRedo.Redo();
+        window.UpdateLayout();
+        DoEvents();
+
+        constraint.ColumnIds.Should().ContainSingle();
+
+        // 残る 1 列を 2 行目に選ぶと、未使用の列が尽きて「＋」が無効化される
+        addMemberButton.Command.Execute(addMemberButton.CommandParameter);
+        window.UpdateLayout();
+        DoEvents();
+
+        var secondComboBox = FindVisualChildren<ComboBox>(container).ElementAt(1);
+        secondComboBox.Items.Count.Should().Be(1, "他行が使う Code は候補から外れる");
+        secondComboBox.SelectedIndex = 0;
+        window.UpdateLayout();
+        DoEvents();
+
+        constraint.Members.Select(m => m.SelectedColumn!.Name).Should().Equal("Code", "Id");
+        addMemberButton.IsEnabled.Should().BeFalse("未使用の列が無ければ行を足せない");
+
+        // 行の「×」は行削除コマンドへ束縛され、その行をパラメーターに持つ
+        var removeButtons = FindVisualChildren<Button>(container)
+            .Where(button =>
+                ReferenceEquals(button.Command, vm.RemoveUniqueConstraintMemberCommand)
+            )
+            .ToList();
+        removeButtons.Should().HaveCount(2);
+        removeButtons[1].CommandParameter.Should().BeSameAs(constraint.Members[1]);
+
+        removeButtons[1].Command.Execute(removeButtons[1].CommandParameter);
+        window.UpdateLayout();
+        DoEvents();
+
+        constraint.Members.Select(m => m.SelectedColumn!.Name).Should().Equal("Code");
+        addMemberButton.IsEnabled.Should().BeTrue("列が解放されたので再び行を足せる");
     }
+
+    /// <summary>指定コマンドへ束縛されたボタンを 1 つだけ取り出す</summary>
+    private static Button FindCommandButton(
+        DependencyObject root,
+        System.Windows.Input.ICommand command
+    ) =>
+        FindVisualChildren<Button>(root).Single(button => ReferenceEquals(button.Command, command));
 
     /// <summary>ビジュアルツリーを深さ優先で辿り、指定型の子要素を列挙する</summary>
     private static IEnumerable<T> FindVisualChildren<T>(DependencyObject root)

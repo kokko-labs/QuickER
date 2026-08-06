@@ -351,6 +351,40 @@
       </Setter>
     </Style>
 
+    <!-- プロパティカードの開閉トグル（PropertyIconButton と同じ見た目の ToggleButton 版） -->
+    <Style x:Key="PropertyIconToggleButton" TargetType="ToggleButton">
+      <Setter Property="Width" Value="30" />
+      <Setter Property="Height" Value="30" />
+      <Setter Property="Margin" Value="0,0,6,0" />
+      <Setter Property="Background" Value="White" />
+      <Setter Property="BorderBrush" Value="#CBD5E1" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ToggleButton">
+            <Border
+              x:Name="Bd"
+              Background="{TemplateBinding Background}"
+              BorderBrush="{TemplateBinding BorderBrush}"
+              BorderThickness="{TemplateBinding BorderThickness}"
+              CornerRadius="6"
+            >
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="#F8FAFC" />
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Opacity" Value="0.45" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
     <Style x:Key="PropertyDangerButton" TargetType="Button">
       <Setter Property="Padding" Value="12,8" />
       <Setter Property="Background" Value="#FFF1F2" />
@@ -2188,23 +2222,52 @@
                 </Grid>
               </Border>
 
-              <!-- UNIQUE 制約カード: 制約の追加・削除・制約名編集と、チェックによる構成列編集 -->
+              <!-- UNIQUE 制約カード: 制約の追加・削除・制約名編集と、列選択コンボボックスの行による構成列編集。
+                   本体は開閉可能（既定はエンティティ選択時に「制約あり＝開く・なし＝畳む」で決まる） -->
               <Border Style="{StaticResource PropertyCard}">
                 <StackPanel>
                   <Grid Margin="0,0,0,10">
                     <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="Auto" />
                       <ColumnDefinition Width="*" />
                       <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
-                    <TextBlock
+                    <ToggleButton
                       Grid.Column="0"
+                      Style="{StaticResource PropertyIconToggleButton}"
+                      ToolTip="{x:Static resources:Strings.Property_UniqueConstraintsToggleTooltip}"
+                      IsChecked="{Binding IsUniqueConstraintCardExpanded, Mode=TwoWay}"
+                    >
+                      <TextBlock
+                        FontSize="11"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        TextAlignment="Center"
+                      >
+                        <TextBlock.Style>
+                          <Style TargetType="TextBlock">
+                            <Setter Property="Text" Value="&#9656;" />
+                            <Style.Triggers>
+                              <DataTrigger
+                                Binding="{Binding IsChecked, RelativeSource={RelativeSource AncestorType=ToggleButton}}"
+                                Value="True"
+                              >
+                                <Setter Property="Text" Value="&#9662;" />
+                              </DataTrigger>
+                            </Style.Triggers>
+                          </Style>
+                        </TextBlock.Style>
+                      </TextBlock>
+                    </ToggleButton>
+                    <TextBlock
+                      Grid.Column="1"
                       Style="{StaticResource PropertyCardTitle}"
                       Text="{x:Static resources:Strings.Property_UniqueConstraintsHeader}"
                       Margin="0"
                       VerticalAlignment="Center"
                     />
                     <Button
-                      Grid.Column="1"
+                      Grid.Column="2"
                       Style="{StaticResource PropertyIconButton}"
                       ToolTip="{x:Static resources:Strings.Property_AddUniqueConstraintTooltip}"
                       Command="{Binding AddUniqueConstraintCommand}"
@@ -2220,103 +2283,148 @@
                     </Button>
                   </Grid>
 
-                  <TextBlock
-                    Style="{StaticResource PropertyHintText}"
-                    Margin="0,0,0,10"
-                    Text="{x:Static resources:Strings.Property_UniqueConstraintHint}"
-                  />
+                  <StackPanel Visibility="{Binding IsUniqueConstraintCardExpanded, Converter={StaticResource BoolToVisibilityConverter}}">
+                    <TextBlock
+                      Style="{StaticResource PropertyHintText}"
+                      Margin="0,0,0,10"
+                      Text="{x:Static resources:Strings.Property_UniqueConstraintHint}"
+                    />
 
-                  <ItemsControl
-                    x:Name="UniqueConstraintsItems"
-                    ItemsSource="{Binding SelectedEntity.UniqueConstraints}"
-                  >
-                    <ItemsControl.ItemTemplate>
-                      <DataTemplate>
-                        <Border
-                          BorderBrush="{StaticResource DividerBrush}"
-                          BorderThickness="1"
-                          CornerRadius="8"
-                          Padding="10"
-                          Margin="0,0,0,8"
-                        >
-                          <StackPanel>
-                            <Grid>
-                              <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                              </Grid.ColumnDefinitions>
-                              <TextBlock
-                                Grid.Column="0"
-                                Style="{StaticResource PropertyFieldLabel}"
-                                Text="{x:Static resources:Strings.Property_UniqueConstraintName}"
-                              />
-                              <TextBox
-                                Grid.Column="1"
-                                Style="{StaticResource PropertyInputTextBox}"
-                                Text="{Binding Name, UpdateSourceTrigger=LostFocus}"
-                                ToolTip="{x:Static resources:Strings.Property_UniqueConstraintNameTooltip}"
-                              />
+                    <ItemsControl
+                      x:Name="UniqueConstraintsItems"
+                      ItemsSource="{Binding SelectedEntity.UniqueConstraints}"
+                    >
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                          <Border
+                            BorderBrush="{StaticResource DividerBrush}"
+                            BorderThickness="1"
+                            CornerRadius="8"
+                            Padding="10"
+                            Margin="0,0,0,8"
+                          >
+                            <StackPanel>
+                              <Grid>
+                                <Grid.ColumnDefinitions>
+                                  <ColumnDefinition Width="Auto" />
+                                  <ColumnDefinition Width="*" />
+                                  <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock
+                                  Grid.Column="0"
+                                  Style="{StaticResource PropertyFieldLabel}"
+                                  Text="{x:Static resources:Strings.Property_UniqueConstraintName}"
+                                />
+                                <TextBox
+                                  Grid.Column="1"
+                                  Style="{StaticResource PropertyInputTextBox}"
+                                  Text="{Binding Name, UpdateSourceTrigger=LostFocus}"
+                                  ToolTip="{x:Static resources:Strings.Property_UniqueConstraintNameTooltip}"
+                                />
+                                <Button
+                                  Grid.Column="2"
+                                  Style="{StaticResource PropertyIconButton}"
+                                  ToolTip="{x:Static resources:Strings.Property_RemoveUniqueConstraintTooltip}"
+                                  Command="{Binding DataContext.RemoveUniqueConstraintCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                  CommandParameter="{Binding}"
+                                >
+                                  <TextBlock
+                                    Text="-"
+                                    FontSize="18"
+                                    FontWeight="Bold"
+                                    Margin="0,-2,0,0"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    TextAlignment="Center"
+                                  />
+                                </Button>
+                              </Grid>
+
+                              <!-- 構成列の行リスト: 1 行＝構成列 1 つ。行の並びが宣言順で、候補は他行の未使用列に絞る -->
+                              <ItemsControl ItemsSource="{Binding Members}" Margin="0,8,0,0">
+                                <ItemsControl.ItemTemplate>
+                                  <DataTemplate>
+                                    <Grid Margin="0,0,0,4">
+                                      <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                      </Grid.ColumnDefinitions>
+                                      <Grid Grid.Column="0">
+                                        <ComboBox
+                                          Style="{StaticResource PropertyInputComboBox}"
+                                          ItemsSource="{Binding AvailableColumns}"
+                                          DisplayMemberPath="Name"
+                                          SelectedItem="{Binding SelectedColumn, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                        />
+                                        <!-- 未選択の空スロットに出す案内（クリックはコンボボックスへ通す） -->
+                                        <TextBlock
+                                          Style="{StaticResource PropertyHintText}"
+                                          Margin="10,0,0,0"
+                                          VerticalAlignment="Center"
+                                          IsHitTestVisible="False"
+                                          Text="{x:Static resources:Strings.Property_UniqueConstraintColumnPlaceholder}"
+                                          Visibility="{Binding IsPendingSlot, Converter={StaticResource BoolToVisibilityConverter}}"
+                                        />
+                                      </Grid>
+                                      <Button
+                                        Grid.Column="1"
+                                        Style="{StaticResource PropertyIconButton}"
+                                        ToolTip="{x:Static resources:Strings.Property_RemoveUniqueConstraintColumnTooltip}"
+                                        Command="{Binding DataContext.RemoveUniqueConstraintMemberCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                        CommandParameter="{Binding}"
+                                      >
+                                        <TextBlock
+                                          Text="&#215;"
+                                          FontSize="14"
+                                          FontWeight="Bold"
+                                          HorizontalAlignment="Center"
+                                          VerticalAlignment="Center"
+                                          TextAlignment="Center"
+                                        />
+                                      </Button>
+                                    </Grid>
+                                  </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                              </ItemsControl>
+
+                              <!-- 構成列を 1 行足す（未使用の列が無い／空スロットが出ている間は無効） -->
                               <Button
-                                Grid.Column="2"
+                                HorizontalAlignment="Left"
+                                Margin="0,2,0,0"
                                 Style="{StaticResource PropertyIconButton}"
-                                ToolTip="{x:Static resources:Strings.Property_RemoveUniqueConstraintTooltip}"
-                                Command="{Binding DataContext.RemoveUniqueConstraintCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                ToolTip="{x:Static resources:Strings.Property_AddUniqueConstraintColumnTooltip}"
+                                IsEnabled="{Binding CanAddMember}"
+                                Command="{Binding DataContext.AddUniqueConstraintMemberSlotCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                 CommandParameter="{Binding}"
                               >
                                 <TextBlock
-                                  Text="-"
-                                  FontSize="18"
+                                  Text="+"
+                                  FontSize="16"
                                   FontWeight="Bold"
-                                  Margin="0,-2,0,0"
                                   HorizontalAlignment="Center"
                                   VerticalAlignment="Center"
                                   TextAlignment="Center"
                                 />
                               </Button>
-                            </Grid>
 
-                            <!-- 構成列のチェックリスト: 参加状態は制約側から導出（OneWay）し、切替は Undo 可能なコマンドで適用する -->
-                            <ItemsControl ItemsSource="{Binding ColumnCandidates}" Margin="0,8,0,0">
-                              <ItemsControl.ItemsPanel>
-                                <ItemsPanelTemplate>
-                                  <WrapPanel Orientation="Horizontal" />
-                                </ItemsPanelTemplate>
-                              </ItemsControl.ItemsPanel>
-                              <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                  <CheckBox
-                                    Margin="0,0,12,4"
-                                    Content="{Binding Column.Name}"
-                                    IsChecked="{Binding IsMember, Mode=OneWay}"
-                                    Command="{Binding DataContext.ToggleUniqueConstraintColumnCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                    CommandParameter="{Binding}"
-                                  />
-                                </DataTemplate>
-                              </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-
-                            <TextBlock
-                              Style="{StaticResource PropertyHintText}"
-                              Margin="0,4,0,0"
-                              Text="{Binding ColumnSummary}"
-                            />
-                            <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
-                              <TextBlock
-                                Style="{StaticResource PropertyHintText}"
-                                Margin="0,0,4,0"
-                                Text="{x:Static resources:Strings.Property_UniqueConstraintDdlName}"
-                              />
-                              <TextBlock
-                                Style="{StaticResource PropertyHintText}"
-                                Text="{Binding ResolvedName}"
-                              />
+                              <!-- 下側の隙間（制約枠の Padding=10）と揃うよう、上にも同じだけ空ける -->
+                              <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                                <TextBlock
+                                  Style="{StaticResource PropertyHintText}"
+                                  Margin="0,0,4,0"
+                                  Text="{x:Static resources:Strings.Property_UniqueConstraintDdlName}"
+                                />
+                                <TextBlock
+                                  Style="{StaticResource PropertyHintText}"
+                                  Text="{Binding ResolvedName}"
+                                />
+                              </StackPanel>
                             </StackPanel>
-                          </StackPanel>
-                        </Border>
-                      </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                  </ItemsControl>
+                          </Border>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </StackPanel>
                 </StackPanel>
               </Border>
 

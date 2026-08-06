@@ -99,28 +99,45 @@ public class EntityViewModelUniqueConstraintTests
             .BeEquivalentTo(new[] { code.Id, kind.Id });
     }
 
-    [Fact(DisplayName = "構成列候補はエンティティの全カラムを映し、参加状態を導出する")]
-    public void ColumnCandidates_MirrorEntityColumns()
+    // チェックボックス方式から行方式（列選択コンボボックス 1 行＝構成列 1 つ）へ変わったため、
+    // 「全カラムのミラー＋参加状態」ではなく「構成列そのものの行と、その行ごとの選択候補」を固定する
+    [Fact(DisplayName = "構成列の編集行は宣言順に並び、候補は他行の未使用列に絞られる")]
+    public void Members_ReflectColumnIds_AndFilterCandidates()
     {
-        var model = NewModelWithCompositeConstraint(out var code, out _);
+        var model = NewModelWithCompositeConstraint(out var code, out var kind);
         var entity = new EntityViewModel(model);
         var constraint = entity.UniqueConstraints[0];
 
-        constraint.ColumnCandidates.Select(c => c.Column.Name).Should().Equal("Id", "Code", "Kind");
-        constraint
-            .ColumnCandidates.Where(c => c.IsMember)
-            .Select(c => c.Column.Name)
-            .Should()
-            .Equal("Code", "Kind");
+        constraint.Members.Select(m => m.SelectedColumn!.Name).Should().Equal("Code", "Kind");
 
-        // カラムを足すと候補も追随する（チェックはされない）
+        // 各行の候補は「他行が使っていない列＋自行の現在選択」＝重複選択が構造的に起きない
+        constraint.Members[0].AvailableColumns.Select(c => c.Name).Should().Equal("Id", "Code");
+        constraint.Members[1].AvailableColumns.Select(c => c.Name).Should().Equal("Id", "Kind");
+
+        // カラムを足すと候補だけが追随する（構成列は変わらない）
         entity.Columns.Add(new ColumnViewModel(new Column { Name = "Extra", DataType = "int" }));
 
         constraint
-            .ColumnCandidates.Select(c => c.Column.Name)
+            .Members[0]
+            .AvailableColumns.Select(c => c.Name)
             .Should()
-            .Equal("Id", "Code", "Kind", "Extra");
+            .Equal("Id", "Code", "Extra");
+        constraint.ColumnIds.Should().Equal(code.Id, kind.Id);
         constraint.ContainsColumn(code.Id).Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "全カラムが構成列なら未使用列が無いため行を足せない")]
+    public void CanAddMember_IsFalse_WhenEveryColumnIsUsed()
+    {
+        var model = NewModelWithCompositeConstraint(out var code, out var kind);
+        var entity = new EntityViewModel(model);
+        var constraint = entity.UniqueConstraints[0];
+
+        constraint.CanAddMember.Should().BeTrue("Id がまだ未使用");
+
+        constraint.SetColumnIds([entity.Columns[0].Id, code.Id, kind.Id]);
+
+        constraint.CanAddMember.Should().BeFalse();
     }
 
     [Fact(DisplayName = "列リネームは Guid 参照のため制約の表示だけが追従する")]
@@ -134,12 +151,19 @@ public class EntityViewModelUniqueConstraintTests
         var entity = new EntityViewModel(model);
         var constraint = entity.UniqueConstraints[0];
 
-        constraint.ColumnSummary.Should().Be("Code, Kind");
+        // 表示は行の SelectedColumn（ColumnViewModel 直参照）経由なのでリネームへ自動追従する
+        constraint
+            .Members.Select(member => member.SelectedColumn!.Name)
+            .Should()
+            .Equal("Code", "Kind");
         constraint.ResolvedName.Should().Be("UQ_Item_Code_Kind");
 
         entity.Columns.First(column => column.Id == code.Id).Name = "ItemCode";
 
-        constraint.ColumnSummary.Should().Be("ItemCode, Kind");
+        constraint
+            .Members.Select(member => member.SelectedColumn!.Name)
+            .Should()
+            .Equal("ItemCode", "Kind");
         constraint.ResolvedName.Should().Be("UQ_Item_ItemCode_Kind");
         constraint.ColumnIds.Should().Equal([code.Id, kind.Id], "参照は Guid のまま");
     }

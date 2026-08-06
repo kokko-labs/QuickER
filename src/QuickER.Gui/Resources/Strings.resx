@@ -345,7 +345,16 @@
     <value>Delete this unique constraint</value>
   </data>
   <data name="Property_UniqueConstraintHint" xml:space="preserve">
-    <value>Add a constraint with +, then check the columns it covers. The order you check them in is the declared order.</value>
+    <value>Add a constraint with +, then add its columns one row at a time. The row order is the declared order.</value>
+  </data>
+  <data name="Property_AddUniqueConstraintColumnTooltip" xml:space="preserve">
+    <value>Add a column to this constraint</value>
+  </data>
+  <data name="Property_RemoveUniqueConstraintColumnTooltip" xml:space="preserve">
+    <value>Remove this column from the constraint</value>
+  </data>
+  <data name="Property_UniqueConstraintColumnPlaceholder" xml:space="preserve">
+    <value>Select a column</value>
   </data>
   <data name="Property_UniqueConstraintName" xml:space="preserve">
     <value>Name</value>
@@ -356,8 +365,8 @@
   <data name="Property_UniqueConstraintDdlName" xml:space="preserve">
     <value>DDL name:</value>
   </data>
-  <data name="Property_UniqueConstraintNoColumns" xml:space="preserve">
-    <value>No columns selected (not written to the DDL)</value>
+  <data name="Property_UniqueConstraintsToggleTooltip" xml:space="preserve">
+    <value>Expand or collapse the unique constraint list</value>
   </data>
   <data name="Property_Memo" xml:space="preserve">
     <value>Notes</value>
