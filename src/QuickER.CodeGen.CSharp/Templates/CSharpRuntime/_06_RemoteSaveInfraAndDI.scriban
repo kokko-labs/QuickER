@@ -2080,7 +2080,8 @@ public static class Generated{{ dialect_di_suffix }}RepositoryServiceCollectionE
 {{~ for repository in repository_classes ~}}
 {{~ if render_contract ~}}
 {{~ if remote_contracts ~}}
-{{~ remote_interface_members = join_members repository.query_interface_block repository.binary_stream_contract_block ~}}
+{{~ remote_interface_members = join_members repository.query_interface_block repository.uniqueness_contract_block ~}}
+{{~ remote_interface_members = join_members remote_interface_members repository.binary_stream_contract_block ~}}
 {{ if !for.first }}
 {{ end }}/// <summary>Remote surface of the {{ repository.entity_class_name }} repository (only CRUD, save, and named queries that can cross a network boundary; swappable for a remote implementation later).</summary>
 public partial interface {{ repository.remote_interface_name }} : IRemoteRepository<{{ repository.entity_class_name }}, {{ repository.key_type_name }}>{{ if remote_interface_members == "" }} { }{{ else }}
@@ -2093,7 +2094,8 @@ public partial interface {{ repository.interface_name }}
     : {{ repository.remote_interface_name }},
         IRepository<{{ repository.entity_class_name }}, {{ repository.key_type_name }}> { }
 {{~ else ~}}
-{{~ non_remote_interface_members = join_members repository.query_interface_block repository.binary_stream_contract_block ~}}
+{{~ non_remote_interface_members = join_members repository.query_interface_block repository.uniqueness_contract_block ~}}
+{{~ non_remote_interface_members = join_members non_remote_interface_members repository.binary_stream_contract_block ~}}
 {{ if !for.first }}
 {{ end }}/// <summary>Repository interface for {{ repository.entity_class_name }}.</summary>
 public partial interface {{ repository.interface_name }} : IRepository<{{ repository.entity_class_name }}, {{ repository.key_type_name }}>{{ if non_remote_interface_members == "" }} { }{{ else }}
@@ -2112,7 +2114,8 @@ public partial interface {{ repository.interface_name }} : IRepository<{{ reposi
 {{~ end ~}}
 {{~ if repositories ~}}
 {{~ ado_query_impl_block = repository.query_impl_blocks_by_dialect[repository_dialect] ~}}
-{{~ ado_impl_members = join_members ado_query_impl_block repository.binary_stream_thin_impl_block ~}}
+{{~ ado_impl_members = join_members ado_query_impl_block repository.uniqueness_shared_impl_block ~}}
+{{~ ado_impl_members = join_members ado_impl_members repository.binary_stream_thin_impl_block ~}}
 
 /// <summary>Repository implementation for {{ repository.entity_class_name }}.</summary>
 public sealed partial class {{ repository.class_name }}(
@@ -2130,7 +2133,8 @@ public sealed partial class {{ repository.class_name }}(
 
 /// <summary>HTTP client implementation of the remote surface ({{ repository.remote_interface_name }}) for {{ repository.entity_class_name }}.</summary>
 /// <remarks>Calls the server-side <c>MapGeneratedRemoteEndpoints</c> endpoints. The HttpClient's BaseAddress must include the prefix (default /quicker/).</remarks>
-{{~ remote_client_members = join_members repository.query_remote_client_block repository.binary_stream_remote_client_block ~}}
+{{~ remote_client_members = join_members repository.query_remote_client_block repository.uniqueness_remote_client_block ~}}
+{{~ remote_client_members = join_members remote_client_members repository.binary_stream_remote_client_block ~}}
 public sealed partial class {{ repository.remote_client_class_name }}(HttpClient httpClient)
     : HttpRemoteRepository<{{ repository.entity_class_name }}, {{ repository.key_type_name }}>(httpClient, "{{ repository.remote_route_name }}"), {{ repository.remote_interface_name }}{{ if remote_client_members == "" }} { }{{ else }}
 {

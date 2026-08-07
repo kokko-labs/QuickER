@@ -427,9 +427,10 @@ public sealed class MultiTargetRepositoryGenerationTests
         code.Should().Contain(": SqlServerRepository<CustomerEntity, int>(");
         code.Should().Contain(": SqliteRepository<CustomerEntity, int>(");
 
-        // 両実装とも共有契約 I{Entity}Repository を実装する（契約は契約 namespace 側の単一型）
+        // 両実装とも共有契約 I{Entity}Repository を実装する（契約は契約 namespace 側の単一型）。
+        // 実装本体は重複事前チェック（CheckUniquenessAsync）を常に持つため、宣言行末で数える
         System
-            .Text.RegularExpressions.Regex.Matches(code, @"ICustomerRepository \{ \}")
+            .Text.RegularExpressions.Regex.Matches(code, @"\), ICustomerRepository\r?\n\{")
             .Count.Should()
             .Be(2, "sqlserver / sqlite の両実装が同一の ICustomerRepository を実装する");
     }

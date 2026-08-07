@@ -59,6 +59,10 @@ public static class InMemoryFixtureDefinition
     private static readonly Guid OrderCustomerFkColId = new("eeeeeeee-0000-0000-0000-000000000003");
     private static readonly Guid OrderMemoColId = new("eeeeeeee-0000-0000-0000-000000000004");
     private static readonly Guid OrderAmountColId = new("eeeeeeee-0000-0000-0000-000000000005");
+    private static readonly Guid OrderMemoUniqueId = new("eeeeeeee-0000-0000-0000-000000000006");
+    private static readonly Guid OrderCustomerAmountUniqueId = new(
+        "eeeeeeee-0000-0000-0000-000000000007"
+    );
 
     private static readonly Guid ProfileId = new("ffffffff-0000-0000-0000-000000000001");
     private static readonly Guid ProfilePkColId = new("ffffffff-0000-0000-0000-000000000002");
@@ -114,6 +118,23 @@ public static class InMemoryFixtureDefinition
         {
             Id = OrderId,
             TableName = "orders",
+            // UNIQUE 制約は重複事前チェック（CheckUniquenessAsync）のインメモリ実装検証用。
+            // 単一列は NULL 許容列（memo）で「NULL を含む組はスキップ」の枝を、複合は非 NULL 列 2 本で合成名の枝を通す。
+            // 決定的シードは memo・(customer_id, amount) とも重複しないため、既存のインメモリテストへは影響しない
+            UniqueConstraints =
+            {
+                new UniqueConstraint
+                {
+                    Id = OrderMemoUniqueId,
+                    Name = "UQ_orders_memo",
+                    ColumnIds = { OrderMemoColId },
+                },
+                new UniqueConstraint
+                {
+                    Id = OrderCustomerAmountUniqueId,
+                    ColumnIds = { OrderCustomerFkColId, OrderAmountColId },
+                },
+            },
             Columns =
             {
                 new Column

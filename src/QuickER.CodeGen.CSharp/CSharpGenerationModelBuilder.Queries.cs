@@ -51,6 +51,7 @@ internal sealed partial class CSharpGenerationModelBuilder
         "ExecuteSqlAsync",
         "ExecuteScalarSqlAsync",
         "QueryProjectionBySqlAsync",
+        "CheckUniquenessAsync",
     };
 
     /// <summary>1 エンティティ分のクエリブロック（テンプレートへ渡す整形済みテキスト群）</summary>

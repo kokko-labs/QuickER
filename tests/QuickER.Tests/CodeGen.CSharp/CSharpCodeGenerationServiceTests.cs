@@ -4178,7 +4178,7 @@ public class CSharpCodeGenerationServiceTests
         content
             .Should()
             .Contain(
-                ") : EfCoreRepository<CustomerEntity, int, QuickErDbContext>(contextFactory, saveHooks), ICustomerRepository { }"
+                ") : EfCoreRepository<CustomerEntity, int, QuickErDbContext>(contextFactory, saveHooks), ICustomerRepository"
             );
 
         // 読み取りは AsNoTracking（切断パターン）、事後状態は既存版と同じ Unchanged

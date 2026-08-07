@@ -148,7 +148,8 @@ public static class GeneratedFilePlanner
     /// <remarks>
     /// 根拠（<c>Templates/CSharpRuntime/*.scriban</c> の型参照から確定）:
     ///   Entity   → Runtime（EntityBase / 独自属性 / RowState）, ValueObject（プロパティ型が VO）
-    ///   EditModel→ Runtime（EditModelBase / EditModelCollection）, ValueObject（VO 由来のパース・検証）
+    ///   EditModel→ Runtime（EditModelBase / EditModelCollection）, ValueObject（VO 由来のパース・検証）,
+    ///              Entity・Repository（DB 照合糖衣 ValidateUniqueAsync が {Entity} を組み立て I{Entity}Repository へ問い合わせる）
     ///   Mapper   → Entity（{Entity}）, EditModel（{Entity}EditModel）, Runtime（基底・RowState）
     ///   ValueObject → Runtime（VO 基底 ValueObjectBase / IValueObject / JSON コンバータ）
     ///   Repository → Entity（対象 Entity）, Runtime（契約基底・SqlQuery・メタデータ）, ValueObject（VO 束縛の unwrap）
@@ -161,7 +162,13 @@ public static class GeneratedFilePlanner
         bucket switch
         {
             GenerationBucket.Entity => [GenerationBucket.Runtime, GenerationBucket.ValueObject],
-            GenerationBucket.EditModel => [GenerationBucket.Runtime, GenerationBucket.ValueObject],
+            GenerationBucket.EditModel =>
+            [
+                GenerationBucket.Entity,
+                GenerationBucket.Repository,
+                GenerationBucket.Runtime,
+                GenerationBucket.ValueObject,
+            ],
             GenerationBucket.Mapper =>
             [
                 GenerationBucket.Entity,

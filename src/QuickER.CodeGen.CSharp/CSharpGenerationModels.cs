@@ -493,6 +493,31 @@ internal sealed class CSharpRepositoryModel
     /// 無制限バイナリ列の Stream アクセサのファイル糖衣（Read/Write{Column}ToFile/FromFile）の拡張メソッド静的クラス全体（整形済み・無ければ空文字）。
     /// </summary>
     public string BinaryStreamFileExtensionsBlock { get; init; } = string.Empty;
+
+    /// <summary>
+    /// UNIQUE 制約の重複事前チェック（<c>CheckUniquenessAsync</c>）の契約メンバー（整形済み）。
+    /// </summary>
+    /// <remarks>
+    /// Repository 契約を生成するエンティティでは制約の有無に依らず常に非空（ユーザー定義フックだけでも動くため）。
+    /// 挿入先はテンプレートがリモート契約の有無で出し分ける（Stream アクセサと同じ規則＝リモート面 ON なら
+    /// <c>I{Entity}RemoteRepository</c>・OFF なら全機能面 <c>I{Entity}Repository</c>）。
+    /// </remarks>
+    public string UniquenessContractBlock { get; init; } = string.Empty;
+
+    /// <summary>
+    /// 重複事前チェックの実装メンバー（式木クエリ経由・全実装先で同一テキスト）。
+    /// QuickER 版 Repository 2 方言・インメモリ・EF Core の各実装クラスへ同じテキストで挿入する（無ければ空文字）。
+    /// </summary>
+    public string UniquenessSharedImplBlock { get; init; } = string.Empty;
+
+    /// <summary>重複事前チェックの HTTP クライアント転送メソッド（<c>Http{Entity}RemoteRepository</c> へ挿入・無ければ空文字）</summary>
+    public string UniquenessRemoteClientBlock { get; init; } = string.Empty;
+
+    /// <summary>重複事前チェックのサーバー側エンドポイントマッピング（<c>Map{Entity}Endpoints</c> 内へ挿入・無ければ空文字）</summary>
+    public string UniquenessRemoteServerBlock { get; init; } = string.Empty;
+
+    /// <summary>重複事前チェックのサーバー側リクエストレコード（クラスレベルへ挿入・無ければ空文字）</summary>
+    public string UniquenessRemoteServerRecordsBlock { get; init; } = string.Empty;
 }
 
 // ---- EditModel 専用モデル ----
@@ -533,6 +558,23 @@ internal sealed class CSharpEditModelClassModel
     /// 全プロパティが VO のときはヘルパを生成しない（未使用メンバーを出さない）。
     /// </summary>
     public required bool HasNonValueObjectProperty { get; init; }
+
+    /// <summary>
+    /// テーブルの UNIQUE 制約をクラスへ宣言する <c>[UniqueConstraint(...)]</c> 属性行（整形済み・制約なしは空文字）。
+    /// </summary>
+    /// <remarks>コレクション内重複検証（<c>EditModelUniquenessValidator</c>）が属性としてリフレクションで読む。</remarks>
+    public string UniqueConstraintAttributesBlock { get; init; } = string.Empty;
+
+    /// <summary>
+    /// DB 照合糖衣 <c>ValidateUniqueAsync</c> のメソッド全体（整形済み）。Repository 契約面が存在するエンティティのみ非空。
+    /// </summary>
+    public string UniquenessValidationBlock { get; init; } = string.Empty;
+
+    /// <summary>
+    /// この EditModel に対応する Repository 契約面（<c>I{Entity}Repository</c>）が生成されるかどうか。
+    /// </summary>
+    /// <remarks>固定メンバー名簿の条件付き集合（<see cref="GeneratedFixedMemberNames.EditModelWithRepositoryFace"/>）の発火条件。</remarks>
+    public required bool HasRepositoryFace { get; init; }
 }
 
 /// <summary>EditModel の 1 プロパティに対応する生成モデル</summary>

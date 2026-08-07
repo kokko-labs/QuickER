@@ -142,6 +142,28 @@ public sealed class StoreGeneratedColumnAttribute : Attribute
 }
 
 /// <summary>
+/// Attribute that declares one UNIQUE constraint of the underlying table on an edit model class.
+/// The arguments are the confirmed-value property names that make up the constraint, in declaration order.
+/// </summary>
+/// <remarks>
+/// It is applied once per UNIQUE constraint of the table and is read by <see cref="EditModelUniquenessValidator"/> to detect
+/// values duplicated among the elements of a collection. Checking against rows already stored in the database is a separate
+/// concern (the repository's <c>CheckUniquenessAsync</c>).
+/// </remarks>
+[AttributeUsage(AttributeTargets.Class, AllowMultiple = true)]
+public sealed class UniqueConstraintAttribute : Attribute
+{
+    /// <summary>Gets the confirmed-value property names that make up the constraint (declaration order).</summary>
+    public string[] PropertyNames { get; }
+
+    /// <summary>Gets or sets the constraint name (the synthesized name when the diagram does not set one).</summary>
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>Initializes a new instance with the properties that make up the constraint.</summary>
+    public UniqueConstraintAttribute(params string[] propertyNames) => PropertyNames = propertyNames;
+}
+
+/// <summary>
 /// Marker attribute that excludes an unbounded binary column (such as <c>varbinary(max)</c> or a BLOB with no declared length) from SELECT / UPDATE.
 /// INSERT / BulkInsert still handle all columns. Updating while a value remains assigned throws at runtime (perform such updates with raw SQL via <c>ExecuteSqlAsync</c>).
 /// </summary>
@@ -1045,6 +1067,43 @@ public abstract partial class EditModelBase
     protected void OnErrorsChanged(string propertyName) =>
         ErrorsChanged?.Invoke(this, new DataErrorsChangedEventArgs(propertyName));
 
+    /// <summary>Binding property names that currently hold a duplicate-value error (so the next uniqueness check clears exactly what the previous one registered).</summary>
+    private readonly List<string> _duplicateErrorProperties = new();
+
+    /// <summary>Clears the duplicate-value errors registered by the previous uniqueness check (errors registered by other rules are left untouched).</summary>
+    public void ClearDuplicateErrors()
+    {
+        foreach (var propertyName in _duplicateErrorProperties)
+        {
+            ClearErrors(propertyName);
+        }
+
+        _duplicateErrorProperties.Clear();
+    }
+
+    /// <summary>Registers a duplicate-value error on the specified binding property and remembers it, so the next check can clear it. An empty name registers a model-level error.</summary>
+    public void SetDuplicateError(string propertyName, string message)
+    {
+        SetError(propertyName, message);
+
+        if (!_duplicateErrorProperties.Contains(propertyName))
+        {
+            _duplicateErrorProperties.Add(propertyName);
+        }
+    }
+
+    /// <summary>
+    /// Registers a duplicate-value error for the given confirmed-value property names. Generated edit models override this to map the
+    /// names to their binding properties, resolve display names, and build the message; names that cannot be mapped (and an empty list)
+    /// produce a model-level error.
+    /// </summary>
+    /// <param name="propertyNames">Confirmed-value property names that make up the violated constraint.</param>
+    /// <param name="message">Message that replaces the default one (null to build the default from <see cref="EditModelMessages.DuplicateValue"/>).</param>
+    public virtual void RegisterDuplicateError(
+        IReadOnlyList<string> propertyNames,
+        string? message
+    ) => SetDuplicateError(string.Empty, message ?? EditModelMessages.DuplicateValue(propertyNames));
+
     /// <summary>Writes the confirmed values back to the binding properties and clears errors.</summary>
     public void RevertInput() => ExecuteRevert(RevertCore);
 
@@ -1146,6 +1205,175 @@ public static class EditModelMessages
     /// <summary>Combines value object validation errors into a single edit model error message.</summary>
     public static Func<IReadOnlyList<string>, string> JoinValueObjectErrors { get; set; } =
         static errors => string.Join(" / ", errors);
+
+    /// <summary>Message for a value that duplicates another element or another row in the database (argument: the display names of the constraint's member properties, in declaration order).</summary>
+    /// <remarks>The display names are quoted with single quotes, matching the required-field and conversion error styles.</remarks>
+    public static Func<IReadOnlyList<string>, string> DuplicateValue { get; set; } =
+        static displayNames => $"'{string.Join(", ", displayNames)}' is already used.";
+}
+
+/// <summary>
+/// Shared helper that detects values duplicated among edit models by reading the UNIQUE constraints declared with <see cref="UniqueConstraintAttribute"/>.
+/// </summary>
+/// <remarks>
+/// It is schema-independent and attribute-driven, and does not bake in property names (constraints are resolved once per type and cached). It is called at the
+/// end of <see cref="EditModelCollection{T}.Validate"/>, and application code can call it directly for a root-level list. Semantics match the database check:
+/// value tuples that contain a null are out of scope (NULL collision semantics differ per dialect), deletion targets (RowState.Removed) are excluded, and every
+/// element of a duplicated group gets the error. Checking against rows already stored in the database is a separate concern (the repository's CheckUniquenessAsync).
+/// </remarks>
+public static class EditModelUniquenessValidator
+{
+    // Type -> the UNIQUE constraints declared on it. Resolved once and cached.
+    private static readonly ConcurrentDictionary<
+        Type,
+        UniqueConstraintAttribute[]
+    > _constraints = new();
+
+    /// <summary>Returns the UNIQUE constraints declared on the specified edit model type (an empty array when none are declared).</summary>
+    public static UniqueConstraintAttribute[] For(Type editModelType) =>
+        _constraints.GetOrAdd(
+            editModelType,
+            static type =>
+                type.GetCustomAttributes<UniqueConstraintAttribute>(inherit: true).ToArray()
+        );
+
+    /// <summary>
+    /// Detects values duplicated among the given edit models and registers a duplicate-value error on every element of each duplicated group
+    /// (returns true when there are no duplicates).
+    /// </summary>
+    /// <remarks>
+    /// The duplicate-value errors registered by the previous call are cleared first, so re-validating never leaves stale errors. The constraints are read from the
+    /// runtime type of the first element that is not a deletion target, so the elements are expected to be of a single edit model type.
+    /// </remarks>
+    /// <param name="models">The edit models to compare with each other.</param>
+    public static bool Validate<T>(IEnumerable<T> models)
+        where T : EditModelBase
+    {
+        ArgumentNullException.ThrowIfNull(models);
+
+        var targets = models.Where(model => !model.IsRemoved).ToList();
+
+        foreach (var model in targets)
+        {
+            model.ClearDuplicateErrors();
+        }
+
+        if (targets.Count == 0)
+        {
+            return true;
+        }
+
+        var valid = true;
+
+        foreach (var constraint in For(targets[0].GetType()))
+        {
+            var groups = new Dictionary<object[], List<T>>(UniquenessKeyComparer.Instance);
+
+            foreach (var model in targets)
+            {
+                var key = BuildKey(model, constraint.PropertyNames);
+
+                // A tuple that contains a null is out of scope (it matches the semantics of the database check).
+                if (key is null)
+                {
+                    continue;
+                }
+
+                if (!groups.TryGetValue(key, out var group))
+                {
+                    groups[key] = group = new List<T>();
+                }
+
+                group.Add(model);
+            }
+
+            foreach (var group in groups.Values)
+            {
+                if (group.Count < 2)
+                {
+                    continue;
+                }
+
+                valid = false;
+
+                foreach (var model in group)
+                {
+                    model.RegisterDuplicateError(constraint.PropertyNames, null);
+                }
+            }
+        }
+
+        return valid;
+    }
+
+    /// <summary>Builds the comparison tuple of the constraint's member properties (null when any value is null or the property does not exist = out of scope).</summary>
+    private static object[]? BuildKey(EditModelBase model, string[] propertyNames)
+    {
+        var type = model.GetType();
+        var values = new object[propertyNames.Length];
+
+        for (var i = 0; i < propertyNames.Length; i++)
+        {
+            var property = type.GetProperty(
+                propertyNames[i],
+                BindingFlags.Public | BindingFlags.Instance
+            );
+            var value = property?.GetValue(model);
+
+            if (value is null)
+            {
+                return null;
+            }
+
+            values[i] = value;
+        }
+
+        return values;
+    }
+
+    /// <summary>Structural comparer for the value tuples (byte[] compares by content, and value objects by their overridden equality).</summary>
+    private sealed class UniquenessKeyComparer : IEqualityComparer<object[]>
+    {
+        /// <summary>The shared instance (stateless).</summary>
+        public static readonly UniquenessKeyComparer Instance = new();
+
+        /// <summary>Compares two value tuples element by element.</summary>
+        public bool Equals(object[]? x, object[]? y)
+        {
+            if (x is null || y is null)
+            {
+                return ReferenceEquals(x, y);
+            }
+
+            if (x.Length != y.Length)
+            {
+                return false;
+            }
+
+            for (var i = 0; i < x.Length; i++)
+            {
+                if (!StructuralComparisons.StructuralEqualityComparer.Equals(x[i], y[i]))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        /// <summary>Combines the element hash codes of a value tuple.</summary>
+        public int GetHashCode(object[] obj)
+        {
+            var hash = new HashCode();
+
+            foreach (var value in obj)
+            {
+                hash.Add(StructuralComparisons.StructuralEqualityComparer.GetHashCode(value));
+            }
+
+            return hash.ToHashCode();
+        }
+    }
 }
 
 /// <summary>A single validation error in an edit model graph.</summary>
@@ -1294,11 +1522,22 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
 
         foreach (var item in this)
         {
+            // Clear the duplicate-value errors of the previous run first: they are re-registered below, and leaving them
+            // would make this element look invalid even after the duplication was resolved.
+            item.ClearDuplicateErrors();
+
             // Do not short-circuit, so that errors are registered for every element.
             if (!item.Validate(includeChildren))
             {
                 valid = false;
             }
+        }
+
+        // Detect values duplicated among the elements themselves (the UNIQUE constraints declared on the edit model class).
+        // It runs after every element has been validated, so the duplicate-value errors are registered on top of the fresh per-element errors.
+        if (!EditModelUniquenessValidator.Validate(this))
+        {
+            valid = false;
         }
 
         return valid;
@@ -1485,6 +1724,7 @@ public partial class CustomerEditModel : EditModelBase
     //   Extra children          : protected override void RegisterExtraChildren();  // register via AddChild/AddChildren inside
     //   Conversion msg tweak    : partial void CustomizeParseErrorMessage(string propertyName, string inputValue, string typeName, ref string message);
     //   Required msg tweak      : partial void CustomizeRequiredErrorMessage(string propertyName, ref string message);
+    //   Duplicate msg tweak     : partial void CustomizeDuplicateErrorMessage(IReadOnlyList<string> propertyNames, ref string message);
     //   Input normalization     : protected override void CustomizeInputNormalization(string propertyName, string rawValue, ref string normalizedValue);
     //   Display name tweak      : partial void CustomizePropertyDisplayName(string propertyName, ref string displayName);  // override display names in validation messages
     //   Row editing             : partial void OnBeginEdit();  partial void OnEndEdit();  partial void OnCancelEdit();
@@ -1870,6 +2110,107 @@ public partial class CustomerEditModel : EditModelBase
         ref string message
     );
 
+    /// <inheritdoc />
+    public override void RegisterDuplicateError(
+        IReadOnlyList<string> propertyNames,
+        string? message
+    )
+    {
+        var displayNames = new List<string>(propertyNames.Count);
+        var targets = new List<string>(propertyNames.Count);
+
+        foreach (var propertyName in propertyNames)
+        {
+            switch (propertyName)
+            {
+                case nameof(CustomerId):
+                    displayNames.Add(GetDisplayName(nameof(CustomerId), null));
+                    targets.Add(nameof(BindingCustomerId));
+                    break;
+
+                case nameof(Name):
+                    displayNames.Add(GetDisplayName(nameof(Name), null));
+                    targets.Add(nameof(BindingName));
+                    break;
+
+                case nameof(Balance):
+                    displayNames.Add(GetDisplayName(nameof(Balance), null));
+                    targets.Add(nameof(BindingBalance));
+                    break;
+
+                default:
+                    // A name that does not belong to this edit model (a user-defined check may report one) has no binding property to attach the error to.
+                    displayNames.Add(propertyName);
+                    break;
+            }
+        }
+
+        var resolved = message ?? ResolveDuplicateErrorMessage(propertyNames, displayNames);
+
+        // Names that could not be mapped (and an empty list) become a model-level error.
+        if (targets.Count == 0)
+        {
+            SetDuplicateError(string.Empty, resolved);
+            return;
+        }
+
+        foreach (var target in targets)
+        {
+            SetDuplicateError(target, resolved);
+        }
+    }
+
+    /// <summary>Resolves the duplicate-value error message (EditModelMessages.DuplicateValue first, then fine-tuned by CustomizeDuplicateErrorMessage).</summary>
+    private string ResolveDuplicateErrorMessage(
+        IReadOnlyList<string> propertyNames,
+        IReadOnlyList<string> displayNames
+    )
+    {
+        var message = EditModelMessages.DuplicateValue(displayNames);
+        CustomizeDuplicateErrorMessage(propertyNames, ref message);
+        return message;
+    }
+
+    /// <summary>Partial method for fine-tuning the duplicate-value error message per constraint (replace via a partial implementation in another file).</summary>
+    partial void CustomizeDuplicateErrorMessage(
+        IReadOnlyList<string> propertyNames,
+        ref string message
+    );
+
+    /// <summary>
+    /// Checks this edit model's confirmed values against the database through the repository and registers duplicate-value errors (returns true when there are no violations).
+    /// </summary>
+    /// <remarks>
+    /// The duplicate-value errors registered by the previous call are cleared first, so re-checking never leaves stale errors. Rows that share the primary key are excluded,
+    /// so the same call is correct for both insert and update. The result is advisory only: the definitive guarantee is the database's own UNIQUE constraint (TOCTOU).
+    /// </remarks>
+    /// <param name="repository">The repository used for the check.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    public async Task<bool> ValidateUniqueAsync(
+        ICustomerRepository repository,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(repository);
+        ClearDuplicateErrors();
+
+        var entity = new CustomerEntity();
+
+        if (CustomerId is { } resolvedCustomerId)
+        {
+            entity.CustomerId = resolvedCustomerId;
+        }
+
+        var violations = await repository.CheckUniquenessAsync(entity, cancellationToken);
+
+        foreach (var violation in violations)
+        {
+            RegisterDuplicateError(violation.PropertyNames, violation.Message);
+        }
+
+        return violations.Count == 0;
+    }
+
     /// <summary>Resolves the display name of a property (default = the column description, or the property name if unspecified; can be replaced through GeneratedDisplayNames.Resolve or CustomizePropertyDisplayName). Used in validation messages.</summary>
     private static string GetDisplayName(string propertyName, string? description)
     {
@@ -1953,6 +2294,8 @@ public partial class CustomerEditModel : EditModelBase
 }
 
 /// <summary>Edit model for on-screen editing of the orders table.</summary>
+[UniqueConstraint("Memo", Name = "UQ_orders_memo")]
+[UniqueConstraint("CustomerId", "Amount", Name = "UQ_orders_customer_id_amount")]
 public partial class OrderEditModel : EditModelBase
 {
     // ===== Extension points (implement only what you need in a partial class; unimplemented partial methods are erased at no cost) =====
@@ -1960,6 +2303,7 @@ public partial class OrderEditModel : EditModelBase
     //   Extra children          : protected override void RegisterExtraChildren();  // register via AddChild/AddChildren inside
     //   Conversion msg tweak    : partial void CustomizeParseErrorMessage(string propertyName, string inputValue, string typeName, ref string message);
     //   Required msg tweak      : partial void CustomizeRequiredErrorMessage(string propertyName, ref string message);
+    //   Duplicate msg tweak     : partial void CustomizeDuplicateErrorMessage(IReadOnlyList<string> propertyNames, ref string message);
     //   Input normalization     : protected override void CustomizeInputNormalization(string propertyName, string rawValue, ref string normalizedValue);
     //   Display name tweak      : partial void CustomizePropertyDisplayName(string propertyName, ref string displayName);  // override display names in validation messages
     //   Row editing             : partial void OnBeginEdit();  partial void OnEndEdit();  partial void OnCancelEdit();
@@ -2399,6 +2743,127 @@ public partial class OrderEditModel : EditModelBase
         ref string message
     );
 
+    /// <inheritdoc />
+    public override void RegisterDuplicateError(
+        IReadOnlyList<string> propertyNames,
+        string? message
+    )
+    {
+        var displayNames = new List<string>(propertyNames.Count);
+        var targets = new List<string>(propertyNames.Count);
+
+        foreach (var propertyName in propertyNames)
+        {
+            switch (propertyName)
+            {
+                case nameof(OrderId):
+                    displayNames.Add(GetDisplayName(nameof(OrderId), null));
+                    targets.Add(nameof(BindingOrderId));
+                    break;
+
+                case nameof(CustomerId):
+                    displayNames.Add(GetDisplayName(nameof(CustomerId), null));
+                    targets.Add(nameof(BindingCustomerId));
+                    break;
+
+                case nameof(Memo):
+                    displayNames.Add(GetDisplayName(nameof(Memo), null));
+                    targets.Add(nameof(BindingMemo));
+                    break;
+
+                case nameof(Amount):
+                    displayNames.Add(GetDisplayName(nameof(Amount), null));
+                    targets.Add(nameof(BindingAmount));
+                    break;
+
+                default:
+                    // A name that does not belong to this edit model (a user-defined check may report one) has no binding property to attach the error to.
+                    displayNames.Add(propertyName);
+                    break;
+            }
+        }
+
+        var resolved = message ?? ResolveDuplicateErrorMessage(propertyNames, displayNames);
+
+        // Names that could not be mapped (and an empty list) become a model-level error.
+        if (targets.Count == 0)
+        {
+            SetDuplicateError(string.Empty, resolved);
+            return;
+        }
+
+        foreach (var target in targets)
+        {
+            SetDuplicateError(target, resolved);
+        }
+    }
+
+    /// <summary>Resolves the duplicate-value error message (EditModelMessages.DuplicateValue first, then fine-tuned by CustomizeDuplicateErrorMessage).</summary>
+    private string ResolveDuplicateErrorMessage(
+        IReadOnlyList<string> propertyNames,
+        IReadOnlyList<string> displayNames
+    )
+    {
+        var message = EditModelMessages.DuplicateValue(displayNames);
+        CustomizeDuplicateErrorMessage(propertyNames, ref message);
+        return message;
+    }
+
+    /// <summary>Partial method for fine-tuning the duplicate-value error message per constraint (replace via a partial implementation in another file).</summary>
+    partial void CustomizeDuplicateErrorMessage(
+        IReadOnlyList<string> propertyNames,
+        ref string message
+    );
+
+    /// <summary>
+    /// Checks this edit model's confirmed values against the database through the repository and registers duplicate-value errors (returns true when there are no violations).
+    /// </summary>
+    /// <remarks>
+    /// The duplicate-value errors registered by the previous call are cleared first, so re-checking never leaves stale errors. Rows that share the primary key are excluded,
+    /// so the same call is correct for both insert and update. The result is advisory only: the definitive guarantee is the database's own UNIQUE constraint (TOCTOU).
+    /// </remarks>
+    /// <param name="repository">The repository used for the check.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    public async Task<bool> ValidateUniqueAsync(
+        IOrderRepository repository,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(repository);
+        ClearDuplicateErrors();
+
+        var entity = new OrderEntity();
+
+        if (OrderId is { } resolvedOrderId)
+        {
+            entity.OrderId = resolvedOrderId;
+        }
+
+        if (CustomerId is { } resolvedCustomerId)
+        {
+            entity.CustomerId = resolvedCustomerId;
+        }
+
+        if (Memo is { } resolvedMemo)
+        {
+            entity.Memo = resolvedMemo;
+        }
+
+        if (Amount is { } resolvedAmount)
+        {
+            entity.Amount = resolvedAmount;
+        }
+
+        var violations = await repository.CheckUniquenessAsync(entity, cancellationToken);
+
+        foreach (var violation in violations)
+        {
+            RegisterDuplicateError(violation.PropertyNames, violation.Message);
+        }
+
+        return violations.Count == 0;
+    }
+
     /// <summary>Resolves the display name of a property (default = the column description, or the property name if unspecified; can be replaced through GeneratedDisplayNames.Resolve or CustomizePropertyDisplayName). Used in validation messages.</summary>
     private static string GetDisplayName(string propertyName, string? description)
     {
@@ -2491,6 +2956,7 @@ public partial class CustomerProfileEditModel : EditModelBase
     //   Extra children          : protected override void RegisterExtraChildren();  // register via AddChild/AddChildren inside
     //   Conversion msg tweak    : partial void CustomizeParseErrorMessage(string propertyName, string inputValue, string typeName, ref string message);
     //   Required msg tweak      : partial void CustomizeRequiredErrorMessage(string propertyName, ref string message);
+    //   Duplicate msg tweak     : partial void CustomizeDuplicateErrorMessage(IReadOnlyList<string> propertyNames, ref string message);
     //   Input normalization     : protected override void CustomizeInputNormalization(string propertyName, string rawValue, ref string normalizedValue);
     //   Display name tweak      : partial void CustomizePropertyDisplayName(string propertyName, ref string displayName);  // override display names in validation messages
     //   Row editing             : partial void OnBeginEdit();  partial void OnEndEdit();  partial void OnCancelEdit();
@@ -2833,6 +3299,107 @@ public partial class CustomerProfileEditModel : EditModelBase
         ref string message
     );
 
+    /// <inheritdoc />
+    public override void RegisterDuplicateError(
+        IReadOnlyList<string> propertyNames,
+        string? message
+    )
+    {
+        var displayNames = new List<string>(propertyNames.Count);
+        var targets = new List<string>(propertyNames.Count);
+
+        foreach (var propertyName in propertyNames)
+        {
+            switch (propertyName)
+            {
+                case nameof(ProfileId):
+                    displayNames.Add(GetDisplayName(nameof(ProfileId), null));
+                    targets.Add(nameof(BindingProfileId));
+                    break;
+
+                case nameof(CustomerId):
+                    displayNames.Add(GetDisplayName(nameof(CustomerId), null));
+                    targets.Add(nameof(BindingCustomerId));
+                    break;
+
+                case nameof(Bio):
+                    displayNames.Add(GetDisplayName(nameof(Bio), null));
+                    targets.Add(nameof(BindingBio));
+                    break;
+
+                default:
+                    // A name that does not belong to this edit model (a user-defined check may report one) has no binding property to attach the error to.
+                    displayNames.Add(propertyName);
+                    break;
+            }
+        }
+
+        var resolved = message ?? ResolveDuplicateErrorMessage(propertyNames, displayNames);
+
+        // Names that could not be mapped (and an empty list) become a model-level error.
+        if (targets.Count == 0)
+        {
+            SetDuplicateError(string.Empty, resolved);
+            return;
+        }
+
+        foreach (var target in targets)
+        {
+            SetDuplicateError(target, resolved);
+        }
+    }
+
+    /// <summary>Resolves the duplicate-value error message (EditModelMessages.DuplicateValue first, then fine-tuned by CustomizeDuplicateErrorMessage).</summary>
+    private string ResolveDuplicateErrorMessage(
+        IReadOnlyList<string> propertyNames,
+        IReadOnlyList<string> displayNames
+    )
+    {
+        var message = EditModelMessages.DuplicateValue(displayNames);
+        CustomizeDuplicateErrorMessage(propertyNames, ref message);
+        return message;
+    }
+
+    /// <summary>Partial method for fine-tuning the duplicate-value error message per constraint (replace via a partial implementation in another file).</summary>
+    partial void CustomizeDuplicateErrorMessage(
+        IReadOnlyList<string> propertyNames,
+        ref string message
+    );
+
+    /// <summary>
+    /// Checks this edit model's confirmed values against the database through the repository and registers duplicate-value errors (returns true when there are no violations).
+    /// </summary>
+    /// <remarks>
+    /// The duplicate-value errors registered by the previous call are cleared first, so re-checking never leaves stale errors. Rows that share the primary key are excluded,
+    /// so the same call is correct for both insert and update. The result is advisory only: the definitive guarantee is the database's own UNIQUE constraint (TOCTOU).
+    /// </remarks>
+    /// <param name="repository">The repository used for the check.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    public async Task<bool> ValidateUniqueAsync(
+        ICustomerProfileRepository repository,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(repository);
+        ClearDuplicateErrors();
+
+        var entity = new CustomerProfileEntity();
+
+        if (ProfileId is { } resolvedProfileId)
+        {
+            entity.ProfileId = resolvedProfileId;
+        }
+
+        var violations = await repository.CheckUniquenessAsync(entity, cancellationToken);
+
+        foreach (var violation in violations)
+        {
+            RegisterDuplicateError(violation.PropertyNames, violation.Message);
+        }
+
+        return violations.Count == 0;
+    }
+
     /// <summary>Resolves the display name of a property (default = the column description, or the property name if unspecified; can be replaced through GeneratedDisplayNames.Resolve or CustomizePropertyDisplayName). Used in validation messages.</summary>
     private static string GetDisplayName(string propertyName, string? description)
     {
@@ -3131,6 +3698,25 @@ public sealed partial class CustomerProfileMapper
     /// <summary>Called after the default load into the CustomerProfileEditModel (load additional properties via a partial implementation).</summary>
     partial void OnEditModelLoaded(CustomerProfileEntity entity, CustomerProfileEditModel editModel);
 }
+
+/// <summary>A single UNIQUE constraint violation reported by a uniqueness pre-check.</summary>
+/// <param name="ConstraintName">Name of the violated constraint (the synthesized name when the diagram does not set one; a caller-defined name for user-defined checks).</param>
+/// <param name="PropertyNames">Entity property names that make up the constraint, in declaration order (empty for a check that is not tied to specific properties).</param>
+/// <param name="Message">Message that replaces the default one built by the caller (null to use the default).</param>
+public sealed record UniquenessViolation(
+    string ConstraintName,
+    IReadOnlyList<string> PropertyNames,
+    string? Message = null
+);
+
+/// <summary>A user-defined uniqueness check that participates in <c>CheckUniquenessAsync</c> (returns null when the entity is unique).</summary>
+/// <typeparam name="TEntity">The entity type being checked.</typeparam>
+/// <param name="entity">The entity to check.</param>
+/// <param name="cancellationToken">The cancellation token.</param>
+public delegate Task<UniquenessViolation?> UniquenessCheck<TEntity>(
+    TEntity entity,
+    CancellationToken cancellationToken
+);
 
 /// <summary>Common repository interface limited to operations that can be provided across a network boundary (the remote surface).</summary>
 /// <remarks>
@@ -4640,7 +5226,21 @@ internal static class EntityGraphSaver
 }
 
 /// <summary>Repository interface for CustomerEntity.</summary>
-public partial interface ICustomerRepository : IRepository<CustomerEntity, int> { }
+public partial interface ICustomerRepository : IRepository<CustomerEntity, int>
+{
+    /// <summary>Checks the UNIQUE constraints of customers against the database and returns the violations (an empty list when there are none).</summary>
+    /// <remarks>
+    /// Rows that share the entity's primary key are excluded, so the same call is correct for both insert and update. Constraint member values that contain
+    /// a null are skipped (NULL collision semantics differ per dialect). The result is advisory only: the definitive guarantee is the database's own UNIQUE
+    /// constraint, and a concurrent insert between this check and the save can still make the save fail (TOCTOU).
+    /// </remarks>
+    /// <param name="entity">The entity whose constraint member values are checked.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
+        CustomerEntity entity,
+        CancellationToken cancellationToken = default
+    );
+}
 
 /// <summary>Repository interface for OrderEntity.</summary>
 public partial interface IOrderRepository : IRepository<OrderEntity, int>
@@ -4656,6 +5256,19 @@ public partial interface IOrderRepository : IRepository<OrderEntity, int>
 
     /// <summary>顧客IDに紐づく注文を射影（顧客ID・金額）で古い順に取得する</summary>
     Task<IReadOnlyList<OrderSummaryRow>> GetSummariesAsync(int customerId, CancellationToken cancellationToken = default);
+
+    /// <summary>Checks the UNIQUE constraints of orders against the database and returns the violations (an empty list when there are none).</summary>
+    /// <remarks>
+    /// Rows that share the entity's primary key are excluded, so the same call is correct for both insert and update. Constraint member values that contain
+    /// a null are skipped (NULL collision semantics differ per dialect). The result is advisory only: the definitive guarantee is the database's own UNIQUE
+    /// constraint, and a concurrent insert between this check and the save can still make the save fail (TOCTOU).
+    /// </remarks>
+    /// <param name="entity">The entity whose constraint member values are checked.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
+        OrderEntity entity,
+        CancellationToken cancellationToken = default
+    );
 }
 
 /// <summary>Projection DTO for the named query GetSummaries (orders).</summary>
@@ -4669,7 +5282,21 @@ public sealed partial class OrderSummaryRow
 }
 
 /// <summary>Repository interface for CustomerProfileEntity.</summary>
-public partial interface ICustomerProfileRepository : IRepository<CustomerProfileEntity, int> { }
+public partial interface ICustomerProfileRepository : IRepository<CustomerProfileEntity, int>
+{
+    /// <summary>Checks the UNIQUE constraints of customer_profiles against the database and returns the violations (an empty list when there are none).</summary>
+    /// <remarks>
+    /// Rows that share the entity's primary key are excluded, so the same call is correct for both insert and update. Constraint member values that contain
+    /// a null are skipped (NULL collision semantics differ per dialect). The result is advisory only: the definitive guarantee is the database's own UNIQUE
+    /// constraint, and a concurrent insert between this check and the save can still make the save fail (TOCTOU).
+    /// </remarks>
+    /// <param name="entity">The entity whose constraint member values are checked.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
+        CustomerProfileEntity entity,
+        CancellationToken cancellationToken = default
+    );
+}
 
 /// <summary>
 /// In-memory data store that holds entities in memory without a database (shared as a DI singleton).
@@ -5877,7 +6504,39 @@ internal sealed class InMemorySaveHookContext(InMemoryDataStore store, Type enti
 public sealed partial class InMemoryCustomerRepository(
     InMemoryDataStore store,
     ISaveHookRegistry? saveHooks = null
-) : InMemoryRepository<CustomerEntity, int>(store, saveHooks), ICustomerRepository { }
+) : InMemoryRepository<CustomerEntity, int>(store, saveHooks), ICustomerRepository
+{
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
+        CustomerEntity entity,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+        var violations = new List<UniquenessViolation>();
+
+        List<UniquenessCheck<CustomerEntity>>? customChecks = null;
+        CollectCustomUniquenessChecks(ref customChecks);
+
+        if (customChecks is not null)
+        {
+            foreach (var customCheck in customChecks)
+            {
+                if (await customCheck(entity, cancellationToken) is { } violation)
+                {
+                    violations.Add(violation);
+                }
+            }
+        }
+
+        return violations;
+    }
+
+    /// <summary>Extension point for adding user-defined uniqueness checks (add delegates to the list in a partial implementation; while unimplemented the call is erased at no cost).</summary>
+    partial void CollectCustomUniquenessChecks(
+        ref List<UniquenessCheck<CustomerEntity>>? checks
+    );
+}
 
 /// <summary>In-memory implementation of the repository for OrderEntity.</summary>
 public sealed partial class InMemoryOrderRepository(
@@ -5900,13 +6559,119 @@ public sealed partial class InMemoryOrderRepository(
     /// <summary>顧客IDに紐づく注文を射影（顧客ID・金額）で古い順に取得する</summary>
     public Task<IReadOnlyList<OrderSummaryRow>> GetSummariesAsync(int customerId, CancellationToken cancellationToken = default) =>
         Query().Where(e => e.CustomerId == customerId).OrderBy(e => e.OrderId).ToProjectionListAsync(e => new OrderSummaryRow { CustomerId = e.CustomerId, Amount = e.Amount }, cancellationToken);
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
+        OrderEntity entity,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+        var violations = new List<UniquenessViolation>();
+
+        // UQ_orders_memo: Memo
+        if (entity.Memo is not null)
+        {
+            var duplicated1 = await Query()
+                .Where(candidate => candidate.Memo == entity.Memo)
+                .Where(candidate => candidate.OrderId != entity.OrderId)
+                .AnyAsync(cancellationToken);
+
+            if (duplicated1)
+            {
+                violations.Add(
+                    new UniquenessViolation(
+                        "UQ_orders_memo",
+                        new[]
+                        {
+                            nameof(OrderEntity.Memo),
+                        }
+                    )
+                );
+            }
+        }
+
+        // UQ_orders_customer_id_amount: CustomerId, Amount
+        var duplicated2 = await Query()
+            .Where(candidate => candidate.CustomerId == entity.CustomerId)
+            .Where(candidate => candidate.Amount == entity.Amount)
+            .Where(candidate => candidate.OrderId != entity.OrderId)
+            .AnyAsync(cancellationToken);
+
+        if (duplicated2)
+        {
+            violations.Add(
+                new UniquenessViolation(
+                    "UQ_orders_customer_id_amount",
+                    new[]
+                    {
+                        nameof(OrderEntity.CustomerId),
+                        nameof(OrderEntity.Amount),
+                    }
+                )
+            );
+        }
+
+        List<UniquenessCheck<OrderEntity>>? customChecks = null;
+        CollectCustomUniquenessChecks(ref customChecks);
+
+        if (customChecks is not null)
+        {
+            foreach (var customCheck in customChecks)
+            {
+                if (await customCheck(entity, cancellationToken) is { } violation)
+                {
+                    violations.Add(violation);
+                }
+            }
+        }
+
+        return violations;
+    }
+
+    /// <summary>Extension point for adding user-defined uniqueness checks (add delegates to the list in a partial implementation; while unimplemented the call is erased at no cost).</summary>
+    partial void CollectCustomUniquenessChecks(
+        ref List<UniquenessCheck<OrderEntity>>? checks
+    );
 }
 
 /// <summary>In-memory implementation of the repository for CustomerProfileEntity.</summary>
 public sealed partial class InMemoryCustomerProfileRepository(
     InMemoryDataStore store,
     ISaveHookRegistry? saveHooks = null
-) : InMemoryRepository<CustomerProfileEntity, int>(store, saveHooks), ICustomerProfileRepository { }
+) : InMemoryRepository<CustomerProfileEntity, int>(store, saveHooks), ICustomerProfileRepository
+{
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
+        CustomerProfileEntity entity,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+        var violations = new List<UniquenessViolation>();
+
+        List<UniquenessCheck<CustomerProfileEntity>>? customChecks = null;
+        CollectCustomUniquenessChecks(ref customChecks);
+
+        if (customChecks is not null)
+        {
+            foreach (var customCheck in customChecks)
+            {
+                if (await customCheck(entity, cancellationToken) is { } violation)
+                {
+                    violations.Add(violation);
+                }
+            }
+        }
+
+        return violations;
+    }
+
+    /// <summary>Extension point for adding user-defined uniqueness checks (add delegates to the list in a partial implementation; while unimplemented the call is erased at no cost).</summary>
+    partial void CollectCustomUniquenessChecks(
+        ref List<UniquenessCheck<CustomerProfileEntity>>? checks
+    );
+}
 
 /// <summary>Seeder that loads deterministic sample data into the in-memory store (3 rows per entity, in FK dependency order).</summary>
 /// <remarks>

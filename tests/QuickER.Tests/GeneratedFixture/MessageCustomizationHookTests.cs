@@ -217,6 +217,89 @@ public class MessageCustomizationHookTests
             .Be("'abc' cannot be converted to int.");
     }
 
+    /// <summary>EditModelMessages.DuplicateValue の一括差し替えが重複エラーへ反映される（表示名列挙を受け取る）</summary>
+    [Fact(DisplayName = "EditModelMessages.DuplicateValue の差し替えが重複メッセージへ反映される")]
+    public void DuplicateValueMessage_Replacement_IsReflected()
+    {
+        var original = EditModelMessages.DuplicateValue;
+        EditModelMessages.DuplicateValue = static displayNames =>
+            $"{string.Join("・", displayNames)} が重複しています";
+
+        try
+        {
+            // 複合制約（CustomerId + Amount）は個別フックの対象外なので、一括差し替えの文言がそのまま出る
+            var collection = new EditModelCollection<OrderEditModel>
+            {
+                NewOrderEditModel(10, 1, 100m, "apple pie"),
+                NewOrderEditModel(11, 1, 100m, "banana"),
+            };
+
+            collection.Validate().Should().BeFalse();
+
+            GetErrors(collection[0], nameof(OrderEditModel.BindingAmount))
+                .Should()
+                .ContainSingle()
+                .Which.Should()
+                .Be("CustomerId・Amount が重複しています");
+        }
+        finally
+        {
+            EditModelMessages.DuplicateValue = original;
+        }
+    }
+
+    /// <summary>CustomizeDuplicateErrorMessage の partial 実装が構成列で対象制約だけを差し替える</summary>
+    [Fact(
+        DisplayName = "CustomizeDuplicateErrorMessage は対象制約のみ差し替え・他制約は既定文言のまま"
+    )]
+    public void CustomizeDuplicateErrorMessage_Hook_RewritesOnlyTargetConstraint()
+    {
+        // 単一列制約（Memo）の重複＝partial 実装（本ファイル末尾）が固定文言へ差し替える
+        var memoDuplicates = new EditModelCollection<OrderEditModel>
+        {
+            NewOrderEditModel(10, 1, 100m, "apple pie"),
+            NewOrderEditModel(11, 2, 50m, "apple pie"),
+        };
+
+        memoDuplicates.Validate().Should().BeFalse();
+
+        GetErrors(memoDuplicates[0], nameof(OrderEditModel.BindingMemo))
+            .Should()
+            .ContainSingle()
+            .Which.Should()
+            .Be(MessageCustomizationHookConstants.DuplicateMemoMessage);
+
+        // 対象外の複合制約は既定文言のまま
+        var compositeDuplicates = new EditModelCollection<OrderEditModel>
+        {
+            NewOrderEditModel(10, 1, 100m, "apple pie"),
+            NewOrderEditModel(11, 1, 100m, "banana"),
+        };
+
+        compositeDuplicates.Validate().Should().BeFalse();
+
+        GetErrors(compositeDuplicates[0], nameof(OrderEditModel.BindingAmount))
+            .Should()
+            .ContainSingle()
+            .Which.Should()
+            .Be("'CustomerId, Amount' is already used.");
+    }
+
+    /// <summary>重複検証用に入力済みの注文 EditModel を組み立てる</summary>
+    private static OrderEditModel NewOrderEditModel(
+        int orderId,
+        int customerId,
+        decimal amount,
+        string memo
+    ) =>
+        new()
+        {
+            BindingOrderId = orderId.ToString(),
+            BindingCustomerId = customerId.ToString(),
+            BindingAmount = amount.ToString(),
+            BindingMemo = memo,
+        };
+
     /// <summary>CustomizeValueRequiredErrorMessage の partial 実装が null 入力エラーを差し替える</summary>
     [Fact(DisplayName = "CustomizeValueRequiredErrorMessage が VO の null エラーを差し替える")]
     public void CustomizeValueRequiredErrorMessage_Hook_RewritesNullError()
@@ -248,6 +331,9 @@ internal static class MessageCustomizationHookConstants
 
     /// <summary>MemoValue の null エラーへ差し替える文言</summary>
     public const string MemoRequiredMessage = "メモには null を渡せません";
+
+    /// <summary>OrderEditModel.Memo の重複エラーへ差し替える文言</summary>
+    public const string DuplicateMemoMessage = "そのメモは既に使われています";
 }
 
 /// <summary>固定フィクスチャの CustomerEditModel へ必須メッセージの個別フックを注入する partial 実装。</summary>
@@ -278,6 +364,18 @@ public partial class OrderEditModel
         if (propertyName == nameof(Amount))
         {
             message += MessageCustomizationHookConstants.ParseSuffix;
+        }
+    }
+
+    /// <summary>単一列制約（Memo のみ）の重複エラーだけ固定文言へ差し替える（構成列分岐の検証用）</summary>
+    partial void CustomizeDuplicateErrorMessage(
+        System.Collections.Generic.IReadOnlyList<string> propertyNames,
+        ref string message
+    )
+    {
+        if (propertyNames.Count == 1 && propertyNames[0] == nameof(Memo))
+        {
+            message = MessageCustomizationHookConstants.DuplicateMemoMessage;
         }
     }
 }

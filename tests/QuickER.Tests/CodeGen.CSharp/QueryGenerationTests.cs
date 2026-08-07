@@ -740,18 +740,22 @@ public class QueryGenerationTests
         result.Diagnostics.Should().HaveCountGreaterThanOrEqualTo(3);
     }
 
-    /// <summary>クエリなしの図では契約が従来どおり一行 { } のままであることを検証する（バイト不変の要）</summary>
-    [Fact(DisplayName = "クエリなしの図は契約が一行 { } のまま")]
-    public void Generate_NoQueries_KeepsOneLinerInterface()
+    /// <summary>
+    /// クエリなしの図でも契約にクエリメソッドが現れないことを検証する
+    /// （契約本体は重複事前チェック <c>CheckUniquenessAsync</c> のみ＝常時出力される固定メンバー）。
+    /// </summary>
+    [Fact(DisplayName = "クエリなしの図の契約は重複事前チェックのみを持つ")]
+    public void Generate_NoQueries_KeepsContractFreeOfQueryMembers()
     {
         var result = Generate(CreateDiagram(), CreateOptions());
 
         result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
-        AllContent(result)
+
+        var content = AllContent(result);
+        content
             .Should()
-            .Contain(
-                "public partial interface IOrderRepository : IRepository<OrderEntity, int> { }"
-            );
+            .Contain("public partial interface IOrderRepository : IRepository<OrderEntity, int>");
+        content.Should().Contain("Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(");
     }
 
     /// <summary>クラス本体（宣言行から対応する閉じブレースまで）を素朴に取り出す</summary>

@@ -291,7 +291,24 @@ public static partial class GeneratedRemoteEndpoints
             group,
             "Customer"
         );
+
+        group.MapPost(
+            "Customer/CheckUniqueness",
+            (HttpContext context) =>
+                ExecuteAsync(
+                    context,
+                    async () =>
+                    {
+                        var request = await ReadRequestAsync<CustomerCheckUniquenessRequest>(context);
+                        var repository = context.RequestServices.GetRequiredService<ICustomerRemoteRepository>();
+                        return (object?)await repository.CheckUniquenessAsync(request.Entity, context.RequestAborted);
+                    }
+                )
+        );
     }
+
+    /// <summary>Request body for CheckUniqueness (Customer).</summary>
+    private sealed record CustomerCheckUniquenessRequest(CustomerEntity Entity);
 
     /// <summary>Maps the remote-surface endpoints for OrderEntity.</summary>
     private static void MapOrderEndpoints(RouteGroupBuilder group)
@@ -480,6 +497,20 @@ public static partial class GeneratedRemoteEndpoints
                     }
                 )
         );
+
+        group.MapPost(
+            "Order/CheckUniqueness",
+            (HttpContext context) =>
+                ExecuteAsync(
+                    context,
+                    async () =>
+                    {
+                        var request = await ReadRequestAsync<OrderCheckUniquenessRequest>(context);
+                        var repository = context.RequestServices.GetRequiredService<IOrderRemoteRepository>();
+                        return (object?)await repository.CheckUniquenessAsync(request.Entity, context.RequestAborted);
+                    }
+                )
+        );
     }
 
     /// <summary>Request body for GetByCustomer (Order).</summary>
@@ -514,4 +545,7 @@ public static partial class GeneratedRemoteEndpoints
 
     /// <summary>Request body for SpecialLookup (Order).</summary>
     private sealed record OrderSpecialLookupRequest(int CustomerId);
+
+    /// <summary>Request body for CheckUniqueness (Order).</summary>
+    private sealed record OrderCheckUniquenessRequest(OrderEntity Entity);
 }

@@ -63,6 +63,12 @@ public static class GeneratedFixtureDefinition
         "33333333-0000-0000-0000-000000000003"
     );
     private static readonly Guid ProfileBioColId = new("33333333-0000-0000-0000-000000000004");
+    private static readonly Guid ProfileCustomerUniqueId = new(
+        "33333333-0000-0000-0000-000000000005"
+    );
+    private static readonly Guid ProfileCustomerBioUniqueId = new(
+        "33333333-0000-0000-0000-000000000006"
+    );
 
     private static readonly Guid RelCustomerOrders = new("44444444-0000-0000-0000-000000000001");
     private static readonly Guid RelCustomerProfile = new("44444444-0000-0000-0000-000000000002");
@@ -160,6 +166,23 @@ public static class GeneratedFixtureDefinition
         {
             Id = ProfileId,
             TableName = "customer_profiles",
+            // UNIQUE 制約は重複事前チェック（CheckUniquenessAsync / ValidateUniqueAsync / コレクション内検証）の
+            // 生成カバレッジ用。1対1 の子（customer_id が実質一意）へ置くことで、既存の実 DB テストのデータでは
+            // 決して違反せず、生成物にだけ単一列制約（実名）と複合制約（名前なし＝合成名）の双方が現れる
+            UniqueConstraints =
+            {
+                new UniqueConstraint
+                {
+                    Id = ProfileCustomerUniqueId,
+                    Name = "UQ_customer_profiles_customer_id",
+                    ColumnIds = { ProfileCustomerFkColId },
+                },
+                new UniqueConstraint
+                {
+                    Id = ProfileCustomerBioUniqueId,
+                    ColumnIds = { ProfileCustomerFkColId, ProfileBioColId },
+                },
+            },
             Columns =
             {
                 new Column
