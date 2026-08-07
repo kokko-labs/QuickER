@@ -56,6 +56,9 @@
 | `DeleteAsync(id, ct)` | 主キー一致の 1 件を削除します（成否を返します）。 |
 | `BulkInsertAsync(entities, ct)` | 複数件をまとめて追加します（追加件数を返します）。 |
 | `Query()` | 絞り込み・並べ替え・件数制限などのクエリを組み立てます。 |
+| `CheckUniquenessAsync(entity, ct)` | このテーブルの UNIQUE 制約を DB と照合して違反を返します（同一主キーの行は除外するため、挿入前・更新前のどちらでも同じ呼び方で使えます）。 |
+
+重複チェックは助言で、最終的な保証は DB 自身の UNIQUE 制約です。EditModel を生成する構成では、`EditModelCollection<T>.Validate()` が要素どうしの重複も検出し、`{EditModel}.ValidateUniqueAsync(repository)` が DB 側の違反をバインディングプロパティへ登録します。
 
 `Query()` の対応範囲・詳細は [docs/code-generation.ja.md](https://github.com/kokko-labs/QuickER/blob/main/docs/code-generation.ja.md) を参照してください。
 

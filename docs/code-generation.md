@@ -270,6 +270,90 @@ var total = await orders.ExecuteScalarSqlAsync<decimal>(
 var affected = await customers.ExecuteSqlAsync("UPDATE customers SET balance = 0", null);
 ```
 
+### Uniqueness pre-check (CheckUniquenessAsync)
+
+Every generated repository contract carries a bulk check built from the diagram's UNIQUE constraints (it is always generated, whether or not the table has any constraint):
+
+```csharp
+Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
+    TEntity entity, CancellationToken cancellationToken = default);
+```
+
+For each UNIQUE constraint of the table it asks "does a row with the same value tuple already exist, **excluding rows that share this entity's primary key**?". Because the same-key row is excluded, the same call is correct both before an insert (there is no such row, so the exclusion is a no-op) and before an update. Constraint member values that contain a `null` are skipped, since NULL collision semantics differ per dialect.
+
+> The result is **advisory**. The definitive guarantee is the database's own UNIQUE constraint: a concurrent insert between the check and the save can still make the save fail (TOCTOU). Use the check to give a friendly message, and keep handling the save exception.
+
+The implementation is a single expression-tree query shared by every backend (QuickER Repository for each dialect, EF Core, and in-memory), so all of them behave the same.
+
+```csharp
+var violations = await orders.CheckUniquenessAsync(order);
+
+foreach (var violation in violations)
+{
+    // ConstraintName = the DDL name (a synthesized UQ_{table}_{columns} name when the diagram sets none)
+    // PropertyNames  = the entity property names that make up the constraint (declaration order)
+    Console.WriteLine($"{violation.ConstraintName}: {string.Join(", ", violation.PropertyNames)}");
+}
+```
+
+#### User-defined checks
+
+Rules the diagram cannot express (a conditional uniqueness, a cross-table rule) are added through an optional partial method generated on every repository implementation. While it is unimplemented the call is erased at no cost.
+
+```csharp
+public sealed partial class OrderRepository
+{
+    partial void CollectCustomUniquenessChecks(ref List<UniquenessCheck<OrderEntity>>? checks) =>
+        (checks ??= []).Add(static async (entity, cancellationToken) =>
+            await SomeLookupAsync(entity, cancellationToken)
+                ? new UniquenessViolation("UQ_custom_rule", [nameof(OrderEntity.Code)], "This code is reserved.")
+                : null);
+}
+```
+
+The generated checks run first, then the collected delegates in registration order; every non-null result joins the returned list. With remote services the whole check (hooks included) runs in the server-side repository — the HTTP client only forwards the call.
+
+#### Edit models: duplicates inside a collection
+
+Every UNIQUE constraint is also stamped on the generated edit model class as `[UniqueConstraint("PropA", "PropB", Name = "UQ_...")]`. `EditModelCollection<T>.Validate()` reads those attributes and flags values duplicated **among the elements themselves**, registering an error on the binding property of every member of each duplicated group. Value tuples containing a `null` are skipped and deletion targets (`RowState.Removed`) are excluded, matching the database check. For a root-level list that is not an `EditModelCollection<T>`, call the same helper directly:
+
+```csharp
+var valid = EditModelUniquenessValidator.Validate(models);
+```
+
+#### Edit models: checking against the database
+
+When edit models and a repository contract are both generated, each edit model also gets a convenience wrapper:
+
+```csharp
+// The repository parameter is I{Entity}RemoteRepository when remote contracts are generated, I{Entity}Repository otherwise
+if (!await editModel.ValidateUniqueAsync(repository))
+{
+    // Errors are already registered on the binding properties (INotifyDataErrorInfo shows them in the UI)
+}
+```
+
+It builds an entity from the edit model's confirmed values, calls `CheckUniquenessAsync`, and maps each violation's `PropertyNames` back to the binding properties. A violation with no property names (or with names that do not belong to the edit model) becomes a model-level error registered under the empty property name, which `GetErrors(null)` returns. The duplicate-value errors registered by the previous call are cleared first, so re-checking never leaves stale errors.
+
+The message comes from `EditModelMessages.DuplicateValue` (a `static Func` taking the display names of the constraint's member properties), refined per class by the optional `partial void CustomizeDuplicateErrorMessage(IReadOnlyList<string> propertyNames, ref string message)`. A `UniquenessViolation.Message` supplied by a user-defined check wins over both.
+
+#### Related pre-checks with the existing API
+
+Uniqueness is the only pre-check with generated support; the neighbouring validations are one-liners over the existing API.
+
+```csharp
+// Primary key already taken (before an insert)
+var taken = await orders.GetByIdAsync(order.OrderId) is not null;
+
+// Foreign key target exists (before saving a child)
+var parentExists = await customers.GetByIdAsync(order.CustomerId) is not null;
+
+// Still referenced by children (before a delete)
+var referenced = await orders.Query().Where(o => o.CustomerId == customerId).AnyAsync();
+```
+
+Like the uniqueness check these are advisory: the database's own constraints remain the final authority.
+
 ### Store-generated columns (rowversion / timestamp)
 
 A column whose value the DB generates (SQL Server's `rowversion` / `timestamp`, etc.) gets the marker attribute `[StoreGeneratedColumn]` on its generated Entity property and is **automatically excluded from INSERT / BulkInsert / UPDATE** in the QuickER Repository (the attribute is applied to any column the type mapper recognizes as a row-version column — SQL Server's `rowversion` / `timestamp` — regardless of the generation options).

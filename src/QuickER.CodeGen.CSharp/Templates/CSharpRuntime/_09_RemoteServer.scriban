@@ -485,6 +485,10 @@ public static partial class GeneratedRemoteEndpoints
 
 {{ repository.query_remote_server_block }}
 {{~ end ~}}
+{{~ if repository.uniqueness_remote_server_block != "" ~}}
+
+{{ repository.uniqueness_remote_server_block }}
+{{~ end ~}}
 {{~ if repository.binary_stream_remote_server_block != "" ~}}
 
 {{ repository.binary_stream_remote_server_block }}
@@ -493,6 +497,10 @@ public static partial class GeneratedRemoteEndpoints
 {{~ if repository.query_remote_server_records_block != "" ~}}
 
 {{ repository.query_remote_server_records_block }}
+{{~ end ~}}
+{{~ if repository.uniqueness_remote_server_records_block != "" ~}}
+
+{{ repository.uniqueness_remote_server_records_block }}
 {{~ end ~}}
 {{~ end ~}}
 }

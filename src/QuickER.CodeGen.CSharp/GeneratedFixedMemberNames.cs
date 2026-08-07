@@ -33,6 +33,7 @@ public static class GeneratedFixedMemberNames
     /// L1236 <c>ResolveParseErrorMessage</c>・L1249 <c>CustomizeParseErrorMessage</c>・
     /// L1279 <c>_rowStateSnapshot</c>・L1282 <c>BeginEditCore</c>・L1290 <c>OnBeginEdit</c>・
     /// L1293 <c>EndEditCore</c>・L1296 <c>OnEndEdit</c>・L1299 <c>CancelEditCore</c>・L1311 <c>OnCancelEdit</c>・
+    /// <c>RegisterDuplicateError</c>・<c>ResolveDuplicateErrorMessage</c>・<c>CustomizeDuplicateErrorMessage</c>（重複値エラー）・
     /// L1314 <c>GetNext</c>・L1317 <c>GetPrevious</c>・L1320 <c>ParentCollection</c>・L1330 <c>MoveCore</c>。
     /// </remarks>
     public static IReadOnlySet<string> EditModelAlways { get; } =
@@ -44,6 +45,9 @@ public static class GeneratedFixedMemberNames
             "CustomizeRequiredErrorMessage",
             "ResolveParseErrorMessage",
             "CustomizeParseErrorMessage",
+            "RegisterDuplicateError",
+            "ResolveDuplicateErrorMessage",
+            "CustomizeDuplicateErrorMessage",
             "_rowStateSnapshot",
             "BeginEditCore",
             "OnBeginEdit",
@@ -68,6 +72,17 @@ public static class GeneratedFixedMemberNames
     /// </summary>
     public static IReadOnlySet<string> EditModelWithTypedParentModel { get; } =
         Create("ParentModel");
+
+    /// <summary>
+    /// Repository 契約面（<c>I{Entity}Repository</c>）が生成される EditModel だけが宣言する固定メンバー名
+    /// （DB 照合糖衣 <c>ValidateUniqueAsync</c>）。
+    /// </summary>
+    /// <remarks>
+    /// 発行条件は「Repository 契約の生成が有効」かつ「単一主キー」（＝そのエンティティの <c>I{Entity}Repository</c> が生成される）。
+    /// 契約面が無い構成では呼び出し先が存在しないため、メソッドごと出さない。
+    /// </remarks>
+    public static IReadOnlySet<string> EditModelWithRepositoryFace { get; } =
+        Create("ValidateUniqueAsync");
 
     /// <summary>
     /// EditModel の表示名解決ヘルパ名（L1256-L1265）。テンプレートは発行するが、シンボル表検証の対象には**しない**。

@@ -148,6 +148,29 @@ public sealed class StoreGeneratedColumnAttribute : Attribute
 {
 }
 {{ end }}
+{{~ if (edit_model_classes.size > 0 || runtime_package_export) && render_runtime && emit_shared_infra ~}}
+/// <summary>
+/// Attribute that declares one UNIQUE constraint of the underlying table on an edit model class.
+/// The arguments are the confirmed-value property names that make up the constraint, in declaration order.
+/// </summary>
+/// <remarks>
+/// It is applied once per UNIQUE constraint of the table and is read by <see cref="EditModelUniquenessValidator"/> to detect
+/// values duplicated among the elements of a collection. Checking against rows already stored in the database is a separate
+/// concern (the repository's <c>CheckUniquenessAsync</c>).
+/// </remarks>
+[AttributeUsage(AttributeTargets.Class, AllowMultiple = true)]
+public sealed class UniqueConstraintAttribute : Attribute
+{
+    /// <summary>Gets the confirmed-value property names that make up the constraint (declaration order).</summary>
+    public string[] PropertyNames { get; }
+
+    /// <summary>Gets or sets the constraint name (the synthesized name when the diagram does not set one).</summary>
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>Initializes a new instance with the properties that make up the constraint.</summary>
+    public UniqueConstraintAttribute(params string[] propertyNames) => PropertyNames = propertyNames;
+}
+{{ end }}
 {{~ if (emit_unbounded_binary_attr || runtime_package_export) && render_runtime && emit_shared_infra ~}}
 /// <summary>
 /// Marker attribute that excludes an unbounded binary column (such as <c>varbinary(max)</c> or a BLOB with no declared length) from SELECT / UPDATE.

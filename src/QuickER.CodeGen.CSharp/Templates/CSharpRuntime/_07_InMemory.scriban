@@ -1399,7 +1399,8 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
 }
 
 {{~ for repository in repository_classes ~}}
-{{~ inmemory_impl_members = join_members repository.query_shared_impl_block repository.binary_stream_thin_impl_block ~}}
+{{~ inmemory_impl_members = join_members repository.query_shared_impl_block repository.uniqueness_shared_impl_block ~}}
+{{~ inmemory_impl_members = join_members inmemory_impl_members repository.binary_stream_thin_impl_block ~}}
 
 /// <summary>In-memory implementation of the repository for {{ repository.entity_class_name }}.</summary>
 public sealed partial class InMemory{{ repository.class_name }}(

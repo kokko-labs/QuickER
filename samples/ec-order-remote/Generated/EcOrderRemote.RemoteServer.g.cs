@@ -293,7 +293,24 @@ public static partial class GeneratedRemoteEndpoints
             group,
             "Customer"
         );
+
+        group.MapPost(
+            "Customer/CheckUniqueness",
+            (HttpContext context) =>
+                ExecuteAsync(
+                    context,
+                    async () =>
+                    {
+                        var request = await ReadRequestAsync<CustomerCheckUniquenessRequest>(context);
+                        var repository = context.RequestServices.GetRequiredService<ICustomerRemoteRepository>();
+                        return (object?)await repository.CheckUniquenessAsync(request.Entity, context.RequestAborted);
+                    }
+                )
+        );
     }
+
+    /// <summary>Request body for CheckUniqueness (Customer).</summary>
+    private sealed record CustomerCheckUniquenessRequest(CustomerEntity Entity);
 
     /// <summary>Maps the remote-surface endpoints for ProductEntity.</summary>
     private static void MapProductEndpoints(RouteGroupBuilder group)
@@ -302,7 +319,24 @@ public static partial class GeneratedRemoteEndpoints
             group,
             "Product"
         );
+
+        group.MapPost(
+            "Product/CheckUniqueness",
+            (HttpContext context) =>
+                ExecuteAsync(
+                    context,
+                    async () =>
+                    {
+                        var request = await ReadRequestAsync<ProductCheckUniquenessRequest>(context);
+                        var repository = context.RequestServices.GetRequiredService<IProductRemoteRepository>();
+                        return (object?)await repository.CheckUniquenessAsync(request.Entity, context.RequestAborted);
+                    }
+                )
+        );
     }
+
+    /// <summary>Request body for CheckUniqueness (Product).</summary>
+    private sealed record ProductCheckUniquenessRequest(ProductEntity Entity);
 
     /// <summary>Maps the remote-surface endpoints for OrderEntity.</summary>
     private static void MapOrderEndpoints(RouteGroupBuilder group)
@@ -339,6 +373,20 @@ public static partial class GeneratedRemoteEndpoints
                     }
                 )
         );
+
+        group.MapPost(
+            "Order/CheckUniqueness",
+            (HttpContext context) =>
+                ExecuteAsync(
+                    context,
+                    async () =>
+                    {
+                        var request = await ReadRequestAsync<OrderCheckUniquenessRequest>(context);
+                        var repository = context.RequestServices.GetRequiredService<IOrderRemoteRepository>();
+                        return (object?)await repository.CheckUniquenessAsync(request.Entity, context.RequestAborted);
+                    }
+                )
+        );
     }
 
     /// <summary>Request body for GetByCustomer (Order).</summary>
@@ -347,6 +395,9 @@ public static partial class GeneratedRemoteEndpoints
     /// <summary>Request body for GetSummaries (Order).</summary>
     private sealed record OrderGetSummariesRequest(int CustomerId);
 
+    /// <summary>Request body for CheckUniqueness (Order).</summary>
+    private sealed record OrderCheckUniquenessRequest(OrderEntity Entity);
+
     /// <summary>Maps the remote-surface endpoints for OrderLineEntity.</summary>
     private static void MapOrderLineEndpoints(RouteGroupBuilder group)
     {
@@ -354,5 +405,22 @@ public static partial class GeneratedRemoteEndpoints
             group,
             "OrderLine"
         );
+
+        group.MapPost(
+            "OrderLine/CheckUniqueness",
+            (HttpContext context) =>
+                ExecuteAsync(
+                    context,
+                    async () =>
+                    {
+                        var request = await ReadRequestAsync<OrderLineCheckUniquenessRequest>(context);
+                        var repository = context.RequestServices.GetRequiredService<IOrderLineRemoteRepository>();
+                        return (object?)await repository.CheckUniquenessAsync(request.Entity, context.RequestAborted);
+                    }
+                )
+        );
     }
+
+    /// <summary>Request body for CheckUniqueness (OrderLine).</summary>
+    private sealed record OrderLineCheckUniquenessRequest(OrderLineEntity Entity);
 }

@@ -59,7 +59,12 @@ internal sealed partial class CSharpGenerationModelBuilder
             EditModelClasses = options.GenerateEditModels
                 ? diagram
                     .Entities.Select(entity =>
-                        BuildEditModelClass(entity, navigationsByEntity[entity.Id], diagnostics)
+                        BuildEditModelClass(
+                            entity,
+                            navigationsByEntity[entity.Id],
+                            options,
+                            diagnostics
+                        )
                     )
                     .ToList()
                 : [],
@@ -145,6 +150,7 @@ internal sealed partial class CSharpGenerationModelBuilder
     private CSharpEditModelClassModel BuildEditModelClass(
         Entity entity,
         IReadOnlyList<NavigationInfo> navigations,
+        CodeGenerationOptions options,
         ICollection<GenerationDiagnostic> diagnostics
     )
     {
@@ -188,6 +194,8 @@ internal sealed partial class CSharpGenerationModelBuilder
             )
             .ToList();
 
+        var uniquenessBlocks = BuildEditModelUniquenessBlocks(entity, options);
+
         return new CSharpEditModelClassModel
         {
             ClassName = className,
@@ -199,6 +207,9 @@ internal sealed partial class CSharpGenerationModelBuilder
             TypedParentModelTypeName = ResolveTypedParentModelTypeName(className, navigationModels),
             HasDisplayNameCollision = hasDisplayNameCollision,
             HasNonValueObjectProperty = properties.Any(property => !property.IsValueObject),
+            UniqueConstraintAttributesBlock = uniquenessBlocks.AttributesBlock,
+            UniquenessValidationBlock = uniquenessBlocks.ValidationBlock,
+            HasRepositoryFace = uniquenessBlocks.HasRepositoryFace,
         };
     }
 
@@ -320,7 +331,8 @@ internal sealed partial class CSharpGenerationModelBuilder
         var keyColumn = entity.Columns.Where(column => column.IsPrimaryKey).ToList();
 
         // Repository は単一主キーを前提とするため、複合・主キーなしのテーブルはスキップする
-        if (keyColumn.Count != 1)
+        // （同じ規則を EditModel 側の ValidateUniqueAsync 生成判定と共有する＝HasSinglePrimaryKey）
+        if (!HasSinglePrimaryKey(entity))
         {
             diagnostics.Add(
                 GenerationDiagnostic.Warning(
@@ -341,6 +353,12 @@ internal sealed partial class CSharpGenerationModelBuilder
             entityClassName,
             repositoryName,
             keyTypeName,
+            options
+        );
+        var uniquenessBlocks = BuildUniquenessBlocks(
+            entity,
+            entityClassName,
+            repositoryName,
             options
         );
 
@@ -366,6 +384,11 @@ internal sealed partial class CSharpGenerationModelBuilder
             BinaryStreamFileExtensionsBlock = binaryStreamBlocks.FileExtensionsBlock,
             BinaryStreamRemoteClientBlock = binaryStreamBlocks.RemoteClientBlock,
             BinaryStreamRemoteServerBlock = binaryStreamBlocks.RemoteServerBlock,
+            UniquenessContractBlock = uniquenessBlocks.ContractBlock,
+            UniquenessSharedImplBlock = uniquenessBlocks.SharedImplBlock,
+            UniquenessRemoteClientBlock = uniquenessBlocks.RemoteClientBlock,
+            UniquenessRemoteServerBlock = uniquenessBlocks.RemoteServerBlock,
+            UniquenessRemoteServerRecordsBlock = uniquenessBlocks.RemoteServerRecordsBlock,
         };
     }
 

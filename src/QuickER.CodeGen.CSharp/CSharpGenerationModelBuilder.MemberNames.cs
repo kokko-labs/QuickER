@@ -127,6 +127,7 @@ internal sealed partial class CSharpGenerationModelBuilder
     ///   <item><description>L1205-L1330 の固定メンバー 18 名 ＝ <see cref="GeneratedFixedMemberNames.EditModelAlways"/>（無条件）</description></item>
     ///   <item><description>L1267 <c>RegisterChildren</c> ＝ <see cref="GeneratedFixedMemberNames.EditModelWithCascadeNavigations"/>（カスケード子を持つときのみ）</description></item>
     ///   <item><description>L1322 <c>ParentModel</c> ＝ <see cref="GeneratedFixedMemberNames.EditModelWithTypedParentModel"/>（型付き親モデルがあるときのみ）</description></item>
+    ///   <item><description><c>ValidateUniqueAsync</c> ＝ <see cref="GeneratedFixedMemberNames.EditModelWithRepositoryFace"/>（Repository 契約面があるときのみ）</description></item>
     /// </list>
     /// <para>
     /// 値オブジェクト経路（<c>BuildValueObjectEditModelProperty</c>）も同じ派生名規則で組み立てるため、
@@ -190,6 +191,15 @@ internal sealed partial class CSharpGenerationModelBuilder
         if (editModel.TypedParentModelTypeName is not null)
         {
             foreach (var name in GeneratedFixedMemberNames.EditModelWithTypedParentModel)
+            {
+                yield return new GeneratedMemberName(name, FormatFixedMemberOrigin(name));
+            }
+        }
+
+        // Repository 契約面があるときだけ DB 照合糖衣 ValidateUniqueAsync が発行される
+        if (editModel.HasRepositoryFace)
+        {
+            foreach (var name in GeneratedFixedMemberNames.EditModelWithRepositoryFace)
             {
                 yield return new GeneratedMemberName(name, FormatFixedMemberOrigin(name));
             }

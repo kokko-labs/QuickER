@@ -1,5 +1,24 @@
 {{~ if (repository_classes.size > 0 || runtime_package_export) && (render_contract || repositories || in_memory || (ef_core && render_ef_core && runtime_package_export)) ~}}
 {{~ if render_contract && emit_shared_infra ~}}
+/// <summary>A single UNIQUE constraint violation reported by a uniqueness pre-check.</summary>
+/// <param name="ConstraintName">Name of the violated constraint (the synthesized name when the diagram does not set one; a caller-defined name for user-defined checks).</param>
+/// <param name="PropertyNames">Entity property names that make up the constraint, in declaration order (empty for a check that is not tied to specific properties).</param>
+/// <param name="Message">Message that replaces the default one built by the caller (null to use the default).</param>
+public sealed record UniquenessViolation(
+    string ConstraintName,
+    IReadOnlyList<string> PropertyNames,
+    string? Message = null
+);
+
+/// <summary>A user-defined uniqueness check that participates in <c>CheckUniquenessAsync</c> (returns null when the entity is unique).</summary>
+/// <typeparam name="TEntity">The entity type being checked.</typeparam>
+/// <param name="entity">The entity to check.</param>
+/// <param name="cancellationToken">The cancellation token.</param>
+public delegate Task<UniquenessViolation?> UniquenessCheck<TEntity>(
+    TEntity entity,
+    CancellationToken cancellationToken
+);
+
 /// <summary>Common repository interface limited to operations that can be provided across a network boundary (the remote surface).</summary>
 /// <remarks>
 /// <para>

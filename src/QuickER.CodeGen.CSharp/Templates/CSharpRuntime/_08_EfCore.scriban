@@ -1583,7 +1583,8 @@ public static class GeneratedEfCoreRepositoryServiceCollectionExtensions
     }
 }
 {{~ for repository in repository_classes ~}}
-{{~ efcore_impl_members = join_members repository.query_shared_impl_block repository.binary_stream_ef_impl_block ~}}
+{{~ efcore_impl_members = join_members repository.query_shared_impl_block repository.uniqueness_shared_impl_block ~}}
+{{~ efcore_impl_members = join_members efcore_impl_members repository.binary_stream_ef_impl_block ~}}
 
 /// <summary>EF Core implementation of the repository for {{ repository.entity_class_name }}.</summary>
 public sealed partial class EfCore{{ repository.class_name }}(

@@ -270,6 +270,90 @@ var total = await orders.ExecuteScalarSqlAsync<decimal>(
 var affected = await customers.ExecuteSqlAsync("UPDATE customers SET balance = 0", null);
 ```
 
+### 重複の事前チェック（CheckUniquenessAsync）
+
+生成される Repository 契約には、図の UNIQUE 制約から組み立てた一括チェックが常に含まれます（テーブルに制約が 1 件も無くても生成されます）:
+
+```csharp
+Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
+    TEntity entity, CancellationToken cancellationToken = default);
+```
+
+テーブルの各 UNIQUE 制約について「**このエンティティと同じ主キーの行を除外して**、同じ値の組を持つ行が既に存在するか」を照合します。同一主キーの行を除くため、挿入前（そもそも該当行が無いので除外は no-op）でも更新前でも同じ呼び方で正しく動きます。構成列の値に `null` を含む組は、NULL の衝突意味論が方言で割れるためスキップします。
+
+> 結果は**助言**です。最終的な保証は DB 自身の UNIQUE 制約で、チェックと保存の間に他プロセスが挿入すれば保存はやはり失敗します（TOCTOU）。チェックは親切なメッセージを出すために使い、保存時の例外処理は残してください。
+
+実装は全実装先（各方言の QuickER 版 Repository・EF Core・インメモリ）で同一の式木クエリ 1 本なので、どのバックエンドでも同じ挙動になります。
+
+```csharp
+var violations = await orders.CheckUniquenessAsync(order);
+
+foreach (var violation in violations)
+{
+    // ConstraintName = DDL 上の名前（図で未設定なら合成名 UQ_{テーブル}_{列連結}）
+    // PropertyNames  = 制約を構成するエンティティプロパティ名（宣言順）
+    Console.WriteLine($"{violation.ConstraintName}: {string.Join(", ", violation.PropertyNames)}");
+}
+```
+
+#### ユーザー定義チェック
+
+図では表せないルール（条件付きの一意性・テーブル横断の規則）は、各 Repository 実装に生成される省略可能な partial メソッドで足せます。未実装の間は呼び出しごと消えるためコストはゼロです。
+
+```csharp
+public sealed partial class OrderRepository
+{
+    partial void CollectCustomUniquenessChecks(ref List<UniquenessCheck<OrderEntity>>? checks) =>
+        (checks ??= []).Add(static async (entity, cancellationToken) =>
+            await SomeLookupAsync(entity, cancellationToken)
+                ? new UniquenessViolation("UQ_custom_rule", [nameof(OrderEntity.Code)], "このコードは予約済みです。")
+                : null);
+}
+```
+
+生成分のチェックが先に走り、続いて収集されたデリゲートが登録順に走ります。null 以外の結果はすべて戻り値のリストへ合流します。リモートサービス構成では、チェック全体（フック込み）がサーバー側の Repository で走ります（HTTP クライアントは呼び出しを転送するだけです）。
+
+#### EditModel: コレクション内の重複
+
+UNIQUE 制約は生成される EditModel クラスにも `[UniqueConstraint("PropA", "PropB", Name = "UQ_...")]` として刻まれます。`EditModelCollection<T>.Validate()` はこの属性を読み、**要素どうし**で重複した値を検出して、重複したグループの全要素の構成列バインディングプロパティへエラーを登録します。値の組に `null` を含む場合はスキップし、削除対象（`RowState.Removed`）は比較から外します（DB 照合と同じ規則）。`EditModelCollection<T>` ではないルートの一覧には、同じヘルパを直接呼べます:
+
+```csharp
+var valid = EditModelUniquenessValidator.Validate(models);
+```
+
+#### EditModel: DB との照合
+
+EditModel と Repository 契約の両方を生成する構成では、各 EditModel に糖衣メソッドも生成されます:
+
+```csharp
+// 引数の型はリモート契約を生成する構成なら I{Entity}RemoteRepository、そうでなければ I{Entity}Repository
+if (!await editModel.ValidateUniqueAsync(repository))
+{
+    // エラーはバインディングプロパティへ登録済み（INotifyDataErrorInfo により UI へ表示される）
+}
+```
+
+EditModel の確定値から Entity を組み立てて `CheckUniquenessAsync` を呼び、各違反の `PropertyNames` をバインディングプロパティ名へ写します。構成列を持たない違反（および EditModel に無いプロパティ名の違反）は、空のプロパティ名で登録されるモデルレベルエラーになり、`GetErrors(null)` で取得できます。呼び出しの先頭で前回の重複エラーを消すため、再検証で古いエラーが残ることはありません。
+
+メッセージは `EditModelMessages.DuplicateValue`（構成列の表示名列挙を受け取る `static Func`）が既定で、クラスごとの省略可能な `partial void CustomizeDuplicateErrorMessage(IReadOnlyList<string> propertyNames, ref string message)` で微調整できます。ユーザー定義チェックが `UniquenessViolation.Message` を返した場合は、そちらが優先されます。
+
+#### 既存 API で書ける近隣の事前チェック
+
+生成による支援があるのは重複チェックだけですが、隣接する検証は既存 API の 1 行で書けます。
+
+```csharp
+// 主キーが既に使われているか（挿入前）
+var taken = await orders.GetByIdAsync(order.OrderId) is not null;
+
+// 外部キーの参照先が存在するか（子の保存前）
+var parentExists = await customers.GetByIdAsync(order.CustomerId) is not null;
+
+// 子から参照されているか（削除前）
+var referenced = await orders.Query().Where(o => o.CustomerId == customerId).AnyAsync();
+```
+
+重複チェックと同じく、これらも助言です。最終的な権威は DB 自身の制約にあります。
+
 ### store-generated 列（rowversion / timestamp）
 
 DB が値を生成する列（SQL Server の `rowversion` / `timestamp` など）は、生成 Entity のプロパティにマーカー属性 `[StoreGeneratedColumn]` が付与され、QuickER 版 Repository の **INSERT / BulkInsert / UPDATE の対象から自動的に除外**されます（付与は生成オプションに依らず、型マッパーが行バージョン列と認識する列＝SQL Server の `rowversion` / `timestamp` に対して行われます）。

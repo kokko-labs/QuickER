@@ -61,6 +61,12 @@ public static class QueryFixtureDefinition
     );
     private static readonly Guid QueryGetMemoRowsRaw = new("dddddddd-0000-0000-0000-000000000013");
 
+    // UNIQUE 制約の ID も決定的でなければならないため固定 GUID を用いる
+    private static readonly Guid OrderMemoUniqueId = new("eeeeeeee-0000-0000-0000-000000000001");
+    private static readonly Guid OrderCustomerAmountUniqueId = new(
+        "eeeeeeee-0000-0000-0000-000000000002"
+    );
+
     /// <summary>可搬フィクスチャの図（SQL Server 型表記）に名前付きクエリ定義を追加して返す</summary>
     public static ErDiagram Build()
     {
@@ -68,7 +74,27 @@ public static class QueryFixtureDefinition
         var orders = diagram.Entities.First(entity => entity.TableName == "orders");
         var orderPk = orders.Columns.First(column => column.Name == "order_id");
         var orderCustomerFk = orders.Columns.First(column => column.Name == "customer_id");
+        var orderMemo = orders.Columns.First(column => column.Name == "memo");
         var orderAmount = orders.Columns.First(column => column.Name == "amount");
+
+        // UNIQUE 制約（重複事前チェックの生成・実 DB 検証用）。単一列は NULL 許容列（memo）を使って
+        // 「NULL を含む組はスキップ」の枝を、複合は非 NULL 列 2 本（customer_id・amount）で名前なし＝合成名の枝を通す。
+        // 既存の実 DB テストのシードは memo・(customer_id, amount) とも重複しないため、これらのテストへは影響しない
+        orders.UniqueConstraints.Add(
+            new UniqueConstraint
+            {
+                Id = OrderMemoUniqueId,
+                Name = "UQ_orders_memo",
+                ColumnIds = { orderMemo.Id },
+            }
+        );
+        orders.UniqueConstraints.Add(
+            new UniqueConstraint
+            {
+                Id = OrderCustomerAmountUniqueId,
+                ColumnIds = { orderCustomerFk.Id, orderAmount.Id },
+            }
+        );
 
         diagram.Queries.Add(
             new QueryDefinition

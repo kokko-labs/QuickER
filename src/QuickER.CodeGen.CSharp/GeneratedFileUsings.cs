@@ -187,10 +187,19 @@ internal static class GeneratedFileUsings
                 break;
 
             // EditModel: 生成コードは Runtime の EditModelBase / EditModelCollection を使うだけで、
-            //   自ファイルの外部参照は BCL の基本のみ（コレクション型は Runtime 側の名前空間で解決）
+            //   自ファイルの外部参照は BCL の基本のみ（コレクション型は Runtime 側の名前空間で解決）。
+            //   Repository 契約があるときだけ DB 照合糖衣（ValidateUniqueAsync）が非同期メソッドになるため、
+            //   CancellationToken / Task の名前空間を追加する
             case GenerationBucket.EditModel:
                 yield return "System";
                 yield return "System.Collections.Generic";
+
+                if (options.GeneratesRepositoryContract)
+                {
+                    yield return "System.Threading";
+                    yield return "System.Threading.Tasks";
+                }
+
                 break;
 
             // Mapper: Entity↔EditModel 変換で LINQ（Select 等・System.Linq）とジェネリックコレクションを使う

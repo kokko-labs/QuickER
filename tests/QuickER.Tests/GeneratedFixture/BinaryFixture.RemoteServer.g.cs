@@ -537,6 +537,20 @@ public static partial class GeneratedRemoteEndpoints
                 )
         );
 
+        group.MapPost(
+            "Document/CheckUniqueness",
+            (HttpContext context) =>
+                ExecuteAsync(
+                    context,
+                    async () =>
+                    {
+                        var request = await ReadRequestAsync<DocumentCheckUniquenessRequest>(context);
+                        var repository = context.RequestServices.GetRequiredService<IDocumentRemoteRepository>();
+                        return (object?)await repository.CheckUniquenessAsync(request.Entity, context.RequestAborted);
+                    }
+                )
+        );
+
         group.MapGet(
             "Document/Payload",
             (HttpContext context) =>
@@ -651,6 +665,9 @@ public static partial class GeneratedRemoteEndpoints
     /// <summary>Request body for GetByTitle (Document).</summary>
     private sealed record DocumentGetByTitleRequest(string Title);
 
+    /// <summary>Request body for CheckUniqueness (Document).</summary>
+    private sealed record DocumentCheckUniquenessRequest(DocumentEntity Entity);
+
     /// <summary>Maps the remote-surface endpoints for DocumentNoteEntity.</summary>
     private static void MapDocumentNoteEndpoints(RouteGroupBuilder group)
     {
@@ -658,5 +675,22 @@ public static partial class GeneratedRemoteEndpoints
             group,
             "DocumentNote"
         );
+
+        group.MapPost(
+            "DocumentNote/CheckUniqueness",
+            (HttpContext context) =>
+                ExecuteAsync(
+                    context,
+                    async () =>
+                    {
+                        var request = await ReadRequestAsync<DocumentNoteCheckUniquenessRequest>(context);
+                        var repository = context.RequestServices.GetRequiredService<IDocumentNoteRemoteRepository>();
+                        return (object?)await repository.CheckUniquenessAsync(request.Entity, context.RequestAborted);
+                    }
+                )
+        );
     }
+
+    /// <summary>Request body for CheckUniqueness (DocumentNote).</summary>
+    private sealed record DocumentNoteCheckUniquenessRequest(DocumentNoteEntity Entity);
 }

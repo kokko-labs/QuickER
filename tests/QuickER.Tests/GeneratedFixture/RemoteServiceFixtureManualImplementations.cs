@@ -10,9 +10,29 @@ namespace QuickER.Tests.GeneratedRemoteServiceFixture;
 // リモートサービス生成でもサーバー側の実装クラスは従来どおりで、HTTP クライアント側は全クエリを
 // 転送メソッドとして自動生成するため、manual 実装が必要なのはサーバー側だけになる。
 
-/// <summary>manual クエリ（SpecialLookup）のQuickER 版 Repository 側実装</summary>
+/// <summary>manual クエリ（SpecialLookup）とユーザー定義重複チェックのQuickER 版 Repository 側実装</summary>
 public sealed partial class OrderRepository
 {
+    /// <summary>予約済みとして弾く金額（ユーザー定義の重複チェック。クライアント側にフックは無く、必ずサーバー側で走る）</summary>
+    public const decimal ReservedAmount = 999m;
+
+    /// <summary>ユーザー定義チェックが返す制約名</summary>
+    public const string CustomConstraintName = "CUSTOM_reserved_amount";
+
+    /// <summary>ユーザー定義の重複チェックを登録する（拡張点 partial の実装見本）</summary>
+    partial void CollectCustomUniquenessChecks(ref List<UniquenessCheck<OrderEntity>>? checks) =>
+        (checks ??= new List<UniquenessCheck<OrderEntity>>()).Add(
+            static (entity, cancellationToken) =>
+                Task.FromResult<UniquenessViolation?>(
+                    entity.Amount is { Value: ReservedAmount }
+                        ? new UniquenessViolation(
+                            CustomConstraintName,
+                            new[] { nameof(OrderEntity.Amount) }
+                        )
+                        : null
+                )
+        );
+
     /// <summary>顧客IDに紐づく注文のうち最初の 1 件を返す（manual 実装の見本）</summary>
     public Task<OrderEntity?> SpecialLookupAsync(
         int customerId,

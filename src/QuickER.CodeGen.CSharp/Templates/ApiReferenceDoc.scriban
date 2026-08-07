@@ -56,6 +56,9 @@ Each generated repository implements `IRepository<TEntity, TKey>`. The main meth
 | `DeleteAsync(id, ct)` | Deletes the single entity matching the primary key (returns whether it succeeded). |
 | `BulkInsertAsync(entities, ct)` | Inserts multiple entities at once (returns the number inserted). |
 | `Query()` | Builds queries such as filtering, ordering, and row limiting. |
+| `CheckUniquenessAsync(entity, ct)` | Checks this table's UNIQUE constraints against the database and returns the violations (rows sharing the primary key are excluded, so the same call fits insert and update). |
+
+The uniqueness check is advisory: the definitive guarantee is the database's own UNIQUE constraint. When edit models are generated, `EditModelCollection<T>.Validate()` also flags duplicates among the elements themselves, and `{EditModel}.ValidateUniqueAsync(repository)` registers the database-side violations on the binding properties.
 
 For the supported scope and details of `Query()`, see [docs/code-generation.md](https://github.com/kokko-labs/QuickER/blob/main/docs/code-generation.md).
 

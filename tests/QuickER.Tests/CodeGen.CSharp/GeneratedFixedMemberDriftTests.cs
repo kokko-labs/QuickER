@@ -164,6 +164,24 @@ public sealed class GeneratedFixedMemberDriftTests
     }
 
     /// <summary>
+    /// Repository 契約面が生成される構成では、EditModel の残余メンバーへ DB 照合糖衣が加わることを検証する
+    /// （<see cref="GeneratedFixedMemberNames.EditModelWithRepositoryFace"/> の条件付き集合の発火）
+    /// </summary>
+    [Fact(DisplayName = "Repository 契約ありの EditModel は DB 照合糖衣を宣言する")]
+    public void EditModelDeclaredMembers_WithRepositoryContract_IncludeValidateUniqueAsync()
+    {
+        var source = GenerateSource(withRepositories: true);
+
+        ResidualMembers(source, "NoteEditModel", "NoteEntity")
+            .Should()
+            .BeEquivalentTo(
+                GeneratedFixedMemberNames
+                    .EditModelAlways.Concat(GeneratedFixedMemberNames.EditModelDisplayNameHelpers)
+                    .Concat(GeneratedFixedMemberNames.EditModelWithRepositoryFace)
+            );
+    }
+
+    /// <summary>
     /// Entity クラスの残余メンバーが固定メンバー名簿と完全一致することを検証する
     /// （テーブル説明があるときだけ <c>DefaultDisplayName</c> の override が出る）
     /// </summary>
@@ -199,6 +217,7 @@ public sealed class GeneratedFixedMemberDriftTests
         var allFixed = GeneratedFixedMemberNames
             .EditModelAlways.Concat(GeneratedFixedMemberNames.EditModelWithCascadeNavigations)
             .Concat(GeneratedFixedMemberNames.EditModelWithTypedParentModel)
+            .Concat(GeneratedFixedMemberNames.EditModelWithRepositoryFace)
             .Concat(GeneratedFixedMemberNames.EditModelDisplayNameHelpers)
             .Concat(GeneratedFixedMemberNames.EntityWithTableDescription)
             .ToHashSet(StringComparer.Ordinal);
@@ -219,11 +238,16 @@ public sealed class GeneratedFixedMemberDriftTests
     }
 
     /// <summary>検証用の図を実際に生成し、全出力ファイルの本文を返す</summary>
-    private static IReadOnlyList<string> GenerateSource()
+    /// <param name="withRepositories">Repository 契約（＝EditModel の DB 照合糖衣）も生成するか</param>
+    private static IReadOnlyList<string> GenerateSource(bool withRepositories = false)
     {
         var result = new CSharpCodeGenerationService().Generate(
             BuildDiagram(),
-            new CodeGenerationOptions { RootNamespace = "Sample.Domain" }
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Sample.Domain",
+                GenerateRepositories = withRepositories,
+            }
         );
 
         result.HasErrors.Should().BeFalse("ドリフト検証の前提として図は正常に生成できること");
