@@ -20,15 +20,6 @@ public sealed class SchemaImportResult
     /// <see cref="Entity.UniqueConstraints"/> が正本のため、ここには含まれない。
     /// </remarks>
     public IReadOnlyList<SchemaAuxiliaryObject> AuxiliaryObjects { get; init; } = [];
-
-    /// <summary>
-    /// 取込で意味モデルへ完全には写し取れなかった箇所の構造化警告（取込自体は成功している）。
-    /// </summary>
-    /// <remarks>
-    /// 現状は複合外部キーの列対応が失われたことの通知のみ（<see cref="CompositeForeignKeyImportWarning"/>）。
-    /// 警告が無い取込では空のまま（後方互換）。表示文言は持たないため、GUI / CLI が各自の resx で整形する。
-    /// </remarks>
-    public IReadOnlyList<CompositeForeignKeyImportWarning> Warnings { get; init; } = [];
 }
 
 /// <summary>接続文字列から DB スキーマを取得して意味モデルへ変換するインポーター（DB 方言ごとに実装）</summary>

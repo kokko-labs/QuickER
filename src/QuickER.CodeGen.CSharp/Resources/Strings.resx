@@ -133,6 +133,9 @@
   <data name="CodeGen_Warning_RelationshipKeyUnknown" xml:space="preserve">
     <value>Relationship '{0}' was skipped for navigation generation because its keys are unknown.</value>
   </data>
+  <data name="CodeGen_Warning_RelationshipCompositeSkipped" xml:space="preserve">
+    <value>Relationship '{0}' was skipped because composite foreign keys (two or more column pairs) are not supported by code generation.</value>
+  </data>
   <data name="CodeGen_Warning_ValueObjectDefinitionMismatch" xml:space="preserve">
     <value>The definitions of the same-named columns aggregated into value object '{0}' do not match. Generation proceeds with the PK definition preferred (otherwise the largest definition), but unifying the definitions in the ER diagram is recommended: {1}</value>
   </data>

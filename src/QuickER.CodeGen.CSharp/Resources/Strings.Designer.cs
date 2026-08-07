@@ -204,6 +204,12 @@ namespace QuickER.CodeGen.CSharp.Resources {
             }
         }
 
+        public static string CodeGen_Warning_RelationshipCompositeSkipped {
+            get {
+                return ResourceManager.GetString("CodeGen_Warning_RelationshipCompositeSkipped", resourceCulture);
+            }
+        }
+
         public static string CodeGen_Warning_ValueObjectDefinitionMismatch {
             get {
                 return ResourceManager.GetString("CodeGen_Warning_ValueObjectDefinitionMismatch", resourceCulture);

@@ -103,7 +103,9 @@ public static class ErDiagramDynamicTools
 
             foreach (var rel in vm.Relationships)
             {
-                sb.AppendLine($"  {rel.Source.TableName} → {rel.Target.TableName} ({rel.Type})");
+                sb.AppendLine(
+                    $"  {rel.Source.TableName} → {rel.Target.TableName} ({rel.Type}{DescribeColumnPairs(rel)}){DescribeConstraintName(rel)}"
+                );
             }
         }
 
@@ -369,7 +371,10 @@ public static class ErDiagramDynamicTools
     }
 
     /// <summary>2 テーブル間にリレーションを追加する</summary>
-    /// <remarks>AI が source_column / target_column で明示した列をそのまま使用し、省略時のみ名前ベースで自動解決する</remarks>
+    /// <remarks>
+    /// AI が source_columns / target_columns で明示した列をそのまま使用し、両方の省略時のみ
+    /// 「親 PK 全列の自動ペア化」で解決する（手動作成フローと同じ意味論）
+    /// </remarks>
     private static (string, bool) AddRelationship(JsonElement args, MainViewModel vm)
     {
         var sourceTable = GetString(args, "source_table");
@@ -405,62 +410,11 @@ public static class ErDiagramDynamicTools
             _ => RelationshipType.OneToMany,
         };
 
-        // AI が明示した列を最優先で使用する（存在しない列名はエラーとして返し、AI に修正を促す）
-        var sourceColumnName = GetString(args, "source_column");
-        ColumnViewModel? sourcePk;
+        var (columnPairs, pairError) = ResolveRelationshipColumnPairs(source, target, args, vm);
 
-        if (!string.IsNullOrWhiteSpace(sourceColumnName))
+        if (pairError is not null)
         {
-            sourcePk = source.Columns.FirstOrDefault(c =>
-                string.Equals(c.Name, sourceColumnName, StringComparison.OrdinalIgnoreCase)
-            );
-
-            if (sourcePk is null)
-            {
-                return (
-                    string.Format(
-                        Strings.Tool_ColumnNotFoundInTable,
-                        sourceTable,
-                        sourceColumnName
-                    ),
-                    false
-                );
-            }
-        }
-        else
-        {
-            sourcePk = source.Columns.FirstOrDefault(c => c.IsPrimaryKey);
-        }
-
-        var targetColumnName = GetString(args, "target_column");
-        ColumnViewModel? targetColumn;
-
-        if (!string.IsNullOrWhiteSpace(targetColumnName))
-        {
-            targetColumn = target.Columns.FirstOrDefault(c =>
-                string.Equals(c.Name, targetColumnName, StringComparison.OrdinalIgnoreCase)
-            );
-
-            if (targetColumn is null)
-            {
-                return (
-                    string.Format(
-                        Strings.Tool_ColumnNotFoundInTable,
-                        targetTable,
-                        targetColumnName
-                    ),
-                    false
-                );
-            }
-        }
-        else
-        {
-            targetColumn = ForeignKeyColumnResolver.ResolveTargetColumn(
-                source,
-                target,
-                sourcePk,
-                vm.Relationships
-            );
+            return (pairError, false);
         }
 
         var rel = new RelationshipViewModel(
@@ -469,8 +423,8 @@ public static class ErDiagramDynamicTools
                 SourceEntityId = source.Id,
                 TargetEntityId = target.Id,
                 Type = relType,
-                SourceColumnId = sourcePk?.Id,
-                TargetColumnId = targetColumn?.Id,
+                // 多対多では VM 側の整合処理が列ペアを落とす（中間テーブルを介する概念表現のため）
+                ColumnPairs = columnPairs!,
                 ConstraintName = $"FK_{target.TableName}_{source.TableName}",
             },
             source,
@@ -480,7 +434,179 @@ public static class ErDiagramDynamicTools
         return (string.Format(Strings.Tool_RelationshipAdded, sourceTable, targetTable), true);
     }
 
+    /// <summary>
+    /// <c>source_columns</c> / <c>target_columns</c>（並行配列）から列ペアを解決する。
+    /// 両方が省略された場合のみ親 PK 全列の自動ペア化へフォールバックする
+    /// </summary>
+    private static (
+        List<RelationshipColumnPair>? Pairs,
+        string? Error
+    ) ResolveRelationshipColumnPairs(
+        EntityViewModel source,
+        EntityViewModel target,
+        JsonElement args,
+        MainViewModel vm
+    )
+    {
+        var (sourceNames, sourceError) = GetColumnNames(args, "source_columns");
+
+        if (sourceError is not null)
+        {
+            return (null, sourceError);
+        }
+
+        var (targetNames, targetError) = GetColumnNames(args, "target_columns");
+
+        if (targetError is not null)
+        {
+            return (null, targetError);
+        }
+
+        if (sourceNames is null && targetNames is null)
+        {
+            return (
+                ForeignKeyColumnResolver.ResolveColumnPairs(source, target, vm.Relationships),
+                null
+            );
+        }
+
+        if (sourceNames is null || targetNames is null)
+        {
+            return (null, Strings.Tool_RelationshipColumnListsRequiredTogether);
+        }
+
+        if (sourceNames.Count != targetNames.Count)
+        {
+            return (
+                null,
+                string.Format(
+                    Strings.Tool_RelationshipColumnListsLengthMismatch,
+                    sourceNames.Count,
+                    targetNames.Count
+                )
+            );
+        }
+
+        var pairs = new List<RelationshipColumnPair>();
+        var usedSourceIds = new HashSet<Guid>();
+        var usedTargetIds = new HashSet<Guid>();
+
+        for (var i = 0; i < sourceNames.Count; i++)
+        {
+            var sourceColumn = FindColumn(source, sourceNames[i]);
+
+            if (sourceColumn is null)
+            {
+                return (
+                    null,
+                    string.Format(
+                        Strings.Tool_ColumnNotFoundInTable,
+                        source.TableName,
+                        sourceNames[i]
+                    )
+                );
+            }
+
+            if (!usedSourceIds.Add(sourceColumn.Id))
+            {
+                return (
+                    null,
+                    string.Format(
+                        Strings.Tool_RelationshipDuplicateColumn,
+                        sourceColumn.Name,
+                        "source_columns"
+                    )
+                );
+            }
+
+            var targetColumn = FindColumn(target, targetNames[i]);
+
+            if (targetColumn is null)
+            {
+                return (
+                    null,
+                    string.Format(
+                        Strings.Tool_ColumnNotFoundInTable,
+                        target.TableName,
+                        targetNames[i]
+                    )
+                );
+            }
+
+            if (!usedTargetIds.Add(targetColumn.Id))
+            {
+                return (
+                    null,
+                    string.Format(
+                        Strings.Tool_RelationshipDuplicateColumn,
+                        targetColumn.Name,
+                        "target_columns"
+                    )
+                );
+            }
+
+            pairs.Add(new RelationshipColumnPair(sourceColumn.Id, targetColumn.Id));
+        }
+
+        return (pairs, null);
+    }
+
+    /// <summary>列名配列の引数を取り出す（未指定は <c>null</c>・型不正や空配列はエラー）</summary>
+    private static (List<string>? Names, string? Error) GetColumnNames(
+        JsonElement args,
+        string propertyName
+    )
+    {
+        if (
+            !args.TryGetProperty(propertyName, out var element)
+            || element.ValueKind == JsonValueKind.Null
+        )
+        {
+            return (null, null);
+        }
+
+        if (element.ValueKind != JsonValueKind.Array)
+        {
+            return (null, string.Format(Strings.Tool_RelationshipColumnListNotArray, propertyName));
+        }
+
+        var names = new List<string>();
+
+        foreach (var item in element.EnumerateArray())
+        {
+            if (
+                item.ValueKind != JsonValueKind.String
+                || string.IsNullOrWhiteSpace(item.GetString())
+            )
+            {
+                return (
+                    null,
+                    string.Format(Strings.Tool_RelationshipColumnListInvalid, propertyName)
+                );
+            }
+
+            names.Add(item.GetString()!);
+        }
+
+        if (names.Count == 0)
+        {
+            return (null, string.Format(Strings.Tool_RelationshipColumnListEmpty, propertyName));
+        }
+
+        return (names, null);
+    }
+
+    /// <summary>指定テーブルの列を名前で検索する（大文字小文字を区別しない）</summary>
+    private static ColumnViewModel? FindColumn(EntityViewModel entity, string columnName) =>
+        entity.Columns.FirstOrDefault(column =>
+            string.Equals(column.Name, columnName, StringComparison.OrdinalIgnoreCase)
+        );
+
     /// <summary>指定した参照元・参照先テーブル間のリレーションを削除する</summary>
+    /// <remarks>
+    /// 同じ向きのテーブル対に複数のリレーションがある場合は <c>constraint_name</c> で特定する。
+    /// 無指定で複数一致したときは黙って先頭を消さず、候補の制約名を挙げてエラーにする
+    /// </remarks>
     private static (string, bool) RemoveRelationship(JsonElement args, MainViewModel vm)
     {
         var sourceTable = GetString(args, "source_table");
@@ -491,12 +617,18 @@ public static class ErDiagramDynamicTools
             return (Strings.Tool_SourceAndTargetTableRequired, false);
         }
 
-        var rel = vm.Relationships.FirstOrDefault(r =>
-            string.Equals(r.Source.TableName, sourceTable, StringComparison.OrdinalIgnoreCase)
-            && string.Equals(r.Target.TableName, targetTable, StringComparison.OrdinalIgnoreCase)
-        );
+        var matches = vm
+            .Relationships.Where(r =>
+                string.Equals(r.Source.TableName, sourceTable, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(
+                    r.Target.TableName,
+                    targetTable,
+                    StringComparison.OrdinalIgnoreCase
+                )
+            )
+            .ToList();
 
-        if (rel is null)
+        if (matches.Count == 0)
         {
             return (
                 string.Format(Strings.Tool_RelationshipNotFound, sourceTable, targetTable),
@@ -504,9 +636,66 @@ public static class ErDiagramDynamicTools
             );
         }
 
-        vm.UndoRedo.Execute(new UndoRedo.RemoveRelationshipCommand(vm, rel));
+        var constraintName = GetString(args, "constraint_name");
+
+        if (!string.IsNullOrWhiteSpace(constraintName))
+        {
+            var byName = matches
+                .Where(r =>
+                    string.Equals(
+                        r.ConstraintName,
+                        constraintName,
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                )
+                .ToList();
+
+            if (byName.Count == 0)
+            {
+                return (
+                    string.Format(
+                        Strings.Tool_RelationshipConstraintNotFound,
+                        sourceTable,
+                        targetTable,
+                        constraintName,
+                        DescribeConstraintNames(matches)
+                    ),
+                    false
+                );
+            }
+
+            matches = byName;
+        }
+
+        if (matches.Count > 1)
+        {
+            return (
+                string.Format(
+                    Strings.Tool_RelationshipAmbiguous,
+                    sourceTable,
+                    targetTable,
+                    DescribeConstraintNames(matches)
+                ),
+                false
+            );
+        }
+
+        vm.UndoRedo.Execute(new UndoRedo.RemoveRelationshipCommand(vm, matches[0]));
         return (string.Format(Strings.Tool_RelationshipRemoved, sourceTable, targetTable), true);
     }
+
+    /// <summary>候補リレーションの制約名を列挙する（名前なしは「名前なし」表記）</summary>
+    private static string DescribeConstraintNames(
+        IEnumerable<RelationshipViewModel> relationships
+    ) =>
+        string.Join(
+            Strings.Tool_ListSeparator,
+            relationships.Select(r =>
+                string.IsNullOrWhiteSpace(r.ConstraintName)
+                    ? Strings.Tool_RelationshipUnnamedConstraint
+                    : r.ConstraintName!
+            )
+        );
 
     /// <summary>一意制約を定義する（同じ列集合の制約があれば名前・列順を差し替え、無ければ追加する）</summary>
     /// <remarks>
@@ -747,6 +936,43 @@ public static class ErDiagramDynamicTools
             sb.AppendLine(line);
         }
     }
+
+    /// <summary>要約テキスト用に外部キーの列ペアを <c>, FK: (親列 → 子列, …)</c> 形式で表す</summary>
+    /// <remarks>列ペアなし（多対多・未割当）や解決できない参照を含む場合は空文字を返す</remarks>
+    private static string DescribeColumnPairs(RelationshipViewModel relationship)
+    {
+        if (relationship.ColumnPairs.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        var texts = new List<string>();
+
+        foreach (var pair in relationship.ColumnPairs)
+        {
+            var sourceColumn = relationship.Source.Columns.FirstOrDefault(column =>
+                column.Id == pair.SourceColumnId
+            );
+            var targetColumn = relationship.Target.Columns.FirstOrDefault(column =>
+                column.Id == pair.TargetColumnId
+            );
+
+            if (sourceColumn is null || targetColumn is null)
+            {
+                return string.Empty;
+            }
+
+            texts.Add($"{sourceColumn.Name} → {targetColumn.Name}");
+        }
+
+        return $", FK: ({string.Join(", ", texts)})";
+    }
+
+    /// <summary>要約テキスト用に外部キー制約名を <c> [名前]</c> 形式で表す（未設定は空文字）</summary>
+    private static string DescribeConstraintName(RelationshipViewModel relationship) =>
+        string.IsNullOrWhiteSpace(relationship.ConstraintName)
+            ? string.Empty
+            : $" [{relationship.ConstraintName}]";
 
     /// <summary>JSON 引数から文字列プロパティを取得する（無い・型不一致なら null）</summary>
     private static string? GetString(JsonElement element, string propertyName)

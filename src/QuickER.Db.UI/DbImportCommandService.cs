@@ -95,9 +95,6 @@ public sealed class DbImportCommandService
                 Queries = merged.SurvivingQueries.ToList(),
             };
             _host.ReplaceDiagram(diagram);
-
-            // 図の置換が確定してから、取り込みきれなかった箇所（複合外部キーの列対応喪失）を知らせる
-            NotifyImportWarnings(result.Warnings);
         }
         catch (Exception ex)
         {
@@ -106,58 +103,6 @@ public sealed class DbImportCommandService
                 Strings.Common_Error
             );
         }
-    }
-
-    /// <summary>取込結果の警告（複合外部キーの列対応喪失）を、導入文＋一覧の詳細ダイアログで提示する</summary>
-    /// <remarks>
-    /// 取込自体は成功しているため、報告水準は失敗（Error）ではなく案内（Information）を用いる。
-    /// 警告が無い取込では何も表示しない（従来と完全に同一の挙動）。
-    /// </remarks>
-    private void NotifyImportWarnings(IReadOnlyList<CompositeForeignKeyImportWarning> warnings)
-    {
-        if (warnings.Count == 0)
-        {
-            return;
-        }
-
-        _dialogs.ShowInformationDetails(
-            Strings.Db_ImportCompositeForeignKeyHeader,
-            BuildCompositeForeignKeyList(warnings),
-            Strings.Db_ImportCompositeForeignKeyTitle
-        );
-    }
-
-    /// <summary>複合外部キー警告の一覧（本文のみ・導入文は含めない）を整形する（30 件超は省略）</summary>
-    private static string BuildCompositeForeignKeyList(
-        IReadOnlyList<CompositeForeignKeyImportWarning> warnings
-    )
-    {
-        const int limit = 30;
-        var lines = warnings
-            .Take(limit)
-            .Select(warning =>
-                string.Format(
-                    Strings.Db_ImportCompositeForeignKeyLine,
-                    warning.ConstraintName,
-                    warning.ChildTable,
-                    string.Join(", ", warning.ChildColumns),
-                    warning.ParentTable,
-                    string.Join(", ", warning.ParentColumns)
-                )
-            );
-        var body = string.Join(Environment.NewLine, lines);
-
-        if (warnings.Count > limit)
-        {
-            body +=
-                Environment.NewLine
-                + string.Format(
-                    Strings.Db_ImportCompositeForeignKeyMoreItems,
-                    warnings.Count - limit
-                );
-        }
-
-        return body;
     }
 
     /// <summary>構造変更・壊れクエリの削除・説明の上書きを伴う場合のみ確認ダイアログを表示する</summary>

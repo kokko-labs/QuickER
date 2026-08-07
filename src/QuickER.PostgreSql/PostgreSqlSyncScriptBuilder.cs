@@ -202,10 +202,10 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
             return;
         }
 
-        var pkCol = SyncScriptBuilderHelper.ResolveReferencedColumn(item);
+        var columnPairs = SyncScriptBuilderHelper.ResolveColumnPairs(item);
 
-        // 参照先列が特定できない場合は不正な DDL を出さず、コメントでスキップを明示する
-        if (pkCol is null || item.ColumnName is null)
+        // 構成列が特定できない場合は不正な DDL を出さず、コメントでスキップを明示する
+        if (columnPairs.Count == 0)
         {
             sb.AppendLine(
                 // スキップ理由の識別子は生成 SQL の決定性を保つため方言中立・カルチャ非依存にする
@@ -223,10 +223,20 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
         var referentialActions = SyncScriptBuilderHelper.BuildReferentialActionClause(
             item.Relationship
         );
+        // 複合外部キーは構成列を宣言順にカンマ区切りで並べる（単列なら従来と同一の出力）
+        var childColumnList = string.Join(
+            ", ",
+            ForeignKeyColumnPairResolver.ChildColumns(columnPairs).Select(PgIdentifier.QuoteSimple)
+        );
+        var parentColumnList = string.Join(
+            ", ",
+            ForeignKeyColumnPairResolver.ParentColumns(columnPairs).Select(PgIdentifier.QuoteSimple)
+        );
+
         sb.AppendLine(
             $"ALTER TABLE {PgIdentifier.Quote(childTbl)} ADD CONSTRAINT \"{PgIdentifier.Escape(fkName)}\" "
-                + $"FOREIGN KEY ({PgIdentifier.QuoteSimple(item.ColumnName)}) "
-                + $"REFERENCES {PgIdentifier.Quote(parentTbl)} ({PgIdentifier.QuoteSimple(pkCol.Name)}){referentialActions};"
+                + $"FOREIGN KEY ({childColumnList}) "
+                + $"REFERENCES {PgIdentifier.Quote(parentTbl)} ({parentColumnList}){referentialActions};"
         );
     }
 

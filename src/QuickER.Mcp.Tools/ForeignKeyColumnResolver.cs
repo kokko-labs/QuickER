@@ -22,6 +22,40 @@ namespace QuickER.Mcp.Tools;
 /// </remarks>
 internal static class ForeignKeyColumnResolver
 {
+    /// <summary>親の主キー全列を順に対応付けた既定の列ペア一覧を組み立てる</summary>
+    /// <param name="source">参照元（親）エンティティ</param>
+    /// <param name="target">参照先（子）エンティティ</param>
+    /// <param name="existingRelationships">既存リレーション一覧（参照先として使用済みの列を候補から除外するために用いる）</param>
+    /// <remarks>
+    /// GUI の作成フロー（<c>MainViewModel.BuildInitialColumnPairs</c>）と同一の意味論。親の主キー列を宣言順に
+    /// 辿り、列ごとに <see cref="ResolveTargetColumn"/> で子列を引き当てる。引き当てられなかった列はペアに
+    /// 含めず、複数の親列が同じ子列へ寄った場合は後続をペアなしにする（1 つの子列を 2 度使う外部キーは作れない）
+    /// </remarks>
+    public static List<RelationshipColumnPair> ResolveColumnPairs(
+        Entity source,
+        Entity target,
+        IEnumerable<Relationship> existingRelationships
+    )
+    {
+        var relationships = existingRelationships.ToList();
+        var pairs = new List<RelationshipColumnPair>();
+        var usedTargetColumnIds = new HashSet<Guid>();
+
+        foreach (var sourceKeyColumn in source.Columns.Where(column => column.IsPrimaryKey))
+        {
+            var targetColumn = ResolveTargetColumn(source, target, sourceKeyColumn, relationships);
+
+            if (targetColumn is null || !usedTargetColumnIds.Add(targetColumn.Id))
+            {
+                continue;
+            }
+
+            pairs.Add(new RelationshipColumnPair(sourceKeyColumn.Id, targetColumn.Id));
+        }
+
+        return pairs;
+    }
+
     /// <summary>参照元キー列を指定して参照先の外部キー列を解決する</summary>
     /// <param name="source">参照元（親）エンティティ</param>
     /// <param name="target">参照先（子）エンティティ</param>
@@ -35,9 +69,11 @@ internal static class ForeignKeyColumnResolver
         IEnumerable<Relationship> existingRelationships
     )
     {
+        // 既存リレーションの全構成列（複合外部キーなら 2 列以上）を使用済みとして候補から外す
         var usedColumnIds = existingRelationships
-            .Where(r => r.TargetEntityId == target.Id && r.TargetColumnId is not null)
-            .Select(r => r.TargetColumnId!.Value)
+            .Where(r => r.TargetEntityId == target.Id)
+            .SelectMany(r => r.ColumnPairs)
+            .Select(pair => pair.TargetColumnId)
             .ToHashSet();
 
         var index = ResolveTargetColumnIndex(

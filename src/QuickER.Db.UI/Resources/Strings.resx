@@ -264,25 +264,6 @@ Do you want to run this against {0}?</value>
     <value>Note: the unique constraint(s) below cover a column that an existing foreign key references. Dropping them removes the candidate key, so the drop may be rejected or the foreign key may break (unless the primary key still covers the same column):
 {0}</value>
   </data>
-  <data name="SchemaSync_ExecuteConfirmRebuildBlocked" xml:space="preserve">
-    <value>The following tables are NOT synchronized: they own a composite foreign key whose column mapping was lost on import, so recreating them would silently replace it with a single-column foreign key.
-
-{0}</value>
-  </data>
-  <data name="SchemaSync_CompositeForeignKeyNotice" xml:space="preserve">
-    <value>{0} composite foreign key(s) were imported without their column mapping, so foreign key changes shown here may be inaccurate.</value>
-  </data>
-  <data name="SchemaSync_CompositeForeignKeyDiffBlocked" xml:space="preserve">
-    <value>{0} (not selectable: this foreign key is part of a composite foreign key)</value>
-  </data>
-  <data name="SchemaSync_CompositeForeignKeyChangeBlocked" xml:space="preserve">
-    <value>{0} (not selectable: applying it would drop and recreate a composite foreign key, silently replacing it with a single-column one)</value>
-  </data>
-  <data name="SchemaSync_ExecuteConfirmCompositeForeignKeyBlocked" xml:space="preserve">
-    <value>The following changes are NOT synchronized: they would drop and recreate a composite foreign key whose column mapping was lost on import, silently replacing it with a single-column foreign key.
-
-{0}</value>
-  </data>
   <data name="SchemaSync_Executing" xml:space="preserve">
     <value>Executing...</value>
   </data>
@@ -313,18 +294,6 @@ Do you want to run this against {0}?</value>
   </data>
   <data name="Db_ImportFailed" xml:space="preserve">
     <value>Failed to import: {0}</value>
-  </data>
-  <data name="Db_ImportCompositeForeignKeyTitle" xml:space="preserve">
-    <value>Import Warning</value>
-  </data>
-  <data name="Db_ImportCompositeForeignKeyHeader" xml:space="preserve">
-    <value>Some composite foreign keys could not be fully imported. Column mappings are not preserved; each was imported as a single relationship without column mapping:</value>
-  </data>
-  <data name="Db_ImportCompositeForeignKeyLine" xml:space="preserve">
-    <value>• {0}: {1} ({2}) -&gt; {3} ({4})</value>
-  </data>
-  <data name="Db_ImportCompositeForeignKeyMoreItems" xml:space="preserve">
-    <value>…and {0} more</value>
   </data>
   <data name="Db_SyncWriteBack" xml:space="preserve">
     <value>Write the current diagram back to the existing DB (apply diff ALTER)</value>

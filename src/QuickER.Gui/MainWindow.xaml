@@ -2537,12 +2537,6 @@
                       <RowDefinition Height="Auto" />
                       <RowDefinition Height="12" />
                       <RowDefinition Height="Auto" />
-                      <RowDefinition Height="12" />
-                      <RowDefinition Height="Auto" />
-                      <RowDefinition Height="12" />
-                      <RowDefinition Height="Auto" />
-                      <RowDefinition Height="12" />
-                      <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
                     <TextBlock
@@ -2589,55 +2583,131 @@
                     <TextBlock
                       Grid.Row="6"
                       Style="{StaticResource PropertyFieldLabel}"
-                      Text="{x:Static resources:Strings.Property_ReferencedColumn}"
-                    />
-                    <ComboBox
-                      Grid.Row="6"
-                      Grid.Column="1"
-                      Style="{StaticResource PropertyInputComboBox}"
-                      ItemsSource="{Binding AvailableSourceColumns}"
-                      DisplayMemberPath="Name"
-                      SelectedValuePath="Id"
-                      SelectedValue="{Binding SourceColumnId, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                      IsEnabled="{Binding CanSelectForeignKeyColumns}"
-                    />
-
-                    <TextBlock
-                      Grid.Row="8"
-                      Style="{StaticResource PropertyFieldLabel}"
                       Text="{x:Static resources:Strings.Property_TargetEndpoint}"
                     />
                     <TextBlock
-                      Grid.Row="8"
+                      Grid.Row="6"
                       Grid.Column="1"
                       VerticalAlignment="Center"
                       Foreground="{StaticResource MutedText}"
                       Text="{Binding Target.TableName}"
                     />
+                  </Grid>
 
+                  <!-- キー列の対応: 1 行＝列ペア 1 組（親の候補キー列＋子の外部キー列）。2 行以上で複合外部キー -->
+                  <StackPanel Margin="0,12,0,0" IsEnabled="{Binding CanSelectForeignKeyColumns}">
                     <TextBlock
-                      Grid.Row="10"
                       Style="{StaticResource PropertyFieldLabel}"
-                      Text="{x:Static resources:Strings.Property_ForeignKeyColumn}"
+                      Text="{x:Static resources:Strings.Property_RelationshipColumnPairsHeader}"
                     />
-                    <ComboBox
-                      Grid.Row="10"
-                      Grid.Column="1"
-                      Style="{StaticResource PropertyInputComboBox}"
-                      ItemsSource="{Binding AvailableTargetColumns}"
-                      DisplayMemberPath="Name"
-                      SelectedValuePath="Id"
-                      SelectedValue="{Binding TargetColumnId, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                      IsEnabled="{Binding CanSelectForeignKeyColumns}"
+                    <TextBlock
+                      Style="{StaticResource PropertyHintText}"
+                      Margin="0,4,0,8"
+                      Text="{x:Static resources:Strings.Property_RelationshipColumnPairHint}"
                     />
 
-                    <TextBlock
-                      Grid.Row="12"
-                      Style="{StaticResource PropertyFieldLabel}"
-                      Text="ON DELETE"
-                    />
+                    <ItemsControl
+                      x:Name="RelationshipColumnPairItems"
+                      ItemsSource="{Binding ColumnPairRows}"
+                    >
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                          <Grid Margin="0,0,0,4">
+                            <Grid.ColumnDefinitions>
+                              <ColumnDefinition Width="*" />
+                              <ColumnDefinition Width="Auto" />
+                              <ColumnDefinition Width="*" />
+                              <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <Grid Grid.Column="0">
+                              <ComboBox
+                                Style="{StaticResource PropertyInputComboBox}"
+                                ItemsSource="{Binding AvailableSourceColumns}"
+                                DisplayMemberPath="Name"
+                                SelectedItem="{Binding SelectedSourceColumn, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                              />
+                              <!-- 未選択の間だけ出す案内（クリックはコンボボックスへ通す） -->
+                              <TextBlock
+                                Style="{StaticResource PropertyHintText}"
+                                Margin="10,0,0,0"
+                                VerticalAlignment="Center"
+                                IsHitTestVisible="False"
+                                Text="{x:Static resources:Strings.Property_ReferencedColumn}"
+                                Visibility="{Binding IsSourceColumnUnselected, Converter={StaticResource BoolToVisibilityConverter}}"
+                              />
+                            </Grid>
+                            <TextBlock
+                              Grid.Column="1"
+                              Margin="6,0,6,0"
+                              VerticalAlignment="Center"
+                              Foreground="{StaticResource MutedText}"
+                              Text="&#8594;"
+                            />
+                            <Grid Grid.Column="2">
+                              <ComboBox
+                                Style="{StaticResource PropertyInputComboBox}"
+                                ItemsSource="{Binding AvailableTargetColumns}"
+                                DisplayMemberPath="Name"
+                                SelectedItem="{Binding SelectedTargetColumn, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                              />
+                              <TextBlock
+                                Style="{StaticResource PropertyHintText}"
+                                Margin="10,0,0,0"
+                                VerticalAlignment="Center"
+                                IsHitTestVisible="False"
+                                Text="{x:Static resources:Strings.Property_ForeignKeyColumn}"
+                                Visibility="{Binding IsTargetColumnUnselected, Converter={StaticResource BoolToVisibilityConverter}}"
+                              />
+                            </Grid>
+                            <Button
+                              Grid.Column="3"
+                              Style="{StaticResource PropertyIconButton}"
+                              ToolTip="{x:Static resources:Strings.Property_RemoveRelationshipColumnPairTooltip}"
+                              Command="{Binding DataContext.RemoveRelationshipColumnPairCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                              CommandParameter="{Binding}"
+                            >
+                              <TextBlock
+                                Text="&#215;"
+                                FontSize="14"
+                                FontWeight="Bold"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                TextAlignment="Center"
+                              />
+                            </Button>
+                          </Grid>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <!-- 列ペアを 1 行足す（未使用の候補列が尽きた／空スロットが出ている間は無効） -->
+                    <Button
+                      HorizontalAlignment="Left"
+                      Margin="0,2,0,0"
+                      Style="{StaticResource PropertyIconButton}"
+                      ToolTip="{x:Static resources:Strings.Property_AddRelationshipColumnPairTooltip}"
+                      IsEnabled="{Binding CanAddColumnPair}"
+                      Command="{Binding DataContext.AddRelationshipColumnPairSlotCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                      CommandParameter="{Binding}"
+                    >
+                      <TextBlock
+                        Text="+"
+                        FontSize="16"
+                        FontWeight="Bold"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        TextAlignment="Center"
+                      />
+                    </Button>
+                  </StackPanel>
+
+                  <Grid Margin="0,12,0,0">
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="90" />
+                      <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Style="{StaticResource PropertyFieldLabel}" Text="ON DELETE" />
                     <ComboBox
-                      Grid.Row="12"
                       Grid.Column="1"
                       Style="{StaticResource PropertyInputComboBox}"
                       ItemsSource="{Binding ReferentialActions}"

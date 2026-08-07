@@ -317,7 +317,9 @@ public static partial class DocumentErDiagramToolHost
                 var target = FindEntityById(schema, rel.TargetEntityId);
                 var sourceName = source?.TableName ?? "(unknown)";
                 var targetName = target?.TableName ?? "(unknown)";
-                sb.AppendLine($"  {sourceName} → {targetName} ({rel.Type})");
+                sb.AppendLine(
+                    $"  {sourceName} → {targetName} ({rel.Type}{DescribeColumnPairs(rel, source, target)}){DescribeConstraintName(rel)}"
+                );
             }
         }
 
@@ -445,17 +447,17 @@ public static partial class DocumentErDiagramToolHost
         // 削除カラムを構成列に含む一意制約は制約ごと取り除く（GUI の削除後挙動をミラー）
         entity.UniqueConstraints.RemoveAll(constraint => constraint.ColumnIds.Contains(column.Id));
 
-        // 削除カラムを参照するリレーションの外部キー参照をクリアする（GUI の削除後挙動をミラー）
+        // 削除カラムを構成列に含むリレーションは、列ペアをすべてクリアする（GUI の削除後挙動をミラー）
+        // ＝残りのペアだけを保った「意味の違う外部キー」へ縮めない
         foreach (var relationship in document.Schema.Relationships)
         {
-            if (relationship.SourceColumnId == column.Id)
+            if (
+                relationship.ColumnPairs.Any(pair =>
+                    pair.SourceColumnId == column.Id || pair.TargetColumnId == column.Id
+                )
+            )
             {
-                relationship.SourceColumnId = null;
-            }
-
-            if (relationship.TargetColumnId == column.Id)
-            {
-                relationship.TargetColumnId = null;
+                relationship.ColumnPairs.Clear();
             }
         }
 
@@ -584,7 +586,10 @@ public static partial class DocumentErDiagramToolHost
     }
 
     /// <summary>2 テーブル間にリレーションを追加する</summary>
-    /// <remarks>source_column / target_column が明示された列をそのまま使用し、省略時のみ既定解決する</remarks>
+    /// <remarks>
+    /// source_columns / target_columns で明示された列をそのまま使用し、両方の省略時のみ
+    /// 「親 PK 全列の自動ペア化」で既定解決する（GUI の作成フローと同じ意味論）
+    /// </remarks>
     private static (string, bool) AddRelationship(DiagramDocument document, JsonElement args)
     {
         var sourceTable = GetString(args, "source_table");
@@ -617,48 +622,22 @@ public static partial class DocumentErDiagramToolHost
             _ => RelationshipType.OneToMany,
         };
 
-        // 明示された参照元列を最優先で使用する（存在しない列名はエラーとして返す）
-        var sourceColumnName = GetString(args, "source_column");
-        Column? sourcePk;
+        var (columnPairs, pairError) = ResolveRelationshipColumnPairs(
+            source,
+            target,
+            args,
+            schema.Relationships
+        );
 
-        if (!string.IsNullOrWhiteSpace(sourceColumnName))
+        if (pairError is not null)
         {
-            sourcePk = source.Columns.FirstOrDefault(c =>
-                string.Equals(c.Name, sourceColumnName, StringComparison.OrdinalIgnoreCase)
-            );
-
-            if (sourcePk is null)
-            {
-                return ($"Column '{sourceColumnName}' not found in table '{sourceTable}'.", false);
-            }
-        }
-        else
-        {
-            sourcePk = source.Columns.FirstOrDefault(c => c.IsPrimaryKey);
+            return (pairError, false);
         }
 
-        var targetColumnName = GetString(args, "target_column");
-        Column? targetColumn;
-
-        if (!string.IsNullOrWhiteSpace(targetColumnName))
+        // 多対多は中間テーブルを介する概念表現のため列ペアを持たない（GUI の VM 側整合をミラー）
+        if (relType == RelationshipType.ManyToMany)
         {
-            targetColumn = target.Columns.FirstOrDefault(c =>
-                string.Equals(c.Name, targetColumnName, StringComparison.OrdinalIgnoreCase)
-            );
-
-            if (targetColumn is null)
-            {
-                return ($"Column '{targetColumnName}' not found in table '{targetTable}'.", false);
-            }
-        }
-        else
-        {
-            targetColumn = ForeignKeyColumnResolver.ResolveTargetColumn(
-                source,
-                target,
-                sourcePk,
-                schema.Relationships
-            );
+            columnPairs!.Clear();
         }
 
         schema.Relationships.Add(
@@ -667,22 +646,180 @@ public static partial class DocumentErDiagramToolHost
                 SourceEntityId = source.Id,
                 TargetEntityId = target.Id,
                 Type = relType,
-                SourceColumnId = sourcePk?.Id,
-                TargetColumnId = targetColumn?.Id,
+                ColumnPairs = columnPairs!,
                 ConstraintName = $"FK_{target.TableName}_{source.TableName}",
             }
         );
 
         // 参照先の外部キー列へ FK フラグを付与する（GUI の LockRelationshipColumns をミラー）
-        if (targetColumn is not null)
+        foreach (var pair in columnPairs!)
         {
-            targetColumn.IsForeignKey = true;
+            var targetColumn = target.Columns.FirstOrDefault(c => c.Id == pair.TargetColumnId);
+
+            if (targetColumn is not null)
+            {
+                targetColumn.IsForeignKey = true;
+            }
         }
 
         return ($"Added relationship '{sourceTable}' → '{targetTable}'.", true);
     }
 
+    /// <summary>
+    /// <c>source_columns</c> / <c>target_columns</c>（並行配列）から列ペアを解決する。
+    /// 両方が省略された場合のみ親 PK 全列の自動ペア化へフォールバックする
+    /// </summary>
+    private static (
+        List<RelationshipColumnPair>? Pairs,
+        string? Error
+    ) ResolveRelationshipColumnPairs(
+        Entity source,
+        Entity target,
+        JsonElement args,
+        IEnumerable<Relationship> existingRelationships
+    )
+    {
+        var (sourceNames, sourceError) = GetColumnNames(args, "source_columns");
+
+        if (sourceError is not null)
+        {
+            return (null, sourceError);
+        }
+
+        var (targetNames, targetError) = GetColumnNames(args, "target_columns");
+
+        if (targetError is not null)
+        {
+            return (null, targetError);
+        }
+
+        if (sourceNames is null && targetNames is null)
+        {
+            return (
+                ForeignKeyColumnResolver.ResolveColumnPairs(source, target, existingRelationships),
+                null
+            );
+        }
+
+        if (sourceNames is null || targetNames is null)
+        {
+            return (
+                null,
+                "source_columns and target_columns must be given together (omit both to derive the mapping from the parent's primary key columns)."
+            );
+        }
+
+        if (sourceNames.Count != targetNames.Count)
+        {
+            return (
+                null,
+                $"source_columns and target_columns must have the same length (got {sourceNames.Count} and {targetNames.Count}); they are parallel arrays of column pairs."
+            );
+        }
+
+        var pairs = new List<RelationshipColumnPair>();
+        var usedSourceIds = new HashSet<Guid>();
+        var usedTargetIds = new HashSet<Guid>();
+
+        for (var i = 0; i < sourceNames.Count; i++)
+        {
+            var sourceColumn = FindColumn(source, sourceNames[i]);
+
+            if (sourceColumn is null)
+            {
+                return (
+                    null,
+                    $"Column '{sourceNames[i]}' not found in table '{source.TableName}'."
+                );
+            }
+
+            if (!usedSourceIds.Add(sourceColumn.Id))
+            {
+                return (
+                    null,
+                    $"Column '{sourceColumn.Name}' is listed more than once in source_columns."
+                );
+            }
+
+            var targetColumn = FindColumn(target, targetNames[i]);
+
+            if (targetColumn is null)
+            {
+                return (
+                    null,
+                    $"Column '{targetNames[i]}' not found in table '{target.TableName}'."
+                );
+            }
+
+            if (!usedTargetIds.Add(targetColumn.Id))
+            {
+                return (
+                    null,
+                    $"Column '{targetColumn.Name}' is listed more than once in target_columns."
+                );
+            }
+
+            pairs.Add(new RelationshipColumnPair(sourceColumn.Id, targetColumn.Id));
+        }
+
+        return (pairs, null);
+    }
+
+    /// <summary>列名配列の引数を取り出す（未指定は <c>null</c>・型不正や空配列はエラー）</summary>
+    private static (List<string>? Names, string? Error) GetColumnNames(
+        JsonElement args,
+        string propertyName
+    )
+    {
+        if (!args.TryGetProperty(propertyName, out var element))
+        {
+            return (null, null);
+        }
+
+        if (element.ValueKind == JsonValueKind.Null)
+        {
+            return (null, null);
+        }
+
+        if (element.ValueKind != JsonValueKind.Array)
+        {
+            return (null, $"{propertyName} must be an array of column names.");
+        }
+
+        var names = new List<string>();
+
+        foreach (var item in element.EnumerateArray())
+        {
+            if (
+                item.ValueKind != JsonValueKind.String
+                || string.IsNullOrWhiteSpace(item.GetString())
+            )
+            {
+                return (null, $"{propertyName} must contain non-empty column names.");
+            }
+
+            names.Add(item.GetString()!);
+        }
+
+        if (names.Count == 0)
+        {
+            return (null, $"{propertyName} must contain at least one column name.");
+        }
+
+        return (names, null);
+    }
+
+    /// <summary>指定テーブルの列を名前で検索する（大文字小文字を区別しない）</summary>
+    private static Column? FindColumn(Entity entity, string columnName) =>
+        entity.Columns.FirstOrDefault(column =>
+            string.Equals(column.Name, columnName, StringComparison.OrdinalIgnoreCase)
+        );
+
     /// <summary>指定した参照元・参照先テーブル間のリレーションを削除する</summary>
+    /// <remarks>
+    /// 同じ向きのテーブル対に複数のリレーションがある場合は <c>constraint_name</c> で特定する。
+    /// 無指定で複数一致したときは黙って先頭を消さず、候補の制約名を挙げてエラーにする
+    /// </remarks>
     private static (string, bool) RemoveRelationship(DiagramDocument document, JsonElement args)
     {
         var sourceTable = GetString(args, "source_table");
@@ -695,26 +832,78 @@ public static partial class DocumentErDiagramToolHost
 
         var schema = document.Schema;
 
-        var rel = schema.Relationships.FirstOrDefault(r =>
-        {
-            var source = FindEntityById(schema, r.SourceEntityId);
-            var target = FindEntityById(schema, r.TargetEntityId);
+        var matches = schema
+            .Relationships.Where(r =>
+            {
+                var source = FindEntityById(schema, r.SourceEntityId);
+                var target = FindEntityById(schema, r.TargetEntityId);
 
-            return source is not null
-                && target is not null
-                && string.Equals(source.TableName, sourceTable, StringComparison.OrdinalIgnoreCase)
-                && string.Equals(target.TableName, targetTable, StringComparison.OrdinalIgnoreCase);
-        });
+                return source is not null
+                    && target is not null
+                    && string.Equals(
+                        source.TableName,
+                        sourceTable,
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                    && string.Equals(
+                        target.TableName,
+                        targetTable,
+                        StringComparison.OrdinalIgnoreCase
+                    );
+            })
+            .ToList();
 
-        if (rel is null)
+        if (matches.Count == 0)
         {
             return ($"Relationship '{sourceTable}' → '{targetTable}' not found.", false);
         }
 
-        schema.Relationships.Remove(rel);
+        var constraintName = GetString(args, "constraint_name");
+
+        if (!string.IsNullOrWhiteSpace(constraintName))
+        {
+            var byName = matches
+                .Where(r =>
+                    string.Equals(
+                        r.ConstraintName,
+                        constraintName,
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                )
+                .ToList();
+
+            if (byName.Count == 0)
+            {
+                return (
+                    $"Relationship '{sourceTable}' → '{targetTable}' with constraint name '{constraintName}' not found. Candidates: {DescribeConstraintNames(matches)}.",
+                    false
+                );
+            }
+
+            matches = byName;
+        }
+
+        if (matches.Count > 1)
+        {
+            return (
+                $"Several relationships connect '{sourceTable}' → '{targetTable}'; specify constraint_name to choose one. Candidates: {DescribeConstraintNames(matches)}.",
+                false
+            );
+        }
+
+        schema.Relationships.Remove(matches[0]);
 
         return ($"Removed relationship '{sourceTable}' → '{targetTable}'.", true);
     }
+
+    /// <summary>候補リレーションの制約名を列挙する（名前なしは <c>(unnamed)</c>）</summary>
+    private static string DescribeConstraintNames(IEnumerable<Relationship> relationships) =>
+        string.Join(
+            ", ",
+            relationships.Select(r =>
+                string.IsNullOrWhiteSpace(r.ConstraintName) ? "(unnamed)" : r.ConstraintName!
+            )
+        );
 
     // ---------------- unique constraint operations ----------------
 
@@ -929,6 +1118,43 @@ public static partial class DocumentErDiagramToolHost
             sb.AppendLine(line);
         }
     }
+
+    /// <summary>要約テキスト用に外部キーの列ペアを <c>, FK: (親列 → 子列, …)</c> 形式で表す</summary>
+    /// <remarks>列ペアなし（多対多・未割当）や解決できない参照を含む場合は空文字を返す</remarks>
+    private static string DescribeColumnPairs(
+        Relationship relationship,
+        Entity? source,
+        Entity? target
+    )
+    {
+        if (relationship.ColumnPairs.Count == 0 || source is null || target is null)
+        {
+            return string.Empty;
+        }
+
+        var texts = new List<string>();
+
+        foreach (var pair in relationship.ColumnPairs)
+        {
+            var sourceColumn = source.Columns.FirstOrDefault(c => c.Id == pair.SourceColumnId);
+            var targetColumn = target.Columns.FirstOrDefault(c => c.Id == pair.TargetColumnId);
+
+            if (sourceColumn is null || targetColumn is null)
+            {
+                return string.Empty;
+            }
+
+            texts.Add($"{sourceColumn.Name} → {targetColumn.Name}");
+        }
+
+        return $", FK: ({string.Join(", ", texts)})";
+    }
+
+    /// <summary>要約テキスト用に外部キー制約名を <c> [名前]</c> 形式で表す（未設定は空文字）</summary>
+    private static string DescribeConstraintName(Relationship relationship) =>
+        string.IsNullOrWhiteSpace(relationship.ConstraintName)
+            ? string.Empty
+            : $" [{relationship.ConstraintName}]";
 
     // ---------------- helpers ----------------
 

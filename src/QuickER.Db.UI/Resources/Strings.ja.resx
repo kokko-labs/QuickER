@@ -264,25 +264,6 @@
     <value>注意: 以下の一意制約は、既存の外部キーが参照している列を覆っています。削除すると候補キーが失われるため、削除自体が拒否されるか外部キーが壊れる可能性があります（主キーが同じ列を覆っている場合を除く）:
 {0}</value>
   </data>
-  <data name="SchemaSync_ExecuteConfirmRebuildBlocked" xml:space="preserve">
-    <value>次のテーブルは同期されません: 取込で列対応が失われた複合外部キーを持つため、作り直すと単列の外部キーへ静かに置き換わってしまいます。
-
-{0}</value>
-  </data>
-  <data name="SchemaSync_CompositeForeignKeyNotice" xml:space="preserve">
-    <value>複合外部キー {0} 件は列対応を保持できないため、この画面での外部キー変更は正確でない可能性があります。</value>
-  </data>
-  <data name="SchemaSync_CompositeForeignKeyDiffBlocked" xml:space="preserve">
-    <value>{0}（選択不可: 複合外部キーの一部です）</value>
-  </data>
-  <data name="SchemaSync_CompositeForeignKeyChangeBlocked" xml:space="preserve">
-    <value>{0}（選択不可: 複合外部キーの作り直しを伴い、単列の外部キーへ静かに置き換わってしまいます）</value>
-  </data>
-  <data name="SchemaSync_ExecuteConfirmCompositeForeignKeyBlocked" xml:space="preserve">
-    <value>次の項目は複合外部キーが関わるため同期されません: 取込で列対応が失われた複合外部キーの作り直しを伴い、単列の外部キーへ静かに置き換わってしまいます。
-
-{0}</value>
-  </data>
   <data name="SchemaSync_Executing" xml:space="preserve">
     <value>実行中...</value>
   </data>
@@ -313,18 +294,6 @@
   </data>
   <data name="Db_ImportFailed" xml:space="preserve">
     <value>取り込みに失敗しました: {0}</value>
-  </data>
-  <data name="Db_ImportCompositeForeignKeyTitle" xml:space="preserve">
-    <value>取込の警告</value>
-  </data>
-  <data name="Db_ImportCompositeForeignKeyHeader" xml:space="preserve">
-    <value>一部の複合外部キーは完全には取り込めませんでした。列の対応付けは保持されず、列対応を持たない 1 本のリレーションとして取り込まれています:</value>
-  </data>
-  <data name="Db_ImportCompositeForeignKeyLine" xml:space="preserve">
-    <value>・{0}: {1} ({2}) → {3} ({4})</value>
-  </data>
-  <data name="Db_ImportCompositeForeignKeyMoreItems" xml:space="preserve">
-    <value>…他 {0} 件</value>
   </data>
   <data name="Db_SyncWriteBack" xml:space="preserve">
     <value>現在のダイアグラムを既存 DB に書き戻し (差分 ALTER 実行)</value>

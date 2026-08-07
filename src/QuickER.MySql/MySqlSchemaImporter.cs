@@ -32,7 +32,6 @@ public class MySqlSchemaImporter : ISchemaImporter
         {
             Entities = result.Entities,
             Relationships = result.Relationships,
-            Warnings = result.Warnings,
         };
     }
 
@@ -44,9 +43,6 @@ public class MySqlSchemaImporter : ISchemaImporter
 
         /// <summary>取得したリレーション一覧</summary>
         public List<Relationship> Relationships { get; init; } = new();
-
-        /// <summary>意味モデルへ完全には写し取れなかった箇所の警告（現状は複合外部キーの列対応喪失のみ）</summary>
-        public List<CompositeForeignKeyImportWarning> Warnings { get; init; } = new();
     }
 
     /// <summary>既に開かれた接続でスキーマを取得する（テストや接続再利用向け）</summary>
@@ -61,13 +57,12 @@ public class MySqlSchemaImporter : ISchemaImporter
         await LoadPrimaryKeysAsync(conn, tables, ct).ConfigureAwait(false);
         // 一意制約は FK の 1 対 1 判定の材料になるため、外部キーより先にモデルへ載せる
         await LoadUniqueConstraintsAsync(conn, tables, ct).ConfigureAwait(false);
-        var (rels, warnings) = await LoadForeignKeysAsync(conn, tables, ct).ConfigureAwait(false);
+        var rels = await LoadForeignKeysAsync(conn, tables, ct).ConfigureAwait(false);
 
         return new SchemaResult
         {
             Entities = tables.Values.Select(t => t.Entity).ToList(),
             Relationships = rels,
-            Warnings = warnings,
         };
     }
 
@@ -247,12 +242,8 @@ ORDER BY kcu.CONSTRAINT_NAME, kcu.ORDINAL_POSITION;";
     /// <summary>外部キーを読み込み、複合列を集約してリレーションへ変換する</summary>
     /// <remarks>
     /// 参照先列の集合が主キーまたは一意制約と一致する場合は 1 対 1、それ以外は 1 対多と判定する。
-    /// 複合外部キーは列対応を失うため、その旨の警告もあわせて返す。
     /// </remarks>
-    private static async Task<(
-        List<Relationship> Relationships,
-        List<CompositeForeignKeyImportWarning> Warnings
-    )> LoadForeignKeysAsync(
+    private static async Task<List<Relationship>> LoadForeignKeysAsync(
         MySqlConnection conn,
         Dictionary<string, SchemaTableEntry> tables,
         CancellationToken ct
@@ -289,9 +280,7 @@ ORDER BY kcu.CONSTRAINT_NAME, kcu.ORDINAL_POSITION;";
             }
         }
 
-        var rels = builder.Build(tables);
-
-        return (rels, builder.CompositeForeignKeyWarnings.ToList());
+        return builder.Build(tables);
     }
 
     /// <summary>UNIQUE 制約を読み込み、各エンティティの一意制約としてモデルへ載せる</summary>

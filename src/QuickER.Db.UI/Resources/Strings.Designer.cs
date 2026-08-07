@@ -456,36 +456,6 @@ namespace QuickER.Db.UI.Resources {
             }
         }
 
-        public static string SchemaSync_ExecuteConfirmRebuildBlocked {
-            get {
-                return ResourceManager.GetString("SchemaSync_ExecuteConfirmRebuildBlocked", resourceCulture);
-            }
-        }
-
-        public static string SchemaSync_CompositeForeignKeyNotice {
-            get {
-                return ResourceManager.GetString("SchemaSync_CompositeForeignKeyNotice", resourceCulture);
-            }
-        }
-
-        public static string SchemaSync_CompositeForeignKeyDiffBlocked {
-            get {
-                return ResourceManager.GetString("SchemaSync_CompositeForeignKeyDiffBlocked", resourceCulture);
-            }
-        }
-
-        public static string SchemaSync_CompositeForeignKeyChangeBlocked {
-            get {
-                return ResourceManager.GetString("SchemaSync_CompositeForeignKeyChangeBlocked", resourceCulture);
-            }
-        }
-
-        public static string SchemaSync_ExecuteConfirmCompositeForeignKeyBlocked {
-            get {
-                return ResourceManager.GetString("SchemaSync_ExecuteConfirmCompositeForeignKeyBlocked", resourceCulture);
-            }
-        }
-
         public static string SchemaSync_Executing {
             get {
                 return ResourceManager.GetString("SchemaSync_Executing", resourceCulture);
@@ -543,30 +513,6 @@ namespace QuickER.Db.UI.Resources {
         public static string Db_ImportFailed {
             get {
                 return ResourceManager.GetString("Db_ImportFailed", resourceCulture);
-            }
-        }
-
-        public static string Db_ImportCompositeForeignKeyTitle {
-            get {
-                return ResourceManager.GetString("Db_ImportCompositeForeignKeyTitle", resourceCulture);
-            }
-        }
-
-        public static string Db_ImportCompositeForeignKeyHeader {
-            get {
-                return ResourceManager.GetString("Db_ImportCompositeForeignKeyHeader", resourceCulture);
-            }
-        }
-
-        public static string Db_ImportCompositeForeignKeyLine {
-            get {
-                return ResourceManager.GetString("Db_ImportCompositeForeignKeyLine", resourceCulture);
-            }
-        }
-
-        public static string Db_ImportCompositeForeignKeyMoreItems {
-            get {
-                return ResourceManager.GetString("Db_ImportCompositeForeignKeyMoreItems", resourceCulture);
             }
         }
 

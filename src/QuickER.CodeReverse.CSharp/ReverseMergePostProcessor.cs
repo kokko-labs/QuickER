@@ -121,11 +121,14 @@ public static class ReverseMergePostProcessor
             return null;
         }
 
+        // C# リバースは単一キー前提のため、先頭の列ペアだけを端点として扱う
+        var firstPair = relationship.ColumnPairs.FirstOrDefault();
+
         return new RelationshipEndpoints(
             SourceEntityId: relationship.SourceEntityId,
-            SourceColumnName: ResolveColumnName(sourceColumns, relationship.SourceColumnId),
+            SourceColumnName: ResolveColumnName(sourceColumns, firstPair?.SourceColumnId),
             TargetEntityId: relationship.TargetEntityId,
-            TargetColumnName: ResolveColumnName(targetColumns, relationship.TargetColumnId)
+            TargetColumnName: ResolveColumnName(targetColumns, firstPair?.TargetColumnId)
         );
     }
 

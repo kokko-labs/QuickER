@@ -70,8 +70,10 @@ public class DbmlTests
                     SourceEntityId = customer.Id,
                     TargetEntityId = order.Id,
                     Type = RelationshipType.OneToMany,
-                    SourceColumnId = customer.Columns[0].Id,
-                    TargetColumnId = order.Columns[1].Id,
+                    ColumnPairs =
+                    [
+                        new RelationshipColumnPair(customer.Columns[0].Id, order.Columns[1].Id),
+                    ],
                     ConstraintName = "FK_Orders_Customer",
                 },
                 customer,
@@ -155,7 +157,13 @@ public class DbmlTests
         vm.StartAddOneToManyCommand.Execute(null);
         vm.OnEntityClicked(vm.Entities[0]);
         vm.OnEntityClicked(vm.Entities[1]);
-        vm.Relationships[0].TargetColumnId = vm.Entities[1].Columns[1].Id;
+        vm.Relationships[0]
+            .SetColumnPairs([
+                new RelationshipColumnPair(
+                    vm.Entities[0].Columns[0].Id,
+                    vm.Entities[1].Columns[1].Id
+                ),
+            ]);
         vm.Relationships[0].ConstraintName = "FK_Child_Parent";
 
         var path = Path.Combine(Path.GetTempPath(), $"er-{Guid.NewGuid()}.dbml");
@@ -178,5 +186,212 @@ public class DbmlTests
                 File.Delete(path);
             }
         }
+    }
+
+    /// <summary>複合外部キーが DBML 標準の複合 Ref 構文で書き出され、そのまま往復することを検証する</summary>
+    [Fact(DisplayName = "DBML は複合外部キーを複合 Ref 構文で往復できる")]
+    public void CompositeForeignKey_RoundTripsThroughCompositeRefSyntax()
+    {
+        var diagram = BuildCompositeDiagram();
+
+        var dbml = DbmlExporter.Build(diagram);
+
+        dbml.Should()
+            .Contain(
+                "Ref: [note: 'FK_TenantUser_TenantRegion'] TenantRegion.(TenantId, RegionCode) < TenantUser.(TenantRef, RegionRef)"
+            );
+
+        var restored = DbmlImporter.Parse(dbml);
+        var parent = restored.Entities.Single(entity => entity.TableName == "TenantRegion");
+        var child = restored.Entities.Single(entity => entity.TableName == "TenantUser");
+        var relationship = restored.Relationships.Single();
+
+        relationship.ColumnPairs.Should().HaveCount(2);
+        relationship
+            .ColumnPairs.Select(pair =>
+                (
+                    parent.Columns.Single(column => column.Id == pair.SourceColumnId).Name,
+                    child.Columns.Single(column => column.Id == pair.TargetColumnId).Name
+                )
+            )
+            .Should()
+            .Equal(("TenantId", "TenantRef"), ("RegionCode", "RegionRef"));
+
+        // 構成列はすべて FK 化される
+        child.Columns.Single(column => column.Name == "TenantRef").IsForeignKey.Should().BeTrue();
+        child.Columns.Single(column => column.Name == "RegionRef").IsForeignKey.Should().BeTrue();
+    }
+
+    /// <summary>単一列の Ref 行は行に書かれた列名がそのまま端点になる（推論しない）ことを検証する</summary>
+    [Fact(DisplayName = "DBML 取込は Ref 行の列名をそのまま端点に使う")]
+    public void Import_UsesRefLineColumnsAsWritten()
+    {
+        // 命名規則（ParentId）とは違う列を指す Ref 行。旧実装は推論で ParentId を選んでいた
+        var text = string.Join(
+            Environment.NewLine,
+            [
+                "Table Parent {",
+                "  ParentId int [pk, not null]",
+                "}",
+                string.Empty,
+                "Table Child {",
+                "  ChildId int [pk, not null]",
+                "  ParentId int [null]",
+                "  OwnerId int [null]",
+                "}",
+                string.Empty,
+                "Ref: Parent.ParentId < Child.OwnerId",
+            ]
+        );
+
+        var diagram = DbmlImporter.Parse(text);
+        var child = diagram.Entities.Single(entity => entity.TableName == "Child");
+        var pair = diagram.Relationships.Single().ColumnPairs.Should().ContainSingle().Subject;
+
+        pair.TargetColumnId.Should()
+            .Be(child.Columns.Single(column => column.Name == "OwnerId").Id);
+        child.Columns.Single(column => column.Name == "ParentId").IsForeignKey.Should().BeFalse();
+    }
+
+    /// <summary>単一列・複合が混在する図でも、それぞれの表記で往復することを検証する</summary>
+    [Fact(DisplayName = "DBML は単一列と複合外部キーの混在を往復できる")]
+    public void MixedForeignKeys_RoundTrip()
+    {
+        var diagram = BuildCompositeDiagram();
+
+        // 単一列の外部キーを 1 本足す（TenantUser → TenantAudit）
+        var child = diagram.Entities.Single(entity => entity.TableName == "TenantUser");
+        var audit = new Entity
+        {
+            TableName = "TenantAudit",
+            Columns =
+            {
+                new Column
+                {
+                    Name = "TenantAuditId",
+                    DataType = "int",
+                    IsPrimaryKey = true,
+                    IsNullable = false,
+                },
+                new Column
+                {
+                    Name = "TenantUserId",
+                    DataType = "int",
+                    IsNullable = false,
+                },
+            },
+        };
+        diagram.Entities.Add(audit);
+        diagram.Relationships.Add(
+            new Relationship
+            {
+                SourceEntityId = child.Id,
+                TargetEntityId = audit.Id,
+                Type = RelationshipType.OneToMany,
+                ColumnPairs =
+                [
+                    new RelationshipColumnPair(
+                        child.Columns.Single(column => column.Name == "TenantUserId").Id,
+                        audit.Columns.Single(column => column.Name == "TenantUserId").Id
+                    ),
+                ],
+                ConstraintName = "FK_TenantAudit_TenantUser",
+            }
+        );
+
+        var dbml = DbmlExporter.Build(diagram);
+
+        // 単一列は従来どおりの表記のまま
+        dbml.Should()
+            .Contain(
+                "Ref: [note: 'FK_TenantAudit_TenantUser'] TenantUser.TenantUserId < TenantAudit.TenantUserId"
+            );
+
+        var restored = DbmlImporter.Parse(dbml);
+
+        restored
+            .Relationships.Single(relationship =>
+                relationship.ConstraintName == "FK_TenantUser_TenantRegion"
+            )
+            .ColumnPairs.Should()
+            .HaveCount(2);
+        restored
+            .Relationships.Single(relationship =>
+                relationship.ConstraintName == "FK_TenantAudit_TenantUser"
+            )
+            .ColumnPairs.Should()
+            .ContainSingle();
+    }
+
+    /// <summary>複合 PK (TenantId, RegionCode) の親と、複合外部キーを持つ子からなる図を作る</summary>
+    private static ErDiagram BuildCompositeDiagram()
+    {
+        var parent = new Entity
+        {
+            TableName = "TenantRegion",
+            Columns =
+            {
+                new Column
+                {
+                    Name = "TenantId",
+                    DataType = "int",
+                    IsPrimaryKey = true,
+                    IsNullable = false,
+                },
+                new Column
+                {
+                    Name = "RegionCode",
+                    DataType = "nvarchar(10)",
+                    IsPrimaryKey = true,
+                    IsNullable = false,
+                },
+            },
+        };
+        var child = new Entity
+        {
+            TableName = "TenantUser",
+            Columns =
+            {
+                new Column
+                {
+                    Name = "TenantUserId",
+                    DataType = "int",
+                    IsPrimaryKey = true,
+                    IsNullable = false,
+                },
+                new Column
+                {
+                    Name = "TenantRef",
+                    DataType = "int",
+                    IsNullable = false,
+                },
+                new Column
+                {
+                    Name = "RegionRef",
+                    DataType = "nvarchar(10)",
+                    IsNullable = false,
+                },
+            },
+        };
+
+        return new ErDiagram
+        {
+            Entities = [parent, child],
+            Relationships =
+            [
+                new Relationship
+                {
+                    SourceEntityId = parent.Id,
+                    TargetEntityId = child.Id,
+                    Type = RelationshipType.OneToMany,
+                    ColumnPairs =
+                    [
+                        new RelationshipColumnPair(parent.Columns[0].Id, child.Columns[1].Id),
+                        new RelationshipColumnPair(parent.Columns[1].Id, child.Columns[2].Id),
+                    ],
+                    ConstraintName = "FK_TenantUser_TenantRegion",
+                },
+            ],
+        };
     }
 }

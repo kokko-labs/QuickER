@@ -44,9 +44,6 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
     /// <summary>直近の取込で得た補助オブジェクト（再構築で温存するインデックス・トリガー・一意制約）</summary>
     private IReadOnlyList<SchemaAuxiliaryObject> _liveAuxiliaryObjects = [];
 
-    /// <summary>直近の取込で検出した複合外部キーの警告（案内表示・選択不可化・再構築ブロックに用いる）</summary>
-    private IReadOnlyList<CompositeForeignKeyImportWarning> _liveCompositeForeignKeys = [];
-
     /// <summary>直近の <see cref="UpdatePreview"/> で組み立てた実行計画（実行確認の文言分岐に用いる）</summary>
     private SyncPlan _currentPlan = new();
 
@@ -122,7 +119,6 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
             _liveEntities = live.Entities;
             _liveRelationships = live.Relationships;
             _liveAuxiliaryObjects = live.AuxiliaryObjects;
-            _liveCompositeForeignKeys = live.Warnings;
 
             // 対象方言のケーパビリティを渡す（SQLite は説明差分を抑止し FK 制約名を比較から除外する）
             var diff = new SchemaDiffService().Compute(
@@ -164,31 +160,8 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
 
             DiffItems.Clear();
 
-            // 複合外部キーは列対応を失って取り込まれるため、この画面の FK 差分は正確でない可能性がある。
-            // 一覧の先頭に選択不可の案内項目を出して、その事実をこの場で伝える
-            if (_liveCompositeForeignKeys.Count > 0)
+            foreach (var entry in diff.Items)
             {
-                DiffItems.Add(
-                    new SchemaDiffItem
-                    {
-                        Kind = SchemaDiffKind.Advisory,
-                        Description = string.Format(
-                            Strings.SchemaSync_CompositeForeignKeyNotice,
-                            _liveCompositeForeignKeys.Count
-                        ),
-                        IsSelected = false,
-                        IsSelectable = false,
-                    }
-                );
-            }
-
-            // 複合外部キーの作り直しを招く変更（主キー変更・FK 関与列の定義変更）の照合範囲を一度だけ組み立てる
-            var compositeScope = CompositeForeignKeyGuard.BuildSyncScope(BuildPlanContext());
-
-            foreach (var item in diff.Items)
-            {
-                var entry = ResolveDiffEntry(item, compositeScope);
-
                 entry.PropertyChanged += (_, e) =>
                 {
                     if (e.PropertyName == nameof(SchemaDiffItem.IsSelected))
@@ -216,43 +189,6 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
         }
     }
 
-    /// <summary>
-    /// 差分項目を一覧へ載せる形へ解決する（同期すると壊れると分かっているものは選択不可の案内へ格下げする）。
-    /// </summary>
-    /// <remarks>
-    /// 格下げは「そもそも選ばせない」ための UX 側の措置で、計画側（<see cref="SyncPlanner"/>）も同じ判定で
-    /// 除外する二重防御になっている（直接 API を使う経路・ここでの格下げ漏れに備える）。
-    /// </remarks>
-    private SchemaDiffItem ResolveDiffEntry(
-        SchemaDiffItem item,
-        CompositeForeignKeySyncScope compositeScope
-    )
-    {
-        // 複合外部キーに関与する FK 差分は、実行すると単列 FK へ置き換わって静かに壊れる
-        if (CompositeForeignKeyGuard.IsAffectedForeignKeyDiff(item, _liveCompositeForeignKeys))
-        {
-            return item.ToAdvisory(
-                string.Format(Strings.SchemaSync_CompositeForeignKeyDiffBlocked, item.Description)
-            );
-        }
-
-        // 主キー変更・FK 関与列の変更は、依存 FK の自動 drop → 再 add を通じて同じ壊れ方を招く
-        if (
-            CompositeForeignKeyGuard.IsBlockedChange(
-                item,
-                _provider.SyncCapabilities,
-                compositeScope
-            )
-        )
-        {
-            return item.ToAdvisory(
-                string.Format(Strings.SchemaSync_CompositeForeignKeyChangeBlocked, item.Description)
-            );
-        }
-
-        return item;
-    }
-
     /// <summary>直近の取込結果から、計画組み立て用の live スキーマ入力を作る</summary>
     private SyncPlanContext BuildPlanContext() =>
         new()
@@ -260,7 +196,6 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
             LiveEntities = _liveEntities,
             LiveRelationships = _liveRelationships,
             AuxiliaryObjects = _liveAuxiliaryObjects,
-            CompositeForeignKeyWarnings = _liveCompositeForeignKeys,
         };
 
     /// <summary>選択中の差分から実行計画を組み立て、スクリプトプレビューを再生成する（選択変更時に呼ぶ）</summary>
@@ -463,42 +398,6 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
                 .Append(Environment.NewLine)
                 .Append(
                     string.Format(Strings.SchemaSync_ExecuteConfirmUniqueConstraintDropRisk, fkList)
-                );
-        }
-
-        // 複合外部キーのため再構築を止めたテーブル（同期されずに残る）
-        var blockedTables = _currentPlan
-            .Warnings.Where(w => w.Kind == SyncPlanWarningKind.RebuildBlockedByCompositeForeignKey)
-            .Select(w => w.TableName)
-            .ToList();
-
-        if (blockedTables.Count > 0)
-        {
-            var tableList = string.Join(Environment.NewLine, blockedTables.Select(t => "  • " + t));
-            sb.Append(Environment.NewLine)
-                .Append(Environment.NewLine)
-                .Append(string.Format(Strings.SchemaSync_ExecuteConfirmRebuildBlocked, tableList));
-        }
-
-        // 複合外部キーの作り直しを招くため計画から落とした変更（主キー変更・列定義変更）
-        var blockedChanges = _currentPlan
-            .Warnings.Where(w => w.Kind == SyncPlanWarningKind.CompositeForeignKeyBlocksChange)
-            .Select(w => string.IsNullOrEmpty(w.Detail) ? w.TableName : $"{w.TableName}.{w.Detail}")
-            .ToList();
-
-        if (blockedChanges.Count > 0)
-        {
-            var changeList = string.Join(
-                Environment.NewLine,
-                blockedChanges.Select(t => "  • " + t)
-            );
-            sb.Append(Environment.NewLine)
-                .Append(Environment.NewLine)
-                .Append(
-                    string.Format(
-                        Strings.SchemaSync_ExecuteConfirmCompositeForeignKeyBlocked,
-                        changeList
-                    )
                 );
         }
 

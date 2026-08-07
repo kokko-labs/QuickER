@@ -144,8 +144,7 @@ public class CSharpCodeGenerationServiceTests
                     SourceEntityId = customer,
                     TargetEntityId = order,
                     Type = RelationshipType.OneToMany,
-                    SourceColumnId = customerId,
-                    TargetColumnId = orderCustomerId,
+                    ColumnPairs = [new(customerId, orderCustomerId)],
                 },
             ],
         };
@@ -441,8 +440,7 @@ public class CSharpCodeGenerationServiceTests
                     SourceEntityId = category,
                     TargetEntityId = item,
                     Type = RelationshipType.OneToMany,
-                    SourceColumnId = categoryId,
-                    TargetColumnId = itemCategoryId,
+                    ColumnPairs = [new(categoryId, itemCategoryId)],
                 },
             ],
         };
@@ -588,6 +586,87 @@ public class CSharpCodeGenerationServiceTests
                 && diagnostic.Message.Contains(manyToManyWarningPrefix)
             );
         result.Files[0].Content.Should().NotContain("ICollection<RoleEntity>");
+    }
+
+    /// <summary>リレーション警告の表示名が Guid でなく「親テーブル → 子テーブル」になることを検証する</summary>
+    /// <remarks>
+    /// 図の上で対象を特定できない Guid 表示は診断として役に立たないため、
+    /// 表示名の規則（制約名の有無に依らずテーブル名ペア・最後の手段のみ Id）を固定する。
+    /// </remarks>
+    [Theory]
+    [InlineData("FK_child_parent", "parents → children")]
+    [InlineData(null, "parents → children")]
+    public void Generate_CompositeRelationshipWarning_UsesReadableName(
+        string? constraintName,
+        string expectedDisplayName
+    )
+    {
+        var parentA = new Column
+        {
+            Name = "a",
+            DataType = "int",
+            IsPrimaryKey = true,
+        };
+        var parentB = new Column
+        {
+            Name = "b",
+            DataType = "int",
+            IsPrimaryKey = true,
+        };
+        var childId = new Column
+        {
+            Name = "id",
+            DataType = "int",
+            IsPrimaryKey = true,
+        };
+        var childA = new Column { Name = "a_ref", DataType = "int" };
+        var childB = new Column { Name = "b_ref", DataType = "int" };
+        var parent = new Entity
+        {
+            Id = Guid.NewGuid(),
+            TableName = "parents",
+            Columns = [parentA, parentB],
+        };
+        var child = new Entity
+        {
+            Id = Guid.NewGuid(),
+            TableName = "children",
+            Columns = [childId, childA, childB],
+        };
+        var relationship = new Relationship
+        {
+            Id = Guid.NewGuid(),
+            SourceEntityId = parent.Id,
+            TargetEntityId = child.Id,
+            Type = RelationshipType.OneToMany,
+            ConstraintName = constraintName,
+            ColumnPairs =
+            [
+                new RelationshipColumnPair(parentA.Id, childA.Id),
+                new RelationshipColumnPair(parentB.Id, childB.Id),
+            ],
+        };
+        var diagram = new ErDiagram { Entities = [parent, child], Relationships = [relationship] };
+
+        var result = new CSharpCodeGenerationService().Generate(
+            diagram,
+            new CodeGenerationOptions { RootNamespace = "Sample.Domain" }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        var warning = result
+            .Diagnostics.Should()
+            .ContainSingle(diagnostic =>
+                diagnostic.Severity == GenerationDiagnosticSeverity.Warning
+                && diagnostic.Message.Contains(
+                    Strings.CodeGen_Warning_RelationshipCompositeSkipped.Split("{0}")[0]
+                )
+            )
+            .Subject;
+        warning.Message.Should().Contain(expectedDisplayName);
+        warning
+            .Message.Should()
+            .NotContain(relationship.Id.ToString(), "Guid 表示は特定に使えない");
     }
 
     /// <summary>Entity ↔ EditModel を変換する Mapper クラスが生成されることを検証する</summary>
@@ -961,8 +1040,7 @@ public class CSharpCodeGenerationServiceTests
                     Type = RelationshipType.OneToOne,
                     SourceEntityId = owner,
                     TargetEntityId = profile,
-                    SourceColumnId = ownerPk,
-                    TargetColumnId = profileFk,
+                    ColumnPairs = [new(ownerPk, profileFk)],
                 },
                 // 自己参照: category -> category
                 new()
@@ -971,8 +1049,7 @@ public class CSharpCodeGenerationServiceTests
                     Type = RelationshipType.OneToMany,
                     SourceEntityId = category,
                     TargetEntityId = category,
-                    SourceColumnId = categoryPk,
-                    TargetColumnId = categoryParentFk,
+                    ColumnPairs = [new(categoryPk, categoryParentFk)],
                 },
                 // 複数親: line_item は sales_order と product の両方を親に持つ
                 new()
@@ -981,8 +1058,7 @@ public class CSharpCodeGenerationServiceTests
                     Type = RelationshipType.OneToMany,
                     SourceEntityId = salesOrder,
                     TargetEntityId = lineItem,
-                    SourceColumnId = salesOrderPk,
-                    TargetColumnId = lineOrderFk,
+                    ColumnPairs = [new(salesOrderPk, lineOrderFk)],
                 },
                 new()
                 {
@@ -990,8 +1066,7 @@ public class CSharpCodeGenerationServiceTests
                     Type = RelationshipType.OneToMany,
                     SourceEntityId = product,
                     TargetEntityId = lineItem,
-                    SourceColumnId = productPk,
-                    TargetColumnId = lineProductFk,
+                    ColumnPairs = [new(productPk, lineProductFk)],
                 },
             ],
         };
@@ -1735,8 +1810,7 @@ public class CSharpCodeGenerationServiceTests
                     SourceEntityId = customer,
                     TargetEntityId = order,
                     Type = RelationshipType.OneToMany,
-                    SourceColumnId = customerId,
-                    TargetColumnId = orderCustomerId,
+                    ColumnPairs = [new(customerId, orderCustomerId)],
                 },
             ],
         };
@@ -2378,8 +2452,7 @@ public class CSharpCodeGenerationServiceTests
                     Type = RelationshipType.OneToMany,
                     SourceEntityId = customerId,
                     TargetEntityId = orderId,
-                    SourceColumnId = customerPk,
-                    TargetColumnId = orderFk,
+                    ColumnPairs = [new(customerPk, orderFk)],
                 },
             ],
         };
@@ -2479,8 +2552,7 @@ public class CSharpCodeGenerationServiceTests
                     Type = RelationshipType.OneToMany,
                     SourceEntityId = customerId,
                     TargetEntityId = orderId,
-                    SourceColumnId = customerPk,
-                    TargetColumnId = orderFk,
+                    ColumnPairs = [new(customerPk, orderFk)],
                 },
             ],
         };
@@ -2571,8 +2643,7 @@ public class CSharpCodeGenerationServiceTests
                     Type = RelationshipType.OneToMany,
                     SourceEntityId = customerId,
                     TargetEntityId = orderId,
-                    SourceColumnId = customerPk,
-                    TargetColumnId = orderFk,
+                    ColumnPairs = [new(customerPk, orderFk)],
                 },
             ],
         };
@@ -3561,9 +3632,8 @@ public class CSharpCodeGenerationServiceTests
                 {
                     Id = Guid.NewGuid(),
                     SourceEntityId = customer,
-                    SourceColumnId = custPk,
                     TargetEntityId = order,
-                    TargetColumnId = orderFk,
+                    ColumnPairs = [new(custPk, orderFk)],
                     Type = RelationshipType.OneToMany,
                 },
             ],

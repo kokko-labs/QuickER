@@ -193,8 +193,7 @@ public class SqliteRepositoryDialectTests
                     Type = RelationshipType.OneToMany,
                     SourceEntityId = customer,
                     TargetEntityId = order,
-                    SourceColumnId = customerPk,
-                    TargetColumnId = orderCustomerFk,
+                    ColumnPairs = [new(customerPk, orderCustomerFk)],
                 },
             ],
         };

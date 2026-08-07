@@ -745,6 +745,29 @@ internal sealed partial class CSharpGenerationModelBuilder
         string DependentColumnName
     );
 
+    /// <summary>診断メッセージ用のリレーション表示名を組み立てる</summary>
+    /// <remarks>
+    /// 利用者が図の上で対象を特定できるよう「親テーブル → 子テーブル」で表す
+    /// （制約名より図上の見た目と直結するため。Guid はそのまま見せない）。
+    /// 端点エンティティが解決できない壊れた参照のときだけ、最後の識別手段として Id へフォールバックする。
+    /// </remarks>
+    private static string DescribeRelationship(ErDiagram diagram, Relationship relationship)
+    {
+        var source = diagram.Entities.FirstOrDefault(item =>
+            item.Id == relationship.SourceEntityId
+        );
+        var target = diagram.Entities.FirstOrDefault(item =>
+            item.Id == relationship.TargetEntityId
+        );
+
+        if (source is null || target is null)
+        {
+            return relationship.Id.ToString();
+        }
+
+        return $"{source.TableName} → {target.TableName}";
+    }
+
     /// <summary>全リレーションを一度だけ走査し、エンティティ ID ごとのナビゲーション情報を解決する</summary>
     /// <remarks>
     /// 多対多や参照先・キーが解決できないリレーションは警告を出して生成対象外とする。
@@ -767,7 +790,10 @@ internal sealed partial class CSharpGenerationModelBuilder
             {
                 diagnostics.Add(
                     GenerationDiagnostic.Warning(
-                        string.Format(Strings.CodeGen_Warning_ManyToManySkipped, relationship.Id)
+                        string.Format(
+                            Strings.CodeGen_Warning_ManyToManySkipped,
+                            DescribeRelationship(diagram, relationship)
+                        )
                     )
                 );
                 continue;
@@ -786,28 +812,35 @@ internal sealed partial class CSharpGenerationModelBuilder
                     GenerationDiagnostic.Warning(
                         string.Format(
                             Strings.CodeGen_Warning_RelationshipTargetNotFound,
-                            relationship.Id
+                            DescribeRelationship(diagram, relationship)
                         )
                     )
                 );
                 continue;
             }
 
-            // 明示指定の列を優先し、無ければ principal は主キー、dependent は外部キー列にフォールバックする
-            var sourceColumn = relationship.SourceColumnId is null
-                ? null
-                : source.Columns.FirstOrDefault(column =>
-                    column.Id == relationship.SourceColumnId.Value
+            // 複合外部キー（列ペア 2 組以上）は生成 Repository が単一キー前提のため対象外
+            if (relationship.ColumnPairs.Count > 1)
+            {
+                diagnostics.Add(
+                    GenerationDiagnostic.Warning(
+                        string.Format(
+                            Strings.CodeGen_Warning_RelationshipCompositeSkipped,
+                            DescribeRelationship(diagram, relationship)
+                        )
+                    )
                 );
-            var targetColumn = relationship.TargetColumnId is null
+                continue;
+            }
+
+            // 列ペアが唯一の正本（主キー・IsForeignKey フラグによる推測フォールバックは行わない）
+            var columnPair = relationship.ColumnPairs.FirstOrDefault();
+            var principalColumn = columnPair is null
                 ? null
-                : target.Columns.FirstOrDefault(column =>
-                    column.Id == relationship.TargetColumnId.Value
-                );
-            var principalColumn =
-                sourceColumn ?? source.Columns.FirstOrDefault(column => column.IsPrimaryKey);
-            var dependentColumn =
-                targetColumn ?? target.Columns.FirstOrDefault(column => column.IsForeignKey);
+                : source.Columns.FirstOrDefault(column => column.Id == columnPair.SourceColumnId);
+            var dependentColumn = columnPair is null
+                ? null
+                : target.Columns.FirstOrDefault(column => column.Id == columnPair.TargetColumnId);
 
             if (principalColumn is null || dependentColumn is null)
             {
@@ -815,7 +848,7 @@ internal sealed partial class CSharpGenerationModelBuilder
                     GenerationDiagnostic.Warning(
                         string.Format(
                             Strings.CodeGen_Warning_RelationshipKeyUnknown,
-                            relationship.Id
+                            DescribeRelationship(diagram, relationship)
                         )
                     )
                 );

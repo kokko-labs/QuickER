@@ -156,12 +156,6 @@ namespace QuickER.Provider.Resources {
             }
         }
 
-        public static string Diff_AddForeignKeyNoColumn {
-            get {
-                return ResourceManager.GetString("Diff_AddForeignKeyNoColumn", resourceCulture);
-            }
-        }
-
         public static string Diff_DropForeignKey {
             get {
                 return ResourceManager.GetString("Diff_DropForeignKey", resourceCulture);

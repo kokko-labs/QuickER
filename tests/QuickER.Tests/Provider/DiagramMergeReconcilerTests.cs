@@ -134,8 +134,7 @@ public class DiagramMergeReconcilerTests
         {
             SourceEntityId = importedParent.Id,
             TargetEntityId = importedChild.Id,
-            SourceColumnId = importedParentPk,
-            TargetColumnId = importedChildFk,
+            ColumnPairs = [new(importedParentPk, importedChildFk)],
         };
 
         var merged = DiagramMergeReconciler.Reconcile(
@@ -148,8 +147,9 @@ public class DiagramMergeReconcilerTests
         var mergedRelationship = merged.Relationships.Should().ContainSingle().Subject;
         mergedRelationship.SourceEntityId.Should().Be(parentId);
         mergedRelationship.TargetEntityId.Should().Be(childId);
-        mergedRelationship.SourceColumnId.Should().Be(parentPkId);
-        mergedRelationship.TargetColumnId.Should().Be(childFkId);
+        var mergedPair = mergedRelationship.ColumnPairs.Should().ContainSingle().Subject;
+        mergedPair.SourceColumnId.Should().Be(parentPkId);
+        mergedPair.TargetColumnId.Should().Be(childFkId);
     }
 
     /// <summary>リネーム（別名）は一致せず新規 Guid のまま＝そのエンティティを参照するクエリは壊れる</summary>

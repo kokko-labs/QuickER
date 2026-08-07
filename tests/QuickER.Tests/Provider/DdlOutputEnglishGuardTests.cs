@@ -195,8 +195,7 @@ public sealed class DdlOutputEnglishGuardTests
         {
             SourceEntityId = orders.Id,
             TargetEntityId = invoice.Id,
-            SourceColumnId = orders.Columns[0].Id,
-            TargetColumnId = invoice.Columns[1].Id,
+            ColumnPairs = [new(orders.Columns[0].Id, invoice.Columns[1].Id)],
         };
 
         var context = new SyncPlanContext
@@ -237,6 +236,7 @@ public sealed class DdlOutputEnglishGuardTests
                 Kind = SchemaDiffKind.AddForeignKey,
                 TableName = "invoice",
                 ColumnName = "orders_id",
+                ForeignKeyColumnPairs = [new("id", "orders_id")],
                 ParentEntity = orders,
                 ChildEntity = invoice,
                 Relationship = invoiceRel,
@@ -332,8 +332,7 @@ public sealed class DdlOutputEnglishGuardTests
                     SourceEntityId = parent.Id,
                     TargetEntityId = child.Id,
                     Type = RelationshipType.OneToMany,
-                    SourceColumnId = parent.Columns[0].Id,
-                    TargetColumnId = child.Columns[0].Id,
+                    ColumnPairs = [new(parent.Columns[0].Id, child.Columns[0].Id)],
                     ConstraintName = "FK_child_parent",
                     OnDelete = ForeignKeyReferentialAction.Cascade,
                     OnUpdate = ForeignKeyReferentialAction.SetNull,
@@ -418,6 +417,7 @@ public sealed class DdlOutputEnglishGuardTests
                 Kind = SchemaDiffKind.AddForeignKey,
                 TableName = "c2",
                 ColumnName = "p2_id",
+                ForeignKeyColumnPairs = [new("id", "p2_id")],
                 ParentEntity = parentWithPk,
                 ChildEntity = childForFk,
                 Relationship = new Relationship

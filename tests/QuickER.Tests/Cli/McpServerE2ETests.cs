@@ -234,6 +234,57 @@ public class McpServerE2ETests
             );
             setUnique.isError.Should().BeFalse(setUnique.text);
 
+            // --- add_relationship: 複合外部キー（並行配列）を stdio 越しに定義できる ---
+            var addOrder = await CallAsync(
+                client,
+                "add_entity",
+                new() { ["file"] = diagramFile, ["table_name"] = "Order" },
+                cts.Token
+            );
+            addOrder.isError.Should().BeFalse(addOrder.text);
+
+            foreach (
+                var (column, type) in new[]
+                {
+                    ("OrderId", "int"),
+                    ("CustomerId", "int"),
+                    ("CustomerEmail", "nvarchar(100)"),
+                }
+            )
+            {
+                var added = await CallAsync(
+                    client,
+                    "add_column",
+                    new()
+                    {
+                        ["file"] = diagramFile,
+                        ["table_name"] = "Order",
+                        ["column_name"] = column,
+                        ["data_type"] = type,
+                        ["is_primary_key"] = column == "OrderId",
+                        ["is_nullable"] = false,
+                    },
+                    cts.Token
+                );
+                added.isError.Should().BeFalse(added.text);
+            }
+
+            var addRelationship = await CallAsync(
+                client,
+                "add_relationship",
+                new()
+                {
+                    ["file"] = diagramFile,
+                    ["source_table"] = "Customer",
+                    ["source_columns"] = new[] { "Id", "Email" },
+                    ["target_table"] = "Order",
+                    ["target_columns"] = new[] { "CustomerId", "CustomerEmail" },
+                    ["relationship_type"] = "OneToMany",
+                },
+                cts.Token
+            );
+            addRelationship.isError.Should().BeFalse(addRelationship.text);
+
             // --- get_diagram_summary: 内容確認 ---
             var summary = await CallAsync(
                 client,
@@ -248,6 +299,8 @@ public class McpServerE2ETests
             // 一意制約は名前なしなら DDL 生成と同じ合成名で並ぶ
             summary.text.Should().Contain("Unique constraints:");
             summary.text.Should().Contain("UQ_Customer_Email (Email)");
+            // 複合外部キーは列ペアが宣言順で並ぶ
+            summary.text.Should().Contain("FK: (Id → CustomerId, Email → CustomerEmail)");
 
             // --- set_query: 名前付きクエリ定義（DSL・件数・パラメータ付き） ---
             var setQuery = await CallAsync(

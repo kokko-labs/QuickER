@@ -390,8 +390,7 @@ public class SyncPlannerTests
         {
             SourceEntityId = parent.Id,
             TargetEntityId = child.Id,
-            SourceColumnId = parent.Columns[0].Id,
-            TargetColumnId = child.Columns[1].Id,
+            ColumnPairs = [new(parent.Columns[0].Id, child.Columns[1].Id)],
         };
 
         var plan = new SyncPlanner().BuildPlan(
@@ -408,6 +407,7 @@ public class SyncPlannerTests
                     Kind = SchemaDiffKind.AddForeignKey,
                     TableName = "orders",
                     ColumnName = "customer_id",
+                    ForeignKeyColumnPairs = [new("id", "customer_id")],
                     ParentEntity = parent,
                     ChildEntity = child,
                     Relationship = rel,
@@ -425,9 +425,9 @@ public class SyncPlannerTests
         rb.TableName.Should().Be("orders");
         rb.CopyColumns.Should().BeEmpty();
         var fk = rb.ForeignKeys.Should().ContainSingle().Which;
-        fk.ChildColumn.Should().Be("customer_id");
+        fk.ChildColumns.Should().Equal("customer_id");
         fk.ParentTable.Should().Be("customer");
-        fk.ParentColumn.Should().Be("id");
+        fk.ParentColumns.Should().Equal("id");
     }
 
     /// <summary>既存テーブルの FK 集合が「live − 選択 Drop ＋ 選択 Add」で合成されることを検証する</summary>
@@ -444,8 +444,7 @@ public class SyncPlannerTests
         {
             SourceEntityId = customer.Id,
             TargetEntityId = orders.Id,
-            SourceColumnId = customer.Columns[0].Id,
-            TargetColumnId = refCol.Id,
+            ColumnPairs = [new(customer.Columns[0].Id, refCol.Id)],
             ConstraintName = "FK_orders_customer_0",
         };
         var context = new SyncPlanContext
@@ -459,8 +458,7 @@ public class SyncPlannerTests
         {
             SourceEntityId = supplier.Id,
             TargetEntityId = orders.Id,
-            SourceColumnId = supplier.Columns[0].Id,
-            TargetColumnId = refCol.Id,
+            ColumnPairs = [new(supplier.Columns[0].Id, refCol.Id)],
         };
 
         var plan = new SyncPlanner().BuildPlan(
@@ -480,6 +478,7 @@ public class SyncPlannerTests
                     Kind = SchemaDiffKind.AddForeignKey,
                     TableName = "orders",
                     ColumnName = "ref_id",
+                    ForeignKeyColumnPairs = [new("id", "ref_id")],
                     ParentEntity = supplier,
                     ChildEntity = orders,
                     Relationship = addRel,
@@ -494,9 +493,9 @@ public class SyncPlannerTests
         var rb = plan.Rebuilds.Should().ContainSingle().Which;
         // live の customer FK は削除され、supplier FK だけが残る
         var fk = rb.ForeignKeys.Should().ContainSingle().Which;
-        fk.ChildColumn.Should().Be("ref_id");
+        fk.ChildColumns.Should().Equal("ref_id");
         fk.ParentTable.Should().Be("supplier");
-        fk.ParentColumn.Should().Be("id");
+        fk.ParentColumns.Should().Equal("id");
     }
 
     /// <summary>複数テーブルにまたがる再構築がテーブル単位でグループ化されることを検証する</summary>
@@ -556,6 +555,7 @@ public class SyncPlannerTests
             Kind = SchemaDiffKind.AddForeignKey,
             TableName = "orders",
             ColumnName = "customer_id",
+            ForeignKeyColumnPairs = [new("id", "customer_id")],
             ParentEntity = parent,
             ChildEntity = newChild,
             IsSelected = true,
@@ -906,8 +906,7 @@ public class SyncPlannerTests
         {
             SourceEntityId = customer.Id,
             TargetEntityId = orders.Id,
-            SourceColumnId = customer.Columns[0].Id,
-            TargetColumnId = orders.Columns[1].Id,
+            ColumnPairs = [new(customer.Columns[0].Id, orders.Columns[1].Id)],
             ConstraintName = "FK_orders_customer",
         };
 
@@ -1246,8 +1245,7 @@ public class SyncPlannerTests
         {
             SourceEntityId = customer.Id,
             TargetEntityId = orders.Id,
-            SourceColumnId = customer.Columns[0].Id,
-            TargetColumnId = orders.Columns[1].Id,
+            ColumnPairs = [new(customer.Columns[0].Id, orders.Columns[1].Id)],
             ConstraintName = "FK_orders_customer",
         };
         var context = new SyncPlanContext
@@ -1273,15 +1271,14 @@ public class SyncPlannerTests
         plan.Sections.Should().Contain(s => s.Kind == SchemaDiffKind.AddForeignKey);
     }
 
-    // ---------------- 複合外部キーの作り直しを招く変更の除外（逐次 DDL 方言） ----------------
+    // ---------------- 複合外部キーの同期（列ペアが正本になった後の挙動） ----------------
 
     /// <summary>
-    /// 複合外部キー（取込で列対応が失われた FK）と、同じ子テーブルが持つ無関係な単列 FK を含む live を組み立てる。
+    /// 複合外部キーと、同じ子テーブルが持つ無関係な単列 FK を含む live を組み立てる。
     /// </summary>
     /// <remarks>
-    /// 複合外部キーの子側は列対応を失うため <c>TargetColumnId</c> が null になり、列の解決は命名規約の
-    /// フォールバックへ落ちる（＝live のリレーションからは構成列を復元できない）。そのため照合範囲は
-    /// 取込警告（<see cref="CompositeForeignKeyImportWarning"/>）の全構成列から組み立てる。
+    /// 意味モデルが複合外部キーを表現できるため、live のリレーションは全構成列を保持する。
+    /// 以降のテストは「複合外部キーがガードで止められず、全構成列のまま同期対象になる」ことを固定する。
     /// </remarks>
     private static SyncPlanContext CompositeFkScenario()
     {
@@ -1304,17 +1301,19 @@ public class SyncPlannerTests
         {
             SourceEntityId = parent.Id,
             TargetEntityId = child.Id,
-            SourceColumnId = parent.Columns[0].Id,
-            // 複合外部キーは意味モデルが列対応を表現できず、子列の指定を失う
-            TargetColumnId = null,
+            // 複合構成（parent.id → child.parent_id / parent.code → child.order_no）をそのまま保持する
+            ColumnPairs =
+            [
+                new(parent.Columns[0].Id, child.Columns[1].Id),
+                new(parent.Columns[1].Id, child.Columns[2].Id),
+            ],
             ConstraintName = "FK_child_parent",
         };
         var simple = new Relationship
         {
             SourceEntityId = vendor.Id,
             TargetEntityId = child.Id,
-            SourceColumnId = vendor.Columns[0].Id,
-            TargetColumnId = child.Columns[3].Id,
+            ColumnPairs = [new(vendor.Columns[0].Id, child.Columns[3].Id)],
             ConstraintName = "FK_child_vendor",
         };
 
@@ -1322,36 +1321,24 @@ public class SyncPlannerTests
         {
             LiveEntities = [parent, vendor, child],
             LiveRelationships = [composite, simple],
-            CompositeForeignKeyWarnings =
-            [
-                new CompositeForeignKeyImportWarning(
-                    "FK_child_parent",
-                    "child",
-                    ["parent_id", "order_no"],
-                    "parent",
-                    ["id", "code"]
-                ),
-            ],
         };
     }
 
     /// <summary>
-    /// 複合外部キーが参照している親テーブルの主キー変更は、計画から除外されて警告が積まれることを検証する。
+    /// 複合外部キーが参照している親テーブルの主キー変更が、全構成列を保った暗黙の DROP → 再 ADD として
+    /// 計画へ入ることを検証する（劣化時代のガード撤去で止まらなくなったことの固定）。
     /// </summary>
-    /// <remarks>
-    /// 実行すると複合外部キーが単列 FK として作り直される（MySQL は成功して静かに壊れ、Oracle は
-    /// 部分適用で FK が消える）ため、暗黙の DROP → 再 ADD ごと計画へ入れない。
-    /// </remarks>
-    [Fact(DisplayName = "複合外部キー: 参照先テーブルの主キー変更は計画から除外され警告が積まれる")]
-    public void AlterPrimaryKey_OnCompositeForeignKeyParent_IsBlocked()
+    [Fact(DisplayName = "複合外部キー: 参照先テーブルの主キー変更は全構成列のまま計画へ入る")]
+    public void AlterPrimaryKey_OnCompositeForeignKeyParent_RebuildsAllColumnPairs()
     {
         var context = CompositeFkScenario();
+        // 主キーを (id) → (id, code) へ拡張する＝被参照列集合 (id, code) はそのまま候補キーであり続ける
         var targetParent = new Entity
         {
             TableName = "parent",
             Columns =
             {
-                Col("id", "INT"),
+                PkId(),
                 new Column
                 {
                     Name = "code",
@@ -1368,23 +1355,37 @@ public class SyncPlannerTests
             context
         );
 
-        // 主キー変更も、それに伴う FK の自動 DROP → 再 ADD も計画に現れない
-        plan.Sections.Should().BeEmpty();
+        // 複合外部キーが暗黙の DROP → 再 ADD として注入される
+        var drop = plan
+            .Sections.Single(s => s.Kind == SchemaDiffKind.DropForeignKey)
+            .Items.Should()
+            .ContainSingle()
+            .Which;
+        drop.ForeignKeyName.Should().Be("FK_child_parent");
 
-        var warning = plan.Warnings.Should().ContainSingle().Which;
-        warning.Kind.Should().Be(SyncPlanWarningKind.CompositeForeignKeyBlocksChange);
-        warning.TableName.Should().Be("parent");
-        warning.Detail.Should().BeEmpty();
+        var add = plan
+            .Sections.Single(s => s.Kind == SchemaDiffKind.AddForeignKey)
+            .Items.Should()
+            .ContainSingle()
+            .Which;
+
+        // 単列へ縮まず、全構成列がそのまま再作成される
+        add.ForeignKeyColumnPairs.Select(p => (p.ParentColumn, p.ChildColumn))
+            .Should()
+            .Equal(("id", "parent_id"), ("code", "order_no"));
+
+        // 被参照列集合 (id, code) は同期後の主キーとちょうど一致するため候補キー喪失の警告も出ない
+        plan.Warnings.Should().BeEmpty();
     }
 
     /// <summary>
-    /// 複合外部キーと無関係な親テーブル（同じ子テーブルが持つ別 FK の参照先）の主キー変更は、
-    /// 従来どおり計画へ入ることを検証する（照合が子テーブル名だけに落ちていないことの担保）。
+    /// 複合外部キーと無関係な親テーブル（同じ子テーブルが持つ別 FK の参照先）の主キー変更では、
+    /// 複合外部キーを巻き込まないことを検証する。
     /// </summary>
     [Fact(
-        DisplayName = "複合外部キー: 無関係な FK の参照先テーブルの主キー変更は従来どおり計画へ入る"
+        DisplayName = "複合外部キー: 無関係な FK の参照先テーブルの主キー変更は複合 FK を巻き込まない"
     )]
-    public void AlterPrimaryKey_OnUnrelatedParent_IsNotBlocked()
+    public void AlterPrimaryKey_OnUnrelatedParent_LeavesCompositeForeignKeyAlone()
     {
         var context = CompositeFkScenario();
         // 主キー構成は変えない（差分項目の有無だけを見る合成ケース）＝候補キー喪失の警告も出ない
@@ -1415,29 +1416,58 @@ public class SyncPlannerTests
     }
 
     /// <summary>
-    /// FK 参加列の型変更に FK の外し直しが必要な方言では、複合外部キーが関与する列の定義変更が
-    /// 計画から除外されることを検証する（同じテーブルの無関係な列は従来どおり）。
+    /// FK 参加列の型変更に FK の外し直しが必要な方言では、複合外部キーの構成列（第 1 列・副構成列とも）の
+    /// 定義変更が、全構成列を保った暗黙の DROP → 再 ADD を伴って計画へ入ることを検証する。
     /// </summary>
     /// <remarks>
-    /// 「無関係な列」には複合外部キーの構成列でない <c>memo</c> を使う。以前はここで第 2 構成列の
-    /// <c>order_no</c> を無関係な列として扱っていたが、それは誤り——構成列はどれを変えても外部キー全体が
-    /// 作り直される（<see cref="AlterColumn_OnCompositeForeignKeySecondaryColumns_IsBlocked"/> で固定）。
+    /// 構成列はどれを変えても外部キー全体が作り直される。列ペアが正本になったため、その作り直しは
+    /// 単列へ縮まない——劣化時代のガードが止めていたのはこの縮退で、その前提そのものが無くなった。
     /// </remarks>
-    [Fact(
-        DisplayName = "複合外部キー: capability が真の方言では関与列の定義変更が計画から除外される"
-    )]
-    public void AlterColumn_OnCompositeForeignKeyColumn_IsBlockedWhenCapabilityIsTrue()
+    [Theory(DisplayName = "複合外部キー: 構成列の定義変更は全構成列のままの FK 再作成を伴う")]
+    [InlineData("child", "parent_id", "BIGINT")]
+    [InlineData("child", "order_no", "BIGINT")]
+    [InlineData("parent", "code", "BIGINT")]
+    public void AlterColumn_OnCompositeForeignKeyColumn_RebuildsAllColumnPairs(
+        string table,
+        string column,
+        string newType
+    )
     {
         var context = CompositeFkScenario();
-        var alterFkColumn = new SchemaDiffItem
+        var alter = new SchemaDiffItem
         {
             Kind = SchemaDiffKind.AlterColumn,
-            TableName = "child",
-            ColumnName = "parent_id",
-            Column = Col("parent_id", "BIGINT"),
+            TableName = table,
+            ColumnName = column,
+            Column = Col(column, newType),
             IsSelected = true,
         };
-        var alterOtherColumn = new SchemaDiffItem
+
+        var plan = new SyncPlanner().BuildPlan([alter], FkRebuildCaps, context);
+
+        plan.Sections.Single(s => s.Kind == SchemaDiffKind.AlterColumn).Items.Should().Equal(alter);
+
+        var add = plan
+            .Sections.Single(s => s.Kind == SchemaDiffKind.AddForeignKey)
+            .Items.Should()
+            .ContainSingle()
+            .Which;
+        add.Relationship!.ConstraintName.Should().Be("FK_child_parent");
+        add.ForeignKeyColumnPairs.Select(p => (p.ParentColumn, p.ChildColumn))
+            .Should()
+            .Equal(("id", "parent_id"), ("code", "order_no"));
+
+        plan.Warnings.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// 複合外部キーに関与しない列の定義変更は、FK の作り直しを一切伴わないことを検証する。
+    /// </summary>
+    [Fact(DisplayName = "複合外部キー: 無関係な列の定義変更は FK を作り直さない")]
+    public void AlterColumn_OnUnrelatedColumn_DoesNotRebuildForeignKey()
+    {
+        var context = CompositeFkScenario();
+        var alter = new SchemaDiffItem
         {
             Kind = SchemaDiffKind.AlterColumn,
             TableName = "child",
@@ -1446,76 +1476,19 @@ public class SyncPlannerTests
             IsSelected = true,
         };
 
-        var plan = new SyncPlanner().BuildPlan(
-            [alterFkColumn, alterOtherColumn],
-            FkRebuildCaps,
-            context
-        );
+        var plan = new SyncPlanner().BuildPlan([alter], FkRebuildCaps, context);
 
-        // 複合外部キーが関与する列だけが落ち、無関係な列の変更は残る
-        plan.Sections.Should().ContainSingle().Which.Items.Should().Equal(alterOtherColumn);
-
-        var warning = plan.Warnings.Should().ContainSingle().Which;
-        warning.Kind.Should().Be(SyncPlanWarningKind.CompositeForeignKeyBlocksChange);
-        warning.TableName.Should().Be("child");
-        warning.Detail.Should().Be("parent_id");
+        plan.Sections.Should().ContainSingle().Which.Items.Should().Equal(alter);
+        plan.Warnings.Should().BeEmpty();
     }
 
     /// <summary>
-    /// 複合外部キーの<b>副構成列</b>（子側の 2 列目・親側の 2 列目）の定義変更も計画から除外されることを検証する。
+    /// FK の外し直しが不要な方言では、複合外部キーの構成列の定義変更でも FK を作り直さないことを検証する。
     /// </summary>
-    /// <remarks>
-    /// 副構成列は意味モデルへ劣化した live リレーションからは復元できない（子側は <c>TargetColumnId</c> が
-    /// 無く命名規約フォールバックで 1 列だけが選ばれる）ため、live 列挙を照合の土台にすると素通りしていた。
-    /// 素通りすると SQL Server では暗黙の FK 再構築にも載らず、実行のたびに Msg 5074 で失敗し続ける
-    /// （ロールバックされるので壊れはしないが、説明のない恒久的な失敗になる）。照合範囲を取込警告の
-    /// 全構成列から組み立てることで、実行前に「複合外部キーのため同期できない」と伝える。
-    /// </remarks>
-    [Fact(DisplayName = "複合外部キー: 副構成列（子・親の 2 列目）の定義変更も計画から除外される")]
-    public void AlterColumn_OnCompositeForeignKeySecondaryColumns_IsBlocked()
-    {
-        var context = CompositeFkScenario();
-        // 子側の第 2 構成列（FK 列名の命名規約に合わないため live 列挙では解決されない）
-        var alterChildSecondary = new SchemaDiffItem
-        {
-            Kind = SchemaDiffKind.AlterColumn,
-            TableName = "child",
-            ColumnName = "order_no",
-            Column = Col("order_no", "BIGINT"),
-            IsSelected = true,
-        };
-        // 親側の第 2 構成列（被参照列としては主キーの 1 列目しか復元されない）
-        var alterParentSecondary = new SchemaDiffItem
-        {
-            Kind = SchemaDiffKind.AlterColumn,
-            TableName = "parent",
-            ColumnName = "code",
-            Column = Col("code", "BIGINT"),
-            IsSelected = true,
-        };
-
-        var plan = new SyncPlanner().BuildPlan(
-            [alterChildSecondary, alterParentSecondary],
-            FkRebuildCaps,
-            context
-        );
-
-        // 両方が落ちる＝暗黙の FK 再構築も注入されない
-        plan.Sections.Should().BeEmpty();
-
-        plan.Warnings.Should()
-            .OnlyContain(w => w.Kind == SyncPlanWarningKind.CompositeForeignKeyBlocksChange);
-        plan.Warnings.Select(w => (w.TableName, w.Detail))
-            .Should()
-            .Equal(("child", "order_no"), ("parent", "code"));
-    }
-
-    /// <summary>
-    /// FK の外し直しが不要な方言では、複合外部キーが関与する列の定義変更も従来どおり計画へ入ることを検証する
-    /// （そもそも FK を作り直さないため、静かに壊れる経路が無い）。
-    /// </summary>
-    [Fact(DisplayName = "複合外部キー: capability が偽の方言では関与列の定義変更を止めない")]
-    public void AlterColumn_OnCompositeForeignKeyColumn_IsNotBlockedWhenCapabilityIsFalse()
+    [Fact(
+        DisplayName = "複合外部キー: capability が偽の方言では構成列の変更でも FK を作り直さない"
+    )]
+    public void AlterColumn_OnCompositeForeignKeyColumn_DoesNotRebuildWhenCapabilityIsFalse()
     {
         var context = CompositeFkScenario();
         var alter = new SchemaDiffItem
@@ -1534,18 +1507,20 @@ public class SyncPlannerTests
     }
 
     /// <summary>
-    /// rebuild 方言（SQLite）で、複合外部キーの子テーブルは再構築対象から外れて警告が積まれ、
-    /// 他テーブルの再構築は続行することを検証する。
+    /// rebuild 方言（SQLite）で、複合外部キーの子テーブルも通常どおり再構築されることを検証する。
     /// </summary>
     /// <remarks>
-    /// 再構築すると列対応を失った複合外部キーが単列外部キーとして作り直される（成功して静かに壊れる）ため、
-    /// 該当テーブルだけを止める。畳み込まれなかった項目はセクションへ残り、レンダラーがスキップを明示する。
+    /// 劣化時代は「再構築すると複合外部キーが単列へ作り替えられる」としてこのテーブルの再構築を止めていた。
+    /// 合成後の定義が全構成列を保つようになったため、ブロックは不要になっている。
     /// </remarks>
-    [Fact(
-        DisplayName = "SQLite: 複合外部キーの子テーブルは再構築せず警告を積む（他テーブルは続行）"
-    )]
-    public void Rebuild_CompositeForeignKeyChildTable_IsBlocked()
+    [Fact(DisplayName = "SQLite: 複合外部キーの子テーブルも通常どおり再構築される")]
+    public void Rebuild_CompositeForeignKeyChildTable_IsRebuiltWithAllColumnPairs()
     {
+        var orders = new Entity
+        {
+            TableName = "orders",
+            Columns = { PkId(), Col("line_no", "INT") },
+        };
         var orderLine = new Entity
         {
             TableName = "order_line",
@@ -1557,16 +1532,20 @@ public class SyncPlannerTests
                 Col("note", "TEXT"),
             },
         };
+        var composite = new Relationship
+        {
+            SourceEntityId = orders.Id,
+            TargetEntityId = orderLine.Id,
+            ColumnPairs =
+            [
+                new(orders.Columns[0].Id, orderLine.Columns[1].Id),
+                new(orders.Columns[1].Id, orderLine.Columns[2].Id),
+            ],
+            ConstraintName = "FK_order_line_orders",
+        };
         var memo = new Entity { TableName = "memo", Columns = { PkId(), Col("note", "TEXT") } };
-        var compositeWarning = new CompositeForeignKeyImportWarning(
-            "FK_order_line_orders",
-            "order_line",
-            ["order_id", "line_no"],
-            "orders",
-            ["id", "line_no"]
-        );
 
-        var blockedAlter = new SchemaDiffItem
+        var childAlter = new SchemaDiffItem
         {
             Kind = SchemaDiffKind.AlterColumn,
             TableName = "order_line",
@@ -1584,24 +1563,29 @@ public class SyncPlannerTests
         };
 
         var plan = new SyncPlanner().BuildPlan(
-            [blockedAlter, otherAlter],
+            [childAlter, otherAlter],
             RebuildCaps,
             new SyncPlanContext
             {
-                LiveEntities = [orderLine, memo],
-                CompositeForeignKeyWarnings = [compositeWarning],
+                LiveEntities = [orders, orderLine, memo],
+                LiveRelationships = [composite],
             }
         );
 
-        // 複合外部キーを持たない memo だけが再構築される
-        plan.Rebuilds.Should().ContainSingle().Which.TableName.Should().Be("memo");
+        // 両テーブルとも再構築される（複合外部キーによるブロックは無い）
+        plan.Rebuilds.Select(r => r.TableName).Should().BeEquivalentTo("order_line", "memo");
 
-        var warning = plan.Warnings.Should().ContainSingle().Which;
-        warning.Kind.Should().Be(SyncPlanWarningKind.RebuildBlockedByCompositeForeignKey);
-        warning.TableName.Should().Be("order_line");
+        // 再構築後の定義でも外部キーは全構成列を保つ
+        var rebuild = plan.Rebuilds.Single(r => r.TableName == "order_line");
+        var fk = rebuild.ForeignKeys.Should().ContainSingle().Which;
+        fk.ConstraintName.Should().Be("FK_order_line_orders");
+        fk.ChildColumns.Should().Equal("order_id", "line_no");
+        fk.ParentTable.Should().Be("orders");
+        fk.ParentColumns.Should().Equal("id", "line_no");
 
-        // 畳み込まれなかった項目はセクションへ残る（SQLite レンダラーがスキップコメントを出す）
-        plan.Sections.Should().ContainSingle().Which.Items.Should().Equal(blockedAlter);
+        // 全項目が再構築へ畳まれるためセクションは残らない
+        plan.Sections.Should().BeEmpty();
+        plan.Warnings.Should().BeEmpty();
     }
 
     /// <summary>

@@ -190,9 +190,6 @@
   <data name="Cli_SchemaImportFailed" xml:space="preserve">
     <value>データベースからのスキーマ取得に失敗しました: {0}</value>
   </data>
-  <data name="Cli_CompositeForeignKeyWarning" xml:space="preserve">
-    <value>警告: 複合外部キー {0}（{1} の {2} → {3} の {4}）は列の対応付けを保持できないため、列対応を持たない 1 本のリレーションとして取り込みました。</value>
-  </data>
   <data name="Cli_RepositoryDialectUnsupported" xml:space="preserve">
     <value>Repository (QuickER)（GenerateRepositories）は方言 '{0}' に対応していません。対応方言: {1}</value>
   </data>

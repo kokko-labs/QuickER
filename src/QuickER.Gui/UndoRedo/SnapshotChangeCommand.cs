@@ -4,7 +4,7 @@ namespace QuickER.UndoRedo;
 
 /// <summary>複数プロパティの変更前後スナップショットを Undo / Redo 時に一括適用する汎用コマンド</summary>
 /// <remarks>
-/// IsPrimaryKey ↔ IsNullable や RelationshipType ↔ SourceColumnId / TargetColumnId のような
+/// IsPrimaryKey ↔ IsNullable や RelationshipType ↔ 列ペアのような
 /// 連動するプロパティ変更を 1 履歴として扱う用途を想定する
 /// </remarks>
 public sealed class SnapshotChangeCommand : IUndoableCommand

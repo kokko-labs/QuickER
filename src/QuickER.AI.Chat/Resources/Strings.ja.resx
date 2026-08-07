@@ -180,7 +180,7 @@
 - テーブル名・カラム名は英数字とアンダースコアのみ。
 - 各テーブルに説明 (description)、各カラムに説明 (description) を必ず付ける。
 - 主キーは各テーブルに必ず『ちょうど 1 列』設ける。複合主キー（複数列の主キー）は禁止。多対多の中間テーブルでも単独のサロゲートキー（例: OrderItemId int）を主キーとし、親テーブルへの参照列は外部キー（主キーではない）として定義する。
-- 外部キーは 1 つのリレーション（外部キー制約）につき必ず 1 列の参照で構成する。複数列の組で 1 つの参照を表す複合外部キーは禁止。
+- 外部キーは、親の参照先列と子の参照元列を対にした順序付きの列ペアで構成する。単一列の参照を基本とし、親のキーが本当に複数列にまたがる場合だけ複合外部キー（2 組以上の列ペア）にする。
 - 外部キー列を同時に主キーにしてはならない。参照元テーブルの主キーを引き継ぐ列は外部キー（非主キー・NOT NULL）にする。
 - 役割が異なる複数の外部キー（例: ShippingAddressId と BillingAddressId が同じテーブルを参照）は正当であり、それぞれ別のリレーションとして定義する。
 - NULL 許容は必ず設定する。主キーは NOT NULL、必須項目や通常の外部キーも NOT NULL、任意入力の項目だけ NULL 許容にする。
@@ -189,8 +189,8 @@
   <data name="ErDesign_SinglePrimaryKeyRule" xml:space="preserve">
     <value>主キーは各テーブル 1 列のみ（複合主キー禁止）。</value>
   </data>
-  <data name="ErDesign_SingleColumnForeignKeyRule" xml:space="preserve">
-    <value>リレーションは 1 列対 1 列の参照のみ（複合外部キー禁止）。</value>
+  <data name="ErDesign_ForeignKeyColumnMappingRule" xml:space="preserve">
+    <value>source_columns と target_columns は同じ長さの並行配列で、1 要素なら単一列の参照、2 要素以上なら複合外部キーになる。</value>
   </data>
   <data name="ErDesign_FunctionToolLabel" xml:space="preserve">
     <value>関数ツール</value>
@@ -206,7 +206,7 @@ ER 図の作成・変更は必ず提供されたツール（{0}）で行って�
 - 既存の ER 図に触れる前に、必ず get_diagram_summary で現在の状態を確認する。
 - テーブル作成は add_entity → add_column の順で行い、最初に主キー列を 1 列だけ is_primary_key=true で追加する。{2}
 - 外部キー列は add_column で is_primary_key=false（通常は is_nullable=false）として追加し、その後 add_relationship で参照を定義する。
-- add_relationship では source_column（親の主キー列）と target_column（子の外部キー列）を必ず明示する。{3}
+- add_relationship では source_columns（親の参照先列）と target_columns（子の外部キー列）を必ず明示する。両方省略した場合は親の主キー列から自動で対応付けられる。{3}
 - ツールがエラーを返した場合は、エラーメッセージの指示に従って修正し再実行する。
 
 # 名前付きクエリの運用手順

@@ -85,8 +85,7 @@ public class MockSchemaSerializerTests
                 {
                     SourceEntityId = customer.Id,
                     TargetEntityId = order.Id,
-                    SourceColumnId = customerPk.Id,
-                    TargetColumnId = orderFk.Id,
+                    ColumnPairs = [new(customerPk.Id, orderFk.Id)],
                     Type = RelationshipType.OneToMany,
                 },
             },

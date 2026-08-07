@@ -339,8 +339,11 @@ public sealed class CSharpReverseParser
                     SourceEntityId = principalEntity.Id, // 参照先（PK 側）を起点として表現
                     TargetEntityId = dependentEntity.Id, // FK 保有側
                     Type = isCollection ? RelationshipType.OneToMany : RelationshipType.OneToOne,
-                    SourceColumnId = sourceColumnId,
-                    TargetColumnId = targetColumnId,
+                    // C# リバースは単一キー前提のため 1 組の列ペアとして表現する
+                    ColumnPairs =
+                        sourceColumnId is { } sourceId && targetColumnId is { } targetId
+                            ? [new RelationshipColumnPair(sourceId, targetId)]
+                            : [],
                 }
             );
         }

@@ -46,9 +46,11 @@ public static class SchemaSignature
                     + ":"
                     + x.Type
                     + ":"
-                    + x.SourceColumnId
-                    + ":"
-                    + x.TargetColumnId
+                    // 構成列ペアは宣言順を含めて署名する（順序が違えば別の外部キー定義）
+                    + string.Join(
+                        ",",
+                        x.ColumnPairs.Select(p => p.SourceColumnId + ">" + p.TargetColumnId)
+                    )
                     + ":"
                     + x.ConstraintName
                     + ":"

@@ -504,14 +504,14 @@ public class SchemaSyncDialogViewModelTests
         vm.DiffItems.Should().NotContain(i => i.Kind == SchemaDiffKind.ReorderColumns);
     }
 
-    // ---------------- 複合外部キー（取込で列対応が失われた FK）の扱い ----------------
+    // ---------------- 複合外部キーの扱い（列ペアが正本になった後の挙動） ----------------
 
     /// <summary>
-    /// 複合外部キーを取り込んだ live（図側では FK が消えている＝DropForeignKey 差分が出る）を組み立てる。
+    /// 複合外部キーを持つ live（図側では FK が消えている＝DropForeignKey 差分が出る）を組み立てる。
     /// </summary>
     private static (SchemaImportResult Live, Entity[] Target) CompositeForeignKeyScenario()
     {
-        var parent = Table("parent", Col("id", "int", pk: true));
+        var parent = Table("parent", Col("id", "int", pk: true), Col("order_no", "int"));
         var child = Table(
             "child",
             Col("id", "int", pk: true),
@@ -523,26 +523,15 @@ public class SchemaSyncDialogViewModelTests
             SourceEntityId = parent.Id,
             TargetEntityId = child.Id,
             Type = RelationshipType.OneToMany,
-            SourceColumnId = parent.Columns[0].Id,
-            // 複合外部キーは意味モデルが列対応を表現できず、子列の指定を失う
-            TargetColumnId = null,
+            // 意味モデルが複合外部キーを表現できるため、取込は全構成列を保つ
+            ColumnPairs =
+            [
+                new(parent.Columns[0].Id, child.Columns[1].Id),
+                new(parent.Columns[1].Id, child.Columns[2].Id),
+            ],
             ConstraintName = "FK_child_parent",
         };
-        var live = new SchemaImportResult
-        {
-            Entities = [parent, child],
-            Relationships = [rel],
-            Warnings =
-            [
-                new CompositeForeignKeyImportWarning(
-                    "FK_child_parent",
-                    "child",
-                    ["parent_id", "order_no"],
-                    "parent",
-                    ["id", "order_no"]
-                ),
-            ],
-        };
+        var live = new SchemaImportResult { Entities = [parent, child], Relationships = [rel] };
 
         // 目標はテーブル構成が同じでリレーション無し＝ DropForeignKey 差分だけが出る
         var target = new[] { parent.Clone(preserveId: true), child.Clone(preserveId: true) };
@@ -550,12 +539,14 @@ public class SchemaSyncDialogViewModelTests
     }
 
     /// <summary>
-    /// 複合外部キーを含む取込では、一覧の先頭に案内項目が出て、関与する FK 差分が選択不可へ格下げされることを検証する。
+    /// 複合外部キーの FK 差分は、案内へ格下げされず通常どおり選択・実行できることを検証する。
     /// </summary>
-    [Fact(
-        DisplayName = "複合外部キー: 案内項目が先頭に出て、関与する FK 差分は選択不可へ格下げされる"
-    )]
-    public async Task Refresh_CompositeForeignKey_AddsNoticeAndDemotesForeignKeyDiff()
+    /// <remarks>
+    /// 劣化時代は「関与する FK 差分」を選択不可の案内へ格下げし、一覧の先頭に注意書きを出していた。
+    /// 列ペアが正本になった今はどちらも不要で、複合外部キーは普通の差分として扱われる。
+    /// </remarks>
+    [Fact(DisplayName = "複合外部キー: FK 差分は格下げされず通常どおり同期できる")]
+    public async Task Refresh_CompositeForeignKey_KeepsForeignKeyDiffSelectable()
     {
         var (live, target) = CompositeForeignKeyScenario();
         var provider = new FakeProvider(new SqlServerProvider(), new FakeSchemaImporter(live));
@@ -563,27 +554,16 @@ public class SchemaSyncDialogViewModelTests
 
         await vm.RefreshCommand.ExecuteAsync(null);
 
-        var notice = vm.DiffItems[0];
-        notice.Kind.Should().Be(SchemaDiffKind.Advisory);
-        notice.IsSelectable.Should().BeFalse();
-        notice
-            .Description.Should()
-            .Be(string.Format(DbStrings.SchemaSync_CompositeForeignKeyNotice, 1));
+        // 案内項目は追加されない（差分そのものだけが並ぶ）
+        vm.DiffItems.Should().OnlyContain(i => i.Kind == SchemaDiffKind.DropForeignKey);
 
-        var dropFk = vm
-            .DiffItems.Should()
-            .ContainSingle(i => i.Kind == SchemaDiffKind.DropForeignKey)
-            .Which;
-        dropFk.IsSelectable.Should().BeFalse();
-        dropFk.IsSelected.Should().BeFalse();
-        dropFk
-            .Description.Should()
-            .Match(string.Format(DbStrings.SchemaSync_CompositeForeignKeyDiffBlocked, "*"));
+        var dropFk = vm.DiffItems.Should().ContainSingle().Which;
+        dropFk.IsSelectable.Should().BeTrue();
 
-        // 全選択でも実行対象にならない（誤った単列 FK への置換を構造的に封じる）
+        // DropForeignKey は破壊的のため既定では未選択。選択すればスクリプトへ載る
         vm.SelectAllCommand.Execute(null);
-        dropFk.IsSelected.Should().BeFalse();
-        vm.ScriptPreview.Should().NotContain("FK_child_parent");
+        dropFk.IsSelected.Should().BeTrue();
+        vm.ScriptPreview.Should().Contain("FK_child_parent");
     }
 
     /// <summary>
@@ -608,43 +588,41 @@ public class SchemaSyncDialogViewModelTests
             SourceEntityId = parent.Id,
             TargetEntityId = child.Id,
             Type = RelationshipType.OneToMany,
-            SourceColumnId = parent.Columns[0].Id,
-            // 複合外部キーは意味モデルが列対応を表現できず、子列の指定を失う
-            TargetColumnId = null,
+            // 意味モデルが複合外部キーを表現できるため、取込は全構成列を保つ
+            ColumnPairs =
+            [
+                new(parent.Columns[0].Id, child.Columns[1].Id),
+                new(parent.Columns[1].Id, child.Columns[2].Id),
+            ],
             ConstraintName = "FK_child_parent",
         };
-        var live = new SchemaImportResult
-        {
-            Entities = [parent, child],
-            Relationships = [rel],
-            Warnings =
-            [
-                new CompositeForeignKeyImportWarning(
-                    "FK_child_parent",
-                    "child",
-                    ["parent_id", "order_no"],
-                    "parent",
-                    ["id", "code"]
-                ),
-            ],
-        };
+        var live = new SchemaImportResult { Entities = [parent, child], Relationships = [rel] };
 
-        // 目標: 親の主キーを id → code へ移し、子の parent_id を型変更し、無関係な列を 1 本足す
+        // 目標: 親の主キーを id → (id, code) へ拡張し、子の parent_id を型変更し、無関係な列を 1 本足す
         var parentTarget = parent.Clone(preserveId: true);
-        parentTarget.Columns.Single(c => c.Name == "id").IsPrimaryKey = false;
         parentTarget.Columns.Single(c => c.Name == "code").IsPrimaryKey = true;
         var childTarget = child.Clone(preserveId: true);
         childTarget.Columns.Single(c => c.Name == "parent_id").DataType = "bigint";
         childTarget.Columns.Add(new Column { Name = "memo", DataType = "nvarchar(50)" });
 
         // 外部キー自体は図にも残す（FK 差分を出さず、主キー・列の変更だけを見るため）
+        // ＝ live と同じ複合構成にする
         var targetRel = new Relationship
         {
             SourceEntityId = parentTarget.Id,
             TargetEntityId = childTarget.Id,
             Type = RelationshipType.OneToMany,
-            SourceColumnId = parentTarget.Columns.Single(c => c.Name == "id").Id,
-            TargetColumnId = childTarget.Columns.Single(c => c.Name == "parent_id").Id,
+            ColumnPairs =
+            [
+                new(
+                    parentTarget.Columns.Single(c => c.Name == "id").Id,
+                    childTarget.Columns.Single(c => c.Name == "parent_id").Id
+                ),
+                new(
+                    parentTarget.Columns.Single(c => c.Name == "code").Id,
+                    childTarget.Columns.Single(c => c.Name == "order_no").Id
+                ),
+            ],
             ConstraintName = "FK_child_parent",
         };
 
@@ -652,11 +630,12 @@ public class SchemaSyncDialogViewModelTests
     }
 
     /// <summary>
-    /// 複合外部キーの作り直しを招く変更（参照先テーブルの主キー変更・関与列の型変更）が選択不可へ
-    /// 格下げされ、無関係な差分は従来どおり選択できることを検証する。
+    /// 複合外部キーの参照先の主キー変更・構成列の型変更が、いずれも選択可能なまま同期できることを検証する。
     /// </summary>
-    [Fact(DisplayName = "複合外部キー: 参照先の主キー変更と関与列の型変更は選択不可へ格下げされる")]
-    public async Task Refresh_CompositeForeignKey_DemotesPrimaryKeyAndColumnChanges()
+    [Fact(
+        DisplayName = "複合外部キー: 参照先の主キー変更と構成列の型変更も選択可能なまま同期できる"
+    )]
+    public async Task Refresh_CompositeForeignKey_KeepsPrimaryKeyAndColumnChangesSelectable()
     {
         var (live, target, targetRelationships) = CompositeForeignKeyChangeScenario();
         var provider = new FakeProvider(new SqlServerProvider(), new FakeSchemaImporter(live));
@@ -669,45 +648,31 @@ public class SchemaSyncDialogViewModelTests
 
         await vm.RefreshCommand.ExecuteAsync(null);
 
+        // すべての差分が選択可能（格下げされた案内項目は 1 件も無い）
+        vm.DiffItems.Should().OnlyContain(i => i.IsSelectable);
+
         var alterPk = vm
             .DiffItems.Should()
             .ContainSingle(i => i.Kind == SchemaDiffKind.AlterPrimaryKey)
             .Which;
-        alterPk.IsSelectable.Should().BeFalse();
-        alterPk
-            .Description.Should()
-            .Match(string.Format(DbStrings.SchemaSync_CompositeForeignKeyChangeBlocked, "*"));
-
-        var alterColumn = vm
-            .DiffItems.Should()
-            .ContainSingle(i => i.Kind == SchemaDiffKind.AlterColumn)
-            .Which;
-        alterColumn.ColumnName.Should().Be("parent_id");
-        alterColumn.IsSelectable.Should().BeFalse();
-
-        // 複合外部キーと無関係な差分（列追加）は従来どおり選択できる
         vm.DiffItems.Should()
-            .ContainSingle(i => i.Kind == SchemaDiffKind.AddColumn)
-            .Which.IsSelectable.Should()
-            .BeTrue();
+            .ContainSingle(i => i.Kind == SchemaDiffKind.AlterColumn)
+            .Which.ColumnName.Should()
+            .Be("parent_id");
+        vm.DiffItems.Should().ContainSingle(i => i.Kind == SchemaDiffKind.AddColumn);
 
-        // 全選択でも実行対象にならない（複合外部キーの単列化を構造的に封じる）
-        vm.SelectAllCommand.Execute(null);
-        alterPk.IsSelected.Should().BeFalse();
-        alterColumn.IsSelected.Should().BeFalse();
-        vm.ScriptPreview.Should().NotContain("PRIMARY KEY");
+        // 主キー変更を選ぶと、暗黙の FK 再作成が全構成列のままスクリプトへ載る
+        alterPk.IsSelected = true;
+        vm.ScriptPreview.Should().Contain("PRIMARY KEY");
+        vm.ScriptPreview.Should()
+            .Contain("FOREIGN KEY ([parent_id], [order_no]) REFERENCES [parent] ([id], [code])");
     }
 
     /// <summary>
-    /// 複合外部キーの<b>副構成列</b>（子側の 2 列目 order_no）の型変更も選択不可へ格下げされることを検証する。
+    /// 複合外部キーの副構成列（子側の 2 列目 order_no）の型変更も選択可能なままであることを検証する。
     /// </summary>
-    /// <remarks>
-    /// 副構成列は意味モデルへ劣化した live リレーションからは復元できない（子側の列指定を失っている）ため、
-    /// 照合範囲を live の外部キー列挙で組み立てると素通りする。SQL Server では素通りした変更が実行時に
-    /// Msg 5074 で失敗し続けるため、取込警告の全構成列を照合範囲にして実行前に格下げする。
-    /// </remarks>
-    [Fact(DisplayName = "複合外部キー: 副構成列（2 列目）の型変更も選択不可へ格下げされる")]
-    public async Task Refresh_CompositeForeignKey_DemotesSecondaryConstituentColumnChange()
+    [Fact(DisplayName = "複合外部キー: 副構成列（2 列目）の型変更も選択可能なまま同期できる")]
+    public async Task Refresh_CompositeForeignKey_KeepsSecondaryConstituentColumnSelectable()
     {
         var (live, target, targetRelationships) = CompositeForeignKeyChangeScenario();
         // 第 1 構成列（parent_id）に加えて第 2 構成列（order_no）も型変更する
@@ -726,62 +691,13 @@ public class SchemaSyncDialogViewModelTests
 
         var alterColumns = vm.DiffItems.Where(i => i.Kind == SchemaDiffKind.AlterColumn).ToList();
         alterColumns.Select(i => i.ColumnName).Should().BeEquivalentTo("parent_id", "order_no");
-        alterColumns.Should().OnlyContain(i => !i.IsSelectable);
+        alterColumns.Should().OnlyContain(i => i.IsSelectable);
 
-        foreach (var alter in alterColumns)
-        {
-            alter
-                .Description.Should()
-                .Match(string.Format(DbStrings.SchemaSync_CompositeForeignKeyChangeBlocked, "*"));
-        }
-
-        // 複合外部キーと無関係な差分（列追加）は従来どおり選択できる
-        vm.DiffItems.Should()
-            .ContainSingle(i => i.Kind == SchemaDiffKind.AddColumn)
-            .Which.IsSelectable.Should()
-            .BeTrue();
-
-        // 全選択でも実行対象にならない
+        // 選択すると、構成列の変更に巻き込まれる FK が全構成列のまま作り直される
         vm.SelectAllCommand.Execute(null);
-        alterColumns.Should().OnlyContain(i => !i.IsSelected);
-    }
-
-    /// <summary>
-    /// 格下げをすり抜けて選択された場合でも、計画側が変更を落として実行確認へ列挙することを検証する
-    /// （UI の格下げと計画側の除外の二重防御）。
-    /// </summary>
-    [Fact(DisplayName = "実行確認: 複合外部キーのため計画から落ちた変更が列挙される")]
-    public async Task Execute_CompositeForeignKeyBlockedChange_AppendsWarningToConfirm()
-    {
-        var (live, target, targetRelationships) = CompositeForeignKeyChangeScenario();
-        var provider = new FakeProvider(new SqlServerProvider(), new FakeSchemaImporter(live));
-        var dialogs = new StubDialogService { ConfirmResult = false };
-        var vm = new SchemaSyncDialogViewModel(
-            provider,
-            new DbConnectionSettings { Database = "shop" },
-            target,
-            targetRelationships,
-            dialogs
-        );
-
-        await vm.RefreshCommand.ExecuteAsync(null);
-        // UI では選べない項目を直接選択して、計画側の最終防御（除外＋警告）が働くことを見る
-        vm.DiffItems.Single(i => i.Kind == SchemaDiffKind.AlterPrimaryKey).IsSelected = true;
-
-        await vm.ExecuteCommand.ExecuteAsync(null);
-
-        var message = dialogs.WarningConfirmMessages.Should().ContainSingle().Subject;
-        message
-            .Should()
-            .Contain(
-                string.Format(
-                    DbStrings.SchemaSync_ExecuteConfirmCompositeForeignKeyBlocked,
-                    "  • parent"
-                )
-            );
-
-        // 主キー変更は計画に入らないため、プレビューにも現れない
-        vm.ScriptPreview.Should().NotContain("PRIMARY KEY");
+        alterColumns.Should().OnlyContain(i => i.IsSelected);
+        vm.ScriptPreview.Should()
+            .Contain("FOREIGN KEY ([parent_id], [order_no]) REFERENCES [parent] ([id], [code])");
     }
 
     /// <summary>
@@ -797,8 +713,7 @@ public class SchemaSyncDialogViewModelTests
             SourceEntityId = parent.Id,
             TargetEntityId = child.Id,
             Type = RelationshipType.OneToMany,
-            SourceColumnId = parent.Columns[0].Id,
-            TargetColumnId = child.Columns[1].Id,
+            ColumnPairs = [new(parent.Columns[0].Id, child.Columns[1].Id)],
             ConstraintName = "FK_child_parent",
         };
         var live = new SchemaImportResult { Entities = [parent, child], Relationships = [rel] };
@@ -814,8 +729,13 @@ public class SchemaSyncDialogViewModelTests
             SourceEntityId = parentTarget.Id,
             TargetEntityId = childTarget.Id,
             Type = RelationshipType.OneToMany,
-            SourceColumnId = parentTarget.Columns.Single(c => c.Name == "id").Id,
-            TargetColumnId = childTarget.Columns.Single(c => c.Name == "parent_id").Id,
+            ColumnPairs =
+            [
+                new(
+                    parentTarget.Columns.Single(c => c.Name == "id").Id,
+                    childTarget.Columns.Single(c => c.Name == "parent_id").Id
+                ),
+            ],
             ConstraintName = "FK_child_parent",
         };
 
@@ -844,11 +764,16 @@ public class SchemaSyncDialogViewModelTests
     }
 
     /// <summary>
-    /// rebuild 方言（SQLite）で複合外部キーの子テーブルは再構築されず、実行確認に対象が列挙されることを検証する。
+    /// rebuild 方言（SQLite）で複合外部キーの子テーブルも通常どおり再構築されることを検証する。
     /// </summary>
-    [Fact(DisplayName = "rebuild 方言: 複合外部キーの子テーブルは再構築されず実行確認へ列挙される")]
-    public async Task Execute_RebuildDialect_CompositeForeignKeyTable_IsBlockedAndListed()
+    /// <remarks>
+    /// 劣化時代はこのテーブルの再構築を止め、実行確認へ「同期していない」旨を列挙していた。
+    /// 合成後の定義が全構成列を保つようになったため、再構築版の確認文言に戻る。
+    /// </remarks>
+    [Fact(DisplayName = "rebuild 方言: 複合外部キーの子テーブルも通常どおり再構築される")]
+    public async Task Execute_RebuildDialect_CompositeForeignKeyTable_IsRebuilt()
     {
+        var orders = Table("orders", Col("Id", "INTEGER", pk: true), Col("LineNo", "INTEGER"));
         var orderLine = Table(
             "order_line",
             Col("Id", "INTEGER", pk: true),
@@ -856,37 +781,44 @@ public class SchemaSyncDialogViewModelTests
             Col("LineNo", "INTEGER"),
             Col("Note", "TEXT")
         );
-        var live = new SchemaImportResult
+        var rel = new Relationship
         {
-            Entities = [orderLine],
-            Warnings =
+            SourceEntityId = orders.Id,
+            TargetEntityId = orderLine.Id,
+            Type = RelationshipType.OneToMany,
+            ColumnPairs =
             [
-                new CompositeForeignKeyImportWarning(
-                    "FK_order_line_orders",
-                    "order_line",
-                    ["OrderId", "LineNo"],
-                    "orders",
-                    ["Id", "LineNo"]
-                ),
+                new(orders.Columns[0].Id, orderLine.Columns[1].Id),
+                new(orders.Columns[1].Id, orderLine.Columns[2].Id),
             ],
+            ConstraintName = "FK_order_line_orders",
         };
+        var live = new SchemaImportResult { Entities = [orders, orderLine], Relationships = [rel] };
         var provider = new FakeSqliteProvider(new FakeSchemaImporter(live));
-        var target = new[]
+
+        // 目標: 子テーブルの Note を型変更する（＝子テーブルの再構築が要る）
+        var ordersTarget = orders.Clone(preserveId: true);
+        var orderLineTarget = orderLine.Clone(preserveId: true);
+        orderLineTarget.Columns.Single(c => c.Name == "Note").DataType = "INTEGER";
+        var targetRel = new Relationship
         {
-            Table(
-                "order_line",
-                Col("Id", "INTEGER", pk: true),
-                Col("OrderId", "INTEGER"),
-                Col("LineNo", "INTEGER"),
-                Col("Note", "INTEGER")
-            ),
+            SourceEntityId = ordersTarget.Id,
+            TargetEntityId = orderLineTarget.Id,
+            Type = RelationshipType.OneToMany,
+            ColumnPairs =
+            [
+                new(ordersTarget.Columns[0].Id, orderLineTarget.Columns[1].Id),
+                new(ordersTarget.Columns[1].Id, orderLineTarget.Columns[2].Id),
+            ],
+            ConstraintName = "FK_order_line_orders",
         };
+
         var dialogs = new StubDialogService { ConfirmResult = false };
         var vm = new SchemaSyncDialogViewModel(
             provider,
             new DbConnectionSettings { FilePath = "shop.db" },
-            target,
-            [],
+            [ordersTarget, orderLineTarget],
+            [targetRel],
             dialogs
         );
 
@@ -895,19 +827,25 @@ public class SchemaSyncDialogViewModelTests
 
         await vm.ExecuteCommand.ExecuteAsync(null);
 
-        var message = dialogs.WarningConfirmMessages.Should().ContainSingle().Subject;
-        // 再構築されないため確認文言は再構築版にならず、破壊的変更版＋ブロック注記になる
-        message
-            .Should()
-            .StartWith(string.Format(DbStrings.SchemaSync_ExecuteConfirmDestructive, "shop.db"));
-        message
-            .Should()
-            .Contain(
-                string.Format(DbStrings.SchemaSync_ExecuteConfirmRebuildBlocked, "  • order_line")
+        // 再構築されるため確認文言はテーブル再構築版になる
+        dialogs
+            .WarningConfirmMessages.Should()
+            .ContainSingle()
+            .Subject.Should()
+            .Be(
+                string.Format(
+                    DbStrings.SchemaSync_ExecuteConfirmRebuild,
+                    "shop.db",
+                    "  • order_line"
+                )
             );
 
-        // プレビューには畳み込まれなかった項目のスキップコメントが出る（スクリプト内は英語固定）
-        vm.ScriptPreview.Should().Contain("Skipped 'AlterColumn' on order_line");
+        // 再構築後の CREATE TABLE でも外部キーは全構成列を保つ
+        vm.ScriptPreview.Should()
+            .Contain(
+                "FOREIGN KEY (\"OrderId\", \"LineNo\") REFERENCES \"orders\" (\"Id\", \"LineNo\")"
+            );
+        vm.ScriptPreview.Should().NotContain("Skipped");
     }
 
     /// <summary>

@@ -123,21 +123,21 @@ internal sealed partial class CSharpGenerationModelBuilder
                 continue;
             }
 
-            // 親（source）は参照先カラム＝主キー、子（target）は外部キー列にフォールバックする（ナビゲーション解決と同一規則）
-            var sourceColumn = relationship.SourceColumnId is null
+            // 複合外部キーは対象外（診断はナビゲーション解決側が 1 度だけ出す）
+            if (relationship.ColumnPairs.Count > 1)
+            {
+                continue;
+            }
+
+            // 列ペアが唯一の正本（主キー・IsForeignKey フラグによる推測フォールバックは行わない。
+            // ナビゲーション解決と同一規則）
+            var columnPair = relationship.ColumnPairs.FirstOrDefault();
+            var principalColumn = columnPair is null
                 ? null
-                : source.Columns.FirstOrDefault(column =>
-                    column.Id == relationship.SourceColumnId.Value
-                );
-            var targetColumn = relationship.TargetColumnId is null
+                : source.Columns.FirstOrDefault(column => column.Id == columnPair.SourceColumnId);
+            var dependentColumn = columnPair is null
                 ? null
-                : target.Columns.FirstOrDefault(column =>
-                    column.Id == relationship.TargetColumnId.Value
-                );
-            var principalColumn =
-                sourceColumn ?? source.Columns.FirstOrDefault(column => column.IsPrimaryKey);
-            var dependentColumn =
-                targetColumn ?? target.Columns.FirstOrDefault(column => column.IsForeignKey);
+                : target.Columns.FirstOrDefault(column => column.Id == columnPair.TargetColumnId);
 
             if (principalColumn is null || dependentColumn is null)
             {

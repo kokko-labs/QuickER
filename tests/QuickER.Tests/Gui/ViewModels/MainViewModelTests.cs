@@ -130,8 +130,9 @@ public class MainViewModelTests
         vm.OnEntityClicked(vm.Entities[0]);
         vm.OnEntityClicked(vm.Entities[1]);
 
-        vm.Relationships[0].SourceColumnId.Should().Be(vm.Entities[0].Columns[0].Id);
-        vm.Relationships[0].TargetColumnId.Should().Be(vm.Entities[1].Columns[1].Id);
+        var pair = vm.Relationships[0].ColumnPairs.Should().ContainSingle().Subject;
+        pair.SourceColumnId.Should().Be(vm.Entities[0].Columns[0].Id);
+        pair.TargetColumnId.Should().Be(vm.Entities[1].Columns[1].Id);
     }
 
     /// <summary>親 PK が Id でも「親テーブル名+Id」の列が参照先として解決されることを検証する</summary>
@@ -155,7 +156,11 @@ public class MainViewModelTests
         vm.OnEntityClicked(vm.Entities[1]);
 
         var customerIdColumn = vm.Entities[1].Columns.Single(c => c.Name == "CustomerId");
-        vm.Relationships[0].TargetColumnId.Should().Be(customerIdColumn.Id);
+        vm.Relationships[0]
+            .ColumnPairs.Should()
+            .ContainSingle()
+            .Subject.TargetColumnId.Should()
+            .Be(customerIdColumn.Id);
         customerIdColumn.IsForeignKey.Should().BeTrue();
     }
 
@@ -174,7 +179,7 @@ public class MainViewModelTests
         vm.OnEntityClicked(vm.Entities[1]);
 
         vm.Relationships.Should().ContainSingle();
-        vm.Relationships[0].TargetColumnId.Should().BeNull();
+        vm.Relationships[0].ColumnPairs.Should().BeEmpty();
         vm.Entities[1].Columns.Single(c => c.Name == "Quantity").IsForeignKey.Should().BeFalse();
     }
 
@@ -196,7 +201,11 @@ public class MainViewModelTests
         vm.Relationships.Should().ContainSingle();
         vm.Relationships[0].Source.Should().Be(vm.Entities[0]);
         vm.Relationships[0].Target.Should().Be(vm.Entities[0]);
-        vm.Relationships[0].TargetColumnId.Should().Be(vm.Entities[0].Columns[1].Id);
+        vm.Relationships[0]
+            .ColumnPairs.Should()
+            .ContainSingle()
+            .Subject.TargetColumnId.Should()
+            .Be(vm.Entities[0].Columns[1].Id);
         vm.Relationships[0].ConstraintName.Should().Be("FK_NewTable_NewTable");
     }
 
@@ -294,7 +303,11 @@ public class MainViewModelTests
         vm.OnEntityClicked(vm.Entities[0]);
         vm.OnEntityClicked(vm.Entities[1]);
 
-        vm.Relationships[0].TargetColumnId.Should().Be(vm.Entities[1].Columns[1].Id);
+        vm.Relationships[0]
+            .ColumnPairs.Should()
+            .ContainSingle()
+            .Subject.TargetColumnId.Should()
+            .Be(vm.Entities[1].Columns[1].Id);
         vm.Entities[1].Columns[1].IsForeignKey.Should().BeTrue();
     }
 
@@ -314,7 +327,7 @@ public class MainViewModelTests
         vm.OnEntityClicked(vm.Entities[1]);
 
         var fkColumn = vm.Entities[1]
-            .Columns.First(c => c.Id == vm.Relationships[0].TargetColumnId);
+            .Columns.First(c => c.Id == vm.Relationships[0].ColumnPairs[0].TargetColumnId);
 
         vm.Entities[0].Columns[0].IsPrimaryKeyEditable.Should().BeFalse();
         fkColumn.IsForeignKeyEditable.Should().BeFalse();
@@ -335,7 +348,8 @@ public class MainViewModelTests
         vm.OnEntityClicked(vm.Entities[0]);
         vm.OnEntityClicked(vm.Entities[1]);
         var relationship = vm.Relationships[0];
-        var fkColumn = vm.Entities[1].Columns.First(c => c.Id == relationship.TargetColumnId);
+        var fkColumn = vm.Entities[1]
+            .Columns.First(c => c.Id == relationship.ColumnPairs[0].TargetColumnId);
 
         fkColumn.IsForeignKey.Should().BeTrue();
         vm.OnRelationshipClicked(relationship);
@@ -461,24 +475,25 @@ public class MainViewModelTests
         vm.OnEntityClicked(vm.Entities[0]);
         vm.OnEntityClicked(vm.Entities[1]);
         var relationship = vm.Relationships[0];
-        var originalSourceColumnId = relationship.SourceColumnId;
-        var originalTargetColumnId = relationship.TargetColumnId;
-        originalTargetColumnId.Should().NotBeNull();
+        var originalPair = relationship.ColumnPairs.Should().ContainSingle().Subject;
 
         relationship.Type = RelationshipType.ManyToMany;
 
-        relationship.SourceColumnId.Should().BeNull();
-        relationship.TargetColumnId.Should().BeNull();
+        relationship.ColumnPairs.Should().BeEmpty();
+        relationship.ColumnPairRows.Should().BeEmpty();
 
         vm.UndoCommand.Execute(null);
         relationship.Type.Should().Be(RelationshipType.OneToMany);
-        relationship.SourceColumnId.Should().Be(originalSourceColumnId);
-        relationship.TargetColumnId.Should().Be(originalTargetColumnId);
+        relationship
+            .ColumnPairs.Should()
+            .ContainSingle()
+            .Subject.Should()
+            .BeEquivalentTo(originalPair);
+        relationship.ColumnPairRows.Should().ContainSingle();
 
         vm.RedoCommand.Execute(null);
         relationship.Type.Should().Be(RelationshipType.ManyToMany);
-        relationship.SourceColumnId.Should().BeNull();
-        relationship.TargetColumnId.Should().BeNull();
+        relationship.ColumnPairs.Should().BeEmpty();
     }
 
     /// <summary>リレーションの FK 列変更にカラム定義側の FK 状態が追従することを検証する</summary>
@@ -497,10 +512,11 @@ public class MainViewModelTests
         vm.OnEntityClicked(vm.Entities[1]);
         var relationship = vm.Relationships[0];
         var originalTargetColumn = vm.Entities[1]
-            .Columns.First(column => column.Id == relationship.TargetColumnId);
+            .Columns.First(column => column.Id == relationship.ColumnPairs[0].TargetColumnId);
         var newTargetColumn = vm.Entities[1].Columns.Single(column => column.Name == "ParentCode");
 
-        relationship.TargetColumnId = newTargetColumn.Id;
+        // プロパティパネルの列ペア行で子列を選び直すのと同じ経路をたどる
+        relationship.ColumnPairRows[0].SelectedTargetColumn = newTargetColumn;
 
         originalTargetColumn.IsForeignKey.Should().BeFalse();
         originalTargetColumn.IsForeignKeyEditable.Should().BeTrue();
@@ -728,27 +744,33 @@ public class MainViewModelTests
 
         var relationship = vm.Relationships[0];
 
-        // FK 列として設定された TargetColumnId を記憶する
-        var originalTargetColumnId = relationship.TargetColumnId;
-        originalTargetColumnId.Should().NotBeNull();
+        // FK 列として設定された子列を記憶する
+        var originalTargetColumnId = relationship
+            .ColumnPairs.Should()
+            .ContainSingle()
+            .Subject.TargetColumnId;
 
         // FK カラムを削除する
         vm.SelectedEntity = vm.Entities[1];
         var columnToRemove = vm.Entities[1].Columns.First(c => c.Id == originalTargetColumnId);
         vm.RemoveColumnCommand.Execute(columnToRemove);
 
-        // 削除後: FK 設定がクリアされている
-        relationship.TargetColumnId.Should().BeNull();
+        // 削除後: 列ペアがクリアされている
+        relationship.ColumnPairs.Should().BeEmpty();
 
-        // Undo: カラムが復元され、リレーションの FK 設定も復元される
+        // Undo: カラムが復元され、リレーションの列ペアも復元される
         vm.UndoCommand.Execute(null);
         vm.Entities[1].Columns.Should().Contain(c => c.Id == originalTargetColumnId);
-        relationship.TargetColumnId.Should().Be(originalTargetColumnId);
+        relationship
+            .ColumnPairs.Should()
+            .ContainSingle()
+            .Subject.TargetColumnId.Should()
+            .Be(originalTargetColumnId);
 
-        // Redo: 再度削除されFK設定もクリアされる
+        // Redo: 再度削除され列ペアもクリアされる
         vm.RedoCommand.Execute(null);
         vm.Entities[1].Columns.Should().NotContain(c => c.Id == originalTargetColumnId);
-        relationship.TargetColumnId.Should().BeNull();
+        relationship.ColumnPairs.Should().BeEmpty();
     }
 
     /// <summary>主キー変更に伴う NULL 許容の連動変更も 1 回の Undo / Redo で往復することを検証する</summary>

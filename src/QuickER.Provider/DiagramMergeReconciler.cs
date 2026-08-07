@@ -144,8 +144,12 @@ public static class DiagramMergeReconciler
         {
             relationship.SourceEntityId = MapId(entityIdMap, relationship.SourceEntityId);
             relationship.TargetEntityId = MapId(entityIdMap, relationship.TargetEntityId);
-            relationship.SourceColumnId = MapNullableId(columnIdMap, relationship.SourceColumnId);
-            relationship.TargetColumnId = MapNullableId(columnIdMap, relationship.TargetColumnId);
+            // 構成列ペアは両端の列 Id を対応表で置き換える（宣言順は保つ）
+            foreach (var pair in relationship.ColumnPairs)
+            {
+                pair.SourceColumnId = MapId(columnIdMap, pair.SourceColumnId);
+                pair.TargetColumnId = MapId(columnIdMap, pair.TargetColumnId);
+            }
         }
 
         // 現在図のクエリを、マージ後の図で Guid 参照が解決できるかで生存/壊れに振り分ける
@@ -298,10 +302,6 @@ public static class DiagramMergeReconciler
     /// <summary>対応表で Guid を写す（対応がなければそのまま＝新規要素）</summary>
     private static Guid MapId(IReadOnlyDictionary<Guid, Guid> map, Guid id) =>
         map.TryGetValue(id, out var mapped) ? mapped : id;
-
-    /// <summary>対応表で NULL 許容 Guid を写す（null・対応なしはそのまま）</summary>
-    private static Guid? MapNullableId(IReadOnlyDictionary<Guid, Guid> map, Guid? id) =>
-        id is { } value && map.TryGetValue(value, out var mapped) ? mapped : id;
 }
 
 /// <summary>マージ取込の結果（Id 書換え済みのスキーマと、クエリの生存/壊れ振り分け）</summary>

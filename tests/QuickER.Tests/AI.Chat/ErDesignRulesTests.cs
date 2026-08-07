@@ -22,18 +22,21 @@ public class ErDesignRulesTests
 
     private static string En(string key) => Strings.ResourceManager.GetString(key, English)!;
 
-    /// <summary>共通設計原則（英語・日本語）に複合主キー・複合外部キーの禁止文言が含まれることを検証する</summary>
-    [Fact(DisplayName = "共通設計原則に複合PK・複合FKの禁止文言が含まれる")]
-    public void CommonDesignPrinciples_ContainsCompositeKeyProhibition()
+    /// <summary>
+    /// 共通設計原則（英語・日本語）に複合主キーの禁止文言と、外部キーの列対応ルール
+    /// （列ペア・単一列を基本とし複合も可）が含まれることを検証する
+    /// </summary>
+    [Fact(DisplayName = "共通設計原則に複合PK禁止とFKの列対応ルールが含まれる")]
+    public void CommonDesignPrinciples_ContainsKeyRules()
     {
         Ja("ErDesign_CommonDesignPrinciples")
             .Should()
             .Contain("複合主キー（複数列の主キー）は禁止");
-        Ja("ErDesign_CommonDesignPrinciples").Should().Contain("複合外部キーは禁止");
+        Ja("ErDesign_CommonDesignPrinciples").Should().Contain("列ペア");
         Ja("ErDesign_CommonDesignPrinciples").Should().Contain("ちょうど 1 列");
 
         En("ErDesign_CommonDesignPrinciples").Should().Contain("composite primary keys");
-        En("ErDesign_CommonDesignPrinciples").Should().Contain("Composite foreign keys");
+        En("ErDesign_CommonDesignPrinciples").Should().Contain("column pairs");
         En("ErDesign_CommonDesignPrinciples").Should().Contain("exactly one primary key column");
     }
 
@@ -61,7 +64,7 @@ public class ErDesignRulesTests
         // 共通設計原則・単一 PK/FK ルールは ambient カルチャで読んだ値がそのまま埋め込まれる
         instructions.Should().Contain(ErDesignRules.CommonDesignPrinciples);
         instructions.Should().Contain(ErDesignRules.SinglePrimaryKeyRule);
-        instructions.Should().Contain(ErDesignRules.SingleColumnForeignKeyRule);
+        instructions.Should().Contain(ErDesignRules.ForeignKeyColumnMappingRule);
 
         // ツール名はどの言語でもリテラルで残る
         instructions.Should().Contain("get_diagram_summary");

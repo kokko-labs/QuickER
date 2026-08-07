@@ -292,8 +292,7 @@ public sealed class CSharpNameConverterTests
                     Type = RelationshipType.OneToMany,
                     SourceEntityId = owner,
                     TargetEntityId = company,
-                    SourceColumnId = ownerPk,
-                    TargetColumnId = companyFk,
+                    ColumnPairs = [new(ownerPk, companyFk)],
                 },
             ],
         };

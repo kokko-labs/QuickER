@@ -130,8 +130,7 @@ IF OBJECT_ID(N'{ItemTable}', N'U') IS NOT NULL DROP TABLE [{ItemTable}];";
             SourceEntityId = parent.Id,
             TargetEntityId = child.Id,
             Type = RelationshipType.OneToMany,
-            SourceColumnId = parent.Columns[0].Id,
-            TargetColumnId = child.Columns[1].Id,
+            ColumnPairs = [new(parent.Columns[0].Id, child.Columns[1].Id)],
         };
 
         // ---------- 2) DB から現状を取得して差分計算 ----------
@@ -179,7 +178,7 @@ IF OBJECT_ID(N'{ItemTable}', N'U') IS NOT NULL DROP TABLE [{ItemTable}];";
         diff2.Items.Where(i => i.Kind == SchemaDiffKind.AddColumn).Should().BeEmpty();
         live2.Relationships.Should().ContainSingle();
         live2.Relationships[0].ConstraintName.Should().Be($"FK_{ChildTable}_{ParentTable}");
-        live2.Relationships[0].TargetColumnId.Should().NotBeNull();
+        live2.Relationships[0].ColumnPairs.Should().ContainSingle();
         live2.Relationships[0].OnDelete.Should().Be(ForeignKeyReferentialAction.NoAction);
         live2.Relationships[0].OnUpdate.Should().Be(ForeignKeyReferentialAction.NoAction);
 
@@ -605,8 +604,13 @@ INSERT INTO [{ChildTable}] ([Id], [ParentCode]) VALUES (1, N'P-1');"
             SourceEntityId = parentTarget.Id,
             TargetEntityId = childTarget.Id,
             Type = RelationshipType.OneToMany,
-            SourceColumnId = parentTarget.Columns.Single(c => c.Name == "Code").Id,
-            TargetColumnId = childTarget.Columns.Single(c => c.Name == "ParentCode").Id,
+            ColumnPairs =
+            [
+                new(
+                    parentTarget.Columns.Single(c => c.Name == "Code").Id,
+                    childTarget.Columns.Single(c => c.Name == "ParentCode").Id
+                ),
+            ],
             ConstraintName = liveFk.ConstraintName,
         };
 
@@ -724,8 +728,13 @@ INSERT INTO [{ChildTable}] ([Id], [ParentId]) VALUES (1, 1);"
             SourceEntityId = parentTarget.Id,
             TargetEntityId = childTarget.Id,
             Type = RelationshipType.OneToMany,
-            SourceColumnId = parentTarget.Columns.Single(c => c.Name == "Id").Id,
-            TargetColumnId = childTarget.Columns.Single(c => c.Name == "ParentId").Id,
+            ColumnPairs =
+            [
+                new(
+                    parentTarget.Columns.Single(c => c.Name == "Id").Id,
+                    childTarget.Columns.Single(c => c.Name == "ParentId").Id
+                ),
+            ],
             ConstraintName = liveFk.ConstraintName,
         };
 

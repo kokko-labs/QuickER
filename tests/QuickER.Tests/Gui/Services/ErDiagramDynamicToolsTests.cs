@@ -256,7 +256,7 @@ public class ErDiagramDynamicToolsTests
         );
     }
 
-    /// <summary>add_relationship で明示指定した source_column / target_column が使用されることを検証する</summary>
+    /// <summary>add_relationship で明示指定した source_columns / target_columns が使用されることを検証する</summary>
     [Fact(DisplayName = "add_relationship で明示指定したカラムがそのまま使用される")]
     public void AddRelationship_WithExplicitColumns_UsesSpecifiedColumns()
     {
@@ -271,9 +271,9 @@ public class ErDiagramDynamicToolsTests
             new
             {
                 source_table = "Customer",
-                source_column = "CustomerId",
+                source_columns = new[] { "CustomerId" },
                 target_table = "Order",
-                target_column = "OwnerId",
+                target_columns = new[] { "OwnerId" },
                 relationship_type = "OneToMany",
             }
         );
@@ -281,18 +281,18 @@ public class ErDiagramDynamicToolsTests
         success.Should().BeTrue();
         var relationship = vm.Relationships.Single();
         var order = vm.Entities.Single(e => e.TableName == "Order");
-        relationship
-            .SourceColumnId.Should()
+        var pair = relationship.ColumnPairs.Should().ContainSingle().Subject;
+        pair.SourceColumnId.Should()
             .Be(
                 vm.Entities.Single(e => e.TableName == "Customer")
                     .Columns.Single(c => c.Name == "CustomerId")
                     .Id
             );
-        relationship.TargetColumnId.Should().Be(order.Columns.Single(c => c.Name == "OwnerId").Id);
+        pair.TargetColumnId.Should().Be(order.Columns.Single(c => c.Name == "OwnerId").Id);
     }
 
     /// <summary>add_relationship で存在しないカラムを指定するとエラーになることを検証する</summary>
-    [Fact(DisplayName = "add_relationship で存在しない target_column を指定するとエラーになる")]
+    [Fact(DisplayName = "add_relationship で存在しない target_columns を指定するとエラーになる")]
     public void AddRelationship_UnknownTargetColumn_ReturnsError()
     {
         var vm = CreateVm();
@@ -304,8 +304,9 @@ public class ErDiagramDynamicToolsTests
             new
             {
                 source_table = "Customer",
+                source_columns = new[] { "CustomerId" },
                 target_table = "Order",
-                target_column = "NoSuchColumn",
+                target_columns = new[] { "NoSuchColumn" },
                 relationship_type = "OneToMany",
             }
         );
@@ -313,6 +314,290 @@ public class ErDiagramDynamicToolsTests
         success.Should().BeFalse();
         result.Should().Contain("NoSuchColumn");
         vm.Relationships.Should().BeEmpty();
+    }
+
+    /// <summary>複合外部キー（並行配列）が宣言順の列ペアとして登録されることを検証する</summary>
+    [Fact(DisplayName = "add_relationship は複合外部キーを宣言順の列ペアで登録する")]
+    public void AddRelationship_CompositeColumns_RegistersOrderedPairs()
+    {
+        var vm = CreateVm();
+        SetupCompositeParentAndChild(vm);
+
+        var (_, success) = Exec(
+            vm,
+            "add_relationship",
+            new
+            {
+                source_table = "TenantRegion",
+                source_columns = new[] { "TenantId", "RegionCode" },
+                target_table = "TenantUser",
+                target_columns = new[] { "TenantRef", "RegionRef" },
+                relationship_type = "OneToMany",
+            }
+        );
+
+        success.Should().BeTrue();
+
+        var tenant = vm.Entities.Single(e => e.TableName == "TenantRegion");
+        var user = vm.Entities.Single(e => e.TableName == "TenantUser");
+        var relationship = vm.Relationships.Single();
+
+        relationship.ColumnPairs.Should().HaveCount(2);
+        relationship
+            .ColumnPairs[0]
+            .SourceColumnId.Should()
+            .Be(tenant.Columns.Single(c => c.Name == "TenantId").Id);
+        relationship
+            .ColumnPairs[0]
+            .TargetColumnId.Should()
+            .Be(user.Columns.Single(c => c.Name == "TenantRef").Id);
+        relationship
+            .ColumnPairs[1]
+            .SourceColumnId.Should()
+            .Be(tenant.Columns.Single(c => c.Name == "RegionCode").Id);
+        relationship
+            .ColumnPairs[1]
+            .TargetColumnId.Should()
+            .Be(user.Columns.Single(c => c.Name == "RegionRef").Id);
+
+        // 構成列はすべて FK としてロックされる
+        user.Columns.Single(c => c.Name == "TenantRef").IsForeignKey.Should().BeTrue();
+        user.Columns.Single(c => c.Name == "RegionRef").IsForeignKey.Should().BeTrue();
+    }
+
+    /// <summary>並行配列の長さ不一致・片側のみ指定がエラーになることを検証する</summary>
+    [Fact(DisplayName = "add_relationship は列配列の長さ不一致と片側のみの指定をエラーにする")]
+    public void AddRelationship_InvalidColumnArrays_ReturnError()
+    {
+        var vm = CreateVm();
+        SetupCompositeParentAndChild(vm);
+
+        var mismatch = Exec(
+            vm,
+            "add_relationship",
+            new
+            {
+                source_table = "TenantRegion",
+                source_columns = new[] { "TenantId", "RegionCode" },
+                target_table = "TenantUser",
+                target_columns = new[] { "TenantRef" },
+                relationship_type = "OneToMany",
+            }
+        );
+        mismatch.Success.Should().BeFalse();
+
+        var oneSided = Exec(
+            vm,
+            "add_relationship",
+            new
+            {
+                source_table = "TenantRegion",
+                source_columns = new[] { "TenantId" },
+                target_table = "TenantUser",
+                relationship_type = "OneToMany",
+            }
+        );
+        oneSided.Success.Should().BeFalse();
+
+        var duplicated = Exec(
+            vm,
+            "add_relationship",
+            new
+            {
+                source_table = "TenantRegion",
+                source_columns = new[] { "TenantId", "TenantId" },
+                target_table = "TenantUser",
+                target_columns = new[] { "TenantRef", "RegionRef" },
+                relationship_type = "OneToMany",
+            }
+        );
+        duplicated.Success.Should().BeFalse();
+
+        vm.Relationships.Should().BeEmpty();
+    }
+
+    /// <summary>列省略時に親 PK の全列が自動でペア化されることを検証する</summary>
+    [Fact(DisplayName = "add_relationship は列省略時に親 PK 全列を自動ペア化する")]
+    public void AddRelationship_OmittedColumns_PairsEveryPrimaryKeyColumn()
+    {
+        var vm = CreateVm();
+
+        // 親の PK 2 列（TenantId / RegionCode）に対し、子側は命名規則どおりの列を持つ
+        SetupCompositeParentAndChild(vm, childColumns: ["TenantId", "RegionCode"]);
+
+        var (_, success) = Exec(
+            vm,
+            "add_relationship",
+            new
+            {
+                source_table = "TenantRegion",
+                target_table = "TenantUser",
+                relationship_type = "OneToMany",
+            }
+        );
+
+        success.Should().BeTrue();
+
+        var user = vm.Entities.Single(e => e.TableName == "TenantUser");
+        var relationship = vm.Relationships.Single();
+
+        relationship
+            .ColumnPairs.Select(pair => user.Columns.Single(c => c.Id == pair.TargetColumnId).Name)
+            .Should()
+            .Equal("TenantId", "RegionCode");
+    }
+
+    /// <summary>同じテーブル対に複数のリレーションがある場合、remove_relationship は constraint_name を要求する</summary>
+    [Fact(DisplayName = "remove_relationship は複数一致時に候補を挙げてエラーにする")]
+    public void RemoveRelationship_MultipleMatches_RequiresConstraintName()
+    {
+        var vm = CreateVm();
+        SetupCompositeParentAndChild(vm);
+
+        Exec(
+            vm,
+            "add_relationship",
+            new
+            {
+                source_table = "TenantRegion",
+                source_columns = new[] { "TenantId" },
+                target_table = "TenantUser",
+                target_columns = new[] { "TenantRef" },
+                relationship_type = "OneToMany",
+            }
+        )
+            .Success.Should()
+            .BeTrue();
+
+        // 2 本目も同じ向きに張り、制約名だけを変えて区別できるようにする
+        Exec(
+            vm,
+            "add_relationship",
+            new
+            {
+                source_table = "TenantRegion",
+                source_columns = new[] { "RegionCode" },
+                target_table = "TenantUser",
+                target_columns = new[] { "RegionRef" },
+                relationship_type = "OneToMany",
+            }
+        )
+            .Success.Should()
+            .BeTrue();
+        vm.Relationships[1].ConstraintName = "FK_TenantUser_TenantRegion_Region";
+
+        var ambiguous = Exec(
+            vm,
+            "remove_relationship",
+            new { source_table = "TenantRegion", target_table = "TenantUser" }
+        );
+
+        ambiguous.Success.Should().BeFalse();
+        ambiguous.Result.Should().Contain("FK_TenantUser_TenantRegion_Region");
+        vm.Relationships.Should().HaveCount(2);
+
+        var removed = Exec(
+            vm,
+            "remove_relationship",
+            new
+            {
+                source_table = "TenantRegion",
+                target_table = "TenantUser",
+                constraint_name = "FK_TenantUser_TenantRegion_Region",
+            }
+        );
+
+        removed.Success.Should().BeTrue();
+        vm.Relationships.Should().ContainSingle();
+        vm.Relationships[0].ConstraintName.Should().Be("FK_TenantUser_TenantRegion");
+    }
+
+    /// <summary>get_diagram_summary が複合外部キーの列ペアを表示することを検証する</summary>
+    [Fact(DisplayName = "get_diagram_summary は外部キーの列ペアを表示する")]
+    public void GetDiagramSummary_ShowsColumnPairs()
+    {
+        var vm = CreateVm();
+        SetupCompositeParentAndChild(vm);
+
+        Exec(
+            vm,
+            "add_relationship",
+            new
+            {
+                source_table = "TenantRegion",
+                source_columns = new[] { "TenantId", "RegionCode" },
+                target_table = "TenantUser",
+                target_columns = new[] { "TenantRef", "RegionRef" },
+                relationship_type = "OneToMany",
+            }
+        );
+
+        var (result, success) = Exec(vm, "get_diagram_summary", new { });
+
+        success.Should().BeTrue();
+        result.Should().Contain("FK: (TenantId → TenantRef, RegionCode → RegionRef)");
+    }
+
+    /// <summary>複合主キーの親テーブルと、対応する子テーブルを用意する</summary>
+    private static void SetupCompositeParentAndChild(
+        MainViewModel vm,
+        string[]? childColumns = null
+    )
+    {
+        Exec(vm, "add_entity", new { table_name = "TenantRegion" });
+        Exec(
+            vm,
+            "add_column",
+            new
+            {
+                table_name = "TenantRegion",
+                column_name = "TenantId",
+                data_type = "int",
+                is_primary_key = true,
+                is_nullable = false,
+            }
+        );
+        Exec(
+            vm,
+            "add_column",
+            new
+            {
+                table_name = "TenantRegion",
+                column_name = "RegionCode",
+                data_type = "nvarchar(10)",
+                is_primary_key = true,
+                is_nullable = false,
+            }
+        );
+        Exec(vm, "add_entity", new { table_name = "TenantUser" });
+        Exec(
+            vm,
+            "add_column",
+            new
+            {
+                table_name = "TenantUser",
+                column_name = "TenantUserId",
+                data_type = "int",
+                is_primary_key = true,
+                is_nullable = false,
+            }
+        );
+
+        foreach (var columnName in childColumns ?? ["TenantRef", "RegionRef"])
+        {
+            Exec(
+                vm,
+                "add_column",
+                new
+                {
+                    table_name = "TenantUser",
+                    column_name = columnName,
+                    data_type = "nvarchar(10)",
+                    is_primary_key = false,
+                    is_nullable = false,
+                }
+            );
+        }
     }
 
     /// <summary>カラム省略時に名前から FK を推測できない場合、無関係な列が FK 化されず未割当となることを検証する</summary>
@@ -337,7 +622,7 @@ public class ErDiagramDynamicToolsTests
 
         success.Should().BeTrue();
         var relationship = vm.Relationships.Single();
-        relationship.TargetColumnId.Should().BeNull();
+        relationship.ColumnPairs.Should().BeEmpty();
 
         var quantityColumn = vm
             .Entities.Single(e => e.TableName == "Order")
@@ -394,10 +679,10 @@ public class ErDiagramDynamicToolsTests
         Exec(vm, "add_relationship", new { source_table = "Customer", target_table = "Order" });
 
         var relationship = vm.Relationships.Single();
-        var originalTargetColumnId = relationship.TargetColumnId;
-        originalTargetColumnId
-            .Should()
-            .NotBeNull("add_relationship が FK 列を参照先として解決する");
+        var originalTargetColumnId = relationship
+            .ColumnPairs.Should()
+            .ContainSingle("add_relationship が FK 列を参照先として解決する")
+            .Subject.TargetColumnId;
 
         var (_, success) = Exec(
             vm,
@@ -406,18 +691,25 @@ public class ErDiagramDynamicToolsTests
         );
         success.Should().BeTrue();
 
-        // 削除後はリレーションの FK 参照がクリアされる
-        relationship.TargetColumnId.Should().BeNull();
+        // 削除後はリレーションの列ペアがクリアされる
+        relationship.ColumnPairs.Should().BeEmpty();
 
-        // Undo でカラムが復元され、リレーションの FK 参照も復元される
+        // Undo でカラムが復元され、リレーションの列ペアも復元される
         vm.UndoCommand.Execute(null);
         var order = vm.Entities.Single(e => e.TableName == "Order");
         order.Columns.Should().Contain(c => c.Id == originalTargetColumnId);
-        relationship.TargetColumnId.Should().Be(originalTargetColumnId);
+        relationship
+            .ColumnPairs.Should()
+            .ContainSingle()
+            .Subject.TargetColumnId.Should()
+            .Be(originalTargetColumnId);
     }
 
-    /// <summary>ツール説明文（英語）に複合キー禁止の設計ルールが含まれることを検証する（AI への指示はツール説明文経由のため）</summary>
-    [Fact(DisplayName = "ツール説明文に複合PK・複合FKの禁止ルールが含まれる")]
+    /// <summary>
+    /// ツール説明文（英語）に複合主キー禁止と、複合外部キーの指定方法が含まれることを検証する
+    /// （AI への指示はツール説明文経由のため）
+    /// </summary>
+    [Fact(DisplayName = "ツール説明文に複合PK禁止と複合FKの指定方法が含まれる")]
     public void GetDefinitions_DescriptionsContainCompositeKeyProhibition()
     {
         var definitions = ErDiagramToolCatalog.GetDefinitions();
@@ -429,7 +721,7 @@ public class ErDiagramDynamicToolsTests
         definitions
             .Single(d => d.Name == "add_relationship")
             .Description.Should()
-            .Contain("composite foreign keys are not allowed");
+            .Contain("two or more entries define a composite foreign key");
         definitions
             .Single(d => d.Name == "add_entity")
             .Description.Should()

@@ -118,8 +118,7 @@ public sealed class GeneratedFixedMemberDriftTests
                     Type = RelationshipType.OneToMany,
                     SourceEntityId = invoiceId,
                     TargetEntityId = invoiceLineId,
-                    SourceColumnId = invoicePk,
-                    TargetColumnId = invoiceLineFk,
+                    ColumnPairs = [new(invoicePk, invoiceLineFk)],
                 },
             ],
         };

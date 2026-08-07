@@ -141,8 +141,13 @@ public sealed class SqliteSchemaSyncIntegrationTests
                         SourceEntityId = category.Id,
                         TargetEntityId = product.Id,
                         Type = RelationshipType.OneToMany,
-                        SourceColumnId = category.Columns.Single(c => c.Name == "id").Id,
-                        TargetColumnId = product.Columns.Single(c => c.Name == "category_id").Id,
+                        ColumnPairs =
+                        [
+                            new(
+                                category.Columns.Single(c => c.Name == "id").Id,
+                                product.Columns.Single(c => c.Name == "category_id").Id
+                            ),
+                        ],
                     }
                 );
                 return (entities, relationships);
@@ -269,8 +274,13 @@ public sealed class SqliteSchemaSyncIntegrationTests
                         SourceEntityId = category.Id,
                         TargetEntityId = product.Id,
                         Type = RelationshipType.OneToMany,
-                        SourceColumnId = category.Columns.Single(c => c.Name == "id").Id,
-                        TargetColumnId = product.Columns.Single(c => c.Name == "category_id").Id,
+                        ColumnPairs =
+                        [
+                            new(
+                                category.Columns.Single(c => c.Name == "id").Id,
+                                product.Columns.Single(c => c.Name == "category_id").Id
+                            ),
+                        ],
                     }
                 );
                 return (entities, relationships);
@@ -421,8 +431,13 @@ public sealed class SqliteSchemaSyncIntegrationTests
                         SourceEntityId = category.Id,
                         TargetEntityId = product.Id,
                         Type = RelationshipType.OneToMany,
-                        SourceColumnId = category.Columns.Single(c => c.Name == "id").Id,
-                        TargetColumnId = product.Columns.Single(c => c.Name == "category_id").Id,
+                        ColumnPairs =
+                        [
+                            new(
+                                category.Columns.Single(c => c.Name == "id").Id,
+                                product.Columns.Single(c => c.Name == "category_id").Id
+                            ),
+                        ],
                     }
                 );
                 return (entities, relationships);
@@ -568,6 +583,181 @@ public sealed class SqliteSchemaSyncIntegrationTests
         (await QueryScalarLongAsync(db, "SELECT COUNT(*) FROM \"uq_item\";"))
             .Should()
             .Be(1);
+    }
+
+    // ---------------- 複合外部キー ----------------
+
+    /// <summary>複合外部キーを持つ子テーブルの再構築で、外部キーが構成列を保ったまま残ることを検証する</summary>
+    /// <remarks>
+    /// <b>劣化時代はブロックされていた経路</b>。意味モデルが複合外部キーの列対応を保てなかった頃は、
+    /// 再構築すると単列外部キーへ作り替えられる（成功して静かに壊れる）ため、このテーブルの再構築だけを
+    /// 計画から落としていた。列ペアが正本になった今は、合成後の <c>CREATE TABLE</c> が全構成列の
+    /// <c>FOREIGN KEY</c> 句を出力するため、通常どおり同期できる。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Integration] SQLite 同期: 複合外部キーの子テーブルも再構築でき構成列が失われない"
+    )]
+    public async Task Rebuild_CompositeForeignKeyChildTable_PreservesAllColumnPairs()
+    {
+        using var db = SqliteTempDatabase.Create();
+        var provider = new SqliteProvider();
+
+        await RunStatementsAsync(
+            db,
+            "CREATE TABLE \"cfk_parent\" ("
+                + "\"a\" INTEGER NOT NULL, \"b\" INTEGER NOT NULL, "
+                + "CONSTRAINT \"PK_cfk_parent\" PRIMARY KEY (\"a\", \"b\"));",
+            "CREATE TABLE \"cfk_child\" ("
+                + "\"id\" INTEGER NOT NULL, "
+                + "\"a_ref\" INTEGER NOT NULL, "
+                + "\"b_ref\" INTEGER NOT NULL, "
+                + "\"note\" TEXT NULL, "
+                + "CONSTRAINT \"PK_cfk_child\" PRIMARY KEY (\"id\"), "
+                + "CONSTRAINT \"FK_cfk_child_cfk_parent\" FOREIGN KEY (\"a_ref\", \"b_ref\") "
+                + "REFERENCES \"cfk_parent\" (\"a\", \"b\"));",
+            "INSERT INTO \"cfk_parent\" (\"a\", \"b\") VALUES (1, 2);",
+            "INSERT INTO \"cfk_child\" (\"id\", \"a_ref\", \"b_ref\", \"note\") "
+                + "VALUES (10, 1, 2, 'hello');"
+        );
+
+        // 目標: 複合外部キーに関与しない note の型だけを変える（＝子テーブルの再構築が要る）
+        var (result, script) = await RunSyncAsync(
+            db,
+            provider,
+            (entities, relationships) =>
+            {
+                var child = entities.Single(e => e.TableName == "cfk_child");
+                child.Columns.Single(c => c.Name == "note").DataType = "VARCHAR(200)";
+                return (entities, relationships);
+            }
+        );
+
+        result.Committed.Should().BeTrue(result.Error);
+
+        // 再構築が起き、合成後の CREATE TABLE が全構成列の FOREIGN KEY 句を出力する
+        script.Should().Contain("-- ===== RebuildTable: cfk_child =====");
+        script
+            .Should()
+            .Contain("FOREIGN KEY (\"a_ref\", \"b_ref\") REFERENCES \"cfk_parent\" (\"a\", \"b\")");
+
+        // ---------- 再取込: 型変更が反映され、複合外部キーは構成列を保つ ----------
+        var reimported = await ImportAsync(db, provider);
+        var child2 = reimported.Entities.Single(e => e.TableName == "cfk_child");
+        child2.Columns.Single(c => c.Name == "note").DataType.Should().Be("VARCHAR(200)");
+        AssertCompositeForeignKey(reimported);
+
+        // 外部キーは 1 本のまま（単列 FK 2 本へ分裂していない）
+        (await QueryForeignKeyCountAsync(db, "cfk_child"))
+            .Should()
+            .Be(1);
+
+        // 行データは失われない（再構築のデータ移送が効いている）
+        (await QueryScalarLongAsync(db, "SELECT COUNT(*) FROM \"cfk_child\";"))
+            .Should()
+            .Be(1);
+    }
+
+    /// <summary>図へ足した複合外部キーが、テーブル再構築を通じて実 DB へ反映されることを検証する</summary>
+    /// <remarks>
+    /// SQLite は <c>ALTER TABLE ... ADD CONSTRAINT</c> を持たないため、外部キーの追加も再構築で実現する。
+    /// 追加後に外して元へ戻るところまで往復させる。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Integration] SQLite 同期: 複合外部キーの追加・削除がテーブル再構築で反映される"
+    )]
+    public async Task Rebuild_CompositeForeignKeyAddAndDrop()
+    {
+        using var db = SqliteTempDatabase.Create();
+        var provider = new SqliteProvider();
+
+        await RunStatementsAsync(
+            db,
+            "CREATE TABLE \"cfk_parent\" ("
+                + "\"a\" INTEGER NOT NULL, \"b\" INTEGER NOT NULL, "
+                + "CONSTRAINT \"PK_cfk_parent\" PRIMARY KEY (\"a\", \"b\"));",
+            "CREATE TABLE \"cfk_child\" ("
+                + "\"id\" INTEGER NOT NULL, "
+                + "\"a_ref\" INTEGER NOT NULL, "
+                + "\"b_ref\" INTEGER NOT NULL, "
+                + "CONSTRAINT \"PK_cfk_child\" PRIMARY KEY (\"id\"));",
+            "INSERT INTO \"cfk_parent\" (\"a\", \"b\") VALUES (1, 2);",
+            "INSERT INTO \"cfk_child\" (\"id\", \"a_ref\", \"b_ref\") VALUES (10, 1, 2);"
+        );
+
+        // ========== 追加 ==========
+        var (addResult, addScript) = await RunSyncAsync(
+            db,
+            provider,
+            (entities, relationships) =>
+            {
+                var parent = entities.Single(e => e.TableName == "cfk_parent");
+                var child = entities.Single(e => e.TableName == "cfk_child");
+                relationships.Add(BuildCompositeRelationship(parent, child));
+                return (entities, relationships);
+            }
+        );
+
+        addResult.Committed.Should().BeTrue(addResult.Error);
+        addScript
+            .Should()
+            .Contain("FOREIGN KEY (\"a_ref\", \"b_ref\") REFERENCES \"cfk_parent\" (\"a\", \"b\")");
+
+        var afterAdd = await ImportAsync(db, provider);
+        AssertCompositeForeignKey(afterAdd);
+        (await QueryScalarLongAsync(db, "SELECT COUNT(*) FROM \"cfk_child\";")).Should().Be(1);
+
+        // ========== 削除 ==========
+        var (dropResult, _) = await RunSyncAsync(
+            db,
+            provider,
+            (entities, relationships) =>
+            {
+                relationships.Clear();
+                return (entities, relationships);
+            }
+        );
+
+        dropResult.Committed.Should().BeTrue(dropResult.Error);
+        (await ImportAsync(db, provider)).Relationships.Should().BeEmpty();
+        (await QueryForeignKeyCountAsync(db, "cfk_child")).Should().Be(0);
+    }
+
+    /// <summary>(a, b) → (a_ref, b_ref) の複合外部キーを表すリレーションを組み立てる</summary>
+    private static Relationship BuildCompositeRelationship(Entity parent, Entity child) =>
+        new()
+        {
+            SourceEntityId = parent.Id,
+            TargetEntityId = child.Id,
+            Type = RelationshipType.OneToMany,
+            ColumnPairs =
+            [
+                new(
+                    parent.Columns.Single(c => c.Name == "a").Id,
+                    child.Columns.Single(c => c.Name == "a_ref").Id
+                ),
+                new(
+                    parent.Columns.Single(c => c.Name == "b").Id,
+                    child.Columns.Single(c => c.Name == "b_ref").Id
+                ),
+            ],
+            ConstraintName = "FK_cfk_child_cfk_parent",
+        };
+
+    /// <summary>取込結果に、構成列を 2 組とも保った複合外部キーが 1 本だけあることを検証する</summary>
+    private static void AssertCompositeForeignKey(SchemaImportResult live)
+    {
+        var parent = live.Entities.Single(e => e.TableName == "cfk_parent");
+        var child = live.Entities.Single(e => e.TableName == "cfk_child");
+        var rel = live.Relationships.Should().ContainSingle().Which;
+
+        rel.ColumnPairs.Select(p =>
+                (
+                    parent.Columns.Single(c => c.Id == p.SourceColumnId).Name,
+                    child.Columns.Single(c => c.Id == p.TargetColumnId).Name
+                )
+            )
+            .Should()
+            .Equal(("a", "a_ref"), ("b", "b_ref"));
     }
 
     /// <summary>主キー変更の検証用テーブルの行を取得する（データ温存の確認用）</summary>
@@ -727,8 +917,7 @@ public sealed class SqliteSchemaSyncIntegrationTests
             SourceEntityId = r.SourceEntityId,
             TargetEntityId = r.TargetEntityId,
             Type = r.Type,
-            SourceColumnId = r.SourceColumnId,
-            TargetColumnId = r.TargetColumnId,
+            ColumnPairs = [.. r.ColumnPairs.Select(p => p.Clone())],
             ConstraintName = r.ConstraintName,
             OnDelete = r.OnDelete,
             OnUpdate = r.OnUpdate,

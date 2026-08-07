@@ -40,8 +40,8 @@ public class JsonStorageServiceTests
                 }
             )
         );
-        vm.Relationships[0].SourceColumnId = a.Columns[0].Id;
-        vm.Relationships[0].TargetColumnId = b.Columns[1].Id;
+        vm.Relationships[0]
+            .SetColumnPairs([new RelationshipColumnPair(a.Columns[0].Id, b.Columns[1].Id)]);
         vm.Relationships[0].ConstraintName = "FK_Order_Customer";
 
         var path = Path.Combine(Path.GetTempPath(), $"er-{Guid.NewGuid()}.json");
@@ -65,8 +65,16 @@ public class JsonStorageServiceTests
             la.TitleBackgroundColor.Should().Be("#FFF0BF");
 
             loaded.Schema.Relationships[0].Type.Should().Be(RelationshipType.OneToMany);
-            loaded.Schema.Relationships[0].SourceColumnId.Should().Be(a.Columns[0].Id);
-            loaded.Schema.Relationships[0].TargetColumnId.Should().Be(b.Columns[1].Id);
+            loaded
+                .Schema.Relationships[0]
+                .ColumnPairs[0]
+                .SourceColumnId.Should()
+                .Be(a.Columns[0].Id);
+            loaded
+                .Schema.Relationships[0]
+                .ColumnPairs[0]
+                .TargetColumnId.Should()
+                .Be(b.Columns[1].Id);
             loaded.Schema.Relationships[0].ConstraintName.Should().Be("FK_Order_Customer");
             loaded
                 .Schema.Entities.First(e => e.Id == b.Id)
@@ -298,13 +306,13 @@ public class JsonStorageServiceTests
 
             var loaded = JsonStorageService.Load(path);
 
-            // Entity / Relationship: 省略キーは既定値（Memo / Description は空文字・列参照 / 制約名は null）
+            // Entity / Relationship: 省略キーは既定値（Memo / Description は空文字・列ペアは空・制約名は null）
             var entity = loaded.Schema.Entities.Should().ContainSingle().Which;
             entity.Memo.Should().BeEmpty();
             entity.Description.Should().BeEmpty();
             var relationship = loaded.Schema.Relationships.Should().ContainSingle().Which;
             relationship.Type.Should().Be(RelationshipType.OneToMany);
-            relationship.SourceColumnId.Should().BeNull();
+            relationship.ColumnPairs.Should().BeEmpty();
             relationship.ConstraintName.Should().BeNull();
 
             // Query: 省略キーは既定値（Type / Condition / ScalarType は null・コレクションは空）

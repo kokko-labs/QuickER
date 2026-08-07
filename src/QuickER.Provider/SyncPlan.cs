@@ -80,26 +80,6 @@ public enum SyncPlanWarningKind
     /// 過剰警告を許容して実行はブロックしない（<see cref="ForeignKeyRebuildMayLoseCandidateKey"/> と同じ方針）。
     /// </remarks>
     UniqueConstraintDropMayBreakForeignKey,
-
-    /// <summary>
-    /// 複合外部キーの子テーブルであるため、そのテーブルのテーブル再構築を計画から除外した。
-    /// </summary>
-    /// <remarks>
-    /// 意味モデルは複合外部キーの列対応を保持できない（<see cref="CompositeForeignKeyImportWarning"/>）ため、
-    /// 再構築すると複合外部キーが単列外部キーへ作り替えられる＝成功して静かに壊れる。他テーブルの同期は続行する。
-    /// </remarks>
-    RebuildBlockedByCompositeForeignKey,
-
-    /// <summary>
-    /// 複合外部キーの作り直しを招くため、その変更（主キー変更・列定義変更）を計画から除外した。
-    /// </summary>
-    /// <remarks>
-    /// 逐次 DDL 方言では、主キー変更や外部キー関与列の定義変更に巻き込まれる外部キーを自動で
-    /// DROP → 再 ADD する（<see cref="SyncPlanner"/>）。その対象が複合外部キーだと、列対応を失った定義で
-    /// 作り直されて単列外部キーへ置き換わる（MySQL は成功して静かに壊れ、Oracle は部分適用で外部キーが消える）。
-    /// テーブル再構築のブロックと同じ理由のため、該当する変更だけを計画から落とす（他の変更は続行する）。
-    /// </remarks>
-    CompositeForeignKeyBlocksChange,
 }
 
 /// <summary>
@@ -108,14 +88,11 @@ public enum SyncPlanWarningKind
 /// <param name="Kind">警告種別</param>
 /// <param name="TableName">
 /// 対象テーブル。<see cref="SyncPlanWarningKind.ForeignKeyRebuildMayLoseCandidateKey"/> では
-/// 外部キーを保有する子テーブル、<see cref="SyncPlanWarningKind.RebuildBlockedByCompositeForeignKey"/> では
-/// 再構築を止めたテーブル、<see cref="SyncPlanWarningKind.CompositeForeignKeyBlocksChange"/> では
-/// 計画から落とした変更のテーブル、<see cref="SyncPlanWarningKind.UniqueConstraintDropMayBreakForeignKey"/>
+/// 外部キーを保有する子テーブル、<see cref="SyncPlanWarningKind.UniqueConstraintDropMayBreakForeignKey"/>
 /// では一意制約を削除するテーブル（＝外部キーの参照先）。
 /// </param>
 /// <param name="Detail">
 /// 補足（外部キー制約名など。無ければ空文字）。
-/// <see cref="SyncPlanWarningKind.CompositeForeignKeyBlocksChange"/> では対象列名（主キー変更なら空文字）。
 /// <see cref="SyncPlanWarningKind.UniqueConstraintDropMayBreakForeignKey"/> では壊れうる外部キーの制約名。
 /// </param>
 public sealed record SyncPlanWarning(
@@ -239,16 +216,16 @@ public sealed record ColumnMove(Column Column, string? AfterColumn);
 /// テーブル再構築の <c>CREATE TABLE</c> にインライン出力する、解決済みの外部キー 1 件。
 /// </summary>
 /// <param name="ConstraintName">FK 制約名</param>
-/// <param name="ChildColumn">子テーブル側の外部キー列名</param>
+/// <param name="ChildColumns">子テーブル側の外部キー列名（宣言順。複合外部キーは 2 件以上）</param>
 /// <param name="ParentTable">参照先（親）テーブル名</param>
-/// <param name="ParentColumn">参照先（親）の被参照列名</param>
+/// <param name="ParentColumns">参照先（親）の被参照列名（宣言順。子側と同数・同順）</param>
 /// <param name="OnDelete">親行削除時の参照アクション</param>
 /// <param name="OnUpdate">親キー更新時の参照アクション</param>
 public sealed record TableRebuildForeignKey(
     string ConstraintName,
-    string ChildColumn,
+    IReadOnlyList<string> ChildColumns,
     string ParentTable,
-    string ParentColumn,
+    IReadOnlyList<string> ParentColumns,
     ForeignKeyReferentialAction OnDelete,
     ForeignKeyReferentialAction OnUpdate
 );

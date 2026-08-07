@@ -70,8 +70,10 @@ public class MermaidTests
                     SourceEntityId = customer.Id,
                     TargetEntityId = order.Id,
                     Type = RelationshipType.OneToMany,
-                    SourceColumnId = customer.Columns[0].Id,
-                    TargetColumnId = order.Columns[1].Id,
+                    ColumnPairs =
+                    [
+                        new RelationshipColumnPair(customer.Columns[0].Id, order.Columns[1].Id),
+                    ],
                     ConstraintName = "FK_Orders_Customer",
                 },
                 customer,
@@ -135,12 +137,9 @@ public class MermaidTests
         );
         source.TableName.Should().Be("Customer");
         target.TableName.Should().Be("Orders");
-        source
-            .Columns.Should()
-            .ContainSingle(column => column.Id == diagram.Relationships[0].SourceColumnId);
-        target
-            .Columns.Should()
-            .ContainSingle(column => column.Id == diagram.Relationships[0].TargetColumnId);
+        var columnPair = diagram.Relationships[0].ColumnPairs.Should().ContainSingle().Subject;
+        source.Columns.Should().ContainSingle(column => column.Id == columnPair.SourceColumnId);
+        target.Columns.Should().ContainSingle(column => column.Id == columnPair.TargetColumnId);
     }
 
     /// <summary>SaveTo で書き出した Mermaid ファイルを Load で読み戻し、内容が往復保持されることを検証する</summary>
@@ -169,7 +168,13 @@ public class MermaidTests
         vm.StartAddOneToManyCommand.Execute(null);
         vm.OnEntityClicked(vm.Entities[0]);
         vm.OnEntityClicked(vm.Entities[1]);
-        vm.Relationships[0].TargetColumnId = vm.Entities[1].Columns[1].Id;
+        vm.Relationships[0]
+            .SetColumnPairs([
+                new RelationshipColumnPair(
+                    vm.Entities[0].Columns[0].Id,
+                    vm.Entities[1].Columns[1].Id
+                ),
+            ]);
         vm.Relationships[0].ConstraintName = "FK_Child_Parent";
 
         var path = Path.Combine(Path.GetTempPath(), $"er-{Guid.NewGuid()}.mmd");
@@ -236,5 +241,45 @@ public class MermaidTests
         var product = diagram.Entities.First(e => e.TableName == "Product");
         product.Columns.First(c => c.Name == "Price").DataType.Should().Be("decimal(10,2)");
         product.Columns.First(c => c.Name == "ProductName").DataType.Should().Be("nvarchar(100)");
+    }
+
+    /// <summary>親が複合主キーの場合、取込の列補完が全 PK 列を順にペア化することを検証する</summary>
+    [Fact(DisplayName = "Mermaid 取込は親の複合 PK を列ごとにペア化する")]
+    public void Import_CompositePrimaryKeyParent_PairsEveryKeyColumn()
+    {
+        // Mermaid の関係記法に列構文は無いため、列は GUI / MCP と同じ既定解決で補完される
+        var text = string.Join(
+            Environment.NewLine,
+            [
+                "erDiagram",
+                "    TenantRegion {",
+                "        int TenantId PK",
+                "        nvarchar(10) RegionCode PK",
+                "    }",
+                "    TenantUser {",
+                "        int TenantUserId PK",
+                "        int TenantId",
+                "        nvarchar(10) RegionCode",
+                "    }",
+                "    TenantRegion ||--o{ TenantUser : FK_TenantUser_TenantRegion",
+            ]
+        );
+
+        var diagram = MermaidImporter.Parse(text);
+        var parent = diagram.Entities.Single(entity => entity.TableName == "TenantRegion");
+        var child = diagram.Entities.Single(entity => entity.TableName == "TenantUser");
+        var relationship = diagram.Relationships.Single();
+
+        relationship
+            .ColumnPairs.Select(pair =>
+                (
+                    parent.Columns.Single(column => column.Id == pair.SourceColumnId).Name,
+                    child.Columns.Single(column => column.Id == pair.TargetColumnId).Name
+                )
+            )
+            .Should()
+            .Equal(("TenantId", "TenantId"), ("RegionCode", "RegionCode"));
+        child.Columns.Single(column => column.Name == "TenantId").IsForeignKey.Should().BeTrue();
+        child.Columns.Single(column => column.Name == "RegionCode").IsForeignKey.Should().BeTrue();
     }
 }

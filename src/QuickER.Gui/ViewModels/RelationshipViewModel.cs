@@ -1,4 +1,6 @@
-﻿using System.ComponentModel;
+﻿using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Linq;
 using CommunityToolkit.Mvvm.ComponentModel;
 using QuickER.Model;
@@ -34,13 +36,15 @@ public partial class RelationshipViewModel : ObservableObject
     [ObservableProperty]
     private RelationshipType _type;
 
-    /// <summary>起点エンティティ側の参照先カラム ID</summary>
-    [ObservableProperty]
-    private Guid? _sourceColumnId;
+    /// <summary>外部キーを構成する列ペア（宣言順）の正本</summary>
+    /// <remarks>
+    /// モデル（<see cref="Relationship.ColumnPairs"/>）と同じ表現をそのまま持ち、編集 UI の
+    /// <see cref="ColumnPairRows"/>（親列＋子列のコンボボックス 1 行 ＝ 列ペア 1 組）は常にここから導出する
+    /// </remarks>
+    private readonly List<RelationshipColumnPair> _columnPairs;
 
-    /// <summary>終点エンティティ側の外部キーカラム ID</summary>
-    [ObservableProperty]
-    private Guid? _targetColumnId;
+    /// <summary>末尾に未確定の空スロット行を出しているかどうか（ビュー状態・モデル未反映）</summary>
+    private bool _hasPendingSlot;
 
     /// <summary>外部キー制約名</summary>
     [ObservableProperty]
@@ -80,12 +84,43 @@ public partial class RelationshipViewModel : ObservableObject
     /// <summary>リレーションの終点エンティティ（外部キーを持つ側）</summary>
     public EntityViewModel Target { get; }
 
-    /// <summary>参照先列として選択可能な起点側カラム一覧（主キー列のみ）</summary>
+    /// <summary>参照先列として選択可能な起点側カラム一覧（主キー列 ∪ 一意制約の構成列）</summary>
+    /// <remarks>
+    /// 外部キーが参照できるのは親側の候補キー（PK または UNIQUE 制約）だけなので、その両方を候補とする
+    /// （<see cref="ColumnViewModel.IsUniqueConstraintMember"/> は所有エンティティが制約の増減へ追従して立てる）
+    /// </remarks>
     public IReadOnlyList<ColumnViewModel> AvailableSourceColumns =>
-        Source.Columns.Where(c => c.IsPrimaryKey).ToList();
+        Source.Columns.Where(c => c.IsPrimaryKey || c.IsUniqueConstraintMember).ToList();
 
     /// <summary>外部キー列として選択可能な終点側カラム一覧</summary>
     public IReadOnlyList<ColumnViewModel> AvailableTargetColumns => Target.Columns.ToList();
+
+    /// <summary>外部キーを構成する列ペア（宣言順。複合外部キーは 2 組以上になる）</summary>
+    /// <remarks>
+    /// <b>この一覧の変更通知（<c>PropertyChanged</c>）は発行しない</b>。UI は行コレクション
+    /// <see cref="ColumnPairRows"/> の増減で更新されるうえ、履歴化は専用コマンド
+    /// （<c>ChangeRelationshipColumnPairsCommand</c>）に一本化しているため
+    /// </remarks>
+    public IReadOnlyList<RelationshipColumnPair> ColumnPairs => _columnPairs;
+
+    /// <summary>列ペアの編集行（宣言順。末尾に空スロットを 1 行だけ持てる）</summary>
+    public ObservableCollection<RelationshipColumnPairViewModel> ColumnPairRows { get; } = new();
+
+    /// <summary>列ペアを 1 行追加できるかどうか（両側に未使用の候補列があり、空スロットが出ていない）</summary>
+    public bool CanAddColumnPair =>
+        !_hasPendingSlot
+        && CanSelectForeignKeyColumns
+        && AvailableSourceColumns.Count
+            > ColumnPairRows.Count(row => row.SelectedSourceColumn is not null)
+        && AvailableTargetColumns.Count
+            > ColumnPairRows.Count(row => row.SelectedTargetColumn is not null);
+
+    /// <summary>列ペア行の選択がユーザー操作で変わったときに発火する（履歴化は購読側の責務）</summary>
+    /// <remarks>
+    /// 未購読・未処理のまま戻ってきた場合は、正本と表示が食い違わないよう自前で確定させる
+    /// （<see cref="MainViewModel"/> を伴わない VM 単体利用の経路。履歴には残らない）
+    /// </remarks>
+    internal event EventHandler<RelationshipColumnPairViewModel>? ColumnPairSelectionEdited;
 
     /// <summary>UI 表示用の参照アクション候補一覧</summary>
     public IReadOnlyList<ForeignKeyReferentialAction> ReferentialActions { get; } =
@@ -107,8 +142,9 @@ public partial class RelationshipViewModel : ObservableObject
     {
         Id = model.Id;
         _type = model.Type;
-        _sourceColumnId = model.SourceColumnId;
-        _targetColumnId = model.TargetColumnId;
+
+        // 列ペアはモデルの正本をそのまま引き継ぐ（複製して外部の List と実体を共有しない）
+        _columnPairs = model.ColumnPairs.Select(pair => pair.Clone()).ToList();
         _constraintName = model.ConstraintName;
         _onDelete = model.OnDelete;
         _onUpdate = model.OnUpdate;
@@ -120,6 +156,7 @@ public partial class RelationshipViewModel : ObservableObject
 
         EnsureColumnSelectionConsistency();
         EnsureReferentialActionConsistency();
+        SyncColumnPairRows();
     }
 
     /// <summary>両端カラムの増減に追従し、購読の着脱と候補・整合性の再評価を行う</summary>
@@ -158,30 +195,39 @@ public partial class RelationshipViewModel : ObservableObject
         }
     }
 
-    /// <summary>主キー化やカラム名の変更時に、選択候補と選択整合性を再評価する</summary>
+    /// <summary>主キー化・一意制約入り・カラム名の変更時に、選択候補と選択整合性を再評価する</summary>
     private void OnColumnPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName is nameof(ColumnViewModel.IsPrimaryKey) or nameof(ColumnViewModel.Name))
+        if (
+            e.PropertyName
+            is nameof(ColumnViewModel.IsPrimaryKey)
+                or nameof(ColumnViewModel.IsUniqueConstraintMember)
+                or nameof(ColumnViewModel.Name)
+        )
         {
             NotifyColumnCandidatesChanged();
             EnsureColumnSelectionConsistency();
         }
     }
 
-    /// <summary>選択候補プロパティの変更を通知する</summary>
+    /// <summary>選択候補プロパティの変更を通知し、各編集行の候補を絞り直す</summary>
     private void NotifyColumnCandidatesChanged()
     {
         OnPropertyChanged(nameof(AvailableSourceColumns));
         OnPropertyChanged(nameof(AvailableTargetColumns));
+
+        RefreshColumnPairCandidates();
+        OnPropertyChanged(nameof(CanAddColumnPair));
     }
 
     /// <summary>スナップショット適用中など列整合チェックを一時的に抑止するためのフラグ</summary>
     internal bool SuppressColumnSelectionConsistency { get; set; }
 
-    /// <summary>種別変更に伴う列選択の連動更新中かどうか</summary>
-    internal bool IsUpdatingType { get; private set; }
-
-    /// <summary>現在の種別・候補に矛盾する列選択を解消する（多対多では選択をクリアする）</summary>
+    /// <summary>現在の種別・両端カラムに矛盾する列ペアを解消する（多対多では全ペアをクリアする）</summary>
+    /// <remarks>
+    /// 落とす対象は「両端のどちらかが実在しない列を指すペア」だけに絞る。候補キー（PK / UNIQUE）から
+    /// 外れただけのペアは残す＝列が生きている限りユーザーの指定を勝手に捨てない
+    /// </remarks>
     private void EnsureColumnSelectionConsistency()
     {
         if (SuppressColumnSelectionConsistency)
@@ -191,27 +237,202 @@ public partial class RelationshipViewModel : ObservableObject
 
         if (!CanSelectForeignKeyColumns)
         {
-            SourceColumnId = null;
-            TargetColumnId = null;
+            if (_columnPairs.Count > 0)
+            {
+                SetColumnPairs([]);
+            }
+
             return;
         }
 
-        if (SourceColumnId is not null && AvailableSourceColumns.All(c => c.Id != SourceColumnId))
-        {
-            SourceColumnId = null;
-        }
+        var survivors = _columnPairs
+            .Where(pair =>
+                Source.Columns.Any(column => column.Id == pair.SourceColumnId)
+                && Target.Columns.Any(column => column.Id == pair.TargetColumnId)
+            )
+            .ToList();
 
-        if (TargetColumnId is not null && AvailableTargetColumns.All(c => c.Id != TargetColumnId))
+        if (survivors.Count != _columnPairs.Count)
         {
-            TargetColumnId = null;
+            SetColumnPairs(survivors);
         }
     }
 
-    /// <summary>参照先カラム ID 変更時に再通知する（バインディング更新を確実にする）</summary>
-    partial void OnSourceColumnIdChanged(Guid? value) => OnPropertyChanged(nameof(SourceColumnId));
+    /// <summary>列ペア一覧を丸ごと差し替える（Undo コマンド・整合処理からの唯一の適用点）</summary>
+    /// <param name="columnPairs">新しい列ペア（宣言順）</param>
+    internal void SetColumnPairs(IEnumerable<RelationshipColumnPair> columnPairs)
+    {
+        _columnPairs.Clear();
+        _columnPairs.AddRange(columnPairs.Select(pair => pair.Clone()));
 
-    /// <summary>外部キーカラム ID 変更時に再通知する（バインディング更新を確実にする）</summary>
-    partial void OnTargetColumnIdChanged(Guid? value) => OnPropertyChanged(nameof(TargetColumnId));
+        // 正本が変わった時点で編集途中の空スロットは意味を失うため捨てる（Undo・AI ツール由来の変更も同じ扱い）
+        _hasPendingSlot = false;
+        SyncColumnPairRows();
+    }
+
+    /// <summary>現在の列ペアを複製して返す（履歴コマンドのスナップショット用）</summary>
+    internal IReadOnlyList<RelationshipColumnPair> SnapshotColumnPairs() =>
+        _columnPairs.Select(pair => pair.Clone()).ToList();
+
+    /// <summary>2 つの列ペア一覧が並び順まで含めて等しいかどうかを判定する</summary>
+    /// <remarks>履歴を汚さないための「実質的な変化なし」判定に用いる</remarks>
+    internal static bool SameColumnPairs(
+        IReadOnlyList<RelationshipColumnPair> left,
+        IReadOnlyList<RelationshipColumnPair> right
+    ) =>
+        left.Count == right.Count
+        && left.Zip(right)
+            .All(entry =>
+                entry.First.SourceColumnId == entry.Second.SourceColumnId
+                && entry.First.TargetColumnId == entry.Second.TargetColumnId
+            );
+
+    /// <summary>末尾へ未確定の空スロット行を 1 つ追加する（ビュー状態のみ・履歴に残さない）</summary>
+    internal void AddPendingColumnPairSlot()
+    {
+        if (!CanAddColumnPair)
+        {
+            return;
+        }
+
+        _hasPendingSlot = true;
+        SyncColumnPairRows();
+    }
+
+    /// <summary>未確定の空スロット行を破棄する（モデル未反映のためビュー状態の取り消しで足りる）</summary>
+    internal void CancelPendingColumnPairSlot()
+    {
+        if (!_hasPendingSlot)
+        {
+            return;
+        }
+
+        _hasPendingSlot = false;
+        SyncColumnPairRows();
+    }
+
+    /// <summary>現在の編集行の選択から列ペア一覧（宣言順）を組み立てる</summary>
+    /// <param name="excluded">除外する行（行削除の適用先を組み立てる場合に指定する）</param>
+    /// <remarks>
+    /// <b>両側が選ばれている行だけ</b>を採る。片側だけ選んだ行は外部キーとして意味を成さないため、
+    /// もう片方が選ばれるまでビュー状態に留める（＝モデル・履歴へ反映しない）
+    /// </remarks>
+    internal IReadOnlyList<RelationshipColumnPair> BuildColumnPairsFromRows(
+        RelationshipColumnPairViewModel? excluded = null
+    ) =>
+        ColumnPairRows
+            .Where(row => !ReferenceEquals(row, excluded))
+            .Where(row =>
+                row.SelectedSourceColumn is not null && row.SelectedTargetColumn is not null
+            )
+            .Select(row => new RelationshipColumnPair(
+                row.SelectedSourceColumn!.Id,
+                row.SelectedTargetColumn!.Id
+            ))
+            .ToList();
+
+    /// <summary>行の列選択がユーザー操作で変わったことを購読側（履歴化する側）へ伝える</summary>
+    internal void NotifyColumnPairSelectionEdited(RelationshipColumnPairViewModel row)
+    {
+        // 選択が動いた時点で他行の候補（重複除外）が変わるため、まず候補だけ整える
+        RefreshColumnPairCandidates();
+        OnPropertyChanged(nameof(CanAddColumnPair));
+
+        ColumnPairSelectionEdited?.Invoke(this, row);
+
+        // 誰も履歴化しなかった場合でも、正本と表示の食い違いは残さない
+        var derived = BuildColumnPairsFromRows();
+
+        if (!SameColumnPairs(_columnPairs, derived))
+        {
+            SetColumnPairs(derived);
+        }
+    }
+
+    /// <summary>正本と空スロットの有無から編集行を作り直す</summary>
+    /// <remarks>
+    /// 行の増減は末尾でのみ吸収し、既存の行インスタンスは使い回す。ItemsControl のコンテナ再生成を避けて、
+    /// コンボボックスの選択操作の途中で行の実体が差し替わらないようにするため
+    /// </remarks>
+    private void SyncColumnPairRows()
+    {
+        // 解決できない Guid（想定外の壊れた参照）は行に出さない＝DDL 生成のスキップと同じ扱い
+        var resolved = _columnPairs
+            .Select(pair =>
+                (
+                    Source: Source.Columns.FirstOrDefault(column =>
+                        column.Id == pair.SourceColumnId
+                    ),
+                    Target: Target.Columns.FirstOrDefault(column =>
+                        column.Id == pair.TargetColumnId
+                    )
+                )
+            )
+            .Where(pair => pair.Source is not null && pair.Target is not null)
+            .ToList();
+
+        var desired = resolved.Count + (_hasPendingSlot ? 1 : 0);
+
+        while (ColumnPairRows.Count > desired)
+        {
+            var removed = ColumnPairRows[^1];
+            ColumnPairRows.RemoveAt(ColumnPairRows.Count - 1);
+
+            // 外れた行のコンボボックスが後片付けの過程で選択を落としても、正本を触らせない
+            removed.Detach();
+        }
+
+        while (ColumnPairRows.Count < desired)
+        {
+            ColumnPairRows.Add(new RelationshipColumnPairViewModel(this));
+        }
+
+        for (var i = 0; i < ColumnPairRows.Count; i++)
+        {
+            ColumnPairRows[i]
+                .ApplySelection(
+                    i < resolved.Count ? resolved[i].Source : null,
+                    i < resolved.Count ? resolved[i].Target : null,
+                    isPendingSlot: i >= resolved.Count
+                );
+        }
+
+        RefreshColumnPairCandidates();
+        OnPropertyChanged(nameof(CanAddColumnPair));
+    }
+
+    /// <summary>各行の選択候補を「他行が使っていない列＋自行の現在選択」へ絞り込む</summary>
+    private void RefreshColumnPairCandidates()
+    {
+        var usedSources = ColumnPairRows
+            .Select(row => row.SelectedSourceColumn)
+            .Where(column => column is not null)
+            .Select(column => column!)
+            .ToHashSet();
+        var usedTargets = ColumnPairRows
+            .Select(row => row.SelectedTargetColumn)
+            .Where(column => column is not null)
+            .Select(column => column!)
+            .ToHashSet();
+        var sourceCandidates = AvailableSourceColumns;
+        var targetCandidates = AvailableTargetColumns;
+
+        foreach (var row in ColumnPairRows)
+        {
+            row.SyncAvailableSourceColumns(
+                sourceCandidates.Where(column =>
+                    !usedSources.Contains(column)
+                    || ReferenceEquals(column, row.SelectedSourceColumn)
+                )
+            );
+            row.SyncAvailableTargetColumns(
+                targetCandidates.Where(column =>
+                    !usedTargets.Contains(column)
+                    || ReferenceEquals(column, row.SelectedTargetColumn)
+                )
+            );
+        }
+    }
 
     /// <summary>両端の位置・サイズ変更時に幾何情報を再計算して通知する</summary>
     private void OnEndpointChanged(object? sender, PropertyChangedEventArgs e)
@@ -266,7 +487,6 @@ public partial class RelationshipViewModel : ObservableObject
     /// <summary>種別変更開始を記録し、変更直前フックを発火する</summary>
     partial void OnTypeChanging(RelationshipType value)
     {
-        IsUpdatingType = true;
         TypeChanging?.Invoke(this, EventArgs.Empty);
     }
 
@@ -278,10 +498,10 @@ public partial class RelationshipViewModel : ObservableObject
         OnPropertyChanged(nameof(TargetMarker));
         OnPropertyChanged(nameof(CanSelectForeignKeyColumns));
         OnPropertyChanged(nameof(CanConfigureReferentialActions));
+        OnPropertyChanged(nameof(CanAddColumnPair));
 
         EnsureColumnSelectionConsistency();
         EnsureReferentialActionConsistency();
-        IsUpdatingType = false;
 
         // 全連動変更完了後に通知する
         TypeChangeCompleted?.Invoke(this, EventArgs.Empty);
@@ -497,6 +717,10 @@ public partial class RelationshipViewModel : ObservableObject
         };
 
     /// <summary>現在の状態をモデルへコピーして返す</summary>
+    /// <remarks>
+    /// 列ペアは正本をそのまま複製して載せる（空リスト＝外部キー句を作らないリレーション）。
+    /// 複合外部キーは 2 組以上のペアがそのまま往復する。
+    /// </remarks>
     public Relationship ToModel() =>
         new()
         {
@@ -504,8 +728,7 @@ public partial class RelationshipViewModel : ObservableObject
             SourceEntityId = Source.Id,
             TargetEntityId = Target.Id,
             Type = Type,
-            SourceColumnId = SourceColumnId,
-            TargetColumnId = TargetColumnId,
+            ColumnPairs = _columnPairs.Select(pair => pair.Clone()).ToList(),
             ConstraintName = ConstraintName,
             OnDelete = OnDelete,
             OnUpdate = OnUpdate,
@@ -588,6 +811,173 @@ public partial class RelationshipViewModel : ObservableObject
             foreach (var column in Target.Columns)
             {
                 column.PropertyChanged -= OnColumnPropertyChanged;
+            }
+        }
+    }
+}
+
+/// <summary>外部キーを構成する列ペア 1 組を表す編集行（親列＋子列のコンボボックス 1 行分）</summary>
+/// <remarks>
+/// 正本はリレーション側の列ペア一覧で、この行は導出表示にすぎない。
+/// <see cref="SelectedSourceColumn"/> / <see cref="SelectedTargetColumn"/> のユーザー操作による変更だけを
+/// リレーションへ通知し、正本からの反映（<see cref="ApplySelection"/>）では通知しない。
+/// UNIQUE 制約の構成列行と違い <b>1 行に 2 つの選択が要る</b>ため、片側だけ選ばれた行は
+/// 未確定（<see cref="IsPendingSlot"/>）のままモデルへ載らない。
+/// </remarks>
+public sealed class RelationshipColumnPairViewModel : ObservableObject
+{
+    /// <summary>この行が属するリレーション</summary>
+    public RelationshipViewModel Relationship { get; }
+
+    /// <summary>親列の選択候補（他行が使っていない候補キー列＋自行の現在選択）</summary>
+    public ObservableCollection<ColumnViewModel> AvailableSourceColumns { get; } = new();
+
+    /// <summary>子列の選択候補（他行が使っていない列＋自行の現在選択）</summary>
+    public ObservableCollection<ColumnViewModel> AvailableTargetColumns { get; } = new();
+
+    /// <summary>選択中の親（被参照）カラム</summary>
+    private ColumnViewModel? _selectedSourceColumn;
+
+    /// <summary>選択中の子（外部キー）カラム</summary>
+    private ColumnViewModel? _selectedTargetColumn;
+
+    /// <summary>正本からの反映中かどうか（この間の変更はリレーションへ通知しない）</summary>
+    private bool _isApplyingModelState;
+
+    /// <summary>行リストから外された後かどうか（外れた行の後片付けで正本を触らないためのガード）</summary>
+    private bool _isDetached;
+
+    /// <summary>まだ正本へ確定していない行かどうか</summary>
+    private bool _isPendingSlot;
+
+    /// <summary><see cref="RelationshipColumnPairViewModel"/> を生成する</summary>
+    public RelationshipColumnPairViewModel(RelationshipViewModel relationship)
+    {
+        Relationship = relationship;
+    }
+
+    /// <summary>この行が指す親（被参照）カラム</summary>
+    public ColumnViewModel? SelectedSourceColumn
+    {
+        get => _selectedSourceColumn;
+        set
+        {
+            if (ReferenceEquals(_selectedSourceColumn, value))
+            {
+                return;
+            }
+
+            _selectedSourceColumn = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(IsSourceColumnUnselected));
+            NotifySelectionEdited();
+        }
+    }
+
+    /// <summary>この行が指す子（外部キー）カラム</summary>
+    public ColumnViewModel? SelectedTargetColumn
+    {
+        get => _selectedTargetColumn;
+        set
+        {
+            if (ReferenceEquals(_selectedTargetColumn, value))
+            {
+                return;
+            }
+
+            _selectedTargetColumn = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(IsTargetColumnUnselected));
+            NotifySelectionEdited();
+        }
+    }
+
+    /// <summary>まだ正本へ確定していない行かどうか（＋で足した空スロット。× は履歴を残さず破棄する）</summary>
+    public bool IsPendingSlot => _isPendingSlot;
+
+    /// <summary>親列が未選択かどうか（プレースホルダー表示の判定）</summary>
+    public bool IsSourceColumnUnselected => _selectedSourceColumn is null;
+
+    /// <summary>子列が未選択かどうか（プレースホルダー表示の判定）</summary>
+    public bool IsTargetColumnUnselected => _selectedTargetColumn is null;
+
+    /// <summary>ユーザー操作による選択変更をリレーションへ通知する（正本反映中・切り離し後は何もしない）</summary>
+    private void NotifySelectionEdited()
+    {
+        if (_isApplyingModelState || _isDetached)
+        {
+            return;
+        }
+
+        Relationship.NotifyColumnPairSelectionEdited(this);
+    }
+
+    /// <summary>正本の列ペアをこの行へ反映する（リレーションへの通知は行わない）</summary>
+    internal void ApplySelection(
+        ColumnViewModel? sourceColumn,
+        ColumnViewModel? targetColumn,
+        bool isPendingSlot
+    )
+    {
+        _isApplyingModelState = true;
+
+        try
+        {
+            SelectedSourceColumn = sourceColumn;
+            SelectedTargetColumn = targetColumn;
+        }
+        finally
+        {
+            _isApplyingModelState = false;
+        }
+
+        if (_isPendingSlot != isPendingSlot)
+        {
+            _isPendingSlot = isPendingSlot;
+            OnPropertyChanged(nameof(IsPendingSlot));
+        }
+    }
+
+    /// <summary>この行を行リストから外れたものとして無効化する</summary>
+    internal void Detach() => _isDetached = true;
+
+    /// <summary>親列の選択候補を差分だけ入れ替える</summary>
+    internal void SyncAvailableSourceColumns(IEnumerable<ColumnViewModel> columns) =>
+        SyncCandidates(AvailableSourceColumns, columns);
+
+    /// <summary>子列の選択候補を差分だけ入れ替える</summary>
+    internal void SyncAvailableTargetColumns(IEnumerable<ColumnViewModel> columns) =>
+        SyncCandidates(AvailableTargetColumns, columns);
+
+    /// <summary>選択候補コレクションを差分だけ入れ替える</summary>
+    /// <remarks>
+    /// ItemsSource を丸ごと差し替えるとコンボボックスが選択を落とすため、実際に増減した項目だけを反映する
+    /// （並びは所有エンティティのカラム順）
+    /// </remarks>
+    private static void SyncCandidates(
+        ObservableCollection<ColumnViewModel> candidates,
+        IEnumerable<ColumnViewModel> columns
+    )
+    {
+        var desired = columns.ToList();
+
+        for (var i = candidates.Count - 1; i >= 0; i--)
+        {
+            if (!desired.Contains(candidates[i]))
+            {
+                candidates.RemoveAt(i);
+            }
+        }
+
+        for (var i = 0; i < desired.Count; i++)
+        {
+            if (i >= candidates.Count)
+            {
+                candidates.Add(desired[i]);
+            }
+            else if (!ReferenceEquals(candidates[i], desired[i]))
+            {
+                candidates.Insert(i, desired[i]);
             }
         }
     }

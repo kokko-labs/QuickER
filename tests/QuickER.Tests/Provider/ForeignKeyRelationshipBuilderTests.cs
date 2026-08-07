@@ -83,14 +83,19 @@ public class ForeignKeyRelationshipBuilderTests
         // 参照先 (PK 側) が起点、FK 保有テーブルが終点
         rel.SourceEntityId.Should().Be(customer.Entity.Id);
         rel.TargetEntityId.Should().Be(order.Entity.Id);
-        rel.SourceColumnId.Should().Be(customerId.Id);
-        rel.TargetColumnId.Should().Be(orderFk.Id);
+        var pair = rel.ColumnPairs.Should().ContainSingle().Which;
+        pair.SourceColumnId.Should().Be(customerId.Id);
+        pair.TargetColumnId.Should().Be(orderFk.Id);
         rel.ConstraintName.Should().Be("FK_Order_Customer");
         // FK 保有列に IsForeignKey フラグが立つ
         orderFk.IsForeignKey.Should().BeTrue();
     }
 
-    /// <summary>同一制約名の複数行が複合 FK として集約され、単一列でないため列 ID が解決されないことを検証する</summary>
+    /// <summary>同一制約名の複数行が複合 FK として集約され、全構成列が列ペアへ載ることを検証する</summary>
+    /// <remarks>
+    /// 意味モデルが複合外部キーを表現できるようになったため、かつての「単一列でないので列 ID を持たない」
+    /// 劣化はもう起きない（列ペアが外部キー定義の正本）。
+    /// </remarks>
     [Fact(DisplayName = "同一制約名の複数行は複合 FK として集約される")]
     public void CompositeForeignKey_AggregatesByConstraintName()
     {
@@ -128,86 +133,15 @@ public class ForeignKeyRelationshipBuilderTests
         var rel = rels.Should().ContainSingle().Which;
         // FK 列集合 (AId,BId) は Child の PK (Id) と一致しないため 1 対多
         rel.Type.Should().Be(RelationshipType.OneToMany);
-        // 複数列 FK では代表列 ID を持たない
-        rel.SourceColumnId.Should().BeNull();
-        rel.TargetColumnId.Should().BeNull();
+        // 構成列は投入順（＝序数順）で親側・子側が対応する列ペアとして全て載る
+        rel.ColumnPairs.Should().HaveCount(2);
+        rel.ColumnPairs[0].SourceColumnId.Should().Be(parent.ColumnsByName["A"].Id);
+        rel.ColumnPairs[0].TargetColumnId.Should().Be(child.ColumnsByName["AId"].Id);
+        rel.ColumnPairs[1].SourceColumnId.Should().Be(parent.ColumnsByName["B"].Id);
+        rel.ColumnPairs[1].TargetColumnId.Should().Be(child.ColumnsByName["BId"].Id);
         rel.ConstraintName.Should().Be("FK_Child_Parent");
         child.ColumnsByName["AId"].IsForeignKey.Should().BeTrue();
         child.ColumnsByName["BId"].IsForeignKey.Should().BeTrue();
-    }
-
-    /// <summary>複合 FK の取込で、制約名・子テーブル・列ペアを備えた劣化警告が生成されることを検証する</summary>
-    [Fact(DisplayName = "複合 FK は列対応喪失の警告を生成する")]
-    public void CompositeForeignKey_ProducesWarning()
-    {
-        var child = Table("Child", "ChildTable", Col("Id", pk: true), Col("AId"), Col("BId"));
-        var parent = Table("Parent", "ParentTable", Col("A", pk: true), Col("B", pk: true));
-
-        var tables = new Dictionary<string, SchemaTableEntry>
-        {
-            ["Child"] = child,
-            ["Parent"] = parent,
-        };
-
-        var builder = new ForeignKeyRelationshipBuilder();
-        builder.Add(
-            "FK_Child_Parent",
-            "Child",
-            "AId",
-            "Parent",
-            "A",
-            ForeignKeyReferentialAction.NoAction,
-            ForeignKeyReferentialAction.NoAction
-        );
-        builder.Add(
-            "FK_Child_Parent",
-            "Child",
-            "BId",
-            "Parent",
-            "B",
-            ForeignKeyReferentialAction.NoAction,
-            ForeignKeyReferentialAction.NoAction
-        );
-
-        builder.Build(tables);
-
-        var warning = builder.CompositeForeignKeyWarnings.Should().ContainSingle().Which;
-        warning.ConstraintName.Should().Be("FK_Child_Parent");
-        // テーブルはキーではなくエンティティのテーブル名で報告する
-        warning.ChildTable.Should().Be("ChildTable");
-        warning.ParentTable.Should().Be("ParentTable");
-        // 列は投入順（＝序数順）で子側・親側が対応する
-        warning.ChildColumns.Should().Equal("AId", "BId");
-        warning.ParentColumns.Should().Equal("A", "B");
-    }
-
-    /// <summary>単一列 FK だけの取込では劣化警告が生成されないことを検証する</summary>
-    [Fact(DisplayName = "単一列 FK では警告を生成しない")]
-    public void SingleColumnForeignKey_ProducesNoWarning()
-    {
-        var customer = Table("Customer", "Customer", Col("Id", pk: true));
-        var order = Table("Order", "Order", Col("Id", pk: true), Col("CustomerId"));
-
-        var tables = new Dictionary<string, SchemaTableEntry>
-        {
-            ["Customer"] = customer,
-            ["Order"] = order,
-        };
-
-        var builder = new ForeignKeyRelationshipBuilder();
-        builder.Add(
-            "FK_Order_Customer",
-            "Order",
-            "CustomerId",
-            "Customer",
-            "Id",
-            ForeignKeyReferentialAction.NoAction,
-            ForeignKeyReferentialAction.NoAction
-        );
-
-        builder.Build(tables);
-
-        builder.CompositeForeignKeyWarnings.Should().BeEmpty();
     }
 
     /// <summary>FK 列が FK 保有テーブルの主キーと一致する場合に 1 対 1 と判定されることを検証する</summary>
@@ -394,16 +328,18 @@ public class ForeignKeyRelationshipBuilderTests
         var orderRel = rels.Should().ContainSingle(r => r.TargetEntityId == order.Entity.Id).Which;
         orderRel.SourceEntityId.Should().Be(customer.Entity.Id);
         orderRel.Type.Should().Be(RelationshipType.OneToMany);
-        orderRel.SourceColumnId.Should().Be(customer.ColumnsByName["Id"].Id);
-        orderRel.TargetColumnId.Should().Be(order.ColumnsByName["CustomerId"].Id);
+        var orderPair = orderRel.ColumnPairs.Should().ContainSingle().Which;
+        orderPair.SourceColumnId.Should().Be(customer.ColumnsByName["Id"].Id);
+        orderPair.TargetColumnId.Should().Be(order.ColumnsByName["CustomerId"].Id);
 
         var invoiceRel = rels.Should()
             .ContainSingle(r => r.TargetEntityId == invoice.Entity.Id)
             .Which;
         invoiceRel.SourceEntityId.Should().Be(customer.Entity.Id);
         invoiceRel.Type.Should().Be(RelationshipType.OneToMany);
-        invoiceRel.SourceColumnId.Should().Be(customer.ColumnsByName["Id"].Id);
-        invoiceRel.TargetColumnId.Should().Be(invoice.ColumnsByName["CustomerId"].Id);
+        var invoicePair = invoiceRel.ColumnPairs.Should().ContainSingle().Which;
+        invoicePair.SourceColumnId.Should().Be(customer.ColumnsByName["Id"].Id);
+        invoicePair.TargetColumnId.Should().Be(invoice.ColumnsByName["CustomerId"].Id);
 
         // 双方の子テーブルの FK 列にフラグが立つ（片方だけに混線していない）
         order.ColumnsByName["CustomerId"].IsForeignKey.Should().BeTrue();

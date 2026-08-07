@@ -156,8 +156,7 @@ public class SqlServerSyncScriptBuilderTests
             SourceEntityId = customer.Id,
             TargetEntityId = order.Id,
             Type = RelationshipType.OneToMany,
-            SourceColumnId = customer.Columns[0].Id,
-            TargetColumnId = order.Columns[2].Id,
+            ColumnPairs = [new(customer.Columns[0].Id, order.Columns[2].Id)],
         };
 
         var item = new SchemaDiffItem
@@ -165,6 +164,7 @@ public class SqlServerSyncScriptBuilderTests
             Kind = SchemaDiffKind.AddForeignKey,
             TableName = "Order",
             ColumnName = "CustomerRef",
+            ForeignKeyColumnPairs = [new("Id", "CustomerRef")],
             ParentEntity = customer,
             ChildEntity = order,
             Relationship = rel,
@@ -204,8 +204,7 @@ public class SqlServerSyncScriptBuilderTests
             SourceEntityId = customer.Id,
             TargetEntityId = order.Id,
             Type = RelationshipType.OneToMany,
-            SourceColumnId = customer.Columns[0].Id,
-            TargetColumnId = order.Columns[1].Id,
+            ColumnPairs = [new(customer.Columns[0].Id, order.Columns[1].Id)],
             ConstraintName = "FK_Order_Customer_Custom",
             OnDelete = ForeignKeyReferentialAction.Cascade,
             OnUpdate = ForeignKeyReferentialAction.SetDefault,
@@ -216,6 +215,7 @@ public class SqlServerSyncScriptBuilderTests
             Kind = SchemaDiffKind.AddForeignKey,
             TableName = "Order",
             ColumnName = "CustomerId",
+            ForeignKeyColumnPairs = [new("Id", "CustomerId")],
             ParentEntity = customer,
             ChildEntity = order,
             Relationship = rel,
@@ -324,6 +324,7 @@ public class SqlServerSyncScriptBuilderTests
                 Kind = SchemaDiffKind.AddForeignKey,
                 TableName = "T",
                 ColumnName = "Customer_Id",
+                ForeignKeyColumnPairs = [new("Id", "Customer_Id")],
                 ParentEntity = customer,
                 ChildEntity = e,
                 IsSelected = true,

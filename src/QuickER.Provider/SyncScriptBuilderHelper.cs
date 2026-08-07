@@ -11,24 +11,13 @@ namespace QuickER.Provider;
 /// </remarks>
 public static class SyncScriptBuilderHelper
 {
-    /// <summary>外部キーの参照先列を差分情報から解決する</summary>
-    /// <remarks>明示指定された列を優先し、無ければ親テーブルの主キー先頭列にフォールバックする</remarks>
-    public static Column? ResolveReferencedColumn(SchemaDiffItem item)
-    {
-        if (item.Relationship?.SourceColumnId is not null)
-        {
-            var byId = item.ParentEntity?.Columns.FirstOrDefault(c =>
-                c.Id == item.Relationship.SourceColumnId
-            );
-
-            if (byId is not null)
-            {
-                return byId;
-            }
-        }
-
-        return item.ParentEntity?.Columns.FirstOrDefault(c => c.IsPrimaryKey);
-    }
+    /// <summary>外部キーの構成列ペアを差分情報から取り出す（宣言順・空なら FK 句を作れない）</summary>
+    /// <remarks>
+    /// 列ペアは差分計算時に解決済みで <see cref="SchemaDiffItem.ForeignKeyColumnPairs"/> へ載っている。
+    /// 推測フォールバック（親の主キー先頭列・命名規約による子列）は行わない。
+    /// </remarks>
+    public static IReadOnlyList<ForeignKeyColumnNamePair> ResolveColumnPairs(SchemaDiffItem item) =>
+        item.ForeignKeyColumnPairs;
 
     /// <summary>NULL 許容句を返す（主キーまたは非 NULL 許容なら NOT NULL）</summary>
     public static string GetNullabilityClause(Column column) =>

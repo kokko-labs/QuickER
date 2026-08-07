@@ -50,8 +50,7 @@ public class ReverseMergePostProcessorTests
                 {
                     SourceEntityId = CustomerId,
                     TargetEntityId = OrderId,
-                    SourceColumnId = CustomerPk,
-                    TargetColumnId = OrderFk,
+                    ColumnPairs = [new(CustomerPk, OrderFk)],
                     Type = RelationshipType.OneToMany,
                     OnDelete = ForeignKeyReferentialAction.Cascade,
                     OnUpdate = ForeignKeyReferentialAction.SetNull,
@@ -68,8 +67,7 @@ public class ReverseMergePostProcessorTests
             {
                 SourceEntityId = CustomerId,
                 TargetEntityId = OrderId,
-                SourceColumnId = CustomerPk,
-                TargetColumnId = OrderFk,
+                ColumnPairs = [new(CustomerPk, OrderFk)],
                 Type = RelationshipType.OneToMany,
             },
         };
@@ -146,8 +144,7 @@ public class ReverseMergePostProcessorTests
                 {
                     SourceEntityId = CustomerId,
                     TargetEntityId = OrderId,
-                    SourceColumnId = CustomerPk,
-                    TargetColumnId = OrderFk,
+                    ColumnPairs = [new(CustomerPk, OrderFk)],
                     Type = RelationshipType.OneToMany,
                     ConstraintName = "FK_orders_customers",
                 },

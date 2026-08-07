@@ -1,6 +1,7 @@
 using System.IO;
 using System.Text;
 using QuickER.Model;
+using QuickER.Provider;
 
 namespace QuickER.Services;
 
@@ -12,7 +13,7 @@ namespace QuickER.Services;
 /// <list type="bullet">
 ///   <item><c>Table</c> ブロック: カラム設定は <c>pk</c> / <c>ref</c> / <c>unique</c> / <c>null</c> / <c>not null</c> / <c>note</c> のみ出力（Enum 等は対象外）</item>
 ///   <item><c>Indexes</c> ブロック: 一意制約のうちカラム設定 <c>unique</c> で表せないもの（複合・名前付き）を <c>(列, …) [unique, name: '…']</c> として出力</item>
-///   <item><c>Ref:</c> 行: 多重度を <c>-</c>（1対1）/ <c>&lt;</c>（1対多）/ <c>&lt;&gt;</c>（多対多）の記号で表現</item>
+///   <item><c>Ref:</c> 行: 多重度を <c>-</c>（1対1）/ <c>&lt;</c>（1対多）/ <c>&lt;&gt;</c>（多対多）の記号で表現し、複合外部キーは DBML 標準の複合 Ref 構文 <c>親.(a, b) &lt; 子.(x, y)</c> で表現</item>
 ///   <item>note 文字列中のシングルクォートは <c>\'</c> にエスケープ</item>
 /// </list>
 /// </remarks>
@@ -180,7 +181,8 @@ public static class DbmlExporter
     /// <remarks>
     /// 制約名は note 設定として出力する。標準 DBML では設定をエンドポイントの後ろへ置くが、
     /// ここでは <see cref="DbmlImporter"/> との往復を前提に <c>Ref:</c> 直後へ配置する独自形式を採る。
-    /// 参照カラム未指定のリレーションは各エンティティの先頭カラムで代用する
+    /// 列ペアが 2 組以上（複合外部キー）なら DBML 標準の複合 Ref 構文 <c>親.(a, b) &lt; 子.(x, y)</c> で書き出し、
+    /// 1 組なら従来どおりの単一列形式を保つ。参照カラム未指定のリレーションは各エンティティの先頭カラムで代用する
     /// </remarks>
     private static string? BuildRelationshipLine(
         Relationship relationship,
@@ -195,12 +197,17 @@ public static class DbmlExporter
             return null;
         }
 
-        var sourceColumn =
-            source.Columns.FirstOrDefault(column => column.Id == relationship.SourceColumnId)
-            ?? source.Columns.First();
-        var targetColumn =
-            target.Columns.FirstOrDefault(column => column.Id == relationship.TargetColumnId)
-            ?? target.Columns.First();
+        // 列ペアの解決は DDL 生成と同じ共通ヘルパーに委ねる（1 列でも解決できなければ null）
+        var pairs = ForeignKeyColumnPairResolver.Resolve(relationship, source, target);
+
+        // 列ペアを持たない（多対多・未割当）リレーションは先頭カラムで代用する
+        var sourceColumnNames = pairs is null
+            ? [source.Columns.First().Name]
+            : ForeignKeyColumnPairResolver.ParentColumns(pairs).ToList();
+        var targetColumnNames = pairs is null
+            ? new List<string> { target.Columns.First().Name }
+            : ForeignKeyColumnPairResolver.ChildColumns(pairs).ToList();
+
         var symbol = relationship.Type switch
         {
             RelationshipType.OneToOne => "-",
@@ -212,8 +219,12 @@ public static class DbmlExporter
             ? string.Empty
             : $" [note: '{EscapeNote(relationship.ConstraintName!)}']";
 
-        return $"Ref:{note} {source.TableName}.{sourceColumn.Name} {symbol} {target.TableName}.{targetColumn.Name}";
+        return $"Ref:{note} {source.TableName}.{FormatEndpointColumns(sourceColumnNames)} {symbol} {target.TableName}.{FormatEndpointColumns(targetColumnNames)}";
     }
+
+    /// <summary><c>Ref:</c> 行のエンドポイント列を表記する（単一列はそのまま・複数列は <c>(a, b)</c>）</summary>
+    private static string FormatEndpointColumns(IReadOnlyList<string> columnNames) =>
+        columnNames.Count == 1 ? columnNames[0] : $"({string.Join(", ", columnNames)})";
 
     /// <summary>
     /// DBML の note リテラル内で使えないシングルクォートを <c>\'</c> へエスケープする
