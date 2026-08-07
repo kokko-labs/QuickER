@@ -588,6 +588,87 @@ public class CSharpCodeGenerationServiceTests
         result.Files[0].Content.Should().NotContain("ICollection<RoleEntity>");
     }
 
+    /// <summary>リレーション警告の表示名が Guid でなく「親テーブル → 子テーブル」になることを検証する</summary>
+    /// <remarks>
+    /// 図の上で対象を特定できない Guid 表示は診断として役に立たないため、
+    /// 表示名の規則（制約名の有無に依らずテーブル名ペア・最後の手段のみ Id）を固定する。
+    /// </remarks>
+    [Theory]
+    [InlineData("FK_child_parent", "parents → children")]
+    [InlineData(null, "parents → children")]
+    public void Generate_CompositeRelationshipWarning_UsesReadableName(
+        string? constraintName,
+        string expectedDisplayName
+    )
+    {
+        var parentA = new Column
+        {
+            Name = "a",
+            DataType = "int",
+            IsPrimaryKey = true,
+        };
+        var parentB = new Column
+        {
+            Name = "b",
+            DataType = "int",
+            IsPrimaryKey = true,
+        };
+        var childId = new Column
+        {
+            Name = "id",
+            DataType = "int",
+            IsPrimaryKey = true,
+        };
+        var childA = new Column { Name = "a_ref", DataType = "int" };
+        var childB = new Column { Name = "b_ref", DataType = "int" };
+        var parent = new Entity
+        {
+            Id = Guid.NewGuid(),
+            TableName = "parents",
+            Columns = [parentA, parentB],
+        };
+        var child = new Entity
+        {
+            Id = Guid.NewGuid(),
+            TableName = "children",
+            Columns = [childId, childA, childB],
+        };
+        var relationship = new Relationship
+        {
+            Id = Guid.NewGuid(),
+            SourceEntityId = parent.Id,
+            TargetEntityId = child.Id,
+            Type = RelationshipType.OneToMany,
+            ConstraintName = constraintName,
+            ColumnPairs =
+            [
+                new RelationshipColumnPair(parentA.Id, childA.Id),
+                new RelationshipColumnPair(parentB.Id, childB.Id),
+            ],
+        };
+        var diagram = new ErDiagram { Entities = [parent, child], Relationships = [relationship] };
+
+        var result = new CSharpCodeGenerationService().Generate(
+            diagram,
+            new CodeGenerationOptions { RootNamespace = "Sample.Domain" }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        var warning = result
+            .Diagnostics.Should()
+            .ContainSingle(diagnostic =>
+                diagnostic.Severity == GenerationDiagnosticSeverity.Warning
+                && diagnostic.Message.Contains(
+                    Strings.CodeGen_Warning_RelationshipCompositeSkipped.Split("{0}")[0]
+                )
+            )
+            .Subject;
+        warning.Message.Should().Contain(expectedDisplayName);
+        warning
+            .Message.Should()
+            .NotContain(relationship.Id.ToString(), "Guid 表示は特定に使えない");
+    }
+
     /// <summary>Entity ↔ EditModel を変換する Mapper クラスが生成されることを検証する</summary>
     [Fact]
     public void Generate_ShouldCreateMapperClass()

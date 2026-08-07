@@ -745,6 +745,29 @@ internal sealed partial class CSharpGenerationModelBuilder
         string DependentColumnName
     );
 
+    /// <summary>診断メッセージ用のリレーション表示名を組み立てる</summary>
+    /// <remarks>
+    /// 利用者が図の上で対象を特定できるよう「親テーブル → 子テーブル」で表す
+    /// （制約名より図上の見た目と直結するため。Guid はそのまま見せない）。
+    /// 端点エンティティが解決できない壊れた参照のときだけ、最後の識別手段として Id へフォールバックする。
+    /// </remarks>
+    private static string DescribeRelationship(ErDiagram diagram, Relationship relationship)
+    {
+        var source = diagram.Entities.FirstOrDefault(item =>
+            item.Id == relationship.SourceEntityId
+        );
+        var target = diagram.Entities.FirstOrDefault(item =>
+            item.Id == relationship.TargetEntityId
+        );
+
+        if (source is null || target is null)
+        {
+            return relationship.Id.ToString();
+        }
+
+        return $"{source.TableName} → {target.TableName}";
+    }
+
     /// <summary>全リレーションを一度だけ走査し、エンティティ ID ごとのナビゲーション情報を解決する</summary>
     /// <remarks>
     /// 多対多や参照先・キーが解決できないリレーションは警告を出して生成対象外とする。
@@ -767,7 +790,10 @@ internal sealed partial class CSharpGenerationModelBuilder
             {
                 diagnostics.Add(
                     GenerationDiagnostic.Warning(
-                        string.Format(Strings.CodeGen_Warning_ManyToManySkipped, relationship.Id)
+                        string.Format(
+                            Strings.CodeGen_Warning_ManyToManySkipped,
+                            DescribeRelationship(diagram, relationship)
+                        )
                     )
                 );
                 continue;
@@ -786,7 +812,7 @@ internal sealed partial class CSharpGenerationModelBuilder
                     GenerationDiagnostic.Warning(
                         string.Format(
                             Strings.CodeGen_Warning_RelationshipTargetNotFound,
-                            relationship.Id
+                            DescribeRelationship(diagram, relationship)
                         )
                     )
                 );
@@ -800,7 +826,7 @@ internal sealed partial class CSharpGenerationModelBuilder
                     GenerationDiagnostic.Warning(
                         string.Format(
                             Strings.CodeGen_Warning_RelationshipCompositeSkipped,
-                            relationship.Id
+                            DescribeRelationship(diagram, relationship)
                         )
                     )
                 );
@@ -822,7 +848,7 @@ internal sealed partial class CSharpGenerationModelBuilder
                     GenerationDiagnostic.Warning(
                         string.Format(
                             Strings.CodeGen_Warning_RelationshipKeyUnknown,
-                            relationship.Id
+                            DescribeRelationship(diagram, relationship)
                         )
                     )
                 );
