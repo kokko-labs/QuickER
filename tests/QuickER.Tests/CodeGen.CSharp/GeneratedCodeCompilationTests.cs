@@ -827,8 +827,7 @@ public class GeneratedCodeCompilationTests
                     Type = RelationshipType.OneToMany,
                     SourceEntityId = customer,
                     TargetEntityId = order,
-                    SourceColumnId = customerPk,
-                    TargetColumnId = orderCustomerFk,
+                    ColumnPairs = [new(customerPk, orderCustomerFk)],
                 },
                 // 1対多: orders -> order_lines（子は複合 PK の一部が FK）
                 new Relationship
@@ -837,8 +836,7 @@ public class GeneratedCodeCompilationTests
                     Type = RelationshipType.OneToMany,
                     SourceEntityId = order,
                     TargetEntityId = orderLine,
-                    SourceColumnId = orderPk,
-                    TargetColumnId = orderLineOrderFk,
+                    ColumnPairs = [new(orderPk, orderLineOrderFk)],
                 },
                 // 1対1: customers <-> customer_profiles
                 new Relationship
@@ -847,8 +845,7 @@ public class GeneratedCodeCompilationTests
                     Type = RelationshipType.OneToOne,
                     SourceEntityId = customer,
                     TargetEntityId = customerProfile,
-                    SourceColumnId = customerPk,
-                    TargetColumnId = customerProfileFk,
+                    ColumnPairs = [new(customerPk, customerProfileFk)],
                 },
                 // 自己参照: categories -> categories
                 new Relationship
@@ -857,8 +854,7 @@ public class GeneratedCodeCompilationTests
                     Type = RelationshipType.OneToMany,
                     SourceEntityId = category,
                     TargetEntityId = category,
-                    SourceColumnId = categoryPk,
-                    TargetColumnId = categoryParentFk,
+                    ColumnPairs = [new(categoryPk, categoryParentFk)],
                 },
             ],
         };

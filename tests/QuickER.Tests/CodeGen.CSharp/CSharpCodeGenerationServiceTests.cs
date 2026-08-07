@@ -144,8 +144,7 @@ public class CSharpCodeGenerationServiceTests
                     SourceEntityId = customer,
                     TargetEntityId = order,
                     Type = RelationshipType.OneToMany,
-                    SourceColumnId = customerId,
-                    TargetColumnId = orderCustomerId,
+                    ColumnPairs = [new(customerId, orderCustomerId)],
                 },
             ],
         };
@@ -441,8 +440,7 @@ public class CSharpCodeGenerationServiceTests
                     SourceEntityId = category,
                     TargetEntityId = item,
                     Type = RelationshipType.OneToMany,
-                    SourceColumnId = categoryId,
-                    TargetColumnId = itemCategoryId,
+                    ColumnPairs = [new(categoryId, itemCategoryId)],
                 },
             ],
         };
@@ -961,8 +959,7 @@ public class CSharpCodeGenerationServiceTests
                     Type = RelationshipType.OneToOne,
                     SourceEntityId = owner,
                     TargetEntityId = profile,
-                    SourceColumnId = ownerPk,
-                    TargetColumnId = profileFk,
+                    ColumnPairs = [new(ownerPk, profileFk)],
                 },
                 // 自己参照: category -> category
                 new()
@@ -971,8 +968,7 @@ public class CSharpCodeGenerationServiceTests
                     Type = RelationshipType.OneToMany,
                     SourceEntityId = category,
                     TargetEntityId = category,
-                    SourceColumnId = categoryPk,
-                    TargetColumnId = categoryParentFk,
+                    ColumnPairs = [new(categoryPk, categoryParentFk)],
                 },
                 // 複数親: line_item は sales_order と product の両方を親に持つ
                 new()
@@ -981,8 +977,7 @@ public class CSharpCodeGenerationServiceTests
                     Type = RelationshipType.OneToMany,
                     SourceEntityId = salesOrder,
                     TargetEntityId = lineItem,
-                    SourceColumnId = salesOrderPk,
-                    TargetColumnId = lineOrderFk,
+                    ColumnPairs = [new(salesOrderPk, lineOrderFk)],
                 },
                 new()
                 {
@@ -990,8 +985,7 @@ public class CSharpCodeGenerationServiceTests
                     Type = RelationshipType.OneToMany,
                     SourceEntityId = product,
                     TargetEntityId = lineItem,
-                    SourceColumnId = productPk,
-                    TargetColumnId = lineProductFk,
+                    ColumnPairs = [new(productPk, lineProductFk)],
                 },
             ],
         };
@@ -1735,8 +1729,7 @@ public class CSharpCodeGenerationServiceTests
                     SourceEntityId = customer,
                     TargetEntityId = order,
                     Type = RelationshipType.OneToMany,
-                    SourceColumnId = customerId,
-                    TargetColumnId = orderCustomerId,
+                    ColumnPairs = [new(customerId, orderCustomerId)],
                 },
             ],
         };
@@ -2378,8 +2371,7 @@ public class CSharpCodeGenerationServiceTests
                     Type = RelationshipType.OneToMany,
                     SourceEntityId = customerId,
                     TargetEntityId = orderId,
-                    SourceColumnId = customerPk,
-                    TargetColumnId = orderFk,
+                    ColumnPairs = [new(customerPk, orderFk)],
                 },
             ],
         };
@@ -2479,8 +2471,7 @@ public class CSharpCodeGenerationServiceTests
                     Type = RelationshipType.OneToMany,
                     SourceEntityId = customerId,
                     TargetEntityId = orderId,
-                    SourceColumnId = customerPk,
-                    TargetColumnId = orderFk,
+                    ColumnPairs = [new(customerPk, orderFk)],
                 },
             ],
         };
@@ -2571,8 +2562,7 @@ public class CSharpCodeGenerationServiceTests
                     Type = RelationshipType.OneToMany,
                     SourceEntityId = customerId,
                     TargetEntityId = orderId,
-                    SourceColumnId = customerPk,
-                    TargetColumnId = orderFk,
+                    ColumnPairs = [new(customerPk, orderFk)],
                 },
             ],
         };
@@ -3561,9 +3551,8 @@ public class CSharpCodeGenerationServiceTests
                 {
                     Id = Guid.NewGuid(),
                     SourceEntityId = customer,
-                    SourceColumnId = custPk,
                     TargetEntityId = order,
-                    TargetColumnId = orderFk,
+                    ColumnPairs = [new(custPk, orderFk)],
                     Type = RelationshipType.OneToMany,
                 },
             ],

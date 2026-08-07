@@ -299,9 +299,9 @@ namespace QuickER.AI.Chat.Resources {
             }
         }
 
-        public static string ErDesign_SingleColumnForeignKeyRule {
+        public static string ErDesign_ForeignKeyColumnMappingRule {
             get {
-                return ResourceManager.GetString("ErDesign_SingleColumnForeignKeyRule", resourceCulture);
+                return ResourceManager.GetString("ErDesign_ForeignKeyColumnMappingRule", resourceCulture);
             }
         }
 

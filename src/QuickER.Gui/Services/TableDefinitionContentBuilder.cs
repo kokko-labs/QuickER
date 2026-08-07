@@ -40,7 +40,44 @@ internal static class TableDefinitionContentBuilder
             _ => type.ToString(),
         };
 
+    /// <summary>リレーション一覧シートの参照元列・参照先列セルの表記（カンマ区切りの列名）を返す</summary>
+    /// <remarks>
+    /// 1 行 1 リレーションを保ったまま複合外部キーを表すため、構成列を宣言順にカンマ区切りで並べる
+    /// （単一列なら従来どおり列名 1 つ）。解決できない参照を含む列ペアは読み飛ばす（DDL 生成と同じ規則）
+    /// </remarks>
+    public static (string SourceColumns, string TargetColumns) GetRelationshipColumnTexts(
+        Relationship relationship,
+        IReadOnlyDictionary<Guid, Entity> entitiesById
+    )
+    {
+        if (
+            !entitiesById.TryGetValue(relationship.SourceEntityId, out var source)
+            || !entitiesById.TryGetValue(relationship.TargetEntityId, out var target)
+        )
+        {
+            return (string.Empty, string.Empty);
+        }
+
+        // 解決は DDL 生成と同じ共通ヘルパーに委ねる（1 列でも解決できないペアを含む外部キーは丸ごと空欄）
+        var pairs = ForeignKeyColumnPairResolver.Resolve(relationship, source, target);
+
+        if (pairs is null)
+        {
+            return (string.Empty, string.Empty);
+        }
+
+        return (
+            string.Join(", ", ForeignKeyColumnPairResolver.ParentColumns(pairs)),
+            string.Join(", ", ForeignKeyColumnPairResolver.ChildColumns(pairs))
+        );
+    }
+
     /// <summary>テーブル内の外部キーに連番（FK1, FK2…）を振った列 ID ごとの表示ラベルを構築する</summary>
+    /// <remarks>
+    /// 連番は 1 リレーション（外部キー制約）につき 1 つで、<b>同じ番号は同じ外部キー</b>を意味する
+    /// （複合外部キーは構成する子列すべてに同じ <c>FK{n}</c> が並ぶ＝一意制約の <c>UQ{n}</c> と同じ流儀）。
+    /// 1 列が複数の外部キーに参加する場合はカンマ連結する
+    /// </remarks>
     public static IReadOnlyDictionary<Guid, string> BuildForeignKeyLabels(
         Entity entity,
         IReadOnlyList<Relationship> relationships,
@@ -53,10 +90,13 @@ internal static class TableDefinitionContentBuilder
         var foreignKeyLabels = new Dictionary<Guid, List<string>>();
         var targetRelationships = relationships
             .Where(relationship =>
-                relationship.TargetEntityId == entity.Id && relationship.TargetColumnId is not null
+                relationship.TargetEntityId == entity.Id && relationship.ColumnPairs.Count > 0
             )
+            // 先頭に来る構成列の位置で並べる（複合外部キーは最も上にある子列が代表）
             .OrderBy(relationship =>
-                columnIndexes.GetValueOrDefault(relationship.TargetColumnId!.Value, int.MaxValue)
+                relationship.ColumnPairs.Min(pair =>
+                    columnIndexes.GetValueOrDefault(pair.TargetColumnId, int.MaxValue)
+                )
             )
             .ThenBy(
                 relationship => TableNameOf(entitiesById, relationship.SourceEntityId),
@@ -67,7 +107,7 @@ internal static class TableDefinitionContentBuilder
                     ColumnNameOf(
                         entitiesById,
                         relationship.SourceEntityId,
-                        relationship.SourceColumnId
+                        relationship.ColumnPairs[0].SourceColumnId
                     ),
                 StringComparer.OrdinalIgnoreCase
             )
@@ -75,16 +115,16 @@ internal static class TableDefinitionContentBuilder
 
         for (var i = 0; i < targetRelationships.Count; i++)
         {
-            var relationship = targetRelationships[i];
-            var targetColumnId = relationship.TargetColumnId!.Value;
-
-            if (!foreignKeyLabels.TryGetValue(targetColumnId, out var labels))
+            foreach (var pair in targetRelationships[i].ColumnPairs)
             {
-                labels = [];
-                foreignKeyLabels[targetColumnId] = labels;
-            }
+                if (!foreignKeyLabels.TryGetValue(pair.TargetColumnId, out var labels))
+                {
+                    labels = [];
+                    foreignKeyLabels[pair.TargetColumnId] = labels;
+                }
 
-            labels.Add($"FK{i + 1}");
+                labels.Add($"FK{i + 1}");
+            }
         }
 
         return foreignKeyLabels.ToDictionary(
@@ -163,6 +203,7 @@ internal static class TableDefinitionContentBuilder
     }
 
     /// <summary>外部キー列の参照先（テーブル.カラム）を重複なく連結した文字列を返す</summary>
+    /// <remarks>複合外部キーでは、この列と対になっている親列だけを参照先として挙げる</remarks>
     public static string GetReferenceText(
         Entity entity,
         Column column,
@@ -171,11 +212,13 @@ internal static class TableDefinitionContentBuilder
     )
     {
         var references = relationships
-            .Where(relationship =>
-                relationship.TargetEntityId == entity.Id && relationship.TargetColumnId == column.Id
-            )
-            .Select(relationship =>
-                $"{TableNameOf(entitiesById, relationship.SourceEntityId)}.{ColumnNameOf(entitiesById, relationship.SourceEntityId, relationship.SourceColumnId)}"
+            .Where(relationship => relationship.TargetEntityId == entity.Id)
+            .SelectMany(relationship =>
+                relationship
+                    .ColumnPairs.Where(pair => pair.TargetColumnId == column.Id)
+                    .Select(pair =>
+                        $"{TableNameOf(entitiesById, relationship.SourceEntityId)}.{ColumnNameOf(entitiesById, relationship.SourceEntityId, pair.SourceColumnId)}"
+                    )
             )
             .Where(reference => !string.IsNullOrWhiteSpace(reference))
             .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -193,7 +236,8 @@ internal static class TableDefinitionContentBuilder
     {
         return relationships
             .Where(relationship =>
-                relationship.TargetEntityId == entity.Id && relationship.TargetColumnId == column.Id
+                relationship.TargetEntityId == entity.Id
+                && relationship.ColumnPairs.Any(pair => pair.TargetColumnId == column.Id)
             )
             .Select(relationship => relationship.SourceEntityId)
             .Distinct()

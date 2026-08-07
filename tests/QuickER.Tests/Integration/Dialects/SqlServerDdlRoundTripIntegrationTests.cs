@@ -113,8 +113,7 @@ public sealed class SqlServerDdlRoundTripIntegrationTests(SqlServerContainerFixt
             SourceEntityId = customer.Id,
             TargetEntityId = order.Id,
             Type = RelationshipType.OneToMany,
-            SourceColumnId = customerId.Id,
-            TargetColumnId = orderCustomerId.Id,
+            ColumnPairs = [new(customerId.Id, orderCustomerId.Id)],
             ConstraintName = "FK_orders_customer",
             OnDelete = ForeignKeyReferentialAction.Cascade,
             OnUpdate = ForeignKeyReferentialAction.NoAction,
@@ -125,8 +124,7 @@ public sealed class SqlServerDdlRoundTripIntegrationTests(SqlServerContainerFixt
             SourceEntityId = customer.Id,
             TargetEntityId = profile.Id,
             Type = RelationshipType.OneToOne,
-            SourceColumnId = customerId.Id,
-            TargetColumnId = profileCustomerId.Id,
+            ColumnPairs = [new(customerId.Id, profileCustomerId.Id)],
             ConstraintName = "FK_profiles_customer",
             OnDelete = ForeignKeyReferentialAction.SetNull,
             OnUpdate = ForeignKeyReferentialAction.NoAction,
@@ -318,5 +316,98 @@ public sealed class SqlServerDdlRoundTripIntegrationTests(SqlServerContainerFixt
             .ColumnIds.Select(cid => columnNamesById[cid])
             .Should()
             .Equal("warehouse", "slot");
+    }
+
+    /// <summary>
+    /// 複合主キーの親と複合外部キーの子を実 DB へ流し、構成列ペアが宣言順のまま往復することを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 意味モデルが列ペアの一覧で外部キーを表現するようになったため、複合外部キーも劣化せず往復する。
+    /// </remarks>
+    [Fact(DisplayName = "[Integration] A: 複合 FK が構成列ペアごと往復一致する")]
+    public async Task CompositeForeignKey_RoundTrips()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+        // 親: 複合主キー (a, b)
+        var parent = new Entity { TableName = "composite_parent" };
+        var parentA = new Column
+        {
+            Name = "a",
+            DataType = "int",
+            IsPrimaryKey = true,
+            IsNullable = false,
+        };
+        var parentB = new Column
+        {
+            Name = "b",
+            DataType = "int",
+            IsPrimaryKey = true,
+            IsNullable = false,
+        };
+        parent.Columns.AddRange([parentA, parentB]);
+
+        // 子: 複合外部キー (a_ref, b_ref) → 親 (a, b)
+        var child = new Entity { TableName = "composite_child" };
+        var childId = new Column
+        {
+            Name = "id",
+            DataType = "int",
+            IsPrimaryKey = true,
+            IsNullable = false,
+        };
+        var childA = new Column
+        {
+            Name = "a_ref",
+            DataType = "int",
+            IsNullable = false,
+        };
+        var childB = new Column
+        {
+            Name = "b_ref",
+            DataType = "int",
+            IsNullable = false,
+        };
+        child.Columns.AddRange([childId, childA, childB]);
+
+        var rel = new Relationship
+        {
+            SourceEntityId = parent.Id,
+            TargetEntityId = child.Id,
+            Type = RelationshipType.OneToMany,
+            ColumnPairs = [new(parentA.Id, childA.Id), new(parentB.Id, childB.Id)],
+            ConstraintName = "FK_composite_child_composite_parent",
+        };
+
+        var diagram = new ErDiagram { Entities = { parent, child }, Relationships = { rel } };
+        var ddl = new SqlServerDdlGenerator().Build(diagram);
+
+        await fixture.ExecuteAsync(ddl, Ct);
+
+        await using var conn = await fixture.OpenConnectionAsync(Ct);
+        var result = await new SqlServerSchemaImporter().ImportAsync(conn, Ct);
+        var importedParent = result.Entities.Single(e => e.TableName == "composite_parent");
+        var importedChild = result.Entities.Single(e => e.TableName == "composite_child");
+        var parentColumnNames = importedParent.Columns.ToDictionary(c => c.Id, c => c.Name);
+        var childColumnNames = importedChild.Columns.ToDictionary(c => c.Id, c => c.Name);
+
+        // 複合外部キーは 1 本のリレーションとして取り込まれる（構成列ごとに分裂しない）
+        var importedRel = result.Relationships.Should().ContainSingle().Which;
+        importedRel.SourceEntityId.Should().Be(importedParent.Id);
+        importedRel.TargetEntityId.Should().Be(importedChild.Id);
+        // FK 列集合 (a_ref, b_ref) は子の主キー (id) と一致しないため 1 対多
+        importedRel.Type.Should().Be(RelationshipType.OneToMany);
+
+        // 構成列ペアは宣言順（a→a_ref, b→b_ref）のまま復元される
+        importedRel
+            .ColumnPairs.Select(p =>
+                (parentColumnNames[p.SourceColumnId], childColumnNames[p.TargetColumnId])
+            )
+            .Should()
+            .Equal(("a", "a_ref"), ("b", "b_ref"));
+
+        // 構成列すべてに外部キーフラグが立つ
+        importedChild.Columns.Single(c => c.Name == "a_ref").IsForeignKey.Should().BeTrue();
+        importedChild.Columns.Single(c => c.Name == "b_ref").IsForeignKey.Should().BeTrue();
     }
 }

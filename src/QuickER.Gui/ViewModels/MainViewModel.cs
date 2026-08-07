@@ -1034,13 +1034,89 @@ public partial class MainViewModel : ObservableObject, IDisposable
         PasteCopiedColumnCommand.NotifyCanExecuteChanged();
     }
 
-    /// <summary>指定カラムを参照元または参照先として使用しているリレーション一覧を返す</summary>
+    /// <summary>リレーションへ未確定の列ペア行（空スロット）を 1 つ足す</summary>
+    /// <remarks>
+    /// この時点ではモデルを変えないため履歴に残さない（親列・子列の<b>両方</b>が選ばれた時点で
+    /// <see cref="SetRelationshipColumnPairCommand"/> が 1 回の Undo 単位として確定させる）
+    /// </remarks>
+    [RelayCommand]
+    private void AddRelationshipColumnPairSlot(RelationshipViewModel? relationship) =>
+        relationship?.AddPendingColumnPairSlot();
+
+    /// <summary>列ペア行で選ばれた列を正本へ確定する（Undo 可能）</summary>
+    /// <remarks>
+    /// 空スロットでの選択は末尾への追加、既存行での選択変更はその位置の差し替えになる
+    /// （どちらも「行の並び＝宣言順」から新しい列ペア一覧を組み立てるだけで表現できる）。
+    /// 片側だけ選ばれた行はまだ列ペアにならないため、この時点では履歴も動かない
+    /// </remarks>
+    [RelayCommand]
+    private void SetRelationshipColumnPair(RelationshipColumnPairViewModel? row)
+    {
+        if (row is null)
+        {
+            return;
+        }
+
+        ApplyRelationshipColumnPairs(row.Relationship, row.Relationship.BuildColumnPairsFromRows());
+    }
+
+    /// <summary>列ペア行を 1 つ取り除く（Undo 可能。空スロットはビュー状態の破棄のみ）</summary>
+    [RelayCommand]
+    private void RemoveRelationshipColumnPair(RelationshipColumnPairViewModel? row)
+    {
+        if (row is null)
+        {
+            return;
+        }
+
+        // 空スロットはまだモデルに反映されていないため、履歴を汚さず取り消すだけでよい
+        if (row.IsPendingSlot)
+        {
+            row.Relationship.CancelPendingColumnPairSlot();
+            return;
+        }
+
+        ApplyRelationshipColumnPairs(
+            row.Relationship,
+            row.Relationship.BuildColumnPairsFromRows(excluded: row)
+        );
+    }
+
+    /// <summary>リレーションの列ペア一覧を Undo 可能な差し替えとして適用する</summary>
+    private void ApplyRelationshipColumnPairs(
+        RelationshipViewModel relationship,
+        IReadOnlyList<RelationshipColumnPair> after
+    )
+    {
+        var before = relationship.SnapshotColumnPairs();
+
+        // 実質的な変化がなければ履歴を汚さない
+        if (RelationshipViewModel.SameColumnPairs(before, after))
+        {
+            return;
+        }
+
+        UndoRedo.Execute(
+            new ChangeRelationshipColumnPairsCommand(
+                relationship,
+                before,
+                after,
+                () => ApplyRelationshipColumnRules()
+            )
+        );
+    }
+
+    /// <summary>指定カラムを列ペアのいずれかで使用しているリレーション一覧を返す</summary>
     /// <remarks>カラム削除コマンドへ渡し、Undo 時に外部キー参照を復元するために用いる（UI 経由・AI ツール経由で共用）</remarks>
     internal IReadOnlyList<RelationshipViewModel> FindRelationshipsUsingColumn(
         ColumnViewModel column
     ) =>
         Relationships
-            .Where(r => r.SourceColumnId == column.Id || r.TargetColumnId == column.Id)
+            .Where(relationship =>
+                relationship.ColumnPairs.Any(pair =>
+                    pair.SourceColumnId == column.Id || pair.TargetColumnId == column.Id
+                )
+            )
             .ToList();
 
     // ---------------- Selection / Click handling ----------------
@@ -1069,19 +1145,18 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 return;
             }
 
-            // 参照元は始点の PK、参照先は共通リゾルバの既定 FK 解決、制約名は FK_<参照側>_<被参照側> を初期値とする
+            // 参照元は始点の PK 全列、参照先は共通リゾルバの既定 FK 解決、制約名は FK_<参照側>_<被参照側> を初期値とする
             var rel = new RelationshipViewModel(
                 new Relationship
                 {
                     SourceEntityId = PendingRelationshipSource.Id,
                     TargetEntityId = entity.Id,
                     Type = PendingRelationshipType,
-                    SourceColumnId = PendingRelationshipSource
-                        .Columns.FirstOrDefault(c => c.IsPrimaryKey)
-                        ?.Id,
-                    TargetColumnId = ForeignKeyColumnResolver
-                        .ResolveTargetColumn(PendingRelationshipSource, entity, Relationships)
-                        ?.Id,
+                    ColumnPairs = ForeignKeyColumnResolver.ResolveColumnPairs(
+                        PendingRelationshipSource,
+                        entity,
+                        Relationships
+                    ),
                     ConstraintName =
                         $"FK_{SqlIdentifier.SafeName(entity.TableName)}_{SqlIdentifier.SafeName(PendingRelationshipSource.TableName)}",
                 },
@@ -1467,28 +1542,32 @@ public partial class MainViewModel : ObservableObject, IDisposable
         );
     }
 
-    /// <summary>指定リレーションが使用する両端カラムの編集をロックし、参照先カラムへ FK フラグを設定する</summary>
+    /// <summary>指定リレーションが使用する全構成列の編集をロックし、参照先カラムへ FK フラグを設定する</summary>
+    /// <remarks>複合外部キーではペアの数だけ両端の列が対象になる（1 組でも同じ処理で足りる）</remarks>
     private static void LockRelationshipColumns(RelationshipViewModel relationship)
     {
-        var sourceColumn = relationship.SourceColumnId is null
-            ? null
-            : relationship.Source.Columns.FirstOrDefault(c => c.Id == relationship.SourceColumnId);
-        var targetColumn = relationship.TargetColumnId is null
-            ? null
-            : relationship.Target.Columns.FirstOrDefault(c => c.Id == relationship.TargetColumnId);
-
-        if (sourceColumn is not null)
+        foreach (var pair in relationship.ColumnPairs)
         {
-            sourceColumn.IsPrimaryKeyEditable = false;
-            sourceColumn.IsForeignKeyEditable = false;
-        }
+            var sourceColumn = relationship.Source.Columns.FirstOrDefault(column =>
+                column.Id == pair.SourceColumnId
+            );
+            var targetColumn = relationship.Target.Columns.FirstOrDefault(column =>
+                column.Id == pair.TargetColumnId
+            );
 
-        if (targetColumn is not null)
-        {
-            targetColumn.IsPrimaryKeyEditable = false;
-            targetColumn.IsForeignKeyEditable = false;
-            targetColumn.IsForeignKeyManagedByRelationship = true;
-            targetColumn.IsForeignKey = true;
+            if (sourceColumn is not null)
+            {
+                sourceColumn.IsPrimaryKeyEditable = false;
+                sourceColumn.IsForeignKeyEditable = false;
+            }
+
+            if (targetColumn is not null)
+            {
+                targetColumn.IsPrimaryKeyEditable = false;
+                targetColumn.IsForeignKeyEditable = false;
+                targetColumn.IsForeignKeyManagedByRelationship = true;
+                targetColumn.IsForeignKey = true;
+            }
         }
     }
 
@@ -1740,6 +1819,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
         UniqueConstraintMemberViewModel member
     ) => SetUniqueConstraintMemberCommand.Execute(member);
 
+    /// <summary>リレーションの列ペア行で列が選び直されたときに、Undo 可能な差し替えとして確定させる</summary>
+    private void OnRelationshipColumnPairSelectionEdited(
+        object? sender,
+        RelationshipColumnPairViewModel row
+    ) => SetRelationshipColumnPairCommand.Execute(row);
+
     /// <summary>エンティティの位置・サイズ変更に追従してキャンバスサイズを更新する</summary>
     private void OnEntityPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
@@ -1777,6 +1862,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 // （解除しないと削除済み VM が生きたエンティティのイベントから参照され続け、
                 //   エンティティ移動のたびに孤児リレーションの幾何再計算・通知が走り続ける）
                 relationship.Detach();
+                relationship.ColumnPairSelectionEdited -= OnRelationshipColumnPairSelectionEdited;
                 _changeTracker.DetachRelationship(relationship);
             }
         }
@@ -1788,6 +1874,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 // 図へ復帰したリレーションの端点購読を張り直す（Undo による削除取り消し・取込の Redo など）
                 // 生成直後の VM は購読済みのため、この呼び出しは何もしない（二重購読ガード）
                 relationship.Attach();
+
+                // 列ペア行のコンボボックス操作は VM 経由で届くため、ここで履歴化の入口へ結ぶ
+                relationship.ColumnPairSelectionEdited += OnRelationshipColumnPairSelectionEdited;
                 _changeTracker.AttachRelationship(relationship);
             }
         }

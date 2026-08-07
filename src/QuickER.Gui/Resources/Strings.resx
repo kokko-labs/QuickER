@@ -395,6 +395,18 @@
   <data name="Property_ForeignKeyColumn" xml:space="preserve">
     <value>Foreign Key Column</value>
   </data>
+  <data name="Property_RelationshipColumnPairsHeader" xml:space="preserve">
+    <value>Key Columns</value>
+  </data>
+  <data name="Property_RelationshipColumnPairHint" xml:space="preserve">
+    <value>Pair a referenced column with a foreign key column. Add rows with +; a row takes effect once both sides are chosen. Two or more rows make a composite foreign key.</value>
+  </data>
+  <data name="Property_AddRelationshipColumnPairTooltip" xml:space="preserve">
+    <value>Add a key column pair</value>
+  </data>
+  <data name="Property_RemoveRelationshipColumnPairTooltip" xml:space="preserve">
+    <value>Remove this key column pair</value>
+  </data>
   <data name="Property_RemoveRelationship" xml:space="preserve">
     <value>Delete Relationship</value>
   </data>
@@ -463,6 +475,9 @@
   </data>
   <data name="Undo_ChangeTargetDbms" xml:space="preserve">
     <value>Change DB type to {0}</value>
+  </data>
+  <data name="Undo_ChangeRelationshipColumnPairs" xml:space="preserve">
+    <value>Change relationship key columns</value>
   </data>
   <data name="Undo_ChangeUniqueConstraintColumns" xml:space="preserve">
     <value>Change unique constraint columns</value>
@@ -714,6 +729,9 @@
   <data name="TableDoc_RelMissingColumn" xml:space="preserve">
     <value>Row {0} of the Relationship List sheet is missing a reference column.</value>
   </data>
+  <data name="TableDoc_RelColumnCountMismatch" xml:space="preserve">
+    <value>Row {0} of the Relationship List sheet lists a different number of referencing and referenced columns. A composite foreign key needs the same number of comma-separated columns on both sides.</value>
+  </data>
   <data name="TableDoc_RelChildColumnNotFound" xml:space="preserve">
     <value>Table '{0}' does not have the source column '{1}'.</value>
   </data>
@@ -884,6 +902,33 @@
   </data>
   <data name="Tool_RelationshipRemoved" xml:space="preserve">
     <value>Removed relationship '{0}' → '{1}'.</value>
+  </data>
+  <data name="Tool_RelationshipColumnListsRequiredTogether" xml:space="preserve">
+    <value>source_columns and target_columns must be given together (omit both to derive the mapping from the parent's primary key columns).</value>
+  </data>
+  <data name="Tool_RelationshipColumnListsLengthMismatch" xml:space="preserve">
+    <value>source_columns and target_columns must have the same length (got {0} and {1}); they are parallel arrays of column pairs.</value>
+  </data>
+  <data name="Tool_RelationshipColumnListNotArray" xml:space="preserve">
+    <value>{0} must be an array of column names.</value>
+  </data>
+  <data name="Tool_RelationshipColumnListInvalid" xml:space="preserve">
+    <value>{0} must contain non-empty column names.</value>
+  </data>
+  <data name="Tool_RelationshipColumnListEmpty" xml:space="preserve">
+    <value>{0} must contain at least one column name.</value>
+  </data>
+  <data name="Tool_RelationshipDuplicateColumn" xml:space="preserve">
+    <value>Column '{0}' is listed more than once in {1}.</value>
+  </data>
+  <data name="Tool_RelationshipAmbiguous" xml:space="preserve">
+    <value>Several relationships connect '{0}' → '{1}'; specify constraint_name to choose one. Candidates: {2}.</value>
+  </data>
+  <data name="Tool_RelationshipConstraintNotFound" xml:space="preserve">
+    <value>Relationship '{0}' → '{1}' with constraint name '{2}' not found. Candidates: {3}.</value>
+  </data>
+  <data name="Tool_RelationshipUnnamedConstraint" xml:space="preserve">
+    <value>(unnamed)</value>
   </data>
   <data name="Tool_Summary_UniqueConstraintsHeader" xml:space="preserve">
     <value>Unique constraints:</value>

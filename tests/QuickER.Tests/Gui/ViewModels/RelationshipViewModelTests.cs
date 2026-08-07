@@ -495,31 +495,42 @@ public class RelationshipViewModelTests
         rel.AvailableSourceColumns.Should().ContainSingle(c => c.Name == "Id");
         rel.AvailableTargetColumns.Should().HaveCount(2);
         rel.CanSelectForeignKeyColumns.Should().BeTrue();
+        rel.CanAddColumnPair.Should().BeTrue();
     }
 
-    /// <summary>多対多では列選択が無効化され、選択がクリアされることを検証する</summary>
+    /// <summary>多対多では列選択が無効化され、列ペアがすべてクリアされることを検証する</summary>
     [Fact(DisplayName = "多対多では列選択が無効化される")]
     public void ManyToMany_DisablesColumnSelection()
     {
         var a = NewEntity(0, 0);
         var b = NewEntity(300, 0);
-        a.Columns.Add(new ColumnViewModel(new Column { Name = "ParentId", DataType = "int" }));
+        a.Columns.Add(
+            new ColumnViewModel(
+                new Column
+                {
+                    Name = "ParentId",
+                    DataType = "int",
+                    IsPrimaryKey = true,
+                }
+            )
+        );
         b.Columns.Add(new ColumnViewModel(new Column { Name = "ChildId", DataType = "int" }));
         var rel = new RelationshipViewModel(
-            new Relationship { Type = RelationshipType.OneToMany },
+            new Relationship
+            {
+                Type = RelationshipType.OneToMany,
+                ColumnPairs = [new RelationshipColumnPair(a.Columns[0].Id, b.Columns[0].Id)],
+            },
             a,
             b
-        )
-        {
-            SourceColumnId = a.Columns[0].Id,
-            TargetColumnId = b.Columns[0].Id,
-        };
+        );
 
         rel.Type = RelationshipType.ManyToMany;
 
         rel.CanSelectForeignKeyColumns.Should().BeFalse();
-        rel.SourceColumnId.Should().BeNull();
-        rel.TargetColumnId.Should().BeNull();
+        rel.CanAddColumnPair.Should().BeFalse();
+        rel.ColumnPairs.Should().BeEmpty();
+        rel.ColumnPairRows.Should().BeEmpty();
     }
 
     /// <summary>多対多では参照アクション設定が無効化され、ON DELETE/UPDATE が既定値へ戻ることを検証する</summary>
@@ -556,7 +567,7 @@ public class RelationshipViewModelTests
             new Relationship
             {
                 Type = RelationshipType.OneToMany,
-                TargetColumnId = entity.Columns.Last().Id,
+                ColumnPairs = [new(entity.Columns[0].Id, entity.Columns.Last().Id)],
             },
             entity,
             entity
@@ -626,6 +637,179 @@ public class RelationshipViewModelTests
         vm.RemoveColumnCommand.Execute(col);
 
         entity.Columns.Should().NotContain(col);
+    }
+
+    /// <summary>親列候補が「PK 列 ∪ UNIQUE 制約の構成列」になることを検証する</summary>
+    /// <remarks>外部キーが参照できるのは親側の候補キーだけ＝PK に加え UNIQUE 制約の構成列も選べる</remarks>
+    [Fact(DisplayName = "親列候補は PK 列と UNIQUE 制約の構成列を合わせたものになる")]
+    public void AvailableSourceColumns_IncludeUniqueConstraintMembers()
+    {
+        var source = NewParentWithUniqueConstraint();
+        var target = new EntityViewModel(
+            new Entity
+            {
+                Columns =
+                {
+                    new Column { Name = "ParentCode", DataType = "nvarchar(20)" },
+                },
+            }
+        );
+        var rel = new RelationshipViewModel(
+            new Relationship { Type = RelationshipType.OneToMany },
+            source,
+            target
+        );
+
+        // 「Memo」は PK でも UNIQUE 構成列でもないため候補に出ない
+        rel.AvailableSourceColumns.Select(column => column.Name).Should().Equal("Id", "Code");
+    }
+
+    /// <summary>空スロット行は両側が選ばれた時点で列ペアとして確定することを検証する</summary>
+    [Fact(DisplayName = "空スロット行は親列と子列の両方を選んだ時点で列ペアになる")]
+    public void PendingColumnPairRow_CommitsOnlyWhenBothSidesSelected()
+    {
+        var (rel, source, target) = NewRelationshipForPairEditing();
+
+        rel.AddPendingColumnPairSlot();
+        var row = rel.ColumnPairRows.Should().ContainSingle().Subject;
+        row.IsPendingSlot.Should().BeTrue();
+
+        // 片側だけの選択はビュー状態に留まり、正本（列ペア）は動かない
+        row.SelectedSourceColumn = source.Columns[0];
+        rel.ColumnPairs.Should().BeEmpty();
+        rel.ColumnPairRows.Should().ContainSingle();
+
+        // もう片方が選ばれた時点で 1 組の列ペアとして確定する
+        row.SelectedTargetColumn = target.Columns[1];
+        rel.ColumnPairs.Should().ContainSingle();
+        rel.ColumnPairs[0].SourceColumnId.Should().Be(source.Columns[0].Id);
+        rel.ColumnPairs[0].TargetColumnId.Should().Be(target.Columns[1].Id);
+        rel.ColumnPairRows[0].IsPendingSlot.Should().BeFalse();
+    }
+
+    /// <summary>各行の選択候補から他行が使用中の列が外れることを検証する</summary>
+    [Fact(DisplayName = "列ペア行の候補からは他行が使っている列が外れる")]
+    public void ColumnPairRow_Candidates_ExcludeColumnsUsedByOtherRows()
+    {
+        var (rel, source, target) = NewRelationshipForPairEditing();
+
+        rel.AddPendingColumnPairSlot();
+        rel.ColumnPairRows[0].SelectedSourceColumn = source.Columns[0];
+        rel.ColumnPairRows[0].SelectedTargetColumn = target.Columns[1];
+
+        rel.AddPendingColumnPairSlot();
+        var secondRow = rel.ColumnPairRows[1];
+
+        // 1 行目が使う Id / ParentId は 2 行目の候補から外れる
+        secondRow.AvailableSourceColumns.Select(column => column.Name).Should().Equal("Code");
+        secondRow
+            .AvailableTargetColumns.Select(column => column.Name)
+            .Should()
+            .Equal("Id", "ParentCode");
+
+        // 自行の現在選択は（他行と重ならない限り）常に候補へ残る
+        rel.ColumnPairRows[0].AvailableSourceColumns.Should().Contain(source.Columns[0]);
+    }
+
+    /// <summary>候補列を使い切ると空スロットを追加できなくなることを検証する</summary>
+    [Fact(DisplayName = "候補列を使い切ると列ペア行を足せない")]
+    public void CanAddColumnPair_IsFalse_WhenCandidatesAreExhausted()
+    {
+        var (rel, source, target) = NewRelationshipForPairEditing();
+
+        rel.CanAddColumnPair.Should().BeTrue();
+        rel.AddPendingColumnPairSlot();
+
+        // 空スロットが出ている間は続けて足せない
+        rel.CanAddColumnPair.Should().BeFalse();
+
+        rel.ColumnPairRows[0].SelectedSourceColumn = source.Columns[0];
+        rel.ColumnPairRows[0].SelectedTargetColumn = target.Columns[1];
+        rel.CanAddColumnPair.Should().BeTrue();
+
+        rel.AddPendingColumnPairSlot();
+        rel.ColumnPairRows[1].SelectedSourceColumn = source.Columns[1];
+        rel.ColumnPairRows[1].SelectedTargetColumn = target.Columns[0];
+
+        // 親側の候補（PK 1 列＋UNIQUE 構成列 1 列）を使い切ったので足せない
+        rel.CanAddColumnPair.Should().BeFalse();
+    }
+
+    /// <summary>存在しない列を指す列ペアが両端カラムの削除で取り除かれることを検証する</summary>
+    [Fact(DisplayName = "削除された列を含む列ペアは取り除かれる")]
+    public void EnsureColumnSelectionConsistency_DropsPairsWithMissingColumns()
+    {
+        var (rel, source, target) = NewRelationshipForPairEditing();
+
+        rel.SetColumnPairs([
+            new RelationshipColumnPair(source.Columns[0].Id, target.Columns[1].Id),
+            new RelationshipColumnPair(source.Columns[1].Id, target.Columns[2].Id),
+        ]);
+        rel.ColumnPairs.Should().HaveCount(2);
+
+        target.Columns.RemoveAt(2);
+
+        rel.ColumnPairs.Should().ContainSingle();
+        rel.ColumnPairs[0].SourceColumnId.Should().Be(source.Columns[0].Id);
+    }
+
+    /// <summary>Id（PK）と Code（UNIQUE 構成列）と Memo を持つ親エンティティを生成する</summary>
+    private static EntityViewModel NewParentWithUniqueConstraint()
+    {
+        var code = new Column { Name = "Code", DataType = "nvarchar(20)" };
+
+        return new EntityViewModel(
+            new Entity
+            {
+                TableName = "Parent",
+                Columns =
+                {
+                    new Column
+                    {
+                        Name = "Id",
+                        DataType = "int",
+                        IsPrimaryKey = true,
+                    },
+                    code,
+                    new Column { Name = "Memo", DataType = "nvarchar(100)" },
+                },
+                UniqueConstraints = { new UniqueConstraint { ColumnIds = [code.Id] } },
+            }
+        );
+    }
+
+    /// <summary>親（PK Id ＋ UNIQUE Code）と子（Id / ParentId / ParentCode）を結ぶ空のリレーションを用意する</summary>
+    private static (
+        RelationshipViewModel Relationship,
+        EntityViewModel Source,
+        EntityViewModel Target
+    ) NewRelationshipForPairEditing()
+    {
+        var source = NewParentWithUniqueConstraint();
+        var target = new EntityViewModel(
+            new Entity
+            {
+                TableName = "Child",
+                Columns =
+                {
+                    new Column
+                    {
+                        Name = "Id",
+                        DataType = "int",
+                        IsPrimaryKey = true,
+                    },
+                    new Column { Name = "ParentId", DataType = "int" },
+                    new Column { Name = "ParentCode", DataType = "nvarchar(20)" },
+                },
+            }
+        );
+        var rel = new RelationshipViewModel(
+            new Relationship { Type = RelationshipType.OneToMany },
+            source,
+            target
+        );
+
+        return (rel, source, target);
     }
 
     /// <summary>データ型候補に代表的な SQL Server の型が含まれることを検証する</summary>

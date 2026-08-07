@@ -4,14 +4,16 @@ using System.Threading.Tasks;
 using AwesomeAssertions;
 using QuickER.Cli;
 using QuickER.Tests.Integration;
-using CliStrings = QuickER.Cli.Resources.Strings;
+using CodeGenStrings = QuickER.CodeGen.CSharp.Resources.Strings;
 
 namespace QuickER.Tests.Integration.Dialects;
 
 /// <summary>
-/// D: CLI <c>scaffold</c> が実 DB から取り込むときの警告表示（複合外部キーの列対応喪失）を検証する統合テスト。
+/// D: CLI <c>scaffold</c> が実 DB の複合外部キーを扱うときの警告表示を検証する統合テスト。
 /// </summary>
 /// <remarks>
+/// 取込は複合外部キーを劣化させないため、取込側の警告は出ない。警告を出すのは、単一列 FK しか
+/// 扱えないコード生成側（ナビゲーション生成）で、当該リレーションだけをスキップする。
 /// 複合外部キーは実 DB から取り込まないと再現できないため、Docker 不要な SQLite 実ファイル DB を用いる
 /// （CI でも常時実行される）。出力は <see cref="CliApp.InvokeAsync(string[], TextWriter, TextWriter)"/> の
 /// TextWriter 注入版で捕捉し、<c>Console</c> は差し替えない。
@@ -48,9 +50,9 @@ CREATE TABLE ""Child"" (
     CONSTRAINT ""FK_Child_Parent"" FOREIGN KEY (""AId"") REFERENCES ""Parent"" (""A"")
 );";
 
-    /// <summary>複合 FK を含む DB の scaffold は、警告を stderr へ出しつつ終了コード 0 で生成を完遂する</summary>
+    /// <summary>複合 FK を含む DB の scaffold は、生成側の警告を stderr へ出しつつ exit 0 で完遂する</summary>
     [Fact(
-        DisplayName = "[Integration] D: scaffold は複合 FK 警告を stderr へ出して exit 0 で続行する"
+        DisplayName = "[Integration] D: scaffold は複合 FK の生成側警告を stderr へ出して exit 0 で続行する"
     )]
     public async Task Scaffold_CompositeForeignKey_WarnsOnStderrAndSucceeds()
     {
@@ -81,20 +83,14 @@ CREATE TABLE ""Child"" (
         exit.Should().Be(0);
         Directory.GetFiles(outDir, "*.g.cs").Should().NotBeEmpty();
 
-        // SQLite は制約名を保持しないため、テーブル名・列名の側で警告内容を確認する
-        var warnings = stderr.ToString();
-        warnings.Should().Contain("Child");
-        warnings.Should().Contain("AId, BId");
-        warnings.Should().Contain("Parent");
-        warnings.Should().Contain("A, B");
-
-        // 文言は resx 由来（書式の骨格が変わったら気付けるよう固定文の一部で照合する）
-        var expectedPrefix = CliStrings.Cli_CompositeForeignKeyWarning.Split("{0}")[0];
-        warnings.Should().Contain(expectedPrefix);
+        // 複合外部キーを扱えないコード生成側の警告が出る（文言は resx 由来）
+        var codeGenWarningPrefix =
+            CodeGenStrings.CodeGen_Warning_RelationshipCompositeSkipped.Split("{0}")[0];
+        stderr.ToString().Should().Contain(codeGenWarningPrefix);
     }
 
-    /// <summary>単一列 FK だけの DB では警告を出さない（従来と完全に同一の出力）</summary>
-    [Fact(DisplayName = "[Integration] D: scaffold は単一列 FK では警告を出さない")]
+    /// <summary>単一列 FK だけの DB では複合 FK の警告を出さない（誤爆しないことの対照）</summary>
+    [Fact(DisplayName = "[Integration] D: scaffold は単一列 FK では複合 FK 警告を出さない")]
     public async Task Scaffold_SingleColumnForeignKey_WritesNoWarning()
     {
         using var db = SqliteTempDatabase.Create();
@@ -123,7 +119,9 @@ CREATE TABLE ""Child"" (
         exit.Should().Be(0);
 
         // 複合 FK 警告は 1 件も出ない（他の診断の有無に左右されないよう、当該文言だけを見る）
-        var expectedPrefix = CliStrings.Cli_CompositeForeignKeyWarning.Split("{0}")[0];
+        var expectedPrefix = CodeGenStrings.CodeGen_Warning_RelationshipCompositeSkipped.Split(
+            "{0}"
+        )[0];
         stderr.ToString().Should().NotContain(expectedPrefix);
     }
 }

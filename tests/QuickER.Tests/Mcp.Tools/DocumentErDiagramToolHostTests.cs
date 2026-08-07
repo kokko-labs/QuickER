@@ -460,12 +460,16 @@ public sealed class DocumentErDiagramToolHostTests : IDisposable
         var order = schema.Entities.Single(e => e.TableName == "Order");
         var customerIdColumn = order.Columns.Single(c => c.Name == "CustomerId");
         var relationship = schema.Relationships.Single();
-        relationship.TargetColumnId.Should().Be(customerIdColumn.Id);
+        relationship
+            .ColumnPairs.Should()
+            .ContainSingle()
+            .Which.TargetColumnId.Should()
+            .Be(customerIdColumn.Id);
         // 参照先の FK 列へ FK フラグが付与される
         customerIdColumn.IsForeignKey.Should().BeTrue();
     }
 
-    [Fact(DisplayName = "add_relationship は存在しない target_column をエラーにする")]
+    [Fact(DisplayName = "add_relationship は存在しない target_columns をエラーにする")]
     public void AddRelationship_UnknownTargetColumn_ReturnsError()
     {
         var file = CreateParentChildFile();
@@ -476,8 +480,9 @@ public sealed class DocumentErDiagramToolHostTests : IDisposable
             new
             {
                 source_table = "Customer",
+                source_columns = new[] { "CustomerId" },
                 target_table = "Order",
-                target_column = "NoSuchColumn",
+                target_columns = new[] { "NoSuchColumn" },
                 relationship_type = "OneToMany",
             }
         );
@@ -485,6 +490,180 @@ public sealed class DocumentErDiagramToolHostTests : IDisposable
         success.Should().BeFalse();
         result.Should().Contain("NoSuchColumn");
         JsonStorageService.Load(file).Schema.Relationships.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "add_relationship は複合外部キーを宣言順の列ペアで登録する")]
+    public void AddRelationship_CompositeColumns_RegistersOrderedPairs()
+    {
+        var file = CreateParentChildFile();
+        Exec(
+            "add_column",
+            file,
+            new
+            {
+                table_name = "Customer",
+                column_name = "RegionCode",
+                data_type = "nvarchar(10)",
+                is_nullable = false,
+            }
+        );
+        Exec(
+            "add_column",
+            file,
+            new
+            {
+                table_name = "Order",
+                column_name = "RegionCode",
+                data_type = "nvarchar(10)",
+                is_nullable = false,
+            }
+        );
+
+        var (_, success) = Exec(
+            "add_relationship",
+            file,
+            new
+            {
+                source_table = "Customer",
+                source_columns = new[] { "CustomerId", "RegionCode" },
+                target_table = "Order",
+                target_columns = new[] { "CustomerId", "RegionCode" },
+                relationship_type = "OneToMany",
+            }
+        );
+
+        success.Should().BeTrue();
+
+        var schema = JsonStorageService.Load(file).Schema;
+        var customer = schema.Entities.Single(e => e.TableName == "Customer");
+        var order = schema.Entities.Single(e => e.TableName == "Order");
+        var relationship = schema.Relationships.Single();
+
+        relationship.ColumnPairs.Should().HaveCount(2);
+        relationship
+            .ColumnPairs[0]
+            .SourceColumnId.Should()
+            .Be(customer.Columns.Single(c => c.Name == "CustomerId").Id);
+        relationship
+            .ColumnPairs[1]
+            .SourceColumnId.Should()
+            .Be(customer.Columns.Single(c => c.Name == "RegionCode").Id);
+        // 構成列はすべて FK フラグが立つ
+        order.Columns.Single(c => c.Name == "CustomerId").IsForeignKey.Should().BeTrue();
+        order.Columns.Single(c => c.Name == "RegionCode").IsForeignKey.Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "add_relationship は列配列の長さ不一致・片側のみの指定をエラーにする")]
+    public void AddRelationship_InvalidColumnArrays_ReturnError()
+    {
+        var file = CreateParentChildFile();
+
+        Exec(
+            "add_relationship",
+            file,
+            new
+            {
+                source_table = "Customer",
+                source_columns = new[] { "CustomerId" },
+                target_table = "Order",
+                target_columns = new[] { "CustomerId", "OrderId" },
+                relationship_type = "OneToMany",
+            }
+        )
+            .Success.Should()
+            .BeFalse();
+
+        Exec(
+            "add_relationship",
+            file,
+            new
+            {
+                source_table = "Customer",
+                target_table = "Order",
+                target_columns = new[] { "CustomerId" },
+                relationship_type = "OneToMany",
+            }
+        )
+            .Success.Should()
+            .BeFalse();
+
+        JsonStorageService.Load(file).Schema.Relationships.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "get_diagram_summary は外部キーの列ペアと制約名を表示する")]
+    public void GetDiagramSummary_ShowsColumnPairsAndConstraintName()
+    {
+        var file = CreateParentChildFile();
+        Exec("add_relationship", file, new { source_table = "Customer", target_table = "Order" });
+
+        var (result, success) = Exec("get_diagram_summary", file, new { });
+
+        success.Should().BeTrue();
+        result.Should().Contain("FK: (CustomerId → CustomerId)");
+        result.Should().Contain("[FK_Order_Customer]");
+    }
+
+    [Fact(DisplayName = "remove_relationship は複数一致時に候補を挙げてエラーにする")]
+    public void RemoveRelationship_MultipleMatches_RequiresConstraintName()
+    {
+        var file = CreateParentChildFile();
+        Exec(
+            "add_column",
+            file,
+            new
+            {
+                table_name = "Order",
+                column_name = "BillingCustomerId",
+                data_type = "int",
+                is_nullable = false,
+            }
+        );
+        Exec("add_relationship", file, new { source_table = "Customer", target_table = "Order" });
+        Exec(
+            "add_relationship",
+            file,
+            new
+            {
+                source_table = "Customer",
+                source_columns = new[] { "CustomerId" },
+                target_table = "Order",
+                target_columns = new[] { "BillingCustomerId" },
+            }
+        );
+
+        // 既定の制約名は同一になるため、2 本目だけ名前を変えて区別できるようにする
+        var document = JsonStorageService.Load(file);
+        document.Schema.Relationships[1].ConstraintName = "FK_Order_Customer_Billing";
+        JsonStorageService.SaveAtomic(file, document);
+
+        var ambiguous = Exec(
+            "remove_relationship",
+            file,
+            new { source_table = "Customer", target_table = "Order" }
+        );
+
+        ambiguous.Success.Should().BeFalse();
+        ambiguous.Result.Should().Contain("FK_Order_Customer_Billing");
+        JsonStorageService.Load(file).Schema.Relationships.Should().HaveCount(2);
+
+        var removed = Exec(
+            "remove_relationship",
+            file,
+            new
+            {
+                source_table = "Customer",
+                target_table = "Order",
+                constraint_name = "FK_Order_Customer_Billing",
+            }
+        );
+
+        removed.Success.Should().BeTrue();
+        JsonStorageService
+            .Load(file)
+            .Schema.Relationships.Should()
+            .ContainSingle()
+            .Which.ConstraintName.Should()
+            .Be("FK_Order_Customer");
     }
 
     [Fact(DisplayName = "remove_relationship は指定した端点間のリレーションを削除する")]
@@ -519,7 +698,8 @@ public sealed class DocumentErDiagramToolHostTests : IDisposable
         var schema = JsonStorageService.Load(file).Schema;
         var order = schema.Entities.Single(e => e.TableName == "Order");
         order.Columns.Should().NotContain(c => c.Name == "CustomerId");
-        schema.Relationships.Single().TargetColumnId.Should().BeNull();
+        // 削除カラムを含む列ペアはリレーションごとクリアされる
+        schema.Relationships.Single().ColumnPairs.Should().BeEmpty();
     }
 
     [Fact(DisplayName = "remove_entity は接続リレーションと孤児レイアウトも削除する")]

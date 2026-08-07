@@ -101,8 +101,7 @@ public sealed class MultiTargetRepositoryGenerationTests
                     Type = RelationshipType.OneToMany,
                     SourceEntityId = customer,
                     TargetEntityId = order,
-                    SourceColumnId = customerPk,
-                    TargetColumnId = orderFk,
+                    ColumnPairs = [new(customerPk, orderFk)],
                 },
             ],
         };

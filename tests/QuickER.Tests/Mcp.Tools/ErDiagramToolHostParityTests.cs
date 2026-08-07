@@ -59,8 +59,14 @@ public sealed class ErDiagramToolHostParityTests : IDisposable
         List<UniqueSnap> UniqueConstraints
     );
 
-    /// <summary>比較用のリレーションスナップショット（端点は名前・種別は文字列）</summary>
-    private sealed record RelSnap(string Source, string Target, string Type);
+    /// <summary>比較用のリレーションスナップショット（端点は名前・種別は文字列・列ペアは「親列→子列」の宣言順）</summary>
+    private sealed record RelSnap(
+        string Source,
+        string Target,
+        string Type,
+        string ConstraintName,
+        List<string> ColumnPairs
+    );
 
     [Fact(
         DisplayName = "GUI 実行ホストとファイル実行ホストは同一シナリオで同じ意味モデル・成否になる"
@@ -218,10 +224,163 @@ public sealed class ErDiagramToolHostParityTests : IDisposable
                 new
                 {
                     source_table = "Customer",
+                    source_columns = new[] { "CustomerId" },
                     target_table = "Order",
-                    target_column = "NoSuchColumn",
+                    target_columns = new[] { "NoSuchColumn" },
                     relationship_type = "OneToMany",
                 }
+            ),
+            // 複合外部キー（親 PK 2 列）— 明示指定・自動ペア化・失敗系を通す
+            ("add_entity", new { table_name = "TenantRegion" }),
+            (
+                "add_column",
+                new
+                {
+                    table_name = "TenantRegion",
+                    column_name = "TenantId",
+                    data_type = "int",
+                    is_primary_key = true,
+                    is_nullable = false,
+                }
+            ),
+            (
+                "add_column",
+                new
+                {
+                    table_name = "TenantRegion",
+                    column_name = "RegionCode",
+                    data_type = "nvarchar(10)",
+                    is_primary_key = true,
+                    is_nullable = false,
+                }
+            ),
+            ("add_entity", new { table_name = "TenantUser" }),
+            (
+                "add_column",
+                new
+                {
+                    table_name = "TenantUser",
+                    column_name = "TenantUserId",
+                    data_type = "int",
+                    is_primary_key = true,
+                    is_nullable = false,
+                }
+            ),
+            (
+                "add_column",
+                new
+                {
+                    table_name = "TenantUser",
+                    column_name = "TenantId",
+                    data_type = "int",
+                    is_primary_key = false,
+                    is_nullable = false,
+                }
+            ),
+            (
+                "add_column",
+                new
+                {
+                    table_name = "TenantUser",
+                    column_name = "RegionCode",
+                    data_type = "nvarchar(10)",
+                    is_primary_key = false,
+                    is_nullable = false,
+                }
+            ),
+            // 列省略＝親 PK 全列の自動ペア化（両ホストで同じ 2 組になる）
+            (
+                "add_relationship",
+                new
+                {
+                    source_table = "TenantRegion",
+                    target_table = "TenantUser",
+                    relationship_type = "OneToMany",
+                }
+            ),
+            ("add_entity", new { table_name = "TenantAudit" }),
+            (
+                "add_column",
+                new
+                {
+                    table_name = "TenantAudit",
+                    column_name = "TenantAuditId",
+                    data_type = "int",
+                    is_primary_key = true,
+                    is_nullable = false,
+                }
+            ),
+            (
+                "add_column",
+                new
+                {
+                    table_name = "TenantAudit",
+                    column_name = "TenantRef",
+                    data_type = "int",
+                    is_primary_key = false,
+                    is_nullable = false,
+                }
+            ),
+            (
+                "add_column",
+                new
+                {
+                    table_name = "TenantAudit",
+                    column_name = "RegionRef",
+                    data_type = "nvarchar(10)",
+                    is_primary_key = false,
+                    is_nullable = false,
+                }
+            ),
+            // 明示指定の複合外部キー（宣言順どおりの 2 組）
+            (
+                "add_relationship",
+                new
+                {
+                    source_table = "TenantRegion",
+                    source_columns = new[] { "TenantId", "RegionCode" },
+                    target_table = "TenantAudit",
+                    target_columns = new[] { "TenantRef", "RegionRef" },
+                    relationship_type = "OneToMany",
+                }
+            ),
+            // 多対多は列を明示しても列ペアを持たない（両ホストで同じ扱い）
+            (
+                "add_relationship",
+                new
+                {
+                    source_table = "TenantRegion",
+                    source_columns = new[] { "TenantId" },
+                    target_table = "TenantUser",
+                    target_columns = new[] { "TenantId" },
+                    relationship_type = "ManyToMany",
+                }
+            ),
+            // 失敗系（配列の長さ不一致・片側のみ指定・複数一致の削除）
+            (
+                "add_relationship",
+                new
+                {
+                    source_table = "TenantRegion",
+                    source_columns = new[] { "TenantId", "RegionCode" },
+                    target_table = "TenantAudit",
+                    target_columns = new[] { "TenantRef" },
+                    relationship_type = "OneToMany",
+                }
+            ),
+            (
+                "add_relationship",
+                new
+                {
+                    source_table = "TenantRegion",
+                    source_columns = new[] { "TenantId" },
+                    target_table = "TenantAudit",
+                    relationship_type = "OneToMany",
+                }
+            ),
+            (
+                "remove_relationship",
+                new { source_table = "TenantRegion", target_table = "TenantUser" }
             ),
         };
 
@@ -318,17 +477,33 @@ public sealed class ErDiagramToolHostParityTests : IDisposable
             .Relationships.Select(r => new RelSnap(
                 r.Source.TableName,
                 r.Target.TableName,
-                r.Type.ToString()
+                r.Type.ToString(),
+                r.ConstraintName ?? string.Empty,
+                r.ColumnPairs.Select(pair =>
+                        $"{r.Source.Columns.First(c => c.Id == pair.SourceColumnId).Name}→{r.Target.Columns.First(c => c.Id == pair.TargetColumnId).Name}"
+                    )
+                    .ToList()
             ))
             .ToList();
 
     /// <summary>意味モデルからリレーションスナップショットを作る（端点は ID→テーブル名で解決）</summary>
     private static List<RelSnap> SnapshotRelationships(ErDiagram schema) =>
         schema
-            .Relationships.Select(r => new RelSnap(
-                schema.Entities.First(e => e.Id == r.SourceEntityId).TableName,
-                schema.Entities.First(e => e.Id == r.TargetEntityId).TableName,
-                r.Type.ToString()
-            ))
+            .Relationships.Select(r =>
+            {
+                var source = schema.Entities.First(e => e.Id == r.SourceEntityId);
+                var target = schema.Entities.First(e => e.Id == r.TargetEntityId);
+
+                return new RelSnap(
+                    source.TableName,
+                    target.TableName,
+                    r.Type.ToString(),
+                    r.ConstraintName ?? string.Empty,
+                    r.ColumnPairs.Select(pair =>
+                            $"{source.Columns.First(c => c.Id == pair.SourceColumnId).Name}→{target.Columns.First(c => c.Id == pair.TargetColumnId).Name}"
+                        )
+                        .ToList()
+                );
+            })
             .ToList();
 }

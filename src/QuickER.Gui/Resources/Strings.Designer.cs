@@ -756,6 +756,30 @@ namespace QuickER.Resources {
                 return ResourceManager.GetString("Property_ForeignKeyColumn", resourceCulture);
             }
         }
+
+        public static string Property_RelationshipColumnPairsHeader {
+            get {
+                return ResourceManager.GetString("Property_RelationshipColumnPairsHeader", resourceCulture);
+            }
+        }
+
+        public static string Property_RelationshipColumnPairHint {
+            get {
+                return ResourceManager.GetString("Property_RelationshipColumnPairHint", resourceCulture);
+            }
+        }
+
+        public static string Property_AddRelationshipColumnPairTooltip {
+            get {
+                return ResourceManager.GetString("Property_AddRelationshipColumnPairTooltip", resourceCulture);
+            }
+        }
+
+        public static string Property_RemoveRelationshipColumnPairTooltip {
+            get {
+                return ResourceManager.GetString("Property_RemoveRelationshipColumnPairTooltip", resourceCulture);
+            }
+        }
         
         public static string Property_RemoveRelationship {
             get {
@@ -949,6 +973,12 @@ namespace QuickER.Resources {
         public static string Undo_ChangeTargetDbms {
             get {
                 return ResourceManager.GetString("Undo_ChangeTargetDbms", resourceCulture);
+            }
+        }
+
+        public static string Undo_ChangeRelationshipColumnPairs {
+            get {
+                return ResourceManager.GetString("Undo_ChangeRelationshipColumnPairs", resourceCulture);
             }
         }
 
@@ -1605,6 +1635,12 @@ namespace QuickER.Resources {
                 return ResourceManager.GetString("TableDoc_RelMissingColumn", resourceCulture);
             }
         }
+
+        public static string TableDoc_RelColumnCountMismatch {
+            get {
+                return ResourceManager.GetString("TableDoc_RelColumnCountMismatch", resourceCulture);
+            }
+        }
         
         public static string TableDoc_RelChildColumnNotFound {
             get {
@@ -1794,6 +1830,60 @@ namespace QuickER.Resources {
         public static string Tool_RelationshipRemoved {
             get {
                 return ResourceManager.GetString("Tool_RelationshipRemoved", resourceCulture);
+            }
+        }
+
+        public static string Tool_RelationshipColumnListsRequiredTogether {
+            get {
+                return ResourceManager.GetString("Tool_RelationshipColumnListsRequiredTogether", resourceCulture);
+            }
+        }
+
+        public static string Tool_RelationshipColumnListsLengthMismatch {
+            get {
+                return ResourceManager.GetString("Tool_RelationshipColumnListsLengthMismatch", resourceCulture);
+            }
+        }
+
+        public static string Tool_RelationshipColumnListNotArray {
+            get {
+                return ResourceManager.GetString("Tool_RelationshipColumnListNotArray", resourceCulture);
+            }
+        }
+
+        public static string Tool_RelationshipColumnListInvalid {
+            get {
+                return ResourceManager.GetString("Tool_RelationshipColumnListInvalid", resourceCulture);
+            }
+        }
+
+        public static string Tool_RelationshipColumnListEmpty {
+            get {
+                return ResourceManager.GetString("Tool_RelationshipColumnListEmpty", resourceCulture);
+            }
+        }
+
+        public static string Tool_RelationshipDuplicateColumn {
+            get {
+                return ResourceManager.GetString("Tool_RelationshipDuplicateColumn", resourceCulture);
+            }
+        }
+
+        public static string Tool_RelationshipAmbiguous {
+            get {
+                return ResourceManager.GetString("Tool_RelationshipAmbiguous", resourceCulture);
+            }
+        }
+
+        public static string Tool_RelationshipConstraintNotFound {
+            get {
+                return ResourceManager.GetString("Tool_RelationshipConstraintNotFound", resourceCulture);
+            }
+        }
+
+        public static string Tool_RelationshipUnnamedConstraint {
+            get {
+                return ResourceManager.GetString("Tool_RelationshipUnnamedConstraint", resourceCulture);
             }
         }
 

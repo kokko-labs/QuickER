@@ -41,6 +41,15 @@ public sealed class DiagramChangeTracker
         ),
     ];
 
+    /// <summary>リレーションの列ペアをスナップショットへ載せるための擬似プロパティ名</summary>
+    /// <remarks>
+    /// <b>実在するプロパティ名と一致させない</b>のが要件。<c>PropertyChanged</c> でこの名前が流れない限り
+    /// 単発プロパティ経路（<see cref="TrackPropertyChange"/>）では拾われず、種別変更のグループ記録
+    /// （<see cref="PushGroupedPropertyChanges"/>）でだけ使われる。列ペアの通常の編集は専用コマンド
+    /// （<see cref="ChangeRelationshipColumnPairsCommand"/>）に一本化しており、二重記録を避けるため
+    /// </remarks>
+    private const string RelationshipColumnPairsKey = "ColumnPairs(snapshot)";
+
     /// <summary>追跡対象とするリレーションのプロパティ群</summary>
     private static readonly ITrackedProperty[] TrackedRelationshipProperties =
     [
@@ -49,15 +58,11 @@ public sealed class DiagramChangeTracker
             x => x.Type,
             (x, v) => x.Type = (RelationshipType)v!
         ),
+        // 種別を多対多へ変えると列ペアが全クリアされるため、種別と同じ 1 履歴で往復できるよう同梱する
         new TrackedProperty<RelationshipViewModel>(
-            nameof(RelationshipViewModel.SourceColumnId),
-            x => x.SourceColumnId,
-            (x, v) => x.SourceColumnId = (Guid?)v
-        ),
-        new TrackedProperty<RelationshipViewModel>(
-            nameof(RelationshipViewModel.TargetColumnId),
-            x => x.TargetColumnId,
-            (x, v) => x.TargetColumnId = (Guid?)v
+            RelationshipColumnPairsKey,
+            x => x.SnapshotColumnPairs(),
+            (x, v) => x.SetColumnPairs((IReadOnlyList<RelationshipColumnPair>)v!)
         ),
         new TrackedProperty<RelationshipViewModel>(
             nameof(RelationshipViewModel.ConstraintName),
@@ -436,22 +441,6 @@ public sealed class DiagramChangeTracker
             return;
         }
 
-        if (
-            e.PropertyName
-            is nameof(RelationshipViewModel.SourceColumnId)
-                or nameof(RelationshipViewModel.TargetColumnId)
-        )
-        {
-            // Type 更新に伴う列付け替えは TypeChangeCompleted 側で一括記録するため、ここでは二重記録しない
-            if (!relationship.IsUpdatingType)
-            {
-                TrackPropertyChange(sender, e, TrackedRelationshipProperties);
-            }
-
-            _applyRelationshipColumnRules(relationship);
-            return;
-        }
-
         TrackPropertyChange(sender, e, TrackedRelationshipProperties);
     }
 
@@ -515,7 +504,7 @@ public sealed class DiagramChangeTracker
     /// 変更前スナップショット全体と現在値全体を <see cref="SnapshotChangeCommand"/> として Undo スタックへ Push する
     /// </summary>
     /// <remarks>
-    /// 連動変更（IsPrimaryKey ↔ IsNullable、Type ↔ SourceColumnId / TargetColumnId）を
+    /// 連動変更（IsPrimaryKey ↔ IsNullable、Type ↔ 列ペア）を
     /// 1 回の Undo / Redo で往復させるために用いる
     /// </remarks>
     private void PushGroupedPropertyChanges(
@@ -667,13 +656,7 @@ public sealed class DiagramChangeTracker
     /// <returns>後処理が不要な場合は null</returns>
     private Action? CreateAfterPropertyApplyAction(object sender, string propertyName)
     {
-        if (
-            sender is RelationshipViewModel
-            && propertyName
-                is nameof(RelationshipViewModel.Type)
-                    or nameof(RelationshipViewModel.SourceColumnId)
-                    or nameof(RelationshipViewModel.TargetColumnId)
-        )
+        if (sender is RelationshipViewModel && propertyName == nameof(RelationshipViewModel.Type))
         {
             return () => _applyRelationshipColumnRules(sender);
         }

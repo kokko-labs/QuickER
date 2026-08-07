@@ -113,26 +113,13 @@ public abstract class DdlGeneratorBase : IDdlGenerator
                 continue;
             }
 
-            // 参照カラムが明示されていればそれを優先し、未指定なら親の PK 列にフォールバックする
-            var pkCol = rel.SourceColumnId is not null
-                ? pkEntity.Columns.FirstOrDefault(c => c.Id == rel.SourceColumnId)
-                    ?? pkEntity.Columns.FirstOrDefault(c => c.IsPrimaryKey)
-                : pkEntity.Columns.FirstOrDefault(c => c.IsPrimaryKey);
+            // 列ペアが外部キー定義の唯一の正本（推測フォールバックなし）。
+            // ペアが 0 件、または解決できない列を含むリレーションは FK を生成できないためスキップする
+            var columnPairs = ForeignKeyColumnPairResolver.Resolve(rel, pkEntity, fkEntity);
 
-            // 親側に参照可能な列がなければ FK を生成できないためスキップする
-            if (pkCol is null)
+            if (columnPairs is null)
             {
                 continue;
-            }
-
-            var fkColName = rel.TargetColumnId is not null
-                ? fkEntity.Columns.FirstOrDefault(c => c.Id == rel.TargetColumnId)?.Name
-                : null;
-
-            // 子側カラム未指定時は「親テーブル名_PK列名」を FK カラム名として採用する
-            if (string.IsNullOrWhiteSpace(fkColName))
-            {
-                fkColName = SafeName(pkEntity.TableName) + "_" + pkCol.Name;
             }
 
             var fkTable = fkEntity.TableName;
@@ -146,9 +133,19 @@ public abstract class DdlGeneratorBase : IDdlGenerator
 
             var referentialActions = BuildReferentialActionClause(rel);
 
+            // 複合外部キーは構成列を宣言順にカンマ区切りで並べる（単列なら従来と同一の出力）
+            var fkColumnList = string.Join(
+                ", ",
+                ForeignKeyColumnPairResolver.ChildColumns(columnPairs).Select(QuoteSimpleName)
+            );
+            var pkColumnList = string.Join(
+                ", ",
+                ForeignKeyColumnPairResolver.ParentColumns(columnPairs).Select(QuoteSimpleName)
+            );
+
             sb.AppendLine(
                 $"ALTER TABLE {QuoteQualifiedName(fkTable)} ADD CONSTRAINT {QuoteConstraintName(constraintName)} "
-                    + $"FOREIGN KEY ({QuoteSimpleName(fkColName)}) REFERENCES {QuoteQualifiedName(pkTable)} ({QuoteSimpleName(pkCol.Name)}){referentialActions};"
+                    + $"FOREIGN KEY ({fkColumnList}) REFERENCES {QuoteQualifiedName(pkTable)} ({pkColumnList}){referentialActions};"
             );
         }
 

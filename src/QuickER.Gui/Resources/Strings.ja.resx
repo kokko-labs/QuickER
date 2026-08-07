@@ -405,6 +405,18 @@
   <data name="Property_ForeignKeyColumn" xml:space="preserve">
     <value>外部キー列</value>
   </data>
+  <data name="Property_RelationshipColumnPairsHeader" xml:space="preserve">
+    <value>キー列の対応</value>
+  </data>
+  <data name="Property_RelationshipColumnPairHint" xml:space="preserve">
+    <value>参照先列と外部キー列を 1 行ずつ対にします。＋で行を足し、両方を選ぶと確定します。2 行以上なら複合外部キーになります。</value>
+  </data>
+  <data name="Property_AddRelationshipColumnPairTooltip" xml:space="preserve">
+    <value>キー列の対を追加</value>
+  </data>
+  <data name="Property_RemoveRelationshipColumnPairTooltip" xml:space="preserve">
+    <value>このキー列の対を外す</value>
+  </data>
   <data name="Property_RemoveRelationship" xml:space="preserve">
     <value>リレーションを削除</value>
   </data>
@@ -473,6 +485,9 @@
   </data>
   <data name="Undo_ChangeTargetDbms" xml:space="preserve">
     <value>DB 種別を {0} へ変更</value>
+  </data>
+  <data name="Undo_ChangeRelationshipColumnPairs" xml:space="preserve">
+    <value>リレーションのキー列変更</value>
   </data>
   <data name="Undo_ChangeUniqueConstraintColumns" xml:space="preserve">
     <value>UNIQUE 制約の構成列変更</value>
@@ -724,6 +739,9 @@
   <data name="TableDoc_RelMissingColumn" xml:space="preserve">
     <value>リレーション一覧シートの {0} 行目に参照カラムがありません。</value>
   </data>
+  <data name="TableDoc_RelColumnCountMismatch" xml:space="preserve">
+    <value>リレーション一覧シートの {0} 行目は、参照元列と参照先列の数が一致していません。複合外部キーは両側に同じ数の列をカンマ区切りで並べてください。</value>
+  </data>
   <data name="TableDoc_RelChildColumnNotFound" xml:space="preserve">
     <value>テーブル '{0}' に参照元カラム '{1}' が存在しません。</value>
   </data>
@@ -894,6 +912,33 @@
   </data>
   <data name="Tool_RelationshipRemoved" xml:space="preserve">
     <value>'{0}' → '{1}' のリレーションを削除しました。</value>
+  </data>
+  <data name="Tool_RelationshipColumnListsRequiredTogether" xml:space="preserve">
+    <value>source_columns と target_columns は両方まとめて指定してください（両方省略すると親テーブルの主キー列から対応付けを導出します）。</value>
+  </data>
+  <data name="Tool_RelationshipColumnListsLengthMismatch" xml:space="preserve">
+    <value>source_columns と target_columns は同じ長さで指定してください（{0} 個と {1} 個でした）。2 つは列ペアの並行配列です。</value>
+  </data>
+  <data name="Tool_RelationshipColumnListNotArray" xml:space="preserve">
+    <value>{0} は列名の配列で指定してください。</value>
+  </data>
+  <data name="Tool_RelationshipColumnListInvalid" xml:space="preserve">
+    <value>{0} には空でない列名を指定してください。</value>
+  </data>
+  <data name="Tool_RelationshipColumnListEmpty" xml:space="preserve">
+    <value>{0} には列名を 1 つ以上指定してください。</value>
+  </data>
+  <data name="Tool_RelationshipDuplicateColumn" xml:space="preserve">
+    <value>カラム '{0}' が {1} に重複して指定されています。</value>
+  </data>
+  <data name="Tool_RelationshipAmbiguous" xml:space="preserve">
+    <value>'{0}' → '{1}' のリレーションが複数あります。constraint_name で対象を指定してください。候補: {2}。</value>
+  </data>
+  <data name="Tool_RelationshipConstraintNotFound" xml:space="preserve">
+    <value>'{0}' → '{1}' で制約名 '{2}' のリレーションが見つかりません。候補: {3}。</value>
+  </data>
+  <data name="Tool_RelationshipUnnamedConstraint" xml:space="preserve">
+    <value>(名前なし)</value>
   </data>
   <data name="Tool_Summary_UniqueConstraintsHeader" xml:space="preserve">
     <value>一意制約:</value>

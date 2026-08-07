@@ -793,21 +793,28 @@ internal sealed partial class CSharpGenerationModelBuilder
                 continue;
             }
 
-            // 明示指定の列を優先し、無ければ principal は主キー、dependent は外部キー列にフォールバックする
-            var sourceColumn = relationship.SourceColumnId is null
-                ? null
-                : source.Columns.FirstOrDefault(column =>
-                    column.Id == relationship.SourceColumnId.Value
+            // 複合外部キー（列ペア 2 組以上）は生成 Repository が単一キー前提のため対象外
+            if (relationship.ColumnPairs.Count > 1)
+            {
+                diagnostics.Add(
+                    GenerationDiagnostic.Warning(
+                        string.Format(
+                            Strings.CodeGen_Warning_RelationshipCompositeSkipped,
+                            relationship.Id
+                        )
+                    )
                 );
-            var targetColumn = relationship.TargetColumnId is null
+                continue;
+            }
+
+            // 列ペアが唯一の正本（主キー・IsForeignKey フラグによる推測フォールバックは行わない）
+            var columnPair = relationship.ColumnPairs.FirstOrDefault();
+            var principalColumn = columnPair is null
                 ? null
-                : target.Columns.FirstOrDefault(column =>
-                    column.Id == relationship.TargetColumnId.Value
-                );
-            var principalColumn =
-                sourceColumn ?? source.Columns.FirstOrDefault(column => column.IsPrimaryKey);
-            var dependentColumn =
-                targetColumn ?? target.Columns.FirstOrDefault(column => column.IsForeignKey);
+                : source.Columns.FirstOrDefault(column => column.Id == columnPair.SourceColumnId);
+            var dependentColumn = columnPair is null
+                ? null
+                : target.Columns.FirstOrDefault(column => column.Id == columnPair.TargetColumnId);
 
             if (principalColumn is null || dependentColumn is null)
             {

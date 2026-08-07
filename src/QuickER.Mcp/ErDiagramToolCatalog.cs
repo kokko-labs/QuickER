@@ -23,7 +23,7 @@ public static class ErDiagramToolCatalog
         + "- Before modifying an existing diagram, call get_diagram_summary to see its current state (and list_queries when working with named queries).\n"
         + "- Naming: unless the user requests a different convention, use PascalCase singular table names (e.g., Customer, OrderItem). When the diagram already has tables, match their existing naming style (casing and singular/plural) instead.\n"
         + "- Give each table exactly one primary key column, added first with add_column is_primary_key=true (composite primary keys are not supported by the code generator).\n"
-        + "- Add foreign key columns with is_primary_key=false (usually is_nullable=false), then define the reference with add_relationship, giving source_column and target_column explicitly. One relationship references exactly one column pair; add multiple foreign keys as separate relationships.\n"
+        + "- Add foreign key columns with is_primary_key=false (usually is_nullable=false), then define the reference with add_relationship, giving source_columns and target_columns explicitly. The two arrays are parallel and must have the same length; a single entry each is the usual single-column foreign key, and two or more entries define a composite foreign key. Add foreign keys with different roles as separate relationships.\n"
         + "- Unique constraints: set_unique_constraint is an upsert keyed by (table_name, set of columns); the primary key already enforces uniqueness of its own columns, so add one only for other columns or column combinations that must be unique.\n"
         + "- Named queries: set_query is an upsert keyed by (table_name, query_name); definitions are validated before saving.\n"
         + "- Before writing a generation config for generate_csharp, call get_generation_config_schema to discover the available keys.\n"
@@ -38,7 +38,7 @@ public static class ErDiagramToolCatalog
             {
                 Name = "get_diagram_summary",
                 Description =
-                    "Returns a text listing of the entities (tables), their unique constraints, and the relationships (foreign keys) in the current ER diagram.",
+                    "Returns a text listing of the entities (tables), their unique constraints, and the relationships (foreign keys, each with its constraint name and column pairs) in the current ER diagram.",
                 DeferLoading = false,
                 InputSchema = new
                 {
@@ -220,7 +220,7 @@ public static class ErDiagramToolCatalog
             {
                 Name = "add_relationship",
                 Description =
-                    "Adds a relationship (foreign key) between two tables. To specify the referenced columns reliably, also provide source_column (the primary key column name of the parent table) and target_column (the foreign key column name of the child table). A relationship references exactly one column to one column (composite foreign keys are not allowed). Add multiple foreign keys with different roles as separate relationships.",
+                    "Adds a relationship (foreign key) between two tables. To specify the mapping reliably, also provide source_columns (the referenced column names of the parent table) and target_columns (the foreign key column names of the child table). The two arrays are parallel: entry i of source_columns is referenced by entry i of target_columns, they must have the same length, and their order is the declaration order of the foreign key. One entry each is the usual single-column foreign key; two or more entries define a composite foreign key. When both arrays are omitted, every primary key column of the parent table is paired with a child column inferred from the column names (a parent column whose counterpart cannot be inferred is left out of the mapping). Add foreign keys with different roles as separate relationships.",
                 DeferLoading = false,
                 InputSchema = new
                 {
@@ -232,20 +232,22 @@ public static class ErDiagramToolCatalog
                             type = "string",
                             description = "Referenced (parent) table name",
                         },
-                        source_column = new
+                        source_columns = new
                         {
-                            type = "string",
-                            description = "Referenced column name in the parent table. Usually the primary key column (if omitted, the primary key column is used).",
+                            type = "array",
+                            description = "Referenced column names in the parent table, in declaration order (usually its primary key columns). Must have the same length as target_columns, and the same column cannot be listed twice. Omit both arrays to derive the mapping from the parent's primary key columns.",
+                            items = new { type = "string" },
                         },
                         target_table = new
                         {
                             type = "string",
                             description = "Referencing (child) table name",
                         },
-                        target_column = new
+                        target_columns = new
                         {
-                            type = "string",
-                            description = "Foreign key column name in the child table (if omitted, it is inferred from the column names, and left unassigned if it cannot be inferred).",
+                            type = "array",
+                            description = "Foreign key column names in the child table, in declaration order. Entry i references entry i of source_columns, and the same column cannot be listed twice.",
+                            items = new { type = "string" },
                         },
                         relationship_type = new
                         {
@@ -260,7 +262,8 @@ public static class ErDiagramToolCatalog
             new ToolDefinition
             {
                 Name = "remove_relationship",
-                Description = "Removes the relationship between two tables.",
+                Description =
+                    "Removes the relationship between two tables. When several relationships run in the same direction between the same pair of tables, identify the one to remove with constraint_name; without it the call fails and lists the candidate constraint names (get_diagram_summary shows them too).",
                 DeferLoading = false,
                 InputSchema = new
                 {
@@ -276,6 +279,11 @@ public static class ErDiagramToolCatalog
                         {
                             type = "string",
                             description = "Referencing table name",
+                        },
+                        constraint_name = new
+                        {
+                            type = "string",
+                            description = "Constraint name of the relationship to remove (optional; needed only when several relationships connect the same pair of tables in the same direction).",
                         },
                     },
                     required = new[] { "source_table", "target_table" },

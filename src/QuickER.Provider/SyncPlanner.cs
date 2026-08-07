@@ -27,16 +27,6 @@ public sealed class SyncPlanContext
     /// （<see cref="LiveEntities"/> から合成する）。
     /// </remarks>
     public IReadOnlyList<SchemaAuxiliaryObject> AuxiliaryObjects { get; init; } = [];
-
-    /// <summary>
-    /// 取込で検出した複合外部キーの警告（テーブル再構築のブロック判定に用いる）。
-    /// </summary>
-    /// <remarks>
-    /// 複合外部キーの子テーブルを再構築すると、列対応を失った外部キーが単列外部キーとして作り直される
-    /// （成功して静かに壊れる）。<see cref="SyncPlanner"/> はここに挙がったテーブルの再構築を計画から除外する。
-    /// </remarks>
-    public IReadOnlyList<CompositeForeignKeyImportWarning> CompositeForeignKeyWarnings { get; init; } =
-    [];
 }
 
 /// <summary>
@@ -137,26 +127,17 @@ public sealed class SyncPlanner
         if (!isRebuildDialect)
         {
             // 逐次 DDL 方言: 全差分をそのままセクション化する。
-            // まず、複合外部キーの作り直しを招く変更（主キー変更・FK 関与列の定義変更）を計画から落とす。
-            // 同期ダイアログでも選択不可へ格下げしているが、直接 API を使う経路・格下げ漏れに備えた最終防御
-            var planned = BlockCompositeForeignKeyChanges(
-                selected,
-                capabilities,
-                context,
-                warnings
-            );
-
             // 列順変更（ReorderColumns）は SectionOrder に無いためセクションからは自然に外れ、
             // Native 方言（MySQL）のときだけネイティブ MODIFY ... AFTER の並べ替え計画へ変換する
             // （None 方言では Compute が ReorderColumns を生成しないため、渡されても計画から消える）
             var reorders =
                 capabilities.ColumnReorder == ColumnReorderMode.Native
-                    ? BuildReorderPlans(planned, context)
+                    ? BuildReorderPlans(selected, context)
                     : [];
 
             // 主キー変更・（方言によっては）列定義変更に巻き込まれる live FK を、暗黙の DROP → 再 ADD として注入する
             var sectionItems = InjectImplicitForeignKeyRebuilds(
-                planned,
+                selected,
                 capabilities,
                 context,
                 warnings
@@ -165,10 +146,11 @@ public sealed class SyncPlanner
             // 列定義変更に巻き込まれる live の一意制約も、同じ流儀で暗黙の DROP → 再 ADD として注入する
             sectionItems = InjectImplicitUniqueConstraintRebuilds(
                 sectionItems,
-                planned,
+                selected,
                 capabilities,
                 context
             );
+
             return new SyncPlan
             {
                 Sections = BuildSections(sectionItems),
@@ -229,65 +211,6 @@ public sealed class SyncPlanner
     /// <summary>この主キー変更項目が新しい主キー列を持つか（＝付与フェーズを要するか）</summary>
     private static bool HasNewPrimaryKeyColumns(SchemaDiffItem item) =>
         item.Entity?.Columns.Any(c => c.IsPrimaryKey) == true;
-
-    // ---------------- 複合外部キーの作り直しを招く変更の除外（逐次 DDL 方言） ----------------
-
-    /// <summary>
-    /// 複合外部キーの自動 DROP → 再 ADD を招く変更を計画から取り除き、除外した項目ごとに警告を積む。
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// <see cref="InjectImplicitForeignKeyRebuilds"/> は live のリレーションを直接列挙するため、UI で外部キー差分を
-    /// 選択不可へ格下げしても素通りする。その対象が複合外部キー（取込で列対応を失った外部キー）だと、
-    /// 単列の定義で作り直されて<b>成功したまま制約だけが静かに壊れる</b>（MySQL）か、部分適用で外部キーが消える
-    /// （Oracle）。テーブル再構築のブロック（<see cref="BlockCompositeForeignKeyRebuilds"/>）と同じ理由のため、
-    /// 原因となる変更そのものを計画から落とす。
-    /// </para>
-    /// <para>
-    /// 落とすのは該当する項目だけで、他の変更は従来どおり同期する。除外した項目は計画に入らない＝プレビューにも
-    /// 現れないため、レンダラー側のスキップコメントは出さず、実行確認の警告（<paramref name="warnings"/>）で伝える。
-    /// </para>
-    /// </remarks>
-    private static List<SchemaDiffItem> BlockCompositeForeignKeyChanges(
-        List<SchemaDiffItem> selected,
-        SyncDialectCapabilities capabilities,
-        SyncPlanContext? context,
-        List<SyncPlanWarning> warnings
-    )
-    {
-        if (context is null || context.CompositeForeignKeyWarnings.Count == 0)
-        {
-            return selected;
-        }
-
-        var scope = CompositeForeignKeyGuard.BuildSyncScope(context);
-
-        if (scope.IsEmpty)
-        {
-            return selected;
-        }
-
-        var kept = new List<SchemaDiffItem>(selected.Count);
-
-        foreach (var item in selected)
-        {
-            if (!CompositeForeignKeyGuard.IsBlockedChange(item, capabilities, scope))
-            {
-                kept.Add(item);
-                continue;
-            }
-
-            warnings.Add(
-                new SyncPlanWarning(
-                    SyncPlanWarningKind.CompositeForeignKeyBlocksChange,
-                    item.TableName.Trim(),
-                    item.ColumnName?.Trim() ?? string.Empty
-                )
-            );
-        }
-
-        return kept;
-    }
 
     // ---------------- 依存 FK の自動 DROP → 再 ADD（逐次 DDL 方言） ----------------
 
@@ -377,13 +300,12 @@ public sealed class SyncPlanner
                 continue;
             }
 
-            var (childCol, parentTable, parentCol) = signature.Value;
+            var (parentTable, columnPairs) = signature.Value;
             explicitlyDropped.Add(
                 ForeignKeyKey(
                     SchemaDiffService.NormalizeTable(dropFk.ChildEntity),
-                    childCol,
                     parentTable,
-                    parentCol
+                    columnPairs
                 )
             );
         }
@@ -395,24 +317,26 @@ public sealed class SyncPlanner
         {
             var childTable = SchemaDiffService.NormalizeTable(fk.Child);
             var parentTable = SchemaDiffService.NormalizeTable(fk.Parent);
+            var referencedColumns = ForeignKeyColumnPairResolver
+                .ParentColumns(fk.ColumnPairs)
+                .ToList();
 
             // (a) 参照先テーブルの主キーが変わる / (b) FK が参加する列の定義が変わる
+            // （複合外部キーは全構成列のどれか 1 つでも定義が変われば作り直しになる）
             var parentPkChanged = pkChangedTables.TryGetValue(parentTable, out var newPkColumns);
             var affected =
                 parentPkChanged
-                || alteredColumns.Contains(ColumnKey(childTable, fk.ChildColumn))
-                || alteredColumns.Contains(ColumnKey(parentTable, fk.ParentColumn.Name));
+                || fk.ColumnPairs.Any(p =>
+                    alteredColumns.Contains(ColumnKey(childTable, p.ChildColumn))
+                    || alteredColumns.Contains(ColumnKey(parentTable, p.ParentColumn))
+                );
 
             if (!affected)
             {
                 continue;
             }
 
-            if (
-                explicitlyDropped.Contains(
-                    ForeignKeyKey(childTable, fk.ChildColumn, parentTable, fk.ParentColumn.Name)
-                )
-            )
+            if (explicitlyDropped.Contains(ForeignKeyKey(childTable, parentTable, fk.ColumnPairs)))
             {
                 continue;
             }
@@ -420,16 +344,16 @@ public sealed class SyncPlanner
             var constraintName = ResolveForeignKeyName(fk.Relationship, childTable, parentTable);
             var description = string.Format(Strings.Diff_AutoForeignKeyRebuild, constraintName);
 
-            // 注入する FK は常に単列参照のため、被参照列が候補キーであり続ける根拠は
-            // 「同期後の主キーが被参照列 1 列ちょうど」か「同期後に被参照列 1 列だけの一意制約が在る」のいずれか。
+            // 被参照列（複合外部キーなら全構成列）が候補キーであり続ける根拠は
+            // 「同期後の主キーが被参照列集合とちょうど一致」か「同期後に同じ列集合の一意制約が在る」のいずれか。
             // 被参照列が新主キーに含まれていても他の列と複合になっていれば主キーは根拠にならない
             // （(id) → (id, code) の拡張は 4 方言中 3 方言で再 ADD が失敗する）。
             // 一意制約はモデルの正本（Entity.UniqueConstraints）から同期後の集合を厳密に合成して判定するため、
             // 「自然キー UNIQUE を持つ表の主キー付け替え」は誤警告しない。証明できない構成は
             // （一意インデックス等で実際には通ることがあっても）警告する＝実行は止めない安全側へ倒す
             var staysCandidateKey =
-                (newPkColumns is { Count: 1 } && newPkColumns.Contains(fk.ParentColumn.Name))
-                || IsCoveredByUniqueConstraint(postSyncUniques, parentTable, fk.ParentColumn.Name);
+                (newPkColumns is not null && IsSameColumnSet(newPkColumns, referencedColumns))
+                || IsCoveredByUniqueConstraint(postSyncUniques, parentTable, referencedColumns);
 
             if (parentPkChanged && !staysCandidateKey)
             {
@@ -452,6 +376,7 @@ public sealed class SyncPlanner
                     ChildEntity = fk.Child,
                     Relationship = fk.Relationship,
                     ForeignKeyName = fk.Relationship.ConstraintName,
+                    ForeignKeyColumnPairs = fk.ColumnPairs,
                     Description = description,
                 }
             );
@@ -461,11 +386,12 @@ public sealed class SyncPlanner
                 {
                     Kind = SchemaDiffKind.AddForeignKey,
                     TableName = childTable,
-                    ColumnName = fk.ChildColumn,
+                    ColumnName = fk.ColumnPairs[0].ChildColumn,
                     Entity = fk.Child,
                     ParentEntity = fk.Parent,
                     ChildEntity = fk.Child,
                     Relationship = fk.Relationship,
+                    ForeignKeyColumnPairs = fk.ColumnPairs,
                     Description = description,
                 }
             );
@@ -564,14 +490,29 @@ public sealed class SyncPlanner
         }
     }
 
-    /// <summary>この列 1 列だけを構成列とする一意制約が同期後に存在するか（＝単列参照 FK の候補キーの証明）</summary>
+    /// <summary>
+    /// この列集合とちょうど一致する一意制約が同期後に存在するか（＝被参照列が候補キーであり続ける証明）。
+    /// </summary>
+    /// <remarks>
+    /// 複合外部キーでは被参照列が複数になるため、列集合シグネチャ（順序・大文字小文字を無視）で照合する。
+    /// 「一意制約の列集合が被参照列を包含する」では不十分（<c>(id)</c> → <c>(id, code)</c> の拡張は
+    /// 4 方言中 3 方言で再 ADD が失敗する）ため、完全一致のみを証明とみなす。
+    /// </remarks>
     private static bool IsCoveredByUniqueConstraint(
         Dictionary<string, HashSet<string>> postSyncUniques,
         string table,
-        string columnName
+        IEnumerable<string> columnNames
     ) =>
         postSyncUniques.TryGetValue(table, out var signatures)
-        && signatures.Contains(UniqueConstraintNaming.ColumnSetSignature([columnName]));
+        && signatures.Contains(UniqueConstraintNaming.ColumnSetSignature(columnNames));
+
+    /// <summary>2 つの列名集合が（順序・大文字小文字を無視して）ちょうど一致するか</summary>
+    private static bool IsSameColumnSet(IEnumerable<string> left, IEnumerable<string> right) =>
+        string.Equals(
+            UniqueConstraintNaming.ColumnSetSignature(left),
+            UniqueConstraintNaming.ColumnSetSignature(right),
+            StringComparison.Ordinal
+        );
 
     /// <summary>
     /// 選択された列定義変更に巻き込まれる live の一意制約を、暗黙の DROP（先頭側）と再 ADD（末尾側）として注入する。
@@ -714,9 +655,9 @@ public sealed class SyncPlanner
         foreach (var fk in EnumerateLiveForeignKeys(context))
         {
             var parentTable = SchemaDiffService.NormalizeTable(fk.Parent);
-            var referencedSignature = UniqueConstraintNaming.ColumnSetSignature([
-                fk.ParentColumn.Name,
-            ]);
+            var referencedSignature = UniqueConstraintNaming.ColumnSetSignature(
+                ForeignKeyColumnPairResolver.ParentColumns(fk.ColumnPairs)
+            );
 
             foreach (var drop in drops)
             {
@@ -759,13 +700,23 @@ public sealed class SyncPlanner
     private static string ColumnKey(string table, string column) =>
         $"{table.Trim().ToLowerInvariant()}|{column.Trim().ToLowerInvariant()}";
 
-    /// <summary>外部キーの照合キー（子テーブル・子列・親テーブル・親列。大文字小文字・前後空白を無視する）</summary>
+    /// <summary>
+    /// 外部キーの照合キー（子テーブル・親テーブル・構成列ペアの宣言順リスト。
+    /// 大文字小文字・前後空白を無視する）
+    /// </summary>
+    /// <remarks>複合外部キーも 1 本のキーへ畳むため、列ペアを宣言順に連結する</remarks>
     private static string ForeignKeyKey(
         string childTable,
-        string childColumn,
         string parentTable,
-        string parentColumn
-    ) => $"{ColumnKey(childTable, childColumn)}|{ColumnKey(parentTable, parentColumn)}";
+        IEnumerable<ForeignKeyColumnNamePair> columnPairs
+    ) =>
+        $"{childTable.Trim().ToLowerInvariant()}|{parentTable.Trim().ToLowerInvariant()}|"
+        + string.Join(
+            ",",
+            columnPairs.Select(p =>
+                $"{p.ParentColumn.Trim().ToLowerInvariant()}>{p.ChildColumn.Trim().ToLowerInvariant()}"
+            )
+        );
 
     /// <summary>FK 制約名を解決する（未設定なら <c>FK_{子}_{親}</c> の規約名）</summary>
     private static string ResolveForeignKeyName(
@@ -777,14 +728,16 @@ public sealed class SyncPlanner
             ? $"FK_{SafeName(childTable)}_{SafeName(parentTable)}"
             : relationship!.ConstraintName!;
 
-    /// <summary>live のリレーションから、親子エンティティ・親列・子列名まで解決できた FK を列挙する</summary>
-    /// <remarks>多対多や、親子・参照列が解決できないリレーションは FK として扱えないため除外する。</remarks>
+    /// <summary>live のリレーションから、親子エンティティ・構成列ペアまで解決できた FK を列挙する</summary>
+    /// <remarks>
+    /// 多対多や、親子・構成列が解決できないリレーションは FK として扱えないため除外する。
+    /// 複合外部キーは列ペアを宣言順に保持したまま列挙する。
+    /// </remarks>
     private static IEnumerable<(
         Relationship Relationship,
         Entity Parent,
         Entity Child,
-        Column ParentColumn,
-        string ChildColumn
+        IReadOnlyList<ForeignKeyColumnNamePair> ColumnPairs
     )> EnumerateLiveForeignKeys(SyncPlanContext context)
     {
         foreach (var rel in context.LiveRelationships)
@@ -802,21 +755,14 @@ public sealed class SyncPlanner
                 continue;
             }
 
-            var parentCol = SchemaDiffService.ResolveReferencedColumn(rel, parent);
+            var columnPairs = ForeignKeyColumnPairResolver.Resolve(rel, parent, child);
 
-            if (parentCol is null)
+            if (columnPairs is null)
             {
                 continue;
             }
 
-            var childCol = SchemaDiffService.ResolveFkColumnName(rel, child, parent, parentCol);
-
-            if (childCol is null)
-            {
-                continue;
-            }
-
-            yield return (rel, parent, child, parentCol, childCol);
+            yield return (rel, parent, child, columnPairs);
         }
     }
 
@@ -824,11 +770,6 @@ public sealed class SyncPlanner
     /// rebuild 方言の実行計画を組み立てる。逐次 DDL で表現できない変更をテーブル単位の再構築へ集約し、
     /// 残り（新規テーブル対象でない列追加・テーブル削除）は従来どおりセクションへ残す。
     /// </summary>
-    /// <remarks>
-    /// 複合外部キーの子テーブルは再構築対象から除外し、警告を積む（<see cref="BlockCompositeForeignKeyRebuilds"/>）。
-    /// 除外されたテーブルの差分項目は畳み込まれずセクションへ残るため、レンダラーのスキップコメントで
-    /// 「同期していない」ことがプレビューにも現れる。
-    /// </remarks>
     private static SyncPlan BuildRebuildPlan(
         List<SchemaDiffItem> selected,
         SyncPlanContext context,
@@ -859,9 +800,6 @@ public sealed class SyncPlanner
             .Where(liveByName.ContainsKey)
             .ToHashSet(TableComparer);
 
-        // 複合外部キーの子テーブルは再構築すると外部キーが単列へ作り替えられるため、そのテーブルだけ止める
-        BlockCompositeForeignKeyRebuilds(existingRebuildTables, context, warnings);
-
         // rebuild へ転用（畳み込み）が確定した項目の集合（SchemaDiffItem は参照同一性で比較する）
         var diverted = new HashSet<SchemaDiffItem>();
 
@@ -886,51 +824,6 @@ public sealed class SyncPlanner
             Rebuilds = rebuilds,
             Warnings = warnings,
         };
-    }
-
-    /// <summary>
-    /// 複合外部キーの子テーブルを再構築対象から取り除き、除外したテーブルごとに警告を積む。
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// 意味モデルは複合外部キーの列対応を保持できないため、その子テーブルを再構築すると外部キーが
-    /// 単列外部キーとして作り直される（実行は成功し、制約だけが静かに壊れる）。実行時に失敗して気づける
-    /// 他の限界と違い自動検出できないため、該当テーブルの再構築だけを計画から落とす。
-    /// </para>
-    /// <para>
-    /// ブロックの粒度は「該当テーブルのみ」で、他テーブルの同期は従来どおり続行する。除外したテーブルの
-    /// 差分項目は畳み込まれずセクションへ残り、レンダラーがスキップコメントを出す。
-    /// </para>
-    /// </remarks>
-    private static void BlockCompositeForeignKeyRebuilds(
-        HashSet<string> existingRebuildTables,
-        SyncPlanContext context,
-        List<SyncPlanWarning> warnings
-    )
-    {
-        if (context.CompositeForeignKeyWarnings.Count == 0)
-        {
-            return;
-        }
-
-        // 出力順を安定させるためテーブル名順に処理する（HashSet の列挙順に依存しない）
-        var blocked = existingRebuildTables
-            .Where(t =>
-                CompositeForeignKeyGuard.IsCompositeChildTable(
-                    t,
-                    context.CompositeForeignKeyWarnings
-                )
-            )
-            .OrderBy(t => t, TableComparer)
-            .ToList();
-
-        foreach (var table in blocked)
-        {
-            existingRebuildTables.Remove(table);
-            warnings.Add(
-                new SyncPlanWarning(SyncPlanWarningKind.RebuildBlockedByCompositeForeignKey, table)
-            );
-        }
     }
 
     /// <summary>選択済み AddTable を CreateOnly の再構築計画へ変換する（新規テーブルへの FK はインラインへ畳む）</summary>
@@ -1477,7 +1370,7 @@ public sealed class SyncPlanner
     {
         var foreignKeys = ResolveLiveForeignKeys(childTable, context).ToList();
 
-        // 選択済み DropForeignKey に一致する live FK を除去する（列・親テーブル・親列のシグネチャで照合）
+        // 選択済み DropForeignKey に一致する live FK を除去する（親テーブル・構成列ペアのシグネチャで照合）
         foreach (var dropFk in tableItems.Where(i => i.Kind == SchemaDiffKind.DropForeignKey))
         {
             var signature = ResolveDroppedForeignKeySignature(dropFk);
@@ -1487,11 +1380,17 @@ public sealed class SyncPlanner
                 continue;
             }
 
-            var (childCol, parentTable, parentCol) = signature.Value;
+            var (parentTable, columnPairs) = signature.Value;
             foreignKeys.RemoveAll(fk =>
-                TableComparer.Equals(fk.ChildColumn, childCol)
-                && TableComparer.Equals(fk.ParentTable, parentTable)
-                && TableComparer.Equals(fk.ParentColumn, parentCol)
+                TableComparer.Equals(fk.ParentTable, parentTable)
+                && fk.ChildColumns.SequenceEqual(
+                    ForeignKeyColumnPairResolver.ChildColumns(columnPairs),
+                    TableComparer
+                )
+                && fk.ParentColumns.SequenceEqual(
+                    ForeignKeyColumnPairResolver.ParentColumns(columnPairs),
+                    TableComparer
+                )
             );
         }
 
@@ -1530,9 +1429,9 @@ public sealed class SyncPlanner
                     SchemaDiffService.NormalizeTable(fk.Child),
                     parentTable
                 ),
-                fk.ChildColumn,
+                [.. ForeignKeyColumnPairResolver.ChildColumns(fk.ColumnPairs)],
                 parentTable,
-                fk.ParentColumn.Name,
+                [.. ForeignKeyColumnPairResolver.ParentColumns(fk.ColumnPairs)],
                 fk.Relationship.OnDelete,
                 fk.Relationship.OnUpdate
             );
@@ -1547,9 +1446,9 @@ public sealed class SyncPlanner
             return null;
         }
 
-        var parentCol = SyncScriptBuilderHelper.ResolveReferencedColumn(item);
+        var columnPairs = SyncScriptBuilderHelper.ResolveColumnPairs(item);
 
-        if (parentCol is null || string.IsNullOrEmpty(item.ColumnName))
+        if (columnPairs.Count == 0)
         {
             return null;
         }
@@ -1559,19 +1458,20 @@ public sealed class SyncPlanner
 
         return new TableRebuildForeignKey(
             ResolveForeignKeyName(item.Relationship, childTable, parentTable),
-            item.ColumnName!,
+            [.. ForeignKeyColumnPairResolver.ChildColumns(columnPairs)],
             parentTable,
-            parentCol.Name,
+            [.. ForeignKeyColumnPairResolver.ParentColumns(columnPairs)],
             item.Relationship?.OnDelete ?? ForeignKeyReferentialAction.NoAction,
             item.Relationship?.OnUpdate ?? ForeignKeyReferentialAction.NoAction
         );
     }
 
-    /// <summary>DropForeignKey 差分項目を、live FK 照合用のシグネチャ（子列・親テーブル・親列）へ解決する</summary>
+    /// <summary>
+    /// DropForeignKey 差分項目を、live FK 照合用のシグネチャ（親テーブル・構成列ペア）へ解決する
+    /// </summary>
     private static (
-        string ChildColumn,
         string ParentTable,
-        string ParentColumn
+        IReadOnlyList<ForeignKeyColumnNamePair> ColumnPairs
     )? ResolveDroppedForeignKeySignature(SchemaDiffItem item)
     {
         if (item.Relationship is null || item.ParentEntity is null || item.ChildEntity is null)
@@ -1579,29 +1479,26 @@ public sealed class SyncPlanner
             return null;
         }
 
-        var parentCol = SchemaDiffService.ResolveReferencedColumn(
-            item.Relationship,
-            item.ParentEntity
-        );
+        // 差分項目に載った列ペアを優先し、無ければリレーションから解決し直す
+        // （差分計算が作った項目には必ず載るが、外部から組み立てた項目でもモデルから復元できるようにする）
+        IReadOnlyList<ForeignKeyColumnNamePair>? columnPairs =
+            SyncScriptBuilderHelper.ResolveColumnPairs(item);
 
-        if (parentCol is null)
+        if (columnPairs.Count == 0)
+        {
+            columnPairs = ForeignKeyColumnPairResolver.Resolve(
+                item.Relationship,
+                item.ParentEntity,
+                item.ChildEntity
+            );
+        }
+
+        if (columnPairs is null || columnPairs.Count == 0)
         {
             return null;
         }
 
-        var childCol = SchemaDiffService.ResolveFkColumnName(
-            item.Relationship,
-            item.ChildEntity,
-            item.ParentEntity,
-            parentCol
-        );
-
-        if (childCol is null)
-        {
-            return null;
-        }
-
-        return (childCol, SchemaDiffService.NormalizeTable(item.ParentEntity), parentCol.Name);
+        return (SchemaDiffService.NormalizeTable(item.ParentEntity), columnPairs);
     }
 
     /// <summary>

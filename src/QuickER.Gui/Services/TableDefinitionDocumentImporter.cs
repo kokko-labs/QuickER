@@ -346,51 +346,70 @@ public static partial class TableDefinitionDocumentImporter
 
             if (type != RelationshipType.ManyToMany)
             {
-                var childColumnName = GetCellText(worksheet, row, 4);
-                var parentColumnName = GetCellText(worksheet, row, 6);
+                // 複合外部キーはカンマ区切りの複数列表記（単一列は従来どおり列名 1 つ）
+                var childColumnNames = SplitColumnNames(GetCellText(worksheet, row, 4));
+                var parentColumnNames = SplitColumnNames(GetCellText(worksheet, row, 6));
 
-                if (
-                    string.IsNullOrWhiteSpace(childColumnName)
-                    || string.IsNullOrWhiteSpace(parentColumnName)
-                )
+                if (childColumnNames.Count == 0 || parentColumnNames.Count == 0)
                 {
                     throw new InvalidDataException(
                         string.Format(Strings.TableDoc_RelMissingColumn, row)
                     );
                 }
 
-                var childColumn = child.Columns.FirstOrDefault(column =>
-                    string.Equals(column.Name, childColumnName, StringComparison.OrdinalIgnoreCase)
-                );
-                var parentColumn = parent.Columns.FirstOrDefault(column =>
-                    string.Equals(column.Name, parentColumnName, StringComparison.OrdinalIgnoreCase)
-                );
-
-                if (childColumn is null)
+                if (childColumnNames.Count != parentColumnNames.Count)
                 {
                     throw new InvalidDataException(
-                        string.Format(
-                            Strings.TableDoc_RelChildColumnNotFound,
-                            child.TableName,
-                            childColumnName
-                        )
+                        string.Format(Strings.TableDoc_RelColumnCountMismatch, row)
                     );
                 }
 
-                if (parentColumn is null)
+                var pairs = new List<RelationshipColumnPair>();
+
+                for (var i = 0; i < childColumnNames.Count; i++)
                 {
-                    throw new InvalidDataException(
-                        string.Format(
-                            Strings.TableDoc_RelParentColumnNotFound,
-                            parent.TableName,
-                            parentColumnName
+                    var childColumn = child.Columns.FirstOrDefault(column =>
+                        string.Equals(
+                            column.Name,
+                            childColumnNames[i],
+                            StringComparison.OrdinalIgnoreCase
                         )
                     );
+                    var parentColumn = parent.Columns.FirstOrDefault(column =>
+                        string.Equals(
+                            column.Name,
+                            parentColumnNames[i],
+                            StringComparison.OrdinalIgnoreCase
+                        )
+                    );
+
+                    if (childColumn is null)
+                    {
+                        throw new InvalidDataException(
+                            string.Format(
+                                Strings.TableDoc_RelChildColumnNotFound,
+                                child.TableName,
+                                childColumnNames[i]
+                            )
+                        );
+                    }
+
+                    if (parentColumn is null)
+                    {
+                        throw new InvalidDataException(
+                            string.Format(
+                                Strings.TableDoc_RelParentColumnNotFound,
+                                parent.TableName,
+                                parentColumnNames[i]
+                            )
+                        );
+                    }
+
+                    childColumn.IsForeignKey = true;
+                    pairs.Add(new RelationshipColumnPair(parentColumn.Id, childColumn.Id));
                 }
 
-                childColumn.IsForeignKey = true;
-                relationship.TargetColumnId = childColumn.Id;
-                relationship.SourceColumnId = parentColumn.Id;
+                relationship.ColumnPairs = pairs;
             }
 
             relationships.Add(relationship);
@@ -400,6 +419,11 @@ public static partial class TableDefinitionDocumentImporter
     }
 
     /// <summary>定義書の関係表記（1:1 / N:1 / N:N）を内部の列挙値へ変換する</summary>
+    /// <summary>参照元列・参照先列セルのカンマ区切り表記を列名一覧へ分割する（空白のみの要素は捨てる）</summary>
+    private static List<string> SplitColumnNames(string text) =>
+        text.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToList();
+
     private static RelationshipType ParseRelationshipType(string text, int row)
     {
         return text.Trim() switch

@@ -180,7 +180,7 @@
 - Table and column names use only alphanumerics and underscores.
 - Give every table a description and every column a description.
 - Each table has exactly one primary key column; composite primary keys (a primary key over multiple columns) are prohibited. Even a many-to-many junction table uses a single surrogate key (e.g. OrderItemId int) as its primary key, and columns that reference parent tables are defined as foreign keys (not primary keys).
-- A foreign key consists of exactly one referencing column per relationship (foreign-key constraint). Composite foreign keys that express one reference with a group of columns are prohibited.
+- A foreign key maps the parent's referenced columns to the child's referencing columns as an ordered list of column pairs. Prefer a single-column reference; use a composite foreign key (two or more pairs) only when the parent key really spans several columns.
 - A foreign-key column must not also be a primary key. A column that carries the referenced table's primary key is a foreign key (non-primary, NOT NULL).
 - Multiple foreign keys with different roles (e.g. ShippingAddressId and BillingAddressId both referencing the same table) are legitimate; define each as its own relationship.
 - Always set nullability. Primary keys are NOT NULL; required fields and ordinary foreign keys are also NOT NULL; only optional fields are nullable.
@@ -189,8 +189,8 @@
   <data name="ErDesign_SinglePrimaryKeyRule" xml:space="preserve">
     <value>Each table has exactly one primary key column (composite primary keys are prohibited).</value>
   </data>
-  <data name="ErDesign_SingleColumnForeignKeyRule" xml:space="preserve">
-    <value>A relationship references exactly one column to one column (composite foreign keys are prohibited).</value>
+  <data name="ErDesign_ForeignKeyColumnMappingRule" xml:space="preserve">
+    <value>source_columns and target_columns are parallel arrays of the same length; one entry each is a single-column reference and two or more entries make a composite foreign key.</value>
   </data>
   <data name="ErDesign_FunctionToolLabel" xml:space="preserve">
     <value>function tools</value>
@@ -206,7 +206,7 @@ Always create and modify ER diagrams with the provided tools ({0}). Do not use f
 - Before touching an existing ER diagram, always check its current state with get_diagram_summary.
 - Create a table with add_entity, then add_column, adding exactly one primary key column first with is_primary_key=true. {2}
 - Add a foreign key column with add_column as is_primary_key=false (usually is_nullable=false), then define the reference with add_relationship.
-- In add_relationship, always specify source_column (the parent's primary key column) and target_column (the child's foreign key column). {3}
+- In add_relationship, always specify source_columns (the parent's referenced columns) and target_columns (the child's foreign key columns); omitting both pairs the parent's primary key columns automatically. {3}
 - If a tool returns an error, follow the error message to fix the input and retry.
 
 # Named query workflow

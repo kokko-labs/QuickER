@@ -174,16 +174,14 @@ public class SqlServerSchemaImporterTests
             SourceEntityId = parent.Id,
             TargetEntityId = child.Id,
             Type = RelationshipType.OneToMany,
-            SourceColumnId = parent.Columns[0].Id,
-            TargetColumnId = child.Columns[1].Id,
+            ColumnPairs = [new(parent.Columns[0].Id, child.Columns[1].Id)],
         };
         var relB = new Relationship
         {
             SourceEntityId = parent.Id,
             TargetEntityId = child.Id,
             Type = RelationshipType.OneToMany,
-            SourceColumnId = parent.Columns[0].Id,
-            TargetColumnId = child.Columns[2].Id,
+            ColumnPairs = [new(parent.Columns[0].Id, child.Columns[2].Id)],
         };
 
         var sigA = SchemaSignature.Compute(new[] { parent, child }, new[] { relA });
@@ -229,8 +227,7 @@ public class SqlServerSchemaImporterTests
             SourceEntityId = parent.Id,
             TargetEntityId = child.Id,
             Type = RelationshipType.OneToMany,
-            SourceColumnId = parent.Columns[0].Id,
-            TargetColumnId = child.Columns[1].Id,
+            ColumnPairs = [new(parent.Columns[0].Id, child.Columns[1].Id)],
             OnDelete = ForeignKeyReferentialAction.NoAction,
             OnUpdate = ForeignKeyReferentialAction.NoAction,
         };
@@ -239,8 +236,7 @@ public class SqlServerSchemaImporterTests
             SourceEntityId = parent.Id,
             TargetEntityId = child.Id,
             Type = RelationshipType.OneToMany,
-            SourceColumnId = parent.Columns[0].Id,
-            TargetColumnId = child.Columns[1].Id,
+            ColumnPairs = [new(parent.Columns[0].Id, child.Columns[1].Id)],
             OnDelete = ForeignKeyReferentialAction.Cascade,
             OnUpdate = ForeignKeyReferentialAction.SetNull,
         };

@@ -14,7 +14,7 @@ namespace QuickER.Services;
 ///   <item><c>Table 名前 {</c> 〜 <c>}</c> ブロック（1 行 1 カラム定義）</item>
 ///   <item>カラム設定: <c>pk</c> / <c>ref</c> / <c>unique</c> / <c>null</c> / <c>not null</c> / <c>note: '...'</c>（大文字小文字を区別しない）</item>
 ///   <item><c>Indexes { … }</c> ブロック: <c>unique</c> 設定を持つ索引のみ一意制約として取り込む（<c>(a, b) [unique, name: '…']</c> / 単一列は括弧なしも可）</item>
-///   <item><c>Ref:</c> 行: 多重度記号は <c>-</c>（1対1）/ <c>&lt;</c>（1対多）/ <c>&lt;&gt;</c>（多対多）のみ。<c>&gt;</c>（多対1）は未対応</item>
+///   <item><c>Ref:</c> 行: 多重度記号は <c>-</c>（1対1）/ <c>&lt;</c>（1対多）/ <c>&lt;&gt;</c>（多対多）のみ（<c>&gt;</c>（多対1）は未対応）。エンドポイントは単一列 <c>親.a</c> と複合 Ref 構文 <c>親.(a, b)</c> の双方に対応し、<b>行に書かれた列名がそのまま外部キーの構成列になる</b>（推論しない）</item>
 ///   <item><c>//</c> 行コメント</item>
 /// </list>
 /// Project・Enum・TableGroup・複数行 Note ブロック等の DBML 構文は未対応
@@ -63,6 +63,9 @@ public static partial class DbmlImporter
         var lines = text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
         var entities = new Dictionary<string, Entity>(StringComparer.OrdinalIgnoreCase);
         var relationships = new List<Relationship>();
+        // Ref: 行の列名は、空テーブルへの既定 PK 列補完まで済んだ後にまとめて列ペアへ解決する
+        var pendingRelationshipColumns =
+            new List<(Relationship Relationship, List<string> Source, List<string> Target)>();
         // Indexes ブロックの一意索引は、列定義より前に書かれていても解決できるよう最後にまとめて紐付ける
         var pendingUniqueIndexes = new List<(Entity Entity, string? Name, List<string> Columns)>();
         Entity? currentEntity = null;
@@ -146,7 +149,12 @@ public static partial class DbmlImporter
 
             if (line.StartsWith("Ref:", StringComparison.OrdinalIgnoreCase))
             {
-                relationships.Add(ParseRelationship(line, entities));
+                var (relationship, sourceColumns, targetColumns) = ParseRelationship(
+                    line,
+                    entities
+                );
+                relationships.Add(relationship);
+                pendingRelationshipColumns.Add((relationship, sourceColumns, targetColumns));
                 continue;
             }
         }
@@ -165,7 +173,7 @@ public static partial class DbmlImporter
 
         EnsureEntitiesHaveColumns(entities.Values);
         ResolveUniqueIndexes(pendingUniqueIndexes);
-        ResolveRelationshipColumns(entities, relationships);
+        ResolveRelationshipColumns(entities, pendingRelationshipColumns);
 
         return new ErDiagram { Entities = entities.Values.ToList(), Relationships = relationships };
     }
@@ -351,14 +359,15 @@ public static partial class DbmlImporter
     /// </summary>
     /// <remarks>
     /// 左辺テーブルを親（Source）、右辺テーブルを子（Target）として扱う。
-    /// 行中のカラム名は構文上必須だがここでは使用せず、参照カラムは後段の
-    /// <see cref="ResolveRelationshipColumns"/> が既定ルールで決定する
+    /// 行中のカラム名（単一列 <c>親.a</c> / 複合 <c>親.(a, b)</c>）は外部キーの構成列そのものとして持ち帰り、
+    /// 後段の <see cref="ResolveRelationshipColumns"/> が列ペアへ解決する（推論はしない）
     /// </remarks>
     /// <exception cref="InvalidDataException">構文不一致、または参照先テーブルが未定義の場合</exception>
-    private static Relationship ParseRelationship(
-        string line,
-        IReadOnlyDictionary<string, Entity> entities
-    )
+    private static (
+        Relationship Relationship,
+        List<string> SourceColumns,
+        List<string> TargetColumns
+    ) ParseRelationship(string line, IReadOnlyDictionary<string, Entity> entities)
     {
         var match = RelationshipRegex.Match(line);
 
@@ -390,7 +399,7 @@ public static partial class DbmlImporter
             );
         }
 
-        return new Relationship
+        var relationship = new Relationship
         {
             SourceEntityId = entities[leftTable].Id,
             TargetEntityId = entities[rightTable].Id,
@@ -405,6 +414,33 @@ public static partial class DbmlImporter
             },
             ConstraintName = note,
         };
+
+        return (
+            relationship,
+            ReadEndpointColumns(match, "leftColumns", "leftColumn"),
+            ReadEndpointColumns(match, "rightColumns", "rightColumn")
+        );
+    }
+
+    /// <summary><c>Ref:</c> 行のエンドポイント列名を取り出す（単一列・複合 <c>(a, b)</c> のどちらでも列名一覧を返す）</summary>
+    private static List<string> ReadEndpointColumns(
+        Match match,
+        string listGroupName,
+        string singleGroupName
+    )
+    {
+        if (!match.Groups[listGroupName].Success)
+        {
+            return [match.Groups[singleGroupName].Value];
+        }
+
+        return match
+            .Groups[listGroupName]
+            .Value.Split(
+                ',',
+                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries
+            )
+            .ToList();
     }
 
     /// <summary>
@@ -487,78 +523,75 @@ public static partial class DbmlImporter
     }
 
     /// <summary>
-    /// 各リレーションの参照カラムを既定ルールで補完する
+    /// <c>Ref:</c> 行に書かれた列名を、各リレーションの列ペア（宣言順）へ解決する
     /// </summary>
     /// <remarks>
-    /// 親（Source）側は最初の PK 列（無ければ先頭列）、子（Target）側は
-    /// <see cref="ResolveTargetColumn"/> の優先順位で選び、選んだ列に FK フラグを立てる。
-    /// 多対多はジャンクションテーブル前提のためカラムを割り当てない
+    /// <b>行の列名が正本</b>で推論は行わない（複合外部キーがそのまま往復する）。解決した子列には FK フラグを立てる。
+    /// 多対多はジャンクションテーブル前提のためカラムを割り当てない。
+    /// 両側の列数が食い違う行や、テーブルに存在しない列名を含む行は、その行の列対応だけを捨てて
+    /// リレーション自体は残す（不正な索引行を読み飛ばすのと同じ寛容さ。列ペアなしのリレーションは
+    /// 外部キー句を作らないため、GUI 側で対応付けを補える）
     /// </remarks>
     private static void ResolveRelationshipColumns(
         IReadOnlyDictionary<string, Entity> entities,
-        IEnumerable<Relationship> relationships
+        IEnumerable<(
+            Relationship Relationship,
+            List<string> SourceColumns,
+            List<string> TargetColumns
+        )> pendingRelationshipColumns
     )
     {
-        foreach (var relationship in relationships)
+        foreach (var (relationship, sourceColumns, targetColumns) in pendingRelationshipColumns)
         {
-            var source = entities.Values.First(entity => entity.Id == relationship.SourceEntityId);
-            var target = entities.Values.First(entity => entity.Id == relationship.TargetEntityId);
-
             if (relationship.Type == RelationshipType.ManyToMany)
             {
                 continue;
             }
 
-            var sourceColumn =
-                source.Columns.FirstOrDefault(column => column.IsPrimaryKey)
-                ?? source.Columns.First();
-            relationship.SourceColumnId = sourceColumn.Id;
+            if (sourceColumns.Count == 0 || sourceColumns.Count != targetColumns.Count)
+            {
+                continue;
+            }
 
-            var targetColumn = ResolveTargetColumn(sourceColumn, target);
-            relationship.TargetColumnId = targetColumn.Id;
-            targetColumn.IsForeignKey = true;
+            var source = entities.Values.First(entity => entity.Id == relationship.SourceEntityId);
+            var target = entities.Values.First(entity => entity.Id == relationship.TargetEntityId);
+            var pairs = new List<RelationshipColumnPair>();
+            var foreignKeyColumns = new List<Column>();
+
+            for (var i = 0; i < sourceColumns.Count; i++)
+            {
+                var sourceColumn = FindColumn(source, sourceColumns[i]);
+                var targetColumn = FindColumn(target, targetColumns[i]);
+
+                if (sourceColumn is null || targetColumn is null)
+                {
+                    pairs.Clear();
+                    break;
+                }
+
+                pairs.Add(new RelationshipColumnPair(sourceColumn.Id, targetColumn.Id));
+                foreignKeyColumns.Add(targetColumn);
+            }
+
+            if (pairs.Count == 0)
+            {
+                continue;
+            }
+
+            relationship.ColumnPairs = pairs;
+
+            foreach (var column in foreignKeyColumns)
+            {
+                column.IsForeignKey = true;
+            }
         }
     }
 
-    /// <summary>
-    /// 親の PK に対応する子側の外部キー列を選択する
-    /// </summary>
-    /// <remarks>
-    /// 優先順位: 同名の FK 列 → 同名の列 → PK でない最初の FK 列 → PK でない先頭列 → 先頭列
-    /// </remarks>
-    private static Column ResolveTargetColumn(Column sourcePrimaryKey, Entity target)
-    {
-        var sameNameForeignKey = target.Columns.FirstOrDefault(column =>
-            column.IsForeignKey
-            && string.Equals(column.Name, sourcePrimaryKey.Name, StringComparison.OrdinalIgnoreCase)
+    /// <summary>テーブルの列を名前で検索する（大文字小文字を区別しない）</summary>
+    private static Column? FindColumn(Entity entity, string columnName) =>
+        entity.Columns.FirstOrDefault(column =>
+            string.Equals(column.Name, columnName, StringComparison.OrdinalIgnoreCase)
         );
-
-        if (sameNameForeignKey is not null)
-        {
-            return sameNameForeignKey;
-        }
-
-        var sameName = target.Columns.FirstOrDefault(column =>
-            string.Equals(column.Name, sourcePrimaryKey.Name, StringComparison.OrdinalIgnoreCase)
-        );
-
-        if (sameName is not null)
-        {
-            return sameName;
-        }
-
-        var firstForeignKey = target.Columns.FirstOrDefault(column =>
-            column.IsForeignKey && !column.IsPrimaryKey
-        );
-
-        if (firstForeignKey is not null)
-        {
-            return firstForeignKey;
-        }
-
-        return target.Columns.FirstOrDefault(column => !column.IsPrimaryKey)
-            ?? target.Columns.First();
-    }
 
     /// <summary><c>Table 名前 {</c> 形式のテーブル開始行に一致する正規表現を生成する</summary>
     [GeneratedRegex(
@@ -569,10 +602,11 @@ public static partial class DbmlImporter
 
     /// <summary>
     /// <c>Ref:</c> 行に一致する正規表現を生成する。note は <see cref="DbmlExporter"/> 独自形式に合わせ
-    /// <c>Ref:</c> 直後の <c>[note: '...']</c> のみ受け付ける
+    /// <c>Ref:</c> 直後の <c>[note: '...']</c> のみ受け付ける。エンドポイントは単一列（<c>親.a</c>）と
+    /// 複合 Ref 構文（<c>親.(a, b)</c>）の双方を受け付ける
     /// </summary>
     [GeneratedRegex(
-        @"^Ref:(?:\s*\[note:\s*'(?<note>(?:\\'|[^'])*)'\])?\s*(?<leftTable>\w+)\.(?<leftColumn>\w+)\s*(?<symbol><>|<|-)\s*(?<rightTable>\w+)\.(?<rightColumn>\w+)\s*$",
+        @"^Ref:(?:\s*\[note:\s*'(?<note>(?:\\'|[^'])*)'\])?\s*(?<leftTable>\w+)\.(?:\((?<leftColumns>[^)]*)\)|(?<leftColumn>\w+))\s*(?<symbol><>|<|-)\s*(?<rightTable>\w+)\.(?:\((?<rightColumns>[^)]*)\)|(?<rightColumn>\w+))\s*$",
         RegexOptions.Compiled
     )]
     private static partial Regex RelationshipLineRegex();

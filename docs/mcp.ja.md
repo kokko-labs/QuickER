@@ -42,15 +42,15 @@ stdio トランスポートに対応した MCP クライアントであれば利
 | ツール | 引数 | 説明 |
 |---|---|---|
 | `create_diagram` | `target_dbms` ✅（`sqlserver` / `postgresql` / `mysql` / `oracle` / `sqlite`） | 指定した対象 DBMS の新規の空図ファイルを作成する。ファイルが既に存在する場合は失敗する（このツールは新規作成専用）。親ディレクトリが存在しない場合も失敗する（ディレクトリは作成しない） |
-| `get_diagram_summary` | — | 図のテーブル・カラム・一意制約・リレーションをテキストで一覧する |
+| `get_diagram_summary` | — | 図のテーブル・カラム・一意制約・リレーションをテキストで一覧する。リレーションの各行には列ペアと制約名が付く（`Customer → Order (OneToMany, FK: (CustomerId → CustomerId)) [FK_Order_Customer]`）ため、複合外部キーは構成ペアが宣言順にすべて並ぶ |
 | `add_entity` | `table_name` ✅, `description` | 新しいテーブルを追加する（カラムは作成しない） |
 | `remove_entity` | `table_name` ✅ | テーブルを、接続するリレーションごと削除する |
 | `add_column` | `table_name` ✅, `column_name` ✅, `data_type` ✅, `is_primary_key`, `is_nullable`, `description` | テーブルへカラムを追加する。主キー列は各テーブルにちょうど 1 つにする。ツールは 2 本目を拒否しないが、コード生成器が複合主キーに対応していない |
 | `remove_column` | `table_name` ✅, `column_name` ✅ | テーブルからカラムを削除する。削除カラムを構成列に含む一意制約は制約ごと削除される（残りの列だけの制約へ黙って変質させない） |
 | `set_entity_property` | `table_name` ✅, `new_table_name`, `memo`, `description` | テーブルの名前・メモ・説明を変更する（いずれか 1 つ以上を指定） |
 | `set_column_property` | `table_name` ✅, `column_name` ✅, `description`, `data_type`, `is_nullable` | カラムの説明・データ型・NULL 許容を変更する（いずれか 1 つ以上を指定） |
-| `add_relationship` | `source_table` ✅, `target_table` ✅, `relationship_type` ✅（`OneToOne` / `OneToMany` / `ManyToMany`）, `source_column`, `target_column` | 2 テーブル間に外部キーを追加する。指定できる端点は各側 1 列まで（複合外部キーは非対応）。`source_column` / `target_column` は任意で、省略して推論もできない場合は列の対応付けが未割当のまま保存される |
-| `remove_relationship` | `source_table` ✅, `target_table` ✅ | 2 テーブル間のリレーションを削除する。1 回の呼び出しで削除されるのは 1 件のみで、同じ向きのテーブル対に複数のリレーションがある場合は最初に見つかった 1 件が削除される。列や制約名で対象を絞り込むことはできないため、複数ある場合は繰り返し呼ぶ |
+| `add_relationship` | `source_table` ✅, `target_table` ✅, `relationship_type` ✅（`OneToOne` / `OneToMany` / `ManyToMany`）, `source_columns`, `target_columns` | 2 テーブル間に外部キーを追加する。`source_columns` と `target_columns` は列名の並行配列で、`source_columns` の *i* 番目（親の参照先列）を `target_columns` の *i* 番目（子の外部キー列）が参照する。2 つは同じ長さで、並びがそのまま外部キーの列順になる。各 1 要素なら通常の単一列外部キー、2 要素以上なら複合外部キーになる。片方だけの指定・長さ不一致・存在しない列名・同じ列の重複はエラー。**両方を省略した場合**は、親の主キー列すべてに対して列名から子列を推論してペア化する（GUI のリレーション作成フローと同じ既定解決）。推論できなかった親列はペアに含まれないので、必要なら GUI で補える。多対多は列ペアを持たない（中間テーブルを介する設計を表すため） |
+| `remove_relationship` | `source_table` ✅, `target_table` ✅, `constraint_name` | 2 テーブル間のリレーションを削除する。1 回の呼び出しで削除されるのは 1 件のみ。同じ向きのテーブル対に複数のリレーションがある場合は `constraint_name` で対象を指定する。無指定のときは先頭を黙って削除せず、候補の制約名を挙げてエラーになる（制約名は `get_diagram_summary` でも確認できる） |
 | `set_unique_constraint` | `table_name` ✅, `columns` ✅（列名の配列・宣言順）, `name` | テーブルへ UNIQUE 制約を定義する（upsert）。照合キーは (`table_name`, 列集合) で、同じ列集合の制約があれば再定義し（id は温存・名前と列順は今回の指定に従う）、無ければ追加する。列の順序・大文字小文字は照合にも制約の意味にも影響しない。`name` を省略すると DDL 生成時に `UQ_{テーブル}_{列…}` が合成される。主キーは自身の列の一意性を既に保証するため、主キー列と同じ構成の制約は通常不要 |
 | `remove_unique_constraint` | `table_name` ✅, `columns` ✅ | UNIQUE 制約を削除する。対象は列集合で特定する（順序・大文字小文字は不問）。構成列が完全に一致する制約が無ければ失敗する |
 
@@ -93,7 +93,7 @@ stdio トランスポートに対応した MCP クライアントであれば利
 1. `create_diagram` — `file` = `shop.json`、`target_dbms` = `sqlite`
 2. `add_entity` — `table_name` = `Customer`。続いて `add_column` で `CustomerId`（`data_type` = `integer`、`is_primary_key` = true）と残りのカラムを追加
 3. `add_entity` — `table_name` = `Order`。続いて `add_column` で `OrderId`（主キー）、`CustomerId` などを追加
-4. `add_relationship` — `source_table` = `Customer`、`target_table` = `Order`、`relationship_type` = `OneToMany`、`source_column` = `CustomerId`、`target_column` = `CustomerId`
+4. `add_relationship` — `source_table` = `Customer`、`target_table` = `Order`、`relationship_type` = `OneToMany`、`source_columns` = `["CustomerId"]`、`target_columns` = `["CustomerId"]`
 5. `generate_ddl` — `out_file` = `shop.sql`、あるいは `generate_csharp` — `out_dir` = `./Generated`
 
 途中で現在のテーブル・リレーションを読み返したいときは、`get_diagram_summary` を呼びます。`generate_csharp` の `config` を書く前には、`get_generation_config_schema` を呼んで利用可能なキーと既定値を確認できます。

@@ -190,6 +190,8 @@ public class SchemaDiffServiceTests
             SourceEntityId = customer.Id,
             TargetEntityId = order.Id,
             Type = RelationshipType.OneToMany,
+            // 構成列は列ペアで明示する（命名規約による推測フォールバックは廃止された）
+            ColumnPairs = [new(customer.Columns[0].Id, order.Columns[1].Id)],
         };
 
         var liveCustomer = Tbl("Customer", ("Id", "int", true));
@@ -226,8 +228,7 @@ public class SchemaDiffServiceTests
             SourceEntityId = customerLive.Id,
             TargetEntityId = orderLive.Id,
             Type = RelationshipType.OneToMany,
-            SourceColumnId = customerLive.Columns[0].Id,
-            TargetColumnId = orderLive.Columns[1].Id,
+            ColumnPairs = [new(customerLive.Columns[0].Id, orderLive.Columns[1].Id)],
             ConstraintName = "FK_Order_CustomerId1",
         };
 
@@ -243,8 +244,7 @@ public class SchemaDiffServiceTests
             SourceEntityId = customerTarget.Id,
             TargetEntityId = orderTarget.Id,
             Type = RelationshipType.OneToMany,
-            SourceColumnId = customerTarget.Columns[0].Id,
-            TargetColumnId = orderTarget.Columns[2].Id,
+            ColumnPairs = [new(customerTarget.Columns[0].Id, orderTarget.Columns[2].Id)],
         };
 
         var diff = new SchemaDiffService().Compute(
@@ -276,8 +276,7 @@ public class SchemaDiffServiceTests
             SourceEntityId = parentLive.Id,
             TargetEntityId = childLive.Id,
             Type = RelationshipType.OneToMany,
-            SourceColumnId = parentLive.Columns[0].Id,
-            TargetColumnId = childLive.Columns[1].Id,
+            ColumnPairs = [new(parentLive.Columns[0].Id, childLive.Columns[1].Id)],
             ConstraintName = "FK_Child_Parent",
             OnDelete = ForeignKeyReferentialAction.NoAction,
             OnUpdate = ForeignKeyReferentialAction.NoAction,
@@ -290,8 +289,7 @@ public class SchemaDiffServiceTests
             SourceEntityId = parentTarget.Id,
             TargetEntityId = childTarget.Id,
             Type = RelationshipType.OneToMany,
-            SourceColumnId = parentTarget.Columns[0].Id,
-            TargetColumnId = childTarget.Columns[1].Id,
+            ColumnPairs = [new(parentTarget.Columns[0].Id, childTarget.Columns[1].Id)],
             ConstraintName = "FK_Child_Parent",
             OnDelete = ForeignKeyReferentialAction.Cascade,
             OnUpdate = ForeignKeyReferentialAction.SetNull,
@@ -495,8 +493,7 @@ public class SchemaDiffServiceTests
             SourceEntityId = parentLive.Id,
             TargetEntityId = childLive.Id,
             Type = RelationshipType.OneToMany,
-            SourceColumnId = parentLive.Columns[0].Id,
-            TargetColumnId = childLive.Columns[1].Id,
+            ColumnPairs = [new(parentLive.Columns[0].Id, childLive.Columns[1].Id)],
             ConstraintName = "FK_Child_Parent_0",
         };
 
@@ -508,8 +505,7 @@ public class SchemaDiffServiceTests
             SourceEntityId = parentTarget.Id,
             TargetEntityId = childTarget.Id,
             Type = RelationshipType.OneToMany,
-            SourceColumnId = parentTarget.Columns[0].Id,
-            TargetColumnId = childTarget.Columns[1].Id,
+            ColumnPairs = [new(parentTarget.Columns[0].Id, childTarget.Columns[1].Id)],
             ConstraintName = null,
         };
 
@@ -545,8 +541,7 @@ public class SchemaDiffServiceTests
             SourceEntityId = parentLive.Id,
             TargetEntityId = childLive.Id,
             Type = RelationshipType.OneToMany,
-            SourceColumnId = parentLive.Columns[0].Id,
-            TargetColumnId = childLive.Columns[1].Id,
+            ColumnPairs = [new(parentLive.Columns[0].Id, childLive.Columns[1].Id)],
             ConstraintName = "FK_Old",
         };
 
@@ -557,8 +552,7 @@ public class SchemaDiffServiceTests
             SourceEntityId = parentTarget.Id,
             TargetEntityId = childTarget.Id,
             Type = RelationshipType.OneToMany,
-            SourceColumnId = parentTarget.Columns[0].Id,
-            TargetColumnId = childTarget.Columns[1].Id,
+            ColumnPairs = [new(parentTarget.Columns[0].Id, childTarget.Columns[1].Id)],
             ConstraintName = "FK_New",
         };
 
@@ -1004,25 +998,5 @@ public class SchemaDiffServiceTests
         );
 
         diff.Items.Should().NotContain(i => i.Kind == SchemaDiffKind.AddUniqueConstraint);
-    }
-
-    /// <summary>案内項目への格下げ（ToAdvisory）が一意制約のフィールドも引き継ぐことを検証する</summary>
-    [Fact(DisplayName = "ToAdvisory は一意制約の名前・構成列を引き継ぐ")]
-    public void ToAdvisory_CopiesUniqueConstraintFields()
-    {
-        var item = new SchemaDiffItem
-        {
-            Kind = SchemaDiffKind.DropUniqueConstraint,
-            TableName = "Customer",
-            UniqueConstraintName = "UQ_Legacy",
-            UniqueConstraintColumns = ["Code", "Kind"],
-        };
-
-        var advisory = item.ToAdvisory("blocked");
-
-        advisory.UniqueConstraintName.Should().Be("UQ_Legacy");
-        advisory.UniqueConstraintColumns.Should().Equal("Code", "Kind");
-        advisory.IsSelected.Should().BeFalse();
-        advisory.IsSelectable.Should().BeFalse();
     }
 }

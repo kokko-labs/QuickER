@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Linq;
+using QuickER.Model;
 using QuickER.Resources;
 using QuickER.ViewModels;
 
@@ -7,10 +8,10 @@ namespace QuickER.UndoRedo;
 
 /// <summary>カラムを 1 件削除するコマンド（Undo で元の位置へ復元する）</summary>
 /// <remarks>
-/// 削除カラムを外部キーとして参照するリレーションの SourceColumnId / TargetColumnId を
-/// 削除前にスナップショット保存し Undo 時にカラムと併せて復元する。
-/// 削除カラムを構成列に含む一意制約は「制約ごと削除」し、同じ Undo 単位で位置ごと復元する
-/// （構成列を 1 つ失った制約を黙って別の意味の制約へ変質させないため）
+/// 削除カラムを含むリレーションは「列ペアを全クリア」し（線・種別・制約名は残す）、削除前の列ペアを
+/// スナップショット保存して Undo 時にカラムと併せて復元する。複合外部キーから 1 組だけ抜くと、
+/// 黙って別の意味の外部キー（縮んだキー）へ変質するため。
+/// 削除カラムを構成列に含む一意制約も同じ理由で「制約ごと削除」し、同じ Undo 単位で位置ごと復元する
 /// </remarks>
 public class RemoveColumnCommand : IUndoableCommand
 {
@@ -23,11 +24,10 @@ public class RemoveColumnCommand : IUndoableCommand
     /// <summary>削除前のインデックス（Undo 時の復元位置）</summary>
     private readonly int _index;
 
-    /// <summary>削除前のリレーション FK スナップショット（リレーション VM と参照カラム ID の対）</summary>
+    /// <summary>削除前のリレーション列ペアのスナップショット（リレーション VM と全列ペアの対）</summary>
     private readonly IReadOnlyList<(
         RelationshipViewModel Relationship,
-        Guid? SourceColumnId,
-        Guid? TargetColumnId
+        IReadOnlyList<RelationshipColumnPair> ColumnPairs
     )> _relationshipSnapshots;
 
     /// <summary>巻き添えで削除する一意制約と、その削除前のインデックス（Undo の復元位置）</summary>
@@ -56,9 +56,9 @@ public class RemoveColumnCommand : IUndoableCommand
         _index = entity.Columns.IndexOf(column);
         _afterApply = afterApply;
 
-        // 削除前の SourceColumnId/TargetColumnId をスナップショット保存する
+        // 削除前の列ペアをまるごとスナップショット保存する
         _relationshipSnapshots = affectedRelationships
-            .Select(r => (r, r.SourceColumnId, r.TargetColumnId))
+            .Select(relationship => (relationship, relationship.SnapshotColumnPairs()))
             .ToList();
 
         // 削除カラムを構成列に含む一意制約を、復元位置つきで退避する
@@ -80,6 +80,12 @@ public class RemoveColumnCommand : IUndoableCommand
             _entity.UniqueConstraints.Remove(constraint);
         }
 
+        // 削除カラムを含むリレーションは列ペアを全クリアする（縮んだ外部キーへ変質させない）
+        foreach (var (relationship, _) in _relationshipSnapshots)
+        {
+            relationship.SetColumnPairs([]);
+        }
+
         _entity.Columns.Remove(_column);
         _afterApply();
     }
@@ -96,20 +102,19 @@ public class RemoveColumnCommand : IUndoableCommand
         var insertIndex = Math.Clamp(_index, 0, _entity.Columns.Count);
         _entity.Columns.Insert(insertIndex, _column);
 
-        // カラム復元後、リレーションの FK 設定もスナップショットから復元する
-        foreach (var (rel, sourceColumnId, targetColumnId) in _relationshipSnapshots)
+        // カラム復元後、リレーションの列ペアもスナップショットから復元する
+        foreach (var (relationship, columnPairs) in _relationshipSnapshots)
         {
             // 復元代入が整合性ロジックを誘発しないよう一時的に抑止する
-            rel.SuppressColumnSelectionConsistency = true;
+            relationship.SuppressColumnSelectionConsistency = true;
 
             try
             {
-                rel.SourceColumnId = sourceColumnId;
-                rel.TargetColumnId = targetColumnId;
+                relationship.SetColumnPairs(columnPairs);
             }
             finally
             {
-                rel.SuppressColumnSelectionConsistency = false;
+                relationship.SuppressColumnSelectionConsistency = false;
             }
         }
 

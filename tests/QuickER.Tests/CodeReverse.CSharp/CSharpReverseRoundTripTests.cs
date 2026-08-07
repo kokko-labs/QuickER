@@ -152,8 +152,7 @@ public class CSharpReverseRoundTripTests
                     Type = RelationshipType.OneToMany,
                     SourceEntityId = categoryId,
                     TargetEntityId = productId,
-                    SourceColumnId = categoryPk,
-                    TargetColumnId = product.Columns[1].Id,
+                    ColumnPairs = [new(categoryPk, product.Columns[1].Id)],
                     OnDelete = ForeignKeyReferentialAction.Cascade,
                     ConstraintName = "FK_products_categories",
                 },
@@ -315,8 +314,14 @@ public class CSharpReverseRoundTripTests
                 entityById[relationship.SourceEntityId].TableName,
                 entityById[relationship.TargetEntityId].TableName,
                 relationship.Type,
-                ResolveName(columnNameById, relationship.SourceColumnId),
-                ResolveName(columnNameById, relationship.TargetColumnId)
+                ResolveName(
+                    columnNameById,
+                    relationship.ColumnPairs.FirstOrDefault()?.SourceColumnId
+                ),
+                ResolveName(
+                    columnNameById,
+                    relationship.ColumnPairs.FirstOrDefault()?.TargetColumnId
+                )
             ))
             .ToList();
     }

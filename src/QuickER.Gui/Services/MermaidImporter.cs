@@ -259,10 +259,14 @@ public static partial class MermaidImporter
     }
 
     /// <summary>Mermaid に列情報が無いリレーションの参照列を既定ルールで補完する</summary>
-    /// <remarks>多対多は中間テーブルを介する設計のため列補完の対象外とする</remarks>
+    /// <remarks>
+    /// 補完は「親 PK 全列の自動ペア化」（<see cref="ForeignKeyColumnResolver.ResolveColumnPairs(Entity, Entity, IEnumerable{Relationship})"/>）で、
+    /// GUI の作成フロー・AI ツール（列省略時）と同じ意味論に揃える（単一 PK なら 1 組の列ペア）。
+    /// 引き当てられた子列には FK フラグを立てる。多対多は中間テーブルを介する設計のため列補完の対象外とする
+    /// </remarks>
     private static void ResolveRelationshipColumns(
         IReadOnlyDictionary<string, Entity> entities,
-        IEnumerable<Relationship> relationships
+        IReadOnlyList<Relationship> relationships
     )
     {
         foreach (var relationship in relationships)
@@ -275,51 +279,18 @@ public static partial class MermaidImporter
                 continue;
             }
 
-            var sourceColumn =
-                source.Columns.FirstOrDefault(column => column.IsPrimaryKey)
-                ?? source.Columns.First();
-            relationship.SourceColumnId = sourceColumn.Id;
+            relationship.ColumnPairs = ForeignKeyColumnResolver.ResolveColumnPairs(
+                source,
+                target,
+                relationships
+            );
 
-            var targetColumn = ResolveTargetColumn(sourceColumn, target);
-            relationship.TargetColumnId = targetColumn.Id;
-            targetColumn.IsForeignKey = true;
+            foreach (var pair in relationship.ColumnPairs)
+            {
+                var targetColumn = target.Columns.First(column => column.Id == pair.TargetColumnId);
+                targetColumn.IsForeignKey = true;
+            }
         }
-    }
-
-    /// <summary>参照先テーブルから外部キーとする列を選択する</summary>
-    /// <remarks>同名 FK → 同名列 → 既存 FK 列 → 主キー以外の先頭列の順で優先する</remarks>
-    private static Column ResolveTargetColumn(Column sourcePrimaryKey, Entity target)
-    {
-        var sameNameForeignKey = target.Columns.FirstOrDefault(column =>
-            column.IsForeignKey
-            && string.Equals(column.Name, sourcePrimaryKey.Name, StringComparison.OrdinalIgnoreCase)
-        );
-
-        if (sameNameForeignKey is not null)
-        {
-            return sameNameForeignKey;
-        }
-
-        var sameName = target.Columns.FirstOrDefault(column =>
-            string.Equals(column.Name, sourcePrimaryKey.Name, StringComparison.OrdinalIgnoreCase)
-        );
-
-        if (sameName is not null)
-        {
-            return sameName;
-        }
-
-        var firstForeignKey = target.Columns.FirstOrDefault(column =>
-            column.IsForeignKey && !column.IsPrimaryKey
-        );
-
-        if (firstForeignKey is not null)
-        {
-            return firstForeignKey;
-        }
-
-        return target.Columns.FirstOrDefault(column => !column.IsPrimaryKey)
-            ?? target.Columns.First();
     }
 
     /// <summary>Mermaid 出力で正規化された型名を元の SQL 型名へ復元する</summary>

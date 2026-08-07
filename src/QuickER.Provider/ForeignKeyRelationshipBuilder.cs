@@ -28,9 +28,8 @@ namespace QuickER.Provider;
 /// <see cref="Build"/> は投入順（=最初に各「FK 保有テーブル＋制約名」が出現した順）を保ったリレーション一覧を返す。
 /// </para>
 /// <para>
-/// 複合外部キー（列ペアが 2 組以上）は、意味モデルが単一の列ペアしか表現できないため列対応を失う。
-/// <see cref="Build"/> はその劣化を <see cref="CompositeForeignKeyWarnings"/> へ記録する（リレーション一覧の
-/// 内容自体は従来どおり）。
+/// 複合外部キー（列ペアが 2 組以上）も <see cref="Relationship.ColumnPairs"/> へ全ペアをそのまま載せる
+/// （意味モデルが複数列に対応したため、劣化は起きない）。
 /// </para>
 /// </remarks>
 public sealed class ForeignKeyRelationshipBuilder
@@ -52,18 +51,6 @@ public sealed class ForeignKeyRelationshipBuilder
             ForeignKeyReferentialAction OnUpdate
         )
     > _grouped = new();
-
-    /// <summary>直近の <see cref="Build"/> で検出した複合外部キーの劣化警告（<see cref="Build"/> ごとに作り直す）</summary>
-    private readonly List<CompositeForeignKeyImportWarning> _compositeWarnings = new();
-
-    /// <summary>
-    /// 直近の <see cref="Build"/> で検出した複合外部キー（列ペア 2 組以上）の劣化警告。
-    /// </summary>
-    /// <remarks>
-    /// <see cref="Build"/> を呼ぶ前は空。表示層はこれを取込結果へ載せて利用者へ提示する。
-    /// </remarks>
-    public IReadOnlyList<CompositeForeignKeyImportWarning> CompositeForeignKeyWarnings =>
-        _compositeWarnings;
 
     /// <summary>外部キー構成列を 1 行投入する（同一テーブル・同一 <paramref name="fkName"/> の複合列は複数回呼ぶ）</summary>
     /// <param name="fkName">外部キー制約名（テーブルをまたいだ一意性は保証されない）</param>
@@ -106,21 +93,23 @@ public sealed class ForeignKeyRelationshipBuilder
 
     /// <summary>集約済みの外部キーをリレーション一覧へ変換する</summary>
     /// <param name="tables">テーブルキー → 取込中のテーブルエントリ</param>
-    /// <returns>投入順を保持したリレーション一覧。解決できないテーブル参照はスキップする</returns>
+    /// <returns>
+    /// 投入順を保持したリレーション一覧。テーブル参照・構成列のいずれかを解決できない外部キーはスキップする
+    /// </returns>
     /// <remarks>
     /// <para>
     /// 1 対 1 判定に用いる一意制約は、エンティティに載った <see cref="Entity.UniqueConstraints"/> を参照する。
     /// そのため本メソッドの呼び出し前に <see cref="UniqueConstraintImportBuilder.Attach"/> を済ませておくこと。
     /// </para>
     /// <para>
-    /// 複合外部キーを検出した場合は <see cref="CompositeForeignKeyWarnings"/> へ記録する
-    /// （複数回呼んでも重複しないよう、呼び出しのたびに作り直す）。
+    /// 集約した構成列は全ペアを <see cref="Relationship.ColumnPairs"/> へ宣言順で載せる。1 列でも
+    /// 列 ID を解決できない外部キーは、劣化した定義を作らないようリレーションごとスキップする
+    /// （DDL 生成・差分計算が「列ペアが正本・推測フォールバックなし」で動くのと同じ流儀）。
     /// </para>
     /// </remarks>
     public List<Relationship> Build(IReadOnlyDictionary<string, SchemaTableEntry> tables)
     {
         var rels = new List<Relationship>();
-        _compositeWarnings.Clear();
 
         foreach (var (_, g) in _grouped)
         {
@@ -134,18 +123,12 @@ public sealed class ForeignKeyRelationshipBuilder
                 continue;
             }
 
-            // 複合外部キーは意味モデルが列対応を表現できず単一リレーションへ劣化するため、警告として記録する
-            if (g.ParentCols.Count > 1)
+            // 集約済みの構成列（序数順）をそのまま列ペアへ変換する
+            var columnPairs = ResolveColumnPairs(g.ParentCols, parent, g.RefCols, refer);
+
+            if (columnPairs is null)
             {
-                _compositeWarnings.Add(
-                    new CompositeForeignKeyImportWarning(
-                        g.ConstraintName,
-                        parent.Entity.TableName,
-                        g.ParentCols.ToArray(),
-                        refer.Entity.TableName,
-                        g.RefCols.ToArray()
-                    )
-                );
+                continue;
             }
 
             // FK を構成する子側の列に IsForeignKey フラグを立てる
@@ -177,16 +160,7 @@ public sealed class ForeignKeyRelationshipBuilder
                     SourceEntityId = refer.Entity.Id, // 参照先 (PK 側) を起点として表示
                     TargetEntityId = parent.Entity.Id, // FK 保有テーブル
                     Type = isOneToOne ? RelationshipType.OneToOne : RelationshipType.OneToMany,
-                    SourceColumnId =
-                        g.RefCols.Count == 1
-                        && refer.ColumnsByName.TryGetValue(g.RefCols[0], out var refColumn)
-                            ? refColumn.Id
-                            : null,
-                    TargetColumnId =
-                        g.ParentCols.Count == 1
-                        && parent.ColumnsByName.TryGetValue(g.ParentCols[0], out var parentColumn)
-                            ? parentColumn.Id
-                            : null,
+                    ColumnPairs = columnPairs,
                     ConstraintName = g.ConstraintName,
                     OnDelete = g.OnDelete,
                     OnUpdate = g.OnUpdate,
@@ -195,6 +169,46 @@ public sealed class ForeignKeyRelationshipBuilder
         }
 
         return rels;
+    }
+
+    /// <summary>集約済みの構成列名（序数順）を、列 ID の列ペア一覧へ変換する</summary>
+    /// <param name="childCols">FK 保有テーブル（子）側の構成列名（序数順）</param>
+    /// <param name="child">FK 保有テーブル（子）のエントリ</param>
+    /// <param name="parentCols">参照先テーブル（親）側の構成列名（序数順）</param>
+    /// <param name="parent">参照先テーブル（親）のエントリ</param>
+    /// <returns>
+    /// 全構成列を解決できた場合は列ペア一覧。1 列でも解決できない、または構成列が 0 件なら <c>null</c>
+    /// （＝この外部キーは取り込まない）
+    /// </returns>
+    private static List<RelationshipColumnPair>? ResolveColumnPairs(
+        IReadOnlyList<string> childCols,
+        SchemaTableEntry child,
+        IReadOnlyList<string> parentCols,
+        SchemaTableEntry parent
+    )
+    {
+        // 構成列の対応が取れない（列数不一致・列なし）外部キーは復元できないため取り込まない
+        if (childCols.Count == 0 || childCols.Count != parentCols.Count)
+        {
+            return null;
+        }
+
+        var pairs = new List<RelationshipColumnPair>(childCols.Count);
+
+        for (var i = 0; i < childCols.Count; i++)
+        {
+            if (
+                !parent.ColumnsByName.TryGetValue(parentCols[i], out var parentColumn)
+                || !child.ColumnsByName.TryGetValue(childCols[i], out var childColumn)
+            )
+            {
+                return null;
+            }
+
+            pairs.Add(new RelationshipColumnPair(parentColumn.Id, childColumn.Id));
+        }
+
+        return pairs;
     }
 
     /// <summary>エンティティの一意制約を「大文字小文字無視の昇順に並べた列名配列」の一覧へ展開する</summary>

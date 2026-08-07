@@ -17,9 +17,9 @@ public static class ErDesignRules
     /// <summary>複合主キー禁止の 1 行ルール（ツール説明文などから単独参照する短文）</summary>
     internal static string SinglePrimaryKeyRule => Strings.ErDesign_SinglePrimaryKeyRule;
 
-    /// <summary>複合外部キー禁止の 1 行ルール（ツール説明文などから単独参照する短文）</summary>
-    internal static string SingleColumnForeignKeyRule =>
-        Strings.ErDesign_SingleColumnForeignKeyRule;
+    /// <summary>外部キーの列対応（並行配列・複合可）の 1 行ルール（ツール説明文などから単独参照する短文）</summary>
+    internal static string ForeignKeyColumnMappingRule =>
+        Strings.ErDesign_ForeignKeyColumnMappingRule;
 
     /// <summary>識別子（テーブル名・カラム名）の命名規則の指示行を返す</summary>
     internal static string BuildNamingInstruction(AiIdentifierNamingStyle style) =>
@@ -60,7 +60,7 @@ public static class ErDesignRules
             toolMechanismLabel,
             CommonDesignPrinciples,
             SinglePrimaryKeyRule,
-            SingleColumnForeignKeyRule
+            ForeignKeyColumnMappingRule
         )
         + "\n\n"
         + Strings.ErDesign_ResponseLanguageRule;

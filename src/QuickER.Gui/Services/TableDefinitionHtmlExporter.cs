@@ -312,20 +312,18 @@ public static class TableDefinitionHtmlExporter
                     _entitiesById,
                     relationship.TargetEntityId
                 );
-                var sourceColumn = TableDefinitionContentBuilder.ColumnNameOf(
-                    _entitiesById,
-                    relationship.TargetEntityId,
-                    relationship.TargetColumnId
-                );
                 var targetTable = TableDefinitionContentBuilder.TableNameOf(
                     _entitiesById,
                     relationship.SourceEntityId
                 );
-                var targetColumn = TableDefinitionContentBuilder.ColumnNameOf(
-                    _entitiesById,
-                    relationship.SourceEntityId,
-                    relationship.SourceColumnId
-                );
+
+                // 複合外部キーは 1 行を保ったまま、構成列をカンマ区切りで並べる（Excel 版と同一表記）
+                // 定義書の「参照元列」＝子（Target）側、「参照先列」＝親（Source）側であることに注意
+                var (targetColumn, sourceColumn) =
+                    TableDefinitionContentBuilder.GetRelationshipColumnTexts(
+                        relationship,
+                        _entitiesById
+                    );
 
                 builder.AppendLine("<tr>");
                 builder.AppendLine($"<td>{i + 1}</td>");

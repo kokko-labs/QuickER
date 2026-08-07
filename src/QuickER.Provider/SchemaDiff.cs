@@ -58,15 +58,6 @@ public enum SchemaDiffKind
 
     /// <summary>列の並び順をダイアグラムに合わせて変更する（対応方言のみ・既定では非選択）</summary>
     ReorderColumns,
-
-    /// <summary>
-    /// 同期できない事情を知らせるだけの汎用の案内項目（SQL 生成対象外・常に選択不可）。
-    /// </summary>
-    /// <remarks>
-    /// 種別固有の案内である <see cref="RebuildTable"/>（列順変更）と違い、差分そのものではない注意書き
-    /// （例: 複合外部キーの取込劣化）を一覧へ載せるために表示層が使う。
-    /// </remarks>
-    Advisory,
 }
 
 /// <summary>
@@ -106,6 +97,16 @@ public sealed class SchemaDiffItem : INotifyPropertyChanged
 
     /// <summary>削除する FK 制約の名前 (DropForeignKey のみ)。</summary>
     public string? ForeignKeyName { get; init; }
+
+    /// <summary>
+    /// FK の構成列ペア（親列名・子列名。宣言順。Add/DropForeignKey のみ）。
+    /// </summary>
+    /// <remarks>
+    /// 複合外部キーもそのまま運ぶため、レンダラーはこの一覧をカンマ区切りで並べて
+    /// <c>FOREIGN KEY (…) REFERENCES … (…)</c> を組み立てる。空なら FK 句を作れないためスキップする
+    /// （<see cref="ColumnName"/> は表示・照合の互換のため先頭ペアの子列名が入る）。
+    /// </remarks>
+    public IReadOnlyList<ForeignKeyColumnNamePair> ForeignKeyColumnPairs { get; init; } = [];
 
     /// <summary>
     /// 対象の一意制約名 (Add/DropUniqueConstraint のみ)。
@@ -167,37 +168,6 @@ public sealed class SchemaDiffItem : INotifyPropertyChanged
                 or SchemaDiffKind.DropTable
                 or SchemaDiffKind.DropForeignKey
                 or SchemaDiffKind.DropUniqueConstraint;
-
-    /// <summary>
-    /// この差分を「選択不可の案内項目」へ格下げした複製を返す（説明だけ差し替え、他の内容は保持する）。
-    /// </summary>
-    /// <param name="description">格下げの理由を含む説明文（表示層が自前の resx で整形する）</param>
-    /// <remarks>
-    /// 同期すると壊れると分かっている差分（例: 複合外部キーに関与する外部キー変更）を、実行対象から
-    /// 構造的に外しつつ理由付きで一覧に残すために使う。<see cref="IsSelected"/> は必ず <c>false</c> になり、
-    /// 全選択（<see cref="IsSelectable"/> で絞る）でも選ばれない。
-    /// </remarks>
-    public SchemaDiffItem ToAdvisory(string description) =>
-        new()
-        {
-            Kind = Kind,
-            Description = description,
-            TableName = TableName,
-            ColumnName = ColumnName,
-            Entity = Entity,
-            Column = Column,
-            OldColumn = OldColumn,
-            Relationship = Relationship,
-            ParentEntity = ParentEntity,
-            ChildEntity = ChildEntity,
-            ForeignKeyName = ForeignKeyName,
-            UniqueConstraintName = UniqueConstraintName,
-            UniqueConstraintColumns = UniqueConstraintColumns,
-            NewDescription = NewDescription,
-            OldDescription = OldDescription,
-            IsSelected = false,
-            IsSelectable = false,
-        };
 
     /// <inheritdoc/>
     public event PropertyChangedEventHandler? PropertyChanged;

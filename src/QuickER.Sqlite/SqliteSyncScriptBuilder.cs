@@ -195,9 +195,9 @@ public sealed class SqliteSyncScriptBuilder : SyncScriptBuilderBase
             trailingConstraints.Add(
                 SqliteDdlGenerator.BuildForeignKeyConstraintLine(
                     fk.ConstraintName,
-                    fk.ChildColumn,
+                    fk.ChildColumns,
                     fk.ParentTable,
-                    fk.ParentColumn,
+                    fk.ParentColumns,
                     fk.OnDelete,
                     fk.OnUpdate
                 )

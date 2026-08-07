@@ -134,8 +134,10 @@ public static class MockSchemaSerializer
         var source = ResolveEntity(entitiesById, relationship.SourceEntityId);
         var target = ResolveEntity(entitiesById, relationship.TargetEntityId);
 
-        var sourceColumn = ResolveColumnName(source, relationship.SourceColumnId);
-        var targetColumn = ResolveColumnName(target, relationship.TargetColumnId);
+        // モック生成向けの要約は 1 列表記のため、先頭の列ペアだけを載せる
+        var firstPair = relationship.ColumnPairs.FirstOrDefault();
+        var sourceColumn = ResolveColumnName(source, firstPair?.SourceColumnId);
+        var targetColumn = ResolveColumnName(target, firstPair?.TargetColumnId);
 
         var sourceName = source?.TableName ?? "(unknown)";
         var targetName = target?.TableName ?? "(unknown)";

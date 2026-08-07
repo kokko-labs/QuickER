@@ -133,6 +133,9 @@
   <data name="CodeGen_Warning_RelationshipKeyUnknown" xml:space="preserve">
     <value>リレーション '{0}' はキーが不明なためナビゲーション生成をスキップしました。</value>
   </data>
+  <data name="CodeGen_Warning_RelationshipCompositeSkipped" xml:space="preserve">
+    <value>リレーション '{0}' は複合外部キー（列ペア 2 組以上）がコード生成の対象外のためスキップしました。</value>
+  </data>
   <data name="CodeGen_Warning_ValueObjectDefinitionMismatch" xml:space="preserve">
     <value>値オブジェクト '{0}' に集約される同名列の定義が一致しません。PK 定義優先（無ければ最大定義）で生成しますが、ER 図の定義統一を推奨します: {1}</value>
   </data>

@@ -1,3 +1,4 @@
+using QuickER.Model;
 using QuickER.ViewModels;
 
 namespace QuickER.Services;
@@ -108,6 +109,92 @@ public static class ForeignKeyColumnResolver
         return null;
     }
 
+    /// <summary>親の主キー全列を順に対応付けた既定の列ペア一覧を組み立てる（ViewModel 版）</summary>
+    /// <remarks>
+    /// 親の主キー列を宣言順に辿り、列ごとに命名マッチで子列を引き当てる。引き当てられなかった列はペアに
+    /// 含めず、複数の親列が同じ子列へ寄った場合は後続をペアなしにする（1 つの子列を 2 度使う外部キーは
+    /// 作れないため）。リレーション作成フローと AI ツール（列省略時）の共通正本
+    /// </remarks>
+    public static List<RelationshipColumnPair> ResolveColumnPairs(
+        EntityViewModel source,
+        EntityViewModel target,
+        IEnumerable<RelationshipViewModel> existingRelationships
+    )
+    {
+        var relationships = existingRelationships.ToList();
+        var pairs = new List<RelationshipColumnPair>();
+        var usedTargetColumnIds = new HashSet<Guid>();
+
+        foreach (var sourceKeyColumn in source.Columns.Where(column => column.IsPrimaryKey))
+        {
+            var targetColumn = ResolveTargetColumn(source, target, sourceKeyColumn, relationships);
+
+            if (targetColumn is null || !usedTargetColumnIds.Add(targetColumn.Id))
+            {
+                continue;
+            }
+
+            pairs.Add(new RelationshipColumnPair(sourceKeyColumn.Id, targetColumn.Id));
+        }
+
+        return pairs;
+    }
+
+    /// <summary>親の主キー全列を順に対応付けた既定の列ペア一覧を組み立てる（意味モデル版）</summary>
+    /// <remarks>
+    /// ViewModel 版と同一の意味論。列情報を持たない取込形式（Mermaid）が同じ既定解決を得るために用いる
+    /// </remarks>
+    public static List<RelationshipColumnPair> ResolveColumnPairs(
+        Entity source,
+        Entity target,
+        IEnumerable<Relationship> existingRelationships
+    )
+    {
+        var usedColumnIds = existingRelationships
+            .Where(relationship => relationship.TargetEntityId == target.Id)
+            .SelectMany(relationship => relationship.ColumnPairs)
+            .Select(pair => pair.TargetColumnId)
+            .ToHashSet();
+        var pairs = new List<RelationshipColumnPair>();
+        var usedTargetColumnIds = new HashSet<Guid>();
+
+        foreach (var sourceKeyColumn in source.Columns.Where(column => column.IsPrimaryKey))
+        {
+            var candidates = target
+                .Columns.Select(column => new CandidateColumn(
+                    column.Name,
+                    column.IsPrimaryKey,
+                    column.IsForeignKey,
+                    column.DataType,
+                    usedColumnIds.Contains(column.Id)
+                ))
+                .ToList();
+            var index = ResolveTargetColumnIndex(
+                source.TableName,
+                sourceKeyColumn.Name,
+                sourceKeyColumn.DataType,
+                candidates,
+                source.Id == target.Id
+            );
+
+            if (index is null)
+            {
+                continue;
+            }
+
+            var targetColumn = target.Columns[index.Value];
+
+            if (!usedTargetColumnIds.Add(targetColumn.Id))
+            {
+                continue;
+            }
+
+            pairs.Add(new RelationshipColumnPair(sourceKeyColumn.Id, targetColumn.Id));
+        }
+
+        return pairs;
+    }
+
     /// <summary>参照元キー列を既定（PK 列）として参照先の外部キー列を解決する</summary>
     public static ColumnViewModel? ResolveTargetColumn(
         EntityViewModel source,
@@ -134,8 +221,8 @@ public static class ForeignKeyColumnResolver
     )
     {
         var usedColumnIds = existingRelationships
-            .Where(r => ReferenceEquals(r.Target, target) && r.TargetColumnId is not null)
-            .Select(r => r.TargetColumnId!.Value)
+            .Where(r => ReferenceEquals(r.Target, target))
+            .SelectMany(r => r.ColumnPairs.Select(pair => pair.TargetColumnId))
             .ToHashSet();
 
         var candidates = target

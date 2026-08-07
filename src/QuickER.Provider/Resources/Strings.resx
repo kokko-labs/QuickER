@@ -107,10 +107,7 @@
     <value>Drop table [{0}]</value>
   </data>
   <data name="Diff_AddForeignKey" xml:space="preserve">
-    <value>Add foreign key [{0}].[{1}] → [{2}].[{3}]</value>
-  </data>
-  <data name="Diff_AddForeignKeyNoColumn" xml:space="preserve">
-    <value>Add foreign key [{0}] → [{1}] (note: the FK column is undefined, so the script is skipped)</value>
+    <value>Add foreign key [{0}] ({1}) → [{2}] ({3})</value>
   </data>
   <data name="Diff_DropForeignKey" xml:space="preserve">
     <value>Drop foreign key [{0}] → [{1}]</value>

@@ -228,19 +228,20 @@ public sealed partial class SqliteDdlGenerator : DdlGeneratorBase
     private static string BuildForeignKeyConstraint(ResolvedForeignKey fk) =>
         BuildForeignKeyConstraintLine(
             fk.ConstraintName,
-            fk.FkColumnName,
+            fk.FkColumnNames,
             fk.ParentTableName,
-            fk.PkColumnName,
+            fk.PkColumnNames,
             fk.OnDelete,
             fk.OnUpdate
         );
 
     /// <summary>インライン <c>FOREIGN KEY</c> 制約行を各要素から組み立てる（DDL 生成と同期再構築で共有する）</summary>
+    /// <remarks>構成列は宣言順にカンマ区切りで並べる（単列なら従来と同一の出力）</remarks>
     internal static string BuildForeignKeyConstraintLine(
         string constraintName,
-        string fkColumnName,
+        IReadOnlyList<string> fkColumnNames,
         string parentTableName,
-        string pkColumnName,
+        IReadOnlyList<string> pkColumnNames,
         ForeignKeyReferentialAction onDelete,
         ForeignKeyReferentialAction onUpdate
     )
@@ -249,14 +250,16 @@ public sealed partial class SqliteDdlGenerator : DdlGeneratorBase
             onDelete,
             onUpdate
         );
+        var fkColumnList = string.Join(", ", fkColumnNames.Select(SqliteIdentifier.QuoteSimple));
+        var pkColumnList = string.Join(", ", pkColumnNames.Select(SqliteIdentifier.QuoteSimple));
 
         return $"    CONSTRAINT \"{SqliteIdentifier.Escape(constraintName)}\" "
-            + $"FOREIGN KEY ({SqliteIdentifier.QuoteSimple(fkColumnName)}) "
-            + $"REFERENCES {SqliteIdentifier.Quote(parentTableName)} ({SqliteIdentifier.QuoteSimple(pkColumnName)}){referentialActions}";
+            + $"FOREIGN KEY ({fkColumnList}) "
+            + $"REFERENCES {SqliteIdentifier.Quote(parentTableName)} ({pkColumnList}){referentialActions}";
     }
 
     /// <summary>リレーション一覧を「子テーブル ID → その子が持つ FK 一覧」へ解決する</summary>
-    /// <remarks>基底の FK 解決規則（参照カラムのフォールバック・FK 列名の命名規則）を踏襲する</remarks>
+    /// <remarks>基底と同じ FK 解決規則（列ペアが唯一の正本・推測フォールバックなし）を踏襲する</remarks>
     private static Dictionary<Guid, List<ResolvedForeignKey>> BuildForeignKeyIndex(
         ErDiagram diagram,
         IReadOnlyDictionary<Guid, Entity> entitiesById
@@ -281,26 +284,13 @@ public sealed partial class SqliteDdlGenerator : DdlGeneratorBase
                 continue;
             }
 
-            // 参照カラムが明示されていればそれを優先し、未指定なら親の PK 列にフォールバックする
-            var pkCol = rel.SourceColumnId is not null
-                ? pkEntity.Columns.FirstOrDefault(c => c.Id == rel.SourceColumnId)
-                    ?? pkEntity.Columns.FirstOrDefault(c => c.IsPrimaryKey)
-                : pkEntity.Columns.FirstOrDefault(c => c.IsPrimaryKey);
+            // 列ペアが外部キー定義の唯一の正本（推測フォールバックなし）。
+            // ペアが 0 件、または解決できない列を含むリレーションは FK を生成できないためスキップする
+            var columnPairs = ForeignKeyColumnPairResolver.Resolve(rel, pkEntity, fkEntity);
 
-            // 親側に参照可能な列がなければ FK を生成できないためスキップする
-            if (pkCol is null)
+            if (columnPairs is null)
             {
                 continue;
-            }
-
-            var fkColName = rel.TargetColumnId is not null
-                ? fkEntity.Columns.FirstOrDefault(c => c.Id == rel.TargetColumnId)?.Name
-                : null;
-
-            // 子側カラム未指定時は「親テーブル名_PK列名」を FK カラム名として採用する
-            if (string.IsNullOrWhiteSpace(fkColName))
-            {
-                fkColName = SqliteIdentifier.SafeName(pkEntity.TableName) + "_" + pkCol.Name;
             }
 
             // 制約名はモデルの値を優先し、未設定なら FK_子_親 の命名規則で生成する
@@ -317,9 +307,9 @@ public sealed partial class SqliteDdlGenerator : DdlGeneratorBase
             list.Add(
                 new ResolvedForeignKey(
                     constraintName,
-                    fkColName,
+                    [.. ForeignKeyColumnPairResolver.ChildColumns(columnPairs)],
                     pkEntity.TableName,
-                    pkCol.Name,
+                    [.. ForeignKeyColumnPairResolver.ParentColumns(columnPairs)],
                     rel.OnDelete,
                     rel.OnUpdate
                 )
@@ -331,16 +321,16 @@ public sealed partial class SqliteDdlGenerator : DdlGeneratorBase
 
     /// <summary>DDL 出力用に解決済みの外部キー 1 件</summary>
     /// <param name="ConstraintName">FK 制約名</param>
-    /// <param name="FkColumnName">子テーブル側の外部キー列名</param>
+    /// <param name="FkColumnNames">子テーブル側の外部キー列名（宣言順。複合外部キーは 2 件以上）</param>
     /// <param name="ParentTableName">参照先（親）テーブル名</param>
-    /// <param name="PkColumnName">参照先（親）の被参照列名</param>
+    /// <param name="PkColumnNames">参照先（親）の被参照列名（宣言順。子側と同数・同順）</param>
     /// <param name="OnDelete">親行削除時の参照アクション</param>
     /// <param name="OnUpdate">親キー更新時の参照アクション</param>
     private sealed record ResolvedForeignKey(
         string ConstraintName,
-        string FkColumnName,
+        IReadOnlyList<string> FkColumnNames,
         string ParentTableName,
-        string PkColumnName,
+        IReadOnlyList<string> PkColumnNames,
         ForeignKeyReferentialAction OnDelete,
         ForeignKeyReferentialAction OnUpdate
     );

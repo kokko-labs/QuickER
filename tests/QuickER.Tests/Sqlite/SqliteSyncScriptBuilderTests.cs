@@ -109,9 +109,9 @@ public class SqliteSyncScriptBuilderTests
                     [
                         new TableRebuildForeignKey(
                             "FK_invoice_orders",
-                            "orders_id",
+                            ["orders_id"],
                             "orders",
-                            "id",
+                            ["id"],
                             ForeignKeyReferentialAction.NoAction,
                             ForeignKeyReferentialAction.NoAction
                         ),
@@ -161,9 +161,9 @@ public class SqliteSyncScriptBuilderTests
                     [
                         new TableRebuildForeignKey(
                             "FK_orders_customer",
-                            "customer_id",
+                            ["customer_id"],
                             "customer",
-                            "id",
+                            ["id"],
                             ForeignKeyReferentialAction.Cascade,
                             ForeignKeyReferentialAction.NoAction
                         ),

@@ -64,8 +64,8 @@ Column order is compared as the relative order of the columns common to both sid
 
 - **Destructive differences (drops and type changes) are unselected by default**, and executing them shows a confirmation stating that destructive changes are included
 - The generated script is ordered by dependency (add tables → add columns → drop FKs → drop old primary keys → alter columns → add new primary keys → drop columns → drop tables → add FKs → descriptions), with a heading comment per section
-- A foreign-key addition whose FK column cannot be resolved is emitted as a skip comment instead of invalid DDL, and the diff list says so as well
-- Foreign keys imported from a composite (multi-column) foreign key cannot be represented accurately in the diagram, so their diff items are shown for information only and are not synced. On SQLite, a table rebuild that would silently recreate such a foreign key as a single-column one is skipped with a warning
+- A foreign-key addition whose FK column cannot be resolved is emitted as a skip comment instead of invalid DDL
+- Composite (multi-column) foreign keys are handled as first-class: a relationship holds an ordered list of column pairs, so import, DDL generation, and sync all carry every pair. That includes the implicit drop-and-recreate triggered by a primary-key change and SQLite's table rebuilds — a composite foreign key is never silently narrowed to a single column
 - On SQL Server, PostgreSQL, and SQLite the script runs in a transaction and rolls back on failure. On MySQL / Oracle, DDL is implicitly committed by design, so a warning explains that a mid-script failure can leave changes partially applied
 - A SQLite run that involves rebuilds shows a dedicated confirmation listing the tables to be rebuilt
 - When the initial diff detection finds no differences at all, the dialog reports that and stays open; once a sync has been applied, it re-reads the diff and closes automatically if no differences remain. After a failed run the diff is also re-read automatically, so the list reflects any partially applied changes (relevant on MySQL / Oracle)

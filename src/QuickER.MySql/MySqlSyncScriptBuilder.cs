@@ -228,10 +228,10 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
             return;
         }
 
-        var pkCol = SyncScriptBuilderHelper.ResolveReferencedColumn(item);
+        var columnPairs = SyncScriptBuilderHelper.ResolveColumnPairs(item);
 
-        // 参照先列が特定できない場合は不正な DDL を出さず、コメントでスキップを明示する
-        if (pkCol is null || item.ColumnName is null)
+        // 構成列が特定できない場合は不正な DDL を出さず、コメントでスキップを明示する
+        if (columnPairs.Count == 0)
         {
             sb.AppendLine(
                 // スキップ理由の識別子は生成 SQL の決定性を保つため方言中立・カルチャ非依存にする
@@ -249,10 +249,24 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
         var referentialActions = SyncScriptBuilderHelper.BuildReferentialActionClause(
             item.Relationship
         );
+        // 複合外部キーは構成列を宣言順にカンマ区切りで並べる（単列なら従来と同一の出力）
+        var childColumnList = string.Join(
+            ", ",
+            ForeignKeyColumnPairResolver
+                .ChildColumns(columnPairs)
+                .Select(MySqlIdentifier.QuoteSimple)
+        );
+        var parentColumnList = string.Join(
+            ", ",
+            ForeignKeyColumnPairResolver
+                .ParentColumns(columnPairs)
+                .Select(MySqlIdentifier.QuoteSimple)
+        );
+
         sb.AppendLine(
             $"ALTER TABLE {MySqlIdentifier.Quote(childTbl)} ADD CONSTRAINT `{MySqlIdentifier.Escape(fkName)}` "
-                + $"FOREIGN KEY ({MySqlIdentifier.QuoteSimple(item.ColumnName)}) "
-                + $"REFERENCES {MySqlIdentifier.Quote(parentTbl)} ({MySqlIdentifier.QuoteSimple(pkCol.Name)}){referentialActions};"
+                + $"FOREIGN KEY ({childColumnList}) "
+                + $"REFERENCES {MySqlIdentifier.Quote(parentTbl)} ({parentColumnList}){referentialActions};"
         );
     }
 

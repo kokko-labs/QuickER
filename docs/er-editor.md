@@ -45,7 +45,7 @@ On the canvas, a column that belongs to a constraint is marked `UQ` in the key c
 
 ### Creating
 
-Press "One-to-One," "One-to-Many," or "Many-to-Many" in the toolbox to enter creation mode, then click the two entities in turn to commit it. Clicking the same entity twice creates a self-referencing relationship. On creation, the source PK column and the target FK column are matched automatically, and the constraint name is generated in the form `FK_<target>_<source>`.
+Press "One-to-One," "One-to-Many," or "Many-to-Many" in the toolbox to enter creation mode, then click the two entities in turn to commit it. Clicking the same entity twice creates a self-referencing relationship. On creation, **every primary key column of the source is paired with a matching column on the target**, each looked up by name, and the constraint name is generated in the form `FK_<target>_<source>`. A source column with no matching target column is simply left out of the mapping (fill it in from the properties panel), and no target column is used twice.
 
 If a relationship with the same start and end points already exists, the new one is rejected as a duplicate — select and edit the existing relationship instead. Only the direction that matches is treated as a duplicate, so B → A can still be created when A → B exists.
 
@@ -57,14 +57,13 @@ Select a relationship and the properties panel lets you edit the following.
 |---|---|
 | Type | One-to-one / one-to-many / many-to-many (changeable later) |
 | Constraint Name | The FK constraint name |
-| Referenced Column | The column on the source (referenced) side. Only primary key columns are candidates |
-| Foreign Key Column | The column on the target (FK-holding) side |
+| Key Columns | Rows of column pairs. Each row pairs a referenced column on the source side (primary key columns and unique-constraint columns are the candidates) with a foreign key column on the target side. "+" adds a row, "×" removes one, and a row takes effect once both sides are chosen. Two or more rows make a composite foreign key, and the row order is the column order of the constraint |
 | ON DELETE / ON UPDATE | Referential actions: NoAction / Cascade / SetNull / SetDefault |
 
 Two supplementary notes:
 
 - **Many-to-many does not auto-generate a junction table.** A many-to-many line represents the concept of "a design that goes through a junction table," and the FK column and referential-action settings are disabled for it. To bring it down to a physical design, add the junction table yourself and express it as two one-to-many relationships
-- **A relationship maps a single column pair.** Composite primary keys themselves can be expressed, but one relationship cannot carry a multi-column FK mapping
+- **A relationship holds an ordered list of column pairs.** Composite (multi-column) foreign keys are represented as they are and are preserved through import, DDL generation, and schema sync. Note that C# code generation (navigation properties and EF Core) targets single-column foreign keys only; a composite one is skipped there with a warning
 
 ## Display and navigation
 

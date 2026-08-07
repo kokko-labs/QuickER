@@ -188,8 +188,7 @@ public class SqliteDdlGeneratorTests
                     SourceEntityId = parent.Id,
                     TargetEntityId = child.Id,
                     Type = RelationshipType.OneToMany,
-                    SourceColumnId = parent.Columns[0].Id,
-                    TargetColumnId = child.Columns[1].Id,
+                    ColumnPairs = [new(parent.Columns[0].Id, child.Columns[1].Id)],
                     ConstraintName = "FK_child_parent",
                     OnDelete = ForeignKeyReferentialAction.Cascade,
                     OnUpdate = ForeignKeyReferentialAction.SetNull,
@@ -436,8 +435,7 @@ public class SqliteDdlGeneratorTests
                 SourceEntityId = owner.Id,
                 TargetEntityId = shop.Id,
                 Type = RelationshipType.OneToMany,
-                SourceColumnId = ownerId.Id,
-                TargetColumnId = ownerRef.Id,
+                ColumnPairs = [new(ownerId.Id, ownerRef.Id)],
                 ConstraintName = "FK_shops_owners",
             }
         );

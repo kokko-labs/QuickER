@@ -106,6 +106,12 @@ public static class JsonStorageService
         schema.Relationships = Compact(schema.Relationships);
         schema.Queries = Compact(schema.Queries);
 
+        // 列ペアはリスト自体・要素の双方が null になりうる（旧形式・手書き JSON）ため掃除する
+        foreach (var relationship in schema.Relationships)
+        {
+            relationship.ColumnPairs = Compact(relationship.ColumnPairs);
+        }
+
         foreach (var entity in schema.Entities)
         {
             entity.Columns = Compact(entity.Columns);

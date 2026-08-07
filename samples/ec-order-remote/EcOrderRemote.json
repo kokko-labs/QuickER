@@ -177,8 +177,12 @@
         "SourceEntityId": "e1111111-0000-0000-0000-000000000001",
         "TargetEntityId": "e3333333-0000-0000-0000-000000000001",
         "Type": "OneToMany",
-        "SourceColumnId": "e1111111-0000-0000-0000-000000000002",
-        "TargetColumnId": "e3333333-0000-0000-0000-000000000003",
+        "ColumnPairs": [
+          {
+            "SourceColumnId": "e1111111-0000-0000-0000-000000000002",
+            "TargetColumnId": "e3333333-0000-0000-0000-000000000003"
+          }
+        ],
         "ConstraintName": "FK_orders_customers",
         "OnDelete": "Cascade",
         "OnUpdate": "NoAction"
@@ -188,8 +192,12 @@
         "SourceEntityId": "e3333333-0000-0000-0000-000000000001",
         "TargetEntityId": "e4444444-0000-0000-0000-000000000001",
         "Type": "OneToMany",
-        "SourceColumnId": "e3333333-0000-0000-0000-000000000002",
-        "TargetColumnId": "e4444444-0000-0000-0000-000000000003",
+        "ColumnPairs": [
+          {
+            "SourceColumnId": "e3333333-0000-0000-0000-000000000002",
+            "TargetColumnId": "e4444444-0000-0000-0000-000000000003"
+          }
+        ],
         "ConstraintName": "FK_order_lines_orders",
         "OnDelete": "Cascade",
         "OnUpdate": "NoAction"
@@ -199,8 +207,12 @@
         "SourceEntityId": "e2222222-0000-0000-0000-000000000001",
         "TargetEntityId": "e4444444-0000-0000-0000-000000000001",
         "Type": "OneToMany",
-        "SourceColumnId": "e2222222-0000-0000-0000-000000000002",
-        "TargetColumnId": "e4444444-0000-0000-0000-000000000004",
+        "ColumnPairs": [
+          {
+            "SourceColumnId": "e2222222-0000-0000-0000-000000000002",
+            "TargetColumnId": "e4444444-0000-0000-0000-000000000004"
+          }
+        ],
         "ConstraintName": "FK_order_lines_products",
         "OnDelete": "NoAction",
         "OnUpdate": "NoAction"

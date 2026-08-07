@@ -453,6 +453,12 @@ public static class TableDefinitionDocumentExporter
             {
                 var relationship = orderedRelationships[i];
                 var row = dataStartRow + i;
+                // 複合外部キーは 1 行を保ったまま、構成列をカンマ区切りで並べる
+                var (sourceColumnsText, targetColumnsText) =
+                    TableDefinitionContentBuilder.GetRelationshipColumnTexts(
+                        relationship,
+                        entitiesById
+                    );
 
                 ApplyDataRowStyle(worksheet.Range(row, 1, row, headers.Length));
                 worksheet.Row(row).Height = DefaultRowHeight;
@@ -463,20 +469,12 @@ public static class TableDefinitionDocumentExporter
                     entitiesById,
                     relationship.TargetEntityId
                 );
-                worksheet.Cell(row, 4).Value = TableDefinitionContentBuilder.ColumnNameOf(
-                    entitiesById,
-                    relationship.TargetEntityId,
-                    relationship.TargetColumnId
-                );
+                worksheet.Cell(row, 4).Value = targetColumnsText;
                 worksheet.Cell(row, 5).Value = TableDefinitionContentBuilder.TableNameOf(
                     entitiesById,
                     relationship.SourceEntityId
                 );
-                worksheet.Cell(row, 6).Value = TableDefinitionContentBuilder.ColumnNameOf(
-                    entitiesById,
-                    relationship.SourceEntityId,
-                    relationship.SourceColumnId
-                );
+                worksheet.Cell(row, 6).Value = sourceColumnsText;
                 worksheet.Cell(row, 7).Value =
                     TableDefinitionContentBuilder.GetRelationshipTypeLabel(relationship.Type);
                 worksheet.Cell(row, 8).Value = relationship.OnDelete.ToDisplayText();
