@@ -1009,9 +1009,9 @@ public class ChatConnectionSettingsViewModelTests
         }
     }
 
-    /// <summary>プロバイダ切替で ApiModel がカタログ先頭（OpenAI/Claude）／履歴先頭（ローカル LLM）になることを検証する</summary>
-    [Fact(DisplayName = "プロバイダ切替で ApiModel がカタログ先頭または履歴先頭になる")]
-    public void ApiProviderChanged_SelectsCatalogOrHistoryFirst()
+    /// <summary>プロバイダ切替で ApiModel がカタログ既定（OpenAI/Claude）／履歴先頭（ローカル LLM）になることを検証する</summary>
+    [Fact(DisplayName = "プロバイダ切替で ApiModel がカタログ既定または履歴先頭になる")]
+    public void ApiProviderChanged_SelectsCatalogDefaultOrHistoryFirst()
     {
         var folder = NewFolder();
 
@@ -1025,13 +1025,19 @@ public class ChatConnectionSettingsViewModelTests
             vm.ApiModel = "hist-model";
             vm.RecordSuccessfulModel();
 
-            // Claude へ切替 → カタログ先頭（既定モデル）
+            // Claude へ切替 → カタログ既定（＝先頭ではない。カタログは上位モデルから並ぶ表示順）
             vm.ApiProvider = AiProvider.Claude;
             vm.ApiModel.Should().Be(AiModelCatalog.DefaultClaudeModel);
+            vm.ApiModel.Should()
+                .NotBe(
+                    AiModelCatalog.ClaudeModels[0],
+                    "既定はカタログ先頭ではなく Default* が正本であること（先頭＝最上位モデルを既定にしない）"
+                );
 
-            // OpenAI へ切替 → カタログ先頭（既定モデル）
+            // OpenAI へ切替 → カタログ既定（同上）
             vm.ApiProvider = AiProvider.OpenAI;
             vm.ApiModel.Should().Be(AiModelCatalog.DefaultOpenAiModel);
+            vm.ApiModel.Should().NotBe(AiModelCatalog.OpenAiModels[0]);
 
             // ローカル LLM へ戻すと MRU 先頭が自動選択される
             vm.ApiProvider = AiProvider.LocalLlm;
