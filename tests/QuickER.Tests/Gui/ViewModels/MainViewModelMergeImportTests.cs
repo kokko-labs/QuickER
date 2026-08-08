@@ -149,7 +149,7 @@ public class MainViewModelMergeImportTests : IDisposable
         var vm = CreateViewModel();
         vm.AddEntityCommand.Execute(null);
 
-        // すべて新規 Id のエンティティ（現在図と交差なし）＋親子リレーションでツリー整列を誘発する
+        // すべて新規 Id のエンティティ（現在図と交差なし）＋親子リレーションで全体整列を誘発する
         var parent = new Entity
         {
             TableName = "Parent",
@@ -193,6 +193,13 @@ public class MainViewModelMergeImportTests : IDisposable
             .Distinct()
             .Should()
             .HaveCount(positions.Count, "自動整列で各エンティティが異なる位置に置かれる");
+
+        // 新規作成経路の全体整列は AI 生成直後（AutoArrangeNewDiagram＝格子整列）と同一であること。
+        // 両者は決定的なので、続けて整列し直しても座標は 1 つも動かない
+        vm.AutoArrangeNewDiagram();
+        vm.Entities.Select(entity => (entity.X, entity.Y))
+            .Should()
+            .Equal(positions, "取込の自動整列は AI 生成直後の格子整列と同じでなければならない");
     }
 
     /// <summary>Excel 再取込の実経路で、テーブル・列が一致するクエリが生存する（Guid 引継）</summary>

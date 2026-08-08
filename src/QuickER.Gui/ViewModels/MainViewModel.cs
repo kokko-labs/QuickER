@@ -468,7 +468,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>履歴対象外でダイアグラムを置換し、幅自動調整と必要に応じた自動レイアウトをまとめて適用する</summary>
-    /// <param name="autoLayout"><c>true</c> の場合はリレーション階層に基づくツリー整列を適用する</param>
+    /// <param name="autoLayout">
+    /// <c>true</c> の場合は格子整列（<see cref="AutoLayoutService.LayoutGrid(IList{EntityViewModel},
+    /// IList{RelationshipViewModel}, int)"/>）を適用する。
+    /// 新規作成の全経路（取込・DB 取込・コード取込・AI 生成・配置なし文書の読込）で
+    /// <see cref="AutoArrangeNewDiagram"/> と同じ整列にする
+    /// </param>
     /// <param name="queries">復元する名前付きクエリ定義（省略時は空。配置なし JSON の受け入れで引き継ぐ）</param>
     private void ReplaceDiagramWithoutHistory(
         IEnumerable<Entity> entities,
@@ -485,7 +490,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
             if (autoLayout)
             {
-                AutoLayoutService.LayoutTree(Entities, Relationships);
+                AutoLayoutService.LayoutGrid(Entities, Relationships);
             }
 
             RefreshCanvasSize();
