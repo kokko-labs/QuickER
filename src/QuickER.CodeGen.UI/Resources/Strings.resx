@@ -389,6 +389,9 @@ You can pass this file directly to the CLI as --config.</value>
   <data name="Common_Complete" xml:space="preserve">
     <value>Done</value>
   </data>
+  <data name="Common_MoreItems" xml:space="preserve">
+    <value>…and {0} more</value>
+  </data>
   <data name="Common_Error" xml:space="preserve">
     <value>Error</value>
   </data>

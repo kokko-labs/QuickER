@@ -714,6 +714,12 @@ namespace QuickER.CodeGen.UI.Resources {
             }
         }
 
+        public static string Common_MoreItems {
+            get {
+                return ResourceManager.GetString("Common_MoreItems", resourceCulture);
+            }
+        }
+
         public static string Common_Error {
             get {
                 return ResourceManager.GetString("Common_Error", resourceCulture);

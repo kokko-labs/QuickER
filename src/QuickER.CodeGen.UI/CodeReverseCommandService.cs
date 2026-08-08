@@ -214,9 +214,12 @@ public sealed class CodeReverseCommandService
         return builder.ToString();
     }
 
-    /// <summary>壊れクエリの名前を 1 行 1 件で列挙した文字列へ整形する</summary>
+    /// <summary>壊れクエリの名前を 1 行 1 件で列挙した文字列へ整形する（件数が多いときは上限で畳む）</summary>
     private static string FormatQueryNames(IReadOnlyList<QueryDefinition> queries) =>
-        string.Join(Environment.NewLine, queries.Select(query => "- " + query.Name));
+        DialogItemList.Format(
+            queries.Select(query => "- " + query.Name).ToList(),
+            Strings.Common_MoreItems
+        );
 
     /// <summary>指定スキーマが現在のダイアグラムと構造的に同一かを署名比較で判定する</summary>
     private static bool HasSameStructure(

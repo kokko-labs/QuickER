@@ -76,6 +76,9 @@
   <data name="Common_Complete" xml:space="preserve">
     <value>Done</value>
   </data>
+  <data name="Common_MoreItems" xml:space="preserve">
+    <value>…and {0} more</value>
+  </data>
   <data name="Toolbar_ImportFromDb" xml:space="preserve">
     <value>DB Import</value>
   </data>
@@ -269,6 +272,9 @@ Do you want to run this against {0}?</value>
   </data>
   <data name="SchemaSync_ExecuteSucceeded" xml:space="preserve">
     <value>Success: executed {0} batch(es) and committed.</value>
+  </data>
+  <data name="SchemaSync_ExecuteSucceededStatus" xml:space="preserve">
+    <value>Applied.</value>
   </data>
   <data name="SchemaSync_ExecuteFailedStatus" xml:space="preserve">
     <value>Failed: {0}</value>

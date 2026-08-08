@@ -570,7 +570,7 @@
   <data name="TypeConversion_ColumnLine" xml:space="preserve">
     <value>・{0}.{1} ({2})</value>
   </data>
-  <data name="TypeConversion_MoreItems" xml:space="preserve">
+  <data name="Common_MoreItems" xml:space="preserve">
     <value>…他 {0} 件</value>
   </data>
   <data name="Export_Failed" xml:space="preserve">

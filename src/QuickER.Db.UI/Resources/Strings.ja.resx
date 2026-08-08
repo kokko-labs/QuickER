@@ -76,6 +76,9 @@
   <data name="Common_Complete" xml:space="preserve">
     <value>完了</value>
   </data>
+  <data name="Common_MoreItems" xml:space="preserve">
+    <value>…他 {0} 件</value>
+  </data>
   <data name="Toolbar_ImportFromDb" xml:space="preserve">
     <value>DB取込</value>
   </data>
@@ -269,6 +272,9 @@
   </data>
   <data name="SchemaSync_ExecuteSucceeded" xml:space="preserve">
     <value>成功: {0} バッチを実行し COMMIT しました。</value>
+  </data>
+  <data name="SchemaSync_ExecuteSucceededStatus" xml:space="preserve">
+    <value>適用しました。</value>
   </data>
   <data name="SchemaSync_ExecuteFailedStatus" xml:space="preserve">
     <value>失敗: {0}</value>

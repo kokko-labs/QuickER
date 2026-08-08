@@ -983,9 +983,10 @@ public partial class MainViewModel
                 .Append(Environment.NewLine)
                 .AppendFormat(
                     Strings.Import_BrokenQueriesWarning,
-                    string.Join(
-                        Environment.NewLine,
-                        merged.BrokenQueries.Select(query => "- " + query.Name)
+                    // 件数が多いとダイアログが縦に伸びてボタンが画面外へ出るため、上限で畳む
+                    DialogItemList.Format(
+                        merged.BrokenQueries.Select(query => "- " + query.Name).ToList(),
+                        Strings.Common_MoreItems
                     )
                 );
         }

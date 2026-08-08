@@ -1144,9 +1144,9 @@ namespace QuickER.Resources {
             }
         }
         
-        public static string TypeConversion_MoreItems {
+        public static string Common_MoreItems {
             get {
-                return ResourceManager.GetString("TypeConversion_MoreItems", resourceCulture);
+                return ResourceManager.GetString("Common_MoreItems", resourceCulture);
             }
         }
         

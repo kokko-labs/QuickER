@@ -389,6 +389,9 @@
   <data name="Common_Complete" xml:space="preserve">
     <value>完了</value>
   </data>
+  <data name="Common_MoreItems" xml:space="preserve">
+    <value>…他 {0} 件</value>
+  </data>
   <data name="Common_Error" xml:space="preserve">
     <value>エラー</value>
   </data>

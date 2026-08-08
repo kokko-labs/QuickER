@@ -304,11 +304,13 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
 
             if (result.Committed)
             {
-                StatusMessage = string.Format(
-                    Strings.SchemaSync_ExecuteSucceeded,
-                    result.Batches.Count
+                // ダイアログ内は簡潔な状態表示、モーダルは結果の要約（実行バッチ数）と役割を分ける。
+                // 同じ文字列を 2 箇所へ出すと重複した通知に見えるため、文言を分けて重ねる意味を持たせる
+                StatusMessage = Strings.SchemaSync_ExecuteSucceededStatus;
+                _dialogs.ShowInformation(
+                    string.Format(Strings.SchemaSync_ExecuteSucceeded, result.Batches.Count),
+                    Strings.Common_Complete
                 );
-                _dialogs.ShowInformation(StatusMessage, Strings.Common_Complete);
                 // 適用後の最新状態を反映するため差分を再計算する
                 await RefreshAsync().ConfigureAwait(true);
 

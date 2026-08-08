@@ -1741,34 +1741,24 @@ public partial class MainViewModel : ObservableObject, IDisposable
         RaiseProviderChanged();
     }
 
-    /// <summary>変換できなかったカラムの一覧（本文のみ・導入文は含めない）を整形する（30 件超は省略）</summary>
+    /// <summary>変換できなかったカラムの一覧（本文のみ・導入文は含めない）を整形する（上限超過分は省略）</summary>
     /// <remarks>導入文は呼び出し側が <see cref="Strings.TypeConversion_WarningHeader"/> を message に使う</remarks>
     private static string BuildUnconvertedColumnList(
         IReadOnlyList<ColumnTypeConversion> unconverted
-    )
-    {
-        const int limit = 30;
-        var lines = unconverted
-            .Take(limit)
-            .Select(c =>
-                string.Format(
-                    Strings.TypeConversion_ColumnLine,
-                    c.TableName,
-                    c.ColumnName,
-                    c.OldType
+    ) =>
+        DialogItemList.Format(
+            unconverted
+                .Select(c =>
+                    string.Format(
+                        Strings.TypeConversion_ColumnLine,
+                        c.TableName,
+                        c.ColumnName,
+                        c.OldType
+                    )
                 )
-            );
-        var body = string.Join(Environment.NewLine, lines);
-
-        if (unconverted.Count > limit)
-        {
-            body +=
-                Environment.NewLine
-                + string.Format(Strings.TypeConversion_MoreItems, unconverted.Count - limit);
-        }
-
-        return body;
-    }
+                .ToList(),
+            Strings.Common_MoreItems
+        );
 
     // ---------------- Collection changed handlers ----------------
 
