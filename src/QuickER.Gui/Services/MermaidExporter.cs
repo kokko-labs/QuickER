@@ -52,10 +52,73 @@ public static class MermaidExporter
         return builder.ToString();
     }
 
-    /// <summary>Mermaid 文字列をファイルへ保存する</summary>
-    public static void SaveTo(ErDiagram diagram, string path)
+    /// <summary>Mermaid 文字列をファイルへ保存し、この形式では表現できず落ちた情報の種類を返す</summary>
+    public static IReadOnlyList<ExportOmissionKind> SaveTo(ErDiagram diagram, string path)
     {
         File.WriteAllText(path, Build(diagram), Encoding.UTF8);
+
+        return DetectOmissions(diagram);
+    }
+
+    /// <summary>この形式では表現できないために落ちる情報の種類を、図の実際の中身から判定する</summary>
+    /// <remarks>
+    /// Mermaid の <c>erDiagram</c> は「型・名前・単一キー標識」しか属性行に書けず、説明・NULL 許可・
+    /// 複合制約・外部キーの列対応・参照アクションを表現する構文を持たない（ビュー用の表現形式であり、
+    /// 往復での完全性は DBML・定義書・保存 JSON が担う）。ここではその欠落のうち、
+    /// <b>図に実際に中身が入っているものだけ</b>を返す（説明が空の図で「説明が落ちる」とは言わない）
+    /// </remarks>
+    public static IReadOnlyList<ExportOmissionKind> DetectOmissions(ErDiagram diagram)
+    {
+        var checks = new (bool Detected, ExportOmissionKind Kind)[]
+        {
+            (
+                diagram.Entities.Any(entity => !string.IsNullOrWhiteSpace(entity.Description)),
+                ExportOmissionKind.TableDescription
+            ),
+            (
+                diagram.Entities.Any(entity => !string.IsNullOrWhiteSpace(entity.Memo)),
+                ExportOmissionKind.TableMemo
+            ),
+            (
+                diagram.Entities.Any(entity =>
+                    entity.Columns.Any(column => !string.IsNullOrWhiteSpace(column.Description))
+                ),
+                ExportOmissionKind.ColumnDescription
+            ),
+            (
+                // Mermaid の属性行は NULL 許可を書けず、取込時は全列が NULL 許可になる
+                diagram.Entities.Any(entity => entity.Columns.Any(column => !column.IsNullable)),
+                ExportOmissionKind.ColumnNullability
+            ),
+            (
+                diagram.Entities.Any(entity =>
+                    entity.UniqueConstraints.Any(constraint => constraint.ColumnIds.Count > 1)
+                ),
+                ExportOmissionKind.CompositeUniqueConstraint
+            ),
+            (
+                diagram.Entities.Any(entity =>
+                    entity.UniqueConstraints.Any(constraint =>
+                        !string.IsNullOrWhiteSpace(constraint.Name)
+                    )
+                ),
+                ExportOmissionKind.UniqueConstraintName
+            ),
+            (
+                diagram.Relationships.Any(relationship => relationship.ColumnPairs.Count > 0),
+                ExportOmissionKind.ForeignKeyColumnPairs
+            ),
+            (
+                diagram.Relationships.Any(relationship =>
+                    relationship.OnDelete != ForeignKeyReferentialAction.NoAction
+                    || relationship.OnUpdate != ForeignKeyReferentialAction.NoAction
+                ),
+                ExportOmissionKind.ReferentialAction
+            ),
+            (diagram.Queries.Count > 0, ExportOmissionKind.NamedQuery),
+        };
+
+        return checks.Where(check => check.Detected).Select(check => check.Kind).ToList();
     }
 
     /// <summary>Mermaid の属性型トークン用に DataType を正規化する</summary>

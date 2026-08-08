@@ -26,8 +26,10 @@ Choosing a file from the "Import" button brings the contents into the diagram. D
 Imports DBML consisting of `Table` blocks and `Ref:` lines. The supported syntax is the subset that QuickER's DBML export writes, and both the syntax and the relationships' column mapping round-trip: the column names written on a `Ref:` line are taken as they are, so a relationship comes back connecting exactly the columns the file names.
 
 - Column settings: `pk` / `ref` / `unique` / `null` / `not null` / `note: '...'`
+- Table description: a `Note: '...'` line inside the `Table` block (the standard DBML form, so descriptions are restored from files written by other tools too)
 - Unique constraints: the `unique` column setting (a constraint over that one column) and `unique` indexes in an `Indexes` block (`(col, …) [unique, name: '…']` — composite and named constraints). Indexes that are not `unique` are skipped
 - Relationships: `-` (one-to-one), `<` (one-to-many), and `<>` (many-to-many) on `Ref:` lines. `>` (many-to-one) is not supported. An endpoint can be a single column (`Parent.a`) or the composite Ref syntax (`Parent.(a, b)`), which restores a composite foreign key with its pairs in order. A line whose two endpoints list a different number of columns, or that names a column the table does not have, keeps the relationship but drops its column mapping (it can be completed in the properties panel)
+- Constraint name and referential actions: restored from the settings block right after `Ref:` (`[note: 'FK name', delete: cascade, update: set null]`). DBML's `restrict` has no counterpart in QuickER, so it is imported as `NO ACTION`
 - Not supported: `Project` / `Enum` / `TableGroup` / multi-line `Note` blocks
 
 Tables with no columns get a default PK column (`ID int`). DBML carries no dialect information, so the diagram's target DB stays as it was before the import.
@@ -61,6 +63,10 @@ Outputs the full set of CREATE statements in the diagram's target dialect.
 ### DBML / Mermaid
 
 Writes out the text formats. The DBML output is the same subset as the import above (`Table` blocks + `Ref:` lines), and the written file can be re-imported with the relationships' column mapping intact — including composite foreign keys, which are written with DBML's composite Ref syntax (`Ref: Parent.(a, b) < Child.(x, y)`; single-column foreign keys keep the plain `Parent.a < Child.x` form). Unique constraints are written as the `unique` column setting for unnamed single-column constraints, and as an `Indexes` block (`(col, …) [unique, name: '…']`) for composite and named ones. Mermaid's key column holds a single marker per column, so it is folded to `PK` > `FK` > `UK`, and **`UK` is written only for the columns of single-column constraints** (splitting a composite constraint per column would come back on import as N separate single-column constraints — a different meaning — so composite ones are not written). Useful for working with DBML tools such as dbdiagram.org, and with GitHub and documentation tools that render Mermaid.
+
+DBML also writes table descriptions as `Note:` lines and foreign key referential actions in the settings block of the `Ref:` line (`delete` / `update`; the default `NO ACTION` is not written), so those round-trip as well.
+
+Information the chosen format cannot represent is listed in the completion dialog (once per format per session, so it does not become noise). Mermaid cannot express descriptions, memos, nullability, composite unique constraints, unique constraint names, foreign key column mappings, referential actions, or named queries, so it reports whichever of those the diagram actually contains. For DBML only table memos and named queries are reported (`Note` is used for the description, so carrying a memo would need a non-standard extension — interoperability with other tools was given priority). SQL DDL and the definition documents report nothing, because the only things they drop are the ones that format is not meant to carry.
 
 ### Excel definition documents (.xlsx)
 

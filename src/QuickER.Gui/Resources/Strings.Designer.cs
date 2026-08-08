@@ -1377,6 +1377,72 @@ namespace QuickER.Resources {
                 return ResourceManager.GetString("Export_Completed", resourceCulture);
             }
         }
+
+        public static string Export_OmissionsHeader {
+            get {
+                return ResourceManager.GetString("Export_OmissionsHeader", resourceCulture);
+            }
+        }
+
+        public static string ExportOmission_Line {
+            get {
+                return ResourceManager.GetString("ExportOmission_Line", resourceCulture);
+            }
+        }
+
+        public static string ExportOmission_TableDescription {
+            get {
+                return ResourceManager.GetString("ExportOmission_TableDescription", resourceCulture);
+            }
+        }
+
+        public static string ExportOmission_TableMemo {
+            get {
+                return ResourceManager.GetString("ExportOmission_TableMemo", resourceCulture);
+            }
+        }
+
+        public static string ExportOmission_ColumnDescription {
+            get {
+                return ResourceManager.GetString("ExportOmission_ColumnDescription", resourceCulture);
+            }
+        }
+
+        public static string ExportOmission_ColumnNullability {
+            get {
+                return ResourceManager.GetString("ExportOmission_ColumnNullability", resourceCulture);
+            }
+        }
+
+        public static string ExportOmission_CompositeUniqueConstraint {
+            get {
+                return ResourceManager.GetString("ExportOmission_CompositeUniqueConstraint", resourceCulture);
+            }
+        }
+
+        public static string ExportOmission_UniqueConstraintName {
+            get {
+                return ResourceManager.GetString("ExportOmission_UniqueConstraintName", resourceCulture);
+            }
+        }
+
+        public static string ExportOmission_ForeignKeyColumnPairs {
+            get {
+                return ResourceManager.GetString("ExportOmission_ForeignKeyColumnPairs", resourceCulture);
+            }
+        }
+
+        public static string ExportOmission_ReferentialAction {
+            get {
+                return ResourceManager.GetString("ExportOmission_ReferentialAction", resourceCulture);
+            }
+        }
+
+        public static string ExportOmission_NamedQuery {
+            get {
+                return ResourceManager.GetString("ExportOmission_NamedQuery", resourceCulture);
+            }
+        }
         
         public static string Import_ReplaceConfirm {
             get {

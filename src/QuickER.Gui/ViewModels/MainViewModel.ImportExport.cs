@@ -751,6 +751,9 @@ public partial class MainViewModel
             _ => Strings.Format_File,
         };
 
+        // この形式では表現できず落ちた情報（Mermaid / DBML のみ検出する。他形式は常に空）
+        IReadOnlyList<ExportOmissionKind> omissions = [];
+
         switch (format)
         {
             case DiagramExportFormat.Png:
@@ -775,11 +778,11 @@ public partial class MainViewModel
                 break;
 
             case DiagramExportFormat.Mermaid:
-                MermaidExporter.SaveTo(ToDiagramModel(), path);
+                omissions = MermaidExporter.SaveTo(ToDiagramModel(), path);
                 break;
 
             case DiagramExportFormat.Dbml:
-                DbmlExporter.SaveTo(ToDiagramModel(), path);
+                omissions = DbmlExporter.SaveTo(ToDiagramModel(), path);
                 break;
 
             case DiagramExportFormat.Excel:
@@ -801,11 +804,64 @@ public partial class MainViewModel
                 break;
         }
 
-        _dialogs.ShowInformation(
-            string.Format(Strings.Export_Completed, displayName),
+        NotifyExportCompleted(format, displayName, omissions);
+    }
+
+    /// <summary>出力形式ごとに「落ちる情報の告知」を済ませたかの記録（セッション中 1 回だけ内訳を見せるため）</summary>
+    private readonly HashSet<DiagramExportFormat> _omissionNotifiedFormats = [];
+
+    /// <summary>出力完了を通知する（落ちた情報があれば、その形式で初回のときだけ内訳を添える）</summary>
+    /// <remarks>
+    /// Mermaid は NOT NULL 列がある限りほぼ必ず告知対象になるため、毎回内訳を出すと通知が形骸化する。
+    /// 未対応方言のフォールバック警告（<c>_fallbackWarningShown</c>）と同じく、形式ごとに初回だけ見せる。
+    /// 内訳の提示形式（要約＋詳細）は型変換警告と揃える
+    /// </remarks>
+    private void NotifyExportCompleted(
+        DiagramExportFormat format,
+        string displayName,
+        IReadOnlyList<ExportOmissionKind> omissions
+    )
+    {
+        var completed = string.Format(Strings.Export_Completed, displayName);
+
+        // 落ちた情報が無い、またはこの形式では既に告知済み（Add が false）なら完了文だけを出す
+        if (omissions.Count == 0 || !_omissionNotifiedFormats.Add(format))
+        {
+            _dialogs.ShowInformation(completed, Strings.Common_Complete);
+            return;
+        }
+
+        var details = string.Join(
+            Environment.NewLine,
+            omissions.Select(kind =>
+                string.Format(Strings.ExportOmission_Line, DescribeOmission(kind))
+            )
+        );
+
+        _dialogs.ShowInformationDetails(
+            completed + Environment.NewLine + Environment.NewLine + Strings.Export_OmissionsHeader,
+            details,
             Strings.Common_Complete
         );
     }
+
+    /// <summary>落ちた情報の種類を表示文言へ変換する</summary>
+    private static string DescribeOmission(ExportOmissionKind kind) =>
+        kind switch
+        {
+            ExportOmissionKind.TableDescription => Strings.ExportOmission_TableDescription,
+            ExportOmissionKind.TableMemo => Strings.ExportOmission_TableMemo,
+            ExportOmissionKind.ColumnDescription => Strings.ExportOmission_ColumnDescription,
+            ExportOmissionKind.ColumnNullability => Strings.ExportOmission_ColumnNullability,
+            ExportOmissionKind.CompositeUniqueConstraint =>
+                Strings.ExportOmission_CompositeUniqueConstraint,
+            ExportOmissionKind.UniqueConstraintName => Strings.ExportOmission_UniqueConstraintName,
+            ExportOmissionKind.ForeignKeyColumnPairs =>
+                Strings.ExportOmission_ForeignKeyColumnPairs,
+            ExportOmissionKind.ReferentialAction => Strings.ExportOmission_ReferentialAction,
+            ExportOmissionKind.NamedQuery => Strings.ExportOmission_NamedQuery,
+            _ => kind.ToString(),
+        };
 
     /// <summary>指定形式のダイアグラムファイルを読み込み、確認のうえ現在の図を置換する</summary>
     private void ImportDiagramFile(DiagramImportFormat format, string path)

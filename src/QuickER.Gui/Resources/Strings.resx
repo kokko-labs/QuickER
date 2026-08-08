@@ -602,6 +602,39 @@
   <data name="Export_Completed" xml:space="preserve">
     <value>Export completed: {0}</value>
   </data>
+  <data name="Export_OmissionsHeader" xml:space="preserve">
+    <value>The following information is not preserved in this format:</value>
+  </data>
+  <data name="ExportOmission_Line" xml:space="preserve">
+    <value>• {0}</value>
+  </data>
+  <data name="ExportOmission_TableDescription" xml:space="preserve">
+    <value>Table descriptions</value>
+  </data>
+  <data name="ExportOmission_TableMemo" xml:space="preserve">
+    <value>Table memos</value>
+  </data>
+  <data name="ExportOmission_ColumnDescription" xml:space="preserve">
+    <value>Column descriptions</value>
+  </data>
+  <data name="ExportOmission_ColumnNullability" xml:space="preserve">
+    <value>Nullability of columns</value>
+  </data>
+  <data name="ExportOmission_CompositeUniqueConstraint" xml:space="preserve">
+    <value>Composite unique constraints</value>
+  </data>
+  <data name="ExportOmission_UniqueConstraintName" xml:space="preserve">
+    <value>Unique constraint names</value>
+  </data>
+  <data name="ExportOmission_ForeignKeyColumnPairs" xml:space="preserve">
+    <value>Foreign key column mappings</value>
+  </data>
+  <data name="ExportOmission_ReferentialAction" xml:space="preserve">
+    <value>Referential actions (ON DELETE / ON UPDATE)</value>
+  </data>
+  <data name="ExportOmission_NamedQuery" xml:space="preserve">
+    <value>Named query definitions</value>
+  </data>
   <data name="Import_ReplaceConfirm" xml:space="preserve">
     <value>This will replace the current diagram with the contents of {0}. Are you sure?</value>
   </data>

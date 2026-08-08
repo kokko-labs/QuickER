@@ -612,6 +612,39 @@
   <data name="Export_Completed" xml:space="preserve">
     <value>{0}の出力が完了しました。</value>
   </data>
+  <data name="Export_OmissionsHeader" xml:space="preserve">
+    <value>次の情報はこの形式では保存されません:</value>
+  </data>
+  <data name="ExportOmission_Line" xml:space="preserve">
+    <value>・{0}</value>
+  </data>
+  <data name="ExportOmission_TableDescription" xml:space="preserve">
+    <value>テーブルの説明</value>
+  </data>
+  <data name="ExportOmission_TableMemo" xml:space="preserve">
+    <value>テーブルのメモ</value>
+  </data>
+  <data name="ExportOmission_ColumnDescription" xml:space="preserve">
+    <value>列の説明</value>
+  </data>
+  <data name="ExportOmission_ColumnNullability" xml:space="preserve">
+    <value>列の NULL 許可の指定</value>
+  </data>
+  <data name="ExportOmission_CompositeUniqueConstraint" xml:space="preserve">
+    <value>複合 UNIQUE 制約</value>
+  </data>
+  <data name="ExportOmission_UniqueConstraintName" xml:space="preserve">
+    <value>UNIQUE 制約の名前</value>
+  </data>
+  <data name="ExportOmission_ForeignKeyColumnPairs" xml:space="preserve">
+    <value>外部キーの列対応</value>
+  </data>
+  <data name="ExportOmission_ReferentialAction" xml:space="preserve">
+    <value>参照アクション (ON DELETE / ON UPDATE)</value>
+  </data>
+  <data name="ExportOmission_NamedQuery" xml:space="preserve">
+    <value>名前付きクエリ定義</value>
+  </data>
   <data name="Import_ReplaceConfirm" xml:space="preserve">
     <value>現在のダイアグラムを{0}の内容で置換します。よろしいですか？</value>
   </data>

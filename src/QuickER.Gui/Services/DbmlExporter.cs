@@ -41,6 +41,7 @@ public static class DbmlExporter
             }
 
             AppendIndexesBlock(builder, indexConstraints);
+            AppendTableNote(builder, entity);
             builder.AppendLine("}");
             builder.AppendLine();
         }
@@ -59,11 +60,46 @@ public static class DbmlExporter
     }
 
     /// <summary>
-    /// DBML 文字列を UTF-8 でファイルへ保存する
+    /// DBML 文字列を UTF-8 でファイルへ保存し、この形式では表現できず落ちた情報の種類を返す
     /// </summary>
-    public static void SaveTo(ErDiagram diagram, string path)
+    public static IReadOnlyList<ExportOmissionKind> SaveTo(ErDiagram diagram, string path)
     {
         File.WriteAllText(path, Build(diagram), Encoding.UTF8);
+
+        return DetectOmissions(diagram);
+    }
+
+    /// <summary>この形式では表現できないために落ちる情報の種類を、図の実際の中身から判定する</summary>
+    /// <remarks>
+    /// DBML はテーブル説明（<c>Note:</c>）・列の説明（<c>note</c>）・NULL 許可・一意制約（複合・名前付きとも
+    /// <c>Indexes</c> ブロック）・外部キーの列対応（複合 Ref 構文）・参照アクション（<c>delete</c> / <c>update</c>）を
+    /// すべて表現できる。載せられないのは、<c>Note</c> を説明に使うため独自拡張なしでは書けないテーブルのメモと、
+    /// DBML がそもそも持たない名前付きクエリ定義だけ。
+    /// 中身が実際に入っているときだけ返す（空の説明では告知しない）
+    /// </remarks>
+    public static IReadOnlyList<ExportOmissionKind> DetectOmissions(ErDiagram diagram)
+    {
+        var checks = new (bool Detected, ExportOmissionKind Kind)[]
+        {
+            (
+                diagram.Entities.Any(entity => !string.IsNullOrWhiteSpace(entity.Memo)),
+                ExportOmissionKind.TableMemo
+            ),
+            (diagram.Queries.Count > 0, ExportOmissionKind.NamedQuery),
+        };
+
+        return checks.Where(check => check.Detected).Select(check => check.Kind).ToList();
+    }
+
+    /// <summary>テーブルの説明を DBML 標準の <c>Note:</c> 行として出力する（説明が空なら出さない）</summary>
+    private static void AppendTableNote(StringBuilder builder, Entity entity)
+    {
+        if (string.IsNullOrWhiteSpace(entity.Description))
+        {
+            return;
+        }
+
+        builder.AppendLine($"  Note: '{EscapeNote(entity.Description)}'");
     }
 
     /// <summary>
@@ -215,11 +251,37 @@ public static class DbmlExporter
             RelationshipType.ManyToMany => "<>",
             _ => "<",
         };
-        var note = string.IsNullOrWhiteSpace(relationship.ConstraintName)
-            ? string.Empty
-            : $" [note: '{EscapeNote(relationship.ConstraintName!)}']";
+        var settings = BuildRelationshipSettings(relationship);
 
-        return $"Ref:{note} {source.TableName}.{FormatEndpointColumns(sourceColumnNames)} {symbol} {target.TableName}.{FormatEndpointColumns(targetColumnNames)}";
+        return $"Ref:{settings} {source.TableName}.{FormatEndpointColumns(sourceColumnNames)} {symbol} {target.TableName}.{FormatEndpointColumns(targetColumnNames)}";
+    }
+
+    /// <summary><c>Ref:</c> 行の設定ブロック（制約名・参照アクション）を組み立てる</summary>
+    /// <remarks>
+    /// 既定の参照アクション（<see cref="ForeignKeyReferentialAction.NoAction"/>）は出力しない
+    /// （指定があるものだけを刻む＝生成コードの <c>[NavigationReference]</c> と同じ流儀）。
+    /// アクション値は DBML の慣例に合わせ小文字で書く。設定が 1 つも無ければ空文字を返す
+    /// </remarks>
+    private static string BuildRelationshipSettings(Relationship relationship)
+    {
+        var settings = new List<string>();
+
+        if (!string.IsNullOrWhiteSpace(relationship.ConstraintName))
+        {
+            settings.Add($"note: '{EscapeNote(relationship.ConstraintName!)}'");
+        }
+
+        if (relationship.OnDelete != ForeignKeyReferentialAction.NoAction)
+        {
+            settings.Add($"delete: {relationship.OnDelete.ToSqlText().ToLowerInvariant()}");
+        }
+
+        if (relationship.OnUpdate != ForeignKeyReferentialAction.NoAction)
+        {
+            settings.Add($"update: {relationship.OnUpdate.ToSqlText().ToLowerInvariant()}");
+        }
+
+        return settings.Count == 0 ? string.Empty : $" [{string.Join(", ", settings)}]";
     }
 
     /// <summary><c>Ref:</c> 行のエンドポイント列を表記する（単一列はそのまま・複数列は <c>(a, b)</c>）</summary>
