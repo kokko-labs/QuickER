@@ -143,6 +143,13 @@ public class DbImportCommandServiceTests
             .ContainSingle()
             .Which.TableName.Should()
             .Be("Imported");
+
+        // 外部（DB）からの取込はファイル取込と同水準のため、完了はモーダルで知らせる
+        dialogs
+            .InformationMessages.Should()
+            .ContainSingle()
+            .Which.Should()
+            .Be(DbStrings.Db_ImportCompleted);
     }
 
     /// <summary>取込中の例外は、Db_ImportFailed 文言のエラーダイアログで提示される</summary>

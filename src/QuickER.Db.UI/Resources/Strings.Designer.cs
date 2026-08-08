@@ -90,6 +90,12 @@ namespace QuickER.Db.UI.Resources {
             }
         }
 
+        public static string Common_MoreItems {
+            get {
+                return ResourceManager.GetString("Common_MoreItems", resourceCulture);
+            }
+        }
+
         public static string Toolbar_ImportFromDb {
             get {
                 return ResourceManager.GetString("Toolbar_ImportFromDb", resourceCulture);
@@ -468,6 +474,12 @@ namespace QuickER.Db.UI.Resources {
             }
         }
 
+        public static string SchemaSync_ExecuteSucceededStatus {
+            get {
+                return ResourceManager.GetString("SchemaSync_ExecuteSucceededStatus", resourceCulture);
+            }
+        }
+
         public static string SchemaSync_ExecuteFailedStatus {
             get {
                 return ResourceManager.GetString("SchemaSync_ExecuteFailedStatus", resourceCulture);
@@ -513,6 +525,12 @@ namespace QuickER.Db.UI.Resources {
         public static string Db_ImportFailed {
             get {
                 return ResourceManager.GetString("Db_ImportFailed", resourceCulture);
+            }
+        }
+
+        public static string Db_ImportCompleted {
+            get {
+                return ResourceManager.GetString("Db_ImportCompleted", resourceCulture);
             }
         }
 

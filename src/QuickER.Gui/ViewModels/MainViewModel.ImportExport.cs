@@ -251,7 +251,8 @@ public partial class MainViewModel
         }
 
         // 破損（不正 JSON）・非 DiagramDocument は現状維持し、次の変更イベントで再試行する
-        if (!TryLoadDiagramDocument(CurrentFilePath, out var document) || document is null)
+        // （控えめな一時通知のため、ここでは失敗の原因までは見せない）
+        if (!TryLoadDiagramDocument(CurrentFilePath, out var document, out _) || document is null)
         {
             NotifyStatus(Strings.Status_ExternalReloadFailed);
             return false;
@@ -283,14 +284,25 @@ public partial class MainViewModel
     }
 
     /// <summary>ファイルを DiagramDocument として妥当か検証したうえで読み込む（破損・非文書は false）</summary>
+    /// <param name="path">読み込むファイルのフルパス</param>
+    /// <param name="document">読み込んだ文書（失敗時は null）</param>
+    /// <param name="error">
+    /// 失敗の原因となった例外（IO エラー・不正 JSON）。形式検証で弾いた場合と成功時は null。
+    /// 呼び出し側は「原因を持つ失敗」だけ他の失敗通知と同じく例外メッセージを連結して見せる。
+    /// </param>
     /// <remarks>
     /// <see cref="JsonStorageService.Load"/> は無関係な JSON も「空図」として読めてしまうため、
     /// ルートが JSON オブジェクトで <c>Version</c>・<c>Schema</c> キーを持つことを検証してから読み込む
     /// （<see cref="JsonStorageService"/> の読込仕様に合わせ大文字小文字を区別する）。
     /// </remarks>
-    private static bool TryLoadDiagramDocument(string path, out DiagramDocument? document)
+    private static bool TryLoadDiagramDocument(
+        string path,
+        out DiagramDocument? document,
+        out Exception? error
+    )
     {
         document = null;
+        error = null;
 
         try
         {
@@ -309,9 +321,10 @@ public partial class MainViewModel
             document = JsonStorageService.Load(path);
             return true;
         }
-        catch
+        catch (Exception ex)
         {
-            // IO エラー・不正 JSON は現状維持（呼び出し側が通知する）
+            // IO エラー・不正 JSON は現状維持（呼び出し側が原因付きで通知する）
+            error = ex;
             return false;
         }
     }
@@ -727,16 +740,19 @@ public partial class MainViewModel
     {
         var displayName = format switch
         {
-            DiagramExportFormat.Png => Strings.ExportFormat_Png,
-            DiagramExportFormat.Svg => Strings.ExportFormat_Svg,
-            DiagramExportFormat.Sql => "SQL DDL",
-            DiagramExportFormat.Mermaid => "Mermaid",
-            DiagramExportFormat.Dbml => "DBML",
+            DiagramExportFormat.Png => Strings.Format_Png,
+            DiagramExportFormat.Svg => Strings.Format_Svg,
+            DiagramExportFormat.Sql => Strings.Format_SqlDdl,
+            DiagramExportFormat.Mermaid => Strings.Format_Mermaid,
+            DiagramExportFormat.Dbml => Strings.Format_Dbml,
             DiagramExportFormat.Excel => Strings.Format_DefinitionDocument,
             DiagramExportFormat.Html => Strings.Format_DefinitionDocumentHtml,
-            DiagramExportFormat.SchemaJson => "Schema JSON",
+            DiagramExportFormat.SchemaJson => Strings.Format_SchemaJson,
             _ => Strings.Format_File,
         };
+
+        // この形式では表現できず落ちた情報（Mermaid / DBML のみ検出する。他形式は常に空）
+        IReadOnlyList<ExportOmissionKind> omissions = [];
 
         switch (format)
         {
@@ -762,11 +778,11 @@ public partial class MainViewModel
                 break;
 
             case DiagramExportFormat.Mermaid:
-                MermaidExporter.SaveTo(ToDiagramModel(), path);
+                omissions = MermaidExporter.SaveTo(ToDiagramModel(), path);
                 break;
 
             case DiagramExportFormat.Dbml:
-                DbmlExporter.SaveTo(ToDiagramModel(), path);
+                omissions = DbmlExporter.SaveTo(ToDiagramModel(), path);
                 break;
 
             case DiagramExportFormat.Excel:
@@ -788,11 +804,64 @@ public partial class MainViewModel
                 break;
         }
 
-        _dialogs.ShowInformation(
-            string.Format(Strings.Export_Completed, displayName),
+        NotifyExportCompleted(format, displayName, omissions);
+    }
+
+    /// <summary>出力形式ごとに「落ちる情報の告知」を済ませたかの記録（セッション中 1 回だけ内訳を見せるため）</summary>
+    private readonly HashSet<DiagramExportFormat> _omissionNotifiedFormats = [];
+
+    /// <summary>出力完了を通知する（落ちた情報があれば、その形式で初回のときだけ内訳を添える）</summary>
+    /// <remarks>
+    /// Mermaid は NOT NULL 列がある限りほぼ必ず告知対象になるため、毎回内訳を出すと通知が形骸化する。
+    /// 未対応方言のフォールバック警告（<c>_fallbackWarningShown</c>）と同じく、形式ごとに初回だけ見せる。
+    /// 内訳の提示形式（要約＋詳細）は型変換警告と揃える
+    /// </remarks>
+    private void NotifyExportCompleted(
+        DiagramExportFormat format,
+        string displayName,
+        IReadOnlyList<ExportOmissionKind> omissions
+    )
+    {
+        var completed = string.Format(Strings.Export_Completed, displayName);
+
+        // 落ちた情報が無い、またはこの形式では既に告知済み（Add が false）なら完了文だけを出す
+        if (omissions.Count == 0 || !_omissionNotifiedFormats.Add(format))
+        {
+            _dialogs.ShowInformation(completed, Strings.Common_Complete);
+            return;
+        }
+
+        var details = string.Join(
+            Environment.NewLine,
+            omissions.Select(kind =>
+                string.Format(Strings.ExportOmission_Line, DescribeOmission(kind))
+            )
+        );
+
+        _dialogs.ShowInformationDetails(
+            completed + Environment.NewLine + Environment.NewLine + Strings.Export_OmissionsHeader,
+            details,
             Strings.Common_Complete
         );
     }
+
+    /// <summary>落ちた情報の種類を表示文言へ変換する</summary>
+    private static string DescribeOmission(ExportOmissionKind kind) =>
+        kind switch
+        {
+            ExportOmissionKind.TableDescription => Strings.ExportOmission_TableDescription,
+            ExportOmissionKind.TableMemo => Strings.ExportOmission_TableMemo,
+            ExportOmissionKind.ColumnDescription => Strings.ExportOmission_ColumnDescription,
+            ExportOmissionKind.ColumnNullability => Strings.ExportOmission_ColumnNullability,
+            ExportOmissionKind.CompositeUniqueConstraint =>
+                Strings.ExportOmission_CompositeUniqueConstraint,
+            ExportOmissionKind.UniqueConstraintName => Strings.ExportOmission_UniqueConstraintName,
+            ExportOmissionKind.ForeignKeyColumnPairs =>
+                Strings.ExportOmission_ForeignKeyColumnPairs,
+            ExportOmissionKind.ReferentialAction => Strings.ExportOmission_ReferentialAction,
+            ExportOmissionKind.NamedQuery => Strings.ExportOmission_NamedQuery,
+            _ => kind.ToString(),
+        };
 
     /// <summary>指定形式のダイアグラムファイルを読み込み、確認のうえ現在の図を置換する</summary>
     private void ImportDiagramFile(DiagramImportFormat format, string path)
@@ -802,13 +871,13 @@ public partial class MainViewModel
             DiagramImportFormat.Mermaid => MermaidImporter.Load(path),
             DiagramImportFormat.Dbml => DbmlImporter.Load(path),
             DiagramImportFormat.Excel => TableDefinitionDocumentImporter.Load(path),
-            _ => throw new InvalidOperationException(Strings.Import_UnsupportedFormat),
+            _ => throw new InvalidOperationException(Strings.Import_FormatUndetermined),
         };
 
         var displayName = format switch
         {
-            DiagramImportFormat.Mermaid => "Mermaid",
-            DiagramImportFormat.Dbml => "DBML",
+            DiagramImportFormat.Mermaid => Strings.Format_Mermaid,
+            DiagramImportFormat.Dbml => Strings.Format_Dbml,
             DiagramImportFormat.Excel => Strings.Format_DefinitionDocument,
             _ => Strings.Format_File,
         };
@@ -914,9 +983,10 @@ public partial class MainViewModel
                 .Append(Environment.NewLine)
                 .AppendFormat(
                     Strings.Import_BrokenQueriesWarning,
-                    string.Join(
-                        Environment.NewLine,
-                        merged.BrokenQueries.Select(query => "- " + query.Name)
+                    // 件数が多いとダイアログが縦に伸びてボタンが画面外へ出るため、上限で畳む
+                    DialogItemList.Format(
+                        merged.BrokenQueries.Select(query => "- " + query.Name).ToList(),
+                        Strings.Common_MoreItems
                     )
                 );
         }
@@ -1044,6 +1114,10 @@ public partial class MainViewModel
         {
             JsonStorageService.SaveAtomic(path, ToDocument());
             UpdateDocumentIdentity(path);
+
+            // ER 図ファイル自身の読み書きは、作業を止めないステータスバーの一時通知で知らせる
+            // （外部形式との入出力＝モーダル、との使い分け。ファイル名はタイトルバーに出るため入れない）
+            NotifyStatus(Strings.Status_Saved);
         }
         catch (Exception ex)
         {
@@ -1090,12 +1164,21 @@ public partial class MainViewModel
         }
 
         // 破損 JSON・非 DiagramDocument JSON・IO 失敗は現状維持のうえ通知する
-        if (!TryLoadDiagramDocument(picked.Path, out var document) || document is null)
+        if (
+            !TryLoadDiagramDocument(picked.Path, out var document, out var error)
+            || document is null
+        )
         {
-            _dialogs.ShowError(
-                string.Format(Strings.Open_Failed, picked.Path),
-                Strings.Common_Error
-            );
+            // 原因を持つ失敗（IO エラー・不正 JSON）は他の失敗通知と同じ流儀で例外メッセージを連結する。
+            // 形式検証で弾いた場合は例外が無いため、本文が挙げる原因候補だけを示す
+            var message = string.Format(Strings.Open_Failed, picked.Path);
+
+            if (error is not null)
+            {
+                message += Environment.NewLine + error.Message;
+            }
+
+            _dialogs.ShowError(message, Strings.Common_Error);
             return;
         }
 
@@ -1119,6 +1202,9 @@ public partial class MainViewModel
 
         // 読込したファイルを現在パスとして紐付け、内容ハッシュを記録してクリーン状態にする
         UpdateDocumentIdentity(picked.Path);
+
+        // 保存と同じく ER 図ファイル自身の読み書きなので、ステータスバーの一時通知で知らせる
+        NotifyStatus(Strings.Status_Opened);
     }
 
     /// <summary>読み込んだ文書を現在の図へ反映する（配置なし文書は全体を自動整列する）</summary>

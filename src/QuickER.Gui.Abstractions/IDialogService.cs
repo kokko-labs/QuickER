@@ -2,11 +2,24 @@ namespace QuickER.Gui.Abstractions;
 
 /// <summary>ViewModel からの確認・通知ダイアログ表示を抽象化するインターフェース</summary>
 /// <remarks>
+/// <para>
 /// 単体テストではスタブへ差し替え、UI を表示せずユーザー応答の分岐を検証する。
 /// アイコンの使い分けは「深刻度」ではなく「メッセージ種別」で選ぶ（Windows UX ガイドラインの原則）：
 /// Error＝すでに発生した失敗の報告／Warning＝取り返しのつかない結果を伴う続行確認／
 /// Question＝ルーチンの確認／Information＝完了・案内。
 /// Warning をエラー報告の「和らげ」に使わないこと。
+/// </para>
+/// <para>
+/// 完了通知の<b>提示先</b>は「外部とのやり取りか、ER 図ファイル自身の読み書きか」で選ぶ：
+/// 外部形式の入出力（エクスポート／インポート）・DB 取込・C# コード取込は<b>このダイアログ（モーダル）</b>、
+/// ER 図の保存・開くは<b>メインウィンドウのステータスバー</b>の一時通知（<c>MainViewModel.NotifyStatus</c>）。
+/// 失敗の報告は提示先に依らず常にモーダル。
+/// </para>
+/// <para>
+/// 完了に添える<b>内訳・警告</b>がある場合は、提示先に依らず
+/// <see cref="ShowInformationDetails"/>（モーダルの詳細ダイアログ）で見せる。
+/// 単文の完了に大型ダイアログは出さない（内訳が無ければ <see cref="ShowInformation"/>）。
+/// </para>
 /// </remarks>
 public interface IDialogService
 {

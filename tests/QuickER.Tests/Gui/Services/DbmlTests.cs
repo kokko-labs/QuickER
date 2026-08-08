@@ -3,6 +3,7 @@ using System.IO;
 using System.Linq;
 using AwesomeAssertions;
 using QuickER.Model;
+using QuickER.Resources;
 using QuickER.Services;
 using QuickER.ViewModels;
 
@@ -390,6 +391,265 @@ public class DbmlTests
                         new RelationshipColumnPair(parent.Columns[1].Id, child.Columns[2].Id),
                     ],
                     ConstraintName = "FK_TenantUser_TenantRegion",
+                },
+            ],
+        };
+    }
+
+    /// <summary>行に紐づく解析エラーへ、その行の行番号が前置されることを検証する</summary>
+    [Fact(DisplayName = "DBML 取込の解析エラーに行番号が付く")]
+    public void Import_ParseError_PrefixesLineNumber()
+    {
+        // 3 行目のカラム定義が名前と型の 2 トークンに満たず解析できない
+        var text = string.Join(
+            Environment.NewLine,
+            ["Table Customer {", "  CustomerId int [pk]", "  broken", "}"]
+        );
+
+        var act = () => DbmlImporter.Parse(text);
+
+        act.Should()
+            .Throw<InvalidDataException>()
+            .WithMessage(
+                string.Format(
+                    Strings.Import_LineDiagnostic,
+                    3,
+                    string.Format(Strings.Dbml_ColumnParseError, "Customer", "broken")
+                )
+            );
+    }
+
+    /// <summary>行ループを抜けてから解決する Indexes ブロックの診断が、索引定義行を指すことを検証する</summary>
+    [Fact(DisplayName = "DBML 取込の索引の未定義列は索引定義行を指す")]
+    public void Import_IndexColumnNotFound_PointsToIndexLine()
+    {
+        var text = string.Join(
+            Environment.NewLine,
+            [
+                "Table Customer {",
+                "  CustomerId int [pk]",
+                "",
+                "  Indexes {",
+                "    (Missing) [unique]",
+                "  }",
+                "}",
+            ]
+        );
+
+        var act = () => DbmlImporter.Parse(text);
+
+        act.Should()
+            .Throw<InvalidDataException>()
+            .WithMessage(
+                string.Format(
+                    Strings.Import_LineDiagnostic,
+                    5,
+                    string.Format(Strings.Dbml_IndexColumnNotFound, "Customer", "Missing")
+                )
+            );
+    }
+
+    /// <summary>未閉じブロックの診断が、エラーの判明位置ではなくブロック開始行を指すことを検証する</summary>
+    [Fact(DisplayName = "DBML 取込の未閉じブロックはブロック開始行を指す")]
+    public void Import_MissingClosingBrace_PointsToBlockStartLine()
+    {
+        var text = string.Join(
+            Environment.NewLine,
+            ["// comment", "Table Customer {", "  CustomerId int [pk]"]
+        );
+
+        var act = () => DbmlImporter.Parse(text);
+
+        act.Should()
+            .Throw<InvalidDataException>()
+            .WithMessage(
+                string.Format(
+                    Strings.Import_LineDiagnostic,
+                    2,
+                    string.Format(Strings.Dbml_MissingClosingBrace, "Customer")
+                )
+            );
+    }
+
+    /// <summary>ファイル全体に紐づく診断には（指すべき行が無いため）行番号を付けないことを検証する</summary>
+    [Fact(DisplayName = "DBML 取込のファイル全体の診断には行番号を付けない")]
+    public void Import_WholeFileDiagnostic_HasNoLineNumber()
+    {
+        var act = () => DbmlImporter.Parse("// only a comment");
+
+        act.Should().Throw<InvalidDataException>().WithMessage(Strings.Dbml_NoEntities);
+    }
+
+    /// <summary>テーブルの説明が DBML 標準の <c>Note:</c> 行として往復することを検証する</summary>
+    [Fact(DisplayName = "DBML 往復: テーブルの説明を Note 行で保持する")]
+    public void Export_TableDescription_RoundTrips()
+    {
+        var diagram = BuildOneToManyDiagram(
+            ForeignKeyReferentialAction.NoAction,
+            ForeignKeyReferentialAction.NoAction
+        );
+        diagram.Entities[0].Description = "顧客マスタ";
+
+        var text = DbmlExporter.Build(diagram);
+
+        text.Should().Contain("Note: '顧客マスタ'");
+        DbmlImporter
+            .Parse(text)
+            .Entities.Single(entity => entity.TableName == "Customer")
+            .Description.Should()
+            .Be("顧客マスタ");
+    }
+
+    /// <summary>他ツールが書いた <c>Note:</c> 行をカラム定義として誤って取り込まないことを検証する</summary>
+    [Fact(DisplayName = "DBML 取込: Note 行はカラムとして取り込まない")]
+    public void Import_TableNote_IsNotTreatedAsColumn()
+    {
+        var text = string.Join(
+            Environment.NewLine,
+            [
+                "Table Customer {",
+                "  CustomerId int [pk, not null]",
+                "  Note: 'Stores customers'",
+                "}",
+            ]
+        );
+
+        var entity = DbmlImporter.Parse(text).Entities.Single();
+
+        entity.Columns.Should().ContainSingle().Which.Name.Should().Be("CustomerId");
+        entity.Description.Should().Be("Stores customers");
+    }
+
+    /// <summary>参照アクションが Ref 行の設定ブロックとして往復することを検証する</summary>
+    [Fact(DisplayName = "DBML 往復: 参照アクションを設定ブロックで保持する")]
+    public void Export_ReferentialActions_RoundTrip()
+    {
+        var diagram = BuildOneToManyDiagram(
+            ForeignKeyReferentialAction.Cascade,
+            ForeignKeyReferentialAction.SetNull
+        );
+
+        var text = DbmlExporter.Build(diagram);
+
+        text.Should().Contain("delete: cascade");
+        text.Should().Contain("update: set null");
+
+        var restored = DbmlImporter.Parse(text).Relationships.Single();
+        restored.OnDelete.Should().Be(ForeignKeyReferentialAction.Cascade);
+        restored.OnUpdate.Should().Be(ForeignKeyReferentialAction.SetNull);
+        restored.ConstraintName.Should().Be("FK_Orders_Customer");
+    }
+
+    /// <summary>既定の参照アクション（NO ACTION）は設定ブロックへ書き出さないことを検証する</summary>
+    [Fact(DisplayName = "DBML 出力: 既定の参照アクションは書かない")]
+    public void Export_DefaultReferentialActions_AreOmitted()
+    {
+        var diagram = BuildOneToManyDiagram(
+            ForeignKeyReferentialAction.NoAction,
+            ForeignKeyReferentialAction.NoAction
+        );
+
+        var text = DbmlExporter.Build(diagram);
+
+        text.Should().NotContain("delete:");
+        text.Should().NotContain("update:");
+        text.Should().Contain("[note: 'FK_Orders_Customer']");
+    }
+
+    /// <summary>DBML で表現できないのはテーブルのメモと名前付きクエリだけであることを検証する</summary>
+    [Fact(DisplayName = "DBML の欠落はメモと名前付きクエリだけ")]
+    public void DetectOmissions_ReturnsMemoAndNamedQueryOnly()
+    {
+        var diagram = BuildOneToManyDiagram(
+            ForeignKeyReferentialAction.Cascade,
+            ForeignKeyReferentialAction.SetNull
+        );
+        var customer = diagram.Entities[0];
+        customer.Description = "顧客マスタ";
+        customer.Memo = "打ち合わせメモ";
+        customer.Columns[0].Description = "顧客 ID";
+        customer.UniqueConstraints.Add(
+            new UniqueConstraint { Name = "UQ_Customer", ColumnIds = [customer.Columns[0].Id] }
+        );
+        diagram.Queries.Add(new QueryDefinition { Name = "ById", EntityId = customer.Id });
+
+        DbmlExporter
+            .DetectOmissions(diagram)
+            .Should()
+            .Equal(ExportOmissionKind.TableMemo, ExportOmissionKind.NamedQuery);
+    }
+
+    /// <summary>説明・メモ・クエリを持たない図では欠落を挙げないことを検証する</summary>
+    [Fact(DisplayName = "DBML の欠落は中身が無ければ挙げない")]
+    public void DetectOmissions_IgnoresEmptyContent()
+    {
+        var diagram = BuildOneToManyDiagram(
+            ForeignKeyReferentialAction.NoAction,
+            ForeignKeyReferentialAction.NoAction
+        );
+
+        DbmlExporter.DetectOmissions(diagram).Should().BeEmpty();
+    }
+
+    /// <summary>親 Customer(CustomerId PK) → 子 Orders(OrderId PK / CustomerId FK) の 1 対多図を作る</summary>
+    private static ErDiagram BuildOneToManyDiagram(
+        ForeignKeyReferentialAction onDelete,
+        ForeignKeyReferentialAction onUpdate
+    )
+    {
+        var parent = new Entity
+        {
+            TableName = "Customer",
+            Columns =
+            {
+                new Column
+                {
+                    Name = "CustomerId",
+                    DataType = "int",
+                    IsPrimaryKey = true,
+                    IsNullable = false,
+                },
+            },
+        };
+        var child = new Entity
+        {
+            TableName = "Orders",
+            Columns =
+            {
+                new Column
+                {
+                    Name = "OrderId",
+                    DataType = "int",
+                    IsPrimaryKey = true,
+                    IsNullable = false,
+                },
+                new Column
+                {
+                    Name = "CustomerId",
+                    DataType = "int",
+                    IsForeignKey = true,
+                    IsNullable = false,
+                },
+            },
+        };
+
+        return new ErDiagram
+        {
+            Entities = [parent, child],
+            Relationships =
+            [
+                new Relationship
+                {
+                    SourceEntityId = parent.Id,
+                    TargetEntityId = child.Id,
+                    Type = RelationshipType.OneToMany,
+                    ColumnPairs =
+                    [
+                        new RelationshipColumnPair(parent.Columns[0].Id, child.Columns[1].Id),
+                    ],
+                    ConstraintName = "FK_Orders_Customer",
+                    OnDelete = onDelete,
+                    OnUpdate = onUpdate,
                 },
             ],
         };

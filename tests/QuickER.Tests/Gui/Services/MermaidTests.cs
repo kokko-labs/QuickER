@@ -3,6 +3,7 @@ using System.IO;
 using System.Linq;
 using AwesomeAssertions;
 using QuickER.Model;
+using QuickER.Resources;
 using QuickER.Services;
 using QuickER.ViewModels;
 
@@ -281,5 +282,184 @@ public class MermaidTests
             .Equal(("TenantId", "TenantId"), ("RegionCode", "RegionCode"));
         child.Columns.Single(column => column.Name == "TenantId").IsForeignKey.Should().BeTrue();
         child.Columns.Single(column => column.Name == "RegionCode").IsForeignKey.Should().BeTrue();
+    }
+
+    /// <summary>行に紐づく解析エラーへ、その行の行番号が前置されることを検証する</summary>
+    [Fact(DisplayName = "Mermaid 取込の解析エラーに行番号が付く")]
+    public void Import_ParseError_PrefixesLineNumber()
+    {
+        // 4 行目のカラム定義がトークン 1 つしかなく解析できない
+        var text = string.Join(
+            Environment.NewLine,
+            ["erDiagram", "    Customer {", "        int CustomerId PK", "        broken", "    }"]
+        );
+
+        var act = () => MermaidImporter.Parse(text);
+
+        act.Should()
+            .Throw<InvalidDataException>()
+            .WithMessage(
+                string.Format(
+                    Strings.Import_LineDiagnostic,
+                    4,
+                    string.Format(Strings.Mermaid_ColumnParseError, "Customer", "broken")
+                )
+            );
+    }
+
+    /// <summary>未閉じブロックの診断が、エラーの判明位置ではなくブロック開始行を指すことを検証する</summary>
+    [Fact(DisplayName = "Mermaid 取込の未閉じブロックはブロック開始行を指す")]
+    public void Import_MissingClosingBrace_PointsToBlockStartLine()
+    {
+        var text = string.Join(
+            Environment.NewLine,
+            ["erDiagram", "", "    Customer {", "        int CustomerId PK"]
+        );
+
+        var act = () => MermaidImporter.Parse(text);
+
+        act.Should()
+            .Throw<InvalidDataException>()
+            .WithMessage(
+                string.Format(
+                    Strings.Import_LineDiagnostic,
+                    3,
+                    string.Format(Strings.Mermaid_MissingClosingBrace, "Customer")
+                )
+            );
+    }
+
+    /// <summary>ファイル全体に紐づく診断には（指すべき行が無いため）行番号を付けないことを検証する</summary>
+    [Fact(DisplayName = "Mermaid 取込のファイル全体の診断には行番号を付けない")]
+    public void Import_WholeFileDiagnostic_HasNoLineNumber()
+    {
+        var act = () => MermaidImporter.Parse("erDiagram");
+
+        act.Should().Throw<InvalidDataException>().WithMessage(Strings.Mermaid_NoEntities);
+    }
+
+    /// <summary>Mermaid が表現できない情報を、図の中身に応じてすべて挙げることを検証する</summary>
+    [Fact(DisplayName = "Mermaid の欠落は表現できない情報をすべて挙げる")]
+    public void DetectOmissions_ListsUnsupportedInformation()
+    {
+        var diagram = BuildOmissionDiagram();
+
+        MermaidExporter
+            .DetectOmissions(diagram)
+            .Should()
+            .Equal(
+                ExportOmissionKind.TableDescription,
+                ExportOmissionKind.TableMemo,
+                ExportOmissionKind.ColumnDescription,
+                ExportOmissionKind.ColumnNullability,
+                ExportOmissionKind.CompositeUniqueConstraint,
+                ExportOmissionKind.UniqueConstraintName,
+                ExportOmissionKind.ForeignKeyColumnPairs,
+                ExportOmissionKind.ReferentialAction,
+                ExportOmissionKind.NamedQuery
+            );
+    }
+
+    /// <summary>該当する中身が無ければ（空の説明・全列 NULL 許可など）欠落を挙げないことを検証する</summary>
+    [Fact(DisplayName = "Mermaid の欠落は中身が無ければ挙げない")]
+    public void DetectOmissions_IgnoresEmptyContent()
+    {
+        var diagram = new ErDiagram
+        {
+            Entities =
+            {
+                new Entity
+                {
+                    TableName = "Customer",
+                    Columns =
+                    {
+                        new Column { Name = "Code", DataType = "int" },
+                    },
+                },
+            },
+        };
+
+        MermaidExporter.DetectOmissions(diagram).Should().BeEmpty();
+    }
+
+    /// <summary>Mermaid で落ちる情報を一通り含む図を作る（説明・メモ・複合制約・列ペア・アクション・クエリ）</summary>
+    private static ErDiagram BuildOmissionDiagram()
+    {
+        var parent = new Entity
+        {
+            TableName = "Customer",
+            Description = "顧客マスタ",
+            Memo = "打ち合わせメモ",
+            Columns =
+            {
+                new Column
+                {
+                    Name = "CustomerId",
+                    DataType = "int",
+                    IsPrimaryKey = true,
+                    IsNullable = false,
+                    Description = "顧客 ID",
+                },
+                new Column
+                {
+                    Name = "TenantId",
+                    DataType = "int",
+                    IsNullable = false,
+                },
+            },
+        };
+        parent.UniqueConstraints.Add(
+            new UniqueConstraint
+            {
+                Name = "UQ_Customer_Tenant",
+                ColumnIds = [parent.Columns[0].Id, parent.Columns[1].Id],
+            }
+        );
+
+        var child = new Entity
+        {
+            TableName = "Orders",
+            Columns =
+            {
+                new Column
+                {
+                    Name = "OrderId",
+                    DataType = "int",
+                    IsPrimaryKey = true,
+                    IsNullable = false,
+                },
+                new Column
+                {
+                    Name = "CustomerId",
+                    DataType = "int",
+                    IsForeignKey = true,
+                    IsNullable = false,
+                },
+            },
+        };
+
+        return new ErDiagram
+        {
+            Entities = [parent, child],
+            Relationships =
+            [
+                new Relationship
+                {
+                    SourceEntityId = parent.Id,
+                    TargetEntityId = child.Id,
+                    Type = RelationshipType.OneToMany,
+                    ColumnPairs =
+                    [
+                        new RelationshipColumnPair(parent.Columns[0].Id, child.Columns[1].Id),
+                    ],
+                    ConstraintName = "FK_Orders_Customer",
+                    OnDelete = ForeignKeyReferentialAction.Cascade,
+                },
+            ],
+            Queries =
+            {
+                new QueryDefinition { Name = "ById", EntityId = parent.Id },
+            },
+        };
     }
 }

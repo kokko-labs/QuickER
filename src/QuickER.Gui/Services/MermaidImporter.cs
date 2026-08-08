@@ -34,83 +34,97 @@ public static partial class MermaidImporter
         var entities = new Dictionary<string, Entity>(StringComparer.OrdinalIgnoreCase);
         var relationships = new List<Relationship>();
         Entity? currentEntity = null;
+        // 未閉じブロックの診断はループを抜けてから判明するため、ブロック開始行を覚えておく
+        var currentEntityLineNumber = 0;
         var foundHeader = false;
 
-        foreach (var rawLine in lines)
+        for (var index = 0; index < lines.Length; index++)
         {
-            var line = rawLine.Trim();
+            var lineNumber = index + 1;
+            var line = lines[index].Trim();
 
             if (string.IsNullOrWhiteSpace(line) || line.StartsWith("%%", StringComparison.Ordinal))
             {
                 continue;
             }
 
-            // 最初の有効行は erDiagram ヘッダーでなければならない
-            if (!foundHeader)
+            // 行に紐づく診断は、パーサ内部（カラム・リレーション定義）のものも含めて行番号を前置して投げ直す
+            try
             {
-                if (!string.Equals(line, "erDiagram", StringComparison.Ordinal))
+                // 最初の有効行は erDiagram ヘッダーでなければならない
+                if (!foundHeader)
                 {
-                    throw new InvalidDataException(Strings.Mermaid_MissingHeader);
-                }
+                    if (!string.Equals(line, "erDiagram", StringComparison.Ordinal))
+                    {
+                        throw new InvalidDataException(Strings.Mermaid_MissingHeader);
+                    }
 
-                foundHeader = true;
-                continue;
-            }
-
-            // エンティティブロック内の行はカラム定義、閉じ括弧でブロックを抜ける
-            if (currentEntity is not null)
-            {
-                if (line == "}")
-                {
-                    currentEntity = null;
+                    foundHeader = true;
                     continue;
                 }
 
-                var (column, isUnique) = ParseColumn(line, currentEntity.TableName);
-                currentEntity.Columns.Add(column);
-
-                // UK 標識はその 1 列だけの一意制約を意味する（Mermaid に複合制約の構文が無いため）
-                if (isUnique)
+                // エンティティブロック内の行はカラム定義、閉じ括弧でブロックを抜ける
+                if (currentEntity is not null)
                 {
-                    currentEntity.UniqueConstraints.Add(
-                        new UniqueConstraint { ColumnIds = [column.Id] }
-                    );
+                    if (line == "}")
+                    {
+                        currentEntity = null;
+                        continue;
+                    }
+
+                    var (column, isUnique) = ParseColumn(line, currentEntity.TableName);
+                    currentEntity.Columns.Add(column);
+
+                    // UK 標識はその 1 列だけの一意制約を意味する（Mermaid に複合制約の構文が無いため）
+                    if (isUnique)
+                    {
+                        currentEntity.UniqueConstraints.Add(
+                            new UniqueConstraint { ColumnIds = [column.Id] }
+                        );
+                    }
+
+                    continue;
                 }
 
-                continue;
-            }
+                if (line.EndsWith("{", StringComparison.Ordinal))
+                {
+                    var tableName = line[..^1].Trim();
 
-            if (line.EndsWith("{", StringComparison.Ordinal))
+                    if (string.IsNullOrWhiteSpace(tableName))
+                    {
+                        throw new InvalidDataException(Strings.Mermaid_MissingEntityName);
+                    }
+
+                    if (!entities.TryAdd(tableName, new Entity { TableName = tableName }))
+                    {
+                        throw new InvalidDataException(
+                            string.Format(Strings.Mermaid_DuplicateEntity, tableName)
+                        );
+                    }
+
+                    currentEntity = entities[tableName];
+                    currentEntityLineNumber = lineNumber;
+                    continue;
+                }
+
+                relationships.Add(ParseRelationship(line, entities));
+            }
+            catch (InvalidDataException ex)
             {
-                var tableName = line[..^1].Trim();
-
-                if (string.IsNullOrWhiteSpace(tableName))
-                {
-                    throw new InvalidDataException(Strings.Mermaid_MissingEntityName);
-                }
-
-                if (!entities.TryAdd(tableName, new Entity { TableName = tableName }))
-                {
-                    throw new InvalidDataException(
-                        string.Format(Strings.Mermaid_DuplicateEntity, tableName)
-                    );
-                }
-
-                currentEntity = entities[tableName];
-                continue;
+                throw ImportDiagnostics.AtLine(lineNumber, ex);
             }
-
-            relationships.Add(ParseRelationship(line, entities));
         }
 
+        // 有効行が 1 行も無い（コメントのみ等）＝ヘッダーが無いのと同じ。指すべき行が無いため行番号は付けない
         if (!foundHeader)
         {
-            throw new InvalidDataException(Strings.Mermaid_HeaderNotFound);
+            throw new InvalidDataException(Strings.Mermaid_MissingHeader);
         }
 
         if (currentEntity is not null)
         {
-            throw new InvalidDataException(
+            throw ImportDiagnostics.AtLine(
+                currentEntityLineNumber,
                 string.Format(Strings.Mermaid_MissingClosingBrace, currentEntity.TableName)
             );
         }

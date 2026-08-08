@@ -389,6 +389,9 @@ You can pass this file directly to the CLI as --config.</value>
   <data name="Common_Complete" xml:space="preserve">
     <value>Done</value>
   </data>
+  <data name="Common_MoreItems" xml:space="preserve">
+    <value>…and {0} more</value>
+  </data>
   <data name="Common_Error" xml:space="preserve">
     <value>Error</value>
   </data>
@@ -416,6 +419,9 @@ You can pass this file directly to the CLI as --config.</value>
   </data>
   <data name="Reverse_Failed" xml:space="preserve">
     <value>Failed to import from code: {0}</value>
+  </data>
+  <data name="Reverse_ImportCompleted" xml:space="preserve">
+    <value>Import completed: C# code</value>
   </data>
   <data name="Toolbar_GenerateCSharp" xml:space="preserve">
     <value>Generate Code</value>

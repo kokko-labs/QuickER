@@ -714,6 +714,12 @@ namespace QuickER.CodeGen.UI.Resources {
             }
         }
 
+        public static string Common_MoreItems {
+            get {
+                return ResourceManager.GetString("Common_MoreItems", resourceCulture);
+            }
+        }
+
         public static string Common_Error {
             get {
                 return ResourceManager.GetString("Common_Error", resourceCulture);
@@ -837,6 +843,12 @@ namespace QuickER.CodeGen.UI.Resources {
         public static string Reverse_Failed {
             get {
                 return ResourceManager.GetString("Reverse_Failed", resourceCulture);
+            }
+        }
+
+        public static string Reverse_ImportCompleted {
+            get {
+                return ResourceManager.GetString("Reverse_ImportCompleted", resourceCulture);
             }
         }
     }

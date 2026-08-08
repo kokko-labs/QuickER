@@ -95,6 +95,10 @@ public sealed class DbImportCommandService
                 Queries = merged.SurvivingQueries.ToList(),
             };
             _host.ReplaceDiagram(diagram);
+
+            // 外部（DB）からの取込はファイル取込と同水準の出来事なので、完了もモーダルで知らせる
+            // （ER 図ファイル自身の保存・開くはステータスバー、との使い分け）
+            _dialogs.ShowInformation(Strings.Db_ImportCompleted, Strings.Common_Complete);
         }
         catch (Exception ex)
         {
@@ -171,9 +175,12 @@ public sealed class DbImportCommandService
         return builder.ToString();
     }
 
-    /// <summary>壊れクエリの名前を 1 行 1 件で列挙した文字列へ整形する</summary>
+    /// <summary>壊れクエリの名前を 1 行 1 件で列挙した文字列へ整形する（件数が多いときは上限で畳む）</summary>
     private static string FormatQueryNames(IReadOnlyList<QueryDefinition> queries) =>
-        string.Join(Environment.NewLine, queries.Select(query => "- " + query.Name));
+        DialogItemList.Format(
+            queries.Select(query => "- " + query.Name).ToList(),
+            Strings.Common_MoreItems
+        );
 
     /// <summary>指定スキーマが現在のダイアグラムと構造的に同一かを署名比較で判定する</summary>
     /// <remarks>ファイル取込で使う <c>MainViewModel.HasSameStructure</c> と同一の <see cref="SchemaSignature"/> 比較</remarks>

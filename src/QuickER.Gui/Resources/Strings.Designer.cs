@@ -445,6 +445,18 @@ namespace QuickER.Resources {
             }
         }
 
+        public static string Status_Saved {
+            get {
+                return ResourceManager.GetString("Status_Saved", resourceCulture);
+            }
+        }
+
+        public static string Status_Opened {
+            get {
+                return ResourceManager.GetString("Status_Opened", resourceCulture);
+            }
+        }
+
         public static string Status_ExternalReloaded {
             get {
                 return ResourceManager.GetString("Status_ExternalReloaded", resourceCulture);
@@ -1132,9 +1144,9 @@ namespace QuickER.Resources {
             }
         }
         
-        public static string TypeConversion_MoreItems {
+        public static string Common_MoreItems {
             get {
-                return ResourceManager.GetString("TypeConversion_MoreItems", resourceCulture);
+                return ResourceManager.GetString("Common_MoreItems", resourceCulture);
             }
         }
         
@@ -1168,21 +1180,45 @@ namespace QuickER.Resources {
             }
         }
         
-        public static string ExportFormat_Png {
+        public static string Format_Png {
             get {
-                return ResourceManager.GetString("ExportFormat_Png", resourceCulture);
+                return ResourceManager.GetString("Format_Png", resourceCulture);
             }
         }
         
-        public static string ExportFormat_Svg {
+        public static string Format_Svg {
             get {
-                return ResourceManager.GetString("ExportFormat_Svg", resourceCulture);
+                return ResourceManager.GetString("Format_Svg", resourceCulture);
             }
         }
         
         public static string Format_DefinitionDocument {
             get {
                 return ResourceManager.GetString("Format_DefinitionDocument", resourceCulture);
+            }
+        }
+
+        public static string Format_SqlDdl {
+            get {
+                return ResourceManager.GetString("Format_SqlDdl", resourceCulture);
+            }
+        }
+
+        public static string Format_Mermaid {
+            get {
+                return ResourceManager.GetString("Format_Mermaid", resourceCulture);
+            }
+        }
+
+        public static string Format_Dbml {
+            get {
+                return ResourceManager.GetString("Format_Dbml", resourceCulture);
+            }
+        }
+
+        public static string Format_SchemaJson {
+            get {
+                return ResourceManager.GetString("Format_SchemaJson", resourceCulture);
             }
         }
 
@@ -1353,10 +1389,70 @@ namespace QuickER.Resources {
                 return ResourceManager.GetString("Export_Completed", resourceCulture);
             }
         }
-        
-        public static string Import_UnsupportedFormat {
+
+        public static string Export_OmissionsHeader {
             get {
-                return ResourceManager.GetString("Import_UnsupportedFormat", resourceCulture);
+                return ResourceManager.GetString("Export_OmissionsHeader", resourceCulture);
+            }
+        }
+
+        public static string ExportOmission_Line {
+            get {
+                return ResourceManager.GetString("ExportOmission_Line", resourceCulture);
+            }
+        }
+
+        public static string ExportOmission_TableDescription {
+            get {
+                return ResourceManager.GetString("ExportOmission_TableDescription", resourceCulture);
+            }
+        }
+
+        public static string ExportOmission_TableMemo {
+            get {
+                return ResourceManager.GetString("ExportOmission_TableMemo", resourceCulture);
+            }
+        }
+
+        public static string ExportOmission_ColumnDescription {
+            get {
+                return ResourceManager.GetString("ExportOmission_ColumnDescription", resourceCulture);
+            }
+        }
+
+        public static string ExportOmission_ColumnNullability {
+            get {
+                return ResourceManager.GetString("ExportOmission_ColumnNullability", resourceCulture);
+            }
+        }
+
+        public static string ExportOmission_CompositeUniqueConstraint {
+            get {
+                return ResourceManager.GetString("ExportOmission_CompositeUniqueConstraint", resourceCulture);
+            }
+        }
+
+        public static string ExportOmission_UniqueConstraintName {
+            get {
+                return ResourceManager.GetString("ExportOmission_UniqueConstraintName", resourceCulture);
+            }
+        }
+
+        public static string ExportOmission_ForeignKeyColumnPairs {
+            get {
+                return ResourceManager.GetString("ExportOmission_ForeignKeyColumnPairs", resourceCulture);
+            }
+        }
+
+        public static string ExportOmission_ReferentialAction {
+            get {
+                return ResourceManager.GetString("ExportOmission_ReferentialAction", resourceCulture);
+            }
+        }
+
+        public static string ExportOmission_NamedQuery {
+            get {
+                return ResourceManager.GetString("ExportOmission_NamedQuery", resourceCulture);
             }
         }
         
@@ -1387,6 +1483,12 @@ namespace QuickER.Resources {
         public static string Import_Completed {
             get {
                 return ResourceManager.GetString("Import_Completed", resourceCulture);
+            }
+        }
+
+        public static string Import_LineDiagnostic {
+            get {
+                return ResourceManager.GetString("Import_LineDiagnostic", resourceCulture);
             }
         }
         
@@ -1501,12 +1603,6 @@ namespace QuickER.Resources {
         public static string Mermaid_DuplicateEntity {
             get {
                 return ResourceManager.GetString("Mermaid_DuplicateEntity", resourceCulture);
-            }
-        }
-        
-        public static string Mermaid_HeaderNotFound {
-            get {
-                return ResourceManager.GetString("Mermaid_HeaderNotFound", resourceCulture);
             }
         }
         

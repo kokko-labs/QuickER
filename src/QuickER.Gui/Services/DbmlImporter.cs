@@ -31,6 +31,12 @@ public static partial class DbmlImporter
     /// <summary>カラム設定の <c>note: '...'</c> を解析する正規表現</summary>
     private static readonly Regex NoteRegex = ColumnNoteRegex();
 
+    /// <summary>テーブルブロック内の <c>Note: '...'</c> 行（テーブルの説明）を解析する正規表現</summary>
+    private static readonly Regex TableNoteRegex = TableNoteLineRegex();
+
+    /// <summary><c>Ref:</c> 行の設定ブロック内の参照アクション設定を解析する正規表現</summary>
+    private static readonly Regex ReferentialActionRegex = ReferentialActionSettingRegex();
+
     /// <summary><c>Indexes {</c> ブロック開始行を検出する正規表現</summary>
     private static readonly Regex IndexesHeaderRegex = IndexesHeaderLineRegex();
 
@@ -67,101 +73,132 @@ public static partial class DbmlImporter
         var pendingRelationshipColumns =
             new List<(Relationship Relationship, List<string> Source, List<string> Target)>();
         // Indexes ブロックの一意索引は、列定義より前に書かれていても解決できるよう最後にまとめて紐付ける
-        var pendingUniqueIndexes = new List<(Entity Entity, string? Name, List<string> Columns)>();
+        // （解決は行ループを抜けた後になるため、診断用に定義行の行番号も持ち回る）
+        var pendingUniqueIndexes =
+            new List<(Entity Entity, string? Name, List<string> Columns, int LineNumber)>();
         Entity? currentEntity = null;
+        // 未閉じブロックの診断はループを抜けてから判明するため、ブロック開始行を覚えておく
+        var currentEntityLineNumber = 0;
         var inIndexesBlock = false;
 
         // 行単位の状態機械: currentEntity が非 null の間は Table ブロック内としてカラム行を解釈する
-        foreach (var rawLine in lines)
+        for (var index = 0; index < lines.Length; index++)
         {
-            var line = RemoveComment(rawLine).Trim();
+            var lineNumber = index + 1;
+            var line = RemoveComment(lines[index]).Trim();
 
             if (string.IsNullOrWhiteSpace(line))
             {
                 continue;
             }
 
-            if (currentEntity is not null)
+            // 行に紐づく診断は、パーサ内部（カラム・索引・リレーション定義）のものも含めて行番号を前置して投げ直す
+            try
             {
-                // Indexes ブロック内は索引定義として解釈する（閉じ括弧で Table ブロックへ戻る）
-                if (inIndexesBlock)
+                if (currentEntity is not null)
                 {
-                    if (line == "}")
+                    // Indexes ブロック内は索引定義として解釈する（閉じ括弧で Table ブロックへ戻る）
+                    if (inIndexesBlock)
                     {
-                        inIndexesBlock = false;
+                        if (line == "}")
+                        {
+                            inIndexesBlock = false;
+                            continue;
+                        }
+
+                        var uniqueIndex = ParseUniqueIndex(line, currentEntity.TableName);
+
+                        if (uniqueIndex is not null)
+                        {
+                            pendingUniqueIndexes.Add(
+                                (
+                                    currentEntity,
+                                    uniqueIndex.Value.Name,
+                                    uniqueIndex.Value.Columns,
+                                    lineNumber
+                                )
+                            );
+                        }
+
                         continue;
                     }
 
-                    var uniqueIndex = ParseUniqueIndex(line, currentEntity.TableName);
-
-                    if (uniqueIndex is not null)
+                    if (line == "}")
                     {
-                        pendingUniqueIndexes.Add(
-                            (currentEntity, uniqueIndex.Value.Name, uniqueIndex.Value.Columns)
+                        currentEntity = null;
+                        continue;
+                    }
+
+                    if (IndexesHeaderRegex.IsMatch(line))
+                    {
+                        inIndexesBlock = true;
+                        continue;
+                    }
+
+                    // テーブルの説明（DBML 標準の Note: 行）。カラム定義として解釈しない
+                    var tableNote = TableNoteRegex.Match(line);
+
+                    if (tableNote.Success)
+                    {
+                        currentEntity.Description = tableNote
+                            .Groups["note"]
+                            .Value.Replace("\\'", "'");
+                        continue;
+                    }
+
+                    var (column, isUnique) = ParseColumn(line, currentEntity.TableName);
+                    currentEntity.Columns.Add(column);
+
+                    // カラム設定の unique は「その 1 列だけの名前なし一意制約」を意味する
+                    if (isUnique)
+                    {
+                        currentEntity.UniqueConstraints.Add(
+                            new UniqueConstraint { ColumnIds = [column.Id] }
                         );
                     }
 
                     continue;
                 }
 
-                if (line == "}")
+                var tableMatch = TableHeaderRegex.Match(line);
+
+                if (tableMatch.Success)
                 {
-                    currentEntity = null;
+                    var tableName = tableMatch.Groups["table"].Value;
+
+                    if (!entities.TryAdd(tableName, new Entity { TableName = tableName }))
+                    {
+                        throw new InvalidDataException(
+                            string.Format(Strings.Dbml_DuplicateEntity, tableName)
+                        );
+                    }
+
+                    currentEntity = entities[tableName];
+                    currentEntityLineNumber = lineNumber;
                     continue;
                 }
 
-                if (IndexesHeaderRegex.IsMatch(line))
+                if (line.StartsWith("Ref:", StringComparison.OrdinalIgnoreCase))
                 {
-                    inIndexesBlock = true;
+                    var (relationship, sourceColumns, targetColumns) = ParseRelationship(
+                        line,
+                        entities
+                    );
+                    relationships.Add(relationship);
+                    pendingRelationshipColumns.Add((relationship, sourceColumns, targetColumns));
                     continue;
                 }
-
-                var (column, isUnique) = ParseColumn(line, currentEntity.TableName);
-                currentEntity.Columns.Add(column);
-
-                // カラム設定の unique は「その 1 列だけの名前なし一意制約」を意味する
-                if (isUnique)
-                {
-                    currentEntity.UniqueConstraints.Add(
-                        new UniqueConstraint { ColumnIds = [column.Id] }
-                    );
-                }
-
-                continue;
             }
-
-            var tableMatch = TableHeaderRegex.Match(line);
-
-            if (tableMatch.Success)
+            catch (InvalidDataException ex)
             {
-                var tableName = tableMatch.Groups["table"].Value;
-
-                if (!entities.TryAdd(tableName, new Entity { TableName = tableName }))
-                {
-                    throw new InvalidDataException(
-                        string.Format(Strings.Dbml_DuplicateEntity, tableName)
-                    );
-                }
-
-                currentEntity = entities[tableName];
-                continue;
-            }
-
-            if (line.StartsWith("Ref:", StringComparison.OrdinalIgnoreCase))
-            {
-                var (relationship, sourceColumns, targetColumns) = ParseRelationship(
-                    line,
-                    entities
-                );
-                relationships.Add(relationship);
-                pendingRelationshipColumns.Add((relationship, sourceColumns, targetColumns));
-                continue;
+                throw ImportDiagnostics.AtLine(lineNumber, ex);
             }
         }
 
         if (currentEntity is not null)
         {
-            throw new InvalidDataException(
+            throw ImportDiagnostics.AtLine(
+                currentEntityLineNumber,
                 string.Format(Strings.Dbml_MissingClosingBrace, currentEntity.TableName)
             );
         }
@@ -321,10 +358,15 @@ public static partial class DbmlImporter
     /// </summary>
     /// <exception cref="InvalidDataException">索引が参照する列がテーブルに存在しない場合</exception>
     private static void ResolveUniqueIndexes(
-        IEnumerable<(Entity Entity, string? Name, List<string> Columns)> uniqueIndexes
+        IEnumerable<(
+            Entity Entity,
+            string? Name,
+            List<string> Columns,
+            int LineNumber
+        )> uniqueIndexes
     )
     {
-        foreach (var (entity, name, columns) in uniqueIndexes)
+        foreach (var (entity, name, columns, lineNumber) in uniqueIndexes)
         {
             var columnIds = new List<Guid>(columns.Count);
 
@@ -336,7 +378,9 @@ public static partial class DbmlImporter
 
                 if (column is null)
                 {
-                    throw new InvalidDataException(
+                    // 解決は行ループを抜けた後だが、診断は索引定義が書かれていた行を指す
+                    throw ImportDiagnostics.AtLine(
+                        lineNumber,
                         string.Format(
                             Strings.Dbml_IndexColumnNotFound,
                             entity.TableName,
@@ -381,9 +425,9 @@ public static partial class DbmlImporter
         var leftTable = match.Groups["leftTable"].Value;
         var rightTable = match.Groups["rightTable"].Value;
         var symbol = match.Groups["symbol"].Value;
-        var note = match.Groups["note"].Success
-            ? match.Groups["note"].Value.Replace("\\'", "'")
-            : null;
+        var (constraintName, onDelete, onUpdate) = ParseRelationshipSettings(
+            match.Groups["settings"].Success ? match.Groups["settings"].Value : string.Empty
+        );
 
         if (!entities.ContainsKey(leftTable))
         {
@@ -412,7 +456,9 @@ public static partial class DbmlImporter
                     string.Format(Strings.Dbml_UnsupportedRelationshipSymbol, symbol)
                 ),
             },
-            ConstraintName = note,
+            ConstraintName = constraintName,
+            OnDelete = onDelete,
+            OnUpdate = onUpdate,
         };
 
         return (
@@ -420,6 +466,63 @@ public static partial class DbmlImporter
             ReadEndpointColumns(match, "leftColumns", "leftColumn"),
             ReadEndpointColumns(match, "rightColumns", "rightColumn")
         );
+    }
+
+    /// <summary><c>Ref:</c> 行の設定ブロックから制約名（<c>note</c>）と参照アクションを取り出す</summary>
+    /// <remarks>
+    /// 未知の設定は読み飛ばす。DBML の <c>restrict</c> はモデルに対応する値が無いため
+    /// <see cref="ForeignKeyReferentialAction.NoAction"/> へ倒れる
+    /// （<see cref="ForeignKeyReferentialActionHelper.Parse"/> の既定）。
+    /// 設定が無い場合は制約名 null・両アクション既定を返す
+    /// </remarks>
+    private static (
+        string? ConstraintName,
+        ForeignKeyReferentialAction OnDelete,
+        ForeignKeyReferentialAction OnUpdate
+    ) ParseRelationshipSettings(string settingText)
+    {
+        string? constraintName = null;
+        var onDelete = ForeignKeyReferentialAction.NoAction;
+        var onUpdate = ForeignKeyReferentialAction.NoAction;
+
+        foreach (var setting in SplitOptions(settingText))
+        {
+            var noteMatch = NoteRegex.Match(setting);
+
+            if (noteMatch.Success)
+            {
+                constraintName = noteMatch.Groups["note"].Value.Replace("\\'", "'");
+                continue;
+            }
+
+            var actionMatch = ReferentialActionRegex.Match(setting);
+
+            if (!actionMatch.Success)
+            {
+                continue;
+            }
+
+            var action = ForeignKeyReferentialActionHelper.Parse(
+                actionMatch.Groups["action"].Value
+            );
+
+            if (
+                string.Equals(
+                    actionMatch.Groups["kind"].Value,
+                    "delete",
+                    StringComparison.OrdinalIgnoreCase
+                )
+            )
+            {
+                onDelete = action;
+            }
+            else
+            {
+                onUpdate = action;
+            }
+        }
+
+        return (constraintName, onDelete, onUpdate);
     }
 
     /// <summary><c>Ref:</c> 行のエンドポイント列名を取り出す（単一列・複合 <c>(a, b)</c> のどちらでも列名一覧を返す）</summary>
@@ -600,13 +703,28 @@ public static partial class DbmlImporter
     )]
     private static partial Regex TableHeaderLineRegex();
 
+    /// <summary>テーブルの説明を表す <c>Note: '...'</c> 行に一致する正規表現を生成する</summary>
+    [GeneratedRegex(
+        @"^Note:\s*'(?<note>(?:\\'|[^'])*)'$",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase
+    )]
+    private static partial Regex TableNoteLineRegex();
+
+    /// <summary><c>Ref:</c> 行の設定ブロック内の <c>delete: ...</c> / <c>update: ...</c> に一致する正規表現を生成する</summary>
+    [GeneratedRegex(
+        @"^(?<kind>delete|update):\s*(?<action>.+)$",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase
+    )]
+    private static partial Regex ReferentialActionSettingRegex();
+
     /// <summary>
-    /// <c>Ref:</c> 行に一致する正規表現を生成する。note は <see cref="DbmlExporter"/> 独自形式に合わせ
-    /// <c>Ref:</c> 直後の <c>[note: '...']</c> のみ受け付ける。エンドポイントは単一列（<c>親.a</c>）と
+    /// <c>Ref:</c> 行に一致する正規表現を生成する。設定ブロックは <see cref="DbmlExporter"/> 独自形式に合わせ
+    /// <c>Ref:</c> 直後へ置き、中身（<c>note</c> / <c>delete</c> / <c>update</c>）は
+    /// <see cref="ParseRelationshipSettings"/> が解釈する。エンドポイントは単一列（<c>親.a</c>）と
     /// 複合 Ref 構文（<c>親.(a, b)</c>）の双方を受け付ける
     /// </summary>
     [GeneratedRegex(
-        @"^Ref:(?:\s*\[note:\s*'(?<note>(?:\\'|[^'])*)'\])?\s*(?<leftTable>\w+)\.(?:\((?<leftColumns>[^)]*)\)|(?<leftColumn>\w+))\s*(?<symbol><>|<|-)\s*(?<rightTable>\w+)\.(?:\((?<rightColumns>[^)]*)\)|(?<rightColumn>\w+))\s*$",
+        @"^Ref:(?:\s*\[(?<settings>[^\]]*)\])?\s*(?<leftTable>\w+)\.(?:\((?<leftColumns>[^)]*)\)|(?<leftColumn>\w+))\s*(?<symbol><>|<|-)\s*(?<rightTable>\w+)\.(?:\((?<rightColumns>[^)]*)\)|(?<rightColumn>\w+))\s*$",
         RegexOptions.Compiled
     )]
     private static partial Regex RelationshipLineRegex();

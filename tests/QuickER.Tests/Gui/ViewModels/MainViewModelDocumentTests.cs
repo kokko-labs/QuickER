@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using AwesomeAssertions;
 using QuickER.Gui.Abstractions;
 using QuickER.Model;
+using QuickER.Resources;
 using QuickER.Services;
 using QuickER.Tests.TestDoubles;
 using QuickER.ViewModels;
@@ -299,5 +300,63 @@ public class MainViewModelDocumentTests : IDisposable
         vm2.CurrentFilePath.Should().Be(path);
         vm2.IsDirty.Should().BeTrue("前回未保存の状態を引き継ぐ");
         vm2.WindowTitle.Should().Be("Dirty* - QuickER");
+    }
+
+    /// <summary>ER 図ファイル自身の保存は、モーダルではなくステータスバーの一時通知で知らせることを検証する</summary>
+    /// <remarks>外部形式の入出力＝モーダル、ER 図ファイルの読み書き＝ステータスバー、の使い分け</remarks>
+    [Fact(DisplayName = "保存の完了はステータスバーで知らせる")]
+    public void Save_NotifiesOnStatusBar()
+    {
+        var path = Path.Combine(_folder, "Saved.json");
+        var dialogs = new StubDialogService();
+        var vm = new MainViewModel(
+            dialogs,
+            files: new RecordingFileDialogService { SaveResult = new(path, 1) }
+        );
+        vm.UsePersistenceForTests(
+            new GuiAppSettingsStore(_folder),
+            Path.Combine(_folder, "last_diagram.json")
+        );
+        vm.AddEntityCommand.Execute(null);
+
+        vm.SaveCommand.Execute(null);
+
+        vm.StatusMessage.Should().Be(Strings.Status_Saved);
+        dialogs.InformationMessages.Should().BeEmpty();
+    }
+
+    /// <summary>読込（開く）も保存と同じくステータスバーの一時通知で知らせることを検証する</summary>
+    [Fact(DisplayName = "開くの完了はステータスバーで知らせる")]
+    public void Open_NotifiesOnStatusBar()
+    {
+        var path = Path.Combine(_folder, "Opened.json");
+
+        // 先に保存してファイルを用意する（保存側 VM は破棄して別 VM で開く）
+        var writer = new MainViewModel(
+            new StubDialogService(),
+            files: new RecordingFileDialogService { SaveResult = new(path, 1) }
+        );
+        writer.UsePersistenceForTests(
+            new GuiAppSettingsStore(_folder),
+            Path.Combine(_folder, "writer.json")
+        );
+        writer.AddEntityCommand.Execute(null);
+        writer.SaveCommand.Execute(null);
+
+        var dialogs = new StubDialogService();
+        var vm = new MainViewModel(
+            dialogs,
+            files: new StubFileDialogService { OpenResult = new FileDialogResult(path, 1) }
+        );
+        vm.UsePersistenceForTests(
+            new GuiAppSettingsStore(_folder),
+            Path.Combine(_folder, "reader.json")
+        );
+
+        vm.OpenCommand.Execute(null);
+
+        vm.CurrentFilePath.Should().Be(path);
+        vm.StatusMessage.Should().Be(Strings.Status_Opened);
+        dialogs.InformationMessages.Should().BeEmpty();
     }
 }
