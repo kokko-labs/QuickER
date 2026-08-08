@@ -123,28 +123,6 @@ public sealed class StoreGeneratedColumnAttribute : Attribute
 }
 
 /// <summary>
-/// Attribute that declares one UNIQUE constraint of the underlying table on an edit model class.
-/// The arguments are the confirmed-value property names that make up the constraint, in declaration order.
-/// </summary>
-/// <remarks>
-/// It is applied once per UNIQUE constraint of the table and is read by <see cref="EditModelUniquenessValidator"/> to detect
-/// values duplicated among the elements of a collection. Checking against rows already stored in the database is a separate
-/// concern (the repository's <c>CheckUniquenessAsync</c>).
-/// </remarks>
-[AttributeUsage(AttributeTargets.Class, AllowMultiple = true)]
-public sealed class UniqueConstraintAttribute : Attribute
-{
-    /// <summary>Gets the confirmed-value property names that make up the constraint (declaration order).</summary>
-    public string[] PropertyNames { get; }
-
-    /// <summary>Gets or sets the constraint name (the synthesized name when the diagram does not set one).</summary>
-    public string Name { get; set; } = string.Empty;
-
-    /// <summary>Initializes a new instance with the properties that make up the constraint.</summary>
-    public UniqueConstraintAttribute(params string[] propertyNames) => PropertyNames = propertyNames;
-}
-
-/// <summary>
 /// Marker attribute that excludes an unbounded binary column (such as <c>varbinary(max)</c> or a BLOB with no declared length) from SELECT / UPDATE.
 /// INSERT / BulkInsert still handle all columns. Updating while a value remains assigned throws at runtime (perform such updates with raw SQL via <c>ExecuteSqlAsync</c>).
 /// </summary>
@@ -1905,6 +1883,17 @@ public abstract partial class EditModelBase
         string? message
     ) => SetDuplicateError(string.Empty, message ?? EditModelMessages.DuplicateValue(propertyNames));
 
+    /// <summary>
+    /// Gets the UNIQUE constraints of the underlying table (none by default). Generated edit models whose table declares
+    /// UNIQUE constraints override this with the constraints and their compiled value accessors.
+    /// </summary>
+    /// <remarks>
+    /// It is the input of the duplicate check among the elements of a collection (<see cref="EditModelUniquenessValidator"/>),
+    /// so the check needs no reflection. Application code can add its own constraints by overriding this in a partial class.
+    /// </remarks>
+    public virtual IReadOnlyList<EditModelUniquenessConstraint> UniquenessConstraints =>
+        Array.Empty<EditModelUniquenessConstraint>();
+
     /// <summary>Writes the confirmed values back to the binding properties and clears errors.</summary>
     public void RevertInput() => ExecuteRevert(RevertCore);
 
@@ -2013,38 +2002,54 @@ public static class EditModelMessages
         static displayNames => $"'{string.Join(", ", displayNames)}' is already used.";
 }
 
+/// <summary>One UNIQUE constraint declared by an edit model (its name, the properties that make it up, and a compiled accessor for their values).</summary>
+/// <remarks>
+/// Generated edit models publish their constraints through <see cref="EditModelBase.UniquenessConstraints"/> and
+/// <see cref="EditModelUniquenessValidator"/> consumes them. The accessor is generated code, so the check reads no property by reflection.
+/// The DB definition itself is described separately by the <c>[UniqueConstraint]</c> attribute on the entity class.
+/// </remarks>
+public sealed class EditModelUniquenessConstraint
+{
+    /// <summary>Gets the constraint name (the DDL name, or the synthesized name when the diagram does not set one).</summary>
+    public string ConstraintName { get; }
+
+    /// <summary>Gets the confirmed-value property names that make up the constraint (declaration order). The binding properties an error is registered on are derived from them.</summary>
+    public IReadOnlyList<string> PropertyNames { get; }
+
+    /// <summary>Gets the accessor that reads the constraint member values of an edit model in a single call (declaration order, matching <see cref="PropertyNames"/>).</summary>
+    public Func<EditModelBase, object?[]> GetValues { get; }
+
+    /// <summary>Initializes a new instance with the constraint name, its member property names, and the value accessor.</summary>
+    public EditModelUniquenessConstraint(
+        string constraintName,
+        IReadOnlyList<string> propertyNames,
+        Func<EditModelBase, object?[]> getValues
+    )
+    {
+        ConstraintName = constraintName;
+        PropertyNames = propertyNames;
+        GetValues = getValues;
+    }
+}
+
 /// <summary>
-/// Shared helper that detects values duplicated among edit models by reading the UNIQUE constraints declared with <see cref="UniqueConstraintAttribute"/>.
+/// Shared helper that detects values duplicated among edit models by reading the UNIQUE constraints they declare (<see cref="EditModelBase.UniquenessConstraints"/>).
 /// </summary>
 /// <remarks>
-/// It is schema-independent and attribute-driven, and does not bake in property names (constraints are resolved once per type and cached). It is called at the
+/// It is schema-independent and does not bake in property names (each edit model declares its own constraints). It is called at the
 /// end of <see cref="EditModelCollection{T}.Validate"/>, and application code can call it directly for a root-level list. Semantics match the database check:
 /// value tuples that contain a null are out of scope (NULL collision semantics differ per dialect), deletion targets (RowState.Removed) are excluded, and every
 /// element of a duplicated group gets the error. Checking against rows already stored in the database is a separate concern (the repository's CheckUniquenessAsync).
 /// </remarks>
 public static class EditModelUniquenessValidator
 {
-    // Type -> the UNIQUE constraints declared on it. Resolved once and cached.
-    private static readonly ConcurrentDictionary<
-        Type,
-        UniqueConstraintAttribute[]
-    > _constraints = new();
-
-    /// <summary>Returns the UNIQUE constraints declared on the specified edit model type (an empty array when none are declared).</summary>
-    public static UniqueConstraintAttribute[] For(Type editModelType) =>
-        _constraints.GetOrAdd(
-            editModelType,
-            static type =>
-                type.GetCustomAttributes<UniqueConstraintAttribute>(inherit: true).ToArray()
-        );
-
     /// <summary>
     /// Detects values duplicated among the given edit models and registers a duplicate-value error on every element of each duplicated group
     /// (returns true when there are no duplicates).
     /// </summary>
     /// <remarks>
     /// The duplicate-value errors registered by the previous call are cleared first, so re-validating never leaves stale errors. The constraints are read from the
-    /// runtime type of the first element that is not a deletion target, so the elements are expected to be of a single edit model type.
+    /// first element that is not a deletion target, so the elements are expected to be of a single edit model type.
     /// </remarks>
     /// <param name="models">The edit models to compare with each other.</param>
     public static bool Validate<T>(IEnumerable<T> models)
@@ -2066,13 +2071,13 @@ public static class EditModelUniquenessValidator
 
         var valid = true;
 
-        foreach (var constraint in For(targets[0].GetType()))
+        foreach (var constraint in targets[0].UniquenessConstraints)
         {
             var groups = new Dictionary<object[], List<T>>(UniquenessKeyComparer.Instance);
 
             foreach (var model in targets)
             {
-                var key = BuildKey(model, constraint.PropertyNames);
+                var key = BuildKey(model, constraint);
 
                 // A tuple that contains a null is out of scope (it matches the semantics of the database check).
                 if (key is null)
@@ -2107,29 +2112,23 @@ public static class EditModelUniquenessValidator
         return valid;
     }
 
-    /// <summary>Builds the comparison tuple of the constraint's member properties (null when any value is null or the property does not exist = out of scope).</summary>
-    private static object[]? BuildKey(EditModelBase model, string[] propertyNames)
+    /// <summary>Builds the comparison tuple of the constraint's member values through its accessor (null when any value is null = out of scope).</summary>
+    private static object[]? BuildKey(
+        EditModelBase model,
+        EditModelUniquenessConstraint constraint
+    )
     {
-        var type = model.GetType();
-        var values = new object[propertyNames.Length];
+        var values = constraint.GetValues(model);
 
-        for (var i = 0; i < propertyNames.Length; i++)
+        foreach (var value in values)
         {
-            var property = type.GetProperty(
-                propertyNames[i],
-                BindingFlags.Public | BindingFlags.Instance
-            );
-            var value = property?.GetValue(model);
-
             if (value is null)
             {
                 return null;
             }
-
-            values[i] = value;
         }
 
-        return values;
+        return values!;
     }
 
     /// <summary>Structural comparer for the value tuples (byte[] compares by content, and value objects by their overridden equality).</summary>

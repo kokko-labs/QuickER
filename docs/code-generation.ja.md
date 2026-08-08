@@ -272,6 +272,8 @@ var affected = await customers.ExecuteSqlAsync("UPDATE customers SET balance = 0
 
 ### 重複の事前チェック（CheckUniquenessAsync）
 
+テーブルの UNIQUE 制約は、生成される **Entity** クラスへ `[UniqueConstraint("PropA", "PropB", Name = "UQ_...")]` として `[DbTableMeta]` / `[DbColumnMeta]` と並んで刻まれます。これらと同じく「DB 定義の自己記述」のための定義メタで、実行時の振る舞いは持ちません（以下のチェックはいずれも生成コードそのものです）。属性型は、刻む制約が 1 つでもあるときだけ出力されます。
+
 生成される Repository 契約には、図の UNIQUE 制約から組み立てた一括チェックが常に含まれます（テーブルに制約が 1 件も無くても生成されます）:
 
 ```csharp
@@ -315,7 +317,7 @@ public sealed partial class OrderRepository
 
 #### EditModel: コレクション内の重複
 
-UNIQUE 制約は生成される EditModel クラスにも `[UniqueConstraint("PropA", "PropB", Name = "UQ_...")]` として刻まれます。`EditModelCollection<T>.Validate()` はこの属性を読み、**要素どうし**で重複した値を検出して、重複したグループの全要素の構成列バインディングプロパティへエラーを登録します。値の組に `null` を含む場合はスキップし、削除対象（`RowState.Removed`）は比較から外します（DB 照合と同じ規則）。`EditModelCollection<T>` ではないルートの一覧には、同じヘルパを直接呼べます:
+UNIQUE 制約を持つテーブルの EditModel は、その制約を生成コードでも宣言します（`EditModelUniquenessConstraint`＝制約名・構成プロパティ名・値のコンパイル済みアクセサの `static readonly` テーブルを `UniquenessConstraints` プロパティで公開）。`EditModelCollection<T>.Validate()` はこのテーブルを読み、**要素どうし**で重複した値を検出して、重複したグループの全要素の構成列バインディングプロパティへエラーを登録します（必須検証と同じくリフレクションは使いません）。値の組に `null` を含む場合はスキップし、削除対象（`RowState.Removed`）は比較から外します（DB 照合と同じ規則）。`EditModelCollection<T>` ではないルートの一覧には、同じヘルパを直接呼べます:
 
 ```csharp
 var valid = EditModelUniquenessValidator.Validate(models);

@@ -583,6 +583,10 @@ public class GeneratedCodeCompilationTests
         var customer = Guid.NewGuid();
         var customerPk = Guid.NewGuid();
 
+        // UNIQUE 制約の構成列（単一列・複合の 2 本を customers へ張る）
+        var customerName = Guid.NewGuid();
+        var customerCreatedAt = Guid.NewGuid();
+
         var order = Guid.NewGuid();
         var orderPk = Guid.NewGuid();
         var orderCustomerFk = Guid.NewGuid();
@@ -626,7 +630,7 @@ public class GeneratedCodeCompilationTests
                         },
                         new Column
                         {
-                            Id = Guid.NewGuid(),
+                            Id = customerName,
                             Name = "name",
                             DataType = "nvarchar(100)",
                             IsNullable = false,
@@ -654,12 +658,22 @@ public class GeneratedCodeCompilationTests
                         },
                         new Column
                         {
-                            Id = Guid.NewGuid(),
+                            Id = customerCreatedAt,
                             Name = "created_at",
                             DataType = "datetime2",
                             IsNullable = false,
                         },
                     ],
+                    // 単一列・複合の 2 本（Entity の [UniqueConstraint] 属性と EditModel の制約テーブルの両方を発火させる）
+                    UniqueConstraints =
+                    {
+                        new UniqueConstraint
+                        {
+                            Name = "UQ_customers_name",
+                            ColumnIds = { customerName },
+                        },
+                        new UniqueConstraint { ColumnIds = { customerName, customerCreatedAt } },
+                    },
                 },
                 new Entity
                 {

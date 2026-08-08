@@ -7,8 +7,9 @@ using QuickER.SqlServer;
 namespace QuickER.Tests.CodeGen.CSharp;
 
 /// <summary>
-/// UNIQUE 制約ベースの重複事前チェック（<c>CheckUniquenessAsync</c>・<c>[UniqueConstraint]</c>・
-/// <c>ValidateUniqueAsync</c>）の生成を、実経路（<see cref="DiagramCodeGenerator"/>＝型解決込み）で検証する。
+/// UNIQUE 制約ベースの重複事前チェック（<c>CheckUniquenessAsync</c>・Entity の <c>[UniqueConstraint]</c> 属性・
+/// EditModel の制約テーブル・<c>ValidateUniqueAsync</c>）の生成を、
+/// 実経路（<see cref="DiagramCodeGenerator"/>＝型解決込み）で検証する。
 /// </summary>
 public class UniquenessGenerationTests
 {
@@ -176,9 +177,13 @@ public class UniquenessGenerationTests
             );
     }
 
-    /// <summary>EditModel クラスへ図の UNIQUE 制約が属性として刻まれる（確定値プロパティ名・宣言順・制約名つき）</summary>
-    [Fact(DisplayName = "EditModel へ UNIQUE 制約属性が刻まれる")]
-    public void Generate_EditModel_EmitsUniqueConstraintAttributes()
+    /// <summary>Entity クラスへ図の UNIQUE 制約が属性として刻まれる（プロパティ名・宣言順・制約名つき）</summary>
+    /// <remarks>
+    /// 属性は他の DB 定義系属性（<c>[DbTableMeta]</c> 等）と同じく Entity 側だけに載る「DB 定義の自己記述」で、
+    /// EditModel へは載せない（EditModel の検証は生成コードの制約テーブルが担う）。
+    /// </remarks>
+    [Fact(DisplayName = "Entity へ UNIQUE 制約属性が刻まれる")]
+    public void Generate_Entity_EmitsUniqueConstraintAttributes()
     {
         var diagram = CreateDiagram(
             new UniqueConstraint { Name = "UQ_Order_Memo", ColumnIds = { _memo.Id } },
@@ -187,10 +192,61 @@ public class UniquenessGenerationTests
 
         var content = AllContent(Generate(diagram, CreateOptions()));
 
-        content.Should().Contain("[UniqueConstraint(\"Memo\", Name = \"UQ_Order_Memo\")]");
         content
             .Should()
-            .Contain("[UniqueConstraint(\"Code\", \"Memo\", Name = \"UQ_Order_Code_Memo\")]");
+            .Contain(
+                "[UniqueConstraint(\"Memo\", Name = \"UQ_Order_Memo\")]\n[UniqueConstraint(\"Code\", \"Memo\", Name = \"UQ_Order_Code_Memo\")]\npublic partial class OrderEntity".ReplaceLineEndings()
+            );
+
+        // EditModel クラス宣言の直前に属性は付かない（EditModel は宣言のみのクラスへ戻す）
+        content
+            .Should()
+            .Contain(
+                "/// <summary>Edit model for on-screen editing of the Order table.</summary>\npublic partial class OrderEditModel".ReplaceLineEndings()
+            );
+    }
+
+    /// <summary>UNIQUE 制約が 1 件も無い図では属性型そのものを出力しない（実体のない属性クラスを出さない）</summary>
+    [Fact(DisplayName = "制約 0 件では属性型を出力しない")]
+    public void Generate_NoConstraints_OmitsAttributeDefinition()
+    {
+        var content = AllContent(Generate(CreateDiagram(), CreateOptions()));
+
+        content.Should().NotContain("class UniqueConstraintAttribute");
+    }
+
+    /// <summary>EditModel は UNIQUE 制約をコンパイル済みの値アクセサ付き制約テーブルとして宣言する（リフレクション無し）</summary>
+    [Fact(DisplayName = "EditModel へ制約テーブルが生成される")]
+    public void Generate_EditModel_EmitsUniquenessConstraintsTable()
+    {
+        var diagram = CreateDiagram(
+            new UniqueConstraint { Name = "UQ_Order_Memo", ColumnIds = { _memo.Id } },
+            new UniqueConstraint { ColumnIds = { _code.Id, _memo.Id } }
+        );
+
+        var content = AllContent(Generate(diagram, CreateOptions()));
+
+        content
+            .Should()
+            .Contain(
+                "private static readonly IReadOnlyList<EditModelUniquenessConstraint> _uniquenessConstraints ="
+            )
+            .And.Contain(
+                "public override IReadOnlyList<EditModelUniquenessConstraint> UniquenessConstraints =>"
+            )
+            .And.Contain("static model => new object?[] { ((OrderEditModel)model).Memo }")
+            .And.Contain("new[] { nameof(Code), nameof(Memo) },")
+            .And.Contain("((OrderEditModel)model).Code,");
+    }
+
+    /// <summary>制約の無いテーブルの EditModel は制約テーブルを持たない（基底の空リストのまま）</summary>
+    [Fact(DisplayName = "制約 0 件の EditModel は制約テーブルを持たない")]
+    public void Generate_EditModelWithoutConstraints_OmitsConstraintsTable()
+    {
+        var content = AllContent(Generate(CreateDiagram(), CreateOptions()));
+
+        content.Should().Contain("class OrderEditModel");
+        content.Should().NotContain("_uniquenessConstraints");
     }
 
     /// <summary>Repository 契約を生成しない構成では EditModel の DB 照合糖衣を出さない（呼び出し先が無い）</summary>
@@ -207,7 +263,7 @@ public class UniquenessGenerationTests
 
         content.Should().Contain("class OrderEditModel");
         content.Should().NotContain("ValidateUniqueAsync");
-        // コレクション内重複検証（属性駆動）は Repository の有無に依らず使える
+        // コレクション内重複検証（制約テーブル駆動）は Repository の有無に依らず使える
         content.Should().Contain("class EditModelUniquenessValidator");
     }
 

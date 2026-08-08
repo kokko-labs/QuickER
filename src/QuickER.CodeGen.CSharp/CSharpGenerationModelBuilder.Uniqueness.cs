@@ -7,11 +7,13 @@ namespace QuickER.CodeGen.CSharp;
 /// </summary>
 /// <remarks>
 /// <para>
-/// 生成物は 2 系統ある。(1) Repository 側の一括チェック <c>CheckUniquenessAsync</c>＝各制約について
+/// 生成物は 3 系統ある。(1) Repository 側の一括チェック <c>CheckUniquenessAsync</c>＝各制約について
 /// 「同一主キーの行を除外して同じ値の組を持つ行が DB に存在するか」を式木クエリで照合する。実装は名前付きクエリの
 /// ミニ DSL と同じく「全実装先で同一テキストの共有本体」で、QuickER 版 Repository 2 方言・インメモリ・EF Core の
-/// どれでも <c>Query()</c> パイプラインを通る。(2) EditModel 側＝クラスへ <c>[UniqueConstraint(...)]</c> 属性を刻んで
-/// コレクション内重複検証の入力にし、DB 照合糖衣 <c>ValidateUniqueAsync</c> を生成する。
+/// どれでも <c>Query()</c> パイプラインを通る。(2) Entity 側＝クラスへ <c>[UniqueConstraint(...)]</c> 属性を刻む
+/// （<c>[DbTableMeta]</c> / <c>[DbColumnMeta]</c> と同じ「DB 定義の自己記述」で、実行時の振る舞いは持たない）。
+/// (3) EditModel 側＝制約テーブル（<c>UniquenessConstraints</c> の override）でコレクション内重複検証の入力を宣言し、
+/// DB 照合糖衣 <c>ValidateUniqueAsync</c> を生成する。
 /// </para>
 /// <para>
 /// 契約はリモート契約生成（<c>GenerateRemoteContracts</c> または <c>GenerateRemoteServices</c>）の有無で挿入先が変わる
@@ -292,44 +294,130 @@ internal sealed partial class CSharpGenerationModelBuilder
         return lines;
     }
 
-    // ---- EditModel 側（コレクション内重複検証の属性・DB 照合糖衣） ----
+    // ---- Entity 側（DB 定義の自己記述属性） ----
 
-    /// <summary>1 EditModel 分の重複検証ブロック（属性行・DB 照合糖衣メソッド・契約面の有無）</summary>
+    /// <summary>
+    /// Entity クラスへ刻む <c>[UniqueConstraint(...)]</c> 属性行（制約なしは空文字）を構築する。
+    /// </summary>
+    /// <remarks>
+    /// 役割は <c>[DbTableMeta]</c> / <c>[DbColumnMeta]</c> と同じ「DB 定義の自己記述」で、実行時に読む機構は無い
+    /// （コレクション内重複検証は EditModel 側の生成コードが持つ制約テーブルを使う）。将来の C# → ErDiagram
+    /// リバースが列型・説明と同じ経路で UNIQUE 制約を復元できるようにするための布石でもある。
+    /// </remarks>
+    private string BuildEntityUniqueConstraintAttributes(Entity entity) =>
+        string.Join(
+            "\n",
+            ResolveUniqueConstraints(entity)
+                .Select(constraint =>
+                    "[UniqueConstraint("
+                    + string.Join(
+                        ", ",
+                        constraint.Members.Select(member => $"\"{member.PropertyName}\"")
+                    )
+                    + $", Name = \"{EscapeForCSharpString(constraint.ConstraintName)}\")]"
+                )
+        );
+
+    // ---- EditModel 側（コレクション内重複検証の制約テーブル・DB 照合糖衣） ----
+
+    /// <summary>1 EditModel 分の重複検証ブロック（制約テーブル・DB 照合糖衣メソッド・条件付き固定メンバーの発火有無）</summary>
     private sealed record EditModelUniquenessBlocks(
-        string AttributesBlock,
+        string ConstraintsBlock,
         string ValidationBlock,
-        bool HasRepositoryFace
+        bool HasRepositoryFace,
+        bool HasUniqueConstraints
     );
 
-    /// <summary>EditModel の重複検証ブロック（<c>[UniqueConstraint]</c> 属性と <c>ValidateUniqueAsync</c>）を構築する</summary>
+    /// <summary>EditModel の重複検証ブロック（制約テーブルの override と <c>ValidateUniqueAsync</c>）を構築する</summary>
     private EditModelUniquenessBlocks BuildEditModelUniquenessBlocks(
         Entity entity,
         CodeGenerationOptions options
     )
     {
         var constraints = ResolveUniqueConstraints(entity);
-        var attributes = string.Join(
-            "\n",
-            constraints.Select(constraint =>
-                "[UniqueConstraint("
-                + string.Join(
-                    ", ",
-                    constraint.Members.Select(member => $"\"{member.PropertyName}\"")
-                )
-                + $", Name = \"{EscapeForCSharpString(constraint.ConstraintName)}\")]"
-            )
-        );
 
         // ValidateUniqueAsync は Repository 契約面（単一主キーが前提）が生成されるエンティティにだけ出せる
         var hasRepositoryFace = options.GeneratesRepositoryContract && HasSinglePrimaryKey(entity);
 
         return new EditModelUniquenessBlocks(
-            attributes,
+            constraints.Count > 0
+                ? BuildEditModelConstraintsTable(entity, constraints)
+                : string.Empty,
             hasRepositoryFace
                 ? BuildEditModelValidateUniqueMethod(entity, constraints, options)
                 : string.Empty,
-            hasRepositoryFace
+            hasRepositoryFace,
+            constraints.Count > 0
         );
+    }
+
+    /// <summary>
+    /// コレクション内重複検証の入力となる制約テーブル（<c>_uniquenessConstraints</c> と
+    /// <c>UniquenessConstraints</c> の override）を構築する。
+    /// </summary>
+    /// <remarks>
+    /// 値アクセサはコンパイル済みのラムダ（1 呼び出しで構成列の値を配列で返す）で、検証時のリフレクションは無い。
+    /// 読むのは確定値プロパティ（バインディング文字列ではない）で、DB 照合・DDL と同じ値の組を比較する。
+    /// テーブルは <c>static readonly</c> の 1 回構築で、インスタンスごとの再構築は起きない。
+    /// </remarks>
+    private string BuildEditModelConstraintsTable(
+        Entity entity,
+        IReadOnlyList<ResolvedUniqueConstraint> constraints
+    )
+    {
+        var editModelClassName = _nameConverter.ToEditModelClassName(entity.TableName);
+
+        var lines = new List<string>
+        {
+            $"    /// <summary>UNIQUE constraints of the {EscapeForXmlDocSummary(entity.TableName)} table, with compiled accessors for their member values (input of the duplicate check inside a collection).</summary>",
+            "    private static readonly IReadOnlyList<EditModelUniquenessConstraint> _uniquenessConstraints =",
+            "        new EditModelUniquenessConstraint[]",
+            "        {",
+        };
+
+        foreach (var constraint in constraints)
+        {
+            var names = string.Join(
+                ", ",
+                constraint.Members.Select(member => $"nameof({member.PropertyName})")
+            );
+
+            lines.Add("            new(");
+            lines.Add($"                \"{EscapeForCSharpString(constraint.ConstraintName)}\",");
+            lines.Add($"                new[] {{ {names} }},");
+
+            // 構成列 1 つなら 1 行に収まる。複数列は 1 行 1 値へ展開して行の伸びを抑える
+            if (constraint.Members.Count == 1)
+            {
+                lines.Add(
+                    $"                static model => new object?[] {{ (({editModelClassName})model).{constraint.Members[0].PropertyName} }}"
+                );
+            }
+            else
+            {
+                lines.Add("                static model =>");
+                lines.Add("                    new object?[]");
+                lines.Add("                    {");
+                lines.AddRange(
+                    constraint.Members.Select(member =>
+                        $"                        (({editModelClassName})model).{member.PropertyName},"
+                    )
+                );
+                lines.Add("                    }");
+            }
+
+            lines.Add("            ),");
+        }
+
+        lines.AddRange([
+            "        };",
+            string.Empty,
+            "    /// <inheritdoc />",
+            "    public override IReadOnlyList<EditModelUniquenessConstraint> UniquenessConstraints =>",
+            "        _uniquenessConstraints;",
+        ]);
+
+        return string.Join("\n", lines);
     }
 
     /// <summary>DB 照合糖衣 <c>ValidateUniqueAsync</c>（EditModel の現在値から Entity を組んで Repository へ問い合わせる）を構築する</summary>

@@ -6,8 +6,8 @@ using Xunit;
 namespace QuickER.Tests.GeneratedQueryFixture;
 
 /// <summary>
-/// EditModel 側のコレクション内重複検証（<c>[UniqueConstraint]</c> 属性＋<see cref="EditModelUniquenessValidator"/>）を
-/// 固定フィクスチャ上で検証する。
+/// EditModel 側のコレクション内重複検証（生成された制約テーブル <c>UniquenessConstraints</c> ＋
+/// <see cref="EditModelUniquenessValidator"/>）を固定フィクスチャ上で検証する。
 /// </summary>
 /// <remarks>
 /// フィクスチャの orders には単一列制約 <c>UQ_orders_memo</c>（NULL 許容列）と複合制約
@@ -33,20 +33,39 @@ public class EditModelUniquenessTests
     private static string[] GetErrors(EditModelBase model, string propertyName) =>
         ((IEnumerable)model.GetErrors(propertyName)).Cast<string>().ToArray();
 
-    /// <summary>クラスへ図の UNIQUE 制約が属性として刻まれる（構成列は確定値プロパティ名・宣言順）</summary>
-    [Fact(DisplayName = "EditModel クラスへ UNIQUE 制約が属性として刻まれる")]
-    public void UniqueConstraintAttributes_AreDeclaredOnClass()
+    /// <summary>クラスが図の UNIQUE 制約を制約テーブルとして宣言する（構成列は確定値プロパティ名・宣言順）</summary>
+    [Fact(DisplayName = "EditModel クラスが UNIQUE 制約を宣言する")]
+    public void UniquenessConstraints_AreDeclaredOnClass()
     {
-        var constraints = EditModelUniquenessValidator.For(typeof(OrderEditModel));
+        var constraints = new OrderEditModel().UniquenessConstraints;
 
         constraints
-            .Select(constraint => constraint.Name)
+            .Select(constraint => constraint.ConstraintName)
             .Should()
             .Equal("UQ_orders_memo", "UQ_orders_customer_id_amount");
         constraints[0].PropertyNames.Should().Equal(nameof(OrderEditModel.Memo));
         constraints[1]
             .PropertyNames.Should()
             .Equal(nameof(OrderEditModel.CustomerId), nameof(OrderEditModel.Amount));
+    }
+
+    /// <summary>値アクセサは確定値プロパティを 1 呼び出しで宣言順に読む（リフレクション無しの照合入力）</summary>
+    [Fact(DisplayName = "制約の値アクセサが確定値を宣言順で返す")]
+    public void UniquenessConstraints_ValueAccessor_ReadsConfirmedValues()
+    {
+        var model = NewOrder(10, 7, 120m, "apple pie");
+        var constraints = model.UniquenessConstraints;
+
+        // 値は確定値プロパティそのもの（このフィクスチャは VO 有効なので VO インスタンスが並ぶ）
+        constraints[0].GetValues(model).Should().Equal(model.Memo);
+        constraints[1].GetValues(model).Should().Equal(model.CustomerId, model.Amount);
+    }
+
+    /// <summary>UNIQUE 制約の無いテーブルの EditModel は基底の既定（空リスト）のまま</summary>
+    [Fact(DisplayName = "制約なしテーブルの EditModel は空の制約テーブルを返す")]
+    public void UniquenessConstraints_WithoutConstraints_AreEmpty()
+    {
+        new CustomerEditModel().UniquenessConstraints.Should().BeEmpty();
     }
 
     /// <summary>同じ値の組を持つ要素すべてに重複エラーが登録される（登録先は構成列のバインディングプロパティ）</summary>

@@ -143,6 +143,8 @@ internal sealed partial class CSharpGenerationModelBuilder
             HasDisplayNameCollision = hasDisplayNameCollision,
             Properties = properties,
             Navigations = navigations.Select(BuildEntityNavigation).ToList(),
+            // UNIQUE 制約は DB 定義メタ属性と同じ「Entity 側の自己記述」として刻む（実行時の振る舞いは持たない）
+            UniqueConstraintAttributesBlock = BuildEntityUniqueConstraintAttributes(entity),
         };
     }
 
@@ -207,9 +209,10 @@ internal sealed partial class CSharpGenerationModelBuilder
             TypedParentModelTypeName = ResolveTypedParentModelTypeName(className, navigationModels),
             HasDisplayNameCollision = hasDisplayNameCollision,
             HasNonValueObjectProperty = properties.Any(property => !property.IsValueObject),
-            UniqueConstraintAttributesBlock = uniquenessBlocks.AttributesBlock,
+            UniquenessConstraintsBlock = uniquenessBlocks.ConstraintsBlock,
             UniquenessValidationBlock = uniquenessBlocks.ValidationBlock,
             HasRepositoryFace = uniquenessBlocks.HasRepositoryFace,
+            HasUniqueConstraints = uniquenessBlocks.HasUniqueConstraints,
         };
     }
 
