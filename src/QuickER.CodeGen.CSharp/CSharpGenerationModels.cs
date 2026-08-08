@@ -203,6 +203,16 @@ internal sealed class CSharpClassModel
 
     /// <summary>ナビゲーションプロパティの生成モデル一覧</summary>
     public required IReadOnlyList<CSharpNavigationModel> Navigations { get; init; }
+
+    /// <summary>
+    /// テーブルの UNIQUE 制約をクラスへ宣言する <c>[UniqueConstraint(...)]</c> 属性行（整形済み・制約なしは空文字）。
+    /// </summary>
+    /// <remarks>
+    /// <c>[DbTableMeta]</c> / <c>[DbColumnMeta]</c> と同じ「DB 定義の自己記述」メタで、実行時の振る舞いは持たない
+    /// （重複事前チェックは生成コードが担う）。属性型そのものの出力可否は
+    /// <c>emit_unique_constraint_attr</c>（刻む中身が 1 つでもあるか）が決める。
+    /// </remarks>
+    public string UniqueConstraintAttributesBlock { get; init; } = string.Empty;
 }
 
 /// <summary>エンティティの 1 スカラープロパティに対応する生成モデル</summary>
@@ -560,15 +570,25 @@ internal sealed class CSharpEditModelClassModel
     public required bool HasNonValueObjectProperty { get; init; }
 
     /// <summary>
-    /// テーブルの UNIQUE 制約をクラスへ宣言する <c>[UniqueConstraint(...)]</c> 属性行（整形済み・制約なしは空文字）。
+    /// テーブルの UNIQUE 制約を静的テーブル＋<c>UniquenessConstraints</c> の override として宣言するブロック
+    /// （整形済み・制約なしは空文字）。
     /// </summary>
-    /// <remarks>コレクション内重複検証（<c>EditModelUniquenessValidator</c>）が属性としてリフレクションで読む。</remarks>
-    public string UniqueConstraintAttributesBlock { get; init; } = string.Empty;
+    /// <remarks>
+    /// コレクション内重複検証（<c>EditModelUniquenessValidator</c>）の入力。値アクセサはコンパイル済みラムダで、
+    /// 検証時のリフレクションは無い（Required 検証と同じ「生成コードで検証する」流儀）。
+    /// </remarks>
+    public string UniquenessConstraintsBlock { get; init; } = string.Empty;
 
     /// <summary>
     /// DB 照合糖衣 <c>ValidateUniqueAsync</c> のメソッド全体（整形済み）。Repository 契約面が存在するエンティティのみ非空。
     /// </summary>
     public string UniquenessValidationBlock { get; init; } = string.Empty;
+
+    /// <summary>
+    /// この EditModel が UNIQUE 制約テーブル（<see cref="UniquenessConstraintsBlock"/>）を宣言するかどうか。
+    /// </summary>
+    /// <remarks>固定メンバー名簿の条件付き集合（<see cref="GeneratedFixedMemberNames.EditModelWithUniqueConstraints"/>）の発火条件。</remarks>
+    public required bool HasUniqueConstraints { get; init; }
 
     /// <summary>
     /// この EditModel に対応する Repository 契約面（<c>I{Entity}Repository</c>）が生成されるかどうか。

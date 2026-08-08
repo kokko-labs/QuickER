@@ -272,6 +272,8 @@ var affected = await customers.ExecuteSqlAsync("UPDATE customers SET balance = 0
 
 ### Uniqueness pre-check (CheckUniquenessAsync)
 
+A table's UNIQUE constraints are stamped on its generated **Entity** class as `[UniqueConstraint("PropA", "PropB", Name = "UQ_...")]`, next to `[DbTableMeta]` / `[DbColumnMeta]`. Like those, it is definition metadata that makes the entity a self-describing document of the DB definition; it drives no runtime behaviour (the checks below are plain generated code). The attribute type itself is emitted only when at least one table has a constraint to declare.
+
 Every generated repository contract carries a bulk check built from the diagram's UNIQUE constraints (it is always generated, whether or not the table has any constraint):
 
 ```csharp
@@ -315,7 +317,7 @@ The generated checks run first, then the collected delegates in registration ord
 
 #### Edit models: duplicates inside a collection
 
-Every UNIQUE constraint is also stamped on the generated edit model class as `[UniqueConstraint("PropA", "PropB", Name = "UQ_...")]`. `EditModelCollection<T>.Validate()` reads those attributes and flags values duplicated **among the elements themselves**, registering an error on the binding property of every member of each duplicated group. Value tuples containing a `null` are skipped and deletion targets (`RowState.Removed`) are excluded, matching the database check. For a root-level list that is not an `EditModelCollection<T>`, call the same helper directly:
+An edit model whose table declares UNIQUE constraints also declares them in generated code, as a `static readonly` table of `EditModelUniquenessConstraint` (constraint name, member property names, and a compiled accessor for their values) published through the `UniquenessConstraints` property. `EditModelCollection<T>.Validate()` reads that table and flags values duplicated **among the elements themselves**, registering an error on the binding property of every member of each duplicated group — no reflection is involved, exactly like the generated required-field checks. Value tuples containing a `null` are skipped and deletion targets (`RowState.Removed`) are excluded, matching the database check. For a root-level list that is not an `EditModelCollection<T>`, call the same helper directly:
 
 ```csharp
 var valid = EditModelUniquenessValidator.Validate(models);

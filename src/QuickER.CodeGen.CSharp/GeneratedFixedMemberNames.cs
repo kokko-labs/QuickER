@@ -85,6 +85,18 @@ public static class GeneratedFixedMemberNames
         Create("ValidateUniqueAsync");
 
     /// <summary>
+    /// テーブルに UNIQUE 制約がある EditModel だけが宣言する固定メンバー名
+    /// （制約テーブル <c>_uniquenessConstraints</c> と <c>UniquenessConstraints</c> の override）。
+    /// </summary>
+    /// <remarks>
+    /// コレクション内重複検証（<c>EditModelUniquenessValidator</c>）の入力を「属性のリフレクション」ではなく
+    /// 生成コードで宣言するため、制約を持つテーブルの EditModel にだけ発行される。制約が無ければ基底の
+    /// 既定実装（空リスト）のままなので、同名の列があっても衝突しない。
+    /// </remarks>
+    public static IReadOnlySet<string> EditModelWithUniqueConstraints { get; } =
+        Create("_uniquenessConstraints", "UniquenessConstraints");
+
+    /// <summary>
     /// EditModel の表示名解決ヘルパ名（L1256-L1265）。テンプレートは発行するが、シンボル表検証の対象には**しない**。
     /// </summary>
     /// <remarks>

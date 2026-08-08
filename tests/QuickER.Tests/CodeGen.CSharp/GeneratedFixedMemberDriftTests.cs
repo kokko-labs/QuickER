@@ -40,14 +40,16 @@ public sealed class GeneratedFixedMemberDriftTests
     /// </list>
     /// 値オブジェクトは使わない（VO 化すると表示名ヘルパの発行条件が変わるため）。
     /// </remarks>
-    private static ErDiagram BuildDiagram()
+    /// <param name="withUniqueConstraint"><c>notes</c> へ UNIQUE 制約を足すか（EditModel の制約テーブルを発火させる）</param>
+    private static ErDiagram BuildDiagram(bool withUniqueConstraint = false)
     {
         var invoiceId = Guid.NewGuid();
         var invoiceLineId = Guid.NewGuid();
         var invoicePk = Guid.NewGuid();
         var invoiceLineFk = Guid.NewGuid();
+        var noteCode = Guid.NewGuid();
 
-        return new ErDiagram
+        var diagram = new ErDiagram
         {
             Entities =
             [
@@ -107,6 +109,13 @@ public sealed class GeneratedFixedMemberDriftTests
                             IsPrimaryKey = true,
                             IsNullable = false,
                         },
+                        new Column
+                        {
+                            Id = noteCode,
+                            Name = "note_code",
+                            DataType = "nvarchar(20)",
+                            IsNullable = false,
+                        },
                     ],
                 },
             ],
@@ -122,6 +131,16 @@ public sealed class GeneratedFixedMemberDriftTests
                 },
             ],
         };
+
+        // UNIQUE 制約は条件付き固定メンバー（制約テーブル）の発火条件そのものなので、要求されたときだけ足す
+        if (withUniqueConstraint)
+        {
+            diagram
+                .Entities.Single(entity => entity.TableName == "notes")
+                .UniqueConstraints.Add(new UniqueConstraint { ColumnIds = { noteCode } });
+        }
+
+        return diagram;
     }
 
     /// <summary>
@@ -182,6 +201,24 @@ public sealed class GeneratedFixedMemberDriftTests
     }
 
     /// <summary>
+    /// UNIQUE 制約を持つテーブルでは、EditModel の残余メンバーへ制約テーブルが加わることを検証する
+    /// （<see cref="GeneratedFixedMemberNames.EditModelWithUniqueConstraints"/> の条件付き集合の発火）
+    /// </summary>
+    [Fact(DisplayName = "UNIQUE 制約ありの EditModel は制約テーブルを宣言する")]
+    public void EditModelDeclaredMembers_WithUniqueConstraint_IncludeUniquenessConstraints()
+    {
+        var source = GenerateSource(withUniqueConstraint: true);
+
+        ResidualMembers(source, "NoteEditModel", "NoteEntity")
+            .Should()
+            .BeEquivalentTo(
+                GeneratedFixedMemberNames
+                    .EditModelAlways.Concat(GeneratedFixedMemberNames.EditModelDisplayNameHelpers)
+                    .Concat(GeneratedFixedMemberNames.EditModelWithUniqueConstraints)
+            );
+    }
+
+    /// <summary>
     /// Entity クラスの残余メンバーが固定メンバー名簿と完全一致することを検証する
     /// （テーブル説明があるときだけ <c>DefaultDisplayName</c> の override が出る）
     /// </summary>
@@ -218,6 +255,7 @@ public sealed class GeneratedFixedMemberDriftTests
             .EditModelAlways.Concat(GeneratedFixedMemberNames.EditModelWithCascadeNavigations)
             .Concat(GeneratedFixedMemberNames.EditModelWithTypedParentModel)
             .Concat(GeneratedFixedMemberNames.EditModelWithRepositoryFace)
+            .Concat(GeneratedFixedMemberNames.EditModelWithUniqueConstraints)
             .Concat(GeneratedFixedMemberNames.EditModelDisplayNameHelpers)
             .Concat(GeneratedFixedMemberNames.EntityWithTableDescription)
             .ToHashSet(StringComparer.Ordinal);
@@ -239,10 +277,14 @@ public sealed class GeneratedFixedMemberDriftTests
 
     /// <summary>検証用の図を実際に生成し、全出力ファイルの本文を返す</summary>
     /// <param name="withRepositories">Repository 契約（＝EditModel の DB 照合糖衣）も生成するか</param>
-    private static IReadOnlyList<string> GenerateSource(bool withRepositories = false)
+    /// <param name="withUniqueConstraint">UNIQUE 制約（＝EditModel の制約テーブル）も生成するか</param>
+    private static IReadOnlyList<string> GenerateSource(
+        bool withRepositories = false,
+        bool withUniqueConstraint = false
+    )
     {
         var result = new CSharpCodeGenerationService().Generate(
-            BuildDiagram(),
+            BuildDiagram(withUniqueConstraint),
             new CodeGenerationOptions
             {
                 RootNamespace = "Sample.Domain",

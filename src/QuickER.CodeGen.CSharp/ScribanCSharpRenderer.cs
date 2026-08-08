@@ -264,6 +264,14 @@ internal sealed class ScribanCSharpRenderer
                 )
             );
 
+        // UNIQUE 制約の宣言属性 [UniqueConstraint] は、生成 Entity を「DB 定義の自己記述ドキュメント」にするための
+        // 定義メタ（[DbTableMeta] / [DbColumnMeta] と同列）で、実行時に読む機構は持たない（重複事前チェックは生成コード）。
+        // 付与は生成オプションに依らず「UNIQUE 制約を持つテーブル」へ無条件だが、刻む中身が 1 つでもあるときだけ
+        // 属性型の定義を出力する（実体のない属性クラスは出さない＝emit_db_meta_attr と同じ方針）。
+        var emitUniqueConstraintAttr = model.EntityClasses.Any(c =>
+            !string.IsNullOrEmpty(c.UniqueConstraintAttributesBlock)
+        );
+
         // 無制限バイナリ列のマーカー属性 [UnboundedBinaryColumn] は (1) オプション ON 時に Entity プロパティへ付与し、
         // (2) 共通契約の EntitySaveMetadata が SELECT / UPDATE から除外する列の識別にリフレクションで参照する。
         // 付与のみでも属性型の定義が要るため、Repository / EF Core / InMemory を生成する場合（メタデータが読む）に加え、
@@ -303,6 +311,8 @@ internal sealed class ScribanCSharpRenderer
             ["emit_nav_ref_attr"] = emitNavRefAttr,
             ["emit_sql_column_type_attr"] = emitSqlColumnTypeAttr,
             ["emit_db_meta_attr"] = emitDbMetaAttr,
+            // UNIQUE 制約の宣言属性 [UniqueConstraint] の定義出力可否（付与は entity_classes 側のブロックが持つ）。
+            ["emit_unique_constraint_attr"] = emitUniqueConstraintAttr,
             // 無制限バイナリ列のマーカー属性の定義出力可否（付与可否は exclude_unbounded_binary で別制御）。
             ["emit_unbounded_binary_attr"] = emitUnboundedBinaryAttr,
             // store-generated 列（rowversion 等）のマーカー属性の定義出力可否（付与は property.is_row_version により無条件）。

@@ -128,6 +128,7 @@ internal sealed partial class CSharpGenerationModelBuilder
     ///   <item><description>L1267 <c>RegisterChildren</c> ＝ <see cref="GeneratedFixedMemberNames.EditModelWithCascadeNavigations"/>（カスケード子を持つときのみ）</description></item>
     ///   <item><description>L1322 <c>ParentModel</c> ＝ <see cref="GeneratedFixedMemberNames.EditModelWithTypedParentModel"/>（型付き親モデルがあるときのみ）</description></item>
     ///   <item><description><c>ValidateUniqueAsync</c> ＝ <see cref="GeneratedFixedMemberNames.EditModelWithRepositoryFace"/>（Repository 契約面があるときのみ）</description></item>
+    ///   <item><description><c>_uniquenessConstraints</c> / <c>UniquenessConstraints</c> ＝ <see cref="GeneratedFixedMemberNames.EditModelWithUniqueConstraints"/>（テーブルに UNIQUE 制約があるときのみ）</description></item>
     /// </list>
     /// <para>
     /// 値オブジェクト経路（<c>BuildValueObjectEditModelProperty</c>）も同じ派生名規則で組み立てるため、
@@ -200,6 +201,15 @@ internal sealed partial class CSharpGenerationModelBuilder
         if (editModel.HasRepositoryFace)
         {
             foreach (var name in GeneratedFixedMemberNames.EditModelWithRepositoryFace)
+            {
+                yield return new GeneratedMemberName(name, FormatFixedMemberOrigin(name));
+            }
+        }
+
+        // テーブルに UNIQUE 制約があるときだけ制約テーブル（_uniquenessConstraints / UniquenessConstraints）が発行される
+        if (editModel.HasUniqueConstraints)
+        {
+            foreach (var name in GeneratedFixedMemberNames.EditModelWithUniqueConstraints)
             {
                 yield return new GeneratedMemberName(name, FormatFixedMemberOrigin(name));
             }

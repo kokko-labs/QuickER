@@ -148,20 +148,21 @@ public sealed class StoreGeneratedColumnAttribute : Attribute
 {
 }
 {{ end }}
-{{~ if (edit_model_classes.size > 0 || runtime_package_export) && render_runtime && emit_shared_infra ~}}
+{{~ if (emit_unique_constraint_attr || runtime_package_export) && render_runtime && emit_shared_infra ~}}
 /// <summary>
-/// Attribute that declares one UNIQUE constraint of the underlying table on an edit model class.
-/// The arguments are the confirmed-value property names that make up the constraint, in declaration order.
+/// Custom attribute that declares one UNIQUE constraint of the table on an entity class (a dialect-neutral definition metadata).
+/// The arguments are the entity property names that make up the constraint, in declaration order.
+/// It turns the generated entity into a self-describing document of the DB definition, allowing the constraint to be recovered via reflection.
 /// </summary>
 /// <remarks>
-/// It is applied once per UNIQUE constraint of the table and is read by <see cref="EditModelUniquenessValidator"/> to detect
-/// values duplicated among the elements of a collection. Checking against rows already stored in the database is a separate
-/// concern (the repository's <c>CheckUniquenessAsync</c>).
+/// It is applied once per UNIQUE constraint of the table. Like <c>[DbColumnMeta]</c> / <c>[DbTableMeta]</c> it carries definition
+/// metadata only and drives no runtime behaviour: the uniqueness pre-checks are plain generated code (the repository's
+/// <c>CheckUniquenessAsync</c> against the database, and the constraints an edit model declares for the duplicate check inside a collection).
 /// </remarks>
 [AttributeUsage(AttributeTargets.Class, AllowMultiple = true)]
 public sealed class UniqueConstraintAttribute : Attribute
 {
-    /// <summary>Gets the confirmed-value property names that make up the constraint (declaration order).</summary>
+    /// <summary>Gets the entity property names that make up the constraint (declaration order).</summary>
     public string[] PropertyNames { get; }
 
     /// <summary>Gets or sets the constraint name (the synthesized name when the diagram does not set one).</summary>
