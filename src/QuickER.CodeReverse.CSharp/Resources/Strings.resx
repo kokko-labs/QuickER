@@ -76,4 +76,13 @@
   <data name="Reverse_TypeTokenUnresolved" xml:space="preserve">
     <value>Type token '{0}' for column '{1}.{2}' could not be expanded for the target dialect; using it verbatim.</value>
   </data>
+  <data name="Reverse_UniqueConstraintMemberUnresolved" xml:space="preserve">
+    <value>A UNIQUE constraint on table '{0}' refers to property '{1}', which is not a restored column; the whole constraint was skipped.</value>
+  </data>
+  <data name="Reverse_UniqueConstraintEmpty" xml:space="preserve">
+    <value>A UNIQUE constraint on table '{0}' declares no member property and was skipped.</value>
+  </data>
+  <data name="Reverse_ReferentialActionUnknown" xml:space="preserve">
+    <value>Referential action '{0}' on the relationship '{1}' -&gt; '{2}' is unknown; it was left unspecified (NO ACTION).</value>
+  </data>
 </root>

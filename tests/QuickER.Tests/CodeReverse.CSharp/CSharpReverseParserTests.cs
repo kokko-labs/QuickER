@@ -301,6 +301,276 @@ public class CSharpReverseParserTests
         columns["quantity"].IsNullable.Should().BeTrue();
     }
 
+    /// <summary>
+    /// クラスレベルの <c>[UniqueConstraint]</c> は、構成プロパティ名 → 列 Id の逆写像で復元される
+    /// （単一列・複合列、名前あり・名前なしの 4 通り）
+    /// </summary>
+    [Fact(DisplayName = "[UniqueConstraint] から UNIQUE 制約を復元する（単一・複合・名前有無）")]
+    public void Parse_RestoresUniqueConstraints()
+    {
+        const string source = """
+            namespace Sample;
+
+            [Table("users")]
+            [UniqueConstraint("Email", Name = "UQ_users_email")]
+            [UniqueConstraint("TenantId", "LoginName")]
+            public partial class UserEntity
+            {
+                [Key]
+                [Column("user_id")]
+                [DbColumnMeta("int32")]
+                public int UserId { get; set; }
+
+                [Column("tenant_id")]
+                [DbColumnMeta("int32")]
+                public int TenantId { get; set; }
+
+                [Column("email")]
+                [Required]
+                [DbColumnMeta("string(200)")]
+                public string Email { get; set; }
+
+                [Column("login_name")]
+                [Required]
+                [DbColumnMeta("string(50)")]
+                public string LoginName { get; set; }
+            }
+            """;
+
+        var entity = Parse(source).Entities.Single();
+        var columnNameById = entity.Columns.ToDictionary(
+            column => column.Id,
+            column => column.Name
+        );
+
+        entity.UniqueConstraints.Should().HaveCount(2);
+
+        // 1 件目: 実名付きの単一列制約
+        entity.UniqueConstraints[0].Name.Should().Be("UQ_users_email");
+        entity
+            .UniqueConstraints[0]
+            .ColumnIds.Select(id => columnNameById[id])
+            .Should()
+            .Equal("email");
+
+        // 2 件目: 名前なし（＝生成時に合成）の複合制約。構成列は宣言順を保つ
+        entity.UniqueConstraints[1].Name.Should().BeNull();
+        entity
+            .UniqueConstraints[1]
+            .ColumnIds.Select(id => columnNameById[id])
+            .Should()
+            .Equal("tenant_id", "login_name");
+    }
+
+    /// <summary>UNIQUE 制約属性が無いコードは「制約なし」として復元される（コードが正本＝温存しない）</summary>
+    [Fact(DisplayName = "[UniqueConstraint] が無いコードは制約なしで復元する")]
+    public void Parse_WithoutUniqueConstraintAttributes_RestoresNoConstraints()
+    {
+        const string source = """
+            namespace Sample;
+
+            [Table("users")]
+            public partial class UserEntity
+            {
+                [Key]
+                [Column("user_id")]
+                [DbColumnMeta("int32")]
+                public int UserId { get; set; }
+            }
+            """;
+
+        var result = Parse(source);
+
+        result.Entities.Single().UniqueConstraints.Should().BeEmpty();
+        result.Warnings.Should().BeEmpty();
+    }
+
+    /// <summary>構成プロパティを解決できない UNIQUE 制約は、縮めずに制約ごとスキップし警告する</summary>
+    [Fact(DisplayName = "解決できないプロパティを含む UNIQUE 制約は制約ごとスキップ＋警告")]
+    public void Parse_UniqueConstraintWithUnresolvableMember_SkippedWithWarning()
+    {
+        const string source = """
+            namespace Sample;
+
+            [Table("users")]
+            [UniqueConstraint("Email", "Missing", Name = "UQ_users_email_missing")]
+            [UniqueConstraint("Email", Name = "UQ_users_email")]
+            public partial class UserEntity
+            {
+                [Key]
+                [Column("user_id")]
+                [DbColumnMeta("int32")]
+                public int UserId { get; set; }
+
+                [Column("email")]
+                [Required]
+                [DbColumnMeta("string(200)")]
+                public string Email { get; set; }
+            }
+            """;
+
+        var result = Parse(source);
+
+        // 解決できた 2 件目だけが残る（1 件目は email だけへ縮めずに丸ごと捨てる）
+        result
+            .Entities.Single()
+            .UniqueConstraints.Select(constraint => constraint.Name)
+            .Should()
+            .Equal("UQ_users_email");
+        result
+            .Warnings.Should()
+            .ContainSingle()
+            .Which.Should()
+            .Be(
+                string.Format(
+                    ReverseStrings.Reverse_UniqueConstraintMemberUnresolved,
+                    "users",
+                    "Missing"
+                )
+            );
+    }
+
+    /// <summary>構成プロパティを 1 つも持たない UNIQUE 制約はスキップし警告する</summary>
+    [Fact(DisplayName = "構成 0 件の UNIQUE 制約はスキップ＋警告")]
+    public void Parse_UniqueConstraintWithoutMembers_SkippedWithWarning()
+    {
+        const string source = """
+            namespace Sample;
+
+            [Table("users")]
+            [UniqueConstraint]
+            public partial class UserEntity
+            {
+                [Key]
+                [Column("user_id")]
+                [DbColumnMeta("int32")]
+                public int UserId { get; set; }
+            }
+            """;
+
+        var result = Parse(source);
+
+        result.Entities.Single().UniqueConstraints.Should().BeEmpty();
+        result
+            .Warnings.Should()
+            .ContainSingle()
+            .Which.Should()
+            .Be(string.Format(ReverseStrings.Reverse_UniqueConstraintEmpty, "users"));
+    }
+
+    /// <summary>
+    /// <c>[NavigationReference]</c> の名前付き引数から、外部キー制約名・参照アクションを復元する
+    /// （両側に同値が刻まれるため 1 本のリレーションへ畳まれる）
+    /// </summary>
+    [Fact(
+        DisplayName = "[NavigationReference] の名前付き引数から FK 制約名・参照アクションを復元する"
+    )]
+    public void Parse_RestoresForeignKeyMetadata()
+    {
+        var result = Parse(
+            BuildRelationshipSource(
+                ", ConstraintName = \"FK_orders_customers\", OnDelete = \"Cascade\", OnUpdate = \"SetNull\""
+            )
+        );
+
+        var relationship = result.Relationships.Should().ContainSingle().Subject;
+        relationship.ConstraintName.Should().Be("FK_orders_customers");
+        relationship.OnDelete.Should().Be(ForeignKeyReferentialAction.Cascade);
+        relationship.OnUpdate.Should().Be(ForeignKeyReferentialAction.SetNull);
+
+        // 「コードが指定していた」ことも索引で伝える（GUI マージの温存判断に使う）
+        var metadata = result.RelationshipMetadata[relationship.Id];
+        metadata.ConstraintName.Should().Be("FK_orders_customers");
+        metadata.OnDelete.Should().Be(ForeignKeyReferentialAction.Cascade);
+        metadata.OnUpdate.Should().Be(ForeignKeyReferentialAction.SetNull);
+        result.Warnings.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// 名前付き引数を持たない旧形式の <c>[NavigationReference]</c>（旧バージョンで生成したコード）は
+    /// 既定値で復元し、「未指定」としてメタデータ索引に載せない（GUI マージが現在図から補完できる）
+    /// </summary>
+    [Fact(DisplayName = "旧形式（名前付き引数なし）は既定値＋未指定として復元する")]
+    public void Parse_LegacyNavigationWithoutMetadata_LeavesFieldsUnspecified()
+    {
+        var result = Parse(BuildRelationshipSource(string.Empty));
+
+        var relationship = result.Relationships.Should().ContainSingle().Subject;
+        relationship.ConstraintName.Should().BeNull();
+        relationship.OnDelete.Should().Be(ForeignKeyReferentialAction.NoAction);
+        relationship.OnUpdate.Should().Be(ForeignKeyReferentialAction.NoAction);
+        result.RelationshipMetadata.Should().BeEmpty();
+        result.Warnings.Should().BeEmpty();
+    }
+
+    /// <summary>解釈できない参照アクションのトークンは、警告のうえ未指定（既定値 NoAction）として扱う</summary>
+    [Fact(DisplayName = "未知の参照アクショントークンは警告＋未指定扱い")]
+    public void Parse_UnknownReferentialActionToken_WarnsAndLeavesUnspecified()
+    {
+        var result = Parse(
+            BuildRelationshipSource(
+                ", ConstraintName = \"FK_orders_customers\", OnDelete = \"RESTRICT\""
+            )
+        );
+
+        var relationship = result.Relationships.Should().ContainSingle().Subject;
+        relationship.OnDelete.Should().Be(ForeignKeyReferentialAction.NoAction);
+        // 制約名は指定として残り、解釈できなかった参照アクションだけ未指定になる
+        result
+            .RelationshipMetadata[relationship.Id]
+            .ConstraintName.Should()
+            .Be("FK_orders_customers");
+        result.RelationshipMetadata[relationship.Id].OnDelete.Should().BeNull();
+        result
+            .Warnings.Should()
+            .ContainSingle()
+            .Which.Should()
+            .Be(
+                string.Format(
+                    ReverseStrings.Reverse_ReferentialActionUnknown,
+                    "RESTRICT",
+                    "customers",
+                    "orders"
+                )
+            );
+    }
+
+    /// <summary>customers 1 対多 orders のソースを組み立てる（両側のナビゲーションへ同じ追加引数を刻む）</summary>
+    private static string BuildRelationshipSource(string extraArguments) =>
+        $$"""
+            using System.Collections.Generic;
+
+            namespace Sample;
+
+            [Table("customers")]
+            public partial class CustomerEntity
+            {
+                [Key]
+                [Column("customer_id")]
+                [DbColumnMeta("int32")]
+                public int CustomerId { get; set; }
+
+                [NavigationReference("customers", "customer_id", "orders", "customer_id", true, true, false{{extraArguments}})]
+                public ICollection<OrderEntity> Orders { get; set; }
+            }
+
+            [Table("orders")]
+            public partial class OrderEntity
+            {
+                [Key]
+                [Column("order_id")]
+                [DbColumnMeta("int32")]
+                public int OrderId { get; set; }
+
+                [Column("customer_id")]
+                [DbColumnMeta("int32")]
+                public int CustomerId { get; set; }
+
+                [NavigationReference("customers", "customer_id", "orders", "customer_id", false, false, true{{extraArguments}})]
+                public CustomerEntity Customer { get; set; }
+            }
+            """;
+
     /// <summary>[Column] はあるが [DbColumnMeta] が無い列は、警告のうえスキップされる</summary>
     [Fact(DisplayName = "[DbColumnMeta] なしの列は警告してスキップ")]
     public void Parse_ColumnWithoutTypeMeta_SkippedWithWarning()

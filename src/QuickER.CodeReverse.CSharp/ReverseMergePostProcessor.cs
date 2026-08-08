@@ -3,33 +3,42 @@ using QuickER.Model;
 namespace QuickER.CodeReverse.CSharp;
 
 /// <summary>
-/// コード取込（GUI マージ）専用の後処理。コードに存在しない情報を現在図から温存する。
+/// コード取込（GUI マージ）専用の後処理。コードが語っていない情報を現在図から温存する。
 /// </summary>
 /// <remarks>
 /// <para>
-/// リバース解析結果は方言中立で、ON DELETE / ON UPDATE・FK 制約名・多対多リレーションを持たない
-/// （コード生成がこれらを出力しないため）。<see cref="DiagramMergeReconciler"/> による Guid 引継の後に本後処理を挟み:
+/// リバース解析結果は方言中立で、多対多リレーションを持たない（コード生成が出力しないため）。
+/// 外部キーメタデータ（<c>OnDelete</c> / <c>OnUpdate</c> / <c>ConstraintName</c>）は
+/// <c>[NavigationReference]</c> の名前付き引数として往復するようになったが、既定値のときは冗長を避けて
+/// 出力されず、旧バージョンで生成したコードには引数自体が存在しない。
+/// <see cref="DiagramMergeReconciler"/> による Guid 引継の後に本後処理を挟み:
 /// </para>
 /// <list type="bullet">
-///   <item>(a) 端点 4 つ組（両端テーブル名・列名）が一致するリレーションの <c>OnDelete</c> / <c>OnUpdate</c> /
-///     <c>ConstraintName</c> を現在図の値へ引き継ぐ</item>
+///   <item>(a) 端点 4 つ組（両端テーブル名・列名）が一致するリレーションについて、
+///     <b>コードが指定していなかったフィールドだけ</b> 現在図の値で補完する（fallback 専用＝指定があればコードが勝つ）</item>
 ///   <item>(b) 現在図の多対多リレーションは、両端エンティティが（Guid 引継で）生存していれば結果へ追加温存する</item>
 /// </list>
 /// <para>
 /// コードで消えた通常（多対多以外）のリレーションは追加しない（＝図からも消える）。
+/// UNIQUE 制約は <c>[UniqueConstraint]</c> でコードが完全に語れる（属性なし＝制約なし）ため温存対象外＝コードが正本。
 /// </para>
 /// </remarks>
 public static class ReverseMergePostProcessor
 {
     /// <summary>マージ後のリレーションへ、現在図由来の参照アクション・制約名・多対多を反映した一覧を返す</summary>
-    /// <param name="current">コード取込前の現在図（多対多・参照アクション・制約名の供給元）</param>
+    /// <param name="current">コード取込前の現在図（多対多・未指定フィールドの供給元）</param>
     /// <param name="mergedEntities">Guid 引継済みのマージ結果エンティティ（現在図の Id を引き継いでいる）</param>
     /// <param name="mergedRelationships">Guid 引継済みのマージ結果リレーション（コード由来）</param>
-    /// <returns>参照アクション・制約名を引き継ぎ、生存する多対多を追加した最終リレーション一覧</returns>
+    /// <param name="codeMetadata">
+    /// コードが明示していた外部キーメタデータの索引（<see cref="CodeReverseResult.RelationshipMetadata"/>。
+    /// <c>null</c> または未登録のリレーションは「全フィールド未指定」＝全項目を現在図から補完する）
+    /// </param>
+    /// <returns>未指定フィールドを補完し、生存する多対多を追加した最終リレーション一覧</returns>
     public static List<Relationship> Apply(
         ErDiagram current,
         IReadOnlyList<Entity> mergedEntities,
-        IReadOnlyList<Relationship> mergedRelationships
+        IReadOnlyList<Relationship> mergedRelationships,
+        IReadOnlyDictionary<Guid, ReverseRelationshipMetadata>? codeMetadata = null
     )
     {
         ArgumentNullException.ThrowIfNull(current);
@@ -56,16 +65,33 @@ public static class ReverseMergePostProcessor
 
         var result = new List<Relationship>(mergedRelationships.Count);
 
-        // (a) コード由来リレーションへ、端点一致する現在図リレーションの参照アクション・制約名を引き継ぐ
+        // (a) コード由来リレーションの「未指定」フィールドだけ、端点一致する現在図リレーションの値で補完する
         foreach (var relationship in mergedRelationships)
         {
             var endpoints = ResolveEndpoints(relationship, mergedNames);
 
             if (endpoints is { } key && currentByEndpoints.TryGetValue(key, out var existing))
             {
-                relationship.OnDelete = existing.OnDelete;
-                relationship.OnUpdate = existing.OnUpdate;
-                relationship.ConstraintName = existing.ConstraintName;
+                var specified =
+                    codeMetadata is not null
+                    && codeMetadata.TryGetValue(relationship.Id, out var metadata)
+                        ? metadata
+                        : null;
+
+                if (specified?.OnDelete is null)
+                {
+                    relationship.OnDelete = existing.OnDelete;
+                }
+
+                if (specified?.OnUpdate is null)
+                {
+                    relationship.OnUpdate = existing.OnUpdate;
+                }
+
+                if (specified?.ConstraintName is null)
+                {
+                    relationship.ConstraintName = existing.ConstraintName;
+                }
             }
 
             result.Add(relationship);

@@ -89,5 +89,23 @@ namespace QuickER.CodeReverse.CSharp.Resources {
                 return ResourceManager.GetString("Reverse_TypeTokenUnresolved", resourceCulture);
             }
         }
+
+        public static string Reverse_UniqueConstraintMemberUnresolved {
+            get {
+                return ResourceManager.GetString("Reverse_UniqueConstraintMemberUnresolved", resourceCulture);
+            }
+        }
+
+        public static string Reverse_UniqueConstraintEmpty {
+            get {
+                return ResourceManager.GetString("Reverse_UniqueConstraintEmpty", resourceCulture);
+            }
+        }
+
+        public static string Reverse_ReferentialActionUnknown {
+            get {
+                return ResourceManager.GetString("Reverse_ReferentialActionUnknown", resourceCulture);
+            }
+        }
     }
 }
