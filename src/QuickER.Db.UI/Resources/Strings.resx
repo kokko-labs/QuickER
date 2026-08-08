@@ -295,6 +295,9 @@ Do you want to run this against {0}?</value>
   <data name="Db_ImportFailed" xml:space="preserve">
     <value>Failed to import: {0}</value>
   </data>
+  <data name="Db_ImportCompleted" xml:space="preserve">
+    <value>Import completed: Database</value>
+  </data>
   <data name="Db_SyncWriteBack" xml:space="preserve">
     <value>Write the current diagram back to the existing DB (apply diff ALTER)</value>
   </data>

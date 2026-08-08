@@ -295,6 +295,9 @@
   <data name="Db_ImportFailed" xml:space="preserve">
     <value>取り込みに失敗しました: {0}</value>
   </data>
+  <data name="Db_ImportCompleted" xml:space="preserve">
+    <value>データベースの取り込みが完了しました。</value>
+  </data>
   <data name="Db_SyncWriteBack" xml:space="preserve">
     <value>現在のダイアグラムを既存 DB に書き戻し (差分 ALTER 実行)</value>
   </data>

@@ -445,6 +445,18 @@ namespace QuickER.Resources {
             }
         }
 
+        public static string Status_Saved {
+            get {
+                return ResourceManager.GetString("Status_Saved", resourceCulture);
+            }
+        }
+
+        public static string Status_Opened {
+            get {
+                return ResourceManager.GetString("Status_Opened", resourceCulture);
+            }
+        }
+
         public static string Status_ExternalReloaded {
             get {
                 return ResourceManager.GetString("Status_ExternalReloaded", resourceCulture);

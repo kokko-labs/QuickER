@@ -417,6 +417,9 @@
   <data name="Reverse_Failed" xml:space="preserve">
     <value>コードからの取込に失敗しました: {0}</value>
   </data>
+  <data name="Reverse_ImportCompleted" xml:space="preserve">
+    <value>C# コードの取り込みが完了しました。</value>
+  </data>
   <data name="Toolbar_GenerateCSharp" xml:space="preserve">
     <value>コード生成</value>
   </data>

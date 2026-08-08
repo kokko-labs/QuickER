@@ -839,5 +839,11 @@ namespace QuickER.CodeGen.UI.Resources {
                 return ResourceManager.GetString("Reverse_Failed", resourceCulture);
             }
         }
+
+        public static string Reverse_ImportCompleted {
+            get {
+                return ResourceManager.GetString("Reverse_ImportCompleted", resourceCulture);
+            }
+        }
     }
 }

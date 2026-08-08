@@ -115,6 +115,37 @@ public sealed class CodeReverseCommandService
             Queries = merged.SurvivingQueries.ToList(),
         };
         _host.ReplaceDiagram(diagram);
+        NotifyImportCompleted(reversed);
+    }
+
+    /// <summary>取込完了を通知する（解析警告があれば内訳を添える）</summary>
+    /// <remarks>
+    /// 外部（C# コード）からの取込はファイル取込と同水準の出来事なのでモーダルで知らせる
+    /// （ER 図ファイル自身の保存・開くはステータスバー、との使い分け）。
+    /// 属性の無い列のスキップや解決できない一意制約などの警告は見逃せないため、
+    /// あるときだけ詳細ダイアログで内訳を添える（コード生成の診断提示と同じ規則）。
+    /// </remarks>
+    private void NotifyImportCompleted(CodeReverseResult reversed)
+    {
+        if (reversed.Warnings.Count == 0)
+        {
+            _dialogs.ShowInformation(Strings.Reverse_ImportCompleted, Strings.Common_Complete);
+            return;
+        }
+
+        var details = string.Join(
+            Environment.NewLine,
+            reversed.Warnings.Select(warning => string.Format(Strings.Csharp_WarningLine, warning))
+        );
+
+        _dialogs.ShowInformationDetails(
+            Strings.Reverse_ImportCompleted
+                + Environment.NewLine
+                + Environment.NewLine
+                + Strings.Csharp_WarningIntro,
+            details,
+            Strings.Common_Complete
+        );
     }
 
     /// <summary>構造変更・壊れクエリの削除・説明の上書きを伴う場合のみ確認ダイアログを表示する（DB 取込と同一規則）</summary>

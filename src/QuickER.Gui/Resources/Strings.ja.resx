@@ -249,6 +249,12 @@
   <data name="Status_FitTooltip" xml:space="preserve">
     <value>全体を表示 (Ctrl+Shift+0)</value>
   </data>
+  <data name="Status_Saved" xml:space="preserve">
+    <value>保存しました。</value>
+  </data>
+  <data name="Status_Opened" xml:space="preserve">
+    <value>開きました。</value>
+  </data>
   <data name="Status_ExternalReloaded" xml:space="preserve">
     <value>外部プログラムによる変更を検知し、再読込しました。</value>
   </data>

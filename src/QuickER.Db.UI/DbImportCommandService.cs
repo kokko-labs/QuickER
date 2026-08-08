@@ -95,6 +95,10 @@ public sealed class DbImportCommandService
                 Queries = merged.SurvivingQueries.ToList(),
             };
             _host.ReplaceDiagram(diagram);
+
+            // 外部（DB）からの取込はファイル取込と同水準の出来事なので、完了もモーダルで知らせる
+            // （ER 図ファイル自身の保存・開くはステータスバー、との使い分け）
+            _dialogs.ShowInformation(Strings.Db_ImportCompleted, Strings.Common_Complete);
         }
         catch (Exception ex)
         {

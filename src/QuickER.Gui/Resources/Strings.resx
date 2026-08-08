@@ -239,6 +239,12 @@
   <data name="Status_FitTooltip" xml:space="preserve">
     <value>Fit to window (Ctrl+Shift+0)</value>
   </data>
+  <data name="Status_Saved" xml:space="preserve">
+    <value>Saved.</value>
+  </data>
+  <data name="Status_Opened" xml:space="preserve">
+    <value>Opened.</value>
+  </data>
   <data name="Status_ExternalReloaded" xml:space="preserve">
     <value>Reloaded: the file was changed by another program.</value>
   </data>

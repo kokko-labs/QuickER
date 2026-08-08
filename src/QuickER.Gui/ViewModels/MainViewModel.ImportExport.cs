@@ -1113,6 +1113,10 @@ public partial class MainViewModel
         {
             JsonStorageService.SaveAtomic(path, ToDocument());
             UpdateDocumentIdentity(path);
+
+            // ER 図ファイル自身の読み書きは、作業を止めないステータスバーの一時通知で知らせる
+            // （外部形式との入出力＝モーダル、との使い分け。ファイル名はタイトルバーに出るため入れない）
+            NotifyStatus(Strings.Status_Saved);
         }
         catch (Exception ex)
         {
@@ -1197,6 +1201,9 @@ public partial class MainViewModel
 
         // 読込したファイルを現在パスとして紐付け、内容ハッシュを記録してクリーン状態にする
         UpdateDocumentIdentity(picked.Path);
+
+        // 保存と同じく ER 図ファイル自身の読み書きなので、ステータスバーの一時通知で知らせる
+        NotifyStatus(Strings.Status_Opened);
     }
 
     /// <summary>読み込んだ文書を現在の図へ反映する（配置なし文書は全体を自動整列する）</summary>

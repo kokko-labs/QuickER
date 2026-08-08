@@ -516,6 +516,12 @@ namespace QuickER.Db.UI.Resources {
             }
         }
 
+        public static string Db_ImportCompleted {
+            get {
+                return ResourceManager.GetString("Db_ImportCompleted", resourceCulture);
+            }
+        }
+
         public static string Db_SyncWriteBack {
             get {
                 return ResourceManager.GetString("Db_SyncWriteBack", resourceCulture);

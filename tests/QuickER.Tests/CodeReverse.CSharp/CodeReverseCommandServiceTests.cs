@@ -530,4 +530,137 @@ public class CodeReverseCommandServiceTests
             }
         }
     }
+
+    /// <summary>解析警告が無い取込は、単文の完了通知（モーダル）だけを出すことを検証する</summary>
+    /// <remarks>外部（C# コード）からの取込はファイル取込と同水準のためモーダルで知らせる</remarks>
+    [Fact(DisplayName = "コード取込の完了はモーダルで知らせる")]
+    public void Run_Success_ShowsCompletionDialog()
+    {
+        var codeDiagram = new ErDiagram
+        {
+            Entities =
+            {
+                new Entity
+                {
+                    TableName = "customers",
+                    Columns =
+                    {
+                        new Column
+                        {
+                            Name = "customer_id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                    },
+                },
+            },
+        };
+        var (picked, root) = WriteGeneratedSource(codeDiagram);
+
+        try
+        {
+            var host = new StubErDiagramHost
+            {
+                DiagramToReturn = new ErDiagram(),
+                ProvidersToReturn = SqlServerRegistry(),
+                TargetDbmsToReturn = "sqlserver",
+            };
+            var dialogs = new StubDialogService();
+            var service = new CodeReverseCommandService(
+                host,
+                dialogs,
+                new StubFileDialogService { OpenResult = picked }
+            );
+
+            service.Run();
+
+            host.LastReplacedDiagram.Should().NotBeNull();
+            dialogs
+                .InformationMessages.Should()
+                .ContainSingle()
+                .Which.Should()
+                .Be(CodeGenStrings.Reverse_ImportCompleted);
+            dialogs.InformationDetailsMessages.Should().BeEmpty();
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>解析警告があるときは、完了通知へ内訳（警告の箇条書き）を添えることを検証する</summary>
+    /// <remarks>
+    /// 属性の無い列のスキップや展開できない型トークンは見逃せないため、詳細ダイアログで提示する。
+    /// CLI（<c>quicker reverse</c>）が stderr へ出しているのと同じ警告を GUI でも見せる。
+    /// </remarks>
+    [Fact(DisplayName = "コード取込の解析警告は完了通知へ内訳として添える")]
+    public void Run_WithParseWarnings_ShowsDetails()
+    {
+        // 展開できない型トークンは verbatim 採用＋警告になる（CSharpReverseParser の既定挙動）
+        const string source = """
+            namespace Sample;
+
+            [Table("things")]
+            public partial class ThingEntity
+            {
+                [Column("weird")]
+                [DbColumnMeta("bogustype")]
+                public object Weird { get; set; }
+            }
+            """;
+        var (picked, root) = WriteSource(source);
+
+        try
+        {
+            var host = new StubErDiagramHost
+            {
+                DiagramToReturn = new ErDiagram(),
+                ProvidersToReturn = SqlServerRegistry(),
+                TargetDbmsToReturn = "sqlserver",
+            };
+            var dialogs = new StubDialogService();
+            var service = new CodeReverseCommandService(
+                host,
+                dialogs,
+                new StubFileDialogService { OpenResult = picked }
+            );
+
+            service.Run();
+
+            host.LastReplacedDiagram.Should().NotBeNull();
+            dialogs.InformationMessages.Should().BeEmpty();
+
+            var shown = dialogs.InformationDetailsMessages.Should().ContainSingle().Subject;
+            shown.Message.Should().StartWith(CodeGenStrings.Reverse_ImportCompleted);
+            shown.Message.Should().EndWith(CodeGenStrings.Csharp_WarningIntro);
+            shown.Details.Should().Contain("bogustype");
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>指定した C# ソースを一時ファイルへ書き出し、選択結果を返す</summary>
+    private static (FileDialogResult picked, string root) WriteSource(string source)
+    {
+        var root = Path.Combine(
+            Path.GetTempPath(),
+            "QuickERReverseGuiTests",
+            Guid.NewGuid().ToString("N")
+        );
+        Directory.CreateDirectory(root);
+
+        var sourcePath = Path.Combine(root, "Model.g.cs");
+        File.WriteAllText(sourcePath, source);
+
+        return (new FileDialogResult(sourcePath, 1), root);
+    }
 }
