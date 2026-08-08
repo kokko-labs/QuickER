@@ -254,6 +254,19 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
         };
 
     /// <summary>
+    /// 現在の API プロバイダーの既定モデル（カタログを持たないローカル LLM は空）。
+    /// カタログの並び順は「上位モデルから」の表示順であって既定ではないため、
+    /// 既定はカタログ先頭ではなく <see cref="AiModelCatalog"/> の Default* から解決する。
+    /// </summary>
+    private string CurrentApiDefaultModel =>
+        ApiProvider switch
+        {
+            AiProvider.Claude => AiModelCatalog.DefaultClaudeModel,
+            AiProvider.OpenAI => AiModelCatalog.DefaultOpenAiModel,
+            _ => string.Empty,
+        };
+
+    /// <summary>
     /// 現在の API プロバイダーに応じてモデル候補を再構築する。静的カタログ（削除不可）を上に固定し、
     /// その下へカタログ外の手入力モデルの MRU 履歴（× で削除可能）を追加する
     /// （カタログと同名の履歴は表示しない。両ダイアログ共有ファイルの最新を反映するため都度 Load する）。
@@ -502,9 +515,12 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
 
         RefreshApiModelCandidates();
 
-        // 候補が空（ローカル LLM で履歴なし）でも落ちないよう先頭を選ぶ
-        // （OpenAI / Claude はカタログ先頭＝既定・ローカル LLM は MRU 先頭または空）。
-        ApiModel = ApiModelCandidates.FirstOrDefault()?.Name ?? string.Empty;
+        // OpenAI / Claude はカタログの既定モデル、ローカル LLM は MRU 先頭（履歴なしなら空）を選ぶ。
+        // カタログの並び順は上位モデルからの表示順なので、先頭を既定にすると切替のたびに
+        // 最上位（＝最も高コスト）のモデルが選ばれてしまう。
+        ApiModel = string.IsNullOrEmpty(CurrentApiDefaultModel)
+            ? ApiModelCandidates.FirstOrDefault()?.Name ?? string.Empty
+            : CurrentApiDefaultModel;
 
         if (value == AiProvider.LocalLlm && string.IsNullOrWhiteSpace(EndpointOverride))
         {
