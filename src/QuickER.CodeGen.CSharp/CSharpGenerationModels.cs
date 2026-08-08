@@ -334,6 +334,17 @@ internal sealed class CSharpNavigationModel
 
     /// <summary>dependent 側（FK 側）のカラム名</summary>
     public required string DependentColumnName { get; init; }
+
+    /// <summary>
+    /// <c>[NavigationReference]</c> へ追記する外部キーメタデータの名前付き引数（例:
+    /// <c>, ConstraintName = "FK_orders_customers", OnDelete = "Cascade"</c>）。既定値のみなら空文字
+    /// </summary>
+    /// <remarks>
+    /// 冗長を避けるため「制約名は非 null のとき・参照アクションは <c>NoAction</c> 以外のとき」だけ出力する
+    /// （説明を持たない列で <c>Description</c> を省く既定の流儀と同じ）。C# リバースはこの引数から
+    /// 制約名・参照アクションを復元する。
+    /// </remarks>
+    public string ForeignKeyMetadataArguments { get; init; } = string.Empty;
 }
 
 /// <summary>Mapper クラスの生成モデル（インターフェースなし）</summary>

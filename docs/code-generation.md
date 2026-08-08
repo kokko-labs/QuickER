@@ -272,7 +272,7 @@ var affected = await customers.ExecuteSqlAsync("UPDATE customers SET balance = 0
 
 ### Uniqueness pre-check (CheckUniquenessAsync)
 
-A table's UNIQUE constraints are stamped on its generated **Entity** class as `[UniqueConstraint("PropA", "PropB", Name = "UQ_...")]`, next to `[DbTableMeta]` / `[DbColumnMeta]`. Like those, it is definition metadata that makes the entity a self-describing document of the DB definition; it drives no runtime behaviour (the checks below are plain generated code). The attribute type itself is emitted only when at least one table has a constraint to declare.
+A table's UNIQUE constraints are stamped on its generated **Entity** class as `[UniqueConstraint("PropA", "PropB", Name = "UQ_...")]`, next to `[DbTableMeta]` / `[DbColumnMeta]`. Like those, it is definition metadata that makes the entity a self-describing document of the DB definition; it drives no runtime behaviour (the checks below are plain generated code). The attribute type itself is emitted only when at least one table has a constraint to declare. C# reverse reads the attribute back, so the constraints round-trip (see [Import and export](import-export.md)).
 
 Every generated repository contract carries a bulk check built from the diagram's UNIQUE constraints (it is always generated, whether or not the table has any constraint):
 

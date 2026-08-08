@@ -25,8 +25,22 @@ namespace QuickER.CodeReverse.CSharp;
 ///   <item>PK＝<c>[Key]</c>・NULL 許容＝プロパティ型が <c>?</c> 付き（<see cref="NullableTypeSyntax"/>）。
 ///     生成コードは <c>#nullable enable</c> のもと NULL 許容列を型の <c>?</c> として必ず表すため、値型・参照型・VO の全ケースで型構文が正</item>
 ///   <item>説明＝<c>[DbColumnMeta].Description</c> / <c>[DbTableMeta].Description</c></item>
-///   <item>リレーション＝<c>[NavigationReference]</c>（端点 4 つ組で双方向の重複を一意化）</item>
+///   <item>UNIQUE 制約＝クラスレベルの <c>[UniqueConstraint("PropA", "PropB", Name = "UQ_…")]</c>
+///     （プロパティ名 → 同クラスの <c>[Column]</c> → 復元済み列 Id へ逆写像。構成列が解決できない制約は制約ごとスキップ＋警告）</item>
+///   <item>リレーション＝<c>[NavigationReference]</c>（端点 4 つ組で双方向の重複を一意化）＋
+///     名前付き引数 <c>ConstraintName</c> / <c>OnDelete</c> / <c>OnUpdate</c> による外部キーメタデータ</item>
 /// </list>
+/// </para>
+/// <para>
+/// <b>UNIQUE 制約はコードが正本</b>＝属性が 1 つも無いコードは「制約なし」として復元する（現在図からの温存はしない）。
+/// 属性が無いことは「旧バージョンで生成したコード」と「制約を持たないテーブル」を区別できず、温存すると
+/// コード上で削除した制約が消せなくなるため（外部キーメタデータは <c>[NavigationReference]</c> に「未指定」を
+/// 表現できるので、そちらだけ <see cref="ReverseMergePostProcessor"/> が未指定分を温存する）。
+/// </para>
+/// <para>
+/// 制約名の往復には非対称がある: 図で名前を持たない制約（<see cref="UniqueConstraint.Name"/> が <c>null</c>）でも
+/// 生成コードには合成名（<see cref="UniqueConstraint.SynthesizeName"/>）が刻まれるため、復元後は実名を持つ。
+/// 合成規則は決定的で DDL 上の制約名も同じになるため、意味の変化はない。
 /// </para>
 /// </remarks>
 public sealed class CSharpReverseParser
@@ -104,6 +118,8 @@ public sealed class CSharpReverseParser
             };
 
             var columnIndex = new Dictionary<string, Column>(StringComparer.Ordinal);
+            // UNIQUE 制約の構成列は「C# プロパティ名」で書かれているため、逆写像用の索引を作る
+            var columnsByPropertyName = new Dictionary<string, Column>(StringComparer.Ordinal);
 
             foreach (var property in classDecl.Members.OfType<PropertyDeclarationSyntax>())
             {
@@ -135,21 +151,110 @@ public sealed class CSharpReverseParser
 
                 entity.Columns.Add(column);
                 columnIndex[column.Name] = column;
+                columnsByPropertyName[property.Identifier.Text] = column;
             }
+
+            // クラスレベルの [UniqueConstraint]（AllowMultiple）を列 Id へ逆写像して復元する
+            entity.UniqueConstraints.AddRange(
+                ReadUniqueConstraints(classDecl, tableName, columnsByPropertyName, warnings)
+            );
 
             entities.Add(entity);
             columnsByTable[tableName] = columnIndex;
             entityByTable[tableName] = entity;
         }
 
-        var relationships = BuildRelationships(navigations, entityByTable, columnsByTable);
+        var (relationships, relationshipMetadata) = BuildRelationships(
+            navigations,
+            entityByTable,
+            columnsByTable,
+            warnings
+        );
 
         return new CodeReverseResult
         {
             Entities = entities,
             Relationships = relationships,
+            RelationshipMetadata = relationshipMetadata,
             Warnings = warnings,
         };
+    }
+
+    /// <summary>
+    /// クラスレベルの <c>[UniqueConstraint]</c> を、構成プロパティ名 → 復元済み列 Id へ逆写像して復元する。
+    /// </summary>
+    /// <remarks>
+    /// 構成列が 1 つでも解決できない制約（型メタ欠落でスキップされた列を含む・プロパティ名が文字列リテラルでない）と、
+    /// 構成 0 件の制約は、縮めて別の意味の制約に変質させないよう <b>制約ごと</b> スキップし、非致命の警告で通知する。
+    /// 制約名は名前付き引数 <c>Name</c> が正本で、未指定・空文字は <c>null</c>（＝生成時に合成）として復元する。
+    /// </remarks>
+    private static List<UniqueConstraint> ReadUniqueConstraints(
+        ClassDeclarationSyntax classDecl,
+        string tableName,
+        IReadOnlyDictionary<string, Column> columnsByPropertyName,
+        List<string> warnings
+    )
+    {
+        var constraints = new List<UniqueConstraint>();
+
+        foreach (var attribute in FindAttributes(classDecl.AttributeLists, "UniqueConstraint"))
+        {
+            var positional =
+                attribute
+                    .ArgumentList?.Arguments.Where(argument => argument.NameEquals is null)
+                    .ToList()
+                ?? [];
+
+            if (positional.Count == 0)
+            {
+                warnings.Add(string.Format(Strings.Reverse_UniqueConstraintEmpty, tableName));
+
+                continue;
+            }
+
+            var columnIds = new List<Guid>(positional.Count);
+            var complete = true;
+
+            foreach (var argument in positional)
+            {
+                // 文字列リテラル以外（nameof・定数参照など）は構文解析だけでは解決できない
+                var propertyName = ReadStringLiteral(argument);
+
+                if (
+                    propertyName is null
+                    || !columnsByPropertyName.TryGetValue(propertyName, out var column)
+                )
+                {
+                    warnings.Add(
+                        string.Format(
+                            Strings.Reverse_UniqueConstraintMemberUnresolved,
+                            tableName,
+                            propertyName ?? argument.Expression.ToString()
+                        )
+                    );
+                    complete = false;
+
+                    break;
+                }
+
+                columnIds.Add(column.Id);
+            }
+
+            if (!complete)
+            {
+                continue;
+            }
+
+            constraints.Add(
+                new UniqueConstraint
+                {
+                    Name = NullIfBlank(ReadNamedArgument(attribute, "Name")),
+                    ColumnIds = columnIds,
+                }
+            );
+        }
+
+        return constraints;
     }
 
     /// <summary>
@@ -274,44 +379,55 @@ public sealed class CSharpReverseParser
     /// 参照先（principal・PK 側）を起点（Source）、FK 保有側（dependent）を終点（Target）とし、
     /// <c>SourceColumn</c>＝principal 列・<c>TargetColumn</c>＝dependent 列。いずれかの端で
     /// <c>IsCollection=true</c> なら 1 対多、そうでなければ 1 対 1 とする。
+    /// <para>
+    /// 外部キーメタデータ（制約名・参照アクション）は双方向ナビの両側へ同値が刻まれるため、
+    /// グループ内で最初に見つかった指定を採用する。指定の有無は
+    /// <see cref="ReverseRelationshipMetadata"/> として別に返す（既定値と未指定の区別）。
+    /// </para>
     /// </remarks>
-    private static List<Relationship> BuildRelationships(
+    private static (
+        List<Relationship> Relationships,
+        Dictionary<Guid, ReverseRelationshipMetadata> Metadata
+    ) BuildRelationships(
         List<NavigationInfo> navigations,
         IReadOnlyDictionary<string, Entity> entityByTable,
-        IReadOnlyDictionary<string, Dictionary<string, Column>> columnsByTable
+        IReadOnlyDictionary<string, Dictionary<string, Column>> columnsByTable,
+        List<string> warnings
     )
     {
         // 端点 4 つ組（principal テーブル・列 / dependent テーブル・列）でグループ化する（双方向属性の重複排除）
-        var groups =
-            new Dictionary<
-                (
-                    string PrincipalTable,
-                    string PrincipalColumn,
-                    string DependentTable,
-                    string DependentColumn
-                ),
-                bool
-            >();
+        var groups = new Dictionary<NavigationEndpoints, NavigationGroup>();
 
         foreach (var nav in navigations)
         {
-            var key = (
+            var key = new NavigationEndpoints(
                 nav.PrincipalTable,
                 nav.PrincipalColumn,
                 nav.DependentTable,
                 nav.DependentColumn
             );
 
+            if (!groups.TryGetValue(key, out var group))
+            {
+                group = new NavigationGroup();
+                groups[key] = group;
+            }
+
             // いずれかの端点で IsCollection=true なら 1 対多（親側コレクションが真を持つ・親参照側は常に偽）
-            groups[key] = groups.TryGetValue(key, out var isCollection)
-                ? isCollection || nav.IsCollection
-                : nav.IsCollection;
+            group.IsCollection |= nav.IsCollection;
+            // 外部キーメタデータは両側同値のため、先に見つかった指定を採る（片側だけ手編集された場合も指定を拾う）
+            group.ConstraintName ??= nav.ConstraintName;
+            group.OnDeleteToken ??= nav.OnDeleteToken;
+            group.OnUpdateToken ??= nav.OnUpdateToken;
         }
 
         var relationships = new List<Relationship>();
+        var metadata = new Dictionary<Guid, ReverseRelationshipMetadata>();
 
-        foreach (var (key, isCollection) in groups)
+        foreach (var (key, group) in groups)
         {
+            var isCollection = group.IsCollection;
+
             // 両端テーブルが解析対象に存在しなければスキップ（解決できない参照）
             if (
                 !entityByTable.TryGetValue(key.PrincipalTable, out var principalEntity)
@@ -333,22 +449,79 @@ public sealed class CSharpReverseParser
                 markForeignKey: true
             );
 
-            relationships.Add(
-                new Relationship
-                {
-                    SourceEntityId = principalEntity.Id, // 参照先（PK 側）を起点として表現
-                    TargetEntityId = dependentEntity.Id, // FK 保有側
-                    Type = isCollection ? RelationshipType.OneToMany : RelationshipType.OneToOne,
-                    // C# リバースは単一キー前提のため 1 組の列ペアとして表現する
-                    ColumnPairs =
-                        sourceColumnId is { } sourceId && targetColumnId is { } targetId
-                            ? [new RelationshipColumnPair(sourceId, targetId)]
-                            : [],
-                }
+            // 参照アクションは列挙体名トークン。未知トークンは既定値のまま「未指定」として扱い警告する
+            var onDelete = ParseReferentialAction(group.OnDeleteToken, key, warnings);
+            var onUpdate = ParseReferentialAction(group.OnUpdateToken, key, warnings);
+
+            var relationship = new Relationship
+            {
+                SourceEntityId = principalEntity.Id, // 参照先（PK 側）を起点として表現
+                TargetEntityId = dependentEntity.Id, // FK 保有側
+                Type = isCollection ? RelationshipType.OneToMany : RelationshipType.OneToOne,
+                // C# リバースは単一キー前提のため 1 組の列ペアとして表現する
+                ColumnPairs =
+                    sourceColumnId is { } sourceId && targetColumnId is { } targetId
+                        ? [new RelationshipColumnPair(sourceId, targetId)]
+                        : [],
+                ConstraintName = group.ConstraintName,
+                OnDelete = onDelete ?? ForeignKeyReferentialAction.NoAction,
+                OnUpdate = onUpdate ?? ForeignKeyReferentialAction.NoAction,
+            };
+
+            relationships.Add(relationship);
+
+            var specified = new ReverseRelationshipMetadata(
+                group.ConstraintName,
+                onDelete,
+                onUpdate
             );
+
+            if (specified.HasAnySpecified)
+            {
+                metadata[relationship.Id] = specified;
+            }
         }
 
-        return relationships;
+        return (relationships, metadata);
+    }
+
+    /// <summary>
+    /// 参照アクションのトークン（<see cref="ForeignKeyReferentialAction"/> の列挙体名）を復元する。
+    /// </summary>
+    /// <returns>
+    /// 未指定（<c>null</c>）はそのまま <c>null</c>。解釈できないトークンは警告のうえ <c>null</c>（＝未指定扱い・
+    /// リレーションは既定値 <see cref="ForeignKeyReferentialAction.NoAction"/> になる）。
+    /// </returns>
+    private static ForeignKeyReferentialAction? ParseReferentialAction(
+        string? token,
+        NavigationEndpoints endpoints,
+        List<string> warnings
+    )
+    {
+        if (token is null)
+        {
+            return null;
+        }
+
+        // 数値文字列も TryParse は通してしまうため、定義済みの列挙値であることまで確認する
+        if (
+            Enum.TryParse<ForeignKeyReferentialAction>(token, ignoreCase: true, out var action)
+            && Enum.IsDefined(action)
+        )
+        {
+            return action;
+        }
+
+        warnings.Add(
+            string.Format(
+                Strings.Reverse_ReferentialActionUnknown,
+                token,
+                endpoints.PrincipalTable,
+                endpoints.DependentTable
+            )
+        );
+
+        return null;
     }
 
     /// <summary>テーブル名・列名から列 Id を解決する（<paramref name="markForeignKey"/> 時は FK フラグを立てる）</summary>
@@ -379,12 +552,20 @@ public sealed class CSharpReverseParser
     private static NavigationInfo? TryReadNavigation(SyntaxList<AttributeListSyntax> attributeLists)
     {
         var attribute = FindAttribute(attributeLists, "NavigationReference");
-        var arguments = attribute?.ArgumentList?.Arguments;
+
+        if (attribute is null)
+        {
+            return null;
+        }
 
         // 位置引数: principalTable, principalColumn, dependentTable, dependentColumn, isCollection, cascade, isParentReference
-        var positional = arguments?.Where(argument => argument.NameEquals is null).ToList();
+        var positional =
+            attribute
+                .ArgumentList?.Arguments.Where(argument => argument.NameEquals is null)
+                .ToList()
+            ?? [];
 
-        if (positional is null || positional.Count < 5)
+        if (positional.Count < 5)
         {
             return null;
         }
@@ -409,7 +590,12 @@ public sealed class CSharpReverseParser
             principalColumn,
             dependentTable,
             dependentColumn,
-            IsCollection: ReadBooleanLiteral(positional[4])
+            IsCollection: ReadBooleanLiteral(positional[4]),
+            // 名前付き引数の外部キーメタデータ（省略＝未指定。旧バージョンの生成コードには存在しない）
+            // 空・空白のみの制約名は「未指定」として扱う（UNIQUE 制約の Name と同じ規則）
+            ConstraintName: NullIfBlank(ReadNamedArgument(attribute, "ConstraintName")),
+            OnDeleteToken: ReadNamedArgument(attribute, "OnDelete"),
+            OnUpdateToken: ReadNamedArgument(attribute, "OnUpdate")
         );
     }
 
@@ -423,10 +609,16 @@ public sealed class CSharpReverseParser
     private static AttributeSyntax? FindAttribute(
         SyntaxList<AttributeListSyntax> attributeLists,
         string name
+    ) => FindAttributes(attributeLists, name).FirstOrDefault();
+
+    /// <summary>指定名の属性をすべて記述順に列挙する（<c>AllowMultiple</c> の属性用）</summary>
+    private static IEnumerable<AttributeSyntax> FindAttributes(
+        SyntaxList<AttributeListSyntax> attributeLists,
+        string name
     ) =>
         attributeLists
             .SelectMany(list => list.Attributes)
-            .FirstOrDefault(attribute =>
+            .Where(attribute =>
                 string.Equals(GetSimpleAttributeName(attribute), name, StringComparison.Ordinal)
             );
 
@@ -458,7 +650,14 @@ public sealed class CSharpReverseParser
     )
     {
         var attribute = FindAttribute(attributeLists, attributeName);
-        var named = attribute?.ArgumentList?.Arguments.FirstOrDefault(argument =>
+
+        return attribute is null ? null : ReadNamedArgument(attribute, argumentName);
+    }
+
+    /// <summary>指定した属性 1 件の名前付き引数（<c>Name = "..."</c>）を文字列として取得する</summary>
+    private static string? ReadNamedArgument(AttributeSyntax attribute, string argumentName)
+    {
+        var named = attribute.ArgumentList?.Arguments.FirstOrDefault(argument =>
             string.Equals(
                 argument.NameEquals?.Name.Identifier.Text,
                 argumentName,
@@ -493,16 +692,48 @@ public sealed class CSharpReverseParser
             ? literal.Token.ValueText
             : null;
 
+    /// <summary>空文字・空白のみの名前を「未指定」（<c>null</c>）へ正規化する</summary>
+    private static string? NullIfBlank(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value;
+
     /// <summary>属性引数の式が <c>true</c> リテラルであるか（それ以外・不明は false）</summary>
     private static bool ReadBooleanLiteral(AttributeArgumentSyntax argument) =>
         argument.Expression.IsKind(SyntaxKind.TrueLiteralExpression);
 
     /// <summary><c>[NavigationReference]</c> の端点情報（重複一意化・リレーション組み立てに使う）</summary>
+    /// <remarks>末尾 3 つは名前付き引数由来の外部キーメタデータ（未指定は <c>null</c>・トークンは未検証の生文字列）。</remarks>
     private sealed record NavigationInfo(
         string PrincipalTable,
         string PrincipalColumn,
         string DependentTable,
         string DependentColumn,
-        bool IsCollection
+        bool IsCollection,
+        string? ConstraintName,
+        string? OnDeleteToken,
+        string? OnUpdateToken
     );
+
+    /// <summary>双方向ナビの重複一意化キー（端点 4 つ組）</summary>
+    private readonly record struct NavigationEndpoints(
+        string PrincipalTable,
+        string PrincipalColumn,
+        string DependentTable,
+        string DependentColumn
+    );
+
+    /// <summary>端点 4 つ組でまとめたナビゲーション（両側の情報を畳み込む可変の入れ物）</summary>
+    private sealed class NavigationGroup
+    {
+        /// <summary>いずれかの端点がコレクション（＝1 対多）か</summary>
+        public bool IsCollection { get; set; }
+
+        /// <summary>コードで指定されていた外部キー制約名（未指定は <c>null</c>）</summary>
+        public string? ConstraintName { get; set; }
+
+        /// <summary>コードで指定されていた <c>ON DELETE</c> トークン（未指定は <c>null</c>）</summary>
+        public string? OnDeleteToken { get; set; }
+
+        /// <summary>コードで指定されていた <c>ON UPDATE</c> トークン（未指定は <c>null</c>）</summary>
+        public string? OnUpdateToken { get; set; }
+    }
 }

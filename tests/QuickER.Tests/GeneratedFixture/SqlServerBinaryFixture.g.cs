@@ -53,6 +53,15 @@ public sealed class NavigationReferenceAttribute : Attribute
     /// <summary>Gets a value indicating whether this is a reference navigation to the parent (referenced) side.</summary>
     public bool IsParentReference { get; }
 
+    /// <summary>Gets or sets the name of the foreign key constraint. Null when the diagram does not define one (definition metadata only; it drives no runtime behaviour).</summary>
+    public string? ConstraintName { get; set; }
+
+    /// <summary>Gets or sets the referential action applied when the parent row is deleted (one of <c>NoAction</c> / <c>Cascade</c> / <c>SetNull</c> / <c>SetDefault</c>). Null means the default <c>NoAction</c>.</summary>
+    public string? OnDelete { get; set; }
+
+    /// <summary>Gets or sets the referential action applied when the parent key is updated (one of <c>NoAction</c> / <c>Cascade</c> / <c>SetNull</c> / <c>SetDefault</c>). Null means the default <c>NoAction</c>.</summary>
+    public string? OnUpdate { get; set; }
+
     /// <summary>Initializes a new instance with the referenced table and column information.</summary>
     public NavigationReferenceAttribute(
         string principalTable,
@@ -512,7 +521,7 @@ public partial class DocumentEntity : EntityBase
     public byte[]? RowVer { get; set; }
 
     /// <summary>DocumentNotes navigation property</summary>
-    [NavigationReference("documents", "document_id", "document_notes", "document_id", true, true, false)]
+    [NavigationReference("documents", "document_id", "document_notes", "document_id", true, true, false, ConstraintName = "FK_document_notes_documents", OnDelete = "Cascade")]
     public ICollection<DocumentNoteEntity> DocumentNotes { get; set; } = new List<DocumentNoteEntity>();
 }
 
@@ -543,7 +552,7 @@ public partial class DocumentNoteEntity : EntityBase
 
     /// <summary>Document navigation property</summary>
     [JsonIgnore]
-    [NavigationReference("documents", "document_id", "document_notes", "document_id", false, false, true)]
+    [NavigationReference("documents", "document_id", "document_notes", "document_id", false, false, true, ConstraintName = "FK_document_notes_documents", OnDelete = "Cascade")]
     public DocumentEntity Document { get; set; } = null!;
 }
 

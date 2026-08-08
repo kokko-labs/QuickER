@@ -58,6 +58,15 @@ public sealed class NavigationReferenceAttribute : Attribute
     /// <summary>Gets a value indicating whether this is a reference navigation to the parent (referenced) side.</summary>
     public bool IsParentReference { get; }
 
+    /// <summary>Gets or sets the name of the foreign key constraint. Null when the diagram does not define one (definition metadata only; it drives no runtime behaviour).</summary>
+    public string? ConstraintName { get; set; }
+
+    /// <summary>Gets or sets the referential action applied when the parent row is deleted (one of <c>NoAction</c> / <c>Cascade</c> / <c>SetNull</c> / <c>SetDefault</c>). Null means the default <c>NoAction</c>.</summary>
+    public string? OnDelete { get; set; }
+
+    /// <summary>Gets or sets the referential action applied when the parent key is updated (one of <c>NoAction</c> / <c>Cascade</c> / <c>SetNull</c> / <c>SetDefault</c>). Null means the default <c>NoAction</c>.</summary>
+    public string? OnUpdate { get; set; }
+
     /// <summary>Initializes a new instance with the referenced table and column information.</summary>
     public NavigationReferenceAttribute(
         string principalTable,
@@ -1322,7 +1331,7 @@ public partial class CustomerEntity : EntityBase
     public BalanceValue? Balance { get; set; }
 
     /// <summary>Orders navigation property</summary>
-    [NavigationReference("customers", "customer_id", "orders", "customer_id", true, true, false)]
+    [NavigationReference("customers", "customer_id", "orders", "customer_id", true, true, false, ConstraintName = "FK_orders_customers", OnDelete = "Cascade")]
     public ICollection<OrderEntity> Orders { get; set; } = new List<OrderEntity>();
 }
 
@@ -1360,7 +1369,7 @@ public partial class OrderEntity : EntityBase
 
     /// <summary>Customer navigation property</summary>
     [JsonIgnore]
-    [NavigationReference("customers", "customer_id", "orders", "customer_id", false, false, true)]
+    [NavigationReference("customers", "customer_id", "orders", "customer_id", false, false, true, ConstraintName = "FK_orders_customers", OnDelete = "Cascade")]
     public CustomerEntity Customer { get; set; } = null!;
 }
 

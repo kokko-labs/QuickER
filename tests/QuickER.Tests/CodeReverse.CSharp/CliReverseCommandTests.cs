@@ -15,7 +15,10 @@ namespace QuickER.Tests.CodeReverse.CSharp;
 public class CliReverseCommandTests
 {
     /// <summary>SQL Server 生成の本体 .g.cs を一時フォルダへ書き出し、パス一式を返す</summary>
-    private static (string sourcePath, string outPath, string root) CreateGeneratedSource()
+    /// <param name="source">生成元の図（省略時は customers 1 テーブルの最小構成）</param>
+    private static (string sourcePath, string outPath, string root) CreateGeneratedSource(
+        ErDiagram? source = null
+    )
     {
         var root = Path.Combine(
             Path.GetTempPath(),
@@ -24,32 +27,34 @@ public class CliReverseCommandTests
         );
         Directory.CreateDirectory(root);
 
-        var diagram = new ErDiagram
-        {
-            Entities =
+        var diagram =
+            source
+            ?? new ErDiagram
             {
-                new Entity
+                Entities =
                 {
-                    TableName = "customers",
-                    Columns =
+                    new Entity
                     {
-                        new Column
+                        TableName = "customers",
+                        Columns =
                         {
-                            Name = "customer_id",
-                            DataType = "int",
-                            IsPrimaryKey = true,
-                            IsNullable = false,
-                        },
-                        new Column
-                        {
-                            Name = "name",
-                            DataType = "nvarchar(100)",
-                            IsNullable = false,
+                            new Column
+                            {
+                                Name = "customer_id",
+                                DataType = "int",
+                                IsPrimaryKey = true,
+                                IsNullable = false,
+                            },
+                            new Column
+                            {
+                                Name = "name",
+                                DataType = "nvarchar(100)",
+                                IsNullable = false,
+                            },
                         },
                     },
                 },
-            },
-        };
+            };
 
         var provider = new SqlServerProvider();
         var result = DiagramCodeGenerator.Generate(
@@ -114,6 +119,138 @@ public class CliReverseCommandTests
                 Directory.Delete(root, recursive: true);
             }
         }
+    }
+
+    /// <summary>
+    /// マージのない CLI リバースでも、UNIQUE 制約と外部キーメタデータ（制約名・参照アクション）が
+    /// 新規図へ載る（コード上の <c>[UniqueConstraint]</c> / <c>[NavigationReference]</c> の名前付き引数が情報源）
+    /// </summary>
+    [Fact(DisplayName = "reverse は UNIQUE 制約と FK メタデータを新規図へ載せる")]
+    public async Task Reverse_CarriesUniqueConstraintsAndForeignKeyMetadata()
+    {
+        var (sourcePath, outPath, root) = CreateGeneratedSource(WithConstraintsDiagram());
+
+        try
+        {
+            var exit = await CliApp.InvokeAsync([
+                "reverse",
+                "--source",
+                sourcePath,
+                "--out",
+                outPath,
+                "--provider",
+                "sqlserver",
+            ]);
+
+            exit.Should().Be(0);
+
+            var schema = JsonStorageService.Load(outPath).Schema;
+            var customers = schema.Entities.Single(entity => entity.TableName == "customers");
+            var columnNameById = customers.Columns.ToDictionary(
+                column => column.Id,
+                column => column.Name
+            );
+
+            // UNIQUE 制約（実名・構成列）が復元される
+            var unique = customers.UniqueConstraints.Should().ContainSingle().Subject;
+            unique.Name.Should().Be("UQ_customers_code");
+            unique.ColumnIds.Select(id => columnNameById[id]).Should().Equal("code");
+
+            // 外部キーの制約名・参照アクションが復元される
+            var relationship = schema.Relationships.Should().ContainSingle().Subject;
+            relationship.ConstraintName.Should().Be("FK_orders_customers");
+            relationship.OnDelete.Should().Be(ForeignKeyReferentialAction.Cascade);
+            relationship.OnUpdate.Should().Be(ForeignKeyReferentialAction.SetNull);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>UNIQUE 制約と参照アクション付き外部キーを持つ図（リバース対象コードの生成元）</summary>
+    private static ErDiagram WithConstraintsDiagram()
+    {
+        var customerId = Guid.NewGuid();
+        var customerPk = Guid.NewGuid();
+        var customerCode = Guid.NewGuid();
+        var orderId = Guid.NewGuid();
+        var orderPk = Guid.NewGuid();
+        var orderCustomerFk = Guid.NewGuid();
+
+        var customers = new Entity
+        {
+            Id = customerId,
+            TableName = "customers",
+            Columns =
+            {
+                new Column
+                {
+                    Id = customerPk,
+                    Name = "customer_id",
+                    DataType = "int",
+                    IsPrimaryKey = true,
+                    IsNullable = false,
+                },
+                new Column
+                {
+                    Id = customerCode,
+                    Name = "code",
+                    DataType = "varchar(20)",
+                    IsNullable = false,
+                },
+            },
+            UniqueConstraints =
+            {
+                new UniqueConstraint { Name = "UQ_customers_code", ColumnIds = { customerCode } },
+            },
+        };
+
+        var orders = new Entity
+        {
+            Id = orderId,
+            TableName = "orders",
+            Columns =
+            {
+                new Column
+                {
+                    Id = orderPk,
+                    Name = "order_id",
+                    DataType = "int",
+                    IsPrimaryKey = true,
+                    IsNullable = false,
+                },
+                new Column
+                {
+                    Id = orderCustomerFk,
+                    Name = "customer_id",
+                    DataType = "int",
+                    IsForeignKey = true,
+                    IsNullable = true,
+                },
+            },
+        };
+
+        return new ErDiagram
+        {
+            Entities = { customers, orders },
+            Relationships =
+            {
+                new Relationship
+                {
+                    Type = RelationshipType.OneToMany,
+                    SourceEntityId = customerId,
+                    TargetEntityId = orderId,
+                    ColumnPairs = [new(customerPk, orderCustomerFk)],
+                    ConstraintName = "FK_orders_customers",
+                    OnDelete = ForeignKeyReferentialAction.Cascade,
+                    OnUpdate = ForeignKeyReferentialAction.SetNull,
+                },
+            },
+        };
     }
 
     /// <summary>解析対象クラスが無いソースは終了コード 1 で中断し、出力ファイルを作らない</summary>

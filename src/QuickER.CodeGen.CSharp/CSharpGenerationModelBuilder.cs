@@ -713,7 +713,38 @@ internal sealed partial class CSharpGenerationModelBuilder
             PrincipalColumnName = nav.PrincipalColumnName,
             DependentTableName = nav.DependentTableName,
             DependentColumnName = nav.DependentColumnName,
+            ForeignKeyMetadataArguments = BuildForeignKeyMetadataArguments(nav),
         };
+    }
+
+    /// <summary>
+    /// <c>[NavigationReference]</c> へ追記する外部キーメタデータの名前付き引数を組み立てる（既定値のみなら空文字）。
+    /// </summary>
+    /// <remarks>
+    /// 制約名は非 <c>null</c> のとき、参照アクションは <see cref="ForeignKeyReferentialAction.NoAction"/> 以外のときだけ
+    /// 出力する（既定値を毎行書かない＝説明なし列で <c>Description</c> を省くのと同じ流儀）。値は列挙体名そのまま
+    /// （方言 SQL 表記ではない）で、C# リバースが同じ列挙体へ復元する。
+    /// </remarks>
+    private static string BuildForeignKeyMetadataArguments(NavigationInfo nav)
+    {
+        var arguments = new List<string>();
+
+        if (nav.ConstraintName is { } constraintName && !string.IsNullOrWhiteSpace(constraintName))
+        {
+            arguments.Add($"ConstraintName = \"{EscapeForCSharpString(constraintName)}\"");
+        }
+
+        if (nav.OnDelete != ForeignKeyReferentialAction.NoAction)
+        {
+            arguments.Add($"OnDelete = \"{nav.OnDelete}\"");
+        }
+
+        if (nav.OnUpdate != ForeignKeyReferentialAction.NoAction)
+        {
+            arguments.Add($"OnUpdate = \"{nav.OnUpdate}\"");
+        }
+
+        return arguments.Count == 0 ? string.Empty : ", " + string.Join(", ", arguments);
     }
 
     /// <summary>解決済みナビゲーション情報から EditModel のナビゲーションプロパティ生成モデルを構築する</summary>
@@ -759,6 +790,10 @@ internal sealed partial class CSharpGenerationModelBuilder
         };
 
     /// <summary>ナビゲーション解決の中間結果（生成側の表現に依存しない情報）</summary>
+    /// <remarks>
+    /// 末尾 3 つは外部キー定義のメタデータ（DDL と同じ正本＝リレーションの値）で、
+    /// <c>[NavigationReference]</c> の名前付き引数として双方向ナビの両側へ同値を刻む。
+    /// </remarks>
     private sealed record NavigationInfo(
         string PropertyName,
         string TargetTableName,
@@ -768,7 +803,10 @@ internal sealed partial class CSharpGenerationModelBuilder
         string PrincipalTableName,
         string PrincipalColumnName,
         string DependentTableName,
-        string DependentColumnName
+        string DependentColumnName,
+        string? ConstraintName,
+        ForeignKeyReferentialAction OnDelete,
+        ForeignKeyReferentialAction OnUpdate
     );
 
     /// <summary>診断メッセージ用のリレーション表示名を組み立てる</summary>
@@ -898,7 +936,10 @@ internal sealed partial class CSharpGenerationModelBuilder
                         PrincipalTableName: source.TableName,
                         PrincipalColumnName: principalColumn.Name,
                         DependentTableName: target.TableName,
-                        DependentColumnName: dependentColumn.Name
+                        DependentColumnName: dependentColumn.Name,
+                        ConstraintName: relationship.ConstraintName,
+                        OnDelete: relationship.OnDelete,
+                        OnUpdate: relationship.OnUpdate
                     )
                 );
 
@@ -920,7 +961,10 @@ internal sealed partial class CSharpGenerationModelBuilder
                             PrincipalTableName: source.TableName,
                             PrincipalColumnName: principalColumn.Name,
                             DependentTableName: target.TableName,
-                            DependentColumnName: dependentColumn.Name
+                            DependentColumnName: dependentColumn.Name,
+                            ConstraintName: relationship.ConstraintName,
+                            OnDelete: relationship.OnDelete,
+                            OnUpdate: relationship.OnUpdate
                         )
                     );
             }

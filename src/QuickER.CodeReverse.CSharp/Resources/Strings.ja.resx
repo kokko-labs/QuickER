@@ -73,4 +73,13 @@
   <data name="Reverse_TypeTokenUnresolved" xml:space="preserve">
     <value>列 '{1}.{2}' の型トークン '{0}' を対象方言へ展開できなかったため、そのまま採用しました。</value>
   </data>
+  <data name="Reverse_UniqueConstraintMemberUnresolved" xml:space="preserve">
+    <value>テーブル '{0}' の UNIQUE 制約が復元できない列（プロパティ '{1}'）を参照しているため、制約ごとスキップしました。</value>
+  </data>
+  <data name="Reverse_UniqueConstraintEmpty" xml:space="preserve">
+    <value>テーブル '{0}' の UNIQUE 制約に構成プロパティが 1 つも無いためスキップしました。</value>
+  </data>
+  <data name="Reverse_ReferentialActionUnknown" xml:space="preserve">
+    <value>リレーション '{1}' → '{2}' の参照アクション '{0}' を解釈できないため、未指定（NO ACTION）として扱いました。</value>
+  </data>
 </root>

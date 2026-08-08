@@ -12,8 +12,10 @@ namespace QuickER.Tests.CodeReverse.CSharp;
 /// ラウンドトリップ（本命）: ER 図 → コード生成（IncludeDataAnnotations ON）→ リバース解析 → 元の図と一致を検証する。
 /// </summary>
 /// <remarks>
-/// 一致対象はテーブル/列名・DataType・PK・NULL・説明・リレーション端点名と Type。
-/// レイアウト・クエリ・OnDelete/OnUpdate・制約名は対象外（コードに存在しないため）。
+/// 一致対象はテーブル/列名・DataType・PK・NULL・説明・UNIQUE 制約（名前と構成列）・
+/// リレーション端点名と Type・外部キー制約名と参照アクション。レイアウト・クエリは対象外（コードに存在しないため）。
+/// UNIQUE 制約名は「図が名前を持たない制約でも生成コードには合成名が刻まれる」ため、比較は実効名
+/// （<c>Name</c> ?? <see cref="UniqueConstraint.SynthesizeName"/>）で行う。
 /// </remarks>
 public class CSharpReverseRoundTripTests
 {
@@ -26,13 +28,22 @@ public class CSharpReverseRoundTripTests
         string Description
     );
 
-    /// <summary>比較用のリレーション射影（端点テーブル名・列名・種類）</summary>
+    /// <summary>比較用の UNIQUE 制約射影（実効制約名・宣言順の構成列名）</summary>
+    private sealed record UniqueConstraintProjection(
+        string EffectiveName,
+        IReadOnlyList<string> ColumnNames
+    );
+
+    /// <summary>比較用のリレーション射影（端点テーブル名・列名・種類・外部キーメタデータ）</summary>
     private sealed record RelationshipProjection(
         string SourceTable,
         string TargetTable,
         RelationshipType Type,
         string? SourceColumn,
-        string? TargetColumn
+        string? TargetColumn,
+        string? ConstraintName,
+        ForeignKeyReferentialAction OnDelete,
+        ForeignKeyReferentialAction OnUpdate
     );
 
     /// <summary>既存の実行時テスト用フィクスチャ図（VO・1対多・1対1）を往復させて一致を検証する</summary>
@@ -247,6 +258,125 @@ public class CSharpReverseRoundTripTests
         AssertRoundTrips(diagram, options);
     }
 
+    /// <summary>
+    /// UNIQUE 制約（単一・複合／実名・名前なし）と外部キーメタデータ（制約名・ON DELETE / ON UPDATE）を
+    /// 持つ図が往復する。制約は <c>[UniqueConstraint]</c>、参照アクションは <c>[NavigationReference]</c> の
+    /// 名前付き引数として往復する。
+    /// </summary>
+    [Fact(DisplayName = "UNIQUE 制約と外部キーメタデータを含む図が往復で一致する")]
+    public void RoundTrip_UniqueConstraintsAndForeignKeyMetadata_Matches()
+    {
+        var tenantId = Guid.NewGuid();
+        var tenantPk = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var userPk = Guid.NewGuid();
+        var userTenantFk = Guid.NewGuid();
+        var userEmailCol = Guid.NewGuid();
+        var userLoginCol = Guid.NewGuid();
+
+        var tenant = new Entity
+        {
+            Id = tenantId,
+            TableName = "tenants",
+            Columns =
+            {
+                new Column
+                {
+                    Id = tenantPk,
+                    Name = "tenant_id",
+                    DataType = "int",
+                    IsPrimaryKey = true,
+                    IsNullable = false,
+                },
+                new Column
+                {
+                    Name = "code",
+                    DataType = "varchar(20)",
+                    IsNullable = false,
+                },
+            },
+        };
+
+        // 単一列（実名あり）と複合（名前なし＝生成時に合成名）の 2 つの UNIQUE 制約を持つ
+        tenant.UniqueConstraints.Add(
+            new UniqueConstraint { Name = "UQ_tenants_code", ColumnIds = { tenant.Columns[1].Id } }
+        );
+
+        var user = new Entity
+        {
+            Id = userId,
+            TableName = "users",
+            Columns =
+            {
+                new Column
+                {
+                    Id = userPk,
+                    Name = "user_id",
+                    DataType = "int",
+                    IsPrimaryKey = true,
+                    IsNullable = false,
+                },
+                new Column
+                {
+                    Id = userTenantFk,
+                    Name = "tenant_id",
+                    DataType = "int",
+                    IsForeignKey = true,
+                    IsNullable = true,
+                },
+                new Column
+                {
+                    Id = userEmailCol,
+                    Name = "email",
+                    DataType = "nvarchar(200)",
+                    IsNullable = false,
+                },
+                new Column
+                {
+                    Id = userLoginCol,
+                    Name = "login_name",
+                    DataType = "varchar(50)",
+                    IsNullable = false,
+                },
+            },
+        };
+
+        user.UniqueConstraints.Add(
+            new UniqueConstraint { Name = "UQ_users_email", ColumnIds = { userEmailCol } }
+        );
+        // 名前なし複合制約（生成コードには合成名 UQ_users_tenant_id_login_name が刻まれる）
+        user.UniqueConstraints.Add(
+            new UniqueConstraint { ColumnIds = { userTenantFk, userLoginCol } }
+        );
+
+        var diagram = new ErDiagram
+        {
+            Entities = { tenant, user },
+            Relationships =
+            {
+                new Relationship
+                {
+                    Type = RelationshipType.OneToMany,
+                    SourceEntityId = tenantId,
+                    TargetEntityId = userId,
+                    ColumnPairs = [new(tenantPk, userTenantFk)],
+                    ConstraintName = "FK_users_tenants",
+                    OnDelete = ForeignKeyReferentialAction.SetNull,
+                    OnUpdate = ForeignKeyReferentialAction.Cascade,
+                },
+            },
+        };
+
+        var options = new CodeGenerationOptions
+        {
+            RootNamespace = "QuickER.Tests.ReverseRoundTrip",
+            GenerateValueObjects = false,
+            SplitFilesByCategory = false,
+        };
+
+        AssertRoundTrips(diagram, options);
+    }
+
     /// <summary>図を生成 → リバース解析 → 元の図と（比較対象の範囲で）一致することを検証する</summary>
     private static void AssertRoundTrips(ErDiagram original, CodeGenerationOptions options)
     {
@@ -280,12 +410,44 @@ public class CSharpReverseRoundTripTests
             ProjectColumns(reversedEntity)
                 .Should()
                 .Equal(ProjectColumns(originalEntity), "列の定義が往復で一致する");
+            ProjectUniqueConstraints(reversedEntity)
+                .Should()
+                .BeEquivalentTo(
+                    ProjectUniqueConstraints(originalEntity),
+                    "UNIQUE 制約（実効名・構成列）が往復で一致する"
+                );
         }
 
         // リレーション端点名と Type が一致する（順序非依存）
         ProjectRelationships(reversed.Entities, reversed.Relationships)
             .Should()
             .BeEquivalentTo(ProjectRelationships(original.Entities, original.Relationships));
+    }
+
+    /// <summary>UNIQUE 制約を「実効名（未設定なら合成名）＋宣言順の構成列名」へ射影する</summary>
+    private static List<UniqueConstraintProjection> ProjectUniqueConstraints(Entity entity)
+    {
+        var columnNamesById = entity.Columns.ToDictionary(
+            column => column.Id,
+            column => column.Name
+        );
+
+        return entity
+            .UniqueConstraints.Select(constraint =>
+            {
+                var columnNames = constraint
+                    .ColumnIds.Select(id =>
+                        columnNamesById.TryGetValue(id, out var name) ? name : id.ToString()
+                    )
+                    .ToList();
+
+                return new UniqueConstraintProjection(
+                    constraint.Name
+                        ?? UniqueConstraint.SynthesizeName(entity.TableName, columnNames),
+                    columnNames
+                );
+            })
+            .ToList();
     }
 
     private static List<ColumnProjection> ProjectColumns(Entity entity) =>
@@ -321,7 +483,10 @@ public class CSharpReverseRoundTripTests
                 ResolveName(
                     columnNameById,
                     relationship.ColumnPairs.FirstOrDefault()?.TargetColumnId
-                )
+                ),
+                relationship.ConstraintName,
+                relationship.OnDelete,
+                relationship.OnUpdate
             ))
             .ToList();
     }

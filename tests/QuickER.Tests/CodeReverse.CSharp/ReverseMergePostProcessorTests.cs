@@ -5,8 +5,8 @@ using QuickER.Model;
 namespace QuickER.Tests.CodeReverse.CSharp;
 
 /// <summary>
-/// <see cref="ReverseMergePostProcessor"/> の温存挙動（参照アクション・制約名の引継ぎ・多対多の温存・
-/// コードで消えた通常リレーションの非追加）を検証する。
+/// <see cref="ReverseMergePostProcessor"/> の温存挙動（未指定の参照アクション・制約名だけを補完する
+/// fallback 専用の引継ぎ・多対多の温存・コードで消えた通常リレーションの非追加）を検証する。
 /// </summary>
 public class ReverseMergePostProcessorTests
 {
@@ -37,11 +37,9 @@ public class ReverseMergePostProcessorTests
             },
         };
 
-    /// <summary>端点 4 つ組が一致するリレーションへ、現在図の参照アクション・制約名が引き継がれる</summary>
-    [Fact(DisplayName = "一致リレーションの OnDelete/OnUpdate/ConstraintName を温存する")]
-    public void Apply_CarriesOverActionsAndConstraintName()
-    {
-        var current = new ErDiagram
+    /// <summary>現在図（温存の供給元）を組み立てる</summary>
+    private static ErDiagram CurrentDiagram() =>
+        new()
         {
             Entities = { Customer(), Order() },
             Relationships =
@@ -59,18 +57,33 @@ public class ReverseMergePostProcessorTests
             },
         };
 
-        // マージ結果（Guid 引継後）: 同一端点・同一 Id だが参照アクション・制約名は既定
-        var mergedEntities = new[] { Customer(), Order() };
-        var mergedRelationships = new[]
+    /// <summary>コード由来（Guid 引継後）のリレーションを組み立てる</summary>
+    private static Relationship CodeRelationship(
+        string? constraintName = null,
+        ForeignKeyReferentialAction onDelete = ForeignKeyReferentialAction.NoAction,
+        ForeignKeyReferentialAction onUpdate = ForeignKeyReferentialAction.NoAction
+    ) =>
+        new()
         {
-            new Relationship
-            {
-                SourceEntityId = CustomerId,
-                TargetEntityId = OrderId,
-                ColumnPairs = [new(CustomerPk, OrderFk)],
-                Type = RelationshipType.OneToMany,
-            },
+            SourceEntityId = CustomerId,
+            TargetEntityId = OrderId,
+            ColumnPairs = [new(CustomerPk, OrderFk)],
+            Type = RelationshipType.OneToMany,
+            ConstraintName = constraintName,
+            OnDelete = onDelete,
+            OnUpdate = onUpdate,
         };
+
+    /// <summary>
+    /// メタデータ索引が無い（＝コードが外部キーメタデータを一切指定していない・旧形式コード）場合は、
+    /// 端点一致する現在図の参照アクション・制約名を全項目温存する
+    /// </summary>
+    [Fact(DisplayName = "コード未指定なら OnDelete/OnUpdate/ConstraintName を温存する")]
+    public void Apply_CarriesOverActionsAndConstraintName_WhenCodeSpecifiesNothing()
+    {
+        var current = CurrentDiagram();
+        var mergedEntities = new[] { Customer(), Order() };
+        var mergedRelationships = new[] { CodeRelationship() };
 
         var result = ReverseMergePostProcessor.Apply(current, mergedEntities, mergedRelationships);
 
@@ -78,6 +91,80 @@ public class ReverseMergePostProcessorTests
         relationship.OnDelete.Should().Be(ForeignKeyReferentialAction.Cascade);
         relationship.OnUpdate.Should().Be(ForeignKeyReferentialAction.SetNull);
         relationship.ConstraintName.Should().Be("FK_orders_customers");
+    }
+
+    /// <summary>
+    /// コードが指定していたフィールドはコードが勝ち、指定が無いフィールドだけ現在図から補完する
+    /// （fallback 専用＝コード上で NO ACTION へ戻した変更が現在図の値で握り潰されない）
+    /// </summary>
+    [Fact(DisplayName = "コード指定フィールドはコードが勝ち、未指定フィールドのみ温存する")]
+    public void Apply_PrefersCodeSpecifiedFields_AndFillsOnlyUnspecified()
+    {
+        var current = CurrentDiagram();
+        var mergedEntities = new[] { Customer(), Order() };
+
+        // コードは OnDelete のみ明示（NoAction＝図の Cascade を意図的に外した状態）。
+        // 制約名・OnUpdate は未指定なので現在図から補完される。
+        var codeRelationship = CodeRelationship();
+        var mergedRelationships = new[] { codeRelationship };
+        var metadata = new Dictionary<Guid, ReverseRelationshipMetadata>
+        {
+            [codeRelationship.Id] = new(
+                ConstraintName: null,
+                OnDelete: ForeignKeyReferentialAction.NoAction,
+                OnUpdate: null
+            ),
+        };
+
+        var result = ReverseMergePostProcessor.Apply(
+            current,
+            mergedEntities,
+            mergedRelationships,
+            metadata
+        );
+
+        var relationship = result.Should().ContainSingle().Subject;
+        relationship
+            .OnDelete.Should()
+            .Be(ForeignKeyReferentialAction.NoAction, "コードの指定が勝つ");
+        relationship
+            .OnUpdate.Should()
+            .Be(ForeignKeyReferentialAction.SetNull, "未指定は温存される");
+        relationship.ConstraintName.Should().Be("FK_orders_customers", "未指定は温存される");
+    }
+
+    /// <summary>コードが全フィールドを指定していれば、現在図の値は一切引き継がれない</summary>
+    [Fact(DisplayName = "コードが全フィールド指定なら現在図の値で上書きしない")]
+    public void Apply_KeepsCodeValues_WhenAllFieldsSpecified()
+    {
+        var current = CurrentDiagram();
+        var mergedEntities = new[] { Customer(), Order() };
+
+        var codeRelationship = CodeRelationship(
+            constraintName: "FK_orders_customers_v2",
+            onDelete: ForeignKeyReferentialAction.SetDefault,
+            onUpdate: ForeignKeyReferentialAction.NoAction
+        );
+        var metadata = new Dictionary<Guid, ReverseRelationshipMetadata>
+        {
+            [codeRelationship.Id] = new(
+                ConstraintName: "FK_orders_customers_v2",
+                OnDelete: ForeignKeyReferentialAction.SetDefault,
+                OnUpdate: ForeignKeyReferentialAction.NoAction
+            ),
+        };
+
+        var result = ReverseMergePostProcessor.Apply(
+            current,
+            mergedEntities,
+            [codeRelationship],
+            metadata
+        );
+
+        var relationship = result.Should().ContainSingle().Subject;
+        relationship.ConstraintName.Should().Be("FK_orders_customers_v2");
+        relationship.OnDelete.Should().Be(ForeignKeyReferentialAction.SetDefault);
+        relationship.OnUpdate.Should().Be(ForeignKeyReferentialAction.NoAction);
     }
 
     /// <summary>現在図の多対多は、両端エンティティが生存していれば結果へ温存される</summary>

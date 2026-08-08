@@ -225,7 +225,7 @@ public static class GeneratedDisplayNames
 {{ end }}{{ for navigation in item.navigations }}
     /// <summary>{{ navigation.property_name }} navigation property</summary>
 {{ if include_json_ignore_on_parent_navigation && navigation.is_parent_reference }}    [JsonIgnore]
-{{ end }}    [NavigationReference("{{ navigation.principal_table_name }}", "{{ navigation.principal_column_name }}", "{{ navigation.dependent_table_name }}", "{{ navigation.dependent_column_name }}", {{ navigation.is_collection }}, {{ navigation.cascade }}, {{ navigation.is_parent_reference }})]
+{{ end }}    [NavigationReference("{{ navigation.principal_table_name }}", "{{ navigation.principal_column_name }}", "{{ navigation.dependent_table_name }}", "{{ navigation.dependent_column_name }}", {{ navigation.is_collection }}, {{ navigation.cascade }}, {{ navigation.is_parent_reference }}{{ navigation.foreign_key_metadata_arguments }})]
     public {{ navigation.display_type_name }} {{ navigation.property_name }} { get; set; }{{ navigation.initializer }}
 {{ end }}{{ if !item.has_display_name_collision && item.display_name_description }}
     /// <summary>Default display name of this entity (resolved from the class name and the table description through GeneratedDisplayNames.Resolve).</summary>

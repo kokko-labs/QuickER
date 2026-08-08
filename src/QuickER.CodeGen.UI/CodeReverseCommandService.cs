@@ -15,7 +15,7 @@ namespace QuickER.CodeGen.UI;
 /// <remarks>
 /// DB 取込（<c>DbImportCommandService</c>）のフローを踏襲する。ファイル選択 → リバース解析 →
 /// <see cref="DiagramMergeReconciler"/> による Guid 引継 → <see cref="ReverseMergePostProcessor"/> で
-/// コードに無い情報（参照アクション・制約名・多対多）を現在図から温存 → 置換確認 →
+/// コードが語っていない情報（未指定の参照アクション・制約名・多対多）を現在図から温存 → 置換確認 →
 /// <see cref="IErDiagramHost.ReplaceDiagram"/> へ渡す。コードは方言中立のため TargetDbms は現在図の方言を維持する。
 /// </remarks>
 public sealed class CodeReverseCommandService
@@ -92,11 +92,12 @@ public sealed class CodeReverseCommandService
             preserveExistingMemo: true
         );
 
-        // リバース専用後処理: コードに無い参照アクション・制約名・多対多を現在図から温存する
+        // リバース専用後処理: コードが指定していない参照アクション・制約名と、多対多を現在図から温存する
         var finalRelationships = ReverseMergePostProcessor.Apply(
             current,
             merged.Entities,
-            merged.Relationships
+            merged.Relationships,
+            reversed.RelationshipMetadata
         );
 
         // 構造差分・壊れクエリがある場合のみ置換確認を行う（DB 取込と同じ規則）

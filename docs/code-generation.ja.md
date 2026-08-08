@@ -272,7 +272,7 @@ var affected = await customers.ExecuteSqlAsync("UPDATE customers SET balance = 0
 
 ### 重複の事前チェック（CheckUniquenessAsync）
 
-テーブルの UNIQUE 制約は、生成される **Entity** クラスへ `[UniqueConstraint("PropA", "PropB", Name = "UQ_...")]` として `[DbTableMeta]` / `[DbColumnMeta]` と並んで刻まれます。これらと同じく「DB 定義の自己記述」のための定義メタで、実行時の振る舞いは持ちません（以下のチェックはいずれも生成コードそのものです）。属性型は、刻む制約が 1 つでもあるときだけ出力されます。
+テーブルの UNIQUE 制約は、生成される **Entity** クラスへ `[UniqueConstraint("PropA", "PropB", Name = "UQ_...")]` として `[DbTableMeta]` / `[DbColumnMeta]` と並んで刻まれます。これらと同じく「DB 定義の自己記述」のための定義メタで、実行時の振る舞いは持ちません（以下のチェックはいずれも生成コードそのものです）。属性型は、刻む制約が 1 つでもあるときだけ出力されます。C# リバースはこの属性を読み戻すため、UNIQUE 制約は往復します（[インポートとエクスポート](import-export.ja.md)を参照）。
 
 生成される Repository 契約には、図の UNIQUE 制約から組み立てた一括チェックが常に含まれます（テーブルに制約が 1 件も無くても生成されます）:
 
