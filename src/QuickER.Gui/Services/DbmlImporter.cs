@@ -67,101 +67,121 @@ public static partial class DbmlImporter
         var pendingRelationshipColumns =
             new List<(Relationship Relationship, List<string> Source, List<string> Target)>();
         // Indexes ブロックの一意索引は、列定義より前に書かれていても解決できるよう最後にまとめて紐付ける
-        var pendingUniqueIndexes = new List<(Entity Entity, string? Name, List<string> Columns)>();
+        // （解決は行ループを抜けた後になるため、診断用に定義行の行番号も持ち回る）
+        var pendingUniqueIndexes =
+            new List<(Entity Entity, string? Name, List<string> Columns, int LineNumber)>();
         Entity? currentEntity = null;
+        // 未閉じブロックの診断はループを抜けてから判明するため、ブロック開始行を覚えておく
+        var currentEntityLineNumber = 0;
         var inIndexesBlock = false;
 
         // 行単位の状態機械: currentEntity が非 null の間は Table ブロック内としてカラム行を解釈する
-        foreach (var rawLine in lines)
+        for (var index = 0; index < lines.Length; index++)
         {
-            var line = RemoveComment(rawLine).Trim();
+            var lineNumber = index + 1;
+            var line = RemoveComment(lines[index]).Trim();
 
             if (string.IsNullOrWhiteSpace(line))
             {
                 continue;
             }
 
-            if (currentEntity is not null)
+            // 行に紐づく診断は、パーサ内部（カラム・索引・リレーション定義）のものも含めて行番号を前置して投げ直す
+            try
             {
-                // Indexes ブロック内は索引定義として解釈する（閉じ括弧で Table ブロックへ戻る）
-                if (inIndexesBlock)
+                if (currentEntity is not null)
                 {
-                    if (line == "}")
+                    // Indexes ブロック内は索引定義として解釈する（閉じ括弧で Table ブロックへ戻る）
+                    if (inIndexesBlock)
                     {
-                        inIndexesBlock = false;
+                        if (line == "}")
+                        {
+                            inIndexesBlock = false;
+                            continue;
+                        }
+
+                        var uniqueIndex = ParseUniqueIndex(line, currentEntity.TableName);
+
+                        if (uniqueIndex is not null)
+                        {
+                            pendingUniqueIndexes.Add(
+                                (
+                                    currentEntity,
+                                    uniqueIndex.Value.Name,
+                                    uniqueIndex.Value.Columns,
+                                    lineNumber
+                                )
+                            );
+                        }
+
                         continue;
                     }
 
-                    var uniqueIndex = ParseUniqueIndex(line, currentEntity.TableName);
-
-                    if (uniqueIndex is not null)
+                    if (line == "}")
                     {
-                        pendingUniqueIndexes.Add(
-                            (currentEntity, uniqueIndex.Value.Name, uniqueIndex.Value.Columns)
+                        currentEntity = null;
+                        continue;
+                    }
+
+                    if (IndexesHeaderRegex.IsMatch(line))
+                    {
+                        inIndexesBlock = true;
+                        continue;
+                    }
+
+                    var (column, isUnique) = ParseColumn(line, currentEntity.TableName);
+                    currentEntity.Columns.Add(column);
+
+                    // カラム設定の unique は「その 1 列だけの名前なし一意制約」を意味する
+                    if (isUnique)
+                    {
+                        currentEntity.UniqueConstraints.Add(
+                            new UniqueConstraint { ColumnIds = [column.Id] }
                         );
                     }
 
                     continue;
                 }
 
-                if (line == "}")
+                var tableMatch = TableHeaderRegex.Match(line);
+
+                if (tableMatch.Success)
                 {
-                    currentEntity = null;
+                    var tableName = tableMatch.Groups["table"].Value;
+
+                    if (!entities.TryAdd(tableName, new Entity { TableName = tableName }))
+                    {
+                        throw new InvalidDataException(
+                            string.Format(Strings.Dbml_DuplicateEntity, tableName)
+                        );
+                    }
+
+                    currentEntity = entities[tableName];
+                    currentEntityLineNumber = lineNumber;
                     continue;
                 }
 
-                if (IndexesHeaderRegex.IsMatch(line))
+                if (line.StartsWith("Ref:", StringComparison.OrdinalIgnoreCase))
                 {
-                    inIndexesBlock = true;
+                    var (relationship, sourceColumns, targetColumns) = ParseRelationship(
+                        line,
+                        entities
+                    );
+                    relationships.Add(relationship);
+                    pendingRelationshipColumns.Add((relationship, sourceColumns, targetColumns));
                     continue;
                 }
-
-                var (column, isUnique) = ParseColumn(line, currentEntity.TableName);
-                currentEntity.Columns.Add(column);
-
-                // カラム設定の unique は「その 1 列だけの名前なし一意制約」を意味する
-                if (isUnique)
-                {
-                    currentEntity.UniqueConstraints.Add(
-                        new UniqueConstraint { ColumnIds = [column.Id] }
-                    );
-                }
-
-                continue;
             }
-
-            var tableMatch = TableHeaderRegex.Match(line);
-
-            if (tableMatch.Success)
+            catch (InvalidDataException ex)
             {
-                var tableName = tableMatch.Groups["table"].Value;
-
-                if (!entities.TryAdd(tableName, new Entity { TableName = tableName }))
-                {
-                    throw new InvalidDataException(
-                        string.Format(Strings.Dbml_DuplicateEntity, tableName)
-                    );
-                }
-
-                currentEntity = entities[tableName];
-                continue;
-            }
-
-            if (line.StartsWith("Ref:", StringComparison.OrdinalIgnoreCase))
-            {
-                var (relationship, sourceColumns, targetColumns) = ParseRelationship(
-                    line,
-                    entities
-                );
-                relationships.Add(relationship);
-                pendingRelationshipColumns.Add((relationship, sourceColumns, targetColumns));
-                continue;
+                throw ImportDiagnostics.AtLine(lineNumber, ex);
             }
         }
 
         if (currentEntity is not null)
         {
-            throw new InvalidDataException(
+            throw ImportDiagnostics.AtLine(
+                currentEntityLineNumber,
                 string.Format(Strings.Dbml_MissingClosingBrace, currentEntity.TableName)
             );
         }
@@ -321,10 +341,15 @@ public static partial class DbmlImporter
     /// </summary>
     /// <exception cref="InvalidDataException">索引が参照する列がテーブルに存在しない場合</exception>
     private static void ResolveUniqueIndexes(
-        IEnumerable<(Entity Entity, string? Name, List<string> Columns)> uniqueIndexes
+        IEnumerable<(
+            Entity Entity,
+            string? Name,
+            List<string> Columns,
+            int LineNumber
+        )> uniqueIndexes
     )
     {
-        foreach (var (entity, name, columns) in uniqueIndexes)
+        foreach (var (entity, name, columns, lineNumber) in uniqueIndexes)
         {
             var columnIds = new List<Guid>(columns.Count);
 
@@ -336,7 +361,9 @@ public static partial class DbmlImporter
 
                 if (column is null)
                 {
-                    throw new InvalidDataException(
+                    // 解決は行ループを抜けた後だが、診断は索引定義が書かれていた行を指す
+                    throw ImportDiagnostics.AtLine(
+                        lineNumber,
                         string.Format(
                             Strings.Dbml_IndexColumnNotFound,
                             entity.TableName,

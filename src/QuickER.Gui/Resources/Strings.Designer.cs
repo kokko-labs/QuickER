@@ -1168,21 +1168,45 @@ namespace QuickER.Resources {
             }
         }
         
-        public static string ExportFormat_Png {
+        public static string Format_Png {
             get {
-                return ResourceManager.GetString("ExportFormat_Png", resourceCulture);
+                return ResourceManager.GetString("Format_Png", resourceCulture);
             }
         }
         
-        public static string ExportFormat_Svg {
+        public static string Format_Svg {
             get {
-                return ResourceManager.GetString("ExportFormat_Svg", resourceCulture);
+                return ResourceManager.GetString("Format_Svg", resourceCulture);
             }
         }
         
         public static string Format_DefinitionDocument {
             get {
                 return ResourceManager.GetString("Format_DefinitionDocument", resourceCulture);
+            }
+        }
+
+        public static string Format_SqlDdl {
+            get {
+                return ResourceManager.GetString("Format_SqlDdl", resourceCulture);
+            }
+        }
+
+        public static string Format_Mermaid {
+            get {
+                return ResourceManager.GetString("Format_Mermaid", resourceCulture);
+            }
+        }
+
+        public static string Format_Dbml {
+            get {
+                return ResourceManager.GetString("Format_Dbml", resourceCulture);
+            }
+        }
+
+        public static string Format_SchemaJson {
+            get {
+                return ResourceManager.GetString("Format_SchemaJson", resourceCulture);
             }
         }
 
@@ -1354,12 +1378,6 @@ namespace QuickER.Resources {
             }
         }
         
-        public static string Import_UnsupportedFormat {
-            get {
-                return ResourceManager.GetString("Import_UnsupportedFormat", resourceCulture);
-            }
-        }
-        
         public static string Import_ReplaceConfirm {
             get {
                 return ResourceManager.GetString("Import_ReplaceConfirm", resourceCulture);
@@ -1387,6 +1405,12 @@ namespace QuickER.Resources {
         public static string Import_Completed {
             get {
                 return ResourceManager.GetString("Import_Completed", resourceCulture);
+            }
+        }
+
+        public static string Import_LineDiagnostic {
+            get {
+                return ResourceManager.GetString("Import_LineDiagnostic", resourceCulture);
             }
         }
         
@@ -1501,12 +1525,6 @@ namespace QuickER.Resources {
         public static string Mermaid_DuplicateEntity {
             get {
                 return ResourceManager.GetString("Mermaid_DuplicateEntity", resourceCulture);
-            }
-        }
-        
-        public static string Mermaid_HeaderNotFound {
-            get {
-                return ResourceManager.GetString("Mermaid_HeaderNotFound", resourceCulture);
             }
         }
         

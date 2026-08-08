@@ -3,6 +3,7 @@ using System.IO;
 using System.Linq;
 using AwesomeAssertions;
 using QuickER.Model;
+using QuickER.Resources;
 using QuickER.Services;
 using QuickER.ViewModels;
 
@@ -281,5 +282,59 @@ public class MermaidTests
             .Equal(("TenantId", "TenantId"), ("RegionCode", "RegionCode"));
         child.Columns.Single(column => column.Name == "TenantId").IsForeignKey.Should().BeTrue();
         child.Columns.Single(column => column.Name == "RegionCode").IsForeignKey.Should().BeTrue();
+    }
+
+    /// <summary>行に紐づく解析エラーへ、その行の行番号が前置されることを検証する</summary>
+    [Fact(DisplayName = "Mermaid 取込の解析エラーに行番号が付く")]
+    public void Import_ParseError_PrefixesLineNumber()
+    {
+        // 4 行目のカラム定義がトークン 1 つしかなく解析できない
+        var text = string.Join(
+            Environment.NewLine,
+            ["erDiagram", "    Customer {", "        int CustomerId PK", "        broken", "    }"]
+        );
+
+        var act = () => MermaidImporter.Parse(text);
+
+        act.Should()
+            .Throw<InvalidDataException>()
+            .WithMessage(
+                string.Format(
+                    Strings.Import_LineDiagnostic,
+                    4,
+                    string.Format(Strings.Mermaid_ColumnParseError, "Customer", "broken")
+                )
+            );
+    }
+
+    /// <summary>未閉じブロックの診断が、エラーの判明位置ではなくブロック開始行を指すことを検証する</summary>
+    [Fact(DisplayName = "Mermaid 取込の未閉じブロックはブロック開始行を指す")]
+    public void Import_MissingClosingBrace_PointsToBlockStartLine()
+    {
+        var text = string.Join(
+            Environment.NewLine,
+            ["erDiagram", "", "    Customer {", "        int CustomerId PK"]
+        );
+
+        var act = () => MermaidImporter.Parse(text);
+
+        act.Should()
+            .Throw<InvalidDataException>()
+            .WithMessage(
+                string.Format(
+                    Strings.Import_LineDiagnostic,
+                    3,
+                    string.Format(Strings.Mermaid_MissingClosingBrace, "Customer")
+                )
+            );
+    }
+
+    /// <summary>ファイル全体に紐づく診断には（指すべき行が無いため）行番号を付けないことを検証する</summary>
+    [Fact(DisplayName = "Mermaid 取込のファイル全体の診断には行番号を付けない")]
+    public void Import_WholeFileDiagnostic_HasNoLineNumber()
+    {
+        var act = () => MermaidImporter.Parse("erDiagram");
+
+        act.Should().Throw<InvalidDataException>().WithMessage(Strings.Mermaid_NoEntities);
     }
 }

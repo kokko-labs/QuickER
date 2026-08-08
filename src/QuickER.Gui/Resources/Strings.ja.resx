@@ -577,19 +577,31 @@
     <value>取り込めませんでした。</value>
   </data>
   <data name="Open_Failed" xml:space="preserve">
-    <value>「{0}」を開けませんでした。QuickER の図ファイルではないか、破損しているか、読み取れません。現在の図はそのまま維持しました。</value>
+    <value>'{0}' を開けませんでした。QuickER の図ファイルではないか、破損しているか、読み取れません。現在の図はそのまま維持しました。</value>
   </data>
   <data name="Save_Failed" xml:space="preserve">
     <value>保存できませんでした。変更は未保存のまま維持しています。もう一度保存するか、別の場所へ保存してください。</value>
   </data>
-  <data name="ExportFormat_Png" xml:space="preserve">
+  <data name="Format_Png" xml:space="preserve">
     <value>PNG 画像</value>
   </data>
-  <data name="ExportFormat_Svg" xml:space="preserve">
+  <data name="Format_Svg" xml:space="preserve">
     <value>SVG 画像</value>
   </data>
   <data name="Format_DefinitionDocument" xml:space="preserve">
     <value>定義書</value>
+  </data>
+  <data name="Format_SqlDdl" xml:space="preserve">
+    <value>SQL DDL</value>
+  </data>
+  <data name="Format_Mermaid" xml:space="preserve">
+    <value>Mermaid</value>
+  </data>
+  <data name="Format_Dbml" xml:space="preserve">
+    <value>DBML</value>
+  </data>
+  <data name="Format_SchemaJson" xml:space="preserve">
+    <value>スキーマ JSON</value>
   </data>
   <data name="Format_File" xml:space="preserve">
     <value>ファイル</value>
@@ -599,9 +611,6 @@
   </data>
   <data name="Export_Completed" xml:space="preserve">
     <value>{0}の出力が完了しました。</value>
-  </data>
-  <data name="Import_UnsupportedFormat" xml:space="preserve">
-    <value>未対応の取込形式です。</value>
   </data>
   <data name="Import_ReplaceConfirm" xml:space="preserve">
     <value>現在のダイアグラムを{0}の内容で置換します。よろしいですか？</value>
@@ -618,6 +627,9 @@
   </data>
   <data name="Import_Completed" xml:space="preserve">
     <value>{0}の取り込みが完了しました。</value>
+  </data>
+  <data name="Import_LineDiagnostic" xml:space="preserve">
+    <value>{0} 行目: {1}</value>
   </data>
   <data name="Export_FormatUndetermined" xml:space="preserve">
     <value>出力形式を判定できませんでした。</value>
@@ -638,7 +650,7 @@
     <value>エンティティ '{0}' の閉じ括弧 '}}' がありません。</value>
   </data>
   <data name="Dbml_NoEntities" xml:space="preserve">
-    <value>DBML にエンティティ定義がありません。</value>
+    <value>DBML テキストにエンティティ定義がありません。</value>
   </data>
   <data name="Dbml_ColumnParseError" xml:space="preserve">
     <value>テーブル '{0}' のカラム定義 '{1}' を解析できません。</value>
@@ -647,7 +659,7 @@
     <value>テーブル '{0}' の Indexes ブロックの索引定義 '{1}' を解析できません。</value>
   </data>
   <data name="Dbml_IndexColumnNotFound" xml:space="preserve">
-    <value>テーブル '{0}' の索引が参照するカラム '{1}' が定義されていません。</value>
+    <value>テーブル '{0}' の索引が参照するカラム '{1}' が未定義です。</value>
   </data>
   <data name="Dbml_RelationshipParseError" xml:space="preserve">
     <value>リレーション定義 '{0}' を解析できません。</value>
@@ -673,14 +685,11 @@
   <data name="Mermaid_DuplicateEntity" xml:space="preserve">
     <value>エンティティ '{0}' が重複しています。</value>
   </data>
-  <data name="Mermaid_HeaderNotFound" xml:space="preserve">
-    <value>Mermaid の erDiagram ヘッダーが見つかりません。</value>
-  </data>
   <data name="Mermaid_MissingClosingBrace" xml:space="preserve">
     <value>エンティティ '{0}' の閉じ括弧 '}}' がありません。</value>
   </data>
   <data name="Mermaid_NoEntities" xml:space="preserve">
-    <value>Mermaid にエンティティ定義がありません。</value>
+    <value>Mermaid テキストにエンティティ定義がありません。</value>
   </data>
   <data name="Mermaid_ColumnParseError" xml:space="preserve">
     <value>テーブル '{0}' のカラム定義 '{1}' を解析できません。</value>
@@ -728,10 +737,10 @@
     <value>リレーション一覧シートの {0} 行目に参照元または参照先テーブル名がありません。</value>
   </data>
   <data name="TableDoc_RelParentNotFound" xml:space="preserve">
-    <value>リレーション一覧シートの参照先テーブル '{0}' が存在しません。</value>
+    <value>リレーション一覧シートの参照先テーブル '{0}' が未定義です。</value>
   </data>
   <data name="TableDoc_RelChildNotFound" xml:space="preserve">
-    <value>リレーション一覧シートの参照元テーブル '{0}' が存在しません。</value>
+    <value>リレーション一覧シートの参照元テーブル '{0}' が未定義です。</value>
   </data>
   <data name="TableDoc_RelDuplicate" xml:space="preserve">
     <value>テーブル '{0}' と '{1}' のリレーションが重複しています。</value>
@@ -743,13 +752,13 @@
     <value>リレーション一覧シートの {0} 行目は、参照元列と参照先列の数が一致していません。複合外部キーは両側に同じ数の列をカンマ区切りで並べてください。</value>
   </data>
   <data name="TableDoc_RelChildColumnNotFound" xml:space="preserve">
-    <value>テーブル '{0}' に参照元カラム '{1}' が存在しません。</value>
+    <value>テーブル '{0}' の参照元カラム '{1}' が未定義です。</value>
   </data>
   <data name="TableDoc_RelParentColumnNotFound" xml:space="preserve">
-    <value>テーブル '{0}' に参照先カラム '{1}' が存在しません。</value>
+    <value>テーブル '{0}' の参照先カラム '{1}' が未定義です。</value>
   </data>
   <data name="TableDoc_RelUnknownRelation" xml:space="preserve">
-    <value>リレーション一覧シートの {0} 行目の関係 '{1}' を解釈できません。</value>
+    <value>リレーション一覧シートの {0} 行目の関係 '{1}' を解析できません。</value>
   </data>
   <data name="TableDoc_MissingRoleTag" xml:space="preserve">
     <value>旧形式または本アプリ以外の出力です。再エクスポートしてください。</value>

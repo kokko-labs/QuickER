@@ -3,6 +3,7 @@ using System.IO;
 using System.Linq;
 using AwesomeAssertions;
 using QuickER.Model;
+using QuickER.Resources;
 using QuickER.Services;
 using QuickER.ViewModels;
 
@@ -393,5 +394,89 @@ public class DbmlTests
                 },
             ],
         };
+    }
+
+    /// <summary>行に紐づく解析エラーへ、その行の行番号が前置されることを検証する</summary>
+    [Fact(DisplayName = "DBML 取込の解析エラーに行番号が付く")]
+    public void Import_ParseError_PrefixesLineNumber()
+    {
+        // 3 行目のカラム定義が名前と型の 2 トークンに満たず解析できない
+        var text = string.Join(
+            Environment.NewLine,
+            ["Table Customer {", "  CustomerId int [pk]", "  broken", "}"]
+        );
+
+        var act = () => DbmlImporter.Parse(text);
+
+        act.Should()
+            .Throw<InvalidDataException>()
+            .WithMessage(
+                string.Format(
+                    Strings.Import_LineDiagnostic,
+                    3,
+                    string.Format(Strings.Dbml_ColumnParseError, "Customer", "broken")
+                )
+            );
+    }
+
+    /// <summary>行ループを抜けてから解決する Indexes ブロックの診断が、索引定義行を指すことを検証する</summary>
+    [Fact(DisplayName = "DBML 取込の索引の未定義列は索引定義行を指す")]
+    public void Import_IndexColumnNotFound_PointsToIndexLine()
+    {
+        var text = string.Join(
+            Environment.NewLine,
+            [
+                "Table Customer {",
+                "  CustomerId int [pk]",
+                "",
+                "  Indexes {",
+                "    (Missing) [unique]",
+                "  }",
+                "}",
+            ]
+        );
+
+        var act = () => DbmlImporter.Parse(text);
+
+        act.Should()
+            .Throw<InvalidDataException>()
+            .WithMessage(
+                string.Format(
+                    Strings.Import_LineDiagnostic,
+                    5,
+                    string.Format(Strings.Dbml_IndexColumnNotFound, "Customer", "Missing")
+                )
+            );
+    }
+
+    /// <summary>未閉じブロックの診断が、エラーの判明位置ではなくブロック開始行を指すことを検証する</summary>
+    [Fact(DisplayName = "DBML 取込の未閉じブロックはブロック開始行を指す")]
+    public void Import_MissingClosingBrace_PointsToBlockStartLine()
+    {
+        var text = string.Join(
+            Environment.NewLine,
+            ["// comment", "Table Customer {", "  CustomerId int [pk]"]
+        );
+
+        var act = () => DbmlImporter.Parse(text);
+
+        act.Should()
+            .Throw<InvalidDataException>()
+            .WithMessage(
+                string.Format(
+                    Strings.Import_LineDiagnostic,
+                    2,
+                    string.Format(Strings.Dbml_MissingClosingBrace, "Customer")
+                )
+            );
+    }
+
+    /// <summary>ファイル全体に紐づく診断には（指すべき行が無いため）行番号を付けないことを検証する</summary>
+    [Fact(DisplayName = "DBML 取込のファイル全体の診断には行番号を付けない")]
+    public void Import_WholeFileDiagnostic_HasNoLineNumber()
+    {
+        var act = () => DbmlImporter.Parse("// only a comment");
+
+        act.Should().Throw<InvalidDataException>().WithMessage(Strings.Dbml_NoEntities);
     }
 }

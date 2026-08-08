@@ -251,7 +251,8 @@ public partial class MainViewModel
         }
 
         // 破損（不正 JSON）・非 DiagramDocument は現状維持し、次の変更イベントで再試行する
-        if (!TryLoadDiagramDocument(CurrentFilePath, out var document) || document is null)
+        // （控えめな一時通知のため、ここでは失敗の原因までは見せない）
+        if (!TryLoadDiagramDocument(CurrentFilePath, out var document, out _) || document is null)
         {
             NotifyStatus(Strings.Status_ExternalReloadFailed);
             return false;
@@ -283,14 +284,25 @@ public partial class MainViewModel
     }
 
     /// <summary>ファイルを DiagramDocument として妥当か検証したうえで読み込む（破損・非文書は false）</summary>
+    /// <param name="path">読み込むファイルのフルパス</param>
+    /// <param name="document">読み込んだ文書（失敗時は null）</param>
+    /// <param name="error">
+    /// 失敗の原因となった例外（IO エラー・不正 JSON）。形式検証で弾いた場合と成功時は null。
+    /// 呼び出し側は「原因を持つ失敗」だけ他の失敗通知と同じく例外メッセージを連結して見せる。
+    /// </param>
     /// <remarks>
     /// <see cref="JsonStorageService.Load"/> は無関係な JSON も「空図」として読めてしまうため、
     /// ルートが JSON オブジェクトで <c>Version</c>・<c>Schema</c> キーを持つことを検証してから読み込む
     /// （<see cref="JsonStorageService"/> の読込仕様に合わせ大文字小文字を区別する）。
     /// </remarks>
-    private static bool TryLoadDiagramDocument(string path, out DiagramDocument? document)
+    private static bool TryLoadDiagramDocument(
+        string path,
+        out DiagramDocument? document,
+        out Exception? error
+    )
     {
         document = null;
+        error = null;
 
         try
         {
@@ -309,9 +321,10 @@ public partial class MainViewModel
             document = JsonStorageService.Load(path);
             return true;
         }
-        catch
+        catch (Exception ex)
         {
-            // IO エラー・不正 JSON は現状維持（呼び出し側が通知する）
+            // IO エラー・不正 JSON は現状維持（呼び出し側が原因付きで通知する）
+            error = ex;
             return false;
         }
     }
@@ -727,14 +740,14 @@ public partial class MainViewModel
     {
         var displayName = format switch
         {
-            DiagramExportFormat.Png => Strings.ExportFormat_Png,
-            DiagramExportFormat.Svg => Strings.ExportFormat_Svg,
-            DiagramExportFormat.Sql => "SQL DDL",
-            DiagramExportFormat.Mermaid => "Mermaid",
-            DiagramExportFormat.Dbml => "DBML",
+            DiagramExportFormat.Png => Strings.Format_Png,
+            DiagramExportFormat.Svg => Strings.Format_Svg,
+            DiagramExportFormat.Sql => Strings.Format_SqlDdl,
+            DiagramExportFormat.Mermaid => Strings.Format_Mermaid,
+            DiagramExportFormat.Dbml => Strings.Format_Dbml,
             DiagramExportFormat.Excel => Strings.Format_DefinitionDocument,
             DiagramExportFormat.Html => Strings.Format_DefinitionDocumentHtml,
-            DiagramExportFormat.SchemaJson => "Schema JSON",
+            DiagramExportFormat.SchemaJson => Strings.Format_SchemaJson,
             _ => Strings.Format_File,
         };
 
@@ -802,13 +815,13 @@ public partial class MainViewModel
             DiagramImportFormat.Mermaid => MermaidImporter.Load(path),
             DiagramImportFormat.Dbml => DbmlImporter.Load(path),
             DiagramImportFormat.Excel => TableDefinitionDocumentImporter.Load(path),
-            _ => throw new InvalidOperationException(Strings.Import_UnsupportedFormat),
+            _ => throw new InvalidOperationException(Strings.Import_FormatUndetermined),
         };
 
         var displayName = format switch
         {
-            DiagramImportFormat.Mermaid => "Mermaid",
-            DiagramImportFormat.Dbml => "DBML",
+            DiagramImportFormat.Mermaid => Strings.Format_Mermaid,
+            DiagramImportFormat.Dbml => Strings.Format_Dbml,
             DiagramImportFormat.Excel => Strings.Format_DefinitionDocument,
             _ => Strings.Format_File,
         };
@@ -1090,12 +1103,21 @@ public partial class MainViewModel
         }
 
         // 破損 JSON・非 DiagramDocument JSON・IO 失敗は現状維持のうえ通知する
-        if (!TryLoadDiagramDocument(picked.Path, out var document) || document is null)
+        if (
+            !TryLoadDiagramDocument(picked.Path, out var document, out var error)
+            || document is null
+        )
         {
-            _dialogs.ShowError(
-                string.Format(Strings.Open_Failed, picked.Path),
-                Strings.Common_Error
-            );
+            // 原因を持つ失敗（IO エラー・不正 JSON）は他の失敗通知と同じ流儀で例外メッセージを連結する。
+            // 形式検証で弾いた場合は例外が無いため、本文が挙げる原因候補だけを示す
+            var message = string.Format(Strings.Open_Failed, picked.Path);
+
+            if (error is not null)
+            {
+                message += Environment.NewLine + error.Message;
+            }
+
+            _dialogs.ShowError(message, Strings.Common_Error);
             return;
         }
 

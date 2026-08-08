@@ -567,19 +567,31 @@
     <value>Failed to import.</value>
   </data>
   <data name="Open_Failed" xml:space="preserve">
-    <value>Could not open "{0}". The file is not a QuickER diagram, or it is corrupted or unreadable. The current diagram was kept.</value>
+    <value>Failed to open '{0}'. The file is not a QuickER diagram, or it is corrupted or unreadable. The current diagram was kept.</value>
   </data>
   <data name="Save_Failed" xml:space="preserve">
     <value>Failed to save. Your changes were kept as unsaved; try saving again or save to another location.</value>
   </data>
-  <data name="ExportFormat_Png" xml:space="preserve">
+  <data name="Format_Png" xml:space="preserve">
     <value>PNG Image</value>
   </data>
-  <data name="ExportFormat_Svg" xml:space="preserve">
+  <data name="Format_Svg" xml:space="preserve">
     <value>SVG Image</value>
   </data>
   <data name="Format_DefinitionDocument" xml:space="preserve">
     <value>Definition Document</value>
+  </data>
+  <data name="Format_SqlDdl" xml:space="preserve">
+    <value>SQL DDL</value>
+  </data>
+  <data name="Format_Mermaid" xml:space="preserve">
+    <value>Mermaid</value>
+  </data>
+  <data name="Format_Dbml" xml:space="preserve">
+    <value>DBML</value>
+  </data>
+  <data name="Format_SchemaJson" xml:space="preserve">
+    <value>Schema JSON</value>
   </data>
   <data name="Format_File" xml:space="preserve">
     <value>File</value>
@@ -588,10 +600,7 @@
     <value>Could not obtain the canvas information required for PNG export.</value>
   </data>
   <data name="Export_Completed" xml:space="preserve">
-    <value>Exported {0}.</value>
-  </data>
-  <data name="Import_UnsupportedFormat" xml:space="preserve">
-    <value>Unsupported import format.</value>
+    <value>Export completed: {0}</value>
   </data>
   <data name="Import_ReplaceConfirm" xml:space="preserve">
     <value>This will replace the current diagram with the contents of {0}. Are you sure?</value>
@@ -607,7 +616,10 @@
     <value>The {0} named queries defined in the current diagram will also be deleted (this format does not carry query definitions).</value>
   </data>
   <data name="Import_Completed" xml:space="preserve">
-    <value>Imported {0}.</value>
+    <value>Import completed: {0}</value>
+  </data>
+  <data name="Import_LineDiagnostic" xml:space="preserve">
+    <value>Line {0}: {1}</value>
   </data>
   <data name="Export_FormatUndetermined" xml:space="preserve">
     <value>Could not determine the export format.</value>
@@ -628,7 +640,7 @@
     <value>Entity '{0}' is missing its closing brace '}}'.</value>
   </data>
   <data name="Dbml_NoEntities" xml:space="preserve">
-    <value>The DBML contains no entity definitions.</value>
+    <value>The DBML text contains no entity definitions.</value>
   </data>
   <data name="Dbml_ColumnParseError" xml:space="preserve">
     <value>Cannot parse column definition '{1}' of table '{0}'.</value>
@@ -637,7 +649,7 @@
     <value>Cannot parse index definition '{1}' in the Indexes block of table '{0}'.</value>
   </data>
   <data name="Dbml_IndexColumnNotFound" xml:space="preserve">
-    <value>Column '{1}' referenced by an index of table '{0}' is not defined.</value>
+    <value>Column '{1}' referenced by an index of table '{0}' is undefined.</value>
   </data>
   <data name="Dbml_RelationshipParseError" xml:space="preserve">
     <value>Cannot parse relationship definition '{0}'.</value>
@@ -663,14 +675,11 @@
   <data name="Mermaid_DuplicateEntity" xml:space="preserve">
     <value>Entity '{0}' is duplicated.</value>
   </data>
-  <data name="Mermaid_HeaderNotFound" xml:space="preserve">
-    <value>The Mermaid erDiagram header was not found.</value>
-  </data>
   <data name="Mermaid_MissingClosingBrace" xml:space="preserve">
     <value>Entity '{0}' is missing its closing brace '}}'.</value>
   </data>
   <data name="Mermaid_NoEntities" xml:space="preserve">
-    <value>The Mermaid contains no entity definitions.</value>
+    <value>The Mermaid text contains no entity definitions.</value>
   </data>
   <data name="Mermaid_ColumnParseError" xml:space="preserve">
     <value>Cannot parse column definition '{1}' of table '{0}'.</value>
@@ -718,10 +727,10 @@
     <value>Row {0} of the Relationship List sheet is missing a source or target table name.</value>
   </data>
   <data name="TableDoc_RelParentNotFound" xml:space="preserve">
-    <value>The target table '{0}' in the Relationship List sheet does not exist.</value>
+    <value>The target table '{0}' in the Relationship List sheet is undefined.</value>
   </data>
   <data name="TableDoc_RelChildNotFound" xml:space="preserve">
-    <value>The source table '{0}' in the Relationship List sheet does not exist.</value>
+    <value>The source table '{0}' in the Relationship List sheet is undefined.</value>
   </data>
   <data name="TableDoc_RelDuplicate" xml:space="preserve">
     <value>The relationship between tables '{0}' and '{1}' is duplicated.</value>
@@ -733,13 +742,13 @@
     <value>Row {0} of the Relationship List sheet lists a different number of referencing and referenced columns. A composite foreign key needs the same number of comma-separated columns on both sides.</value>
   </data>
   <data name="TableDoc_RelChildColumnNotFound" xml:space="preserve">
-    <value>Table '{0}' does not have the source column '{1}'.</value>
+    <value>The source column '{1}' of table '{0}' is undefined.</value>
   </data>
   <data name="TableDoc_RelParentColumnNotFound" xml:space="preserve">
-    <value>Table '{0}' does not have the target column '{1}'.</value>
+    <value>The target column '{1}' of table '{0}' is undefined.</value>
   </data>
   <data name="TableDoc_RelUnknownRelation" xml:space="preserve">
-    <value>Cannot interpret the relationship '{1}' in row {0} of the Relationship List sheet.</value>
+    <value>Cannot parse the relationship '{1}' in row {0} of the Relationship List sheet.</value>
   </data>
   <data name="TableDoc_MissingRoleTag" xml:space="preserve">
     <value>This workbook is in an old format or was not produced by this application. Please export it again.</value>
