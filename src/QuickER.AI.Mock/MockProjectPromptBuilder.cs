@@ -4,10 +4,11 @@ namespace QuickER.AI.Mock;
 /// WPF モックプロジェクト生成（第2ステップ）のシステムプロンプト・初回プロンプトを組み立てる共有ヘルパ。
 /// </summary>
 /// <remarks>
-/// バックエンド（Claude Code / Codex）に依らずプロンプト本文は同一である必要があるため、
-/// <see cref="ClaudeCodeMockProjectAgent"/> と <see cref="CodexMockProjectAgent"/> の双方がここを参照する
-/// （プロンプト本文の重複コピーを避ける正本）。各バックエンドは、ここで得たシステムプロンプトを
-/// それぞれの流儀（Claude Code＝<c>--append-system-prompt</c>／Codex＝developer instructions）で渡す。
+/// バックエンド（Claude Code / Codex / Copilot）に依らずプロンプト本文は同一である必要があるため、
+/// <see cref="ClaudeCodeMockProjectAgent"/> ・ <see cref="CodexMockProjectAgent"/> ・
+/// <see cref="CopilotMockProjectAgent"/> のいずれもここを参照する（プロンプト本文の重複コピーを避ける正本）。
+/// 各バックエンドは、ここで得たシステムプロンプトをそれぞれの流儀（Claude Code＝<c>--append-system-prompt</c>／
+/// Codex＝developer instructions／Copilot＝システムメッセージへの追記）で渡す。
 /// 本文はすべて英語固定（ヘッドレス実行の機械向け指示は UI 言語に追従させない＝回答言語が意図せず
 /// 引きずられるのを避ける方針。CJK 混入は英語ガードテストが検知する）。
 /// </remarks>
@@ -23,13 +24,13 @@ internal static class MockProjectPromptBuilder
     internal const string AdditionalInstructionsHeading = "# Additional instructions";
 
     /// <summary>
-    /// Codex 保険用の自動続行ナッジ（承認待ちで止まったターンを 1 回だけ後押しする固定文）。
+    /// エージェント型バックエンド保険用の自動続行ナッジ（承認待ちで止まったターンを 1 回だけ後押しする固定文）。
     /// </summary>
     /// <remarks>
-    /// Codex が計画提示だけで（承認待ちのまま）ターンを終えたと疑われるとき、
-    /// <see cref="CodexMockProjectAgent"/> が同一スレッドへ 1 回だけ送る続行指示。
+    /// 計画提示だけで（承認待ちのまま）ターンを終えたと疑われるとき、<see cref="CodexMockProjectAgent"/> と
+    /// <see cref="CopilotMockProjectAgent"/> が同一セッションへ 1 回だけ送る続行指示。
     /// </remarks>
-    internal const string CodexContinuationNudge =
+    internal const string ContinuationNudge =
         "No confirmation is needed. Do not ask for approval: continue on your own and finish the work, from the implementation through verification with dotnet build.";
 
     /// <summary>ヘッドレス実行のシステムプロンプト（規約・制約）を組み立てる</summary>

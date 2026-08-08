@@ -73,6 +73,12 @@
   <data name="Connection_ClaudeCodeGuidanceDefault" xml:space="preserve">
     <value>「再確認」を押すとログイン状態を確認できます。</value>
   </data>
+  <data name="Connection_CopilotStatusUnverified" xml:space="preserve">
+    <value>未確認</value>
+  </data>
+  <data name="Connection_CopilotGuidanceDefault" xml:space="preserve">
+    <value>「再確認」を押すとログイン状態を確認できます。</value>
+  </data>
   <data name="Attachment_ClearedUnsupported" xml:space="preserve">
     <value>この接続方式は添付に対応していないため、添付をクリアしました。</value>
   </data>
@@ -113,13 +119,13 @@
     <value>画像は 1 メッセージ最大 {0} 枚までです: {1}</value>
   </data>
   <data name="Attachment_RejectPdf" xml:space="preserve">
-    <value>この接続では PDF を読めません。Claude 接続をご利用ください: {0}</value>
+    <value>この接続では PDF を読めません。API キーの Claude または Claude Code をご利用ください: {0}</value>
   </data>
   <data name="Attachment_RejectText" xml:space="preserve">
     <value>この接続ではテキストファイルを読めません: {0}</value>
   </data>
   <data name="Attachment_RejectBinary" xml:space="preserve">
-    <value>この接続ではテキスト・画像・PDF 以外を読めません。Claude 接続をご利用ください: {0}</value>
+    <value>この接続ではテキスト・画像・PDF 以外を読めません。Claude Code をご利用ください: {0}</value>
   </data>
   <data name="Attachment_RejectImage" xml:space="preserve">
     <value>この接続では画像を読めません: {0}</value>

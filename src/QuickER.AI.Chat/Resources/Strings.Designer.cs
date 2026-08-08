@@ -162,6 +162,18 @@ namespace QuickER.AI.Chat.Resources {
             }
         }
 
+        public static string Chat_TabCopilot {
+            get {
+                return ResourceManager.GetString("Chat_TabCopilot", resourceCulture);
+            }
+        }
+
+        public static string Chat_CopilotModelTooltip {
+            get {
+                return ResourceManager.GetString("Chat_CopilotModelTooltip", resourceCulture);
+            }
+        }
+
         public static string Chat_ChatHeader {
             get {
                 return ResourceManager.GetString("Chat_ChatHeader", resourceCulture);

@@ -178,10 +178,10 @@ public sealed class CodexMockProjectAgent : IMockProjectAgent
                 && !HasAnyUiFile(request.WorkingDirectory, request.Profile.UiFileSearchPattern)
             )
             {
-                onProgress(Strings.Mock_Codex_AutoContinueNotice);
+                onProgress(Strings.Mock_AutoContinueNotice);
                 outcome = await RunTurnAndWaitAsync(
                         thread.Id,
-                        MockProjectPromptBuilder.CodexContinuationNudge
+                        MockProjectPromptBuilder.ContinuationNudge
                     )
                     .ConfigureAwait(false);
             }

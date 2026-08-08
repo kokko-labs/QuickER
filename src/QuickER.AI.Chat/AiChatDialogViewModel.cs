@@ -13,7 +13,10 @@ using QuickER.Gui.Common;
 
 namespace QuickER.AI.Chat;
 
-/// <summary>AI チャット（API キー接続 / Codex 接続 / Claude Code 接続の 3 エンジン）を扱う統合ダイアログ用 ViewModel</summary>
+/// <summary>
+/// AI チャット（API キー接続 / Codex 接続 / Claude Code 接続 / GitHub Copilot 接続の 4 エンジン）を
+/// 扱う統合ダイアログ用 ViewModel
+/// </summary>
 /// <remarks>チャット UI・メッセージ・送信/中断・自動整列を共通化し、エンジン固有部分のみ <see cref="IErChatEngine"/> で差し替える</remarks>
 public partial class AiChatDialogViewModel : ObservableObject
 {
@@ -21,12 +24,13 @@ public partial class AiChatDialogViewModel : ObservableObject
     private readonly IUiDispatcher _dispatcher;
     private readonly IDialogService _dialogs;
 
-    /// <summary>接続方式タブ（API キー / Codex / Claude Code）の状態と永続化を束ねる共通 VM 部品</summary>
+    /// <summary>接続方式タブ（API キー / Codex / Claude Code / Copilot）の状態と永続化を束ねる共通 VM 部品</summary>
     public ChatConnectionSettingsViewModel Connection { get; }
 
     private readonly ChatTurnEngine _apiKeyEngine;
     private readonly CodexChatEngine? _codexEngine;
     private readonly ClaudeCodeChatEngine _claudeCodeEngine;
+    private readonly CopilotChatEngine _copilotEngine;
     private IErChatEngine _engine;
 
     private bool _conversationStarted;
@@ -176,6 +180,7 @@ public partial class AiChatDialogViewModel : ObservableObject
             settingsStore: null,
             codexClient: null,
             claudeCodeClient: null,
+            copilotClient: null,
             dialogService: dialogService
         ) { }
 
@@ -192,6 +197,7 @@ public partial class AiChatDialogViewModel : ObservableObject
         AiSettingsStore? settingsStore,
         ICodexAppServerClient? codexClient,
         IClaudeCodeClient? claudeCodeClient = null,
+        ICopilotRuntimeClient? copilotClient = null,
         IDialogService? dialogService = null,
         IFileDialogService? files = null,
         ChatAttachmentFactory.ImageShrinker? imageShrinker = null,
@@ -249,6 +255,15 @@ public partial class AiChatDialogViewModel : ObservableObject
         );
         _claudeCodeEngine.StatusSummaryChanged += OnClaudeCodeStatusSummaryChanged;
 
+        _copilotEngine = new CopilotChatEngine(
+            copilotClient ?? new CopilotRuntimeClient(),
+            toolHost,
+            dispatcher,
+            ErDesignProfile.ErDesign
+        );
+        _copilotEngine.StatusSummaryChanged += OnCopilotStatusSummaryChanged;
+        _copilotEngine.AvailableModelsChanged += OnCopilotAvailableModelsChanged;
+
         _engine = _apiKeyEngine;
         SubscribeEngine(_engine);
 
@@ -298,6 +313,10 @@ public partial class AiChatDialogViewModel : ObservableObject
         else if (Connection.IsClaudeCodeBackend)
         {
             await EnsureClaudeCodeInitializedAsync().ConfigureAwait(true);
+        }
+        else if (Connection.IsCopilotBackend)
+        {
+            await EnsureCopilotInitializedAsync().ConfigureAwait(true);
         }
     }
 
@@ -463,6 +482,14 @@ public partial class AiChatDialogViewModel : ObservableObject
         await _claudeCodeEngine.RefreshAsync().ConfigureAwait(true);
     }
 
+    /// <summary>Copilot の接続・ログイン状態とモデル一覧を取り直す（「再確認」）</summary>
+    [RelayCommand]
+    private async Task CopilotRefreshAsync()
+    {
+        await _copilotEngine.RefreshAsync().ConfigureAwait(true);
+        ApplyCopilotState();
+    }
+
     /// <summary>設定を保存する（ウィンドウ非表示化時などに外部から呼ぶ）</summary>
     /// <remarks>接続タブの状態保存は子（<see cref="ChatConnectionSettingsViewModel.SaveSettings"/>）へ委譲する。</remarks>
     public void SaveSettings() => Connection.SaveSettings();
@@ -524,6 +551,27 @@ public partial class AiChatDialogViewModel : ObservableObject
         NotifyReadinessChanged();
     }
 
+    /// <summary>Copilot エンジンを初期化（接続）し、状態サマリー・モデル候補・可否を反映する</summary>
+    private async Task EnsureCopilotInitializedAsync()
+    {
+        _copilotEngine.Model = Connection.CopilotModel;
+        await _copilotEngine.InitializeAsync().ConfigureAwait(true);
+        ApplyCopilotState();
+    }
+
+    /// <summary>Copilot エンジンの状態（サマリー・健全度・案内・モデル候補）を接続タブへ反映する</summary>
+    /// <remarks>
+    /// Copilot は静的カタログを持たないため、実行時列挙したモデル一覧も接続タブへ流し込んで候補にする。
+    /// </remarks>
+    private void ApplyCopilotState()
+    {
+        Connection.CopilotStatusSummary = _copilotEngine.StatusSummary;
+        Connection.CopilotStatusLevel = _copilotEngine.StatusLevel;
+        Connection.CopilotGuidance = _copilotEngine.Guidance;
+        Connection.CopilotAvailableModels = _copilotEngine.AvailableModels;
+        NotifyReadinessChanged();
+    }
+
     // ── 設定変更フック ──
 
     /// <summary>
@@ -543,6 +591,7 @@ public partial class AiChatDialogViewModel : ObservableObject
                 {
                     ErChatBackendKind.Codex when _codexEngine is not null => _codexEngine,
                     ErChatBackendKind.ClaudeCode => _claudeCodeEngine,
+                    ErChatBackendKind.Copilot => _copilotEngine,
                     _ => _apiKeyEngine,
                 };
                 SubscribeEngine(_engine);
@@ -559,6 +608,10 @@ public partial class AiChatDialogViewModel : ObservableObject
                 else if (Connection.SelectedBackend == ErChatBackendKind.ClaudeCode)
                 {
                     _ = EnsureClaudeCodeInitializedAsync();
+                }
+                else if (Connection.SelectedBackend == ErChatBackendKind.Copilot)
+                {
+                    _ = EnsureCopilotInitializedAsync();
                 }
 
                 break;
@@ -599,6 +652,10 @@ public partial class AiChatDialogViewModel : ObservableObject
 
             case nameof(ChatConnectionSettingsViewModel.ClaudeCodeModel):
                 _claudeCodeEngine.Model = Connection.ClaudeCodeModel;
+                break;
+
+            case nameof(ChatConnectionSettingsViewModel.CopilotModel):
+                _copilotEngine.Model = Connection.CopilotModel;
                 break;
         }
     }
@@ -650,6 +707,12 @@ public partial class AiChatDialogViewModel : ObservableObject
             Connection.ClaudeCodeGuidance = _claudeCodeEngine.Guidance;
             NotifyReadinessChanged();
         });
+
+    private void OnCopilotStatusSummaryChanged(object? sender, EventArgs e) =>
+        RunOnUi(ApplyCopilotState);
+
+    private void OnCopilotAvailableModelsChanged(object? sender, EventArgs e) =>
+        RunOnUi(() => Connection.CopilotAvailableModels = _copilotEngine.AvailableModels);
 
     /// <summary>ストリーミング差分を組み立て中のアシスタント吹き出しへ追記する</summary>
     private void ApplyDelta(string delta)

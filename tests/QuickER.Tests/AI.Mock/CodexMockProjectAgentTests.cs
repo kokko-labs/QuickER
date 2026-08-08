@@ -288,10 +288,10 @@ public class CodexMockProjectAgentTests
             .Be(
                 MockProjectPromptBuilder.BuildPrompt(MockProjectTargetProfile.Wpf, "AcmeMock", null)
             );
-        client.TurnPrompts[1].Should().Be(MockProjectPromptBuilder.CodexContinuationNudge);
+        client.TurnPrompts[1].Should().Be(MockProjectPromptBuilder.ContinuationNudge);
 
         // 承認待ち検知の一行が進捗へ流れる
-        string.Concat(progress).Should().Contain(MockStrings.Mock_Codex_AutoContinueNotice.Trim());
+        string.Concat(progress).Should().Contain(MockStrings.Mock_AutoContinueNotice.Trim());
     }
 
     /// <summary>作業フォルダに *.xaml があれば（実装が進んだ兆候）自動続行ナッジを送らないことを検証する</summary>
@@ -317,9 +317,7 @@ public class CodexMockProjectAgentTests
             outcome.Success.Should().BeTrue();
             // xaml があるためナッジせず 1 ターンのみ
             client.StartTurnCount.Should().Be(1);
-            string.Concat(progress)
-                .Should()
-                .NotContain(MockStrings.Mock_Codex_AutoContinueNotice.Trim());
+            string.Concat(progress).Should().NotContain(MockStrings.Mock_AutoContinueNotice.Trim());
         }
         finally
         {
@@ -396,8 +394,8 @@ public class CodexMockProjectAgentTests
         outcome.Success.Should().BeTrue();
         // 初回＋ナッジ 1 回だけ
         client.StartTurnCount.Should().Be(2);
-        client.TurnPrompts[1].Should().Be(MockProjectPromptBuilder.CodexContinuationNudge);
-        string.Concat(progress).Should().Contain(MockStrings.Mock_Codex_AutoContinueNotice.Trim());
+        client.TurnPrompts[1].Should().Be(MockProjectPromptBuilder.ContinuationNudge);
+        string.Concat(progress).Should().Contain(MockStrings.Mock_AutoContinueNotice.Trim());
     }
 
     /// <summary>Blazor ターゲットで *.razor があれば自動続行ナッジを送らないことを検証する（xaml テストと対称）</summary>
@@ -421,9 +419,7 @@ public class CodexMockProjectAgentTests
             outcome.Success.Should().BeTrue();
             // razor があるためナッジせず 1 ターンのみ
             client.StartTurnCount.Should().Be(1);
-            string.Concat(progress)
-                .Should()
-                .NotContain(MockStrings.Mock_Codex_AutoContinueNotice.Trim());
+            string.Concat(progress).Should().NotContain(MockStrings.Mock_AutoContinueNotice.Trim());
         }
         finally
         {

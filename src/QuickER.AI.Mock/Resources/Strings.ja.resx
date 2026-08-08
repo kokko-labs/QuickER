@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <root>
   <!--
     日本語サテライトリソース。中立（英語）の Strings.resx と同じキー集合を保つこと（ResxKeyParityTests がキー集合一致を検証）。
@@ -197,6 +197,9 @@
   <data name="Mock_DisabledReason_CodexNotReady" xml:space="preserve">
     <value>Codex が利用可能ではありません。Codex タブで接続・ログインしてください。</value>
   </data>
+  <data name="Mock_DisabledReason_CopilotNotReady" xml:space="preserve">
+    <value>GitHub Copilot が利用可能ではありません。Copilot タブで接続・ログインしてください。</value>
+  </data>
   <data name="Mock_DisabledReason_Dotnet" xml:space="preserve">
     <value>.NET SDK（dotnet）が見つかりません。.NET SDK をインストールしてください。</value>
   </data>
@@ -266,7 +269,7 @@
   <data name="Mock_GenerationFailedFormat" xml:space="preserve">
     <value>モックプロジェクト生成に失敗しました: {0}</value>
   </data>
-  <data name="Mock_Codex_AutoContinueNotice" xml:space="preserve">
+  <data name="Mock_AutoContinueNotice" xml:space="preserve">
     <value>
 （承認待ちを検知：自動続行します）
 </value>
@@ -365,6 +368,12 @@
   </data>
   <data name="Mock_CodexNotLoggedIn" xml:space="preserve">
     <value>Codex が未ログインです。</value>
+  </data>
+  <data name="Mock_CopilotNotLoggedIn" xml:space="preserve">
+    <value>GitHub Copilot が未ログインです。</value>
+  </data>
+  <data name="Mock_CopilotModelTooltip" xml:space="preserve">
+    <value>モデル ID は接続後に一覧されます。空のままにすると GitHub Copilot CLI の既定モデルを使います。</value>
   </data>
   <data name="Mock_Result_ClientFailedFormat" xml:space="preserve">
     <value>AI バックエンドの実行に失敗しました: {0}。ログを確認してください。</value>

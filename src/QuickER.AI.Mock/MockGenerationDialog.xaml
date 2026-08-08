@@ -516,7 +516,7 @@
             </StackPanel>
           </TabItem>
 
-          <TabItem Header="Claude">
+          <TabItem Header="Claude Code">
             <StackPanel Margin="14,12">
               <Grid>
                 <Grid.ColumnDefinitions>
@@ -548,6 +548,76 @@
                     Foreground="{StaticResource MutedText}"
                     TextWrapping="Wrap"
                     Text="{Binding Connection.ClaudeCodeGuidance}"
+                  />
+                </ui:ConnectionStatusPanel.Body>
+              </ui:ConnectionStatusPanel>
+            </StackPanel>
+          </TabItem>
+
+          <TabItem Header="Copilot">
+            <StackPanel Margin="14,12">
+              <Grid>
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="Auto" />
+                  <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <TextBlock
+                  Grid.Column="0"
+                  Style="{StaticResource FieldLabel}"
+                  Text="{x:Static res:Strings.Mock_Model}"
+                />
+                <!-- 候補は接続後の実行時列挙（削除不可）＋カタログ外の MRU 履歴（× で削除可能）。空＝CLI 既定 -->
+                <ComboBox
+                  x:Name="CopilotModelBox"
+                  Grid.Column="1"
+                  Padding="6,4"
+                  IsEditable="True"
+                  TextSearch.TextPath="Name"
+                  Text="{Binding Connection.CopilotModel, UpdateSourceTrigger=PropertyChanged}"
+                  ItemsSource="{Binding Connection.CopilotModelCandidates}"
+                  ToolTip="{x:Static res:Strings.Mock_CopilotModelTooltip}"
+                >
+                  <!-- ドロップダウン項目を横いっぱいに広げ、× ボタンを右端へ寄せる -->
+                  <ComboBox.ItemContainerStyle>
+                    <Style TargetType="ComboBoxItem">
+                      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                    </Style>
+                  </ComboBox.ItemContainerStyle>
+                  <ComboBox.ItemTemplate>
+                    <DataTemplate>
+                      <DockPanel LastChildFill="True">
+                        <!-- 右端の × は履歴由来（IsRemovable=true）の候補だけ表示し、履歴から個別削除する -->
+                        <Button
+                          DockPanel.Dock="Right"
+                          Content="✕"
+                          Padding="6,0"
+                          Background="Transparent"
+                          BorderThickness="0"
+                          Cursor="Hand"
+                          Foreground="{StaticResource MutedText}"
+                          ToolTip="{x:Static res:Strings.Mock_RemoveModelFromHistory}"
+                          Visibility="{Binding IsRemovable, Converter={StaticResource BoolToVisibilityConverter}}"
+                          Command="{Binding DataContext.Connection.RemoveCopilotModelHistoryCommand, RelativeSource={RelativeSource AncestorType=ComboBox}}"
+                          CommandParameter="{Binding Name}"
+                        />
+                        <TextBlock VerticalAlignment="Center" Text="{Binding Name}" />
+                      </DockPanel>
+                    </DataTemplate>
+                  </ComboBox.ItemTemplate>
+                </ComboBox>
+              </Grid>
+              <ui:ConnectionStatusPanel
+                Margin="0,10,0,0"
+                StatusLevel="{Binding Connection.CopilotStatusLevel}"
+                SummaryText="{Binding Connection.CopilotStatusSummary}"
+                RefreshCommand="{Binding CopilotRefreshCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+              >
+                <ui:ConnectionStatusPanel.Body>
+                  <TextBlock
+                    Margin="0,10,0,0"
+                    Foreground="{StaticResource MutedText}"
+                    TextWrapping="Wrap"
+                    Text="{Binding Connection.CopilotGuidance}"
                   />
                 </ui:ConnectionStatusPanel.Body>
               </ui:ConnectionStatusPanel>

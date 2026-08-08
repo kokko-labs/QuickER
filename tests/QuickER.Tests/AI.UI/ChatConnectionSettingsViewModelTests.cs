@@ -77,6 +77,7 @@ public class ChatConnectionSettingsViewModelTests
             vm.IsApiKeyBackend.Should().BeTrue();
             vm.IsCodexBackend.Should().BeFalse();
             vm.IsClaudeCodeBackend.Should().BeFalse();
+            vm.IsCopilotBackend.Should().BeFalse();
 
             // PasswordBoxBehavior の不変条件: 初期値は空文字（null 不可）
             vm.ApiKey.Should().Be(string.Empty);
@@ -89,8 +90,8 @@ public class ChatConnectionSettingsViewModelTests
         }
     }
 
-    /// <summary>SelectedBackend 変更で Is* 3 プロパティの通知が発火することを検証する</summary>
-    [Fact(DisplayName = "SelectedBackend 変更で Is* 3 通知が発火する")]
+    /// <summary>SelectedBackend 変更で Is* 4 プロパティの通知が発火することを検証する</summary>
+    [Fact(DisplayName = "SelectedBackend 変更で Is* 4 通知が発火する")]
     public void SelectedBackendChanged_NotifiesIsBackendFlags()
     {
         var folder = NewFolder();
@@ -105,6 +106,7 @@ public class ChatConnectionSettingsViewModelTests
             changed.Should().Contain(nameof(vm.IsApiKeyBackend));
             changed.Should().Contain(nameof(vm.IsCodexBackend));
             changed.Should().Contain(nameof(vm.IsClaudeCodeBackend));
+            changed.Should().Contain(nameof(vm.IsCopilotBackend));
             vm.IsCodexBackend.Should().BeTrue();
         }
         finally
@@ -1297,6 +1299,219 @@ public class ChatConnectionSettingsViewModelTests
             var restoredMock = CreateVm(folder, dialogKind: AiDialogKind.MockGeneration);
             restoredMock.LoadSettings();
             restoredMock.InitialBackend.Should().Be(ErChatBackendKind.ClaudeCode);
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    // ── GitHub Copilot 接続（モデル候補＝実行時列挙＋MRU 履歴・固定キーの履歴・設定往復） ──
+
+    /// <summary>Copilot の既定値（モデル空＝CLI 既定・状態は未確認の灰）を検証する</summary>
+    [Fact(DisplayName = "Copilot の既定はモデル空・状態は Pending")]
+    public void CopilotDefaults_EmptyModel_AndPendingStatus()
+    {
+        var folder = NewFolder();
+
+        try
+        {
+            var vm = CreateVm(folder);
+
+            // 空＝Copilot CLI の既定モデルに任せる（Claude Code 接続と同じ思想）
+            vm.CopilotModel.Should().BeEmpty();
+            vm.CopilotStatusLevel.Should().Be(ConnectionHealth.Pending);
+            vm.CopilotAvailableModels.Should().BeEmpty();
+            vm.CopilotModelCandidates.Should().BeEmpty();
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>実行時列挙が候補の上段（削除不可）に入ることを検証する（静的カタログを持たない Copilot の候補源）</summary>
+    [Fact(DisplayName = "Copilot 候補は実行時列挙が上段（削除不可）")]
+    public void CopilotAvailableModels_FillCandidatesAsNonRemovable()
+    {
+        var folder = NewFolder();
+
+        try
+        {
+            var vm = CreateVm(folder);
+
+            vm.CopilotAvailableModels = new List<string> { "gpt-5", "claude-sonnet-4.5" };
+
+            vm.CopilotModelCandidates.Select(c => c.Name)
+                .Should()
+                .Equal("gpt-5", "claude-sonnet-4.5");
+            vm.CopilotModelCandidates.Should().OnlyContain(c => !c.IsRemovable);
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>成功記録で履歴が列挙の下段（× 付き）に並び、列挙と同名の履歴は表示されないことを検証する</summary>
+    [Fact(DisplayName = "Copilot 候補は実行時列挙＋履歴の 2 層で重複しない")]
+    public void RecordSuccessfulModel_Copilot_AppendsHistoryBelowAvailableModels()
+    {
+        var folder = NewFolder();
+
+        try
+        {
+            var vm = CreateVm(folder);
+            vm.LoadSettings();
+            vm.SelectedBackend = ErChatBackendKind.Copilot;
+            vm.CopilotAvailableModels = new List<string> { "gpt-5" };
+
+            // 列挙外のモデル（手入力）と、列挙と同名（大文字小文字違い）のモデルを両方記録する
+            vm.CopilotModel = "custom-copilot-model";
+            vm.RecordSuccessfulModel();
+            vm.CopilotModel = "GPT-5";
+            vm.RecordSuccessfulModel();
+
+            // 表示は「列挙（削除不可）＋列挙に無い履歴（× 付き）」のみ
+            vm.CopilotModelCandidates.Select(c => c.Name)
+                .Should()
+                .Equal("gpt-5", "custom-copilot-model");
+            vm.CopilotModelCandidates[0].IsRemovable.Should().BeFalse();
+            vm.CopilotModelCandidates[1].IsRemovable.Should().BeTrue();
+
+            // JSON は固定プロバイダーキー（"copilot"）で永続化される
+            var reloaded = new AiSettingsStore(folder).Load().CopilotModelHistory;
+            reloaded
+                .ModelsFor(CopilotSettings.HistoryProviderKey)
+                .Should()
+                .Equal("GPT-5", "custom-copilot-model");
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>Copilot 以外のバックエンド・空モデルでは Copilot 履歴へ記録しないことを検証する（ガード）</summary>
+    [Fact(DisplayName = "Copilot 以外・空モデルでは Copilot 履歴に記録しない")]
+    public void RecordSuccessfulModel_Copilot_GuardsBackendAndBlankModel()
+    {
+        var folder = NewFolder();
+
+        try
+        {
+            var vm = CreateVm(folder);
+            vm.LoadSettings();
+
+            // ①Copilot モデルが入っていても、バックエンドが Claude Code なら記録しない
+            vm.CopilotModel = "gpt-5";
+            vm.SelectedBackend = ErChatBackendKind.ClaudeCode;
+            vm.RecordSuccessfulModel();
+            File.Exists(new AiSettingsStore(folder).SettingsPath).Should().BeFalse();
+
+            // ②Copilot でもモデルが空（＝CLI 既定に任せる指定）なら記録するモデル名が無い
+            vm.SelectedBackend = ErChatBackendKind.Copilot;
+            vm.CopilotModel = "   ";
+            vm.RecordSuccessfulModel();
+
+            vm.CopilotModelCandidates.Should().BeEmpty();
+            File.Exists(new AiSettingsStore(folder).SettingsPath).Should().BeFalse();
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>削除コマンドで履歴のみ消え、実行時列挙と選択中モデル（CopilotModel）は残ることを検証する</summary>
+    [Fact(DisplayName = "Copilot 削除コマンドで履歴のみ消え列挙と CopilotModel は残る")]
+    public void RemoveCopilotModelHistoryCommand_RemovesHistoryOnly()
+    {
+        var folder = NewFolder();
+
+        try
+        {
+            var vm = CreateVm(folder);
+            vm.LoadSettings();
+            vm.SelectedBackend = ErChatBackendKind.Copilot;
+            vm.CopilotAvailableModels = new List<string> { "gpt-5" };
+            vm.CopilotModel = "custom-copilot-model";
+            vm.RecordSuccessfulModel();
+
+            vm.RemoveCopilotModelHistoryCommand.Execute("custom-copilot-model");
+
+            vm.CopilotModelCandidates.Select(c => c.Name).Should().Equal("gpt-5");
+            vm.CopilotModel.Should().Be("custom-copilot-model");
+
+            var reloaded = new AiSettingsStore(folder).Load().CopilotModelHistory;
+            reloaded.ModelsFor(CopilotSettings.HistoryProviderKey).Should().BeEmpty();
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>Copilot のモデル・タブ選択が SaveSettings→LoadSettings で往復し、履歴が候補へ復元されることを検証する</summary>
+    [Fact(DisplayName = "Copilot のモデル・タブ選択・履歴が往復する")]
+    public void SaveSettings_Copilot_RoundTrips()
+    {
+        var folder = NewFolder();
+
+        try
+        {
+            var vm = CreateVm(folder);
+            vm.LoadSettings();
+            vm.SelectedBackend = ErChatBackendKind.Copilot;
+            vm.CopilotModel = "claude-sonnet-4.5";
+            vm.RecordSuccessfulModel();
+            vm.SaveSettings();
+
+            var restored = CreateVm(folder);
+            restored.LoadSettings();
+
+            restored.InitialBackend.Should().Be(ErChatBackendKind.Copilot);
+            restored.CopilotModel.Should().Be("claude-sonnet-4.5");
+            // 未接続（実行時列挙が空）でも履歴が候補として残るため、直近のモデルを選び直せる
+            restored
+                .CopilotModelCandidates.Select(c => c.Name)
+                .Should()
+                .Equal("claude-sonnet-4.5");
+            restored.CopilotModelCandidates.Should().OnlyContain(c => c.IsRemovable);
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>Copilot 設定の保存が他セクション（Codex / Claude Code / UI）を消さないことを検証する</summary>
+    [Fact(DisplayName = "Copilot 保存は他セクションを消さない")]
+    public void SaveSettings_Copilot_DoesNotClobberOtherSections()
+    {
+        var folder = NewFolder();
+
+        try
+        {
+            var config = new CodexConfigToml
+            {
+                ProviderNames = new List<string> { "ollama-launch" },
+            };
+
+            var vm = CreateVm(folder, codexConfigReader: () => config);
+            vm.LoadSettings();
+            vm.CodexModelProvider = "ollama-launch";
+            vm.CodexModel = "gemma4:31b-cloud";
+            vm.ClaudeCodeModel = "opus";
+            vm.CopilotModel = "gpt-5";
+            vm.SelectedBackend = ErChatBackendKind.Copilot;
+            vm.SaveSettings();
+
+            var saved = new AiSettingsStore(folder).Load();
+            saved.Copilot.Model.Should().Be("gpt-5");
+            saved.CodexAppServer.Model.Should().Be("gemma4:31b-cloud");
+            saved.ClaudeCode.Model.Should().Be("opus");
+            saved.ChatUi.LastBackend.Should().Be(nameof(ErChatBackendKind.Copilot));
         }
         finally
         {

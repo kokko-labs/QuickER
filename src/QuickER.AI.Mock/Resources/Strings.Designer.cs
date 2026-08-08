@@ -354,6 +354,12 @@ namespace QuickER.AI.Mock.Resources {
             }
         }
 
+        public static string Mock_DisabledReason_CopilotNotReady {
+            get {
+                return ResourceManager.GetString("Mock_DisabledReason_CopilotNotReady", resourceCulture);
+            }
+        }
+
         public static string Mock_DisabledReason_Dotnet {
             get {
                 return ResourceManager.GetString("Mock_DisabledReason_Dotnet", resourceCulture);
@@ -456,9 +462,9 @@ namespace QuickER.AI.Mock.Resources {
             }
         }
 
-        public static string Mock_Codex_AutoContinueNotice {
+        public static string Mock_AutoContinueNotice {
             get {
-                return ResourceManager.GetString("Mock_Codex_AutoContinueNotice", resourceCulture);
+                return ResourceManager.GetString("Mock_AutoContinueNotice", resourceCulture);
             }
         }
 
@@ -627,6 +633,18 @@ namespace QuickER.AI.Mock.Resources {
         public static string Mock_CodexNotLoggedIn {
             get {
                 return ResourceManager.GetString("Mock_CodexNotLoggedIn", resourceCulture);
+            }
+        }
+
+        public static string Mock_CopilotNotLoggedIn {
+            get {
+                return ResourceManager.GetString("Mock_CopilotNotLoggedIn", resourceCulture);
+            }
+        }
+
+        public static string Mock_CopilotModelTooltip {
+            get {
+                return ResourceManager.GetString("Mock_CopilotModelTooltip", resourceCulture);
             }
         }
 

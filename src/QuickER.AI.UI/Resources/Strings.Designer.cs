@@ -84,6 +84,18 @@ namespace QuickER.AI.UI.Resources {
             }
         }
 
+        public static string Connection_CopilotStatusUnverified {
+            get {
+                return ResourceManager.GetString("Connection_CopilotStatusUnverified", resourceCulture);
+            }
+        }
+
+        public static string Connection_CopilotGuidanceDefault {
+            get {
+                return ResourceManager.GetString("Connection_CopilotGuidanceDefault", resourceCulture);
+            }
+        }
+
         public static string Attachment_ClearedUnsupported {
             get {
                 return ResourceManager.GetString("Attachment_ClearedUnsupported", resourceCulture);

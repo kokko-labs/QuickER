@@ -587,5 +587,179 @@ namespace QuickER.AI.Resources {
                 return ResourceManager.GetString("Codex_ServerNotStarted", resourceCulture);
             }
         }
+
+        public static string Copilot_Guidance_Pending {
+            get {
+                return ResourceManager.GetString("Copilot_Guidance_Pending", resourceCulture);
+            }
+        }
+
+        public static string Copilot_Guidance_Install {
+            get {
+                return ResourceManager.GetString("Copilot_Guidance_Install", resourceCulture);
+            }
+        }
+
+        public static string Copilot_Guidance_LoggedIn {
+            get {
+                return ResourceManager.GetString("Copilot_Guidance_LoggedIn", resourceCulture);
+            }
+        }
+
+        public static string Copilot_Guidance_NotLoggedIn {
+            get {
+                return ResourceManager.GetString("Copilot_Guidance_NotLoggedIn", resourceCulture);
+            }
+        }
+
+        public static string Copilot_Guidance_Inconclusive {
+            get {
+                return ResourceManager.GetString("Copilot_Guidance_Inconclusive", resourceCulture);
+            }
+        }
+
+        public static string Copilot_Status_Unconfirmed {
+            get {
+                return ResourceManager.GetString("Copilot_Status_Unconfirmed", resourceCulture);
+            }
+        }
+
+        public static string Copilot_Status_NotFound {
+            get {
+                return ResourceManager.GetString("Copilot_Status_NotFound", resourceCulture);
+            }
+        }
+
+        public static string Copilot_Status_NotConnected {
+            get {
+                return ResourceManager.GetString("Copilot_Status_NotConnected", resourceCulture);
+            }
+        }
+
+        public static string Copilot_Status_LoggedIn {
+            get {
+                return ResourceManager.GetString("Copilot_Status_LoggedIn", resourceCulture);
+            }
+        }
+
+        public static string Copilot_Status_LoggedInAs {
+            get {
+                return ResourceManager.GetString("Copilot_Status_LoggedInAs", resourceCulture);
+            }
+        }
+
+        public static string Copilot_Status_NotLoggedIn {
+            get {
+                return ResourceManager.GetString("Copilot_Status_NotLoggedIn", resourceCulture);
+            }
+        }
+
+        public static string Copilot_Status_Inconclusive {
+            get {
+                return ResourceManager.GetString("Copilot_Status_Inconclusive", resourceCulture);
+            }
+        }
+
+        public static string Copilot_CliNotFound {
+            get {
+                return ResourceManager.GetString("Copilot_CliNotFound", resourceCulture);
+            }
+        }
+
+        public static string Copilot_NotConnected {
+            get {
+                return ResourceManager.GetString("Copilot_NotConnected", resourceCulture);
+            }
+        }
+
+        public static string Copilot_NoSession {
+            get {
+                return ResourceManager.GetString("Copilot_NoSession", resourceCulture);
+            }
+        }
+
+        public static string Copilot_ConnectFailed {
+            get {
+                return ResourceManager.GetString("Copilot_ConnectFailed", resourceCulture);
+            }
+        }
+
+        public static string Copilot_AuthStateFailed {
+            get {
+                return ResourceManager.GetString("Copilot_AuthStateFailed", resourceCulture);
+            }
+        }
+
+        public static string Copilot_ModelListFailed {
+            get {
+                return ResourceManager.GetString("Copilot_ModelListFailed", resourceCulture);
+            }
+        }
+
+        public static string Copilot_StartingConversation {
+            get {
+                return ResourceManager.GetString("Copilot_StartingConversation", resourceCulture);
+            }
+        }
+
+        public static string Copilot_StartedConversation {
+            get {
+                return ResourceManager.GetString("Copilot_StartedConversation", resourceCulture);
+            }
+        }
+
+        public static string Copilot_StartConversationFailed {
+            get {
+                return ResourceManager.GetString("Copilot_StartConversationFailed", resourceCulture);
+            }
+        }
+
+        public static string Copilot_CouldNotStartConversation {
+            get {
+                return ResourceManager.GetString("Copilot_CouldNotStartConversation", resourceCulture);
+            }
+        }
+
+        public static string Copilot_Processing {
+            get {
+                return ResourceManager.GetString("Copilot_Processing", resourceCulture);
+            }
+        }
+
+        public static string Copilot_InterruptFailed {
+            get {
+                return ResourceManager.GetString("Copilot_InterruptFailed", resourceCulture);
+            }
+        }
+
+        public static string Copilot_ToolResponseSendFailed {
+            get {
+                return ResourceManager.GetString("Copilot_ToolResponseSendFailed", resourceCulture);
+            }
+        }
+
+        public static string Copilot_PermissionDeclined {
+            get {
+                return ResourceManager.GetString("Copilot_PermissionDeclined", resourceCulture);
+            }
+        }
+
+        public static string Copilot_OnlyImageAttachments {
+            get {
+                return ResourceManager.GetString("Copilot_OnlyImageAttachments", resourceCulture);
+            }
+        }
+
+        public static string Copilot_UnknownError {
+            get {
+                return ResourceManager.GetString("Copilot_UnknownError", resourceCulture);
+            }
+        }
+
+        public static string Copilot_ErrorOccurred {
+            get {
+                return ResourceManager.GetString("Copilot_ErrorOccurred", resourceCulture);
+            }
+        }
     }
 }

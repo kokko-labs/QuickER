@@ -325,4 +325,91 @@
   <data name="Codex_ServerNotStarted" xml:space="preserve">
     <value>The Codex App Server has not started yet.</value>
   </data>
+  <data name="Copilot_Guidance_Pending" xml:space="preserve">
+    <value>Press "Recheck" to verify the login status.</value>
+  </data>
+  <data name="Copilot_Guidance_Install" xml:space="preserve">
+    <value>Install the GitHub Copilot CLI and add it to your PATH.</value>
+  </data>
+  <data name="Copilot_Guidance_LoggedIn" xml:space="preserve">
+    <value>The local GitHub Copilot CLI will be used as is.</value>
+  </data>
+  <data name="Copilot_Guidance_NotLoggedIn" xml:space="preserve">
+    <value>Launch copilot in a terminal, sign in with /login, then press "Recheck".</value>
+  </data>
+  <data name="Copilot_Guidance_Inconclusive" xml:space="preserve">
+    <value>Wait a moment and press "Recheck".</value>
+  </data>
+  <data name="Copilot_Status_Unconfirmed" xml:space="preserve">
+    <value>Not verified</value>
+  </data>
+  <data name="Copilot_Status_NotFound" xml:space="preserve">
+    <value>GitHub Copilot CLI not found</value>
+  </data>
+  <data name="Copilot_Status_NotConnected" xml:space="preserve">
+    <value>Not connected</value>
+  </data>
+  <data name="Copilot_Status_LoggedIn" xml:space="preserve">
+    <value>Logged in</value>
+  </data>
+  <data name="Copilot_Status_LoggedInAs" xml:space="preserve">
+    <value>Logged in ({0})</value>
+  </data>
+  <data name="Copilot_Status_NotLoggedIn" xml:space="preserve">
+    <value>Not logged in</value>
+  </data>
+  <data name="Copilot_Status_Inconclusive" xml:space="preserve">
+    <value>Could not verify the login status</value>
+  </data>
+  <data name="Copilot_CliNotFound" xml:space="preserve">
+    <value>The copilot CLI was not found. Install the GitHub Copilot CLI.</value>
+  </data>
+  <data name="Copilot_NotConnected" xml:space="preserve">
+    <value>The GitHub Copilot runtime has not started yet.</value>
+  </data>
+  <data name="Copilot_NoSession" xml:space="preserve">
+    <value>No GitHub Copilot conversation has been started yet.</value>
+  </data>
+  <data name="Copilot_ConnectFailed" xml:space="preserve">
+    <value>Failed to connect: {0}</value>
+  </data>
+  <data name="Copilot_AuthStateFailed" xml:space="preserve">
+    <value>Failed to get the authentication status: {0}</value>
+  </data>
+  <data name="Copilot_ModelListFailed" xml:space="preserve">
+    <value>Failed to get the model list: {0}</value>
+  </data>
+  <data name="Copilot_StartingConversation" xml:space="preserve">
+    <value>Starting a conversation...</value>
+  </data>
+  <data name="Copilot_StartedConversation" xml:space="preserve">
+    <value>Started a conversation.</value>
+  </data>
+  <data name="Copilot_StartConversationFailed" xml:space="preserve">
+    <value>Failed to start the conversation: {0}</value>
+  </data>
+  <data name="Copilot_CouldNotStartConversation" xml:space="preserve">
+    <value>Could not start the conversation.</value>
+  </data>
+  <data name="Copilot_Processing" xml:space="preserve">
+    <value>GitHub Copilot is processing...</value>
+  </data>
+  <data name="Copilot_InterruptFailed" xml:space="preserve">
+    <value>Failed to interrupt: {0}</value>
+  </data>
+  <data name="Copilot_ToolResponseSendFailed" xml:space="preserve">
+    <value>Failed to send the tool result: {0}</value>
+  </data>
+  <data name="Copilot_PermissionDeclined" xml:space="preserve">
+    <value>Declined a permission request from GitHub Copilot. It is not needed for editing the ER diagram, so it is declined for safety.</value>
+  </data>
+  <data name="Copilot_OnlyImageAttachments" xml:space="preserve">
+    <value>The GitHub Copilot connection supports image attachments only.</value>
+  </data>
+  <data name="Copilot_UnknownError" xml:space="preserve">
+    <value>An unknown error occurred.</value>
+  </data>
+  <data name="Copilot_ErrorOccurred" xml:space="preserve">
+    <value>An error occurred: {0}</value>
+  </data>
 </root>

@@ -12,7 +12,7 @@ namespace QuickER.AI.Mock;
 /// AI モック生成ダイアログ（左チャット／右 HTML プレビュー）のコードビハインド。
 /// </summary>
 /// <remarks>
-/// 接続方式ごとの認証状態プローブ（Codex / Claude）はここで軽量エンジンを保持して確認し、
+/// 接続方式ごとの認証状態プローブ（Codex / Claude / Copilot）はここで軽量エンジンを保持して確認し、
 /// 結果を ViewModel へ反映する。生成に使うエンジンは ViewModel が生成開始時に別途構築する。
 /// ViewModel のプレビュー要求（現在画面のファイルパス）を受けて、モックフォルダ内の実ファイルを
 /// 直接 WebView2 プレビューへ Navigate する（一時ファイルは使わない）。
@@ -28,6 +28,9 @@ public partial class MockGenerationDialog : Window
     /// <summary>Claude Code ログイン状態のプローブ用エンジン（ツールホスト無し）</summary>
     private readonly ClaudeCodeChatEngine _claudeCodeProbe;
 
+    /// <summary>GitHub Copilot ログイン状態・モデル一覧のプローブ用エンジン（ツールホスト無し）</summary>
+    private readonly CopilotChatEngine _copilotProbe;
+
     /// <summary>アプリ終了などで強制クローズ中かどうか</summary>
     private bool _isForceClosing;
 
@@ -36,6 +39,9 @@ public partial class MockGenerationDialog : Window
 
     /// <summary>「再確認」（Claude）コマンド</summary>
     public IAsyncRelayCommand ClaudeCodeRefreshCommand { get; }
+
+    /// <summary>「再確認」（Copilot）コマンド</summary>
+    public IAsyncRelayCommand CopilotRefreshCommand { get; }
 
     /// <summary>注入された ViewModel を結び付けてウィンドウを生成する</summary>
     public MockGenerationDialog(MockGenerationDialogViewModel viewModel)
@@ -61,9 +67,19 @@ public partial class MockGenerationDialog : Window
             MockDesignProfile.FolderMockDesign
         );
         _claudeCodeProbe.StatusSummaryChanged += OnClaudeCodeStatusChanged;
+        _copilotProbe = new CopilotChatEngine(
+            new CopilotRuntimeClient(),
+            toolHost: null,
+            dispatcher,
+            MockDesignProfile.FolderMockDesign
+        );
+        _copilotProbe.StatusSummaryChanged += OnCopilotStatusChanged;
+        // モデル一覧は接続後に実行時列挙されるため、更新通知も拾って接続タブの候補へ流す
+        _copilotProbe.AvailableModelsChanged += OnCopilotStatusChanged;
 
         CodexRefreshCommand = new AsyncRelayCommand(RefreshCodexAsync);
         ClaudeCodeRefreshCommand = new AsyncRelayCommand(RefreshClaudeCodeAsync);
+        CopilotRefreshCommand = new AsyncRelayCommand(RefreshCopilotAsync);
 
         // ViewModel のプレビュー要求／クリア要求と、プレビュー内リンク遷移をサイドバー選択へ橋渡しする
         ViewModel.PreviewRequested += OnPreviewRequested;
@@ -108,6 +124,7 @@ public partial class MockGenerationDialog : Window
         {
             ErChatBackendKind.Codex => 1,
             ErChatBackendKind.ClaudeCode => 2,
+            ErChatBackendKind.Copilot => 3,
             _ => 0,
         };
 
@@ -260,6 +277,7 @@ public partial class MockGenerationDialog : Window
         {
             1 => ErChatBackendKind.Codex,
             2 => ErChatBackendKind.ClaudeCode,
+            3 => ErChatBackendKind.Copilot,
             _ => ErChatBackendKind.ApiKey,
         };
         ViewModel.Connection.SelectedBackend = backend;
@@ -271,6 +289,10 @@ public partial class MockGenerationDialog : Window
         else if (backend == ErChatBackendKind.ClaudeCode)
         {
             await EnsureClaudeCodeInitializedAsync();
+        }
+        else if (backend == ErChatBackendKind.Copilot)
+        {
+            await EnsureCopilotInitializedAsync();
         }
     }
 
@@ -347,5 +369,34 @@ public partial class MockGenerationDialog : Window
             _claudeCodeProbe.StatusSummary,
             _claudeCodeProbe.StatusLevel,
             _claudeCodeProbe.Guidance
+        );
+
+    /// <summary>GitHub Copilot を初期化（接続）し、状態とモデル一覧を ViewModel へ反映する</summary>
+    private async Task EnsureCopilotInitializedAsync()
+    {
+        _copilotProbe.Model = ViewModel.Connection.CopilotModel;
+        await _copilotProbe.InitializeAsync();
+        ApplyCopilotState();
+    }
+
+    /// <summary>GitHub Copilot のログイン状態・モデル一覧を取り直す（「再確認」）</summary>
+    private async Task RefreshCopilotAsync()
+    {
+        await _copilotProbe.RefreshAsync();
+        ApplyCopilotState();
+    }
+
+    /// <summary>GitHub Copilot 状態変化を ViewModel へ反映する</summary>
+    private void OnCopilotStatusChanged(object? sender, EventArgs e) =>
+        Dispatcher.Invoke(ApplyCopilotState);
+
+    /// <summary>GitHub Copilot の現在状態を ViewModel へ反映する</summary>
+    private void ApplyCopilotState() =>
+        ViewModel.ApplyCopilotReadiness(
+            _copilotProbe.IsReady,
+            _copilotProbe.StatusSummary,
+            _copilotProbe.StatusLevel,
+            _copilotProbe.Guidance,
+            _copilotProbe.AvailableModels
         );
 }
