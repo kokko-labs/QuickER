@@ -1333,8 +1333,13 @@ public static class SqlExpressionTranslator
                 }
 
                 // The argument may be a string or a value object (the TSelf overload). Value objects are unwrapped to the raw value (string)
+                // A null pattern is unreachable when the query was built through SqlQuery.Where (the guard rejects it up front); kept as defense in depth
                 var raw =
-                    SqlParameterValue.Unwrap(Evaluate(call.Arguments[0])) as string ?? string.Empty;
+                    SqlParameterValue.Unwrap(Evaluate(call.Arguments[0])) as string
+                    ?? throw new ArgumentNullException(
+                        "value",
+                        "The pattern argument of Contains/StartsWith/EndsWith in a query predicate must not be null."
+                    );
                 var pattern = likeKind switch
                 {
                     LikeKind.Contains => "%" + EscapeLike(raw) + "%",
@@ -1819,7 +1824,7 @@ public static class SqlExpressionTranslator
         value.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_").Replace("[", "\\[");
 
     /// <summary>Builds, on the SQL side, a LIKE pattern that treats the column value as a literal (the same 4 characters as EscapeLike, escaped via REPLACE).</summary>
-    /// <remarks>Rows where the argument column is NULL yield a NULL concatenation, then LIKE NULL, and thus no match (semantics differ from a null value argument, which becomes an empty string and matches everything).</remarks>
+    /// <remarks>Rows where the argument column is NULL yield a NULL concatenation, then LIKE NULL, and thus no match. This is the column-argument case only: a null value argument never reaches SQL because SqlQuery.Where rejects it up front.</remarks>
     private static string BuildLikePatternFromColumn(string column, LikeKind kind)
     {
         var escaped =

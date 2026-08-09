@@ -408,25 +408,52 @@ public abstract partial class ValueObjectStringBase<TSelf>
         : base(value) { }
 
     /// <summary>Returns whether the value contains the specified string.</summary>
-    public bool Contains(string? value) =>
-        value is not null && Value.Contains(value, StringComparison.Ordinal);
+    /// <remarks>Throws <see cref="ArgumentNullException"/> when value is null (the same contract as <c>string.Contains</c>).</remarks>
+    public bool Contains(string value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        return Value.Contains(value, StringComparison.Ordinal);
+    }
 
     /// <summary>Returns whether the value starts with the specified string.</summary>
-    public bool StartsWith(string? value) =>
-        value is not null && Value.StartsWith(value, StringComparison.Ordinal);
+    /// <remarks>Throws <see cref="ArgumentNullException"/> when value is null (the same contract as <c>string.StartsWith</c>).</remarks>
+    public bool StartsWith(string value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        return Value.StartsWith(value, StringComparison.Ordinal);
+    }
 
     /// <summary>Returns whether the value ends with the specified string.</summary>
-    public bool EndsWith(string? value) =>
-        value is not null && Value.EndsWith(value, StringComparison.Ordinal);
+    /// <remarks>Throws <see cref="ArgumentNullException"/> when value is null (the same contract as <c>string.EndsWith</c>).</remarks>
+    public bool EndsWith(string value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        return Value.EndsWith(value, StringComparison.Ordinal);
+    }
 
     /// <summary>Returns whether the value contains another value object's value.</summary>
-    public bool Contains(TSelf? value) => value is not null && Contains(value.Value);
+    /// <remarks>Throws <see cref="ArgumentNullException"/> when value is null (the same contract as the string overload).</remarks>
+    public bool Contains(TSelf value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        return Contains(value.Value);
+    }
 
     /// <summary>Returns whether the value starts with another value object's value.</summary>
-    public bool StartsWith(TSelf? value) => value is not null && StartsWith(value.Value);
+    /// <remarks>Throws <see cref="ArgumentNullException"/> when value is null (the same contract as the string overload).</remarks>
+    public bool StartsWith(TSelf value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        return StartsWith(value.Value);
+    }
 
     /// <summary>Returns whether the value ends with another value object's value.</summary>
-    public bool EndsWith(TSelf? value) => value is not null && EndsWith(value.Value);
+    /// <remarks>Throws <see cref="ArgumentNullException"/> when value is null (the same contract as the string overload).</remarks>
+    public bool EndsWith(TSelf value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        return EndsWith(value.Value);
+    }
 
     /// <summary>Compares ordinally.</summary>
     public int CompareTo(TSelf? other) =>
@@ -5528,6 +5555,102 @@ internal sealed class ProjectionColumnCollector : ExpressionVisitor
     }
 }
 
+/// <summary>Validates the string-matching calls (Contains / StartsWith / EndsWith) inside a query predicate and rejects a null pattern argument up front.</summary>
+/// <remarks>
+/// Dialects and backends disagreed on what a null pattern means (match-all, no-match, or an exception), so the guard unifies
+/// them to fail fast. Every backend (the per-dialect ADO executor, EF Core, and the in-memory store) and every generated
+/// named query builds its predicates through <see cref="SqlQuery{TEntity}.Where"/>, which makes this the single enforcement point.
+/// </remarks>
+internal static class QueryStringMatchGuard
+{
+    /// <summary>Walks a predicate body and throws when a column-side string match is given a null pattern.</summary>
+    public static void Validate(Expression predicateBody) =>
+        new NullPatternVisitor().Visit(predicateBody);
+
+    /// <summary>The visitor that inspects every method call in the predicate body.</summary>
+    private sealed class NullPatternVisitor : ExpressionVisitor
+    {
+        /// <summary>Checks a string-matching call whose receiver is a column and whose argument is a value, then descends as usual.</summary>
+        protected override Expression VisitMethodCall(MethodCallExpression node)
+        {
+            if (
+                IsStringMatch(node)
+                // The receiver must be the column side (it references the lambda parameter) and the argument the value side (it does not)
+                && ReferencesParameter(node.Object!)
+                && !ReferencesParameter(node.Arguments[0])
+                && Evaluate(node.Arguments[0]) is null
+            )
+            {
+                throw new ArgumentNullException(
+                    "value",
+                    "The pattern argument of Contains/StartsWith/EndsWith in a query predicate must not be null."
+                );
+            }
+
+            return base.VisitMethodCall(node);
+        }
+    }
+
+    /// <summary>Determines whether the call is a single-argument string match on string or on a string value object.</summary>
+    private static bool IsStringMatch(MethodCallExpression call) =>
+        call.Object is not null
+        && call.Arguments.Count == 1
+        && call.Method.Name is "Contains" or "StartsWith" or "EndsWith"
+        && (
+            call.Method.DeclaringType == typeof(string)
+            || (
+                call.Method.DeclaringType is { IsGenericType: true } declaring
+                && declaring.GetGenericTypeDefinition() == typeof(ValueObjectStringBase<>)
+            )
+        );
+
+    /// <summary>Walks the expression tree to determine whether it references a lambda parameter (i.e. an entity column).</summary>
+    private static bool ReferencesParameter(Expression expression)
+    {
+        var finder = new ParameterFinder();
+        finder.Visit(expression);
+        return finder.Found;
+    }
+
+    /// <summary>
+    /// Evaluates a value-side argument (a constant or a captured variable) to obtain the actual value. Constants and closure
+    /// field / property references are read directly, avoiding (expensive) expression-tree compilation; anything else falls back to compiling.
+    /// </summary>
+    private static object? Evaluate(Expression expression)
+    {
+        switch (expression)
+        {
+            case ConstantExpression constant:
+                return constant.Value;
+
+            case MemberExpression member:
+                var instance = member.Expression is null ? null : Evaluate(member.Expression);
+
+                return member.Member switch
+                {
+                    FieldInfo field => field.GetValue(instance),
+                    PropertyInfo property => property.GetValue(instance),
+                    _ => Expression.Lambda(expression).Compile().DynamicInvoke(),
+                };
+
+            default:
+                return Expression.Lambda(expression).Compile().DynamicInvoke();
+        }
+    }
+
+    /// <summary>A lightweight visitor that merely raises a flag when it finds a lambda-parameter reference.</summary>
+    private sealed class ParameterFinder : ExpressionVisitor
+    {
+        public bool Found { get; private set; }
+
+        protected override Expression VisitParameter(ParameterExpression node)
+        {
+            Found = true;
+            return node;
+        }
+    }
+}
+
 /// <summary>A query built up by chaining conditions, orderings, and Includes, then executed by a terminal method (ToListAsync, etc.).</summary>
 /// <remarks>
 /// Predicates, orderings, and Includes are captured as lambda expressions (expression trees); translation to SQL and
@@ -5560,6 +5683,8 @@ public sealed class SqlQuery<TEntity>
     public SqlQuery<TEntity> Where(Expression<Func<TEntity, bool>> predicate)
     {
         ArgumentNullException.ThrowIfNull(predicate);
+        // Reject a null Contains/StartsWith/EndsWith pattern here so that every backend behaves the same way
+        QueryStringMatchGuard.Validate(predicate.Body);
         // Capture as an expression tree and leave translation to SQL / LINQ to the executor
         _predicates.Add(predicate);
         return this;
@@ -6515,8 +6640,13 @@ internal static class SqlExpressionTranslator
                 }
 
                 // The argument may be a string or a value object (the TSelf overload). Value objects are unwrapped to the raw value (string)
+                // A null pattern is unreachable when the query was built through SqlQuery.Where (the guard rejects it up front); kept as defense in depth
                 var raw =
-                    SqlParameterValue.Unwrap(Evaluate(call.Arguments[0])) as string ?? string.Empty;
+                    SqlParameterValue.Unwrap(Evaluate(call.Arguments[0])) as string
+                    ?? throw new ArgumentNullException(
+                        "value",
+                        "The pattern argument of Contains/StartsWith/EndsWith in a query predicate must not be null."
+                    );
                 var pattern = likeKind switch
                 {
                     LikeKind.Contains => "%" + EscapeLike(raw) + "%",
@@ -7002,7 +7132,7 @@ internal static class SqlExpressionTranslator
         value.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_").Replace("[", "\\[");
 
     /// <summary>Builds, on the SQL side, a LIKE pattern that treats the column value as a literal (the same 4 characters as EscapeLike, escaped via REPLACE).</summary>
-    /// <remarks>Rows where the argument column is NULL yield a NULL concatenation, then LIKE NULL, and thus no match (semantics differ from a null value argument, which becomes an empty string and matches everything).</remarks>
+    /// <remarks>Rows where the argument column is NULL yield a NULL concatenation, then LIKE NULL, and thus no match. This is the column-argument case only: a null value argument never reaches SQL because SqlQuery.Where rejects it up front.</remarks>
     private static string BuildLikePatternFromColumn(string column, LikeKind kind)
     {
         var escaped =
@@ -8819,7 +8949,13 @@ internal sealed class ValueObjectStringMethodTranslator(
         // A TSelf overload constant (which EF Core folded from Create(...) into a constant) is unwrapped to its raw value first.
         if (argument is SqlConstantExpression { Value: var constantValue })
         {
-            var raw = SqlParameterValue.Unwrap(constantValue) as string ?? string.Empty;
+            // A null pattern is unreachable when the query was built through SqlQuery.Where (the guard rejects it up front); kept as defense in depth.
+            var raw =
+                SqlParameterValue.Unwrap(constantValue) as string
+                ?? throw new ArgumentNullException(
+                    "value",
+                    "The pattern argument of Contains/StartsWith/EndsWith in a query predicate must not be null."
+                );
             var escaped = EscapeLikePattern(raw);
             var constantPattern = methodName switch
             {
@@ -8830,11 +8966,9 @@ internal sealed class ValueObjectStringMethodTranslator(
             return _sqlExpressionFactory.Constant(constantPattern, _stringTypeMapping);
         }
 
-        // Parameters and the like are escaped on the SQL side. null is coalesced to an empty string, matching the QuickER version (null → empty string).
-        SqlExpression escapedArgument = _sqlExpressionFactory.Coalesce(
-            argument,
-            _sqlExpressionFactory.Constant(string.Empty, _stringTypeMapping)
-        );
+        // Parameters and the like are escaped on the SQL side. A null parameter cannot be detected at translation time; SqlQuery.Where
+        // rejects it up front, and if one ever slips through, the SQL-side LIKE NULL yields no match (the safe side).
+        SqlExpression escapedArgument = argument;
 
         foreach (var (from, to) in EscapePairs())
         {

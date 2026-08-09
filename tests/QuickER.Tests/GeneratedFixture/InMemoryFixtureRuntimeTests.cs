@@ -266,6 +266,29 @@ public sealed class InMemoryFixtureRuntimeTests
     }
 
     [Fact(
+        DisplayName = "Query: Contains/StartsWith/EndsWith の null 引数は Where 呼び出し時点で ArgumentNullException"
+    )]
+    public void Query_NullStringMatchPattern_Throws()
+    {
+        var (_, customers, _, _) = BuildFresh();
+
+        // バックエンドごとに意味が食い違っていた（ADO は "%%" で全件一致・EF Core は 0 件/全件・InMemory は例外/0 件）ため、
+        // 共有の SqlQuery.Where のガードで fail-fast へ統一する。終端メソッドを待たず Where の時点で同期的に throw する
+        var contains = () => customers.Query().Where(c => c.Name.Contains(null!));
+        contains.Should().Throw<ArgumentNullException>().Which.ParamName.Should().Be("value");
+
+        var startsWith = () => customers.Query().Where(c => c.Name.StartsWith(null!));
+        startsWith.Should().Throw<ArgumentNullException>().Which.ParamName.Should().Be("value");
+
+        var endsWith = () => customers.Query().Where(c => c.Name.EndsWith(null!));
+        endsWith.Should().Throw<ArgumentNullException>().Which.ParamName.Should().Be("value");
+
+        // 非 null の引数は従来どおり通る（ガードは null のみを弾く）
+        var valid = () => customers.Query().Where(c => c.Name.Contains("A"));
+        valid.Should().NotThrow();
+    }
+
+    [Fact(
         DisplayName = "Include: 子コレクション・単一参照子・親参照・ThenInclude を FK から復元する"
     )]
     public async Task Include_Works()

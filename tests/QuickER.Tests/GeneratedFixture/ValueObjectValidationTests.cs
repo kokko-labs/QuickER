@@ -331,8 +331,6 @@ public sealed class ValueObjectValidationTests
         vo.StartsWith("Hello").Should().BeTrue();
         vo.EndsWith("World").Should().BeTrue();
         vo.Contains("xyz").Should().BeFalse();
-        // null は常に false
-        vo.Contains((string?)null).Should().BeFalse();
 
         // VO オーバーロード
         vo.Contains(NameValue.Create("World")).Should().BeTrue();
@@ -341,5 +339,31 @@ public sealed class ValueObjectValidationTests
 
         // 文字列 VO の CompareTo は序数比較
         NameValue.Create("a").CompareTo(NameValue.Create("b")).Should().BeNegative();
+    }
+
+    [Fact(
+        DisplayName = "文字列 VO の Contains/StartsWith/EndsWith は null 引数で ArgumentNullException（string・VO 両オーバーロード計 6 本）"
+    )]
+    public void 文字列VOの部分一致はnullで例外()
+    {
+        var vo = NameValue.Create("HelloWorld");
+
+        // string オーバーロード 3 本（BCL の string.Contains(null) と同じ契約＝ParamName は "value"）
+        vo.Invoking(v => v.Contains((string)null!))
+            .Should()
+            .Throw<ArgumentNullException>()
+            .And.ParamName.Should()
+            .Be("value");
+        vo.Invoking(v => v.StartsWith((string)null!)).Should().Throw<ArgumentNullException>();
+        vo.Invoking(v => v.EndsWith((string)null!)).Should().Throw<ArgumentNullException>();
+
+        // VO オーバーロード 3 本
+        vo.Invoking(v => v.Contains((NameValue)null!))
+            .Should()
+            .Throw<ArgumentNullException>()
+            .And.ParamName.Should()
+            .Be("value");
+        vo.Invoking(v => v.StartsWith((NameValue)null!)).Should().Throw<ArgumentNullException>();
+        vo.Invoking(v => v.EndsWith((NameValue)null!)).Should().Throw<ArgumentNullException>();
     }
 }

@@ -200,25 +200,52 @@ public abstract partial class ValueObjectStringBase<TSelf>
         : base(value) { }
 
     /// <summary>Returns whether the value contains the specified string.</summary>
-    public bool Contains(string? value) =>
-        value is not null && Value.Contains(value, StringComparison.Ordinal);
+    /// <remarks>Throws <see cref="ArgumentNullException"/> when value is null (the same contract as <c>string.Contains</c>).</remarks>
+    public bool Contains(string value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        return Value.Contains(value, StringComparison.Ordinal);
+    }
 
     /// <summary>Returns whether the value starts with the specified string.</summary>
-    public bool StartsWith(string? value) =>
-        value is not null && Value.StartsWith(value, StringComparison.Ordinal);
+    /// <remarks>Throws <see cref="ArgumentNullException"/> when value is null (the same contract as <c>string.StartsWith</c>).</remarks>
+    public bool StartsWith(string value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        return Value.StartsWith(value, StringComparison.Ordinal);
+    }
 
     /// <summary>Returns whether the value ends with the specified string.</summary>
-    public bool EndsWith(string? value) =>
-        value is not null && Value.EndsWith(value, StringComparison.Ordinal);
+    /// <remarks>Throws <see cref="ArgumentNullException"/> when value is null (the same contract as <c>string.EndsWith</c>).</remarks>
+    public bool EndsWith(string value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        return Value.EndsWith(value, StringComparison.Ordinal);
+    }
 
     /// <summary>Returns whether the value contains another value object's value.</summary>
-    public bool Contains(TSelf? value) => value is not null && Contains(value.Value);
+    /// <remarks>Throws <see cref="ArgumentNullException"/> when value is null (the same contract as the string overload).</remarks>
+    public bool Contains(TSelf value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        return Contains(value.Value);
+    }
 
     /// <summary>Returns whether the value starts with another value object's value.</summary>
-    public bool StartsWith(TSelf? value) => value is not null && StartsWith(value.Value);
+    /// <remarks>Throws <see cref="ArgumentNullException"/> when value is null (the same contract as the string overload).</remarks>
+    public bool StartsWith(TSelf value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        return StartsWith(value.Value);
+    }
 
     /// <summary>Returns whether the value ends with another value object's value.</summary>
-    public bool EndsWith(TSelf? value) => value is not null && EndsWith(value.Value);
+    /// <remarks>Throws <see cref="ArgumentNullException"/> when value is null (the same contract as the string overload).</remarks>
+    public bool EndsWith(TSelf value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        return EndsWith(value.Value);
+    }
 
     /// <summary>Compares ordinally.</summary>
     public int CompareTo(TSelf? other) =>

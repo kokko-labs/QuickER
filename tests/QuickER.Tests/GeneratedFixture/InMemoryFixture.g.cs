@@ -4691,6 +4691,96 @@ internal sealed class ProjectionColumnCollector : ExpressionVisitor
     }
 }
 
+/// <summary>Validates the string-matching calls (Contains / StartsWith / EndsWith) inside a query predicate and rejects a null pattern argument up front.</summary>
+/// <remarks>
+/// Dialects and backends disagreed on what a null pattern means (match-all, no-match, or an exception), so the guard unifies
+/// them to fail fast. Every backend (the per-dialect ADO executor, EF Core, and the in-memory store) and every generated
+/// named query builds its predicates through <see cref="SqlQuery{TEntity}.Where"/>, which makes this the single enforcement point.
+/// </remarks>
+internal static class QueryStringMatchGuard
+{
+    /// <summary>Walks a predicate body and throws when a column-side string match is given a null pattern.</summary>
+    public static void Validate(Expression predicateBody) =>
+        new NullPatternVisitor().Visit(predicateBody);
+
+    /// <summary>The visitor that inspects every method call in the predicate body.</summary>
+    private sealed class NullPatternVisitor : ExpressionVisitor
+    {
+        /// <summary>Checks a string-matching call whose receiver is a column and whose argument is a value, then descends as usual.</summary>
+        protected override Expression VisitMethodCall(MethodCallExpression node)
+        {
+            if (
+                IsStringMatch(node)
+                // The receiver must be the column side (it references the lambda parameter) and the argument the value side (it does not)
+                && ReferencesParameter(node.Object!)
+                && !ReferencesParameter(node.Arguments[0])
+                && Evaluate(node.Arguments[0]) is null
+            )
+            {
+                throw new ArgumentNullException(
+                    "value",
+                    "The pattern argument of Contains/StartsWith/EndsWith in a query predicate must not be null."
+                );
+            }
+
+            return base.VisitMethodCall(node);
+        }
+    }
+
+    /// <summary>Determines whether the call is a single-argument string match on string.</summary>
+    private static bool IsStringMatch(MethodCallExpression call) =>
+        call.Object is not null
+        && call.Arguments.Count == 1
+        && call.Method.Name is "Contains" or "StartsWith" or "EndsWith"
+        && call.Method.DeclaringType == typeof(string);
+
+    /// <summary>Walks the expression tree to determine whether it references a lambda parameter (i.e. an entity column).</summary>
+    private static bool ReferencesParameter(Expression expression)
+    {
+        var finder = new ParameterFinder();
+        finder.Visit(expression);
+        return finder.Found;
+    }
+
+    /// <summary>
+    /// Evaluates a value-side argument (a constant or a captured variable) to obtain the actual value. Constants and closure
+    /// field / property references are read directly, avoiding (expensive) expression-tree compilation; anything else falls back to compiling.
+    /// </summary>
+    private static object? Evaluate(Expression expression)
+    {
+        switch (expression)
+        {
+            case ConstantExpression constant:
+                return constant.Value;
+
+            case MemberExpression member:
+                var instance = member.Expression is null ? null : Evaluate(member.Expression);
+
+                return member.Member switch
+                {
+                    FieldInfo field => field.GetValue(instance),
+                    PropertyInfo property => property.GetValue(instance),
+                    _ => Expression.Lambda(expression).Compile().DynamicInvoke(),
+                };
+
+            default:
+                return Expression.Lambda(expression).Compile().DynamicInvoke();
+        }
+    }
+
+    /// <summary>A lightweight visitor that merely raises a flag when it finds a lambda-parameter reference.</summary>
+    private sealed class ParameterFinder : ExpressionVisitor
+    {
+        public bool Found { get; private set; }
+
+        protected override Expression VisitParameter(ParameterExpression node)
+        {
+            Found = true;
+            return node;
+        }
+    }
+}
+
 /// <summary>A query built up by chaining conditions, orderings, and Includes, then executed by a terminal method (ToListAsync, etc.).</summary>
 /// <remarks>
 /// Predicates, orderings, and Includes are captured as lambda expressions (expression trees); translation to SQL and
@@ -4723,6 +4813,8 @@ public sealed class SqlQuery<TEntity>
     public SqlQuery<TEntity> Where(Expression<Func<TEntity, bool>> predicate)
     {
         ArgumentNullException.ThrowIfNull(predicate);
+        // Reject a null Contains/StartsWith/EndsWith pattern here so that every backend behaves the same way
+        QueryStringMatchGuard.Validate(predicate.Body);
         // Capture as an expression tree and leave translation to SQL / LINQ to the executor
         _predicates.Add(predicate);
         return this;

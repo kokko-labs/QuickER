@@ -143,6 +143,37 @@ public sealed class SqlExpressionTranslatorColumnArgumentTests
         sqlite.Parameters[0].Value.Should().Be("%a\\%b%");
     }
 
+    [Fact(
+        DisplayName = "対照: 列引数の Contains/StartsWith/EndsWith は null ガードの対象外（列同士の LIKE のまま）"
+    )]
+    public void ColumnArgument_IsNotRejectedByNullPatternGuard()
+    {
+        // SqlQuery.Where が呼ぶ共有ガードは「レシーバが列・引数が値」の形だけを検査する。
+        // 列引数（引数側もラムダパラメータを参照する）は値評価の対象外なので素通りし、従来どおり列同士の LIKE へ落ちる
+        var contains = () =>
+            QueryStringMatchGuard.Validate(
+                ((Expression<Func<Probe, bool>>)(p => p.Name1.Contains(p.Name2))).Body
+            );
+        contains.Should().NotThrow();
+
+        var startsWith = () =>
+            QueryStringMatchGuard.Validate(
+                ((Expression<Func<Probe, bool>>)(p => p.Name1.StartsWith(p.Name2))).Body
+            );
+        startsWith.Should().NotThrow();
+
+        var endsWith = () =>
+            QueryStringMatchGuard.Validate(
+                ((Expression<Func<Probe, bool>>)(p => p.Name1.EndsWith(p.Name2))).Body
+            );
+        endsWith.Should().NotThrow();
+
+        // 列引数はガードを抜けたあとも列同士の LIKE として翻訳される（意味論が変わっていないことの確認）
+        RunSqlServer(p => p.Name1.Contains(p.Name2))
+            .Sql.Should()
+            .Be($"[Name1] LIKE '%' + {Escaped("[Name2]")} + '%' ESCAPE '\\'");
+    }
+
     [Fact(DisplayName = "ガード: 値の位置に ToUpper() を置くと NotSupportedException（両方言）")]
     public void ToUpperInValuePosition_Throws()
     {

@@ -192,7 +192,13 @@ public partial class QuickErDbContext : DbContext
         // A TSelf overload constant (which EF Core folded from Create(...) into a constant) is unwrapped to its raw value first.
         if (argument is SqlConstantExpression { Value: var constantValue })
         {
-            var raw = SqlParameterValue.Unwrap(constantValue) as string ?? string.Empty;
+            // A null pattern is unreachable when the query was built through SqlQuery.Where (the guard rejects it up front); kept as defense in depth.
+            var raw =
+                SqlParameterValue.Unwrap(constantValue) as string
+                ?? throw new ArgumentNullException(
+                    "value",
+                    "The pattern argument of Contains/StartsWith/EndsWith in a query predicate must not be null."
+                );
             var escaped = EscapeLikePattern(raw);
             var constantPattern = methodName switch
             {
@@ -203,11 +209,9 @@ public partial class QuickErDbContext : DbContext
             return _sqlExpressionFactory.Constant(constantPattern, _stringTypeMapping);
         }
 
-        // Parameters and the like are escaped on the SQL side. null is coalesced to an empty string, matching the QuickER version (null → empty string).
-        SqlExpression escapedArgument = _sqlExpressionFactory.Coalesce(
-            argument,
-            _sqlExpressionFactory.Constant(string.Empty, _stringTypeMapping)
-        );
+        // Parameters and the like are escaped on the SQL side. A null parameter cannot be detected at translation time; SqlQuery.Where
+        // rejects it up front, and if one ever slips through, the SQL-side LIKE NULL yields no match (the safe side).
+        SqlExpression escapedArgument = argument;
 
         foreach (var (from, to) in EscapePairs())
         {
