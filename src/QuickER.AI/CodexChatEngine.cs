@@ -295,6 +295,8 @@ public sealed class CodexChatEngine : IErChatEngine
             await _client.LogoutAsync(cancellationToken).ConfigureAwait(false);
             RequiresOpenAiAuth = true;
             AccountSummary = Strings.Codex_NotLoggedIn;
+            // ログイン済みの常時案内を残さない（ログインパネル側が案内する）
+            Guidance = string.Empty;
             StatusChanged?.Invoke(this, Strings.Codex_LoggedOut);
         }
         catch (Exception ex)
@@ -455,6 +457,9 @@ public sealed class CodexChatEngine : IErChatEngine
                 account.RequiresOpenAiAuth,
                 IsOpenAiProvider
             );
+            // ログイン済みの常時案内（Claude Code / Copilot 接続タブと同じ「相乗り」の説明。
+            // Codex のログイン状態も実体は ~/.codex で CLI と共有される）
+            Guidance = Strings.Codex_Guidance_LoggedIn;
             return;
         }
 
@@ -467,6 +472,8 @@ public sealed class CodexChatEngine : IErChatEngine
                 account.RequiresOpenAiAuth,
                 IsOpenAiProvider
             );
+            // 未ログインへ変わった場合は、直前のログイン済み案内を残さない（ログインパネル側が案内する）
+            Guidance = string.Empty;
         }
     }
 
@@ -487,7 +494,8 @@ public sealed class CodexChatEngine : IErChatEngine
                     : string.Format(Strings.Codex_Account_ChatGptWithPlan, planType)
                 : string.IsNullOrWhiteSpace(planType)
                     ? string.Format(Strings.Codex_Account_EmailLoggedIn, email)
-                    : $"{email} / {planType}",
+                    // 「ログイン済み（メール / プラン）」＝Copilot 接続タブの概要と同じ形式に揃える
+                    : string.Format(Strings.Codex_Account_EmailLoggedIn, $"{email} / {planType}"),
             _ => showNotLoggedInWhenUnauthenticated ? Strings.Codex_NotLoggedIn
             : isOpenAiProvider ? Strings.Codex_Account_Connected
             : Strings.Codex_Account_NoLoginRequired,

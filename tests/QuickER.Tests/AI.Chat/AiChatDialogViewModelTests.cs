@@ -200,6 +200,67 @@ public class AiChatDialogViewModelTests
         }
     }
 
+    /// <summary>
+    /// Codex ログイン済みなら、接続解決後に状態ドットが緑（Ready）として「通知」され、
+    /// 概要が「ログイン済み（メール / プラン）」形式・ログイン済みの常時案内が出ることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 認証状態イベントは接続解決中（＝灰）の時点で発火するため、解決完了時に
+    /// <see cref="AiChatDialogViewModel.CodexStatusLevel"/> を再通知しないと、バインドされた
+    /// ドットはログイン済みでも灰のまま残る（実機報告の回帰）。値だけでなく
+    /// 「最後に通知された時点の値」を検証する。
+    /// </remarks>
+    [Fact(DisplayName = "codex ログイン済みなら接続解決後にドットが緑として通知される")]
+    public void CodexLoggedIn_NotifiesReadyStatusLevel_AfterConnectResolves()
+    {
+        var (vm, client, folder) = CreateVm();
+
+        try
+        {
+            client.NextAccountInfo = new CodexAccountInfo
+            {
+                RequiresOpenAiAuth = true,
+                AuthMode = CodexAuthMode.ChatGpt,
+                Email = "user@example.com",
+                PlanType = "plus",
+            };
+
+            // CodexStatusLevel が通知された時点の値を記録する（バインディングが観測する値の追跡）
+            var observed = new List<ConnectionHealth>();
+            vm.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName == nameof(vm.CodexStatusLevel))
+                {
+                    observed.Add(vm.CodexStatusLevel);
+                }
+            };
+
+            vm.Connection.SelectedBackend = ErChatBackendKind.Codex;
+
+            vm.CodexStatusLevel.Should().Be(ConnectionHealth.Ready);
+            observed.Should().NotBeEmpty();
+            observed[^1]
+                .Should()
+                .Be(
+                    ConnectionHealth.Ready,
+                    "最後に通知された時点の値が緑でないと、バインドされたドットは灰のまま残る"
+                );
+            vm.CodexAccountSummary.Should()
+                .Be(
+                    string.Format(
+                        QuickER.AI.Resources.Strings.Codex_Account_EmailLoggedIn,
+                        "user@example.com / plus"
+                    )
+                );
+            vm.CodexGuidance.Should().Be(QuickER.AI.Resources.Strings.Codex_Guidance_LoggedIn);
+            vm.ShowCodexGuidance.Should().BeTrue();
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
     /// <summary>チャットホストのスタブ（呼び出しを記録し、MainViewModel への依存を排除する）</summary>
     private sealed class RecordingChatHost : IErDiagramChatHost
     {

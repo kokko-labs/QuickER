@@ -272,16 +272,19 @@
     <value>エラーが発生しました: {0}</value>
   </data>
   <data name="Codex_Account_ApiKey" xml:space="preserve">
-    <value>API キーでログイン済み</value>
+    <value>ログイン済み（API キー）</value>
   </data>
   <data name="Codex_Account_ChatGpt" xml:space="preserve">
-    <value>ChatGPT でログイン済み</value>
+    <value>ログイン済み（ChatGPT）</value>
   </data>
   <data name="Codex_Account_ChatGptWithPlan" xml:space="preserve">
-    <value>ChatGPT でログイン済み ({0})</value>
+    <value>ログイン済み（ChatGPT / {0}）</value>
   </data>
   <data name="Codex_Account_EmailLoggedIn" xml:space="preserve">
-    <value>{0} でログイン済み</value>
+    <value>ログイン済み（{0}）</value>
+  </data>
+  <data name="Codex_Guidance_LoggedIn" xml:space="preserve">
+    <value>ローカルの Codex CLI のログインをそのまま使用します。</value>
   </data>
   <data name="Codex_Account_Connected" xml:space="preserve">
     <value>接続済み</value>

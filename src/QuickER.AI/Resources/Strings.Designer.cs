@@ -336,6 +336,12 @@ namespace QuickER.AI.Resources {
             }
         }
 
+        public static string Codex_Guidance_LoggedIn {
+            get {
+                return ResourceManager.GetString("Codex_Guidance_LoggedIn", resourceCulture);
+            }
+        }
+
         public static string Codex_ConnectFailed {
             get {
                 return ResourceManager.GetString("Codex_ConnectFailed", resourceCulture);

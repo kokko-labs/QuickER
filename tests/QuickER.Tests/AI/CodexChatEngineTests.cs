@@ -247,6 +247,45 @@ public class CodexChatEngineTests
         statuses.Should().ContainSingle().Which.Should().Contain("起動できません");
     }
 
+    /// <summary>
+    /// ChatGPT ログイン済み（メール・プランあり）なら、概要が「ログイン済み（メール / プラン）」形式
+    /// （Copilot 接続タブの概要と同形）になり、ログイン済みの常時案内が立つことを検証する。
+    /// </summary>
+    [Fact(
+        DisplayName = "ChatGPT ログイン済みなら概要は「ログイン済み（メール / プラン）」形式になる"
+    )]
+    public async Task Connect_ChatGptLoggedIn_UsesUnifiedSummaryAndGuidance()
+    {
+        var client = new FakeCodexAppServerClient
+        {
+            NextAccountInfo = new CodexAccountInfo
+            {
+                RequiresOpenAiAuth = true,
+                AuthMode = CodexAuthMode.ChatGpt,
+                Email = "user@example.com",
+                PlanType = "plus",
+            },
+        };
+        var engine = new CodexChatEngine(
+            client,
+            new RecordingToolHost(),
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign
+        );
+
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
+
+        engine
+            .AccountSummary.Should()
+            .Be(
+                string.Format(
+                    QuickER.AI.Resources.Strings.Codex_Account_EmailLoggedIn,
+                    "user@example.com / plus"
+                )
+            );
+        engine.Guidance.Should().Be(QuickER.AI.Resources.Strings.Codex_Guidance_LoggedIn);
+    }
+
     /// <summary>未検出から検出可能へ変わったら、「再確認」で未検出表示が解除され接続されることを検証する</summary>
     [Fact(DisplayName = "未検出から復帰したら再確認で接続できる")]
     public async Task Refresh_AfterCliBecomesAvailable_Connects()

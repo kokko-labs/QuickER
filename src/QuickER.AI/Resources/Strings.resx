@@ -272,16 +272,19 @@
     <value>An error occurred: {0}</value>
   </data>
   <data name="Codex_Account_ApiKey" xml:space="preserve">
-    <value>Logged in with an API key</value>
+    <value>Logged in (API key)</value>
   </data>
   <data name="Codex_Account_ChatGpt" xml:space="preserve">
-    <value>Logged in with ChatGPT</value>
+    <value>Logged in (ChatGPT)</value>
   </data>
   <data name="Codex_Account_ChatGptWithPlan" xml:space="preserve">
-    <value>Logged in with ChatGPT ({0})</value>
+    <value>Logged in (ChatGPT / {0})</value>
   </data>
   <data name="Codex_Account_EmailLoggedIn" xml:space="preserve">
-    <value>Logged in as {0}</value>
+    <value>Logged in ({0})</value>
+  </data>
+  <data name="Codex_Guidance_LoggedIn" xml:space="preserve">
+    <value>The local Codex CLI login will be used as is.</value>
   </data>
   <data name="Codex_Account_Connected" xml:space="preserve">
     <value>Connected</value>

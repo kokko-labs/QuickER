@@ -533,11 +533,17 @@ public partial class AiChatDialogViewModel : ObservableObject
         }
     }
 
-    /// <summary>Codex 接続解決中フラグを更新し、ログインパネル表示を再評価する</summary>
+    /// <summary>Codex 接続解決中フラグを更新し、ログインパネル表示と状態ドットを再評価する</summary>
+    /// <remarks>
+    /// 認証状態イベント（<see cref="ApplyCodexAuthState"/>）は接続解決中＝灰の時点で発火するため、
+    /// 解決完了時にここで <see cref="CodexStatusLevel"/> を再通知しないと、ログイン済みでも
+    /// ドットが灰のまま残る。
+    /// </remarks>
     private void SetCodexConnecting(bool value)
     {
         _codexConnecting = value;
         OnPropertyChanged(nameof(ShowCodexLoginPanel));
+        OnPropertyChanged(nameof(CodexStatusLevel));
     }
 
     /// <summary>Claude Code エンジンを初期化し、状態サマリー・可否を反映する</summary>
