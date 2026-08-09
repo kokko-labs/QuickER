@@ -1,6 +1,7 @@
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Data;
 using System.Windows.Media;
 using System.Windows.Threading;
 using AwesomeAssertions;
@@ -511,6 +512,124 @@ public class ModelHistoryComboBoxTests
                         .CopilotModelHistory.ModelsFor(CopilotSettings.HistoryProviderKey)
                         .Should()
                         .Equal("hist-model-2");
+                }
+                finally
+                {
+                    window.Close();
+                }
+            }
+            finally
+            {
+                if (Directory.Exists(folder))
+                {
+                    Directory.Delete(folder, recursive: true);
+                }
+            }
+        });
+    }
+
+    /// <summary>
+    /// Copilot モデル ComboBox で、リストから選択したモデルが「成功ターンの MRU 記録」と
+    /// 「実行時列挙の更新」の候補再構築後も空へ戻らないことを検証する（実機報告の回帰テスト）。
+    /// </summary>
+    /// <remarks>
+    /// 候補の Clear で編集可能 ComboBox は選択中項目を失い、Text（＝双方向バインドの CopilotModel）を
+    /// 空へ押し戻す。Copilot は成功ターンごとに必ず記録→再構築が走るため（静的カタログ無し）、
+    /// 再構築側の退避・復元が無いと「チャットするたびに選択モデルが空欄へ戻る」。この機構は
+    /// ComboBox の実挙動に依存するため、実ダイアログと同じ束縛（編集可能・TextSearch.TextPath=Name・
+    /// Text は CopilotModel と双方向）を組んだ実 ComboBox で検証する。
+    /// </remarks>
+    [Fact(DisplayName = "Copilot の選択モデルは成功ターン記録・列挙更新後も空へ戻らない")]
+    public void CopilotSelectedModel_SurvivesRecordAndReenumeration()
+    {
+        WpfApplicationTestSupport.RunSta(() =>
+        {
+            WpfApplicationTestSupport.EnsureApplicationResources();
+
+            var folder = Path.Combine(
+                Path.GetTempPath(),
+                "QuickERTests",
+                Guid.NewGuid().ToString("N")
+            );
+
+            try
+            {
+                var connection = new ChatConnectionSettingsViewModel(
+                    AiDialogKind.AiChat,
+                    settingsStore: new AiSettingsStore(folder),
+                    codexConfigReader: () => new CodexConfigToml(),
+                    apiKeyLoader: _ => string.Empty,
+                    apiKeySaver: (_, _) => { }
+                );
+                connection.LoadSettings();
+                connection.SelectedBackend = ErChatBackendKind.Copilot;
+                connection.CopilotAvailableModels = new List<string>
+                {
+                    "enum-model",
+                    "enum-model-2",
+                };
+
+                // 実ダイアログの CopilotModelBox と同じ束縛を最小ウィンドウの ComboBox へ組む
+                var combo = new ComboBox
+                {
+                    IsEditable = true,
+                    ItemsSource = connection.CopilotModelCandidates,
+                    DataContext = new ConnectionHost(connection),
+                };
+                TextSearch.SetTextPath(combo, "Name");
+                combo.SetBinding(
+                    ComboBox.TextProperty,
+                    new Binding("Connection.CopilotModel")
+                    {
+                        UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged,
+                    }
+                );
+                // 画面外＋非アクティブで Show し、テスト実行中にユーザーの画面を邪魔しない（lessons 2026-07-10）
+                var window = new Window
+                {
+                    Content = combo,
+                    Width = 400,
+                    Height = 200,
+                    ShowInTaskbar = false,
+                    ShowActivated = false,
+                    WindowStyle = WindowStyle.None,
+                    WindowStartupLocation = WindowStartupLocation.Manual,
+                    Left = -4000,
+                    Top = -4000,
+                };
+                window.Show();
+
+                try
+                {
+                    window.UpdateLayout();
+                    DoEvents();
+
+                    // 実機の報告手順どおり、ドロップダウン項目の選択でモデルを決める
+                    combo.SelectedItem = connection.CopilotModelCandidates[0];
+                    DoEvents();
+                    connection
+                        .CopilotModel.Should()
+                        .Be("enum-model", "リスト選択が Text 経由で VM へ届くこと");
+
+                    // 成功ターン → MRU 記録 → 候補再構築（修正前はここで Text が空へ戻っていた）
+                    connection.RecordSuccessfulModel();
+                    DoEvents();
+                    connection
+                        .CopilotModel.Should()
+                        .Be("enum-model", "MRU 記録の候補再構築で選択モデルが消えないこと");
+                    combo.Text.Should().Be("enum-model");
+
+                    // 再接続などによる実行時列挙の更新でも保たれる
+                    connection.CopilotAvailableModels = new List<string>
+                    {
+                        "enum-model",
+                        "enum-model-3",
+                    };
+                    DoEvents();
+                    connection
+                        .CopilotModel.Should()
+                        .Be("enum-model", "実行時列挙の更新で選択モデルが消えないこと");
+                    combo.Text.Should().Be("enum-model");
                 }
                 finally
                 {

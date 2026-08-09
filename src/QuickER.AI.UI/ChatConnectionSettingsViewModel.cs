@@ -317,6 +317,12 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
     /// </summary>
     private void RefreshApiModelCandidates()
     {
+        // 候補の Clear で編集可能 ComboBox が選択中項目を失い、Text（＝双方向バインドの ApiModel）を
+        // 空へ押し戻すことがあるため、再構築の前に退避して最後に復元する（成功ターン後の MRU 記録・
+        // 履歴の × 削除のどの経路でも選択値を保つ。プロバイダー切替の既定モデルは本メソッドの後で
+        // 明示代入されるため復元と両立する）
+        var current = ApiModel;
+
         ApiModelCandidates.Clear();
 
         foreach (var m in CurrentApiCatalog)
@@ -338,6 +344,8 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
 
             ApiModelCandidates.Add(new ModelCandidate(m, IsRemovable: true));
         }
+
+        ApiModel = current;
     }
 
     /// <summary>
@@ -397,9 +405,6 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
             return;
         }
 
-        // 選択中の項目を削除すると ComboBox が Text（＝双方向バインドの ApiModel）を消すため、退避して後で復元する
-        var current = ApiModel;
-
         var settings = _settingsStore.Load();
 
         if (settings.ApiModelHistory.Remove(ApiProviderKey, model))
@@ -407,8 +412,8 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
             _settingsStore.Save(settings);
         }
 
+        // 選択中の項目を消しても Text（＝双方向バインドの ApiModel）が保たれる（再構築側が退避・復元する）
         RefreshApiModelCandidates();
-        ApiModel = current;
     }
 
     /// <summary>
@@ -444,9 +449,6 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
             return;
         }
 
-        // 選択中の項目を削除すると ComboBox が Text（＝双方向バインドの CodexModel）を消すため、退避して後で復元する
-        var current = CodexModel;
-
         var settings = _settingsStore.Load();
 
         if (settings.CodexModelHistory.Remove(CodexModelProvider?.Trim() ?? string.Empty, model))
@@ -454,8 +456,8 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
             _settingsStore.Save(settings);
         }
 
+        // 選択中の項目を消しても Text（＝双方向バインドの CodexModel）が保たれる（再構築側が退避・復元する）
         RefreshCodexModelCandidates();
-        CodexModel = current;
     }
 
     /// <summary>
@@ -498,9 +500,6 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
             return;
         }
 
-        // 選択中の項目を削除すると ComboBox が Text（＝双方向バインドの CopilotModel）を消すため、退避して後で復元する
-        var current = CopilotModel;
-
         var settings = _settingsStore.Load();
 
         if (settings.CopilotModelHistory.Remove(CopilotSettings.HistoryProviderKey, model))
@@ -508,8 +507,8 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
             _settingsStore.Save(settings);
         }
 
+        // 選択中の項目を消しても Text（＝双方向バインドの CopilotModel）が保たれる（再構築側が退避・復元する）
         RefreshCopilotModelCandidates();
-        CopilotModel = current;
     }
 
     /// <summary>
@@ -519,6 +518,12 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
     /// </summary>
     private void RefreshCopilotModelCandidates()
     {
+        // 候補の Clear で編集可能 ComboBox が選択中項目を失い、Text（＝双方向バインドの CopilotModel）を
+        // 空へ押し戻すことがあるため、再構築の前に退避して最後に復元する。Copilot は成功ターンごとに
+        // MRU 記録→再構築が走る（静的カタログが無く常に記録する）ため、復元しないと
+        // 「チャットするたびに選択モデルが空へ戻る」ことになる
+        var current = CopilotModel;
+
         CopilotModelCandidates.Clear();
 
         foreach (var m in CopilotAvailableModels)
@@ -544,6 +549,8 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
 
             CopilotModelCandidates.Add(new ModelCandidate(m, IsRemovable: true));
         }
+
+        CopilotModel = current;
     }
 
     /// <summary>接続タブ関連の設定を保存する（親の SaveSettings から呼ぶ）</summary>
@@ -618,22 +625,36 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
     /// </summary>
     private void RefreshCodexModelCandidates()
     {
-        CodexModelCandidates.Clear();
+        // 候補の Clear で編集可能 ComboBox が選択中項目を失い、Text（＝双方向バインドの CodexModel）を
+        // 空へ押し戻すことがあるため、再構築の前に退避して最後に復元する（成功ターン後の MRU 記録・
+        // 履歴の × 削除・プロバイダー切替のどの経路でも選択値を保つ。手入力の自由テキストは従来から
+        // 切替後も残るため、リスト選択だけ消える非対称の解消でもある）
+        var current = CodexModel;
 
-        if (IsOpenAiCodexProvider)
+        try
         {
-            foreach (var m in AiModelCatalog.OpenAiModels)
+            CodexModelCandidates.Clear();
+
+            if (IsOpenAiCodexProvider)
             {
-                CodexModelCandidates.Add(new ModelCandidate(m, IsRemovable: false));
+                foreach (var m in AiModelCatalog.OpenAiModels)
+                {
+                    CodexModelCandidates.Add(new ModelCandidate(m, IsRemovable: false));
+                }
+
+                return;
             }
 
-            return;
+            // 非 openai: MRU 履歴のみ。両ダイアログ共有ファイルの最新を反映するため都度 Load する
+            foreach (var m in _settingsStore.Load().CodexModelHistory.ModelsFor(CodexModelProvider))
+            {
+                CodexModelCandidates.Add(new ModelCandidate(m, IsRemovable: true));
+            }
         }
-
-        // 非 openai: MRU 履歴のみ。両ダイアログ共有ファイルの最新を反映するため都度 Load する
-        foreach (var m in _settingsStore.Load().CodexModelHistory.ModelsFor(CodexModelProvider))
+        finally
         {
-            CodexModelCandidates.Add(new ModelCandidate(m, IsRemovable: true));
+            // openai の早期 return を含む全経路で復元する
+            CodexModel = current;
         }
     }
 
