@@ -352,7 +352,7 @@ public sealed class ValueObjectValidationException : Exception
 public abstract partial class ValueObjectBase<TSelf, TValue> : IValueObject
     where TSelf : ValueObjectBase<TSelf, TValue>
 {
-    /// <summary>Gets the underlying value (immutable).</summary>
+    /// <summary>Gets the underlying value (never reassigned; reference-typed values such as byte[] are not defensively copied — see <see cref="ValueObjectBinaryBase{TSelf}"/>).</summary>
     public TValue Value { get; }
 
     /// <summary>Initializes with an already-validated value (the concrete Create/TryCreate performs validation beforehand).</summary>
@@ -557,6 +557,11 @@ public abstract partial class ValueObjectDateTimeBase<TSelf>
 }
 
 /// <summary>Base for byte[] value objects. ToString returns Base64 (equality uses the base's structural comparison).</summary>
+/// <remarks>
+/// The wrapped array is NOT defensively copied: the value object holds (and exposes through Value) the very array it was
+/// created with, because copying would double the allocation of every binary column read from the database. Treat the array
+/// as frozen after Create — mutating it afterwards silently changes the value object's equality, hash code, and ToString.
+/// </remarks>
 public abstract partial class ValueObjectBinaryBase<TSelf> : ValueObjectBase<TSelf, byte[]>
     where TSelf : ValueObjectBinaryBase<TSelf>
 {
