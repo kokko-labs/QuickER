@@ -245,6 +245,7 @@ Supported connection methods:
 - Local LLMs (OpenAI-compatible APIs: Ollama, LM Studio, vLLM, etc.)
 - Codex
 - Claude Code
+- Copilot (GitHub Copilot CLI)
 
 ![Generating a full set of order-management tables through AI chat (Claude Code connection)](docs/images/ai-chat.png)
 

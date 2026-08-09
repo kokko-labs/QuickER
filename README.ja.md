@@ -245,6 +245,7 @@ EC サイトの受注管理に必要なテーブルを設計して
 - ローカル LLM（OpenAI 互換 API：Ollama・LM Studio・vLLM など）
 - Codex
 - Claude Code
+- Copilot（GitHub Copilot CLI）
 
 ![AI チャットで受注管理のテーブル一式を生成した例（Claude Code 接続）](docs/images/ai-chat.ja.png)
 

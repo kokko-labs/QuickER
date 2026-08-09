@@ -4,16 +4,6 @@
 
 This file records changes that affect QuickER users. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/) (see [CONTRIBUTING.md](CONTRIBUTING.md) for the versioning rules during 0.x and the release procedure).
 
-## [Unreleased]
-
-### Added
-
-- **Crash handling in the GUI** — on an unexpected error the diagram being edited is saved for recovery, a crash log is written to `%APPDATA%\QuickER\crash-*.log`, and a dialog shows the details with a copy button before the app closes
-
-### Changed
-
-- The recovery auto-save file is now written atomically (a temporary file is swapped in), so an interrupted write can no longer corrupt it
-
 ## [0.1.0] - 2026-08-02
 
 Initial public release.
@@ -23,7 +13,7 @@ Initial public release.
 - **Visual ER design** — crow's foot notation, one-to-one / one-to-many / many-to-many, composite primary keys, FK referential actions, comprehensive undo/redo, and a large-diagram canvas UX (zoom / pan / search / minimap)
 - **Multi-DB support** — schema import, diff sync, DDL generation, and automatic type conversion on dialect switch, across five dialects (SQL Server / PostgreSQL / MySQL / Oracle / SQLite)
 - **C# code generation** — Entity / EditModel / Mapper, plus a 3-way data-access choice: none / the QuickER Repository / the EF Core Repository (the same interfaces, swappable with a single DI registration line). Value objects, named queries, remote contracts and HTTP + JSON services, and a runtime NuGet package reference mode are optional
-- **AI chat and mock generation** — create and edit diagrams in conversation (OpenAI API / Anthropic API / an OpenAI-compatible local LLM / Codex / Claude Code), generate web screen mockups from the ER model, and optionally scaffold a runnable Blazor or WPF mock project
+- **AI chat and mock generation** — create and edit diagrams in conversation (OpenAI API / Anthropic API / an OpenAI-compatible local LLM / Codex / Claude Code / Copilot), generate web screen mockups from the ER model, and optionally scaffold a runnable Blazor or WPF mock project
 - **MCP server** — `quicker mcp` exposes diagram editing and code generation to external AI agents over stdio
 - **Import/export** — DBML / Mermaid / Excel definition documents / HTML definition documents / schema JSON / PNG / SVG / vector printing
 - **CLI** — `quicker generate` / `quicker scaffold` / `quicker reverse` / `quicker mcp`

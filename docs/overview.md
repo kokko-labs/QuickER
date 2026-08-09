@@ -55,7 +55,7 @@ What happens in a brand-new project with no database or other data source to imp
 Creating dozens of tables on a blank canvas takes real effort.
 QuickER's AI chat feature takes on that initial design work.
 Ask the AI to "design the tables for order management on an e-commerce site," and it drafts an ER diagram that you can continue refining through conversation.
-Depending on your environment, you can connect through an API key, a local LLM, Codex, or Claude Code.
+Depending on your environment, you can connect through an API key, a local LLM, Codex, Claude Code, or Copilot (the GitHub Copilot CLI).
 
 The AI can also generate web screen mockups from the ER model.
 The output is written live to a mock folder containing per-screen HTML and shared styles, where you can inspect it in a preview and refine it through conversation.

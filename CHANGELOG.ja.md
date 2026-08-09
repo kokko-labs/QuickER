@@ -4,16 +4,6 @@
 
 QuickER の利用者に影響する変更を記録します。形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/)、バージョンは [Semantic Versioning](https://semver.org/lang/ja/) に従います（0.x の間の版上げルールとリリース手順は [CONTRIBUTING.ja.md](CONTRIBUTING.ja.md) を参照）。
 
-## [Unreleased]
-
-### Added
-
-- **GUI のクラッシュ処理** — 予期しないエラー時に編集中の図を復旧用に保存し、`%APPDATA%\QuickER\crash-*.log` へクラッシュログを書き出したうえで、詳細をコピーできるダイアログを表示してから終了
-
-### Changed
-
-- 復旧用の自動保存ファイルをアトミックに書き換えるようにした（一時ファイル経由の差し替え）。書き込み途中の中断でファイルが壊れなくなる
-
 ## [0.1.0] - 2026-08-02
 
 初回公開リリース。
@@ -23,7 +13,7 @@ QuickER の利用者に影響する変更を記録します。形式は [Keep a 
 - **ビジュアル ER 設計** — crow's foot 記法、1 対 1 / 1 対多 / 多対多、複合主キー、FK 参照アクション、包括的な Undo/Redo、大規模図向けのキャンバス UX（ズーム / パン / 検索 / ミニマップ）
 - **マルチ DB 対応** — SQL Server / PostgreSQL / MySQL / Oracle / SQLite の 5 方言で、スキーマ取込・差分同期・DDL 生成・方言切替時の型自動変換
 - **C# コード生成** — Entity / EditModel / Mapper と、DB アクセス 3 択（なし / QuickER 版 Repository / EF Core 版 Repository。同じインターフェイスを実装し、DI 登録 1 行で差し替え可能）。値オブジェクト、名前付きクエリ、リモート契約と HTTP + JSON サービス、ランタイム NuGet パッケージ参照モードはオプション
-- **AI チャットとモック生成** — 対話による図の生成・編集（OpenAI API / Anthropic API / OpenAI 互換のローカル LLM / Codex / Claude Code）、ER モデルからの Web 画面モック生成、任意で実行可能な Blazor / WPF モックプロジェクトの生成
+- **AI チャットとモック生成** — 対話による図の生成・編集（OpenAI API / Anthropic API / OpenAI 互換のローカル LLM / Codex / Claude Code / Copilot）、ER モデルからの Web 画面モック生成、任意で実行可能な Blazor / WPF モックプロジェクトの生成
 - **MCP サーバ** — `quicker mcp` が図の編集とコード生成を外部 AI エージェントへ stdio で公開
 - **入出力** — DBML / Mermaid / Excel 定義書 / HTML 定義書 / スキーマ JSON / PNG / SVG / ベクタ印刷
 - **CLI** — `quicker generate` / `quicker scaffold` / `quicker reverse` / `quicker mcp`
