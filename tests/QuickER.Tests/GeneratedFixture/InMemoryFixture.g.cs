@@ -493,7 +493,7 @@ public partial class CustomerEntity : EntityBase
 
     /// <summary>CustomerProfile navigation property</summary>
     [NavigationReference("customers", "customer_id", "customer_profiles", "customer_id", false, true, false, ConstraintName = "FK_customer_profiles_customers")]
-    public CustomerProfileEntity CustomerProfile { get; set; } = null!;
+    public CustomerProfileEntity? CustomerProfile { get; set; }
 }
 
 /// <summary>Entity for the orders table</summary>
@@ -2063,10 +2063,10 @@ public partial class CustomerEditModel : EditModelBase
     }
 
     /// <summary>Backing field for the single CustomerProfile child.</summary>
-    private CustomerProfileEditModel _customerProfile = null!;
+    private CustomerProfileEditModel? _customerProfile;
 
     /// <summary>CustomerProfile navigation property (single child; this model is set as the child's ParentModel).</summary>
-    public CustomerProfileEditModel CustomerProfile
+    public CustomerProfileEditModel? CustomerProfile
     {
         get => _customerProfile;
         set
@@ -3579,10 +3579,7 @@ public sealed partial class CustomerMapper
         // Transfer the RowState raised on the edit model by confirmed-value changes as-is (no state is created here).
         entity.RowState = editModel.RowState;
         entity.Orders = new OrderMapper().CreateEntities(editModel.Orders, includeRemoved);
-        if (editModel.CustomerProfile is not null)
-        {
-            entity.CustomerProfile = new CustomerProfileMapper().CreateEntity(editModel.CustomerProfile, includeRemoved);
-        }
+        entity.CustomerProfile = editModel.CustomerProfile is null ? null : new CustomerProfileMapper().CreateEntity(editModel.CustomerProfile, includeRemoved);
         OnEntityApplied(editModel, entity);
     }
 
@@ -3599,10 +3596,7 @@ public sealed partial class CustomerMapper
             editModel.BindingName = entity.Name.ToString() ?? string.Empty;
             editModel.BindingBalance = entity.Balance?.ToString() ?? string.Empty;
             editModel.Orders = new OrderMapper().CreateEditModels(entity.Orders);
-            if (entity.CustomerProfile is not null)
-            {
-                editModel.CustomerProfile = new CustomerProfileMapper().CreateEditModel(entity.CustomerProfile);
-            }
+            editModel.CustomerProfile = entity.CustomerProfile is null ? null : new CustomerProfileMapper().CreateEditModel(entity.CustomerProfile);
             OnEditModelLoaded(entity, editModel);
         });
 
@@ -4748,9 +4742,19 @@ public sealed class SqlQuery<TEntity>
         return this;
     }
 
-    /// <summary>Sets the maximum number of rows to fetch.</summary>
+    /// <summary>Sets the maximum number of rows to fetch (must be greater than zero).</summary>
     public SqlQuery<TEntity> Take(int count)
     {
+        // Zero and negative values are rejected up front: dialects disagree on what they mean (SQL Server requires a fetch count greater than zero
+        // while SQLite treats a negative LIMIT as "no limit"), and fetching zero rows has no meaningful use (skip the query instead).
+        if (count <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(count),
+                "The number of rows to fetch must be greater than zero."
+            );
+        }
+
         _take = count;
         return this;
     }
@@ -4758,6 +4762,15 @@ public sealed class SqlQuery<TEntity>
     /// <summary>Sets the number of leading rows to skip.</summary>
     public SqlQuery<TEntity> Skip(int count)
     {
+        // Negative values are rejected up front: dialects disagree on what they mean (SQL Server raises an error, SQLite clamps a negative OFFSET to zero).
+        if (count < 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(count),
+                "The number of rows to skip must not be negative."
+            );
+        }
+
         _skip = count;
         return this;
     }
@@ -5453,7 +5466,7 @@ public sealed class InMemoryDataStore
         }
     }
 
-    /// <summary>Stores a snapshot (clone) for both insert and update (an existing key is replaced).</summary>
+    /// <summary>Stores a snapshot (clone) for updates and seeding (an existing key is overwritten). Use <see cref="Insert"/> for inserts, which reject an existing key.</summary>
     internal void Put(EntityBase entity)
     {
         lock (_gate)
@@ -5461,6 +5474,28 @@ public sealed class InMemoryDataStore
             var snapshot = entity.Clone();
             snapshot.MarkUnchanged();
             Table(entity.GetType())[KeyOf(entity)] = snapshot;
+        }
+    }
+
+    /// <summary>Creates the exception for an insert that hits an existing primary key (mirroring the primary-key violation a real database would raise).</summary>
+    internal static InvalidOperationException DuplicateKeyError(Type entityType, object key) =>
+        new(
+            $"Cannot insert {entityType.Name} with key '{key}': an entity with the same primary key already exists (a real database would raise a primary-key violation)."
+        );
+
+    /// <summary>Stores a snapshot (clone) for an insert only. An existing primary key is rejected with an <see cref="InvalidOperationException"/> instead of being silently overwritten.</summary>
+    internal void Insert(EntityBase entity)
+    {
+        lock (_gate)
+        {
+            var key = KeyOf(entity);
+            var snapshot = entity.Clone();
+            snapshot.MarkUnchanged();
+
+            if (!Table(entity.GetType()).TryAdd(key, snapshot))
+            {
+                throw DuplicateKeyError(entity.GetType(), key);
+            }
         }
     }
 
@@ -5504,12 +5539,25 @@ public sealed class InMemoryDataStore
     /// <summary>Scope for applying writes across a whole graph under the lock.</summary>
     internal readonly struct InMemoryWriteScope(InMemoryDataStore store)
     {
-        /// <summary>Stores a snapshot (insert/update). Assumes the lock is held, so it writes directly to the internal dictionary.</summary>
+        /// <summary>Stores a snapshot for updates and seeding (an existing key is overwritten). Assumes the lock is held, so it writes directly to the internal dictionary.</summary>
         public void Put(EntityBase entity)
         {
             var snapshot = entity.Clone();
             snapshot.MarkUnchanged();
             store.Table(entity.GetType())[KeyOf(entity)] = snapshot;
+        }
+
+        /// <summary>Stores a snapshot for an insert only (an existing primary key throws instead of being overwritten). Assumes the lock is held, so it writes directly to the internal dictionary.</summary>
+        public void Insert(EntityBase entity)
+        {
+            var key = KeyOf(entity);
+            var snapshot = entity.Clone();
+            snapshot.MarkUnchanged();
+
+            if (!store.Table(entity.GetType()).TryAdd(key, snapshot))
+            {
+                throw DuplicateKeyError(entity.GetType(), key);
+            }
         }
 
         /// <summary>Removes the snapshot for the given type and primary key (true if one existed).</summary>
@@ -5980,7 +6028,7 @@ internal static class InMemoryCascade
             // Insert unless skipped (even when skipped, the child cascade continues).
             if (hooks is null || !hooks.Skipped.Contains(entity))
             {
-                scope.Put(entity);
+                scope.Insert(entity);
                 rows++;
                 records?.Add((entity, SaveOperation.Insert));
             }
@@ -6001,7 +6049,7 @@ internal static class InMemoryCascade
                 else if (insertWhenUpdateMissing)
                 {
                     // The update target was missing and we switched to INSERT, so After fires with the actual operation Insert.
-                    scope.Put(entity);
+                    scope.Insert(entity);
                     rows++;
                     records?.Add((entity, SaveOperation.Insert));
                 }
@@ -6258,35 +6306,49 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
     public Task<IReadOnlyList<TEntity>> GetAllAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult(Store.Snapshot<TEntity>());
 
-    /// <summary>Inserts an entity.</summary>
+    /// <summary>Inserts an entity (an existing primary key is rejected, as a real database would).</summary>
     public Task InsertAsync(TEntity entity, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(entity);
-        Store.Put(entity);
+        Store.Insert(entity);
         entity.MarkUnchanged();
         return Task.CompletedTask;
     }
 
-    /// <summary>Bulk-inserts a collection of entities.</summary>
+    /// <summary>Bulk-inserts a collection of entities (all-or-nothing: a duplicate primary key rejects the whole batch without applying any of it).</summary>
     public Task<int> BulkInsertAsync(
         IEnumerable<TEntity> entities,
         CancellationToken cancellationToken = default
     )
     {
         ArgumentNullException.ThrowIfNull(entities);
-        var count = 0;
+        cancellationToken.ThrowIfCancellationRequested();
 
-        foreach (var entity in entities)
+        var targets = entities.Where(entity => entity is not null).ToList();
+
+        var count = Store.Write(scope =>
         {
-            if (entity is null)
+            var batchKeys = new HashSet<object>();
+
+            // Pre-validate all keys, then apply: a duplicate must not leave a partially inserted batch behind.
+            foreach (var entity in targets)
             {
-                continue;
+                var key = InMemoryDataStore.KeyOf(entity);
+
+                if (scope.Exists(entity.GetType(), key) || !batchKeys.Add(key))
+                {
+                    throw InMemoryDataStore.DuplicateKeyError(entity.GetType(), key);
+                }
             }
 
-            Store.Put(entity);
-            entity.MarkUnchanged();
-            count++;
-        }
+            foreach (var entity in targets)
+            {
+                scope.Insert(entity);
+                entity.MarkUnchanged();
+            }
+
+            return targets.Count;
+        });
 
         return Task.FromResult(count);
     }

@@ -288,7 +288,8 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
         }
         catch
         {
-            await transaction.RollbackAsync(cancellationToken);
+            // Roll back with CancellationToken.None: a canceled token must not interrupt the rollback or mask the original exception.
+            await transaction.RollbackAsync(CancellationToken.None);
             throw;
         }
     }
@@ -445,7 +446,8 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
         }
         catch
         {
-            await transaction.RollbackAsync(cancellationToken);
+            // Roll back with CancellationToken.None: a canceled token must not interrupt the rollback or mask the original exception.
+            await transaction.RollbackAsync(CancellationToken.None);
             throw;
         }
     }
@@ -518,7 +520,8 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
         }
         catch
         {
-            await transaction.RollbackAsync(cancellationToken);
+            // Roll back with CancellationToken.None: a canceled token must not interrupt the rollback or mask the original exception.
+            await transaction.RollbackAsync(CancellationToken.None);
             throw;
         }
     }
@@ -809,7 +812,8 @@ public static class UnboundedBinaryColumnEngine
         {
             if (ownsTransaction)
             {
-                await activeTransaction.RollbackAsync(cancellationToken);
+                // Roll back with CancellationToken.None: a canceled token must not interrupt the rollback or mask the original exception.
+                await activeTransaction.RollbackAsync(CancellationToken.None);
             }
 
             throw;
@@ -1076,7 +1080,8 @@ public sealed class SqliteSqlQueryExecutor<TEntity>(ISqlConnectionFactory connec
         }
         catch
         {
-            await transaction.RollbackAsync(cancellationToken);
+            // Roll back with CancellationToken.None: a canceled token must not interrupt the rollback or mask the original exception.
+            await transaction.RollbackAsync(CancellationToken.None);
             throw;
         }
     }

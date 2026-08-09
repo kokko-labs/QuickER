@@ -17,8 +17,11 @@ public sealed class MapperRoundTripTests
 {
     // ===== テストデータ生成 =====
 
-    /// <summary>Orders×2・CustomerProfile を持つ Unchanged な CustomerEntity を作る。</summary>
-    private static CustomerEntity BuildFullCustomer(decimal? balance = 250.75m)
+    /// <summary>Orders×2・CustomerProfile を持つ Unchanged な CustomerEntity を作る（withProfile=false で子プロファイル無し）。</summary>
+    private static CustomerEntity BuildFullCustomer(
+        decimal? balance = 250.75m,
+        bool withProfile = true
+    )
     {
         var entity = new CustomerEntity
         {
@@ -47,12 +50,15 @@ public sealed class MapperRoundTripTests
             }
         );
 
-        entity.CustomerProfile = new CustomerProfileEntity
+        if (withProfile)
         {
-            ProfileId = ProfileIdValue.Create(5),
-            CustomerId = CustomerIdValue.Create(1),
-            Bio = BioValue.Create("hello"),
-        };
+            entity.CustomerProfile = new CustomerProfileEntity
+            {
+                ProfileId = ProfileIdValue.Create(5),
+                CustomerId = CustomerIdValue.Create(1),
+                Bio = BioValue.Create("hello"),
+            };
+        }
 
         return entity;
     }
@@ -106,7 +112,7 @@ public sealed class MapperRoundTripTests
         em.IsActive!.Value.Should().BeTrue();
         em.RowState.Should().Be(RowState.Unchanged);
         em.Orders.Should().HaveCount(2);
-        em.CustomerProfile.Bio!.Value.Should().Be("hello");
+        em.CustomerProfile!.Bio!.Value.Should().Be("hello");
     }
 
     [Fact(DisplayName = "ApplyToEditModel: 既存 EditModel へエンティティ値を上書きロードする")]
@@ -162,7 +168,7 @@ public sealed class MapperRoundTripTests
         rebuilt.Orders.ElementAt(0).Amount.Should().Be(original.Orders.ElementAt(0).Amount);
         rebuilt.Orders.ElementAt(1).Memo.Should().BeNull(); // nullable 未設定は null のまま
 
-        rebuilt.CustomerProfile.ProfileId.Should().Be(original.CustomerProfile.ProfileId);
+        rebuilt.CustomerProfile!.ProfileId.Should().Be(original.CustomerProfile!.ProfileId);
         rebuilt.CustomerProfile.Bio.Should().Be(original.CustomerProfile.Bio!);
     }
 
@@ -175,6 +181,38 @@ public sealed class MapperRoundTripTests
         var rebuilt = mapper.CreateEntity(mapper.CreateEditModel(original));
 
         rebuilt.Balance.Should().BeNull();
+    }
+
+    // ===== 1 対 1 の子ナビゲーション（本質的に 0..1）の再利用時クリア =====
+
+    [Fact(
+        DisplayName = "ApplyToEditModel: 子プロファイル無しのエンティティを再ロードすると前回の子が残留しない"
+    )]
+    public void ApplyToEditModel_子無し再ロードで子がnullへ戻る()
+    {
+        var mapper = new CustomerMapper();
+        var em = mapper.CreateEditModel(BuildFullCustomer());
+        em.CustomerProfile.Should().NotBeNull();
+
+        // 同じ EditModel を使い回して、子を持たないエンティティをロードし直す
+        mapper.ApplyToEditModel(BuildFullCustomer(withProfile: false), em);
+
+        em.CustomerProfile.Should().BeNull();
+    }
+
+    [Fact(
+        DisplayName = "ApplyToEntity: 子プロファイル無しの EditModel を再適用すると前回の子が残留しない"
+    )]
+    public void ApplyToEntity_子無し再適用で子がnullへ戻る()
+    {
+        var mapper = new CustomerMapper();
+        var entity = mapper.CreateEntity(mapper.CreateEditModel(BuildFullCustomer()));
+        entity.CustomerProfile.Should().NotBeNull();
+
+        // 同じエンティティを使い回して、子を持たない EditModel を適用し直す
+        mapper.ApplyToEntity(mapper.CreateEditModel(BuildFullCustomer(withProfile: false)), entity);
+
+        entity.CustomerProfile.Should().BeNull();
     }
 
     // ===== MapperBase.CreateEntity(em, includeRemoved) の両分岐 =====

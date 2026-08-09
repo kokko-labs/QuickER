@@ -1085,7 +1085,8 @@ public class CSharpCodeGenerationServiceTests
         var content = result.Files[0].Content;
 
         // 1対1の単一子: 親 ProfileOwner が Profile を保持し、setter で子の親モデルリンクを張る
-        content.Should().Contain("private ProfileEditModel _profile = null!;");
+        // （子は行が無くても成立する＝本質的に 0..1 のため nullable）
+        content.Should().Contain("private ProfileEditModel? _profile;");
         content.Should().Contain("_profile?.SetParentModel(null);");
         content.Should().Contain("_profile?.SetParentModel(this);");
         // 子 Profile は親が一意なので型付き ParentModel（ProfileOwnerEditModel）を生成する
@@ -1542,6 +1543,25 @@ public class CSharpCodeGenerationServiceTests
                 "metadata.AddQueryParameter(command, parameter.Name, parameter.ColumnName, value);"
             );
         content.Should().Contain("FETCH NEXT {take.Value} ROWS ONLY");
+    }
+
+    /// <summary>catch 内のロールバックへ CancellationToken.None を渡すコードが生成されることを検証する（キャンセル済みトークンでロールバックが中断され元例外が覆われる問題の回帰防止）</summary>
+    [Fact]
+    public void Generate_ShouldRollbackWithCancellationTokenNone()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            SingleEntityDiagram(),
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Sample.Domain",
+                GenerateRepositories = true,
+            }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files[0].Content;
+        content.Should().Contain("await transaction.RollbackAsync(CancellationToken.None);");
+        content.Should().NotContain("await transaction.RollbackAsync(cancellationToken);");
     }
 
     /// <summary>コレクションの Contains（配列・List など）が SQL の IN 句へ変換されるコードが生成されることを検証する</summary>

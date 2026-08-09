@@ -931,7 +931,9 @@ internal sealed partial class CSharpGenerationModelBuilder
                         ),
                         TargetTableName: target.TableName,
                         IsCollection: isCollection,
-                        IsNullable: false,
+                        // 1 対 1 の子は行が無くても成立する（本質的に 0..1）ため nullable。
+                        // 1 対多はこの方向が IsCollection: true になり IsNullable は使われないため影響しない
+                        IsNullable: true,
                         IsParentReference: false,
                         PrincipalTableName: source.TableName,
                         PrincipalColumnName: principalColumn.Name,

@@ -113,6 +113,72 @@ public sealed class InMemoryFixtureRuntimeTests
         (await customers.GetAllAsync(Ct)).Should().HaveCount(3);
     }
 
+    [Fact(DisplayName = "Insert: 重複主キーは InvalidOperationException で拒否しストアは不変")]
+    public async Task Insert_DuplicateKey_Rejected()
+    {
+        var (_, customers, _, _) = BuildFresh();
+        await customers.InsertAsync(NewCustomer(1, "Alice"), Ct);
+
+        var act = async () => await customers.InsertAsync(NewCustomer(1, "Bob"), Ct);
+        (await act.Should().ThrowAsync<InvalidOperationException>()).WithMessage("*primary key*");
+
+        // 既存行は上書きされない
+        (await customers.GetByIdAsync(1, Ct))!
+            .Name.Should()
+            .Be("Alice");
+        (await customers.GetAllAsync(Ct)).Should().ContainSingle();
+    }
+
+    [Fact(DisplayName = "BulkInsert: ストア重複・バッチ内重複は全体を拒否する（原子性）")]
+    public async Task BulkInsert_DuplicateKey_RejectsWholeBatch()
+    {
+        var (_, customers, _, _) = BuildFresh();
+        await customers.InsertAsync(NewCustomer(1, "Alice"), Ct);
+
+        // ストア側と衝突（2 番目の要素）：先行する 2 も後続の 3 も投入されない
+        var storeConflict = async () =>
+            await customers.BulkInsertAsync(
+                [NewCustomer(2, "B"), NewCustomer(1, "Dup"), NewCustomer(3, "C")],
+                Ct
+            );
+        await storeConflict.Should().ThrowAsync<InvalidOperationException>();
+        (await customers.GetAllAsync(Ct)).Should().ContainSingle("部分適用は残らない");
+
+        // バッチ内での重複も同様に全体を拒否
+        var (_, fresh, _, _) = BuildFresh();
+        var batchConflict = async () =>
+            await fresh.BulkInsertAsync([NewCustomer(5, "X"), NewCustomer(5, "Y")], Ct);
+        await batchConflict.Should().ThrowAsync<InvalidOperationException>();
+        (await fresh.GetAllAsync(Ct)).Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "SaveAsync: Added の重複主キーも拒否する")]
+    public async Task SaveAsync_AddedDuplicateKey_Rejected()
+    {
+        var (_, customers, _, _) = BuildFresh();
+        await customers.InsertAsync(NewCustomer(1, "Alice"), Ct);
+
+        var duplicate = NewCustomer(1, "Bob"); // RowState.Added
+        var act = async () => await customers.SaveAsync(duplicate, cancellationToken: Ct);
+        await act.Should().ThrowAsync<InvalidOperationException>();
+
+        (await customers.GetByIdAsync(1, Ct))!.Name.Should().Be("Alice");
+    }
+
+    [Fact(
+        DisplayName = "BulkInsert: キャンセル済みトークンは OperationCanceledException でストア不変"
+    )]
+    public async Task BulkInsert_Canceled_Throws()
+    {
+        var (_, customers, _, _) = BuildFresh();
+
+        var canceled = new CancellationToken(canceled: true);
+        var act = async () => await customers.BulkInsertAsync([NewCustomer(1, "A")], canceled);
+        await act.Should().ThrowAsync<OperationCanceledException>();
+
+        (await customers.GetAllAsync(Ct)).Should().BeEmpty();
+    }
+
     [Fact(DisplayName = "取得したエンティティを変更してもストアは不変（複製性）")]
     public async Task GetById_ReturnsClone_StoreImmutable()
     {
@@ -167,6 +233,36 @@ public sealed class InMemoryFixtureRuntimeTests
         (await customers.Query().Where(c => c.Name == "Zed").FirstOrDefaultAsync(Ct))
             .Should()
             .BeNull();
+    }
+
+    [Fact(
+        DisplayName = "Query: Take の 0 以下・Skip の負数は ArgumentOutOfRangeException で拒否する"
+    )]
+    public void Query_InvalidTakeOrSkip_Throws()
+    {
+        var (_, customers, _, _) = BuildFresh();
+
+        // 方言ごとに意味が食い違う値（SQL Server の FETCH NEXT は 0 以下がエラー・SQLite の負 LIMIT は無制限・InMemory は空/no-op）はビルダー時点で一律拒否する。
+        // Take(0) は「0 件取得」に実用的な意味がないため拒否側・Skip(0) はページネーションの 1 ページ目（page * size = 0）として正当なため許可
+        var takeZero = () => customers.Query().Take(0);
+        takeZero.Should().Throw<ArgumentOutOfRangeException>().Which.ParamName.Should().Be("count");
+
+        var takeNegative = () => customers.Query().Take(-1);
+        takeNegative
+            .Should()
+            .Throw<ArgumentOutOfRangeException>()
+            .Which.ParamName.Should()
+            .Be("count");
+
+        var skipNegative = () => customers.Query().Skip(-1);
+        skipNegative
+            .Should()
+            .Throw<ArgumentOutOfRangeException>()
+            .Which.ParamName.Should()
+            .Be("count");
+
+        var skipZero = () => customers.Query().Skip(0);
+        skipZero.Should().NotThrow();
     }
 
     [Fact(

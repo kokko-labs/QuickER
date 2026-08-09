@@ -1417,7 +1417,7 @@ public partial class {{ item.class_name }} : EditModelBase
         }
     }
 {{ else if navigation.cascade }}    /// <summary>Backing field for the single {{ navigation.property_name }} child.</summary>
-    private {{ navigation.display_type_name }} {{ navigation.field_name }}{{ navigation.initializer }}
+    private {{ navigation.display_type_name }} {{ navigation.field_name }};
 
     /// <summary>{{ navigation.property_name }} navigation property (single child; this model is set as the child's ParentModel).</summary>
     public {{ navigation.display_type_name }} {{ navigation.property_name }}
@@ -1682,11 +1682,7 @@ public sealed partial class {{ mapper.class_name }}
 {{ end }}{{ end }}        // Transfer the RowState raised on the edit model by confirmed-value changes as-is (no state is created here).
         entity.RowState = editModel.RowState;
 {{ for nav in mapper.navigation_properties }}{{ if nav.is_cascade }}{{ if nav.is_collection }}        entity.{{ nav.property_name }} = new {{ nav.mapper_class_name }}().CreateEntities(editModel.{{ nav.property_name }}, includeRemoved);
-{{ else if nav.is_nullable }}        entity.{{ nav.property_name }} = editModel.{{ nav.property_name }} is null ? null : new {{ nav.mapper_class_name }}().CreateEntity(editModel.{{ nav.property_name }}, includeRemoved);
-{{ else }}        if (editModel.{{ nav.property_name }} is not null)
-        {
-            entity.{{ nav.property_name }} = new {{ nav.mapper_class_name }}().CreateEntity(editModel.{{ nav.property_name }}, includeRemoved);
-        }
+{{ else }}        entity.{{ nav.property_name }} = editModel.{{ nav.property_name }} is null ? null : new {{ nav.mapper_class_name }}().CreateEntity(editModel.{{ nav.property_name }}, includeRemoved);
 {{ end }}{{ end }}{{ end }}        OnEntityApplied(editModel, entity);
     }
 
@@ -1701,11 +1697,7 @@ public sealed partial class {{ mapper.class_name }}
             editModel.RevertInput();
 {{ for prop in mapper.scalar_properties }}            editModel.{{ prop.binding_property_name }} = {{ prop.load_binding_expression }};
 {{ end }}{{ for nav in mapper.navigation_properties }}{{ if nav.is_cascade }}{{ if nav.is_collection }}            editModel.{{ nav.property_name }} = new {{ nav.mapper_class_name }}().CreateEditModels(entity.{{ nav.property_name }});
-{{ else if nav.is_nullable }}            editModel.{{ nav.property_name }} = entity.{{ nav.property_name }} is null ? null : new {{ nav.mapper_class_name }}().CreateEditModel(entity.{{ nav.property_name }});
-{{ else }}            if (entity.{{ nav.property_name }} is not null)
-            {
-                editModel.{{ nav.property_name }} = new {{ nav.mapper_class_name }}().CreateEditModel(entity.{{ nav.property_name }});
-            }
+{{ else }}            editModel.{{ nav.property_name }} = entity.{{ nav.property_name }} is null ? null : new {{ nav.mapper_class_name }}().CreateEditModel(entity.{{ nav.property_name }});
 {{ end }}{{ end }}{{ end }}            OnEditModelLoaded(entity, editModel);
         });
 

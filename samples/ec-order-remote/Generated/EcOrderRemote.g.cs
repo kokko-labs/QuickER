@@ -5639,7 +5639,8 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
         }
         catch
         {
-            await transaction.RollbackAsync(cancellationToken);
+            // Roll back with CancellationToken.None: a canceled token must not interrupt the rollback or mask the original exception.
+            await transaction.RollbackAsync(CancellationToken.None);
             throw;
         }
     }
@@ -5734,7 +5735,8 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
         }
         catch
         {
-            await transaction.RollbackAsync(cancellationToken);
+            // Roll back with CancellationToken.None: a canceled token must not interrupt the rollback or mask the original exception.
+            await transaction.RollbackAsync(CancellationToken.None);
             throw;
         }
     }
@@ -5807,7 +5809,8 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
         }
         catch
         {
-            await transaction.RollbackAsync(cancellationToken);
+            // Roll back with CancellationToken.None: a canceled token must not interrupt the rollback or mask the original exception.
+            await transaction.RollbackAsync(CancellationToken.None);
             throw;
         }
     }
@@ -6102,9 +6105,19 @@ public sealed class SqlQuery<TEntity>
         return this;
     }
 
-    /// <summary>Sets the maximum number of rows to fetch.</summary>
+    /// <summary>Sets the maximum number of rows to fetch (must be greater than zero).</summary>
     public SqlQuery<TEntity> Take(int count)
     {
+        // Zero and negative values are rejected up front: dialects disagree on what they mean (SQL Server requires a fetch count greater than zero
+        // while SQLite treats a negative LIMIT as "no limit"), and fetching zero rows has no meaningful use (skip the query instead).
+        if (count <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(count),
+                "The number of rows to fetch must be greater than zero."
+            );
+        }
+
         _take = count;
         return this;
     }
@@ -6112,6 +6125,15 @@ public sealed class SqlQuery<TEntity>
     /// <summary>Sets the number of leading rows to skip.</summary>
     public SqlQuery<TEntity> Skip(int count)
     {
+        // Negative values are rejected up front: dialects disagree on what they mean (SQL Server raises an error, SQLite clamps a negative OFFSET to zero).
+        if (count < 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(count),
+                "The number of rows to skip must not be negative."
+            );
+        }
+
         _skip = count;
         return this;
     }
@@ -6577,7 +6599,8 @@ internal sealed class SqliteSqlQueryExecutor<TEntity>(ISqlConnectionFactory conn
         }
         catch
         {
-            await transaction.RollbackAsync(cancellationToken);
+            // Roll back with CancellationToken.None: a canceled token must not interrupt the rollback or mask the original exception.
+            await transaction.RollbackAsync(CancellationToken.None);
             throw;
         }
     }

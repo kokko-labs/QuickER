@@ -322,7 +322,7 @@ public sealed class EditModelLifecycleTests
         CustomerEditModel? orderParent = m.Orders[0].ParentModel;
         orderParent.Should().BeSameAs(m);
 
-        CustomerEditModel? profileParent = m.CustomerProfile.ParentModel;
+        CustomerEditModel? profileParent = m.CustomerProfile!.ParentModel;
         profileParent.Should().BeSameAs(m);
     }
 
