@@ -8,7 +8,7 @@ using QuickER.AI.UI.Resources;
 namespace QuickER.AI.UI;
 
 /// <summary>
-/// AI チャット系ダイアログの「接続方式タブ（API キー接続 / Codex 接続 / Claude Code 接続）」の
+/// AI チャット系ダイアログの「接続方式タブ（API キー接続 / Codex 接続 / Claude Code 接続 / Copilot 接続）」の
 /// 状態と永続化を束ねる共通 VM 部品。AiChatDialog / MockGenerationDialog の両方がコンポジションで保持する。
 /// </summary>
 /// <remarks>
@@ -101,6 +101,9 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
     /// <summary>Claude Code 接続タブが選択されているか</summary>
     public bool IsClaudeCodeBackend => SelectedBackend == ErChatBackendKind.ClaudeCode;
 
+    /// <summary>GitHub Copilot 接続タブが選択されているか</summary>
+    public bool IsCopilotBackend => SelectedBackend == ErChatBackendKind.Copilot;
+
     // ── API キー接続タブ ──
 
     [ObservableProperty]
@@ -187,6 +190,45 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
     public IReadOnlyList<string> ClaudeCodeModelCandidates { get; } =
         AiModelCatalog.ClaudeCodeModels;
 
+    // ── GitHub Copilot 接続タブ（状態の置き場のみ。更新経路は親の責務） ──
+
+    /// <summary>使用するモデル ID（空なら Copilot CLI の既定モデルに任せる＝既定値）</summary>
+    [ObservableProperty]
+    private string _copilotModel = string.Empty;
+
+    [ObservableProperty]
+    private string _copilotStatusSummary = Strings.Connection_CopilotStatusUnverified;
+
+    [ObservableProperty]
+    private ConnectionHealth _copilotStatusLevel = ConnectionHealth.Pending;
+
+    [ObservableProperty]
+    private string _copilotGuidance = Strings.Connection_CopilotGuidanceDefault;
+
+    private IReadOnlyList<string> _copilotAvailableModels = [];
+
+    /// <summary>
+    /// 接続確立後にエンジンが実行時列挙したモデル ID の一覧（親が
+    /// <see cref="CopilotChatEngine.AvailableModels"/> から流し込む）。
+    /// Copilot は静的カタログを持たないため、これが候補の上段（削除不可）になる。
+    /// </summary>
+    public IReadOnlyList<string> CopilotAvailableModels
+    {
+        get => _copilotAvailableModels;
+        set
+        {
+            _copilotAvailableModels = value ?? [];
+            OnPropertyChanged();
+            RefreshCopilotModelCandidates();
+        }
+    }
+
+    /// <summary>
+    /// Copilot モデル候補。実行時列挙（削除不可）を上に固定し、その下へ列挙に無いモデルの
+    /// MRU 履歴（× で削除可能）を並べる。未接続でも直近使ったモデルを選べるようにするための 2 層構成。
+    /// </summary>
+    public ObservableCollection<ModelCandidate> CopilotModelCandidates { get; } = new();
+
     /// <summary>現在のプロバイダーに対応する API キー保存名（プロバイダーごとに別スロットで保持する）</summary>
     private string? CurrentApiKeyStoreName =>
         ApiProvider switch
@@ -224,6 +266,8 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
             : settings.CodexAppServer.Model;
 
         ClaudeCodeModel = settings.ClaudeCode.Model;
+        CopilotModel = settings.Copilot.Model;
+        RefreshCopilotModelCandidates();
 
         var ui = settings.UiFor(_dialogKind);
         InitialBackend = ui.ParseLastBackend() ?? ErChatBackendKind.ApiKey;
@@ -273,6 +317,12 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
     /// </summary>
     private void RefreshApiModelCandidates()
     {
+        // 候補の Clear で編集可能 ComboBox が選択中項目を失い、Text（＝双方向バインドの ApiModel）を
+        // 空へ押し戻すことがあるため、再構築の前に退避して最後に復元する（成功ターン後の MRU 記録・
+        // 履歴の × 削除のどの経路でも選択値を保つ。プロバイダー切替の既定モデルは本メソッドの後で
+        // 明示代入されるため復元と両立する）
+        var current = ApiModel;
+
         ApiModelCandidates.Clear();
 
         foreach (var m in CurrentApiCatalog)
@@ -294,13 +344,16 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
 
             ApiModelCandidates.Add(new ModelCandidate(m, IsRemovable: true));
         }
+
+        ApiModel = current;
     }
 
     /// <summary>
     /// チャットのターンが成功したときに、使用中のモデルを MRU 履歴へ記録する。
     /// ①API キー接続 → そのプロバイダーの静的カタログに無いモデルのみ API 履歴（プロバイダ別）、
-    /// ②Codex 接続かつ非 openai プロバイダー → Codex 履歴（プロバイダ別）に記録する。
-    /// どちらの条件にも当たらなければ何もしない
+    /// ②Codex 接続かつ非 openai プロバイダー → Codex 履歴（プロバイダ別）、
+    /// ③Copilot 接続 → Copilot 履歴（固定キー）に記録する。
+    /// どれにも当たらなければ何もしない
     /// （Claude Code バックエンド等の成功ターンで無条件に呼ばれても安全）。
     /// </summary>
     public void RecordSuccessfulModel()
@@ -308,6 +361,12 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
         if (SelectedBackend == ErChatBackendKind.Codex)
         {
             RecordSuccessfulCodexModel();
+            return;
+        }
+
+        if (SelectedBackend == ErChatBackendKind.Copilot)
+        {
+            RecordSuccessfulCopilotModel();
             return;
         }
 
@@ -346,9 +405,6 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
             return;
         }
 
-        // 選択中の項目を削除すると ComboBox が Text（＝双方向バインドの ApiModel）を消すため、退避して後で復元する
-        var current = ApiModel;
-
         var settings = _settingsStore.Load();
 
         if (settings.ApiModelHistory.Remove(ApiProviderKey, model))
@@ -356,8 +412,8 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
             _settingsStore.Save(settings);
         }
 
+        // 選択中の項目を消しても Text（＝双方向バインドの ApiModel）が保たれる（再構築側が退避・復元する）
         RefreshApiModelCandidates();
-        ApiModel = current;
     }
 
     /// <summary>
@@ -393,9 +449,6 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
             return;
         }
 
-        // 選択中の項目を削除すると ComboBox が Text（＝双方向バインドの CodexModel）を消すため、退避して後で復元する
-        var current = CodexModel;
-
         var settings = _settingsStore.Load();
 
         if (settings.CodexModelHistory.Remove(CodexModelProvider?.Trim() ?? string.Empty, model))
@@ -403,8 +456,101 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
             _settingsStore.Save(settings);
         }
 
+        // 選択中の項目を消しても Text（＝双方向バインドの CodexModel）が保たれる（再構築側が退避・復元する）
         RefreshCodexModelCandidates();
-        CodexModel = current;
+    }
+
+    /// <summary>
+    /// Copilot 接続の成功ターンで使用モデルを MRU 履歴（固定キー）へ記録する。
+    /// Copilot は静的カタログを持たず候補が接続後にしか判らないため、実行時列挙に載っているモデルも
+    /// 区別せず記録する（未接続時に直近使ったモデルを候補として出せるようにするため）。
+    /// </summary>
+    private void RecordSuccessfulCopilotModel()
+    {
+        // 空＝CLI 既定モデルに任せる指定なので、記録すべきモデル名が無い
+        if (string.IsNullOrWhiteSpace(CopilotModel))
+        {
+            return;
+        }
+
+        // 共有ファイルは両ダイアログで書き換え合うため、記録直前に最新を読み直し、
+        // 該当セクションだけ変更して全体を書き戻す（他セクションを消さない）
+        var settings = _settingsStore.Load();
+
+        if (
+            settings.CopilotModelHistory.Touch(
+                CopilotSettings.HistoryProviderKey,
+                CopilotModel.Trim()
+            )
+        )
+        {
+            _settingsStore.Save(settings);
+        }
+
+        RefreshCopilotModelCandidates();
+    }
+
+    /// <summary>指定した Copilot モデルを履歴から個別削除する（ドロップダウン項目の × ボタン）</summary>
+    /// <param name="model">削除するモデル名（項目の Name）</param>
+    [RelayCommand]
+    private void RemoveCopilotModelHistory(string? model)
+    {
+        if (string.IsNullOrWhiteSpace(model))
+        {
+            return;
+        }
+
+        var settings = _settingsStore.Load();
+
+        if (settings.CopilotModelHistory.Remove(CopilotSettings.HistoryProviderKey, model))
+        {
+            _settingsStore.Save(settings);
+        }
+
+        // 選択中の項目を消しても Text（＝双方向バインドの CopilotModel）が保たれる（再構築側が退避・復元する）
+        RefreshCopilotModelCandidates();
+    }
+
+    /// <summary>
+    /// Copilot のモデル候補を再構築する。実行時列挙（削除不可）を上に固定し、
+    /// その下へ列挙に無いモデルの MRU 履歴（× で削除可能）を追加する
+    /// （両ダイアログ共有ファイルの最新を反映するため都度 Load する）。
+    /// </summary>
+    private void RefreshCopilotModelCandidates()
+    {
+        // 候補の Clear で編集可能 ComboBox が選択中項目を失い、Text（＝双方向バインドの CopilotModel）を
+        // 空へ押し戻すことがあるため、再構築の前に退避して最後に復元する。Copilot は成功ターンごとに
+        // MRU 記録→再構築が走る（静的カタログが無く常に記録する）ため、復元しないと
+        // 「チャットするたびに選択モデルが空へ戻る」ことになる
+        var current = CopilotModel;
+
+        CopilotModelCandidates.Clear();
+
+        foreach (var m in CopilotAvailableModels)
+        {
+            CopilotModelCandidates.Add(new ModelCandidate(m, IsRemovable: false));
+        }
+
+        foreach (
+            var m in _settingsStore
+                .Load()
+                .CopilotModelHistory.ModelsFor(CopilotSettings.HistoryProviderKey)
+        )
+        {
+            // 実行時列挙と同名（大文字小文字問わず）の履歴は表示しない（列挙側を優先。ファイル上の履歴には残る）
+            if (
+                CopilotModelCandidates.Any(c =>
+                    string.Equals(c.Name, m, StringComparison.OrdinalIgnoreCase)
+                )
+            )
+            {
+                continue;
+            }
+
+            CopilotModelCandidates.Add(new ModelCandidate(m, IsRemovable: true));
+        }
+
+        CopilotModel = current;
     }
 
     /// <summary>接続タブ関連の設定を保存する（親の SaveSettings から呼ぶ）</summary>
@@ -424,6 +570,8 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
         {
             Model = ClaudeCodeModel?.Trim() ?? string.Empty,
         };
+
+        settings.Copilot = new CopilotSettings { Model = CopilotModel?.Trim() ?? string.Empty };
 
         var ui = settings.UiFor(_dialogKind);
         ui.LastBackend = SelectedBackend.ToString();
@@ -477,22 +625,36 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
     /// </summary>
     private void RefreshCodexModelCandidates()
     {
-        CodexModelCandidates.Clear();
+        // 候補の Clear で編集可能 ComboBox が選択中項目を失い、Text（＝双方向バインドの CodexModel）を
+        // 空へ押し戻すことがあるため、再構築の前に退避して最後に復元する（成功ターン後の MRU 記録・
+        // 履歴の × 削除・プロバイダー切替のどの経路でも選択値を保つ。手入力の自由テキストは従来から
+        // 切替後も残るため、リスト選択だけ消える非対称の解消でもある）
+        var current = CodexModel;
 
-        if (IsOpenAiCodexProvider)
+        try
         {
-            foreach (var m in AiModelCatalog.OpenAiModels)
+            CodexModelCandidates.Clear();
+
+            if (IsOpenAiCodexProvider)
             {
-                CodexModelCandidates.Add(new ModelCandidate(m, IsRemovable: false));
+                foreach (var m in AiModelCatalog.OpenAiModels)
+                {
+                    CodexModelCandidates.Add(new ModelCandidate(m, IsRemovable: false));
+                }
+
+                return;
             }
 
-            return;
+            // 非 openai: MRU 履歴のみ。両ダイアログ共有ファイルの最新を反映するため都度 Load する
+            foreach (var m in _settingsStore.Load().CodexModelHistory.ModelsFor(CodexModelProvider))
+            {
+                CodexModelCandidates.Add(new ModelCandidate(m, IsRemovable: true));
+            }
         }
-
-        // 非 openai: MRU 履歴のみ。両ダイアログ共有ファイルの最新を反映するため都度 Load する
-        foreach (var m in _settingsStore.Load().CodexModelHistory.ModelsFor(CodexModelProvider))
+        finally
         {
-            CodexModelCandidates.Add(new ModelCandidate(m, IsRemovable: true));
+            // openai の早期 return を含む全経路で復元する
+            CodexModel = current;
         }
     }
 
@@ -500,10 +662,11 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
 
     partial void OnSelectedBackendChanged(ErChatBackendKind value)
     {
-        // Is* 3 通知（エンジン差し替え・readiness 再評価は親が PropertyChanged 購読で行う）
+        // Is* 4 通知（エンジン差し替え・readiness 再評価は親が PropertyChanged 購読で行う）
         OnPropertyChanged(nameof(IsApiKeyBackend));
         OnPropertyChanged(nameof(IsCodexBackend));
         OnPropertyChanged(nameof(IsClaudeCodeBackend));
+        OnPropertyChanged(nameof(IsCopilotBackend));
     }
 
     partial void OnApiProviderChanged(AiProvider value)

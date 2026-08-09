@@ -665,48 +665,8 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
     }
 
     /// <summary>PATH から claude 実行ファイルを解決する（見つからなければ null）</summary>
-    private static string? ResolveExecutablePath()
-    {
-        var pathValue = Environment.GetEnvironmentVariable("PATH");
-
-        if (string.IsNullOrEmpty(pathValue))
-        {
-            return null;
-        }
-
-        string[] candidates = OperatingSystem.IsWindows()
-            ? ["claude.exe", "claude.cmd", "claude.bat", "claude"]
-            : ["claude"];
-
-        foreach (var directory in pathValue.Split(Path.PathSeparator))
-        {
-            if (string.IsNullOrWhiteSpace(directory))
-            {
-                continue;
-            }
-
-            foreach (var candidate in candidates)
-            {
-                string fullPath;
-
-                try
-                {
-                    fullPath = Path.Combine(directory.Trim(), candidate);
-                }
-                catch (ArgumentException)
-                {
-                    continue;
-                }
-
-                if (File.Exists(fullPath))
-                {
-                    return fullPath;
-                }
-            }
-        }
-
-        return null;
-    }
+    /// <remarks>走査規則は codex / copilot のロケーターと共通（<see cref="PathExecutableResolver"/>）。</remarks>
+    private static string? ResolveExecutablePath() => PathExecutableResolver.Resolve("claude");
 
     /// <inheritdoc />
     public ValueTask DisposeAsync()

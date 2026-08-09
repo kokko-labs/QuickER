@@ -42,6 +42,30 @@ public class AiChatDialogViewModelTests
         return (vm, client, folder);
     }
 
+    /// <summary>
+    /// Copilot ランタイムをフェイクへ差し替えた VM を用意する（実 copilot CLI を起動させない）。
+    /// </summary>
+    private static (
+        AiChatDialogViewModel vm,
+        FakeCopilotRuntimeClient copilot,
+        string folder
+    ) CreateVmWithCopilot()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+        var copilot = new FakeCopilotRuntimeClient();
+        var keyStore = new InMemoryApiKeyStore();
+        var vm = new AiChatDialogViewModel(
+            host: null,
+            dispatcher: new SyncUiDispatcher(),
+            settingsStore: new AiSettingsStore(folder),
+            codexClient: new FakeCodexAppServerClient(),
+            copilotClient: copilot,
+            apiKeyLoader: keyStore.Load,
+            apiKeySaver: keyStore.Save
+        );
+        return (vm, copilot, folder);
+    }
+
     private static void Cleanup(string folder)
     {
         if (Directory.Exists(folder))
@@ -169,6 +193,67 @@ public class AiChatDialogViewModelTests
             vm.CodexGuidance.Should().BeEmpty();
             vm.ShowCodexGuidance.Should().BeFalse();
             vm.CodexStatusLevel.Should().Be(ConnectionHealth.NeedsAction);
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>
+    /// Codex ログイン済みなら、接続解決後に状態ドットが緑（Ready）として「通知」され、
+    /// 概要が「ログイン済み（メール / プラン）」形式・ログイン済みの常時案内が出ることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 認証状態イベントは接続解決中（＝灰）の時点で発火するため、解決完了時に
+    /// <see cref="AiChatDialogViewModel.CodexStatusLevel"/> を再通知しないと、バインドされた
+    /// ドットはログイン済みでも灰のまま残る（実機報告の回帰）。値だけでなく
+    /// 「最後に通知された時点の値」を検証する。
+    /// </remarks>
+    [Fact(DisplayName = "codex ログイン済みなら接続解決後にドットが緑として通知される")]
+    public void CodexLoggedIn_NotifiesReadyStatusLevel_AfterConnectResolves()
+    {
+        var (vm, client, folder) = CreateVm();
+
+        try
+        {
+            client.NextAccountInfo = new CodexAccountInfo
+            {
+                RequiresOpenAiAuth = true,
+                AuthMode = CodexAuthMode.ChatGpt,
+                Email = "user@example.com",
+                PlanType = "plus",
+            };
+
+            // CodexStatusLevel が通知された時点の値を記録する（バインディングが観測する値の追跡）
+            var observed = new List<ConnectionHealth>();
+            vm.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName == nameof(vm.CodexStatusLevel))
+                {
+                    observed.Add(vm.CodexStatusLevel);
+                }
+            };
+
+            vm.Connection.SelectedBackend = ErChatBackendKind.Codex;
+
+            vm.CodexStatusLevel.Should().Be(ConnectionHealth.Ready);
+            observed.Should().NotBeEmpty();
+            observed[^1]
+                .Should()
+                .Be(
+                    ConnectionHealth.Ready,
+                    "最後に通知された時点の値が緑でないと、バインドされたドットは灰のまま残る"
+                );
+            vm.CodexAccountSummary.Should()
+                .Be(
+                    string.Format(
+                        QuickER.AI.Resources.Strings.Codex_Account_EmailLoggedIn,
+                        "user@example.com / plus"
+                    )
+                );
+            vm.CodexGuidance.Should().Be(QuickER.AI.Resources.Strings.Codex_Guidance_LoggedIn);
+            vm.ShowCodexGuidance.Should().BeTrue();
         }
         finally
         {
@@ -677,5 +762,214 @@ public class AiChatDialogViewModelTests
         var bytes = new byte[16];
         "%PDF-1.7"u8.CopyTo(bytes);
         return bytes;
+    }
+
+    // ── GitHub Copilot 接続タブ ──
+
+    /// <summary>
+    /// Copilot タブへ切り替えると接続が走り、状態・案内・モデル候補（実行時列挙）が接続タブへ反映され、
+    /// 会話開始が可能になることを検証する。
+    /// </summary>
+    [Fact(DisplayName = "Copilot へ切替で接続し状態とモデル候補が反映される")]
+    public void SwitchToCopilot_ConnectsAndAppliesStatusAndModels()
+    {
+        var (vm, copilot, folder) = CreateVmWithCopilot();
+
+        try
+        {
+            vm.Connection.SelectedBackend = ErChatBackendKind.Copilot;
+
+            vm.Connection.IsCopilotBackend.Should().BeTrue();
+            copilot.IsStarted.Should().BeTrue();
+
+            // ログイン済み（フェイクの既定）なら緑・利用案内
+            vm.Connection.CopilotStatusLevel.Should().Be(ConnectionHealth.Ready);
+            vm.Connection.CopilotStatusSummary.Should()
+                .Be(
+                    string.Format(
+                        QuickER.AI.Resources.Strings.Copilot_Status_LoggedInAs,
+                        copilot.AuthInfo.Login
+                    )
+                );
+            vm.Connection.CopilotGuidance.Should()
+                .Be(QuickER.AI.Resources.Strings.Copilot_Guidance_LoggedIn);
+
+            // 静的カタログを持たないため、候補は実行時列挙（削除不可）で埋まる
+            vm.Connection.CopilotModelCandidates.Select(c => c.Name)
+                .Should()
+                .Equal(copilot.Models);
+            vm.Connection.CopilotModelCandidates.Should().OnlyContain(c => !c.IsRemovable);
+
+            vm.CanStartConversation.Should().BeTrue();
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>
+    /// copilot CLI 未検出のとき、赤ドット・未検出サマリー・インストール案内になり、
+    /// プロセス起動を試みず会話開始も不可であることを検証する（Codex 未検出と同じ扱い）。
+    /// </summary>
+    [Fact(DisplayName = "copilot 未検出なら赤・インストール案内・起動を試みない")]
+    public void CopilotCliMissing_ShowsInstallGuidance_AndDoesNotStart()
+    {
+        var (vm, copilot, folder) = CreateVmWithCopilot();
+
+        try
+        {
+            copilot.Available = false;
+
+            vm.Connection.SelectedBackend = ErChatBackendKind.Copilot;
+
+            copilot.IsStarted.Should().BeFalse("未検出ならプロセス起動を試みない");
+            vm.Connection.CopilotStatusLevel.Should().Be(ConnectionHealth.NeedsAction);
+            vm.Connection.CopilotStatusSummary.Should()
+                .Be(QuickER.AI.Resources.Strings.Copilot_Status_NotFound);
+            vm.Connection.CopilotGuidance.Should()
+                .Be(QuickER.AI.Resources.Strings.Copilot_Guidance_Install);
+            vm.CanStartConversation.Should().BeFalse();
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>接続タブのモデル選択が Copilot エンジンへ伝わり、セッション生成オプションへ載ることを検証する</summary>
+    [Fact(DisplayName = "Copilot のモデル選択がセッション生成へ渡る")]
+    public void CopilotModelSelection_FlowsIntoSessionOptions()
+    {
+        var (vm, copilot, folder) = CreateVmWithCopilot();
+
+        try
+        {
+            vm.Connection.SelectedBackend = ErChatBackendKind.Copilot;
+            vm.Connection.CopilotModel = "claude-sonnet-4.5";
+
+            vm.StartConversationCommand.Execute(null);
+
+            copilot.LastSessionOptions.Should().NotBeNull();
+            copilot.LastSessionOptions!.Model.Should().Be("claude-sonnet-4.5");
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>Copilot バックエンドでは添付が画像のみに制限されることを検証する</summary>
+    [Fact(DisplayName = "Copilot では添付範囲が画像のみ")]
+    public void AttachmentSupport_CopilotBackend_IsImagesOnly()
+    {
+        var (vm, _, folder) = CreateVmWithCopilot();
+
+        try
+        {
+            vm.Connection.SelectedBackend = ErChatBackendKind.Copilot;
+
+            vm.Attachments.Support.Should().Be(AttachmentSupport.Images);
+            vm.Attachments.Support.Allows(ChatAttachmentKind.Pdf).Should().BeFalse();
+            vm.Attachments.Support.Allows(ChatAttachmentKind.Text).Should().BeFalse();
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>
+    /// Copilot の成功ターン（送信 → アイドル復帰）で、使用モデルが Copilot 履歴へ記録され
+    /// 候補にも × 付きで現れることをエンドツーエンドで検証する。
+    /// </summary>
+    [Fact(DisplayName = "Copilot の成功ターンで使用モデルが履歴へ記録される")]
+    public void CopilotSuccessfulTurn_RecordsCopilotHistory()
+    {
+        var (vm, copilot, folder) = CreateVmWithCopilot();
+
+        try
+        {
+            vm.Connection.SelectedBackend = ErChatBackendKind.Copilot;
+            // 実行時列挙に無い（手入力の）モデルを使い、履歴側の候補として現れることを確かめる
+            vm.Connection.CopilotModel = "mru-copilot-model";
+
+            vm.StartConversationCommand.Execute(null);
+            vm.UserInput = "本のテーブルを作って";
+            vm.SendMessageCommand.Execute(null);
+            copilot.Sends.Should().ContainSingle();
+
+            // アイドル復帰＝ターン成功
+            copilot.RaiseIdle();
+
+            var reloaded = new AiSettingsStore(folder).Load().CopilotModelHistory;
+            reloaded
+                .ModelsFor(CopilotSettings.HistoryProviderKey)
+                .Should()
+                .Equal("mru-copilot-model");
+            vm.Connection.CopilotModelCandidates.Should()
+                .Contain(c => c.Name == "mru-copilot-model" && c.IsRemovable);
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>中断コマンドが Copilot エンジン経由でランタイムの中断を呼ぶことを検証する</summary>
+    [Fact(DisplayName = "Copilot の中断がランタイムへ伝わる")]
+    public void CopilotInterrupt_CallsRuntimeAbort()
+    {
+        var (vm, copilot, folder) = CreateVmWithCopilot();
+
+        try
+        {
+            vm.Connection.SelectedBackend = ErChatBackendKind.Copilot;
+            vm.StartConversationCommand.Execute(null);
+            vm.UserInput = "本のテーブルを作って";
+            vm.SendMessageCommand.Execute(null);
+
+            vm.InterruptCommand.Execute(null);
+
+            copilot.AbortCallCount.Should().Be(1);
+
+            // 中断によるアイドル復帰はエラーではなく「中断」として完了する
+            copilot.RaiseIdle(aborted: true);
+            vm.IsTurnInProgress.Should().BeFalse();
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>Copilot タブの選択が保存され、次回構築時の InitialBackend として復元されることを検証する</summary>
+    [Fact(DisplayName = "Copilot タブの選択が保存・復元される")]
+    public void SaveSettings_PersistsCopilotBackend()
+    {
+        var (vm, _, folder) = CreateVmWithCopilot();
+
+        try
+        {
+            vm.TryChangeBackend(ErChatBackendKind.Copilot).Should().BeTrue();
+            vm.SaveSettings();
+
+            var keyStore = new InMemoryApiKeyStore();
+            var restored = new AiChatDialogViewModel(
+                host: null,
+                dispatcher: new SyncUiDispatcher(),
+                settingsStore: new AiSettingsStore(folder),
+                codexClient: new FakeCodexAppServerClient(),
+                copilotClient: new FakeCopilotRuntimeClient(),
+                apiKeyLoader: keyStore.Load,
+                apiKeySaver: keyStore.Save
+            );
+
+            restored.Connection.InitialBackend.Should().Be(ErChatBackendKind.Copilot);
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
     }
 }

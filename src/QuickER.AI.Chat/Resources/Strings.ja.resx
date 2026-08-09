@@ -65,7 +65,7 @@
     <value>AI チャット</value>
   </data>
   <data name="Chat_TabApiKey" xml:space="preserve">
-    <value>API キー接続</value>
+    <value>API キー</value>
   </data>
   <data name="Chat_Provider" xml:space="preserve">
     <value>プロバイダー</value>
@@ -95,10 +95,10 @@
     <value>OpenAI 互換エンドポイント（Ollama / LM Studio / vLLM 等）</value>
   </data>
   <data name="Chat_TabCodex" xml:space="preserve">
-    <value>Codex 接続</value>
+    <value>Codex</value>
   </data>
   <data name="Chat_CodexLoginGuidance" xml:space="preserve">
-    <value>ChatGPT アカウントでログインしてください。API キーで利用する場合は「API キー接続」タブを使用します。</value>
+    <value>ChatGPT アカウントでログインしてください。API キーで利用する場合は「API キー」タブを使用します。</value>
   </data>
   <data name="Chat_CodexLoginButton" xml:space="preserve">
     <value>ChatGPT ブラウザでログイン</value>
@@ -107,10 +107,16 @@
     <value>ログアウト</value>
   </data>
   <data name="Chat_TabClaude" xml:space="preserve">
-    <value>Claude 接続</value>
+    <value>Claude Code</value>
   </data>
   <data name="Chat_Model" xml:space="preserve">
     <value>モデル</value>
+  </data>
+  <data name="Chat_TabCopilot" xml:space="preserve">
+    <value>Copilot</value>
+  </data>
+  <data name="Chat_CopilotModelTooltip" xml:space="preserve">
+    <value>モデル ID は接続後に一覧されます。空のままにすると GitHub Copilot CLI の既定モデルを使います。</value>
   </data>
   <data name="Chat_ChatHeader" xml:space="preserve">
     <value>チャット</value>
@@ -173,7 +179,7 @@
     <value>AIチャット</value>
   </data>
   <data name="Toolbar_OpenAiChatTooltip" xml:space="preserve">
-    <value>AI チャットで ER 図を作成・編集（API キー / Codex 接続）</value>
+    <value>AI チャットで ER 図を作成・編集（API キー / Codex / Claude Code / Copilot）</value>
   </data>
   <data name="ErDesign_CommonDesignPrinciples" xml:space="preserve">
     <value>- 第3正規形を意識したテーブル設計を行う。

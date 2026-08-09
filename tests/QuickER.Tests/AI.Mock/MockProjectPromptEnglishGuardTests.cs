@@ -162,9 +162,9 @@ public class MockProjectPromptEnglishGuardTests
 
     /// <summary>Codex 保険の自動続行ナッジに CJK が無いことを検証する</summary>
     [Fact(DisplayName = "Codex 自動続行ナッジに日本語（CJK）が含まれない")]
-    public void CodexContinuationNudge_ContainsNoCjk()
+    public void ContinuationNudge_ContainsNoCjk()
     {
-        AssertNoCjk(MockProjectPromptBuilder.CodexContinuationNudge, "CodexContinuationNudge");
+        AssertNoCjk(MockProjectPromptBuilder.ContinuationNudge, "ContinuationNudge");
     }
 
     /// <summary>ASCII のみの ER 図から起こしたスキーマ記述に CJK が無いことを検証する（空の図も含む）</summary>

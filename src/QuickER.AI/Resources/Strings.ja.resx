@@ -272,16 +272,19 @@
     <value>エラーが発生しました: {0}</value>
   </data>
   <data name="Codex_Account_ApiKey" xml:space="preserve">
-    <value>API キーでログイン済み</value>
+    <value>ログイン済み（API キー）</value>
   </data>
   <data name="Codex_Account_ChatGpt" xml:space="preserve">
-    <value>ChatGPT でログイン済み</value>
+    <value>ログイン済み（ChatGPT）</value>
   </data>
   <data name="Codex_Account_ChatGptWithPlan" xml:space="preserve">
-    <value>ChatGPT でログイン済み ({0})</value>
+    <value>ログイン済み（ChatGPT / {0}）</value>
   </data>
   <data name="Codex_Account_EmailLoggedIn" xml:space="preserve">
-    <value>{0} でログイン済み</value>
+    <value>ログイン済み（{0}）</value>
+  </data>
+  <data name="Codex_Guidance_LoggedIn" xml:space="preserve">
+    <value>ローカルの Codex CLI のログインをそのまま使用します。</value>
   </data>
   <data name="Codex_Account_Connected" xml:space="preserve">
     <value>接続済み</value>
@@ -324,5 +327,92 @@
   </data>
   <data name="Codex_ServerNotStarted" xml:space="preserve">
     <value>Codex App Server はまだ起動していません。</value>
+  </data>
+  <data name="Copilot_Guidance_Pending" xml:space="preserve">
+    <value>「再確認」を押すとログイン状態を確認できます。</value>
+  </data>
+  <data name="Copilot_Guidance_Install" xml:space="preserve">
+    <value>GitHub Copilot CLI をインストールし、PATH を通してください。</value>
+  </data>
+  <data name="Copilot_Guidance_LoggedIn" xml:space="preserve">
+    <value>ローカルの GitHub Copilot CLI をそのまま使用します。</value>
+  </data>
+  <data name="Copilot_Guidance_NotLoggedIn" xml:space="preserve">
+    <value>ターミナルで copilot を起動し /login でログイン後、「再確認」を押してください。</value>
+  </data>
+  <data name="Copilot_Guidance_Inconclusive" xml:space="preserve">
+    <value>しばらくして「再確認」を押してください。</value>
+  </data>
+  <data name="Copilot_Status_Unconfirmed" xml:space="preserve">
+    <value>未確認</value>
+  </data>
+  <data name="Copilot_Status_NotFound" xml:space="preserve">
+    <value>GitHub Copilot CLI が見つかりません</value>
+  </data>
+  <data name="Copilot_Status_NotConnected" xml:space="preserve">
+    <value>未接続</value>
+  </data>
+  <data name="Copilot_Status_LoggedIn" xml:space="preserve">
+    <value>ログイン済み</value>
+  </data>
+  <data name="Copilot_Status_LoggedInAs" xml:space="preserve">
+    <value>ログイン済み（{0}）</value>
+  </data>
+  <data name="Copilot_Status_NotLoggedIn" xml:space="preserve">
+    <value>未ログイン</value>
+  </data>
+  <data name="Copilot_Status_Inconclusive" xml:space="preserve">
+    <value>ログイン状態を確認できませんでした</value>
+  </data>
+  <data name="Copilot_CliNotFound" xml:space="preserve">
+    <value>copilot CLI が見つかりません。GitHub Copilot CLI をインストールしてください。</value>
+  </data>
+  <data name="Copilot_NotConnected" xml:space="preserve">
+    <value>GitHub Copilot ランタイムはまだ起動していません。</value>
+  </data>
+  <data name="Copilot_NoSession" xml:space="preserve">
+    <value>GitHub Copilot の会話がまだ開始されていません。</value>
+  </data>
+  <data name="Copilot_ConnectFailed" xml:space="preserve">
+    <value>接続に失敗しました: {0}</value>
+  </data>
+  <data name="Copilot_AuthStateFailed" xml:space="preserve">
+    <value>認証状態の取得に失敗しました: {0}</value>
+  </data>
+  <data name="Copilot_ModelListFailed" xml:space="preserve">
+    <value>モデル一覧の取得に失敗しました: {0}</value>
+  </data>
+  <data name="Copilot_StartingConversation" xml:space="preserve">
+    <value>会話を開始中...</value>
+  </data>
+  <data name="Copilot_StartedConversation" xml:space="preserve">
+    <value>会話を開始しました。</value>
+  </data>
+  <data name="Copilot_StartConversationFailed" xml:space="preserve">
+    <value>会話の開始に失敗しました: {0}</value>
+  </data>
+  <data name="Copilot_CouldNotStartConversation" xml:space="preserve">
+    <value>会話を開始できませんでした。</value>
+  </data>
+  <data name="Copilot_Processing" xml:space="preserve">
+    <value>GitHub Copilot が処理中です...</value>
+  </data>
+  <data name="Copilot_InterruptFailed" xml:space="preserve">
+    <value>処理の中断に失敗しました: {0}</value>
+  </data>
+  <data name="Copilot_ToolResponseSendFailed" xml:space="preserve">
+    <value>ツール結果の送信に失敗しました: {0}</value>
+  </data>
+  <data name="Copilot_PermissionDeclined" xml:space="preserve">
+    <value>GitHub Copilot からの許可要求を拒否しました。ER 図の編集には不要な操作のため、安全側で拒否しています。</value>
+  </data>
+  <data name="Copilot_OnlyImageAttachments" xml:space="preserve">
+    <value>GitHub Copilot 接続は画像の添付のみに対応しています。</value>
+  </data>
+  <data name="Copilot_UnknownError" xml:space="preserve">
+    <value>不明なエラーが発生しました。</value>
+  </data>
+  <data name="Copilot_ErrorOccurred" xml:space="preserve">
+    <value>エラーが発生しました: {0}</value>
   </data>
 </root>

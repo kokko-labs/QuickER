@@ -497,14 +497,35 @@
           >
             <ui:ConnectionStatusPanel.Body>
               <StackPanel>
-                <!-- 状態依存の案内（CLI 未検出時のインストール案内・接続失敗理由）。空なら行ごと隠す -->
-                <TextBlock
-                  Margin="0,10,0,0"
-                  Foreground="{StaticResource MutedText}"
-                  TextWrapping="Wrap"
-                  Text="{Binding CodexGuidance}"
-                  Visibility="{Binding ShowCodexGuidance, Converter={StaticResource BoolToVisibilityConverter}}"
-                />
+                <!--
+                  状態依存の案内（ログイン済みの常時案内・CLI 未検出時のインストール案内・接続失敗理由）と、
+                  ログイン済み時のログアウトを同じ行に置く（左＝案内文・右端＝ボタン）。
+                  余白は子要素側に持たせ、両方が非表示のとき行が余白ごと消えるようにする。
+                -->
+                <Grid>
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                  </Grid.ColumnDefinitions>
+                  <TextBlock
+                    Grid.Column="0"
+                    Margin="0,10,0,0"
+                    VerticalAlignment="Center"
+                    Foreground="{StaticResource MutedText}"
+                    TextWrapping="Wrap"
+                    Text="{Binding CodexGuidance}"
+                    Visibility="{Binding ShowCodexGuidance, Converter={StaticResource BoolToVisibilityConverter}}"
+                  />
+                  <Button
+                    Grid.Column="1"
+                    Margin="8,10,0,0"
+                    VerticalAlignment="Center"
+                    Style="{StaticResource SecondaryButton}"
+                    Content="{x:Static res:Strings.Chat_Logout}"
+                    Command="{Binding CodexLogoutCommand}"
+                    Visibility="{Binding ShowCodexLogout, Converter={StaticResource BoolToVisibilityConverter}}"
+                  />
+                </Grid>
                 <!-- 未ログイン: 案内 + ChatGPT ログイン -->
                 <StackPanel
                   Margin="0,10,0,0"
@@ -523,15 +544,6 @@
                     Command="{Binding CodexStartChatGptLoginCommand}"
                   />
                 </StackPanel>
-                <!-- ログイン済み: ログアウト -->
-                <Button
-                  Margin="0,10,0,0"
-                  HorizontalAlignment="Left"
-                  Style="{StaticResource SecondaryButton}"
-                  Content="{x:Static res:Strings.Chat_Logout}"
-                  Command="{Binding CodexLogoutCommand}"
-                  Visibility="{Binding ShowCodexLogout, Converter={StaticResource BoolToVisibilityConverter}}"
-                />
               </StackPanel>
             </ui:ConnectionStatusPanel.Body>
           </ui:ConnectionStatusPanel>
@@ -571,6 +583,77 @@
                 Foreground="{StaticResource MutedText}"
                 TextWrapping="Wrap"
                 Text="{Binding Connection.ClaudeCodeGuidance}"
+              />
+            </ui:ConnectionStatusPanel.Body>
+          </ui:ConnectionStatusPanel>
+        </StackPanel>
+      </TabItem>
+
+      <TabItem Header="{x:Static res:Strings.Chat_TabCopilot}">
+        <StackPanel Margin="16,14">
+          <Grid>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <TextBlock
+              Grid.Column="0"
+              Style="{StaticResource FieldLabel}"
+              Text="{x:Static res:Strings.Chat_Model}"
+            />
+            <!-- 候補は接続後の実行時列挙（削除不可）＋カタログ外の MRU 履歴（× で削除可能）。空＝CLI 既定 -->
+            <ComboBox
+              x:Name="CopilotModelBox"
+              Grid.Column="1"
+              Padding="6,4"
+              IsEditable="True"
+              TextSearch.TextPath="Name"
+              Text="{Binding Connection.CopilotModel, UpdateSourceTrigger=PropertyChanged}"
+              ItemsSource="{Binding Connection.CopilotModelCandidates}"
+              ToolTip="{x:Static res:Strings.Chat_CopilotModelTooltip}"
+            >
+              <!-- ドロップダウン項目を横いっぱいに広げ、× ボタンを右端へ寄せる -->
+              <ComboBox.ItemContainerStyle>
+                <Style TargetType="ComboBoxItem">
+                  <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                </Style>
+              </ComboBox.ItemContainerStyle>
+              <ComboBox.ItemTemplate>
+                <DataTemplate>
+                  <DockPanel LastChildFill="True">
+                    <!-- 右端の × は履歴由来（IsRemovable=true）の候補だけ表示し、履歴から個別削除する -->
+                    <Button
+                      DockPanel.Dock="Right"
+                      Content="✕"
+                      Padding="6,0"
+                      Background="Transparent"
+                      BorderThickness="0"
+                      Cursor="Hand"
+                      Foreground="{StaticResource MutedText}"
+                      ToolTip="{x:Static res:Strings.Chat_RemoveModelFromHistory}"
+                      Visibility="{Binding IsRemovable, Converter={StaticResource BoolToVisibilityConverter}}"
+                      Command="{Binding DataContext.Connection.RemoveCopilotModelHistoryCommand, RelativeSource={RelativeSource AncestorType=ComboBox}}"
+                      CommandParameter="{Binding Name}"
+                    />
+                    <TextBlock VerticalAlignment="Center" Text="{Binding Name}" />
+                  </DockPanel>
+                </DataTemplate>
+              </ComboBox.ItemTemplate>
+            </ComboBox>
+          </Grid>
+
+          <ui:ConnectionStatusPanel
+            Margin="0,12,0,0"
+            StatusLevel="{Binding Connection.CopilotStatusLevel}"
+            SummaryText="{Binding Connection.CopilotStatusSummary}"
+            RefreshCommand="{Binding CopilotRefreshCommand}"
+          >
+            <ui:ConnectionStatusPanel.Body>
+              <TextBlock
+                Margin="0,10,0,0"
+                Foreground="{StaticResource MutedText}"
+                TextWrapping="Wrap"
+                Text="{Binding Connection.CopilotGuidance}"
               />
             </ui:ConnectionStatusPanel.Body>
           </ui:ConnectionStatusPanel>

@@ -65,7 +65,7 @@
     <value>AI Chat</value>
   </data>
   <data name="Chat_TabApiKey" xml:space="preserve">
-    <value>API Key Connection</value>
+    <value>API Key</value>
   </data>
   <data name="Chat_Provider" xml:space="preserve">
     <value>Provider</value>
@@ -95,10 +95,10 @@
     <value>OpenAI-compatible endpoint (Ollama / LM Studio / vLLM, etc.)</value>
   </data>
   <data name="Chat_TabCodex" xml:space="preserve">
-    <value>Codex Connection</value>
+    <value>Codex</value>
   </data>
   <data name="Chat_CodexLoginGuidance" xml:space="preserve">
-    <value>Please log in with your ChatGPT account. To use an API key instead, use the "API Key Connection" tab.</value>
+    <value>Please log in with your ChatGPT account. To use an API key instead, use the "API Key" tab.</value>
   </data>
   <data name="Chat_CodexLoginButton" xml:space="preserve">
     <value>Log in with ChatGPT in browser</value>
@@ -107,10 +107,16 @@
     <value>Log out</value>
   </data>
   <data name="Chat_TabClaude" xml:space="preserve">
-    <value>Claude Connection</value>
+    <value>Claude Code</value>
   </data>
   <data name="Chat_Model" xml:space="preserve">
     <value>Model</value>
+  </data>
+  <data name="Chat_TabCopilot" xml:space="preserve">
+    <value>Copilot</value>
+  </data>
+  <data name="Chat_CopilotModelTooltip" xml:space="preserve">
+    <value>Model IDs are listed once connected. Leave it blank to use the GitHub Copilot CLI default.</value>
   </data>
   <data name="Chat_ChatHeader" xml:space="preserve">
     <value>Chat</value>
@@ -173,7 +179,7 @@
     <value>AI Chat</value>
   </data>
   <data name="Toolbar_OpenAiChatTooltip" xml:space="preserve">
-    <value>Create and edit ER diagrams via AI chat (API key / Codex connection)</value>
+    <value>Create and edit ER diagrams via AI chat (API key / Codex / Claude Code / Copilot)</value>
   </data>
   <data name="ErDesign_CommonDesignPrinciples" xml:space="preserve">
     <value>- Design tables with the third normal form in mind.

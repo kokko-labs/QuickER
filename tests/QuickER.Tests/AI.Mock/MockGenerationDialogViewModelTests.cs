@@ -212,6 +212,8 @@ public class MockGenerationDialogViewModelTests
             apiKeyEngineFactory: null,
             codexEngineFactory: null,
             claudeCodeEngineFactory: (_, toolHost) => engineBox[0] = new FakeChatEngine(toolHost),
+            // Copilot バックエンドの検証でも同じ捕捉箱を使う（選択中バックエンドで呼ばれる側が変わる）
+            copilotEngineFactory: (_, toolHost) => engineBox[0] = new FakeChatEngine(toolHost),
             mockProjectGenerator: generator,
             dialogService: dialogs ?? new StubDialogService(),
             apiKeyLoader: keyStore.Load,
@@ -1747,6 +1749,138 @@ public class MockGenerationDialogViewModelTests
             vm.ApplyCodexStatusMessage("   ");
 
             vm.StatusMessage.Should().Be("先の通知");
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    // ── GitHub Copilot バックエンド ──
+
+    /// <summary>Copilot バックエンドでは添付範囲が画像のみになることを検証する</summary>
+    [Fact(DisplayName = "Copilot では添付範囲が画像のみ")]
+    public void AttachmentSupport_Copilot_IsImagesOnly()
+    {
+        var (vm, _, baseFolder, _) = CreateVm(NonEmptyDiagram());
+
+        try
+        {
+            vm.Connection.SelectedBackend = ErChatBackendKind.Copilot;
+            vm.Attachments.Support.Should().Be(AttachmentSupport.Images);
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>
+    /// Copilot バックエンドの可否がプローブ結果（<see cref="MockGenerationDialogViewModel.ApplyCopilotReadiness"/>）で
+    /// 決まり、状態・案内・モデル候補が接続タブへ流れることを検証する。
+    /// </summary>
+    [Fact(DisplayName = "Copilot の可否はプローブ結果で決まり状態が接続タブへ流れる")]
+    public void ApplyCopilotReadiness_DrivesReadinessAndConnectionState()
+    {
+        var (vm, _, baseFolder, _) = CreateVm(NonEmptyDiagram());
+
+        try
+        {
+            vm.Connection.SelectedBackend = ErChatBackendKind.Copilot;
+
+            // 未確認のうちは会話開始できない
+            vm.IsBackendReady.Should().BeFalse();
+            vm.CanStartConversation.Should().BeFalse();
+
+            vm.ApplyCopilotReadiness(
+                true,
+                "ログイン済み (octocat)",
+                ConnectionHealth.Ready,
+                string.Empty,
+                ["gpt-5", "claude-sonnet-4.5"]
+            );
+
+            vm.IsBackendReady.Should().BeTrue();
+            vm.CanStartConversation.Should().BeTrue();
+            vm.Connection.CopilotStatusSummary.Should().Be("ログイン済み (octocat)");
+            vm.Connection.CopilotStatusLevel.Should().Be(ConnectionHealth.Ready);
+            // 実行時列挙のモデルが候補（削除不可）として並ぶ
+            vm.Connection.CopilotModelCandidates.Select(c => c.Name)
+                .Should()
+                .Contain(["gpt-5", "claude-sonnet-4.5"]);
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>Copilot バックエンドで会話開始すると Copilot 用エンジンファクトリが使われることを検証する</summary>
+    [Fact(DisplayName = "Copilot バックエンドの会話は Copilot エンジンで始まる")]
+    public void StartConversation_Copilot_UsesCopilotEngineFactory()
+    {
+        var (vm, engineBox, _, baseFolder, mockFolder) = CreateVmWithGenerator(NonEmptyDiagram());
+
+        try
+        {
+            vm.Connection.SelectedBackend = ErChatBackendKind.Copilot;
+            vm.ApplyCopilotReadiness(
+                true,
+                "ログイン済み",
+                ConnectionHealth.Ready,
+                string.Empty,
+                []
+            );
+            vm.MockFolder = mockFolder;
+
+            vm.StartConversationCommand.Execute(null);
+
+            // Copilot 用ファクトリ経由でエンジンが構築されている
+            engineBox[0].Should().NotBeNull();
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>Copilot バックエンドの第 2 ステップが Copilot のモデルで生成器を呼ぶことを検証する</summary>
+    [Fact(DisplayName = "Copilot の第 2 ステップは Copilot モデルで生成する")]
+    public async Task GenerateMockProject_Copilot_PassesCopilotModel()
+    {
+        var (vm, engineBox, generator, baseFolder, mockFolder) = CreateVmWithGenerator(
+            NonEmptyDiagram()
+        );
+
+        try
+        {
+            // 画面を 1 つ作って第 2 ステップの前提（HasScreens）を満たす
+            await SaveScreenOnClaudeCode(vm, engineBox, mockFolder);
+
+            vm.Connection.SelectedBackend = ErChatBackendKind.Copilot;
+            vm.Connection.CopilotModel = "claude-sonnet-4.5";
+            vm.IsDotnetAvailable = true;
+            vm.OutputFolder = Path.Combine(baseFolder, "out");
+
+            // 画面が揃っていても未接続なら Copilot 用の理由が出る
+            vm.CanGenerateMockProject.Should().BeFalse();
+            vm.MockGenDisabledReason.Should().Be(MockStrings.Mock_DisabledReason_CopilotNotReady);
+
+            vm.ApplyCopilotReadiness(
+                true,
+                "ログイン済み",
+                ConnectionHealth.Ready,
+                string.Empty,
+                []
+            );
+
+            vm.CanGenerateMockProject.Should().BeTrue();
+            await vm.GenerateMockProjectCommand.ExecuteAsync(null);
+
+            generator.CapturedBackend.Should().Be(ErChatBackendKind.Copilot);
+            generator.CapturedModel.Should().Be("claude-sonnet-4.5");
+            // モデルプロバイダーは Codex 専用なので空のまま
+            generator.CapturedModelProvider.Should().BeEmpty();
         }
         finally
         {

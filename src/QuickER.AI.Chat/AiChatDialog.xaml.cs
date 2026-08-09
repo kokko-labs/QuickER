@@ -6,7 +6,7 @@ using QuickER.AI.UI;
 
 namespace QuickER.AI.Chat;
 
-/// <summary>AI チャット（API キー接続 / Codex 接続）の統合ウィンドウのコードビハインド</summary>
+/// <summary>AI チャット（API キー接続 / Codex 接続 / Claude Code 接続 / Copilot 接続）の統合ウィンドウのコードビハインド</summary>
 public partial class AiChatDialog : Window
 {
     /// <summary>このウィンドウの ViewModel</summary>
@@ -45,6 +45,7 @@ public partial class AiChatDialog : Window
         {
             ErChatBackendKind.Codex => 1,
             ErChatBackendKind.ClaudeCode => 2,
+            ErChatBackendKind.Copilot => 3,
             _ => 0,
         };
 
@@ -104,6 +105,7 @@ public partial class AiChatDialog : Window
         {
             1 => ErChatBackendKind.Codex,
             2 => ErChatBackendKind.ClaudeCode,
+            3 => ErChatBackendKind.Copilot,
             _ => ErChatBackendKind.ApiKey,
         };
 

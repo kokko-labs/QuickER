@@ -30,11 +30,20 @@ public class AiSettings
     /// <summary>Codex App Server の起動設定</summary>
     public CodexAppServerSettings CodexAppServer { get; set; } = new();
 
+    /// <summary>GitHub Copilot 接続の設定</summary>
+    public CopilotSettings Copilot { get; set; } = new();
+
     /// <summary>API キー接続のモデル MRU 履歴（両ダイアログ共有）</summary>
     public ProviderModelHistory ApiModelHistory { get; set; } = new();
 
     /// <summary>Codex 接続のモデル MRU 履歴（両ダイアログ共有）</summary>
     public ProviderModelHistory CodexModelHistory { get; set; } = new();
+
+    /// <summary>
+    /// GitHub Copilot 接続のモデル MRU 履歴（両ダイアログ共有。キーは
+    /// <see cref="CopilotSettings.HistoryProviderKey"/> 固定）。
+    /// </summary>
+    public ProviderModelHistory CopilotModelHistory { get; set; } = new();
 
     /// <summary>指定ダイアログの UI 状態セクションを取得する</summary>
     /// <param name="kind">対象ダイアログの種別</param>

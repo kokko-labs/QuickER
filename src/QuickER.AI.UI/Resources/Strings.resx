@@ -73,6 +73,12 @@
   <data name="Connection_ClaudeCodeGuidanceDefault" xml:space="preserve">
     <value>Click "Recheck" to verify the login status.</value>
   </data>
+  <data name="Connection_CopilotStatusUnverified" xml:space="preserve">
+    <value>Not verified</value>
+  </data>
+  <data name="Connection_CopilotGuidanceDefault" xml:space="preserve">
+    <value>Click "Recheck" to verify the login status.</value>
+  </data>
   <data name="Attachment_ClearedUnsupported" xml:space="preserve">
     <value>This connection method does not support attachments, so the attachments were cleared.</value>
   </data>
@@ -113,13 +119,13 @@
     <value>Up to {0} images per message: {1}</value>
   </data>
   <data name="Attachment_RejectPdf" xml:space="preserve">
-    <value>This connection cannot read PDF files. Please use a Claude connection: {0}</value>
+    <value>This connection cannot read PDF files. Please use Claude via API key or Claude Code: {0}</value>
   </data>
   <data name="Attachment_RejectText" xml:space="preserve">
     <value>This connection cannot read text files: {0}</value>
   </data>
   <data name="Attachment_RejectBinary" xml:space="preserve">
-    <value>This connection cannot read files other than text, images, and PDF. Please use a Claude connection: {0}</value>
+    <value>This connection cannot read files other than text, images, and PDF. Please use Claude Code: {0}</value>
   </data>
   <data name="Attachment_RejectImage" xml:space="preserve">
     <value>This connection cannot read images: {0}</value>

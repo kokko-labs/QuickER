@@ -48,9 +48,14 @@ public class AiSettingsStoreTests
                     ModelProvider = "ollama-launch",
                     Model = "gemma4:31b-cloud",
                 },
+                Copilot = new CopilotSettings { Model = "claude-sonnet-4.5" },
             };
             expected.ApiModelHistory.Touch("openai", "custom-openai");
             expected.CodexModelHistory.Touch("ollama-launch", "gemma4:31b-cloud");
+            expected.CopilotModelHistory.Touch(
+                CopilotSettings.HistoryProviderKey,
+                "claude-sonnet-4.5"
+            );
 
             store.Save(expected);
 
@@ -60,8 +65,13 @@ public class AiSettingsStoreTests
             actual.ClaudeCode.Model.Should().Be("sonnet");
             actual.CodexAppServer.ModelProvider.Should().Be("ollama-launch");
             actual.CodexAppServer.Model.Should().Be("gemma4:31b-cloud");
+            actual.Copilot.Model.Should().Be("claude-sonnet-4.5");
             actual.ApiModelHistory.ModelsFor("openai").Should().Equal("custom-openai");
             actual.CodexModelHistory.ModelsFor("ollama-launch").Should().Equal("gemma4:31b-cloud");
+            actual
+                .CopilotModelHistory.ModelsFor(CopilotSettings.HistoryProviderKey)
+                .Should()
+                .Equal("claude-sonnet-4.5");
         }
         finally
         {
@@ -96,8 +106,10 @@ public class AiSettingsStoreTests
             loaded.MockUi.LastBackend.Should().BeEmpty();
             loaded.ClaudeCode.Model.Should().BeEmpty();
             loaded.CodexAppServer.ModelProvider.Should().BeEmpty();
+            loaded.Copilot.Model.Should().BeEmpty();
             loaded.ApiModelHistory.Providers.Should().BeEmpty();
             loaded.CodexModelHistory.Providers.Should().BeEmpty();
+            loaded.CopilotModelHistory.Providers.Should().BeEmpty();
         }
         finally
         {
@@ -156,6 +168,7 @@ public class AiSettingsStoreTests
     [InlineData("ApiKey", ErChatBackendKind.ApiKey)]
     [InlineData("codex", ErChatBackendKind.Codex)]
     [InlineData("CLAUDECODE", ErChatBackendKind.ClaudeCode)]
+    [InlineData("Copilot", ErChatBackendKind.Copilot)]
     public void ParseLastBackend_ParsesKnownNames(string value, ErChatBackendKind expected)
     {
         new ChatUiSettings { LastBackend = value }

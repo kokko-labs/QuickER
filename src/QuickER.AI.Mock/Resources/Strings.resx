@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <root>
   <!--
     中立（既定）リソース＝英語。日本語は Strings.ja.resx サテライトで賦与する（ResxKeyParityTests がキー集合の一致を検証する）。
@@ -197,6 +197,9 @@ Start "+ New Conversation" in the chat on the left and send your requests for th
   <data name="Mock_DisabledReason_CodexNotReady" xml:space="preserve">
     <value>Codex is not ready. Connect and sign in on the Codex tab.</value>
   </data>
+  <data name="Mock_DisabledReason_CopilotNotReady" xml:space="preserve">
+    <value>GitHub Copilot is not ready. Connect and sign in on the Copilot tab.</value>
+  </data>
   <data name="Mock_DisabledReason_Dotnet" xml:space="preserve">
     <value>.NET SDK (dotnet) not found. Please install the .NET SDK.</value>
   </data>
@@ -266,7 +269,7 @@ An error occurred during generation: {0}
   <data name="Mock_GenerationFailedFormat" xml:space="preserve">
     <value>Mock project generation failed: {0}</value>
   </data>
-  <data name="Mock_Codex_AutoContinueNotice" xml:space="preserve">
+  <data name="Mock_AutoContinueNotice" xml:space="preserve">
     <value>
 (Detected a pending approval: continuing automatically.)
 </value>
@@ -365,6 +368,12 @@ See the log for details:
   </data>
   <data name="Mock_CodexNotLoggedIn" xml:space="preserve">
     <value>Codex is not logged in.</value>
+  </data>
+  <data name="Mock_CopilotNotLoggedIn" xml:space="preserve">
+    <value>GitHub Copilot is not logged in.</value>
+  </data>
+  <data name="Mock_CopilotModelTooltip" xml:space="preserve">
+    <value>Model IDs are listed once connected. Leave it blank to use the GitHub Copilot CLI default.</value>
   </data>
   <data name="Mock_Result_ClientFailedFormat" xml:space="preserve">
     <value>The AI backend failed: {0}. Check the log for details.</value>

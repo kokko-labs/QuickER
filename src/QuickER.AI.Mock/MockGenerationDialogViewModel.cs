@@ -36,7 +36,7 @@ public sealed record MockPreviewRequest(string FilePath, string Folder);
 /// AI モック生成ダイアログ（左チャット／右「画面一覧サイドバー＋プレビュー」）の ViewModel。
 /// </summary>
 /// <remarks>
-/// 接続方式（API キー / Codex / Claude）の選択・接続状態は <see cref="AiChatDialogViewModel"/> と
+/// 接続方式（API キー / Codex / Claude / Copilot）の選択・接続状態は <see cref="AiChatDialogViewModel"/> と
 /// 同じ構造を踏襲する。会話は「モックフォルダ」（<see cref="MockFolderStore"/>）に対して行い、画面ごとの HTML と
 /// 共有 style.css を <see cref="MockFolderDesignSession"/> のツール（save_screen / save_stylesheet /
 /// get_screen / remove_screen）で作成・更新する。プレビューはフォルダ内の実ファイルを直接表示し、
@@ -56,8 +56,9 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         IErDiagramToolHost,
         IErChatEngine
     > _claudeCodeEngineFactory;
+    private readonly Func<ErChatProfile, IErDiagramToolHost, IErChatEngine> _copilotEngineFactory;
 
-    /// <summary>接続方式タブ（API キー / Codex / Claude Code）の状態と永続化を束ねる共通 VM 部品</summary>
+    /// <summary>接続方式タブ（API キー / Codex / Claude Code / Copilot）の状態と永続化を束ねる共通 VM 部品</summary>
     public ChatConnectionSettingsViewModel Connection { get; }
 
     /// <summary>現在の生成セッション（会話開始前は null）</summary>
@@ -152,6 +153,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         {
             ErChatBackendKind.Codex => _codexReady,
             ErChatBackendKind.ClaudeCode => _claudeCodeReady,
+            ErChatBackendKind.Copilot => _copilotReady,
             _ => IsApiKeyConnectionReady,
         };
 
@@ -190,7 +192,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     /// <summary>単一 HTML を出力できるか（モックフォルダに画面が 1 つ以上あるか）</summary>
     public bool CanExportBundle => HasScreens;
 
-    // ── 第2ステップ: モックプロジェクト生成（Claude Code / Codex / API キー） ──
+    // ── 第2ステップ: モックプロジェクト生成（Claude Code / Codex / Copilot / API キー） ──
 
     /// <summary>選択可能な生成ターゲット一覧（WPF / Blazor。生成器が公開する Targets）</summary>
     public IReadOnlyList<MockProjectTarget> MockProjectTargets { get; }
@@ -280,7 +282,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
 
     /// <summary>
     /// モックプロジェクト生成を開始できるか（画面あり・選択バックエンドが ready・dotnet SDK 検出・
-    /// 出力フォルダあり／プロジェクト名が妥当・非実行中）。3 バックエンド（Claude Code / Codex / API キー）すべて可。
+    /// 出力フォルダあり／プロジェクト名が妥当・非実行中）。4 バックエンド（Claude Code / Codex / Copilot / API キー）すべて可。
     /// </summary>
     public bool CanGenerateMockProject =>
         HasScreens
@@ -297,6 +299,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     /// <summary>
     /// 選択中バックエンドがモックプロジェクト生成の実行条件（CLI 検出／認証／API キー）を満たすか。
     /// Claude Code＝claude CLI 検出・Codex＝認証プローブ結果（<see cref="ApplyCodexReadiness"/>）・
+    /// Copilot＝認証プローブ結果（<see cref="ApplyCopilotReadiness"/>）・
     /// API キー＝キー入力あり（ローカル LLM はキー任意）。
     /// </summary>
     private bool IsSelectedBackendReadyForMockGen =>
@@ -304,6 +307,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         {
             ErChatBackendKind.ClaudeCode => IsClaudeCliAvailable,
             ErChatBackendKind.Codex => _codexReady,
+            ErChatBackendKind.Copilot => _copilotReady,
             _ => IsApiKeyConnectionReady,
         };
 
@@ -330,6 +334,11 @@ public partial class MockGenerationDialogViewModel : ObservableObject
             if (Connection.SelectedBackend == ErChatBackendKind.Codex && !_codexReady)
             {
                 return Strings.Mock_DisabledReason_CodexNotReady;
+            }
+
+            if (Connection.SelectedBackend == ErChatBackendKind.Copilot && !_copilotReady)
+            {
+                return Strings.Mock_DisabledReason_CopilotNotReady;
             }
 
             if (Connection.SelectedBackend == ErChatBackendKind.ApiKey && !IsApiKeyConnectionReady)
@@ -380,6 +389,8 @@ public partial class MockGenerationDialogViewModel : ObservableObject
 
     private bool _claudeCodeReady;
 
+    private bool _copilotReady;
+
     /// <summary>送信待ち添付を束ねる共通 VM 部品（チップ列・可否・追加/削除）</summary>
     public AttachmentListViewModel Attachments { get; }
 
@@ -393,6 +404,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
             apiKeyEngineFactory: null,
             codexEngineFactory: null,
             claudeCodeEngineFactory: null,
+            copilotEngineFactory: null,
             mockProjectGenerator: null
         ) { }
 
@@ -404,6 +416,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     /// <param name="apiKeyEngineFactory">API キーエンジンのファクトリ（プロファイル・ツールホスト受け取り）</param>
     /// <param name="codexEngineFactory">Codex エンジンのファクトリ</param>
     /// <param name="claudeCodeEngineFactory">Claude Code エンジンのファクトリ</param>
+    /// <param name="copilotEngineFactory">GitHub Copilot エンジンのファクトリ</param>
     /// <param name="mockProjectGenerator">モックプロジェクト生成器（省略時は図の供給元のプロバイダから構築）</param>
     /// <param name="dialogService">確認・通知ダイアログ（省略時は MessageBox 実装）</param>
     /// <param name="apiKeyLoader">
@@ -420,6 +433,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         Func<ErChatProfile, IErDiagramToolHost, IErChatEngine>? apiKeyEngineFactory,
         Func<ErChatProfile, IErDiagramToolHost, IErChatEngine>? codexEngineFactory,
         Func<ErChatProfile, IErDiagramToolHost, IErChatEngine>? claudeCodeEngineFactory,
+        Func<ErChatProfile, IErDiagramToolHost, IErChatEngine>? copilotEngineFactory = null,
         IMockProjectGenerator? mockProjectGenerator = null,
         ChatAttachmentFactory.ImageShrinker? imageShrinker = null,
         IDialogService? dialogService = null,
@@ -482,6 +496,20 @@ public partial class MockGenerationDialogViewModel : ObservableObject
                         Model = Connection.ClaudeCodeModel,
                     }
             );
+        _copilotEngineFactory =
+            copilotEngineFactory
+            ?? (
+                (profile, toolHost) =>
+                    new CopilotChatEngine(
+                        new CopilotRuntimeClient(),
+                        toolHost,
+                        _dispatcher,
+                        profile
+                    )
+                    {
+                        Model = Connection.CopilotModel,
+                    }
+            );
 
         // ctor 順序厳守: Connection 生成 → PropertyChanged 購読 → Connection.LoadSettings
         // （購読前にロードするとモデル同期・可否再評価が漏れる）
@@ -493,7 +521,8 @@ public partial class MockGenerationDialogViewModel : ObservableObject
 
     /// <summary>
     /// 選択中バックエンドに応じて添付部品の対応範囲を再評価する。
-    /// API キー=プロバイダー依存・Codex=なし・Claude Code=全種別（エンジン生成前でも判定できるよう規則で解決する）。
+    /// API キー=プロバイダー依存・Codex=なし・Claude Code=全種別・Copilot=画像のみ
+    /// （エンジン生成前でも判定できるよう規則で解決する）。
     /// </summary>
     private void RefreshAttachmentSupport() =>
         Attachments.Support = Connection.SelectedBackend switch
@@ -503,6 +532,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
                 | AttachmentSupport.Text
                 | AttachmentSupport.Binary,
             ErChatBackendKind.Codex => AttachmentSupport.None,
+            ErChatBackendKind.Copilot => AttachmentSupport.Images,
             _ => AttachmentSupportResolver.ForApiKeyProvider(Connection.ApiProvider),
         };
 
@@ -1028,7 +1058,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         }
     }
 
-    /// <summary>スキャフォールド＋選択バックエンド（Claude Code / Codex / API キー）でモックプロジェクトを生成する</summary>
+    /// <summary>スキャフォールド＋選択バックエンド（Claude Code / Codex / Copilot / API キー）でモックプロジェクトを生成する</summary>
     [RelayCommand(CanExecute = nameof(CanGenerateMockProject))]
     private async Task GenerateMockProjectAsync()
     {
@@ -1064,6 +1094,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         {
             ErChatBackendKind.Codex => Connection.CodexModel,
             ErChatBackendKind.ClaudeCode => Connection.ClaudeCodeModel,
+            ErChatBackendKind.Copilot => Connection.CopilotModel,
             _ => Connection.ApiModel,
         };
         var modelProvider =
@@ -1209,6 +1240,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         {
             ErChatBackendKind.Codex => _codexEngineFactory,
             ErChatBackendKind.ClaudeCode => _claudeCodeEngineFactory,
+            ErChatBackendKind.Copilot => _copilotEngineFactory,
             _ => _apiKeyEngineFactory,
         };
 
@@ -1512,6 +1544,31 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         Connection.ClaudeCodeStatusSummary = summary;
         Connection.ClaudeCodeStatusLevel = level;
         Connection.ClaudeCodeGuidance = guidance;
+        NotifyReadinessChanged();
+    }
+
+    /// <summary>GitHub Copilot 接続状態を外部から反映する</summary>
+    /// <param name="ready">送信可能な状態か（接続済みかつログイン済み）</param>
+    /// <param name="summary">状態サマリー（未検出・未ログイン・ログイン済みなど）</param>
+    /// <param name="level">状態ドットの健全度</param>
+    /// <param name="guidance">状態依存の案内文</param>
+    /// <param name="availableModels">
+    /// 接続後に実行時列挙したモデル ID の一覧。Copilot は静的カタログを持たないため、
+    /// これを接続タブのモデル候補（削除不可の上段）へ流し込む。
+    /// </param>
+    public void ApplyCopilotReadiness(
+        bool ready,
+        string summary,
+        ConnectionHealth level,
+        string guidance,
+        IReadOnlyList<string> availableModels
+    )
+    {
+        _copilotReady = ready;
+        Connection.CopilotStatusSummary = summary;
+        Connection.CopilotStatusLevel = level;
+        Connection.CopilotGuidance = guidance;
+        Connection.CopilotAvailableModels = availableModels;
         NotifyReadinessChanged();
     }
 

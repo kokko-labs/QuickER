@@ -33,7 +33,7 @@ public sealed record MockProjectGenerationResult(
 /// （<see cref="IMockProjectGenerator"/> の口は変えない）。
 /// </para>
 /// <para>
-/// バックエンド拡張（Codex / API キー等）は、共有オーケストレーター <see cref="MockProjectAgentRunner"/> が
+/// バックエンド拡張（Codex / Copilot / API キー等）は、共有オーケストレーター <see cref="MockProjectAgentRunner"/> が
 /// 受け取る <see cref="IMockProjectAgent"/> seam を別のエージェント実装へ差し替える形で実現する
 /// （生成の骨格＝タイムアウト・成果物検証・独立ビルド・ログ保全は共有する）。
 /// </para>
@@ -56,7 +56,7 @@ public interface IMockProjectGenerator
     /// <summary>この生成器が対応する生成ターゲット一覧（<see cref="MockProjectTarget.Blazor"/> / <see cref="MockProjectTarget.Wpf"/>。先頭が UI の既定選択）</summary>
     IReadOnlyList<MockProjectTarget> Targets { get; }
 
-    /// <summary>指定バックエンド（Claude Code / Codex）の実行器（CLI）が利用可能か</summary>
+    /// <summary>指定バックエンド（Claude Code / Codex / Copilot）の実行器（CLI）が利用可能か</summary>
     bool IsAgentAvailable(ErChatBackendKind backend);
 
     /// <summary>dotnet SDK が利用可能か（<c>dotnet --version</c> の成否で判定）</summary>
@@ -155,11 +155,14 @@ public sealed class MockProjectGenerator : IMockProjectGenerator
         _timeout = timeout;
     }
 
-    /// <summary>本番の実行器をバックエンド別に構築する（Claude Code / Codex / API キー。既定は Claude Code）</summary>
+    /// <summary>
+    /// 本番の実行器をバックエンド別に構築する（Claude Code / Codex / Copilot / API キー。既定は Claude Code）
+    /// </summary>
     private IMockProjectAgent CreateDefaultAgent(ErChatBackendKind backend) =>
         backend switch
         {
             ErChatBackendKind.Codex => new CodexMockProjectAgent(new CodexAppServerClient()),
+            ErChatBackendKind.Copilot => new CopilotMockProjectAgent(new CopilotRuntimeClient()),
             ErChatBackendKind.ApiKey => new ApiKeyMockProjectAgent(
                 _apiKeyEngineFactory
                     ?? throw new InvalidOperationException(
