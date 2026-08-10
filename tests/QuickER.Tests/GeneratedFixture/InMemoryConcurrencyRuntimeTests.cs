@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
@@ -507,12 +508,281 @@ public sealed class InMemoryConcurrencyRuntimeTests : IDisposable
         document.RowVer.Should().NotEqual(beforeSave, "保存が完了した時点で新しい版が反映される");
     }
 
+    // ── copy-on-write の公開（After がロック外で走っている間の並行更新） ──
+
+    /// <summary>
+    /// 11. After フックの待機中に別インスタンスが同じ行を正常更新し、その後 After が例外を投げても、
+    /// <b>他者の更新は消えない</b>（保存は 1 度もストアへ書いていないため、失敗しても巻き戻すものが無い）。
+    /// </summary>
+    /// <remarks>
+    /// 旧実装（undo ジャーナル）は失敗時に「保存前のスナップショット」を無条件で書き戻していたため、
+    /// After 待機中に割り込んだ他者の更新をまるごと消していた。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Concurrency/InMemory] SaveAsync: After 例外の失敗は並行更新を巻き添えにしない"
+    )]
+    public async Task SaveAsync_AfterThrows_LeavesConcurrentUpdateIntact()
+    {
+        var store = new InMemoryDataStore();
+        var hook = new GatedAfterHook<DocumentEntity> { ThrowOnAfter = true };
+        var documents = new InMemoryDocumentRepository(store, SingleHookRegistry(hook));
+        var other = new InMemoryDocumentRepository(store);
+
+        await other.InsertAsync(
+            new DocumentEntity
+            {
+                DocumentId = 1,
+                Title = "alpha",
+                Thumb = [],
+            },
+            Ct
+        );
+
+        var mine = await documents.GetByIdAsync(1, Ct);
+        var beforeSave = mine!.RowVer;
+        mine.Title = "by-me";
+        mine.MarkUpdated();
+
+        // After に入った時点では保存はまだ 1 バイトもストアへ書いていない
+        var saving = documents.SaveAsync(mine, cancellationToken: Ct);
+        await hook.Entered.Task;
+
+        // 別インスタンスの正常な更新（ストアの現在値は保存前のままなので成立する）
+        var theirs = await other.GetByIdAsync(1, Ct);
+        theirs!.Title = "by-another-user";
+        (await other.UpdateAsync(theirs, cancellationToken: Ct))
+            .Should()
+            .BeTrue("公開前なので他者から見た行は保存前のまま＝更新が通る");
+
+        hook.Release.TrySetResult();
+        var act = async () => await saving;
+        (await act.Should().ThrowAsync<InvalidOperationException>()).WithMessage("*after-boom*");
+
+        var stored = await other.GetByIdAsync(1, Ct);
+        stored!.Title.Should().Be("by-another-user", "失敗した保存は他者の更新を消さない");
+        stored.RowVer.Should().Equal(theirs.RowVer, "他者が受け取った版もそのまま有効なまま残る");
+        mine.RowVer.Should().Equal(beforeSave, "失敗した保存は新しい版を配らない");
+    }
+
+    /// <summary>
+    /// 12. After フックの待機中に別インスタンスが同じ行を更新すると、After が正常終了しても公開時の検証で
+    /// <c>SaveConflictException</c> になる（並行更新は無傷のまま残る）。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Concurrency/InMemory] SaveAsync: After 待機中の並行更新は公開時に競合として弾かれる"
+    )]
+    public async Task SaveAsync_ConcurrentUpdateDuringAfter_IsRejectedAtPublish()
+    {
+        var store = new InMemoryDataStore();
+        var hook = new GatedAfterHook<DocumentEntity>();
+        var documents = new InMemoryDocumentRepository(store, SingleHookRegistry(hook));
+        var other = new InMemoryDocumentRepository(store);
+
+        await other.InsertAsync(
+            new DocumentEntity
+            {
+                DocumentId = 1,
+                Title = "alpha",
+                Thumb = [],
+            },
+            Ct
+        );
+
+        var mine = await documents.GetByIdAsync(1, Ct);
+        var beforeSave = mine!.RowVer;
+        mine.Title = "by-me";
+        mine.MarkUpdated();
+
+        var saving = documents.SaveAsync(mine, cancellationToken: Ct);
+        await hook.Entered.Task;
+
+        var theirs = await other.GetByIdAsync(1, Ct);
+        theirs!.Title = "by-another-user";
+        (await other.UpdateAsync(theirs, cancellationToken: Ct)).Should().BeTrue();
+
+        hook.Release.TrySetResult();
+        var act = async () => await saving;
+
+        await act.Should()
+            .ThrowAsync<SaveConflictException>()
+            .WithMessage(
+                "*modified by another user*",
+                "保存フェーズを通過した後でも、公開時に他者の書き込みを検出する"
+            );
+
+        (await other.GetByIdAsync(1, Ct))!
+            .Title.Should()
+            .Be("by-another-user", "競合した保存は並行更新を上書きしない");
+        mine.RowVer.Should().Equal(beforeSave, "公開されなかった保存は新しい版を配らない");
+    }
+
+    /// <summary>
+    /// 13. rowversion 列を持たない型は公開時検証の対象外＝After 待機中に並行更新があっても競合にならず、
+    /// 保存が後勝ち（last-write-wins）で公開される。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Concurrency/InMemory] SaveAsync: rowversion なしの型は公開時検証の対象外（後勝ち）"
+    )]
+    public async Task SaveAsync_TypeWithoutRowVersion_IsNotVerifiedAtPublish()
+    {
+        var store = new InMemoryDataStore();
+        var hook = new GatedAfterHook<DocumentNoteEntity>();
+        var notes = new InMemoryDocumentNoteRepository(
+            store,
+            SingleHookRegistry<DocumentNoteEntity>(hook)
+        );
+        var other = new InMemoryDocumentNoteRepository(store);
+
+        await new InMemoryDocumentRepository(store).InsertAsync(
+            new DocumentEntity
+            {
+                DocumentId = 1,
+                Title = "alpha",
+                Thumb = [],
+            },
+            Ct
+        );
+        await other.InsertAsync(
+            new DocumentNoteEntity
+            {
+                NoteId = 100,
+                DocumentId = 1,
+                Note = "first",
+            },
+            Ct
+        );
+
+        var mine = await notes.GetByIdAsync(100, Ct);
+        mine!.Note = "by-me";
+        mine.MarkUpdated();
+
+        var saving = notes.SaveAsync(mine, cancellationToken: Ct);
+        await hook.Entered.Task;
+
+        var theirs = await other.GetByIdAsync(100, Ct);
+        theirs!.Note = "by-another-user";
+        (await other.UpdateAsync(theirs, cancellationToken: Ct)).Should().BeTrue();
+
+        hook.Release.TrySetResult();
+        (await saving).Should().Be(1, "版を持たない型は公開時検証を行わない＝競合にならない");
+
+        (await other.GetByIdAsync(100, Ct))!
+            .Note.Should()
+            .Be("by-me", "版のない型の契約どおり後勝ちで公開される");
+    }
+
+    /// <summary>
+    /// 14. After が同じ行へ blob を書くと版がもう一段進むが、呼び出し元エンティティには
+    /// <b>公開された最終版</b>が反映される（保存フェーズ時点の版を配ると、次の保存が偽の競合になる）。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Concurrency/InMemory] SaveAsync: After の blob 書き込み後の最終版が呼び出し元へ反映される"
+    )]
+    public async Task SaveAsync_AfterWritesBinaryColumn_HandsBackPublishedRowVersion()
+    {
+        var store = new InMemoryDataStore();
+        var payload = new byte[128];
+        new Random(3).NextBytes(payload);
+
+        var documents = new InMemoryDocumentRepository(
+            store,
+            SingleHookRegistry(new BinaryWritingHook(payload))
+        );
+        var plain = new InMemoryDocumentRepository(store);
+
+        await plain.InsertAsync(
+            new DocumentEntity
+            {
+                DocumentId = 1,
+                Title = "alpha",
+                Thumb = [],
+            },
+            Ct
+        );
+
+        var document = await documents.GetByIdAsync(1, Ct);
+        document!.Title = "by-me";
+        document.MarkUpdated();
+        (await documents.SaveAsync(document, cancellationToken: Ct)).Should().Be(1);
+
+        var stored = await plain
+            .Query()
+            .Where(d => d.DocumentId == 1)
+            .WithUnboundedBinary()
+            .FirstOrDefaultAsync(Ct);
+        stored!.Payload.Should().Equal(payload, "After が書いた blob が公開されている");
+        stored.Title.Should().Be("by-me", "保存フェーズの更新も同じ単位で公開される");
+        document
+            .RowVer.Should()
+            .Equal(stored.RowVer, "呼び出し元の版は blob 書き込み後の最終版と一致する");
+
+        // 古い版を配っていれば、この再保存は偽の競合になる
+        document.Title = "again";
+        document.MarkUpdated();
+        (await documents.SaveAsync(document, cancellationToken: Ct))
+            .Should()
+            .Be(1, "反映された版はそのまま次の保存に使える（再取得不要）");
+    }
+
     /// <summary>Save フックを 1 つだけ登録したレジストリを組み立てる</summary>
-    private ISaveHookRegistry SingleHookRegistry(ISaveHook<DocumentEntity> hook)
+    private ISaveHookRegistry SingleHookRegistry<TEntity>(ISaveHook<TEntity> hook)
+        where TEntity : EntityBase
     {
         var provider = new ServiceCollection().AddSingleton(hook).BuildServiceProvider();
         _providers.Add(provider);
         return new ServiceProviderSaveHookRegistry(provider);
+    }
+
+    /// <summary>
+    /// After で合図を出してからテスト側の解放を待つ Save フック（ロック外で走る After の最中に、
+    /// 別スレッドの更新を決定的に差し込むためのゲート）。
+    /// </summary>
+    private sealed class GatedAfterHook<TEntity> : ISaveHook<TEntity>
+        where TEntity : EntityBase
+    {
+        /// <summary>After に到達したことを知らせる合図</summary>
+        public TaskCompletionSource Entered { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        /// <summary>After を先へ進めてよいことをテスト側が知らせる合図</summary>
+        public TaskCompletionSource Release { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        /// <summary>解放されたあとに例外を投げるか</summary>
+        public bool ThrowOnAfter { get; init; }
+
+        public async Task AfterSaveAsync(
+            TEntity entity,
+            SaveOperation operation,
+            ISaveHookContext context,
+            CancellationToken cancellationToken = default
+        )
+        {
+            Entered.TrySetResult();
+            await Release.Task;
+
+            if (ThrowOnAfter)
+            {
+                throw new InvalidOperationException("after-boom");
+            }
+        }
+    }
+
+    /// <summary>After で除外列 blob を書き込む Save フック（保存フェーズの後に版がもう一段進む経路の再現用）</summary>
+    private sealed class BinaryWritingHook(byte[] payload) : ISaveHook<DocumentEntity>
+    {
+        public async Task AfterSaveAsync(
+            DocumentEntity entity,
+            SaveOperation operation,
+            ISaveHookContext context,
+            CancellationToken cancellationToken = default
+        ) =>
+            await context.WriteBinaryColumnAsync(
+                nameof(DocumentEntity.Payload),
+                entity.DocumentId,
+                new MemoryStream(payload),
+                cancellationToken: cancellationToken
+            );
     }
 
     /// <summary>After が見た版を記録し、任意で例外を投げる Save フック（版の反映タイミング検証用）</summary>

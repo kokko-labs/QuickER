@@ -85,31 +85,24 @@ public sealed class InMemoryDataStore
     }
 
     /// <summary>
-    /// Assigns the next store-generated row version to <paramref name="snapshot"/> (and to <paramref name="source"/> when
-    /// given). Does nothing for a type without a rowversion column. The caller must already hold the lock.
+    /// Assigns the next store-generated row version to <paramref name="snapshot"/> and returns the rowversion property that
+    /// was stamped (<c>null</c> for a type without a rowversion column, in which case nothing was assigned).
     /// </summary>
     /// <remarks>
     /// The value is a monotonically increasing 8-byte big-endian token that emulates SQL Server's rowversion: every insert
-    /// and update moves it on, so an entity holding a stale version can be told apart from a current one. The source entity
-    /// is stamped as well as the stored snapshot because the store keeps a clone, and a real database likewise hands the
-    /// newly assigned version back to the caller. When <paramref name="journal"/> is given, the source is not stamped yet:
-    /// the new version is held in the journal and handed over only once every phase of the save has succeeded, so a save
-    /// that fails later never leaves a caller entity holding a version the store does not have.
+    /// and update moves it on, so an entity holding a stale version can be told apart from a current one. The counter is
+    /// advanced atomically because a save hook's After writes a column outside the store lock.
     /// </remarks>
-    private void StampRowVersion(
-        EntityBase snapshot,
-        EntityBase? source,
-        InMemoryWriteJournal? journal
-    )
+    private PropertyInfo? StampRowVersion(EntityBase snapshot)
     {
         var property = EntitySaveMetadata.For(snapshot.GetType()).RowVersionProperty;
 
         if (property is null)
         {
-            return;
+            return null;
         }
 
-        var version = BitConverter.GetBytes(++_rowVersion);
+        var version = BitConverter.GetBytes(Interlocked.Increment(ref _rowVersion));
 
         // Big-endian so that comparing the bytes orders the versions the same way as comparing the numbers
         if (BitConverter.IsLittleEndian)
@@ -118,62 +111,36 @@ public sealed class InMemoryDataStore
         }
 
         property.SetValue(snapshot, {{ if generate_value_objects }}SqlValueObjectActivator.Wrap(version, property.PropertyType){{ else }}version{{ end }});
+        return property;
+    }
 
-        if (source is null)
+    /// <summary>Stamps <paramref name="snapshot"/> and hands the newly assigned version straight to <paramref name="source"/> (used by the writes that apply to the store immediately).</summary>
+    private void StampRowVersionDirect(EntityBase snapshot, EntityBase? source)
+    {
+        var property = StampRowVersion(snapshot);
+
+        if (property is null || source is null)
         {
             return;
         }
 
-        // The source gets its own array so that mutating one side cannot reach into the store's snapshot
-        var sourceVersion = {{ if generate_value_objects }}SqlValueObjectActivator.Wrap(version.ToArray(), property.PropertyType){{ else }}version.ToArray(){{ end }};
-
-        if (journal is null)
-        {
-            property.SetValue(source, sourceVersion);
-        }
-        else
-        {
-            journal.DeferSourceStamp(source, property, sourceVersion);
-        }
+        ApplyRowVersion(source, property, snapshot);
     }
 
-    /// <summary>Records the row that is about to be overwritten into <paramref name="journal"/> (a no-op without a journal). The caller must already hold the lock.</summary>
-    private void CaptureUnlocked(InMemoryWriteJournal? journal, Type entityType, object key) =>
-        journal?.Capture(entityType, key, Table(entityType).GetValueOrDefault(key));
-
-    /// <summary>
-    /// Rolls the store back to the state recorded in <paramref name="journal"/>. Used when a graph save fails after its write
-    /// phase (an After hook throwing, for instance), so that the save unit stays all-or-nothing.
-    /// </summary>
-    internal void Undo(InMemoryWriteJournal journal)
+    /// <summary>Copies the row version a stored snapshot holds onto the caller's entity, mirroring how a real database hands the newly assigned version back.</summary>
+    /// <remarks>The caller's entity gets its own array so that mutating one side cannot reach into the store's snapshot.</remarks>
+    private static void ApplyRowVersion(
+        EntityBase source,
+        PropertyInfo property,
+        EntityBase snapshot
+    )
     {
-        lock (_gate)
+        var stored = {{ if generate_value_objects }}SqlParameterValue.Unwrap(property.GetValue(snapshot)){{ else }}property.GetValue(snapshot){{ end }};
+
+        if (stored is byte[] version)
         {
-            UndoUnlocked(journal);
+            property.SetValue(source, {{ if generate_value_objects }}SqlValueObjectActivator.Wrap(version.ToArray(), property.PropertyType){{ else }}version.ToArray(){{ end }});
         }
-    }
-
-    /// <summary>Puts the recorded snapshots back, most recent record first, and empties the journal. The caller must already hold the lock.</summary>
-    private void UndoUnlocked(InMemoryWriteJournal journal)
-    {
-        var entries = journal.Entries;
-
-        for (var index = entries.Count - 1; index >= 0; index--)
-        {
-            var (entityType, key, previous) = entries[index];
-
-            if (previous is null)
-            {
-                // There was no row before the save, so the row the save added goes away again
-                Table(entityType).Remove(key);
-            }
-            else
-            {
-                Table(entityType)[key] = previous;
-            }
-        }
-
-        journal.Clear();
     }
 
     /// <summary>Gets the raw snapshot (no clone) for the given type and primary key. Used by internal traversals such as Include key matching. The caller must already hold the lock.</summary>
@@ -202,7 +169,7 @@ public sealed class InMemoryDataStore
         {
             var snapshot = entity.Clone();
             snapshot.MarkUnchanged();
-            StampRowVersion(snapshot, entity, journal: null);
+            StampRowVersionDirect(snapshot, entity);
             Table(entity.GetType())[KeyOf(entity)] = snapshot;
         }
     }
@@ -228,7 +195,7 @@ public sealed class InMemoryDataStore
             }
 
             // Stamped only once the row is in, so a rejected insert consumes no version and leaves the entity untouched
-            StampRowVersion(snapshot, entity, journal: null);
+            StampRowVersionDirect(snapshot, entity);
         }
     }
 
@@ -266,63 +233,158 @@ public sealed class InMemoryDataStore
     /// Does not mutate the store's actual entity directly; instead it updates a clone and writes it back (following the existing Clone/Put semantics).
     /// </summary>
     /// <remarks>
-    /// The row version moves on, mirroring the real database where writing a blob is an UPDATE like any other. There is no
-    /// caller entity to hand the new version back to, so an entity fetched before this call is left holding a stale version.
-    /// When <paramref name="journal"/> is given (a write from a save hook's After), the row is recorded there first, so this
-    /// write is rolled back together with the rest of the save unit if a later phase fails.
+    /// The row version moves on, mirroring the real database where writing a blob is an UPDATE like any other. A standalone
+    /// call has no caller entity to hand the new version back to, so an entity fetched before it is left holding a stale
+    /// version. When <paramref name="staging"/> is given (a write from a save hook's After), the write joins the save's
+    /// staging instead of touching the store: it builds on what the save has already staged for the row, stays invisible
+    /// until the save publishes, and the version it assigns is the one the caller's entity ends up with.
     /// </remarks>
     internal bool WriteColumnValue(
         Type entityType,
         object key,
         PropertyInfo column,
         object? value,
-        InMemoryWriteJournal? journal = null
+        InMemorySaveStaging? staging = null
     )
     {
+        if (staging is null)
+        {
+            lock (_gate)
+            {
+                var entity = FindRaw(entityType, key);
+
+                if (entity is null)
+                {
+                    return false;
+                }
+
+                var clone = entity.Clone();
+                column.SetValue(clone, value);
+                clone.MarkUnchanged();
+                StampRowVersion(clone);
+                Table(entityType)[key] = clone;
+                return true;
+            }
+        }
+
+        EntityBase? baseRow;
+
         lock (_gate)
         {
-            var entity = FindRaw(entityType, key);
-
-            if (entity is null)
-            {
-                return false;
-            }
-
-            CaptureUnlocked(journal, entityType, key);
-            var clone = entity.Clone();
-            column.SetValue(clone, value);
-            clone.MarkUnchanged();
-            StampRowVersion(clone, source: null, journal);
-            Table(entityType)[key] = clone;
-            return true;
+            baseRow = FindRaw(entityType, key);
         }
+
+        // A row the save has already staged wins over the store's own row (the save's own writes are visible to its hooks)
+        var current = staging.TryGetStaged(entityType, key, out var staged) ? staged : baseRow;
+
+        if (current is null)
+        {
+            return false;
+        }
+
+        staging.CaptureBase(entityType, key, baseRow);
+        var updated = current.Clone();
+        column.SetValue(updated, value);
+        updated.MarkUnchanged();
+        StampRowVersion(updated);
+        staging.Stage(entityType, key, updated);
+        return true;
     }
 {{~ end ~}}
 
     /// <summary>Applies multiple writes (insert/update/delete) together under a single lock (preserving the atomicity of a graph save).</summary>
     internal TResult Write<TResult>(Func<InMemoryWriteScope, TResult> writer) =>
-        Write(writer, journal: null);
+        Write(writer, staging: null);
 
     /// <summary>
-    /// Applies multiple writes together under a single lock while recording every row it overwrites into
-    /// <paramref name="journal"/>, so that a failure part-way through (a concurrency conflict, for instance) rolls the whole
-    /// batch back before the exception leaves this method.
+    /// Runs multiple writes together under a single lock. Without <paramref name="staging"/> the writes are applied to the
+    /// store as they happen; with it they are staged instead and only become visible once <see cref="Publish"/> accepts them,
+    /// which is what lets a graph save stay all-or-nothing across the phases that run outside the lock.
     /// </summary>
+    /// <remarks>
+    /// A failure part-way through simply lets the exception out: the staging is the only place the writes exist, so the
+    /// caller discarding it is all the rollback there is (nothing was ever applied to the store).
+    /// </remarks>
     internal TResult Write<TResult>(
         Func<InMemoryWriteScope, TResult> writer,
-        InMemoryWriteJournal? journal
+        InMemorySaveStaging? staging
     )
     {
         lock (_gate)
         {
-            try
+            return writer(new InMemoryWriteScope(this, staging));
+        }
+    }
+
+    /// <summary>
+    /// Publishes everything a save staged, under the lock, after verifying that nobody else has written the rows the save
+    /// started from.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The verification is what makes the copy-on-write scheme safe. The staged writes were prepared against the rows the
+    /// save read while it held the lock, and the save hooks' After runs outside the lock in between, so another thread may
+    /// have written the same rows meanwhile. Every row the save touched is therefore compared against the snapshot it
+    /// started from; reference equality is enough because the store never hands its snapshots out and replaces them
+    /// wholesale on every write.
+    /// </para>
+    /// <para>
+    /// A row whose type has no rowversion column is not verified: without a concurrency token the store's contract is
+    /// last-write-wins, exactly as it is for a direct update, and <see cref="ConcurrencyMode.ForceOverwrite"/> waives the
+    /// verification for the same reason. A row the save inserted is verified whatever the mode, because someone else having
+    /// taken the same primary key meanwhile is a duplicate key rather than something an overwrite policy can excuse.
+    /// </para>
+    /// <para>
+    /// Once the writes are in, the row versions they assigned are read back out of the published snapshots and handed to the
+    /// caller's entities. Reading them back (rather than remembering them when they were assigned) is what keeps a later
+    /// write to the same row - a hook writing a blob, for instance - from leaving the caller holding a superseded version.
+    /// </para>
+    /// </remarks>
+    internal void Publish(InMemorySaveStaging staging, ConcurrencyMode mode)
+    {
+        lock (_gate)
+        {
+            foreach (var (entityType, key, baseRow) in staging.Baseline)
             {
-                return writer(new InMemoryWriteScope(this, journal));
+                if (ReferenceEquals(Table(entityType).GetValueOrDefault(key), baseRow))
+                {
+                    continue;
+                }
+
+                // The save is adding this row, but the primary key has been taken since: a real database would raise the
+                // primary-key violation at this point, and no concurrency policy makes that acceptable.
+                if (baseRow is null && staging.Staged(entityType, key) is not null)
+                {
+                    throw DuplicateKeyError(entityType, key);
+                }
+
+                if (
+                    mode == ConcurrencyMode.Optimistic
+                    && EntitySaveMetadata.For(entityType).RowVersionProperty is not null
+                )
+                {
+                    throw SaveConflictException.Modified(entityType, key, "save");
+                }
             }
-            catch when (journal is not null)
+
+            foreach (var ((entityType, key), snapshot) in staging.Overlay)
             {
-                UndoUnlocked(journal);
-                throw;
+                if (snapshot is null)
+                {
+                    Table(entityType).Remove(key);
+                }
+                else
+                {
+                    Table(entityType)[key] = snapshot;
+                }
+            }
+
+            foreach (var (source, property, entityType, key) in staging.Stamps)
+            {
+                if (Table(entityType).GetValueOrDefault(key) is { } published)
+                {
+                    ApplyRowVersion(source, property, published);
+                }
             }
         }
     }
@@ -346,49 +408,87 @@ public sealed class InMemoryDataStore
         public EntityBase? Find(Type entityType, object key) => store.FindRaw(entityType, key);
     }
 
-    /// <summary>Scope for applying writes across a whole graph under the lock (every write is recorded into the journal, when the caller supplied one).</summary>
+    /// <summary>
+    /// Scope for applying writes across a whole graph under the lock. Without a staging the writes land in the store
+    /// straight away; with one they are staged and read back through the staging, so the save sees its own writes while
+    /// nobody else does until it publishes.
+    /// </summary>
     internal readonly struct InMemoryWriteScope(
         InMemoryDataStore store,
-        InMemoryWriteJournal? journal
+        InMemorySaveStaging? staging
     )
     {
+        /// <summary>The row as this scope sees it: what the save has staged for it, or else the store's own row (null when there is none).</summary>
+        private EntityBase? Current(Type entityType, object key) =>
+            staging is not null && staging.TryGetStaged(entityType, key, out var staged)
+                ? staged
+                : store.FindRaw(entityType, key);
+
+        /// <summary>Applies or stages a prepared snapshot and arranges for the newly assigned row version to reach <paramref name="entity"/>.</summary>
+        private void Write(EntityBase entity, Type entityType, object key, EntityBase snapshot)
+        {
+            if (staging is null)
+            {
+                store.StampRowVersionDirect(snapshot, entity);
+                store.Table(entityType)[key] = snapshot;
+                return;
+            }
+
+            // The first touch of a row records the baseline that publishing verifies against
+            staging.CaptureBase(entityType, key, store.FindRaw(entityType, key));
+            var property = store.StampRowVersion(snapshot);
+            staging.Stage(entityType, key, snapshot);
+
+            if (property is not null)
+            {
+                // Only the row is remembered, not the version: the version handed over is whichever one gets published
+                staging.RecordStamp(entity, property, entityType, key);
+            }
+        }
+
         /// <summary>Stores a snapshot for updates and seeding (an existing key is overwritten). Assumes the lock is held, so it writes directly to the internal dictionary.</summary>
         public void Put(EntityBase entity)
         {
+            var entityType = entity.GetType();
             var key = KeyOf(entity);
-            store.CaptureUnlocked(journal, entity.GetType(), key);
             var snapshot = entity.Clone();
             snapshot.MarkUnchanged();
-            store.StampRowVersion(snapshot, entity, journal);
-            store.Table(entity.GetType())[key] = snapshot;
+            Write(entity, entityType, key, snapshot);
         }
 
         /// <summary>Stores a snapshot for an insert only (an existing primary key throws instead of being overwritten). Assumes the lock is held, so it writes directly to the internal dictionary.</summary>
         public void Insert(EntityBase entity)
         {
+            var entityType = entity.GetType();
             var key = KeyOf(entity);
-            var snapshot = entity.Clone();
-            snapshot.MarkUnchanged();
-            store.CaptureUnlocked(journal, entity.GetType(), key);
 
-            if (!store.Table(entity.GetType()).TryAdd(key, snapshot))
+            // Rejected before anything is written, so a rejected insert consumes no version and leaves the entity untouched
+            if (Exists(entityType, key))
             {
-                throw DuplicateKeyError(entity.GetType(), key);
+                throw DuplicateKeyError(entityType, key);
             }
 
-            // Stamped only once the row is in, so a rejected insert consumes no version and leaves the entity untouched
-            store.StampRowVersion(snapshot, entity, journal);
+            var snapshot = entity.Clone();
+            snapshot.MarkUnchanged();
+            Write(entity, entityType, key, snapshot);
         }
 
         /// <summary>Removes the snapshot for the given type and primary key (true if one existed).</summary>
         public bool Remove(Type entityType, object key)
         {
-            store.CaptureUnlocked(journal, entityType, key);
-            return store.Table(entityType).Remove(key);
+            if (staging is null)
+            {
+                return store.Table(entityType).Remove(key);
+            }
+
+            var existed = Current(entityType, key) is not null;
+            staging.CaptureBase(entityType, key, store.FindRaw(entityType, key));
+            staging.Stage(entityType, key, null);
+            return existed;
         }
 
         /// <summary>Whether a snapshot exists for the given type and primary key.</summary>
-        public bool Exists(Type entityType, object key) => store.Table(entityType).ContainsKey(key);
+        public bool Exists(Type entityType, object key) => Current(entityType, key) is not null;
 
         /// <summary>
         /// Whether <paramref name="entity"/> may overwrite the stored row under the given concurrency policy: <c>true</c> when
@@ -409,7 +509,7 @@ public sealed class InMemoryDataStore
                 return true;
             }
 
-            var stored = store.FindRaw(entity.GetType(), KeyOf(entity));
+            var stored = Current(entity.GetType(), KeyOf(entity));
 
             if (stored is null)
             {
@@ -427,68 +527,85 @@ public sealed class InMemoryDataStore
 }
 
 /// <summary>
-/// Undo journal that records what one graph save is about to overwrite in the <see cref="InMemoryDataStore"/>, so that the
-/// whole save unit is all-or-nothing even though the store has no real transaction of its own.
+/// Copy-on-write staging area holding the writes of one graph save, so that the whole save unit is all-or-nothing even
+/// though the <see cref="InMemoryDataStore"/> has no real transaction of its own.
 /// </summary>
 /// <remarks>
 /// <para>
-/// A row is recorded once, the first time the save touches it, together with the snapshot that was there beforehand (or
-/// nothing at all, when the row did not exist yet). Rolling back puts those snapshots back and drops the rows that were not
-/// there before, which returns the store to exactly the state it had when the save started. Keeping the previous snapshot by
-/// reference is enough because the store never hands its snapshots out (readers always get a clone), so nothing outside can
-/// have changed one in the meantime.
+/// A staged write is invisible to everyone but the save that staged it: it never touches the store until
+/// <see cref="InMemoryDataStore.Publish"/> accepts the whole set at once. A save that fails simply drops its staging, which
+/// is all the rollback there is - the store was never changed, so there is nothing to undo and nothing another thread's
+/// write can be trampled by. That matters because a save hook's After runs outside the store lock: rolling a failed save
+/// back by restoring snapshots would silently discard whatever someone else wrote to the same rows while After was running.
 /// </para>
 /// <para>
-/// The row version counter is deliberately not rewound: it only has to keep increasing for a stale version to be
-/// distinguishable from a current one, so the versions a rolled back save consumed are simply skipped.
+/// Alongside the writes, the row each save touched is recorded once, the first time it is touched, together with the
+/// snapshot the store held for it at that moment (or nothing at all, when the row did not exist yet). Publishing compares
+/// the store against those snapshots to detect a row someone else has written meanwhile.
 /// </para>
 /// <para>
-/// The newly assigned versions destined for the caller's own entities are held here as well, and handed over only once every
-/// phase of the save has succeeded. A save that fails therefore leaves the caller holding the versions it read, and a save
-/// hook's After still sees the pre-save version (the same "before commit" view the real backends give).
+/// The row version counter is deliberately not rewound when a save is dropped: it only has to keep increasing for a stale
+/// version to be distinguishable from a current one, so the versions an abandoned save consumed are simply skipped. The
+/// caller entities awaiting a version are recorded here by the row they were written to, not by the version value, so the
+/// version that reaches the caller is whichever one is actually published. A save that fails therefore leaves the caller
+/// holding the versions it read, and a save hook's After still sees the pre-save version (the same "before commit" view the
+/// real backends give).
 /// </para>
 /// </remarks>
-{{ infra_visibility }} sealed class InMemoryWriteJournal
+{{ infra_visibility }} sealed class InMemorySaveStaging
 {
-    private readonly List<(Type EntityType, object Key, EntityBase? Previous)> _entries = new();
+    private readonly Dictionary<(Type EntityType, object Key), EntityBase?> _overlay = new();
+    private readonly List<(Type EntityType, object Key, EntityBase? Base)> _baseline = new();
     private readonly HashSet<(Type EntityType, object Key)> _touched = new();
-    private readonly List<(EntityBase Source, PropertyInfo Property, object? Version)> _stamps =
-        new();
+    private readonly List<(
+        EntityBase Source,
+        PropertyInfo Property,
+        Type EntityType,
+        object Key
+    )> _stamps = new();
 
-    /// <summary>The recorded rows, in the order the save first touched them.</summary>
-    public IReadOnlyList<(Type EntityType, object Key, EntityBase? Previous)> Entries => _entries;
+    /// <summary>The rows the save started from, in the order it first touched them (a null base means the row did not exist yet).</summary>
+    public IReadOnlyList<(Type EntityType, object Key, EntityBase? Base)> Baseline => _baseline;
 
-    /// <summary>Records the snapshot a row holds before the save overwrites it (only the first touch of a row is kept).</summary>
-    public void Capture(Type entityType, object key, EntityBase? previous)
+    /// <summary>The staged writes (a null value marks a delete).</summary>
+    public IReadOnlyDictionary<(Type EntityType, object Key), EntityBase?> Overlay => _overlay;
+
+    /// <summary>The caller entities awaiting the row version of the row they were written to.</summary>
+    public IReadOnlyList<(
+        EntityBase Source,
+        PropertyInfo Property,
+        Type EntityType,
+        object Key
+    )> Stamps => _stamps;
+
+    /// <summary>Records the snapshot the store held for a row when the save first touched it (later touches are ignored).</summary>
+    public void CaptureBase(Type entityType, object key, EntityBase? baseRow)
     {
         if (_touched.Add((entityType, key)))
         {
-            _entries.Add((entityType, key, previous));
+            _baseline.Add((entityType, key, baseRow));
         }
     }
 
-    /// <summary>Holds a newly assigned row version for a caller entity until the save has fully succeeded (see <see cref="ApplySourceStamps"/>).</summary>
-    public void DeferSourceStamp(EntityBase source, PropertyInfo property, object? version) =>
-        _stamps.Add((source, property, version));
+    /// <summary>Stages a write for a row (a null snapshot marks a delete), replacing whatever the save staged for it before.</summary>
+    public void Stage(Type entityType, object key, EntityBase? snapshot) =>
+        _overlay[(entityType, key)] = snapshot;
 
-    /// <summary>Hands the newly assigned row versions to the caller's entities (called only once every phase of the save has succeeded).</summary>
-    public void ApplySourceStamps()
-    {
-        foreach (var (source, property, version) in _stamps)
-        {
-            property.SetValue(source, version);
-        }
+    /// <summary>Gets the write the save has staged for a row (true when it staged one at all, including a delete).</summary>
+    public bool TryGetStaged(Type entityType, object key, out EntityBase? snapshot) =>
+        _overlay.TryGetValue((entityType, key), out snapshot);
 
-        _stamps.Clear();
-    }
+    /// <summary>The snapshot staged for a row (null for a delete as well as for a row the save never staged).</summary>
+    public EntityBase? Staged(Type entityType, object key) =>
+        _overlay.GetValueOrDefault((entityType, key));
 
-    /// <summary>Drops everything recorded (called once the journal has been rolled back).</summary>
-    public void Clear()
-    {
-        _entries.Clear();
-        _touched.Clear();
-        _stamps.Clear();
-    }
+    /// <summary>Records that a caller entity is waiting for the row version the given row ends up published with.</summary>
+    public void RecordStamp(
+        EntityBase source,
+        PropertyInfo property,
+        Type entityType,
+        object key
+    ) => _stamps.Add((source, property, entityType, key));
 }
 
 /// <summary>
@@ -901,9 +1018,8 @@ public sealed class InMemoryDataStore
     /// contained in <see cref="SaveHookSession.Skipped"/>, and the operations actually performed are recorded into
     /// <paramref name="records"/> (in execution order), which is used to determine the After firing order and the actual operations.
     /// Entities whose type has a rowversion column are guarded by <paramref name="mode"/>: updating or deleting a row that
-    /// someone else changed first is rejected. A conflict found part-way through does not leave the writes already applied
-    /// behind: the write scope records them into an undo journal, and the store is rolled back before the exception
-    /// surfaces.
+    /// someone else changed first is rejected. A conflict found part-way through does not leave the earlier writes behind:
+    /// when the caller gave the write scope a staging, none of them ever reached the store to begin with.
     /// </remarks>
     public static int Save(
         EntityBase entity,
@@ -1448,13 +1564,15 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
     /// <summary>Saves the graph according to RowState (cascading to children by default).</summary>
     /// <remarks>
     /// When save hooks are registered, this runs in 3 phases: (1) traverse the graph outside the lock, fire Before, and build the
-    /// skip set; (2) save inside the lock applying the skips and record the (entity, operation) pairs performed; (3) fire After
-    /// outside the lock in execution order. After emulates "before commit": it still sees the row version the entity was read
-    /// with, because the newly assigned versions reach the caller's entities only once every phase has succeeded.
+    /// skip set; (2) stage the save inside the lock applying the skips and record the (entity, operation) pairs performed;
+    /// (3) fire After outside the lock in execution order. After emulates "before commit": nothing it sees has been published
+    /// yet, so the entity still carries the row version it was read with. Once every phase has succeeded the staged writes are
+    /// published as one unit and the newly assigned versions reach the caller's entities.
     /// Entities whose type has a rowversion column are guarded by <paramref name="mode"/>: updating or deleting a row that
-    /// someone else changed first is rejected. The save is all-or-nothing through an undo journal: a conflict found part-way
-    /// through, or an exception thrown by After, rolls the store back to the state it had before the save (and the caller's
-    /// entities keep the versions they had).
+    /// someone else changed first is rejected, both while staging and again when publishing (which is when a row changed
+    /// during phase 3 is caught). The save is all-or-nothing because the store is only ever written by the publish step: a
+    /// conflict found part-way through, or an exception thrown by After, leaves the store exactly as it was and the caller's
+    /// entities holding the versions they had.
     /// </remarks>
     public async Task<int> SaveAsync(
         TEntity entity,
@@ -1474,9 +1592,9 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
             return 0;
         }
 
-        // Undo journal that makes the whole save all-or-nothing: it records every row the save overwrites and holds the newly
-        // assigned row versions until the last phase has succeeded.
-        var journal = new InMemoryWriteJournal();
+        // Copy-on-write staging that makes the whole save all-or-nothing: every write goes here and reaches the store only
+        // once the last phase has succeeded.
+        var staging = new InMemorySaveStaging();
 
         // If hooks are registered, build a session that supplies a context participating in the in-progress store write.
         var hooks =
@@ -1484,7 +1602,7 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
                 ? null
                 : new SaveHookSession(
                     _saveHooks,
-                    e => new InMemorySaveHookContext(Store, e.GetType(){{ if exclude_unbounded_binary || runtime_package_export }}, journal{{ end }})
+                    e => new InMemorySaveHookContext(Store, e.GetType(){{ if exclude_unbounded_binary || runtime_package_export }}, staging{{ end }})
                 );
 
         // Phase 1 (outside the lock): traverse the graph in the same order as Save, fire Before, and build the skip set.
@@ -1500,7 +1618,7 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
             );
         }
 
-        // Phase 2 (inside the lock): save applying the skip set and record the (entity, operation) pairs performed.
+        // Phase 2 (inside the lock): stage the save applying the skip set and record the (entity, operation) pairs performed.
         var records =
             hooks is null ? null : new List<(EntityBase Entity, SaveOperation Operation)>();
         var rows = Store.Write(
@@ -1516,29 +1634,21 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
                     records,
                     changesAlreadyVerified: true
                 ),
-            journal
+            staging
         );
 
-        // Phase 3 (outside the lock): fire After in execution order. An exception here rolls the save phase back, so the
+        // Phase 3 (outside the lock): fire After in execution order. An exception here leaves the staging unpublished, so the
         // "row written but the hook's follow-up failed" half state cannot survive.
         if (hooks is not null)
         {
-            try
+            foreach (var (recordEntity, operation) in records!)
             {
-                foreach (var (recordEntity, operation) in records!)
-                {
-                    await hooks.InvokeAfterAsync(recordEntity, operation, cancellationToken);
-                }
-            }
-            catch
-            {
-                Store.Undo(journal);
-                throw;
+                await hooks.InvokeAfterAsync(recordEntity, operation, cancellationToken);
             }
         }
 
-        // Every phase succeeded, so the newly assigned row versions can now reach the caller's entities.
-        journal.ApplySourceStamps();
+        // Every phase succeeded, so the staged writes become visible as one unit and hand their row versions to the caller.
+        Store.Publish(staging, mode);
 
         // Finalize the saved graph as Unchanged (skipped rows are left as they are).
         EntityGraphSaver.AcceptChanges(entity, cascadeSave, hooks?.Skipped);
@@ -1549,8 +1659,8 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
     /// <remarks>
     /// The hook firing order is the same 3 phases as the single-root overload (Before pre-pass, save, After post-pass), and roots are processed in the specified order.
     /// Entities whose type has a rowversion column are guarded by <paramref name="mode"/>: updating or deleting a row that
-    /// someone else changed first is rejected. All the roots share one undo journal, so a conflict found part-way through, or
-    /// an exception thrown by After, rolls every root back to the state it had before the save.
+    /// someone else changed first is rejected. All the roots share one staging and are published together, so a conflict found
+    /// part-way through, or an exception thrown by After, leaves every root unwritten.
     /// </remarks>
     public async Task<int> SaveAsync(
         IEnumerable<TEntity> entities,
@@ -1573,15 +1683,15 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
             return 0;
         }
 
-        // Undo journal shared by every root, so the whole call is one all-or-nothing unit.
-        var journal = new InMemoryWriteJournal();
+        // Staging shared by every root, so the whole call is one all-or-nothing unit.
+        var staging = new InMemorySaveStaging();
 
         var hooks =
             _saveHooks is null
                 ? null
                 : new SaveHookSession(
                     _saveHooks,
-                    e => new InMemorySaveHookContext(Store, e.GetType(){{ if exclude_unbounded_binary || runtime_package_export }}, journal{{ end }})
+                    e => new InMemorySaveHookContext(Store, e.GetType(){{ if exclude_unbounded_binary || runtime_package_export }}, staging{{ end }})
                 );
 
         // Phase 1 (outside the lock): traverse the graphs of all roots and fire Before.
@@ -1600,7 +1710,7 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
             }
         }
 
-        // Phase 2 (inside the lock): save all roots applying the skips and record the (entity, operation) pairs performed.
+        // Phase 2 (inside the lock): stage all roots applying the skips and record the (entity, operation) pairs performed.
         var records =
             hooks is null ? null : new List<(EntityBase Entity, SaveOperation Operation)>();
         var rows = Store.Write(
@@ -1625,28 +1735,20 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
 
                 return total;
             },
-            journal
+            staging
         );
 
-        // Phase 3 (outside the lock): fire After in execution order (an exception here rolls the save phase back).
+        // Phase 3 (outside the lock): fire After in execution order (an exception here leaves the staging unpublished).
         if (hooks is not null)
         {
-            try
+            foreach (var (recordEntity, operation) in records!)
             {
-                foreach (var (recordEntity, operation) in records!)
-                {
-                    await hooks.InvokeAfterAsync(recordEntity, operation, cancellationToken);
-                }
-            }
-            catch
-            {
-                Store.Undo(journal);
-                throw;
+                await hooks.InvokeAfterAsync(recordEntity, operation, cancellationToken);
             }
         }
 
-        // Every phase succeeded, so the newly assigned row versions can now reach the caller's entities.
-        journal.ApplySourceStamps();
+        // Every phase succeeded, so the staged writes become visible as one unit and hand their row versions to the caller.
+        Store.Publish(staging, mode);
 
         foreach (var entity in roots)
         {
@@ -1695,19 +1797,19 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
 /// <remarks>
 /// Excluded-column binary writes are applied to the store with the same Stream-to-byte[] conversion as the existing in-memory
 /// stream accessors (strictly following the <c>ResolveWriteLength</c> contract validation and the clone/Put semantics). Raw SQL
-/// cannot run in memory and throws <see cref="NotSupportedException"/>. Writes made here join the save's undo journal, so if a
-/// later After throws they are rolled back together with the rest of the save unit.
+/// cannot run in memory and throws <see cref="NotSupportedException"/>. Writes made here join the save's staging, so they build
+/// on what the save has already staged for the row, become visible with it, and never reach the store if a later After throws.
 /// </remarks>
 {{~ if exclude_unbounded_binary || runtime_package_export ~}}
 {{ infra_visibility }} sealed class InMemorySaveHookContext(
     InMemoryDataStore store,
     Type entityType,
-    InMemoryWriteJournal journal
+    InMemorySaveStaging staging
 ) : ISaveHookContext
 {
     private readonly InMemoryDataStore _store = store;
     private readonly Type _entityType = entityType;
-    private readonly InMemoryWriteJournal _journal = journal;
+    private readonly InMemorySaveStaging _staging = staging;
 {{~ else ~}}
 {{ infra_visibility }} sealed class InMemorySaveHookContext(InMemoryDataStore store, Type entityType)
     : ISaveHookContext
@@ -1763,7 +1865,7 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
 {{~ end ~}}
         }
 
-        return _store.WriteColumnValue(_entityType, NormalizeKey(key), column, stored, _journal);
+        return _store.WriteColumnValue(_entityType, NormalizeKey(key), column, stored, _staging);
     }
 
     /// <summary>Normalizes the primary key (object) into a dictionary key (value objects are opened to their underlying value).</summary>

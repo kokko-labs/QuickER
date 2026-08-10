@@ -224,7 +224,7 @@ public sealed class DocumentSaveHook : ISaveHook<DocumentEntity>
 services.AddSingleton<ISaveHook<DocumentEntity>, DocumentSaveHook>();
 ```
 
-同じエンティティ型に複数のフックを登録できます。**Before は登録順**に呼ばれ、**最初に `false` を返した時点で短絡**します（残りの Before は呼ばれず、その行はスキップ）。**After も登録順**に呼ばれます。Before / After が投げた例外はそのまま伝播し、Save 全体がロールバックします（実トランザクションを持つ実装先はトランザクションで、インメモリは undo ジャーナルで巻き戻します）。
+同じエンティティ型に複数のフックを登録できます。**Before は登録順**に呼ばれ、**最初に `false` を返した時点で短絡**します（残りの Before は呼ばれず、その行はスキップ）。**After も登録順**に呼ばれます。Before / After が投げた例外はそのまま伝播し、Save 全体がロールバックします（実トランザクションを持つ実装先はトランザクションで巻き戻し、インメモリはそもそも書き込みを公開していません＝後述）。
 
 **対象は `SaveAsync`（単一・複数の両形態）だけ**です。低レベル API である `InsertAsync` / `UpdateAsync` / `DeleteAsync` の直接呼び出しと `BulkInsertAsync` は、フックを**素通り**します（発火しません）。
 
@@ -236,7 +236,7 @@ services.AddSingleton<ISaveHook<DocumentEntity>, DocumentSaveHook>();
 
 #### After とコンテキスト
 
-After は**操作の直後・コミット前**に、進行中のトランザクションに参加する `ISaveHookContext` を受け取ります。フック内から Repository の通常 API を呼ぶと別接続でロック競合するため、context 経由の操作を使います。After が例外を投げると Save ごとロールバックするため、「行はあるがファイル未登録」という中途半端な状態は構造的に生じません（インメモリも undo ジャーナルで同じ保証を持ちます）。
+After は**操作の直後・コミット前**に、進行中のトランザクションに参加する `ISaveHookContext` を受け取ります。フック内から Repository の通常 API を呼ぶと別接続でロック競合するため、context 経由の操作を使います。After が例外を投げると Save ごとロールバックするため、「行はあるがファイル未登録」という中途半端な状態は構造的に生じません（インメモリも、書き込みをステージングして全フェーズ成功後にだけ公開することで同じ保証を持ちます）。
 
 context が提供する操作（生ハンドルは公開しません）:
 
@@ -251,7 +251,7 @@ context が提供する操作（生ハンドルは公開しません）:
 |---|---|---|
 | QuickER 版 Repository（SQL Server / SQLite） | 完全対応（After は各操作の直後） | `WriteBinaryColumnAsync` / `ExecuteSqlAsync` とも対応 |
 | EF Core 版 Repository（`GenerateEfCore`） | 対応（After は `SaveChanges` 後に一括） | `ExecuteSqlAsync` は対応・`WriteBinaryColumnAsync` は `NotSupportedException` |
-| インメモリ（`GenerateInMemoryRepositories`） | 対応（擬似トランザクション） | `WriteBinaryColumnAsync` はストアへ・`ExecuteSqlAsync` は `NotSupportedException`。実トランザクションはありませんが undo ジャーナルで保存単位を all-or-nothing にするため、**After が例外を投げるとストアの変更（After が書いた blob を含む）も巻き戻ります** |
+| インメモリ（`GenerateInMemoryRepositories`） | 対応（擬似トランザクション） | `WriteBinaryColumnAsync` はストアへ・`ExecuteSqlAsync` は `NotSupportedException`。実トランザクションはありませんが copy-on-write で保存単位を all-or-nothing にします＝全書き込みをステージングし、最後のフェーズが成功したときだけ一括公開するため、**失敗した保存の書き込み（After が書いた blob を含む）は一度も見えず**、失敗の巻き添えで並行書き込みが消えることもありません |
 | リモート（`--generate-remote-services`） | **サーバー側の DI に登録したフックが発火**します | サーバー側の実体実装に準じます。**既知の制限**: Before でサーバーがスキップした行でも、クライアント側の `RowState` はスキップを反映せず `Unchanged` に確定します |
 
 ### 生 SQL の逃げ道
@@ -390,7 +390,8 @@ await repository.SaveAsync(order, cancellationToken: ct);
 ```
 
 - **「行なし」と「版が古い」は別の結果です。** 単一の `UpdateAsync` は行が存在しなければ従来どおり `false` を返し、行はあるが版が進んでいれば `SaveConflictException` を送出します。`insertWhenUpdateMissing: true` も同じ線引きで、行なしは INSERT へ切り替わり、版が古い場合は競合として報告されます（INSERT へ倒すと競合が主キー重複に化けるためです）。
-- **グラフ保存は削除も守り**、競合が 1 件でもあれば保存単位の全体がロールバックされます（インメモリ Repository も、実トランザクションの代わりに undo ジャーナルで同じく巻き戻します）。
+- **グラフ保存は削除も守り**、競合が 1 件でもあれば保存単位の全体がロールバックされます（インメモリ Repository は書き込みをステージングして一括公開する方式で同じ結果になります＝失敗した保存はそもそもストアへ届きません）。
+- **インメモリは公開時にもう一度検証します。** Save フックはストアのロック外で走るため、保存が起点にした行を他者が先に書き換えている場合があり、公開時にそれを検出して `SaveConflictException` にします（他者の書き込みは無傷のまま残ります）。rowversion 列を**持たない**型はこの検証の対象外で、並行性トークンが無い以上ストアの契約は後勝ちのままです。`ForceOverwrite` も同じ理由で検証を外します。保存が挿入する行だけは必ず検証します（先に取られた主キーは並行性の判断ではなく主キー重複だからです）。
 - **新しい版が反映されます。** 挿入・更新・グラフ保存が成功すると、エンティティは DB が採番した版を保持するため、再取得せずに同じインスタンスをそのまま保存できます。Save フックの `AfterSaveAsync` はコミット前に走るため、この時点ではまだ古い版が見えます。
 - **どのバックエンドでも契約は同じです。** QuickER 版 Repository は `WHERE ... AND <rowversion> = @original` で文を守り `OUTPUT` 句で新しい版を読み戻します。EF Core は自前の並行性トークン（`IsRowVersion()`）を使い `DbUpdateConcurrencyException` を同じ例外へ変換します。インメモリ Repository は単調増加する 8 バイトの擬似版で DB を模します。HTTP リモートクライアントはモードをリクエストへ載せ、応答が返す版を書き戻します。
 

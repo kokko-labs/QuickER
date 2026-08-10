@@ -99,6 +99,12 @@ public sealed class SaveHookInMemoryRuntimeTests : SaveHookRuntimeTestsBase, IDi
             .WithUnboundedBinary()
             .FirstOrDefaultAsync(Ct);
         readBack!.Payload.Should().Equal(newPayload, "After が書いた payload がストアに反映される");
+        readBack
+            .Title.Should()
+            .Be(
+                "alpha-hooked",
+                "保存フェーズの更新も同時に反映される（After の blob 書き込みは保存中の行の上に積む）"
+            );
     }
 
     // ── InMemory 固有 1-b: After が書いた blob も後続の After 例外で巻き戻る ──

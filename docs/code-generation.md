@@ -224,7 +224,7 @@ public sealed class DocumentSaveHook : ISaveHook<DocumentEntity>
 services.AddSingleton<ISaveHook<DocumentEntity>, DocumentSaveHook>();
 ```
 
-You can register multiple hooks for the same entity type. **Before runs in registration order** and **short-circuits the moment one returns `false`** (the remaining Before hooks are not called, and that row is skipped). **After also runs in registration order.** An exception thrown by Before / After propagates as-is and rolls back the entire save (a target with a real transaction rolls the transaction back; in-memory rolls back through an undo journal).
+You can register multiple hooks for the same entity type. **Before runs in registration order** and **short-circuits the moment one returns `false`** (the remaining Before hooks are not called, and that row is skipped). **After also runs in registration order.** An exception thrown by Before / After propagates as-is and rolls back the entire save (a target with a real transaction rolls the transaction back; in-memory never published the writes in the first place - see below).
 
 **Only `SaveAsync` (both the single and the multiple form) is targeted.** Direct calls to the low-level APIs `InsertAsync` / `UpdateAsync` / `DeleteAsync`, and `BulkInsertAsync`, **bypass** the hooks (they do not fire).
 
@@ -236,7 +236,7 @@ Because a skip is isolated, consistency is the hook author's responsibility. In 
 
 #### After and the context
 
-After receives, **just after the operation and before commit**, an `ISaveHookContext` that joins the in-flight transaction. Calling the repository's ordinary APIs from within the hook would contend for locks on a separate connection, so use the operations exposed through `context`. Because throwing from After rolls back the whole save, the half-finished state of "the row exists but the file is not registered" is structurally impossible (in-memory gives the same guarantee through an undo journal).
+After receives, **just after the operation and before commit**, an `ISaveHookContext` that joins the in-flight transaction. Calling the repository's ordinary APIs from within the hook would contend for locks on a separate connection, so use the operations exposed through `context`. Because throwing from After rolls back the whole save, the half-finished state of "the row exists but the file is not registered" is structurally impossible (in-memory gives the same guarantee by staging its writes and publishing them only once every phase has succeeded).
 
 Operations the context provides (it does not expose raw handles):
 
@@ -251,7 +251,7 @@ Operations the context provides (it does not expose raw handles):
 |---|---|---|
 | QuickER Repository (SQL Server / SQLite) | Full support (After fires right after each operation) | Both `WriteBinaryColumnAsync` and `ExecuteSqlAsync` are supported |
 | EF Core Repository (`GenerateEfCore`) | Supported (After fires in a batch after `SaveChanges`) | `ExecuteSqlAsync` supported; `WriteBinaryColumnAsync` throws `NotSupportedException` |
-| In-memory (`GenerateInMemoryRepositories`) | Supported (pseudo transaction) | `WriteBinaryColumnAsync` writes to the store; `ExecuteSqlAsync` throws `NotSupportedException`. There is no real transaction, but an undo journal makes the save unit all-or-nothing, so **store changes (including a blob written by After) are rolled back when After throws** |
+| In-memory (`GenerateInMemoryRepositories`) | Supported (pseudo transaction) | `WriteBinaryColumnAsync` writes to the store; `ExecuteSqlAsync` throws `NotSupportedException`. There is no real transaction, but the save unit is all-or-nothing through copy-on-write: every write is staged and published as one unit only after the last phase succeeds, so **nothing a failed save wrote (including a blob written by After) is ever visible**, and a concurrent writer's changes cannot be trampled by the failure |
 | Remote (`--generate-remote-services`) | **A hook registered in the server-side DI fires** | Follows the server-side real implementation. **Known limitation**: even for a row the server skipped in Before, the client-side `RowState` does not reflect the skip and is committed to `Unchanged` |
 
 ### Raw SQL escape hatch
@@ -390,7 +390,8 @@ await repository.SaveAsync(order, cancellationToken: ct);
 ```
 
 - **A missing row and a stale version are different outcomes.** A single `UpdateAsync` returns `false` when the row no longer exists (the pre-existing contract) and throws `SaveConflictException` when the row is still there but its version moved on. `insertWhenUpdateMissing: true` draws the same line: a missing row switches to an INSERT, while a stale version is reported as a conflict (switching that to an INSERT would turn the conflict into a primary-key violation).
-- **A graph save guards deletes as well**, and a single conflict rolls the whole save unit back (the in-memory repository rolls back the same way, through an undo journal instead of a real transaction).
+- **A graph save guards deletes as well**, and a single conflict rolls the whole save unit back (the in-memory repository reaches the same result differently: it stages its writes and publishes them in one go, so a failed save simply never reaches the store).
+- **The in-memory repository verifies again when it publishes.** Save hooks run outside the store lock, so a row the save started from may have been written by someone else in the meantime; publishing rejects that with a `SaveConflictException` and leaves the other writer's row untouched. A type **without** a rowversion column is not verified at that point - without a concurrency token the store's contract stays last-write-wins - and `ForceOverwrite` waives the verification for the same reason. A row the save inserts is always verified, because a primary key taken meanwhile is a duplicate key rather than a concurrency decision.
 - **The new version is written back.** After a successful insert, update, or graph save, the entity holds the version the database assigned, so the same instance can be saved again without being re-read. A save hook's `AfterSaveAsync` runs before the commit and therefore still sees the old version.
 - **Every backend follows the same contract.** The QuickER Repository guards the statement with `WHERE ... AND <rowversion> = @original` and reads the new version back through an `OUTPUT` clause; EF Core uses its own concurrency token (`IsRowVersion()`) and converts `DbUpdateConcurrencyException` into the same exception; the in-memory repository emulates the database with a monotonically increasing 8-byte token; the HTTP remote client carries the mode in the request and writes back the versions the response returns.
 
