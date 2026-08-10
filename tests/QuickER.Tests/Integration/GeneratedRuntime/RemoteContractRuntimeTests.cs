@@ -119,7 +119,7 @@ public sealed class RemoteContractRuntimeTests : IDisposable
         var loaded = await orders.GetByIdAsync(OrderIdValue.Create(10), Ct);
         loaded.Should().NotBeNull();
         loaded!.Memo = MemoValue.Create("apple tart");
-        (await orders.UpdateAsync(loaded, Ct)).Should().BeTrue();
+        (await orders.UpdateAsync(loaded, cancellationToken: Ct)).Should().BeTrue();
         (await orders.DeleteAsync(OrderIdValue.Create(11), Ct)).Should().BeTrue();
         (await orders.GetAllAsync(Ct)).Should().ContainSingle();
     }

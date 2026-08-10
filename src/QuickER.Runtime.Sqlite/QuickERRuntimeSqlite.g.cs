@@ -297,6 +297,7 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
     /// <summary>Updates an entity (true when a matching row was updated).</summary>
     public async Task<bool> UpdateAsync(
         TEntity entity,
+        ConcurrencyMode mode = ConcurrencyMode.Optimistic,
         CancellationToken cancellationToken = default
     )
     {
@@ -396,6 +397,7 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
         bool cascadeSave = true,
         bool cascadeDelete = true,
         bool insertWhenUpdateMissing = false,
+        ConcurrencyMode mode = ConcurrencyMode.Optimistic,
         CancellationToken cancellationToken = default
     )
     {
@@ -458,6 +460,7 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
         bool cascadeSave = true,
         bool cascadeDelete = true,
         bool insertWhenUpdateMissing = false,
+        ConcurrencyMode mode = ConcurrencyMode.Optimistic,
         CancellationToken cancellationToken = default
     )
     {
@@ -2079,6 +2082,10 @@ public sealed class EntitySaveMetadata
     /// <summary>Gets the unbounded binary columns excluded from SELECT / UPDATE (marked with <see cref="UnboundedBinaryColumnAttribute"/>). Empty when there are no excluded columns.</summary>
     public required IReadOnlyList<PropertyInfo> ExcludedProperties { get; init; }
 
+    /// <summary>Gets the rowversion (concurrency token) property, or <c>null</c> when the table has no such column.</summary>
+    /// <remarks>Resolved from <see cref="StoreGeneratedColumnAttribute"/>. A table carries at most one rowversion column, so the first match is used.</remarks>
+    public PropertyInfo? RowVersionProperty { get; init; }
+
     /// <summary>Gets the (property, column name) pairs of the SELECT columns, resolved at build time. Row mapping enumerates this instead of reflecting for column names per row.</summary>
     public required IReadOnlyList<(PropertyInfo Property, string ColumnName)> SelectColumns { get; init; }
 
@@ -2185,6 +2192,9 @@ public sealed class EntitySaveMetadata
                 property.GetCustomAttribute<StoreGeneratedColumnAttribute>() is not null
             )
             .ToList();
+        // A store-generated column doubles as the table's concurrency token; a table carries at most one of them
+        var rowVersionProperty =
+            storeGeneratedColumns.Count == 0 ? null : storeGeneratedColumns[0];
         // INSERT / BulkInsert targets are all columns minus store-generated columns (identical to all columns when there are none)
         var insertProperties =
             storeGeneratedColumns.Count == 0
@@ -2201,6 +2211,8 @@ public sealed class EntitySaveMetadata
         var updateAssignments = nonKeyProperties.Select(property =>
             $"\"{GetColumnName(property)}\" = @{property.Name}"
         );
+        var insertColumnList = string.Join(", ", insertProperties.Select(property => $"\"{GetColumnName(property)}\""));
+        var insertValueList = string.Join(", ", insertProperties.Select(property => $"@{property.Name}"));
         var cascades = allProperties
             .Select(property =>
                 (property, attribute: property.GetCustomAttribute<NavigationReferenceAttribute>())
@@ -2227,6 +2239,7 @@ public sealed class EntitySaveMetadata
             AllProperties = columns,
             SelectProperties = selectProperties,
             ExcludedProperties = excludedColumns,
+            RowVersionProperty = rowVersionProperty,
             // Resolve column names for row mapping at build time to eliminate per-row [Column] reflection
             SelectColumns = selectProperties.Select(property => (property, GetColumnName(property))).ToList(),
             ColumnNameByProperty = columns.ToDictionary(property => property, GetColumnName),
@@ -2244,7 +2257,7 @@ public sealed class EntitySaveMetadata
             SelectAllSql = $"SELECT {columnList} FROM {tableName};",
             SelectByIdSql = $"SELECT {columnList} FROM {tableName} WHERE \"{keyColumnName}\" = @id;",
             InsertSql =
-                $"INSERT INTO {tableName} ({string.Join(", ", insertProperties.Select(property => $"\"{GetColumnName(property)}\""))}) VALUES ({string.Join(", ", insertProperties.Select(property => $"@{property.Name}"))});",
+                $"INSERT INTO {tableName} ({insertColumnList}) VALUES ({insertValueList});",
             UpdateSql =
                 $"UPDATE {tableName} SET {string.Join(", ", updateAssignments)} WHERE \"{keyColumnName}\" = @id;",
             DeleteSql = $"DELETE FROM {tableName} WHERE \"{keyColumnName}\" = @id;",
@@ -3007,10 +3020,8 @@ public static class EntityGraphSaver
                 return rows;
             }
 
-            rows += await ExecuteAsync(
+            rows += await DeleteEntityAsync(
                 entity,
-                meta => meta.DeleteSql,
-                static (meta, command, e) => meta.BindEntityKeyParameter(command, e),
                 connection,
                 transaction,
                 cancellationToken
@@ -3033,10 +3044,8 @@ public static class EntityGraphSaver
                 || await hooks.InvokeBeforeAsync(entity, SaveOperation.Insert, cancellationToken)
             )
             {
-                rows += await ExecuteAsync(
+                rows += await InsertEntityAsync(
                     entity,
-                    meta => meta.InsertSql,
-                    static (meta, command, e) => meta.BindInsertParameters(command, e),
                     connection,
                     transaction,
                     cancellationToken
@@ -3148,7 +3157,13 @@ public static class EntityGraphSaver
 
         foreach (var child in EnumerateCascadeChildren(entity))
         {
-            rows += await DeleteGraphAsync(child, connection, transaction, cancellationToken, hooks);
+            rows += await DeleteGraphAsync(
+                child,
+                connection,
+                transaction,
+                cancellationToken,
+                hooks
+            );
         }
 
         // Before(Delete) fires from the subtree's children upward. On false, "the children are gone but this node remains" (the consequence of a standalone skip)
@@ -3161,10 +3176,8 @@ public static class EntityGraphSaver
             return rows;
         }
 
-        rows += await ExecuteAsync(
+        rows += await DeleteEntityAsync(
             entity,
-            meta => meta.DeleteSql,
-            static (meta, command, e) => meta.BindEntityKeyParameter(command, e),
             connection,
             transaction,
             cancellationToken
@@ -3178,6 +3191,42 @@ public static class EntityGraphSaver
         return rows;
     }
 
+    /// <summary>Inserts a single row.</summary>
+    private static Task<int> InsertEntityAsync(
+        EntityBase entity,
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        CancellationToken cancellationToken
+    )
+    {
+        return ExecuteAsync(
+            entity,
+            meta => meta.InsertSql,
+            static (meta, command, e) => meta.BindInsertParameters(command, e),
+            connection,
+            transaction,
+            cancellationToken
+        );
+    }
+
+    /// <summary>Deletes a single row.</summary>
+    private static Task<int> DeleteEntityAsync(
+        EntityBase entity,
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        CancellationToken cancellationToken
+    )
+    {
+        return ExecuteAsync(
+            entity,
+            meta => meta.DeleteSql,
+            static (meta, command, e) => meta.BindEntityKeyParameter(command, e),
+            connection,
+            transaction,
+            cancellationToken
+        );
+    }
+
     /// <summary>Executes the update and returns the affected row count and the operation actually performed (Insert when switched).</summary>
     private static async Task<(int Rows, SaveOperation Performed)> UpdateAsync(
         EntityBase entity,
@@ -3187,6 +3236,8 @@ public static class EntityGraphSaver
         CancellationToken cancellationToken
     )
     {
+        var metadata = EntitySaveMetadata.For(entity.GetType());
+
         var affected = await ExecuteAsync(
             entity,
             meta => meta.UpdateSql,
@@ -3205,10 +3256,8 @@ public static class EntityGraphSaver
         // switch to INSERT or report it as a conflict
         if (insertWhenUpdateMissing)
         {
-            var inserted = await ExecuteAsync(
+            var inserted = await InsertEntityAsync(
                 entity,
-                meta => meta.InsertSql,
-                static (meta, command, e) => meta.BindInsertParameters(command, e),
                 connection,
                 transaction,
                 cancellationToken
@@ -3216,9 +3265,9 @@ public static class EntityGraphSaver
             return (inserted, SaveOperation.Insert);
         }
 
-        var metadata = EntitySaveMetadata.For(entity.GetType());
-        throw new SaveConflictException(
-            $"The record to update was not found ({entity.GetType().Name}, key {metadata.KeyProperty.GetValue(entity)}). It may have been deleted by another user."
+        throw SaveConflictException.NotFound(
+            entity.GetType(),
+            metadata.KeyProperty.GetValue(entity)
         );
     }
 

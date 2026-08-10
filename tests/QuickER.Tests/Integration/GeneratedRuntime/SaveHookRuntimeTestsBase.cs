@@ -293,7 +293,7 @@ public abstract class SaveHookRuntimeTestsBase
         await documents.InsertAsync(NewDocument(40, "direct-insert", null, [1]), Ct);
         var updated = await documents.GetByIdAsync(40, Ct);
         updated!.Title = "direct-update";
-        await documents.UpdateAsync(updated, Ct);
+        await documents.UpdateAsync(updated, cancellationToken: Ct);
         await documents.DeleteAsync(40, Ct);
         await documents.BulkInsertAsync([NewDocument(41, "bulk", null, [1])], Ct);
 

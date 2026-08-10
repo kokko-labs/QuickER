@@ -384,6 +384,15 @@ internal sealed class CSharpMappingPropertyPair
     /// <summary>byte[] 系プロパティかどうか</summary>
     public required bool IsBinary { get; init; }
 
+    /// <summary>
+    /// DB が値を生成する行バージョン列（rowversion / timestamp）かどうか。
+    /// </summary>
+    /// <remarks>
+    /// true のとき Mapper の Entity へのコピーは「入力があるときだけ代入」に切り替える。
+    /// DB 採番のため新規行では未入力が正常であり、未入力を欠落として例外にすると新規保存が成立しない。
+    /// </remarks>
+    public required bool IsRowVersion { get; init; }
+
     /// <summary>Entity からバインディング文字列へ変換する式</summary>
     public required string LoadBindingExpression { get; init; }
 
@@ -655,7 +664,14 @@ internal sealed record CSharpEditModelPropertyModel
     public required bool IsNullable { get; init; }
 
     /// <summary>必須項目（Entity 側が非 NULL）かどうか</summary>
+    /// <remarks>行バージョン列（<see cref="IsRowVersion"/>）は DB 採番のため非 NULL でも必須にしない。</remarks>
     public required bool IsRequired { get; init; }
+
+    /// <summary>
+    /// DB が値を生成する行バージョン列（rowversion / timestamp）かどうか。
+    /// </summary>
+    /// <remarks>必須検証の除外と、Mapper の「入力があるときだけ代入」への切り替えに使う。</remarks>
+    public bool IsRowVersion { get; init; }
 
     /// <summary>参照型かどうか</summary>
     public required bool IsReferenceType { get; init; }

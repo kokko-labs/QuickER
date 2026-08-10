@@ -73,7 +73,7 @@ public sealed class BinaryInMemoryFixtureRuntimeTests
         var doc = await documents.GetByIdAsync(1, Ct);
         doc!.Payload = [5, 5];
 
-        var act = async () => await documents.UpdateAsync(doc, Ct);
+        var act = async () => await documents.UpdateAsync(doc, cancellationToken: Ct);
 
         await act.Should().ThrowAsync<InvalidOperationException>();
     }
@@ -89,7 +89,7 @@ public sealed class BinaryInMemoryFixtureRuntimeTests
         var doc = await documents.GetByIdAsync(1, Ct);
         doc!.Title = "alpha2";
 
-        (await documents.UpdateAsync(doc, Ct)).Should().BeTrue();
+        (await documents.UpdateAsync(doc, cancellationToken: Ct)).Should().BeTrue();
         (await documents.GetByIdAsync(1, Ct))!.Title.Should().Be("alpha2");
     }
 

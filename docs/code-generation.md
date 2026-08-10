@@ -363,7 +363,43 @@ A column whose value the DB generates (SQL Server's `rowversion` / `timestamp`, 
 - **Never written**: the DB assigns these columns' values, so the repository writes no explicit value. Attempting an explicit insert makes SQL Server return `Cannot insert an explicit value into a timestamp column.`, but the exclusion avoids this runtime error.
 - **Read on SELECT**: they are included in the results of `GetByIdAsync` / `GetAllAsync` / `Query()`, and you can read their values (they can be referenced as a concurrency token).
 - **In EF Core mode** the Fluent configuration's `IsRowVersion()` already treats them as store-generated, so this mechanism is not applied.
-- **Optimistic concurrency using rowversion (comparing the version in the UPDATE WHERE) is out of scope** (future work). Note that when a graph save (`SaveAsync`) cannot find the update target row (e.g. another user deleted it), `SaveConflictException` is thrown, but this is an existence check based on an affected-row count of 0 and is unrelated to rowversion comparison.
+- **They double as the table's concurrency token**: saves compare the version the entity was read with against the current row (see the next section).
+
+### Optimistic concurrency (rowversion)
+
+A table that carries a rowversion column is saved with optimistic concurrency, and there is nothing to turn on: the version the entity was read with is compared against the current row, and a save that lost the race is rejected instead of silently overwriting someone else's change. A table without such a column keeps exactly the behaviour it had.
+
+`UpdateAsync` and `SaveAsync` take an optional `ConcurrencyMode`:
+
+| Mode | Behaviour |
+| --- | --- |
+| `Optimistic` (default) | The write is guarded by the version. A row someone else changed first is rejected with `SaveConflictException`. |
+| `ForceOverwrite` | The version guard is dropped (an explicit last-write-wins). |
+
+```csharp
+// Guarded by the version the entity was read with; losing the race throws SaveConflictException
+await repository.UpdateAsync(order, cancellationToken: ct);
+
+// Explicit last-write-wins
+await repository.UpdateAsync(order, ConcurrencyMode.ForceOverwrite, ct);
+
+// A graph save guards the updates and deletes inside the graph the same way
+await repository.SaveAsync(order, cancellationToken: ct);
+```
+
+- **A missing row and a stale version are different outcomes.** A single `UpdateAsync` returns `false` when the row no longer exists (the pre-existing contract) and throws `SaveConflictException` when the row is still there but its version moved on. `insertWhenUpdateMissing: true` draws the same line: a missing row switches to an INSERT, while a stale version is reported as a conflict (switching that to an INSERT would turn the conflict into a primary-key violation).
+- **A graph save guards deletes as well**, and a single conflict rolls the whole transaction back.
+- **The new version is written back.** After a successful insert, update, or graph save, the entity holds the version the database assigned, so the same instance can be saved again without being re-read. A save hook's `AfterSaveAsync` runs before the commit and therefore still sees the old version.
+- **Every backend follows the same contract.** The QuickER Repository guards the statement with `WHERE ... AND <rowversion> = @original` and reads the new version back through an `OUTPUT` clause; EF Core uses its own concurrency token (`IsRowVersion()`) and converts `DbUpdateConcurrencyException` into the same exception; the in-memory repository emulates the database with a monotonically increasing 8-byte token; the HTTP remote client carries the mode in the request and writes back the versions the response returns.
+
+Known limitations:
+
+- Only SQL Server has a `rowversion` type, so the QuickER Repository applies this to the `sqlserver` dialect only. A diagram targeting SQLite (or another dialect) has no such column and is unaffected.
+- `BulkInsertAsync` uses `SqlBulkCopy`, which cannot return generated values, so the entities keep whatever version they had. Re-read them when a later update needs the version.
+- The version is read back through an `OUTPUT` clause, which SQL Server rejects on a table that has a trigger. QuickER's DDL generation never emits triggers, so this only affects tables whose triggers were added outside QuickER.
+- Deleting a row that is already gone stays asymmetric between the backends, as it always has: the QuickER Repository tolerates it silently, while a graph save on EF Core reports it as `SaveConflictException`.
+- A rowversion column carries no `[DbColumnMeta]` token, so C# reverse engineering does not restore it (declare it in the diagram).
+- Raw SQL (`ExecuteSqlAsync` and friends) and the stream accessors for unbounded binary columns are direct operations and are not guarded.
 
 ### Excluding unbounded binary columns (ExcludeUnboundedBinaryColumns)
 
@@ -465,7 +501,7 @@ services.AddGeneratedEfCoreRepositories(options => options.UseSqlServer(connecti
 ```
 
 - Save uses a disconnected-graph save via `TrackGraph` (converts `RowState` to EF Core's state).
-- An optimistic-concurrency conflict converts EF Core's exception to `SaveConflictException` (unifying the contract).
+- Optimistic concurrency is at parity: `ConcurrencyMode` selects the policy, EF Core's `DbUpdateConcurrencyException` is converted to `SaveConflictException`, and the refreshed concurrency token is left on the entity (see [Optimistic concurrency (rowversion)](#optimistic-concurrency-rowversion)).
 - The raw-SQL APIs are at full parity.
 
 **Combined generation with the QuickER Repository** (both ON) is for parity verification and can only be specified via the CLI / config file; the GUI is an exclusive choice. Also, the EF Core Repository and multi-target QuickER Repositories (below) cannot be combined (a diagnostic error).
@@ -545,6 +581,7 @@ Points to keep in mind:
 - **Exception types are restored**: the server's `SaveConflictException` is thrown on the client as `SaveConflictException` too via HTTP 409 (the same catch as in the direct case works), and other server exceptions become `RemoteRepositoryException` (preserving the status code and message).
 - **A request the server cannot interpret is answered with 400, not 500.** Anything that fails while the request itself is being read — a malformed or empty JSON body, a non-JSON content type, a type mismatch, a value that fails value-object validation, or a missing/unrestorable `?id=` key on the binary endpoints — is a fault in what the client sent, so it returns HTTP 400 with a `RemoteError` of type `"BadRequest"` (the client throws `RemoteRepositoryException` with `StatusCode` 400). The message of a 400 only describes the client's own payload, and neither the server-side logging nor the `OnServerError` hook runs (both are reserved for 500). A request rejected by the server infrastructure (`BadHttpRequestException`, for example when the request body size limit is exceeded) keeps the status code it carries, such as 413.
 - **After a successful graph save (Save), the local RowState is also committed** (the same behavior as the direct case).
+- **Optimistic concurrency travels over the wire.** The `ConcurrencyMode` argument is part of the Update / Save request, and the Insert / Update / Save responses carry the row versions the save assigned, keyed by entity type and primary key, which the client writes back onto the local graph. A remote client therefore ends up holding the same versions a direct connection would, and can keep saving the same entities without re-reading them.
 - **A 500 response carries the server-side exception message verbatim.** This is intentional: the message is what lets the client restore the failure, so that `catch` looks the same as in the direct case. The full exception, including the stack trace, is written only to the server side, through `ILoggerFactory` (category `QuickER.RemoteServer`; a no-op when the host has no logging provider). When you expose the endpoints beyond a trusted boundary, combine them with authorization or with exception-translating middleware so that internal details do not leak into the response.
 - Authentication and TLS are out of scope. Configure the client with an authentication-handler-equipped HttpClient via `AddGeneratedHttpRemoteRepositories(Func<IServiceProvider, HttpClient>)`, and add ASP.NET Core authorization to the return value (`RouteGroupBuilder`) of `MapGeneratedRemoteEndpoints()`.
 - **The HttpClient returned by the factory overload is owned by the caller.** `AddGeneratedHttpRemoteRepositories(Func<IServiceProvider, HttpClient>)` invokes the factory every time a repository is resolved (once per scope and per entity), and the returned HttpClient is disposed by neither the generated code nor the DI container. Return a shared instance, or one managed by `IHttpClientFactory`; creating a new HttpClient on every call exhausts sockets. (The base-address overload creates a single shared instance that the container owns, so the client is disposed together with the `ServiceProvider`; a repository resolved from an already disposed provider therefore throws `ObjectDisposedException` on use.)

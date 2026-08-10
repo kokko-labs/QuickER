@@ -1132,27 +1132,62 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
     }
 
     /// <summary>Updates an entity (true when a target row was updated).</summary>
+    /// <remarks>
+    /// When the entity carries a concurrency token (a rowversion column), <paramref name="mode"/> decides whether the update
+    /// is guarded by the version the entity was read with. A guarded update that finds the row changed by someone else throws
+    /// a <see cref="SaveConflictException"/>; a row that no longer exists still returns <c>false</c>.
+    /// </remarks>
+    /// <param name="entity">The entity to update.</param>
+    /// <param name="mode">How a concurrent modification is handled when the entity carries a concurrency token (no effect otherwise).</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
     public async Task<bool> UpdateAsync(
         TEntity entity,
+        ConcurrencyMode mode = ConcurrencyMode.Optimistic,
         CancellationToken cancellationToken = default
     )
     {
         ArgumentNullException.ThrowIfNull(entity);
 
         await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
-        context.Entry(entity).State = EntityState.Modified;
+        var entry = context.Entry(entity);
+        entry.State = EntityState.Modified;
 
-        try
+        while (true)
         {
-            await context.SaveChangesAsync(cancellationToken);
-            return true;
-        }
-        catch (DbUpdateConcurrencyException)
-        {
-            // No row to update exists (the same contract as the existing version's "0 affected rows → false").
-            return false;
+            try
+            {
+                await context.SaveChangesAsync(cancellationToken);
+                return true;
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                // Matching no row is ambiguous: either the row is gone (the pre-existing "0 affected rows → false" contract)
+                // or its concurrency token moved on after this entity was read. Reading the stored values tells the two apart
+                var stored = await entry.GetDatabaseValuesAsync(cancellationToken);
+
+                if (stored is null)
+                {
+                    return false;
+                }
+
+                if (mode == ConcurrencyMode.Optimistic)
+                {
+                    throw SaveConflictException.Modified(
+                        entity.GetType(),
+                        KeyOf(entity),
+                        "update"
+                    );
+                }
+
+                // Last-write-wins: adopting the stored values as the originals makes the retried update match the row
+                entry.OriginalValues.SetValues(stored);
+            }
         }
     }
+
+    /// <summary>Reads an entity's primary key value for conflict reporting.</summary>
+    private static object? KeyOf(object entity) =>
+        EntitySaveMetadata.For(entity.GetType()).KeyProperty.GetValue(entity);
 
     /// <summary>Deletes an entity by primary key (true when a target row was deleted).</summary>
     public async Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default)
@@ -1171,11 +1206,17 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
         new(new EfCoreSqlQueryExecutor<TEntity, TContext>(_contextFactory));
 
     /// <summary>Saves inserts, updates, and deletes according to RowState within a single transaction (children are cascaded by default).</summary>
+    /// <remarks>
+    /// Entities carrying a concurrency token (a rowversion column) take part in optimistic concurrency: unless
+    /// <paramref name="mode"/> says otherwise, an update or delete whose row was changed by someone else after it was read
+    /// is rejected with a <see cref="SaveConflictException"/> and the whole transaction rolls back.
+    /// </remarks>
     public async Task<int> SaveAsync(
         TEntity entity,
         bool cascadeSave = true,
         bool cascadeDelete = true,
         bool insertWhenUpdateMissing = false,
+        ConcurrencyMode mode = ConcurrencyMode.Optimistic,
         CancellationToken cancellationToken = default
     )
     {
@@ -1198,16 +1239,23 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
             tracked,
             cascadeSave,
             insertWhenUpdateMissing,
+            mode,
             cancellationToken
         );
     }
 
     /// <summary>Saves multiple aggregate roots together within a single transaction (atomic: all succeed or all roll back).</summary>
+    /// <remarks>
+    /// Entities carrying a concurrency token (a rowversion column) take part in optimistic concurrency: unless
+    /// <paramref name="mode"/> says otherwise, an update or delete whose row was changed by someone else after it was read
+    /// is rejected with a <see cref="SaveConflictException"/> and the whole transaction rolls back.
+    /// </remarks>
     public async Task<int> SaveAsync(
         IEnumerable<TEntity> entities,
         bool cascadeSave = true,
         bool cascadeDelete = true,
         bool insertWhenUpdateMissing = false,
+        ConcurrencyMode mode = ConcurrencyMode.Optimistic,
         CancellationToken cancellationToken = default
     )
     {
@@ -1238,6 +1286,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
             tracked,
             cascadeSave,
             insertWhenUpdateMissing,
+            mode,
             cancellationToken
         );
     }
@@ -1253,6 +1302,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
         List<TrackedOperation> tracked,
         bool cascadeSave,
         bool insertWhenUpdateMissing,
+        ConcurrencyMode mode,
         CancellationToken cancellationToken
     )
     {
@@ -1268,6 +1318,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
                 context,
                 tracked,
                 insertWhenUpdateMissing,
+                mode,
                 cancellationToken
             );
 
@@ -1305,6 +1356,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
             context,
             survivors,
             insertWhenUpdateMissing,
+            mode,
             cancellationToken
         );
 
@@ -1444,14 +1496,27 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
         };
 
     /// <summary>
-    /// Executes SaveChanges and converts a <see cref="DbUpdateConcurrencyException"/> into the existing contract
-    /// (with insertWhenUpdateMissing=true, an UPDATE with no target row is switched to an INSERT and retried;
-    /// otherwise a <see cref="SaveConflictException"/> is thrown).
+    /// Executes SaveChanges and converts a <see cref="DbUpdateConcurrencyException"/> into the save contract.
     /// </summary>
+    /// <remarks>
+    /// SaveChanges reports every statement that matched no row through one exception, which covers two different situations
+    /// that are told apart here by reading the stored values of each reported entry:
+    /// <list type="bullet">
+    ///   <item>the row is gone: with insertWhenUpdateMissing=true an UPDATE is switched to an INSERT and retried, otherwise
+    ///     it is reported as a <see cref="SaveConflictException"/></item>
+    ///   <item>the row is still there but its concurrency token moved on: under
+    ///     <see cref="ConcurrencyMode.Optimistic"/> it is reported as a <see cref="SaveConflictException"/> (it must never be
+    ///     switched to an INSERT, which would turn a stale version into a primary-key violation), and under
+    ///     <see cref="ConcurrencyMode.ForceOverwrite"/> the stored values are adopted as the originals so the retry wins</item>
+    /// </list>
+    /// A retry can in principle hit a further concurrent change, so the loop is unbounded, matching how the
+    /// insertWhenUpdateMissing retry has always worked.
+    /// </remarks>
     private static async Task<int> SaveTrackedChangesAsync(
         TContext context,
         IReadOnlyList<TrackedOperation> tracked,
         bool insertWhenUpdateMissing,
+        ConcurrencyMode mode,
         CancellationToken cancellationToken
     )
     {
@@ -1463,38 +1528,55 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
             }
             catch (DbUpdateConcurrencyException ex)
             {
-                // No row to update exists (deleted by another user, etc.). Depending on the policy, switch to INSERT or report as a conflict.
-                if (
-                    insertWhenUpdateMissing
-                    && ex.Entries.Count > 0
-                    && ex.Entries.All(entry => entry.State == EntityState.Modified)
-                )
+                if (ex.Entries.Count == 0)
                 {
-                    foreach (var entry in ex.Entries)
-                    {
-                        entry.State = EntityState.Added;
-
-                        // For nodes switched to INSERT on retry, the operation used when After fires is also updated to Insert (Before already fired as Update).
-                        foreach (var op in tracked)
-                        {
-                            if (ReferenceEquals(op.Entry.Entity, entry.Entity))
-                            {
-                                op.Operation = SaveOperation.Insert;
-                            }
-                        }
-                    }
-
-                    continue;
+                    // EF Core could not attribute the failure to any entry, so there is nothing to classify or retry
+                    throw new SaveConflictException(
+                        "The save was rejected by a concurrency conflict that could not be attributed to a specific record. Reload the data and try again."
+                    );
                 }
 
-                var conflict = ex.Entries.Count > 0 ? ex.Entries[0].Entity : null;
-                var description =
-                    conflict is null
-                        ? "unknown target"
-                        : $"{conflict.GetType().Name}, key {EntitySaveMetadata.For(conflict.GetType()).KeyProperty.GetValue(conflict)}";
-                throw new SaveConflictException(
-                    $"The record to update was not found ({description}). It may have been deleted or modified by another user."
-                );
+                foreach (var entry in ex.Entries)
+                {
+                    var stored = await entry.GetDatabaseValuesAsync(cancellationToken);
+
+                    if (stored is not null)
+                    {
+                        // The row is still there, so someone else changed it after this entity was read
+                        if (mode == ConcurrencyMode.Optimistic)
+                        {
+                            throw SaveConflictException.Modified(
+                                entry.Entity.GetType(),
+                                KeyOf(entry.Entity),
+                                entry.State == EntityState.Deleted ? "delete" : "update"
+                            );
+                        }
+
+                        // Last-write-wins: adopting the stored values as the originals makes the retry match the row
+                        entry.OriginalValues.SetValues(stored);
+                        continue;
+                    }
+
+                    // The row is gone. Depending on the policy, switch to INSERT or report as a conflict
+                    if (!insertWhenUpdateMissing || entry.State != EntityState.Modified)
+                    {
+                        throw SaveConflictException.NotFound(
+                            entry.Entity.GetType(),
+                            KeyOf(entry.Entity)
+                        );
+                    }
+
+                    entry.State = EntityState.Added;
+
+                    // For nodes switched to INSERT on retry, the operation used when After fires is also updated to Insert (Before already fired as Update).
+                    foreach (var op in tracked)
+                    {
+                        if (ReferenceEquals(op.Entry.Entity, entry.Entity))
+                        {
+                            op.Operation = SaveOperation.Insert;
+                        }
+                    }
+                }
             }
         }
     }

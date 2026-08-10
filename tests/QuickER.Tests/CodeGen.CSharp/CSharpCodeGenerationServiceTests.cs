@@ -1178,10 +1178,17 @@ public class CSharpCodeGenerationServiceTests
             .Contain(
                 "SelectByIdSql = $\"SELECT {columnList} FROM {tableName} WHERE [{keyColumnName}] = @id;\""
             );
+        // INSERT の列名・値の並びは局所変数へ抽出して、版返却付き変種（InsertReturningSql）と共用する
         content
             .Should()
             .Contain(
-                "$\"INSERT INTO {tableName} ({string.Join(\", \", insertProperties.Select(property => $\"[{GetColumnName(property)}]\"))}) VALUES ({string.Join(\", \", insertProperties.Select(property => $\"@{property.Name}\"))});\""
+                "var insertColumnList = string.Join(\", \", insertProperties.Select(property => $\"[{GetColumnName(property)}]\"));"
+            )
+            .And.Contain(
+                "var insertValueList = string.Join(\", \", insertProperties.Select(property => $\"@{property.Name}\"));"
+            )
+            .And.Contain(
+                "$\"INSERT INTO {tableName} ({insertColumnList}) VALUES ({insertValueList});\""
             );
         content
             .Should()
@@ -1673,9 +1680,12 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("internal sealed class EntitySaveMetadata");
         content.Should().Contain("public sealed class SaveConflictException : Exception");
         content.Should().Contain("internal sealed record CascadeNavigation(");
-        // 更新欠落時の方針（既定は例外、insertWhenUpdateMissing で INSERT へ切替）
+        // 更新欠落時の方針（既定は例外、insertWhenUpdateMissing で INSERT へ切替）。
+        // 競合メッセージは全バックエンド共有のファクトリ（NotFound / Modified）へ集約されている
         content.Should().Contain("if (insertWhenUpdateMissing)");
-        content.Should().Contain("throw new SaveConflictException(");
+        content.Should().Contain("throw SaveConflictException.NotFound(");
+        content.Should().Contain("public static SaveConflictException NotFound(");
+        content.Should().Contain("public static SaveConflictException Modified(");
         // DB ロード時は Unchanged に確定する
         content.Should().Contain("entity.RowState = RowState.Unchanged;");
         // ApplyToEntity は EditModel の RowState を転写する（Updated は EditModel 側の確定値変更で立つ）
@@ -4645,6 +4655,56 @@ public class CSharpCodeGenerationServiceTests
             .And.Contain("InsertProperties");
         // SELECT 系: RowVersion プロパティは通常どおり生成され読める（除外は書き込みのみ）
         content.Should().Contain("public byte[] RowVersion");
+    }
+
+    /// <summary>
+    /// rowversion 列を持つ図の SQL Server 方言で、楽観排他（ConcurrencyMode）の契約と版条件付き SQL 変種が
+    /// 生成されることを検証する（意味論の実 DB 検証は SqlServerConcurrencyRuntimeTests）。
+    /// </summary>
+    [Fact(
+        DisplayName = "楽観排他: ConcurrencyMode 契約と版条件付き SQL 変種が SQL Server 方言に出る"
+    )]
+    public void Generate_RowVersionColumn_EmitsConcurrencyContractAndVersionedSql()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            BinaryColumnDiagram(),
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Sample.Domain",
+                GenerateRepositories = true,
+            }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files.Single(f => f.FileName.EndsWith(".g.cs")).Content;
+
+        // 契約: enum と、リモート面（＝全機能面の基底）のシグネチャへ mode が載る
+        content
+            .Should()
+            .Contain("public enum ConcurrencyMode")
+            .And.Contain("Optimistic,")
+            .And.Contain("ForceOverwrite,")
+            .And.Contain("ConcurrencyMode mode = ConcurrencyMode.Optimistic,");
+        // メタデータ: rowversion プロパティの公開と、版条件付き SQL 変種 4 本
+        content
+            .Should()
+            .Contain("public PropertyInfo? RowVersionProperty { get; init; }")
+            .And.Contain("public string? InsertReturningSql { get; init; }")
+            .And.Contain("public string? UpdateVersionedSql { get; init; }")
+            .And.Contain("public string? UpdateForcedSql { get; init; }")
+            .And.Contain("public string? DeleteVersionedSql { get; init; }");
+        // 版条件は @originalRowVersion・新版の返却は OUTPUT INSERTED
+        content
+            .Should()
+            .Contain("OUTPUT INSERTED.")
+            .And.Contain("{rowVersionColumn} = @originalRowVersion;")
+            .And.Contain("public void BindRowVersionParameter(");
+        // コミット後に版を書き戻す収集器と、実在確認・競合生成のヘルパー
+        content
+            .Should()
+            .Contain("sealed class RowVersionCollector")
+            .And.Contain("static class RowVersionConcurrency")
+            .And.Contain("was modified by another user");
     }
 
     /// <summary>

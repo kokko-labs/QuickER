@@ -1676,7 +1676,14 @@ public sealed partial class {{ mapper.class_name }}
         bool includeRemoved = false
     )
     {
-{{ for prop in mapper.scalar_properties }}{{ if prop.edit_model_is_nullable && prop.entity_type_name != prop.edit_model_type_name }}        entity.{{ prop.property_name }} =
+{{ for prop in mapper.scalar_properties }}{{ if prop.is_row_version }}
+        // The database generates this column, so an absent input keeps the entity's current value.
+        if (editModel.{{ prop.property_name }} is not null)
+        {
+            entity.{{ prop.property_name }} = editModel.{{ prop.property_name }};
+        }
+
+{{ else if prop.edit_model_is_nullable && prop.entity_type_name != prop.edit_model_type_name }}        entity.{{ prop.property_name }} =
             editModel.{{ prop.property_name }} ?? throw new InvalidOperationException("{{ prop.property_name }} has no input value.");
 {{ else }}        entity.{{ prop.property_name }} = editModel.{{ prop.property_name }};
 {{ end }}{{ end }}        // Transfer the RowState raised on the edit model by confirmed-value changes as-is (no state is created here).

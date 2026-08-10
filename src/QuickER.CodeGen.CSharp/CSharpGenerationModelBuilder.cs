@@ -301,6 +301,8 @@ internal sealed partial class CSharpGenerationModelBuilder
                     EditModelTypeName = editModelProperty.TypeName,
                     EditModelIsNullable = editModelProperty.IsNullable,
                     IsBinary = editModelProperty.IsBinary,
+                    // DB 採番の行バージョン列は「入力があるときだけ代入」へ倒す（未入力を欠落として例外にしない）
+                    IsRowVersion = editModelProperty.IsRowVersion,
                     LoadBindingExpression = isValueObject
                         ? $"entity.{property.PropertyName}?.ToString() ?? string.Empty"
                         : BuildMapperBindingExpression(
@@ -637,8 +639,10 @@ internal sealed partial class CSharpGenerationModelBuilder
             IsNullable = editModelIsNullable,
             IsReferenceType = typeInfo.IsReferenceType,
             IsBinary = isBytes,
-            // Entity 側が非 NULL（必須）で EditModel 側は入力途中を許容して NULL 許容にした項目を必須とみなす
-            IsRequired = editModelIsNullable && !column.IsNullable,
+            // Entity 側が非 NULL（必須）で EditModel 側は入力途中を許容して NULL 許容にした項目を必須とみなす。
+            // ただし行バージョン列は DB が採番するため非 NULL でも入力必須にしない（新規行は未入力が正常）
+            IsRequired = editModelIsNullable && !column.IsNullable && !typeInfo.IsRowVersion,
+            IsRowVersion = typeInfo.IsRowVersion,
             RevertBindingExpression = BuildBindingExpression(propertyName, isBytes),
         };
     }

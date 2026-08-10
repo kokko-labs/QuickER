@@ -60,7 +60,7 @@ public sealed class BinaryColumnEfCoreRuntimeTests : BinaryColumnRuntimeTestsBas
         doc!.Title = "beta-ef";
         doc.Payload = [42, 43];
 
-        (await documents.UpdateAsync(doc, Ct)).Should().BeTrue();
+        (await documents.UpdateAsync(doc, cancellationToken: Ct)).Should().BeTrue();
 
         var reread = await documents.GetByIdAsync(2, Ct);
         reread!.Title.Should().Be("beta-ef");

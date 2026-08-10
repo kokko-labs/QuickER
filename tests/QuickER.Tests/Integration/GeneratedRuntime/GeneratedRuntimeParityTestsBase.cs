@@ -112,7 +112,7 @@ public abstract class GeneratedRuntimeParityTestsBase(SqlServerContainerFixture 
         // Update
         loaded.Name = NameValue.Create("Alice Updated");
         loaded.Balance = null;
-        var updated = await repo.UpdateAsync(loaded, Ct);
+        var updated = await repo.UpdateAsync(loaded, cancellationToken: Ct);
         updated.Should().BeTrue();
 
         var reloaded = await repo.GetByIdAsync(CustomerIdValue.Create(1), Ct);

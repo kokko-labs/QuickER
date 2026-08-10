@@ -363,7 +363,43 @@ DB が値を生成する列（SQL Server の `rowversion` / `timestamp` など�
 - **書き込みでは触れない**: これらの列には DB が値を採番するため、Repository は明示的な値を書き込みません。明示挿入を試みると SQL Server は `Cannot insert an explicit value into a timestamp column.` を返しますが、除外によりこの実行時エラーを回避します。
 - **SELECT では取得する**: `GetByIdAsync` / `GetAllAsync` / `Query()` の結果に含まれ、値を読めます（並行性トークンとして参照できます）。
 - **EF Core モード**では Fluent 構成の `IsRowVersion()` が同じく store-generated として扱うため、この機構は適用されません。
-- **rowversion を使った楽観排他（UPDATE の WHERE でのバージョン比較）はスコープ外**です（将来対応）。なお、グラフ保存（`SaveAsync`）で更新対象行が見つからない（他ユーザーに削除された等）場合は `SaveConflictException` が送出されますが、これは影響行数 0 に基づく存在チェックで、rowversion の比較とは無関係です。
+- **テーブルの並行性トークンを兼ねます**。保存時にエンティティが読んだ版と現在の行が比較されます（次節）。
+
+### rowversion による楽観排他
+
+rowversion 列を持つテーブルは楽観排他で保存されます。オプトインは不要で、エンティティが読んだ版と現在の行を比較し、競り負けた保存は他人の変更を黙って上書きせずに拒否されます。rowversion 列のないテーブルの挙動は従来どおりです。
+
+`UpdateAsync` / `SaveAsync` は省略可能な `ConcurrencyMode` を受け取ります:
+
+| モード | 挙動 |
+| --- | --- |
+| `Optimistic`（既定） | 書き込みを版で守ります。他者が先に変更した行は `SaveConflictException` で拒否されます。 |
+| `ForceOverwrite` | 版の条件を外します（明示的な last-write-wins）。 |
+
+```csharp
+// エンティティが読んだ版で守られる。競り負けると SaveConflictException
+await repository.UpdateAsync(order, cancellationToken: ct);
+
+// 明示的な last-write-wins
+await repository.UpdateAsync(order, ConcurrencyMode.ForceOverwrite, ct);
+
+// グラフ保存もグラフ内の更新・削除を同じ規則で守る
+await repository.SaveAsync(order, cancellationToken: ct);
+```
+
+- **「行なし」と「版が古い」は別の結果です。** 単一の `UpdateAsync` は行が存在しなければ従来どおり `false` を返し、行はあるが版が進んでいれば `SaveConflictException` を送出します。`insertWhenUpdateMissing: true` も同じ線引きで、行なしは INSERT へ切り替わり、版が古い場合は競合として報告されます（INSERT へ倒すと競合が主キー重複に化けるためです）。
+- **グラフ保存は削除も守り**、競合が 1 件でもあればトランザクション全体がロールバックされます。
+- **新しい版が反映されます。** 挿入・更新・グラフ保存が成功すると、エンティティは DB が採番した版を保持するため、再取得せずに同じインスタンスをそのまま保存できます。Save フックの `AfterSaveAsync` はコミット前に走るため、この時点ではまだ古い版が見えます。
+- **どのバックエンドでも契約は同じです。** QuickER 版 Repository は `WHERE ... AND <rowversion> = @original` で文を守り `OUTPUT` 句で新しい版を読み戻します。EF Core は自前の並行性トークン（`IsRowVersion()`）を使い `DbUpdateConcurrencyException` を同じ例外へ変換します。インメモリ Repository は単調増加する 8 バイトの擬似版で DB を模します。HTTP リモートクライアントはモードをリクエストへ載せ、応答が返す版を書き戻します。
+
+既知の制限:
+
+- `rowversion` 型を持つのは SQL Server だけのため、QuickER 版 Repository では `sqlserver` 方言のみが対象です。SQLite（や他方言）向けの図にはそもそも該当列がないため影響しません。
+- `BulkInsertAsync` は `SqlBulkCopy` を使い、生成値を返せないためエンティティの版は元のままです。後続の更新で版が要る場合は再取得してください。
+- 版の読み戻しには `OUTPUT` 句を使いますが、SQL Server はトリガーのあるテーブルでこれを拒否します。QuickER の DDL 生成はトリガーを出力しないため、QuickER 外でトリガーを足したテーブルにのみ関係します。
+- 既に消えている行の削除は、従来どおりバックエンド間で非対称です。QuickER 版 Repository は黙って許容し、EF Core のグラフ保存は `SaveConflictException` として報告します。
+- rowversion 列には `[DbColumnMeta]` のトークンが付かないため、C# リバースでは復元されません（図の側で宣言してください）。
+- 生 SQL（`ExecuteSqlAsync` 等）と無制限バイナリ列の Stream アクセサは直接操作のため、版では守られません。
 
 ### 無制限バイナリ列の除外（ExcludeUnboundedBinaryColumns）
 
@@ -465,7 +501,7 @@ services.AddGeneratedEfCoreRepositories(options => options.UseSqlServer(connecti
 ```
 
 - 保存は `TrackGraph` による切断グラフ保存（`RowState` を EF Core の状態へ変換）
-- 楽観排他の競合は EF Core の例外を `SaveConflictException` へ変換（契約を統一）
+- 楽観排他もパリティ（`ConcurrencyMode` でポリシーを選び、EF Core の `DbUpdateConcurrencyException` を `SaveConflictException` へ変換し、更新後の並行性トークンをエンティティへ残す。[rowversion による楽観排他](#rowversion-による楽観排他)）
 - 生 SQL 系 API も完全パリティ
 
 **QuickER 版 Repository との併用生成**（両方 ON）はパリティ検証用で、CLI / 設定ファイルでのみ指定できます。GUI は排他選択です。また EF Core 版 Repository とマルチターゲットの QuickER 版 Repository（下記）は併用できません（診断エラー）。
@@ -545,6 +581,7 @@ app.Run();
 - **例外は型が復元されます**: サーバーの `SaveConflictException` は HTTP 409 を介してクライアントでも `SaveConflictException` として送出され（直結時と同じ catch が機能）、その他のサーバー例外は `RemoteRepositoryException`（ステータスコード・メッセージ保持）になります
 - **リクエストを解釈できない場合は 500 ではなく 400 になります**。リクエスト自体の読み取り中に失敗するもの（不正な JSON・空ボディ・JSON でない Content-Type・型不一致・値オブジェクトの検証違反、バイナリエンドポイントの `?id=` 欠落・復元不能）はクライアントが送った内容の問題なので、HTTP 400＋`RemoteError`（`Type` は `"BadRequest"`）を返します（クライアントは `StatusCode` が 400 の `RemoteRepositoryException` を送出）。400 のメッセージにはクライアント自身のペイロードに関する情報しか載らず、サーバー側のログ出力も `OnServerError` フックも実行されません（どちらも 500 専用）。サーバー基盤が拒否したリクエスト（`BadHttpRequestException`。例: リクエストボディのサイズ上限超過）は、その例外が持つステータスコード（413 など）をそのまま返します
 - **グラフ保存（Save）成功後はローカルの RowState も確定**します（直結時と同じ挙動）
+- **楽観排他も転送されます**。`ConcurrencyMode` 引数は Update / Save のリクエストに含まれ、Insert / Update / Save の応答は保存で採番された版を「エンティティ型名＋主キー」の対応表として運び、クライアントが手元のグラフへ書き戻します。これによりリモートでも直結と同じ版を保持でき、再取得なしで同じエンティティを続けて保存できます
 - **500 応答にはサーバー側例外のメッセージがそのまま載ります**。これは意図的な設計で、クライアントが失敗内容を復元し「直結時と同じ catch」を成立させるための情報です。スタックトレースを含む例外全体はサーバー側だけに記録されます（`ILoggerFactory` 経由・カテゴリ `QuickER.RemoteServer`。ロギング未構成のホストでは何もしません）。信頼境界の外へ公開する場合は、認可か例外変換ミドルウェアを併用して内部情報が応答へ漏れないようにしてください
 - 認証・TLS はスコープ外です。クライアントは `AddGeneratedHttpRemoteRepositories(Func<IServiceProvider, HttpClient>)` で認証ハンドラ付きの HttpClient を構成し、サーバーは `MapGeneratedRemoteEndpoints()` の戻り値（`RouteGroupBuilder`）へ ASP.NET Core の認可を付与してください
 - **ファクトリ版が返す HttpClient の所有権は呼び出し側にあります**。`AddGeneratedHttpRemoteRepositories(Func<IServiceProvider, HttpClient>)` はリポジトリ解決のたび（スコープ×エンティティ数だけ）ファクトリを呼び出し、返された HttpClient は生成コードも DI コンテナも破棄しません。共有インスタンスか `IHttpClientFactory` 管理のインスタンスを返してください（毎回 new するとソケットが枯渇します）。ベースアドレス版は共有インスタンスを 1 つだけ作り、それを DI コンテナが所有します（`ServiceProvider` の破棄と同時に HttpClient も破棄されるため、破棄済み provider から取得したリポジトリを使うと `ObjectDisposedException` になります）

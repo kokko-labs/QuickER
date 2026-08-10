@@ -101,7 +101,7 @@ Each generated repository implements `IRepository<TEntity, TKey>`. The main meth
 | `GetByIdAsync(id, ct)` | Gets a single entity by primary key (null when not found). |
 | `GetAllAsync(ct)` | Gets all entities. |
 | `InsertAsync(entity, ct)` | Inserts a single entity. |
-| `UpdateAsync(entity, ct)` | Updates the single entity matching the primary key (returns whether it succeeded). |
+| `UpdateAsync(entity, mode, ct)` | Updates the single entity matching the primary key (returns whether it succeeded). `mode` selects the concurrency policy for tables that have a rowversion column. |
 | `DeleteAsync(id, ct)` | Deletes the single entity matching the primary key (returns whether it succeeded). |
 | `BulkInsertAsync(entities, ct)` | Inserts multiple entities at once (returns the number inserted). |
 | `Query()` | Builds queries such as filtering, ordering, and row limiting. |

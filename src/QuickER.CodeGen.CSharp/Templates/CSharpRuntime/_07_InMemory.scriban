@@ -19,6 +19,7 @@ public sealed class InMemoryDataStore
 {
     private readonly object _gate = new();
     private readonly Dictionary<Type, Dictionary<object, EntityBase>> _tables = new();
+    private long _rowVersion;
 
     /// <summary>Gets the table (primary key -> snapshot) for the given type, creating it if absent. The caller must already hold the lock.</summary>
     private Dictionary<object, EntityBase> Table(Type entityType)
@@ -83,6 +84,42 @@ public sealed class InMemoryDataStore
         }
     }
 
+    /// <summary>
+    /// Assigns the next store-generated row version to <paramref name="snapshot"/> (and to <paramref name="source"/> when
+    /// given). Does nothing for a type without a rowversion column. The caller must already hold the lock.
+    /// </summary>
+    /// <remarks>
+    /// The value is a monotonically increasing 8-byte big-endian token that emulates SQL Server's rowversion: every insert
+    /// and update moves it on, so an entity holding a stale version can be told apart from a current one. The source entity
+    /// is stamped as well as the stored snapshot because the store keeps a clone, and a real database likewise hands the
+    /// newly assigned version back to the caller.
+    /// </remarks>
+    private void StampRowVersion(EntityBase snapshot, EntityBase? source = null)
+    {
+        var property = EntitySaveMetadata.For(snapshot.GetType()).RowVersionProperty;
+
+        if (property is null)
+        {
+            return;
+        }
+
+        var version = BitConverter.GetBytes(++_rowVersion);
+
+        // Big-endian so that comparing the bytes orders the versions the same way as comparing the numbers
+        if (BitConverter.IsLittleEndian)
+        {
+            Array.Reverse(version);
+        }
+
+        property.SetValue(snapshot, {{ if generate_value_objects }}SqlValueObjectActivator.Wrap(version, property.PropertyType){{ else }}version{{ end }});
+
+        if (source is not null)
+        {
+            // The source gets its own array so that mutating one side cannot reach into the store's snapshot
+            property.SetValue(source, {{ if generate_value_objects }}SqlValueObjectActivator.Wrap(version.ToArray(), property.PropertyType){{ else }}version.ToArray(){{ end }});
+        }
+    }
+
     /// <summary>Gets the raw snapshot (no clone) for the given type and primary key. Used by internal traversals such as Include key matching. The caller must already hold the lock.</summary>
     private EntityBase? FindRaw(Type entityType, object key) =>
         Table(entityType).TryGetValue(key, out var entity) ? entity : null;
@@ -109,6 +146,7 @@ public sealed class InMemoryDataStore
         {
             var snapshot = entity.Clone();
             snapshot.MarkUnchanged();
+            StampRowVersion(snapshot, entity);
             Table(entity.GetType())[KeyOf(entity)] = snapshot;
         }
     }
@@ -132,6 +170,9 @@ public sealed class InMemoryDataStore
             {
                 throw DuplicateKeyError(entity.GetType(), key);
             }
+
+            // Stamped only once the row is in, so a rejected insert consumes no version and leaves the entity untouched
+            StampRowVersion(snapshot, entity);
         }
     }
 
@@ -168,6 +209,10 @@ public sealed class InMemoryDataStore
     /// Rewrites a column value for the given type and primary key (used by the streaming accessors for unbounded binary columns; true if the row existed).
     /// Does not mutate the store's actual entity directly; instead it updates a clone and writes it back (following the existing Clone/Put semantics).
     /// </summary>
+    /// <remarks>
+    /// The row version moves on, mirroring the real database where writing a blob is an UPDATE like any other. There is no
+    /// caller entity to hand the new version back to, so an entity fetched before this call is left holding a stale version.
+    /// </remarks>
     internal bool WriteColumnValue(Type entityType, object key, PropertyInfo column, object? value)
     {
         lock (_gate)
@@ -182,6 +227,7 @@ public sealed class InMemoryDataStore
             var clone = entity.Clone();
             column.SetValue(clone, value);
             clone.MarkUnchanged();
+            StampRowVersion(clone);
             Table(entityType)[key] = clone;
             return true;
         }
@@ -224,6 +270,7 @@ public sealed class InMemoryDataStore
         {
             var snapshot = entity.Clone();
             snapshot.MarkUnchanged();
+            store.StampRowVersion(snapshot, entity);
             store.Table(entity.GetType())[KeyOf(entity)] = snapshot;
         }
 
@@ -238,6 +285,9 @@ public sealed class InMemoryDataStore
             {
                 throw DuplicateKeyError(entity.GetType(), key);
             }
+
+            // Stamped only once the row is in, so a rejected insert consumes no version and leaves the entity untouched
+            store.StampRowVersion(snapshot, entity);
         }
 
         /// <summary>Removes the snapshot for the given type and primary key (true if one existed).</summary>
@@ -245,6 +295,37 @@ public sealed class InMemoryDataStore
 
         /// <summary>Whether a snapshot exists for the given type and primary key.</summary>
         public bool Exists(Type entityType, object key) => store.Table(entityType).ContainsKey(key);
+
+        /// <summary>
+        /// Whether <paramref name="entity"/> may overwrite the stored row under the given concurrency policy: <c>true</c> when
+        /// the type has no rowversion column, when the policy is <see cref="ConcurrencyMode.ForceOverwrite"/>, when there is no
+        /// stored row at all (a missing row is the caller's decision to make), or when the entity still carries the version the
+        /// stored row has.
+        /// </summary>
+        /// <remarks>
+        /// The comparison is strict: an entity whose version is null (never read back from the store) never matches a stored
+        /// row, which is what a real database does with <c>WHERE ... AND row_ver = @originalRowVersion</c>.
+        /// </remarks>
+        public bool IsCurrent(EntityBase entity, ConcurrencyMode mode)
+        {
+            var property = EntitySaveMetadata.For(entity.GetType()).RowVersionProperty;
+
+            if (property is null || mode != ConcurrencyMode.Optimistic)
+            {
+                return true;
+            }
+
+            var stored = store.FindRaw(entity.GetType(), KeyOf(entity));
+
+            if (stored is null)
+            {
+                return true;
+            }
+
+            return {{ if generate_value_objects }}SqlParameterValue.Unwrap(property.GetValue(entity)){{ else }}property.GetValue(entity){{ end }} is byte[] carried
+                && {{ if generate_value_objects }}SqlParameterValue.Unwrap(property.GetValue(stored)){{ else }}property.GetValue(stored){{ end }} is byte[] current
+                && carried.SequenceEqual(current);
+        }
 
         /// <summary>The list of raw snapshots (no clones) for the given type. Used by the descendant traversal for cascade delete.</summary>
         public IReadOnlyList<EntityBase> All(Type entityType) => store.RawAll(entityType);
@@ -660,6 +741,9 @@ public sealed class InMemoryDataStore
     /// first; deletes process the children first. When <paramref name="hooks"/> is provided, Put/Remove is suppressed for nodes
     /// contained in <see cref="SaveHookSession.Skipped"/>, and the operations actually performed are recorded into
     /// <paramref name="records"/> (in execution order), which is used to determine the After firing order and the actual operations.
+    /// Entities whose type has a rowversion column are guarded by <paramref name="mode"/>: updating or deleting a row that
+    /// someone else changed first is rejected. Because the store has no real transaction, a conflict found part-way through
+    /// leaves the writes already applied in place (the same best-effort limitation as the After hook phase).
     /// </remarks>
     public static int Save(
         EntityBase entity,
@@ -667,6 +751,7 @@ public sealed class InMemoryDataStore
         bool cascadeSave,
         bool cascadeDelete,
         bool insertWhenUpdateMissing,
+        ConcurrencyMode mode,
         SaveHookSession? hooks = null,
         List<(EntityBase Entity, SaveOperation Operation)>? records = null,
         bool changesAlreadyVerified = false
@@ -688,7 +773,7 @@ public sealed class InMemoryDataStore
             {
                 foreach (var child in EnumerateChildren(entity))
                 {
-                    rows += DeleteGraph(child, scope, hooks, records);
+                    rows += DeleteGraph(child, scope, mode, hooks, records);
                 }
             }
 
@@ -696,6 +781,12 @@ public sealed class InMemoryDataStore
             if (hooks is not null && hooks.Skipped.Contains(entity))
             {
                 return rows;
+            }
+
+            // A row someone else changed first must not be deleted (a row that is simply gone stays tolerated silently).
+            if (!scope.IsCurrent(entity, mode))
+            {
+                throw SaveConflictException.Modified(entityType, key, "delete");
             }
 
             if (scope.Remove(entityType, key))
@@ -726,6 +817,13 @@ public sealed class InMemoryDataStore
 
                 if (scope.Exists(entityType, key))
                 {
+                    // A row someone else changed first must not be overwritten, and must never be switched to an INSERT
+                    // below (which would turn a stale version into a duplicate primary key).
+                    if (!scope.IsCurrent(entity, mode))
+                    {
+                        throw SaveConflictException.Modified(entityType, key, "update");
+                    }
+
                     scope.Put(entity);
                     rows++;
                     records?.Add((entity, SaveOperation.Update));
@@ -739,9 +837,7 @@ public sealed class InMemoryDataStore
                 }
                 else
                 {
-                    throw new SaveConflictException(
-                        $"The record to update was not found ({entityType.Name}, key {key}). It may have been deleted by another user."
-                    );
+                    throw SaveConflictException.NotFound(entityType, key);
                 }
             }
         }
@@ -756,6 +852,7 @@ public sealed class InMemoryDataStore
                     cascadeSave,
                     cascadeDelete,
                     insertWhenUpdateMissing,
+                    mode,
                     hooks,
                     records
                 );
@@ -853,6 +950,7 @@ public sealed class InMemoryDataStore
     private static int DeleteGraph(
         EntityBase entity,
         InMemoryDataStore.InMemoryWriteScope scope,
+        ConcurrencyMode mode,
         SaveHookSession? hooks = null,
         List<(EntityBase Entity, SaveOperation Operation)>? records = null
     )
@@ -861,7 +959,7 @@ public sealed class InMemoryDataStore
 
         foreach (var child in EnumerateChildren(entity))
         {
-            rows += DeleteGraph(child, scope, hooks, records);
+            rows += DeleteGraph(child, scope, mode, hooks, records);
         }
 
         // If Before(Delete) returned false (skip), do not delete the entity itself (children are already deleted).
@@ -870,7 +968,15 @@ public sealed class InMemoryDataStore
             return rows;
         }
 
-        if (scope.Remove(entity.GetType(), InMemoryDataStore.KeyOf(entity)))
+        var key = InMemoryDataStore.KeyOf(entity);
+
+        // A row someone else changed first must not be deleted (a row that is simply gone stays tolerated silently).
+        if (!scope.IsCurrent(entity, mode))
+        {
+            throw SaveConflictException.Modified(entity.GetType(), key, "delete");
+        }
+
+        if (scope.Remove(entity.GetType(), key))
         {
             rows++;
         }
@@ -1042,7 +1148,20 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
     }
 
     /// <summary>Updates an entity (true if the update target existed).</summary>
-    public Task<bool> UpdateAsync(TEntity entity, CancellationToken cancellationToken = default)
+    /// <remarks>
+    /// When the type has a rowversion column, <paramref name="mode"/> decides whether the update is guarded by the version
+    /// the entity was read with. A guarded update against a row someone else changed first throws a
+    /// <see cref="SaveConflictException"/>; a row that no longer exists still returns <c>false</c>. On success the entity
+    /// receives the newly assigned version.
+    /// </remarks>
+    /// <param name="entity">The entity to update.</param>
+    /// <param name="mode">How a concurrent modification is handled when the type has a rowversion column (no effect otherwise).</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    public Task<bool> UpdateAsync(
+        TEntity entity,
+        ConcurrencyMode mode = ConcurrencyMode.Optimistic,
+        CancellationToken cancellationToken = default
+    )
     {
         ArgumentNullException.ThrowIfNull(entity);
 
@@ -1056,6 +1175,12 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
             if (!scope.Exists(typeof(TEntity), key))
             {
                 return false;
+            }
+
+            // A row that is gone keeps the pre-existing "false" contract; a row someone else changed first is a conflict
+            if (!scope.IsCurrent(entity, mode))
+            {
+                throw SaveConflictException.Modified(typeof(TEntity), key, "update");
             }
 
             scope.Put(entity);
@@ -1165,12 +1290,16 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
     /// skip set; (2) save inside the lock applying the skips and record the (entity, operation) pairs performed; (3) fire After
     /// outside the lock in execution order. After emulates "before commit" (in-memory has no real transaction, so even if After
     /// throws, the store changes remain = best effort).
+    /// Entities whose type has a rowversion column are guarded by <paramref name="mode"/>: updating or deleting a row that
+    /// someone else changed first is rejected. Having no real transaction, a conflict found part-way through leaves the
+    /// writes already applied in place.
     /// </remarks>
     public async Task<int> SaveAsync(
         TEntity entity,
         bool cascadeSave = true,
         bool cascadeDelete = true,
         bool insertWhenUpdateMissing = false,
+        ConcurrencyMode mode = ConcurrencyMode.Optimistic,
         CancellationToken cancellationToken = default
     )
     {
@@ -1214,6 +1343,7 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
                 cascadeSave,
                 cascadeDelete,
                 insertWhenUpdateMissing,
+                mode,
                 hooks,
                 records,
                 changesAlreadyVerified: true
@@ -1235,12 +1365,18 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
     }
 
     /// <summary>Saves multiple aggregate roots as one unit (atomic processing: all succeed or all roll back).</summary>
-    /// <remarks>The hook firing order is the same 3 phases as the single-root overload (Before pre-pass, save, After post-pass), and roots are processed in the specified order.</remarks>
+    /// <remarks>
+    /// The hook firing order is the same 3 phases as the single-root overload (Before pre-pass, save, After post-pass), and roots are processed in the specified order.
+    /// Entities whose type has a rowversion column are guarded by <paramref name="mode"/>: updating or deleting a row that
+    /// someone else changed first is rejected. Having no real transaction, a conflict found part-way through leaves the
+    /// writes already applied in place.
+    /// </remarks>
     public async Task<int> SaveAsync(
         IEnumerable<TEntity> entities,
         bool cascadeSave = true,
         bool cascadeDelete = true,
         bool insertWhenUpdateMissing = false,
+        ConcurrencyMode mode = ConcurrencyMode.Optimistic,
         CancellationToken cancellationToken = default
     )
     {
@@ -1294,6 +1430,7 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
                     cascadeSave,
                     cascadeDelete,
                     insertWhenUpdateMissing,
+                    mode,
                     hooks,
                     records,
                     changesAlreadyVerified: true

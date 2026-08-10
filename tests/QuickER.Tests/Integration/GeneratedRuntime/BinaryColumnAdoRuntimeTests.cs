@@ -81,7 +81,7 @@ public sealed class BinaryColumnAdoRuntimeTests : BinaryColumnRuntimeTestsBase
         var doc = await documents.GetByIdAsync(1, Ct);
         doc!.Payload = [1, 2, 3];
 
-        var act = async () => await documents.UpdateAsync(doc, Ct);
+        var act = async () => await documents.UpdateAsync(doc, cancellationToken: Ct);
 
         (await act.Should().ThrowAsync<InvalidOperationException>())
             .Which.Message.Should()
@@ -119,7 +119,7 @@ public sealed class BinaryColumnAdoRuntimeTests : BinaryColumnRuntimeTestsBase
         var doc = await documents.GetByIdAsync(1, Ct);
         doc!.Title = "alpha2";
 
-        (await documents.UpdateAsync(doc, Ct)).Should().BeTrue();
+        (await documents.UpdateAsync(doc, cancellationToken: Ct)).Should().BeTrue();
         (await documents.GetByIdAsync(1, Ct))!.Title.Should().Be("alpha2");
 
         // UPDATE は payload / thumb 列に触れないため DB の blob はそのまま残る
@@ -249,7 +249,7 @@ public sealed class BinaryColumnAdoRuntimeTests : BinaryColumnRuntimeTestsBase
             .FirstOrDefaultAsync(Ct);
         doc!.Title = "alpha-x";
 
-        var act = async () => await documents.UpdateAsync(doc, Ct);
+        var act = async () => await documents.UpdateAsync(doc, cancellationToken: Ct);
 
         (await act.Should().ThrowAsync<InvalidOperationException>())
             .Which.Message.Should()
@@ -276,7 +276,7 @@ public sealed class BinaryColumnAdoRuntimeTests : BinaryColumnRuntimeTestsBase
         doc.Thumb = [];
         doc.Title = "alpha-reset";
 
-        (await documents.UpdateAsync(doc, Ct)).Should().BeTrue();
+        (await documents.UpdateAsync(doc, cancellationToken: Ct)).Should().BeTrue();
         (await documents.GetByIdAsync(1, Ct))!.Title.Should().Be("alpha-reset");
 
         // UPDATE は除外列に触れないため DB の blob は温存される（RowState=Unchanged の正当なエンティティだった証拠）

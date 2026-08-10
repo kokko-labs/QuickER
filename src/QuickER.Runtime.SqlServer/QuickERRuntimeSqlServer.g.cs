@@ -229,6 +229,7 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
     }
 
     /// <summary>Inserts an entity.</summary>
+    /// <remarks>When the table has a rowversion column, the version the database assigned is written back to <paramref name="entity"/>.</remarks>
     public async Task InsertAsync(TEntity entity, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(entity);
@@ -236,12 +237,35 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
+        if (_metadata.RowVersionProperty is not null)
+        {
+            await using var returningCommand = new SqlCommand(
+                _metadata.InsertReturningSql!,
+                connection
+            );
+            _metadata.BindInsertParameters(returningCommand, entity);
+
+            if (await returningCommand.ExecuteScalarAsync(cancellationToken) is byte[] version)
+            {
+                _metadata.RowVersionProperty.SetValue(
+                    entity,
+                    SqlValueObjectActivator.Wrap(version, _metadata.RowVersionProperty.PropertyType)
+                );
+            }
+
+            return;
+        }
+
         await using var command = new SqlCommand(_metadata.InsertSql, connection);
         _metadata.BindInsertParameters(command, entity);
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
     /// <summary>Bulk inserts a collection of entities using SqlBulkCopy.</summary>
+    /// <remarks>
+    /// Known limitation: SqlBulkCopy cannot return generated values, so for a table with a rowversion column the entities
+    /// keep whatever version they had. Re-read them when the version is needed for a later update.
+    /// </remarks>
     public async Task<int> BulkInsertAsync(
         IEnumerable<TEntity> entities,
         CancellationToken cancellationToken = default
@@ -276,8 +300,15 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
     }
 
     /// <summary>Updates an entity (true when a matching row was updated).</summary>
+    /// <remarks>
+    /// When the table has a rowversion column, <paramref name="mode"/> decides whether the update is guarded by the version
+    /// the entity was read with. A guarded update that finds the row changed by someone else throws a
+    /// <see cref="SaveConflictException"/>; a row that no longer exists still returns <c>false</c>. On success the new
+    /// version is written back to <paramref name="entity"/>.
+    /// </remarks>
     public async Task<bool> UpdateAsync(
         TEntity entity,
+        ConcurrencyMode mode = ConcurrencyMode.Optimistic,
         CancellationToken cancellationToken = default
     )
     {
@@ -285,6 +316,41 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
 
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
+
+        if (_metadata.RowVersionProperty is not null)
+        {
+            await using var guardedCommand = new SqlCommand(
+                RowVersionConcurrency.UpdateSql(_metadata, mode),
+                connection
+            );
+            RowVersionConcurrency.BindUpdate(_metadata, guardedCommand, entity, mode);
+
+            if (await guardedCommand.ExecuteScalarAsync(cancellationToken) is byte[] version)
+            {
+                _metadata.RowVersionProperty.SetValue(
+                    entity,
+                    SqlValueObjectActivator.Wrap(version, _metadata.RowVersionProperty.PropertyType)
+                );
+                return true;
+            }
+
+            // Nothing matched: a row that is simply gone keeps the pre-existing "false" contract, while a row that is
+            // still there means someone else changed it after this entity was read
+            if (
+                await RowVersionConcurrency.RowExistsAsync(
+                    _metadata,
+                    entity,
+                    connection,
+                    transaction: null,
+                    cancellationToken
+                )
+            )
+            {
+                throw RowVersionConcurrency.Conflict(_metadata, entity, "update");
+            }
+
+            return false;
+        }
 
         await using var command = new SqlCommand(_metadata.UpdateSql, connection);
         _metadata.BindUpdateParameters(command, entity);
@@ -372,11 +438,17 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
     }
 
     /// <summary>Saves inserts, updates, and deletes in a single transaction according to RowState (children cascade by default).</summary>
+    /// <remarks>
+    /// Entities whose table has a rowversion column take part in optimistic concurrency: their updates and deletes are
+    /// guarded by the version they were read with unless <paramref name="mode"/> says otherwise, and the versions the
+    /// database assigns are written back to the entities once the transaction commits.
+    /// </remarks>
     public async Task<int> SaveAsync(
         TEntity entity,
         bool cascadeSave = true,
         bool cascadeDelete = true,
         bool insertWhenUpdateMissing = false,
+        ConcurrencyMode mode = ConcurrencyMode.Optimistic,
         CancellationToken cancellationToken = default
     )
     {
@@ -404,6 +476,9 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
                     e => new SqlSaveHookContext(connection, transaction, e.GetType())
                 );
 
+        // Row versions the database assigns are collected during the transaction and applied only after it commits
+        var versions = new RowVersionCollector();
+
         try
         {
             // HasChanges was already checked before this call, so skip the redundant internal graph traversal
@@ -416,9 +491,14 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
                 insertWhenUpdateMissing,
                 cancellationToken,
                 hooks,
-                changesAlreadyVerified: true
+                changesAlreadyVerified: true,
+                mode: mode,
+                versions: versions
             );
             await transaction.CommitAsync(cancellationToken);
+
+            // The commit made the new row versions visible, so settle them on the entities
+            versions.Apply();
 
             // After a successful commit, settle the state (Added/Updated → Unchanged) to prevent double-processing on a re-save.
             // Skipped rows (where a hook's Before returned false) are left as they are
@@ -434,11 +514,17 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
     }
 
     /// <summary>Saves multiple aggregate roots together in a single transaction (an atomic all-succeed-or-all-rollback operation).</summary>
+    /// <remarks>
+    /// Entities whose table has a rowversion column take part in optimistic concurrency: their updates and deletes are
+    /// guarded by the version they were read with unless <paramref name="mode"/> says otherwise, and the versions the
+    /// database assigns are written back to the entities once the transaction commits.
+    /// </remarks>
     public async Task<int> SaveAsync(
         IEnumerable<TEntity> entities,
         bool cascadeSave = true,
         bool cascadeDelete = true,
         bool insertWhenUpdateMissing = false,
+        ConcurrencyMode mode = ConcurrencyMode.Optimistic,
         CancellationToken cancellationToken = default
     )
     {
@@ -469,6 +555,9 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
                     e => new SqlSaveHookContext(connection, transaction, e.GetType())
                 );
 
+        // Row versions the database assigns are collected during the transaction and applied only after it commits
+        var versions = new RowVersionCollector();
+
         try
         {
             var rows = 0;
@@ -484,11 +573,16 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
                     insertWhenUpdateMissing,
                     cancellationToken,
                     hooks,
-                    changesAlreadyVerified: true
+                    changesAlreadyVerified: true,
+                    mode: mode,
+                    versions: versions
                 );
             }
 
             await transaction.CommitAsync(cancellationToken);
+
+            // The commit made the new row versions visible, so settle them on the entities
+            versions.Apply();
 
             // After a successful commit, settle the state of every graph (Added/Updated → Unchanged) to prevent double-processing on a re-save.
             // Skipped rows (where a hook's Before returned false) are left as they are
@@ -1886,6 +1980,10 @@ public sealed class EntitySaveMetadata
     /// <summary>Gets the unbounded binary columns excluded from SELECT / UPDATE (marked with <see cref="UnboundedBinaryColumnAttribute"/>). Empty when there are no excluded columns.</summary>
     public required IReadOnlyList<PropertyInfo> ExcludedProperties { get; init; }
 
+    /// <summary>Gets the rowversion (concurrency token) property, or <c>null</c> when the table has no such column.</summary>
+    /// <remarks>Resolved from <see cref="StoreGeneratedColumnAttribute"/>. A table carries at most one rowversion column, so the first match is used.</remarks>
+    public PropertyInfo? RowVersionProperty { get; init; }
+
     /// <summary>Gets the (property, column name) pairs of the SELECT columns, resolved at build time. Row mapping enumerates this instead of reflecting for column names per row.</summary>
     public required IReadOnlyList<(PropertyInfo Property, string ColumnName)> SelectColumns { get; init; }
 
@@ -1921,6 +2019,18 @@ public sealed class EntitySaveMetadata
 
     /// <summary>Gets the DELETE statement.</summary>
     public required string DeleteSql { get; init; }
+
+    /// <summary>Gets the INSERT statement that returns the row version the database assigned (<c>null</c> when the table has no rowversion column).</summary>
+    public string? InsertReturningSql { get; init; }
+
+    /// <summary>Gets the UPDATE statement guarded by the row version the entity was read with, returning the new row version (<c>null</c> when the table has no rowversion column).</summary>
+    public string? UpdateVersionedSql { get; init; }
+
+    /// <summary>Gets the UPDATE statement without the row version guard, returning the new row version (<c>null</c> when the table has no rowversion column). Used by <see cref="ConcurrencyMode.ForceOverwrite"/>.</summary>
+    public string? UpdateForcedSql { get; init; }
+
+    /// <summary>Gets the DELETE statement guarded by the row version the entity was read with (<c>null</c> when the table has no rowversion column).</summary>
+    public string? DeleteVersionedSql { get; init; }
 
     /// <summary>Gets the cascade-target child navigations.</summary>
     public required IReadOnlyList<CascadeNavigation> CascadeNavigations { get; init; }
@@ -1992,6 +2102,9 @@ public sealed class EntitySaveMetadata
                 property.GetCustomAttribute<StoreGeneratedColumnAttribute>() is not null
             )
             .ToList();
+        // A store-generated column doubles as the table's concurrency token; a table carries at most one of them
+        var rowVersionProperty =
+            storeGeneratedColumns.Count == 0 ? null : storeGeneratedColumns[0];
         // INSERT / BulkInsert targets are all columns minus store-generated columns (identical to all columns when there are none)
         var insertProperties =
             storeGeneratedColumns.Count == 0
@@ -2008,6 +2121,14 @@ public sealed class EntitySaveMetadata
         var updateAssignments = nonKeyProperties.Select(property =>
             $"[{GetColumnName(property)}] = @{property.Name}"
         );
+        var insertColumnList = string.Join(", ", insertProperties.Select(property => $"[{GetColumnName(property)}]"));
+        var insertValueList = string.Join(", ", insertProperties.Select(property => $"@{property.Name}"));
+        // Quoted rowversion column, non-null only for tables that carry one. The optimistic concurrency statements below
+        // are built solely for those tables (every other table keeps exactly the statements it had before)
+        var rowVersionColumn =
+            rowVersionProperty is null
+                ? null
+                : $"[{GetColumnName(rowVersionProperty)}]";
         var cascades = allProperties
             .Select(property =>
                 (property, attribute: property.GetCustomAttribute<NavigationReferenceAttribute>())
@@ -2033,6 +2154,7 @@ public sealed class EntitySaveMetadata
             AllProperties = columns,
             SelectProperties = selectProperties,
             ExcludedProperties = excludedColumns,
+            RowVersionProperty = rowVersionProperty,
             // Resolve column names for row mapping at build time to eliminate per-row [Column] reflection
             SelectColumns = selectProperties.Select(property => (property, GetColumnName(property))).ToList(),
             ColumnNameByProperty = columns.ToDictionary(property => property, GetColumnName),
@@ -2050,10 +2172,26 @@ public sealed class EntitySaveMetadata
             SelectAllSql = $"SELECT {columnList} FROM {tableName};",
             SelectByIdSql = $"SELECT {columnList} FROM {tableName} WHERE [{keyColumnName}] = @id;",
             InsertSql =
-                $"INSERT INTO {tableName} ({string.Join(", ", insertProperties.Select(property => $"[{GetColumnName(property)}]"))}) VALUES ({string.Join(", ", insertProperties.Select(property => $"@{property.Name}"))});",
+                $"INSERT INTO {tableName} ({insertColumnList}) VALUES ({insertValueList});",
             UpdateSql =
                 $"UPDATE {tableName} SET {string.Join(", ", updateAssignments)} WHERE [{keyColumnName}] = @id;",
             DeleteSql = $"DELETE FROM {tableName} WHERE [{keyColumnName}] = @id;",
+            InsertReturningSql =
+                rowVersionColumn is null
+                    ? null
+                    : $"INSERT INTO {tableName} ({insertColumnList}) OUTPUT INSERTED.{rowVersionColumn} VALUES ({insertValueList});",
+            UpdateVersionedSql =
+                rowVersionColumn is null
+                    ? null
+                    : $"UPDATE {tableName} SET {string.Join(", ", updateAssignments)} OUTPUT INSERTED.{rowVersionColumn} WHERE [{keyColumnName}] = @id AND {rowVersionColumn} = @originalRowVersion;",
+            UpdateForcedSql =
+                rowVersionColumn is null
+                    ? null
+                    : $"UPDATE {tableName} SET {string.Join(", ", updateAssignments)} OUTPUT INSERTED.{rowVersionColumn} WHERE [{keyColumnName}] = @id;",
+            DeleteVersionedSql =
+                rowVersionColumn is null
+                    ? null
+                    : $"DELETE FROM {tableName} WHERE [{keyColumnName}] = @id AND {rowVersionColumn} = @originalRowVersion;",
             CascadeNavigations = cascades,
         };
     }
@@ -2447,6 +2585,22 @@ public sealed class EntitySaveMetadata
         );
     }
 
+    /// <summary>Binds the row version the entity was read with to the @originalRowVersion parameter (the optimistic concurrency guard of UPDATE / DELETE).</summary>
+    /// <remarks>
+    /// Only called for tables that have a rowversion column. A <c>null</c> value (an entity that was never read from the
+    /// database) binds as DBNull and matches no row, so the save is reported as a conflict rather than silently overwriting.
+    /// </remarks>
+    public void BindRowVersionParameter(SqlCommand command, EntityBase entity)
+    {
+        var property = RowVersionProperty!;
+        AddColumnParameter(
+            command,
+            "@originalRowVersion",
+            property,
+            SqlParameterValue.Unwrap(property.GetValue(entity))
+        );
+    }
+
     /// <summary>Binds an externally supplied primary key value to the @id parameter (used by GetById/Delete).</summary>
     public void BindKeyParameter(SqlCommand command, object? id)
     {
@@ -2745,6 +2899,93 @@ public sealed class SaveHookSession(
     }
 }
 
+/// <summary>Collects the row versions the database assigned during a save so that they can be written back once the transaction commits.</summary>
+/// <remarks>
+/// A rowversion is assigned while the transaction is still open, so writing it straight back to the entity would leave it
+/// carrying a version that never became visible if the transaction is rolled back afterwards. The saver records the pairs
+/// here instead and <see cref="Apply"/> settles them after a successful commit.
+/// </remarks>
+public sealed class RowVersionCollector
+{
+    private readonly List<(EntityBase Entity, byte[] Version)> _versions = new();
+
+    /// <summary>Records the raw row version bytes the database assigned to an entity (converting them to the property type is left to <see cref="Apply"/>).</summary>
+    public void Record(EntityBase entity, byte[] version) => _versions.Add((entity, version));
+
+    /// <summary>Writes every recorded row version back to its entity (call only after the save transaction has committed).</summary>
+    public void Apply()
+    {
+        foreach (var (entity, version) in _versions)
+        {
+            var property = EntitySaveMetadata.For(entity.GetType()).RowVersionProperty!;
+
+            // The raw bytes are wrapped here when the property is a value object type
+            property.SetValue(entity, SqlValueObjectActivator.Wrap(version, property.PropertyType));
+        }
+    }
+}
+
+/// <summary>Optimistic concurrency helpers shared by the direct CRUD methods and the graph saver, for tables that carry a rowversion (concurrency token) column.</summary>
+public static class RowVersionConcurrency
+{
+    /// <summary>Selects the UPDATE statement for the given mode (the version guard applies to <see cref="ConcurrencyMode.Optimistic"/> only).</summary>
+    public static string UpdateSql(EntitySaveMetadata metadata, ConcurrencyMode mode) =>
+        mode == ConcurrencyMode.Optimistic
+            ? metadata.UpdateVersionedSql!
+            : metadata.UpdateForcedSql!;
+
+    /// <summary>Binds the UPDATE parameters, adding the version guard parameter for <see cref="ConcurrencyMode.Optimistic"/>.</summary>
+    public static void BindUpdate(
+        EntitySaveMetadata metadata,
+        SqlCommand command,
+        EntityBase entity,
+        ConcurrencyMode mode
+    )
+    {
+        metadata.BindUpdateParameters(command, entity);
+
+        if (mode == ConcurrencyMode.Optimistic)
+        {
+            metadata.BindRowVersionParameter(command, entity);
+        }
+    }
+
+    /// <summary>
+    /// Returns whether the row the entity's primary key points at currently exists. Used after a guarded statement affected
+    /// no rows, to tell "the row is gone" (the pre-existing not-found contract) apart from "the row version is stale".
+    /// </summary>
+    public static async Task<bool> RowExistsAsync(
+        EntitySaveMetadata metadata,
+        EntityBase entity,
+        SqlConnection connection,
+        SqlTransaction? transaction,
+        CancellationToken cancellationToken
+    )
+    {
+        await using var command = new SqlCommand(metadata.SelectByIdSql, connection);
+        command.Transaction = transaction;
+        metadata.BindEntityKeyParameter(command, entity);
+
+        // ExecuteScalar yields null only when the SELECT produced no row at all (a NULL first column comes back as DBNull)
+        return await command.ExecuteScalarAsync(cancellationToken) is not null;
+    }
+
+    /// <summary>Builds the conflict reported when the row still exists but its version moved on since the entity was read.</summary>
+    /// <param name="metadata">The metadata of the entity's type.</param>
+    /// <param name="entity">The entity whose save was rejected.</param>
+    /// <param name="operation">The lowercase verb of the rejected operation ("update" or "delete").</param>
+    public static SaveConflictException Conflict(
+        EntitySaveMetadata metadata,
+        EntityBase entity,
+        string operation
+    ) =>
+        SaveConflictException.Modified(
+            entity.GetType(),
+            metadata.KeyProperty.GetValue(entity),
+            operation
+        );
+}
+
 /// <summary>Internal engine that saves an entity graph in a single transaction according to RowState.</summary>
 public static class EntityGraphSaver
 {
@@ -2769,7 +3010,9 @@ public static class EntityGraphSaver
         bool insertWhenUpdateMissing,
         CancellationToken cancellationToken,
         SaveHookSession? hooks = null,
-        bool changesAlreadyVerified = false
+        bool changesAlreadyVerified = false,
+        ConcurrencyMode mode = ConcurrencyMode.Optimistic,
+        RowVersionCollector? versions = null
     )
     {
         if (!changesAlreadyVerified && !HasChanges(entity, cascadeSave))
@@ -2791,7 +3034,8 @@ public static class EntityGraphSaver
                         connection,
                         transaction,
                         cancellationToken,
-                        hooks
+                        hooks,
+                        mode
                     );
                 }
             }
@@ -2810,13 +3054,12 @@ public static class EntityGraphSaver
                 return rows;
             }
 
-            rows += await ExecuteAsync(
+            rows += await DeleteEntityAsync(
                 entity,
-                meta => meta.DeleteSql,
-                static (meta, command, e) => meta.BindEntityKeyParameter(command, e),
                 connection,
                 transaction,
-                cancellationToken
+                cancellationToken,
+                mode
             );
 
             // After(Delete) fires immediately after the DML (before commit)
@@ -2836,13 +3079,12 @@ public static class EntityGraphSaver
                 || await hooks.InvokeBeforeAsync(entity, SaveOperation.Insert, cancellationToken)
             )
             {
-                rows += await ExecuteAsync(
+                rows += await InsertEntityAsync(
                     entity,
-                    meta => meta.InsertSql,
-                    static (meta, command, e) => meta.BindInsertParameters(command, e),
                     connection,
                     transaction,
-                    cancellationToken
+                    cancellationToken,
+                    versions
                 );
 
                 if (hooks is not null)
@@ -2868,7 +3110,9 @@ public static class EntityGraphSaver
                     connection,
                     transaction,
                     insertWhenUpdateMissing,
-                    cancellationToken
+                    cancellationToken,
+                    mode,
+                    versions
                 );
                 rows += affected;
 
@@ -2896,7 +3140,10 @@ public static class EntityGraphSaver
                     cascadeDelete,
                     insertWhenUpdateMissing,
                     cancellationToken,
-                    hooks
+                    hooks,
+                    changesAlreadyVerified: false,
+                    mode,
+                    versions
                 );
             }
         }
@@ -2944,14 +3191,22 @@ public static class EntityGraphSaver
         SqlConnection connection,
         SqlTransaction transaction,
         CancellationToken cancellationToken,
-        SaveHookSession? hooks = null
+        SaveHookSession? hooks = null,
+        ConcurrencyMode mode = ConcurrencyMode.Optimistic
     )
     {
         var rows = 0;
 
         foreach (var child in EnumerateCascadeChildren(entity))
         {
-            rows += await DeleteGraphAsync(child, connection, transaction, cancellationToken, hooks);
+            rows += await DeleteGraphAsync(
+                child,
+                connection,
+                transaction,
+                cancellationToken,
+                hooks,
+                mode
+            );
         }
 
         // Before(Delete) fires from the subtree's children upward. On false, "the children are gone but this node remains" (the consequence of a standalone skip)
@@ -2964,13 +3219,12 @@ public static class EntityGraphSaver
             return rows;
         }
 
-        rows += await ExecuteAsync(
+        rows += await DeleteEntityAsync(
             entity,
-            meta => meta.DeleteSql,
-            static (meta, command, e) => meta.BindEntityKeyParameter(command, e),
             connection,
             transaction,
-            cancellationToken
+            cancellationToken,
+            mode
         );
 
         if (hooks is not null)
@@ -2981,23 +3235,162 @@ public static class EntityGraphSaver
         return rows;
     }
 
+    /// <summary>Inserts a single row, capturing the row version the database assigned when the table carries one.</summary>
+    private static async Task<int> InsertEntityAsync(
+        EntityBase entity,
+        SqlConnection connection,
+        SqlTransaction transaction,
+        CancellationToken cancellationToken,
+        RowVersionCollector? versions
+    )
+    {
+        var metadata = EntitySaveMetadata.For(entity.GetType());
+
+        if (metadata.RowVersionProperty is not null)
+        {
+            // The INSERT returns the version the database generated; it is written back to the entity after the commit
+            var version = await ExecuteReturningAsync(
+                entity,
+                meta => meta.InsertReturningSql!,
+                static (meta, command, e) => meta.BindInsertParameters(command, e),
+                connection,
+                transaction,
+                cancellationToken
+            );
+
+            if (version is byte[] newVersion)
+            {
+                versions?.Record(entity, newVersion);
+            }
+
+            return 1;
+        }
+
+        return await ExecuteAsync(
+            entity,
+            meta => meta.InsertSql,
+            static (meta, command, e) => meta.BindInsertParameters(command, e),
+            connection,
+            transaction,
+            cancellationToken
+        );
+    }
+
+    /// <summary>Deletes a single row, guarded by the row version the entity was read with when the table carries one.</summary>
+    private static async Task<int> DeleteEntityAsync(
+        EntityBase entity,
+        SqlConnection connection,
+        SqlTransaction transaction,
+        CancellationToken cancellationToken,
+        ConcurrencyMode mode
+    )
+    {
+        var metadata = EntitySaveMetadata.For(entity.GetType());
+
+        if (metadata.RowVersionProperty is not null && mode == ConcurrencyMode.Optimistic)
+        {
+            var affected = await ExecuteAsync(
+                entity,
+                meta => meta.DeleteVersionedSql!,
+                static (meta, command, e) =>
+                {
+                    meta.BindEntityKeyParameter(command, e);
+                    meta.BindRowVersionParameter(command, e);
+                },
+                connection,
+                transaction,
+                cancellationToken
+            );
+
+            // Zero affected rows is ambiguous: either the row is already gone (deleting a row that is not there has always
+            // been tolerated silently) or someone else changed it after it was read. Probing the row tells the two apart
+            if (
+                affected == 0
+                && await RowVersionConcurrency.RowExistsAsync(
+                    metadata,
+                    entity,
+                    connection,
+                    transaction,
+                    cancellationToken
+                )
+            )
+            {
+                throw RowVersionConcurrency.Conflict(metadata, entity, "delete");
+            }
+
+            return affected;
+        }
+
+        return await ExecuteAsync(
+            entity,
+            meta => meta.DeleteSql,
+            static (meta, command, e) => meta.BindEntityKeyParameter(command, e),
+            connection,
+            transaction,
+            cancellationToken
+        );
+    }
+
     /// <summary>Executes the update and returns the affected row count and the operation actually performed (Insert when switched).</summary>
     private static async Task<(int Rows, SaveOperation Performed)> UpdateAsync(
         EntityBase entity,
         SqlConnection connection,
         SqlTransaction transaction,
         bool insertWhenUpdateMissing,
-        CancellationToken cancellationToken
+        CancellationToken cancellationToken,
+        ConcurrencyMode mode,
+        RowVersionCollector? versions
     )
     {
-        var affected = await ExecuteAsync(
-            entity,
-            meta => meta.UpdateSql,
-            static (meta, command, e) => meta.BindUpdateParameters(command, e),
-            connection,
-            transaction,
-            cancellationToken
-        );
+        var metadata = EntitySaveMetadata.For(entity.GetType());
+        int affected;
+
+        if (metadata.RowVersionProperty is not null)
+        {
+            // The guarded UPDATE returns the version the database generated; a null result means it matched no row
+            var version = await ExecuteReturningAsync(
+                entity,
+                meta => RowVersionConcurrency.UpdateSql(meta, mode),
+                (meta, command, e) => RowVersionConcurrency.BindUpdate(meta, command, e, mode),
+                connection,
+                transaction,
+                cancellationToken
+            );
+
+            if (version is byte[] newVersion)
+            {
+                versions?.Record(entity, newVersion);
+                return (1, SaveOperation.Update);
+            }
+
+            // Nothing matched: probing the row separates "the row is gone" (handled below like any missing record) from
+            // "someone else changed it after it was read", which must never be silently switched to an INSERT
+            if (
+                await RowVersionConcurrency.RowExistsAsync(
+                    metadata,
+                    entity,
+                    connection,
+                    transaction,
+                    cancellationToken
+                )
+            )
+            {
+                throw RowVersionConcurrency.Conflict(metadata, entity, "update");
+            }
+
+            affected = 0;
+        }
+        else
+        {
+            affected = await ExecuteAsync(
+                entity,
+                meta => meta.UpdateSql,
+                static (meta, command, e) => meta.BindUpdateParameters(command, e),
+                connection,
+                transaction,
+                cancellationToken
+            );
+        }
 
         if (affected != 0)
         {
@@ -3008,21 +3401,37 @@ public static class EntityGraphSaver
         // switch to INSERT or report it as a conflict
         if (insertWhenUpdateMissing)
         {
-            var inserted = await ExecuteAsync(
+            var inserted = await InsertEntityAsync(
                 entity,
-                meta => meta.InsertSql,
-                static (meta, command, e) => meta.BindInsertParameters(command, e),
                 connection,
                 transaction,
-                cancellationToken
+                cancellationToken,
+                versions
             );
             return (inserted, SaveOperation.Insert);
         }
 
-        var metadata = EntitySaveMetadata.For(entity.GetType());
-        throw new SaveConflictException(
-            $"The record to update was not found ({entity.GetType().Name}, key {metadata.KeyProperty.GetValue(entity)}). It may have been deleted by another user."
+        throw SaveConflictException.NotFound(
+            entity.GetType(),
+            metadata.KeyProperty.GetValue(entity)
         );
+    }
+
+    /// <summary>Executes a statement whose OUTPUT clause returns a single value, yielding <c>null</c> when it matched no row.</summary>
+    private static async Task<object?> ExecuteReturningAsync(
+        EntityBase entity,
+        Func<EntitySaveMetadata, string> sqlSelector,
+        Action<EntitySaveMetadata, SqlCommand, EntityBase> bind,
+        SqlConnection connection,
+        SqlTransaction transaction,
+        CancellationToken cancellationToken
+    )
+    {
+        var metadata = EntitySaveMetadata.For(entity.GetType());
+
+        await using var command = new SqlCommand(sqlSelector(metadata), connection, transaction);
+        bind(metadata, command, entity);
+        return await command.ExecuteScalarAsync(cancellationToken);
     }
 
     private static async Task<int> ExecuteAsync(

@@ -114,7 +114,7 @@ public sealed class BinaryColumnRemoteRuntimeTests : IAsyncLifetime
             Payload = [5, 5],
         };
 
-        var act = () => Documents.UpdateAsync(doc, Ct);
+        var act = () => Documents.UpdateAsync(doc, cancellationToken: Ct);
 
         (await act.Should().ThrowAsync<InvalidOperationException>())
             .Which.Message.Should()

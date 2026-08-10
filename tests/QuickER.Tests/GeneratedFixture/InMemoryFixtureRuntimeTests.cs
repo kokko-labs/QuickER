@@ -83,13 +83,13 @@ public sealed class InMemoryFixtureRuntimeTests
         // 更新
         var updated = NewCustomer(1, "Alice2", 200m);
         updated.RowState = RowState.Updated;
-        (await customers.UpdateAsync(updated, Ct)).Should().BeTrue();
+        (await customers.UpdateAsync(updated, cancellationToken: Ct)).Should().BeTrue();
         (await customers.GetByIdAsync(1, Ct))!.Name.Should().Be("Alice2");
 
         // 存在しない主キーの更新は false
         var missing = NewCustomer(42, "Ghost");
         missing.RowState = RowState.Updated;
-        (await customers.UpdateAsync(missing, Ct)).Should().BeFalse();
+        (await customers.UpdateAsync(missing, cancellationToken: Ct)).Should().BeFalse();
 
         // 削除
         (await customers.DeleteAsync(2, Ct))

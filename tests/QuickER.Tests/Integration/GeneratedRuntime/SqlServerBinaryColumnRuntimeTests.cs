@@ -388,7 +388,7 @@ public sealed class SqlServerBinaryColumnRuntimeTests(SqlServerContainerFixture 
         beforeRowVer.Should().NotBeNull("更新前から rowversion は読める");
 
         before.Title = "alpha-updated";
-        (await documents.UpdateAsync(before, Ct))
+        (await documents.UpdateAsync(before, cancellationToken: Ct))
             .Should()
             .BeTrue(
                 "rowversion 列入りテーブルでも UPDATE は成功する（rowversion は SET から除外）"

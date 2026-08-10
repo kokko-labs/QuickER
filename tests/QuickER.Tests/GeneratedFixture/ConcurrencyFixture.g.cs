@@ -20,10 +20,11 @@ using System.Net.Http.Json;
 using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
-using Microsoft.Data.Sqlite;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Diagnostics;
@@ -34,7 +35,7 @@ using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
-namespace QuickER.Tests.GeneratedRemoteServiceFixture;
+namespace QuickER.Tests.GeneratedConcurrencyFixture;
 
 /// <summary>Custom attribute that annotates an entity navigation with the referenced table and column information.</summary>
 [AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]
@@ -92,6 +93,33 @@ public sealed class NavigationReferenceAttribute : Attribute
 }
 
 /// <summary>
+/// Custom attribute that annotates an entity property with DB column metadata (SqlDbType, Size, Precision, Scale).
+/// It is used by the runtime (EntitySaveMetadata) to build an explicit <c>SqlParameter</c>, and can also be
+/// consumed by user code that needs the column metadata (maximum length, number of digits).
+/// </summary>
+[AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]
+public sealed class SqlColumnTypeAttribute : Attribute
+{
+    /// <summary>Gets the SqlDbType of the DB column.</summary>
+    public SqlDbType DbType { get; }
+
+    /// <summary>Gets or sets the declared length for string/binary columns. (max) is -1, and unspecified is 0.</summary>
+    public int Size { get; set; }
+
+    /// <summary>Gets or sets the total number of digits (precision) for decimal types.</summary>
+    public byte Precision { get; set; }
+
+    /// <summary>Gets or sets the number of fractional digits (scale) for decimal types.</summary>
+    public byte Scale { get; set; }
+
+    /// <summary>Gets the number of integral digits (Precision - Scale) for decimal types; -1 for non-decimal types.</summary>
+    public int IntegralDigits => Precision > 0 ? Precision - Scale : -1;
+
+    /// <summary>Initializes a new instance with the specified SqlDbType.</summary>
+    public SqlColumnTypeAttribute(SqlDbType dbType) => DbType = dbType;
+}
+
+/// <summary>
 /// Custom attribute that annotates an entity property with DB column definition metadata (a dialect-neutral type token and description).
 /// It turns the generated entity into a self-describing document of the DB definition, allowing the column definition to be recovered via reflection.
 /// </summary>
@@ -133,29 +161,6 @@ public sealed class DbTableMetaAttribute : Attribute
 [AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]
 public sealed class StoreGeneratedColumnAttribute : Attribute
 {
-}
-
-/// <summary>
-/// Custom attribute that declares one UNIQUE constraint of the table on an entity class (a dialect-neutral definition metadata).
-/// The arguments are the entity property names that make up the constraint, in declaration order.
-/// It turns the generated entity into a self-describing document of the DB definition, allowing the constraint to be recovered via reflection.
-/// </summary>
-/// <remarks>
-/// It is applied once per UNIQUE constraint of the table. Like <c>[DbColumnMeta]</c> / <c>[DbTableMeta]</c> it carries definition
-/// metadata only and drives no runtime behaviour: the uniqueness pre-checks are plain generated code (the repository's
-/// <c>CheckUniquenessAsync</c> against the database, and the constraints an edit model declares for the duplicate check inside a collection).
-/// </remarks>
-[AttributeUsage(AttributeTargets.Class, AllowMultiple = true)]
-public sealed class UniqueConstraintAttribute : Attribute
-{
-    /// <summary>Gets the entity property names that make up the constraint (declaration order).</summary>
-    public string[] PropertyNames { get; }
-
-    /// <summary>Gets or sets the constraint name (the synthesized name when the diagram does not set one).</summary>
-    public string Name { get; set; } = string.Empty;
-
-    /// <summary>Initializes a new instance with the properties that make up the constraint.</summary>
-    public UniqueConstraintAttribute(params string[] propertyNames) => PropertyNames = propertyNames;
 }
 
 /// <summary>
@@ -622,240 +627,30 @@ public static class ValueObjectValidationMessages
     public static Func<string> ValueRequired { get; set; } = () => "A value is required.";
 }
 
-/// <summary>Value object for the amount column</summary>
-public sealed partial class AmountValue
-    : ValueObjectOrderedBase<AmountValue, decimal>,
-        IValueObject<AmountValue, decimal>
+/// <summary>Value object for the gadget_id column</summary>
+public sealed partial class GadgetIdValue
+    : ValueObjectOrderedBase<GadgetIdValue, int>,
+        IValueObject<GadgetIdValue, int>
 {
-    private AmountValue(decimal value)
+    private GadgetIdValue(int value)
         : base(value) { }
 
     /// <summary>Validates and creates the value object (throws ValueObjectValidationException on violation).</summary>
-    public static AmountValue Create(decimal value)
+    public static GadgetIdValue Create(int value)
     {
         var errors = new List<string>();
         Validate(value, errors);
         if (errors.Count > 0)
         {
-            throw new ValueObjectValidationException(typeof(AmountValue), errors);
+            throw new ValueObjectValidationException(typeof(GadgetIdValue), errors);
         }
-        return new AmountValue(value);
-    }
-
-    /// <summary>Returns true plus the value object when creation succeeds, or false plus the error details when it fails.</summary>
-    public static bool TryCreate(
-        decimal value,
-        out AmountValue? result,
-        out IReadOnlyList<string> errors
-    )
-    {
-        var list = new List<string>();
-        Validate(value, list);
-        if (list.Count > 0)
-        {
-            result = null;
-            errors = list;
-            return false;
-        }
-        result = new AmountValue(value);
-        errors = Array.Empty<string>();
-        return true;
-    }
-
-    /// <summary>Auto-generated validation plus the user extension (OnValidate). Also callable from partial and custom code.</summary>
-    internal static void Validate(decimal value, ICollection<string> errors)
-    {
-        ValidateDecimal(value, 10, 2, errors);
-        OnValidate(value, errors);
-    }
-
-    /// <summary>User-defined additional validation (partial; zero cost when not implemented).</summary>
-    static partial void OnValidate(decimal value, ICollection<string> errors);
-
-    /// <summary>Gets the display name of this value object (used in error messages and similar). Defaults to the column description, or the property name when unset. Can be replaced through GeneratedDisplayNames.Resolve (all display names at once) or CustomizeDisplayName (this value object only).</summary>
-    public static string DisplayName
-    {
-        get
-        {
-            var displayName = GeneratedDisplayNames.Resolve("Amount", null);
-            CustomizeDisplayName(ref displayName);
-            return displayName;
-        }
-    }
-
-    /// <summary>Extension point for replacing the display name (partial; the default display name applies when not implemented).</summary>
-    static partial void CustomizeDisplayName(ref string displayName);
-
-    /// <summary>Validates the digit counts of a decimal (does not round; rejects overflow). Trailing zeros count toward the scale.</summary>
-    private static void ValidateDecimal(
-        decimal value,
-        int precision,
-        int scale,
-        ICollection<string> errors
-    )
-    {
-        var valueScale = (decimal.GetBits(value)[3] >> 16) & 0xFF;
-        if (valueScale > scale)
-        {
-            var message = ValueObjectValidationMessages.ScaleExceeded(scale);
-            CustomizeScaleErrorMessage(value, scale, ref message);
-            errors.Add(message);
-        }
-        var integral = Math.Truncate(Math.Abs(value));
-        var integralDigits = 0;
-        while (integral >= 1)
-        {
-            integral = Math.Truncate(integral / 10);
-            integralDigits++;
-        }
-        if (integralDigits > precision - scale)
-        {
-            var message = ValueObjectValidationMessages.PrecisionExceeded(precision - scale);
-            CustomizePrecisionErrorMessage(value, precision - scale, ref message);
-            errors.Add(message);
-        }
-    }
-
-    /// <summary>Replaces the decimal-places error message (partial; the default message applies when not implemented).</summary>
-    static partial void CustomizeScaleErrorMessage(decimal value, int scale, ref string message);
-
-    /// <summary>Replaces the integer-digits error message (partial; the default message applies when not implemented).</summary>
-    static partial void CustomizePrecisionErrorMessage(
-        decimal value,
-        int maxIntegralDigits,
-        ref string message
-    );
-}
-
-/// <summary>Value object for the balance column</summary>
-public sealed partial class BalanceValue
-    : ValueObjectOrderedBase<BalanceValue, decimal>,
-        IValueObject<BalanceValue, decimal>
-{
-    private BalanceValue(decimal value)
-        : base(value) { }
-
-    /// <summary>Validates and creates the value object (throws ValueObjectValidationException on violation).</summary>
-    public static BalanceValue Create(decimal value)
-    {
-        var errors = new List<string>();
-        Validate(value, errors);
-        if (errors.Count > 0)
-        {
-            throw new ValueObjectValidationException(typeof(BalanceValue), errors);
-        }
-        return new BalanceValue(value);
-    }
-
-    /// <summary>Returns true plus the value object when creation succeeds, or false plus the error details when it fails.</summary>
-    public static bool TryCreate(
-        decimal value,
-        out BalanceValue? result,
-        out IReadOnlyList<string> errors
-    )
-    {
-        var list = new List<string>();
-        Validate(value, list);
-        if (list.Count > 0)
-        {
-            result = null;
-            errors = list;
-            return false;
-        }
-        result = new BalanceValue(value);
-        errors = Array.Empty<string>();
-        return true;
-    }
-
-    /// <summary>Auto-generated validation plus the user extension (OnValidate). Also callable from partial and custom code.</summary>
-    internal static void Validate(decimal value, ICollection<string> errors)
-    {
-        ValidateDecimal(value, 10, 2, errors);
-        OnValidate(value, errors);
-    }
-
-    /// <summary>User-defined additional validation (partial; zero cost when not implemented).</summary>
-    static partial void OnValidate(decimal value, ICollection<string> errors);
-
-    /// <summary>Gets the display name of this value object (used in error messages and similar). Defaults to the column description, or the property name when unset. Can be replaced through GeneratedDisplayNames.Resolve (all display names at once) or CustomizeDisplayName (this value object only).</summary>
-    public static string DisplayName
-    {
-        get
-        {
-            var displayName = GeneratedDisplayNames.Resolve("Balance", null);
-            CustomizeDisplayName(ref displayName);
-            return displayName;
-        }
-    }
-
-    /// <summary>Extension point for replacing the display name (partial; the default display name applies when not implemented).</summary>
-    static partial void CustomizeDisplayName(ref string displayName);
-
-    /// <summary>Validates the digit counts of a decimal (does not round; rejects overflow). Trailing zeros count toward the scale.</summary>
-    private static void ValidateDecimal(
-        decimal value,
-        int precision,
-        int scale,
-        ICollection<string> errors
-    )
-    {
-        var valueScale = (decimal.GetBits(value)[3] >> 16) & 0xFF;
-        if (valueScale > scale)
-        {
-            var message = ValueObjectValidationMessages.ScaleExceeded(scale);
-            CustomizeScaleErrorMessage(value, scale, ref message);
-            errors.Add(message);
-        }
-        var integral = Math.Truncate(Math.Abs(value));
-        var integralDigits = 0;
-        while (integral >= 1)
-        {
-            integral = Math.Truncate(integral / 10);
-            integralDigits++;
-        }
-        if (integralDigits > precision - scale)
-        {
-            var message = ValueObjectValidationMessages.PrecisionExceeded(precision - scale);
-            CustomizePrecisionErrorMessage(value, precision - scale, ref message);
-            errors.Add(message);
-        }
-    }
-
-    /// <summary>Replaces the decimal-places error message (partial; the default message applies when not implemented).</summary>
-    static partial void CustomizeScaleErrorMessage(decimal value, int scale, ref string message);
-
-    /// <summary>Replaces the integer-digits error message (partial; the default message applies when not implemented).</summary>
-    static partial void CustomizePrecisionErrorMessage(
-        decimal value,
-        int maxIntegralDigits,
-        ref string message
-    );
-}
-
-/// <summary>Value object for the customer_id column</summary>
-public sealed partial class CustomerIdValue
-    : ValueObjectOrderedBase<CustomerIdValue, int>,
-        IValueObject<CustomerIdValue, int>
-{
-    private CustomerIdValue(int value)
-        : base(value) { }
-
-    /// <summary>Validates and creates the value object (throws ValueObjectValidationException on violation).</summary>
-    public static CustomerIdValue Create(int value)
-    {
-        var errors = new List<string>();
-        Validate(value, errors);
-        if (errors.Count > 0)
-        {
-            throw new ValueObjectValidationException(typeof(CustomerIdValue), errors);
-        }
-        return new CustomerIdValue(value);
+        return new GadgetIdValue(value);
     }
 
     /// <summary>Returns true plus the value object when creation succeeds, or false plus the error details when it fails.</summary>
     public static bool TryCreate(
         int value,
-        out CustomerIdValue? result,
+        out GadgetIdValue? result,
         out IReadOnlyList<string> errors
     )
     {
@@ -867,7 +662,7 @@ public sealed partial class CustomerIdValue
             errors = list;
             return false;
         }
-        result = new CustomerIdValue(value);
+        result = new GadgetIdValue(value);
         errors = Array.Empty<string>();
         return true;
     }
@@ -886,7 +681,7 @@ public sealed partial class CustomerIdValue
     {
         get
         {
-            var displayName = GeneratedDisplayNames.Resolve("CustomerId", null);
+            var displayName = GeneratedDisplayNames.Resolve("GadgetId", null);
             CustomizeDisplayName(ref displayName);
             return displayName;
         }
@@ -894,96 +689,6 @@ public sealed partial class CustomerIdValue
 
     /// <summary>Extension point for replacing the display name (partial; the default display name applies when not implemented).</summary>
     static partial void CustomizeDisplayName(ref string displayName);
-}
-
-/// <summary>Value object for the memo column</summary>
-public sealed partial class MemoValue
-    : ValueObjectStringBase<MemoValue>,
-        IValueObject<MemoValue, string>
-{
-    private MemoValue(string value)
-        : base(value) { }
-
-    /// <summary>Validates and creates the value object (throws ValueObjectValidationException on violation).</summary>
-    public static MemoValue Create(string value)
-    {
-        var errors = new List<string>();
-        Validate(value, errors);
-        if (errors.Count > 0)
-        {
-            throw new ValueObjectValidationException(typeof(MemoValue), errors);
-        }
-        return new MemoValue(value);
-    }
-
-    /// <summary>Returns true plus the value object when creation succeeds, or false plus the error details when it fails.</summary>
-    public static bool TryCreate(
-        string value,
-        out MemoValue? result,
-        out IReadOnlyList<string> errors
-    )
-    {
-        var list = new List<string>();
-        Validate(value, list);
-        if (list.Count > 0)
-        {
-            result = null;
-            errors = list;
-            return false;
-        }
-        result = new MemoValue(value);
-        errors = Array.Empty<string>();
-        return true;
-    }
-
-    /// <summary>Auto-generated validation plus the user extension (OnValidate). Also callable from partial and custom code.</summary>
-    internal static void Validate(string value, ICollection<string> errors)
-    {
-        // A value object never wraps null (a nullable column keeps the property itself null),
-        // so a null input is reported as a validation error instead of throwing from the checks below.
-        if (value is null)
-        {
-            var message = ValueObjectValidationMessages.ValueRequired();
-            CustomizeValueRequiredErrorMessage(ref message);
-            errors.Add(message);
-            return;
-        }
-
-        if (value.Length > 50)
-        {
-            var message = ValueObjectValidationMessages.MaxLengthExceeded(50, value.Length);
-            CustomizeMaxLengthErrorMessage(value, 50, ref message);
-            errors.Add(message);
-        }
-        OnValidate(value, errors);
-    }
-
-    /// <summary>User-defined additional validation (partial; zero cost when not implemented).</summary>
-    static partial void OnValidate(string value, ICollection<string> errors);
-
-    /// <summary>Gets the display name of this value object (used in error messages and similar). Defaults to the column description, or the property name when unset. Can be replaced through GeneratedDisplayNames.Resolve (all display names at once) or CustomizeDisplayName (this value object only).</summary>
-    public static string DisplayName
-    {
-        get
-        {
-            var displayName = GeneratedDisplayNames.Resolve("Memo", null);
-            CustomizeDisplayName(ref displayName);
-            return displayName;
-        }
-    }
-
-    /// <summary>Extension point for replacing the display name (partial; the default display name applies when not implemented).</summary>
-    static partial void CustomizeDisplayName(ref string displayName);
-
-    /// <summary>Replaces the required-value error message (partial; the default message applies when not implemented).</summary>
-    static partial void CustomizeValueRequiredErrorMessage(ref string message);
-
-    /// <summary>Replaces the maximum-length error message (partial; the default message applies when not implemented).</summary>
-    static partial void CustomizeMaxLengthErrorMessage(
-        string value,
-        int maxLength,
-        ref string message
-    );
 }
 
 /// <summary>Value object for the name column</summary>
@@ -1076,30 +781,30 @@ public sealed partial class NameValue
     );
 }
 
-/// <summary>Value object for the order_id column</summary>
-public sealed partial class OrderIdValue
-    : ValueObjectOrderedBase<OrderIdValue, int>,
-        IValueObject<OrderIdValue, int>
+/// <summary>Value object for the note_id column</summary>
+public sealed partial class NoteIdValue
+    : ValueObjectOrderedBase<NoteIdValue, int>,
+        IValueObject<NoteIdValue, int>
 {
-    private OrderIdValue(int value)
+    private NoteIdValue(int value)
         : base(value) { }
 
     /// <summary>Validates and creates the value object (throws ValueObjectValidationException on violation).</summary>
-    public static OrderIdValue Create(int value)
+    public static NoteIdValue Create(int value)
     {
         var errors = new List<string>();
         Validate(value, errors);
         if (errors.Count > 0)
         {
-            throw new ValueObjectValidationException(typeof(OrderIdValue), errors);
+            throw new ValueObjectValidationException(typeof(NoteIdValue), errors);
         }
-        return new OrderIdValue(value);
+        return new NoteIdValue(value);
     }
 
     /// <summary>Returns true plus the value object when creation succeeds, or false plus the error details when it fails.</summary>
     public static bool TryCreate(
         int value,
-        out OrderIdValue? result,
+        out NoteIdValue? result,
         out IReadOnlyList<string> errors
     )
     {
@@ -1111,7 +816,7 @@ public sealed partial class OrderIdValue
             errors = list;
             return false;
         }
-        result = new OrderIdValue(value);
+        result = new NoteIdValue(value);
         errors = Array.Empty<string>();
         return true;
     }
@@ -1130,7 +835,7 @@ public sealed partial class OrderIdValue
     {
         get
         {
-            var displayName = GeneratedDisplayNames.Resolve("OrderId", null);
+            var displayName = GeneratedDisplayNames.Resolve("NoteId", null);
             CustomizeDisplayName(ref displayName);
             return displayName;
         }
@@ -1138,6 +843,173 @@ public sealed partial class OrderIdValue
 
     /// <summary>Extension point for replacing the display name (partial; the default display name applies when not implemented).</summary>
     static partial void CustomizeDisplayName(ref string displayName);
+}
+
+/// <summary>Value object for the note column</summary>
+public sealed partial class NoteValue
+    : ValueObjectStringBase<NoteValue>,
+        IValueObject<NoteValue, string>
+{
+    private NoteValue(string value)
+        : base(value) { }
+
+    /// <summary>Validates and creates the value object (throws ValueObjectValidationException on violation).</summary>
+    public static NoteValue Create(string value)
+    {
+        var errors = new List<string>();
+        Validate(value, errors);
+        if (errors.Count > 0)
+        {
+            throw new ValueObjectValidationException(typeof(NoteValue), errors);
+        }
+        return new NoteValue(value);
+    }
+
+    /// <summary>Returns true plus the value object when creation succeeds, or false plus the error details when it fails.</summary>
+    public static bool TryCreate(
+        string value,
+        out NoteValue? result,
+        out IReadOnlyList<string> errors
+    )
+    {
+        var list = new List<string>();
+        Validate(value, list);
+        if (list.Count > 0)
+        {
+            result = null;
+            errors = list;
+            return false;
+        }
+        result = new NoteValue(value);
+        errors = Array.Empty<string>();
+        return true;
+    }
+
+    /// <summary>Auto-generated validation plus the user extension (OnValidate). Also callable from partial and custom code.</summary>
+    internal static void Validate(string value, ICollection<string> errors)
+    {
+        // A value object never wraps null (a nullable column keeps the property itself null),
+        // so a null input is reported as a validation error instead of throwing from the checks below.
+        if (value is null)
+        {
+            var message = ValueObjectValidationMessages.ValueRequired();
+            CustomizeValueRequiredErrorMessage(ref message);
+            errors.Add(message);
+            return;
+        }
+
+        if (value.Length > 100)
+        {
+            var message = ValueObjectValidationMessages.MaxLengthExceeded(100, value.Length);
+            CustomizeMaxLengthErrorMessage(value, 100, ref message);
+            errors.Add(message);
+        }
+        OnValidate(value, errors);
+    }
+
+    /// <summary>User-defined additional validation (partial; zero cost when not implemented).</summary>
+    static partial void OnValidate(string value, ICollection<string> errors);
+
+    /// <summary>Gets the display name of this value object (used in error messages and similar). Defaults to the column description, or the property name when unset. Can be replaced through GeneratedDisplayNames.Resolve (all display names at once) or CustomizeDisplayName (this value object only).</summary>
+    public static string DisplayName
+    {
+        get
+        {
+            var displayName = GeneratedDisplayNames.Resolve("Note", null);
+            CustomizeDisplayName(ref displayName);
+            return displayName;
+        }
+    }
+
+    /// <summary>Extension point for replacing the display name (partial; the default display name applies when not implemented).</summary>
+    static partial void CustomizeDisplayName(ref string displayName);
+
+    /// <summary>Replaces the required-value error message (partial; the default message applies when not implemented).</summary>
+    static partial void CustomizeValueRequiredErrorMessage(ref string message);
+
+    /// <summary>Replaces the maximum-length error message (partial; the default message applies when not implemented).</summary>
+    static partial void CustomizeMaxLengthErrorMessage(
+        string value,
+        int maxLength,
+        ref string message
+    );
+}
+
+/// <summary>Value object for the row_ver column</summary>
+public sealed partial class RowVerValue
+    : ValueObjectBinaryBase<RowVerValue>,
+        IValueObject<RowVerValue, byte[]>
+{
+    private RowVerValue(byte[] value)
+        : base(value) { }
+
+    /// <summary>Validates and creates the value object (throws ValueObjectValidationException on violation).</summary>
+    public static RowVerValue Create(byte[] value)
+    {
+        var errors = new List<string>();
+        Validate(value, errors);
+        if (errors.Count > 0)
+        {
+            throw new ValueObjectValidationException(typeof(RowVerValue), errors);
+        }
+        return new RowVerValue(value);
+    }
+
+    /// <summary>Returns true plus the value object when creation succeeds, or false plus the error details when it fails.</summary>
+    public static bool TryCreate(
+        byte[] value,
+        out RowVerValue? result,
+        out IReadOnlyList<string> errors
+    )
+    {
+        var list = new List<string>();
+        Validate(value, list);
+        if (list.Count > 0)
+        {
+            result = null;
+            errors = list;
+            return false;
+        }
+        result = new RowVerValue(value);
+        errors = Array.Empty<string>();
+        return true;
+    }
+
+    /// <summary>Auto-generated validation plus the user extension (OnValidate). Also callable from partial and custom code.</summary>
+    internal static void Validate(byte[] value, ICollection<string> errors)
+    {
+        // A value object never wraps null (a nullable column keeps the property itself null),
+        // so a null input is reported as a validation error instead of throwing from the checks below.
+        if (value is null)
+        {
+            var message = ValueObjectValidationMessages.ValueRequired();
+            CustomizeValueRequiredErrorMessage(ref message);
+            errors.Add(message);
+            return;
+        }
+
+        OnValidate(value, errors);
+    }
+
+    /// <summary>User-defined additional validation (partial; zero cost when not implemented).</summary>
+    static partial void OnValidate(byte[] value, ICollection<string> errors);
+
+    /// <summary>Gets the display name of this value object (used in error messages and similar). Defaults to the column description, or the property name when unset. Can be replaced through GeneratedDisplayNames.Resolve (all display names at once) or CustomizeDisplayName (this value object only).</summary>
+    public static string DisplayName
+    {
+        get
+        {
+            var displayName = GeneratedDisplayNames.Resolve("RowVer", null);
+            CustomizeDisplayName(ref displayName);
+            return displayName;
+        }
+    }
+
+    /// <summary>Extension point for replacing the display name (partial; the default display name applies when not implemented).</summary>
+    static partial void CustomizeDisplayName(ref string displayName);
+
+    /// <summary>Replaces the required-value error message (partial; the default message applies when not implemented).</summary>
+    static partial void CustomizeValueRequiredErrorMessage(ref string message);
 }
 
 /// <summary>Change state of an entity or EditModel.</summary>
@@ -1338,67 +1210,74 @@ public static class GeneratedDisplayNames
         static (memberName, description) => description ?? memberName;
 }
 
-/// <summary>Entity for the customers table</summary>
-[Table("customers")]
-public partial class CustomerEntity : EntityBase
+/// <summary>Entity for the gadgets table</summary>
+[Table("gadgets")]
+public partial class GadgetEntity : EntityBase
 {
-    /// <summary>Property for the customer_id column</summary>
+    /// <summary>Property for the gadget_id column</summary>
     [Key]
-    [Column("customer_id")]
+    [Column("gadget_id")]
     [Required]
+    [SqlColumnType(SqlDbType.Int)]
     [DbColumnMeta("int32")]
-    public CustomerIdValue CustomerId { get; set; } = null!;
+    public GadgetIdValue GadgetId { get; set; } = null!;
 
     /// <summary>Property for the name column</summary>
     [Column("name")]
     [Required]
+    [SqlColumnType(SqlDbType.NVarChar, Size = 50)]
     [DbColumnMeta("string(50)")]
     public NameValue Name { get; set; } = null!;
 
-    /// <summary>Property for the balance column</summary>
-    [Column("balance")]
-    [DbColumnMeta("decimal(10,2)")]
-    public BalanceValue? Balance { get; set; }
+    /// <summary>Property for the row_ver column</summary>
+    [Column("row_ver")]
+    [Required]
+    [SqlColumnType(SqlDbType.Timestamp)]
+    [StoreGeneratedColumn]
+    public RowVerValue RowVer { get; set; } = null!;
 
-    /// <summary>Orders navigation property</summary>
-    [NavigationReference("customers", "customer_id", "orders", "customer_id", true, true, false, ConstraintName = "FK_orders_customers", OnDelete = "Cascade")]
-    public ICollection<OrderEntity> Orders { get; set; } = new List<OrderEntity>();
+    /// <summary>GadgetNotes navigation property</summary>
+    [NavigationReference("gadgets", "gadget_id", "gadget_notes", "gadget_id", true, true, false, ConstraintName = "FK_gadget_notes_gadgets", OnDelete = "Cascade")]
+    public ICollection<GadgetNoteEntity> GadgetNotes { get; set; } = new List<GadgetNoteEntity>();
 }
 
-/// <summary>Entity for the orders table</summary>
-[Table("orders")]
-[UniqueConstraint("Memo", Name = "UQ_orders_memo")]
-[UniqueConstraint("CustomerId", "Amount", Name = "UQ_orders_customer_id_amount")]
-public partial class OrderEntity : EntityBase
+/// <summary>Entity for the gadget_notes table</summary>
+[Table("gadget_notes")]
+public partial class GadgetNoteEntity : EntityBase
 {
-    /// <summary>Property for the order_id column</summary>
+    /// <summary>Property for the note_id column</summary>
     [Key]
-    [Column("order_id")]
+    [Column("note_id")]
     [Required]
+    [SqlColumnType(SqlDbType.Int)]
     [DbColumnMeta("int32")]
-    public OrderIdValue OrderId { get; set; } = null!;
+    public NoteIdValue NoteId { get; set; } = null!;
 
-    /// <summary>Property for the customer_id column</summary>
-    [Column("customer_id")]
+    /// <summary>Property for the gadget_id column</summary>
+    [Column("gadget_id")]
     [Required]
+    [SqlColumnType(SqlDbType.Int)]
     [DbColumnMeta("int32")]
-    public CustomerIdValue CustomerId { get; set; } = null!;
+    public GadgetIdValue GadgetId { get; set; } = null!;
 
-    /// <summary>Property for the memo column</summary>
-    [Column("memo")]
-    [DbColumnMeta("string(50)")]
-    public MemoValue? Memo { get; set; }
-
-    /// <summary>Property for the amount column</summary>
-    [Column("amount")]
+    /// <summary>Property for the note column</summary>
+    [Column("note")]
     [Required]
-    [DbColumnMeta("decimal(10,2)")]
-    public AmountValue Amount { get; set; } = null!;
+    [SqlColumnType(SqlDbType.NVarChar, Size = 100)]
+    [DbColumnMeta("string(100)")]
+    public NoteValue Note { get; set; } = null!;
 
-    /// <summary>Customer navigation property</summary>
+    /// <summary>Property for the row_ver column</summary>
+    [Column("row_ver")]
+    [Required]
+    [SqlColumnType(SqlDbType.Timestamp)]
+    [StoreGeneratedColumn]
+    public RowVerValue RowVer { get; set; } = null!;
+
+    /// <summary>Gadget navigation property</summary>
     [JsonIgnore]
-    [NavigationReference("customers", "customer_id", "orders", "customer_id", false, false, true, ConstraintName = "FK_orders_customers", OnDelete = "Cascade")]
-    public CustomerEntity Customer { get; set; } = null!;
+    [NavigationReference("gadgets", "gadget_id", "gadget_notes", "gadget_id", false, false, true, ConstraintName = "FK_gadget_notes_gadgets", OnDelete = "Cascade")]
+    public GadgetEntity Gadget { get; set; } = null!;
 }
 
 /// <summary>Base class providing change notification, error management, and helper processing common to edit models.</summary>
@@ -2586,8 +2465,8 @@ public abstract partial class MapperBase<TEntity, TEditModel>
         return new EditModelCollection<TEditModel>(entities.Select(entity => CreateEditModel(entity)));
     }
 }
-/// <summary>Edit model for on-screen editing of the customers table.</summary>
-public partial class CustomerEditModel : EditModelBase
+/// <summary>Edit model for on-screen editing of the gadgets table.</summary>
+public partial class GadgetEditModel : EditModelBase
 {
     // ===== Extension points (implement only what you need in a partial class; unimplemented partial methods are erased at no cost) =====
     //   Extra validation        : partial void OnValidate();
@@ -2601,37 +2480,37 @@ public partial class CustomerEditModel : EditModelBase
     // ====================================================================================================
 
     // Each column keeps two representations: the confirmed value and the on-screen input string (conversion errors are held by the error dictionary).
-    /// <summary>Confirmed value of CustomerId.</summary>
-    private CustomerIdValue? _customerId;
+    /// <summary>Confirmed value of GadgetId.</summary>
+    private GadgetIdValue? _gadgetId;
 
-    /// <summary>On-screen input string for CustomerId.</summary>
-    private string _bindingCustomerId = string.Empty;
+    /// <summary>On-screen input string for GadgetId.</summary>
+    private string _bindingGadgetId = string.Empty;
 
-    /// <summary>Confirmed value of CustomerId (read-only from outside).</summary>
-    public CustomerIdValue? CustomerId
+    /// <summary>Confirmed value of GadgetId (read-only from outside).</summary>
+    public GadgetIdValue? GadgetId
     {
-        get => _customerId;
+        get => _gadgetId;
         private set
         {
-            if (EqualityComparer<CustomerIdValue?>.Default.Equals(_customerId, value))
+            if (EqualityComparer<GadgetIdValue?>.Default.Equals(_gadgetId, value))
             {
                 return;
             }
 
-            var oldValue = _customerId;
-            OnCustomerIdChanging(value);
-            OnCustomerIdChanging(oldValue, value);
-            _customerId = value;
-            OnCustomerIdChanged(value);
-            OnCustomerIdChanged(oldValue, value);
-            OnPropertyChanged(nameof(CustomerId));
+            var oldValue = _gadgetId;
+            OnGadgetIdChanging(value);
+            OnGadgetIdChanging(oldValue, value);
+            _gadgetId = value;
+            OnGadgetIdChanged(value);
+            OnGadgetIdChanged(oldValue, value);
+            OnPropertyChanged(nameof(GadgetId));
 
             // Promote to update target when the confirmed value changes (not during load, where the state stays a mirror of the source entity).
             if (!IsLoading)
             {
-                OnConfirmedValueChanged(nameof(CustomerId));
+                OnConfirmedValueChanged(nameof(GadgetId));
 
-                if (ShouldMarkUpdated(nameof(CustomerId)))
+                if (ShouldMarkUpdated(nameof(GadgetId)))
                 {
                     MarkUpdated();
                 }
@@ -2639,36 +2518,36 @@ public partial class CustomerEditModel : EditModelBase
         }
     }
 
-    /// <summary>Called just before the confirmed value of CustomerId changes (new value only; add processing via a partial implementation).</summary>
-    partial void OnCustomerIdChanging(CustomerIdValue? value);
+    /// <summary>Called just before the confirmed value of GadgetId changes (new value only; add processing via a partial implementation).</summary>
+    partial void OnGadgetIdChanging(GadgetIdValue? value);
 
-    /// <summary>Called just before the confirmed value of CustomerId changes (old and new values; add processing via a partial implementation).</summary>
-    partial void OnCustomerIdChanging(CustomerIdValue? oldValue, CustomerIdValue? newValue);
+    /// <summary>Called just before the confirmed value of GadgetId changes (old and new values; add processing via a partial implementation).</summary>
+    partial void OnGadgetIdChanging(GadgetIdValue? oldValue, GadgetIdValue? newValue);
 
-    /// <summary>Called just after the confirmed value of CustomerId changes (new value only; add processing via a partial implementation).</summary>
-    partial void OnCustomerIdChanged(CustomerIdValue? value);
+    /// <summary>Called just after the confirmed value of GadgetId changes (new value only; add processing via a partial implementation).</summary>
+    partial void OnGadgetIdChanged(GadgetIdValue? value);
 
-    /// <summary>Called just after the confirmed value of CustomerId changes (old and new values; add processing via a partial implementation).</summary>
-    partial void OnCustomerIdChanged(CustomerIdValue? oldValue, CustomerIdValue? newValue);
+    /// <summary>Called just after the confirmed value of GadgetId changes (old and new values; add processing via a partial implementation).</summary>
+    partial void OnGadgetIdChanged(GadgetIdValue? oldValue, GadgetIdValue? newValue);
 
-    /// <summary>On-screen input binding string for CustomerId (converted to the confirmed value when set).</summary>
-    public string BindingCustomerId
+    /// <summary>On-screen input binding string for GadgetId (converted to the confirmed value when set).</summary>
+    public string BindingGadgetId
     {
-        get => _bindingCustomerId;
+        get => _bindingGadgetId;
         set
         {
             // Normalize only values that come from input (pass through during load/revert to keep a mirror of the source entity).
             var normalized =
                 IsLoading || IsReverting
                     ? value
-                    : NormalizeInput(nameof(BindingCustomerId), value);
+                    : NormalizeInput(nameof(BindingGadgetId), value);
 
-            if (!SetProperty(ref _bindingCustomerId, normalized, nameof(BindingCustomerId)))
+            if (!SetProperty(ref _bindingGadgetId, normalized, nameof(BindingGadgetId)))
             {
                 // When trimming makes the value equal to the existing one, only the on-screen display keeps the whitespace-padded string, so reset the display to the normalized value.
                 if (!string.Equals(value, normalized, StringComparison.Ordinal))
                 {
-                    OnPropertyChanged(nameof(BindingCustomerId));
+                    OnPropertyChanged(nameof(BindingGadgetId));
                 }
 
                 return;
@@ -2678,26 +2557,26 @@ public partial class CustomerEditModel : EditModelBase
             {
                 if (string.IsNullOrEmpty(normalized))
                 {
-                    CustomerId = null;
-                    SetError(nameof(BindingCustomerId), null);
+                    GadgetId = null;
+                    SetError(nameof(BindingGadgetId), null);
                 }
                 else if (int.TryParse(normalized, out var parsed))
                 {
-                    if (CustomerIdValue.TryCreate(parsed, out var converted, out var voErrors))
+                    if (GadgetIdValue.TryCreate(parsed, out var converted, out var voErrors))
                     {
-                        CustomerId = converted;
-                        SetError(nameof(BindingCustomerId), null);
+                        GadgetId = converted;
+                        SetError(nameof(BindingGadgetId), null);
                     }
                     else
                     {
-                        SetError(nameof(BindingCustomerId), EditModelMessages.JoinValueObjectErrors(voErrors));
+                        SetError(nameof(BindingGadgetId), EditModelMessages.JoinValueObjectErrors(voErrors));
                     }
                 }
                 else
                 {
                     SetError(
-                        nameof(BindingCustomerId),
-                        ResolveParseErrorMessage(nameof(CustomerId), CustomerIdValue.DisplayName, normalized, "int")
+                        nameof(BindingGadgetId),
+                        ResolveParseErrorMessage(nameof(GadgetId), GadgetIdValue.DisplayName, normalized, "int")
                     );
                 }
             }
@@ -2797,37 +2676,37 @@ public partial class CustomerEditModel : EditModelBase
         }
     }
 
-    /// <summary>Confirmed value of Balance.</summary>
-    private BalanceValue? _balance;
+    /// <summary>Confirmed value of RowVer.</summary>
+    private RowVerValue? _rowVer;
 
-    /// <summary>On-screen input string for Balance.</summary>
-    private string _bindingBalance = string.Empty;
+    /// <summary>On-screen input string for RowVer.</summary>
+    private string _bindingRowVer = string.Empty;
 
-    /// <summary>Confirmed value of Balance (read-only from outside).</summary>
-    public BalanceValue? Balance
+    /// <summary>Confirmed value of RowVer (read-only from outside).</summary>
+    public RowVerValue? RowVer
     {
-        get => _balance;
+        get => _rowVer;
         private set
         {
-            if (EqualityComparer<BalanceValue?>.Default.Equals(_balance, value))
+            if (EqualityComparer<RowVerValue?>.Default.Equals(_rowVer, value))
             {
                 return;
             }
 
-            var oldValue = _balance;
-            OnBalanceChanging(value);
-            OnBalanceChanging(oldValue, value);
-            _balance = value;
-            OnBalanceChanged(value);
-            OnBalanceChanged(oldValue, value);
-            OnPropertyChanged(nameof(Balance));
+            var oldValue = _rowVer;
+            OnRowVerChanging(value);
+            OnRowVerChanging(oldValue, value);
+            _rowVer = value;
+            OnRowVerChanged(value);
+            OnRowVerChanged(oldValue, value);
+            OnPropertyChanged(nameof(RowVer));
 
             // Promote to update target when the confirmed value changes (not during load, where the state stays a mirror of the source entity).
             if (!IsLoading)
             {
-                OnConfirmedValueChanged(nameof(Balance));
+                OnConfirmedValueChanged(nameof(RowVer));
 
-                if (ShouldMarkUpdated(nameof(Balance)))
+                if (ShouldMarkUpdated(nameof(RowVer)))
                 {
                     MarkUpdated();
                 }
@@ -2835,36 +2714,36 @@ public partial class CustomerEditModel : EditModelBase
         }
     }
 
-    /// <summary>Called just before the confirmed value of Balance changes (new value only; add processing via a partial implementation).</summary>
-    partial void OnBalanceChanging(BalanceValue? value);
+    /// <summary>Called just before the confirmed value of RowVer changes (new value only; add processing via a partial implementation).</summary>
+    partial void OnRowVerChanging(RowVerValue? value);
 
-    /// <summary>Called just before the confirmed value of Balance changes (old and new values; add processing via a partial implementation).</summary>
-    partial void OnBalanceChanging(BalanceValue? oldValue, BalanceValue? newValue);
+    /// <summary>Called just before the confirmed value of RowVer changes (old and new values; add processing via a partial implementation).</summary>
+    partial void OnRowVerChanging(RowVerValue? oldValue, RowVerValue? newValue);
 
-    /// <summary>Called just after the confirmed value of Balance changes (new value only; add processing via a partial implementation).</summary>
-    partial void OnBalanceChanged(BalanceValue? value);
+    /// <summary>Called just after the confirmed value of RowVer changes (new value only; add processing via a partial implementation).</summary>
+    partial void OnRowVerChanged(RowVerValue? value);
 
-    /// <summary>Called just after the confirmed value of Balance changes (old and new values; add processing via a partial implementation).</summary>
-    partial void OnBalanceChanged(BalanceValue? oldValue, BalanceValue? newValue);
+    /// <summary>Called just after the confirmed value of RowVer changes (old and new values; add processing via a partial implementation).</summary>
+    partial void OnRowVerChanged(RowVerValue? oldValue, RowVerValue? newValue);
 
-    /// <summary>On-screen input binding string for Balance (converted to the confirmed value when set).</summary>
-    public string BindingBalance
+    /// <summary>On-screen input binding string for RowVer (converted to the confirmed value when set).</summary>
+    public string BindingRowVer
     {
-        get => _bindingBalance;
+        get => _bindingRowVer;
         set
         {
             // Normalize only values that come from input (pass through during load/revert to keep a mirror of the source entity).
             var normalized =
                 IsLoading || IsReverting
                     ? value
-                    : NormalizeInput(nameof(BindingBalance), value);
+                    : NormalizeInput(nameof(BindingRowVer), value);
 
-            if (!SetProperty(ref _bindingBalance, normalized, nameof(BindingBalance)))
+            if (!SetProperty(ref _bindingRowVer, normalized, nameof(BindingRowVer)))
             {
                 // When trimming makes the value equal to the existing one, only the on-screen display keeps the whitespace-padded string, so reset the display to the normalized value.
                 if (!string.Equals(value, normalized, StringComparison.Ordinal))
                 {
-                    OnPropertyChanged(nameof(BindingBalance));
+                    OnPropertyChanged(nameof(BindingRowVer));
                 }
 
                 return;
@@ -2874,75 +2753,84 @@ public partial class CustomerEditModel : EditModelBase
             {
                 if (string.IsNullOrEmpty(normalized))
                 {
-                    Balance = null;
-                    SetError(nameof(BindingBalance), null);
-                }
-                else if (decimal.TryParse(normalized, out var parsed))
-                {
-                    if (BalanceValue.TryCreate(parsed, out var converted, out var voErrors))
-                    {
-                        Balance = converted;
-                        SetError(nameof(BindingBalance), null);
-                    }
-                    else
-                    {
-                        SetError(nameof(BindingBalance), EditModelMessages.JoinValueObjectErrors(voErrors));
-                    }
+                    RowVer = null;
+                    SetError(nameof(BindingRowVer), null);
                 }
                 else
                 {
-                    SetError(
-                        nameof(BindingBalance),
-                        ResolveParseErrorMessage(nameof(Balance), BalanceValue.DisplayName, normalized, "decimal")
-                    );
+                    try
+                    {
+                        if (
+                            RowVerValue.TryCreate(
+                                Convert.FromBase64String(normalized),
+                                out var converted,
+                                out var voErrors
+                            )
+                        )
+                        {
+                            RowVer = converted;
+                            SetError(nameof(BindingRowVer), null);
+                        }
+                        else
+                        {
+                            SetError(nameof(BindingRowVer), EditModelMessages.JoinValueObjectErrors(voErrors));
+                        }
+                    }
+                    catch (FormatException)
+                    {
+                        SetError(
+                            nameof(BindingRowVer),
+                            ResolveParseErrorMessage(nameof(RowVer), RowVerValue.DisplayName, normalized, "byte[]")
+                        );
+                    }
                 }
             }
         }
     }
 
     // ---- navigation ----
-    /// <summary>Backing field for the Orders child collection.</summary>
-    private EditModelCollection<OrderEditModel> _orders = new EditModelCollection<OrderEditModel>();
+    /// <summary>Backing field for the GadgetNotes child collection.</summary>
+    private EditModelCollection<GadgetNoteEditModel> _gadgetNotes = new EditModelCollection<GadgetNoteEditModel>();
 
-    /// <summary>Orders navigation property (child collection; this model is set as each element's ParentModel).</summary>
-    public EditModelCollection<OrderEditModel> Orders
+    /// <summary>GadgetNotes navigation property (child collection; this model is set as each element's ParentModel).</summary>
+    public EditModelCollection<GadgetNoteEditModel> GadgetNotes
     {
         get
         {
-            _orders.OwnerModel ??= this;
-            return _orders;
+            _gadgetNotes.OwnerModel ??= this;
+            return _gadgetNotes;
         }
         set
         {
-            if (ReferenceEquals(_orders, value))
+            if (ReferenceEquals(_gadgetNotes, value))
             {
                 return;
             }
 
-            _orders.OwnerModel = null;
-            _orders = value;
-            _orders.OwnerModel = this;
-            OnPropertyChanged(nameof(Orders));
+            _gadgetNotes.OwnerModel = null;
+            _gadgetNotes = value;
+            _gadgetNotes.OwnerModel = this;
+            OnPropertyChanged(nameof(GadgetNotes));
         }
     }
 
     /// <summary>Writes the confirmed values back to the binding properties and clears errors (called from RevertInput).</summary>
     protected override void RevertCore()
     {
-        BindingCustomerId = CustomerId?.ToString() ?? string.Empty;
-        SetError(nameof(BindingCustomerId), null);
+        BindingGadgetId = GadgetId?.ToString() ?? string.Empty;
+        SetError(nameof(BindingGadgetId), null);
         BindingName = Name?.ToString() ?? string.Empty;
         SetError(nameof(BindingName), null);
-        BindingBalance = Balance?.ToString() ?? string.Empty;
-        SetError(nameof(BindingBalance), null);
+        BindingRowVer = RowVer?.ToString() ?? string.Empty;
+        SetError(nameof(BindingRowVer), null);
     }
 
     /// <summary>Validation of this node itself (missing-input checks for required fields plus the extra validation hook). Called from Validate.</summary>
     protected override void ValidateSelf()
     {
-        if (CustomerId is null)
+        if (GadgetId is null)
         {
-            SetError(nameof(BindingCustomerId), ResolveRequiredErrorMessage(nameof(CustomerId), CustomerIdValue.DisplayName));
+            SetError(nameof(BindingGadgetId), ResolveRequiredErrorMessage(nameof(GadgetId), GadgetIdValue.DisplayName));
         }
         if (Name is null)
         {
@@ -2999,9 +2887,9 @@ public partial class CustomerEditModel : EditModelBase
         {
             switch (propertyName)
             {
-                case nameof(CustomerId):
-                    displayNames.Add(CustomerIdValue.DisplayName);
-                    targets.Add(nameof(BindingCustomerId));
+                case nameof(GadgetId):
+                    displayNames.Add(GadgetIdValue.DisplayName);
+                    targets.Add(nameof(BindingGadgetId));
                     break;
 
                 case nameof(Name):
@@ -3009,9 +2897,9 @@ public partial class CustomerEditModel : EditModelBase
                     targets.Add(nameof(BindingName));
                     break;
 
-                case nameof(Balance):
-                    displayNames.Add(BalanceValue.DisplayName);
-                    targets.Add(nameof(BindingBalance));
+                case nameof(RowVer):
+                    displayNames.Add(RowVerValue.DisplayName);
+                    targets.Add(nameof(BindingRowVer));
                     break;
 
                 default:
@@ -3063,18 +2951,18 @@ public partial class CustomerEditModel : EditModelBase
     /// <param name="repository">The repository used for the check.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     public async Task<bool> ValidateUniqueAsync(
-        ICustomerRemoteRepository repository,
+        IGadgetRemoteRepository repository,
         CancellationToken cancellationToken = default
     )
     {
         ArgumentNullException.ThrowIfNull(repository);
         ClearDuplicateErrors();
 
-        var entity = new CustomerEntity();
+        var entity = new GadgetEntity();
 
-        if (CustomerId is { } resolvedCustomerId)
+        if (GadgetId is { } resolvedGadgetId)
         {
-            entity.CustomerId = resolvedCustomerId;
+            entity.GadgetId = resolvedGadgetId;
         }
 
         var violations = await repository.CheckUniquenessAsync(entity, cancellationToken);
@@ -3090,18 +2978,18 @@ public partial class CustomerEditModel : EditModelBase
     /// <summary>Registers the known cascade children into the registry (they participate in validation, error collection, accepting changes, and dirty checks; children added via partial classes are registered in RegisterExtraChildren).</summary>
     protected override void RegisterChildren()
     {
-        AddChildren("Orders", Orders);
+        AddChildren("GadgetNotes", GadgetNotes);
     }
 
     // ---- Snapshots for row editing (IEditableObject) ----
-    /// <summary>Pre-edit snapshot of CustomerId.</summary>
-    private string _bindingCustomerIdSnapshot = string.Empty;
+    /// <summary>Pre-edit snapshot of GadgetId.</summary>
+    private string _bindingGadgetIdSnapshot = string.Empty;
 
     /// <summary>Pre-edit snapshot of Name.</summary>
     private string _bindingNameSnapshot = string.Empty;
 
-    /// <summary>Pre-edit snapshot of Balance.</summary>
-    private string _bindingBalanceSnapshot = string.Empty;
+    /// <summary>Pre-edit snapshot of RowVer.</summary>
+    private string _bindingRowVerSnapshot = string.Empty;
 
     /// <summary>Pre-edit snapshot of the RowState.</summary>
     private RowState _rowStateSnapshot;
@@ -3109,9 +2997,9 @@ public partial class CustomerEditModel : EditModelBase
     /// <summary>Core logic of BeginEdit. Snapshots each binding input and the RowState.</summary>
     protected override void BeginEditCore()
     {
-        _bindingCustomerIdSnapshot = _bindingCustomerId;
+        _bindingGadgetIdSnapshot = _bindingGadgetId;
         _bindingNameSnapshot = _bindingName;
-        _bindingBalanceSnapshot = _bindingBalance;
+        _bindingRowVerSnapshot = _bindingRowVer;
         _rowStateSnapshot = RowState;
         OnBeginEdit();
     }
@@ -3130,9 +3018,9 @@ public partial class CustomerEditModel : EditModelBase
     {
         ExecuteLoad(() =>
         {
-            BindingCustomerId = _bindingCustomerIdSnapshot;
+            BindingGadgetId = _bindingGadgetIdSnapshot;
             BindingName = _bindingNameSnapshot;
-            BindingBalance = _bindingBalanceSnapshot;
+            BindingRowVer = _bindingRowVerSnapshot;
             OnCancelEdit();
         });
 
@@ -3143,22 +3031,22 @@ public partial class CustomerEditModel : EditModelBase
     partial void OnCancelEdit();
 
     /// <summary>Returns the next element after this one in its owning collection (null if not owned or at the end).</summary>
-    public new CustomerEditModel? GetNext() => (CustomerEditModel?)base.GetNext();
+    public new GadgetEditModel? GetNext() => (GadgetEditModel?)base.GetNext();
 
     /// <summary>Returns the previous element before this one in its owning collection (null if not owned or at the start).</summary>
-    public new CustomerEditModel? GetPrevious() => (CustomerEditModel?)base.GetPrevious();
+    public new GadgetEditModel? GetPrevious() => (GadgetEditModel?)base.GetPrevious();
 
     /// <summary>Gets the parent collection this element belongs to (null if not owned).</summary>
-    public EditModelCollection<CustomerEditModel>? ParentCollection =>
-        Owner as EditModelCollection<CustomerEditModel>;
+    public EditModelCollection<GadgetEditModel>? ParentCollection =>
+        Owner as EditModelCollection<GadgetEditModel>;
 
     /// <summary>Core reorder logic for the owning collection. Calls Move on the typed collection (used by the MoveTo* methods).</summary>
     protected override void MoveCore(int oldIndex, int newIndex) =>
         ParentCollection?.Move(oldIndex, newIndex);
 }
 
-/// <summary>Edit model for on-screen editing of the orders table.</summary>
-public partial class OrderEditModel : EditModelBase
+/// <summary>Edit model for on-screen editing of the gadget_notes table.</summary>
+public partial class GadgetNoteEditModel : EditModelBase
 {
     // ===== Extension points (implement only what you need in a partial class; unimplemented partial methods are erased at no cost) =====
     //   Extra validation        : partial void OnValidate();
@@ -3172,37 +3060,37 @@ public partial class OrderEditModel : EditModelBase
     // ====================================================================================================
 
     // Each column keeps two representations: the confirmed value and the on-screen input string (conversion errors are held by the error dictionary).
-    /// <summary>Confirmed value of OrderId.</summary>
-    private OrderIdValue? _orderId;
+    /// <summary>Confirmed value of NoteId.</summary>
+    private NoteIdValue? _noteId;
 
-    /// <summary>On-screen input string for OrderId.</summary>
-    private string _bindingOrderId = string.Empty;
+    /// <summary>On-screen input string for NoteId.</summary>
+    private string _bindingNoteId = string.Empty;
 
-    /// <summary>Confirmed value of OrderId (read-only from outside).</summary>
-    public OrderIdValue? OrderId
+    /// <summary>Confirmed value of NoteId (read-only from outside).</summary>
+    public NoteIdValue? NoteId
     {
-        get => _orderId;
+        get => _noteId;
         private set
         {
-            if (EqualityComparer<OrderIdValue?>.Default.Equals(_orderId, value))
+            if (EqualityComparer<NoteIdValue?>.Default.Equals(_noteId, value))
             {
                 return;
             }
 
-            var oldValue = _orderId;
-            OnOrderIdChanging(value);
-            OnOrderIdChanging(oldValue, value);
-            _orderId = value;
-            OnOrderIdChanged(value);
-            OnOrderIdChanged(oldValue, value);
-            OnPropertyChanged(nameof(OrderId));
+            var oldValue = _noteId;
+            OnNoteIdChanging(value);
+            OnNoteIdChanging(oldValue, value);
+            _noteId = value;
+            OnNoteIdChanged(value);
+            OnNoteIdChanged(oldValue, value);
+            OnPropertyChanged(nameof(NoteId));
 
             // Promote to update target when the confirmed value changes (not during load, where the state stays a mirror of the source entity).
             if (!IsLoading)
             {
-                OnConfirmedValueChanged(nameof(OrderId));
+                OnConfirmedValueChanged(nameof(NoteId));
 
-                if (ShouldMarkUpdated(nameof(OrderId)))
+                if (ShouldMarkUpdated(nameof(NoteId)))
                 {
                     MarkUpdated();
                 }
@@ -3210,36 +3098,36 @@ public partial class OrderEditModel : EditModelBase
         }
     }
 
-    /// <summary>Called just before the confirmed value of OrderId changes (new value only; add processing via a partial implementation).</summary>
-    partial void OnOrderIdChanging(OrderIdValue? value);
+    /// <summary>Called just before the confirmed value of NoteId changes (new value only; add processing via a partial implementation).</summary>
+    partial void OnNoteIdChanging(NoteIdValue? value);
 
-    /// <summary>Called just before the confirmed value of OrderId changes (old and new values; add processing via a partial implementation).</summary>
-    partial void OnOrderIdChanging(OrderIdValue? oldValue, OrderIdValue? newValue);
+    /// <summary>Called just before the confirmed value of NoteId changes (old and new values; add processing via a partial implementation).</summary>
+    partial void OnNoteIdChanging(NoteIdValue? oldValue, NoteIdValue? newValue);
 
-    /// <summary>Called just after the confirmed value of OrderId changes (new value only; add processing via a partial implementation).</summary>
-    partial void OnOrderIdChanged(OrderIdValue? value);
+    /// <summary>Called just after the confirmed value of NoteId changes (new value only; add processing via a partial implementation).</summary>
+    partial void OnNoteIdChanged(NoteIdValue? value);
 
-    /// <summary>Called just after the confirmed value of OrderId changes (old and new values; add processing via a partial implementation).</summary>
-    partial void OnOrderIdChanged(OrderIdValue? oldValue, OrderIdValue? newValue);
+    /// <summary>Called just after the confirmed value of NoteId changes (old and new values; add processing via a partial implementation).</summary>
+    partial void OnNoteIdChanged(NoteIdValue? oldValue, NoteIdValue? newValue);
 
-    /// <summary>On-screen input binding string for OrderId (converted to the confirmed value when set).</summary>
-    public string BindingOrderId
+    /// <summary>On-screen input binding string for NoteId (converted to the confirmed value when set).</summary>
+    public string BindingNoteId
     {
-        get => _bindingOrderId;
+        get => _bindingNoteId;
         set
         {
             // Normalize only values that come from input (pass through during load/revert to keep a mirror of the source entity).
             var normalized =
                 IsLoading || IsReverting
                     ? value
-                    : NormalizeInput(nameof(BindingOrderId), value);
+                    : NormalizeInput(nameof(BindingNoteId), value);
 
-            if (!SetProperty(ref _bindingOrderId, normalized, nameof(BindingOrderId)))
+            if (!SetProperty(ref _bindingNoteId, normalized, nameof(BindingNoteId)))
             {
                 // When trimming makes the value equal to the existing one, only the on-screen display keeps the whitespace-padded string, so reset the display to the normalized value.
                 if (!string.Equals(value, normalized, StringComparison.Ordinal))
                 {
-                    OnPropertyChanged(nameof(BindingOrderId));
+                    OnPropertyChanged(nameof(BindingNoteId));
                 }
 
                 return;
@@ -3249,63 +3137,63 @@ public partial class OrderEditModel : EditModelBase
             {
                 if (string.IsNullOrEmpty(normalized))
                 {
-                    OrderId = null;
-                    SetError(nameof(BindingOrderId), null);
+                    NoteId = null;
+                    SetError(nameof(BindingNoteId), null);
                 }
                 else if (int.TryParse(normalized, out var parsed))
                 {
-                    if (OrderIdValue.TryCreate(parsed, out var converted, out var voErrors))
+                    if (NoteIdValue.TryCreate(parsed, out var converted, out var voErrors))
                     {
-                        OrderId = converted;
-                        SetError(nameof(BindingOrderId), null);
+                        NoteId = converted;
+                        SetError(nameof(BindingNoteId), null);
                     }
                     else
                     {
-                        SetError(nameof(BindingOrderId), EditModelMessages.JoinValueObjectErrors(voErrors));
+                        SetError(nameof(BindingNoteId), EditModelMessages.JoinValueObjectErrors(voErrors));
                     }
                 }
                 else
                 {
                     SetError(
-                        nameof(BindingOrderId),
-                        ResolveParseErrorMessage(nameof(OrderId), OrderIdValue.DisplayName, normalized, "int")
+                        nameof(BindingNoteId),
+                        ResolveParseErrorMessage(nameof(NoteId), NoteIdValue.DisplayName, normalized, "int")
                     );
                 }
             }
         }
     }
 
-    /// <summary>Confirmed value of CustomerId.</summary>
-    private CustomerIdValue? _customerId;
+    /// <summary>Confirmed value of GadgetId.</summary>
+    private GadgetIdValue? _gadgetId;
 
-    /// <summary>On-screen input string for CustomerId.</summary>
-    private string _bindingCustomerId = string.Empty;
+    /// <summary>On-screen input string for GadgetId.</summary>
+    private string _bindingGadgetId = string.Empty;
 
-    /// <summary>Confirmed value of CustomerId (read-only from outside).</summary>
-    public CustomerIdValue? CustomerId
+    /// <summary>Confirmed value of GadgetId (read-only from outside).</summary>
+    public GadgetIdValue? GadgetId
     {
-        get => _customerId;
+        get => _gadgetId;
         private set
         {
-            if (EqualityComparer<CustomerIdValue?>.Default.Equals(_customerId, value))
+            if (EqualityComparer<GadgetIdValue?>.Default.Equals(_gadgetId, value))
             {
                 return;
             }
 
-            var oldValue = _customerId;
-            OnCustomerIdChanging(value);
-            OnCustomerIdChanging(oldValue, value);
-            _customerId = value;
-            OnCustomerIdChanged(value);
-            OnCustomerIdChanged(oldValue, value);
-            OnPropertyChanged(nameof(CustomerId));
+            var oldValue = _gadgetId;
+            OnGadgetIdChanging(value);
+            OnGadgetIdChanging(oldValue, value);
+            _gadgetId = value;
+            OnGadgetIdChanged(value);
+            OnGadgetIdChanged(oldValue, value);
+            OnPropertyChanged(nameof(GadgetId));
 
             // Promote to update target when the confirmed value changes (not during load, where the state stays a mirror of the source entity).
             if (!IsLoading)
             {
-                OnConfirmedValueChanged(nameof(CustomerId));
+                OnConfirmedValueChanged(nameof(GadgetId));
 
-                if (ShouldMarkUpdated(nameof(CustomerId)))
+                if (ShouldMarkUpdated(nameof(GadgetId)))
                 {
                     MarkUpdated();
                 }
@@ -3313,36 +3201,36 @@ public partial class OrderEditModel : EditModelBase
         }
     }
 
-    /// <summary>Called just before the confirmed value of CustomerId changes (new value only; add processing via a partial implementation).</summary>
-    partial void OnCustomerIdChanging(CustomerIdValue? value);
+    /// <summary>Called just before the confirmed value of GadgetId changes (new value only; add processing via a partial implementation).</summary>
+    partial void OnGadgetIdChanging(GadgetIdValue? value);
 
-    /// <summary>Called just before the confirmed value of CustomerId changes (old and new values; add processing via a partial implementation).</summary>
-    partial void OnCustomerIdChanging(CustomerIdValue? oldValue, CustomerIdValue? newValue);
+    /// <summary>Called just before the confirmed value of GadgetId changes (old and new values; add processing via a partial implementation).</summary>
+    partial void OnGadgetIdChanging(GadgetIdValue? oldValue, GadgetIdValue? newValue);
 
-    /// <summary>Called just after the confirmed value of CustomerId changes (new value only; add processing via a partial implementation).</summary>
-    partial void OnCustomerIdChanged(CustomerIdValue? value);
+    /// <summary>Called just after the confirmed value of GadgetId changes (new value only; add processing via a partial implementation).</summary>
+    partial void OnGadgetIdChanged(GadgetIdValue? value);
 
-    /// <summary>Called just after the confirmed value of CustomerId changes (old and new values; add processing via a partial implementation).</summary>
-    partial void OnCustomerIdChanged(CustomerIdValue? oldValue, CustomerIdValue? newValue);
+    /// <summary>Called just after the confirmed value of GadgetId changes (old and new values; add processing via a partial implementation).</summary>
+    partial void OnGadgetIdChanged(GadgetIdValue? oldValue, GadgetIdValue? newValue);
 
-    /// <summary>On-screen input binding string for CustomerId (converted to the confirmed value when set).</summary>
-    public string BindingCustomerId
+    /// <summary>On-screen input binding string for GadgetId (converted to the confirmed value when set).</summary>
+    public string BindingGadgetId
     {
-        get => _bindingCustomerId;
+        get => _bindingGadgetId;
         set
         {
             // Normalize only values that come from input (pass through during load/revert to keep a mirror of the source entity).
             var normalized =
                 IsLoading || IsReverting
                     ? value
-                    : NormalizeInput(nameof(BindingCustomerId), value);
+                    : NormalizeInput(nameof(BindingGadgetId), value);
 
-            if (!SetProperty(ref _bindingCustomerId, normalized, nameof(BindingCustomerId)))
+            if (!SetProperty(ref _bindingGadgetId, normalized, nameof(BindingGadgetId)))
             {
                 // When trimming makes the value equal to the existing one, only the on-screen display keeps the whitespace-padded string, so reset the display to the normalized value.
                 if (!string.Equals(value, normalized, StringComparison.Ordinal))
                 {
-                    OnPropertyChanged(nameof(BindingCustomerId));
+                    OnPropertyChanged(nameof(BindingGadgetId));
                 }
 
                 return;
@@ -3352,63 +3240,63 @@ public partial class OrderEditModel : EditModelBase
             {
                 if (string.IsNullOrEmpty(normalized))
                 {
-                    CustomerId = null;
-                    SetError(nameof(BindingCustomerId), null);
+                    GadgetId = null;
+                    SetError(nameof(BindingGadgetId), null);
                 }
                 else if (int.TryParse(normalized, out var parsed))
                 {
-                    if (CustomerIdValue.TryCreate(parsed, out var converted, out var voErrors))
+                    if (GadgetIdValue.TryCreate(parsed, out var converted, out var voErrors))
                     {
-                        CustomerId = converted;
-                        SetError(nameof(BindingCustomerId), null);
+                        GadgetId = converted;
+                        SetError(nameof(BindingGadgetId), null);
                     }
                     else
                     {
-                        SetError(nameof(BindingCustomerId), EditModelMessages.JoinValueObjectErrors(voErrors));
+                        SetError(nameof(BindingGadgetId), EditModelMessages.JoinValueObjectErrors(voErrors));
                     }
                 }
                 else
                 {
                     SetError(
-                        nameof(BindingCustomerId),
-                        ResolveParseErrorMessage(nameof(CustomerId), CustomerIdValue.DisplayName, normalized, "int")
+                        nameof(BindingGadgetId),
+                        ResolveParseErrorMessage(nameof(GadgetId), GadgetIdValue.DisplayName, normalized, "int")
                     );
                 }
             }
         }
     }
 
-    /// <summary>Confirmed value of Memo.</summary>
-    private MemoValue? _memo;
+    /// <summary>Confirmed value of Note.</summary>
+    private NoteValue? _note;
 
-    /// <summary>On-screen input string for Memo.</summary>
-    private string _bindingMemo = string.Empty;
+    /// <summary>On-screen input string for Note.</summary>
+    private string _bindingNote = string.Empty;
 
-    /// <summary>Confirmed value of Memo (read-only from outside).</summary>
-    public MemoValue? Memo
+    /// <summary>Confirmed value of Note (read-only from outside).</summary>
+    public NoteValue? Note
     {
-        get => _memo;
+        get => _note;
         private set
         {
-            if (EqualityComparer<MemoValue?>.Default.Equals(_memo, value))
+            if (EqualityComparer<NoteValue?>.Default.Equals(_note, value))
             {
                 return;
             }
 
-            var oldValue = _memo;
-            OnMemoChanging(value);
-            OnMemoChanging(oldValue, value);
-            _memo = value;
-            OnMemoChanged(value);
-            OnMemoChanged(oldValue, value);
-            OnPropertyChanged(nameof(Memo));
+            var oldValue = _note;
+            OnNoteChanging(value);
+            OnNoteChanging(oldValue, value);
+            _note = value;
+            OnNoteChanged(value);
+            OnNoteChanged(oldValue, value);
+            OnPropertyChanged(nameof(Note));
 
             // Promote to update target when the confirmed value changes (not during load, where the state stays a mirror of the source entity).
             if (!IsLoading)
             {
-                OnConfirmedValueChanged(nameof(Memo));
+                OnConfirmedValueChanged(nameof(Note));
 
-                if (ShouldMarkUpdated(nameof(Memo)))
+                if (ShouldMarkUpdated(nameof(Note)))
                 {
                     MarkUpdated();
                 }
@@ -3416,36 +3304,36 @@ public partial class OrderEditModel : EditModelBase
         }
     }
 
-    /// <summary>Called just before the confirmed value of Memo changes (new value only; add processing via a partial implementation).</summary>
-    partial void OnMemoChanging(MemoValue? value);
+    /// <summary>Called just before the confirmed value of Note changes (new value only; add processing via a partial implementation).</summary>
+    partial void OnNoteChanging(NoteValue? value);
 
-    /// <summary>Called just before the confirmed value of Memo changes (old and new values; add processing via a partial implementation).</summary>
-    partial void OnMemoChanging(MemoValue? oldValue, MemoValue? newValue);
+    /// <summary>Called just before the confirmed value of Note changes (old and new values; add processing via a partial implementation).</summary>
+    partial void OnNoteChanging(NoteValue? oldValue, NoteValue? newValue);
 
-    /// <summary>Called just after the confirmed value of Memo changes (new value only; add processing via a partial implementation).</summary>
-    partial void OnMemoChanged(MemoValue? value);
+    /// <summary>Called just after the confirmed value of Note changes (new value only; add processing via a partial implementation).</summary>
+    partial void OnNoteChanged(NoteValue? value);
 
-    /// <summary>Called just after the confirmed value of Memo changes (old and new values; add processing via a partial implementation).</summary>
-    partial void OnMemoChanged(MemoValue? oldValue, MemoValue? newValue);
+    /// <summary>Called just after the confirmed value of Note changes (old and new values; add processing via a partial implementation).</summary>
+    partial void OnNoteChanged(NoteValue? oldValue, NoteValue? newValue);
 
-    /// <summary>On-screen input binding string for Memo (converted to the confirmed value when set).</summary>
-    public string BindingMemo
+    /// <summary>On-screen input binding string for Note (converted to the confirmed value when set).</summary>
+    public string BindingNote
     {
-        get => _bindingMemo;
+        get => _bindingNote;
         set
         {
             // Normalize only values that come from input (pass through during load/revert to keep a mirror of the source entity).
             var normalized =
                 IsLoading || IsReverting
                     ? value
-                    : NormalizeInput(nameof(BindingMemo), value);
+                    : NormalizeInput(nameof(BindingNote), value);
 
-            if (!SetProperty(ref _bindingMemo, normalized, nameof(BindingMemo)))
+            if (!SetProperty(ref _bindingNote, normalized, nameof(BindingNote)))
             {
                 // When trimming makes the value equal to the existing one, only the on-screen display keeps the whitespace-padded string, so reset the display to the normalized value.
                 if (!string.Equals(value, normalized, StringComparison.Ordinal))
                 {
-                    OnPropertyChanged(nameof(BindingMemo));
+                    OnPropertyChanged(nameof(BindingNote));
                 }
 
                 return;
@@ -3455,53 +3343,53 @@ public partial class OrderEditModel : EditModelBase
             {
                 if (string.IsNullOrEmpty(normalized))
                 {
-                    Memo = null;
-                    SetError(nameof(BindingMemo), null);
+                    Note = null;
+                    SetError(nameof(BindingNote), null);
                 }
-                else if (MemoValue.TryCreate(normalized, out var converted, out var voErrors))
+                else if (NoteValue.TryCreate(normalized, out var converted, out var voErrors))
                 {
-                    Memo = converted;
-                    SetError(nameof(BindingMemo), null);
+                    Note = converted;
+                    SetError(nameof(BindingNote), null);
                 }
                 else
                 {
-                    SetError(nameof(BindingMemo), EditModelMessages.JoinValueObjectErrors(voErrors));
+                    SetError(nameof(BindingNote), EditModelMessages.JoinValueObjectErrors(voErrors));
                 }
             }
         }
     }
 
-    /// <summary>Confirmed value of Amount.</summary>
-    private AmountValue? _amount;
+    /// <summary>Confirmed value of RowVer.</summary>
+    private RowVerValue? _rowVer;
 
-    /// <summary>On-screen input string for Amount.</summary>
-    private string _bindingAmount = string.Empty;
+    /// <summary>On-screen input string for RowVer.</summary>
+    private string _bindingRowVer = string.Empty;
 
-    /// <summary>Confirmed value of Amount (read-only from outside).</summary>
-    public AmountValue? Amount
+    /// <summary>Confirmed value of RowVer (read-only from outside).</summary>
+    public RowVerValue? RowVer
     {
-        get => _amount;
+        get => _rowVer;
         private set
         {
-            if (EqualityComparer<AmountValue?>.Default.Equals(_amount, value))
+            if (EqualityComparer<RowVerValue?>.Default.Equals(_rowVer, value))
             {
                 return;
             }
 
-            var oldValue = _amount;
-            OnAmountChanging(value);
-            OnAmountChanging(oldValue, value);
-            _amount = value;
-            OnAmountChanged(value);
-            OnAmountChanged(oldValue, value);
-            OnPropertyChanged(nameof(Amount));
+            var oldValue = _rowVer;
+            OnRowVerChanging(value);
+            OnRowVerChanging(oldValue, value);
+            _rowVer = value;
+            OnRowVerChanged(value);
+            OnRowVerChanged(oldValue, value);
+            OnPropertyChanged(nameof(RowVer));
 
             // Promote to update target when the confirmed value changes (not during load, where the state stays a mirror of the source entity).
             if (!IsLoading)
             {
-                OnConfirmedValueChanged(nameof(Amount));
+                OnConfirmedValueChanged(nameof(RowVer));
 
-                if (ShouldMarkUpdated(nameof(Amount)))
+                if (ShouldMarkUpdated(nameof(RowVer)))
                 {
                     MarkUpdated();
                 }
@@ -3509,36 +3397,36 @@ public partial class OrderEditModel : EditModelBase
         }
     }
 
-    /// <summary>Called just before the confirmed value of Amount changes (new value only; add processing via a partial implementation).</summary>
-    partial void OnAmountChanging(AmountValue? value);
+    /// <summary>Called just before the confirmed value of RowVer changes (new value only; add processing via a partial implementation).</summary>
+    partial void OnRowVerChanging(RowVerValue? value);
 
-    /// <summary>Called just before the confirmed value of Amount changes (old and new values; add processing via a partial implementation).</summary>
-    partial void OnAmountChanging(AmountValue? oldValue, AmountValue? newValue);
+    /// <summary>Called just before the confirmed value of RowVer changes (old and new values; add processing via a partial implementation).</summary>
+    partial void OnRowVerChanging(RowVerValue? oldValue, RowVerValue? newValue);
 
-    /// <summary>Called just after the confirmed value of Amount changes (new value only; add processing via a partial implementation).</summary>
-    partial void OnAmountChanged(AmountValue? value);
+    /// <summary>Called just after the confirmed value of RowVer changes (new value only; add processing via a partial implementation).</summary>
+    partial void OnRowVerChanged(RowVerValue? value);
 
-    /// <summary>Called just after the confirmed value of Amount changes (old and new values; add processing via a partial implementation).</summary>
-    partial void OnAmountChanged(AmountValue? oldValue, AmountValue? newValue);
+    /// <summary>Called just after the confirmed value of RowVer changes (old and new values; add processing via a partial implementation).</summary>
+    partial void OnRowVerChanged(RowVerValue? oldValue, RowVerValue? newValue);
 
-    /// <summary>On-screen input binding string for Amount (converted to the confirmed value when set).</summary>
-    public string BindingAmount
+    /// <summary>On-screen input binding string for RowVer (converted to the confirmed value when set).</summary>
+    public string BindingRowVer
     {
-        get => _bindingAmount;
+        get => _bindingRowVer;
         set
         {
             // Normalize only values that come from input (pass through during load/revert to keep a mirror of the source entity).
             var normalized =
                 IsLoading || IsReverting
                     ? value
-                    : NormalizeInput(nameof(BindingAmount), value);
+                    : NormalizeInput(nameof(BindingRowVer), value);
 
-            if (!SetProperty(ref _bindingAmount, normalized, nameof(BindingAmount)))
+            if (!SetProperty(ref _bindingRowVer, normalized, nameof(BindingRowVer)))
             {
                 // When trimming makes the value equal to the existing one, only the on-screen display keeps the whitespace-padded string, so reset the display to the normalized value.
                 if (!string.Equals(value, normalized, StringComparison.Ordinal))
                 {
-                    OnPropertyChanged(nameof(BindingAmount));
+                    OnPropertyChanged(nameof(BindingRowVer));
                 }
 
                 return;
@@ -3548,63 +3436,72 @@ public partial class OrderEditModel : EditModelBase
             {
                 if (string.IsNullOrEmpty(normalized))
                 {
-                    Amount = null;
-                    SetError(nameof(BindingAmount), null);
-                }
-                else if (decimal.TryParse(normalized, out var parsed))
-                {
-                    if (AmountValue.TryCreate(parsed, out var converted, out var voErrors))
-                    {
-                        Amount = converted;
-                        SetError(nameof(BindingAmount), null);
-                    }
-                    else
-                    {
-                        SetError(nameof(BindingAmount), EditModelMessages.JoinValueObjectErrors(voErrors));
-                    }
+                    RowVer = null;
+                    SetError(nameof(BindingRowVer), null);
                 }
                 else
                 {
-                    SetError(
-                        nameof(BindingAmount),
-                        ResolveParseErrorMessage(nameof(Amount), AmountValue.DisplayName, normalized, "decimal")
-                    );
+                    try
+                    {
+                        if (
+                            RowVerValue.TryCreate(
+                                Convert.FromBase64String(normalized),
+                                out var converted,
+                                out var voErrors
+                            )
+                        )
+                        {
+                            RowVer = converted;
+                            SetError(nameof(BindingRowVer), null);
+                        }
+                        else
+                        {
+                            SetError(nameof(BindingRowVer), EditModelMessages.JoinValueObjectErrors(voErrors));
+                        }
+                    }
+                    catch (FormatException)
+                    {
+                        SetError(
+                            nameof(BindingRowVer),
+                            ResolveParseErrorMessage(nameof(RowVer), RowVerValue.DisplayName, normalized, "byte[]")
+                        );
+                    }
                 }
             }
         }
     }
 
     // ---- navigation ----
-    /// <summary>Customer navigation property.</summary>
-    public CustomerEditModel Customer { get; set; } = null!;
+    /// <summary>Gadget navigation property.</summary>
+    public GadgetEditModel Gadget { get; set; } = null!;
 
     /// <summary>Writes the confirmed values back to the binding properties and clears errors (called from RevertInput).</summary>
     protected override void RevertCore()
     {
-        BindingOrderId = OrderId?.ToString() ?? string.Empty;
-        SetError(nameof(BindingOrderId), null);
-        BindingCustomerId = CustomerId?.ToString() ?? string.Empty;
-        SetError(nameof(BindingCustomerId), null);
-        BindingMemo = Memo?.ToString() ?? string.Empty;
-        SetError(nameof(BindingMemo), null);
-        BindingAmount = Amount?.ToString() ?? string.Empty;
-        SetError(nameof(BindingAmount), null);
+        BindingNoteId = NoteId?.ToString() ?? string.Empty;
+        SetError(nameof(BindingNoteId), null);
+        BindingGadgetId = GadgetId?.ToString() ?? string.Empty;
+        SetError(nameof(BindingGadgetId), null);
+        BindingNote = Note?.ToString() ?? string.Empty;
+        SetError(nameof(BindingNote), null);
+        BindingRowVer = RowVer?.ToString() ?? string.Empty;
+        SetError(nameof(BindingRowVer), null);
     }
 
     /// <summary>Validation of this node itself (missing-input checks for required fields plus the extra validation hook). Called from Validate.</summary>
     protected override void ValidateSelf()
     {
-        if (OrderId is null)
+        if (NoteId is null)
         {
-            SetError(nameof(BindingOrderId), ResolveRequiredErrorMessage(nameof(OrderId), OrderIdValue.DisplayName));
+            SetError(nameof(BindingNoteId), ResolveRequiredErrorMessage(nameof(NoteId), NoteIdValue.DisplayName));
         }
-        if (CustomerId is null)
+        if (GadgetId is null)
         {
-            SetError(nameof(BindingCustomerId), ResolveRequiredErrorMessage(nameof(CustomerId), CustomerIdValue.DisplayName));
+            SetError(nameof(BindingGadgetId), ResolveRequiredErrorMessage(nameof(GadgetId), GadgetIdValue.DisplayName));
         }
-        if (Amount is null)
+        if (Note is null)
         {
-            SetError(nameof(BindingAmount), ResolveRequiredErrorMessage(nameof(Amount), AmountValue.DisplayName));
+            SetError(nameof(BindingNote), ResolveRequiredErrorMessage(nameof(Note), NoteValue.DisplayName));
         }
         OnValidate();
     }
@@ -3657,24 +3554,24 @@ public partial class OrderEditModel : EditModelBase
         {
             switch (propertyName)
             {
-                case nameof(OrderId):
-                    displayNames.Add(OrderIdValue.DisplayName);
-                    targets.Add(nameof(BindingOrderId));
+                case nameof(NoteId):
+                    displayNames.Add(NoteIdValue.DisplayName);
+                    targets.Add(nameof(BindingNoteId));
                     break;
 
-                case nameof(CustomerId):
-                    displayNames.Add(CustomerIdValue.DisplayName);
-                    targets.Add(nameof(BindingCustomerId));
+                case nameof(GadgetId):
+                    displayNames.Add(GadgetIdValue.DisplayName);
+                    targets.Add(nameof(BindingGadgetId));
                     break;
 
-                case nameof(Memo):
-                    displayNames.Add(MemoValue.DisplayName);
-                    targets.Add(nameof(BindingMemo));
+                case nameof(Note):
+                    displayNames.Add(NoteValue.DisplayName);
+                    targets.Add(nameof(BindingNote));
                     break;
 
-                case nameof(Amount):
-                    displayNames.Add(AmountValue.DisplayName);
-                    targets.Add(nameof(BindingAmount));
+                case nameof(RowVer):
+                    displayNames.Add(RowVerValue.DisplayName);
+                    targets.Add(nameof(BindingRowVer));
                     break;
 
                 default:
@@ -3716,31 +3613,6 @@ public partial class OrderEditModel : EditModelBase
         ref string message
     );
 
-    /// <summary>UNIQUE constraints of the orders table, with compiled accessors for their member values (input of the duplicate check inside a collection).</summary>
-    private static readonly IReadOnlyList<EditModelUniquenessConstraint> _uniquenessConstraints =
-        new EditModelUniquenessConstraint[]
-        {
-            new(
-                "UQ_orders_memo",
-                new[] { nameof(Memo) },
-                static model => new object?[] { ((OrderEditModel)model).Memo }
-            ),
-            new(
-                "UQ_orders_customer_id_amount",
-                new[] { nameof(CustomerId), nameof(Amount) },
-                static model =>
-                    new object?[]
-                    {
-                        ((OrderEditModel)model).CustomerId,
-                        ((OrderEditModel)model).Amount,
-                    }
-            ),
-        };
-
-    /// <inheritdoc />
-    public override IReadOnlyList<EditModelUniquenessConstraint> UniquenessConstraints =>
-        _uniquenessConstraints;
-
     /// <summary>
     /// Checks this edit model's confirmed values against the database through the repository and registers duplicate-value errors (returns true when there are no violations).
     /// </summary>
@@ -3751,33 +3623,18 @@ public partial class OrderEditModel : EditModelBase
     /// <param name="repository">The repository used for the check.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     public async Task<bool> ValidateUniqueAsync(
-        IOrderRemoteRepository repository,
+        IGadgetNoteRemoteRepository repository,
         CancellationToken cancellationToken = default
     )
     {
         ArgumentNullException.ThrowIfNull(repository);
         ClearDuplicateErrors();
 
-        var entity = new OrderEntity();
+        var entity = new GadgetNoteEntity();
 
-        if (OrderId is { } resolvedOrderId)
+        if (NoteId is { } resolvedNoteId)
         {
-            entity.OrderId = resolvedOrderId;
-        }
-
-        if (CustomerId is { } resolvedCustomerId)
-        {
-            entity.CustomerId = resolvedCustomerId;
-        }
-
-        if (Memo is { } resolvedMemo)
-        {
-            entity.Memo = resolvedMemo;
-        }
-
-        if (Amount is { } resolvedAmount)
-        {
-            entity.Amount = resolvedAmount;
+            entity.NoteId = resolvedNoteId;
         }
 
         var violations = await repository.CheckUniquenessAsync(entity, cancellationToken);
@@ -3791,17 +3648,17 @@ public partial class OrderEditModel : EditModelBase
     }
 
     // ---- Snapshots for row editing (IEditableObject) ----
-    /// <summary>Pre-edit snapshot of OrderId.</summary>
-    private string _bindingOrderIdSnapshot = string.Empty;
+    /// <summary>Pre-edit snapshot of NoteId.</summary>
+    private string _bindingNoteIdSnapshot = string.Empty;
 
-    /// <summary>Pre-edit snapshot of CustomerId.</summary>
-    private string _bindingCustomerIdSnapshot = string.Empty;
+    /// <summary>Pre-edit snapshot of GadgetId.</summary>
+    private string _bindingGadgetIdSnapshot = string.Empty;
 
-    /// <summary>Pre-edit snapshot of Memo.</summary>
-    private string _bindingMemoSnapshot = string.Empty;
+    /// <summary>Pre-edit snapshot of Note.</summary>
+    private string _bindingNoteSnapshot = string.Empty;
 
-    /// <summary>Pre-edit snapshot of Amount.</summary>
-    private string _bindingAmountSnapshot = string.Empty;
+    /// <summary>Pre-edit snapshot of RowVer.</summary>
+    private string _bindingRowVerSnapshot = string.Empty;
 
     /// <summary>Pre-edit snapshot of the RowState.</summary>
     private RowState _rowStateSnapshot;
@@ -3809,10 +3666,10 @@ public partial class OrderEditModel : EditModelBase
     /// <summary>Core logic of BeginEdit. Snapshots each binding input and the RowState.</summary>
     protected override void BeginEditCore()
     {
-        _bindingOrderIdSnapshot = _bindingOrderId;
-        _bindingCustomerIdSnapshot = _bindingCustomerId;
-        _bindingMemoSnapshot = _bindingMemo;
-        _bindingAmountSnapshot = _bindingAmount;
+        _bindingNoteIdSnapshot = _bindingNoteId;
+        _bindingGadgetIdSnapshot = _bindingGadgetId;
+        _bindingNoteSnapshot = _bindingNote;
+        _bindingRowVerSnapshot = _bindingRowVer;
         _rowStateSnapshot = RowState;
         OnBeginEdit();
     }
@@ -3831,10 +3688,10 @@ public partial class OrderEditModel : EditModelBase
     {
         ExecuteLoad(() =>
         {
-            BindingOrderId = _bindingOrderIdSnapshot;
-            BindingCustomerId = _bindingCustomerIdSnapshot;
-            BindingMemo = _bindingMemoSnapshot;
-            BindingAmount = _bindingAmountSnapshot;
+            BindingNoteId = _bindingNoteIdSnapshot;
+            BindingGadgetId = _bindingGadgetIdSnapshot;
+            BindingNote = _bindingNoteSnapshot;
+            BindingRowVer = _bindingRowVerSnapshot;
             OnCancelEdit();
         });
 
@@ -3845,84 +3702,90 @@ public partial class OrderEditModel : EditModelBase
     partial void OnCancelEdit();
 
     /// <summary>Returns the next element after this one in its owning collection (null if not owned or at the end).</summary>
-    public new OrderEditModel? GetNext() => (OrderEditModel?)base.GetNext();
+    public new GadgetNoteEditModel? GetNext() => (GadgetNoteEditModel?)base.GetNext();
 
     /// <summary>Returns the previous element before this one in its owning collection (null if not owned or at the start).</summary>
-    public new OrderEditModel? GetPrevious() => (OrderEditModel?)base.GetPrevious();
+    public new GadgetNoteEditModel? GetPrevious() => (GadgetNoteEditModel?)base.GetPrevious();
 
     /// <summary>Gets the parent collection this element belongs to (null if not owned).</summary>
-    public EditModelCollection<OrderEditModel>? ParentCollection =>
-        Owner as EditModelCollection<OrderEditModel>;
+    public EditModelCollection<GadgetNoteEditModel>? ParentCollection =>
+        Owner as EditModelCollection<GadgetNoteEditModel>;
 
     /// <summary>Gets the parent model that holds this element as a child (cascade parent; null when not owned or at the root).</summary>
-    public new CustomerEditModel? ParentModel =>
-        base.ParentModel as CustomerEditModel;
+    public new GadgetEditModel? ParentModel =>
+        base.ParentModel as GadgetEditModel;
 
     /// <summary>Core reorder logic for the owning collection. Calls Move on the typed collection (used by the MoveTo* methods).</summary>
     protected override void MoveCore(int oldIndex, int newIndex) =>
         ParentCollection?.Move(oldIndex, newIndex);
 }
 
-/// <summary>Converts between CustomerEntity and CustomerEditModel.</summary>
-public sealed partial class CustomerMapper
-    : MapperBase<CustomerEntity, CustomerEditModel>
+/// <summary>Converts between GadgetEntity and GadgetEditModel.</summary>
+public sealed partial class GadgetMapper
+    : MapperBase<GadgetEntity, GadgetEditModel>
 {
-    /// <summary>Creates a new CustomerEntity with initial values set (it will be an insertion target on save).</summary>
-    public override CustomerEntity CreateEntity()
+    /// <summary>Creates a new GadgetEntity with initial values set (it will be an insertion target on save).</summary>
+    public override GadgetEntity CreateEntity()
     {
-        var entity = new CustomerEntity();
+        var entity = new GadgetEntity();
         entity.MarkAdded();
         OnEntityCreated(entity);
         return entity;
     }
 
-    /// <summary>Called just after a new CustomerEntity is created (set initial values via a partial implementation).</summary>
-    partial void OnEntityCreated(CustomerEntity entity);
+    /// <summary>Called just after a new GadgetEntity is created (set initial values via a partial implementation).</summary>
+    partial void OnEntityCreated(GadgetEntity entity);
 
-    /// <summary>Creates a new CustomerEditModel from a CustomerEntity.</summary>
-    public override CustomerEditModel CreateEditModel(CustomerEntity entity)
+    /// <summary>Creates a new GadgetEditModel from a GadgetEntity.</summary>
+    public override GadgetEditModel CreateEditModel(GadgetEntity entity)
     {
-        var editModel = new CustomerEditModel();
+        var editModel = new GadgetEditModel();
         ApplyToEditModel(entity, editModel);
         OnEditModelCreated(editModel);
         return editModel;
     }
 
-    /// <summary>Called just after a new CustomerEditModel is created (after loading) (set initial values via a partial implementation; branch on IsAdded to target new models only).</summary>
-    partial void OnEditModelCreated(CustomerEditModel editModel);
+    /// <summary>Called just after a new GadgetEditModel is created (after loading) (set initial values via a partial implementation; branch on IsAdded to target new models only).</summary>
+    partial void OnEditModelCreated(GadgetEditModel editModel);
 
-    /// <summary>Applies the CustomerEditModel's confirmed values to an existing CustomerEntity (destructive update).</summary>
+    /// <summary>Applies the GadgetEditModel's confirmed values to an existing GadgetEntity (destructive update).</summary>
     /// <param name="includeRemoved">Whether to also restore and apply deletion-tracked (Removed) items (true for saving, false for report display and similar).</param>
     public override void ApplyToEntity(
-        CustomerEditModel editModel,
-        CustomerEntity entity,
+        GadgetEditModel editModel,
+        GadgetEntity entity,
         bool includeRemoved = false
     )
     {
-        entity.CustomerId =
-            editModel.CustomerId ?? throw new InvalidOperationException("CustomerId has no input value.");
+        entity.GadgetId =
+            editModel.GadgetId ?? throw new InvalidOperationException("GadgetId has no input value.");
         entity.Name =
             editModel.Name ?? throw new InvalidOperationException("Name has no input value.");
-        entity.Balance = editModel.Balance;
+
+        // The database generates this column, so an absent input keeps the entity's current value.
+        if (editModel.RowVer is not null)
+        {
+            entity.RowVer = editModel.RowVer;
+        }
+
         // Transfer the RowState raised on the edit model by confirmed-value changes as-is (no state is created here).
         entity.RowState = editModel.RowState;
-        entity.Orders = new OrderMapper().CreateEntities(editModel.Orders, includeRemoved);
+        entity.GadgetNotes = new GadgetNoteMapper().CreateEntities(editModel.GadgetNotes, includeRemoved);
         OnEntityApplied(editModel, entity);
     }
 
-    /// <summary>Called after the CustomerEditModel's confirmed values are applied to the CustomerEntity (save additional properties via a partial implementation).</summary>
-    partial void OnEntityApplied(CustomerEditModel editModel, CustomerEntity entity);
+    /// <summary>Called after the GadgetEditModel's confirmed values are applied to the GadgetEntity (save additional properties via a partial implementation).</summary>
+    partial void OnEntityApplied(GadgetEditModel editModel, GadgetEntity entity);
 
-    /// <summary>Applies the CustomerEntity's values to an existing CustomerEditModel (via the bindings).</summary>
-    public void ApplyToEditModel(CustomerEntity entity, CustomerEditModel editModel)
+    /// <summary>Applies the GadgetEntity's values to an existing GadgetEditModel (via the bindings).</summary>
+    public void ApplyToEditModel(GadgetEntity entity, GadgetEditModel editModel)
     {
         editModel.ExecuteLoad(() =>
         {
             editModel.RevertInput();
-            editModel.BindingCustomerId = entity.CustomerId?.ToString() ?? string.Empty;
+            editModel.BindingGadgetId = entity.GadgetId?.ToString() ?? string.Empty;
             editModel.BindingName = entity.Name?.ToString() ?? string.Empty;
-            editModel.BindingBalance = entity.Balance?.ToString() ?? string.Empty;
-            editModel.Orders = new OrderMapper().CreateEditModels(entity.Orders);
+            editModel.BindingRowVer = entity.RowVer?.ToString() ?? string.Empty;
+            editModel.GadgetNotes = new GadgetNoteMapper().CreateEditModels(entity.GadgetNotes);
             OnEditModelLoaded(entity, editModel);
         });
 
@@ -3930,71 +3793,77 @@ public sealed partial class CustomerMapper
         editModel.RowState = entity.RowState;
     }
 
-    /// <summary>Called after the default load into the CustomerEditModel (load additional properties via a partial implementation).</summary>
-    partial void OnEditModelLoaded(CustomerEntity entity, CustomerEditModel editModel);
+    /// <summary>Called after the default load into the GadgetEditModel (load additional properties via a partial implementation).</summary>
+    partial void OnEditModelLoaded(GadgetEntity entity, GadgetEditModel editModel);
 }
 
-/// <summary>Converts between OrderEntity and OrderEditModel.</summary>
-public sealed partial class OrderMapper
-    : MapperBase<OrderEntity, OrderEditModel>
+/// <summary>Converts between GadgetNoteEntity and GadgetNoteEditModel.</summary>
+public sealed partial class GadgetNoteMapper
+    : MapperBase<GadgetNoteEntity, GadgetNoteEditModel>
 {
-    /// <summary>Creates a new OrderEntity with initial values set (it will be an insertion target on save).</summary>
-    public override OrderEntity CreateEntity()
+    /// <summary>Creates a new GadgetNoteEntity with initial values set (it will be an insertion target on save).</summary>
+    public override GadgetNoteEntity CreateEntity()
     {
-        var entity = new OrderEntity();
+        var entity = new GadgetNoteEntity();
         entity.MarkAdded();
         OnEntityCreated(entity);
         return entity;
     }
 
-    /// <summary>Called just after a new OrderEntity is created (set initial values via a partial implementation).</summary>
-    partial void OnEntityCreated(OrderEntity entity);
+    /// <summary>Called just after a new GadgetNoteEntity is created (set initial values via a partial implementation).</summary>
+    partial void OnEntityCreated(GadgetNoteEntity entity);
 
-    /// <summary>Creates a new OrderEditModel from a OrderEntity.</summary>
-    public override OrderEditModel CreateEditModel(OrderEntity entity)
+    /// <summary>Creates a new GadgetNoteEditModel from a GadgetNoteEntity.</summary>
+    public override GadgetNoteEditModel CreateEditModel(GadgetNoteEntity entity)
     {
-        var editModel = new OrderEditModel();
+        var editModel = new GadgetNoteEditModel();
         ApplyToEditModel(entity, editModel);
         OnEditModelCreated(editModel);
         return editModel;
     }
 
-    /// <summary>Called just after a new OrderEditModel is created (after loading) (set initial values via a partial implementation; branch on IsAdded to target new models only).</summary>
-    partial void OnEditModelCreated(OrderEditModel editModel);
+    /// <summary>Called just after a new GadgetNoteEditModel is created (after loading) (set initial values via a partial implementation; branch on IsAdded to target new models only).</summary>
+    partial void OnEditModelCreated(GadgetNoteEditModel editModel);
 
-    /// <summary>Applies the OrderEditModel's confirmed values to an existing OrderEntity (destructive update).</summary>
+    /// <summary>Applies the GadgetNoteEditModel's confirmed values to an existing GadgetNoteEntity (destructive update).</summary>
     /// <param name="includeRemoved">Whether to also restore and apply deletion-tracked (Removed) items (true for saving, false for report display and similar).</param>
     public override void ApplyToEntity(
-        OrderEditModel editModel,
-        OrderEntity entity,
+        GadgetNoteEditModel editModel,
+        GadgetNoteEntity entity,
         bool includeRemoved = false
     )
     {
-        entity.OrderId =
-            editModel.OrderId ?? throw new InvalidOperationException("OrderId has no input value.");
-        entity.CustomerId =
-            editModel.CustomerId ?? throw new InvalidOperationException("CustomerId has no input value.");
-        entity.Memo = editModel.Memo;
-        entity.Amount =
-            editModel.Amount ?? throw new InvalidOperationException("Amount has no input value.");
+        entity.NoteId =
+            editModel.NoteId ?? throw new InvalidOperationException("NoteId has no input value.");
+        entity.GadgetId =
+            editModel.GadgetId ?? throw new InvalidOperationException("GadgetId has no input value.");
+        entity.Note =
+            editModel.Note ?? throw new InvalidOperationException("Note has no input value.");
+
+        // The database generates this column, so an absent input keeps the entity's current value.
+        if (editModel.RowVer is not null)
+        {
+            entity.RowVer = editModel.RowVer;
+        }
+
         // Transfer the RowState raised on the edit model by confirmed-value changes as-is (no state is created here).
         entity.RowState = editModel.RowState;
         OnEntityApplied(editModel, entity);
     }
 
-    /// <summary>Called after the OrderEditModel's confirmed values are applied to the OrderEntity (save additional properties via a partial implementation).</summary>
-    partial void OnEntityApplied(OrderEditModel editModel, OrderEntity entity);
+    /// <summary>Called after the GadgetNoteEditModel's confirmed values are applied to the GadgetNoteEntity (save additional properties via a partial implementation).</summary>
+    partial void OnEntityApplied(GadgetNoteEditModel editModel, GadgetNoteEntity entity);
 
-    /// <summary>Applies the OrderEntity's values to an existing OrderEditModel (via the bindings).</summary>
-    public void ApplyToEditModel(OrderEntity entity, OrderEditModel editModel)
+    /// <summary>Applies the GadgetNoteEntity's values to an existing GadgetNoteEditModel (via the bindings).</summary>
+    public void ApplyToEditModel(GadgetNoteEntity entity, GadgetNoteEditModel editModel)
     {
         editModel.ExecuteLoad(() =>
         {
             editModel.RevertInput();
-            editModel.BindingOrderId = entity.OrderId?.ToString() ?? string.Empty;
-            editModel.BindingCustomerId = entity.CustomerId?.ToString() ?? string.Empty;
-            editModel.BindingMemo = entity.Memo?.ToString() ?? string.Empty;
-            editModel.BindingAmount = entity.Amount?.ToString() ?? string.Empty;
+            editModel.BindingNoteId = entity.NoteId?.ToString() ?? string.Empty;
+            editModel.BindingGadgetId = entity.GadgetId?.ToString() ?? string.Empty;
+            editModel.BindingNote = entity.Note?.ToString() ?? string.Empty;
+            editModel.BindingRowVer = entity.RowVer?.ToString() ?? string.Empty;
             OnEditModelLoaded(entity, editModel);
         });
 
@@ -4002,8 +3871,8 @@ public sealed partial class OrderMapper
         editModel.RowState = entity.RowState;
     }
 
-    /// <summary>Called after the default load into the OrderEditModel (load additional properties via a partial implementation).</summary>
-    partial void OnEditModelLoaded(OrderEntity entity, OrderEditModel editModel);
+    /// <summary>Called after the default load into the GadgetNoteEditModel (load additional properties via a partial implementation).</summary>
+    partial void OnEditModelLoaded(GadgetNoteEntity entity, GadgetNoteEditModel editModel);
 }
 
 /// <summary>A single UNIQUE constraint violation reported by a uniqueness pre-check.</summary>
@@ -4109,7 +3978,7 @@ public partial interface IRemoteRepository<TEntity, TKey>
 public partial interface IRepository<TEntity, TKey> : IRemoteRepository<TEntity, TKey>
     where TEntity : EntityBase, new()
 {
-    /// <summary>Bulk inserts a collection of entities.</summary>
+    /// <summary>Bulk inserts a collection of entities using SqlBulkCopy.</summary>
     /// <param name="entities">The list of entities to insert.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The number of rows inserted.</returns>
@@ -4544,18 +4413,18 @@ internal sealed class SaveHookInvoker<TEntity>(IEnumerable<ISaveHook<TEntity>> h
     }
 }
 
-/// <summary>A factory that creates SQLite connections.</summary>
+/// <summary>A factory that creates SQL Server connections.</summary>
 public interface ISqlConnectionFactory
 {
     /// <summary>Creates a new SQL connection.</summary>
-    SqliteConnection CreateConnection();
+    SqlConnection CreateConnection();
 }
 
 /// <summary>The default implementation that creates SQL connections from a connection string.</summary>
 public sealed class SqlConnectionFactory(string connectionString) : ISqlConnectionFactory
 {
     /// <summary>Creates a new SQL connection.</summary>
-    public SqliteConnection CreateConnection() => new(connectionString);
+    public SqlConnection CreateConnection() => new(connectionString);
 }
 
 /// <summary>Helper that unwraps values passed to SQL parameters into raw values (converts value objects to their underlying values, into types SqlClient can handle).</summary>
@@ -4947,7 +4816,7 @@ public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory)
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
-        await using var command = new SqliteCommand(sql, connection);
+        await using var command = new SqlCommand(sql, connection);
         BindParameters(command, parameters);
 
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -4971,7 +4840,7 @@ public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory)
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
-        await using var command = new SqliteCommand(sql, connection);
+        await using var command = new SqlCommand(sql, connection);
         BindParameters(command, parameters);
 
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -4991,7 +4860,7 @@ public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory)
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
-        await using var command = new SqliteCommand(sql, connection);
+        await using var command = new SqlCommand(sql, connection);
         BindParameters(command, parameters);
 
         return await command.ExecuteNonQueryAsync(cancellationToken);
@@ -5009,7 +4878,7 @@ public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory)
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
-        await using var command = new SqliteCommand(sql, connection);
+        await using var command = new SqlCommand(sql, connection);
         BindParameters(command, parameters);
 
         var scalar = await command.ExecuteScalarAsync(cancellationToken);
@@ -5022,7 +4891,7 @@ public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory)
     /// when null. Bindable property resolution shares the single implementation in the shared helper
     /// <see cref="RawSqlMapper.GetBindableProperties"/>.
     /// </summary>
-    internal static void BindParameters(SqliteCommand command, object? parameters)
+    internal static void BindParameters(SqlCommand command, object? parameters)
     {
         if (parameters is null)
         {
@@ -5050,8 +4919,8 @@ public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory)
     }
 }
 
-/// <summary>Repository base class for SQLite that implements CRUD using metadata.</summary>
-public abstract partial class SqliteRepository<TEntity, TKey>(
+/// <summary>Repository base class for SQL Server that implements CRUD using metadata.</summary>
+public abstract partial class SqlServerRepository<TEntity, TKey>(
     ISqlConnectionFactory connectionFactory,
     ISaveHookRegistry? saveHooks = null
 ) : IRepository<TEntity, TKey>
@@ -5075,7 +4944,7 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
-        await using var command = new SqliteCommand(_metadata.SelectByIdSql, connection);
+        await using var command = new SqlCommand(_metadata.SelectByIdSql, connection);
         _metadata.BindKeyParameter(command, id);
 
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -5098,7 +4967,7 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
-        await using var command = new SqliteCommand(_metadata.SelectAllSql, connection);
+        await using var command = new SqlCommand(_metadata.SelectAllSql, connection);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
 
         // Resolve column-name-to-ordinal once per result set instead of looking it up per row
@@ -5113,6 +4982,7 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
     }
 
     /// <summary>Inserts an entity.</summary>
+    /// <remarks>When the table has a rowversion column, the version the database assigned is written back to <paramref name="entity"/>.</remarks>
     public async Task InsertAsync(TEntity entity, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(entity);
@@ -5120,16 +4990,34 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
-        await using var command = new SqliteCommand(_metadata.InsertSql, connection);
+        if (_metadata.RowVersionProperty is not null)
+        {
+            await using var returningCommand = new SqlCommand(
+                _metadata.InsertReturningSql!,
+                connection
+            );
+            _metadata.BindInsertParameters(returningCommand, entity);
+
+            if (await returningCommand.ExecuteScalarAsync(cancellationToken) is byte[] version)
+            {
+                _metadata.RowVersionProperty.SetValue(
+                    entity,
+                    SqlValueObjectActivator.Wrap(version, _metadata.RowVersionProperty.PropertyType)
+                );
+            }
+
+            return;
+        }
+
+        await using var command = new SqlCommand(_metadata.InsertSql, connection);
         _metadata.BindInsertParameters(command, entity);
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    /// <summary>Bulk inserts a collection of entities as a batch of INSERTs in a single transaction.</summary>
+    /// <summary>Bulk inserts a collection of entities using SqlBulkCopy.</summary>
     /// <remarks>
-    /// SQLite has no SqlBulkCopy equivalent, so INSERTs are repeated over a single connection and transaction (the command
-    /// is prepared once and reused with swapped parameter values). The performance characteristics differ from the
-    /// SQL Server variant that uses SqlBulkCopy, and large row counts may be slow.
+    /// Known limitation: SqlBulkCopy cannot return generated values, so for a table with a rowversion column the entities
+    /// keep whatever version they had. Re-read them when the version is needed for a later update.
     /// </remarks>
     public async Task<int> BulkInsertAsync(
         IEnumerable<TEntity> entities,
@@ -5147,40 +5035,30 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
-        await using var transaction = (SqliteTransaction)
-            await connection.BeginTransactionAsync(cancellationToken);
-
-        try
+        using var bulkCopy = new SqlBulkCopy(connection)
         {
-            var rows = 0;
-            foreach (var entity in entities)
-            {
-                if (entity is null)
-                {
-                    continue;
-                }
+            DestinationTableName = _metadata.TableName,
+        };
+        using var reader = _metadata.CreateDataReader(entities);
 
-                await using var command = new SqliteCommand(
-                    _metadata.InsertSql,
-                    connection,
-                    transaction
-                );
-                _metadata.BindInsertParameters(command, entity);
-                rows += await command.ExecuteNonQueryAsync(cancellationToken);
-            }
-
-            await transaction.CommitAsync(cancellationToken);
-            return rows;
-        }
-        catch
+        // Map explicitly by column name (the DB column name) to avoid depending on column order
+        for (var i = 0; i < reader.FieldCount; i++)
         {
-            // Roll back with CancellationToken.None: a canceled token must not interrupt the rollback or mask the original exception.
-            await transaction.RollbackAsync(CancellationToken.None);
-            throw;
+            var columnName = reader.GetName(i);
+            bulkCopy.ColumnMappings.Add(columnName, columnName);
         }
+
+        await bulkCopy.WriteToServerAsync(reader, cancellationToken);
+        return bulkCopy.RowsCopied;
     }
 
     /// <summary>Updates an entity (true when a matching row was updated).</summary>
+    /// <remarks>
+    /// When the table has a rowversion column, <paramref name="mode"/> decides whether the update is guarded by the version
+    /// the entity was read with. A guarded update that finds the row changed by someone else throws a
+    /// <see cref="SaveConflictException"/>; a row that no longer exists still returns <c>false</c>. On success the new
+    /// version is written back to <paramref name="entity"/>.
+    /// </remarks>
     public async Task<bool> UpdateAsync(
         TEntity entity,
         ConcurrencyMode mode = ConcurrencyMode.Optimistic,
@@ -5192,7 +5070,42 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
-        await using var command = new SqliteCommand(_metadata.UpdateSql, connection);
+        if (_metadata.RowVersionProperty is not null)
+        {
+            await using var guardedCommand = new SqlCommand(
+                RowVersionConcurrency.UpdateSql(_metadata, mode),
+                connection
+            );
+            RowVersionConcurrency.BindUpdate(_metadata, guardedCommand, entity, mode);
+
+            if (await guardedCommand.ExecuteScalarAsync(cancellationToken) is byte[] version)
+            {
+                _metadata.RowVersionProperty.SetValue(
+                    entity,
+                    SqlValueObjectActivator.Wrap(version, _metadata.RowVersionProperty.PropertyType)
+                );
+                return true;
+            }
+
+            // Nothing matched: a row that is simply gone keeps the pre-existing "false" contract, while a row that is
+            // still there means someone else changed it after this entity was read
+            if (
+                await RowVersionConcurrency.RowExistsAsync(
+                    _metadata,
+                    entity,
+                    connection,
+                    transaction: null,
+                    cancellationToken
+                )
+            )
+            {
+                throw RowVersionConcurrency.Conflict(_metadata, entity, "update");
+            }
+
+            return false;
+        }
+
+        await using var command = new SqlCommand(_metadata.UpdateSql, connection);
         _metadata.BindUpdateParameters(command, entity);
 
         var affected = await command.ExecuteNonQueryAsync(cancellationToken);
@@ -5205,7 +5118,7 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
-        await using var command = new SqliteCommand(_metadata.DeleteSql, connection);
+        await using var command = new SqlCommand(_metadata.DeleteSql, connection);
         _metadata.BindKeyParameter(command, id);
 
         var affected = await command.ExecuteNonQueryAsync(cancellationToken);
@@ -5213,9 +5126,14 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
     }
 
     /// <summary>Starts a query where filters, ordering, and Include can be specified via a fluent chain.</summary>
-    public SqlQuery<TEntity> Query() => new(new SqliteSqlQueryExecutor<TEntity>(_connectionFactory));
+    public SqlQuery<TEntity> Query() => new(new SqlServerSqlQueryExecutor<TEntity>(_connectionFactory));
 
     /// <summary>Saves inserts, updates, and deletes in a single transaction according to RowState (children cascade by default).</summary>
+    /// <remarks>
+    /// Entities whose table has a rowversion column take part in optimistic concurrency: their updates and deletes are
+    /// guarded by the version they were read with unless <paramref name="mode"/> says otherwise, and the versions the
+    /// database assigns are written back to the entities once the transaction commits.
+    /// </remarks>
     public async Task<int> SaveAsync(
         TEntity entity,
         bool cascadeSave = true,
@@ -5237,7 +5155,7 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
         await connection.OpenAsync(cancellationToken);
 
         // Save the entire graph, cascades included, over a single connection and transaction (avoids MSDTC promotion)
-        await using var transaction = (SqliteTransaction)
+        await using var transaction = (SqlTransaction)
             await connection.BeginTransactionAsync(cancellationToken);
 
         // If hooks are registered, build a session that supplies a context participating in the in-progress (connection, transaction)
@@ -5248,6 +5166,9 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
                     _saveHooks,
                     e => new SqlSaveHookContext(connection, transaction, e.GetType())
                 );
+
+        // Row versions the database assigns are collected during the transaction and applied only after it commits
+        var versions = new RowVersionCollector();
 
         try
         {
@@ -5261,9 +5182,14 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
                 insertWhenUpdateMissing,
                 cancellationToken,
                 hooks,
-                changesAlreadyVerified: true
+                changesAlreadyVerified: true,
+                mode: mode,
+                versions: versions
             );
             await transaction.CommitAsync(cancellationToken);
+
+            // The commit made the new row versions visible, so settle them on the entities
+            versions.Apply();
 
             // After a successful commit, settle the state (Added/Updated → Unchanged) to prevent double-processing on a re-save.
             // Skipped rows (where a hook's Before returned false) are left as they are
@@ -5279,6 +5205,11 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
     }
 
     /// <summary>Saves multiple aggregate roots together in a single transaction (an atomic all-succeed-or-all-rollback operation).</summary>
+    /// <remarks>
+    /// Entities whose table has a rowversion column take part in optimistic concurrency: their updates and deletes are
+    /// guarded by the version they were read with unless <paramref name="mode"/> says otherwise, and the versions the
+    /// database assigns are written back to the entities once the transaction commits.
+    /// </remarks>
     public async Task<int> SaveAsync(
         IEnumerable<TEntity> entities,
         bool cascadeSave = true,
@@ -5303,7 +5234,7 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
         await connection.OpenAsync(cancellationToken);
 
         // Save the graphs of all entities over a single connection and transaction (a mid-way failure rolls back everything)
-        await using var transaction = (SqliteTransaction)
+        await using var transaction = (SqlTransaction)
             await connection.BeginTransactionAsync(cancellationToken);
 
         // If hooks are registered, build a session that supplies a context participating in the in-progress (connection, transaction)
@@ -5314,6 +5245,9 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
                     _saveHooks,
                     e => new SqlSaveHookContext(connection, transaction, e.GetType())
                 );
+
+        // Row versions the database assigns are collected during the transaction and applied only after it commits
+        var versions = new RowVersionCollector();
 
         try
         {
@@ -5330,11 +5264,16 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
                     insertWhenUpdateMissing,
                     cancellationToken,
                     hooks,
-                    changesAlreadyVerified: true
+                    changesAlreadyVerified: true,
+                    mode: mode,
+                    versions: versions
                 );
             }
 
             await transaction.CommitAsync(cancellationToken);
+
+            // The commit made the new row versions visible, so settle them on the entities
+            versions.Apply();
 
             // After a successful commit, settle the state of every graph (Added/Updated → Unchanged) to prevent double-processing on a re-save.
             // Skipped rows (where a hook's Before returned false) are left as they are
@@ -5407,16 +5346,16 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
     ) => _sqlExecutor.QueryProjectionBySqlAsync<TResult>(sql, parameters, cancellationToken);
 }
 
-/// <summary>The SQLite context passed to a save hook's After, participating in the in-progress (connection, transaction).</summary>
+/// <summary>The SQL Server context passed to a save hook's After, participating in the in-progress (connection, transaction).</summary>
 /// <remarks>Created bound to an entity type (<see cref="WriteBinaryColumnAsync"/> resolves that type's excluded columns). Raw SQL reuses <c>SqlExecutor.BindParameters</c>.</remarks>
 internal sealed class SqlSaveHookContext(
-    SqliteConnection connection,
-    SqliteTransaction transaction,
+    SqlConnection connection,
+    SqlTransaction transaction,
     Type entityType
 ) : ISaveHookContext
 {
-    private readonly SqliteConnection _connection = connection;
-    private readonly SqliteTransaction _transaction = transaction;
+    private readonly SqlConnection _connection = connection;
+    private readonly SqlTransaction _transaction = transaction;
     private readonly EntitySaveMetadata _metadata = EntitySaveMetadata.For(entityType);
 
     /// <summary>Executes raw SQL (any DML) within the same transaction and returns the number of affected rows (binding shares the single implementation with SqlExecutor).</summary>
@@ -5428,7 +5367,7 @@ internal sealed class SqlSaveHookContext(
     {
         ArgumentNullException.ThrowIfNull(sql);
 
-        await using var command = new SqliteCommand(sql, _connection, _transaction);
+        await using var command = new SqlCommand(sql, _connection, _transaction);
         SqlExecutor.BindParameters(command, parameters);
         return await command.ExecuteNonQueryAsync(cancellationToken);
     }
@@ -5990,15 +5929,15 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
 }
 
 /// <summary>
-/// The SQLite ADO executor for <see cref="SqlQuery{TEntity}"/>.
+/// The SQL Server ADO executor for <see cref="SqlQuery{TEntity}"/>.
 /// It translates the plan's predicates and orderings to SQL via <see cref="SqlExpressionTranslator"/>, and
-/// materializes the roots with a plain SELECT and resolves Includes by pulling parents and children with an IN-clause multi-query, assembling them in memory.
+/// fetches the graph as nested JSON in a single query with FOR JSON, then restores it with System.Text.Json.
 /// </summary>
 /// <remarks>
 /// Dialect SQL (identifier quoting, SELECT syntax, paging clauses) is confined to this executor.
 /// SqlQuery merely passes the dialect-neutral <see cref="SqlQueryPlan{TEntity}"/>, and dialect differences are absorbed only here.
 /// </remarks>
-internal sealed class SqliteSqlQueryExecutor<TEntity>(ISqlConnectionFactory connectionFactory)
+internal sealed class SqlServerSqlQueryExecutor<TEntity>(ISqlConnectionFactory connectionFactory)
     : ISqlQueryExecutor<TEntity>
     where TEntity : EntityBase
 {
@@ -6006,6 +5945,61 @@ internal sealed class SqliteSqlQueryExecutor<TEntity>(ISqlConnectionFactory conn
     private readonly ISqlConnectionFactory _connectionFactory = connectionFactory;
 
     private static string TableName => EntitySaveMetadata.For(typeof(TEntity)).TableName;
+
+    // Navigations may carry [JsonIgnore] (to break parent-reference cycles), but loading with Include
+    // needs to restore them too, so a resolver modifier adds navigation properties back to the read set.
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        TypeInfoResolver = new DefaultJsonTypeInfoResolver
+        {
+            Modifiers = { IncludeNavigationProperties },
+        },
+        Converters = { new ValueObjectJsonConverterFactory() },
+    };
+
+    /// <summary>Re-registers navigation properties dropped from the contract by [JsonIgnore] and the like as deserialization targets.</summary>
+    private static void IncludeNavigationProperties(JsonTypeInfo typeInfo)
+    {
+        if (typeInfo.Kind != JsonTypeInfoKind.Object)
+        {
+            return;
+        }
+
+        foreach (
+            var property in typeInfo.Type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+        )
+        {
+            if (
+                !property.CanRead
+                || !property.CanWrite
+                || property.GetCustomAttribute<NavigationReferenceAttribute>() is null
+            )
+            {
+                continue;
+            }
+
+            var existing = typeInfo.Properties.FirstOrDefault(item =>
+                string.Equals(item.Name, property.Name, StringComparison.OrdinalIgnoreCase)
+            );
+            if (existing is not null)
+            {
+                // When disabled by [JsonIgnore] (Get/Set are null), revive it so Include can read it in
+                existing.Get ??= property.GetValue;
+                existing.Set ??= property.SetValue;
+            }
+            else
+            {
+                var jsonProperty = typeInfo.CreateJsonPropertyInfo(
+                    property.PropertyType,
+                    property.Name
+                );
+                jsonProperty.Get = property.GetValue;
+                jsonProperty.Set = property.SetValue;
+                typeInfo.Properties.Add(jsonProperty);
+            }
+        }
+    }
 
     /// <summary>Fetches the entities matching the conditions (together with the requested Includes) as a list.</summary>
     public async Task<IReadOnlyList<TEntity>> ToListAsync(
@@ -6028,23 +6022,17 @@ internal sealed class SqliteSqlQueryExecutor<TEntity>(ISqlConnectionFactory conn
                 cancellationToken
             );
         }
-        await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
-
-        // Materialize the roots with a plain SELECT; Includes are resolved by a multi-query that assembles parents and children in memory
-        var roots = await MaterializeRootsAsync(
-            connection,
-            plan,
-            whereClause,
+        var json = await ReadJsonAsync(
+            BuildJsonSelect(plan, whereClause, plan.Take, plan.Skip),
             parameters,
-            plan.Take,
-            plan.Skip,
             cancellationToken
         );
-        await IncludeLoader
-            .For(typeof(TEntity))
-            .LoadAsync(roots, plan.Includes, connection, cancellationToken);
-        return roots;
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return new List<TEntity>();
+        }
+
+        return JsonSerializer.Deserialize<List<TEntity>>(json, JsonOptions) ?? new List<TEntity>();
     }
 
     /// <summary>Fetches the entities matching the conditions with a projection (when the selector references only columns and there is no Include, only the referenced columns are plain-SELECTed).</summary>
@@ -6126,28 +6114,18 @@ internal sealed class SqliteSqlQueryExecutor<TEntity>(ISqlConnectionFactory conn
             );
             return withBinary.Count > 0 ? withBinary[0] : null;
         }
-        await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
-
-        // Materialize only the first row (LIMIT 1) and resolve Includes against that single row
-        var roots = await MaterializeRootsAsync(
-            connection,
-            plan,
-            whereClause,
+        var json = await ReadJsonAsync(
+            BuildJsonSelect(plan, whereClause, 1, plan.Skip),
             parameters,
-            take: 1,
-            plan.Skip,
             cancellationToken
         );
-        if (roots.Count == 0)
+        if (string.IsNullOrWhiteSpace(json))
         {
             return null;
         }
 
-        await IncludeLoader
-            .For(typeof(TEntity))
-            .LoadAsync(roots, plan.Includes, connection, cancellationToken);
-        return roots[0];
+        var list = JsonSerializer.Deserialize<List<TEntity>>(json, JsonOptions);
+        return list is { Count: > 0 } ? list[0] : null;
     }
 
     /// <summary>Returns the count of rows matching the conditions (orderings, paging, and Include are not involved).</summary>
@@ -6210,7 +6188,7 @@ internal sealed class SqliteSqlQueryExecutor<TEntity>(ISqlConnectionFactory conn
         }
 
         // Cascade: execute the DELETE statements ordered descendants-first, then the target, in a single transaction
-        await using var transaction = (SqliteTransaction)
+        await using var transaction = (SqlTransaction)
             await connection.BeginTransactionAsync(cancellationToken);
 
         try
@@ -6225,7 +6203,7 @@ internal sealed class SqliteSqlQueryExecutor<TEntity>(ISqlConnectionFactory conn
                 )
             )
             {
-                await using var command = new SqliteCommand(sql, connection, transaction);
+                await using var command = new SqlCommand(sql, connection, transaction);
                 AddParameters(command, parameters);
                 rows += await command.ExecuteNonQueryAsync(cancellationToken);
             }
@@ -6287,60 +6265,59 @@ internal sealed class SqliteSqlQueryExecutor<TEntity>(ISqlConnectionFactory conn
         return results;
     }
 
-    /// <summary>Fetches the roots with a plain SELECT and materializes them via a DataReader (the root set before Includes).</summary>
-    private async Task<List<TEntity>> MaterializeRootsAsync(
-        SqliteConnection connection,
-        SqlQueryPlan<TEntity> plan,
-        string whereClause,
+    /// <summary>Concatenates the FOR JSON result (returned as multiple rows of roughly 2KB each) into a single JSON string.</summary>
+    private async Task<string> ReadJsonAsync(
+        string sql,
         IReadOnlyList<SqlQueryParameter> parameters,
-        int? take,
-        int? skip,
         CancellationToken cancellationToken
     )
     {
-        var metadata = EntitySaveMetadata.For(typeof(TEntity));
-        var sql =
-            $"SELECT {metadata.ColumnList} FROM {TableName}{whereClause}{BuildOrderAndPaging(plan, take, skip)};";
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
 
         await using var command = CreateCommand(connection, sql, parameters);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
 
-        // Column-name-to-ordinal mapping is resolved only once per result set
-        var ordinals = metadata.SelectOrdinals(reader);
-
-        var roots = new List<TEntity>();
+        var chunks = new List<string>();
         while (await reader.ReadAsync(cancellationToken))
         {
-            roots.Add((TEntity)(object)metadata.MapEntityObject(reader, ordinals));
+            chunks.Add(reader.GetString(0));
         }
 
-        return roots;
+        return string.Concat(chunks);
     }
 
-    /// <summary>Builds the ORDER BY / LIMIT-OFFSET clauses (on SQLite, skip-only uses LIMIT -1 to allow all rows).</summary>
+    /// <summary>Builds the FOR JSON SELECT statement from the root's WHERE, ordering, paging, and the Include tree.</summary>
+    private static string BuildJsonSelect(
+        SqlQueryPlan<TEntity> plan,
+        string whereClause,
+        int? take,
+        int? skip
+    ) =>
+        JsonQueryPlanner.BuildSelect(
+            typeof(TEntity),
+            whereClause,
+            BuildOrderAndPaging(plan, take, skip),
+            plan.Includes
+        );
+
+    /// <summary>Builds the ORDER BY / OFFSET-FETCH clauses (when take/skip is specified, a dummy ordering is supplied because ORDER BY is mandatory).</summary>
     private static string BuildOrderAndPaging(SqlQueryPlan<TEntity> plan, int? take, int? skip)
     {
         var orderings = BuildOrderings(plan);
-        var ordering =
-            orderings.Count == 0 ? string.Empty : " ORDER BY " + string.Join(", ", orderings);
 
-        if (take.HasValue && skip.HasValue)
+        if (take.HasValue || skip.HasValue)
         {
-            return $"{ordering} LIMIT {take.Value} OFFSET {skip.Value}";
+            var ordering =
+                orderings.Count == 0
+                    ? " ORDER BY (SELECT NULL)"
+                    : " ORDER BY " + string.Join(", ", orderings);
+            return take.HasValue
+                ? $"{ordering} OFFSET {skip ?? 0} ROWS FETCH NEXT {take.Value} ROWS ONLY"
+                : $"{ordering} OFFSET {skip ?? 0} ROWS";
         }
 
-        if (take.HasValue)
-        {
-            return $"{ordering} LIMIT {take.Value}";
-        }
-
-        if (skip.HasValue)
-        {
-            // OFFSET requires LIMIT. Attach an unbounded LIMIT -1 so the skip is applied and everything after it is fetched
-            return $"{ordering} LIMIT -1 OFFSET {skip.Value}";
-        }
-
-        return ordering;
+        return orderings.Count == 0 ? string.Empty : " ORDER BY " + string.Join(", ", orderings);
     }
 
     /// <summary>Translates the plan's orderings (expression trees) into SQL ORDER BY elements ("[col] ASC", etc.).</summary>
@@ -6379,23 +6356,25 @@ internal sealed class SqliteSqlQueryExecutor<TEntity>(ISqlConnectionFactory conn
     }
 
     /// <summary>Creates a command with the accumulated parameters applied.</summary>
-    private SqliteCommand CreateCommand(
-        SqliteConnection connection,
+    private SqlCommand CreateCommand(
+        SqlConnection connection,
         string sql,
         IReadOnlyList<SqlQueryParameter> parameters
     )
     {
-        var command = new SqliteCommand(sql, connection);
+        var command = new SqlCommand(sql, connection);
         AddParameters(command, parameters);
         return command;
     }
 
     /// <summary>Applies the translated condition parameters to the command.</summary>
     /// <remarks>
-    /// SQLite defers to Microsoft.Data.Sqlite's default conversions, so all parameters are bound with AddWithValue.
+    /// Parameters whose column is known are built as explicit SqlParameters using that column's [SqlColumnType]
+    /// (harmless even through functions such as LOWER-wrapped comparisons, since both sides share the same type).
+    /// When the column cannot be identified, falls back to AddWithValue as before.
     /// </remarks>
     private static void AddParameters(
-        SqliteCommand command,
+        SqlCommand command,
         IReadOnlyList<SqlQueryParameter> parameters
     )
     {
@@ -6409,55 +6388,64 @@ internal sealed class SqliteSqlQueryExecutor<TEntity>(ISqlConnectionFactory conn
     }
 }
 
-/// <summary>
-/// A dialect-neutral engine that resolves the Include tree with a multi-query: "parent query, then children via an IN clause in a separate query, then assembly in memory".
-/// </summary>
-/// <remarks>
-/// <para>
-/// Same idea as EF Core's Split Query. It collects the parent set's PK/FK values, pulls the child table once with
-/// <c>WHERE fk IN (@p0..@pn)</c>, and recurses along the IncludeNode tree. Dialect dependence in the SQL text is limited
-/// to identifier quoting and the IN clause, so future dialects can reuse it. FK metadata comes from
-/// <see cref="NavigationReferenceAttribute"/> (a property attribute) and <see cref="EntitySaveMetadata"/>.
-/// </para>
-/// <para>Built once per type and cached (same philosophy as <see cref="EntitySaveMetadata"/>).</para>
-/// </remarks>
-internal sealed class IncludeLoader
+/// <summary>A planner that builds the FOR JSON SELECT statement from the Include tree and FK metadata (database-independent and pure).</summary>
+internal static class JsonQueryPlanner
 {
-    private static readonly ConcurrentDictionary<Type, IncludeLoader> _cache = new();
+    /// <summary>Caches the root column projection for Include-less roots (pure text fixed per type, with the root alias always a0).</summary>
+    private static readonly ConcurrentDictionary<Type, string> _rootProjectionCache = new();
 
-    private readonly EntitySaveMetadata _metadata;
-
-    private IncludeLoader(Type entityType) => _metadata = EntitySaveMetadata.For(entityType);
-
-    /// <summary>Gets the Include loader for the specified type (built once per type and cached).</summary>
-    public static IncludeLoader For(Type entityType) =>
-        _cache.GetOrAdd(entityType, static t => new IncludeLoader(t));
-
-    /// <summary>Loads the children described by the Include tree for the parent set and binds them to navigation properties.</summary>
-    public async Task LoadAsync(
-        IReadOnlyList<object> parents,
-        IReadOnlyList<IncludeNode> includes,
-        SqliteConnection connection,
-        CancellationToken cancellationToken
+    /// <summary>Builds a SELECT statement returning nested JSON from the root type, WHERE clause, ordering/paging clause, and Include tree.</summary>
+    public static string BuildSelect(
+        Type rootType,
+        string whereClause,
+        string orderAndPaging,
+        IReadOnlyList<IncludeNode> includes
     )
     {
-        if (parents.Count == 0 || includes.Count == 0)
-        {
-            return;
-        }
-
-        foreach (var node in includes)
-        {
-            await LoadNodeAsync(parents, node, connection, cancellationToken);
-        }
+        var aliasCounter = new int[1];
+        var rootAlias = NextAlias(aliasCounter);
+        // Without Include, the root projection is pure text determined by the type ("a0.[col] AS Prop, ..."), so pull it from the cache
+        // (the root alias is always a0 on the first NextAlias call; with Include, child aliases vary so it is rebuilt every time)
+        var projection =
+            includes.Count == 0
+                ? _rootProjectionCache.GetOrAdd(
+                    rootType,
+                    static t => BuildProjection(t, "a0", Array.Empty<IncludeNode>(), new int[1])
+                )
+                : BuildProjection(rootType, rootAlias, includes, aliasCounter);
+        var tableName = EntitySaveMetadata.For(rootType).TableName;
+        return $"SELECT {projection} FROM {tableName} AS {rootAlias}{whereClause}{orderAndPaging} FOR JSON PATH;";
     }
 
-    /// <summary>Loads a single Include node (and its ThenInclude descendants) and binds them to the parents.</summary>
-    private async Task LoadNodeAsync(
-        IReadOnlyList<object> parents,
+    private static string BuildProjection(
+        Type type,
+        string alias,
+        IReadOnlyList<IncludeNode> includes,
+        int[] aliasCounter
+    )
+    {
+        var metadata = EntitySaveMetadata.For(type);
+        var parts = new List<string>();
+
+        // Columns are aliased to property names ([col] AS Prop) so System.Text.Json can restore them directly
+        foreach (var (propertyName, columnName) in metadata.Columns)
+        {
+            parts.Add($"{alias}.[{columnName}] AS {propertyName}");
+        }
+
+        // Included children are embedded as correlated subqueries (FOR JSON)
+        foreach (var node in includes)
+        {
+            parts.Add(BuildIncludeProjection(node, alias, aliasCounter));
+        }
+
+        return string.Join(", ", parts);
+    }
+
+    private static string BuildIncludeProjection(
         IncludeNode node,
-        SqliteConnection connection,
-        CancellationToken cancellationToken
+        string parentAlias,
+        int[] aliasCounter
     )
     {
         var attribute =
@@ -6468,157 +6456,23 @@ internal sealed class IncludeLoader
         var childType = attribute.IsCollection
             ? node.Property.PropertyType.GetGenericArguments()[0]
             : node.Property.PropertyType;
-        var childMetadata = EntitySaveMetadata.For(childType);
+        var childAlias = NextAlias(aliasCounter);
+        var childTable = EntitySaveMetadata.For(childType).TableName;
 
-        // Correlation: parent reference is child.[Principal] = parent.[Dependent]; child direction is child.[Dependent] = parent.[Principal]
-        var parentKeyColumn = attribute.IsParentReference
-            ? attribute.DependentColumn
-            : attribute.PrincipalColumn;
-        var childKeyColumn = attribute.IsParentReference
-            ? attribute.PrincipalColumn
-            : attribute.DependentColumn;
+        // Correlation: child direction is child.[Dependent] = parent.[Principal]; parent reference is parent.[Principal] = self.[Dependent]
+        var correlation = attribute.IsParentReference
+            ? $"{childAlias}.[{attribute.PrincipalColumn}] = {parentAlias}.[{attribute.DependentColumn}]"
+            : $"{childAlias}.[{attribute.DependentColumn}] = {parentAlias}.[{attribute.PrincipalColumn}]";
 
-        // Collect the parent-side key values (non-null). When the set is empty, no child query is issued
-        var parentKeys = new List<object>();
-        foreach (var parent in parents)
-        {
-            var key = _metadata.GetColumnValue((EntityBase)parent, parentKeyColumn);
-            if (key is not null)
-            {
-                parentKeys.Add(key);
-            }
-        }
+        var childProjection = BuildProjection(childType, childAlias, node.Children, aliasCounter);
 
-        var distinctKeys = parentKeys.Distinct().ToList();
-        if (distinctKeys.Count == 0)
-        {
-            return;
-        }
-
-        var children = await QueryChildrenAsync(
-            childMetadata,
-            childKeyColumn,
-            distinctKeys,
-            connection,
-            cancellationToken
-        );
-
-        // Group the children by FK value and bind them to their parents
-        var childrenByKey = new Dictionary<object, List<EntityBase>>();
-        foreach (var child in children)
-        {
-            var fk = childMetadata.GetColumnValue(child, childKeyColumn);
-            if (fk is null)
-            {
-                continue;
-            }
-
-            if (!childrenByKey.TryGetValue(fk, out var bucket))
-            {
-                bucket = new List<EntityBase>();
-                childrenByKey[fk] = bucket;
-            }
-
-            bucket.Add(child);
-        }
-
-        AssignChildren(parents, node.Property, attribute, childType, childrenByKey, parentKeyColumn);
-
-        // Recursively load ThenInclude (descendants), treating the children as parents
-        if (node.Children.Count > 0 && children.Count > 0)
-        {
-            await IncludeLoader
-                .For(childType)
-                .LoadAsync(children, node.Children, connection, cancellationToken);
-        }
+        // Collections are emitted as arrays; single references as objects via WITHOUT_ARRAY_WRAPPER.
+        // Nested FOR JSON results get string-escaped by the outer query, so wrap them in JSON_QUERY to embed them as raw JSON.
+        var arrayMode = attribute.IsCollection ? string.Empty : ", WITHOUT_ARRAY_WRAPPER";
+        return $"JSON_QUERY((SELECT {childProjection} FROM {childTable} AS {childAlias} WHERE {correlation} FOR JSON PATH{arrayMode})) AS {node.Property.Name}";
     }
 
-    /// <summary>
-    /// The maximum number of keys per IN clause. Chosen to fit within database bind-variable / IN-list limits
-    /// across dialects (Oracle's 1000, SQL Server's 2100 parameters, SQLite's historical 999, etc.).
-    /// </summary>
-    private const int InClauseChunkSize = 500;
-
-    /// <summary>Pulls the child table with <c>WHERE fk IN (@i0..@in)</c> and materializes the rows (keys are chunked to stay within limits).</summary>
-    private static async Task<List<EntityBase>> QueryChildrenAsync(
-        EntitySaveMetadata childMetadata,
-        string childKeyColumn,
-        IReadOnlyList<object> keys,
-        SqliteConnection connection,
-        CancellationToken cancellationToken
-    )
-    {
-        var children = new List<EntityBase>();
-
-        for (var offset = 0; offset < keys.Count; offset += InClauseChunkSize)
-        {
-            var count = Math.Min(InClauseChunkSize, keys.Count - offset);
-            var placeholders = new string[count];
-            for (var i = 0; i < count; i++)
-            {
-                placeholders[i] = "@i" + i;
-            }
-
-            var sql =
-                $"SELECT {childMetadata.ColumnList} FROM {childMetadata.TableName} "
-                + $"WHERE \"{childKeyColumn}\" IN ({string.Join(", ", placeholders)});";
-
-            await using var command = new SqliteCommand(sql, connection);
-            for (var i = 0; i < count; i++)
-            {
-                command.Parameters.AddWithValue(placeholders[i], keys[offset + i]);
-            }
-
-            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-
-            // Column-name-to-ordinal mapping is resolved only once per result set (chunk)
-            var ordinals = childMetadata.SelectOrdinals(reader);
-
-            while (await reader.ReadAsync(cancellationToken))
-            {
-                children.Add(childMetadata.MapEntityObject(reader, ordinals));
-            }
-        }
-
-        return children;
-    }
-
-    /// <summary>Assigns the grouped children to each parent's navigation property (collection or single reference).</summary>
-    private void AssignChildren(
-        IReadOnlyList<object> parents,
-        PropertyInfo navigation,
-        NavigationReferenceAttribute attribute,
-        Type childType,
-        Dictionary<object, List<EntityBase>> childrenByKey,
-        string parentKeyColumn
-    )
-    {
-        foreach (var parent in parents)
-        {
-            var key = _metadata.GetColumnValue((EntityBase)parent, parentKeyColumn);
-            var matched =
-                key is not null && childrenByKey.TryGetValue(key, out var bucket)
-                    ? bucket
-                    : new List<EntityBase>();
-
-            if (attribute.IsCollection)
-            {
-                // Create a concrete List for ICollection<childType> and fill in each element
-                var listType = typeof(List<>).MakeGenericType(childType);
-                var list = (System.Collections.IList)Activator.CreateInstance(listType)!;
-                foreach (var child in matched)
-                {
-                    list.Add(child);
-                }
-
-                navigation.SetValue(parent, list);
-            }
-            else
-            {
-                navigation.SetValue(parent, matched.Count > 0 ? matched[0] : null);
-            }
-        }
-    }
+    private static string NextAlias(int[] aliasCounter) => "a" + aliasCounter[0]++;
 }
 
 /// <summary>Translates lambda expressions (expression trees) into SQL conditions and column references.</summary>
@@ -7039,7 +6893,7 @@ internal static class SqlExpressionTranslator
     private static string ColumnName(MemberInfo member) =>
         _columnNameCache.GetOrAdd(
             member,
-            static m => $"\"{m.GetCustomAttribute<ColumnAttribute>()?.Name ?? m.Name}\""
+            static m => $"[{m.GetCustomAttribute<ColumnAttribute>()?.Name ?? m.Name}]"
         );
 
     /// <summary>Extracts the bracketed column name from a column reference (a plain column x.Col, or a value object's x.Col.Value). Returns null when it is not a column.</summary>
@@ -7086,15 +6940,14 @@ internal static class SqlExpressionTranslator
 
         sql = member.Member.Name switch
         {
-            // SQLite stores date-times as ISO8601 TEXT, so extract the part with strftime and CAST to INTEGER
-            "Year" => $"CAST(strftime('%Y', {column}) AS INTEGER)",
-            "Month" => $"CAST(strftime('%m', {column}) AS INTEGER)",
-            "Day" => $"CAST(strftime('%d', {column}) AS INTEGER)",
-            "Hour" => $"CAST(strftime('%H', {column}) AS INTEGER)",
-            "Minute" => $"CAST(strftime('%M', {column}) AS INTEGER)",
-            "Second" => $"CAST(strftime('%S', {column}) AS INTEGER)",
-            "DayOfYear" => $"CAST(strftime('%j', {column}) AS INTEGER)",
-            "Date" => $"date({column})",
+            "Year" => $"YEAR({column})",
+            "Month" => $"MONTH({column})",
+            "Day" => $"DAY({column})",
+            "Hour" => $"DATEPART(HOUR, {column})",
+            "Minute" => $"DATEPART(MINUTE, {column})",
+            "Second" => $"DATEPART(SECOND, {column})",
+            "DayOfYear" => $"DATEPART(DAYOFYEAR, {column})",
+            "Date" => $"CAST({column} AS date)",
             _ => string.Empty,
         };
 
@@ -7160,7 +7013,7 @@ internal static class SqlExpressionTranslator
 
     /// <summary>Extracts the raw column name from a bracketed column name "[col]". Returns null when it is not a simple column (null, wrapped in a function, etc.).</summary>
     private static string? RawColumnName(string? bracketedColumn) =>
-        bracketedColumn is { Length: >= 2 } && bracketedColumn[0] == '"' && bracketedColumn[^1] == '"'
+        bracketedColumn is { Length: >= 2 } && bracketedColumn[0] == '[' && bracketedColumn[^1] == ']'
             ? bracketedColumn[1..^1]
             : null;
 
@@ -7177,9 +7030,9 @@ internal static class SqlExpressionTranslator
 
         return kind switch
         {
-            LikeKind.Contains => $"'%' || {escaped} || '%'",
-            LikeKind.StartsWith => $"{escaped} || '%'",
-            _ => $"'%' || {escaped}",
+            LikeKind.Contains => $"'%' + {escaped} + '%'",
+            LikeKind.StartsWith => $"{escaped} + '%'",
+            _ => $"'%' + {escaped}",
         };
     }
 
@@ -7807,9 +7660,6 @@ internal sealed class EntitySaveMetadata
 {
     private static readonly ConcurrentDictionary<Type, EntitySaveMetadata> _cache = new();
 
-    /// <summary>Gets the entity type this metadata describes (used to instantiate entities for multi-query Include).</summary>
-    public required Type EntityType { get; init; }
-
     /// <summary>Gets the table name wrapped in quoting brackets.</summary>
     public required string TableName { get; init; }
 
@@ -7867,6 +7717,18 @@ internal sealed class EntitySaveMetadata
 
     /// <summary>Gets the DELETE statement.</summary>
     public required string DeleteSql { get; init; }
+
+    /// <summary>Gets the INSERT statement that returns the row version the database assigned (<c>null</c> when the table has no rowversion column).</summary>
+    public string? InsertReturningSql { get; init; }
+
+    /// <summary>Gets the UPDATE statement guarded by the row version the entity was read with, returning the new row version (<c>null</c> when the table has no rowversion column).</summary>
+    public string? UpdateVersionedSql { get; init; }
+
+    /// <summary>Gets the UPDATE statement without the row version guard, returning the new row version (<c>null</c> when the table has no rowversion column). Used by <see cref="ConcurrencyMode.ForceOverwrite"/>.</summary>
+    public string? UpdateForcedSql { get; init; }
+
+    /// <summary>Gets the DELETE statement guarded by the row version the entity was read with (<c>null</c> when the table has no rowversion column).</summary>
+    public string? DeleteVersionedSql { get; init; }
 
     /// <summary>Gets the cascade-target child navigations.</summary>
     public required IReadOnlyList<CascadeNavigation> CascadeNavigations { get; init; }
@@ -7951,14 +7813,20 @@ internal sealed class EntitySaveMetadata
                 property != keyProperty && !storeGeneratedColumns.Contains(property)
             )
             .ToList();
-        var tableName = $"\"{tableAttribute.Name}\"";
+        var tableName = $"[{tableAttribute.Name}]";
         var keyColumnName = GetColumnName(keyProperty);
-        var columnList = string.Join(", ", selectProperties.Select(property => $"\"{GetColumnName(property)}\""));
+        var columnList = string.Join(", ", selectProperties.Select(property => $"[{GetColumnName(property)}]"));
         var updateAssignments = nonKeyProperties.Select(property =>
-            $"\"{GetColumnName(property)}\" = @{property.Name}"
+            $"[{GetColumnName(property)}] = @{property.Name}"
         );
-        var insertColumnList = string.Join(", ", insertProperties.Select(property => $"\"{GetColumnName(property)}\""));
+        var insertColumnList = string.Join(", ", insertProperties.Select(property => $"[{GetColumnName(property)}]"));
         var insertValueList = string.Join(", ", insertProperties.Select(property => $"@{property.Name}"));
+        // Quoted rowversion column, non-null only for tables that carry one. The optimistic concurrency statements below
+        // are built solely for those tables (every other table keeps exactly the statements it had before)
+        var rowVersionColumn =
+            rowVersionProperty is null
+                ? null
+                : $"[{GetColumnName(rowVersionProperty)}]";
         var cascades = allProperties
             .Select(property =>
                 (property, attribute: property.GetCustomAttribute<NavigationReferenceAttribute>())
@@ -7977,7 +7845,6 @@ internal sealed class EntitySaveMetadata
 
         return new EntitySaveMetadata
         {
-            EntityType = entityType,
             TableName = tableName,
             KeyProperty = keyProperty,
             KeyColumnName = keyColumnName,
@@ -8000,12 +7867,28 @@ internal sealed class EntitySaveMetadata
             ),
             ColumnList = columnList,
             SelectAllSql = $"SELECT {columnList} FROM {tableName};",
-            SelectByIdSql = $"SELECT {columnList} FROM {tableName} WHERE \"{keyColumnName}\" = @id;",
+            SelectByIdSql = $"SELECT {columnList} FROM {tableName} WHERE [{keyColumnName}] = @id;",
             InsertSql =
                 $"INSERT INTO {tableName} ({insertColumnList}) VALUES ({insertValueList});",
             UpdateSql =
-                $"UPDATE {tableName} SET {string.Join(", ", updateAssignments)} WHERE \"{keyColumnName}\" = @id;",
-            DeleteSql = $"DELETE FROM {tableName} WHERE \"{keyColumnName}\" = @id;",
+                $"UPDATE {tableName} SET {string.Join(", ", updateAssignments)} WHERE [{keyColumnName}] = @id;",
+            DeleteSql = $"DELETE FROM {tableName} WHERE [{keyColumnName}] = @id;",
+            InsertReturningSql =
+                rowVersionColumn is null
+                    ? null
+                    : $"INSERT INTO {tableName} ({insertColumnList}) OUTPUT INSERTED.{rowVersionColumn} VALUES ({insertValueList});",
+            UpdateVersionedSql =
+                rowVersionColumn is null
+                    ? null
+                    : $"UPDATE {tableName} SET {string.Join(", ", updateAssignments)} OUTPUT INSERTED.{rowVersionColumn} WHERE [{keyColumnName}] = @id AND {rowVersionColumn} = @originalRowVersion;",
+            UpdateForcedSql =
+                rowVersionColumn is null
+                    ? null
+                    : $"UPDATE {tableName} SET {string.Join(", ", updateAssignments)} OUTPUT INSERTED.{rowVersionColumn} WHERE [{keyColumnName}] = @id;",
+            DeleteVersionedSql =
+                rowVersionColumn is null
+                    ? null
+                    : $"DELETE FROM {tableName} WHERE [{keyColumnName}] = @id AND {rowVersionColumn} = @originalRowVersion;",
             CascadeNavigations = cascades,
         };
     }
@@ -8263,7 +8146,7 @@ internal sealed class EntitySaveMetadata
     public string BuildColumnList(IReadOnlyList<PropertyInfo> properties) =>
         string.Join(
             ", ",
-            properties.Select(property => $"\"{GetColumnName(property)}\"")
+            properties.Select(property => $"[{GetColumnName(property)}]")
         );
 
     /// <summary>Per-column-property "reader+ordinal, set onto entity" binders (expression-tree compiled, cached per property).</summary>
@@ -8324,7 +8207,7 @@ internal sealed class EntitySaveMetadata
     /// holds the column ordinals in <paramref name="properties"/> order, resolved once before the row loop via <see cref="ColumnOrdinals"/>.
     /// </summary>
     public TEntity MapEntityColumns<TEntity>(
-        SqliteDataReader reader,
+        SqlDataReader reader,
         IReadOnlyList<PropertyInfo> properties,
         int[] ordinals,
         bool markUnchanged = false
@@ -8348,131 +8231,8 @@ internal sealed class EntitySaveMetadata
         return entity;
     }
 
-    /// <summary>Maps one data reader row to an entity (without a type argument) (pre-resolved ordinal variant). Used to materialize entities for multi-query Include.</summary>
-    /// <remarks>
-    /// Same column-to-property binding as <c>MapEntity</c>, but created without a generic constraint because the Include
-    /// loader works with runtime <see cref="Type"/> values. <paramref name="ordinals"/> is resolved once before the row loop via <see cref="SelectOrdinals"/>.
-    /// </remarks>
-    public EntityBase MapEntityObject(DbDataReader reader, int[] ordinals)
-    {
-        var entity = (EntityBase)Activator.CreateInstance(EntityType)!;
-
-        // Unbounded binary columns are excluded from SELECT by default, so only SelectColumns
-        // (the pre-resolved pairs of SelectProperties) are mapped
-        for (var i = 0; i < SelectColumns.Count; i++)
-        {
-            var property = SelectColumns[i].Property;
-            var value = reader.GetValue(ordinals[i]);
-
-            if (value is DBNull)
-            {
-                property.SetValue(entity, null);
-            }
-            else
-            {
-                // Value objects are converted to the wrapped type and re-wrapped (Wrap already applies Convert.ChangeType).
-                // Plain columns are coerced from the SQLite storage type (int stored as long, decimal/Guid/DateTime as TEXT, etc.) to the property type
-                var propertyType = property.PropertyType;
-                property.SetValue(
-                    entity,
-                    typeof(IValueObject).IsAssignableFrom(propertyType)
-                        ? SqlValueObjectActivator.Wrap(value, propertyType)
-                        : CoerceScalar(value, propertyType)
-                );
-            }
-        }
-
-        // Rows read from the database are treated as unchanged (later edits transition them to Updated)
-        entity.RowState = RowState.Unchanged;
-        return entity;
-    }
-
-    /// <summary>Maps one data reader row to an entity (without a type argument) (single-row variant that resolves the SelectColumns ordinals on each call).</summary>
-    public EntityBase MapEntityObject(DbDataReader reader) =>
-        MapEntityObject(reader, SelectOrdinals(reader));
-
-    /// <summary>
-    /// Coerces the raw value SQLite returns (long / double / string / byte[]) to the target property's CLR type.
-    /// </summary>
-    /// <remarks>
-    /// Handles the SQLite storage conventions (same as EF Core Sqlite: decimal/Guid/DateTime/DateTimeOffset/TimeSpan
-    /// stored as TEXT, bool as INTEGER). Values already assignable are returned as-is, and Nullable types are judged by
-    /// their underlying type. When conversion is impossible, throws an exception with a clear message.
-    /// </remarks>
-    private static object CoerceScalar(object value, Type targetType)
-    {
-        var underlying = Nullable.GetUnderlyingType(targetType) ?? targetType;
-
-        if (underlying.IsInstanceOfType(value))
-        {
-            return value;
-        }
-
-        // Enums are coerced to their underlying integer type first, then converted
-        if (underlying.IsEnum)
-        {
-            return Enum.ToObject(underlying, Convert.ChangeType(value, Enum.GetUnderlyingType(underlying), CultureInfo.InvariantCulture));
-        }
-
-        // Types stored as TEXT are restored from the string (ISO 8601 / "N" format)
-        if (value is string text)
-        {
-            if (underlying == typeof(Guid))
-            {
-                return Guid.Parse(text);
-            }
-
-            if (underlying == typeof(DateTime))
-            {
-                return DateTime.Parse(text, CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind);
-            }
-
-            if (underlying == typeof(DateTimeOffset))
-            {
-                return DateTimeOffset.Parse(text, CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind);
-            }
-
-            if (underlying == typeof(TimeSpan))
-            {
-                return TimeSpan.Parse(text, CultureInfo.InvariantCulture);
-            }
-        }
-
-        // bool is stored as INTEGER (0/1)
-        if (underlying == typeof(bool) && value is long boolLong)
-        {
-            return boolLong != 0;
-        }
-
-        try
-        {
-            // Numeric narrowing (long to int/short/byte, double to float/decimal, etc.)
-            return Convert.ChangeType(value, underlying, CultureInfo.InvariantCulture);
-        }
-        catch (Exception ex) when (ex is InvalidCastException or FormatException or OverflowException)
-        {
-            throw new InvalidOperationException(
-                $"The value read from SQLite ({value.GetType().Name}) could not be converted to {underlying.Name}.",
-                ex
-            );
-        }
-    }
-
-    /// <summary>Extracts the value of the specified column from an entity (value objects are unwrapped to their raw value). Used for parent/child key matching in Include.</summary>
-    public object? GetColumnValue(EntityBase entity, string columnName)
-    {
-        if (!PropertyByColumn.TryGetValue(columnName, out var property))
-        {
-            throw new InvalidOperationException(
-                $"{EntityType.Name} has no property corresponding to column {columnName}."
-            );
-        }
-
-        var value = property.GetValue(entity);
-        return SqlParameterValue.Unwrap(value);
-    }
     /// <summary>Binds the INSERT parameters (the insert-target columns excluding store-generated columns) (shared by insert and graph insert).</summary>
-    public void BindInsertParameters(SqliteCommand command, EntityBase entity)
+    public void BindInsertParameters(SqlCommand command, EntityBase entity)
     {
         foreach (var property in InsertProperties)
         {
@@ -8486,7 +8246,7 @@ internal sealed class EntitySaveMetadata
     }
 
     /// <summary>Binds the UPDATE parameters (non-key columns plus the primary key) (shared by update and graph update).</summary>
-    public void BindUpdateParameters(SqliteCommand command, EntityBase entity)
+    public void BindUpdateParameters(SqlCommand command, EntityBase entity)
     {
         // Updates that still carry values in unbounded binary columns (excluded from UPDATE) would lose them silently,
         // so reject them up front. Both direct UpdateAsync and cascading graph updates pass through here,
@@ -8512,7 +8272,7 @@ internal sealed class EntitySaveMetadata
     }
 
     /// <summary>Binds the entity's primary key value to the @id parameter (used by graph delete).</summary>
-    public void BindEntityKeyParameter(SqliteCommand command, EntityBase entity)
+    public void BindEntityKeyParameter(SqlCommand command, EntityBase entity)
     {
         AddColumnParameter(
             command,
@@ -8522,8 +8282,24 @@ internal sealed class EntitySaveMetadata
         );
     }
 
+    /// <summary>Binds the row version the entity was read with to the @originalRowVersion parameter (the optimistic concurrency guard of UPDATE / DELETE).</summary>
+    /// <remarks>
+    /// Only called for tables that have a rowversion column. A <c>null</c> value (an entity that was never read from the
+    /// database) binds as DBNull and matches no row, so the save is reported as a conflict rather than silently overwriting.
+    /// </remarks>
+    public void BindRowVersionParameter(SqlCommand command, EntityBase entity)
+    {
+        var property = RowVersionProperty!;
+        AddColumnParameter(
+            command,
+            "@originalRowVersion",
+            property,
+            SqlParameterValue.Unwrap(property.GetValue(entity))
+        );
+    }
+
     /// <summary>Binds an externally supplied primary key value to the @id parameter (used by GetById/Delete).</summary>
-    public void BindKeyParameter(SqliteCommand command, object? id)
+    public void BindKeyParameter(SqlCommand command, object? id)
     {
         var value =
             SqlParameterValue.Unwrap(id)
@@ -8531,17 +8307,66 @@ internal sealed class EntitySaveMetadata
         AddColumnParameter(command, "@id", KeyProperty, value);
     }
 
-    /// <summary>Binding used when the [SqlColumnType] attribute is not generated. Adds via AddWithValue as before.</summary>
+    /// <summary>Resolves the per-property [SqlColumnType] attribute once and caches it (null when absent).</summary>
+    private static readonly ConcurrentDictionary<PropertyInfo, SqlColumnTypeAttribute?> _columnTypeCache =
+        new();
+
+    /// <summary>
+    /// Builds and adds an explicitly typed <see cref="SqlParameter"/> from the column property's
+    /// [SqlColumnType] attribute. When the attribute is absent (hand-written entities, unknown types), falls back to
+    /// AddWithValue as before.
+    /// </summary>
     /// <param name="command">The command to add the parameter to</param>
     /// <param name="name">The parameter name (with the @ prefix)</param>
-    /// <param name="property">The property corresponding to the target column (unused in this branch)</param>
+    /// <param name="property">The property corresponding to the target column (the basis for typing)</param>
     /// <param name="rawValue">The value after value objects have already been unwrapped to their raw value; null is bound as DBNull.Value</param>
     private static void AddColumnParameter(
-        SqliteCommand command,
+        SqlCommand command,
         string name,
         PropertyInfo property,
         object? rawValue
-    ) => command.Parameters.AddWithValue(name, rawValue ?? DBNull.Value);
+    )
+    {
+        var attribute = _columnTypeCache.GetOrAdd(
+            property,
+            static p => p.GetCustomAttribute<SqlColumnTypeAttribute>()
+        );
+        if (attribute is null)
+        {
+            command.Parameters.AddWithValue(name, rawValue ?? DBNull.Value);
+            return;
+        }
+
+        var parameter = new SqlParameter(name, attribute.DbType);
+        // String/binary Size safety guard: when the declared length is positive and the value length is within it,
+        // use the declared length; when the value exceeds the declared length, use the value length as Size
+        // (ADO.NET truncates input values client-side by Size, so a fixed Size would cause silent data corruption
+        // instead of a server-side truncation error; sending the oversized value as-is preserves the server-side error).
+        // (max) = -1 always stays -1.
+        if (attribute.Size == -1)
+        {
+            parameter.Size = -1;
+        }
+        else if (attribute.Size > 0)
+        {
+            var valueLength = rawValue switch
+            {
+                string text => text.Length,
+                byte[] bytes => bytes.Length,
+                _ => 0,
+            };
+            parameter.Size = valueLength > attribute.Size ? valueLength : attribute.Size;
+        }
+
+        if (attribute.Precision > 0)
+        {
+            parameter.Precision = attribute.Precision;
+            parameter.Scale = attribute.Scale;
+        }
+
+        parameter.Value = rawValue ?? DBNull.Value;
+        command.Parameters.Add(parameter);
+    }
 
     /// <summary>
     /// Binds a query WHERE-clause parameter. When the column name is known and its column property is found, the
@@ -8552,7 +8377,7 @@ internal sealed class EntitySaveMetadata
     /// <param name="columnName">The unquoted column name; null when the column cannot be determined</param>
     /// <param name="rawValue">The value after value objects have already been unwrapped to their raw value; null is bound as DBNull.Value</param>
     public void AddQueryParameter(
-        SqliteCommand command,
+        SqlCommand command,
         string name,
         string? columnName,
         object? rawValue
@@ -8565,6 +8390,126 @@ internal sealed class EntitySaveMetadata
         }
 
         command.Parameters.AddWithValue(name, rawValue ?? DBNull.Value);
+    }
+
+    /// <summary>Creates an IDataReader for SqlBulkCopy that reads an entity collection one row at a time (store-generated columns are excluded from insertion).</summary>
+    public IDataReader CreateDataReader(IEnumerable<EntityBase> entities) =>
+        new EntityDataReader(InsertProperties, entities);
+
+    /// <summary>An IDataReader that reads entity columns one row at a time and feeds them to SqlBulkCopy (memory-efficient, no intermediate DataTable).</summary>
+    /// <remarks>SqlBulkCopy uses only Read, GetValue, FieldCount, GetName, and GetOrdinal, so the other typed getters are left unsupported.</remarks>
+    private sealed class EntityDataReader : IDataReader
+    {
+        private readonly IReadOnlyList<PropertyInfo> _properties;
+        private readonly string[] _columnNames;
+        private readonly IEnumerator<EntityBase> _enumerator;
+
+        public EntityDataReader(
+            IReadOnlyList<PropertyInfo> properties,
+            IEnumerable<EntityBase> entities
+        )
+        {
+            _properties = properties;
+            _columnNames = properties.Select(GetColumnName).ToArray();
+            _enumerator = entities.GetEnumerator();
+        }
+
+        public int FieldCount => _properties.Count;
+
+        public bool Read() => _enumerator.MoveNext();
+
+        public object GetValue(int i) =>
+            SqlParameterValue.Unwrap(_properties[i].GetValue(_enumerator.Current)) ?? DBNull.Value;
+
+        public string GetName(int i) => _columnNames[i];
+
+        public int GetOrdinal(string name)
+        {
+            var index = Array.IndexOf(_columnNames, name);
+            return index >= 0
+                ? index
+                : throw new IndexOutOfRangeException($"Column {name} does not exist.");
+        }
+
+        // Nullable<T> returns the underlying type (to align with SqlBulkCopy's column type resolution)
+        public Type GetFieldType(int i) =>
+            Nullable.GetUnderlyingType(_properties[i].PropertyType) ?? _properties[i].PropertyType;
+
+        public bool IsDBNull(int i) => GetValue(i) is DBNull;
+
+        public object this[int i] => GetValue(i);
+
+        public object this[string name] => GetValue(GetOrdinal(name));
+
+        public int GetValues(object[] values)
+        {
+            var count = Math.Min(values.Length, FieldCount);
+            for (var i = 0; i < count; i++)
+            {
+                values[i] = GetValue(i);
+            }
+
+            return count;
+        }
+
+        public void Dispose() => _enumerator.Dispose();
+
+        public int Depth => 0;
+
+        public bool IsClosed => false;
+
+        public int RecordsAffected => -1;
+
+        public void Close() { }
+
+        public bool NextResult() => false;
+
+        public DataTable? GetSchemaTable() => null;
+
+        // The members below are never called by SqlBulkCopy, so they are left unsupported
+        public bool GetBoolean(int i) => throw new NotSupportedException();
+
+        public byte GetByte(int i) => throw new NotSupportedException();
+
+        public long GetBytes(
+            int i,
+            long fieldOffset,
+            byte[]? buffer,
+            int bufferOffset,
+            int length
+        ) => throw new NotSupportedException();
+
+        public char GetChar(int i) => throw new NotSupportedException();
+
+        public long GetChars(
+            int i,
+            long fieldOffset,
+            char[]? buffer,
+            int bufferOffset,
+            int length
+        ) => throw new NotSupportedException();
+
+        public IDataReader GetData(int i) => throw new NotSupportedException();
+
+        public string GetDataTypeName(int i) => throw new NotSupportedException();
+
+        public DateTime GetDateTime(int i) => throw new NotSupportedException();
+
+        public decimal GetDecimal(int i) => throw new NotSupportedException();
+
+        public double GetDouble(int i) => throw new NotSupportedException();
+
+        public float GetFloat(int i) => throw new NotSupportedException();
+
+        public Guid GetGuid(int i) => throw new NotSupportedException();
+
+        public short GetInt16(int i) => throw new NotSupportedException();
+
+        public int GetInt32(int i) => throw new NotSupportedException();
+
+        public long GetInt64(int i) => throw new NotSupportedException();
+
+        public string GetString(int i) => throw new NotSupportedException();
     }
 
     private static string GetColumnName(PropertyInfo property) =>
@@ -8616,7 +8561,7 @@ internal static class CascadeDeletePlanner
 
             var childTable = EntitySaveMetadata.For(navigation.ChildType).TableName;
             var childScopeWhere =
-                $" WHERE \"{navigation.DependentColumn}\" IN (SELECT \"{navigation.PrincipalColumn}\" FROM {parentTable}{parentScopeWhere})";
+                $" WHERE [{navigation.DependentColumn}] IN (SELECT [{navigation.PrincipalColumn}] FROM {parentTable}{parentScopeWhere})";
 
             // Delete grandchildren and below first, then the children (FK consistency)
             AppendDescendantDeletes(
@@ -8686,6 +8631,93 @@ internal sealed class SaveHookSession(
     }
 }
 
+/// <summary>Collects the row versions the database assigned during a save so that they can be written back once the transaction commits.</summary>
+/// <remarks>
+/// A rowversion is assigned while the transaction is still open, so writing it straight back to the entity would leave it
+/// carrying a version that never became visible if the transaction is rolled back afterwards. The saver records the pairs
+/// here instead and <see cref="Apply"/> settles them after a successful commit.
+/// </remarks>
+internal sealed class RowVersionCollector
+{
+    private readonly List<(EntityBase Entity, byte[] Version)> _versions = new();
+
+    /// <summary>Records the raw row version bytes the database assigned to an entity (converting them to the property type is left to <see cref="Apply"/>).</summary>
+    public void Record(EntityBase entity, byte[] version) => _versions.Add((entity, version));
+
+    /// <summary>Writes every recorded row version back to its entity (call only after the save transaction has committed).</summary>
+    public void Apply()
+    {
+        foreach (var (entity, version) in _versions)
+        {
+            var property = EntitySaveMetadata.For(entity.GetType()).RowVersionProperty!;
+
+            // The raw bytes are wrapped here when the property is a value object type
+            property.SetValue(entity, SqlValueObjectActivator.Wrap(version, property.PropertyType));
+        }
+    }
+}
+
+/// <summary>Optimistic concurrency helpers shared by the direct CRUD methods and the graph saver, for tables that carry a rowversion (concurrency token) column.</summary>
+internal static class RowVersionConcurrency
+{
+    /// <summary>Selects the UPDATE statement for the given mode (the version guard applies to <see cref="ConcurrencyMode.Optimistic"/> only).</summary>
+    public static string UpdateSql(EntitySaveMetadata metadata, ConcurrencyMode mode) =>
+        mode == ConcurrencyMode.Optimistic
+            ? metadata.UpdateVersionedSql!
+            : metadata.UpdateForcedSql!;
+
+    /// <summary>Binds the UPDATE parameters, adding the version guard parameter for <see cref="ConcurrencyMode.Optimistic"/>.</summary>
+    public static void BindUpdate(
+        EntitySaveMetadata metadata,
+        SqlCommand command,
+        EntityBase entity,
+        ConcurrencyMode mode
+    )
+    {
+        metadata.BindUpdateParameters(command, entity);
+
+        if (mode == ConcurrencyMode.Optimistic)
+        {
+            metadata.BindRowVersionParameter(command, entity);
+        }
+    }
+
+    /// <summary>
+    /// Returns whether the row the entity's primary key points at currently exists. Used after a guarded statement affected
+    /// no rows, to tell "the row is gone" (the pre-existing not-found contract) apart from "the row version is stale".
+    /// </summary>
+    public static async Task<bool> RowExistsAsync(
+        EntitySaveMetadata metadata,
+        EntityBase entity,
+        SqlConnection connection,
+        SqlTransaction? transaction,
+        CancellationToken cancellationToken
+    )
+    {
+        await using var command = new SqlCommand(metadata.SelectByIdSql, connection);
+        command.Transaction = transaction;
+        metadata.BindEntityKeyParameter(command, entity);
+
+        // ExecuteScalar yields null only when the SELECT produced no row at all (a NULL first column comes back as DBNull)
+        return await command.ExecuteScalarAsync(cancellationToken) is not null;
+    }
+
+    /// <summary>Builds the conflict reported when the row still exists but its version moved on since the entity was read.</summary>
+    /// <param name="metadata">The metadata of the entity's type.</param>
+    /// <param name="entity">The entity whose save was rejected.</param>
+    /// <param name="operation">The lowercase verb of the rejected operation ("update" or "delete").</param>
+    public static SaveConflictException Conflict(
+        EntitySaveMetadata metadata,
+        EntityBase entity,
+        string operation
+    ) =>
+        SaveConflictException.Modified(
+            entity.GetType(),
+            metadata.KeyProperty.GetValue(entity),
+            operation
+        );
+}
+
 /// <summary>Internal engine that saves an entity graph in a single transaction according to RowState.</summary>
 internal static class EntityGraphSaver
 {
@@ -8703,14 +8735,16 @@ internal static class EntityGraphSaver
     /// </remarks>
     public static async Task<int> SaveAsync(
         EntityBase entity,
-        SqliteConnection connection,
-        SqliteTransaction transaction,
+        SqlConnection connection,
+        SqlTransaction transaction,
         bool cascadeSave,
         bool cascadeDelete,
         bool insertWhenUpdateMissing,
         CancellationToken cancellationToken,
         SaveHookSession? hooks = null,
-        bool changesAlreadyVerified = false
+        bool changesAlreadyVerified = false,
+        ConcurrencyMode mode = ConcurrencyMode.Optimistic,
+        RowVersionCollector? versions = null
     )
     {
         if (!changesAlreadyVerified && !HasChanges(entity, cascadeSave))
@@ -8732,7 +8766,8 @@ internal static class EntityGraphSaver
                         connection,
                         transaction,
                         cancellationToken,
-                        hooks
+                        hooks,
+                        mode
                     );
                 }
             }
@@ -8755,7 +8790,8 @@ internal static class EntityGraphSaver
                 entity,
                 connection,
                 transaction,
-                cancellationToken
+                cancellationToken,
+                mode
             );
 
             // After(Delete) fires immediately after the DML (before commit)
@@ -8779,7 +8815,8 @@ internal static class EntityGraphSaver
                     entity,
                     connection,
                     transaction,
-                    cancellationToken
+                    cancellationToken,
+                    versions
                 );
 
                 if (hooks is not null)
@@ -8805,7 +8842,9 @@ internal static class EntityGraphSaver
                     connection,
                     transaction,
                     insertWhenUpdateMissing,
-                    cancellationToken
+                    cancellationToken,
+                    mode,
+                    versions
                 );
                 rows += affected;
 
@@ -8833,7 +8872,10 @@ internal static class EntityGraphSaver
                     cascadeDelete,
                     insertWhenUpdateMissing,
                     cancellationToken,
-                    hooks
+                    hooks,
+                    changesAlreadyVerified: false,
+                    mode,
+                    versions
                 );
             }
         }
@@ -8878,10 +8920,11 @@ internal static class EntityGraphSaver
     /// <summary>Deletes the subtree starting from the children (deleted regardless of state; when <paramref name="hooks"/> is provided, fires Before/After(Delete) per child).</summary>
     private static async Task<int> DeleteGraphAsync(
         EntityBase entity,
-        SqliteConnection connection,
-        SqliteTransaction transaction,
+        SqlConnection connection,
+        SqlTransaction transaction,
         CancellationToken cancellationToken,
-        SaveHookSession? hooks = null
+        SaveHookSession? hooks = null,
+        ConcurrencyMode mode = ConcurrencyMode.Optimistic
     )
     {
         var rows = 0;
@@ -8893,7 +8936,8 @@ internal static class EntityGraphSaver
                 connection,
                 transaction,
                 cancellationToken,
-                hooks
+                hooks,
+                mode
             );
         }
 
@@ -8911,7 +8955,8 @@ internal static class EntityGraphSaver
             entity,
             connection,
             transaction,
-            cancellationToken
+            cancellationToken,
+            mode
         );
 
         if (hooks is not null)
@@ -8922,15 +8967,38 @@ internal static class EntityGraphSaver
         return rows;
     }
 
-    /// <summary>Inserts a single row.</summary>
-    private static Task<int> InsertEntityAsync(
+    /// <summary>Inserts a single row, capturing the row version the database assigned when the table carries one.</summary>
+    private static async Task<int> InsertEntityAsync(
         EntityBase entity,
-        SqliteConnection connection,
-        SqliteTransaction transaction,
-        CancellationToken cancellationToken
+        SqlConnection connection,
+        SqlTransaction transaction,
+        CancellationToken cancellationToken,
+        RowVersionCollector? versions
     )
     {
-        return ExecuteAsync(
+        var metadata = EntitySaveMetadata.For(entity.GetType());
+
+        if (metadata.RowVersionProperty is not null)
+        {
+            // The INSERT returns the version the database generated; it is written back to the entity after the commit
+            var version = await ExecuteReturningAsync(
+                entity,
+                meta => meta.InsertReturningSql!,
+                static (meta, command, e) => meta.BindInsertParameters(command, e),
+                connection,
+                transaction,
+                cancellationToken
+            );
+
+            if (version is byte[] newVersion)
+            {
+                versions?.Record(entity, newVersion);
+            }
+
+            return 1;
+        }
+
+        return await ExecuteAsync(
             entity,
             meta => meta.InsertSql,
             static (meta, command, e) => meta.BindInsertParameters(command, e),
@@ -8940,15 +9008,52 @@ internal static class EntityGraphSaver
         );
     }
 
-    /// <summary>Deletes a single row.</summary>
-    private static Task<int> DeleteEntityAsync(
+    /// <summary>Deletes a single row, guarded by the row version the entity was read with when the table carries one.</summary>
+    private static async Task<int> DeleteEntityAsync(
         EntityBase entity,
-        SqliteConnection connection,
-        SqliteTransaction transaction,
-        CancellationToken cancellationToken
+        SqlConnection connection,
+        SqlTransaction transaction,
+        CancellationToken cancellationToken,
+        ConcurrencyMode mode
     )
     {
-        return ExecuteAsync(
+        var metadata = EntitySaveMetadata.For(entity.GetType());
+
+        if (metadata.RowVersionProperty is not null && mode == ConcurrencyMode.Optimistic)
+        {
+            var affected = await ExecuteAsync(
+                entity,
+                meta => meta.DeleteVersionedSql!,
+                static (meta, command, e) =>
+                {
+                    meta.BindEntityKeyParameter(command, e);
+                    meta.BindRowVersionParameter(command, e);
+                },
+                connection,
+                transaction,
+                cancellationToken
+            );
+
+            // Zero affected rows is ambiguous: either the row is already gone (deleting a row that is not there has always
+            // been tolerated silently) or someone else changed it after it was read. Probing the row tells the two apart
+            if (
+                affected == 0
+                && await RowVersionConcurrency.RowExistsAsync(
+                    metadata,
+                    entity,
+                    connection,
+                    transaction,
+                    cancellationToken
+                )
+            )
+            {
+                throw RowVersionConcurrency.Conflict(metadata, entity, "delete");
+            }
+
+            return affected;
+        }
+
+        return await ExecuteAsync(
             entity,
             meta => meta.DeleteSql,
             static (meta, command, e) => meta.BindEntityKeyParameter(command, e),
@@ -8961,22 +9066,63 @@ internal static class EntityGraphSaver
     /// <summary>Executes the update and returns the affected row count and the operation actually performed (Insert when switched).</summary>
     private static async Task<(int Rows, SaveOperation Performed)> UpdateAsync(
         EntityBase entity,
-        SqliteConnection connection,
-        SqliteTransaction transaction,
+        SqlConnection connection,
+        SqlTransaction transaction,
         bool insertWhenUpdateMissing,
-        CancellationToken cancellationToken
+        CancellationToken cancellationToken,
+        ConcurrencyMode mode,
+        RowVersionCollector? versions
     )
     {
         var metadata = EntitySaveMetadata.For(entity.GetType());
+        int affected;
 
-        var affected = await ExecuteAsync(
-            entity,
-            meta => meta.UpdateSql,
-            static (meta, command, e) => meta.BindUpdateParameters(command, e),
-            connection,
-            transaction,
-            cancellationToken
-        );
+        if (metadata.RowVersionProperty is not null)
+        {
+            // The guarded UPDATE returns the version the database generated; a null result means it matched no row
+            var version = await ExecuteReturningAsync(
+                entity,
+                meta => RowVersionConcurrency.UpdateSql(meta, mode),
+                (meta, command, e) => RowVersionConcurrency.BindUpdate(meta, command, e, mode),
+                connection,
+                transaction,
+                cancellationToken
+            );
+
+            if (version is byte[] newVersion)
+            {
+                versions?.Record(entity, newVersion);
+                return (1, SaveOperation.Update);
+            }
+
+            // Nothing matched: probing the row separates "the row is gone" (handled below like any missing record) from
+            // "someone else changed it after it was read", which must never be silently switched to an INSERT
+            if (
+                await RowVersionConcurrency.RowExistsAsync(
+                    metadata,
+                    entity,
+                    connection,
+                    transaction,
+                    cancellationToken
+                )
+            )
+            {
+                throw RowVersionConcurrency.Conflict(metadata, entity, "update");
+            }
+
+            affected = 0;
+        }
+        else
+        {
+            affected = await ExecuteAsync(
+                entity,
+                meta => meta.UpdateSql,
+                static (meta, command, e) => meta.BindUpdateParameters(command, e),
+                connection,
+                transaction,
+                cancellationToken
+            );
+        }
 
         if (affected != 0)
         {
@@ -8991,7 +9137,8 @@ internal static class EntityGraphSaver
                 entity,
                 connection,
                 transaction,
-                cancellationToken
+                cancellationToken,
+                versions
             );
             return (inserted, SaveOperation.Insert);
         }
@@ -9002,18 +9149,35 @@ internal static class EntityGraphSaver
         );
     }
 
-    private static async Task<int> ExecuteAsync(
+    /// <summary>Executes a statement whose OUTPUT clause returns a single value, yielding <c>null</c> when it matched no row.</summary>
+    private static async Task<object?> ExecuteReturningAsync(
         EntityBase entity,
         Func<EntitySaveMetadata, string> sqlSelector,
-        Action<EntitySaveMetadata, SqliteCommand, EntityBase> bind,
-        SqliteConnection connection,
-        SqliteTransaction transaction,
+        Action<EntitySaveMetadata, SqlCommand, EntityBase> bind,
+        SqlConnection connection,
+        SqlTransaction transaction,
         CancellationToken cancellationToken
     )
     {
         var metadata = EntitySaveMetadata.For(entity.GetType());
 
-        await using var command = new SqliteCommand(sqlSelector(metadata), connection, transaction);
+        await using var command = new SqlCommand(sqlSelector(metadata), connection, transaction);
+        bind(metadata, command, entity);
+        return await command.ExecuteScalarAsync(cancellationToken);
+    }
+
+    private static async Task<int> ExecuteAsync(
+        EntityBase entity,
+        Func<EntitySaveMetadata, string> sqlSelector,
+        Action<EntitySaveMetadata, SqlCommand, EntityBase> bind,
+        SqlConnection connection,
+        SqlTransaction transaction,
+        CancellationToken cancellationToken
+    )
+    {
+        var metadata = EntitySaveMetadata.For(entity.GetType());
+
+        await using var command = new SqlCommand(sqlSelector(metadata), connection, transaction);
         bind(metadata, command, entity);
         return await command.ExecuteNonQueryAsync(cancellationToken);
     }
@@ -9051,17 +9215,17 @@ internal static class EntityGraphSaver
     }
 }
 
-/// <summary>Extensions that register the generated repositories (SQLite implementation) with the DI container.</summary>
+/// <summary>Extensions that register the generated repositories (SQL Server implementation) with the DI container.</summary>
 /// <remarks>
-/// DI registration is provided per engine under the name <c>AddGeneratedSqliteRepositories</c>, registering
+/// DI registration is provided per engine under the name <c>AddGeneratedSqlServerRepositories</c>, registering
 /// the same contracts (I{Entity}Repository / ISqlExecutor) with dialect-specific implementations. To use multiple dialects
 /// (multi-targeting) in the same process, use the overloads with <c>object? serviceKey</c> (keyed DI) and resolve the
 /// dialect-specific connection via <c>[FromKeyedServices("...")]</c>.
 /// </remarks>
-public static class GeneratedSqliteRepositoryServiceCollectionExtensions
+public static class GeneratedSqlServerRepositoryServiceCollectionExtensions
 {
-    /// <summary>Registers the SQLite repositories with the DI container using a connection string (non-keyed, for standalone use).</summary>
-    public static IServiceCollection AddGeneratedSqliteRepositories(
+    /// <summary>Registers the SQL Server repositories with the DI container using a connection string (non-keyed, for standalone use).</summary>
+    public static IServiceCollection AddGeneratedSqlServerRepositories(
         this IServiceCollection services,
         string connectionString
     )
@@ -9078,25 +9242,25 @@ public static class GeneratedSqliteRepositoryServiceCollectionExtensions
         services.TryAddScoped<ISaveHookRegistry>(provider => new ServiceProviderSaveHookRegistry(
             provider
         ));
-        services.AddScoped<ICustomerRepository, CustomerRepository>();
-        services.AddScoped<ICustomerRemoteRepository>(provider =>
-            provider.GetRequiredService<ICustomerRepository>()
+        services.AddScoped<IGadgetRepository, GadgetRepository>();
+        services.AddScoped<IGadgetRemoteRepository>(provider =>
+            provider.GetRequiredService<IGadgetRepository>()
         );
-        services.AddScoped<IOrderRepository, OrderRepository>();
-        services.AddScoped<IOrderRemoteRepository>(provider =>
-            provider.GetRequiredService<IOrderRepository>()
+        services.AddScoped<IGadgetNoteRepository, GadgetNoteRepository>();
+        services.AddScoped<IGadgetNoteRemoteRepository>(provider =>
+            provider.GetRequiredService<IGadgetNoteRepository>()
         );
 
         return services;
     }
 
-    /// <summary>Registers the SQLite repositories with a service key (keyed DI, for using multiple dialects simultaneously).</summary>
+    /// <summary>Registers the SQL Server repositories with a service key (keyed DI, for using multiple dialects simultaneously).</summary>
     /// <remarks>
     /// Registers I{Entity}Repository / ISqlExecutor keyed by <paramref name="serviceKey"/>. Consumers resolve the
     /// dialect-specific implementation like <c>[FromKeyedServices(serviceKey)] ICustomerRepository</c>.
     /// The connection factory is captured per key in a closure, so it causes no non-keyed registration collisions.
     /// </remarks>
-    public static IServiceCollection AddGeneratedSqliteRepositories(
+    public static IServiceCollection AddGeneratedSqlServerRepositories(
         this IServiceCollection services,
         object? serviceKey,
         string connectionString
@@ -9116,37 +9280,37 @@ public static class GeneratedSqliteRepositoryServiceCollectionExtensions
         services.TryAddScoped<ISaveHookRegistry>(provider => new ServiceProviderSaveHookRegistry(
             provider
         ));
-        services.AddKeyedScoped<ICustomerRepository>(
+        services.AddKeyedScoped<IGadgetRepository>(
             serviceKey,
-            (provider, _) => new CustomerRepository(
+            (provider, _) => new GadgetRepository(
                 connectionFactory,
                 provider.GetService<ISaveHookRegistry>()
             )
         );
-        services.AddKeyedScoped<ICustomerRemoteRepository>(
+        services.AddKeyedScoped<IGadgetRemoteRepository>(
             serviceKey,
-            (provider, key) => provider.GetRequiredKeyedService<ICustomerRepository>(key)
+            (provider, key) => provider.GetRequiredKeyedService<IGadgetRepository>(key)
         );
-        services.AddKeyedScoped<IOrderRepository>(
+        services.AddKeyedScoped<IGadgetNoteRepository>(
             serviceKey,
-            (provider, _) => new OrderRepository(
+            (provider, _) => new GadgetNoteRepository(
                 connectionFactory,
                 provider.GetService<ISaveHookRegistry>()
             )
         );
-        services.AddKeyedScoped<IOrderRemoteRepository>(
+        services.AddKeyedScoped<IGadgetNoteRemoteRepository>(
             serviceKey,
-            (provider, key) => provider.GetRequiredKeyedService<IOrderRepository>(key)
+            (provider, key) => provider.GetRequiredKeyedService<IGadgetNoteRepository>(key)
         );
 
         return services;
     }
 }
 
-/// <summary>Remote surface of the CustomerEntity repository (only CRUD, save, and named queries that can cross a network boundary; swappable for a remote implementation later).</summary>
-public partial interface ICustomerRemoteRepository : IRemoteRepository<CustomerEntity, CustomerIdValue>
+/// <summary>Remote surface of the GadgetEntity repository (only CRUD, save, and named queries that can cross a network boundary; swappable for a remote implementation later).</summary>
+public partial interface IGadgetRemoteRepository : IRemoteRepository<GadgetEntity, GadgetIdValue>
 {
-    /// <summary>Checks the UNIQUE constraints of customers against the database and returns the violations (an empty list when there are none).</summary>
+    /// <summary>Checks the UNIQUE constraints of gadgets against the database and returns the violations (an empty list when there are none).</summary>
     /// <remarks>
     /// Rows that share the entity's primary key are excluded, so the same call is correct for both insert and update. Constraint member values that contain
     /// a null are skipped (NULL collision semantics differ per dialect). The result is advisory only: the definitive guarantee is the database's own UNIQUE
@@ -9155,32 +9319,32 @@ public partial interface ICustomerRemoteRepository : IRemoteRepository<CustomerE
     /// <param name="entity">The entity whose constraint member values are checked.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
-        CustomerEntity entity,
+        GadgetEntity entity,
         CancellationToken cancellationToken = default
     );
 }
 
-/// <summary>Repository interface for CustomerEntity (the full-featured surface = the remote surface plus expression-tree queries, raw SQL, and bulk insert).</summary>
-public partial interface ICustomerRepository
-    : ICustomerRemoteRepository,
-        IRepository<CustomerEntity, CustomerIdValue> { }
+/// <summary>Repository interface for GadgetEntity (the full-featured surface = the remote surface plus expression-tree queries, raw SQL, and bulk insert).</summary>
+public partial interface IGadgetRepository
+    : IGadgetRemoteRepository,
+        IRepository<GadgetEntity, GadgetIdValue> { }
 
-/// <summary>Repository implementation for CustomerEntity.</summary>
-public sealed partial class CustomerRepository(
+/// <summary>Repository implementation for GadgetEntity.</summary>
+public sealed partial class GadgetRepository(
     ISqlConnectionFactory connectionFactory,
     ISaveHookRegistry? saveHooks = null
-) : SqliteRepository<CustomerEntity, CustomerIdValue>(connectionFactory, saveHooks), ICustomerRepository
+) : SqlServerRepository<GadgetEntity, GadgetIdValue>(connectionFactory, saveHooks), IGadgetRepository
 {
     /// <inheritdoc />
     public async Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
-        CustomerEntity entity,
+        GadgetEntity entity,
         CancellationToken cancellationToken = default
     )
     {
         ArgumentNullException.ThrowIfNull(entity);
         var violations = new List<UniquenessViolation>();
 
-        List<UniquenessCheck<CustomerEntity>>? customChecks = null;
+        List<UniquenessCheck<GadgetEntity>>? customChecks = null;
         CollectCustomUniquenessChecks(ref customChecks);
 
         if (customChecks is not null)
@@ -9199,59 +9363,14 @@ public sealed partial class CustomerRepository(
 
     /// <summary>Extension point for adding user-defined uniqueness checks (add delegates to the list in a partial implementation; while unimplemented the call is erased at no cost).</summary>
     partial void CollectCustomUniquenessChecks(
-        ref List<UniquenessCheck<CustomerEntity>>? checks
+        ref List<UniquenessCheck<GadgetEntity>>? checks
     );
 }
 
-/// <summary>Remote surface of the OrderEntity repository (only CRUD, save, and named queries that can cross a network boundary; swappable for a remote implementation later).</summary>
-public partial interface IOrderRemoteRepository : IRemoteRepository<OrderEntity, OrderIdValue>
+/// <summary>Remote surface of the GadgetNoteEntity repository (only CRUD, save, and named queries that can cross a network boundary; swappable for a remote implementation later).</summary>
+public partial interface IGadgetNoteRemoteRepository : IRemoteRepository<GadgetNoteEntity, NoteIdValue>
 {
-    /// <summary>顧客IDで注文を新しい順（注文ID降順）に検索する（ページング付き）</summary>
-    Task<IReadOnlyList<OrderEntity>> GetByCustomerAsync(int customerId, int take, int skip = 0, CancellationToken cancellationToken = default);
-
-    /// <summary>最新（注文IDが最大）の注文を 1 件取得する</summary>
-    Task<OrderEntity?> FindTopAsync(CancellationToken cancellationToken = default);
-
-    /// <summary>顧客IDに紐づく注文件数を取得する</summary>
-    Task<int> CountByCustomerAsync(int customerId, CancellationToken cancellationToken = default);
-
-    /// <summary>メモの部分一致で注文を検索する</summary>
-    Task<IReadOnlyList<OrderEntity>> SearchMemoAsync(string keyword, CancellationToken cancellationToken = default);
-
-    /// <summary>注文IDの一覧で注文を取得する</summary>
-    Task<IReadOnlyList<OrderEntity>> GetByIdsAsync(IReadOnlyList<int> ids, CancellationToken cancellationToken = default);
-
-    /// <summary>顧客IDに紐づく注文を射影（顧客ID・金額）で新しい順に取得する</summary>
-    Task<IReadOnlyList<OrderSummaryRow>> GetSummariesAsync(int customerId, int take, int skip = 0, CancellationToken cancellationToken = default);
-
-    /// <summary>顧客IDに紐づく注文金額の合計を取得する（自由 SQL・SQLite）</summary>
-    /// <remarks>Implementation targets that do not get a generated body (EF Core, dialects without a SQL definition, and in-memory) require an implementation in a partial class.</remarks>
-    Task<decimal?> SumAmountsAsync(int customerId, CancellationToken cancellationToken = default);
-
-    /// <summary>注文IDの一覧で注文を取得する（自由 SQL・IN のリスト展開）</summary>
-    /// <remarks>Implementation targets that do not get a generated body (EF Core, dialects without a SQL definition, and in-memory) require an implementation in a partial class.</remarks>
-    Task<IReadOnlyList<OrderEntity>> GetByIdsRawAsync(IReadOnlyList<int> ids, CancellationToken cancellationToken = default);
-
-    /// <summary>最新（注文IDが最大）の注文を 1 件取得する（自由 SQL・単一戻り形）</summary>
-    /// <remarks>Implementation targets that do not get a generated body (EF Core, dialects without a SQL definition, and in-memory) require an implementation in a partial class.</remarks>
-    Task<OrderEntity?> FindTopRawAsync(CancellationToken cancellationToken = default);
-
-    /// <summary>顧客IDに紐づく注文件数を取得する（自由 SQL・件数戻り形）</summary>
-    /// <remarks>Implementation targets that do not get a generated body (EF Core, dialects without a SQL definition, and in-memory) require an implementation in a partial class.</remarks>
-    Task<int> CountByCustomerRawAsync(int customerId, CancellationToken cancellationToken = default);
-
-    /// <summary>顧客IDに紐づく注文のメモ一覧を取得する（自由 SQL・射影戻り形＝自由フィールドの型トークン解決）</summary>
-    /// <remarks>Implementation targets that do not get a generated body (EF Core, dialects without a SQL definition, and in-memory) require an implementation in a partial class.</remarks>
-    Task<IReadOnlyList<OrderMemoRow>> GetMemoRowsRawAsync(int customerId, CancellationToken cancellationToken = default);
-
-    /// <summary>顧客IDで注文を古い順に検索する（列参照型付け＝VO 有効時は VO 引数）</summary>
-    Task<IReadOnlyList<OrderEntity>> GetByCustomerTypedAsync(CustomerIdValue customerId, CancellationToken cancellationToken = default);
-
-    /// <summary>利用者が partial クラスで実装する特別な検索（manual）</summary>
-    /// <remarks>Implementation targets that do not get a generated body (EF Core, dialects without a SQL definition, and in-memory) require an implementation in a partial class.</remarks>
-    Task<OrderEntity?> SpecialLookupAsync(int customerId, CancellationToken cancellationToken = default);
-
-    /// <summary>Checks the UNIQUE constraints of orders against the database and returns the violations (an empty list when there are none).</summary>
+    /// <summary>Checks the UNIQUE constraints of gadget_notes against the database and returns the violations (an empty list when there are none).</summary>
     /// <remarks>
     /// Rows that share the entity's primary key are excluded, so the same call is correct for both insert and update. Constraint member values that contain
     /// a null are skipped (NULL collision semantics differ per dialect). The result is advisory only: the definitive guarantee is the database's own UNIQUE
@@ -9260,172 +9379,32 @@ public partial interface IOrderRemoteRepository : IRemoteRepository<OrderEntity,
     /// <param name="entity">The entity whose constraint member values are checked.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
-        OrderEntity entity,
+        GadgetNoteEntity entity,
         CancellationToken cancellationToken = default
     );
 }
 
-/// <summary>Repository interface for OrderEntity (the full-featured surface = the remote surface plus expression-tree queries, raw SQL, and bulk insert).</summary>
-public partial interface IOrderRepository
-    : IOrderRemoteRepository,
-        IRepository<OrderEntity, OrderIdValue> { }
+/// <summary>Repository interface for GadgetNoteEntity (the full-featured surface = the remote surface plus expression-tree queries, raw SQL, and bulk insert).</summary>
+public partial interface IGadgetNoteRepository
+    : IGadgetNoteRemoteRepository,
+        IRepository<GadgetNoteEntity, NoteIdValue> { }
 
-/// <summary>Projection DTO for the named query GetSummaries (orders).</summary>
-public sealed partial class OrderSummaryRow
-{
-    /// <summary>CustomerId</summary>
-    public CustomerIdValue CustomerId { get; set; } = null!;
-
-    /// <summary>Amount</summary>
-    public AmountValue Amount { get; set; } = null!;
-}
-
-/// <summary>Projection DTO for the named query GetMemoRowsRaw (orders).</summary>
-public sealed partial class OrderMemoRow
-{
-    /// <summary>OrderId</summary>
-    public int? OrderId { get; set; }
-
-    /// <summary>Memo</summary>
-    public string? Memo { get; set; }
-}
-
-/// <summary>Repository implementation for OrderEntity.</summary>
-public sealed partial class OrderRepository(
+/// <summary>Repository implementation for GadgetNoteEntity.</summary>
+public sealed partial class GadgetNoteRepository(
     ISqlConnectionFactory connectionFactory,
     ISaveHookRegistry? saveHooks = null
-) : SqliteRepository<OrderEntity, OrderIdValue>(connectionFactory, saveHooks), IOrderRepository
+) : SqlServerRepository<GadgetNoteEntity, NoteIdValue>(connectionFactory, saveHooks), IGadgetNoteRepository
 {
-    /// <summary>顧客IDで注文を新しい順（注文ID降順）に検索する（ページング付き）</summary>
-    public Task<IReadOnlyList<OrderEntity>> GetByCustomerAsync(int customerId, int take, int skip = 0, CancellationToken cancellationToken = default) =>
-        Query().Where(e => e.CustomerId == CustomerIdValue.Create(customerId)).OrderByDescending(e => e.OrderId).Skip(skip).Take(take).ToListAsync(cancellationToken);
-
-    /// <summary>最新（注文IDが最大）の注文を 1 件取得する</summary>
-    public Task<OrderEntity?> FindTopAsync(CancellationToken cancellationToken = default) =>
-        Query().OrderByDescending(e => e.OrderId).FirstOrDefaultAsync(cancellationToken);
-
-    /// <summary>顧客IDに紐づく注文件数を取得する</summary>
-    public Task<int> CountByCustomerAsync(int customerId, CancellationToken cancellationToken = default) =>
-        Query().Where(e => e.CustomerId == CustomerIdValue.Create(customerId)).CountAsync(cancellationToken);
-
-    /// <summary>メモの部分一致で注文を検索する</summary>
-    public Task<IReadOnlyList<OrderEntity>> SearchMemoAsync(string keyword, CancellationToken cancellationToken = default) =>
-        Query().Where(e => e.Memo!.Contains(keyword)).ToListAsync(cancellationToken);
-
-    /// <summary>注文IDの一覧で注文を取得する</summary>
-    public Task<IReadOnlyList<OrderEntity>> GetByIdsAsync(IReadOnlyList<int> ids, CancellationToken cancellationToken = default)
-    {
-        var idsValues = ids.Select(OrderIdValue.Create).ToList();
-        return Query().Where(e => idsValues.Contains(e.OrderId)).ToListAsync(cancellationToken);
-    }
-
-    /// <summary>顧客IDに紐づく注文を射影（顧客ID・金額）で新しい順に取得する</summary>
-    public Task<IReadOnlyList<OrderSummaryRow>> GetSummariesAsync(int customerId, int take, int skip = 0, CancellationToken cancellationToken = default) =>
-        Query().Where(e => e.CustomerId == CustomerIdValue.Create(customerId)).OrderByDescending(e => e.OrderId).Skip(skip).Take(take).ToProjectionListAsync(e => new OrderSummaryRow { CustomerId = e.CustomerId, Amount = e.Amount }, cancellationToken);
-
-    /// <summary>顧客IDに紐づく注文金額の合計を取得する（自由 SQL・SQLite）</summary>
-    public Task<decimal?> SumAmountsAsync(int customerId, CancellationToken cancellationToken = default) =>
-        ExecuteScalarSqlAsync<decimal?>(
-            @"SELECT SUM(""amount"") FROM ""orders"" WHERE ""customer_id"" = @customerId",
-            new { customerId },
-            cancellationToken
-        );
-
-    /// <summary>注文IDの一覧で注文を取得する（自由 SQL・IN のリスト展開）</summary>
-    public Task<IReadOnlyList<OrderEntity>> GetByIdsRawAsync(IReadOnlyList<int> ids, CancellationToken cancellationToken = default) =>
-        QueryBySqlAsync(
-            @"SELECT * FROM ""orders"" WHERE ""order_id"" IN (@ids) ORDER BY ""order_id""",
-            new { ids },
-            cancellationToken
-        );
-
-    /// <summary>最新（注文IDが最大）の注文を 1 件取得する（自由 SQL・単一戻り形）</summary>
-    public async Task<OrderEntity?> FindTopRawAsync(CancellationToken cancellationToken = default)
-    {
-        var items = await QueryBySqlAsync(
-            @"SELECT * FROM ""orders"" ORDER BY ""order_id"" DESC LIMIT 1",
-            null,
-            cancellationToken
-        );
-        return items.Count > 0 ? items[0] : null;
-    }
-
-    /// <summary>顧客IDに紐づく注文件数を取得する（自由 SQL・件数戻り形）</summary>
-    public async Task<int> CountByCustomerRawAsync(int customerId, CancellationToken cancellationToken = default) =>
-        await ExecuteScalarSqlAsync<int?>(
-            @"SELECT COUNT(*) FROM ""orders"" WHERE ""customer_id"" = @customerId",
-            new { customerId },
-            cancellationToken
-        ) ?? 0;
-
-    /// <summary>顧客IDに紐づく注文のメモ一覧を取得する（自由 SQL・射影戻り形＝自由フィールドの型トークン解決）</summary>
-    public Task<IReadOnlyList<OrderMemoRow>> GetMemoRowsRawAsync(int customerId, CancellationToken cancellationToken = default) =>
-        QueryProjectionBySqlAsync<OrderMemoRow>(
-            @"SELECT ""order_id"" AS OrderId, ""memo"" AS Memo FROM ""orders"" WHERE ""customer_id"" = @customerId ORDER BY ""order_id""",
-            new { customerId },
-            cancellationToken
-        );
-
-    /// <summary>顧客IDで注文を古い順に検索する（列参照型付け＝VO 有効時は VO 引数）</summary>
-    public Task<IReadOnlyList<OrderEntity>> GetByCustomerTypedAsync(CustomerIdValue customerId, CancellationToken cancellationToken = default) =>
-        Query().Where(e => e.CustomerId == customerId).OrderBy(e => e.OrderId).ToListAsync(cancellationToken);
-
     /// <inheritdoc />
     public async Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
-        OrderEntity entity,
+        GadgetNoteEntity entity,
         CancellationToken cancellationToken = default
     )
     {
         ArgumentNullException.ThrowIfNull(entity);
         var violations = new List<UniquenessViolation>();
 
-        // UQ_orders_memo: Memo
-        if (entity.Memo is not null)
-        {
-            var duplicated1 = await Query()
-                .Where(candidate => candidate.Memo == entity.Memo)
-                .Where(candidate => candidate.OrderId != entity.OrderId)
-                .AnyAsync(cancellationToken);
-
-            if (duplicated1)
-            {
-                violations.Add(
-                    new UniquenessViolation(
-                        "UQ_orders_memo",
-                        new[]
-                        {
-                            nameof(OrderEntity.Memo),
-                        }
-                    )
-                );
-            }
-        }
-
-        // UQ_orders_customer_id_amount: CustomerId, Amount
-        if (entity.CustomerId is not null && entity.Amount is not null)
-        {
-            var duplicated2 = await Query()
-                .Where(candidate => candidate.CustomerId == entity.CustomerId)
-                .Where(candidate => candidate.Amount == entity.Amount)
-                .Where(candidate => candidate.OrderId != entity.OrderId)
-                .AnyAsync(cancellationToken);
-
-            if (duplicated2)
-            {
-                violations.Add(
-                    new UniquenessViolation(
-                        "UQ_orders_customer_id_amount",
-                        new[]
-                        {
-                            nameof(OrderEntity.CustomerId),
-                            nameof(OrderEntity.Amount),
-                        }
-                    )
-                );
-            }
-        }
-
-        List<UniquenessCheck<OrderEntity>>? customChecks = null;
+        List<UniquenessCheck<GadgetNoteEntity>>? customChecks = null;
         CollectCustomUniquenessChecks(ref customChecks);
 
         if (customChecks is not null)
@@ -9444,79 +9423,27 @@ public sealed partial class OrderRepository(
 
     /// <summary>Extension point for adding user-defined uniqueness checks (add delegates to the list in a partial implementation; while unimplemented the call is erased at no cost).</summary>
     partial void CollectCustomUniquenessChecks(
-        ref List<UniquenessCheck<OrderEntity>>? checks
+        ref List<UniquenessCheck<GadgetNoteEntity>>? checks
     );
 }
 
-/// <summary>HTTP client implementation of the remote surface (ICustomerRemoteRepository) for CustomerEntity.</summary>
+/// <summary>HTTP client implementation of the remote surface (IGadgetRemoteRepository) for GadgetEntity.</summary>
 /// <remarks>Calls the server-side <c>MapGeneratedRemoteEndpoints</c> endpoints. The HttpClient's BaseAddress must include the prefix (default /quicker/).</remarks>
-public sealed partial class HttpCustomerRemoteRepository(HttpClient httpClient)
-    : HttpRemoteRepository<CustomerEntity, CustomerIdValue>(httpClient, "Customer"), ICustomerRemoteRepository
+public sealed partial class HttpGadgetRemoteRepository(HttpClient httpClient)
+    : HttpRemoteRepository<GadgetEntity, GadgetIdValue>(httpClient, "Gadget"), IGadgetRemoteRepository
 {
-    /// <summary>Checks the UNIQUE constraints of customers against the database and returns the violations (an empty list when there are none). The check, including any user-defined hooks, runs in the server-side repository.</summary>
-    public Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(CustomerEntity entity, CancellationToken cancellationToken = default) =>
+    /// <summary>Checks the UNIQUE constraints of gadgets against the database and returns the violations (an empty list when there are none). The check, including any user-defined hooks, runs in the server-side repository.</summary>
+    public Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(GadgetEntity entity, CancellationToken cancellationToken = default) =>
         InvokeAsync<IReadOnlyList<UniquenessViolation>>("CheckUniqueness", new { entity }, cancellationToken);
 }
 
-/// <summary>HTTP client implementation of the remote surface (IOrderRemoteRepository) for OrderEntity.</summary>
+/// <summary>HTTP client implementation of the remote surface (IGadgetNoteRemoteRepository) for GadgetNoteEntity.</summary>
 /// <remarks>Calls the server-side <c>MapGeneratedRemoteEndpoints</c> endpoints. The HttpClient's BaseAddress must include the prefix (default /quicker/).</remarks>
-public sealed partial class HttpOrderRemoteRepository(HttpClient httpClient)
-    : HttpRemoteRepository<OrderEntity, OrderIdValue>(httpClient, "Order"), IOrderRemoteRepository
+public sealed partial class HttpGadgetNoteRemoteRepository(HttpClient httpClient)
+    : HttpRemoteRepository<GadgetNoteEntity, NoteIdValue>(httpClient, "GadgetNote"), IGadgetNoteRemoteRepository
 {
-    /// <summary>顧客IDで注文を新しい順（注文ID降順）に検索する（ページング付き）</summary>
-    public Task<IReadOnlyList<OrderEntity>> GetByCustomerAsync(int customerId, int take, int skip = 0, CancellationToken cancellationToken = default) =>
-        InvokeAsync<IReadOnlyList<OrderEntity>>("GetByCustomer", new { customerId, take, skip }, cancellationToken);
-
-    /// <summary>最新（注文IDが最大）の注文を 1 件取得する</summary>
-    public Task<OrderEntity?> FindTopAsync(CancellationToken cancellationToken = default) =>
-        InvokeAsync<OrderEntity?>("FindTop", null, cancellationToken);
-
-    /// <summary>顧客IDに紐づく注文件数を取得する</summary>
-    public Task<int> CountByCustomerAsync(int customerId, CancellationToken cancellationToken = default) =>
-        InvokeAsync<int>("CountByCustomer", new { customerId }, cancellationToken);
-
-    /// <summary>メモの部分一致で注文を検索する</summary>
-    public Task<IReadOnlyList<OrderEntity>> SearchMemoAsync(string keyword, CancellationToken cancellationToken = default) =>
-        InvokeAsync<IReadOnlyList<OrderEntity>>("SearchMemo", new { keyword }, cancellationToken);
-
-    /// <summary>注文IDの一覧で注文を取得する</summary>
-    public Task<IReadOnlyList<OrderEntity>> GetByIdsAsync(IReadOnlyList<int> ids, CancellationToken cancellationToken = default) =>
-        InvokeAsync<IReadOnlyList<OrderEntity>>("GetByIds", new { ids }, cancellationToken);
-
-    /// <summary>顧客IDに紐づく注文を射影（顧客ID・金額）で新しい順に取得する</summary>
-    public Task<IReadOnlyList<OrderSummaryRow>> GetSummariesAsync(int customerId, int take, int skip = 0, CancellationToken cancellationToken = default) =>
-        InvokeAsync<IReadOnlyList<OrderSummaryRow>>("GetSummaries", new { customerId, take, skip }, cancellationToken);
-
-    /// <summary>顧客IDに紐づく注文金額の合計を取得する（自由 SQL・SQLite）</summary>
-    public Task<decimal?> SumAmountsAsync(int customerId, CancellationToken cancellationToken = default) =>
-        InvokeAsync<decimal?>("SumAmounts", new { customerId }, cancellationToken);
-
-    /// <summary>注文IDの一覧で注文を取得する（自由 SQL・IN のリスト展開）</summary>
-    public Task<IReadOnlyList<OrderEntity>> GetByIdsRawAsync(IReadOnlyList<int> ids, CancellationToken cancellationToken = default) =>
-        InvokeAsync<IReadOnlyList<OrderEntity>>("GetByIdsRaw", new { ids }, cancellationToken);
-
-    /// <summary>最新（注文IDが最大）の注文を 1 件取得する（自由 SQL・単一戻り形）</summary>
-    public Task<OrderEntity?> FindTopRawAsync(CancellationToken cancellationToken = default) =>
-        InvokeAsync<OrderEntity?>("FindTopRaw", null, cancellationToken);
-
-    /// <summary>顧客IDに紐づく注文件数を取得する（自由 SQL・件数戻り形）</summary>
-    public Task<int> CountByCustomerRawAsync(int customerId, CancellationToken cancellationToken = default) =>
-        InvokeAsync<int>("CountByCustomerRaw", new { customerId }, cancellationToken);
-
-    /// <summary>顧客IDに紐づく注文のメモ一覧を取得する（自由 SQL・射影戻り形＝自由フィールドの型トークン解決）</summary>
-    public Task<IReadOnlyList<OrderMemoRow>> GetMemoRowsRawAsync(int customerId, CancellationToken cancellationToken = default) =>
-        InvokeAsync<IReadOnlyList<OrderMemoRow>>("GetMemoRowsRaw", new { customerId }, cancellationToken);
-
-    /// <summary>顧客IDで注文を古い順に検索する（列参照型付け＝VO 有効時は VO 引数）</summary>
-    public Task<IReadOnlyList<OrderEntity>> GetByCustomerTypedAsync(CustomerIdValue customerId, CancellationToken cancellationToken = default) =>
-        InvokeAsync<IReadOnlyList<OrderEntity>>("GetByCustomerTyped", new { customerId }, cancellationToken);
-
-    /// <summary>利用者が partial クラスで実装する特別な検索（manual）</summary>
-    public Task<OrderEntity?> SpecialLookupAsync(int customerId, CancellationToken cancellationToken = default) =>
-        InvokeAsync<OrderEntity?>("SpecialLookup", new { customerId }, cancellationToken);
-
-    /// <summary>Checks the UNIQUE constraints of orders against the database and returns the violations (an empty list when there are none). The check, including any user-defined hooks, runs in the server-side repository.</summary>
-    public Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(OrderEntity entity, CancellationToken cancellationToken = default) =>
+    /// <summary>Checks the UNIQUE constraints of gadget_notes against the database and returns the violations (an empty list when there are none). The check, including any user-defined hooks, runs in the server-side repository.</summary>
+    public Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(GadgetNoteEntity entity, CancellationToken cancellationToken = default) =>
         InvokeAsync<IReadOnlyList<UniquenessViolation>>("CheckUniqueness", new { entity }, cancellationToken);
 }
 
@@ -9581,10 +9508,10 @@ public static class GeneratedHttpRemoteRepositoryServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(httpClientFactory);
 
-        services.AddScoped<ICustomerRemoteRepository>(provider => new HttpCustomerRemoteRepository(
+        services.AddScoped<IGadgetRemoteRepository>(provider => new HttpGadgetRemoteRepository(
             httpClientFactory(provider)
         ));
-        services.AddScoped<IOrderRemoteRepository>(provider => new HttpOrderRemoteRepository(
+        services.AddScoped<IGadgetNoteRemoteRepository>(provider => new HttpGadgetNoteRemoteRepository(
             httpClientFactory(provider)
         ));
 
@@ -9604,6 +9531,1562 @@ public static class GeneratedHttpRemoteRepositoryServiceCollectionExtensions
 
         /// <summary>Disposes the shared client (called by the DI container when the provider is disposed).</summary>
         public void Dispose() => Client.Dispose();
+    }
+}
+
+/// <summary>
+/// In-memory data store that holds entities in memory without a database (shared as a DI singleton).
+/// </summary>
+/// <remarks>
+/// <para>
+/// Keeps a "primary key -> snapshot clone" dictionary per entity type. Writes (save/delete) and reads (fetch/query)
+/// always go through a clone produced by <see cref="EntityBase.Clone"/>, so mutating a returned entity on the caller
+/// side never changes the store contents (matching the by-value semantics of a real database). All operations are
+/// serialized with a <c>lock</c> to be thread-safe.
+/// </para>
+/// <para>
+/// The primary key is taken from <see cref="EntitySaveMetadata.KeyProperty"/>, and value objects are opened to their
+/// underlying value to form the dictionary key (so they match by value equality).
+/// </para>
+/// </remarks>
+public sealed class InMemoryDataStore
+{
+    private readonly object _gate = new();
+    private readonly Dictionary<Type, Dictionary<object, EntityBase>> _tables = new();
+    private long _rowVersion;
+
+    /// <summary>Gets the table (primary key -> snapshot) for the given type, creating it if absent. The caller must already hold the lock.</summary>
+    private Dictionary<object, EntityBase> Table(Type entityType)
+    {
+        if (!_tables.TryGetValue(entityType, out var table))
+        {
+            table = new Dictionary<object, EntityBase>();
+            _tables[entityType] = table;
+        }
+
+        return table;
+    }
+
+    /// <summary>Normalizes an entity's primary key value into a dictionary key (value objects are opened to their underlying value; null is not allowed).</summary>
+    internal static object KeyOf(EntityBase entity)
+    {
+        var metadata = EntitySaveMetadata.For(entity.GetType());
+        var raw = metadata.KeyProperty.GetValue(entity);
+        raw = raw is IValueObject vo ? vo.UnderlyingValue : raw;
+
+        return raw
+            ?? throw new InvalidOperationException(
+                $"The primary key of {entity.GetType().Name} is null. In-memory persistence requires a primary key value."
+            );
+    }
+
+    /// <summary>Gets all snapshots of the given type (as clones).</summary>
+    /// <remarks>The returned clones drop unbounded binary columns to their "not fetched" state (matching the real database's SELECT exclusion; the store's actual data is preserved).</remarks>
+    public IReadOnlyList<TEntity> Snapshot<TEntity>()
+        where TEntity : EntityBase, new()
+    {
+        lock (_gate)
+        {
+            return Table(typeof(TEntity))
+                .Values.Select(entity =>
+                {
+                    var clone = (TEntity)entity.Clone();
+                    UnboundedBinaryColumns.StripExcluded(clone);
+                    return clone;
+                })
+                .ToList();
+        }
+    }
+
+    /// <summary>Gets the snapshot for the given type and primary key (as a clone; null if not found).</summary>
+    /// <remarks>The returned clone drops unbounded binary columns to their "not fetched" state (matching the real database's SELECT exclusion; the store's actual data is preserved).</remarks>
+    public TEntity? Find<TEntity>(object key)
+        where TEntity : EntityBase, new()
+    {
+        lock (_gate)
+        {
+            if (!Table(typeof(TEntity)).TryGetValue(key, out var entity))
+            {
+                return null;
+            }
+
+            var clone = (TEntity)entity.Clone();
+            UnboundedBinaryColumns.StripExcluded(clone);
+            return clone;
+        }
+    }
+
+    /// <summary>
+    /// Assigns the next store-generated row version to <paramref name="snapshot"/> (and to <paramref name="source"/> when
+    /// given). Does nothing for a type without a rowversion column. The caller must already hold the lock.
+    /// </summary>
+    /// <remarks>
+    /// The value is a monotonically increasing 8-byte big-endian token that emulates SQL Server's rowversion: every insert
+    /// and update moves it on, so an entity holding a stale version can be told apart from a current one. The source entity
+    /// is stamped as well as the stored snapshot because the store keeps a clone, and a real database likewise hands the
+    /// newly assigned version back to the caller.
+    /// </remarks>
+    private void StampRowVersion(EntityBase snapshot, EntityBase? source = null)
+    {
+        var property = EntitySaveMetadata.For(snapshot.GetType()).RowVersionProperty;
+
+        if (property is null)
+        {
+            return;
+        }
+
+        var version = BitConverter.GetBytes(++_rowVersion);
+
+        // Big-endian so that comparing the bytes orders the versions the same way as comparing the numbers
+        if (BitConverter.IsLittleEndian)
+        {
+            Array.Reverse(version);
+        }
+
+        property.SetValue(snapshot, SqlValueObjectActivator.Wrap(version, property.PropertyType));
+
+        if (source is not null)
+        {
+            // The source gets its own array so that mutating one side cannot reach into the store's snapshot
+            property.SetValue(source, SqlValueObjectActivator.Wrap(version.ToArray(), property.PropertyType));
+        }
+    }
+
+    /// <summary>Gets the raw snapshot (no clone) for the given type and primary key. Used by internal traversals such as Include key matching. The caller must already hold the lock.</summary>
+    private EntityBase? FindRaw(Type entityType, object key) =>
+        Table(entityType).TryGetValue(key, out var entity) ? entity : null;
+
+    /// <summary>Gets the list of raw snapshots (no clones) for the given type. Used by the query executor's internal traversals. The caller must already hold the lock.</summary>
+    private IReadOnlyList<EntityBase> RawAll(Type entityType) => Table(entityType).Values.ToList();
+
+    /// <summary>Gets the list of raw snapshots (no clones) for the given type. Used inside the lock to hand pre-clone snapshots to the executor.</summary>
+    internal IReadOnlyList<EntityBase> RawSnapshotUnlocked(Type entityType) => RawAll(entityType);
+
+    /// <summary>Runs an arbitrary read traversal over the whole store under the lock (so Include key matching can span multiple tables).</summary>
+    internal TResult Read<TResult>(Func<InMemoryReadScope, TResult> reader)
+    {
+        lock (_gate)
+        {
+            return reader(new InMemoryReadScope(this));
+        }
+    }
+
+    /// <summary>Stores a snapshot (clone) for updates and seeding (an existing key is overwritten). Use <see cref="Insert"/> for inserts, which reject an existing key.</summary>
+    internal void Put(EntityBase entity)
+    {
+        lock (_gate)
+        {
+            var snapshot = entity.Clone();
+            snapshot.MarkUnchanged();
+            StampRowVersion(snapshot, entity);
+            Table(entity.GetType())[KeyOf(entity)] = snapshot;
+        }
+    }
+
+    /// <summary>Creates the exception for an insert that hits an existing primary key (mirroring the primary-key violation a real database would raise).</summary>
+    internal static InvalidOperationException DuplicateKeyError(Type entityType, object key) =>
+        new(
+            $"Cannot insert {entityType.Name} with key '{key}': an entity with the same primary key already exists (a real database would raise a primary-key violation)."
+        );
+
+    /// <summary>Stores a snapshot (clone) for an insert only. An existing primary key is rejected with an <see cref="InvalidOperationException"/> instead of being silently overwritten.</summary>
+    internal void Insert(EntityBase entity)
+    {
+        lock (_gate)
+        {
+            var key = KeyOf(entity);
+            var snapshot = entity.Clone();
+            snapshot.MarkUnchanged();
+
+            if (!Table(entity.GetType()).TryAdd(key, snapshot))
+            {
+                throw DuplicateKeyError(entity.GetType(), key);
+            }
+
+            // Stamped only once the row is in, so a rejected insert consumes no version and leaves the entity untouched
+            StampRowVersion(snapshot, entity);
+        }
+    }
+
+    /// <summary>Removes the snapshot for the given type and primary key (true if one existed).</summary>
+    internal bool Remove(Type entityType, object key)
+    {
+        lock (_gate)
+        {
+            return Table(entityType).Remove(key);
+        }
+    }
+
+    /// <summary>Applies multiple writes (insert/update/delete) together under a single lock (preserving the atomicity of a graph save).</summary>
+    internal TResult Write<TResult>(Func<InMemoryWriteScope, TResult> writer)
+    {
+        lock (_gate)
+        {
+            return writer(new InMemoryWriteScope(this));
+        }
+    }
+
+    /// <summary>Clears all tables (for resetting in tests).</summary>
+    public void Clear()
+    {
+        lock (_gate)
+        {
+            _tables.Clear();
+        }
+    }
+
+    /// <summary>Scope for reading across multiple tables under the lock (used for Include key matching).</summary>
+    internal readonly struct InMemoryReadScope(InMemoryDataStore store)
+    {
+        /// <summary>The list of raw snapshots (no clones) for the given type.</summary>
+        public IReadOnlyList<EntityBase> All(Type entityType) => store.RawAll(entityType);
+
+        /// <summary>The raw snapshot (no clone) for the given type and primary key (null if not found).</summary>
+        public EntityBase? Find(Type entityType, object key) => store.FindRaw(entityType, key);
+    }
+
+    /// <summary>Scope for applying writes across a whole graph under the lock.</summary>
+    internal readonly struct InMemoryWriteScope(InMemoryDataStore store)
+    {
+        /// <summary>Stores a snapshot for updates and seeding (an existing key is overwritten). Assumes the lock is held, so it writes directly to the internal dictionary.</summary>
+        public void Put(EntityBase entity)
+        {
+            var snapshot = entity.Clone();
+            snapshot.MarkUnchanged();
+            store.StampRowVersion(snapshot, entity);
+            store.Table(entity.GetType())[KeyOf(entity)] = snapshot;
+        }
+
+        /// <summary>Stores a snapshot for an insert only (an existing primary key throws instead of being overwritten). Assumes the lock is held, so it writes directly to the internal dictionary.</summary>
+        public void Insert(EntityBase entity)
+        {
+            var key = KeyOf(entity);
+            var snapshot = entity.Clone();
+            snapshot.MarkUnchanged();
+
+            if (!store.Table(entity.GetType()).TryAdd(key, snapshot))
+            {
+                throw DuplicateKeyError(entity.GetType(), key);
+            }
+
+            // Stamped only once the row is in, so a rejected insert consumes no version and leaves the entity untouched
+            store.StampRowVersion(snapshot, entity);
+        }
+
+        /// <summary>Removes the snapshot for the given type and primary key (true if one existed).</summary>
+        public bool Remove(Type entityType, object key) => store.Table(entityType).Remove(key);
+
+        /// <summary>Whether a snapshot exists for the given type and primary key.</summary>
+        public bool Exists(Type entityType, object key) => store.Table(entityType).ContainsKey(key);
+
+        /// <summary>
+        /// Whether <paramref name="entity"/> may overwrite the stored row under the given concurrency policy: <c>true</c> when
+        /// the type has no rowversion column, when the policy is <see cref="ConcurrencyMode.ForceOverwrite"/>, when there is no
+        /// stored row at all (a missing row is the caller's decision to make), or when the entity still carries the version the
+        /// stored row has.
+        /// </summary>
+        /// <remarks>
+        /// The comparison is strict: an entity whose version is null (never read back from the store) never matches a stored
+        /// row, which is what a real database does with <c>WHERE ... AND row_ver = @originalRowVersion</c>.
+        /// </remarks>
+        public bool IsCurrent(EntityBase entity, ConcurrencyMode mode)
+        {
+            var property = EntitySaveMetadata.For(entity.GetType()).RowVersionProperty;
+
+            if (property is null || mode != ConcurrencyMode.Optimistic)
+            {
+                return true;
+            }
+
+            var stored = store.FindRaw(entity.GetType(), KeyOf(entity));
+
+            if (stored is null)
+            {
+                return true;
+            }
+
+            return SqlParameterValue.Unwrap(property.GetValue(entity)) is byte[] carried
+                && SqlParameterValue.Unwrap(property.GetValue(stored)) is byte[] current
+                && carried.SequenceEqual(current);
+        }
+
+        /// <summary>The list of raw snapshots (no clones) for the given type. Used by the descendant traversal for cascade delete.</summary>
+        public IReadOnlyList<EntityBase> All(Type entityType) => store.RawAll(entityType);
+    }
+}
+
+/// <summary>
+/// In-memory implementation of <see cref="ISqlQueryExecutor{TEntity}"/>. It evaluates the predicates, orderings, and
+/// paging of <see cref="SqlQueryPlan{TEntity}"/> with LINQ-to-Objects, and reconstructs the Include tree's navigations
+/// from FK metadata to attach them.
+/// </summary>
+/// <remarks>
+/// Predicates (<see cref="LambdaExpression"/>) are turned into delegates with <see cref="LambdaExpression.Compile"/> and
+/// evaluated directly (no SQL translation). Returned entities are always clones of the store's snapshots, and the
+/// navigations attached by Include point to cloned children/parents as well (so caller-side changes do not propagate to the store).
+/// </remarks>
+internal sealed class InMemoryQueryExecutor<TEntity>(InMemoryDataStore store)
+    : ISqlQueryExecutor<TEntity>
+    where TEntity : EntityBase, new()
+{
+    private readonly InMemoryDataStore _store = store;
+
+    /// <summary>Returns the result after applying predicates (AND-combined), orderings, and Skip/Take as Include-attached clones.</summary>
+    public Task<IReadOnlyList<TEntity>> ToListAsync(
+        SqlQueryPlan<TEntity> plan,
+        CancellationToken cancellationToken
+    )
+    {
+        var result = _store.Read(scope =>
+        {
+            var matched = ApplyOrderingAndPaging(FilterRaw(plan), plan);
+            // Clone first, then attach Include (so the store's actual entities are not mutated). By default the returned clones drop
+            // unbounded binary columns to their not-fetched state (when WithUnboundedBinary is set they are returned as full clones
+            // without stripping, so excluded columns are also fetched; the Include-less case is already guarded at the terminal).
+            var cloned = matched
+                .Select(entity =>
+                {
+                    var clone = (TEntity)entity.Clone();
+
+                    if (!plan.WithUnboundedBinary)
+                    {
+                        UnboundedBinaryColumns.StripExcluded(clone);
+                    }
+
+                    return clone;
+                })
+                .ToList();
+
+            foreach (var entity in cloned)
+            {
+                IncludeAttacher.Attach(entity, plan.Includes, scope);
+            }
+
+            return (IReadOnlyList<TEntity>)cloned;
+        });
+
+        return Task.FromResult(result);
+    }
+
+    /// <summary>Applies the projection to clones after applying predicates, orderings, and Skip/Take, and returns the list (result-equivalent to the real database's column pruning).</summary>
+    /// <remarks>
+    /// For a selector with no Include and only column references, it projects "from a full clone" (so unbounded binary columns are
+    /// also referenceable, giving the same parity as the real database including the referenced columns in the SELECT). When Include
+    /// is used or column references cannot be extracted, it projects from the conventional path (a clone with unbounded binary columns
+    /// stripped, as in ToListAsync), giving the same parity as the real database's fallback.
+    /// </remarks>
+    public Task<IReadOnlyList<TResult>> ToProjectionListAsync<TResult>(
+        SqlQueryPlan<TEntity> plan,
+        Expression<Func<TEntity, TResult>> selector,
+        CancellationToken cancellationToken
+    )
+    {
+        var project = selector.Compile();
+
+        // With no Include and only column references, project from a full clone (excluded columns are also referenceable). Otherwise project from a stripped clone.
+        var prunable =
+            plan.Includes.Count == 0
+            && ProjectionColumnCollector.TryCollect(selector, out var referenced)
+            && EntitySaveMetadata.For(typeof(TEntity)).ResolveProjectionColumns(referenced) is not null;
+
+        var result = _store.Read(scope =>
+        {
+            var matched = ApplyOrderingAndPaging(FilterRaw(plan), plan);
+            var projected = new List<TResult>(matched.Count);
+
+            foreach (var entity in matched)
+            {
+                // Always clone before projecting so we do not share byte[] and the like with the store's actual entity.
+                var clone = (TEntity)entity.Clone();
+
+                if (!prunable)
+                {
+                    // Same parity as the conventional path (ToListAsync): strip unbounded binary columns, attach Include, then project.
+                    UnboundedBinaryColumns.StripExcluded(clone);
+                    IncludeAttacher.Attach(clone, plan.Includes, scope);
+                }
+
+                projected.Add(project(clone));
+            }
+
+            return (IReadOnlyList<TResult>)projected;
+        });
+
+        return Task.FromResult(result);
+    }
+
+    /// <summary>Returns the first item as an Include-attached clone (null if none).</summary>
+    public Task<TEntity?> FirstOrDefaultAsync(
+        SqlQueryPlan<TEntity> plan,
+        CancellationToken cancellationToken
+    )
+    {
+        var result = _store.Read(scope =>
+        {
+            var first = ApplyOrderingAndPaging(FilterRaw(plan), plan).FirstOrDefault();
+
+            if (first is null)
+            {
+                return null;
+            }
+
+            var cloned = (TEntity)first.Clone();
+
+            // By default drop unbounded binary columns to their not-fetched state. When WithUnboundedBinary is set, return a full clone without stripping.
+            if (!plan.WithUnboundedBinary)
+            {
+                UnboundedBinaryColumns.StripExcluded(cloned);
+            }
+
+            IncludeAttacher.Attach(cloned, plan.Includes, scope);
+            return cloned;
+        });
+
+        return Task.FromResult(result);
+    }
+
+    /// <summary>Returns the count of rows matching the conditions (orderings, paging, and Include play no part).</summary>
+    public Task<int> CountAsync(SqlQueryPlan<TEntity> plan, CancellationToken cancellationToken) =>
+        Task.FromResult(_store.Read(_ => FilterRaw(plan).Count()));
+
+    /// <summary>Returns whether any row matches the conditions.</summary>
+    public Task<bool> AnyAsync(SqlQueryPlan<TEntity> plan, CancellationToken cancellationToken) =>
+        Task.FromResult(_store.Read(_ => FilterRaw(plan).Any()));
+
+    /// <summary>Deletes rows matching the conditions. With cascadeDelete=true, descendants are also deleted along the FK chain.</summary>
+    public Task<int> ExecuteDeleteAsync(
+        SqlQueryPlan<TEntity> plan,
+        bool cascadeDelete,
+        CancellationToken cancellationToken
+    )
+    {
+        var rows = _store.Write(scope =>
+        {
+            // Determine the delete targets by the primary keys of the snapshots (pre-clone) as evaluated at this point.
+            var targets = FilterRaw(plan).ToList();
+            var removed = 0;
+
+            foreach (var target in targets)
+            {
+                if (cascadeDelete)
+                {
+                    removed += InMemoryCascade.DeleteDescendants(target, scope);
+                }
+
+                if (scope.Remove(typeof(TEntity), InMemoryDataStore.KeyOf(target)))
+                {
+                    removed++;
+                }
+            }
+
+            return removed;
+        });
+
+        return Task.FromResult(rows);
+    }
+
+    /// <summary>Filters the store's raw snapshots by applying the predicates (AND-combined) (pre-clone, enumeration only).</summary>
+    private IEnumerable<EntityBase> FilterRaw(SqlQueryPlan<TEntity> plan)
+    {
+        IEnumerable<TEntity> query = _store.RawSnapshotUnlocked(typeof(TEntity)).Cast<TEntity>();
+
+        foreach (var predicate in plan.Predicates)
+        {
+            var compiled = (Func<TEntity, bool>)predicate.Compile();
+            query = query.Where(compiled);
+        }
+
+        return query;
+    }
+
+    /// <summary>Applies the orderings (stable sort in the specified order) and Skip/Take.</summary>
+    private static IReadOnlyList<EntityBase> ApplyOrderingAndPaging(
+        IEnumerable<EntityBase> source,
+        SqlQueryPlan<TEntity> plan
+    )
+    {
+        var typed = source.Cast<TEntity>();
+        IOrderedEnumerable<TEntity>? ordered = null;
+
+        foreach (var ordering in plan.Orderings)
+        {
+            var keySelector = (Func<TEntity, object?>)ordering.KeySelector.Compile();
+
+            if (ordered is null)
+            {
+                ordered = ordering.Descending
+                    ? typed.OrderByDescending(keySelector)
+                    : typed.OrderBy(keySelector);
+            }
+            else
+            {
+                ordered = ordering.Descending
+                    ? ordered.ThenByDescending(keySelector)
+                    : ordered.ThenBy(keySelector);
+            }
+        }
+
+        IEnumerable<TEntity> result = ordered ?? typed;
+
+        if (plan.Skip is { } skip)
+        {
+            result = result.Skip(skip);
+        }
+
+        if (plan.Take is { } take)
+        {
+            result = result.Take(take);
+        }
+
+        return result.Cast<EntityBase>().ToList();
+    }
+}
+
+/// <summary>Reconstructs navigations (child collections, parent references) from FK metadata along the Include tree and attaches them to the cloned graph.</summary>
+internal static class IncludeAttacher
+{
+    /// <summary>Recursively attaches the navigations for the Include tree onto the given (cloned) entity.</summary>
+    public static void Attach(
+        EntityBase entity,
+        IReadOnlyList<IncludeNode> includes,
+        InMemoryDataStore.InMemoryReadScope scope
+    )
+    {
+        foreach (var node in includes)
+        {
+            var attribute =
+                node.Property.GetCustomAttribute<NavigationReferenceAttribute>()
+                ?? throw new InvalidOperationException(
+                    $"{node.Property.Name} is not a navigation that has [NavigationReference]."
+                );
+
+            var metadata = EntitySaveMetadata.For(entity.GetType());
+
+            if (attribute.IsCollection || !attribute.IsParentReference)
+            {
+                AttachChildren(entity, node, attribute, metadata, scope);
+            }
+            else
+            {
+                AttachParent(entity, node, attribute, metadata, scope);
+            }
+        }
+    }
+
+    /// <summary>Fills a collection or child-direction single-reference navigation with the children whose FK matches the parent key.</summary>
+    private static void AttachChildren(
+        EntityBase parent,
+        IncludeNode node,
+        NavigationReferenceAttribute attribute,
+        EntitySaveMetadata parentMetadata,
+        InMemoryDataStore.InMemoryReadScope scope
+    )
+    {
+        var childType = attribute.IsCollection
+            ? node.Property.PropertyType.GetGenericArguments()[0]
+            : node.Property.PropertyType;
+        var childMetadata = EntitySaveMetadata.For(childType);
+
+        var parentKey = ColumnValue(parent, attribute.PrincipalColumn, parentMetadata);
+        var matched = new List<EntityBase>();
+
+        foreach (var child in scope.All(childType))
+        {
+            var fk = ColumnValue(child, attribute.DependentColumn, childMetadata);
+
+            if (parentKey is not null && Equals(fk, parentKey))
+            {
+                var clonedChild = child.Clone();
+                UnboundedBinaryColumns.StripExcluded(clonedChild);
+                Attach(clonedChild, node.Children, scope);
+                matched.Add(clonedChild);
+            }
+        }
+
+        if (attribute.IsCollection)
+        {
+            // Create a concrete List for ICollection<childType> and fill it.
+            var listType = typeof(List<>).MakeGenericType(childType);
+            var list = (System.Collections.IList)Activator.CreateInstance(listType)!;
+
+            foreach (var child in matched)
+            {
+                list.Add(child);
+            }
+
+            node.Property.SetValue(parent, list);
+        }
+        else
+        {
+            node.Property.SetValue(parent, matched.Count > 0 ? matched[0] : null);
+        }
+    }
+
+    /// <summary>Fills a parent-reference navigation with the parent that its own FK points to.</summary>
+    private static void AttachParent(
+        EntityBase dependent,
+        IncludeNode node,
+        NavigationReferenceAttribute attribute,
+        EntitySaveMetadata dependentMetadata,
+        InMemoryDataStore.InMemoryReadScope scope
+    )
+    {
+        var parentType = node.Property.PropertyType;
+        var parentMetadata = EntitySaveMetadata.For(parentType);
+
+        var fk = ColumnValue(dependent, attribute.DependentColumn, dependentMetadata);
+
+        if (fk is null)
+        {
+            node.Property.SetValue(dependent, null);
+            return;
+        }
+
+        foreach (var candidate in scope.All(parentType))
+        {
+            var principal = ColumnValue(candidate, attribute.PrincipalColumn, parentMetadata);
+
+            if (Equals(principal, fk))
+            {
+                var clonedParent = candidate.Clone();
+                UnboundedBinaryColumns.StripExcluded(clonedParent);
+                Attach(clonedParent, node.Children, scope);
+                node.Property.SetValue(dependent, clonedParent);
+                return;
+            }
+        }
+
+        node.Property.SetValue(dependent, null);
+    }
+
+    /// <summary>Reads the value of the given column from an entity (value objects are opened to their underlying value).</summary>
+    private static object? ColumnValue(
+        EntityBase entity,
+        string columnName,
+        EntitySaveMetadata metadata
+    )
+    {
+        if (!metadata.PropertyByColumn.TryGetValue(columnName, out var property))
+        {
+            throw new InvalidOperationException(
+                $"{entity.GetType().Name} has no property corresponding to column {columnName}."
+            );
+        }
+
+        var value = property.GetValue(entity);
+        return value is IValueObject vo ? vo.UnderlyingValue : value;
+    }
+}
+
+/// <summary>Cascade save/delete for the in-memory repository (traversing child navigations derived from FK metadata).</summary>
+internal static class InMemoryCascade
+{
+    /// <summary>Enumerates the child entities subject to cascade (null is excluded).</summary>
+    public static IEnumerable<EntityBase> EnumerateChildren(EntityBase entity)
+    {
+        foreach (var navigation in EntitySaveMetadata.For(entity.GetType()).CascadeNavigations)
+        {
+            var value = navigation.Property.GetValue(entity);
+
+            if (value is null)
+            {
+                continue;
+            }
+
+            if (navigation.IsCollection)
+            {
+                if (value is IEnumerable<EntityBase> children)
+                {
+                    foreach (var child in children)
+                    {
+                        if (child is not null)
+                        {
+                            yield return child;
+                        }
+                    }
+                }
+            }
+            else if (value is EntityBase child)
+            {
+                yield return child;
+            }
+        }
+    }
+
+    /// <summary>Saves the graph driven by RowState and returns the number of rows written (same semantics as QuickER's EntityGraphSaver).</summary>
+    /// <remarks>
+    /// IsRemoved deletes children first and then the entity itself, IsAdded inserts, and IsUpdated updates (when the target is
+    /// missing, insertWhenUpdateMissing either inserts or throws a conflict exception). Inserts/updates process the entity itself
+    /// first; deletes process the children first. When <paramref name="hooks"/> is provided, Put/Remove is suppressed for nodes
+    /// contained in <see cref="SaveHookSession.Skipped"/>, and the operations actually performed are recorded into
+    /// <paramref name="records"/> (in execution order), which is used to determine the After firing order and the actual operations.
+    /// Entities whose type has a rowversion column are guarded by <paramref name="mode"/>: updating or deleting a row that
+    /// someone else changed first is rejected. Because the store has no real transaction, a conflict found part-way through
+    /// leaves the writes already applied in place (the same best-effort limitation as the After hook phase).
+    /// </remarks>
+    public static int Save(
+        EntityBase entity,
+        InMemoryDataStore.InMemoryWriteScope scope,
+        bool cascadeSave,
+        bool cascadeDelete,
+        bool insertWhenUpdateMissing,
+        ConcurrencyMode mode,
+        SaveHookSession? hooks = null,
+        List<(EntityBase Entity, SaveOperation Operation)>? records = null,
+        bool changesAlreadyVerified = false
+    )
+    {
+        // If the caller already verified HasChanges, skip the redundant graph traversal here (recursion into children keeps the default false so each branch is checked).
+        if (!changesAlreadyVerified && !EntityGraphSaver.HasChanges(entity, cascadeSave))
+        {
+            return 0;
+        }
+
+        var rows = 0;
+        var entityType = entity.GetType();
+        var key = InMemoryDataStore.KeyOf(entity);
+
+        if (entity.IsRemoved)
+        {
+            if (cascadeDelete)
+            {
+                foreach (var child in EnumerateChildren(entity))
+                {
+                    rows += DeleteGraph(child, scope, mode, hooks, records);
+                }
+            }
+
+            // If Before(Delete) returned false (skip), only the entity's own deletion is withheld (children were already deleted above, so the entity itself remains).
+            if (hooks is not null && hooks.Skipped.Contains(entity))
+            {
+                return rows;
+            }
+
+            // A row someone else changed first must not be deleted (a row that is simply gone stays tolerated silently).
+            if (!scope.IsCurrent(entity, mode))
+            {
+                throw SaveConflictException.Modified(entityType, key, "delete");
+            }
+
+            if (scope.Remove(entityType, key))
+            {
+                rows++;
+            }
+
+            records?.Add((entity, SaveOperation.Delete));
+            return rows;
+        }
+
+        if (entity.IsAdded)
+        {
+            // Insert unless skipped (even when skipped, the child cascade continues).
+            if (hooks is null || !hooks.Skipped.Contains(entity))
+            {
+                scope.Insert(entity);
+                rows++;
+                records?.Add((entity, SaveOperation.Insert));
+            }
+        }
+        else if (entity.IsUpdated)
+        {
+            if (hooks is null || !hooks.Skipped.Contains(entity))
+            {
+                // As with graph updates against a real database, reject updates that still carry values in unbounded binary columns.
+                UnboundedBinaryColumns.ThrowIfExcludedAssigned(entity);
+
+                if (scope.Exists(entityType, key))
+                {
+                    // A row someone else changed first must not be overwritten, and must never be switched to an INSERT
+                    // below (which would turn a stale version into a duplicate primary key).
+                    if (!scope.IsCurrent(entity, mode))
+                    {
+                        throw SaveConflictException.Modified(entityType, key, "update");
+                    }
+
+                    scope.Put(entity);
+                    rows++;
+                    records?.Add((entity, SaveOperation.Update));
+                }
+                else if (insertWhenUpdateMissing)
+                {
+                    // The update target was missing and we switched to INSERT, so After fires with the actual operation Insert.
+                    scope.Insert(entity);
+                    rows++;
+                    records?.Add((entity, SaveOperation.Insert));
+                }
+                else
+                {
+                    throw SaveConflictException.NotFound(entityType, key);
+                }
+            }
+        }
+
+        if (cascadeSave)
+        {
+            foreach (var child in EnumerateChildren(entity))
+            {
+                rows += Save(
+                    child,
+                    scope,
+                    cascadeSave,
+                    cascadeDelete,
+                    insertWhenUpdateMissing,
+                    mode,
+                    hooks,
+                    records
+                );
+            }
+        }
+
+        return rows;
+    }
+
+    /// <summary>Phase 1: traverses the graph in the same order as <see cref="Save"/>, fires the pre-operation hooks (Before), and builds the skip set (outside the lock, async).</summary>
+    /// <remarks>Before fires with the RowState-derived operation (even when <c>insertWhenUpdateMissing</c> switches to Insert, it fires once as Update). The actual operation is determined by the save phase.</remarks>
+    public static async Task InvokeBeforeGraphAsync(
+        EntityBase entity,
+        SaveHookSession hooks,
+        bool cascadeSave,
+        bool cascadeDelete,
+        CancellationToken cancellationToken,
+        bool changesAlreadyVerified = false
+    )
+    {
+        // If the caller already verified HasChanges, skip the redundant graph traversal here (recursion into children keeps the default false so each branch is checked).
+        if (!changesAlreadyVerified && !EntityGraphSaver.HasChanges(entity, cascadeSave))
+        {
+            return;
+        }
+
+        if (entity.IsRemoved)
+        {
+            // For deletes, fire Before starting from the children (same order as Save / DeleteGraph).
+            if (cascadeDelete)
+            {
+                foreach (var child in EnumerateChildren(entity))
+                {
+                    await InvokeBeforeDeleteGraphAsync(child, hooks, cancellationToken);
+                }
+            }
+
+            if (!await hooks.InvokeBeforeAsync(entity, SaveOperation.Delete, cancellationToken))
+            {
+                hooks.Skip(entity);
+            }
+
+            return;
+        }
+
+        if (entity.IsAdded)
+        {
+            if (!await hooks.InvokeBeforeAsync(entity, SaveOperation.Insert, cancellationToken))
+            {
+                hooks.Skip(entity);
+            }
+        }
+        else if (entity.IsUpdated)
+        {
+            if (!await hooks.InvokeBeforeAsync(entity, SaveOperation.Update, cancellationToken))
+            {
+                hooks.Skip(entity);
+            }
+        }
+
+        if (cascadeSave)
+        {
+            foreach (var child in EnumerateChildren(entity))
+            {
+                await InvokeBeforeGraphAsync(
+                    child,
+                    hooks,
+                    cascadeSave,
+                    cascadeDelete,
+                    cancellationToken
+                );
+            }
+        }
+    }
+
+    /// <summary>Fires Before for a subtree delete starting from the children (same order as <see cref="DeleteGraph"/>).</summary>
+    private static async Task InvokeBeforeDeleteGraphAsync(
+        EntityBase entity,
+        SaveHookSession hooks,
+        CancellationToken cancellationToken
+    )
+    {
+        foreach (var child in EnumerateChildren(entity))
+        {
+            await InvokeBeforeDeleteGraphAsync(child, hooks, cancellationToken);
+        }
+
+        if (!await hooks.InvokeBeforeAsync(entity, SaveOperation.Delete, cancellationToken))
+        {
+            hooks.Skip(entity);
+        }
+    }
+
+    /// <summary>Deletes a subtree starting from the children (deletes regardless of state; when <paramref name="hooks"/> is provided, skipped rows are left in place and the deletes actually performed are recorded into <paramref name="records"/>).</summary>
+    private static int DeleteGraph(
+        EntityBase entity,
+        InMemoryDataStore.InMemoryWriteScope scope,
+        ConcurrencyMode mode,
+        SaveHookSession? hooks = null,
+        List<(EntityBase Entity, SaveOperation Operation)>? records = null
+    )
+    {
+        var rows = 0;
+
+        foreach (var child in EnumerateChildren(entity))
+        {
+            rows += DeleteGraph(child, scope, mode, hooks, records);
+        }
+
+        // If Before(Delete) returned false (skip), do not delete the entity itself (children are already deleted).
+        if (hooks is not null && hooks.Skipped.Contains(entity))
+        {
+            return rows;
+        }
+
+        var key = InMemoryDataStore.KeyOf(entity);
+
+        // A row someone else changed first must not be deleted (a row that is simply gone stays tolerated silently).
+        if (!scope.IsCurrent(entity, mode))
+        {
+            throw SaveConflictException.Modified(entity.GetType(), key, "delete");
+        }
+
+        if (scope.Remove(entity.GetType(), key))
+        {
+            rows++;
+        }
+
+        records?.Add((entity, SaveOperation.Delete));
+        return rows;
+    }
+
+    /// <summary>For ExecuteDelete, which has no loaded graph, deletes descendants in the store along the FK chain (grandchildren before children).</summary>
+    /// <remarks>
+    /// Follows the cascade navigations (FK metadata) and finds and deletes children in the store whose DependentColumn matches the
+    /// parent's PrincipalColumn value. Cyclic cascades (self-references and the like) cannot be expressed by this fixed traversal
+    /// and are therefore unsupported.
+    /// </remarks>
+    public static int DeleteDescendants(
+        EntityBase root,
+        InMemoryDataStore.InMemoryWriteScope scope
+    ) => DeleteDescendants(root, scope, new HashSet<Type> { root.GetType() });
+
+    private static int DeleteDescendants(
+        EntityBase parent,
+        InMemoryDataStore.InMemoryWriteScope scope,
+        HashSet<Type> visited
+    )
+    {
+        var rows = 0;
+        var parentMetadata = EntitySaveMetadata.For(parent.GetType());
+
+        foreach (var navigation in parentMetadata.CascadeNavigations)
+        {
+            if (!visited.Add(navigation.ChildType))
+            {
+                throw new NotSupportedException(
+                    $"A cyclic cascade ({navigation.ChildType.Name}) is not supported by ExecuteDeleteAsync. Load the graph and use SaveAsync, or use SaveAsync against an already loaded graph."
+                );
+            }
+
+            var childMetadata = EntitySaveMetadata.For(navigation.ChildType);
+            var parentKey = ColumnValue(parent, navigation.PrincipalColumn, parentMetadata);
+
+            // Materialize the child snapshots first so the enumeration is not broken while deleting.
+            var children = scope
+                .All(navigation.ChildType)
+                .Where(child =>
+                    parentKey is not null
+                    && Equals(
+                        ColumnValue(child, navigation.DependentColumn, childMetadata),
+                        parentKey
+                    )
+                )
+                .ToList();
+
+            foreach (var child in children)
+            {
+                // Delete grandchildren and below first, then the child (FK consistency).
+                rows += DeleteDescendants(child, scope, visited);
+
+                if (scope.Remove(navigation.ChildType, InMemoryDataStore.KeyOf(child)))
+                {
+                    rows++;
+                }
+            }
+
+            visited.Remove(navigation.ChildType);
+        }
+
+        return rows;
+    }
+
+    /// <summary>Reads the value of the given column from an entity (value objects are opened to their underlying value).</summary>
+    private static object? ColumnValue(
+        EntityBase entity,
+        string columnName,
+        EntitySaveMetadata metadata
+    )
+    {
+        if (!metadata.PropertyByColumn.TryGetValue(columnName, out var property))
+        {
+            throw new InvalidOperationException(
+                $"{entity.GetType().Name} has no property corresponding to column {columnName}."
+            );
+        }
+
+        var value = property.GetValue(entity);
+        return value is IValueObject vo ? vo.UnderlyingValue : value;
+    }
+}
+
+/// <summary>Base class for in-memory repositories implementing CRUD over the in-memory data store (dialect-independent, no real database required).</summary>
+/// <remarks>
+/// <para>
+/// Read operations (GetById/GetAll/Query) always return clones of the store's snapshots with RowState=Unchanged
+/// (mutating a returned entity leaves the store unchanged). Write operations (Insert/Update/Delete/Save) replace the snapshots.
+/// Raw SQL operations (QueryBySql/ExecuteSql/ExecuteScalarSql) cannot run in memory and throw <see cref="NotSupportedException"/>.
+/// </para>
+/// </remarks>
+public abstract partial class InMemoryRepository<TEntity, TKey>(
+    InMemoryDataStore store,
+    ISaveHookRegistry? saveHooks = null
+) : IRepository<TEntity, TKey>
+    where TEntity : EntityBase, new()
+{
+    /// <summary>The data store holding the snapshots (shared via DI).</summary>
+    protected InMemoryDataStore Store { get; } = store;
+
+    /// <summary>The save hook registry (unspecified = null = no hooks, a complete no-op).</summary>
+    private readonly ISaveHookRegistry? _saveHooks = saveHooks;
+
+    private const string RawSqlNotSupported =
+        "The in-memory repository cannot execute raw SQL. Switch to a real database repository.";
+
+    /// <summary>Gets a single entity by primary key (null if not found).</summary>
+    public Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default) =>
+        Task.FromResult(Store.Find<TEntity>(NormalizeKey(id)));
+
+    /// <summary>Gets all entities.</summary>
+    public Task<IReadOnlyList<TEntity>> GetAllAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(Store.Snapshot<TEntity>());
+
+    /// <summary>Inserts an entity (an existing primary key is rejected, as a real database would).</summary>
+    public Task InsertAsync(TEntity entity, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+        Store.Insert(entity);
+        entity.MarkUnchanged();
+        return Task.CompletedTask;
+    }
+
+    /// <summary>Bulk-inserts a collection of entities (all-or-nothing: a duplicate primary key rejects the whole batch without applying any of it).</summary>
+    public Task<int> BulkInsertAsync(
+        IEnumerable<TEntity> entities,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(entities);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var targets = entities.Where(entity => entity is not null).ToList();
+
+        var count = Store.Write(scope =>
+        {
+            var batchKeys = new HashSet<object>();
+
+            // Pre-validate all keys, then apply: a duplicate must not leave a partially inserted batch behind.
+            foreach (var entity in targets)
+            {
+                var key = InMemoryDataStore.KeyOf(entity);
+
+                if (scope.Exists(entity.GetType(), key) || !batchKeys.Add(key))
+                {
+                    throw InMemoryDataStore.DuplicateKeyError(entity.GetType(), key);
+                }
+            }
+
+            foreach (var entity in targets)
+            {
+                scope.Insert(entity);
+                entity.MarkUnchanged();
+            }
+
+            return targets.Count;
+        });
+
+        return Task.FromResult(count);
+    }
+
+    /// <summary>Updates an entity (true if the update target existed).</summary>
+    /// <remarks>
+    /// When the type has a rowversion column, <paramref name="mode"/> decides whether the update is guarded by the version
+    /// the entity was read with. A guarded update against a row someone else changed first throws a
+    /// <see cref="SaveConflictException"/>; a row that no longer exists still returns <c>false</c>. On success the entity
+    /// receives the newly assigned version.
+    /// </remarks>
+    /// <param name="entity">The entity to update.</param>
+    /// <param name="mode">How a concurrent modification is handled when the type has a rowversion column (no effect otherwise).</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    public Task<bool> UpdateAsync(
+        TEntity entity,
+        ConcurrencyMode mode = ConcurrencyMode.Optimistic,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+
+        // As with a real database, reject updates that still carry values in unbounded binary columns (checked here individually because this path does not go through BindUpdateParameters).
+        UnboundedBinaryColumns.ThrowIfExcludedAssigned(entity);
+
+        var updated = Store.Write(scope =>
+        {
+            var key = InMemoryDataStore.KeyOf(entity);
+
+            if (!scope.Exists(typeof(TEntity), key))
+            {
+                return false;
+            }
+
+            // A row that is gone keeps the pre-existing "false" contract; a row someone else changed first is a conflict
+            if (!scope.IsCurrent(entity, mode))
+            {
+                throw SaveConflictException.Modified(typeof(TEntity), key, "update");
+            }
+
+            scope.Put(entity);
+            return true;
+        });
+
+        if (updated)
+        {
+            entity.MarkUnchanged();
+        }
+
+        return Task.FromResult(updated);
+    }
+
+    /// <summary>Deletes an entity by primary key (true if the delete target existed).</summary>
+    public Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default) =>
+        Task.FromResult(Store.Remove(typeof(TEntity), NormalizeKey(id)));
+
+    /// <summary>Starts a query that fetches entities with chained filter conditions, orderings, and Includes.</summary>
+    public SqlQuery<TEntity> Query() => new(new InMemoryQueryExecutor<TEntity>(Store));
+
+    /// <summary>Saves the graph according to RowState (cascading to children by default).</summary>
+    /// <remarks>
+    /// When save hooks are registered, this runs in 3 phases: (1) traverse the graph outside the lock, fire Before, and build the
+    /// skip set; (2) save inside the lock applying the skips and record the (entity, operation) pairs performed; (3) fire After
+    /// outside the lock in execution order. After emulates "before commit" (in-memory has no real transaction, so even if After
+    /// throws, the store changes remain = best effort).
+    /// Entities whose type has a rowversion column are guarded by <paramref name="mode"/>: updating or deleting a row that
+    /// someone else changed first is rejected. Having no real transaction, a conflict found part-way through leaves the
+    /// writes already applied in place.
+    /// </remarks>
+    public async Task<int> SaveAsync(
+        TEntity entity,
+        bool cascadeSave = true,
+        bool cascadeDelete = true,
+        bool insertWhenUpdateMissing = false,
+        ConcurrencyMode mode = ConcurrencyMode.Optimistic,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+
+        // Do nothing if the whole graph has no changes (the change check happens exactly once here and is passed to later phases as already verified).
+        if (!EntityGraphSaver.HasChanges(entity, cascadeSave))
+        {
+            return 0;
+        }
+
+        // If hooks are registered, build a session that supplies a context participating in the in-progress store write.
+        var hooks =
+            _saveHooks is null
+                ? null
+                : new SaveHookSession(
+                    _saveHooks,
+                    e => new InMemorySaveHookContext(Store, e.GetType())
+                );
+
+        // Phase 1 (outside the lock): traverse the graph in the same order as Save, fire Before, and build the skip set.
+        if (hooks is not null)
+        {
+            await InMemoryCascade.InvokeBeforeGraphAsync(
+                entity,
+                hooks,
+                cascadeSave,
+                cascadeDelete,
+                cancellationToken,
+                changesAlreadyVerified: true
+            );
+        }
+
+        // Phase 2 (inside the lock): save applying the skip set and record the (entity, operation) pairs performed.
+        var records =
+            hooks is null ? null : new List<(EntityBase Entity, SaveOperation Operation)>();
+        var rows = Store.Write(scope =>
+            InMemoryCascade.Save(
+                entity,
+                scope,
+                cascadeSave,
+                cascadeDelete,
+                insertWhenUpdateMissing,
+                mode,
+                hooks,
+                records,
+                changesAlreadyVerified: true
+            )
+        );
+
+        // Phase 3 (outside the lock): fire After in execution order.
+        if (hooks is not null)
+        {
+            foreach (var (recordEntity, operation) in records!)
+            {
+                await hooks.InvokeAfterAsync(recordEntity, operation, cancellationToken);
+            }
+        }
+
+        // Finalize the saved graph as Unchanged (skipped rows are left as they are).
+        EntityGraphSaver.AcceptChanges(entity, cascadeSave, hooks?.Skipped);
+        return rows;
+    }
+
+    /// <summary>Saves multiple aggregate roots as one unit (atomic processing: all succeed or all roll back).</summary>
+    /// <remarks>
+    /// The hook firing order is the same 3 phases as the single-root overload (Before pre-pass, save, After post-pass), and roots are processed in the specified order.
+    /// Entities whose type has a rowversion column are guarded by <paramref name="mode"/>: updating or deleting a row that
+    /// someone else changed first is rejected. Having no real transaction, a conflict found part-way through leaves the
+    /// writes already applied in place.
+    /// </remarks>
+    public async Task<int> SaveAsync(
+        IEnumerable<TEntity> entities,
+        bool cascadeSave = true,
+        bool cascadeDelete = true,
+        bool insertWhenUpdateMissing = false,
+        ConcurrencyMode mode = ConcurrencyMode.Optimistic,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(entities);
+        // Target only graphs with changes (the change check happens exactly once here and is passed to later phases as already verified).
+        var roots = entities
+            .Where(entity => entity is not null && EntityGraphSaver.HasChanges(entity, cascadeSave))
+            .ToList();
+
+        if (roots.Count == 0)
+        {
+            return 0;
+        }
+
+        var hooks =
+            _saveHooks is null
+                ? null
+                : new SaveHookSession(
+                    _saveHooks,
+                    e => new InMemorySaveHookContext(Store, e.GetType())
+                );
+
+        // Phase 1 (outside the lock): traverse the graphs of all roots and fire Before.
+        if (hooks is not null)
+        {
+            foreach (var entity in roots)
+            {
+                await InMemoryCascade.InvokeBeforeGraphAsync(
+                    entity,
+                    hooks,
+                    cascadeSave,
+                    cascadeDelete,
+                    cancellationToken,
+                    changesAlreadyVerified: true
+                );
+            }
+        }
+
+        // Phase 2 (inside the lock): save all roots applying the skips and record the (entity, operation) pairs performed.
+        var records =
+            hooks is null ? null : new List<(EntityBase Entity, SaveOperation Operation)>();
+        var rows = Store.Write(scope =>
+        {
+            var total = 0;
+
+            foreach (var entity in roots)
+            {
+                total += InMemoryCascade.Save(
+                    entity,
+                    scope,
+                    cascadeSave,
+                    cascadeDelete,
+                    insertWhenUpdateMissing,
+                    mode,
+                    hooks,
+                    records,
+                    changesAlreadyVerified: true
+                );
+            }
+
+            return total;
+        });
+
+        // Phase 3 (outside the lock): fire After in execution order.
+        if (hooks is not null)
+        {
+            foreach (var (recordEntity, operation) in records!)
+            {
+                await hooks.InvokeAfterAsync(recordEntity, operation, cancellationToken);
+            }
+        }
+
+        foreach (var entity in roots)
+        {
+            EntityGraphSaver.AcceptChanges(entity, cascadeSave, hooks?.Skipped);
+        }
+
+        return rows;
+    }
+
+    /// <summary>Raw SQL cannot run in memory.</summary>
+    public Task<IReadOnlyList<TEntity>> QueryBySqlAsync(
+        string sql,
+        object? parameters = null,
+        CancellationToken cancellationToken = default
+    ) => throw new NotSupportedException(RawSqlNotSupported);
+
+    /// <summary>Raw SQL cannot run in memory.</summary>
+    public Task<int> ExecuteSqlAsync(
+        string sql,
+        object? parameters = null,
+        CancellationToken cancellationToken = default
+    ) => throw new NotSupportedException(RawSqlNotSupported);
+
+    /// <summary>Raw SQL cannot run in memory.</summary>
+    public Task<TResult?> ExecuteScalarSqlAsync<TResult>(
+        string sql,
+        object? parameters = null,
+        CancellationToken cancellationToken = default
+    ) => throw new NotSupportedException(RawSqlNotSupported);
+
+    /// <summary>Normalizes the primary key argument (TKey) into a dictionary key (value objects are opened to their underlying value).</summary>
+    private static object NormalizeKey(TKey id)
+    {
+        object? raw = id is IValueObject vo ? vo.UnderlyingValue : id;
+
+        return raw
+            ?? throw new ArgumentNullException(nameof(id), "The primary key must not be null.");
+    }
+}
+
+/// <summary>In-memory context passed to a save hook's After that participates in the in-progress store write (created bound to an entity type).</summary>
+/// <remarks>
+/// Excluded-column binary writes are applied to the store with the same Stream-to-byte[] conversion as the existing in-memory
+/// stream accessors (strictly following the <c>ResolveWriteLength</c> contract validation and the clone/Put semantics). Raw SQL
+/// cannot run in memory and throws <see cref="NotSupportedException"/>. In-memory has no real transaction, so even if After
+/// throws, the store changes written here remain (no rollback = best effort).
+/// </remarks>
+internal sealed class InMemorySaveHookContext(InMemoryDataStore store, Type entityType)
+    : ISaveHookContext
+{
+    private readonly InMemoryDataStore _store = store;
+    private readonly Type _entityType = entityType;
+
+    /// <summary>Raw SQL cannot run in memory (switch to a real database repository, or handle it outside the hook).</summary>
+    public Task<int> ExecuteSqlAsync(
+        string sql,
+        object? parameters = null,
+        CancellationToken cancellationToken = default
+    ) =>
+        throw new NotSupportedException(
+            "The in-memory repository cannot execute raw SQL. Switch to a real database repository."
+        );
+
+    /// <summary>In a diagram without exclusion, writing unbounded binary columns is unsupported (points to enabling ExcludeUnboundedBinaryColumns).</summary>
+    public Task<bool> WriteBinaryColumnAsync(
+        string propertyName,
+        object key,
+        Stream? source,
+        long? length = null,
+        CancellationToken cancellationToken = default
+    ) =>
+        throw new NotSupportedException(
+            "Writing unbounded binary columns requires code generated with ExcludeUnboundedBinaryColumns enabled. "
+                + "Enable it, or update the column with raw SQL (ExecuteSqlAsync)."
+        );
+}
+
+/// <summary>In-memory implementation of the repository for GadgetEntity.</summary>
+public sealed partial class InMemoryGadgetRepository(
+    InMemoryDataStore store,
+    ISaveHookRegistry? saveHooks = null
+) : InMemoryRepository<GadgetEntity, GadgetIdValue>(store, saveHooks), IGadgetRepository
+{
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
+        GadgetEntity entity,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+        var violations = new List<UniquenessViolation>();
+
+        List<UniquenessCheck<GadgetEntity>>? customChecks = null;
+        CollectCustomUniquenessChecks(ref customChecks);
+
+        if (customChecks is not null)
+        {
+            foreach (var customCheck in customChecks)
+            {
+                if (await customCheck(entity, cancellationToken) is { } violation)
+                {
+                    violations.Add(violation);
+                }
+            }
+        }
+
+        return violations;
+    }
+
+    /// <summary>Extension point for adding user-defined uniqueness checks (add delegates to the list in a partial implementation; while unimplemented the call is erased at no cost).</summary>
+    partial void CollectCustomUniquenessChecks(
+        ref List<UniquenessCheck<GadgetEntity>>? checks
+    );
+}
+
+/// <summary>In-memory implementation of the repository for GadgetNoteEntity.</summary>
+public sealed partial class InMemoryGadgetNoteRepository(
+    InMemoryDataStore store,
+    ISaveHookRegistry? saveHooks = null
+) : InMemoryRepository<GadgetNoteEntity, NoteIdValue>(store, saveHooks), IGadgetNoteRepository
+{
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
+        GadgetNoteEntity entity,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+        var violations = new List<UniquenessViolation>();
+
+        List<UniquenessCheck<GadgetNoteEntity>>? customChecks = null;
+        CollectCustomUniquenessChecks(ref customChecks);
+
+        if (customChecks is not null)
+        {
+            foreach (var customCheck in customChecks)
+            {
+                if (await customCheck(entity, cancellationToken) is { } violation)
+                {
+                    violations.Add(violation);
+                }
+            }
+        }
+
+        return violations;
+    }
+
+    /// <summary>Extension point for adding user-defined uniqueness checks (add delegates to the list in a partial implementation; while unimplemented the call is erased at no cost).</summary>
+    partial void CollectCustomUniquenessChecks(
+        ref List<UniquenessCheck<GadgetNoteEntity>>? checks
+    );
+}
+
+/// <summary>Seeder that loads deterministic sample data into the in-memory store (3 rows per entity, in FK dependency order).</summary>
+/// <remarks>
+/// Values are generated deterministically from the column metadata (int keys = 1,2,3; string keys = "{TABLE}-00n";
+/// Guids are deterministic from a fixed seed; string columns = "{column name} n"; numbers/dates are type-based fixed
+/// values; nullable columns get null in 1 of the 3 rows). FK columns reference existing parent key values, so seeding
+/// runs parent-first, then children.
+/// </remarks>
+public static class InMemorySampleData
+{
+    /// <summary>Number of rows seeded per entity.</summary>
+    public const int RowsPerEntity = 3;
+
+    /// <summary>Seeds sample data for all entities (in parent-to-child FK dependency order).</summary>
+    public static void Seed(InMemoryDataStore store)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+        SeedGadgetEntity(store);
+        SeedGadgetNoteEntity(store);
+
+    }
+
+    /// <summary>Seeds sample data for gadgets.</summary>
+    private static void SeedGadgetEntity(InMemoryDataStore store)
+    {
+        for (var index = 1; index <= RowsPerEntity; index++)
+        {
+            var entity = new GadgetEntity
+            {
+                GadgetId = GadgetIdValue.Create(index),
+                Name = NameValue.Create(($"name {index}").Length > 50 ? ($"name {index}")[..50] : ($"name {index}")),
+                RowVer = RowVerValue.Create(new byte[] { (byte)index, (byte)(index + 1), (byte)(index + 2) }),
+            };
+            entity.MarkAdded();
+            store.Put(entity);
+            entity.MarkUnchanged();
+        }
+    }
+
+    /// <summary>Seeds sample data for gadget_notes.</summary>
+    private static void SeedGadgetNoteEntity(InMemoryDataStore store)
+    {
+        for (var index = 1; index <= RowsPerEntity; index++)
+        {
+            var entity = new GadgetNoteEntity
+            {
+                NoteId = NoteIdValue.Create(index),
+                GadgetId = GadgetIdValue.Create(index),
+                Note = NoteValue.Create(($"note {index}").Length > 100 ? ($"note {index}")[..100] : ($"note {index}")),
+                RowVer = RowVerValue.Create(new byte[] { (byte)index, (byte)(index + 1), (byte)(index + 2) }),
+            };
+            entity.MarkAdded();
+            store.Put(entity);
+            entity.MarkUnchanged();
+        }
+    }
+}
+
+/// <summary>Extensions that register the in-memory repositories with the DI container.</summary>
+public static class GeneratedInMemoryRepositoryServiceCollectionExtensions
+{
+    /// <summary>Registers the in-memory data store (singleton) and each in-memory repository (scoped).</summary>
+    /// <param name="services">The service collection to register into.</param>
+    /// <param name="seedSampleData">When true (the default), the store is registered already seeded with the deterministic sample data of <see cref="InMemorySampleData"/>.</param>
+    public static IServiceCollection AddGeneratedInMemoryRepositories(
+        this IServiceCollection services,
+        bool seedSampleData = true
+    )
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        var store = new InMemoryDataStore();
+
+        if (seedSampleData)
+        {
+            InMemorySampleData.Seed(store);
+        }
+
+        services.AddSingleton(store);
+
+        // Register the save hook registry by default (a complete no-op if no ISaveHook<T> is registered).
+        services.TryAddScoped<ISaveHookRegistry>(provider => new ServiceProviderSaveHookRegistry(
+            provider
+        ));
+        services.AddScoped<IGadgetRepository, InMemoryGadgetRepository>();
+        services.AddScoped<IGadgetRemoteRepository>(provider =>
+            provider.GetRequiredService<IGadgetRepository>()
+        );
+        services.AddScoped<IGadgetNoteRepository, InMemoryGadgetNoteRepository>();
+        services.AddScoped<IGadgetNoteRemoteRepository>(provider =>
+            provider.GetRequiredService<IGadgetNoteRepository>()
+        );
+
+        return services;
     }
 }
 
@@ -9639,47 +11122,47 @@ public partial class QuickErDbContext : DbContext
         }
     }
 
-    /// <summary>DbSet for CustomerEntity.</summary>
-    public DbSet<CustomerEntity> Customers => Set<CustomerEntity>();
+    /// <summary>DbSet for GadgetEntity.</summary>
+    public DbSet<GadgetEntity> Gadgets => Set<GadgetEntity>();
 
-    /// <summary>DbSet for OrderEntity.</summary>
-    public DbSet<OrderEntity> Orders => Set<OrderEntity>();
+    /// <summary>DbSet for GadgetNoteEntity.</summary>
+    public DbSet<GadgetNoteEntity> GadgetNotes => Set<GadgetNoteEntity>();
 
     /// <summary>Configures the table, keys, columns, and relationships for each entity using the Fluent API.</summary>
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
-        modelBuilder.Entity<CustomerEntity>(entity =>
+        modelBuilder.Entity<GadgetEntity>(entity =>
         {
-            entity.ToTable("customers");
-            entity.HasKey(e => e.CustomerId);
+            entity.ToTable("gadgets");
+            entity.HasKey(e => e.GadgetId);
             entity.Ignore(e => e.RowState);
             entity.Ignore(e => e.IsAdded);
             entity.Ignore(e => e.IsUpdated);
             entity.Ignore(e => e.IsRemoved);
             entity.Ignore(e => e.HasChanges);
-            entity.Property(e => e.CustomerId).HasColumnName("customer_id").IsRequired().HasConversion(v => v!.Value, v => CustomerIdValue.Create(v!));
+            entity.Property(e => e.GadgetId).HasColumnName("gadget_id").IsRequired().HasConversion(v => v!.Value, v => GadgetIdValue.Create(v!));
             entity.Property(e => e.Name).HasColumnName("name").IsRequired().HasConversion(v => v!.Value, v => NameValue.Create(v!));
-            entity.Property(e => e.Balance).HasColumnName("balance").HasConversion(v => v!.Value, v => BalanceValue.Create(v!));
+            entity.Property(e => e.RowVer).HasColumnName("row_ver").IsRequired().IsRowVersion().HasConversion(v => v!.Value, v => RowVerValue.Create(v!));
             entity
-                .HasMany(e => e.Orders)
-                .WithOne(e => e.Customer)
-                .HasForeignKey(e => e.CustomerId)
+                .HasMany(e => e.GadgetNotes)
+                .WithOne(e => e.Gadget)
+                .HasForeignKey(e => e.GadgetId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
-        modelBuilder.Entity<OrderEntity>(entity =>
+        modelBuilder.Entity<GadgetNoteEntity>(entity =>
         {
-            entity.ToTable("orders");
-            entity.HasKey(e => e.OrderId);
+            entity.ToTable("gadget_notes");
+            entity.HasKey(e => e.NoteId);
             entity.Ignore(e => e.RowState);
             entity.Ignore(e => e.IsAdded);
             entity.Ignore(e => e.IsUpdated);
             entity.Ignore(e => e.IsRemoved);
             entity.Ignore(e => e.HasChanges);
-            entity.Property(e => e.OrderId).HasColumnName("order_id").IsRequired().HasConversion(v => v!.Value, v => OrderIdValue.Create(v!));
-            entity.Property(e => e.CustomerId).HasColumnName("customer_id").IsRequired().HasConversion(v => v!.Value, v => CustomerIdValue.Create(v!));
-            entity.Property(e => e.Memo).HasColumnName("memo").HasConversion(v => v!.Value, v => MemoValue.Create(v!));
-            entity.Property(e => e.Amount).HasColumnName("amount").IsRequired().HasConversion(v => v!.Value, v => AmountValue.Create(v!));
+            entity.Property(e => e.NoteId).HasColumnName("note_id").IsRequired().HasConversion(v => v!.Value, v => NoteIdValue.Create(v!));
+            entity.Property(e => e.GadgetId).HasColumnName("gadget_id").IsRequired().HasConversion(v => v!.Value, v => GadgetIdValue.Create(v!));
+            entity.Property(e => e.Note).HasColumnName("note").IsRequired().HasConversion(v => v!.Value, v => NoteValue.Create(v!));
+            entity.Property(e => e.RowVer).HasColumnName("row_ver").IsRequired().IsRowVersion().HasConversion(v => v!.Value, v => RowVerValue.Create(v!));
         });
 
         OnModelCreatingPartial(modelBuilder);
@@ -10610,7 +12093,7 @@ internal sealed class EfCoreSqlQueryExecutor<TEntity, TContext>(
 /// <summary>Repository base class that implements CRUD with metadata and EF Core (<typeparamref name="TContext"/>).</summary>
 /// <remarks>
 /// <para>
-/// Implements the same contract as QuickER's SQL Server implementation (<see cref="SqliteRepository{TEntity, TKey}"/>) on top of a DbContext.
+/// Implements the same contract as QuickER's SQL Server implementation (<see cref="SqlServerRepository{TEntity, TKey}"/>) on top of a DbContext.
 /// The DbContext is created short-lived per call (the same unit as opening a connection per call);
 /// reads use AsNoTracking, and saves use a RowState → EntityState conversion via <c>ChangeTracker.TrackGraph</c>.
 /// </para>
@@ -11260,35 +12743,35 @@ public static class GeneratedEfCoreRepositoryServiceCollectionExtensions
         services.TryAddScoped<ISaveHookRegistry>(provider => new ServiceProviderSaveHookRegistry(
             provider
         ));
-        services.AddScoped<ICustomerRepository, EfCoreCustomerRepository>();
-        services.AddScoped<ICustomerRemoteRepository>(provider =>
-            provider.GetRequiredService<ICustomerRepository>()
+        services.AddScoped<IGadgetRepository, EfCoreGadgetRepository>();
+        services.AddScoped<IGadgetRemoteRepository>(provider =>
+            provider.GetRequiredService<IGadgetRepository>()
         );
-        services.AddScoped<IOrderRepository, EfCoreOrderRepository>();
-        services.AddScoped<IOrderRemoteRepository>(provider =>
-            provider.GetRequiredService<IOrderRepository>()
+        services.AddScoped<IGadgetNoteRepository, EfCoreGadgetNoteRepository>();
+        services.AddScoped<IGadgetNoteRemoteRepository>(provider =>
+            provider.GetRequiredService<IGadgetNoteRepository>()
         );
 
         return services;
     }
 }
 
-/// <summary>EF Core implementation of the repository for CustomerEntity.</summary>
-public sealed partial class EfCoreCustomerRepository(
+/// <summary>EF Core implementation of the repository for GadgetEntity.</summary>
+public sealed partial class EfCoreGadgetRepository(
     IDbContextFactory<QuickErDbContext> contextFactory,
     ISaveHookRegistry? saveHooks = null
-) : EfCoreRepository<CustomerEntity, CustomerIdValue, QuickErDbContext>(contextFactory, saveHooks), ICustomerRepository
+) : EfCoreRepository<GadgetEntity, GadgetIdValue, QuickErDbContext>(contextFactory, saveHooks), IGadgetRepository
 {
     /// <inheritdoc />
     public async Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
-        CustomerEntity entity,
+        GadgetEntity entity,
         CancellationToken cancellationToken = default
     )
     {
         ArgumentNullException.ThrowIfNull(entity);
         var violations = new List<UniquenessViolation>();
 
-        List<UniquenessCheck<CustomerEntity>>? customChecks = null;
+        List<UniquenessCheck<GadgetEntity>>? customChecks = null;
         CollectCustomUniquenessChecks(ref customChecks);
 
         if (customChecks is not null)
@@ -11307,103 +12790,26 @@ public sealed partial class EfCoreCustomerRepository(
 
     /// <summary>Extension point for adding user-defined uniqueness checks (add delegates to the list in a partial implementation; while unimplemented the call is erased at no cost).</summary>
     partial void CollectCustomUniquenessChecks(
-        ref List<UniquenessCheck<CustomerEntity>>? checks
+        ref List<UniquenessCheck<GadgetEntity>>? checks
     );
 }
 
-/// <summary>EF Core implementation of the repository for OrderEntity.</summary>
-public sealed partial class EfCoreOrderRepository(
+/// <summary>EF Core implementation of the repository for GadgetNoteEntity.</summary>
+public sealed partial class EfCoreGadgetNoteRepository(
     IDbContextFactory<QuickErDbContext> contextFactory,
     ISaveHookRegistry? saveHooks = null
-) : EfCoreRepository<OrderEntity, OrderIdValue, QuickErDbContext>(contextFactory, saveHooks), IOrderRepository
+) : EfCoreRepository<GadgetNoteEntity, NoteIdValue, QuickErDbContext>(contextFactory, saveHooks), IGadgetNoteRepository
 {
-    /// <summary>顧客IDで注文を新しい順（注文ID降順）に検索する（ページング付き）</summary>
-    public Task<IReadOnlyList<OrderEntity>> GetByCustomerAsync(int customerId, int take, int skip = 0, CancellationToken cancellationToken = default) =>
-        Query().Where(e => e.CustomerId == CustomerIdValue.Create(customerId)).OrderByDescending(e => e.OrderId).Skip(skip).Take(take).ToListAsync(cancellationToken);
-
-    /// <summary>最新（注文IDが最大）の注文を 1 件取得する</summary>
-    public Task<OrderEntity?> FindTopAsync(CancellationToken cancellationToken = default) =>
-        Query().OrderByDescending(e => e.OrderId).FirstOrDefaultAsync(cancellationToken);
-
-    /// <summary>顧客IDに紐づく注文件数を取得する</summary>
-    public Task<int> CountByCustomerAsync(int customerId, CancellationToken cancellationToken = default) =>
-        Query().Where(e => e.CustomerId == CustomerIdValue.Create(customerId)).CountAsync(cancellationToken);
-
-    /// <summary>メモの部分一致で注文を検索する</summary>
-    public Task<IReadOnlyList<OrderEntity>> SearchMemoAsync(string keyword, CancellationToken cancellationToken = default) =>
-        Query().Where(e => e.Memo!.Contains(keyword)).ToListAsync(cancellationToken);
-
-    /// <summary>注文IDの一覧で注文を取得する</summary>
-    public Task<IReadOnlyList<OrderEntity>> GetByIdsAsync(IReadOnlyList<int> ids, CancellationToken cancellationToken = default)
-    {
-        var idsValues = ids.Select(OrderIdValue.Create).ToList();
-        return Query().Where(e => idsValues.Contains(e.OrderId)).ToListAsync(cancellationToken);
-    }
-
-    /// <summary>顧客IDに紐づく注文を射影（顧客ID・金額）で新しい順に取得する</summary>
-    public Task<IReadOnlyList<OrderSummaryRow>> GetSummariesAsync(int customerId, int take, int skip = 0, CancellationToken cancellationToken = default) =>
-        Query().Where(e => e.CustomerId == CustomerIdValue.Create(customerId)).OrderByDescending(e => e.OrderId).Skip(skip).Take(take).ToProjectionListAsync(e => new OrderSummaryRow { CustomerId = e.CustomerId, Amount = e.Amount }, cancellationToken);
-
-    /// <summary>顧客IDで注文を古い順に検索する（列参照型付け＝VO 有効時は VO 引数）</summary>
-    public Task<IReadOnlyList<OrderEntity>> GetByCustomerTypedAsync(CustomerIdValue customerId, CancellationToken cancellationToken = default) =>
-        Query().Where(e => e.CustomerId == customerId).OrderBy(e => e.OrderId).ToListAsync(cancellationToken);
-
     /// <inheritdoc />
     public async Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
-        OrderEntity entity,
+        GadgetNoteEntity entity,
         CancellationToken cancellationToken = default
     )
     {
         ArgumentNullException.ThrowIfNull(entity);
         var violations = new List<UniquenessViolation>();
 
-        // UQ_orders_memo: Memo
-        if (entity.Memo is not null)
-        {
-            var duplicated1 = await Query()
-                .Where(candidate => candidate.Memo == entity.Memo)
-                .Where(candidate => candidate.OrderId != entity.OrderId)
-                .AnyAsync(cancellationToken);
-
-            if (duplicated1)
-            {
-                violations.Add(
-                    new UniquenessViolation(
-                        "UQ_orders_memo",
-                        new[]
-                        {
-                            nameof(OrderEntity.Memo),
-                        }
-                    )
-                );
-            }
-        }
-
-        // UQ_orders_customer_id_amount: CustomerId, Amount
-        if (entity.CustomerId is not null && entity.Amount is not null)
-        {
-            var duplicated2 = await Query()
-                .Where(candidate => candidate.CustomerId == entity.CustomerId)
-                .Where(candidate => candidate.Amount == entity.Amount)
-                .Where(candidate => candidate.OrderId != entity.OrderId)
-                .AnyAsync(cancellationToken);
-
-            if (duplicated2)
-            {
-                violations.Add(
-                    new UniquenessViolation(
-                        "UQ_orders_customer_id_amount",
-                        new[]
-                        {
-                            nameof(OrderEntity.CustomerId),
-                            nameof(OrderEntity.Amount),
-                        }
-                    )
-                );
-            }
-        }
-
-        List<UniquenessCheck<OrderEntity>>? customChecks = null;
+        List<UniquenessCheck<GadgetNoteEntity>>? customChecks = null;
         CollectCustomUniquenessChecks(ref customChecks);
 
         if (customChecks is not null)
@@ -11422,6 +12828,6 @@ public sealed partial class EfCoreOrderRepository(
 
     /// <summary>Extension point for adding user-defined uniqueness checks (add delegates to the list in a partial implementation; while unimplemented the call is erased at no cost).</summary>
     partial void CollectCustomUniquenessChecks(
-        ref List<UniquenessCheck<OrderEntity>>? checks
+        ref List<UniquenessCheck<GadgetNoteEntity>>? checks
     );
 }

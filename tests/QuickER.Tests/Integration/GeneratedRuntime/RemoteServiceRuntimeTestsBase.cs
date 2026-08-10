@@ -125,7 +125,7 @@ public abstract class RemoteServiceRuntimeTestsBase : IAsyncLifetime
         loaded.Amount!.Value.Should().Be(100m);
 
         loaded.Memo = MemoValue.Create("apple tart");
-        (await Orders.UpdateAsync(loaded, Ct)).Should().BeTrue();
+        (await Orders.UpdateAsync(loaded, cancellationToken: Ct)).Should().BeTrue();
         (await Orders.GetByIdAsync(OrderIdValue.Create(10), Ct))!
             .Memo!.Value.Should()
             .Be("apple tart");

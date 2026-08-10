@@ -555,7 +555,11 @@ public static partial class GeneratedRemoteEndpoints
                         var request = await ReadRequestAsync<RemoteEntityRequest<TEntity>>(context);
                         await Repository<TRepository>(context)
                             .InsertAsync(request.Entity, context.RequestAborted);
-                        return (object?)true;
+                        // The insert leaves the newly assigned version on the entity, which the client writes back
+                        return (object?)
+                            new RemoteInsertResult(
+                                RemoteEntityGraph.ReadRowVersion(request.Entity)
+                            );
                     }
                 )
         );
@@ -566,10 +570,15 @@ public static partial class GeneratedRemoteEndpoints
                     context,
                     async () =>
                     {
-                        var request = await ReadRequestAsync<RemoteEntityRequest<TEntity>>(context);
+                        var request = await ReadRequestAsync<RemoteUpdateRequest<TEntity>>(context);
+                        var updated = await Repository<TRepository>(context)
+                            .UpdateAsync(request.Entity, request.Mode, context.RequestAborted);
+                        // A successful update leaves the newly assigned version on the entity, which the client writes back
                         return (object?)
-                            await Repository<TRepository>(context)
-                                .UpdateAsync(request.Entity, context.RequestAborted);
+                            new RemoteUpdateResult(
+                                updated,
+                                updated ? RemoteEntityGraph.ReadRowVersion(request.Entity) : null
+                            );
                     }
                 )
         );
@@ -595,15 +604,20 @@ public static partial class GeneratedRemoteEndpoints
                     async () =>
                     {
                         var request = await ReadRequestAsync<RemoteSaveRequest<TEntity>>(context);
+                        var affected = await Repository<TRepository>(context)
+                            .SaveAsync(
+                                request.Entity,
+                                request.CascadeSave,
+                                request.CascadeDelete,
+                                request.InsertWhenUpdateMissing,
+                                request.Mode,
+                                context.RequestAborted
+                            );
                         return (object?)
-                            await Repository<TRepository>(context)
-                                .SaveAsync(
-                                    request.Entity,
-                                    request.CascadeSave,
-                                    request.CascadeDelete,
-                                    request.InsertWhenUpdateMissing,
-                                    context.RequestAborted
-                                );
+                            new RemoteSaveResult(
+                                affected,
+                                CollectRowVersions([request.Entity], request.CascadeSave)
+                            );
                     }
                 )
         );
@@ -617,18 +631,49 @@ public static partial class GeneratedRemoteEndpoints
                         var request = await ReadRequestAsync<RemoteSaveManyRequest<TEntity>>(
                             context
                         );
+                        var affected = await Repository<TRepository>(context)
+                            .SaveAsync(
+                                request.Entities,
+                                request.CascadeSave,
+                                request.CascadeDelete,
+                                request.InsertWhenUpdateMissing,
+                                request.Mode,
+                                context.RequestAborted
+                            );
                         return (object?)
-                            await Repository<TRepository>(context)
-                                .SaveAsync(
-                                    request.Entities,
-                                    request.CascadeSave,
-                                    request.CascadeDelete,
-                                    request.InsertWhenUpdateMissing,
-                                    context.RequestAborted
-                                );
+                            new RemoteSaveResult(
+                                affected,
+                                CollectRowVersions(request.Entities, request.CascadeSave)
+                            );
                     }
                 )
         );
+    }
+
+    /// <summary>
+    /// Collects the row versions a completed save assigned across the saved graphs, so that the client can write them back
+    /// onto its own entities.
+    /// </summary>
+    /// <remarks>
+    /// The traversal is the server-side counterpart of the client's <c>AcceptChanges</c>: both walk the same
+    /// [NavigationReference(Cascade=true)] child navigations (<c>RemoteEntityGraph.CascadeNavigations</c>) and identify an
+    /// entity the same way, so every collected entry lands on the matching local entity. Backends that assign no versions -
+    /// a dialect without a rowversion type, or a diagram whose tables carry no such column - simply yield an empty list.
+    /// </remarks>
+    private static List<RemoteRowVersionEntry> CollectRowVersions<TEntity>(
+        IEnumerable<TEntity> entities,
+        bool cascade
+    )
+        where TEntity : EntityBase
+    {
+        var rowVersions = new List<RemoteRowVersionEntry>();
+
+        foreach (var entity in entities)
+        {
+            RemoteEntityGraph.CollectRowVersions(entity, cascade, rowVersions);
+        }
+
+        return rowVersions;
     }
 
     /// <summary>Maps the remote-surface endpoints for DocumentEntity.</summary>

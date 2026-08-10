@@ -10,7 +10,7 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
-namespace QuickER.Tests.GeneratedRemoteServiceFixture;
+namespace QuickER.Tests.GeneratedConcurrencyFixture;
 
 /// <summary>
 /// Endpoint mapping that exposes the generated remote surface (I{Entity}RemoteRepository) as an ASP.NET Core Minimal API.
@@ -55,8 +55,8 @@ public static partial class GeneratedRemoteEndpoints
         ArgumentNullException.ThrowIfNull(endpoints);
 
         var group = endpoints.MapGroup(prefix);
-        MapCustomerEndpoints(group);
-        MapOrderEndpoints(group);
+        MapGadgetEndpoints(group);
+        MapGadgetNoteEndpoints(group);
 
         return group;
     }
@@ -403,268 +403,55 @@ public static partial class GeneratedRemoteEndpoints
         return rowVersions;
     }
 
-    /// <summary>Maps the remote-surface endpoints for CustomerEntity.</summary>
-    private static void MapCustomerEndpoints(RouteGroupBuilder group)
+    /// <summary>Maps the remote-surface endpoints for GadgetEntity.</summary>
+    private static void MapGadgetEndpoints(RouteGroupBuilder group)
     {
-        MapCrud<CustomerEntity, CustomerIdValue, ICustomerRemoteRepository>(
+        MapCrud<GadgetEntity, GadgetIdValue, IGadgetRemoteRepository>(
             group,
-            "Customer"
+            "Gadget"
         );
 
         group.MapPost(
-            "Customer/CheckUniqueness",
+            "Gadget/CheckUniqueness",
             (HttpContext context) =>
                 ExecuteAsync(
                     context,
                     async () =>
                     {
-                        var request = await ReadRequestAsync<CustomerCheckUniquenessRequest>(context);
-                        var repository = context.RequestServices.GetRequiredService<ICustomerRemoteRepository>();
+                        var request = await ReadRequestAsync<GadgetCheckUniquenessRequest>(context);
+                        var repository = context.RequestServices.GetRequiredService<IGadgetRemoteRepository>();
                         return (object?)await repository.CheckUniquenessAsync(request.Entity, context.RequestAborted);
                     }
                 )
         );
     }
 
-    /// <summary>Request body for CheckUniqueness (Customer).</summary>
-    private sealed record CustomerCheckUniquenessRequest(CustomerEntity Entity);
+    /// <summary>Request body for CheckUniqueness (Gadget).</summary>
+    private sealed record GadgetCheckUniquenessRequest(GadgetEntity Entity);
 
-    /// <summary>Maps the remote-surface endpoints for OrderEntity.</summary>
-    private static void MapOrderEndpoints(RouteGroupBuilder group)
+    /// <summary>Maps the remote-surface endpoints for GadgetNoteEntity.</summary>
+    private static void MapGadgetNoteEndpoints(RouteGroupBuilder group)
     {
-        MapCrud<OrderEntity, OrderIdValue, IOrderRemoteRepository>(
+        MapCrud<GadgetNoteEntity, NoteIdValue, IGadgetNoteRemoteRepository>(
             group,
-            "Order"
+            "GadgetNote"
         );
 
         group.MapPost(
-            "Order/GetByCustomer",
+            "GadgetNote/CheckUniqueness",
             (HttpContext context) =>
                 ExecuteAsync(
                     context,
                     async () =>
                     {
-                        var request = await ReadRequestAsync<OrderGetByCustomerRequest>(context);
-                        var repository = context.RequestServices.GetRequiredService<IOrderRemoteRepository>();
-                        return (object?)await repository.GetByCustomerAsync(request.CustomerId, request.Take, request.Skip, context.RequestAborted);
-                    }
-                )
-        );
-
-        group.MapPost(
-            "Order/FindTop",
-            (HttpContext context) =>
-                ExecuteAsync(
-                    context,
-                    async () =>
-                    {
-                        var repository = context.RequestServices.GetRequiredService<IOrderRemoteRepository>();
-                        return (object?)await repository.FindTopAsync(context.RequestAborted);
-                    }
-                )
-        );
-
-        group.MapPost(
-            "Order/CountByCustomer",
-            (HttpContext context) =>
-                ExecuteAsync(
-                    context,
-                    async () =>
-                    {
-                        var request = await ReadRequestAsync<OrderCountByCustomerRequest>(context);
-                        var repository = context.RequestServices.GetRequiredService<IOrderRemoteRepository>();
-                        return (object?)await repository.CountByCustomerAsync(request.CustomerId, context.RequestAborted);
-                    }
-                )
-        );
-
-        group.MapPost(
-            "Order/SearchMemo",
-            (HttpContext context) =>
-                ExecuteAsync(
-                    context,
-                    async () =>
-                    {
-                        var request = await ReadRequestAsync<OrderSearchMemoRequest>(context);
-                        var repository = context.RequestServices.GetRequiredService<IOrderRemoteRepository>();
-                        return (object?)await repository.SearchMemoAsync(request.Keyword, context.RequestAborted);
-                    }
-                )
-        );
-
-        group.MapPost(
-            "Order/GetByIds",
-            (HttpContext context) =>
-                ExecuteAsync(
-                    context,
-                    async () =>
-                    {
-                        var request = await ReadRequestAsync<OrderGetByIdsRequest>(context);
-                        var repository = context.RequestServices.GetRequiredService<IOrderRemoteRepository>();
-                        return (object?)await repository.GetByIdsAsync(request.Ids, context.RequestAborted);
-                    }
-                )
-        );
-
-        group.MapPost(
-            "Order/GetSummaries",
-            (HttpContext context) =>
-                ExecuteAsync(
-                    context,
-                    async () =>
-                    {
-                        var request = await ReadRequestAsync<OrderGetSummariesRequest>(context);
-                        var repository = context.RequestServices.GetRequiredService<IOrderRemoteRepository>();
-                        return (object?)await repository.GetSummariesAsync(request.CustomerId, request.Take, request.Skip, context.RequestAborted);
-                    }
-                )
-        );
-
-        group.MapPost(
-            "Order/SumAmounts",
-            (HttpContext context) =>
-                ExecuteAsync(
-                    context,
-                    async () =>
-                    {
-                        var request = await ReadRequestAsync<OrderSumAmountsRequest>(context);
-                        var repository = context.RequestServices.GetRequiredService<IOrderRemoteRepository>();
-                        return (object?)await repository.SumAmountsAsync(request.CustomerId, context.RequestAborted);
-                    }
-                )
-        );
-
-        group.MapPost(
-            "Order/GetByIdsRaw",
-            (HttpContext context) =>
-                ExecuteAsync(
-                    context,
-                    async () =>
-                    {
-                        var request = await ReadRequestAsync<OrderGetByIdsRawRequest>(context);
-                        var repository = context.RequestServices.GetRequiredService<IOrderRemoteRepository>();
-                        return (object?)await repository.GetByIdsRawAsync(request.Ids, context.RequestAborted);
-                    }
-                )
-        );
-
-        group.MapPost(
-            "Order/FindTopRaw",
-            (HttpContext context) =>
-                ExecuteAsync(
-                    context,
-                    async () =>
-                    {
-                        var repository = context.RequestServices.GetRequiredService<IOrderRemoteRepository>();
-                        return (object?)await repository.FindTopRawAsync(context.RequestAborted);
-                    }
-                )
-        );
-
-        group.MapPost(
-            "Order/CountByCustomerRaw",
-            (HttpContext context) =>
-                ExecuteAsync(
-                    context,
-                    async () =>
-                    {
-                        var request = await ReadRequestAsync<OrderCountByCustomerRawRequest>(context);
-                        var repository = context.RequestServices.GetRequiredService<IOrderRemoteRepository>();
-                        return (object?)await repository.CountByCustomerRawAsync(request.CustomerId, context.RequestAborted);
-                    }
-                )
-        );
-
-        group.MapPost(
-            "Order/GetMemoRowsRaw",
-            (HttpContext context) =>
-                ExecuteAsync(
-                    context,
-                    async () =>
-                    {
-                        var request = await ReadRequestAsync<OrderGetMemoRowsRawRequest>(context);
-                        var repository = context.RequestServices.GetRequiredService<IOrderRemoteRepository>();
-                        return (object?)await repository.GetMemoRowsRawAsync(request.CustomerId, context.RequestAborted);
-                    }
-                )
-        );
-
-        group.MapPost(
-            "Order/GetByCustomerTyped",
-            (HttpContext context) =>
-                ExecuteAsync(
-                    context,
-                    async () =>
-                    {
-                        var request = await ReadRequestAsync<OrderGetByCustomerTypedRequest>(context);
-                        var repository = context.RequestServices.GetRequiredService<IOrderRemoteRepository>();
-                        return (object?)await repository.GetByCustomerTypedAsync(request.CustomerId, context.RequestAborted);
-                    }
-                )
-        );
-
-        group.MapPost(
-            "Order/SpecialLookup",
-            (HttpContext context) =>
-                ExecuteAsync(
-                    context,
-                    async () =>
-                    {
-                        var request = await ReadRequestAsync<OrderSpecialLookupRequest>(context);
-                        var repository = context.RequestServices.GetRequiredService<IOrderRemoteRepository>();
-                        return (object?)await repository.SpecialLookupAsync(request.CustomerId, context.RequestAborted);
-                    }
-                )
-        );
-
-        group.MapPost(
-            "Order/CheckUniqueness",
-            (HttpContext context) =>
-                ExecuteAsync(
-                    context,
-                    async () =>
-                    {
-                        var request = await ReadRequestAsync<OrderCheckUniquenessRequest>(context);
-                        var repository = context.RequestServices.GetRequiredService<IOrderRemoteRepository>();
+                        var request = await ReadRequestAsync<GadgetNoteCheckUniquenessRequest>(context);
+                        var repository = context.RequestServices.GetRequiredService<IGadgetNoteRemoteRepository>();
                         return (object?)await repository.CheckUniquenessAsync(request.Entity, context.RequestAborted);
                     }
                 )
         );
     }
 
-    /// <summary>Request body for GetByCustomer (Order).</summary>
-    private sealed record OrderGetByCustomerRequest(int CustomerId, int Take, int Skip);
-
-    /// <summary>Request body for CountByCustomer (Order).</summary>
-    private sealed record OrderCountByCustomerRequest(int CustomerId);
-
-    /// <summary>Request body for SearchMemo (Order).</summary>
-    private sealed record OrderSearchMemoRequest(string Keyword);
-
-    /// <summary>Request body for GetByIds (Order).</summary>
-    private sealed record OrderGetByIdsRequest(IReadOnlyList<int> Ids);
-
-    /// <summary>Request body for GetSummaries (Order).</summary>
-    private sealed record OrderGetSummariesRequest(int CustomerId, int Take, int Skip);
-
-    /// <summary>Request body for SumAmounts (Order).</summary>
-    private sealed record OrderSumAmountsRequest(int CustomerId);
-
-    /// <summary>Request body for GetByIdsRaw (Order).</summary>
-    private sealed record OrderGetByIdsRawRequest(IReadOnlyList<int> Ids);
-
-    /// <summary>Request body for CountByCustomerRaw (Order).</summary>
-    private sealed record OrderCountByCustomerRawRequest(int CustomerId);
-
-    /// <summary>Request body for GetMemoRowsRaw (Order).</summary>
-    private sealed record OrderGetMemoRowsRawRequest(int CustomerId);
-
-    /// <summary>Request body for GetByCustomerTyped (Order).</summary>
-    private sealed record OrderGetByCustomerTypedRequest(CustomerIdValue CustomerId);
-
-    /// <summary>Request body for SpecialLookup (Order).</summary>
-    private sealed record OrderSpecialLookupRequest(int CustomerId);
-
-    /// <summary>Request body for CheckUniqueness (Order).</summary>
-    private sealed record OrderCheckUniquenessRequest(OrderEntity Entity);
+    /// <summary>Request body for CheckUniqueness (GadgetNote).</summary>
+    private sealed record GadgetNoteCheckUniquenessRequest(GadgetNoteEntity Entity);
 }

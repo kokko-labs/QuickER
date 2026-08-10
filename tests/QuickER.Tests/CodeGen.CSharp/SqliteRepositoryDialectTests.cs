@@ -78,6 +78,10 @@ public class SqliteRepositoryDialectTests
         code.Should().NotContain("SqlServerRepository");
         // OFFSET-FETCH ページング構文
         code.Should().NotContain("FETCH NEXT");
+        // 楽観排他の版返却句と共有部品（SQLite に相当構文がないため SQL Server 方言専用）
+        code.Should().NotContain("OUTPUT INSERTED");
+        code.Should().NotContain("RowVersionConcurrency");
+        code.Should().NotContain("RowVersionCollector");
     }
 
     /// <summary>SQLite 方言（VO 有効）でも SQL Server 依存が漏れないことを検証する</summary>
@@ -115,6 +119,9 @@ public class SqliteRepositoryDialectTests
         // SQL Server 版は従来どおり FOR JSON / SqlServerRepository を維持
         code.Should().Contain("SqlServerRepository<");
         code.Should().Contain("FOR JSON");
+        // 楽観排他の共有部品は SQL Server 方言側に出る（rowversion 列の有無に依らず固定 infra として存在する）
+        code.Should().Contain("RowVersionConcurrency");
+        code.Should().Contain("OUTPUT INSERTED.");
     }
 
     /// <summary>親（customers）1 対多 子（orders）の関係を持つ、Include 検証用の最小 ER 図</summary>

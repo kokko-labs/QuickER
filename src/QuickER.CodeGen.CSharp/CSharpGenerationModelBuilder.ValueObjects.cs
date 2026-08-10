@@ -164,7 +164,9 @@ internal sealed partial class CSharpGenerationModelBuilder
             IsNullable = true,
             IsReferenceType = true,
             IsBinary = isBinary,
-            IsRequired = !column.IsNullable,
+            // 行バージョン列は DB が採番するため非 NULL でも入力必須にしない（新規行は未入力が正常）
+            IsRequired = !column.IsNullable && !_columnTypes[column.Id].IsRowVersion,
+            IsRowVersion = _columnTypes[column.Id].IsRowVersion,
             RevertBindingExpression = $"{propertyName}?.ToString() ?? string.Empty",
             IsValueObject = true,
             ValueObjectClassName = valueObject.ClassName,

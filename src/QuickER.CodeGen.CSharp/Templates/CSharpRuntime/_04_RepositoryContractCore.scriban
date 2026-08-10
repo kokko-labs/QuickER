@@ -47,7 +47,14 @@ public partial interface IRemoteRepository<TEntity, TKey>
     Task InsertAsync(TEntity entity, CancellationToken cancellationToken = default);
 
     /// <summary>Updates an entity (true when a matching row was updated).</summary>
-    Task<bool> UpdateAsync(TEntity entity, CancellationToken cancellationToken = default);
+    /// <param name="entity">The entity to update.</param>
+    /// <param name="mode">How a concurrent modification is handled when the table has a rowversion column (no effect otherwise).</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    Task<bool> UpdateAsync(
+        TEntity entity,
+        ConcurrencyMode mode = ConcurrencyMode.Optimistic,
+        CancellationToken cancellationToken = default
+    );
 
     /// <summary>Deletes an entity by primary key (true when a matching row was deleted).</summary>
     Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default);
@@ -57,6 +64,7 @@ public partial interface IRemoteRepository<TEntity, TKey>
     /// <param name="cascadeSave">Whether to cascade the save to child objects.</param>
     /// <param name="cascadeDelete">Whether to cascade deletes to child objects.</param>
     /// <param name="insertWhenUpdateMissing">Whether to switch to INSERT when no row exists to update (throws by default).</param>
+    /// <param name="mode">How a concurrent modification is handled for entities whose table has a rowversion column (no effect otherwise).</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The number of records saved.</returns>
     Task<int> SaveAsync(
@@ -64,6 +72,7 @@ public partial interface IRemoteRepository<TEntity, TKey>
         bool cascadeSave = true,
         bool cascadeDelete = true,
         bool insertWhenUpdateMissing = false,
+        ConcurrencyMode mode = ConcurrencyMode.Optimistic,
         CancellationToken cancellationToken = default
     );
 
@@ -72,6 +81,7 @@ public partial interface IRemoteRepository<TEntity, TKey>
     /// <param name="cascadeSave">Whether to cascade the save to child objects.</param>
     /// <param name="cascadeDelete">Whether to cascade deletes to child objects.</param>
     /// <param name="insertWhenUpdateMissing">Whether to switch to INSERT when no row exists to update (throws by default).</param>
+    /// <param name="mode">How a concurrent modification is handled for entities whose table has a rowversion column (no effect otherwise).</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The number of records saved.</returns>
     Task<int> SaveAsync(
@@ -79,6 +89,7 @@ public partial interface IRemoteRepository<TEntity, TKey>
         bool cascadeSave = true,
         bool cascadeDelete = true,
         bool insertWhenUpdateMissing = false,
+        ConcurrencyMode mode = ConcurrencyMode.Optimistic,
         CancellationToken cancellationToken = default
     );
 }
@@ -272,6 +283,16 @@ public enum SaveOperation
     Delete,
 }
 
+/// <summary>Selects how concurrent modifications are handled when saving an entity whose table has a rowversion column (no effect otherwise).</summary>
+public enum ConcurrencyMode
+{
+    /// <summary>Rejects the save with a SaveConflictException when the row was modified by someone else after it was read (the default).</summary>
+    Optimistic,
+
+    /// <summary>Overwrites the row unconditionally, ignoring the version check (an explicit last-write-wins).</summary>
+    ForceOverwrite,
+}
+
 /// <summary>
 /// A hook that injects logic before and after a graph save (<c>SaveAsync</c>). Zero or more can be registered in DI and are
 /// resolved per target entity type.
@@ -307,6 +328,10 @@ public interface ISaveHook<TEntity>
     ) => Task.FromResult(true);
 
     /// <summary>Called immediately after the operation, before commit (the default does nothing; <paramref name="context"/> participates in the same transaction).</summary>
+    /// <remarks>
+    /// Because this runs before the commit, a rowversion (concurrency token) property still holds the value the entity was
+    /// read with: the version the database assigned during this save is written back only after the commit succeeds.
+    /// </remarks>
     /// <param name="entity">The entity that was saved.</param>
     /// <param name="operation">The operation actually performed (Insert when switched via <c>insertWhenUpdateMissing</c>).</param>
     /// <param name="context">A context for performing DB operations within the same transaction.</param>
@@ -1099,12 +1124,40 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
     }
 
     /// <summary>Inserts an entity.</summary>
+{{~ if repository_dialect == "sqlserver" ~}}
+    /// <remarks>When the table has a rowversion column, the version the database assigned is written back to <paramref name="entity"/>.</remarks>
+{{~ end ~}}
     public async Task InsertAsync(TEntity entity, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(entity);
 
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
+{{~ if repository_dialect == "sqlserver" ~}}
+
+        if (_metadata.RowVersionProperty is not null)
+        {
+            await using var returningCommand = new {{ sql_command_type }}(
+                _metadata.InsertReturningSql!,
+                connection
+            );
+            _metadata.BindInsertParameters(returningCommand, entity);
+
+            if (await returningCommand.ExecuteScalarAsync(cancellationToken) is byte[] version)
+            {
+{{~ if generate_value_objects ~}}
+                _metadata.RowVersionProperty.SetValue(
+                    entity,
+                    SqlValueObjectActivator.Wrap(version, _metadata.RowVersionProperty.PropertyType)
+                );
+{{~ else ~}}
+                _metadata.RowVersionProperty.SetValue(entity, version);
+{{~ end ~}}
+            }
+
+            return;
+        }
+{{~ end ~}}
 
         await using var command = new {{ sql_command_type }}(_metadata.InsertSql, connection);
         _metadata.BindInsertParameters(command, entity);
@@ -1113,6 +1166,10 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
 
 {{~ if repository_dialect == "sqlserver" ~}}
     /// <summary>Bulk inserts a collection of entities using SqlBulkCopy.</summary>
+    /// <remarks>
+    /// Known limitation: SqlBulkCopy cannot return generated values, so for a table with a rowversion column the entities
+    /// keep whatever version they had. Re-read them when the version is needed for a later update.
+    /// </remarks>
     public async Task<int> BulkInsertAsync(
         IEnumerable<TEntity> entities,
         CancellationToken cancellationToken = default
@@ -1203,8 +1260,17 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
 {{~ end ~}}
 
     /// <summary>Updates an entity (true when a matching row was updated).</summary>
+{{~ if repository_dialect == "sqlserver" ~}}
+    /// <remarks>
+    /// When the table has a rowversion column, <paramref name="mode"/> decides whether the update is guarded by the version
+    /// the entity was read with. A guarded update that finds the row changed by someone else throws a
+    /// <see cref="SaveConflictException"/>; a row that no longer exists still returns <c>false</c>. On success the new
+    /// version is written back to <paramref name="entity"/>.
+    /// </remarks>
+{{~ end ~}}
     public async Task<bool> UpdateAsync(
         TEntity entity,
+        ConcurrencyMode mode = ConcurrencyMode.Optimistic,
         CancellationToken cancellationToken = default
     )
     {
@@ -1212,6 +1278,47 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
 
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
+{{~ if repository_dialect == "sqlserver" ~}}
+
+        if (_metadata.RowVersionProperty is not null)
+        {
+            await using var guardedCommand = new {{ sql_command_type }}(
+                RowVersionConcurrency.UpdateSql(_metadata, mode),
+                connection
+            );
+            RowVersionConcurrency.BindUpdate(_metadata, guardedCommand, entity, mode);
+
+            if (await guardedCommand.ExecuteScalarAsync(cancellationToken) is byte[] version)
+            {
+{{~ if generate_value_objects ~}}
+                _metadata.RowVersionProperty.SetValue(
+                    entity,
+                    SqlValueObjectActivator.Wrap(version, _metadata.RowVersionProperty.PropertyType)
+                );
+{{~ else ~}}
+                _metadata.RowVersionProperty.SetValue(entity, version);
+{{~ end ~}}
+                return true;
+            }
+
+            // Nothing matched: a row that is simply gone keeps the pre-existing "false" contract, while a row that is
+            // still there means someone else changed it after this entity was read
+            if (
+                await RowVersionConcurrency.RowExistsAsync(
+                    _metadata,
+                    entity,
+                    connection,
+                    transaction: null,
+                    cancellationToken
+                )
+            )
+            {
+                throw RowVersionConcurrency.Conflict(_metadata, entity, "update");
+            }
+
+            return false;
+        }
+{{~ end ~}}
 
         await using var command = new {{ sql_command_type }}(_metadata.UpdateSql, connection);
         _metadata.BindUpdateParameters(command, entity);
@@ -1301,11 +1408,19 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
 {{~ end ~}}
 
     /// <summary>Saves inserts, updates, and deletes in a single transaction according to RowState (children cascade by default).</summary>
+{{~ if repository_dialect == "sqlserver" ~}}
+    /// <remarks>
+    /// Entities whose table has a rowversion column take part in optimistic concurrency: their updates and deletes are
+    /// guarded by the version they were read with unless <paramref name="mode"/> says otherwise, and the versions the
+    /// database assigns are written back to the entities once the transaction commits.
+    /// </remarks>
+{{~ end ~}}
     public async Task<int> SaveAsync(
         TEntity entity,
         bool cascadeSave = true,
         bool cascadeDelete = true,
         bool insertWhenUpdateMissing = false,
+        ConcurrencyMode mode = ConcurrencyMode.Optimistic,
         CancellationToken cancellationToken = default
     )
     {
@@ -1333,6 +1448,11 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
                     e => new SqlSaveHookContext(connection, transaction, e.GetType())
                 );
 
+{{~ if repository_dialect == "sqlserver" ~}}
+        // Row versions the database assigns are collected during the transaction and applied only after it commits
+        var versions = new RowVersionCollector();
+
+{{~ end ~}}
         try
         {
             // HasChanges was already checked before this call, so skip the redundant internal graph traversal
@@ -1345,9 +1465,16 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
                 insertWhenUpdateMissing,
                 cancellationToken,
                 hooks,
-                changesAlreadyVerified: true
+                changesAlreadyVerified: true{{ if repository_dialect == "sqlserver" }},
+                mode: mode,
+                versions: versions{{ end }}
             );
             await transaction.CommitAsync(cancellationToken);
+{{~ if repository_dialect == "sqlserver" ~}}
+
+            // The commit made the new row versions visible, so settle them on the entities
+            versions.Apply();
+{{~ end ~}}
 
             // After a successful commit, settle the state (Added/Updated → Unchanged) to prevent double-processing on a re-save.
             // Skipped rows (where a hook's Before returned false) are left as they are
@@ -1363,11 +1490,19 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
     }
 
     /// <summary>Saves multiple aggregate roots together in a single transaction (an atomic all-succeed-or-all-rollback operation).</summary>
+{{~ if repository_dialect == "sqlserver" ~}}
+    /// <remarks>
+    /// Entities whose table has a rowversion column take part in optimistic concurrency: their updates and deletes are
+    /// guarded by the version they were read with unless <paramref name="mode"/> says otherwise, and the versions the
+    /// database assigns are written back to the entities once the transaction commits.
+    /// </remarks>
+{{~ end ~}}
     public async Task<int> SaveAsync(
         IEnumerable<TEntity> entities,
         bool cascadeSave = true,
         bool cascadeDelete = true,
         bool insertWhenUpdateMissing = false,
+        ConcurrencyMode mode = ConcurrencyMode.Optimistic,
         CancellationToken cancellationToken = default
     )
     {
@@ -1398,6 +1533,11 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
                     e => new SqlSaveHookContext(connection, transaction, e.GetType())
                 );
 
+{{~ if repository_dialect == "sqlserver" ~}}
+        // Row versions the database assigns are collected during the transaction and applied only after it commits
+        var versions = new RowVersionCollector();
+
+{{~ end ~}}
         try
         {
             var rows = 0;
@@ -1413,11 +1553,18 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
                     insertWhenUpdateMissing,
                     cancellationToken,
                     hooks,
-                    changesAlreadyVerified: true
+                    changesAlreadyVerified: true{{ if repository_dialect == "sqlserver" }},
+                    mode: mode,
+                    versions: versions{{ end }}
                 );
             }
 
             await transaction.CommitAsync(cancellationToken);
+{{~ if repository_dialect == "sqlserver" ~}}
+
+            // The commit made the new row versions visible, so settle them on the entities
+            versions.Apply();
+{{~ end ~}}
 
             // After a successful commit, settle the state of every graph (Added/Updated → Unchanged) to prevent double-processing on a re-save.
             // Skipped rows (where a hook's Before returned false) are left as they are

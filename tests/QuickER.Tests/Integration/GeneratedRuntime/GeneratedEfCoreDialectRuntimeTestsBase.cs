@@ -94,7 +94,7 @@ public abstract class GeneratedEfCoreDialectRuntimeTestsBase
 
         loaded.Name = NameValue.Create("Alice Updated");
         loaded.Balance = null;
-        (await repo.UpdateAsync(loaded, Ct)).Should().BeTrue();
+        (await repo.UpdateAsync(loaded, cancellationToken: Ct)).Should().BeTrue();
 
         var reloaded = await repo.GetByIdAsync(CustomerIdValue.Create(1), Ct);
         reloaded!.Name.Value.Should().Be("Alice Updated");

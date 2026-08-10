@@ -52,7 +52,7 @@
 | `GetByIdAsync(id, ct)` | 主キーで 1 件取得します（該当なしは null）。 |
 | `GetAllAsync(ct)` | 全件を取得します。 |
 | `InsertAsync(entity, ct)` | 1 件を追加します。 |
-| `UpdateAsync(entity, ct)` | 主キー一致の 1 件を更新します（成否を返します）。 |
+| `UpdateAsync(entity, mode, ct)` | 主キー一致の 1 件を更新します（成否を返します）。`mode` は rowversion 列を持つテーブルの同時実行ポリシーを選びます。 |
 | `DeleteAsync(id, ct)` | 主キー一致の 1 件を削除します（成否を返します）。 |
 | `BulkInsertAsync(entities, ct)` | 複数件をまとめて追加します（追加件数を返します）。 |
 | `Query()` | 絞り込み・並べ替え・件数制限などのクエリを組み立てます。 |

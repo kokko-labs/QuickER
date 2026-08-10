@@ -1,11 +1,32 @@
 {{~ if render_contract && emit_shared_infra ~}}
 
-/// <summary>Represents an exception indicating that the record to update no longer existed (a conflict such as deletion by another party).</summary>
+/// <summary>Represents an exception indicating that a record could not be saved because another party changed it first (it was deleted, or its version moved on).</summary>
 public sealed class SaveConflictException : Exception
 {
     /// <summary>Initializes a new instance with the specified message.</summary>
     public SaveConflictException(string message)
         : base(message) { }
+
+    /// <summary>Creates the conflict reported when the row an update targeted no longer exists.</summary>
+    /// <param name="entityType">The type of the entity whose save was rejected.</param>
+    /// <param name="key">The primary key value the save targeted.</param>
+    public static SaveConflictException NotFound(Type entityType, object? key) =>
+        new(
+            $"The record to update was not found ({entityType.Name}, key {key}). It may have been deleted by another user."
+        );
+
+    /// <summary>Creates the conflict reported when the row still exists but was changed by someone else after the entity was read.</summary>
+    /// <param name="entityType">The type of the entity whose save was rejected.</param>
+    /// <param name="key">The primary key value the save targeted.</param>
+    /// <param name="operation">The lowercase verb of the rejected operation ("update" or "delete").</param>
+    public static SaveConflictException Modified(
+        Type entityType,
+        object? key,
+        string operation
+    ) =>
+        new(
+            $"The record to {operation} was modified by another user ({entityType.Name}, key {key}). Reload the entity and try again."
+        );
 }
 
 /// <summary>A child navigation targeted by cascading (property, collection kind, child type, and FK information).</summary>
@@ -73,15 +94,23 @@ public sealed class RemoteError
 /// <summary>Request body carrying a single primary key (GetById / Delete).</summary>
 public sealed record RemoteIdRequest<TKey>(TKey Id);
 
-/// <summary>Request body carrying a single entity (Insert / Update).</summary>
+/// <summary>Request body carrying a single entity (Insert).</summary>
 public sealed record RemoteEntityRequest<TEntity>(TEntity Entity);
+
+/// <summary>Request body for a single update (carries the concurrency policy alongside the entity).</summary>
+/// <remarks>The policy defaults to <see cref="ConcurrencyMode.Optimistic"/>, so a body that omits it - one sent by a client built before the policy was carried - is read as the default.</remarks>
+public sealed record RemoteUpdateRequest<TEntity>(
+    TEntity Entity,
+    ConcurrencyMode Mode = ConcurrencyMode.Optimistic
+);
 
 /// <summary>Request body for a graph save (single root).</summary>
 public sealed record RemoteSaveRequest<TEntity>(
     TEntity Entity,
     bool CascadeSave,
     bool CascadeDelete,
-    bool InsertWhenUpdateMissing
+    bool InsertWhenUpdateMissing,
+    ConcurrencyMode Mode = ConcurrencyMode.Optimistic
 );
 
 /// <summary>Request body for a graph save (multiple roots).</summary>
@@ -89,8 +118,202 @@ public sealed record RemoteSaveManyRequest<TEntity>(
     List<TEntity> Entities,
     bool CascadeSave,
     bool CascadeDelete,
-    bool InsertWhenUpdateMissing
+    bool InsertWhenUpdateMissing,
+    ConcurrencyMode Mode = ConcurrencyMode.Optimistic
 );
+
+/// <summary>One row version a save assigned, identified by the entity's CLR type name and its primary key.</summary>
+/// <remarks>
+/// <paramref name="Key"/> is the primary key serialized with the transport settings (<see cref="RemoteJson.Options"/>),
+/// which both sides produce the same way, so value-object keys and dialect differences round-trip unchanged.
+/// </remarks>
+/// <param name="EntityType">The CLR type name of the entity the version belongs to.</param>
+/// <param name="Key">The entity's primary key, serialized with the transport settings.</param>
+/// <param name="RowVersion">The row version the database assigned during the save.</param>
+public sealed record RemoteRowVersionEntry(string EntityType, string Key, byte[] RowVersion);
+
+/// <summary>Response body of a single insert (the row version the database assigned, or <c>null</c> when the table carries no rowversion column).</summary>
+public sealed record RemoteInsertResult(byte[]? RowVersion);
+
+/// <summary>Response body of a single update (the result, plus the row version the database assigned when the table carries one).</summary>
+public sealed record RemoteUpdateResult(bool Updated, byte[]? RowVersion);
+
+/// <summary>Response body of a graph save (the affected row count, plus the row versions assigned across the saved graph).</summary>
+/// <remarks>The version list is empty for tables with no rowversion column, so backends that do not carry versions simply return nothing to write back.</remarks>
+public sealed record RemoteSaveResult(int Affected, List<RemoteRowVersionEntry> RowVersions);
+
+/// <summary>
+/// Shared reflection over an entity graph for remote transport: the cascade navigations to walk, and the row version
+/// table (<see cref="RemoteRowVersionEntry"/>) the server collects after a save and the client writes back.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Both sides identify an entity the same way - CLR type name plus the primary key serialized with
+/// <see cref="RemoteJson.Options"/> - so this single place defines the correspondence between the two.
+/// The traversal is attribute-driven ([NavigationReference(Cascade=true)]) and therefore matches the child direction the
+/// direct-connection graph saver walks.
+/// </para>
+/// <para>
+/// It is public like the other transport types, because the server implementation is generated into a separate file that
+/// may be compiled into a project of its own.
+/// </para>
+/// </remarks>
+public static class RemoteEntityGraph
+{
+    private static readonly ConcurrentDictionary<Type, PropertyInfo[]> _cascadeNavigations = new();
+    private static readonly ConcurrentDictionary<Type, PropertyInfo?> _rowVersionProperties = new();
+    private static readonly ConcurrentDictionary<Type, PropertyInfo> _keyProperties = new();
+
+    /// <summary>Enumerates the cascade-target (child-direction) navigation properties.</summary>
+    public static PropertyInfo[] CascadeNavigations(Type entityType) =>
+        _cascadeNavigations.GetOrAdd(
+            entityType,
+            static type =>
+                type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                    .Where(property =>
+                        property.GetCustomAttribute<NavigationReferenceAttribute>()
+                            is { Cascade: true }
+                    )
+                    .ToArray()
+        );
+
+    /// <summary>Gets the rowversion (concurrency token) property, or <c>null</c> when the type has no such column.</summary>
+    public static PropertyInfo? RowVersionProperty(Type entityType) =>
+        _rowVersionProperties.GetOrAdd(
+            entityType,
+            static type =>
+                type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                    .FirstOrDefault(property =>
+                        property.GetCustomAttribute<StoreGeneratedColumnAttribute>() is not null
+                    )
+        );
+
+{{~ if generate_value_objects ~}}
+    /// <summary>Reads the row version the entity currently carries (<c>null</c> when the type has no rowversion column or the value is unset).</summary>
+    /// <remarks>The value is unwrapped when the property is a value object, because the transport always carries the raw bytes.</remarks>
+    public static byte[]? ReadRowVersion(EntityBase entity) =>
+        SqlParameterValue.Unwrap(RowVersionProperty(entity.GetType())?.GetValue(entity)) as byte[];
+
+    /// <summary>Writes a row version back to the entity (a no-op for a type without a rowversion column).</summary>
+    /// <remarks>The raw bytes are wrapped when the property is a value object, the counterpart of <see cref="ReadRowVersion"/>.</remarks>
+    public static void WriteRowVersion(EntityBase entity, byte[] rowVersion)
+    {
+        var property = RowVersionProperty(entity.GetType());
+        property?.SetValue(entity, SqlValueObjectActivator.Wrap(rowVersion, property.PropertyType));
+    }
+{{~ else ~}}
+    /// <summary>Reads the row version the entity currently carries (<c>null</c> when the type has no rowversion column or the value is unset).</summary>
+    public static byte[]? ReadRowVersion(EntityBase entity) =>
+        RowVersionProperty(entity.GetType())?.GetValue(entity) as byte[];
+
+    /// <summary>Writes a row version back to the entity (a no-op for a type without a rowversion column).</summary>
+    public static void WriteRowVersion(EntityBase entity, byte[] rowVersion) =>
+        RowVersionProperty(entity.GetType())?.SetValue(entity, rowVersion);
+{{~ end ~}}
+
+    /// <summary>Serializes the entity's primary key the way the row version table identifies it.</summary>
+    public static string KeyText(EntityBase entity) =>
+        JsonSerializer.Serialize(
+            KeyProperty(entity.GetType()).GetValue(entity),
+            RemoteJson.Options
+        );
+
+    /// <summary>Collects the row versions a save assigned across the graph (server side; deleted entities are skipped because there is no row left to version).</summary>
+    public static void CollectRowVersions(
+        EntityBase entity,
+        bool cascade,
+        List<RemoteRowVersionEntry> into
+    )
+    {
+        if (entity.IsRemoved)
+        {
+            return;
+        }
+
+        if (ReadRowVersion(entity) is byte[] rowVersion)
+        {
+            into.Add(
+                new RemoteRowVersionEntry(entity.GetType().Name, KeyText(entity), rowVersion)
+            );
+        }
+
+        if (!cascade)
+        {
+            return;
+        }
+
+        foreach (var property in CascadeNavigations(entity.GetType()))
+        {
+            var value = property.GetValue(entity);
+
+            if (value is EntityBase child)
+            {
+                CollectRowVersions(child, true, into);
+            }
+            else if (value is IEnumerable<EntityBase> children)
+            {
+                foreach (var item in children)
+                {
+                    if (item is not null)
+                    {
+                        CollectRowVersions(item, true, into);
+                    }
+                }
+            }
+        }
+    }
+
+    /// <summary>Indexes the row versions a save response carried, or returns <c>null</c> when there is nothing to write back.</summary>
+    public static Dictionary<(string EntityType, string Key), byte[]>? RowVersionLookup(
+        List<RemoteRowVersionEntry>? entries
+    )
+    {
+        if (entries is null || entries.Count == 0)
+        {
+            return null;
+        }
+
+        var lookup = new Dictionary<(string EntityType, string Key), byte[]>();
+
+        foreach (var entry in entries)
+        {
+            lookup[(entry.EntityType, entry.Key)] = entry.RowVersion;
+        }
+
+        return lookup;
+    }
+
+    /// <summary>Writes back the row version the response carried for this entity, if any (client side).</summary>
+    public static void ApplyRowVersion(
+        EntityBase entity,
+        Dictionary<(string EntityType, string Key), byte[]>? lookup
+    )
+    {
+        if (lookup is null || RowVersionProperty(entity.GetType()) is null)
+        {
+            return;
+        }
+
+        if (lookup.TryGetValue((entity.GetType().Name, KeyText(entity)), out var rowVersion))
+        {
+            WriteRowVersion(entity, rowVersion);
+        }
+    }
+
+    /// <summary>Gets the primary key property ([Key]) of the entity type.</summary>
+    private static PropertyInfo KeyProperty(Type entityType) =>
+        _keyProperties.GetOrAdd(
+            entityType,
+            static type =>
+                type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                    .FirstOrDefault(property =>
+                        property.GetCustomAttribute<KeyAttribute>() is not null
+                    )
+                ?? throw new InvalidOperationException(
+                    $"{type.Name} requires a property with a [Key] attribute."
+                )
+        );
+}
 
 /// <summary>
 /// Common base class for client implementations that call the remote surface (<see cref="IRemoteRepository{TEntity, TKey}"/>) over HTTP + JSON.
@@ -106,6 +329,11 @@ public sealed record RemoteSaveManyRequest<TEntity>(
 /// After a successful graph save (Save), the local entities' RowState is finalized with the same semantics as a direct
 /// connection (<c>EntityGraphSaver.AcceptChanges</c>), so swapping direct and remote implementations does not change
 /// the post-save state transitions.
+/// </para>
+/// <para>
+/// The concurrency policy (<see cref="ConcurrencyMode"/>) travels with the request, and Update / Save responses carry the
+/// row versions the save assigned, which are written back to the local entities. A remote client therefore ends up holding
+/// the same versions a direct connection would leave behind, and can keep saving the same graph without re-reading it.
 /// </para>
 /// </remarks>
 public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepository<TEntity, TKey>
@@ -195,24 +423,48 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         InvokeAsync<IReadOnlyList<TEntity>>("GetAll", null, cancellationToken);
 
     /// <summary>Inserts an entity.</summary>
-    public async Task InsertAsync(TEntity entity, CancellationToken cancellationToken = default) =>
-        await InvokeAsync<bool>(
+    /// <remarks>As on a direct connection, the row version the database assigned is written back to <paramref name="entity"/> when the table carries a rowversion column, so the inserted entity can be updated straight away without re-reading it.</remarks>
+    public async Task InsertAsync(TEntity entity, CancellationToken cancellationToken = default)
+    {
+        var result = await InvokeAsync<RemoteInsertResult>(
             "Insert",
             new RemoteEntityRequest<TEntity>(entity),
             cancellationToken
         );
 
+        if (result.RowVersion is byte[] rowVersion)
+        {
+            RemoteEntityGraph.WriteRowVersion(entity, rowVersion);
+        }
+    }
+
     /// <summary>Updates an entity (returns true when a matching row was updated).</summary>
-    public Task<bool> UpdateAsync(TEntity entity, CancellationToken cancellationToken = default)
+    /// <remarks>The policy travels with the request, so a table with a rowversion column behaves exactly as it does on a direct connection: an optimistic conflict surfaces as <see cref="SaveConflictException"/> (HTTP 409) and a successful update writes the new version back to <paramref name="entity"/>.</remarks>
+    /// <param name="entity">The entity to update.</param>
+    /// <param name="mode">The concurrency policy applied on the server for tables that have a rowversion column (no effect otherwise).</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    public async Task<bool> UpdateAsync(
+        TEntity entity,
+        ConcurrencyMode mode = ConcurrencyMode.Optimistic,
+        CancellationToken cancellationToken = default
+    )
     {
         // Reject updates that still carry values in unbounded binary columns before sending
         // (they are excluded from the server-side UPDATE and would be lost silently)
         UnboundedBinaryColumns.ThrowIfExcludedAssigned(entity);
-        return InvokeAsync<bool>(
+
+        var result = await InvokeAsync<RemoteUpdateResult>(
             "Update",
-            new RemoteEntityRequest<TEntity>(entity),
+            new RemoteUpdateRequest<TEntity>(entity, mode),
             cancellationToken
         );
+
+        if (result.RowVersion is byte[] rowVersion)
+        {
+            RemoteEntityGraph.WriteRowVersion(entity, rowVersion);
+        }
+
+        return result.Updated;
     }
 
     /// <summary>Deletes an entity by primary key (returns true when a matching row was deleted).</summary>
@@ -220,11 +472,13 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         InvokeAsync<bool>("Delete", new RemoteIdRequest<TKey>(id), cancellationToken);
 
     /// <summary>Saves inserts, updates, and deletes according to RowState in a single transaction (cascades to children by default).</summary>
+    /// <remarks><paramref name="mode"/> travels with the request, and the response carries the row versions the save assigned so that the local graph ends up with the same versions a direct connection would leave behind.</remarks>
     public async Task<int> SaveAsync(
         TEntity entity,
         bool cascadeSave = true,
         bool cascadeDelete = true,
         bool insertWhenUpdateMissing = false,
+        ConcurrencyMode mode = ConcurrencyMode.Optimistic,
         CancellationToken cancellationToken = default
     )
     {
@@ -232,23 +486,26 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         // in unbounded binary columns (cascade targets are traversed as well)
         GuardUnboundedBinaryOnSave(entity, cascadeSave);
 
-        var affected = await InvokeAsync<int>(
+        var result = await InvokeAsync<RemoteSaveResult>(
             "Save",
-            new RemoteSaveRequest<TEntity>(entity, cascadeSave, cascadeDelete, insertWhenUpdateMissing),
+            new RemoteSaveRequest<TEntity>(entity, cascadeSave, cascadeDelete, insertWhenUpdateMissing, mode),
             cancellationToken
         );
 
-        // As with a direct connection (EntityGraphSaver), finalize the local RowState after a successful save
-        AcceptChanges(entity, cascadeSave);
-        return affected;
+        // As with a direct connection (EntityGraphSaver), finalize the local RowState after a successful save,
+        // writing back the row versions the response carried along the same traversal
+        AcceptChanges(entity, cascadeSave, RemoteEntityGraph.RowVersionLookup(result.RowVersions));
+        return result.Affected;
     }
 
     /// <summary>Saves multiple aggregate roots together in a single transaction (atomic: all succeed or all roll back).</summary>
+    /// <remarks><paramref name="mode"/> travels with the request, and the response carries the row versions the save assigned so that the local graphs end up with the same versions a direct connection would leave behind.</remarks>
     public async Task<int> SaveAsync(
         IEnumerable<TEntity> entities,
         bool cascadeSave = true,
         bool cascadeDelete = true,
         bool insertWhenUpdateMissing = false,
+        ConcurrencyMode mode = ConcurrencyMode.Optimistic,
         CancellationToken cancellationToken = default
     )
     {
@@ -261,18 +518,20 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
             GuardUnboundedBinaryOnSave(entity, cascadeSave);
         }
 
-        var affected = await InvokeAsync<int>(
+        var result = await InvokeAsync<RemoteSaveResult>(
             "SaveMany",
-            new RemoteSaveManyRequest<TEntity>(list, cascadeSave, cascadeDelete, insertWhenUpdateMissing),
+            new RemoteSaveManyRequest<TEntity>(list, cascadeSave, cascadeDelete, insertWhenUpdateMissing, mode),
             cancellationToken
         );
 
+        var rowVersions = RemoteEntityGraph.RowVersionLookup(result.RowVersions);
+
         foreach (var entity in list)
         {
-            AcceptChanges(entity, cascadeSave);
+            AcceptChanges(entity, cascadeSave, rowVersions);
         }
 
-        return affected;
+        return result.Affected;
     }
 
     /// <summary>Verifies that no updated (Updated) entity in the graph to save still carries values in unbounded binary columns (same child-direction traversal as AcceptChanges).</summary>
@@ -288,7 +547,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
             return;
         }
 
-        foreach (var property in CascadeNavigationProperties(entity.GetType()))
+        foreach (var property in RemoteEntityGraph.CascadeNavigations(entity.GetType()))
         {
             var value = property.GetValue(entity);
 
@@ -309,12 +568,13 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         }
     }
 
-    /// <summary>Per-type cache of cascade navigation properties ([NavigationReference(Cascade=true)]).</summary>
-    private static readonly ConcurrentDictionary<Type, PropertyInfo[]> _cascadeNavigations = new();
-
-    /// <summary>Finalizes saved entities to Unchanged after commit (same semantics as the direct-connection EntityGraphSaver.AcceptChanges).</summary>
-    /// <remarks>Deleted (Removed) entities keep their state. When cascading, the child-direction [NavigationReference] navigations are finalized recursively.</remarks>
-    private static void AcceptChanges(EntityBase entity, bool cascade)
+    /// <summary>Finalizes saved entities to Unchanged after commit (same semantics as the direct-connection EntityGraphSaver.AcceptChanges), writing back the row versions the response carried.</summary>
+    /// <remarks>Deleted (Removed) entities keep their state. When cascading, the child-direction [NavigationReference] navigations are finalized recursively. The row version write-back rides along this traversal because it visits exactly the entities the server collected versions for.</remarks>
+    private static void AcceptChanges(
+        EntityBase entity,
+        bool cascade,
+        Dictionary<(string EntityType, string Key), byte[]>? rowVersions
+    )
     {
         if (entity.IsRemoved)
         {
@@ -322,19 +582,20 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         }
 
         entity.MarkUnchanged();
+        RemoteEntityGraph.ApplyRowVersion(entity, rowVersions);
 
         if (!cascade)
         {
             return;
         }
 
-        foreach (var property in CascadeNavigationProperties(entity.GetType()))
+        foreach (var property in RemoteEntityGraph.CascadeNavigations(entity.GetType()))
         {
             var value = property.GetValue(entity);
 
             if (value is EntityBase child)
             {
-                AcceptChanges(child, true);
+                AcceptChanges(child, true, rowVersions);
             }
             else if (value is IEnumerable<EntityBase> children)
             {
@@ -342,25 +603,12 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
                 {
                     if (item is not null)
                     {
-                        AcceptChanges(item, true);
+                        AcceptChanges(item, true, rowVersions);
                     }
                 }
             }
         }
     }
-
-    /// <summary>Enumerates the cascade-target (child-direction) navigation properties.</summary>
-    private static PropertyInfo[] CascadeNavigationProperties(Type entityType) =>
-        _cascadeNavigations.GetOrAdd(
-            entityType,
-            static type =>
-                type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
-                    .Where(property =>
-                        property.GetCustomAttribute<NavigationReferenceAttribute>()
-                            is { Cascade: true }
-                    )
-                    .ToArray()
-        );
 {{~ if exclude_unbounded_binary || runtime_package_export ~}}
 
     /// <summary>Serializes the primary key into a string for the URL query (<c>?id=</c>) using the same JSON rules as the envelopes (value objects use their wrapped value, numbers as-is, strings/Guids quoted).</summary>
@@ -500,6 +748,10 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     /// <summary>Gets the unbounded binary columns excluded from SELECT / UPDATE (marked with <see cref="UnboundedBinaryColumnAttribute"/>). Empty when there are no excluded columns.</summary>
     public required IReadOnlyList<PropertyInfo> ExcludedProperties { get; init; }
 
+    /// <summary>Gets the rowversion (concurrency token) property, or <c>null</c> when the table has no such column.</summary>
+    /// <remarks>Resolved from <see cref="StoreGeneratedColumnAttribute"/>. A table carries at most one rowversion column, so the first match is used.</remarks>
+    public PropertyInfo? RowVersionProperty { get; init; }
+
 {{~ if repositories || ef_core ~}}
     /// <summary>Gets the (property, column name) pairs of the SELECT columns, resolved at build time. Row mapping enumerates this instead of reflecting for column names per row.</summary>
     public required IReadOnlyList<(PropertyInfo Property, string ColumnName)> SelectColumns { get; init; }
@@ -540,6 +792,20 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
 
     /// <summary>Gets the DELETE statement.</summary>
     public required string DeleteSql { get; init; }
+{{~ end ~}}
+{{~ if repositories && repository_dialect == "sqlserver" ~}}
+
+    /// <summary>Gets the INSERT statement that returns the row version the database assigned (<c>null</c> when the table has no rowversion column).</summary>
+    public string? InsertReturningSql { get; init; }
+
+    /// <summary>Gets the UPDATE statement guarded by the row version the entity was read with, returning the new row version (<c>null</c> when the table has no rowversion column).</summary>
+    public string? UpdateVersionedSql { get; init; }
+
+    /// <summary>Gets the UPDATE statement without the row version guard, returning the new row version (<c>null</c> when the table has no rowversion column). Used by <see cref="ConcurrencyMode.ForceOverwrite"/>.</summary>
+    public string? UpdateForcedSql { get; init; }
+
+    /// <summary>Gets the DELETE statement guarded by the row version the entity was read with (<c>null</c> when the table has no rowversion column).</summary>
+    public string? DeleteVersionedSql { get; init; }
 {{~ end ~}}
 
     /// <summary>Gets the cascade-target child navigations.</summary>
@@ -604,7 +870,6 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
             excludedColumns.Count == 0
                 ? columns
                 : columns.Where(property => !excludedColumns.Contains(property)).ToList();
-{{~ if repositories ~}}
         // Columns whose values are generated by the database (rowversion / timestamp etc., StoreGeneratedColumnAttribute)
         // are excluded from INSERT / UPDATE. The database assigns them, so an explicit write fails at runtime
         // (e.g. SQL Server timestamp columns). They are still fetched by SELECT
@@ -613,6 +878,10 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
                 property.GetCustomAttribute<StoreGeneratedColumnAttribute>() is not null
             )
             .ToList();
+        // A store-generated column doubles as the table's concurrency token; a table carries at most one of them
+        var rowVersionProperty =
+            storeGeneratedColumns.Count == 0 ? null : storeGeneratedColumns[0];
+{{~ if repositories ~}}
         // INSERT / BulkInsert targets are all columns minus store-generated columns (identical to all columns when there are none)
         var insertProperties =
             storeGeneratedColumns.Count == 0
@@ -631,6 +900,16 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         var updateAssignments = nonKeyProperties.Select(property =>
             $"{{ quote_open }}{GetColumnName(property)}{{ quote_close }} = @{property.Name}"
         );
+        var insertColumnList = string.Join(", ", insertProperties.Select(property => $"{{ quote_open }}{GetColumnName(property)}{{ quote_close }}"));
+        var insertValueList = string.Join(", ", insertProperties.Select(property => $"@{property.Name}"));
+{{~ end ~}}
+{{~ if repositories && repository_dialect == "sqlserver" ~}}
+        // Quoted rowversion column, non-null only for tables that carry one. The optimistic concurrency statements below
+        // are built solely for those tables (every other table keeps exactly the statements it had before)
+        var rowVersionColumn =
+            rowVersionProperty is null
+                ? null
+                : $"{{ quote_open }}{GetColumnName(rowVersionProperty)}{{ quote_close }}";
 {{~ end ~}}
         var cascades = allProperties
             .Select(property =>
@@ -666,6 +945,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
             AllProperties = columns,
             SelectProperties = selectProperties,
             ExcludedProperties = excludedColumns,
+            RowVersionProperty = rowVersionProperty,
 {{~ if repositories || ef_core ~}}
             // Resolve column names for row mapping at build time to eliminate per-row [Column] reflection
             SelectColumns = selectProperties.Select(property => (property, GetColumnName(property))).ToList(),
@@ -688,10 +968,28 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
             SelectAllSql = $"SELECT {columnList} FROM {tableName};",
             SelectByIdSql = $"SELECT {columnList} FROM {tableName} WHERE {{ quote_open }}{keyColumnName}{{ quote_close }} = @id;",
             InsertSql =
-                $"INSERT INTO {tableName} ({string.Join(", ", insertProperties.Select(property => $"{{ quote_open }}{GetColumnName(property)}{{ quote_close }}"))}) VALUES ({string.Join(", ", insertProperties.Select(property => $"@{property.Name}"))});",
+                $"INSERT INTO {tableName} ({insertColumnList}) VALUES ({insertValueList});",
             UpdateSql =
                 $"UPDATE {tableName} SET {string.Join(", ", updateAssignments)} WHERE {{ quote_open }}{keyColumnName}{{ quote_close }} = @id;",
             DeleteSql = $"DELETE FROM {tableName} WHERE {{ quote_open }}{keyColumnName}{{ quote_close }} = @id;",
+{{~ end ~}}
+{{~ if repositories && repository_dialect == "sqlserver" ~}}
+            InsertReturningSql =
+                rowVersionColumn is null
+                    ? null
+                    : $"INSERT INTO {tableName} ({insertColumnList}) OUTPUT INSERTED.{rowVersionColumn} VALUES ({insertValueList});",
+            UpdateVersionedSql =
+                rowVersionColumn is null
+                    ? null
+                    : $"UPDATE {tableName} SET {string.Join(", ", updateAssignments)} OUTPUT INSERTED.{rowVersionColumn} WHERE {{ quote_open }}{keyColumnName}{{ quote_close }} = @id AND {rowVersionColumn} = @originalRowVersion;",
+            UpdateForcedSql =
+                rowVersionColumn is null
+                    ? null
+                    : $"UPDATE {tableName} SET {string.Join(", ", updateAssignments)} OUTPUT INSERTED.{rowVersionColumn} WHERE {{ quote_open }}{keyColumnName}{{ quote_close }} = @id;",
+            DeleteVersionedSql =
+                rowVersionColumn is null
+                    ? null
+                    : $"DELETE FROM {tableName} WHERE {{ quote_open }}{keyColumnName}{{ quote_close }} = @id AND {rowVersionColumn} = @originalRowVersion;",
 {{~ end ~}}
             CascadeNavigations = cascades,
         };
@@ -1291,6 +1589,24 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         );
     }
 
+{{~ if repository_dialect == "sqlserver" ~}}
+    /// <summary>Binds the row version the entity was read with to the @originalRowVersion parameter (the optimistic concurrency guard of UPDATE / DELETE).</summary>
+    /// <remarks>
+    /// Only called for tables that have a rowversion column. A <c>null</c> value (an entity that was never read from the
+    /// database) binds as DBNull and matches no row, so the save is reported as a conflict rather than silently overwriting.
+    /// </remarks>
+    public void BindRowVersionParameter({{ sql_command_type }} command, EntityBase entity)
+    {
+        var property = RowVersionProperty!;
+        AddColumnParameter(
+            command,
+            "@originalRowVersion",
+            property,
+            {{ if generate_value_objects }}SqlParameterValue.Unwrap(property.GetValue(entity)){{ else }}property.GetValue(entity){{ end }}
+        );
+    }
+
+{{~ end ~}}
     /// <summary>Binds an externally supplied primary key value to the @id parameter (used by GetById/Delete).</summary>
     public void BindKeyParameter({{ sql_command_type }} command, object? id)
     {
@@ -1664,6 +1980,99 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     }
 }
 
+{{~ if repositories && repository_dialect == "sqlserver" ~}}
+/// <summary>Collects the row versions the database assigned during a save so that they can be written back once the transaction commits.</summary>
+/// <remarks>
+/// A rowversion is assigned while the transaction is still open, so writing it straight back to the entity would leave it
+/// carrying a version that never became visible if the transaction is rolled back afterwards. The saver records the pairs
+/// here instead and <see cref="Apply"/> settles them after a successful commit.
+/// </remarks>
+{{ infra_visibility }} sealed class RowVersionCollector
+{
+    private readonly List<(EntityBase Entity, byte[] Version)> _versions = new();
+
+    /// <summary>Records the raw row version bytes the database assigned to an entity (converting them to the property type is left to <see cref="Apply"/>).</summary>
+    public void Record(EntityBase entity, byte[] version) => _versions.Add((entity, version));
+
+    /// <summary>Writes every recorded row version back to its entity (call only after the save transaction has committed).</summary>
+    public void Apply()
+    {
+        foreach (var (entity, version) in _versions)
+        {
+{{~ if generate_value_objects ~}}
+            var property = EntitySaveMetadata.For(entity.GetType()).RowVersionProperty!;
+
+            // The raw bytes are wrapped here when the property is a value object type
+            property.SetValue(entity, SqlValueObjectActivator.Wrap(version, property.PropertyType));
+{{~ else ~}}
+            EntitySaveMetadata.For(entity.GetType()).RowVersionProperty!.SetValue(entity, version);
+{{~ end ~}}
+        }
+    }
+}
+
+/// <summary>Optimistic concurrency helpers shared by the direct CRUD methods and the graph saver, for tables that carry a rowversion (concurrency token) column.</summary>
+{{ infra_visibility }} static class RowVersionConcurrency
+{
+    /// <summary>Selects the UPDATE statement for the given mode (the version guard applies to <see cref="ConcurrencyMode.Optimistic"/> only).</summary>
+    public static string UpdateSql(EntitySaveMetadata metadata, ConcurrencyMode mode) =>
+        mode == ConcurrencyMode.Optimistic
+            ? metadata.UpdateVersionedSql!
+            : metadata.UpdateForcedSql!;
+
+    /// <summary>Binds the UPDATE parameters, adding the version guard parameter for <see cref="ConcurrencyMode.Optimistic"/>.</summary>
+    public static void BindUpdate(
+        EntitySaveMetadata metadata,
+        {{ sql_command_type }} command,
+        EntityBase entity,
+        ConcurrencyMode mode
+    )
+    {
+        metadata.BindUpdateParameters(command, entity);
+
+        if (mode == ConcurrencyMode.Optimistic)
+        {
+            metadata.BindRowVersionParameter(command, entity);
+        }
+    }
+
+    /// <summary>
+    /// Returns whether the row the entity's primary key points at currently exists. Used after a guarded statement affected
+    /// no rows, to tell "the row is gone" (the pre-existing not-found contract) apart from "the row version is stale".
+    /// </summary>
+    public static async Task<bool> RowExistsAsync(
+        EntitySaveMetadata metadata,
+        EntityBase entity,
+        {{ sql_connection_type }} connection,
+        {{ sql_transaction_type }}? transaction,
+        CancellationToken cancellationToken
+    )
+    {
+        await using var command = new {{ sql_command_type }}(metadata.SelectByIdSql, connection);
+        command.Transaction = transaction;
+        metadata.BindEntityKeyParameter(command, entity);
+
+        // ExecuteScalar yields null only when the SELECT produced no row at all (a NULL first column comes back as DBNull)
+        return await command.ExecuteScalarAsync(cancellationToken) is not null;
+    }
+
+    /// <summary>Builds the conflict reported when the row still exists but its version moved on since the entity was read.</summary>
+    /// <param name="metadata">The metadata of the entity's type.</param>
+    /// <param name="entity">The entity whose save was rejected.</param>
+    /// <param name="operation">The lowercase verb of the rejected operation ("update" or "delete").</param>
+    public static SaveConflictException Conflict(
+        EntitySaveMetadata metadata,
+        EntityBase entity,
+        string operation
+    ) =>
+        SaveConflictException.Modified(
+            entity.GetType(),
+            metadata.KeyProperty.GetValue(entity),
+            operation
+        );
+}
+
+{{~ end ~}}
 /// <summary>Internal engine that saves an entity graph in a single transaction according to RowState.</summary>
 {{ infra_visibility }} static class EntityGraphSaver
 {
@@ -1689,7 +2098,9 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         bool insertWhenUpdateMissing,
         CancellationToken cancellationToken,
         SaveHookSession? hooks = null,
-        bool changesAlreadyVerified = false
+        bool changesAlreadyVerified = false{{ if repository_dialect == "sqlserver" }},
+        ConcurrencyMode mode = ConcurrencyMode.Optimistic,
+        RowVersionCollector? versions = null{{ end }}
     )
     {
         if (!changesAlreadyVerified && !HasChanges(entity, cascadeSave))
@@ -1711,7 +2122,8 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
                         connection,
                         transaction,
                         cancellationToken,
-                        hooks
+                        hooks{{ if repository_dialect == "sqlserver" }},
+                        mode{{ end }}
                     );
                 }
             }
@@ -1730,13 +2142,12 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
                 return rows;
             }
 
-            rows += await ExecuteAsync(
+            rows += await DeleteEntityAsync(
                 entity,
-                meta => meta.DeleteSql,
-                static (meta, command, e) => meta.BindEntityKeyParameter(command, e),
                 connection,
                 transaction,
-                cancellationToken
+                cancellationToken{{ if repository_dialect == "sqlserver" }},
+                mode{{ end }}
             );
 
             // After(Delete) fires immediately after the DML (before commit)
@@ -1756,13 +2167,12 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
                 || await hooks.InvokeBeforeAsync(entity, SaveOperation.Insert, cancellationToken)
             )
             {
-                rows += await ExecuteAsync(
+                rows += await InsertEntityAsync(
                     entity,
-                    meta => meta.InsertSql,
-                    static (meta, command, e) => meta.BindInsertParameters(command, e),
                     connection,
                     transaction,
-                    cancellationToken
+                    cancellationToken{{ if repository_dialect == "sqlserver" }},
+                    versions{{ end }}
                 );
 
                 if (hooks is not null)
@@ -1788,7 +2198,9 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
                     connection,
                     transaction,
                     insertWhenUpdateMissing,
-                    cancellationToken
+                    cancellationToken{{ if repository_dialect == "sqlserver" }},
+                    mode,
+                    versions{{ end }}
                 );
                 rows += affected;
 
@@ -1816,7 +2228,10 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
                     cascadeDelete,
                     insertWhenUpdateMissing,
                     cancellationToken,
-                    hooks
+                    hooks{{ if repository_dialect == "sqlserver" }},
+                    changesAlreadyVerified: false,
+                    mode,
+                    versions{{ end }}
                 );
             }
         }
@@ -1866,14 +2281,22 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         {{ sql_connection_type }} connection,
         {{ sql_transaction_type }} transaction,
         CancellationToken cancellationToken,
-        SaveHookSession? hooks = null
+        SaveHookSession? hooks = null{{ if repository_dialect == "sqlserver" }},
+        ConcurrencyMode mode = ConcurrencyMode.Optimistic{{ end }}
     )
     {
         var rows = 0;
 
         foreach (var child in EnumerateCascadeChildren(entity))
         {
-            rows += await DeleteGraphAsync(child, connection, transaction, cancellationToken, hooks);
+            rows += await DeleteGraphAsync(
+                child,
+                connection,
+                transaction,
+                cancellationToken,
+                hooks{{ if repository_dialect == "sqlserver" }},
+                mode{{ end }}
+            );
         }
 
         // Before(Delete) fires from the subtree's children upward. On false, "the children are gone but this node remains" (the consequence of a standalone skip)
@@ -1886,13 +2309,12 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
             return rows;
         }
 
-        rows += await ExecuteAsync(
+        rows += await DeleteEntityAsync(
             entity,
-            meta => meta.DeleteSql,
-            static (meta, command, e) => meta.BindEntityKeyParameter(command, e),
             connection,
             transaction,
-            cancellationToken
+            cancellationToken{{ if repository_dialect == "sqlserver" }},
+            mode{{ end }}
         );
 
         if (hooks is not null)
@@ -1903,15 +2325,169 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         return rows;
     }
 
+    /// <summary>Inserts a single row{{ if repository_dialect == "sqlserver" }}, capturing the row version the database assigned when the table carries one{{ end }}.</summary>
+    private static {{ if repository_dialect == "sqlserver" }}async {{ end }}Task<int> InsertEntityAsync(
+        EntityBase entity,
+        {{ sql_connection_type }} connection,
+        {{ sql_transaction_type }} transaction,
+        CancellationToken cancellationToken{{ if repository_dialect == "sqlserver" }},
+        RowVersionCollector? versions{{ end }}
+    )
+    {
+{{~ if repository_dialect == "sqlserver" ~}}
+        var metadata = EntitySaveMetadata.For(entity.GetType());
+
+        if (metadata.RowVersionProperty is not null)
+        {
+            // The INSERT returns the version the database generated; it is written back to the entity after the commit
+            var version = await ExecuteReturningAsync(
+                entity,
+                meta => meta.InsertReturningSql!,
+                static (meta, command, e) => meta.BindInsertParameters(command, e),
+                connection,
+                transaction,
+                cancellationToken
+            );
+
+            if (version is byte[] newVersion)
+            {
+                versions?.Record(entity, newVersion);
+            }
+
+            return 1;
+        }
+
+{{~ end ~}}
+        return {{ if repository_dialect == "sqlserver" }}await {{ end }}ExecuteAsync(
+            entity,
+            meta => meta.InsertSql,
+            static (meta, command, e) => meta.BindInsertParameters(command, e),
+            connection,
+            transaction,
+            cancellationToken
+        );
+    }
+
+    /// <summary>Deletes a single row{{ if repository_dialect == "sqlserver" }}, guarded by the row version the entity was read with when the table carries one{{ end }}.</summary>
+    private static {{ if repository_dialect == "sqlserver" }}async {{ end }}Task<int> DeleteEntityAsync(
+        EntityBase entity,
+        {{ sql_connection_type }} connection,
+        {{ sql_transaction_type }} transaction,
+        CancellationToken cancellationToken{{ if repository_dialect == "sqlserver" }},
+        ConcurrencyMode mode{{ end }}
+    )
+    {
+{{~ if repository_dialect == "sqlserver" ~}}
+        var metadata = EntitySaveMetadata.For(entity.GetType());
+
+        if (metadata.RowVersionProperty is not null && mode == ConcurrencyMode.Optimistic)
+        {
+            var affected = await ExecuteAsync(
+                entity,
+                meta => meta.DeleteVersionedSql!,
+                static (meta, command, e) =>
+                {
+                    meta.BindEntityKeyParameter(command, e);
+                    meta.BindRowVersionParameter(command, e);
+                },
+                connection,
+                transaction,
+                cancellationToken
+            );
+
+            // Zero affected rows is ambiguous: either the row is already gone (deleting a row that is not there has always
+            // been tolerated silently) or someone else changed it after it was read. Probing the row tells the two apart
+            if (
+                affected == 0
+                && await RowVersionConcurrency.RowExistsAsync(
+                    metadata,
+                    entity,
+                    connection,
+                    transaction,
+                    cancellationToken
+                )
+            )
+            {
+                throw RowVersionConcurrency.Conflict(metadata, entity, "delete");
+            }
+
+            return affected;
+        }
+
+{{~ end ~}}
+        return {{ if repository_dialect == "sqlserver" }}await {{ end }}ExecuteAsync(
+            entity,
+            meta => meta.DeleteSql,
+            static (meta, command, e) => meta.BindEntityKeyParameter(command, e),
+            connection,
+            transaction,
+            cancellationToken
+        );
+    }
+
     /// <summary>Executes the update and returns the affected row count and the operation actually performed (Insert when switched).</summary>
     private static async Task<(int Rows, SaveOperation Performed)> UpdateAsync(
         EntityBase entity,
         {{ sql_connection_type }} connection,
         {{ sql_transaction_type }} transaction,
         bool insertWhenUpdateMissing,
-        CancellationToken cancellationToken
+        CancellationToken cancellationToken{{ if repository_dialect == "sqlserver" }},
+        ConcurrencyMode mode,
+        RowVersionCollector? versions{{ end }}
     )
     {
+        var metadata = EntitySaveMetadata.For(entity.GetType());
+{{~ if repository_dialect == "sqlserver" ~}}
+        int affected;
+
+        if (metadata.RowVersionProperty is not null)
+        {
+            // The guarded UPDATE returns the version the database generated; a null result means it matched no row
+            var version = await ExecuteReturningAsync(
+                entity,
+                meta => RowVersionConcurrency.UpdateSql(meta, mode),
+                (meta, command, e) => RowVersionConcurrency.BindUpdate(meta, command, e, mode),
+                connection,
+                transaction,
+                cancellationToken
+            );
+
+            if (version is byte[] newVersion)
+            {
+                versions?.Record(entity, newVersion);
+                return (1, SaveOperation.Update);
+            }
+
+            // Nothing matched: probing the row separates "the row is gone" (handled below like any missing record) from
+            // "someone else changed it after it was read", which must never be silently switched to an INSERT
+            if (
+                await RowVersionConcurrency.RowExistsAsync(
+                    metadata,
+                    entity,
+                    connection,
+                    transaction,
+                    cancellationToken
+                )
+            )
+            {
+                throw RowVersionConcurrency.Conflict(metadata, entity, "update");
+            }
+
+            affected = 0;
+        }
+        else
+        {
+            affected = await ExecuteAsync(
+                entity,
+                meta => meta.UpdateSql,
+                static (meta, command, e) => meta.BindUpdateParameters(command, e),
+                connection,
+                transaction,
+                cancellationToken
+            );
+        }
+{{~ else ~}}
+
         var affected = await ExecuteAsync(
             entity,
             meta => meta.UpdateSql,
@@ -1920,6 +2496,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
             transaction,
             cancellationToken
         );
+{{~ end ~}}
 
         if (affected != 0)
         {
@@ -1930,22 +2507,40 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         // switch to INSERT or report it as a conflict
         if (insertWhenUpdateMissing)
         {
-            var inserted = await ExecuteAsync(
+            var inserted = await InsertEntityAsync(
                 entity,
-                meta => meta.InsertSql,
-                static (meta, command, e) => meta.BindInsertParameters(command, e),
                 connection,
                 transaction,
-                cancellationToken
+                cancellationToken{{ if repository_dialect == "sqlserver" }},
+                versions{{ end }}
             );
             return (inserted, SaveOperation.Insert);
         }
 
-        var metadata = EntitySaveMetadata.For(entity.GetType());
-        throw new SaveConflictException(
-            $"The record to update was not found ({entity.GetType().Name}, key {metadata.KeyProperty.GetValue(entity)}). It may have been deleted by another user."
+        throw SaveConflictException.NotFound(
+            entity.GetType(),
+            metadata.KeyProperty.GetValue(entity)
         );
     }
+{{~ if repository_dialect == "sqlserver" ~}}
+
+    /// <summary>Executes a statement whose OUTPUT clause returns a single value, yielding <c>null</c> when it matched no row.</summary>
+    private static async Task<object?> ExecuteReturningAsync(
+        EntityBase entity,
+        Func<EntitySaveMetadata, string> sqlSelector,
+        Action<EntitySaveMetadata, {{ sql_command_type }}, EntityBase> bind,
+        {{ sql_connection_type }} connection,
+        {{ sql_transaction_type }} transaction,
+        CancellationToken cancellationToken
+    )
+    {
+        var metadata = EntitySaveMetadata.For(entity.GetType());
+
+        await using var command = new {{ sql_command_type }}(sqlSelector(metadata), connection, transaction);
+        bind(metadata, command, entity);
+        return await command.ExecuteScalarAsync(cancellationToken);
+    }
+{{~ end ~}}
 
     private static async Task<int> ExecuteAsync(
         EntityBase entity,
