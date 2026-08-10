@@ -543,6 +543,7 @@ app.Run();
 - **直列化**はエンティティの JSON 往復（`ToJson` / `Clone`）と同じ意味論（VO は内包値・RowState 込み・親参照ナビは循環しない）で、クライアント・サーバーが共有の `RemoteJson.Options` を使います
 - **名前付きクエリは実装方式（簡易 DSL／生 SQL／手動実装）に依らず全部**リモート面経由で呼び出せます（実装の実体はサーバー側のリポジトリ）
 - **例外は型が復元されます**: サーバーの `SaveConflictException` は HTTP 409 を介してクライアントでも `SaveConflictException` として送出され（直結時と同じ catch が機能）、その他のサーバー例外は `RemoteRepositoryException`（ステータスコード・メッセージ保持）になります
+- **リクエストを解釈できない場合は 500 ではなく 400 になります**。リクエスト自体の読み取り中に失敗するもの（不正な JSON・空ボディ・JSON でない Content-Type・型不一致・値オブジェクトの検証違反、バイナリエンドポイントの `?id=` 欠落・復元不能）はクライアントが送った内容の問題なので、HTTP 400＋`RemoteError`（`Type` は `"BadRequest"`）を返します（クライアントは `StatusCode` が 400 の `RemoteRepositoryException` を送出）。400 のメッセージにはクライアント自身のペイロードに関する情報しか載らず、サーバー側のログ出力も `OnServerError` フックも実行されません（どちらも 500 専用）。サーバー基盤が拒否したリクエスト（`BadHttpRequestException`。例: リクエストボディのサイズ上限超過）は、その例外が持つステータスコード（413 など）をそのまま返します
 - **グラフ保存（Save）成功後はローカルの RowState も確定**します（直結時と同じ挙動）
 - **500 応答にはサーバー側例外のメッセージがそのまま載ります**。これは意図的な設計で、クライアントが失敗内容を復元し「直結時と同じ catch」を成立させるための情報です。スタックトレースを含む例外全体はサーバー側だけに記録されます（`ILoggerFactory` 経由・カテゴリ `QuickER.RemoteServer`。ロギング未構成のホストでは何もしません）。信頼境界の外へ公開する場合は、認可か例外変換ミドルウェアを併用して内部情報が応答へ漏れないようにしてください
 - 認証・TLS はスコープ外です。クライアントは `AddGeneratedHttpRemoteRepositories(Func<IServiceProvider, HttpClient>)` で認証ハンドラ付きの HttpClient を構成し、サーバーは `MapGeneratedRemoteEndpoints()` の戻り値（`RouteGroupBuilder`）へ ASP.NET Core の認可を付与してください
@@ -556,9 +557,9 @@ app.Run();
 
 | 動詞・URL | 意味 | 応答 |
 |---|---|---|
-| `GET {prefix}/{エンティティ}/{列名}?id=` | ダウンロード（本文を宛先へストリーム） | 200＋`application/octet-stream`（空 blob も 200）／行なし・NULL は **404**（クライアントで `false`） |
-| `PUT {prefix}/{エンティティ}/{列名}?id=` | アップロード（生ボディ・`Content-Length` 必須） | 成功 **204**／行なし **404**（`false`）／`Content-Length` 欠落（chunked）は **411** |
-| `DELETE {prefix}/{エンティティ}/{列名}?id=` | 列を `NULL` へ（`Write(id, null)` 相当） | 成功 204／行なし 404 |
+| `GET {prefix}/{エンティティ}/{列名}?id=` | ダウンロード（本文を宛先へストリーム） | 200＋`application/octet-stream`（空 blob も 200）／行なし・NULL は **404**（クライアントで `false`）／`id` 欠落・不正は **400** |
+| `PUT {prefix}/{エンティティ}/{列名}?id=` | アップロード（生ボディ・`Content-Length` 必須） | 成功 **204**／行なし **404**（`false`）／`Content-Length` 欠落（chunked）は **411**／`id` 欠落・不正は **400** |
+| `DELETE {prefix}/{エンティティ}/{列名}?id=` | 列を `NULL` へ（`Write(id, null)` 相当） | 成功 204／行なし 404／`id` 欠落・不正は **400** |
 
 - **キーは URL クエリ `?id=`** で運びます（本文は blob 本体に使うため）。VO キーは JSON エンベロープと同一規則（内包値）で直列化されます。
 - **0 バイトの PUT（空ボディ）と `NULL` 化（DELETE）は構造的に区別**されます（前者は `Read` が `true`＋空・後者は `false`）。

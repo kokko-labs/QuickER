@@ -7700,7 +7700,7 @@ public sealed class RemoteRepositoryException : Exception
 /// <summary>Structured payload for transport errors (server to client; the type restores the exception type on the client side).</summary>
 public sealed class RemoteError
 {
-    /// <summary>Gets or sets the error kind ("SaveConflict" = optimistic conflict / "Error" = anything else).</summary>
+    /// <summary>Gets or sets the error kind ("SaveConflict" = optimistic conflict / "BadRequest" = the request could not be interpreted / "Error" = anything else).</summary>
     public string Type { get; set; } = string.Empty;
 
     /// <summary>Gets or sets the server-side exception message.</summary>

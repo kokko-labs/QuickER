@@ -4,6 +4,7 @@ using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Net.Http.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
@@ -417,6 +418,58 @@ public sealed class BinaryColumnRemoteRuntimeTests : IAsyncLifetime
         (await Documents.ReadPayloadAsync(1, afterPut, Ct))
             .Should()
             .BeFalse("411 で拒否されたため payload は書き込まれない");
+    }
+
+    /// <summary>
+    /// 13. バイナリエンドポイントの <c>id</c> 欠落はリクエスト解釈の失敗＝400（従来は 500 だった経路の回帰防止）。
+    /// 生成クライアントは必ず id を付けるため、素の <see cref="HttpClient"/> で直接送って観測する。
+    /// </summary>
+    [Fact(DisplayName = "[Binary/Remote] 13: id 欠落の GET/DELETE は 400（BadRequest）になる")]
+    public async Task BinaryEndpoints_MissingId_ReturnsBadRequest()
+    {
+        await SeedAsync(1, Doc1Payload, Doc1Thumb);
+
+        var baseUrl = _app!.Urls.First();
+        using var raw = new HttpClient();
+
+        using var getResponse = await raw.GetAsync($"{baseUrl}/quicker/Document/Payload", Ct);
+        getResponse.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await getResponse.Content.ReadFromJsonAsync<RemoteError>(Ct))!
+            .Type.Should()
+            .Be("BadRequest");
+
+        using var deleteResponse = await raw.DeleteAsync($"{baseUrl}/quicker/Document/Payload", Ct);
+        deleteResponse.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+
+        // 400 で終わっているため列は書き換わっていない
+        using var destination = new MemoryStream();
+        (await Documents.ReadPayloadAsync(1, destination, Ct)).Should().BeTrue();
+    }
+
+    /// <summary>14. 復元できない <c>id</c>（不正 JSON）も 400 になる</summary>
+    [Fact(DisplayName = "[Binary/Remote] 14: 不正 JSON の id は 400（BadRequest）になる")]
+    public async Task BinaryEndpoints_MalformedId_ReturnsBadRequest()
+    {
+        await SeedAsync(1, Doc1Payload, Doc1Thumb);
+
+        var baseUrl = _app!.Urls.First();
+        using var raw = new HttpClient();
+
+        // 主キーは int。JSON として復元できない値はリクエスト解釈の失敗として 400 になる
+        using var getResponse = await raw.GetAsync(
+            $"{baseUrl}/quicker/Document/Payload?id=not-json",
+            Ct
+        );
+        getResponse.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await getResponse.Content.ReadFromJsonAsync<RemoteError>(Ct))!
+            .Type.Should()
+            .Be("BadRequest");
+
+        using var deleteResponse = await raw.DeleteAsync(
+            $"{baseUrl}/quicker/Document/Payload?id=not-json",
+            Ct
+        );
+        deleteResponse.StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
 
     /// <summary>CanSeek でない Stream（length を渡さないと長さ不明）＝クライアント側検証の再現用</summary>

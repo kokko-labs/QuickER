@@ -26,7 +26,14 @@ namespace EcOrderRemoteSample.Generated;
 /// such as authorization to the returned <see cref="RouteGroupBuilder"/>
 /// (for example <c>app.MapGeneratedRemoteEndpoints().RequireAuthorization()</c>).
 /// Exceptions are converted to structured JSON (RemoteError): <see cref="SaveConflictException"/> maps to 409 and
-/// everything else to 500, and the client (Http{Entity}RemoteRepository) restores the original exception type.
+/// an unhandled failure to 500, and the client (Http{Entity}RemoteRepository) restores the original exception type.
+/// </para>
+/// <para>
+/// A request that cannot be interpreted at all - a malformed or empty JSON body, a non-JSON content type, a type
+/// mismatch, a value that fails value-object validation, or a missing/malformed <c>?id=</c> key - is a fault in what
+/// the client sent, so it is answered with HTTP 400 (RemoteError of type "BadRequest") instead of 500. A request
+/// rejected by the server infrastructure (<see cref="BadHttpRequestException"/>, for example when the request body
+/// size limit is exceeded) keeps the status code it carries, such as 413.
 /// </para>
 /// <para>
 /// The class is <c>partial</c> so additional endpoints or helpers can live alongside the generated ones,
@@ -56,7 +63,7 @@ public static partial class GeneratedRemoteEndpoints
         return group;
     }
 
-    /// <summary>Runs a handler, writes the result as JSON, and maps exceptions to HTTP responses (409/500).</summary>
+    /// <summary>Runs a handler, writes the result as JSON, and maps exceptions to HTTP responses (400/409/500, or the status carried by a rejected request such as 413).</summary>
     private static async Task ExecuteAsync(HttpContext context, Func<Task<object?>> handler)
     {
         try
@@ -68,14 +75,29 @@ public static partial class GeneratedRemoteEndpoints
                 context.RequestAborted
             );
         }
+        catch (RemoteBadRequestException ex)
+        {
+            // The request itself could not be interpreted: a client-side fault, so it is classified as 400 without server-side logging or the hook.
+            await WriteErrorAsync(
+                context,
+                StatusCodes.Status400BadRequest,
+                "BadRequest",
+                ex.Message
+            );
+        }
+        catch (BadHttpRequestException ex)
+        {
+            // Rejected by the server infrastructure (request body size limit, malformed request): pass through the status code it carries (413 and similar).
+            await WriteErrorAsync(context, ex.StatusCode, "BadRequest", ex.Message);
+        }
         catch (SaveConflictException ex)
         {
             // Optimistic-concurrency conflicts are restored on the client as SaveConflictException (the same catch works as with a direct call).
-            context.Response.StatusCode = StatusCodes.Status409Conflict;
-            await context.Response.WriteAsJsonAsync(
-                new RemoteError { Type = "SaveConflict", Message = ex.Message },
-                RemoteJson.Options,
-                context.RequestAborted
+            await WriteErrorAsync(
+                context,
+                StatusCodes.Status409Conflict,
+                "SaveConflict",
+                ex.Message
             );
         }
         catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
@@ -86,24 +108,74 @@ public static partial class GeneratedRemoteEndpoints
         {
             LogServerError(context, ex);
             RaiseServerError(context, ex);
-            context.Response.StatusCode = StatusCodes.Status500InternalServerError;
-            await context.Response.WriteAsJsonAsync(
-                new RemoteError { Type = "Error", Message = ex.Message },
-                RemoteJson.Options,
-                context.RequestAborted
+            await WriteErrorAsync(
+                context,
+                StatusCodes.Status500InternalServerError,
+                "Error",
+                ex.Message
             );
         }
     }
 
-    /// <summary>Restores the request body from JSON (an empty body throws, and the error is reported to the client via 500).</summary>
-    private static async Task<TRequest> ReadRequestAsync<TRequest>(HttpContext context)
+    /// <summary>Writes a <see cref="RemoteError"/> body with the given status code (the shared path for every classified failure response).</summary>
+    private static async Task WriteErrorAsync(
+        HttpContext context,
+        int statusCode,
+        string type,
+        string message
+    )
     {
-        var request = await context.Request.ReadFromJsonAsync<TRequest>(
+        context.Response.StatusCode = statusCode;
+        await context.Response.WriteAsJsonAsync(
+            new RemoteError { Type = type, Message = message },
             RemoteJson.Options,
             context.RequestAborted
         );
+    }
 
-        return request ?? throw new InvalidOperationException("The request body is empty.");
+    /// <summary>Restores the request body from JSON (a body that cannot be interpreted is reported to the client as HTTP 400).</summary>
+    /// <remarks>
+    /// Malformed JSON, an empty body, a non-JSON content type, a type mismatch, or a value that fails value-object
+    /// validation are all faults in the payload the client sent, so they are wrapped in
+    /// <see cref="RemoteBadRequestException"/> and answered with 400. Cancellation and
+    /// <see cref="BadHttpRequestException"/> (which carries its own status code, for example 413 when the request body
+    /// size limit is exceeded) are left untouched so that the surrounding handler can classify them.
+    /// </remarks>
+    private static async Task<TRequest> ReadRequestAsync<TRequest>(HttpContext context)
+    {
+        TRequest? request;
+
+        try
+        {
+            request = await context.Request.ReadFromJsonAsync<TRequest>(
+                RemoteJson.Options,
+                context.RequestAborted
+            );
+        }
+        catch (Exception ex)
+            when (ex is not (OperationCanceledException or BadHttpRequestException))
+        {
+            throw new RemoteBadRequestException(ex.Message, ex);
+        }
+
+        return request ?? throw new RemoteBadRequestException("The request body is empty.");
+    }
+
+    /// <summary>
+    /// Marks a failure to interpret the request itself (the JSON body or the <c>?id=</c> key). The request never reached
+    /// the repository, so it is a fault in what the client sent rather than a server-side error: it is answered with
+    /// HTTP 400 and a <see cref="RemoteError"/> of type "BadRequest", and neither the server-side logging nor the
+    /// <c>OnServerError</c> hook - both reserved for HTTP 500 - is invoked.
+    /// </summary>
+    private sealed class RemoteBadRequestException : Exception
+    {
+        /// <summary>Initializes a new instance with the message reported to the client.</summary>
+        public RemoteBadRequestException(string message)
+            : base(message) { }
+
+        /// <summary>Initializes a new instance with the message reported to the client and the underlying failure.</summary>
+        public RemoteBadRequestException(string message, Exception innerException)
+            : base(message, innerException) { }
     }
 
     /// <summary>Resolves the remote-surface repository from DI.</summary>
@@ -115,7 +187,8 @@ public static partial class GeneratedRemoteEndpoints
     /// The response body carries only the exception message (so that the client can restore the exception type),
     /// therefore the full exception - including the stack trace - is recorded here on the server side.
     /// Logging is optional: when the host has no <c>ILoggerFactory</c> registered this is a no-op and the behavior
-    /// is unchanged.
+    /// is unchanged. Classified responses (400 and 409) do not go through here: they are the expected outcome of the
+    /// request rather than an unhandled server-side failure.
     /// </remarks>
     private static void LogServerError(HttpContext context, Exception ex)
     {
@@ -157,7 +230,8 @@ public static partial class GeneratedRemoteEndpoints
     /// <summary>Extension hook invoked - after the built-in logging - whenever an endpoint responds with HTTP 500.</summary>
     /// <remarks>
     /// Implement this method in another part of this partial class to add custom handling for server-side
-    /// failures (notifications, metrics, extra logging). When no implementation is provided the compiler removes
+    /// failures (notifications, metrics, extra logging). It is reserved for HTTP 500 and is therefore not invoked for
+    /// classified responses (400 and 409). When no implementation is provided the compiler removes
     /// the call itself, so nothing but an empty guard remains. An exception thrown by the hook is isolated (logged
     /// on the server side and then swallowed) and never replaces the original 500 response. The 500 response body
     /// itself is not customizable here; wrap the group returned by <c>MapGeneratedRemoteEndpoints</c> in middleware

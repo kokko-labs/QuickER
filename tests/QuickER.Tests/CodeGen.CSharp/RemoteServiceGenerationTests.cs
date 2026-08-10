@@ -134,7 +134,13 @@ public class RemoteServiceGenerationTests
         server.Should().Contain("string prefix = \"/quicker\"");
         server.Should().Contain("MapCrud<OrderEntity, int, IOrderRemoteRepository>(");
         server.Should().Contain("StatusCodes.Status409Conflict");
-        server.Should().Contain("Type = \"SaveConflict\"");
+        server.Should().Contain("\"SaveConflict\"");
+
+        // リクエスト解釈の失敗は 400（BadRequest）・Kestrel の BadHttpRequestException はステータス素通し
+        server.Should().Contain("private sealed class RemoteBadRequestException");
+        server.Should().Contain("StatusCodes.Status400BadRequest");
+        server.Should().Contain("catch (BadHttpRequestException ex)");
+        server.Should().Contain("await WriteErrorAsync(context, ex.StatusCode, \"BadRequest\"");
 
         // サーバーファイルは ASP.NET Core の using を持ち、本体は持たない
         server.Should().Contain("using Microsoft.AspNetCore.Builder;");

@@ -1,6 +1,8 @@
 using System;
 using System.Linq;
+using System.Net;
 using System.Net.Http;
+using System.Net.Http.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
@@ -421,6 +423,117 @@ public abstract class RemoteServiceRuntimeTestsBase : IAsyncLifetime
         var act = () => customers.GetAllAsync(Ct);
 
         await act.Should().ThrowAsync<ObjectDisposedException>();
+    }
+
+    /// <summary>
+    /// 13. 不正 JSON のボディはリクエスト解釈の失敗＝400（RemoteError.Type="BadRequest"）になり、
+    /// 生成クライアント経由でも RemoteRepositoryException.StatusCode が 400 になる（従来は 500 だった経路の回帰防止）。
+    /// </summary>
+    [Fact(DisplayName = "[RemoteService] 13: 不正 JSON のボディは 400（BadRequest）になる")]
+    public async Task MalformedJsonBody_ReturnsBadRequest()
+    {
+        var baseUrl = _app!.Urls.First();
+
+        // 生成クライアントは必ず正しい JSON を送るため、壊れた JSON は素の HttpClient で直接送る
+        using var raw = new HttpClient();
+        using var content = new StringContent(
+            "{\"broken",
+            System.Text.Encoding.UTF8,
+            "application/json"
+        );
+        using var response = await raw.PostAsync($"{baseUrl}/quicker/Customer/Insert", content, Ct);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+
+        var error = await response.Content.ReadFromJsonAsync<RemoteError>(Ct);
+        error!.Type.Should().Be("BadRequest", "リクエスト解釈の失敗は BadRequest として分類される");
+    }
+
+    /// <summary>14. 空ボディ（Content-Length 0）もリクエスト解釈の失敗＝400 になる</summary>
+    [Fact(DisplayName = "[RemoteService] 14: 空ボディの POST は 400（BadRequest）になる")]
+    public async Task EmptyBody_ReturnsBadRequest()
+    {
+        var baseUrl = _app!.Urls.First();
+
+        using var raw = new HttpClient();
+        using var content = new StringContent("", System.Text.Encoding.UTF8, "application/json");
+        using var response = await raw.PostAsync($"{baseUrl}/quicker/Customer/Insert", content, Ct);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+
+        var error = await response.Content.ReadFromJsonAsync<RemoteError>(Ct);
+        error!.Type.Should().Be("BadRequest");
+    }
+
+    /// <summary>
+    /// 15. VO の制約違反（NameValue は最大 50 文字）はデシリアライズ中の ValueObjectValidationException になるが、
+    /// これもリクエスト解釈の失敗＝400 として分類される（従来は 500 だった）。
+    /// </summary>
+    [Fact(DisplayName = "[RemoteService] 15: VO 制約違反のボディは 400（BadRequest）になる")]
+    public async Task ValueObjectViolationInBody_ReturnsBadRequest()
+    {
+        var baseUrl = _app!.Urls.First();
+
+        // NameValue の上限は 50 文字。生成クライアントでは VO 生成時点で弾かれるため素の HttpClient で送る
+        var tooLong = new string('a', 51);
+        using var raw = new HttpClient();
+        using var content = new StringContent(
+            $"{{\"Entity\":{{\"CustomerId\":1,\"Name\":\"{tooLong}\"}}}}",
+            System.Text.Encoding.UTF8,
+            "application/json"
+        );
+        using var response = await raw.PostAsync($"{baseUrl}/quicker/Customer/Insert", content, Ct);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+
+        var error = await response.Content.ReadFromJsonAsync<RemoteError>(Ct);
+        error!.Type.Should().Be("BadRequest");
+
+        // 400 で終わっているため行は作られていない
+        (await Customers.GetAllAsync(Ct))
+            .Should()
+            .BeEmpty();
+    }
+
+    /// <summary>
+    /// 16. リクエストボディのサイズ上限超過（Kestrel の BadHttpRequestException）はステータスが素通しされ 413 になる
+    /// （汎用 catch に落ちて 500 へ化けていた不具合の回帰防止）。上限を小さく設定した専用サーバーを別途起動して観測する。
+    /// </summary>
+    [Fact(
+        DisplayName = "[RemoteService] 16: ボディサイズ上限超過は 413 が素通しされる（500 にならない）"
+    )]
+    public async Task RequestBodyTooLarge_PassesThroughStatusCode()
+    {
+        var builder = WebApplication.CreateBuilder();
+        builder.Logging.ClearProviders();
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = 1024);
+        ConfigureServerRepositories(builder.Services, _db.ReadWriteCreateConnectionString);
+
+        await using var app = builder.Build();
+        app.MapGeneratedRemoteEndpoints();
+        await app.StartAsync(Ct);
+
+        var baseUrl = app.Urls.First();
+
+        // 上限 1KB を確実に超える JSON ボディ（形としては正しい JSON）
+        var payload = $"{{\"Entity\":{{\"CustomerId\":1,\"Name\":\"{new string('a', 4096)}\"}}}}";
+        using var raw = new HttpClient();
+        using var content = new StringContent(
+            payload,
+            System.Text.Encoding.UTF8,
+            "application/json"
+        );
+        using var response = await raw.PostAsync($"{baseUrl}/quicker/Customer/Insert", content, Ct);
+
+        response
+            .StatusCode.Should()
+            .Be(
+                HttpStatusCode.RequestEntityTooLarge,
+                "BadHttpRequestException が持つステータスコードを素通しする"
+            );
+
+        await app.StopAsync(Ct);
     }
 
     /// <summary>使い終えたクライアント DI・サーバー・一時 DB を破棄する</summary>
