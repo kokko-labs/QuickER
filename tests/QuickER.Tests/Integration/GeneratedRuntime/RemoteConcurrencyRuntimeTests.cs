@@ -1,3 +1,4 @@
+using System;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
@@ -292,17 +293,83 @@ public sealed class RemoteConcurrencyRuntimeTests : IAsyncLifetime
     /// <summary>生の JSON をそのまま Update エンドポイントへ POST し、応答のステータスコードを返す</summary>
     private async Task<HttpStatusCode> PostUpdateAsync(HttpClient client, object payload)
     {
-        using var content = new StringContent(
-            JsonSerializer.Serialize(payload, RemoteJson.Options),
-            Encoding.UTF8,
-            "application/json"
+        var (status, _) = await PostUpdateJsonAsync(
+            client,
+            JsonSerializer.Serialize(payload, RemoteJson.Options)
         );
+        return status;
+    }
+
+    /// <summary>組み立て済みの JSON 文字列を Update エンドポイントへ POST し、ステータスと本文を返す</summary>
+    private async Task<(HttpStatusCode Status, string Body)> PostUpdateJsonAsync(
+        HttpClient client,
+        string json
+    )
+    {
+        using var content = new StringContent(json, Encoding.UTF8, "application/json");
         using var response = await client.PostAsync(
             $"{_baseUrl}/quicker/Document/Update",
             content,
             Ct
         );
-        return response.StatusCode;
+        return (response.StatusCode, await response.Content.ReadAsStringAsync(Ct));
+    }
+
+    // ── 未定義の ConcurrencyMode ──
+
+    /// <summary>8. クライアントは未定義値を送信前に弾く（ArgumentOutOfRangeException）</summary>
+    [Fact(
+        DisplayName = "[Concurrency/Remote] 8: 未定義の ConcurrencyMode はクライアントが送信前に弾く"
+    )]
+    public async Task UndefinedConcurrencyMode_IsRejectedBeforeSending()
+    {
+        var document = await InsertedAsync(1, "alpha");
+
+        document.Title = "by-undefined";
+        var update = async () => await Documents.UpdateAsync(document, (ConcurrencyMode)99, Ct);
+
+        await update.Should().ThrowAsync<ArgumentOutOfRangeException>().WithParameterName("mode");
+
+        document.MarkUpdated();
+        var save = async () =>
+            await Documents.SaveAsync(document, mode: (ConcurrencyMode)99, cancellationToken: Ct);
+
+        await save.Should().ThrowAsync<ArgumentOutOfRangeException>().WithParameterName("mode");
+
+        (await Documents.GetByIdAsync(1, Ct))!
+            .Title.Should()
+            .Be("alpha", "送信前に弾かれるのでサーバー側は無変更");
+    }
+
+    /// <summary>
+    /// 9. クライアント検証を迂回した手書きクライアント（生の JSON で <c>"Mode":99</c>）はサーバーが 400 で拒否する
+    /// （enum は JSON で任意の数値を受けるため、素通しすると版チェックが黙って無効化される）。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Concurrency/Remote] 9: 生 JSON の未定義 Mode はサーバーが 400 BadRequest で拒否する"
+    )]
+    public async Task UndefinedConcurrencyModeOverTheWire_IsRejectedWith400()
+    {
+        var document = await InsertedAsync(1, "alpha");
+
+        document.Title = "by-undefined";
+        var entityJson = JsonSerializer.Serialize(document, RemoteJson.Options);
+
+        using var raw = new HttpClient();
+        var (status, body) = await PostUpdateJsonAsync(
+            raw,
+            $$"""{"Entity":{{entityJson}},"Mode":99}"""
+        );
+
+        status.Should().Be(HttpStatusCode.BadRequest, "リクエスト解釈の失敗＝クライアント起因");
+
+        var error = JsonSerializer.Deserialize<RemoteError>(body, RemoteJson.Options);
+        error.Should().NotBeNull();
+        error!.Type.Should().Be("BadRequest");
+
+        (await Documents.GetByIdAsync(1, Ct))!
+            .Title.Should()
+            .Be("alpha", "拒否されたので更新は適用されない");
     }
 
     /// <summary>使い終えたクライアント DI・サーバーを破棄する</summary>

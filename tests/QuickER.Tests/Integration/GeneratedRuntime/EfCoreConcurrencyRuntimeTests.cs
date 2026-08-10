@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
@@ -97,9 +99,31 @@ public sealed class EfCoreConcurrencyRuntimeTests(SqlServerContainerFixture fixt
     /// <summary>DI コンテナを破棄する</summary>
     public ValueTask DisposeAsync()
     {
+        foreach (var provider in _hookProviders)
+        {
+            provider.Dispose();
+        }
+
         _provider?.Dispose();
 
         return ValueTask.CompletedTask;
+    }
+
+    /// <summary>Save フックを登録した専用 DI コンテナ（テストごとに 1 つ作り、最後にまとめて破棄する）</summary>
+    private readonly List<ServiceProvider> _hookProviders = [];
+
+    /// <summary>Save フックを 1 つ登録した EF Core 版文書リポジトリを解決する</summary>
+    private IDocumentRepository DocumentsWithHook(ISaveHook<DocumentEntity> hook)
+    {
+        var provider = new ServiceCollection()
+            .AddGeneratedEfCoreRepositories(options =>
+                options.UseSqlServer(_fixture.ConnectionString)
+            )
+            .AddSingleton(hook)
+            .BuildServiceProvider();
+
+        _hookProviders.Add(provider);
+        return provider.GetRequiredService<IDocumentRepository>();
     }
 
     /// <summary>文書リポジトリを解決する</summary>
@@ -320,5 +344,104 @@ public sealed class EfCoreConcurrencyRuntimeTests(SqlServerContainerFixture fixt
             .Should()
             .BeGreaterThan(0);
         (await documents.GetByIdAsync(1, Ct)).Should().BeNull("版条件を外せば削除される");
+    }
+
+    /// <summary>
+    /// 8. 列挙に無い値は入口で ArgumentOutOfRangeException（内部の 2 値分岐は「Optimistic なら競合として報告・
+    /// さもなくば DB 側の値を取り込んで再試行」のため、検証しないと未定義値が黙って last-write-wins へ落ちる）。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Concurrency/EFCore] 未定義の ConcurrencyMode は ArgumentOutOfRangeException"
+    )]
+    public async Task UndefinedConcurrencyMode_IsRejected()
+    {
+        var documents = Documents();
+
+        var stale = await documents.GetByIdAsync(1, Ct);
+        await BumpByAnotherUserAsync(1);
+
+        stale!.Title = "by-undefined";
+        var update = async () => await documents.UpdateAsync(stale, (ConcurrencyMode)99, Ct);
+
+        await update.Should().ThrowAsync<ArgumentOutOfRangeException>().WithParameterName("mode");
+
+        stale.MarkUpdated();
+        var save = async () =>
+            await documents.SaveAsync(stale, mode: (ConcurrencyMode)99, cancellationToken: Ct);
+
+        await save.Should().ThrowAsync<ArgumentOutOfRangeException>().WithParameterName("mode");
+
+        (await documents.GetByIdAsync(1, Ct))!
+            .Title.Should()
+            .Be("by-another-user", "未定義値の保存は 1 件も適用されない");
+    }
+
+    // ── Save フック × 版の反映タイミング ──
+
+    /// <summary>
+    /// 9. フックあり経路では、EF が SaveChanges で書いた新しい版をコミット後まで反映しない。
+    /// After はコミット前に走るので保存前の版を見て、After 例外でロールバックしてもエンティティには
+    /// 「DB に存在しない版」が残らない（残ると同一インスタンスの再保存が偽の競合になる）。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Concurrency/EFCore] SaveAsync: After は旧版を見る・例外でロールバックしても幻の版が残らない"
+    )]
+    public async Task SaveAsync_WithHook_KeepsRowVersionUntilCommit()
+    {
+        var hook = new RowVersionCapturingHook();
+        var documents = DocumentsWithHook(hook);
+
+        var document = await documents.GetByIdAsync(1, Ct);
+        var beforeSave = document!.RowVer;
+        beforeSave.Should().NotBeNull("SQL Server の rowversion は取得時点で読める");
+
+        document.Title = "by-me";
+        document.MarkUpdated();
+
+        var act = async () => await documents.SaveAsync(document, cancellationToken: Ct);
+        (await act.Should().ThrowAsync<InvalidOperationException>()).WithMessage("*after-boom*");
+
+        hook.SeenRowVersion.Should()
+            .Equal(beforeSave, "After はコミット前に走るので保存前の版が見える");
+        document
+            .RowVer.Should()
+            .Equal(beforeSave, "ロールバックされたので DB に存在しない版は残らない");
+        (await Documents().GetByIdAsync(1, Ct))!
+            .Title.Should()
+            .Be("alpha", "行更新もロールバックされている");
+
+        // 幻の版が残っていれば、同一インスタンスのこの再保存は偽の競合になる
+        hook.ThrowOnAfter = false;
+        (await documents.SaveAsync(document, cancellationToken: Ct)).Should().Be(1);
+
+        document.RowVer.Should().NotEqual(beforeSave, "コミット成功後は新しい版が反映される");
+        (await Documents().GetByIdAsync(1, Ct))!.Title.Should().Be("by-me");
+    }
+
+    /// <summary>After が見た版を記録し、任意で例外を投げる Save フック（版の反映タイミング検証用）</summary>
+    private sealed class RowVersionCapturingHook : ISaveHook<DocumentEntity>
+    {
+        /// <summary>After で例外を投げるか（true の間は保存が丸ごとロールバックされる）</summary>
+        public bool ThrowOnAfter { get; set; } = true;
+
+        /// <summary>After が呼ばれた時点でエンティティが持っていた版</summary>
+        public byte[]? SeenRowVersion { get; private set; }
+
+        public Task AfterSaveAsync(
+            DocumentEntity entity,
+            SaveOperation operation,
+            ISaveHookContext context,
+            CancellationToken cancellationToken = default
+        )
+        {
+            SeenRowVersion = entity.RowVer;
+
+            if (ThrowOnAfter)
+            {
+                throw new InvalidOperationException("after-boom");
+            }
+
+            return Task.CompletedTask;
+        }
     }
 }

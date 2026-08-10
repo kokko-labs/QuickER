@@ -40,9 +40,6 @@ public sealed class SaveHookAdoRuntimeTests : SaveHookRuntimeTestsBase, IDisposa
             ForeignKeys = true,
         }.ConnectionString;
 
-    /// <summary>QuickER 版 Repository は 1 トランザクションのため After 例外で保存変更は残らない</summary>
-    protected override bool AfterExceptionLeavesResidue => false;
-
     /// <summary>指定した Save フック群を登録した DI プロバイダを構築する（テスト終了時にまとめて破棄）</summary>
     private ServiceProvider BuildProvider(params object[] hooks)
     {

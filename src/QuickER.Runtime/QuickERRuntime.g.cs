@@ -2102,7 +2102,7 @@ public partial interface IRemoteRepository<TEntity, TKey>
 
     /// <summary>Updates an entity (true when a matching row was updated).</summary>
     /// <param name="entity">The entity to update.</param>
-    /// <param name="mode">How a concurrent modification is handled when the table has a rowversion column (no effect otherwise).</param>
+    /// <param name="mode">How a concurrent modification is handled when the table has a rowversion column (no effect otherwise). An undefined value throws <see cref="ArgumentOutOfRangeException"/>.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     Task<bool> UpdateAsync(
         TEntity entity,
@@ -2118,7 +2118,7 @@ public partial interface IRemoteRepository<TEntity, TKey>
     /// <param name="cascadeSave">Whether to cascade the save to child objects.</param>
     /// <param name="cascadeDelete">Whether to cascade deletes to child objects.</param>
     /// <param name="insertWhenUpdateMissing">Whether to switch to INSERT when no row exists to update (throws by default).</param>
-    /// <param name="mode">How a concurrent modification is handled for entities whose table has a rowversion column (no effect otherwise).</param>
+    /// <param name="mode">How a concurrent modification is handled for entities whose table has a rowversion column (no effect otherwise). An undefined value throws <see cref="ArgumentOutOfRangeException"/>.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The number of records saved.</returns>
     Task<int> SaveAsync(
@@ -2135,7 +2135,7 @@ public partial interface IRemoteRepository<TEntity, TKey>
     /// <param name="cascadeSave">Whether to cascade the save to child objects.</param>
     /// <param name="cascadeDelete">Whether to cascade deletes to child objects.</param>
     /// <param name="insertWhenUpdateMissing">Whether to switch to INSERT when no row exists to update (throws by default).</param>
-    /// <param name="mode">How a concurrent modification is handled for entities whose table has a rowversion column (no effect otherwise).</param>
+    /// <param name="mode">How a concurrent modification is handled for entities whose table has a rowversion column (no effect otherwise). An undefined value throws <see cref="ArgumentOutOfRangeException"/>.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The number of records saved.</returns>
     Task<int> SaveAsync(
@@ -2345,6 +2345,19 @@ public enum ConcurrencyMode
 
     /// <summary>Overwrites the row unconditionally, ignoring the version check (an explicit last-write-wins).</summary>
     ForceOverwrite,
+}
+
+/// <summary>Validates a ConcurrencyMode argument (an undefined value must fail fast instead of silently disabling the version check).</summary>
+public static class ConcurrencyModes
+{
+    /// <summary>Returns the mode unchanged, or throws ArgumentOutOfRangeException when it is not a defined member.</summary>
+    public static ConcurrencyMode Validated(ConcurrencyMode mode) =>
+        mode is ConcurrencyMode.Optimistic or ConcurrencyMode.ForceOverwrite
+            ? mode
+            : throw new ArgumentOutOfRangeException(
+                nameof(mode),
+                "The concurrency mode must be Optimistic or ForceOverwrite."
+            );
 }
 
 /// <summary>
@@ -3921,7 +3934,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     /// <summary>Updates an entity (returns true when a matching row was updated).</summary>
     /// <remarks>The policy travels with the request, so a table with a rowversion column behaves exactly as it does on a direct connection: an optimistic conflict surfaces as <see cref="SaveConflictException"/> (HTTP 409) and a successful update writes the new version back to <paramref name="entity"/>.</remarks>
     /// <param name="entity">The entity to update.</param>
-    /// <param name="mode">The concurrency policy applied on the server for tables that have a rowversion column (no effect otherwise).</param>
+    /// <param name="mode">The concurrency policy applied on the server for tables that have a rowversion column (no effect otherwise). An undefined value throws <see cref="ArgumentOutOfRangeException"/> before anything is sent.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     public async Task<bool> UpdateAsync(
         TEntity entity,
@@ -3929,6 +3942,8 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         CancellationToken cancellationToken = default
     )
     {
+        mode = ConcurrencyModes.Validated(mode);
+
         // Reject updates that still carry values in unbounded binary columns before sending
         // (they are excluded from the server-side UPDATE and would be lost silently)
         UnboundedBinaryColumns.ThrowIfExcludedAssigned(entity);
@@ -3962,6 +3977,8 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         CancellationToken cancellationToken = default
     )
     {
+        mode = ConcurrencyModes.Validated(mode);
+
         // Reject before sending if any entity to update (RowState==Updated) still carries values
         // in unbounded binary columns (cascade targets are traversed as well)
         GuardUnboundedBinaryOnSave(entity, cascadeSave);
@@ -3989,6 +4006,8 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         CancellationToken cancellationToken = default
     )
     {
+        mode = ConcurrencyModes.Validated(mode);
+
         var list = entities.ToList();
 
         // Reject before sending if any updated entity in each aggregate root (including cascade targets)

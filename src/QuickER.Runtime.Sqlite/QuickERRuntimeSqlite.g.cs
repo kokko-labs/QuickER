@@ -302,6 +302,7 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
     )
     {
         ArgumentNullException.ThrowIfNull(entity);
+        mode = ConcurrencyModes.Validated(mode);
 
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
@@ -402,6 +403,7 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
     )
     {
         ArgumentNullException.ThrowIfNull(entity);
+        mode = ConcurrencyModes.Validated(mode);
 
         // If the entire graph has no changes, return without even opening a connection
         if (!EntityGraphSaver.HasChanges(entity, cascadeSave))
@@ -465,6 +467,7 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
     )
     {
         ArgumentNullException.ThrowIfNull(entities);
+        mode = ConcurrencyModes.Validated(mode);
 
         // Target only graphs with changes (filter before opening the connection and transaction)
         var targets = entities

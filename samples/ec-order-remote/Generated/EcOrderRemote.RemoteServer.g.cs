@@ -30,8 +30,9 @@ namespace EcOrderRemoteSample.Generated;
 /// </para>
 /// <para>
 /// A request that cannot be interpreted at all - a malformed or empty JSON body, a non-JSON content type, a type
-/// mismatch, a value that fails value-object validation, or a missing/malformed <c>?id=</c> key - is a fault in what
-/// the client sent, so it is answered with HTTP 400 (RemoteError of type "BadRequest") instead of 500. A request
+/// mismatch, a value that fails value-object validation, an undefined <see cref="ConcurrencyMode"/> value, or a
+/// missing/malformed <c>?id=</c> key - is a fault in what the client sent, so it is answered with HTTP 400
+/// (RemoteError of type "BadRequest") instead of 500. A request
 /// rejected by the server infrastructure (<see cref="BadHttpRequestException"/>, for example when the request body
 /// size limit is exceeded) keeps the status code it carries, such as 413.
 /// </para>
@@ -160,6 +161,19 @@ public static partial class GeneratedRemoteEndpoints
 
         return request ?? throw new RemoteBadRequestException("The request body is empty.");
     }
+
+    /// <summary>Validates the concurrency policy carried by a request body (an undefined value is reported to the client as HTTP 400).</summary>
+    /// <remarks>
+    /// JSON deserialization accepts any numeric value for an enum, so a hand-written client can put a value that names no
+    /// policy into the body. Passing it on would silently fall through to the unguarded branch, disabling the version check,
+    /// therefore it is rejected here as a fault in the payload the client sent.
+    /// </remarks>
+    private static ConcurrencyMode ValidatedMode(ConcurrencyMode mode) =>
+        Enum.IsDefined(mode)
+            ? mode
+            : throw new RemoteBadRequestException(
+                "The concurrency mode must be Optimistic or ForceOverwrite."
+            );
 
     /// <summary>
     /// Marks a failure to interpret the request itself (the JSON body or the <c>?id=</c> key). The request never reached
@@ -301,7 +315,11 @@ public static partial class GeneratedRemoteEndpoints
                     {
                         var request = await ReadRequestAsync<RemoteUpdateRequest<TEntity>>(context);
                         var updated = await Repository<TRepository>(context)
-                            .UpdateAsync(request.Entity, request.Mode, context.RequestAborted);
+                            .UpdateAsync(
+                                request.Entity,
+                                ValidatedMode(request.Mode),
+                                context.RequestAborted
+                            );
                         // A successful update leaves the newly assigned version on the entity, which the client writes back
                         return (object?)
                             new RemoteUpdateResult(
@@ -339,7 +357,7 @@ public static partial class GeneratedRemoteEndpoints
                                 request.CascadeSave,
                                 request.CascadeDelete,
                                 request.InsertWhenUpdateMissing,
-                                request.Mode,
+                                ValidatedMode(request.Mode),
                                 context.RequestAborted
                             );
                         return (object?)
@@ -366,7 +384,7 @@ public static partial class GeneratedRemoteEndpoints
                                 request.CascadeSave,
                                 request.CascadeDelete,
                                 request.InsertWhenUpdateMissing,
-                                request.Mode,
+                                ValidatedMode(request.Mode),
                                 context.RequestAborted
                             );
                         return (object?)

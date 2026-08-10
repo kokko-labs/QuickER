@@ -1,3 +1,4 @@
+using System;
 using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
@@ -345,5 +346,35 @@ public sealed class SqlServerConcurrencyRuntimeTests(SqlServerContainerFixture f
             .Should()
             .BeGreaterThan(0);
         (await documents.GetByIdAsync(1, Ct)).Should().BeNull("版条件を外せば削除される");
+    }
+
+    /// <summary>
+    /// 8. 列挙に無い値は入口で ArgumentOutOfRangeException（内部の 2 値分岐は「Optimistic なら版条件付き・
+    /// さもなくば版条件なし」のため、検証しないと未定義値が黙って last-write-wins へ落ちる）。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Concurrency/SqlServer] 未定義の ConcurrencyMode は ArgumentOutOfRangeException"
+    )]
+    public async Task UndefinedConcurrencyMode_IsRejected()
+    {
+        var documents = Documents();
+
+        var stale = await documents.GetByIdAsync(1, Ct);
+        await BumpByAnotherUserAsync(1, "by-another-user");
+
+        stale!.Title = "by-undefined";
+        var update = async () => await documents.UpdateAsync(stale, (ConcurrencyMode)99, Ct);
+
+        await update.Should().ThrowAsync<ArgumentOutOfRangeException>().WithParameterName("mode");
+
+        stale.MarkUpdated();
+        var save = async () =>
+            await documents.SaveAsync(stale, mode: (ConcurrencyMode)99, cancellationToken: Ct);
+
+        await save.Should().ThrowAsync<ArgumentOutOfRangeException>().WithParameterName("mode");
+
+        (await ReadTitleAsync(1))
+            .Should()
+            .Be("by-another-user", "未定義値の保存は 1 件も適用されない");
     }
 }

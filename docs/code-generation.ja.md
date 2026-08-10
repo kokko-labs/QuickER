@@ -167,6 +167,8 @@ var result = await customers.Query()
 
 対応: 等値・比較・`&&`/`||`・`Contains`/`StartsWith`/`EndsWith`（LIKE）・リストの `Contains`（IN）・日付部品（`Year` など）・`string.IsNullOrEmpty`・値オブジェクト比較。**射影（Select）・GroupBy・Join・算術式は未対応**です（実行時例外。生 SQL か EF Core で回避してください）。
 
+リストの `Contains` は要素 1 個につきバインド変数 1 個へ展開され、チャンク分割はしません。そのため巨大なリストは方言のバインド変数・IN リスト上限（Oracle の 1000、SQL Server の 2100 パラメータ、SQLite の歴史的な 999 など）を超えて実行時エラーになります。大量のキーを渡す場合は一時テーブルへ入れて結合するか、生 SQL を使ってください。
+
 ### グラフ保存（親子まとめて 1 回で保存）
 
 ```csharp
@@ -222,7 +224,7 @@ public sealed class DocumentSaveHook : ISaveHook<DocumentEntity>
 services.AddSingleton<ISaveHook<DocumentEntity>, DocumentSaveHook>();
 ```
 
-同じエンティティ型に複数のフックを登録できます。**Before は登録順**に呼ばれ、**最初に `false` を返した時点で短絡**します（残りの Before は呼ばれず、その行はスキップ）。**After も登録順**に呼ばれます。Before / After が投げた例外はそのまま伝播し、実トランザクションを持つ実装先では Save 全体がロールバックします（インメモリは下表を参照）。
+同じエンティティ型に複数のフックを登録できます。**Before は登録順**に呼ばれ、**最初に `false` を返した時点で短絡**します（残りの Before は呼ばれず、その行はスキップ）。**After も登録順**に呼ばれます。Before / After が投げた例外はそのまま伝播し、Save 全体がロールバックします（実トランザクションを持つ実装先はトランザクションで、インメモリは undo ジャーナルで巻き戻します）。
 
 **対象は `SaveAsync`（単一・複数の両形態）だけ**です。低レベル API である `InsertAsync` / `UpdateAsync` / `DeleteAsync` の直接呼び出しと `BulkInsertAsync` は、フックを**素通り**します（発火しません）。
 
@@ -234,7 +236,7 @@ services.AddSingleton<ISaveHook<DocumentEntity>, DocumentSaveHook>();
 
 #### After とコンテキスト
 
-After は**操作の直後・コミット前**に、進行中のトランザクションに参加する `ISaveHookContext` を受け取ります。フック内から Repository の通常 API を呼ぶと別接続でロック競合するため、context 経由の操作を使います。After が例外を投げると Save ごとロールバックするため、「行はあるがファイル未登録」という中途半端な状態は QuickER 版 Repository（SQL Server / SQLite）では構造的に生じません（インメモリの例外は下表を参照）。
+After は**操作の直後・コミット前**に、進行中のトランザクションに参加する `ISaveHookContext` を受け取ります。フック内から Repository の通常 API を呼ぶと別接続でロック競合するため、context 経由の操作を使います。After が例外を投げると Save ごとロールバックするため、「行はあるがファイル未登録」という中途半端な状態は構造的に生じません（インメモリも undo ジャーナルで同じ保証を持ちます）。
 
 context が提供する操作（生ハンドルは公開しません）:
 
@@ -249,7 +251,7 @@ context が提供する操作（生ハンドルは公開しません）:
 |---|---|---|
 | QuickER 版 Repository（SQL Server / SQLite） | 完全対応（After は各操作の直後） | `WriteBinaryColumnAsync` / `ExecuteSqlAsync` とも対応 |
 | EF Core 版 Repository（`GenerateEfCore`） | 対応（After は `SaveChanges` 後に一括） | `ExecuteSqlAsync` は対応・`WriteBinaryColumnAsync` は `NotSupportedException` |
-| インメモリ（`GenerateInMemoryRepositories`） | 対応（擬似トランザクション） | `WriteBinaryColumnAsync` はストアへ・`ExecuteSqlAsync` は `NotSupportedException`。実トランザクションがないため**After が例外を投げてもストアの変更は残ります**（ベストエフォート） |
+| インメモリ（`GenerateInMemoryRepositories`） | 対応（擬似トランザクション） | `WriteBinaryColumnAsync` はストアへ・`ExecuteSqlAsync` は `NotSupportedException`。実トランザクションはありませんが undo ジャーナルで保存単位を all-or-nothing にするため、**After が例外を投げるとストアの変更（After が書いた blob を含む）も巻き戻ります** |
 | リモート（`--generate-remote-services`） | **サーバー側の DI に登録したフックが発火**します | サーバー側の実体実装に準じます。**既知の制限**: Before でサーバーがスキップした行でも、クライアント側の `RowState` はスキップを反映せず `Unchanged` に確定します |
 
 ### 生 SQL の逃げ道
@@ -388,7 +390,7 @@ await repository.SaveAsync(order, cancellationToken: ct);
 ```
 
 - **「行なし」と「版が古い」は別の結果です。** 単一の `UpdateAsync` は行が存在しなければ従来どおり `false` を返し、行はあるが版が進んでいれば `SaveConflictException` を送出します。`insertWhenUpdateMissing: true` も同じ線引きで、行なしは INSERT へ切り替わり、版が古い場合は競合として報告されます（INSERT へ倒すと競合が主キー重複に化けるためです）。
-- **グラフ保存は削除も守り**、競合が 1 件でもあればトランザクション全体がロールバックされます。
+- **グラフ保存は削除も守り**、競合が 1 件でもあれば保存単位の全体がロールバックされます（インメモリ Repository も、実トランザクションの代わりに undo ジャーナルで同じく巻き戻します）。
 - **新しい版が反映されます。** 挿入・更新・グラフ保存が成功すると、エンティティは DB が採番した版を保持するため、再取得せずに同じインスタンスをそのまま保存できます。Save フックの `AfterSaveAsync` はコミット前に走るため、この時点ではまだ古い版が見えます。
 - **どのバックエンドでも契約は同じです。** QuickER 版 Repository は `WHERE ... AND <rowversion> = @original` で文を守り `OUTPUT` 句で新しい版を読み戻します。EF Core は自前の並行性トークン（`IsRowVersion()`）を使い `DbUpdateConcurrencyException` を同じ例外へ変換します。インメモリ Repository は単調増加する 8 バイトの擬似版で DB を模します。HTTP リモートクライアントはモードをリクエストへ載せ、応答が返す版を書き戻します。
 
@@ -579,7 +581,7 @@ app.Run();
 - **直列化**はエンティティの JSON 往復（`ToJson` / `Clone`）と同じ意味論（VO は内包値・RowState 込み・親参照ナビは循環しない）で、クライアント・サーバーが共有の `RemoteJson.Options` を使います
 - **名前付きクエリは実装方式（簡易 DSL／生 SQL／手動実装）に依らず全部**リモート面経由で呼び出せます（実装の実体はサーバー側のリポジトリ）
 - **例外は型が復元されます**: サーバーの `SaveConflictException` は HTTP 409 を介してクライアントでも `SaveConflictException` として送出され（直結時と同じ catch が機能）、その他のサーバー例外は `RemoteRepositoryException`（ステータスコード・メッセージ保持）になります
-- **リクエストを解釈できない場合は 500 ではなく 400 になります**。リクエスト自体の読み取り中に失敗するもの（不正な JSON・空ボディ・JSON でない Content-Type・型不一致・値オブジェクトの検証違反、バイナリエンドポイントの `?id=` 欠落・復元不能）はクライアントが送った内容の問題なので、HTTP 400＋`RemoteError`（`Type` は `"BadRequest"`）を返します（クライアントは `StatusCode` が 400 の `RemoteRepositoryException` を送出）。400 のメッセージにはクライアント自身のペイロードに関する情報しか載らず、サーバー側のログ出力も `OnServerError` フックも実行されません（どちらも 500 専用）。サーバー基盤が拒否したリクエスト（`BadHttpRequestException`。例: リクエストボディのサイズ上限超過）は、その例外が持つステータスコード（413 など）をそのまま返します
+- **リクエストを解釈できない場合は 500 ではなく 400 になります**。リクエスト自体の読み取り中に失敗するもの（不正な JSON・空ボディ・JSON でない Content-Type・型不一致・値オブジェクトの検証違反・未定義の `ConcurrencyMode` 値、バイナリエンドポイントの `?id=` 欠落・復元不能）はクライアントが送った内容の問題なので、HTTP 400＋`RemoteError`（`Type` は `"BadRequest"`）を返します（クライアントは `StatusCode` が 400 の `RemoteRepositoryException` を送出）。400 のメッセージにはクライアント自身のペイロードに関する情報しか載らず、サーバー側のログ出力も `OnServerError` フックも実行されません（どちらも 500 専用）。サーバー基盤が拒否したリクエスト（`BadHttpRequestException`。例: リクエストボディのサイズ上限超過）は、その例外が持つステータスコード（413 など）をそのまま返します
 - **グラフ保存（Save）成功後はローカルの RowState も確定**します（直結時と同じ挙動）
 - **楽観排他も転送されます**。`ConcurrencyMode` 引数は Update / Save のリクエストに含まれ、Insert / Update / Save の応答は保存で採番された版を「エンティティ型名＋主キー」の対応表として運び、クライアントが手元のグラフへ書き戻します。これによりリモートでも直結と同じ版を保持でき、再取得なしで同じエンティティを続けて保存できます
 - **500 応答にはサーバー側例外のメッセージがそのまま載ります**。これは意図的な設計で、クライアントが失敗内容を復元し「直結時と同じ catch」を成立させるための情報です。スタックトレースを含む例外全体はサーバー側だけに記録されます（`ILoggerFactory` 経由・カテゴリ `QuickER.RemoteServer`。ロギング未構成のホストでは何もしません）。信頼境界の外へ公開する場合は、認可か例外変換ミドルウェアを併用して内部情報が応答へ漏れないようにしてください

@@ -3490,7 +3490,7 @@ public partial interface IRemoteRepository<TEntity, TKey>
 
     /// <summary>Updates an entity (true when a matching row was updated).</summary>
     /// <param name="entity">The entity to update.</param>
-    /// <param name="mode">How a concurrent modification is handled when the table has a rowversion column (no effect otherwise).</param>
+    /// <param name="mode">How a concurrent modification is handled when the table has a rowversion column (no effect otherwise). An undefined value throws <see cref="ArgumentOutOfRangeException"/>.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     Task<bool> UpdateAsync(
         TEntity entity,
@@ -3506,7 +3506,7 @@ public partial interface IRemoteRepository<TEntity, TKey>
     /// <param name="cascadeSave">Whether to cascade the save to child objects.</param>
     /// <param name="cascadeDelete">Whether to cascade deletes to child objects.</param>
     /// <param name="insertWhenUpdateMissing">Whether to switch to INSERT when no row exists to update (throws by default).</param>
-    /// <param name="mode">How a concurrent modification is handled for entities whose table has a rowversion column (no effect otherwise).</param>
+    /// <param name="mode">How a concurrent modification is handled for entities whose table has a rowversion column (no effect otherwise). An undefined value throws <see cref="ArgumentOutOfRangeException"/>.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The number of records saved.</returns>
     Task<int> SaveAsync(
@@ -3523,7 +3523,7 @@ public partial interface IRemoteRepository<TEntity, TKey>
     /// <param name="cascadeSave">Whether to cascade the save to child objects.</param>
     /// <param name="cascadeDelete">Whether to cascade deletes to child objects.</param>
     /// <param name="insertWhenUpdateMissing">Whether to switch to INSERT when no row exists to update (throws by default).</param>
-    /// <param name="mode">How a concurrent modification is handled for entities whose table has a rowversion column (no effect otherwise).</param>
+    /// <param name="mode">How a concurrent modification is handled for entities whose table has a rowversion column (no effect otherwise). An undefined value throws <see cref="ArgumentOutOfRangeException"/>.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The number of records saved.</returns>
     Task<int> SaveAsync(
@@ -3733,6 +3733,19 @@ public enum ConcurrencyMode
 
     /// <summary>Overwrites the row unconditionally, ignoring the version check (an explicit last-write-wins).</summary>
     ForceOverwrite,
+}
+
+/// <summary>Validates a ConcurrencyMode argument (an undefined value must fail fast instead of silently disabling the version check).</summary>
+internal static class ConcurrencyModes
+{
+    /// <summary>Returns the mode unchanged, or throws ArgumentOutOfRangeException when it is not a defined member.</summary>
+    public static ConcurrencyMode Validated(ConcurrencyMode mode) =>
+        mode is ConcurrencyMode.Optimistic or ConcurrencyMode.ForceOverwrite
+            ? mode
+            : throw new ArgumentOutOfRangeException(
+                nameof(mode),
+                "The concurrency mode must be Optimistic or ForceOverwrite."
+            );
 }
 
 /// <summary>
@@ -4554,6 +4567,7 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
     )
     {
         ArgumentNullException.ThrowIfNull(entity);
+        mode = ConcurrencyModes.Validated(mode);
 
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
@@ -4691,6 +4705,7 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
     )
     {
         ArgumentNullException.ThrowIfNull(entity);
+        mode = ConcurrencyModes.Validated(mode);
 
         // If the entire graph has no changes, return without even opening a connection
         if (!EntityGraphSaver.HasChanges(entity, cascadeSave))
@@ -4767,6 +4782,7 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
     )
     {
         ArgumentNullException.ThrowIfNull(entities);
+        mode = ConcurrencyModes.Validated(mode);
 
         // Target only graphs with changes (filter before opening the connection and transaction)
         var targets = entities

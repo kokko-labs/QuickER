@@ -167,6 +167,8 @@ var result = await customers.Query()
 
 Supported: equality, comparison, `&&`/`||`, `Contains`/`StartsWith`/`EndsWith` (LIKE), `Contains` on a list (IN), date parts (`Year`, etc.), `string.IsNullOrEmpty`, and value-object comparison. **Projection (Select), GroupBy, Join, and arithmetic expressions are not supported** (they throw at runtime; work around them with raw SQL or EF Core).
 
+`Contains` on a list expands to one bind variable per element and is not chunked, so a very large list runs into the dialect's bind-variable / IN-list limit (Oracle's 1000, SQL Server's 2100 parameters, SQLite's historical 999, etc.) and fails at runtime. For a large set of keys, stage them in a temporary table and join, or use raw SQL.
+
 ### Graph save (save parent and children in one call)
 
 ```csharp
@@ -222,7 +224,7 @@ public sealed class DocumentSaveHook : ISaveHook<DocumentEntity>
 services.AddSingleton<ISaveHook<DocumentEntity>, DocumentSaveHook>();
 ```
 
-You can register multiple hooks for the same entity type. **Before runs in registration order** and **short-circuits the moment one returns `false`** (the remaining Before hooks are not called, and that row is skipped). **After also runs in registration order.** An exception thrown by Before / After propagates as-is and, on an implementation target that has a real transaction, rolls back the entire save (for in-memory, see the table below).
+You can register multiple hooks for the same entity type. **Before runs in registration order** and **short-circuits the moment one returns `false`** (the remaining Before hooks are not called, and that row is skipped). **After also runs in registration order.** An exception thrown by Before / After propagates as-is and rolls back the entire save (a target with a real transaction rolls the transaction back; in-memory rolls back through an undo journal).
 
 **Only `SaveAsync` (both the single and the multiple form) is targeted.** Direct calls to the low-level APIs `InsertAsync` / `UpdateAsync` / `DeleteAsync`, and `BulkInsertAsync`, **bypass** the hooks (they do not fire).
 
@@ -234,7 +236,7 @@ Because a skip is isolated, consistency is the hook author's responsibility. In 
 
 #### After and the context
 
-After receives, **just after the operation and before commit**, an `ISaveHookContext` that joins the in-flight transaction. Calling the repository's ordinary APIs from within the hook would contend for locks on a separate connection, so use the operations exposed through `context`. Because throwing from After rolls back the whole save, the half-finished state of "the row exists but the file is not registered" is structurally impossible in the QuickER Repository (SQL Server / SQLite) (for in-memory, see the table below).
+After receives, **just after the operation and before commit**, an `ISaveHookContext` that joins the in-flight transaction. Calling the repository's ordinary APIs from within the hook would contend for locks on a separate connection, so use the operations exposed through `context`. Because throwing from After rolls back the whole save, the half-finished state of "the row exists but the file is not registered" is structurally impossible (in-memory gives the same guarantee through an undo journal).
 
 Operations the context provides (it does not expose raw handles):
 
@@ -249,7 +251,7 @@ Operations the context provides (it does not expose raw handles):
 |---|---|---|
 | QuickER Repository (SQL Server / SQLite) | Full support (After fires right after each operation) | Both `WriteBinaryColumnAsync` and `ExecuteSqlAsync` are supported |
 | EF Core Repository (`GenerateEfCore`) | Supported (After fires in a batch after `SaveChanges`) | `ExecuteSqlAsync` supported; `WriteBinaryColumnAsync` throws `NotSupportedException` |
-| In-memory (`GenerateInMemoryRepositories`) | Supported (pseudo transaction) | `WriteBinaryColumnAsync` writes to the store; `ExecuteSqlAsync` throws `NotSupportedException`. Because there is no real transaction, **store changes remain even if After throws** (best effort) |
+| In-memory (`GenerateInMemoryRepositories`) | Supported (pseudo transaction) | `WriteBinaryColumnAsync` writes to the store; `ExecuteSqlAsync` throws `NotSupportedException`. There is no real transaction, but an undo journal makes the save unit all-or-nothing, so **store changes (including a blob written by After) are rolled back when After throws** |
 | Remote (`--generate-remote-services`) | **A hook registered in the server-side DI fires** | Follows the server-side real implementation. **Known limitation**: even for a row the server skipped in Before, the client-side `RowState` does not reflect the skip and is committed to `Unchanged` |
 
 ### Raw SQL escape hatch
@@ -388,7 +390,7 @@ await repository.SaveAsync(order, cancellationToken: ct);
 ```
 
 - **A missing row and a stale version are different outcomes.** A single `UpdateAsync` returns `false` when the row no longer exists (the pre-existing contract) and throws `SaveConflictException` when the row is still there but its version moved on. `insertWhenUpdateMissing: true` draws the same line: a missing row switches to an INSERT, while a stale version is reported as a conflict (switching that to an INSERT would turn the conflict into a primary-key violation).
-- **A graph save guards deletes as well**, and a single conflict rolls the whole transaction back.
+- **A graph save guards deletes as well**, and a single conflict rolls the whole save unit back (the in-memory repository rolls back the same way, through an undo journal instead of a real transaction).
 - **The new version is written back.** After a successful insert, update, or graph save, the entity holds the version the database assigned, so the same instance can be saved again without being re-read. A save hook's `AfterSaveAsync` runs before the commit and therefore still sees the old version.
 - **Every backend follows the same contract.** The QuickER Repository guards the statement with `WHERE ... AND <rowversion> = @original` and reads the new version back through an `OUTPUT` clause; EF Core uses its own concurrency token (`IsRowVersion()`) and converts `DbUpdateConcurrencyException` into the same exception; the in-memory repository emulates the database with a monotonically increasing 8-byte token; the HTTP remote client carries the mode in the request and writes back the versions the response returns.
 
@@ -579,7 +581,7 @@ Points to keep in mind:
 - **Serialization** uses the same semantics as the entity's JSON round trip (`ToJson` / `Clone`) (VO as the wrapped value, RowState included, parent-reference navigation does not cycle), and the client and server share `RemoteJson.Options`.
 - **Named queries can all be called through the remote surface regardless of implementation method** (simple DSL / raw SQL / manual implementation) (the real implementation lives in the server-side repository).
 - **Exception types are restored**: the server's `SaveConflictException` is thrown on the client as `SaveConflictException` too via HTTP 409 (the same catch as in the direct case works), and other server exceptions become `RemoteRepositoryException` (preserving the status code and message).
-- **A request the server cannot interpret is answered with 400, not 500.** Anything that fails while the request itself is being read — a malformed or empty JSON body, a non-JSON content type, a type mismatch, a value that fails value-object validation, or a missing/unrestorable `?id=` key on the binary endpoints — is a fault in what the client sent, so it returns HTTP 400 with a `RemoteError` of type `"BadRequest"` (the client throws `RemoteRepositoryException` with `StatusCode` 400). The message of a 400 only describes the client's own payload, and neither the server-side logging nor the `OnServerError` hook runs (both are reserved for 500). A request rejected by the server infrastructure (`BadHttpRequestException`, for example when the request body size limit is exceeded) keeps the status code it carries, such as 413.
+- **A request the server cannot interpret is answered with 400, not 500.** Anything that fails while the request itself is being read — a malformed or empty JSON body, a non-JSON content type, a type mismatch, a value that fails value-object validation, an undefined `ConcurrencyMode` value, or a missing/unrestorable `?id=` key on the binary endpoints — is a fault in what the client sent, so it returns HTTP 400 with a `RemoteError` of type `"BadRequest"` (the client throws `RemoteRepositoryException` with `StatusCode` 400). The message of a 400 only describes the client's own payload, and neither the server-side logging nor the `OnServerError` hook runs (both are reserved for 500). A request rejected by the server infrastructure (`BadHttpRequestException`, for example when the request body size limit is exceeded) keeps the status code it carries, such as 413.
 - **After a successful graph save (Save), the local RowState is also committed** (the same behavior as the direct case).
 - **Optimistic concurrency travels over the wire.** The `ConcurrencyMode` argument is part of the Update / Save request, and the Insert / Update / Save responses carry the row versions the save assigned, keyed by entity type and primary key, which the client writes back onto the local graph. A remote client therefore ends up holding the same versions a direct connection would, and can keep saving the same entities without re-reading them.
 - **A 500 response carries the server-side exception message verbatim.** This is intentional: the message is what lets the client restore the failure, so that `catch` looks the same as in the direct case. The full exception, including the stack trace, is written only to the server side, through `ILoggerFactory` (category `QuickER.RemoteServer`; a no-op when the host has no logging provider). When you expose the endpoints beyond a trusted boundary, combine them with authorization or with exception-translating middleware so that internal details do not leak into the response.

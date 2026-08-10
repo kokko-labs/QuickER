@@ -4020,7 +4020,7 @@ public partial interface IRemoteRepository<TEntity, TKey>
 
     /// <summary>Updates an entity (true when a matching row was updated).</summary>
     /// <param name="entity">The entity to update.</param>
-    /// <param name="mode">How a concurrent modification is handled when the table has a rowversion column (no effect otherwise).</param>
+    /// <param name="mode">How a concurrent modification is handled when the table has a rowversion column (no effect otherwise). An undefined value throws <see cref="ArgumentOutOfRangeException"/>.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     Task<bool> UpdateAsync(
         TEntity entity,
@@ -4036,7 +4036,7 @@ public partial interface IRemoteRepository<TEntity, TKey>
     /// <param name="cascadeSave">Whether to cascade the save to child objects.</param>
     /// <param name="cascadeDelete">Whether to cascade deletes to child objects.</param>
     /// <param name="insertWhenUpdateMissing">Whether to switch to INSERT when no row exists to update (throws by default).</param>
-    /// <param name="mode">How a concurrent modification is handled for entities whose table has a rowversion column (no effect otherwise).</param>
+    /// <param name="mode">How a concurrent modification is handled for entities whose table has a rowversion column (no effect otherwise). An undefined value throws <see cref="ArgumentOutOfRangeException"/>.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The number of records saved.</returns>
     Task<int> SaveAsync(
@@ -4053,7 +4053,7 @@ public partial interface IRemoteRepository<TEntity, TKey>
     /// <param name="cascadeSave">Whether to cascade the save to child objects.</param>
     /// <param name="cascadeDelete">Whether to cascade deletes to child objects.</param>
     /// <param name="insertWhenUpdateMissing">Whether to switch to INSERT when no row exists to update (throws by default).</param>
-    /// <param name="mode">How a concurrent modification is handled for entities whose table has a rowversion column (no effect otherwise).</param>
+    /// <param name="mode">How a concurrent modification is handled for entities whose table has a rowversion column (no effect otherwise). An undefined value throws <see cref="ArgumentOutOfRangeException"/>.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The number of records saved.</returns>
     Task<int> SaveAsync(
@@ -4263,6 +4263,19 @@ public enum ConcurrencyMode
 
     /// <summary>Overwrites the row unconditionally, ignoring the version check (an explicit last-write-wins).</summary>
     ForceOverwrite,
+}
+
+/// <summary>Validates a ConcurrencyMode argument (an undefined value must fail fast instead of silently disabling the version check).</summary>
+internal static class ConcurrencyModes
+{
+    /// <summary>Returns the mode unchanged, or throws ArgumentOutOfRangeException when it is not a defined member.</summary>
+    public static ConcurrencyMode Validated(ConcurrencyMode mode) =>
+        mode is ConcurrencyMode.Optimistic or ConcurrencyMode.ForceOverwrite
+            ? mode
+            : throw new ArgumentOutOfRangeException(
+                nameof(mode),
+                "The concurrency mode must be Optimistic or ForceOverwrite."
+            );
 }
 
 /// <summary>
@@ -7144,7 +7157,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
     /// a <see cref="SaveConflictException"/>; a row that no longer exists still returns <c>false</c>.
     /// </remarks>
     /// <param name="entity">The entity to update.</param>
-    /// <param name="mode">How a concurrent modification is handled when the entity carries a concurrency token (no effect otherwise).</param>
+    /// <param name="mode">How a concurrent modification is handled when the entity carries a concurrency token (no effect otherwise). An undefined value throws <see cref="ArgumentOutOfRangeException"/>.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     public async Task<bool> UpdateAsync(
         TEntity entity,
@@ -7153,6 +7166,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
     )
     {
         ArgumentNullException.ThrowIfNull(entity);
+        mode = ConcurrencyModes.Validated(mode);
 
         await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
         var entry = context.Entry(entity);
@@ -7215,7 +7229,9 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
     /// <remarks>
     /// Entities carrying a concurrency token (a rowversion column) take part in optimistic concurrency: unless
     /// <paramref name="mode"/> says otherwise, an update or delete whose row was changed by someone else after it was read
-    /// is rejected with a <see cref="SaveConflictException"/> and the whole transaction rolls back.
+    /// is rejected with a <see cref="SaveConflictException"/> and the whole transaction rolls back. A save hook's
+    /// <c>AfterSaveAsync</c> runs before the commit and therefore still sees the version the entity was read with; the
+    /// version the database assigned is written back once the commit succeeds (the same contract as the direct ADO path).
     /// </remarks>
     public async Task<int> SaveAsync(
         TEntity entity,
@@ -7227,6 +7243,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
     )
     {
         ArgumentNullException.ThrowIfNull(entity);
+        mode = ConcurrencyModes.Validated(mode);
 
         // If there are no changes anywhere in the graph, return without even creating a DbContext.
         if (!EntityGraphSaver.HasChanges(entity, cascadeSave))
@@ -7254,7 +7271,9 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
     /// <remarks>
     /// Entities carrying a concurrency token (a rowversion column) take part in optimistic concurrency: unless
     /// <paramref name="mode"/> says otherwise, an update or delete whose row was changed by someone else after it was read
-    /// is rejected with a <see cref="SaveConflictException"/> and the whole transaction rolls back.
+    /// is rejected with a <see cref="SaveConflictException"/> and the whole transaction rolls back. A save hook's
+    /// <c>AfterSaveAsync</c> runs before the commit and therefore still sees the version the entity was read with; the
+    /// version the database assigned is written back once the commit succeeds (the same contract as the direct ADO path).
     /// </remarks>
     public async Task<int> SaveAsync(
         IEnumerable<TEntity> entities,
@@ -7266,6 +7285,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
     )
     {
         ArgumentNullException.ThrowIfNull(entities);
+        mode = ConcurrencyModes.Validated(mode);
 
         // Only graphs with changes are targeted (narrowed down before creating a DbContext).
         var targets = entities
@@ -7358,6 +7378,19 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
         // To fire After "post-operation, pre-commit", SaveChanges is performed within an explicit transaction.
         await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
 
+        // SaveChanges writes the row version the database assigned straight onto the entity, but this transaction has not
+        // committed yet. The versions the entities were read with are kept so that they can be put back for the duration of
+        // the After pass (see below).
+        var readVersions = new List<(EntityBase Entity, PropertyInfo Property, object? Version)>();
+
+        foreach (var op in survivors)
+        {
+            if (EntitySaveMetadata.For(op.Entity.GetType()).RowVersionProperty is { } property)
+            {
+                readVersions.Add((op.Entity, property, property.GetValue(op.Entity)));
+            }
+        }
+
         var rows = await SaveTrackedChangesAsync(
             context,
             survivors,
@@ -7366,6 +7399,25 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
             cancellationToken
         );
 
+        // Set the assigned versions aside and restore the ones the entities were read with: After runs before the commit, so
+        // it must see the old version, and a rollback (an exception thrown by After) must not leave behind a version the
+        // database never stored - a later save of the same instance would then fail as a phantom conflict. This is the ADO
+        // path's RowVersionCollector expressed for EF Core; no value-object wrapping is needed here because the values never
+        // leave their property (the ADO collector wraps because the database hands it a raw byte[]).
+        var assignedVersions =
+            new List<(EntityBase Entity, PropertyInfo Property, object? Version)>();
+
+        foreach (var (entity, property, readVersion) in readVersions)
+        {
+            var assigned = property.GetValue(entity);
+
+            if (!Equals(assigned, readVersion))
+            {
+                assignedVersions.Add((entity, property, assigned));
+                property.SetValue(entity, readVersion);
+            }
+        }
+
         // After pass (pre-commit): fires in recorded order with the operation actually performed (Insert when switched).
         foreach (var op in survivors)
         {
@@ -7373,6 +7425,12 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
         }
 
         await transaction.CommitAsync(cancellationToken);
+
+        // The commit made the assigned row versions real, so settle them on the entities.
+        foreach (var (entity, property, version) in assignedVersions)
+        {
+            property.SetValue(entity, version);
+        }
 
         // After a successful save, finalize the state (Added/Updated → Unchanged), leaving skipped rows as-is.
         foreach (var root in roots)

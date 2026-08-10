@@ -31,9 +31,6 @@ public sealed class SaveHookEfCoreRuntimeTests : SaveHookRuntimeTestsBase, IDisp
     private ServiceProvider? _hooklessProvider;
     private readonly List<ServiceProvider> _providers = [];
 
-    /// <summary>EF Core は SaveChanges＋After を 1 つの明示トランザクションで囲うため After 例外で保存変更は残らない</summary>
-    protected override bool AfterExceptionLeavesResidue => false;
-
     /// <summary>EF Core 版リポジトリ群とフックを登録した DI プロバイダを構築する（フックなしは状態確認用に使い回す）</summary>
     private ServiceProvider Provider(object[] hooks)
     {

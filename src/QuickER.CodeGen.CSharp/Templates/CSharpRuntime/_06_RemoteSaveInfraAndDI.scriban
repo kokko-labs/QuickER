@@ -441,7 +441,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     /// <summary>Updates an entity (returns true when a matching row was updated).</summary>
     /// <remarks>The policy travels with the request, so a table with a rowversion column behaves exactly as it does on a direct connection: an optimistic conflict surfaces as <see cref="SaveConflictException"/> (HTTP 409) and a successful update writes the new version back to <paramref name="entity"/>.</remarks>
     /// <param name="entity">The entity to update.</param>
-    /// <param name="mode">The concurrency policy applied on the server for tables that have a rowversion column (no effect otherwise).</param>
+    /// <param name="mode">The concurrency policy applied on the server for tables that have a rowversion column (no effect otherwise). An undefined value throws <see cref="ArgumentOutOfRangeException"/> before anything is sent.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     public async Task<bool> UpdateAsync(
         TEntity entity,
@@ -449,6 +449,8 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         CancellationToken cancellationToken = default
     )
     {
+        mode = ConcurrencyModes.Validated(mode);
+
         // Reject updates that still carry values in unbounded binary columns before sending
         // (they are excluded from the server-side UPDATE and would be lost silently)
         UnboundedBinaryColumns.ThrowIfExcludedAssigned(entity);
@@ -482,6 +484,8 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         CancellationToken cancellationToken = default
     )
     {
+        mode = ConcurrencyModes.Validated(mode);
+
         // Reject before sending if any entity to update (RowState==Updated) still carries values
         // in unbounded binary columns (cascade targets are traversed as well)
         GuardUnboundedBinaryOnSave(entity, cascadeSave);
@@ -509,6 +513,8 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         CancellationToken cancellationToken = default
     )
     {
+        mode = ConcurrencyModes.Validated(mode);
+
         var list = entities.ToList();
 
         // Reject before sending if any updated entity in each aggregate root (including cascade targets)

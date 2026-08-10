@@ -15,18 +15,16 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// </summary>
 /// <remarks>
 /// バックエンド非依存のシナリオは基底 <see cref="SaveHookRuntimeTestsBase"/> が持つ。インメモリは実トランザクションを
-/// 持たない（3 フェーズ＝Before プリパス → 保存 → After ポストパス）ため、<see cref="AfterExceptionLeavesResidue"/>=true＝
-/// After が例外を投げても保存フェーズの変更は残る（ベストエフォート）。本クラスは InMemory 固有の検証（skip 時の Put 抑止・
-/// After の除外列書き込みがストアへ反映＝実 DB のストリーミングとパリティ・context の生 SQL は NotSupported）を持つ。
+/// 持たない（3 フェーズ＝Before プリパス → 保存 → After ポストパス）が、undo ジャーナルで保存単位を all-or-nothing に
+/// するため After 例外時も保存フェーズの変更は残らない。本クラスは InMemory 固有の検証（skip 時の Put 抑止・After の
+/// 除外列書き込みがストアへ反映＝実 DB のストリーミングとパリティ・After 例外時は blob 書き込みも巻き戻る・
+/// context の生 SQL は NotSupported）を持つ。
 /// </remarks>
 public sealed class SaveHookInMemoryRuntimeTests : SaveHookRuntimeTestsBase, IDisposable
 {
     /// <summary>全リポジトリで共有するインメモリストア（実 DB のファイルに相当する永続点）</summary>
     private readonly InMemoryDataStore _store = new();
     private readonly List<ServiceProvider> _providers = [];
-
-    /// <summary>インメモリは実トランザクションを持たないため After 例外で保存フェーズの変更が残る</summary>
-    protected override bool AfterExceptionLeavesResidue => true;
 
     /// <summary>指定フック群から Save フックのレジストリを構築する（フックなしは null＝完全 no-op）</summary>
     private ISaveHookRegistry? BuildRegistry(object[] hooks)
@@ -101,6 +99,52 @@ public sealed class SaveHookInMemoryRuntimeTests : SaveHookRuntimeTestsBase, IDi
             .WithUnboundedBinary()
             .FirstOrDefaultAsync(Ct);
         readBack!.Payload.Should().Equal(newPayload, "After が書いた payload がストアに反映される");
+    }
+
+    // ── InMemory 固有 1-b: After が書いた blob も後続の After 例外で巻き戻る ──
+
+    /// <summary>
+    /// 1 つ目の After が除外列 blob を書き、2 つ目の After が例外を投げると、行の更新だけでなく
+    /// <c>WriteBinaryColumnAsync</c> が書いた blob も undo ジャーナルで巻き戻る（保存単位の all-or-nothing）。
+    /// </summary>
+    [Fact(DisplayName = "[SaveHook/InMemory] After が書いた blob も後続の After 例外で巻き戻る")]
+    public async Task After_WritesBinaryColumn_RolledBackWhenLaterAfterThrows()
+    {
+        await ResetAndSeedAsync();
+
+        var newPayload = new byte[8 * 1024];
+        new Random(11).NextBytes(newPayload);
+
+        var writer = new RecordingHook<DocumentEntity>("w", [], e => e.DocumentId)
+        {
+            AfterAction = async (entity, _, context) =>
+                await context.WriteBinaryColumnAsync(
+                    nameof(DocumentEntity.Payload),
+                    entity.DocumentId,
+                    new MemoryStream(newPayload),
+                    cancellationToken: Ct
+                ),
+        };
+        var breaker = new RecordingHook<DocumentEntity>("b", [], e => e.DocumentId)
+        {
+            AfterAction = (_, _, _) => throw new InvalidOperationException("after-boom"),
+        };
+        var documents = Documents(writer, breaker);
+
+        var doc = await documents.GetByIdAsync(1, Ct);
+        doc!.Title = "alpha-doomed";
+        doc.MarkUpdated();
+
+        var act = () => documents.SaveAsync(doc, cancellationToken: Ct);
+        (await act.Should().ThrowAsync<InvalidOperationException>()).WithMessage("*after-boom*");
+
+        var reread = await Documents()
+            .Query()
+            .Where(d => d.DocumentId == 1)
+            .WithUnboundedBinary()
+            .FirstOrDefaultAsync(Ct);
+        reread!.Title.Should().Be("alpha", "行の更新は巻き戻る");
+        reread.Payload.Should().Equal(Doc1Payload, "After が書いた blob も保存前の値へ巻き戻る");
     }
 
     // ── InMemory 固有 2: context の生 SQL は NotSupported ──

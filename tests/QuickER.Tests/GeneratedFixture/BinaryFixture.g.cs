@@ -3463,7 +3463,7 @@ public partial interface IRemoteRepository<TEntity, TKey>
 
     /// <summary>Updates an entity (true when a matching row was updated).</summary>
     /// <param name="entity">The entity to update.</param>
-    /// <param name="mode">How a concurrent modification is handled when the table has a rowversion column (no effect otherwise).</param>
+    /// <param name="mode">How a concurrent modification is handled when the table has a rowversion column (no effect otherwise). An undefined value throws <see cref="ArgumentOutOfRangeException"/>.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     Task<bool> UpdateAsync(
         TEntity entity,
@@ -3479,7 +3479,7 @@ public partial interface IRemoteRepository<TEntity, TKey>
     /// <param name="cascadeSave">Whether to cascade the save to child objects.</param>
     /// <param name="cascadeDelete">Whether to cascade deletes to child objects.</param>
     /// <param name="insertWhenUpdateMissing">Whether to switch to INSERT when no row exists to update (throws by default).</param>
-    /// <param name="mode">How a concurrent modification is handled for entities whose table has a rowversion column (no effect otherwise).</param>
+    /// <param name="mode">How a concurrent modification is handled for entities whose table has a rowversion column (no effect otherwise). An undefined value throws <see cref="ArgumentOutOfRangeException"/>.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The number of records saved.</returns>
     Task<int> SaveAsync(
@@ -3496,7 +3496,7 @@ public partial interface IRemoteRepository<TEntity, TKey>
     /// <param name="cascadeSave">Whether to cascade the save to child objects.</param>
     /// <param name="cascadeDelete">Whether to cascade deletes to child objects.</param>
     /// <param name="insertWhenUpdateMissing">Whether to switch to INSERT when no row exists to update (throws by default).</param>
-    /// <param name="mode">How a concurrent modification is handled for entities whose table has a rowversion column (no effect otherwise).</param>
+    /// <param name="mode">How a concurrent modification is handled for entities whose table has a rowversion column (no effect otherwise). An undefined value throws <see cref="ArgumentOutOfRangeException"/>.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The number of records saved.</returns>
     Task<int> SaveAsync(
@@ -3706,6 +3706,19 @@ public enum ConcurrencyMode
 
     /// <summary>Overwrites the row unconditionally, ignoring the version check (an explicit last-write-wins).</summary>
     ForceOverwrite,
+}
+
+/// <summary>Validates a ConcurrencyMode argument (an undefined value must fail fast instead of silently disabling the version check).</summary>
+internal static class ConcurrencyModes
+{
+    /// <summary>Returns the mode unchanged, or throws ArgumentOutOfRangeException when it is not a defined member.</summary>
+    public static ConcurrencyMode Validated(ConcurrencyMode mode) =>
+        mode is ConcurrencyMode.Optimistic or ConcurrencyMode.ForceOverwrite
+            ? mode
+            : throw new ArgumentOutOfRangeException(
+                nameof(mode),
+                "The concurrency mode must be Optimistic or ForceOverwrite."
+            );
 }
 
 /// <summary>
@@ -4521,6 +4534,7 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
     )
     {
         ArgumentNullException.ThrowIfNull(entity);
+        mode = ConcurrencyModes.Validated(mode);
 
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
@@ -4621,6 +4635,7 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
     )
     {
         ArgumentNullException.ThrowIfNull(entity);
+        mode = ConcurrencyModes.Validated(mode);
 
         // If the entire graph has no changes, return without even opening a connection
         if (!EntityGraphSaver.HasChanges(entity, cascadeSave))
@@ -4684,6 +4699,7 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
     )
     {
         ArgumentNullException.ThrowIfNull(entities);
+        mode = ConcurrencyModes.Validated(mode);
 
         // Target only graphs with changes (filter before opening the connection and transaction)
         var targets = entities
@@ -7204,7 +7220,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     /// <summary>Updates an entity (returns true when a matching row was updated).</summary>
     /// <remarks>The policy travels with the request, so a table with a rowversion column behaves exactly as it does on a direct connection: an optimistic conflict surfaces as <see cref="SaveConflictException"/> (HTTP 409) and a successful update writes the new version back to <paramref name="entity"/>.</remarks>
     /// <param name="entity">The entity to update.</param>
-    /// <param name="mode">The concurrency policy applied on the server for tables that have a rowversion column (no effect otherwise).</param>
+    /// <param name="mode">The concurrency policy applied on the server for tables that have a rowversion column (no effect otherwise). An undefined value throws <see cref="ArgumentOutOfRangeException"/> before anything is sent.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     public async Task<bool> UpdateAsync(
         TEntity entity,
@@ -7212,6 +7228,8 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         CancellationToken cancellationToken = default
     )
     {
+        mode = ConcurrencyModes.Validated(mode);
+
         // Reject updates that still carry values in unbounded binary columns before sending
         // (they are excluded from the server-side UPDATE and would be lost silently)
         UnboundedBinaryColumns.ThrowIfExcludedAssigned(entity);
@@ -7245,6 +7263,8 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         CancellationToken cancellationToken = default
     )
     {
+        mode = ConcurrencyModes.Validated(mode);
+
         // Reject before sending if any entity to update (RowState==Updated) still carries values
         // in unbounded binary columns (cascade targets are traversed as well)
         GuardUnboundedBinaryOnSave(entity, cascadeSave);
@@ -7272,6 +7292,8 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         CancellationToken cancellationToken = default
     )
     {
+        mode = ConcurrencyModes.Validated(mode);
+
         var list = entities.ToList();
 
         // Reject before sending if any updated entity in each aggregate root (including cascade targets)
@@ -9313,9 +9335,15 @@ public sealed class InMemoryDataStore
     /// The value is a monotonically increasing 8-byte big-endian token that emulates SQL Server's rowversion: every insert
     /// and update moves it on, so an entity holding a stale version can be told apart from a current one. The source entity
     /// is stamped as well as the stored snapshot because the store keeps a clone, and a real database likewise hands the
-    /// newly assigned version back to the caller.
+    /// newly assigned version back to the caller. When <paramref name="journal"/> is given, the source is not stamped yet:
+    /// the new version is held in the journal and handed over only once every phase of the save has succeeded, so a save
+    /// that fails later never leaves a caller entity holding a version the store does not have.
     /// </remarks>
-    private void StampRowVersion(EntityBase snapshot, EntityBase? source = null)
+    private void StampRowVersion(
+        EntityBase snapshot,
+        EntityBase? source,
+        InMemoryWriteJournal? journal
+    )
     {
         var property = EntitySaveMetadata.For(snapshot.GetType()).RowVersionProperty;
 
@@ -9334,11 +9362,61 @@ public sealed class InMemoryDataStore
 
         property.SetValue(snapshot, version);
 
-        if (source is not null)
+        if (source is null)
         {
-            // The source gets its own array so that mutating one side cannot reach into the store's snapshot
-            property.SetValue(source, version.ToArray());
+            return;
         }
+
+        // The source gets its own array so that mutating one side cannot reach into the store's snapshot
+        var sourceVersion = version.ToArray();
+
+        if (journal is null)
+        {
+            property.SetValue(source, sourceVersion);
+        }
+        else
+        {
+            journal.DeferSourceStamp(source, property, sourceVersion);
+        }
+    }
+
+    /// <summary>Records the row that is about to be overwritten into <paramref name="journal"/> (a no-op without a journal). The caller must already hold the lock.</summary>
+    private void CaptureUnlocked(InMemoryWriteJournal? journal, Type entityType, object key) =>
+        journal?.Capture(entityType, key, Table(entityType).GetValueOrDefault(key));
+
+    /// <summary>
+    /// Rolls the store back to the state recorded in <paramref name="journal"/>. Used when a graph save fails after its write
+    /// phase (an After hook throwing, for instance), so that the save unit stays all-or-nothing.
+    /// </summary>
+    internal void Undo(InMemoryWriteJournal journal)
+    {
+        lock (_gate)
+        {
+            UndoUnlocked(journal);
+        }
+    }
+
+    /// <summary>Puts the recorded snapshots back, most recent record first, and empties the journal. The caller must already hold the lock.</summary>
+    private void UndoUnlocked(InMemoryWriteJournal journal)
+    {
+        var entries = journal.Entries;
+
+        for (var index = entries.Count - 1; index >= 0; index--)
+        {
+            var (entityType, key, previous) = entries[index];
+
+            if (previous is null)
+            {
+                // There was no row before the save, so the row the save added goes away again
+                Table(entityType).Remove(key);
+            }
+            else
+            {
+                Table(entityType)[key] = previous;
+            }
+        }
+
+        journal.Clear();
     }
 
     /// <summary>Gets the raw snapshot (no clone) for the given type and primary key. Used by internal traversals such as Include key matching. The caller must already hold the lock.</summary>
@@ -9367,7 +9445,7 @@ public sealed class InMemoryDataStore
         {
             var snapshot = entity.Clone();
             snapshot.MarkUnchanged();
-            StampRowVersion(snapshot, entity);
+            StampRowVersion(snapshot, entity, journal: null);
             Table(entity.GetType())[KeyOf(entity)] = snapshot;
         }
     }
@@ -9393,7 +9471,7 @@ public sealed class InMemoryDataStore
             }
 
             // Stamped only once the row is in, so a rejected insert consumes no version and leaves the entity untouched
-            StampRowVersion(snapshot, entity);
+            StampRowVersion(snapshot, entity, journal: null);
         }
     }
 
@@ -9432,8 +9510,16 @@ public sealed class InMemoryDataStore
     /// <remarks>
     /// The row version moves on, mirroring the real database where writing a blob is an UPDATE like any other. There is no
     /// caller entity to hand the new version back to, so an entity fetched before this call is left holding a stale version.
+    /// When <paramref name="journal"/> is given (a write from a save hook's After), the row is recorded there first, so this
+    /// write is rolled back together with the rest of the save unit if a later phase fails.
     /// </remarks>
-    internal bool WriteColumnValue(Type entityType, object key, PropertyInfo column, object? value)
+    internal bool WriteColumnValue(
+        Type entityType,
+        object key,
+        PropertyInfo column,
+        object? value,
+        InMemoryWriteJournal? journal = null
+    )
     {
         lock (_gate)
         {
@@ -9444,21 +9530,41 @@ public sealed class InMemoryDataStore
                 return false;
             }
 
+            CaptureUnlocked(journal, entityType, key);
             var clone = entity.Clone();
             column.SetValue(clone, value);
             clone.MarkUnchanged();
-            StampRowVersion(clone);
+            StampRowVersion(clone, source: null, journal);
             Table(entityType)[key] = clone;
             return true;
         }
     }
 
     /// <summary>Applies multiple writes (insert/update/delete) together under a single lock (preserving the atomicity of a graph save).</summary>
-    internal TResult Write<TResult>(Func<InMemoryWriteScope, TResult> writer)
+    internal TResult Write<TResult>(Func<InMemoryWriteScope, TResult> writer) =>
+        Write(writer, journal: null);
+
+    /// <summary>
+    /// Applies multiple writes together under a single lock while recording every row it overwrites into
+    /// <paramref name="journal"/>, so that a failure part-way through (a concurrency conflict, for instance) rolls the whole
+    /// batch back before the exception leaves this method.
+    /// </summary>
+    internal TResult Write<TResult>(
+        Func<InMemoryWriteScope, TResult> writer,
+        InMemoryWriteJournal? journal
+    )
     {
         lock (_gate)
         {
-            return writer(new InMemoryWriteScope(this));
+            try
+            {
+                return writer(new InMemoryWriteScope(this, journal));
+            }
+            catch when (journal is not null)
+            {
+                UndoUnlocked(journal);
+                throw;
+            }
         }
     }
 
@@ -9481,16 +9587,21 @@ public sealed class InMemoryDataStore
         public EntityBase? Find(Type entityType, object key) => store.FindRaw(entityType, key);
     }
 
-    /// <summary>Scope for applying writes across a whole graph under the lock.</summary>
-    internal readonly struct InMemoryWriteScope(InMemoryDataStore store)
+    /// <summary>Scope for applying writes across a whole graph under the lock (every write is recorded into the journal, when the caller supplied one).</summary>
+    internal readonly struct InMemoryWriteScope(
+        InMemoryDataStore store,
+        InMemoryWriteJournal? journal
+    )
     {
         /// <summary>Stores a snapshot for updates and seeding (an existing key is overwritten). Assumes the lock is held, so it writes directly to the internal dictionary.</summary>
         public void Put(EntityBase entity)
         {
+            var key = KeyOf(entity);
+            store.CaptureUnlocked(journal, entity.GetType(), key);
             var snapshot = entity.Clone();
             snapshot.MarkUnchanged();
-            store.StampRowVersion(snapshot, entity);
-            store.Table(entity.GetType())[KeyOf(entity)] = snapshot;
+            store.StampRowVersion(snapshot, entity, journal);
+            store.Table(entity.GetType())[key] = snapshot;
         }
 
         /// <summary>Stores a snapshot for an insert only (an existing primary key throws instead of being overwritten). Assumes the lock is held, so it writes directly to the internal dictionary.</summary>
@@ -9499,6 +9610,7 @@ public sealed class InMemoryDataStore
             var key = KeyOf(entity);
             var snapshot = entity.Clone();
             snapshot.MarkUnchanged();
+            store.CaptureUnlocked(journal, entity.GetType(), key);
 
             if (!store.Table(entity.GetType()).TryAdd(key, snapshot))
             {
@@ -9506,11 +9618,15 @@ public sealed class InMemoryDataStore
             }
 
             // Stamped only once the row is in, so a rejected insert consumes no version and leaves the entity untouched
-            store.StampRowVersion(snapshot, entity);
+            store.StampRowVersion(snapshot, entity, journal);
         }
 
         /// <summary>Removes the snapshot for the given type and primary key (true if one existed).</summary>
-        public bool Remove(Type entityType, object key) => store.Table(entityType).Remove(key);
+        public bool Remove(Type entityType, object key)
+        {
+            store.CaptureUnlocked(journal, entityType, key);
+            return store.Table(entityType).Remove(key);
+        }
 
         /// <summary>Whether a snapshot exists for the given type and primary key.</summary>
         public bool Exists(Type entityType, object key) => store.Table(entityType).ContainsKey(key);
@@ -9548,6 +9664,71 @@ public sealed class InMemoryDataStore
 
         /// <summary>The list of raw snapshots (no clones) for the given type. Used by the descendant traversal for cascade delete.</summary>
         public IReadOnlyList<EntityBase> All(Type entityType) => store.RawAll(entityType);
+    }
+}
+
+/// <summary>
+/// Undo journal that records what one graph save is about to overwrite in the <see cref="InMemoryDataStore"/>, so that the
+/// whole save unit is all-or-nothing even though the store has no real transaction of its own.
+/// </summary>
+/// <remarks>
+/// <para>
+/// A row is recorded once, the first time the save touches it, together with the snapshot that was there beforehand (or
+/// nothing at all, when the row did not exist yet). Rolling back puts those snapshots back and drops the rows that were not
+/// there before, which returns the store to exactly the state it had when the save started. Keeping the previous snapshot by
+/// reference is enough because the store never hands its snapshots out (readers always get a clone), so nothing outside can
+/// have changed one in the meantime.
+/// </para>
+/// <para>
+/// The row version counter is deliberately not rewound: it only has to keep increasing for a stale version to be
+/// distinguishable from a current one, so the versions a rolled back save consumed are simply skipped.
+/// </para>
+/// <para>
+/// The newly assigned versions destined for the caller's own entities are held here as well, and handed over only once every
+/// phase of the save has succeeded. A save that fails therefore leaves the caller holding the versions it read, and a save
+/// hook's After still sees the pre-save version (the same "before commit" view the real backends give).
+/// </para>
+/// </remarks>
+internal sealed class InMemoryWriteJournal
+{
+    private readonly List<(Type EntityType, object Key, EntityBase? Previous)> _entries = new();
+    private readonly HashSet<(Type EntityType, object Key)> _touched = new();
+    private readonly List<(EntityBase Source, PropertyInfo Property, object? Version)> _stamps =
+        new();
+
+    /// <summary>The recorded rows, in the order the save first touched them.</summary>
+    public IReadOnlyList<(Type EntityType, object Key, EntityBase? Previous)> Entries => _entries;
+
+    /// <summary>Records the snapshot a row holds before the save overwrites it (only the first touch of a row is kept).</summary>
+    public void Capture(Type entityType, object key, EntityBase? previous)
+    {
+        if (_touched.Add((entityType, key)))
+        {
+            _entries.Add((entityType, key, previous));
+        }
+    }
+
+    /// <summary>Holds a newly assigned row version for a caller entity until the save has fully succeeded (see <see cref="ApplySourceStamps"/>).</summary>
+    public void DeferSourceStamp(EntityBase source, PropertyInfo property, object? version) =>
+        _stamps.Add((source, property, version));
+
+    /// <summary>Hands the newly assigned row versions to the caller's entities (called only once every phase of the save has succeeded).</summary>
+    public void ApplySourceStamps()
+    {
+        foreach (var (source, property, version) in _stamps)
+        {
+            property.SetValue(source, version);
+        }
+
+        _stamps.Clear();
+    }
+
+    /// <summary>Drops everything recorded (called once the journal has been rolled back).</summary>
+    public void Clear()
+    {
+        _entries.Clear();
+        _touched.Clear();
+        _stamps.Clear();
     }
 }
 
@@ -9957,8 +10138,9 @@ internal static class InMemoryCascade
     /// contained in <see cref="SaveHookSession.Skipped"/>, and the operations actually performed are recorded into
     /// <paramref name="records"/> (in execution order), which is used to determine the After firing order and the actual operations.
     /// Entities whose type has a rowversion column are guarded by <paramref name="mode"/>: updating or deleting a row that
-    /// someone else changed first is rejected. Because the store has no real transaction, a conflict found part-way through
-    /// leaves the writes already applied in place (the same best-effort limitation as the After hook phase).
+    /// someone else changed first is rejected. A conflict found part-way through does not leave the writes already applied
+    /// behind: the write scope records them into an undo journal, and the store is rolled back before the exception
+    /// surfaces.
     /// </remarks>
     public static int Save(
         EntityBase entity,
@@ -10366,7 +10548,7 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
     /// receives the newly assigned version.
     /// </remarks>
     /// <param name="entity">The entity to update.</param>
-    /// <param name="mode">How a concurrent modification is handled when the type has a rowversion column (no effect otherwise).</param>
+    /// <param name="mode">How a concurrent modification is handled when the type has a rowversion column (no effect otherwise). An undefined value throws <see cref="ArgumentOutOfRangeException"/>.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     public Task<bool> UpdateAsync(
         TEntity entity,
@@ -10375,6 +10557,7 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
     )
     {
         ArgumentNullException.ThrowIfNull(entity);
+        mode = ConcurrencyModes.Validated(mode);
 
         // As with a real database, reject updates that still carry values in unbounded binary columns (checked here individually because this path does not go through BindUpdateParameters).
         UnboundedBinaryColumns.ThrowIfExcludedAssigned(entity);
@@ -10489,11 +10672,12 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
     /// <remarks>
     /// When save hooks are registered, this runs in 3 phases: (1) traverse the graph outside the lock, fire Before, and build the
     /// skip set; (2) save inside the lock applying the skips and record the (entity, operation) pairs performed; (3) fire After
-    /// outside the lock in execution order. After emulates "before commit" (in-memory has no real transaction, so even if After
-    /// throws, the store changes remain = best effort).
+    /// outside the lock in execution order. After emulates "before commit": it still sees the row version the entity was read
+    /// with, because the newly assigned versions reach the caller's entities only once every phase has succeeded.
     /// Entities whose type has a rowversion column are guarded by <paramref name="mode"/>: updating or deleting a row that
-    /// someone else changed first is rejected. Having no real transaction, a conflict found part-way through leaves the
-    /// writes already applied in place.
+    /// someone else changed first is rejected. The save is all-or-nothing through an undo journal: a conflict found part-way
+    /// through, or an exception thrown by After, rolls the store back to the state it had before the save (and the caller's
+    /// entities keep the versions they had).
     /// </remarks>
     public async Task<int> SaveAsync(
         TEntity entity,
@@ -10505,6 +10689,7 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
     )
     {
         ArgumentNullException.ThrowIfNull(entity);
+        mode = ConcurrencyModes.Validated(mode);
 
         // Do nothing if the whole graph has no changes (the change check happens exactly once here and is passed to later phases as already verified).
         if (!EntityGraphSaver.HasChanges(entity, cascadeSave))
@@ -10512,13 +10697,17 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
             return 0;
         }
 
+        // Undo journal that makes the whole save all-or-nothing: it records every row the save overwrites and holds the newly
+        // assigned row versions until the last phase has succeeded.
+        var journal = new InMemoryWriteJournal();
+
         // If hooks are registered, build a session that supplies a context participating in the in-progress store write.
         var hooks =
             _saveHooks is null
                 ? null
                 : new SaveHookSession(
                     _saveHooks,
-                    e => new InMemorySaveHookContext(Store, e.GetType())
+                    e => new InMemorySaveHookContext(Store, e.GetType(), journal)
                 );
 
         // Phase 1 (outside the lock): traverse the graph in the same order as Save, fire Before, and build the skip set.
@@ -10537,28 +10726,42 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
         // Phase 2 (inside the lock): save applying the skip set and record the (entity, operation) pairs performed.
         var records =
             hooks is null ? null : new List<(EntityBase Entity, SaveOperation Operation)>();
-        var rows = Store.Write(scope =>
-            InMemoryCascade.Save(
-                entity,
-                scope,
-                cascadeSave,
-                cascadeDelete,
-                insertWhenUpdateMissing,
-                mode,
-                hooks,
-                records,
-                changesAlreadyVerified: true
-            )
+        var rows = Store.Write(
+            scope =>
+                InMemoryCascade.Save(
+                    entity,
+                    scope,
+                    cascadeSave,
+                    cascadeDelete,
+                    insertWhenUpdateMissing,
+                    mode,
+                    hooks,
+                    records,
+                    changesAlreadyVerified: true
+                ),
+            journal
         );
 
-        // Phase 3 (outside the lock): fire After in execution order.
+        // Phase 3 (outside the lock): fire After in execution order. An exception here rolls the save phase back, so the
+        // "row written but the hook's follow-up failed" half state cannot survive.
         if (hooks is not null)
         {
-            foreach (var (recordEntity, operation) in records!)
+            try
             {
-                await hooks.InvokeAfterAsync(recordEntity, operation, cancellationToken);
+                foreach (var (recordEntity, operation) in records!)
+                {
+                    await hooks.InvokeAfterAsync(recordEntity, operation, cancellationToken);
+                }
+            }
+            catch
+            {
+                Store.Undo(journal);
+                throw;
             }
         }
+
+        // Every phase succeeded, so the newly assigned row versions can now reach the caller's entities.
+        journal.ApplySourceStamps();
 
         // Finalize the saved graph as Unchanged (skipped rows are left as they are).
         EntityGraphSaver.AcceptChanges(entity, cascadeSave, hooks?.Skipped);
@@ -10569,8 +10772,8 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
     /// <remarks>
     /// The hook firing order is the same 3 phases as the single-root overload (Before pre-pass, save, After post-pass), and roots are processed in the specified order.
     /// Entities whose type has a rowversion column are guarded by <paramref name="mode"/>: updating or deleting a row that
-    /// someone else changed first is rejected. Having no real transaction, a conflict found part-way through leaves the
-    /// writes already applied in place.
+    /// someone else changed first is rejected. All the roots share one undo journal, so a conflict found part-way through, or
+    /// an exception thrown by After, rolls every root back to the state it had before the save.
     /// </remarks>
     public async Task<int> SaveAsync(
         IEnumerable<TEntity> entities,
@@ -10582,6 +10785,7 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
     )
     {
         ArgumentNullException.ThrowIfNull(entities);
+        mode = ConcurrencyModes.Validated(mode);
         // Target only graphs with changes (the change check happens exactly once here and is passed to later phases as already verified).
         var roots = entities
             .Where(entity => entity is not null && EntityGraphSaver.HasChanges(entity, cascadeSave))
@@ -10592,12 +10796,15 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
             return 0;
         }
 
+        // Undo journal shared by every root, so the whole call is one all-or-nothing unit.
+        var journal = new InMemoryWriteJournal();
+
         var hooks =
             _saveHooks is null
                 ? null
                 : new SaveHookSession(
                     _saveHooks,
-                    e => new InMemorySaveHookContext(Store, e.GetType())
+                    e => new InMemorySaveHookContext(Store, e.GetType(), journal)
                 );
 
         // Phase 1 (outside the lock): traverse the graphs of all roots and fire Before.
@@ -10619,36 +10826,50 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
         // Phase 2 (inside the lock): save all roots applying the skips and record the (entity, operation) pairs performed.
         var records =
             hooks is null ? null : new List<(EntityBase Entity, SaveOperation Operation)>();
-        var rows = Store.Write(scope =>
-        {
-            var total = 0;
-
-            foreach (var entity in roots)
+        var rows = Store.Write(
+            scope =>
             {
-                total += InMemoryCascade.Save(
-                    entity,
-                    scope,
-                    cascadeSave,
-                    cascadeDelete,
-                    insertWhenUpdateMissing,
-                    mode,
-                    hooks,
-                    records,
-                    changesAlreadyVerified: true
-                );
-            }
+                var total = 0;
 
-            return total;
-        });
+                foreach (var entity in roots)
+                {
+                    total += InMemoryCascade.Save(
+                        entity,
+                        scope,
+                        cascadeSave,
+                        cascadeDelete,
+                        insertWhenUpdateMissing,
+                        mode,
+                        hooks,
+                        records,
+                        changesAlreadyVerified: true
+                    );
+                }
 
-        // Phase 3 (outside the lock): fire After in execution order.
+                return total;
+            },
+            journal
+        );
+
+        // Phase 3 (outside the lock): fire After in execution order (an exception here rolls the save phase back).
         if (hooks is not null)
         {
-            foreach (var (recordEntity, operation) in records!)
+            try
             {
-                await hooks.InvokeAfterAsync(recordEntity, operation, cancellationToken);
+                foreach (var (recordEntity, operation) in records!)
+                {
+                    await hooks.InvokeAfterAsync(recordEntity, operation, cancellationToken);
+                }
+            }
+            catch
+            {
+                Store.Undo(journal);
+                throw;
             }
         }
+
+        // Every phase succeeded, so the newly assigned row versions can now reach the caller's entities.
+        journal.ApplySourceStamps();
 
         foreach (var entity in roots)
         {
@@ -10693,14 +10914,18 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
 /// <remarks>
 /// Excluded-column binary writes are applied to the store with the same Stream-to-byte[] conversion as the existing in-memory
 /// stream accessors (strictly following the <c>ResolveWriteLength</c> contract validation and the clone/Put semantics). Raw SQL
-/// cannot run in memory and throws <see cref="NotSupportedException"/>. In-memory has no real transaction, so even if After
-/// throws, the store changes written here remain (no rollback = best effort).
+/// cannot run in memory and throws <see cref="NotSupportedException"/>. Writes made here join the save's undo journal, so if a
+/// later After throws they are rolled back together with the rest of the save unit.
 /// </remarks>
-internal sealed class InMemorySaveHookContext(InMemoryDataStore store, Type entityType)
-    : ISaveHookContext
+internal sealed class InMemorySaveHookContext(
+    InMemoryDataStore store,
+    Type entityType,
+    InMemoryWriteJournal journal
+) : ISaveHookContext
 {
     private readonly InMemoryDataStore _store = store;
     private readonly Type _entityType = entityType;
+    private readonly InMemoryWriteJournal _journal = journal;
 
     /// <summary>Raw SQL cannot run in memory (switch to a real database repository, or handle it outside the hook).</summary>
     public Task<int> ExecuteSqlAsync(
@@ -10744,7 +10969,7 @@ internal sealed class InMemorySaveHookContext(InMemoryDataStore store, Type enti
             stored = bytes;
         }
 
-        return _store.WriteColumnValue(_entityType, NormalizeKey(key), column, stored);
+        return _store.WriteColumnValue(_entityType, NormalizeKey(key), column, stored, _journal);
     }
 
     /// <summary>Normalizes the primary key (object) into a dictionary key (value objects are opened to their underlying value).</summary>
@@ -11719,7 +11944,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
     /// a <see cref="SaveConflictException"/>; a row that no longer exists still returns <c>false</c>.
     /// </remarks>
     /// <param name="entity">The entity to update.</param>
-    /// <param name="mode">How a concurrent modification is handled when the entity carries a concurrency token (no effect otherwise).</param>
+    /// <param name="mode">How a concurrent modification is handled when the entity carries a concurrency token (no effect otherwise). An undefined value throws <see cref="ArgumentOutOfRangeException"/>.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     public async Task<bool> UpdateAsync(
         TEntity entity,
@@ -11728,6 +11953,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
     )
     {
         ArgumentNullException.ThrowIfNull(entity);
+        mode = ConcurrencyModes.Validated(mode);
 
         await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
         var entry = context.Entry(entity);
@@ -11790,7 +12016,9 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
     /// <remarks>
     /// Entities carrying a concurrency token (a rowversion column) take part in optimistic concurrency: unless
     /// <paramref name="mode"/> says otherwise, an update or delete whose row was changed by someone else after it was read
-    /// is rejected with a <see cref="SaveConflictException"/> and the whole transaction rolls back.
+    /// is rejected with a <see cref="SaveConflictException"/> and the whole transaction rolls back. A save hook's
+    /// <c>AfterSaveAsync</c> runs before the commit and therefore still sees the version the entity was read with; the
+    /// version the database assigned is written back once the commit succeeds (the same contract as the direct ADO path).
     /// </remarks>
     public async Task<int> SaveAsync(
         TEntity entity,
@@ -11802,6 +12030,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
     )
     {
         ArgumentNullException.ThrowIfNull(entity);
+        mode = ConcurrencyModes.Validated(mode);
 
         // If there are no changes anywhere in the graph, return without even creating a DbContext.
         if (!EntityGraphSaver.HasChanges(entity, cascadeSave))
@@ -11829,7 +12058,9 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
     /// <remarks>
     /// Entities carrying a concurrency token (a rowversion column) take part in optimistic concurrency: unless
     /// <paramref name="mode"/> says otherwise, an update or delete whose row was changed by someone else after it was read
-    /// is rejected with a <see cref="SaveConflictException"/> and the whole transaction rolls back.
+    /// is rejected with a <see cref="SaveConflictException"/> and the whole transaction rolls back. A save hook's
+    /// <c>AfterSaveAsync</c> runs before the commit and therefore still sees the version the entity was read with; the
+    /// version the database assigned is written back once the commit succeeds (the same contract as the direct ADO path).
     /// </remarks>
     public async Task<int> SaveAsync(
         IEnumerable<TEntity> entities,
@@ -11841,6 +12072,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
     )
     {
         ArgumentNullException.ThrowIfNull(entities);
+        mode = ConcurrencyModes.Validated(mode);
 
         // Only graphs with changes are targeted (narrowed down before creating a DbContext).
         var targets = entities
@@ -11933,6 +12165,19 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
         // To fire After "post-operation, pre-commit", SaveChanges is performed within an explicit transaction.
         await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
 
+        // SaveChanges writes the row version the database assigned straight onto the entity, but this transaction has not
+        // committed yet. The versions the entities were read with are kept so that they can be put back for the duration of
+        // the After pass (see below).
+        var readVersions = new List<(EntityBase Entity, PropertyInfo Property, object? Version)>();
+
+        foreach (var op in survivors)
+        {
+            if (EntitySaveMetadata.For(op.Entity.GetType()).RowVersionProperty is { } property)
+            {
+                readVersions.Add((op.Entity, property, property.GetValue(op.Entity)));
+            }
+        }
+
         var rows = await SaveTrackedChangesAsync(
             context,
             survivors,
@@ -11941,6 +12186,25 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
             cancellationToken
         );
 
+        // Set the assigned versions aside and restore the ones the entities were read with: After runs before the commit, so
+        // it must see the old version, and a rollback (an exception thrown by After) must not leave behind a version the
+        // database never stored - a later save of the same instance would then fail as a phantom conflict. This is the ADO
+        // path's RowVersionCollector expressed for EF Core; no value-object wrapping is needed here because the values never
+        // leave their property (the ADO collector wraps because the database hands it a raw byte[]).
+        var assignedVersions =
+            new List<(EntityBase Entity, PropertyInfo Property, object? Version)>();
+
+        foreach (var (entity, property, readVersion) in readVersions)
+        {
+            var assigned = property.GetValue(entity);
+
+            if (!Equals(assigned, readVersion))
+            {
+                assignedVersions.Add((entity, property, assigned));
+                property.SetValue(entity, readVersion);
+            }
+        }
+
         // After pass (pre-commit): fires in recorded order with the operation actually performed (Insert when switched).
         foreach (var op in survivors)
         {
@@ -11948,6 +12212,12 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
         }
 
         await transaction.CommitAsync(cancellationToken);
+
+        // The commit made the assigned row versions real, so settle them on the entities.
+        foreach (var (entity, property, version) in assignedVersions)
+        {
+            property.SetValue(entity, version);
+        }
 
         // After a successful save, finalize the state (Added/Updated → Unchanged), leaving skipped rows as-is.
         foreach (var root in roots)

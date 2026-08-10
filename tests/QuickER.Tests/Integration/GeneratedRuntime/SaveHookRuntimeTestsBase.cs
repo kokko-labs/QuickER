@@ -21,10 +21,10 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// 同じアサーションが成立する。
 /// </para>
 /// <para>
-/// 実装先で唯一期待が分かれるのは<b>「After 例外時の残留」</b>で、QuickER 版 Repository・EF Core は 1 トランザクションのため
-/// ロールバックして残らず（<see cref="AfterExceptionLeavesResidue"/>=false）、インメモリは実トランザクションを持たず保存フェーズの
-/// 変更が残る（=true）。After の同一トランザクション書き込み（除外列 blob・生 SQL）や FK 制約ロールバックは、context 操作の
-/// 対応が実装先で異なるため各派生のバックエンド固有 <c>[Fact]</c> で検証する。
+/// <b>「After 例外時の残留」</b>は全実装先で共通の期待（残らない）である。QuickER 版 Repository・EF Core は 1 トランザクション、
+/// インメモリは undo ジャーナルによる保存単位の all-or-nothing で、いずれもロールバックする。After の同一トランザクション
+/// 書き込み（除外列 blob・生 SQL）や FK 制約ロールバックは、context 操作の対応が実装先で異なるため各派生のバックエンド固有
+/// <c>[Fact]</c> で検証する。
 /// </para>
 /// </remarks>
 [Trait("Category", "Integration")]
@@ -45,9 +45,6 @@ public abstract class SaveHookRuntimeTestsBase
 
     /// <summary>指定した Save フック群を登録した文書メモ（子）リポジトリを生成する</summary>
     protected abstract IDocumentNoteRepository Notes(params object[] hooks);
-
-    /// <summary>After が例外を投げたとき、保存フェーズで確定した変更が残るか（QuickER/EF Core=false・InMemory=true）</summary>
-    protected abstract bool AfterExceptionLeavesResidue { get; }
 
     /// <summary>文書エンティティを組み立てる</summary>
     protected static DocumentEntity NewDocument(
@@ -121,13 +118,14 @@ public abstract class SaveHookRuntimeTestsBase
         log.Should().Contain("h:before:Insert:11").And.Contain("h:after:Insert:11");
     }
 
-    // ── 4（row 版）. After 例外時の残留（実装先で期待が分岐する唯一の点） ──
+    // ── 4（row 版）. After 例外で保存フェーズの変更が残らない（全実装先で共通） ──
 
-    /// <summary>After が例外を投げると、保存フェーズで行った更新は QuickER/EF Core では残らず、インメモリでは残る</summary>
-    [Fact(
-        DisplayName = "[SaveHook] After 例外時の残留は実装先で分岐する（QuickER/EF Core=残らない・InMemory=残る）"
-    )]
-    public async Task After_Throws_RowResidueDependsOnBackend()
+    /// <summary>
+    /// After が例外を投げると、保存フェーズで行った更新は全実装先で残らない（QuickER 版 Repository・EF Core は
+    /// 1 トランザクション、インメモリは undo ジャーナルによるロールバック）。
+    /// </summary>
+    [Fact(DisplayName = "[SaveHook] After 例外で保存フェーズの変更は残らない（全実装先で共通）")]
+    public async Task After_Throws_RollsBackSavePhase()
     {
         await ResetAndSeedAsync();
 
@@ -146,18 +144,7 @@ public abstract class SaveHookRuntimeTestsBase
 
         var reread = await Documents().GetByIdAsync(1, Ct);
 
-        if (AfterExceptionLeavesResidue)
-        {
-            reread!
-                .Title.Should()
-                .Be("alpha-doomed", "インメモリは保存フェーズの変更を（ロールバックできず）残す");
-        }
-        else
-        {
-            reread!
-                .Title.Should()
-                .Be("alpha", "1 トランザクションのため After 例外で更新はロールバックされる");
-        }
+        reread!.Title.Should().Be("alpha", "After 例外で保存フェーズの更新はロールバックされる");
     }
 
     // ── 5. 複数フックの短絡と順序 ──
