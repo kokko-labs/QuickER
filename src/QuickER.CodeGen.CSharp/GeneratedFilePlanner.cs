@@ -607,6 +607,16 @@ public static class GeneratedFilePlanner
         };
 
     /// <summary>
+    /// サーバー実装の固定部ファイル・名前空間のサフィックス（配布パッケージ <see cref="RuntimePackages.AspNetCore"/> と同名規則）。
+    /// </summary>
+    /// <remarks>
+    /// RemoteServer バケットは <see cref="ActiveBuckets"/> に載らず（サーバー実装は常に専用スペック）、
+    /// <see cref="FixedRuntimeSuffix"/> のバケットループを通らないため、<see cref="AddRemoteServerSpec"/> が直接使う。
+    /// スキーマ依存側のファイル名・名前空間サフィックスは従来どおり <c>RemoteServer</c> で、両者は別軸。
+    /// </remarks>
+    private const string AspNetCoreSuffix = "AspNetCore";
+
+    /// <summary>
     /// 分割時の固定 infra ファイル（<c>Runtime*.g.cs</c>）のスペックを、配布パッケージと 1:1 対応する構成で追加する。
     /// </summary>
     /// <remarks>
@@ -741,10 +751,19 @@ public static class GeneratedFilePlanner
     /// スペック（常に別ファイル）を計画へ追加する。
     /// </summary>
     /// <remarks>
+    /// <para>
     /// サーバー実装は ASP.NET Core（FrameworkReference）を要するため、非分割でも本体ファイルへは連結しない。
     /// Repository バケット（＝リモート面の契約）が有効でない構成では何も追加しない（契約が無ければ実装先が無い）。
     /// 挿入位置は「Repository バケットを含む最後のスペックの直後」＝リモート面の契約・実装の隣に並べる
     /// （プレビュー・出力順で Repositories の下に RemoteServer が来る。非分割は本体 1 ファイルの後ろ＝従来どおり末尾）。
+    /// </para>
+    /// <para>
+    /// 分割時は他バケットと同じ対称構成で、固定部（<c>RemoteServerEngine</c> ほか）を <c>Runtime.AspNetCore.g.cs</c>
+    /// （<c>{Runtime}.AspNetCore</c>＝配布パッケージ <see cref="RuntimePackages.AspNetCore"/> 相当）へ切り出し、
+    /// <c>RemoteServer.g.cs</c> は per-entity のエンドポイントだけへ純化する。パッケージ参照モードでは固定部ファイルを
+    /// 計画せず（パッケージが持つ）、非分割は 1 ファイルへ同居する（<c>EmitSharedInfra</c> の既定 true ＋
+    /// <c>CSharpCodeGenerationService</c> 側の <c>!UseRuntimePackages</c> の AND が効く）。
+    /// </para>
     /// </remarks>
     private static void AddRemoteServerSpec(
         List<GeneratedFileSpec> specs,
@@ -787,13 +806,37 @@ public static class GeneratedFilePlanner
                 : active
         ).ToHashSet();
         var ownNamespace = ResolveNamespace(options, GenerationBucket.RemoteServer);
-        var crossUsings = BucketDependencies(GenerationBucket.RemoteServer)
+        var dependencyNamespaces = BucketDependencies(GenerationBucket.RemoteServer)
             .Where(dependency => activeSet.Contains(dependency))
             .Select(dependency => ResolveNamespace(options, dependency))
-            .Where(ns => !string.Equals(ns, ownNamespace, StringComparison.Ordinal))
-            .Distinct(StringComparer.Ordinal)
-            .OrderBy(ns => ns, StringComparer.Ordinal)
             .ToList();
+
+        // 固定部ファイル（Runtime.AspNetCore.g.cs）は他の Runtime 系と同じく、パッケージ参照モードでは計画しない
+        // （そのときは GeneratedFileUsings が固定名前空間 QuickER.Runtime.AspNetCore の using を付ける）
+        if (!options.UseRuntimePackages)
+        {
+            var runtimeNamespace = ResolveNamespace(options, GenerationBucket.Runtime);
+            var aspNetCoreNamespace = $"{runtimeNamespace}.{AspNetCoreSuffix}";
+
+            // 固定部は共通契約（RemoteJson・エンベロープ・SaveConflictException 等）をコア相当のファイルから
+            // using で参照する（パッケージが using QuickER.Runtime; するのと同じ構造）
+            specs.Add(
+                new GeneratedFileSpec
+                {
+                    FileName = FixedRuntimeFileName(AspNetCoreSuffix),
+                    NamespaceName = aspNetCoreNamespace,
+                    Buckets = [GenerationBucket.RemoteServer],
+                    CrossNamespaceUsings = [runtimeNamespace],
+                    Dialect = primaryDialect,
+                    ContractOnly = false,
+                    MultiDialect = false,
+                    EmitSchemaDependent = false,
+                }
+            );
+
+            // per-entity 側は固定部の namespace も using する（方言別実装が Runtime.{方言} を using するのと同型）
+            dependencyNamespaces.Add(aspNetCoreNamespace);
+        }
 
         InsertAfterRepositorySpecs(
             specs,
@@ -802,7 +845,7 @@ public static class GeneratedFilePlanner
                 FileName = DefaultFileName(GenerationBucket.RemoteServer),
                 NamespaceName = ownNamespace,
                 Buckets = [GenerationBucket.RemoteServer],
-                CrossNamespaceUsings = crossUsings,
+                CrossNamespaceUsings = OrderCrossUsings(dependencyNamespaces, ownNamespace),
                 Dialect = primaryDialect,
                 ContractOnly = false,
                 MultiDialect = false,

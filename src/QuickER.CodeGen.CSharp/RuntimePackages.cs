@@ -8,8 +8,9 @@ namespace QuickER.CodeGen.CSharp;
 /// <remarks>
 /// <para>
 /// 生成コードのうちスキーマに依存しない固定部分（EntityBase・属性・VO 基底・JSON コンバータ・Repository 共通契約・
-/// 方言別エンジン・EF Core 共通部品・インメモリ基盤）は <c>Templates/CSharpRuntime/*.scriban</c> から出力される。これを 5 分割の
-/// NuGet パッケージ（コア＋QuickER の方言エンジン×方言数＋EF Core＋インメモリ）として配布できるようにするための ID を集約する。
+/// 方言別エンジン・EF Core 共通部品・インメモリ基盤・リモートサーバー基盤）は <c>Templates/CSharpRuntime/*.scriban</c> から
+/// 出力される。これを 6 分割の NuGet パッケージ（コア＋QuickER の方言エンジン×方言数＋EF Core＋インメモリ＋
+/// ASP.NET Core）として配布できるようにするための ID を集約する。
 /// </para>
 /// <para>
 /// パッケージ ID は、パッケージ書き出し時のソースの名前空間と一致させる（<see cref="RuntimePackageSourceRenderer"/> が
@@ -32,6 +33,16 @@ public static class RuntimePackages
 
     /// <summary>インメモリ基盤パッケージ（DB 非依存・BCL のみ依存）の ID＝固定名前空間。</summary>
     public const string InMemory = "QuickER.Runtime.InMemory";
+
+    /// <summary>
+    /// リモートサーバー基盤パッケージ（ASP.NET Core の <c>FrameworkReference</c> 依存）の ID＝固定名前空間。
+    /// </summary>
+    /// <remarks>
+    /// サーバー実装ファイル（<c>{ベース名}.RemoteServer.g.cs</c> / 分割時 <c>RemoteServer.g.cs</c>）の固定部
+    /// （<c>RemoteServerEngine</c>・エラー分類・詳細公開ポリシー・バイナリ転送の補助型）を収載する。
+    /// per-entity のエンドポイント（<c>GeneratedRemoteEndpoints</c>）はスキーマ依存物のため常に生成側に残る。
+    /// </remarks>
+    public const string AspNetCore = "QuickER.Runtime.AspNetCore";
 
     /// <summary>
     /// パッケージ参照の案内（生成ヘッダ・GUI/CLI）に載せる既定バージョン。

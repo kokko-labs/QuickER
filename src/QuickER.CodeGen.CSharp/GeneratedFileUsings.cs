@@ -44,7 +44,14 @@ internal static class GeneratedFileUsings
         // 例外は EfCore バケット: VO 翻訳プラグインの DbContextOptions 拡張が固定 infra として
         // IDbContextOptionsExtension.ApplyServices(IServiceCollection) を実装するため DI 抽象が必須で、
         // かつ EF Core Relational が推移的に連れてくるので依存も増えない。
-        if (!spec.EmitSchemaDependent && !spec.Buckets.Contains(GenerationBucket.EfCore))
+        // RemoteServer バケットも同じ形の例外: 固定 infra のエンジンがリポジトリ・ILoggerFactory を
+        // GetRequiredService / GetService で解決するため DI 抽象が必須で、ASP.NET Core の
+        // FrameworkReference（Microsoft.AspNetCore.App）が推移的に連れてくるので依存も増えない。
+        if (
+            !spec.EmitSchemaDependent
+            && !spec.Buckets.Contains(GenerationBucket.EfCore)
+            && !spec.Buckets.Contains(GenerationBucket.RemoteServer)
+        )
         {
             ordered.RemoveAll(ns =>
                 ns.StartsWith("Microsoft.Extensions.DependencyInjection", StringComparison.Ordinal)
@@ -97,6 +104,8 @@ internal static class GeneratedFileUsings
     ///     （DbContext・EF Core 版実装が EF Core 共通部品を参照する）</item>
     ///   <item>InMemory バケットを含むファイル → <see cref="RuntimePackages.InMemory"/>
     ///     （InMemory{Entity}Repository・シーダー・DI がインメモリ基盤を参照する）</item>
+    ///   <item>RemoteServer バケットを含むファイル → <see cref="RuntimePackages.AspNetCore"/>
+    ///     （per-entity のエンドポイントがサーバー固定部 <c>RemoteServerEngine</c> ほかを参照する）</item>
     /// </list>
     /// マルチターゲット時は方言実装スペックが各自の方言エンジンだけを参照する（spec.Dialect による）。
     /// </remarks>
@@ -134,6 +143,13 @@ internal static class GeneratedFileUsings
         if (spec.Buckets.Contains(GenerationBucket.InMemory))
         {
             yield return RuntimePackages.InMemory;
+        }
+
+        // サーバー実装（GeneratedRemoteEndpoints の per-entity エンドポイント）は、
+        // 固定部（RemoteServerEngine・エラー分類・詳細公開ポリシー）を持つ ASP.NET Core パッケージを参照する。
+        if (spec.Buckets.Contains(GenerationBucket.RemoteServer))
+        {
+            yield return RuntimePackages.AspNetCore;
         }
     }
 

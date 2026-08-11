@@ -13,89 +13,23 @@ using Microsoft.Extensions.Logging;
 namespace QuickER.Tests.GeneratedRemoteServiceFixture;
 
 /// <summary>
-/// Endpoint mapping that exposes the generated remote surface (I{Entity}RemoteRepository) as an ASP.NET Core Minimal API.
+/// The fixed engine behind the generated remote endpoints: request reading, exception classification, response
+/// writing, and the generic CRUD mapping.
 /// </summary>
 /// <remarks>
 /// <para>
-/// Place this file in a project that has the ASP.NET Core FrameworkReference (<c>Microsoft.AspNetCore.App</c>);
-/// no extra configuration is needed when the SDK is <c>Microsoft.NET.Sdk.Web</c>. Register the concrete repositories
-/// (<c>AddGeneratedSqlServerRepositories</c> / <c>AddGeneratedEfCoreRepositories</c>, etc.) in the server-side DI container.
+/// Nothing here depends on the diagram, so it lives apart from <c>GeneratedRemoteEndpoints</c>, which keeps only the
+/// mapping entry point, the <c>OnServerError</c> extension hook, and the per-entity endpoints.
 /// </para>
 /// <para>
-/// Each operation is exposed as <c>POST {prefix}/{entity}/{operation}</c> (JSON body). Apply cross-cutting concerns
-/// such as authorization to the returned <see cref="RouteGroupBuilder"/>
-/// (for example <c>app.MapGeneratedRemoteEndpoints().RequireAuthorization()</c>).
-/// Exceptions are converted to structured JSON (RemoteError): <see cref="SaveConflictException"/> maps to 409 and
-/// an unhandled failure to 500, and the client (Http{Entity}RemoteRepository) restores the original exception type.
-/// </para>
-/// <para>
-/// An unhandled failure (500) does not report what went wrong to the client unless
-/// <c>exposeErrorDetails</c> is turned on: by default the body carries a fixed generic message plus the
-/// correlation id of the request, while the full exception - stack trace included - goes to the server log under that
-/// same id. The classified responses (400 and 409) are unaffected, because their messages are written here rather than
-/// taken from an internal failure, and the conflict details a 409 carries are what a retry loop is built on.
-/// </para>
-/// <para>
-/// A request that cannot be interpreted at all - a malformed or empty JSON body, a non-JSON content type, a type
-/// mismatch, a value that fails value-object validation, a body that omits a required field such as the entity, an
-/// undefined <see cref="ConcurrencyMode"/> value, or a
-/// missing/malformed <c>?id=</c> key - is a fault in what the client sent, so it is answered with HTTP 400
-/// (RemoteError of type "BadRequest") instead of 500. A request
-/// rejected by the server infrastructure (<see cref="BadHttpRequestException"/>, for example when the request body
-/// size limit is exceeded) keeps the status code it carries, such as 413.
-/// </para>
-/// <para>
-/// The class is <c>partial</c> so additional endpoints or helpers can live alongside the generated ones,
-/// and the <c>OnServerError</c> partial method can be implemented to add custom handling (notifications,
-/// metrics, extra logging) whenever an endpoint responds with HTTP 500.
+/// The members are public because the generated part calls them from another file - and, when the engine is consumed
+/// as a package, from another assembly. What limits their reach is the visibility of the class itself.
 /// </para>
 /// </remarks>
-public static partial class GeneratedRemoteEndpoints
+internal static class RemoteServerEngine
 {
-    /// <summary>Maps every remote-surface endpoint under the given prefix (defaults to <see cref="RemotePaths.DefaultPrefix"/>).</summary>
-    /// <remarks>
-    /// The group also carries a liveness endpoint, <c>GET {prefix}/health</c>, which answers 200 with an empty body
-    /// once the server is listening. It is a member of the group like any other endpoint, so authorization applied to
-    /// the group covers it as well; a probe that has to stay anonymous can be given its own route mapped outside the
-    /// group instead.
-    /// </remarks>
-    /// <param name="endpoints">The mapping target (for example a <c>WebApplication</c>).</param>
-    /// <param name="prefix">The route prefix for the endpoint group.</param>
-    /// <param name="exposeErrorDetails">
-    /// Whether an HTTP 500 response reports the server-side exception message to the client. It is off by default, which
-    /// keeps internal details - table and column names, connection strings, file paths - from crossing the trust
-    /// boundary: the client is given a fixed generic message plus the correlation id of the request instead. Because it
-    /// is an argument rather than a generation-time option, the same generated code covers both sides of the trade-off;
-    /// pass <c>app.Environment.IsDevelopment()</c> to read the real message while developing and hide it in production.
-    /// Server-side logging and the <c>OnServerError</c> hook always receive the full exception either way, and the
-    /// classified responses (400 and 409) are not affected by this switch.
-    /// </param>
-    /// <returns>The endpoint group, to which authorization and similar concerns can be applied.</returns>
-    public static RouteGroupBuilder MapGeneratedRemoteEndpoints(
-        this IEndpointRouteBuilder endpoints,
-        string prefix = RemotePaths.DefaultPrefix,
-        bool exposeErrorDetails = false
-    )
-    {
-        ArgumentNullException.ThrowIfNull(endpoints);
-
-        var group = endpoints.MapGroup(prefix);
-
-        // The policy travels as endpoint metadata rather than as a handler argument: every 500 is written by one of the
-        // wrappers below, which already have the HttpContext, so no handler signature has to change to carry it
-        group.WithMetadata(new RemoteErrorDetailPolicy(exposeErrorDetails));
-
-        // Liveness: the client's PingAsync polls this while waiting for the server to come up, so it must not touch
-        // the database - a 200 states that the process is listening and the endpoints are mapped, nothing more
-        group.MapGet(RemotePaths.HealthRoute, () => Results.Ok());
-        MapCustomerEndpoints(group);
-        MapOrderEndpoints(group);
-
-        return group;
-    }
-
     /// <summary>Runs a handler, writes the result as JSON, and maps exceptions to HTTP responses (400/409/500, or the status carried by a rejected request such as 413).</summary>
-    private static async Task ExecuteAsync(HttpContext context, Func<Task<object?>> handler)
+    public static async Task ExecuteAsync(HttpContext context, Func<Task<object?>> handler)
     {
         try
         {
@@ -155,12 +89,17 @@ public static partial class GeneratedRemoteEndpoints
     /// internal message ever crossing the trust boundary. While it is on, the message is passed through and no
     /// correlation id is sent (the message is the detail, so there is nothing to look up).
     /// </remarks>
-    private static async Task WriteServerErrorAsync(HttpContext context, Exception ex)
+    public static async Task WriteServerErrorAsync(HttpContext context, Exception ex)
     {
-        LogServerError(context, ex);
-        RaiseServerError(context, ex);
+        // The policy of the matched endpoint carries both halves of the contract - whether details are exposed and the
+        // hook to raise - and is read once here. A request that matched no endpoint keeps the safe default of hiding
+        // the details and raising nothing.
+        var policy = context.GetEndpoint()?.Metadata.GetMetadata<RemoteErrorDetailPolicy>();
 
-        var expose = ExposesErrorDetails(context);
+        LogServerError(context, ex);
+        policy?.OnServerError?.Invoke(context, ex);
+
+        var expose = policy?.Expose ?? false;
 
         await WriteErrorAsync(
             context,
@@ -171,10 +110,6 @@ public static partial class GeneratedRemoteEndpoints
         ).ConfigureAwait(false);
     }
 
-    /// <summary>Reads the error-detail policy the matched endpoint was mapped with (an unmatched request keeps the safe default of hiding it).</summary>
-    private static bool ExposesErrorDetails(HttpContext context) =>
-        context.GetEndpoint()?.Metadata.GetMetadata<RemoteErrorDetailPolicy>()?.Expose ?? false;
-
     /// <summary>Writes a <see cref="RemoteError"/> body with the given status code (the shared path for every classified failure response).</summary>
     /// <remarks>
     /// <paramref name="conflict"/> is supplied only for the 409 path: its details travel with the body so that the client
@@ -182,7 +117,7 @@ public static partial class GeneratedRemoteEndpoints
     /// <paramref name="correlationId"/> only for a 500 whose message was withheld. Every other kind leaves
     /// those fields null.
     /// </remarks>
-    private static async Task WriteErrorAsync(
+    public static async Task WriteErrorAsync(
         HttpContext context,
         int statusCode,
         string type,
@@ -215,7 +150,7 @@ public static partial class GeneratedRemoteEndpoints
     /// <see cref="BadHttpRequestException"/> (which carries its own status code, for example 413 when the request body
     /// size limit is exceeded) are left untouched so that the surrounding handler can classify them.
     /// </remarks>
-    private static async Task<TRequest> ReadRequestAsync<TRequest>(HttpContext context)
+    public static async Task<TRequest> ReadRequestAsync<TRequest>(HttpContext context)
     {
         TRequest? request;
 
@@ -241,7 +176,7 @@ public static partial class GeneratedRemoteEndpoints
     /// policy into the body. Passing it on would silently fall through to the unguarded branch, disabling the version check,
     /// therefore it is rejected here as a fault in the payload the client sent.
     /// </remarks>
-    private static ConcurrencyMode ValidatedMode(ConcurrencyMode mode) =>
+    public static ConcurrencyMode ValidatedMode(ConcurrencyMode mode) =>
         Enum.IsDefined(mode)
             ? mode
             : throw new RemoteBadRequestException(
@@ -256,43 +191,13 @@ public static partial class GeneratedRemoteEndpoints
     /// wrong, therefore it is rejected here as a fault in the payload the client sent. A key whose type is a value type has
     /// no omitted form and always passes through.
     /// </remarks>
-    private static T Required<T>(T? value, string name) =>
+    public static T Required<T>(T? value, string name) =>
         value is null
             ? throw new RemoteBadRequestException($"The '{name}' field is required.")
             : value;
 
-    /// <summary>
-    /// Marks a failure to interpret the request itself (the JSON body, a required field it omitted, or the <c>?id=</c>
-    /// key). The request never reached
-    /// the repository, so it is a fault in what the client sent rather than a server-side error: it is answered with
-    /// HTTP 400 and a <see cref="RemoteError"/> of type "BadRequest", and neither the server-side logging nor the
-    /// <c>OnServerError</c> hook - both reserved for HTTP 500 - is invoked.
-    /// </summary>
-    private sealed class RemoteBadRequestException : Exception
-    {
-        /// <summary>Initializes a new instance with the message reported to the client.</summary>
-        public RemoteBadRequestException(string message)
-            : base(message) { }
-
-        /// <summary>Initializes a new instance with the message reported to the client and the underlying failure.</summary>
-        public RemoteBadRequestException(string message, Exception innerException)
-            : base(message, innerException) { }
-    }
-
-    /// <summary>Endpoint metadata recording whether the group was mapped to expose server-side error details in its 500 responses.</summary>
-    /// <remarks>
-    /// Attached to the group by <c>MapGeneratedRemoteEndpoints</c> so that the policy reaches the wrappers through the
-    /// matched endpoint instead of through every handler signature. Storing it per endpoint also keeps two groups mapped
-    /// in the same process - say a public one and an internal one - independent of each other.
-    /// </remarks>
-    private sealed class RemoteErrorDetailPolicy(bool expose)
-    {
-        /// <summary>Gets a value indicating whether the server-side exception message is reported to the client.</summary>
-        public bool Expose { get; } = expose;
-    }
-
     /// <summary>Resolves the remote-surface repository from DI.</summary>
-    private static TRepository Repository<TRepository>(HttpContext context)
+    public static TRepository Repository<TRepository>(HttpContext context)
         where TRepository : notnull => context.RequestServices.GetRequiredService<TRepository>();
 
     /// <summary>Logs an unhandled exception that is about to be reported to the client as a 500 response.</summary>
@@ -305,7 +210,7 @@ public static partial class GeneratedRemoteEndpoints
     /// is unchanged. Classified responses (400 and 409) do not go through here: they are the expected outcome of the
     /// request rather than an unhandled server-side failure.
     /// </remarks>
-    private static void LogServerError(HttpContext context, Exception ex)
+    public static void LogServerError(HttpContext context, Exception ex)
     {
         var loggerFactory = context.RequestServices.GetService<ILoggerFactory>();
 
@@ -324,42 +229,8 @@ public static partial class GeneratedRemoteEndpoints
         );
     }
 
-    /// <summary>Invokes the <c>OnServerError</c> extension hook while isolating any failure inside it.</summary>
-    /// <remarks>
-    /// The hook is user code and runs before the 500 body (<see cref="RemoteError"/>) has been written, so an exception
-    /// escaping from it would discard the original error response and leave the client with a generic failure whose
-    /// cause is lost. The hook must never replace the original failure, therefore an exception thrown by it is
-    /// reported through the same server-side logging and then swallowed.
-    /// </remarks>
-    private static void RaiseServerError(HttpContext context, Exception ex)
-    {
-        try
-        {
-            OnServerError(context, ex);
-        }
-        catch (Exception hookError)
-        {
-            LogServerError(context, hookError);
-        }
-    }
-
-    /// <summary>Extension hook invoked - after the built-in logging - whenever an endpoint responds with HTTP 500.</summary>
-    /// <remarks>
-    /// Implement this method in another part of this partial class to add custom handling for server-side
-    /// failures (notifications, metrics, extra logging). It is reserved for HTTP 500 and is therefore not invoked for
-    /// classified responses (400 and 409). When no implementation is provided the compiler removes
-    /// the call itself, so nothing but an empty guard remains. An exception thrown by the hook is isolated (logged
-    /// on the server side and then swallowed) and never replaces the original 500 response. The hook always receives the
-    /// exception itself, whether or not the endpoint exposes error details to the client. The 500 response body
-    /// itself is not customizable here; wrap the group returned by <c>MapGeneratedRemoteEndpoints</c> in middleware
-    /// to translate responses instead.
-    /// </remarks>
-    /// <param name="context">The HTTP context of the failed request.</param>
-    /// <param name="ex">The unhandled exception that was reported to the client.</param>
-    static partial void OnServerError(HttpContext context, Exception ex);
-
     /// <summary>Maps the common CRUD operations (GetById / GetAll / Insert / Update / Delete / Save / SaveMany).</summary>
-    private static void MapCrud<TEntity, TKey, TRepository>(
+    public static void MapCrud<TEntity, TKey, TRepository>(
         RouteGroupBuilder group,
         string entityRoute
     )
@@ -520,7 +391,7 @@ public static partial class GeneratedRemoteEndpoints
     /// entity the same way, so every collected entry lands on the matching local entity. Backends that assign no versions -
     /// a dialect without a rowversion type, or a diagram whose tables carry no such column - simply yield an empty list.
     /// </remarks>
-    private static List<RemoteRowVersionEntry> CollectRowVersions<TEntity>(
+    public static List<RemoteRowVersionEntry> CollectRowVersions<TEntity>(
         IEnumerable<TEntity> entities,
         bool cascade
     )
@@ -556,7 +427,7 @@ public static partial class GeneratedRemoteEndpoints
     /// graph contains the same (type, key) twice, the entries collapse onto one entity on the client side.
     /// </para>
     /// </remarks>
-    private static List<RemoteEntityRef> CollectSkipped<TEntity>(
+    public static List<RemoteEntityRef> CollectSkipped<TEntity>(
         IEnumerable<TEntity> entities,
         bool cascade
     )
@@ -575,11 +446,173 @@ public static partial class GeneratedRemoteEndpoints
 
         return skipped;
     }
+}
+
+/// <summary>
+/// Marks a failure to interpret the request itself (the JSON body, a required field it omitted, or the <c>?id=</c>
+/// key). The request never reached
+/// the repository, so it is a fault in what the client sent rather than a server-side error: it is answered with
+/// HTTP 400 and a <see cref="RemoteError"/> of type "BadRequest", and neither the server-side logging nor the
+/// <c>OnServerError</c> hook - both reserved for HTTP 500 - is invoked.
+/// </summary>
+internal sealed class RemoteBadRequestException : Exception
+{
+    /// <summary>Initializes a new instance with the message reported to the client.</summary>
+    public RemoteBadRequestException(string message)
+        : base(message) { }
+
+    /// <summary>Initializes a new instance with the message reported to the client and the underlying failure.</summary>
+    public RemoteBadRequestException(string message, Exception innerException)
+        : base(message, innerException) { }
+}
+
+/// <summary>Endpoint metadata recording how the group was mapped: whether its 500 responses expose server-side error details, and what to raise when one occurs.</summary>
+/// <remarks>
+/// Attached to the group by <c>MapGeneratedRemoteEndpoints</c> so that the policy reaches the wrappers through the
+/// matched endpoint instead of through every handler signature. Storing it per endpoint also keeps two groups mapped
+/// in the same process - say a public one and an internal one - independent of each other. The hook travels the same
+/// way because a partial method cannot be called across assemblies: the generated part passes its own wrapper, which
+/// already isolates a failure inside the user's implementation.
+/// </remarks>
+internal sealed class RemoteErrorDetailPolicy(
+    bool expose,
+    Action<HttpContext, Exception>? onServerError
+)
+{
+    /// <summary>Gets a value indicating whether the server-side exception message is reported to the client.</summary>
+    public bool Expose { get; } = expose;
+
+    /// <summary>Gets the extension hook raised - after the built-in logging - whenever an endpoint of the group responds with HTTP 500 (null when the group was mapped without one).</summary>
+    public Action<HttpContext, Exception>? OnServerError { get; } = onServerError;
+}
+
+/// <summary>
+/// Endpoint mapping that exposes the generated remote surface (I{Entity}RemoteRepository) as an ASP.NET Core Minimal API.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Place this file in a project that has the ASP.NET Core FrameworkReference (<c>Microsoft.AspNetCore.App</c>);
+/// no extra configuration is needed when the SDK is <c>Microsoft.NET.Sdk.Web</c>. Register the concrete repositories
+/// (<c>AddGeneratedSqlServerRepositories</c> / <c>AddGeneratedEfCoreRepositories</c>, etc.) in the server-side DI container.
+/// </para>
+/// <para>
+/// Each operation is exposed as <c>POST {prefix}/{entity}/{operation}</c> (JSON body). Apply cross-cutting concerns
+/// such as authorization to the returned <see cref="RouteGroupBuilder"/>
+/// (for example <c>app.MapGeneratedRemoteEndpoints().RequireAuthorization()</c>).
+/// Exceptions are converted to structured JSON (RemoteError): <see cref="SaveConflictException"/> maps to 409 and
+/// an unhandled failure to 500, and the client (Http{Entity}RemoteRepository) restores the original exception type.
+/// </para>
+/// <para>
+/// An unhandled failure (500) does not report what went wrong to the client unless
+/// <c>exposeErrorDetails</c> is turned on: by default the body carries a fixed generic message plus the
+/// correlation id of the request, while the full exception - stack trace included - goes to the server log under that
+/// same id. The classified responses (400 and 409) are unaffected, because their messages are written here rather than
+/// taken from an internal failure, and the conflict details a 409 carries are what a retry loop is built on.
+/// </para>
+/// <para>
+/// A request that cannot be interpreted at all - a malformed or empty JSON body, a non-JSON content type, a type
+/// mismatch, a value that fails value-object validation, a body that omits a required field such as the entity, an
+/// undefined <see cref="ConcurrencyMode"/> value, or a
+/// missing/malformed <c>?id=</c> key - is a fault in what the client sent, so it is answered with HTTP 400
+/// (RemoteError of type "BadRequest") instead of 500. A request
+/// rejected by the server infrastructure (<see cref="BadHttpRequestException"/>, for example when the request body
+/// size limit is exceeded) keeps the status code it carries, such as 413.
+/// </para>
+/// <para>
+/// The request handling itself - reading the body, classifying exceptions, writing the response - lives in
+/// <c>RemoteServerEngine</c>, which is fixed code shared by every diagram. What remains here is the mapping entry
+/// point and the endpoints of each entity.
+/// </para>
+/// <para>
+/// The class is <c>partial</c> so additional endpoints or helpers can live alongside the generated ones,
+/// and the <c>OnServerError</c> partial method can be implemented to add custom handling (notifications,
+/// metrics, extra logging) whenever an endpoint responds with HTTP 500.
+/// </para>
+/// </remarks>
+public static partial class GeneratedRemoteEndpoints
+{
+    /// <summary>Maps every remote-surface endpoint under the given prefix (defaults to <see cref="RemotePaths.DefaultPrefix"/>).</summary>
+    /// <remarks>
+    /// The group also carries a liveness endpoint, <c>GET {prefix}/health</c>, which answers 200 with an empty body
+    /// once the server is listening. It is a member of the group like any other endpoint, so authorization applied to
+    /// the group covers it as well; a probe that has to stay anonymous can be given its own route mapped outside the
+    /// group instead.
+    /// </remarks>
+    /// <param name="endpoints">The mapping target (for example a <c>WebApplication</c>).</param>
+    /// <param name="prefix">The route prefix for the endpoint group.</param>
+    /// <param name="exposeErrorDetails">
+    /// Whether an HTTP 500 response reports the server-side exception message to the client. It is off by default, which
+    /// keeps internal details - table and column names, connection strings, file paths - from crossing the trust
+    /// boundary: the client is given a fixed generic message plus the correlation id of the request instead. Because it
+    /// is an argument rather than a generation-time option, the same generated code covers both sides of the trade-off;
+    /// pass <c>app.Environment.IsDevelopment()</c> to read the real message while developing and hide it in production.
+    /// Server-side logging and the <c>OnServerError</c> hook always receive the full exception either way, and the
+    /// classified responses (400 and 409) are not affected by this switch.
+    /// </param>
+    /// <returns>The endpoint group, to which authorization and similar concerns can be applied.</returns>
+    public static RouteGroupBuilder MapGeneratedRemoteEndpoints(
+        this IEndpointRouteBuilder endpoints,
+        string prefix = RemotePaths.DefaultPrefix,
+        bool exposeErrorDetails = false
+    )
+    {
+        ArgumentNullException.ThrowIfNull(endpoints);
+
+        var group = endpoints.MapGroup(prefix);
+
+        // The policy travels as endpoint metadata rather than as a handler argument: every 500 is written by one of the
+        // wrappers in the engine, which already have the HttpContext, so no handler signature has to change to carry it.
+        // The hook goes along the same way, as the engine cannot call a partial method declared here
+        group.WithMetadata(new RemoteErrorDetailPolicy(exposeErrorDetails, RaiseServerError));
+
+        // Liveness: the client's PingAsync polls this while waiting for the server to come up, so it must not touch
+        // the database - a 200 states that the process is listening and the endpoints are mapped, nothing more
+        group.MapGet(RemotePaths.HealthRoute, () => Results.Ok());
+        MapCustomerEndpoints(group);
+        MapOrderEndpoints(group);
+
+        return group;
+    }
+
+    /// <summary>Invokes the <c>OnServerError</c> extension hook while isolating any failure inside it.</summary>
+    /// <remarks>
+    /// The hook is user code and runs before the 500 body (<see cref="RemoteError"/>) has been written, so an exception
+    /// escaping from it would discard the original error response and leave the client with a generic failure whose
+    /// cause is lost. The hook must never replace the original failure, therefore an exception thrown by it is
+    /// reported through the same server-side logging and then swallowed. This wrapper is what the engine receives as
+    /// the group's hook, because a partial method has no callable form outside the part that declares it.
+    /// </remarks>
+    private static void RaiseServerError(HttpContext context, Exception ex)
+    {
+        try
+        {
+            OnServerError(context, ex);
+        }
+        catch (Exception hookError)
+        {
+            RemoteServerEngine.LogServerError(context, hookError);
+        }
+    }
+
+    /// <summary>Extension hook invoked - after the built-in logging - whenever an endpoint responds with HTTP 500.</summary>
+    /// <remarks>
+    /// Implement this method in another part of this partial class to add custom handling for server-side
+    /// failures (notifications, metrics, extra logging). It is reserved for HTTP 500 and is therefore not invoked for
+    /// classified responses (400 and 409). When no implementation is provided the compiler removes
+    /// the call itself, so nothing but an empty guard remains. An exception thrown by the hook is isolated (logged
+    /// on the server side and then swallowed) and never replaces the original 500 response. The hook always receives the
+    /// exception itself, whether or not the endpoint exposes error details to the client. The 500 response body
+    /// itself is not customizable here; wrap the group returned by <c>MapGeneratedRemoteEndpoints</c> in middleware
+    /// to translate responses instead.
+    /// </remarks>
+    /// <param name="context">The HTTP context of the failed request.</param>
+    /// <param name="ex">The unhandled exception that was reported to the client.</param>
+    static partial void OnServerError(HttpContext context, Exception ex);
 
     /// <summary>Maps the remote-surface endpoints for CustomerEntity.</summary>
     private static void MapCustomerEndpoints(RouteGroupBuilder group)
     {
-        MapCrud<CustomerEntity, CustomerIdValue, ICustomerRemoteRepository>(
+        RemoteServerEngine.MapCrud<CustomerEntity, CustomerIdValue, ICustomerRemoteRepository>(
             group,
             "Customer"
         );
@@ -587,11 +620,11 @@ public static partial class GeneratedRemoteEndpoints
         group.MapPost(
             "Customer/CheckUniqueness",
             (HttpContext context) =>
-                ExecuteAsync(
+                RemoteServerEngine.ExecuteAsync(
                     context,
                     async () =>
                     {
-                        var request = await ReadRequestAsync<CustomerCheckUniquenessRequest>(context).ConfigureAwait(false);
+                        var request = await RemoteServerEngine.ReadRequestAsync<CustomerCheckUniquenessRequest>(context).ConfigureAwait(false);
                         var repository = context.RequestServices.GetRequiredService<ICustomerRemoteRepository>();
                         return (object?)await repository.CheckUniquenessAsync(request.Entity, context.RequestAborted).ConfigureAwait(false);
                     }
@@ -605,7 +638,7 @@ public static partial class GeneratedRemoteEndpoints
     /// <summary>Maps the remote-surface endpoints for OrderEntity.</summary>
     private static void MapOrderEndpoints(RouteGroupBuilder group)
     {
-        MapCrud<OrderEntity, OrderIdValue, IOrderRemoteRepository>(
+        RemoteServerEngine.MapCrud<OrderEntity, OrderIdValue, IOrderRemoteRepository>(
             group,
             "Order"
         );
@@ -613,11 +646,11 @@ public static partial class GeneratedRemoteEndpoints
         group.MapPost(
             "Order/GetByCustomer",
             (HttpContext context) =>
-                ExecuteAsync(
+                RemoteServerEngine.ExecuteAsync(
                     context,
                     async () =>
                     {
-                        var request = await ReadRequestAsync<OrderGetByCustomerRequest>(context).ConfigureAwait(false);
+                        var request = await RemoteServerEngine.ReadRequestAsync<OrderGetByCustomerRequest>(context).ConfigureAwait(false);
                         var repository = context.RequestServices.GetRequiredService<IOrderRemoteRepository>();
                         return (object?)await repository.GetByCustomerAsync(request.CustomerId, request.Take, request.Skip, context.RequestAborted).ConfigureAwait(false);
                     }
@@ -627,7 +660,7 @@ public static partial class GeneratedRemoteEndpoints
         group.MapPost(
             "Order/FindTop",
             (HttpContext context) =>
-                ExecuteAsync(
+                RemoteServerEngine.ExecuteAsync(
                     context,
                     async () =>
                     {
@@ -640,11 +673,11 @@ public static partial class GeneratedRemoteEndpoints
         group.MapPost(
             "Order/CountByCustomer",
             (HttpContext context) =>
-                ExecuteAsync(
+                RemoteServerEngine.ExecuteAsync(
                     context,
                     async () =>
                     {
-                        var request = await ReadRequestAsync<OrderCountByCustomerRequest>(context).ConfigureAwait(false);
+                        var request = await RemoteServerEngine.ReadRequestAsync<OrderCountByCustomerRequest>(context).ConfigureAwait(false);
                         var repository = context.RequestServices.GetRequiredService<IOrderRemoteRepository>();
                         return (object?)await repository.CountByCustomerAsync(request.CustomerId, context.RequestAborted).ConfigureAwait(false);
                     }
@@ -654,11 +687,11 @@ public static partial class GeneratedRemoteEndpoints
         group.MapPost(
             "Order/SearchMemo",
             (HttpContext context) =>
-                ExecuteAsync(
+                RemoteServerEngine.ExecuteAsync(
                     context,
                     async () =>
                     {
-                        var request = await ReadRequestAsync<OrderSearchMemoRequest>(context).ConfigureAwait(false);
+                        var request = await RemoteServerEngine.ReadRequestAsync<OrderSearchMemoRequest>(context).ConfigureAwait(false);
                         var repository = context.RequestServices.GetRequiredService<IOrderRemoteRepository>();
                         return (object?)await repository.SearchMemoAsync(request.Keyword, context.RequestAborted).ConfigureAwait(false);
                     }
@@ -668,11 +701,11 @@ public static partial class GeneratedRemoteEndpoints
         group.MapPost(
             "Order/GetByIds",
             (HttpContext context) =>
-                ExecuteAsync(
+                RemoteServerEngine.ExecuteAsync(
                     context,
                     async () =>
                     {
-                        var request = await ReadRequestAsync<OrderGetByIdsRequest>(context).ConfigureAwait(false);
+                        var request = await RemoteServerEngine.ReadRequestAsync<OrderGetByIdsRequest>(context).ConfigureAwait(false);
                         var repository = context.RequestServices.GetRequiredService<IOrderRemoteRepository>();
                         return (object?)await repository.GetByIdsAsync(request.Ids, context.RequestAborted).ConfigureAwait(false);
                     }
@@ -682,11 +715,11 @@ public static partial class GeneratedRemoteEndpoints
         group.MapPost(
             "Order/GetSummaries",
             (HttpContext context) =>
-                ExecuteAsync(
+                RemoteServerEngine.ExecuteAsync(
                     context,
                     async () =>
                     {
-                        var request = await ReadRequestAsync<OrderGetSummariesRequest>(context).ConfigureAwait(false);
+                        var request = await RemoteServerEngine.ReadRequestAsync<OrderGetSummariesRequest>(context).ConfigureAwait(false);
                         var repository = context.RequestServices.GetRequiredService<IOrderRemoteRepository>();
                         return (object?)await repository.GetSummariesAsync(request.CustomerId, request.Take, request.Skip, context.RequestAborted).ConfigureAwait(false);
                     }
@@ -696,11 +729,11 @@ public static partial class GeneratedRemoteEndpoints
         group.MapPost(
             "Order/SumAmounts",
             (HttpContext context) =>
-                ExecuteAsync(
+                RemoteServerEngine.ExecuteAsync(
                     context,
                     async () =>
                     {
-                        var request = await ReadRequestAsync<OrderSumAmountsRequest>(context).ConfigureAwait(false);
+                        var request = await RemoteServerEngine.ReadRequestAsync<OrderSumAmountsRequest>(context).ConfigureAwait(false);
                         var repository = context.RequestServices.GetRequiredService<IOrderRemoteRepository>();
                         return (object?)await repository.SumAmountsAsync(request.CustomerId, context.RequestAborted).ConfigureAwait(false);
                     }
@@ -710,11 +743,11 @@ public static partial class GeneratedRemoteEndpoints
         group.MapPost(
             "Order/GetByIdsRaw",
             (HttpContext context) =>
-                ExecuteAsync(
+                RemoteServerEngine.ExecuteAsync(
                     context,
                     async () =>
                     {
-                        var request = await ReadRequestAsync<OrderGetByIdsRawRequest>(context).ConfigureAwait(false);
+                        var request = await RemoteServerEngine.ReadRequestAsync<OrderGetByIdsRawRequest>(context).ConfigureAwait(false);
                         var repository = context.RequestServices.GetRequiredService<IOrderRemoteRepository>();
                         return (object?)await repository.GetByIdsRawAsync(request.Ids, context.RequestAborted).ConfigureAwait(false);
                     }
@@ -724,7 +757,7 @@ public static partial class GeneratedRemoteEndpoints
         group.MapPost(
             "Order/FindTopRaw",
             (HttpContext context) =>
-                ExecuteAsync(
+                RemoteServerEngine.ExecuteAsync(
                     context,
                     async () =>
                     {
@@ -737,11 +770,11 @@ public static partial class GeneratedRemoteEndpoints
         group.MapPost(
             "Order/CountByCustomerRaw",
             (HttpContext context) =>
-                ExecuteAsync(
+                RemoteServerEngine.ExecuteAsync(
                     context,
                     async () =>
                     {
-                        var request = await ReadRequestAsync<OrderCountByCustomerRawRequest>(context).ConfigureAwait(false);
+                        var request = await RemoteServerEngine.ReadRequestAsync<OrderCountByCustomerRawRequest>(context).ConfigureAwait(false);
                         var repository = context.RequestServices.GetRequiredService<IOrderRemoteRepository>();
                         return (object?)await repository.CountByCustomerRawAsync(request.CustomerId, context.RequestAborted).ConfigureAwait(false);
                     }
@@ -751,11 +784,11 @@ public static partial class GeneratedRemoteEndpoints
         group.MapPost(
             "Order/GetMemoRowsRaw",
             (HttpContext context) =>
-                ExecuteAsync(
+                RemoteServerEngine.ExecuteAsync(
                     context,
                     async () =>
                     {
-                        var request = await ReadRequestAsync<OrderGetMemoRowsRawRequest>(context).ConfigureAwait(false);
+                        var request = await RemoteServerEngine.ReadRequestAsync<OrderGetMemoRowsRawRequest>(context).ConfigureAwait(false);
                         var repository = context.RequestServices.GetRequiredService<IOrderRemoteRepository>();
                         return (object?)await repository.GetMemoRowsRawAsync(request.CustomerId, context.RequestAborted).ConfigureAwait(false);
                     }
@@ -765,11 +798,11 @@ public static partial class GeneratedRemoteEndpoints
         group.MapPost(
             "Order/GetByCustomerTyped",
             (HttpContext context) =>
-                ExecuteAsync(
+                RemoteServerEngine.ExecuteAsync(
                     context,
                     async () =>
                     {
-                        var request = await ReadRequestAsync<OrderGetByCustomerTypedRequest>(context).ConfigureAwait(false);
+                        var request = await RemoteServerEngine.ReadRequestAsync<OrderGetByCustomerTypedRequest>(context).ConfigureAwait(false);
                         var repository = context.RequestServices.GetRequiredService<IOrderRemoteRepository>();
                         return (object?)await repository.GetByCustomerTypedAsync(request.CustomerId, context.RequestAborted).ConfigureAwait(false);
                     }
@@ -779,11 +812,11 @@ public static partial class GeneratedRemoteEndpoints
         group.MapPost(
             "Order/SpecialLookup",
             (HttpContext context) =>
-                ExecuteAsync(
+                RemoteServerEngine.ExecuteAsync(
                     context,
                     async () =>
                     {
-                        var request = await ReadRequestAsync<OrderSpecialLookupRequest>(context).ConfigureAwait(false);
+                        var request = await RemoteServerEngine.ReadRequestAsync<OrderSpecialLookupRequest>(context).ConfigureAwait(false);
                         var repository = context.RequestServices.GetRequiredService<IOrderRemoteRepository>();
                         return (object?)await repository.SpecialLookupAsync(request.CustomerId, context.RequestAborted).ConfigureAwait(false);
                     }
@@ -793,11 +826,11 @@ public static partial class GeneratedRemoteEndpoints
         group.MapPost(
             "Order/CheckUniqueness",
             (HttpContext context) =>
-                ExecuteAsync(
+                RemoteServerEngine.ExecuteAsync(
                     context,
                     async () =>
                     {
-                        var request = await ReadRequestAsync<OrderCheckUniquenessRequest>(context).ConfigureAwait(false);
+                        var request = await RemoteServerEngine.ReadRequestAsync<OrderCheckUniquenessRequest>(context).ConfigureAwait(false);
                         var repository = context.RequestServices.GetRequiredService<IOrderRemoteRepository>();
                         return (object?)await repository.CheckUniquenessAsync(request.Entity, context.RequestAborted).ConfigureAwait(false);
                     }

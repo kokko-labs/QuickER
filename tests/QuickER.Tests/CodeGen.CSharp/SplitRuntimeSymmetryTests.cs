@@ -14,7 +14,8 @@ namespace QuickER.Tests.CodeGen.CSharp;
 /// <remarks>
 /// <para>
 /// 「分割ファイル ⇔ パッケージ」の対応は 1:1（<c>Runtime.g.cs</c>⇔Core・<c>Runtime.SqlServer.g.cs</c>⇔SqlServer・
-/// <c>Runtime.Sqlite.g.cs</c>⇔Sqlite・<c>Runtime.EntityFrameworkCore.g.cs</c>⇔EF Core）。バイト一致は原理的に成り立たない
+/// <c>Runtime.Sqlite.g.cs</c>⇔Sqlite・<c>Runtime.EntityFrameworkCore.g.cs</c>⇔EF Core・<c>Runtime.InMemory.g.cs</c>⇔InMemory・
+/// <c>Runtime.AspNetCore.g.cs</c>⇔AspNetCore）。バイト一致は原理的に成り立たない
 /// （名前空間・可視性 internal/public・パッケージ側のヘッダコメントが異なる）ため、<b>トップレベル型宣言の集合</b>で
 /// 構造一致を固定する。境界がずれれば「片方にしかない型」として必ず落ちる。
 /// </para>
@@ -93,6 +94,23 @@ public class SplitRuntimeSymmetryTests
     }
 
     /// <summary>
+    /// 分割の <c>Runtime.AspNetCore.g.cs</c> がリモートサーバー基盤パッケージと同じトップレベル型集合になることを検証する
+    /// （<see cref="MultiDialectOptions"/> は <c>GenerateRemoteServices=true</c> のためサーバー固定部が計画される）。
+    /// </summary>
+    [Fact]
+    public void SplitAspNetCoreRuntimeFile_ShouldDeclareSameTypesAsAspNetCorePackage()
+    {
+        var files = GenerateSplit(MultiDialectOptions());
+
+        DeclaredTypes(files["Runtime.AspNetCore.g.cs"])
+            .Should()
+            .BeEquivalentTo(
+                DeclaredTypes(PackageRenderer.RenderAspNetCore()),
+                "Runtime.AspNetCore.g.cs は QuickER.Runtime.AspNetCore と同じ守備範囲でなければならない"
+            );
+    }
+
+    /// <summary>
     /// 固定 infra ファイルにスキーマ依存物（エンティティ別の型）が 1 つも混じらないことを検証する
     /// （型集合の一致は「パッケージ側にも同じ漏れがある」場合に素通りしうるため、独立した観点で押さえる）。
     /// </summary>
@@ -125,7 +143,16 @@ public class SplitRuntimeSymmetryTests
             // （EF Core 固定 infra だけは DbContextOptions 拡張の ApplyServices のために DI 抽象を使うが、
             //   本構成はマルチ方言＝EF Core と排他のため対象外）
             content.Should().NotContain("ServiceCollectionExtensions", $"{fileName}");
-            content.Should().NotContain("Microsoft.Extensions.DependencyInjection", $"{fileName}");
+
+            // サーバー固定部（Runtime.AspNetCore.g.cs）は EF Core 固定 infra と同じ例外＝エンジン自身が
+            // リポジトリ・ILoggerFactory を DI から解決するため DI 抽象が必須で、ASP.NET Core の
+            // FrameworkReference が推移的に連れてくるので依存も増えない
+            if (!fileName.Contains("AspNetCore", StringComparison.Ordinal))
+            {
+                content
+                    .Should()
+                    .NotContain("Microsoft.Extensions.DependencyInjection", $"{fileName}");
+            }
         }
     }
 

@@ -646,7 +646,7 @@ app.Run();
 - **500 応答はサーバー側の詳細を既定で公開しません**。本文には固定文言（`An unexpected error occurred on the server.`）と `CorrelationId` が載り、クライアントでは `RemoteRepositoryException.CorrelationId` として取り出せます。スタックトレースを含む例外全体は従来どおり常にサーバー側へ記録され（`ILoggerFactory` 経由・カテゴリ `QuickER.RemoteServer`。ロギング未構成のホストでは何もしません）、**そのログ行にも同じ相関 ID が載る**ので、利用者から報告された ID を突き合わせれば、内部メッセージ（テーブル名・列名・接続文字列・ファイルパス）を信頼境界の外へ出さないまま完全な記録に辿り着けます。従来どおりメッセージを透過させたい場合は `MapGeneratedRemoteEndpoints(exposeErrorDetails: true)` を渡してください（このとき `CorrelationId` は null＝ボディは以前のバージョンと同一です）。定型は `exposeErrorDetails: app.Environment.IsDevelopment()` で、これを生成時オプションでなく実行時引数にしているのは、同じ生成物のまま開発と本番を使い分けられるようにするためです。スイッチが変えるのは**クライアントから見える 500 の内容だけ**で、サーバー側のログ出力と `OnServerError` フックはどちらのモードでも例外そのものを受け取ります。また 400（クライアント自身のペイロードについての説明）と 409 の競合内訳（`Reason` / `EntityType` / `Key`＝再取得リトライを組むための材料）は自前の文言なのでスイッチの影響を受けず、常に従来どおり返ります。バイナリ転送エンドポイントの 500 も同じスイッチに従います
 - 認証・TLS はスコープ外です。クライアントは `AddGeneratedHttpRemoteRepositories(Func<IServiceProvider, HttpClient>)` で認証ハンドラ付きの HttpClient を構成し、サーバーは `MapGeneratedRemoteEndpoints()` の戻り値（`RouteGroupBuilder`）へ ASP.NET Core の認可を付与してください
 - **ファクトリ版が返す HttpClient の所有権は呼び出し側にあります**。`AddGeneratedHttpRemoteRepositories(Func<IServiceProvider, HttpClient>)` はリポジトリ解決のたび（スコープ×エンティティ数だけ）ファクトリを呼び出し、返された HttpClient は生成コードも DI コンテナも破棄しません。共有インスタンスか `IHttpClientFactory` 管理のインスタンスを返してください（毎回 new するとソケットが枯渇します）。ベースアドレス版は共有インスタンスを 1 つだけ作り、それを DI コンテナが所有します（`ServiceProvider` の破棄と同時に HttpClient も破棄されるため、破棄済み provider から取得したリポジトリを使うと `ObjectDisposedException` になります）
-- サーバーファイルは ASP.NET Core の FrameworkReference（`Microsoft.AspNetCore.App`）が必要です（SDK が `Microsoft.NET.Sdk.Web` のプロジェクトなら追加設定不要）
+- サーバーファイルは ASP.NET Core の FrameworkReference（`Microsoft.AspNetCore.App`）が必要です（SDK が `Microsoft.NET.Sdk.Web` のプロジェクトなら追加設定不要）。その固定エンジンは共有コードのため、`--use-runtime-packages` では `QuickER.Runtime.AspNetCore` が提供し、参照するのはサーバーファイルを載せるプロジェクトだけです（[ランタイムパッケージ参照モード](#ランタイムパッケージ参照モード--use-runtime-packages)を参照）
 - **生成サーバークラスは拡張できます。** `GeneratedRemoteEndpoints` は `partial` クラスなので、生成物と並べて独自のエンドポイントヘルパを同じクラスへ置けます。また `static partial void OnServerError(HttpContext, Exception)` フックを別パートで実装すると、エンドポイントが HTTP 500 を返すたびに独自処理（通知・メトリクス・追加ログ）を差し込めます（組み込みログの後に実行され、実装しなければコンパイル時に呼び出しが消えます。フック内で例外が起きても隔離され、元のエラー応答を妨げません＝フックの例外はサーバーログへ記録して握り潰します）。同じプレフィックス配下への追加エンドポイントは、`MapGeneratedRemoteEndpoints()` が返す `RouteGroupBuilder` へ直接 Map しても構いません
 
 ### バイナリ転送エンドポイント（無制限バイナリ列の Stream アクセサ）
@@ -689,6 +689,7 @@ DB なしでユニットテストするためのインメモリ実装を追加�
 | `QuickER.Runtime.Sqlite` | QuickER の SQLite 方言エンジン | Microsoft.Data.Sqlite |
 | `QuickER.Runtime.EntityFrameworkCore` | EF Core 共通部品 | Microsoft.EntityFrameworkCore.Relational |
 | `QuickER.Runtime.InMemory` | インメモリエンジン（テスト用） | なし |
+| `QuickER.Runtime.AspNetCore` | 生成されるリモートエンドポイントのサーバー側固定エンジン | ASP.NET Core（NuGet 依存ではなく `FrameworkReference`） |
 
 パッケージ版とツール版はロックステップ（同一バージョン）で公開されるため、両者には同じバージョンを使ってください。0.x の間は minor 間の互換性を約束していません（[CONTRIBUTING](../CONTRIBUTING.ja.md) のバージョニング方針を参照）。DI 登録拡張・`QuickErDbContext`・エンティティ別実装などのスキーマ依存物は、本モードでも常に生成側に出力されます。
 
@@ -702,15 +703,16 @@ DB なしでユニットテストするためのインメモリ実装を追加�
 | `Runtime.SqlServer.g.cs` / `Runtime.Sqlite.g.cs`（`{Runtime}.{方言}`） | `QuickER.Runtime.SqlServer` / `QuickER.Runtime.Sqlite` | 方言エンジン（方言 Repository 基底・式木翻訳・実行器・接続ファクトリ） |
 | `Runtime.EntityFrameworkCore.g.cs`（`{Runtime}.EntityFrameworkCore`） | `QuickER.Runtime.EntityFrameworkCore` | EF Core 共通部品（`TContext : DbContext` ジェネリックの Repository 基底・VO 翻訳プラグイン） |
 | `Runtime.InMemory.g.cs`（`{Runtime}.InMemory`） | `QuickER.Runtime.InMemory` | インメモリ基盤（ストア・Repository 基底・保存ステージング） |
-| `Repositories.g.cs`・`Repositories.SqlServer.g.cs` / `Repositories.Sqlite.g.cs` / `Repositories.EntityFrameworkCore.g.cs` / `Repositories.InMemory.g.cs` | —（対応パッケージなし＝常に生成） | スキーマ依存物のみ（per-entity の契約と実装・DI 登録・`QuickErDbContext` と Fluent 構成・HTTP クライアント・射影 DTO） |
+| `Runtime.AspNetCore.g.cs`（`{Runtime}.AspNetCore`） | `QuickER.Runtime.AspNetCore` | サーバー側固定エンジン（`RemoteServerEngine`＝リクエスト読み取り・エラー分類・詳細公開ポリシー・バイナリ転送の補助） |
+| `Repositories.g.cs`・`Repositories.SqlServer.g.cs` / `Repositories.Sqlite.g.cs` / `Repositories.EntityFrameworkCore.g.cs` / `Repositories.InMemory.g.cs`・`RemoteServer.g.cs` | —（対応パッケージなし＝常に生成） | スキーマ依存物のみ（per-entity の契約と実装・DI 登録・`QuickErDbContext` と Fluent 構成・HTTP クライアント・射影 DTO・per-entity のエンドポイント（`GeneratedRemoteEndpoints`）） |
 
-`Runtime.g.cs` は常に出力され、それ以降のファイルは有効にした機能の分だけ出力されます（方言ファイルは QuickER 版 Repository を生成するとき・EF Core ファイルは `GenerateEfCore`・インメモリファイルは `GenerateInMemoryRepositories` のときだけ）＝参照すべきパッケージの集合とそのまま一致します。
+`Runtime.g.cs` は常に出力され、それ以降のファイルは有効にした機能の分だけ出力されます（方言ファイルは QuickER 版 Repository を生成するとき・EF Core ファイルは `GenerateEfCore`・インメモリファイルは `GenerateInMemoryRepositories`・ASP.NET Core ファイルは `GenerateRemoteServices` のときだけ）＝参照すべきパッケージの集合とそのまま一致します。
 
 この構成のため、`--use-runtime-packages` の意味は 1 つに収まります。**`Runtime*.g.cs` を 1 本も出力せず、生成コードの `using` が `{Runtime}…` ではなく固定のパッケージ名前空間（`QuickER.Runtime`・`QuickER.Runtime.SqlServer` …）を指すようになる**、それだけです。`Repositories*` 側はモードの ON / OFF で内容が変わりません。
 
 なお、ファイル名・名前空間の `EntityFrameworkCore` はパッケージ名へ揃えるためのもので、**C# の型名は従来どおり**です（`EfCore{Entity}Repository`・`QuickErDbContext`・`AddGeneratedEfCoreRepositories`）。
 
-`Entities.g.cs`・`ValueObjects.g.cs`・`EditModels.g.cs`・`Mappers.g.cs`・`RemoteServer.g.cs` は全体がスキーマ依存で、本モードでも内容は変わりません。非分割（単一ファイル）生成では、上記のすべてが 1 ファイルに連結されます。
+`Entities.g.cs`・`ValueObjects.g.cs`・`EditModels.g.cs`・`Mappers.g.cs` は全体がスキーマ依存で、本モードでも内容は変わりません。`RemoteServer.g.cs` もスキーマ依存ですが、分割時はその裏側の固定エンジンが `Runtime.AspNetCore.g.cs`（パッケージ参照モードでは `QuickER.Runtime.AspNetCore`）へ分かれ、ファイル本体には per-entity のエンドポイントと `OnServerError` フックだけが残ります。非分割（インライン）生成ではエンジンが `RemoteServer.g.cs` 自身に同居します。いずれの場合も ASP.NET Core の `FrameworkReference` を要するため別ファイルのままで、上記のそれ以外は非分割時に 1 ファイルへ連結されます。
 
 ## API リファレンス（.g.md）
 

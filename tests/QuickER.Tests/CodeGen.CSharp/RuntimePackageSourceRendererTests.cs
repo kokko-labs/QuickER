@@ -7,7 +7,8 @@ using QuickER.CodeGen.CSharp;
 namespace QuickER.Tests.CodeGen.CSharp;
 
 /// <summary>
-/// <see cref="RuntimePackageSourceRenderer"/> が書き出す 5 パッケージ（Core / SqlServer / Sqlite / EfCore / InMemory）のソースが、
+/// <see cref="RuntimePackageSourceRenderer"/> が書き出す 6 パッケージ（Core / SqlServer / Sqlite / EfCore / InMemory /
+/// AspNetCore）のソースが、
 /// 「案内どおりの最小依存だけを参照して」Roslyn でコンパイルできることと、依存が排他であることを検証する。
 /// </summary>
 /// <remarks>
@@ -121,6 +122,49 @@ public class RuntimePackageSourceRendererTests
             );
     }
 
+    /// <summary>AspNetCore は Core＋ASP.NET Core（DI 込み）でコンパイルでき、ADO / EF Core 参照なしで成立する</summary>
+    /// <remarks>
+    /// ASP.NET Core のアセンブリは TPA（テストホストが ASP.NET Core 共有フレームワークを持つ）に含まれるため、
+    /// 追加で戻すのは DI（<c>Microsoft.Extensions.DependencyInjection.Abstractions</c>）のみ。固定エンジンが
+    /// リポジトリと <c>ILoggerFactory</c> を DI から解決するために必要で、実プロジェクトでは
+    /// <c>Microsoft.AspNetCore.App</c> の FrameworkReference が推移的に提供する。
+    /// </remarks>
+    [Fact]
+    public void RenderAspNetCore_CompilesWithCoreAndAspNetCoreOnly()
+    {
+        var core = _renderer.RenderCore();
+        var aspNetCore = _renderer.RenderAspNetCore();
+
+        var result = Compile(
+            [core, aspNetCore],
+            allowSqlClient: false,
+            allowSqlite: false,
+            allowEfCore: false,
+            allowDependencyInjection: true
+        );
+
+        result
+            .Success.Should()
+            .BeTrue(
+                $"AspNetCore は Core＋ASP.NET Core（共有フレームワーク）のみで成立するはず:{Environment.NewLine}{result.Describe()}"
+            );
+    }
+
+    /// <summary>AspNetCore ソースには方言 ADO / EF Core の名前空間文字列が現れない（依存排他の文字列ガード）</summary>
+    /// <remarks>
+    /// DI（<c>Microsoft.Extensions.DependencyInjection</c>）は EF Core パッケージと同じ例外で、固定エンジン自身が
+    /// リポジトリ・<c>ILoggerFactory</c> の解決に使うため許容する（ASP.NET Core が推移的に持ち込むので依存は増えない）。
+    /// </remarks>
+    [Fact]
+    public void RenderAspNetCore_DoesNotReferenceDialectOrEfNamespaces()
+    {
+        var aspNetCore = _renderer.RenderAspNetCore();
+
+        aspNetCore.Should().NotContain("Microsoft.Data.SqlClient");
+        aspNetCore.Should().NotContain("Microsoft.Data.Sqlite");
+        aspNetCore.Should().NotContain("EntityFrameworkCore");
+    }
+
     /// <summary>InMemory ソースには方言 ADO / EF Core / DI の名前空間文字列が現れない（依存排他の文字列ガード）</summary>
     [Fact]
     public void RenderInMemory_DoesNotReferenceDialectEfOrDiNamespaces()
@@ -166,6 +210,10 @@ public class RuntimePackageSourceRendererTests
         var inMemory = _renderer.RenderInMemory();
         inMemory.Should().Contain($"namespace {RuntimePackages.InMemory};");
         inMemory.Should().Contain($"using {RuntimePackages.Core};");
+
+        var aspNetCore = _renderer.RenderAspNetCore();
+        aspNetCore.Should().Contain($"namespace {RuntimePackages.AspNetCore};");
+        aspNetCore.Should().Contain($"using {RuntimePackages.Core};");
     }
 
     /// <summary>
@@ -214,14 +262,16 @@ public class RuntimePackageSourceRendererTests
     /// <remarks>
     /// BCL（TPA）から SqlClient / Sqlite / EF Core / DI のアセンブリをファイル名で除外してから、
     /// <paramref name="allowSqlClient"/> 等が true のものだけを明示的に戻す。DI（<c>Microsoft.Extensions.DependencyInjection</c>）は
-    /// EF Core 部品（AddGeneratedEfCoreRepositories）だけが必要とする。方言パッケージの DI 登録拡張はスキーマ依存物として
+    /// EF Core 部品（AddGeneratedEfCoreRepositories）とサーバー固定エンジン（<paramref name="allowDependencyInjection"/>）
+    /// だけが必要とする。方言パッケージの DI 登録拡張はスキーマ依存物として
     /// 生成側に出力される（パッケージ書き出しでは抑止）ため、方言許可では DI を戻さない＝DI 非依存をコンパイルで証明する。
     /// </remarks>
     private static CompileResult Compile(
         IReadOnlyList<string> sources,
         bool allowSqlClient,
         bool allowSqlite,
-        bool allowEfCore
+        bool allowEfCore,
+        bool allowDependencyInjection = false
     )
     {
         var syntaxTrees = sources
@@ -235,7 +285,12 @@ public class RuntimePackageSourceRendererTests
             )
             .ToArray();
 
-        var references = BuildReferences(allowSqlClient, allowSqlite, allowEfCore);
+        var references = BuildReferences(
+            allowSqlClient,
+            allowSqlite,
+            allowEfCore,
+            allowDependencyInjection
+        );
 
         var compilation = CSharpCompilation.Create(
             $"QuickER.RuntimePackage.Tests.{Guid.NewGuid():N}",
@@ -277,7 +332,8 @@ public class RuntimePackageSourceRendererTests
     private static IReadOnlyList<MetadataReference> BuildReferences(
         bool allowSqlClient,
         bool allowSqlite,
-        bool allowEfCore
+        bool allowEfCore,
+        bool allowDependencyInjection
     )
     {
         var referencesByPath = new Dictionary<string, MetadataReference>(
@@ -314,9 +370,10 @@ public class RuntimePackageSourceRendererTests
             }
         }
 
-        // DI（登録拡張）を必要とするのは EF Core 部品（AddGeneratedEfCoreRepositories）だけ。
+        // DI（登録拡張）を必要とするのは EF Core 部品（AddGeneratedEfCoreRepositories）と、
+        // サーバー固定エンジン（リポジトリ・ILoggerFactory を DI から解決する）だけ。
         // 方言パッケージは DI 非依存（DI 登録拡張はスキーマ依存物として生成側に出力される）のため戻さない。
-        if (allowEfCore)
+        if (allowEfCore || allowDependencyInjection)
         {
             AddPath(
                 typeof(Microsoft.Extensions.DependencyInjection.IServiceCollection)

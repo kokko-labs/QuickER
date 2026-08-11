@@ -4730,6 +4730,51 @@ public class CSharpCodeGenerationServiceTests
             .Equal(RuntimePackages.Core, RuntimePackages.InMemory);
     }
 
+    /// <summary>
+    /// リモートサービス生成とランタイムパッケージ参照モードの併用で、サーバー実装の固定部
+    /// （<c>RemoteServerEngine</c> ほか）が出力されず <c>QuickER.Runtime.AspNetCore</c> を using で参照することを検証する。
+    /// </summary>
+    /// <remarks>
+    /// per-entity のエンドポイント（<c>GeneratedRemoteEndpoints.MapGeneratedRemoteEndpoints</c>・
+    /// <c>OnServerError</c> partial フック）はスキーマ依存物として生成側に残る＝利用者契約は不変。
+    /// </remarks>
+    [Fact(
+        DisplayName = "リモートサービス生成 ＋ UseRuntimePackages はサーバー固定部を出さず AspNetCore パッケージを参照する"
+    )]
+    public void Generate_RemoteServicesWithRuntimePackages_UsesAspNetCorePackage()
+    {
+        var options = new CodeGenerationOptions
+        {
+            RootNamespace = "Sample.Domain",
+            GenerateRepositories = true,
+            GenerateRemoteServices = true,
+            UseRuntimePackages = true,
+        };
+
+        var result = new CSharpCodeGenerationService().Generate(SingleEntityDiagram(), options);
+
+        result.HasErrors.Should().BeFalse();
+
+        var serverFile = result.Files.Single(f =>
+            f.FileName.EndsWith(".RemoteServer.g.cs", StringComparison.Ordinal)
+        );
+
+        // サーバー固定部はパッケージが持つ（生成側には出ない）
+        serverFile.Content.Should().NotContain("class RemoteServerEngine");
+        serverFile.Content.Should().NotContain("class DeferredOctetStreamBody");
+        serverFile.Content.Should().NotContain("class RemoteBadRequestException");
+        // スキーマ依存物（エンドポイント・partial フック）は生成側に残り、パッケージを using で参照する
+        serverFile.Content.Should().Contain($"using {RuntimePackages.AspNetCore};");
+        serverFile.Content.Should().Contain("MapGeneratedRemoteEndpoints");
+        serverFile.Content.Should().Contain("static partial void OnServerError");
+
+        // 案内は Core＋SqlServer＋AspNetCore になる
+        RuntimePackageReferenceGuidance
+            .Compute(options)
+            .Should()
+            .Equal(RuntimePackages.Core, RuntimePackages.SqlServer, RuntimePackages.AspNetCore);
+    }
+
     /// <summary>varbinary(max)（無制限バイナリ）と rowversion（有界バイナリ）を持つ単一エンティティ図（除外機能の検証用）</summary>
     private static ErDiagram BinaryColumnDiagram() =>
         new()

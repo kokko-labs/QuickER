@@ -42,6 +42,7 @@ $generatedPaths = @(
     'src/QuickER.Runtime.Sqlite',
     'src/QuickER.Runtime.EntityFrameworkCore',
     'src/QuickER.Runtime.InMemory',
+    'src/QuickER.Runtime.AspNetCore',
     'tests/QuickER.Tests/GeneratedFixture',
     'samples'
 )

@@ -16,7 +16,8 @@ namespace QuickER.Tests.CodeGen.CSharp;
 /// </summary>
 /// <remarks>
 /// <para>
-/// ランタイム側は <see cref="RuntimePackageSourceRenderer"/> の出力（Core / SqlServer / Sqlite / EfCore）を
+/// ランタイム側は <see cref="RuntimePackageSourceRenderer"/> の出力（Core / SqlServer / Sqlite / EfCore /
+/// InMemory / AspNetCore）を
 /// in-memory アセンブリへ順にコンパイル（Core → 方言/EF Core の参照順）して <see cref="MetadataReference"/> 化し、
 /// 生成コードのコンパイルへ「案内が指示するパッケージだけ」を渡す。これにより案内の十分性（不足なくコンパイル可能）と
 /// 依存最小性（余計なパッケージなしで成立）を同時に証明する。
@@ -72,22 +73,23 @@ public class RuntimePackageModeCompilationTests
         allContent.Should().NotContain("class SqliteRepository<");
         allContent.Should().NotContain("class InMemoryDataStore");
 
-        // 案内が指示するパッケージ集合だけを参照集合として構築し、生成コードをコンパイルする。
-        // サーバー実装ファイル（.RemoteServer.g.cs）は ASP.NET Core の FrameworkReference を要するため
-        // 本ハーネスの参照集合ではコンパイルしない（実コンパイル検証はチェックイン済みフィクスチャが担う）
-        var compilableResult = new CodeGenerationResult
+        // サーバー実装ファイルが出る構成では、それが確かにコンパイル対象へ入っていることを明示的に固定する
+        // （かつては ASP.NET Core 依存を理由に除外していた。撤廃が空振りにならないよう存在を表明する。
+        //   ファイル名は非分割が {ベース名}.RemoteServer.g.cs・分割が RemoteServer.g.cs）
+        if (options.GenerateRemoteServices)
         {
-            Files = result
-                .Files.Where(f =>
-                    !f.FileName.EndsWith(".RemoteServer.g.cs", StringComparison.Ordinal)
-                )
-                .ToList(),
-            Diagnostics = result.Diagnostics,
-        };
+            result
+                .Files.Should()
+                .Contain(f => f.FileName.EndsWith("RemoteServer.g.cs", StringComparison.Ordinal));
+        }
+
+        // 案内が指示するパッケージ集合だけを参照集合として構築し、生成コードをコンパイルする。
+        // サーバー実装ファイル（.RemoteServer.g.cs）も対象に含める＝固定部は QuickER.Runtime.AspNetCore が
+        // 提供し、ASP.NET Core 本体はテストホストの共有フレームワーク（TPA）から解決される。
         var packages = RuntimePackageReferenceGuidance.Compute(options);
         var packageRefs = BuildPackageReferences(packages);
 
-        var compilation = CompileGenerated(compilableResult, packages, packageRefs);
+        var compilation = CompileGenerated(result, packages, packageRefs);
 
         compilation
             .Success.Should()
@@ -232,6 +234,48 @@ public class RuntimePackageModeCompilationTests
             .Equal(RuntimePackages.Core, RuntimePackages.InMemory);
     }
 
+    /// <summary>リモートサービス生成×パッケージの案内は Core＋方言＋AspNetCore になる（サーバー固定部の所在）</summary>
+    [Fact]
+    public void RemoteServices_Guidance_IncludesAspNetCore()
+    {
+        var options = WithPackageMode(
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Sample.Domain",
+                GenerateRepositories = true,
+                GenerateRemoteServices = true,
+            }
+        );
+
+        RuntimePackageReferenceGuidance
+            .Compute(options)
+            .Should()
+            .Equal(RuntimePackages.Core, RuntimePackages.SqlServer, RuntimePackages.AspNetCore);
+    }
+
+    /// <summary>リモート契約のみ（サーバー実装なし）の案内には AspNetCore が入らない</summary>
+    /// <remarks>
+    /// <c>GenerateRemoteContracts</c> はインターフェイスを足すだけで、サーバー実装ファイル
+    /// （<c>RemoteServer.g.cs</c>）を出さない＝ASP.NET Core は要らない。
+    /// </remarks>
+    [Fact]
+    public void RemoteContractsOnly_Guidance_DoesNotIncludeAspNetCore()
+    {
+        var options = WithPackageMode(
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Sample.Domain",
+                GenerateRepositories = true,
+                GenerateRemoteContracts = true,
+            }
+        );
+
+        RuntimePackageReferenceGuidance
+            .Compute(options)
+            .Should()
+            .Equal(RuntimePackages.Core, RuntimePackages.SqlServer);
+    }
+
     /// <summary>PackageReference 行の案内が指定バージョンで組み立てられる</summary>
     [Fact]
     public void BuildPackageReferenceLines_ProducesVersionedLines()
@@ -281,6 +325,7 @@ public class RuntimePackageModeCompilationTests
                 {
                     RootNamespace = "Sample.Domain",
                     SplitFilesByCategory = split,
+                    GenerateRepositories = true,
                 }
             );
             data.Add(
@@ -289,6 +334,7 @@ public class RuntimePackageModeCompilationTests
                 {
                     RootNamespace = "Sample.Domain",
                     SplitFilesByCategory = split,
+                    GenerateRepositories = true,
                     RepositoryDialects = ["sqlite"],
                 }
             );
@@ -298,6 +344,7 @@ public class RuntimePackageModeCompilationTests
                 {
                     RootNamespace = "Sample.Domain",
                     SplitFilesByCategory = split,
+                    GenerateRepositories = true,
                     RepositoryDialects = ["sqlserver", "sqlite"],
                 }
             );
@@ -365,6 +412,7 @@ public class RuntimePackageModeCompilationTests
             new CodeGenerationOptions
             {
                 RootNamespace = "Sample.Domain",
+                GenerateRepositories = true,
                 GenerateRemoteContracts = true,
             }
         );
@@ -373,6 +421,7 @@ public class RuntimePackageModeCompilationTests
             new CodeGenerationOptions
             {
                 RootNamespace = "Sample.Domain",
+                GenerateRepositories = true,
                 RepositoryDialects = ["sqlserver", "sqlite"],
                 GenerateRemoteContracts = true,
             }
@@ -382,6 +431,7 @@ public class RuntimePackageModeCompilationTests
             new CodeGenerationOptions
             {
                 RootNamespace = "Sample.Domain",
+                GenerateRepositories = true,
                 RepositoryDialects = ["sqlite"],
                 GenerateEfCore = true,
                 GenerateRemoteContracts = true,
@@ -389,14 +439,37 @@ public class RuntimePackageModeCompilationTests
         );
 
         // リモートサービス生成×パッケージ参照モード（クライアント固定 infra＝HttpRemoteRepository 等は Core パッケージが提供し、
-        // per-entity クライアント・DI 登録は生成側に残る。サーバーファイルは ASP.NET Core 前提のため本ハーネスの
-        // コンパイル対象から除外される＝Generate_PackageMode 側の除外処理を参照）
+        // サーバー固定 infra＝RemoteServerEngine 等は AspNetCore パッケージが提供する。per-entity クライアント・
+        // エンドポイント・DI 登録は生成側に残り、サーバーファイルもそのままコンパイル検証の対象になる）
         data.Add(
             "remote-services QuickER sqlserver",
             new CodeGenerationOptions
             {
                 RootNamespace = "Sample.Domain",
+                GenerateRepositories = true,
                 GenerateRemoteServices = true,
+            }
+        );
+        data.Add(
+            "remote-services QuickER sqlserver Split=true",
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Sample.Domain",
+                SplitFilesByCategory = true,
+                GenerateRepositories = true,
+                GenerateRemoteServices = true,
+            }
+        );
+        // 無制限バイナリ除外との併用（バイナリ転送エンドポイント＝サーバー固定部の
+        // ExecuteDownload/Upload/Delete・DeferredOctetStreamBody まで参照するケース）
+        data.Add(
+            "remote-services QuickER sqlserver＋バイナリ除外",
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Sample.Domain",
+                GenerateRepositories = true,
+                GenerateRemoteServices = true,
+                ExcludeUnboundedBinaryColumns = true,
             }
         );
 
@@ -611,6 +684,17 @@ public class RuntimePackageModeCompilationTests
             references.Add(MetadataReference.CreateFromImage(image));
         }
 
+        if (packages.Contains(RuntimePackages.AspNetCore))
+        {
+            var image = CompilePackageAssembly(
+                RuntimePackages.AspNetCore,
+                [PackageRenderer.RenderCore(), PackageRenderer.RenderAspNetCore()],
+                RuntimeReferenceSet.AspNetCore,
+                corePeImage: coreImage
+            );
+            references.Add(MetadataReference.CreateFromImage(image));
+        }
+
         return references;
     }
 
@@ -782,6 +866,16 @@ internal sealed class RuntimeReferenceSet
 
     /// <summary>InMemory パッケージ: BCL のみ（ADO / EF Core / DI なし＝DB 非依存を参照集合で証明する）</summary>
     public static RuntimeReferenceSet InMemory { get; } = new(false, false, false, false);
+
+    /// <summary>
+    /// AspNetCore パッケージ: BCL（ASP.NET Core 共有フレームワークを含む）＋DI。ADO / EF Core は参照しない
+    /// </summary>
+    /// <remarks>
+    /// ASP.NET Core のアセンブリはテストホストの共有フレームワーク経由で TPA に含まれるため除外対象に入れていない。
+    /// DI はサーバー固定エンジンがリポジトリ・<c>ILoggerFactory</c> を解決するために必要（実プロジェクトでは
+    /// <c>Microsoft.AspNetCore.App</c> の FrameworkReference が推移的に提供する）。
+    /// </remarks>
+    public static RuntimeReferenceSet AspNetCore { get; } = new(false, false, false, true);
 
     /// <summary>生成コード: BCL＋DI（登録拡張）のみ。方言 ADO / EF Core はパッケージ側だけが参照する</summary>
     public static RuntimeReferenceSet GeneratedCode { get; } = new(false, false, false, true);

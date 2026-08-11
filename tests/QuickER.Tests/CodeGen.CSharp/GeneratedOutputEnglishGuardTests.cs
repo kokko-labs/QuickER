@@ -37,11 +37,11 @@ public sealed class GeneratedOutputEnglishGuardTests
     private static readonly Regex CjkPattern = new("[　-鿿＀-￯]", RegexOptions.Compiled);
 
     /// <summary>
-    /// ランタイムパッケージ用ソース（<see cref="RuntimePackageSourceRenderer"/> の 5 レンダリング＝
-    /// Core / SqlServer / Sqlite / EfCore / InMemory）の出力に CJK 文字が含まれないことを検証する。
+    /// ランタイムパッケージ用ソース（<see cref="RuntimePackageSourceRenderer"/> の 6 レンダリング＝
+    /// Core / SqlServer / Sqlite / EfCore / InMemory / AspNetCore）の出力に CJK 文字が含まれないことを検証する。
     /// これらは空図＋固定名前空間でレンダリングされるため、ユーザーデータ由来の日本語は元々混入し得ない。
     /// </summary>
-    [Fact(DisplayName = "ランタイムパッケージ用ソース 5 本に日本語（CJK）が含まれない")]
+    [Fact(DisplayName = "ランタイムパッケージ用ソース 6 本に日本語（CJK）が含まれない")]
     public void RuntimePackageSources_ContainNoCjk()
     {
         var renderer = new RuntimePackageSourceRenderer();
@@ -53,6 +53,7 @@ public sealed class GeneratedOutputEnglishGuardTests
             ("Runtime.Sqlite.g.cs", renderer.RenderSqlite()),
             ("Runtime.EntityFrameworkCore.g.cs", renderer.RenderEfCore()),
             ("Runtime.InMemory.g.cs", renderer.RenderInMemory()),
+            ("Runtime.AspNetCore.g.cs", renderer.RenderAspNetCore()),
         };
 
         AssertNoCjk(rendered);

@@ -61,7 +61,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             .Append('/')
             .Append(operation)
             .Append("\",\n            (HttpContext context) =>\n")
-            .Append("                ExecuteAsync(\n")
+            .Append("                RemoteServerEngine.ExecuteAsync(\n")
             .Append("                    context,\n")
             .Append("                    async () =>\n")
             .Append("                    {\n");
@@ -72,7 +72,9 @@ internal sealed partial class CSharpGenerationModelBuilder
         if (shape.PayloadParameters.Count > 0)
         {
             builder
-                .Append("                        var request = await ReadRequestAsync<")
+                .Append(
+                    "                        var request = await RemoteServerEngine.ReadRequestAsync<"
+                )
                 .Append(RequestRecordName(shape, repositoryName))
                 .Append(">(context).ConfigureAwait(false);\n");
             arguments.AddRange(

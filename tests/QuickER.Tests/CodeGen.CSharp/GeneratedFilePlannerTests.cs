@@ -230,7 +230,7 @@ public class GeneratedFilePlannerTests
         var plan = GeneratedFilePlanner.Plan(options);
 
         // RemoteServer は Repository バケットを含む最後のスキーマ依存スペック（方言別実装）の直後に並ぶ
-        // （Runtime 系の固定 infra ファイルはさらに後ろ）
+        // （Runtime 系の固定 infra ファイルはさらに後ろ。サーバー固定部の Runtime.AspNetCore.g.cs もその一員）
         plan.Select(spec => spec.FileName)
             .Should()
             .Equal(
@@ -241,8 +241,56 @@ public class GeneratedFilePlannerTests
                 "Repositories.SqlServer.g.cs",
                 "RemoteServer.g.cs",
                 "Runtime.g.cs",
-                "Runtime.SqlServer.g.cs"
+                "Runtime.SqlServer.g.cs",
+                "Runtime.AspNetCore.g.cs"
             );
+    }
+
+    /// <summary>
+    /// 分割＋リモートサービス生成時、サーバー実装が「固定部（Runtime.AspNetCore.g.cs）＋スキーマ依存
+    /// （RemoteServer.g.cs）」の 2 スペックへ分かれ、パッケージ参照モードでは固定部を計画しないことを検証する。
+    /// </summary>
+    [Fact]
+    public void Plan_Split_RemoteServer_SeparatesFixedEngineSpec()
+    {
+        var options = new CodeGenerationOptions
+        {
+            RootNamespace = "Acme.App",
+            SplitFilesByCategory = true,
+            GenerateRepositories = true,
+            GenerateRemoteServices = true,
+        };
+
+        var plan = GeneratedFilePlanner.Plan(options);
+
+        // 固定部（他の Runtime 系と同型＝コア相当だけを using・スキーマ依存物なし）
+        var engine = plan.Single(spec => spec.FileName == "Runtime.AspNetCore.g.cs");
+        engine.NamespaceName.Should().Be("Acme.App.Runtime.AspNetCore");
+        engine.Buckets.Should().Equal(GenerationBucket.RemoteServer);
+        engine.CrossNamespaceUsings.Should().Equal("Acme.App.Runtime");
+        engine.EmitSchemaDependent.Should().BeFalse();
+        engine.EmitSharedInfra.Should().BeTrue();
+
+        // スキーマ依存側（per-entity）は固定部を using し、固定 infra を描かない
+        var server = plan.Single(spec => spec.FileName == "RemoteServer.g.cs");
+        server.NamespaceName.Should().Be("Acme.App.RemoteServer");
+        server.EmitSharedInfra.Should().BeFalse();
+        server
+            .CrossNamespaceUsings.Should()
+            .BeEquivalentTo(
+                "Acme.App.Entities",
+                "Acme.App.Repositories",
+                "Acme.App.Runtime",
+                "Acme.App.Runtime.AspNetCore"
+            );
+
+        // パッケージ参照モードでは固定部ファイルを計画しない（固定名前空間 using は GeneratedFileUsings が付ける）
+        var packagePlan = GeneratedFilePlanner.Plan(options with { UseRuntimePackages = true });
+        packagePlan.Select(spec => spec.FileName).Should().NotContain("Runtime.AspNetCore.g.cs");
+        packagePlan
+            .Single(spec => spec.FileName == "RemoteServer.g.cs")
+            .CrossNamespaceUsings.Should()
+            .NotContain("Acme.App.Runtime.AspNetCore");
     }
 
     /// <summary>クロス using が依存グラフに基づき、参照しないバケットの名前空間を using しないことを検証する</summary>

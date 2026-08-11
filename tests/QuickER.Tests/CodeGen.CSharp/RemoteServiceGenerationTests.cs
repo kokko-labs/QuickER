@@ -128,25 +128,40 @@ public class RemoteServiceGenerationTests
                 "services.AddScoped<IOrderRemoteRepository>(provider => new HttpOrderRemoteRepository("
             );
 
-        // サーバーファイル: エンドポイントマッピング＋例外変換＋CRUD 汎用マッピング
+        // サーバーファイル: 固定エンジン（スキーマ非依存）＋エンドポイントマッピング（スキーマ依存）の 2 層構成
+        server.Should().Contain("internal static class RemoteServerEngine");
         server.Should().Contain("public static partial class GeneratedRemoteEndpoints");
         server.Should().Contain("MapGeneratedRemoteEndpoints(");
         server.Should().Contain("string prefix = RemotePaths.DefaultPrefix");
-        server.Should().Contain("MapCrud<OrderEntity, int, IOrderRemoteRepository>(");
+        // per-entity のエンドポイントは固定エンジンの汎用マッピングを修飾付きで呼ぶ（別ファイル／別アセンブリでも同一テキスト）
+        server
+            .Should()
+            .Contain("RemoteServerEngine.MapCrud<OrderEntity, int, IOrderRemoteRepository>(");
         server.Should().Contain("StatusCodes.Status409Conflict");
         server.Should().Contain("\"SaveConflict\"");
 
         // リクエスト解釈の失敗は 400（BadRequest）・Kestrel の BadHttpRequestException はステータス素通し
-        server.Should().Contain("private sealed class RemoteBadRequestException");
+        // （エンジンから使う例外・メタデータ型はトップレベルへ出す＝入れ子だとエンジン外から参照できない）
+        server.Should().Contain("internal sealed class RemoteBadRequestException : Exception");
         server.Should().Contain("StatusCodes.Status400BadRequest");
         server.Should().Contain("catch (BadHttpRequestException ex)");
         server.Should().Contain("await WriteErrorAsync(context, ex.StatusCode, \"BadRequest\"");
 
-        // 500 の詳細公開は実行時引数で、既定は非公開（汎用文言＋相関 ID）
+        // 500 の詳細公開は実行時引数で、既定は非公開（汎用文言＋相関 ID）。
+        // OnServerError（partial＝アセンブリを跨げない）はラッパー RaiseServerError をデリゲートとして
+        // メタデータへ載せ、エンジンが呼び出す
         server.Should().Contain("bool exposeErrorDetails = false");
         server
             .Should()
-            .Contain("group.WithMetadata(new RemoteErrorDetailPolicy(exposeErrorDetails));");
+            .Contain(
+                "group.WithMetadata(new RemoteErrorDetailPolicy(exposeErrorDetails, RaiseServerError));"
+            );
+        server.Should().Contain("internal sealed class RemoteErrorDetailPolicy(");
+        server.Should().Contain("public Action<HttpContext, Exception>? OnServerError { get; }");
+        server.Should().Contain("policy?.OnServerError?.Invoke(context, ex);");
+        server.Should().Contain("private static void RaiseServerError(HttpContext context");
+        server.Should().Contain("RemoteServerEngine.LogServerError(context, hookError);");
+        server.Should().Contain("static partial void OnServerError(HttpContext context");
         server.Should().Contain("\"An unexpected error occurred on the server.\"");
         server.Should().Contain("correlationId: expose ? null : context.TraceIdentifier");
 
@@ -244,6 +259,91 @@ public class RemoteServiceGenerationTests
         server.Content.Should().Contain("using Acme.Entities;");
         server.Content.Should().Contain("using Acme.Repositories;");
         server.Content.Should().Contain("using Acme.Runtime;");
+        // 固定部は Runtime.AspNetCore.g.cs へ分かれるため、その namespace も using する
+        server.Content.Should().Contain("using Acme.Runtime.AspNetCore;");
+    }
+
+    /// <summary>
+    /// 分割出力では、サーバー実装が「固定エンジン＝Runtime.AspNetCore.g.cs」と
+    /// 「per-entity＝RemoteServer.g.cs」の 2 ファイルへ分かれることを検証する
+    /// （他バケットと同じ「固定 infra は Runtime 系・スキーマ依存物は各カテゴリ」の対称構成）。
+    /// </summary>
+    [Fact(DisplayName = "分割出力: サーバー固定部が Runtime.AspNetCore.g.cs へ分かれる")]
+    public void Generate_RemoteServicesWithSplit_SeparatesEngineIntoFixedRuntimeFile()
+    {
+        var result = Generate(
+            CreateDiagram(),
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Acme",
+                GenerateRepositories = true,
+                GenerateRemoteServices = true,
+                SplitFilesByCategory = true,
+            }
+        );
+
+        result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
+
+        var engine = result.Files.Single(f => f.FileName == "Runtime.AspNetCore.g.cs");
+        engine.Content.Should().Contain("namespace Acme.Runtime.AspNetCore;");
+        // 固定部は共通契約（RemoteJson・エンベロープ）をコア相当ファイルから using で参照する
+        engine.Content.Should().Contain("using Acme.Runtime;");
+        engine.Content.Should().Contain("internal static class RemoteServerEngine");
+        engine.Content.Should().Contain("internal sealed class RemoteBadRequestException");
+        engine.Content.Should().Contain("internal sealed class RemoteErrorDetailPolicy(");
+        // スキーマ依存物（エンドポイント本体・per-entity）は 1 つも混ざらない
+        engine.Content.Should().NotContain("class GeneratedRemoteEndpoints");
+        engine.Content.Should().NotContain("MapOrderEndpoints");
+        engine.Content.Should().NotContain("OrderEntity");
+
+        // per-entity 側は固定部の型定義を持たず、修飾付きで呼ぶだけ
+        var server = result.Files.Single(f => f.FileName == "RemoteServer.g.cs");
+        server.Content.Should().Contain("public static partial class GeneratedRemoteEndpoints");
+        server.Content.Should().Contain("RemoteServerEngine.MapCrud<");
+        server.Content.Should().NotContain("static class RemoteServerEngine");
+        server.Content.Should().NotContain("class RemoteBadRequestException");
+    }
+
+    /// <summary>
+    /// パッケージ参照モードでは固定部ファイルを出さず、per-entity のサーバーファイルが
+    /// 固定名前空間（<see cref="RuntimePackages.AspNetCore"/>）を using するだけになることを検証する。
+    /// </summary>
+    [Fact(DisplayName = "パッケージ参照モード: サーバー固定部は出力されず using だけになる")]
+    public void Generate_RemoteServicesWithRuntimePackages_ReferencesAspNetCorePackage()
+    {
+        var result = Generate(
+            CreateDiagram(),
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Acme",
+                OutputFileName = "Shop.g.cs",
+                GenerateRepositories = true,
+                GenerateRemoteServices = true,
+                UseRuntimePackages = true,
+            }
+        );
+
+        result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
+
+        var server = result.Files.Single(f => f.FileName == "Shop.RemoteServer.g.cs");
+        server.Content.Should().Contain($"using {RuntimePackages.AspNetCore};");
+        server.Content.Should().NotContain("static class RemoteServerEngine");
+        server.Content.Should().NotContain("class RemoteBadRequestException");
+        // per-entity 側のテキストはモードに依らず同一（修飾呼び出しのみ）
+        server.Content.Should().Contain("RemoteServerEngine.MapCrud<");
+
+        // 案内にも ASP.NET Core パッケージが載る（安定順の末尾）
+        RuntimePackageReferenceGuidance
+            .Compute(
+                new CodeGenerationOptions
+                {
+                    GenerateRepositories = true,
+                    GenerateRemoteServices = true,
+                    UseRuntimePackages = true,
+                }
+            )
+            .Should()
+            .Equal(RuntimePackages.Core, RuntimePackages.SqlServer, RuntimePackages.AspNetCore);
     }
 
     /// <summary>EF Core 単独＋リモートサービス: 契約・クライアント・サーバーが EF Core 版 Repository 基準でも成立することを検証する</summary>

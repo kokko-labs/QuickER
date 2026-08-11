@@ -45,6 +45,7 @@ public class GeneratedConfigureAwaitGuardTests
             "src/QuickER.Runtime.Sqlite/Runtime.Sqlite.g.cs",
             "src/QuickER.Runtime.EntityFrameworkCore/Runtime.EntityFrameworkCore.g.cs",
             "src/QuickER.Runtime.InMemory/Runtime.InMemory.g.cs",
+            "src/QuickER.Runtime.AspNetCore/Runtime.AspNetCore.g.cs",
             "tests/QuickER.Tests/GeneratedFixture/GeneratedFixture.g.cs",
             "tests/QuickER.Tests/GeneratedFixture/PortableFixture.g.cs",
             "tests/QuickER.Tests/GeneratedFixture/SqlitePortableFixture.g.cs",

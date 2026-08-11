@@ -10,9 +10,9 @@ using Xunit;
 namespace QuickER.Tests.CodeGen.CSharp;
 
 /// <summary>
-/// ランタイムパッケージ 5 プロジェクト（<c>QuickER.Runtime</c> / <c>.SqlServer</c> / <c>.Sqlite</c> /
-/// <c>.EntityFrameworkCore</c> / <c>.InMemory</c>）の csproj が宣言する依存集合（PackageReference / ProjectReference）を検証し、
-/// パッケージ境界での依存排他を守る。
+/// ランタイムパッケージ 6 プロジェクト（<c>QuickER.Runtime</c> / <c>.SqlServer</c> / <c>.Sqlite</c> /
+/// <c>.EntityFrameworkCore</c> / <c>.InMemory</c> / <c>.AspNetCore</c>）の csproj が宣言する依存集合
+/// （PackageReference / ProjectReference / FrameworkReference）を検証し、パッケージ境界での依存排他を守る。
 /// </summary>
 /// <remarks>
 /// <para>
@@ -25,6 +25,11 @@ namespace QuickER.Tests.CodeGen.CSharp;
 /// 出力される（パッケージ書き出しでは抑止）ため、パッケージは <c>Microsoft.Extensions.DependencyInjection</c> 系にも
 /// 依存しない。依存集合は完全一致で検証する。
 /// </para>
+/// <para>
+/// <c>FrameworkReference</c>（共有フレームワーク参照）を持ってよいのは <c>.AspNetCore</c> だけで、他 5 つは
+/// 持たない（逆表明も固定する）。共有フレームワーク参照は「そのパッケージを参照する側のプロジェクト種別を縛る」
+/// ため、うっかり他パッケージへ足すと非 Web プロジェクトで解決できない依存が広がる。
+/// </para>
 /// </remarks>
 public sealed class RuntimePackageProjectDependencyGuardTests
 {
@@ -35,6 +40,10 @@ public sealed class RuntimePackageProjectDependencyGuardTests
         var packages = PackageReferences("src/QuickER.Runtime/QuickER.Runtime.csproj");
 
         packages.Should().BeEmpty("コアは BCL のみに依存し、いかなる NuGet 依存も持ってはならない");
+
+        FrameworkReferences("src/QuickER.Runtime/QuickER.Runtime.csproj")
+            .Should()
+            .BeEmpty(NoFrameworkReferenceReason);
     }
 
     /// <summary>SqlServer パッケージは SqlClient のみを持ち、Sqlite / EF Core 系を持たない</summary>
@@ -60,6 +69,10 @@ public sealed class RuntimePackageProjectDependencyGuardTests
             "src/QuickER.Runtime.SqlServer/QuickER.Runtime.SqlServer.csproj"
         );
         projects.Should().ContainSingle().Which.Should().EndWith("QuickER.Runtime.csproj");
+
+        FrameworkReferences("src/QuickER.Runtime.SqlServer/QuickER.Runtime.SqlServer.csproj")
+            .Should()
+            .BeEmpty(NoFrameworkReferenceReason);
     }
 
     /// <summary>Sqlite パッケージは Sqlite + SQLitePCLRaw のみを持ち、SqlClient / EF Core 系を持たない</summary>
@@ -85,6 +98,10 @@ public sealed class RuntimePackageProjectDependencyGuardTests
             "src/QuickER.Runtime.Sqlite/QuickER.Runtime.Sqlite.csproj"
         );
         projects.Should().ContainSingle().Which.Should().EndWith("QuickER.Runtime.csproj");
+
+        FrameworkReferences("src/QuickER.Runtime.Sqlite/QuickER.Runtime.Sqlite.csproj")
+            .Should()
+            .BeEmpty(NoFrameworkReferenceReason);
     }
 
     /// <summary>EntityFrameworkCore パッケージは EF Core（Relational）のみを持ち、ADO / DI 系を持たない</summary>
@@ -110,6 +127,12 @@ public sealed class RuntimePackageProjectDependencyGuardTests
             "src/QuickER.Runtime.EntityFrameworkCore/QuickER.Runtime.EntityFrameworkCore.csproj"
         );
         projects.Should().ContainSingle().Which.Should().EndWith("QuickER.Runtime.csproj");
+
+        FrameworkReferences(
+                "src/QuickER.Runtime.EntityFrameworkCore/QuickER.Runtime.EntityFrameworkCore.csproj"
+            )
+            .Should()
+            .BeEmpty(NoFrameworkReferenceReason);
     }
 
     /// <summary>InMemory パッケージは PackageReference を 1 つも持たない（BCL のみ・ADO / EF Core / DI なし）</summary>
@@ -134,7 +157,54 @@ public sealed class RuntimePackageProjectDependencyGuardTests
             "src/QuickER.Runtime.InMemory/QuickER.Runtime.InMemory.csproj"
         );
         projects.Should().ContainSingle().Which.Should().EndWith("QuickER.Runtime.csproj");
+
+        FrameworkReferences("src/QuickER.Runtime.InMemory/QuickER.Runtime.InMemory.csproj")
+            .Should()
+            .BeEmpty(NoFrameworkReferenceReason);
     }
+
+    /// <summary>
+    /// AspNetCore パッケージは PackageReference を 1 つも持たず、共有フレームワーク参照は
+    /// <c>Microsoft.AspNetCore.App</c> 1 つだけを持つ（ADO / EF Core / DI の NuGet 依存なし）。
+    /// </summary>
+    [Fact(
+        DisplayName = "QuickER.Runtime.AspNetCore は PackageReference ゼロ＋FrameworkReference は Microsoft.AspNetCore.App のみ"
+    )]
+    public void AspNetCore_HasAspNetCoreFrameworkReferenceOnly()
+    {
+        var packages = PackageReferences(
+            "src/QuickER.Runtime.AspNetCore/QuickER.Runtime.AspNetCore.csproj"
+        );
+
+        packages
+            .Should()
+            .BeEmpty(
+                "サーバー固定エンジンが必要とするもの（Minimal API・DI・ロギング）は ASP.NET Core の共有フレームワークが"
+                    + "推移的に提供するため、NuGet 依存は 1 つも持ってはならない"
+                    + "（ADO（SqlClient / Sqlite）／EF Core が混ざってはならない。per-entity のエンドポイント・DI 登録は"
+                    + "スキーマ依存物として生成側に出力される）"
+            );
+
+        // 共有フレームワーク参照は ASP.NET Core だけ（Windows Desktop 等が混ざらない）
+        FrameworkReferences("src/QuickER.Runtime.AspNetCore/QuickER.Runtime.AspNetCore.csproj")
+            .Should()
+            .BeEquivalentTo(
+                new[] { "Microsoft.AspNetCore.App" },
+                "サーバー固定部は Minimal API（RouteGroupBuilder / HttpContext）を使うため ASP.NET Core の"
+                    + "共有フレームワークだけを参照する"
+            );
+
+        // 依存はコアへの ProjectReference のみ（方言・EF Core プロジェクトを参照しない）
+        var projects = ProjectReferences(
+            "src/QuickER.Runtime.AspNetCore/QuickER.Runtime.AspNetCore.csproj"
+        );
+        projects.Should().ContainSingle().Which.Should().EndWith("QuickER.Runtime.csproj");
+    }
+
+    /// <summary>AspNetCore 以外のパッケージが FrameworkReference を持たないことの理由文（逆表明の共有文言）</summary>
+    private const string NoFrameworkReferenceReason =
+        "共有フレームワーク参照（FrameworkReference）を持ってよいのは QuickER.Runtime.AspNetCore だけで、"
+        + "他パッケージが持つと参照側プロジェクトの種別（Web SDK 等）を不必要に縛ってしまう";
 
     /// <summary>指定 csproj の PackageReference Include 集合を読む</summary>
     private static IReadOnlyList<string> PackageReferences(string repoRelativePath) =>
@@ -145,6 +215,10 @@ public sealed class RuntimePackageProjectDependencyGuardTests
         ReadIncludes(repoRelativePath, "ProjectReference")
             .Select(p => p.Replace('\\', '/').TrimEnd('/'))
             .ToList();
+
+    /// <summary>指定 csproj の FrameworkReference Include（共有フレームワーク名）集合を読む</summary>
+    private static IReadOnlyList<string> FrameworkReferences(string repoRelativePath) =>
+        ReadIncludes(repoRelativePath, "FrameworkReference");
 
     /// <summary>csproj を XML として解析し、指定要素の Include 属性値を集める（名前空間非依存）</summary>
     private static IReadOnlyList<string> ReadIncludes(string repoRelativePath, string elementName)

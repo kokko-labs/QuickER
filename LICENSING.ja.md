@@ -32,7 +32,7 @@ GitHub のライセンスラベルは 1 つしか表示できないため「MIT�
 | --- | --- |
 | GUI（Setup.exe / Portable zip） | MIT 部分＋NC 対象機能のアセンブリ（ライセンスファイルを配布物に同梱） |
 | CLI（NuGet パッケージ `QuickER.Cli`） | PolyForm NC＋追加許諾（ライセンスファイルをパッケージに同梱） |
-| ランタイム NuGet パッケージ（`QuickER.Runtime` / `.SqlServer` / `.Sqlite` / `.EntityFrameworkCore` / `.InMemory`） | MIT |
+| ランタイム NuGet パッケージ（`QuickER.Runtime` / `.SqlServer` / `.Sqlite` / `.EntityFrameworkCore` / `.InMemory` / `.AspNetCore`） | MIT |
 | QuickER が生成したコード・DDL・ドキュメント | 利用者のもの——QuickER のライセンスは一切適用されません |
 
 GUI と CLI の配布物にはサードパーティのコンポーネント（データベースドライバ・テンプレートエンジンなど）も同梱されています。その帰属表示とライセンス全文は [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) にまとめており、これらの配布物にも同梱されます。

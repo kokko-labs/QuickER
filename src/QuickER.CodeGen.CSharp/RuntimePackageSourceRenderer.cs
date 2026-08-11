@@ -8,7 +8,7 @@ namespace QuickER.CodeGen.CSharp;
 /// ソースの正本は <c>Templates/CSharpRuntime/*.scriban</c>（<see cref="ScribanCSharpRenderer"/> 経由）で、通常生成と同一。
 /// ここでは「空の ER 図＋全機能 ON＋<c>runtime_package_export=true</c>＋<c>infra_visibility="public"</c>」でレンダリングし、
 /// スキーマ依存物（Entity / EditModel / Mapper / I{Entity}Repository / DI 登録など）を一切含まない固定 infra だけを
-/// 5 パッケージ（<see cref="RuntimePackages"/>）のソースへ切り出す。
+/// 6 パッケージ（<see cref="RuntimePackages"/>）のソースへ切り出す。
 /// </para>
 /// <para>
 /// 分割規則:
@@ -21,6 +21,8 @@ namespace QuickER.CodeGen.CSharp;
 ///     同じく <c>using QuickER.Runtime;</c> 付き</item>
 ///   <item><b>InMemory</b>: DB 非依存のインメモリエンジン（InMemoryDataStore・InMemoryRepository 基底・保存ステージング・
 ///     式木評価）。ADO も EF Core も参照せず、同じく <c>using QuickER.Runtime;</c> 付き</item>
+///   <item><b>AspNetCore</b>: リモートサーバーの固定エンジン（RemoteServerEngine・エラー分類・詳細公開ポリシー・
+///     バイナリ転送の補助型）。ASP.NET Core の FrameworkReference のみに依存し、同じく <c>using QuickER.Runtime;</c> 付き</item>
 /// </list>
 /// </para>
 /// </remarks>
@@ -221,6 +223,49 @@ public sealed class RuntimePackageSourceRenderer
         return Wrap(_renderer.Render(model, options, scope));
     }
 
+    /// <summary>
+    /// リモートサーバー基盤パッケージ（<see cref="RuntimePackages.AspNetCore"/>）のソースをレンダリングする。
+    /// </summary>
+    /// <remarks>
+    /// サーバー実装の固定コード（<c>RemoteServerEngine</c>＝リクエスト読み取り・例外分類・応答書き込み・汎用 CRUD
+    /// マッピングと、<c>RemoteBadRequestException</c> / <c>RemoteErrorDetailPolicy</c> / バイナリ転送の補助型）を、
+    /// 名前空間 <c>QuickER.Runtime.AspNetCore</c> で 1 ファイルへ出力する。共通契約（<c>RemoteJson</c>・転送エンベロープ・
+    /// <c>SaveConflictException</c> 等）はコアを <c>using QuickER.Runtime;</c> で参照する（重複定義しない）。
+    /// 外部依存は ASP.NET Core の <c>FrameworkReference</c> のみ（方言 ADO・EF Core は参照しない）。
+    /// </remarks>
+    public string RenderAspNetCore()
+    {
+        var options = BuildAllFeaturesOptions();
+        var model = BuildEmptyModel();
+
+        // RemoteServer バケットの using（ASP.NET Core・DI・ロギング・JSON）＋コア契約 namespace（QuickER.Runtime）。
+        // DI の using はコア・方言エンジンと違って除外しない＝固定部のエンジン自身がリポジトリと ILoggerFactory を
+        // DI から解決するため必須で、ASP.NET Core の FrameworkReference が推移的に連れてくるので依存も増えない
+        // （EF Core パッケージと同じ理由）。
+        var usings = ResolveUsings(
+            options,
+            [GenerationBucket.RemoteServer],
+            dialect: "sqlserver",
+            contractOnly: false,
+            generateRepositories: false,
+            crossUsings: [RuntimePackages.Core],
+            emitSchemaDependent: false
+        );
+
+        var scope = BuildScope(
+            RuntimePackages.AspNetCore,
+            usings,
+            dialect: "sqlserver",
+            runtime: false,
+            renderContract: false,
+            repositoryImpl: false,
+            efCore: false,
+            remoteServer: true
+        );
+
+        return Wrap(_renderer.Render(model, options, scope));
+    }
+
     /// <summary>全機能 ON（VO・データアノテーション等すべて有効）の生成オプションを構築する</summary>
     /// <remarks>
     /// 固定 infra を最大構成で書き出すため、機能フラグはすべて有効にする。空の ER 図と組み合わせるため、
@@ -314,7 +359,8 @@ public sealed class RuntimePackageSourceRenderer
         bool renderContract,
         bool repositoryImpl,
         bool efCore,
-        bool inMemory = false
+        bool inMemory = false,
+        bool remoteServer = false
     ) =>
         new()
         {
@@ -334,6 +380,10 @@ public sealed class RuntimePackageSourceRenderer
             // per-entity のインメモリ実装・シーダー・DI 登録はスキーマ依存物として生成側に残る
             // （EmitSchemaDependent=false が抑止する）。
             InMemory = inMemory,
+            // サーバー実装の固定部（RemoteServerEngine ほか）は専用パッケージ（QuickER.Runtime.AspNetCore）だけが持つ。
+            // per-entity のエンドポイント（GeneratedRemoteEndpoints）はスキーマ依存物として生成側に残る
+            // （EmitSchemaDependent=false が抑止する）。
+            RemoteServer = remoteServer,
             Dialect = dialect,
             MultiDialect = false,
             BlockNamespace = false,

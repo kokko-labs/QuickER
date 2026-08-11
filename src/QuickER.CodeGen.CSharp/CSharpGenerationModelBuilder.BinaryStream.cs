@@ -337,7 +337,7 @@ internal sealed partial class CSharpGenerationModelBuilder
         var route = $"{repositoryName}/{propertyName}";
         var resolve =
             $"var repository = context.RequestServices.GetRequiredService<{remoteInterfaceName}>();";
-        var parseKey = $"ParseKeyFromQuery<{keyTypeName}>(context)";
+        var parseKey = $"RemoteServerEngine.ParseKeyFromQuery<{keyTypeName}>(context)";
 
         var builder = new StringBuilder();
 
@@ -346,7 +346,9 @@ internal sealed partial class CSharpGenerationModelBuilder
             .Append("        group.MapGet(\n            \"")
             .Append(route)
             .Append("\",\n            (HttpContext context) =>\n")
-            .Append("                ExecuteDownloadAsync(\n                    context,\n")
+            .Append(
+                "                RemoteServerEngine.ExecuteDownloadAsync(\n                    context,\n"
+            )
             .Append("                    destination =>\n                    {\n")
             .Append("                        ")
             .Append(resolve)
@@ -365,7 +367,9 @@ internal sealed partial class CSharpGenerationModelBuilder
             .Append("        group\n            .MapPut(\n                \"")
             .Append(route)
             .Append("\",\n                (HttpContext context) =>\n")
-            .Append("                    ExecuteUploadAsync(\n                        context,\n")
+            .Append(
+                "                    RemoteServerEngine.ExecuteUploadAsync(\n                        context,\n"
+            )
             .Append("                        (body, length) =>\n                        {\n")
             .Append("                            ")
             .Append(resolve)
@@ -387,7 +391,9 @@ internal sealed partial class CSharpGenerationModelBuilder
             .Append("        group.MapDelete(\n            \"")
             .Append(route)
             .Append("\",\n            (HttpContext context) =>\n")
-            .Append("                ExecuteDeleteAsync(\n                    context,\n")
+            .Append(
+                "                RemoteServerEngine.ExecuteDeleteAsync(\n                    context,\n"
+            )
             .Append("                    () =>\n                    {\n")
             .Append("                        ")
             .Append(resolve)

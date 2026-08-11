@@ -21,6 +21,8 @@ namespace QuickER.CodeGen.CSharp;
 ///     <see cref="RuntimePackages.SqlServer"/> / <see cref="RuntimePackages.Sqlite"/>（マルチターゲットなら両方）</item>
 ///   <item><see cref="CodeGenerationOptions.GenerateEfCore"/> 時: <see cref="RuntimePackages.EntityFrameworkCore"/></item>
 ///   <item><see cref="CodeGenerationOptions.GenerateInMemoryRepositories"/> 時: <see cref="RuntimePackages.InMemory"/></item>
+///   <item><see cref="CodeGenerationOptions.GenerateRemoteServices"/> 時: <see cref="RuntimePackages.AspNetCore"/>
+///     （サーバー実装ファイルの固定部。参照するのはサーバー側プロジェクトのみだが、案内は生成単位で出す）</item>
 /// </list>
 /// バージョンは呼び出し側から受け取る（版の実配線は後続タスク）。
 /// </para>
@@ -74,6 +76,14 @@ public static class RuntimePackageReferenceGuidance
         if (options.GenerateInMemoryRepositories && !packages.Contains(RuntimePackages.InMemory))
         {
             packages.Add(RuntimePackages.InMemory);
+        }
+
+        // サーバー実装ファイルの固定部（RemoteServerEngine ほか）は ASP.NET Core 前提のため専用パッケージが持つ。
+        // 参照が要るのはサーバーを載せるプロジェクトだけだが、案内は「この生成物が必要とするパッケージ」の列挙なので
+        // 他と同じく生成オプションから決める（安定順の末尾へ足す）。
+        if (options.GenerateRemoteServices && !packages.Contains(RuntimePackages.AspNetCore))
+        {
+            packages.Add(RuntimePackages.AspNetCore);
         }
 
         return packages;
