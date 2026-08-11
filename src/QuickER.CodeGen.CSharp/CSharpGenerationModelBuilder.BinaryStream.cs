@@ -263,7 +263,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             .Append("        await using var destination = File.Create(path);\n")
             .Append("        return await repository.Read")
             .Append(propertyName)
-            .Append("Async(id, destination, cancellationToken);\n    }\n\n");
+            .Append("Async(id, destination, cancellationToken).ConfigureAwait(false);\n    }\n\n");
         builder
             .Append("    /// <summary>Writes the ")
             .Append(columnName)
@@ -286,7 +286,9 @@ internal sealed partial class CSharpGenerationModelBuilder
             .Append("        await using var source = File.OpenRead(path);\n")
             .Append("        return await repository.Write")
             .Append(propertyName)
-            .Append("Async(id, source, source.Length, cancellationToken);\n    }");
+            .Append(
+                "Async(id, source, source.Length, cancellationToken).ConfigureAwait(false);\n    }"
+            );
         return builder.ToString();
     }
 

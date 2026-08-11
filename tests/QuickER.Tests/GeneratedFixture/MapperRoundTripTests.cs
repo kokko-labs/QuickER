@@ -63,14 +63,19 @@ public sealed class MapperRoundTripTests
         return entity;
     }
 
-    private static OrderEntity BuildOrder(int id) =>
+    private static OrderEntity BuildOrder(int id, DateTime? orderedAt = null) =>
         new OrderEntity
         {
             OrderId = OrderIdValue.Create(id),
             CustomerId = CustomerIdValue.Create(1),
             Amount = AmountValue.Create(id),
             Memo = MemoValue.Create($"m{id}"),
+            OrderedAt = orderedAt is null ? null : OrderedAtValue.Create(orderedAt.Value),
         };
+
+    /// <summary>秒未満（7 桁 tick）と DateTimeKind を持つ検証用の日時。既定書式の ToString() では両方が落ちる</summary>
+    private static DateTime PreciseOrderedAt() =>
+        new DateTime(2026, 8, 10, 14, 30, 15, DateTimeKind.Utc).AddTicks(1_234_567);
 
     // ===== CreateEntity() 新規 =====
 
@@ -302,6 +307,111 @@ public sealed class MapperRoundTripTests
         };
         var rebuiltNull = mapper.CreateEntity(mapper.CreateEditModel(nullBio));
         rebuiltNull.Bio.Should().BeNull();
+    }
+
+    // ===== ロードの無損失性（確定値の直接代入） =====
+
+    /// <summary>
+    /// 本丸: ロードが「バインディング文字列 → TryParse」で確定値を再構築していた頃は、ユーザーが触っていない
+    /// DateTime 列でも秒未満（7 桁 tick）と <see cref="DateTimeKind"/> がロードの瞬間に落ち、そのまま保存で書き戻っていた。
+    /// </summary>
+    [Fact(
+        DisplayName = "往復: 無操作の DateTime 列が tick 単位で一致し DateTimeKind も保たれる（ロードは無損失）"
+    )]
+    public void 往復_DateTime精度とKindが無損失()
+    {
+        var orderedAt = PreciseOrderedAt();
+        var entity = BuildOrder(1, orderedAt);
+        var mapper = new OrderMapper();
+
+        // 一切編集せずに EditModel を経由させる
+        var rebuilt = mapper.CreateEntity(mapper.CreateEditModel(entity));
+
+        rebuilt.OrderedAt.Should().NotBeNull();
+        rebuilt.OrderedAt!.Value.Ticks.Should().Be(orderedAt.Ticks);
+        rebuilt.OrderedAt.Value.Kind.Should().Be(DateTimeKind.Utc);
+    }
+
+    [Fact(
+        DisplayName = "ロード: DateTime 列の表示文字列は従来どおり ToString() の既定書式（\"O\" 化しない）"
+    )]
+    public void ロード_DateTimeの表示書式は従来どおり()
+    {
+        var orderedAt = PreciseOrderedAt();
+
+        var em = new OrderMapper().CreateEditModel(BuildOrder(1, orderedAt));
+
+        em.BindingOrderedAt.Should().Be(orderedAt.ToString());
+        em.BindingOrderedAt.Should().NotBe(orderedAt.ToString("O"));
+    }
+
+    [Fact(
+        DisplayName = "編集: ユーザーが入力した欄だけが入力文字列の精度になる（パース経路は従来どおり）"
+    )]
+    public void 編集_入力欄はパース経路を通る()
+    {
+        var em = new OrderMapper().CreateEditModel(BuildOrder(1, PreciseOrderedAt()));
+
+        em.BindingOrderedAt = "2026-01-02 03:04:05";
+
+        em.HasErrors.Should().BeFalse();
+        em.OrderedAt!.Value.Should().Be(new DateTime(2026, 1, 2, 3, 4, 5));
+        em.OrderedAt.Value.Ticks.Should().Be(new DateTime(2026, 1, 2, 3, 4, 5).Ticks);
+    }
+
+    [Fact(DisplayName = "編集: DateTime 欄の不正文字列は従来どおり変換エラーになる")]
+    public void 編集_不正入力は変換エラー()
+    {
+        var em = new OrderMapper().CreateEditModel(BuildOrder(1, PreciseOrderedAt()));
+
+        em.BindingOrderedAt = "not a date";
+
+        em.HasErrors.Should().BeTrue();
+        em.GetErrors(nameof(OrderEditModel.BindingOrderedAt)).Cast<string>().Should().NotBeEmpty();
+    }
+
+    [Fact(
+        DisplayName = "ロード: 変換エラーを抱えた EditModel を再ロードするとエラーが消えて確定値が鏡像になる"
+    )]
+    public void ロード_再ロードで変換エラーが消える()
+    {
+        var mapper = new OrderMapper();
+        var em = mapper.CreateEditModel(BuildOrder(1, PreciseOrderedAt()));
+        em.BindingOrderedAt = "not a date";
+        em.HasErrors.Should().BeTrue();
+
+        var orderedAt = PreciseOrderedAt().AddDays(3);
+        mapper.ApplyToEditModel(BuildOrder(2, orderedAt), em);
+
+        em.HasErrors.Should().BeFalse();
+        em.OrderedAt!.Value.Ticks.Should().Be(orderedAt.Ticks);
+        em.BindingOrderedAt.Should().Be(orderedAt.ToString());
+    }
+
+    [Fact(DisplayName = "ロード: NULL の DateTime 列は null のまま往復し、表示文字列は空になる")]
+    public void ロード_null日時()
+    {
+        var mapper = new OrderMapper();
+
+        var em = mapper.CreateEditModel(BuildOrder(1));
+
+        em.OrderedAt.Should().BeNull();
+        em.BindingOrderedAt.Should().BeEmpty();
+        mapper.CreateEntity(em).OrderedAt.Should().BeNull();
+    }
+
+    [Fact(
+        DisplayName = "ロード: 確定値の直接代入でも RowState は鏡像のまま（Updated へ昇格しない）"
+    )]
+    public void ロード_RowStateは昇格しない()
+    {
+        var entity = BuildOrder(1, PreciseOrderedAt());
+        entity.RowState = RowState.Unchanged;
+
+        var em = new OrderMapper().CreateEditModel(entity);
+
+        em.RowState.Should().Be(RowState.Unchanged);
+        em.IsUpdated.Should().BeFalse();
     }
 
     // ===== OrderMapper 単体往復 =====

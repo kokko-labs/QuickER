@@ -177,6 +177,14 @@ public sealed class EntitySaveMetadata
     }
 
     // ===== Row materializer (expression-tree compiled; removes reflection from the hot path) =====
+    /// <summary>Type-specialized reader accessors that avoid boxing (<c>GetInt32</c> etc.). Only the fast-path CLR types are registered.</summary>
+    private static readonly IReadOnlyDictionary<Type, MethodInfo> _typedReaders = BuildTypedReaders();
+
+    /// <summary>Resolved <see cref="MethodInfo"/> of <see cref="DbDataReader.IsDBNull(int)"/>.</summary>
+    private static readonly MethodInfo _isDbNullMethod = typeof(DbDataReader).GetMethod(
+        nameof(DbDataReader.IsDBNull),
+        new[] { typeof(int) }
+    )!;
 
     /// <summary>Resolved <see cref="MethodInfo"/> of <see cref="DbDataReader.GetValue(int)"/> (used as the fallback for columns that cannot be type-specialized).</summary>
     private static readonly MethodInfo _getValueMethod = typeof(DbDataReader).GetMethod(
@@ -199,13 +207,92 @@ public sealed class EntitySaveMetadata
     /// <remarks>The arguments are <c>(reader, ordinals)</c>. <c>ordinals</c> holds the column ordinals in SelectColumns order, resolved once before the row loop.</remarks>
     public required Func<DbDataReader, int[], EntityBase> SelectMaterializer { get; init; }
 
+    /// <summary>Builds the type-specialized reader accessor table (each value is a <see cref="DbDataReader"/> method taking an <c>int</c> and returning the corresponding CLR type).</summary>
+    private static IReadOnlyDictionary<Type, MethodInfo> BuildTypedReaders()
+    {
+        static MethodInfo Getter(string name) =>
+            typeof(DbDataReader).GetMethod(name, new[] { typeof(int) })!;
+
+        // Type-specialized accessors for the declared column types the generated SELECT returns. On SQLite each GetXxx
+        // coerces the storage type (long to int, TEXT to DateTime, etc.), equivalent to CoerceScalar; on SQL Server each
+        // returns the column's CLR type directly, equivalent to the previous pass-through. Types not listed here
+        // (byte[], enums, DateTimeOffset, TimeSpan, etc.) are converted via the fallback as before.
+        return new Dictionary<Type, MethodInfo>
+        {
+            [typeof(bool)] = Getter(nameof(DbDataReader.GetBoolean)),
+            [typeof(byte)] = Getter(nameof(DbDataReader.GetByte)),
+            [typeof(short)] = Getter(nameof(DbDataReader.GetInt16)),
+            [typeof(int)] = Getter(nameof(DbDataReader.GetInt32)),
+            [typeof(long)] = Getter(nameof(DbDataReader.GetInt64)),
+            [typeof(float)] = Getter(nameof(DbDataReader.GetFloat)),
+            [typeof(double)] = Getter(nameof(DbDataReader.GetDouble)),
+            [typeof(decimal)] = Getter(nameof(DbDataReader.GetDecimal)),
+            [typeof(string)] = Getter(nameof(DbDataReader.GetString)),
+            [typeof(DateTime)] = Getter(nameof(DbDataReader.GetDateTime)),
+            [typeof(Guid)] = Getter(nameof(DbDataReader.GetGuid)),
+        };
+    }
+
+    /// <summary>Caches the type-specialized pair resolved per value object property type (<c>null</c> when the type has no fast path).</summary>
+    private static readonly ConcurrentDictionary<
+        Type,
+        (MethodInfo Getter, MethodInfo Create)?
+    > _valueObjectReaderCache = new();
+
+    /// <summary>
+    /// Resolves the type-specialized pair for a value object property: the reader accessor for its underlying value and
+    /// the static <c>Create</c> factory that wraps it.
+    /// </summary>
+    /// <remarks>
+    /// Returns <c>null</c> when the property is not a value object, when its underlying type has no type-specialized
+    /// accessor (<c>byte[]</c> and friends), or when no matching factory exists; those columns take the fallback.
+    /// </remarks>
+    private static (MethodInfo Getter, MethodInfo Create)? ResolveValueObjectReader(
+        Type propertyType
+    ) => _valueObjectReaderCache.GetOrAdd(propertyType, ResolveValueObjectReaderCore);
+
+    /// <summary>Performs the uncached resolution behind <see cref="ResolveValueObjectReader"/>.</summary>
+    private static (MethodInfo Getter, MethodInfo Create)? ResolveValueObjectReaderCore(
+        Type propertyType
+    )
+    {
+        var iface = Array.Find(
+            propertyType.GetInterfaces(),
+            i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IValueObject<,>)
+        );
+
+        if (iface is null)
+        {
+            return null;
+        }
+
+        // The underlying value type is the second type argument of IValueObject<TSelf, TValue>
+        if (!_typedReaders.TryGetValue(iface.GetGenericArguments()[1], out var getter))
+        {
+            return null;
+        }
+
+        var create = propertyType.GetMethod(
+            "Create",
+            BindingFlags.Public | BindingFlags.Static,
+            binder: null,
+            new[] { getter.ReturnType },
+            modifiers: null
+        );
+
+        return create is null ? null : (getter, create);
+    }
+
     /// <summary>
     /// Builds the expression-tree-compiled delegate that materializes one row of SelectColumns (the fixed SELECT set)
     /// into an entity using a pre-resolved ordinal array (once per type).
     /// </summary>
     /// <remarks>
     /// Columns with a type-specialized accessor are read directly without boxing (<c>DBNull</c> becomes the default value,
-    /// equivalent to the previous <c>SetValue(null)</c>); all other columns fall back to the previous
+    /// equivalent to the previous <c>SetValue(null)</c>);
+    /// a value object column whose underlying value has such an accessor reads it the same way and calls the value object's
+    /// static <c>Create</c> factory directly;
+    /// all other columns fall back to the previous
     /// <see cref="SetColumnValue"/> (dialect-specific conversion / value object re-wrapping).
     /// The resulting final state (<c>RowState = Unchanged</c>) matches the previous row mapping.
     /// </remarks>
@@ -252,6 +339,50 @@ public sealed class EntitySaveMetadata
         PropertyInfo property
     )
     {
+        var propertyType = property.PropertyType;
+        var underlying = Nullable.GetUnderlyingType(propertyType) ?? propertyType;
+
+        // Columns with a type-specialized accessor are read directly without boxing
+        // (DBNull becomes the default value, equivalent to the previous SetValue(null))
+        if (_typedReaders.TryGetValue(underlying, out var getter))
+        {
+            Expression read = Expression.Call(readerParam, getter, ordinal);
+
+            if (getter.ReturnType != propertyType)
+            {
+                read = Expression.Convert(read, propertyType);
+            }
+
+            var value = Expression.Condition(
+                Expression.Call(readerParam, _isDbNullMethod, ordinal),
+                Expression.Default(propertyType),
+                read
+            );
+            return Expression.Assign(Expression.Property(entityExpr, property), value);
+        }
+
+        // A value object whose underlying value has a type-specialized accessor reads that value without boxing and
+        // calls the static Create factory straight from the expression tree (no reflection Invoke, no Convert.ChangeType,
+        // and DBNull becomes null, equivalent to the previous SetValue(null))
+        if (ResolveValueObjectReader(propertyType) is (var voGetter, var voCreate))
+        {
+            Expression created = Expression.Call(
+                voCreate,
+                Expression.Call(readerParam, voGetter, ordinal)
+            );
+
+            if (created.Type != propertyType)
+            {
+                created = Expression.Convert(created, propertyType);
+            }
+
+            var wrapped = Expression.Condition(
+                Expression.Call(readerParam, _isDbNullMethod, ordinal),
+                Expression.Default(propertyType),
+                created
+            );
+            return Expression.Assign(Expression.Property(entityExpr, property), wrapped);
+        }
 
         // Fallback: call the previous SetColumnValue (DBNull to null / dialect-specific conversion / value object re-wrapping) via the ordinal
         return Expression.Call(
@@ -958,16 +1089,16 @@ public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TConte
         var metadata = EntitySaveMetadata.For(typeof(TEntity));
         var items = new List<TEntity>();
 
-        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
         await using var command = await CreateCommandAsync(
             context,
             sql,
             parameters,
             cancellationToken
-        );
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        ).ConfigureAwait(false);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
 
-        while (await reader.ReadAsync(cancellationToken))
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
             items.Add(metadata.MapEntityFromRawSql<TEntity>(reader));
         }
@@ -984,17 +1115,17 @@ public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TConte
     {
         ArgumentNullException.ThrowIfNull(sql);
 
-        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
         await using var command = await CreateCommandAsync(
             context,
             sql,
             parameters,
             cancellationToken
-        );
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        ).ConfigureAwait(false);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
 
         // Projection mapping (single-value mode, DTO mode) uses the single shared helper path.
-        return await RawSqlMapper.ReadProjectionRowsAsync<TResult>(reader, cancellationToken);
+        return await RawSqlMapper.ReadProjectionRowsAsync<TResult>(reader, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Executes raw SQL (UPDATE/DELETE/any DML) and returns the number of affected rows.</summary>
@@ -1010,15 +1141,15 @@ public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TConte
     {
         ArgumentNullException.ThrowIfNull(sql);
 
-        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
         await using var command = await CreateCommandAsync(
             context,
             sql,
             parameters,
             cancellationToken
-        );
+        ).ConfigureAwait(false);
 
-        return await command.ExecuteNonQueryAsync(cancellationToken);
+        return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Executes raw SQL and returns a single scalar value (no match / DBNull yields <c>default</c>).</summary>
@@ -1030,15 +1161,15 @@ public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TConte
     {
         ArgumentNullException.ThrowIfNull(sql);
 
-        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
         await using var command = await CreateCommandAsync(
             context,
             sql,
             parameters,
             cancellationToken
-        );
+        ).ConfigureAwait(false);
 
-        var scalar = await command.ExecuteScalarAsync(cancellationToken);
+        var scalar = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
         return RawSqlMapper.ConvertSingleValue<TResult>(scalar is DBNull ? null : scalar);
     }
 
@@ -1051,7 +1182,7 @@ public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TConte
     )
     {
         // The connection is owned by the DbContext and is closed when the DbContext is disposed.
-        await context.Database.OpenConnectionAsync(cancellationToken);
+        await context.Database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
 
         var command = context.Database.GetDbConnection().CreateCommand();
         command.CommandText = sql;
@@ -1088,13 +1219,13 @@ public sealed class EfCoreSqlQueryExecutor<TEntity, TContext>(
         CancellationToken cancellationToken
     )
     {
-        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
 
         var query = ApplyOrderings(
             ApplyIncludes(ApplyPredicates(context.Set<TEntity>().AsNoTracking(), plan), plan),
             plan
         );
-        var items = await ApplyPaging(query, plan).ToListAsync(cancellationToken);
+        var items = await ApplyPaging(query, plan).ToListAsync(cancellationToken).ConfigureAwait(false);
 
         foreach (var item in items)
         {
@@ -1126,11 +1257,11 @@ public sealed class EfCoreSqlQueryExecutor<TEntity, TContext>(
         if (!prunable)
         {
             // Fallback: fetch all columns (including Includes), then project in memory.
-            var entities = await ToListAsync(plan, cancellationToken);
+            var entities = await ToListAsync(plan, cancellationToken).ConfigureAwait(false);
             return entities.Select(selector.Compile()).ToList();
         }
 
-        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
 
         // Includes are assumed absent, so none are applied. Apply orderings and paging, then apply Select directly.
         var query = ApplyPaging(
@@ -1138,7 +1269,7 @@ public sealed class EfCoreSqlQueryExecutor<TEntity, TContext>(
             plan
         );
 
-        return await query.Select(selector).ToListAsync(cancellationToken);
+        return await query.Select(selector).ToListAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Retrieves the first entity matching the conditions (together with the specified Includes), or null when there is no match.</summary>
@@ -1147,7 +1278,7 @@ public sealed class EfCoreSqlQueryExecutor<TEntity, TContext>(
         CancellationToken cancellationToken
     )
     {
-        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
 
         var query = ApplyOrderings(
             ApplyIncludes(ApplyPredicates(context.Set<TEntity>().AsNoTracking(), plan), plan),
@@ -1160,7 +1291,7 @@ public sealed class EfCoreSqlQueryExecutor<TEntity, TContext>(
             query = query.Skip(skip);
         }
 
-        var item = await query.FirstOrDefaultAsync(cancellationToken);
+        var item = await query.FirstOrDefaultAsync(cancellationToken).ConfigureAwait(false);
 
         if (item is not null)
         {
@@ -1176,10 +1307,10 @@ public sealed class EfCoreSqlQueryExecutor<TEntity, TContext>(
         CancellationToken cancellationToken
     )
     {
-        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
 
         return await ApplyPredicates(context.Set<TEntity>().AsNoTracking(), plan)
-            .CountAsync(cancellationToken);
+            .CountAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Retrieves whether any matching record exists (as in the existing version, orderings, paging, and Includes are not involved).</summary>
@@ -1188,10 +1319,10 @@ public sealed class EfCoreSqlQueryExecutor<TEntity, TContext>(
         CancellationToken cancellationToken
     )
     {
-        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
 
         return await ApplyPredicates(context.Set<TEntity>().AsNoTracking(), plan)
-            .AnyAsync(cancellationToken);
+            .AnyAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Bulk-deletes the rows matching the conditions. When cascadeDelete=true, descendants are also deleted following the FK chain.</summary>
@@ -1201,25 +1332,25 @@ public sealed class EfCoreSqlQueryExecutor<TEntity, TContext>(
         CancellationToken cancellationToken
     )
     {
-        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
         var roots = ApplyPredicates(context.Set<TEntity>(), plan);
 
         if (!cascadeDelete)
         {
-            return await roots.ExecuteDeleteAsync(cancellationToken);
+            return await roots.ExecuteDeleteAsync(cancellationToken).ConfigureAwait(false);
         }
 
         // Cascade: run ExecuteDelete in descendants → root order within a single transaction (same DELETE statement order as the existing version).
         await using var transaction = await context.Database.BeginTransactionAsync(
             cancellationToken
-        );
+        ).ConfigureAwait(false);
         var rows = await DeleteSubtreeAsync(
             context,
             roots,
             new HashSet<Type> { typeof(TEntity) },
             cancellationToken
-        );
-        await transaction.CommitAsync(cancellationToken);
+        ).ConfigureAwait(false);
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
         return rows;
     }
 
@@ -1254,12 +1385,12 @@ public sealed class EfCoreSqlQueryExecutor<TEntity, TContext>(
                 _deleteSubtreeMethod
                     .MakeGenericMethod(navigation.ChildType)
                     .Invoke(null, new object[] { context, childQuery, visited, cancellationToken })!;
-            rows += await subtreeTask;
+            rows += await subtreeTask.ConfigureAwait(false);
 
             visited.Remove(navigation.ChildType);
         }
 
-        rows += await query.ExecuteDeleteAsync(cancellationToken);
+        rows += await query.ExecuteDeleteAsync(cancellationToken).ConfigureAwait(false);
         return rows;
     }
 
@@ -1538,12 +1669,12 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
     /// <remarks>As in the existing version, only the single table is read (navigations are loaded via Include on <see cref="Query"/>).</remarks>
     public async Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default)
     {
-        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
 
         var entity = await context
             .Set<TEntity>()
             .AsNoTracking()
-            .FirstOrDefaultAsync(BuildKeyPredicate(id), cancellationToken);
+            .FirstOrDefaultAsync(BuildKeyPredicate(id), cancellationToken).ConfigureAwait(false);
         // Rows read from the database are treated as unchanged (the same post-state as the existing version's MapEntity).
         entity?.MarkUnchanged();
         return entity;
@@ -1554,9 +1685,9 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
         CancellationToken cancellationToken = default
     )
     {
-        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
 
-        var items = await context.Set<TEntity>().AsNoTracking().ToListAsync(cancellationToken);
+        var items = await context.Set<TEntity>().AsNoTracking().ToListAsync(cancellationToken).ConfigureAwait(false);
 
         foreach (var item in items)
         {
@@ -1571,11 +1702,11 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
     {
         ArgumentNullException.ThrowIfNull(entity);
 
-        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
 
         // Add marks navigation targets as Added too, so assign Entry.State to add only the single target (the same scope as the existing version's single INSERT).
         context.Entry(entity).State = EntityState.Added;
-        await context.SaveChangesAsync(cancellationToken);
+        await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Bulk-inserts a collection of entities.</summary>
@@ -1597,7 +1728,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
             return 0;
         }
 
-        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
 
         foreach (var entity in entities)
         {
@@ -1605,7 +1736,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
             context.Entry(entity).State = EntityState.Added;
         }
 
-        return await context.SaveChangesAsync(cancellationToken);
+        return await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Updates an entity (true when a target row was updated).</summary>
@@ -1626,7 +1757,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
         ArgumentNullException.ThrowIfNull(entity);
         mode = ConcurrencyModes.Validated(mode);
 
-        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
         var entry = context.Entry(entity);
         entry.State = EntityState.Modified;
 
@@ -1634,14 +1765,14 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
         {
             try
             {
-                await context.SaveChangesAsync(cancellationToken);
+                await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
                 return true;
             }
             catch (DbUpdateConcurrencyException)
             {
                 // Matching no row is ambiguous: either the row is gone (the pre-existing "0 affected rows → false" contract)
                 // or its concurrency token moved on after this entity was read. Reading the stored values tells the two apart
-                var stored = await entry.GetDatabaseValuesAsync(cancellationToken);
+                var stored = await entry.GetDatabaseValuesAsync(cancellationToken).ConfigureAwait(false);
 
                 if (stored is null)
                 {
@@ -1670,12 +1801,12 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
     /// <summary>Deletes an entity by primary key (true when a target row was deleted).</summary>
     public async Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default)
     {
-        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
 
         var affected = await context
             .Set<TEntity>()
             .Where(BuildKeyPredicate(id))
-            .ExecuteDeleteAsync(cancellationToken);
+            .ExecuteDeleteAsync(cancellationToken).ConfigureAwait(false);
         return affected > 0;
     }
 
@@ -1709,7 +1840,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
             return 0;
         }
 
-        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
 
         var tracked = new List<TrackedOperation>();
         TrackGraph(context, entity, cascadeSave, cascadeDelete, tracked);
@@ -1722,7 +1853,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
             insertWhenUpdateMissing,
             mode,
             cancellationToken
-        );
+        ).ConfigureAwait(false);
     }
 
     /// <summary>Saves multiple aggregate roots together within a single transaction (atomic: all succeed or all roll back).</summary>
@@ -1755,7 +1886,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
             return 0;
         }
 
-        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
 
         var tracked = new List<TrackedOperation>();
 
@@ -1772,7 +1903,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
             insertWhenUpdateMissing,
             mode,
             cancellationToken
-        );
+        ).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -1804,7 +1935,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
                 insertWhenUpdateMissing,
                 mode,
                 cancellationToken
-            );
+            ).ConfigureAwait(false);
 
             foreach (var root in roots)
             {
@@ -1822,7 +1953,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
 
         foreach (var op in tracked)
         {
-            if (await hooks.InvokeBeforeAsync(op.Entity, op.Operation, cancellationToken))
+            if (await hooks.InvokeBeforeAsync(op.Entity, op.Operation, cancellationToken).ConfigureAwait(false))
             {
                 survivors.Add(op);
             }
@@ -1834,7 +1965,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
         }
 
         // To fire After "post-operation, pre-commit", SaveChanges is performed within an explicit transaction.
-        await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
+        await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
 
         // SaveChanges writes the row version the database assigned straight onto the entity, but this transaction has not
         // committed yet. The versions the entities were read with are kept so that they can be put back for the duration of
@@ -1855,7 +1986,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
             insertWhenUpdateMissing,
             mode,
             cancellationToken
-        );
+        ).ConfigureAwait(false);
 
         // Set the assigned versions aside and restore the ones the entities were read with: After runs before the commit, so
         // it must see the old version, and a rollback (an exception thrown by After) must not leave behind a version the
@@ -1879,10 +2010,10 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
         // After pass (pre-commit): fires in recorded order with the operation actually performed (Insert when switched).
         foreach (var op in survivors)
         {
-            await hooks.InvokeAfterAsync(op.Entity, op.Operation, cancellationToken);
+            await hooks.InvokeAfterAsync(op.Entity, op.Operation, cancellationToken).ConfigureAwait(false);
         }
 
-        await transaction.CommitAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
 
         // The commit made the assigned row versions real, so settle them on the entities.
         foreach (var (entity, property, version) in assignedVersions)
@@ -2046,7 +2177,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
         {
             try
             {
-                return await context.SaveChangesAsync(cancellationToken);
+                return await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
             }
             catch (DbUpdateConcurrencyException ex)
             {
@@ -2060,7 +2191,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
 
                 foreach (var entry in ex.Entries)
                 {
-                    var stored = await entry.GetDatabaseValuesAsync(cancellationToken);
+                    var stored = await entry.GetDatabaseValuesAsync(cancellationToken).ConfigureAwait(false);
 
                     if (stored is not null)
                     {
@@ -2137,7 +2268,7 @@ public sealed class EfCoreSaveHookContext(DbContext context) : ISaveHookContext
         // Participate in the ongoing save transaction (no separate connection or transaction is opened).
         command.Transaction = _context.Database.CurrentTransaction?.GetDbTransaction();
         RawSqlMapper.BindParameters(command, parameters);
-        return await command.ExecuteNonQueryAsync(cancellationToken);
+        return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Writing excluded binary columns is not supported in EF Core mode (the same policy as the stream accessors: use raw SQL or the QuickER Repository).</summary>

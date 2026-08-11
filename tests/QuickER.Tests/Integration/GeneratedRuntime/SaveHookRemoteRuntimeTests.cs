@@ -32,8 +32,9 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// <see cref="RemoteRepositoryException"/>・行も blob も残らない（サーバー側トランザクションのロールバック実証）。
 /// </para>
 /// <para>
-/// <b>既知の制限（テスト 5 で固定）</b>: Before false でサーバー側でスキップされた行でも、クライアント側の
-/// <c>AcceptChanges</c> はスキップを知り得ないため RowState が <c>Unchanged</c> に確定する。この現挙動を回帰防止として固定する。
+/// <b>スキップの伝搬（テスト 5〜8）</b>: Before false でサーバー側がスキップした行は保存応答の <c>Skipped</c> に載って戻り、
+/// クライアントの <c>AcceptChanges</c> がその行を <c>MarkUnchanged</c> しない＝直結（ADO / EF Core / インメモリ）と同じく
+/// RowState が据え置かれ、次回の保存で再試行できる（旧「クライアントは Unchanged に確定する」既知の制限の解消）。
 /// </para>
 /// </remarks>
 [Trait("Category", "Integration")]
@@ -233,42 +234,129 @@ public sealed class SaveHookRemoteRuntimeTests : IAsyncLifetime
             .BeFalse("行がないため blob も存在しない（404→false）");
     }
 
-    // ── 5. 既知の制限: Before false でスキップされた行のクライアント側 RowState は Unchanged になる ──
+    // ── 5. スキップ行のクライアント側 RowState は据え置かれ、非スキップ行だけが確定する ──
 
     /// <summary>
-    /// 5. <b>既知の制限の固定</b>: Before false でサーバー側でスキップされた行でも、クライアント側の <c>AcceptChanges</c> は
-    /// スキップを知り得ないため RowState が <c>Unchanged</c> に確定する。DB に行が無いこととあわせて現挙動を回帰防止で固定する。
+    /// 5. サーバー側でスキップされた行は保存応答の <c>Skipped</c> に載って戻り、クライアントの <c>AcceptChanges</c> が
+    /// その行を確定しない＝ RowState が据え置かれる。同じ保存単位の非スキップ行は従来どおり <c>Unchanged</c> へ確定する。
     /// </summary>
     /// <remarks>
-    /// この非対称（サーバーはスキップ・クライアントは Unchanged 確定）は設計上の既知の制限であり、将来 Save 応答へ
-    /// スキップキー集合を載せるプロトコル拡張で解消可能（tasks/todo.md のバックログ参照）。直結（ADO/EF Core/InMemory）では
-    /// スキップ行の RowState は据え置かれる（<see cref="SaveHookRuntimeTestsBase.Before_False_SkipsSingleEntity_OthersSaved"/>）。
+    /// 直結（ADO / EF Core / インメモリ）と同じ挙動
+    /// （<see cref="SaveHookRuntimeTestsBase.Before_False_SkipsSingleEntity_OthersSaved"/>）へ揃える回帰ガード。
     /// </remarks>
     [Fact(
-        DisplayName = "[SaveHook/Remote] 5: 既知の制限＝スキップ行のクライアント RowState は Unchanged になる"
+        DisplayName = "[SaveHook/Remote] 5: スキップ行の RowState は据え置かれ非スキップ行だけ確定する"
     )]
-    public async Task Before_False_ClientRowStateBecomesUnchanged_KnownLimitation()
+    public async Task Before_False_SkippedRowKeepsRowState_OthersAreAccepted()
+    {
+        // 5 番だけスキップし、6 番は通す
+        var hook = new RemoteRecordingHook([])
+        {
+            BeforePredicate = (entity, _) => entity.DocumentId != 5,
+        };
+        var documents = await StartServerAsync(hook);
+
+        var skipped = NewDocument(5, "epsilon", null, [5]);
+        var saved = NewDocument(6, "zeta", null, [6]);
+        skipped.MarkAdded();
+        saved.MarkAdded();
+
+        await documents.SaveAsync([skipped, saved], cancellationToken: Ct);
+
+        // スキップ行は保存されていないので Added のまま（次回の保存で再試行できる）
+        skipped
+            .RowState.Should()
+            .Be(RowState.Added, "サーバーのスキップが応答で伝わり RowState は据え置かれる");
+
+        // 同じ保存単位の非スキップ行は従来どおり確定する
+        saved.RowState.Should().Be(RowState.Unchanged, "スキップされていない行は確定する");
+
+        (await documents.GetByIdAsync(5, Ct)).Should().BeNull("スキップ行は保存されない");
+        (await documents.GetByIdAsync(6, Ct)).Should().NotBeNull("非スキップ行は保存される");
+    }
+
+    // ── 6. 子（カスケード先）のスキップも同じ走査で伝わる ──
+
+    /// <summary>
+    /// 6. カスケード先の子だけがスキップされた場合も、親は確定・子は据え置きになる（応答の走査が
+    /// [NavigationReference(Cascade)] 経路をたどり、クライアントの <c>AcceptChanges</c> と一致することの検証）。
+    /// </summary>
+    [Fact(DisplayName = "[SaveHook/Remote] 6: 子のスキップも伝わる（親は確定・子は据え置き）")]
+    public async Task Before_False_OnChild_PropagatesThroughCascade()
+    {
+        var noteHook = new RemoteNoteHook { BeforePredicate = (_, _) => false };
+        var documents = await StartServerAsync(noteHook);
+
+        var doc = NewDocument(7, "eta", null, [7]);
+        var note = new DocumentNoteEntity
+        {
+            NoteId = 70,
+            DocumentId = 7,
+            Note = "child",
+        };
+        doc.DocumentNotes.Add(note);
+        doc.MarkAdded();
+        note.MarkAdded();
+
+        await documents.SaveAsync(doc, cancellationToken: Ct);
+
+        doc.RowState.Should().Be(RowState.Unchanged, "親はスキップされていないので確定する");
+        note.RowState.Should()
+            .Be(RowState.Added, "子のスキップがカスケード走査を通って伝わり据え置かれる");
+
+        (await documents.GetByIdAsync(7, Ct)).Should().NotBeNull("親は保存される");
+    }
+
+    // ── 7. スキップ解除後に同じインスタンスをそのまま再保存できる ──
+
+    /// <summary>
+    /// 7. RowState が据え置かれる結果として、スキップの原因が解消したあとに<b>同じインスタンス</b>をそのまま再保存できる
+    /// （旧挙動では Unchanged に確定していたため、再保存しても何も起きなかった）。
+    /// </summary>
+    [Fact(DisplayName = "[SaveHook/Remote] 7: スキップ解除後に同じインスタンスを再保存できる")]
+    public async Task SkippedRow_CanBeSavedAgainAfterSkipCleared()
     {
         var hook = new RemoteRecordingHook([]) { BeforePredicate = (_, _) => false };
         var documents = await StartServerAsync(hook);
 
-        var doc = NewDocument(5, "epsilon", null, [5]);
+        var doc = NewDocument(8, "theta", null, [8]);
         doc.MarkAdded();
-        doc.IsAdded.Should().BeTrue();
+
+        await documents.SaveAsync(doc, cancellationToken: Ct);
+        (await documents.GetByIdAsync(8, Ct)).Should().BeNull("1 回目はスキップされる");
+
+        // スキップの原因が解消したものとしてフックを通すモードへ切り替え、同じインスタンスを再保存する
+        hook.BeforePredicate = null;
 
         await documents.SaveAsync(doc, cancellationToken: Ct);
 
-        // 既知の制限: サーバーはスキップしたが、クライアントの AcceptChanges はそれを知り得ず Unchanged に確定する
-        doc.RowState.Should()
-            .Be(
-                RowState.Unchanged,
-                "既知の制限＝クライアント側 AcceptChanges はサーバーのスキップを反映しない"
-            );
+        doc.RowState.Should().Be(RowState.Unchanged, "2 回目は保存され確定する");
+        (await documents.GetByIdAsync(8, Ct)).Should().NotBeNull("再保存で行が作られる");
+    }
 
-        // 一方、サーバー側ではスキップされ DB に行は存在しない（真実は DB 側にある）
-        (await documents.GetByIdAsync(5, Ct))
+    // ── 8. 旧サーバー互換: Skipped を持たない応答ボディは「スキップなし」として読める ──
+
+    /// <summary>
+    /// 8. <c>Skipped</c> を載せる前のサーバーが返す応答ボディ（当該フィールドなし）でも、クライアントは
+    /// 「スキップなし」として解釈する（<c>RemoteSaveResult.Skipped</c> は既定 null・<c>SkippedLookup(null)</c> は null）。
+    /// </summary>
+    [Fact(
+        DisplayName = "[SaveHook/Remote] 8: Skipped 欠落の旧応答ボディはスキップなしとして読める"
+    )]
+    public void LegacySaveResponseWithoutSkipped_IsReadAsNoSkips()
+    {
+        // Skipped フィールドを持たない旧サーバーの応答ボディ
+        var legacy = System.Text.Json.JsonSerializer.Deserialize<RemoteSaveResult>(
+            """{"Affected":1,"RowVersions":[]}""",
+            RemoteJson.Options
+        );
+
+        legacy!.Affected.Should().Be(1);
+        legacy.Skipped.Should().BeNull("既定値付きのため欠落したフィールドは null になる");
+        RemoteEntityGraph
+            .SkippedLookup(legacy.Skipped)
             .Should()
-            .BeNull("サーバー側ではスキップされ保存されていない");
+            .BeNull("スキップなしとして扱われ、AcceptChanges は従来どおり全件を確定する");
     }
 
     /// <summary>使い終えたクライアント DI・サーバー・一時 DB を破棄する</summary>
@@ -290,7 +378,8 @@ public sealed class SaveHookRemoteRuntimeTests : IAsyncLifetime
     /// </summary>
     private sealed class RemoteRecordingHook(List<string> log) : ISaveHook<DocumentEntity>
     {
-        public Func<DocumentEntity, SaveOperation, bool>? BeforePredicate { get; init; }
+        /// <summary>Before の返り値を決める述語（テストの途中で差し替えられるよう set 可能にしてある）</summary>
+        public Func<DocumentEntity, SaveOperation, bool>? BeforePredicate { get; set; }
 
         public Func<
             DocumentEntity,
@@ -323,5 +412,17 @@ public sealed class SaveHookRemoteRuntimeTests : IAsyncLifetime
                 await AfterAction(entity, operation, context);
             }
         }
+    }
+
+    /// <summary>子（メモ）側のスキップを差し込むためのテスト用フック</summary>
+    private sealed class RemoteNoteHook : ISaveHook<DocumentNoteEntity>
+    {
+        public Func<DocumentNoteEntity, SaveOperation, bool>? BeforePredicate { get; set; }
+
+        public Task<bool> BeforeSaveAsync(
+            DocumentNoteEntity entity,
+            SaveOperation operation,
+            CancellationToken cancellationToken = default
+        ) => Task.FromResult(BeforePredicate?.Invoke(entity, operation) ?? true);
     }
 }

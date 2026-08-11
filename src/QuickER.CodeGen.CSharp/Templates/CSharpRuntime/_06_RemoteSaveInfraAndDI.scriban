@@ -132,19 +132,34 @@ public sealed record RemoteSaveManyRequest<TEntity>(
 /// <param name="RowVersion">The row version the database assigned during the save.</param>
 public sealed record RemoteRowVersionEntry(string EntityType, string Key, byte[] RowVersion);
 
+/// <summary>One entity referenced across the transport, identified the same way as <see cref="RemoteRowVersionEntry"/> (CLR type name plus the serialized primary key).</summary>
+/// <param name="EntityType">The CLR type name of the entity.</param>
+/// <param name="Key">The entity's primary key, serialized with the transport settings.</param>
+public sealed record RemoteEntityRef(string EntityType, string Key);
+
 /// <summary>Response body of a single insert (the row version the database assigned, or <c>null</c> when the table carries no rowversion column).</summary>
 public sealed record RemoteInsertResult(byte[]? RowVersion);
 
 /// <summary>Response body of a single update (the result, plus the row version the database assigned when the table carries one).</summary>
 public sealed record RemoteUpdateResult(bool Updated, byte[]? RowVersion);
 
-/// <summary>Response body of a graph save (the affected row count, plus the row versions assigned across the saved graph).</summary>
-/// <remarks>The version list is empty for tables with no rowversion column, so backends that do not carry versions simply return nothing to write back.</remarks>
-public sealed record RemoteSaveResult(int Affected, List<RemoteRowVersionEntry> RowVersions);
+/// <summary>Response body of a graph save (the affected row count, the row versions assigned across the saved graph, and the rows a save hook skipped).</summary>
+/// <remarks>
+/// The version list is empty for tables with no rowversion column, so backends that do not carry versions simply return
+/// nothing to write back. <paramref name="Skipped"/> names the rows whose save was declined by a hook's Before, so that the
+/// client can leave their RowState untouched exactly as a direct connection does; it defaults to <c>null</c> so that a
+/// response produced before it was carried - one from a server built earlier - is read as "nothing was skipped".
+/// </remarks>
+public sealed record RemoteSaveResult(
+    int Affected,
+    List<RemoteRowVersionEntry> RowVersions,
+    List<RemoteEntityRef>? Skipped = null
+);
 
 /// <summary>
-/// Shared reflection over an entity graph for remote transport: the cascade navigations to walk, and the row version
-/// table (<see cref="RemoteRowVersionEntry"/>) the server collects after a save and the client writes back.
+/// Shared reflection over an entity graph for remote transport: the cascade navigations to walk, and the tables the server
+/// collects after a save for the client to act on - the row versions (<see cref="RemoteRowVersionEntry"/>) to write back and
+/// the rows (<see cref="RemoteEntityRef"/>) a save hook skipped.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -263,6 +278,75 @@ public static class RemoteEntityGraph
         }
     }
 
+    /// <summary>Collects the rows a completed save left unsaved because a hook's Before declined them (server side; deleted entities are skipped because the client leaves them untouched either way).</summary>
+    /// <remarks>
+    /// A completed save has finalized every row it operated on to Unchanged and left the skipped ones as they were, so a row
+    /// that still carries changes is exactly a row the hook skipped. The traversal matches <see cref="CollectRowVersions"/>.
+    /// </remarks>
+    public static void CollectSkipped(EntityBase entity, bool cascade, List<RemoteEntityRef> into)
+    {
+        if (entity.IsRemoved)
+        {
+            return;
+        }
+
+        if (entity.HasChanges)
+        {
+            into.Add(new RemoteEntityRef(entity.GetType().Name, KeyText(entity)));
+        }
+
+        if (!cascade)
+        {
+            return;
+        }
+
+        foreach (var property in CascadeNavigations(entity.GetType()))
+        {
+            var value = property.GetValue(entity);
+
+            if (value is EntityBase child)
+            {
+                CollectSkipped(child, true, into);
+            }
+            else if (value is IEnumerable<EntityBase> children)
+            {
+                foreach (var item in children)
+                {
+                    if (item is not null)
+                    {
+                        CollectSkipped(item, true, into);
+                    }
+                }
+            }
+        }
+    }
+
+    /// <summary>Indexes the skipped rows a save response carried, or returns <c>null</c> when nothing was skipped.</summary>
+    public static HashSet<(string EntityType, string Key)>? SkippedLookup(
+        List<RemoteEntityRef>? entries
+    )
+    {
+        if (entries is null || entries.Count == 0)
+        {
+            return null;
+        }
+
+        var lookup = new HashSet<(string EntityType, string Key)>();
+
+        foreach (var entry in entries)
+        {
+            lookup.Add((entry.EntityType, entry.Key));
+        }
+
+        return lookup;
+    }
+
+    /// <summary>Determines whether the response named this entity as skipped by a save hook (client side).</summary>
+    public static bool IsSkipped(
+        EntityBase entity,
+        HashSet<(string EntityType, string Key)>? lookup
+    ) => lookup is not null && lookup.Contains((entity.GetType().Name, KeyText(entity)));
+
     /// <summary>Indexes the row versions a save response carried, or returns <c>null</c> when there is nothing to write back.</summary>
     public static Dictionary<(string EntityType, string Key), byte[]>? RowVersionLookup(
         List<RemoteRowVersionEntry>? entries
@@ -328,7 +412,9 @@ public static class RemoteEntityGraph
 /// <para>
 /// After a successful graph save (Save), the local entities' RowState is finalized with the same semantics as a direct
 /// connection (<c>EntityGraphSaver.AcceptChanges</c>), so swapping direct and remote implementations does not change
-/// the post-save state transitions.
+/// the post-save state transitions. A row whose save a server-side hook declined (<c>ISaveHook</c>'s Before returning
+/// <c>false</c>) travels back in the response and keeps its state, so it is still pending on the next save just as it
+/// would be on a direct connection.
 /// </para>
 /// <para>
 /// The concurrency policy (<see cref="ConcurrencyMode"/>) travels with the request, and Update / Save responses carry the
@@ -364,14 +450,14 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
             payload,
             RemoteJson.Options,
             cancellationToken
-        );
+        ).ConfigureAwait(false);
 
-        await EnsureSuccessAsync(response, cancellationToken);
+        await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
 
         var result = await response.Content.ReadFromJsonAsync<TResult>(
             RemoteJson.Options,
             cancellationToken
-        );
+        ).ConfigureAwait(false);
         return result!;
     }
 
@@ -393,7 +479,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
             error = await response.Content.ReadFromJsonAsync<RemoteError>(
                 RemoteJson.Options,
                 cancellationToken
-            );
+            ).ConfigureAwait(false);
         }
         catch (Exception parseError) when (parseError is JsonException or NotSupportedException)
         {
@@ -430,7 +516,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
             "Insert",
             new RemoteEntityRequest<TEntity>(entity),
             cancellationToken
-        );
+        ).ConfigureAwait(false);
 
         if (result.RowVersion is byte[] rowVersion)
         {
@@ -459,7 +545,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
             "Update",
             new RemoteUpdateRequest<TEntity>(entity, mode),
             cancellationToken
-        );
+        ).ConfigureAwait(false);
 
         if (result.RowVersion is byte[] rowVersion)
         {
@@ -494,11 +580,16 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
             "Save",
             new RemoteSaveRequest<TEntity>(entity, cascadeSave, cascadeDelete, insertWhenUpdateMissing, mode),
             cancellationToken
-        );
+        ).ConfigureAwait(false);
 
         // As with a direct connection (EntityGraphSaver), finalize the local RowState after a successful save,
-        // writing back the row versions the response carried along the same traversal
-        AcceptChanges(entity, cascadeSave, RemoteEntityGraph.RowVersionLookup(result.RowVersions));
+        // writing back the row versions the response carried and leaving the rows it reported as skipped alone
+        AcceptChanges(
+            entity,
+            cascadeSave,
+            RemoteEntityGraph.RowVersionLookup(result.RowVersions),
+            RemoteEntityGraph.SkippedLookup(result.Skipped)
+        );
         return result.Affected;
     }
 
@@ -528,13 +619,14 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
             "SaveMany",
             new RemoteSaveManyRequest<TEntity>(list, cascadeSave, cascadeDelete, insertWhenUpdateMissing, mode),
             cancellationToken
-        );
+        ).ConfigureAwait(false);
 
         var rowVersions = RemoteEntityGraph.RowVersionLookup(result.RowVersions);
+        var skipped = RemoteEntityGraph.SkippedLookup(result.Skipped);
 
         foreach (var entity in list)
         {
-            AcceptChanges(entity, cascadeSave, rowVersions);
+            AcceptChanges(entity, cascadeSave, rowVersions, skipped);
         }
 
         return result.Affected;
@@ -575,11 +667,18 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     }
 
     /// <summary>Finalizes saved entities to Unchanged after commit (same semantics as the direct-connection EntityGraphSaver.AcceptChanges), writing back the row versions the response carried.</summary>
-    /// <remarks>Deleted (Removed) entities keep their state. When cascading, the child-direction [NavigationReference] navigations are finalized recursively. The row version write-back rides along this traversal because it visits exactly the entities the server collected versions for.</remarks>
+    /// <remarks>
+    /// Deleted (Removed) entities keep their state. Rows the response reported as skipped - a save hook's Before declined
+    /// them on the server, so no INSERT or UPDATE was performed - keep their state as well, exactly as they do on a direct
+    /// connection. When cascading, the child-direction [NavigationReference] navigations are finalized recursively. Both the
+    /// row version write-back and the skip check ride along this traversal because it visits exactly the entities the server
+    /// reported on.
+    /// </remarks>
     private static void AcceptChanges(
         EntityBase entity,
         bool cascade,
-        Dictionary<(string EntityType, string Key), byte[]>? rowVersions
+        Dictionary<(string EntityType, string Key), byte[]>? rowVersions,
+        HashSet<(string EntityType, string Key)>? skipped
     )
     {
         if (entity.IsRemoved)
@@ -587,7 +686,12 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
             return;
         }
 
-        entity.MarkUnchanged();
+        // A skipped row had no INSERT / UPDATE performed on the server, so its RowState is left untouched
+        if (!RemoteEntityGraph.IsSkipped(entity, skipped))
+        {
+            entity.MarkUnchanged();
+        }
+
         RemoteEntityGraph.ApplyRowVersion(entity, rowVersions);
 
         if (!cascade)
@@ -601,7 +705,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
 
             if (value is EntityBase child)
             {
-                AcceptChanges(child, true, rowVersions);
+                AcceptChanges(child, true, rowVersions, skipped);
             }
             else if (value is IEnumerable<EntityBase> children)
             {
@@ -609,7 +713,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
                 {
                     if (item is not null)
                     {
-                        AcceptChanges(item, true, rowVersions);
+                        AcceptChanges(item, true, rowVersions, skipped);
                     }
                 }
             }
@@ -643,17 +747,17 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
             requestUri,
             HttpCompletionOption.ResponseHeadersRead,
             cancellationToken
-        );
+        ).ConfigureAwait(false);
 
         if (response.StatusCode == HttpStatusCode.NotFound)
         {
             return false;
         }
 
-        await EnsureSuccessAsync(response, cancellationToken);
+        await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
 
-        await using var source = await response.Content.ReadAsStreamAsync(cancellationToken);
-        await source.CopyToAsync(destination, cancellationToken);
+        await using var source = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        await source.CopyToAsync(destination, cancellationToken).ConfigureAwait(false);
         return true;
     }
 
@@ -677,14 +781,14 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         // source=null sets the column to NULL (DELETE); this differs in meaning from a zero-byte PUT (empty body)
         if (source is null)
         {
-            using var deleteResponse = await _httpClient.DeleteAsync(requestUri, cancellationToken);
+            using var deleteResponse = await _httpClient.DeleteAsync(requestUri, cancellationToken).ConfigureAwait(false);
 
             if (deleteResponse.StatusCode == HttpStatusCode.NotFound)
             {
                 return false;
             }
 
-            await EnsureSuccessAsync(deleteResponse, cancellationToken);
+            await EnsureSuccessAsync(deleteResponse, cancellationToken).ConfigureAwait(false);
             return true;
         }
 
@@ -701,14 +805,14 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
             request,
             HttpCompletionOption.ResponseHeadersRead,
             cancellationToken
-        );
+        ).ConfigureAwait(false);
 
         if (response.StatusCode == HttpStatusCode.NotFound)
         {
             return false;
         }
 
-        await EnsureSuccessAsync(response, cancellationToken);
+        await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
         return true;
     }
 {{~ end ~}}
@@ -1003,7 +1107,6 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
 
 {{~ if repositories || ef_core ~}}
     // ===== Row materializer (expression-tree compiled; removes reflection from the hot path) =====
-{{~ if !generate_value_objects ~}}
     /// <summary>Type-specialized reader accessors that avoid boxing (<c>GetInt32</c> etc.). Only the fast-path CLR types are registered.</summary>
     private static readonly IReadOnlyDictionary<Type, MethodInfo> _typedReaders = BuildTypedReaders();
 
@@ -1012,7 +1115,6 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         nameof(DbDataReader.IsDBNull),
         new[] { typeof(int) }
     )!;
-{{~ end ~}}
 
     /// <summary>Resolved <see cref="MethodInfo"/> of <see cref="DbDataReader.GetValue(int)"/> (used as the fallback for columns that cannot be type-specialized).</summary>
     private static readonly MethodInfo _getValueMethod = typeof(DbDataReader).GetMethod(
@@ -1034,7 +1136,6 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     /// <summary>Gets the expression-tree-compiled delegate that materializes one row of SelectColumns (the fixed SELECT set) (built once per type and cached).</summary>
     /// <remarks>The arguments are <c>(reader, ordinals)</c>. <c>ordinals</c> holds the column ordinals in SelectColumns order, resolved once before the row loop.</remarks>
     public required Func<DbDataReader, int[], EntityBase> SelectMaterializer { get; init; }
-{{~ if !generate_value_objects ~}}
 
     /// <summary>Builds the type-specialized reader accessor table (each value is a <see cref="DbDataReader"/> method taking an <c>int</c> and returning the corresponding CLR type).</summary>
     private static IReadOnlyDictionary<Type, MethodInfo> BuildTypedReaders()
@@ -1061,6 +1162,57 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
             [typeof(Guid)] = Getter(nameof(DbDataReader.GetGuid)),
         };
     }
+{{~ if generate_value_objects ~}}
+
+    /// <summary>Caches the type-specialized pair resolved per value object property type (<c>null</c> when the type has no fast path).</summary>
+    private static readonly ConcurrentDictionary<
+        Type,
+        (MethodInfo Getter, MethodInfo Create)?
+    > _valueObjectReaderCache = new();
+
+    /// <summary>
+    /// Resolves the type-specialized pair for a value object property: the reader accessor for its underlying value and
+    /// the static <c>Create</c> factory that wraps it.
+    /// </summary>
+    /// <remarks>
+    /// Returns <c>null</c> when the property is not a value object, when its underlying type has no type-specialized
+    /// accessor (<c>byte[]</c> and friends), or when no matching factory exists; those columns take the fallback.
+    /// </remarks>
+    private static (MethodInfo Getter, MethodInfo Create)? ResolveValueObjectReader(
+        Type propertyType
+    ) => _valueObjectReaderCache.GetOrAdd(propertyType, ResolveValueObjectReaderCore);
+
+    /// <summary>Performs the uncached resolution behind <see cref="ResolveValueObjectReader"/>.</summary>
+    private static (MethodInfo Getter, MethodInfo Create)? ResolveValueObjectReaderCore(
+        Type propertyType
+    )
+    {
+        var iface = Array.Find(
+            propertyType.GetInterfaces(),
+            i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IValueObject<,>)
+        );
+
+        if (iface is null)
+        {
+            return null;
+        }
+
+        // The underlying value type is the second type argument of IValueObject<TSelf, TValue>
+        if (!_typedReaders.TryGetValue(iface.GetGenericArguments()[1], out var getter))
+        {
+            return null;
+        }
+
+        var create = propertyType.GetMethod(
+            "Create",
+            BindingFlags.Public | BindingFlags.Static,
+            binder: null,
+            new[] { getter.ReturnType },
+            modifiers: null
+        );
+
+        return create is null ? null : (getter, create);
+    }
 {{~ end ~}}
 
     /// <summary>
@@ -1069,7 +1221,12 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     /// </summary>
     /// <remarks>
     /// Columns with a type-specialized accessor are read directly without boxing (<c>DBNull</c> becomes the default value,
-    /// equivalent to the previous <c>SetValue(null)</c>); all other columns fall back to the previous
+    /// equivalent to the previous <c>SetValue(null)</c>);
+{{~ if generate_value_objects ~}}
+    /// a value object column whose underlying value has such an accessor reads it the same way and calls the value object's
+    /// static <c>Create</c> factory directly;
+{{~ end ~}}
+    /// all other columns fall back to the previous
     /// <see cref="SetColumnValue"/> (dialect-specific conversion / value object re-wrapping).
     /// The resulting final state (<c>RowState = Unchanged</c>) matches the previous row mapping.
     /// </remarks>
@@ -1116,7 +1273,6 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         PropertyInfo property
     )
     {
-{{~ if !generate_value_objects ~}}
         var propertyType = property.PropertyType;
         var underlying = Nullable.GetUnderlyingType(propertyType) ?? propertyType;
 
@@ -1137,6 +1293,30 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
                 read
             );
             return Expression.Assign(Expression.Property(entityExpr, property), value);
+        }
+{{~ if generate_value_objects ~}}
+
+        // A value object whose underlying value has a type-specialized accessor reads that value without boxing and
+        // calls the static Create factory straight from the expression tree (no reflection Invoke, no Convert.ChangeType,
+        // and DBNull becomes null, equivalent to the previous SetValue(null))
+        if (ResolveValueObjectReader(propertyType) is (var voGetter, var voCreate))
+        {
+            Expression created = Expression.Call(
+                voCreate,
+                Expression.Call(readerParam, voGetter, ordinal)
+            );
+
+            if (created.Type != propertyType)
+            {
+                created = Expression.Convert(created, propertyType);
+            }
+
+            var wrapped = Expression.Condition(
+                Expression.Call(readerParam, _isDbNullMethod, ordinal),
+                Expression.Default(propertyType),
+                created
+            );
+            return Expression.Assign(Expression.Property(entityExpr, property), wrapped);
         }
 {{~ end ~}}
 
@@ -2059,7 +2239,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         metadata.BindEntityKeyParameter(command, entity);
 
         // ExecuteScalar yields null only when the SELECT produced no row at all (a NULL first column comes back as DBNull)
-        return await command.ExecuteScalarAsync(cancellationToken) is not null;
+        return await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) is not null;
     }
 
     /// <summary>Builds the conflict reported when the row still exists but its version moved on since the entity was read.</summary>
@@ -2130,7 +2310,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
                         cancellationToken,
                         hooks{{ if repository_dialect == "sqlserver" }},
                         mode{{ end }}
-                    );
+                    ).ConfigureAwait(false);
                 }
             }
 
@@ -2141,7 +2321,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
                     entity,
                     SaveOperation.Delete,
                     cancellationToken
-                )
+                ).ConfigureAwait(false)
             )
             {
                 hooks.Skip(entity);
@@ -2154,12 +2334,12 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
                 transaction,
                 cancellationToken{{ if repository_dialect == "sqlserver" }},
                 mode{{ end }}
-            );
+            ).ConfigureAwait(false);
 
             // After(Delete) fires immediately after the DML (before commit)
             if (hooks is not null)
             {
-                await hooks.InvokeAfterAsync(entity, SaveOperation.Delete, cancellationToken);
+                await hooks.InvokeAfterAsync(entity, SaveOperation.Delete, cancellationToken).ConfigureAwait(false);
             }
 
             return rows;
@@ -2170,7 +2350,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         {
             if (
                 hooks is null
-                || await hooks.InvokeBeforeAsync(entity, SaveOperation.Insert, cancellationToken)
+                || await hooks.InvokeBeforeAsync(entity, SaveOperation.Insert, cancellationToken).ConfigureAwait(false)
             )
             {
                 rows += await InsertEntityAsync(
@@ -2179,11 +2359,11 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
                     transaction,
                     cancellationToken{{ if repository_dialect == "sqlserver" }},
                     versions{{ end }}
-                );
+                ).ConfigureAwait(false);
 
                 if (hooks is not null)
                 {
-                    await hooks.InvokeAfterAsync(entity, SaveOperation.Insert, cancellationToken);
+                    await hooks.InvokeAfterAsync(entity, SaveOperation.Insert, cancellationToken).ConfigureAwait(false);
                 }
             }
             else
@@ -2196,7 +2376,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         {
             if (
                 hooks is null
-                || await hooks.InvokeBeforeAsync(entity, SaveOperation.Update, cancellationToken)
+                || await hooks.InvokeBeforeAsync(entity, SaveOperation.Update, cancellationToken).ConfigureAwait(false)
             )
             {
                 var (affected, performed) = await UpdateAsync(
@@ -2207,13 +2387,13 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
                     cancellationToken{{ if repository_dialect == "sqlserver" }},
                     mode,
                     versions{{ end }}
-                );
+                ).ConfigureAwait(false);
                 rows += affected;
 
                 // After fires with the operation actually performed (Insert when switched by insertWhenUpdateMissing)
                 if (hooks is not null)
                 {
-                    await hooks.InvokeAfterAsync(entity, performed, cancellationToken);
+                    await hooks.InvokeAfterAsync(entity, performed, cancellationToken).ConfigureAwait(false);
                 }
             }
             else
@@ -2238,7 +2418,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
                     changesAlreadyVerified: false,
                     mode,
                     versions{{ end }}
-                );
+                ).ConfigureAwait(false);
             }
         }
 
@@ -2302,13 +2482,13 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
                 cancellationToken,
                 hooks{{ if repository_dialect == "sqlserver" }},
                 mode{{ end }}
-            );
+            ).ConfigureAwait(false);
         }
 
         // Before(Delete) fires from the subtree's children upward. On false, "the children are gone but this node remains" (the consequence of a standalone skip)
         if (
             hooks is not null
-            && !await hooks.InvokeBeforeAsync(entity, SaveOperation.Delete, cancellationToken)
+            && !await hooks.InvokeBeforeAsync(entity, SaveOperation.Delete, cancellationToken).ConfigureAwait(false)
         )
         {
             hooks.Skip(entity);
@@ -2321,11 +2501,11 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
             transaction,
             cancellationToken{{ if repository_dialect == "sqlserver" }},
             mode{{ end }}
-        );
+        ).ConfigureAwait(false);
 
         if (hooks is not null)
         {
-            await hooks.InvokeAfterAsync(entity, SaveOperation.Delete, cancellationToken);
+            await hooks.InvokeAfterAsync(entity, SaveOperation.Delete, cancellationToken).ConfigureAwait(false);
         }
 
         return rows;
@@ -2353,7 +2533,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
                 connection,
                 transaction,
                 cancellationToken
-            );
+            ).ConfigureAwait(false);
 
             if (version is byte[] newVersion)
             {
@@ -2371,7 +2551,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
             connection,
             transaction,
             cancellationToken
-        );
+        ){{ if repository_dialect == "sqlserver" }}.ConfigureAwait(false){{ end }};
     }
 
     /// <summary>Deletes a single row{{ if repository_dialect == "sqlserver" }}, guarded by the row version the entity was read with when the table carries one{{ end }}.</summary>
@@ -2399,7 +2579,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
                 connection,
                 transaction,
                 cancellationToken
-            );
+            ).ConfigureAwait(false);
 
             // Zero affected rows is ambiguous: either the row is already gone (deleting a row that is not there has always
             // been tolerated silently) or someone else changed it after it was read. Probing the row tells the two apart
@@ -2411,7 +2591,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
                     connection,
                     transaction,
                     cancellationToken
-                )
+                ).ConfigureAwait(false)
             )
             {
                 throw RowVersionConcurrency.Conflict(metadata, entity, "delete");
@@ -2428,7 +2608,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
             connection,
             transaction,
             cancellationToken
-        );
+        ){{ if repository_dialect == "sqlserver" }}.ConfigureAwait(false){{ end }};
     }
 
     /// <summary>Executes the update and returns the affected row count and the operation actually performed (Insert when switched).</summary>
@@ -2456,7 +2636,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
                 connection,
                 transaction,
                 cancellationToken
-            );
+            ).ConfigureAwait(false);
 
             if (version is byte[] newVersion)
             {
@@ -2473,7 +2653,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
                     connection,
                     transaction,
                     cancellationToken
-                )
+                ).ConfigureAwait(false)
             )
             {
                 throw RowVersionConcurrency.Conflict(metadata, entity, "update");
@@ -2490,7 +2670,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
                 connection,
                 transaction,
                 cancellationToken
-            );
+            ).ConfigureAwait(false);
         }
 {{~ else ~}}
 
@@ -2501,7 +2681,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
             connection,
             transaction,
             cancellationToken
-        );
+        ).ConfigureAwait(false);
 {{~ end ~}}
 
         if (affected != 0)
@@ -2519,7 +2699,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
                 transaction,
                 cancellationToken{{ if repository_dialect == "sqlserver" }},
                 versions{{ end }}
-            );
+            ).ConfigureAwait(false);
             return (inserted, SaveOperation.Insert);
         }
 
@@ -2544,7 +2724,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
 
         await using var command = new {{ sql_command_type }}(sqlSelector(metadata), connection, transaction);
         bind(metadata, command, entity);
-        return await command.ExecuteScalarAsync(cancellationToken);
+        return await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
     }
 {{~ end ~}}
 
@@ -2561,7 +2741,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
 
         await using var command = new {{ sql_command_type }}(sqlSelector(metadata), connection, transaction);
         bind(metadata, command, entity);
-        return await command.ExecuteNonQueryAsync(cancellationToken);
+        return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 {{~ end ~}}
 

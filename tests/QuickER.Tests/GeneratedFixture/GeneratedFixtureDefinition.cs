@@ -17,7 +17,7 @@ namespace QuickER.Tests.GeneratedFixture;
 /// <list type="bullet">
 ///   <item>親子（1対多・ON DELETE CASCADE）: <c>customers</c> → <c>orders</c></item>
 ///   <item>1対1: <c>customers</c> ↔ <c>customer_profiles</c></item>
-///   <item>VO 対象カラム: <c>varchar(50)</c>（名前）・<c>decimal(10,2)</c>（金額）を含む</item>
+///   <item>VO 対象カラム: <c>varchar(50)</c>（名前）・<c>decimal(10,2)</c>（金額）・<c>datetime2</c>（注文日時）を含む</item>
 ///   <item>DB 照合順序の揺れを避けるため日本語識別子は使わない</item>
 ///   <item>名前付きクエリ（ミニ DSL）: CONTAINS（LIKE エスケープ）・IS NULL・decimal 比較＝
 ///     SQL Server 方言の DSL→SQL 翻訳の実 DB 検証用</item>
@@ -56,6 +56,7 @@ public static class GeneratedFixtureDefinition
     private static readonly Guid OrderCustomerFkColId = new("22222222-0000-0000-0000-000000000003");
     private static readonly Guid OrderMemoColId = new("22222222-0000-0000-0000-000000000004");
     private static readonly Guid OrderAmountColId = new("22222222-0000-0000-0000-000000000005");
+    private static readonly Guid OrderOrderedAtColId = new("22222222-0000-0000-0000-000000000006");
 
     private static readonly Guid ProfileId = new("33333333-0000-0000-0000-000000000001");
     private static readonly Guid ProfilePkColId = new("33333333-0000-0000-0000-000000000002");
@@ -158,6 +159,15 @@ public static class GeneratedFixtureDefinition
                     Name = "amount",
                     DataType = "decimal(10,2)",
                     IsNullable = false,
+                },
+                // EditModel のロードが「文字列往復で秒未満・DateTimeKind を落とさない」ことを実型で検証するための列。
+                // 既存シード（INSERT 側は列を指定しない）へ影響しないよう NULL 許容にする
+                new Column
+                {
+                    Id = OrderOrderedAtColId,
+                    Name = "ordered_at",
+                    DataType = "datetime2",
+                    IsNullable = true,
                 },
             },
         };

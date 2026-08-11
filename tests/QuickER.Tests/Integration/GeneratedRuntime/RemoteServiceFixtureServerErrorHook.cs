@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Threading;
 using Microsoft.AspNetCore.Http;
 
@@ -22,6 +23,16 @@ public static partial class GeneratedRemoteEndpoints
     /// <summary>このリクエストのフックで例外を投げることを要求するヘッダ名（テスト 11 用のスコープ手段）</summary>
     internal const string ThrowInHookHeaderName = "X-QuickER-Test-Hook-Throw";
 
+    /// <summary>フック発火をリクエスト単位で数えるための相関 ID ヘッダ名（テスト 19 用のスコープ手段）</summary>
+    internal const string CorrelationHeaderName = "X-QuickER-Test-Correlation";
+
+    /// <summary>相関 ID ごとのフック発火回数（静的カウンタと違い並列実行される派生スイートと混ざらない）</summary>
+    private static readonly ConcurrentDictionary<string, int> _correlatedHookCalls = new();
+
+    /// <summary>指定した相関 ID のリクエストでフックが発火した回数を読み取る（テスト検証用）</summary>
+    internal static int CorrelatedHookCallCount(string correlationId) =>
+        _correlatedHookCalls.TryGetValue(correlationId, out var count) ? count : 0;
+
     /// <summary>フックが呼ばれた回数（派生スイート間で共有されるため Interlocked で加算する）</summary>
     private static int _serverErrorHookCallCount;
 
@@ -37,6 +48,11 @@ public static partial class GeneratedRemoteEndpoints
     static partial void OnServerError(HttpContext context, Exception ex)
     {
         Interlocked.Increment(ref _serverErrorHookCallCount);
+
+        if (context.Request.Headers.TryGetValue(CorrelationHeaderName, out var correlationId))
+        {
+            _correlatedHookCalls.AddOrUpdate(correlationId.ToString(), 1, (_, count) => count + 1);
+        }
 
         if (!context.Request.Headers.ContainsKey(ThrowInHookHeaderName))
         {

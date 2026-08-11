@@ -367,19 +367,19 @@ public sealed class SqlQuery<TEntity>
     /// <summary>Fetches the entities matching the conditions (together with the requested Includes) as a list.</summary>
     public async Task<IReadOnlyList<TEntity>> ToListAsync(
         CancellationToken cancellationToken = default
-    ) => await _executor.ToListAsync(BuildPlan(), cancellationToken);
+    ) => await _executor.ToListAsync(BuildPlan(), cancellationToken).ConfigureAwait(false);
 
     /// <summary>Fetches the first entity matching the conditions (together with the requested Includes); returns null when there is no match.</summary>
     public async Task<TEntity?> FirstOrDefaultAsync(CancellationToken cancellationToken = default) =>
-        await _executor.FirstOrDefaultAsync(BuildPlan(), cancellationToken);
+        await _executor.FirstOrDefaultAsync(BuildPlan(), cancellationToken).ConfigureAwait(false);
 
     /// <summary>Returns the count of rows matching the conditions.</summary>
     public async Task<int> CountAsync(CancellationToken cancellationToken = default) =>
-        await _executor.CountAsync(BuildPlan(), cancellationToken);
+        await _executor.CountAsync(BuildPlan(), cancellationToken).ConfigureAwait(false);
 
     /// <summary>Returns whether any record matching the conditions exists.</summary>
     public async Task<bool> AnyAsync(CancellationToken cancellationToken = default) =>
-        await _executor.AnyAsync(BuildPlan(), cancellationToken);
+        await _executor.AnyAsync(BuildPlan(), cancellationToken).ConfigureAwait(false);
 
     /// <summary>Fetches the entities matching the conditions and returns them as a list transformed by the given projection (for named-query projections).</summary>
     /// <remarks>
@@ -397,14 +397,14 @@ public sealed class SqlQuery<TEntity>
     {
         ArgumentNullException.ThrowIfNull(selector);
 
-        return await _executor.ToProjectionListAsync(BuildPlan(), selector, cancellationToken);
+        return await _executor.ToProjectionListAsync(BuildPlan(), selector, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Bulk-deletes the rows matching the conditions. When cascadeDelete=true, descendants are also deleted along FK chains.</summary>
     public async Task<int> ExecuteDeleteAsync(
         bool cascadeDelete = false,
         CancellationToken cancellationToken = default
-    ) => await _executor.ExecuteDeleteAsync(BuildPlan(), cascadeDelete, cancellationToken);
+    ) => await _executor.ExecuteDeleteAsync(BuildPlan(), cascadeDelete, cancellationToken).ConfigureAwait(false);
 
     /// <summary>Freezes the captured expressions, Include tree, and paging into a snapshot to pass to the executor.</summary>
     private SqlQueryPlan<TEntity> BuildPlan()
@@ -644,14 +644,14 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
                 plan.Take,
                 plan.Skip,
                 cancellationToken
-            );
+            ).ConfigureAwait(false);
         }
 {{~ if repository_dialect == "sqlserver" ~}}
         var json = await ReadJsonAsync(
             BuildJsonSelect(plan, whereClause, plan.Take, plan.Skip),
             parameters,
             cancellationToken
-        );
+        ).ConfigureAwait(false);
         if (string.IsNullOrWhiteSpace(json))
         {
             return new List<TEntity>();
@@ -660,7 +660,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
         return JsonSerializer.Deserialize<List<TEntity>>(json, JsonOptions) ?? new List<TEntity>();
 {{~ else ~}}
         await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         // Materialize the roots with a plain SELECT; Includes are resolved by a multi-query that assembles parents and children in memory
         var roots = await MaterializeRootsAsync(
@@ -671,10 +671,10 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
             plan.Take,
             plan.Skip,
             cancellationToken
-        );
+        ).ConfigureAwait(false);
         await IncludeLoader
             .For(typeof(TEntity))
-            .LoadAsync(roots, plan.Includes, connection, cancellationToken);
+            .LoadAsync(roots, plan.Includes, connection, cancellationToken).ConfigureAwait(false);
         return roots;
 {{~ end ~}}
     }
@@ -705,7 +705,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
         if (projectionColumns is null)
         {
             // Fallback: materialize all columns, then project in memory
-            var entities = await ToListAsync(plan, cancellationToken);
+            var entities = await ToListAsync(plan, cancellationToken).ConfigureAwait(false);
             return entities.Select(project).ToList();
         }
 
@@ -716,17 +716,17 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
             $"SELECT {metadata.BuildColumnList(projectionColumns)} FROM {TableName}{whereClause}{BuildOrderAndPaging(plan, plan.Take, plan.Skip)};";
 
         await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         await using var command = CreateCommand(connection, sql, parameters);
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
 
         // Column-name-to-ordinal mapping is resolved only once per result set
         var ordinals = metadata.ColumnOrdinals(reader, projectionColumns);
 
         var results = new List<TResult>();
 
-        while (await reader.ReadAsync(cancellationToken))
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
             // Apply the projection to a partial entity with only the referenced columns populated (RowState is irrelevant; the entity is discarded after projection)
             var entity = metadata.MapEntityColumns<TEntity>(reader, projectionColumns, ordinals);
@@ -755,7 +755,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
                 take: 1,
                 plan.Skip,
                 cancellationToken
-            );
+            ).ConfigureAwait(false);
             return withBinary.Count > 0 ? withBinary[0] : null;
         }
 {{~ if repository_dialect == "sqlserver" ~}}
@@ -763,7 +763,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
             BuildJsonSelect(plan, whereClause, 1, plan.Skip),
             parameters,
             cancellationToken
-        );
+        ).ConfigureAwait(false);
         if (string.IsNullOrWhiteSpace(json))
         {
             return null;
@@ -773,7 +773,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
         return list is { Count: > 0 } ? list[0] : null;
 {{~ else ~}}
         await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         // Materialize only the first row (LIMIT 1) and resolve Includes against that single row
         var roots = await MaterializeRootsAsync(
@@ -784,7 +784,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
             take: 1,
             plan.Skip,
             cancellationToken
-        );
+        ).ConfigureAwait(false);
         if (roots.Count == 0)
         {
             return null;
@@ -792,7 +792,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
 
         await IncludeLoader
             .For(typeof(TEntity))
-            .LoadAsync(roots, plan.Includes, connection, cancellationToken);
+            .LoadAsync(roots, plan.Includes, connection, cancellationToken).ConfigureAwait(false);
         return roots[0];
 {{~ end ~}}
     }
@@ -804,14 +804,14 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
         var whereClause = BuildWhereClause(plan, parameters);
 
         await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         await using var command = CreateCommand(
             connection,
             $"SELECT COUNT(*) FROM {TableName}{whereClause};",
             parameters
         );
-        var result = await command.ExecuteScalarAsync(cancellationToken);
+        var result = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
         return Convert.ToInt32(result);
     }
 
@@ -822,14 +822,14 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
         var whereClause = BuildWhereClause(plan, parameters);
 
         await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         await using var command = CreateCommand(
             connection,
             $"SELECT CASE WHEN EXISTS (SELECT 1 FROM {TableName}{whereClause}) THEN 1 ELSE 0 END;",
             parameters
         );
-        var result = await command.ExecuteScalarAsync(cancellationToken);
+        var result = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
         return Convert.ToInt32(result) != 0;
     }
 
@@ -844,7 +844,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
         var whereClause = BuildWhereClause(plan, parameters);
 
         await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         if (!cascadeDelete)
         {
@@ -853,12 +853,12 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
                 $"DELETE FROM {TableName}{whereClause};",
                 parameters
             );
-            return await command.ExecuteNonQueryAsync(cancellationToken);
+            return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         }
 
         // Cascade: execute the DELETE statements ordered descendants-first, then the target, in a single transaction
         await using var transaction = ({{ sql_transaction_type }})
-            await connection.BeginTransactionAsync(cancellationToken);
+            await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
 
         try
         {
@@ -874,16 +874,16 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
             {
                 await using var command = new {{ sql_command_type }}(sql, connection, transaction);
                 AddParameters(command, parameters);
-                rows += await command.ExecuteNonQueryAsync(cancellationToken);
+                rows += await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
             }
 
-            await transaction.CommitAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
             return rows;
         }
         catch
         {
             // Roll back with CancellationToken.None: a canceled token must not interrupt the rollback or mask the original exception.
-            await transaction.RollbackAsync(CancellationToken.None);
+            await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
             throw;
         }
     }
@@ -908,17 +908,17 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
             $"SELECT {metadata.BuildColumnList(metadata.AllProperties)} FROM {TableName}{whereClause}{BuildOrderAndPaging(plan, take, skip)};";
 
         await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         await using var command = CreateCommand(connection, sql, parameters);
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
 
         // Column-name-to-ordinal mapping is resolved only once per result set
         var ordinals = metadata.ColumnOrdinals(reader, metadata.AllProperties);
 
         var results = new List<TEntity>();
 
-        while (await reader.ReadAsync(cancellationToken))
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
             // Materialize as a legitimate entity (RowState=Unchanged) with all columns bound
             results.Add(
@@ -943,13 +943,13 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
     )
     {
         await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         await using var command = CreateCommand(connection, sql, parameters);
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
 
         var chunks = new List<string>();
-        while (await reader.ReadAsync(cancellationToken))
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
             chunks.Add(reader.GetString(0));
         }
@@ -1007,13 +1007,13 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
             $"SELECT {metadata.ColumnList} FROM {TableName}{whereClause}{BuildOrderAndPaging(plan, take, skip)};";
 
         await using var command = CreateCommand(connection, sql, parameters);
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
 
         // Column-name-to-ordinal mapping is resolved only once per result set
         var ordinals = metadata.SelectOrdinals(reader);
 
         var roots = new List<TEntity>();
-        while (await reader.ReadAsync(cancellationToken))
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
             roots.Add((TEntity)(object)metadata.MapEntityObject(reader, ordinals));
         }
@@ -1249,7 +1249,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
 
         foreach (var node in includes)
         {
-            await LoadNodeAsync(parents, node, connection, cancellationToken);
+            await LoadNodeAsync(parents, node, connection, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -1302,7 +1302,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
             distinctKeys,
             connection,
             cancellationToken
-        );
+        ).ConfigureAwait(false);
 
         // Group the children by FK value and bind them to their parents
         var childrenByKey = new Dictionary<object, List<EntityBase>>();
@@ -1330,7 +1330,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
         {
             await IncludeLoader
                 .For(childType)
-                .LoadAsync(children, node.Children, connection, cancellationToken);
+                .LoadAsync(children, node.Children, connection, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -1370,12 +1370,12 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
                 command.Parameters.AddWithValue(placeholders[i], keys[offset + i]);
             }
 
-            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
 
             // Column-name-to-ordinal mapping is resolved only once per result set (chunk)
             var ordinals = childMetadata.SelectOrdinals(reader);
 
-            while (await reader.ReadAsync(cancellationToken))
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
             {
                 children.Add(childMetadata.MapEntityObject(reader, ordinals));
             }
@@ -1424,7 +1424,10 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
 {{~ end ~}}
 
 /// <summary>Translates lambda expressions (expression trees) into SQL conditions and column references.</summary>
-/// <remarks>Supported constructs are limited to comparisons (== != &lt; &lt;= &gt; &gt;=), logical combinations (&amp;&amp; ||), negation, null checks, bool columns, and string Contains/StartsWith/EndsWith; anything outside this set throws.</remarks>
+/// <remarks>
+/// Supported constructs are limited to comparisons (== != &lt; &lt;= &gt; &gt;=), logical combinations (&amp;&amp; ||), negation, null checks, bool columns, and string Contains/StartsWith/EndsWith; anything outside this set throws.
+/// An <c>==</c> / <c>!=</c> comparison whose value side is null is compensated to <c>IS NULL</c> / <c>IS NOT NULL</c> (the same meaning C# and EF Core give it), whether the null is written as a literal or comes from a variable.
+/// </remarks>
 {{ infra_visibility }} static class SqlExpressionTranslator
 {
     /// <summary>Translates the body of a predicate lambda into a SQL condition, parameterizing values and appending them to parameters.</summary>
@@ -1531,6 +1534,15 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
         }
     }
 
+    /// <summary>Translates a binary comparison, compensating for null values on the value side.</summary>
+    /// <remarks>
+    /// Each side is resolved once: an operand that stays on the SQL side (a column reference or a date component) is rendered as SQL,
+    /// and every other operand is evaluated to its actual value. When an <c>==</c> / <c>!=</c> comparison has a value operand that turns
+    /// out to be null (a literal null, or a variable / expression that evaluates to null), it becomes <c>IS NULL</c> / <c>IS NOT NULL</c>,
+    /// which is what C# and EF Core mean by it. Binding the null as an ordinary parameter would instead leave <c>col = @p</c>, and SQL's
+    /// three-valued logic makes that UNKNOWN for every row. The compensation is deliberately limited to equality: the relational operators
+    /// (&lt; &lt;= &gt; &gt;=) keep binding the null as a parameter, because they have no null-aware SQL counterpart.
+    /// </remarks>
     private static string VisitComparison(
         BinaryExpression binary,
         List<SqlQueryParameter> parameters
@@ -1539,18 +1551,24 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
         var left = Unwrap(binary.Left);
         var right = Unwrap(binary.Right);
 
+        // Resolve both sides once: SQL-side operands keep their SQL text, value-side operands are evaluated here (and reused below)
+        var leftSql = OperandSql(left);
+        var rightSql = OperandSql(right);
+        var leftValue = leftSql is null ? Evaluate(left) : null;
+        var rightValue = rightSql is null ? Evaluate(right) : null;
+
         if (binary.NodeType is ExpressionType.Equal or ExpressionType.NotEqual)
         {
             var suffix = binary.NodeType == ExpressionType.NotEqual ? "NOT " : string.Empty;
 
-            if (IsNull(right) && left is MemberExpression leftColumn && IsColumn(leftColumn))
+            if (leftSql is not null && rightSql is null && IsNullValue(rightValue))
             {
-                return $"{ColumnName(leftColumn.Member)} IS {suffix}NULL";
+                return $"{leftSql} IS {suffix}NULL";
             }
 
-            if (IsNull(left) && right is MemberExpression rightColumn && IsColumn(rightColumn))
+            if (rightSql is not null && leftSql is null && IsNullValue(leftValue))
             {
-                return $"{ColumnName(rightColumn.Member)} IS {suffix}NULL";
+                return $"{rightSql} IS {suffix}NULL";
             }
         }
 
@@ -1566,22 +1584,17 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
         };
 
         // In a column-versus-value comparison, the value parameter carries the opposing column name for explicit typing (omitted when both sides are columns or both are values)
-        var leftColumnSql = TryColumnName(left);
-        var rightColumnSql = TryColumnName(right);
-        return $"{Operand(left, parameters, RawColumnName(rightColumnSql))} {op} {Operand(right, parameters, RawColumnName(leftColumnSql))}";
+        return $"{leftSql ?? AddParameter(leftValue, parameters, RawColumnName(rightSql))} {op} {rightSql ?? AddParameter(rightValue, parameters, RawColumnName(leftSql))}";
     }
 
-    /// <param name="expression">The operand expression (either a column reference or a constant value).</param>
-    /// <param name="parameters">The list that receives parameterized value operands.</param>
-    /// <param name="counterpartColumn">The opposing column name (without brackets) attached when parameterizing as a value; null when absent.</param>
-    private static string Operand(
-        Expression expression,
-        List<SqlQueryParameter> parameters,
-        string? counterpartColumn
-    ) =>
+    /// <summary>Renders an operand that stays on the SQL side (a column reference, or a date component of a date-time column). Returns null for a value operand.</summary>
+    private static string? OperandSql(Expression expression) =>
         TryColumnName(expression) is { } column ? column
         : TryGetDatePart(expression, out var datePart) ? datePart
-        : AddParameter(Evaluate(expression), parameters, counterpartColumn);
+        : null;
+
+    /// <summary>Whether an evaluated value operand is null{{ if generate_value_objects }} (a value object is unwrapped first, so one wrapping a null underlying value counts as null too){{ end }}.</summary>
+    private static bool IsNullValue(object? value) => {{ if generate_value_objects }}SqlParameterValue.Unwrap(value) is null{{ else }}value is null{{ end }};
 
     private enum LikeKind
     {
@@ -1833,9 +1846,6 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
     /// <summary>Whether the member is a property reference on the lambda parameter (i.e. a column).</summary>
     private static bool IsColumn(MemberExpression member) =>
         member is { Expression: ParameterExpression, Member: PropertyInfo };
-
-    private static bool IsNull(Expression expression) =>
-        expression is ConstantExpression { Value: null };
 
     /// <summary>Caches member-to-bracketed-column-name resolution per type member (avoiding [Column] reflection for every column reference).</summary>
     private static readonly ConcurrentDictionary<MemberInfo, string> _columnNameCache = new();

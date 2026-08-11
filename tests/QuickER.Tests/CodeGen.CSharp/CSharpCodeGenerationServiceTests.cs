@@ -1,4 +1,4 @@
-using AwesomeAssertions;
+﻿using AwesomeAssertions;
 using QuickER.CodeGen.CSharp;
 using QuickER.CodeGen.CSharp.Resources;
 using QuickER.Model;
@@ -348,12 +348,13 @@ public class CSharpCodeGenerationServiceTests
         content
             .Should()
             .Contain(
-                "protected void AddChildren<T>(string name, EditModelCollection<T> collection)"
+                "protected void AddChildren<T>(string name, Func<EditModelCollection<T>> accessor)"
             );
         content.Should().Contain("foreach (var link in ChildLinks)");
         // 子（カスケードナビ）を持つ EditModel は RegisterChildren を override し AddChildren で登録する
+        // （コレクションも単一子と同じ遅延アクセサ形＝ロードで差し替わった新インスタンスを見る）
         content.Should().Contain("protected override void RegisterChildren()");
-        content.Should().Contain("AddChildren(\"Orders\", Orders);");
+        content.Should().Contain("AddChildren(\"Orders\", () => Orders);");
         // グラフ全体のエラーをノードのパス付きで収集する（収集は ChildLink レジストリ経由）
         content
             .Should()
@@ -752,14 +753,17 @@ public class CSharpCodeGenerationServiceTests
             .Contain(
                 "editModel.Name ?? throw new InvalidOperationException(\"Name has no input value.\");"
             );
-        // Entity → EditModel 反映は public な ApplyToEditModel で行い、バインディング用プロパティ経由でロードする
+        // Entity → EditModel 反映は public な ApplyToEditModel で行い、確定値を直接代入してから
+        // RevertInput でバインディング文字列を導出する（文字列往復なし＝無損失ロード）
         result
             .Files[0]
             .Content.Should()
             .Contain(
                 "public void ApplyToEditModel(ProductEntity entity, ProductEditModel editModel)"
             );
-        result.Files[0].Content.Should().Contain("editModel.BindingName =");
+        result.Files[0].Content.Should().Contain("editModel.Name = entity.Name;");
+        result.Files[0].Content.Should().Contain("editModel.RevertInput();");
+        result.Files[0].Content.Should().NotContain("editModel.BindingName = entity.");
         result.Files[0].Content.Should().NotContain("LoadFrom");
         // 既定ロード後の後処理フック（partial 実装で追加プロパティをロード）
         result.Files[0].Content.Should().Contain("OnEditModelLoaded(entity, editModel);");
@@ -1567,7 +1571,11 @@ public class CSharpCodeGenerationServiceTests
 
         result.HasErrors.Should().BeFalse();
         var content = result.Files[0].Content;
-        content.Should().Contain("await transaction.RollbackAsync(CancellationToken.None);");
+        content
+            .Should()
+            .Contain(
+                "await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);"
+            );
         content.Should().NotContain("await transaction.RollbackAsync(cancellationToken);");
     }
 
@@ -1640,6 +1648,75 @@ public class CSharpCodeGenerationServiceTests
             .Contain("typeof(IValueObject).IsAssignableFrom(member.Member.DeclaringType)");
     }
 
+    /// <summary>
+    /// 値オブジェクト構成でも行マテリアライザの型特殊化が有効で、VO 列は静的 Create を式木から直呼びすることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 以前は型特殊化機構全体が「VO 無効時のみ」出力されており、VO 構成では VO 化されない素の列まで含めて
+    /// 全列が <c>GetValue</c>（boxing）＋<c>PropertyInfo.SetValue</c>＋<c>SqlValueObjectActivator.Wrap</c>
+    /// （<c>Convert.ChangeType</c> 込み）のフォールバックへ落ちていた。
+    /// </remarks>
+    [Fact]
+    public void Generate_ValueObjects_ShouldKeepTypeSpecializedMaterializer()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            SingleEntityDiagram(),
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Sample.Domain",
+                GenerateValueObjects = true,
+                GenerateRepositories = true,
+            }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files[0].Content;
+
+        // 型特殊化アクセサ表そのもの（VO 構成でも出力される）
+        content
+            .Should()
+            .Contain(
+                "private static readonly IReadOnlyDictionary<Type, MethodInfo> _typedReaders ="
+            );
+        content.Should().Contain("[typeof(decimal)] = Getter(nameof(DbDataReader.GetDecimal)),");
+
+        // 分岐 1: 非 VO プロパティ×対応型は従来どおり typed getter 直読み
+        content.Should().Contain("if (_typedReaders.TryGetValue(underlying, out var getter))");
+        content
+            .Should()
+            .Contain("Expression read = Expression.Call(readerParam, getter, ordinal);");
+
+        // 分岐 2: VO プロパティは内包値を typed getter で読み、静的 Create を式木から直呼びする
+        content
+            .Should()
+            .Contain("if (ResolveValueObjectReader(propertyType) is (var voGetter, var voCreate))");
+        content
+            .Should()
+            .Contain(
+                string.Join(
+                        "\n",
+                        "            Expression created = Expression.Call(",
+                        "                voCreate,",
+                        "                Expression.Call(readerParam, voGetter, ordinal)",
+                        "            );"
+                    )
+                    .ReplaceLineEndings()
+            );
+
+        // Create は IValueObject<TSelf, TValue> の TValue から解決し、リフレクション Invoke は挟まない
+        content
+            .Should()
+            .Contain("i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IValueObject<,>)");
+        content
+            .Should()
+            .Contain(
+                "if (!_typedReaders.TryGetValue(iface.GetGenericArguments()[1], out var getter))"
+            );
+
+        // 分岐 3: 対応表にない型（byte[] / enum など）は従来のフォールバックのまま
+        content.Should().Contain("_setColumnValueMethod,");
+    }
+
     /// <summary>RowState ベースのカスケード Save 基盤（EntityBase / SaveAsync / 保存エンジン）が生成されることを検証する</summary>
     [Fact]
     public void Generate_ShouldCreateCascadeSaveInfrastructure()
@@ -1673,7 +1750,11 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("public async Task<int> BulkInsertAsync(");
         content.Should().Contain("DestinationTableName = _metadata.TableName,");
         content.Should().Contain("using var reader = _metadata.CreateDataReader(entities);");
-        content.Should().Contain("await bulkCopy.WriteToServerAsync(reader, cancellationToken);");
+        content
+            .Should()
+            .Contain(
+                "await bulkCopy.WriteToServerAsync(reader, cancellationToken).ConfigureAwait(false);"
+            );
         content.Should().Contain("private sealed class EntityDataReader : IDataReader");
         // 保存エンジン・競合例外・メタデータ・連鎖情報
         content.Should().Contain("internal static class EntityGraphSaver");
@@ -1934,11 +2015,11 @@ public class CSharpCodeGenerationServiceTests
             );
         content.Should().Contain("Filedata = Array.Empty<byte>();");
         content.Should().Contain("BindingFileId = FileId?.ToString() ?? string.Empty;");
-        content
-            .Should()
-            .Contain("editModel.BindingIsActive = entity.IsActive.ToString() ?? string.Empty;");
-        content.Should().NotContain("entity.FileId?.ToString()");
-        content.Should().NotContain("entity.IsActive?.ToString()");
+        // Mapper のロードは確定値の直接代入（byte[] も Base64 を経由しない＝無損失）
+        content.Should().Contain("editModel.IsActive = entity.IsActive;");
+        content.Should().Contain("editModel.Filedata = entity.Filedata;");
+        content.Should().NotContain("editModel.BindingIsActive = entity.");
+        content.Should().NotContain("Convert.ToBase64String(entity.Filedata)");
         content.Should().NotContain("private string? _errorFiledata;");
         content
             .Should()
@@ -3425,12 +3506,9 @@ public class CSharpCodeGenerationServiceTests
             .Contain("CustomerIdValue.TryCreate(parsed, out var converted, out var voErrors)");
         // EntityBase / Repository の JSON オプションに VO 変換器が登録される
         content.Should().Contain("Converters = { new ValueObjectJsonConverterFactory() },");
-        // Mapper のロードは必須 VO 列でも null 条件付きで ToString する（= null! のためロード前は null になり得る）
-        content
-            .Should()
-            .Contain(
-                "editModel.BindingCustomerId = entity.CustomerId?.ToString() ?? string.Empty;"
-            );
+        // Mapper のロードは VO 列でも VO インスタンスをそのまま代入する（ToString/TryCreate の往復なし）
+        content.Should().Contain("editModel.CustomerId = entity.CustomerId;");
+        content.Should().NotContain("editModel.BindingCustomerId = entity.");
     }
 
     /// <summary>string PK ＋ GuidKey オプションで PK が GuidKey 基底になり、非 PK の string は通常の string 基底になることを検証する</summary>
@@ -4161,7 +4239,11 @@ public class CSharpCodeGenerationServiceTests
 
         // 実行器委譲パスは出力される
         content.Should().Contain("public sealed class SqlQuery<TEntity>");
-        content.Should().Contain("=> await _executor.ToListAsync(BuildPlan(), cancellationToken);");
+        content
+            .Should()
+            .Contain(
+                "=> await _executor.ToListAsync(BuildPlan(), cancellationToken).ConfigureAwait(false);"
+            );
         // SQL Server 専用の要素は出力されない（コード本体で判定。FOR JSON 等は契約の doc コメントに残るためコードで確認する）
         content.Should().NotContain("private readonly ISqlConnectionFactory _connectionFactory");
         content.Should().NotContain("internal static class SqlExpressionTranslator");

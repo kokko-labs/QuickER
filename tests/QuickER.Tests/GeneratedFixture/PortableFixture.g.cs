@@ -255,6 +255,27 @@ internal static class UnboundedBinaryColumns
             _ => false,
         };
     }
+
+    /// <summary>
+    /// Fills in every excluded column that <paramref name="entity"/> left in the "not-fetched" state from <paramref name="stored"/>,
+    /// so that writing back an entity that was fetched without its blobs keeps them.
+    /// </summary>
+    /// <remarks>
+    /// A real database's UPDATE does not name the excluded columns at all, so the stored blob simply survives it. A store that
+    /// replaces the whole row instead has to carry the old value across explicitly, or an ordinary fetch-modify-save would wipe
+    /// the blob (the update guard cannot catch it: the entity holds exactly the "not-fetched" value the guard permits). A column
+    /// that does carry a value is left alone, because that value is the caller's own data, as it is on an insert.
+    /// </remarks>
+    public static void PreserveUnset(EntityBase entity, EntityBase stored)
+    {
+        foreach (var property in For(entity.GetType()))
+        {
+            if (IsUnset(property.GetValue(entity)))
+            {
+                property.SetValue(entity, property.GetValue(stored));
+            }
+        }
+    }
 }
 
 /// <summary>Non-generic marker for a value object. Used to extract the underlying value and to test the type.</summary>
@@ -319,14 +340,15 @@ public abstract partial class ValueObjectBase<TSelf, TValue> : IValueObject
     /// <summary>Gets the string used for display (defaults to ToString()). A concrete value object's partial class can override it to change the format.</summary>
     public virtual string DisplayValue => ToString();
 
-    /// <summary>Value-based equality (arrays such as byte[] are compared element by element).</summary>
+    /// <summary>Value-based equality (compared through <see cref="EqualityComparer{T}.Default"/>, so a struct value is not boxed).</summary>
+    /// <remarks>A value object whose value is an array needs element-by-element comparison and overrides this — see <see cref="ValueObjectBinaryBase{TSelf}"/>.</remarks>
     public override bool Equals(object? obj) =>
         obj is ValueObjectBase<TSelf, TValue> other
-        && StructuralComparisons.StructuralEqualityComparer.Equals(Value, other.Value);
+        && EqualityComparer<TValue>.Default.Equals(Value, other.Value);
 
-    /// <summary>Value-based hash code (arrays are computed structurally).</summary>
+    /// <summary>Value-based hash code (computed through <see cref="EqualityComparer{T}.Default"/>, so a struct value is not boxed).</summary>
     public override int GetHashCode() =>
-        Value is null ? 0 : StructuralComparisons.StructuralEqualityComparer.GetHashCode(Value);
+        Value is null ? 0 : EqualityComparer<TValue>.Default.GetHashCode(Value);
 
     /// <summary>Value-based equality operator.</summary>
     public static bool operator ==(
@@ -511,7 +533,7 @@ public abstract partial class ValueObjectDateTimeBase<TSelf>
     public static TSelf Today => TSelf.Create(DateTime.Today);
 }
 
-/// <summary>Base for byte[] value objects. ToString returns Base64 (equality uses the base's structural comparison).</summary>
+/// <summary>Base for byte[] value objects. ToString returns Base64, and equality compares the arrays element by element.</summary>
 /// <remarks>
 /// The wrapped array is NOT defensively copied: the value object holds (and exposes through Value) the very array it was
 /// created with, because copying would double the allocation of every binary column read from the database. Treat the array
@@ -523,6 +545,15 @@ public abstract partial class ValueObjectBinaryBase<TSelf> : ValueObjectBase<TSe
     /// <summary>Initializes with an already-validated value.</summary>
     protected ValueObjectBinaryBase(byte[] value)
         : base(value) { }
+
+    /// <summary>Value-based equality (arrays are compared element by element; reference equality would make two equal blobs differ).</summary>
+    public override bool Equals(object? obj) =>
+        obj is ValueObjectBase<TSelf, byte[]> other
+        && StructuralComparisons.StructuralEqualityComparer.Equals(Value, other.Value);
+
+    /// <summary>Value-based hash code (arrays are computed structurally, matching <see cref="Equals(object?)"/>).</summary>
+    public override int GetHashCode() =>
+        Value is null ? 0 : StructuralComparisons.StructuralEqualityComparer.GetHashCode(Value);
 
     /// <summary>Returns the value as a Base64 string.</summary>
     public override string ToString() =>
@@ -1413,8 +1444,16 @@ public abstract partial class EditModelBase
         INotifyDataErrorInfo,
         IEditableObject
 {
-    /// <summary>Error messages keyed by property name.</summary>
+    /// <summary>Input error messages (required, conversion, value object, OnValidate) keyed by property name.</summary>
     private readonly Dictionary<string, List<string>> _errors = new();
+
+    /// <summary>
+    /// Duplicate-value error messages keyed by property name, kept in a store of their own so the two kinds never overwrite each other:
+    /// a uniqueness check registers and clears only this store, while SetError / ClearErrors touch only <see cref="_errors"/>.
+    /// Both stores are merged by <see cref="HasErrors"/>, <see cref="GetErrors"/>, and error collection, so a property can carry a
+    /// conversion error and a duplicate-value error at the same time.
+    /// </summary>
+    private readonly Dictionary<string, List<string>> _duplicateErrors = new();
 
     /// <summary>Raised when a property value changes.</summary>
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -1422,8 +1461,8 @@ public abstract partial class EditModelBase
     /// <summary>Raised when the input errors change.</summary>
     public event EventHandler<DataErrorsChangedEventArgs>? ErrorsChanged;
 
-    /// <summary>Gets a value indicating whether any input errors are present.</summary>
-    public bool HasErrors => _errors.Count > 0;
+    /// <summary>Gets a value indicating whether any errors are present (input errors and duplicate-value errors alike).</summary>
+    public bool HasErrors => _errors.Count > 0 || _duplicateErrors.Count > 0;
 
     /// <summary>Gets a value indicating whether a revert operation is in progress.</summary>
     protected bool IsReverting { get; private set; }
@@ -1656,16 +1695,25 @@ public abstract partial class EditModelBase
         return true;
     }
 
-    /// <summary>Returns the errors for the specified property (all errors when null).</summary>
+    /// <summary>Returns the errors for the specified property (all errors when null). Input errors come first, then duplicate-value errors.</summary>
     public IEnumerable GetErrors(string? propertyName)
     {
         if (string.IsNullOrEmpty(propertyName))
         {
-            return _errors.Values.SelectMany(e => e);
+            return _errors
+                .Values.SelectMany(e => e)
+                .Concat(_duplicateErrors.Values.SelectMany(e => e));
         }
 
-        return _errors.TryGetValue(propertyName, out var list) ? list : Enumerable.Empty<string>();
+        return ReadErrors(_errors, propertyName)
+            .Concat(ReadErrors(_duplicateErrors, propertyName));
     }
+
+    /// <summary>Reads the messages registered for the specified property in the specified error store (empty when there are none).</summary>
+    private static IEnumerable<string> ReadErrors(
+        Dictionary<string, List<string>> store,
+        string propertyName
+    ) => store.TryGetValue(propertyName, out var list) ? list : Enumerable.Empty<string>();
 
     /// <summary>Combines a child element path (empty at the root, "."-separated below).</summary>
     protected static string CombineErrorPath(string path, string segment) =>
@@ -1683,7 +1731,11 @@ public abstract partial class EditModelBase
         {
             foreach (var link in ChildLinks)
             {
-                link.Validate(includeChildren, ref valid);
+                // Do not short-circuit, so that errors are registered on every child.
+                if (!link.Validate(includeChildren))
+                {
+                    valid = false;
+                }
             }
         }
 
@@ -1718,14 +1770,17 @@ public abstract partial class EditModelBase
         }
     }
 
-    /// <summary>Enumerates this edit model's own errors with the specified path (building block for graph collection).</summary>
+    /// <summary>Enumerates this edit model's own errors with the specified path (building block for graph collection). Input errors come first, then duplicate-value errors.</summary>
     protected IEnumerable<EditModelError> CollectOwnErrors(string path)
     {
-        foreach (var pair in _errors)
+        foreach (var store in new[] { _errors, _duplicateErrors })
         {
-            foreach (var message in pair.Value)
+            foreach (var pair in store)
             {
-                yield return new EditModelError(path, pair.Key, message);
+                foreach (var message in pair.Value)
+                {
+                    yield return new EditModelError(path, pair.Key, message);
+                }
             }
         }
     }
@@ -1807,17 +1862,23 @@ public abstract partial class EditModelBase
     protected void AddChild(string name, Func<EditModelBase?> accessor) =>
         (_childLinks ??= new()).Add(ChildLink.ForSingle(name, accessor));
 
-    /// <summary>Registers a child collection into the cascade.</summary>
-    protected void AddChildren<T>(string name, EditModelCollection<T> collection)
+    /// <summary>Registers a child collection into the cascade (the collection is resolved lazily so the latest instance is used, even after a mapper load replaces it).</summary>
+    protected void AddChildren<T>(string name, Func<EditModelCollection<T>> accessor)
         where T : EditModelBase =>
-        (_childLinks ??= new()).Add(ChildLink.ForCollection(name, collection));
+        (_childLinks ??= new()).Add(ChildLink.ForCollection(name, accessor));
 
     /// <summary>Link to a registered child (cascade participant). Treats single references and child collections uniformly.</summary>
+    /// <remarks>
+    /// Every operation goes through the accessor the link was created with, so a child reference or child collection that is
+    /// replaced later (a mapper load rebuilds the collection, for instance) is still the one that validation, error collection,
+    /// accepting changes, and dirty checks see.
+    /// </remarks>
     private sealed class ChildLink
     {
         private readonly string _name;
         private readonly bool _isCollection;
         private readonly Func<IEnumerable<EditModelBase>> _items;
+        private readonly Func<bool, bool> _validate;
         private readonly Func<bool, bool> _hasChanges;
         private readonly Action _acceptRemoved;
 
@@ -1825,6 +1886,7 @@ public abstract partial class EditModelBase
             string name,
             bool isCollection,
             Func<IEnumerable<EditModelBase>> items,
+            Func<bool, bool> validate,
             Func<bool, bool> hasChanges,
             Action acceptRemoved
         )
@@ -1832,6 +1894,7 @@ public abstract partial class EditModelBase
             _name = name;
             _isCollection = isCollection;
             _items = items;
+            _validate = validate;
             _hasChanges = hasChanges;
             _acceptRemoved = acceptRemoved;
         }
@@ -1842,27 +1905,30 @@ public abstract partial class EditModelBase
                 name,
                 false,
                 () => accessor() is { } child ? new[] { child } : Enumerable.Empty<EditModelBase>(),
+                includeChildren => accessor() is not { } child || child.Validate(includeChildren),
                 includeChildren =>
                     accessor() is { } child && child.HasGraphChanges(includeChildren),
                 () => { }
             );
 
         /// <summary>Creates a link that registers a child collection.</summary>
-        public static ChildLink ForCollection<T>(string name, EditModelCollection<T> collection)
+        /// <remarks>
+        /// Validation is delegated to <see cref="EditModelCollection{T}.Validate"/> rather than looping over the elements here,
+        /// so validating the parent also runs the duplicate check among the siblings.
+        /// </remarks>
+        public static ChildLink ForCollection<T>(string name, Func<EditModelCollection<T>> accessor)
             where T : EditModelBase =>
-            new(name, true, () => collection, _ => collection.HasChanges, collection.AcceptRemoved);
+            new(
+                name,
+                true,
+                () => accessor(),
+                includeChildren => accessor().Validate(includeChildren),
+                _ => accessor().HasChanges,
+                () => accessor().AcceptRemoved()
+            );
 
-        /// <summary>Validates the registered children and updates <paramref name="valid"/>.</summary>
-        public void Validate(bool includeChildren, ref bool valid)
-        {
-            foreach (var item in _items())
-            {
-                if (!item.Validate(includeChildren))
-                {
-                    valid = false;
-                }
-            }
-        }
+        /// <summary>Validates the registered children and returns true when they are all valid.</summary>
+        public bool Validate(bool includeChildren) => _validate(includeChildren);
 
         /// <summary>Collects the registered children's errors with paths (name[i] for collections, name for single references).</summary>
         public void CollectErrors(
@@ -1896,7 +1962,7 @@ public abstract partial class EditModelBase
         public bool HasChanges(bool includeChildren) => _hasChanges(includeChildren);
     }
 
-    /// <summary>Sets the error for the specified property (pass null to clear).</summary>
+    /// <summary>Sets the input error for the specified property (pass null to clear). Duplicate-value errors live in their own store and are not affected.</summary>
     protected void SetError(string propertyName, string? error)
     {
         if (error is null)
@@ -1909,7 +1975,7 @@ public abstract partial class EditModelBase
         OnErrorsChanged(propertyName);
     }
 
-    /// <summary>Clears the errors for the specified property.</summary>
+    /// <summary>Clears the input errors for the specified property. Duplicate-value errors live in their own store and are cleared by ClearDuplicateErrors.</summary>
     protected void ClearErrors(string propertyName)
     {
         if (_errors.Remove(propertyName))
@@ -1922,29 +1988,29 @@ public abstract partial class EditModelBase
     protected void OnErrorsChanged(string propertyName) =>
         ErrorsChanged?.Invoke(this, new DataErrorsChangedEventArgs(propertyName));
 
-    /// <summary>Binding property names that currently hold a duplicate-value error (so the next uniqueness check clears exactly what the previous one registered).</summary>
-    private readonly List<string> _duplicateErrorProperties = new();
-
-    /// <summary>Clears the duplicate-value errors registered by the previous uniqueness check (errors registered by other rules are left untouched).</summary>
+    /// <summary>Clears the duplicate-value errors registered by the previous uniqueness check (input errors, which live in a separate store, are left untouched).</summary>
     public void ClearDuplicateErrors()
     {
-        foreach (var propertyName in _duplicateErrorProperties)
+        if (_duplicateErrors.Count == 0)
         {
-            ClearErrors(propertyName);
+            return;
         }
 
-        _duplicateErrorProperties.Clear();
+        var cleared = _duplicateErrors.Keys.ToList();
+        _duplicateErrors.Clear();
+
+        foreach (var propertyName in cleared)
+        {
+            OnErrorsChanged(propertyName);
+        }
     }
 
-    /// <summary>Registers a duplicate-value error on the specified binding property and remembers it, so the next check can clear it. An empty name registers a model-level error.</summary>
+    /// <summary>Registers a duplicate-value error on the specified binding property in the duplicate-value store. An empty name registers a model-level error.</summary>
+    /// <remarks>It does not go through <see cref="SetError"/>, so a conversion error already registered on the same property survives and both are reported.</remarks>
     public void SetDuplicateError(string propertyName, string message)
     {
-        SetError(propertyName, message);
-
-        if (!_duplicateErrorProperties.Contains(propertyName))
-        {
-            _duplicateErrorProperties.Add(propertyName);
-        }
+        _duplicateErrors[propertyName] = [message];
+        OnErrorsChanged(propertyName);
     }
 
     /// <summary>
@@ -2613,11 +2679,11 @@ public partial class CustomerEditModel : EditModelBase
     /// <summary>On-screen input string for CustomerId.</summary>
     private string _bindingCustomerId = string.Empty;
 
-    /// <summary>Confirmed value of CustomerId (read-only from outside).</summary>
+    /// <summary>Confirmed value of CustomerId (written by the input conversion and by the mapper when loading; treat it as read-only elsewhere).</summary>
     public CustomerIdValue? CustomerId
     {
         get => _customerId;
-        private set
+        internal set
         {
             if (EqualityComparer<CustomerIdValue?>.Default.Equals(_customerId, value))
             {
@@ -2716,11 +2782,11 @@ public partial class CustomerEditModel : EditModelBase
     /// <summary>On-screen input string for Name.</summary>
     private string _bindingName = string.Empty;
 
-    /// <summary>Confirmed value of Name (read-only from outside).</summary>
+    /// <summary>Confirmed value of Name (written by the input conversion and by the mapper when loading; treat it as read-only elsewhere).</summary>
     public NameValue? Name
     {
         get => _name;
-        private set
+        internal set
         {
             if (EqualityComparer<NameValue?>.Default.Equals(_name, value))
             {
@@ -2809,11 +2875,11 @@ public partial class CustomerEditModel : EditModelBase
     /// <summary>On-screen input string for Balance.</summary>
     private string _bindingBalance = string.Empty;
 
-    /// <summary>Confirmed value of Balance (read-only from outside).</summary>
+    /// <summary>Confirmed value of Balance (written by the input conversion and by the mapper when loading; treat it as read-only elsewhere).</summary>
     public BalanceValue? Balance
     {
         get => _balance;
-        private set
+        internal set
         {
             if (EqualityComparer<BalanceValue?>.Default.Equals(_balance, value))
             {
@@ -3064,7 +3130,7 @@ public partial class CustomerEditModel : EditModelBase
     /// </summary>
     /// <remarks>
     /// The duplicate-value errors registered by the previous call are cleared first, so re-checking never leaves stale errors. Rows that share the primary key are excluded,
-    /// so the same call is correct for both insert and update. The result is advisory only: the definitive guarantee is the database's own UNIQUE constraint (TOCTOU).
+    /// so the same call is correct for both insert and update (a model whose key is not set yet excludes nothing). The result is advisory only: the definitive guarantee is the database's own UNIQUE constraint (TOCTOU).
     /// </remarks>
     /// <param name="repository">The repository used for the check.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
@@ -3083,7 +3149,9 @@ public partial class CustomerEditModel : EditModelBase
             entity.CustomerId = resolvedCustomerId;
         }
 
-        var violations = await repository.CheckUniquenessAsync(entity, cancellationToken);
+        var violations = await repository
+            .CheckUniquenessAsync(entity, cancellationToken)
+            .ConfigureAwait(false);
 
         foreach (var violation in violations)
         {
@@ -3096,7 +3164,7 @@ public partial class CustomerEditModel : EditModelBase
     /// <summary>Registers the known cascade children into the registry (they participate in validation, error collection, accepting changes, and dirty checks; children added via partial classes are registered in RegisterExtraChildren).</summary>
     protected override void RegisterChildren()
     {
-        AddChildren("Orders", Orders);
+        AddChildren("Orders", () => Orders);
     }
 
     // ---- Snapshots for row editing (IEditableObject) ----
@@ -3184,11 +3252,11 @@ public partial class OrderEditModel : EditModelBase
     /// <summary>On-screen input string for OrderId.</summary>
     private string _bindingOrderId = string.Empty;
 
-    /// <summary>Confirmed value of OrderId (read-only from outside).</summary>
+    /// <summary>Confirmed value of OrderId (written by the input conversion and by the mapper when loading; treat it as read-only elsewhere).</summary>
     public OrderIdValue? OrderId
     {
         get => _orderId;
-        private set
+        internal set
         {
             if (EqualityComparer<OrderIdValue?>.Default.Equals(_orderId, value))
             {
@@ -3287,11 +3355,11 @@ public partial class OrderEditModel : EditModelBase
     /// <summary>On-screen input string for CustomerId.</summary>
     private string _bindingCustomerId = string.Empty;
 
-    /// <summary>Confirmed value of CustomerId (read-only from outside).</summary>
+    /// <summary>Confirmed value of CustomerId (written by the input conversion and by the mapper when loading; treat it as read-only elsewhere).</summary>
     public CustomerIdValue? CustomerId
     {
         get => _customerId;
-        private set
+        internal set
         {
             if (EqualityComparer<CustomerIdValue?>.Default.Equals(_customerId, value))
             {
@@ -3390,11 +3458,11 @@ public partial class OrderEditModel : EditModelBase
     /// <summary>On-screen input string for Memo.</summary>
     private string _bindingMemo = string.Empty;
 
-    /// <summary>Confirmed value of Memo (read-only from outside).</summary>
+    /// <summary>Confirmed value of Memo (written by the input conversion and by the mapper when loading; treat it as read-only elsewhere).</summary>
     public MemoValue? Memo
     {
         get => _memo;
-        private set
+        internal set
         {
             if (EqualityComparer<MemoValue?>.Default.Equals(_memo, value))
             {
@@ -3483,11 +3551,11 @@ public partial class OrderEditModel : EditModelBase
     /// <summary>On-screen input string for Amount.</summary>
     private string _bindingAmount = string.Empty;
 
-    /// <summary>Confirmed value of Amount (read-only from outside).</summary>
+    /// <summary>Confirmed value of Amount (written by the input conversion and by the mapper when loading; treat it as read-only elsewhere).</summary>
     public AmountValue? Amount
     {
         get => _amount;
-        private set
+        internal set
         {
             if (EqualityComparer<AmountValue?>.Default.Equals(_amount, value))
             {
@@ -3727,7 +3795,7 @@ public partial class OrderEditModel : EditModelBase
     /// </summary>
     /// <remarks>
     /// The duplicate-value errors registered by the previous call are cleared first, so re-checking never leaves stale errors. Rows that share the primary key are excluded,
-    /// so the same call is correct for both insert and update. The result is advisory only: the definitive guarantee is the database's own UNIQUE constraint (TOCTOU).
+    /// so the same call is correct for both insert and update (a model whose key is not set yet excludes nothing). The result is advisory only: the definitive guarantee is the database's own UNIQUE constraint (TOCTOU).
     /// </remarks>
     /// <param name="repository">The repository used for the check.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
@@ -3746,7 +3814,9 @@ public partial class OrderEditModel : EditModelBase
             entity.OrderId = resolvedOrderId;
         }
 
-        var violations = await repository.CheckUniquenessAsync(entity, cancellationToken);
+        var violations = await repository
+            .CheckUniquenessAsync(entity, cancellationToken)
+            .ConfigureAwait(false);
 
         foreach (var violation in violations)
         {
@@ -3879,15 +3949,22 @@ public sealed partial class CustomerMapper
     /// <summary>Called after the CustomerEditModel's confirmed values are applied to the CustomerEntity (save additional properties via a partial implementation).</summary>
     partial void OnEntityApplied(CustomerEditModel editModel, CustomerEntity entity);
 
-    /// <summary>Applies the CustomerEntity's values to an existing CustomerEditModel (via the bindings).</summary>
+    /// <summary>Applies the CustomerEntity's values to an existing CustomerEditModel.</summary>
+    /// <remarks>
+    /// Loading is lossless: the confirmed values are copied straight from the entity instead of being rebuilt by parsing
+    /// the on-screen input strings, so nothing that the display format cannot express (sub-second precision of a
+    /// DateTime, its Kind, and so on) is dropped. The input strings are then derived from the confirmed values.
+    /// </remarks>
     public void ApplyToEditModel(CustomerEntity entity, CustomerEditModel editModel)
     {
         editModel.ExecuteLoad(() =>
         {
+            editModel.CustomerId = entity.CustomerId;
+            editModel.Name = entity.Name;
+            editModel.Balance = entity.Balance;
+
+            // Derive the on-screen input strings from the confirmed values just loaded and clear stale conversion errors.
             editModel.RevertInput();
-            editModel.BindingCustomerId = entity.CustomerId?.ToString() ?? string.Empty;
-            editModel.BindingName = entity.Name?.ToString() ?? string.Empty;
-            editModel.BindingBalance = entity.Balance?.ToString() ?? string.Empty;
             editModel.Orders = new OrderMapper().CreateEditModels(entity.Orders);
             OnEditModelLoaded(entity, editModel);
         });
@@ -3951,16 +4028,23 @@ public sealed partial class OrderMapper
     /// <summary>Called after the OrderEditModel's confirmed values are applied to the OrderEntity (save additional properties via a partial implementation).</summary>
     partial void OnEntityApplied(OrderEditModel editModel, OrderEntity entity);
 
-    /// <summary>Applies the OrderEntity's values to an existing OrderEditModel (via the bindings).</summary>
+    /// <summary>Applies the OrderEntity's values to an existing OrderEditModel.</summary>
+    /// <remarks>
+    /// Loading is lossless: the confirmed values are copied straight from the entity instead of being rebuilt by parsing
+    /// the on-screen input strings, so nothing that the display format cannot express (sub-second precision of a
+    /// DateTime, its Kind, and so on) is dropped. The input strings are then derived from the confirmed values.
+    /// </remarks>
     public void ApplyToEditModel(OrderEntity entity, OrderEditModel editModel)
     {
         editModel.ExecuteLoad(() =>
         {
+            editModel.OrderId = entity.OrderId;
+            editModel.CustomerId = entity.CustomerId;
+            editModel.Memo = entity.Memo;
+            editModel.Amount = entity.Amount;
+
+            // Derive the on-screen input strings from the confirmed values just loaded and clear stale conversion errors.
             editModel.RevertInput();
-            editModel.BindingOrderId = entity.OrderId?.ToString() ?? string.Empty;
-            editModel.BindingCustomerId = entity.CustomerId?.ToString() ?? string.Empty;
-            editModel.BindingMemo = entity.Memo?.ToString() ?? string.Empty;
-            editModel.BindingAmount = entity.Amount?.ToString() ?? string.Empty;
             OnEditModelLoaded(entity, editModel);
         });
 
@@ -4401,7 +4485,7 @@ public interface ISaveHookContext
             stream,
             stream.Length,
             cancellationToken
-        );
+        ).ConfigureAwait(false);
     }
 }
 
@@ -4497,7 +4581,7 @@ internal sealed class SaveHookInvoker<TEntity>(IEnumerable<ISaveHook<TEntity>> h
 
         foreach (var hook in _hooks)
         {
-            if (!await hook.BeforeSaveAsync(typed, operation, cancellationToken))
+            if (!await hook.BeforeSaveAsync(typed, operation, cancellationToken).ConfigureAwait(false))
             {
                 return false;
             }
@@ -4518,7 +4602,7 @@ internal sealed class SaveHookInvoker<TEntity>(IEnumerable<ISaveHook<TEntity>> h
 
         foreach (var hook in _hooks)
         {
-            await hook.AfterSaveAsync(typed, operation, context, cancellationToken);
+            await hook.AfterSaveAsync(typed, operation, context, cancellationToken).ConfigureAwait(false);
         }
     }
 }
@@ -4694,7 +4778,7 @@ internal static class RawSqlMapper
         // Single-value mode (primitive/enum/string/decimal/date-time/Guid/byte[]/value object) converts and returns the first column of each row
         if (IsSingleValueType(resultType))
         {
-            while (await reader.ReadAsync(cancellationToken))
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
             {
                 var raw = reader.IsDBNull(0) ? null : reader.GetValue(0);
                 // Single-value mode allows DBNull → default (may be null for reference types, but projections carry no corruption risk)
@@ -4735,7 +4819,7 @@ internal static class RawSqlMapper
             );
         }
 
-        while (await reader.ReadAsync(cancellationToken))
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
             var result = accessor.Create();
             for (var i = 0; i < setters.Length; i++)
@@ -5250,19 +5334,19 @@ public sealed class SqlQuery<TEntity>
     /// <summary>Fetches the entities matching the conditions (together with the requested Includes) as a list.</summary>
     public async Task<IReadOnlyList<TEntity>> ToListAsync(
         CancellationToken cancellationToken = default
-    ) => await _executor.ToListAsync(BuildPlan(), cancellationToken);
+    ) => await _executor.ToListAsync(BuildPlan(), cancellationToken).ConfigureAwait(false);
 
     /// <summary>Fetches the first entity matching the conditions (together with the requested Includes); returns null when there is no match.</summary>
     public async Task<TEntity?> FirstOrDefaultAsync(CancellationToken cancellationToken = default) =>
-        await _executor.FirstOrDefaultAsync(BuildPlan(), cancellationToken);
+        await _executor.FirstOrDefaultAsync(BuildPlan(), cancellationToken).ConfigureAwait(false);
 
     /// <summary>Returns the count of rows matching the conditions.</summary>
     public async Task<int> CountAsync(CancellationToken cancellationToken = default) =>
-        await _executor.CountAsync(BuildPlan(), cancellationToken);
+        await _executor.CountAsync(BuildPlan(), cancellationToken).ConfigureAwait(false);
 
     /// <summary>Returns whether any record matching the conditions exists.</summary>
     public async Task<bool> AnyAsync(CancellationToken cancellationToken = default) =>
-        await _executor.AnyAsync(BuildPlan(), cancellationToken);
+        await _executor.AnyAsync(BuildPlan(), cancellationToken).ConfigureAwait(false);
 
     /// <summary>Fetches the entities matching the conditions and returns them as a list transformed by the given projection (for named-query projections).</summary>
     /// <remarks>
@@ -5280,14 +5364,14 @@ public sealed class SqlQuery<TEntity>
     {
         ArgumentNullException.ThrowIfNull(selector);
 
-        return await _executor.ToProjectionListAsync(BuildPlan(), selector, cancellationToken);
+        return await _executor.ToProjectionListAsync(BuildPlan(), selector, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Bulk-deletes the rows matching the conditions. When cascadeDelete=true, descendants are also deleted along FK chains.</summary>
     public async Task<int> ExecuteDeleteAsync(
         bool cascadeDelete = false,
         CancellationToken cancellationToken = default
-    ) => await _executor.ExecuteDeleteAsync(BuildPlan(), cascadeDelete, cancellationToken);
+    ) => await _executor.ExecuteDeleteAsync(BuildPlan(), cascadeDelete, cancellationToken).ConfigureAwait(false);
 
     /// <summary>Freezes the captured expressions, Include tree, and paging into a snapshot to pass to the executor.</summary>
     private SqlQueryPlan<TEntity> BuildPlan()
@@ -5610,6 +5694,14 @@ internal sealed class EntitySaveMetadata
     }
 
     // ===== Row materializer (expression-tree compiled; removes reflection from the hot path) =====
+    /// <summary>Type-specialized reader accessors that avoid boxing (<c>GetInt32</c> etc.). Only the fast-path CLR types are registered.</summary>
+    private static readonly IReadOnlyDictionary<Type, MethodInfo> _typedReaders = BuildTypedReaders();
+
+    /// <summary>Resolved <see cref="MethodInfo"/> of <see cref="DbDataReader.IsDBNull(int)"/>.</summary>
+    private static readonly MethodInfo _isDbNullMethod = typeof(DbDataReader).GetMethod(
+        nameof(DbDataReader.IsDBNull),
+        new[] { typeof(int) }
+    )!;
 
     /// <summary>Resolved <see cref="MethodInfo"/> of <see cref="DbDataReader.GetValue(int)"/> (used as the fallback for columns that cannot be type-specialized).</summary>
     private static readonly MethodInfo _getValueMethod = typeof(DbDataReader).GetMethod(
@@ -5632,13 +5724,92 @@ internal sealed class EntitySaveMetadata
     /// <remarks>The arguments are <c>(reader, ordinals)</c>. <c>ordinals</c> holds the column ordinals in SelectColumns order, resolved once before the row loop.</remarks>
     public required Func<DbDataReader, int[], EntityBase> SelectMaterializer { get; init; }
 
+    /// <summary>Builds the type-specialized reader accessor table (each value is a <see cref="DbDataReader"/> method taking an <c>int</c> and returning the corresponding CLR type).</summary>
+    private static IReadOnlyDictionary<Type, MethodInfo> BuildTypedReaders()
+    {
+        static MethodInfo Getter(string name) =>
+            typeof(DbDataReader).GetMethod(name, new[] { typeof(int) })!;
+
+        // Type-specialized accessors for the declared column types the generated SELECT returns. On SQLite each GetXxx
+        // coerces the storage type (long to int, TEXT to DateTime, etc.), equivalent to CoerceScalar; on SQL Server each
+        // returns the column's CLR type directly, equivalent to the previous pass-through. Types not listed here
+        // (byte[], enums, DateTimeOffset, TimeSpan, etc.) are converted via the fallback as before.
+        return new Dictionary<Type, MethodInfo>
+        {
+            [typeof(bool)] = Getter(nameof(DbDataReader.GetBoolean)),
+            [typeof(byte)] = Getter(nameof(DbDataReader.GetByte)),
+            [typeof(short)] = Getter(nameof(DbDataReader.GetInt16)),
+            [typeof(int)] = Getter(nameof(DbDataReader.GetInt32)),
+            [typeof(long)] = Getter(nameof(DbDataReader.GetInt64)),
+            [typeof(float)] = Getter(nameof(DbDataReader.GetFloat)),
+            [typeof(double)] = Getter(nameof(DbDataReader.GetDouble)),
+            [typeof(decimal)] = Getter(nameof(DbDataReader.GetDecimal)),
+            [typeof(string)] = Getter(nameof(DbDataReader.GetString)),
+            [typeof(DateTime)] = Getter(nameof(DbDataReader.GetDateTime)),
+            [typeof(Guid)] = Getter(nameof(DbDataReader.GetGuid)),
+        };
+    }
+
+    /// <summary>Caches the type-specialized pair resolved per value object property type (<c>null</c> when the type has no fast path).</summary>
+    private static readonly ConcurrentDictionary<
+        Type,
+        (MethodInfo Getter, MethodInfo Create)?
+    > _valueObjectReaderCache = new();
+
+    /// <summary>
+    /// Resolves the type-specialized pair for a value object property: the reader accessor for its underlying value and
+    /// the static <c>Create</c> factory that wraps it.
+    /// </summary>
+    /// <remarks>
+    /// Returns <c>null</c> when the property is not a value object, when its underlying type has no type-specialized
+    /// accessor (<c>byte[]</c> and friends), or when no matching factory exists; those columns take the fallback.
+    /// </remarks>
+    private static (MethodInfo Getter, MethodInfo Create)? ResolveValueObjectReader(
+        Type propertyType
+    ) => _valueObjectReaderCache.GetOrAdd(propertyType, ResolveValueObjectReaderCore);
+
+    /// <summary>Performs the uncached resolution behind <see cref="ResolveValueObjectReader"/>.</summary>
+    private static (MethodInfo Getter, MethodInfo Create)? ResolveValueObjectReaderCore(
+        Type propertyType
+    )
+    {
+        var iface = Array.Find(
+            propertyType.GetInterfaces(),
+            i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IValueObject<,>)
+        );
+
+        if (iface is null)
+        {
+            return null;
+        }
+
+        // The underlying value type is the second type argument of IValueObject<TSelf, TValue>
+        if (!_typedReaders.TryGetValue(iface.GetGenericArguments()[1], out var getter))
+        {
+            return null;
+        }
+
+        var create = propertyType.GetMethod(
+            "Create",
+            BindingFlags.Public | BindingFlags.Static,
+            binder: null,
+            new[] { getter.ReturnType },
+            modifiers: null
+        );
+
+        return create is null ? null : (getter, create);
+    }
+
     /// <summary>
     /// Builds the expression-tree-compiled delegate that materializes one row of SelectColumns (the fixed SELECT set)
     /// into an entity using a pre-resolved ordinal array (once per type).
     /// </summary>
     /// <remarks>
     /// Columns with a type-specialized accessor are read directly without boxing (<c>DBNull</c> becomes the default value,
-    /// equivalent to the previous <c>SetValue(null)</c>); all other columns fall back to the previous
+    /// equivalent to the previous <c>SetValue(null)</c>);
+    /// a value object column whose underlying value has such an accessor reads it the same way and calls the value object's
+    /// static <c>Create</c> factory directly;
+    /// all other columns fall back to the previous
     /// <see cref="SetColumnValue"/> (dialect-specific conversion / value object re-wrapping).
     /// The resulting final state (<c>RowState = Unchanged</c>) matches the previous row mapping.
     /// </remarks>
@@ -5685,6 +5856,50 @@ internal sealed class EntitySaveMetadata
         PropertyInfo property
     )
     {
+        var propertyType = property.PropertyType;
+        var underlying = Nullable.GetUnderlyingType(propertyType) ?? propertyType;
+
+        // Columns with a type-specialized accessor are read directly without boxing
+        // (DBNull becomes the default value, equivalent to the previous SetValue(null))
+        if (_typedReaders.TryGetValue(underlying, out var getter))
+        {
+            Expression read = Expression.Call(readerParam, getter, ordinal);
+
+            if (getter.ReturnType != propertyType)
+            {
+                read = Expression.Convert(read, propertyType);
+            }
+
+            var value = Expression.Condition(
+                Expression.Call(readerParam, _isDbNullMethod, ordinal),
+                Expression.Default(propertyType),
+                read
+            );
+            return Expression.Assign(Expression.Property(entityExpr, property), value);
+        }
+
+        // A value object whose underlying value has a type-specialized accessor reads that value without boxing and
+        // calls the static Create factory straight from the expression tree (no reflection Invoke, no Convert.ChangeType,
+        // and DBNull becomes null, equivalent to the previous SetValue(null))
+        if (ResolveValueObjectReader(propertyType) is (var voGetter, var voCreate))
+        {
+            Expression created = Expression.Call(
+                voCreate,
+                Expression.Call(readerParam, voGetter, ordinal)
+            );
+
+            if (created.Type != propertyType)
+            {
+                created = Expression.Convert(created, propertyType);
+            }
+
+            var wrapped = Expression.Condition(
+                Expression.Call(readerParam, _isDbNullMethod, ordinal),
+                Expression.Default(propertyType),
+                created
+            );
+            return Expression.Assign(Expression.Property(entityExpr, property), wrapped);
+        }
 
         // Fallback: call the previous SetColumnValue (DBNull to null / dialect-specific conversion / value object re-wrapping) via the ordinal
         return Expression.Call(
@@ -5995,7 +6210,7 @@ public partial interface ICustomerRepository : IRepository<CustomerEntity, Custo
 {
     /// <summary>Checks the UNIQUE constraints of customers against the database and returns the violations (an empty list when there are none).</summary>
     /// <remarks>
-    /// Rows that share the entity's primary key are excluded, so the same call is correct for both insert and update. Constraint member values that contain
+    /// Rows that share the entity's primary key are excluded, so the same call is correct for both insert and update (an entity whose key is not set yet excludes nothing). Constraint member values that contain
     /// a null are skipped (NULL collision semantics differ per dialect). The result is advisory only: the definitive guarantee is the database's own UNIQUE
     /// constraint, and a concurrent insert between this check and the save can still make the save fail (TOCTOU).
     /// </remarks>
@@ -6012,7 +6227,7 @@ public partial interface IOrderRepository : IRepository<OrderEntity, OrderIdValu
 {
     /// <summary>Checks the UNIQUE constraints of orders against the database and returns the violations (an empty list when there are none).</summary>
     /// <remarks>
-    /// Rows that share the entity's primary key are excluded, so the same call is correct for both insert and update. Constraint member values that contain
+    /// Rows that share the entity's primary key are excluded, so the same call is correct for both insert and update (an entity whose key is not set yet excludes nothing). Constraint member values that contain
     /// a null are skipped (NULL collision semantics differ per dialect). The result is advisory only: the definitive guarantee is the database's own UNIQUE
     /// constraint, and a concurrent insert between this check and the save can still make the save fail (TOCTOU).
     /// </remarks>
@@ -6500,16 +6715,16 @@ public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TConte
         var metadata = EntitySaveMetadata.For(typeof(TEntity));
         var items = new List<TEntity>();
 
-        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
         await using var command = await CreateCommandAsync(
             context,
             sql,
             parameters,
             cancellationToken
-        );
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        ).ConfigureAwait(false);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
 
-        while (await reader.ReadAsync(cancellationToken))
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
             items.Add(metadata.MapEntityFromRawSql<TEntity>(reader));
         }
@@ -6526,17 +6741,17 @@ public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TConte
     {
         ArgumentNullException.ThrowIfNull(sql);
 
-        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
         await using var command = await CreateCommandAsync(
             context,
             sql,
             parameters,
             cancellationToken
-        );
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        ).ConfigureAwait(false);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
 
         // Projection mapping (single-value mode, DTO mode) uses the single shared helper path.
-        return await RawSqlMapper.ReadProjectionRowsAsync<TResult>(reader, cancellationToken);
+        return await RawSqlMapper.ReadProjectionRowsAsync<TResult>(reader, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Executes raw SQL (UPDATE/DELETE/any DML) and returns the number of affected rows.</summary>
@@ -6552,15 +6767,15 @@ public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TConte
     {
         ArgumentNullException.ThrowIfNull(sql);
 
-        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
         await using var command = await CreateCommandAsync(
             context,
             sql,
             parameters,
             cancellationToken
-        );
+        ).ConfigureAwait(false);
 
-        return await command.ExecuteNonQueryAsync(cancellationToken);
+        return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Executes raw SQL and returns a single scalar value (no match / DBNull yields <c>default</c>).</summary>
@@ -6572,15 +6787,15 @@ public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TConte
     {
         ArgumentNullException.ThrowIfNull(sql);
 
-        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
         await using var command = await CreateCommandAsync(
             context,
             sql,
             parameters,
             cancellationToken
-        );
+        ).ConfigureAwait(false);
 
-        var scalar = await command.ExecuteScalarAsync(cancellationToken);
+        var scalar = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
         return RawSqlMapper.ConvertSingleValue<TResult>(scalar is DBNull ? null : scalar);
     }
 
@@ -6593,7 +6808,7 @@ public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TConte
     )
     {
         // The connection is owned by the DbContext and is closed when the DbContext is disposed.
-        await context.Database.OpenConnectionAsync(cancellationToken);
+        await context.Database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
 
         var command = context.Database.GetDbConnection().CreateCommand();
         command.CommandText = sql;
@@ -6630,13 +6845,13 @@ internal sealed class EfCoreSqlQueryExecutor<TEntity, TContext>(
         CancellationToken cancellationToken
     )
     {
-        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
 
         var query = ApplyOrderings(
             ApplyIncludes(ApplyPredicates(context.Set<TEntity>().AsNoTracking(), plan), plan),
             plan
         );
-        var items = await ApplyPaging(query, plan).ToListAsync(cancellationToken);
+        var items = await ApplyPaging(query, plan).ToListAsync(cancellationToken).ConfigureAwait(false);
 
         foreach (var item in items)
         {
@@ -6668,11 +6883,11 @@ internal sealed class EfCoreSqlQueryExecutor<TEntity, TContext>(
         if (!prunable)
         {
             // Fallback: fetch all columns (including Includes), then project in memory.
-            var entities = await ToListAsync(plan, cancellationToken);
+            var entities = await ToListAsync(plan, cancellationToken).ConfigureAwait(false);
             return entities.Select(selector.Compile()).ToList();
         }
 
-        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
 
         // Includes are assumed absent, so none are applied. Apply orderings and paging, then apply Select directly.
         var query = ApplyPaging(
@@ -6680,7 +6895,7 @@ internal sealed class EfCoreSqlQueryExecutor<TEntity, TContext>(
             plan
         );
 
-        return await query.Select(selector).ToListAsync(cancellationToken);
+        return await query.Select(selector).ToListAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Retrieves the first entity matching the conditions (together with the specified Includes), or null when there is no match.</summary>
@@ -6689,7 +6904,7 @@ internal sealed class EfCoreSqlQueryExecutor<TEntity, TContext>(
         CancellationToken cancellationToken
     )
     {
-        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
 
         var query = ApplyOrderings(
             ApplyIncludes(ApplyPredicates(context.Set<TEntity>().AsNoTracking(), plan), plan),
@@ -6702,7 +6917,7 @@ internal sealed class EfCoreSqlQueryExecutor<TEntity, TContext>(
             query = query.Skip(skip);
         }
 
-        var item = await query.FirstOrDefaultAsync(cancellationToken);
+        var item = await query.FirstOrDefaultAsync(cancellationToken).ConfigureAwait(false);
 
         if (item is not null)
         {
@@ -6718,10 +6933,10 @@ internal sealed class EfCoreSqlQueryExecutor<TEntity, TContext>(
         CancellationToken cancellationToken
     )
     {
-        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
 
         return await ApplyPredicates(context.Set<TEntity>().AsNoTracking(), plan)
-            .CountAsync(cancellationToken);
+            .CountAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Retrieves whether any matching record exists (as in the existing version, orderings, paging, and Includes are not involved).</summary>
@@ -6730,10 +6945,10 @@ internal sealed class EfCoreSqlQueryExecutor<TEntity, TContext>(
         CancellationToken cancellationToken
     )
     {
-        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
 
         return await ApplyPredicates(context.Set<TEntity>().AsNoTracking(), plan)
-            .AnyAsync(cancellationToken);
+            .AnyAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Bulk-deletes the rows matching the conditions. When cascadeDelete=true, descendants are also deleted following the FK chain.</summary>
@@ -6743,25 +6958,25 @@ internal sealed class EfCoreSqlQueryExecutor<TEntity, TContext>(
         CancellationToken cancellationToken
     )
     {
-        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
         var roots = ApplyPredicates(context.Set<TEntity>(), plan);
 
         if (!cascadeDelete)
         {
-            return await roots.ExecuteDeleteAsync(cancellationToken);
+            return await roots.ExecuteDeleteAsync(cancellationToken).ConfigureAwait(false);
         }
 
         // Cascade: run ExecuteDelete in descendants → root order within a single transaction (same DELETE statement order as the existing version).
         await using var transaction = await context.Database.BeginTransactionAsync(
             cancellationToken
-        );
+        ).ConfigureAwait(false);
         var rows = await DeleteSubtreeAsync(
             context,
             roots,
             new HashSet<Type> { typeof(TEntity) },
             cancellationToken
-        );
-        await transaction.CommitAsync(cancellationToken);
+        ).ConfigureAwait(false);
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
         return rows;
     }
 
@@ -6796,12 +7011,12 @@ internal sealed class EfCoreSqlQueryExecutor<TEntity, TContext>(
                 _deleteSubtreeMethod
                     .MakeGenericMethod(navigation.ChildType)
                     .Invoke(null, new object[] { context, childQuery, visited, cancellationToken })!;
-            rows += await subtreeTask;
+            rows += await subtreeTask.ConfigureAwait(false);
 
             visited.Remove(navigation.ChildType);
         }
 
-        rows += await query.ExecuteDeleteAsync(cancellationToken);
+        rows += await query.ExecuteDeleteAsync(cancellationToken).ConfigureAwait(false);
         return rows;
     }
 
@@ -7080,12 +7295,12 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
     /// <remarks>As in the existing version, only the single table is read (navigations are loaded via Include on <see cref="Query"/>).</remarks>
     public async Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default)
     {
-        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
 
         var entity = await context
             .Set<TEntity>()
             .AsNoTracking()
-            .FirstOrDefaultAsync(BuildKeyPredicate(id), cancellationToken);
+            .FirstOrDefaultAsync(BuildKeyPredicate(id), cancellationToken).ConfigureAwait(false);
         // Rows read from the database are treated as unchanged (the same post-state as the existing version's MapEntity).
         entity?.MarkUnchanged();
         return entity;
@@ -7096,9 +7311,9 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
         CancellationToken cancellationToken = default
     )
     {
-        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
 
-        var items = await context.Set<TEntity>().AsNoTracking().ToListAsync(cancellationToken);
+        var items = await context.Set<TEntity>().AsNoTracking().ToListAsync(cancellationToken).ConfigureAwait(false);
 
         foreach (var item in items)
         {
@@ -7113,11 +7328,11 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
     {
         ArgumentNullException.ThrowIfNull(entity);
 
-        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
 
         // Add marks navigation targets as Added too, so assign Entry.State to add only the single target (the same scope as the existing version's single INSERT).
         context.Entry(entity).State = EntityState.Added;
-        await context.SaveChangesAsync(cancellationToken);
+        await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Bulk-inserts a collection of entities.</summary>
@@ -7139,7 +7354,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
             return 0;
         }
 
-        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
 
         foreach (var entity in entities)
         {
@@ -7147,7 +7362,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
             context.Entry(entity).State = EntityState.Added;
         }
 
-        return await context.SaveChangesAsync(cancellationToken);
+        return await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Updates an entity (true when a target row was updated).</summary>
@@ -7168,7 +7383,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
         ArgumentNullException.ThrowIfNull(entity);
         mode = ConcurrencyModes.Validated(mode);
 
-        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
         var entry = context.Entry(entity);
         entry.State = EntityState.Modified;
 
@@ -7176,14 +7391,14 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
         {
             try
             {
-                await context.SaveChangesAsync(cancellationToken);
+                await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
                 return true;
             }
             catch (DbUpdateConcurrencyException)
             {
                 // Matching no row is ambiguous: either the row is gone (the pre-existing "0 affected rows → false" contract)
                 // or its concurrency token moved on after this entity was read. Reading the stored values tells the two apart
-                var stored = await entry.GetDatabaseValuesAsync(cancellationToken);
+                var stored = await entry.GetDatabaseValuesAsync(cancellationToken).ConfigureAwait(false);
 
                 if (stored is null)
                 {
@@ -7212,12 +7427,12 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
     /// <summary>Deletes an entity by primary key (true when a target row was deleted).</summary>
     public async Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default)
     {
-        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
 
         var affected = await context
             .Set<TEntity>()
             .Where(BuildKeyPredicate(id))
-            .ExecuteDeleteAsync(cancellationToken);
+            .ExecuteDeleteAsync(cancellationToken).ConfigureAwait(false);
         return affected > 0;
     }
 
@@ -7251,7 +7466,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
             return 0;
         }
 
-        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
 
         var tracked = new List<TrackedOperation>();
         TrackGraph(context, entity, cascadeSave, cascadeDelete, tracked);
@@ -7264,7 +7479,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
             insertWhenUpdateMissing,
             mode,
             cancellationToken
-        );
+        ).ConfigureAwait(false);
     }
 
     /// <summary>Saves multiple aggregate roots together within a single transaction (atomic: all succeed or all roll back).</summary>
@@ -7297,7 +7512,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
             return 0;
         }
 
-        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
 
         var tracked = new List<TrackedOperation>();
 
@@ -7314,7 +7529,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
             insertWhenUpdateMissing,
             mode,
             cancellationToken
-        );
+        ).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -7346,7 +7561,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
                 insertWhenUpdateMissing,
                 mode,
                 cancellationToken
-            );
+            ).ConfigureAwait(false);
 
             foreach (var root in roots)
             {
@@ -7364,7 +7579,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
 
         foreach (var op in tracked)
         {
-            if (await hooks.InvokeBeforeAsync(op.Entity, op.Operation, cancellationToken))
+            if (await hooks.InvokeBeforeAsync(op.Entity, op.Operation, cancellationToken).ConfigureAwait(false))
             {
                 survivors.Add(op);
             }
@@ -7376,7 +7591,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
         }
 
         // To fire After "post-operation, pre-commit", SaveChanges is performed within an explicit transaction.
-        await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
+        await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
 
         // SaveChanges writes the row version the database assigned straight onto the entity, but this transaction has not
         // committed yet. The versions the entities were read with are kept so that they can be put back for the duration of
@@ -7397,7 +7612,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
             insertWhenUpdateMissing,
             mode,
             cancellationToken
-        );
+        ).ConfigureAwait(false);
 
         // Set the assigned versions aside and restore the ones the entities were read with: After runs before the commit, so
         // it must see the old version, and a rollback (an exception thrown by After) must not leave behind a version the
@@ -7421,10 +7636,10 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
         // After pass (pre-commit): fires in recorded order with the operation actually performed (Insert when switched).
         foreach (var op in survivors)
         {
-            await hooks.InvokeAfterAsync(op.Entity, op.Operation, cancellationToken);
+            await hooks.InvokeAfterAsync(op.Entity, op.Operation, cancellationToken).ConfigureAwait(false);
         }
 
-        await transaction.CommitAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
 
         // The commit made the assigned row versions real, so settle them on the entities.
         foreach (var (entity, property, version) in assignedVersions)
@@ -7588,7 +7803,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
         {
             try
             {
-                return await context.SaveChangesAsync(cancellationToken);
+                return await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
             }
             catch (DbUpdateConcurrencyException ex)
             {
@@ -7602,7 +7817,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
 
                 foreach (var entry in ex.Entries)
                 {
-                    var stored = await entry.GetDatabaseValuesAsync(cancellationToken);
+                    var stored = await entry.GetDatabaseValuesAsync(cancellationToken).ConfigureAwait(false);
 
                     if (stored is not null)
                     {
@@ -7679,7 +7894,7 @@ internal sealed class EfCoreSaveHookContext(DbContext context) : ISaveHookContex
         // Participate in the ongoing save transaction (no separate connection or transaction is opened).
         command.Transaction = _context.Database.CurrentTransaction?.GetDbTransaction();
         RawSqlMapper.BindParameters(command, parameters);
-        return await command.ExecuteNonQueryAsync(cancellationToken);
+        return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Writing excluded binary columns is not supported in EF Core mode (the same policy as the stream accessors: use raw SQL or the QuickER Repository).</summary>
@@ -7751,7 +7966,10 @@ public sealed partial class EfCoreCustomerRepository(
         {
             foreach (var customCheck in customChecks)
             {
-                if (await customCheck(entity, cancellationToken) is { } violation)
+                if (
+                    await customCheck(entity, cancellationToken)
+                        .ConfigureAwait(false) is { } violation
+                )
                 {
                     violations.Add(violation);
                 }
@@ -7789,7 +8007,10 @@ public sealed partial class EfCoreOrderRepository(
         {
             foreach (var customCheck in customChecks)
             {
-                if (await customCheck(entity, cancellationToken) is { } violation)
+                if (
+                    await customCheck(entity, cancellationToken)
+                        .ConfigureAwait(false) is { } violation
+                )
                 {
                     violations.Add(violation);
                 }

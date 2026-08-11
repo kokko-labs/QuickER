@@ -379,6 +379,82 @@ public sealed class InMemoryFixtureRuntimeTests
         remaining[0].Amount.Should().Be(50m);
     }
 
+    [Fact(
+        DisplayName = "ストアは行だけを持つ: Include なしの取得でナビが空・再保存で子の重複 INSERT にならない"
+    )]
+    public async Task Save_StoresRowWithoutChildGraph()
+    {
+        var (_, customers, orders, profiles) = BuildFresh();
+
+        // 親＋子コレクション＋単一参照子をカスケード保存（グラフのまま渡す）
+        var alice = NewCustomer(1, "Alice");
+        alice.Orders.Add(NewOrder(10, 1, 5m));
+        alice.CustomerProfile = new CustomerProfileEntity
+        {
+            ProfileId = 100,
+            CustomerId = 1,
+            Bio = "hello",
+            RowState = RowState.Added,
+        };
+        await customers.SaveAsync(alice, cancellationToken: Ct);
+
+        // Include なしの取得は実 DB の SELECT と同じく行だけ＝ナビは初期状態（子グラフを抱え込まない）
+        var loaded = await customers.GetByIdAsync(1, Ct);
+        loaded!.Orders.Should().BeEmpty("Include していない子コレクションは実 DB と同じく空");
+        loaded.CustomerProfile.Should().BeNull("Include していない単一参照子は実 DB と同じく null");
+        (await customers.GetAllAsync(Ct))[0].Orders.Should().BeEmpty();
+        (await customers.Query().ToListAsync(Ct))[0].Orders.Should().BeEmpty();
+
+        // Include すれば従来どおり FK から復元される
+        var included = await customers
+            .Query()
+            .Where(c => c.CustomerId == 1)
+            .Include(c => c.Orders)
+            .Include(c => c.CustomerProfile)
+            .FirstOrDefaultAsync(Ct);
+        included!.Orders.Should().ContainSingle();
+        included.CustomerProfile!.Bio.Should().Be("hello");
+
+        // 取得したエンティティをそのまま再保存しても、抱え込んだ Added の子を二重 INSERT しない
+        loaded.Name = "Alice2";
+        loaded.RowState = RowState.Updated;
+        var act = async () => await customers.SaveAsync(loaded, cancellationToken: Ct);
+        await act.Should().NotThrowAsync();
+        (await orders.GetAllAsync(Ct)).Should().ContainSingle("子は 1 件のまま");
+        (await profiles.GetAllAsync(Ct)).Should().ContainSingle();
+        (await customers.GetByIdAsync(1, Ct))!.Name.Should().Be("Alice2");
+    }
+
+    [Fact(DisplayName = "OrderBy: 文字列は序数順（大文字小文字はカルチャ非依存に並ぶ）")]
+    public async Task OrderBy_StringIsOrdinal()
+    {
+        var (_, customers, _, _) = BuildFresh();
+        await customers.InsertAsync(NewCustomer(1, "apple"), Ct);
+        await customers.InsertAsync(NewCustomer(2, "Banana"), Ct);
+
+        // カルチャ依存の比較では apple < Banana、序数比較では 'B'(0x42) < 'a'(0x61) で Banana が先。
+        // InMemory の Where（Ordinal）と並び順の意味論を揃える
+        var ascending = await customers.Query().OrderBy(c => c.Name).ToListAsync(Ct);
+        ascending.Select(c => c.Name).Should().Equal("Banana", "apple");
+
+        var descending = await customers.Query().OrderByDescending(c => c.Name).ToListAsync(Ct);
+        descending.Select(c => c.Name).Should().Equal("apple", "Banana");
+    }
+
+    [Fact(DisplayName = "OrderBy: null は昇順で先頭・降順で末尾（SQL の ORDER BY と同じ）")]
+    public async Task OrderBy_NullSortsFirstAscending()
+    {
+        var (_, customers, _, _) = BuildFresh();
+        await customers.InsertAsync(NewCustomer(1, "A", balance: 10m), Ct);
+        await customers.InsertAsync(NewCustomer(2, "B"), Ct);
+
+        var ascending = await customers.Query().OrderBy(c => c.Balance).ToListAsync(Ct);
+        ascending.Select(c => c.CustomerId).Should().Equal(2, 1);
+
+        var descending = await customers.Query().OrderByDescending(c => c.Balance).ToListAsync(Ct);
+        descending.Select(c => c.CustomerId).Should().Equal(1, 2);
+    }
+
     [Fact(DisplayName = "SaveAsync: insertWhenUpdateMissing で更新対象なしを INSERT へ切替")]
     public async Task SaveAsync_InsertWhenUpdateMissing()
     {

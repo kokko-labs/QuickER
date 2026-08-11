@@ -113,9 +113,7 @@ internal sealed partial class CSharpGenerationModelBuilder
     )
     {
         var constraints = ResolveUniqueConstraints(entity);
-        var keyPropertyName = _nameConverter.ToPropertyName(
-            entity.Columns.First(column => column.IsPrimaryKey).Name
-        );
+        var keyProperty = BuildProperty(entity.Columns.First(column => column.IsPrimaryKey));
 
         var summary =
             $"Checks the UNIQUE constraints of {EscapeForXmlDocSummary(entity.TableName)} against the database and returns the violations (an empty list when there are none).";
@@ -132,7 +130,7 @@ internal sealed partial class CSharpGenerationModelBuilder
 
         return new UniquenessBlocks(
             BuildUniquenessContractMember(entityClassName, summary),
-            BuildUniquenessImplMember(entityClassName, keyPropertyName, constraints),
+            BuildUniquenessImplMember(entityClassName, keyProperty, constraints),
             options.GenerateRemoteServices ? BuildRemoteClientMember(shape) : string.Empty,
             options.GenerateRemoteServices
                 ? BuildRemoteServerMap(shape, repositoryName)
@@ -149,7 +147,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             "\n",
             $"    /// <summary>{summary}</summary>",
             "    /// <remarks>",
-            "    /// Rows that share the entity's primary key are excluded, so the same call is correct for both insert and update. Constraint member values that contain",
+            "    /// Rows that share the entity's primary key are excluded, so the same call is correct for both insert and update (an entity whose key is not set yet excludes nothing). Constraint member values that contain",
             "    /// a null are skipped (NULL collision semantics differ per dialect). The result is advisory only: the definitive guarantee is the database's own UNIQUE",
             "    /// constraint, and a concurrent insert between this check and the save can still make the save fail (TOCTOU).",
             "    /// </remarks>",
@@ -166,7 +164,7 @@ internal sealed partial class CSharpGenerationModelBuilder
     /// </summary>
     private static string BuildUniquenessImplMember(
         string entityClassName,
-        string keyPropertyName,
+        CSharpPropertyModel keyProperty,
         IReadOnlyList<ResolvedUniqueConstraint> constraints
     )
     {
@@ -188,7 +186,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             lines.AddRange(
                 BuildUniquenessConstraintCheckLines(
                     entityClassName,
-                    keyPropertyName,
+                    keyProperty,
                     constraints[index],
                     index + 1
                 )
@@ -205,7 +203,10 @@ internal sealed partial class CSharpGenerationModelBuilder
             "        {",
             "            foreach (var customCheck in customChecks)",
             "            {",
-            "                if (await customCheck(entity, cancellationToken) is { } violation)",
+            "                if (",
+            "                    await customCheck(entity, cancellationToken)",
+            "                        .ConfigureAwait(false) is { } violation",
+            "                )",
             "                {",
             "                    violations.Add(violation);",
             "                }",
@@ -226,19 +227,31 @@ internal sealed partial class CSharpGenerationModelBuilder
 
     /// <summary>1 制約分の照合コード（NULL 組のスキップ → 存在確認 → 違反の追加）の行を組み立てる</summary>
     /// <remarks>
+    /// <para>
     /// 条件は制約構成列ごとに 1 つずつ <c>Where</c> を重ねる（<c>SqlQuery.Where</c> は AND 結合）。1 行 1 比較になるため
     /// 列数が増えても行が伸びず、方言翻訳・EF Core いずれでも同じ式木の形になる。
     /// 判定結果のローカル名に連番を付けるのは、NULL 検査の有無で宣言スコープ（メソッド直下 / <c>if</c> ブロック内）が
     /// 変わり、素の同名だと制約の組み合わせ次第で CS0136 になるため。
+    /// </para>
+    /// <para>
+    /// 自分自身の除外（主キー不一致の <c>Where</c>）は<b>主キーが null を取り得る型（値オブジェクト・string 等）のとき
+    /// 条件付きで足す</b>。挿入前のエンティティは主キー未設定＝除外すべき行が存在しないため、除外条件そのものを
+    /// 付けないのが正しい（付けたままだと「NULL との比較」に依存することになる）。非 NULL の値型（int 等）は
+    /// <c>is not null</c> が常に真で警告になるため、従来どおり無条件に連ねる＝そうした図の生成物はバイト不変。
+    /// </para>
     /// </remarks>
     /// <param name="ordinal">制約の 1 始まり通し番号（判定結果のローカル名に使う）</param>
     private static IEnumerable<string> BuildUniquenessConstraintCheckLines(
         string entityClassName,
-        string keyPropertyName,
+        CSharpPropertyModel keyProperty,
         ResolvedUniqueConstraint constraint,
         int ordinal
     )
     {
+        var keyPropertyName = keyProperty.PropertyName;
+
+        // 主キーが null を取り得るか（構成列の NULL 検査と同じ判定規則）
+        var keyCanBeNull = keyProperty.IsNullable || keyProperty.IsReferenceType;
         // 構成列の値に null を含む組は判定対象外。null を取り得るプロパティ（NULL 許容列・参照型・値オブジェクト）だけを検査する
         var nullChecks = constraint
             .Members.Where(member => member.IsNullable || member.IsReferenceType)
@@ -258,16 +271,46 @@ internal sealed partial class CSharpGenerationModelBuilder
         }
 
         var duplicatedLocal = $"duplicated{ordinal}";
-        lines.Add($"{indent}var {duplicatedLocal} = await Query()");
-        lines.AddRange(
-            constraint.Members.Select(member =>
+        var memberFilters = constraint
+            .Members.Select(member =>
                 $"{indent}    .Where(candidate => candidate.{member.PropertyName} == entity.{member.PropertyName})"
             )
-        );
-        lines.Add(
-            $"{indent}    .Where(candidate => candidate.{keyPropertyName} != entity.{keyPropertyName})"
-        );
-        lines.Add($"{indent}    .AnyAsync(cancellationToken);");
+            .ToList();
+
+        if (keyCanBeNull)
+        {
+            // 主キーを持ち得ない（＝未設定の）新規行では除外条件そのものを足さない
+            var queryLocal = $"query{ordinal}";
+
+            lines.Add($"{indent}var {queryLocal} = Query()");
+            lines.AddRange(memberFilters);
+            lines[^1] += ";";
+            lines.Add(string.Empty);
+            lines.Add(
+                $"{indent}// A row that has no primary key yet (a new row) has no row of its own to exclude"
+            );
+            lines.Add($"{indent}if (entity.{keyPropertyName} is not null)");
+            lines.Add($"{indent}{{");
+            lines.Add(
+                $"{indent}    {queryLocal} = {queryLocal}.Where(candidate => candidate.{keyPropertyName} != entity.{keyPropertyName});"
+            );
+            lines.Add($"{indent}}}");
+            lines.Add(string.Empty);
+            lines.Add($"{indent}var {duplicatedLocal} = await {queryLocal}");
+            lines.Add($"{indent}    .AnyAsync(cancellationToken)");
+            lines.Add($"{indent}    .ConfigureAwait(false);");
+        }
+        else
+        {
+            lines.Add($"{indent}var {duplicatedLocal} = await Query()");
+            lines.AddRange(memberFilters);
+            lines.Add(
+                $"{indent}    .Where(candidate => candidate.{keyPropertyName} != entity.{keyPropertyName})"
+            );
+            lines.Add($"{indent}    .AnyAsync(cancellationToken)");
+            lines.Add($"{indent}    .ConfigureAwait(false);");
+        }
+
         lines.Add(string.Empty);
         lines.Add($"{indent}if ({duplicatedLocal})");
         lines.Add($"{indent}{{");
@@ -456,7 +499,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             "    /// </summary>",
             "    /// <remarks>",
             "    /// The duplicate-value errors registered by the previous call are cleared first, so re-checking never leaves stale errors. Rows that share the primary key are excluded,",
-            "    /// so the same call is correct for both insert and update. The result is advisory only: the definitive guarantee is the database's own UNIQUE constraint (TOCTOU).",
+            "    /// so the same call is correct for both insert and update (a model whose key is not set yet excludes nothing). The result is advisory only: the definitive guarantee is the database's own UNIQUE constraint (TOCTOU).",
             "    /// </remarks>",
             "    /// <param name=\"repository\">The repository used for the check.</param>",
             "    /// <param name=\"cancellationToken\">The cancellation token.</param>",
@@ -492,7 +535,9 @@ internal sealed partial class CSharpGenerationModelBuilder
 
         lines.AddRange([
             string.Empty,
-            "        var violations = await repository.CheckUniquenessAsync(entity, cancellationToken);",
+            "        var violations = await repository",
+            "            .CheckUniquenessAsync(entity, cancellationToken)",
+            "            .ConfigureAwait(false);",
             string.Empty,
             "        foreach (var violation in violations)",
             "        {",

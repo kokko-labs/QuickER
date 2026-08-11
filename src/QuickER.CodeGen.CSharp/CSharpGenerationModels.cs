@@ -392,12 +392,6 @@ internal sealed class CSharpMappingPropertyPair
     /// DB 採番のため新規行では未入力が正常であり、未入力を欠落として例外にすると新規保存が成立しない。
     /// </remarks>
     public required bool IsRowVersion { get; init; }
-
-    /// <summary>Entity からバインディング文字列へ変換する式</summary>
-    public required string LoadBindingExpression { get; init; }
-
-    /// <summary>バインディング用プロパティ名（例: BindingCustomerId）</summary>
-    public required string BindingPropertyName { get; init; }
 }
 
 /// <summary>Mapper が扱うナビゲーションプロパティの生成モデル</summary>

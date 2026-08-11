@@ -291,9 +291,8 @@ internal sealed partial class CSharpGenerationModelBuilder
             {
                 var property = BuildProperty(column);
                 var editModelProperty = BuildEditModelProperty(column);
-                // VO は ToString() が型ごとの表現（binary は Base64）を返す。さらに非 NULL の VO 列は
-                // = null! 初期化のためロード前は null になり得るので、必須でも null 条件付きで ToString する。
-                var isValueObject = ResolveValueObject(column) is not null;
+                // ロードは Entity の確定値を EditModel の確定値へ直接代入する（文字列往復なし＝無損失）。
+                // EditModel 側の確定値は常に NULL 許容なので、Entity 側が非 NULL でもそのまま代入できる
                 return new CSharpMappingPropertyPair
                 {
                     PropertyName = property.PropertyName,
@@ -303,14 +302,6 @@ internal sealed partial class CSharpGenerationModelBuilder
                     IsBinary = editModelProperty.IsBinary,
                     // DB 採番の行バージョン列は「入力があるときだけ代入」へ倒す（未入力を欠落として例外にしない）
                     IsRowVersion = editModelProperty.IsRowVersion,
-                    LoadBindingExpression = isValueObject
-                        ? $"entity.{property.PropertyName}?.ToString() ?? string.Empty"
-                        : BuildMapperBindingExpression(
-                            property.TypeName,
-                            editModelProperty.IsBinary,
-                            property.PropertyName
-                        ),
-                    BindingPropertyName = "Binding" + property.PropertyName,
                 };
             })
             .ToList();
@@ -672,26 +663,6 @@ internal sealed partial class CSharpGenerationModelBuilder
         }
 
         return string.Empty;
-    }
-
-    /// <summary>Mapper 内で Entity プロパティを EditModel のバインディング文字列へ変換する式を生成する</summary>
-    private static string BuildMapperBindingExpression(
-        string entityTypeName,
-        bool isBinary,
-        string propertyName
-    )
-    {
-        if (isBinary)
-        {
-            return $"entity.{propertyName} is null ? string.Empty : Convert.ToBase64String(entity.{propertyName})";
-        }
-
-        if (entityTypeName.EndsWith("?", StringComparison.Ordinal))
-        {
-            return $"entity.{propertyName}?.ToString() ?? string.Empty";
-        }
-
-        return $"entity.{propertyName}.ToString() ?? string.Empty";
     }
 
     /// <summary>解決済みナビゲーション情報からエンティティのナビゲーションプロパティ生成モデルを構築する</summary>

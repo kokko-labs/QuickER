@@ -9,8 +9,8 @@ QuickER が生成する C# コードの構成と、データアクセス層（Qu
 | カテゴリ | 内容 |
 |---|---|
 | Entity | テーブルに対応する POCO。UI フレームワーク非依存（CommunityToolkit 等に依存しない）。`RowState`（Unchanged / Added / Updated / Removed）と `MarkAdded()` などの状態遷移メソッド、ナビゲーションプロパティ（親参照・子コレクション）を持つ |
-| EditModel | 画面編集用のモデルと Entity との相互変換 |
-| Mapper | Entity ⇄ EditModel の変換器 |
+| EditModel | 画面編集用のモデルと Entity との相互変換。各列は確定値と画面入力文字列（`BindingXxx`）の 2 表現を持つ |
+| Mapper | Entity ⇄ EditModel の変換器。**ロードは無損失**＝確定値は Entity から直接コピーし（入力文字列のパースで再構築しない）、`BindingXxx` は確定値から導出される表示用の投影になる。入力文字列の精度になるのはユーザーが実際に編集した欄だけなので、読み込んだだけで表示書式が表現できないもの（`DateTime` の秒未満・`DateTimeKind` など）が落ちることはない |
 | 値オブジェクト（オプション） | 列名ごとの値オブジェクト型（`CustomerIdValue` など）。`GenerateValueObjects` 有効時のみ（[値オブジェクト](#値オブジェクトgeneratevalueobjects) 参照） |
 | Repository 共通契約 | `IRepository<TEntity, TKey>` と各エンティティのインターフェイス（`ICustomerRepository` など）。QuickER 版 Repository と EF Core 版 Repository が同じ契約を実装する |
 | QuickER 版 Repository 実装 | 方言別（SQL Server / SQLite）の軽量実装＋ DI 登録拡張 |
@@ -167,6 +167,8 @@ var result = await customers.Query()
 
 対応: 等値・比較・`&&`/`||`・`Contains`/`StartsWith`/`EndsWith`（LIKE）・リストの `Contains`（IN）・日付部品（`Year` など）・`string.IsNullOrEmpty`・値オブジェクト比較。**射影（Select）・GroupBy・Join・算術式は未対応**です（実行時例外。生 SQL か EF Core で回避してください）。
 
+値の側が null になる `==` / `!=` の比較は、リテラルの null でも変数由来の null でも `IS NULL` / `IS NOT NULL` へ変換されます（C# / EF Core と同じ意味論で、全バックエンドで一致します）。素のパラメータとして束縛すると `col = @p` となり、SQL の 3 値論理では全行が偽になってしまうためです。補償は等値のみが対象で、関係演算子（`<` `<=` `>` `>=`）は従来どおり null をパラメータとして束縛します（null 対応の SQL 対応物が無いため）。
+
 リストの `Contains` は要素 1 個につきバインド変数 1 個へ展開され、チャンク分割はしません。そのため巨大なリストは方言のバインド変数・IN リスト上限（Oracle の 1000、SQL Server の 2100 パラメータ、SQLite の歴史的な 999 など）を超えて実行時エラーになります。大量のキーを渡す場合は一時テーブルへ入れて結合するか、生 SQL を使ってください。
 
 ### グラフ保存（親子まとめて 1 回で保存）
@@ -252,7 +254,7 @@ context が提供する操作（生ハンドルは公開しません）:
 | QuickER 版 Repository（SQL Server / SQLite） | 完全対応（After は各操作の直後） | `WriteBinaryColumnAsync` / `ExecuteSqlAsync` とも対応 |
 | EF Core 版 Repository（`GenerateEfCore`） | 対応（After は `SaveChanges` 後に一括） | `ExecuteSqlAsync` は対応・`WriteBinaryColumnAsync` は `NotSupportedException` |
 | インメモリ（`GenerateInMemoryRepositories`） | 対応（擬似トランザクション） | `WriteBinaryColumnAsync` はストアへ・`ExecuteSqlAsync` は `NotSupportedException`。実トランザクションはありませんが copy-on-write で保存単位を all-or-nothing にします＝全書き込みをステージングし、最後のフェーズが成功したときだけ一括公開するため、**失敗した保存の書き込み（After が書いた blob を含む）は一度も見えず**、失敗の巻き添えで並行書き込みが消えることもありません |
-| リモート（`--generate-remote-services`） | **サーバー側の DI に登録したフックが発火**します | サーバー側の実体実装に準じます。**既知の制限**: Before でサーバーがスキップした行でも、クライアント側の `RowState` はスキップを反映せず `Unchanged` に確定します |
+| リモート（`--generate-remote-services`） | **サーバー側の DI に登録したフックが発火**します | サーバー側の実体実装に準じます。Before でサーバーがスキップした行は保存応答に載って戻るため、クライアント側の `RowState` も据え置かれます（その行は未保存のまま残り、次回の保存で再試行されます）＝直結と同じ挙動です |
 
 ### 生 SQL の逃げ道
 
@@ -283,7 +285,7 @@ Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
     TEntity entity, CancellationToken cancellationToken = default);
 ```
 
-テーブルの各 UNIQUE 制約について「**このエンティティと同じ主キーの行を除外して**、同じ値の組を持つ行が既に存在するか」を照合します。同一主キーの行を除くため、挿入前（そもそも該当行が無いので除外は no-op）でも更新前でも同じ呼び方で正しく動きます。構成列の値に `null` を含む組は、NULL の衝突意味論が方言で割れるためスキップします。
+テーブルの各 UNIQUE 制約について「**このエンティティと同じ主キーの行を除外して**、同じ値の組を持つ行が既に存在するか」を照合します。同一主キーの行を除くため、挿入前でも更新前でも同じ呼び方で正しく動きます。主キーが null を取り得る型（値オブジェクト・`string`）で未設定のとき（＝新規行の通常状態）は、除外条件そのものを付けないため、本当に全行が照合対象になります。構成列の値に `null` を含む組は、NULL の衝突意味論が方言で割れるためスキップします。
 
 > 結果は**助言**です。最終的な保証は DB 自身の UNIQUE 制約で、チェックと保存の間に他プロセスが挿入すれば保存はやはり失敗します（TOCTOU）。チェックは親切なメッセージを出すために使い、保存時の例外処理は残してください。
 
@@ -324,6 +326,10 @@ UNIQUE 制約を持つテーブルの EditModel は、その制約を生成コ�
 ```csharp
 var valid = EditModelUniquenessValidator.Validate(models);
 ```
+
+親の検証でもコレクション内の重複まで走ります。`parent.Validate(includeChildren: true)` は登録済みの子コレクションの検証を `EditModelCollection<T>.Validate()` へ委譲するため、要素個別の検証だけでなく兄弟どうしの重複検出も 1 回の呼び出しに含まれ、`parent.CollectErrors()` は重複エラーも `Orders[i]` のパス付きで返します。Mapper のロードで丸ごと差し替わった子コレクションも対象です（カスケード登録は登録時のインスタンスを捕捉せず、毎回アクセサ経由で現在のコレクションを解決します）。
+
+重複エラーは入力エラー（必須・変換・値オブジェクト・`OnValidate`）とは別のストアで保持します。一方の登録・クリアがもう一方に触れないため、同じプロパティに変換エラーと重複エラーが同時に立ち、`GetErrors` は両方を返します。とくに、重複を解消して再検証しても同じ欄に残っている「変換できません」のエラーは消えません（変換エラーはバインディングのセッターからしか再生成されないため、ここで消すと不正な入力が画面に残ったまま `Validate` が成功を返してしまいます）。`HasErrors` は両ストアを合わせて判定します。
 
 #### EditModel: DB との照合
 
@@ -582,7 +588,7 @@ app.Run();
 - **直列化**はエンティティの JSON 往復（`ToJson` / `Clone`）と同じ意味論（VO は内包値・RowState 込み・親参照ナビは循環しない）で、クライアント・サーバーが共有の `RemoteJson.Options` を使います
 - **名前付きクエリは実装方式（簡易 DSL／生 SQL／手動実装）に依らず全部**リモート面経由で呼び出せます（実装の実体はサーバー側のリポジトリ）
 - **例外は型が復元されます**: サーバーの `SaveConflictException` は HTTP 409 を介してクライアントでも `SaveConflictException` として送出され（直結時と同じ catch が機能）、その他のサーバー例外は `RemoteRepositoryException`（ステータスコード・メッセージ保持）になります
-- **リクエストを解釈できない場合は 500 ではなく 400 になります**。リクエスト自体の読み取り中に失敗するもの（不正な JSON・空ボディ・JSON でない Content-Type・型不一致・値オブジェクトの検証違反・未定義の `ConcurrencyMode` 値、バイナリエンドポイントの `?id=` 欠落・復元不能）はクライアントが送った内容の問題なので、HTTP 400＋`RemoteError`（`Type` は `"BadRequest"`）を返します（クライアントは `StatusCode` が 400 の `RemoteRepositoryException` を送出）。400 のメッセージにはクライアント自身のペイロードに関する情報しか載らず、サーバー側のログ出力も `OnServerError` フックも実行されません（どちらも 500 専用）。サーバー基盤が拒否したリクエスト（`BadHttpRequestException`。例: リクエストボディのサイズ上限超過）は、その例外が持つステータスコード（413 など）をそのまま返します
+- **リクエストを解釈できない場合は 500 ではなく 400 になります**。リクエスト自体の読み取り中に失敗するもの（不正な JSON・空ボディ・JSON でない Content-Type・型不一致・値オブジェクトの検証違反・必須フィールドの欠落〔`Insert` / `Update` / `Save` / `SaveMany` への `{}`、参照型キーを省いた `GetById` / `Delete`〕・未定義の `ConcurrencyMode` 値、バイナリエンドポイントの `?id=` 欠落・復元不能）はクライアントが送った内容の問題なので、HTTP 400＋`RemoteError`（`Type` は `"BadRequest"`）を返します（クライアントは `StatusCode` が 400 の `RemoteRepositoryException` を送出）。400 のメッセージにはクライアント自身のペイロードに関する情報しか載らず、サーバー側のログ出力も `OnServerError` フックも実行されません（どちらも 500 専用）。サーバー基盤が拒否したリクエスト（`BadHttpRequestException`。例: リクエストボディのサイズ上限超過）は、その例外が持つステータスコード（413 など）をそのまま返します
 - **グラフ保存（Save）成功後はローカルの RowState も確定**します（直結時と同じ挙動）
 - **楽観排他も転送されます**。`ConcurrencyMode` 引数は Update / Save のリクエストに含まれ、Insert / Update / Save の応答は保存で採番された版を「エンティティ型名＋主キー」の対応表として運び、クライアントが手元のグラフへ書き戻します。これによりリモートでも直結と同じ版を保持でき、再取得なしで同じエンティティを続けて保存できます
 - **500 応答にはサーバー側例外のメッセージがそのまま載ります**。これは意図的な設計で、クライアントが失敗内容を復元し「直結時と同じ catch」を成立させるための情報です。スタックトレースを含む例外全体はサーバー側だけに記録されます（`ILoggerFactory` 経由・カテゴリ `QuickER.RemoteServer`。ロギング未構成のホストでは何もしません）。信頼境界の外へ公開する場合は、認可か例外変換ミドルウェアを併用して内部情報が応答へ漏れないようにしてください
@@ -612,6 +618,13 @@ app.Run();
 ## テスト用インメモリ Repository（GenerateInMemoryRepositories）
 
 DB なしでユニットテストするためのインメモリ実装を追加生成できます。同一契約を実装し、サポート外の操作は実 DB の Repository へ切り替える案内付きの `NotSupportedException` を送出します。なお `GenerateInMemoryRepositories` と `UseRuntimePackages` は併用できません（診断エラー）。インメモリの実行器は生成側の固定 infra として出力され、パッケージには存在しないためです。
+
+### 実 DB との既知の乖離
+
+インメモリストアはクエリを SQL でなく LINQ-to-Objects で評価するため、いくつかの意味論は DB のものではなくインメモリ固有です。「インメモリでは通るのに実 DB では落ちる」を避けるために把握しておいてください。
+
+- **文字列の比較と並び順は序数（Ordinal）です。** 絞り込み（`Where`）も `OrderBy` も序数比較なので、`"B"` は `"a"` より前に並びます。SQL Server の既定照合は大文字小文字を区別せず、並び順も照合順序に従うため、大文字小文字やアクセントの扱いに依存するテストは実 DB の裏付けにはなりません。
+- **UNIQUE 制約は書き込み時に強制されません。** 強制されるのは主キーだけです（重複主キーは実 DB の INSERT と同じく拒否されます）。UNIQUE 制約の重複値は黙って格納されるため、チェックが要るテストでは `CheckUniquenessAsync` を使ってください。
 
 ## ランタイムパッケージ参照モード（--use-runtime-packages）
 

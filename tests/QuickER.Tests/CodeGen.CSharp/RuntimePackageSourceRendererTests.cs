@@ -131,6 +131,46 @@ public class RuntimePackageSourceRendererTests
     }
 
     /// <summary>
+    /// 方言／EF Core パッケージの行マテリアライザに型特殊化（<c>_typedReaders</c>）と
+    /// 値オブジェクトの <c>Create</c> 直呼びが含まれる。
+    /// </summary>
+    /// <remarks>
+    /// パッケージソースは常に値オブジェクト有効でレンダリングされる（<see cref="RuntimePackageSourceRenderer"/>）ため、
+    /// 型特殊化が値オブジェクト構成で無効化されていると、<c>UseRuntimePackages</c> の利用者は図の設定に依らず
+    /// 常に <c>GetValue</c> ボックス化＋<c>PropertyInfo.SetValue</c> のフォールバックへ落ちてしまう。
+    /// </remarks>
+    [Fact]
+    public void RenderedSources_KeepTypeSpecializedMaterializer()
+    {
+        string[] sources =
+        [
+            _renderer.RenderSqlServer(),
+            _renderer.RenderSqlite(),
+            _renderer.RenderEfCore(),
+        ];
+
+        foreach (var source in sources)
+        {
+            // 型特殊化アクセサ表（素の列の boxing 回避）
+            source
+                .Should()
+                .Contain(
+                    "private static readonly IReadOnlyDictionary<Type, MethodInfo> _typedReaders ="
+                );
+            source.Should().Contain("[typeof(int)] = Getter(nameof(DbDataReader.GetInt32)),");
+
+            // 値オブジェクト列は内包値を型特殊化アクセサで読み、静的 Create を式木から直呼びする
+            source.Should().Contain("private static (MethodInfo Getter, MethodInfo Create)?");
+            source
+                .Should()
+                .Contain(
+                    "if (ResolveValueObjectReader(propertyType) is (var voGetter, var voCreate))"
+                );
+            source.Should().Contain("Expression.Call(readerParam, voGetter, ordinal)");
+        }
+    }
+
+    /// <summary>
     /// 指定した許可依存だけを参照へ含めて、パッケージソース群をコンパイルする。
     /// </summary>
     /// <remarks>

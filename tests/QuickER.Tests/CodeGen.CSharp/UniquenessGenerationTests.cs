@@ -1,4 +1,4 @@
-using AwesomeAssertions;
+﻿using AwesomeAssertions;
 using QuickER.CodeGen.CSharp;
 using QuickER.Model;
 using QuickER.Provider;
@@ -107,7 +107,50 @@ public class UniquenessGenerationTests
         content.Should().Contain(".Where(candidate => candidate.Memo == entity.Memo)");
         // 同一主キーの行は必ず除外する（挿入・更新のどちらでも同じ呼び方で正しくなる根拠）
         content.Should().Contain(".Where(candidate => candidate.OrderId != entity.OrderId)");
+        // 非 NULL の値型 PK は null になり得ないので除外条件は無条件に連ねる（is not null は常に真＝警告になる）
+        content.Should().NotContain("if (entity.OrderId is not null)");
         content.Should().Contain("\"UQ_Order_Memo\"");
+    }
+
+    /// <summary>
+    /// null を取り得る主キー（string / 値オブジェクト）では、自分自身の除外を「主キーが設定されているときだけ」足す。
+    /// </summary>
+    /// <remarks>
+    /// 挿入前のエンティティは主キー未設定＝除外すべき自分自身の行が存在しないため、除外条件そのものを付けないのが正しい
+    /// （付けたままだと NULL との比較に依存し、SQL の 3 値論理では全行が UNKNOWN になって重複を見逃す）。
+    /// </remarks>
+    [Fact(DisplayName = "null を取り得る主キーでは自分自身の除外を条件付きにする")]
+    public void Generate_NullablePrimaryKey_GuardsSelfExclusion()
+    {
+        // 主キーを参照型（string）へ変える。値オブジェクト有効時の VO 型 PK も同じ分岐に落ちる
+        _orderId.DataType = "nvarchar(20)";
+
+        var diagram = CreateDiagram(
+            new UniqueConstraint { Name = "UQ_Order_Memo", ColumnIds = { _memo.Id } }
+        );
+
+        var content = AllContent(Generate(diagram, CreateOptions()));
+
+        content
+            .Should()
+            .Contain(
+                string.Join(
+                        "\n",
+                        "            var query1 = Query()",
+                        "                .Where(candidate => candidate.Memo == entity.Memo);",
+                        "",
+                        "            // A row that has no primary key yet (a new row) has no row of its own to exclude",
+                        "            if (entity.OrderId is not null)",
+                        "            {",
+                        "                query1 = query1.Where(candidate => candidate.OrderId != entity.OrderId);",
+                        "            }",
+                        "",
+                        "            var duplicated1 = await query1",
+                        "                .AnyAsync(cancellationToken)",
+                        "                .ConfigureAwait(false);"
+                    )
+                    .ReplaceLineEndings()
+            );
     }
 
     /// <summary>名前なしの複合制約は合成名（UQ_{テーブル}_{列連結}）と全構成列の照合を生成する</summary>

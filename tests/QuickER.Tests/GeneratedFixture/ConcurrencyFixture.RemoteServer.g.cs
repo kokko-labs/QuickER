@@ -30,7 +30,8 @@ namespace QuickER.Tests.GeneratedConcurrencyFixture;
 /// </para>
 /// <para>
 /// A request that cannot be interpreted at all - a malformed or empty JSON body, a non-JSON content type, a type
-/// mismatch, a value that fails value-object validation, an undefined <see cref="ConcurrencyMode"/> value, or a
+/// mismatch, a value that fails value-object validation, a body that omits a required field such as the entity, an
+/// undefined <see cref="ConcurrencyMode"/> value, or a
 /// missing/malformed <c>?id=</c> key - is a fault in what the client sent, so it is answered with HTTP 400
 /// (RemoteError of type "BadRequest") instead of 500. A request
 /// rejected by the server infrastructure (<see cref="BadHttpRequestException"/>, for example when the request body
@@ -67,12 +68,12 @@ public static partial class GeneratedRemoteEndpoints
     {
         try
         {
-            var result = await handler();
+            var result = await handler().ConfigureAwait(false);
             await context.Response.WriteAsJsonAsync(
                 result,
                 RemoteJson.Options,
                 context.RequestAborted
-            );
+            ).ConfigureAwait(false);
         }
         catch (RemoteBadRequestException ex)
         {
@@ -82,12 +83,12 @@ public static partial class GeneratedRemoteEndpoints
                 StatusCodes.Status400BadRequest,
                 "BadRequest",
                 ex.Message
-            );
+            ).ConfigureAwait(false);
         }
         catch (BadHttpRequestException ex)
         {
             // Rejected by the server infrastructure (request body size limit, malformed request): pass through the status code it carries (413 and similar).
-            await WriteErrorAsync(context, ex.StatusCode, "BadRequest", ex.Message);
+            await WriteErrorAsync(context, ex.StatusCode, "BadRequest", ex.Message).ConfigureAwait(false);
         }
         catch (SaveConflictException ex)
         {
@@ -97,7 +98,7 @@ public static partial class GeneratedRemoteEndpoints
                 StatusCodes.Status409Conflict,
                 "SaveConflict",
                 ex.Message
-            );
+            ).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
         {
@@ -112,7 +113,7 @@ public static partial class GeneratedRemoteEndpoints
                 StatusCodes.Status500InternalServerError,
                 "Error",
                 ex.Message
-            );
+            ).ConfigureAwait(false);
         }
     }
 
@@ -129,7 +130,7 @@ public static partial class GeneratedRemoteEndpoints
             new RemoteError { Type = type, Message = message },
             RemoteJson.Options,
             context.RequestAborted
-        );
+        ).ConfigureAwait(false);
     }
 
     /// <summary>Restores the request body from JSON (a body that cannot be interpreted is reported to the client as HTTP 400).</summary>
@@ -149,7 +150,7 @@ public static partial class GeneratedRemoteEndpoints
             request = await context.Request.ReadFromJsonAsync<TRequest>(
                 RemoteJson.Options,
                 context.RequestAborted
-            );
+            ).ConfigureAwait(false);
         }
         catch (Exception ex)
             when (ex is not (OperationCanceledException or BadHttpRequestException))
@@ -173,8 +174,22 @@ public static partial class GeneratedRemoteEndpoints
                 "The concurrency mode must be Optimistic or ForceOverwrite."
             );
 
+    /// <summary>Returns a required request field unchanged (a field the body omitted is reported to the client as HTTP 400).</summary>
+    /// <remarks>
+    /// The request bodies are positional records, so a body that leaves out a member - <c>{}</c>, for example - deserializes
+    /// with that member at its default rather than failing. Passing it on would surface deep inside the repository as a
+    /// null-argument failure and be reported as an unhandled server-side error, even though nothing on the server went
+    /// wrong, therefore it is rejected here as a fault in the payload the client sent. A key whose type is a value type has
+    /// no omitted form and always passes through.
+    /// </remarks>
+    private static T Required<T>(T? value, string name) =>
+        value is null
+            ? throw new RemoteBadRequestException($"The '{name}' field is required.")
+            : value;
+
     /// <summary>
-    /// Marks a failure to interpret the request itself (the JSON body or the <c>?id=</c> key). The request never reached
+    /// Marks a failure to interpret the request itself (the JSON body, a required field it omitted, or the <c>?id=</c>
+    /// key). The request never reached
     /// the repository, so it is a fault in what the client sent rather than a server-side error: it is answered with
     /// HTTP 400 and a <see cref="RemoteError"/> of type "BadRequest", and neither the server-side logging nor the
     /// <c>OnServerError</c> hook - both reserved for HTTP 500 - is invoked.
@@ -268,10 +283,13 @@ public static partial class GeneratedRemoteEndpoints
                     context,
                     async () =>
                     {
-                        var request = await ReadRequestAsync<RemoteIdRequest<TKey>>(context);
+                        var request = await ReadRequestAsync<RemoteIdRequest<TKey>>(context).ConfigureAwait(false);
                         return (object?)
                             await Repository<TRepository>(context)
-                                .GetByIdAsync(request.Id, context.RequestAborted);
+                                .GetByIdAsync(
+                                    Required(request.Id, "Id"),
+                                    context.RequestAborted
+                                ).ConfigureAwait(false);
                     }
                 )
         );
@@ -283,7 +301,7 @@ public static partial class GeneratedRemoteEndpoints
                     async () =>
                         (object?)
                             await Repository<TRepository>(context)
-                                .GetAllAsync(context.RequestAborted)
+                                .GetAllAsync(context.RequestAborted).ConfigureAwait(false)
                 )
         );
         group.MapPost(
@@ -293,14 +311,13 @@ public static partial class GeneratedRemoteEndpoints
                     context,
                     async () =>
                     {
-                        var request = await ReadRequestAsync<RemoteEntityRequest<TEntity>>(context);
+                        var request = await ReadRequestAsync<RemoteEntityRequest<TEntity>>(context).ConfigureAwait(false);
+                        var entity = Required(request.Entity, "Entity");
                         await Repository<TRepository>(context)
-                            .InsertAsync(request.Entity, context.RequestAborted);
+                            .InsertAsync(entity, context.RequestAborted).ConfigureAwait(false);
                         // The insert leaves the newly assigned version on the entity, which the client writes back
                         return (object?)
-                            new RemoteInsertResult(
-                                RemoteEntityGraph.ReadRowVersion(request.Entity)
-                            );
+                            new RemoteInsertResult(RemoteEntityGraph.ReadRowVersion(entity));
                     }
                 )
         );
@@ -311,18 +328,19 @@ public static partial class GeneratedRemoteEndpoints
                     context,
                     async () =>
                     {
-                        var request = await ReadRequestAsync<RemoteUpdateRequest<TEntity>>(context);
+                        var request = await ReadRequestAsync<RemoteUpdateRequest<TEntity>>(context).ConfigureAwait(false);
+                        var entity = Required(request.Entity, "Entity");
                         var updated = await Repository<TRepository>(context)
                             .UpdateAsync(
-                                request.Entity,
+                                entity,
                                 ValidatedMode(request.Mode),
                                 context.RequestAborted
-                            );
+                            ).ConfigureAwait(false);
                         // A successful update leaves the newly assigned version on the entity, which the client writes back
                         return (object?)
                             new RemoteUpdateResult(
                                 updated,
-                                updated ? RemoteEntityGraph.ReadRowVersion(request.Entity) : null
+                                updated ? RemoteEntityGraph.ReadRowVersion(entity) : null
                             );
                     }
                 )
@@ -334,10 +352,13 @@ public static partial class GeneratedRemoteEndpoints
                     context,
                     async () =>
                     {
-                        var request = await ReadRequestAsync<RemoteIdRequest<TKey>>(context);
+                        var request = await ReadRequestAsync<RemoteIdRequest<TKey>>(context).ConfigureAwait(false);
                         return (object?)
                             await Repository<TRepository>(context)
-                                .DeleteAsync(request.Id, context.RequestAborted);
+                                .DeleteAsync(
+                                    Required(request.Id, "Id"),
+                                    context.RequestAborted
+                                ).ConfigureAwait(false);
                     }
                 )
         );
@@ -348,20 +369,22 @@ public static partial class GeneratedRemoteEndpoints
                     context,
                     async () =>
                     {
-                        var request = await ReadRequestAsync<RemoteSaveRequest<TEntity>>(context);
+                        var request = await ReadRequestAsync<RemoteSaveRequest<TEntity>>(context).ConfigureAwait(false);
+                        var entity = Required(request.Entity, "Entity");
                         var affected = await Repository<TRepository>(context)
                             .SaveAsync(
-                                request.Entity,
+                                entity,
                                 request.CascadeSave,
                                 request.CascadeDelete,
                                 request.InsertWhenUpdateMissing,
                                 ValidatedMode(request.Mode),
                                 context.RequestAborted
-                            );
+                            ).ConfigureAwait(false);
                         return (object?)
                             new RemoteSaveResult(
                                 affected,
-                                CollectRowVersions([request.Entity], request.CascadeSave)
+                                CollectRowVersions([entity], request.CascadeSave),
+                                CollectSkipped([entity], request.CascadeSave)
                             );
                     }
                 )
@@ -375,20 +398,22 @@ public static partial class GeneratedRemoteEndpoints
                     {
                         var request = await ReadRequestAsync<RemoteSaveManyRequest<TEntity>>(
                             context
-                        );
+                        ).ConfigureAwait(false);
+                        var entities = Required(request.Entities, "Entities");
                         var affected = await Repository<TRepository>(context)
                             .SaveAsync(
-                                request.Entities,
+                                entities,
                                 request.CascadeSave,
                                 request.CascadeDelete,
                                 request.InsertWhenUpdateMissing,
                                 ValidatedMode(request.Mode),
                                 context.RequestAborted
-                            );
+                            ).ConfigureAwait(false);
                         return (object?)
                             new RemoteSaveResult(
                                 affected,
-                                CollectRowVersions(request.Entities, request.CascadeSave)
+                                CollectRowVersions(entities, request.CascadeSave),
+                                CollectSkipped(entities, request.CascadeSave)
                             );
                     }
                 )
@@ -415,10 +440,50 @@ public static partial class GeneratedRemoteEndpoints
 
         foreach (var entity in entities)
         {
-            RemoteEntityGraph.CollectRowVersions(entity, cascade, rowVersions);
+            // A null element is filtered out by the save itself, so it is passed over here as well
+            if (entity is not null)
+            {
+                RemoteEntityGraph.CollectRowVersions(entity, cascade, rowVersions);
+            }
         }
 
         return rowVersions;
+    }
+
+    /// <summary>
+    /// Collects the rows a save hook's Before skipped, so that the client can leave their RowState untouched instead of
+    /// finalizing them to Unchanged.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A completed save has already finalized every row it operated on (<c>EntityGraphSaver.AcceptChanges</c> leaves the
+    /// skipped ones alone), so a row that still carries changes is exactly a row the hook skipped - no separate bookkeeping
+    /// has to travel from the repository to here. Deleted rows are left out because the client leaves a removed entity
+    /// untouched in either case.
+    /// </para>
+    /// <para>
+    /// The traversal and the identity of a row are shared with the row version table, so the same constraint applies: when a
+    /// graph contains the same (type, key) twice, the entries collapse onto one entity on the client side.
+    /// </para>
+    /// </remarks>
+    private static List<RemoteEntityRef> CollectSkipped<TEntity>(
+        IEnumerable<TEntity> entities,
+        bool cascade
+    )
+        where TEntity : EntityBase
+    {
+        var skipped = new List<RemoteEntityRef>();
+
+        foreach (var entity in entities)
+        {
+            // A null element is filtered out by the save itself, so it is passed over here as well
+            if (entity is not null)
+            {
+                RemoteEntityGraph.CollectSkipped(entity, cascade, skipped);
+            }
+        }
+
+        return skipped;
     }
 
     /// <summary>Maps the remote-surface endpoints for GadgetEntity.</summary>
@@ -436,9 +501,9 @@ public static partial class GeneratedRemoteEndpoints
                     context,
                     async () =>
                     {
-                        var request = await ReadRequestAsync<GadgetCheckUniquenessRequest>(context);
+                        var request = await ReadRequestAsync<GadgetCheckUniquenessRequest>(context).ConfigureAwait(false);
                         var repository = context.RequestServices.GetRequiredService<IGadgetRemoteRepository>();
-                        return (object?)await repository.CheckUniquenessAsync(request.Entity, context.RequestAborted);
+                        return (object?)await repository.CheckUniquenessAsync(request.Entity, context.RequestAborted).ConfigureAwait(false);
                     }
                 )
         );
@@ -462,9 +527,9 @@ public static partial class GeneratedRemoteEndpoints
                     context,
                     async () =>
                     {
-                        var request = await ReadRequestAsync<GadgetNoteCheckUniquenessRequest>(context);
+                        var request = await ReadRequestAsync<GadgetNoteCheckUniquenessRequest>(context).ConfigureAwait(false);
                         var repository = context.RequestServices.GetRequiredService<IGadgetNoteRemoteRepository>();
-                        return (object?)await repository.CheckUniquenessAsync(request.Entity, context.RequestAborted);
+                        return (object?)await repository.CheckUniquenessAsync(request.Entity, context.RequestAborted).ConfigureAwait(false);
                     }
                 )
         );

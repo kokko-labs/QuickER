@@ -224,6 +224,57 @@ public sealed class EditModelLifecycleTests
         ownErrors.Should().OnlyContain(e => e.Path == string.Empty);
     }
 
+    // ===== 再ロードでの子コレクション差し替え（ChildLink の遅延解決） =====
+
+    [Fact(
+        DisplayName = "再ロード: Orders が別インスタンスへ差し替わっても親 Validate/CollectErrors は新しいコレクションを見る"
+    )]
+    public void 再ロード後のValidateは新しい子コレクションを見る()
+    {
+        var mapper = new CustomerMapper();
+        var m = mapper.CreateEditModel(BuildCustomerEntity(1, "Alice", true, 1));
+
+        // ここで ChildLinks が確定する（旧実装はこの時点の Orders インスタンスを捕捉していた）
+        m.Validate().Should().BeTrue();
+
+        // ApplyToEditModel は Orders を丸ごと新しい EditModelCollection へ差し替える
+        mapper.ApplyToEditModel(BuildCustomerEntity(2, "Bob", true, 1), m);
+
+        // 差し替え後の子に必須エラーを作る（Amount は必須・空入力で確定値が null になる）
+        m.Orders[0].BindingAmount = string.Empty;
+
+        m.Validate().Should().BeFalse();
+        m.CollectErrors()
+            .Should()
+            .Contain(e => e.Path == "Orders[0]" && e.Property == "BindingAmount");
+    }
+
+    [Fact(
+        DisplayName = "再ロード: HasGraphChanges / AcceptChanges も差し替え後のコレクションを対象にする"
+    )]
+    public void 再ロード後の変更追跡は新しい子コレクションを対象にする()
+    {
+        var mapper = new CustomerMapper();
+        var m = mapper.CreateEditModel(BuildCustomerEntity(1, "Alice", true, 2));
+
+        // ここで ChildLinks が確定する
+        m.HasGraphChanges().Should().BeFalse();
+
+        mapper.ApplyToEditModel(BuildCustomerEntity(2, "Bob", true, 2), m);
+
+        // 差し替え後のコレクションで「要素の変更」と「削除追跡」の両方を起こす
+        m.Orders[0].BindingMemo = "changed";
+        m.Orders.RemoveAt(1);
+
+        m.HasGraphChanges().Should().BeTrue();
+
+        m.AcceptChanges();
+
+        m.Orders[0].RowState.Should().Be(RowState.Unchanged);
+        m.Orders.RemovedItems.Should().BeEmpty();
+        m.HasGraphChanges().Should().BeFalse();
+    }
+
     // ===== GetNext / GetPrevious =====
 
     [Fact(DisplayName = "GetNext/GetPrevious: 兄弟を辿り、端・非所有では null")]

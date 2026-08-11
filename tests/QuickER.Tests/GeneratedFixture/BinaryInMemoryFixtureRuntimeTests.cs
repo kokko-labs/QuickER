@@ -91,6 +91,76 @@ public sealed class BinaryInMemoryFixtureRuntimeTests
 
         (await documents.UpdateAsync(doc, cancellationToken: Ct)).Should().BeTrue();
         (await documents.GetByIdAsync(1, Ct))!.Title.Should().Be("alpha2");
+
+        // 実 DB の UPDATE は除外列を SET に含めない＝blob は温存される。行ごと差し替えるインメモリも同じ結果になること
+        var stored = await documents
+            .Query()
+            .Where(d => d.DocumentId == 1)
+            .WithUnboundedBinary()
+            .FirstOrDefaultAsync(Ct);
+        stored!
+            .Payload.Should()
+            .Equal(Doc1Payload, "未取得状態のまま更新しても除外列 payload は消えない");
+        stored.Thumb.Should().Equal(Doc1Thumb, "非 nullable の除外列 thumb も消えない");
+    }
+
+    /// <summary>グラフ保存（SaveAsync）経由の更新でも除外列の blob は温存される</summary>
+    [Fact(DisplayName = "[Binary/InMemory] 5b: グラフ保存の更新でも除外列 blob は温存される")]
+    public async Task Save_WithUnsetExcludedColumn_PreservesBlob()
+    {
+        var (_, documents) = await SeededAsync();
+
+        var doc = await documents.GetByIdAsync(1, Ct);
+        doc!.Title = "alpha3";
+        doc.RowState = RowState.Updated;
+
+        await documents.SaveAsync(doc, cancellationToken: Ct);
+
+        var stored = await documents
+            .Query()
+            .Where(d => d.DocumentId == 1)
+            .WithUnboundedBinary()
+            .FirstOrDefaultAsync(Ct);
+        stored!.Title.Should().Be("alpha3");
+        stored.Payload.Should().Equal(Doc1Payload, "グラフ保存でも除外列 payload は消えない");
+        stored.Thumb.Should().Equal(Doc1Thumb);
+    }
+
+    /// <summary>バイナリ列の OrderBy は例外にならず辞書式バイト順に並ぶ（実 DB の varbinary 順序と同じ）</summary>
+    [Fact(DisplayName = "[Binary/InMemory] OrderBy: byte[] 列が辞書式バイト順で並ぶ")]
+    public async Task OrderBy_BinaryColumn_SortsLexicographically()
+    {
+        var (_, documents) = await SeededAsync();
+
+        // checksum は有界バイナリ（除外対象外）＝読み取り複製にも載る。byte[] は IComparable を実装しないため
+        // 既定の比較子では ArgumentException になっていた
+        await documents.InsertAsync(
+            new DocumentEntity
+            {
+                DocumentId = 2,
+                Title = "beta",
+                Checksum = [10, 11],
+                RowState = RowState.Added,
+            },
+            Ct
+        );
+        await documents.InsertAsync(
+            new DocumentEntity
+            {
+                DocumentId = 3,
+                Title = "gamma",
+                Checksum = [2, 250],
+                RowState = RowState.Added,
+            },
+            Ct
+        );
+
+        // 先頭バイト順＝[2,250] < [10,11] < [10,11,12]（前方一致なら短い方が先）
+        var ascending = await documents.Query().OrderBy(d => d.Checksum).ToListAsync(Ct);
+        ascending.Select(d => d.DocumentId).Should().Equal(3, 2, 1);
+
+        var descending = await documents.Query().OrderByDescending(d => d.Checksum).ToListAsync(Ct);
+        descending.Select(d => d.DocumentId).Should().Equal(1, 2, 3);
     }
 
     /// <summary>射影（GetPayloads）は除外列 payload の値を取得できる（ストアの完全クローンから射影する）</summary>

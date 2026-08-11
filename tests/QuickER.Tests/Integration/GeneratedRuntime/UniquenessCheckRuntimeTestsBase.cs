@@ -190,6 +190,53 @@ public abstract class UniquenessCheckRuntimeTestsBase : IDisposable
         violations[0].Message.Should().Be(OrderUniquenessCustomCheck.Message);
     }
 
+    /// <summary>7. 主キー未設定（挿入前）の新規エンティティでも重複が検出される</summary>
+    /// <remarks>
+    /// 自分自身の除外（主キー不一致）は主キーが設定されているときだけ足す。加えて翻訳器の null 補償により
+    /// 「値が null の等値比較＝<c>IS [NOT] NULL</c>」となるため、除外条件が残っても全行 UNKNOWN にはならない
+    /// （補償前は <c>[order_id] &lt;&gt; @p</c>（@p=NULL）で全行が弾かれ、重複を静かに見逃していた）。
+    /// </remarks>
+    [Fact(DisplayName = "[Uniqueness] 7: 主キー未設定の新規エンティティでも重複が検出される")]
+    public async Task NewEntityWithoutKey_ReportsViolation()
+    {
+        await ResetAndSeedAsync();
+        var orders = CreateOrderRepository();
+
+        // 挿入前＝主キー未採番。memo は既存の注文 10 と同じ
+        var candidate = new OrderEntity
+        {
+            CustomerId = CustomerIdValue.Create(2),
+            Amount = AmountValue.Create(12m),
+            Memo = MemoValue.Create("apple pie"),
+        };
+
+        candidate.OrderId.Should().BeNull("挿入前のエンティティは主キーを持たない");
+
+        var violations = await orders.CheckUniquenessAsync(candidate, Ct);
+
+        violations.Should().ContainSingle();
+        violations[0].ConstraintName.Should().Be("UQ_orders_memo");
+    }
+
+    /// <summary>8. null 変数との等値比較は IS NULL 相当（C# / EF Core と同じ意味論）になる</summary>
+    /// <remarks>翻訳器の null 補償そのものの検証。実装先（ADO / EF Core）で観測結果が一致することを固定する。</remarks>
+    [Fact(DisplayName = "[Uniqueness] 8: null 変数との == / != が IS NULL / IS NOT NULL になる")]
+    public async Task NullVariableComparison_MatchesNullRows()
+    {
+        await ResetAndSeedAsync();
+        var orders = CreateOrderRepository();
+
+        MemoValue? missing = null;
+
+        // memo が NULL の行（注文 11）だけに一致する
+        var nullRows = await orders.Query().Where(o => o.Memo == missing).ToListAsync(Ct);
+        nullRows.Select(o => o.OrderId.Value).Should().Equal(11);
+
+        // 反対に != null は NULL でない行（注文 10）だけに一致する
+        var nonNullRows = await orders.Query().Where(o => o.Memo != missing).ToListAsync(Ct);
+        nonNullRows.Select(o => o.OrderId.Value).Should().Equal(10);
+    }
+
     /// <summary>一時 DB を破棄する</summary>
     public virtual void Dispose()
     {

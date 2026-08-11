@@ -9,8 +9,8 @@ This document describes the structure of the C# code QuickER generates and how t
 | Category | Contents |
 |---|---|
 | Entity | A POCO that corresponds to a table. UI-framework independent (no dependency on CommunityToolkit or the like). Carries `RowState` (Unchanged / Added / Updated / Removed), state-transition methods such as `MarkAdded()`, and navigation properties (parent reference / child collection). |
-| EditModel | A model for screen editing, plus conversion to and from the Entity. |
-| Mapper | A converter for Entity ⇄ EditModel. |
+| EditModel | A model for screen editing, plus conversion to and from the Entity. Every column keeps two representations: the committed value and the on-screen input string (`BindingXxx`). |
+| Mapper | A converter for Entity ⇄ EditModel. **Loading is lossless**: the committed values are copied straight from the entity instead of being rebuilt by parsing the input strings, and the `BindingXxx` strings are then derived from them purely for display. Only the fields the user actually edits take on the precision of their input string, so simply loading a row never drops what the display format cannot express (the sub-second part of a `DateTime`, its `DateTimeKind`, and so on). |
 | Value objects (optional) | A per-column value-object type (e.g. `CustomerIdValue`). Emitted only when `GenerateValueObjects` is enabled (see [Value objects](#value-objects-generatevalueobjects)). |
 | Repository shared contracts | `IRepository<TEntity, TKey>` and a per-entity interface (e.g. `ICustomerRepository`). Both the QuickER Repository and the EF Core Repository implement the same contracts. |
 | QuickER Repository implementation | Lightweight per-dialect implementations (SQL Server / SQLite) plus DI-registration extensions. |
@@ -167,6 +167,8 @@ var result = await customers.Query()
 
 Supported: equality, comparison, `&&`/`||`, `Contains`/`StartsWith`/`EndsWith` (LIKE), `Contains` on a list (IN), date parts (`Year`, etc.), `string.IsNullOrEmpty`, and value-object comparison. **Projection (Select), GroupBy, Join, and arithmetic expressions are not supported** (they throw at runtime; work around them with raw SQL or EF Core).
 
+An `==` / `!=` comparison whose value side is null becomes `IS NULL` / `IS NOT NULL`, whether the null is written as a literal or comes from a variable — the same meaning C# and EF Core give it, and identical across every backend. (Binding it as an ordinary parameter would leave `col = @p`, which SQL's three-valued logic makes false for every row.) The compensation covers equality only: the relational operators (`<` `<=` `>` `>=`) still bind the null as a parameter, because they have no null-aware SQL counterpart.
+
 `Contains` on a list expands to one bind variable per element and is not chunked, so a very large list runs into the dialect's bind-variable / IN-list limit (Oracle's 1000, SQL Server's 2100 parameters, SQLite's historical 999, etc.) and fails at runtime. For a large set of keys, stage them in a temporary table and join, or use raw SQL.
 
 ### Graph save (save parent and children in one call)
@@ -252,7 +254,7 @@ Operations the context provides (it does not expose raw handles):
 | QuickER Repository (SQL Server / SQLite) | Full support (After fires right after each operation) | Both `WriteBinaryColumnAsync` and `ExecuteSqlAsync` are supported |
 | EF Core Repository (`GenerateEfCore`) | Supported (After fires in a batch after `SaveChanges`) | `ExecuteSqlAsync` supported; `WriteBinaryColumnAsync` throws `NotSupportedException` |
 | In-memory (`GenerateInMemoryRepositories`) | Supported (pseudo transaction) | `WriteBinaryColumnAsync` writes to the store; `ExecuteSqlAsync` throws `NotSupportedException`. There is no real transaction, but the save unit is all-or-nothing through copy-on-write: every write is staged and published as one unit only after the last phase succeeds, so **nothing a failed save wrote (including a blob written by After) is ever visible**, and a concurrent writer's changes cannot be trampled by the failure |
-| Remote (`--generate-remote-services`) | **A hook registered in the server-side DI fires** | Follows the server-side real implementation. **Known limitation**: even for a row the server skipped in Before, the client-side `RowState` does not reflect the skip and is committed to `Unchanged` |
+| Remote (`--generate-remote-services`) | **A hook registered in the server-side DI fires** | Follows the server-side real implementation. A row the server skipped in Before travels back in the save response, so the client-side `RowState` is left untouched as well (the row stays pending and is retried on the next save), exactly as on a direct connection |
 
 ### Raw SQL escape hatch
 
@@ -283,7 +285,7 @@ Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
     TEntity entity, CancellationToken cancellationToken = default);
 ```
 
-For each UNIQUE constraint of the table it asks "does a row with the same value tuple already exist, **excluding rows that share this entity's primary key**?". Because the same-key row is excluded, the same call is correct both before an insert (there is no such row, so the exclusion is a no-op) and before an update. Constraint member values that contain a `null` are skipped, since NULL collision semantics differ per dialect.
+For each UNIQUE constraint of the table it asks "does a row with the same value tuple already exist, **excluding rows that share this entity's primary key**?". Because the same-key row is excluded, the same call is correct both before an insert and before an update. When the primary key can be null (a value object or `string` key) and has not been assigned yet — the normal state of a new row — the exclusion is left out entirely, so the check really does search every row. Constraint member values that contain a `null` are skipped, since NULL collision semantics differ per dialect.
 
 > The result is **advisory**. The definitive guarantee is the database's own UNIQUE constraint: a concurrent insert between the check and the save can still make the save fail (TOCTOU). Use the check to give a friendly message, and keep handling the save exception.
 
@@ -324,6 +326,10 @@ An edit model whose table declares UNIQUE constraints also declares them in gene
 ```csharp
 var valid = EditModelUniquenessValidator.Validate(models);
 ```
+
+Validating the parent covers the collection: `parent.Validate(includeChildren: true)` delegates each registered child collection to `EditModelCollection<T>.Validate()`, so the duplicate check among the siblings runs from the root call as well, and `parent.CollectErrors()` returns the duplicate-value errors along with the rest, each under its `Orders[i]` path. A child collection that a mapper load replaces wholesale is picked up too — the cascade registry resolves the collection through an accessor at every use rather than capturing the instance it was registered with.
+
+Duplicate-value errors live in a store of their own, separate from input errors (required, conversion, value object, `OnValidate`). Registering or clearing one kind never touches the other, so a property can carry a conversion error and a duplicate-value error at the same time, and `GetErrors` returns both. In particular, resolving a duplication and re-validating does not silently drop the "cannot be converted" error left on the same field — that error only ever comes back through the binding setter, so clearing it would leave an invalid input on screen with `Validate` reporting success. `HasErrors` covers both stores.
 
 #### Edit models: checking against the database
 
@@ -582,7 +588,7 @@ Points to keep in mind:
 - **Serialization** uses the same semantics as the entity's JSON round trip (`ToJson` / `Clone`) (VO as the wrapped value, RowState included, parent-reference navigation does not cycle), and the client and server share `RemoteJson.Options`.
 - **Named queries can all be called through the remote surface regardless of implementation method** (simple DSL / raw SQL / manual implementation) (the real implementation lives in the server-side repository).
 - **Exception types are restored**: the server's `SaveConflictException` is thrown on the client as `SaveConflictException` too via HTTP 409 (the same catch as in the direct case works), and other server exceptions become `RemoteRepositoryException` (preserving the status code and message).
-- **A request the server cannot interpret is answered with 400, not 500.** Anything that fails while the request itself is being read — a malformed or empty JSON body, a non-JSON content type, a type mismatch, a value that fails value-object validation, an undefined `ConcurrencyMode` value, or a missing/unrestorable `?id=` key on the binary endpoints — is a fault in what the client sent, so it returns HTTP 400 with a `RemoteError` of type `"BadRequest"` (the client throws `RemoteRepositoryException` with `StatusCode` 400). The message of a 400 only describes the client's own payload, and neither the server-side logging nor the `OnServerError` hook runs (both are reserved for 500). A request rejected by the server infrastructure (`BadHttpRequestException`, for example when the request body size limit is exceeded) keeps the status code it carries, such as 413.
+- **A request the server cannot interpret is answered with 400, not 500.** Anything that fails while the request itself is being read — a malformed or empty JSON body, a non-JSON content type, a type mismatch, a value that fails value-object validation, a body that omits a required field (`{}` sent to `Insert` / `Update` / `Save` / `SaveMany`, or a reference-type key omitted from `GetById` / `Delete`), an undefined `ConcurrencyMode` value, or a missing/unrestorable `?id=` key on the binary endpoints — is a fault in what the client sent, so it returns HTTP 400 with a `RemoteError` of type `"BadRequest"` (the client throws `RemoteRepositoryException` with `StatusCode` 400). The message of a 400 only describes the client's own payload, and neither the server-side logging nor the `OnServerError` hook runs (both are reserved for 500). A request rejected by the server infrastructure (`BadHttpRequestException`, for example when the request body size limit is exceeded) keeps the status code it carries, such as 413.
 - **After a successful graph save (Save), the local RowState is also committed** (the same behavior as the direct case).
 - **Optimistic concurrency travels over the wire.** The `ConcurrencyMode` argument is part of the Update / Save request, and the Insert / Update / Save responses carry the row versions the save assigned, keyed by entity type and primary key, which the client writes back onto the local graph. A remote client therefore ends up holding the same versions a direct connection would, and can keep saving the same entities without re-reading them.
 - **A 500 response carries the server-side exception message verbatim.** This is intentional: the message is what lets the client restore the failure, so that `catch` looks the same as in the direct case. The full exception, including the stack trace, is written only to the server side, through `ILoggerFactory` (category `QuickER.RemoteServer`; a no-op when the host has no logging provider). When you expose the endpoints beyond a trusted boundary, combine them with authorization or with exception-translating middleware so that internal details do not leak into the response.
@@ -612,6 +618,13 @@ A working example is in the repository at [samples/ec-order-remote](../samples/e
 ## In-memory repositories for tests (GenerateInMemoryRepositories)
 
 You can additionally generate an in-memory implementation for unit testing without a DB. It implements the same contract, and unsupported operations throw `NotSupportedException` with guidance to switch to the real-DB repository. Note that `GenerateInMemoryRepositories` cannot be combined with `UseRuntimePackages` (a diagnostic error), because the in-memory engine is emitted as fixed infra on the generation side and does not exist in the packages.
+
+### Known divergences from a real database
+
+The in-memory store evaluates queries with LINQ-to-Objects rather than SQL, so a few semantics are its own rather than the database's. They are worth knowing when a test passes in memory and fails against the real thing:
+
+- **String comparison and ordering are ordinal.** Filtering (`Where`) and `OrderBy` both compare strings ordinally, so `"B"` sorts before `"a"`. SQL Server's default collation is case-insensitive and orders by the collation's rules instead, so a test that depends on case or accent handling is not evidence about the database.
+- **UNIQUE constraints are not enforced on write.** Only the primary key is (a duplicate key is rejected exactly as a real INSERT would be). A duplicate value in a UNIQUE constraint is stored without complaint; use `CheckUniquenessAsync` if a test needs the check.
 
 ## Runtime package reference mode (--use-runtime-packages)
 

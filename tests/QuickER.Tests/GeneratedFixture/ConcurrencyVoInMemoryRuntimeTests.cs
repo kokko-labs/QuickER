@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
@@ -259,5 +260,57 @@ public sealed class ConcurrencyVoInMemoryRuntimeTests
         (await gadgets.GetByIdAsync(GadgetIdValue.Create(1), Ct))!
             .Name.Value.Should()
             .Be("renamed");
+    }
+
+    /// <summary>バイナリ VO 列（版）の OrderBy が例外にならず、包んでいる byte[] の辞書式順に並ぶ</summary>
+    [Fact(
+        DisplayName = "[Concurrency/VO/InMemory] OrderBy: バイナリ VO の版が辞書式バイト順で並ぶ"
+    )]
+    public async Task OrderBy_BinaryValueObject_SortsLexicographically()
+    {
+        var store = new InMemoryDataStore();
+        var gadgets = new InMemoryGadgetRepository(store);
+
+        // 版は単調増加＝採番順がそのまま昇順になる。ValueObjectBinaryBase は IComparable を実装しないため、
+        // 既定の比較子では ArgumentException になっていた
+        foreach (var id in new[] { 1, 2, 3 })
+        {
+            await gadgets.InsertAsync(
+                new GadgetEntity
+                {
+                    GadgetId = GadgetIdValue.Create(id),
+                    Name = NameValue.Create($"gadget{id}"),
+                },
+                Ct
+            );
+        }
+
+        var ascending = await gadgets.Query().OrderBy(g => g.RowVer).ToListAsync(Ct);
+        ascending.Select(g => g.GadgetId.Value).Should().Equal(1, 2, 3);
+
+        var descending = await gadgets.Query().OrderByDescending(g => g.RowVer).ToListAsync(Ct);
+        descending.Select(g => g.GadgetId.Value).Should().Equal(3, 2, 1);
+    }
+
+    /// <summary>バイナリ VO の等値・ハッシュは配列を要素ごとに比較する（参照同一性ではない）</summary>
+    /// <remarks>
+    /// <see cref="ValueObjectBase{TSelf, TValue}"/> の等値は boxing 回避のため
+    /// <c>EqualityComparer&lt;TValue&gt;.Default</c> 基準だが、<c>byte[]</c> ではそれが参照比較になってしまう。
+    /// <see cref="ValueObjectBinaryBase{TSelf}"/> 側の override が構造比較を保つことを固定する。
+    /// </remarks>
+    [Fact(DisplayName = "[Concurrency/VO] バイナリ VO の等値・ハッシュは要素ごとの構造比較")]
+    public void BinaryValueObject_UsesStructuralEquality()
+    {
+        var a = RowVerValue.Create([1, 2, 3]);
+        var b = RowVerValue.Create([1, 2, 3]);
+        var c = RowVerValue.Create([1, 2, 4]);
+
+        // 内容が同じ「別インスタンスの配列」同士が等しい（参照比較なら false になる）
+        a.Equals(b).Should().BeTrue();
+        (a == b).Should().BeTrue();
+        a.GetHashCode().Should().Be(b.GetHashCode());
+
+        a.Equals(c).Should().BeFalse();
+        (a != c).Should().BeTrue();
     }
 }

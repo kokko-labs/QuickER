@@ -74,7 +74,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             builder
                 .Append("                        var request = await ReadRequestAsync<")
                 .Append(RequestRecordName(shape, repositoryName))
-                .Append(">(context);\n");
+                .Append(">(context).ConfigureAwait(false);\n");
             arguments.AddRange(
                 shape.PayloadParameters.Select(p => $"request.{ToPascalCase(p.Name)}")
             );
@@ -92,7 +92,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             .Append(shape.MethodName)
             .Append('(')
             .Append(string.Join(", ", arguments))
-            .Append(");\n")
+            .Append(").ConfigureAwait(false);\n")
             .Append("                    }\n")
             .Append("                )\n")
             .Append("        );");

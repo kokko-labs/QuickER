@@ -12,6 +12,27 @@
             _ => false,
         };
     }
+
+    /// <summary>
+    /// Fills in every excluded column that <paramref name="entity"/> left in the "not-fetched" state from <paramref name="stored"/>,
+    /// so that writing back an entity that was fetched without its blobs keeps them.
+    /// </summary>
+    /// <remarks>
+    /// A real database's UPDATE does not name the excluded columns at all, so the stored blob simply survives it. A store that
+    /// replaces the whole row instead has to carry the old value across explicitly, or an ordinary fetch-modify-save would wipe
+    /// the blob (the update guard cannot catch it: the entity holds exactly the "not-fetched" value the guard permits). A column
+    /// that does carry a value is left alone, because that value is the caller's own data, as it is on an insert.
+    /// </remarks>
+    public static void PreserveUnset(EntityBase entity, EntityBase stored)
+    {
+        foreach (var property in For(entity.GetType()))
+        {
+            if (IsUnset(property.GetValue(entity)))
+            {
+                property.SetValue(entity, property.GetValue(stored));
+            }
+        }
+    }
 {{~ if exclude_unbounded_binary || runtime_package_export ~}}
 
     /// <summary>Default buffer size for the chunked copy used by the streaming accessors (O(chunk); never loads the whole blob into memory).</summary>
@@ -106,14 +127,15 @@ public abstract partial class ValueObjectBase<TSelf, TValue> : IValueObject
     /// <summary>Gets the string used for display (defaults to ToString()). A concrete value object's partial class can override it to change the format.</summary>
     public virtual string DisplayValue => ToString();
 
-    /// <summary>Value-based equality (arrays such as byte[] are compared element by element).</summary>
+    /// <summary>Value-based equality (compared through <see cref="EqualityComparer{T}.Default"/>, so a struct value is not boxed).</summary>
+    /// <remarks>A value object whose value is an array needs element-by-element comparison and overrides this — see <see cref="ValueObjectBinaryBase{TSelf}"/>.</remarks>
     public override bool Equals(object? obj) =>
         obj is ValueObjectBase<TSelf, TValue> other
-        && StructuralComparisons.StructuralEqualityComparer.Equals(Value, other.Value);
+        && EqualityComparer<TValue>.Default.Equals(Value, other.Value);
 
-    /// <summary>Value-based hash code (arrays are computed structurally).</summary>
+    /// <summary>Value-based hash code (computed through <see cref="EqualityComparer{T}.Default"/>, so a struct value is not boxed).</summary>
     public override int GetHashCode() =>
-        Value is null ? 0 : StructuralComparisons.StructuralEqualityComparer.GetHashCode(Value);
+        Value is null ? 0 : EqualityComparer<TValue>.Default.GetHashCode(Value);
 
     /// <summary>Value-based equality operator.</summary>
     public static bool operator ==(
@@ -298,7 +320,7 @@ public abstract partial class ValueObjectDateTimeBase<TSelf>
     public static TSelf Today => TSelf.Create(DateTime.Today);
 }
 
-/// <summary>Base for byte[] value objects. ToString returns Base64 (equality uses the base's structural comparison).</summary>
+/// <summary>Base for byte[] value objects. ToString returns Base64, and equality compares the arrays element by element.</summary>
 /// <remarks>
 /// The wrapped array is NOT defensively copied: the value object holds (and exposes through Value) the very array it was
 /// created with, because copying would double the allocation of every binary column read from the database. Treat the array
@@ -310,6 +332,15 @@ public abstract partial class ValueObjectBinaryBase<TSelf> : ValueObjectBase<TSe
     /// <summary>Initializes with an already-validated value.</summary>
     protected ValueObjectBinaryBase(byte[] value)
         : base(value) { }
+
+    /// <summary>Value-based equality (arrays are compared element by element; reference equality would make two equal blobs differ).</summary>
+    public override bool Equals(object? obj) =>
+        obj is ValueObjectBase<TSelf, byte[]> other
+        && StructuralComparisons.StructuralEqualityComparer.Equals(Value, other.Value);
+
+    /// <summary>Value-based hash code (arrays are computed structurally, matching <see cref="Equals(object?)"/>).</summary>
+    public override int GetHashCode() =>
+        Value is null ? 0 : StructuralComparisons.StructuralEqualityComparer.GetHashCode(Value);
 
     /// <summary>Returns the value as a Base64 string.</summary>
     public override string ToString() =>

@@ -161,6 +161,81 @@ public class EditModelUniquenessTests
         collection[0].HasErrors.Should().BeFalse();
     }
 
+    /// <summary>親の Validate(includeChildren) だけで、子コレクション内の兄弟重複まで検出される</summary>
+    /// <remarks>
+    /// ChildLink（コレクション）の検証は <see cref="EditModelCollection{T}.Validate"/> へ委譲されるため、
+    /// 要素個別の検証だけでなく重複検出も親からの 1 回の Validate で走る。
+    /// </remarks>
+    [Fact(DisplayName = "親の Validate で子コレクション内の重複が検出される")]
+    public void ParentValidate_DetectsDuplicatesAmongChildren()
+    {
+        var customer = new CustomerEditModel { BindingCustomerId = "1", BindingName = "Alice" };
+        customer.Orders.Add(NewOrder(10, 1, 100m, "apple pie"));
+        customer.Orders.Add(NewOrder(11, 2, 50m, "apple pie"));
+
+        customer.Validate(includeChildren: true).Should().BeFalse();
+
+        GetErrors(customer.Orders[0], nameof(OrderEditModel.BindingMemo)).Should().ContainSingle();
+        GetErrors(customer.Orders[1], nameof(OrderEditModel.BindingMemo)).Should().ContainSingle();
+
+        // 親からの収集にも重複エラーがパス付きで載る
+        customer
+            .CollectErrors(includeChildren: true)
+            .Should()
+            .Contain(e =>
+                e.Path == "Orders[0]" && e.Property == nameof(OrderEditModel.BindingMemo)
+            );
+    }
+
+    /// <summary>同一プロパティに変換エラーと重複エラーが同時に立つときは、別ストアなので 2 件とも返る</summary>
+    /// <remarks>
+    /// 旧実装は重複エラーを入力エラーと同じスロットへ <c>SetError</c> で上書きしていたため、変換エラーが消えていた。
+    /// </remarks>
+    [Fact(DisplayName = "同一プロパティの変換エラーと重複エラーは 2 件とも返る")]
+    public void SameProperty_ReturnsBothErrorKinds()
+    {
+        var collection = new EditModelCollection<OrderEditModel>
+        {
+            NewOrder(10, 1, 100m, "apple pie"),
+            NewOrder(11, 1, 100m, "banana"),
+        };
+
+        // 複合制約（customer_id + amount）の重複を保ったまま、同じ amount 欄へ不正入力を与える
+        // （変換に失敗するので確定値 100 は据え置き＝重複したまま変換エラーだけが増える）
+        collection[1].BindingAmount = "abc";
+
+        collection.Validate().Should().BeFalse();
+
+        GetErrors(collection[1], nameof(OrderEditModel.BindingAmount)).Should().HaveCount(2);
+    }
+
+    /// <summary>重複を解消して再検証しても、同じプロパティの入力エラーは巻き添えで消えない（false のまま）</summary>
+    /// <remarks>
+    /// 旧実装は重複エラーを入力エラーと同じスロットへ上書きし、次回検証冒頭の一括クリアでスロットごと削除していた。
+    /// 変換エラーはバインディングのセッターからしか再生成されないため二度と復活せず、画面に不正入力が残ったまま
+    /// Validate が true になり、古い確定値が黙って保存され得た。
+    /// </remarks>
+    [Fact(DisplayName = "重複解消後も同じ欄の変換エラーは残り Validate は false のまま")]
+    public void ResolvingDuplicate_KeepsParseErrorOnSameProperty()
+    {
+        var collection = new EditModelCollection<OrderEditModel>
+        {
+            NewOrder(10, 1, 100m, "apple pie"),
+            NewOrder(11, 1, 100m, "banana"),
+        };
+        collection[1].BindingAmount = "abc";
+
+        collection.Validate().Should().BeFalse();
+
+        // 重複だけを解消する（不正入力 "abc" は amount 欄に残ったまま）
+        collection[1].BindingCustomerId = "2";
+
+        collection.Validate().Should().BeFalse();
+
+        GetErrors(collection[1], nameof(OrderEditModel.BindingAmount)).Should().ContainSingle();
+        collection[1].HasErrors.Should().BeTrue();
+    }
+
     /// <summary>ルートの一覧（コレクションでない列挙）でも同じヘルパを直接呼べる</summary>
     [Fact(DisplayName = "ヘルパを一覧へ直接呼べる")]
     public void Validator_CanBeCalledOnPlainSequence()

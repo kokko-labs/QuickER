@@ -536,6 +536,118 @@ public abstract class RemoteServiceRuntimeTestsBase : IAsyncLifetime
         await app.StopAsync(Ct);
     }
 
+    /// <summary>
+    /// 17. 必須フィールドを省いたボディ（<c>{}</c>）は 400（BadRequest）になる。エンベロープは positional record のため
+    /// 欠落メンバは既定の null のまま通ってしまい、従来はリポジトリ奥の null 引数例外＝500 に化けていた経路の回帰防止。
+    /// </summary>
+    [Theory(DisplayName = "[RemoteService] 17: 必須フィールドを省いた {} のボディは 400 になる")]
+    [InlineData("Customer/Insert")]
+    [InlineData("Customer/Update")]
+    [InlineData("Customer/Save")]
+    [InlineData("Customer/SaveMany")]
+    public async Task BodyMissingRequiredField_ReturnsBadRequest(string operation)
+    {
+        var baseUrl = _app!.Urls.First();
+
+        // 生成クライアントは必ず全フィールドを送るため、欠落したボディは素の HttpClient で直接送る
+        using var raw = new HttpClient();
+        using var content = new StringContent("{}", System.Text.Encoding.UTF8, "application/json");
+        using var response = await raw.PostAsync($"{baseUrl}/quicker/{operation}", content, Ct);
+
+        response
+            .StatusCode.Should()
+            .Be(HttpStatusCode.BadRequest, "必須フィールドの欠落はクライアント側の不備＝400");
+
+        var error = await response.Content.ReadFromJsonAsync<RemoteError>(Ct);
+        error!.Type.Should().Be("BadRequest");
+
+        // 400 で終わっているため行は作られていない
+        (await Customers.GetAllAsync(Ct))
+            .Should()
+            .BeEmpty();
+    }
+
+    /// <summary>
+    /// 18. 参照型キー（このフィクスチャの主キーは値オブジェクト）を省いたボディも 400 になる
+    /// （キーの型が値型の場合は省略形が無いため素通しする＝この検証は参照型キー限定）。
+    /// </summary>
+    [Theory(DisplayName = "[RemoteService] 18: 参照型キーを省いた {} のボディは 400 になる")]
+    [InlineData("Customer/GetById")]
+    [InlineData("Customer/Delete")]
+    public async Task BodyMissingKey_ReturnsBadRequest(string operation)
+    {
+        var baseUrl = _app!.Urls.First();
+
+        using var raw = new HttpClient();
+        using var content = new StringContent("{}", System.Text.Encoding.UTF8, "application/json");
+        using var response = await raw.PostAsync($"{baseUrl}/quicker/{operation}", content, Ct);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+
+        var error = await response.Content.ReadFromJsonAsync<RemoteError>(Ct);
+        error!.Type.Should().Be("BadRequest");
+    }
+
+    /// <summary>
+    /// 19. 400 の経路ではサーバー側のログ出力も <c>OnServerError</c> フックも呼ばれない（どちらも 500 専用）。
+    /// </summary>
+    /// <remarks>
+    /// 静的カウンタは並列実行される派生スイート間で共有されるため、リクエスト単位の相関 ID ヘッダで数える。
+    /// 同じ相関 ID で意図的に 500 を起こして 1 回数えられることも確認する＝「そもそも数えられていないから 0」という
+    /// 空虚な検証にならないようにしている。ログ出力（<c>LogServerError</c>）はフック呼び出しと同じ catch 節の中に
+    /// あるため、フックが呼ばれていないことはログも出ていないことを意味する。
+    /// </remarks>
+    [Fact(DisplayName = "[RemoteService] 19: 400 の経路では OnServerError フックが発火しない")]
+    public async Task BadRequest_DoesNotInvokeOnServerErrorHook()
+    {
+        var baseUrl = _app!.Urls.First();
+        var correlationId = Guid.NewGuid().ToString();
+
+        using var raw = new HttpClient();
+        raw.DefaultRequestHeaders.Add(
+            GeneratedRemoteEndpoints.CorrelationHeaderName,
+            correlationId
+        );
+
+        // 必須フィールド欠落＝400。500 専用のフックは呼ばれない
+        using var badContent = new StringContent(
+            "{}",
+            System.Text.Encoding.UTF8,
+            "application/json"
+        );
+        using var badResponse = await raw.PostAsync(
+            $"{baseUrl}/quicker/Customer/Insert",
+            badContent,
+            Ct
+        );
+
+        badResponse.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        GeneratedRemoteEndpoints
+            .CorrelatedHookCallCount(correlationId)
+            .Should()
+            .Be(0, "400 はサーバー側の失敗ではないためフックもログも呼ばれない");
+
+        // 対照: 同じ相関 ID で 500（主キー重複）を起こすとフックは数えられる＝計測機構が生きている
+        await Customers.InsertAsync(NewCustomer(1, "Alice"), Ct);
+        var payload = "{\"Entity\":{\"CustomerId\":1,\"Name\":\"Alice\"}}";
+        using var conflictContent = new StringContent(
+            payload,
+            System.Text.Encoding.UTF8,
+            "application/json"
+        );
+        using var conflictResponse = await raw.PostAsync(
+            $"{baseUrl}/quicker/Customer/Insert",
+            conflictContent,
+            Ct
+        );
+
+        conflictResponse.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        GeneratedRemoteEndpoints
+            .CorrelatedHookCallCount(correlationId)
+            .Should()
+            .Be(1, "500 の経路ではフックが発火する（計測機構が機能していることの対照）");
+    }
+
     /// <summary>使い終えたクライアント DI・サーバー・一時 DB を破棄する</summary>
     public async ValueTask DisposeAsync()
     {

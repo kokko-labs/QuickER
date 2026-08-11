@@ -372,14 +372,15 @@ public sealed class SqlServerQueryPipelineRuntimeTests(SqlServerContainerFixture
     /// 正しい値を返すことを検証する。
     /// </summary>
     /// <remarks>
-    /// <b>フィクスチャに DateTime 列がない</b>ため（<see cref="GeneratedFixtureDefinition"/> は int/varchar/decimal/bit のみ）、
-    /// 式木クエリ API から翻訳器を通す実データ検証はできない。そこで SQLite 側
+    /// フィクスチャの唯一の DateTime 列（<c>orders.ordered_at</c>）は EditModel のロード無損失性を実型で押さえるための
+    /// NULL 許容列で、既存シードは値を入れない。日付部品の実データ検証をそこへ相乗りさせると本テストがシード形状に
+    /// 縛られるため、専用テーブルを立てる方式を維持する。そこで SQLite 側
     /// <see cref="GeneratedSqliteAdoRuntimeTests.DateParts_StrftimeFragments_ReturnCorrectIntegersOnRealData"/> と
     /// <b>同型</b>のアプローチを採る＝翻訳器がテンプレート <c>CSharpRuntime/_05_QueryPipeline.scriban</c> の
     /// <c>TryGetDatePart</c>（<c>repository_dialect == "sqlserver"</c> 分岐）で DateTime 列参照に対して生成する SQL
     /// フラグメントそのものを、<c>datetime2</c> 列を持つ一時テーブルへ格納したうえで <c>ExecuteScalarSqlAsync</c> で
     /// 実行し、部品の実値を検証する。フラグメントの生成側（式木からの吐き分け）は <c>SqlServerRepositoryDialectTests</c>
-    /// と Roslyn コンパイル検証が守る。フィクスチャは変更しない。
+    /// と Roslyn コンパイル検証が守る。
     /// </remarks>
     [Fact(
         DisplayName = "[SqlServerPipeline] 7: 式木の日付部品が生成する SQL Server フラグメントが実 datetime2 で正しい値を返す"

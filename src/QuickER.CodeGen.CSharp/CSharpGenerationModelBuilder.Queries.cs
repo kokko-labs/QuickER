@@ -1079,7 +1079,7 @@ internal sealed partial class CSharpGenerationModelBuilder
                     .Append(",\n            ")
                     .Append(args)
                     .Append(
-                        ",\n            cancellationToken\n        );\n        return items.Count > 0 ? items[0] : null;\n    }"
+                        ",\n            cancellationToken\n        ).ConfigureAwait(false);\n        return items.Count > 0 ? items[0] : null;\n    }"
                     );
                 break;
 
@@ -1089,7 +1089,9 @@ internal sealed partial class CSharpGenerationModelBuilder
                     .Append(sqlLiteral)
                     .Append(",\n            ")
                     .Append(args)
-                    .Append(",\n            cancellationToken\n        ) ?? 0;");
+                    .Append(
+                        ",\n            cancellationToken\n        ).ConfigureAwait(false) ?? 0;"
+                    );
                 break;
 
             case QueryReturnShape.Scalar:

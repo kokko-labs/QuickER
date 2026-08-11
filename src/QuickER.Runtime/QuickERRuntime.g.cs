@@ -276,6 +276,27 @@ public static class UnboundedBinaryColumns
         };
     }
 
+    /// <summary>
+    /// Fills in every excluded column that <paramref name="entity"/> left in the "not-fetched" state from <paramref name="stored"/>,
+    /// so that writing back an entity that was fetched without its blobs keeps them.
+    /// </summary>
+    /// <remarks>
+    /// A real database's UPDATE does not name the excluded columns at all, so the stored blob simply survives it. A store that
+    /// replaces the whole row instead has to carry the old value across explicitly, or an ordinary fetch-modify-save would wipe
+    /// the blob (the update guard cannot catch it: the entity holds exactly the "not-fetched" value the guard permits). A column
+    /// that does carry a value is left alone, because that value is the caller's own data, as it is on an insert.
+    /// </remarks>
+    public static void PreserveUnset(EntityBase entity, EntityBase stored)
+    {
+        foreach (var property in For(entity.GetType()))
+        {
+            if (IsUnset(property.GetValue(entity)))
+            {
+                property.SetValue(entity, property.GetValue(stored));
+            }
+        }
+    }
+
     /// <summary>Default buffer size for the chunked copy used by the streaming accessors (O(chunk); never loads the whole blob into memory).</summary>
     public const int StreamCopyBufferSize = 81920;
 
@@ -366,14 +387,15 @@ public abstract partial class ValueObjectBase<TSelf, TValue> : IValueObject
     /// <summary>Gets the string used for display (defaults to ToString()). A concrete value object's partial class can override it to change the format.</summary>
     public virtual string DisplayValue => ToString();
 
-    /// <summary>Value-based equality (arrays such as byte[] are compared element by element).</summary>
+    /// <summary>Value-based equality (compared through <see cref="EqualityComparer{T}.Default"/>, so a struct value is not boxed).</summary>
+    /// <remarks>A value object whose value is an array needs element-by-element comparison and overrides this — see <see cref="ValueObjectBinaryBase{TSelf}"/>.</remarks>
     public override bool Equals(object? obj) =>
         obj is ValueObjectBase<TSelf, TValue> other
-        && StructuralComparisons.StructuralEqualityComparer.Equals(Value, other.Value);
+        && EqualityComparer<TValue>.Default.Equals(Value, other.Value);
 
-    /// <summary>Value-based hash code (arrays are computed structurally).</summary>
+    /// <summary>Value-based hash code (computed through <see cref="EqualityComparer{T}.Default"/>, so a struct value is not boxed).</summary>
     public override int GetHashCode() =>
-        Value is null ? 0 : StructuralComparisons.StructuralEqualityComparer.GetHashCode(Value);
+        Value is null ? 0 : EqualityComparer<TValue>.Default.GetHashCode(Value);
 
     /// <summary>Value-based equality operator.</summary>
     public static bool operator ==(
@@ -558,7 +580,7 @@ public abstract partial class ValueObjectDateTimeBase<TSelf>
     public static TSelf Today => TSelf.Create(DateTime.Today);
 }
 
-/// <summary>Base for byte[] value objects. ToString returns Base64 (equality uses the base's structural comparison).</summary>
+/// <summary>Base for byte[] value objects. ToString returns Base64, and equality compares the arrays element by element.</summary>
 /// <remarks>
 /// The wrapped array is NOT defensively copied: the value object holds (and exposes through Value) the very array it was
 /// created with, because copying would double the allocation of every binary column read from the database. Treat the array
@@ -570,6 +592,15 @@ public abstract partial class ValueObjectBinaryBase<TSelf> : ValueObjectBase<TSe
     /// <summary>Initializes with an already-validated value.</summary>
     protected ValueObjectBinaryBase(byte[] value)
         : base(value) { }
+
+    /// <summary>Value-based equality (arrays are compared element by element; reference equality would make two equal blobs differ).</summary>
+    public override bool Equals(object? obj) =>
+        obj is ValueObjectBase<TSelf, byte[]> other
+        && StructuralComparisons.StructuralEqualityComparer.Equals(Value, other.Value);
+
+    /// <summary>Value-based hash code (arrays are computed structurally, matching <see cref="Equals(object?)"/>).</summary>
+    public override int GetHashCode() =>
+        Value is null ? 0 : StructuralComparisons.StructuralEqualityComparer.GetHashCode(Value);
 
     /// <summary>Returns the value as a Base64 string.</summary>
     public override string ToString() =>
@@ -874,8 +905,16 @@ public abstract partial class EditModelBase
         INotifyDataErrorInfo,
         IEditableObject
 {
-    /// <summary>Error messages keyed by property name.</summary>
+    /// <summary>Input error messages (required, conversion, value object, OnValidate) keyed by property name.</summary>
     private readonly Dictionary<string, List<string>> _errors = new();
+
+    /// <summary>
+    /// Duplicate-value error messages keyed by property name, kept in a store of their own so the two kinds never overwrite each other:
+    /// a uniqueness check registers and clears only this store, while SetError / ClearErrors touch only <see cref="_errors"/>.
+    /// Both stores are merged by <see cref="HasErrors"/>, <see cref="GetErrors"/>, and error collection, so a property can carry a
+    /// conversion error and a duplicate-value error at the same time.
+    /// </summary>
+    private readonly Dictionary<string, List<string>> _duplicateErrors = new();
 
     /// <summary>Raised when a property value changes.</summary>
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -883,8 +922,8 @@ public abstract partial class EditModelBase
     /// <summary>Raised when the input errors change.</summary>
     public event EventHandler<DataErrorsChangedEventArgs>? ErrorsChanged;
 
-    /// <summary>Gets a value indicating whether any input errors are present.</summary>
-    public bool HasErrors => _errors.Count > 0;
+    /// <summary>Gets a value indicating whether any errors are present (input errors and duplicate-value errors alike).</summary>
+    public bool HasErrors => _errors.Count > 0 || _duplicateErrors.Count > 0;
 
     /// <summary>Gets a value indicating whether a revert operation is in progress.</summary>
     protected bool IsReverting { get; private set; }
@@ -1117,16 +1156,25 @@ public abstract partial class EditModelBase
         return true;
     }
 
-    /// <summary>Returns the errors for the specified property (all errors when null).</summary>
+    /// <summary>Returns the errors for the specified property (all errors when null). Input errors come first, then duplicate-value errors.</summary>
     public IEnumerable GetErrors(string? propertyName)
     {
         if (string.IsNullOrEmpty(propertyName))
         {
-            return _errors.Values.SelectMany(e => e);
+            return _errors
+                .Values.SelectMany(e => e)
+                .Concat(_duplicateErrors.Values.SelectMany(e => e));
         }
 
-        return _errors.TryGetValue(propertyName, out var list) ? list : Enumerable.Empty<string>();
+        return ReadErrors(_errors, propertyName)
+            .Concat(ReadErrors(_duplicateErrors, propertyName));
     }
+
+    /// <summary>Reads the messages registered for the specified property in the specified error store (empty when there are none).</summary>
+    private static IEnumerable<string> ReadErrors(
+        Dictionary<string, List<string>> store,
+        string propertyName
+    ) => store.TryGetValue(propertyName, out var list) ? list : Enumerable.Empty<string>();
 
     /// <summary>Combines a child element path (empty at the root, "."-separated below).</summary>
     protected static string CombineErrorPath(string path, string segment) =>
@@ -1144,7 +1192,11 @@ public abstract partial class EditModelBase
         {
             foreach (var link in ChildLinks)
             {
-                link.Validate(includeChildren, ref valid);
+                // Do not short-circuit, so that errors are registered on every child.
+                if (!link.Validate(includeChildren))
+                {
+                    valid = false;
+                }
             }
         }
 
@@ -1179,14 +1231,17 @@ public abstract partial class EditModelBase
         }
     }
 
-    /// <summary>Enumerates this edit model's own errors with the specified path (building block for graph collection).</summary>
+    /// <summary>Enumerates this edit model's own errors with the specified path (building block for graph collection). Input errors come first, then duplicate-value errors.</summary>
     protected IEnumerable<EditModelError> CollectOwnErrors(string path)
     {
-        foreach (var pair in _errors)
+        foreach (var store in new[] { _errors, _duplicateErrors })
         {
-            foreach (var message in pair.Value)
+            foreach (var pair in store)
             {
-                yield return new EditModelError(path, pair.Key, message);
+                foreach (var message in pair.Value)
+                {
+                    yield return new EditModelError(path, pair.Key, message);
+                }
             }
         }
     }
@@ -1268,17 +1323,23 @@ public abstract partial class EditModelBase
     protected void AddChild(string name, Func<EditModelBase?> accessor) =>
         (_childLinks ??= new()).Add(ChildLink.ForSingle(name, accessor));
 
-    /// <summary>Registers a child collection into the cascade.</summary>
-    protected void AddChildren<T>(string name, EditModelCollection<T> collection)
+    /// <summary>Registers a child collection into the cascade (the collection is resolved lazily so the latest instance is used, even after a mapper load replaces it).</summary>
+    protected void AddChildren<T>(string name, Func<EditModelCollection<T>> accessor)
         where T : EditModelBase =>
-        (_childLinks ??= new()).Add(ChildLink.ForCollection(name, collection));
+        (_childLinks ??= new()).Add(ChildLink.ForCollection(name, accessor));
 
     /// <summary>Link to a registered child (cascade participant). Treats single references and child collections uniformly.</summary>
+    /// <remarks>
+    /// Every operation goes through the accessor the link was created with, so a child reference or child collection that is
+    /// replaced later (a mapper load rebuilds the collection, for instance) is still the one that validation, error collection,
+    /// accepting changes, and dirty checks see.
+    /// </remarks>
     private sealed class ChildLink
     {
         private readonly string _name;
         private readonly bool _isCollection;
         private readonly Func<IEnumerable<EditModelBase>> _items;
+        private readonly Func<bool, bool> _validate;
         private readonly Func<bool, bool> _hasChanges;
         private readonly Action _acceptRemoved;
 
@@ -1286,6 +1347,7 @@ public abstract partial class EditModelBase
             string name,
             bool isCollection,
             Func<IEnumerable<EditModelBase>> items,
+            Func<bool, bool> validate,
             Func<bool, bool> hasChanges,
             Action acceptRemoved
         )
@@ -1293,6 +1355,7 @@ public abstract partial class EditModelBase
             _name = name;
             _isCollection = isCollection;
             _items = items;
+            _validate = validate;
             _hasChanges = hasChanges;
             _acceptRemoved = acceptRemoved;
         }
@@ -1303,27 +1366,30 @@ public abstract partial class EditModelBase
                 name,
                 false,
                 () => accessor() is { } child ? new[] { child } : Enumerable.Empty<EditModelBase>(),
+                includeChildren => accessor() is not { } child || child.Validate(includeChildren),
                 includeChildren =>
                     accessor() is { } child && child.HasGraphChanges(includeChildren),
                 () => { }
             );
 
         /// <summary>Creates a link that registers a child collection.</summary>
-        public static ChildLink ForCollection<T>(string name, EditModelCollection<T> collection)
+        /// <remarks>
+        /// Validation is delegated to <see cref="EditModelCollection{T}.Validate"/> rather than looping over the elements here,
+        /// so validating the parent also runs the duplicate check among the siblings.
+        /// </remarks>
+        public static ChildLink ForCollection<T>(string name, Func<EditModelCollection<T>> accessor)
             where T : EditModelBase =>
-            new(name, true, () => collection, _ => collection.HasChanges, collection.AcceptRemoved);
+            new(
+                name,
+                true,
+                () => accessor(),
+                includeChildren => accessor().Validate(includeChildren),
+                _ => accessor().HasChanges,
+                () => accessor().AcceptRemoved()
+            );
 
-        /// <summary>Validates the registered children and updates <paramref name="valid"/>.</summary>
-        public void Validate(bool includeChildren, ref bool valid)
-        {
-            foreach (var item in _items())
-            {
-                if (!item.Validate(includeChildren))
-                {
-                    valid = false;
-                }
-            }
-        }
+        /// <summary>Validates the registered children and returns true when they are all valid.</summary>
+        public bool Validate(bool includeChildren) => _validate(includeChildren);
 
         /// <summary>Collects the registered children's errors with paths (name[i] for collections, name for single references).</summary>
         public void CollectErrors(
@@ -1357,7 +1423,7 @@ public abstract partial class EditModelBase
         public bool HasChanges(bool includeChildren) => _hasChanges(includeChildren);
     }
 
-    /// <summary>Sets the error for the specified property (pass null to clear).</summary>
+    /// <summary>Sets the input error for the specified property (pass null to clear). Duplicate-value errors live in their own store and are not affected.</summary>
     protected void SetError(string propertyName, string? error)
     {
         if (error is null)
@@ -1370,7 +1436,7 @@ public abstract partial class EditModelBase
         OnErrorsChanged(propertyName);
     }
 
-    /// <summary>Clears the errors for the specified property.</summary>
+    /// <summary>Clears the input errors for the specified property. Duplicate-value errors live in their own store and are cleared by ClearDuplicateErrors.</summary>
     protected void ClearErrors(string propertyName)
     {
         if (_errors.Remove(propertyName))
@@ -1383,29 +1449,29 @@ public abstract partial class EditModelBase
     protected void OnErrorsChanged(string propertyName) =>
         ErrorsChanged?.Invoke(this, new DataErrorsChangedEventArgs(propertyName));
 
-    /// <summary>Binding property names that currently hold a duplicate-value error (so the next uniqueness check clears exactly what the previous one registered).</summary>
-    private readonly List<string> _duplicateErrorProperties = new();
-
-    /// <summary>Clears the duplicate-value errors registered by the previous uniqueness check (errors registered by other rules are left untouched).</summary>
+    /// <summary>Clears the duplicate-value errors registered by the previous uniqueness check (input errors, which live in a separate store, are left untouched).</summary>
     public void ClearDuplicateErrors()
     {
-        foreach (var propertyName in _duplicateErrorProperties)
+        if (_duplicateErrors.Count == 0)
         {
-            ClearErrors(propertyName);
+            return;
         }
 
-        _duplicateErrorProperties.Clear();
+        var cleared = _duplicateErrors.Keys.ToList();
+        _duplicateErrors.Clear();
+
+        foreach (var propertyName in cleared)
+        {
+            OnErrorsChanged(propertyName);
+        }
     }
 
-    /// <summary>Registers a duplicate-value error on the specified binding property and remembers it, so the next check can clear it. An empty name registers a model-level error.</summary>
+    /// <summary>Registers a duplicate-value error on the specified binding property in the duplicate-value store. An empty name registers a model-level error.</summary>
+    /// <remarks>It does not go through <see cref="SetError"/>, so a conversion error already registered on the same property survives and both are reported.</remarks>
     public void SetDuplicateError(string propertyName, string message)
     {
-        SetError(propertyName, message);
-
-        if (!_duplicateErrorProperties.Contains(propertyName))
-        {
-            _duplicateErrorProperties.Add(propertyName);
-        }
+        _duplicateErrors[propertyName] = [message];
+        OnErrorsChanged(propertyName);
     }
 
     /// <summary>
@@ -2483,7 +2549,7 @@ public interface ISaveHookContext
             stream,
             stream.Length,
             cancellationToken
-        );
+        ).ConfigureAwait(false);
     }
 }
 
@@ -2579,7 +2645,7 @@ public sealed class SaveHookInvoker<TEntity>(IEnumerable<ISaveHook<TEntity>> hoo
 
         foreach (var hook in _hooks)
         {
-            if (!await hook.BeforeSaveAsync(typed, operation, cancellationToken))
+            if (!await hook.BeforeSaveAsync(typed, operation, cancellationToken).ConfigureAwait(false))
             {
                 return false;
             }
@@ -2600,7 +2666,7 @@ public sealed class SaveHookInvoker<TEntity>(IEnumerable<ISaveHook<TEntity>> hoo
 
         foreach (var hook in _hooks)
         {
-            await hook.AfterSaveAsync(typed, operation, context, cancellationToken);
+            await hook.AfterSaveAsync(typed, operation, context, cancellationToken).ConfigureAwait(false);
         }
     }
 }
@@ -2776,7 +2842,7 @@ public static class RawSqlMapper
         // Single-value mode (primitive/enum/string/decimal/date-time/Guid/byte[]/value object) converts and returns the first column of each row
         if (IsSingleValueType(resultType))
         {
-            while (await reader.ReadAsync(cancellationToken))
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
             {
                 var raw = reader.IsDBNull(0) ? null : reader.GetValue(0);
                 // Single-value mode allows DBNull → default (may be null for reference types, but projections carry no corruption risk)
@@ -2817,7 +2883,7 @@ public static class RawSqlMapper
             );
         }
 
-        while (await reader.ReadAsync(cancellationToken))
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
             var result = accessor.Create();
             for (var i = 0; i < setters.Length; i++)
@@ -3332,19 +3398,19 @@ public sealed class SqlQuery<TEntity>
     /// <summary>Fetches the entities matching the conditions (together with the requested Includes) as a list.</summary>
     public async Task<IReadOnlyList<TEntity>> ToListAsync(
         CancellationToken cancellationToken = default
-    ) => await _executor.ToListAsync(BuildPlan(), cancellationToken);
+    ) => await _executor.ToListAsync(BuildPlan(), cancellationToken).ConfigureAwait(false);
 
     /// <summary>Fetches the first entity matching the conditions (together with the requested Includes); returns null when there is no match.</summary>
     public async Task<TEntity?> FirstOrDefaultAsync(CancellationToken cancellationToken = default) =>
-        await _executor.FirstOrDefaultAsync(BuildPlan(), cancellationToken);
+        await _executor.FirstOrDefaultAsync(BuildPlan(), cancellationToken).ConfigureAwait(false);
 
     /// <summary>Returns the count of rows matching the conditions.</summary>
     public async Task<int> CountAsync(CancellationToken cancellationToken = default) =>
-        await _executor.CountAsync(BuildPlan(), cancellationToken);
+        await _executor.CountAsync(BuildPlan(), cancellationToken).ConfigureAwait(false);
 
     /// <summary>Returns whether any record matching the conditions exists.</summary>
     public async Task<bool> AnyAsync(CancellationToken cancellationToken = default) =>
-        await _executor.AnyAsync(BuildPlan(), cancellationToken);
+        await _executor.AnyAsync(BuildPlan(), cancellationToken).ConfigureAwait(false);
 
     /// <summary>Fetches the entities matching the conditions and returns them as a list transformed by the given projection (for named-query projections).</summary>
     /// <remarks>
@@ -3362,14 +3428,14 @@ public sealed class SqlQuery<TEntity>
     {
         ArgumentNullException.ThrowIfNull(selector);
 
-        return await _executor.ToProjectionListAsync(BuildPlan(), selector, cancellationToken);
+        return await _executor.ToProjectionListAsync(BuildPlan(), selector, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Bulk-deletes the rows matching the conditions. When cascadeDelete=true, descendants are also deleted along FK chains.</summary>
     public async Task<int> ExecuteDeleteAsync(
         bool cascadeDelete = false,
         CancellationToken cancellationToken = default
-    ) => await _executor.ExecuteDeleteAsync(BuildPlan(), cascadeDelete, cancellationToken);
+    ) => await _executor.ExecuteDeleteAsync(BuildPlan(), cascadeDelete, cancellationToken).ConfigureAwait(false);
 
     /// <summary>Freezes the captured expressions, Include tree, and paging into a snapshot to pass to the executor.</summary>
     private SqlQueryPlan<TEntity> BuildPlan()
@@ -3635,19 +3701,34 @@ public sealed record RemoteSaveManyRequest<TEntity>(
 /// <param name="RowVersion">The row version the database assigned during the save.</param>
 public sealed record RemoteRowVersionEntry(string EntityType, string Key, byte[] RowVersion);
 
+/// <summary>One entity referenced across the transport, identified the same way as <see cref="RemoteRowVersionEntry"/> (CLR type name plus the serialized primary key).</summary>
+/// <param name="EntityType">The CLR type name of the entity.</param>
+/// <param name="Key">The entity's primary key, serialized with the transport settings.</param>
+public sealed record RemoteEntityRef(string EntityType, string Key);
+
 /// <summary>Response body of a single insert (the row version the database assigned, or <c>null</c> when the table carries no rowversion column).</summary>
 public sealed record RemoteInsertResult(byte[]? RowVersion);
 
 /// <summary>Response body of a single update (the result, plus the row version the database assigned when the table carries one).</summary>
 public sealed record RemoteUpdateResult(bool Updated, byte[]? RowVersion);
 
-/// <summary>Response body of a graph save (the affected row count, plus the row versions assigned across the saved graph).</summary>
-/// <remarks>The version list is empty for tables with no rowversion column, so backends that do not carry versions simply return nothing to write back.</remarks>
-public sealed record RemoteSaveResult(int Affected, List<RemoteRowVersionEntry> RowVersions);
+/// <summary>Response body of a graph save (the affected row count, the row versions assigned across the saved graph, and the rows a save hook skipped).</summary>
+/// <remarks>
+/// The version list is empty for tables with no rowversion column, so backends that do not carry versions simply return
+/// nothing to write back. <paramref name="Skipped"/> names the rows whose save was declined by a hook's Before, so that the
+/// client can leave their RowState untouched exactly as a direct connection does; it defaults to <c>null</c> so that a
+/// response produced before it was carried - one from a server built earlier - is read as "nothing was skipped".
+/// </remarks>
+public sealed record RemoteSaveResult(
+    int Affected,
+    List<RemoteRowVersionEntry> RowVersions,
+    List<RemoteEntityRef>? Skipped = null
+);
 
 /// <summary>
-/// Shared reflection over an entity graph for remote transport: the cascade navigations to walk, and the row version
-/// table (<see cref="RemoteRowVersionEntry"/>) the server collects after a save and the client writes back.
+/// Shared reflection over an entity graph for remote transport: the cascade navigations to walk, and the tables the server
+/// collects after a save for the client to act on - the row versions (<see cref="RemoteRowVersionEntry"/>) to write back and
+/// the rows (<see cref="RemoteEntityRef"/>) a save hook skipped.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -3756,6 +3837,75 @@ public static class RemoteEntityGraph
         }
     }
 
+    /// <summary>Collects the rows a completed save left unsaved because a hook's Before declined them (server side; deleted entities are skipped because the client leaves them untouched either way).</summary>
+    /// <remarks>
+    /// A completed save has finalized every row it operated on to Unchanged and left the skipped ones as they were, so a row
+    /// that still carries changes is exactly a row the hook skipped. The traversal matches <see cref="CollectRowVersions"/>.
+    /// </remarks>
+    public static void CollectSkipped(EntityBase entity, bool cascade, List<RemoteEntityRef> into)
+    {
+        if (entity.IsRemoved)
+        {
+            return;
+        }
+
+        if (entity.HasChanges)
+        {
+            into.Add(new RemoteEntityRef(entity.GetType().Name, KeyText(entity)));
+        }
+
+        if (!cascade)
+        {
+            return;
+        }
+
+        foreach (var property in CascadeNavigations(entity.GetType()))
+        {
+            var value = property.GetValue(entity);
+
+            if (value is EntityBase child)
+            {
+                CollectSkipped(child, true, into);
+            }
+            else if (value is IEnumerable<EntityBase> children)
+            {
+                foreach (var item in children)
+                {
+                    if (item is not null)
+                    {
+                        CollectSkipped(item, true, into);
+                    }
+                }
+            }
+        }
+    }
+
+    /// <summary>Indexes the skipped rows a save response carried, or returns <c>null</c> when nothing was skipped.</summary>
+    public static HashSet<(string EntityType, string Key)>? SkippedLookup(
+        List<RemoteEntityRef>? entries
+    )
+    {
+        if (entries is null || entries.Count == 0)
+        {
+            return null;
+        }
+
+        var lookup = new HashSet<(string EntityType, string Key)>();
+
+        foreach (var entry in entries)
+        {
+            lookup.Add((entry.EntityType, entry.Key));
+        }
+
+        return lookup;
+    }
+
+    /// <summary>Determines whether the response named this entity as skipped by a save hook (client side).</summary>
+    public static bool IsSkipped(
+        EntityBase entity,
+        HashSet<(string EntityType, string Key)>? lookup
+    ) => lookup is not null && lookup.Contains((entity.GetType().Name, KeyText(entity)));
+
     /// <summary>Indexes the row versions a save response carried, or returns <c>null</c> when there is nothing to write back.</summary>
     public static Dictionary<(string EntityType, string Key), byte[]>? RowVersionLookup(
         List<RemoteRowVersionEntry>? entries
@@ -3821,7 +3971,9 @@ public static class RemoteEntityGraph
 /// <para>
 /// After a successful graph save (Save), the local entities' RowState is finalized with the same semantics as a direct
 /// connection (<c>EntityGraphSaver.AcceptChanges</c>), so swapping direct and remote implementations does not change
-/// the post-save state transitions.
+/// the post-save state transitions. A row whose save a server-side hook declined (<c>ISaveHook</c>'s Before returning
+/// <c>false</c>) travels back in the response and keeps its state, so it is still pending on the next save just as it
+/// would be on a direct connection.
 /// </para>
 /// <para>
 /// The concurrency policy (<see cref="ConcurrencyMode"/>) travels with the request, and Update / Save responses carry the
@@ -3857,14 +4009,14 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
             payload,
             RemoteJson.Options,
             cancellationToken
-        );
+        ).ConfigureAwait(false);
 
-        await EnsureSuccessAsync(response, cancellationToken);
+        await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
 
         var result = await response.Content.ReadFromJsonAsync<TResult>(
             RemoteJson.Options,
             cancellationToken
-        );
+        ).ConfigureAwait(false);
         return result!;
     }
 
@@ -3886,7 +4038,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
             error = await response.Content.ReadFromJsonAsync<RemoteError>(
                 RemoteJson.Options,
                 cancellationToken
-            );
+            ).ConfigureAwait(false);
         }
         catch (Exception parseError) when (parseError is JsonException or NotSupportedException)
         {
@@ -3923,7 +4075,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
             "Insert",
             new RemoteEntityRequest<TEntity>(entity),
             cancellationToken
-        );
+        ).ConfigureAwait(false);
 
         if (result.RowVersion is byte[] rowVersion)
         {
@@ -3952,7 +4104,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
             "Update",
             new RemoteUpdateRequest<TEntity>(entity, mode),
             cancellationToken
-        );
+        ).ConfigureAwait(false);
 
         if (result.RowVersion is byte[] rowVersion)
         {
@@ -3987,11 +4139,16 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
             "Save",
             new RemoteSaveRequest<TEntity>(entity, cascadeSave, cascadeDelete, insertWhenUpdateMissing, mode),
             cancellationToken
-        );
+        ).ConfigureAwait(false);
 
         // As with a direct connection (EntityGraphSaver), finalize the local RowState after a successful save,
-        // writing back the row versions the response carried along the same traversal
-        AcceptChanges(entity, cascadeSave, RemoteEntityGraph.RowVersionLookup(result.RowVersions));
+        // writing back the row versions the response carried and leaving the rows it reported as skipped alone
+        AcceptChanges(
+            entity,
+            cascadeSave,
+            RemoteEntityGraph.RowVersionLookup(result.RowVersions),
+            RemoteEntityGraph.SkippedLookup(result.Skipped)
+        );
         return result.Affected;
     }
 
@@ -4021,13 +4178,14 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
             "SaveMany",
             new RemoteSaveManyRequest<TEntity>(list, cascadeSave, cascadeDelete, insertWhenUpdateMissing, mode),
             cancellationToken
-        );
+        ).ConfigureAwait(false);
 
         var rowVersions = RemoteEntityGraph.RowVersionLookup(result.RowVersions);
+        var skipped = RemoteEntityGraph.SkippedLookup(result.Skipped);
 
         foreach (var entity in list)
         {
-            AcceptChanges(entity, cascadeSave, rowVersions);
+            AcceptChanges(entity, cascadeSave, rowVersions, skipped);
         }
 
         return result.Affected;
@@ -4068,11 +4226,18 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     }
 
     /// <summary>Finalizes saved entities to Unchanged after commit (same semantics as the direct-connection EntityGraphSaver.AcceptChanges), writing back the row versions the response carried.</summary>
-    /// <remarks>Deleted (Removed) entities keep their state. When cascading, the child-direction [NavigationReference] navigations are finalized recursively. The row version write-back rides along this traversal because it visits exactly the entities the server collected versions for.</remarks>
+    /// <remarks>
+    /// Deleted (Removed) entities keep their state. Rows the response reported as skipped - a save hook's Before declined
+    /// them on the server, so no INSERT or UPDATE was performed - keep their state as well, exactly as they do on a direct
+    /// connection. When cascading, the child-direction [NavigationReference] navigations are finalized recursively. Both the
+    /// row version write-back and the skip check ride along this traversal because it visits exactly the entities the server
+    /// reported on.
+    /// </remarks>
     private static void AcceptChanges(
         EntityBase entity,
         bool cascade,
-        Dictionary<(string EntityType, string Key), byte[]>? rowVersions
+        Dictionary<(string EntityType, string Key), byte[]>? rowVersions,
+        HashSet<(string EntityType, string Key)>? skipped
     )
     {
         if (entity.IsRemoved)
@@ -4080,7 +4245,12 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
             return;
         }
 
-        entity.MarkUnchanged();
+        // A skipped row had no INSERT / UPDATE performed on the server, so its RowState is left untouched
+        if (!RemoteEntityGraph.IsSkipped(entity, skipped))
+        {
+            entity.MarkUnchanged();
+        }
+
         RemoteEntityGraph.ApplyRowVersion(entity, rowVersions);
 
         if (!cascade)
@@ -4094,7 +4264,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
 
             if (value is EntityBase child)
             {
-                AcceptChanges(child, true, rowVersions);
+                AcceptChanges(child, true, rowVersions, skipped);
             }
             else if (value is IEnumerable<EntityBase> children)
             {
@@ -4102,7 +4272,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
                 {
                     if (item is not null)
                     {
-                        AcceptChanges(item, true, rowVersions);
+                        AcceptChanges(item, true, rowVersions, skipped);
                     }
                 }
             }
@@ -4135,17 +4305,17 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
             requestUri,
             HttpCompletionOption.ResponseHeadersRead,
             cancellationToken
-        );
+        ).ConfigureAwait(false);
 
         if (response.StatusCode == HttpStatusCode.NotFound)
         {
             return false;
         }
 
-        await EnsureSuccessAsync(response, cancellationToken);
+        await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
 
-        await using var source = await response.Content.ReadAsStreamAsync(cancellationToken);
-        await source.CopyToAsync(destination, cancellationToken);
+        await using var source = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        await source.CopyToAsync(destination, cancellationToken).ConfigureAwait(false);
         return true;
     }
 
@@ -4169,14 +4339,14 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         // source=null sets the column to NULL (DELETE); this differs in meaning from a zero-byte PUT (empty body)
         if (source is null)
         {
-            using var deleteResponse = await _httpClient.DeleteAsync(requestUri, cancellationToken);
+            using var deleteResponse = await _httpClient.DeleteAsync(requestUri, cancellationToken).ConfigureAwait(false);
 
             if (deleteResponse.StatusCode == HttpStatusCode.NotFound)
             {
                 return false;
             }
 
-            await EnsureSuccessAsync(deleteResponse, cancellationToken);
+            await EnsureSuccessAsync(deleteResponse, cancellationToken).ConfigureAwait(false);
             return true;
         }
 
@@ -4193,14 +4363,14 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
             request,
             HttpCompletionOption.ResponseHeadersRead,
             cancellationToken
-        );
+        ).ConfigureAwait(false);
 
         if (response.StatusCode == HttpStatusCode.NotFound)
         {
             return false;
         }
 
-        await EnsureSuccessAsync(response, cancellationToken);
+        await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
         return true;
     }
 }

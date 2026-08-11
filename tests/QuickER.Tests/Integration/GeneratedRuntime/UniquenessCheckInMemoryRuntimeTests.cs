@@ -110,6 +110,51 @@ public sealed class UniquenessCheckInMemoryRuntimeTests
             .Equal(nameof(OrderEntity.CustomerId), nameof(OrderEntity.Amount));
     }
 
+    /// <summary>主キー未設定（挿入前）の新規エンティティでも重複が検出される</summary>
+    /// <remarks>
+    /// このフィクスチャの主キーは非 NULL の <c>int</c>（＝未設定は既定値 0）なので、自分自身の除外は
+    /// 従来どおり無条件に連なる。QuickER 版 Repository 側（値オブジェクト／string 主キー）で null になる
+    /// 経路と<b>同じ観測結果</b>になることを、インメモリ実行器（式木コンパイル＝C# 意味論）でも固定する。
+    /// </remarks>
+    [Fact(DisplayName = "[Uniqueness/InMemory] 主キー未設定の新規エンティティでも重複が検出される")]
+    public async Task NewEntityWithoutKey_ReportsViolation()
+    {
+        await SeedAsync();
+
+        var candidate = new OrderEntity
+        {
+            CustomerId = 2,
+            Amount = 12m,
+            Memo = "apple pie",
+        };
+
+        candidate.OrderId.Should().Be(0, "挿入前のエンティティは主キーを持たない");
+
+        var violations = await Orders.CheckUniquenessAsync(candidate, Ct);
+
+        violations.Should().ContainSingle();
+        violations[0].ConstraintName.Should().Be("UQ_orders_memo");
+    }
+
+    /// <summary>null 変数との等値比較は IS NULL 相当（C# / EF Core / QuickER 版 ADO と同じ意味論）になる</summary>
+    /// <remarks>
+    /// インメモリ実行器は式木をコンパイルして評価するため元から C# 意味論だが、翻訳器の null 補償を入れた
+    /// 実装先（QuickER 版 ADO）と観測結果が一致することをパリティとして固定する。
+    /// </remarks>
+    [Fact(DisplayName = "[Uniqueness/InMemory] null 変数との == / != が NULL 行と一致する")]
+    public async Task NullVariableComparison_MatchesNullRows()
+    {
+        await SeedAsync();
+
+        string? missing = null;
+
+        var nullRows = await Orders.Query().Where(o => o.Memo == missing).ToListAsync(Ct);
+        nullRows.Select(o => o.OrderId).Should().Equal(11);
+
+        var nonNullRows = await Orders.Query().Where(o => o.Memo != missing).ToListAsync(Ct);
+        nonNullRows.Select(o => o.OrderId).Should().Equal(10);
+    }
+
     /// <summary>ユーザー定義フック（partial 実装）の違反が生成分の後ろへ合流する</summary>
     [Fact(DisplayName = "[Uniqueness/InMemory] ユーザー定義フックの違反が合流する")]
     public async Task CustomCheck_ContributesViolation()

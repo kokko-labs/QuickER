@@ -5,8 +5,16 @@ public abstract partial class EditModelBase
         INotifyDataErrorInfo,
         IEditableObject
 {
-    /// <summary>Error messages keyed by property name.</summary>
+    /// <summary>Input error messages (required, conversion, value object, OnValidate) keyed by property name.</summary>
     private readonly Dictionary<string, List<string>> _errors = new();
+
+    /// <summary>
+    /// Duplicate-value error messages keyed by property name, kept in a store of their own so the two kinds never overwrite each other:
+    /// a uniqueness check registers and clears only this store, while SetError / ClearErrors touch only <see cref="_errors"/>.
+    /// Both stores are merged by <see cref="HasErrors"/>, <see cref="GetErrors"/>, and error collection, so a property can carry a
+    /// conversion error and a duplicate-value error at the same time.
+    /// </summary>
+    private readonly Dictionary<string, List<string>> _duplicateErrors = new();
 
     /// <summary>Raised when a property value changes.</summary>
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -14,8 +22,8 @@ public abstract partial class EditModelBase
     /// <summary>Raised when the input errors change.</summary>
     public event EventHandler<DataErrorsChangedEventArgs>? ErrorsChanged;
 
-    /// <summary>Gets a value indicating whether any input errors are present.</summary>
-    public bool HasErrors => _errors.Count > 0;
+    /// <summary>Gets a value indicating whether any errors are present (input errors and duplicate-value errors alike).</summary>
+    public bool HasErrors => _errors.Count > 0 || _duplicateErrors.Count > 0;
 
     /// <summary>Gets a value indicating whether a revert operation is in progress.</summary>
     protected bool IsReverting { get; private set; }
@@ -248,16 +256,25 @@ public abstract partial class EditModelBase
         return true;
     }
 
-    /// <summary>Returns the errors for the specified property (all errors when null).</summary>
+    /// <summary>Returns the errors for the specified property (all errors when null). Input errors come first, then duplicate-value errors.</summary>
     public IEnumerable GetErrors(string? propertyName)
     {
         if (string.IsNullOrEmpty(propertyName))
         {
-            return _errors.Values.SelectMany(e => e);
+            return _errors
+                .Values.SelectMany(e => e)
+                .Concat(_duplicateErrors.Values.SelectMany(e => e));
         }
 
-        return _errors.TryGetValue(propertyName, out var list) ? list : Enumerable.Empty<string>();
+        return ReadErrors(_errors, propertyName)
+            .Concat(ReadErrors(_duplicateErrors, propertyName));
     }
+
+    /// <summary>Reads the messages registered for the specified property in the specified error store (empty when there are none).</summary>
+    private static IEnumerable<string> ReadErrors(
+        Dictionary<string, List<string>> store,
+        string propertyName
+    ) => store.TryGetValue(propertyName, out var list) ? list : Enumerable.Empty<string>();
 
     /// <summary>Combines a child element path (empty at the root, "."-separated below).</summary>
     protected static string CombineErrorPath(string path, string segment) =>
@@ -275,7 +292,11 @@ public abstract partial class EditModelBase
         {
             foreach (var link in ChildLinks)
             {
-                link.Validate(includeChildren, ref valid);
+                // Do not short-circuit, so that errors are registered on every child.
+                if (!link.Validate(includeChildren))
+                {
+                    valid = false;
+                }
             }
         }
 
@@ -310,14 +331,17 @@ public abstract partial class EditModelBase
         }
     }
 
-    /// <summary>Enumerates this edit model's own errors with the specified path (building block for graph collection).</summary>
+    /// <summary>Enumerates this edit model's own errors with the specified path (building block for graph collection). Input errors come first, then duplicate-value errors.</summary>
     protected IEnumerable<EditModelError> CollectOwnErrors(string path)
     {
-        foreach (var pair in _errors)
+        foreach (var store in new[] { _errors, _duplicateErrors })
         {
-            foreach (var message in pair.Value)
+            foreach (var pair in store)
             {
-                yield return new EditModelError(path, pair.Key, message);
+                foreach (var message in pair.Value)
+                {
+                    yield return new EditModelError(path, pair.Key, message);
+                }
             }
         }
     }
@@ -399,17 +423,23 @@ public abstract partial class EditModelBase
     protected void AddChild(string name, Func<EditModelBase?> accessor) =>
         (_childLinks ??= new()).Add(ChildLink.ForSingle(name, accessor));
 
-    /// <summary>Registers a child collection into the cascade.</summary>
-    protected void AddChildren<T>(string name, EditModelCollection<T> collection)
+    /// <summary>Registers a child collection into the cascade (the collection is resolved lazily so the latest instance is used, even after a mapper load replaces it).</summary>
+    protected void AddChildren<T>(string name, Func<EditModelCollection<T>> accessor)
         where T : EditModelBase =>
-        (_childLinks ??= new()).Add(ChildLink.ForCollection(name, collection));
+        (_childLinks ??= new()).Add(ChildLink.ForCollection(name, accessor));
 
     /// <summary>Link to a registered child (cascade participant). Treats single references and child collections uniformly.</summary>
+    /// <remarks>
+    /// Every operation goes through the accessor the link was created with, so a child reference or child collection that is
+    /// replaced later (a mapper load rebuilds the collection, for instance) is still the one that validation, error collection,
+    /// accepting changes, and dirty checks see.
+    /// </remarks>
     private sealed class ChildLink
     {
         private readonly string _name;
         private readonly bool _isCollection;
         private readonly Func<IEnumerable<EditModelBase>> _items;
+        private readonly Func<bool, bool> _validate;
         private readonly Func<bool, bool> _hasChanges;
         private readonly Action _acceptRemoved;
 
@@ -417,6 +447,7 @@ public abstract partial class EditModelBase
             string name,
             bool isCollection,
             Func<IEnumerable<EditModelBase>> items,
+            Func<bool, bool> validate,
             Func<bool, bool> hasChanges,
             Action acceptRemoved
         )
@@ -424,6 +455,7 @@ public abstract partial class EditModelBase
             _name = name;
             _isCollection = isCollection;
             _items = items;
+            _validate = validate;
             _hasChanges = hasChanges;
             _acceptRemoved = acceptRemoved;
         }
@@ -434,27 +466,30 @@ public abstract partial class EditModelBase
                 name,
                 false,
                 () => accessor() is { } child ? new[] { child } : Enumerable.Empty<EditModelBase>(),
+                includeChildren => accessor() is not { } child || child.Validate(includeChildren),
                 includeChildren =>
                     accessor() is { } child && child.HasGraphChanges(includeChildren),
                 () => { }
             );
 
         /// <summary>Creates a link that registers a child collection.</summary>
-        public static ChildLink ForCollection<T>(string name, EditModelCollection<T> collection)
+        /// <remarks>
+        /// Validation is delegated to <see cref="EditModelCollection{T}.Validate"/> rather than looping over the elements here,
+        /// so validating the parent also runs the duplicate check among the siblings.
+        /// </remarks>
+        public static ChildLink ForCollection<T>(string name, Func<EditModelCollection<T>> accessor)
             where T : EditModelBase =>
-            new(name, true, () => collection, _ => collection.HasChanges, collection.AcceptRemoved);
+            new(
+                name,
+                true,
+                () => accessor(),
+                includeChildren => accessor().Validate(includeChildren),
+                _ => accessor().HasChanges,
+                () => accessor().AcceptRemoved()
+            );
 
-        /// <summary>Validates the registered children and updates <paramref name="valid"/>.</summary>
-        public void Validate(bool includeChildren, ref bool valid)
-        {
-            foreach (var item in _items())
-            {
-                if (!item.Validate(includeChildren))
-                {
-                    valid = false;
-                }
-            }
-        }
+        /// <summary>Validates the registered children and returns true when they are all valid.</summary>
+        public bool Validate(bool includeChildren) => _validate(includeChildren);
 
         /// <summary>Collects the registered children's errors with paths (name[i] for collections, name for single references).</summary>
         public void CollectErrors(
@@ -488,7 +523,7 @@ public abstract partial class EditModelBase
         public bool HasChanges(bool includeChildren) => _hasChanges(includeChildren);
     }
 
-    /// <summary>Sets the error for the specified property (pass null to clear).</summary>
+    /// <summary>Sets the input error for the specified property (pass null to clear). Duplicate-value errors live in their own store and are not affected.</summary>
     protected void SetError(string propertyName, string? error)
     {
         if (error is null)
@@ -501,7 +536,7 @@ public abstract partial class EditModelBase
         OnErrorsChanged(propertyName);
     }
 
-    /// <summary>Clears the errors for the specified property.</summary>
+    /// <summary>Clears the input errors for the specified property. Duplicate-value errors live in their own store and are cleared by ClearDuplicateErrors.</summary>
     protected void ClearErrors(string propertyName)
     {
         if (_errors.Remove(propertyName))
@@ -514,29 +549,29 @@ public abstract partial class EditModelBase
     protected void OnErrorsChanged(string propertyName) =>
         ErrorsChanged?.Invoke(this, new DataErrorsChangedEventArgs(propertyName));
 
-    /// <summary>Binding property names that currently hold a duplicate-value error (so the next uniqueness check clears exactly what the previous one registered).</summary>
-    private readonly List<string> _duplicateErrorProperties = new();
-
-    /// <summary>Clears the duplicate-value errors registered by the previous uniqueness check (errors registered by other rules are left untouched).</summary>
+    /// <summary>Clears the duplicate-value errors registered by the previous uniqueness check (input errors, which live in a separate store, are left untouched).</summary>
     public void ClearDuplicateErrors()
     {
-        foreach (var propertyName in _duplicateErrorProperties)
+        if (_duplicateErrors.Count == 0)
         {
-            ClearErrors(propertyName);
+            return;
         }
 
-        _duplicateErrorProperties.Clear();
+        var cleared = _duplicateErrors.Keys.ToList();
+        _duplicateErrors.Clear();
+
+        foreach (var propertyName in cleared)
+        {
+            OnErrorsChanged(propertyName);
+        }
     }
 
-    /// <summary>Registers a duplicate-value error on the specified binding property and remembers it, so the next check can clear it. An empty name registers a model-level error.</summary>
+    /// <summary>Registers a duplicate-value error on the specified binding property in the duplicate-value store. An empty name registers a model-level error.</summary>
+    /// <remarks>It does not go through <see cref="SetError"/>, so a conversion error already registered on the same property survives and both are reported.</remarks>
     public void SetDuplicateError(string propertyName, string message)
     {
-        SetError(propertyName, message);
-
-        if (!_duplicateErrorProperties.Contains(propertyName))
-        {
-            _duplicateErrorProperties.Add(propertyName);
-        }
+        _duplicateErrors[propertyName] = [message];
+        OnErrorsChanged(propertyName);
     }
 
     /// <summary>
@@ -1213,11 +1248,11 @@ public partial class {{ item.class_name }} : EditModelBase
     /// <summary>{{ if p.description_xml_doc != "" }}{{ p.description_xml_doc }}{{ else }}On-screen input string for {{ p.property_name }}.{{ end }}</summary>
     private string {{ p.binding_field_name }} = {{ p.binding_field_initializer }};
 
-    /// <summary>Confirmed value of {{ p.property_name }} (read-only from outside).</summary>
+    /// <summary>Confirmed value of {{ p.property_name }} (written by the input conversion and by the mapper when loading; treat it as read-only elsewhere).</summary>
     public {{ p.type_name }} {{ p.property_name }}
     {
         get => {{ p.field_name }};
-        private set
+        internal set
         {
             if (EqualityComparer<{{ p.type_name }}>.Default.Equals({{ p.field_name }}, value))
             {
@@ -1571,7 +1606,7 @@ public partial class {{ item.class_name }} : EditModelBase
 {{ end }}{{ if item.has_cascade_navigations }}    /// <summary>Registers the known cascade children into the registry (they participate in validation, error collection, accepting changes, and dirty checks; children added via partial classes are registered in RegisterExtraChildren).</summary>
     protected override void RegisterChildren()
     {
-{{ for nav in item.navigations }}{{ if nav.cascade }}{{ if nav.is_collection }}        AddChildren("{{ nav.property_name }}", {{ nav.property_name }});
+{{ for nav in item.navigations }}{{ if nav.cascade }}{{ if nav.is_collection }}        AddChildren("{{ nav.property_name }}", () => {{ nav.property_name }});
 {{ else }}        AddChild("{{ nav.property_name }}", () => {{ nav.property_name }});
 {{ end }}{{ end }}{{ end }}    }
 
@@ -1696,14 +1731,21 @@ public sealed partial class {{ mapper.class_name }}
     /// <summary>Called after the {{ mapper.edit_model_class_name }}'s confirmed values are applied to the {{ mapper.entity_class_name }} (save additional properties via a partial implementation).</summary>
     partial void OnEntityApplied({{ mapper.edit_model_class_name }} editModel, {{ mapper.entity_class_name }} entity);
 
-    /// <summary>Applies the {{ mapper.entity_class_name }}'s values to an existing {{ mapper.edit_model_class_name }} (via the bindings).</summary>
+    /// <summary>Applies the {{ mapper.entity_class_name }}'s values to an existing {{ mapper.edit_model_class_name }}.</summary>
+    /// <remarks>
+    /// Loading is lossless: the confirmed values are copied straight from the entity instead of being rebuilt by parsing
+    /// the on-screen input strings, so nothing that the display format cannot express (sub-second precision of a
+    /// DateTime, its Kind, and so on) is dropped. The input strings are then derived from the confirmed values.
+    /// </remarks>
     public void ApplyToEditModel({{ mapper.entity_class_name }} entity, {{ mapper.edit_model_class_name }} editModel)
     {
         editModel.ExecuteLoad(() =>
         {
+{{ for prop in mapper.scalar_properties }}            editModel.{{ prop.property_name }} = entity.{{ prop.property_name }};
+{{ end }}
+            // Derive the on-screen input strings from the confirmed values just loaded and clear stale conversion errors.
             editModel.RevertInput();
-{{ for prop in mapper.scalar_properties }}            editModel.{{ prop.binding_property_name }} = {{ prop.load_binding_expression }};
-{{ end }}{{ for nav in mapper.navigation_properties }}{{ if nav.is_cascade }}{{ if nav.is_collection }}            editModel.{{ nav.property_name }} = new {{ nav.mapper_class_name }}().CreateEditModels(entity.{{ nav.property_name }});
+{{ for nav in mapper.navigation_properties }}{{ if nav.is_cascade }}{{ if nav.is_collection }}            editModel.{{ nav.property_name }} = new {{ nav.mapper_class_name }}().CreateEditModels(entity.{{ nav.property_name }});
 {{ else }}            editModel.{{ nav.property_name }} = entity.{{ nav.property_name }} is null ? null : new {{ nav.mapper_class_name }}().CreateEditModel(entity.{{ nav.property_name }});
 {{ end }}{{ end }}{{ end }}            OnEditModelLoaded(entity, editModel);
         });

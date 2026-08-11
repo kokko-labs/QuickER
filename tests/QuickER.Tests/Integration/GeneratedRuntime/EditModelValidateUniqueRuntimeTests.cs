@@ -172,6 +172,30 @@ public sealed class EditModelValidateUniqueRuntimeTests : IAsyncLifetime
             .Contain("The combination is already taken.");
     }
 
+    /// <summary>7. 主キー未入力（新規行）でも DB 上の重複が検出される</summary>
+    /// <remarks>
+    /// 新規行の EditModel は主キーが未入力＝確定値 null のまま <c>ValidateUniqueAsync</c> を呼ぶのが正規の使い方。
+    /// 自分自身の除外は主キーがあるときだけ足す（かつ翻訳器が null 等値を <c>IS NULL</c> へ補償する）ので、
+    /// 除外が全行を弾いて重複を見逃すことはない。
+    /// </remarks>
+    [Fact(DisplayName = "[ValidateUnique] 7: 主キー未入力の新規行でも重複が検出される")]
+    public async Task NewModelWithoutKey_RegistersBindingError()
+    {
+        var model = new OrderEditModel
+        {
+            BindingOrderId = string.Empty,
+            BindingCustomerId = "2",
+            BindingAmount = "12",
+            BindingMemo = "apple pie",
+        };
+
+        model.OrderId.Should().BeNull("主キー未入力の新規行は確定値を持たない");
+
+        (await model.ValidateUniqueAsync(Orders, Ct)).Should().BeFalse();
+
+        GetErrors(model, nameof(OrderEditModel.BindingMemo)).Should().ContainSingle();
+    }
+
     /// <summary>DI コンテナと一時 DB を破棄する</summary>
     public ValueTask DisposeAsync()
     {

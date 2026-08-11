@@ -429,7 +429,7 @@ public interface ISaveHookContext
             stream,
             stream.Length,
             cancellationToken
-        );
+        ).ConfigureAwait(false);
     }
 }
 
@@ -525,7 +525,7 @@ public interface ISaveHookRegistry
 
         foreach (var hook in _hooks)
         {
-            if (!await hook.BeforeSaveAsync(typed, operation, cancellationToken))
+            if (!await hook.BeforeSaveAsync(typed, operation, cancellationToken).ConfigureAwait(false))
             {
                 return false;
             }
@@ -546,7 +546,7 @@ public interface ISaveHookRegistry
 
         foreach (var hook in _hooks)
         {
-            await hook.AfterSaveAsync(typed, operation, context, cancellationToken);
+            await hook.AfterSaveAsync(typed, operation, context, cancellationToken).ConfigureAwait(false);
         }
     }
 }
@@ -743,7 +743,7 @@ public sealed class SqlConnectionFactory(string connectionString) : ISqlConnecti
         // Single-value mode (primitive/enum/string/decimal/date-time/Guid/byte[]{{ if generate_value_objects }}/value object{{ end }}) converts and returns the first column of each row
         if (IsSingleValueType(resultType))
         {
-            while (await reader.ReadAsync(cancellationToken))
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
             {
                 var raw = reader.IsDBNull(0) ? null : reader.GetValue(0);
                 // Single-value mode allows DBNull → default (may be null for reference types, but projections carry no corruption risk)
@@ -784,7 +784,7 @@ public sealed class SqlConnectionFactory(string connectionString) : ISqlConnecti
             );
         }
 
-        while (await reader.ReadAsync(cancellationToken))
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
             var result = accessor.Create();
             for (var i = 0; i < setters.Length; i++)
@@ -967,13 +967,13 @@ public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory)
         var items = new List<TEntity>();
 
         await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         await using var command = new {{ sql_command_type }}(sql, connection);
         BindParameters(command, parameters);
 
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        while (await reader.ReadAsync(cancellationToken))
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
             items.Add(metadata.MapEntityFromRawSql<TEntity>(reader));
         }
@@ -991,14 +991,14 @@ public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory)
         ArgumentNullException.ThrowIfNull(sql);
 
         await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         await using var command = new {{ sql_command_type }}(sql, connection);
         BindParameters(command, parameters);
 
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         // Projection mapping (single-value mode and DTO mode) uses the shared helper's single implementation
-        return await RawSqlMapper.ReadProjectionRowsAsync<TResult>(reader, cancellationToken);
+        return await RawSqlMapper.ReadProjectionRowsAsync<TResult>(reader, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Executes raw SQL (UPDATE/DELETE/any DML) and returns the number of affected rows.</summary>
@@ -1011,12 +1011,12 @@ public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory)
         ArgumentNullException.ThrowIfNull(sql);
 
         await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         await using var command = new {{ sql_command_type }}(sql, connection);
         BindParameters(command, parameters);
 
-        return await command.ExecuteNonQueryAsync(cancellationToken);
+        return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Executes raw SQL and returns a single scalar value (<c>default</c> when there is no match or DBNull).</summary>
@@ -1029,12 +1029,12 @@ public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory)
         ArgumentNullException.ThrowIfNull(sql);
 
         await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         await using var command = new {{ sql_command_type }}(sql, connection);
         BindParameters(command, parameters);
 
-        var scalar = await command.ExecuteScalarAsync(cancellationToken);
+        var scalar = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
         return RawSqlMapper.ConvertSingleValue<TResult>(scalar is DBNull ? null : scalar);
     }
 
@@ -1097,14 +1097,14 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
     public async Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default)
     {
         await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         await using var command = new {{ sql_command_type }}(_metadata.SelectByIdSql, connection);
         _metadata.BindKeyParameter(command, id);
 
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
 
-        if (!await reader.ReadAsync(cancellationToken))
+        if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
             return null;
         }
@@ -1120,15 +1120,15 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
         var items = new List<TEntity>();
 
         await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         await using var command = new {{ sql_command_type }}(_metadata.SelectAllSql, connection);
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
 
         // Resolve column-name-to-ordinal once per result set instead of looking it up per row
         var ordinals = _metadata.SelectOrdinals(reader);
 
-        while (await reader.ReadAsync(cancellationToken))
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
             items.Add(_metadata.MapEntity<TEntity>(reader, ordinals));
         }
@@ -1145,7 +1145,7 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
         ArgumentNullException.ThrowIfNull(entity);
 
         await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 {{~ if repository_dialect == "sqlserver" ~}}
 
         if (_metadata.RowVersionProperty is not null)
@@ -1156,7 +1156,7 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
             );
             _metadata.BindInsertParameters(returningCommand, entity);
 
-            if (await returningCommand.ExecuteScalarAsync(cancellationToken) is byte[] version)
+            if (await returningCommand.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) is byte[] version)
             {
 {{~ if generate_value_objects ~}}
                 _metadata.RowVersionProperty.SetValue(
@@ -1174,7 +1174,7 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
 
         await using var command = new {{ sql_command_type }}(_metadata.InsertSql, connection);
         _metadata.BindInsertParameters(command, entity);
-        await command.ExecuteNonQueryAsync(cancellationToken);
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
 {{~ if repository_dialect == "sqlserver" ~}}
@@ -1197,7 +1197,7 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
         }
 
         await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         using var bulkCopy = new SqlBulkCopy(connection)
         {
@@ -1212,7 +1212,7 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
             bulkCopy.ColumnMappings.Add(columnName, columnName);
         }
 
-        await bulkCopy.WriteToServerAsync(reader, cancellationToken);
+        await bulkCopy.WriteToServerAsync(reader, cancellationToken).ConfigureAwait(false);
         return bulkCopy.RowsCopied;
     }
 {{~ else ~}}
@@ -1236,10 +1236,10 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
         }
 
         await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         await using var transaction = ({{ sql_transaction_type }})
-            await connection.BeginTransactionAsync(cancellationToken);
+            await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
 
         try
         {
@@ -1257,16 +1257,16 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
                     transaction
                 );
                 _metadata.BindInsertParameters(command, entity);
-                rows += await command.ExecuteNonQueryAsync(cancellationToken);
+                rows += await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
             }
 
-            await transaction.CommitAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
             return rows;
         }
         catch
         {
             // Roll back with CancellationToken.None: a canceled token must not interrupt the rollback or mask the original exception.
-            await transaction.RollbackAsync(CancellationToken.None);
+            await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
             throw;
         }
     }
@@ -1291,7 +1291,7 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
         mode = ConcurrencyModes.Validated(mode);
 
         await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 {{~ if repository_dialect == "sqlserver" ~}}
 
         if (_metadata.RowVersionProperty is not null)
@@ -1302,7 +1302,7 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
             );
             RowVersionConcurrency.BindUpdate(_metadata, guardedCommand, entity, mode);
 
-            if (await guardedCommand.ExecuteScalarAsync(cancellationToken) is byte[] version)
+            if (await guardedCommand.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) is byte[] version)
             {
 {{~ if generate_value_objects ~}}
                 _metadata.RowVersionProperty.SetValue(
@@ -1324,7 +1324,7 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
                     connection,
                     transaction: null,
                     cancellationToken
-                )
+                ).ConfigureAwait(false)
             )
             {
                 throw RowVersionConcurrency.Conflict(_metadata, entity, "update");
@@ -1337,7 +1337,7 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
         await using var command = new {{ sql_command_type }}(_metadata.UpdateSql, connection);
         _metadata.BindUpdateParameters(command, entity);
 
-        var affected = await command.ExecuteNonQueryAsync(cancellationToken);
+        var affected = await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         return affected > 0;
     }
 
@@ -1345,12 +1345,12 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
     public async Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default)
     {
         await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         await using var command = new {{ sql_command_type }}(_metadata.DeleteSql, connection);
         _metadata.BindKeyParameter(command, id);
 
-        var affected = await command.ExecuteNonQueryAsync(cancellationToken);
+        var affected = await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         return affected > 0;
     }
 
@@ -1375,7 +1375,7 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
         ArgumentNullException.ThrowIfNull(destination);
 
         await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         // Delegate to the streaming engine in standalone mode (own connection, no transaction)
         return await UnboundedBinaryColumnEngine.ReadAsync(
@@ -1386,7 +1386,7 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
             connection,
             transaction: null,
             cancellationToken
-        );
+        ).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -1405,7 +1405,7 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
     )
     {
         await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         // Delegate to the streaming engine in standalone mode (own connection, own transaction)
         return await UnboundedBinaryColumnEngine.WriteAsync(
@@ -1417,7 +1417,7 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
             connection,
             transaction: null,
             cancellationToken
-        );
+        ).ConfigureAwait(false);
     }
 {{~ end ~}}
 
@@ -1448,11 +1448,11 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
         }
 
         await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         // Save the entire graph, cascades included, over a single connection and transaction (avoids MSDTC promotion)
         await using var transaction = ({{ sql_transaction_type }})
-            await connection.BeginTransactionAsync(cancellationToken);
+            await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
 
         // If hooks are registered, build a session that supplies a context participating in the in-progress (connection, transaction)
         var hooks =
@@ -1483,8 +1483,8 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
                 changesAlreadyVerified: true{{ if repository_dialect == "sqlserver" }},
                 mode: mode,
                 versions: versions{{ end }}
-            );
-            await transaction.CommitAsync(cancellationToken);
+            ).ConfigureAwait(false);
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
 {{~ if repository_dialect == "sqlserver" ~}}
 
             // The commit made the new row versions visible, so settle them on the entities
@@ -1499,7 +1499,7 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
         catch
         {
             // Roll back with CancellationToken.None: a canceled token must not interrupt the rollback or mask the original exception.
-            await transaction.RollbackAsync(CancellationToken.None);
+            await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
             throw;
         }
     }
@@ -1534,11 +1534,11 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
         }
 
         await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         // Save the graphs of all entities over a single connection and transaction (a mid-way failure rolls back everything)
         await using var transaction = ({{ sql_transaction_type }})
-            await connection.BeginTransactionAsync(cancellationToken);
+            await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
 
         // If hooks are registered, build a session that supplies a context participating in the in-progress (connection, transaction)
         var hooks =
@@ -1572,10 +1572,10 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
                     changesAlreadyVerified: true{{ if repository_dialect == "sqlserver" }},
                     mode: mode,
                     versions: versions{{ end }}
-                );
+                ).ConfigureAwait(false);
             }
 
-            await transaction.CommitAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
 {{~ if repository_dialect == "sqlserver" ~}}
 
             // The commit made the new row versions visible, so settle them on the entities
@@ -1594,7 +1594,7 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
         catch
         {
             // Roll back with CancellationToken.None: a canceled token must not interrupt the rollback or mask the original exception.
-            await transaction.RollbackAsync(CancellationToken.None);
+            await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
             throw;
         }
     }
@@ -1676,7 +1676,7 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
 
         await using var command = new {{ sql_command_type }}(sql, _connection, _transaction);
         SqlExecutor.BindParameters(command, parameters);
-        return await command.ExecuteNonQueryAsync(cancellationToken);
+        return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Stream-writes an unbounded binary (excluded) column within the same transaction (unsupported for diagrams without exclusions).</summary>
@@ -1757,14 +1757,14 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
         await using var reader = await command.ExecuteReaderAsync(
             CommandBehavior.SequentialAccess,
             cancellationToken
-        );
+        ).ConfigureAwait(false);
 
-        if (!await reader.ReadAsync(cancellationToken))
+        if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
             return false;
         }
 
-        if (await reader.IsDBNullAsync(0, cancellationToken))
+        if (await reader.IsDBNullAsync(0, cancellationToken).ConfigureAwait(false))
         {
             return false;
         }
@@ -1774,7 +1774,7 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
             destination,
             UnboundedBinaryColumns.StreamCopyBufferSize,
             cancellationToken
-        );
+        ).ConfigureAwait(false);
         return true;
 {{~ else ~}}
 
@@ -1791,9 +1791,9 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
         )
         {
             metadata.BindKeyParameter(probe, key);
-            await using var reader = await probe.ExecuteReaderAsync(cancellationToken);
+            await using var reader = await probe.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
 
-            if (!await reader.ReadAsync(cancellationToken))
+            if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
             {
                 return false;
             }
@@ -1817,7 +1817,7 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
             destination,
             UnboundedBinaryColumns.StreamCopyBufferSize,
             cancellationToken
-        );
+        ).ConfigureAwait(false);
         return true;
 {{~ end ~}}
     }
@@ -1846,7 +1846,7 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
                 transaction
             );
             metadata.BindKeyParameter(nullCommand, key);
-            return await nullCommand.ExecuteNonQueryAsync(cancellationToken) > 0;
+            return await nullCommand.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) > 0;
         }
 
         // The CanSeek/length contract is validated uniformly across dialects (SQLite's zeroblob requires a fixed length)
@@ -1866,7 +1866,7 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
         };
         command.Parameters.Add(parameter);
         metadata.BindKeyParameter(command, key);
-        return await command.ExecuteNonQueryAsync(cancellationToken) > 0;
+        return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) > 0;
 {{~ else ~}}
 
         // Enlisted mode (transaction given) uses the outer transaction and does not commit.
@@ -1874,7 +1874,7 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
         var ownsTransaction = transaction is null;
         var activeTransaction =
             transaction
-            ?? ({{ sql_transaction_type }})await connection.BeginTransactionAsync(cancellationToken);
+            ?? ({{ sql_transaction_type }})await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
 
         try
         {
@@ -1889,12 +1889,12 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
                 allocate.Parameters.AddWithValue("@len", payloadLength);
                 metadata.BindKeyParameter(allocate, key);
 
-                if (await allocate.ExecuteNonQueryAsync(cancellationToken) == 0)
+                if (await allocate.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) == 0)
                 {
                     // No matching row (the zeroblob could not be allocated). Roll back only in standalone mode (enlisted mode defers to the outer transaction)
                     if (ownsTransaction)
                     {
-                        await activeTransaction.RollbackAsync(cancellationToken);
+                        await activeTransaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
                     }
 
                     return false;
@@ -1912,7 +1912,7 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
             )
             {
                 metadata.BindKeyParameter(rowidCommand, key);
-                rowid = (long)(await rowidCommand.ExecuteScalarAsync(cancellationToken))!;
+                rowid = (long)(await rowidCommand.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false))!;
             }
 
             await using (
@@ -1929,13 +1929,13 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
                     blob,
                     UnboundedBinaryColumns.StreamCopyBufferSize,
                     cancellationToken
-                );
+                ).ConfigureAwait(false);
             }
 
             // Commit only in standalone mode (in enlisted mode the outer Save commits — do not close it here)
             if (ownsTransaction)
             {
-                await activeTransaction.CommitAsync(cancellationToken);
+                await activeTransaction.CommitAsync(cancellationToken).ConfigureAwait(false);
             }
 
             return true;
@@ -1945,7 +1945,7 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
             if (ownsTransaction)
             {
                 // Roll back with CancellationToken.None: a canceled token must not interrupt the rollback or mask the original exception.
-                await activeTransaction.RollbackAsync(CancellationToken.None);
+                await activeTransaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
             }
 
             throw;
@@ -1954,7 +1954,7 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
         {
             if (ownsTransaction)
             {
-                await activeTransaction.DisposeAsync();
+                await activeTransaction.DisposeAsync().ConfigureAwait(false);
             }
         }
 {{~ end ~}}

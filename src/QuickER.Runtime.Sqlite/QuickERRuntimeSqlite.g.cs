@@ -59,13 +59,13 @@ public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory)
         var items = new List<TEntity>();
 
         await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         await using var command = new SqliteCommand(sql, connection);
         BindParameters(command, parameters);
 
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        while (await reader.ReadAsync(cancellationToken))
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
             items.Add(metadata.MapEntityFromRawSql<TEntity>(reader));
         }
@@ -83,14 +83,14 @@ public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory)
         ArgumentNullException.ThrowIfNull(sql);
 
         await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         await using var command = new SqliteCommand(sql, connection);
         BindParameters(command, parameters);
 
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         // Projection mapping (single-value mode and DTO mode) uses the shared helper's single implementation
-        return await RawSqlMapper.ReadProjectionRowsAsync<TResult>(reader, cancellationToken);
+        return await RawSqlMapper.ReadProjectionRowsAsync<TResult>(reader, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Executes raw SQL (UPDATE/DELETE/any DML) and returns the number of affected rows.</summary>
@@ -103,12 +103,12 @@ public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory)
         ArgumentNullException.ThrowIfNull(sql);
 
         await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         await using var command = new SqliteCommand(sql, connection);
         BindParameters(command, parameters);
 
-        return await command.ExecuteNonQueryAsync(cancellationToken);
+        return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Executes raw SQL and returns a single scalar value (<c>default</c> when there is no match or DBNull).</summary>
@@ -121,12 +121,12 @@ public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory)
         ArgumentNullException.ThrowIfNull(sql);
 
         await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         await using var command = new SqliteCommand(sql, connection);
         BindParameters(command, parameters);
 
-        var scalar = await command.ExecuteScalarAsync(cancellationToken);
+        var scalar = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
         return RawSqlMapper.ConvertSingleValue<TResult>(scalar is DBNull ? null : scalar);
     }
 
@@ -187,14 +187,14 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
     public async Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default)
     {
         await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         await using var command = new SqliteCommand(_metadata.SelectByIdSql, connection);
         _metadata.BindKeyParameter(command, id);
 
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
 
-        if (!await reader.ReadAsync(cancellationToken))
+        if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
             return null;
         }
@@ -210,15 +210,15 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
         var items = new List<TEntity>();
 
         await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         await using var command = new SqliteCommand(_metadata.SelectAllSql, connection);
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
 
         // Resolve column-name-to-ordinal once per result set instead of looking it up per row
         var ordinals = _metadata.SelectOrdinals(reader);
 
-        while (await reader.ReadAsync(cancellationToken))
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
             items.Add(_metadata.MapEntity<TEntity>(reader, ordinals));
         }
@@ -232,11 +232,11 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
         ArgumentNullException.ThrowIfNull(entity);
 
         await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         await using var command = new SqliteCommand(_metadata.InsertSql, connection);
         _metadata.BindInsertParameters(command, entity);
-        await command.ExecuteNonQueryAsync(cancellationToken);
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Bulk inserts a collection of entities as a batch of INSERTs in a single transaction.</summary>
@@ -259,10 +259,10 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
         }
 
         await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         await using var transaction = (SqliteTransaction)
-            await connection.BeginTransactionAsync(cancellationToken);
+            await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
 
         try
         {
@@ -280,16 +280,16 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
                     transaction
                 );
                 _metadata.BindInsertParameters(command, entity);
-                rows += await command.ExecuteNonQueryAsync(cancellationToken);
+                rows += await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
             }
 
-            await transaction.CommitAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
             return rows;
         }
         catch
         {
             // Roll back with CancellationToken.None: a canceled token must not interrupt the rollback or mask the original exception.
-            await transaction.RollbackAsync(CancellationToken.None);
+            await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
             throw;
         }
     }
@@ -305,12 +305,12 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
         mode = ConcurrencyModes.Validated(mode);
 
         await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         await using var command = new SqliteCommand(_metadata.UpdateSql, connection);
         _metadata.BindUpdateParameters(command, entity);
 
-        var affected = await command.ExecuteNonQueryAsync(cancellationToken);
+        var affected = await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         return affected > 0;
     }
 
@@ -318,12 +318,12 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
     public async Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default)
     {
         await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         await using var command = new SqliteCommand(_metadata.DeleteSql, connection);
         _metadata.BindKeyParameter(command, id);
 
-        var affected = await command.ExecuteNonQueryAsync(cancellationToken);
+        var affected = await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         return affected > 0;
     }
 
@@ -347,7 +347,7 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
         ArgumentNullException.ThrowIfNull(destination);
 
         await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         // Delegate to the streaming engine in standalone mode (own connection, no transaction)
         return await UnboundedBinaryColumnEngine.ReadAsync(
@@ -358,7 +358,7 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
             connection,
             transaction: null,
             cancellationToken
-        );
+        ).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -377,7 +377,7 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
     )
     {
         await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         // Delegate to the streaming engine in standalone mode (own connection, own transaction)
         return await UnboundedBinaryColumnEngine.WriteAsync(
@@ -389,7 +389,7 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
             connection,
             transaction: null,
             cancellationToken
-        );
+        ).ConfigureAwait(false);
     }
 
     /// <summary>Saves inserts, updates, and deletes in a single transaction according to RowState (children cascade by default).</summary>
@@ -412,11 +412,11 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
         }
 
         await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         // Save the entire graph, cascades included, over a single connection and transaction (avoids MSDTC promotion)
         await using var transaction = (SqliteTransaction)
-            await connection.BeginTransactionAsync(cancellationToken);
+            await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
 
         // If hooks are registered, build a session that supplies a context participating in the in-progress (connection, transaction)
         var hooks =
@@ -440,8 +440,8 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
                 cancellationToken,
                 hooks,
                 changesAlreadyVerified: true
-            );
-            await transaction.CommitAsync(cancellationToken);
+            ).ConfigureAwait(false);
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
 
             // After a successful commit, settle the state (Added/Updated → Unchanged) to prevent double-processing on a re-save.
             // Skipped rows (where a hook's Before returned false) are left as they are
@@ -451,7 +451,7 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
         catch
         {
             // Roll back with CancellationToken.None: a canceled token must not interrupt the rollback or mask the original exception.
-            await transaction.RollbackAsync(CancellationToken.None);
+            await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
             throw;
         }
     }
@@ -479,11 +479,11 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
         }
 
         await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         // Save the graphs of all entities over a single connection and transaction (a mid-way failure rolls back everything)
         await using var transaction = (SqliteTransaction)
-            await connection.BeginTransactionAsync(cancellationToken);
+            await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
 
         // If hooks are registered, build a session that supplies a context participating in the in-progress (connection, transaction)
         var hooks =
@@ -510,10 +510,10 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
                     cancellationToken,
                     hooks,
                     changesAlreadyVerified: true
-                );
+                ).ConfigureAwait(false);
             }
 
-            await transaction.CommitAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
 
             // After a successful commit, settle the state of every graph (Added/Updated → Unchanged) to prevent double-processing on a re-save.
             // Skipped rows (where a hook's Before returned false) are left as they are
@@ -527,7 +527,7 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
         catch
         {
             // Roll back with CancellationToken.None: a canceled token must not interrupt the rollback or mask the original exception.
-            await transaction.RollbackAsync(CancellationToken.None);
+            await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
             throw;
         }
     }
@@ -609,7 +609,7 @@ public sealed class SqlSaveHookContext(
 
         await using var command = new SqliteCommand(sql, _connection, _transaction);
         SqlExecutor.BindParameters(command, parameters);
-        return await command.ExecuteNonQueryAsync(cancellationToken);
+        return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Stream-writes an unbounded binary (excluded) column within the same transaction (unsupported for diagrams without exclusions).</summary>
@@ -683,9 +683,9 @@ public static class UnboundedBinaryColumnEngine
         )
         {
             metadata.BindKeyParameter(probe, key);
-            await using var reader = await probe.ExecuteReaderAsync(cancellationToken);
+            await using var reader = await probe.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
 
-            if (!await reader.ReadAsync(cancellationToken))
+            if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
             {
                 return false;
             }
@@ -709,7 +709,7 @@ public static class UnboundedBinaryColumnEngine
             destination,
             UnboundedBinaryColumns.StreamCopyBufferSize,
             cancellationToken
-        );
+        ).ConfigureAwait(false);
         return true;
     }
 
@@ -737,7 +737,7 @@ public static class UnboundedBinaryColumnEngine
                 transaction
             );
             metadata.BindKeyParameter(nullCommand, key);
-            return await nullCommand.ExecuteNonQueryAsync(cancellationToken) > 0;
+            return await nullCommand.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) > 0;
         }
 
         // The CanSeek/length contract is validated uniformly across dialects (SQLite's zeroblob requires a fixed length)
@@ -748,7 +748,7 @@ public static class UnboundedBinaryColumnEngine
         var ownsTransaction = transaction is null;
         var activeTransaction =
             transaction
-            ?? (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+            ?? (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
 
         try
         {
@@ -763,12 +763,12 @@ public static class UnboundedBinaryColumnEngine
                 allocate.Parameters.AddWithValue("@len", payloadLength);
                 metadata.BindKeyParameter(allocate, key);
 
-                if (await allocate.ExecuteNonQueryAsync(cancellationToken) == 0)
+                if (await allocate.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) == 0)
                 {
                     // No matching row (the zeroblob could not be allocated). Roll back only in standalone mode (enlisted mode defers to the outer transaction)
                     if (ownsTransaction)
                     {
-                        await activeTransaction.RollbackAsync(cancellationToken);
+                        await activeTransaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
                     }
 
                     return false;
@@ -786,7 +786,7 @@ public static class UnboundedBinaryColumnEngine
             )
             {
                 metadata.BindKeyParameter(rowidCommand, key);
-                rowid = (long)(await rowidCommand.ExecuteScalarAsync(cancellationToken))!;
+                rowid = (long)(await rowidCommand.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false))!;
             }
 
             await using (
@@ -803,13 +803,13 @@ public static class UnboundedBinaryColumnEngine
                     blob,
                     UnboundedBinaryColumns.StreamCopyBufferSize,
                     cancellationToken
-                );
+                ).ConfigureAwait(false);
             }
 
             // Commit only in standalone mode (in enlisted mode the outer Save commits — do not close it here)
             if (ownsTransaction)
             {
-                await activeTransaction.CommitAsync(cancellationToken);
+                await activeTransaction.CommitAsync(cancellationToken).ConfigureAwait(false);
             }
 
             return true;
@@ -819,7 +819,7 @@ public static class UnboundedBinaryColumnEngine
             if (ownsTransaction)
             {
                 // Roll back with CancellationToken.None: a canceled token must not interrupt the rollback or mask the original exception.
-                await activeTransaction.RollbackAsync(CancellationToken.None);
+                await activeTransaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
             }
 
             throw;
@@ -828,7 +828,7 @@ public static class UnboundedBinaryColumnEngine
         {
             if (ownsTransaction)
             {
-                await activeTransaction.DisposeAsync();
+                await activeTransaction.DisposeAsync().ConfigureAwait(false);
             }
         }
     }
@@ -877,10 +877,10 @@ public sealed class SqliteSqlQueryExecutor<TEntity>(ISqlConnectionFactory connec
                 plan.Take,
                 plan.Skip,
                 cancellationToken
-            );
+            ).ConfigureAwait(false);
         }
         await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         // Materialize the roots with a plain SELECT; Includes are resolved by a multi-query that assembles parents and children in memory
         var roots = await MaterializeRootsAsync(
@@ -891,10 +891,10 @@ public sealed class SqliteSqlQueryExecutor<TEntity>(ISqlConnectionFactory connec
             plan.Take,
             plan.Skip,
             cancellationToken
-        );
+        ).ConfigureAwait(false);
         await IncludeLoader
             .For(typeof(TEntity))
-            .LoadAsync(roots, plan.Includes, connection, cancellationToken);
+            .LoadAsync(roots, plan.Includes, connection, cancellationToken).ConfigureAwait(false);
         return roots;
     }
 
@@ -924,7 +924,7 @@ public sealed class SqliteSqlQueryExecutor<TEntity>(ISqlConnectionFactory connec
         if (projectionColumns is null)
         {
             // Fallback: materialize all columns, then project in memory
-            var entities = await ToListAsync(plan, cancellationToken);
+            var entities = await ToListAsync(plan, cancellationToken).ConfigureAwait(false);
             return entities.Select(project).ToList();
         }
 
@@ -935,17 +935,17 @@ public sealed class SqliteSqlQueryExecutor<TEntity>(ISqlConnectionFactory connec
             $"SELECT {metadata.BuildColumnList(projectionColumns)} FROM {TableName}{whereClause}{BuildOrderAndPaging(plan, plan.Take, plan.Skip)};";
 
         await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         await using var command = CreateCommand(connection, sql, parameters);
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
 
         // Column-name-to-ordinal mapping is resolved only once per result set
         var ordinals = metadata.ColumnOrdinals(reader, projectionColumns);
 
         var results = new List<TResult>();
 
-        while (await reader.ReadAsync(cancellationToken))
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
             // Apply the projection to a partial entity with only the referenced columns populated (RowState is irrelevant; the entity is discarded after projection)
             var entity = metadata.MapEntityColumns<TEntity>(reader, projectionColumns, ordinals);
@@ -974,11 +974,11 @@ public sealed class SqliteSqlQueryExecutor<TEntity>(ISqlConnectionFactory connec
                 take: 1,
                 plan.Skip,
                 cancellationToken
-            );
+            ).ConfigureAwait(false);
             return withBinary.Count > 0 ? withBinary[0] : null;
         }
         await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         // Materialize only the first row (LIMIT 1) and resolve Includes against that single row
         var roots = await MaterializeRootsAsync(
@@ -989,7 +989,7 @@ public sealed class SqliteSqlQueryExecutor<TEntity>(ISqlConnectionFactory connec
             take: 1,
             plan.Skip,
             cancellationToken
-        );
+        ).ConfigureAwait(false);
         if (roots.Count == 0)
         {
             return null;
@@ -997,7 +997,7 @@ public sealed class SqliteSqlQueryExecutor<TEntity>(ISqlConnectionFactory connec
 
         await IncludeLoader
             .For(typeof(TEntity))
-            .LoadAsync(roots, plan.Includes, connection, cancellationToken);
+            .LoadAsync(roots, plan.Includes, connection, cancellationToken).ConfigureAwait(false);
         return roots[0];
     }
 
@@ -1008,14 +1008,14 @@ public sealed class SqliteSqlQueryExecutor<TEntity>(ISqlConnectionFactory connec
         var whereClause = BuildWhereClause(plan, parameters);
 
         await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         await using var command = CreateCommand(
             connection,
             $"SELECT COUNT(*) FROM {TableName}{whereClause};",
             parameters
         );
-        var result = await command.ExecuteScalarAsync(cancellationToken);
+        var result = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
         return Convert.ToInt32(result);
     }
 
@@ -1026,14 +1026,14 @@ public sealed class SqliteSqlQueryExecutor<TEntity>(ISqlConnectionFactory connec
         var whereClause = BuildWhereClause(plan, parameters);
 
         await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         await using var command = CreateCommand(
             connection,
             $"SELECT CASE WHEN EXISTS (SELECT 1 FROM {TableName}{whereClause}) THEN 1 ELSE 0 END;",
             parameters
         );
-        var result = await command.ExecuteScalarAsync(cancellationToken);
+        var result = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
         return Convert.ToInt32(result) != 0;
     }
 
@@ -1048,7 +1048,7 @@ public sealed class SqliteSqlQueryExecutor<TEntity>(ISqlConnectionFactory connec
         var whereClause = BuildWhereClause(plan, parameters);
 
         await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         if (!cascadeDelete)
         {
@@ -1057,12 +1057,12 @@ public sealed class SqliteSqlQueryExecutor<TEntity>(ISqlConnectionFactory connec
                 $"DELETE FROM {TableName}{whereClause};",
                 parameters
             );
-            return await command.ExecuteNonQueryAsync(cancellationToken);
+            return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         }
 
         // Cascade: execute the DELETE statements ordered descendants-first, then the target, in a single transaction
         await using var transaction = (SqliteTransaction)
-            await connection.BeginTransactionAsync(cancellationToken);
+            await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
 
         try
         {
@@ -1078,16 +1078,16 @@ public sealed class SqliteSqlQueryExecutor<TEntity>(ISqlConnectionFactory connec
             {
                 await using var command = new SqliteCommand(sql, connection, transaction);
                 AddParameters(command, parameters);
-                rows += await command.ExecuteNonQueryAsync(cancellationToken);
+                rows += await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
             }
 
-            await transaction.CommitAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
             return rows;
         }
         catch
         {
             // Roll back with CancellationToken.None: a canceled token must not interrupt the rollback or mask the original exception.
-            await transaction.RollbackAsync(CancellationToken.None);
+            await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
             throw;
         }
     }
@@ -1112,17 +1112,17 @@ public sealed class SqliteSqlQueryExecutor<TEntity>(ISqlConnectionFactory connec
             $"SELECT {metadata.BuildColumnList(metadata.AllProperties)} FROM {TableName}{whereClause}{BuildOrderAndPaging(plan, take, skip)};";
 
         await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         await using var command = CreateCommand(connection, sql, parameters);
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
 
         // Column-name-to-ordinal mapping is resolved only once per result set
         var ordinals = metadata.ColumnOrdinals(reader, metadata.AllProperties);
 
         var results = new List<TEntity>();
 
-        while (await reader.ReadAsync(cancellationToken))
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
             // Materialize as a legitimate entity (RowState=Unchanged) with all columns bound
             results.Add(
@@ -1154,13 +1154,13 @@ public sealed class SqliteSqlQueryExecutor<TEntity>(ISqlConnectionFactory connec
             $"SELECT {metadata.ColumnList} FROM {TableName}{whereClause}{BuildOrderAndPaging(plan, take, skip)};";
 
         await using var command = CreateCommand(connection, sql, parameters);
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
 
         // Column-name-to-ordinal mapping is resolved only once per result set
         var ordinals = metadata.SelectOrdinals(reader);
 
         var roots = new List<TEntity>();
-        while (await reader.ReadAsync(cancellationToken))
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
             roots.Add((TEntity)(object)metadata.MapEntityObject(reader, ordinals));
         }
@@ -1299,7 +1299,7 @@ public sealed class IncludeLoader
 
         foreach (var node in includes)
         {
-            await LoadNodeAsync(parents, node, connection, cancellationToken);
+            await LoadNodeAsync(parents, node, connection, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -1352,7 +1352,7 @@ public sealed class IncludeLoader
             distinctKeys,
             connection,
             cancellationToken
-        );
+        ).ConfigureAwait(false);
 
         // Group the children by FK value and bind them to their parents
         var childrenByKey = new Dictionary<object, List<EntityBase>>();
@@ -1380,7 +1380,7 @@ public sealed class IncludeLoader
         {
             await IncludeLoader
                 .For(childType)
-                .LoadAsync(children, node.Children, connection, cancellationToken);
+                .LoadAsync(children, node.Children, connection, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -1420,12 +1420,12 @@ public sealed class IncludeLoader
                 command.Parameters.AddWithValue(placeholders[i], keys[offset + i]);
             }
 
-            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
 
             // Column-name-to-ordinal mapping is resolved only once per result set (chunk)
             var ordinals = childMetadata.SelectOrdinals(reader);
 
-            while (await reader.ReadAsync(cancellationToken))
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
             {
                 children.Add(childMetadata.MapEntityObject(reader, ordinals));
             }
@@ -1473,7 +1473,10 @@ public sealed class IncludeLoader
 }
 
 /// <summary>Translates lambda expressions (expression trees) into SQL conditions and column references.</summary>
-/// <remarks>Supported constructs are limited to comparisons (== != &lt; &lt;= &gt; &gt;=), logical combinations (&amp;&amp; ||), negation, null checks, bool columns, and string Contains/StartsWith/EndsWith; anything outside this set throws.</remarks>
+/// <remarks>
+/// Supported constructs are limited to comparisons (== != &lt; &lt;= &gt; &gt;=), logical combinations (&amp;&amp; ||), negation, null checks, bool columns, and string Contains/StartsWith/EndsWith; anything outside this set throws.
+/// An <c>==</c> / <c>!=</c> comparison whose value side is null is compensated to <c>IS NULL</c> / <c>IS NOT NULL</c> (the same meaning C# and EF Core give it), whether the null is written as a literal or comes from a variable.
+/// </remarks>
 public static class SqlExpressionTranslator
 {
     /// <summary>Translates the body of a predicate lambda into a SQL condition, parameterizing values and appending them to parameters.</summary>
@@ -1580,6 +1583,15 @@ public static class SqlExpressionTranslator
         }
     }
 
+    /// <summary>Translates a binary comparison, compensating for null values on the value side.</summary>
+    /// <remarks>
+    /// Each side is resolved once: an operand that stays on the SQL side (a column reference or a date component) is rendered as SQL,
+    /// and every other operand is evaluated to its actual value. When an <c>==</c> / <c>!=</c> comparison has a value operand that turns
+    /// out to be null (a literal null, or a variable / expression that evaluates to null), it becomes <c>IS NULL</c> / <c>IS NOT NULL</c>,
+    /// which is what C# and EF Core mean by it. Binding the null as an ordinary parameter would instead leave <c>col = @p</c>, and SQL's
+    /// three-valued logic makes that UNKNOWN for every row. The compensation is deliberately limited to equality: the relational operators
+    /// (&lt; &lt;= &gt; &gt;=) keep binding the null as a parameter, because they have no null-aware SQL counterpart.
+    /// </remarks>
     private static string VisitComparison(
         BinaryExpression binary,
         List<SqlQueryParameter> parameters
@@ -1588,18 +1600,24 @@ public static class SqlExpressionTranslator
         var left = Unwrap(binary.Left);
         var right = Unwrap(binary.Right);
 
+        // Resolve both sides once: SQL-side operands keep their SQL text, value-side operands are evaluated here (and reused below)
+        var leftSql = OperandSql(left);
+        var rightSql = OperandSql(right);
+        var leftValue = leftSql is null ? Evaluate(left) : null;
+        var rightValue = rightSql is null ? Evaluate(right) : null;
+
         if (binary.NodeType is ExpressionType.Equal or ExpressionType.NotEqual)
         {
             var suffix = binary.NodeType == ExpressionType.NotEqual ? "NOT " : string.Empty;
 
-            if (IsNull(right) && left is MemberExpression leftColumn && IsColumn(leftColumn))
+            if (leftSql is not null && rightSql is null && IsNullValue(rightValue))
             {
-                return $"{ColumnName(leftColumn.Member)} IS {suffix}NULL";
+                return $"{leftSql} IS {suffix}NULL";
             }
 
-            if (IsNull(left) && right is MemberExpression rightColumn && IsColumn(rightColumn))
+            if (rightSql is not null && leftSql is null && IsNullValue(leftValue))
             {
-                return $"{ColumnName(rightColumn.Member)} IS {suffix}NULL";
+                return $"{rightSql} IS {suffix}NULL";
             }
         }
 
@@ -1615,22 +1633,17 @@ public static class SqlExpressionTranslator
         };
 
         // In a column-versus-value comparison, the value parameter carries the opposing column name for explicit typing (omitted when both sides are columns or both are values)
-        var leftColumnSql = TryColumnName(left);
-        var rightColumnSql = TryColumnName(right);
-        return $"{Operand(left, parameters, RawColumnName(rightColumnSql))} {op} {Operand(right, parameters, RawColumnName(leftColumnSql))}";
+        return $"{leftSql ?? AddParameter(leftValue, parameters, RawColumnName(rightSql))} {op} {rightSql ?? AddParameter(rightValue, parameters, RawColumnName(leftSql))}";
     }
 
-    /// <param name="expression">The operand expression (either a column reference or a constant value).</param>
-    /// <param name="parameters">The list that receives parameterized value operands.</param>
-    /// <param name="counterpartColumn">The opposing column name (without brackets) attached when parameterizing as a value; null when absent.</param>
-    private static string Operand(
-        Expression expression,
-        List<SqlQueryParameter> parameters,
-        string? counterpartColumn
-    ) =>
+    /// <summary>Renders an operand that stays on the SQL side (a column reference, or a date component of a date-time column). Returns null for a value operand.</summary>
+    private static string? OperandSql(Expression expression) =>
         TryColumnName(expression) is { } column ? column
         : TryGetDatePart(expression, out var datePart) ? datePart
-        : AddParameter(Evaluate(expression), parameters, counterpartColumn);
+        : null;
+
+    /// <summary>Whether an evaluated value operand is null (a value object is unwrapped first, so one wrapping a null underlying value counts as null too).</summary>
+    private static bool IsNullValue(object? value) => SqlParameterValue.Unwrap(value) is null;
 
     private enum LikeKind
     {
@@ -1880,9 +1893,6 @@ public static class SqlExpressionTranslator
     /// <summary>Whether the member is a property reference on the lambda parameter (i.e. a column).</summary>
     private static bool IsColumn(MemberExpression member) =>
         member is { Expression: ParameterExpression, Member: PropertyInfo };
-
-    private static bool IsNull(Expression expression) =>
-        expression is ConstantExpression { Value: null };
 
     /// <summary>Caches member-to-bracketed-column-name resolution per type member (avoiding [Column] reflection for every column reference).</summary>
     private static readonly ConcurrentDictionary<MemberInfo, string> _columnNameCache = new();
@@ -2269,6 +2279,14 @@ public sealed class EntitySaveMetadata
     }
 
     // ===== Row materializer (expression-tree compiled; removes reflection from the hot path) =====
+    /// <summary>Type-specialized reader accessors that avoid boxing (<c>GetInt32</c> etc.). Only the fast-path CLR types are registered.</summary>
+    private static readonly IReadOnlyDictionary<Type, MethodInfo> _typedReaders = BuildTypedReaders();
+
+    /// <summary>Resolved <see cref="MethodInfo"/> of <see cref="DbDataReader.IsDBNull(int)"/>.</summary>
+    private static readonly MethodInfo _isDbNullMethod = typeof(DbDataReader).GetMethod(
+        nameof(DbDataReader.IsDBNull),
+        new[] { typeof(int) }
+    )!;
 
     /// <summary>Resolved <see cref="MethodInfo"/> of <see cref="DbDataReader.GetValue(int)"/> (used as the fallback for columns that cannot be type-specialized).</summary>
     private static readonly MethodInfo _getValueMethod = typeof(DbDataReader).GetMethod(
@@ -2291,13 +2309,92 @@ public sealed class EntitySaveMetadata
     /// <remarks>The arguments are <c>(reader, ordinals)</c>. <c>ordinals</c> holds the column ordinals in SelectColumns order, resolved once before the row loop.</remarks>
     public required Func<DbDataReader, int[], EntityBase> SelectMaterializer { get; init; }
 
+    /// <summary>Builds the type-specialized reader accessor table (each value is a <see cref="DbDataReader"/> method taking an <c>int</c> and returning the corresponding CLR type).</summary>
+    private static IReadOnlyDictionary<Type, MethodInfo> BuildTypedReaders()
+    {
+        static MethodInfo Getter(string name) =>
+            typeof(DbDataReader).GetMethod(name, new[] { typeof(int) })!;
+
+        // Type-specialized accessors for the declared column types the generated SELECT returns. On SQLite each GetXxx
+        // coerces the storage type (long to int, TEXT to DateTime, etc.), equivalent to CoerceScalar; on SQL Server each
+        // returns the column's CLR type directly, equivalent to the previous pass-through. Types not listed here
+        // (byte[], enums, DateTimeOffset, TimeSpan, etc.) are converted via the fallback as before.
+        return new Dictionary<Type, MethodInfo>
+        {
+            [typeof(bool)] = Getter(nameof(DbDataReader.GetBoolean)),
+            [typeof(byte)] = Getter(nameof(DbDataReader.GetByte)),
+            [typeof(short)] = Getter(nameof(DbDataReader.GetInt16)),
+            [typeof(int)] = Getter(nameof(DbDataReader.GetInt32)),
+            [typeof(long)] = Getter(nameof(DbDataReader.GetInt64)),
+            [typeof(float)] = Getter(nameof(DbDataReader.GetFloat)),
+            [typeof(double)] = Getter(nameof(DbDataReader.GetDouble)),
+            [typeof(decimal)] = Getter(nameof(DbDataReader.GetDecimal)),
+            [typeof(string)] = Getter(nameof(DbDataReader.GetString)),
+            [typeof(DateTime)] = Getter(nameof(DbDataReader.GetDateTime)),
+            [typeof(Guid)] = Getter(nameof(DbDataReader.GetGuid)),
+        };
+    }
+
+    /// <summary>Caches the type-specialized pair resolved per value object property type (<c>null</c> when the type has no fast path).</summary>
+    private static readonly ConcurrentDictionary<
+        Type,
+        (MethodInfo Getter, MethodInfo Create)?
+    > _valueObjectReaderCache = new();
+
+    /// <summary>
+    /// Resolves the type-specialized pair for a value object property: the reader accessor for its underlying value and
+    /// the static <c>Create</c> factory that wraps it.
+    /// </summary>
+    /// <remarks>
+    /// Returns <c>null</c> when the property is not a value object, when its underlying type has no type-specialized
+    /// accessor (<c>byte[]</c> and friends), or when no matching factory exists; those columns take the fallback.
+    /// </remarks>
+    private static (MethodInfo Getter, MethodInfo Create)? ResolveValueObjectReader(
+        Type propertyType
+    ) => _valueObjectReaderCache.GetOrAdd(propertyType, ResolveValueObjectReaderCore);
+
+    /// <summary>Performs the uncached resolution behind <see cref="ResolveValueObjectReader"/>.</summary>
+    private static (MethodInfo Getter, MethodInfo Create)? ResolveValueObjectReaderCore(
+        Type propertyType
+    )
+    {
+        var iface = Array.Find(
+            propertyType.GetInterfaces(),
+            i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IValueObject<,>)
+        );
+
+        if (iface is null)
+        {
+            return null;
+        }
+
+        // The underlying value type is the second type argument of IValueObject<TSelf, TValue>
+        if (!_typedReaders.TryGetValue(iface.GetGenericArguments()[1], out var getter))
+        {
+            return null;
+        }
+
+        var create = propertyType.GetMethod(
+            "Create",
+            BindingFlags.Public | BindingFlags.Static,
+            binder: null,
+            new[] { getter.ReturnType },
+            modifiers: null
+        );
+
+        return create is null ? null : (getter, create);
+    }
+
     /// <summary>
     /// Builds the expression-tree-compiled delegate that materializes one row of SelectColumns (the fixed SELECT set)
     /// into an entity using a pre-resolved ordinal array (once per type).
     /// </summary>
     /// <remarks>
     /// Columns with a type-specialized accessor are read directly without boxing (<c>DBNull</c> becomes the default value,
-    /// equivalent to the previous <c>SetValue(null)</c>); all other columns fall back to the previous
+    /// equivalent to the previous <c>SetValue(null)</c>);
+    /// a value object column whose underlying value has such an accessor reads it the same way and calls the value object's
+    /// static <c>Create</c> factory directly;
+    /// all other columns fall back to the previous
     /// <see cref="SetColumnValue"/> (dialect-specific conversion / value object re-wrapping).
     /// The resulting final state (<c>RowState = Unchanged</c>) matches the previous row mapping.
     /// </remarks>
@@ -2344,6 +2441,50 @@ public sealed class EntitySaveMetadata
         PropertyInfo property
     )
     {
+        var propertyType = property.PropertyType;
+        var underlying = Nullable.GetUnderlyingType(propertyType) ?? propertyType;
+
+        // Columns with a type-specialized accessor are read directly without boxing
+        // (DBNull becomes the default value, equivalent to the previous SetValue(null))
+        if (_typedReaders.TryGetValue(underlying, out var getter))
+        {
+            Expression read = Expression.Call(readerParam, getter, ordinal);
+
+            if (getter.ReturnType != propertyType)
+            {
+                read = Expression.Convert(read, propertyType);
+            }
+
+            var value = Expression.Condition(
+                Expression.Call(readerParam, _isDbNullMethod, ordinal),
+                Expression.Default(propertyType),
+                read
+            );
+            return Expression.Assign(Expression.Property(entityExpr, property), value);
+        }
+
+        // A value object whose underlying value has a type-specialized accessor reads that value without boxing and
+        // calls the static Create factory straight from the expression tree (no reflection Invoke, no Convert.ChangeType,
+        // and DBNull becomes null, equivalent to the previous SetValue(null))
+        if (ResolveValueObjectReader(propertyType) is (var voGetter, var voCreate))
+        {
+            Expression created = Expression.Call(
+                voCreate,
+                Expression.Call(readerParam, voGetter, ordinal)
+            );
+
+            if (created.Type != propertyType)
+            {
+                created = Expression.Convert(created, propertyType);
+            }
+
+            var wrapped = Expression.Condition(
+                Expression.Call(readerParam, _isDbNullMethod, ordinal),
+                Expression.Default(propertyType),
+                created
+            );
+            return Expression.Assign(Expression.Property(entityExpr, property), wrapped);
+        }
 
         // Fallback: call the previous SetColumnValue (DBNull to null / dialect-specific conversion / value object re-wrapping) via the ordinal
         return Expression.Call(
@@ -3005,7 +3146,7 @@ public static class EntityGraphSaver
                         transaction,
                         cancellationToken,
                         hooks
-                    );
+                    ).ConfigureAwait(false);
                 }
             }
 
@@ -3016,7 +3157,7 @@ public static class EntityGraphSaver
                     entity,
                     SaveOperation.Delete,
                     cancellationToken
-                )
+                ).ConfigureAwait(false)
             )
             {
                 hooks.Skip(entity);
@@ -3028,12 +3169,12 @@ public static class EntityGraphSaver
                 connection,
                 transaction,
                 cancellationToken
-            );
+            ).ConfigureAwait(false);
 
             // After(Delete) fires immediately after the DML (before commit)
             if (hooks is not null)
             {
-                await hooks.InvokeAfterAsync(entity, SaveOperation.Delete, cancellationToken);
+                await hooks.InvokeAfterAsync(entity, SaveOperation.Delete, cancellationToken).ConfigureAwait(false);
             }
 
             return rows;
@@ -3044,7 +3185,7 @@ public static class EntityGraphSaver
         {
             if (
                 hooks is null
-                || await hooks.InvokeBeforeAsync(entity, SaveOperation.Insert, cancellationToken)
+                || await hooks.InvokeBeforeAsync(entity, SaveOperation.Insert, cancellationToken).ConfigureAwait(false)
             )
             {
                 rows += await InsertEntityAsync(
@@ -3052,11 +3193,11 @@ public static class EntityGraphSaver
                     connection,
                     transaction,
                     cancellationToken
-                );
+                ).ConfigureAwait(false);
 
                 if (hooks is not null)
                 {
-                    await hooks.InvokeAfterAsync(entity, SaveOperation.Insert, cancellationToken);
+                    await hooks.InvokeAfterAsync(entity, SaveOperation.Insert, cancellationToken).ConfigureAwait(false);
                 }
             }
             else
@@ -3069,7 +3210,7 @@ public static class EntityGraphSaver
         {
             if (
                 hooks is null
-                || await hooks.InvokeBeforeAsync(entity, SaveOperation.Update, cancellationToken)
+                || await hooks.InvokeBeforeAsync(entity, SaveOperation.Update, cancellationToken).ConfigureAwait(false)
             )
             {
                 var (affected, performed) = await UpdateAsync(
@@ -3078,13 +3219,13 @@ public static class EntityGraphSaver
                     transaction,
                     insertWhenUpdateMissing,
                     cancellationToken
-                );
+                ).ConfigureAwait(false);
                 rows += affected;
 
                 // After fires with the operation actually performed (Insert when switched by insertWhenUpdateMissing)
                 if (hooks is not null)
                 {
-                    await hooks.InvokeAfterAsync(entity, performed, cancellationToken);
+                    await hooks.InvokeAfterAsync(entity, performed, cancellationToken).ConfigureAwait(false);
                 }
             }
             else
@@ -3106,7 +3247,7 @@ public static class EntityGraphSaver
                     insertWhenUpdateMissing,
                     cancellationToken,
                     hooks
-                );
+                ).ConfigureAwait(false);
             }
         }
 
@@ -3166,13 +3307,13 @@ public static class EntityGraphSaver
                 transaction,
                 cancellationToken,
                 hooks
-            );
+            ).ConfigureAwait(false);
         }
 
         // Before(Delete) fires from the subtree's children upward. On false, "the children are gone but this node remains" (the consequence of a standalone skip)
         if (
             hooks is not null
-            && !await hooks.InvokeBeforeAsync(entity, SaveOperation.Delete, cancellationToken)
+            && !await hooks.InvokeBeforeAsync(entity, SaveOperation.Delete, cancellationToken).ConfigureAwait(false)
         )
         {
             hooks.Skip(entity);
@@ -3184,11 +3325,11 @@ public static class EntityGraphSaver
             connection,
             transaction,
             cancellationToken
-        );
+        ).ConfigureAwait(false);
 
         if (hooks is not null)
         {
-            await hooks.InvokeAfterAsync(entity, SaveOperation.Delete, cancellationToken);
+            await hooks.InvokeAfterAsync(entity, SaveOperation.Delete, cancellationToken).ConfigureAwait(false);
         }
 
         return rows;
@@ -3248,7 +3389,7 @@ public static class EntityGraphSaver
             connection,
             transaction,
             cancellationToken
-        );
+        ).ConfigureAwait(false);
 
         if (affected != 0)
         {
@@ -3264,7 +3405,7 @@ public static class EntityGraphSaver
                 connection,
                 transaction,
                 cancellationToken
-            );
+            ).ConfigureAwait(false);
             return (inserted, SaveOperation.Insert);
         }
 
@@ -3287,7 +3428,7 @@ public static class EntityGraphSaver
 
         await using var command = new SqliteCommand(sqlSelector(metadata), connection, transaction);
         bind(metadata, command, entity);
-        return await command.ExecuteNonQueryAsync(cancellationToken);
+        return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Enumerates the cascade-target child entities (nulls are excluded).</summary>
