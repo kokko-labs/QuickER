@@ -22,7 +22,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// </para>
 /// <para>
 /// <b>「After 例外時の残留」</b>は全実装先で共通の期待（残らない）である。QuickER 版 Repository・EF Core は 1 トランザクション、
-/// インメモリは undo ジャーナルによる保存単位の all-or-nothing で、いずれもロールバックする。After の同一トランザクション
+/// インメモリは copy-on-write ステージングによる保存単位の all-or-nothing で、いずれもロールバックする。After の同一トランザクション
 /// 書き込み（除外列 blob・生 SQL）や FK 制約ロールバックは、context 操作の対応が実装先で異なるため各派生のバックエンド固有
 /// <c>[Fact]</c> で検証する。
 /// </para>
@@ -89,7 +89,7 @@ public abstract class SaveHookRuntimeTestsBase
         await ResetAndSeedAsync();
 
         var log = new List<string>();
-        var hook = new RecordingHook<DocumentEntity>("h", log, e => e.DocumentId)
+        var hook = new RecordingHook<DocumentEntity>(log, e => e.DocumentId, "h")
         {
             // 文書 10 の挿入だけをスキップする
             BeforePredicate = (e, _) => e.DocumentId != 10,
@@ -122,14 +122,14 @@ public abstract class SaveHookRuntimeTestsBase
 
     /// <summary>
     /// After が例外を投げると、保存フェーズで行った更新は全実装先で残らない（QuickER 版 Repository・EF Core は
-    /// 1 トランザクション、インメモリは undo ジャーナルによるロールバック）。
+    /// 1 トランザクション、インメモリはステージング破棄＝未公開）。
     /// </summary>
     [Fact(DisplayName = "[SaveHook] After 例外で保存フェーズの変更は残らない（全実装先で共通）")]
     public async Task After_Throws_RollsBackSavePhase()
     {
         await ResetAndSeedAsync();
 
-        var hook = new RecordingHook<DocumentEntity>("h", [], e => e.DocumentId)
+        var hook = new RecordingHook<DocumentEntity>([], e => e.DocumentId, "h")
         {
             AfterAction = (_, _, _) => throw new InvalidOperationException("after-boom"),
         };
@@ -157,12 +157,12 @@ public abstract class SaveHookRuntimeTestsBase
 
         // 短絡: s2 が Insert を止める → s3 の Before は呼ばれない・After は誰も呼ばれない
         var shortLog = new List<string>();
-        var s1 = new RecordingHook<DocumentEntity>("s1", shortLog, e => e.DocumentId);
-        var s2 = new RecordingHook<DocumentEntity>("s2", shortLog, e => e.DocumentId)
+        var s1 = new RecordingHook<DocumentEntity>(shortLog, e => e.DocumentId, "s1");
+        var s2 = new RecordingHook<DocumentEntity>(shortLog, e => e.DocumentId, "s2")
         {
             BeforePredicate = (_, _) => false,
         };
-        var s3 = new RecordingHook<DocumentEntity>("s3", shortLog, e => e.DocumentId);
+        var s3 = new RecordingHook<DocumentEntity>(shortLog, e => e.DocumentId, "s3");
         var shortDocs = Documents(s1, s2, s3);
 
         var blocked = NewDocument(20, "blocked", null, [1]);
@@ -174,9 +174,9 @@ public abstract class SaveHookRuntimeTestsBase
 
         // 順序: 全 true → Before を登録順、After を登録順に呼ぶ
         var orderLog = new List<string>();
-        var o1 = new RecordingHook<DocumentEntity>("o1", orderLog, e => e.DocumentId);
-        var o2 = new RecordingHook<DocumentEntity>("o2", orderLog, e => e.DocumentId);
-        var o3 = new RecordingHook<DocumentEntity>("o3", orderLog, e => e.DocumentId);
+        var o1 = new RecordingHook<DocumentEntity>(orderLog, e => e.DocumentId, "o1");
+        var o2 = new RecordingHook<DocumentEntity>(orderLog, e => e.DocumentId, "o2");
+        var o3 = new RecordingHook<DocumentEntity>(orderLog, e => e.DocumentId, "o3");
         var orderDocs = Documents(o1, o2, o3);
 
         var passed = NewDocument(21, "passed", null, [1]);
@@ -204,7 +204,7 @@ public abstract class SaveHookRuntimeTestsBase
         await ResetAndSeedAsync();
 
         var log = new List<string>();
-        var hook = new RecordingHook<DocumentEntity>("h", log, e => e.DocumentId);
+        var hook = new RecordingHook<DocumentEntity>(log, e => e.DocumentId, "h");
         var documents = Documents(hook);
 
         // 子を持たない文書 2 を取得 → 削除 → Updated として保存（更新対象なし → INSERT へ切替）
@@ -231,11 +231,11 @@ public abstract class SaveHookRuntimeTestsBase
 
         var log = new List<string>();
         // 親（DocumentEntity）の Delete だけをスキップし、子（DocumentNoteEntity）は削除する
-        var docHook = new RecordingHook<DocumentEntity>("doc", log, e => e.DocumentId)
+        var docHook = new RecordingHook<DocumentEntity>(log, e => e.DocumentId, "doc")
         {
             BeforePredicate = (_, op) => op != SaveOperation.Delete,
         };
-        var noteHook = new RecordingHook<DocumentNoteEntity>("note", log, e => e.NoteId);
+        var noteHook = new RecordingHook<DocumentNoteEntity>(log, e => e.NoteId, "note");
         var documents = Documents(docHook, noteHook);
 
         // 文書 1（子 100/101 を持つ）を Include して取得し、削除としてグラフ保存する
@@ -274,7 +274,7 @@ public abstract class SaveHookRuntimeTestsBase
         await ResetAndSeedAsync();
 
         var log = new List<string>();
-        var hook = new RecordingHook<DocumentEntity>("h", log, e => e.DocumentId);
+        var hook = new RecordingHook<DocumentEntity>(log, e => e.DocumentId, "h");
         var documents = Documents(hook);
 
         await documents.InsertAsync(NewDocument(40, "direct-insert", null, [1]), Ct);
@@ -320,7 +320,7 @@ public abstract class SaveHookRuntimeTestsBase
         await ResetAndSeedAsync();
 
         var log = new List<string>();
-        var hook = new RecordingHook<DocumentEntity>("h", log, e => e.DocumentId);
+        var hook = new RecordingHook<DocumentEntity>(log, e => e.DocumentId, "h");
         var documents = Documents(hook);
 
         var a = NewDocument(70, "a", null, [1]);
@@ -345,48 +345,5 @@ public abstract class SaveHookRuntimeTestsBase
 
         (await DocumentExistsAsync(70)).Should().BeTrue();
         (await DocumentExistsAsync(71)).Should().BeTrue();
-    }
-
-    /// <summary>
-    /// 呼び出しを共有ログへ記録するテスト用フック。<see cref="BeforePredicate"/> で Before の返り値（スキップ）を、
-    /// <see cref="AfterAction"/> で After の副作用（context 経由の書き込み・例外）を差し込める。
-    /// </summary>
-    protected sealed class RecordingHook<TEntity>(
-        string name,
-        List<string> log,
-        Func<TEntity, object> keySelector
-    ) : ISaveHook<TEntity>
-        where TEntity : EntityBase
-    {
-        /// <summary>Before の返り値を決める述語（null＝常に true＝スキップしない）</summary>
-        public Func<TEntity, SaveOperation, bool>? BeforePredicate { get; init; }
-
-        /// <summary>After の副作用（null＝何もしない）</summary>
-        public Func<TEntity, SaveOperation, ISaveHookContext, Task>? AfterAction { get; init; }
-
-        public Task<bool> BeforeSaveAsync(
-            TEntity entity,
-            SaveOperation operation,
-            CancellationToken cancellationToken = default
-        )
-        {
-            log.Add($"{name}:before:{operation}:{keySelector(entity)}");
-            return Task.FromResult(BeforePredicate?.Invoke(entity, operation) ?? true);
-        }
-
-        public async Task AfterSaveAsync(
-            TEntity entity,
-            SaveOperation operation,
-            ISaveHookContext context,
-            CancellationToken cancellationToken = default
-        )
-        {
-            log.Add($"{name}:after:{operation}:{keySelector(entity)}");
-
-            if (AfterAction is not null)
-            {
-                await AfterAction(entity, operation, context);
-            }
-        }
     }
 }

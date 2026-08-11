@@ -15,7 +15,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// </summary>
 /// <remarks>
 /// バックエンド非依存のシナリオは基底 <see cref="SaveHookRuntimeTestsBase"/> が持つ。インメモリは実トランザクションを
-/// 持たない（3 フェーズ＝Before プリパス → 保存 → After ポストパス）が、undo ジャーナルで保存単位を all-or-nothing に
+/// 持たない（3 フェーズ＝Before プリパス → 保存 → After ポストパス）が、copy-on-write ステージングで保存単位を all-or-nothing に
 /// するため After 例外時も保存フェーズの変更は残らない。本クラスは InMemory 固有の検証（skip 時の Put 抑止・After の
 /// 除外列書き込みがストアへ反映＝実 DB のストリーミングとパリティ・After 例外時は blob 書き込みも巻き戻る・
 /// context の生 SQL は NotSupported）を持つ。
@@ -35,7 +35,11 @@ public sealed class SaveHookInMemoryRuntimeTests : SaveHookRuntimeTestsBase, IDi
         }
 
         var services = new ServiceCollection();
-        SaveHookAdoRuntimeTests.RegisterHooks(services, hooks);
+
+        foreach (var hook in hooks)
+        {
+            services.AddSaveHook(hook);
+        }
 
         var provider = services.BuildServiceProvider();
         _providers.Add(provider);
@@ -76,7 +80,7 @@ public sealed class SaveHookInMemoryRuntimeTests : SaveHookRuntimeTestsBase, IDi
         var newPayload = new byte[64 * 1024];
         new Random(7).NextBytes(newPayload);
 
-        var hook = new RecordingHook<DocumentEntity>("h", [], e => e.DocumentId)
+        var hook = new RecordingHook<DocumentEntity>([], e => e.DocumentId, "h")
         {
             AfterAction = async (entity, _, context) =>
                 await context.WriteBinaryColumnAsync(
@@ -111,7 +115,7 @@ public sealed class SaveHookInMemoryRuntimeTests : SaveHookRuntimeTestsBase, IDi
 
     /// <summary>
     /// 1 つ目の After が除外列 blob を書き、2 つ目の After が例外を投げると、行の更新だけでなく
-    /// <c>WriteBinaryColumnAsync</c> が書いた blob も undo ジャーナルで巻き戻る（保存単位の all-or-nothing）。
+    /// <c>WriteBinaryColumnAsync</c> が書いた blob もステージング破棄で公開されない（保存単位の all-or-nothing）。
     /// </summary>
     [Fact(DisplayName = "[SaveHook/InMemory] After が書いた blob も後続の After 例外で巻き戻る")]
     public async Task After_WritesBinaryColumn_RolledBackWhenLaterAfterThrows()
@@ -121,7 +125,7 @@ public sealed class SaveHookInMemoryRuntimeTests : SaveHookRuntimeTestsBase, IDi
         var newPayload = new byte[8 * 1024];
         new Random(11).NextBytes(newPayload);
 
-        var writer = new RecordingHook<DocumentEntity>("w", [], e => e.DocumentId)
+        var writer = new RecordingHook<DocumentEntity>([], e => e.DocumentId, "w")
         {
             AfterAction = async (entity, _, context) =>
                 await context.WriteBinaryColumnAsync(
@@ -131,7 +135,7 @@ public sealed class SaveHookInMemoryRuntimeTests : SaveHookRuntimeTestsBase, IDi
                     cancellationToken: Ct
                 ),
         };
-        var breaker = new RecordingHook<DocumentEntity>("b", [], e => e.DocumentId)
+        var breaker = new RecordingHook<DocumentEntity>([], e => e.DocumentId, "b")
         {
             AfterAction = (_, _, _) => throw new InvalidOperationException("after-boom"),
         };
@@ -161,7 +165,7 @@ public sealed class SaveHookInMemoryRuntimeTests : SaveHookRuntimeTestsBase, IDi
     {
         await ResetAndSeedAsync();
 
-        var hook = new RecordingHook<DocumentEntity>("h", [], e => e.DocumentId)
+        var hook = new RecordingHook<DocumentEntity>([], e => e.DocumentId, "h")
         {
             AfterAction = async (_, _, context) =>
                 await context.ExecuteSqlAsync(
@@ -188,7 +192,7 @@ public sealed class SaveHookInMemoryRuntimeTests : SaveHookRuntimeTestsBase, IDi
     {
         await ResetAndSeedAsync();
 
-        var hook = new RecordingHook<DocumentEntity>("h", [], e => e.DocumentId)
+        var hook = new RecordingHook<DocumentEntity>([], e => e.DocumentId, "h")
         {
             // 更新（Update）だけをスキップする
             BeforePredicate = (_, op) => op != SaveOperation.Update,

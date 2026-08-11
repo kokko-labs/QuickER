@@ -3,9 +3,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
-using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
-using QuickER.Sqlite;
 using QuickER.Tests.GeneratedSqliteFixture;
 using QuickER.Tests.Integration;
 
@@ -55,18 +53,8 @@ public sealed class SqlitePortableNamedQueryRuntimeTests : IDisposable
     /// <summary>スキーマを初期化し、SQL Server 側パリティ 17 系と同一のシードを投入した注文リポジトリを返す</summary>
     private async Task<IOrderRepository> ResetAndSeedNamedQueryOrdersAsync()
     {
-        await using (var conn = new SqliteConnection(ConnectionString))
-        {
-            await conn.OpenAsync(Ct);
-
-            await using var drop = conn.CreateCommand();
-            drop.CommandText =
-                "DROP TABLE IF EXISTS \"orders\"; DROP TABLE IF EXISTS \"customers\";";
-            await drop.ExecuteNonQueryAsync(Ct);
-        }
-
-        var ddl = new SqliteDdlGenerator().Build(SqlitePortableFixtureDefinition.Build());
-        await _db.ApplyDdlAsync(ddl, Ct);
+        await _db.ResetSchemaAsync(Ct);
+        await _db.ApplyDdlAsync(SqlitePortableFixtureDefinition.Build(), Ct);
 
         var customers = Provider().GetRequiredService<ICustomerRepository>();
         await customers.InsertAsync(

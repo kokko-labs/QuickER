@@ -47,10 +47,7 @@ public sealed class ConcurrencyVoEfCoreRuntimeTests(SqlServerContainerFixture fi
         Assert.SkipUnless(_fixture.IsAvailable, _fixture.UnavailableReason);
 
         await _fixture.ResetSchemaAsync(Ct);
-        await _fixture.ExecuteAsync(
-            new SqlServerDdlGenerator().Build(ConcurrencyFixtureDefinition.Build()),
-            Ct
-        );
+        await _fixture.ApplyDdlAsync(ConcurrencyFixtureDefinition.Build(), Ct);
 
         _provider = new ServiceCollection()
             .AddGeneratedEfCoreRepositories(options =>

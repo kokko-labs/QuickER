@@ -6,11 +6,8 @@ using System.Net.Http.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
-using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
-using QuickER.Sqlite;
 using QuickER.Tests.GeneratedRemoteServiceFixture;
 using QuickER.Tests.Integration;
 
@@ -42,7 +39,7 @@ public abstract class RemoteServiceRuntimeTestsBase : IAsyncLifetime
     private readonly SqliteTempDatabase _db = SqliteTempDatabase.Create();
 
     /// <summary>in-process 起動した Kestrel サーバー</summary>
-    private WebApplication? _app;
+    private InProcessRemoteServer? _server;
 
     /// <summary>HTTP クライアント実装を登録した DI コンテナ</summary>
     private ServiceProvider? _clientProvider;
@@ -56,21 +53,16 @@ public abstract class RemoteServiceRuntimeTestsBase : IAsyncLifetime
     /// <summary>スキーマ作成 → Kestrel 起動（空きポート）→ HTTP クライアント DI 構築を行う</summary>
     public async ValueTask InitializeAsync()
     {
-        var ddl = new SqliteDdlGenerator().Build(RemoteServiceFixtureDefinition.Build());
-        await _db.ApplyDdlAsync(ddl, Ct);
+        await _db.ApplyDdlAsync(RemoteServiceFixtureDefinition.Build(), Ct);
 
-        var builder = WebApplication.CreateBuilder();
-        builder.Logging.ClearProviders();
-        builder.WebHost.UseUrls("http://127.0.0.1:0");
-        ConfigureServerRepositories(builder.Services, _db.ReadWriteCreateConnectionString);
+        _server = await InProcessRemoteServer.StartAsync(
+            services => ConfigureServerRepositories(services, _db.ReadWriteCreateConnectionString),
+            app => app.MapGeneratedRemoteEndpoints(),
+            Ct
+        );
 
-        _app = builder.Build();
-        _app.MapGeneratedRemoteEndpoints();
-        await _app.StartAsync(Ct);
-
-        var baseUrl = _app.Urls.First();
         _clientProvider = new ServiceCollection()
-            .AddGeneratedHttpRemoteRepositories($"{baseUrl}/quicker")
+            .AddGeneratedHttpRemoteRepositories(_server.BaseAddress(RemotePaths.DefaultPrefix))
             .BuildServiceProvider();
     }
 
@@ -323,7 +315,7 @@ public abstract class RemoteServiceRuntimeTestsBase : IAsyncLifetime
     )]
     public async Task HttpClientFactoryOverload_ResolvesAndRoundTrips()
     {
-        var baseUrl = _app!.Urls.First();
+        var baseUrl = _server!.BaseUrl;
 
         // ファクトリ版は「prefix を含み末尾スラッシュ付き」の BaseAddress を持つ HttpClient を供給する契約
         using var provider = new ServiceCollection()
@@ -371,7 +363,7 @@ public abstract class RemoteServiceRuntimeTestsBase : IAsyncLifetime
     {
         await Customers.InsertAsync(NewCustomer(1, "Hook"), Ct);
 
-        var baseUrl = _app!.Urls.First();
+        var baseUrl = _server!.BaseUrl;
 
         // 「フックが投げるモード」はリクエストヘッダでスコープする（静的フラグにすると並列実行される派生スイートへ漏れる）
         using var client = new HttpClient { BaseAddress = new Uri($"{baseUrl}/quicker/") };
@@ -406,7 +398,7 @@ public abstract class RemoteServiceRuntimeTestsBase : IAsyncLifetime
     )]
     public async Task BaseAddressOverload_SharedHttpClientIsDisposedWithProvider()
     {
-        var baseUrl = _app!.Urls.First();
+        var baseUrl = _server!.BaseUrl;
         var provider = new ServiceCollection()
             .AddGeneratedHttpRemoteRepositories($"{baseUrl}/quicker")
             .BuildServiceProvider();
@@ -432,7 +424,7 @@ public abstract class RemoteServiceRuntimeTestsBase : IAsyncLifetime
     [Fact(DisplayName = "[RemoteService] 13: 不正 JSON のボディは 400（BadRequest）になる")]
     public async Task MalformedJsonBody_ReturnsBadRequest()
     {
-        var baseUrl = _app!.Urls.First();
+        var baseUrl = _server!.BaseUrl;
 
         // 生成クライアントは必ず正しい JSON を送るため、壊れた JSON は素の HttpClient で直接送る
         using var raw = new HttpClient();
@@ -453,7 +445,7 @@ public abstract class RemoteServiceRuntimeTestsBase : IAsyncLifetime
     [Fact(DisplayName = "[RemoteService] 14: 空ボディの POST は 400（BadRequest）になる")]
     public async Task EmptyBody_ReturnsBadRequest()
     {
-        var baseUrl = _app!.Urls.First();
+        var baseUrl = _server!.BaseUrl;
 
         using var raw = new HttpClient();
         using var content = new StringContent("", System.Text.Encoding.UTF8, "application/json");
@@ -472,7 +464,7 @@ public abstract class RemoteServiceRuntimeTestsBase : IAsyncLifetime
     [Fact(DisplayName = "[RemoteService] 15: VO 制約違反のボディは 400（BadRequest）になる")]
     public async Task ValueObjectViolationInBody_ReturnsBadRequest()
     {
-        var baseUrl = _app!.Urls.First();
+        var baseUrl = _server!.BaseUrl;
 
         // NameValue の上限は 50 文字。生成クライアントでは VO 生成時点で弾かれるため素の HttpClient で送る
         var tooLong = new string('a', 51);
@@ -504,17 +496,17 @@ public abstract class RemoteServiceRuntimeTestsBase : IAsyncLifetime
     )]
     public async Task RequestBodyTooLarge_PassesThroughStatusCode()
     {
-        var builder = WebApplication.CreateBuilder();
-        builder.Logging.ClearProviders();
-        builder.WebHost.UseUrls("http://127.0.0.1:0");
-        builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = 1024);
-        ConfigureServerRepositories(builder.Services, _db.ReadWriteCreateConnectionString);
+        await using var server = await InProcessRemoteServer.StartAsync(
+            services => ConfigureServerRepositories(services, _db.ReadWriteCreateConnectionString),
+            app => app.MapGeneratedRemoteEndpoints(),
+            Ct,
+            builder =>
+                builder.WebHost.ConfigureKestrel(options =>
+                    options.Limits.MaxRequestBodySize = 1024
+                )
+        );
 
-        await using var app = builder.Build();
-        app.MapGeneratedRemoteEndpoints();
-        await app.StartAsync(Ct);
-
-        var baseUrl = app.Urls.First();
+        var baseUrl = server.BaseUrl;
 
         // 上限 1KB を確実に超える JSON ボディ（形としては正しい JSON）
         var payload = $"{{\"Entity\":{{\"CustomerId\":1,\"Name\":\"{new string('a', 4096)}\"}}}}";
@@ -533,7 +525,7 @@ public abstract class RemoteServiceRuntimeTestsBase : IAsyncLifetime
                 "BadHttpRequestException が持つステータスコードを素通しする"
             );
 
-        await app.StopAsync(Ct);
+        await server.StopAsync(Ct);
     }
 
     /// <summary>
@@ -547,7 +539,7 @@ public abstract class RemoteServiceRuntimeTestsBase : IAsyncLifetime
     [InlineData("Customer/SaveMany")]
     public async Task BodyMissingRequiredField_ReturnsBadRequest(string operation)
     {
-        var baseUrl = _app!.Urls.First();
+        var baseUrl = _server!.BaseUrl;
 
         // 生成クライアントは必ず全フィールドを送るため、欠落したボディは素の HttpClient で直接送る
         using var raw = new HttpClient();
@@ -576,7 +568,7 @@ public abstract class RemoteServiceRuntimeTestsBase : IAsyncLifetime
     [InlineData("Customer/Delete")]
     public async Task BodyMissingKey_ReturnsBadRequest(string operation)
     {
-        var baseUrl = _app!.Urls.First();
+        var baseUrl = _server!.BaseUrl;
 
         using var raw = new HttpClient();
         using var content = new StringContent("{}", System.Text.Encoding.UTF8, "application/json");
@@ -600,7 +592,7 @@ public abstract class RemoteServiceRuntimeTestsBase : IAsyncLifetime
     [Fact(DisplayName = "[RemoteService] 19: 400 の経路では OnServerError フックが発火しない")]
     public async Task BadRequest_DoesNotInvokeOnServerErrorHook()
     {
-        var baseUrl = _app!.Urls.First();
+        var baseUrl = _server!.BaseUrl;
         var correlationId = Guid.NewGuid().ToString();
 
         using var raw = new HttpClient();
@@ -653,9 +645,9 @@ public abstract class RemoteServiceRuntimeTestsBase : IAsyncLifetime
     {
         _clientProvider?.Dispose();
 
-        if (_app is not null)
+        if (_server is not null)
         {
-            await _app.DisposeAsync();
+            await _server.DisposeAsync();
         }
 
         _db.Dispose();

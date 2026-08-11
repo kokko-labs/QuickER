@@ -136,10 +136,8 @@ public sealed class SqliteDdlRoundTripIntegrationTests
             Relationships = { relOrder, relProfile },
         };
 
-        var ddl = new SqliteDdlGenerator().Build(diagram);
-
         // ---------- 実行 ----------
-        await db.ApplyDdlAsync(ddl, Ct);
+        await db.ApplyDdlAsync(diagram, Ct);
 
         // ---------- 取込 ----------
         await using var conn = await db.OpenReadOnlyConnectionAsync(Ct);
@@ -262,8 +260,7 @@ public sealed class SqliteDdlRoundTripIntegrationTests
         var diagram = new ErDiagram { Entities = { entity } };
 
         // ---------- DDL 生成→適用→取込 ----------
-        var ddl = new SqliteDdlGenerator().Build(diagram);
-        await db.ApplyDdlAsync(ddl, Ct);
+        await db.ApplyDdlAsync(diagram, Ct);
 
         await using var conn = await db.OpenReadOnlyConnectionAsync(Ct);
         var result = await new SqliteSchemaImporter().ImportAsync(conn, Ct);
@@ -340,7 +337,7 @@ public sealed class SqliteDdlRoundTripIntegrationTests
 
         var diagram = new ErDiagram { Entities = { inventory } };
 
-        await db.ApplyDdlAsync(new SqliteDdlGenerator().Build(diagram), Ct);
+        await db.ApplyDdlAsync(diagram, Ct);
 
         await using var conn = await db.OpenReadOnlyConnectionAsync(Ct);
         var result = await new SqliteSchemaImporter().ImportAsync(conn, Ct);
@@ -422,9 +419,8 @@ public sealed class SqliteDdlRoundTripIntegrationTests
         };
 
         var diagram = new ErDiagram { Entities = { parent, child }, Relationships = { rel } };
-        var ddl = new SqliteDdlGenerator().Build(diagram);
 
-        await db.ApplyDdlAsync(ddl, Ct);
+        await db.ApplyDdlAsync(diagram, Ct);
 
         await using var conn = await db.OpenReadOnlyConnectionAsync(Ct);
         var result = await new SqliteSchemaImporter().ImportAsync(conn, Ct);

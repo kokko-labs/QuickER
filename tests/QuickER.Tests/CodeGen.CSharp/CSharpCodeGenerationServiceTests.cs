@@ -3368,6 +3368,103 @@ public class CSharpCodeGenerationServiceTests
             .Contain("public int IntegralDigits => Precision > 0 ? Precision - Scale : -1;");
     }
 
+    /// <summary>
+    /// ランタイム中核 API の 4 件（DI なしの SaveHookRegistry・非ジェネリックな AddSaveHook・カスケード版 MarkAdded・
+    /// 構造化された SaveConflictException）が、QuickER 版 Repository の生成物へ期待どおりの形で出力されることを検証する
+    /// </summary>
+    [Fact]
+    public void Generate_RuntimeCoreApis_ShouldEmitExpectedSignatures()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            SingleEntityDiagram(),
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Sample.Domain",
+                GenerateRepositories = true,
+            }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files[0].Content;
+
+        // 1. DI コンテナなしで組める明示リスト版レジストリ（既定の DI 版と併存する）
+        content
+            .Should()
+            .Contain("internal sealed class SaveHookRegistry : ISaveHookRegistry")
+            .And.Contain("public SaveHookRegistry Add<TEntity>(ISaveHook<TEntity> hook)")
+            .And.Contain("internal sealed class ServiceProviderSaveHookRegistry");
+
+        // 2. フックの実装面から登録先を導く DI 拡張（エンティティ型ごとの分岐が要らない）
+        content
+            .Should()
+            .Contain("public static class SaveHookServiceCollectionExtensions")
+            .And.Contain(
+                "public static IServiceCollection AddSaveHook(this IServiceCollection services, object hook)"
+            );
+
+        // 3. MarkAdded だけがカスケード形を持つ（MarkRemoved / MarkUpdated は単一ノードのまま）
+        content
+            .Should()
+            .Contain("public void MarkAdded(bool includeChildren = false)")
+            .And.Contain("public void MarkRemoved() => RowState = RowState.Removed;")
+            .And.NotContain("public void MarkRemoved(bool includeChildren");
+
+        // 4. 競合の内訳（理由・型名・キー）を公開プロパティで持つ
+        content
+            .Should()
+            .Contain("public enum SaveConflictReason")
+            .And.Contain("public SaveConflictReason Reason { get; }")
+            .And.Contain("public string? EntityTypeName { get; }")
+            .And.Contain(
+                "public SaveConflictException(\r\n        string message,\r\n        SaveConflictReason reason,\r\n        string? entityTypeName,\r\n        string? key\r\n    )"
+            );
+    }
+
+    /// <summary>
+    /// AddSaveHook は契約と同じ「1 回だけ」の条件で出力されるため、QuickER 版 Repository を伴わない
+    /// EF Core 単独出力でも過不足なく 1 つだけ現れることを検証する（DI の using も併せて出る）
+    /// </summary>
+    [Fact]
+    public void Generate_AddSaveHook_ShouldBeEmittedExactlyOnce_EvenForEfCoreOnly()
+    {
+        var service = new CSharpCodeGenerationService();
+
+        var efCoreOnly = service.Generate(
+            SingleEntityDiagram(),
+            new CodeGenerationOptions { RootNamespace = "Sample.Domain", GenerateEfCore = true }
+        );
+
+        efCoreOnly.HasErrors.Should().BeFalse();
+        var efCoreContent = efCoreOnly.Files[0].Content;
+        efCoreContent.Should().Contain("using Microsoft.Extensions.DependencyInjection;");
+        OccurrencesOf(efCoreContent, "public static class SaveHookServiceCollectionExtensions")
+            .Should()
+            .Be(1, "EF Core 単独でもフック登録の入口は 1 つだけ出る");
+
+        // QuickER 版 Repository ＋ EF Core ＋ インメモリの全部入りでも重複しない（DI 拡張はエンジンごとにあるため）
+        var everything = service.Generate(
+            SingleEntityDiagram(),
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Sample.Domain",
+                GenerateRepositories = true,
+                GenerateInMemoryRepositories = true,
+            }
+        );
+
+        everything.HasErrors.Should().BeFalse();
+        OccurrencesOf(
+                everything.Files[0].Content,
+                "public static class SaveHookServiceCollectionExtensions"
+            )
+            .Should()
+            .Be(1, "エンジンが増えても定義は 1 つだけ");
+    }
+
+    /// <summary>指定文字列が本文に現れる回数を数える</summary>
+    private static int OccurrencesOf(string content, string value) =>
+        content.Split(value).Length - 1;
+
     /// <summary>主キー 1 列のみを持つ単純なエンティティ 1 件のダイアグラムを生成する</summary>
     private static ErDiagram SingleEntityDiagram() =>
         new()
@@ -4084,11 +4181,15 @@ public class CSharpCodeGenerationServiceTests
         }
     }
 
-    /// <summary>EF Core 単独出力の分割時、契約のみの Repository ファイルに SqlClient / DependencyInjection の using が漏れないことを検証する</summary>
+    /// <summary>
+    /// EF Core 単独出力の分割時、契約のみの Repository ファイルに SqlClient（ADO）の using が漏れないことを検証する。
+    /// DI（DependencyInjection）は Save フックの登録拡張 <c>AddSaveHook</c> が契約と同じ場所へ 1 回だけ出るため、
+    /// 契約ファイルが持つのが正しい（EF Core が DI を連れてくるので新たな依存は増えない）
+    /// </summary>
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public void Generate_EfCoreOnly_Split_RepositoryFile_ShouldNotUseSqlClientOrDi(bool vo)
+    public void Generate_EfCoreOnly_Split_RepositoryFile_ShouldNotUseSqlClient(bool vo)
     {
         var result = new CSharpCodeGenerationService().Generate(
             ValueObjectDiagram(),
@@ -4104,10 +4205,16 @@ public class CSharpCodeGenerationServiceTests
 
         result.HasErrors.Should().BeFalse();
 
-        // 契約のみ（QuickER の SQL Server 実装なし）の Repository ファイルは SqlClient・DI に依存しない
+        // 契約のみ（QuickER の SQL Server 実装なし）の Repository ファイルは ADO に依存しない
         var repository = Content(result, "Repositories.g.cs");
         repository.Should().NotContain("using Microsoft.Data.SqlClient;");
-        repository.Should().NotContain("using Microsoft.Extensions.DependencyInjection;");
+        repository.Should().NotContain("using Microsoft.Data.Sqlite;");
+
+        // DI は AddSaveHook（エンジン非依存の Save フック登録拡張）のために契約ファイルが持つ
+        repository
+            .Should()
+            .Contain("using Microsoft.Extensions.DependencyInjection;")
+            .And.Contain("public static class SaveHookServiceCollectionExtensions");
     }
 
     /// <summary>

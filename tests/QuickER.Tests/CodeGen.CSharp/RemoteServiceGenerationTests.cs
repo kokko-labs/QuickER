@@ -131,7 +131,7 @@ public class RemoteServiceGenerationTests
         // サーバーファイル: エンドポイントマッピング＋例外変換＋CRUD 汎用マッピング
         server.Should().Contain("public static partial class GeneratedRemoteEndpoints");
         server.Should().Contain("MapGeneratedRemoteEndpoints(");
-        server.Should().Contain("string prefix = \"/quicker\"");
+        server.Should().Contain("string prefix = RemotePaths.DefaultPrefix");
         server.Should().Contain("MapCrud<OrderEntity, int, IOrderRemoteRepository>(");
         server.Should().Contain("StatusCodes.Status409Conflict");
         server.Should().Contain("\"SaveConflict\"");
@@ -257,5 +257,49 @@ public class RemoteServiceGenerationTests
         result.Files.Should().HaveCount(2);
         result.Files[0].Content.Should().Contain("HttpOrderRemoteRepository");
         result.Files[1].Content.Should().Contain("MapGeneratedRemoteEndpoints");
+    }
+
+    /// <summary>
+    /// リモートのルート（プレフィックス／health）が公開定数 <c>RemotePaths</c> へ一点集約され、
+    /// サーバーの既定引数・health マッピング・クライアントの liveness チェックがいずれも定数を参照することを固定する
+    /// </summary>
+    /// <remarks>
+    /// サーバー既定引数とクライアント DI 登録の双方に <c>"/quicker"</c> がリテラルで散っていた重複の解消。
+    /// サーバーファイルにリテラルが残っていないこと（NotContain）まで見て、定数化の抜けを検知する。
+    /// </remarks>
+    [Fact(DisplayName = "リモートのプレフィックスと health ルートが公開定数へ集約される")]
+    public void Generate_RemoteServices_SharesRoutesThroughRemotePaths()
+    {
+        var result = Generate(
+            CreateDiagram(),
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Test.Ns",
+                GenerateRepositories = true,
+                GenerateRemoteServices = true,
+            }
+        );
+
+        result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
+        var main = result.Files[0].Content;
+        var server = result.Files[1].Content;
+
+        // 定数の正本はクライアント側固定 infra（Core パッケージ収載）
+        main.Should().Contain("public static class RemotePaths");
+        main.Should().Contain("public const string DefaultPrefix = \"/quicker\";");
+        main.Should().Contain("public const string HealthRoute = \"health\";");
+
+        // クライアントの liveness チェックも同じ定数を使う
+        main.Should()
+            .Contain(
+                "public async Task<bool> PingAsync(CancellationToken cancellationToken = default)"
+            );
+        main.Should().Contain("RemotePaths.HealthRoute,");
+
+        // サーバー: 既定引数も health ルートも定数参照で、リテラルは残っていない
+        server.Should().Contain("string prefix = RemotePaths.DefaultPrefix");
+        server.Should().Contain("group.MapGet(RemotePaths.HealthRoute, () => Results.Ok());");
+        server.Should().NotContain("\"/quicker\"");
+        server.Should().NotContain("\"health\"");
     }
 }

@@ -40,6 +40,41 @@ public sealed class SqlConnectionFactory(string connectionString) : ISqlConnecti
     public SqlConnection CreateConnection() => new(connectionString);
 }
 
+/// <summary>Creates a schema by running a DDL script against a SQL Server database.</summary>
+/// <remarks>
+/// A bootstrap convenience for development, tests, and samples - it turns the DDL QuickER generates into a usable
+/// database in one call. It is not schema management: it knows nothing about versions, about what already exists,
+/// or about rolling back, so anything that outlives a throwaway database wants a migration tool instead.
+/// </remarks>
+public static class SqlServerSchemaBootstrap
+{
+    /// <summary>Opens a connection and runs the whole DDL script.</summary>
+    /// <remarks>
+    /// The script is sent as a single command. The DDL QuickER generates is one batch - it emits no <c>GO</c>
+    /// separators and no statement that must start a batch of its own - so it needs no batch splitting.
+    /// A hand-edited script that does contain <c>GO</c> has to be split by the caller.
+    /// </remarks>
+    /// <param name="connectionString">The connection string of the database to create the schema in.</param>
+    /// <param name="ddl">The DDL script to run.</param>
+    /// <param name="cancellationToken">A token that cancels the operation.</param>
+    public static async Task ApplyDdlAsync(
+        string connectionString,
+        string ddl,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
+        ArgumentException.ThrowIfNullOrWhiteSpace(ddl);
+
+        await using var connection = new SqlConnectionFactory(connectionString).CreateConnection();
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = ddl;
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+}
+
 /// <summary>The default implementation of the entity-agnostic raw SQL executor (the single implementation of binding, scalar conversion, and projection mapping).</summary>
 /// <remarks>Stateless (holds only the connection factory), so it can be registered as a Singleton in DI. The repository's raw SQL methods delegate to this implementation.</remarks>
 public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory) : ISqlExecutor

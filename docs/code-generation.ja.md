@@ -141,6 +141,19 @@ var provider = new ServiceCollection()
 var customers = provider.GetRequiredService<ICustomerRepository>();
 ```
 
+### 接続とスキーマの立ち上げ
+
+接続を開くのは生成された `SqlConnectionFactory` で、**SQLite では外部キー強制を既定で有効**にします。SQLite は接続側が要求しない限り強制しないため、これがないと生成 DDL の外部キーが黙って無効になります（親のない子行が入り、親を消しても子が残る）。スキーマが制約を宣言している以上、強制されるのが既定として正しいという判断です。接続文字列の `Foreign Keys` 指定はそのまま尊重するので、`Foreign Keys=False` を明示すればプロバイダ本来の挙動に戻せます。
+
+QuickER が生成した DDL からスキーマを作る用途には、`SqliteSchemaBootstrap.ApplyDdlAsync` / `SqlServerSchemaBootstrap.ApplyDdlAsync` があります。接続を開いてスクリプト全文を 1 回で実行します。
+
+```csharp
+var ddl = await File.ReadAllTextAsync("Shop.sql");
+await SqliteSchemaBootstrap.ApplyDdlAsync(connectionString, ddl);
+```
+
+これは開発・テスト・サンプル向けのブートストラップであり、スキーマ管理ではありません。バージョンも既存の状態もロールバックも知らないため、使い捨てでない DB にはマイグレーションツールを使ってください（EF Core モードが既存スキーマへの接続専用で Migrations を範囲外としているのと同じ線引きです）。
+
 ### 基本操作
 
 ```csharp
@@ -175,13 +188,14 @@ var result = await customers.Query()
 
 ```csharp
 var order = new OrderEntity { OrderId = 1000, CustomerId = 1 };
-order.MarkAdded();
-var line = new OrderLineEntity { OrderLineId = 5000, OrderId = 1000, ProductId = 100, Quantity = 2 };
-line.MarkAdded();
-order.OrderLines.Add(line);
+order.OrderLines.Add(new OrderLineEntity { OrderLineId = 5000, OrderId = 1000, ProductId = 100, Quantity = 2 });
+
+order.MarkAdded(includeChildren: true);         // 保存がたどるのと同じカスケードで集約全体をマーク
 
 var affected = await orders.SaveAsync(order);   // RowState に従い INSERT / UPDATE / DELETE を 1 トランザクションで実行
 ```
+
+`MarkAdded(includeChildren: true)` は、グラフ保存がたどるカスケードナビゲーションを末端までたどってマークします。組み立てたばかりの集約を、ノードごとに 1 回ずつ呼ばずに 1 回でマークできます（先にグラフを組み立ててからマークしてください）。カスケード形を持つのは `MarkAdded` だけです——グラフ全体を更新対象にすると誰も触っていない行まで書き戻すことになり、グラフ全体を削除対象にするのはグラフ保存の `cascadeDelete` がルートだけで行っていることだからです。
 
 ### Save フック（ISaveHook）
 
@@ -224,7 +238,23 @@ public sealed class DocumentSaveHook : ISaveHook<DocumentEntity>
 ```csharp
 // DI 登録（Singleton / Scoped どちらでも可。フックが Scoped サービスを使うなら Scoped）
 services.AddSingleton<ISaveHook<DocumentEntity>, DocumentSaveHook>();
+
+// 対象のエンティティ型をインスタンス自身から導く登録もできる。実装している ISaveHook<TEntity> すべてに
+// 登録するため、複数テーブルを 1 つのフックで賄う場合も型ごとの行を書かずに済む
+services.AddSaveHook(new AuditSaveHook());
 ```
+
+**DI コンテナを使わない**場合は、`SaveHookRegistry` を組み立ててリポジトリのコンストラクタへ渡します。フックは追加順に発火し、DI 版のレジストリと同じ挙動です:
+
+```csharp
+var hooks = new SaveHookRegistry()
+    .Add<DocumentEntity>(new DocumentSaveHook())
+    .Add<OrderEntity>(new OrderSaveHook());
+
+var documents = new DocumentRepository(connectionFactory, hooks);
+```
+
+レジストリの組み立てはスレッドセーフではありません（リポジトリへ渡す前に全フックを追加してください）。渡した後の解決は読み取り専用です。
 
 同じエンティティ型に複数のフックを登録できます。**Before は登録順**に呼ばれ、**最初に `false` を返した時点で短絡**します（残りの Before は呼ばれず、その行はスキップ）。**After も登録順**に呼ばれます。Before / After が投げた例外はそのまま伝播し、Save 全体がロールバックします（実トランザクションを持つ実装先はトランザクションで巻き戻し、インメモリはそもそも書き込みを公開していません＝後述）。
 
@@ -394,6 +424,25 @@ await repository.UpdateAsync(order, ConcurrencyMode.ForceOverwrite, ct);
 // グラフ保存もグラフ内の更新・削除を同じ規則で守る
 await repository.SaveAsync(order, cancellationToken: ct);
 ```
+
+`SaveConflictException` は再試行に必要な材料を構造化して持つため、メッセージを解析する必要はありません: `Reason`（`NotFound`＝行が消えた／`Modified`＝行はあるが版が進んだ）・`EntityTypeName`・`Key`。この情報はリモート転送（HTTP 409）でも復元されるため、直結でもリモートでも呼び出し側は同じプロパティを読めます。
+
+競合への通常の対処は、再取得して適用し直すことです:
+
+```csharp
+try
+{
+    await repository.UpdateAsync(order, cancellationToken: ct);
+}
+catch (SaveConflictException ex) when (ex.Reason == SaveConflictReason.Modified)
+{
+    var current = await repository.GetByIdAsync(order.OrderId, ct);   // 勝った側の版を読み直す
+    current!.Memo = order.Memo;                                       // その上へ自分の編集を当て直す
+    await repository.UpdateAsync(current, cancellationToken: ct);     // 今度は新しい版で守られる
+}
+```
+
+再取得して当て直すのは、2 つの編集をマージできる場合の素直な答えです。マージできず、この書き込みを無条件に通したい場合が `ForceOverwrite` です（最初から版の条件を外すので、読み直しもマージも行いません）。
 
 - **「行なし」と「版が古い」は別の結果です。** 単一の `UpdateAsync` は行が存在しなければ従来どおり `false` を返し、行はあるが版が進んでいれば `SaveConflictException` を送出します。`insertWhenUpdateMissing: true` も同じ線引きで、行なしは INSERT へ切り替わり、版が古い場合は競合として報告されます（INSERT へ倒すと競合が主キー重複に化けるためです）。
 - **グラフ保存は削除も守り**、競合が 1 件でもあれば保存単位の全体がロールバックされます（インメモリ Repository は書き込みをステージングして一括公開する方式で同じ結果になります＝失敗した保存はそもそもストアへ届きません）。
@@ -586,6 +635,7 @@ app.Run();
 押さえておくポイント:
 
 - **直列化**はエンティティの JSON 往復（`ToJson` / `Clone`）と同じ意味論（VO は内包値・RowState 込み・親参照ナビは循環しない）で、クライアント・サーバーが共有の `RemoteJson.Options` を使います
+- **liveness エンドポイントがあります**。`MapGeneratedRemoteEndpoints` は `GET {prefix}/health` も同時にマップし、サーバーが待ち受け始めた時点で本文なしの 200 を返します。DB には意図的に触らないので、「プロセスが上がっていてエンドポイントがマップされている」ことだけを表します。クライアント側は `Http{Entity}RemoteRepository.PingAsync` がこれを呼び、到達できない事象（接続拒否・DNS/TLS 失敗・HttpClient 自身のタイムアウト・成功以外のステータス）はすべて例外でなく `false` として返すため、起動待ちループの条件にそのまま使えます（渡したトークンのキャンセルは従来どおり例外になるので、呼び出し側のタイムアウトとサーバー停止は区別できます）。エンドポイントはグループの一員なので、グループに付けた認可はここにも効きます。プレフィックスと health ルートは公開定数 `RemotePaths.DefaultPrefix`（`"/quicker"`）／`RemotePaths.HealthRoute` として両側が参照し、値の正本を 1 箇所に保ちます
 - **名前付きクエリは実装方式（簡易 DSL／生 SQL／手動実装）に依らず全部**リモート面経由で呼び出せます（実装の実体はサーバー側のリポジトリ）
 - **例外は型が復元されます**: サーバーの `SaveConflictException` は HTTP 409 を介してクライアントでも `SaveConflictException` として送出され（直結時と同じ catch が機能）、その他のサーバー例外は `RemoteRepositoryException`（ステータスコード・メッセージ保持）になります
 - **リクエストを解釈できない場合は 500 ではなく 400 になります**。リクエスト自体の読み取り中に失敗するもの（不正な JSON・空ボディ・JSON でない Content-Type・型不一致・値オブジェクトの検証違反・必須フィールドの欠落〔`Insert` / `Update` / `Save` / `SaveMany` への `{}`、参照型キーを省いた `GetById` / `Delete`〕・未定義の `ConcurrencyMode` 値、バイナリエンドポイントの `?id=` 欠落・復元不能）はクライアントが送った内容の問題なので、HTTP 400＋`RemoteError`（`Type` は `"BadRequest"`）を返します（クライアントは `StatusCode` が 400 の `RemoteRepositoryException` を送出）。400 のメッセージにはクライアント自身のペイロードに関する情報しか載らず、サーバー側のログ出力も `OnServerError` フックも実行されません（どちらも 500 専用）。サーバー基盤が拒否したリクエスト（`BadHttpRequestException`。例: リクエストボディのサイズ上限超過）は、その例外が持つステータスコード（413 など）をそのまま返します

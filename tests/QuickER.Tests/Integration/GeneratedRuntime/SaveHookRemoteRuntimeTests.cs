@@ -5,11 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
-using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
-using QuickER.Sqlite;
 using QuickER.Tests.GeneratedBinaryFixture;
 using QuickER.Tests.Integration;
 using Xunit;
@@ -43,14 +39,13 @@ public sealed class SaveHookRemoteRuntimeTests : IAsyncLifetime
     private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;
 
     private readonly SqliteTempDatabase _db = SqliteTempDatabase.Create();
-    private WebApplication? _app;
+    private InProcessRemoteServer? _server;
     private ServiceProvider? _clientProvider;
 
     /// <summary>スキーマを作成する（サーバーは各テストがフックを指定して起動する）</summary>
     public async ValueTask InitializeAsync()
     {
-        var ddl = new SqliteDdlGenerator().Build(BinaryFixtureDefinition.Build());
-        await _db.ApplyDdlAsync(ddl, Ct);
+        await _db.ApplyDdlAsync(BinaryFixtureDefinition.Build(), Ct);
     }
 
     /// <summary>
@@ -58,35 +53,23 @@ public sealed class SaveHookRemoteRuntimeTests : IAsyncLifetime
     /// </summary>
     private async Task<IDocumentRemoteRepository> StartServerAsync(params object[] hooks)
     {
-        var builder = WebApplication.CreateBuilder();
-        builder.Logging.ClearProviders();
-        builder.WebHost.UseUrls("http://127.0.0.1:0");
-        builder.Services.AddGeneratedSqliteRepositories(_db.ReadWriteCreateConnectionString);
-
-        // フックはサーバー側の DI に登録する（in-process のため単一インスタンスの共有ログをテストから観測できる）
-        foreach (var hook in hooks)
-        {
-            if (hook is ISaveHook<DocumentEntity> documentHook)
+        _server = await InProcessRemoteServer.StartAsync(
+            services =>
             {
-                builder.Services.AddSingleton(documentHook);
-            }
-            else if (hook is ISaveHook<DocumentNoteEntity> noteHook)
-            {
-                builder.Services.AddSingleton(noteHook);
-            }
-            else
-            {
-                throw new InvalidOperationException($"未知のフック型: {hook.GetType()}");
-            }
-        }
+                services.AddGeneratedSqliteRepositories(_db.ReadWriteCreateConnectionString);
 
-        _app = builder.Build();
-        _app.MapGeneratedRemoteEndpoints();
-        await _app.StartAsync(Ct);
+                // フックはサーバー側の DI に登録する（in-process のため単一インスタンスの共有ログをテストから観測できる）
+                foreach (var hook in hooks)
+                {
+                    services.AddSaveHook(hook);
+                }
+            },
+            app => app.MapGeneratedRemoteEndpoints(),
+            Ct
+        );
 
-        var baseUrl = _app.Urls.First();
         _clientProvider = new ServiceCollection()
-            .AddGeneratedHttpRemoteRepositories($"{baseUrl}/quicker")
+            .AddGeneratedHttpRemoteRepositories(_server.BaseAddress(RemotePaths.DefaultPrefix))
             .BuildServiceProvider();
 
         return _clientProvider.GetRequiredService<IDocumentRemoteRepository>();
@@ -114,7 +97,7 @@ public sealed class SaveHookRemoteRuntimeTests : IAsyncLifetime
     public async Task Save_OverHttp_FiresServerSideHooks()
     {
         var log = new List<string>();
-        var hook = new RemoteRecordingHook(log);
+        var hook = new RecordingHook<DocumentEntity>(log, e => e.DocumentId);
         var documents = await StartServerAsync(hook);
 
         var doc = NewDocument(1, "alpha", null, [9, 9]);
@@ -134,7 +117,10 @@ public sealed class SaveHookRemoteRuntimeTests : IAsyncLifetime
     public async Task Before_False_SkipsRow_SaveReturnsSuccessfully()
     {
         var log = new List<string>();
-        var hook = new RemoteRecordingHook(log) { BeforePredicate = (_, _) => false };
+        var hook = new RecordingHook<DocumentEntity>(log, e => e.DocumentId)
+        {
+            BeforePredicate = (_, _) => false,
+        };
         var documents = await StartServerAsync(hook);
 
         var doc = NewDocument(2, "beta", null, [8]);
@@ -162,7 +148,7 @@ public sealed class SaveHookRemoteRuntimeTests : IAsyncLifetime
         var newPayload = new byte[128 * 1024];
         new Random(7).NextBytes(newPayload);
 
-        var hook = new RemoteRecordingHook([])
+        var hook = new RecordingHook<DocumentEntity>([], e => e.DocumentId)
         {
             AfterAction = async (entity, _, context) =>
                 await context.WriteBinaryColumnAsync(
@@ -201,7 +187,7 @@ public sealed class SaveHookRemoteRuntimeTests : IAsyncLifetime
     )]
     public async Task After_Throws_ServerRollsBack_NoRowNoBlob()
     {
-        var hook = new RemoteRecordingHook([])
+        var hook = new RecordingHook<DocumentEntity>([], e => e.DocumentId)
         {
             AfterAction = async (entity, _, context) =>
             {
@@ -250,7 +236,7 @@ public sealed class SaveHookRemoteRuntimeTests : IAsyncLifetime
     public async Task Before_False_SkippedRowKeepsRowState_OthersAreAccepted()
     {
         // 5 番だけスキップし、6 番は通す
-        var hook = new RemoteRecordingHook([])
+        var hook = new RecordingHook<DocumentEntity>([], e => e.DocumentId)
         {
             BeforePredicate = (entity, _) => entity.DocumentId != 5,
         };
@@ -284,7 +270,10 @@ public sealed class SaveHookRemoteRuntimeTests : IAsyncLifetime
     [Fact(DisplayName = "[SaveHook/Remote] 6: 子のスキップも伝わる（親は確定・子は据え置き）")]
     public async Task Before_False_OnChild_PropagatesThroughCascade()
     {
-        var noteHook = new RemoteNoteHook { BeforePredicate = (_, _) => false };
+        var noteHook = new RecordingHook<DocumentNoteEntity>([], e => e.NoteId)
+        {
+            BeforePredicate = (_, _) => false,
+        };
         var documents = await StartServerAsync(noteHook);
 
         var doc = NewDocument(7, "eta", null, [7]);
@@ -316,7 +305,10 @@ public sealed class SaveHookRemoteRuntimeTests : IAsyncLifetime
     [Fact(DisplayName = "[SaveHook/Remote] 7: スキップ解除後に同じインスタンスを再保存できる")]
     public async Task SkippedRow_CanBeSavedAgainAfterSkipCleared()
     {
-        var hook = new RemoteRecordingHook([]) { BeforePredicate = (_, _) => false };
+        var hook = new RecordingHook<DocumentEntity>([], e => e.DocumentId)
+        {
+            BeforePredicate = (_, _) => false,
+        };
         var documents = await StartServerAsync(hook);
 
         var doc = NewDocument(8, "theta", null, [8]);
@@ -364,65 +356,11 @@ public sealed class SaveHookRemoteRuntimeTests : IAsyncLifetime
     {
         _clientProvider?.Dispose();
 
-        if (_app is not null)
+        if (_server is not null)
         {
-            await _app.DisposeAsync();
+            await _server.DisposeAsync();
         }
 
         _db.Dispose();
-    }
-
-    /// <summary>
-    /// サーバー側の発火を共有ログへ記録するテスト用フック。<see cref="BeforePredicate"/> で Before の返り値（スキップ）、
-    /// <see cref="AfterAction"/> で After の副作用（context 経由の blob 書き込み・例外）を差し込める。
-    /// </summary>
-    private sealed class RemoteRecordingHook(List<string> log) : ISaveHook<DocumentEntity>
-    {
-        /// <summary>Before の返り値を決める述語（テストの途中で差し替えられるよう set 可能にしてある）</summary>
-        public Func<DocumentEntity, SaveOperation, bool>? BeforePredicate { get; set; }
-
-        public Func<
-            DocumentEntity,
-            SaveOperation,
-            ISaveHookContext,
-            Task
-        >? AfterAction { get; init; }
-
-        public Task<bool> BeforeSaveAsync(
-            DocumentEntity entity,
-            SaveOperation operation,
-            CancellationToken cancellationToken = default
-        )
-        {
-            log.Add($"before:{operation}:{entity.DocumentId}");
-            return Task.FromResult(BeforePredicate?.Invoke(entity, operation) ?? true);
-        }
-
-        public async Task AfterSaveAsync(
-            DocumentEntity entity,
-            SaveOperation operation,
-            ISaveHookContext context,
-            CancellationToken cancellationToken = default
-        )
-        {
-            log.Add($"after:{operation}:{entity.DocumentId}");
-
-            if (AfterAction is not null)
-            {
-                await AfterAction(entity, operation, context);
-            }
-        }
-    }
-
-    /// <summary>子（メモ）側のスキップを差し込むためのテスト用フック</summary>
-    private sealed class RemoteNoteHook : ISaveHook<DocumentNoteEntity>
-    {
-        public Func<DocumentNoteEntity, SaveOperation, bool>? BeforePredicate { get; set; }
-
-        public Task<bool> BeforeSaveAsync(
-            DocumentNoteEntity entity,
-            SaveOperation operation,
-            CancellationToken cancellationToken = default
-        ) => Task.FromResult(BeforePredicate?.Invoke(entity, operation) ?? true);
     }
 }

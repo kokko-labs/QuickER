@@ -3,9 +3,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
-using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
-using QuickER.Sqlite;
 using QuickER.Tests.GeneratedBinaryFixture;
 using QuickER.Tests.Integration;
 
@@ -45,18 +43,8 @@ public sealed class SqliteBoolColumnTranslatorRuntimeTests : IDisposable
     /// <remarks>documents: 1="alpha"（公開）・2="beta"（非公開）・3="gamma"（公開）。</remarks>
     private async Task<IDocumentRepository> ResetAndSeedAsync()
     {
-        await using (var conn = new SqliteConnection(_db.ReadWriteCreateConnectionString))
-        {
-            await conn.OpenAsync(Ct);
-
-            await using var drop = conn.CreateCommand();
-            drop.CommandText =
-                "DROP TABLE IF EXISTS \"document_notes\"; DROP TABLE IF EXISTS \"documents\";";
-            await drop.ExecuteNonQueryAsync(Ct);
-        }
-
-        var ddl = new SqliteDdlGenerator().Build(BinaryFixtureDefinition.Build());
-        await _db.ApplyDdlAsync(ddl, Ct);
+        await _db.ResetSchemaAsync(Ct);
+        await _db.ApplyDdlAsync(BinaryFixtureDefinition.Build(), Ct);
 
         var documents = Provider().GetRequiredService<IDocumentRepository>();
         await documents.InsertAsync(NewDocument(1, "alpha", isPublished: true), Ct);

@@ -5,7 +5,6 @@ using System.Threading.Tasks;
 using AwesomeAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using QuickER.Sqlite;
 using QuickER.Tests.GeneratedRemoteContractFixture;
 using QuickER.Tests.Integration;
 
@@ -67,9 +66,7 @@ public sealed class RemoteContractRuntimeTests : IDisposable
     /// <summary>フィクスチャ図から SQLite DDL を生成して一時 DB へ適用する</summary>
     private Task ApplySchemaAsync()
     {
-        var ddl = new SqliteDdlGenerator().Build(RemoteContractFixtureDefinition.Build());
-
-        return _db.ApplyDdlAsync(ddl, Ct);
+        return _db.ApplyDdlAsync(RemoteContractFixtureDefinition.Build(), Ct);
     }
 
     /// <summary>リモート面だけで CRUD・グラフ保存・名前付きクエリが完結することを検証する共通シナリオ</summary>

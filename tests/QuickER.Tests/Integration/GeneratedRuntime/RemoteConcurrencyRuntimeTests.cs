@@ -1,5 +1,4 @@
 using System;
-using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Text;
@@ -7,10 +6,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
-using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 using QuickER.Tests.GeneratedBinaryFixture;
 using Xunit;
 
@@ -45,25 +41,22 @@ public sealed class RemoteConcurrencyRuntimeTests : IAsyncLifetime
 {
     private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;
 
-    private WebApplication? _app;
+    private InProcessRemoteServer? _server;
     private ServiceProvider? _clientProvider;
     private string _baseUrl = string.Empty;
 
     /// <summary>Kestrel 起動（空きポート・サーバー実体はインメモリ Repository・サンプルデータなし）→ HTTP クライアント DI 構築</summary>
     public async ValueTask InitializeAsync()
     {
-        var builder = WebApplication.CreateBuilder();
-        builder.Logging.ClearProviders();
-        builder.WebHost.UseUrls("http://127.0.0.1:0");
-        builder.Services.AddGeneratedInMemoryRepositories(seedSampleData: false);
+        _server = await InProcessRemoteServer.StartAsync(
+            services => services.AddGeneratedInMemoryRepositories(seedSampleData: false),
+            app => app.MapGeneratedRemoteEndpoints(),
+            Ct
+        );
 
-        _app = builder.Build();
-        _app.MapGeneratedRemoteEndpoints();
-        await _app.StartAsync(Ct);
-
-        _baseUrl = _app.Urls.First();
+        _baseUrl = _server.BaseUrl;
         _clientProvider = new ServiceCollection()
-            .AddGeneratedHttpRemoteRepositories($"{_baseUrl}/quicker")
+            .AddGeneratedHttpRemoteRepositories(_server.BaseAddress(RemotePaths.DefaultPrefix))
             .BuildServiceProvider();
     }
 
@@ -377,9 +370,9 @@ public sealed class RemoteConcurrencyRuntimeTests : IAsyncLifetime
     {
         _clientProvider?.Dispose();
 
-        if (_app is not null)
+        if (_server is not null)
         {
-            await _app.DisposeAsync();
+            await _server.DisposeAsync();
         }
     }
 }

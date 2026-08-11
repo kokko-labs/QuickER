@@ -234,6 +234,15 @@ internal static class GeneratedFileUsings
                 // 契約に常に含まれるため System.IO を常時要求する（無制限バイナリの Stream アクセサ・エンジンも同じ System.IO）
                 yield return "System.IO";
 
+                // Save フックの明示登録 DI 拡張（AddSaveHook）は契約と同じ「1 回だけ出力される」条件（scriban の
+                // render_contract＝契約を描画するスペック）で出るため、契約を描画するファイルは方言実装を持たなくても
+                // DI の using を要する（マルチ方言の契約専用ファイル・EF Core 単独出力の分割ファイルが該当）。
+                // 契約が出るのは Repository / EF Core のいずれかを生成するときだけなので、DI パッケージは常に利用可能
+                if (spec.ContractOnly || !spec.MultiDialect)
+                {
+                    yield return "Microsoft.Extensions.DependencyInjection";
+                }
+
                 if (options.IncludeDataAnnotations)
                 {
                     yield return "System.ComponentModel.DataAnnotations";

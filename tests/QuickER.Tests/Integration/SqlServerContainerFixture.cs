@@ -1,7 +1,9 @@
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Data.SqlClient;
+using QuickER.Model;
 using QuickER.Provider;
+using QuickER.SqlServer;
 using Testcontainers.MsSql;
 
 namespace QuickER.Tests.Integration;
@@ -112,6 +114,10 @@ public sealed class SqlServerContainerFixture : IAsyncLifetime
         await using var cmd = new SqlCommand(sql, conn);
         await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
+
+    /// <summary>図から SQL Server 方言の DDL を生成してコンテナ上で実行する（テスト定番の 2 行を 1 行にまとめる糖衣）</summary>
+    public Task ApplyDdlAsync(ErDiagram diagram, CancellationToken ct = default) =>
+        ExecuteAsync(new SqlServerDdlGenerator().Build(diagram), ct);
 
     /// <summary>コンテナの接続文字列を分解して共通接続設定 <see cref="DbConnectionSettings"/> を組み立てる</summary>
     public DbConnectionSettings ToDbConnectionSettings()

@@ -3,10 +3,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
 using AwesomeAssertions;
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using QuickER.Sqlite;
 using QuickER.Tests.GeneratedBinaryFixture;
 using QuickER.Tests.Integration;
 using Xunit;
@@ -48,7 +46,11 @@ public sealed class SaveHookEfCoreRuntimeTests : SaveHookRuntimeTestsBase, IDisp
         var services = new ServiceCollection().AddGeneratedEfCoreRepositories(options =>
             options.UseSqlite(_db.ReadWriteCreateConnectionString)
         );
-        SaveHookAdoRuntimeTests.RegisterHooks(services, hooks);
+
+        foreach (var hook in hooks)
+        {
+            services.AddSaveHook(hook);
+        }
 
         var provider = services.BuildServiceProvider();
         _providers.Add(provider);
@@ -64,28 +66,14 @@ public sealed class SaveHookEfCoreRuntimeTests : SaveHookRuntimeTestsBase, IDisp
     /// <summary>スキーマ（＋監査テーブル）を作成し、共通シードを EF Core リポジトリ経由で投入する</summary>
     protected override async Task ResetAndSeedAsync()
     {
-        await using (var conn = new SqliteConnection(_db.ReadWriteCreateConnectionString))
-        {
-            await conn.OpenAsync(Ct);
+        await _db.ResetSchemaAsync(Ct);
+        await _db.ApplyDdlAsync(BinaryFixtureDefinition.Build(), Ct);
 
-            await using var drop = conn.CreateCommand();
-            drop.CommandText =
-                "DROP TABLE IF EXISTS \"document_notes\"; DROP TABLE IF EXISTS \"documents\"; DROP TABLE IF EXISTS \"audit\";";
-            await drop.ExecuteNonQueryAsync(Ct);
-        }
-
-        var ddl = new SqliteDdlGenerator().Build(BinaryFixtureDefinition.Build());
-        await _db.ApplyDdlAsync(ddl, Ct);
-
-        await using (var conn = new SqliteConnection(_db.ReadWriteCreateConnectionString))
-        {
-            await conn.OpenAsync(Ct);
-
-            await using var create = conn.CreateCommand();
-            create.CommandText =
-                "CREATE TABLE \"audit\" (\"audit_id\" INTEGER PRIMARY KEY AUTOINCREMENT, \"note\" TEXT NOT NULL);";
-            await create.ExecuteNonQueryAsync(Ct);
-        }
+        // After フックの生 SQL（ExecuteSqlAsync）のアトミック性を検証するための監査テーブル
+        await _db.ApplyDdlAsync(
+            "CREATE TABLE \"audit\" (\"audit_id\" INTEGER PRIMARY KEY AUTOINCREMENT, \"note\" TEXT NOT NULL);",
+            Ct
+        );
 
         var documents = Documents();
         var notes = Notes();
@@ -105,7 +93,7 @@ public sealed class SaveHookEfCoreRuntimeTests : SaveHookRuntimeTestsBase, IDisp
     {
         await ResetAndSeedAsync();
 
-        var hook = new RecordingHook<DocumentEntity>("h", [], _ => 0)
+        var hook = new RecordingHook<DocumentEntity>([], _ => 0, "h")
         {
             BeforePredicate = (_, op) => op != SaveOperation.Insert,
         };
@@ -134,7 +122,7 @@ public sealed class SaveHookEfCoreRuntimeTests : SaveHookRuntimeTestsBase, IDisp
     {
         await ResetAndSeedAsync();
 
-        var hook = new RecordingHook<DocumentEntity>("h", [], e => e.DocumentId)
+        var hook = new RecordingHook<DocumentEntity>([], e => e.DocumentId, "h")
         {
             AfterAction = async (_, _, context) =>
             {
@@ -174,7 +162,7 @@ public sealed class SaveHookEfCoreRuntimeTests : SaveHookRuntimeTestsBase, IDisp
     {
         await ResetAndSeedAsync();
 
-        var hook = new RecordingHook<DocumentEntity>("h", [], e => e.DocumentId)
+        var hook = new RecordingHook<DocumentEntity>([], e => e.DocumentId, "h")
         {
             AfterAction = async (entity, _, context) =>
                 await context.WriteBinaryColumnAsync(

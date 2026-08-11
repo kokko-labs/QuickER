@@ -13,7 +13,8 @@ QuickER の「リモートサービス生成（GenerateRemoteServices）」で E
   （`EntityGraphSaver.AcceptChanges`）と同じ意味論で確定します
 - **名前付きクエリのリモート転送** — 射影 DTO（`OrderSummaryRow`）が JSON でクライアントまで届きます
 - **`SaveConflictException` の型復元** — サーバー側の楽観的競合が HTTP 409＋構造化 JSON を経て、
-  クライアント側でも同じ例外型で catch できます（直結時とまったく同じ `catch` が書けます）
+  クライアント側でも同じ例外型で catch できます（直結時とまったく同じ `catch` が書けます）。
+  詳細（`Reason` / `EntityTypeName` / `Key`）もそのまま復元されます
 
 ## 構成
 
@@ -54,7 +55,8 @@ dotnet run --project samples/ec-order-remote/EcOrderRemote.Client
 ```
 
 クライアントは各シナリオの結果を英語で表示し、すべて成功すると終了コード 0 で終わります。期待値と異なる場合は
-例外で終了（終了コード非 0）します。サーバーの起動待ちは約 15 秒までリトライします。
+例外で終了（終了コード非 0）します。サーバーの起動待ちは、生成された liveness エンドポイント
+（`GET /quicker/health`）を `PingAsync` でポーリングして約 15 秒までリトライします。
 
 ポートを変える場合は、サーバーとクライアントの両方に第 1 引数として同じベース URL を渡します
 （例 `http://127.0.0.1:5299`）。

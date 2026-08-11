@@ -41,8 +41,7 @@ public abstract class GeneratedRuntimeParityTestsBase(SqlServerContainerFixture 
     /// <summary>フィクスチャ図の SQL Server 方言 DDL でテーブルを作成する（各テスト冒頭で呼ぶ）</summary>
     protected async Task CreateSchemaAsync()
     {
-        var ddl = new SqlServerDdlGenerator().Build(GeneratedFixtureDefinition.Build());
-        await Fixture.ExecuteAsync(ddl, Ct);
+        await Fixture.ApplyDdlAsync(GeneratedFixtureDefinition.Build(), Ct);
     }
 
     /// <summary>各テスト冒頭のセットアップ（スキーマ初期化＋作成）をまとめる</summary>

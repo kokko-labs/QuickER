@@ -5,7 +5,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
 using Microsoft.Extensions.DependencyInjection;
-using QuickER.Sqlite;
 using QuickER.Tests.GeneratedQueryFixture;
 using QuickER.Tests.Integration;
 using Xunit;
@@ -38,8 +37,7 @@ public sealed class EditModelValidateUniqueRuntimeTests : IAsyncLifetime
     /// <summary>スキーマを作成し、注文 10（顧客 1・100・apple pie）を投入する</summary>
     public async ValueTask InitializeAsync()
     {
-        var ddl = new SqliteDdlGenerator().Build(QueryFixtureDefinition.Build());
-        await _db.ApplyDdlAsync(ddl, Ct);
+        await _db.ApplyDdlAsync(QueryFixtureDefinition.Build(), Ct);
 
         _provider = new ServiceCollection()
             .AddGeneratedSqliteRepositories(_db.ReadWriteCreateConnectionString)

@@ -45,10 +45,7 @@ public sealed class SaveHookSqlServerRuntimeTests(SqlServerContainerFixture fixt
         Assert.SkipUnless(_fixture.IsAvailable, _fixture.UnavailableReason);
 
         await _fixture.ResetSchemaAsync(Ct);
-        await _fixture.ExecuteAsync(
-            new SqlServerDdlGenerator().Build(SqlServerBinaryFixtureDefinition.Build()),
-            Ct
-        );
+        await _fixture.ApplyDdlAsync(SqlServerBinaryFixtureDefinition.Build(), Ct);
         await _fixture.ExecuteAsync(
             "CREATE TABLE audit (audit_id INT IDENTITY(1,1) PRIMARY KEY, note NVARCHAR(200) NOT NULL);",
             Ct
@@ -78,14 +75,7 @@ public sealed class SaveHookSqlServerRuntimeTests(SqlServerContainerFixture fixt
 
         foreach (var hook in hooks)
         {
-            if (hook is ISaveHook<DocumentEntity> documentHook)
-            {
-                services.AddSingleton(documentHook);
-            }
-            else if (hook is ISaveHook<DocumentNoteEntity> noteHook)
-            {
-                services.AddSingleton(noteHook);
-            }
+            services.AddSaveHook(hook);
         }
 
         var provider = services.BuildServiceProvider();

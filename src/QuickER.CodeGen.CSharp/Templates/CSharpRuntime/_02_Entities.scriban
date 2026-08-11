@@ -52,7 +52,71 @@ public abstract partial class EntityBase
     protected virtual void CustomizeDisplayName(ref string displayName) { }
 
     /// <summary>Marks this entity for insert (use when a directly constructed entity should be saved).</summary>
-    public void MarkAdded() => RowState = RowState.Added;
+    /// <param name="includeChildren">
+    /// <c>true</c> to mark the cascade children as well (the child-direction navigations a graph save follows, all the way
+    /// down), so a freshly built aggregate can be marked in a single call. The default <c>false</c> marks this entity only.
+    /// </param>
+    /// <remarks>
+    /// Only MarkAdded offers the cascading form. Marking a whole graph for update is ambiguous (the save would rewrite every
+    /// row, including the ones nothing touched), and marking a whole graph for removal is what the graph save's
+    /// <c>cascadeDelete</c> option already does from the root alone.
+    /// </remarks>
+    public void MarkAdded(bool includeChildren = false)
+    {
+        RowState = RowState.Added;
+
+        if (!includeChildren)
+        {
+            return;
+        }
+
+        // Cascade navigations point at children only (parent references are excluded), so the traversal is a tree and terminates
+        foreach (var child in EnumerateCascadeChildren())
+        {
+            child.MarkAdded(true);
+        }
+    }
+
+    /// <summary>Caches the cascade navigation properties per type (the child-direction navigations a graph save follows).</summary>
+    private static readonly ConcurrentDictionary<Type, PropertyInfo[]> _cascadeNavigationCache = new();
+
+    /// <summary>Returns the cascade navigation properties of the given type (scanned once per type and cached).</summary>
+    private static PropertyInfo[] GetCascadeNavigations(Type type) =>
+        _cascadeNavigationCache.GetOrAdd(
+            type,
+            static resolvedType =>
+                resolvedType
+                    .GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                    .Where(property =>
+                        property.GetCustomAttribute<NavigationReferenceAttribute>()
+                            is { Cascade: true }
+                    )
+                    .ToArray()
+        );
+
+    /// <summary>Enumerates the children reachable through cascade navigations (single references and collections alike; nulls are skipped).</summary>
+    private IEnumerable<EntityBase> EnumerateCascadeChildren()
+    {
+        foreach (var navigation in GetCascadeNavigations(GetType()))
+        {
+            var value = navigation.GetValue(this);
+
+            if (value is EntityBase child)
+            {
+                yield return child;
+            }
+            else if (value is IEnumerable<EntityBase> children)
+            {
+                foreach (var item in children)
+                {
+                    if (item is not null)
+                    {
+                        yield return item;
+                    }
+                }
+            }
+        }
+    }
 
     /// <summary>Marks this entity for removal (it stays in the collection but is deleted on save).</summary>
     public void MarkRemoved() => RowState = RowState.Removed;

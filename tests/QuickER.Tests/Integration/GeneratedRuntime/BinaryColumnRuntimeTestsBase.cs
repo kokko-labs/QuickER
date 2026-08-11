@@ -3,8 +3,6 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
-using Microsoft.Data.Sqlite;
-using QuickER.Sqlite;
 using QuickER.Tests.GeneratedBinaryFixture;
 using QuickER.Tests.Integration;
 using Xunit;
@@ -60,18 +58,8 @@ public abstract class BinaryColumnRuntimeTestsBase : IDisposable
     /// </remarks>
     protected async Task ResetAndSeedAsync()
     {
-        await using (var conn = new SqliteConnection(ConnectionString))
-        {
-            await conn.OpenAsync(Ct);
-
-            await using var drop = conn.CreateCommand();
-            drop.CommandText =
-                "DROP TABLE IF EXISTS \"document_notes\"; DROP TABLE IF EXISTS \"documents\";";
-            await drop.ExecuteNonQueryAsync(Ct);
-        }
-
-        var ddl = new SqliteDdlGenerator().Build(BinaryFixtureDefinition.Build());
-        await _db.ApplyDdlAsync(ddl, Ct);
+        await _db.ResetSchemaAsync(Ct);
+        await _db.ApplyDdlAsync(BinaryFixtureDefinition.Build(), Ct);
 
         var documents = CreateDocumentRepository();
         var notes = CreateDocumentNoteRepository();

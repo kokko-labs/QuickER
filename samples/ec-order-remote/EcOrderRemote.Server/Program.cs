@@ -24,12 +24,21 @@ var connectionString = new SqliteConnectionStringBuilder
 // Delete any existing DB file and recreate it from the DDL so the server starts idempotently.
 if (File.Exists(dbFilePath))
 {
-    // The connection pool may hold the file open and block deletion, so release the pools first.
-    SqliteConnection.ClearAllPools();
+    // The connection pool may hold the file open and block deletion, so release the pool for this
+    // connection string first (ClearAllPools would also drop pools this sample does not own).
+    using (var pooled = new SqliteConnection(connectionString))
+    {
+        SqliteConnection.ClearPool(pooled);
+    }
+
     File.Delete(dbFilePath);
 }
 
-await CreateSchemaAsync(connectionString);
+// Create the schema from the generated DDL in a single call. The bootstrap opens its connection through the
+// generated SqlConnectionFactory, which turns foreign key enforcement on by default (SQLite leaves it off
+// unless the connection asks for it), so the constraints in the DDL are actually enforced.
+var ddl = await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "EcOrderRemote.sql"));
+await SqliteSchemaBootstrap.ApplyDdlAsync(connectionString, ddl);
 Console.WriteLine(
     "[Server] Created the SQLite file DB (ec-order-remote.db) from the EcOrderRemote.sql DDL."
 );
@@ -46,27 +55,5 @@ var app = builder.Build();
 // Expose the generated remote endpoints (POST /quicker/{entity}/{operation}).
 app.MapGeneratedRemoteEndpoints();
 
-Console.WriteLine($"[Server] Listening on {url}/quicker. Press Ctrl+C to exit.");
+Console.WriteLine($"[Server] Listening on {url}{RemotePaths.DefaultPrefix}. Press Ctrl+C to exit.");
 app.Run();
-
-// Read the DDL (EcOrderRemote.sql) and apply it to the SQLite file DB to create the schema.
-static async Task CreateSchemaAsync(string connectionString)
-{
-    var ddlPath = Path.Combine(AppContext.BaseDirectory, "EcOrderRemote.sql");
-    var ddl = await File.ReadAllTextAsync(ddlPath);
-
-    await using var conn = new SqliteConnection(connectionString);
-    await conn.OpenAsync();
-
-    // Enable the foreign key constraints in the generated DDL (SQLite disables FK enforcement by default).
-    await using (var pragma = conn.CreateCommand())
-    {
-        pragma.CommandText = "PRAGMA foreign_keys = ON;";
-        await pragma.ExecuteNonQueryAsync();
-    }
-
-    // Microsoft.Data.Sqlite can execute multiple semicolon-separated statements in a single ExecuteNonQuery.
-    await using var command = conn.CreateCommand();
-    command.CommandText = ddl;
-    await command.ExecuteNonQueryAsync();
-}

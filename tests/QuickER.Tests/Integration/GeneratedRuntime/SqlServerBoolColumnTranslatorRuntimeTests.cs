@@ -44,10 +44,7 @@ public sealed class SqlServerBoolColumnTranslatorRuntimeTests(SqlServerContainer
         Assert.SkipUnless(_fixture.IsAvailable, _fixture.UnavailableReason);
 
         await _fixture.ResetSchemaAsync(Ct);
-        await _fixture.ExecuteAsync(
-            new SqlServerDdlGenerator().Build(SqlServerBinaryFixtureDefinition.Build()),
-            Ct
-        );
+        await _fixture.ApplyDdlAsync(SqlServerBinaryFixtureDefinition.Build(), Ct);
 
         _provider = new ServiceCollection()
             .AddGeneratedSqlServerRepositories(_fixture.ConnectionString)

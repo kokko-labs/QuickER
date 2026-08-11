@@ -5,7 +5,6 @@ using System.Threading.Tasks;
 using AwesomeAssertions;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
-using QuickER.Sqlite;
 using QuickER.Tests.GeneratedBinaryFixture;
 using QuickER.Tests.Integration;
 using Xunit;
@@ -44,31 +43,15 @@ public sealed class SaveHookAdoRuntimeTests : SaveHookRuntimeTestsBase, IDisposa
     private ServiceProvider BuildProvider(params object[] hooks)
     {
         var services = new ServiceCollection().AddGeneratedSqliteRepositories(ConnectionString);
-        RegisterHooks(services, hooks);
+
+        foreach (var hook in hooks)
+        {
+            services.AddSaveHook(hook);
+        }
 
         var provider = services.BuildServiceProvider();
         _providers.Add(provider);
         return provider;
-    }
-
-    /// <summary>フック群を対象エンティティ型ごとに DI へ登録する（派生で共有する登録規約）</summary>
-    internal static void RegisterHooks(IServiceCollection services, object[] hooks)
-    {
-        foreach (var hook in hooks)
-        {
-            if (hook is ISaveHook<DocumentEntity> documentHook)
-            {
-                services.AddSingleton(documentHook);
-            }
-            else if (hook is ISaveHook<DocumentNoteEntity> noteHook)
-            {
-                services.AddSingleton(noteHook);
-            }
-            else
-            {
-                throw new InvalidOperationException($"未知のフック型: {hook.GetType()}");
-            }
-        }
     }
 
     protected override IDocumentRepository Documents(params object[] hooks) =>
@@ -80,29 +63,14 @@ public sealed class SaveHookAdoRuntimeTests : SaveHookRuntimeTestsBase, IDisposa
     /// <summary>スキーマ（＋監査テーブル）を作成し、共通シードを投入する（フックなしのプロバイダ経由）</summary>
     protected override async Task ResetAndSeedAsync()
     {
-        await using (var conn = new SqliteConnection(ConnectionString))
-        {
-            await conn.OpenAsync(Ct);
-
-            await using var drop = conn.CreateCommand();
-            drop.CommandText =
-                "DROP TABLE IF EXISTS \"document_notes\"; DROP TABLE IF EXISTS \"documents\"; DROP TABLE IF EXISTS \"audit\";";
-            await drop.ExecuteNonQueryAsync(Ct);
-        }
-
-        var ddl = new SqliteDdlGenerator().Build(BinaryFixtureDefinition.Build());
-        await _db.ApplyDdlAsync(ddl, Ct);
+        await _db.ResetSchemaAsync(Ct);
+        await _db.ApplyDdlAsync(BinaryFixtureDefinition.Build(), Ct);
 
         // After フックの生 SQL（ExecuteSqlAsync）のアトミック性を検証するための監査テーブル
-        await using (var conn = new SqliteConnection(ConnectionString))
-        {
-            await conn.OpenAsync(Ct);
-
-            await using var create = conn.CreateCommand();
-            create.CommandText =
-                "CREATE TABLE \"audit\" (\"audit_id\" INTEGER PRIMARY KEY AUTOINCREMENT, \"note\" TEXT NOT NULL);";
-            await create.ExecuteNonQueryAsync(Ct);
-        }
+        await _db.ApplyDdlAsync(
+            "CREATE TABLE \"audit\" (\"audit_id\" INTEGER PRIMARY KEY AUTOINCREMENT, \"note\" TEXT NOT NULL);",
+            Ct
+        );
 
         var documents = Documents();
         var notes = Notes();
@@ -126,7 +94,7 @@ public sealed class SaveHookAdoRuntimeTests : SaveHookRuntimeTestsBase, IDisposa
     {
         await ResetAndSeedAsync();
 
-        var hook = new RecordingHook<DocumentEntity>("h", [], _ => 0)
+        var hook = new RecordingHook<DocumentEntity>([], _ => 0, "h")
         {
             // 親（新規）の挿入をスキップする
             BeforePredicate = (_, op) => op != SaveOperation.Insert,
@@ -174,7 +142,7 @@ public sealed class SaveHookAdoRuntimeTests : SaveHookRuntimeTestsBase, IDisposa
             new Random(8).NextBytes(thumbBytes);
             await File.WriteAllBytesAsync(thumbPath, thumbBytes, Ct);
 
-            var hook = new RecordingHook<DocumentEntity>("h", [], e => e.DocumentId)
+            var hook = new RecordingHook<DocumentEntity>([], e => e.DocumentId, "h")
             {
                 AfterAction = async (entity, _, context) =>
                 {
@@ -224,7 +192,7 @@ public sealed class SaveHookAdoRuntimeTests : SaveHookRuntimeTestsBase, IDisposa
     {
         await ResetAndSeedAsync();
 
-        var hook = new RecordingHook<DocumentEntity>("h", [], e => e.DocumentId)
+        var hook = new RecordingHook<DocumentEntity>([], e => e.DocumentId, "h")
         {
             AfterAction = async (entity, _, context) =>
             {

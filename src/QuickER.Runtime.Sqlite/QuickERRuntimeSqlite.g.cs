@@ -32,10 +32,83 @@ public interface ISqlConnectionFactory
 }
 
 /// <summary>The default implementation that creates SQL connections from a connection string.</summary>
-public sealed class SqlConnectionFactory(string connectionString) : ISqlConnectionFactory
+/// <remarks>
+/// <para>
+/// Foreign key enforcement is turned on by default. SQLite leaves it off unless a connection asks for it, so the
+/// foreign keys the generated DDL declares would otherwise be silently unenforced: a child row could reference a
+/// parent that does not exist, and deleting a parent would leave its children behind. Because the schema declares
+/// those constraints, enforcing them is the correct default.
+/// </para>
+/// <para>
+/// An explicit <c>Foreign Keys</c> keyword in the connection string is honored exactly as written - including
+/// <c>Foreign Keys=False</c>, which keeps the provider's own behavior.
+/// </para>
+/// </remarks>
+public sealed class SqlConnectionFactory : ISqlConnectionFactory
 {
+    /// <summary>The connection string to open, with the foreign-key default already resolved.</summary>
+    private readonly string _connectionString;
+
+    /// <summary>Initializes a new instance from a connection string.</summary>
+    /// <remarks>The connection string is parsed once here, not on every <see cref="CreateConnection"/> call.</remarks>
+    /// <param name="connectionString">The connection string to open connections with.</param>
+    public SqlConnectionFactory(string connectionString)
+    {
+        _connectionString = ApplyForeignKeysDefault(connectionString);
+    }
+
     /// <summary>Creates a new SQL connection.</summary>
-    public SqliteConnection CreateConnection() => new(connectionString);
+    public SqliteConnection CreateConnection() => new(_connectionString);
+
+    /// <summary>Adds <c>Foreign Keys=True</c> when the keyword is absent, and returns the connection string unchanged when it is present.</summary>
+    /// <remarks><c>SqliteConnectionStringBuilder.ForeignKeys</c> is a <c>bool?</c> whose <c>null</c> means "not specified", which is what makes "absent" distinguishable from an explicit <c>False</c>.</remarks>
+    private static string ApplyForeignKeysDefault(string connectionString)
+    {
+        var builder = new SqliteConnectionStringBuilder(connectionString);
+
+        if (builder.ForeignKeys is not null)
+        {
+            return connectionString;
+        }
+
+        builder.ForeignKeys = true;
+        return builder.ConnectionString;
+    }
+}
+
+/// <summary>Creates a schema by running a DDL script against a SQLite database.</summary>
+/// <remarks>
+/// A bootstrap convenience for development, tests, and samples - it turns the DDL QuickER generates into a usable
+/// database in one call. It is not schema management: it knows nothing about versions, about what already exists,
+/// or about rolling back, so anything that outlives a throwaway database wants a migration tool instead.
+/// </remarks>
+public static class SqliteSchemaBootstrap
+{
+    /// <summary>Opens a connection and runs the whole DDL script.</summary>
+    /// <remarks>
+    /// The script is sent as a single command: the SQLite provider executes every semicolon-separated statement of one
+    /// command text. The connection is opened through <see cref="SqlConnectionFactory"/>, so foreign key enforcement
+    /// follows the same rule as the repositories (on unless the connection string says otherwise).
+    /// </remarks>
+    /// <param name="connectionString">The connection string of the database to create the schema in.</param>
+    /// <param name="ddl">The DDL script to run.</param>
+    /// <param name="cancellationToken">A token that cancels the operation.</param>
+    public static async Task ApplyDdlAsync(
+        string connectionString,
+        string ddl,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
+        ArgumentException.ThrowIfNullOrWhiteSpace(ddl);
+
+        await using var connection = new SqlConnectionFactory(connectionString).CreateConnection();
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = ddl;
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
 }
 
 /// <summary>The default implementation of the entity-agnostic raw SQL executor (the single implementation of binding, scalar conversion, and projection mapping).</summary>

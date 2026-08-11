@@ -97,6 +97,34 @@ public class SqliteRepositoryDialectTests
         code.Should().NotContain("SqlServerRepository");
     }
 
+    /// <summary>
+    /// SQLite の接続ファクトリが外部キー強制を既定 ON にし（未指定時のみ補う）、DDL 適用ヘルパーを併せて出力することを検証する
+    /// </summary>
+    /// <remarks>
+    /// Microsoft.Data.Sqlite の既定は FK 強制 OFF のため、生成 DDL の FK 制約が黙って無効になる。
+    /// 明示指定（true/false どちら）も尊重するため、判定は「<c>ForeignKeys</c> が null（未指定）か」で行う。
+    /// </remarks>
+    [Fact]
+    public void SqliteDialect_ShouldEnableForeignKeysByDefaultAndEmitSchemaBootstrap()
+    {
+        var code = GenerateSqlite();
+
+        // 未指定のときだけ true を補う（明示指定はそのまま返す＝尊重）
+        code.Should()
+            .Contain("private static string ApplyForeignKeysDefault(string connectionString)");
+        code.Should().Contain("if (builder.ForeignKeys is not null)");
+        code.Should().Contain("builder.ForeignKeys = true;");
+        // 解釈はコンストラクタで 1 回だけ（接続生成ごとに再パースしない）
+        code.Should().Contain("_connectionString = ApplyForeignKeysDefault(connectionString);");
+        code.Should()
+            .Contain("public SqliteConnection CreateConnection() => new(_connectionString);");
+
+        // DDL 適用ヘルパー（開発・テスト・サンプル向けブートストラップ）
+        code.Should().Contain("public static class SqliteSchemaBootstrap");
+        code.Should().Contain("public static async Task ApplyDdlAsync(");
+        code.Should().NotContain("public static class SqlServerSchemaBootstrap");
+    }
+
     /// <summary>SQL Server 方言（既定）の生成物に SQLite 依存が漏れないことを検証する（逆方向の排他）</summary>
     [Fact]
     public void SqlServerDialect_ShouldNotEmitSqliteDependencies()
@@ -122,6 +150,9 @@ public class SqliteRepositoryDialectTests
         // 楽観排他の共有部品は SQL Server 方言側に出る（rowversion 列の有無に依らず固定 infra として存在する）
         code.Should().Contain("RowVersionConcurrency");
         code.Should().Contain("OUTPUT INSERTED.");
+        // DDL 適用ヘルパーは方言対称に出る（SQL Server 版は接続文字列の補正を持たない素の実装）
+        code.Should().Contain("public static class SqlServerSchemaBootstrap");
+        code.Should().NotContain("ApplyForeignKeysDefault");
     }
 
     /// <summary>親（customers）1 対多 子（orders）の関係を持つ、Include 検証用の最小 ER 図</summary>

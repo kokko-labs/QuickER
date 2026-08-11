@@ -14,10 +14,12 @@ using Microsoft.Extensions.DependencyInjection;
 // The default is the same fixed port as the server.
 var baseUrl = args.FirstOrDefault() ?? "http://127.0.0.1:5210";
 
-// Register the generated HTTP client implementations with DI. baseAddress includes the server prefix (/quicker).
+// Register the generated HTTP client implementations with DI. baseAddress includes the server prefix, which is
+// the one MapGeneratedRemoteEndpoints was mapped under — RemotePaths.DefaultPrefix here, the constant both
+// sides read so the value is written down once.
 // Swap just this line for AddGeneratedSqliteRepositories (DB-direct) and the same calling code runs locally.
 using var provider = new ServiceCollection()
-    .AddGeneratedHttpRemoteRepositories($"{baseUrl}/quicker")
+    .AddGeneratedHttpRemoteRepositories($"{baseUrl}{RemotePaths.DefaultPrefix}")
     .BuildServiceProvider();
 
 var customers = provider.GetRequiredService<ICustomerRemoteRepository>();
@@ -25,7 +27,8 @@ var products = provider.GetRequiredService<IProductRemoteRepository>();
 var orders = provider.GetRequiredService<IOrderRemoteRepository>();
 
 // Wait for the server to come up (it starts in another process, so establishing a connection can take a few
-// hundred ms). Retry up to 30 times x 500ms, absorbing connection failures (HttpRequestException) meanwhile.
+// hundred ms). PingAsync polls the liveness endpoint (GET {prefix}/health) and reports "not reachable" as
+// false instead of throwing, which is exactly what a wait loop needs.
 await WaitForServerAsync(customers);
 
 // ---- 1. Register the seed data the later scenarios refer to (1 customer, 2 products) ----
@@ -67,30 +70,31 @@ var order1000 = new OrderEntity
     OrderedAt = new DateTime(2026, 7, 7, 13, 47, 9, DateTimeKind.Unspecified),
     Memo = "First order",
 };
-order1000.MarkAdded();
 
-var line1 = new OrderLineEntity
-{
-    OrderLineId = 5000,
-    OrderId = 1000,
-    ProductId = 100,
-    Quantity = 2,
-    UnitPrice = 980m,
-};
-line1.MarkAdded();
+order1000.OrderLines.Add(
+    new OrderLineEntity
+    {
+        OrderLineId = 5000,
+        OrderId = 1000,
+        ProductId = 100,
+        Quantity = 2,
+        UnitPrice = 980m,
+    }
+);
+order1000.OrderLines.Add(
+    new OrderLineEntity
+    {
+        OrderLineId = 5001,
+        OrderId = 1000,
+        ProductId = 101,
+        Quantity = 1,
+        UnitPrice = 1500m,
+    }
+);
 
-var line2 = new OrderLineEntity
-{
-    OrderLineId = 5001,
-    OrderId = 1000,
-    ProductId = 101,
-    Quantity = 1,
-    UnitPrice = 1500m,
-};
-line2.MarkAdded();
-
-order1000.OrderLines.Add(line1);
-order1000.OrderLines.Add(line2);
+// One call marks the whole freshly built aggregate: MarkAdded follows the cascade navigations a graph save
+// follows, so the order lines are marked as inserts too (build the graph first, then mark it).
+order1000.MarkAdded(includeChildren: true);
 
 var order1001 = new OrderEntity
 {
@@ -140,7 +144,8 @@ Console.WriteLine();
 // An update-save of a non-existent order (insertWhenUpdateMissing=false) becomes an optimistic conflict on the
 // server, which throws SaveConflictException. Via an HTTP 409 plus structured JSON it is restored on the client
 // as the same SaveConflictException — demonstrating that you can write exactly the same catch as in the
-// DB-direct case.
+// DB-direct case. The structured details (Reason / EntityTypeName / Key) survive the transport too, so a
+// reload-and-retry loop does not have to parse the message.
 var missing = new OrderEntity
 {
     OrderId = 9999,
@@ -150,45 +155,52 @@ var missing = new OrderEntity
 };
 missing.MarkUpdated();
 
-var conflictCaught = false;
+SaveConflictException? conflict = null;
 
 try
 {
     await orders.SaveAsync(missing);
 }
-catch (SaveConflictException)
+catch (SaveConflictException ex)
 {
     // The server-side exception type was restored across HTTP (the same catch as the DB-direct case).
-    conflictCaught = true;
+    conflict = ex;
 }
 
-Check(conflictCaught, true, "type restoration of SaveConflictException via HTTP 409");
+Check(conflict is not null, true, "type restoration of SaveConflictException via HTTP 409");
 Console.WriteLine(
-    "[4] Caught SaveConflictException over HTTP for an update-save of a non-existent order."
+    "[4] Caught SaveConflictException over HTTP for an update-save of a non-existent order:"
 );
+Console.WriteLine(
+    $"    Reason={conflict!.Reason} EntityType={conflict.EntityTypeName} Key={conflict.Key}"
+);
+Check(conflict.Reason, SaveConflictReason.NotFound, "conflict reason restored across HTTP");
+Check(conflict.EntityTypeName, nameof(OrderEntity), "conflict entity type restored across HTTP");
+Check(conflict.Key, "9999", "conflict key restored across HTTP");
 Console.WriteLine();
 
 Console.WriteLine("All scenarios succeeded.");
 return 0;
 
-// Try GetAllAsync until the server responds, absorbing connection failures (HttpRequestException) and
-// retrying. A small helper for waiting on the server started in another process (including CI).
+// Poll the liveness endpoint until the server answers. A small helper for waiting on the server started in
+// another process (including CI).
+// PingAsync lives on the generated HTTP client (HttpRemoteRepository), not on the remote interface — the
+// interface is the surface a DB-direct implementation shares, and liveness has no meaning there — so the
+// resolved instance is cast to its concrete type.
 static async Task WaitForServerAsync(ICustomerRemoteRepository customers)
 {
     const int maxAttempts = 30;
+    var client = (HttpCustomerRemoteRepository)customers;
 
     for (var attempt = 1; attempt <= maxAttempts; attempt++)
     {
-        try
+        if (await client.PingAsync())
         {
-            await customers.GetAllAsync();
             return;
         }
-        catch (HttpRequestException)
-        {
-            // The server is not accepting connections yet; wait a bit and retry.
-            await Task.Delay(500);
-        }
+
+        // The server is not accepting connections yet; wait a bit and retry.
+        await Task.Delay(500);
     }
 
     throw new InvalidOperationException(

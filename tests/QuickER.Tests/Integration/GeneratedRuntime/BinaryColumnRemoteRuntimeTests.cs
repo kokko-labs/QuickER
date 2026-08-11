@@ -1,6 +1,5 @@
 using System;
 using System.IO;
-using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
@@ -8,11 +7,7 @@ using System.Net.Http.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
-using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
-using QuickER.Sqlite;
 using QuickER.Tests.GeneratedBinaryFixture;
 using QuickER.Tests.Integration;
 using Xunit;
@@ -34,7 +29,7 @@ public sealed class BinaryColumnRemoteRuntimeTests : IAsyncLifetime
     private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;
 
     private readonly SqliteTempDatabase _db = SqliteTempDatabase.Create();
-    private WebApplication? _app;
+    private InProcessRemoteServer? _server;
     private ServiceProvider? _clientProvider;
 
     private static readonly byte[] Doc1Payload = [1, 2, 3, 4];
@@ -43,21 +38,17 @@ public sealed class BinaryColumnRemoteRuntimeTests : IAsyncLifetime
     /// <summary>スキーマ作成 → Kestrel 起動（空きポート・サーバー実体はQuickER の SqliteRepository）→ HTTP クライアント DI 構築</summary>
     public async ValueTask InitializeAsync()
     {
-        var ddl = new SqliteDdlGenerator().Build(BinaryFixtureDefinition.Build());
-        await _db.ApplyDdlAsync(ddl, Ct);
+        await _db.ApplyDdlAsync(BinaryFixtureDefinition.Build(), Ct);
 
-        var builder = WebApplication.CreateBuilder();
-        builder.Logging.ClearProviders();
-        builder.WebHost.UseUrls("http://127.0.0.1:0");
-        builder.Services.AddGeneratedSqliteRepositories(_db.ReadWriteCreateConnectionString);
+        _server = await InProcessRemoteServer.StartAsync(
+            services =>
+                services.AddGeneratedSqliteRepositories(_db.ReadWriteCreateConnectionString),
+            app => app.MapGeneratedRemoteEndpoints(),
+            Ct
+        );
 
-        _app = builder.Build();
-        _app.MapGeneratedRemoteEndpoints();
-        await _app.StartAsync(Ct);
-
-        var baseUrl = _app.Urls.First();
         _clientProvider = new ServiceCollection()
-            .AddGeneratedHttpRemoteRepositories($"{baseUrl}/quicker")
+            .AddGeneratedHttpRemoteRepositories(_server.BaseAddress(RemotePaths.DefaultPrefix))
             .BuildServiceProvider();
     }
 
@@ -104,7 +95,7 @@ public sealed class BinaryColumnRemoteRuntimeTests : IAsyncLifetime
         );
 
         // サーバーを止めても例外になる＝HTTP を投げる前にクライアント側ガードで弾かれていることを示す
-        await _app!.StopAsync(Ct);
+        await _server!.StopAsync(Ct);
 
         var doc = new DocumentEntity
         {
@@ -282,7 +273,7 @@ public sealed class BinaryColumnRemoteRuntimeTests : IAsyncLifetime
         await SeedAsync(1, null, Doc1Thumb);
 
         // サーバーを止めても例外になる＝HTTP を投げる前にクライアント側の長さ検証で弾かれている
-        await _app!.StopAsync(Ct);
+        await _server!.StopAsync(Ct);
 
         var act = () =>
             Documents.WritePayloadAsync(1, new NonSeekableStream([1, 2, 3]), cancellationToken: Ct);
@@ -385,7 +376,7 @@ public sealed class BinaryColumnRemoteRuntimeTests : IAsyncLifetime
     {
         await SeedAsync(1, null, Doc1Thumb);
 
-        var baseUrl = _app!.Urls.First();
+        var baseUrl = _server!.BaseUrl;
 
         using var raw = new HttpClient();
         using var content = new StreamContent(new NonSeekableStream([1, 2, 3]))
@@ -429,7 +420,7 @@ public sealed class BinaryColumnRemoteRuntimeTests : IAsyncLifetime
     {
         await SeedAsync(1, Doc1Payload, Doc1Thumb);
 
-        var baseUrl = _app!.Urls.First();
+        var baseUrl = _server!.BaseUrl;
         using var raw = new HttpClient();
 
         using var getResponse = await raw.GetAsync($"{baseUrl}/quicker/Document/Payload", Ct);
@@ -452,7 +443,7 @@ public sealed class BinaryColumnRemoteRuntimeTests : IAsyncLifetime
     {
         await SeedAsync(1, Doc1Payload, Doc1Thumb);
 
-        var baseUrl = _app!.Urls.First();
+        var baseUrl = _server!.BaseUrl;
         using var raw = new HttpClient();
 
         // 主キーは int。JSON として復元できない値はリクエスト解釈の失敗として 400 になる
@@ -516,9 +507,9 @@ public sealed class BinaryColumnRemoteRuntimeTests : IAsyncLifetime
     {
         _clientProvider?.Dispose();
 
-        if (_app is not null)
+        if (_server is not null)
         {
-            await _app.DisposeAsync();
+            await _server.DisposeAsync();
         }
 
         _db.Dispose();

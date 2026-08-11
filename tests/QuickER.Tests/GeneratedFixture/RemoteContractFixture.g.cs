@@ -1221,7 +1221,71 @@ public abstract partial class EntityBase
     protected virtual void CustomizeDisplayName(ref string displayName) { }
 
     /// <summary>Marks this entity for insert (use when a directly constructed entity should be saved).</summary>
-    public void MarkAdded() => RowState = RowState.Added;
+    /// <param name="includeChildren">
+    /// <c>true</c> to mark the cascade children as well (the child-direction navigations a graph save follows, all the way
+    /// down), so a freshly built aggregate can be marked in a single call. The default <c>false</c> marks this entity only.
+    /// </param>
+    /// <remarks>
+    /// Only MarkAdded offers the cascading form. Marking a whole graph for update is ambiguous (the save would rewrite every
+    /// row, including the ones nothing touched), and marking a whole graph for removal is what the graph save's
+    /// <c>cascadeDelete</c> option already does from the root alone.
+    /// </remarks>
+    public void MarkAdded(bool includeChildren = false)
+    {
+        RowState = RowState.Added;
+
+        if (!includeChildren)
+        {
+            return;
+        }
+
+        // Cascade navigations point at children only (parent references are excluded), so the traversal is a tree and terminates
+        foreach (var child in EnumerateCascadeChildren())
+        {
+            child.MarkAdded(true);
+        }
+    }
+
+    /// <summary>Caches the cascade navigation properties per type (the child-direction navigations a graph save follows).</summary>
+    private static readonly ConcurrentDictionary<Type, PropertyInfo[]> _cascadeNavigationCache = new();
+
+    /// <summary>Returns the cascade navigation properties of the given type (scanned once per type and cached).</summary>
+    private static PropertyInfo[] GetCascadeNavigations(Type type) =>
+        _cascadeNavigationCache.GetOrAdd(
+            type,
+            static resolvedType =>
+                resolvedType
+                    .GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                    .Where(property =>
+                        property.GetCustomAttribute<NavigationReferenceAttribute>()
+                            is { Cascade: true }
+                    )
+                    .ToArray()
+        );
+
+    /// <summary>Enumerates the children reachable through cascade navigations (single references and collections alike; nulls are skipped).</summary>
+    private IEnumerable<EntityBase> EnumerateCascadeChildren()
+    {
+        foreach (var navigation in GetCascadeNavigations(GetType()))
+        {
+            var value = navigation.GetValue(this);
+
+            if (value is EntityBase child)
+            {
+                yield return child;
+            }
+            else if (value is IEnumerable<EntityBase> children)
+            {
+                foreach (var item in children)
+                {
+                    if (item is not null)
+                    {
+                        yield return item;
+                    }
+                }
+            }
+        }
+    }
 
     /// <summary>Marks this entity for removal (it stays in the collection but is deleted on save).</summary>
     public void MarkRemoved() => RowState = RowState.Removed;
@@ -4593,6 +4657,48 @@ internal sealed class ServiceProviderSaveHookRegistry(IServiceProvider servicePr
     }
 }
 
+/// <summary>An <see cref="ISaveHookRegistry"/> built from hooks added explicitly, for use without a DI container.</summary>
+/// <remarks>
+/// The generated repositories take an <see cref="ISaveHookRegistry"/> as a constructor argument, so a repository created
+/// with <c>new</c> can be given its hooks without standing up a service provider:
+/// <c>new {Entity}Repository(connectionFactory, new SaveHookRegistry().Add(hook))</c>. Hooks run in the order they
+/// were added, exactly as with the DI-backed <see cref="ServiceProviderSaveHookRegistry"/>. Building the registry is not
+/// thread-safe (add every hook before handing it to a repository); resolution afterwards is read-only.
+/// </remarks>
+internal sealed class SaveHookRegistry : ISaveHookRegistry
+{
+    // The value is the List<ISaveHook<TEntity>> for the key type. Add is generic, so the typed list and its invoker are
+    // built without reflection; only the storage is type-erased
+    private readonly Dictionary<Type, object> _hooks = new();
+    private readonly Dictionary<Type, ISaveHookInvoker> _invokers = new();
+
+    /// <summary>Adds a hook for <typeparamref name="TEntity"/> and returns this registry so that calls can be chained.</summary>
+    /// <typeparam name="TEntity">The entity type the hook targets.</typeparam>
+    /// <param name="hook">The hook to add (hooks for the same type fire in the order they were added).</param>
+    public SaveHookRegistry Add<TEntity>(ISaveHook<TEntity> hook)
+        where TEntity : EntityBase
+    {
+        ArgumentNullException.ThrowIfNull(hook);
+
+        if (!_hooks.TryGetValue(typeof(TEntity), out var registered))
+        {
+            registered = new List<ISaveHook<TEntity>>();
+            _hooks[typeof(TEntity)] = registered;
+        }
+
+        var hooks = (List<ISaveHook<TEntity>>)registered;
+        hooks.Add(hook);
+
+        // Rebuild the invoker so that a hook added after the registry was already used still takes effect
+        _invokers[typeof(TEntity)] = new SaveHookInvoker<TEntity>(hooks);
+        return this;
+    }
+
+    /// <summary>Returns the invoker surface for the given type (<c>null</c> when no hook was added for it).</summary>
+    public ISaveHookInvoker? GetInvoker(Type entityType) =>
+        _invokers.TryGetValue(entityType, out var invoker) ? invoker : null;
+}
+
 /// <summary>Typed implementation that invokes the hooks for <typeparamref name="TEntity"/> in registration order (the concrete <see cref="ISaveHookInvoker"/>).</summary>
 /// <typeparam name="TEntity">The entity type the hooks target.</typeparam>
 internal sealed class SaveHookInvoker<TEntity>(IEnumerable<ISaveHook<TEntity>> hooks)
@@ -4647,10 +4753,83 @@ public interface ISqlConnectionFactory
 }
 
 /// <summary>The default implementation that creates SQL connections from a connection string.</summary>
-public sealed class SqlConnectionFactory(string connectionString) : ISqlConnectionFactory
+/// <remarks>
+/// <para>
+/// Foreign key enforcement is turned on by default. SQLite leaves it off unless a connection asks for it, so the
+/// foreign keys the generated DDL declares would otherwise be silently unenforced: a child row could reference a
+/// parent that does not exist, and deleting a parent would leave its children behind. Because the schema declares
+/// those constraints, enforcing them is the correct default.
+/// </para>
+/// <para>
+/// An explicit <c>Foreign Keys</c> keyword in the connection string is honored exactly as written - including
+/// <c>Foreign Keys=False</c>, which keeps the provider's own behavior.
+/// </para>
+/// </remarks>
+public sealed class SqlConnectionFactory : ISqlConnectionFactory
 {
+    /// <summary>The connection string to open, with the foreign-key default already resolved.</summary>
+    private readonly string _connectionString;
+
+    /// <summary>Initializes a new instance from a connection string.</summary>
+    /// <remarks>The connection string is parsed once here, not on every <see cref="CreateConnection"/> call.</remarks>
+    /// <param name="connectionString">The connection string to open connections with.</param>
+    public SqlConnectionFactory(string connectionString)
+    {
+        _connectionString = ApplyForeignKeysDefault(connectionString);
+    }
+
     /// <summary>Creates a new SQL connection.</summary>
-    public SqliteConnection CreateConnection() => new(connectionString);
+    public SqliteConnection CreateConnection() => new(_connectionString);
+
+    /// <summary>Adds <c>Foreign Keys=True</c> when the keyword is absent, and returns the connection string unchanged when it is present.</summary>
+    /// <remarks><c>SqliteConnectionStringBuilder.ForeignKeys</c> is a <c>bool?</c> whose <c>null</c> means "not specified", which is what makes "absent" distinguishable from an explicit <c>False</c>.</remarks>
+    private static string ApplyForeignKeysDefault(string connectionString)
+    {
+        var builder = new SqliteConnectionStringBuilder(connectionString);
+
+        if (builder.ForeignKeys is not null)
+        {
+            return connectionString;
+        }
+
+        builder.ForeignKeys = true;
+        return builder.ConnectionString;
+    }
+}
+
+/// <summary>Creates a schema by running a DDL script against a SQLite database.</summary>
+/// <remarks>
+/// A bootstrap convenience for development, tests, and samples - it turns the DDL QuickER generates into a usable
+/// database in one call. It is not schema management: it knows nothing about versions, about what already exists,
+/// or about rolling back, so anything that outlives a throwaway database wants a migration tool instead.
+/// </remarks>
+public static class SqliteSchemaBootstrap
+{
+    /// <summary>Opens a connection and runs the whole DDL script.</summary>
+    /// <remarks>
+    /// The script is sent as a single command: the SQLite provider executes every semicolon-separated statement of one
+    /// command text. The connection is opened through <see cref="SqlConnectionFactory"/>, so foreign key enforcement
+    /// follows the same rule as the repositories (on unless the connection string says otherwise).
+    /// </remarks>
+    /// <param name="connectionString">The connection string of the database to create the schema in.</param>
+    /// <param name="ddl">The DDL script to run.</param>
+    /// <param name="cancellationToken">A token that cancels the operation.</param>
+    public static async Task ApplyDdlAsync(
+        string connectionString,
+        string ddl,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
+        ArgumentException.ThrowIfNullOrWhiteSpace(ddl);
+
+        await using var connection = new SqlConnectionFactory(connectionString).CreateConnection();
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = ddl;
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
 }
 
 /// <summary>Helper that unwraps values passed to SQL parameters into raw values (converts value objects to their underlying values, into types SqlClient can handle).</summary>
@@ -7312,19 +7491,68 @@ internal static class SqlExpressionTranslator
     }
 }
 
+/// <summary>Why a save was rejected as a conflict (the classification carried by <see cref="SaveConflictException"/>).</summary>
+public enum SaveConflictReason
+{
+    /// <summary>The reason was not reported (the exception was constructed directly rather than through a factory).</summary>
+    Unknown,
+
+    /// <summary>The row the save targeted no longer exists (it was deleted by someone else).</summary>
+    NotFound,
+
+    /// <summary>The row still exists, but its version moved on after the entity was read.</summary>
+    Modified,
+}
+
 /// <summary>Represents an exception indicating that a record could not be saved because another party changed it first (it was deleted, or its version moved on).</summary>
+/// <remarks>
+/// <see cref="Reason"/>, <see cref="EntityTypeName"/>, and <see cref="Key"/> carry the material a reload-and-retry loop
+/// needs, so the message does not have to be parsed. They are filled in by the factory methods; an instance built with the
+/// message-only constructor reports <see cref="SaveConflictReason.Unknown"/> and nulls. The same details survive the remote
+/// transport (HTTP 409), so a caller behaves identically against a direct and a remote repository.
+/// </remarks>
 public sealed class SaveConflictException : Exception
 {
-    /// <summary>Initializes a new instance with the specified message.</summary>
+    /// <summary>Initializes a new instance with the specified message (no details: the reason stays <see cref="SaveConflictReason.Unknown"/>).</summary>
     public SaveConflictException(string message)
         : base(message) { }
+
+    /// <summary>Initializes a new instance with the specified message and the details of the rejected save.</summary>
+    /// <param name="message">The message describing the conflict.</param>
+    /// <param name="reason">Why the save was rejected.</param>
+    /// <param name="entityTypeName">The CLR type name (<c>Type.Name</c>) of the entity whose save was rejected, or <c>null</c> when unknown.</param>
+    /// <param name="key">The primary key the save targeted, formatted for display, or <c>null</c> when unknown.</param>
+    public SaveConflictException(
+        string message,
+        SaveConflictReason reason,
+        string? entityTypeName,
+        string? key
+    )
+        : base(message)
+    {
+        Reason = reason;
+        EntityTypeName = entityTypeName;
+        Key = key;
+    }
+
+    /// <summary>Gets why the save was rejected (<see cref="SaveConflictReason.Unknown"/> when the exception carries no details).</summary>
+    public SaveConflictReason Reason { get; }
+
+    /// <summary>Gets the CLR type name of the entity whose save was rejected (<c>null</c> when unknown).</summary>
+    public string? EntityTypeName { get; }
+
+    /// <summary>Gets the primary key the rejected save targeted, formatted for display (<c>null</c> when unknown).</summary>
+    public string? Key { get; }
 
     /// <summary>Creates the conflict reported when the row an update targeted no longer exists.</summary>
     /// <param name="entityType">The type of the entity whose save was rejected.</param>
     /// <param name="key">The primary key value the save targeted.</param>
     public static SaveConflictException NotFound(Type entityType, object? key) =>
         new(
-            $"The record to update was not found ({entityType.Name}, key {key}). It may have been deleted by another user."
+            $"The record to update was not found ({entityType.Name}, key {key}). It may have been deleted by another user.",
+            SaveConflictReason.NotFound,
+            entityType.Name,
+            key?.ToString()
         );
 
     /// <summary>Creates the conflict reported when the row still exists but was changed by someone else after the entity was read.</summary>
@@ -7337,7 +7565,10 @@ public sealed class SaveConflictException : Exception
         string operation
     ) =>
         new(
-            $"The record to {operation} was modified by another user ({entityType.Name}, key {key}). Reload the entity and try again."
+            $"The record to {operation} was modified by another user ({entityType.Name}, key {key}). Reload the entity and try again.",
+            SaveConflictReason.Modified,
+            entityType.Name,
+            key?.ToString()
         );
 }
 
@@ -8728,6 +8959,50 @@ internal static class EntityGraphSaver
                 yield return child;
             }
         }
+    }
+}
+
+/// <summary>Extensions that register save hooks (<c>ISaveHook&lt;TEntity&gt;</c>) with the DI container.</summary>
+/// <remarks>
+/// The default registry (<c>ServiceProviderSaveHookRegistry</c>, registered by every <c>AddGenerated*Repositories</c>
+/// overload) resolves <c>IEnumerable&lt;ISaveHook&lt;TEntity&gt;&gt;</c>, so a hook must be registered under each closed
+/// interface it implements. This extension derives those from the instance itself, which keeps registration code free of
+/// per-entity-type branching (and free of the maintenance it needs whenever a table is added).
+/// </remarks>
+public static class SaveHookServiceCollectionExtensions
+{
+    /// <summary>Registers a save hook instance as a singleton under every <c>ISaveHook&lt;TEntity&gt;</c> it implements.</summary>
+    /// <param name="services">The service collection to register with.</param>
+    /// <param name="hook">The hook instance (one object may implement the hook interface for several entity types).</param>
+    /// <returns>The same service collection, so that calls can be chained.</returns>
+    /// <exception cref="ArgumentException">The object implements no <c>ISaveHook&lt;TEntity&gt;</c> interface, so registering it would silently do nothing.</exception>
+    public static IServiceCollection AddSaveHook(this IServiceCollection services, object hook)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(hook);
+
+        var registered = false;
+
+        foreach (var contract in hook.GetType().GetInterfaces())
+        {
+            if (
+                !contract.IsGenericType
+                || contract.GetGenericTypeDefinition() != typeof(ISaveHook<>)
+            )
+            {
+                continue;
+            }
+
+            services.AddSingleton(contract, hook);
+            registered = true;
+        }
+
+        return registered
+            ? services
+            : throw new ArgumentException(
+                $"The object of type '{hook.GetType().Name}' implements no ISaveHook<TEntity> interface.",
+                nameof(hook)
+            );
     }
 }
 

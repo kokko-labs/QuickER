@@ -16,7 +16,7 @@ the points where going over HTTP actually matters:
 - **Remote transfer of named queries** — a projection DTO (`OrderSummaryRow`) reaches the client as JSON
 - **Type restoration of `SaveConflictException`** — an optimistic conflict on the server is restored on the
   client as the same exception type via an HTTP 409 plus structured JSON (you can write exactly the same
-  `catch` as in the DB-direct case)
+  `catch` as in the DB-direct case), with its details (`Reason` / `EntityTypeName` / `Key`) intact
 
 ## Structure
 
@@ -58,8 +58,8 @@ dotnet run --project samples/ec-order-remote/EcOrderRemote.Client
 ```
 
 The client prints the result of each scenario and exits with code 0 when they all succeed. If a value
-differs from what is expected, it exits with an exception (a non-zero exit code). It retries for about
-15 seconds while waiting for the server to start.
+differs from what is expected, it exits with an exception (a non-zero exit code). It waits for the server to
+start by polling the generated liveness endpoint (`GET /quicker/health`) with `PingAsync` for about 15 seconds.
 
 To change the port, pass the same base URL as the first argument to both the server and the client
 (e.g. `http://127.0.0.1:5299`).

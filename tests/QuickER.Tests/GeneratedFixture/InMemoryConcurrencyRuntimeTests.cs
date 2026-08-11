@@ -34,12 +34,9 @@ namespace QuickER.Tests.GeneratedBinaryFixture;
 /// 未取得状態（null / 空配列）のまま扱う。
 /// </para>
 /// </remarks>
-public sealed class InMemoryConcurrencyRuntimeTests : IDisposable
+public sealed class InMemoryConcurrencyRuntimeTests
 {
     private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;
-
-    /// <summary>Save フック登録用に作った DI コンテナ（テスト終了時にまとめて破棄する）</summary>
-    private readonly List<ServiceProvider> _providers = [];
 
     /// <summary>データストアと文書リポジトリを生成し、文書 1 件（メモ 1 件つき）を投入する</summary>
     private static async Task<(
@@ -370,7 +367,7 @@ public sealed class InMemoryConcurrencyRuntimeTests : IDisposable
             .Be("by-first", "未定義値の保存は 1 件も適用されない");
     }
 
-    // ── undo ジャーナルによる保存単位の all-or-nothing ──
+    // ── copy-on-write ステージングによる保存単位の all-or-nothing ──
 
     /// <summary>
     /// 8. グラフ保存の途中で競合が起きると、それより前に適用済みの書き込み（親の更新・子の追加）も巻き戻る。
@@ -441,7 +438,7 @@ public sealed class InMemoryConcurrencyRuntimeTests : IDisposable
     {
         var store = new InMemoryDataStore();
         var hook = new RowVersionCapturingHook();
-        var documents = new InMemoryDocumentRepository(store, SingleHookRegistry(hook));
+        var documents = new InMemoryDocumentRepository(store, new SaveHookRegistry().Add(hook));
 
         await new InMemoryDocumentRepository(store).InsertAsync(
             new DocumentEntity
@@ -484,7 +481,7 @@ public sealed class InMemoryConcurrencyRuntimeTests : IDisposable
     {
         var store = new InMemoryDataStore();
         var hook = new RowVersionCapturingHook { ThrowOnAfter = false };
-        var documents = new InMemoryDocumentRepository(store, SingleHookRegistry(hook));
+        var documents = new InMemoryDocumentRepository(store, new SaveHookRegistry().Add(hook));
 
         await new InMemoryDocumentRepository(store).InsertAsync(
             new DocumentEntity
@@ -525,7 +522,7 @@ public sealed class InMemoryConcurrencyRuntimeTests : IDisposable
     {
         var store = new InMemoryDataStore();
         var hook = new GatedAfterHook<DocumentEntity> { ThrowOnAfter = true };
-        var documents = new InMemoryDocumentRepository(store, SingleHookRegistry(hook));
+        var documents = new InMemoryDocumentRepository(store, new SaveHookRegistry().Add(hook));
         var other = new InMemoryDocumentRepository(store);
 
         await other.InsertAsync(
@@ -575,7 +572,7 @@ public sealed class InMemoryConcurrencyRuntimeTests : IDisposable
     {
         var store = new InMemoryDataStore();
         var hook = new GatedAfterHook<DocumentEntity>();
-        var documents = new InMemoryDocumentRepository(store, SingleHookRegistry(hook));
+        var documents = new InMemoryDocumentRepository(store, new SaveHookRegistry().Add(hook));
         var other = new InMemoryDocumentRepository(store);
 
         await other.InsertAsync(
@@ -629,7 +626,7 @@ public sealed class InMemoryConcurrencyRuntimeTests : IDisposable
         var hook = new GatedAfterHook<DocumentNoteEntity>();
         var notes = new InMemoryDocumentNoteRepository(
             store,
-            SingleHookRegistry<DocumentNoteEntity>(hook)
+            new SaveHookRegistry().Add<DocumentNoteEntity>(hook)
         );
         var other = new InMemoryDocumentNoteRepository(store);
 
@@ -686,7 +683,7 @@ public sealed class InMemoryConcurrencyRuntimeTests : IDisposable
 
         var documents = new InMemoryDocumentRepository(
             store,
-            SingleHookRegistry(new BinaryWritingHook(payload))
+            new SaveHookRegistry().Add(new BinaryWritingHook(payload))
         );
         var plain = new InMemoryDocumentRepository(store);
 
@@ -722,15 +719,6 @@ public sealed class InMemoryConcurrencyRuntimeTests : IDisposable
         (await documents.SaveAsync(document, cancellationToken: Ct))
             .Should()
             .Be(1, "反映された版はそのまま次の保存に使える（再取得不要）");
-    }
-
-    /// <summary>Save フックを 1 つだけ登録したレジストリを組み立てる</summary>
-    private ISaveHookRegistry SingleHookRegistry<TEntity>(ISaveHook<TEntity> hook)
-        where TEntity : EntityBase
-    {
-        var provider = new ServiceCollection().AddSingleton(hook).BuildServiceProvider();
-        _providers.Add(provider);
-        return new ServiceProviderSaveHookRegistry(provider);
     }
 
     /// <summary>
@@ -809,14 +797,6 @@ public sealed class InMemoryConcurrencyRuntimeTests : IDisposable
             }
 
             return Task.CompletedTask;
-        }
-    }
-
-    public void Dispose()
-    {
-        foreach (var provider in _providers)
-        {
-            provider.Dispose();
         }
     }
 }

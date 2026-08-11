@@ -61,7 +61,7 @@ public sealed class SqliteConnectionStringFactoryIntegrationTests
                 },
             },
         };
-        await db.ApplyDdlAsync(new SqliteDdlGenerator().Build(diagram), Ct);
+        await db.ApplyDdlAsync(diagram, Ct);
 
         // 共通接続設定（FilePath のみ）→ プロバイダのファクトリで接続文字列を構築する
         var settings = new DbConnectionSettings { FilePath = db.FilePath };

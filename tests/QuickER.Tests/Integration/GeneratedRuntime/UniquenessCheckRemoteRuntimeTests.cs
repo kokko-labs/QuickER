@@ -3,11 +3,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
-using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
-using QuickER.Sqlite;
 using QuickER.Tests.GeneratedRemoteServiceFixture;
 using QuickER.Tests.Integration;
 
@@ -35,7 +31,7 @@ public sealed class UniquenessCheckRemoteRuntimeTests : IAsyncLifetime
     private readonly SqliteTempDatabase _db = SqliteTempDatabase.Create();
 
     /// <summary>in-process 起動した Kestrel サーバー</summary>
-    private WebApplication? _app;
+    private InProcessRemoteServer? _server;
 
     /// <summary>HTTP クライアント実装を登録した DI コンテナ</summary>
     private ServiceProvider? _clientProvider;
@@ -51,21 +47,17 @@ public sealed class UniquenessCheckRemoteRuntimeTests : IAsyncLifetime
     /// <summary>スキーマ作成 → Kestrel 起動（空きポート）→ HTTP クライアント DI 構築 → シード投入を行う</summary>
     public async ValueTask InitializeAsync()
     {
-        var ddl = new SqliteDdlGenerator().Build(RemoteServiceFixtureDefinition.Build());
-        await _db.ApplyDdlAsync(ddl, Ct);
+        await _db.ApplyDdlAsync(RemoteServiceFixtureDefinition.Build(), Ct);
 
-        var builder = WebApplication.CreateBuilder();
-        builder.Logging.ClearProviders();
-        builder.WebHost.UseUrls("http://127.0.0.1:0");
-        builder.Services.AddGeneratedSqliteRepositories(_db.ReadWriteCreateConnectionString);
+        _server = await InProcessRemoteServer.StartAsync(
+            services =>
+                services.AddGeneratedSqliteRepositories(_db.ReadWriteCreateConnectionString),
+            app => app.MapGeneratedRemoteEndpoints(),
+            Ct
+        );
 
-        _app = builder.Build();
-        _app.MapGeneratedRemoteEndpoints();
-        await _app.StartAsync(Ct);
-
-        var baseUrl = _app.Urls.First();
         _clientProvider = new ServiceCollection()
-            .AddGeneratedHttpRemoteRepositories($"{baseUrl}/quicker")
+            .AddGeneratedHttpRemoteRepositories(_server.BaseAddress(RemotePaths.DefaultPrefix))
             .BuildServiceProvider();
 
         await Customers.InsertAsync(
@@ -158,10 +150,10 @@ public sealed class UniquenessCheckRemoteRuntimeTests : IAsyncLifetime
     {
         _clientProvider?.Dispose();
 
-        if (_app is not null)
+        if (_server is not null)
         {
-            await _app.StopAsync(CancellationToken.None);
-            await _app.DisposeAsync();
+            await _server.StopAsync(CancellationToken.None);
+            await _server.DisposeAsync();
         }
 
         _db.Dispose();

@@ -5,6 +5,8 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Data.Sqlite;
+using QuickER.Model;
+using QuickER.Sqlite;
 
 namespace QuickER.Tests.Integration;
 
@@ -73,28 +75,78 @@ internal sealed class SqliteTempDatabase : IDisposable
             Mode = SqliteOpenMode.ReadWrite,
         }.ConnectionString;
 
-    /// <summary>
-    /// DDL スクリプトを一時 DB に適用する。SQLite は 1 回の <c>ExecuteNonQuery</c> で複数文を実行できないため、
-    /// ステートメントごとに分割して順に実行する（外部キー制約を含むため <c>foreign_keys</c> は明示 ON）。
-    /// </summary>
+    /// <summary>DDL スクリプト（複数文可）を一時 DB に適用する</summary>
+    /// <remarks>
+    /// Microsoft.Data.Sqlite は 1 コマンドでセミコロン区切りの複数文を実行できる
+    /// （プロダクションの <c>SqliteSchemaSyncExecutor</c> / 生成物の <c>SqliteSchemaBootstrap</c> と同じ前提）。
+    /// テーブル作成は FK 強制の有無に影響されないため PRAGMA は送らない。
+    /// </remarks>
     public async Task ApplyDdlAsync(string ddl, CancellationToken ct = default)
     {
         await using var conn = new SqliteConnection(ReadWriteCreateConnectionString);
         await conn.OpenAsync(ct).ConfigureAwait(false);
 
-        // 生成 DDL の FK 制約を有効化した状態で作成する
-        await using (var pragma = conn.CreateCommand())
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = ddl;
+        await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <summary>図から SQLite 方言の DDL を生成して一時 DB に適用する（テスト定番の 2 行を 1 行にまとめる糖衣）</summary>
+    public Task ApplyDdlAsync(ErDiagram diagram, CancellationToken ct = default) =>
+        ApplyDdlAsync(new SqliteDdlGenerator().Build(diagram), ct);
+
+    /// <summary>
+    /// 一時 DB のユーザーテーブルをすべて DROP し、各テストをクリーンな状態から始める
+    /// （SQL Server 側の <c>SqlServerContainerFixture.ResetSchemaAsync</c> と対称の汎用実装）。
+    /// </summary>
+    /// <remarks>
+    /// <c>sqlite_master</c> から実テーブルを列挙して落とすため、テスト側がテーブル名や削除順を持たなくてよい。
+    /// FK 依存順を気にせず落とせるよう <c>PRAGMA foreign_keys = OFF</c> の下で実行する
+    /// （PRAGMA は接続単位＝この接続を閉じれば元に戻る）。DB ファイルが未作成なら何もしない。
+    /// </remarks>
+    public async Task ResetSchemaAsync(CancellationToken ct = default)
+    {
+        if (!File.Exists(FilePath))
         {
-            pragma.CommandText = "PRAGMA foreign_keys = ON;";
-            await pragma.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            return;
         }
 
-        foreach (var statement in SplitStatements(ddl))
+        await using var conn = new SqliteConnection(ReadWriteCreateConnectionString);
+        await conn.OpenAsync(ct).ConfigureAwait(false);
+
+        // sqlite_ で始まる内部テーブル（sqlite_sequence 等）は DROP できないため除外する
+        var tables = new List<string>();
+
+        await using (var select = conn.CreateCommand())
         {
-            await using var cmd = conn.CreateCommand();
-            cmd.CommandText = statement;
-            await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            select.CommandText =
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%';";
+            await using var reader = await select.ExecuteReaderAsync(ct).ConfigureAwait(false);
+
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                tables.Add(reader.GetString(0));
+            }
         }
+
+        if (tables.Count == 0)
+        {
+            return;
+        }
+
+        var script = new StringBuilder("PRAGMA foreign_keys = OFF;\n");
+
+        foreach (var table in tables)
+        {
+            script
+                .Append("DROP TABLE IF EXISTS \"")
+                .Append(table.Replace("\"", "\"\""))
+                .Append("\";\n");
+        }
+
+        await using var drop = conn.CreateCommand();
+        drop.CommandText = script.ToString();
+        await drop.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
 
     /// <summary>取込専用（ReadOnly）接続を開いて返す（呼び出し側で破棄する）</summary>
@@ -103,79 +155,6 @@ internal sealed class SqliteTempDatabase : IDisposable
         var conn = new SqliteConnection(ReadOnlyConnectionString);
         await conn.OpenAsync(ct).ConfigureAwait(false);
         return conn;
-    }
-
-    /// <summary>
-    /// DDL スクリプトを実行可能なステートメント単位に分割する。
-    /// <c>--</c> 行コメントを除去し、文字列リテラル内のセミコロンを無視してセミコロンで区切る。
-    /// </summary>
-    /// <remarks>
-    /// 生成 DDL は識別子を二重引用符、リテラルを含まない構造のため単純な分割で足りるが、
-    /// 文字列リテラル（<c>'...'</c>）内のセミコロン混入に備えてクォート状態を追跡する。
-    /// </remarks>
-    private static IEnumerable<string> SplitStatements(string ddl)
-    {
-        var current = new StringBuilder();
-        var inSingleQuote = false;
-
-        // 行コメントを除去したうえで 1 文字ずつ走査し、クォート外のセミコロンで区切る
-        foreach (var rawLine in ddl.Split('\n'))
-        {
-            var line = StripLineComment(rawLine);
-
-            foreach (var ch in line)
-            {
-                if (ch == '\'')
-                {
-                    inSingleQuote = !inSingleQuote;
-                }
-
-                if (ch == ';' && !inSingleQuote)
-                {
-                    var stmt = current.ToString().Trim();
-
-                    if (stmt.Length > 0)
-                    {
-                        yield return stmt;
-                    }
-
-                    current.Clear();
-                    continue;
-                }
-
-                current.Append(ch);
-            }
-
-            current.Append('\n');
-        }
-
-        var tail = current.ToString().Trim();
-
-        if (tail.Length > 0)
-        {
-            yield return tail;
-        }
-    }
-
-    /// <summary>クォート外の <c>--</c> 以降を行コメントとして除去する</summary>
-    private static string StripLineComment(string line)
-    {
-        var inSingleQuote = false;
-
-        for (var i = 0; i < line.Length - 1; i++)
-        {
-            if (line[i] == '\'')
-            {
-                inSingleQuote = !inSingleQuote;
-            }
-
-            if (!inSingleQuote && line[i] == '-' && line[i + 1] == '-')
-            {
-                return line.Substring(0, i);
-            }
-        }
-
-        return line;
     }
 
     /// <summary>接続プールを解放し、一時ファイル・ディレクトリを削除する</summary>

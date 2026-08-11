@@ -32,18 +32,28 @@
 /// </remarks>
 public static partial class GeneratedRemoteEndpoints
 {
-    /// <summary>Maps every remote-surface endpoint under the given prefix (defaults to /quicker).</summary>
+    /// <summary>Maps every remote-surface endpoint under the given prefix (defaults to <see cref="RemotePaths.DefaultPrefix"/>).</summary>
+    /// <remarks>
+    /// The group also carries a liveness endpoint, <c>GET {prefix}/health</c>, which answers 200 with an empty body
+    /// once the server is listening. It is a member of the group like any other endpoint, so authorization applied to
+    /// the group covers it as well; a probe that has to stay anonymous can be given its own route mapped outside the
+    /// group instead.
+    /// </remarks>
     /// <param name="endpoints">The mapping target (for example a <c>WebApplication</c>).</param>
     /// <param name="prefix">The route prefix for the endpoint group.</param>
     /// <returns>The endpoint group, to which authorization and similar concerns can be applied.</returns>
     public static RouteGroupBuilder MapGeneratedRemoteEndpoints(
         this IEndpointRouteBuilder endpoints,
-        string prefix = "/quicker"
+        string prefix = RemotePaths.DefaultPrefix
     )
     {
         ArgumentNullException.ThrowIfNull(endpoints);
 
         var group = endpoints.MapGroup(prefix);
+
+        // Liveness: the client's PingAsync polls this while waiting for the server to come up, so it must not touch
+        // the database - a 200 states that the process is listening and the endpoints are mapped, nothing more
+        group.MapGet(RemotePaths.HealthRoute, () => Results.Ok());
 {{ for repository in repository_classes }}        Map{{ repository.remote_route_name }}Endpoints(group);
 {{ end }}
         return group;
@@ -83,7 +93,8 @@ public static partial class GeneratedRemoteEndpoints
                 context,
                 StatusCodes.Status409Conflict,
                 "SaveConflict",
-                ex.Message
+                ex.Message,
+                ex
             ).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
@@ -104,16 +115,29 @@ public static partial class GeneratedRemoteEndpoints
     }
 
     /// <summary>Writes a <see cref="RemoteError"/> body with the given status code (the shared path for every classified failure response).</summary>
+    /// <remarks>
+    /// <paramref name="conflict"/> is supplied only for the 409 path: its details travel with the body so that the client
+    /// can rebuild the same <see cref="SaveConflictException"/> a direct call would have thrown. Every other kind leaves
+    /// those fields null.
+    /// </remarks>
     private static async Task WriteErrorAsync(
         HttpContext context,
         int statusCode,
         string type,
-        string message
+        string message,
+        SaveConflictException? conflict = null
     )
     {
         context.Response.StatusCode = statusCode;
         await context.Response.WriteAsJsonAsync(
-            new RemoteError { Type = type, Message = message },
+            new RemoteError
+            {
+                Type = type,
+                Message = message,
+                Reason = conflict?.Reason.ToString(),
+                EntityType = conflict?.EntityTypeName,
+                Key = conflict?.Key,
+            },
             RemoteJson.Options,
             context.RequestAborted
         ).ConfigureAwait(false);

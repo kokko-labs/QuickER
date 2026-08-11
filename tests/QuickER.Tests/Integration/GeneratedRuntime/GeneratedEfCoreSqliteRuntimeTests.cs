@@ -1,7 +1,6 @@
 using System.Linq;
 using System.Threading.Tasks;
 using AwesomeAssertions;
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Sqlite;
@@ -57,26 +56,13 @@ public sealed class GeneratedEfCoreSqliteRuntimeTests
 
     /// <summary>スキーマを初期化し、SQLite の DdlGenerator が生成した DDL でテーブルを作成する</summary>
     /// <remarks>
-    /// 一時ファイル DB のため、テーブルを明示 DROP してから作り直す。EF Core Migrations は使わない
-    /// （EF Core は既存スキーマ接続専用という設計）。DROP は依存順（子 → 親）で実行する。
+    /// 一時ファイル DB のため、既存テーブルを全 DROP してから作り直す。EF Core Migrations は使わない
+    /// （EF Core は既存スキーマ接続専用という設計）。
     /// </remarks>
     protected override async Task ResetAndCreateSchemaAsync()
     {
-        await using (var conn = new SqliteConnection(ConnectionString))
-        {
-            await conn.OpenAsync(Ct);
-
-            // FK 依存順に子（orders）→ 親（customers）の順で DROP する
-            await using var drop = conn.CreateCommand();
-            drop.CommandText =
-                "DROP TABLE IF EXISTS \"orders\"; DROP TABLE IF EXISTS \"customers\";";
-            await drop.ExecuteNonQueryAsync(Ct);
-        }
-
-        var ddl = new SqliteDdlGenerator().Build(
-            PortableFixtureDefinition.Build(PortableDialect.SqlServer)
-        );
-        await _db.ApplyDdlAsync(ddl, Ct);
+        await _db.ResetSchemaAsync(Ct);
+        await _db.ApplyDdlAsync(PortableFixtureDefinition.Build(PortableDialect.SqlServer), Ct);
     }
 
     /// <summary>SQLite は二重引用符で識別子を引用する</summary>

@@ -19,12 +19,21 @@ var connectionString = new SqliteConnectionStringBuilder
 // Delete any existing DB file and recreate it from the DDL so the sample runs idempotently.
 if (File.Exists(dbFilePath))
 {
-    // The connection pool may hold the file open and block deletion, so release the pools first.
-    SqliteConnection.ClearAllPools();
+    // The connection pool may hold the file open and block deletion, so release the pool for this
+    // connection string first (ClearAllPools would also drop pools this sample does not own).
+    using (var pooled = new SqliteConnection(connectionString))
+    {
+        SqliteConnection.ClearPool(pooled);
+    }
+
     File.Delete(dbFilePath);
 }
 
-await CreateSchemaAsync(connectionString);
+// Create the schema from the generated DDL in a single call. The bootstrap opens its connection through the
+// generated SqlConnectionFactory, which turns foreign key enforcement on by default (SQLite leaves it off
+// unless the connection asks for it), so the constraints in the DDL are actually enforced below.
+var ddl = await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "EcOrder.sql"));
+await SqliteSchemaBootstrap.ApplyDdlAsync(connectionString, ddl);
 Console.WriteLine("[Setup] Created the SQLite file DB (ec-order.db) from the EcOrder.sql DDL.");
 Console.WriteLine();
 
@@ -86,30 +95,31 @@ var order = new OrderEntity
     OrderedAt = orderedAt,
     Memo = "First order",
 };
-order.MarkAdded();
 
-var line1 = new OrderLineEntity
-{
-    OrderLineId = 5000,
-    OrderId = 1000,
-    ProductId = 100,
-    Quantity = 2,
-    UnitPrice = 980m,
-};
-line1.MarkAdded();
+order.OrderLines.Add(
+    new OrderLineEntity
+    {
+        OrderLineId = 5000,
+        OrderId = 1000,
+        ProductId = 100,
+        Quantity = 2,
+        UnitPrice = 980m,
+    }
+);
+order.OrderLines.Add(
+    new OrderLineEntity
+    {
+        OrderLineId = 5001,
+        OrderId = 1000,
+        ProductId = 101,
+        Quantity = 1,
+        UnitPrice = 1500m,
+    }
+);
 
-var line2 = new OrderLineEntity
-{
-    OrderLineId = 5001,
-    OrderId = 1000,
-    ProductId = 101,
-    Quantity = 1,
-    UnitPrice = 1500m,
-};
-line2.MarkAdded();
-
-order.OrderLines.Add(line1);
-order.OrderLines.Add(line2);
+// One call marks the whole freshly built aggregate: MarkAdded follows the cascade navigations a graph save
+// follows, so the order lines are marked as inserts too (build the graph first, then mark it).
+order.MarkAdded(includeChildren: true);
 
 var savedCount = await orders.SaveAsync(order);
 Console.WriteLine($"[2] Graph-saved 1 order + 2 order lines (records saved: {savedCount}).");
@@ -238,28 +248,6 @@ Console.WriteLine();
 
 Console.WriteLine("All scenarios succeeded.");
 return 0;
-
-// Read the DDL (EcOrder.sql) and apply it to the SQLite file DB to create the schema.
-static async Task CreateSchemaAsync(string connectionString)
-{
-    var ddlPath = Path.Combine(AppContext.BaseDirectory, "EcOrder.sql");
-    var ddl = await File.ReadAllTextAsync(ddlPath);
-
-    await using var conn = new SqliteConnection(connectionString);
-    await conn.OpenAsync();
-
-    // Enable the foreign key constraints in the generated DDL (SQLite disables FK enforcement by default).
-    await using (var pragma = conn.CreateCommand())
-    {
-        pragma.CommandText = "PRAGMA foreign_keys = ON;";
-        await pragma.ExecuteNonQueryAsync();
-    }
-
-    // Microsoft.Data.Sqlite can execute multiple semicolon-separated statements in a single ExecuteNonQuery.
-    await using var command = conn.CreateCommand();
-    command.CommandText = ddl;
-    await command.ExecuteNonQueryAsync();
-}
 
 // A small helper that throws when the actual value differs from the expected one, making the exit code
 // non-zero so CI can detect it.

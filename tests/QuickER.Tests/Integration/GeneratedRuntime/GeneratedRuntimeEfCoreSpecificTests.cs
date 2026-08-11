@@ -48,8 +48,7 @@ public sealed class GeneratedRuntimeEfCoreSpecificTests(SqlServerContainerFixtur
     {
         Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
         await fixture.ResetSchemaAsync(Ct);
-        var ddl = new SqlServerDdlGenerator().Build(GeneratedFixtureDefinition.Build());
-        await fixture.ExecuteAsync(ddl, Ct);
+        await fixture.ApplyDdlAsync(GeneratedFixtureDefinition.Build(), Ct);
     }
 
     private static CustomerEntity NewCustomer(int id, string name, bool isActive = true) =>

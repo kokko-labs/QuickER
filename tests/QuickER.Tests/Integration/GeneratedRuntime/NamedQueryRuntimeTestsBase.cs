@@ -4,8 +4,6 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
-using Microsoft.Data.Sqlite;
-using QuickER.Sqlite;
 using QuickER.Tests.GeneratedQueryFixture;
 using QuickER.Tests.Integration;
 
@@ -52,18 +50,8 @@ public abstract class NamedQueryRuntimeTestsBase : IDisposable
     /// </remarks>
     protected async Task ResetAndSeedAsync()
     {
-        await using (var conn = new SqliteConnection(ConnectionString))
-        {
-            await conn.OpenAsync(Ct);
-
-            await using var drop = conn.CreateCommand();
-            drop.CommandText =
-                "DROP TABLE IF EXISTS \"orders\"; DROP TABLE IF EXISTS \"customers\";";
-            await drop.ExecuteNonQueryAsync(Ct);
-        }
-
-        var ddl = new SqliteDdlGenerator().Build(QueryFixtureDefinition.Build());
-        await _db.ApplyDdlAsync(ddl, Ct);
+        await _db.ResetSchemaAsync(Ct);
+        await _db.ApplyDdlAsync(QueryFixtureDefinition.Build(), Ct);
 
         var customers = CreateCustomerRepository();
         var orders = CreateOrderRepository();

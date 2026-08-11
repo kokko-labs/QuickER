@@ -62,8 +62,7 @@ public sealed class SqlServerTranslatorOperatorRuntimeTests(SqlServerContainerFi
     {
         Assert.SkipUnless(Fixture.IsAvailable, Fixture.UnavailableReason);
         await Fixture.ResetSchemaAsync(Ct);
-        var ddl = new SqlServerDdlGenerator().Build(GeneratedFixtureDefinition.Build());
-        await Fixture.ExecuteAsync(ddl, Ct);
+        await Fixture.ApplyDdlAsync(GeneratedFixtureDefinition.Build(), Ct);
     }
 
     /// <summary>指定 ID の顧客エンティティを組み立てる（VO は Create で検証生成）</summary>

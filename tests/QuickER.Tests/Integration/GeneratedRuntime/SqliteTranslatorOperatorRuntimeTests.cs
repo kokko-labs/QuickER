@@ -4,9 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
-using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
-using QuickER.Sqlite;
 using QuickER.Tests.GeneratedSqliteFixture;
 using QuickER.Tests.Integration;
 
@@ -65,21 +63,11 @@ public sealed class SqliteTranslatorOperatorRuntimeTests : IDisposable
         Provider().GetRequiredService<IOrderRepository>();
 
     /// <summary>スキーマを初期化し、SQLite の DdlGenerator が生成した DDL でテーブルを作成する</summary>
-    /// <remarks>子（orders）→ 親（customers）の順で DROP してから作り直す。</remarks>
+    /// <remarks>既存テーブルを全 DROP してから作り直す。</remarks>
     private async Task ResetAndCreateSchemaAsync()
     {
-        await using (var conn = new SqliteConnection(ConnectionString))
-        {
-            await conn.OpenAsync(Ct);
-
-            await using var drop = conn.CreateCommand();
-            drop.CommandText =
-                "DROP TABLE IF EXISTS \"orders\"; DROP TABLE IF EXISTS \"customers\";";
-            await drop.ExecuteNonQueryAsync(Ct);
-        }
-
-        var ddl = new SqliteDdlGenerator().Build(SqlitePortableFixtureDefinition.Build());
-        await _db.ApplyDdlAsync(ddl, Ct);
+        await _db.ResetSchemaAsync(Ct);
+        await _db.ApplyDdlAsync(SqlitePortableFixtureDefinition.Build(), Ct);
     }
 
     /// <summary>指定 ID の顧客エンティティを組み立てる（VO は Create で検証生成）</summary>

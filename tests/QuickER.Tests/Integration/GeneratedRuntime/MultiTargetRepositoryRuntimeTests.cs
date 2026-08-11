@@ -68,10 +68,10 @@ public sealed class MultiTargetRepositoryRuntimeTests(SqlServerContainerFixture 
 
         // server 側スキーマ（SQL Server 方言 DDL・コンテナは各テストで使い回すため先に初期化）
         await _fixture.ResetSchemaAsync(Ct);
-        await _fixture.ExecuteAsync(new SqlServerDdlGenerator().Build(diagram), Ct);
+        await _fixture.ApplyDdlAsync(diagram, Ct);
 
         // local 側スキーマ（SQLite 方言 DDL・一時ファイル）
-        await _sqlite.ApplyDdlAsync(new SqliteDdlGenerator().Build(diagram), Ct);
+        await _sqlite.ApplyDdlAsync(diagram, Ct);
 
         // 同一契約型を方言別に keyed 登録する（サーバー=SQL Server・ローカル=SQLite）
         var services = new ServiceCollection();

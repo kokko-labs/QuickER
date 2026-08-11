@@ -1,18 +1,67 @@
 {{~ if render_contract && emit_shared_infra ~}}
 
+/// <summary>Why a save was rejected as a conflict (the classification carried by <see cref="SaveConflictException"/>).</summary>
+public enum SaveConflictReason
+{
+    /// <summary>The reason was not reported (the exception was constructed directly rather than through a factory).</summary>
+    Unknown,
+
+    /// <summary>The row the save targeted no longer exists (it was deleted by someone else).</summary>
+    NotFound,
+
+    /// <summary>The row still exists, but its version moved on after the entity was read.</summary>
+    Modified,
+}
+
 /// <summary>Represents an exception indicating that a record could not be saved because another party changed it first (it was deleted, or its version moved on).</summary>
+/// <remarks>
+/// <see cref="Reason"/>, <see cref="EntityTypeName"/>, and <see cref="Key"/> carry the material a reload-and-retry loop
+/// needs, so the message does not have to be parsed. They are filled in by the factory methods; an instance built with the
+/// message-only constructor reports <see cref="SaveConflictReason.Unknown"/> and nulls. The same details survive the remote
+/// transport (HTTP 409), so a caller behaves identically against a direct and a remote repository.
+/// </remarks>
 public sealed class SaveConflictException : Exception
 {
-    /// <summary>Initializes a new instance with the specified message.</summary>
+    /// <summary>Initializes a new instance with the specified message (no details: the reason stays <see cref="SaveConflictReason.Unknown"/>).</summary>
     public SaveConflictException(string message)
         : base(message) { }
+
+    /// <summary>Initializes a new instance with the specified message and the details of the rejected save.</summary>
+    /// <param name="message">The message describing the conflict.</param>
+    /// <param name="reason">Why the save was rejected.</param>
+    /// <param name="entityTypeName">The CLR type name (<c>Type.Name</c>) of the entity whose save was rejected, or <c>null</c> when unknown.</param>
+    /// <param name="key">The primary key the save targeted, formatted for display, or <c>null</c> when unknown.</param>
+    public SaveConflictException(
+        string message,
+        SaveConflictReason reason,
+        string? entityTypeName,
+        string? key
+    )
+        : base(message)
+    {
+        Reason = reason;
+        EntityTypeName = entityTypeName;
+        Key = key;
+    }
+
+    /// <summary>Gets why the save was rejected (<see cref="SaveConflictReason.Unknown"/> when the exception carries no details).</summary>
+    public SaveConflictReason Reason { get; }
+
+    /// <summary>Gets the CLR type name of the entity whose save was rejected (<c>null</c> when unknown).</summary>
+    public string? EntityTypeName { get; }
+
+    /// <summary>Gets the primary key the rejected save targeted, formatted for display (<c>null</c> when unknown).</summary>
+    public string? Key { get; }
 
     /// <summary>Creates the conflict reported when the row an update targeted no longer exists.</summary>
     /// <param name="entityType">The type of the entity whose save was rejected.</param>
     /// <param name="key">The primary key value the save targeted.</param>
     public static SaveConflictException NotFound(Type entityType, object? key) =>
         new(
-            $"The record to update was not found ({entityType.Name}, key {key}). It may have been deleted by another user."
+            $"The record to update was not found ({entityType.Name}, key {key}). It may have been deleted by another user.",
+            SaveConflictReason.NotFound,
+            entityType.Name,
+            key?.ToString()
         );
 
     /// <summary>Creates the conflict reported when the row still exists but was changed by someone else after the entity was read.</summary>
@@ -25,7 +74,10 @@ public sealed class SaveConflictException : Exception
         string operation
     ) =>
         new(
-            $"The record to {operation} was modified by another user ({entityType.Name}, key {key}). Reload the entity and try again."
+            $"The record to {operation} was modified by another user ({entityType.Name}, key {key}). Reload the entity and try again.",
+            SaveConflictReason.Modified,
+            entityType.Name,
+            key?.ToString()
         );
 }
 
@@ -39,6 +91,21 @@ public sealed class SaveConflictException : Exception
 );
 {{~ end ~}}
 {{~ if render_contract && emit_shared_infra && remote_services ~}}
+
+/// <summary>The routes the generated remote server and its clients agree on.</summary>
+/// <remarks>
+/// Both sides read the values from here so the prefix is written down once: the server's
+/// <c>MapGeneratedRemoteEndpoints</c> defaults to <see cref="DefaultPrefix"/>, and a client's base address has to
+/// include whichever prefix the server was mapped under.
+/// </remarks>
+public static class RemotePaths
+{
+    /// <summary>The route prefix the generated endpoints are mapped under unless another one is passed to <c>MapGeneratedRemoteEndpoints</c>.</summary>
+    public const string DefaultPrefix = "/quicker";
+
+    /// <summary>The liveness endpoint's route, relative to the prefix (<c>GET {prefix}/health</c>).</summary>
+    public const string HealthRoute = "health";
+}
 
 /// <summary>Shared serialization settings used for remote transport (HTTP + JSON).</summary>
 /// <remarks>
@@ -82,6 +149,11 @@ public sealed class RemoteRepositoryException : Exception
 }
 
 /// <summary>Structured payload for transport errors (server to client; the type restores the exception type on the client side).</summary>
+/// <remarks>
+/// The conflict detail fields (<see cref="Reason"/>, <see cref="EntityType"/>, <see cref="Key"/>) are written only for a
+/// "SaveConflict" error and are optional on the wire: a body from a server built before they existed simply leaves them
+/// null, and the restored <see cref="SaveConflictException"/> then reports <see cref="SaveConflictReason.Unknown"/>.
+/// </remarks>
 public sealed class RemoteError
 {
     /// <summary>Gets or sets the error kind ("SaveConflict" = optimistic conflict / "BadRequest" = the request could not be interpreted / "Error" = anything else).</summary>
@@ -89,6 +161,15 @@ public sealed class RemoteError
 
     /// <summary>Gets or sets the server-side exception message.</summary>
     public string Message { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the name of the <see cref="SaveConflictReason"/> behind a conflict (<c>null</c> for every other kind).</summary>
+    public string? Reason { get; set; }
+
+    /// <summary>Gets or sets the CLR type name of the entity whose save was rejected (<c>null</c> for every other kind).</summary>
+    public string? EntityType { get; set; }
+
+    /// <summary>Gets or sets the primary key the rejected save targeted, formatted for display (<c>null</c> for every other kind).</summary>
+    public string? Key { get; set; }
 }
 
 /// <summary>Request body carrying a single primary key (GetById / Delete).</summary>
@@ -437,6 +518,50 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         _entityRoute = entityRoute;
     }
 
+    /// <summary>Asks the server whether it is up (<c>GET {prefix}/health</c>), returning <c>false</c> instead of throwing when it is not.</summary>
+    /// <remarks>
+    /// <para>
+    /// A liveness check, not a health check: a 200 means the process is listening and the endpoints are mapped. It says
+    /// nothing about the database behind them.
+    /// </para>
+    /// <para>
+    /// Every way of "not reachable" - connection refused, DNS failure, TLS failure, the HttpClient's own timeout, or any
+    /// status other than success - comes back as <c>false</c>, which is what makes this usable as the condition of a
+    /// wait-for-startup loop. Cancelling <paramref name="cancellationToken"/> is not one of those ways: it still throws
+    /// <see cref="OperationCanceledException"/>, so a caller's own timeout stays distinguishable from a server that is down.
+    /// </para>
+    /// <para>
+    /// The endpoint lives on the group, so authorization applied to the group
+    /// (<c>MapGeneratedRemoteEndpoints().RequireAuthorization()</c>) covers it too, and an unauthenticated client then
+    /// reads a protected server as <c>false</c>.
+    /// </para>
+    /// </remarks>
+    /// <param name="cancellationToken">A token that cancels the check.</param>
+    /// <returns><c>true</c> when the server answered with a success status; otherwise <c>false</c>.</returns>
+    public async Task<bool> PingAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using var response = await _httpClient.GetAsync(
+                RemotePaths.HealthRoute,
+                HttpCompletionOption.ResponseHeadersRead,
+                cancellationToken
+            ).ConfigureAwait(false);
+
+            return response.IsSuccessStatusCode;
+        }
+        catch (HttpRequestException)
+        {
+            // The server is not listening yet (or not reachable at all): that is the answer, not a failure
+            return false;
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            // The HttpClient's own timeout elapsed. The caller did not cancel, so this is still "not ready"
+            return false;
+        }
+    }
+
     /// <summary>Posts an operation and deserializes the result JSON into <typeparamref name="TResult"/> (the shared path for generated transport methods).</summary>
     /// <remarks>On a failure response, reads the <see cref="RemoteError"/>; 409 with SaveConflict throws <see cref="SaveConflictException"/>, anything else throws <see cref="RemoteRepositoryException"/>.</remarks>
     protected async Task<TResult> InvokeAsync<TResult>(
@@ -494,7 +619,16 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
 
         if (statusCode == 409 && error?.Type == "SaveConflict")
         {
-            throw new SaveConflictException(message);
+            // Restore the conflict details the server reported so that a reload-and-retry loop reads the same properties as
+            // with a direct call. A body without them (an older server) degrades to Unknown rather than failing
+            throw new SaveConflictException(
+                message,
+                Enum.TryParse(error.Reason, out SaveConflictReason reason)
+                    ? reason
+                    : SaveConflictReason.Unknown,
+                error.EntityType,
+                error.Key
+            );
         }
 
         throw new RemoteRepositoryException(statusCode, message);
@@ -2779,6 +2913,52 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
 }
 {{~ end ~}}
 
+{{~ if render_contract && !runtime_package_export ~}}
+/// <summary>Extensions that register save hooks (<c>ISaveHook&lt;TEntity&gt;</c>) with the DI container.</summary>
+/// <remarks>
+/// The default registry (<c>ServiceProviderSaveHookRegistry</c>, registered by every <c>AddGenerated*Repositories</c>
+/// overload) resolves <c>IEnumerable&lt;ISaveHook&lt;TEntity&gt;&gt;</c>, so a hook must be registered under each closed
+/// interface it implements. This extension derives those from the instance itself, which keeps registration code free of
+/// per-entity-type branching (and free of the maintenance it needs whenever a table is added).
+/// </remarks>
+public static class SaveHookServiceCollectionExtensions
+{
+    /// <summary>Registers a save hook instance as a singleton under every <c>ISaveHook&lt;TEntity&gt;</c> it implements.</summary>
+    /// <param name="services">The service collection to register with.</param>
+    /// <param name="hook">The hook instance (one object may implement the hook interface for several entity types).</param>
+    /// <returns>The same service collection, so that calls can be chained.</returns>
+    /// <exception cref="ArgumentException">The object implements no <c>ISaveHook&lt;TEntity&gt;</c> interface, so registering it would silently do nothing.</exception>
+    public static IServiceCollection AddSaveHook(this IServiceCollection services, object hook)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(hook);
+
+        var registered = false;
+
+        foreach (var contract in hook.GetType().GetInterfaces())
+        {
+            if (
+                !contract.IsGenericType
+                || contract.GetGenericTypeDefinition() != typeof(ISaveHook<>)
+            )
+            {
+                continue;
+            }
+
+            services.AddSingleton(contract, hook);
+            registered = true;
+        }
+
+        return registered
+            ? services
+            : throw new ArgumentException(
+                $"The object of type '{hook.GetType().Name}' implements no ISaveHook<TEntity> interface.",
+                nameof(hook)
+            );
+    }
+}
+{{~ end ~}}
+
 {{~ if repositories && !runtime_package_export ~}}
 /// <summary>Extensions that register the generated repositories ({{ dialect_display_name }} implementation) with the DI container.</summary>
 /// <remarks>
@@ -2939,7 +3119,7 @@ public static class GeneratedHttpRemoteRepositoryServiceCollectionExtensions
     /// </para>
     /// </remarks>
     /// <param name="services">The service collection to register into</param>
-    /// <param name="baseAddress">The base address including the server prefix (for example <c>https://server:5001/quicker</c>; a trailing / is appended automatically)</param>
+    /// <param name="baseAddress">The base address including the server prefix - the one <c>MapGeneratedRemoteEndpoints</c> was mapped under, <see cref="RemotePaths.DefaultPrefix"/> unless it was passed another (for example <c>https://server:5001/quicker</c>; a trailing / is appended automatically)</param>
     public static IServiceCollection AddGeneratedHttpRemoteRepositories(
         this IServiceCollection services,
         string baseAddress

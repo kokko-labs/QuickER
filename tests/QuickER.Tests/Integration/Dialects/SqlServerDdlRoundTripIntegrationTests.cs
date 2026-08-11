@@ -295,7 +295,7 @@ public sealed class SqlServerDdlRoundTripIntegrationTests(SqlServerContainerFixt
 
         var diagram = new ErDiagram { Entities = { inventory } };
 
-        await fixture.ExecuteAsync(new SqlServerDdlGenerator().Build(diagram), Ct);
+        await fixture.ApplyDdlAsync(diagram, Ct);
 
         await using var conn = await fixture.OpenConnectionAsync(Ct);
         var result = await new SqlServerSchemaImporter().ImportAsync(conn, Ct);
@@ -380,9 +380,7 @@ public sealed class SqlServerDdlRoundTripIntegrationTests(SqlServerContainerFixt
         };
 
         var diagram = new ErDiagram { Entities = { parent, child }, Relationships = { rel } };
-        var ddl = new SqlServerDdlGenerator().Build(diagram);
-
-        await fixture.ExecuteAsync(ddl, Ct);
+        await fixture.ApplyDdlAsync(diagram, Ct);
 
         await using var conn = await fixture.OpenConnectionAsync(Ct);
         var result = await new SqlServerSchemaImporter().ImportAsync(conn, Ct);

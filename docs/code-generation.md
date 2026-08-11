@@ -141,6 +141,19 @@ var provider = new ServiceCollection()
 var customers = provider.GetRequiredService<ICustomerRepository>();
 ```
 
+### Connections and schema bootstrapping
+
+The generated `SqlConnectionFactory` is what opens every connection, and on **SQLite it enables foreign key enforcement by default**. SQLite leaves enforcement off unless a connection asks for it, so without this the foreign keys in the generated DDL would be silently inert: a child row could reference a parent that does not exist, and deleting a parent would leave its children behind. Since the schema declares the constraints, enforcing them is the correct default. An explicit `Foreign Keys` keyword in the connection string is honored exactly as written, so `Foreign Keys=False` restores the provider's own behavior.
+
+For creating a schema from the DDL QuickER generates, `SqliteSchemaBootstrap.ApplyDdlAsync` / `SqlServerSchemaBootstrap.ApplyDdlAsync` open a connection and run the whole script in one call.
+
+```csharp
+var ddl = await File.ReadAllTextAsync("Shop.sql");
+await SqliteSchemaBootstrap.ApplyDdlAsync(connectionString, ddl);
+```
+
+This is a bootstrap convenience for development, tests, and samples — not schema management. It knows nothing about versions, about what already exists, or about rolling back, so anything that outlives a throwaway database wants a migration tool instead (see also: EF Core mode is for connecting to an existing schema, and Migrations are out of scope).
+
 ### Basic operations
 
 ```csharp
@@ -175,13 +188,14 @@ An `==` / `!=` comparison whose value side is null becomes `IS NULL` / `IS NOT N
 
 ```csharp
 var order = new OrderEntity { OrderId = 1000, CustomerId = 1 };
-order.MarkAdded();
-var line = new OrderLineEntity { OrderLineId = 5000, OrderId = 1000, ProductId = 100, Quantity = 2 };
-line.MarkAdded();
-order.OrderLines.Add(line);
+order.OrderLines.Add(new OrderLineEntity { OrderLineId = 5000, OrderId = 1000, ProductId = 100, Quantity = 2 });
+
+order.MarkAdded(includeChildren: true);         // Marks the whole aggregate: the same cascade the save follows
 
 var affected = await orders.SaveAsync(order);   // Runs INSERT / UPDATE / DELETE per RowState in one transaction
 ```
+
+`MarkAdded(includeChildren: true)` walks the cascade navigations a graph save follows — all the way down — so a freshly built aggregate is marked in one call instead of one call per node (build the graph first, then mark it). Only `MarkAdded` offers the cascading form: marking a whole graph for update would rewrite every row including the untouched ones, and marking a whole graph for removal is what the graph save's `cascadeDelete` already does from the root alone.
 
 ### Save hooks (ISaveHook)
 
@@ -224,7 +238,23 @@ public sealed class DocumentSaveHook : ISaveHook<DocumentEntity>
 ```csharp
 // DI registration (Singleton or Scoped; use Scoped if the hook uses scoped services)
 services.AddSingleton<ISaveHook<DocumentEntity>, DocumentSaveHook>();
+
+// Or let the registration derive the entity types from the instance. Registers the hook under every
+// ISaveHook<TEntity> it implements, so one object covering several tables needs no per-type line
+services.AddSaveHook(new AuditSaveHook());
 ```
+
+**Without a DI container**, build a `SaveHookRegistry` and hand it to the repository constructor — hooks fire in the order they were added, exactly as with the DI-backed registry:
+
+```csharp
+var hooks = new SaveHookRegistry()
+    .Add<DocumentEntity>(new DocumentSaveHook())
+    .Add<OrderEntity>(new OrderSaveHook());
+
+var documents = new DocumentRepository(connectionFactory, hooks);
+```
+
+Building the registry is not thread-safe (add every hook before handing it to a repository); resolution afterwards is read-only.
 
 You can register multiple hooks for the same entity type. **Before runs in registration order** and **short-circuits the moment one returns `false`** (the remaining Before hooks are not called, and that row is skipped). **After also runs in registration order.** An exception thrown by Before / After propagates as-is and rolls back the entire save (a target with a real transaction rolls the transaction back; in-memory never published the writes in the first place - see below).
 
@@ -394,6 +424,25 @@ await repository.UpdateAsync(order, ConcurrencyMode.ForceOverwrite, ct);
 // A graph save guards the updates and deletes inside the graph the same way
 await repository.SaveAsync(order, cancellationToken: ct);
 ```
+
+`SaveConflictException` carries the material a retry needs, so the message never has to be parsed: `Reason` (`NotFound` — the row is gone — or `Modified` — the row is there but its version moved on), `EntityTypeName`, and `Key`. The same details survive the remote transport (HTTP 409), so a caller reads the same properties against a direct and a remote repository.
+
+The usual answer to a conflict is to reload and reapply:
+
+```csharp
+try
+{
+    await repository.UpdateAsync(order, cancellationToken: ct);
+}
+catch (SaveConflictException ex) when (ex.Reason == SaveConflictReason.Modified)
+{
+    var current = await repository.GetByIdAsync(order.OrderId, ct);   // Read the version that won
+    current!.Memo = order.Memo;                                       // Reapply this user's edit on top of it
+    await repository.UpdateAsync(current, cancellationToken: ct);     // Now guarded by the fresh version
+}
+```
+
+Reload-and-reapply is the honest answer when the two edits can be merged. `ForceOverwrite` is for when they cannot and this write is meant to win regardless — it skips the guard on the first attempt, so nothing is read back and nothing is merged.
 
 - **A missing row and a stale version are different outcomes.** A single `UpdateAsync` returns `false` when the row no longer exists (the pre-existing contract) and throws `SaveConflictException` when the row is still there but its version moved on. `insertWhenUpdateMissing: true` draws the same line: a missing row switches to an INSERT, while a stale version is reported as a conflict (switching that to an INSERT would turn the conflict into a primary-key violation).
 - **A graph save guards deletes as well**, and a single conflict rolls the whole save unit back (the in-memory repository reaches the same result differently: it stages its writes and publishes them in one go, so a failed save simply never reaches the store).
@@ -586,6 +635,7 @@ app.Run();
 Points to keep in mind:
 
 - **Serialization** uses the same semantics as the entity's JSON round trip (`ToJson` / `Clone`) (VO as the wrapped value, RowState included, parent-reference navigation does not cycle), and the client and server share `RemoteJson.Options`.
+- **There is a liveness endpoint**: `MapGeneratedRemoteEndpoints` also maps `GET {prefix}/health`, which answers 200 with an empty body as soon as the server is listening. It deliberately does not touch the database, so it says only that the process is up and the endpoints are mapped. On the client, `Http{Entity}RemoteRepository.PingAsync` calls it and returns `false` — rather than throwing — for every flavor of "not reachable" (connection refused, DNS or TLS failure, the HttpClient's own timeout, any non-success status), which makes it usable as the condition of a wait-for-startup loop; cancelling the token you pass still throws, so your own timeout stays distinguishable from a server that is down. The endpoint is a member of the group, so authorization applied to the group covers it too. The prefix and the health route are exposed as the constants `RemotePaths.DefaultPrefix` (`"/quicker"`) and `RemotePaths.HealthRoute`, which both sides read so the value is written down once.
 - **Named queries can all be called through the remote surface regardless of implementation method** (simple DSL / raw SQL / manual implementation) (the real implementation lives in the server-side repository).
 - **Exception types are restored**: the server's `SaveConflictException` is thrown on the client as `SaveConflictException` too via HTTP 409 (the same catch as in the direct case works), and other server exceptions become `RemoteRepositoryException` (preserving the status code and message).
 - **A request the server cannot interpret is answered with 400, not 500.** Anything that fails while the request itself is being read — a malformed or empty JSON body, a non-JSON content type, a type mismatch, a value that fails value-object validation, a body that omits a required field (`{}` sent to `Insert` / `Update` / `Save` / `SaveMany`, or a reference-type key omitted from `GetById` / `Delete`), an undefined `ConcurrencyMode` value, or a missing/unrestorable `?id=` key on the binary endpoints — is a fault in what the client sent, so it returns HTTP 400 with a `RemoteError` of type `"BadRequest"` (the client throws `RemoteRepositoryException` with `StatusCode` 400). The message of a 400 only describes the client's own payload, and neither the server-side logging nor the `OnServerError` hook runs (both are reserved for 500). A request rejected by the server infrastructure (`BadHttpRequestException`, for example when the request body size limit is exceeded) keeps the status code it carries, such as 413.
