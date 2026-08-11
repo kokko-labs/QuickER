@@ -37,6 +37,20 @@ internal static class GeneratedFileUsings
 
         ordered.AddRange(spec.CrossNamespaceUsings);
 
+        // 固定 infra 専用ファイル（スキーマ依存物を出さない）は DI 登録拡張（AddGenerated*Repositories・
+        // AddSaveHook・AddGeneratedHttpRemoteRepositories）を持たないため、DI の using を落とす。
+        // 分割時の Runtime 系ファイルと、パッケージ用ソース（コア・方言エンジン）が同じ規則で共有する
+        // ＝コア／方言エンジンパッケージの「Microsoft.Extensions.DependencyInjection 非依存」を保つ。
+        // 例外は EfCore バケット: VO 翻訳プラグインの DbContextOptions 拡張が固定 infra として
+        // IDbContextOptionsExtension.ApplyServices(IServiceCollection) を実装するため DI 抽象が必須で、
+        // かつ EF Core Relational が推移的に連れてくるので依存も増えない。
+        if (!spec.EmitSchemaDependent && !spec.Buckets.Contains(GenerationBucket.EfCore))
+        {
+            ordered.RemoveAll(ns =>
+                ns.StartsWith("Microsoft.Extensions.DependencyInjection", StringComparison.Ordinal)
+            );
+        }
+
         // パッケージ参照モード: 固定 infra（Runtime バケット・契約・方言エンジン・EF Core 部品）を出力しないため、
         // 生成コードは固定名前空間の型を using で参照する。プランナはこのモードで Runtime バケットのファイルを
         // 計画せず、Runtime を指すクロス using も付けない（PackageRuntimeUsings が唯一の供給元）。
@@ -81,6 +95,8 @@ internal static class GeneratedFileUsings
     ///     エンティティ別実装が方言 Repository 基底・接続ファクトリ・実行器を参照する</item>
     ///   <item>EfCore バケットを含むファイル → <see cref="RuntimePackages.EntityFrameworkCore"/>
     ///     （DbContext・EF Core 版実装が EF Core 共通部品を参照する）</item>
+    ///   <item>InMemory バケットを含むファイル → <see cref="RuntimePackages.InMemory"/>
+    ///     （InMemory{Entity}Repository・シーダー・DI がインメモリ基盤を参照する）</item>
     /// </list>
     /// マルチターゲット時は方言実装スペックが各自の方言エンジンだけを参照する（spec.Dialect による）。
     /// </remarks>
@@ -112,6 +128,12 @@ internal static class GeneratedFileUsings
         if (spec.Buckets.Contains(GenerationBucket.EfCore))
         {
             yield return RuntimePackages.EntityFrameworkCore;
+        }
+
+        // インメモリ生成物（InMemory{Entity}Repository・シーダー・DI）はインメモリ基盤パッケージを参照する。
+        if (spec.Buckets.Contains(GenerationBucket.InMemory))
+        {
+            yield return RuntimePackages.InMemory;
         }
     }
 
@@ -312,14 +334,21 @@ internal static class GeneratedFileUsings
             // EfCore: DbContext / DbSet / ModelBuilder（Microsoft.EntityFrameworkCore）、AddGeneratedEfCoreRepositories の
             //   DI（Microsoft.Extensions.DependencyInjection(.Extensions)）、ADO 実行器の DbDataReader/DbCommand（System.Data.Common）、
             //   リフレクション・LINQ 式・非同期。VO の文字列メソッド翻訳プラグイン（IMethodCallTranslatorPlugin 等）で
-            //   EF Core の Query / Storage / Infrastructure / Diagnostics 名前空間も使うため、EfCore バケットには EF Core 系一式を付与する
+            //   EF Core の Query / Storage / Infrastructure / Diagnostics 名前空間も使うため、EfCore バケットには EF Core 系一式を付与する。
+            //   さらに自ファイルへ EntitySaveMetadata / SaveHookSession / EntityGraphSaver（バックエンド共通のメタデータ）を
+            //   出力するため（InMemory バケットと同じ流儀。ランタイムパッケージの EF Core パッケージと同じ帰属）、
+            //   ConcurrentDictionary（System.Collections.Concurrent）・書式変換（System.Globalization）・
+            //   パラメータ展開の Regex（System.Text.RegularExpressions）・属性参照（DataAnnotations(.Schema)）も要する
             case GenerationBucket.EfCore:
                 yield return "System";
+                yield return "System.Collections.Concurrent";
                 yield return "System.Collections.Generic";
                 yield return "System.Data.Common";
+                yield return "System.Globalization";
                 yield return "System.Linq";
                 yield return "System.Linq.Expressions";
                 yield return "System.Reflection";
+                yield return "System.Text.RegularExpressions";
                 yield return "System.Threading";
                 yield return "System.Threading.Tasks";
 
@@ -336,6 +365,13 @@ internal static class GeneratedFileUsings
                 yield return "Microsoft.EntityFrameworkCore.Storage";
                 yield return "Microsoft.Extensions.DependencyInjection";
                 yield return "Microsoft.Extensions.DependencyInjection.Extensions";
+
+                if (options.IncludeDataAnnotations)
+                {
+                    yield return "System.ComponentModel.DataAnnotations";
+                    yield return "System.ComponentModel.DataAnnotations.Schema";
+                }
+
                 break;
 
             // InMemory: DB 非依存のインメモリ Repository 群（InMemoryDataStore・InMemory{Entity}Repository・シーダー・

@@ -20,6 +20,7 @@ namespace QuickER.CodeGen.CSharp;
 ///   <item><see cref="CodeGenerationOptions.GenerateRepositories"/> 時: 実効方言に応じ
 ///     <see cref="RuntimePackages.SqlServer"/> / <see cref="RuntimePackages.Sqlite"/>（マルチターゲットなら両方）</item>
 ///   <item><see cref="CodeGenerationOptions.GenerateEfCore"/> 時: <see cref="RuntimePackages.EntityFrameworkCore"/></item>
+///   <item><see cref="CodeGenerationOptions.GenerateInMemoryRepositories"/> 時: <see cref="RuntimePackages.InMemory"/></item>
 /// </list>
 /// バージョンは呼び出し側から受け取る（版の実配線は後続タスク）。
 /// </para>
@@ -29,7 +30,7 @@ public static class RuntimePackageReferenceGuidance
     /// <summary>
     /// 生成オプションから、参照すべきパッケージ ID の一覧を決定する（Core を先頭に、方言・EF Core を続ける安定順）。
     /// </summary>
-    /// <param name="options">生成オプション（実効方言・QuickER 版 Repository / EF Core の有無を参照する）</param>
+    /// <param name="options">生成オプション（実効方言・QuickER 版 Repository / EF Core / インメモリの有無を参照する）</param>
     /// <returns>参照が必要なパッケージ ID（重複なし・安定順）。<see cref="RuntimePackages.Core"/> を必ず含む</returns>
     public static IReadOnlyList<string> Compute(CodeGenerationOptions options)
     {
@@ -68,6 +69,11 @@ public static class RuntimePackageReferenceGuidance
         if (options.GenerateEfCore && !packages.Contains(RuntimePackages.EntityFrameworkCore))
         {
             packages.Add(RuntimePackages.EntityFrameworkCore);
+        }
+
+        if (options.GenerateInMemoryRepositories && !packages.Contains(RuntimePackages.InMemory))
+        {
+            packages.Add(RuntimePackages.InMemory);
         }
 
         return packages;

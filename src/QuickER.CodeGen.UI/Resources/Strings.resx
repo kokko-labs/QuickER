@@ -202,9 +202,6 @@
   <data name="CodeGen_Status_TargetDbRequired" xml:space="preserve">
     <value>Please select at least one target DB.</value>
   </data>
-  <data name="CodeGen_Status_InMemoryRuntimePackagesConflict" xml:space="preserve">
-    <value>In-memory repositories cannot be combined with the runtime NuGet package reference mode.</value>
-  </data>
   <data name="CodeGen_Status_NamespaceInvalidFormat" xml:space="preserve">
     <value>The {0} format is invalid.</value>
   </data>

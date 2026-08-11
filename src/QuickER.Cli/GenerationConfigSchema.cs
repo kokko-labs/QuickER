@@ -227,7 +227,6 @@ public static class GenerationConfigSchema
         "Entity classes are always generated; there is no key to toggle them.",
         "Generating DB-access code requires GenerateRepositories: true or GenerateEfCore: true (both default to false).",
         "Multi-target RepositoryDialects (two or more effective dialects) cannot be combined with GenerateEfCore.",
-        "UseRuntimePackages cannot be combined with GenerateEfCore or GenerateInMemoryRepositories.",
         "GenerateRemoteServices implies GenerateRemoteContracts.",
         "GenerateRemoteContracts / GenerateRemoteServices require a repository or EF Core contract (GenerateRepositories, GenerateEfCore, or GenerateInMemoryRepositories).",
         "UseGuidKeyForStringPrimaryKey applies only when GenerateValueObjects is true and the primary key is a string.",

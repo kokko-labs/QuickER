@@ -110,7 +110,7 @@ quicker mcp
 | `RepositoryDialects`（未指定） | QuickER 版 Repository のマルチターゲット方言リスト（例 `["sqlserver", "sqlite"]`）。対応方言は `sqlserver` と `sqlite` のみで、それ以外を `GenerateRepositories` と併用すると生成前にエラーになる。未指定時の実効値は `--repository-dialects` ＞ 設定ファイルの本キー ＞ `--provider` からの単一導出、の順で決まる |
 | `ExcludeUnboundedBinaryColumns`（`false`） | 無制限バイナリ列を QuickER 版 Repository の SELECT / UPDATE から除外する（CLI の `--exclude-unbounded-binary-columns` に対応。[生成コードの使い方](code-generation.ja.md#無制限バイナリ列の除外excludeunboundedbinarycolumns) 参照） |
 | `GenerateEfCore`（`false`） | EF Core 用の `QuickErDbContext` ＋ EF Core 版 Repository 実装を生成する。マルチターゲット（実効方言 2 つ以上）とは併用不可 |
-| `GenerateInMemoryRepositories`（`false`） | テスト用のインメモリ Repository 実装を生成する（`UseRuntimePackages` とは併用不可） |
+| `GenerateInMemoryRepositories`（`false`） | テスト用のインメモリ Repository 実装を生成する |
 | `GenerateRemoteContracts`（`false`） | リモート操作用インターフェイス `I{Entity}RemoteRepository` を追加生成する（CLI の `--generate-remote-contracts` に対応。QuickER 版 Repository・EF Core 版 Repository・インメモリ Repository のいずれか＝`GenerateRepositories` / `GenerateEfCore` / `GenerateInMemoryRepositories` のいずれかが前提。[生成コードの使い方](code-generation.ja.md) 参照） |
 | `GenerateRemoteServices`（`false`） | リモート面の HTTP クライアント／サーバー実装を生成する（`GenerateRemoteContracts` を自動的に含意。CLI の `--generate-remote-services` に対応。[生成コードの使い方](code-generation.ja.md) 参照） |
 | `UseRuntimePackages`（`false`） | ランタイム固定コードを出力せず NuGet パッケージ参照で賄う（[生成コードの使い方](code-generation.ja.md) 参照） |

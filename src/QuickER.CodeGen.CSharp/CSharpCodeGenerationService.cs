@@ -137,16 +137,10 @@ public sealed class CSharpCodeGenerationService
             );
         }
 
-        // インメモリ Repository はパッケージ参照モードと併用できない。インメモリ実行器（InMemoryQueryExecutor・
-        // InMemoryDataStore）は生成側の固定 infra として出力され、パッケージ（QuickER.Runtime.*）には存在しない。
-        // UseRuntimePackages は固定 infra を出力しないため、インメモリ実装が参照先を失いコンパイル不能になる。
-        // よって併用指定は早期に診断エラーとする（インメモリはインライン既定＝固定 infra 同梱でのみ成立する）。
-        if (options.GenerateInMemoryRepositories && options.UseRuntimePackages)
-        {
-            diagnostics.Add(
-                GenerationDiagnostic.Error(Strings.CodeGen_Error_InMemoryRuntimePackagesExclusive)
-            );
-        }
+        // インメモリ Repository とランタイムのパッケージ参照モードは併用できる（インメモリ基盤の固定 infra
+        // ＝InMemoryDataStore・InMemoryRepository 基底・保存ステージングをパッケージ QuickER.Runtime.InMemory へ
+        // 切り出したため、参照先を失わない）。per-entity のインメモリ実装・シーダー・DI 登録はスキーマ依存物として
+        // パッケージモードでも常に生成側へ出力する。
 
         // ランタイムのパッケージ参照モードと EF Core 生成は併用できる（EF Core 固定 infra を TContext ジェネリック化した
         // ことで、EF Core エンジン（EfCoreRepository / EfCoreSqlExecutor 等）は具象 QuickErDbContext を参照しなくなった）。
@@ -442,7 +436,12 @@ public sealed class CSharpCodeGenerationService
             // パッケージ参照モードでは固定 infra（契約・方言エンジン・EntityBase/属性/VO 基底 等）を出力せず、
             // 生成コードはパッケージ QuickER.Runtime.* の型を using で参照する。スキーマ依存物（Entity/EditModel/
             // Mapper/VO 具象/I{Entity}Repository/エンティティ別実装/DI 登録）は本フラグに依らず出力する。
-            EmitSharedInfra = !options.UseRuntimePackages,
+            // 分割時は固定 infra を Runtime 系ファイルへ集約するため、スペック側でも出し分ける
+            // （非分割は 1 ファイルへ全部入るため spec 側は既定の true）。
+            EmitSharedInfra = spec.EmitSharedInfra && !options.UseRuntimePackages,
+            // スキーマ依存物（per-entity・DI 登録・DbContext）は固定 infra 専用ファイル以外が出力する
+            // （非分割・スキーマ依存ファイルとも true。パッケージ用ソースの書き出しは RuntimePackageSourceRenderer が false）。
+            EmitSchemaDependent = spec.EmitSchemaDependent,
             // ヘッダ（render_header=true のファイル）へ載せる案内行。renderHeader=false の連結スペックでは
             // テンプレート側で出さないため空でよいが、呼び出し側が共通で渡す（render_header 経路のみ描画する）。
             PackageGuidanceLines = renderHeader ? packageGuidanceLines : [],

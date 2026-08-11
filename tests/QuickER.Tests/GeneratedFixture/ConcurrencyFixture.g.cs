@@ -10794,7 +10794,7 @@ internal sealed class InMemorySaveStaging
 /// from FK metadata to attach them.
 /// </summary>
 /// <remarks>
-/// Predicates (<see cref="LambdaExpression"/>) are turned into delegates with <see cref="LambdaExpression.Compile"/> and
+/// Predicates (<see cref="LambdaExpression"/>) are turned into delegates with <see cref="LambdaExpression.Compile()"/> and
 /// evaluated directly (no SQL translation). Returned entities are always clones of the store's snapshots, and the
 /// navigations attached by Include point to cloned children/parents as well (so caller-side changes do not propagate to the store).
 /// </remarks>

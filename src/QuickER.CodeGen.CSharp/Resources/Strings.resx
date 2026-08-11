@@ -64,9 +64,6 @@
   <data name="CodeGen_Error_MultiTargetEfCoreExclusive" xml:space="preserve">
     <value>EF Core generation cannot be combined with multi-target QuickER Repositories (two or more effective dialects). Narrow it to a single dialect or disable EF Core (the two are mutually exclusive).</value>
   </data>
-  <data name="CodeGen_Error_InMemoryRuntimePackagesExclusive" xml:space="preserve">
-    <value>In-memory Repository generation cannot be combined with the runtime package reference mode (UseRuntimePackages). The in-memory executor is emitted as fixed code on the generated side, so in a package reference mode that does not emit fixed code it loses its reference target. Disable UseRuntimePackages (emit the fixed code inline) or disable in-memory generation.</value>
-  </data>
   <data name="CodeGen_Error_TypeMismatch" xml:space="preserve">
     <value>Column '{1}' of table '{0}' resolves to different C# types across dialects ({2}: {3} / {4}: {5}). The shared Entity is a single type, so both dialects must resolve to the same C# type.</value>
   </data>

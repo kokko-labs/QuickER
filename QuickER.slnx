@@ -98,6 +98,7 @@
     <Project Path="src/QuickER.PostgreSql/QuickER.PostgreSql.csproj" />
     <Project Path="src/QuickER.Provider/QuickER.Provider.csproj" />
     <Project Path="src/QuickER.Runtime.EntityFrameworkCore/QuickER.Runtime.EntityFrameworkCore.csproj" />
+    <Project Path="src/QuickER.Runtime.InMemory/QuickER.Runtime.InMemory.csproj" />
     <Project Path="src/QuickER.Runtime.Sqlite/QuickER.Runtime.Sqlite.csproj" />
     <Project Path="src/QuickER.Runtime.SqlServer/QuickER.Runtime.SqlServer.csproj" />
     <Project Path="src/QuickER.Runtime/QuickER.Runtime.csproj" />

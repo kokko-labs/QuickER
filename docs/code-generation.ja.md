@@ -667,7 +667,7 @@ app.Run();
 
 ## テスト用インメモリ Repository（GenerateInMemoryRepositories）
 
-DB なしでユニットテストするためのインメモリ実装を追加生成できます。同一契約を実装し、サポート外の操作は実 DB の Repository へ切り替える案内付きの `NotSupportedException` を送出します。なお `GenerateInMemoryRepositories` と `UseRuntimePackages` は併用できません（診断エラー）。インメモリの実行器は生成側の固定 infra として出力され、パッケージには存在しないためです。
+DB なしでユニットテストするためのインメモリ実装を追加生成できます。同一契約を実装し、サポート外の操作は実 DB の Repository へ切り替える案内付きの `NotSupportedException` を送出します。
 
 ### 実 DB との既知の乖離
 
@@ -686,8 +686,29 @@ DB なしでユニットテストするためのインメモリ実装を追加�
 | `QuickER.Runtime.SqlServer` | QuickER の SQL Server 方言エンジン | Microsoft.Data.SqlClient |
 | `QuickER.Runtime.Sqlite` | QuickER の SQLite 方言エンジン | Microsoft.Data.Sqlite |
 | `QuickER.Runtime.EntityFrameworkCore` | EF Core 共通部品 | Microsoft.EntityFrameworkCore.Relational |
+| `QuickER.Runtime.InMemory` | インメモリエンジン（テスト用） | なし |
 
 パッケージ版とツール版はロックステップ（同一バージョン）で公開されるため、両者には同じバージョンを使ってください。0.x の間は minor 間の互換性を約束していません（[CONTRIBUTING](../CONTRIBUTING.ja.md) のバージョニング方針を参照）。DI 登録拡張・`QuickErDbContext`・エンティティ別実装などのスキーマ依存物は、本モードでも常に生成側に出力されます。
+
+### 生成ファイルとパッケージの対応（分割生成時）
+
+ファイル分割生成では、固定ランタイムとスキーマ依存コードが別ファイルに分かれ、**固定ランタイム側のファイルはパッケージと 1:1 対応**します。命名は「ファイル名・名前空間サフィックス＝パッケージ名のサフィックス」という単一規則です（`Runtime.SqlServer.g.cs` → 名前空間 `{Runtime}.SqlServer` → パッケージ `QuickER.Runtime.SqlServer`）。以下の `{Runtime}` はランタイム名前空間（既定 `{RootNamespace}.Runtime`）を指します。
+
+| 生成ファイル（名前空間） | 対応パッケージ | 内容 |
+|---|---|---|
+| `Runtime.g.cs`（`{Runtime}`） | `QuickER.Runtime` | 共有基盤（基底クラス・属性・VO 基底・JSON コンバータ）＋方言中立の契約（`IRepository`・クエリ基盤・リモートクライアント固定部） |
+| `Runtime.SqlServer.g.cs` / `Runtime.Sqlite.g.cs`（`{Runtime}.{方言}`） | `QuickER.Runtime.SqlServer` / `QuickER.Runtime.Sqlite` | 方言エンジン（方言 Repository 基底・式木翻訳・実行器・接続ファクトリ） |
+| `Runtime.EntityFrameworkCore.g.cs`（`{Runtime}.EntityFrameworkCore`） | `QuickER.Runtime.EntityFrameworkCore` | EF Core 共通部品（`TContext : DbContext` ジェネリックの Repository 基底・VO 翻訳プラグイン） |
+| `Runtime.InMemory.g.cs`（`{Runtime}.InMemory`） | `QuickER.Runtime.InMemory` | インメモリ基盤（ストア・Repository 基底・保存ステージング） |
+| `Repositories.g.cs`・`Repositories.SqlServer.g.cs` / `Repositories.Sqlite.g.cs` / `Repositories.EntityFrameworkCore.g.cs` / `Repositories.InMemory.g.cs` | —（対応パッケージなし＝常に生成） | スキーマ依存物のみ（per-entity の契約と実装・DI 登録・`QuickErDbContext` と Fluent 構成・HTTP クライアント・射影 DTO） |
+
+`Runtime.g.cs` は常に出力され、それ以降のファイルは有効にした機能の分だけ出力されます（方言ファイルは QuickER 版 Repository を生成するとき・EF Core ファイルは `GenerateEfCore`・インメモリファイルは `GenerateInMemoryRepositories` のときだけ）＝参照すべきパッケージの集合とそのまま一致します。
+
+この構成のため、`--use-runtime-packages` の意味は 1 つに収まります。**`Runtime*.g.cs` を 1 本も出力せず、生成コードの `using` が `{Runtime}…` ではなく固定のパッケージ名前空間（`QuickER.Runtime`・`QuickER.Runtime.SqlServer` …）を指すようになる**、それだけです。`Repositories*` 側はモードの ON / OFF で内容が変わりません。
+
+なお、ファイル名・名前空間の `EntityFrameworkCore` はパッケージ名へ揃えるためのもので、**C# の型名は従来どおり**です（`EfCore{Entity}Repository`・`QuickErDbContext`・`AddGeneratedEfCoreRepositories`）。
+
+`Entities.g.cs`・`ValueObjects.g.cs`・`EditModels.g.cs`・`Mappers.g.cs`・`RemoteServer.g.cs` は全体がスキーマ依存で、本モードでも内容は変わりません。非分割（単一ファイル）生成では、上記のすべてが 1 ファイルに連結されます。
 
 ## API リファレンス（.g.md）
 

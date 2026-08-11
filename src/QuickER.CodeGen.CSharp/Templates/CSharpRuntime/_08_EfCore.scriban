@@ -1,4 +1,4 @@
-{{~ if ef_core && render_ef_core && !runtime_package_export ~}}
+{{~ if ef_core && render_ef_core && emit_schema_dependent ~}}
 
 /// <summary>
 /// EF Core DbContext that connects to an existing schema.
@@ -1677,7 +1677,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
         );
 }
 {{~ end ~}}
-{{~ if ef_core && render_ef_core && !runtime_package_export ~}}
+{{~ if ef_core && render_ef_core && emit_schema_dependent ~}}
 
 /// <summary>Extensions that register the generated EF Core repositories into the DI container.</summary>
 public static class GeneratedEfCoreRepositoryServiceCollectionExtensions

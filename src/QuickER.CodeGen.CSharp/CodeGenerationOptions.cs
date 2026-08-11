@@ -167,9 +167,9 @@ public sealed record CodeGenerationOptions
     /// <see cref="GenerateRepositories"/> / <see cref="GenerateEfCore"/> と共有する（どれか一つでも ON なら契約を生成）。
     /// </para>
     /// <para>
-    /// 方言に依存しないため、QuickER 版 Repository のマルチターゲットや <see cref="GenerateEfCore"/> とは併用できる。
-    /// 固定 infra を出力しない <see cref="UseRuntimePackages"/> とは併用できない（インメモリ実行器がパッケージ側に
-    /// 存在せず生成側の固定 infra を必要とするため）。併用指定は生成時に診断エラーになる。
+    /// 方言に依存しないため、QuickER 版 Repository のマルチターゲット・<see cref="GenerateEfCore"/>・
+    /// <see cref="UseRuntimePackages"/> のいずれとも併用できる（パッケージ参照モードではインメモリ基盤の固定 infra を
+    /// <c>QuickER.Runtime.InMemory</c> パッケージが担い、per-entity 実装・シーダー・DI 登録だけが生成側に残る）。
     /// </para>
     /// </remarks>
     public bool GenerateInMemoryRepositories { get; init; }

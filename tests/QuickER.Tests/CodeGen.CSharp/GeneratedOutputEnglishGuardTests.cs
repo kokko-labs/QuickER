@@ -37,21 +37,22 @@ public sealed class GeneratedOutputEnglishGuardTests
     private static readonly Regex CjkPattern = new("[　-鿿＀-￯]", RegexOptions.Compiled);
 
     /// <summary>
-    /// ランタイムパッケージ用ソース（<see cref="RuntimePackageSourceRenderer"/> の 4 レンダリング＝
-    /// Core / SqlServer / Sqlite / EfCore）の出力に CJK 文字が含まれないことを検証する。
+    /// ランタイムパッケージ用ソース（<see cref="RuntimePackageSourceRenderer"/> の 5 レンダリング＝
+    /// Core / SqlServer / Sqlite / EfCore / InMemory）の出力に CJK 文字が含まれないことを検証する。
     /// これらは空図＋固定名前空間でレンダリングされるため、ユーザーデータ由来の日本語は元々混入し得ない。
     /// </summary>
-    [Fact(DisplayName = "ランタイムパッケージ用ソース 4 本に日本語（CJK）が含まれない")]
+    [Fact(DisplayName = "ランタイムパッケージ用ソース 5 本に日本語（CJK）が含まれない")]
     public void RuntimePackageSources_ContainNoCjk()
     {
         var renderer = new RuntimePackageSourceRenderer();
 
         var rendered = new (string FileName, string Content)[]
         {
-            ("QuickERRuntime.g.cs (Core)", renderer.RenderCore()),
-            ("QuickERRuntime.SqlServer.g.cs", renderer.RenderSqlServer()),
-            ("QuickERRuntime.Sqlite.g.cs", renderer.RenderSqlite()),
-            ("QuickERRuntime.EntityFrameworkCore.g.cs", renderer.RenderEfCore()),
+            ("Runtime.g.cs (Core)", renderer.RenderCore()),
+            ("Runtime.SqlServer.g.cs", renderer.RenderSqlServer()),
+            ("Runtime.Sqlite.g.cs", renderer.RenderSqlite()),
+            ("Runtime.EntityFrameworkCore.g.cs", renderer.RenderEfCore()),
+            ("Runtime.InMemory.g.cs", renderer.RenderInMemory()),
         };
 
         AssertNoCjk(rendered);

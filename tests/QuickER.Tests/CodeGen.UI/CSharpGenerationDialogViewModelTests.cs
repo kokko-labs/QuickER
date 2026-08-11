@@ -212,9 +212,12 @@ public class CSharpGenerationDialogViewModelTests
 
     /// <summary>
     /// EF Core 選択＋分割モードで Repository 契約名前空間欄が現れ、EF Core 実装ファイルは方言別実装と同じ流儀で
-    /// Repositories.EfCore.g.cs・{RepositoryNamespace}.EfCore へ導出される（専用の名前空間欄は持たない）ことを検証する
+    /// Repositories.EntityFrameworkCore.g.cs・{RepositoryNamespace}.EntityFrameworkCore へ導出される
+    /// （専用の名前空間欄は持たない）ことを検証する
     /// </summary>
-    [Fact(DisplayName = "EF Core 選択で EF Core 実装が {Repository}.EfCore へ導出される")]
+    [Fact(
+        DisplayName = "EF Core 選択で EF Core 実装が {Repository}.EntityFrameworkCore へ導出される"
+    )]
     public void EfCoreSelection_DerivesEfCoreNamespaceFromRepository()
     {
         var vm = CreateViewModel(out _);
@@ -230,12 +233,16 @@ public class CSharpGenerationDialogViewModelTests
 
         // EF Core 実装は Repository 契約名前空間のサブ名前空間へ導出される（専用欄なし）
         vm.PreviewFiles.Should()
-            .Contain("Repositories.EfCore.g.cs  →  namespace Acme.App.Repositories.EfCore");
+            .Contain(
+                "Repositories.EntityFrameworkCore.g.cs  →  namespace Acme.App.Repositories.EntityFrameworkCore"
+            );
 
         // ルート変更に伴い契約（Repositories）が追従すれば EF Core も自動的に追従する
         vm.RootNamespace = "Contoso.Sales";
         vm.PreviewFiles.Should()
-            .Contain("Repositories.EfCore.g.cs  →  namespace Contoso.Sales.Repositories.EfCore");
+            .Contain(
+                "Repositories.EntityFrameworkCore.g.cs  →  namespace Contoso.Sales.Repositories.EntityFrameworkCore"
+            );
     }
 
     /// <summary>
@@ -1358,10 +1365,11 @@ public class CSharpGenerationDialogViewModelTests
     }
 
     /// <summary>
-    /// インメモリ実装とパッケージ参照モードの併用は Ok で拒否され、専用のエラーメッセージが表示されることを検証する
+    /// インメモリ実装とパッケージ参照モードの併用が確定できることを検証する
+    /// （インメモリ基盤は QuickER.Runtime.InMemory パッケージが担うため、旧・併用不可チェックは撤去済み）
     /// </summary>
-    [Fact(DisplayName = "インメモリ実装＋パッケージ参照モードの併用は確定できない")]
-    public void Ok_InMemoryWithRuntimePackages_ShowsConflictError()
+    [Fact(DisplayName = "インメモリ実装＋パッケージ参照モードの併用は確定できる")]
+    public void Ok_InMemoryWithRuntimePackages_Succeeds()
     {
         var vm = CreateViewModel(out _);
         vm.RootNamespace = "Acme.App";
@@ -1371,8 +1379,9 @@ public class CSharpGenerationDialogViewModelTests
 
         vm.OkCommand.Execute(null);
 
-        vm.Result.Should().BeNull();
-        vm.StatusMessage.Should().Be(CodeGenStrings.CodeGen_Status_InMemoryRuntimePackagesConflict);
+        vm.Result.Should().NotBeNull();
+        vm.Result!.Options.GenerateInMemoryRepositories.Should().BeTrue();
+        vm.Result.Options.UseRuntimePackages.Should().BeTrue();
     }
 
     /// <summary>

@@ -8,8 +8,8 @@ namespace QuickER.CodeGen.CSharp;
 /// <remarks>
 /// <para>
 /// 生成コードのうちスキーマに依存しない固定部分（EntityBase・属性・VO 基底・JSON コンバータ・Repository 共通契約・
-/// 方言別エンジン・EF Core 共通部品）は <c>Templates/CSharpRuntime/*.scriban</c> から出力される。これを 4 分割の NuGet
-/// パッケージ（コア＋QuickER の方言エンジン×方言数＋EF Core）として配布できるようにするための ID を集約する。
+/// 方言別エンジン・EF Core 共通部品・インメモリ基盤）は <c>Templates/CSharpRuntime/*.scriban</c> から出力される。これを 5 分割の
+/// NuGet パッケージ（コア＋QuickER の方言エンジン×方言数＋EF Core＋インメモリ）として配布できるようにするための ID を集約する。
 /// </para>
 /// <para>
 /// パッケージ ID は、パッケージ書き出し時のソースの名前空間と一致させる（<see cref="RuntimePackageSourceRenderer"/> が
@@ -29,6 +29,9 @@ public static class RuntimePackages
 
     /// <summary>EF Core 共通部品パッケージ（EF Core 依存）の ID＝固定名前空間。</summary>
     public const string EntityFrameworkCore = "QuickER.Runtime.EntityFrameworkCore";
+
+    /// <summary>インメモリ基盤パッケージ（DB 非依存・BCL のみ依存）の ID＝固定名前空間。</summary>
+    public const string InMemory = "QuickER.Runtime.InMemory";
 
     /// <summary>
     /// パッケージ参照の案内（生成ヘッダ・GUI/CLI）に載せる既定バージョン。

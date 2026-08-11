@@ -8,7 +8,7 @@ namespace QuickER.CodeGen.CSharp;
 /// ソースの正本は <c>Templates/CSharpRuntime/*.scriban</c>（<see cref="ScribanCSharpRenderer"/> 経由）で、通常生成と同一。
 /// ここでは「空の ER 図＋全機能 ON＋<c>runtime_package_export=true</c>＋<c>infra_visibility="public"</c>」でレンダリングし、
 /// スキーマ依存物（Entity / EditModel / Mapper / I{Entity}Repository / DI 登録など）を一切含まない固定 infra だけを
-/// 4 パッケージ（<see cref="RuntimePackages"/>）のソースへ切り出す。
+/// 5 パッケージ（<see cref="RuntimePackages"/>）のソースへ切り出す。
 /// </para>
 /// <para>
 /// 分割規則:
@@ -19,6 +19,8 @@ namespace QuickER.CodeGen.CSharp;
 ///     方言別メタデータ）。<c>using QuickER.Runtime;</c> でコアの契約を参照する</item>
 ///   <item><b>EfCore</b>: EF Core 共通部品（EF Core 版 Repository 基底・VO 翻訳プラグイン・SaveConflict 変換・DbContext 基盤）。
 ///     同じく <c>using QuickER.Runtime;</c> 付き</item>
+///   <item><b>InMemory</b>: DB 非依存のインメモリエンジン（InMemoryDataStore・InMemoryRepository 基底・保存ステージング・
+///     式木評価）。ADO も EF Core も参照せず、同じく <c>using QuickER.Runtime;</c> 付き</item>
 /// </list>
 /// </para>
 /// </remarks>
@@ -49,18 +51,15 @@ public sealed class RuntimePackageSourceRenderer
         // その using（Microsoft.Extensions.DependencyInjection(.Extensions)）は除外して Core の依存ゼロを保つ
         // （方言エンジンパッケージの除外と同じ理由）。
         var usings = ResolveUsings(
-                options,
-                [GenerationBucket.Runtime, GenerationBucket.Repository],
-                dialect: "sqlserver",
-                contractOnly: true,
-                generateRepositories: true,
-                crossUsings: [],
-                includeRemoteServices: true
-            )
-            .Where(u =>
-                !u.StartsWith("Microsoft.Extensions.DependencyInjection", StringComparison.Ordinal)
-            )
-            .ToList();
+            options,
+            [GenerationBucket.Runtime, GenerationBucket.Repository],
+            dialect: "sqlserver",
+            contractOnly: true,
+            generateRepositories: true,
+            crossUsings: [],
+            includeRemoteServices: true,
+            emitSchemaDependent: false
+        );
 
         var scope = BuildScope(
             RuntimePackages.Core,
@@ -99,17 +98,14 @@ public sealed class RuntimePackageSourceRenderer
         // パッケージ書き出しでは出力しない（テンプレート側で runtime_package_export により抑止）ため、
         // DI の using も除いてパッケージを Microsoft.Extensions.DependencyInjection 非依存に保つ。
         var usings = ResolveUsings(
-                options,
-                [GenerationBucket.Repository],
-                dialect: dialect,
-                contractOnly: false,
-                generateRepositories: true,
-                crossUsings: [RuntimePackages.Core]
-            )
-            .Where(u =>
-                !u.StartsWith("Microsoft.Extensions.DependencyInjection", StringComparison.Ordinal)
-            )
-            .ToList();
+            options,
+            [GenerationBucket.Repository],
+            dialect: dialect,
+            contractOnly: false,
+            generateRepositories: true,
+            crossUsings: [RuntimePackages.Core],
+            emitSchemaDependent: false
+        );
 
         var scope = BuildScope(
             packageNamespace,
@@ -156,14 +152,17 @@ public sealed class RuntimePackageSourceRenderer
 
         // EF Core パッケージは EntitySaveMetadata / EntityGraphSaver（バックエンド共通メタデータ）も内包するため、
         // EfCore バケットに加えて Repository 契約バケットの using（ConcurrentDictionary・DataAnnotations・
-        // Globalization・式木リフレクション等）も取り込む。ContractOnly＝ADO・DI は付かない（EF Core 依存のみ）。
+        // Globalization・式木リフレクション等）も取り込む。ContractOnly＝ADO は付かない（EF Core 依存のみ）。
+        // DI（Microsoft.Extensions.DependencyInjection(.Extensions)）はコア・方言エンジンと違って除外しない
+        // ＝EF Core Relational が DI 抽象を推移的に連れてくるため依存が増えず、除外する理由がない。
         var usings = ResolveUsings(
             options,
             [GenerationBucket.EfCore, GenerationBucket.Repository],
             dialect: "sqlserver",
             contractOnly: true,
             generateRepositories: false,
-            crossUsings: [RuntimePackages.Core]
+            crossUsings: [RuntimePackages.Core],
+            emitSchemaDependent: false
         );
 
         var scope = BuildScope(
@@ -174,6 +173,49 @@ public sealed class RuntimePackageSourceRenderer
             renderContract: false,
             repositoryImpl: false,
             efCore: true
+        );
+
+        return Wrap(_renderer.Render(model, options, scope));
+    }
+
+    /// <summary>
+    /// インメモリ基盤パッケージ（<see cref="RuntimePackages.InMemory"/>）のソースをレンダリングする。
+    /// </summary>
+    /// <remarks>
+    /// インメモリエンジンの固定コード（InMemoryDataStore・InMemoryRepository 基底・保存ステージング・読み書きスコープ・
+    /// 式木評価）と、それが使うバックエンド共通メタデータ（EntitySaveMetadata / SaveHookSession / EntityGraphSaver）を、
+    /// 名前空間 <c>QuickER.Runtime.InMemory</c> で 1 ファイルへ出力する。共通契約（IRepository・SqlQuery・
+    /// ISaveHookContext 等）はコアを <c>using QuickER.Runtime;</c> で参照する（重複定義しない）。
+    /// 方言 ADO・EF Core・DI いずれにも依存しない（BCL のみ）。
+    /// </remarks>
+    public string RenderInMemory()
+    {
+        var options = BuildAllFeaturesOptions();
+        var model = BuildEmptyModel();
+
+        // InMemory バケットの using（BCL＋共有メタデータ用）＋コア契約 namespace（QuickER.Runtime）を付ける。
+        // 方言実装（ADO）の using は Repository バケットを含めないため付かない。DI 登録拡張
+        // （AddGeneratedInMemoryRepositories）はスキーマ依存物で出力されないため、DI の using も
+        // 除いてパッケージを Microsoft.Extensions.DependencyInjection 非依存に保つ（コア・方言エンジンと同じ規則）。
+        var usings = ResolveUsings(
+            options,
+            [GenerationBucket.InMemory],
+            dialect: "sqlserver",
+            contractOnly: false,
+            generateRepositories: false,
+            crossUsings: [RuntimePackages.Core],
+            emitSchemaDependent: false
+        );
+
+        var scope = BuildScope(
+            RuntimePackages.InMemory,
+            usings,
+            dialect: "sqlserver",
+            runtime: false,
+            renderContract: false,
+            repositoryImpl: false,
+            efCore: false,
+            inMemory: true
         );
 
         return Wrap(_renderer.Render(model, options, scope));
@@ -224,7 +266,8 @@ public sealed class RuntimePackageSourceRenderer
         bool contractOnly,
         bool generateRepositories,
         IReadOnlyList<string> crossUsings,
-        bool includeRemoteServices = false
+        bool includeRemoteServices = false,
+        bool emitSchemaDependent = true
     )
     {
         // GenerateRepositories（Repository バケットの ADO using 有無）と GenerateRemoteServices
@@ -254,6 +297,9 @@ public sealed class RuntimePackageSourceRenderer
             Dialect = dialect,
             ContractOnly = contractOnly,
             MultiDialect = false,
+            // false のとき DI 登録拡張（スキーマ依存物）の using が落ちる＝コア・方言エンジンパッケージの
+            // Microsoft.Extensions.DependencyInjection 非依存を保つ（分割生成の Runtime 系ファイルと共通の規則）
+            EmitSchemaDependent = emitSchemaDependent,
         };
 
         return GeneratedFileUsings.Resolve(spec, usingOptions);
@@ -267,7 +313,8 @@ public sealed class RuntimePackageSourceRenderer
         bool runtime,
         bool renderContract,
         bool repositoryImpl,
-        bool efCore
+        bool efCore,
+        bool inMemory = false
     ) =>
         new()
         {
@@ -283,8 +330,10 @@ public sealed class RuntimePackageSourceRenderer
             EfCore = efCore,
             RepositoryImpl = repositoryImpl,
             RenderContract = renderContract,
-            // インメモリ Repository はスキーマ依存物（生成側専用）であり、パッケージ固定 infra には含めない
-            InMemory = false,
+            // インメモリ基盤の固定 infra は専用パッケージ（QuickER.Runtime.InMemory）だけが持つ。
+            // per-entity のインメモリ実装・シーダー・DI 登録はスキーマ依存物として生成側に残る
+            // （EmitSchemaDependent=false が抑止する）。
+            InMemory = inMemory,
             Dialect = dialect,
             MultiDialect = false,
             BlockNamespace = false,
@@ -292,6 +341,9 @@ public sealed class RuntimePackageSourceRenderer
             // パッケージ書き出しモード: 空図でも固定 infra を完全出力し、infra 型を public 化する。
             RuntimePackageExport = true,
             InfraVisibility = PublicVisibility,
+            // per-entity クラス・DI 登録拡張・DbContext などのスキーマ依存物はパッケージに入れない
+            // （従来の !runtime_package_export ゲートと同じ意味を、固定 infra 軸と直交する第 2 軸で表す）。
+            EmitSchemaDependent = false,
         };
 
     /// <summary>

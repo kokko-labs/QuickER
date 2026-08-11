@@ -914,13 +914,6 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             return;
         }
 
-        // インメモリ実装（生成側の固定 infra を要する）とパッケージ参照モード（固定 infra を出力しない）は併用不可
-        if (GenerateInMemoryRepositories && UseRuntimePackages)
-        {
-            StatusMessage = Strings.CodeGen_Status_InMemoryRuntimePackagesConflict;
-            return;
-        }
-
         if (SplitFilesByCategory)
         {
             if (!ValidateSplitNamespaces(out var invalidName))

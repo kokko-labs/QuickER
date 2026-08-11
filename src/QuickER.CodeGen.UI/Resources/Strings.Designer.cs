@@ -342,12 +342,6 @@ namespace QuickER.CodeGen.UI.Resources {
             }
         }
 
-        public static string CodeGen_Status_InMemoryRuntimePackagesConflict {
-            get {
-                return ResourceManager.GetString("CodeGen_Status_InMemoryRuntimePackagesConflict", resourceCulture);
-            }
-        }
-
         public static string CodeGen_Status_NamespaceInvalidFormat {
             get {
                 return ResourceManager.GetString("CodeGen_Status_NamespaceInvalidFormat", resourceCulture);

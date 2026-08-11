@@ -6,7 +6,7 @@ The shared runtime foundation for the C# code that QuickER (an ER diagram design
 
 By default, QuickER's generated code is self-contained with the runtime inlined into the output, so **this package is not required**. When you generate with `--use-runtime-packages` (CLI) or the option that switches the runtime to package references (GUI), the schema-independent fixed code is provided by a reference to this package instead. The required `PackageReference`s are shown in the generated code header and the CLI output.
 
-Use it together with a dialect engine (`QuickER.Runtime.SqlServer` / `QuickER.Runtime.Sqlite`) or the EF Core components (`QuickER.Runtime.EntityFrameworkCore`). The DI registration extensions (`AddGenerated*Repositories`) are schema-dependent, so they are not included in this package and are always emitted on the generated-code side.
+Use it together with a dialect engine (`QuickER.Runtime.SqlServer` / `QuickER.Runtime.Sqlite`), the EF Core components (`QuickER.Runtime.EntityFrameworkCore`), or the in-memory engine (`QuickER.Runtime.InMemory`). The DI registration extensions (`AddGenerated*Repositories`) are schema-dependent, so they are not included in this package and are always emitted on the generated-code side.
 
 ## Version compatibility
 

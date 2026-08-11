@@ -3856,12 +3856,14 @@ public class CSharpCodeGenerationServiceTests
         );
 
         result.HasErrors.Should().BeFalse();
-        // QuickER 版 Repository は単一方言でも契約（Repositories.g.cs）＋方言別実装（Repositories.SqlServer.g.cs）へ分ける
+        // QuickER 版 Repository は単一方言でも契約（Repositories.g.cs）＋方言別実装（Repositories.SqlServer.g.cs）へ分け、
+        // 固定 infra は配布パッケージと対称な Runtime 系ファイル（Runtime.g.cs / Runtime.SqlServer.g.cs）へ分ける
         result
             .Files.Select(file => file.FileName)
             .Should()
             .BeEquivalentTo([
                 "Runtime.g.cs",
+                "Runtime.SqlServer.g.cs",
                 "ValueObjects.g.cs",
                 "Entities.g.cs",
                 "EditModels.g.cs",
@@ -3871,6 +3873,9 @@ public class CSharpCodeGenerationServiceTests
             ]);
 
         Content(result, "Runtime.g.cs").Should().Contain("namespace Sample.Domain.Runtime;");
+        Content(result, "Runtime.SqlServer.g.cs")
+            .Should()
+            .Contain("namespace Sample.Domain.Runtime.SqlServer;");
         Content(result, "Entities.g.cs").Should().Contain("namespace Sample.Domain.Entities;");
         Content(result, "ValueObjects.g.cs")
             .Should()
@@ -4106,15 +4111,23 @@ public class CSharpCodeGenerationServiceTests
         );
 
         result.HasErrors.Should().BeFalse();
-        // EF Core 実装は方言別実装と同じ流儀で Repositories.EfCore.g.cs・{Repository}.EfCore へ出力される
-        result.Files.Should().Contain(file => file.FileName == "Repositories.EfCore.g.cs");
+        // EF Core 実装は方言別実装と同じ流儀で Repositories.EntityFrameworkCore.g.cs・{Repository}.EntityFrameworkCore へ出力される
+        result
+            .Files.Should()
+            .Contain(file => file.FileName == "Repositories.EntityFrameworkCore.g.cs");
 
-        var efCore = Content(result, "Repositories.EfCore.g.cs");
-        efCore.Should().Contain("namespace Sample.Domain.Repositories.EfCore;");
+        var efCore = Content(result, "Repositories.EntityFrameworkCore.g.cs");
+        efCore.Should().Contain("namespace Sample.Domain.Repositories.EntityFrameworkCore;");
         efCore.Should().Contain("using Microsoft.EntityFrameworkCore;");
         efCore.Should().Contain("public partial class QuickErDbContext : DbContext");
+        // EF Core 固定 infra は Runtime.EntityFrameworkCore.g.cs（配布パッケージと対称）へ分かれる
+        efCore.Should().Contain("using Sample.Domain.Runtime.EntityFrameworkCore;");
+        Content(result, "Runtime.EntityFrameworkCore.g.cs")
+            .Should()
+            .Contain("namespace Sample.Domain.Runtime.EntityFrameworkCore;")
+            .And.Contain("EfCoreRepository<TEntity, TKey, TContext>");
 
-        // EF Core の using は EfCore ファイルにのみ現れ、Entity ファイルには漏れない
+        // EF Core の using は EF Core 系ファイルにのみ現れ、Entity ファイルには漏れない
         Content(result, "Entities.g.cs")
             .Should()
             .NotContain("using Microsoft.EntityFrameworkCore;");
@@ -4218,8 +4231,9 @@ public class CSharpCodeGenerationServiceTests
     }
 
     /// <summary>
-    /// 分割時、EF Core 実装は方言別実装と同じ流儀で Repositories.EfCore.g.cs へ出力され、
-    /// 名前空間が Repository 契約 namespace のサブ名前空間（{RepositoryNamespace}.EfCore）へ導出されることを検証する
+    /// 分割時、EF Core 実装は方言別実装と同じ流儀で Repositories.EntityFrameworkCore.g.cs へ出力され、
+    /// 名前空間が Repository 契約 namespace のサブ名前空間（{RepositoryNamespace}.EntityFrameworkCore）へ
+    /// 導出されることを検証する
     /// </summary>
     [Fact]
     public void Generate_EfCore_Split_ShouldDeriveNamespaceFromRepository()
@@ -4237,9 +4251,9 @@ public class CSharpCodeGenerationServiceTests
         );
 
         result.HasErrors.Should().BeFalse();
-        Content(result, "Repositories.EfCore.g.cs")
+        Content(result, "Repositories.EntityFrameworkCore.g.cs")
             .Should()
-            .Contain("namespace Acme.Persistence.Repos.EfCore;");
+            .Contain("namespace Acme.Persistence.Repos.EntityFrameworkCore;");
     }
 
     /// <summary>EF Core 単独出力（GenerateEfCore=true・GenerateRepositories=false）が合法で、エラーなく生成できることを検証する</summary>
@@ -4591,7 +4605,11 @@ public class CSharpCodeGenerationServiceTests
         );
 
         result.HasErrors.Should().BeFalse();
-        var efCore = Content(result, "Repositories.EfCore.g.cs");
+        // EF Core 系は「固定 infra（Runtime.EntityFrameworkCore.g.cs）＋スキーマ依存物（Repositories.EntityFrameworkCore.g.cs）」の
+        // 2 ファイル構成。いずれにも ADO（SqlClient）の型が出ないことを検証する
+        var efCore =
+            Content(result, "Repositories.EntityFrameworkCore.g.cs")
+            + Content(result, "Runtime.EntityFrameworkCore.g.cs");
 
         // EF Core 版コードは方言非依存（System.Data.Common の DbCommand/DbConnection/DbDataReader のみ使用）。
         // SqlBulkCopy は「性能特性が異なる」旨の XML コメントでのみ言及されるため、型使用（"SqlBulkCopy("）だけを禁止する
@@ -4599,8 +4617,11 @@ public class CSharpCodeGenerationServiceTests
         efCore.Should().NotContain("SqlDataReader");
         efCore.Should().NotContain("SqlBulkCopy(");
         efCore.Should().NotContain("new SqlConnection");
-        efCore.Should().Contain("EfCoreSqlExecutor");
-        efCore.Should().Contain("EfCoreRepository<TEntity, TKey, TContext>");
+        // 固定 infra（EF Core エンジン）は Runtime.EntityFrameworkCore.g.cs 側に出る
+        Content(result, "Runtime.EntityFrameworkCore.g.cs")
+            .Should()
+            .Contain("EfCoreSqlExecutor")
+            .And.Contain("EfCoreRepository<TEntity, TKey, TContext>");
     }
 
     /// <summary>rowversion 列と単一主キーを持つ最小ダイアグラム（IsRowVersion 構成の検証用）</summary>
@@ -4670,30 +4691,43 @@ public class CSharpCodeGenerationServiceTests
         content.Should().NotContain("AddGeneratedSqliteRepositories");
     }
 
-    /// <summary>インメモリ Repository とランタイムパッケージ参照モードの併用が診断エラーになることを検証する</summary>
-    [Fact(DisplayName = "インメモリ Repository ＋ UseRuntimePackages は診断エラー（併用不可）")]
-    public void Generate_InMemoryWithRuntimePackages_ReturnsErrorDiagnostic()
+    /// <summary>
+    /// インメモリ Repository とランタイムパッケージ参照モードが併用でき（旧・併用不可診断は撤去済み）、
+    /// インメモリ基盤の固定 infra が出力されず <c>QuickER.Runtime.InMemory</c> を using で参照することを検証する。
+    /// </summary>
+    [Fact(
+        DisplayName = "インメモリ Repository ＋ UseRuntimePackages は併用でき InMemory パッケージを参照する"
+    )]
+    public void Generate_InMemoryWithRuntimePackages_UsesInMemoryPackage()
     {
-        var result = new CSharpCodeGenerationService().Generate(
-            SingleEntityDiagram(),
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Domain",
-                GenerateRepositories = false,
-                GenerateEfCore = false,
-                GenerateInMemoryRepositories = true,
-                UseRuntimePackages = true,
-            }
-        );
+        var options = new CodeGenerationOptions
+        {
+            RootNamespace = "Sample.Domain",
+            GenerateRepositories = false,
+            GenerateEfCore = false,
+            GenerateInMemoryRepositories = true,
+            UseRuntimePackages = true,
+        };
 
-        result.HasErrors.Should().BeTrue();
-        result
-            .Diagnostics.Should()
-            .Contain(d =>
-                d.Severity == GenerationDiagnosticSeverity.Error
-                && d.Message == Strings.CodeGen_Error_InMemoryRuntimePackagesExclusive
-            );
-        result.Files.Should().BeEmpty("診断エラー時はファイルを出力しない");
+        var result = new CSharpCodeGenerationService().Generate(SingleEntityDiagram(), options);
+
+        result.HasErrors.Should().BeFalse();
+        result.Files.Should().NotBeEmpty();
+
+        var content = string.Join(Environment.NewLine, result.Files.Select(f => f.Content));
+
+        // 固定 infra はパッケージが持つ（生成側には出ない）
+        content.Should().NotContain("class InMemoryDataStore");
+        content.Should().NotContain("abstract partial class EntityBase");
+        // スキーマ依存物（per-entity 実装・DI 登録）は生成側に残り、パッケージを using で参照する
+        content.Should().Contain($"using {RuntimePackages.InMemory};");
+        content.Should().Contain("AddGeneratedInMemoryRepositories");
+
+        // 案内も Core＋InMemory になる（ADO / EF Core を含まない）
+        RuntimePackageReferenceGuidance
+            .Compute(options)
+            .Should()
+            .Equal(RuntimePackages.Core, RuntimePackages.InMemory);
     }
 
     /// <summary>varbinary(max)（無制限バイナリ）と rowversion（有界バイナリ）を持つ単一エンティティ図（除外機能の検証用）</summary>

@@ -13,10 +13,7 @@
 # ランタイムパッケージのチェックイン済み生成ソース（RuntimePackageSourceRenderer 出力）は、
 # ドリフト検知がレンダラー出力（CRLF）とのバイト単位一致を前提とするため CRLF に固定する。
 ###############################################################################
-src/QuickER.Runtime/QuickERRuntime.g.cs text eol=crlf
-src/QuickER.Runtime.SqlServer/QuickERRuntimeSqlServer.g.cs text eol=crlf
-src/QuickER.Runtime.Sqlite/QuickERRuntimeSqlite.g.cs text eol=crlf
-src/QuickER.Runtime.EntityFrameworkCore/QuickERRuntimeEntityFrameworkCore.g.cs text eol=crlf
+src/QuickER.Runtime*/Runtime*.g.cs text eol=crlf
 
 ###############################################################################
 # samples/ec-order のチェックイン済み生成物・図 JSON は、ドリフト検知が生成器出力

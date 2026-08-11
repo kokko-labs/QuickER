@@ -952,7 +952,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
 {{~ end ~}}
 }
 {{~ end ~}}
-{{~ if (repositories || in_memory || (ef_core && render_contract) || (ef_core && render_ef_core && runtime_package_export)) && emit_shared_infra ~}}
+{{~ if (repositories || in_memory || (ef_core && render_ef_core)) && emit_shared_infra ~}}
 
 /// <summary>Metadata built from the entity type's attributes that holds table/column information, CRUD SQL, and cascade child navigations, and provides row mapping and parameter binding.</summary>
 /// <remarks>Built once per type and cached by type key (reduces reflection cost). Shared by the repository's CRUD, graph save, JSON query planner, and cascade delete planner.</remarks>
@@ -2245,7 +2245,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     }
 }
 {{~ end ~}}
-{{~ if (repositories || in_memory || (ef_core && render_contract) || (ef_core && render_ef_core && runtime_package_export)) && emit_shared_infra ~}}
+{{~ if (repositories || in_memory || (ef_core && render_ef_core)) && emit_shared_infra ~}}
 
 /// <summary>A save hook session that lives only for the duration of a single Save call (carries the registry, context factory, and skip set).</summary>
 /// <remarks>
@@ -2913,7 +2913,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
 }
 {{~ end ~}}
 
-{{~ if render_contract && !runtime_package_export ~}}
+{{~ if render_contract && emit_schema_dependent ~}}
 /// <summary>Extensions that register save hooks (<c>ISaveHook&lt;TEntity&gt;</c>) with the DI container.</summary>
 /// <remarks>
 /// The default registry (<c>ServiceProviderSaveHookRegistry</c>, registered by every <c>AddGenerated*Repositories</c>
@@ -2959,7 +2959,7 @@ public static class SaveHookServiceCollectionExtensions
 }
 {{~ end ~}}
 
-{{~ if repositories && !runtime_package_export ~}}
+{{~ if repositories && emit_schema_dependent ~}}
 /// <summary>Extensions that register the generated repositories ({{ dialect_display_name }} implementation) with the DI container.</summary>
 /// <remarks>
 /// DI registration is provided per engine under the name <c>AddGenerated{{ dialect_di_suffix }}Repositories</c>, registering
@@ -3039,7 +3039,7 @@ public static class Generated{{ dialect_di_suffix }}RepositoryServiceCollectionE
 {{~ end ~}}
 
 {{~ for repository in repository_classes ~}}
-{{~ if render_contract ~}}
+{{~ if render_contract && emit_schema_dependent ~}}
 {{~ if remote_contracts ~}}
 {{~ remote_interface_members = join_members repository.query_interface_block repository.uniqueness_contract_block ~}}
 {{~ remote_interface_members = join_members remote_interface_members repository.binary_stream_contract_block ~}}
@@ -3073,7 +3073,7 @@ public partial interface {{ repository.interface_name }} : IRepository<{{ reposi
 {{ repository.binary_stream_file_extensions_block }}
 {{~ end ~}}
 {{~ end ~}}
-{{~ if repositories ~}}
+{{~ if repositories && emit_schema_dependent ~}}
 {{~ ado_query_impl_block = repository.query_impl_blocks_by_dialect[repository_dialect] ~}}
 {{~ ado_impl_members = join_members ado_query_impl_block repository.uniqueness_shared_impl_block ~}}
 {{~ ado_impl_members = join_members ado_impl_members repository.binary_stream_thin_impl_block ~}}
@@ -3089,7 +3089,7 @@ public sealed partial class {{ repository.class_name }}(
 {{~ end ~}}
 {{~ end ~}}
 {{~ end ~}}
-{{~ if remote_services && render_contract && !runtime_package_export ~}}
+{{~ if remote_services && render_contract && emit_schema_dependent ~}}
 {{~ for repository in repository_classes ~}}
 
 /// <summary>HTTP client implementation of the remote surface ({{ repository.remote_interface_name }}) for {{ repository.entity_class_name }}.</summary>

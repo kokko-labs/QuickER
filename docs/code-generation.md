@@ -667,7 +667,7 @@ A working example is in the repository at [samples/ec-order-remote](../samples/e
 
 ## In-memory repositories for tests (GenerateInMemoryRepositories)
 
-You can additionally generate an in-memory implementation for unit testing without a DB. It implements the same contract, and unsupported operations throw `NotSupportedException` with guidance to switch to the real-DB repository. Note that `GenerateInMemoryRepositories` cannot be combined with `UseRuntimePackages` (a diagnostic error), because the in-memory engine is emitted as fixed infra on the generation side and does not exist in the packages.
+You can additionally generate an in-memory implementation for unit testing without a DB. It implements the same contract, and unsupported operations throw `NotSupportedException` with guidance to switch to the real-DB repository.
 
 ### Known divergences from a real database
 
@@ -686,8 +686,29 @@ By default, the generated code is self-contained inline output that includes the
 | `QuickER.Runtime.SqlServer` | QuickER's SQL Server dialect engine | Microsoft.Data.SqlClient |
 | `QuickER.Runtime.Sqlite` | QuickER's SQLite dialect engine | Microsoft.Data.Sqlite |
 | `QuickER.Runtime.EntityFrameworkCore` | EF Core shared parts | Microsoft.EntityFrameworkCore.Relational |
+| `QuickER.Runtime.InMemory` | The in-memory engine (for tests) | None |
 
 The package version and the tool version are published in lockstep (the same version), so use the same version for both. While the project is on 0.x, compatibility between minor versions is not promised (see the versioning policy in [CONTRIBUTING](../CONTRIBUTING.md)). Schema-dependent items such as the DI-registration extensions, `QuickErDbContext`, and per-entity implementations are always emitted on the generation side even in this mode.
+
+### How generated files map to the packages (split output)
+
+With file splitting, the fixed runtime and the schema-dependent code go into separate files, and **the fixed-runtime files correspond one-to-one with the packages**. The naming follows a single rule: the file name and the namespace suffix are the suffix of the package name (`Runtime.SqlServer.g.cs` → namespace `{Runtime}.SqlServer` → package `QuickER.Runtime.SqlServer`). `{Runtime}` below is the runtime namespace (`{RootNamespace}.Runtime` by default).
+
+| Generated file (namespace) | Corresponding package | Contents |
+|---|---|---|
+| `Runtime.g.cs` (`{Runtime}`) | `QuickER.Runtime` | The shared foundation (base classes, attributes, VO bases, JSON converters) plus the dialect-neutral contracts (`IRepository`, the query pipeline, the remote client fixed part) |
+| `Runtime.SqlServer.g.cs` / `Runtime.Sqlite.g.cs` (`{Runtime}.{dialect}`) | `QuickER.Runtime.SqlServer` / `QuickER.Runtime.Sqlite` | The dialect engine (repository base, expression-tree translation, executor, connection factory) |
+| `Runtime.EntityFrameworkCore.g.cs` (`{Runtime}.EntityFrameworkCore`) | `QuickER.Runtime.EntityFrameworkCore` | EF Core shared parts (the `TContext : DbContext` generic repository base, VO translation plugins) |
+| `Runtime.InMemory.g.cs` (`{Runtime}.InMemory`) | `QuickER.Runtime.InMemory` | The in-memory foundation (store, repository base, save staging) |
+| `Repositories.g.cs`, `Repositories.SqlServer.g.cs` / `Repositories.Sqlite.g.cs` / `Repositories.EntityFrameworkCore.g.cs` / `Repositories.InMemory.g.cs` | — (no package; always generated) | Schema-dependent code only: per-entity contracts and implementations, DI registration, `QuickErDbContext` and its Fluent configuration, the HTTP client, projection DTOs |
+
+`Runtime.g.cs` is always there, while the files below it are emitted only for a feature you actually enabled (the dialect files only when the QuickER Repository is generated, the EF Core file only with `GenerateEfCore`, the in-memory file only with `GenerateInMemoryRepositories`) — exactly the same set of packages you would have to reference.
+
+Because of this layout, `--use-runtime-packages` means exactly one thing: **no `Runtime*.g.cs` is emitted at all, and the `using` directives in the generated code point at the fixed package namespaces (`QuickER.Runtime`, `QuickER.Runtime.SqlServer`, …) instead of `{Runtime}…`.** The `Repositories*` files are the same either way — turning the mode on or off does not change their contents.
+
+Note that the file and namespace suffix `EntityFrameworkCore` is about matching the package name; the **C# type names are unchanged** (`EfCore{Entity}Repository`, `QuickErDbContext`, `AddGeneratedEfCoreRepositories`).
+
+`Entities.g.cs`, `ValueObjects.g.cs`, `EditModels.g.cs`, `Mappers.g.cs`, and `RemoteServer.g.cs` are schema-dependent in their entirety and are unchanged by this mode. With non-split (single-file) generation, all of the above are concatenated into one file.
 
 ## API reference (.g.md)
 

@@ -463,34 +463,52 @@ public sealed class MultiTargetRepositoryGenerationTests
     {
         var files = GenerateMultiTarget(split: true).Files.ToDictionary(f => f.FileName);
 
-        // 方言別ファイルが生成される
+        // 方言別ファイルが生成される（スキーマ依存物＝Repositories 系・固定 infra＝Runtime 系）
         files.Keys.Should().Contain("Repositories.g.cs");
         files.Keys.Should().Contain("Repositories.SqlServer.g.cs");
         files.Keys.Should().Contain("Repositories.Sqlite.g.cs");
+        files.Keys.Should().Contain("Runtime.g.cs");
+        files.Keys.Should().Contain("Runtime.SqlServer.g.cs");
+        files.Keys.Should().Contain("Runtime.Sqlite.g.cs");
 
         var contract = files["Repositories.g.cs"].Content;
         var sqlServer = files["Repositories.SqlServer.g.cs"].Content;
         var sqlite = files["Repositories.Sqlite.g.cs"].Content;
+        var runtime = files["Runtime.g.cs"].Content;
+        var runtimeSqlServer = files["Runtime.SqlServer.g.cs"].Content;
+        var runtimeSqlite = files["Runtime.Sqlite.g.cs"].Content;
 
-        // 契約ファイルには ADO 依存が一切出ない
+        // 契約ファイル（per-entity 契約）・方言中立の固定 infra には ADO 依存が一切出ない
         contract.Should().NotContain("Microsoft.Data.SqlClient");
         contract.Should().NotContain("Microsoft.Data.Sqlite");
-        contract.Should().Contain("public partial interface IRepository<TEntity, TKey>");
         contract.Should().Contain("public partial interface ICustomerRepository");
+        runtime.Should().NotContain("Microsoft.Data.SqlClient");
+        runtime.Should().NotContain("Microsoft.Data.Sqlite");
+        // 方言中立契約の固定 infra は Runtime.g.cs（＝コアパッケージ相当）にのみ出る
+        runtime.Should().Contain("public partial interface IRepository<TEntity, TKey>");
+        contract.Should().NotContain("public partial interface IRepository<TEntity, TKey>");
 
         // sqlserver ファイルには SqlClient のみ（Sqlite ゼロ）
         sqlServer.Should().Contain("using Microsoft.Data.SqlClient;");
         sqlServer.Should().NotContain("Microsoft.Data.Sqlite");
         sqlServer.Should().Contain("using Sample.Domain.Repositories;");
+        sqlServer.Should().Contain("using Sample.Domain.Runtime.SqlServer;");
+        runtimeSqlServer.Should().Contain("using Microsoft.Data.SqlClient;");
+        runtimeSqlServer.Should().NotContain("Microsoft.Data.Sqlite");
 
         // sqlite ファイルには Sqlite のみ（SqlClient ゼロ）
         sqlite.Should().Contain("using Microsoft.Data.Sqlite;");
         sqlite.Should().NotContain("Microsoft.Data.SqlClient");
         sqlite.Should().Contain("using Sample.Domain.Repositories;");
+        sqlite.Should().Contain("using Sample.Domain.Runtime.Sqlite;");
+        runtimeSqlite.Should().Contain("using Microsoft.Data.Sqlite;");
+        runtimeSqlite.Should().NotContain("Microsoft.Data.SqlClient");
 
-        // 契約は契約ファイルにのみ（方言ファイルには IRepository 定義を再掲しない）
+        // 契約は Runtime.g.cs にのみ（方言ファイルには IRepository 定義を再掲しない）
         sqlServer.Should().NotContain("public partial interface IRepository<TEntity, TKey>");
         sqlite.Should().NotContain("public partial interface IRepository<TEntity, TKey>");
+        runtimeSqlServer.Should().NotContain("public partial interface IRepository<TEntity, TKey>");
+        runtimeSqlite.Should().NotContain("public partial interface IRepository<TEntity, TKey>");
     }
 
     [Fact(

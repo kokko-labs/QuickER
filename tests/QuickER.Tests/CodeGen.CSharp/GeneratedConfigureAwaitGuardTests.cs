@@ -40,10 +40,11 @@ public class GeneratedConfigureAwaitGuardTests
     /// <summary>検査対象のチェックイン済み生成物（リポジトリ直下からの相対パス）</summary>
     public static TheoryData<string> GeneratedFiles =>
         [
-            "src/QuickER.Runtime/QuickERRuntime.g.cs",
-            "src/QuickER.Runtime.SqlServer/QuickERRuntimeSqlServer.g.cs",
-            "src/QuickER.Runtime.Sqlite/QuickERRuntimeSqlite.g.cs",
-            "src/QuickER.Runtime.EntityFrameworkCore/QuickERRuntimeEntityFrameworkCore.g.cs",
+            "src/QuickER.Runtime/Runtime.g.cs",
+            "src/QuickER.Runtime.SqlServer/Runtime.SqlServer.g.cs",
+            "src/QuickER.Runtime.Sqlite/Runtime.Sqlite.g.cs",
+            "src/QuickER.Runtime.EntityFrameworkCore/Runtime.EntityFrameworkCore.g.cs",
+            "src/QuickER.Runtime.InMemory/Runtime.InMemory.g.cs",
             "tests/QuickER.Tests/GeneratedFixture/GeneratedFixture.g.cs",
             "tests/QuickER.Tests/GeneratedFixture/PortableFixture.g.cs",
             "tests/QuickER.Tests/GeneratedFixture/SqlitePortableFixture.g.cs",

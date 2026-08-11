@@ -122,7 +122,7 @@ internal static class FixtureDriftHarness
     /// または再生成する。既存フィクスチャと同一経路（<see cref="RegenEnvVar"/>）で上書き再生成される。
     /// </summary>
     /// <param name="rendered">レンダラーが生成した現在のソース文字列（CRLF・バイト一致の基準）</param>
-    /// <param name="repoRelativePath">リポジトリ直下からの相対パス（例 <c>src/QuickER.Runtime/QuickERRuntime.g.cs</c>）</param>
+    /// <param name="repoRelativePath">リポジトリ直下からの相対パス（例 <c>src/QuickER.Runtime/Runtime.g.cs</c>）</param>
     /// <param name="driftReason">ドリフト時に表示する理由（末尾に再生成コマンドが自動付与される）</param>
     public static void VerifyOrRegeneratePackageSource(
         string rendered,
@@ -265,7 +265,7 @@ internal static class FixtureDriftHarness
     }
 
     /// <summary>
-    /// リポジトリ直下からの相対パス（例 <c>src/QuickER.Runtime/QuickERRuntime.g.cs</c>）を、
+    /// リポジトリ直下からの相対パス（例 <c>src/QuickER.Runtime/Runtime.g.cs</c>）を、
     /// テストアセンブリの位置から <c>QuickER.slnx</c> を目印にリポジトリ直下を遡って解決する。
     /// </summary>
     private static string ResolveRepoRelativePath(string repoRelativePath)

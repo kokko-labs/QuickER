@@ -46,7 +46,7 @@ QuickER は個人開発の OSS です。Issue・Pull Request を歓迎します�
 
 ## バージョニング
 
-- [Semantic Versioning](https://semver.org/lang/ja/) に従います。全配布物（GUI・CLI・ランタイムパッケージ 4 種）はロックステップ＝`Directory.Build.props` の `VersionPrefix` で共通管理です
+- [Semantic Versioning](https://semver.org/lang/ja/) に従います。全配布物（GUI・CLI・ランタイムパッケージ 5 種）はロックステップ＝`Directory.Build.props` の `VersionPrefix` で共通管理です
 - 0.x の間の版上げルール:
   - **minor**（0.2.0 → 0.3.0）: 新機能、非互換変更（Repository API や生成コードのシグネチャ・構造の変化、パッケージの依存変更）
   - **patch**（0.2.0 → 0.2.1）: バグ修正のみ。利用側の呼び出しコードが壊れない修正は、生成コードの内部実装が変わっても patch とします

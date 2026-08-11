@@ -15,9 +15,9 @@ namespace QuickER.Tests.GeneratedFixture;
 /// チェックイン済みソースが古くなり得るため、このテストで乖離を検出する。
 /// </para>
 /// <para>
-/// 対象は 4 パッケージのソース（Core / SqlServer / Sqlite / EntityFrameworkCore）。
+/// 対象は 5 パッケージのソース（Core / SqlServer / Sqlite / EntityFrameworkCore / InMemory）。
 /// 検証・再生成の実処理は既存フィクスチャと同じ <see cref="FixtureDriftHarness"/> に集約しており、
-/// <c>QUICKER_REGEN_FIXTURES=1</c> のとき既存フィクスチャと同一経路でこの 4 ソースも上書き再生成される。
+/// <c>QUICKER_REGEN_FIXTURES=1</c> のとき既存フィクスチャと同一経路でこの 5 ソースも上書き再生成される。
 /// テンプレート変更後の再生成手順は同ハーネスの docstring と失敗メッセージを参照。
 /// </para>
 /// </remarks>
@@ -33,7 +33,7 @@ public sealed class RuntimePackageSourceDriftTests
     {
         FixtureDriftHarness.VerifyOrRegeneratePackageSource(
             Renderer.RenderCore(),
-            "src/QuickER.Runtime/QuickERRuntime.g.cs",
+            "src/QuickER.Runtime/Runtime.g.cs",
             "コアパッケージのチェックイン済みソースが現在のテンプレート出力と乖離しています。"
                 + "テンプレート（QuickER.CodeGen.CSharp/Templates/CSharpRuntime/*.scriban 等）を変更した場合は再生成が必要です。"
         );
@@ -47,7 +47,7 @@ public sealed class RuntimePackageSourceDriftTests
     {
         FixtureDriftHarness.VerifyOrRegeneratePackageSource(
             Renderer.RenderSqlServer(),
-            "src/QuickER.Runtime.SqlServer/QuickERRuntimeSqlServer.g.cs",
+            "src/QuickER.Runtime.SqlServer/Runtime.SqlServer.g.cs",
             "SqlServer パッケージのチェックイン済みソースが現在のテンプレート出力と乖離しています。"
                 + "テンプレート（QuickER.CodeGen.CSharp/Templates/CSharpRuntime/*.scriban 等）を変更した場合は再生成が必要です。"
         );
@@ -61,7 +61,7 @@ public sealed class RuntimePackageSourceDriftTests
     {
         FixtureDriftHarness.VerifyOrRegeneratePackageSource(
             Renderer.RenderSqlite(),
-            "src/QuickER.Runtime.Sqlite/QuickERRuntimeSqlite.g.cs",
+            "src/QuickER.Runtime.Sqlite/Runtime.Sqlite.g.cs",
             "Sqlite パッケージのチェックイン済みソースが現在のテンプレート出力と乖離しています。"
                 + "テンプレート（QuickER.CodeGen.CSharp/Templates/CSharpRuntime/*.scriban 等）を変更した場合は再生成が必要です。"
         );
@@ -75,8 +75,22 @@ public sealed class RuntimePackageSourceDriftTests
     {
         FixtureDriftHarness.VerifyOrRegeneratePackageSource(
             Renderer.RenderEfCore(),
-            "src/QuickER.Runtime.EntityFrameworkCore/QuickERRuntimeEntityFrameworkCore.g.cs",
+            "src/QuickER.Runtime.EntityFrameworkCore/Runtime.EntityFrameworkCore.g.cs",
             "EntityFrameworkCore パッケージのチェックイン済みソースが現在のテンプレート出力と乖離しています。"
+                + "テンプレート（QuickER.CodeGen.CSharp/Templates/CSharpRuntime/*.scriban 等）を変更した場合は再生成が必要です。"
+        );
+    }
+
+    /// <summary>インメモリ基盤（<c>QuickER.Runtime.InMemory</c>・BCL のみ）のチェックイン済みソースが一致する</summary>
+    [Fact(
+        DisplayName = "InMemory パッケージのチェックイン済みソースが現在のレンダラー出力と完全一致する（ドリフト検知）"
+    )]
+    public void InMemorySource_MatchesRenderedOutput()
+    {
+        FixtureDriftHarness.VerifyOrRegeneratePackageSource(
+            Renderer.RenderInMemory(),
+            "src/QuickER.Runtime.InMemory/Runtime.InMemory.g.cs",
+            "InMemory パッケージのチェックイン済みソースが現在のテンプレート出力と乖離しています。"
                 + "テンプレート（QuickER.CodeGen.CSharp/Templates/CSharpRuntime/*.scriban 等）を変更した場合は再生成が必要です。"
         );
     }

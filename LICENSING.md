@@ -32,7 +32,7 @@ Mapped to what you actually download:
 | --- | --- |
 | GUI (Setup.exe / Portable zip) | MIT parts + the NC-covered feature assemblies (the license files ship inside the distribution) |
 | CLI (NuGet package `QuickER.Cli`) | PolyForm NC + additional grants (the license file is bundled in the package) |
-| Runtime NuGet packages (`QuickER.Runtime` / `.SqlServer` / `.Sqlite` / `.EntityFrameworkCore`) | MIT |
+| Runtime NuGet packages (`QuickER.Runtime` / `.SqlServer` / `.Sqlite` / `.EntityFrameworkCore` / `.InMemory`) | MIT |
 | Code, DDL, and documents QuickER generates for you | Yours — not covered by QuickER's licenses at all |
 
 The GUI and CLI distributions also bundle third-party components (database drivers, the template engine, and so on). Their attributions and license texts are collected in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md), which ships inside those distributions.

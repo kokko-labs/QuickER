@@ -70,6 +70,7 @@ public class RuntimePackageModeCompilationTests
         allContent.Should().NotContain("interface IRepository<TEntity");
         allContent.Should().NotContain("class SqlServerRepository<");
         allContent.Should().NotContain("class SqliteRepository<");
+        allContent.Should().NotContain("class InMemoryDataStore");
 
         // 案内が指示するパッケージ集合だけを参照集合として構築し、生成コードをコンパイルする。
         // サーバー実装ファイル（.RemoteServer.g.cs）は ASP.NET Core の FrameworkReference を要するため
@@ -212,6 +213,25 @@ public class RuntimePackageModeCompilationTests
             );
     }
 
+    /// <summary>インメモリ×パッケージの案内は Core＋InMemory のみ（ADO / EF Core を含まない）になる</summary>
+    [Fact]
+    public void InMemoryOnly_Guidance_IsCoreAndInMemory_NoAdoOrEf()
+    {
+        var options = WithPackageMode(
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Sample.Domain",
+                GenerateRepositories = false,
+                GenerateInMemoryRepositories = true,
+            }
+        );
+
+        RuntimePackageReferenceGuidance
+            .Compute(options)
+            .Should()
+            .Equal(RuntimePackages.Core, RuntimePackages.InMemory);
+    }
+
     /// <summary>PackageReference 行の案内が指定バージョンで組み立てられる</summary>
     [Fact]
     public void BuildPackageReferenceLines_ProducesVersionedLines()
@@ -299,6 +319,42 @@ public class RuntimePackageModeCompilationTests
                     SplitFilesByCategory = split,
                     GenerateRepositories = true,
                     GenerateEfCore = true,
+                }
+            );
+            // インメモリ×パッケージ参照モード（併用可能化の実証。インメモリ基盤の固定 infra は
+            // QuickER.Runtime.InMemory が提供し、per-entity 実装・シーダー・DI 登録は生成側に残る）
+            data.Add(
+                $"インメモリ単独 Split={split}",
+                new CodeGenerationOptions
+                {
+                    RootNamespace = "Sample.Domain",
+                    SplitFilesByCategory = split,
+                    GenerateRepositories = false,
+                    GenerateInMemoryRepositories = true,
+                }
+            );
+            data.Add(
+                $"QuickER sqlserver＋インメモリ併存 Split={split}",
+                new CodeGenerationOptions
+                {
+                    RootNamespace = "Sample.Domain",
+                    SplitFilesByCategory = split,
+                    GenerateRepositories = true,
+                    GenerateInMemoryRepositories = true,
+                }
+            );
+            // インメモリ×VO×無制限バイナリ除外（per-entity 実装が固定 infra の protected/公開メンバーだけで
+            // 成立することを最大構成で確認する）
+            data.Add(
+                $"インメモリ＋VO＋バイナリ除外 Split={split}",
+                new CodeGenerationOptions
+                {
+                    RootNamespace = "Sample.Domain",
+                    SplitFilesByCategory = split,
+                    GenerateRepositories = true,
+                    GenerateInMemoryRepositories = true,
+                    GenerateValueObjects = true,
+                    ExcludeUnboundedBinaryColumns = true,
                 }
             );
         }
@@ -460,6 +516,15 @@ public class RuntimePackageModeCompilationTests
                             DataType = "decimal(10,2)",
                             IsNullable = false,
                         },
+                        // 無制限バイナリ列（ExcludeUnboundedBinaryColumns のケースで Stream アクセサ・
+                        // 除外ガードの固定 infra 参照までコンパイル検証させる）
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "attachment",
+                            DataType = "varbinary(max)",
+                            IsNullable = true,
+                        },
                     ],
                 },
             ],
@@ -530,6 +595,17 @@ public class RuntimePackageModeCompilationTests
                 RuntimePackages.EntityFrameworkCore,
                 [PackageRenderer.RenderCore(), PackageRenderer.RenderEfCore()],
                 RuntimeReferenceSet.EfCore,
+                corePeImage: coreImage
+            );
+            references.Add(MetadataReference.CreateFromImage(image));
+        }
+
+        if (packages.Contains(RuntimePackages.InMemory))
+        {
+            var image = CompilePackageAssembly(
+                RuntimePackages.InMemory,
+                [PackageRenderer.RenderCore(), PackageRenderer.RenderInMemory()],
+                RuntimeReferenceSet.InMemory,
                 corePeImage: coreImage
             );
             references.Add(MetadataReference.CreateFromImage(image));
@@ -703,6 +779,9 @@ internal sealed class RuntimeReferenceSet
 
     /// <summary>EfCore パッケージ: BCL＋EF Core＋DI</summary>
     public static RuntimeReferenceSet EfCore { get; } = new(false, false, true, true);
+
+    /// <summary>InMemory パッケージ: BCL のみ（ADO / EF Core / DI なし＝DB 非依存を参照集合で証明する）</summary>
+    public static RuntimeReferenceSet InMemory { get; } = new(false, false, false, false);
 
     /// <summary>生成コード: BCL＋DI（登録拡張）のみ。方言 ADO / EF Core はパッケージ側だけが参照する</summary>
     public static RuntimeReferenceSet GeneratedCode { get; } = new(false, false, false, true);

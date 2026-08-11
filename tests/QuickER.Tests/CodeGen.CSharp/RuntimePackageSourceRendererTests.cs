@@ -7,7 +7,7 @@ using QuickER.CodeGen.CSharp;
 namespace QuickER.Tests.CodeGen.CSharp;
 
 /// <summary>
-/// <see cref="RuntimePackageSourceRenderer"/> が書き出す 4 パッケージ（Core / SqlServer / Sqlite / EfCore）のソースが、
+/// <see cref="RuntimePackageSourceRenderer"/> が書き出す 5 パッケージ（Core / SqlServer / Sqlite / EfCore / InMemory）のソースが、
 /// 「案内どおりの最小依存だけを参照して」Roslyn でコンパイルできることと、依存が排他であることを検証する。
 /// </summary>
 /// <remarks>
@@ -100,6 +100,40 @@ public class RuntimePackageSourceRendererTests
             );
     }
 
+    /// <summary>InMemory は Core 参照のみでコンパイルでき、ADO / EF Core / DI 参照なしで成立する</summary>
+    [Fact]
+    public void RenderInMemory_CompilesWithCoreOnly()
+    {
+        var core = _renderer.RenderCore();
+        var inMemory = _renderer.RenderInMemory();
+
+        var result = Compile(
+            [core, inMemory],
+            allowSqlClient: false,
+            allowSqlite: false,
+            allowEfCore: false
+        );
+
+        result
+            .Success.Should()
+            .BeTrue(
+                $"InMemory は Core＋BCL のみで成立するはず:{Environment.NewLine}{result.Describe()}"
+            );
+    }
+
+    /// <summary>InMemory ソースには方言 ADO / EF Core / DI の名前空間文字列が現れない（依存排他の文字列ガード）</summary>
+    [Fact]
+    public void RenderInMemory_DoesNotReferenceDialectEfOrDiNamespaces()
+    {
+        var inMemory = _renderer.RenderInMemory();
+
+        inMemory.Should().NotContain("Microsoft.Data.SqlClient");
+        inMemory.Should().NotContain("Microsoft.Data.Sqlite");
+        inMemory.Should().NotContain("EntityFrameworkCore");
+        // DI 登録拡張（AddGeneratedInMemoryRepositories）はスキーマ依存物として生成側にだけ出る
+        inMemory.Should().NotContain("Microsoft.Extensions.DependencyInjection");
+    }
+
     /// <summary>Core ソースには方言 ADO / EF Core の名前空間文字列が現れない（依存排他の文字列ガード）</summary>
     [Fact]
     public void RenderCore_DoesNotReferenceDialectOrEfNamespaces()
@@ -128,6 +162,10 @@ public class RuntimePackageSourceRendererTests
         var efCore = _renderer.RenderEfCore();
         efCore.Should().Contain($"namespace {RuntimePackages.EntityFrameworkCore};");
         efCore.Should().Contain($"using {RuntimePackages.Core};");
+
+        var inMemory = _renderer.RenderInMemory();
+        inMemory.Should().Contain($"namespace {RuntimePackages.InMemory};");
+        inMemory.Should().Contain($"using {RuntimePackages.Core};");
     }
 
     /// <summary>

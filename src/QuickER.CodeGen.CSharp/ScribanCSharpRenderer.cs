@@ -104,6 +104,22 @@ internal sealed class RenderScope
     public bool EmitSharedInfra { get; init; } = true;
 
     /// <summary>
+    /// スキーマ依存物（per-entity のクラス・インターフェイス、DI 登録拡張、DbContext 等）を出力するか（既定 true）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <see cref="EmitSharedInfra"/>（固定 infra 軸）と直交する第 2 軸。通常生成は <c>true</c>（従来どおり全部出す＝バイト不変）、
+    /// パッケージ用ソースの書き出し（<see cref="RuntimePackageSourceRenderer"/>）は <c>false</c>（パッケージにスキーマ依存物は入らない）。
+    /// </para>
+    /// <para>
+    /// <see cref="RuntimePackageExport"/> を流用しないのは、同フラグに「スキーマが空でも固定 infra を出す」＝機能ゲートを
+    /// 加算的に緩める副作用があり、「スキーマ依存物を出すか」という軸だけを表せないため（分割生成の対称化で
+    /// パッケージ書き出し以外の経路からも本軸を落とす必要がある）。
+    /// </para>
+    /// </remarks>
+    public bool EmitSchemaDependent { get; init; } = true;
+
+    /// <summary>
     /// パッケージ参照モードで生成ファイルの先頭コメントへ載せる案内テキスト（必要な PackageReference 等）。既定は空。
     /// </summary>
     /// <remarks>
@@ -376,6 +392,10 @@ internal sealed class ScribanCSharpRenderer
             // 通常生成のみ false を渡し、固定 infra を落として per-entity・DI・DbContext だけを残す。
             // 全既存経路へ必ず供給する（供給漏れは scriban が空文字を出しバイト不変を壊すため）。
             ["emit_shared_infra"] = scope.EmitSharedInfra,
+            // スキーマ依存物（per-entity・DI 登録・DbContext）を出力するか。通常生成は true（バイト不変）。
+            // パッケージ用ソースの書き出しのみ false を渡し、固定 infra だけを残す（emit_shared_infra と直交する第 2 軸）。
+            // 全既存経路へ必ず供給する（供給漏れは scriban が空文字を出しバイト不変を壊すため）。
+            ["emit_schema_dependent"] = scope.EmitSchemaDependent,
             // パッケージ参照モードでヘッダへ載せる案内行。通常生成は空リスト（追加行なし＝バイト不変）。
             ["package_guidance_lines"] = scope.PackageGuidanceLines,
             // ブロック名前空間の内側へ出す方言限定 using（非分割マルチ方言のパッケージ参照モードのみ非空）。

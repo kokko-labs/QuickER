@@ -73,6 +73,27 @@ public sealed class GeneratedFileSpec
     /// DI 拡張の方言別名（<c>AddGenerated{方言}Repositories</c>）は本フラグに依らずエンジン別で統一される。
     /// </remarks>
     public required bool MultiDialect { get; init; }
+
+    /// <summary>
+    /// スキーマ非依存の固定 infra（契約・方言エンジン・EF Core 共通部品・インメモリ基盤・EntityBase/属性/VO 基底 等）を
+    /// このファイルへ出力するか（既定 true）。
+    /// </summary>
+    /// <remarks>
+    /// 分割時は固定 infra を <c>Runtime*.g.cs</c> へ集約し（true）、<c>Repositories*.g.cs</c> 等はスキーマ依存物だけに
+    /// 純化する（false）。非分割は 1 ファイルへ全部入るため既定の true のまま
+    /// （パッケージ参照モードでの抑止は <see cref="CodeGenerationOptions.UseRuntimePackages"/> が別途 AND する）。
+    /// </remarks>
+    public bool EmitSharedInfra { get; init; } = true;
+
+    /// <summary>
+    /// スキーマ依存物（per-entity のクラス・インターフェイス、DI 登録拡張、DbContext・シーダー等）を
+    /// このファイルへ出力するか（既定 true）。
+    /// </summary>
+    /// <remarks>
+    /// <see cref="EmitSharedInfra"/> と直交する第 2 軸。固定 infra 専用ファイル（<c>Runtime*.g.cs</c>）だけが false で、
+    /// その他のファイルは true（非分割は 1 ファイルへ全部入るため既定の true）。
+    /// </remarks>
+    public bool EmitSchemaDependent { get; init; } = true;
 }
 
 /// <summary>
@@ -109,7 +130,7 @@ public static class GeneratedFilePlanner
             GenerationBucket.EditModel => options.EditModelNamespace,
             GenerationBucket.Mapper => options.MapperNamespace,
             GenerationBucket.Repository => options.RepositoryNamespace,
-            // EfCore に個別の名前空間オプションは設けない（分割時は {RepositoryNamespace}.EfCore へ導出専用。
+            // EfCore に個別の名前空間オプションは設けない（分割時は {RepositoryNamespace}.EntityFrameworkCore へ導出専用。
             // 方言別実装 {RepositoryNamespace}.SqlServer 等と同じ扱い）
             _ => null,
         };
@@ -132,7 +153,10 @@ public static class GeneratedFilePlanner
             GenerationBucket.EditModel => "EditModels",
             GenerationBucket.Mapper => "Mappers",
             GenerationBucket.Repository => "Repositories",
-            GenerationBucket.EfCore => "EfCore",
+            // ファイル名・名前空間サフィックスは配布パッケージ名のサフィックスと同一規則にする
+            // （EF Core は略記 EfCore を使わず QuickER.Runtime.EntityFrameworkCore に揃える。
+            //   C# の型名（EfCore{Entity}Repository・QuickErDbContext）は別軸のため現状維持）
+            GenerationBucket.EfCore => "EntityFrameworkCore",
             GenerationBucket.InMemory => "InMemory",
             GenerationBucket.RemoteServer => "RemoteServer",
             _ => "Generated",
@@ -310,7 +334,13 @@ public static class GeneratedFilePlanner
     /// </para>
     /// <para>
     /// EF Core 実装（<see cref="CodeGenerationOptions.GenerateEfCore"/>）は分割時、方言別実装と同じ流儀で
-    /// <c>Repositories.EfCore.g.cs</c>・<c>{RepositoryNamespace}.EfCore</c>（契約 namespace のサブ名前空間へ導出専用）へ出す。
+    /// <c>Repositories.EntityFrameworkCore.g.cs</c>・<c>{RepositoryNamespace}.EntityFrameworkCore</c>
+    /// （契約 namespace のサブ名前空間へ導出専用）へ出す。
+    /// </para>
+    /// <para>
+    /// 分割時はさらに、スキーマ非依存の固定 infra を <c>Runtime*.g.cs</c>（配布パッケージ <c>QuickER.Runtime*</c> と
+    /// 1:1 対応）へ集約し、<c>Repositories*.g.cs</c> は per-entity・DI 登録・DbContext だけへ純化する。
+    /// パッケージ参照モードでは <c>Runtime*.g.cs</c> を 1 本も計画しない（固定 infra はパッケージが持つ）。
     /// </para>
     /// </remarks>
     public static IReadOnlyList<GeneratedFileSpec> Plan(CodeGenerationOptions options)
@@ -399,9 +429,13 @@ public static class GeneratedFilePlanner
             return specs;
         }
 
-        // パッケージ参照モードの分割生成では、共有基盤（Runtime バケット）は固定 infra だけで構成されるため
-        // ファイルを作らない（全型がパッケージ QuickER.Runtime に移る）。他バケットの Runtime 向けクロス using は
-        // activeSet から外れることで自然に落ち、代わりに GeneratedFileUsings が固定名前空間 using を付ける。
+        // 分割生成は「固定 infra は Runtime 系ファイル・スキーマ依存物は Repositories 系ほか」の対称構成へ分ける。
+        // Runtime 系（Runtime.g.cs / Runtime.{方言}.g.cs / Runtime.EntityFrameworkCore.g.cs / Runtime.InMemory.g.cs）は
+        // 配布パッケージ QuickER.Runtime* と 1:1 対応し、Repositories 系は per-entity・DI 登録・DbContext だけになる
+        // （＝パッケージ参照モードの on/off で内容が変わらない）。
+        // パッケージ参照モードでは固定 infra をパッケージが持つため、Runtime 系ファイルを計画から落とすだけでよい
+        // （他バケットの Runtime 向けクロス using は activeSet から外れて自然に落ち、代わりに
+        //   GeneratedFileUsings が固定名前空間 using を付ける）。
         var emittedBuckets = options.UseRuntimePackages
             ? active.Where(bucket => bucket != GenerationBucket.Runtime).ToList()
             : active;
@@ -425,22 +459,42 @@ public static class GeneratedFilePlanner
 
         var activeSet = emittedBuckets.ToHashSet();
 
+        // 固定 infra ファイル（Runtime 系）の基底名前空間。パッケージ参照モードでは Runtime バケット自体を
+        // 出さないため null で、スキーマ依存物は固定名前空間（QuickER.Runtime*）を using する。
+        var runtimeNamespace = options.UseRuntimePackages
+            ? null
+            : namespaceByBucket[GenerationBucket.Runtime];
+
         var splitSpecs = new List<GeneratedFileSpec>();
 
         foreach (var bucket in emittedBuckets)
         {
+            // 共有基盤（Runtime バケット）は固定 infra 専用ファイル群としてループの後でまとめて計画する
+            // （契約・方言エンジン・EF Core・インメモリの固定部と同じ場所で扱うため）
+            if (bucket == GenerationBucket.Runtime)
+            {
+                continue;
+            }
+
             var ownNamespace = namespaceByBucket[bucket];
             // 依存グラフから「実際に参照する他バケット」の名前空間だけを using する
             // （無差別に全バケットを using していた従来動作の不要 using を排除する）。
             // 有効でない依存先（例: VO 無効時の ValueObject）は自然に除外される。また依存先が
             // 自分と同一名前空間へ解決される場合は自分自身の using になるため除外する。
-            var crossUsings = BucketDependencies(bucket)
+            var dependencyNamespaces = BucketDependencies(bucket)
                 .Where(dependency => activeSet.Contains(dependency))
                 .Select(dependency => namespaceByBucket[dependency])
-                .Where(ns => !string.Equals(ns, ownNamespace, StringComparison.Ordinal))
-                .Distinct(StringComparer.Ordinal)
-                .OrderBy(ns => ns, StringComparer.Ordinal)
                 .ToList();
+
+            // 固定 infra は Runtime 系ファイルへ分かれたため、実装バケット（EF Core・インメモリ）は
+            // 対応する Runtime サブ名前空間も using する（パッケージ参照モードでは PackageRuntimeUsings が
+            // 固定名前空間を付けるため runtimeNamespace は null＝ここでは何も足さない）。
+            if (runtimeNamespace is not null && FixedRuntimeSuffix(bucket) is { } fixedSuffix)
+            {
+                dependencyNamespaces.Add($"{runtimeNamespace}.{fixedSuffix}");
+            }
+
+            var crossUsings = OrderCrossUsings(dependencyNamespaces, ownNamespace);
 
             // 分割時の Repository バケットは契約のみを自 namespace へ出し、方言別実装は別ファイルへ分ける
             // （単一方言でも同レイアウト）。インメモリ実装は独立バケットとして別ファイルへ分かれる。
@@ -456,6 +510,9 @@ public static class GeneratedFilePlanner
                         Dialect = primaryDialect,
                         ContractOnly = true,
                         MultiDialect = true,
+                        // 固定 infra（契約本体）は Runtime.g.cs が持つ。ここは per-entity 契約・AddSaveHook・
+                        // HTTP クライアント・射影 DTO などのスキーマ依存物だけ。
+                        EmitSharedInfra = false,
                     }
                 );
 
@@ -470,7 +527,12 @@ public static class GeneratedFilePlanner
                             ownNamespace,
                             dialect,
                             contractNamespace: ownNamespace,
-                            extraCrossUsings: crossUsings
+                            extraCrossUsings: crossUsings,
+                            // 方言エンジンの固定 infra は Runtime.{方言}.g.cs が持つ（ここは per-entity 実装＋DI のみ）
+                            emitSharedInfra: false,
+                            fixedRuntimeNamespace: runtimeNamespace is null
+                                ? null
+                                : $"{runtimeNamespace}.{DialectNamespaceSuffix(dialect)}"
                         )
                     );
                 }
@@ -481,7 +543,7 @@ public static class GeneratedFilePlanner
             splitSpecs.Add(
                 new GeneratedFileSpec
                 {
-                    // EF Core 実装は Repositories.EfCore.g.cs、インメモリ実装は Repositories.InMemory.g.cs へ出す
+                    // EF Core 実装は Repositories.EntityFrameworkCore.g.cs、インメモリ実装は Repositories.InMemory.g.cs へ出す
                     // （いずれも方言別実装 Repositories.SqlServer.g.cs 等と同じ流儀）
                     FileName = DerivedRepositorySubBuckets.Contains(bucket)
                         ? DerivedRepositoryFileName(bucket)
@@ -492,7 +554,23 @@ public static class GeneratedFilePlanner
                     Dialect = primaryDialect,
                     ContractOnly = false,
                     MultiDialect = false,
+                    // 固定 infra は Runtime 系ファイルが持つ（Entity/EditModel/Mapper/VO のように固定 infra を
+                    // そもそも描画しないバケットでも、意味を揃えて false で統一する）
+                    EmitSharedInfra = false,
                 }
+            );
+        }
+
+        // 固定 infra ファイル（Runtime 系）。パッケージ参照モードでは 1 本も作らない。
+        if (runtimeNamespace is not null)
+        {
+            AddFixedRuntimeSpecs(
+                splitSpecs,
+                options,
+                runtimeNamespace,
+                dialects,
+                activeSet,
+                primaryDialect
             );
         }
 
@@ -500,6 +578,150 @@ public static class GeneratedFilePlanner
 
         return splitSpecs;
     }
+
+    /// <summary>クロス using を「自分自身を除外・重複排除・序数昇順」で整える（分割時の唯一の正）</summary>
+    private static List<string> OrderCrossUsings(
+        IEnumerable<string> namespaces,
+        string ownNamespace
+    ) =>
+        namespaces
+            .Where(ns => !string.Equals(ns, ownNamespace, StringComparison.Ordinal))
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(ns => ns, StringComparer.Ordinal)
+            .ToList();
+
+    /// <summary>
+    /// そのバケットのスキーマ依存物が参照する固定 infra ファイルの Runtime サブ名前空間サフィックスを返す
+    /// （対応する固定部ファイルが無いバケットは null）。
+    /// </summary>
+    /// <remarks>
+    /// 方言別実装（Repository バケット）は方言ごとにサフィックスが変わるため、ここではなく
+    /// <see cref="BuildDialectRepositorySpec"/> の引数で受け渡す。
+    /// </remarks>
+    private static string? FixedRuntimeSuffix(GenerationBucket bucket) =>
+        bucket switch
+        {
+            GenerationBucket.EfCore => DefaultSuffix(GenerationBucket.EfCore),
+            GenerationBucket.InMemory => DefaultSuffix(GenerationBucket.InMemory),
+            _ => null,
+        };
+
+    /// <summary>
+    /// 分割時の固定 infra ファイル（<c>Runtime*.g.cs</c>）のスペックを、配布パッケージと 1:1 対応する構成で追加する。
+    /// </summary>
+    /// <remarks>
+    /// <list type="bullet">
+    ///   <item><c>Runtime.g.cs</c>（<c>{Runtime}</c>）: 共有基盤＋方言中立の契約＝<see cref="RuntimePackages.Core"/> 相当</item>
+    ///   <item><c>Runtime.SqlServer.g.cs</c> / <c>Runtime.Sqlite.g.cs</c>（<c>{Runtime}.{方言}</c>）: 方言エンジン</item>
+    ///   <item><c>Runtime.EntityFrameworkCore.g.cs</c>（<c>{Runtime}.EntityFrameworkCore</c>）: EF Core 共通部品</item>
+    ///   <item><c>Runtime.InMemory.g.cs</c>（<c>{Runtime}.InMemory</c>）: インメモリ基盤</item>
+    /// </list>
+    /// いずれも <see cref="GeneratedFileSpec.EmitSchemaDependent"/> が false で、per-entity・DI 登録・DbContext は含まない。
+    /// 方言エンジン・EF Core・インメモリの各ファイルは共通契約をコア相当のファイルから using で参照する
+    /// （パッケージが <c>using QuickER.Runtime;</c> でコアを参照するのと同じ構造）。
+    /// </remarks>
+    private static void AddFixedRuntimeSpecs(
+        List<GeneratedFileSpec> specs,
+        CodeGenerationOptions options,
+        string runtimeNamespace,
+        IReadOnlyList<string> dialects,
+        IReadOnlySet<GenerationBucket> activeSet,
+        string primaryDialect
+    )
+    {
+        var repositoryActive = activeSet.Contains(GenerationBucket.Repository);
+
+        // 共有基盤（EntityBase・属性・VO 基底・JSON コンバータ）＋方言中立の Repository 共通契約。
+        // 契約は Repository バケットが有効なときだけ載る（Entity 単独生成では従来どおり共有基盤のみ）。
+        specs.Add(
+            new GeneratedFileSpec
+            {
+                FileName = DefaultFileName(GenerationBucket.Runtime),
+                NamespaceName = runtimeNamespace,
+                Buckets = repositoryActive
+                    ? [GenerationBucket.Runtime, GenerationBucket.Repository]
+                    : [GenerationBucket.Runtime],
+                CrossNamespaceUsings = [],
+                Dialect = primaryDialect,
+                // 契約のみ（方言エンジンは方言別の固定部ファイルが担う）
+                ContractOnly = true,
+                MultiDialect = true,
+                EmitSchemaDependent = false,
+            }
+        );
+
+        // 方言エンジンの固定部（方言 Repository 基底・式木翻訳・実行器・接続ファクトリ・方言別メタデータ）
+        if (options.GenerateRepositories && repositoryActive)
+        {
+            foreach (var dialect in dialects)
+            {
+                var suffix = DialectNamespaceSuffix(dialect);
+                specs.Add(
+                    new GeneratedFileSpec
+                    {
+                        FileName = FixedRuntimeFileName(suffix),
+                        NamespaceName = $"{runtimeNamespace}.{suffix}",
+                        Buckets = [GenerationBucket.Repository],
+                        CrossNamespaceUsings = [runtimeNamespace],
+                        Dialect = dialect,
+                        ContractOnly = false,
+                        MultiDialect = true,
+                        EmitSchemaDependent = false,
+                    }
+                );
+            }
+        }
+
+        // EF Core 共通部品の固定部（EF Core 版 Repository 基底・VO 翻訳プラグイン・SaveConflict 変換・共通メタデータ）
+        if (activeSet.Contains(GenerationBucket.EfCore))
+        {
+            AddFixedRuntimeSubSpec(
+                specs,
+                runtimeNamespace,
+                GenerationBucket.EfCore,
+                primaryDialect
+            );
+        }
+
+        // インメモリ基盤の固定部（InMemoryDataStore・InMemoryRepository 基底・ステージング・共通メタデータ）
+        if (activeSet.Contains(GenerationBucket.InMemory))
+        {
+            AddFixedRuntimeSubSpec(
+                specs,
+                runtimeNamespace,
+                GenerationBucket.InMemory,
+                primaryDialect
+            );
+        }
+    }
+
+    /// <summary>方言を持たない固定部サブファイル（EF Core / インメモリ）のスペックを追加する</summary>
+    private static void AddFixedRuntimeSubSpec(
+        List<GeneratedFileSpec> specs,
+        string runtimeNamespace,
+        GenerationBucket bucket,
+        string primaryDialect
+    )
+    {
+        var suffix = DefaultSuffix(bucket);
+        specs.Add(
+            new GeneratedFileSpec
+            {
+                FileName = FixedRuntimeFileName(suffix),
+                NamespaceName = $"{runtimeNamespace}.{suffix}",
+                Buckets = [bucket],
+                CrossNamespaceUsings = [runtimeNamespace],
+                Dialect = primaryDialect,
+                ContractOnly = false,
+                MultiDialect = false,
+                EmitSchemaDependent = false,
+            }
+        );
+    }
+
+    /// <summary>固定 infra ファイルの分割ファイル名（例: <c>Runtime.SqlServer.g.cs</c>）</summary>
+    private static string FixedRuntimeFileName(string suffix) =>
+        $"{DefaultSuffix(GenerationBucket.Runtime)}.{suffix}.g.cs";
 
     /// <summary>生成 C# ファイルの拡張子サフィックス（<c>.g.cs</c>）</summary>
     internal const string GeneratedCSharpSuffix = ".g.cs";
@@ -584,21 +806,28 @@ public static class GeneratedFilePlanner
                 Dialect = primaryDialect,
                 ContractOnly = false,
                 MultiDialect = false,
+                // サーバー実装はスキーマ依存物のみ（固定 infra は Runtime 系ファイルが持つ）
+                EmitSharedInfra = false,
             }
         );
     }
 
     /// <summary>
-    /// サーバー実装スペックを「Repository バケットを含む最後のスペックの直後」へ挿入する
-    /// （分割時に Repositories（方言別実装含む）の下・EfCore / Runtime より前へ並べるため）。
+    /// サーバー実装スペックを「Repository バケットを含むスキーマ依存ファイルの最後の直後」へ挿入する
+    /// （分割時に Repositories（方言別実装含む）の下・EfCore / Runtime 系より前へ並べるため）。
     /// </summary>
+    /// <remarks>
+    /// 固定 infra ファイル（<c>Runtime.g.cs</c> / <c>Runtime.{方言}.g.cs</c>）も Repository バケットを含むため、
+    /// スキーマ依存（<see cref="GeneratedFileSpec.EmitSchemaDependent"/>）であることを条件に加えて
+    /// リモート面の契約・実装の隣という位置づけを保つ。
+    /// </remarks>
     private static void InsertAfterRepositorySpecs(
         List<GeneratedFileSpec> specs,
         GeneratedFileSpec remoteServerSpec
     )
     {
         var lastRepositoryIndex = specs.FindLastIndex(spec =>
-            spec.Buckets.Contains(GenerationBucket.Repository)
+            spec.Buckets.Contains(GenerationBucket.Repository) && spec.EmitSchemaDependent
         );
 
         // 呼び出し元で Repository バケットの有効性を確認済みだが、万一見つからない場合は末尾へ退避する
@@ -607,13 +836,23 @@ public static class GeneratedFilePlanner
     }
 
     /// <summary>方言別実装スペックを組み立てる（Repository バケットのみ・{RepositoryNamespace}.Suffix・契約 namespace を using）</summary>
+    /// <param name="emitSharedInfra">
+    /// 方言エンジンの固定 infra を同じファイルへ描画するか。非分割（1 ファイルへ全部入る）は true、
+    /// 分割は false（固定 infra は <c>Runtime.{方言}.g.cs</c> が持つ）。
+    /// </param>
+    /// <param name="fixedRuntimeNamespace">
+    /// 分割時に方言エンジンの固定 infra が居る名前空間（<c>{Runtime}.{方言}</c>）。null なら追加 using なし
+    /// （非分割・パッケージ参照モード）。
+    /// </param>
     private static GeneratedFileSpec BuildDialectRepositorySpec(
         CodeGenerationOptions options,
         string fileName,
         string repositoryNamespace,
         string dialect,
         string contractNamespace,
-        IReadOnlyList<string>? extraCrossUsings = null
+        IReadOnlyList<string>? extraCrossUsings = null,
+        bool emitSharedInfra = true,
+        string? fixedRuntimeNamespace = null
     )
     {
         var dialectNamespace = $"{repositoryNamespace}.{DialectNamespaceSuffix(dialect)}";
@@ -627,21 +866,22 @@ public static class GeneratedFilePlanner
             crossUsings.AddRange(extraCrossUsings);
         }
 
-        var orderedCrossUsings = crossUsings
-            .Where(ns => !string.Equals(ns, dialectNamespace, StringComparison.Ordinal))
-            .Distinct(StringComparer.Ordinal)
-            .OrderBy(ns => ns, StringComparer.Ordinal)
-            .ToList();
+        // 分割時は方言エンジン（SqlServerRepository / ISqlConnectionFactory 等）が別ファイルへ分かれるため、その namespace も using する
+        if (fixedRuntimeNamespace is not null)
+        {
+            crossUsings.Add(fixedRuntimeNamespace);
+        }
 
         return new GeneratedFileSpec
         {
             FileName = fileName,
             NamespaceName = dialectNamespace,
             Buckets = [GenerationBucket.Repository],
-            CrossNamespaceUsings = orderedCrossUsings,
+            CrossNamespaceUsings = OrderCrossUsings(crossUsings, dialectNamespace),
             Dialect = dialect,
             ContractOnly = false,
             MultiDialect = true,
+            EmitSharedInfra = emitSharedInfra,
         };
     }
 
@@ -662,7 +902,7 @@ public static class GeneratedFilePlanner
         GenerationBucket.InMemory,
     ];
 
-    /// <summary>導出サブバケットの分割ファイル名（例: <c>Repositories.EfCore.g.cs</c>）＝方言別実装と同じ流儀</summary>
+    /// <summary>導出サブバケットの分割ファイル名（例: <c>Repositories.EntityFrameworkCore.g.cs</c>）＝方言別実装と同じ流儀</summary>
     private static string DerivedRepositoryFileName(GenerationBucket bucket) =>
         $"{DefaultSuffix(GenerationBucket.Repository)}.{DefaultSuffix(bucket)}.g.cs";
 }

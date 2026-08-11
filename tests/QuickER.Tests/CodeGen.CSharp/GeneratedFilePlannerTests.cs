@@ -69,7 +69,8 @@ public class GeneratedFilePlannerTests
 
     /// <summary>
     /// 分割時は有効バケットごとにファイルを作り、自分以外の名前空間をクロス using に持つことを検証する。
-    /// QuickER 版 Repository は単一方言でも「契約（Repositories.g.cs）＋方言別実装（Repositories.SqlServer.g.cs）」へ分ける。
+    /// QuickER 版 Repository は単一方言でも「契約（Repositories.g.cs）＋方言別実装（Repositories.SqlServer.g.cs）」へ分け、
+    /// スキーマ非依存の固定 infra は配布パッケージと対称な Runtime 系ファイル（Runtime.g.cs / Runtime.SqlServer.g.cs）へ分ける。
     /// </summary>
     [Fact]
     public void Plan_Split_ProducesOneFilePerBucketWithCrossUsings()
@@ -84,7 +85,7 @@ public class GeneratedFilePlannerTests
 
         var plan = GeneratedFilePlanner.Plan(options);
 
-        // 並び順は UI のカテゴリ別 namespace 欄と一致させる（DB アクセス系は値オブジェクトの後・Runtime は末尾の共有基盤）。
+        // 並び順は UI のカテゴリ別 namespace 欄と一致させる（DB アクセス系は値オブジェクトの後・Runtime 系は末尾の固定 infra）。
         // 単一方言でも契約 1 回＋方言別実装ファイル（既定 sqlserver）へ分割する。
         plan.Select(spec => spec.FileName)
             .Should()
@@ -95,7 +96,8 @@ public class GeneratedFilePlannerTests
                 "ValueObjects.g.cs",
                 "Repositories.g.cs",
                 "Repositories.SqlServer.g.cs",
-                "Runtime.g.cs"
+                "Runtime.g.cs",
+                "Runtime.SqlServer.g.cs"
             );
 
         var entity = plan.Single(spec => spec.FileName == "Entities.g.cs");
@@ -109,11 +111,34 @@ public class GeneratedFilePlannerTests
         contract.ContractOnly.Should().BeTrue();
         contract.MultiDialect.Should().BeTrue();
 
-        // 方言別実装ファイル: {Repository}.SqlServer namespace・実装（!ContractOnly）・契約 namespace を using する
+        // 方言別実装ファイル: {Repository}.SqlServer namespace・実装（!ContractOnly）・契約 namespace と
+        // 方言エンジンの固定 infra namespace（{Runtime}.SqlServer）を using する
         var impl = plan.Single(spec => spec.FileName == "Repositories.SqlServer.g.cs");
         impl.NamespaceName.Should().Be("Acme.App.Repositories.SqlServer");
         impl.ContractOnly.Should().BeFalse();
-        impl.CrossNamespaceUsings.Should().Contain("Acme.App.Repositories");
+        impl.CrossNamespaceUsings.Should()
+            .Contain("Acme.App.Repositories")
+            .And.Contain("Acme.App.Runtime.SqlServer");
+
+        // Repositories 系はスキーマ依存物のみ・Runtime 系は固定 infra のみ（相互に排他）
+        contract.EmitSharedInfra.Should().BeFalse();
+        contract.EmitSchemaDependent.Should().BeTrue();
+        impl.EmitSharedInfra.Should().BeFalse();
+
+        // 固定 infra ファイル: 共有基盤＋方言中立契約（Runtime.g.cs）と方言エンジン（Runtime.SqlServer.g.cs）
+        var runtime = plan.Single(spec => spec.FileName == "Runtime.g.cs");
+        runtime.NamespaceName.Should().Be("Acme.App.Runtime");
+        runtime.Buckets.Should().Equal(GenerationBucket.Runtime, GenerationBucket.Repository);
+        runtime.ContractOnly.Should().BeTrue();
+        runtime.EmitSharedInfra.Should().BeTrue();
+        runtime.EmitSchemaDependent.Should().BeFalse();
+
+        var runtimeEngine = plan.Single(spec => spec.FileName == "Runtime.SqlServer.g.cs");
+        runtimeEngine.NamespaceName.Should().Be("Acme.App.Runtime.SqlServer");
+        runtimeEngine.ContractOnly.Should().BeFalse();
+        runtimeEngine.CrossNamespaceUsings.Should().Equal("Acme.App.Runtime");
+        runtimeEngine.EmitSharedInfra.Should().BeTrue();
+        runtimeEngine.EmitSchemaDependent.Should().BeFalse();
     }
 
     /// <summary>
@@ -142,14 +167,26 @@ public class GeneratedFilePlannerTests
                 "Repositories.g.cs",
                 "Repositories.SqlServer.g.cs",
                 "Repositories.InMemory.g.cs",
-                "Runtime.g.cs"
+                "Runtime.g.cs",
+                "Runtime.SqlServer.g.cs",
+                "Runtime.InMemory.g.cs"
             );
 
         var inMemory = plan.Single(spec => spec.FileName == "Repositories.InMemory.g.cs");
         inMemory.NamespaceName.Should().Be("Acme.App.Repositories.InMemory");
         inMemory.Buckets.Should().Equal(GenerationBucket.InMemory);
-        // 契約 namespace（I{Entity}Repository・SqlQuery 等）を using する
-        inMemory.CrossNamespaceUsings.Should().Contain("Acme.App.Repositories");
+        // 契約 namespace（I{Entity}Repository・SqlQuery 等）とインメモリ固定 infra namespace を using する
+        inMemory
+            .CrossNamespaceUsings.Should()
+            .Contain("Acme.App.Repositories")
+            .And.Contain("Acme.App.Runtime.InMemory");
+
+        // インメモリの固定 infra（InMemoryDataStore・InMemoryRepository 基底）は Runtime.InMemory.g.cs へ分かれる
+        var inMemoryRuntime = plan.Single(spec => spec.FileName == "Runtime.InMemory.g.cs");
+        inMemoryRuntime.NamespaceName.Should().Be("Acme.App.Runtime.InMemory");
+        inMemoryRuntime.Buckets.Should().Equal(GenerationBucket.InMemory);
+        inMemoryRuntime.CrossNamespaceUsings.Should().Equal("Acme.App.Runtime");
+        inMemoryRuntime.EmitSchemaDependent.Should().BeFalse();
 
         // 契約ファイルは InMemory バケットを含まない（同居しない）
         var contract = plan.Single(spec => spec.FileName == "Repositories.g.cs");
@@ -192,7 +229,8 @@ public class GeneratedFilePlannerTests
 
         var plan = GeneratedFilePlanner.Plan(options);
 
-        // RemoteServer は Repository バケットを含む最後のスペック（方言別実装）の直後に並ぶ
+        // RemoteServer は Repository バケットを含む最後のスキーマ依存スペック（方言別実装）の直後に並ぶ
+        // （Runtime 系の固定 infra ファイルはさらに後ろ）
         plan.Select(spec => spec.FileName)
             .Should()
             .Equal(
@@ -202,7 +240,8 @@ public class GeneratedFilePlannerTests
                 "Repositories.g.cs",
                 "Repositories.SqlServer.g.cs",
                 "RemoteServer.g.cs",
-                "Runtime.g.cs"
+                "Runtime.g.cs",
+                "Runtime.SqlServer.g.cs"
             );
     }
 
@@ -220,7 +259,7 @@ public class GeneratedFilePlannerTests
 
         var plan = GeneratedFilePlanner.Plan(options);
 
-        // Entity は Runtime / ValueObjects のみ依存し、Repositories / Repositories.EfCore / Mappers は using しない
+        // Entity は Runtime / ValueObjects のみ依存し、Repositories / Repositories.EntityFrameworkCore / Mappers は using しない
         var entity = plan.Single(spec => spec.FileName == "Entities.g.cs");
         entity
             .CrossNamespaceUsings.Should()
@@ -232,22 +271,30 @@ public class GeneratedFilePlannerTests
             .CrossNamespaceUsings.Should()
             .BeEquivalentTo("Acme.App.Entities", "Acme.App.EditModels", "Acme.App.Runtime");
 
-        // EF Core 実装は方言別実装と同じ流儀で Repositories.EfCore.g.cs・{Repository}.EfCore へ出し、
-        // Entity / Repositories（契約）/ Runtime / ValueObjects に依存する
-        var efCore = plan.Single(spec => spec.FileName == "Repositories.EfCore.g.cs");
-        efCore.NamespaceName.Should().Be("Acme.App.Repositories.EfCore");
+        // EF Core 実装は方言別実装と同じ流儀で Repositories.EntityFrameworkCore.g.cs・{Repository}.EntityFrameworkCore へ出し、
+        // Entity / Repositories（契約）/ Runtime / ValueObjects と EF Core 固定 infra namespace に依存する
+        var efCore = plan.Single(spec => spec.FileName == "Repositories.EntityFrameworkCore.g.cs");
+        efCore.NamespaceName.Should().Be("Acme.App.Repositories.EntityFrameworkCore");
         efCore
             .CrossNamespaceUsings.Should()
             .BeEquivalentTo(
                 "Acme.App.Entities",
                 "Acme.App.Repositories",
                 "Acme.App.Runtime",
+                "Acme.App.Runtime.EntityFrameworkCore",
                 "Acme.App.ValueObjects"
             );
 
-        // Runtime は共有基盤で他バケットへ依存しない
+        // Runtime（共有基盤＋契約の固定 infra）は他バケットへ依存しない
         var runtime = plan.Single(spec => spec.FileName == "Runtime.g.cs");
         runtime.CrossNamespaceUsings.Should().BeEmpty();
+
+        // EF Core 固定 infra はコア相当（Runtime）だけを using する（パッケージが using QuickER.Runtime; するのと同型）
+        var efCoreRuntime = plan.Single(spec =>
+            spec.FileName == "Runtime.EntityFrameworkCore.g.cs"
+        );
+        efCoreRuntime.NamespaceName.Should().Be("Acme.App.Runtime.EntityFrameworkCore");
+        efCoreRuntime.CrossNamespaceUsings.Should().Equal("Acme.App.Runtime");
     }
 
     /// <summary>分割時に複数カテゴリが同一名前空間でも、ファイルは分かれ、自分自身は using しないことを検証する</summary>
@@ -271,6 +318,43 @@ public class GeneratedFilePlannerTests
         entity.NamespaceName.Should().Be("Shared.Models");
         editModel.NamespaceName.Should().Be("Shared.Models");
         entity.CrossNamespaceUsings.Should().NotContain("Shared.Models");
+    }
+
+    /// <summary>
+    /// パッケージ参照モードの分割時は固定 infra ファイル（Runtime 系）を 1 本も計画せず、スキーマ依存の
+    /// Repositories 系ファイルの構成は据え置かれることを検証する（「Runtime 系が出ない」だけの差）。
+    /// </summary>
+    [Fact]
+    public void Plan_Split_UseRuntimePackages_OmitsFixedRuntimeFiles()
+    {
+        var options = new CodeGenerationOptions
+        {
+            RootNamespace = "Acme.App",
+            SplitFilesByCategory = true,
+            GenerateRepositories = true,
+            GenerateEfCore = true,
+            UseRuntimePackages = true,
+        };
+
+        var plan = GeneratedFilePlanner.Plan(options);
+
+        plan.Select(spec => spec.FileName)
+            .Should()
+            .Equal(
+                "Entities.g.cs",
+                "EditModels.g.cs",
+                "Mappers.g.cs",
+                "Repositories.g.cs",
+                "Repositories.SqlServer.g.cs",
+                "Repositories.EntityFrameworkCore.g.cs"
+            );
+
+        plan.Should()
+            .NotContain(spec => spec.FileName.StartsWith("Runtime", StringComparison.Ordinal));
+        // 固定 infra が無いためクロス using も {root}.Runtime を指さない（パッケージ名前空間は using 解決側が付ける）
+        plan.SelectMany(spec => spec.CrossNamespaceUsings)
+            .Should()
+            .NotContain(ns => ns.StartsWith("Acme.App.Runtime", StringComparison.Ordinal));
     }
 
     /// <summary>クラスを 1 つでも生成するなら Runtime バケットが常に有効になることを検証する</summary>

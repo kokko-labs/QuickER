@@ -202,9 +202,6 @@
   <data name="CodeGen_Status_TargetDbRequired" xml:space="preserve">
     <value>対象 DB を 1 つ以上選択してください。</value>
   </data>
-  <data name="CodeGen_Status_InMemoryRuntimePackagesConflict" xml:space="preserve">
-    <value>インメモリ実装はランタイムの NuGet パッケージ参照モードとは併用できません。</value>
-  </data>
   <data name="CodeGen_Status_NamespaceInvalidFormat" xml:space="preserve">
     <value>{0} の形式が正しくありません。</value>
   </data>

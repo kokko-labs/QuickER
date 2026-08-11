@@ -46,7 +46,7 @@ The architecture and the invariants that break silently (not caught by the build
 
 ## Versioning
 
-- We follow [Semantic Versioning](https://semver.org/). All distributables (the GUI, the CLI, and the 4 runtime packages) are versioned in lockstep, managed via `VersionPrefix` in `Directory.Build.props`
+- We follow [Semantic Versioning](https://semver.org/). All distributables (the GUI, the CLI, and the 5 runtime packages) are versioned in lockstep, managed via `VersionPrefix` in `Directory.Build.props`
 - Version bump rules during 0.x:
   - **minor** (0.2.0 → 0.3.0): new features and breaking changes (changes to the Repository API or to the signatures/structure of the generated code, package dependency changes)
   - **patch** (0.2.0 → 0.2.1): bug fixes only. A fix that doesn't break calling code counts as a patch, even if the internals of the generated code change

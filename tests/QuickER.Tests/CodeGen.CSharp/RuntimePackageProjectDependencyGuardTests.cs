@@ -10,8 +10,8 @@ using Xunit;
 namespace QuickER.Tests.CodeGen.CSharp;
 
 /// <summary>
-/// ランタイムパッケージ 4 プロジェクト（<c>QuickER.Runtime</c> / <c>.SqlServer</c> / <c>.Sqlite</c> /
-/// <c>.EntityFrameworkCore</c>）の csproj が宣言する依存集合（PackageReference / ProjectReference）を検証し、
+/// ランタイムパッケージ 5 プロジェクト（<c>QuickER.Runtime</c> / <c>.SqlServer</c> / <c>.Sqlite</c> /
+/// <c>.EntityFrameworkCore</c> / <c>.InMemory</c>）の csproj が宣言する依存集合（PackageReference / ProjectReference）を検証し、
 /// パッケージ境界での依存排他を守る。
 /// </summary>
 /// <remarks>
@@ -108,6 +108,30 @@ public sealed class RuntimePackageProjectDependencyGuardTests
         // 依存はコアへの ProjectReference のみ（方言プロジェクトを参照しない）
         var projects = ProjectReferences(
             "src/QuickER.Runtime.EntityFrameworkCore/QuickER.Runtime.EntityFrameworkCore.csproj"
+        );
+        projects.Should().ContainSingle().Which.Should().EndWith("QuickER.Runtime.csproj");
+    }
+
+    /// <summary>InMemory パッケージは PackageReference を 1 つも持たない（BCL のみ・ADO / EF Core / DI なし）</summary>
+    [Fact(
+        DisplayName = "QuickER.Runtime.InMemory は PackageReference ゼロ（BCL のみ・Core への ProjectReference だけ）"
+    )]
+    public void InMemory_HasNoPackageReferences()
+    {
+        var packages = PackageReferences(
+            "src/QuickER.Runtime.InMemory/QuickER.Runtime.InMemory.csproj"
+        );
+
+        packages
+            .Should()
+            .BeEmpty(
+                "インメモリエンジンは DB へ触らないため BCL のみに依存し、いかなる NuGet 依存も持ってはならない"
+                    + "（ADO（SqlClient / Sqlite）／EF Core／DI 系が混ざってはならない。DI 登録拡張はスキーマ依存物として生成側に出力される）"
+            );
+
+        // 依存はコアへの ProjectReference のみ（方言プロジェクトを参照しない）
+        var projects = ProjectReferences(
+            "src/QuickER.Runtime.InMemory/QuickER.Runtime.InMemory.csproj"
         );
         projects.Should().ContainSingle().Which.Should().EndWith("QuickER.Runtime.csproj");
     }

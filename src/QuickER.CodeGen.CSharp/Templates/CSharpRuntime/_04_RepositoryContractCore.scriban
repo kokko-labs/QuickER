@@ -1,4 +1,4 @@
-{{~ if (repository_classes.size > 0 || runtime_package_export) && (render_contract || repositories || in_memory || (ef_core && render_ef_core && runtime_package_export)) ~}}
+{{~ if (repository_classes.size > 0 || runtime_package_export) && (render_contract || repositories || in_memory || (ef_core && render_ef_core)) ~}}
 {{~ if render_contract && emit_shared_infra ~}}
 /// <summary>A single UNIQUE constraint violation reported by a uniqueness pre-check.</summary>
 /// <param name="ConstraintName">Name of the violated constraint (the synthesized name when the diagram does not set one; a caller-defined name for user-defined checks).</param>
