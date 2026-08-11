@@ -53,6 +53,9 @@ builder.Services.AddGeneratedSqliteRepositories(connectionString);
 var app = builder.Build();
 
 // Expose the generated remote endpoints (POST /quicker/{entity}/{operation}).
+// A 500 response keeps the server-side exception message to itself by default and sends a correlation id
+// instead, which also appears in the server log. Pass exposeErrorDetails: app.Environment.IsDevelopment()
+// to read the real message while developing; this sample keeps the safe default.
 app.MapGeneratedRemoteEndpoints();
 
 Console.WriteLine($"[Server] Listening on {url}{RemotePaths.DefaultPrefix}. Press Ctrl+C to exit.");

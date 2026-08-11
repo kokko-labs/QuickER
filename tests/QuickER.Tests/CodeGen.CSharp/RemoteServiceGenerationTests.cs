@@ -142,6 +142,14 @@ public class RemoteServiceGenerationTests
         server.Should().Contain("catch (BadHttpRequestException ex)");
         server.Should().Contain("await WriteErrorAsync(context, ex.StatusCode, \"BadRequest\"");
 
+        // 500 の詳細公開は実行時引数で、既定は非公開（汎用文言＋相関 ID）
+        server.Should().Contain("bool exposeErrorDetails = false");
+        server
+            .Should()
+            .Contain("group.WithMetadata(new RemoteErrorDetailPolicy(exposeErrorDetails));");
+        server.Should().Contain("\"An unexpected error occurred on the server.\"");
+        server.Should().Contain("correlationId: expose ? null : context.TraceIdentifier");
+
         // サーバーファイルは ASP.NET Core の using を持ち、本体は持たない
         server.Should().Contain("using Microsoft.AspNetCore.Builder;");
         main.Should().NotContain("Microsoft.AspNetCore");

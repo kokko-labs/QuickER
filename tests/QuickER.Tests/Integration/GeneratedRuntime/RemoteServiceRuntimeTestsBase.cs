@@ -382,8 +382,13 @@ public abstract class RemoteServiceRuntimeTestsBase : IAsyncLifetime
         var thrown = (await act.Should().ThrowAsync<RemoteRepositoryException>()).Which;
         thrown.StatusCode.Should().Be(500);
 
-        // フックの例外が素通りしていれば RemoteError JSON は書かれず、クライアントは汎用文言へ退化する
+        // フックの例外が素通りしていれば RemoteError JSON 自体が書かれず、クライアントは
+        // 「本文を読めなかった」ときの文言（The remote call failed …）へ退化する。ここではボディが
+        // 書かれたこと＝サーバー側の 500 応答（既定では詳細非公開の固定文言＋相関 ID）が届いたことを見る
         thrown.Message.Should().NotContain("The remote call failed");
+        thrown
+            .CorrelationId.Should()
+            .NotBeNullOrEmpty("既定の 500 は相関 ID を伴う＝RemoteError 本文が書かれている");
 
         // このリクエストのフックが実際に投げたこと（＝隔離が効いた経路を通ったこと）も確認する
         GeneratedRemoteEndpoints.ServerErrorHookThrowCount.Should().BeGreaterThan(throwsBefore);

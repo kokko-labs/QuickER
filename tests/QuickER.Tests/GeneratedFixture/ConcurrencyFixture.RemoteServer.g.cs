@@ -29,6 +29,13 @@ namespace QuickER.Tests.GeneratedConcurrencyFixture;
 /// an unhandled failure to 500, and the client (Http{Entity}RemoteRepository) restores the original exception type.
 /// </para>
 /// <para>
+/// An unhandled failure (500) does not report what went wrong to the client unless
+/// <c>exposeErrorDetails</c> is turned on: by default the body carries a fixed generic message plus the
+/// correlation id of the request, while the full exception - stack trace included - goes to the server log under that
+/// same id. The classified responses (400 and 409) are unaffected, because their messages are written here rather than
+/// taken from an internal failure, and the conflict details a 409 carries are what a retry loop is built on.
+/// </para>
+/// <para>
 /// A request that cannot be interpreted at all - a malformed or empty JSON body, a non-JSON content type, a type
 /// mismatch, a value that fails value-object validation, a body that omits a required field such as the entity, an
 /// undefined <see cref="ConcurrencyMode"/> value, or a
@@ -54,15 +61,29 @@ public static partial class GeneratedRemoteEndpoints
     /// </remarks>
     /// <param name="endpoints">The mapping target (for example a <c>WebApplication</c>).</param>
     /// <param name="prefix">The route prefix for the endpoint group.</param>
+    /// <param name="exposeErrorDetails">
+    /// Whether an HTTP 500 response reports the server-side exception message to the client. It is off by default, which
+    /// keeps internal details - table and column names, connection strings, file paths - from crossing the trust
+    /// boundary: the client is given a fixed generic message plus the correlation id of the request instead. Because it
+    /// is an argument rather than a generation-time option, the same generated code covers both sides of the trade-off;
+    /// pass <c>app.Environment.IsDevelopment()</c> to read the real message while developing and hide it in production.
+    /// Server-side logging and the <c>OnServerError</c> hook always receive the full exception either way, and the
+    /// classified responses (400 and 409) are not affected by this switch.
+    /// </param>
     /// <returns>The endpoint group, to which authorization and similar concerns can be applied.</returns>
     public static RouteGroupBuilder MapGeneratedRemoteEndpoints(
         this IEndpointRouteBuilder endpoints,
-        string prefix = RemotePaths.DefaultPrefix
+        string prefix = RemotePaths.DefaultPrefix,
+        bool exposeErrorDetails = false
     )
     {
         ArgumentNullException.ThrowIfNull(endpoints);
 
         var group = endpoints.MapGroup(prefix);
+
+        // The policy travels as endpoint metadata rather than as a handler argument: every 500 is written by one of the
+        // wrappers below, which already have the HttpContext, so no handler signature has to change to carry it
+        group.WithMetadata(new RemoteErrorDetailPolicy(exposeErrorDetails));
 
         // Liveness: the client's PingAsync polls this while waiting for the server to come up, so it must not touch
         // the database - a 200 states that the process is listening and the endpoints are mapped, nothing more
@@ -117,21 +138,48 @@ public static partial class GeneratedRemoteEndpoints
         }
         catch (Exception ex)
         {
-            LogServerError(context, ex);
-            RaiseServerError(context, ex);
-            await WriteErrorAsync(
-                context,
-                StatusCodes.Status500InternalServerError,
-                "Error",
-                ex.Message
-            ).ConfigureAwait(false);
+            await WriteServerErrorAsync(context, ex).ConfigureAwait(false);
         }
     }
+
+    /// <summary>The 500 message sent while error details are hidden (the real one stays in the server log).</summary>
+    private const string GenericServerErrorMessage =
+        "An unexpected error occurred on the server.";
+
+    /// <summary>Reports an unhandled failure as HTTP 500: the server side always sees all of it, the client only what the endpoint's policy allows.</summary>
+    /// <remarks>
+    /// The single place a 500 is produced, so the four wrappers stay identical. Logging and the <c>OnServerError</c> hook
+    /// run first and unconditionally receive the exception itself; the switch only decides what leaves the process. While
+    /// it is off - the default - the body carries a fixed message plus the request's correlation id, which the log line
+    /// carries as well, so a report from the caller can still be matched to the full server-side record without the
+    /// internal message ever crossing the trust boundary. While it is on, the message is passed through and no
+    /// correlation id is sent (the message is the detail, so there is nothing to look up).
+    /// </remarks>
+    private static async Task WriteServerErrorAsync(HttpContext context, Exception ex)
+    {
+        LogServerError(context, ex);
+        RaiseServerError(context, ex);
+
+        var expose = ExposesErrorDetails(context);
+
+        await WriteErrorAsync(
+            context,
+            StatusCodes.Status500InternalServerError,
+            "Error",
+            expose ? ex.Message : GenericServerErrorMessage,
+            correlationId: expose ? null : context.TraceIdentifier
+        ).ConfigureAwait(false);
+    }
+
+    /// <summary>Reads the error-detail policy the matched endpoint was mapped with (an unmatched request keeps the safe default of hiding it).</summary>
+    private static bool ExposesErrorDetails(HttpContext context) =>
+        context.GetEndpoint()?.Metadata.GetMetadata<RemoteErrorDetailPolicy>()?.Expose ?? false;
 
     /// <summary>Writes a <see cref="RemoteError"/> body with the given status code (the shared path for every classified failure response).</summary>
     /// <remarks>
     /// <paramref name="conflict"/> is supplied only for the 409 path: its details travel with the body so that the client
-    /// can rebuild the same <see cref="SaveConflictException"/> a direct call would have thrown. Every other kind leaves
+    /// can rebuild the same <see cref="SaveConflictException"/> a direct call would have thrown, and
+    /// <paramref name="correlationId"/> only for a 500 whose message was withheld. Every other kind leaves
     /// those fields null.
     /// </remarks>
     private static async Task WriteErrorAsync(
@@ -139,7 +187,8 @@ public static partial class GeneratedRemoteEndpoints
         int statusCode,
         string type,
         string message,
-        SaveConflictException? conflict = null
+        SaveConflictException? conflict = null,
+        string? correlationId = null
     )
     {
         context.Response.StatusCode = statusCode;
@@ -151,6 +200,7 @@ public static partial class GeneratedRemoteEndpoints
                 Reason = conflict?.Reason.ToString(),
                 EntityType = conflict?.EntityTypeName,
                 Key = conflict?.Key,
+                CorrelationId = correlationId,
             },
             RemoteJson.Options,
             context.RequestAborted
@@ -229,14 +279,28 @@ public static partial class GeneratedRemoteEndpoints
             : base(message, innerException) { }
     }
 
+    /// <summary>Endpoint metadata recording whether the group was mapped to expose server-side error details in its 500 responses.</summary>
+    /// <remarks>
+    /// Attached to the group by <c>MapGeneratedRemoteEndpoints</c> so that the policy reaches the wrappers through the
+    /// matched endpoint instead of through every handler signature. Storing it per endpoint also keeps two groups mapped
+    /// in the same process - say a public one and an internal one - independent of each other.
+    /// </remarks>
+    private sealed class RemoteErrorDetailPolicy(bool expose)
+    {
+        /// <summary>Gets a value indicating whether the server-side exception message is reported to the client.</summary>
+        public bool Expose { get; } = expose;
+    }
+
     /// <summary>Resolves the remote-surface repository from DI.</summary>
     private static TRepository Repository<TRepository>(HttpContext context)
         where TRepository : notnull => context.RequestServices.GetRequiredService<TRepository>();
 
     /// <summary>Logs an unhandled exception that is about to be reported to the client as a 500 response.</summary>
     /// <remarks>
-    /// The response body carries only the exception message (so that the client can restore the exception type),
-    /// therefore the full exception - including the stack trace - is recorded here on the server side.
+    /// The response body carries at most the exception message and, while error details are hidden, not even that,
+    /// therefore the full exception - including the stack trace - is recorded here on the server side, regardless of the
+    /// policy. The correlation id is logged alongside it because it is what the client is given in place of a withheld
+    /// message, and matching a report against this record is the whole point of sending it.
     /// Logging is optional: when the host has no <c>ILoggerFactory</c> registered this is a no-op and the behavior
     /// is unchanged. Classified responses (400 and 409) do not go through here: they are the expected outcome of the
     /// request rather than an unhandled server-side failure.
@@ -253,9 +317,10 @@ public static partial class GeneratedRemoteEndpoints
         var logger = loggerFactory.CreateLogger("QuickER.RemoteServer");
         logger.LogError(
             ex,
-            "An unhandled exception occurred while handling {Method} {Path}.",
+            "An unhandled exception occurred while handling {Method} {Path} (correlation id: {CorrelationId}).",
             context.Request.Method,
-            context.Request.Path
+            context.Request.Path,
+            context.TraceIdentifier
         );
     }
 
@@ -284,7 +349,8 @@ public static partial class GeneratedRemoteEndpoints
     /// failures (notifications, metrics, extra logging). It is reserved for HTTP 500 and is therefore not invoked for
     /// classified responses (400 and 409). When no implementation is provided the compiler removes
     /// the call itself, so nothing but an empty guard remains. An exception thrown by the hook is isolated (logged
-    /// on the server side and then swallowed) and never replaces the original 500 response. The 500 response body
+    /// on the server side and then swallowed) and never replaces the original 500 response. The hook always receives the
+    /// exception itself, whether or not the endpoint exposes error details to the client. The 500 response body
     /// itself is not customizable here; wrap the group returned by <c>MapGeneratedRemoteEndpoints</c> in middleware
     /// to translate responses instead.
     /// </remarks>

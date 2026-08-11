@@ -3812,15 +3812,26 @@ public static class RemoteJson
 /// <remarks>An optimistic conflict (HTTP 409) is restored as <see cref="SaveConflictException"/> rather than this exception, so the same catch blocks work as with a direct connection.</remarks>
 public sealed class RemoteRepositoryException : Exception
 {
-    /// <summary>Initializes a new instance with the specified HTTP status code and message.</summary>
-    public RemoteRepositoryException(int statusCode, string message)
+    /// <summary>Initializes a new instance with the specified HTTP status code, message, and correlation id.</summary>
+    public RemoteRepositoryException(int statusCode, string message, string? correlationId = null)
         : base(message)
     {
         StatusCode = statusCode;
+        CorrelationId = correlationId;
     }
 
     /// <summary>Gets the HTTP status code returned by the server.</summary>
     public int StatusCode { get; }
+
+    /// <summary>Gets the id that identifies the failed request in the server log (<c>null</c> when the server did not send one).</summary>
+    /// <remarks>
+    /// A server that hides its error details (the default of <c>MapGeneratedRemoteEndpoints</c>) replaces the message with
+    /// a fixed generic one and sends this id instead, and it writes the same id next to the full exception in its own log.
+    /// Reporting it therefore lets the failure be looked up on the server without the message having crossed the trust
+    /// boundary. It stays <c>null</c> when the server exposes its error details, and also for a response from a server
+    /// built before the id existed.
+    /// </remarks>
+    public string? CorrelationId { get; }
 }
 
 /// <summary>Structured payload for transport errors (server to client; the type restores the exception type on the client side).</summary>
@@ -3828,6 +3839,7 @@ public sealed class RemoteRepositoryException : Exception
 /// The conflict detail fields (<see cref="Reason"/>, <see cref="EntityType"/>, <see cref="Key"/>) are written only for a
 /// "SaveConflict" error and are optional on the wire: a body from a server built before they existed simply leaves them
 /// null, and the restored <see cref="SaveConflictException"/> then reports <see cref="SaveConflictReason.Unknown"/>.
+/// <see cref="CorrelationId"/> is optional in the same way and degrades to null.
 /// </remarks>
 public sealed class RemoteError
 {
@@ -3845,6 +3857,14 @@ public sealed class RemoteError
 
     /// <summary>Gets or sets the primary key the rejected save targeted, formatted for display (<c>null</c> for every other kind).</summary>
     public string? Key { get; set; }
+
+    /// <summary>Gets or sets the id that identifies the failed request in the server log (written only for a 500 whose details are hidden).</summary>
+    /// <remarks>
+    /// The server writes it in place of the exception message it withheld, and records the same id next to the full
+    /// exception in its own log, so the two can be matched up. It stays null on a 500 whose details are exposed, and on
+    /// every classified response (400 and 409), which carry their own messages rather than a withheld one.
+    /// </remarks>
+    public string? CorrelationId { get; set; }
 }
 
 /// <summary>Request body carrying a single primary key (GetById / Delete).</summary>
@@ -4296,7 +4316,9 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
             );
         }
 
-        throw new RemoteRepositoryException(statusCode, message);
+        // A server that withheld its error detail sends the correlation id instead, so carry it onto the exception rather
+        // than leaving the caller to dig it out of the message (there is none to dig out)
+        throw new RemoteRepositoryException(statusCode, message, error?.CorrelationId);
     }
 
     /// <summary>Gets a single entity by primary key (null when not found).</summary>
