@@ -309,6 +309,120 @@ public class EditModelUniquenessTests
             .Be("already used");
     }
 
+    /// <summary>同一プロパティが兄弟間でも DB 照合でも重複していれば、両方の所見が併存する</summary>
+    /// <remarks>
+    /// 旧実装は 1 プロパティ 1 スロットだったため、後から走ったチェックが先の所見を上書きし、そのチェックが
+    /// クリアした時点で「もう一方は依然として重複している」という事実ごと消えていた（片方を解消しただけで
+    /// <c>Validate</c> が真になり得た）。スロットをチェックごとに分けて、それぞれが自分の分だけを付け外しする。
+    /// </remarks>
+    [Fact(
+        DisplayName = "同一プロパティの兄弟間重複と DB 重複は併存し、各チェックが自分の分だけ更新する"
+    )]
+    public void DuplicateErrors_FromBothSources_CoexistOnSameProperty()
+    {
+        var collection = new EditModelCollection<OrderEditModel>
+        {
+            NewOrder(10, 1, 100m, "apple pie"),
+            NewOrder(11, 2, 50m, "apple pie"),
+        };
+
+        // 兄弟間チェック（memo が重複）
+        collection.Validate().Should().BeFalse();
+
+        // DB 照合が同じ memo 欄へ別の所見を載せる
+        collection[1]
+            .SetDuplicateError(
+                nameof(OrderEditModel.BindingMemo),
+                "already used in the database",
+                DuplicateErrorSource.Database
+            );
+
+        GetErrors(collection[1], nameof(OrderEditModel.BindingMemo))
+            .Should()
+            .HaveCount(2, "2 つのチェックの所見は互いに上書きしない");
+
+        // 兄弟間の重複だけを解消する（相手側の値を変える＝所見を持つモデル自身は編集しない）
+        collection[0].BindingMemo = "banana";
+        collection.Validate().Should().BeFalse("DB 由来の重複は兄弟間の解消では消えない");
+
+        GetErrors(collection[1], nameof(OrderEditModel.BindingMemo))
+            .Should()
+            .ContainSingle()
+            .Which.Should()
+            .Be("already used in the database");
+
+        // DB 照合が自分の所見を取り下げれば、その欄は完全に解消される
+        collection[1].ClearDuplicateErrors(DuplicateErrorSource.Database);
+        GetErrors(collection[1], nameof(OrderEditModel.BindingMemo)).Should().BeEmpty();
+        collection.Validate().Should().BeTrue();
+    }
+
+    /// <summary>DB 照合の所見は、確定値が変わった時点で（陳腐化するため）取り下げられる</summary>
+    /// <remarks>
+    /// 照合したのは編集前の値なので、値が変われば結論は無効になる。複合制約は構成列すべての組で判定して
+    /// いるため、1 列でも変われば同じモデルの DB 由来所見はすべて取り下げる。
+    /// </remarks>
+    [Fact(DisplayName = "確定値を編集すると DB 由来の重複エラーが解消される")]
+    public void ConfirmedValueChange_ClearsDatabaseDuplicateErrors()
+    {
+        var model = NewOrder(10, 1, 100m, "apple pie");
+
+        model.SetDuplicateError(
+            nameof(OrderEditModel.BindingMemo),
+            "already used in the database",
+            DuplicateErrorSource.Database
+        );
+        model.HasErrors.Should().BeTrue();
+        model.Validate().Should().BeFalse();
+
+        // 重複していた欄そのものを編集する（バインディング経由＝確定値まで変わる）
+        model.BindingMemo = "banana";
+
+        GetErrors(model, nameof(OrderEditModel.BindingMemo)).Should().BeEmpty();
+        model.HasErrors.Should().BeFalse();
+        model.Validate().Should().BeTrue("値が変われば DB 突合の結論は持ち越さない");
+    }
+
+    /// <summary>複合制約の別列を編集しても DB 由来の所見は残らない（判定はすべての構成列の組で行うため）</summary>
+    [Fact(DisplayName = "複合制約の別列を編集しても DB 由来の重複エラーが残らない")]
+    public void ConfirmedValueChange_ClearsDatabaseDuplicateErrorsOnOtherColumns()
+    {
+        var model = NewOrder(10, 1, 100m, "apple pie");
+
+        // 複合制約（customer_id + amount）の違反は先頭の構成列へ載る
+        model.SetDuplicateError(
+            nameof(OrderEditModel.BindingCustomerId),
+            "already used in the database",
+            DuplicateErrorSource.Database
+        );
+
+        // 組のもう一方の列を編集する
+        model.BindingAmount = "999";
+
+        GetErrors(model, nameof(OrderEditModel.BindingCustomerId))
+            .Should()
+            .BeEmpty("組の一部が変われば組全体の突合結果が無効になる");
+        model.HasErrors.Should().BeFalse();
+    }
+
+    /// <summary>対照: 兄弟間チェックの所見は確定値の編集では消えない（再検証が判断する）</summary>
+    [Fact(DisplayName = "確定値の編集は兄弟間の重複エラーを消さない")]
+    public void ConfirmedValueChange_KeepsSiblingDuplicateErrors()
+    {
+        var collection = new EditModelCollection<OrderEditModel>
+        {
+            NewOrder(10, 1, 100m, "apple pie"),
+            NewOrder(11, 2, 50m, "apple pie"),
+        };
+
+        collection.Validate().Should().BeFalse();
+
+        // 重複と無関係な欄を編集しても、兄弟間の所見はそのまま（次の Validate が判断する）
+        collection[1].BindingAmount = "60";
+
+        GetErrors(collection[1], nameof(OrderEditModel.BindingMemo)).Should().ContainSingle();
+    }
+
     /// <summary>ルートの一覧（コレクションでない列挙）でも同じヘルパを直接呼べる</summary>
     [Fact(DisplayName = "ヘルパを一覧へ直接呼べる")]
     public void Validator_CanBeCalledOnPlainSequence()

@@ -37,11 +37,11 @@ public static class RemoteServerEngine
 {
     /// <summary>Runs a handler, writes the result as JSON, and maps exceptions to HTTP responses (400/409/500, or the status carried by a rejected request such as 413).</summary>
     /// <remarks>
-    /// Every classifying catch is guarded by <c>!Response.HasStarted</c>, matching the binary transfer executors: once
-    /// the status line and headers have gone out - a failure part-way through serializing the result, for instance -
-    /// the status code can no longer be changed, and writing an error body would append it to the partial response
-    /// instead of replacing it. Such a failure is recorded on the server side and rethrown, which lets the host abort
-    /// the connection so that the client sees a truncated response rather than a corrupted one.
+    /// Every classifying catch is guarded by <c>!Response.HasStarted</c>: once the status line and headers have gone out
+    /// - a failure part-way through serializing the result, for instance - the status code can no longer be changed, and
+    /// writing an error body would append it to the partial response instead of replacing it. Such a failure is recorded
+    /// on the server side and rethrown, which lets the host abort the connection so that the client sees a truncated
+    /// response rather than a corrupted one.
     /// </remarks>
     public static async Task ExecuteAsync(HttpContext context, Func<Task<object?>> handler)
     {
@@ -348,6 +348,14 @@ public static class RemoteServerEngine
         {
             await WriteServerErrorAsync(context, ex).ConfigureAwait(false);
         }
+        catch (Exception ex)
+        {
+            // The body is already on the wire, so none of the classified answers can be produced any more. Logging it
+            // here is what keeps the failure from disappearing before it is rethrown for the host to abort the
+            // connection; the OnServerError hook stays out of it, being the extension point of a 500 that is not sent.
+            LogServerError(context, ex);
+            throw;
+        }
     }
 
     /// <summary>
@@ -411,6 +419,14 @@ public static class RemoteServerEngine
         {
             await WriteServerErrorAsync(context, ex).ConfigureAwait(false);
         }
+        catch (Exception ex)
+        {
+            // The body is already on the wire, so none of the classified answers can be produced any more. Logging it
+            // here is what keeps the failure from disappearing before it is rethrown for the host to abort the
+            // connection; the OnServerError hook stays out of it, being the extension point of a 500 that is not sent.
+            LogServerError(context, ex);
+            throw;
+        }
     }
 
     /// <summary>Performs a NULL-out (DELETE) of an unbounded binary column. Success yields 204, a missing row yields a 404 marked as "NotFound", and a key that cannot be interpreted yields 400.</summary>
@@ -450,6 +466,14 @@ public static class RemoteServerEngine
         catch (Exception ex) when (!context.Response.HasStarted)
         {
             await WriteServerErrorAsync(context, ex).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            // The body is already on the wire, so none of the classified answers can be produced any more. Logging it
+            // here is what keeps the failure from disappearing before it is rethrown for the host to abort the
+            // connection; the OnServerError hook stays out of it, being the extension point of a 500 that is not sent.
+            LogServerError(context, ex);
+            throw;
         }
     }
 
@@ -710,7 +734,7 @@ public sealed class RemoteErrorDetailPolicy(
     public Action<HttpContext, Exception>? OnServerError { get; } = onServerError;
 }
 
-/// <summary>Endpoint metadata that lifts the request size limit for the binary PUT (allowing GB-scale uploads with no extra configuration).</summary>
+/// <summary>Endpoint metadata that lifts the request size limit for the binary PUT (attached only when the group opted in to unbounded uploads).</summary>
 /// <remarks>
 /// It is attached only when the group was mapped with <c>allowUnboundedUploads: true</c>; without it the host's own
 /// limit - 30 MB under Kestrel's defaults - applies and a larger upload is rejected with HTTP 413. Because an endpoint

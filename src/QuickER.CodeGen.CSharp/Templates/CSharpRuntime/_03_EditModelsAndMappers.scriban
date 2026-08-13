@@ -16,16 +16,46 @@ public abstract partial class EditModelBase
     /// Duplicate-value error messages keyed by property name, kept in a store of their own so the two kinds never overwrite each other:
     /// a uniqueness check registers and clears only this store, while SetError / ClearErrors touch only <see cref="_errors"/>.
     /// Both stores are merged by <see cref="HasErrors"/>, <see cref="GetErrors"/>, and error collection, so a property can carry a
-    /// conversion error and a duplicate-value error at the same time. Each entry also records which check found the duplicate
-    /// (<see cref="DuplicateErrorSource"/>), so the check among the siblings and the check against the database clear only their own findings.
+    /// conversion error and a duplicate-value error at the same time. Each entry holds one slot per check
+    /// (<see cref="DuplicateErrorSource"/>), so the check among the siblings and the check against the database neither overwrite
+    /// nor clear each other's findings on the same property.
     /// </summary>
-    private readonly Dictionary<string, DuplicateError> _duplicateErrors = new();
+    /// <remarks>An entry is removed as soon as both of its slots are empty, which is what keeps <c>Count</c> a valid "are there any" test.</remarks>
+    private readonly Dictionary<string, DuplicateErrors> _duplicateErrors = new();
 
     /// <summary>An input error message together with the check that registered it.</summary>
     private readonly record struct InputError(string Message, bool FromRequiredCheck);
 
-    /// <summary>A duplicate-value error message together with the check that found it.</summary>
-    private readonly record struct DuplicateError(string Message, DuplicateErrorSource Source);
+    /// <summary>The duplicate-value messages registered on one property, one slot per check that can find them (null where a check found nothing).</summary>
+    private readonly record struct DuplicateErrors(string? Siblings, string? Database)
+    {
+        /// <summary>Whether neither check has anything registered (an entry in this state is dropped from the store).</summary>
+        public bool IsEmpty => Siblings is null && Database is null;
+
+        /// <summary>The message the specified check registered (null when it found nothing).</summary>
+        public string? Of(DuplicateErrorSource source) =>
+            source == DuplicateErrorSource.Siblings ? Siblings : Database;
+
+        /// <summary>This entry with the specified check's message replaced (null clears that check's slot only).</summary>
+        public DuplicateErrors With(DuplicateErrorSource source, string? message) =>
+            source == DuplicateErrorSource.Siblings
+                ? this with { Siblings = message }
+                : this with { Database = message };
+
+        /// <summary>The registered messages in a fixed order (the siblings check first), so reporting is deterministic.</summary>
+        public IEnumerable<string> Messages()
+        {
+            if (Siblings is not null)
+            {
+                yield return Siblings;
+            }
+
+            if (Database is not null)
+            {
+                yield return Database;
+            }
+        }
+    }
 
     /// <summary>Raised when a property value changes.</summary>
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -280,13 +310,13 @@ public abstract partial class EditModelBase
         {
             return _errors
                 .Values.Select(error => error.Message)
-                .Concat(_duplicateErrors.Values.Select(error => error.Message));
+                .Concat(_duplicateErrors.Values.SelectMany(entry => entry.Messages()));
         }
 
         return ReadErrors(propertyName);
     }
 
-    /// <summary>Reads the messages registered for the specified property in both stores (the input error first, then the duplicate-value error).</summary>
+    /// <summary>Reads the messages registered for the specified property in both stores (the input error first, then the duplicate-value errors).</summary>
     private IEnumerable<string> ReadErrors(string propertyName)
     {
         if (_errors.TryGetValue(propertyName, out var input))
@@ -294,9 +324,12 @@ public abstract partial class EditModelBase
             yield return input.Message;
         }
 
-        if (_duplicateErrors.TryGetValue(propertyName, out var duplicate))
+        if (_duplicateErrors.TryGetValue(propertyName, out var duplicates))
         {
-            yield return duplicate.Message;
+            foreach (var message in duplicates.Messages())
+            {
+                yield return message;
+            }
         }
     }
 
@@ -365,7 +398,10 @@ public abstract partial class EditModelBase
 
         foreach (var pair in _duplicateErrors)
         {
-            yield return new EditModelError(path, pair.Key, pair.Value.Message);
+            foreach (var message in pair.Value.Messages())
+            {
+                yield return new EditModelError(path, pair.Key, message);
+            }
         }
     }
 
@@ -612,7 +648,9 @@ public abstract partial class EditModelBase
     /// <summary>Clears the duplicate-value errors found by the specified check only, leaving the other check's findings in place.</summary>
     /// <remarks>
     /// Each check clears exactly what it registered before running again, so the check among the siblings no longer discards
-    /// the violations the database check found (and the other way round).
+    /// the violations the database check found (and the other way round). Changing a confirmed value also clears the
+    /// <see cref="DuplicateErrorSource.Database"/> findings of the whole model, because they were reached by comparing the values
+    /// it held before the edit - all of them, since a composite constraint's verdict rests on every column it covers.
     /// </remarks>
     /// <param name="source">The check whose findings are cleared.</param>
     public void ClearDuplicateErrors(DuplicateErrorSource source) =>
@@ -626,30 +664,55 @@ public abstract partial class EditModelBase
             return;
         }
 
+        // The properties to touch are listed first, because the store is modified while they are processed
         var cleared = _duplicateErrors
-            .Where(pair => source is null || pair.Value.Source == source)
+            .Where(pair => source is null || pair.Value.Of(source.Value) is not null)
             .Select(pair => pair.Key)
             .ToList();
 
         foreach (var propertyName in cleared)
         {
-            _duplicateErrors.Remove(propertyName);
+            if (source is null)
+            {
+                _duplicateErrors.Remove(propertyName);
+            }
+            else
+            {
+                // Only the calling check's slot is emptied; the entry stays as long as the other check still has a finding
+                var remaining = _duplicateErrors[propertyName].With(source.Value, null);
+
+                if (remaining.IsEmpty)
+                {
+                    _duplicateErrors.Remove(propertyName);
+                }
+                else
+                {
+                    _duplicateErrors[propertyName] = remaining;
+                }
+            }
+
             OnErrorsChanged(propertyName);
         }
     }
 
     /// <summary>Registers a duplicate-value error on the specified binding property in the duplicate-value store. An empty name registers a model-level error.</summary>
-    /// <remarks>It does not go through <see cref="SetError"/>, so a conversion error already registered on the same property survives and both are reported.</remarks>
+    /// <remarks>
+    /// It does not go through <see cref="SetError"/>, so a conversion error already registered on the same property survives and both are
+    /// reported. Only the calling check's slot is written, so a property found to be a duplicate both among its siblings and against the
+    /// database reports both findings, and each of them disappears when its own check stops finding it.
+    /// </remarks>
     /// <param name="propertyName">Binding property the error is attached to (empty for a model-level error).</param>
     /// <param name="message">The error message.</param>
-    /// <param name="source">The check that found the duplicate (it decides which clear removes the error again).</param>
+    /// <param name="source">The check that found the duplicate (it decides which slot is written and which clear removes the error again).</param>
     public void SetDuplicateError(
         string propertyName,
         string message,
         DuplicateErrorSource source = DuplicateErrorSource.Siblings
     )
     {
-        _duplicateErrors[propertyName] = new DuplicateError(message, source);
+        _duplicateErrors[propertyName] = _duplicateErrors
+            .GetValueOrDefault(propertyName)
+            .With(source, message);
         OnErrorsChanged(propertyName);
     }
 
@@ -1409,6 +1472,8 @@ public partial class {{ item.class_name }} : EditModelBase
             // Promote to update target when the confirmed value changes (not during load, where the state stays a mirror of the source entity).
             if (!IsLoading)
             {
+                // The database check compared the values this model held a moment ago, so editing one makes its verdict stale.
+                ClearDuplicateErrors(DuplicateErrorSource.Database);
                 OnConfirmedValueChanged(nameof({{ p.property_name }}));
 
                 if (ShouldMarkUpdated(nameof({{ p.property_name }})))
@@ -1903,7 +1968,10 @@ public sealed partial class {{ mapper.class_name }}
     /// Loading is lossless: the confirmed values are copied straight from the entity instead of being rebuilt by parsing
     /// the on-screen input strings, so nothing that the display format cannot express (sub-second precision of a
     /// DateTime, its Kind, and so on) is dropped. The input strings are then derived from the confirmed values.
-    /// Binary columns are copied defensively, so editing the loaded model never reaches into the entity's array.
+    /// Binary columns are copied defensively, so editing the loaded model never reaches into the entity's array. The
+    /// defensive copy belongs to this direction alone: <c>ApplyToEntity</c> assigns the confirmed values across as they
+    /// are, so the array an entity receives on the way to being saved is the edit model's own - saving hands the buffer
+    /// over rather than duplicating it, and writing into it afterwards is writing into both.
     /// </remarks>
     public void ApplyToEditModel({{ mapper.entity_class_name }} entity, {{ mapper.edit_model_class_name }} editModel)
     {

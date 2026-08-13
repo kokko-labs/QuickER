@@ -1697,16 +1697,46 @@ public abstract partial class EditModelBase
     /// Duplicate-value error messages keyed by property name, kept in a store of their own so the two kinds never overwrite each other:
     /// a uniqueness check registers and clears only this store, while SetError / ClearErrors touch only <see cref="_errors"/>.
     /// Both stores are merged by <see cref="HasErrors"/>, <see cref="GetErrors"/>, and error collection, so a property can carry a
-    /// conversion error and a duplicate-value error at the same time. Each entry also records which check found the duplicate
-    /// (<see cref="DuplicateErrorSource"/>), so the check among the siblings and the check against the database clear only their own findings.
+    /// conversion error and a duplicate-value error at the same time. Each entry holds one slot per check
+    /// (<see cref="DuplicateErrorSource"/>), so the check among the siblings and the check against the database neither overwrite
+    /// nor clear each other's findings on the same property.
     /// </summary>
-    private readonly Dictionary<string, DuplicateError> _duplicateErrors = new();
+    /// <remarks>An entry is removed as soon as both of its slots are empty, which is what keeps <c>Count</c> a valid "are there any" test.</remarks>
+    private readonly Dictionary<string, DuplicateErrors> _duplicateErrors = new();
 
     /// <summary>An input error message together with the check that registered it.</summary>
     private readonly record struct InputError(string Message, bool FromRequiredCheck);
 
-    /// <summary>A duplicate-value error message together with the check that found it.</summary>
-    private readonly record struct DuplicateError(string Message, DuplicateErrorSource Source);
+    /// <summary>The duplicate-value messages registered on one property, one slot per check that can find them (null where a check found nothing).</summary>
+    private readonly record struct DuplicateErrors(string? Siblings, string? Database)
+    {
+        /// <summary>Whether neither check has anything registered (an entry in this state is dropped from the store).</summary>
+        public bool IsEmpty => Siblings is null && Database is null;
+
+        /// <summary>The message the specified check registered (null when it found nothing).</summary>
+        public string? Of(DuplicateErrorSource source) =>
+            source == DuplicateErrorSource.Siblings ? Siblings : Database;
+
+        /// <summary>This entry with the specified check's message replaced (null clears that check's slot only).</summary>
+        public DuplicateErrors With(DuplicateErrorSource source, string? message) =>
+            source == DuplicateErrorSource.Siblings
+                ? this with { Siblings = message }
+                : this with { Database = message };
+
+        /// <summary>The registered messages in a fixed order (the siblings check first), so reporting is deterministic.</summary>
+        public IEnumerable<string> Messages()
+        {
+            if (Siblings is not null)
+            {
+                yield return Siblings;
+            }
+
+            if (Database is not null)
+            {
+                yield return Database;
+            }
+        }
+    }
 
     /// <summary>Raised when a property value changes.</summary>
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -1961,13 +1991,13 @@ public abstract partial class EditModelBase
         {
             return _errors
                 .Values.Select(error => error.Message)
-                .Concat(_duplicateErrors.Values.Select(error => error.Message));
+                .Concat(_duplicateErrors.Values.SelectMany(entry => entry.Messages()));
         }
 
         return ReadErrors(propertyName);
     }
 
-    /// <summary>Reads the messages registered for the specified property in both stores (the input error first, then the duplicate-value error).</summary>
+    /// <summary>Reads the messages registered for the specified property in both stores (the input error first, then the duplicate-value errors).</summary>
     private IEnumerable<string> ReadErrors(string propertyName)
     {
         if (_errors.TryGetValue(propertyName, out var input))
@@ -1975,9 +2005,12 @@ public abstract partial class EditModelBase
             yield return input.Message;
         }
 
-        if (_duplicateErrors.TryGetValue(propertyName, out var duplicate))
+        if (_duplicateErrors.TryGetValue(propertyName, out var duplicates))
         {
-            yield return duplicate.Message;
+            foreach (var message in duplicates.Messages())
+            {
+                yield return message;
+            }
         }
     }
 
@@ -2046,7 +2079,10 @@ public abstract partial class EditModelBase
 
         foreach (var pair in _duplicateErrors)
         {
-            yield return new EditModelError(path, pair.Key, pair.Value.Message);
+            foreach (var message in pair.Value.Messages())
+            {
+                yield return new EditModelError(path, pair.Key, message);
+            }
         }
     }
 
@@ -2293,7 +2329,9 @@ public abstract partial class EditModelBase
     /// <summary>Clears the duplicate-value errors found by the specified check only, leaving the other check's findings in place.</summary>
     /// <remarks>
     /// Each check clears exactly what it registered before running again, so the check among the siblings no longer discards
-    /// the violations the database check found (and the other way round).
+    /// the violations the database check found (and the other way round). Changing a confirmed value also clears the
+    /// <see cref="DuplicateErrorSource.Database"/> findings of the whole model, because they were reached by comparing the values
+    /// it held before the edit - all of them, since a composite constraint's verdict rests on every column it covers.
     /// </remarks>
     /// <param name="source">The check whose findings are cleared.</param>
     public void ClearDuplicateErrors(DuplicateErrorSource source) =>
@@ -2307,30 +2345,55 @@ public abstract partial class EditModelBase
             return;
         }
 
+        // The properties to touch are listed first, because the store is modified while they are processed
         var cleared = _duplicateErrors
-            .Where(pair => source is null || pair.Value.Source == source)
+            .Where(pair => source is null || pair.Value.Of(source.Value) is not null)
             .Select(pair => pair.Key)
             .ToList();
 
         foreach (var propertyName in cleared)
         {
-            _duplicateErrors.Remove(propertyName);
+            if (source is null)
+            {
+                _duplicateErrors.Remove(propertyName);
+            }
+            else
+            {
+                // Only the calling check's slot is emptied; the entry stays as long as the other check still has a finding
+                var remaining = _duplicateErrors[propertyName].With(source.Value, null);
+
+                if (remaining.IsEmpty)
+                {
+                    _duplicateErrors.Remove(propertyName);
+                }
+                else
+                {
+                    _duplicateErrors[propertyName] = remaining;
+                }
+            }
+
             OnErrorsChanged(propertyName);
         }
     }
 
     /// <summary>Registers a duplicate-value error on the specified binding property in the duplicate-value store. An empty name registers a model-level error.</summary>
-    /// <remarks>It does not go through <see cref="SetError"/>, so a conversion error already registered on the same property survives and both are reported.</remarks>
+    /// <remarks>
+    /// It does not go through <see cref="SetError"/>, so a conversion error already registered on the same property survives and both are
+    /// reported. Only the calling check's slot is written, so a property found to be a duplicate both among its siblings and against the
+    /// database reports both findings, and each of them disappears when its own check stops finding it.
+    /// </remarks>
     /// <param name="propertyName">Binding property the error is attached to (empty for a model-level error).</param>
     /// <param name="message">The error message.</param>
-    /// <param name="source">The check that found the duplicate (it decides which clear removes the error again).</param>
+    /// <param name="source">The check that found the duplicate (it decides which slot is written and which clear removes the error again).</param>
     public void SetDuplicateError(
         string propertyName,
         string message,
         DuplicateErrorSource source = DuplicateErrorSource.Siblings
     )
     {
-        _duplicateErrors[propertyName] = new DuplicateError(message, source);
+        _duplicateErrors[propertyName] = _duplicateErrors
+            .GetValueOrDefault(propertyName)
+            .With(source, message);
         OnErrorsChanged(propertyName);
     }
 
@@ -3082,6 +3145,8 @@ public partial class CustomerEditModel : EditModelBase
             // Promote to update target when the confirmed value changes (not during load, where the state stays a mirror of the source entity).
             if (!IsLoading)
             {
+                // The database check compared the values this model held a moment ago, so editing one makes its verdict stale.
+                ClearDuplicateErrors(DuplicateErrorSource.Database);
                 OnConfirmedValueChanged(nameof(CustomerId));
 
                 if (ShouldMarkUpdated(nameof(CustomerId)))
@@ -3185,6 +3250,8 @@ public partial class CustomerEditModel : EditModelBase
             // Promote to update target when the confirmed value changes (not during load, where the state stays a mirror of the source entity).
             if (!IsLoading)
             {
+                // The database check compared the values this model held a moment ago, so editing one makes its verdict stale.
+                ClearDuplicateErrors(DuplicateErrorSource.Database);
                 OnConfirmedValueChanged(nameof(Name));
 
                 if (ShouldMarkUpdated(nameof(Name)))
@@ -3278,6 +3345,8 @@ public partial class CustomerEditModel : EditModelBase
             // Promote to update target when the confirmed value changes (not during load, where the state stays a mirror of the source entity).
             if (!IsLoading)
             {
+                // The database check compared the values this model held a moment ago, so editing one makes its verdict stale.
+                ClearDuplicateErrors(DuplicateErrorSource.Database);
                 OnConfirmedValueChanged(nameof(Balance));
 
                 if (ShouldMarkUpdated(nameof(Balance)))
@@ -3689,6 +3758,8 @@ public partial class OrderEditModel : EditModelBase
             // Promote to update target when the confirmed value changes (not during load, where the state stays a mirror of the source entity).
             if (!IsLoading)
             {
+                // The database check compared the values this model held a moment ago, so editing one makes its verdict stale.
+                ClearDuplicateErrors(DuplicateErrorSource.Database);
                 OnConfirmedValueChanged(nameof(OrderId));
 
                 if (ShouldMarkUpdated(nameof(OrderId)))
@@ -3792,6 +3863,8 @@ public partial class OrderEditModel : EditModelBase
             // Promote to update target when the confirmed value changes (not during load, where the state stays a mirror of the source entity).
             if (!IsLoading)
             {
+                // The database check compared the values this model held a moment ago, so editing one makes its verdict stale.
+                ClearDuplicateErrors(DuplicateErrorSource.Database);
                 OnConfirmedValueChanged(nameof(CustomerId));
 
                 if (ShouldMarkUpdated(nameof(CustomerId)))
@@ -3895,6 +3968,8 @@ public partial class OrderEditModel : EditModelBase
             // Promote to update target when the confirmed value changes (not during load, where the state stays a mirror of the source entity).
             if (!IsLoading)
             {
+                // The database check compared the values this model held a moment ago, so editing one makes its verdict stale.
+                ClearDuplicateErrors(DuplicateErrorSource.Database);
                 OnConfirmedValueChanged(nameof(Memo));
 
                 if (ShouldMarkUpdated(nameof(Memo)))
@@ -3988,6 +4063,8 @@ public partial class OrderEditModel : EditModelBase
             // Promote to update target when the confirmed value changes (not during load, where the state stays a mirror of the source entity).
             if (!IsLoading)
             {
+                // The database check compared the values this model held a moment ago, so editing one makes its verdict stale.
+                ClearDuplicateErrors(DuplicateErrorSource.Database);
                 OnConfirmedValueChanged(nameof(Amount));
 
                 if (ShouldMarkUpdated(nameof(Amount)))
@@ -4452,7 +4529,10 @@ public sealed partial class CustomerMapper
     /// Loading is lossless: the confirmed values are copied straight from the entity instead of being rebuilt by parsing
     /// the on-screen input strings, so nothing that the display format cannot express (sub-second precision of a
     /// DateTime, its Kind, and so on) is dropped. The input strings are then derived from the confirmed values.
-    /// Binary columns are copied defensively, so editing the loaded model never reaches into the entity's array.
+    /// Binary columns are copied defensively, so editing the loaded model never reaches into the entity's array. The
+    /// defensive copy belongs to this direction alone: <c>ApplyToEntity</c> assigns the confirmed values across as they
+    /// are, so the array an entity receives on the way to being saved is the edit model's own - saving hands the buffer
+    /// over rather than duplicating it, and writing into it afterwards is writing into both.
     /// </remarks>
     public void ApplyToEditModel(CustomerEntity entity, CustomerEditModel editModel)
     {
@@ -4535,7 +4615,10 @@ public sealed partial class OrderMapper
     /// Loading is lossless: the confirmed values are copied straight from the entity instead of being rebuilt by parsing
     /// the on-screen input strings, so nothing that the display format cannot express (sub-second precision of a
     /// DateTime, its Kind, and so on) is dropped. The input strings are then derived from the confirmed values.
-    /// Binary columns are copied defensively, so editing the loaded model never reaches into the entity's array.
+    /// Binary columns are copied defensively, so editing the loaded model never reaches into the entity's array. The
+    /// defensive copy belongs to this direction alone: <c>ApplyToEntity</c> assigns the confirmed values across as they
+    /// are, so the array an entity receives on the way to being saved is the edit model's own - saving hands the buffer
+    /// over rather than duplicating it, and writing into it afterwards is writing into both.
     /// </remarks>
     public void ApplyToEditModel(OrderEntity entity, OrderEditModel editModel)
     {
@@ -4619,6 +4702,14 @@ public partial interface IRemoteRepository<TEntity, TKey>
     );
 
     /// <summary>Deletes an entity by primary key (true when a matching row was deleted).</summary>
+    /// <remarks>
+    /// The delete is unconditional: a primary key is all this call is given, so there is no version to compare it against
+    /// and <see cref="ConcurrencyMode"/> plays no part even when the table has a rowversion column. To delete under the
+    /// protection of the version that was read, call <c>MarkRemoved()</c> on the entity and hand it to <c>SaveAsync</c>,
+    /// which fails with <see cref="SaveConflictException"/> when someone else has changed the row meanwhile.
+    /// </remarks>
+    /// <param name="id">The primary key of the row to delete.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
     Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default);
 
     /// <summary>Saves inserts, updates, and deletes in a single transaction according to RowState (children cascade by default).</summary>
@@ -4942,7 +5033,13 @@ public interface ISaveHook<TEntity>
 {
     /// <summary>Called immediately before the operation (<c>false</c> skips that single operation; the default does not skip).</summary>
     /// <param name="entity">The entity being saved.</param>
-    /// <param name="operation">The operation about to be performed (Insert/Update/Delete).</param>
+    /// <param name="operation">
+    /// The operation about to be performed (Insert/Update/Delete), decided from the entity's RowState before the hook is
+    /// called. Rewriting that RowState from inside the hook is not a supported way to redirect the save: whether the change
+    /// is picked up is not guaranteed and differs between the backends. Returning <c>false</c> is the supported way to stop
+    /// an operation - it is what <see cref="AfterSaveAsync"/> reflects, since that one reports the operation actually
+    /// performed.
+    /// </param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns><c>true</c> to proceed with the operation, <c>false</c> to skip it.</returns>
     Task<bool> BeforeSaveAsync(
@@ -5266,9 +5363,15 @@ public static class SqliteSchemaBootstrap
 {
     /// <summary>Opens a connection and runs the whole DDL script.</summary>
     /// <remarks>
+    /// <para>
     /// The script is sent as a single command: the SQLite provider executes every semicolon-separated statement of one
     /// command text. The connection is opened through <see cref="SqlConnectionFactory"/>, so foreign key enforcement
     /// follows the same rule as the repositories (on unless the connection string says otherwise).
+    /// </para>
+    /// <para>
+    /// Pass the optional arguments by name (<c>commandTimeout:</c>, <c>cancellationToken:</c>). The optional parameter
+    /// list is where later versions add their knobs, and a positional call would then quietly bind to a different one.
+    /// </para>
     /// </remarks>
     /// <param name="connectionString">The connection string of the database to create the schema in.</param>
     /// <param name="ddl">The DDL script to run.</param>
@@ -5665,10 +5768,11 @@ internal static class RawSqlMapper
             // so coerce to the property's underlying type (Nullable uses its underlying type) before setting
             var underlyingType =
                 Nullable.GetUnderlyingType(property.PropertyType) ?? property.PropertyType;
+            var propertyName = property.Name;
             setters[property.Name] = (target, raw) =>
                 property.SetValue(
                     target,
-                    raw is null ? null : CoerceProjectionValue(raw, underlyingType)
+                    raw is null ? null : CoerceProjectionValue(raw, underlyingType, propertyName)
                 );
         }
 
@@ -5676,12 +5780,33 @@ internal static class RawSqlMapper
     }
 
     /// <summary>Coerces a value being assigned to a projection DTO property to the underlying type (same semantics as the scalar conversion ConvertSingleValue).</summary>
-    private static object CoerceProjectionValue(object raw, Type underlyingType)
+    /// <remarks>
+    /// The failures name the property being filled: a projection has as many of them as it has columns, and without the name the
+    /// message says only that some value of some type was rejected, leaving the reader to guess which column it came from.
+    /// </remarks>
+    /// <param name="raw">The value the driver returned.</param>
+    /// <param name="underlyingType">The property's type (a nullable property's underlying type).</param>
+    /// <param name="propertyName">The projection property being filled (used in the failure messages).</param>
+    private static object CoerceProjectionValue(
+        object raw,
+        Type underlyingType,
+        string propertyName
+    )
     {
         // Wrap the raw value via Create for value objects
         if (typeof(IValueObject).IsAssignableFrom(underlyingType))
         {
-            return SqlValueObjectActivator.Wrap(raw, underlyingType)!;
+            try
+            {
+                return SqlValueObjectActivator.Wrap(raw, underlyingType)!;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                throw new InvalidOperationException(
+                    $"The raw SQL projection value for '{propertyName}' (of type {raw.GetType().Name}) could not be converted to the value object {underlyingType.Name}: {ex.Message}",
+                    ex
+                );
+            }
         }
 
         if (underlyingType.IsInstanceOfType(raw))
@@ -5697,7 +5822,7 @@ internal static class RawSqlMapper
             when (ex is InvalidCastException or FormatException or OverflowException)
         {
             throw new InvalidOperationException(
-                $"Could not convert the raw SQL projection value (of type {raw.GetType().Name}) to {underlyingType.Name}.",
+                $"Could not convert the raw SQL projection value for '{propertyName}' (of type {raw.GetType().Name}) to {underlyingType.Name}.",
                 ex
             );
         }
@@ -7484,9 +7609,30 @@ internal static class SqlExpressionTranslator
                 return VisitComparison(binary, parameters);
 
             case UnaryExpression { NodeType: ExpressionType.Not } unary:
-                return Unwrap(unary.Operand) is MemberExpression boolMember && IsColumn(boolMember)
-                    ? $"{ColumnName(boolMember.Member)} = 0"
-                    : $"NOT ({Visit(unary.Operand, parameters)})";
+            {
+                var operand = Unwrap(unary.Operand);
+
+                if (operand is MemberExpression boolMember && IsColumn(boolMember))
+                {
+                    return $"{ColumnName(boolMember.Member)} = 0";
+                }
+
+                // A negated equality is translated as the opposite comparison rather than wrapped in NOT, so that it gets
+                // the same null compensation the opposite operator would get on its own: NOT ([col] <> @p) leaves out every
+                // row whose column is NULL, while C# and EF Core read !(col != v) as including them.
+                if (
+                    operand
+                    is BinaryExpression
+                    {
+                        NodeType: ExpressionType.Equal or ExpressionType.NotEqual
+                    } equality
+                )
+                {
+                    return VisitComparison(equality, parameters, negate: true);
+                }
+
+                return $"NOT ({Visit(unary.Operand, parameters)})";
+            }
 
             case MethodCallExpression call
                 when TryGetLike(call, out var likeColumn, out var likeKind):
@@ -7567,15 +7713,35 @@ internal static class SqlExpressionTranslator
     /// expression tree; on a column that is never NULL the added disjunct simply never holds, so the result is unchanged.
     /// </para>
     /// <para>
-    /// Both compensations are deliberately limited to equality: the relational operators (&lt; &lt;= &gt; &gt;=) are left alone,
+    /// Comparing two columns with <c>!=</c> is the same mismatch once more, with a NULL possible on either side, so it is spelled out
+    /// in full: <c>(a &lt;&gt; b OR (a IS NULL AND b IS NOT NULL) OR (a IS NOT NULL AND b IS NULL))</c>, which matches C# (and EF Core)
+    /// in counting one NULL side as different and two NULL sides as the same. Column-to-column <c>==</c> is left as plain <c>=</c>,
+    /// where SQL and C# already agree that a NULL side is not a match.
+    /// </para>
+    /// <para>
+    /// The compensations are deliberately limited to equality: the relational operators (&lt; &lt;= &gt; &gt;=) are left alone,
     /// because they have no null-aware SQL counterpart.
     /// </para>
     /// </remarks>
+    /// <param name="binary">The comparison to translate.</param>
+    /// <param name="parameters">The parameter list the value operands are appended to.</param>
+    /// <param name="negate">
+    /// Whether the comparison is being translated under a <c>!</c>, in which case equality and inequality swap places here instead of
+    /// the result being wrapped in NOT (which would bypass the null compensation above).
+    /// </param>
     private static string VisitComparison(
         BinaryExpression binary,
-        List<SqlQueryParameter> parameters
+        List<SqlQueryParameter> parameters,
+        bool negate = false
     )
     {
+        // A negation is folded in by flipping the operator (only == / != reach here negated, so nothing else can be flipped)
+        var nodeType = negate
+            ? binary.NodeType == ExpressionType.Equal
+                ? ExpressionType.NotEqual
+                : ExpressionType.Equal
+            : binary.NodeType;
+
         var left = Unwrap(binary.Left);
         var right = Unwrap(binary.Right);
 
@@ -7585,9 +7751,9 @@ internal static class SqlExpressionTranslator
         var leftValue = leftSql is null ? Evaluate(left) : null;
         var rightValue = rightSql is null ? Evaluate(right) : null;
 
-        if (binary.NodeType is ExpressionType.Equal or ExpressionType.NotEqual)
+        if (nodeType is ExpressionType.Equal or ExpressionType.NotEqual)
         {
-            var suffix = binary.NodeType == ExpressionType.NotEqual ? "NOT " : string.Empty;
+            var suffix = nodeType == ExpressionType.NotEqual ? "NOT " : string.Empty;
 
             if (leftSql is not null && rightSql is null && IsNullValue(rightValue))
             {
@@ -7602,7 +7768,7 @@ internal static class SqlExpressionTranslator
 
         // "not equal to a non-null value" also has to admit the rows whose column is NULL (see the remarks); the null
         // value cases have already returned above, so what reaches here is exactly the non-null comparison
-        if (binary.NodeType == ExpressionType.NotEqual)
+        if (nodeType == ExpressionType.NotEqual)
         {
             if (leftSql is not null && rightSql is null)
             {
@@ -7613,9 +7779,15 @@ internal static class SqlExpressionTranslator
             {
                 return $"({rightSql} <> {AddParameter(leftValue, parameters, RawColumnName(rightSql))} OR {rightSql} IS NULL)";
             }
+
+            // Both sides stay on the SQL side: a NULL on either side has to be spelled out, since <> alone drops those rows
+            if (leftSql is not null && rightSql is not null)
+            {
+                return $"({leftSql} <> {rightSql} OR ({leftSql} IS NULL AND {rightSql} IS NOT NULL) OR ({leftSql} IS NOT NULL AND {rightSql} IS NULL))";
+            }
         }
 
-        var op = binary.NodeType switch
+        var op = nodeType switch
         {
             ExpressionType.Equal => "=",
             ExpressionType.NotEqual => "<>",
@@ -7957,6 +8129,11 @@ internal static class SqlExpressionTranslator
     }
 
     /// <summary>Translates date-component references on DateTime columns (x.Col.Year / x.Col.Value.Month, etc.) into SQL date functions.</summary>
+    /// <remarks>
+    /// The member name alone does not make something a date component, so the type the member is read from has to be a date/time
+    /// type as well. Without that check a property named <c>Year</c> added to any other column's type - a partial member on a value
+    /// object, say - would silently become <c>YEAR([col])</c>, computing a date component of a column that holds no date.
+    /// </remarks>
     private static bool TryGetDatePart(Expression expression, out string sql)
     {
         sql = string.Empty;
@@ -7965,6 +8142,7 @@ internal static class SqlExpressionTranslator
             Unwrap(expression) is not MemberExpression member
             || member.Expression is not { } source
             || TryColumnName(source) is not { } column
+            || !IsDateTimeType(Unwrap(source).Type)
         )
         {
             return false;
@@ -7985,6 +8163,16 @@ internal static class SqlExpressionTranslator
         };
 
         return sql.Length != 0;
+    }
+
+    /// <summary>Whether the type is one whose members can be date components (the nullable forms included).</summary>
+    private static bool IsDateTimeType(Type type)
+    {
+        var underlying = Nullable.GetUnderlyingType(type) ?? type;
+
+        return underlying == typeof(DateTime)
+            || underlying == typeof(DateOnly)
+            || underlying == typeof(DateTimeOffset);
     }
 
     /// <summary>
@@ -8604,6 +8792,12 @@ public static class RemoteEntityGraph
 /// row versions the save assigned, which are written back to the local entities. A remote client therefore ends up holding
 /// the same versions a direct connection would leave behind, and can keep saving the same graph without re-reading it.
 /// </para>
+/// <para>
+/// The wire format is not promised to stay compatible across QuickER versions while the tool is at 0.x, so
+/// regenerate the client and the server together and deploy them together. A server that moves ahead on its own
+/// does not announce the mismatch: a request the newer endpoints no longer recognize surfaces as an ordinary transport
+/// failure - a 404 or a 400 - rather than as a version error.
+/// </para>
 /// </remarks>
 public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepository<TEntity, TKey>
     where TEntity : EntityBase, new()
@@ -8665,7 +8859,12 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     }
 
     /// <summary>Posts an operation and deserializes the result JSON into <typeparamref name="TResult"/> (the shared path for generated transport methods).</summary>
-    /// <remarks>On a failure response, reads the <see cref="RemoteError"/>; 409 with SaveConflict throws <see cref="SaveConflictException"/>, anything else throws <see cref="RemoteRepositoryException"/>.</remarks>
+    /// <remarks>
+    /// On a failure response, reads the <see cref="RemoteError"/>; 409 with SaveConflict throws <see cref="SaveConflictException"/>,
+    /// anything else throws <see cref="RemoteRepositoryException"/>. A success response whose body is not the expected JSON throws
+    /// <see cref="RemoteRepositoryException"/> as well: something other than the generated endpoint answered - a proxy's or a portal's
+    /// success page, most often - and letting the raw <c>JsonException</c> out would hide that behind a parsing detail.
+    /// </remarks>
     protected async Task<TResult> InvokeAsync<TResult>(
         string operation,
         object? payload,
@@ -8681,11 +8880,23 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
 
         await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
 
-        var result = await response.Content.ReadFromJsonAsync<TResult>(
-            RemoteJson.Options,
-            cancellationToken
-        ).ConfigureAwait(false);
-        return result!;
+        try
+        {
+            var result = await response.Content.ReadFromJsonAsync<TResult>(
+                RemoteJson.Options,
+                cancellationToken
+            ).ConfigureAwait(false);
+            return result!;
+        }
+        catch (Exception parseError) when (parseError is JsonException or NotSupportedException)
+        {
+            // Malformed JSON surfaces as JsonException, a non-JSON content type as NotSupportedException - the same two
+            // kinds the error path folds away, classified here as the transport failure they are
+            throw new RemoteRepositoryException(
+                (int)response.StatusCode,
+                $"The remote call succeeded (HTTP {(int)response.StatusCode}) but its response body could not be interpreted: {parseError.Message}"
+            );
+        }
     }
 
     /// <summary>Converts a failure response into an exception (known kinds restore the original exception type).</summary>

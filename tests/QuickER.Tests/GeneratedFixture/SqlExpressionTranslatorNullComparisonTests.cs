@@ -31,6 +31,14 @@ namespace QuickER.Tests.GeneratedFixture;
 /// 列の NULL 許容性は式木から確実には判定できないため無条件に補償する（非 NULL 列では意味不変）。
 /// </para>
 /// <para>
+/// 列同士: <c>a &lt;&gt; b</c> はどちらかが NULL の行を落とすが、C#／EF Core は「片側だけ NULL＝不一致」と扱う。
+/// そのため <c>(a &lt;&gt; b OR (a IS NULL AND b IS NOT NULL) OR (a IS NOT NULL AND b IS NULL))</c> へ展開する。
+/// </para>
+/// <para>
+/// 否定: <c>!(a == b)</c> は <c>NOT (...)</c> で包むと補償の外側に出てしまうため、演算子を反転して
+/// <c>a != b</c> と同じ経路へ流す（等値以外の否定は従来どおり <c>NOT (...)</c>）。
+/// </para>
+/// <para>
 /// 補償範囲は <c>==</c> / <c>!=</c> のみで、関係演算子（&lt; &lt;= &gt; &gt;=）は従来どおり NULL パラメータの
 /// ままにする（null 対応の SQL 対応物が無いため）。ここではその線引きも対照として固定する。
 /// </para>
@@ -174,10 +182,73 @@ public sealed class SqlExpressionTranslatorNullComparisonTests
         RunSqlite(p => p.Name1 == name).Sql.Should().Be("\"Name1\" = @p0");
     }
 
-    [Fact(DisplayName = "対照: 列同士の != は補償しない（値側が無く両辺が SQL のため）")]
-    public void NotEqualColumnToColumn_IsNotCompensated()
+    [Fact(DisplayName = "列同士の != は両辺の NULL を明示した形へ補償される（両方言）")]
+    public void NotEqualColumnToColumn_CompensatesBothSides()
     {
-        RunSqlServer(p => p.Name1 != p.Name2).Sql.Should().Be("[Name1] <> [Name2]");
+        RunSqlServer(p => p.Name1 != p.Name2)
+            .Sql.Should()
+            .Be(
+                "([Name1] <> [Name2] OR ([Name1] IS NULL AND [Name2] IS NOT NULL) OR ([Name1] IS NOT NULL AND [Name2] IS NULL))"
+            );
+
+        RunSqlite(p => p.Name1 != p.Name2)
+            .Sql.Should()
+            .Be(
+                "(\"Name1\" <> \"Name2\" OR (\"Name1\" IS NULL AND \"Name2\" IS NOT NULL) OR (\"Name1\" IS NOT NULL AND \"Name2\" IS NULL))"
+            );
+    }
+
+    [Fact(DisplayName = "対照: 列同士の == は補償しない（NULL 側は SQL でも C# でも不一致）")]
+    public void EqualColumnToColumn_IsNotCompensated()
+    {
+        RunSqlServer(p => p.Name1 == p.Name2).Sql.Should().Be("[Name1] = [Name2]");
+    }
+
+    [Fact(DisplayName = "!(==) は != と同じ補償形になる（NOT で包まない）")]
+    public void NegatedEqual_TranslatesAsNotEqual()
+    {
+        var name = "Alice";
+
+        var sqlServer = RunSqlServer(p => !(p.Name1 == name));
+        sqlServer.Sql.Should().Be("([Name1] <> @p0 OR [Name1] IS NULL)", "!(==) と != は同義");
+        sqlServer.Parameters.Should().ContainSingle();
+
+        RunSqlite(p => !(p.Name1 == name))
+            .Sql.Should()
+            .Be("(\"Name1\" <> @p0 OR \"Name1\" IS NULL)");
+    }
+
+    [Fact(DisplayName = "!(!=) は == と同じ形になる（二重否定が畳まれる）")]
+    public void NegatedNotEqual_TranslatesAsEqual()
+    {
+        var name = "Alice";
+
+        RunSqlServer(p => !(p.Name1 != name)).Sql.Should().Be("[Name1] = @p0");
+    }
+
+    [Fact(DisplayName = "!(== null) / !(!= null) も IS [NOT] NULL へ畳まれる")]
+    public void NegatedNullComparison_EmitsIsNull()
+    {
+        string? missing = null;
+
+        RunSqlServer(p => !(p.Name1 == missing)).Sql.Should().Be("[Name1] IS NOT NULL");
+        RunSqlServer(p => !(p.Name1 != null)).Sql.Should().Be("[Name1] IS NULL");
+    }
+
+    [Fact(DisplayName = "!(列 == 列) も列同士の補償形になる")]
+    public void NegatedColumnToColumnEqual_CompensatesBothSides()
+    {
+        RunSqlServer(p => !(p.Name1 == p.Name2))
+            .Sql.Should()
+            .Be(
+                "([Name1] <> [Name2] OR ([Name1] IS NULL AND [Name2] IS NOT NULL) OR ([Name1] IS NOT NULL AND [Name2] IS NULL))"
+            );
+    }
+
+    [Fact(DisplayName = "対照: 等値以外の否定は従来どおり NOT (...) で包まれる")]
+    public void NegatedNonEqualityComparison_StillWrapsInNot()
+    {
+        RunSqlServer(p => !(p.A > 1)).Sql.Should().Be("NOT ([A] > @p0)");
     }
 
     [Fact(DisplayName = "値オブジェクト列でも null 変数との比較が補償される（VO 有効の図）")]

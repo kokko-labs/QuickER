@@ -57,6 +57,14 @@ public partial interface IRemoteRepository<TEntity, TKey>
     );
 
     /// <summary>Deletes an entity by primary key (true when a matching row was deleted).</summary>
+    /// <remarks>
+    /// The delete is unconditional: a primary key is all this call is given, so there is no version to compare it against
+    /// and <see cref="ConcurrencyMode"/> plays no part even when the table has a rowversion column. To delete under the
+    /// protection of the version that was read, call <c>MarkRemoved()</c> on the entity and hand it to <c>SaveAsync</c>,
+    /// which fails with <see cref="SaveConflictException"/> when someone else has changed the row meanwhile.
+    /// </remarks>
+    /// <param name="id">The primary key of the row to delete.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
     Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default);
 
     /// <summary>Saves inserts, updates, and deletes in a single transaction according to RowState (children cascade by default).</summary>
@@ -380,7 +388,13 @@ public interface ISaveHook<TEntity>
 {
     /// <summary>Called immediately before the operation (<c>false</c> skips that single operation; the default does not skip).</summary>
     /// <param name="entity">The entity being saved.</param>
-    /// <param name="operation">The operation about to be performed (Insert/Update/Delete).</param>
+    /// <param name="operation">
+    /// The operation about to be performed (Insert/Update/Delete), decided from the entity's RowState before the hook is
+    /// called. Rewriting that RowState from inside the hook is not a supported way to redirect the save: whether the change
+    /// is picked up is not guaranteed and differs between the backends. Returning <c>false</c> is the supported way to stop
+    /// an operation - it is what <see cref="AfterSaveAsync"/> reflects, since that one reports the operation actually
+    /// performed.
+    /// </param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns><c>true</c> to proceed with the operation, <c>false</c> to skip it.</returns>
     Task<bool> BeforeSaveAsync(
@@ -708,9 +722,15 @@ public static class SqliteSchemaBootstrap
 {
     /// <summary>Opens a connection and runs the whole DDL script.</summary>
     /// <remarks>
+    /// <para>
     /// The script is sent as a single command: the SQLite provider executes every semicolon-separated statement of one
     /// command text. The connection is opened through <see cref="SqlConnectionFactory"/>, so foreign key enforcement
     /// follows the same rule as the repositories (on unless the connection string says otherwise).
+    /// </para>
+    /// <para>
+    /// Pass the optional arguments by name (<c>commandTimeout:</c>, <c>cancellationToken:</c>). The optional parameter
+    /// list is where later versions add their knobs, and a positional call would then quietly bind to a different one.
+    /// </para>
     /// </remarks>
     /// <param name="connectionString">The connection string of the database to create the schema in.</param>
     /// <param name="ddl">The DDL script to run.</param>
@@ -760,9 +780,15 @@ public static class SqlServerSchemaBootstrap
 {
     /// <summary>Opens a connection and runs the whole DDL script.</summary>
     /// <remarks>
+    /// <para>
     /// The script is sent as a single command. The DDL QuickER generates is one batch - it emits no <c>GO</c>
     /// separators and no statement that must start a batch of its own - so it needs no batch splitting.
     /// A hand-edited script that does contain <c>GO</c> has to be split by the caller.
+    /// </para>
+    /// <para>
+    /// Pass the optional arguments by name (<c>commandTimeout:</c>, <c>cancellationToken:</c>). The optional parameter
+    /// list is where later versions add their knobs, and a positional call would then quietly bind to a different one.
+    /// </para>
     /// </remarks>
     /// <param name="connectionString">The connection string of the database to create the schema in.</param>
     /// <param name="ddl">The DDL script to run.</param>
@@ -1168,10 +1194,11 @@ public static class SqlServerSchemaBootstrap
             // so coerce to the property's underlying type (Nullable uses its underlying type) before setting
             var underlyingType =
                 Nullable.GetUnderlyingType(property.PropertyType) ?? property.PropertyType;
+            var propertyName = property.Name;
             setters[property.Name] = (target, raw) =>
                 property.SetValue(
                     target,
-                    raw is null ? null : CoerceProjectionValue(raw, underlyingType)
+                    raw is null ? null : CoerceProjectionValue(raw, underlyingType, propertyName)
                 );
         }
 
@@ -1179,13 +1206,34 @@ public static class SqlServerSchemaBootstrap
     }
 
     /// <summary>Coerces a value being assigned to a projection DTO property to the underlying type (same semantics as the scalar conversion ConvertSingleValue).</summary>
-    private static object CoerceProjectionValue(object raw, Type underlyingType)
+    /// <remarks>
+    /// The failures name the property being filled: a projection has as many of them as it has columns, and without the name the
+    /// message says only that some value of some type was rejected, leaving the reader to guess which column it came from.
+    /// </remarks>
+    /// <param name="raw">The value the driver returned.</param>
+    /// <param name="underlyingType">The property's type (a nullable property's underlying type).</param>
+    /// <param name="propertyName">The projection property being filled (used in the failure messages).</param>
+    private static object CoerceProjectionValue(
+        object raw,
+        Type underlyingType,
+        string propertyName
+    )
     {
         {{~ if generate_value_objects ~}}
         // Wrap the raw value via Create for value objects
         if (typeof(IValueObject).IsAssignableFrom(underlyingType))
         {
-            return SqlValueObjectActivator.Wrap(raw, underlyingType)!;
+            try
+            {
+                return SqlValueObjectActivator.Wrap(raw, underlyingType)!;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                throw new InvalidOperationException(
+                    $"The raw SQL projection value for '{propertyName}' (of type {raw.GetType().Name}) could not be converted to the value object {underlyingType.Name}: {ex.Message}",
+                    ex
+                );
+            }
         }
 
         {{~ end ~}}
@@ -1202,7 +1250,7 @@ public static class SqlServerSchemaBootstrap
             when (ex is InvalidCastException or FormatException or OverflowException)
         {
             throw new InvalidOperationException(
-                $"Could not convert the raw SQL projection value (of type {raw.GetType().Name}) to {underlyingType.Name}.",
+                $"Could not convert the raw SQL projection value for '{propertyName}' (of type {raw.GetType().Name}) to {underlyingType.Name}.",
                 ex
             );
         }

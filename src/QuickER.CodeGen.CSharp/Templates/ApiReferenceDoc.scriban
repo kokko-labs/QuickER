@@ -53,7 +53,9 @@ Each generated repository implements `IRepository<TEntity, TKey>`. The main meth
 | `GetAllAsync(ct)` | Gets all entities. |
 | `InsertAsync(entity, ct)` | Inserts a single entity. |
 | `UpdateAsync(entity, mode, ct)` | Updates the single entity matching the primary key (returns whether it succeeded). `mode` selects the concurrency policy for tables that have a rowversion column. |
-| `DeleteAsync(id, ct)` | Deletes the single entity matching the primary key (returns whether it succeeded). |
+| `DeleteAsync(id, ct)` | Deletes the single entity matching the primary key (returns whether it succeeded). The delete is unconditional: a key carries no rowversion, so nothing is compared. To delete under the protection of the version you read, use `MarkRemoved()` + `SaveAsync`. |
+| `SaveAsync(entity, cascadeSave, cascadeDelete, insertWhenUpdateMissing, mode, ct)` | Saves one aggregate root's inserts, updates, and deletes in a single transaction according to RowState (children cascade by default; returns the number of records saved). `mode` selects the concurrency policy, and the save hooks (`ISaveHook<T>`) fire here. |
+| `SaveAsync(entities, cascadeSave, cascadeDelete, insertWhenUpdateMissing, mode, ct)` | Saves multiple aggregate roots together in one transaction (all succeed or all roll back), otherwise identical to the single-root form. |
 | `BulkInsertAsync(entities, ct)` | Inserts multiple entities at once (returns the number inserted). |
 | `Query()` | Builds queries such as filtering, ordering, and row limiting. |
 | `CheckUniquenessAsync(entity, ct)` | Checks this table's UNIQUE constraints against the database and returns the violations (rows sharing the primary key are excluded, so the same call fits insert and update). |

@@ -522,6 +522,12 @@ public static class RemoteEntityGraph
 /// row versions the save assigned, which are written back to the local entities. A remote client therefore ends up holding
 /// the same versions a direct connection would leave behind, and can keep saving the same graph without re-reading it.
 /// </para>
+/// <para>
+/// The wire format is not promised to stay compatible across QuickER versions while the tool is at 0.x, so
+/// regenerate the client and the server together and deploy them together. A server that moves ahead on its own
+/// does not announce the mismatch: a request the newer endpoints no longer recognize surfaces as an ordinary transport
+/// failure - a 404 or a 400 - rather than as a version error.
+/// </para>
 /// </remarks>
 public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepository<TEntity, TKey>
     where TEntity : EntityBase, new()
@@ -583,7 +589,12 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     }
 
     /// <summary>Posts an operation and deserializes the result JSON into <typeparamref name="TResult"/> (the shared path for generated transport methods).</summary>
-    /// <remarks>On a failure response, reads the <see cref="RemoteError"/>; 409 with SaveConflict throws <see cref="SaveConflictException"/>, anything else throws <see cref="RemoteRepositoryException"/>.</remarks>
+    /// <remarks>
+    /// On a failure response, reads the <see cref="RemoteError"/>; 409 with SaveConflict throws <see cref="SaveConflictException"/>,
+    /// anything else throws <see cref="RemoteRepositoryException"/>. A success response whose body is not the expected JSON throws
+    /// <see cref="RemoteRepositoryException"/> as well: something other than the generated endpoint answered - a proxy's or a portal's
+    /// success page, most often - and letting the raw <c>JsonException</c> out would hide that behind a parsing detail.
+    /// </remarks>
     protected async Task<TResult> InvokeAsync<TResult>(
         string operation,
         object? payload,
@@ -599,11 +610,23 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
 
         await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
 
-        var result = await response.Content.ReadFromJsonAsync<TResult>(
-            RemoteJson.Options,
-            cancellationToken
-        ).ConfigureAwait(false);
-        return result!;
+        try
+        {
+            var result = await response.Content.ReadFromJsonAsync<TResult>(
+                RemoteJson.Options,
+                cancellationToken
+            ).ConfigureAwait(false);
+            return result!;
+        }
+        catch (Exception parseError) when (parseError is JsonException or NotSupportedException)
+        {
+            // Malformed JSON surfaces as JsonException, a non-JSON content type as NotSupportedException - the same two
+            // kinds the error path folds away, classified here as the transport failure they are
+            throw new RemoteRepositoryException(
+                (int)response.StatusCode,
+                $"The remote call succeeded (HTTP {(int)response.StatusCode}) but its response body could not be interpreted: {parseError.Message}"
+            );
+        }
     }
 
     /// <summary>Converts a failure response into an exception (known kinds restore the original exception type).</summary>
@@ -1013,7 +1036,8 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     /// <remarks>
     /// The endpoints mark the 404 they produce themselves with a <see cref="RemoteError"/> body of type "NotFound". A 404
     /// without that marker never reached them - a base address or prefix that does not match the server's, a route that no
-    /// longer exists, a proxy answering on its own - and reading it as "no data" would turn a misconfiguration into
+    /// longer exists, a proxy answering on its own, or a server regenerated from a newer version than this client - and
+    /// reading it as "no data" would turn a misconfiguration into
     /// silently empty results, so it is reported as <see cref="RemoteRepositoryException"/> like any other failure. The
     /// return type is <c>bool</c> only so that callers can <c>return</c> the result directly; it is never <c>true</c>.
     /// </remarks>

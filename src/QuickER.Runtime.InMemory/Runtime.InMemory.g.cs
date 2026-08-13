@@ -722,9 +722,12 @@ public sealed class InMemoryDataStore
     /// taken the same primary key meanwhile is a duplicate key rather than something an overwrite policy can excuse.
     /// </para>
     /// <para>
-    /// Last-write-wins still stops short of resurrection: a row the save started from that has been deleted meanwhile is left
-    /// deleted, because putting the staged snapshot back would bring a deleted row to life, where a real database's UPDATE
-    /// simply affects no rows. The staged write for such a row is dropped (a staged delete for it is a no-op either way).
+    /// Last-write-wins still stops short of resurrection: a row the save started from that has been deleted meanwhile cannot
+    /// be written back, because putting the staged snapshot in would bring a deleted row to life, where a real database's
+    /// UPDATE simply affects no rows. Reporting that as <see cref="SaveConflictReason.NotFound"/> is what keeps the save
+    /// honest: the row count the save already returned counted this write, and its entities are about to be accepted as
+    /// saved, so dropping the write silently would leave the caller believing a row exists that does not. A staged delete for
+    /// such a row is not a conflict (deleting a row that is already gone is the same no-op it is against a real database).
     /// </para>
     /// <para>
     /// Once the writes are in, the row versions they assigned are read back out of the published snapshots and handed to the
@@ -736,9 +739,6 @@ public sealed class InMemoryDataStore
     {
         lock (_gate)
         {
-            // The rows that were deleted while the save was running: their staged writes are dropped instead of applied
-            HashSet<(Type EntityType, object Key)>? deletedMeanwhile = null;
-
             foreach (var (entityType, key, baseRow) in staging.Baseline)
             {
                 var current = Table(entityType).GetValueOrDefault(key);
@@ -763,21 +763,21 @@ public sealed class InMemoryDataStore
                     throw SaveConflictException.Modified(entityType, key, "save");
                 }
 
-                // The row this write started from is gone: overwriting last-write-wins does not extend to reviving it
-                if (baseRow is not null && current is null)
+                // The row this write started from is gone: overwriting last-write-wins does not extend to reviving it, and
+                // saying so beats dropping the write, which would report a saved row that is not there (a staged delete
+                // against an already deleted row stays the no-op it is against a real database).
+                if (
+                    baseRow is not null
+                    && current is null
+                    && staging.Staged(entityType, key) is not null
+                )
                 {
-                    deletedMeanwhile ??= new HashSet<(Type EntityType, object Key)>();
-                    deletedMeanwhile.Add((entityType, key));
+                    throw SaveConflictException.NotFound(entityType, key);
                 }
             }
 
             foreach (var ((entityType, key), snapshot) in staging.Overlay)
             {
-                if (deletedMeanwhile is not null && deletedMeanwhile.Contains((entityType, key)))
-                {
-                    continue;
-                }
-
                 if (snapshot is null)
                 {
                     Table(entityType).Remove(key);
@@ -940,7 +940,11 @@ public sealed class InMemoryDataStore
 /// <remarks>
 /// <para>
 /// A staged write is invisible to everyone but the save that staged it: it never touches the store until
-/// <see cref="InMemoryDataStore.Publish"/> accepts the whole set at once. A save that fails simply drops its staging, which
+/// <see cref="InMemoryDataStore.Publish"/> accepts the whole set at once. "At once" is about the outcome, not about
+/// isolation: the staging writes and <see cref="InMemoryDataStore.Publish"/> take the store lock separately, so a
+/// reader running in between sees the store as it was before the save. What the staging guarantees is
+/// that a save which stops half way - and the phases it runs outside the lock are where it can - never leaves part of
+/// itself behind. A save that fails simply drops its staging, which
 /// is all the rollback there is - the store was never changed, so there is nothing to undo and nothing another thread's
 /// write can be trampled by. That matters because a save hook's After runs outside the store lock: rolling a failed save
 /// back by restoring snapshots would silently discard whatever someone else wrote to the same rows while After was running.

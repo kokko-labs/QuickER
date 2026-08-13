@@ -1022,16 +1022,46 @@ public abstract partial class EditModelBase
     /// Duplicate-value error messages keyed by property name, kept in a store of their own so the two kinds never overwrite each other:
     /// a uniqueness check registers and clears only this store, while SetError / ClearErrors touch only <see cref="_errors"/>.
     /// Both stores are merged by <see cref="HasErrors"/>, <see cref="GetErrors"/>, and error collection, so a property can carry a
-    /// conversion error and a duplicate-value error at the same time. Each entry also records which check found the duplicate
-    /// (<see cref="DuplicateErrorSource"/>), so the check among the siblings and the check against the database clear only their own findings.
+    /// conversion error and a duplicate-value error at the same time. Each entry holds one slot per check
+    /// (<see cref="DuplicateErrorSource"/>), so the check among the siblings and the check against the database neither overwrite
+    /// nor clear each other's findings on the same property.
     /// </summary>
-    private readonly Dictionary<string, DuplicateError> _duplicateErrors = new();
+    /// <remarks>An entry is removed as soon as both of its slots are empty, which is what keeps <c>Count</c> a valid "are there any" test.</remarks>
+    private readonly Dictionary<string, DuplicateErrors> _duplicateErrors = new();
 
     /// <summary>An input error message together with the check that registered it.</summary>
     private readonly record struct InputError(string Message, bool FromRequiredCheck);
 
-    /// <summary>A duplicate-value error message together with the check that found it.</summary>
-    private readonly record struct DuplicateError(string Message, DuplicateErrorSource Source);
+    /// <summary>The duplicate-value messages registered on one property, one slot per check that can find them (null where a check found nothing).</summary>
+    private readonly record struct DuplicateErrors(string? Siblings, string? Database)
+    {
+        /// <summary>Whether neither check has anything registered (an entry in this state is dropped from the store).</summary>
+        public bool IsEmpty => Siblings is null && Database is null;
+
+        /// <summary>The message the specified check registered (null when it found nothing).</summary>
+        public string? Of(DuplicateErrorSource source) =>
+            source == DuplicateErrorSource.Siblings ? Siblings : Database;
+
+        /// <summary>This entry with the specified check's message replaced (null clears that check's slot only).</summary>
+        public DuplicateErrors With(DuplicateErrorSource source, string? message) =>
+            source == DuplicateErrorSource.Siblings
+                ? this with { Siblings = message }
+                : this with { Database = message };
+
+        /// <summary>The registered messages in a fixed order (the siblings check first), so reporting is deterministic.</summary>
+        public IEnumerable<string> Messages()
+        {
+            if (Siblings is not null)
+            {
+                yield return Siblings;
+            }
+
+            if (Database is not null)
+            {
+                yield return Database;
+            }
+        }
+    }
 
     /// <summary>Raised when a property value changes.</summary>
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -1286,13 +1316,13 @@ public abstract partial class EditModelBase
         {
             return _errors
                 .Values.Select(error => error.Message)
-                .Concat(_duplicateErrors.Values.Select(error => error.Message));
+                .Concat(_duplicateErrors.Values.SelectMany(entry => entry.Messages()));
         }
 
         return ReadErrors(propertyName);
     }
 
-    /// <summary>Reads the messages registered for the specified property in both stores (the input error first, then the duplicate-value error).</summary>
+    /// <summary>Reads the messages registered for the specified property in both stores (the input error first, then the duplicate-value errors).</summary>
     private IEnumerable<string> ReadErrors(string propertyName)
     {
         if (_errors.TryGetValue(propertyName, out var input))
@@ -1300,9 +1330,12 @@ public abstract partial class EditModelBase
             yield return input.Message;
         }
 
-        if (_duplicateErrors.TryGetValue(propertyName, out var duplicate))
+        if (_duplicateErrors.TryGetValue(propertyName, out var duplicates))
         {
-            yield return duplicate.Message;
+            foreach (var message in duplicates.Messages())
+            {
+                yield return message;
+            }
         }
     }
 
@@ -1371,7 +1404,10 @@ public abstract partial class EditModelBase
 
         foreach (var pair in _duplicateErrors)
         {
-            yield return new EditModelError(path, pair.Key, pair.Value.Message);
+            foreach (var message in pair.Value.Messages())
+            {
+                yield return new EditModelError(path, pair.Key, message);
+            }
         }
     }
 
@@ -1618,7 +1654,9 @@ public abstract partial class EditModelBase
     /// <summary>Clears the duplicate-value errors found by the specified check only, leaving the other check's findings in place.</summary>
     /// <remarks>
     /// Each check clears exactly what it registered before running again, so the check among the siblings no longer discards
-    /// the violations the database check found (and the other way round).
+    /// the violations the database check found (and the other way round). Changing a confirmed value also clears the
+    /// <see cref="DuplicateErrorSource.Database"/> findings of the whole model, because they were reached by comparing the values
+    /// it held before the edit - all of them, since a composite constraint's verdict rests on every column it covers.
     /// </remarks>
     /// <param name="source">The check whose findings are cleared.</param>
     public void ClearDuplicateErrors(DuplicateErrorSource source) =>
@@ -1632,30 +1670,55 @@ public abstract partial class EditModelBase
             return;
         }
 
+        // The properties to touch are listed first, because the store is modified while they are processed
         var cleared = _duplicateErrors
-            .Where(pair => source is null || pair.Value.Source == source)
+            .Where(pair => source is null || pair.Value.Of(source.Value) is not null)
             .Select(pair => pair.Key)
             .ToList();
 
         foreach (var propertyName in cleared)
         {
-            _duplicateErrors.Remove(propertyName);
+            if (source is null)
+            {
+                _duplicateErrors.Remove(propertyName);
+            }
+            else
+            {
+                // Only the calling check's slot is emptied; the entry stays as long as the other check still has a finding
+                var remaining = _duplicateErrors[propertyName].With(source.Value, null);
+
+                if (remaining.IsEmpty)
+                {
+                    _duplicateErrors.Remove(propertyName);
+                }
+                else
+                {
+                    _duplicateErrors[propertyName] = remaining;
+                }
+            }
+
             OnErrorsChanged(propertyName);
         }
     }
 
     /// <summary>Registers a duplicate-value error on the specified binding property in the duplicate-value store. An empty name registers a model-level error.</summary>
-    /// <remarks>It does not go through <see cref="SetError"/>, so a conversion error already registered on the same property survives and both are reported.</remarks>
+    /// <remarks>
+    /// It does not go through <see cref="SetError"/>, so a conversion error already registered on the same property survives and both are
+    /// reported. Only the calling check's slot is written, so a property found to be a duplicate both among its siblings and against the
+    /// database reports both findings, and each of them disappears when its own check stops finding it.
+    /// </remarks>
     /// <param name="propertyName">Binding property the error is attached to (empty for a model-level error).</param>
     /// <param name="message">The error message.</param>
-    /// <param name="source">The check that found the duplicate (it decides which clear removes the error again).</param>
+    /// <param name="source">The check that found the duplicate (it decides which slot is written and which clear removes the error again).</param>
     public void SetDuplicateError(
         string propertyName,
         string message,
         DuplicateErrorSource source = DuplicateErrorSource.Siblings
     )
     {
-        _duplicateErrors[propertyName] = new DuplicateError(message, source);
+        _duplicateErrors[propertyName] = _duplicateErrors
+            .GetValueOrDefault(propertyName)
+            .With(source, message);
         OnErrorsChanged(propertyName);
     }
 
@@ -2422,6 +2485,14 @@ public partial interface IRemoteRepository<TEntity, TKey>
     );
 
     /// <summary>Deletes an entity by primary key (true when a matching row was deleted).</summary>
+    /// <remarks>
+    /// The delete is unconditional: a primary key is all this call is given, so there is no version to compare it against
+    /// and <see cref="ConcurrencyMode"/> plays no part even when the table has a rowversion column. To delete under the
+    /// protection of the version that was read, call <c>MarkRemoved()</c> on the entity and hand it to <c>SaveAsync</c>,
+    /// which fails with <see cref="SaveConflictException"/> when someone else has changed the row meanwhile.
+    /// </remarks>
+    /// <param name="id">The primary key of the row to delete.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
     Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default);
 
     /// <summary>Saves inserts, updates, and deletes in a single transaction according to RowState (children cascade by default).</summary>
@@ -2745,7 +2816,13 @@ public interface ISaveHook<TEntity>
 {
     /// <summary>Called immediately before the operation (<c>false</c> skips that single operation; the default does not skip).</summary>
     /// <param name="entity">The entity being saved.</param>
-    /// <param name="operation">The operation about to be performed (Insert/Update/Delete).</param>
+    /// <param name="operation">
+    /// The operation about to be performed (Insert/Update/Delete), decided from the entity's RowState before the hook is
+    /// called. Rewriting that RowState from inside the hook is not a supported way to redirect the save: whether the change
+    /// is picked up is not guaranteed and differs between the backends. Returning <c>false</c> is the supported way to stop
+    /// an operation - it is what <see cref="AfterSaveAsync"/> reflects, since that one reports the operation actually
+    /// performed.
+    /// </param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns><c>true</c> to proceed with the operation, <c>false</c> to skip it.</returns>
     Task<bool> BeforeSaveAsync(
@@ -3371,10 +3448,11 @@ public static class RawSqlMapper
             // so coerce to the property's underlying type (Nullable uses its underlying type) before setting
             var underlyingType =
                 Nullable.GetUnderlyingType(property.PropertyType) ?? property.PropertyType;
+            var propertyName = property.Name;
             setters[property.Name] = (target, raw) =>
                 property.SetValue(
                     target,
-                    raw is null ? null : CoerceProjectionValue(raw, underlyingType)
+                    raw is null ? null : CoerceProjectionValue(raw, underlyingType, propertyName)
                 );
         }
 
@@ -3382,12 +3460,33 @@ public static class RawSqlMapper
     }
 
     /// <summary>Coerces a value being assigned to a projection DTO property to the underlying type (same semantics as the scalar conversion ConvertSingleValue).</summary>
-    private static object CoerceProjectionValue(object raw, Type underlyingType)
+    /// <remarks>
+    /// The failures name the property being filled: a projection has as many of them as it has columns, and without the name the
+    /// message says only that some value of some type was rejected, leaving the reader to guess which column it came from.
+    /// </remarks>
+    /// <param name="raw">The value the driver returned.</param>
+    /// <param name="underlyingType">The property's type (a nullable property's underlying type).</param>
+    /// <param name="propertyName">The projection property being filled (used in the failure messages).</param>
+    private static object CoerceProjectionValue(
+        object raw,
+        Type underlyingType,
+        string propertyName
+    )
     {
         // Wrap the raw value via Create for value objects
         if (typeof(IValueObject).IsAssignableFrom(underlyingType))
         {
-            return SqlValueObjectActivator.Wrap(raw, underlyingType)!;
+            try
+            {
+                return SqlValueObjectActivator.Wrap(raw, underlyingType)!;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                throw new InvalidOperationException(
+                    $"The raw SQL projection value for '{propertyName}' (of type {raw.GetType().Name}) could not be converted to the value object {underlyingType.Name}: {ex.Message}",
+                    ex
+                );
+            }
         }
 
         if (underlyingType.IsInstanceOfType(raw))
@@ -3403,7 +3502,7 @@ public static class RawSqlMapper
             when (ex is InvalidCastException or FormatException or OverflowException)
         {
             throw new InvalidOperationException(
-                $"Could not convert the raw SQL projection value (of type {raw.GetType().Name}) to {underlyingType.Name}.",
+                $"Could not convert the raw SQL projection value for '{propertyName}' (of type {raw.GetType().Name}) to {underlyingType.Name}.",
                 ex
             );
         }
@@ -4470,6 +4569,12 @@ public static class RemoteEntityGraph
 /// row versions the save assigned, which are written back to the local entities. A remote client therefore ends up holding
 /// the same versions a direct connection would leave behind, and can keep saving the same graph without re-reading it.
 /// </para>
+/// <para>
+/// The wire format is not promised to stay compatible across QuickER versions while the tool is at 0.x, so
+/// regenerate the client and the server together and deploy them together. A server that moves ahead on its own
+/// does not announce the mismatch: a request the newer endpoints no longer recognize surfaces as an ordinary transport
+/// failure - a 404 or a 400 - rather than as a version error.
+/// </para>
 /// </remarks>
 public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepository<TEntity, TKey>
     where TEntity : EntityBase, new()
@@ -4531,7 +4636,12 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     }
 
     /// <summary>Posts an operation and deserializes the result JSON into <typeparamref name="TResult"/> (the shared path for generated transport methods).</summary>
-    /// <remarks>On a failure response, reads the <see cref="RemoteError"/>; 409 with SaveConflict throws <see cref="SaveConflictException"/>, anything else throws <see cref="RemoteRepositoryException"/>.</remarks>
+    /// <remarks>
+    /// On a failure response, reads the <see cref="RemoteError"/>; 409 with SaveConflict throws <see cref="SaveConflictException"/>,
+    /// anything else throws <see cref="RemoteRepositoryException"/>. A success response whose body is not the expected JSON throws
+    /// <see cref="RemoteRepositoryException"/> as well: something other than the generated endpoint answered - a proxy's or a portal's
+    /// success page, most often - and letting the raw <c>JsonException</c> out would hide that behind a parsing detail.
+    /// </remarks>
     protected async Task<TResult> InvokeAsync<TResult>(
         string operation,
         object? payload,
@@ -4547,11 +4657,23 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
 
         await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
 
-        var result = await response.Content.ReadFromJsonAsync<TResult>(
-            RemoteJson.Options,
-            cancellationToken
-        ).ConfigureAwait(false);
-        return result!;
+        try
+        {
+            var result = await response.Content.ReadFromJsonAsync<TResult>(
+                RemoteJson.Options,
+                cancellationToken
+            ).ConfigureAwait(false);
+            return result!;
+        }
+        catch (Exception parseError) when (parseError is JsonException or NotSupportedException)
+        {
+            // Malformed JSON surfaces as JsonException, a non-JSON content type as NotSupportedException - the same two
+            // kinds the error path folds away, classified here as the transport failure they are
+            throw new RemoteRepositoryException(
+                (int)response.StatusCode,
+                $"The remote call succeeded (HTTP {(int)response.StatusCode}) but its response body could not be interpreted: {parseError.Message}"
+            );
+        }
     }
 
     /// <summary>Converts a failure response into an exception (known kinds restore the original exception type).</summary>
@@ -4960,7 +5082,8 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     /// <remarks>
     /// The endpoints mark the 404 they produce themselves with a <see cref="RemoteError"/> body of type "NotFound". A 404
     /// without that marker never reached them - a base address or prefix that does not match the server's, a route that no
-    /// longer exists, a proxy answering on its own - and reading it as "no data" would turn a misconfiguration into
+    /// longer exists, a proxy answering on its own, or a server regenerated from a newer version than this client - and
+    /// reading it as "no data" would turn a misconfiguration into
     /// silently empty results, so it is reported as <see cref="RemoteRepositoryException"/> like any other failure. The
     /// return type is <c>bool</c> only so that callers can <c>return</c> the result directly; it is never <c>true</c>.
     /// </remarks>

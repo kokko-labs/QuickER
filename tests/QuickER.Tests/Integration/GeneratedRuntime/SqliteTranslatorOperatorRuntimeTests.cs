@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Linq.Expressions;
 using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
+using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.GeneratedSqliteFixture;
 using QuickER.Tests.Integration;
@@ -262,9 +264,9 @@ public sealed class SqliteTranslatorOperatorRuntimeTests : IDisposable
     }
 
     /// <summary>
-    /// NOT: bool 列以外（比較式）の否定は一般 <c>NOT (...)</c> 分岐へ落ち、条件の補集合を返す。
-    /// bool 列短縮分岐（<c>"col"=0</c>）は本フィクスチャに bool 列が無く到達しないため、ここでは
-    /// 到達可能な一般 NOT を検証する（クラス doc 参照）。
+    /// NOT: 否定は条件の補集合を返す。等値の否定は演算子を反転して <c>!=</c> と同じ経路へ落ち（NULL 補償の
+    /// 内側に入る）、それ以外は一般 <c>NOT (...)</c> 分岐になる。bool 列短縮分岐（<c>"col"=0</c>）は本
+    /// フィクスチャに bool 列が無く到達しない（クラス doc 参照）。
     /// </summary>
     [Fact(DisplayName = "[SQLite演算子] NOT（一般否定）が条件の補集合を返す")]
     public async Task Not_NegatesCondition()
@@ -277,6 +279,116 @@ public sealed class SqliteTranslatorOperatorRuntimeTests : IDisposable
             .Where(c => !(c.Name == NameValue.Create("Bob")))
             .ToListAsync(Ct);
         notBob.Select(c => c.CustomerId.Value).Should().BeEquivalentTo([1, 3, 4]);
+
+        // 等値以外（>）の否定は従来どおり NOT (...) で包まれる → 150 超でない＝100 のみ（NULL 残高は含まない）
+        var notGreater = await repo.Query().Where(c => !(c.Balance!.Value > 150m)).ToListAsync(Ct);
+        notGreater.Select(c => c.CustomerId.Value).Should().BeEquivalentTo([1]);
+    }
+
+    /// <summary>
+    /// 列同士の <c>!=</c> が、片側だけ NULL の行を<b>含め</b>両側 NULL の行を<b>含めない</b>（C# の
+    /// <c>!=</c> と同じ意味論）ことを実 SQLite で確認する。
+    /// </summary>
+    /// <remarks>
+    /// 固定フィクスチャには「同一エンティティに NULL 許容列 2 本」を持つ図が無いため、翻訳器が生成した
+    /// 条件文字列をそのまま専用テーブルへ流して観測する（生成 SQL の文字列固定は
+    /// <c>SqlExpressionTranslatorNullComparisonTests</c> 側が担当する）。素の <c>a &lt;&gt; b</c> のままだと
+    /// 3・4 が SQL の三値論理で落ち、インメモリ（式木コンパイル）・EF Core と結果が割れる。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[SQLite演算子] 列同士の != が片側 NULL の行を含め両側 NULL の行を除く（C# の意味論）"
+    )]
+    public async Task NotEqualColumnToColumn_MatchesCSharpSemantics()
+    {
+        await _db.ApplyDdlAsync(
+            """
+            CREATE TABLE probe ("Id" INTEGER PRIMARY KEY, "Name1" TEXT NULL, "Name2" TEXT NULL);
+            INSERT INTO probe ("Id", "Name1", "Name2") VALUES
+                (1, 'a', 'b'), (2, 'a', 'a'), (3, NULL, 'b'), (4, 'a', NULL), (5, NULL, NULL);
+            """,
+            Ct
+        );
+
+        var parameters = new List<SqlQueryParameter>();
+        Expression<Func<TwoNullableColumnProbe, bool>> predicate = p => p.Name1 != p.Name2;
+        var condition = SqlExpressionTranslator.ToCondition(predicate.Body, parameters);
+        parameters.Should().BeEmpty("列同士の比較は値をバインドしない");
+
+        var matched = await SelectProbeIdsAsync(condition);
+
+        // C# の != と同じ結論: 1（a≠b）・3（NULL と b）・4（a と NULL）が一致し、2（同値）・5（両方 NULL）は一致しない
+        matched.Should().Equal(1, 3, 4);
+
+        // 同じ行集合を C# 側でも評価して突き合わせる（期待値の手打ちに寄りかからない）
+        var evaluated = predicate.Compile();
+        ProbeRows()
+            .Where(evaluated)
+            .Select(row => row.Id)
+            .Should()
+            .Equal(matched, "SQL の観測結果は C# の評価と一致する");
+    }
+
+    /// <summary>列同士比較の検証用プローブ（プロパティ名がそのまま列名になる＝[Column] 属性なし）</summary>
+    private sealed class TwoNullableColumnProbe
+    {
+        public int Id { get; init; }
+        public string? Name1 { get; init; }
+        public string? Name2 { get; init; }
+    }
+
+    /// <summary>プローブ表に投入した行（SQL 側の観測と突き合わせる C# 側の同一データ）</summary>
+    private static IEnumerable<TwoNullableColumnProbe> ProbeRows() =>
+        [
+            new()
+            {
+                Id = 1,
+                Name1 = "a",
+                Name2 = "b",
+            },
+            new()
+            {
+                Id = 2,
+                Name1 = "a",
+                Name2 = "a",
+            },
+            new()
+            {
+                Id = 3,
+                Name1 = null,
+                Name2 = "b",
+            },
+            new()
+            {
+                Id = 4,
+                Name1 = "a",
+                Name2 = null,
+            },
+            new()
+            {
+                Id = 5,
+                Name1 = null,
+                Name2 = null,
+            },
+        ];
+
+    /// <summary>プローブ表へ条件をそのまま適用し、一致した行の主キーを昇順で返す</summary>
+    private async Task<List<int>> SelectProbeIdsAsync(string condition)
+    {
+        await using var connection = new SqliteConnection(ConnectionString);
+        await connection.OpenAsync(Ct);
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"SELECT \"Id\" FROM probe WHERE {condition} ORDER BY \"Id\"";
+
+        var ids = new List<int>();
+        await using var reader = await command.ExecuteReaderAsync(Ct);
+
+        while (await reader.ReadAsync(Ct))
+        {
+            ids.Add(reader.GetInt32(0));
+        }
+
+        return ids;
     }
 
     /// <summary>

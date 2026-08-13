@@ -53,7 +53,9 @@
 | `GetAllAsync(ct)` | 全件を取得します。 |
 | `InsertAsync(entity, ct)` | 1 件を追加します。 |
 | `UpdateAsync(entity, mode, ct)` | 主キー一致の 1 件を更新します（成否を返します）。`mode` は rowversion 列を持つテーブルの同時実行ポリシーを選びます。 |
-| `DeleteAsync(id, ct)` | 主キー一致の 1 件を削除します（成否を返します）。 |
+| `DeleteAsync(id, ct)` | 主キー一致の 1 件を削除します（成否を返します）。削除は無条件です＝キーだけでは rowversion を照合できないため、版のチェックは行われません。読み取った版で守りたい場合は `MarkRemoved()` ＋ `SaveAsync` を使ってください。 |
+| `SaveAsync(entity, cascadeSave, cascadeDelete, insertWhenUpdateMissing, mode, ct)` | 1 つの集約ルートの追加・更新・削除を RowState に従って 1 トランザクションで保存します（既定で子へカスケード。保存件数を返します）。`mode` は同時実行ポリシーを選び、Save フック（`ISaveHook<T>`）はここで発火します。 |
+| `SaveAsync(entities, cascadeSave, cascadeDelete, insertWhenUpdateMissing, mode, ct)` | 複数の集約ルートを 1 トランザクションでまとめて保存します（全件成功か全件ロールバック）。それ以外は単一形と同じです。 |
 | `BulkInsertAsync(entities, ct)` | 複数件をまとめて追加します（追加件数を返します）。 |
 | `Query()` | 絞り込み・並べ替え・件数制限などのクエリを組み立てます。 |
 | `CheckUniquenessAsync(entity, ct)` | このテーブルの UNIQUE 制約を DB と照合して違反を返します（同一主キーの行は除外するため、挿入前・更新前のどちらでも同じ呼び方で使えます）。 |

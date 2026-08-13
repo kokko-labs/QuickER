@@ -18,8 +18,10 @@ namespace QuickER.Tests.GeneratedInMemoryFixture;
 /// 検証対象は 2 つ。(1) <c>ExecuteDeleteAsync</c> が途中で例外になったときにストアが 1 行も変わらないこと
 /// （循環カスケードの <see cref="NotSupportedException"/> は走査の<b>途中</b>で投げられるため、staging を使わない
 /// 実装では先に削除した子が残る＝実 DB のロールバックと乖離する）。(2) <c>Publish</c> が「更新として開始した行が
-/// その間に削除されていた」場合に staged スナップショットを適用せず、削除された行を復活させないこと
-/// （実 DB の UPDATE は対象行が無ければ 0 行更新で終わる）。
+/// その間に削除されていた」場合に staged スナップショットを適用せず、<c>SaveConflictException</c>
+/// （<see cref="SaveConflictReason.NotFound"/>）で失敗を述べること（実 DB の UPDATE は対象行が無ければ 0 行更新
+/// ＝黙って捨てると「保存できた」と報告しながら行が無い状態になる）。staged 側が削除なら、行が既に無いのは
+/// 実 DB と同じく no-op なので競合にしない。
 /// </para>
 /// <para>
 /// 循環カスケードを持つ図は固定フィクスチャに無いため、生成された <c>EntityBase</c> ／
@@ -65,11 +67,14 @@ public sealed class InMemoryStoreAtomicityTests
     }
 
     /// <summary>
-    /// 更新として開始した行がその間に削除されていた場合、<c>Publish</c> は staged スナップショットを適用しない
-    /// （後勝ちは「他者の更新を上書きする」までで、削除された行の復活までは含まない）。
+    /// 更新として開始した行がその間に削除されていた場合、<c>Publish</c> は staged スナップショットを適用せず
+    /// <c>SaveConflictException</c>（<see cref="SaveConflictReason.NotFound"/>）で失敗する（復活させないのは
+    /// 従来どおりだが、黙って捨てると「保存できた」と報告しながら行が無い状態になる）。
     /// </summary>
-    [Fact(DisplayName = "[InMemory/Atomicity] Publish: 削除された行を staged 更新が復活させない")]
-    public void Publish_RowDeletedMeanwhile_IsNotRevived()
+    [Fact(
+        DisplayName = "[InMemory/Atomicity] Publish: 削除された行への staged 更新は NotFound の競合になる"
+    )]
+    public void Publish_RowDeletedMeanwhile_ThrowsNotFound()
     {
         var store = new InMemoryDataStore();
         store.Put(new CustomerEntity { CustomerId = 1, Name = "Alice" });
@@ -88,12 +93,41 @@ public sealed class InMemoryStoreAtomicityTests
         // 保存フックの After が走っている間に、別の書き手が同じ行を削除した
         store.Remove(typeof(CustomerEntity), 1).Should().BeTrue();
 
-        store.Publish(staging, ConcurrencyMode.Optimistic);
+        var act = () => store.Publish(staging, ConcurrencyMode.Optimistic);
 
-        store
-            .Snapshot<CustomerEntity>()
-            .Should()
-            .BeEmpty("削除された行は staged 更新で復活しない（実 DB の UPDATE 0 行と同じ）");
+        act.Should()
+            .Throw<SaveConflictException>("消えた行への更新は実 DB の UPDATE 0 行と同じ扱いになる")
+            .Which.Reason.Should()
+            .Be(SaveConflictReason.NotFound);
+
+        store.Snapshot<CustomerEntity>().Should().BeEmpty("削除された行は staged 更新で復活しない");
+    }
+
+    /// <summary>
+    /// 対照: staged 側が「削除」なら、行がその間に消えていても競合にしない（既に無い行の削除は実 DB でも no-op）。
+    /// </summary>
+    [Fact(DisplayName = "[InMemory/Atomicity] Publish: 削除された行への staged 削除は競合にしない")]
+    public void Publish_StagedDeleteOfRowDeletedMeanwhile_IsNoOp()
+    {
+        var store = new InMemoryDataStore();
+        store.Put(new CustomerEntity { CustomerId = 1, Name = "Alice" });
+
+        var staging = new InMemorySaveStaging();
+        store.Write(
+            scope =>
+            {
+                scope.Remove(typeof(CustomerEntity), 1);
+                return 0;
+            },
+            staging
+        );
+
+        store.Remove(typeof(CustomerEntity), 1).Should().BeTrue();
+
+        var act = () => store.Publish(staging, ConcurrencyMode.Optimistic);
+
+        act.Should().NotThrow("削除したい行が既に無いのは矛盾ではない");
+        store.Snapshot<CustomerEntity>().Should().BeEmpty();
     }
 
     /// <summary>

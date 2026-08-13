@@ -225,6 +225,30 @@ public abstract class UniquenessCheckRuntimeTestsBase : IDisposable
         nonNullRows.Select(o => o.OrderId.Value).Should().Equal(10);
     }
 
+    /// <summary>9. 等値の否定 <c>!(==)</c> は <c>!=</c> と同じ行集合を返す（NULL 行を含む）</summary>
+    /// <remarks>
+    /// 翻訳器が否定を <c>NOT (...)</c> で包むと列側の NULL 補償の外側に出てしまい、NULL 行が落ちて
+    /// C#（インメモリ）・EF Core と結果が割れる。ここでは 2 つの書き方が同じ行集合になることを固定する。
+    /// </remarks>
+    [Fact(DisplayName = "[Uniqueness] 9: !(==) が != と同じ行集合（NULL 行を含む）を返す")]
+    public async Task NegatedEqualComparison_MatchesNotEqual()
+    {
+        await ResetAndSeedAsync();
+        var orders = CreateOrderRepository();
+
+        var apple = MemoValue.Create("apple pie");
+
+        // memo が "apple pie" でない行＝memo が NULL の注文 11（NULL 行が落ちれば空になる）
+        var negated = await orders.Query().Where(o => !(o.Memo == apple)).ToListAsync(Ct);
+        negated.Select(o => o.OrderId.Value).Should().Equal(11);
+
+        var notEqual = await orders.Query().Where(o => o.Memo != apple).ToListAsync(Ct);
+        negated
+            .Select(o => o.OrderId.Value)
+            .Should()
+            .Equal(notEqual.Select(o => o.OrderId.Value), "!(==) と != は同義");
+    }
+
     /// <summary>一時 DB を破棄する</summary>
     public virtual void Dispose()
     {

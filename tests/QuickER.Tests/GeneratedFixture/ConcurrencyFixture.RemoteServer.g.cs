@@ -30,11 +30,11 @@ internal static class RemoteServerEngine
 {
     /// <summary>Runs a handler, writes the result as JSON, and maps exceptions to HTTP responses (400/409/500, or the status carried by a rejected request such as 413).</summary>
     /// <remarks>
-    /// Every classifying catch is guarded by <c>!Response.HasStarted</c>, matching the binary transfer executors: once
-    /// the status line and headers have gone out - a failure part-way through serializing the result, for instance -
-    /// the status code can no longer be changed, and writing an error body would append it to the partial response
-    /// instead of replacing it. Such a failure is recorded on the server side and rethrown, which lets the host abort
-    /// the connection so that the client sees a truncated response rather than a corrupted one.
+    /// Every classifying catch is guarded by <c>!Response.HasStarted</c>: once the status line and headers have gone out
+    /// - a failure part-way through serializing the result, for instance - the status code can no longer be changed, and
+    /// writing an error body would append it to the partial response instead of replacing it. Such a failure is recorded
+    /// on the server side and rethrown, which lets the host abort the connection so that the client sees a truncated
+    /// response rather than a corrupted one.
     /// </remarks>
     public static async Task ExecuteAsync(HttpContext context, Func<Task<object?>> handler)
     {
@@ -517,6 +517,15 @@ internal sealed class RemoteErrorDetailPolicy(
 /// (for example <c>app.MapGeneratedRemoteEndpoints().RequireAuthorization()</c>).
 /// Exceptions are converted to structured JSON (RemoteError): <see cref="SaveConflictException"/> maps to 409 and
 /// an unhandled failure to 500, and the client (Http{Entity}RemoteRepository) restores the original exception type.
+/// </para>
+/// <para>
+/// Until authorization is supplied, every endpoint is open to anyone who can reach it, and the policy belongs on the
+/// group as a whole rather than on hand-picked endpoints. <c>Save</c> and <c>SaveMany</c> are as powerful as
+/// <c>Delete</c>: a graph whose nodes carry <c>RowState.Removed</c> deletes those rows, so a policy that guards
+/// <c>Delete</c> while leaving <c>Save</c> open guards nothing. The same holds for the payloads in general - the wire
+/// format accepts every column an entity has, the primary key included - so authorization is the only thing standing
+/// between a caller and any row it can name. Apply it in one line with
+/// <c>app.MapGeneratedRemoteEndpoints().RequireAuthorization()</c>.
 /// </para>
 /// <para>
 /// An unhandled failure (500) does not report what went wrong to the client unless

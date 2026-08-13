@@ -669,16 +669,46 @@ public abstract partial class EditModelBase
     /// Duplicate-value error messages keyed by property name, kept in a store of their own so the two kinds never overwrite each other:
     /// a uniqueness check registers and clears only this store, while SetError / ClearErrors touch only <see cref="_errors"/>.
     /// Both stores are merged by <see cref="HasErrors"/>, <see cref="GetErrors"/>, and error collection, so a property can carry a
-    /// conversion error and a duplicate-value error at the same time. Each entry also records which check found the duplicate
-    /// (<see cref="DuplicateErrorSource"/>), so the check among the siblings and the check against the database clear only their own findings.
+    /// conversion error and a duplicate-value error at the same time. Each entry holds one slot per check
+    /// (<see cref="DuplicateErrorSource"/>), so the check among the siblings and the check against the database neither overwrite
+    /// nor clear each other's findings on the same property.
     /// </summary>
-    private readonly Dictionary<string, DuplicateError> _duplicateErrors = new();
+    /// <remarks>An entry is removed as soon as both of its slots are empty, which is what keeps <c>Count</c> a valid "are there any" test.</remarks>
+    private readonly Dictionary<string, DuplicateErrors> _duplicateErrors = new();
 
     /// <summary>An input error message together with the check that registered it.</summary>
     private readonly record struct InputError(string Message, bool FromRequiredCheck);
 
-    /// <summary>A duplicate-value error message together with the check that found it.</summary>
-    private readonly record struct DuplicateError(string Message, DuplicateErrorSource Source);
+    /// <summary>The duplicate-value messages registered on one property, one slot per check that can find them (null where a check found nothing).</summary>
+    private readonly record struct DuplicateErrors(string? Siblings, string? Database)
+    {
+        /// <summary>Whether neither check has anything registered (an entry in this state is dropped from the store).</summary>
+        public bool IsEmpty => Siblings is null && Database is null;
+
+        /// <summary>The message the specified check registered (null when it found nothing).</summary>
+        public string? Of(DuplicateErrorSource source) =>
+            source == DuplicateErrorSource.Siblings ? Siblings : Database;
+
+        /// <summary>This entry with the specified check's message replaced (null clears that check's slot only).</summary>
+        public DuplicateErrors With(DuplicateErrorSource source, string? message) =>
+            source == DuplicateErrorSource.Siblings
+                ? this with { Siblings = message }
+                : this with { Database = message };
+
+        /// <summary>The registered messages in a fixed order (the siblings check first), so reporting is deterministic.</summary>
+        public IEnumerable<string> Messages()
+        {
+            if (Siblings is not null)
+            {
+                yield return Siblings;
+            }
+
+            if (Database is not null)
+            {
+                yield return Database;
+            }
+        }
+    }
 
     /// <summary>Raised when a property value changes.</summary>
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -933,13 +963,13 @@ public abstract partial class EditModelBase
         {
             return _errors
                 .Values.Select(error => error.Message)
-                .Concat(_duplicateErrors.Values.Select(error => error.Message));
+                .Concat(_duplicateErrors.Values.SelectMany(entry => entry.Messages()));
         }
 
         return ReadErrors(propertyName);
     }
 
-    /// <summary>Reads the messages registered for the specified property in both stores (the input error first, then the duplicate-value error).</summary>
+    /// <summary>Reads the messages registered for the specified property in both stores (the input error first, then the duplicate-value errors).</summary>
     private IEnumerable<string> ReadErrors(string propertyName)
     {
         if (_errors.TryGetValue(propertyName, out var input))
@@ -947,9 +977,12 @@ public abstract partial class EditModelBase
             yield return input.Message;
         }
 
-        if (_duplicateErrors.TryGetValue(propertyName, out var duplicate))
+        if (_duplicateErrors.TryGetValue(propertyName, out var duplicates))
         {
-            yield return duplicate.Message;
+            foreach (var message in duplicates.Messages())
+            {
+                yield return message;
+            }
         }
     }
 
@@ -1018,7 +1051,10 @@ public abstract partial class EditModelBase
 
         foreach (var pair in _duplicateErrors)
         {
-            yield return new EditModelError(path, pair.Key, pair.Value.Message);
+            foreach (var message in pair.Value.Messages())
+            {
+                yield return new EditModelError(path, pair.Key, message);
+            }
         }
     }
 
@@ -1265,7 +1301,9 @@ public abstract partial class EditModelBase
     /// <summary>Clears the duplicate-value errors found by the specified check only, leaving the other check's findings in place.</summary>
     /// <remarks>
     /// Each check clears exactly what it registered before running again, so the check among the siblings no longer discards
-    /// the violations the database check found (and the other way round).
+    /// the violations the database check found (and the other way round). Changing a confirmed value also clears the
+    /// <see cref="DuplicateErrorSource.Database"/> findings of the whole model, because they were reached by comparing the values
+    /// it held before the edit - all of them, since a composite constraint's verdict rests on every column it covers.
     /// </remarks>
     /// <param name="source">The check whose findings are cleared.</param>
     public void ClearDuplicateErrors(DuplicateErrorSource source) =>
@@ -1279,30 +1317,55 @@ public abstract partial class EditModelBase
             return;
         }
 
+        // The properties to touch are listed first, because the store is modified while they are processed
         var cleared = _duplicateErrors
-            .Where(pair => source is null || pair.Value.Source == source)
+            .Where(pair => source is null || pair.Value.Of(source.Value) is not null)
             .Select(pair => pair.Key)
             .ToList();
 
         foreach (var propertyName in cleared)
         {
-            _duplicateErrors.Remove(propertyName);
+            if (source is null)
+            {
+                _duplicateErrors.Remove(propertyName);
+            }
+            else
+            {
+                // Only the calling check's slot is emptied; the entry stays as long as the other check still has a finding
+                var remaining = _duplicateErrors[propertyName].With(source.Value, null);
+
+                if (remaining.IsEmpty)
+                {
+                    _duplicateErrors.Remove(propertyName);
+                }
+                else
+                {
+                    _duplicateErrors[propertyName] = remaining;
+                }
+            }
+
             OnErrorsChanged(propertyName);
         }
     }
 
     /// <summary>Registers a duplicate-value error on the specified binding property in the duplicate-value store. An empty name registers a model-level error.</summary>
-    /// <remarks>It does not go through <see cref="SetError"/>, so a conversion error already registered on the same property survives and both are reported.</remarks>
+    /// <remarks>
+    /// It does not go through <see cref="SetError"/>, so a conversion error already registered on the same property survives and both are
+    /// reported. Only the calling check's slot is written, so a property found to be a duplicate both among its siblings and against the
+    /// database reports both findings, and each of them disappears when its own check stops finding it.
+    /// </remarks>
     /// <param name="propertyName">Binding property the error is attached to (empty for a model-level error).</param>
     /// <param name="message">The error message.</param>
-    /// <param name="source">The check that found the duplicate (it decides which clear removes the error again).</param>
+    /// <param name="source">The check that found the duplicate (it decides which slot is written and which clear removes the error again).</param>
     public void SetDuplicateError(
         string propertyName,
         string message,
         DuplicateErrorSource source = DuplicateErrorSource.Siblings
     )
     {
-        _duplicateErrors[propertyName] = new DuplicateError(message, source);
+        _duplicateErrors[propertyName] = _duplicateErrors
+            .GetValueOrDefault(propertyName)
+            .With(source, message);
         OnErrorsChanged(propertyName);
     }
 
@@ -2055,6 +2118,8 @@ public partial class CustomerEditModel : EditModelBase
             // Promote to update target when the confirmed value changes (not during load, where the state stays a mirror of the source entity).
             if (!IsLoading)
             {
+                // The database check compared the values this model held a moment ago, so editing one makes its verdict stale.
+                ClearDuplicateErrors(DuplicateErrorSource.Database);
                 OnConfirmedValueChanged(nameof(CustomerId));
 
                 if (ShouldMarkUpdated(nameof(CustomerId)))
@@ -2146,6 +2211,8 @@ public partial class CustomerEditModel : EditModelBase
             // Promote to update target when the confirmed value changes (not during load, where the state stays a mirror of the source entity).
             if (!IsLoading)
             {
+                // The database check compared the values this model held a moment ago, so editing one makes its verdict stale.
+                ClearDuplicateErrors(DuplicateErrorSource.Database);
                 OnConfirmedValueChanged(nameof(Name));
 
                 if (ShouldMarkUpdated(nameof(Name)))
@@ -2235,6 +2302,8 @@ public partial class CustomerEditModel : EditModelBase
             // Promote to update target when the confirmed value changes (not during load, where the state stays a mirror of the source entity).
             if (!IsLoading)
             {
+                // The database check compared the values this model held a moment ago, so editing one makes its verdict stale.
+                ClearDuplicateErrors(DuplicateErrorSource.Database);
                 OnConfirmedValueChanged(nameof(Balance));
 
                 if (ShouldMarkUpdated(nameof(Balance)))
@@ -2668,6 +2737,8 @@ public partial class OrderEditModel : EditModelBase
             // Promote to update target when the confirmed value changes (not during load, where the state stays a mirror of the source entity).
             if (!IsLoading)
             {
+                // The database check compared the values this model held a moment ago, so editing one makes its verdict stale.
+                ClearDuplicateErrors(DuplicateErrorSource.Database);
                 OnConfirmedValueChanged(nameof(OrderId));
 
                 if (ShouldMarkUpdated(nameof(OrderId)))
@@ -2759,6 +2830,8 @@ public partial class OrderEditModel : EditModelBase
             // Promote to update target when the confirmed value changes (not during load, where the state stays a mirror of the source entity).
             if (!IsLoading)
             {
+                // The database check compared the values this model held a moment ago, so editing one makes its verdict stale.
+                ClearDuplicateErrors(DuplicateErrorSource.Database);
                 OnConfirmedValueChanged(nameof(CustomerId));
 
                 if (ShouldMarkUpdated(nameof(CustomerId)))
@@ -2850,6 +2923,8 @@ public partial class OrderEditModel : EditModelBase
             // Promote to update target when the confirmed value changes (not during load, where the state stays a mirror of the source entity).
             if (!IsLoading)
             {
+                // The database check compared the values this model held a moment ago, so editing one makes its verdict stale.
+                ClearDuplicateErrors(DuplicateErrorSource.Database);
                 OnConfirmedValueChanged(nameof(Memo));
 
                 if (ShouldMarkUpdated(nameof(Memo)))
@@ -2939,6 +3014,8 @@ public partial class OrderEditModel : EditModelBase
             // Promote to update target when the confirmed value changes (not during load, where the state stays a mirror of the source entity).
             if (!IsLoading)
             {
+                // The database check compared the values this model held a moment ago, so editing one makes its verdict stale.
+                ClearDuplicateErrors(DuplicateErrorSource.Database);
                 OnConfirmedValueChanged(nameof(Amount));
 
                 if (ShouldMarkUpdated(nameof(Amount)))
@@ -3391,6 +3468,8 @@ public partial class CustomerProfileEditModel : EditModelBase
             // Promote to update target when the confirmed value changes (not during load, where the state stays a mirror of the source entity).
             if (!IsLoading)
             {
+                // The database check compared the values this model held a moment ago, so editing one makes its verdict stale.
+                ClearDuplicateErrors(DuplicateErrorSource.Database);
                 OnConfirmedValueChanged(nameof(ProfileId));
 
                 if (ShouldMarkUpdated(nameof(ProfileId)))
@@ -3482,6 +3561,8 @@ public partial class CustomerProfileEditModel : EditModelBase
             // Promote to update target when the confirmed value changes (not during load, where the state stays a mirror of the source entity).
             if (!IsLoading)
             {
+                // The database check compared the values this model held a moment ago, so editing one makes its verdict stale.
+                ClearDuplicateErrors(DuplicateErrorSource.Database);
                 OnConfirmedValueChanged(nameof(CustomerId));
 
                 if (ShouldMarkUpdated(nameof(CustomerId)))
@@ -3573,6 +3654,8 @@ public partial class CustomerProfileEditModel : EditModelBase
             // Promote to update target when the confirmed value changes (not during load, where the state stays a mirror of the source entity).
             if (!IsLoading)
             {
+                // The database check compared the values this model held a moment ago, so editing one makes its verdict stale.
+                ClearDuplicateErrors(DuplicateErrorSource.Database);
                 OnConfirmedValueChanged(nameof(Bio));
 
                 if (ShouldMarkUpdated(nameof(Bio)))
@@ -3975,7 +4058,10 @@ public sealed partial class CustomerMapper
     /// Loading is lossless: the confirmed values are copied straight from the entity instead of being rebuilt by parsing
     /// the on-screen input strings, so nothing that the display format cannot express (sub-second precision of a
     /// DateTime, its Kind, and so on) is dropped. The input strings are then derived from the confirmed values.
-    /// Binary columns are copied defensively, so editing the loaded model never reaches into the entity's array.
+    /// Binary columns are copied defensively, so editing the loaded model never reaches into the entity's array. The
+    /// defensive copy belongs to this direction alone: <c>ApplyToEntity</c> assigns the confirmed values across as they
+    /// are, so the array an entity receives on the way to being saved is the edit model's own - saving hands the buffer
+    /// over rather than duplicating it, and writing into it afterwards is writing into both.
     /// </remarks>
     public void ApplyToEditModel(CustomerEntity entity, CustomerEditModel editModel)
     {
@@ -4059,7 +4145,10 @@ public sealed partial class OrderMapper
     /// Loading is lossless: the confirmed values are copied straight from the entity instead of being rebuilt by parsing
     /// the on-screen input strings, so nothing that the display format cannot express (sub-second precision of a
     /// DateTime, its Kind, and so on) is dropped. The input strings are then derived from the confirmed values.
-    /// Binary columns are copied defensively, so editing the loaded model never reaches into the entity's array.
+    /// Binary columns are copied defensively, so editing the loaded model never reaches into the entity's array. The
+    /// defensive copy belongs to this direction alone: <c>ApplyToEntity</c> assigns the confirmed values across as they
+    /// are, so the array an entity receives on the way to being saved is the edit model's own - saving hands the buffer
+    /// over rather than duplicating it, and writing into it afterwards is writing into both.
     /// </remarks>
     public void ApplyToEditModel(OrderEntity entity, OrderEditModel editModel)
     {
@@ -4140,7 +4229,10 @@ public sealed partial class CustomerProfileMapper
     /// Loading is lossless: the confirmed values are copied straight from the entity instead of being rebuilt by parsing
     /// the on-screen input strings, so nothing that the display format cannot express (sub-second precision of a
     /// DateTime, its Kind, and so on) is dropped. The input strings are then derived from the confirmed values.
-    /// Binary columns are copied defensively, so editing the loaded model never reaches into the entity's array.
+    /// Binary columns are copied defensively, so editing the loaded model never reaches into the entity's array. The
+    /// defensive copy belongs to this direction alone: <c>ApplyToEntity</c> assigns the confirmed values across as they
+    /// are, so the array an entity receives on the way to being saved is the edit model's own - saving hands the buffer
+    /// over rather than duplicating it, and writing into it afterwards is writing into both.
     /// </remarks>
     public void ApplyToEditModel(CustomerProfileEntity entity, CustomerProfileEditModel editModel)
     {
@@ -4223,6 +4315,14 @@ public partial interface IRemoteRepository<TEntity, TKey>
     );
 
     /// <summary>Deletes an entity by primary key (true when a matching row was deleted).</summary>
+    /// <remarks>
+    /// The delete is unconditional: a primary key is all this call is given, so there is no version to compare it against
+    /// and <see cref="ConcurrencyMode"/> plays no part even when the table has a rowversion column. To delete under the
+    /// protection of the version that was read, call <c>MarkRemoved()</c> on the entity and hand it to <c>SaveAsync</c>,
+    /// which fails with <see cref="SaveConflictException"/> when someone else has changed the row meanwhile.
+    /// </remarks>
+    /// <param name="id">The primary key of the row to delete.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
     Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default);
 
     /// <summary>Saves inserts, updates, and deletes in a single transaction according to RowState (children cascade by default).</summary>
@@ -4546,7 +4646,13 @@ public interface ISaveHook<TEntity>
 {
     /// <summary>Called immediately before the operation (<c>false</c> skips that single operation; the default does not skip).</summary>
     /// <param name="entity">The entity being saved.</param>
-    /// <param name="operation">The operation about to be performed (Insert/Update/Delete).</param>
+    /// <param name="operation">
+    /// The operation about to be performed (Insert/Update/Delete), decided from the entity's RowState before the hook is
+    /// called. Rewriting that RowState from inside the hook is not a supported way to redirect the save: whether the change
+    /// is picked up is not guaranteed and differs between the backends. Returning <c>false</c> is the supported way to stop
+    /// an operation - it is what <see cref="AfterSaveAsync"/> reflects, since that one reports the operation actually
+    /// performed.
+    /// </param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns><c>true</c> to proceed with the operation, <c>false</c> to skip it.</returns>
     Task<bool> BeforeSaveAsync(
@@ -5075,10 +5181,11 @@ internal static class RawSqlMapper
             // so coerce to the property's underlying type (Nullable uses its underlying type) before setting
             var underlyingType =
                 Nullable.GetUnderlyingType(property.PropertyType) ?? property.PropertyType;
+            var propertyName = property.Name;
             setters[property.Name] = (target, raw) =>
                 property.SetValue(
                     target,
-                    raw is null ? null : CoerceProjectionValue(raw, underlyingType)
+                    raw is null ? null : CoerceProjectionValue(raw, underlyingType, propertyName)
                 );
         }
 
@@ -5086,7 +5193,18 @@ internal static class RawSqlMapper
     }
 
     /// <summary>Coerces a value being assigned to a projection DTO property to the underlying type (same semantics as the scalar conversion ConvertSingleValue).</summary>
-    private static object CoerceProjectionValue(object raw, Type underlyingType)
+    /// <remarks>
+    /// The failures name the property being filled: a projection has as many of them as it has columns, and without the name the
+    /// message says only that some value of some type was rejected, leaving the reader to guess which column it came from.
+    /// </remarks>
+    /// <param name="raw">The value the driver returned.</param>
+    /// <param name="underlyingType">The property's type (a nullable property's underlying type).</param>
+    /// <param name="propertyName">The projection property being filled (used in the failure messages).</param>
+    private static object CoerceProjectionValue(
+        object raw,
+        Type underlyingType,
+        string propertyName
+    )
     {
         if (underlyingType.IsInstanceOfType(raw))
         {
@@ -5101,7 +5219,7 @@ internal static class RawSqlMapper
             when (ex is InvalidCastException or FormatException or OverflowException)
         {
             throw new InvalidOperationException(
-                $"Could not convert the raw SQL projection value (of type {raw.GetType().Name}) to {underlyingType.Name}.",
+                $"Could not convert the raw SQL projection value for '{propertyName}' (of type {raw.GetType().Name}) to {underlyingType.Name}.",
                 ex
             );
         }
@@ -6463,9 +6581,12 @@ public sealed class InMemoryDataStore
     /// taken the same primary key meanwhile is a duplicate key rather than something an overwrite policy can excuse.
     /// </para>
     /// <para>
-    /// Last-write-wins still stops short of resurrection: a row the save started from that has been deleted meanwhile is left
-    /// deleted, because putting the staged snapshot back would bring a deleted row to life, where a real database's UPDATE
-    /// simply affects no rows. The staged write for such a row is dropped (a staged delete for it is a no-op either way).
+    /// Last-write-wins still stops short of resurrection: a row the save started from that has been deleted meanwhile cannot
+    /// be written back, because putting the staged snapshot in would bring a deleted row to life, where a real database's
+    /// UPDATE simply affects no rows. Reporting that as <see cref="SaveConflictReason.NotFound"/> is what keeps the save
+    /// honest: the row count the save already returned counted this write, and its entities are about to be accepted as
+    /// saved, so dropping the write silently would leave the caller believing a row exists that does not. A staged delete for
+    /// such a row is not a conflict (deleting a row that is already gone is the same no-op it is against a real database).
     /// </para>
     /// <para>
     /// Once the writes are in, the row versions they assigned are read back out of the published snapshots and handed to the
@@ -6477,9 +6598,6 @@ public sealed class InMemoryDataStore
     {
         lock (_gate)
         {
-            // The rows that were deleted while the save was running: their staged writes are dropped instead of applied
-            HashSet<(Type EntityType, object Key)>? deletedMeanwhile = null;
-
             foreach (var (entityType, key, baseRow) in staging.Baseline)
             {
                 var current = Table(entityType).GetValueOrDefault(key);
@@ -6504,21 +6622,21 @@ public sealed class InMemoryDataStore
                     throw SaveConflictException.Modified(entityType, key, "save");
                 }
 
-                // The row this write started from is gone: overwriting last-write-wins does not extend to reviving it
-                if (baseRow is not null && current is null)
+                // The row this write started from is gone: overwriting last-write-wins does not extend to reviving it, and
+                // saying so beats dropping the write, which would report a saved row that is not there (a staged delete
+                // against an already deleted row stays the no-op it is against a real database).
+                if (
+                    baseRow is not null
+                    && current is null
+                    && staging.Staged(entityType, key) is not null
+                )
                 {
-                    deletedMeanwhile ??= new HashSet<(Type EntityType, object Key)>();
-                    deletedMeanwhile.Add((entityType, key));
+                    throw SaveConflictException.NotFound(entityType, key);
                 }
             }
 
             foreach (var ((entityType, key), snapshot) in staging.Overlay)
             {
-                if (deletedMeanwhile is not null && deletedMeanwhile.Contains((entityType, key)))
-                {
-                    continue;
-                }
-
                 if (snapshot is null)
                 {
                     Table(entityType).Remove(key);
@@ -6681,7 +6799,11 @@ public sealed class InMemoryDataStore
 /// <remarks>
 /// <para>
 /// A staged write is invisible to everyone but the save that staged it: it never touches the store until
-/// <see cref="InMemoryDataStore.Publish"/> accepts the whole set at once. A save that fails simply drops its staging, which
+/// <see cref="InMemoryDataStore.Publish"/> accepts the whole set at once. "At once" is about the outcome, not about
+/// isolation: the staging writes and <see cref="InMemoryDataStore.Publish"/> take the store lock separately, so a
+/// reader running in between sees the store as it was before the save. What the staging guarantees is
+/// that a save which stops half way - and the phases it runs outside the lock are where it can - never leaves part of
+/// itself behind. A save that fails simply drops its staging, which
 /// is all the rollback there is - the store was never changed, so there is nothing to undo and nothing another thread's
 /// write can be trampled by. That matters because a save hook's After runs outside the store lock: rolling a failed save
 /// back by restoring snapshots would silently discard whatever someone else wrote to the same rows while After was running.

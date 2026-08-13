@@ -237,10 +237,10 @@ public sealed class GeneratedSqliteAdoRuntimeTests : GeneratedSqliteRuntimeTests
     /// 「どの列で失敗したか」を含む <see cref="InvalidOperationException"/> になることを検証する。
     /// </summary>
     /// <remarks>
-    /// VO の再構築はリフレクションの <c>Create</c> 呼び出しで、既定では検証失敗が
-    /// <c>TargetInvocationException</c> に包まれ、メッセージからは列も型も分からなかった。
-    /// <c>BindingFlags.DoNotWrapExceptions</c> で素の例外にし、行マッピング側が列名・プロパティ名を
-    /// 添えて包み直すようにしている（元の例外は InnerException に残る）。
+    /// VO の再構築は <c>SqlValueObjectActivator</c> が型ごとに 1 回だけコンパイルする式木デリゲート経由の
+    /// <c>Create</c> 呼び出しで、デリゲート呼び出しは <c>TargetInvocationException</c> に包まないため、
+    /// 検証失敗はそのままの例外として出る（リフレクション <c>Invoke</c> なら包まれて列も型も分からなくなる）。
+    /// これを行マッピング側が列名・プロパティ名を添えて包み直す（元の例外は InnerException に残る）。
     /// SQLite は宣言長を強制しないため、生 SQL で 50 文字上限を超える名前を書き込んで再現する。
     /// </remarks>
     [Fact(DisplayName = "[SQLite] 追加: VO 検証に合わない DB 値の読み取り例外に列名が含まれる")]
@@ -267,7 +267,7 @@ public sealed class GeneratedSqliteAdoRuntimeTests : GeneratedSqliteRuntimeTests
             .Which.InnerException.Should()
             .NotBeNull()
             .And.NotBeOfType<System.Reflection.TargetInvocationException>(
-                "リフレクションの包装は外してある"
+                "式木デリゲート経由なのでリフレクションの包装が挟まらない"
             );
     }
 

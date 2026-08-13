@@ -669,6 +669,110 @@ public sealed class InMemoryConcurrencyRuntimeTests
     }
 
     /// <summary>
+    /// 13b. 後勝ちは「復活」までは含まない: After 待機中に他者が行を<b>削除</b>すると、版を持たない型でも
+    /// <c>SaveConflictException</c>（<see cref="SaveConflictReason.NotFound"/>）になる。
+    /// </summary>
+    /// <remarks>
+    /// 黙って staged 更新を捨てると「戻り値 1 件・エンティティは Unchanged・ストアに行なし」という、保存できたと
+    /// 報告しながら行が存在しない組合せが成立してしまう（実 DB の UPDATE は対象行が無ければ 0 行更新で終わる）。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Concurrency/InMemory] SaveAsync: After 待機中の他者削除は NotFound の競合になる"
+    )]
+    public async Task SaveAsync_RowDeletedDuringAfter_IsRejectedAsNotFound()
+    {
+        var store = new InMemoryDataStore();
+        var hook = new GatedAfterHook<DocumentNoteEntity>();
+        var notes = new InMemoryDocumentNoteRepository(
+            store,
+            new SaveHookRegistry().Add<DocumentNoteEntity>(hook)
+        );
+        var other = new InMemoryDocumentNoteRepository(store);
+
+        await new InMemoryDocumentRepository(store).InsertAsync(
+            new DocumentEntity
+            {
+                DocumentId = 1,
+                Title = "alpha",
+                Thumb = [],
+            },
+            Ct
+        );
+        await other.InsertAsync(
+            new DocumentNoteEntity
+            {
+                NoteId = 100,
+                DocumentId = 1,
+                Note = "first",
+            },
+            Ct
+        );
+
+        var mine = await notes.GetByIdAsync(100, Ct);
+        mine!.Note = "by-me";
+        mine.MarkUpdated();
+
+        var saving = notes.SaveAsync(mine, cancellationToken: Ct);
+        await hook.Entered.Task;
+
+        (await other.DeleteAsync(100, Ct)).Should().BeTrue();
+
+        hook.Release.TrySetResult();
+        var act = async () => await saving;
+
+        (await act.Should().ThrowAsync<SaveConflictException>())
+            .Which.Reason.Should()
+            .Be(
+                SaveConflictReason.NotFound,
+                "消えた行への更新は「保存できた」ではなく行なしの競合として報告される"
+            );
+
+        (await other.GetByIdAsync(100, Ct)).Should().BeNull("削除された行は復活しない");
+        mine.RowState.Should().Be(RowState.Updated, "失敗した保存は RowState を確定させない");
+    }
+
+    /// <summary>
+    /// 13c. 対照: 版を持つ型では同じ状況が従来どおり <see cref="SaveConflictReason.Modified"/> のまま
+    /// （版チェックが先に成立するため、分類は変わらない）。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Concurrency/InMemory] SaveAsync: 版あり型の他者削除は従来どおり Modified"
+    )]
+    public async Task SaveAsync_VersionedRowDeletedDuringAfter_StaysModified()
+    {
+        var store = new InMemoryDataStore();
+        var hook = new GatedAfterHook<DocumentEntity>();
+        var documents = new InMemoryDocumentRepository(store, new SaveHookRegistry().Add(hook));
+        var other = new InMemoryDocumentRepository(store);
+
+        await other.InsertAsync(
+            new DocumentEntity
+            {
+                DocumentId = 1,
+                Title = "alpha",
+                Thumb = [],
+            },
+            Ct
+        );
+
+        var mine = await documents.GetByIdAsync(1, Ct);
+        mine!.Title = "by-me";
+        mine.MarkUpdated();
+
+        var saving = documents.SaveAsync(mine, cancellationToken: Ct);
+        await hook.Entered.Task;
+
+        (await other.DeleteAsync(1, Ct)).Should().BeTrue();
+
+        hook.Release.TrySetResult();
+        var act = async () => await saving;
+
+        (await act.Should().ThrowAsync<SaveConflictException>())
+            .Which.Reason.Should()
+            .Be(SaveConflictReason.Modified, "版を持つ型は版の不一致として先に弾かれる");
+    }
+
+    /// <summary>
     /// 14. After が同じ行へ blob を書くと版がもう一段進むが、呼び出し元エンティティには
     /// <b>公開された最終版</b>が反映される（保存フェーズ時点の版を配ると、次の保存が偽の競合になる）。
     /// </summary>

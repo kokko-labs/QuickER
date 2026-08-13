@@ -155,6 +155,23 @@ public sealed class UniquenessCheckInMemoryRuntimeTests
         nonNullRows.Select(o => o.OrderId).Should().Equal(10);
     }
 
+    /// <summary>等値の否定 <c>!(==)</c> は <c>!=</c> と同じ行集合を返す（NULL 行を含む）</summary>
+    /// <remarks>
+    /// インメモリは式木をコンパイルして C# の意味論で評価するため元からこの結果になる。翻訳器側
+    /// （QuickER 版 ADO / EF Core）が否定を補償の外側で包まないことのパリティ基準として固定する。
+    /// </remarks>
+    [Fact(DisplayName = "[Uniqueness/InMemory] !(==) が != と同じ行集合（NULL 行を含む）を返す")]
+    public async Task NegatedEqualComparison_MatchesNotEqual()
+    {
+        await SeedAsync();
+
+        var negated = await Orders.Query().Where(o => !(o.Memo == "apple pie")).ToListAsync(Ct);
+        negated.Select(o => o.OrderId).Should().Equal(11);
+
+        var notEqual = await Orders.Query().Where(o => o.Memo != "apple pie").ToListAsync(Ct);
+        negated.Select(o => o.OrderId).Should().Equal(notEqual.Select(o => o.OrderId));
+    }
+
     /// <summary>ユーザー定義フック（partial 実装）の違反が生成分の後ろへ合流する</summary>
     [Fact(DisplayName = "[Uniqueness/InMemory] ユーザー定義フックの違反が合流する")]
     public async Task CustomCheck_ContributesViolation()
