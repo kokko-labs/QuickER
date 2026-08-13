@@ -490,9 +490,14 @@ public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TConte
         ).ConfigureAwait(false);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
 
+        // The column ordinals are resolved once for the result set (on the first row, because some providers only
+        // expose the result schema after a successful Read) and reused for every row
+        EntitySaveMetadata.RawSqlRowPlan? plan = null;
+
         while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
-            items.Add(metadata.MapEntityFromRawSql<TEntity>(reader));
+            plan ??= metadata.CreateRawSqlRowPlan(reader);
+            items.Add(metadata.MapEntityFromRawSql<TEntity>(reader, plan));
         }
 
         return items;
@@ -1023,7 +1028,8 @@ public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TConte
 /// <typeparam name="TContext">The concrete type of the DbContext that performs CRUD.</typeparam>
 public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
     IDbContextFactory<TContext> contextFactory,
-    ISaveHookRegistry? saveHooks = null
+    ISaveHookRegistry? saveHooks = null,
+    ISqlExecutor? sqlExecutor = null
 ) : IRepository<TEntity, TKey>
     where TEntity : EntityBase, new()
     where TContext : DbContext
@@ -1034,8 +1040,13 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
     /// <summary>The source that creates the DbContext.</summary>
     private readonly IDbContextFactory<TContext> _contextFactory = contextFactory;
 
-    /// <summary>Delegation target of the raw SQL methods (consolidates binding and mapping into a single path).</summary>
-    private readonly ISqlExecutor _sqlExecutor = new EfCoreSqlExecutor<TContext>(contextFactory);
+    /// <summary>
+    /// Delegation target of the raw SQL methods (consolidates binding and mapping into a single path).
+    /// Unspecified = null builds the default EF Core implementation over the same context factory, which keeps
+    /// hand-constructed repositories working; the DI registration passes the registered implementation instead.
+    /// </summary>
+    private readonly ISqlExecutor _sqlExecutor =
+        sqlExecutor ?? new EfCoreSqlExecutor<TContext>(contextFactory);
 
     /// <summary>The save hook registry (unspecified = null = no hooks, a complete no-op).</summary>
     private readonly ISaveHookRegistry? _saveHooks = saveHooks;
@@ -1113,6 +1124,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
     )
     {
         ArgumentNullException.ThrowIfNull(entities);
+        cancellationToken.ThrowIfCancellationRequested();
 
         // If a collection with a known count is empty, return without creating a DbContext.
         if (entities is ICollection<TEntity> { Count: 0 })
@@ -1124,6 +1136,12 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
 
         foreach (var entity in entities)
         {
+            // A null element is skipped rather than rejected (the shared BulkInsert contract).
+            if (entity is null)
+            {
+                continue;
+            }
+
             // AddRange marks navigation targets as Added too, so assign Entry.State to add only the targets.
             context.Entry(entity).State = EntityState.Added;
         }
@@ -1705,7 +1723,11 @@ public static class GeneratedEfCoreRepositoryServiceCollectionExtensions
         services.TryAddScoped<ISaveHookRegistry>(provider => new ServiceProviderSaveHookRegistry(
             provider
         ));
-{{ for repository in repository_classes }}        services.AddScoped<{{ repository.interface_name }}, EfCore{{ repository.class_name }}>();
+{{ for repository in repository_classes }}        services.AddScoped<{{ repository.interface_name }}>(provider => new EfCore{{ repository.class_name }}(
+            provider.GetRequiredService<IDbContextFactory<QuickErDbContext>>(),
+            provider.GetService<ISaveHookRegistry>(),
+            provider.GetService<ISqlExecutor>()
+        ));
 {{ if remote_contracts }}        services.AddScoped<{{ repository.remote_interface_name }}>(provider =>
             provider.GetRequiredService<{{ repository.interface_name }}>()
         );
@@ -1720,8 +1742,9 @@ public static class GeneratedEfCoreRepositoryServiceCollectionExtensions
 /// <summary>EF Core implementation of the repository for {{ repository.entity_class_name }}.</summary>
 public sealed partial class EfCore{{ repository.class_name }}(
     IDbContextFactory<QuickErDbContext> contextFactory,
-    ISaveHookRegistry? saveHooks = null
-) : EfCoreRepository<{{ repository.entity_class_name }}, {{ repository.key_type_name }}, QuickErDbContext>(contextFactory, saveHooks), {{ repository.interface_name }}{{ if efcore_impl_members == "" }} { }{{ else }}
+    ISaveHookRegistry? saveHooks = null,
+    ISqlExecutor? sqlExecutor = null
+) : EfCoreRepository<{{ repository.entity_class_name }}, {{ repository.key_type_name }}, QuickErDbContext>(contextFactory, saveHooks, sqlExecutor), {{ repository.interface_name }}{{ if efcore_impl_members == "" }} { }{{ else }}
 {
 {{ efcore_impl_members }}
 }{{ end }}

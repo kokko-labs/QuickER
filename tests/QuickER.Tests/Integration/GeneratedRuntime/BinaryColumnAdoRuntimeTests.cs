@@ -196,6 +196,37 @@ public sealed class BinaryColumnAdoRuntimeTests : BinaryColumnRuntimeTestsBase
             .Be(2);
     }
 
+    /// <summary>
+    /// 8b. 射影のフォールバック経路（列抽出不能なセレクタ）でも <c>WithUnboundedBinary</c> が効く
+    /// （方言側はフォールバックが <c>ToListAsync</c> 委譲のため自然にフラグを拾う。インメモリ側の対照を固定する基準）。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Binary/Ado] 8b: 射影のフォールバックでも WithUnboundedBinary で除外列が取れる"
+    )]
+    public async Task Projection_Fallback_HonorsWithUnboundedBinary()
+    {
+        await ResetAndSeedAsync();
+        var documents = CreateDocumentRepository();
+
+        // エンティティを丸ごと引数に取るためセレクタから列を抽出できない＝全列取得してからのフォールバック射影になる
+        var withFlag = await documents
+            .Query()
+            .Where(d => d.DocumentId == 1)
+            .WithUnboundedBinary()
+            .ToProjectionListAsync(d => PayloadOf(d), Ct);
+        withFlag.Should().ContainSingle().Which.Should().Equal(Doc1Payload);
+
+        // 指定しなければ従来どおり除外列は未取得状態のまま射影される
+        var withoutFlag = await documents
+            .Query()
+            .Where(d => d.DocumentId == 1)
+            .ToProjectionListAsync(d => PayloadOf(d), Ct);
+        withoutFlag.Should().ContainSingle().Which.Should().BeNull();
+    }
+
+    /// <summary>射影セレクタからの列抽出を成立させないためのヘルパー（エンティティ全体を引数に取る）</summary>
+    private static byte[]? PayloadOf(DocumentEntity document) => document.Payload;
+
     /// <summary>9. 生 SQL エンティティ取得: SELECT * は opportunistic に除外列も取り込む・縮小列は成功・必須列不足は例外</summary>
     [Fact(
         DisplayName = "[Binary/Ado] 9: 生 SQL は SELECT * で除外列も取り込み・縮小列は成功・不足は例外"
@@ -460,6 +491,27 @@ public sealed class BinaryColumnAdoRuntimeTests : BinaryColumnRuntimeTestsBase
         doc!
             .Payload.Should()
             .Equal(payload, "Stream 版で書いた blob が WithUnboundedBinary でも取れる");
+    }
+
+    /// <summary>
+    /// 直結の Write は渡された Stream を閉じない（所有権は呼び出し側）。リモート実装との対称性の基準側で、
+    /// 対になるのは <c>BinaryColumnRemoteRuntimeTests</c> の同名検証。
+    /// </summary>
+    [Fact(DisplayName = "[Binary/Ado] Stream: Write は渡された source Stream を閉じない")]
+    public async Task Stream_Write_LeavesSourceStreamOpen()
+    {
+        await ResetAndSeedAsync();
+        var documents = CreateDocumentRepository();
+
+        var payload = new byte[4096];
+        new Random(77).NextBytes(payload);
+
+        using var source = new MemoryStream(payload);
+        (await documents.WritePayloadAsync(1, source, cancellationToken: Ct)).Should().BeTrue();
+
+        // 破棄済み MemoryStream は CanRead=false になる＝開いたままであることの直接の証拠
+        source.CanRead.Should().BeTrue("Stream の所有権は呼び出し側にあり、実装は閉じない");
+        source.Position.Should().Be(payload.Length, "読み切られてはいるが破棄はされていない");
     }
 
     public override void Dispose()

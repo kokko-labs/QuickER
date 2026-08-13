@@ -113,6 +113,62 @@ public sealed class InMemoryFixtureRuntimeTests
         (await customers.GetAllAsync(Ct)).Should().HaveCount(3);
     }
 
+    /// <summary>
+    /// BulkInsert の共通契約（null 要素はスキップ・戻り値は実際に挿入した行数・空コレクションは 0）を固定する。
+    /// </summary>
+    /// <remarks>
+    /// 実装先ごとに「null で例外／黙ってスキップ」が割れていたのを「スキップ」へ揃えた（グラフ保存のリスト内 null と
+    /// 同じ流儀）。実 DB 側の対照は <c>GeneratedSqliteRuntimeTestsBase</c>（SQLite／EF Core）と
+    /// <c>GeneratedRuntimeParityTestsBase</c>（SQL Server／EF Core）が持つ。
+    /// </remarks>
+    [Fact(DisplayName = "BulkInsert: null 要素はスキップし、戻り値は挿入した行数だけを数える")]
+    public async Task BulkInsert_SkipsNullElements()
+    {
+        var (_, customers, _, _) = BuildFresh();
+
+        var count = await customers.BulkInsertAsync(
+            [NewCustomer(1, "A"), null!, NewCustomer(2, "B")],
+            Ct
+        );
+
+        count.Should().Be(2, "スキップした null は数えない");
+        (await customers.GetAllAsync(Ct)).Select(c => c.CustomerId).Should().BeEquivalentTo([1, 2]);
+
+        (await customers.BulkInsertAsync([], Ct)).Should().Be(0, "空コレクションは 0 件");
+    }
+
+    /// <summary>
+    /// 保存はエンティティの<b>列だけ</b>を写し取るため、保存後に呼び出し側でエンティティを書き換えても
+    /// （byte[] のような可変値も含めて）ストアへは波及しない。
+    /// </summary>
+    /// <remarks>
+    /// スナップショットの生成を「グラフごとの JSON 複製 → ナビ破棄」から列コピーへ置き換えた際の独立性の固定。
+    /// 子コレクションの差し替えがストアの行に触れないことも併せて確認する（ストアが持つのは行であってグラフではない）。
+    /// </remarks>
+    [Fact(DisplayName = "保存後に元エンティティを書き換えてもストアは不変（スナップショット独立）")]
+    public async Task Save_SnapshotIsIndependentOfCallerEntity()
+    {
+        var (_, customers, orders, _) = BuildFresh();
+
+        var alice = NewCustomer(1, "Alice", 100m);
+        alice.Orders.Add(NewOrder(10, 1, 5m));
+        await customers.SaveAsync(alice, cancellationToken: Ct);
+
+        // 保存後に列・子コレクションを書き換える
+        alice.Name = "Mutated";
+        alice.Balance = 999m;
+        alice.Orders.Clear();
+        alice.Orders.Add(NewOrder(99, 1, 1m));
+
+        var stored = await customers.GetByIdAsync(1, Ct);
+        stored!.Name.Should().Be("Alice", "列の変更はストアへ波及しない");
+        stored.Balance.Should().Be(100m);
+        (await orders.GetAllAsync(Ct))
+            .Select(o => o.OrderId)
+            .Should()
+            .BeEquivalentTo([10], "子コレクションの差し替えもストアの行には触れない");
+    }
+
     [Fact(DisplayName = "Insert: 重複主キーは InvalidOperationException で拒否しストアは不変")]
     public async Task Insert_DuplicateKey_Rejected()
     {
@@ -164,6 +220,88 @@ public sealed class InMemoryFixtureRuntimeTests
 
         (await customers.GetByIdAsync(1, Ct))!.Name.Should().Be("Alice");
     }
+
+    /// <summary>
+    /// 直接 CRUD（Insert / BulkInsert / Update）は引数の RowState を触らないことと、その帰結が
+    /// 実 DB（SqlServer / EF Core / HTTP の各実装）と一致することを固定する。
+    /// </summary>
+    /// <remarks>
+    /// インメモリだけが Insert 後に <c>MarkUnchanged()</c> を呼んでいたため、Added のまま Insert したエンティティが
+    /// 続く <c>SaveAsync</c> で「変更なし＝何もしない」に化け、実 DB なら主キー重複で失敗する誤りが
+    /// インメモリでは黙って通っていた。RowState を確定させるのはグラフ保存成功後の <c>SaveAsync</c> だけ、が正しい契約。
+    /// </remarks>
+    [Fact(DisplayName = "直接 CRUD は RowState を触らない（Added のまま＝実 DB と同じ帰結になる）")]
+    public async Task DirectCrud_LeavesRowStateUntouched()
+    {
+        var (_, customers, _, _) = BuildFresh();
+
+        var added = NewCustomer(1, "Alice");
+        await customers.InsertAsync(added, Ct);
+        added
+            .RowState.Should()
+            .Be(RowState.Added, "Insert は保存状態を確定しない（実装先すべてで同じ）");
+
+        // Added のまま再保存すると、実 DB と同じく主キー重複で失敗する（旧実装では「変更なし」で黙って通っていた）
+        var resave = async () => await customers.SaveAsync(added, cancellationToken: Ct);
+        (await resave.Should().ThrowAsync<InvalidOperationException>()).WithMessage(
+            "*primary key*"
+        );
+
+        var bulk = NewCustomer(2, "Bob");
+        await customers.BulkInsertAsync([bulk], Ct);
+        bulk.RowState.Should().Be(RowState.Added, "BulkInsert も保存状態を確定しない");
+
+        var updated = (await customers.GetByIdAsync(1, Ct))!;
+        updated.Name = "Alice2";
+        updated.MarkUpdated();
+        (await customers.UpdateAsync(updated, cancellationToken: Ct)).Should().BeTrue();
+        updated.RowState.Should().Be(RowState.Updated, "Update も保存状態を確定しない");
+
+        // 対照: グラフ保存（SaveAsync）は成功後に確定させる
+        var saved = NewCustomer(3, "Carol");
+        await customers.SaveAsync(saved, cancellationToken: Ct);
+        saved.RowState.Should().Be(RowState.Unchanged, "SaveAsync は成功後に RowState を確定する");
+    }
+
+    /// <summary>
+    /// NULL 許容列に対する <c>!=</c>（非 null 値との比較）が NULL 行も含める（C# の <c>!=</c> と同じ意味論）。
+    /// </summary>
+    /// <remarks>
+    /// ADO 翻訳器の列側 NULL 補償（<c>(col &lt;&gt; @p OR col IS NULL)</c>）が揃える相手側の基準。
+    /// インメモリは述語を式木コンパイルして C# の意味論で評価するため、EF Core とともにこちらが正しい振る舞い。
+    /// 実 SQLite 側の対照は <c>GeneratedSqliteRuntimeTestsBase</c> が持つ。
+    /// </remarks>
+    [Fact(DisplayName = "Query: NULL 許容列の != は NULL 行も含める（C# の意味論）")]
+    public async Task Query_NotEqual_IncludesNullRows()
+    {
+        var (_, _, orders, _) = BuildFresh();
+
+        await orders.InsertAsync(NewOrderWithMemo(10, 1, 10m, null), Ct);
+        await orders.InsertAsync(NewOrderWithMemo(11, 1, 20m, "x"), Ct);
+        await orders.InsertAsync(NewOrderWithMemo(12, 1, 30m, "y"), Ct);
+
+        var notX = await orders.Query().Where(o => o.Memo != "x").ToListAsync(Ct);
+        notX.Select(o => o.OrderId).Should().BeEquivalentTo([10, 12]);
+
+        var isX = await orders.Query().Where(o => o.Memo == "x").ToListAsync(Ct);
+        isX.Select(o => o.OrderId).Should().BeEquivalentTo([11]);
+    }
+
+    /// <summary>memo 付きの注文エンティティを組み立てる</summary>
+    private static OrderEntity NewOrderWithMemo(
+        int id,
+        int customerId,
+        decimal amount,
+        string? memo
+    ) =>
+        new()
+        {
+            OrderId = id,
+            CustomerId = customerId,
+            Amount = amount,
+            Memo = memo,
+            RowState = RowState.Added,
+        };
 
     [Fact(
         DisplayName = "BulkInsert: キャンセル済みトークンは OperationCanceledException でストア不変"

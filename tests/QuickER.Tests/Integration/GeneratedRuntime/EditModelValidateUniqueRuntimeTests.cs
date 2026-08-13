@@ -194,6 +194,29 @@ public sealed class EditModelValidateUniqueRuntimeTests : IAsyncLifetime
         GetErrors(model, nameof(OrderEditModel.BindingMemo)).Should().ContainSingle();
     }
 
+    /// <summary>8. DB 照合で登録したエラーは、その後のコレクション内重複検証で消えない</summary>
+    /// <remarks>
+    /// 画面の定型は「DB 照合 → 保存直前にグラフ全体を Validate」で、旧実装はその Validate（コレクション側の
+    /// 一括クリア）が DB 照合の結果を巻き添えで消していた。重複エラーはチェックごとに分離して保持する。
+    /// </remarks>
+    [Fact(DisplayName = "[ValidateUnique] 8: 親の Validate 後も DB 由来の重複エラーが残る")]
+    public async Task DatabaseError_SurvivesSiblingValidation()
+    {
+        var customer = new CustomerEditModel { BindingCustomerId = "1", BindingName = "Alice" };
+        var model = NewOrder(99, 1, 12m, "apple pie");
+        customer.Orders.Add(model);
+
+        (await model.ValidateUniqueAsync(Orders, Ct)).Should().BeFalse();
+        GetErrors(model, nameof(OrderEditModel.BindingMemo)).Should().ContainSingle();
+
+        // 兄弟は 1 件だけなのでコレクション内重複はゼロ＝この検証は何も登録しない
+        customer.Validate(includeChildren: true).Should().BeFalse();
+
+        GetErrors(model, nameof(OrderEditModel.BindingMemo))
+            .Should()
+            .ContainSingle("DB 照合の結果は兄弟間検証で消えない");
+    }
+
     /// <summary>DI コンテナと一時 DB を破棄する</summary>
     public ValueTask DisposeAsync()
     {

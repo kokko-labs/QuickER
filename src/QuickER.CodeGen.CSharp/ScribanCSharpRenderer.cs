@@ -266,6 +266,14 @@ internal sealed class ScribanCSharpRenderer
             && (options.GenerateRepositories || options.IncludeDataAnnotations)
             && model.EntityClasses.Any(c => c.Properties.Any(p => p.SqlDbTypeName is not null));
 
+        // バイナリ列のアップロード（PUT）エンドポイントが 1 本でも出るか。出るときだけ
+        // MapGeneratedRemoteEndpoints へ allowUnboundedUploads 引数を載せる（サイズ制限解除のオプトイン）。
+        // 「除外オプション ON」だけでは足りない＝無制限バイナリ列が 1 つも無い図では Stream アクセサ自体が
+        // 生成されず、引数だけが宙に浮くため、実際に生成されたサーバーブロックの有無で判定する。
+        var hasBinaryUploadEndpoints = model.RepositoryClasses.Any(r =>
+            !string.IsNullOrEmpty(r.BinaryStreamRemoteServerBlock)
+        );
+
         // DB 定義メタ属性（[DbColumnMeta] / [DbTableMeta]）は、生成 Entity を「DB 定義の自己記述ドキュメント」に
         // するための方言中立メタ（型トークン・説明）を載せる。付与は対象 DB・Repository/EF Core 設定に依らず、
         // データアノテーション付与（[Table]/[Column] と同列）のとき。Entity は常時生成されるため、canonical 由来で
@@ -335,6 +343,8 @@ internal sealed class ScribanCSharpRenderer
             ["emit_store_generated_attr"] = emitStoreGeneratedAttr,
             // マーカー属性 [UnboundedBinaryColumn] を Entity プロパティへ付与するか（オプション ON のときのみ真）。
             ["exclude_unbounded_binary"] = options.ExcludeUnboundedBinaryColumns,
+            // バイナリ列アップロード（PUT）エンドポイントが 1 本でも生成されるか（allowUnboundedUploads 引数の出力条件）。
+            ["has_binary_upload_endpoints"] = hasBinaryUploadEndpoints,
             ["generate_value_objects"] = options.GenerateValueObjects,
             ["value_object_classes"] = model.ValueObjectClasses,
             ["ef_core"] = model.EfCore,

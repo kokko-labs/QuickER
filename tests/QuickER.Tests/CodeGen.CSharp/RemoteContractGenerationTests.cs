@@ -120,8 +120,10 @@ public class RemoteContractGenerationTests
         content.Should().Contain("IRepository<OrderEntity, int> { }");
 
         // 実装クラス・DI 実装登録は従来どおり（全機能面を実装・登録）
-        content.Should().Contain("(connectionFactory, saveHooks), IOrderRepository");
-        content.Should().Contain("services.AddScoped<IOrderRepository, OrderRepository>();");
+        content.Should().Contain("(connectionFactory, saveHooks, sqlExecutor), IOrderRepository");
+        content
+            .Should()
+            .Contain("services.AddScoped<IOrderRepository>(provider => new OrderRepository(");
 
         // リモート面は同一インスタンスへの転送として追加登録される
         content.Should().Contain("services.AddScoped<IOrderRemoteRepository>(provider =>");
@@ -155,7 +157,9 @@ public class RemoteContractGenerationTests
             );
 
         // DI は従来どおり単一登録
-        content.Should().Contain("services.AddScoped<IOrderRepository, OrderRepository>();");
+        content
+            .Should()
+            .Contain("services.AddScoped<IOrderRepository>(provider => new OrderRepository(");
         content.Should().NotContain("GetRequiredService<IOrderRepository>");
     }
 
@@ -181,7 +185,9 @@ public class RemoteContractGenerationTests
 
         // EF Core 版 Repository・実装登録は従来どおり全機能面基準
         content.Should().Contain("public sealed partial class EfCoreOrderRepository(");
-        content.Should().Contain("services.AddScoped<IOrderRepository, EfCoreOrderRepository>();");
+        content
+            .Should()
+            .Contain("services.AddScoped<IOrderRepository>(provider => new EfCoreOrderRepository(");
 
         // リモート面の転送登録が追加される
         content.Should().Contain("services.AddScoped<IOrderRemoteRepository>(provider =>");
@@ -233,7 +239,9 @@ public class RemoteContractGenerationTests
         var content = AllContent(result);
 
         // 非 keyed・keyed の双方で全機能面が実装登録され、リモート面が転送登録される
-        content.Should().Contain("services.AddScoped<IOrderRepository, OrderRepository>();");
+        content
+            .Should()
+            .Contain("services.AddScoped<IOrderRepository>(provider => new OrderRepository(");
         content.Should().Contain("services.AddKeyedScoped<IOrderRepository>(");
         content.Should().Contain("services.AddKeyedScoped<IOrderRemoteRepository>(");
         content

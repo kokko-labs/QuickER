@@ -418,19 +418,89 @@ public sealed class EntitySaveMetadata
         where TEntity : EntityBase, new() => (TEntity)SelectMaterializer(reader, SelectOrdinals(reader));
 
     /// <summary>
-    /// Strict row mapping for raw SQL (the column set and column types are variable, so no type specialization;
-    /// uses the previous lenient <see cref="SetColumnValue"/>).
+    /// The column resolution of one raw SQL result set: the ordinal of every SELECT column, plus the ordinals of the
+    /// excluded (unbounded binary) columns the statement happened to include.
     /// </summary>
-    private TEntity MapEntityStrict<TEntity>(DbDataReader reader)
+    /// <remarks>
+    /// Built once per result set and reused for every row, so neither the name-to-ordinal lookup nor the reader's column
+    /// name set is rebuilt per row. Resolve it after the first successful <c>Read</c>: some providers only expose the
+    /// result schema once a row has been fetched.
+    /// </remarks>
+    public sealed class RawSqlRowPlan
+    {
+        /// <summary>Gets the ordinal of each <see cref="SelectColumns"/> column on this reader (same order as SelectColumns).</summary>
+        public required int[] SelectOrdinals { get; init; }
+
+        /// <summary>Gets the excluded columns this result set does contain, paired with their ordinal (empty in the usual case).</summary>
+        public required (PropertyInfo Property, int Ordinal)[] ExcludedOrdinals { get; init; }
+    }
+
+    /// <summary>Resolves the raw SQL column plan for the current result set (call once, after the first <c>Read</c>).</summary>
+    /// <exception cref="InvalidOperationException">A required SELECT column is missing from the result set.</exception>
+    public RawSqlRowPlan CreateRawSqlRowPlan(DbDataReader reader)
+    {
+        int[] selectOrdinals;
+
+        // The exception thrown for an unknown column reference differs by data reader implementation
+        // (IndexOutOfRangeException vs ArgumentOutOfRangeException), so both are caught
+        try
+        {
+            selectOrdinals = SelectOrdinals(reader);
+        }
+        catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentOutOfRangeException)
+        {
+            throw new InvalidOperationException(
+                $"The raw SQL SELECT must include the {KeyProperty.DeclaringType?.Name} columns ({ColumnList}); use SELECT * or list all columns. "
+                    + $"The result set is missing a column: {ex.Message}",
+                ex
+            );
+        }
+
+        if (ExcludedProperties.Count == 0)
+        {
+            return new RawSqlRowPlan
+            {
+                SelectOrdinals = selectOrdinals,
+                ExcludedOrdinals = Array.Empty<(PropertyInfo, int)>(),
+            };
+        }
+
+        // Excluded (unbounded binary) columns are optional, so they are matched against the reader's own column names
+        var ordinalsByName = RawReaderOrdinals(reader);
+        var excluded = new List<(PropertyInfo Property, int Ordinal)>();
+
+        foreach (var property in ExcludedProperties)
+        {
+            if (ordinalsByName.TryGetValue(ColumnNameByProperty[property], out var ordinal))
+            {
+                excluded.Add((property, ordinal));
+            }
+        }
+
+        return new RawSqlRowPlan
+        {
+            SelectOrdinals = selectOrdinals,
+            ExcludedOrdinals = excluded.ToArray(),
+        };
+    }
+
+    /// <summary>
+    /// Strict row mapping for raw SQL (the column set and column types are variable, so no type specialization;
+    /// uses the previous lenient <see cref="SetColumnValue"/>). Reads through the plan's pre-resolved ordinals.
+    /// </summary>
+    private TEntity MapEntityStrict<TEntity>(
+        DbDataReader reader,
+        RawSqlRowPlan plan
+    )
         where TEntity : EntityBase, new()
     {
         var entity = new TEntity();
 
         // Unbounded binary columns are excluded from SELECT by default, so only SelectColumns
         // (the pre-resolved pairs of SelectProperties) are mapped
-        foreach (var (property, columnName) in SelectColumns)
+        for (var i = 0; i < plan.SelectOrdinals.Length; i++)
         {
-            SetColumnValue(entity, property, reader[columnName]);
+            SetColumnValue(entity, SelectColumns[i].Property, reader.GetValue(plan.SelectOrdinals[i]));
         }
 
         // Rows read from the database are treated as unchanged (later edits transition them to Updated)
@@ -451,52 +521,43 @@ public sealed class EntitySaveMetadata
         }
         else
         {
-            // Value objects are converted to the wrapped type and re-wrapped (Wrap already applies Convert.ChangeType)
-            property.SetValue(entity, SqlValueObjectActivator.Wrap(value, property.PropertyType));
+            // Value objects are converted to the wrapped type and re-wrapped (Wrap already applies Convert.ChangeType).
+            // A stored value the value object rejects surfaces as a validation failure with no hint of where it came from,
+            // so the column is named here and the original exception is kept as the inner one
+            try
+            {
+                property.SetValue(entity, SqlValueObjectActivator.Wrap(value, property.PropertyType));
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                throw new InvalidOperationException(
+                    $"The stored value of column '{GetColumnName(property)}' could not be mapped to {entity.GetType().Name}.{property.Name} ({property.PropertyType.Name}): {ex.Message}",
+                    ex
+                );
+            }
         }
     }
 
     /// <summary>
-    /// Maps a raw SQL result row to {TEntity}. Same strict mapping as <see cref="MapEntityStrict"/> (the SELECT columns are
-    /// required), but when a column cannot be found (a partial SELECT), the error is wrapped in an
-    /// <see cref="InvalidOperationException"/> that lists the required columns for clarity. The exception thrown for an
-    /// unknown column reference differs by data reader implementation (<see cref="IndexOutOfRangeException"/> vs
-    /// <see cref="ArgumentOutOfRangeException"/>), so both are caught.
+    /// Maps a raw SQL result row to {TEntity} through a plan resolved for this result set. Same strict mapping as
+    /// <see cref="MapEntityStrict"/> (the SELECT columns are required; a missing one is reported by
+    /// <see cref="CreateRawSqlRowPlan"/> while the plan is built).
     /// Unbounded binary columns are not fetched by default, but if the raw SQL SELECT explicitly includes them they are mapped additionally (so a user who deliberately selected them gets the values).
     /// </summary>
-    public TEntity MapEntityFromRawSql<TEntity>(DbDataReader reader)
+    public TEntity MapEntityFromRawSql<TEntity>(
+        DbDataReader reader,
+        RawSqlRowPlan plan
+    )
         where TEntity : EntityBase, new()
     {
-        TEntity entity;
-
-        try
-        {
-            entity = MapEntityStrict<TEntity>(reader);
-        }
-        catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentOutOfRangeException)
-        {
-            throw new InvalidOperationException(
-                $"The raw SQL SELECT must include the {typeof(TEntity).Name} columns ({ColumnList}); use SELECT * or list all columns. "
-                    + $"The result set is missing a column: {ex.Message}",
-                ex
-            );
-        }
+        var entity = MapEntityStrict<TEntity>(reader, plan);
 
         // If excluded columns (unbounded binary) are present in the raw SQL result, take them opportunistically
-        if (ExcludedProperties.Count > 0)
+        if (plan.ExcludedOrdinals.Length > 0)
         {
-            var present = RawReaderColumnNames(reader);
-
-            foreach (var property in ExcludedProperties)
+            foreach (var (property, ordinal) in plan.ExcludedOrdinals)
             {
-                var columnName = ColumnNameByProperty[property];
-
-                if (!present.Contains(columnName))
-                {
-                    continue;
-                }
-
-                SetColumnValue(entity, property, reader[columnName]);
+                SetColumnValue(entity, property, reader.GetValue(ordinal));
             }
 
             // Re-finalize as unchanged so the opportunistic assignments do not shift state
@@ -507,17 +568,27 @@ public sealed class EntitySaveMetadata
         return entity;
     }
 
-    /// <summary>Enumerates the data reader's column name set once, case-insensitively (used to detect excluded columns in raw SQL results).</summary>
-    private static HashSet<string> RawReaderColumnNames(DbDataReader reader)
+    /// <summary>Maps a single raw SQL result row, resolving the column plan on this call (convenience for one-row reads).</summary>
+    /// <remarks>Resolve the plan yourself with <see cref="CreateRawSqlRowPlan"/> when reading many rows, so the ordinals are resolved once for the whole result set.</remarks>
+    public TEntity MapEntityFromRawSql<TEntity>(DbDataReader reader)
+        where TEntity : EntityBase, new() =>
+        MapEntityFromRawSql<TEntity>(reader, CreateRawSqlRowPlan(reader));
+
+    /// <summary>Enumerates the data reader's column name to ordinal map once, case-insensitively (used to detect excluded columns in raw SQL results).</summary>
+    /// <remarks>A name that appears twice keeps its first ordinal, which is what <c>GetOrdinal</c> - and therefore the previous name-based lookup - resolves it to.</remarks>
+    private static Dictionary<string, int> RawReaderOrdinals(DbDataReader reader)
     {
-        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var ordinals = new Dictionary<string, int>(
+            reader.FieldCount,
+            StringComparer.OrdinalIgnoreCase
+        );
 
         for (var i = 0; i < reader.FieldCount; i++)
         {
-            names.Add(reader.GetName(i));
+            ordinals.TryAdd(reader.GetName(i), i);
         }
 
-        return names;
+        return ordinals;
     }
 
     /// <summary>
@@ -1098,9 +1169,14 @@ public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TConte
         ).ConfigureAwait(false);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
 
+        // The column ordinals are resolved once for the result set (on the first row, because some providers only
+        // expose the result schema after a successful Read) and reused for every row
+        EntitySaveMetadata.RawSqlRowPlan? plan = null;
+
         while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
-            items.Add(metadata.MapEntityFromRawSql<TEntity>(reader));
+            plan ??= metadata.CreateRawSqlRowPlan(reader);
+            items.Add(metadata.MapEntityFromRawSql<TEntity>(reader, plan));
         }
 
         return items;
@@ -1631,7 +1707,8 @@ public sealed class EfCoreSqlQueryExecutor<TEntity, TContext>(
 /// <typeparam name="TContext">The concrete type of the DbContext that performs CRUD.</typeparam>
 public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
     IDbContextFactory<TContext> contextFactory,
-    ISaveHookRegistry? saveHooks = null
+    ISaveHookRegistry? saveHooks = null,
+    ISqlExecutor? sqlExecutor = null
 ) : IRepository<TEntity, TKey>
     where TEntity : EntityBase, new()
     where TContext : DbContext
@@ -1642,8 +1719,13 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
     /// <summary>The source that creates the DbContext.</summary>
     private readonly IDbContextFactory<TContext> _contextFactory = contextFactory;
 
-    /// <summary>Delegation target of the raw SQL methods (consolidates binding and mapping into a single path).</summary>
-    private readonly ISqlExecutor _sqlExecutor = new EfCoreSqlExecutor<TContext>(contextFactory);
+    /// <summary>
+    /// Delegation target of the raw SQL methods (consolidates binding and mapping into a single path).
+    /// Unspecified = null builds the default EF Core implementation over the same context factory, which keeps
+    /// hand-constructed repositories working; the DI registration passes the registered implementation instead.
+    /// </summary>
+    private readonly ISqlExecutor _sqlExecutor =
+        sqlExecutor ?? new EfCoreSqlExecutor<TContext>(contextFactory);
 
     /// <summary>The save hook registry (unspecified = null = no hooks, a complete no-op).</summary>
     private readonly ISaveHookRegistry? _saveHooks = saveHooks;
@@ -1721,6 +1803,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
     )
     {
         ArgumentNullException.ThrowIfNull(entities);
+        cancellationToken.ThrowIfCancellationRequested();
 
         // If a collection with a known count is empty, return without creating a DbContext.
         if (entities is ICollection<TEntity> { Count: 0 })
@@ -1732,6 +1815,12 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
 
         foreach (var entity in entities)
         {
+            // A null element is skipped rather than rejected (the shared BulkInsert contract).
+            if (entity is null)
+            {
+                continue;
+            }
+
             // AddRange marks navigation targets as Added too, so assign Entry.State to add only the targets.
             context.Entry(entity).State = EntityState.Added;
         }

@@ -372,7 +372,7 @@ public sealed class ValueObjectValidationException : Exception
 }
 
 /// <summary>Common base for value objects. Provides value storage, equality, ToString, and extraction of the raw value (ordered comparison is added by derived types).</summary>
-public abstract partial class ValueObjectBase<TSelf, TValue> : IValueObject
+public abstract partial class ValueObjectBase<TSelf, TValue> : IValueObject, IEquatable<TSelf>
     where TSelf : ValueObjectBase<TSelf, TValue>
 {
     /// <summary>Gets the underlying value (never reassigned; reference-typed values such as byte[] are not defensively copied — see <see cref="ValueObjectBinaryBase{TSelf}"/>).</summary>
@@ -387,11 +387,19 @@ public abstract partial class ValueObjectBase<TSelf, TValue> : IValueObject
     /// <summary>Gets the string used for display (defaults to ToString()). A concrete value object's partial class can override it to change the format.</summary>
     public virtual string DisplayValue => ToString();
 
-    /// <summary>Value-based equality (compared through <see cref="EqualityComparer{T}.Default"/>, so a struct value is not boxed).</summary>
-    /// <remarks>A value object whose value is an array needs element-by-element comparison and overrides this — see <see cref="ValueObjectBinaryBase{TSelf}"/>.</remarks>
-    public override bool Equals(object? obj) =>
-        obj is ValueObjectBase<TSelf, TValue> other
-        && EqualityComparer<TValue>.Default.Equals(Value, other.Value);
+    /// <summary>Value-based equality with another instance of the same value object type (compared through <see cref="EqualityComparer{T}.Default"/>, so a struct value is not boxed).</summary>
+    /// <remarks>
+    /// Implementing <see cref="IEquatable{T}"/> is what lets <see cref="EqualityComparer{T}.Default"/> compare value objects
+    /// by value directly. Without it the default comparer falls back to the object-based one, which reaches equality only
+    /// through <see cref="Equals(object?)"/> and boxes a struct-valued argument on the way; every dictionary and hash-set
+    /// lookup keyed by a value object goes through that comparer. A value object whose value is an array needs
+    /// element-by-element comparison and overrides this — see <see cref="ValueObjectBinaryBase{TSelf}"/>.
+    /// </remarks>
+    public virtual bool Equals(TSelf? other) =>
+        other is not null && EqualityComparer<TValue>.Default.Equals(Value, other.Value);
+
+    /// <summary>Value-based equality (delegates to the typed overload; anything that is not this value object type is unequal).</summary>
+    public override bool Equals(object? obj) => obj is TSelf other && Equals(other);
 
     /// <summary>Value-based hash code (computed through <see cref="EqualityComparer{T}.Default"/>, so a struct value is not boxed).</summary>
     public override int GetHashCode() =>
@@ -587,20 +595,53 @@ public abstract partial class ValueObjectDateTimeBase<TSelf>
 /// as frozen after Create — mutating it afterwards silently changes the value object's equality, hash code, and ToString.
 /// </remarks>
 public abstract partial class ValueObjectBinaryBase<TSelf> : ValueObjectBase<TSelf, byte[]>
-    where TSelf : ValueObjectBinaryBase<TSelf>
+    where TSelf : ValueObjectBinaryBase<TSelf>, IValueObject<TSelf, byte[]>
 {
     /// <summary>Initializes with an already-validated value.</summary>
     protected ValueObjectBinaryBase(byte[] value)
         : base(value) { }
 
-    /// <summary>Value-based equality (arrays are compared element by element; reference equality would make two equal blobs differ).</summary>
-    public override bool Equals(object? obj) =>
-        obj is ValueObjectBase<TSelf, byte[]> other
-        && StructuralComparisons.StructuralEqualityComparer.Equals(Value, other.Value);
+    /// <summary>Returns an equal value object built over a copy of the array (the copy the "not defensively copied" contract leaves to the caller).</summary>
+    /// <remarks>
+    /// Use it where two holders must not share one array — loading an entity into an edit model, for instance, where editing the
+    /// model would otherwise write straight into the entity that was loaded from.
+    /// </remarks>
+    public TSelf CopyValue() => TSelf.Create((byte[])Value.Clone());
 
-    /// <summary>Value-based hash code (arrays are computed structurally, matching <see cref="Equals(object?)"/>).</summary>
-    public override int GetHashCode() =>
-        Value is null ? 0 : StructuralComparisons.StructuralEqualityComparer.GetHashCode(Value);
+    /// <summary>Value-based equality (arrays are compared element by element; reference equality would make two equal blobs differ).</summary>
+    /// <remarks>The comparison runs over spans, which compares whole machine words at a time instead of one element at a time — worth having on values that are blob-sized by definition.</remarks>
+    public override bool Equals(TSelf? other)
+    {
+        if (other is null)
+        {
+            return false;
+        }
+
+        if (Value is null || other.Value is null)
+        {
+            return Value is null && other.Value is null;
+        }
+
+        return Value.AsSpan().SequenceEqual(other.Value);
+    }
+
+    /// <summary>Value-based hash code computed from every byte, matching <see cref="Equals(TSelf)"/>.</summary>
+    /// <remarks>
+    /// <see cref="HashCode.AddBytes(ReadOnlySpan{byte})"/> mixes in the whole array. The structural comparer used before it
+    /// hashes only the last eight elements, so two blobs sharing a tail landed in the same bucket however much of their
+    /// content differed — exactly the shape a binary value object tends to have when it wraps a versioned or padded payload.
+    /// </remarks>
+    public override int GetHashCode()
+    {
+        if (Value is null)
+        {
+            return 0;
+        }
+
+        var hash = new HashCode();
+        hash.AddBytes(Value);
+        return hash.ToHashCode();
+    }
 
     /// <summary>Returns the value as a Base64 string.</summary>
     public override string ToString() =>
@@ -856,6 +897,7 @@ public abstract partial class EntityBase
         );
 
     /// <summary>Determines whether all column values match those of another entity (RowState and navigations are excluded from the comparison).</summary>
+    /// <remarks>The comparison reads each column through reflection (the property list itself is cached per type). That is meant for change detection and assertions, not for a hot path — write the comparison out by hand where one is called for.</remarks>
     public bool HasSameValues(EntityBase? other)
     {
         if (other is null)
@@ -892,7 +934,7 @@ public abstract partial class EntityBase
     }
 
     /// <summary>Returns a value-based hash code computed from the column values (RowState and navigations are excluded).</summary>
-    /// <remarks>Two entities for which HasSameValues is true always return the same value. Since the object is mutable, do not modify it while using it as a dictionary key.</remarks>
+    /// <remarks>Two entities for which HasSameValues is true always return the same value. Since the object is mutable, do not modify it while using it as a dictionary key. Like HasSameValues, it reads the columns through reflection and is not meant for a hot path.</remarks>
     public int GetValueHashCode()
     {
         var type = GetType();
@@ -969,16 +1011,27 @@ public abstract partial class EditModelBase
         INotifyDataErrorInfo,
         IEditableObject
 {
-    /// <summary>Input error messages (required, conversion, value object, OnValidate) keyed by property name.</summary>
-    private readonly Dictionary<string, List<string>> _errors = new();
+    /// <summary>
+    /// Input errors (conversion, value object, OnValidate, and the missing-required-input check) keyed by property name.
+    /// A property carries one input error at a time, and the entry remembers whether the required check registered it, so
+    /// that check can add and remove its own error without overwriting a conversion error the binding setter produced.
+    /// </summary>
+    private readonly Dictionary<string, InputError> _errors = new();
 
     /// <summary>
     /// Duplicate-value error messages keyed by property name, kept in a store of their own so the two kinds never overwrite each other:
     /// a uniqueness check registers and clears only this store, while SetError / ClearErrors touch only <see cref="_errors"/>.
     /// Both stores are merged by <see cref="HasErrors"/>, <see cref="GetErrors"/>, and error collection, so a property can carry a
-    /// conversion error and a duplicate-value error at the same time.
+    /// conversion error and a duplicate-value error at the same time. Each entry also records which check found the duplicate
+    /// (<see cref="DuplicateErrorSource"/>), so the check among the siblings and the check against the database clear only their own findings.
     /// </summary>
-    private readonly Dictionary<string, List<string>> _duplicateErrors = new();
+    private readonly Dictionary<string, DuplicateError> _duplicateErrors = new();
+
+    /// <summary>An input error message together with the check that registered it.</summary>
+    private readonly record struct InputError(string Message, bool FromRequiredCheck);
+
+    /// <summary>A duplicate-value error message together with the check that found it.</summary>
+    private readonly record struct DuplicateError(string Message, DuplicateErrorSource Source);
 
     /// <summary>Raised when a property value changes.</summary>
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -989,11 +1042,17 @@ public abstract partial class EditModelBase
     /// <summary>Gets a value indicating whether any errors are present (input errors and duplicate-value errors alike).</summary>
     public bool HasErrors => _errors.Count > 0 || _duplicateErrors.Count > 0;
 
+    /// <summary>Number of revert operations in progress (a counter rather than a flag, so a revert started from inside another one cannot clear it early).</summary>
+    private int _revertDepth;
+
     /// <summary>Gets a value indicating whether a revert operation is in progress.</summary>
-    protected bool IsReverting { get; private set; }
+    protected bool IsReverting => _revertDepth > 0;
+
+    /// <summary>Number of loads in progress (a counter rather than a flag, so a load started from inside a hook cannot clear it early).</summary>
+    private int _loadDepth;
 
     /// <summary>Gets a value indicating whether a load is in progress (confirmed-value changes do not promote the state to Updated while loading).</summary>
-    protected bool IsLoading { get; private set; }
+    protected bool IsLoading => _loadDepth > 0;
 
     /// <summary>Gets or sets the change state of this edit model (based on the source entity; confirmed-value changes promote it to Updated).</summary>
     public RowState RowState
@@ -1226,19 +1285,26 @@ public abstract partial class EditModelBase
         if (string.IsNullOrEmpty(propertyName))
         {
             return _errors
-                .Values.SelectMany(e => e)
-                .Concat(_duplicateErrors.Values.SelectMany(e => e));
+                .Values.Select(error => error.Message)
+                .Concat(_duplicateErrors.Values.Select(error => error.Message));
         }
 
-        return ReadErrors(_errors, propertyName)
-            .Concat(ReadErrors(_duplicateErrors, propertyName));
+        return ReadErrors(propertyName);
     }
 
-    /// <summary>Reads the messages registered for the specified property in the specified error store (empty when there are none).</summary>
-    private static IEnumerable<string> ReadErrors(
-        Dictionary<string, List<string>> store,
-        string propertyName
-    ) => store.TryGetValue(propertyName, out var list) ? list : Enumerable.Empty<string>();
+    /// <summary>Reads the messages registered for the specified property in both stores (the input error first, then the duplicate-value error).</summary>
+    private IEnumerable<string> ReadErrors(string propertyName)
+    {
+        if (_errors.TryGetValue(propertyName, out var input))
+        {
+            yield return input.Message;
+        }
+
+        if (_duplicateErrors.TryGetValue(propertyName, out var duplicate))
+        {
+            yield return duplicate.Message;
+        }
+    }
 
     /// <summary>Combines a child element path (empty at the root, "."-separated below).</summary>
     protected static string CombineErrorPath(string path, string segment) =>
@@ -1298,15 +1364,14 @@ public abstract partial class EditModelBase
     /// <summary>Enumerates this edit model's own errors with the specified path (building block for graph collection). Input errors come first, then duplicate-value errors.</summary>
     protected IEnumerable<EditModelError> CollectOwnErrors(string path)
     {
-        foreach (var store in new[] { _errors, _duplicateErrors })
+        foreach (var pair in _errors)
         {
-            foreach (var pair in store)
-            {
-                foreach (var message in pair.Value)
-                {
-                    yield return new EditModelError(path, pair.Key, message);
-                }
-            }
+            yield return new EditModelError(path, pair.Key, pair.Value.Message);
+        }
+
+        foreach (var pair in _duplicateErrors)
+        {
+            yield return new EditModelError(path, pair.Key, pair.Value.Message);
         }
     }
 
@@ -1488,6 +1553,7 @@ public abstract partial class EditModelBase
     }
 
     /// <summary>Sets the input error for the specified property (pass null to clear). Duplicate-value errors live in their own store and are not affected.</summary>
+    /// <remarks>A property carries one input error at a time, so this also replaces a missing-required-input error left by a previous validation.</remarks>
     protected void SetError(string propertyName, string? error)
     {
         if (error is null)
@@ -1496,11 +1562,11 @@ public abstract partial class EditModelBase
             return;
         }
 
-        _errors[propertyName] = [error];
+        _errors[propertyName] = new InputError(error, FromRequiredCheck: false);
         OnErrorsChanged(propertyName);
     }
 
-    /// <summary>Clears the input errors for the specified property. Duplicate-value errors live in their own store and are cleared by ClearDuplicateErrors.</summary>
+    /// <summary>Clears the input error for the specified property, whichever check registered it. Duplicate-value errors live in their own store and are cleared by ClearDuplicateErrors.</summary>
     protected void ClearErrors(string propertyName)
     {
         if (_errors.Remove(propertyName))
@@ -1509,32 +1575,87 @@ public abstract partial class EditModelBase
         }
     }
 
+    /// <summary>Registers a missing-required-input error on the specified property, unless it already carries another input error (called by the generated required-field check).</summary>
+    /// <remarks>
+    /// A conversion error means the field does hold input that simply cannot be converted, which is the more upstream cause and the
+    /// message the user has to act on. Replacing it with "is required" would hide the real problem behind a wrong one, and the
+    /// conversion error can only ever be produced again by the binding setter.
+    /// </remarks>
+    protected void SetRequiredError(string propertyName, string message)
+    {
+        if (_errors.TryGetValue(propertyName, out var existing) && !existing.FromRequiredCheck)
+        {
+            return;
+        }
+
+        _errors[propertyName] = new InputError(message, FromRequiredCheck: true);
+        OnErrorsChanged(propertyName);
+    }
+
+    /// <summary>Clears the missing-required-input error registered on the specified property (called by the generated required-field check once the value is present).</summary>
+    /// <remarks>
+    /// Only an error the required check itself registered is removed: a conversion error belongs to the binding setter and an error
+    /// registered from OnValidate belongs to that hook, so neither is cleared here.
+    /// </remarks>
+    protected void ClearRequiredError(string propertyName)
+    {
+        if (!_errors.TryGetValue(propertyName, out var existing) || !existing.FromRequiredCheck)
+        {
+            return;
+        }
+
+        _errors.Remove(propertyName);
+        OnErrorsChanged(propertyName);
+    }
+
     /// <summary>Raises the input-errors change notification.</summary>
     protected void OnErrorsChanged(string propertyName) =>
         ErrorsChanged?.Invoke(this, new DataErrorsChangedEventArgs(propertyName));
 
-    /// <summary>Clears the duplicate-value errors registered by the previous uniqueness check (input errors, which live in a separate store, are left untouched).</summary>
-    public void ClearDuplicateErrors()
+    /// <summary>Clears every duplicate-value error, whichever check found it (input errors, which live in a separate store, are left untouched). Loading a new value into the model uses this.</summary>
+    public void ClearDuplicateErrors() => ClearDuplicateErrorsCore(null);
+
+    /// <summary>Clears the duplicate-value errors found by the specified check only, leaving the other check's findings in place.</summary>
+    /// <remarks>
+    /// Each check clears exactly what it registered before running again, so the check among the siblings no longer discards
+    /// the violations the database check found (and the other way round).
+    /// </remarks>
+    /// <param name="source">The check whose findings are cleared.</param>
+    public void ClearDuplicateErrors(DuplicateErrorSource source) =>
+        ClearDuplicateErrorsCore(source);
+
+    /// <summary>Shared implementation of the two ClearDuplicateErrors overloads (null clears every source).</summary>
+    private void ClearDuplicateErrorsCore(DuplicateErrorSource? source)
     {
         if (_duplicateErrors.Count == 0)
         {
             return;
         }
 
-        var cleared = _duplicateErrors.Keys.ToList();
-        _duplicateErrors.Clear();
+        var cleared = _duplicateErrors
+            .Where(pair => source is null || pair.Value.Source == source)
+            .Select(pair => pair.Key)
+            .ToList();
 
         foreach (var propertyName in cleared)
         {
+            _duplicateErrors.Remove(propertyName);
             OnErrorsChanged(propertyName);
         }
     }
 
     /// <summary>Registers a duplicate-value error on the specified binding property in the duplicate-value store. An empty name registers a model-level error.</summary>
     /// <remarks>It does not go through <see cref="SetError"/>, so a conversion error already registered on the same property survives and both are reported.</remarks>
-    public void SetDuplicateError(string propertyName, string message)
+    /// <param name="propertyName">Binding property the error is attached to (empty for a model-level error).</param>
+    /// <param name="message">The error message.</param>
+    /// <param name="source">The check that found the duplicate (it decides which clear removes the error again).</param>
+    public void SetDuplicateError(
+        string propertyName,
+        string message,
+        DuplicateErrorSource source = DuplicateErrorSource.Siblings
+    )
     {
-        _duplicateErrors[propertyName] = [message];
+        _duplicateErrors[propertyName] = new DuplicateError(message, source);
         OnErrorsChanged(propertyName);
     }
 
@@ -1545,10 +1666,17 @@ public abstract partial class EditModelBase
     /// </summary>
     /// <param name="propertyNames">Confirmed-value property names that make up the violated constraint.</param>
     /// <param name="message">Message that replaces the default one (null to build the default from <see cref="EditModelMessages.DuplicateValue"/>).</param>
+    /// <param name="source">The check that found the duplicate (it decides which clear removes the error again).</param>
     public virtual void RegisterDuplicateError(
         IReadOnlyList<string> propertyNames,
-        string? message
-    ) => SetDuplicateError(string.Empty, message ?? EditModelMessages.DuplicateValue(propertyNames));
+        string? message,
+        DuplicateErrorSource source = DuplicateErrorSource.Siblings
+    ) =>
+        SetDuplicateError(
+            string.Empty,
+            message ?? EditModelMessages.DuplicateValue(propertyNames),
+            source
+        );
 
     /// <summary>
     /// Gets the UNIQUE constraints of the underlying table (none by default). Generated edit models whose table declares
@@ -1561,16 +1689,21 @@ public abstract partial class EditModelBase
     public virtual IReadOnlyList<EditModelUniquenessConstraint> UniquenessConstraints =>
         Array.Empty<EditModelUniquenessConstraint>();
 
-    /// <summary>Writes the confirmed values back to the binding properties and clears errors.</summary>
+    /// <summary>Writes the confirmed values back to the binding properties and clears the input errors (conversion and missing-required-input).</summary>
+    /// <remarks>
+    /// Duplicate-value errors are not touched here: they are owned by the uniqueness checks (a value that is a duplicate stays a
+    /// duplicate when its display string is rebuilt). Loading a different value into the model clears them, because the checks then
+    /// have to run again.
+    /// </remarks>
     public void RevertInput() => ExecuteRevert(RevertCore);
 
-    /// <summary>Core logic of RevertInput (concrete classes implement writing back each property).</summary>
+    /// <summary>Core logic of RevertInput (concrete classes implement writing back each property and clearing its input error).</summary>
     protected virtual void RevertCore() { }
 
-    /// <summary>Executes an action with the reverting flag set.</summary>
+    /// <summary>Executes an action with the reverting flag set (nesting is counted, so an inner revert does not clear the flag for the outer one).</summary>
     protected void ExecuteRevert(Action action)
     {
-        IsReverting = true;
+        _revertDepth++;
 
         try
         {
@@ -1578,14 +1711,14 @@ public abstract partial class EditModelBase
         }
         finally
         {
-            IsReverting = false;
+            _revertDepth--;
         }
     }
 
-    /// <summary>Executes an action with the loading flag set (called from mapper loads; confirmed-value changes during load do not promote the state to Updated).</summary>
+    /// <summary>Executes an action with the loading flag set (called from mapper loads; confirmed-value changes during load do not promote the state to Updated). Nesting is counted, so a load started from a hook does not clear the flag for the outer one.</summary>
     public void ExecuteLoad(Action action)
     {
-        IsLoading = true;
+        _loadDepth++;
 
         try
         {
@@ -1593,14 +1726,14 @@ public abstract partial class EditModelBase
         }
         finally
         {
-            IsLoading = false;
+            _loadDepth--;
         }
     }
 
     /// <summary>Whether a row edit is in progress (IEditableObject; true between BeginEdit and EndEdit/CancelEdit).</summary>
     private bool _editing;
 
-    /// <summary>Begins a row edit and snapshots the current input state (supports canceling DataGrid row edits).</summary>
+    /// <summary>Begins a row edit and snapshots the current state (supports canceling DataGrid row edits).</summary>
     public void BeginEdit()
     {
         if (_editing)
@@ -1624,7 +1757,7 @@ public abstract partial class EditModelBase
         EndEditCore();
     }
 
-    /// <summary>Cancels the row edit and restores the input state captured at BeginEdit.</summary>
+    /// <summary>Cancels the row edit and restores the state captured at BeginEdit.</summary>
     public void CancelEdit()
     {
         if (!_editing)
@@ -1636,7 +1769,7 @@ public abstract partial class EditModelBase
         CancelEditCore();
     }
 
-    /// <summary>Core logic of BeginEdit (concrete classes implement snapshotting the input state).</summary>
+    /// <summary>Core logic of BeginEdit (concrete classes implement snapshotting the confirmed values).</summary>
     protected virtual void BeginEditCore() { }
 
     /// <summary>Core logic of EndEdit (does nothing by default; override in a concrete class if needed).</summary>
@@ -1667,6 +1800,21 @@ public static class EditModelMessages
     /// <remarks>The display names are quoted with single quotes, matching the required-field and conversion error styles.</remarks>
     public static Func<IReadOnlyList<string>, string> DuplicateValue { get; set; } =
         static displayNames => $"'{string.Join(", ", displayNames)}' is already used.";
+}
+
+/// <summary>Identifies the uniqueness check that found a duplicate-value error, so each check clears only what it registered.</summary>
+/// <remarks>
+/// The two checks answer different questions and run at different times: the sibling check compares the edit models of a
+/// collection with each other, while the database check asks the repository about the rows already stored. Without this
+/// distinction, running one of them would discard what the other had just reported.
+/// </remarks>
+public enum DuplicateErrorSource
+{
+    /// <summary>The duplicate check among the edit models themselves (<see cref="EditModelCollection{T}.Validate"/> / <see cref="EditModelUniquenessValidator"/>).</summary>
+    Siblings,
+
+    /// <summary>The check against the rows already stored in the database (the generated edit model wrapper over the repository's uniqueness check).</summary>
+    Database,
 }
 
 /// <summary>One UNIQUE constraint declared by an edit model (its name, the properties that make it up, and a compiled accessor for their values).</summary>
@@ -1715,7 +1863,8 @@ public static class EditModelUniquenessValidator
     /// (returns true when there are no duplicates).
     /// </summary>
     /// <remarks>
-    /// The duplicate-value errors registered by the previous call are cleared first, so re-validating never leaves stale errors. The constraints are read from the
+    /// The duplicate-value errors registered by the previous call are cleared first, so re-validating never leaves stale errors. Only the findings of this
+    /// check are cleared, so violations the database check reported survive. The constraints are read from the
     /// first element that is not a deletion target, so the elements are expected to be of a single edit model type.
     /// </remarks>
     /// <param name="models">The edit models to compare with each other.</param>
@@ -1728,7 +1877,7 @@ public static class EditModelUniquenessValidator
 
         foreach (var model in targets)
         {
-            model.ClearDuplicateErrors();
+            model.ClearDuplicateErrors(DuplicateErrorSource.Siblings);
         }
 
         if (targets.Count == 0)
@@ -1771,7 +1920,11 @@ public static class EditModelUniquenessValidator
 
                 foreach (var model in group)
                 {
-                    model.RegisterDuplicateError(constraint.PropertyNames, null);
+                    model.RegisterDuplicateError(
+                        constraint.PropertyNames,
+                        null,
+                        DuplicateErrorSource.Siblings
+                    );
                 }
             }
         }
@@ -1857,8 +2010,11 @@ public sealed record EditModelError(string Path, string Property, string Message
 public sealed partial class EditModelCollection<T> : ObservableCollection<T>
     where T : EditModelBase
 {
-    /// <summary>Holding list for deletion targets (Removed) removed via Remove.</summary>
-    private readonly List<T> _removed = new();
+    /// <summary>Holding list for deletion targets (Removed) removed via Remove, each with the state it had before the removal.</summary>
+    private readonly List<RemovedItem> _removed = new();
+
+    /// <summary>A deletion target together with the change state it had before it was removed (restored when the very same instance is added back).</summary>
+    private readonly record struct RemovedItem(T Item, RowState PriorState);
 
     /// <summary>Backing field for the parent model that holds this collection as a child.</summary>
     private EditModelBase? _ownerModel;
@@ -1892,15 +2048,21 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
         }
     }
 
-    /// <summary>Gets the deletion targets (Removed) taken out via Remove.</summary>
-    public IReadOnlyList<T> RemovedItems => _removed;
+    /// <summary>Gets the deletion targets (Removed) taken out via Remove, in the order they were removed.</summary>
+    /// <remarks>The result is a snapshot rather than a live view of the tracking list.</remarks>
+    public IReadOnlyList<T> RemovedItems => _removed.Select(entry => entry.Item).ToList();
 
     /// <summary>Gets a value indicating whether any element (or its cascade children) has changes, or deletion-tracked items exist.</summary>
     public bool HasChanges => _removed.Count > 0 || this.Any(item => item.HasGraphChanges());
 
     /// <summary>Inserts an element. Sets this collection as the element's owner and raises position property change notifications.</summary>
+    /// <remarks>
+    /// Adding back an instance that was removed earlier cancels the deletion instead of saving a delete and an insert of the very
+    /// same row: the element leaves the tracking list and its change state returns to what it was before the removal.
+    /// </remarks>
     protected override void InsertItem(int index, T item)
     {
+        UntrackRemoval(item);
         item.Owner = this;
         item.SetParentModel(_ownerModel);
         base.InsertItem(index, item);
@@ -1921,11 +2083,12 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
         NotifyPositionsChanged();
     }
 
-    /// <summary>Replaces an element via indexer assignment. The existing element being replaced is set aside as Removed.</summary>
+    /// <summary>Replaces an element via indexer assignment. The existing element being replaced is set aside as Removed (and a replacement that was removed earlier is taken back off the deletion list).</summary>
     protected override void SetItem(int index, T item)
     {
         var replaced = this[index];
         TrackRemoval(replaced);
+        UntrackRemoval(item);
         replaced.Owner = null;
         replaced.SetParentModel(null);
         item.Owner = this;
@@ -1989,9 +2152,10 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
 
         foreach (var item in this)
         {
-            // Clear the duplicate-value errors of the previous run first: they are re-registered below, and leaving them
-            // would make this element look invalid even after the duplication was resolved.
-            item.ClearDuplicateErrors();
+            // Clear this check's duplicate-value errors from the previous run first: they are re-registered below, and leaving
+            // them would make this element look invalid even after the duplication was resolved. Findings of the database check
+            // are left alone (they are cleared and re-registered by that check instead).
+            item.ClearDuplicateErrors(DuplicateErrorSource.Siblings);
 
             // Do not short-circuit, so that errors are registered for every element.
             if (!item.Validate(includeChildren))
@@ -2056,11 +2220,12 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
     }
 
     /// <summary>Removes all elements (existing elements are tracked as Removed). Use Clear for an untracked on-screen wipe.</summary>
+    /// <remarks>Elements are removed from the front, so <see cref="RemovedItems"/> keeps the order they had in the collection.</remarks>
     public void RemoveAll()
     {
         while (Count > 0)
         {
-            RemoveAt(Count - 1);
+            RemoveAt(0);
         }
     }
 
@@ -2106,12 +2271,28 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
             return;
         }
 
+        // Capture the state before marking the removal, so adding the very same instance back can restore it.
+        var priorState = item.RowState;
         item.MarkRemoved();
 
-        if (!_removed.Contains(item))
+        if (!_removed.Any(entry => ReferenceEquals(entry.Item, item)))
         {
-            _removed.Add(item);
+            _removed.Add(new RemovedItem(item, priorState));
         }
+    }
+
+    /// <summary>Cancels the deletion tracking of an element that is being put back into the collection and restores the state it had before the removal.</summary>
+    private void UntrackRemoval(T item)
+    {
+        var tracked = _removed.FindIndex(entry => ReferenceEquals(entry.Item, item));
+
+        if (tracked < 0)
+        {
+            return;
+        }
+
+        item.RowState = _removed[tracked].PriorState;
+        _removed.RemoveAt(tracked);
     }
 }
 
@@ -2288,7 +2469,18 @@ public partial interface IRepository<TEntity, TKey> : IRemoteRepository<TEntity,
     where TEntity : EntityBase, new()
 {
     /// <summary>Bulk inserts a collection of entities using SqlBulkCopy.</summary>
-    /// <param name="entities">The list of entities to insert.</param>
+    /// <remarks>
+    /// The contract every backend keeps to:
+    /// <list type="bullet">
+    /// <item><description>A <c>null</c> element is skipped rather than rejected (the same treatment the graph save gives a null in its list).</description></item>
+    /// <item><description>The return value counts the rows actually inserted, so skipped elements are not part of it.</description></item>
+    /// <item><description>An empty collection inserts nothing and returns 0 without opening a connection.</description></item>
+    /// <item><description>A cancellation already requested on entry throws before anything is written.</description></item>
+    /// </list>
+    /// The insert itself is one unit of work per backend (SqlBulkCopy, a single transaction, one SaveChanges, or one staged
+    /// batch), but only the in-memory backend validates the whole batch for duplicate primary keys up front.
+    /// </remarks>
+    /// <param name="entities">The list of entities to insert (null elements are skipped).</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The number of rows inserted.</returns>
     Task<int> BulkInsertAsync(
@@ -2488,6 +2680,44 @@ public static class ConcurrencyModes
                 nameof(mode),
                 "The concurrency mode must be Optimistic or ForceOverwrite."
             );
+}
+
+/// <summary>Transaction handling shared by the failure paths of the generated repositories.</summary>
+public static class SqlTransactions
+{
+    /// <summary>Rolls a transaction back from a catch block, never letting the rollback replace the failure being propagated.</summary>
+    /// <remarks>
+    /// <para>
+    /// A rollback attempted on a transaction that has already completed - most notably one whose commit went through
+    /// before the failure occurred - throws <see cref="InvalidOperationException"/>, and an exception thrown from a
+    /// catch block replaces the one being propagated. The original failure is the one that explains what went wrong,
+    /// so the completed case is skipped and anything the rollback itself raises is swallowed.
+    /// </para>
+    /// <para>
+    /// Nothing is leaked by swallowing: the caller disposes the connection on the way out, which ends an uncommitted
+    /// transaction regardless. The rollback also runs with <see cref="CancellationToken.None"/>, because a canceled
+    /// token must not be able to interrupt it.
+    /// </para>
+    /// </remarks>
+    /// <param name="transaction">The transaction to roll back.</param>
+    public static async Task RollbackQuietlyAsync(DbTransaction transaction)
+    {
+        // A completed transaction no longer holds its connection, which is the portable way to tell that there is
+        // nothing left to roll back.
+        if (transaction.Connection is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            // Deliberately ignored: reporting it would hide the failure that is on its way to the caller.
+        }
+    }
 }
 
 /// <summary>
@@ -2828,13 +3058,29 @@ public static class SqlValueObjectActivator
             return null;
         }
 
+        // Compile the call to Create once per target type. Invoking it reflectively instead would re-dispatch and allocate a
+        // one-element object[] for every value read out of every row; the compiled delegate does neither. A validation
+        // failure inside Create surfaces as itself here as well - an expression-tree call never wraps anything in a
+        // TargetInvocationException - so the caller can still add the column context and keep the original as the inner one.
+        var rawParameter = Expression.Parameter(typeof(object), "raw");
+        var invoker = Expression
+            .Lambda<Func<object, object>>(
+                Expression.Convert(
+                    Expression.Call(createMethod, Expression.Convert(rawParameter, valueType)),
+                    typeof(object)
+                ),
+                rawParameter
+            )
+            .Compile();
+
         return raw =>
         {
             // Convert only when the raw type returned by the DB differs from TValue (byte[]/Guid etc. do not implement IConvertible, so matching types pass through)
             var converted = valueType.IsInstanceOfType(raw)
                 ? raw
                 : Convert.ChangeType(raw, valueType, CultureInfo.InvariantCulture);
-            return createMethod.Invoke(null, new[] { converted })!;
+
+            return invoker(converted);
         };
     }
 }
@@ -2903,8 +3149,17 @@ public static class RawSqlMapper
     /// <c>@name0, @name1, ...</c> and adds each element as an individual parameter.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Reference it inside parentheses in the SQL, as in <c>IN (@name)</c>. An empty collection expands to a single
-    /// <c>NULL</c> (<c>IN (NULL)</c>) and matches no rows (following SQL's three-valued logic).
+    /// <c>NULL</c> (<c>IN (NULL)</c>) and matches no rows (following SQL's three-valued logic). That is the right answer
+    /// for <c>IN</c>, but <c>NOT IN (NULL)</c> is UNKNOWN for every row and therefore matches nothing either - branch to a
+    /// different statement when the collection can be empty and the negated form is what you need.
+    /// </para>
+    /// <para>
+    /// The rewrite is textual, so it replaces <c>@name</c> anywhere in the command text - including inside a string
+    /// literal or a comment. Do not write the parameter's own name in those places. Names that merely start the same
+    /// (<c>@nameSuffix</c>, <c>@name0</c>) and system variables that merely end the same (<c>@@name</c>) are left alone.
+    /// </para>
     /// </remarks>
     public static void BindCollectionParameter(
         DbCommand command,
@@ -2924,10 +3179,11 @@ public static class RawSqlMapper
             names.Add(parameter.ParameterName);
         }
 
-        // When an identifier character follows @name (as in @name0 or @nameX) it is a different parameter, so do not rewrite it
+        // When an identifier character follows @name (as in @name0 or @nameX) it is a different parameter, so do not rewrite it.
+        // The same holds on the left: an identifier character or a second @ in front (@@name, a system variable) means a different token
         command.CommandText = Regex.Replace(
             command.CommandText,
-            $"@{Regex.Escape(name)}(?![0-9A-Za-z_])",
+            $"(?<![@0-9A-Za-z_])@{Regex.Escape(name)}(?![0-9A-Za-z_])",
             names.Count == 0 ? "NULL" : string.Join(", ", names)
         );
     }
@@ -3027,7 +3283,18 @@ public static class RawSqlMapper
         var targetType = Nullable.GetUnderlyingType(typeof(TResult)) ?? typeof(TResult);
         if (typeof(IValueObject).IsAssignableFrom(targetType))
         {
-            return (TResult?)SqlValueObjectActivator.Wrap(raw, targetType);
+            try
+            {
+                return (TResult?)SqlValueObjectActivator.Wrap(raw, targetType);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // Name the target value object: without it the failure only says the value was rejected, not what it was being read into
+                throw new InvalidOperationException(
+                    $"The raw SQL result value (of type {raw.GetType().Name}) could not be converted to the value object {targetType.Name}: {ex.Message}",
+                    ex
+                );
+            }
         }
 
         try
@@ -3357,13 +3624,18 @@ public static class QueryStringMatchGuard
                 {
                     FieldInfo field => field.GetValue(instance),
                     PropertyInfo property => property.GetValue(instance),
-                    _ => Expression.Lambda(expression).Compile().DynamicInvoke(),
+                    _ => CompileAndInvoke(expression),
                 };
 
             default:
-                return Expression.Lambda(expression).Compile().DynamicInvoke();
+                return CompileAndInvoke(expression);
         }
     }
+
+    /// <summary>Compiles an expression as a <c>Func&lt;object&gt;</c> and invokes it (avoiding the reflection-based DynamicInvoke and its exception wrapping).</summary>
+    private static object? CompileAndInvoke(Expression expression) =>
+        Expression.Lambda<Func<object?>>(Expression.Convert(expression, typeof(object)))
+            .Compile()();
 
     /// <summary>A lightweight visitor that merely raises a flag when it finds a lambda-parameter reference.</summary>
     private sealed class ParameterFinder : ExpressionVisitor
@@ -3471,8 +3743,9 @@ public sealed class SqlQuery<TEntity>
     /// <remarks>
     /// Cannot be combined with Include (an <see cref="InvalidOperationException"/> is thrown when the terminal method runs). When unbounded binary
     /// columns are needed, fetch them with a separate query that has no Include. On SQL Server this uses a plain SELECT (not the default JSON path),
-    /// avoiding the Base64 inflation of large blobs (5-6x peak memory). It takes effect only on ToListAsync / FirstOrDefaultAsync
-    /// (it does not affect projections, counts, or existence checks). The fetched entities are equivalent to a normal fetch (RowState=Unchanged), but
+    /// avoiding the Base64 inflation of large blobs (5-6x peak memory). It takes effect on the entity-shaped fetches (ToListAsync /
+    /// FirstOrDefaultAsync) and on the fallback path of a projection, where the entity is materialized in full before the selector runs
+    /// (it does not affect counts, existence checks, or a projection whose columns are pruned). The fetched entities are equivalent to a normal fetch (RowState=Unchanged), but
     /// because excluded columns remain outside the UPDATE set, calling UpdateAsync on them as-is throws via the existing guard (perform updates with raw SQL).
     /// </remarks>
     public SqlQuery<TEntity> WithUnboundedBinary()
@@ -3556,7 +3829,17 @@ public sealed class SqlQuery<TEntity>
             );
         }
 
-        return new(_predicates, _orderSelectors, _includes, _take, _skip, _withUnboundedBinary);
+        // The captured lists are copied, so a query that carries on being built after a terminal method cannot add to a plan
+        // that has already been handed over. Their elements are shared as they are: the expressions are immutable, and
+        // rebuilding them would defeat EF Core's query plan cache.
+        return new(
+            _predicates.ToArray(),
+            _orderSelectors.ToArray(),
+            _includes.ToArray(),
+            _take,
+            _skip,
+            _withUnboundedBinary
+        );
     }
 }
 
@@ -3843,7 +4126,7 @@ public sealed class RemoteRepositoryException : Exception
 /// </remarks>
 public sealed class RemoteError
 {
-    /// <summary>Gets or sets the error kind ("SaveConflict" = optimistic conflict / "BadRequest" = the request could not be interpreted / "Error" = anything else).</summary>
+    /// <summary>Gets or sets the error kind ("SaveConflict" = optimistic conflict / "BadRequest" = the request could not be interpreted / "NotFound" = the binary endpoint's addressed row or column value does not exist / "Error" = anything else).</summary>
     public string Type { get; set; } = string.Empty;
 
     /// <summary>Gets or sets the server-side exception message.</summary>
@@ -4282,11 +4565,25 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
             return;
         }
 
-        RemoteError? error = null;
+        throw ToException(
+            response,
+            await ReadErrorAsync(response, cancellationToken).ConfigureAwait(false)
+        );
+    }
 
+    /// <summary>Reads the <see cref="RemoteError"/> body of a failure response, or <c>null</c> when the body is not one.</summary>
+    /// <remarks>
+    /// The body of a response can be read only once, so every caller that needs both the error and a decision based on it
+    /// goes through this one read and then passes the result on to <see cref="ToException"/>.
+    /// </remarks>
+    private static async Task<RemoteError?> ReadErrorAsync(
+        HttpResponseMessage response,
+        CancellationToken cancellationToken
+    )
+    {
         try
         {
-            error = await response.Content.ReadFromJsonAsync<RemoteError>(
+            return await response.Content.ReadFromJsonAsync<RemoteError>(
                 RemoteJson.Options,
                 cancellationToken
             ).ConfigureAwait(false);
@@ -4296,17 +4593,26 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
             // If the error payload is not JSON, report the status only. Malformed JSON surfaces as JsonException, while a
             // non-JSON content type (text/html or text/plain from a proxy or a developer exception page, or no
             // Content-Type at all on an empty body) surfaces as NotSupportedException from ReadFromJsonAsync
+            return null;
         }
+    }
 
+    /// <summary>Builds the exception a failure response maps to (known kinds restore the original exception type).</summary>
+    private static Exception ToException(HttpResponseMessage response, RemoteError? error)
+    {
         var statusCode = (int)response.StatusCode;
-        var message =
-            error?.Message ?? $"The remote call failed (HTTP {statusCode}).";
+
+        // RemoteError.Message defaults to the empty string, so a body that carried no message has to fall back the same
+        // way a body that was not a RemoteError at all does (a null check alone would hand back an empty message)
+        var message = string.IsNullOrEmpty(error?.Message)
+            ? $"The remote call failed (HTTP {statusCode})."
+            : error!.Message;
 
         if (statusCode == 409 && error?.Type == "SaveConflict")
         {
             // Restore the conflict details the server reported so that a reload-and-retry loop reads the same properties as
             // with a direct call. A body without them (an older server) degrades to Unknown rather than failing
-            throw new SaveConflictException(
+            return new SaveConflictException(
                 message,
                 Enum.TryParse(error.Reason, out SaveConflictReason reason)
                     ? reason
@@ -4318,7 +4624,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
 
         // A server that withheld its error detail sends the correlation id instead, so carry it onto the exception rather
         // than leaving the caller to dig it out of the message (there is none to dig out)
-        throw new RemoteRepositoryException(statusCode, message, error?.CorrelationId);
+        return new RemoteRepositoryException(statusCode, message, error?.CorrelationId);
     }
 
     /// <summary>Gets a single entity by primary key (null when not found).</summary>
@@ -4333,6 +4639,8 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     /// <remarks>As on a direct connection, the row version the database assigned is written back to <paramref name="entity"/> when the table carries a rowversion column, so the inserted entity can be updated straight away without re-reading it.</remarks>
     public async Task InsertAsync(TEntity entity, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(entity);
+
         var result = await InvokeAsync<RemoteInsertResult>(
             "Insert",
             new RemoteEntityRequest<TEntity>(entity),
@@ -4356,6 +4664,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         CancellationToken cancellationToken = default
     )
     {
+        ArgumentNullException.ThrowIfNull(entity);
         mode = ConcurrencyModes.Validated(mode);
 
         // Reject updates that still carry values in unbounded binary columns before sending
@@ -4391,6 +4700,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         CancellationToken cancellationToken = default
     )
     {
+        ArgumentNullException.ThrowIfNull(entity);
         mode = ConcurrencyModes.Validated(mode);
 
         // Reject before sending if any entity to update (RowState==Updated) still carries values
@@ -4425,6 +4735,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         CancellationToken cancellationToken = default
     )
     {
+        ArgumentNullException.ThrowIfNull(entities);
         mode = ConcurrencyModes.Validated(mode);
 
         var list = entities.ToList();
@@ -4550,8 +4861,9 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     /// Streams an unbounded binary column (excluded column) down from the server (<c>GET {entity}/{column}?id=</c>).
     /// Reads only the response headers up front (<see cref="HttpCompletionOption.ResponseHeadersRead"/>) and copies the body
     /// to the destination in O(chunk) (the whole blob is never loaded into memory; no Base64). 200 = data was written
-    /// (<c>true</c>; an empty blob is also true) / 404 = no row or NULL (<c>false</c>; nothing is written to the destination).
-    /// Any other failure restores exceptions per the existing rules.
+    /// (<c>true</c>; an empty blob is also true) / 404 marked by the endpoint = no row or NULL (<c>false</c>; nothing is
+    /// written to the destination). Any other failure - a 404 the endpoint did not produce included - restores exceptions
+    /// per the existing rules.
     /// </summary>
     protected async Task<bool> DownloadUnboundedBinaryColumnAsync(
         string columnRoute,
@@ -4571,7 +4883,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
 
         if (response.StatusCode == HttpStatusCode.NotFound)
         {
-            return false;
+            return await MissingBinaryValueAsync(response, cancellationToken).ConfigureAwait(false);
         }
 
         await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
@@ -4586,8 +4898,14 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     /// sends <c>DELETE</c> (sets the column to NULL); when non-<c>null</c>, sends <c>PUT</c> (<see cref="StreamContent"/> with
     /// Content-Length). A zero-byte PUT (empty body) and setting NULL (DELETE) are structurally distinct. The length contract
     /// is validated before sending (a non-<c>CanSeek</c> Stream requires <paramref name="length"/>). 204 = success (<c>true</c>) /
-    /// 404 = no row (<c>false</c>). Anything else restores exceptions.
+    /// 404 marked by the endpoint = no row (<c>false</c>). Anything else restores exceptions.
     /// </summary>
+    /// <remarks>
+    /// <paramref name="source"/> stays owned by the caller: it is neither closed nor disposed here, exactly as with a
+    /// direct connection, so swapping the two implementations does not change what happens to the stream that was passed
+    /// in. (The HTTP layer disposes the request content once the request has been sent, so the stream is handed to
+    /// <see cref="StreamContent"/> through a non-closing wrapper.)
+    /// </remarks>
     protected async Task<bool> UploadUnboundedBinaryColumnAsync(
         string columnRoute,
         TKey id,
@@ -4605,7 +4923,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
 
             if (deleteResponse.StatusCode == HttpStatusCode.NotFound)
             {
-                return false;
+                return await MissingBinaryValueAsync(deleteResponse, cancellationToken).ConfigureAwait(false);
             }
 
             await EnsureSuccessAsync(deleteResponse, cancellationToken).ConfigureAwait(false);
@@ -4616,7 +4934,9 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         // aligns with Content-Length; a missing length throws before sending)
         var payloadLength = UnboundedBinaryColumns.ResolveWriteLength(source, length);
 
-        using var content = new StreamContent(source);
+        // The wrapper is what keeps the caller's stream open: HttpClient disposes the request content after sending,
+        // and StreamContent's disposal reaches through to the stream it was built on
+        using var content = new StreamContent(new NonClosingStream(source));
         content.Headers.ContentLength = payloadLength;
         content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
 
@@ -4629,10 +4949,131 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
 
         if (response.StatusCode == HttpStatusCode.NotFound)
         {
-            return false;
+            return await MissingBinaryValueAsync(response, cancellationToken).ConfigureAwait(false);
         }
 
         await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
         return true;
     }
+
+    /// <summary>Decides what a 404 from a binary endpoint means, returning <c>false</c> for the contractual "no row / NULL" and throwing otherwise.</summary>
+    /// <remarks>
+    /// The endpoints mark the 404 they produce themselves with a <see cref="RemoteError"/> body of type "NotFound". A 404
+    /// without that marker never reached them - a base address or prefix that does not match the server's, a route that no
+    /// longer exists, a proxy answering on its own - and reading it as "no data" would turn a misconfiguration into
+    /// silently empty results, so it is reported as <see cref="RemoteRepositoryException"/> like any other failure. The
+    /// return type is <c>bool</c> only so that callers can <c>return</c> the result directly; it is never <c>true</c>.
+    /// </remarks>
+    private static async Task<bool> MissingBinaryValueAsync(
+        HttpResponseMessage response,
+        CancellationToken cancellationToken
+    )
+    {
+        var error = await ReadErrorAsync(response, cancellationToken).ConfigureAwait(false);
+
+        if (error?.Type == "NotFound")
+        {
+            return false;
+        }
+
+        throw ToException(response, error);
+    }
+}
+
+/// <summary>Read-only pass-through wrapper that keeps the wrapped stream open when the HTTP layer disposes the request content.</summary>
+/// <remarks>
+/// <see cref="HttpClient"/> disposes the request content once a request has been sent, and disposing
+/// <see cref="StreamContent"/> reaches through to the stream it was built on. A direct-connection write leaves the
+/// stream the caller passed in untouched, so without this wrapper the same call would close it on a remote client
+/// and not on a direct one. Every member forwards to the wrapped stream except disposal, which does nothing:
+/// the stream stays owned by the caller.
+/// </remarks>
+public sealed class NonClosingStream(Stream inner) : Stream
+{
+    /// <inheritdoc />
+    public override bool CanRead => inner.CanRead;
+
+    /// <inheritdoc />
+    public override bool CanSeek => inner.CanSeek;
+
+    /// <inheritdoc />
+    public override bool CanWrite => inner.CanWrite;
+
+    /// <inheritdoc />
+    public override long Length => inner.Length;
+
+    /// <inheritdoc />
+    public override long Position
+    {
+        get => inner.Position;
+        set => inner.Position = value;
+    }
+
+    /// <inheritdoc />
+    public override void Flush() => inner.Flush();
+
+    /// <inheritdoc />
+    public override Task FlushAsync(CancellationToken cancellationToken) =>
+        inner.FlushAsync(cancellationToken);
+
+    /// <inheritdoc />
+    public override int Read(byte[] buffer, int offset, int count) =>
+        inner.Read(buffer, offset, count);
+
+    /// <inheritdoc />
+    public override int Read(Span<byte> buffer) => inner.Read(buffer);
+
+    /// <inheritdoc />
+    public override Task<int> ReadAsync(
+        byte[] buffer,
+        int offset,
+        int count,
+        CancellationToken cancellationToken
+    ) => inner.ReadAsync(buffer, offset, count, cancellationToken);
+
+    /// <inheritdoc />
+    public override ValueTask<int> ReadAsync(
+        Memory<byte> buffer,
+        CancellationToken cancellationToken = default
+    ) => inner.ReadAsync(buffer, cancellationToken);
+
+    /// <inheritdoc />
+    public override long Seek(long offset, SeekOrigin origin) => inner.Seek(offset, origin);
+
+    /// <inheritdoc />
+    public override void SetLength(long value) => inner.SetLength(value);
+
+    /// <inheritdoc />
+    public override void Write(byte[] buffer, int offset, int count) =>
+        inner.Write(buffer, offset, count);
+
+    /// <inheritdoc />
+    public override void Write(ReadOnlySpan<byte> buffer) => inner.Write(buffer);
+
+    /// <inheritdoc />
+    public override Task WriteAsync(
+        byte[] buffer,
+        int offset,
+        int count,
+        CancellationToken cancellationToken
+    ) => inner.WriteAsync(buffer, offset, count, cancellationToken);
+
+    /// <inheritdoc />
+    public override ValueTask WriteAsync(
+        ReadOnlyMemory<byte> buffer,
+        CancellationToken cancellationToken = default
+    ) => inner.WriteAsync(buffer, cancellationToken);
+
+    /// <inheritdoc />
+    public override Task CopyToAsync(
+        Stream destination,
+        int bufferSize,
+        CancellationToken cancellationToken
+    ) => inner.CopyToAsync(destination, bufferSize, cancellationToken);
+
+    /// <summary>Does nothing: the wrapped stream is owned by the caller, not by this wrapper.</summary>
+    protected override void Dispose(bool disposing) { }
+
+    /// <inheritdoc />
+    public override ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }

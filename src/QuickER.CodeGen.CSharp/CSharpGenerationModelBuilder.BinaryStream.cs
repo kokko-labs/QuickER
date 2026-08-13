@@ -336,12 +336,12 @@ internal sealed partial class CSharpGenerationModelBuilder
     {
         var route = $"{repositoryName}/{propertyName}";
         var resolve =
-            $"var repository = context.RequestServices.GetRequiredService<{remoteInterfaceName}>();";
+            $"var repository = RemoteServerEngine.Repository<{remoteInterfaceName}>(context);";
         var parseKey = $"RemoteServerEngine.ParseKeyFromQuery<{keyTypeName}>(context)";
 
         var builder = new StringBuilder();
 
-        // GET: ダウンロード。読み取り関数が false（行なし/NULL）のときは本文未送信のまま 404 になる
+        // GET: ダウンロード。読み取り関数が false（行なし/NULL）のときは本文未送信のまま marker 付き 404 になる
         builder
             .Append("        group.MapGet(\n            \"")
             .Append(route)
@@ -362,29 +362,34 @@ internal sealed partial class CSharpGenerationModelBuilder
             )
             .Append("                    }\n                )\n        );\n\n");
 
-        // PUT: アップロード。このエンドポイントのみリクエストサイズ制限を解除する（メタデータ付与）
+        // PUT: アップロード。リクエストサイズ制限の解除は allowUnboundedUploads によるオプトイン
+        // （既定は false ＝ホストの制限をそのまま適用。true のときだけこのエンドポイントへメタデータを付与する）
+        var uploadLocal = $"upload{propertyName}";
         builder
-            .Append("        group\n            .MapPut(\n                \"")
+            .Append("        var ")
+            .Append(uploadLocal)
+            .Append(" = group.MapPut(\n            \"")
             .Append(route)
-            .Append("\",\n                (HttpContext context) =>\n")
+            .Append("\",\n            (HttpContext context) =>\n")
             .Append(
-                "                    RemoteServerEngine.ExecuteUploadAsync(\n                        context,\n"
+                "                RemoteServerEngine.ExecuteUploadAsync(\n                    context,\n"
             )
-            .Append("                        (body, length) =>\n                        {\n")
-            .Append("                            ")
+            .Append("                    (body, length) =>\n                    {\n")
+            .Append("                        ")
             .Append(resolve)
-            .Append("\n                            return repository.Write")
+            .Append("\n                        return repository.Write")
             .Append(propertyName)
-            .Append("Async(\n                                ")
+            .Append("Async(\n                            ")
             .Append(parseKey)
+            .Append(",\n                            body,\n                            length,\n")
             .Append(
-                ",\n                                body,\n                                length,\n"
+                "                            context.RequestAborted\n                        );\n"
             )
-            .Append(
-                "                                context.RequestAborted\n                            );\n"
-            )
-            .Append("                        }\n                    )\n            )\n")
-            .Append("            .WithMetadata(DisableRequestBodySizeLimit.Instance);\n\n");
+            .Append("                    }\n                )\n        );\n\n")
+            .Append("        if (allowUnboundedUploads)\n        {\n")
+            .Append("            ")
+            .Append(uploadLocal)
+            .Append(".WithMetadata(DisableRequestBodySizeLimit.Instance);\n        }\n\n");
 
         // DELETE: 列を NULL 化（source=null 相当）
         builder

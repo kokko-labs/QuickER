@@ -121,7 +121,7 @@ internal sealed partial class CSharpGenerationModelBuilder
     ///   <item><description>L978 <c>public (型) (p.property_name)</c> ＝確定値プロパティ（Prop）</description></item>
     ///   <item><description>L1010-L1019 <c>partial void On(p.property_name)Changing/Changed(...)</c> ＝値変更フック（4 本はシグネチャ違いのオーバーロード同士なので、名前は 2 つだけ登録する）</description></item>
     ///   <item><description>L1022 <c>public string (p.binding_property_name)</c> ＝バインディングプロパティ（BindingProp）</description></item>
-    ///   <item><description>L1276 <c>private string (p.binding_field_name)Snapshot</c> ＝行編集のスナップショットフィールド</description></item>
+    ///   <item><description>L1276 <c>private (型) (p.field_name)Snapshot</c> ＝行編集の確定値スナップショットフィールド</description></item>
     ///   <item><description>L1157/L1181 <c>private (型) (navigation.field_name)</c> ＝カスケード子のバッキングフィールド（親参照ナビは field_name が空で発行されない）</description></item>
     ///   <item><description>L1160/L1184/L1201 <c>public (型) (navigation.property_name)</c> ＝ナビゲーションプロパティ</description></item>
     ///   <item><description>L1205-L1330 の固定メンバー 18 名 ＝ <see cref="GeneratedFixedMemberNames.EditModelAlways"/>（無条件）</description></item>
@@ -153,7 +153,9 @@ internal sealed partial class CSharpGenerationModelBuilder
             yield return new GeneratedMemberName(property.FieldName, origin);
             yield return new GeneratedMemberName(property.BindingPropertyName, origin);
             yield return new GeneratedMemberName(property.BindingFieldName, origin);
-            yield return new GeneratedMemberName(property.BindingFieldName + "Snapshot", origin);
+
+            // 行編集（IEditableObject）のスナップショットは確定値フィールド側に持つ
+            yield return new GeneratedMemberName(property.FieldName + "Snapshot", origin);
 
             // 値変更フックは 1 プロパティにつき Changing / Changed の 2 名だけ登録する
             // （各 2 本はシグネチャ違いのオーバーロードで、同名を 2 回入れると自分自身を重複と誤検知する）

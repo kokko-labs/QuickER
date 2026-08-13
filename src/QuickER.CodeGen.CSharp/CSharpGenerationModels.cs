@@ -385,6 +385,16 @@ internal sealed class CSharpMappingPropertyPair
     public required bool IsBinary { get; init; }
 
     /// <summary>
+    /// Entity → EditModel のロードで確定値へ代入する式（既定は <c>entity.{プロパティ}</c>）。
+    /// </summary>
+    /// <remarks>
+    /// バイナリ列だけは防御的コピーを挟む。<c>byte[]</c> は参照型なので素の代入だと Entity と EditModel が
+    /// 同じ配列を共有し、片方への書き込みがもう片方へ黙って波及する（値オブジェクト列も内包配列を複製しない契約
+    /// ＝<c>ValueObjectBinaryBase</c> の XmlDoc のため、配列を写した VO を作り直す）。
+    /// </remarks>
+    public required string EditModelLoadExpression { get; init; }
+
+    /// <summary>
     /// DB が値を生成する行バージョン列（rowversion / timestamp）かどうか。
     /// </summary>
     /// <remarks>

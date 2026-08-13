@@ -133,4 +133,66 @@ public sealed class GeneratedRuntimeAdoParityTests(SqlServerContainerFixture fix
         // 後始末（検証専用テーブルを落とす）
         await executor.ExecuteSqlAsync("DROP TABLE dbo.probe;", null, Ct);
     }
+
+    /// <summary>
+    /// 追加（QuickER の SQL Server のみ）: <c>BulkInsertAsync</c>（SqlBulkCopy 経路）が外部キー制約を検査し、
+    /// 親の無い子行を黙って書き込まないことを検証する。
+    /// </summary>
+    /// <remarks>
+    /// SqlBulkCopy は既定で FK / CHECK 制約を検査しない。行単位の INSERT（<c>InsertAsync</c>）は当然に弾かれるため、
+    /// 既定のままだと「同じ図・同じ制約なのに一括追加だけが不正な行を通す」非対称になっていた。
+    /// <c>SqlBulkCopyOptions.CheckConstraints</c> を常時付けることで両経路が揃う。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Parity] 追加: BulkInsertAsync は外部キー違反の行を検査して弾く（CheckConstraints）"
+    )]
+    public async Task BulkInsert_ChecksForeignKeyConstraints()
+    {
+        await ResetAndCreateSchemaAsync();
+
+        var orders = CreateOrderRepository();
+
+        // 顧客 999 は存在しない＝FK 違反の子行。行単位 INSERT と同じく一括追加でも例外になる
+        var bulk = async () =>
+            await orders.BulkInsertAsync([NewOrder(1, customerId: 999, 10m, memo: null)], Ct);
+        await bulk.Should().ThrowAsync<Exception>();
+
+        // 例外で終わった＝1 行も入っていない（検査なしだと黙って挿入されてしまう）
+        (await orders.GetAllAsync(Ct))
+            .Should()
+            .BeEmpty();
+    }
+
+    /// <summary>
+    /// 追加（QuickER の SQL Server のみ）: 生 SQL のコレクション IN 展開が、同名で始まる <c>@@</c> システム変数を
+    /// 巻き込まないことを検証する（<c>@@ROWCOUNT</c> が <c>@ROWCOUNT</c> の展開で壊されない）。
+    /// </summary>
+    /// <remarks>
+    /// 置換の正規表現は右境界しか見ていなかったため、パラメータ名が <c>ROWCOUNT</c> のとき <c>@@ROWCOUNT</c> の
+    /// 末尾 <c>@ROWCOUNT</c> が一致して展開され、構文が壊れていた。左境界（直前が識別子文字でも <c>@</c> でもない）を
+    /// 加えて解消している。SQL Server 固有の <c>@@</c> 変数を使うため SQL Server 専用テスト。
+    /// </remarks>
+    [Fact(DisplayName = "[Parity] 追加: 生 SQL の IN 展開は同名の @@ システム変数を書き換えない")]
+    public async Task RawSql_CollectionExpansion_LeavesSystemVariableIntact()
+    {
+        await ResetAndCreateSchemaAsync();
+
+        var customers = CreateCustomerRepository();
+        await customers.InsertAsync(NewCustomer(1, "Alice"), Ct);
+        await customers.InsertAsync(NewCustomer(2, "Bob"), Ct);
+        await customers.InsertAsync(NewCustomer(3, "Carol"), Ct);
+
+        var executor = CreateSqlExecutor();
+
+        // パラメータ名を ROWCOUNT にして @@ROWCOUNT と同居させる。展開が左境界を見ていないと @@ROWCOUNT の
+        // 末尾が置換されて「@1, 3」のような壊れたトークンになり、実行そのものが構文エラーになる
+        var matched = await executor.ExecuteScalarSqlAsync<int>(
+            "DECLARE @previous INT = @@ROWCOUNT; "
+                + "SELECT COUNT(*) FROM customers WHERE customer_id IN (@ROWCOUNT);",
+            new { ROWCOUNT = new[] { 1, 3 } },
+            Ct
+        );
+
+        matched.Should().Be(2, "IN (@ROWCOUNT) は 2 行に一致し、@@ROWCOUNT はそのまま残る");
+    }
 }

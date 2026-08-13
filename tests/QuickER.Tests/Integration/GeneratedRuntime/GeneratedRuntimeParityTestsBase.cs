@@ -380,6 +380,34 @@ public abstract class GeneratedRuntimeParityTestsBase(SqlServerContainerFixture 
         all.Select(c => c.CustomerId.Value).Should().BeEquivalentTo(Enumerable.Range(1, count));
     }
 
+    /// <summary>
+    /// 6b. BulkInsertAsync の共通契約: null 要素はスキップし、戻り値は実際に挿入した行数だけを数える（空は 0）。
+    /// </summary>
+    /// <remarks>
+    /// SqlBulkCopy 版は null 要素で例外、SQLite / インメモリ版はスキップ、と実装先で割れていたのを「スキップ」へ
+    /// 揃えた（グラフ保存のリスト内 null と同じ流儀）。この基底は QuickER の SQL Server と EF Core の両派生で走る。
+    /// </remarks>
+    [Fact(DisplayName = "[Parity] 6b: BulkInsertAsync は null 要素をスキップし挿入行数を返す")]
+    public async Task BulkInsert_SkipsNullElements()
+    {
+        await ResetAndCreateSchemaAsync();
+
+        var repo = CreateCustomerRepository();
+
+        var inserted = await repo.BulkInsertAsync(
+            [NewCustomer(1, "Alice"), null!, NewCustomer(2, "Bob")],
+            Ct
+        );
+
+        inserted.Should().Be(2, "スキップした null は数えない");
+        (await repo.GetAllAsync(Ct))
+            .Select(c => c.CustomerId.Value)
+            .Should()
+            .BeEquivalentTo([1, 2]);
+
+        (await repo.BulkInsertAsync([], Ct)).Should().Be(0, "空コレクションは 0 件");
+    }
+
     /// <summary>7. QueryBySqlAsync: WHERE 付き全列 SELECT で対象行のみ取得し、VO 復元・匿名オブジェクトパラメータが機能する</summary>
     [Fact(
         DisplayName = "[Parity] 7: QueryBySqlAsync（WHERE 付き全列 SELECT・匿名パラメータ）で対象行のみ VO 復元して取得できる"

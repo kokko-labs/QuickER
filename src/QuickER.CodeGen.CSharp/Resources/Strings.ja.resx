@@ -85,6 +85,9 @@
   <data name="CodeGen_Error_ColumnPropertyNameCollision" xml:space="preserve">
     <value>テーブル '{0}' の列 {2} のプロパティ名がいずれも '{1}' になります。エンティティクラスと EditModel クラスに同名メンバーが重複して生成され、コンパイルできません。生成されるプロパティ名が異なるよう列名を変更してください（列名はパスカルケースへ変換されるため、'user-id'・'user_id'・'USER_ID' はいずれも 'UserId' になります）。</value>
   </data>
+  <data name="CodeGen_Error_MultipleRowVersionColumns" xml:space="preserve">
+    <value>テーブル '{0}' に rowversion 列が複数あります（{1}）。楽観排他は 1 テーブルにつき版列 1 本を読み書きし、SQL Server も 1 本しか許さないため、2 本目は DDL 適用時に失敗します。rowversion 列は 1 本だけ残し、他は別の型に変更してください。</value>
+  </data>
   <data name="CodeGen_Error_GeneratedMemberNameCollision" xml:space="preserve">
     <value>クラス '{0}'（テーブル '{1}'）で生成されるメンバー名 '{2}' が重複します（由来: {3}）。同名メンバーが二重に宣言されコンパイルできません（CS0102）。生成されるメンバー名が一意になるよう列名を変更してください。EditModel は 1 列につき 5 つのメンバー（Name・_name・BindingName・_bindingName・_bindingNameSnapshot）を生成するため、'binding_id' という列は 'id' という列が生成するメンバーと衝突します。また列のプロパティ名がナビゲーションプロパティ名と一致する場合（例: 'customers' を参照するテーブルにある 'customer' 列）は、エンティティクラスでも衝突します。</value>
   </data>

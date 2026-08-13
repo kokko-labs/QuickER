@@ -231,6 +231,42 @@ public abstract class GeneratedSqliteRuntimeTestsBase : IDisposable
         selfContains.Select(o => o.OrderId.Value).Should().BeEquivalentTo([10, 11]);
     }
 
+    /// <summary>
+    /// 2d. NULL 許容列に対する <c>!=</c>（非 null 値との比較）が、両バックエンドで同一に
+    /// 「NULL 行も一致として含める」ことを検証する（C# の <c>!=</c> と同じ意味論）。
+    /// </summary>
+    /// <remarks>
+    /// 素の <c>col &lt;&gt; @p</c> は SQL の三値論理により NULL 行で UNKNOWN になり、その行が落ちる。EF Core の
+    /// リレーショナルプロバイダは <c>(col &lt;&gt; @p OR col IS NULL)</c> へ補償するため、補償前は ADO だけが
+    /// 少ない行数を返していた（インメモリは式木コンパイル＝C# 意味論なので EF Core と一致）。翻訳器へ同じ補償を
+    /// 入れたことで 3 実装先が揃う。インメモリ側の対照は <c>InMemoryFixtureRuntimeTests</c> が持つ。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[SQLite] 2d: NULL 許容列の != が NULL 行も含める（両バックエンド一致・C# と同じ意味論）"
+    )]
+    public async Task Where_NotEqual_IncludesNullRows()
+    {
+        await ResetAndCreateSchemaAsync();
+
+        var customers = CreateCustomerRepository();
+        var orders = CreateOrderRepository();
+
+        await customers.InsertAsync(NewCustomer(1, "Alice"), Ct);
+        await orders.InsertAsync(NewOrder(10, 1, 10m, memo: null), Ct);
+        await orders.InsertAsync(NewOrder(11, 1, 20m, "x"), Ct);
+        await orders.InsertAsync(NewOrder(12, 1, 30m, "y"), Ct);
+
+        var excluded = MemoValue.Create("x");
+        var notX = await orders.Query().Where(o => o.Memo != excluded).ToListAsync(Ct);
+        notX.Select(o => o.OrderId.Value)
+            .Should()
+            .BeEquivalentTo([10, 12], "NULL は非 null 値と等しくない＝一致として含める");
+
+        // 対照: == は NULL 行を含めない（こちらは補償の対象外で、素の SQL の意味論が C# と一致する）
+        var isX = await orders.Query().Where(o => o.Memo == excluded).ToListAsync(Ct);
+        isX.Select(o => o.OrderId.Value).Should().BeEquivalentTo([11]);
+    }
+
     /// <summary>3. OrderBy/ThenBy・Skip/Take（LIMIT/OFFSET）が整数キーで正しい順序・範囲を返す</summary>
     [Fact(
         DisplayName = "[SQLite] 3: OrderBy/ThenBy・Skip/Take（LIMIT/OFFSET）が正しい順序・範囲を返す"
@@ -526,6 +562,34 @@ public abstract class GeneratedSqliteRuntimeTestsBase : IDisposable
         var all = await repo.GetAllAsync(Ct);
         all.Should().HaveCount(count);
         all.Select(c => c.CustomerId.Value).Should().BeEquivalentTo(Enumerable.Range(1, count));
+    }
+
+    /// <summary>
+    /// 7b. BulkInsertAsync の共通契約: null 要素はスキップし、戻り値は実際に挿入した行数だけを数える（空は 0）。
+    /// </summary>
+    /// <remarks>
+    /// 実装先ごとに「null で例外／黙ってスキップ」が割れていたのを「スキップ」へ揃えた（グラフ保存のリスト内 null と
+    /// 同じ流儀）。この基底は QuickER の SQLite と EF Core Sqlite の両派生で走るため、2 実装ぶんの対称性を固定する。
+    /// </remarks>
+    [Fact(DisplayName = "[SQLite] 7b: BulkInsertAsync は null 要素をスキップし挿入行数を返す")]
+    public async Task BulkInsert_SkipsNullElements()
+    {
+        await ResetAndCreateSchemaAsync();
+
+        var repo = CreateCustomerRepository();
+
+        var inserted = await repo.BulkInsertAsync(
+            [NewCustomer(1, "Alice"), null!, NewCustomer(2, "Bob")],
+            Ct
+        );
+
+        inserted.Should().Be(2, "スキップした null は数えない");
+        (await repo.GetAllAsync(Ct))
+            .Select(c => c.CustomerId.Value)
+            .Should()
+            .BeEquivalentTo([1, 2]);
+
+        (await repo.BulkInsertAsync([], Ct)).Should().Be(0, "空コレクションは 0 件");
     }
 
     /// <summary>8. ExecuteDeleteAsync（cascadeDelete=true）で子ごと削除し件数が一致する（削除カスケード）</summary>

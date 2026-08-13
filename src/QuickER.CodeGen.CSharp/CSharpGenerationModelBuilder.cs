@@ -300,6 +300,10 @@ internal sealed partial class CSharpGenerationModelBuilder
                     EditModelTypeName = editModelProperty.TypeName,
                     EditModelIsNullable = editModelProperty.IsNullable,
                     IsBinary = editModelProperty.IsBinary,
+                    EditModelLoadExpression = BuildEditModelLoadExpression(
+                        property.PropertyName,
+                        editModelProperty
+                    ),
                     // DB 採番の行バージョン列は「入力があるときだけ代入」へ倒す（未入力を欠落として例外にしない）
                     IsRowVersion = editModelProperty.IsRowVersion,
                 };
@@ -314,6 +318,32 @@ internal sealed partial class CSharpGenerationModelBuilder
             ScalarProperties = scalarProperties,
             NavigationProperties = navigations.Select(BuildMapperNavigation).ToList(),
         };
+    }
+
+    /// <summary>Entity → EditModel のロードで確定値へ代入する式を組み立てる（バイナリ列だけ防御的コピーを挟む）</summary>
+    /// <remarks>
+    /// <c>byte[]</c> は参照型なので素の代入だと Entity と EditModel が同じ配列を指し、EditModel 側の書き換えが
+    /// ロード元のエンティティへ黙って波及する（無損失ロード＝確定値の直接代入にした副作用）。値オブジェクト列は
+    /// VO 自身が配列を複製しない契約のため、写した配列から VO を作り直す（VO の Create 契約は変えない）。
+    /// </remarks>
+    private static string BuildEditModelLoadExpression(
+        string propertyName,
+        CSharpEditModelPropertyModel editModelProperty
+    )
+    {
+        if (!editModelProperty.IsBinary)
+        {
+            return $"entity.{propertyName}";
+        }
+
+        // 値オブジェクトは基底の CopyValue()（配列を写した同値の VO を返す）で複製する。
+        // VO クラス名を書かないので、分割生成で Mapper ファイルが値オブジェクト名前空間へ依存せずに済む
+        if (editModelProperty.IsValueObject)
+        {
+            return $"entity.{propertyName}?.CopyValue()";
+        }
+
+        return $"(byte[]?)entity.{propertyName}?.Clone()";
     }
 
     /// <summary>エンティティ定義から Repository の生成モデルを構築する</summary>
@@ -634,20 +664,48 @@ internal sealed partial class CSharpGenerationModelBuilder
             // ただし行バージョン列は DB が採番するため非 NULL でも入力必須にしない（新規行は未入力が正常）
             IsRequired = editModelIsNullable && !column.IsNullable && !typeInfo.IsRowVersion,
             IsRowVersion = typeInfo.IsRowVersion,
-            RevertBindingExpression = BuildBindingExpression(propertyName, isBytes),
+            RevertBindingExpression = BuildBindingExpression(
+                propertyName,
+                isBytes,
+                IsDateOnly(typeInfo)
+            ),
         };
     }
 
-    /// <summary>確定値から UI バインディング文字列へ戻す式を生成する（バイナリは Base64 化する）</summary>
-    private static string BuildBindingExpression(string propertyName, bool isBinary)
+    /// <summary>確定値から UI バインディング文字列へ戻す式を生成する（バイナリは Base64 化・日付のみ列は短い日付書式）</summary>
+    /// <remarks>
+    /// 日付のみの列（SQL の <c>date</c>）は既定の <c>ToString()</c> だと時刻部 "0:00:00" が常に付いて画面に出るため、
+    /// カルチャ依存の短い日付書式（"d"）で導出する。入力側は無変更で往復する（<c>DateTime.TryParse</c> は
+    /// 日付のみの文字列をそのまま受ける）。時刻を持つ列（<c>datetime2</c> 等）は従来どおり既定書式。
+    /// </remarks>
+    private static string BuildBindingExpression(
+        string propertyName,
+        bool isBinary,
+        bool isDateOnly
+    )
     {
         if (isBinary)
         {
             return $"{propertyName} is null ? string.Empty : Convert.ToBase64String({propertyName})";
         }
 
+        if (isDateOnly)
+        {
+            return $"{propertyName}?.ToString(\"d\") ?? string.Empty";
+        }
+
         return $"{propertyName}?.ToString() ?? string.Empty";
     }
+
+    /// <summary>日付のみ（時刻部を持たない）の列かどうかを判定する</summary>
+    /// <remarks>
+    /// 判定材料は方言中立トークン（<see cref="CSharpTypeInfo.CanonicalTypeToken"/>）の <c>date</c> で、生成器は
+    /// DB 非依存を保つため方言の型表記そのものは見ない。トークンが載らない経路（型カタログで解析できない自由記述型・
+    /// トークン付加を通していない呼び出し）では false ＝従来どおりの表示になる。
+    /// </remarks>
+    private static bool IsDateOnly(CSharpTypeInfo typeInfo) =>
+        typeInfo.TypeName == "DateTime"
+        && string.Equals(typeInfo.CanonicalTypeToken, "date", StringComparison.Ordinal);
 
     /// <summary>非 NULL の string / byte[] プロパティに対する空既定値の初期化子を生成する</summary>
     private static string BuildEntityInitializer(string typeName, bool isNullable)
@@ -726,6 +784,12 @@ internal sealed partial class CSharpGenerationModelBuilder
     private CSharpNavigationModel BuildEditModelNavigation(NavigationInfo nav)
     {
         var targetEditModelTypeName = _nameConverter.ToEditModelClassName(nav.TargetTableName);
+
+        // 親参照は生成コードが一度も代入しない（ロードは親をたどらないため）。非 NULL 宣言＋ null! で
+        // 「初期化済みのふり」をするとコンパイラの NULL 解析が黙るだけなので、NULL 許容で宣言して初期化子も付けない
+        // （カスケード親の実体は ParentModel が持つ）
+        var declaresNullable = nav.IsNullable || nav.IsParentReference;
+
         return new CSharpNavigationModel
         {
             PropertyName = nav.PropertyName,
@@ -736,12 +800,12 @@ internal sealed partial class CSharpGenerationModelBuilder
             Cascade = !nav.IsParentReference,
             DisplayTypeName = nav.IsCollection
                 ? $"EditModelCollection<{targetEditModelTypeName}>"
-                : (nav.IsNullable ? targetEditModelTypeName + "?" : targetEditModelTypeName),
+                : (declaresNullable ? targetEditModelTypeName + "?" : targetEditModelTypeName),
             // カスケード子（親→子）のみバッキングフィールドで所有者リンクを張るため、フィールド名を用意する
             FieldName = nav.IsParentReference ? string.Empty : ToFieldName(nav.PropertyName),
             Initializer = nav.IsCollection
                 ? $" = new EditModelCollection<{targetEditModelTypeName}>();"
-                : (nav.IsNullable ? string.Empty : " = null!;"),
+                : (declaresNullable ? string.Empty : " = null!;"),
             PrincipalTableName = nav.PrincipalTableName,
             PrincipalColumnName = nav.PrincipalColumnName,
             DependentTableName = nav.DependentTableName,

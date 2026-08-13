@@ -362,7 +362,7 @@ public sealed class GeneratedFixedMemberDriftTests
 
     /// <summary>
     /// 1 つの元の名前 N から EditModel / Entity が派生させ得るメンバー名を列挙する
-    /// （<c>N</c>・<c>_n</c>・<c>BindingN</c>・<c>_bindingN</c>・<c>_bindingNSnapshot</c>・<c>OnNChanging</c>・<c>OnNChanged</c>）。
+    /// （<c>N</c>・<c>_n</c>・<c>_nSnapshot</c>・<c>BindingN</c>・<c>_bindingN</c>・<c>OnNChanging</c>・<c>OnNChanged</c>）。
     /// </summary>
     /// <remarks>
     /// ナビゲーション由来の名前では一部（<c>BindingN</c> 等）が実際には発行されないが、差し引く側なので
@@ -378,9 +378,9 @@ public sealed class GeneratedFixedMemberDriftTests
 
             derived.Add(rootName);
             derived.Add(ToFieldName(rootName));
+            derived.Add(ToFieldName(rootName) + "Snapshot");
             derived.Add(bindingName);
             derived.Add(ToFieldName(bindingName));
-            derived.Add(ToFieldName(bindingName) + "Snapshot");
             derived.Add($"On{rootName}Changing");
             derived.Add($"On{rootName}Changed");
         }

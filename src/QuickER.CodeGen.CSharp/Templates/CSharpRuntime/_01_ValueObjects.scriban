@@ -112,7 +112,7 @@ public sealed class ValueObjectValidationException : Exception
 }
 
 /// <summary>Common base for value objects. Provides value storage, equality, ToString, and extraction of the raw value (ordered comparison is added by derived types).</summary>
-public abstract partial class ValueObjectBase<TSelf, TValue> : IValueObject
+public abstract partial class ValueObjectBase<TSelf, TValue> : IValueObject, IEquatable<TSelf>
     where TSelf : ValueObjectBase<TSelf, TValue>
 {
     /// <summary>Gets the underlying value (never reassigned; reference-typed values such as byte[] are not defensively copied — see <see cref="ValueObjectBinaryBase{TSelf}"/>).</summary>
@@ -127,11 +127,19 @@ public abstract partial class ValueObjectBase<TSelf, TValue> : IValueObject
     /// <summary>Gets the string used for display (defaults to ToString()). A concrete value object's partial class can override it to change the format.</summary>
     public virtual string DisplayValue => ToString();
 
-    /// <summary>Value-based equality (compared through <see cref="EqualityComparer{T}.Default"/>, so a struct value is not boxed).</summary>
-    /// <remarks>A value object whose value is an array needs element-by-element comparison and overrides this — see <see cref="ValueObjectBinaryBase{TSelf}"/>.</remarks>
-    public override bool Equals(object? obj) =>
-        obj is ValueObjectBase<TSelf, TValue> other
-        && EqualityComparer<TValue>.Default.Equals(Value, other.Value);
+    /// <summary>Value-based equality with another instance of the same value object type (compared through <see cref="EqualityComparer{T}.Default"/>, so a struct value is not boxed).</summary>
+    /// <remarks>
+    /// Implementing <see cref="IEquatable{T}"/> is what lets <see cref="EqualityComparer{T}.Default"/> compare value objects
+    /// by value directly. Without it the default comparer falls back to the object-based one, which reaches equality only
+    /// through <see cref="Equals(object?)"/> and boxes a struct-valued argument on the way; every dictionary and hash-set
+    /// lookup keyed by a value object goes through that comparer. A value object whose value is an array needs
+    /// element-by-element comparison and overrides this — see <see cref="ValueObjectBinaryBase{TSelf}"/>.
+    /// </remarks>
+    public virtual bool Equals(TSelf? other) =>
+        other is not null && EqualityComparer<TValue>.Default.Equals(Value, other.Value);
+
+    /// <summary>Value-based equality (delegates to the typed overload; anything that is not this value object type is unequal).</summary>
+    public override bool Equals(object? obj) => obj is TSelf other && Equals(other);
 
     /// <summary>Value-based hash code (computed through <see cref="EqualityComparer{T}.Default"/>, so a struct value is not boxed).</summary>
     public override int GetHashCode() =>
@@ -327,20 +335,53 @@ public abstract partial class ValueObjectDateTimeBase<TSelf>
 /// as frozen after Create — mutating it afterwards silently changes the value object's equality, hash code, and ToString.
 /// </remarks>
 public abstract partial class ValueObjectBinaryBase<TSelf> : ValueObjectBase<TSelf, byte[]>
-    where TSelf : ValueObjectBinaryBase<TSelf>
+    where TSelf : ValueObjectBinaryBase<TSelf>, IValueObject<TSelf, byte[]>
 {
     /// <summary>Initializes with an already-validated value.</summary>
     protected ValueObjectBinaryBase(byte[] value)
         : base(value) { }
 
-    /// <summary>Value-based equality (arrays are compared element by element; reference equality would make two equal blobs differ).</summary>
-    public override bool Equals(object? obj) =>
-        obj is ValueObjectBase<TSelf, byte[]> other
-        && StructuralComparisons.StructuralEqualityComparer.Equals(Value, other.Value);
+    /// <summary>Returns an equal value object built over a copy of the array (the copy the "not defensively copied" contract leaves to the caller).</summary>
+    /// <remarks>
+    /// Use it where two holders must not share one array — loading an entity into an edit model, for instance, where editing the
+    /// model would otherwise write straight into the entity that was loaded from.
+    /// </remarks>
+    public TSelf CopyValue() => TSelf.Create((byte[])Value.Clone());
 
-    /// <summary>Value-based hash code (arrays are computed structurally, matching <see cref="Equals(object?)"/>).</summary>
-    public override int GetHashCode() =>
-        Value is null ? 0 : StructuralComparisons.StructuralEqualityComparer.GetHashCode(Value);
+    /// <summary>Value-based equality (arrays are compared element by element; reference equality would make two equal blobs differ).</summary>
+    /// <remarks>The comparison runs over spans, which compares whole machine words at a time instead of one element at a time — worth having on values that are blob-sized by definition.</remarks>
+    public override bool Equals(TSelf? other)
+    {
+        if (other is null)
+        {
+            return false;
+        }
+
+        if (Value is null || other.Value is null)
+        {
+            return Value is null && other.Value is null;
+        }
+
+        return Value.AsSpan().SequenceEqual(other.Value);
+    }
+
+    /// <summary>Value-based hash code computed from every byte, matching <see cref="Equals(TSelf)"/>.</summary>
+    /// <remarks>
+    /// <see cref="HashCode.AddBytes(ReadOnlySpan{byte})"/> mixes in the whole array. The structural comparer used before it
+    /// hashes only the last eight elements, so two blobs sharing a tail landed in the same bucket however much of their
+    /// content differed — exactly the shape a binary value object tends to have when it wraps a versioned or padded payload.
+    /// </remarks>
+    public override int GetHashCode()
+    {
+        if (Value is null)
+        {
+            return 0;
+        }
+
+        var hash = new HashCode();
+        hash.AddBytes(Value);
+        return hash.ToHashCode();
+    }
 
     /// <summary>Returns the value as a Base64 string.</summary>
     public override string ToString() =>
@@ -455,9 +496,9 @@ public sealed partial class {{ vo.class_name }}
     /// <summary>Validates and creates the value object (throws ValueObjectValidationException on violation).</summary>
     public static {{ vo.class_name }} Create({{ vo.value_type_name }} value)
     {
-        var errors = new List<string>();
-        Validate(value, errors);
-        if (errors.Count > 0)
+        List<string>? errors = null;
+        ValidateCore(value, ref errors);
+        if (errors is { Count: > 0 })
         {
             throw new ValueObjectValidationException(typeof({{ vo.class_name }}), errors);
         }
@@ -471,9 +512,9 @@ public sealed partial class {{ vo.class_name }}
         out IReadOnlyList<string> errors
     )
     {
-        var list = new List<string>();
-        Validate(value, list);
-        if (list.Count > 0)
+        List<string>? list = null;
+        ValidateCore(value, ref list);
+        if (list is { Count: > 0 })
         {
             result = null;
             errors = list;
@@ -487,6 +528,29 @@ public sealed partial class {{ vo.class_name }}
     /// <summary>Auto-generated validation plus the user extension (OnValidate). Also callable from partial and custom code.</summary>
     internal static void Validate({{ vo.value_type_name }} value, ICollection<string> errors)
     {
+        List<string>? collected = null;
+        ValidateCore(value, ref collected);
+        if (collected is null)
+        {
+            return;
+        }
+
+        foreach (var error in collected)
+        {
+            errors.Add(error);
+        }
+    }
+
+    /// <summary>Validation core shared by Create / TryCreate / Validate; fills the error list, creating it only once something is actually wrong.</summary>
+    /// <remarks>
+    /// Creating a value object succeeds far more often than it fails, and a list allocated on every successful call is pure
+    /// garbage: value objects are created per column per row. The list is therefore allocated on first use, so a run with no
+    /// violations allocates nothing at all. OnValidate needs a collection to hand over, but an unimplemented partial method
+    /// takes its arguments with it when the compiler removes the call, so that allocation only happens where the hook is
+    /// actually written.
+    /// </remarks>
+    private static void ValidateCore({{ vo.value_type_name }} value, ref List<string>? errors)
+    {
         {{~ if vo.value_type_name == "string" || vo.value_type_name == "byte[]" ~}}
         // A value object never wraps null (a nullable column keeps the property itself null),
         // so a null input is reported as a validation error instead of throwing from the checks below.
@@ -494,7 +558,7 @@ public sealed partial class {{ vo.class_name }}
         {
             var message = ValueObjectValidationMessages.ValueRequired();
             CustomizeValueRequiredErrorMessage(ref message);
-            errors.Add(message);
+            (errors ??= new List<string>()).Add(message);
             return;
         }
 
@@ -504,13 +568,13 @@ public sealed partial class {{ vo.class_name }}
         {
             var message = ValueObjectValidationMessages.MaxLengthExceeded({{ vo.max_length }}, value.Length);
             CustomizeMaxLengthErrorMessage(value, {{ vo.max_length }}, ref message);
-            errors.Add(message);
+            (errors ??= new List<string>()).Add(message);
         }
         {{~ end ~}}
         {{~ if vo.precision ~}}
-        ValidateDecimal(value, {{ vo.precision }}, {{ if vo.scale }}{{ vo.scale }}{{ else }}0{{ end }}, errors);
+        ValidateDecimal(value, {{ vo.precision }}, {{ if vo.scale }}{{ vo.scale }}{{ else }}0{{ end }}, ref errors);
         {{~ end ~}}
-        OnValidate(value, errors);
+        OnValidate(value, errors ??= new List<string>());
     }
 
     /// <summary>User-defined additional validation (partial; zero cost when not implemented).</summary>
@@ -550,15 +614,17 @@ public sealed partial class {{ vo.class_name }}
         decimal value,
         int precision,
         int scale,
-        ICollection<string> errors
+        ref List<string>? errors
     )
     {
-        var valueScale = (decimal.GetBits(value)[3] >> 16) & 0xFF;
+        // decimal.Scale states the number of decimal places directly; reading it out of decimal.GetBits meant
+        // allocating a four-element int array on every single validation just to shift one of the words.
+        var valueScale = value.Scale;
         if (valueScale > scale)
         {
             var message = ValueObjectValidationMessages.ScaleExceeded(scale);
             CustomizeScaleErrorMessage(value, scale, ref message);
-            errors.Add(message);
+            (errors ??= new List<string>()).Add(message);
         }
         var integral = Math.Truncate(Math.Abs(value));
         var integralDigits = 0;
@@ -571,7 +637,7 @@ public sealed partial class {{ vo.class_name }}
         {
             var message = ValueObjectValidationMessages.PrecisionExceeded(precision - scale);
             CustomizePrecisionErrorMessage(value, precision - scale, ref message);
-            errors.Add(message);
+            (errors ??= new List<string>()).Add(message);
         }
     }
 

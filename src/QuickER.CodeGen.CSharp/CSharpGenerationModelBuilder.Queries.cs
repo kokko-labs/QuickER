@@ -66,7 +66,13 @@ internal sealed partial class CSharpGenerationModelBuilder
     );
 
     /// <summary>クエリメソッドのペイロードパラメータ（HTTP 転送のエンベロープに載る引数。CancellationToken は含まない）</summary>
-    private sealed record QueryPayloadParameter(string TypeName, string Name);
+    /// <param name="TypeName">生成コード上の宣言型（リストは <c>IReadOnlyList&lt;T&gt;</c>）</param>
+    /// <param name="Name">パラメータ名（camelCase）</param>
+    /// <param name="IsReferenceType">
+    /// 参照型か（＝リクエストボディが省略したときに null のまま奥へ渡る型か）。サーバー側ハンドラが
+    /// <c>RemoteServerEngine.Required</c> で包むかどうかの判定に使う（値型は省略形を持たないため素通し）。
+    /// </param>
+    private sealed record QueryPayloadParameter(string TypeName, string Name, bool IsReferenceType);
 
     /// <summary>1 クエリ分のメソッド形状（リモート転送メソッド・サーバーハンドラの生成素材）</summary>
     private sealed record QueryMethodShape(
@@ -482,6 +488,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             }
 
             string typeName;
+            bool isReferenceType;
 
             if (parameter.SourceColumnId is { } sourceColumnId)
             {
@@ -502,30 +509,45 @@ internal sealed partial class CSharpGenerationModelBuilder
                 }
 
                 typeName = sourceBinding.ValueObjectClassName ?? sourceBinding.UnderlyingTypeName;
+                isReferenceType =
+                    sourceBinding.ValueObjectClassName is not null
+                    || sourceBinding.IsUnderlyingReferenceType;
 
                 if (sourceBinding.ValueObjectClassName is { } vo)
                 {
                     parameterValueObjects[parameter.Name] = vo;
                 }
             }
-            else if (!TryResolveTokenType(query, parameter.Type, diagnostics, out typeName))
+            else if (TryResolveTokenInfo(query, parameter.Type, diagnostics, out var tokenInfo))
+            {
+                typeName = tokenInfo.TypeName;
+                isReferenceType = tokenInfo.IsReferenceType;
+            }
+            else
             {
                 hasError = true;
                 continue;
             }
 
+            // IN 展開のリストは IReadOnlyList<T>＝参照型（欠落すると転送先で null 参照になるため必須扱いの対象）
             var declaredType = parameter.IsList ? $"IReadOnlyList<{typeName}>" : typeName;
             parameterDecls.Add($"{declaredType} {parameter.Name}");
             argumentNames.Add(parameter.Name);
-            payloadParameters.Add(new QueryPayloadParameter(declaredType, parameter.Name));
+            payloadParameters.Add(
+                new QueryPayloadParameter(
+                    declaredType,
+                    parameter.Name,
+                    parameter.IsList || isReferenceType
+                )
+            );
         }
 
         if (query.HasPaging)
         {
             parameterDecls.Add("int take");
             parameterDecls.Add("int skip = 0");
-            payloadParameters.Add(new QueryPayloadParameter("int", "take"));
-            payloadParameters.Add(new QueryPayloadParameter("int", "skip"));
+            payloadParameters.Add(new QueryPayloadParameter("int", "take", false));
+            payloadParameters.Add(new QueryPayloadParameter("int", "skip", false));
         }
 
         parameterDecls.Add("CancellationToken cancellationToken = default");

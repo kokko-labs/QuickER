@@ -123,13 +123,14 @@ public sealed class SqliteTranslatorOperatorRuntimeTests : IDisposable
     }
 
     /// <summary>
-    /// NotEqual（&lt;&gt;）: 等値でない行を返す。NULL 許容列に対しては SQL の三値論理により
-    /// <c>NULL &lt;&gt; @p</c> が unknown となり NULL 行が<b>除外</b>される（C# の <c>!=</c> の null 意味論と異なる）。
+    /// NotEqual（&lt;&gt;）: 等値でない行を返す。NULL 許容列は翻訳器が <c>(col &lt;&gt; @p OR col IS NULL)</c> へ
+    /// 補償するため、C#（InMemory）・EF Core と同じく<b>含まれる</b>（素の <c>&lt;&gt;</c> は SQL の三値論理で
+    /// unknown となり NULL 行を落とすが、それは 3 実装先の乖離になる）。
     /// </summary>
     [Fact(
-        DisplayName = "[SQLite演算子] NotEqual（<>）が等値行を除外し、NULL 列は SQL 意味論で不一致（除外）"
+        DisplayName = "[SQLite演算子] NotEqual（<>）が等値行を除外し、NULL 列は補償により一致（含める）"
     )]
-    public async Task NotEqual_ExcludesEqualAndNullRows()
+    public async Task NotEqual_ExcludesEqualRowsAndKeepsNullRows()
     {
         await ResetAndCreateSchemaAsync();
         var repo = await SeedCustomersAsync();
@@ -141,10 +142,10 @@ public sealed class SqliteTranslatorOperatorRuntimeTests : IDisposable
         notBob.Select(c => c.CustomerId.Value).Should().BeEquivalentTo([1, 3, 4]);
 
         // (b) decimal VO の <>（.Value 展開）: "balance" <> 100。
-        //     100 の Alice(1) は等値で除外、NULL 残高の Carol(4) は NULL <> 100 が unknown となり除外。
-        //     → 200(Bob) / 300(Alicia) のみ。C# の != 意味論なら null 行も一致するが、SQL 側は除外する。
+        //     100 の Alice(1) は等値で除外、NULL 残高の Carol(4) は IS NULL 補償により含まれる。
+        //     → 200(Bob) / 300(Alicia) / NULL(Carol)。C# の != と同じ意味論。
         var notHundred = await repo.Query().Where(c => c.Balance!.Value != 100m).ToListAsync(Ct);
-        notHundred.Select(c => c.CustomerId.Value).Should().BeEquivalentTo([2, 3]);
+        notHundred.Select(c => c.CustomerId.Value).Should().BeEquivalentTo([2, 3, 4]);
     }
 
     /// <summary>

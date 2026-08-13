@@ -341,6 +341,111 @@ public sealed class ValueObjectValidationTests
         NameValue.Create("a").CompareTo(NameValue.Create("b")).Should().BeNegative();
     }
 
+    // ===== (9) IEquatable<TSelf>: 既定比較器と辞書キー =====
+
+    [Fact(
+        DisplayName = "VO は IEquatable<TSelf> を実装し、EqualityComparer<T>.Default が object フォールバックに落ちない"
+    )]
+    public void VOはIEquatableを実装する()
+    {
+        // IEquatable<TSelf> の実装が無いと EqualityComparer<T>.Default は object ベースの比較器
+        // （ObjectEqualityComparer）へ落ち、比較のたびに Equals(object?) 経由で引数が boxing される。
+        // Dictionary / HashSet のキー検索はすべてこの比較器を通るため、実装の有無が効く。
+        typeof(CustomerIdValue).Should().BeAssignableTo<IEquatable<CustomerIdValue>>();
+        typeof(NameValue).Should().BeAssignableTo<IEquatable<NameValue>>();
+        typeof(AmountValue).Should().BeAssignableTo<IEquatable<AmountValue>>();
+
+        EqualityComparer<CustomerIdValue>
+            .Default.GetType()
+            .Name.Should()
+            .NotStartWith(
+                "ObjectEqualityComparer",
+                "IEquatable<TSelf> があれば型付きの比較器が選ばれる"
+            );
+
+        var comparer = EqualityComparer<CustomerIdValue>.Default;
+        comparer.Equals(CustomerIdValue.Create(5), CustomerIdValue.Create(5)).Should().BeTrue();
+        comparer.Equals(CustomerIdValue.Create(5), CustomerIdValue.Create(6)).Should().BeFalse();
+    }
+
+    [Fact(DisplayName = "VO は Dictionary / HashSet のキーとして値ベースで一致する")]
+    public void VOは辞書キーとして値ベースで一致する()
+    {
+        var map = new Dictionary<NameValue, int> { [NameValue.Create("alice")] = 1 };
+
+        // 別インスタンスでも同値なら引ける
+        map.TryGetValue(NameValue.Create("alice"), out var found).Should().BeTrue();
+        found.Should().Be(1);
+        map.ContainsKey(NameValue.Create("bob")).Should().BeFalse();
+
+        var set = new HashSet<CustomerIdValue>
+        {
+            CustomerIdValue.Create(1),
+            CustomerIdValue.Create(1),
+            CustomerIdValue.Create(2),
+        };
+
+        set.Should().HaveCount(2);
+    }
+
+    [Fact(DisplayName = "VO の型付き Equals(TSelf) は同値・null・異型を正しく判定する")]
+    public void VOの型付きEquals()
+    {
+        var a = NameValue.Create("x");
+
+        a.Equals(NameValue.Create("x")).Should().BeTrue();
+        a.Equals(NameValue.Create("y")).Should().BeFalse();
+        // 同じ下位型（string）を内包する別 VO 型とは等しくない
+        a.Equals((object)MemoValue.Create("x")).Should().BeFalse();
+
+        // null 相手は毎回新しいレシーバーで書く。IEquatable<T> を実装した型（BCL の string も同じ）へ
+        // Equals(null) を渡すと、C# の null 解析が「等しいならレシーバーも null」と学習してレシーバーの
+        // null 状態を maybe-null へ落とし、以降の同一変数の使用が CS8602 になるため。
+        NameValue.Create("x").Equals((NameValue?)null).Should().BeFalse();
+        NameValue.Create("x").Equals((object?)null).Should().BeFalse();
+    }
+
+    // ===== (10) 検証の内部遅延確保が既存の Validate 契約を変えないこと =====
+
+    [Fact(
+        DisplayName = "Validate(value, errors) は呼び出し側コレクションへ追記する（違反あり／なしの両側）"
+    )]
+    public void Validateラッパーは呼び出し側コレクションへ追記する()
+    {
+        // Create / TryCreate は成功パスでリストを確保しないが、内部の遅延確保は
+        // 「利用者が渡したコレクションへ積む」internal Validate の契約を変えない。
+        var errors = new List<string> { "pre-existing" };
+
+        NameValue.Validate(new string('a', 51), errors);
+
+        errors.Should().HaveCount(2);
+        errors[0].Should().Be("pre-existing");
+        errors[1].Should().Be("Enter at most 50 characters. (currently 51 characters)");
+
+        var noViolation = new List<string>();
+        NameValue.Validate("ok", noViolation);
+        noViolation.Should().BeEmpty();
+    }
+
+    [Fact(
+        DisplayName = "decimal VO の桁数判定は宣言スケール基準（末尾ゼロを含む）＝decimal.Scale と GetBits は同義"
+    )]
+    public void decimalVOのスケール判定は宣言スケール基準()
+    {
+        // 1.230m は値としては 1.23 だが宣言スケールは 3 ＝ scale(2) 超過として弾かれる
+        var act = () => AmountValue.Create(1.230m);
+
+        act.Should()
+            .Throw<ValueObjectValidationException>()
+            .Which.Errors.Should()
+            .ContainSingle()
+            .Which.Should()
+            .Be("Enter at most 2 digits after the decimal point.");
+
+        // 末尾ゼロを含めてちょうど 2 桁は通る
+        AmountValue.Create(1.20m).Value.Should().Be(1.20m);
+    }
+
     [Fact(
         DisplayName = "文字列 VO の Contains/StartsWith/EndsWith は null 引数で ArgumentNullException（string・VO 両オーバーロード計 6 本）"
     )]

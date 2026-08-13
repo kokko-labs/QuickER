@@ -57,6 +57,9 @@ public static class GeneratedFixtureDefinition
     private static readonly Guid OrderMemoColId = new("22222222-0000-0000-0000-000000000004");
     private static readonly Guid OrderAmountColId = new("22222222-0000-0000-0000-000000000005");
     private static readonly Guid OrderOrderedAtColId = new("22222222-0000-0000-0000-000000000006");
+    private static readonly Guid OrderDeliveryDateColId = new(
+        "22222222-0000-0000-0000-000000000007"
+    );
 
     private static readonly Guid ProfileId = new("33333333-0000-0000-0000-000000000001");
     private static readonly Guid ProfilePkColId = new("33333333-0000-0000-0000-000000000002");
@@ -167,6 +170,15 @@ public static class GeneratedFixtureDefinition
                     Id = OrderOrderedAtColId,
                     Name = "ordered_at",
                     DataType = "datetime2",
+                    IsNullable = true,
+                },
+                // 日付のみ（date）の列。EditModel の表示文字列が時刻部（"0:00:00"）を含まないことを実型で検証するための列。
+                // 既存シード（INSERT 側は列を指定しない）へ影響しないよう NULL 許容にする
+                new Column
+                {
+                    Id = OrderDeliveryDateColId,
+                    Name = "delivery_date",
+                    DataType = "date",
                     IsNullable = true,
                 },
             },

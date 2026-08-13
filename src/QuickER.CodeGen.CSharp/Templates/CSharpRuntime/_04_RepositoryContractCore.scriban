@@ -104,7 +104,18 @@ public partial interface IRepository<TEntity, TKey> : IRemoteRepository<TEntity,
     where TEntity : EntityBase, new()
 {
     /// <summary>Bulk inserts a collection of entities{{ if repository_dialect == "sqlserver" }} using SqlBulkCopy{{ end }}.</summary>
-    /// <param name="entities">The list of entities to insert.</param>
+    /// <remarks>
+    /// The contract every backend keeps to:
+    /// <list type="bullet">
+    /// <item><description>A <c>null</c> element is skipped rather than rejected (the same treatment the graph save gives a null in its list).</description></item>
+    /// <item><description>The return value counts the rows actually inserted, so skipped elements are not part of it.</description></item>
+    /// <item><description>An empty collection inserts nothing and returns 0 without opening a connection.</description></item>
+    /// <item><description>A cancellation already requested on entry throws before anything is written.</description></item>
+    /// </list>
+    /// The insert itself is one unit of work per backend (SqlBulkCopy, a single transaction, one SaveChanges, or one staged
+    /// batch), but only the in-memory backend validates the whole batch for duplicate primary keys up front.
+    /// </remarks>
+    /// <param name="entities">The list of entities to insert (null elements are skipped).</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The number of rows inserted.</returns>
     Task<int> BulkInsertAsync(
@@ -304,6 +315,44 @@ public enum ConcurrencyMode
                 nameof(mode),
                 "The concurrency mode must be Optimistic or ForceOverwrite."
             );
+}
+
+/// <summary>Transaction handling shared by the failure paths of the generated repositories.</summary>
+{{ infra_visibility }} static class SqlTransactions
+{
+    /// <summary>Rolls a transaction back from a catch block, never letting the rollback replace the failure being propagated.</summary>
+    /// <remarks>
+    /// <para>
+    /// A rollback attempted on a transaction that has already completed - most notably one whose commit went through
+    /// before the failure occurred - throws <see cref="InvalidOperationException"/>, and an exception thrown from a
+    /// catch block replaces the one being propagated. The original failure is the one that explains what went wrong,
+    /// so the completed case is skipped and anything the rollback itself raises is swallowed.
+    /// </para>
+    /// <para>
+    /// Nothing is leaked by swallowing: the caller disposes the connection on the way out, which ends an uncommitted
+    /// transaction regardless. The rollback also runs with <see cref="CancellationToken.None"/>, because a canceled
+    /// token must not be able to interrupt it.
+    /// </para>
+    /// </remarks>
+    /// <param name="transaction">The transaction to roll back.</param>
+    public static async Task RollbackQuietlyAsync(DbTransaction transaction)
+    {
+        // A completed transaction no longer holds its connection, which is the portable way to tell that there is
+        // nothing left to roll back.
+        if (transaction.Connection is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            // Deliberately ignored: reporting it would hide the failure that is on its way to the caller.
+        }
+    }
 }
 
 /// <summary>
@@ -665,10 +714,12 @@ public static class SqliteSchemaBootstrap
     /// </remarks>
     /// <param name="connectionString">The connection string of the database to create the schema in.</param>
     /// <param name="ddl">The DDL script to run.</param>
+    /// <param name="commandTimeout">How long the DDL command may run. Null keeps the provider's default; a large script on a slow machine may need more than that.</param>
     /// <param name="cancellationToken">A token that cancels the operation.</param>
     public static async Task ApplyDdlAsync(
         string connectionString,
         string ddl,
+        TimeSpan? commandTimeout = null,
         CancellationToken cancellationToken = default
     )
     {
@@ -680,6 +731,14 @@ public static class SqliteSchemaBootstrap
 
         await using var command = connection.CreateCommand();
         command.CommandText = ddl;
+
+        // The ADO command exposes its timeout in whole seconds, so a requested duration is rounded up (null keeps the provider default)
+        if (commandTimeout is { } timeout)
+        {
+            ArgumentOutOfRangeException.ThrowIfLessThan(timeout, TimeSpan.Zero);
+            command.CommandTimeout = (int)Math.Ceiling(timeout.TotalSeconds);
+        }
+
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 }
@@ -707,10 +766,12 @@ public static class SqlServerSchemaBootstrap
     /// </remarks>
     /// <param name="connectionString">The connection string of the database to create the schema in.</param>
     /// <param name="ddl">The DDL script to run.</param>
+    /// <param name="commandTimeout">How long the DDL command may run. Null keeps the provider's default; a large script on a slow machine may need more than that.</param>
     /// <param name="cancellationToken">A token that cancels the operation.</param>
     public static async Task ApplyDdlAsync(
         string connectionString,
         string ddl,
+        TimeSpan? commandTimeout = null,
         CancellationToken cancellationToken = default
     )
     {
@@ -722,6 +783,14 @@ public static class SqlServerSchemaBootstrap
 
         await using var command = connection.CreateCommand();
         command.CommandText = ddl;
+
+        // The ADO command exposes its timeout in whole seconds, so a requested duration is rounded up (null keeps the provider default)
+        if (commandTimeout is { } timeout)
+        {
+            ArgumentOutOfRangeException.ThrowIfLessThan(timeout, TimeSpan.Zero);
+            command.CommandTimeout = (int)Math.Ceiling(timeout.TotalSeconds);
+        }
+
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 }
@@ -781,13 +850,29 @@ public static class SqlServerSchemaBootstrap
             return null;
         }
 
+        // Compile the call to Create once per target type. Invoking it reflectively instead would re-dispatch and allocate a
+        // one-element object[] for every value read out of every row; the compiled delegate does neither. A validation
+        // failure inside Create surfaces as itself here as well - an expression-tree call never wraps anything in a
+        // TargetInvocationException - so the caller can still add the column context and keep the original as the inner one.
+        var rawParameter = Expression.Parameter(typeof(object), "raw");
+        var invoker = Expression
+            .Lambda<Func<object, object>>(
+                Expression.Convert(
+                    Expression.Call(createMethod, Expression.Convert(rawParameter, valueType)),
+                    typeof(object)
+                ),
+                rawParameter
+            )
+            .Compile();
+
         return raw =>
         {
             // Convert only when the raw type returned by the DB differs from TValue (byte[]/Guid etc. do not implement IConvertible, so matching types pass through)
             var converted = valueType.IsInstanceOfType(raw)
                 ? raw
                 : Convert.ChangeType(raw, valueType, CultureInfo.InvariantCulture);
-            return createMethod.Invoke(null, new[] { converted })!;
+
+            return invoker(converted);
         };
     }
 }
@@ -857,8 +942,17 @@ public static class SqlServerSchemaBootstrap
     /// <c>@name0, @name1, ...</c> and adds each element as an individual parameter.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Reference it inside parentheses in the SQL, as in <c>IN (@name)</c>. An empty collection expands to a single
-    /// <c>NULL</c> (<c>IN (NULL)</c>) and matches no rows (following SQL's three-valued logic).
+    /// <c>NULL</c> (<c>IN (NULL)</c>) and matches no rows (following SQL's three-valued logic). That is the right answer
+    /// for <c>IN</c>, but <c>NOT IN (NULL)</c> is UNKNOWN for every row and therefore matches nothing either - branch to a
+    /// different statement when the collection can be empty and the negated form is what you need.
+    /// </para>
+    /// <para>
+    /// The rewrite is textual, so it replaces <c>@name</c> anywhere in the command text - including inside a string
+    /// literal or a comment. Do not write the parameter's own name in those places. Names that merely start the same
+    /// (<c>@nameSuffix</c>, <c>@name0</c>) and system variables that merely end the same (<c>@@name</c>) are left alone.
+    /// </para>
     /// </remarks>
     {{ infra_visibility }} static void BindCollectionParameter(
         DbCommand command,
@@ -878,10 +972,11 @@ public static class SqlServerSchemaBootstrap
             names.Add(parameter.ParameterName);
         }
 
-        // When an identifier character follows @name (as in @name0 or @nameX) it is a different parameter, so do not rewrite it
+        // When an identifier character follows @name (as in @name0 or @nameX) it is a different parameter, so do not rewrite it.
+        // The same holds on the left: an identifier character or a second @ in front (@@name, a system variable) means a different token
         command.CommandText = Regex.Replace(
             command.CommandText,
-            $"@{Regex.Escape(name)}(?![0-9A-Za-z_])",
+            $"(?<![@0-9A-Za-z_])@{Regex.Escape(name)}(?![0-9A-Za-z_])",
             names.Count == 0 ? "NULL" : string.Join(", ", names)
         );
     }
@@ -982,7 +1077,18 @@ public static class SqlServerSchemaBootstrap
         {{~ if generate_value_objects ~}}
         if (typeof(IValueObject).IsAssignableFrom(targetType))
         {
-            return (TResult?)SqlValueObjectActivator.Wrap(raw, targetType);
+            try
+            {
+                return (TResult?)SqlValueObjectActivator.Wrap(raw, targetType);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // Name the target value object: without it the failure only says the value was rejected, not what it was being read into
+                throw new InvalidOperationException(
+                    $"The raw SQL result value (of type {raw.GetType().Name}) could not be converted to the value object {targetType.Name}: {ex.Message}",
+                    ex
+                );
+            }
         }
         {{~ end ~}}
 
@@ -1132,9 +1238,15 @@ public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory)
         BindParameters(command, parameters);
 
         await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+
+        // The column ordinals are resolved once for the result set (on the first row, because some providers only
+        // expose the result schema after a successful Read) and reused for every row
+        EntitySaveMetadata.RawSqlRowPlan? plan = null;
+
         while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
-            items.Add(metadata.MapEntityFromRawSql<TEntity>(reader));
+            plan ??= metadata.CreateRawSqlRowPlan(reader);
+            items.Add(metadata.MapEntityFromRawSql<TEntity>(reader, plan));
         }
 
         return items;
@@ -1236,7 +1348,8 @@ public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory)
 /// <summary>Repository base class for {{ dialect_display_name }} that implements CRUD using metadata.</summary>
 public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
     ISqlConnectionFactory connectionFactory,
-    ISaveHookRegistry? saveHooks = null
+    ISaveHookRegistry? saveHooks = null,
+    ISqlExecutor? sqlExecutor = null
 ) : IRepository<TEntity, TKey>
     where TEntity : EntityBase, new()
 {
@@ -1246,8 +1359,12 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
     /// <summary>The source of SQL connections.</summary>
     private readonly ISqlConnectionFactory _connectionFactory = connectionFactory;
 
-    /// <summary>The delegate target of the raw SQL methods (consolidates binding and mapping into a single implementation).</summary>
-    private readonly ISqlExecutor _sqlExecutor = new SqlExecutor(connectionFactory);
+    /// <summary>
+    /// The delegate target of the raw SQL methods (consolidates binding and mapping into a single implementation).
+    /// Unspecified = null builds the default implementation over the same connection factory, which keeps
+    /// hand-constructed repositories working; the DI registrations pass the registered implementation instead.
+    /// </summary>
+    private readonly ISqlExecutor _sqlExecutor = sqlExecutor ?? new SqlExecutor(connectionFactory);
 
     /// <summary>The save hook registry (unspecified = null = no hooks, a complete no-op).</summary>
     private readonly ISaveHookRegistry? _saveHooks = saveHooks;
@@ -1339,8 +1456,16 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
 {{~ if repository_dialect == "sqlserver" ~}}
     /// <summary>Bulk inserts a collection of entities using SqlBulkCopy.</summary>
     /// <remarks>
+    /// <para>
+    /// Constraints are checked: SqlBulkCopy skips foreign key and CHECK constraints unless asked to honour them, which would
+    /// let a bulk insert write rows the row-at-a-time INSERT path rejects. <c>CheckConstraints</c> is therefore always on, so
+    /// a violating row fails the copy exactly as it would fail an INSERT. Triggers are still not fired
+    /// (<c>FireTriggers</c> is deliberately left off - QuickER's DDL generates no triggers).
+    /// </para>
+    /// <para>
     /// Known limitation: SqlBulkCopy cannot return generated values, so for a table with a rowversion column the entities
     /// keep whatever version they had. Re-read them when the version is needed for a later update.
+    /// </para>
     /// </remarks>
     public async Task<int> BulkInsertAsync(
         IEnumerable<TEntity> entities,
@@ -1348,6 +1473,7 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
     )
     {
         ArgumentNullException.ThrowIfNull(entities);
+        cancellationToken.ThrowIfCancellationRequested();
 
         // If a collection with a known count is empty, return without opening a connection
         if (entities is ICollection<TEntity> { Count: 0 })
@@ -1358,11 +1484,19 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
-        using var bulkCopy = new SqlBulkCopy(connection)
+        using var bulkCopy = new SqlBulkCopy(
+            connection,
+            SqlBulkCopyOptions.CheckConstraints,
+            externalTransaction: null
+        )
         {
             DestinationTableName = _metadata.TableName,
         };
-        using var reader = _metadata.CreateDataReader(entities);
+
+        // Null elements are dropped before the reader sees them, so they are skipped rather than failing the whole copy
+        using var reader = _metadata.CreateDataReader(
+            entities.Where(entity => entity is not null)
+        );
 
         // Map explicitly by column name (the DB column name) to avoid depending on column order
         for (var i = 0; i < reader.FieldCount; i++)
@@ -1387,6 +1521,7 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
     )
     {
         ArgumentNullException.ThrowIfNull(entities);
+        cancellationToken.ThrowIfCancellationRequested();
 
         // If a collection with a known count is empty, return without opening a connection
         if (entities is ICollection<TEntity> { Count: 0 })
@@ -1424,8 +1559,7 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
         }
         catch
         {
-            // Roll back with CancellationToken.None: a canceled token must not interrupt the rollback or mask the original exception.
-            await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+            await SqlTransactions.RollbackQuietlyAsync(transaction).ConfigureAwait(false);
             throw;
         }
     }
@@ -1566,7 +1700,13 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
-        // Delegate to the streaming engine in standalone mode (own connection, own transaction)
+{{~ if repository_dialect == "sqlserver" ~}}
+        // Delegate to the streaming engine in standalone mode (own connection; the write is one UPDATE, so the statement's
+        // implicit transaction is the only one involved)
+{{~ else ~}}
+        // Delegate to the streaming engine in standalone mode (own connection, and the engine opens a transaction of its own
+        // because the write takes several statements)
+{{~ end ~}}
         return await UnboundedBinaryColumnEngine.WriteAsync(
             _metadata,
             propertyName,
@@ -1627,10 +1767,12 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
         var versions = new RowVersionCollector();
 
 {{~ end ~}}
+        int rows;
+
         try
         {
             // HasChanges was already checked before this call, so skip the redundant internal graph traversal
-            var rows = await EntityGraphSaver.SaveAsync(
+            rows = await EntityGraphSaver.SaveAsync(
                 entity,
                 connection,
                 transaction,
@@ -1644,23 +1786,26 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
                 versions: versions{{ end }}
             ).ConfigureAwait(false);
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
-{{~ if repository_dialect == "sqlserver" ~}}
-
-            // The commit made the new row versions visible, so settle them on the entities
-            versions.Apply();
-{{~ end ~}}
-
-            // After a successful commit, settle the state (Added/Updated → Unchanged) to prevent double-processing on a re-save.
-            // Skipped rows (where a hook's Before returned false) are left as they are
-            EntityGraphSaver.AcceptChanges(entity, cascadeSave, hooks?.Skipped);
-            return rows;
         }
         catch
         {
-            // Roll back with CancellationToken.None: a canceled token must not interrupt the rollback or mask the original exception.
-            await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+            await SqlTransactions.RollbackQuietlyAsync(transaction).ConfigureAwait(false);
             throw;
         }
+
+        // What follows is settled state, not database work, and it is kept outside the try on purpose: the transaction
+        // has already committed, so there is nothing left to roll back, and routing a failure here through the catch
+        // would trade the real exception for a rollback error.
+{{~ if repository_dialect == "sqlserver" ~}}
+
+        // The commit made the new row versions visible, so settle them on the entities
+        versions.Apply();
+{{~ end ~}}
+
+        // After a successful commit, settle the state (Added/Updated → Unchanged) to prevent double-processing on a re-save.
+        // Skipped rows (where a hook's Before returned false) are left as they are
+        EntityGraphSaver.AcceptChanges(entity, cascadeSave, hooks?.Skipped);
+        return rows;
     }
 
     /// <summary>Saves multiple aggregate roots together in a single transaction (an atomic all-succeed-or-all-rollback operation).</summary>
@@ -1713,9 +1858,10 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
         var versions = new RowVersionCollector();
 
 {{~ end ~}}
+        var rows = 0;
+
         try
         {
-            var rows = 0;
             foreach (var entity in targets)
             {
                 // targets is already filtered by HasChanges, so skip the redundant internal graph traversal
@@ -1735,27 +1881,30 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
             }
 
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
-{{~ if repository_dialect == "sqlserver" ~}}
-
-            // The commit made the new row versions visible, so settle them on the entities
-            versions.Apply();
-{{~ end ~}}
-
-            // After a successful commit, settle the state of every graph (Added/Updated → Unchanged) to prevent double-processing on a re-save.
-            // Skipped rows (where a hook's Before returned false) are left as they are
-            foreach (var entity in targets)
-            {
-                EntityGraphSaver.AcceptChanges(entity, cascadeSave, hooks?.Skipped);
-            }
-
-            return rows;
         }
         catch
         {
-            // Roll back with CancellationToken.None: a canceled token must not interrupt the rollback or mask the original exception.
-            await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+            await SqlTransactions.RollbackQuietlyAsync(transaction).ConfigureAwait(false);
             throw;
         }
+
+        // What follows is settled state, not database work, and it is kept outside the try on purpose: the transaction
+        // has already committed, so there is nothing left to roll back, and routing a failure here through the catch
+        // would trade the real exception for a rollback error.
+{{~ if repository_dialect == "sqlserver" ~}}
+
+        // The commit made the new row versions visible, so settle them on the entities
+        versions.Apply();
+{{~ end ~}}
+
+        // After a successful commit, settle the state of every graph (Added/Updated → Unchanged) to prevent double-processing on a re-save.
+        // Skipped rows (where a hook's Before returned false) are left as they are
+        foreach (var entity in targets)
+        {
+            EntityGraphSaver.AcceptChanges(entity, cascadeSave, hooks?.Skipped);
+        }
+
+        return rows;
     }
 
     /// <summary>Executes a raw SQL SELECT and maps the result rows to {TEntity}.</summary>
@@ -1875,11 +2024,19 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
 /// Shared by the repository's streaming accessors (standalone mode — no <c>transaction</c>) and the save hook's
 /// <see cref="ISaveHookContext.WriteBinaryColumnAsync"/> (enlisted mode — participating in the in-progress transaction).
 /// </para>
+{{~ if repository_dialect == "sqlserver" ~}}
 /// <para>
-/// <b>Beware the enlisted/standalone split for SQLite</b>: a write allocates a zeroblob, resolves the rowid, and copies via
+/// A write is a single UPDATE that streams the payload straight into its parameter, so standalone mode opens no transaction
+/// of its own — the statement's implicit one is all there is — and enlisted mode just runs on the transaction it was handed,
+/// leaving the commit to the outer Save.
+/// </para>
+{{~ else ~}}
+/// <para>
+/// <b>Beware the enlisted/standalone split</b>: a write allocates a zeroblob, resolves the rowid, and copies via
 /// SqliteBlob within one transaction. Standalone mode opens its own transaction and commits it, whereas enlisted mode uses
 /// the in-progress transaction as is and does not commit (the outer Save commits). Mixing these up loses the blob.
 /// </para>
+{{~ end ~}}
 /// </remarks>
 {{ infra_visibility }} static class UnboundedBinaryColumnEngine
 {
@@ -2050,10 +2207,11 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
 
                 if (await allocate.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) == 0)
                 {
-                    // No matching row (the zeroblob could not be allocated). Roll back only in standalone mode (enlisted mode defers to the outer transaction)
+                    // No matching row (the zeroblob could not be allocated). Roll back only in standalone mode (enlisted mode defers to the outer transaction).
+                    // CancellationToken.None, as everywhere else: a canceled token must not be able to interrupt a rollback.
                     if (ownsTransaction)
                     {
-                        await activeTransaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+                        await activeTransaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
                     }
 
                     return false;
@@ -2103,8 +2261,7 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
         {
             if (ownsTransaction)
             {
-                // Roll back with CancellationToken.None: a canceled token must not interrupt the rollback or mask the original exception.
-                await activeTransaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+                await SqlTransactions.RollbackQuietlyAsync(activeTransaction).ConfigureAwait(false);
             }
 
             throw;

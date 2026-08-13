@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Linq;
 using AwesomeAssertions;
 using Xunit;
@@ -224,6 +225,65 @@ public sealed class EditModelLifecycleTests
         ownErrors.Should().OnlyContain(e => e.Path == string.Empty);
     }
 
+    // ===== 必須検証が触るエラーの範囲 =====
+
+    /// <summary>指定プロパティのエラー一覧を取り出す</summary>
+    private static string[] GetErrors(EditModelBase model, string propertyName) =>
+        ((IEnumerable)model.GetErrors(propertyName)).Cast<string>().ToArray();
+
+    [Fact(DisplayName = "必須検証: 変換エラーの付いた欄を必須エラーで上書きしない")]
+    public void 必須検証は変換エラーを上書きしない()
+    {
+        // 変換に失敗するので確定値 Amount は未設定（null）のまま＝必須チェックにも引っかかる状態
+        var m = new OrderEditModel { BindingAmount = "abc" };
+        m.Amount.Should().BeNull();
+
+        m.Validate(includeChildren: false).Should().BeFalse();
+
+        // 表示されるのは原因が上流の変換エラーのまま（「必須です」で塗り潰さない）
+        GetErrors(m, nameof(OrderEditModel.BindingAmount))
+            .Should()
+            .ContainSingle()
+            .Which.Should()
+            .Contain("cannot be converted");
+    }
+
+    [Fact(DisplayName = "必須検証: 値が入れば自分が付けた必須エラーを消す（確定値の直接代入でも）")]
+    public void 必須検証は成立時に自分のエラーを消す()
+    {
+        var m = new OrderEditModel();
+
+        m.Validate(includeChildren: false).Should().BeFalse();
+        GetErrors(m, nameof(OrderEditModel.BindingAmount)).Should().ContainSingle();
+
+        // 確定値の直接代入（Mapper のロードと同じ経路）はバインディングのセッターを通らないため、
+        // 必須エラーを消せるのは必須チェック自身だけ
+        m.OrderId = OrderIdValue.Create(1);
+        m.CustomerId = CustomerIdValue.Create(1);
+        m.Amount = AmountValue.Create(10m);
+
+        m.Validate(includeChildren: false).Should().BeTrue();
+        m.HasErrors.Should().BeFalse();
+    }
+
+    [Fact(
+        DisplayName = "ロード中フラグ: 入れ子の ExecuteLoad を抜けても外側のロードは継続中と扱う"
+    )]
+    public void ロード中フラグは入れ子で解けない()
+    {
+        var m = LoadedOrder();
+
+        m.ExecuteLoad(() =>
+        {
+            // 内側のロード（フック等からの再入を模す）が終わっても、外側はまだロード中
+            m.ExecuteLoad(() => { });
+            m.Amount = AmountValue.Create(99m);
+        });
+
+        // ロード中の確定値変更は Updated へ昇格しない（フラグが早く解けると昇格してしまう）
+        m.RowState.Should().Be(RowState.Unchanged);
+    }
+
     // ===== 再ロードでの子コレクション差し替え（ChildLink の遅延解決） =====
 
     [Fact(
@@ -430,20 +490,56 @@ public sealed class EditModelLifecycleTests
 
     // ===== EditModelCollection: RemoveAll / RemoveRange =====
 
-    [Fact(DisplayName = "RemoveAll: 全既存要素を削除追跡付きで外す")]
+    [Fact(DisplayName = "RemoveAll: 全既存要素を削除追跡付きで、コレクション順のまま外す")]
     public void RemoveAll()
     {
-        var col = new EditModelCollection<OrderEditModel>
-        {
-            new OrderEditModel(),
-            new OrderEditModel(),
-            new OrderEditModel(),
-        };
+        var a = new OrderEditModel();
+        var b = new OrderEditModel();
+        var c = new OrderEditModel();
+        var col = new EditModelCollection<OrderEditModel> { a, b, c };
 
         col.RemoveAll();
 
         col.Should().BeEmpty();
         col.RemovedItems.Should().HaveCount(3);
+        // 先頭から外すため、削除追跡はコレクションの並び順を保つ（末尾からだと逆順になる）
+        col.RemovedItems.Should().Equal(a, b, c);
+    }
+
+    // ===== EditModelCollection: 削除の取り消し（Remove → Add） =====
+
+    [Fact(
+        DisplayName = "Remove→Add: 同じ要素を戻すと削除追跡が解除され RowState も削除前へ復元される"
+    )]
+    public void 削除の取り消し()
+    {
+        var order = LoadedOrder();
+        order.BindingMemo = "edited"; // Unchanged → Updated（削除前の状態）
+        var col = new EditModelCollection<OrderEditModel> { order };
+
+        col.Remove(order);
+        order.RowState.Should().Be(RowState.Removed);
+
+        col.Add(order);
+
+        col.RemovedItems.Should().BeEmpty();
+        order.RowState.Should().Be(RowState.Updated);
+        col.Should().ContainSingle().Which.Should().BeSameAs(order);
+    }
+
+    [Fact(DisplayName = "Remove→Add: 戻した要素は保存対象（includeRemoved）の削除分に現れない")]
+    public void 削除の取り消し後は削除分に出ない()
+    {
+        var customer = LoadedCustomer(orderCount: 2);
+        var order = customer.Orders[0];
+
+        customer.Orders.Remove(order);
+        customer.Orders.Add(order);
+
+        var entity = new CustomerMapper().CreateEntity(customer, includeRemoved: true);
+
+        entity.Orders.Should().HaveCount(2);
+        entity.Orders.Should().NotContain(o => o.RowState == RowState.Removed);
     }
 
     [Fact(DisplayName = "RemoveRange: 指定範囲を削除し、範囲外指定は ArgumentOutOfRangeException")]

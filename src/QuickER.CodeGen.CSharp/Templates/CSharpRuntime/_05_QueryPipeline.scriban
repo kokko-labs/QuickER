@@ -220,13 +220,18 @@
                 {
                     FieldInfo field => field.GetValue(instance),
                     PropertyInfo property => property.GetValue(instance),
-                    _ => Expression.Lambda(expression).Compile().DynamicInvoke(),
+                    _ => CompileAndInvoke(expression),
                 };
 
             default:
-                return Expression.Lambda(expression).Compile().DynamicInvoke();
+                return CompileAndInvoke(expression);
         }
     }
+
+    /// <summary>Compiles an expression as a <c>Func&lt;object&gt;</c> and invokes it (avoiding the reflection-based DynamicInvoke and its exception wrapping).</summary>
+    private static object? CompileAndInvoke(Expression expression) =>
+        Expression.Lambda<Func<object?>>(Expression.Convert(expression, typeof(object)))
+            .Compile()();
 
     /// <summary>A lightweight visitor that merely raises a flag when it finds a lambda-parameter reference.</summary>
     private sealed class ParameterFinder : ExpressionVisitor
@@ -334,8 +339,9 @@ public sealed class SqlQuery<TEntity>
     /// <remarks>
     /// Cannot be combined with Include (an <see cref="InvalidOperationException"/> is thrown when the terminal method runs). When unbounded binary
     /// columns are needed, fetch them with a separate query that has no Include. On SQL Server this uses a plain SELECT (not the default JSON path),
-    /// avoiding the Base64 inflation of large blobs (5-6x peak memory). It takes effect only on ToListAsync / FirstOrDefaultAsync
-    /// (it does not affect projections, counts, or existence checks). The fetched entities are equivalent to a normal fetch (RowState=Unchanged), but
+    /// avoiding the Base64 inflation of large blobs (5-6x peak memory). It takes effect on the entity-shaped fetches (ToListAsync /
+    /// FirstOrDefaultAsync) and on the fallback path of a projection, where the entity is materialized in full before the selector runs
+    /// (it does not affect counts, existence checks, or a projection whose columns are pruned). The fetched entities are equivalent to a normal fetch (RowState=Unchanged), but
     /// because excluded columns remain outside the UPDATE set, calling UpdateAsync on them as-is throws via the existing guard (perform updates with raw SQL).
     /// </remarks>
     public SqlQuery<TEntity> WithUnboundedBinary()
@@ -419,7 +425,17 @@ public sealed class SqlQuery<TEntity>
             );
         }
 
-        return new(_predicates, _orderSelectors, _includes, _take, _skip, _withUnboundedBinary);
+        // The captured lists are copied, so a query that carries on being built after a terminal method cannot add to a plan
+        // that has already been handed over. Their elements are shared as they are: the expressions are immutable, and
+        // rebuilding them would defeat EF Core's query plan cache.
+        return new(
+            _predicates.ToArray(),
+            _orderSelectors.ToArray(),
+            _includes.ToArray(),
+            _take,
+            _skip,
+            _withUnboundedBinary
+        );
     }
 }
 
@@ -882,8 +898,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
         }
         catch
         {
-            // Roll back with CancellationToken.None: a canceled token must not interrupt the rollback or mask the original exception.
-            await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+            await SqlTransactions.RollbackQuietlyAsync(transaction).ConfigureAwait(false);
             throw;
         }
     }
@@ -1534,14 +1549,26 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
         }
     }
 
-    /// <summary>Translates a binary comparison, compensating for null values on the value side.</summary>
+    /// <summary>Translates a binary comparison, compensating for nulls on both the value side and the column side.</summary>
     /// <remarks>
+    /// <para>
     /// Each side is resolved once: an operand that stays on the SQL side (a column reference or a date component) is rendered as SQL,
     /// and every other operand is evaluated to its actual value. When an <c>==</c> / <c>!=</c> comparison has a value operand that turns
     /// out to be null (a literal null, or a variable / expression that evaluates to null), it becomes <c>IS NULL</c> / <c>IS NOT NULL</c>,
     /// which is what C# and EF Core mean by it. Binding the null as an ordinary parameter would instead leave <c>col = @p</c>, and SQL's
-    /// three-valued logic makes that UNKNOWN for every row. The compensation is deliberately limited to equality: the relational operators
-    /// (&lt; &lt;= &gt; &gt;=) keep binding the null as a parameter, because they have no null-aware SQL counterpart.
+    /// three-valued logic makes that UNKNOWN for every row.
+    /// </para>
+    /// <para>
+    /// The other half of the same mismatch sits on the column side: <c>col &lt;&gt; @p</c> is UNKNOWN - and therefore excluded - for
+    /// every row whose column is NULL, while C# and EF Core both consider NULL different from a non-null value. A <c>!=</c> against a
+    /// non-null value is therefore emitted as <c>(col &lt;&gt; @p OR col IS NULL)</c>, the same shape EF Core's relational provider
+    /// produces. It is applied without asking whether the column allows NULL, because that cannot be decided reliably from the
+    /// expression tree; on a column that is never NULL the added disjunct simply never holds, so the result is unchanged.
+    /// </para>
+    /// <para>
+    /// Both compensations are deliberately limited to equality: the relational operators (&lt; &lt;= &gt; &gt;=) are left alone,
+    /// because they have no null-aware SQL counterpart.
+    /// </para>
     /// </remarks>
     private static string VisitComparison(
         BinaryExpression binary,
@@ -1569,6 +1596,21 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
             if (rightSql is not null && leftSql is null && IsNullValue(leftValue))
             {
                 return $"{rightSql} IS {suffix}NULL";
+            }
+        }
+
+        // "not equal to a non-null value" also has to admit the rows whose column is NULL (see the remarks); the null
+        // value cases have already returned above, so what reaches here is exactly the non-null comparison
+        if (binary.NodeType == ExpressionType.NotEqual)
+        {
+            if (leftSql is not null && rightSql is null)
+            {
+                return $"({leftSql} <> {AddParameter(rightValue, parameters, RawColumnName(leftSql))} OR {leftSql} IS NULL)";
+            }
+
+            if (rightSql is not null && leftSql is null)
+            {
+                return $"({rightSql} <> {AddParameter(leftValue, parameters, RawColumnName(rightSql))} OR {rightSql} IS NULL)";
             }
         }
 
@@ -1843,9 +1885,40 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
         return expression;
     }
 
-    /// <summary>Whether the member is a property reference on the lambda parameter (i.e. a column).</summary>
-    private static bool IsColumn(MemberExpression member) =>
-        member is { Expression: ParameterExpression, Member: PropertyInfo };
+    /// <summary>Whether the member is a property reference on the lambda parameter (i.e. a column). A navigation property is not a column and is rejected outright.</summary>
+    /// <remarks>
+    /// A navigation carries no column of its own, so treating one as a column would emit its property name as a column
+    /// name and produce SQL the database rejects (<c>x.Parent == null</c> became <c>[Parent] IS NULL</c>). The in-memory
+    /// store and EF Core both translate such a predicate happily, which made this the one place where the three backends
+    /// disagreed. Failing here states the limitation instead, and the fix is always the same: filter on the foreign-key column.
+    /// </remarks>
+    private static bool IsColumn(MemberExpression member)
+    {
+        if (member is not { Expression: ParameterExpression, Member: PropertyInfo property })
+        {
+            return false;
+        }
+
+        if (IsNavigation(property))
+        {
+            throw new NotSupportedException(
+                $"'{property.DeclaringType?.Name}.{property.Name}' is a navigation property and cannot be translated to SQL; "
+                    + "filter on the foreign-key column instead."
+            );
+        }
+
+        return true;
+    }
+
+    /// <summary>Caches the [NavigationReference] lookup per property (the column check runs for every column reference in every predicate).</summary>
+    private static readonly ConcurrentDictionary<PropertyInfo, bool> _navigationCache = new();
+
+    /// <summary>Whether the property is a navigation (annotated with <see cref="NavigationReferenceAttribute"/>) rather than a column.</summary>
+    private static bool IsNavigation(PropertyInfo property) =>
+        _navigationCache.GetOrAdd(
+            property,
+            static p => p.GetCustomAttribute<NavigationReferenceAttribute>() is not null
+        );
 
     /// <summary>Caches member-to-bracketed-column-name resolution per type member (avoiding [Column] reflection for every column reference).</summary>
     private static readonly ConcurrentDictionary<MemberInfo, string> _columnNameCache = new();
@@ -1968,8 +2041,14 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
     }
 
     /// <summary>Wraps an arbitrary expression tree in a lambda, compiles and invokes it to obtain the actual value (fallback for expressions that cannot be read directly via reflection).</summary>
+    /// <remarks>
+    /// The lambda is typed as <c>Func&lt;object&gt;</c> (boxing the result with a Convert node) so that it can be invoked
+    /// directly. The untyped <c>Compile().DynamicInvoke()</c> pair goes through reflection on every call and wraps any
+    /// exception the expression throws in a <see cref="System.Reflection.TargetInvocationException"/>.
+    /// </remarks>
     private static object? CompileAndInvoke(Expression expression) =>
-        Expression.Lambda(expression).Compile().DynamicInvoke();
+        Expression.Lambda<Func<object?>>(Expression.Convert(expression, typeof(object)))
+            .Compile()();
 
     /// <param name="value">The actual value to parameterize (may be null).</param>
     /// <param name="parameters">The list that receives the generated parameter.</param>

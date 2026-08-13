@@ -167,7 +167,10 @@ internal sealed partial class CSharpGenerationModelBuilder
             // 行バージョン列は DB が採番するため非 NULL でも入力必須にしない（新規行は未入力が正常）
             IsRequired = !column.IsNullable && !_columnTypes[column.Id].IsRowVersion,
             IsRowVersion = _columnTypes[column.Id].IsRowVersion,
-            RevertBindingExpression = $"{propertyName}?.ToString() ?? string.Empty",
+            // 日付のみの列は内包値を短い日付書式で表示する（VO の ToString() は時刻部まで出るため）
+            RevertBindingExpression = IsDateOnly(_columnTypes[column.Id])
+                ? $"{propertyName}?.Value.ToString(\"d\") ?? string.Empty"
+                : $"{propertyName}?.ToString() ?? string.Empty",
             IsValueObject = true,
             ValueObjectClassName = valueObject.ClassName,
         };

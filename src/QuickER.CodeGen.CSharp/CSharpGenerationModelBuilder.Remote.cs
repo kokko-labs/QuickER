@@ -77,19 +77,26 @@ internal sealed partial class CSharpGenerationModelBuilder
                 )
                 .Append(RequestRecordName(shape, repositoryName))
                 .Append(">(context).ConfigureAwait(false);\n");
+            // 参照型のフィールドは Required で包む: エンベロープは positional record なので "{}" のような
+            // 欠落ボディが既定の null のまま通り、リポジトリ奥の null 引数例外＝500 に化ける（クライアント起因の
+            // 誤りは 400 が正）。値型は省略形を持たないためそのまま渡す（CRUD 側のエンベロープと同じ規則）
             arguments.AddRange(
-                shape.PayloadParameters.Select(p => $"request.{ToPascalCase(p.Name)}")
+                shape.PayloadParameters.Select(p =>
+                {
+                    var member = $"request.{ToPascalCase(p.Name)}";
+                    return p.IsReferenceType
+                        ? $"RemoteServerEngine.Required({member}, \"{ToPascalCase(p.Name)}\")"
+                        : member;
+                })
             );
         }
 
         arguments.Add("context.RequestAborted");
 
         builder
-            .Append(
-                "                        var repository = context.RequestServices.GetRequiredService<"
-            )
+            .Append("                        var repository = RemoteServerEngine.Repository<")
             .Append(remoteInterfaceName)
-            .Append(">();\n")
+            .Append(">(context);\n")
             .Append("                        return (object?)await repository.")
             .Append(shape.MethodName)
             .Append('(')

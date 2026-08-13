@@ -155,6 +155,7 @@ public abstract partial class EntityBase
         );
 
     /// <summary>Determines whether all column values match those of another entity (RowState and navigations are excluded from the comparison).</summary>
+    /// <remarks>The comparison reads each column through reflection (the property list itself is cached per type). That is meant for change detection and assertions, not for a hot path — write the comparison out by hand where one is called for.</remarks>
     public bool HasSameValues(EntityBase? other)
     {
         if (other is null)
@@ -191,7 +192,7 @@ public abstract partial class EntityBase
     }
 
     /// <summary>Returns a value-based hash code computed from the column values (RowState and navigations are excluded).</summary>
-    /// <remarks>Two entities for which HasSameValues is true always return the same value. Since the object is mutable, do not modify it while using it as a dictionary key.</remarks>
+    /// <remarks>Two entities for which HasSameValues is true always return the same value. Since the object is mutable, do not modify it while using it as a dictionary key. Like HasSameValues, it reads the columns through reflection and is not meant for a hot path.</remarks>
     public int GetValueHashCode()
     {
         var type = GetType();

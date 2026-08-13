@@ -125,7 +125,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             // クライアントの転送メソッドは「実体はサーバー側」であることを summary へ明示する（フックはサーバー側にしか無い）
             summary
                 + " The check, including any user-defined hooks, runs in the server-side repository.",
-            [new QueryPayloadParameter(entityClassName, "entity")]
+            [new QueryPayloadParameter(entityClassName, "entity", true)]
         );
 
         return new UniquenessBlocks(
@@ -498,8 +498,11 @@ internal sealed partial class CSharpGenerationModelBuilder
             "    /// Checks this edit model's confirmed values against the database through the repository and registers duplicate-value errors (returns true when there are no violations).",
             "    /// </summary>",
             "    /// <remarks>",
-            "    /// The duplicate-value errors registered by the previous call are cleared first, so re-checking never leaves stale errors. Rows that share the primary key are excluded,",
+            "    /// The duplicate-value errors registered by the previous call are cleared first, so re-checking never leaves stale errors (only the ones this check registered:",
+            "    /// what the check among the siblings reported stays). Rows that share the primary key are excluded,",
             "    /// so the same call is correct for both insert and update (a model whose key is not set yet excludes nothing). The result is advisory only: the definitive guarantee is the database's own UNIQUE constraint (TOCTOU).",
+            "    /// The errors are registered after the await, which puts them on a thread pool thread rather than the caller's, and ErrorsChanged fires there too.",
+            "    /// A WPF binding marshals that back to the UI thread by itself, so the ordinary case needs nothing; a subscriber that updates UI state directly has to marshal it at the call site.",
             "    /// </remarks>",
             "    /// <param name=\"repository\">The repository used for the check.</param>",
             "    /// <param name=\"cancellationToken\">The cancellation token.</param>",
@@ -509,7 +512,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             "    )",
             "    {",
             "        ArgumentNullException.ThrowIfNull(repository);",
-            "        ClearDuplicateErrors();",
+            "        ClearDuplicateErrors(DuplicateErrorSource.Database);",
             string.Empty,
             $"        var entity = new {entityClassName}();",
         };
@@ -541,7 +544,11 @@ internal sealed partial class CSharpGenerationModelBuilder
             string.Empty,
             "        foreach (var violation in violations)",
             "        {",
-            "            RegisterDuplicateError(violation.PropertyNames, violation.Message);",
+            "            RegisterDuplicateError(",
+            "                violation.PropertyNames,",
+            "                violation.Message,",
+            "                DuplicateErrorSource.Database",
+            "            );",
             "        }",
             string.Empty,
             "        return violations.Count == 0;",

@@ -37,7 +37,11 @@ public sealed class SqliteSchemaBootstrapRuntimeTests : IDisposable
     {
         var ddl = new SqliteDdlGenerator().Build(BinaryFixtureDefinition.Build());
 
-        await SqliteSchemaBootstrap.ApplyDdlAsync(_db.ReadWriteCreateConnectionString, ddl, Ct);
+        await SqliteSchemaBootstrap.ApplyDdlAsync(
+            _db.ReadWriteCreateConnectionString,
+            ddl,
+            cancellationToken: Ct
+        );
 
         // documents / document_notes の 2 本が 1 回の適用で作られている
         await using (var connection = new SqliteConnection(_db.ReadWriteCreateConnectionString))
@@ -87,15 +91,55 @@ public sealed class SqliteSchemaBootstrapRuntimeTests : IDisposable
     public async Task ApplyDdlAsync_RejectsEmptyArguments()
     {
         var emptyConnectionString = async () =>
-            await SqliteSchemaBootstrap.ApplyDdlAsync("   ", "CREATE TABLE t (x int);", Ct);
+            await SqliteSchemaBootstrap.ApplyDdlAsync(
+                "   ",
+                "CREATE TABLE t (x int);",
+                cancellationToken: Ct
+            );
         await emptyConnectionString.Should().ThrowAsync<ArgumentException>();
 
         var emptyDdl = async () =>
             await SqliteSchemaBootstrap.ApplyDdlAsync(
                 _db.ReadWriteCreateConnectionString,
                 "   ",
-                Ct
+                cancellationToken: Ct
             );
         await emptyDdl.Should().ThrowAsync<ArgumentException>();
+    }
+
+    /// <summary>コマンドタイムアウトを明示指定しても適用でき、負の指定は引数例外で弾かれる</summary>
+    /// <remarks>
+    /// 既定（null）はプロバイダ既定のまま。大きな DDL を遅いマシンへ流すときに伸ばせるようにした引数で、
+    /// ADO のコマンドが秒単位でしか受け付けないため切り上げて渡している。
+    /// </remarks>
+    [Fact(DisplayName = "[SQLiteブートストラップ] コマンドタイムアウトを指定でき負値は引数例外")]
+    public async Task ApplyDdlAsync_AcceptsCommandTimeout()
+    {
+        var ddl = new SqliteDdlGenerator().Build(BinaryFixtureDefinition.Build());
+
+        await SqliteSchemaBootstrap.ApplyDdlAsync(
+            _db.ReadWriteCreateConnectionString,
+            ddl,
+            TimeSpan.FromMinutes(2),
+            Ct
+        );
+
+        await using (var connection = new SqliteConnection(_db.ReadWriteCreateConnectionString))
+        {
+            await connection.OpenAsync(Ct);
+            await using var command = connection.CreateCommand();
+            command.CommandText =
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'documents';";
+            Convert.ToInt32(await command.ExecuteScalarAsync(Ct)).Should().Be(1);
+        }
+
+        var negative = async () =>
+            await SqliteSchemaBootstrap.ApplyDdlAsync(
+                _db.ReadWriteCreateConnectionString,
+                ddl,
+                TimeSpan.FromSeconds(-1),
+                Ct
+            );
+        await negative.Should().ThrowAsync<ArgumentOutOfRangeException>();
     }
 }

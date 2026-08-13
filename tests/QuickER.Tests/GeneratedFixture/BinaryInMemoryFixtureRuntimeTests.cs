@@ -205,6 +205,76 @@ public sealed class BinaryInMemoryFixtureRuntimeTests
             .Equal(Doc1Payload, "返却は完全クローンのためストアは書き換わらない");
     }
 
+    /// <summary>
+    /// 射影のフォールバック経路（列抽出不能なセレクタ）でも <c>WithUnboundedBinary</c> が効く（方言側とパリティ）。
+    /// </summary>
+    /// <remarks>
+    /// 方言側のフォールバックは <c>ToListAsync</c> 委譲なので自然にフラグを拾う。インメモリだけが常に strip して
+    /// いたため、同じ呼び出しが実 DB では blob を返しインメモリでは null という乖離があった。
+    /// 対照は <c>BinaryColumnAdoRuntimeTests</c> の 8b。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Binary/InMemory] 射影のフォールバックでも WithUnboundedBinary で除外列が取れる"
+    )]
+    public async Task Projection_Fallback_HonorsWithUnboundedBinary()
+    {
+        var (_, documents) = await SeededAsync();
+
+        // エンティティを丸ごと引数に取るためセレクタから列を抽出できない＝完全クローンからのフォールバック射影になる
+        var withFlag = await documents
+            .Query()
+            .Where(d => d.DocumentId == 1)
+            .WithUnboundedBinary()
+            .ToProjectionListAsync(d => PayloadOf(d), Ct);
+        withFlag.Should().ContainSingle().Which.Should().Equal(Doc1Payload);
+
+        // 指定しなければ従来どおり除外列は未取得状態のまま射影される
+        var withoutFlag = await documents
+            .Query()
+            .Where(d => d.DocumentId == 1)
+            .ToProjectionListAsync(d => PayloadOf(d), Ct);
+        withoutFlag.Should().ContainSingle().Which.Should().BeNull();
+    }
+
+    /// <summary>射影セレクタからの列抽出を成立させないためのヘルパー（エンティティ全体を引数に取る）</summary>
+    private static byte[]? PayloadOf(DocumentEntity document) => document.Payload;
+
+    /// <summary>
+    /// 保存後に呼び出し側が byte[] 列を破壊的に書き換えても、ストアの行には波及しない（列コピーの独立性）。
+    /// </summary>
+    [Fact(DisplayName = "[Binary/InMemory] 保存後に byte[] を書き換えてもストアの行は変わらない")]
+    public async Task Insert_CopiesBinaryColumns_NotShared()
+    {
+        var store = new InMemoryDataStore();
+        var documents = new InMemoryDocumentRepository(store);
+
+        var checksum = new byte[] { 1, 2, 3 };
+        var payload = new byte[] { 7, 7, 7 };
+        await documents.InsertAsync(
+            new DocumentEntity
+            {
+                DocumentId = 1,
+                Title = "alpha",
+                Payload = payload,
+                Checksum = checksum,
+                RowState = RowState.Added,
+            },
+            Ct
+        );
+
+        // 呼び出し側の配列をその場で書き換える（値オブジェクトではない素の byte[]）
+        checksum[0] = 0xFF;
+        payload[0] = 0xFF;
+
+        var stored = await documents
+            .Query()
+            .Where(d => d.DocumentId == 1)
+            .WithUnboundedBinary()
+            .FirstOrDefaultAsync(Ct);
+        stored!.Checksum.Should().Equal([1, 2, 3], "ストアは自分の複製を持つ");
+        stored.Payload.Should().Equal([7, 7, 7]);
+    }
+
     /// <summary>WithUnboundedBinary と Include の併用はインメモリでも例外になる（実 DB とパリティ）</summary>
     [Fact(DisplayName = "[Binary/InMemory] WithUnboundedBinary と Include の併用は例外になる")]
     public async Task WithUnboundedBinary_WithInclude_Throws()

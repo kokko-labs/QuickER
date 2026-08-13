@@ -85,6 +85,9 @@
   <data name="CodeGen_Error_ColumnPropertyNameCollision" xml:space="preserve">
     <value>Columns {2} of table '{0}' all map to the same property name '{1}'. The entity and EditModel classes would declare duplicate members and fail to compile. Rename the columns so that the generated property names differ (column names are converted to Pascal case, so 'user-id', 'user_id', and 'USER_ID' all become 'UserId').</value>
   </data>
+  <data name="CodeGen_Error_MultipleRowVersionColumns" xml:space="preserve">
+    <value>Table '{0}' has more than one rowversion column ({1}). Optimistic concurrency reads and writes a single version column per table, and SQL Server allows only one as well, so the DDL would fail on the second one. Keep one rowversion column and give the others another type.</value>
+  </data>
   <data name="CodeGen_Error_GeneratedMemberNameCollision" xml:space="preserve">
     <value>Class '{0}' (table '{1}') generates the member name '{2}' more than once (from {3}). The same member would be declared twice and fail to compile (CS0102). Rename the columns so that every generated member name is unique. Note that an EditModel generates five members per column (Name, _name, BindingName, _bindingName, _bindingNameSnapshot), so a column named 'binding_id' collides with the members generated for a column named 'id', and a column whose property name equals a navigation property name (for example a column named 'customer' on a table that references the 'customers' table) collides on the entity class as well.</value>
   </data>

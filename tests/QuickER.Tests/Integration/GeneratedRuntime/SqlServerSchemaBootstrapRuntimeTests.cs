@@ -38,7 +38,11 @@ public sealed class SqlServerSchemaBootstrapRuntimeTests(SqlServerContainerFixtu
         await _fixture.ResetSchemaAsync(Ct);
 
         var ddl = new SqlServerDdlGenerator().Build(SqlServerBinaryFixtureDefinition.Build());
-        await SqlServerSchemaBootstrap.ApplyDdlAsync(_fixture.ConnectionString, ddl, Ct);
+        await SqlServerSchemaBootstrap.ApplyDdlAsync(
+            _fixture.ConnectionString,
+            ddl,
+            cancellationToken: Ct
+        );
 
         var provider = new ServiceCollection()
             .AddGeneratedSqlServerRepositories(_fixture.ConnectionString)

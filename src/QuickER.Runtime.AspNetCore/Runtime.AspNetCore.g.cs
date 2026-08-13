@@ -36,6 +36,13 @@ namespace QuickER.Runtime.AspNetCore;
 public static class RemoteServerEngine
 {
     /// <summary>Runs a handler, writes the result as JSON, and maps exceptions to HTTP responses (400/409/500, or the status carried by a rejected request such as 413).</summary>
+    /// <remarks>
+    /// Every classifying catch is guarded by <c>!Response.HasStarted</c>, matching the binary transfer executors: once
+    /// the status line and headers have gone out - a failure part-way through serializing the result, for instance -
+    /// the status code can no longer be changed, and writing an error body would append it to the partial response
+    /// instead of replacing it. Such a failure is recorded on the server side and rethrown, which lets the host abort
+    /// the connection so that the client sees a truncated response rather than a corrupted one.
+    /// </remarks>
     public static async Task ExecuteAsync(HttpContext context, Func<Task<object?>> handler)
     {
         try
@@ -47,7 +54,7 @@ public static class RemoteServerEngine
                 context.RequestAborted
             ).ConfigureAwait(false);
         }
-        catch (RemoteBadRequestException ex)
+        catch (RemoteBadRequestException ex) when (!context.Response.HasStarted)
         {
             // The request itself could not be interpreted: a client-side fault, so it is classified as 400 without server-side logging or the hook.
             await WriteErrorAsync(
@@ -57,12 +64,12 @@ public static class RemoteServerEngine
                 ex.Message
             ).ConfigureAwait(false);
         }
-        catch (BadHttpRequestException ex)
+        catch (BadHttpRequestException ex) when (!context.Response.HasStarted)
         {
             // Rejected by the server infrastructure (request body size limit, malformed request): pass through the status code it carries (413 and similar).
             await WriteErrorAsync(context, ex.StatusCode, "BadRequest", ex.Message).ConfigureAwait(false);
         }
-        catch (SaveConflictException ex)
+        catch (SaveConflictException ex) when (!context.Response.HasStarted)
         {
             // Optimistic-concurrency conflicts are restored on the client as SaveConflictException (the same catch works as with a direct call).
             await WriteErrorAsync(
@@ -77,9 +84,18 @@ public static class RemoteServerEngine
         {
             // Client disconnected or cancelled: there is no longer a response target, so do nothing.
         }
-        catch (Exception ex)
+        catch (Exception ex) when (!context.Response.HasStarted)
         {
             await WriteServerErrorAsync(context, ex).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            // The response is already on the wire, so none of the classified answers can be produced any more. The
+            // failure would otherwise disappear entirely, therefore it is logged here - the one part of the 500 path
+            // that does not need the response - before it is rethrown. The OnServerError hook stays out of it: it is
+            // the extension point of a 500 response, and no 500 is being sent.
+            LogServerError(context, ex);
+            throw;
         }
     }
 
@@ -264,13 +280,32 @@ public static class RemoteServerEngine
         }
     }
 
+    /// <summary>The 404 message a binary endpoint sends when the row it addressed does not exist (or the column is NULL).</summary>
+    private const string BinaryNotFoundMessage =
+        "The row does not exist, or the column holds no value.";
+
+    /// <summary>Answers a binary endpoint's "no row / NULL" as a 404 carrying a <see cref="RemoteError"/> of type "NotFound".</summary>
+    /// <remarks>
+    /// The body is what tells this 404 apart from one the routing layer produced - a base address or prefix that does not
+    /// match, a route that no longer exists - which the client would otherwise read as "no data" and hide the
+    /// misconfiguration behind an empty result. Only the 404 written here belongs to the contract; the client raises
+    /// every other one.
+    /// </remarks>
+    private static Task WriteBinaryNotFoundAsync(HttpContext context) =>
+        WriteErrorAsync(
+            context,
+            StatusCodes.Status404NotFound,
+            "NotFound",
+            BinaryNotFoundMessage
+        );
+
     /// <summary>
     /// Performs a download (GET) of an unbounded binary column. When the read function returns <c>false</c> (no row / NULL),
-    /// no body is sent and the response resolves to 404; when it returns <c>true</c> (including an empty blob), it returns
-    /// 200 with <c>application/octet-stream</c>. Because the response cannot be switched to 404 once writing has begun, a
-    /// wrapper stream that defers the response start until the first write is passed in (reconciling existence detection
-    /// with O(chunk) streaming). A key that cannot be interpreted yields 400, and only when the read function throws
-    /// before writing any body is a 500 with <see cref="RemoteError"/> returned.
+    /// no body is sent and the response resolves to a 404 marked as "NotFound"; when it returns <c>true</c> (including an
+    /// empty blob), it returns 200 with <c>application/octet-stream</c>. Because the response cannot be switched to 404 once
+    /// writing has begun, a wrapper stream that defers the response start until the first write is passed in (reconciling
+    /// existence detection with O(chunk) streaming). A key that cannot be interpreted yields 400, and only when the read
+    /// function throws before writing any body is a 500 with <see cref="RemoteError"/> returned.
     /// </summary>
     public static async Task ExecuteDownloadAsync(HttpContext context, Func<Stream, Task<bool>> read)
     {
@@ -282,8 +317,8 @@ public static class RemoteServerEngine
 
             if (!wrote)
             {
-                // No row / NULL: no body has been sent yet, so the response can resolve to 404.
-                context.Response.StatusCode = StatusCodes.Status404NotFound;
+                // No row / NULL: no body has been sent yet, so the response can resolve to a marked 404.
+                await WriteBinaryNotFoundAsync(context).ConfigureAwait(false);
                 return;
             }
 
@@ -317,8 +352,8 @@ public static class RemoteServerEngine
 
     /// <summary>
     /// Performs an upload (PUT) of an unbounded binary column. A missing Content-Length (chunked transfer) yields 411
-    /// (the transfer contract requires a length), success yields 204, a missing row yields 404, and a key that cannot be
-    /// interpreted yields 400. The
+    /// (the transfer contract requires a length), success yields 204, a missing row yields a 404 marked as "NotFound",
+    /// and a key that cannot be interpreted yields 400. The
     /// <see cref="Microsoft.AspNetCore.Http.HttpRequest.Body"/> (non-seekable) is passed to the write with its length.
     /// </summary>
     public static async Task ExecuteUploadAsync(
@@ -333,14 +368,25 @@ public static class RemoteServerEngine
             if (length is null)
             {
                 // Reject chunked transfers, which violate the length-required contract (for example SQLite's zeroblob).
-                context.Response.StatusCode = StatusCodes.Status411LengthRequired;
+                // The body describes the rejection like every other classified failure does
+                await WriteErrorAsync(
+                    context,
+                    StatusCodes.Status411LengthRequired,
+                    "BadRequest",
+                    "A binary column upload requires a Content-Length header (chunked transfer is not supported)."
+                ).ConfigureAwait(false);
                 return;
             }
 
             var updated = await write(context.Request.Body, length.Value).ConfigureAwait(false);
-            context.Response.StatusCode = updated
-                ? StatusCodes.Status204NoContent
-                : StatusCodes.Status404NotFound;
+
+            if (!updated)
+            {
+                await WriteBinaryNotFoundAsync(context).ConfigureAwait(false);
+                return;
+            }
+
+            context.Response.StatusCode = StatusCodes.Status204NoContent;
         }
         catch (RemoteBadRequestException ex) when (!context.Response.HasStarted)
         {
@@ -367,15 +413,20 @@ public static class RemoteServerEngine
         }
     }
 
-    /// <summary>Performs a NULL-out (DELETE) of an unbounded binary column. Success yields 204, a missing row yields 404, and a key that cannot be interpreted yields 400.</summary>
+    /// <summary>Performs a NULL-out (DELETE) of an unbounded binary column. Success yields 204, a missing row yields a 404 marked as "NotFound", and a key that cannot be interpreted yields 400.</summary>
     public static async Task ExecuteDeleteAsync(HttpContext context, Func<Task<bool>> deleteToNull)
     {
         try
         {
             var updated = await deleteToNull().ConfigureAwait(false);
-            context.Response.StatusCode = updated
-                ? StatusCodes.Status204NoContent
-                : StatusCodes.Status404NotFound;
+
+            if (!updated)
+            {
+                await WriteBinaryNotFoundAsync(context).ConfigureAwait(false);
+                return;
+            }
+
+            context.Response.StatusCode = StatusCodes.Status204NoContent;
         }
         catch (RemoteBadRequestException ex) when (!context.Response.HasStarted)
         {
@@ -661,9 +712,11 @@ public sealed class RemoteErrorDetailPolicy(
 
 /// <summary>Endpoint metadata that lifts the request size limit for the binary PUT (allowing GB-scale uploads with no extra configuration).</summary>
 /// <remarks>
-/// Because lifting the limit raises DoS concerns, combining it with authorization
-/// (<c>MapGeneratedRemoteEndpoints().RequireAuthorization()</c>) is recommended.
-/// To restore the default limit or set a different value, override the whole group via the returned <see cref="RouteGroupBuilder"/>.
+/// It is attached only when the group was mapped with <c>allowUnboundedUploads: true</c>; without it the host's own
+/// limit - 30 MB under Kestrel's defaults - applies and a larger upload is rejected with HTTP 413. Because an endpoint
+/// that accepts a body of any size is a denial-of-service surface, combining the opt-in with authorization
+/// (<c>MapGeneratedRemoteEndpoints(...).RequireAuthorization()</c>) is recommended.
+/// To set a limit of a different size, override the whole group via the returned <see cref="RouteGroupBuilder"/>.
 /// </remarks>
 public sealed class DisableRequestBodySizeLimit : IRequestSizeLimitMetadata
 {

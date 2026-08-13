@@ -56,10 +56,12 @@ public static class SqlServerSchemaBootstrap
     /// </remarks>
     /// <param name="connectionString">The connection string of the database to create the schema in.</param>
     /// <param name="ddl">The DDL script to run.</param>
+    /// <param name="commandTimeout">How long the DDL command may run. Null keeps the provider's default; a large script on a slow machine may need more than that.</param>
     /// <param name="cancellationToken">A token that cancels the operation.</param>
     public static async Task ApplyDdlAsync(
         string connectionString,
         string ddl,
+        TimeSpan? commandTimeout = null,
         CancellationToken cancellationToken = default
     )
     {
@@ -71,6 +73,14 @@ public static class SqlServerSchemaBootstrap
 
         await using var command = connection.CreateCommand();
         command.CommandText = ddl;
+
+        // The ADO command exposes its timeout in whole seconds, so a requested duration is rounded up (null keeps the provider default)
+        if (commandTimeout is { } timeout)
+        {
+            ArgumentOutOfRangeException.ThrowIfLessThan(timeout, TimeSpan.Zero);
+            command.CommandTimeout = (int)Math.Ceiling(timeout.TotalSeconds);
+        }
+
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 }
@@ -102,9 +112,15 @@ public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory)
         BindParameters(command, parameters);
 
         await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+
+        // The column ordinals are resolved once for the result set (on the first row, because some providers only
+        // expose the result schema after a successful Read) and reused for every row
+        EntitySaveMetadata.RawSqlRowPlan? plan = null;
+
         while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
-            items.Add(metadata.MapEntityFromRawSql<TEntity>(reader));
+            plan ??= metadata.CreateRawSqlRowPlan(reader);
+            items.Add(metadata.MapEntityFromRawSql<TEntity>(reader, plan));
         }
 
         return items;
@@ -204,7 +220,8 @@ public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory)
 /// <summary>Repository base class for SQL Server that implements CRUD using metadata.</summary>
 public abstract partial class SqlServerRepository<TEntity, TKey>(
     ISqlConnectionFactory connectionFactory,
-    ISaveHookRegistry? saveHooks = null
+    ISaveHookRegistry? saveHooks = null,
+    ISqlExecutor? sqlExecutor = null
 ) : IRepository<TEntity, TKey>
     where TEntity : EntityBase, new()
 {
@@ -214,8 +231,12 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
     /// <summary>The source of SQL connections.</summary>
     private readonly ISqlConnectionFactory _connectionFactory = connectionFactory;
 
-    /// <summary>The delegate target of the raw SQL methods (consolidates binding and mapping into a single implementation).</summary>
-    private readonly ISqlExecutor _sqlExecutor = new SqlExecutor(connectionFactory);
+    /// <summary>
+    /// The delegate target of the raw SQL methods (consolidates binding and mapping into a single implementation).
+    /// Unspecified = null builds the default implementation over the same connection factory, which keeps
+    /// hand-constructed repositories working; the DI registrations pass the registered implementation instead.
+    /// </summary>
+    private readonly ISqlExecutor _sqlExecutor = sqlExecutor ?? new SqlExecutor(connectionFactory);
 
     /// <summary>The save hook registry (unspecified = null = no hooks, a complete no-op).</summary>
     private readonly ISaveHookRegistry? _saveHooks = saveHooks;
@@ -298,8 +319,16 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
 
     /// <summary>Bulk inserts a collection of entities using SqlBulkCopy.</summary>
     /// <remarks>
+    /// <para>
+    /// Constraints are checked: SqlBulkCopy skips foreign key and CHECK constraints unless asked to honour them, which would
+    /// let a bulk insert write rows the row-at-a-time INSERT path rejects. <c>CheckConstraints</c> is therefore always on, so
+    /// a violating row fails the copy exactly as it would fail an INSERT. Triggers are still not fired
+    /// (<c>FireTriggers</c> is deliberately left off - QuickER's DDL generates no triggers).
+    /// </para>
+    /// <para>
     /// Known limitation: SqlBulkCopy cannot return generated values, so for a table with a rowversion column the entities
     /// keep whatever version they had. Re-read them when the version is needed for a later update.
+    /// </para>
     /// </remarks>
     public async Task<int> BulkInsertAsync(
         IEnumerable<TEntity> entities,
@@ -307,6 +336,7 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
     )
     {
         ArgumentNullException.ThrowIfNull(entities);
+        cancellationToken.ThrowIfCancellationRequested();
 
         // If a collection with a known count is empty, return without opening a connection
         if (entities is ICollection<TEntity> { Count: 0 })
@@ -317,11 +347,19 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
-        using var bulkCopy = new SqlBulkCopy(connection)
+        using var bulkCopy = new SqlBulkCopy(
+            connection,
+            SqlBulkCopyOptions.CheckConstraints,
+            externalTransaction: null
+        )
         {
             DestinationTableName = _metadata.TableName,
         };
-        using var reader = _metadata.CreateDataReader(entities);
+
+        // Null elements are dropped before the reader sees them, so they are skipped rather than failing the whole copy
+        using var reader = _metadata.CreateDataReader(
+            entities.Where(entity => entity is not null)
+        );
 
         // Map explicitly by column name (the DB column name) to avoid depending on column order
         for (var i = 0; i < reader.FieldCount; i++)
@@ -460,7 +498,8 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
-        // Delegate to the streaming engine in standalone mode (own connection, own transaction)
+        // Delegate to the streaming engine in standalone mode (own connection; the write is one UPDATE, so the statement's
+        // implicit transaction is the only one involved)
         return await UnboundedBinaryColumnEngine.WriteAsync(
             _metadata,
             propertyName,
@@ -516,10 +555,12 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
         // Row versions the database assigns are collected during the transaction and applied only after it commits
         var versions = new RowVersionCollector();
 
+        int rows;
+
         try
         {
             // HasChanges was already checked before this call, so skip the redundant internal graph traversal
-            var rows = await EntityGraphSaver.SaveAsync(
+            rows = await EntityGraphSaver.SaveAsync(
                 entity,
                 connection,
                 transaction,
@@ -533,21 +574,24 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
                 versions: versions
             ).ConfigureAwait(false);
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
-
-            // The commit made the new row versions visible, so settle them on the entities
-            versions.Apply();
-
-            // After a successful commit, settle the state (Added/Updated → Unchanged) to prevent double-processing on a re-save.
-            // Skipped rows (where a hook's Before returned false) are left as they are
-            EntityGraphSaver.AcceptChanges(entity, cascadeSave, hooks?.Skipped);
-            return rows;
         }
         catch
         {
-            // Roll back with CancellationToken.None: a canceled token must not interrupt the rollback or mask the original exception.
-            await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+            await SqlTransactions.RollbackQuietlyAsync(transaction).ConfigureAwait(false);
             throw;
         }
+
+        // What follows is settled state, not database work, and it is kept outside the try on purpose: the transaction
+        // has already committed, so there is nothing left to roll back, and routing a failure here through the catch
+        // would trade the real exception for a rollback error.
+
+        // The commit made the new row versions visible, so settle them on the entities
+        versions.Apply();
+
+        // After a successful commit, settle the state (Added/Updated → Unchanged) to prevent double-processing on a re-save.
+        // Skipped rows (where a hook's Before returned false) are left as they are
+        EntityGraphSaver.AcceptChanges(entity, cascadeSave, hooks?.Skipped);
+        return rows;
     }
 
     /// <summary>Saves multiple aggregate roots together in a single transaction (an atomic all-succeed-or-all-rollback operation).</summary>
@@ -596,9 +640,10 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
         // Row versions the database assigns are collected during the transaction and applied only after it commits
         var versions = new RowVersionCollector();
 
+        var rows = 0;
+
         try
         {
-            var rows = 0;
             foreach (var entity in targets)
             {
                 // targets is already filtered by HasChanges, so skip the redundant internal graph traversal
@@ -618,25 +663,28 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
             }
 
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
-
-            // The commit made the new row versions visible, so settle them on the entities
-            versions.Apply();
-
-            // After a successful commit, settle the state of every graph (Added/Updated → Unchanged) to prevent double-processing on a re-save.
-            // Skipped rows (where a hook's Before returned false) are left as they are
-            foreach (var entity in targets)
-            {
-                EntityGraphSaver.AcceptChanges(entity, cascadeSave, hooks?.Skipped);
-            }
-
-            return rows;
         }
         catch
         {
-            // Roll back with CancellationToken.None: a canceled token must not interrupt the rollback or mask the original exception.
-            await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+            await SqlTransactions.RollbackQuietlyAsync(transaction).ConfigureAwait(false);
             throw;
         }
+
+        // What follows is settled state, not database work, and it is kept outside the try on purpose: the transaction
+        // has already committed, so there is nothing left to roll back, and routing a failure here through the catch
+        // would trade the real exception for a rollback error.
+
+        // The commit made the new row versions visible, so settle them on the entities
+        versions.Apply();
+
+        // After a successful commit, settle the state of every graph (Added/Updated → Unchanged) to prevent double-processing on a re-save.
+        // Skipped rows (where a hook's Before returned false) are left as they are
+        foreach (var entity in targets)
+        {
+            EntityGraphSaver.AcceptChanges(entity, cascadeSave, hooks?.Skipped);
+        }
+
+        return rows;
     }
 
     /// <summary>Executes a raw SQL SELECT and maps the result rows to {TEntity}.</summary>
@@ -749,9 +797,9 @@ public sealed class SqlSaveHookContext(
 /// <see cref="ISaveHookContext.WriteBinaryColumnAsync"/> (enlisted mode — participating in the in-progress transaction).
 /// </para>
 /// <para>
-/// <b>Beware the enlisted/standalone split for SQLite</b>: a write allocates a zeroblob, resolves the rowid, and copies via
-/// SqliteBlob within one transaction. Standalone mode opens its own transaction and commits it, whereas enlisted mode uses
-/// the in-progress transaction as is and does not commit (the outer Save commits). Mixing these up loses the blob.
+/// A write is a single UPDATE that streams the payload straight into its parameter, so standalone mode opens no transaction
+/// of its own — the statement's implicit one is all there is — and enlisted mode just runs on the transaction it was handed,
+/// leaving the commit to the outer Save.
 /// </para>
 /// </remarks>
 public static class UnboundedBinaryColumnEngine
@@ -1147,8 +1195,7 @@ public sealed class SqlServerSqlQueryExecutor<TEntity>(ISqlConnectionFactory con
         }
         catch
         {
-            // Roll back with CancellationToken.None: a canceled token must not interrupt the rollback or mask the original exception.
-            await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+            await SqlTransactions.RollbackQuietlyAsync(transaction).ConfigureAwait(false);
             throw;
         }
     }
@@ -1520,14 +1567,26 @@ public static class SqlExpressionTranslator
         }
     }
 
-    /// <summary>Translates a binary comparison, compensating for null values on the value side.</summary>
+    /// <summary>Translates a binary comparison, compensating for nulls on both the value side and the column side.</summary>
     /// <remarks>
+    /// <para>
     /// Each side is resolved once: an operand that stays on the SQL side (a column reference or a date component) is rendered as SQL,
     /// and every other operand is evaluated to its actual value. When an <c>==</c> / <c>!=</c> comparison has a value operand that turns
     /// out to be null (a literal null, or a variable / expression that evaluates to null), it becomes <c>IS NULL</c> / <c>IS NOT NULL</c>,
     /// which is what C# and EF Core mean by it. Binding the null as an ordinary parameter would instead leave <c>col = @p</c>, and SQL's
-    /// three-valued logic makes that UNKNOWN for every row. The compensation is deliberately limited to equality: the relational operators
-    /// (&lt; &lt;= &gt; &gt;=) keep binding the null as a parameter, because they have no null-aware SQL counterpart.
+    /// three-valued logic makes that UNKNOWN for every row.
+    /// </para>
+    /// <para>
+    /// The other half of the same mismatch sits on the column side: <c>col &lt;&gt; @p</c> is UNKNOWN - and therefore excluded - for
+    /// every row whose column is NULL, while C# and EF Core both consider NULL different from a non-null value. A <c>!=</c> against a
+    /// non-null value is therefore emitted as <c>(col &lt;&gt; @p OR col IS NULL)</c>, the same shape EF Core's relational provider
+    /// produces. It is applied without asking whether the column allows NULL, because that cannot be decided reliably from the
+    /// expression tree; on a column that is never NULL the added disjunct simply never holds, so the result is unchanged.
+    /// </para>
+    /// <para>
+    /// Both compensations are deliberately limited to equality: the relational operators (&lt; &lt;= &gt; &gt;=) are left alone,
+    /// because they have no null-aware SQL counterpart.
+    /// </para>
     /// </remarks>
     private static string VisitComparison(
         BinaryExpression binary,
@@ -1555,6 +1614,21 @@ public static class SqlExpressionTranslator
             if (rightSql is not null && leftSql is null && IsNullValue(leftValue))
             {
                 return $"{rightSql} IS {suffix}NULL";
+            }
+        }
+
+        // "not equal to a non-null value" also has to admit the rows whose column is NULL (see the remarks); the null
+        // value cases have already returned above, so what reaches here is exactly the non-null comparison
+        if (binary.NodeType == ExpressionType.NotEqual)
+        {
+            if (leftSql is not null && rightSql is null)
+            {
+                return $"({leftSql} <> {AddParameter(rightValue, parameters, RawColumnName(leftSql))} OR {leftSql} IS NULL)";
+            }
+
+            if (rightSql is not null && leftSql is null)
+            {
+                return $"({rightSql} <> {AddParameter(leftValue, parameters, RawColumnName(rightSql))} OR {rightSql} IS NULL)";
             }
         }
 
@@ -1827,9 +1901,40 @@ public static class SqlExpressionTranslator
         return expression;
     }
 
-    /// <summary>Whether the member is a property reference on the lambda parameter (i.e. a column).</summary>
-    private static bool IsColumn(MemberExpression member) =>
-        member is { Expression: ParameterExpression, Member: PropertyInfo };
+    /// <summary>Whether the member is a property reference on the lambda parameter (i.e. a column). A navigation property is not a column and is rejected outright.</summary>
+    /// <remarks>
+    /// A navigation carries no column of its own, so treating one as a column would emit its property name as a column
+    /// name and produce SQL the database rejects (<c>x.Parent == null</c> became <c>[Parent] IS NULL</c>). The in-memory
+    /// store and EF Core both translate such a predicate happily, which made this the one place where the three backends
+    /// disagreed. Failing here states the limitation instead, and the fix is always the same: filter on the foreign-key column.
+    /// </remarks>
+    private static bool IsColumn(MemberExpression member)
+    {
+        if (member is not { Expression: ParameterExpression, Member: PropertyInfo property })
+        {
+            return false;
+        }
+
+        if (IsNavigation(property))
+        {
+            throw new NotSupportedException(
+                $"'{property.DeclaringType?.Name}.{property.Name}' is a navigation property and cannot be translated to SQL; "
+                    + "filter on the foreign-key column instead."
+            );
+        }
+
+        return true;
+    }
+
+    /// <summary>Caches the [NavigationReference] lookup per property (the column check runs for every column reference in every predicate).</summary>
+    private static readonly ConcurrentDictionary<PropertyInfo, bool> _navigationCache = new();
+
+    /// <summary>Whether the property is a navigation (annotated with <see cref="NavigationReferenceAttribute"/>) rather than a column.</summary>
+    private static bool IsNavigation(PropertyInfo property) =>
+        _navigationCache.GetOrAdd(
+            property,
+            static p => p.GetCustomAttribute<NavigationReferenceAttribute>() is not null
+        );
 
     /// <summary>Caches member-to-bracketed-column-name resolution per type member (avoiding [Column] reflection for every column reference).</summary>
     private static readonly ConcurrentDictionary<MemberInfo, string> _columnNameCache = new();
@@ -1938,8 +2043,14 @@ public static class SqlExpressionTranslator
     }
 
     /// <summary>Wraps an arbitrary expression tree in a lambda, compiles and invokes it to obtain the actual value (fallback for expressions that cannot be read directly via reflection).</summary>
+    /// <remarks>
+    /// The lambda is typed as <c>Func&lt;object&gt;</c> (boxing the result with a Convert node) so that it can be invoked
+    /// directly. The untyped <c>Compile().DynamicInvoke()</c> pair goes through reflection on every call and wraps any
+    /// exception the expression throws in a <see cref="System.Reflection.TargetInvocationException"/>.
+    /// </remarks>
     private static object? CompileAndInvoke(Expression expression) =>
-        Expression.Lambda(expression).Compile().DynamicInvoke();
+        Expression.Lambda<Func<object?>>(Expression.Convert(expression, typeof(object)))
+            .Compile()();
 
     /// <param name="value">The actual value to parameterize (may be null).</param>
     /// <param name="parameters">The list that receives the generated parameter.</param>
@@ -2058,6 +2169,9 @@ public sealed class EntitySaveMetadata
 
     /// <summary>Gets the SELECT statement that fetches a row by primary key.</summary>
     public required string SelectByIdSql { get; init; }
+
+    /// <summary>Gets the statement that answers whether a row with the given primary key exists (1 or 0), without fetching any column data.</summary>
+    public required string ExistsByIdSql { get; init; }
 
     /// <summary>Gets the INSERT statement.</summary>
     public required string InsertSql { get; init; }
@@ -2219,6 +2333,8 @@ public sealed class EntitySaveMetadata
             ColumnList = columnList,
             SelectAllSql = $"SELECT {columnList} FROM {tableName};",
             SelectByIdSql = $"SELECT {columnList} FROM {tableName} WHERE [{keyColumnName}] = @id;",
+            ExistsByIdSql =
+                $"SELECT CASE WHEN EXISTS (SELECT 1 FROM {tableName} WHERE [{keyColumnName}] = @id) THEN 1 ELSE 0 END;",
             InsertSql =
                 $"INSERT INTO {tableName} ({insertColumnList}) VALUES ({insertValueList});",
             UpdateSql =
@@ -2486,19 +2602,89 @@ public sealed class EntitySaveMetadata
         where TEntity : EntityBase, new() => (TEntity)SelectMaterializer(reader, SelectOrdinals(reader));
 
     /// <summary>
-    /// Strict row mapping for raw SQL (the column set and column types are variable, so no type specialization;
-    /// uses the previous lenient <see cref="SetColumnValue"/>).
+    /// The column resolution of one raw SQL result set: the ordinal of every SELECT column, plus the ordinals of the
+    /// excluded (unbounded binary) columns the statement happened to include.
     /// </summary>
-    private TEntity MapEntityStrict<TEntity>(SqlDataReader reader)
+    /// <remarks>
+    /// Built once per result set and reused for every row, so neither the name-to-ordinal lookup nor the reader's column
+    /// name set is rebuilt per row. Resolve it after the first successful <c>Read</c>: some providers only expose the
+    /// result schema once a row has been fetched.
+    /// </remarks>
+    public sealed class RawSqlRowPlan
+    {
+        /// <summary>Gets the ordinal of each <see cref="SelectColumns"/> column on this reader (same order as SelectColumns).</summary>
+        public required int[] SelectOrdinals { get; init; }
+
+        /// <summary>Gets the excluded columns this result set does contain, paired with their ordinal (empty in the usual case).</summary>
+        public required (PropertyInfo Property, int Ordinal)[] ExcludedOrdinals { get; init; }
+    }
+
+    /// <summary>Resolves the raw SQL column plan for the current result set (call once, after the first <c>Read</c>).</summary>
+    /// <exception cref="InvalidOperationException">A required SELECT column is missing from the result set.</exception>
+    public RawSqlRowPlan CreateRawSqlRowPlan(SqlDataReader reader)
+    {
+        int[] selectOrdinals;
+
+        // The exception thrown for an unknown column reference differs by data reader implementation
+        // (IndexOutOfRangeException vs ArgumentOutOfRangeException), so both are caught
+        try
+        {
+            selectOrdinals = SelectOrdinals(reader);
+        }
+        catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentOutOfRangeException)
+        {
+            throw new InvalidOperationException(
+                $"The raw SQL SELECT must include the {KeyProperty.DeclaringType?.Name} columns ({ColumnList}); use SELECT * or list all columns. "
+                    + $"The result set is missing a column: {ex.Message}",
+                ex
+            );
+        }
+
+        if (ExcludedProperties.Count == 0)
+        {
+            return new RawSqlRowPlan
+            {
+                SelectOrdinals = selectOrdinals,
+                ExcludedOrdinals = Array.Empty<(PropertyInfo, int)>(),
+            };
+        }
+
+        // Excluded (unbounded binary) columns are optional, so they are matched against the reader's own column names
+        var ordinalsByName = RawReaderOrdinals(reader);
+        var excluded = new List<(PropertyInfo Property, int Ordinal)>();
+
+        foreach (var property in ExcludedProperties)
+        {
+            if (ordinalsByName.TryGetValue(ColumnNameByProperty[property], out var ordinal))
+            {
+                excluded.Add((property, ordinal));
+            }
+        }
+
+        return new RawSqlRowPlan
+        {
+            SelectOrdinals = selectOrdinals,
+            ExcludedOrdinals = excluded.ToArray(),
+        };
+    }
+
+    /// <summary>
+    /// Strict row mapping for raw SQL (the column set and column types are variable, so no type specialization;
+    /// uses the previous lenient <see cref="SetColumnValue"/>). Reads through the plan's pre-resolved ordinals.
+    /// </summary>
+    private TEntity MapEntityStrict<TEntity>(
+        SqlDataReader reader,
+        RawSqlRowPlan plan
+    )
         where TEntity : EntityBase, new()
     {
         var entity = new TEntity();
 
         // Unbounded binary columns are excluded from SELECT by default, so only SelectColumns
         // (the pre-resolved pairs of SelectProperties) are mapped
-        foreach (var (property, columnName) in SelectColumns)
+        for (var i = 0; i < plan.SelectOrdinals.Length; i++)
         {
-            SetColumnValue(entity, property, reader[columnName]);
+            SetColumnValue(entity, SelectColumns[i].Property, reader.GetValue(plan.SelectOrdinals[i]));
         }
 
         // Rows read from the database are treated as unchanged (later edits transition them to Updated)
@@ -2519,52 +2705,43 @@ public sealed class EntitySaveMetadata
         }
         else
         {
-            // Value objects are converted to the wrapped type and re-wrapped (Wrap already applies Convert.ChangeType)
-            property.SetValue(entity, SqlValueObjectActivator.Wrap(value, property.PropertyType));
+            // Value objects are converted to the wrapped type and re-wrapped (Wrap already applies Convert.ChangeType).
+            // A stored value the value object rejects surfaces as a validation failure with no hint of where it came from,
+            // so the column is named here and the original exception is kept as the inner one
+            try
+            {
+                property.SetValue(entity, SqlValueObjectActivator.Wrap(value, property.PropertyType));
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                throw new InvalidOperationException(
+                    $"The stored value of column '{GetColumnName(property)}' could not be mapped to {entity.GetType().Name}.{property.Name} ({property.PropertyType.Name}): {ex.Message}",
+                    ex
+                );
+            }
         }
     }
 
     /// <summary>
-    /// Maps a raw SQL result row to {TEntity}. Same strict mapping as <see cref="MapEntityStrict"/> (the SELECT columns are
-    /// required), but when a column cannot be found (a partial SELECT), the error is wrapped in an
-    /// <see cref="InvalidOperationException"/> that lists the required columns for clarity. The exception thrown for an
-    /// unknown column reference differs by data reader implementation (<see cref="IndexOutOfRangeException"/> vs
-    /// <see cref="ArgumentOutOfRangeException"/>), so both are caught.
+    /// Maps a raw SQL result row to {TEntity} through a plan resolved for this result set. Same strict mapping as
+    /// <see cref="MapEntityStrict"/> (the SELECT columns are required; a missing one is reported by
+    /// <see cref="CreateRawSqlRowPlan"/> while the plan is built).
     /// Unbounded binary columns are not fetched by default, but if the raw SQL SELECT explicitly includes them they are mapped additionally (so a user who deliberately selected them gets the values).
     /// </summary>
-    public TEntity MapEntityFromRawSql<TEntity>(SqlDataReader reader)
+    public TEntity MapEntityFromRawSql<TEntity>(
+        SqlDataReader reader,
+        RawSqlRowPlan plan
+    )
         where TEntity : EntityBase, new()
     {
-        TEntity entity;
-
-        try
-        {
-            entity = MapEntityStrict<TEntity>(reader);
-        }
-        catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentOutOfRangeException)
-        {
-            throw new InvalidOperationException(
-                $"The raw SQL SELECT must include the {typeof(TEntity).Name} columns ({ColumnList}); use SELECT * or list all columns. "
-                    + $"The result set is missing a column: {ex.Message}",
-                ex
-            );
-        }
+        var entity = MapEntityStrict<TEntity>(reader, plan);
 
         // If excluded columns (unbounded binary) are present in the raw SQL result, take them opportunistically
-        if (ExcludedProperties.Count > 0)
+        if (plan.ExcludedOrdinals.Length > 0)
         {
-            var present = RawReaderColumnNames(reader);
-
-            foreach (var property in ExcludedProperties)
+            foreach (var (property, ordinal) in plan.ExcludedOrdinals)
             {
-                var columnName = ColumnNameByProperty[property];
-
-                if (!present.Contains(columnName))
-                {
-                    continue;
-                }
-
-                SetColumnValue(entity, property, reader[columnName]);
+                SetColumnValue(entity, property, reader.GetValue(ordinal));
             }
 
             // Re-finalize as unchanged so the opportunistic assignments do not shift state
@@ -2575,17 +2752,27 @@ public sealed class EntitySaveMetadata
         return entity;
     }
 
-    /// <summary>Enumerates the data reader's column name set once, case-insensitively (used to detect excluded columns in raw SQL results).</summary>
-    private static HashSet<string> RawReaderColumnNames(SqlDataReader reader)
+    /// <summary>Maps a single raw SQL result row, resolving the column plan on this call (convenience for one-row reads).</summary>
+    /// <remarks>Resolve the plan yourself with <see cref="CreateRawSqlRowPlan"/> when reading many rows, so the ordinals are resolved once for the whole result set.</remarks>
+    public TEntity MapEntityFromRawSql<TEntity>(SqlDataReader reader)
+        where TEntity : EntityBase, new() =>
+        MapEntityFromRawSql<TEntity>(reader, CreateRawSqlRowPlan(reader));
+
+    /// <summary>Enumerates the data reader's column name to ordinal map once, case-insensitively (used to detect excluded columns in raw SQL results).</summary>
+    /// <remarks>A name that appears twice keeps its first ordinal, which is what <c>GetOrdinal</c> - and therefore the previous name-based lookup - resolves it to.</remarks>
+    private static Dictionary<string, int> RawReaderOrdinals(SqlDataReader reader)
     {
-        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var ordinals = new Dictionary<string, int>(
+            reader.FieldCount,
+            StringComparer.OrdinalIgnoreCase
+        );
 
         for (var i = 0; i < reader.FieldCount; i++)
         {
-            names.Add(reader.GetName(i));
+            ordinals.TryAdd(reader.GetName(i), i);
         }
 
-        return names;
+        return ordinals;
     }
 
     /// <summary>
@@ -2789,17 +2976,66 @@ public sealed class EntitySaveMetadata
         AddColumnParameter(command, "@id", KeyProperty, value);
     }
 
-    /// <summary>Binding used when the [SqlColumnType] attribute is not generated. Adds via AddWithValue as before.</summary>
+    /// <summary>Resolves the per-property [SqlColumnType] attribute once and caches it (null when absent).</summary>
+    private static readonly ConcurrentDictionary<PropertyInfo, SqlColumnTypeAttribute?> _columnTypeCache =
+        new();
+
+    /// <summary>
+    /// Builds and adds an explicitly typed <see cref="SqlParameter"/> from the column property's
+    /// [SqlColumnType] attribute. When the attribute is absent (hand-written entities, unknown types), falls back to
+    /// AddWithValue as before.
+    /// </summary>
     /// <param name="command">The command to add the parameter to</param>
     /// <param name="name">The parameter name (with the @ prefix)</param>
-    /// <param name="property">The property corresponding to the target column (unused in this branch)</param>
+    /// <param name="property">The property corresponding to the target column (the basis for typing)</param>
     /// <param name="rawValue">The value after value objects have already been unwrapped to their raw value; null is bound as DBNull.Value</param>
     private static void AddColumnParameter(
         SqlCommand command,
         string name,
         PropertyInfo property,
         object? rawValue
-    ) => command.Parameters.AddWithValue(name, rawValue ?? DBNull.Value);
+    )
+    {
+        var attribute = _columnTypeCache.GetOrAdd(
+            property,
+            static p => p.GetCustomAttribute<SqlColumnTypeAttribute>()
+        );
+        if (attribute is null)
+        {
+            command.Parameters.AddWithValue(name, rawValue ?? DBNull.Value);
+            return;
+        }
+
+        var parameter = new SqlParameter(name, attribute.DbType);
+        // String/binary Size safety guard: when the declared length is positive and the value length is within it,
+        // use the declared length; when the value exceeds the declared length, use the value length as Size
+        // (ADO.NET truncates input values client-side by Size, so a fixed Size would cause silent data corruption
+        // instead of a server-side truncation error; sending the oversized value as-is preserves the server-side error).
+        // (max) = -1 always stays -1.
+        if (attribute.Size == -1)
+        {
+            parameter.Size = -1;
+        }
+        else if (attribute.Size > 0)
+        {
+            var valueLength = rawValue switch
+            {
+                string text => text.Length,
+                byte[] bytes => bytes.Length,
+                _ => 0,
+            };
+            parameter.Size = valueLength > attribute.Size ? valueLength : attribute.Size;
+        }
+
+        if (attribute.Precision > 0)
+        {
+            parameter.Precision = attribute.Precision;
+            parameter.Scale = attribute.Scale;
+        }
+
+        parameter.Value = rawValue ?? DBNull.Value;
+        command.Parameters.Add(parameter);
+    }
 
     /// <summary>
     /// Binds a query WHERE-clause parameter. When the column name is known and its column property is found, the
@@ -3098,8 +3334,22 @@ public sealed class RowVersionCollector
         {
             var property = EntitySaveMetadata.For(entity.GetType()).RowVersionProperty!;
 
-            // The raw bytes are wrapped here when the property is a value object type
-            property.SetValue(entity, SqlValueObjectActivator.Wrap(version, property.PropertyType));
+            // The raw bytes are wrapped here when the property is a value object type. A value object that rejects the
+            // bytes the database assigned would otherwise fail with no indication of which property was being written
+            try
+            {
+                property.SetValue(
+                    entity,
+                    SqlValueObjectActivator.Wrap(version, property.PropertyType)
+                );
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                throw new InvalidOperationException(
+                    $"The row version the database assigned could not be written back to {entity.GetType().Name}.{property.Name} ({property.PropertyType.Name}): {ex.Message}",
+                    ex
+                );
+            }
         }
     }
 }
@@ -3133,6 +3383,7 @@ public static class RowVersionConcurrency
     /// Returns whether the row the entity's primary key points at currently exists. Used after a guarded statement affected
     /// no rows, to tell "the row is gone" (the pre-existing not-found contract) apart from "the row version is stale".
     /// </summary>
+    /// <remarks>The question is existence only, so it runs the EXISTS statement rather than selecting every column of a row that is then discarded.</remarks>
     public static async Task<bool> RowExistsAsync(
         EntitySaveMetadata metadata,
         EntityBase entity,
@@ -3141,12 +3392,13 @@ public static class RowVersionConcurrency
         CancellationToken cancellationToken
     )
     {
-        await using var command = new SqlCommand(metadata.SelectByIdSql, connection);
+        await using var command = new SqlCommand(metadata.ExistsByIdSql, connection);
         command.Transaction = transaction;
         metadata.BindEntityKeyParameter(command, entity);
 
-        // ExecuteScalar yields null only when the SELECT produced no row at all (a NULL first column comes back as DBNull)
-        return await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) is not null;
+        // The statement always yields a single row whose only column is the int 1 or 0 (the CASE never returns NULL)
+        var exists = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+        return exists is int flag && flag != 0;
     }
 
     /// <summary>Builds the conflict reported when the row still exists but its version moved on since the entity was read.</summary>

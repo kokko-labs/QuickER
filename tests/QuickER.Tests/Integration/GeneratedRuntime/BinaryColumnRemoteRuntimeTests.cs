@@ -284,28 +284,91 @@ public sealed class BinaryColumnRemoteRuntimeTests : IAsyncLifetime
     }
 
     /// <summary>
-    /// 9. バイナリ PUT はリクエストサイズ制限が解除されている（既定 30MB 超の 31MB を実転送して成功）。
-    /// 既定の Kestrel 上限（約 30MB）を超える転送が 413 にならず往復することで、メタデータ解除が実効していることを示す。
+    /// 9. <c>allowUnboundedUploads: true</c> でマップしたグループのバイナリ PUT はリクエストサイズ制限が
+    /// 解除されている（既定 30MB 超の 31MB を実転送して成功）。
     /// </summary>
+    /// <remarks>
+    /// 解除は<b>オプトイン</b>なので、共有サーバー（既定＝解除なし）ではなくこのテスト専用のサーバーを立てる。
+    /// 既定側の対照は <see cref="Stream_Put_WithoutOptIn_IsRejectedByDefaultRequestSizeLimit"/>。
+    /// </remarks>
     [Fact(
-        DisplayName = "[Binary/Remote] 9: バイナリ PUT は 31MB（>30MB 既定）でも成功＝サイズ制限解除"
+        DisplayName = "[Binary/Remote] 9: allowUnboundedUploads:true のバイナリ PUT は 31MB（>30MB 既定）でも成功"
     )]
-    public async Task Stream_Put_ExceedsDefaultRequestSizeLimit()
+    public async Task Stream_Put_WithOptIn_ExceedsDefaultRequestSizeLimit()
     {
-        await SeedAsync(1, null, Doc1Thumb);
+        await using var server = await InProcessRemoteServer.StartAsync(
+            services =>
+                services.AddGeneratedSqliteRepositories(_db.ReadWriteCreateConnectionString),
+            app => app.MapGeneratedRemoteEndpoints(allowUnboundedUploads: true),
+            Ct
+        );
+        await using var clientProvider = new ServiceCollection()
+            .AddGeneratedHttpRemoteRepositories(server.BaseAddress(RemotePaths.DefaultPrefix))
+            .BuildServiceProvider();
+        var documents = clientProvider.GetRequiredService<IDocumentRemoteRepository>();
+
+        await documents.InsertAsync(
+            new DocumentEntity
+            {
+                DocumentId = 1,
+                Title = "doc-1",
+                Payload = null,
+                Thumb = Doc1Thumb,
+            },
+            Ct
+        );
 
         // 既定の Kestrel MaxRequestBodySize（30_000_000）を確実に超える 31MiB
         var payload = new byte[31 * 1024 * 1024];
         new Random(31).NextBytes(payload);
 
-        (await Documents.WritePayloadAsync(1, new MemoryStream(payload), cancellationToken: Ct))
+        (await documents.WritePayloadAsync(1, new MemoryStream(payload), cancellationToken: Ct))
             .Should()
             .BeTrue("サイズ制限解除メタデータにより 30MB 超の PUT も受理される");
 
         using var destination = new MemoryStream();
-        (await Documents.ReadPayloadAsync(1, destination, Ct)).Should().BeTrue();
+        (await documents.ReadPayloadAsync(1, destination, Ct)).Should().BeTrue();
         destination.Length.Should().Be(payload.Length, "31MB が往復する");
         destination.ToArray()[^1].Should().Be(payload[^1], "末尾バイトまで転送される");
+    }
+
+    /// <summary>
+    /// 9b. 対照: 既定（オプトインなし）のバイナリ PUT はホストのリクエストサイズ制限が効き、30MB 超は 413 になる。
+    /// </summary>
+    /// <remarks>
+    /// 共有サーバーは <c>MapGeneratedRemoteEndpoints()</c>（既定引数＝解除なし）で起動しているため、そのまま使える。
+    /// 413 は Kestrel の <c>BadHttpRequestException</c> がステータス素通しで分類された結果で、クライアントは
+    /// <see cref="RemoteRepositoryException"/> としてその状態コードを保って復元する。
+    /// ただし Kestrel は上限超過を検知した時点で本文の受信を打ち切るため、クライアントが 413 応答を読み取る前に
+    /// 送信側のソケットが接続リセットを観測すると <see cref="HttpRequestException"/> になる（タイミング依存の正常系）。
+    /// どちらの形でも「既定では 31MB の書き込みが拒否される」という契約自体は成立しているため、両方を合格とする。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Binary/Remote] 9b: 既定（オプトインなし）のバイナリ PUT は 31MB が拒否される（413 または送信中断）"
+    )]
+    public async Task Stream_Put_WithoutOptIn_IsRejectedByDefaultRequestSizeLimit()
+    {
+        await SeedAsync(1, null, Doc1Thumb);
+
+        var payload = new byte[31 * 1024 * 1024];
+        new Random(31).NextBytes(payload);
+
+        var act = async () =>
+            await Documents.WritePayloadAsync(1, new MemoryStream(payload), cancellationToken: Ct);
+
+        // 413 応答を読めた場合と、Kestrel の受信打ち切りで接続リセットを先に観測した場合の両方が「拒否」の正当な形
+        var thrown = (await act.Should().ThrowAsync<Exception>()).Which;
+
+        if (thrown is RemoteRepositoryException remote)
+        {
+            remote.StatusCode.Should().Be(413, "既定ではホストのボディサイズ上限がそのまま効く");
+        }
+        else
+        {
+            thrown
+                .Should()
+                .BeOfType<HttpRequestException>("413 が読めない場合は送信中断＝接続リセットになる");
+        }
     }
 
     /// <summary>
@@ -404,6 +467,12 @@ public sealed class BinaryColumnRemoteRuntimeTests : IAsyncLifetime
                 "Content-Length 欠落（chunked）の PUT はサーバーが 411 を返す"
             );
 
+        // 411 も他の分類済み失敗と同じく RemoteError 本文を伴う（拒否理由が本文から読める）
+        var error = await response.Content.ReadFromJsonAsync<RemoteError>(Ct);
+        error.Should().NotBeNull();
+        error!.Type.Should().Be("BadRequest");
+        error.Message.Should().Contain("Content-Length");
+
         // 411 なので DB は変化せず、payload は依然 NULL（Read は false）
         using var afterPut = new MemoryStream();
         (await Documents.ReadPayloadAsync(1, afterPut, Ct))
@@ -461,6 +530,83 @@ public sealed class BinaryColumnRemoteRuntimeTests : IAsyncLifetime
             Ct
         );
         deleteResponse.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    /// <summary>
+    /// 15. 行なし 404 は marker（<c>RemoteError{Type:"NotFound"}</c>）を伴い、marker のない 404
+    /// （プレフィックス誤りなどでエンドポイントに届かなかった応答）は例外になる。
+    /// </summary>
+    /// <remarks>
+    /// 前者は既存の「404→false」契約そのもの。後者を false に畳むと、ベースアドレスの設定ミスが
+    /// 「データがない」と区別できなくなり無言で握り潰される。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Binary/Remote] 15: marker つき 404 は false・marker なし 404 は例外になる"
+    )]
+    public async Task Stream_UnmarkedNotFound_Throws()
+    {
+        await SeedAsync(1, Doc1Payload, Doc1Thumb);
+
+        // 行なしの 404 には marker が載る（生の HttpClient で本文まで確認する）
+        using var raw = new HttpClient();
+        using var markedResponse = await raw.GetAsync(
+            $"{_server!.BaseUrl}/quicker/Document/Payload?id=999",
+            Ct
+        );
+        markedResponse.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await markedResponse.Content.ReadFromJsonAsync<RemoteError>(Ct))!
+            .Type.Should()
+            .Be("NotFound", "エンドポイント自身が返す 404 は marker で識別できる");
+
+        // プレフィックスを間違えたクライアント＝ルーティングに届かず本文なしの 404 になる
+        await using var strayProvider = new ServiceCollection()
+            .AddGeneratedHttpRemoteRepositories($"{_server.BaseUrl}/wrong-prefix")
+            .BuildServiceProvider();
+        var stray = strayProvider.GetRequiredService<IDocumentRemoteRepository>();
+
+        using var destination = new MemoryStream();
+        var read = async () => await stray.ReadPayloadAsync(1, destination, Ct);
+        (await read.Should().ThrowAsync<RemoteRepositoryException>())
+            .Which.StatusCode.Should()
+            .Be(404, "marker のない 404 は設定ミスなので false へ畳まず送出する");
+
+        var write = async () =>
+            await stray.WritePayloadAsync(1, new MemoryStream([1, 2, 3]), cancellationToken: Ct);
+        (await write.Should().ThrowAsync<RemoteRepositoryException>())
+            .Which.StatusCode.Should()
+            .Be(404);
+
+        var delete = async () => await stray.WritePayloadAsync(1, null, cancellationToken: Ct);
+        (await delete.Should().ThrowAsync<RemoteRepositoryException>())
+            .Which.StatusCode.Should()
+            .Be(404);
+    }
+
+    /// <summary>
+    /// 16. リモートの Write も渡された Stream を閉じない（直結実装＝<c>BinaryColumnAdoRuntimeTests</c> と同じ所有権契約）。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Binary/Remote] 16: Write は渡された source Stream を閉じない（直結と対称）"
+    )]
+    public async Task Stream_Write_LeavesSourceStreamOpen()
+    {
+        await SeedAsync(1, null, Doc1Thumb);
+
+        var payload = new byte[4096];
+        new Random(77).NextBytes(payload);
+
+        using var source = new MemoryStream(payload);
+        (await Documents.WritePayloadAsync(1, source, cancellationToken: Ct)).Should().BeTrue();
+
+        // 破棄済み MemoryStream は CanRead=false になる＝HTTP レイヤのコンテンツ破棄が呼び出し側 Stream へ波及していない
+        source
+            .CanRead.Should()
+            .BeTrue("Stream の所有権は呼び出し側にあり、リモート実装も閉じない");
+        source.Position.Should().Be(payload.Length, "読み切られてはいるが破棄はされていない");
+
+        // 同じ Stream を巻き戻して再送できる＝閉じられていないことの実用的な確認
+        source.Position = 0;
+        (await Documents.WriteThumbAsync(1, source, cancellationToken: Ct)).Should().BeTrue();
     }
 
     /// <summary>CanSeek でない Stream（length を渡さないと長さ不明）＝クライアント側検証の再現用</summary>

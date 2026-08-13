@@ -10,7 +10,7 @@ QuickER が生成する C# コードの構成と、データアクセス層（Qu
 |---|---|
 | Entity | テーブルに対応する POCO。UI フレームワーク非依存（CommunityToolkit 等に依存しない）。`RowState`（Unchanged / Added / Updated / Removed）と `MarkAdded()` などの状態遷移メソッド、ナビゲーションプロパティ（親参照・子コレクション）を持つ |
 | EditModel | 画面編集用のモデルと Entity との相互変換。各列は確定値と画面入力文字列（`BindingXxx`）の 2 表現を持つ |
-| Mapper | Entity ⇄ EditModel の変換器。**ロードは無損失**＝確定値は Entity から直接コピーし（入力文字列のパースで再構築しない）、`BindingXxx` は確定値から導出される表示用の投影になる。入力文字列の精度になるのはユーザーが実際に編集した欄だけなので、読み込んだだけで表示書式が表現できないもの（`DateTime` の秒未満・`DateTimeKind` など）が落ちることはない |
+| Mapper | Entity ⇄ EditModel の変換器。**ロードは無損失**＝確定値は Entity から直接コピーし（入力文字列のパースで再構築しない）、`BindingXxx` は確定値から導出される表示用の投影になる。入力文字列の精度になるのはユーザーが実際に編集した欄だけなので、読み込んだだけで表示書式が表現できないもの（`DateTime` の秒未満・`DateTimeKind` など）が落ちることはない。バイナリ列は防御的にコピーするため、ロードした EditModel の編集がロード元の Entity へ波及しない。`date` 列（`datetime` ではない）はカルチャの短い日付書式で表示し、末尾に "0:00:00" が付かない |
 | 値オブジェクト（オプション） | 列名ごとの値オブジェクト型（`CustomerIdValue` など）。`GenerateValueObjects` 有効時のみ（[値オブジェクト](#値オブジェクトgeneratevalueobjects) 参照） |
 | Repository 共通契約 | `IRepository<TEntity, TKey>` と各エンティティのインターフェイス（`ICustomerRepository` など）。QuickER 版 Repository と EF Core 版 Repository が同じ契約を実装する |
 | QuickER 版 Repository 実装 | 方言別（SQL Server / SQLite）の軽量実装＋ DI 登録拡張 |
@@ -141,6 +141,8 @@ var provider = new ServiceCollection()
 var customers = provider.GetRequiredService<ICustomerRepository>();
 ```
 
+この登録はエンティティ非依存の生 SQL 実行器 `ISqlExecutor` も登録し、登録する各リポジトリへ渡します。そのため生成拡張のあとに独自実装を登録すれば（生 SQL にログ・計測・再試行を挟むラッパーなど）、リポジトリの生 SQL メソッドもその実装を経由します。手で `new` するリポジトリは実行器を省略可能な第 3 引数で受け取り、省略時は従来どおり既定実装を組むため、既存の呼び出しは無変更です。
+
 ### 接続とスキーマの立ち上げ
 
 接続を開くのは生成された `SqlConnectionFactory` で、**SQLite では外部キー強制を既定で有効**にします。SQLite は接続側が要求しない限り強制しないため、これがないと生成 DDL の外部キーが黙って無効になります（親のない子行が入り、親を消しても子が残る）。スキーマが制約を宣言している以上、強制されるのが既定として正しいという判断です。接続文字列の `Foreign Keys` 指定はそのまま尊重するので、`Foreign Keys=False` を明示すればプロバイダ本来の挙動に戻せます。
@@ -150,6 +152,9 @@ QuickER が生成した DDL からスキーマを作る用途には、`SqliteSch
 ```csharp
 var ddl = await File.ReadAllTextAsync("Shop.sql");
 await SqliteSchemaBootstrap.ApplyDdlAsync(connectionString, ddl);
+
+// 大きなスクリプトを遅いマシンへ流すときはコマンドタイムアウトを伸ばせる（既定 null はプロバイダ既定）
+await SqliteSchemaBootstrap.ApplyDdlAsync(connectionString, ddl, TimeSpan.FromMinutes(5));
 ```
 
 これは開発・テスト・サンプル向けのブートストラップであり、スキーマ管理ではありません。バージョンも既存の状態もロールバックも知らないため、使い捨てでない DB にはマイグレーションツールを使ってください（EF Core モードが既存スキーマへの接続専用で Migrations を範囲外としているのと同じ線引きです）。
@@ -166,6 +171,10 @@ await customers.DeleteAsync(1);
 await customers.BulkInsertAsync(manyCustomers);   // 一括挿入
 ```
 
+`BulkInsertAsync` の契約はすべての実装先で共通です。`null` 要素は**スキップ**され（グラフ保存のリスト内 null と同じ流儀）、戻り値は実際に挿入した行数だけを数え、空コレクションは接続を開かずに 0 を返し、呼び出し時点でキャンセル済みのトークンは何も書き込む前に例外になります。
+
+SQL Server では `SqlBulkCopy` 経由になりますが、`CheckConstraints` を**常時**付けています。外部キー・CHECK 制約が検査されるため、行単位の `InsertAsync` が弾く行は一括追加でも弾かれます（`SqlBulkCopy` は指定しない限りこれらを検査せず、放置すると「一括追加だけが不正な行を通す」非対称になります）。トリガーは意図的に発火させません（QuickER の DDL はトリガーを生成しないため）。
+
 ### クエリ（式木 → SQL 変換）
 
 ```csharp
@@ -180,7 +189,14 @@ var result = await customers.Query()
 
 対応: 等値・比較・`&&`/`||`・`Contains`/`StartsWith`/`EndsWith`（LIKE）・リストの `Contains`（IN）・日付部品（`Year` など）・`string.IsNullOrEmpty`・値オブジェクト比較。**射影（Select）・GroupBy・Join・算術式は未対応**です（実行時例外。生 SQL か EF Core で回避してください）。
 
-値の側が null になる `==` / `!=` の比較は、リテラルの null でも変数由来の null でも `IS NULL` / `IS NOT NULL` へ変換されます（C# / EF Core と同じ意味論で、全バックエンドで一致します）。素のパラメータとして束縛すると `col = @p` となり、SQL の 3 値論理では全行が偽になってしまうためです。補償は等値のみが対象で、関係演算子（`<` `<=` `>` `>=`）は従来どおり null をパラメータとして束縛します（null 対応の SQL 対応物が無いため）。
+**ナビゲーションプロパティは述語にも並び替えキーにも書けません**。`Where(o => o.Customer == null)` は `NotSupportedException` になります。ナビゲーションは自分の列を持たないため、外部キー列で絞ってください（`Where(o => o.CustomerId == null)`）。インメモリと EF Core はこの述語を翻訳できるので、これは QuickER 版 Repository 固有の制限です。
+
+等値比較の null は、全バックエンドが C# / EF Core と同じ意味論になるよう両側で補償されます。
+
+- **値の側**: 評価すると null になる `==` / `!=` は、リテラルの null でも変数由来の null でも `IS NULL` / `IS NOT NULL` へ変換されます（素のパラメータとして束縛すると `col = @p` となり、SQL の 3 値論理では全行が偽になってしまうため）。
+- **列の側**: 非 null 値との `!=` は `(col <> @p OR col IS NULL)` へ変換され、列が `NULL` の行も一致に含まれます。C# も EF Core も「`NULL` は非 null 値と等しくない」と扱うのに対し、素の `col <> @p` はその行が UNKNOWN になって静かに脱落するためです。列の NULL 許容性は式木から確実には判定できないため無条件に補償します（非 NULL 列では追加した選言が成立しないだけで意味は変わりません）。
+
+補償は等値のみが対象で、関係演算子（`<` `<=` `>` `>=`）は従来どおり null をパラメータとして束縛します（null 対応の SQL 対応物が無いため）。
 
 リストの `Contains` は要素 1 個につきバインド変数 1 個へ展開され、チャンク分割はしません。そのため巨大なリストは方言のバインド変数・IN リスト上限（Oracle の 1000、SQL Server の 2100 パラメータ、SQLite の歴史的な 999 など）を超えて実行時エラーになります。大量のキーを渡す場合は一時テーブルへ入れて結合するか、生 SQL を使ってください。
 
@@ -304,6 +320,18 @@ var total = await orders.ExecuteScalarSqlAsync<decimal>(
 var affected = await customers.ExecuteSqlAsync("UPDATE customers SET balance = 0", null);
 ```
 
+値がコレクション（`string` / `byte[]` を除く列挙可能なもの）のパラメータは `IN` 用に展開されます。SQL には `IN (@ids)` と括弧の中に書き、各要素が `@ids0, @ids1, ...` として束縛され、SQL 中の `@ids` もそれに合わせて書き換えられます。
+
+```csharp
+var rows = await customers.QueryBySqlAsync(
+    "SELECT * FROM customers WHERE customer_id IN (@ids)", new { ids = new[] { 1, 2, 3 } });
+```
+
+展開について 2 点だけ注意があります。
+
+- **空コレクションは `(NULL)` へ展開されます。** `IN` なら「何にも一致しない」で正しいのですが、`NOT IN (@ids)` は罠です。`x NOT IN (NULL)` は全行 UNKNOWN になるため**どの行も一致しません**＝「除外リストが空」の意味と正反対になります。空になり得るなら SQL 自体を分岐してください。
+- **書き換えはテキスト置換です。** コマンドテキスト中の `@name` を、文字列リテラルやコメントの中も含めて置換します。それらの中にパラメータ名そのものを書かないでください。先頭が同じだけの名前（`@idsSuffix` / `@ids0`）や、末尾が同じだけのシステム変数（`@@ids`）は置換されません。
+
 ### 重複の事前チェック（CheckUniquenessAsync）
 
 テーブルの UNIQUE 制約は、生成される **Entity** クラスへ `[UniqueConstraint("PropA", "PropB", Name = "UQ_...")]` として `[DbTableMeta]` / `[DbColumnMeta]` と並んで刻まれます。これらと同じく「DB 定義の自己記述」のための定義メタで、実行時の振る舞いは持ちません（以下のチェックはいずれも生成コードそのものです）。属性型は、刻む制約が 1 つでもあるときだけ出力されます。C# リバースはこの属性を読み戻すため、UNIQUE 制約は往復します（[インポートとエクスポート](import-export.ja.md)を参照）。
@@ -361,6 +389,15 @@ var valid = EditModelUniquenessValidator.Validate(models);
 
 重複エラーは入力エラー（必須・変換・値オブジェクト・`OnValidate`）とは別のストアで保持します。一方の登録・クリアがもう一方に触れないため、同じプロパティに変換エラーと重複エラーが同時に立ち、`GetErrors` は両方を返します。とくに、重複を解消して再検証しても同じ欄に残っている「変換できません」のエラーは消えません（変換エラーはバインディングのセッターからしか再生成されないため、ここで消すと不正な入力が画面に残ったまま `Validate` が成功を返してしまいます）。`HasErrors` は両ストアを合わせて判定します。
 
+エラーは登録したチェックの持ち物で、各チェックは自分が付けたものだけを付け外しします。
+
+- **バインディングのセッター**が変換エラー・値オブジェクトエラーを持ちます（`SetError`）。再生成できるのはセッターだけなので、他のチェックは消しません。
+- **必須チェック**（生成される `ValidateSelf`）は、そのプロパティに他の入力エラーが無いときだけ未入力エラーを付けます（変換できない文字列が入っている欄を「必須です」で塗り潰しません）。値が入れば自分のエラーを消します（バインディング経由ではなく確定値へ直接代入した場合も同じ）。
+- **2 つの重複チェック**は、見つけたエラーへ `DuplicateErrorSource`（コレクション要素どうしの検証は `Siblings`、DB の既存行との照合は `Database`）を刻み、自分の分だけをクリアします。保存前にグラフ全体を `Validate` しても、直前の DB 照合の結果が消えることはありません（逆も同様）。
+- **`OnValidate`** が登録したエラーはフックの持ち物です。条件が解消したらフック側で消してください（`SetError` に null を渡す）。
+
+`RevertInput()` は入力文字列を作り直して入力エラーだけを消します。Mapper のロードはさらに両方の重複エラーも消します（判定の対象だった値そのものが入れ替わるためです）。
+
 #### EditModel: DB との照合
 
 EditModel と Repository 契約の両方を生成する構成では、各 EditModel に糖衣メソッドも生成されます:
@@ -373,7 +410,9 @@ if (!await editModel.ValidateUniqueAsync(repository))
 }
 ```
 
-EditModel の確定値から Entity を組み立てて `CheckUniquenessAsync` を呼び、各違反の `PropertyNames` をバインディングプロパティ名へ写します。構成列を持たない違反（および EditModel に無いプロパティ名の違反）は、空のプロパティ名で登録されるモデルレベルエラーになり、`GetErrors(null)` で取得できます。呼び出しの先頭で前回の重複エラーを消すため、再検証で古いエラーが残ることはありません。
+EditModel の確定値から Entity を組み立てて `CheckUniquenessAsync` を呼び、各違反の `PropertyNames` をバインディングプロパティ名へ写します。構成列を持たない違反（および EditModel に無いプロパティ名の違反）は、空のプロパティ名で登録されるモデルレベルエラーになり、`GetErrors(null)` で取得できます。呼び出しの先頭で前回の重複エラーを消すため、再検証で古いエラーが残ることはありません（消すのは自分が付けた分だけなので、要素どうしの検証が報告したエラーは残ります）。
+
+エラーの登録は `await` の後＝呼び出し元のスレッドではなくスレッドプール上で行われ、`ErrorsChanged` も同じスレッドで発火します。WPF のバインディングエンジンは通知を UI スレッドへ自動でマーシャルするため通常は何もする必要がありませんが、UI の状態を直接更新する購読者は呼び出し側でマーシャルしてください。
 
 メッセージは `EditModelMessages.DuplicateValue`（構成列の表示名列挙を受け取る `static Func`）が既定で、クラスごとの省略可能な `partial void CustomizeDuplicateErrorMessage(IReadOnlyList<string> propertyNames, ref string message)` で微調整できます。ユーザー定義チェックが `UniquenessViolation.Message` を返した場合は、そちらが優先されます。
 
@@ -457,6 +496,7 @@ catch (SaveConflictException ex) when (ex.Reason == SaveConflictReason.Modified)
 - 版の読み戻しには `OUTPUT` 句を使いますが、SQL Server はトリガーのあるテーブルでこれを拒否します。QuickER の DDL 生成はトリガーを出力しないため、QuickER 外でトリガーを足したテーブルにのみ関係します。
 - 既に消えている行の削除は、従来どおりバックエンド間で非対称です。QuickER 版 Repository は黙って許容し、EF Core のグラフ保存は `SaveConflictException` として報告します。
 - rowversion 列には `[DbColumnMeta]` のトークンが付かないため、C# リバースでは復元されません（図の側で宣言してください）。
+- **キー指定の削除は版で守られません。** `DeleteAsync(id)` はエンティティではなくキーを受け取るため比較すべき版がなく、現在の版が何であれ行は削除されます。読んだ版で削除を守りたい場合は、エンティティを `MarkRemoved()` してグラフ保存してください（グラフ保存は削除もエンティティが読んだ版で守ります）。
 - 生 SQL（`ExecuteSqlAsync` 等）と無制限バイナリ列の Stream アクセサは直接操作のため、版では守られません。
 
 ### 無制限バイナリ列の除外（ExcludeUnboundedBinaryColumns）
@@ -512,7 +552,7 @@ var doc = await documents
 制約と挙動:
 
 - **`Include` とは併用できません**（終端メソッド実行時に `InvalidOperationException`）。無制限バイナリ列が必要な場合は `Include` なしの別クエリで取得してください。これは SQL Server の `Include` 経路が FOR JSON＝Base64 経由で巨大 BLOB のメモリ膨張（ピーク 5〜6 倍）を招くためで、「巨大 BLOB を扱う」目的でメモリ特性が予測可能に保たれるようにするためです（SQL Server では FOR JSON を使わず**プレーン SELECT** で取得します）。
-- 効果があるのは `ToListAsync` / `FirstOrDefaultAsync` のみです（件数・存在確認・射影 `ToProjectionListAsync` には影響しません）。
+- 効果があるのは、エンティティ形の取得（`ToListAsync` / `FirstOrDefaultAsync`）と、`ToProjectionListAsync` が**エンティティを全列取得してから射影するフォールバック経路**（セレクタから列を抽出できない場合や `Include` 併用時）です。件数・存在確認と、サーバー側で列を刈り込める射影には影響しません（後者は参照した列を除外列も含めて取得済みのためです）。
 - 取得したエンティティは正当なエンティティですが、除外列が UPDATE 対象外である点は変わりません。そのまま `UpdateAsync` すると既存ガードで例外になります（除外列の更新は上記の生 SQL `ExecuteSqlAsync` で行ってください）。
 - EF Core モードでは EF Core が元々全列を読むため no-op です（`Include` 併用エラーだけはパリティで同様に送出します）。
 
@@ -644,8 +684,10 @@ app.Run();
 - **グラフ保存（Save）成功後はローカルの RowState も確定**します（直結時と同じ挙動）
 - **楽観排他も転送されます**。`ConcurrencyMode` 引数は Update / Save のリクエストに含まれ、Insert / Update / Save の応答は保存で採番された版を「エンティティ型名＋主キー」の対応表として運び、クライアントが手元のグラフへ書き戻します。これによりリモートでも直結と同じ版を保持でき、再取得なしで同じエンティティを続けて保存できます
 - **500 応答はサーバー側の詳細を既定で公開しません**。本文には固定文言（`An unexpected error occurred on the server.`）と `CorrelationId` が載り、クライアントでは `RemoteRepositoryException.CorrelationId` として取り出せます。スタックトレースを含む例外全体は従来どおり常にサーバー側へ記録され（`ILoggerFactory` 経由・カテゴリ `QuickER.RemoteServer`。ロギング未構成のホストでは何もしません）、**そのログ行にも同じ相関 ID が載る**ので、利用者から報告された ID を突き合わせれば、内部メッセージ（テーブル名・列名・接続文字列・ファイルパス）を信頼境界の外へ出さないまま完全な記録に辿り着けます。従来どおりメッセージを透過させたい場合は `MapGeneratedRemoteEndpoints(exposeErrorDetails: true)` を渡してください（このとき `CorrelationId` は null＝ボディは以前のバージョンと同一です）。定型は `exposeErrorDetails: app.Environment.IsDevelopment()` で、これを生成時オプションでなく実行時引数にしているのは、同じ生成物のまま開発と本番を使い分けられるようにするためです。スイッチが変えるのは**クライアントから見える 500 の内容だけ**で、サーバー側のログ出力と `OnServerError` フックはどちらのモードでも例外そのものを受け取ります。また 400（クライアント自身のペイロードについての説明）と 409 の競合内訳（`Reason` / `EntityType` / `Key`＝再取得リトライを組むための材料）は自前の文言なのでスイッチの影響を受けず、常に従来どおり返ります。バイナリ転送エンドポイントの 500 も同じスイッチに従います
-- 認証・TLS はスコープ外です。クライアントは `AddGeneratedHttpRemoteRepositories(Func<IServiceProvider, HttpClient>)` で認証ハンドラ付きの HttpClient を構成し、サーバーは `MapGeneratedRemoteEndpoints()` の戻り値（`RouteGroupBuilder`）へ ASP.NET Core の認可を付与してください
+- **認証・TLS はスコープ外で、付与するまでエンドポイントは無防備です。** クライアントは `AddGeneratedHttpRemoteRepositories(Func<IServiceProvider, HttpClient>)` で認証ハンドラ付きの HttpClient を構成し、サーバーは `MapGeneratedRemoteEndpoints()` の戻り値（`RouteGroupBuilder`）へ ASP.NET Core の認可を付与してください（`MapGeneratedRemoteEndpoints(...).RequireAuthorization()` で生成グループ全体を 1 行で覆えます）。**認可はエンドポイントを選ばずグループ全体へ掛けてください。** `Save` は `Delete` と同じ強さを持つからです＝`RowState.Removed` を含むグラフを送れば該当行は削除されるため、`Delete` だけを守って `Save` を開けておく方針は何も守っていません。エンティティのペイロード全般についても同様で、ワイヤ形式は主キーを含む全列を受け付けます。呼び出し側が名指しできる行との間に立つのは認可だけです
 - **ファクトリ版が返す HttpClient の所有権は呼び出し側にあります**。`AddGeneratedHttpRemoteRepositories(Func<IServiceProvider, HttpClient>)` はリポジトリ解決のたび（スコープ×エンティティ数だけ）ファクトリを呼び出し、返された HttpClient は生成コードも DI コンテナも破棄しません。共有インスタンスか `IHttpClientFactory` 管理のインスタンスを返してください（毎回 new するとソケットが枯渇します）。ベースアドレス版は共有インスタンスを 1 つだけ作り、それを DI コンテナが所有します（`ServiceProvider` の破棄と同時に HttpClient も破棄されるため、破棄済み provider から取得したリポジトリを使うと `ObjectDisposedException` になります）
+- **ベースアドレス版が作る HttpClient は、タイムアウトを持たず 5 分でコネクションを作り直します**。`PooledConnectionLifetime`（`SocketsHttpHandler`）を設定しているのは、長命のシングルトンが最初に解決したアドレスを固定し続けず DNS 変更に追従するためです。`Timeout` は `Timeout.InfiniteTimeSpan` にしています＝`HttpClient.Timeout` は本文を含むリクエスト全体に掛かるため、既定の 100 秒では大きな blob 転送が途中で切られてしまうからです。したがって**個々の呼び出しの制限時間は、もともと渡している `CancellationToken` で与えてください**（それがタイムアウトです）。クライアント全体に有限の期限を持たせたい場合はファクトリ版を使い、自分で構成した HttpClient を渡してください（ファクトリ版の HttpClient は利用者の所有物で、生成コードは設定に手を入れません）
+- **更新系の操作（`Insert` / `Update` / `Save` / `SaveMany` / `Delete`）に HTTP レベルの自動リトライ（Polly 等）を掛けないでください**。冪等キーを持たないため、実際には成功したのに応答が返る途中で失われたリクエストを再送すると二重に適用されます（挿入の重複、あるいは版が二度進んで次回保存が偽の競合になる、など）。リトライしてよいのは読み取り専用の操作（`GetById` / `GetAll` / 名前付きクエリ）と health エンドポイントなので、ポリシーはクライアント全体でなくそれらへ限定してください
 - サーバーファイルは ASP.NET Core の FrameworkReference（`Microsoft.AspNetCore.App`）が必要です（SDK が `Microsoft.NET.Sdk.Web` のプロジェクトなら追加設定不要）。その固定エンジンは共有コードのため、`--use-runtime-packages` では `QuickER.Runtime.AspNetCore` が提供し、参照するのはサーバーファイルを載せるプロジェクトだけです（[ランタイムパッケージ参照モード](#ランタイムパッケージ参照モード--use-runtime-packages)を参照）
 - **生成サーバークラスは拡張できます。** `GeneratedRemoteEndpoints` は `partial` クラスなので、生成物と並べて独自のエンドポイントヘルパを同じクラスへ置けます。また `static partial void OnServerError(HttpContext, Exception)` フックを別パートで実装すると、エンドポイントが HTTP 500 を返すたびに独自処理（通知・メトリクス・追加ログ）を差し込めます（組み込みログの後に実行され、実装しなければコンパイル時に呼び出しが消えます。フック内で例外が起きても隔離され、元のエラー応答を妨げません＝フックの例外はサーバーログへ記録して握り潰します）。同じプレフィックス配下への追加エンドポイントは、`MapGeneratedRemoteEndpoints()` が返す `RouteGroupBuilder` へ直接 Map しても構いません
 
@@ -659,10 +701,11 @@ app.Run();
 | `PUT {prefix}/{エンティティ}/{列名}?id=` | アップロード（生ボディ・`Content-Length` 必須） | 成功 **204**／行なし **404**（`false`）／`Content-Length` 欠落（chunked）は **411**／`id` 欠落・不正は **400** |
 | `DELETE {prefix}/{エンティティ}/{列名}?id=` | 列を `NULL` へ（`Write(id, null)` 相当） | 成功 204／行なし 404／`id` 欠落・不正は **400** |
 
+- **これらのエンドポイント自身が返す 404 には、`Type` が `"NotFound"` の `RemoteError` 本文が載ります**。クライアントで `false` になるのはこの marker 付きの 404 だけです。本文なしの素の 404（ベースアドレスやプレフィックスの誤り、消えたルート、プロキシ自身の応答）は「データなし」と区別できないため、クライアントは `RemoteRepositoryException` として送出します＝設定ミスが空の結果に化けません。411 にも同様に `RemoteError` 本文（`Type` は他の分類済み拒否と同じ `"BadRequest"`）が載ります。
 - **キーは URL クエリ `?id=`** で運びます（本文は blob 本体に使うため）。VO キーは JSON エンベロープと同一規則（内包値）で直列化されます。
 - **0 バイトの PUT（空ボディ）と `NULL` 化（DELETE）は構造的に区別**されます（前者は `Read` が `true`＋空・後者は `false`）。
-- **バイナリ PUT だけリクエストサイズ制限が既定で解除**されます（`IRequestSizeLimitMetadata` メタデータ付与。JSON エンドポイントは既定 30MB のまま）。GB 級を追加設定なしで扱うためですが、**解除は DoS 面の懸念があるため認可（`MapGeneratedRemoteEndpoints().RequireAuthorization()`）との併用を強く推奨**します。上限へ戻す・別値にする場合は戻り値の `RouteGroupBuilder` でグループ全体を上書きしてください。
-- クライアント（`Http{Entity}RemoteRepository`）は `GET` を `ResponseHeadersRead` で受けて宛先へ O(チャンク) でコピーし、`PUT` は `StreamContent`（`Content-Length` 付き）で送ります。非シーク Stream で `length` を渡さない場合は**送信前**に `ArgumentException` になります（既存の長さ契約と同一）。
+- **バイナリ PUT のリクエストサイズ制限解除はオプトイン**です（`MapGeneratedRemoteEndpoints(prefix, exposeErrorDetails, allowUnboundedUploads)`）。既定は `false`＝ホスト側の上限（Kestrel 既定で 30MB）がこのエンドポイントにも効き、超過は **413** で拒否されます。GB 級を扱うときだけ `allowUnboundedUploads: true` を渡してください。**任意サイズの本文を受けるエンドポイントは DoS 面になるため、認可（`MapGeneratedRemoteEndpoints(...).RequireAuthorization()`）との併用を強く推奨**します。影響を受けるのはバイナリ PUT のみ（JSON エンドポイントは常にホストの上限のまま）で、別の値にする場合は戻り値の `RouteGroupBuilder` でグループ全体を上書きしてください。
+- クライアント（`Http{Entity}RemoteRepository`）は `GET` を `ResponseHeadersRead` で受けて宛先へ O(チャンク) でコピーし、`PUT` は `StreamContent`（`Content-Length` 付き）で送ります。非シーク Stream で `length` を渡さない場合は**送信前**に `ArgumentException` になります（既存の長さ契約と同一）。**渡した Stream の所有権は呼び出し側のまま**で、クライアントは閉じも破棄もしません（直結実装と同じ＝実装を差し替えても Stream の扱いが変わりません。HTTP レイヤは送信後にリクエストコンテンツを破棄するため、Stream は非クローズのラッパー経由で `StreamContent` へ渡しています）。
 - **`WithUnboundedBinary()` / `Query()` / 生 SQL のリモート化はスコープ外**です（従来どおり）。
 
 動く実例はリポジトリの [samples/ec-order-remote](../samples/ec-order-remote/README.ja.md) にあります（この推奨構成そのままの 3 プロジェクト＋実 2 プロセスで動かすサンプル。名前付きクエリのリモート転送・`SaveConflictException` の型復元も実演）。
@@ -677,6 +720,9 @@ DB なしでユニットテストするためのインメモリ実装を追加�
 
 - **文字列の比較と並び順は序数（Ordinal）です。** 絞り込み（`Where`）も `OrderBy` も序数比較なので、`"B"` は `"a"` より前に並びます。SQL Server の既定照合は大文字小文字を区別せず、並び順も照合順序に従うため、大文字小文字やアクセントの扱いに依存するテストは実 DB の裏付けにはなりません。
 - **UNIQUE 制約は書き込み時に強制されません。** 強制されるのは主キーだけです（重複主キーは実 DB の INSERT と同じく拒否されます）。UNIQUE 制約の重複値は黙って格納されるため、チェックが要るテストでは `CheckUniquenessAsync` を使ってください。
+- **Before フックで RowState を書き換えると、インメモリでだけ操作が変わります。** このバックエンドは操作を実行する時点で RowState を読み直すため、`BeforeSaveAsync` が `Modified` を `Added` へ変えると実際の操作も変わります。QuickER 版 Repository と EF Core はその時点で発行する文を決め終えているため、書き換えは無視されます。フック契約はどちらの挙動も保証していないので、**フックから RowState を書き換えないでください**（その行だけ飛ばしたい場合は `false` を返します）。
+- **After フックの実行後に `SaveConflictException` が出ることがあります。** 書き込みはステージングされて一括公開され、公開時に保存の起点となった行を再検証します。フックはストアのロック外で走るため、この再検証は `AfterSaveAsync` より後です。実 DB はその時点よりずっと前にロックを取っているため、「After フックが走った＝保存は確定」と仮定するテストは実 DB では成立してもここでは成立しません。
+- **rowversion 列を持たない型の並行保存は後勝ち（last-write-wins）です。** 公開時の再検証は並行性トークンを持つ型だけが対象のため、版のない同一行を 2 つの保存が奪い合うと後から公開した側の値が残ります。ただしどちらの場合も行が復活することはありません（他者が先に削除した行は、古いスナップショットから蘇らずに削除されたままです）。
 
 ## ランタイムパッケージ参照モード（--use-runtime-packages）
 

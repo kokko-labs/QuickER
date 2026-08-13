@@ -14,15 +14,21 @@ using SqlServerTranslator = QuickER.Tests.GeneratedFixture.SqlExpressionTranslat
 namespace QuickER.Tests.GeneratedFixture;
 
 /// <summary>
-/// 生成ランタイムの <c>SqlExpressionTranslator</c> が「値の位置に <c>null</c> を置いた等値比較」を
-/// <c>IS NULL</c> / <c>IS NOT NULL</c> へ補償することを、生成 SQL 文字列の固定で検証する単体テスト。
+/// 生成ランタイムの <c>SqlExpressionTranslator</c> が等値比較の null 意味論を C#／EF Core へ揃えることを、
+/// 生成 SQL 文字列の固定で検証する単体テスト（値側の null 補償と、列側の null 補償の両方）。
 /// </summary>
 /// <remarks>
 /// <para>
-/// 補償前は「リテラル null」だけが <c>IS NULL</c> になり、変数・式が評価の結果 null になる場合は
+/// 値側: 補償前は「リテラル null」だけが <c>IS NULL</c> になり、変数・式が評価の結果 null になる場合は
 /// <c>col = @p</c>（@p=NULL）としてバインドされていた。SQL の 3 値論理ではこれが全行 UNKNOWN になるため、
 /// C#（インメモリ実行器の式木コンパイル）や EF Core と結果が割れていた（一意性チェックの自分自身除外が
 /// 主キー未設定の新規行で全行を弾いていた不具合の根本原因）。
+/// </para>
+/// <para>
+/// 列側: <c>col &lt;&gt; @p</c> は列が NULL の行で UNKNOWN になり、その行が結果から落ちる。C# も EF Core も
+/// 「NULL は非 null 値と等しくない＝一致」と扱うため、ここが 3 実装先の乖離になっていた（実測で
+/// ADO 1 件・EF Core 2 件・InMemory 2 件）。<c>!=</c> は <c>(col &lt;&gt; @p OR col IS NULL)</c> へ補償する。
+/// 列の NULL 許容性は式木から確実には判定できないため無条件に補償する（非 NULL 列では意味不変）。
 /// </para>
 /// <para>
 /// 補償範囲は <c>==</c> / <c>!=</c> のみで、関係演算子（&lt; &lt;= &gt; &gt;=）は従来どおり NULL パラメータの
@@ -35,6 +41,7 @@ public sealed class SqlExpressionTranslatorNullComparisonTests
     private sealed class Probe
     {
         public string? Name1 { get; set; }
+        public string? Name2 { get; set; }
         public int? A { get; set; }
     }
 
@@ -132,6 +139,47 @@ public sealed class SqlExpressionTranslatorNullComparisonTests
         sqlServer.Parameters[0].Value.Should().BeNull();
     }
 
+    [Fact(
+        DisplayName = "null でない値との != は (col <> @p OR col IS NULL) へ補償される（両方言）"
+    )]
+    public void NotEqualNonNullValue_CompensatesNullColumn()
+    {
+        var name = "Alice";
+
+        var sqlServer = RunSqlServer(p => p.Name1 != name);
+        sqlServer.Sql.Should().Be("([Name1] <> @p0 OR [Name1] IS NULL)");
+        sqlServer.Parameters.Should().ContainSingle("補償しても値は 1 回だけバインドする");
+        sqlServer.Parameters[0].Value.Should().Be("Alice");
+        sqlServer.Parameters[0].ColumnName.Should().Be("Name1", "対辺の列名は明示型付けに使う");
+
+        var sqlite = RunSqlite(p => p.Name1 != name);
+        sqlite.Sql.Should().Be("(\"Name1\" <> @p0 OR \"Name1\" IS NULL)");
+        sqlite.Parameters.Should().ContainSingle();
+    }
+
+    [Fact(DisplayName = "!= の列側補償は列が左右どちらにあっても働く")]
+    public void NotEqualNonNullValue_OnEitherSide_Compensates()
+    {
+        var name = "Alice";
+
+        RunSqlServer(p => name != p.Name1).Sql.Should().Be("([Name1] <> @p0 OR [Name1] IS NULL)");
+    }
+
+    [Fact(DisplayName = "対照: == は列側を補償しない（NULL 行は元から不一致で C# と一致する）")]
+    public void EqualNonNullValue_IsNotCompensated()
+    {
+        var name = "Alice";
+
+        RunSqlServer(p => p.Name1 == name).Sql.Should().Be("[Name1] = @p0");
+        RunSqlite(p => p.Name1 == name).Sql.Should().Be("\"Name1\" = @p0");
+    }
+
+    [Fact(DisplayName = "対照: 列同士の != は補償しない（値側が無く両辺が SQL のため）")]
+    public void NotEqualColumnToColumn_IsNotCompensated()
+    {
+        RunSqlServer(p => p.Name1 != p.Name2).Sql.Should().Be("[Name1] <> [Name2]");
+    }
+
     [Fact(DisplayName = "値オブジェクト列でも null 変数との比較が補償される（VO 有効の図）")]
     public void ValueObjectColumn_NullVariable_EmitsIsNull()
     {
@@ -149,5 +197,25 @@ public sealed class SqlExpressionTranslatorNullComparisonTests
             .Should()
             .Be("\"order_id\" IS NOT NULL");
         parameters.Should().BeEmpty();
+    }
+
+    [Fact(
+        DisplayName = "一意性チェックの自分自身除外（主キーあり）は列側補償の形で生成される（VO 有効の図）"
+    )]
+    public void ValueObjectColumn_NotEqualNonNullKey_CompensatesNullColumn()
+    {
+        var existingKey = QuickER.Tests.GeneratedQueryFixture.OrderIdValue.Create(42);
+
+        var parameters = new List<QueryFixtureParam>();
+        var predicate =
+            (Expression<Func<QueryFixtureOrder, bool>>)(
+                candidate => candidate.OrderId != existingKey
+            );
+
+        QueryFixtureTranslator
+            .ToCondition(predicate.Body, parameters)
+            .Should()
+            .Be("(\"order_id\" <> @p0 OR \"order_id\" IS NULL)");
+        parameters.Should().ContainSingle();
     }
 }

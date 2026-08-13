@@ -388,6 +388,50 @@ public sealed class MapperRoundTripTests
         em.BindingOrderedAt.Should().Be(orderedAt.ToString());
     }
 
+    // ===== 日付のみ（date）列の表示書式 =====
+
+    [Fact(DisplayName = "ロード: date 列の表示文字列は日付だけで、時刻（0:00:00）が付かない")]
+    public void ロード_date列は日付のみ表示()
+    {
+        var deliveryDate = new DateTime(2026, 8, 12);
+        var entity = BuildOrder(1);
+        entity.DeliveryDate = DeliveryDateValue.Create(deliveryDate);
+
+        var em = new OrderMapper().CreateEditModel(entity);
+
+        em.BindingDeliveryDate.Should().Be(deliveryDate.ToString("d"));
+        // 既定書式（ToString()）だと時刻部が常に付く＝それを出さないことが本題
+        em.BindingDeliveryDate.Should().NotBe(deliveryDate.ToString());
+        em.BindingDeliveryDate.Should().NotContain("0:00");
+    }
+
+    [Fact(DisplayName = "編集: date 列は日付のみの表示文字列から確定値へ往復できる")]
+    public void 編集_date列は日付表示から往復できる()
+    {
+        var mapper = new OrderMapper();
+        var em = mapper.CreateEditModel(BuildOrder(1));
+        var deliveryDate = new DateTime(2026, 8, 12);
+
+        // 画面に出るのと同じ「日付のみ」の文字列を入力に戻す
+        em.BindingDeliveryDate = deliveryDate.ToString("d");
+
+        em.HasErrors.Should().BeFalse();
+        em.DeliveryDate!.Value.Should().Be(deliveryDate);
+        mapper.CreateEntity(em).DeliveryDate!.Value.Should().Be(deliveryDate);
+    }
+
+    [Fact(DisplayName = "ロード: NULL の date 列は null のまま往復し、表示文字列は空になる")]
+    public void ロード_null日付()
+    {
+        var mapper = new OrderMapper();
+
+        var em = mapper.CreateEditModel(BuildOrder(1));
+
+        em.DeliveryDate.Should().BeNull();
+        em.BindingDeliveryDate.Should().BeEmpty();
+        mapper.CreateEntity(em).DeliveryDate.Should().BeNull();
+    }
+
     [Fact(DisplayName = "ロード: NULL の DateTime 列は null のまま往復し、表示文字列は空になる")]
     public void ロード_null日時()
     {
@@ -412,6 +456,62 @@ public sealed class MapperRoundTripTests
 
         em.RowState.Should().Be(RowState.Unchanged);
         em.IsUpdated.Should().BeFalse();
+    }
+
+    // ===== 行編集のキャンセル（IEditableObject）=====
+
+    /// <summary>
+    /// 本丸: <c>CancelEdit</c> は確定値のスナップショットから直接復元する。バインディング文字列を戻して
+    /// セッターで再パースしていた頃は、無損失ロードで保たれていた秒未満・<see cref="DateTimeKind"/> が
+    /// 「編集して取り消した」だけで落ち、RowState は Unchanged のままなので劣化値が黙って保存され得た。
+    /// </summary>
+    [Fact(DisplayName = "キャンセル: 編集を取り消した DateTime 列が tick 単位・Kind ごと元へ戻る")]
+    public void キャンセル_DateTime精度とKindが保たれる()
+    {
+        var orderedAt = PreciseOrderedAt();
+        var em = new OrderMapper().CreateEditModel(BuildOrder(1, orderedAt));
+        em.RowState = RowState.Unchanged;
+
+        em.BeginEdit();
+        em.BindingOrderedAt = "2026-01-02 03:04:05";
+        em.OrderedAt!.Value.Ticks.Should().NotBe(orderedAt.Ticks, "編集は確かに効いている");
+        em.CancelEdit();
+
+        em.OrderedAt.Should().NotBeNull();
+        em.OrderedAt!.Value.Ticks.Should().Be(orderedAt.Ticks, "確定値は編集前の精度のまま戻る");
+        em.OrderedAt.Value.Kind.Should().Be(DateTimeKind.Utc);
+        em.BindingOrderedAt.Should().Be(orderedAt.ToString(), "表示は確定値から導出し直される");
+        em.RowState.Should().Be(RowState.Unchanged, "RowState も編集前のものへ戻る");
+    }
+
+    [Fact(DisplayName = "キャンセル: 取り消した不正入力の変換エラーは残らない")]
+    public void キャンセル_変換エラーが消える()
+    {
+        var orderedAt = PreciseOrderedAt();
+        var em = new OrderMapper().CreateEditModel(BuildOrder(1, orderedAt));
+
+        em.BeginEdit();
+        em.BindingOrderedAt = "not a date";
+        em.HasErrors.Should().BeTrue();
+        em.CancelEdit();
+
+        em.HasErrors.Should().BeFalse("キャンセルは入力ごとエラーも取り消す");
+        em.OrderedAt!.Value.Ticks.Should().Be(orderedAt.Ticks);
+        em.BindingOrderedAt.Should().Be(orderedAt.ToString());
+    }
+
+    [Fact(DisplayName = "キャンセル: 他の列（文字列 VO）も編集前の確定値へ戻る")]
+    public void キャンセル_他の列も戻る()
+    {
+        var em = new OrderMapper().CreateEditModel(BuildOrder(7, PreciseOrderedAt()));
+
+        em.BeginEdit();
+        em.BindingMemo = "edited";
+        em.Memo!.Value.Should().Be("edited");
+        em.CancelEdit();
+
+        em.Memo!.Value.Should().Be("m7");
+        em.BindingMemo.Should().Be("m7");
     }
 
     // ===== OrderMapper 単体往復 =====

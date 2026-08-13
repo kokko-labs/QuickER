@@ -444,6 +444,7 @@ public abstract partial class EntityBase
         );
 
     /// <summary>Determines whether all column values match those of another entity (RowState and navigations are excluded from the comparison).</summary>
+    /// <remarks>The comparison reads each column through reflection (the property list itself is cached per type). That is meant for change detection and assertions, not for a hot path — write the comparison out by hand where one is called for.</remarks>
     public bool HasSameValues(EntityBase? other)
     {
         if (other is null)
@@ -480,7 +481,7 @@ public abstract partial class EntityBase
     }
 
     /// <summary>Returns a value-based hash code computed from the column values (RowState and navigations are excluded).</summary>
-    /// <remarks>Two entities for which HasSameValues is true always return the same value. Since the object is mutable, do not modify it while using it as a dictionary key.</remarks>
+    /// <remarks>Two entities for which HasSameValues is true always return the same value. Since the object is mutable, do not modify it while using it as a dictionary key. Like HasSameValues, it reads the columns through reflection and is not meant for a hot path.</remarks>
     public int GetValueHashCode()
     {
         var type = GetType();
@@ -657,16 +658,27 @@ public abstract partial class EditModelBase
         INotifyDataErrorInfo,
         IEditableObject
 {
-    /// <summary>Input error messages (required, conversion, value object, OnValidate) keyed by property name.</summary>
-    private readonly Dictionary<string, List<string>> _errors = new();
+    /// <summary>
+    /// Input errors (conversion, value object, OnValidate, and the missing-required-input check) keyed by property name.
+    /// A property carries one input error at a time, and the entry remembers whether the required check registered it, so
+    /// that check can add and remove its own error without overwriting a conversion error the binding setter produced.
+    /// </summary>
+    private readonly Dictionary<string, InputError> _errors = new();
 
     /// <summary>
     /// Duplicate-value error messages keyed by property name, kept in a store of their own so the two kinds never overwrite each other:
     /// a uniqueness check registers and clears only this store, while SetError / ClearErrors touch only <see cref="_errors"/>.
     /// Both stores are merged by <see cref="HasErrors"/>, <see cref="GetErrors"/>, and error collection, so a property can carry a
-    /// conversion error and a duplicate-value error at the same time.
+    /// conversion error and a duplicate-value error at the same time. Each entry also records which check found the duplicate
+    /// (<see cref="DuplicateErrorSource"/>), so the check among the siblings and the check against the database clear only their own findings.
     /// </summary>
-    private readonly Dictionary<string, List<string>> _duplicateErrors = new();
+    private readonly Dictionary<string, DuplicateError> _duplicateErrors = new();
+
+    /// <summary>An input error message together with the check that registered it.</summary>
+    private readonly record struct InputError(string Message, bool FromRequiredCheck);
+
+    /// <summary>A duplicate-value error message together with the check that found it.</summary>
+    private readonly record struct DuplicateError(string Message, DuplicateErrorSource Source);
 
     /// <summary>Raised when a property value changes.</summary>
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -677,11 +689,17 @@ public abstract partial class EditModelBase
     /// <summary>Gets a value indicating whether any errors are present (input errors and duplicate-value errors alike).</summary>
     public bool HasErrors => _errors.Count > 0 || _duplicateErrors.Count > 0;
 
+    /// <summary>Number of revert operations in progress (a counter rather than a flag, so a revert started from inside another one cannot clear it early).</summary>
+    private int _revertDepth;
+
     /// <summary>Gets a value indicating whether a revert operation is in progress.</summary>
-    protected bool IsReverting { get; private set; }
+    protected bool IsReverting => _revertDepth > 0;
+
+    /// <summary>Number of loads in progress (a counter rather than a flag, so a load started from inside a hook cannot clear it early).</summary>
+    private int _loadDepth;
 
     /// <summary>Gets a value indicating whether a load is in progress (confirmed-value changes do not promote the state to Updated while loading).</summary>
-    protected bool IsLoading { get; private set; }
+    protected bool IsLoading => _loadDepth > 0;
 
     /// <summary>Gets or sets the change state of this edit model (based on the source entity; confirmed-value changes promote it to Updated).</summary>
     public RowState RowState
@@ -914,19 +932,26 @@ public abstract partial class EditModelBase
         if (string.IsNullOrEmpty(propertyName))
         {
             return _errors
-                .Values.SelectMany(e => e)
-                .Concat(_duplicateErrors.Values.SelectMany(e => e));
+                .Values.Select(error => error.Message)
+                .Concat(_duplicateErrors.Values.Select(error => error.Message));
         }
 
-        return ReadErrors(_errors, propertyName)
-            .Concat(ReadErrors(_duplicateErrors, propertyName));
+        return ReadErrors(propertyName);
     }
 
-    /// <summary>Reads the messages registered for the specified property in the specified error store (empty when there are none).</summary>
-    private static IEnumerable<string> ReadErrors(
-        Dictionary<string, List<string>> store,
-        string propertyName
-    ) => store.TryGetValue(propertyName, out var list) ? list : Enumerable.Empty<string>();
+    /// <summary>Reads the messages registered for the specified property in both stores (the input error first, then the duplicate-value error).</summary>
+    private IEnumerable<string> ReadErrors(string propertyName)
+    {
+        if (_errors.TryGetValue(propertyName, out var input))
+        {
+            yield return input.Message;
+        }
+
+        if (_duplicateErrors.TryGetValue(propertyName, out var duplicate))
+        {
+            yield return duplicate.Message;
+        }
+    }
 
     /// <summary>Combines a child element path (empty at the root, "."-separated below).</summary>
     protected static string CombineErrorPath(string path, string segment) =>
@@ -986,15 +1011,14 @@ public abstract partial class EditModelBase
     /// <summary>Enumerates this edit model's own errors with the specified path (building block for graph collection). Input errors come first, then duplicate-value errors.</summary>
     protected IEnumerable<EditModelError> CollectOwnErrors(string path)
     {
-        foreach (var store in new[] { _errors, _duplicateErrors })
+        foreach (var pair in _errors)
         {
-            foreach (var pair in store)
-            {
-                foreach (var message in pair.Value)
-                {
-                    yield return new EditModelError(path, pair.Key, message);
-                }
-            }
+            yield return new EditModelError(path, pair.Key, pair.Value.Message);
+        }
+
+        foreach (var pair in _duplicateErrors)
+        {
+            yield return new EditModelError(path, pair.Key, pair.Value.Message);
         }
     }
 
@@ -1176,6 +1200,7 @@ public abstract partial class EditModelBase
     }
 
     /// <summary>Sets the input error for the specified property (pass null to clear). Duplicate-value errors live in their own store and are not affected.</summary>
+    /// <remarks>A property carries one input error at a time, so this also replaces a missing-required-input error left by a previous validation.</remarks>
     protected void SetError(string propertyName, string? error)
     {
         if (error is null)
@@ -1184,11 +1209,11 @@ public abstract partial class EditModelBase
             return;
         }
 
-        _errors[propertyName] = [error];
+        _errors[propertyName] = new InputError(error, FromRequiredCheck: false);
         OnErrorsChanged(propertyName);
     }
 
-    /// <summary>Clears the input errors for the specified property. Duplicate-value errors live in their own store and are cleared by ClearDuplicateErrors.</summary>
+    /// <summary>Clears the input error for the specified property, whichever check registered it. Duplicate-value errors live in their own store and are cleared by ClearDuplicateErrors.</summary>
     protected void ClearErrors(string propertyName)
     {
         if (_errors.Remove(propertyName))
@@ -1197,32 +1222,87 @@ public abstract partial class EditModelBase
         }
     }
 
+    /// <summary>Registers a missing-required-input error on the specified property, unless it already carries another input error (called by the generated required-field check).</summary>
+    /// <remarks>
+    /// A conversion error means the field does hold input that simply cannot be converted, which is the more upstream cause and the
+    /// message the user has to act on. Replacing it with "is required" would hide the real problem behind a wrong one, and the
+    /// conversion error can only ever be produced again by the binding setter.
+    /// </remarks>
+    protected void SetRequiredError(string propertyName, string message)
+    {
+        if (_errors.TryGetValue(propertyName, out var existing) && !existing.FromRequiredCheck)
+        {
+            return;
+        }
+
+        _errors[propertyName] = new InputError(message, FromRequiredCheck: true);
+        OnErrorsChanged(propertyName);
+    }
+
+    /// <summary>Clears the missing-required-input error registered on the specified property (called by the generated required-field check once the value is present).</summary>
+    /// <remarks>
+    /// Only an error the required check itself registered is removed: a conversion error belongs to the binding setter and an error
+    /// registered from OnValidate belongs to that hook, so neither is cleared here.
+    /// </remarks>
+    protected void ClearRequiredError(string propertyName)
+    {
+        if (!_errors.TryGetValue(propertyName, out var existing) || !existing.FromRequiredCheck)
+        {
+            return;
+        }
+
+        _errors.Remove(propertyName);
+        OnErrorsChanged(propertyName);
+    }
+
     /// <summary>Raises the input-errors change notification.</summary>
     protected void OnErrorsChanged(string propertyName) =>
         ErrorsChanged?.Invoke(this, new DataErrorsChangedEventArgs(propertyName));
 
-    /// <summary>Clears the duplicate-value errors registered by the previous uniqueness check (input errors, which live in a separate store, are left untouched).</summary>
-    public void ClearDuplicateErrors()
+    /// <summary>Clears every duplicate-value error, whichever check found it (input errors, which live in a separate store, are left untouched). Loading a new value into the model uses this.</summary>
+    public void ClearDuplicateErrors() => ClearDuplicateErrorsCore(null);
+
+    /// <summary>Clears the duplicate-value errors found by the specified check only, leaving the other check's findings in place.</summary>
+    /// <remarks>
+    /// Each check clears exactly what it registered before running again, so the check among the siblings no longer discards
+    /// the violations the database check found (and the other way round).
+    /// </remarks>
+    /// <param name="source">The check whose findings are cleared.</param>
+    public void ClearDuplicateErrors(DuplicateErrorSource source) =>
+        ClearDuplicateErrorsCore(source);
+
+    /// <summary>Shared implementation of the two ClearDuplicateErrors overloads (null clears every source).</summary>
+    private void ClearDuplicateErrorsCore(DuplicateErrorSource? source)
     {
         if (_duplicateErrors.Count == 0)
         {
             return;
         }
 
-        var cleared = _duplicateErrors.Keys.ToList();
-        _duplicateErrors.Clear();
+        var cleared = _duplicateErrors
+            .Where(pair => source is null || pair.Value.Source == source)
+            .Select(pair => pair.Key)
+            .ToList();
 
         foreach (var propertyName in cleared)
         {
+            _duplicateErrors.Remove(propertyName);
             OnErrorsChanged(propertyName);
         }
     }
 
     /// <summary>Registers a duplicate-value error on the specified binding property in the duplicate-value store. An empty name registers a model-level error.</summary>
     /// <remarks>It does not go through <see cref="SetError"/>, so a conversion error already registered on the same property survives and both are reported.</remarks>
-    public void SetDuplicateError(string propertyName, string message)
+    /// <param name="propertyName">Binding property the error is attached to (empty for a model-level error).</param>
+    /// <param name="message">The error message.</param>
+    /// <param name="source">The check that found the duplicate (it decides which clear removes the error again).</param>
+    public void SetDuplicateError(
+        string propertyName,
+        string message,
+        DuplicateErrorSource source = DuplicateErrorSource.Siblings
+    )
     {
-        _duplicateErrors[propertyName] = [message];
+        _duplicateErrors[propertyName] = new DuplicateError(message, source);
         OnErrorsChanged(propertyName);
     }
 
@@ -1233,10 +1313,17 @@ public abstract partial class EditModelBase
     /// </summary>
     /// <param name="propertyNames">Confirmed-value property names that make up the violated constraint.</param>
     /// <param name="message">Message that replaces the default one (null to build the default from <see cref="EditModelMessages.DuplicateValue"/>).</param>
+    /// <param name="source">The check that found the duplicate (it decides which clear removes the error again).</param>
     public virtual void RegisterDuplicateError(
         IReadOnlyList<string> propertyNames,
-        string? message
-    ) => SetDuplicateError(string.Empty, message ?? EditModelMessages.DuplicateValue(propertyNames));
+        string? message,
+        DuplicateErrorSource source = DuplicateErrorSource.Siblings
+    ) =>
+        SetDuplicateError(
+            string.Empty,
+            message ?? EditModelMessages.DuplicateValue(propertyNames),
+            source
+        );
 
     /// <summary>
     /// Gets the UNIQUE constraints of the underlying table (none by default). Generated edit models whose table declares
@@ -1249,16 +1336,21 @@ public abstract partial class EditModelBase
     public virtual IReadOnlyList<EditModelUniquenessConstraint> UniquenessConstraints =>
         Array.Empty<EditModelUniquenessConstraint>();
 
-    /// <summary>Writes the confirmed values back to the binding properties and clears errors.</summary>
+    /// <summary>Writes the confirmed values back to the binding properties and clears the input errors (conversion and missing-required-input).</summary>
+    /// <remarks>
+    /// Duplicate-value errors are not touched here: they are owned by the uniqueness checks (a value that is a duplicate stays a
+    /// duplicate when its display string is rebuilt). Loading a different value into the model clears them, because the checks then
+    /// have to run again.
+    /// </remarks>
     public void RevertInput() => ExecuteRevert(RevertCore);
 
-    /// <summary>Core logic of RevertInput (concrete classes implement writing back each property).</summary>
+    /// <summary>Core logic of RevertInput (concrete classes implement writing back each property and clearing its input error).</summary>
     protected virtual void RevertCore() { }
 
-    /// <summary>Executes an action with the reverting flag set.</summary>
+    /// <summary>Executes an action with the reverting flag set (nesting is counted, so an inner revert does not clear the flag for the outer one).</summary>
     protected void ExecuteRevert(Action action)
     {
-        IsReverting = true;
+        _revertDepth++;
 
         try
         {
@@ -1266,14 +1358,14 @@ public abstract partial class EditModelBase
         }
         finally
         {
-            IsReverting = false;
+            _revertDepth--;
         }
     }
 
-    /// <summary>Executes an action with the loading flag set (called from mapper loads; confirmed-value changes during load do not promote the state to Updated).</summary>
+    /// <summary>Executes an action with the loading flag set (called from mapper loads; confirmed-value changes during load do not promote the state to Updated). Nesting is counted, so a load started from a hook does not clear the flag for the outer one.</summary>
     public void ExecuteLoad(Action action)
     {
-        IsLoading = true;
+        _loadDepth++;
 
         try
         {
@@ -1281,14 +1373,14 @@ public abstract partial class EditModelBase
         }
         finally
         {
-            IsLoading = false;
+            _loadDepth--;
         }
     }
 
     /// <summary>Whether a row edit is in progress (IEditableObject; true between BeginEdit and EndEdit/CancelEdit).</summary>
     private bool _editing;
 
-    /// <summary>Begins a row edit and snapshots the current input state (supports canceling DataGrid row edits).</summary>
+    /// <summary>Begins a row edit and snapshots the current state (supports canceling DataGrid row edits).</summary>
     public void BeginEdit()
     {
         if (_editing)
@@ -1312,7 +1404,7 @@ public abstract partial class EditModelBase
         EndEditCore();
     }
 
-    /// <summary>Cancels the row edit and restores the input state captured at BeginEdit.</summary>
+    /// <summary>Cancels the row edit and restores the state captured at BeginEdit.</summary>
     public void CancelEdit()
     {
         if (!_editing)
@@ -1324,7 +1416,7 @@ public abstract partial class EditModelBase
         CancelEditCore();
     }
 
-    /// <summary>Core logic of BeginEdit (concrete classes implement snapshotting the input state).</summary>
+    /// <summary>Core logic of BeginEdit (concrete classes implement snapshotting the confirmed values).</summary>
     protected virtual void BeginEditCore() { }
 
     /// <summary>Core logic of EndEdit (does nothing by default; override in a concrete class if needed).</summary>
@@ -1355,6 +1447,21 @@ public static class EditModelMessages
     /// <remarks>The display names are quoted with single quotes, matching the required-field and conversion error styles.</remarks>
     public static Func<IReadOnlyList<string>, string> DuplicateValue { get; set; } =
         static displayNames => $"'{string.Join(", ", displayNames)}' is already used.";
+}
+
+/// <summary>Identifies the uniqueness check that found a duplicate-value error, so each check clears only what it registered.</summary>
+/// <remarks>
+/// The two checks answer different questions and run at different times: the sibling check compares the edit models of a
+/// collection with each other, while the database check asks the repository about the rows already stored. Without this
+/// distinction, running one of them would discard what the other had just reported.
+/// </remarks>
+public enum DuplicateErrorSource
+{
+    /// <summary>The duplicate check among the edit models themselves (<see cref="EditModelCollection{T}.Validate"/> / <see cref="EditModelUniquenessValidator"/>).</summary>
+    Siblings,
+
+    /// <summary>The check against the rows already stored in the database (the generated edit model wrapper over the repository's uniqueness check).</summary>
+    Database,
 }
 
 /// <summary>One UNIQUE constraint declared by an edit model (its name, the properties that make it up, and a compiled accessor for their values).</summary>
@@ -1403,7 +1510,8 @@ public static class EditModelUniquenessValidator
     /// (returns true when there are no duplicates).
     /// </summary>
     /// <remarks>
-    /// The duplicate-value errors registered by the previous call are cleared first, so re-validating never leaves stale errors. The constraints are read from the
+    /// The duplicate-value errors registered by the previous call are cleared first, so re-validating never leaves stale errors. Only the findings of this
+    /// check are cleared, so violations the database check reported survive. The constraints are read from the
     /// first element that is not a deletion target, so the elements are expected to be of a single edit model type.
     /// </remarks>
     /// <param name="models">The edit models to compare with each other.</param>
@@ -1416,7 +1524,7 @@ public static class EditModelUniquenessValidator
 
         foreach (var model in targets)
         {
-            model.ClearDuplicateErrors();
+            model.ClearDuplicateErrors(DuplicateErrorSource.Siblings);
         }
 
         if (targets.Count == 0)
@@ -1459,7 +1567,11 @@ public static class EditModelUniquenessValidator
 
                 foreach (var model in group)
                 {
-                    model.RegisterDuplicateError(constraint.PropertyNames, null);
+                    model.RegisterDuplicateError(
+                        constraint.PropertyNames,
+                        null,
+                        DuplicateErrorSource.Siblings
+                    );
                 }
             }
         }
@@ -1545,8 +1657,11 @@ public sealed record EditModelError(string Path, string Property, string Message
 public sealed partial class EditModelCollection<T> : ObservableCollection<T>
     where T : EditModelBase
 {
-    /// <summary>Holding list for deletion targets (Removed) removed via Remove.</summary>
-    private readonly List<T> _removed = new();
+    /// <summary>Holding list for deletion targets (Removed) removed via Remove, each with the state it had before the removal.</summary>
+    private readonly List<RemovedItem> _removed = new();
+
+    /// <summary>A deletion target together with the change state it had before it was removed (restored when the very same instance is added back).</summary>
+    private readonly record struct RemovedItem(T Item, RowState PriorState);
 
     /// <summary>Backing field for the parent model that holds this collection as a child.</summary>
     private EditModelBase? _ownerModel;
@@ -1580,15 +1695,21 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
         }
     }
 
-    /// <summary>Gets the deletion targets (Removed) taken out via Remove.</summary>
-    public IReadOnlyList<T> RemovedItems => _removed;
+    /// <summary>Gets the deletion targets (Removed) taken out via Remove, in the order they were removed.</summary>
+    /// <remarks>The result is a snapshot rather than a live view of the tracking list.</remarks>
+    public IReadOnlyList<T> RemovedItems => _removed.Select(entry => entry.Item).ToList();
 
     /// <summary>Gets a value indicating whether any element (or its cascade children) has changes, or deletion-tracked items exist.</summary>
     public bool HasChanges => _removed.Count > 0 || this.Any(item => item.HasGraphChanges());
 
     /// <summary>Inserts an element. Sets this collection as the element's owner and raises position property change notifications.</summary>
+    /// <remarks>
+    /// Adding back an instance that was removed earlier cancels the deletion instead of saving a delete and an insert of the very
+    /// same row: the element leaves the tracking list and its change state returns to what it was before the removal.
+    /// </remarks>
     protected override void InsertItem(int index, T item)
     {
+        UntrackRemoval(item);
         item.Owner = this;
         item.SetParentModel(_ownerModel);
         base.InsertItem(index, item);
@@ -1609,11 +1730,12 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
         NotifyPositionsChanged();
     }
 
-    /// <summary>Replaces an element via indexer assignment. The existing element being replaced is set aside as Removed.</summary>
+    /// <summary>Replaces an element via indexer assignment. The existing element being replaced is set aside as Removed (and a replacement that was removed earlier is taken back off the deletion list).</summary>
     protected override void SetItem(int index, T item)
     {
         var replaced = this[index];
         TrackRemoval(replaced);
+        UntrackRemoval(item);
         replaced.Owner = null;
         replaced.SetParentModel(null);
         item.Owner = this;
@@ -1677,9 +1799,10 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
 
         foreach (var item in this)
         {
-            // Clear the duplicate-value errors of the previous run first: they are re-registered below, and leaving them
-            // would make this element look invalid even after the duplication was resolved.
-            item.ClearDuplicateErrors();
+            // Clear this check's duplicate-value errors from the previous run first: they are re-registered below, and leaving
+            // them would make this element look invalid even after the duplication was resolved. Findings of the database check
+            // are left alone (they are cleared and re-registered by that check instead).
+            item.ClearDuplicateErrors(DuplicateErrorSource.Siblings);
 
             // Do not short-circuit, so that errors are registered for every element.
             if (!item.Validate(includeChildren))
@@ -1744,11 +1867,12 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
     }
 
     /// <summary>Removes all elements (existing elements are tracked as Removed). Use Clear for an untracked on-screen wipe.</summary>
+    /// <remarks>Elements are removed from the front, so <see cref="RemovedItems"/> keeps the order they had in the collection.</remarks>
     public void RemoveAll()
     {
         while (Count > 0)
         {
-            RemoveAt(Count - 1);
+            RemoveAt(0);
         }
     }
 
@@ -1794,12 +1918,28 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
             return;
         }
 
+        // Capture the state before marking the removal, so adding the very same instance back can restore it.
+        var priorState = item.RowState;
         item.MarkRemoved();
 
-        if (!_removed.Contains(item))
+        if (!_removed.Any(entry => ReferenceEquals(entry.Item, item)))
         {
-            _removed.Add(item);
+            _removed.Add(new RemovedItem(item, priorState));
         }
+    }
+
+    /// <summary>Cancels the deletion tracking of an element that is being put back into the collection and restores the state it had before the removal.</summary>
+    private void UntrackRemoval(T item)
+    {
+        var tracked = _removed.FindIndex(entry => ReferenceEquals(entry.Item, item));
+
+        if (tracked < 0)
+        {
+            return;
+        }
+
+        item.RowState = _removed[tracked].PriorState;
+        _removed.RemoveAt(tracked);
     }
 }
 
@@ -2205,7 +2345,7 @@ public partial class CustomerEditModel : EditModelBase
         }
     }
 
-    /// <summary>Writes the confirmed values back to the binding properties and clears errors (called from RevertInput).</summary>
+    /// <summary>Writes the confirmed values back to the binding properties and clears the input errors (called from RevertInput; duplicate-value errors belong to the uniqueness checks).</summary>
     protected override void RevertCore()
     {
         BindingCustomerId = CustomerId?.ToString() ?? string.Empty;
@@ -2217,20 +2357,36 @@ public partial class CustomerEditModel : EditModelBase
     }
 
     /// <summary>Validation of this node itself (missing-input checks for required fields plus the extra validation hook). Called from Validate.</summary>
+    /// <remarks>
+    /// The required check owns exactly the errors it registers: a satisfied field clears its own missing-input error, and a field
+    /// that already carries a conversion error keeps that error instead (the conversion failure is the cause the user must fix).
+    /// </remarks>
     protected override void ValidateSelf()
     {
         if (CustomerId is null)
         {
-            SetError(nameof(BindingCustomerId), ResolveRequiredErrorMessage(nameof(CustomerId), GetDisplayName(nameof(CustomerId), null)));
+            SetRequiredError(nameof(BindingCustomerId), ResolveRequiredErrorMessage(nameof(CustomerId), GetDisplayName(nameof(CustomerId), null)));
+        }
+        else
+        {
+            ClearRequiredError(nameof(BindingCustomerId));
         }
         if (Name is null)
         {
-            SetError(nameof(BindingName), ResolveRequiredErrorMessage(nameof(Name), GetDisplayName(nameof(Name), null)));
+            SetRequiredError(nameof(BindingName), ResolveRequiredErrorMessage(nameof(Name), GetDisplayName(nameof(Name), null)));
+        }
+        else
+        {
+            ClearRequiredError(nameof(BindingName));
         }
         OnValidate();
     }
 
     /// <summary>Hook for implementing additional validation rules (register errors via SetError in a partial implementation).</summary>
+    /// <remarks>
+    /// Errors registered from here belong to this hook: the generated checks only add and remove the errors they registered
+    /// themselves, so clear a custom error from here (SetError with a null message) once its condition no longer holds.
+    /// </remarks>
     partial void OnValidate();
 
     /// <summary>Resolves the required-field error message (EditModelMessages.Required first, then fine-tuned by CustomizeRequiredErrorMessage).</summary>
@@ -2268,7 +2424,8 @@ public partial class CustomerEditModel : EditModelBase
     /// <inheritdoc />
     public override void RegisterDuplicateError(
         IReadOnlyList<string> propertyNames,
-        string? message
+        string? message,
+        DuplicateErrorSource source = DuplicateErrorSource.Siblings
     )
     {
         var displayNames = new List<string>(propertyNames.Count);
@@ -2305,13 +2462,13 @@ public partial class CustomerEditModel : EditModelBase
         // Names that could not be mapped (and an empty list) become a model-level error.
         if (targets.Count == 0)
         {
-            SetDuplicateError(string.Empty, resolved);
+            SetDuplicateError(string.Empty, resolved, source);
             return;
         }
 
         foreach (var target in targets)
         {
-            SetDuplicateError(target, resolved);
+            SetDuplicateError(target, resolved, source);
         }
     }
 
@@ -2336,8 +2493,11 @@ public partial class CustomerEditModel : EditModelBase
     /// Checks this edit model's confirmed values against the database through the repository and registers duplicate-value errors (returns true when there are no violations).
     /// </summary>
     /// <remarks>
-    /// The duplicate-value errors registered by the previous call are cleared first, so re-checking never leaves stale errors. Rows that share the primary key are excluded,
+    /// The duplicate-value errors registered by the previous call are cleared first, so re-checking never leaves stale errors (only the ones this check registered:
+    /// what the check among the siblings reported stays). Rows that share the primary key are excluded,
     /// so the same call is correct for both insert and update (a model whose key is not set yet excludes nothing). The result is advisory only: the definitive guarantee is the database's own UNIQUE constraint (TOCTOU).
+    /// The errors are registered after the await, which puts them on a thread pool thread rather than the caller's, and ErrorsChanged fires there too.
+    /// A WPF binding marshals that back to the UI thread by itself, so the ordinary case needs nothing; a subscriber that updates UI state directly has to marshal it at the call site.
     /// </remarks>
     /// <param name="repository">The repository used for the check.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
@@ -2347,7 +2507,7 @@ public partial class CustomerEditModel : EditModelBase
     )
     {
         ArgumentNullException.ThrowIfNull(repository);
-        ClearDuplicateErrors();
+        ClearDuplicateErrors(DuplicateErrorSource.Database);
 
         var entity = new CustomerEntity();
 
@@ -2362,7 +2522,11 @@ public partial class CustomerEditModel : EditModelBase
 
         foreach (var violation in violations)
         {
-            RegisterDuplicateError(violation.PropertyNames, violation.Message);
+            RegisterDuplicateError(
+                violation.PropertyNames,
+                violation.Message,
+                DuplicateErrorSource.Database
+            );
         }
 
         return violations.Count == 0;
@@ -2387,24 +2551,24 @@ public partial class CustomerEditModel : EditModelBase
     }
 
     // ---- Snapshots for row editing (IEditableObject) ----
-    /// <summary>Pre-edit snapshot of CustomerId.</summary>
-    private string _bindingCustomerIdSnapshot = string.Empty;
+    /// <summary>Pre-edit snapshot of the confirmed value of CustomerId.</summary>
+    private int? _customerIdSnapshot;
 
-    /// <summary>Pre-edit snapshot of Name.</summary>
-    private string _bindingNameSnapshot = string.Empty;
+    /// <summary>Pre-edit snapshot of the confirmed value of Name.</summary>
+    private string? _nameSnapshot;
 
-    /// <summary>Pre-edit snapshot of Balance.</summary>
-    private string _bindingBalanceSnapshot = string.Empty;
+    /// <summary>Pre-edit snapshot of the confirmed value of Balance.</summary>
+    private decimal? _balanceSnapshot;
 
     /// <summary>Pre-edit snapshot of the RowState.</summary>
     private RowState _rowStateSnapshot;
 
-    /// <summary>Core logic of BeginEdit. Snapshots each binding input and the RowState.</summary>
+    /// <summary>Core logic of BeginEdit. Snapshots each confirmed value and the RowState.</summary>
     protected override void BeginEditCore()
     {
-        _bindingCustomerIdSnapshot = _bindingCustomerId;
-        _bindingNameSnapshot = _bindingName;
-        _bindingBalanceSnapshot = _bindingBalance;
+        _customerIdSnapshot = _customerId;
+        _nameSnapshot = _name;
+        _balanceSnapshot = _balance;
         _rowStateSnapshot = RowState;
         OnBeginEdit();
     }
@@ -2418,14 +2582,24 @@ public partial class CustomerEditModel : EditModelBase
     /// <summary>Hook invoked at EndEdit (commit).</summary>
     partial void OnEndEdit();
 
-    /// <summary>Core logic of CancelEdit. Restores from the snapshot (confirmed values and errors are reproduced by re-parsing, and the RowState is restored).</summary>
+    /// <summary>Core logic of CancelEdit. Restores the confirmed values and the RowState from the snapshot, then derives the input strings from them and clears the errors the canceled input left behind.</summary>
+    /// <remarks>
+    /// The confirmed values are the source of truth, so they are put back directly rather than rebuilt by re-parsing
+    /// the input strings: a display format cannot express everything a value holds - <see cref="System.DateTime"/>
+    /// sub-second precision and Kind, for example - so re-parsing would let a canceled edit silently degrade the very
+    /// value it was supposed to leave untouched.
+    /// </remarks>
     protected override void CancelEditCore()
     {
         ExecuteLoad(() =>
         {
-            BindingCustomerId = _bindingCustomerIdSnapshot;
-            BindingName = _bindingNameSnapshot;
-            BindingBalance = _bindingBalanceSnapshot;
+            CustomerId = _customerIdSnapshot;
+            Name = _nameSnapshot;
+            Balance = _balanceSnapshot;
+
+            // Derive the input strings from the restored confirmed values (RevertCore also clears the errors the
+            // canceled input produced).
+            ExecuteRevert(RevertCore);
             OnCancelEdit();
         });
 
@@ -2829,10 +3003,15 @@ public partial class OrderEditModel : EditModelBase
     }
 
     // ---- navigation ----
-    /// <summary>Customer navigation property.</summary>
-    public CustomerEditModel Customer { get; set; } = null!;
+    /// <summary>Customer navigation property (reference to the parent side).</summary>
+    /// <remarks>
+    /// Nothing in the generated code assigns it: loading does not follow a reference back to the parent (that would recurse), so it
+    /// stays null unless application code sets it. The cascade parent is exposed by ParentModel, which the owning collection or
+    /// single reference keeps up to date; this property is kept for application code that wants a navigation of its own.
+    /// </remarks>
+    public CustomerEditModel? Customer { get; set; }
 
-    /// <summary>Writes the confirmed values back to the binding properties and clears errors (called from RevertInput).</summary>
+    /// <summary>Writes the confirmed values back to the binding properties and clears the input errors (called from RevertInput; duplicate-value errors belong to the uniqueness checks).</summary>
     protected override void RevertCore()
     {
         BindingOrderId = OrderId?.ToString() ?? string.Empty;
@@ -2846,24 +3025,44 @@ public partial class OrderEditModel : EditModelBase
     }
 
     /// <summary>Validation of this node itself (missing-input checks for required fields plus the extra validation hook). Called from Validate.</summary>
+    /// <remarks>
+    /// The required check owns exactly the errors it registers: a satisfied field clears its own missing-input error, and a field
+    /// that already carries a conversion error keeps that error instead (the conversion failure is the cause the user must fix).
+    /// </remarks>
     protected override void ValidateSelf()
     {
         if (OrderId is null)
         {
-            SetError(nameof(BindingOrderId), ResolveRequiredErrorMessage(nameof(OrderId), GetDisplayName(nameof(OrderId), null)));
+            SetRequiredError(nameof(BindingOrderId), ResolveRequiredErrorMessage(nameof(OrderId), GetDisplayName(nameof(OrderId), null)));
+        }
+        else
+        {
+            ClearRequiredError(nameof(BindingOrderId));
         }
         if (CustomerId is null)
         {
-            SetError(nameof(BindingCustomerId), ResolveRequiredErrorMessage(nameof(CustomerId), GetDisplayName(nameof(CustomerId), null)));
+            SetRequiredError(nameof(BindingCustomerId), ResolveRequiredErrorMessage(nameof(CustomerId), GetDisplayName(nameof(CustomerId), null)));
+        }
+        else
+        {
+            ClearRequiredError(nameof(BindingCustomerId));
         }
         if (Amount is null)
         {
-            SetError(nameof(BindingAmount), ResolveRequiredErrorMessage(nameof(Amount), GetDisplayName(nameof(Amount), null)));
+            SetRequiredError(nameof(BindingAmount), ResolveRequiredErrorMessage(nameof(Amount), GetDisplayName(nameof(Amount), null)));
+        }
+        else
+        {
+            ClearRequiredError(nameof(BindingAmount));
         }
         OnValidate();
     }
 
     /// <summary>Hook for implementing additional validation rules (register errors via SetError in a partial implementation).</summary>
+    /// <remarks>
+    /// Errors registered from here belong to this hook: the generated checks only add and remove the errors they registered
+    /// themselves, so clear a custom error from here (SetError with a null message) once its condition no longer holds.
+    /// </remarks>
     partial void OnValidate();
 
     /// <summary>Resolves the required-field error message (EditModelMessages.Required first, then fine-tuned by CustomizeRequiredErrorMessage).</summary>
@@ -2901,7 +3100,8 @@ public partial class OrderEditModel : EditModelBase
     /// <inheritdoc />
     public override void RegisterDuplicateError(
         IReadOnlyList<string> propertyNames,
-        string? message
+        string? message,
+        DuplicateErrorSource source = DuplicateErrorSource.Siblings
     )
     {
         var displayNames = new List<string>(propertyNames.Count);
@@ -2943,13 +3143,13 @@ public partial class OrderEditModel : EditModelBase
         // Names that could not be mapped (and an empty list) become a model-level error.
         if (targets.Count == 0)
         {
-            SetDuplicateError(string.Empty, resolved);
+            SetDuplicateError(string.Empty, resolved, source);
             return;
         }
 
         foreach (var target in targets)
         {
-            SetDuplicateError(target, resolved);
+            SetDuplicateError(target, resolved, source);
         }
     }
 
@@ -2999,8 +3199,11 @@ public partial class OrderEditModel : EditModelBase
     /// Checks this edit model's confirmed values against the database through the repository and registers duplicate-value errors (returns true when there are no violations).
     /// </summary>
     /// <remarks>
-    /// The duplicate-value errors registered by the previous call are cleared first, so re-checking never leaves stale errors. Rows that share the primary key are excluded,
+    /// The duplicate-value errors registered by the previous call are cleared first, so re-checking never leaves stale errors (only the ones this check registered:
+    /// what the check among the siblings reported stays). Rows that share the primary key are excluded,
     /// so the same call is correct for both insert and update (a model whose key is not set yet excludes nothing). The result is advisory only: the definitive guarantee is the database's own UNIQUE constraint (TOCTOU).
+    /// The errors are registered after the await, which puts them on a thread pool thread rather than the caller's, and ErrorsChanged fires there too.
+    /// A WPF binding marshals that back to the UI thread by itself, so the ordinary case needs nothing; a subscriber that updates UI state directly has to marshal it at the call site.
     /// </remarks>
     /// <param name="repository">The repository used for the check.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
@@ -3010,7 +3213,7 @@ public partial class OrderEditModel : EditModelBase
     )
     {
         ArgumentNullException.ThrowIfNull(repository);
-        ClearDuplicateErrors();
+        ClearDuplicateErrors(DuplicateErrorSource.Database);
 
         var entity = new OrderEntity();
 
@@ -3040,7 +3243,11 @@ public partial class OrderEditModel : EditModelBase
 
         foreach (var violation in violations)
         {
-            RegisterDuplicateError(violation.PropertyNames, violation.Message);
+            RegisterDuplicateError(
+                violation.PropertyNames,
+                violation.Message,
+                DuplicateErrorSource.Database
+            );
         }
 
         return violations.Count == 0;
@@ -3058,28 +3265,28 @@ public partial class OrderEditModel : EditModelBase
     static partial void CustomizePropertyDisplayName(string propertyName, ref string displayName);
 
     // ---- Snapshots for row editing (IEditableObject) ----
-    /// <summary>Pre-edit snapshot of OrderId.</summary>
-    private string _bindingOrderIdSnapshot = string.Empty;
+    /// <summary>Pre-edit snapshot of the confirmed value of OrderId.</summary>
+    private int? _orderIdSnapshot;
 
-    /// <summary>Pre-edit snapshot of CustomerId.</summary>
-    private string _bindingCustomerIdSnapshot = string.Empty;
+    /// <summary>Pre-edit snapshot of the confirmed value of CustomerId.</summary>
+    private int? _customerIdSnapshot;
 
-    /// <summary>Pre-edit snapshot of Memo.</summary>
-    private string _bindingMemoSnapshot = string.Empty;
+    /// <summary>Pre-edit snapshot of the confirmed value of Memo.</summary>
+    private string? _memoSnapshot;
 
-    /// <summary>Pre-edit snapshot of Amount.</summary>
-    private string _bindingAmountSnapshot = string.Empty;
+    /// <summary>Pre-edit snapshot of the confirmed value of Amount.</summary>
+    private decimal? _amountSnapshot;
 
     /// <summary>Pre-edit snapshot of the RowState.</summary>
     private RowState _rowStateSnapshot;
 
-    /// <summary>Core logic of BeginEdit. Snapshots each binding input and the RowState.</summary>
+    /// <summary>Core logic of BeginEdit. Snapshots each confirmed value and the RowState.</summary>
     protected override void BeginEditCore()
     {
-        _bindingOrderIdSnapshot = _bindingOrderId;
-        _bindingCustomerIdSnapshot = _bindingCustomerId;
-        _bindingMemoSnapshot = _bindingMemo;
-        _bindingAmountSnapshot = _bindingAmount;
+        _orderIdSnapshot = _orderId;
+        _customerIdSnapshot = _customerId;
+        _memoSnapshot = _memo;
+        _amountSnapshot = _amount;
         _rowStateSnapshot = RowState;
         OnBeginEdit();
     }
@@ -3093,15 +3300,25 @@ public partial class OrderEditModel : EditModelBase
     /// <summary>Hook invoked at EndEdit (commit).</summary>
     partial void OnEndEdit();
 
-    /// <summary>Core logic of CancelEdit. Restores from the snapshot (confirmed values and errors are reproduced by re-parsing, and the RowState is restored).</summary>
+    /// <summary>Core logic of CancelEdit. Restores the confirmed values and the RowState from the snapshot, then derives the input strings from them and clears the errors the canceled input left behind.</summary>
+    /// <remarks>
+    /// The confirmed values are the source of truth, so they are put back directly rather than rebuilt by re-parsing
+    /// the input strings: a display format cannot express everything a value holds - <see cref="System.DateTime"/>
+    /// sub-second precision and Kind, for example - so re-parsing would let a canceled edit silently degrade the very
+    /// value it was supposed to leave untouched.
+    /// </remarks>
     protected override void CancelEditCore()
     {
         ExecuteLoad(() =>
         {
-            BindingOrderId = _bindingOrderIdSnapshot;
-            BindingCustomerId = _bindingCustomerIdSnapshot;
-            BindingMemo = _bindingMemoSnapshot;
-            BindingAmount = _bindingAmountSnapshot;
+            OrderId = _orderIdSnapshot;
+            CustomerId = _customerIdSnapshot;
+            Memo = _memoSnapshot;
+            Amount = _amountSnapshot;
+
+            // Derive the input strings from the restored confirmed values (RevertCore also clears the errors the
+            // canceled input produced).
+            ExecuteRevert(RevertCore);
             OnCancelEdit();
         });
 
@@ -3418,10 +3635,15 @@ public partial class CustomerProfileEditModel : EditModelBase
     }
 
     // ---- navigation ----
-    /// <summary>Customer navigation property.</summary>
-    public CustomerEditModel Customer { get; set; } = null!;
+    /// <summary>Customer navigation property (reference to the parent side).</summary>
+    /// <remarks>
+    /// Nothing in the generated code assigns it: loading does not follow a reference back to the parent (that would recurse), so it
+    /// stays null unless application code sets it. The cascade parent is exposed by ParentModel, which the owning collection or
+    /// single reference keeps up to date; this property is kept for application code that wants a navigation of its own.
+    /// </remarks>
+    public CustomerEditModel? Customer { get; set; }
 
-    /// <summary>Writes the confirmed values back to the binding properties and clears errors (called from RevertInput).</summary>
+    /// <summary>Writes the confirmed values back to the binding properties and clears the input errors (called from RevertInput; duplicate-value errors belong to the uniqueness checks).</summary>
     protected override void RevertCore()
     {
         BindingProfileId = ProfileId?.ToString() ?? string.Empty;
@@ -3433,20 +3655,36 @@ public partial class CustomerProfileEditModel : EditModelBase
     }
 
     /// <summary>Validation of this node itself (missing-input checks for required fields plus the extra validation hook). Called from Validate.</summary>
+    /// <remarks>
+    /// The required check owns exactly the errors it registers: a satisfied field clears its own missing-input error, and a field
+    /// that already carries a conversion error keeps that error instead (the conversion failure is the cause the user must fix).
+    /// </remarks>
     protected override void ValidateSelf()
     {
         if (ProfileId is null)
         {
-            SetError(nameof(BindingProfileId), ResolveRequiredErrorMessage(nameof(ProfileId), GetDisplayName(nameof(ProfileId), null)));
+            SetRequiredError(nameof(BindingProfileId), ResolveRequiredErrorMessage(nameof(ProfileId), GetDisplayName(nameof(ProfileId), null)));
+        }
+        else
+        {
+            ClearRequiredError(nameof(BindingProfileId));
         }
         if (CustomerId is null)
         {
-            SetError(nameof(BindingCustomerId), ResolveRequiredErrorMessage(nameof(CustomerId), GetDisplayName(nameof(CustomerId), null)));
+            SetRequiredError(nameof(BindingCustomerId), ResolveRequiredErrorMessage(nameof(CustomerId), GetDisplayName(nameof(CustomerId), null)));
+        }
+        else
+        {
+            ClearRequiredError(nameof(BindingCustomerId));
         }
         OnValidate();
     }
 
     /// <summary>Hook for implementing additional validation rules (register errors via SetError in a partial implementation).</summary>
+    /// <remarks>
+    /// Errors registered from here belong to this hook: the generated checks only add and remove the errors they registered
+    /// themselves, so clear a custom error from here (SetError with a null message) once its condition no longer holds.
+    /// </remarks>
     partial void OnValidate();
 
     /// <summary>Resolves the required-field error message (EditModelMessages.Required first, then fine-tuned by CustomizeRequiredErrorMessage).</summary>
@@ -3484,7 +3722,8 @@ public partial class CustomerProfileEditModel : EditModelBase
     /// <inheritdoc />
     public override void RegisterDuplicateError(
         IReadOnlyList<string> propertyNames,
-        string? message
+        string? message,
+        DuplicateErrorSource source = DuplicateErrorSource.Siblings
     )
     {
         var displayNames = new List<string>(propertyNames.Count);
@@ -3521,13 +3760,13 @@ public partial class CustomerProfileEditModel : EditModelBase
         // Names that could not be mapped (and an empty list) become a model-level error.
         if (targets.Count == 0)
         {
-            SetDuplicateError(string.Empty, resolved);
+            SetDuplicateError(string.Empty, resolved, source);
             return;
         }
 
         foreach (var target in targets)
         {
-            SetDuplicateError(target, resolved);
+            SetDuplicateError(target, resolved, source);
         }
     }
 
@@ -3552,8 +3791,11 @@ public partial class CustomerProfileEditModel : EditModelBase
     /// Checks this edit model's confirmed values against the database through the repository and registers duplicate-value errors (returns true when there are no violations).
     /// </summary>
     /// <remarks>
-    /// The duplicate-value errors registered by the previous call are cleared first, so re-checking never leaves stale errors. Rows that share the primary key are excluded,
+    /// The duplicate-value errors registered by the previous call are cleared first, so re-checking never leaves stale errors (only the ones this check registered:
+    /// what the check among the siblings reported stays). Rows that share the primary key are excluded,
     /// so the same call is correct for both insert and update (a model whose key is not set yet excludes nothing). The result is advisory only: the definitive guarantee is the database's own UNIQUE constraint (TOCTOU).
+    /// The errors are registered after the await, which puts them on a thread pool thread rather than the caller's, and ErrorsChanged fires there too.
+    /// A WPF binding marshals that back to the UI thread by itself, so the ordinary case needs nothing; a subscriber that updates UI state directly has to marshal it at the call site.
     /// </remarks>
     /// <param name="repository">The repository used for the check.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
@@ -3563,7 +3805,7 @@ public partial class CustomerProfileEditModel : EditModelBase
     )
     {
         ArgumentNullException.ThrowIfNull(repository);
-        ClearDuplicateErrors();
+        ClearDuplicateErrors(DuplicateErrorSource.Database);
 
         var entity = new CustomerProfileEntity();
 
@@ -3578,7 +3820,11 @@ public partial class CustomerProfileEditModel : EditModelBase
 
         foreach (var violation in violations)
         {
-            RegisterDuplicateError(violation.PropertyNames, violation.Message);
+            RegisterDuplicateError(
+                violation.PropertyNames,
+                violation.Message,
+                DuplicateErrorSource.Database
+            );
         }
 
         return violations.Count == 0;
@@ -3596,24 +3842,24 @@ public partial class CustomerProfileEditModel : EditModelBase
     static partial void CustomizePropertyDisplayName(string propertyName, ref string displayName);
 
     // ---- Snapshots for row editing (IEditableObject) ----
-    /// <summary>Pre-edit snapshot of ProfileId.</summary>
-    private string _bindingProfileIdSnapshot = string.Empty;
+    /// <summary>Pre-edit snapshot of the confirmed value of ProfileId.</summary>
+    private int? _profileIdSnapshot;
 
-    /// <summary>Pre-edit snapshot of CustomerId.</summary>
-    private string _bindingCustomerIdSnapshot = string.Empty;
+    /// <summary>Pre-edit snapshot of the confirmed value of CustomerId.</summary>
+    private int? _customerIdSnapshot;
 
-    /// <summary>Pre-edit snapshot of Bio.</summary>
-    private string _bindingBioSnapshot = string.Empty;
+    /// <summary>Pre-edit snapshot of the confirmed value of Bio.</summary>
+    private string? _bioSnapshot;
 
     /// <summary>Pre-edit snapshot of the RowState.</summary>
     private RowState _rowStateSnapshot;
 
-    /// <summary>Core logic of BeginEdit. Snapshots each binding input and the RowState.</summary>
+    /// <summary>Core logic of BeginEdit. Snapshots each confirmed value and the RowState.</summary>
     protected override void BeginEditCore()
     {
-        _bindingProfileIdSnapshot = _bindingProfileId;
-        _bindingCustomerIdSnapshot = _bindingCustomerId;
-        _bindingBioSnapshot = _bindingBio;
+        _profileIdSnapshot = _profileId;
+        _customerIdSnapshot = _customerId;
+        _bioSnapshot = _bio;
         _rowStateSnapshot = RowState;
         OnBeginEdit();
     }
@@ -3627,14 +3873,24 @@ public partial class CustomerProfileEditModel : EditModelBase
     /// <summary>Hook invoked at EndEdit (commit).</summary>
     partial void OnEndEdit();
 
-    /// <summary>Core logic of CancelEdit. Restores from the snapshot (confirmed values and errors are reproduced by re-parsing, and the RowState is restored).</summary>
+    /// <summary>Core logic of CancelEdit. Restores the confirmed values and the RowState from the snapshot, then derives the input strings from them and clears the errors the canceled input left behind.</summary>
+    /// <remarks>
+    /// The confirmed values are the source of truth, so they are put back directly rather than rebuilt by re-parsing
+    /// the input strings: a display format cannot express everything a value holds - <see cref="System.DateTime"/>
+    /// sub-second precision and Kind, for example - so re-parsing would let a canceled edit silently degrade the very
+    /// value it was supposed to leave untouched.
+    /// </remarks>
     protected override void CancelEditCore()
     {
         ExecuteLoad(() =>
         {
-            BindingProfileId = _bindingProfileIdSnapshot;
-            BindingCustomerId = _bindingCustomerIdSnapshot;
-            BindingBio = _bindingBioSnapshot;
+            ProfileId = _profileIdSnapshot;
+            CustomerId = _customerIdSnapshot;
+            Bio = _bioSnapshot;
+
+            // Derive the input strings from the restored confirmed values (RevertCore also clears the errors the
+            // canceled input produced).
+            ExecuteRevert(RevertCore);
             OnCancelEdit();
         });
 
@@ -3719,6 +3975,7 @@ public sealed partial class CustomerMapper
     /// Loading is lossless: the confirmed values are copied straight from the entity instead of being rebuilt by parsing
     /// the on-screen input strings, so nothing that the display format cannot express (sub-second precision of a
     /// DateTime, its Kind, and so on) is dropped. The input strings are then derived from the confirmed values.
+    /// Binary columns are copied defensively, so editing the loaded model never reaches into the entity's array.
     /// </remarks>
     public void ApplyToEditModel(CustomerEntity entity, CustomerEditModel editModel)
     {
@@ -3730,6 +3987,9 @@ public sealed partial class CustomerMapper
 
             // Derive the on-screen input strings from the confirmed values just loaded and clear stale conversion errors.
             editModel.RevertInput();
+
+            // The values the uniqueness checks looked at are gone, so their findings go too (RevertInput only owns the input errors).
+            editModel.ClearDuplicateErrors();
             editModel.Orders = new OrderMapper().CreateEditModels(entity.Orders);
             editModel.CustomerProfile = entity.CustomerProfile is null ? null : new CustomerProfileMapper().CreateEditModel(entity.CustomerProfile);
             OnEditModelLoaded(entity, editModel);
@@ -3799,6 +4059,7 @@ public sealed partial class OrderMapper
     /// Loading is lossless: the confirmed values are copied straight from the entity instead of being rebuilt by parsing
     /// the on-screen input strings, so nothing that the display format cannot express (sub-second precision of a
     /// DateTime, its Kind, and so on) is dropped. The input strings are then derived from the confirmed values.
+    /// Binary columns are copied defensively, so editing the loaded model never reaches into the entity's array.
     /// </remarks>
     public void ApplyToEditModel(OrderEntity entity, OrderEditModel editModel)
     {
@@ -3811,6 +4072,9 @@ public sealed partial class OrderMapper
 
             // Derive the on-screen input strings from the confirmed values just loaded and clear stale conversion errors.
             editModel.RevertInput();
+
+            // The values the uniqueness checks looked at are gone, so their findings go too (RevertInput only owns the input errors).
+            editModel.ClearDuplicateErrors();
             OnEditModelLoaded(entity, editModel);
         });
 
@@ -3876,6 +4140,7 @@ public sealed partial class CustomerProfileMapper
     /// Loading is lossless: the confirmed values are copied straight from the entity instead of being rebuilt by parsing
     /// the on-screen input strings, so nothing that the display format cannot express (sub-second precision of a
     /// DateTime, its Kind, and so on) is dropped. The input strings are then derived from the confirmed values.
+    /// Binary columns are copied defensively, so editing the loaded model never reaches into the entity's array.
     /// </remarks>
     public void ApplyToEditModel(CustomerProfileEntity entity, CustomerProfileEditModel editModel)
     {
@@ -3887,6 +4152,9 @@ public sealed partial class CustomerProfileMapper
 
             // Derive the on-screen input strings from the confirmed values just loaded and clear stale conversion errors.
             editModel.RevertInput();
+
+            // The values the uniqueness checks looked at are gone, so their findings go too (RevertInput only owns the input errors).
+            editModel.ClearDuplicateErrors();
             OnEditModelLoaded(entity, editModel);
         });
 
@@ -4002,7 +4270,18 @@ public partial interface IRepository<TEntity, TKey> : IRemoteRepository<TEntity,
     where TEntity : EntityBase, new()
 {
     /// <summary>Bulk inserts a collection of entities using SqlBulkCopy.</summary>
-    /// <param name="entities">The list of entities to insert.</param>
+    /// <remarks>
+    /// The contract every backend keeps to:
+    /// <list type="bullet">
+    /// <item><description>A <c>null</c> element is skipped rather than rejected (the same treatment the graph save gives a null in its list).</description></item>
+    /// <item><description>The return value counts the rows actually inserted, so skipped elements are not part of it.</description></item>
+    /// <item><description>An empty collection inserts nothing and returns 0 without opening a connection.</description></item>
+    /// <item><description>A cancellation already requested on entry throws before anything is written.</description></item>
+    /// </list>
+    /// The insert itself is one unit of work per backend (SqlBulkCopy, a single transaction, one SaveChanges, or one staged
+    /// batch), but only the in-memory backend validates the whole batch for duplicate primary keys up front.
+    /// </remarks>
+    /// <param name="entities">The list of entities to insert (null elements are skipped).</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The number of rows inserted.</returns>
     Task<int> BulkInsertAsync(
@@ -4202,6 +4481,44 @@ internal static class ConcurrencyModes
                 nameof(mode),
                 "The concurrency mode must be Optimistic or ForceOverwrite."
             );
+}
+
+/// <summary>Transaction handling shared by the failure paths of the generated repositories.</summary>
+internal static class SqlTransactions
+{
+    /// <summary>Rolls a transaction back from a catch block, never letting the rollback replace the failure being propagated.</summary>
+    /// <remarks>
+    /// <para>
+    /// A rollback attempted on a transaction that has already completed - most notably one whose commit went through
+    /// before the failure occurred - throws <see cref="InvalidOperationException"/>, and an exception thrown from a
+    /// catch block replaces the one being propagated. The original failure is the one that explains what went wrong,
+    /// so the completed case is skipped and anything the rollback itself raises is swallowed.
+    /// </para>
+    /// <para>
+    /// Nothing is leaked by swallowing: the caller disposes the connection on the way out, which ends an uncommitted
+    /// transaction regardless. The rollback also runs with <see cref="CancellationToken.None"/>, because a canceled
+    /// token must not be able to interrupt it.
+    /// </para>
+    /// </remarks>
+    /// <param name="transaction">The transaction to roll back.</param>
+    public static async Task RollbackQuietlyAsync(DbTransaction transaction)
+    {
+        // A completed transaction no longer holds its connection, which is the portable way to tell that there is
+        // nothing left to roll back.
+        if (transaction.Connection is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            // Deliberately ignored: reporting it would hide the failure that is on its way to the caller.
+        }
+    }
 }
 
 /// <summary>
@@ -4555,8 +4872,17 @@ internal static class RawSqlMapper
     /// <c>@name0, @name1, ...</c> and adds each element as an individual parameter.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Reference it inside parentheses in the SQL, as in <c>IN (@name)</c>. An empty collection expands to a single
-    /// <c>NULL</c> (<c>IN (NULL)</c>) and matches no rows (following SQL's three-valued logic).
+    /// <c>NULL</c> (<c>IN (NULL)</c>) and matches no rows (following SQL's three-valued logic). That is the right answer
+    /// for <c>IN</c>, but <c>NOT IN (NULL)</c> is UNKNOWN for every row and therefore matches nothing either - branch to a
+    /// different statement when the collection can be empty and the negated form is what you need.
+    /// </para>
+    /// <para>
+    /// The rewrite is textual, so it replaces <c>@name</c> anywhere in the command text - including inside a string
+    /// literal or a comment. Do not write the parameter's own name in those places. Names that merely start the same
+    /// (<c>@nameSuffix</c>, <c>@name0</c>) and system variables that merely end the same (<c>@@name</c>) are left alone.
+    /// </para>
     /// </remarks>
     internal static void BindCollectionParameter(
         DbCommand command,
@@ -4576,10 +4902,11 @@ internal static class RawSqlMapper
             names.Add(parameter.ParameterName);
         }
 
-        // When an identifier character follows @name (as in @name0 or @nameX) it is a different parameter, so do not rewrite it
+        // When an identifier character follows @name (as in @name0 or @nameX) it is a different parameter, so do not rewrite it.
+        // The same holds on the left: an identifier character or a second @ in front (@@name, a system variable) means a different token
         command.CommandText = Regex.Replace(
             command.CommandText,
-            $"@{Regex.Escape(name)}(?![0-9A-Za-z_])",
+            $"(?<![@0-9A-Za-z_])@{Regex.Escape(name)}(?![0-9A-Za-z_])",
             names.Count == 0 ? "NULL" : string.Join(", ", names)
         );
     }
@@ -4989,13 +5316,18 @@ internal static class QueryStringMatchGuard
                 {
                     FieldInfo field => field.GetValue(instance),
                     PropertyInfo property => property.GetValue(instance),
-                    _ => Expression.Lambda(expression).Compile().DynamicInvoke(),
+                    _ => CompileAndInvoke(expression),
                 };
 
             default:
-                return Expression.Lambda(expression).Compile().DynamicInvoke();
+                return CompileAndInvoke(expression);
         }
     }
+
+    /// <summary>Compiles an expression as a <c>Func&lt;object&gt;</c> and invokes it (avoiding the reflection-based DynamicInvoke and its exception wrapping).</summary>
+    private static object? CompileAndInvoke(Expression expression) =>
+        Expression.Lambda<Func<object?>>(Expression.Convert(expression, typeof(object)))
+            .Compile()();
 
     /// <summary>A lightweight visitor that merely raises a flag when it finds a lambda-parameter reference.</summary>
     private sealed class ParameterFinder : ExpressionVisitor
@@ -5103,8 +5435,9 @@ public sealed class SqlQuery<TEntity>
     /// <remarks>
     /// Cannot be combined with Include (an <see cref="InvalidOperationException"/> is thrown when the terminal method runs). When unbounded binary
     /// columns are needed, fetch them with a separate query that has no Include. On SQL Server this uses a plain SELECT (not the default JSON path),
-    /// avoiding the Base64 inflation of large blobs (5-6x peak memory). It takes effect only on ToListAsync / FirstOrDefaultAsync
-    /// (it does not affect projections, counts, or existence checks). The fetched entities are equivalent to a normal fetch (RowState=Unchanged), but
+    /// avoiding the Base64 inflation of large blobs (5-6x peak memory). It takes effect on the entity-shaped fetches (ToListAsync /
+    /// FirstOrDefaultAsync) and on the fallback path of a projection, where the entity is materialized in full before the selector runs
+    /// (it does not affect counts, existence checks, or a projection whose columns are pruned). The fetched entities are equivalent to a normal fetch (RowState=Unchanged), but
     /// because excluded columns remain outside the UPDATE set, calling UpdateAsync on them as-is throws via the existing guard (perform updates with raw SQL).
     /// </remarks>
     public SqlQuery<TEntity> WithUnboundedBinary()
@@ -5188,7 +5521,17 @@ public sealed class SqlQuery<TEntity>
             );
         }
 
-        return new(_predicates, _orderSelectors, _includes, _take, _skip, _withUnboundedBinary);
+        // The captured lists are copied, so a query that carries on being built after a terminal method cannot add to a plan
+        // that has already been handed over. Their elements are shared as they are: the expressions are immutable, and
+        // rebuilding them would defeat EF Core's query plan cache.
+        return new(
+            _predicates.ToArray(),
+            _orderSelectors.ToArray(),
+            _includes.ToArray(),
+            _take,
+            _skip,
+            _withUnboundedBinary
+        );
     }
 }
 
@@ -5826,8 +6169,8 @@ public partial interface ICustomerProfileRepository : IRepository<CustomerProfil
 /// </summary>
 /// <remarks>
 /// <para>
-/// Keeps a "primary key -> snapshot clone" dictionary per entity type. Writes (save/delete) and reads (fetch/query)
-/// always go through a clone produced by <see cref="EntityBase.Clone"/>, so mutating a returned entity on the caller
+/// Keeps a "primary key -> snapshot" dictionary per entity type. A write files away a copy of the entity's columns and a
+/// read hands out a clone produced by <see cref="EntityBase.Clone"/>, so mutating a returned entity on the caller
 /// side never changes the store contents (matching the by-value semantics of a real database). All operations are
 /// serialized with a <c>lock</c> to be thread-safe.
 /// </para>
@@ -5961,54 +6304,47 @@ public sealed class InMemoryDataStore
         }
     }
 
-    // Type -> navigation properties (those carrying [NavigationReference]). Resolved once and cached.
-    private static readonly ConcurrentDictionary<Type, PropertyInfo[]> _navigations = new();
-
-    /// <summary>Returns the navigation properties of the given type (an empty array for a type without any).</summary>
-    private static PropertyInfo[] Navigations(Type entityType) =>
-        _navigations.GetOrAdd(
-            entityType,
-            static type =>
-                type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
-                    .Where(property => EntitySaveMetadata.NavigationAttribute(property) is not null)
-                    .ToArray()
-        );
-
-    /// <summary>Detaches the navigations of a snapshot that is about to be stored, so the store holds rows rather than graphs.</summary>
+    /// <summary>Copies the columns of <paramref name="entity"/> onto a fresh instance of its type, leaving the navigations at the values the constructor gives them (an empty collection, a null reference).</summary>
     /// <remarks>
-    /// <see cref="EntityBase.Clone"/> copies the child navigations along with the columns, so a graph handed to a save
-    /// would otherwise be filed away with its children still hanging off the row - and still marked Added. A real database
-    /// stores rows: a fetch without Include comes back with its navigations empty, and re-saving what it returned does not
-    /// try to insert the children a second time. Detaching costs nothing on the read side, where Include rebuilds the
-    /// navigations from the child rows whenever a query asks for them.
+    /// <para>
+    /// The store holds rows, not graphs. A graph handed to a save would otherwise be filed away with its children still
+    /// hanging off the row - and still marked Added - whereas a real database stores rows: a fetch without Include comes back
+    /// with its navigations empty, and re-saving what it returned does not try to insert the children a second time. Nothing
+    /// is lost on the read side, where Include rebuilds the navigations from the child rows whenever a query asks for them.
+    /// </para>
+    /// <para>
+    /// Copying the columns alone is also what keeps a save linear. <see cref="EntityBase.Clone"/> deep-copies the whole
+    /// subtree (a JSON round trip) only for the children to be dropped again straight afterwards, so saving a graph of n
+    /// nodes copied the subtree of every one of them.
+    /// </para>
+    /// <para>
+    /// A binary column is copied rather than shared, because it is the one column value that can be mutated in place; that
+    /// keeps the by-value semantics cloning gave, where writing through the caller's array cannot reach the store's row.
+    /// </para>
     /// </remarks>
-    private static void DetachNavigations(EntityBase snapshot)
+    private static EntityBase CopyColumns(EntityBase entity)
     {
-        foreach (var property in Navigations(snapshot.GetType()))
+        var entityType = entity.GetType();
+        var copy = (EntityBase)Activator.CreateInstance(entityType)!;
+
+        foreach (var property in EntitySaveMetadata.For(entityType).AllProperties)
         {
-            // A collection navigation gets an empty list of its own (never one shared between rows); a single reference is dropped
-            property.SetValue(
-                snapshot,
-                EntitySaveMetadata.NavigationAttribute(property)!.IsCollection
-                    ? Activator.CreateInstance(
-                        typeof(List<>).MakeGenericType(
-                            property.PropertyType.GetGenericArguments()[0]
-                        )
-                    )
-                    : null
-            );
+            var value = property.GetValue(entity);
+
+            property.SetValue(copy, value is byte[] bytes ? (byte[])bytes.Clone() : value);
         }
+
+        return copy;
     }
 
-    /// <summary>Prepares the snapshot to store for <paramref name="entity"/>: a detached clone carrying over whatever the row being replaced holds in columns this write does not name.</summary>
+    /// <summary>Prepares the snapshot to store for <paramref name="entity"/>: a detached row carrying over whatever the row being replaced holds in columns this write does not name.</summary>
     /// <remarks>
     /// <paramref name="previous"/> is the row this write replaces (<c>null</c> for an insert, which writes every column just
     /// as a real INSERT does).
     /// </remarks>
     private static EntityBase PrepareSnapshot(EntityBase entity, EntityBase? previous)
     {
-        var snapshot = entity.Clone();
-        DetachNavigations(snapshot);
+        var snapshot = CopyColumns(entity);
 
         if (previous is not null)
         {
@@ -6127,6 +6463,11 @@ public sealed class InMemoryDataStore
     /// taken the same primary key meanwhile is a duplicate key rather than something an overwrite policy can excuse.
     /// </para>
     /// <para>
+    /// Last-write-wins still stops short of resurrection: a row the save started from that has been deleted meanwhile is left
+    /// deleted, because putting the staged snapshot back would bring a deleted row to life, where a real database's UPDATE
+    /// simply affects no rows. The staged write for such a row is dropped (a staged delete for it is a no-op either way).
+    /// </para>
+    /// <para>
     /// Once the writes are in, the row versions they assigned are read back out of the published snapshots and handed to the
     /// caller's entities. Reading them back (rather than remembering them when they were assigned) is what keeps a later
     /// write to the same row - a hook writing a blob, for instance - from leaving the caller holding a superseded version.
@@ -6136,9 +6477,14 @@ public sealed class InMemoryDataStore
     {
         lock (_gate)
         {
+            // The rows that were deleted while the save was running: their staged writes are dropped instead of applied
+            HashSet<(Type EntityType, object Key)>? deletedMeanwhile = null;
+
             foreach (var (entityType, key, baseRow) in staging.Baseline)
             {
-                if (ReferenceEquals(Table(entityType).GetValueOrDefault(key), baseRow))
+                var current = Table(entityType).GetValueOrDefault(key);
+
+                if (ReferenceEquals(current, baseRow))
                 {
                     continue;
                 }
@@ -6157,10 +6503,22 @@ public sealed class InMemoryDataStore
                 {
                     throw SaveConflictException.Modified(entityType, key, "save");
                 }
+
+                // The row this write started from is gone: overwriting last-write-wins does not extend to reviving it
+                if (baseRow is not null && current is null)
+                {
+                    deletedMeanwhile ??= new HashSet<(Type EntityType, object Key)>();
+                    deletedMeanwhile.Add((entityType, key));
+                }
             }
 
             foreach (var ((entityType, key), snapshot) in staging.Overlay)
             {
+                if (deletedMeanwhile is not null && deletedMeanwhile.Contains((entityType, key)))
+                {
+                    continue;
+                }
+
                 if (snapshot is null)
                 {
                     Table(entityType).Remove(key);
@@ -6420,9 +6778,12 @@ internal sealed class InMemoryQueryExecutor<TEntity>(InMemoryDataStore store)
         CancellationToken cancellationToken
     )
     {
+        var predicates = CompilePredicates(plan);
+        var orderings = CompileOrderings(plan);
+
         var result = _store.Read(scope =>
         {
-            var matched = ApplyOrderingAndPaging(FilterRaw(plan), plan);
+            var matched = ApplyOrderingAndPaging(FilterRaw(predicates), plan, orderings);
             // Clone first, then attach Include (so the store's actual entities are not mutated). By default the returned clones drop
             // unbounded binary columns to their not-fetched state (when WithUnboundedBinary is set they are returned as full clones
             // without stripping, so excluded columns are also fetched; the Include-less case is already guarded at the terminal).
@@ -6456,7 +6817,8 @@ internal sealed class InMemoryQueryExecutor<TEntity>(InMemoryDataStore store)
     /// For a selector with no Include and only column references, it projects "from a full clone" (so unbounded binary columns are
     /// also referenceable, giving the same parity as the real database including the referenced columns in the SELECT). When Include
     /// is used or column references cannot be extracted, it projects from the conventional path (a clone with unbounded binary columns
-    /// stripped, as in ToListAsync), giving the same parity as the real database's fallback.
+    /// stripped, as in ToListAsync), giving the same parity as the real database's fallback - including <c>WithUnboundedBinary</c>,
+    /// which the dialect backends pick up on that path because their fallback goes through ToListAsync.
     /// </remarks>
     public Task<IReadOnlyList<TResult>> ToProjectionListAsync<TResult>(
         SqlQueryPlan<TEntity> plan,
@@ -6465,6 +6827,8 @@ internal sealed class InMemoryQueryExecutor<TEntity>(InMemoryDataStore store)
     )
     {
         var project = selector.Compile();
+        var predicates = CompilePredicates(plan);
+        var orderings = CompileOrderings(plan);
 
         // With no Include and only column references, project from a full clone (excluded columns are also referenceable). Otherwise project from a stripped clone.
         var prunable =
@@ -6474,7 +6838,7 @@ internal sealed class InMemoryQueryExecutor<TEntity>(InMemoryDataStore store)
 
         var result = _store.Read(scope =>
         {
-            var matched = ApplyOrderingAndPaging(FilterRaw(plan), plan);
+            var matched = ApplyOrderingAndPaging(FilterRaw(predicates), plan, orderings);
             var projected = new List<TResult>(matched.Count);
 
             foreach (var entity in matched)
@@ -6484,8 +6848,12 @@ internal sealed class InMemoryQueryExecutor<TEntity>(InMemoryDataStore store)
 
                 if (!prunable)
                 {
-                    // Same parity as the conventional path (ToListAsync): strip unbounded binary columns, attach Include, then project.
-                    UnboundedBinaryColumns.StripExcluded(clone);
+                    // Same parity as the conventional path (ToListAsync): strip unbounded binary columns unless they were asked for, attach Include, then project.
+                    if (!plan.WithUnboundedBinary)
+                    {
+                        UnboundedBinaryColumns.StripExcluded(clone);
+                    }
+
                     IncludeAttacher.Attach(clone, plan.Includes, scope);
                 }
 
@@ -6504,9 +6872,13 @@ internal sealed class InMemoryQueryExecutor<TEntity>(InMemoryDataStore store)
         CancellationToken cancellationToken
     )
     {
+        var predicates = CompilePredicates(plan);
+        var orderings = CompileOrderings(plan);
+
         var result = _store.Read(scope =>
         {
-            var first = ApplyOrderingAndPaging(FilterRaw(plan), plan).FirstOrDefault();
+            var first = ApplyOrderingAndPaging(FilterRaw(predicates), plan, orderings)
+                .FirstOrDefault();
 
             if (first is null)
             {
@@ -6529,54 +6901,90 @@ internal sealed class InMemoryQueryExecutor<TEntity>(InMemoryDataStore store)
     }
 
     /// <summary>Returns the count of rows matching the conditions (orderings, paging, and Include play no part).</summary>
-    public Task<int> CountAsync(SqlQueryPlan<TEntity> plan, CancellationToken cancellationToken) =>
-        Task.FromResult(_store.Read(_ => FilterRaw(plan).Count()));
+    public Task<int> CountAsync(SqlQueryPlan<TEntity> plan, CancellationToken cancellationToken)
+    {
+        var predicates = CompilePredicates(plan);
+        return Task.FromResult(_store.Read(_ => FilterRaw(predicates).Count()));
+    }
 
     /// <summary>Returns whether any row matches the conditions.</summary>
-    public Task<bool> AnyAsync(SqlQueryPlan<TEntity> plan, CancellationToken cancellationToken) =>
-        Task.FromResult(_store.Read(_ => FilterRaw(plan).Any()));
+    public Task<bool> AnyAsync(SqlQueryPlan<TEntity> plan, CancellationToken cancellationToken)
+    {
+        var predicates = CompilePredicates(plan);
+        return Task.FromResult(_store.Read(_ => FilterRaw(predicates).Any()));
+    }
 
     /// <summary>Deletes rows matching the conditions. With cascadeDelete=true, descendants are also deleted along the FK chain.</summary>
+    /// <remarks>
+    /// The deletes are staged and published as one unit, so a traversal that gives up part-way through - a cascade the fixed
+    /// descendant walk cannot express, for instance - leaves the store exactly as it found it, the way a real database rolls
+    /// the statement back. Publishing waives the version check: a bulk delete states a condition, not the version of any
+    /// particular row.
+    /// </remarks>
     public Task<int> ExecuteDeleteAsync(
         SqlQueryPlan<TEntity> plan,
         bool cascadeDelete,
         CancellationToken cancellationToken
     )
     {
-        var rows = _store.Write(scope =>
-        {
-            // Determine the delete targets by the primary keys of the snapshots (pre-clone) as evaluated at this point.
-            var targets = FilterRaw(plan).ToList();
-            var removed = 0;
+        var predicates = CompilePredicates(plan);
+        var staging = new InMemorySaveStaging();
 
-            foreach (var target in targets)
+        var rows = _store.Write(
+            scope =>
             {
-                if (cascadeDelete)
+                // Determine the delete targets by the primary keys of the snapshots (pre-clone) as evaluated at this point.
+                var targets = FilterRaw(predicates).ToList();
+                var removed = 0;
+
+                foreach (var target in targets)
                 {
-                    removed += InMemoryCascade.DeleteDescendants(target, scope);
+                    if (cascadeDelete)
+                    {
+                        removed += InMemoryCascade.DeleteDescendants(target, scope);
+                    }
+
+                    if (scope.Remove(typeof(TEntity), InMemoryDataStore.KeyOf(target)))
+                    {
+                        removed++;
+                    }
                 }
 
-                if (scope.Remove(typeof(TEntity), InMemoryDataStore.KeyOf(target)))
-                {
-                    removed++;
-                }
-            }
+                return removed;
+            },
+            staging
+        );
 
-            return removed;
-        });
-
+        _store.Publish(staging, ConcurrencyMode.ForceOverwrite);
         return Task.FromResult(rows);
     }
 
+    /// <summary>Compiles the plan's predicates into delegates.</summary>
+    /// <remarks>
+    /// Compiling an expression tree is expensive, and it is done before the store lock is taken on purpose: doing it inside
+    /// would serialize every read in the process behind one query's compilation.
+    /// </remarks>
+    private static Func<TEntity, bool>[] CompilePredicates(SqlQueryPlan<TEntity> plan) =>
+        plan.Predicates.Select(predicate => (Func<TEntity, bool>)predicate.Compile()).ToArray();
+
+    /// <summary>Compiles the plan's ordering key selectors into delegates (paired with their direction). Called outside the store lock, for the same reason as <see cref="CompilePredicates"/>.</summary>
+    private static (Func<TEntity, object?> KeySelector, bool Descending)[] CompileOrderings(
+        SqlQueryPlan<TEntity> plan
+    ) =>
+        plan
+            .Orderings.Select(ordering =>
+                ((Func<TEntity, object?>)ordering.KeySelector.Compile(), ordering.Descending)
+            )
+            .ToArray();
+
     /// <summary>Filters the store's raw snapshots by applying the predicates (AND-combined) (pre-clone, enumeration only).</summary>
-    private IEnumerable<EntityBase> FilterRaw(SqlQueryPlan<TEntity> plan)
+    private IEnumerable<EntityBase> FilterRaw(Func<TEntity, bool>[] predicates)
     {
         IEnumerable<TEntity> query = _store.RawSnapshotUnlocked(typeof(TEntity)).Cast<TEntity>();
 
-        foreach (var predicate in plan.Predicates)
+        foreach (var predicate in predicates)
         {
-            var compiled = (Func<TEntity, bool>)predicate.Compile();
-            query = query.Where(compiled);
+            query = query.Where(predicate);
         }
 
         return query;
@@ -6585,15 +6993,16 @@ internal sealed class InMemoryQueryExecutor<TEntity>(InMemoryDataStore store)
     /// <summary>Applies the orderings (stable sort in the specified order) and Skip/Take.</summary>
     private static IReadOnlyList<EntityBase> ApplyOrderingAndPaging(
         IEnumerable<EntityBase> source,
-        SqlQueryPlan<TEntity> plan
+        SqlQueryPlan<TEntity> plan,
+        (Func<TEntity, object?> KeySelector, bool Descending)[] orderings
     )
     {
         var typed = source.Cast<TEntity>();
         IOrderedEnumerable<TEntity>? ordered = null;
 
-        foreach (var ordering in plan.Orderings)
+        foreach (var ordering in orderings)
         {
-            var keySelector = (Func<TEntity, object?>)ordering.KeySelector.Compile();
+            var keySelector = ordering.KeySelector;
 
             if (ordered is null)
             {
@@ -6632,7 +7041,8 @@ internal sealed class InMemoryQueryExecutor<TEntity>(InMemoryDataStore store)
 /// <see cref="Comparer{T}.Default"/> throws on them, whereas ordering by a binary column is perfectly ordinary in SQL; they
 /// are compared byte by byte here, which is the order SQL Server gives <c>varbinary</c>. Strings compare culture-sensitively
 /// by default, while every other string comparison in this backend is ordinal, so ordering is ordinal too (a real database
-/// orders by its collation, which this backend does not model - see the divergences the documentation lists).
+/// orders by its collation, which this backend does not model - see the divergences the documentation lists at
+/// https://github.com/kokko-labs/QuickER/blob/main/docs/code-generation.md).
 /// </para>
 /// <para>
 /// Null sorts before everything else, which an ascending <c>ORDER BY</c> does as well (and descending duly puts it last).
@@ -7201,15 +7611,24 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
         Task.FromResult(Store.Snapshot<TEntity>());
 
     /// <summary>Inserts an entity (an existing primary key is rejected, as a real database would).</summary>
+    /// <remarks>
+    /// Like every other backend, the direct CRUD operations leave the argument's <c>RowState</c> alone: settling it is
+    /// what <c>SaveAsync</c> does after a successful graph save. Doing it here as well would make an entity marked
+    /// Added silently turn into a no-op on a following save, where a real database reports the duplicate key.
+    /// </remarks>
     public Task InsertAsync(TEntity entity, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(entity);
         Store.Insert(entity);
-        entity.MarkUnchanged();
         return Task.CompletedTask;
     }
 
-    /// <summary>Bulk-inserts a collection of entities (all-or-nothing: a duplicate primary key rejects the whole batch without applying any of it).</summary>
+    /// <summary>Bulk-inserts a collection of entities.</summary>
+    /// <remarks>
+    /// Unlike the other backends, the whole batch is checked for duplicate primary keys (against the store and within the
+    /// batch itself) before any of it is applied, so a duplicate rejects the batch without leaving part of it inserted -
+    /// which is what a real database's single transaction gives.
+    /// </remarks>
     public Task<int> BulkInsertAsync(
         IEnumerable<TEntity> entities,
         CancellationToken cancellationToken = default
@@ -7217,6 +7636,12 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
     {
         ArgumentNullException.ThrowIfNull(entities);
         cancellationToken.ThrowIfCancellationRequested();
+
+        // A collection known to be empty is answered without touching the store
+        if (entities is ICollection<TEntity> { Count: 0 })
+        {
+            return Task.FromResult(0);
+        }
 
         var targets = entities.Where(entity => entity is not null).ToList();
 
@@ -7238,7 +7663,6 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
             foreach (var entity in targets)
             {
                 scope.Insert(entity);
-                entity.MarkUnchanged();
             }
 
             return targets.Count;
@@ -7287,11 +7711,6 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
             scope.Put(entity);
             return true;
         });
-
-        if (updated)
-        {
-            entity.MarkUnchanged();
-        }
 
         return Task.FromResult(updated);
     }

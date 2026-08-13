@@ -5,8 +5,8 @@
 /// </summary>
 /// <remarks>
 /// <para>
-/// Keeps a "primary key -> snapshot clone" dictionary per entity type. Writes (save/delete) and reads (fetch/query)
-/// always go through a clone produced by <see cref="EntityBase.Clone"/>, so mutating a returned entity on the caller
+/// Keeps a "primary key -> snapshot" dictionary per entity type. A write files away a copy of the entity's columns and a
+/// read hands out a clone produced by <see cref="EntityBase.Clone"/>, so mutating a returned entity on the caller
 /// side never changes the store contents (matching the by-value semantics of a real database). All operations are
 /// serialized with a <c>lock</c> to be thread-safe.
 /// </para>
@@ -143,54 +143,58 @@ public sealed class InMemoryDataStore
         }
     }
 
-    // Type -> navigation properties (those carrying [NavigationReference]). Resolved once and cached.
-    private static readonly ConcurrentDictionary<Type, PropertyInfo[]> _navigations = new();
-
-    /// <summary>Returns the navigation properties of the given type (an empty array for a type without any).</summary>
-    private static PropertyInfo[] Navigations(Type entityType) =>
-        _navigations.GetOrAdd(
-            entityType,
-            static type =>
-                type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
-                    .Where(property => EntitySaveMetadata.NavigationAttribute(property) is not null)
-                    .ToArray()
-        );
-
-    /// <summary>Detaches the navigations of a snapshot that is about to be stored, so the store holds rows rather than graphs.</summary>
+    /// <summary>Copies the columns of <paramref name="entity"/> onto a fresh instance of its type, leaving the navigations at the values the constructor gives them (an empty collection, a null reference).</summary>
     /// <remarks>
-    /// <see cref="EntityBase.Clone"/> copies the child navigations along with the columns, so a graph handed to a save
-    /// would otherwise be filed away with its children still hanging off the row - and still marked Added. A real database
-    /// stores rows: a fetch without Include comes back with its navigations empty, and re-saving what it returned does not
-    /// try to insert the children a second time. Detaching costs nothing on the read side, where Include rebuilds the
-    /// navigations from the child rows whenever a query asks for them.
+    /// <para>
+    /// The store holds rows, not graphs. A graph handed to a save would otherwise be filed away with its children still
+    /// hanging off the row - and still marked Added - whereas a real database stores rows: a fetch without Include comes back
+    /// with its navigations empty, and re-saving what it returned does not try to insert the children a second time. Nothing
+    /// is lost on the read side, where Include rebuilds the navigations from the child rows whenever a query asks for them.
+    /// </para>
+    /// <para>
+    /// Copying the columns alone is also what keeps a save linear. <see cref="EntityBase.Clone"/> deep-copies the whole
+    /// subtree (a JSON round trip) only for the children to be dropped again straight afterwards, so saving a graph of n
+    /// nodes copied the subtree of every one of them.
+    /// </para>
+    /// <para>
+    /// A binary column is copied rather than shared, because it is the one column value that can be mutated in place; that
+    /// keeps the by-value semantics cloning gave, where writing through the caller's array cannot reach the store's row.
+    /// </para>
     /// </remarks>
-    private static void DetachNavigations(EntityBase snapshot)
+    private static EntityBase CopyColumns(EntityBase entity)
     {
-        foreach (var property in Navigations(snapshot.GetType()))
+        var entityType = entity.GetType();
+        var copy = (EntityBase)Activator.CreateInstance(entityType)!;
+
+        foreach (var property in EntitySaveMetadata.For(entityType).AllProperties)
         {
-            // A collection navigation gets an empty list of its own (never one shared between rows); a single reference is dropped
-            property.SetValue(
-                snapshot,
-                EntitySaveMetadata.NavigationAttribute(property)!.IsCollection
-                    ? Activator.CreateInstance(
-                        typeof(List<>).MakeGenericType(
-                            property.PropertyType.GetGenericArguments()[0]
-                        )
-                    )
-                    : null
-            );
+            var value = property.GetValue(entity);
+{{~ if generate_value_objects ~}}
+
+            // A binary value object hands out the very array it was created with, so the copy has to reach inside it
+            if (value is IValueObject valueObject && valueObject.UnderlyingValue is byte[] wrapped)
+            {
+                value = SqlValueObjectActivator.Wrap(
+                    (byte[])wrapped.Clone(),
+                    property.PropertyType
+                );
+            }
+{{~ end ~}}
+
+            property.SetValue(copy, value is byte[] bytes ? (byte[])bytes.Clone() : value);
         }
+
+        return copy;
     }
 
-    /// <summary>Prepares the snapshot to store for <paramref name="entity"/>: a detached clone carrying over whatever the row being replaced holds in columns this write does not name.</summary>
+    /// <summary>Prepares the snapshot to store for <paramref name="entity"/>: a detached row carrying over whatever the row being replaced holds in columns this write does not name.</summary>
     /// <remarks>
     /// <paramref name="previous"/> is the row this write replaces (<c>null</c> for an insert, which writes every column just
     /// as a real INSERT does).
     /// </remarks>
     private static EntityBase PrepareSnapshot(EntityBase entity, EntityBase? previous)
     {
-        var snapshot = entity.Clone();
-        DetachNavigations(snapshot);
+        var snapshot = CopyColumns(entity);
 
         if (previous is not null)
         {
@@ -393,6 +397,11 @@ public sealed class InMemoryDataStore
     /// taken the same primary key meanwhile is a duplicate key rather than something an overwrite policy can excuse.
     /// </para>
     /// <para>
+    /// Last-write-wins still stops short of resurrection: a row the save started from that has been deleted meanwhile is left
+    /// deleted, because putting the staged snapshot back would bring a deleted row to life, where a real database's UPDATE
+    /// simply affects no rows. The staged write for such a row is dropped (a staged delete for it is a no-op either way).
+    /// </para>
+    /// <para>
     /// Once the writes are in, the row versions they assigned are read back out of the published snapshots and handed to the
     /// caller's entities. Reading them back (rather than remembering them when they were assigned) is what keeps a later
     /// write to the same row - a hook writing a blob, for instance - from leaving the caller holding a superseded version.
@@ -402,9 +411,14 @@ public sealed class InMemoryDataStore
     {
         lock (_gate)
         {
+            // The rows that were deleted while the save was running: their staged writes are dropped instead of applied
+            HashSet<(Type EntityType, object Key)>? deletedMeanwhile = null;
+
             foreach (var (entityType, key, baseRow) in staging.Baseline)
             {
-                if (ReferenceEquals(Table(entityType).GetValueOrDefault(key), baseRow))
+                var current = Table(entityType).GetValueOrDefault(key);
+
+                if (ReferenceEquals(current, baseRow))
                 {
                     continue;
                 }
@@ -423,10 +437,22 @@ public sealed class InMemoryDataStore
                 {
                     throw SaveConflictException.Modified(entityType, key, "save");
                 }
+
+                // The row this write started from is gone: overwriting last-write-wins does not extend to reviving it
+                if (baseRow is not null && current is null)
+                {
+                    deletedMeanwhile ??= new HashSet<(Type EntityType, object Key)>();
+                    deletedMeanwhile.Add((entityType, key));
+                }
             }
 
             foreach (var ((entityType, key), snapshot) in staging.Overlay)
             {
+                if (deletedMeanwhile is not null && deletedMeanwhile.Contains((entityType, key)))
+                {
+                    continue;
+                }
+
                 if (snapshot is null)
                 {
                     Table(entityType).Remove(key);
@@ -686,9 +712,12 @@ public sealed class InMemoryDataStore
         CancellationToken cancellationToken
     )
     {
+        var predicates = CompilePredicates(plan);
+        var orderings = CompileOrderings(plan);
+
         var result = _store.Read(scope =>
         {
-            var matched = ApplyOrderingAndPaging(FilterRaw(plan), plan);
+            var matched = ApplyOrderingAndPaging(FilterRaw(predicates), plan, orderings);
             // Clone first, then attach Include (so the store's actual entities are not mutated). By default the returned clones drop
             // unbounded binary columns to their not-fetched state (when WithUnboundedBinary is set they are returned as full clones
             // without stripping, so excluded columns are also fetched; the Include-less case is already guarded at the terminal).
@@ -722,7 +751,8 @@ public sealed class InMemoryDataStore
     /// For a selector with no Include and only column references, it projects "from a full clone" (so unbounded binary columns are
     /// also referenceable, giving the same parity as the real database including the referenced columns in the SELECT). When Include
     /// is used or column references cannot be extracted, it projects from the conventional path (a clone with unbounded binary columns
-    /// stripped, as in ToListAsync), giving the same parity as the real database's fallback.
+    /// stripped, as in ToListAsync), giving the same parity as the real database's fallback - including <c>WithUnboundedBinary</c>,
+    /// which the dialect backends pick up on that path because their fallback goes through ToListAsync.
     /// </remarks>
     public Task<IReadOnlyList<TResult>> ToProjectionListAsync<TResult>(
         SqlQueryPlan<TEntity> plan,
@@ -731,6 +761,8 @@ public sealed class InMemoryDataStore
     )
     {
         var project = selector.Compile();
+        var predicates = CompilePredicates(plan);
+        var orderings = CompileOrderings(plan);
 
         // With no Include and only column references, project from a full clone (excluded columns are also referenceable). Otherwise project from a stripped clone.
         var prunable =
@@ -740,7 +772,7 @@ public sealed class InMemoryDataStore
 
         var result = _store.Read(scope =>
         {
-            var matched = ApplyOrderingAndPaging(FilterRaw(plan), plan);
+            var matched = ApplyOrderingAndPaging(FilterRaw(predicates), plan, orderings);
             var projected = new List<TResult>(matched.Count);
 
             foreach (var entity in matched)
@@ -750,8 +782,12 @@ public sealed class InMemoryDataStore
 
                 if (!prunable)
                 {
-                    // Same parity as the conventional path (ToListAsync): strip unbounded binary columns, attach Include, then project.
-                    UnboundedBinaryColumns.StripExcluded(clone);
+                    // Same parity as the conventional path (ToListAsync): strip unbounded binary columns unless they were asked for, attach Include, then project.
+                    if (!plan.WithUnboundedBinary)
+                    {
+                        UnboundedBinaryColumns.StripExcluded(clone);
+                    }
+
                     IncludeAttacher.Attach(clone, plan.Includes, scope);
                 }
 
@@ -770,9 +806,13 @@ public sealed class InMemoryDataStore
         CancellationToken cancellationToken
     )
     {
+        var predicates = CompilePredicates(plan);
+        var orderings = CompileOrderings(plan);
+
         var result = _store.Read(scope =>
         {
-            var first = ApplyOrderingAndPaging(FilterRaw(plan), plan).FirstOrDefault();
+            var first = ApplyOrderingAndPaging(FilterRaw(predicates), plan, orderings)
+                .FirstOrDefault();
 
             if (first is null)
             {
@@ -795,54 +835,90 @@ public sealed class InMemoryDataStore
     }
 
     /// <summary>Returns the count of rows matching the conditions (orderings, paging, and Include play no part).</summary>
-    public Task<int> CountAsync(SqlQueryPlan<TEntity> plan, CancellationToken cancellationToken) =>
-        Task.FromResult(_store.Read(_ => FilterRaw(plan).Count()));
+    public Task<int> CountAsync(SqlQueryPlan<TEntity> plan, CancellationToken cancellationToken)
+    {
+        var predicates = CompilePredicates(plan);
+        return Task.FromResult(_store.Read(_ => FilterRaw(predicates).Count()));
+    }
 
     /// <summary>Returns whether any row matches the conditions.</summary>
-    public Task<bool> AnyAsync(SqlQueryPlan<TEntity> plan, CancellationToken cancellationToken) =>
-        Task.FromResult(_store.Read(_ => FilterRaw(plan).Any()));
+    public Task<bool> AnyAsync(SqlQueryPlan<TEntity> plan, CancellationToken cancellationToken)
+    {
+        var predicates = CompilePredicates(plan);
+        return Task.FromResult(_store.Read(_ => FilterRaw(predicates).Any()));
+    }
 
     /// <summary>Deletes rows matching the conditions. With cascadeDelete=true, descendants are also deleted along the FK chain.</summary>
+    /// <remarks>
+    /// The deletes are staged and published as one unit, so a traversal that gives up part-way through - a cascade the fixed
+    /// descendant walk cannot express, for instance - leaves the store exactly as it found it, the way a real database rolls
+    /// the statement back. Publishing waives the version check: a bulk delete states a condition, not the version of any
+    /// particular row.
+    /// </remarks>
     public Task<int> ExecuteDeleteAsync(
         SqlQueryPlan<TEntity> plan,
         bool cascadeDelete,
         CancellationToken cancellationToken
     )
     {
-        var rows = _store.Write(scope =>
-        {
-            // Determine the delete targets by the primary keys of the snapshots (pre-clone) as evaluated at this point.
-            var targets = FilterRaw(plan).ToList();
-            var removed = 0;
+        var predicates = CompilePredicates(plan);
+        var staging = new InMemorySaveStaging();
 
-            foreach (var target in targets)
+        var rows = _store.Write(
+            scope =>
             {
-                if (cascadeDelete)
+                // Determine the delete targets by the primary keys of the snapshots (pre-clone) as evaluated at this point.
+                var targets = FilterRaw(predicates).ToList();
+                var removed = 0;
+
+                foreach (var target in targets)
                 {
-                    removed += InMemoryCascade.DeleteDescendants(target, scope);
+                    if (cascadeDelete)
+                    {
+                        removed += InMemoryCascade.DeleteDescendants(target, scope);
+                    }
+
+                    if (scope.Remove(typeof(TEntity), InMemoryDataStore.KeyOf(target)))
+                    {
+                        removed++;
+                    }
                 }
 
-                if (scope.Remove(typeof(TEntity), InMemoryDataStore.KeyOf(target)))
-                {
-                    removed++;
-                }
-            }
+                return removed;
+            },
+            staging
+        );
 
-            return removed;
-        });
-
+        _store.Publish(staging, ConcurrencyMode.ForceOverwrite);
         return Task.FromResult(rows);
     }
 
+    /// <summary>Compiles the plan's predicates into delegates.</summary>
+    /// <remarks>
+    /// Compiling an expression tree is expensive, and it is done before the store lock is taken on purpose: doing it inside
+    /// would serialize every read in the process behind one query's compilation.
+    /// </remarks>
+    private static Func<TEntity, bool>[] CompilePredicates(SqlQueryPlan<TEntity> plan) =>
+        plan.Predicates.Select(predicate => (Func<TEntity, bool>)predicate.Compile()).ToArray();
+
+    /// <summary>Compiles the plan's ordering key selectors into delegates (paired with their direction). Called outside the store lock, for the same reason as <see cref="CompilePredicates"/>.</summary>
+    private static (Func<TEntity, object?> KeySelector, bool Descending)[] CompileOrderings(
+        SqlQueryPlan<TEntity> plan
+    ) =>
+        plan
+            .Orderings.Select(ordering =>
+                ((Func<TEntity, object?>)ordering.KeySelector.Compile(), ordering.Descending)
+            )
+            .ToArray();
+
     /// <summary>Filters the store's raw snapshots by applying the predicates (AND-combined) (pre-clone, enumeration only).</summary>
-    private IEnumerable<EntityBase> FilterRaw(SqlQueryPlan<TEntity> plan)
+    private IEnumerable<EntityBase> FilterRaw(Func<TEntity, bool>[] predicates)
     {
         IEnumerable<TEntity> query = _store.RawSnapshotUnlocked(typeof(TEntity)).Cast<TEntity>();
 
-        foreach (var predicate in plan.Predicates)
+        foreach (var predicate in predicates)
         {
-            var compiled = (Func<TEntity, bool>)predicate.Compile();
-            query = query.Where(compiled);
+            query = query.Where(predicate);
         }
 
         return query;
@@ -851,15 +927,16 @@ public sealed class InMemoryDataStore
     /// <summary>Applies the orderings (stable sort in the specified order) and Skip/Take.</summary>
     private static IReadOnlyList<EntityBase> ApplyOrderingAndPaging(
         IEnumerable<EntityBase> source,
-        SqlQueryPlan<TEntity> plan
+        SqlQueryPlan<TEntity> plan,
+        (Func<TEntity, object?> KeySelector, bool Descending)[] orderings
     )
     {
         var typed = source.Cast<TEntity>();
         IOrderedEnumerable<TEntity>? ordered = null;
 
-        foreach (var ordering in plan.Orderings)
+        foreach (var ordering in orderings)
         {
-            var keySelector = (Func<TEntity, object?>)ordering.KeySelector.Compile();
+            var keySelector = ordering.KeySelector;
 
             if (ordered is null)
             {
@@ -898,7 +975,8 @@ public sealed class InMemoryDataStore
 /// <see cref="Comparer{T}.Default"/> throws on them, whereas ordering by a binary column is perfectly ordinary in SQL; they
 /// are compared byte by byte here, which is the order SQL Server gives <c>varbinary</c>. Strings compare culture-sensitively
 /// by default, while every other string comparison in this backend is ordinal, so ordering is ordinal too (a real database
-/// orders by its collation, which this backend does not model - see the divergences the documentation lists).
+/// orders by its collation, which this backend does not model - see the divergences the documentation lists at
+/// https://github.com/kokko-labs/QuickER/blob/main/docs/code-generation.md).
 /// </para>
 /// <para>
 /// Null sorts before everything else, which an ascending <c>ORDER BY</c> does as well (and descending duly puts it last).
@@ -1481,15 +1559,24 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
         Task.FromResult(Store.Snapshot<TEntity>());
 
     /// <summary>Inserts an entity (an existing primary key is rejected, as a real database would).</summary>
+    /// <remarks>
+    /// Like every other backend, the direct CRUD operations leave the argument's <c>RowState</c> alone: settling it is
+    /// what <c>SaveAsync</c> does after a successful graph save. Doing it here as well would make an entity marked
+    /// Added silently turn into a no-op on a following save, where a real database reports the duplicate key.
+    /// </remarks>
     public Task InsertAsync(TEntity entity, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(entity);
         Store.Insert(entity);
-        entity.MarkUnchanged();
         return Task.CompletedTask;
     }
 
-    /// <summary>Bulk-inserts a collection of entities (all-or-nothing: a duplicate primary key rejects the whole batch without applying any of it).</summary>
+    /// <summary>Bulk-inserts a collection of entities.</summary>
+    /// <remarks>
+    /// Unlike the other backends, the whole batch is checked for duplicate primary keys (against the store and within the
+    /// batch itself) before any of it is applied, so a duplicate rejects the batch without leaving part of it inserted -
+    /// which is what a real database's single transaction gives.
+    /// </remarks>
     public Task<int> BulkInsertAsync(
         IEnumerable<TEntity> entities,
         CancellationToken cancellationToken = default
@@ -1497,6 +1584,12 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
     {
         ArgumentNullException.ThrowIfNull(entities);
         cancellationToken.ThrowIfCancellationRequested();
+
+        // A collection known to be empty is answered without touching the store
+        if (entities is ICollection<TEntity> { Count: 0 })
+        {
+            return Task.FromResult(0);
+        }
 
         var targets = entities.Where(entity => entity is not null).ToList();
 
@@ -1518,7 +1611,6 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
             foreach (var entity in targets)
             {
                 scope.Insert(entity);
-                entity.MarkUnchanged();
             }
 
             return targets.Count;
@@ -1567,11 +1659,6 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
             scope.Put(entity);
             return true;
         });
-
-        if (updated)
-        {
-            entity.MarkUnchanged();
-        }
 
         return Task.FromResult(updated);
     }

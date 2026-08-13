@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
@@ -537,11 +538,19 @@ public abstract class RemoteServiceRuntimeTestsBase : IAsyncLifetime
     /// 17. 必須フィールドを省いたボディ（<c>{}</c>）は 400（BadRequest）になる。エンベロープは positional record のため
     /// 欠落メンバは既定の null のまま通ってしまい、従来はリポジトリ奥の null 引数例外＝500 に化けていた経路の回帰防止。
     /// </summary>
+    /// <remarks>
+    /// CRUD のエンベロープだけでなく、重複事前チェック（CheckUniqueness）と参照型パラメータを持つ名前付きクエリも
+    /// 同じ規則で 400 になる（これらは per-entity のマップを組み立てるモデルビルダー側が包む。以前は素通しで 500 だった）。
+    /// </remarks>
     [Theory(DisplayName = "[RemoteService] 17: 必須フィールドを省いた {} のボディは 400 になる")]
     [InlineData("Customer/Insert")]
     [InlineData("Customer/Update")]
     [InlineData("Customer/Save")]
     [InlineData("Customer/SaveMany")]
+    [InlineData("Customer/CheckUniqueness")]
+    [InlineData("Order/SearchMemo")]
+    [InlineData("Order/GetByIds")]
+    [InlineData("Order/GetByCustomerTyped")]
     public async Task BodyMissingRequiredField_ReturnsBadRequest(string operation)
     {
         var baseUrl = _server!.BaseUrl;
@@ -643,6 +652,57 @@ public abstract class RemoteServiceRuntimeTestsBase : IAsyncLifetime
             .CorrelatedHookCallCount(correlationId)
             .Should()
             .Be(1, "500 の経路ではフックが発火する（計測機構が機能していることの対照）");
+    }
+
+    /// <summary>
+    /// null 引数の拒否は直結とリモートで同型（<see cref="ArgumentNullException"/>）・同じパラメータ名になる。
+    /// </summary>
+    /// <remarks>
+    /// 直結実装（QuickER / EF Core）は入口で <c>ArgumentNullException.ThrowIfNull</c> を通すのに対し、HTTP 実装は
+    /// null をそのまま直列化してサーバー奥まで運び、リポジトリ内の別の例外＝500 に化けていた。実装を差し替えても
+    /// catch の型が変わらないことが契約なので、同じ図・同じ操作で両者の例外が一致することを表明する。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[RemoteService] 20: null 引数は直結・リモートとも ArgumentNullException（パリティ）"
+    )]
+    public async Task NullArgument_ThrowsArgumentNullException_LikeDirectConnection()
+    {
+        var services = new ServiceCollection();
+        ConfigureServerRepositories(services, _db.ReadWriteCreateConnectionString);
+        await using var directProvider = services.BuildServiceProvider();
+
+        var direct = directProvider.GetRequiredService<ICustomerRepository>();
+        var remote = Customers;
+
+        var cases = new (string Parameter, Func<Task> Direct, Func<Task> Remote)[]
+        {
+            ("entity", () => direct.InsertAsync(null!, Ct), () => remote.InsertAsync(null!, Ct)),
+            (
+                "entity",
+                () => direct.UpdateAsync(null!, cancellationToken: Ct),
+                () => remote.UpdateAsync(null!, cancellationToken: Ct)
+            ),
+            (
+                "entity",
+                () => direct.SaveAsync((CustomerEntity)null!, cancellationToken: Ct),
+                () => remote.SaveAsync((CustomerEntity)null!, cancellationToken: Ct)
+            ),
+            (
+                "entities",
+                () => direct.SaveAsync((IEnumerable<CustomerEntity>)null!, cancellationToken: Ct),
+                () => remote.SaveAsync((IEnumerable<CustomerEntity>)null!, cancellationToken: Ct)
+            ),
+        };
+
+        foreach (var (parameter, directCall, remoteCall) in cases)
+        {
+            (await directCall.Should().ThrowAsync<ArgumentNullException>())
+                .Which.ParamName.Should()
+                .Be(parameter);
+            (await remoteCall.Should().ThrowAsync<ArgumentNullException>())
+                .Which.ParamName.Should()
+                .Be(parameter, "リモートも HTTP を投げる前に直結と同じ例外で弾く");
+        }
     }
 
     /// <summary>使い終えたクライアント DI・サーバー・一時 DB を破棄する</summary>

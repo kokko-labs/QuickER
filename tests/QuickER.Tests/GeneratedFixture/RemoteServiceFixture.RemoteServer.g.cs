@@ -29,6 +29,13 @@ namespace QuickER.Tests.GeneratedRemoteServiceFixture;
 internal static class RemoteServerEngine
 {
     /// <summary>Runs a handler, writes the result as JSON, and maps exceptions to HTTP responses (400/409/500, or the status carried by a rejected request such as 413).</summary>
+    /// <remarks>
+    /// Every classifying catch is guarded by <c>!Response.HasStarted</c>, matching the binary transfer executors: once
+    /// the status line and headers have gone out - a failure part-way through serializing the result, for instance -
+    /// the status code can no longer be changed, and writing an error body would append it to the partial response
+    /// instead of replacing it. Such a failure is recorded on the server side and rethrown, which lets the host abort
+    /// the connection so that the client sees a truncated response rather than a corrupted one.
+    /// </remarks>
     public static async Task ExecuteAsync(HttpContext context, Func<Task<object?>> handler)
     {
         try
@@ -40,7 +47,7 @@ internal static class RemoteServerEngine
                 context.RequestAborted
             ).ConfigureAwait(false);
         }
-        catch (RemoteBadRequestException ex)
+        catch (RemoteBadRequestException ex) when (!context.Response.HasStarted)
         {
             // The request itself could not be interpreted: a client-side fault, so it is classified as 400 without server-side logging or the hook.
             await WriteErrorAsync(
@@ -50,12 +57,12 @@ internal static class RemoteServerEngine
                 ex.Message
             ).ConfigureAwait(false);
         }
-        catch (BadHttpRequestException ex)
+        catch (BadHttpRequestException ex) when (!context.Response.HasStarted)
         {
             // Rejected by the server infrastructure (request body size limit, malformed request): pass through the status code it carries (413 and similar).
             await WriteErrorAsync(context, ex.StatusCode, "BadRequest", ex.Message).ConfigureAwait(false);
         }
-        catch (SaveConflictException ex)
+        catch (SaveConflictException ex) when (!context.Response.HasStarted)
         {
             // Optimistic-concurrency conflicts are restored on the client as SaveConflictException (the same catch works as with a direct call).
             await WriteErrorAsync(
@@ -70,9 +77,18 @@ internal static class RemoteServerEngine
         {
             // Client disconnected or cancelled: there is no longer a response target, so do nothing.
         }
-        catch (Exception ex)
+        catch (Exception ex) when (!context.Response.HasStarted)
         {
             await WriteServerErrorAsync(context, ex).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            // The response is already on the wire, so none of the classified answers can be produced any more. The
+            // failure would otherwise disappear entirely, therefore it is logged here - the one part of the 500 path
+            // that does not need the response - before it is rethrown. The OnServerError hook stays out of it: it is
+            // the extension point of a 500 response, and no 500 is being sent.
+            LogServerError(context, ex);
+            throw;
         }
     }
 
@@ -625,8 +641,8 @@ public static partial class GeneratedRemoteEndpoints
                     async () =>
                     {
                         var request = await RemoteServerEngine.ReadRequestAsync<CustomerCheckUniquenessRequest>(context).ConfigureAwait(false);
-                        var repository = context.RequestServices.GetRequiredService<ICustomerRemoteRepository>();
-                        return (object?)await repository.CheckUniquenessAsync(request.Entity, context.RequestAborted).ConfigureAwait(false);
+                        var repository = RemoteServerEngine.Repository<ICustomerRemoteRepository>(context);
+                        return (object?)await repository.CheckUniquenessAsync(RemoteServerEngine.Required(request.Entity, "Entity"), context.RequestAborted).ConfigureAwait(false);
                     }
                 )
         );
@@ -651,7 +667,7 @@ public static partial class GeneratedRemoteEndpoints
                     async () =>
                     {
                         var request = await RemoteServerEngine.ReadRequestAsync<OrderGetByCustomerRequest>(context).ConfigureAwait(false);
-                        var repository = context.RequestServices.GetRequiredService<IOrderRemoteRepository>();
+                        var repository = RemoteServerEngine.Repository<IOrderRemoteRepository>(context);
                         return (object?)await repository.GetByCustomerAsync(request.CustomerId, request.Take, request.Skip, context.RequestAborted).ConfigureAwait(false);
                     }
                 )
@@ -664,7 +680,7 @@ public static partial class GeneratedRemoteEndpoints
                     context,
                     async () =>
                     {
-                        var repository = context.RequestServices.GetRequiredService<IOrderRemoteRepository>();
+                        var repository = RemoteServerEngine.Repository<IOrderRemoteRepository>(context);
                         return (object?)await repository.FindTopAsync(context.RequestAborted).ConfigureAwait(false);
                     }
                 )
@@ -678,7 +694,7 @@ public static partial class GeneratedRemoteEndpoints
                     async () =>
                     {
                         var request = await RemoteServerEngine.ReadRequestAsync<OrderCountByCustomerRequest>(context).ConfigureAwait(false);
-                        var repository = context.RequestServices.GetRequiredService<IOrderRemoteRepository>();
+                        var repository = RemoteServerEngine.Repository<IOrderRemoteRepository>(context);
                         return (object?)await repository.CountByCustomerAsync(request.CustomerId, context.RequestAborted).ConfigureAwait(false);
                     }
                 )
@@ -692,8 +708,8 @@ public static partial class GeneratedRemoteEndpoints
                     async () =>
                     {
                         var request = await RemoteServerEngine.ReadRequestAsync<OrderSearchMemoRequest>(context).ConfigureAwait(false);
-                        var repository = context.RequestServices.GetRequiredService<IOrderRemoteRepository>();
-                        return (object?)await repository.SearchMemoAsync(request.Keyword, context.RequestAborted).ConfigureAwait(false);
+                        var repository = RemoteServerEngine.Repository<IOrderRemoteRepository>(context);
+                        return (object?)await repository.SearchMemoAsync(RemoteServerEngine.Required(request.Keyword, "Keyword"), context.RequestAborted).ConfigureAwait(false);
                     }
                 )
         );
@@ -706,8 +722,8 @@ public static partial class GeneratedRemoteEndpoints
                     async () =>
                     {
                         var request = await RemoteServerEngine.ReadRequestAsync<OrderGetByIdsRequest>(context).ConfigureAwait(false);
-                        var repository = context.RequestServices.GetRequiredService<IOrderRemoteRepository>();
-                        return (object?)await repository.GetByIdsAsync(request.Ids, context.RequestAborted).ConfigureAwait(false);
+                        var repository = RemoteServerEngine.Repository<IOrderRemoteRepository>(context);
+                        return (object?)await repository.GetByIdsAsync(RemoteServerEngine.Required(request.Ids, "Ids"), context.RequestAborted).ConfigureAwait(false);
                     }
                 )
         );
@@ -720,7 +736,7 @@ public static partial class GeneratedRemoteEndpoints
                     async () =>
                     {
                         var request = await RemoteServerEngine.ReadRequestAsync<OrderGetSummariesRequest>(context).ConfigureAwait(false);
-                        var repository = context.RequestServices.GetRequiredService<IOrderRemoteRepository>();
+                        var repository = RemoteServerEngine.Repository<IOrderRemoteRepository>(context);
                         return (object?)await repository.GetSummariesAsync(request.CustomerId, request.Take, request.Skip, context.RequestAborted).ConfigureAwait(false);
                     }
                 )
@@ -734,7 +750,7 @@ public static partial class GeneratedRemoteEndpoints
                     async () =>
                     {
                         var request = await RemoteServerEngine.ReadRequestAsync<OrderSumAmountsRequest>(context).ConfigureAwait(false);
-                        var repository = context.RequestServices.GetRequiredService<IOrderRemoteRepository>();
+                        var repository = RemoteServerEngine.Repository<IOrderRemoteRepository>(context);
                         return (object?)await repository.SumAmountsAsync(request.CustomerId, context.RequestAborted).ConfigureAwait(false);
                     }
                 )
@@ -748,8 +764,8 @@ public static partial class GeneratedRemoteEndpoints
                     async () =>
                     {
                         var request = await RemoteServerEngine.ReadRequestAsync<OrderGetByIdsRawRequest>(context).ConfigureAwait(false);
-                        var repository = context.RequestServices.GetRequiredService<IOrderRemoteRepository>();
-                        return (object?)await repository.GetByIdsRawAsync(request.Ids, context.RequestAborted).ConfigureAwait(false);
+                        var repository = RemoteServerEngine.Repository<IOrderRemoteRepository>(context);
+                        return (object?)await repository.GetByIdsRawAsync(RemoteServerEngine.Required(request.Ids, "Ids"), context.RequestAborted).ConfigureAwait(false);
                     }
                 )
         );
@@ -761,7 +777,7 @@ public static partial class GeneratedRemoteEndpoints
                     context,
                     async () =>
                     {
-                        var repository = context.RequestServices.GetRequiredService<IOrderRemoteRepository>();
+                        var repository = RemoteServerEngine.Repository<IOrderRemoteRepository>(context);
                         return (object?)await repository.FindTopRawAsync(context.RequestAborted).ConfigureAwait(false);
                     }
                 )
@@ -775,7 +791,7 @@ public static partial class GeneratedRemoteEndpoints
                     async () =>
                     {
                         var request = await RemoteServerEngine.ReadRequestAsync<OrderCountByCustomerRawRequest>(context).ConfigureAwait(false);
-                        var repository = context.RequestServices.GetRequiredService<IOrderRemoteRepository>();
+                        var repository = RemoteServerEngine.Repository<IOrderRemoteRepository>(context);
                         return (object?)await repository.CountByCustomerRawAsync(request.CustomerId, context.RequestAborted).ConfigureAwait(false);
                     }
                 )
@@ -789,7 +805,7 @@ public static partial class GeneratedRemoteEndpoints
                     async () =>
                     {
                         var request = await RemoteServerEngine.ReadRequestAsync<OrderGetMemoRowsRawRequest>(context).ConfigureAwait(false);
-                        var repository = context.RequestServices.GetRequiredService<IOrderRemoteRepository>();
+                        var repository = RemoteServerEngine.Repository<IOrderRemoteRepository>(context);
                         return (object?)await repository.GetMemoRowsRawAsync(request.CustomerId, context.RequestAborted).ConfigureAwait(false);
                     }
                 )
@@ -803,8 +819,8 @@ public static partial class GeneratedRemoteEndpoints
                     async () =>
                     {
                         var request = await RemoteServerEngine.ReadRequestAsync<OrderGetByCustomerTypedRequest>(context).ConfigureAwait(false);
-                        var repository = context.RequestServices.GetRequiredService<IOrderRemoteRepository>();
-                        return (object?)await repository.GetByCustomerTypedAsync(request.CustomerId, context.RequestAborted).ConfigureAwait(false);
+                        var repository = RemoteServerEngine.Repository<IOrderRemoteRepository>(context);
+                        return (object?)await repository.GetByCustomerTypedAsync(RemoteServerEngine.Required(request.CustomerId, "CustomerId"), context.RequestAborted).ConfigureAwait(false);
                     }
                 )
         );
@@ -817,7 +833,7 @@ public static partial class GeneratedRemoteEndpoints
                     async () =>
                     {
                         var request = await RemoteServerEngine.ReadRequestAsync<OrderSpecialLookupRequest>(context).ConfigureAwait(false);
-                        var repository = context.RequestServices.GetRequiredService<IOrderRemoteRepository>();
+                        var repository = RemoteServerEngine.Repository<IOrderRemoteRepository>(context);
                         return (object?)await repository.SpecialLookupAsync(request.CustomerId, context.RequestAborted).ConfigureAwait(false);
                     }
                 )
@@ -831,8 +847,8 @@ public static partial class GeneratedRemoteEndpoints
                     async () =>
                     {
                         var request = await RemoteServerEngine.ReadRequestAsync<OrderCheckUniquenessRequest>(context).ConfigureAwait(false);
-                        var repository = context.RequestServices.GetRequiredService<IOrderRemoteRepository>();
-                        return (object?)await repository.CheckUniquenessAsync(request.Entity, context.RequestAborted).ConfigureAwait(false);
+                        var repository = RemoteServerEngine.Repository<IOrderRemoteRepository>(context);
+                        return (object?)await repository.CheckUniquenessAsync(RemoteServerEngine.Required(request.Entity, "Entity"), context.RequestAborted).ConfigureAwait(false);
                     }
                 )
         );

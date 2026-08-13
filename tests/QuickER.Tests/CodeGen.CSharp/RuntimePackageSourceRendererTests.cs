@@ -257,6 +257,50 @@ public class RuntimePackageSourceRendererTests
     }
 
     /// <summary>
+    /// SqlServer パッケージのパラメータ束縛が <c>[SqlColumnType]</c> による明示型付け版であり、
+    /// Sqlite パッケージには入らない。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 明示型付けの出力条件は「図に SqlDbType の判明した列がある」ことなので、空図でレンダリングする
+    /// パッケージソースでは素通りし、<c>AddWithValue</c> のフォールバック版だけが入っていた。属性型
+    /// <c>SqlColumnTypeAttribute</c> 自体は出ているため型集合の対称性テストでは検出できず、
+    /// <c>UseRuntimePackages</c> の利用者だけが Size ガード（宣言長超過時の値長採用）と精度指定を失っていた。
+    /// </para>
+    /// <para>
+    /// <c>[SqlColumnType]</c> は <c>System.Data.SqlDbType</c> 前提の SQL Server 専用機構なので、Sqlite 側へ
+    /// 混入しないことも同時に固定する。
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void RenderSqlServer_KeepsExplicitlyTypedParameterBinding()
+    {
+        var sqlServer = _renderer.RenderSqlServer();
+
+        sqlServer
+            .Should()
+            .Contain(
+                "private static readonly ConcurrentDictionary<PropertyInfo, SqlColumnTypeAttribute?> _columnTypeCache =",
+                "属性解決のキャッシュは明示型付け版の分岐にしかない"
+            );
+        sqlServer.Should().Contain("var parameter = new SqlParameter(name, attribute.DbType);");
+        sqlServer
+            .Should()
+            .Contain(
+                "parameter.Size = valueLength > attribute.Size ? valueLength : attribute.Size;",
+                "文字列／バイナリの Size ガード（宣言長超過なら値長）はサイレントなデータ破損を防ぐ"
+            );
+
+        _renderer
+            .RenderSqlite()
+            .Should()
+            .NotContain(
+                "SqlColumnTypeAttribute",
+                "[SqlColumnType] は SqlDbType 前提の SQL Server 専用機構"
+            );
+    }
+
+    /// <summary>
     /// 指定した許可依存だけを参照へ含めて、パッケージソース群をコンパイルする。
     /// </summary>
     /// <remarks>

@@ -165,6 +165,9 @@ public sealed class CSharpCodeGenerationService
             );
         }
 
+        // 版列の本数は型解決の結果（CSharpTypeInfo.IsRowVersion）で決まるため、列型辞書が確定した後で検証する
+        ValidateRowVersionColumns(diagram, columnTypes, diagnostics);
+
         // エラー検出時（検証・型不一致）は生成処理に進まず、診断のみを返して呼び出し側に修正を促す
         if (
             diagnostics.Any(diagnostic => diagnostic.Severity == GenerationDiagnosticSeverity.Error)
@@ -543,6 +546,46 @@ public sealed class CSharpCodeGenerationService
 
         ValidateEntityClassNameUniqueness(diagram, diagnostics);
         ValidateColumnPropertyNameUniqueness(diagram, diagnostics);
+    }
+
+    /// <summary>
+    /// 1 エンティティに rowversion 列が 2 本以上ないことを検証する
+    /// </summary>
+    /// <remarks>
+    /// 版の読み書き（<c>RowVersionCollector</c> / <c>RemoteEntityGraph</c> / インメモリの版スタンプ）は
+    /// 「1 型につき版列は 1 本」を前提に <c>FirstOrDefault</c> で先頭 1 本だけを見る。SQL Server も 1 テーブルに
+    /// 1 本しか許さないため実 DB では成立しない構成だが、図の上では 2 本置けてしまい、そのまま生成すると
+    /// 「どちらが版か」が黙って決まった生成物が出て DDL 適用で初めて落ちる。生成時に止めて理由を示す。
+    /// 判定は型マッパーの解決結果（<see cref="CSharpTypeInfo.IsRowVersion"/>）＝<c>[StoreGeneratedColumn]</c> の付与条件と同一。
+    /// </remarks>
+    private static void ValidateRowVersionColumns(
+        ErDiagram diagram,
+        IReadOnlyDictionary<Guid, CSharpTypeInfo> columnTypes,
+        ICollection<GenerationDiagnostic> diagnostics
+    )
+    {
+        foreach (var entity in diagram.Entities)
+        {
+            var rowVersionColumns = entity
+                .Columns.Where(column =>
+                    columnTypes.TryGetValue(column.Id, out var typeInfo) && typeInfo.IsRowVersion
+                )
+                .Select(column => $"'{column.Name}'")
+                .ToList();
+
+            if (rowVersionColumns.Count > 1)
+            {
+                diagnostics.Add(
+                    GenerationDiagnostic.Error(
+                        string.Format(
+                            Strings.CodeGen_Error_MultipleRowVersionColumns,
+                            entity.TableName,
+                            string.Join(", ", rowVersionColumns)
+                        )
+                    )
+                );
+            }
+        }
     }
 
     /// <summary>

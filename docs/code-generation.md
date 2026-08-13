@@ -10,7 +10,7 @@ This document describes the structure of the C# code QuickER generates and how t
 |---|---|
 | Entity | A POCO that corresponds to a table. UI-framework independent (no dependency on CommunityToolkit or the like). Carries `RowState` (Unchanged / Added / Updated / Removed), state-transition methods such as `MarkAdded()`, and navigation properties (parent reference / child collection). |
 | EditModel | A model for screen editing, plus conversion to and from the Entity. Every column keeps two representations: the committed value and the on-screen input string (`BindingXxx`). |
-| Mapper | A converter for Entity ⇄ EditModel. **Loading is lossless**: the committed values are copied straight from the entity instead of being rebuilt by parsing the input strings, and the `BindingXxx` strings are then derived from them purely for display. Only the fields the user actually edits take on the precision of their input string, so simply loading a row never drops what the display format cannot express (the sub-second part of a `DateTime`, its `DateTimeKind`, and so on). |
+| Mapper | A converter for Entity ⇄ EditModel. **Loading is lossless**: the committed values are copied straight from the entity instead of being rebuilt by parsing the input strings, and the `BindingXxx` strings are then derived from them purely for display. Only the fields the user actually edits take on the precision of their input string, so simply loading a row never drops what the display format cannot express (the sub-second part of a `DateTime`, its `DateTimeKind`, and so on). Binary columns are copied defensively, so editing the loaded model never writes into the entity it was loaded from. A `date` column (as opposed to `datetime`) is displayed with the culture's short date pattern, without a "0:00:00" tail. |
 | Value objects (optional) | A per-column value-object type (e.g. `CustomerIdValue`). Emitted only when `GenerateValueObjects` is enabled (see [Value objects](#value-objects-generatevalueobjects)). |
 | Repository shared contracts | `IRepository<TEntity, TKey>` and a per-entity interface (e.g. `ICustomerRepository`). Both the QuickER Repository and the EF Core Repository implement the same contracts. |
 | QuickER Repository implementation | Lightweight per-dialect implementations (SQL Server / SQLite) plus DI-registration extensions. |
@@ -141,6 +141,8 @@ var provider = new ServiceCollection()
 var customers = provider.GetRequiredService<ICustomerRepository>();
 ```
 
+The registration also wires up `ISqlExecutor`, the entity-independent raw SQL executor, and hands it to every repository it registers. Registering your own implementation after the generated extension (to add logging, metrics, or retries around raw SQL) therefore makes the repositories' raw SQL methods go through it as well. A repository constructed by hand takes the executor as an optional third argument and builds the default one when it is omitted, so existing `new` calls are unaffected.
+
 ### Connections and schema bootstrapping
 
 The generated `SqlConnectionFactory` is what opens every connection, and on **SQLite it enables foreign key enforcement by default**. SQLite leaves enforcement off unless a connection asks for it, so without this the foreign keys in the generated DDL would be silently inert: a child row could reference a parent that does not exist, and deleting a parent would leave its children behind. Since the schema declares the constraints, enforcing them is the correct default. An explicit `Foreign Keys` keyword in the connection string is honored exactly as written, so `Foreign Keys=False` restores the provider's own behavior.
@@ -150,6 +152,9 @@ For creating a schema from the DDL QuickER generates, `SqliteSchemaBootstrap.App
 ```csharp
 var ddl = await File.ReadAllTextAsync("Shop.sql");
 await SqliteSchemaBootstrap.ApplyDdlAsync(connectionString, ddl);
+
+// A large script on a slow machine may need longer than the provider's default command timeout
+await SqliteSchemaBootstrap.ApplyDdlAsync(connectionString, ddl, TimeSpan.FromMinutes(5));
 ```
 
 This is a bootstrap convenience for development, tests, and samples — not schema management. It knows nothing about versions, about what already exists, or about rolling back, so anything that outlives a throwaway database wants a migration tool instead (see also: EF Core mode is for connecting to an existing schema, and Migrations are out of scope).
@@ -166,6 +171,10 @@ await customers.DeleteAsync(1);
 await customers.BulkInsertAsync(manyCustomers);   // bulk insert
 ```
 
+`BulkInsertAsync` keeps the same contract on every backend: a `null` element is **skipped** (as it is in a graph save's list), the return value counts only the rows actually inserted, an empty collection returns 0 without opening a connection, and a cancellation already requested on entry throws before anything is written.
+
+On SQL Server the bulk insert runs through `SqlBulkCopy` with `CheckConstraints` **always on**: foreign key and CHECK constraints are honored, so a row the row-at-a-time `InsertAsync` would reject fails the copy too. (`SqlBulkCopy` skips those checks unless asked, which would otherwise let a bulk insert write rows the rest of the API refuses.) Triggers are deliberately **not** fired — QuickER's DDL generates none.
+
 ### Queries (expression tree → SQL)
 
 ```csharp
@@ -180,7 +189,14 @@ var result = await customers.Query()
 
 Supported: equality, comparison, `&&`/`||`, `Contains`/`StartsWith`/`EndsWith` (LIKE), `Contains` on a list (IN), date parts (`Year`, etc.), `string.IsNullOrEmpty`, and value-object comparison. **Projection (Select), GroupBy, Join, and arithmetic expressions are not supported** (they throw at runtime; work around them with raw SQL or EF Core).
 
-An `==` / `!=` comparison whose value side is null becomes `IS NULL` / `IS NOT NULL`, whether the null is written as a literal or comes from a variable — the same meaning C# and EF Core give it, and identical across every backend. (Binding it as an ordinary parameter would leave `col = @p`, which SQL's three-valued logic makes false for every row.) The compensation covers equality only: the relational operators (`<` `<=` `>` `>=`) still bind the null as a parameter, because they have no null-aware SQL counterpart.
+**Navigation properties cannot appear in a predicate or an ordering key** either — `Where(o => o.Customer == null)` throws `NotSupportedException`. A navigation has no column of its own, so filter on the foreign-key column instead (`Where(o => o.CustomerId == null)`). The in-memory and EF Core backends do translate such a predicate, so this is a limitation of the QuickER Repository rather than a shared one.
+
+Nulls in an equality comparison are compensated on both sides so that every backend agrees with C# and EF Core:
+
+- **Value side.** An `==` / `!=` whose value turns out to be null becomes `IS NULL` / `IS NOT NULL`, whether the null is written as a literal or comes from a variable. (Binding it as an ordinary parameter would leave `col = @p`, which SQL's three-valued logic makes false for every row.)
+- **Column side.** A `!=` against a non-null value becomes `(col <> @p OR col IS NULL)`, so rows whose column is `NULL` are included — C# and EF Core both treat `NULL` as different from a non-null value, while the bare `col <> @p` is UNKNOWN for those rows and silently drops them. It is applied without asking whether the column allows `NULL`, since that cannot be decided reliably from the expression tree; on a column that is never `NULL` the added disjunct simply never holds.
+
+The compensation covers equality only: the relational operators (`<` `<=` `>` `>=`) still bind the null as a parameter, because they have no null-aware SQL counterpart.
 
 `Contains` on a list expands to one bind variable per element and is not chunked, so a very large list runs into the dialect's bind-variable / IN-list limit (Oracle's 1000, SQL Server's 2100 parameters, SQLite's historical 999, etc.) and fails at runtime. For a large set of keys, stage them in a temporary table and join, or use raw SQL.
 
@@ -304,6 +320,18 @@ var total = await orders.ExecuteScalarSqlAsync<decimal>(
 var affected = await customers.ExecuteSqlAsync("UPDATE customers SET balance = 0", null);
 ```
 
+A parameter whose value is a collection (anything enumerable except `string` and `byte[]`) is expanded for `IN`: write it inside parentheses as `IN (@ids)` and each element is bound as `@ids0, @ids1, ...`, with the `@ids` in the SQL rewritten to match.
+
+```csharp
+var rows = await customers.QueryBySqlAsync(
+    "SELECT * FROM customers WHERE customer_id IN (@ids)", new { ids = new[] { 1, 2, 3 } });
+```
+
+Two things to know about the expansion:
+
+- **An empty collection expands to `(NULL)`.** For `IN` that is right — nothing matches. For `NOT IN (@ids)` it is a trap: `x NOT IN (NULL)` is UNKNOWN for every row, so **no** row matches, which is the opposite of what an empty exclusion list should mean. Branch to a different statement when the collection can be empty.
+- **The rewrite is textual.** It replaces `@name` anywhere in the command text, including inside a string literal or a comment, so do not write the parameter's own name in those places. Names that merely start the same (`@idsSuffix`, `@ids0`) and system variables that merely end the same (`@@ids`) are left alone.
+
 ### Uniqueness pre-check (CheckUniquenessAsync)
 
 A table's UNIQUE constraints are stamped on its generated **Entity** class as `[UniqueConstraint("PropA", "PropB", Name = "UQ_...")]`, next to `[DbTableMeta]` / `[DbColumnMeta]`. Like those, it is definition metadata that makes the entity a self-describing document of the DB definition; it drives no runtime behaviour (the checks below are plain generated code). The attribute type itself is emitted only when at least one table has a constraint to declare. C# reverse reads the attribute back, so the constraints round-trip (see [Import and export](import-export.md)).
@@ -361,6 +389,15 @@ Validating the parent covers the collection: `parent.Validate(includeChildren: t
 
 Duplicate-value errors live in a store of their own, separate from input errors (required, conversion, value object, `OnValidate`). Registering or clearing one kind never touches the other, so a property can carry a conversion error and a duplicate-value error at the same time, and `GetErrors` returns both. In particular, resolving a duplication and re-validating does not silently drop the "cannot be converted" error left on the same field — that error only ever comes back through the binding setter, so clearing it would leave an invalid input on screen with `Validate` reporting success. `HasErrors` covers both stores.
 
+Every error is owned by the check that registered it, and a check only ever adds or removes its own:
+
+- **The binding setter** owns conversion and value-object errors (`SetError`). It is the only thing that can produce them again, so nothing else clears them.
+- **The required-field check** (generated `ValidateSelf`) adds a missing-input error only when the property carries no other input error — a field that holds unconvertible text is not silently relabelled "is required" — and clears its own error as soon as the value is present, even when the value was assigned straight to the committed property rather than typed.
+- **The two uniqueness checks** tag their findings with a `DuplicateErrorSource` (`Siblings` for the check among the elements of a collection, `Database` for the check against the stored rows) and clear only their own tag. Validating the graph before a save therefore no longer discards what the database check has just reported, and vice versa.
+- **`OnValidate`** owns whatever it registers: clear a custom error from the hook (`SetError` with a null message) once its condition no longer holds.
+
+`RevertInput()` rebuilds the input strings and clears the input errors only. A mapper load goes further and clears the duplicate-value errors of both checks as well, because the values they judged are gone.
+
 #### Edit models: checking against the database
 
 When edit models and a repository contract are both generated, each edit model also gets a convenience wrapper:
@@ -373,7 +410,9 @@ if (!await editModel.ValidateUniqueAsync(repository))
 }
 ```
 
-It builds an entity from the edit model's confirmed values, calls `CheckUniquenessAsync`, and maps each violation's `PropertyNames` back to the binding properties. A violation with no property names (or with names that do not belong to the edit model) becomes a model-level error registered under the empty property name, which `GetErrors(null)` returns. The duplicate-value errors registered by the previous call are cleared first, so re-checking never leaves stale errors.
+It builds an entity from the edit model's confirmed values, calls `CheckUniquenessAsync`, and maps each violation's `PropertyNames` back to the binding properties. A violation with no property names (or with names that do not belong to the edit model) becomes a model-level error registered under the empty property name, which `GetErrors(null)` returns. The duplicate-value errors registered by the previous call are cleared first, so re-checking never leaves stale errors — its own findings only, so what the check among the siblings reported stays.
+
+The errors are registered after the `await`, which puts them on a thread pool thread rather than the caller's, and `ErrorsChanged` fires on that same thread. A WPF binding marshals the notification back to the UI thread by itself, so the ordinary case needs nothing from you; a subscriber that updates UI state directly has to marshal it at the call site.
 
 The message comes from `EditModelMessages.DuplicateValue` (a `static Func` taking the display names of the constraint's member properties), refined per class by the optional `partial void CustomizeDuplicateErrorMessage(IReadOnlyList<string> propertyNames, ref string message)`. A `UniquenessViolation.Message` supplied by a user-defined check wins over both.
 
@@ -457,6 +496,7 @@ Known limitations:
 - The version is read back through an `OUTPUT` clause, which SQL Server rejects on a table that has a trigger. QuickER's DDL generation never emits triggers, so this only affects tables whose triggers were added outside QuickER.
 - Deleting a row that is already gone stays asymmetric between the backends, as it always has: the QuickER Repository tolerates it silently, while a graph save on EF Core reports it as `SaveConflictException`.
 - A rowversion column carries no `[DbColumnMeta]` token, so C# reverse engineering does not restore it (declare it in the diagram).
+- **Deleting by key is not guarded.** `DeleteAsync(id)` takes a key rather than an entity, so there is no version to compare it against and the row goes whatever its current version is. Where a delete has to lose the race it lost, mark the entity `MarkRemoved()` and save the graph — a graph save guards its deletes with the version the entity was read with.
 - Raw SQL (`ExecuteSqlAsync` and friends) and the stream accessors for unbounded binary columns are direct operations and are not guarded.
 
 ### Excluding unbounded binary columns (ExcludeUnboundedBinaryColumns)
@@ -512,7 +552,7 @@ var doc = await documents
 Constraints and behavior:
 
 - **Cannot be combined with `Include`** (`InvalidOperationException` when the terminal method runs). If you need the unbounded binary column, fetch it with a separate query that has no `Include`. This is because SQL Server's `Include` path goes through FOR JSON = Base64, which inflates memory for a huge BLOB (5–6× peak), so this restriction keeps the memory profile predictable for the "handle a huge BLOB" purpose (on SQL Server it fetches with a **plain SELECT** rather than FOR JSON).
-- The effect applies only to `ToListAsync` / `FirstOrDefaultAsync` (it does not affect count, existence check, or the projection `ToProjectionListAsync`).
+- The effect applies to the entity-shaped fetches `ToListAsync` / `FirstOrDefaultAsync`, and to `ToProjectionListAsync` **when the projection falls back to materializing the entity in full** (a selector whose columns cannot be extracted, or one combined with `Include`). It does not affect count, existence check, or a projection whose columns are pruned server-side — that projection already fetches exactly the columns it references, excluded ones included.
 - The fetched entity is a legitimate entity, but the fact that the excluded column is out of scope for UPDATE does not change. Calling `UpdateAsync` on it as-is throws from the existing guard (update an excluded column with the raw SQL `ExecuteSqlAsync` above).
 - In EF Core mode it is a no-op because EF Core reads all columns to begin with (only the `Include`-combination error is thrown identically for parity).
 
@@ -645,8 +685,10 @@ Points to keep in mind:
 - **After a successful graph save (Save), the local RowState is also committed** (the same behavior as the direct case).
 - **Optimistic concurrency travels over the wire.** The `ConcurrencyMode` argument is part of the Update / Save request, and the Insert / Update / Save responses carry the row versions the save assigned, keyed by entity type and primary key, which the client writes back onto the local graph. A remote client therefore ends up holding the same versions a direct connection would, and can keep saving the same entities without re-reading them.
 - **A 500 response hides the server-side error detail by default.** The body carries a fixed message (`An unexpected error occurred on the server.`) plus a `CorrelationId`, which the client surfaces as `RemoteRepositoryException.CorrelationId`. The full exception, including the stack trace, always goes to the server side through `ILoggerFactory` (category `QuickER.RemoteServer`; a no-op when the host has no logging provider) **with the same correlation id in the log line**, so a caller who reports the id lets you find the complete record without the internal message — table and column names, connection strings, file paths — ever crossing the trust boundary. Pass `MapGeneratedRemoteEndpoints(exposeErrorDetails: true)` to send the message verbatim instead (`CorrelationId` is then null and the body is exactly what earlier versions sent); the idiomatic form is `exposeErrorDetails: app.Environment.IsDevelopment()`, which is why it is a runtime argument rather than a generation-time option — one set of generated code covers both environments. The switch changes **only** what the client sees on a 500: server-side logging and the `OnServerError` hook always receive the exception itself, and the classified responses are unaffected — a 400 describes the caller's own payload, and the conflict detail on a 409 (`Reason` / `EntityType` / `Key`) is the material a reload-and-retry loop is built on, so both keep their own messages in either mode. The binary transfer endpoints follow the same switch.
-- Authentication and TLS are out of scope. Configure the client with an authentication-handler-equipped HttpClient via `AddGeneratedHttpRemoteRepositories(Func<IServiceProvider, HttpClient>)`, and add ASP.NET Core authorization to the return value (`RouteGroupBuilder`) of `MapGeneratedRemoteEndpoints()`.
+- **Authentication and TLS are out of scope, and the endpoints are wide open until you supply them.** Configure the client with an authentication-handler-equipped HttpClient via `AddGeneratedHttpRemoteRepositories(Func<IServiceProvider, HttpClient>)`, and add ASP.NET Core authorization to the return value (`RouteGroupBuilder`) of `MapGeneratedRemoteEndpoints()` — `MapGeneratedRemoteEndpoints(...).RequireAuthorization()` covers the whole generated group in one line. **Apply the policy to the group rather than picking endpoints**, because `Save` is as powerful as `Delete`: a graph whose nodes carry `RowState.Removed` deletes those rows, so a policy that guards `Delete` and leaves `Save` open guards nothing. The same holds for the entity payloads generally — the wire format accepts every column the entity has, including the primary key, so authorization is the only thing standing between a caller and any row it can name.
 - **The HttpClient returned by the factory overload is owned by the caller.** `AddGeneratedHttpRemoteRepositories(Func<IServiceProvider, HttpClient>)` invokes the factory every time a repository is resolved (once per scope and per entity), and the returned HttpClient is disposed by neither the generated code nor the DI container. Return a shared instance, or one managed by `IHttpClientFactory`; creating a new HttpClient on every call exhausts sockets. (The base-address overload creates a single shared instance that the container owns, so the client is disposed together with the `ServiceProvider`; a repository resolved from an already disposed provider therefore throws `ObjectDisposedException` on use.)
+- **The client the base-address overload builds has no timeout of its own and recycles pooled connections every five minutes.** `PooledConnectionLifetime` (a `SocketsHttpHandler`) is what makes a long-lived singleton follow DNS changes rather than pin the address it first resolved. `Timeout` is `Timeout.InfiniteTimeSpan` because `HttpClient.Timeout` covers a whole request including the body — the 100-second default would cut off a large blob transfer part-way through — so **bound each call with the `CancellationToken` you already pass to it**; that token is the timeout. If you would rather have a finite client-wide deadline, use the factory overload and hand in an HttpClient configured your way (that one is yours, and the generated code does not touch its settings).
+- **Do not put an HTTP-level retry policy (Polly and the like) on the mutating operations** — `Insert`, `Update`, `Save`, `SaveMany`, `Delete`. They carry no idempotency key, so a request that in fact succeeded and lost its response on the way back would be applied a second time (a duplicate insert, or a second version bump that turns the next save into a spurious conflict). Retrying the read-only operations (`GetById`, `GetAll`, the named queries) and the health endpoint is safe, so scope the policy to those rather than to the whole client.
 - The server file requires the ASP.NET Core FrameworkReference (`Microsoft.AspNetCore.App`) (no extra setup is needed if the project's SDK is `Microsoft.NET.Sdk.Web`). Its fixed engine is shared code, so under `--use-runtime-packages` it comes from `QuickER.Runtime.AspNetCore` and only the project hosting the server file references that package (see [Runtime package reference mode](#runtime-package-reference-mode---use-runtime-packages)).
 - **The generated server class is extensible.** `GeneratedRemoteEndpoints` is a `partial` class, so your own endpoint helpers can live alongside the generated ones, and you can implement the `static partial void OnServerError(HttpContext, Exception)` hook in another part of the class to add custom handling (notifications, metrics, extra logging) whenever an endpoint responds with HTTP 500 — it runs after the built-in logging, and when you do not implement it the compiler removes the call itself. An exception thrown inside the hook is isolated: it is written to the server log and swallowed, so it never gets in the way of the original error response. Additional endpoints under the same prefix can also be mapped directly onto the `RouteGroupBuilder` returned by `MapGeneratedRemoteEndpoints()`.
 
@@ -660,10 +702,11 @@ When combined with unbounded-binary exclusion (`--exclude-unbounded-binary-colum
 | `PUT {prefix}/{entity}/{column}?id=` | Upload (raw body, `Content-Length` required) | Success **204** / no row **404** (`false`) / missing `Content-Length` (chunked) is **411** / a missing or malformed `id` is **400** |
 | `DELETE {prefix}/{entity}/{column}?id=` | Set the column to `NULL` (equivalent to `Write(id, null)`) | Success 204 / no row 404 / a missing or malformed `id` is **400** |
 
+- **The 404 these endpoints produce themselves carries a `RemoteError` body of type `"NotFound"`**, and only a 404 with that marker becomes `false` on the client. A bare 404 — a base address or prefix that does not match the server's, a route that no longer exists, a proxy answering on its own — would otherwise be indistinguishable from "no data", so the client raises `RemoteRepositoryException` for it instead of hiding the misconfiguration behind an empty result. The 411 carries a `RemoteError` body as well (type `"BadRequest"`, like the other classified rejections).
 - **The key is carried in the URL query `?id=`** (the body is used for the blob itself). A VO key is serialized by the same rule as the JSON envelope (the wrapped value).
 - **A 0-byte PUT (empty body) and setting to `NULL` (DELETE) are structurally distinguished** (the former makes `Read` return `true` + empty; the latter `false`).
-- **Only binary PUT has its request-size limit lifted by default** (the `IRequestSizeLimitMetadata` metadata is applied; JSON endpoints stay at the default 30 MB). This is to handle GB-scale data with no extra setup, but **because lifting it raises DoS concerns, combining it with authorization (`MapGeneratedRemoteEndpoints().RequireAuthorization()`) is strongly recommended**. To restore the limit or set a different value, override the whole group via the returned `RouteGroupBuilder`.
-- The client (`Http{Entity}RemoteRepository`) receives `GET` with `ResponseHeadersRead` and copies to the destination in O(chunks), and sends `PUT` with `StreamContent` (with `Content-Length`). If you do not pass `length` for a non-seekable Stream, it throws `ArgumentException` **before sending** (the same length contract as existing).
+- **Lifting the request-size limit on binary PUT is opt-in**: `MapGeneratedRemoteEndpoints(prefix, exposeErrorDetails, allowUnboundedUploads)`. It defaults to `false`, so the host's own limit (30 MB under Kestrel's defaults) applies to these endpoints too and a larger upload is rejected with **413**. Pass `allowUnboundedUploads: true` to stream GB-scale blobs, and **pair it with authorization (`MapGeneratedRemoteEndpoints(...).RequireAuthorization()`), because an endpoint that accepts a body of any size is a denial-of-service surface**. Only the binary PUT endpoints are affected (JSON endpoints always keep the host limit); to set a limit of a different size, override the whole group via the returned `RouteGroupBuilder`.
+- The client (`Http{Entity}RemoteRepository`) receives `GET` with `ResponseHeadersRead` and copies to the destination in O(chunks), and sends `PUT` with `StreamContent` (with `Content-Length`). If you do not pass `length` for a non-seekable Stream, it throws `ArgumentException` **before sending** (the same length contract as existing). **The Stream you pass in stays yours**: the client neither closes nor disposes it, exactly as a direct connection does not, so switching between the two implementations does not change what happens to the stream (the HTTP layer disposes the request content after sending, so the stream is handed to `StreamContent` through a non-closing wrapper).
 - **Making `WithUnboundedBinary()` / `Query()` / raw SQL remote is out of scope** (as before).
 
 A working example is in the repository at [samples/ec-order-remote](../samples/ec-order-remote/README.md) (a sample that runs exactly this recommended layout as three projects across two real processes; it also demonstrates remote transfer of named queries and type restoration of `SaveConflictException`).
@@ -678,6 +721,9 @@ The in-memory store evaluates queries with LINQ-to-Objects rather than SQL, so a
 
 - **String comparison and ordering are ordinal.** Filtering (`Where`) and `OrderBy` both compare strings ordinally, so `"B"` sorts before `"a"`. SQL Server's default collation is case-insensitive and orders by the collation's rules instead, so a test that depends on case or accent handling is not evidence about the database.
 - **UNIQUE constraints are not enforced on write.** Only the primary key is (a duplicate key is rejected exactly as a real INSERT would be). A duplicate value in a UNIQUE constraint is stored without complaint; use `CheckUniquenessAsync` if a test needs the check.
+- **Changing an entity's RowState from a Before hook takes effect here and nowhere else.** This backend reads the state again when it carries the operation out, so a `BeforeSaveAsync` that turns `Modified` into `Added` changes what happens; the QuickER Repository and EF Core have chosen the statement by then and the change is ignored. The hook contract promises neither behaviour — do not rewrite RowState from a hook. Return `false` to skip the row instead.
+- **A `SaveConflictException` can surface after the After hooks have already run.** Writes are staged and published as one unit, and the publish re-verifies the rows the save started from — which is after `AfterSaveAsync`, since the hooks run outside the store lock. A real database has taken its locks long before that point, so a test that asserts "the After hook ran, therefore the save is done" holds against a database and not here.
+- **Types without a rowversion column are last-write-wins under concurrent saves.** The publish verification only covers types that carry a concurrency token, so two saves racing on the same versionless row leave the later one's values. Nothing is resurrected either way: a row another writer deleted in the meantime stays deleted rather than coming back from the stale snapshot.
 
 ## Runtime package reference mode (--use-runtime-packages)
 

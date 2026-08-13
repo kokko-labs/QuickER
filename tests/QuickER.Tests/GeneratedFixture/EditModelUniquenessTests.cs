@@ -236,6 +236,79 @@ public class EditModelUniquenessTests
         collection[1].HasErrors.Should().BeTrue();
     }
 
+    /// <summary>再ロード（別エンティティの読み込み）は、両方の重複チェックが付けたエラーを落とす</summary>
+    /// <remarks>
+    /// ロードで値そのものが入れ替わるため、その値に対する重複判定は無効になる（次の検証まで結果を持たない）。
+    /// <c>RevertInput</c> は入力エラーしか担当しないので、Mapper のロードが重複エラーを別途クリアする。
+    /// </remarks>
+    [Fact(DisplayName = "再ロードすると重複エラーが残らない")]
+    public void Reload_ClearsDuplicateErrors()
+    {
+        var collection = new EditModelCollection<OrderEditModel>
+        {
+            NewOrder(10, 1, 100m, "apple pie"),
+            NewOrder(11, 2, 50m, "apple pie"),
+        };
+
+        collection.Validate().Should().BeFalse();
+        collection[1].HasErrors.Should().BeTrue();
+
+        // DB 照合（リモート面）由来のエラーも同時に載せておく
+        collection[1]
+            .SetDuplicateError(
+                nameof(OrderEditModel.BindingAmount),
+                "already used",
+                DuplicateErrorSource.Database
+            );
+
+        new OrderMapper().ApplyToEditModel(
+            new OrderEntity
+            {
+                OrderId = OrderIdValue.Create(12),
+                CustomerId = CustomerIdValue.Create(3),
+                Amount = AmountValue.Create(20m),
+                Memo = MemoValue.Create("banana"),
+            },
+            collection[1]
+        );
+
+        collection[1].HasErrors.Should().BeFalse();
+        GetErrors(collection[1], nameof(OrderEditModel.BindingMemo)).Should().BeEmpty();
+        GetErrors(collection[1], nameof(OrderEditModel.BindingAmount)).Should().BeEmpty();
+    }
+
+    /// <summary>兄弟間チェックの再実行は、DB 照合が登録したエラーを巻き添えで消さない（ソース分離）</summary>
+    /// <remarks>
+    /// 旧実装は重複エラーストアを一括クリアしていたため、直前の <c>ValidateUniqueAsync</c>（DB 突合）の結果が
+    /// 親の <c>Validate</c> 1 回で静かに消えていた。実 DB を使う検証は EditModelValidateUniqueRuntimeTests 側。
+    /// </remarks>
+    [Fact(DisplayName = "兄弟間チェックの再実行で DB 由来の重複エラーが消えない")]
+    public void SiblingValidation_KeepsDatabaseDuplicateErrors()
+    {
+        var collection = new EditModelCollection<OrderEditModel>
+        {
+            NewOrder(10, 1, 100m, "apple pie"),
+            NewOrder(11, 2, 50m, "banana"),
+        };
+
+        // DB 照合が見つけた違反（兄弟間では重複していない値に載る）
+        collection[1]
+            .SetDuplicateError(
+                nameof(OrderEditModel.BindingMemo),
+                "already used",
+                DuplicateErrorSource.Database
+            );
+
+        // 兄弟間では重複していないが、DB 由来のエラーが残るため全体としては無効のまま
+        collection.Validate().Should().BeFalse();
+
+        GetErrors(collection[1], nameof(OrderEditModel.BindingMemo))
+            .Should()
+            .ContainSingle()
+            .Which.Should()
+            .Be("already used");
+    }
+
     /// <summary>ルートの一覧（コレクションでない列挙）でも同じヘルパを直接呼べる</summary>
     [Fact(DisplayName = "ヘルパを一覧へ直接呼べる")]
     public void Validator_CanBeCalledOnPlainSequence()

@@ -232,6 +232,45 @@ public sealed class GeneratedSqliteAdoRuntimeTests : GeneratedSqliteRuntimeTests
         selfEquals.Select(o => o.OrderId.Value).Should().BeEquivalentTo([10, 11]);
     }
 
+    /// <summary>
+    /// 追加（QuickER の SQLite のみ）: VO の検証に合わない値が DB に入っていたときの読み取り例外が、
+    /// 「どの列で失敗したか」を含む <see cref="InvalidOperationException"/> になることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// VO の再構築はリフレクションの <c>Create</c> 呼び出しで、既定では検証失敗が
+    /// <c>TargetInvocationException</c> に包まれ、メッセージからは列も型も分からなかった。
+    /// <c>BindingFlags.DoNotWrapExceptions</c> で素の例外にし、行マッピング側が列名・プロパティ名を
+    /// 添えて包み直すようにしている（元の例外は InnerException に残る）。
+    /// SQLite は宣言長を強制しないため、生 SQL で 50 文字上限を超える名前を書き込んで再現する。
+    /// </remarks>
+    [Fact(DisplayName = "[SQLite] 追加: VO 検証に合わない DB 値の読み取り例外に列名が含まれる")]
+    public async Task ValueObjectRestoreFailure_NamesTheColumn()
+    {
+        await ResetAndCreateSchemaAsync();
+
+        var executor = CreateSqlExecutor();
+
+        // name は nvarchar(50)＝VO の上限 50 文字。SQLite は長さを強制しないのでそのまま書き込める
+        await executor.ExecuteSqlAsync(
+            "INSERT INTO \"customers\" (\"customer_id\", \"name\", \"balance\") VALUES (1, @name, NULL)",
+            new { name = new string('x', 60) },
+            Ct
+        );
+
+        var repo = CreateCustomerRepository();
+        var read = async () => await repo.QueryBySqlAsync("SELECT * FROM \"customers\"", null, Ct);
+
+        var thrown = await read.Should().ThrowAsync<InvalidOperationException>();
+        thrown.Which.Message.Should().Contain("name", "失敗した列名が示される");
+        thrown.Which.Message.Should().Contain("NameValue", "対象の VO 型も示される");
+        thrown
+            .Which.InnerException.Should()
+            .NotBeNull()
+            .And.NotBeOfType<System.Reflection.TargetInvocationException>(
+                "リフレクションの包装は外してある"
+            );
+    }
+
     public override void Dispose()
     {
         _provider?.Dispose();
