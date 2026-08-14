@@ -451,7 +451,10 @@ public sealed class InMemoryDataStore
                 // it is against a real database, whether or not the type carries a rowversion column.
                 if (baseRow is not null && current is null)
                 {
-                    if (staging.Staged(entityType, key) is null)
+                    // "Staged a delete" is an entry holding a null snapshot, not the absence of an entry: a save that
+                    // captured this row without ever writing to it has nothing to revive, and reading the two as one
+                    // would let such a capture pass for a delete
+                    if (staging.TryGetStaged(entityType, key, out var staged) && staged is null)
                     {
                         continue;
                     }

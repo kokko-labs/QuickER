@@ -35,15 +35,24 @@ public sealed class RemoteResponseBodyRuntimeTests
     /// <summary>生成クライアントが GetAll で叩くルート（POST {prefix}/{エンティティ}/{操作}）</summary>
     private const string GetAllRoute = "/quicker/Document/GetAll";
 
-    /// <summary>指定した本文・Content-Type を 200 で返すだけのサーバーを立て、生成クライアントを繋ぐ</summary>
+    /// <summary>指定した本文・Content-Type・ステータスを返すだけのサーバーを立て、生成クライアントを繋ぐ</summary>
     private static async Task<(
         InProcessRemoteServer Server,
         ServiceProvider Clients
-    )> StartFakeAsync(string body, string contentType)
+    )> StartFakeAsync(string body, string contentType, int statusCode = StatusCodes.Status200OK)
     {
         var server = await InProcessRemoteServer.StartAsync(
             _ => { },
-            app => app.MapPost(GetAllRoute, () => Results.Content(body, contentType)),
+            app =>
+                app.MapPost(
+                    GetAllRoute,
+                    async (HttpContext context) =>
+                    {
+                        context.Response.StatusCode = statusCode;
+                        context.Response.ContentType = contentType;
+                        await context.Response.WriteAsync(body, context.RequestAborted);
+                    }
+                ),
             Ct
         );
 
@@ -97,6 +106,60 @@ public sealed class RemoteResponseBodyRuntimeTests
 
             var thrown = (await act.Should().ThrowAsync<RemoteRepositoryException>()).Which;
             thrown.InnerException.Should().BeOfType<System.Text.Json.JsonException>();
+        }
+    }
+
+    [Fact(DisplayName = "[Remote/応答本文] 失敗応答の本文が読めなかった理由も inner として残る")]
+    public async Task FailureWithNonJsonBody_KeepsParseFailureAsInnerException()
+    {
+        // 502＋HTML＝プロキシやゲートウェイが自分で返した失敗応答（RemoteError ではない）
+        var (server, clients) = await StartFakeAsync(
+            "<html><body>Bad gateway</body></html>",
+            "text/html",
+            StatusCodes.Status502BadGateway
+        );
+
+        await using (server)
+        using (clients)
+        {
+            var documents = clients.GetRequiredService<IDocumentRemoteRepository>();
+
+            var act = async () => await documents.GetAllAsync(Ct);
+
+            var thrown = (await act.Should().ThrowAsync<RemoteRepositoryException>()).Which;
+            thrown.StatusCode.Should().Be(502);
+
+            // 「本文が RemoteError ではなかった」のか「message が空の RemoteError だった」のかは、
+            // 読めなかった理由が残っていて初めて呼び出し側から区別できる
+            var inner = thrown.InnerException;
+            inner.Should().NotBeNull();
+
+            // 読めなかった理由（JSON として壊れている／そもそも JSON でない）がそのまま残る
+            (inner is System.Text.Json.JsonException or NotSupportedException)
+                .Should()
+                .BeTrue($"本文を読めなかった失敗そのものを保つ（実際: {inner!.GetType().Name}）");
+        }
+    }
+
+    [Fact(DisplayName = "[Remote/応答本文] 対照: RemoteError の失敗応答には inner が付かない")]
+    public async Task FailureWithRemoteErrorBody_HasNoInnerException()
+    {
+        var (server, clients) = await StartFakeAsync(
+            """{"Type":"Error","Message":"boom"}""",
+            "application/json",
+            StatusCodes.Status500InternalServerError
+        );
+
+        await using (server)
+        using (clients)
+        {
+            var documents = clients.GetRequiredService<IDocumentRemoteRepository>();
+
+            var act = async () => await documents.GetAllAsync(Ct);
+
+            var thrown = (await act.Should().ThrowAsync<RemoteRepositoryException>()).Which;
+            thrown.Message.Should().Be("boom");
+            thrown.InnerException.Should().BeNull("本文は読めているので保全すべき失敗が無い");
         }
     }
 

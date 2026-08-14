@@ -685,15 +685,34 @@ public abstract partial class EditModelBase
         /// <summary>Whether neither check has anything registered (an entry in this state is dropped from the store).</summary>
         public bool IsEmpty => Siblings is null && Database is null;
 
-        /// <summary>The message the specified check registered (null when it found nothing).</summary>
+        /// <summary>The message the specified check registered (null when it found nothing). An undefined source throws <see cref="ArgumentOutOfRangeException"/>.</summary>
+        /// <remarks>
+        /// Every slot is named explicitly rather than letting anything that is not one check fall through to the other:
+        /// the source travels in from public API (<c>SetDuplicateError</c> and the clears), and a value naming no check
+        /// would otherwise be written to - or cleared from - the database slot without a word.
+        /// </remarks>
         public string? Of(DuplicateErrorSource source) =>
-            source == DuplicateErrorSource.Siblings ? Siblings : Database;
+            source switch
+            {
+                DuplicateErrorSource.Siblings => Siblings,
+                DuplicateErrorSource.Database => Database,
+                _ => throw new ArgumentOutOfRangeException(
+                    nameof(source),
+                    "The duplicate error source must be Siblings or Database."
+                ),
+            };
 
-        /// <summary>This entry with the specified check's message replaced (null clears that check's slot only).</summary>
+        /// <summary>This entry with the specified check's message replaced (null clears that check's slot only). An undefined source throws <see cref="ArgumentOutOfRangeException"/>.</summary>
         public DuplicateErrors With(DuplicateErrorSource source, string? message) =>
-            source == DuplicateErrorSource.Siblings
-                ? this with { Siblings = message }
-                : this with { Database = message };
+            source switch
+            {
+                DuplicateErrorSource.Siblings => this with { Siblings = message },
+                DuplicateErrorSource.Database => this with { Database = message },
+                _ => throw new ArgumentOutOfRangeException(
+                    nameof(source),
+                    "The duplicate error source must be Siblings or Database."
+                ),
+            };
 
         /// <summary>The registered messages in a fixed order (the siblings check first), so reporting is deterministic.</summary>
         public IEnumerable<string> Messages()
@@ -1326,7 +1345,7 @@ public abstract partial class EditModelBase
     /// definitive guarantee is the database's own UNIQUE constraint either way, so run the check again before saving.
     /// </para>
     /// </remarks>
-    /// <param name="source">The check whose findings are cleared.</param>
+    /// <param name="source">The check whose findings are cleared. An undefined value throws <see cref="ArgumentOutOfRangeException"/>.</param>
     public void ClearDuplicateErrors(DuplicateErrorSource source) =>
         ClearDuplicateErrorsCore(source);
 
@@ -1384,7 +1403,7 @@ public abstract partial class EditModelBase
     /// </remarks>
     /// <param name="propertyName">Binding property the error is attached to (empty for a model-level error).</param>
     /// <param name="message">The error message.</param>
-    /// <param name="source">The check that found the duplicate (it decides which slot is written and which clear removes the error again).</param>
+    /// <param name="source">The check that found the duplicate (it decides which slot is written and which clear removes the error again). An undefined value throws <see cref="ArgumentOutOfRangeException"/>.</param>
     public void SetDuplicateError(
         string propertyName,
         string message,
@@ -1404,7 +1423,7 @@ public abstract partial class EditModelBase
     /// </summary>
     /// <param name="propertyNames">Confirmed-value property names that make up the violated constraint.</param>
     /// <param name="message">Message that replaces the default one (null to build the default from <see cref="EditModelMessages.DuplicateValue"/>).</param>
-    /// <param name="source">The check that found the duplicate (it decides which clear removes the error again).</param>
+    /// <param name="source">The check that found the duplicate (it decides which clear removes the error again). An undefined value throws <see cref="ArgumentOutOfRangeException"/>.</param>
     public virtual void RegisterDuplicateError(
         IReadOnlyList<string> propertyNames,
         string? message,
@@ -1495,7 +1514,7 @@ public abstract partial class EditModelBase
         EndEditCore();
     }
 
-    /// <summary>Cancels the row edit and restores the state captured at BeginEdit.</summary>
+    /// <summary>Cancels the row edit: the confirmed values and the RowState go back to the snapshot <see cref="BeginEdit"/> took, and the input strings are derived from the restored confirmed values.</summary>
     /// <remarks>
     /// The input errors are cleared for every property, not only for the ones the canceled edit touched, because rebuilding
     /// the input strings from the restored confirmed values goes through <see cref="RevertInput"/>, which clears each
@@ -2706,6 +2725,12 @@ public partial class CustomerEditModel : EditModelBase
     /// the findings among the siblings are about the collection as it stands and belong to the next check over it.
     /// </para>
     /// <para>
+    /// Leaving them to that check cuts both ways, and nothing here runs it: a cancel that puts back a value which
+    /// duplicates a sibling restores the duplicate without restoring the finding about it, just as a cancel that undoes
+    /// a duplicate leaves the finding standing. Run the collection's <c>Validate</c> again before saving - the sibling
+    /// findings are only ever as current as the last check over the collection.
+    /// </para>
+    /// <para>
     /// Deriving the input strings clears the input error of every property, so a conversion error that predates the
     /// <see cref="EditModelBase.BeginEdit"/> of this row is cleared along with the ones the canceled edit produced. The
     /// unconvertible text goes away in the same step, since the input string is rebuilt from the restored confirmed value,
@@ -3451,6 +3476,12 @@ public partial class OrderEditModel : EditModelBase
     /// the findings among the siblings are about the collection as it stands and belong to the next check over it.
     /// </para>
     /// <para>
+    /// Leaving them to that check cuts both ways, and nothing here runs it: a cancel that puts back a value which
+    /// duplicates a sibling restores the duplicate without restoring the finding about it, just as a cancel that undoes
+    /// a duplicate leaves the finding standing. Run the collection's <c>Validate</c> again before saving - the sibling
+    /// findings are only ever as current as the last check over the collection.
+    /// </para>
+    /// <para>
     /// Deriving the input strings clears the input error of every property, so a conversion error that predates the
     /// <see cref="EditModelBase.BeginEdit"/> of this row is cleared along with the ones the canceled edit produced. The
     /// unconvertible text goes away in the same step, since the input string is rebuilt from the restored confirmed value,
@@ -4047,6 +4078,12 @@ public partial class CustomerProfileEditModel : EditModelBase
     /// discarded value behind and hold <see cref="EditModelBase.Validate"/> false forever. Only the database check's
     /// findings are withdrawn, on the same reasoning the setters use: the value they were reached about is gone, whereas
     /// the findings among the siblings are about the collection as it stands and belong to the next check over it.
+    /// </para>
+    /// <para>
+    /// Leaving them to that check cuts both ways, and nothing here runs it: a cancel that puts back a value which
+    /// duplicates a sibling restores the duplicate without restoring the finding about it, just as a cancel that undoes
+    /// a duplicate leaves the finding standing. Run the collection's <c>Validate</c> again before saving - the sibling
+    /// findings are only ever as current as the last check over the collection.
     /// </para>
     /// <para>
     /// Deriving the input strings clears the input error of every property, so a conversion error that predates the
@@ -5892,6 +5929,13 @@ public sealed class SaveConflictException : Exception
         : base(message) { }
 
     /// <summary>Initializes a new instance with the specified message and the failure it was classified from (no details: the reason stays <see cref="SaveConflictReason.Unknown"/>).</summary>
+    /// <remarks>
+    /// This is the constructor for a backend that recognizes a conflict in a provider's exception but cannot say which
+    /// kind it is - the generated EF Core repositories take it when a <c>DbUpdateConcurrencyException</c> names no entry
+    /// at all, leaving nothing to look the stored row up by. A conflict reported this way therefore carries
+    /// <see cref="SaveConflictReason.Unknown"/> and no key, and the provider's exception is kept as the inner one because
+    /// that is all the detail there is.
+    /// </remarks>
     /// <param name="message">The message describing the conflict.</param>
     /// <param name="innerException">The failure this conflict was classified from, kept so that the original error is still available for diagnosis.</param>
     public SaveConflictException(string message, Exception? innerException)
@@ -6734,7 +6778,10 @@ public sealed class InMemoryDataStore
                 // it is against a real database, whether or not the type carries a rowversion column.
                 if (baseRow is not null && current is null)
                 {
-                    if (staging.Staged(entityType, key) is null)
+                    // "Staged a delete" is an entry holding a null snapshot, not the absence of an entry: a save that
+                    // captured this row without ever writing to it has nothing to revive, and reading the two as one
+                    // would let such a capture pass for a delete
+                    if (staging.TryGetStaged(entityType, key, out var staged) && staged is null)
                     {
                         continue;
                     }

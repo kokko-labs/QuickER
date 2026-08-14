@@ -1638,6 +1638,12 @@ public static class SqlExpressionTranslator
     /// because they have no null-aware SQL counterpart.
     /// </para>
     /// <para>
+    /// They are also limited to the operators themselves. The method form of an equality is translated elsewhere and is
+    /// emitted as a plain <c>a = b</c>, so <c>!x.A.Equals(x.B)</c> drops every row whose argument column is NULL, where C#
+    /// (and the in-memory backend, which runs the compiled lambda) counts that row as a match. Where a NULL is possible,
+    /// write it as <c>x.A != x.B</c>, which takes the compensation.
+    /// </para>
+    /// <para>
     /// They also only reach a negation that sits directly on a comparison, which is why <c>!</c> flips the operator instead of
     /// wrapping the result. A <c>!</c> applied to a composite condition - <c>!(a == b &amp;&amp; c)</c> - is not pushed inward by
     /// De Morgan's laws: it comes out as <c>NOT (...)</c> around operands that are compensated individually, and NOT of an

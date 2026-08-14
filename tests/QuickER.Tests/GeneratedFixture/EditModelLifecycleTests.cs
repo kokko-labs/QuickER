@@ -311,6 +311,35 @@ public sealed class EditModelLifecycleTests
         m.HasErrors.Should().BeFalse();
     }
 
+    [Fact(
+        DisplayName = "重複エラー: 未定義の DuplicateErrorSource は既定スロットへ落ちず例外になる"
+    )]
+    public void 未定義の重複エラーソースは弾かれる()
+    {
+        var m = LoadedOrder();
+        var undefined = (DuplicateErrorSource)99;
+
+        // 登録: どちらのチェックでもない値が黙って Database スロットへ書かれない
+        var register = () =>
+            m.SetDuplicateError(nameof(OrderEditModel.BindingAmount), "dup", undefined);
+        register.Should().Throw<ArgumentOutOfRangeException>();
+
+        // 取り下げ: 所見が実在する状態でも同じ（クリアはスロットを引いてから判断する）
+        m.SetDuplicateError(
+            nameof(OrderEditModel.BindingAmount),
+            "dup",
+            DuplicateErrorSource.Siblings
+        );
+        var clear = () => m.ClearDuplicateErrors(undefined);
+        clear.Should().Throw<ArgumentOutOfRangeException>();
+
+        // 対照: 定義済みの値は従来どおり自分のスロットだけを扱う
+        m.ClearDuplicateErrors(DuplicateErrorSource.Database);
+        m.HasErrors.Should().BeTrue("消したのは Database 枠だけで、兄弟間の所見は残る");
+        m.ClearDuplicateErrors(DuplicateErrorSource.Siblings);
+        m.HasErrors.Should().BeFalse();
+    }
+
     [Fact(DisplayName = "必須検証: 変換エラーの付いた欄を必須エラーで上書きしない")]
     public void 必須検証は変換エラーを上書きしない()
     {

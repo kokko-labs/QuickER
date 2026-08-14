@@ -105,7 +105,7 @@ public static class RemoteServerEngine
 
     /// <summary>Reports an unhandled failure as HTTP 500: the server side always sees all of it, the client only what the endpoint's policy allows.</summary>
     /// <remarks>
-    /// The single place a 500 is produced, so every wrapper that classifies a failure stays identical. Logging and the <c>OnServerError</c> hook
+    /// The single place a 500 is produced, so every wrapper stays identical. Logging and the <c>OnServerError</c> hook
     /// run first and unconditionally receive the exception itself; the switch only decides what leaves the process. While
     /// it is off - the default - the body carries a fixed message plus the request's correlation id, which the log line
     /// carries as well, so a report from the caller can still be matched to the full server-side record without the
