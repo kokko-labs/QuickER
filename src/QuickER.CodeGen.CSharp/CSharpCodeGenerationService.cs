@@ -168,6 +168,9 @@ public sealed class CSharpCodeGenerationService
         // 版列の本数は型解決の結果（CSharpTypeInfo.IsRowVersion）で決まるため、列型辞書が確定した後で検証する
         ValidateRowVersionColumns(diagram, columnTypes, diagnostics);
 
+        // 無制限バイナリ列かどうかも型解決の結果（CSharpTypeInfo.IsUnboundedBinary）で決まるため同じ位置で検証する
+        ValidateUnboundedBinaryPrimaryKeys(diagram, columnTypes, options, diagnostics);
+
         // エラー検出時（検証・型不一致）は生成処理に進まず、診断のみを返して呼び出し側に修正を促す
         if (
             diagnostics.Any(diagnostic => diagnostic.Severity == GenerationDiagnosticSeverity.Error)
@@ -549,14 +552,25 @@ public sealed class CSharpCodeGenerationService
     }
 
     /// <summary>
-    /// 1 エンティティに rowversion 列が 2 本以上ないことを検証する
+    /// rowversion 列の置き方を検証する（1 エンティティに 2 本以上ないこと・主キー列が rowversion でないこと）
     /// </summary>
     /// <remarks>
+    /// <para>
     /// 版の読み書き（<c>RowVersionCollector</c> / <c>RemoteEntityGraph</c> / インメモリの版スタンプ）は
     /// 「1 型につき版列は 1 本」を前提に <c>FirstOrDefault</c> で先頭 1 本だけを見る。SQL Server も 1 テーブルに
     /// 1 本しか許さないため実 DB では成立しない構成だが、図の上では 2 本置けてしまい、そのまま生成すると
     /// 「どちらが版か」が黙って決まった生成物が出て DDL 適用で初めて落ちる。生成時に止めて理由を示す。
+    /// </para>
+    /// <para>
+    /// 主キー列が rowversion の場合も同様に止める。rowversion は DB 採番のため
+    /// <c>[StoreGeneratedColumn]</c> が付き <c>EntitySaveMetadata</c> が INSERT / UPDATE の対象から外すので、
+    /// 生成される INSERT はキー列を送らず、しかも「行の同一性」が更新のたびに変わる値に乗る。
+    /// DB 取込では自然に発生し得る構成（版列を主キーに含めた既存スキーマ）なのに、
+    /// 黙って通ると退化した SQL やインメモリ辞書のキー破壊まで到達する。
+    /// </para>
+    /// <para>
     /// 判定は型マッパーの解決結果（<see cref="CSharpTypeInfo.IsRowVersion"/>）＝<c>[StoreGeneratedColumn]</c> の付与条件と同一。
+    /// </para>
     /// </remarks>
     private static void ValidateRowVersionColumns(
         ErDiagram diagram,
@@ -570,7 +584,6 @@ public sealed class CSharpCodeGenerationService
                 .Columns.Where(column =>
                     columnTypes.TryGetValue(column.Id, out var typeInfo) && typeInfo.IsRowVersion
                 )
-                .Select(column => $"'{column.Name}'")
                 .ToList();
 
             if (rowVersionColumns.Count > 1)
@@ -580,7 +593,75 @@ public sealed class CSharpCodeGenerationService
                         string.Format(
                             Strings.CodeGen_Error_MultipleRowVersionColumns,
                             entity.TableName,
-                            string.Join(", ", rowVersionColumns)
+                            string.Join(
+                                ", ",
+                                rowVersionColumns.Select(column => $"'{column.Name}'")
+                            )
+                        )
+                    )
+                );
+            }
+
+            foreach (var column in rowVersionColumns.Where(column => column.IsPrimaryKey))
+            {
+                diagnostics.Add(
+                    GenerationDiagnostic.Error(
+                        string.Format(
+                            Strings.CodeGen_Error_PrimaryKeyRowVersionColumn,
+                            entity.TableName,
+                            column.Name
+                        )
+                    )
+                );
+            }
+        }
+    }
+
+    /// <summary>
+    /// 主キー列が無制限バイナリ列でないことを検証する（無制限バイナリ列の除外が有効なときのみ）
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>ExcludeUnboundedBinaryColumns</c> が有効なとき、無制限バイナリ列は
+    /// <c>EntitySaveMetadata.SelectProperties</c> から外れる（SELECT で読まない）。その列が主キーだと
+    /// <c>GetByIdAsync</c> / <c>GetAllAsync</c> がキー未設定のエンティティを返し、それを起点にした保存・更新が
+    /// 別の行を対象にする。読み取り経路が黙って壊れる形なので生成時に止める。
+    /// </para>
+    /// <para>
+    /// 除外オプションが無効なら無制限バイナリ列も通常列として全経路で読み書きされるため実害がなく、
+    /// 診断は発火させない（オプション非依存で常時エラーにすると、従来生成できていた図が理由なく止まる）。
+    /// 判定は型マッパーの解決結果（<see cref="CSharpTypeInfo.IsUnboundedBinary"/>）＝
+    /// <c>[UnboundedBinaryColumn]</c> の付与条件と同一。
+    /// </para>
+    /// </remarks>
+    private static void ValidateUnboundedBinaryPrimaryKeys(
+        ErDiagram diagram,
+        IReadOnlyDictionary<Guid, CSharpTypeInfo> columnTypes,
+        CodeGenerationOptions options,
+        ICollection<GenerationDiagnostic> diagnostics
+    )
+    {
+        if (!options.ExcludeUnboundedBinaryColumns)
+        {
+            return;
+        }
+
+        foreach (var entity in diagram.Entities)
+        {
+            var offenders = entity.Columns.Where(column =>
+                column.IsPrimaryKey
+                && columnTypes.TryGetValue(column.Id, out var typeInfo)
+                && typeInfo.IsUnboundedBinary
+            );
+
+            foreach (var column in offenders)
+            {
+                diagnostics.Add(
+                    GenerationDiagnostic.Error(
+                        string.Format(
+                            Strings.CodeGen_Error_PrimaryKeyUnboundedBinaryColumn,
+                            entity.TableName,
+                            column.Name
                         )
                     )
                 );

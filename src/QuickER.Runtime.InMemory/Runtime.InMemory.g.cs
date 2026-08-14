@@ -716,18 +716,32 @@ public sealed class InMemoryDataStore
     /// wholesale on every write.
     /// </para>
     /// <para>
-    /// A row whose type has no rowversion column is not verified: without a concurrency token the store's contract is
-    /// last-write-wins, exactly as it is for a direct update, and <see cref="ConcurrencyMode.ForceOverwrite"/> waives the
-    /// verification for the same reason. A row the save inserted is verified whatever the mode, because someone else having
-    /// taken the same primary key meanwhile is a duplicate key rather than something an overwrite policy can excuse.
+    /// Whether the row is still there is settled first, and independently of the concurrency policy and of whether the type
+    /// carries a rowversion column at all, because a version comparison against a row that no longer exists cannot say
+    /// anything about it. Last-write-wins stops short of resurrection: a row the save started from that has been deleted
+    /// meanwhile cannot be written back, because putting the staged snapshot in would bring a deleted row to life, where a
+    /// real database's UPDATE simply affects no rows. Reporting that as <see cref="SaveConflictReason.NotFound"/> is what
+    /// keeps the save honest: the row count the save already returned counted this write, and its entities are about to be
+    /// accepted as saved, so dropping the write silently would leave the caller believing a row exists that does not. A
+    /// staged delete for such a row is not a conflict (deleting a row that is already gone is the same no-op it is against a
+    /// real database). This is the same split a real backend makes when its UPDATE affects no rows and it asks whether the
+    /// row exists before deciding between "gone" and "changed". <see cref="ConcurrencyMode.ForceOverwrite"/> does not lift
+    /// this: it waives the version comparison, not the existence check, so a staged update against a row that was deleted
+    /// meanwhile still fails.
     /// </para>
     /// <para>
-    /// Last-write-wins still stops short of resurrection: a row the save started from that has been deleted meanwhile cannot
-    /// be written back, because putting the staged snapshot in would bring a deleted row to life, where a real database's
-    /// UPDATE simply affects no rows. Reporting that as <see cref="SaveConflictReason.NotFound"/> is what keeps the save
-    /// honest: the row count the save already returned counted this write, and its entities are about to be accepted as
-    /// saved, so dropping the write silently would leave the caller believing a row exists that does not. A staged delete for
-    /// such a row is not a conflict (deleting a row that is already gone is the same no-op it is against a real database).
+    /// <c>insertWhenUpdateMissing</c> does not reach here either. The save phase decides between an UPDATE and the fallback
+    /// INSERT while it holds the lock, so a row deleted after that decision leaves the save holding a staged update and this
+    /// verification reports <see cref="SaveConflictReason.NotFound"/> rather than turning the write into an insert. A real
+    /// database has no window in which that could happen - its own statement sees the row's absence at the moment it writes -
+    /// so this is a divergence of the in-memory backend rather than a rule it shares.
+    /// </para>
+    /// <para>
+    /// Only a row that is still there has its version compared. A row whose type has no rowversion column is not verified:
+    /// without a concurrency token the store's contract is last-write-wins, exactly as it is for a direct update, and
+    /// <see cref="ConcurrencyMode.ForceOverwrite"/> waives the verification for the same reason. A row the save inserted is
+    /// verified whatever the mode, because someone else having taken the same primary key meanwhile is a duplicate key
+    /// rather than something an overwrite policy can excuse.
     /// </para>
     /// <para>
     /// Once the writes are in, the row versions they assigned are read back out of the published snapshots and handed to the
@@ -755,24 +769,27 @@ public sealed class InMemoryDataStore
                     throw DuplicateKeyError(entityType, key);
                 }
 
+                // The row this write started from is gone. Whether it is still there is settled before whether its version
+                // still matches, because a version comparison against a row that no longer exists cannot say anything:
+                // overwriting last-write-wins does not extend to reviving it, and saying so beats dropping the write, which
+                // would report a saved row that is not there. A staged delete against an already deleted row stays the no-op
+                // it is against a real database, whether or not the type carries a rowversion column.
+                if (baseRow is not null && current is null)
+                {
+                    if (staging.Staged(entityType, key) is null)
+                    {
+                        continue;
+                    }
+
+                    throw SaveConflictException.NotFound(entityType, key);
+                }
+
                 if (
                     mode == ConcurrencyMode.Optimistic
                     && EntitySaveMetadata.For(entityType).RowVersionProperty is not null
                 )
                 {
                     throw SaveConflictException.Modified(entityType, key, "save");
-                }
-
-                // The row this write started from is gone: overwriting last-write-wins does not extend to reviving it, and
-                // saying so beats dropping the write, which would report a saved row that is not there (a staged delete
-                // against an already deleted row stays the no-op it is against a real database).
-                if (
-                    baseRow is not null
-                    && current is null
-                    && staging.Staged(entityType, key) is not null
-                )
-                {
-                    throw SaveConflictException.NotFound(entityType, key);
                 }
             }
 
@@ -1180,9 +1197,11 @@ public sealed class InMemoryQueryExecutor<TEntity>(InMemoryDataStore store)
     /// <summary>Deletes rows matching the conditions. With cascadeDelete=true, descendants are also deleted along the FK chain.</summary>
     /// <remarks>
     /// The deletes are staged and published as one unit, so a traversal that gives up part-way through - a cascade the fixed
-    /// descendant walk cannot express, for instance - leaves the store exactly as it found it, the way a real database rolls
-    /// the statement back. Publishing waives the version check: a bulk delete states a condition, not the version of any
-    /// particular row.
+    /// descendant walk cannot express, for instance - leaves the store exactly as it found it: the writes only ever existed in
+    /// the staging, so there is nothing to undo. That is abort safety, not isolation - the staging writes and the publish take
+    /// the store lock separately, so another thread can still observe the store in between and change the rows this delete
+    /// started from, which a database's statement-level rollback would have held locks against. Publishing waives the version
+    /// check: a bulk delete states a condition, not the version of any particular row.
     /// </remarks>
     public Task<int> ExecuteDeleteAsync(
         SqlQueryPlan<TEntity> plan,
@@ -1982,7 +2001,7 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
         return Task.FromResult(updated);
     }
 
-    /// <summary>Deletes an entity by primary key (true if the delete target existed).</summary>
+    /// <inheritdoc />
     public Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default) =>
         Task.FromResult(Store.Remove(typeof(TEntity), NormalizeKey(id)));
 

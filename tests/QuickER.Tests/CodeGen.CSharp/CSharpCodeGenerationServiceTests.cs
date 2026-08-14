@@ -2265,6 +2265,199 @@ public class CSharpCodeGenerationServiceTests
         result.Files[0].Content.Should().Contain("[StoreGeneratedColumn]");
     }
 
+    /// <summary>
+    /// 主キー列が rowversion の図は生成時にエラーになることを検証する
+    /// （rowversion は DB 採番＝書き込み対象から外れるため、生成 INSERT がキーを送らず、
+    /// 行の同一性が更新のたびに変わる値に乗ってしまう。DB 取込では自然に発生し得る構成）
+    /// </summary>
+    [Fact]
+    public void Generate_PrimaryKeyRowVersionColumn_ShouldFailWithError()
+    {
+        var diagram = new ErDiagram
+        {
+            Entities =
+            [
+                new Entity
+                {
+                    Id = Guid.NewGuid(),
+                    TableName = "items",
+                    Columns =
+                    [
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "row_ver",
+                            DataType = "rowversion",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "name",
+                            DataType = "nvarchar(50)",
+                            IsNullable = false,
+                        },
+                    ],
+                },
+            ],
+        };
+
+        var result = new CSharpCodeGenerationService().Generate(
+            diagram,
+            new CodeGenerationOptions { RootNamespace = "Sample.Domain" }
+        );
+
+        result.HasErrors.Should().BeTrue();
+        result.Files.Should().BeEmpty("エラー時は生成物を書き出さない");
+        result
+            .Diagnostics.Should()
+            .Contain(diagnostic =>
+                diagnostic.Severity == GenerationDiagnosticSeverity.Error
+                && diagnostic.Message.Contains("items")
+                && diagnostic.Message.Contains("'row_ver'")
+            );
+    }
+
+    /// <summary>
+    /// 対照: 主キーでない rowversion 列は従来どおり生成できる（診断は主キーとの組合せだけを止める）
+    /// </summary>
+    [Fact]
+    public void Generate_NonPrimaryKeyRowVersionColumn_ShouldSucceed()
+    {
+        var diagram = new ErDiagram
+        {
+            Entities =
+            [
+                new Entity
+                {
+                    Id = Guid.NewGuid(),
+                    TableName = "items",
+                    Columns =
+                    [
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "item_id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "row_ver",
+                            DataType = "timestamp",
+                            IsNullable = false,
+                        },
+                    ],
+                },
+            ],
+        };
+
+        var result = new CSharpCodeGenerationService().Generate(
+            diagram,
+            new CodeGenerationOptions { RootNamespace = "Sample.Domain" }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        result.Files[0].Content.Should().Contain("[StoreGeneratedColumn]");
+    }
+
+    /// <summary>
+    /// 主キー列が無制限バイナリ列で、かつ無制限バイナリ列の除外が有効な図は生成時にエラーになることを検証する
+    /// （除外列は SELECT から外れるため、キーが読み戻せず GetById / GetAll がキー未設定のエンティティを返す）
+    /// </summary>
+    [Fact]
+    public void Generate_PrimaryKeyUnboundedBinaryColumn_WithExclusion_ShouldFailWithError()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            BuildUnboundedBinaryDiagram(binaryColumnIsPrimaryKey: true),
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Sample.Domain",
+                ExcludeUnboundedBinaryColumns = true,
+            }
+        );
+
+        result.HasErrors.Should().BeTrue();
+        result.Files.Should().BeEmpty("エラー時は生成物を書き出さない");
+        result
+            .Diagnostics.Should()
+            .Contain(diagnostic =>
+                diagnostic.Severity == GenerationDiagnosticSeverity.Error
+                && diagnostic.Message.Contains("assets")
+                && diagnostic.Message.Contains("payload")
+            );
+    }
+
+    /// <summary>
+    /// 対照: 主キーでない無制限バイナリ列は除外が有効でも従来どおり生成できる（診断は主キーとの組合せだけを止める）
+    /// </summary>
+    [Fact]
+    public void Generate_NonPrimaryKeyUnboundedBinaryColumn_WithExclusion_ShouldSucceed()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            BuildUnboundedBinaryDiagram(binaryColumnIsPrimaryKey: false),
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Sample.Domain",
+                ExcludeUnboundedBinaryColumns = true,
+            }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        result.Files[0].Content.Should().Contain("[UnboundedBinaryColumn]");
+    }
+
+    /// <summary>
+    /// 対照: 除外が無効なら主キーが無制限バイナリ列でも生成できる（通常列として全経路で読み書きされるため実害がない）
+    /// </summary>
+    [Fact]
+    public void Generate_PrimaryKeyUnboundedBinaryColumn_WithoutExclusion_ShouldSucceed()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            BuildUnboundedBinaryDiagram(binaryColumnIsPrimaryKey: true),
+            new CodeGenerationOptions { RootNamespace = "Sample.Domain" }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        result.Files.Should().NotBeEmpty();
+    }
+
+    /// <summary>無制限バイナリ列（varbinary(max)）を持つ検証用の図を作る（主キーの置き場所だけを切り替える）</summary>
+    private static ErDiagram BuildUnboundedBinaryDiagram(bool binaryColumnIsPrimaryKey) =>
+        new()
+        {
+            Entities =
+            [
+                new Entity
+                {
+                    Id = Guid.NewGuid(),
+                    TableName = "assets",
+                    Columns =
+                    [
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "asset_id",
+                            DataType = "int",
+                            IsPrimaryKey = !binaryColumnIsPrimaryKey,
+                            IsNullable = false,
+                        },
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "payload",
+                            DataType = "varbinary(max)",
+                            IsPrimaryKey = binaryColumnIsPrimaryKey,
+                            IsNullable = false,
+                        },
+                    ],
+                },
+            ],
+        };
+
     /// <summary>Mapper を EditModel なしで生成しようとするとエラーになることを検証する</summary>
     [Fact]
     public void Generate_MapperWithoutEditModel_ShouldFailWithError()

@@ -732,13 +732,19 @@ public sealed class InMemoryConcurrencyRuntimeTests
     }
 
     /// <summary>
-    /// 13c. 対照: 版を持つ型では同じ状況が従来どおり <see cref="SaveConflictReason.Modified"/> のまま
-    /// （版チェックが先に成立するため、分類は変わらない）。
+    /// 13c. 版を持つ型でも同じ状況は <see cref="SaveConflictReason.NotFound"/>。存否の判定は版の比較より先に
+    /// 行うため、分類は版の有無に依らず揃う。
     /// </summary>
+    /// <remarks>
+    /// 旧実装は版比較が先で、版を持つ型に限って <see cref="SaveConflictReason.Modified"/> を返していた
+    /// （消えた行に対して版を比べても何も言えないうえ、再取得しても行が無いので「再読込して再試行」という
+    /// 指示が空振りする）。SQL Server が UPDATE 0 行のとき実在確認で「消えた」と「変わった」を分ける二分と
+    /// 同じ意味論へ揃えた。
+    /// </remarks>
     [Fact(
-        DisplayName = "[Concurrency/InMemory] SaveAsync: 版あり型の他者削除は従来どおり Modified"
+        DisplayName = "[Concurrency/InMemory] SaveAsync: 版あり型の他者削除も NotFound（版の有無で分類が割れない）"
     )]
-    public async Task SaveAsync_VersionedRowDeletedDuringAfter_StaysModified()
+    public async Task SaveAsync_VersionedRowDeletedDuringAfter_ReportsNotFound()
     {
         var store = new InMemoryDataStore();
         var hook = new GatedAfterHook<DocumentEntity>();
@@ -769,7 +775,13 @@ public sealed class InMemoryConcurrencyRuntimeTests
 
         (await act.Should().ThrowAsync<SaveConflictException>())
             .Which.Reason.Should()
-            .Be(SaveConflictReason.Modified, "版を持つ型は版の不一致として先に弾かれる");
+            .Be(
+                SaveConflictReason.NotFound,
+                "版を持っていても、無くなった行への更新は「変更された」ではなく「無くなった」"
+            );
+
+        (await other.GetByIdAsync(1, Ct)).Should().BeNull("削除された行は復活しない");
+        mine.RowState.Should().Be(RowState.Updated, "失敗した保存は RowState を確定させない");
     }
 
     /// <summary>

@@ -26,6 +26,12 @@ public sealed class SaveConflictException : Exception
     public SaveConflictException(string message)
         : base(message) { }
 
+    /// <summary>Initializes a new instance with the specified message and the failure it was classified from (no details: the reason stays <see cref="SaveConflictReason.Unknown"/>).</summary>
+    /// <param name="message">The message describing the conflict.</param>
+    /// <param name="innerException">The failure this conflict was classified from, kept so that the original error is still available for diagnosis.</param>
+    public SaveConflictException(string message, Exception? innerException)
+        : base(message, innerException) { }
+
     /// <summary>Initializes a new instance with the specified message and the details of the rejected save.</summary>
     /// <param name="message">The message describing the conflict.</param>
     /// <param name="reason">Why the save was rejected.</param>
@@ -134,12 +140,40 @@ public static class RemoteJson
 }
 
 /// <summary>Represents a remote call that failed with a server-side error (carries the HTTP status and the server's message).</summary>
-/// <remarks>An optimistic conflict (HTTP 409) is restored as <see cref="SaveConflictException"/> rather than this exception, so the same catch blocks work as with a direct connection.</remarks>
+/// <remarks>
+/// <para>
+/// An optimistic conflict (HTTP 409) is restored as <see cref="SaveConflictException"/> rather than this exception, so the same catch blocks work as with a direct connection.
+/// </para>
+/// <para>
+/// It also reports a call that failed after a <b>successful</b> status: a 2xx whose body cannot be read as what the operation
+/// expects means something other than the generated endpoint answered - a proxy's or a portal's success page, or a server
+/// generated from a different diagram - which is a transport failure however cheerful the status line was.
+/// <see cref="StatusCode"/> therefore holds a success code in that case, and the parse failure is kept as the inner exception.
+/// Treat it as "the call did not go through", not as "the server reported an error with this code".
+/// </para>
+/// </remarks>
 public sealed class RemoteRepositoryException : Exception
 {
     /// <summary>Initializes a new instance with the specified HTTP status code, message, and correlation id.</summary>
     public RemoteRepositoryException(int statusCode, string message, string? correlationId = null)
         : base(message)
+    {
+        StatusCode = statusCode;
+        CorrelationId = correlationId;
+    }
+
+    /// <summary>Initializes a new instance with the specified HTTP status code, message, correlation id, and the failure it was classified from.</summary>
+    /// <param name="statusCode">The HTTP status code returned by the server.</param>
+    /// <param name="message">The message describing the failure.</param>
+    /// <param name="correlationId">The id identifying the failed request in the server log, or <c>null</c> when there is none.</param>
+    /// <param name="innerException">The failure this exception was classified from, kept so that the original error is still available for diagnosis.</param>
+    public RemoteRepositoryException(
+        int statusCode,
+        string message,
+        string? correlationId,
+        Exception? innerException
+    )
+        : base(message, innerException)
     {
         StatusCode = statusCode;
         CorrelationId = correlationId;
@@ -526,7 +560,19 @@ public static class RemoteEntityGraph
 /// The wire format is not promised to stay compatible across QuickER versions while the tool is at 0.x, so
 /// regenerate the client and the server together and deploy them together. A server that moves ahead on its own
 /// does not announce the mismatch: a request the newer endpoints no longer recognize surfaces as an ordinary transport
-/// failure - a 404 or a 400 - rather than as a version error.
+/// failure - a 404 or a 400 - rather than as a version error, and a successful response whose payload changed shape is
+/// reported as <see cref="RemoteRepositoryException"/> only when it cannot be read into the expected type at all. A shape
+/// that merely gained or lost a field deserializes quietly, leaving the missing part at its default, which is why keeping
+/// the two sides in step is the actual safeguard rather than anything the client can detect.
+/// </para>
+/// <para>
+/// <b>Do not put an automatic retry policy (Polly and the like) in front of the mutating operations</b> - Insert, Update,
+/// Delete, and both forms of Save. None of them carries an idempotency key, so the server cannot tell a retry from a new
+/// request: a call that in fact succeeded but whose response was lost is applied a second time, inserting a duplicate row
+/// or replaying a graph save. Retrying is safe only for the read-only operations - GetById, GetAll, the named queries, and
+/// the health probe - so scope any handler-level policy to those. A conflict reported by the server
+/// (<see cref="SaveConflictException"/>) is retried by re-reading the entity and saving again, not by resending the same
+/// body.
 /// </para>
 /// </remarks>
 public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepository<TEntity, TKey>
@@ -593,7 +639,11 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     /// On a failure response, reads the <see cref="RemoteError"/>; 409 with SaveConflict throws <see cref="SaveConflictException"/>,
     /// anything else throws <see cref="RemoteRepositoryException"/>. A success response whose body is not the expected JSON throws
     /// <see cref="RemoteRepositoryException"/> as well: something other than the generated endpoint answered - a proxy's or a portal's
-    /// success page, most often - and letting the raw <c>JsonException</c> out would hide that behind a parsing detail.
+    /// success page, most often - and letting the raw <c>JsonException</c> out would hide that behind a parsing detail. A body that is
+    /// JSON but of another shape than this call expects (an endpoint from a differently generated server, say) is reported the same way
+    /// when it cannot be read into <typeparamref name="TResult"/> at all; a shape that only gained or lost a field is read without
+    /// complaint and leaves the missing part at its default, so this is not a version check. The parse failure itself is kept as the
+    /// inner exception, since the reason the body could not be read is exactly what tells the two apart.
     /// </remarks>
     protected async Task<TResult> InvokeAsync<TResult>(
         string operation,
@@ -624,7 +674,9 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
             // kinds the error path folds away, classified here as the transport failure they are
             throw new RemoteRepositoryException(
                 (int)response.StatusCode,
-                $"The remote call succeeded (HTTP {(int)response.StatusCode}) but its response body could not be interpreted: {parseError.Message}"
+                $"The remote call succeeded (HTTP {(int)response.StatusCode}) but its response body could not be interpreted: {parseError.Message}",
+                correlationId: null,
+                innerException: parseError
             );
         }
     }
@@ -711,7 +763,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         InvokeAsync<IReadOnlyList<TEntity>>("GetAll", null, cancellationToken);
 
     /// <summary>Inserts an entity.</summary>
-    /// <remarks>As on a direct connection, the row version the database assigned is written back to <paramref name="entity"/> when the table carries a rowversion column, so the inserted entity can be updated straight away without re-reading it.</remarks>
+    /// <remarks>As on a direct connection, the row version the database assigned is written back to <paramref name="entity"/> when the table carries a rowversion column, so the inserted entity can be updated straight away without re-reading it. Being a mutating call it carries no idempotency key, so it must not be resent by an automatic retry policy - a resend after a lost response inserts the row twice.</remarks>
     public async Task InsertAsync(TEntity entity, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(entity);
@@ -729,7 +781,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     }
 
     /// <summary>Updates an entity (returns true when a matching row was updated).</summary>
-    /// <remarks>The policy travels with the request, so a table with a rowversion column behaves exactly as it does on a direct connection: an optimistic conflict surfaces as <see cref="SaveConflictException"/> (HTTP 409) and a successful update writes the new version back to <paramref name="entity"/>.</remarks>
+    /// <remarks>The policy travels with the request, so a table with a rowversion column behaves exactly as it does on a direct connection: an optimistic conflict surfaces as <see cref="SaveConflictException"/> (HTTP 409) and a successful update writes the new version back to <paramref name="entity"/>. Being a mutating call it carries no idempotency key, so it must not be resent by an automatic retry policy - a conflict is retried by re-reading the entity, not by resending the same body.</remarks>
     /// <param name="entity">The entity to update.</param>
     /// <param name="mode">The concurrency policy applied on the server for tables that have a rowversion column (no effect otherwise). An undefined value throws <see cref="ArgumentOutOfRangeException"/> before anything is sent.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
@@ -760,12 +812,12 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         return result.Updated;
     }
 
-    /// <summary>Deletes an entity by primary key (returns true when a matching row was deleted).</summary>
+    /// <inheritdoc />
     public Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default) =>
         InvokeAsync<bool>("Delete", new RemoteIdRequest<TKey>(id), cancellationToken);
 
     /// <summary>Saves inserts, updates, and deletes according to RowState in a single transaction (cascades to children by default).</summary>
-    /// <remarks><paramref name="mode"/> travels with the request, and the response carries the row versions the save assigned so that the local graph ends up with the same versions a direct connection would leave behind.</remarks>
+    /// <remarks><paramref name="mode"/> travels with the request, and the response carries the row versions the save assigned so that the local graph ends up with the same versions a direct connection would leave behind. Being a mutating call it carries no idempotency key, so it must not be resent by an automatic retry policy - a resend after a lost response replays the whole graph.</remarks>
     public async Task<int> SaveAsync(
         TEntity entity,
         bool cascadeSave = true,
@@ -800,7 +852,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     }
 
     /// <summary>Saves multiple aggregate roots together in a single transaction (atomic: all succeed or all roll back).</summary>
-    /// <remarks><paramref name="mode"/> travels with the request, and the response carries the row versions the save assigned so that the local graphs end up with the same versions a direct connection would leave behind.</remarks>
+    /// <remarks><paramref name="mode"/> travels with the request, and the response carries the row versions the save assigned so that the local graphs end up with the same versions a direct connection would leave behind. Being a mutating call it carries no idempotency key, so it must not be resent by an automatic retry policy - a resend after a lost response replays every graph in the list.</remarks>
     public async Task<int> SaveAsync(
         IEnumerable<TEntity> entities,
         bool cascadeSave = true,
@@ -1990,7 +2042,11 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     )
         where TEntity : EntityBase
     {
-        // The query executor's TEntity has no new() constraint, so create via Activator (entities always have a parameterless constructor)
+        // The query executor's TEntity has no new() constraint of its own, so the instance is created through Activator. The
+        // parameterless constructor it needs is guaranteed by the contract types the entity has to satisfy to get here
+        // (IRepository<TEntity, TKey> and IRemoteRepository<TEntity, TKey> both require "where TEntity : EntityBase, new()"),
+        // so a partial declaration that removed the default constructor would fail the build with CS0310 rather than reach
+        // this line
         var entity = (TEntity)Activator.CreateInstance(typeof(TEntity))!;
 
         for (var i = 0; i < properties.Count; i++)

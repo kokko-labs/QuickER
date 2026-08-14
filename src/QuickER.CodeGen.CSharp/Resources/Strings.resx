@@ -88,6 +88,12 @@
   <data name="CodeGen_Error_MultipleRowVersionColumns" xml:space="preserve">
     <value>Table '{0}' has more than one rowversion column ({1}). Optimistic concurrency reads and writes a single version column per table, and SQL Server allows only one as well, so the DDL would fail on the second one. Keep one rowversion column and give the others another type.</value>
   </data>
+  <data name="CodeGen_Error_PrimaryKeyRowVersionColumn" xml:space="preserve">
+    <value>Column '{1}' of table '{0}' is both the primary key and a rowversion column. A rowversion is assigned by the database, so it is left out of every INSERT and UPDATE the repositories issue: the generated INSERT would send no key at all, and the row's identity would rest on a value that changes with every update. Give the primary key a type of its own, and add a separate rowversion column if the table needs optimistic concurrency.</value>
+  </data>
+  <data name="CodeGen_Error_PrimaryKeyUnboundedBinaryColumn" xml:space="preserve">
+    <value>Column '{1}' of table '{0}' is both the primary key and an unbounded binary column, and unbounded binary columns are excluded (ExcludeUnboundedBinaryColumns). An excluded column is left out of every SELECT the repositories issue, so the key would not be read back: GetByIdAsync and GetAllAsync would return entities whose key is null, and any save built on them would target the wrong row. Give the primary key a bounded type of its own, or turn the exclusion off.</value>
+  </data>
   <data name="CodeGen_Error_GeneratedMemberNameCollision" xml:space="preserve">
     <value>Class '{0}' (table '{1}') generates the member name '{2}' more than once (from {3}). The same member would be declared twice and fail to compile (CS0102). Rename the columns so that every generated member name is unique. Note that an EditModel generates five members per column (Name, _name, BindingName, _bindingName, _bindingNameSnapshot), so a column named 'binding_id' collides with the members generated for a column named 'id', and a column whose property name equals a navigation property name (for example a column named 'customer' on a table that references the 'customers' table) collides on the entity class as well.</value>
   </data>

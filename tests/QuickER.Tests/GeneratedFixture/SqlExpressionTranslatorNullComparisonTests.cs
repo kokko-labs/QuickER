@@ -31,12 +31,25 @@ namespace QuickER.Tests.GeneratedFixture;
 /// 列の NULL 許容性は式木から確実には判定できないため無条件に補償する（非 NULL 列では意味不変）。
 /// </para>
 /// <para>
-/// 列同士: <c>a &lt;&gt; b</c> はどちらかが NULL の行を落とすが、C#／EF Core は「片側だけ NULL＝不一致」と扱う。
-/// そのため <c>(a &lt;&gt; b OR (a IS NULL AND b IS NOT NULL) OR (a IS NOT NULL AND b IS NULL))</c> へ展開する。
+/// 列同士: 両側に NULL があり得るため両方の演算子を展開する。<c>a &lt;&gt; b</c> はどちらかが NULL の行を落とすが
+/// C#／EF Core は「片側だけ NULL＝不一致」と扱うので
+/// <c>(a &lt;&gt; b OR (a IS NULL AND b IS NOT NULL) OR (a IS NOT NULL AND b IS NULL))</c> へ、
+/// <c>a = b</c> は両側 NULL の行を落とすが C#／EF Core は「両側 NULL＝一致」と扱うので
+/// <c>(a = b OR (a IS NULL AND b IS NULL))</c> へ展開する（列 vs 値の <c>==</c> にはこの問題が無いので無補償のまま）。
 /// </para>
 /// <para>
 /// 否定: <c>!(a == b)</c> は <c>NOT (...)</c> で包むと補償の外側に出てしまうため、演算子を反転して
-/// <c>a != b</c> と同じ経路へ流す（等値以外の否定は従来どおり <c>NOT (...)</c>）。
+/// <c>a != b</c> と同じ経路へ流す（等値以外の否定は従来どおり <c>NOT (...)</c>）。二重否定は単項 Not の入口で
+/// 畳み込む——畳まないと外側の Not は「オペランドが等値比較でない」ため <c>NOT (...)</c> 枝へ落ち、内側の反転と
+/// 合成されて補償の外へ出てしまう。
+/// </para>
+/// <para>
+/// 射程（既知の乖離）: 補償が効くのは「否定が比較に直接乗っている」場合だけで、論理演算子を挟んだ複合否定
+/// （<c>!(a == b &amp;&amp; c)</c> など）は De Morgan 展開されない。個々の比較は補償された形で出るが、それを
+/// <c>NOT (...)</c> で包むため、片側 NULL で UNKNOWN になった行は <c>NOT (UNKNOWN)</c> も UNKNOWN のまま落ち、
+/// C#／EF Core とは割れる。ここで固定するのは直接の否定（および二重否定）までで、複合否定は
+/// 「NULL があり得るなら比較側へ否定を書く（<c>a != b || !c</c>）」という回避を docs／翻訳器 XmlDoc に明記して
+/// 割り切っている。
 /// </para>
 /// <para>
 /// 補償範囲は <c>==</c> / <c>!=</c> のみで、関係演算子（&lt; &lt;= &gt; &gt;=）は従来どおり NULL パラメータの
@@ -51,6 +64,7 @@ public sealed class SqlExpressionTranslatorNullComparisonTests
         public string? Name1 { get; set; }
         public string? Name2 { get; set; }
         public int? A { get; set; }
+        public bool Flag { get; set; }
     }
 
     /// <summary>SQL Server 方言のトランスレータで述語本体を条件へ変換する</summary>
@@ -198,10 +212,40 @@ public sealed class SqlExpressionTranslatorNullComparisonTests
             );
     }
 
-    [Fact(DisplayName = "対照: 列同士の == は補償しない（NULL 側は SQL でも C# でも不一致）")]
-    public void EqualColumnToColumn_IsNotCompensated()
+    [Fact(DisplayName = "列同士の == は両側 NULL を一致とする形へ補償される（両方言）")]
+    public void EqualColumnToColumn_CompensatesBothNulls()
     {
-        RunSqlServer(p => p.Name1 == p.Name2).Sql.Should().Be("[Name1] = [Name2]");
+        // 素の [Name1] = [Name2] は両側 NULL の行を UNKNOWN で落とすが、C# も EF Core も「両側 NULL は一致」と扱う
+        RunSqlServer(p => p.Name1 == p.Name2)
+            .Sql.Should()
+            .Be("([Name1] = [Name2] OR ([Name1] IS NULL AND [Name2] IS NULL))");
+
+        RunSqlite(p => p.Name1 == p.Name2)
+            .Sql.Should()
+            .Be("(\"Name1\" = \"Name2\" OR (\"Name1\" IS NULL AND \"Name2\" IS NULL))");
+    }
+
+    [Fact(DisplayName = "列同士の == と != の補償形は互いの否定になっている（4 通りの網羅）")]
+    public void ColumnToColumnCompensations_AreComplementary()
+    {
+        // (両側 NULL / 片側 NULL×2 / 両側非 NULL) の 4 通りを、== 形と != 形が過不足なく二分する
+        RunSqlServer(p => p.Name1 == p.Name2)
+            .Sql.Should()
+            .Be("([Name1] = [Name2] OR ([Name1] IS NULL AND [Name2] IS NULL))");
+
+        RunSqlServer(p => !(p.Name1 == p.Name2))
+            .Sql.Should()
+            .Be(
+                "([Name1] <> [Name2] OR ([Name1] IS NULL AND [Name2] IS NOT NULL) OR ([Name1] IS NOT NULL AND [Name2] IS NULL))",
+                "!(==) は != の補償形と同一"
+            );
+
+        RunSqlServer(p => !(p.Name1 != p.Name2))
+            .Sql.Should()
+            .Be(
+                "([Name1] = [Name2] OR ([Name1] IS NULL AND [Name2] IS NULL))",
+                "!(!=) は == の補償形と同一"
+            );
     }
 
     [Fact(DisplayName = "!(==) は != と同じ補償形になる（NOT で包まない）")]
@@ -243,6 +287,83 @@ public sealed class SqlExpressionTranslatorNullComparisonTests
             .Be(
                 "([Name1] <> [Name2] OR ([Name1] IS NULL AND [Name2] IS NOT NULL) OR ([Name1] IS NOT NULL AND [Name2] IS NULL))"
             );
+    }
+
+    /// <summary>
+    /// 述語本体を指定回数だけ明示的な単項 Not で包む（<c>!!x</c> と書くと C# コンパイラが畳んでしまう可能性があるため、
+    /// 木の形をテスト側で確定させる）。
+    /// </summary>
+    private static Expression Negate(Expression<Func<Probe, bool>> predicate, int times)
+    {
+        Expression body = predicate.Body;
+
+        for (var index = 0; index < times; index++)
+        {
+            body = Expression.Not(body);
+        }
+
+        return body;
+    }
+
+    /// <summary>SQL Server 方言のトランスレータで、組み立て済みの式木を条件へ変換する</summary>
+    private static string RunSqlServerBody(Expression body) =>
+        SqlServerTranslator.ToCondition(body, new List<SqlServerParam>());
+
+    /// <summary>SQLite 方言のトランスレータで、組み立て済みの式木を条件へ変換する</summary>
+    private static string RunSqliteBody(Expression body) =>
+        SqliteTranslator.ToCondition(body, new List<SqliteParam>());
+
+    [Fact(DisplayName = "二重否定は畳み込まれ、素の比較とまったく同じ補償形になる")]
+    public void DoubleNegation_CollapsesToPlainComparison()
+    {
+        var name = "Alice";
+
+        // 畳み込みが無いと、外側の Not はオペランドが UnaryExpression のため NOT (...) 枝へ落ち、
+        // 内側の反転（!= → ==）と合成されて NOT ([Name1] = @p0) になる＝列が NULL の行が脱落する
+        RunSqlServerBody(Negate(p => p.Name1 != name, 2))
+            .Should()
+            .Be("([Name1] <> @p0 OR [Name1] IS NULL)", "!(!(x != v)) は x != v と同義");
+
+        RunSqlServerBody(Negate(p => p.Name1 == name, 2)).Should().Be("[Name1] = @p0");
+
+        RunSqliteBody(Negate(p => p.Name1 != name, 2))
+            .Should()
+            .Be("(\"Name1\" <> @p0 OR \"Name1\" IS NULL)");
+    }
+
+    [Fact(DisplayName = "三重否定も再帰的に畳まれ、1 回の否定と同じ形になる")]
+    public void TripleNegation_CollapsesToSingleNegation()
+    {
+        var name = "Alice";
+
+        RunSqlServerBody(Negate(p => p.Name1 != name, 3))
+            .Should()
+            .Be("[Name1] = @p0", "三重否定は 1 回の否定＝x == v と同義");
+
+        RunSqlServerBody(Negate(p => p.Name1 != name, 4))
+            .Should()
+            .Be("([Name1] <> @p0 OR [Name1] IS NULL)", "四重否定は素の比較へ戻る");
+    }
+
+    [Fact(DisplayName = "列同士の二重否定も畳まれ、補償形が保たれる")]
+    public void DoubleNegation_ColumnToColumn_KeepsCompensation()
+    {
+        RunSqlServerBody(Negate(p => p.Name1 != p.Name2, 2))
+            .Should()
+            .Be(
+                "([Name1] <> [Name2] OR ([Name1] IS NULL AND [Name2] IS NOT NULL) OR ([Name1] IS NOT NULL AND [Name2] IS NULL))"
+            );
+
+        RunSqlServerBody(Negate(p => p.Name1 == p.Name2, 2))
+            .Should()
+            .Be("([Name1] = [Name2] OR ([Name1] IS NULL AND [Name2] IS NULL))");
+    }
+
+    [Fact(DisplayName = "対照: 二重否定の中身が比較でなくても畳まれる（bool 列）")]
+    public void DoubleNegation_BoolColumn_CollapsesToPlainColumn()
+    {
+        RunSqlServerBody(Negate(p => p.Flag, 2)).Should().Be("[Flag] = 1");
+        RunSqlServerBody(Negate(p => p.Flag, 1)).Should().Be("[Flag] = 0");
     }
 
     [Fact(DisplayName = "対照: 等値以外の否定は従来どおり NOT (...) で包まれる")]

@@ -439,7 +439,7 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
         return affected > 0;
     }
 
-    /// <summary>Deletes an entity by primary key (true when a matching row was deleted).</summary>
+    /// <inheritdoc />
     public async Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default)
     {
         await using var connection = _connectionFactory.CreateConnection();
@@ -1510,6 +1510,16 @@ public static class SqlExpressionTranslator
             {
                 var operand = Unwrap(unary.Operand);
 
+                // A negation of a negation cancels out here rather than being passed on. The equality case below only fires
+                // when the operand is the comparison itself, so an inner Not would fall through to the NOT (...) wrapper and
+                // take the comparison's null compensation out of reach: !(!(col != v)) would come out as NOT ([col] = @p),
+                // which drops the NULL rows that C# and EF Core keep. Cancelling is recursive, so any stack of negations
+                // collapses to whatever the expression underneath translates to.
+                if (operand is UnaryExpression { NodeType: ExpressionType.Not } innerNegation)
+                {
+                    return Visit(Unwrap(innerNegation.Operand), parameters);
+                }
+
                 if (operand is MemberExpression boolMember && IsColumn(boolMember))
                 {
                     return $"{ColumnName(boolMember.Member)} = 0";
@@ -1529,6 +1539,11 @@ public static class SqlExpressionTranslator
                     return VisitComparison(equality, parameters, negate: true);
                 }
 
+                // Anything else keeps the NOT wrapper, and a negated composite condition - !(a == b && c) - lands here: the
+                // negation is not pushed inward, so the equalities inside are compensated but then read through NOT, and
+                // NOT (UNKNOWN) is still UNKNOWN. A row a NULL made UNKNOWN inside therefore stays excluded where C# and
+                // EF Core would have kept it. Writing the negation on the comparison itself (a != b || !c) goes through the
+                // flip above and matches them (documented as a known limitation)
                 return $"NOT ({Visit(unary.Operand, parameters)})";
             }
 
@@ -1611,14 +1626,24 @@ public static class SqlExpressionTranslator
     /// expression tree; on a column that is never NULL the added disjunct simply never holds, so the result is unchanged.
     /// </para>
     /// <para>
-    /// Comparing two columns with <c>!=</c> is the same mismatch once more, with a NULL possible on either side, so it is spelled out
-    /// in full: <c>(a &lt;&gt; b OR (a IS NULL AND b IS NOT NULL) OR (a IS NOT NULL AND b IS NULL))</c>, which matches C# (and EF Core)
-    /// in counting one NULL side as different and two NULL sides as the same. Column-to-column <c>==</c> is left as plain <c>=</c>,
-    /// where SQL and C# already agree that a NULL side is not a match.
+    /// Comparing two columns is the same mismatch once more, with a NULL possible on either side, so both operators are spelled out
+    /// in full: <c>!=</c> becomes <c>(a &lt;&gt; b OR (a IS NULL AND b IS NOT NULL) OR (a IS NOT NULL AND b IS NULL))</c> and <c>==</c>
+    /// becomes <c>(a = b OR (a IS NULL AND b IS NULL))</c>, the shapes EF Core's relational provider produces. Both follow from C#
+    /// counting one NULL side as different and two NULL sides as the same, which plain <c>=</c> / <c>&lt;&gt;</c> get wrong in
+    /// opposite directions. A column compared against a value needs no such treatment on the <c>==</c> side, where SQL and C# already
+    /// agree that a NULL column does not match a non-null value.
     /// </para>
     /// <para>
     /// The compensations are deliberately limited to equality: the relational operators (&lt; &lt;= &gt; &gt;=) are left alone,
     /// because they have no null-aware SQL counterpart.
+    /// </para>
+    /// <para>
+    /// They also only reach a negation that sits directly on a comparison, which is why <c>!</c> flips the operator instead of
+    /// wrapping the result. A <c>!</c> applied to a composite condition - <c>!(a == b &amp;&amp; c)</c> - is not pushed inward by
+    /// De Morgan's laws: it comes out as <c>NOT (...)</c> around operands that are compensated individually, and NOT of an
+    /// UNKNOWN is still UNKNOWN, so a row a NULL made UNKNOWN inside the parentheses stays excluded where C# and EF Core would
+    /// have kept it. Where a NULL is possible, write the negation on the comparison itself (<c>a != b || !c</c>), which takes
+    /// the flip and matches them.
     /// </para>
     /// </remarks>
     /// <param name="binary">The comparison to translate.</param>
@@ -1683,6 +1708,14 @@ public static class SqlExpressionTranslator
             {
                 return $"({leftSql} <> {rightSql} OR ({leftSql} IS NULL AND {rightSql} IS NOT NULL) OR ({leftSql} IS NOT NULL AND {rightSql} IS NULL))";
             }
+        }
+
+        // The mirror image on the equality side: plain = makes two NULL columns UNKNOWN and drops the row, while C# and
+        // EF Core both count two nulls as equal (see the remarks). Only column-to-column needs it - a NULL column against a
+        // non-null value is a non-match to C# just as it is to SQL
+        if (nodeType == ExpressionType.Equal && leftSql is not null && rightSql is not null)
+        {
+            return $"({leftSql} = {rightSql} OR ({leftSql} IS NULL AND {rightSql} IS NULL))";
         }
 
         var op = nodeType switch
@@ -2952,7 +2985,11 @@ public sealed class EntitySaveMetadata
     )
         where TEntity : EntityBase
     {
-        // The query executor's TEntity has no new() constraint, so create via Activator (entities always have a parameterless constructor)
+        // The query executor's TEntity has no new() constraint of its own, so the instance is created through Activator. The
+        // parameterless constructor it needs is guaranteed by the contract types the entity has to satisfy to get here
+        // (IRepository<TEntity, TKey> and IRemoteRepository<TEntity, TKey> both require "where TEntity : EntityBase, new()"),
+        // so a partial declaration that removed the default constructor would fail the build with CS0310 rather than reach
+        // this line
         var entity = (TEntity)Activator.CreateInstance(typeof(TEntity))!;
 
         for (var i = 0; i < properties.Count; i++)

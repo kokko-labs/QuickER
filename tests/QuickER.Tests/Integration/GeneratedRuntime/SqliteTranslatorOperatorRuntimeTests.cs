@@ -300,8 +300,65 @@ public sealed class SqliteTranslatorOperatorRuntimeTests : IDisposable
     )]
     public async Task NotEqualColumnToColumn_MatchesCSharpSemantics()
     {
-        await _db.ApplyDdlAsync(
+        await SeedProbeTableAsync();
+
+        var matched = await MatchProbeIdsAsync(p => p.Name1 != p.Name2);
+
+        // C# の != と同じ結論: 1（a≠b）・3（NULL と b）・4（a と NULL）が一致し、2（同値）・5（両方 NULL）は一致しない
+        matched.Should().Equal(1, 3, 4);
+    }
+
+    /// <summary>
+    /// 列同士の <c>==</c> が、両側 NULL の行を<b>含める</b>（C# の <c>==</c> と同じ意味論）ことを実 SQLite で確認する。
+    /// </summary>
+    /// <remarks>
+    /// 素の <c>a = b</c> のままだと両側 NULL の行 5 が SQL の三値論理で落ち、インメモリ（式木コンパイル）・EF Core
+    /// と結果が割れる。<c>!=</c> 側の補償と対になる欠落だった。
+    /// </remarks>
+    [Fact(DisplayName = "[SQLite演算子] 列同士の == が両側 NULL の行を含める（C# の意味論）")]
+    public async Task EqualColumnToColumn_MatchesCSharpSemantics()
+    {
+        await SeedProbeTableAsync();
+
+        var matched = await MatchProbeIdsAsync(p => p.Name1 == p.Name2);
+
+        // C# の == と同じ結論: 2（同値）・5（両方 NULL）が一致し、1（異値）・3・4（片側 NULL）は一致しない
+        matched.Should().Equal(2, 5);
+    }
+
+    /// <summary>
+    /// 二重否定を挟んでも、素の比較とまったく同じ行集合（＝C# の評価と同じ）になることを実 SQLite で確認する。
+    /// </summary>
+    /// <remarks>
+    /// 畳み込みが無いと外側の Not が <c>NOT (...)</c> 枝へ落ち、内側の反転と合成されて補償の外側に出る
+    /// （<c>!(!(a != b))</c> が <c>NOT (a = b)</c> になり、NULL を含む行 3・4・5 の扱いが C# と割れる）。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[SQLite演算子] 列同士の二重否定が素の比較と同じ行集合を返す（C# の意味論）"
+    )]
+    public async Task DoubleNegatedColumnComparison_MatchesCSharpSemantics()
+    {
+        await SeedProbeTableAsync();
+
+        var notEqual = await MatchProbeIdsAsync(p => p.Name1 != p.Name2);
+        var doubleNegatedNotEqual = await MatchProbeIdsAsync(p => p.Name1 != p.Name2, negations: 2);
+        doubleNegatedNotEqual.Should().Equal(notEqual);
+
+        var equal = await MatchProbeIdsAsync(p => p.Name1 == p.Name2);
+        var doubleNegatedEqual = await MatchProbeIdsAsync(p => p.Name1 == p.Name2, negations: 2);
+        doubleNegatedEqual.Should().Equal(equal);
+
+        // 三重否定は 1 回の否定＝反対の演算子と同じ行集合になる
+        (await MatchProbeIdsAsync(p => p.Name1 != p.Name2, negations: 3))
+            .Should()
+            .Equal(equal);
+    }
+
+    /// <summary>プローブ表を作り直し、NULL の組合せを網羅した 5 行を投入する</summary>
+    private Task SeedProbeTableAsync() =>
+        _db.ApplyDdlAsync(
             """
+            DROP TABLE IF EXISTS probe;
             CREATE TABLE probe ("Id" INTEGER PRIMARY KEY, "Name1" TEXT NULL, "Name2" TEXT NULL);
             INSERT INTO probe ("Id", "Name1", "Name2") VALUES
                 (1, 'a', 'b'), (2, 'a', 'a'), (3, NULL, 'b'), (4, 'a', NULL), (5, NULL, NULL);
@@ -309,23 +366,42 @@ public sealed class SqliteTranslatorOperatorRuntimeTests : IDisposable
             Ct
         );
 
+    /// <summary>
+    /// 述語を（必要なら明示的な単項 Not で <paramref name="negations"/> 回包んでから）翻訳し、実 SQLite で
+    /// 一致した行の主キーを返す。同じ式を C# 側でも評価し、両者が一致することまで確認する。
+    /// </summary>
+    /// <remarks>
+    /// 否定は式木で組み立てる（<c>!!x</c> と書くと C# コンパイラが畳んでしまい、翻訳器側の畳み込みを突けない）。
+    /// 期待値の手打ちに寄りかからないよう、SQL の観測結果は必ず C# の評価と突き合わせる。
+    /// </remarks>
+    private async Task<List<int>> MatchProbeIdsAsync(
+        Expression<Func<TwoNullableColumnProbe, bool>> predicate,
+        int negations = 0
+    )
+    {
+        Expression body = predicate.Body;
+
+        for (var index = 0; index < negations; index++)
+        {
+            body = Expression.Not(body);
+        }
+
         var parameters = new List<SqlQueryParameter>();
-        Expression<Func<TwoNullableColumnProbe, bool>> predicate = p => p.Name1 != p.Name2;
-        var condition = SqlExpressionTranslator.ToCondition(predicate.Body, parameters);
+        var condition = SqlExpressionTranslator.ToCondition(body, parameters);
         parameters.Should().BeEmpty("列同士の比較は値をバインドしない");
 
         var matched = await SelectProbeIdsAsync(condition);
 
-        // C# の != と同じ結論: 1（a≠b）・3（NULL と b）・4（a と NULL）が一致し、2（同値）・5（両方 NULL）は一致しない
-        matched.Should().Equal(1, 3, 4);
-
-        // 同じ行集合を C# 側でも評価して突き合わせる（期待値の手打ちに寄りかからない）
-        var evaluated = predicate.Compile();
+        var evaluated = Expression
+            .Lambda<Func<TwoNullableColumnProbe, bool>>(body, predicate.Parameters)
+            .Compile();
         ProbeRows()
             .Where(evaluated)
             .Select(row => row.Id)
             .Should()
             .Equal(matched, "SQL の観測結果は C# の評価と一致する");
+
+        return matched;
     }
 
     /// <summary>列同士比較の検証用プローブ（プロパティ名がそのまま列名になる＝[Column] 属性なし）</summary>

@@ -1208,7 +1208,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
     private static object? KeyOf(object entity) =>
         EntitySaveMetadata.For(entity.GetType()).KeyProperty.GetValue(entity);
 
-    /// <summary>Deletes an entity by primary key (true when a target row was deleted).</summary>
+    /// <inheritdoc />
     public async Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default)
     {
         await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
@@ -1593,9 +1593,12 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
             {
                 if (ex.Entries.Count == 0)
                 {
-                    // EF Core could not attribute the failure to any entry, so there is nothing to classify or retry
+                    // EF Core could not attribute the failure to any entry, so there is nothing to classify or retry. The
+                    // original exception is kept as the inner one: with no entry to name, it is the only thing left that
+                    // says which statement EF Core was running
                     throw new SaveConflictException(
-                        "The save was rejected by a concurrency conflict that could not be attributed to a specific record. Reload the data and try again."
+                        "The save was rejected by a concurrency conflict that could not be attributed to a specific record. Reload the data and try again.",
+                        ex
                     );
                 }
 

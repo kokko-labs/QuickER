@@ -96,6 +96,57 @@ public sealed class EditModelLifecycleTests
         m.RowState.Should().Be(RowState.Unchanged);
     }
 
+    [Fact(
+        DisplayName = "CancelEdit: 取り消すと DB 照合の重複エラーも取り下げられ、検証が通るようになる"
+    )]
+    public void CancelEditでDB由来の重複エラーが取り下げられる()
+    {
+        var m = LoadedOrder();
+        var original = m.BindingAmount;
+
+        m.BeginEdit();
+        m.BindingAmount = "99";
+
+        // 編集した値で DB を照合し、重複していた（保存直前の ValidateUniqueAsync と同じ経路）
+        m.SetDuplicateError(
+            nameof(OrderEditModel.BindingAmount),
+            "already used",
+            DuplicateErrorSource.Database
+        );
+        m.HasErrors.Should().BeTrue();
+
+        m.CancelEdit();
+
+        // 照合した値そのものが取り消されたので、その所見は無効になる。確定値セッターがロード中は黙っている以上、
+        // 取り下げるのはキャンセル側の責務（さもないと Validate() が永続的に false のままになる）
+        m.BindingAmount.Should().Be(original);
+        m.HasErrors.Should().BeFalse();
+        m.Validate(includeChildren: false).Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "CancelEdit: 兄弟間の重複エラーは取り下げない（次の兄弟間検証が判断する）")]
+    public void CancelEditは兄弟間の重複エラーを触らない()
+    {
+        var m = LoadedOrder();
+
+        m.BeginEdit();
+        m.BindingAmount = "99";
+        m.SetDuplicateError(
+            nameof(OrderEditModel.BindingAmount),
+            "duplicate among siblings",
+            DuplicateErrorSource.Siblings
+        );
+
+        m.CancelEdit();
+
+        // 兄弟間の所見はコレクションの現状についてのものなので、取り消しでは判断できない
+        GetErrors(m, nameof(OrderEditModel.BindingAmount))
+            .Should()
+            .ContainSingle()
+            .Which.Should()
+            .Be("duplicate among siblings");
+    }
+
     [Fact(DisplayName = "EndEdit: コミットすると変更は保持される")]
     public void EndEditで変更が保持される()
     {
@@ -230,6 +281,35 @@ public sealed class EditModelLifecycleTests
     /// <summary>指定プロパティのエラー一覧を取り出す</summary>
     private static string[] GetErrors(EditModelBase model, string propertyName) =>
         ((IEnumerable)model.GetErrors(propertyName)).Cast<string>().ToArray();
+
+    [Fact(
+        DisplayName = "GetErrors: 返した列挙は取得時点のスナップショット（後続のクリアで壊れない）"
+    )]
+    public void GetErrorsはスナップショットを返す()
+    {
+        var m = LoadedOrder();
+        m.SetDuplicateError(
+            nameof(OrderEditModel.BindingAmount),
+            "dup amount",
+            DuplicateErrorSource.Database
+        );
+        m.SetDuplicateError(
+            nameof(OrderEditModel.BindingMemo),
+            "dup memo",
+            DuplicateErrorSource.Database
+        );
+
+        var all = m.GetErrors(null);
+        var single = m.GetErrors(nameof(OrderEditModel.BindingAmount));
+
+        // バインディング層は受け取った列挙を後から回すため、その間にストアが書き換わり得る。遅延クエリを
+        // 返していると、全プロパティ形は「列挙中に変更された辞書」を回すことになる
+        m.ClearDuplicateErrors();
+
+        ((IEnumerable)all).Cast<string>().Should().BeEquivalentTo(["dup amount", "dup memo"]);
+        ((IEnumerable)single).Cast<string>().Should().Equal("dup amount");
+        m.HasErrors.Should().BeFalse();
+    }
 
     [Fact(DisplayName = "必須検証: 変換エラーの付いた欄を必須エラーで上書きしない")]
     public void 必須検証は変換エラーを上書きしない()

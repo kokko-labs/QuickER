@@ -71,9 +71,13 @@ public sealed class RemoteResponseBodyRuntimeTests
 
             var act = async () => await documents.GetAllAsync(Ct);
 
-            (await act.Should().ThrowAsync<RemoteRepositoryException>())
-                .Which.StatusCode.Should()
-                .Be(200, "分類には応答のステータスをそのまま添える");
+            var thrown = (await act.Should().ThrowAsync<RemoteRepositoryException>()).Which;
+            thrown.StatusCode.Should().Be(200, "分類には応答のステータスをそのまま添える");
+            thrown
+                .InnerException.Should()
+                .NotBeNull(
+                    "本文が読めなかった理由そのものが「宛先が違う」と「形が違う」を見分ける材料になる"
+                );
         }
     }
 
@@ -91,8 +95,35 @@ public sealed class RemoteResponseBodyRuntimeTests
 
             var act = async () => await documents.GetAllAsync(Ct);
 
-            await act.Should().ThrowAsync<RemoteRepositoryException>();
+            var thrown = (await act.Should().ThrowAsync<RemoteRepositoryException>()).Which;
+            thrown.InnerException.Should().BeOfType<System.Text.Json.JsonException>();
         }
+    }
+
+    [Fact(
+        DisplayName = "[Remote/応答本文] 例外の追加コンストラクタは inner を保ったまま既存プロパティを埋める"
+    )]
+    public void ExceptionConstructors_PreserveInnerException()
+    {
+        var cause = new InvalidOperationException("cause");
+
+        var remote = new RemoteRepositoryException(500, "message", "trace-1", cause);
+        remote.StatusCode.Should().Be(500);
+        remote.CorrelationId.Should().Be("trace-1");
+        remote.InnerException.Should().BeSameAs(cause);
+
+        // 既存の 3 引数形は追加的な変更なので従来どおり（inner なし）
+        new RemoteRepositoryException(500, "message")
+            .InnerException.Should()
+            .BeNull();
+
+        var conflict = new SaveConflictException("message", cause);
+        conflict.InnerException.Should().BeSameAs(cause);
+        conflict
+            .Reason.Should()
+            .Be(SaveConflictReason.Unknown, "詳細を伴わない構築なので分類は Unknown のまま");
+
+        new SaveConflictException("message").InnerException.Should().BeNull();
     }
 
     [Fact(DisplayName = "[Remote/応答本文] 対照: 正しい JSON 本文は従来どおり解釈される")]

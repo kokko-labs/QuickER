@@ -1985,33 +1985,41 @@ public abstract partial class EditModelBase
     }
 
     /// <summary>Returns the errors for the specified property (all errors when null). Input errors come first, then duplicate-value errors.</summary>
+    /// <remarks>
+    /// The result is a finished list, never a deferred view over the error stores. A binding layer holds on to what this
+    /// returns and enumerates it later, by which time a validation pass may well have registered or withdrawn an error; a
+    /// deferred query would then read the stores mid-change - and, for the all-properties form, enumerate the very
+    /// dictionaries a <c>Clear</c> is emptying.
+    /// </remarks>
     public IEnumerable GetErrors(string? propertyName)
     {
         if (string.IsNullOrEmpty(propertyName))
         {
             return _errors
                 .Values.Select(error => error.Message)
-                .Concat(_duplicateErrors.Values.SelectMany(entry => entry.Messages()));
+                .Concat(_duplicateErrors.Values.SelectMany(entry => entry.Messages()))
+                .ToList();
         }
 
         return ReadErrors(propertyName);
     }
 
     /// <summary>Reads the messages registered for the specified property in both stores (the input error first, then the duplicate-value errors).</summary>
-    private IEnumerable<string> ReadErrors(string propertyName)
+    private List<string> ReadErrors(string propertyName)
     {
+        var messages = new List<string>();
+
         if (_errors.TryGetValue(propertyName, out var input))
         {
-            yield return input.Message;
+            messages.Add(input.Message);
         }
 
         if (_duplicateErrors.TryGetValue(propertyName, out var duplicates))
         {
-            foreach (var message in duplicates.Messages())
-            {
-                yield return message;
-            }
+            messages.AddRange(duplicates.Messages());
         }
+
+        return messages;
     }
 
     /// <summary>Combines a child element path (empty at the root, "."-separated below).</summary>
@@ -2070,20 +2078,25 @@ public abstract partial class EditModelBase
     }
 
     /// <summary>Enumerates this edit model's own errors with the specified path (building block for graph collection). Input errors come first, then duplicate-value errors.</summary>
+    /// <remarks>The result is a finished list rather than a deferred query, for the same reason as <see cref="GetErrors"/>: nothing that escapes this class enumerates the error stores later on.</remarks>
     protected IEnumerable<EditModelError> CollectOwnErrors(string path)
     {
+        var errors = new List<EditModelError>();
+
         foreach (var pair in _errors)
         {
-            yield return new EditModelError(path, pair.Key, pair.Value.Message);
+            errors.Add(new EditModelError(path, pair.Key, pair.Value.Message));
         }
 
         foreach (var pair in _duplicateErrors)
         {
             foreach (var message in pair.Value.Messages())
             {
-                yield return new EditModelError(path, pair.Key, message);
+                errors.Add(new EditModelError(path, pair.Key, message));
             }
         }
+
+        return errors;
     }
 
     /// <summary>Resets the graph to the unchanged state after a save is confirmed (marks this model Unchanged and also clears children's deletion tracking).</summary>
@@ -2328,10 +2341,18 @@ public abstract partial class EditModelBase
 
     /// <summary>Clears the duplicate-value errors found by the specified check only, leaving the other check's findings in place.</summary>
     /// <remarks>
+    /// <para>
     /// Each check clears exactly what it registered before running again, so the check among the siblings no longer discards
     /// the violations the database check found (and the other way round). Changing a confirmed value also clears the
     /// <see cref="DuplicateErrorSource.Database"/> findings of the whole model, because they were reached by comparing the values
     /// it held before the edit - all of them, since a composite constraint's verdict rests on every column it covers.
+    /// </para>
+    /// <para>
+    /// That sweep is per model, not per property, so editing one column also withdraws a database finding standing on another
+    /// column of the same model, and <see cref="HasErrors"/> can read false until the check is run again. The window is
+    /// deliberate: the alternative is reporting a violation that was established against values the model no longer holds. The
+    /// definitive guarantee is the database's own UNIQUE constraint either way, so run the check again before saving.
+    /// </para>
     /// </remarks>
     /// <param name="source">The check whose findings are cleared.</param>
     public void ClearDuplicateErrors(DuplicateErrorSource source) =>
@@ -2381,6 +2402,13 @@ public abstract partial class EditModelBase
     /// It does not go through <see cref="SetError"/>, so a conversion error already registered on the same property survives and both are
     /// reported. Only the calling check's slot is written, so a property found to be a duplicate both among its siblings and against the
     /// database reports both findings, and each of them disappears when its own check stops finding it.
+    /// <para>
+    /// The two slots are withdrawn on different occasions. A <see cref="DuplicateErrorSource.Database"/> finding is dropped as soon as a
+    /// confirmed value of this model changes, since it was reached by comparing the values held before the edit. A
+    /// <see cref="DuplicateErrorSource.Siblings"/> finding stays until the check over the collection runs again: it is a statement about
+    /// two models holding the same value, and the matching finding on the other model can only be withdrawn by that check, so retracting
+    /// one side on its own edit would leave the other side flagged alone.
+    /// </para>
     /// </remarks>
     /// <param name="propertyName">Binding property the error is attached to (empty for a model-level error).</param>
     /// <param name="message">The error message.</param>
@@ -2496,6 +2524,14 @@ public abstract partial class EditModelBase
     }
 
     /// <summary>Cancels the row edit and restores the state captured at BeginEdit.</summary>
+    /// <remarks>
+    /// The input errors are cleared for every property, not only for the ones the canceled edit touched, because rebuilding
+    /// the input strings from the restored confirmed values goes through <see cref="RevertInput"/>, which clears each
+    /// property's input error unconditionally. A conversion error that was already there when <see cref="BeginEdit"/> ran
+    /// therefore disappears as well. The value it complained about is gone from the display in the same step - the input
+    /// string is rebuilt from the confirmed value, so the unconvertible text is no longer on screen for the message to refer
+    /// to - and it comes back as soon as that text is typed again.
+    /// </remarks>
     public void CancelEdit()
     {
         if (!_editing)
@@ -3599,6 +3635,8 @@ public partial class CustomerEditModel : EditModelBase
     /// The duplicate-value errors registered by the previous call are cleared first, so re-checking never leaves stale errors (only the ones this check registered:
     /// what the check among the siblings reported stays). Rows that share the primary key are excluded,
     /// so the same call is correct for both insert and update (a model whose key is not set yet excludes nothing). The result is advisory only: the definitive guarantee is the database's own UNIQUE constraint (TOCTOU).
+    /// The same applies to the model itself: a confirmed value edited while the call is awaiting is not seen by the query that is already in flight, so the violations registered when it returns are about the values the model held when it started.
+    /// (An edit clears the database findings as it happens, but the continuation then registers what it found for the previous values.) Run the check again after the last edit, before saving.
     /// The errors are registered after the await, which puts them on a thread pool thread rather than the caller's, and ErrorsChanged fires there too.
     /// A WPF binding marshals that back to the UI thread by itself, so the ordinary case needs nothing; a subscriber that updates UI state directly has to marshal it at the call site.
     /// </remarks>
@@ -3675,10 +3713,26 @@ public partial class CustomerEditModel : EditModelBase
 
     /// <summary>Core logic of CancelEdit. Restores the confirmed values and the RowState from the snapshot, then derives the input strings from them and clears the errors the canceled input left behind.</summary>
     /// <remarks>
+    /// <para>
     /// The confirmed values are the source of truth, so they are put back directly rather than rebuilt by re-parsing
     /// the input strings: a display format cannot express everything a value holds - <see cref="System.DateTime"/>
     /// sub-second precision and Kind, for example - so re-parsing would let a canceled edit silently degrade the very
     /// value it was supposed to leave untouched.
+    /// </para>
+    /// <para>
+    /// Restoring the values also withdraws the duplicate-value findings the database check registered, exactly as an
+    /// ordinary assignment to a confirmed value does. That withdrawal is normally the setter's job, but the restore runs
+    /// as a load, and a load deliberately keeps the setters quiet - so a cancel would otherwise leave a finding about the
+    /// discarded value behind and hold <see cref="EditModelBase.Validate"/> false forever. Only the database check's
+    /// findings are withdrawn, on the same reasoning the setters use: the value they were reached about is gone, whereas
+    /// the findings among the siblings are about the collection as it stands and belong to the next check over it.
+    /// </para>
+    /// <para>
+    /// Deriving the input strings clears the input error of every property, so a conversion error that predates the
+    /// <see cref="EditModelBase.BeginEdit"/> of this row is cleared along with the ones the canceled edit produced. The
+    /// unconvertible text goes away in the same step, since the input string is rebuilt from the restored confirmed value,
+    /// and typing it again brings the error back.
+    /// </para>
     /// </remarks>
     protected override void CancelEditCore()
     {
@@ -3691,6 +3745,7 @@ public partial class CustomerEditModel : EditModelBase
             // Derive the input strings from the restored confirmed values (RevertCore also clears the errors the
             // canceled input produced).
             ExecuteRevert(RevertCore);
+            ClearDuplicateErrors(DuplicateErrorSource.Database);
             OnCancelEdit();
         });
 
@@ -4340,6 +4395,8 @@ public partial class OrderEditModel : EditModelBase
     /// The duplicate-value errors registered by the previous call are cleared first, so re-checking never leaves stale errors (only the ones this check registered:
     /// what the check among the siblings reported stays). Rows that share the primary key are excluded,
     /// so the same call is correct for both insert and update (a model whose key is not set yet excludes nothing). The result is advisory only: the definitive guarantee is the database's own UNIQUE constraint (TOCTOU).
+    /// The same applies to the model itself: a confirmed value edited while the call is awaiting is not seen by the query that is already in flight, so the violations registered when it returns are about the values the model held when it started.
+    /// (An edit clears the database findings as it happens, but the continuation then registers what it found for the previous values.) Run the check again after the last edit, before saving.
     /// The errors are registered after the await, which puts them on a thread pool thread rather than the caller's, and ErrorsChanged fires there too.
     /// A WPF binding marshals that back to the UI thread by itself, so the ordinary case needs nothing; a subscriber that updates UI state directly has to marshal it at the call site.
     /// </remarks>
@@ -4429,10 +4486,26 @@ public partial class OrderEditModel : EditModelBase
 
     /// <summary>Core logic of CancelEdit. Restores the confirmed values and the RowState from the snapshot, then derives the input strings from them and clears the errors the canceled input left behind.</summary>
     /// <remarks>
+    /// <para>
     /// The confirmed values are the source of truth, so they are put back directly rather than rebuilt by re-parsing
     /// the input strings: a display format cannot express everything a value holds - <see cref="System.DateTime"/>
     /// sub-second precision and Kind, for example - so re-parsing would let a canceled edit silently degrade the very
     /// value it was supposed to leave untouched.
+    /// </para>
+    /// <para>
+    /// Restoring the values also withdraws the duplicate-value findings the database check registered, exactly as an
+    /// ordinary assignment to a confirmed value does. That withdrawal is normally the setter's job, but the restore runs
+    /// as a load, and a load deliberately keeps the setters quiet - so a cancel would otherwise leave a finding about the
+    /// discarded value behind and hold <see cref="EditModelBase.Validate"/> false forever. Only the database check's
+    /// findings are withdrawn, on the same reasoning the setters use: the value they were reached about is gone, whereas
+    /// the findings among the siblings are about the collection as it stands and belong to the next check over it.
+    /// </para>
+    /// <para>
+    /// Deriving the input strings clears the input error of every property, so a conversion error that predates the
+    /// <see cref="EditModelBase.BeginEdit"/> of this row is cleared along with the ones the canceled edit produced. The
+    /// unconvertible text goes away in the same step, since the input string is rebuilt from the restored confirmed value,
+    /// and typing it again brings the error back.
+    /// </para>
     /// </remarks>
     protected override void CancelEditCore()
     {
@@ -4446,6 +4519,7 @@ public partial class OrderEditModel : EditModelBase
             // Derive the input strings from the restored confirmed values (RevertCore also clears the errors the
             // canceled input produced).
             ExecuteRevert(RevertCore);
+            ClearDuplicateErrors(DuplicateErrorSource.Database);
             OnCancelEdit();
         });
 
@@ -6116,7 +6190,7 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
         return affected > 0;
     }
 
-    /// <summary>Deletes an entity by primary key (true when a matching row was deleted).</summary>
+    /// <inheritdoc />
     public async Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default)
     {
         await using var connection = _connectionFactory.CreateConnection();
@@ -7612,6 +7686,16 @@ internal static class SqlExpressionTranslator
             {
                 var operand = Unwrap(unary.Operand);
 
+                // A negation of a negation cancels out here rather than being passed on. The equality case below only fires
+                // when the operand is the comparison itself, so an inner Not would fall through to the NOT (...) wrapper and
+                // take the comparison's null compensation out of reach: !(!(col != v)) would come out as NOT ([col] = @p),
+                // which drops the NULL rows that C# and EF Core keep. Cancelling is recursive, so any stack of negations
+                // collapses to whatever the expression underneath translates to.
+                if (operand is UnaryExpression { NodeType: ExpressionType.Not } innerNegation)
+                {
+                    return Visit(Unwrap(innerNegation.Operand), parameters);
+                }
+
                 if (operand is MemberExpression boolMember && IsColumn(boolMember))
                 {
                     return $"{ColumnName(boolMember.Member)} = 0";
@@ -7631,6 +7715,11 @@ internal static class SqlExpressionTranslator
                     return VisitComparison(equality, parameters, negate: true);
                 }
 
+                // Anything else keeps the NOT wrapper, and a negated composite condition - !(a == b && c) - lands here: the
+                // negation is not pushed inward, so the equalities inside are compensated but then read through NOT, and
+                // NOT (UNKNOWN) is still UNKNOWN. A row a NULL made UNKNOWN inside therefore stays excluded where C# and
+                // EF Core would have kept it. Writing the negation on the comparison itself (a != b || !c) goes through the
+                // flip above and matches them (documented as a known limitation)
                 return $"NOT ({Visit(unary.Operand, parameters)})";
             }
 
@@ -7713,14 +7802,24 @@ internal static class SqlExpressionTranslator
     /// expression tree; on a column that is never NULL the added disjunct simply never holds, so the result is unchanged.
     /// </para>
     /// <para>
-    /// Comparing two columns with <c>!=</c> is the same mismatch once more, with a NULL possible on either side, so it is spelled out
-    /// in full: <c>(a &lt;&gt; b OR (a IS NULL AND b IS NOT NULL) OR (a IS NOT NULL AND b IS NULL))</c>, which matches C# (and EF Core)
-    /// in counting one NULL side as different and two NULL sides as the same. Column-to-column <c>==</c> is left as plain <c>=</c>,
-    /// where SQL and C# already agree that a NULL side is not a match.
+    /// Comparing two columns is the same mismatch once more, with a NULL possible on either side, so both operators are spelled out
+    /// in full: <c>!=</c> becomes <c>(a &lt;&gt; b OR (a IS NULL AND b IS NOT NULL) OR (a IS NOT NULL AND b IS NULL))</c> and <c>==</c>
+    /// becomes <c>(a = b OR (a IS NULL AND b IS NULL))</c>, the shapes EF Core's relational provider produces. Both follow from C#
+    /// counting one NULL side as different and two NULL sides as the same, which plain <c>=</c> / <c>&lt;&gt;</c> get wrong in
+    /// opposite directions. A column compared against a value needs no such treatment on the <c>==</c> side, where SQL and C# already
+    /// agree that a NULL column does not match a non-null value.
     /// </para>
     /// <para>
     /// The compensations are deliberately limited to equality: the relational operators (&lt; &lt;= &gt; &gt;=) are left alone,
     /// because they have no null-aware SQL counterpart.
+    /// </para>
+    /// <para>
+    /// They also only reach a negation that sits directly on a comparison, which is why <c>!</c> flips the operator instead of
+    /// wrapping the result. A <c>!</c> applied to a composite condition - <c>!(a == b &amp;&amp; c)</c> - is not pushed inward by
+    /// De Morgan's laws: it comes out as <c>NOT (...)</c> around operands that are compensated individually, and NOT of an
+    /// UNKNOWN is still UNKNOWN, so a row a NULL made UNKNOWN inside the parentheses stays excluded where C# and EF Core would
+    /// have kept it. Where a NULL is possible, write the negation on the comparison itself (<c>a != b || !c</c>), which takes
+    /// the flip and matches them.
     /// </para>
     /// </remarks>
     /// <param name="binary">The comparison to translate.</param>
@@ -7785,6 +7884,14 @@ internal static class SqlExpressionTranslator
             {
                 return $"({leftSql} <> {rightSql} OR ({leftSql} IS NULL AND {rightSql} IS NOT NULL) OR ({leftSql} IS NOT NULL AND {rightSql} IS NULL))";
             }
+        }
+
+        // The mirror image on the equality side: plain = makes two NULL columns UNKNOWN and drops the row, while C# and
+        // EF Core both count two nulls as equal (see the remarks). Only column-to-column needs it - a NULL column against a
+        // non-null value is a non-match to C# just as it is to SQL
+        if (nodeType == ExpressionType.Equal && leftSql is not null && rightSql is not null)
+        {
+            return $"({leftSql} = {rightSql} OR ({leftSql} IS NULL AND {rightSql} IS NULL))";
         }
 
         var op = nodeType switch
@@ -8310,6 +8417,12 @@ public sealed class SaveConflictException : Exception
     public SaveConflictException(string message)
         : base(message) { }
 
+    /// <summary>Initializes a new instance with the specified message and the failure it was classified from (no details: the reason stays <see cref="SaveConflictReason.Unknown"/>).</summary>
+    /// <param name="message">The message describing the conflict.</param>
+    /// <param name="innerException">The failure this conflict was classified from, kept so that the original error is still available for diagnosis.</param>
+    public SaveConflictException(string message, Exception? innerException)
+        : base(message, innerException) { }
+
     /// <summary>Initializes a new instance with the specified message and the details of the rejected save.</summary>
     /// <param name="message">The message describing the conflict.</param>
     /// <param name="reason">Why the save was rejected.</param>
@@ -8414,12 +8527,40 @@ public static class RemoteJson
 }
 
 /// <summary>Represents a remote call that failed with a server-side error (carries the HTTP status and the server's message).</summary>
-/// <remarks>An optimistic conflict (HTTP 409) is restored as <see cref="SaveConflictException"/> rather than this exception, so the same catch blocks work as with a direct connection.</remarks>
+/// <remarks>
+/// <para>
+/// An optimistic conflict (HTTP 409) is restored as <see cref="SaveConflictException"/> rather than this exception, so the same catch blocks work as with a direct connection.
+/// </para>
+/// <para>
+/// It also reports a call that failed after a <b>successful</b> status: a 2xx whose body cannot be read as what the operation
+/// expects means something other than the generated endpoint answered - a proxy's or a portal's success page, or a server
+/// generated from a different diagram - which is a transport failure however cheerful the status line was.
+/// <see cref="StatusCode"/> therefore holds a success code in that case, and the parse failure is kept as the inner exception.
+/// Treat it as "the call did not go through", not as "the server reported an error with this code".
+/// </para>
+/// </remarks>
 public sealed class RemoteRepositoryException : Exception
 {
     /// <summary>Initializes a new instance with the specified HTTP status code, message, and correlation id.</summary>
     public RemoteRepositoryException(int statusCode, string message, string? correlationId = null)
         : base(message)
+    {
+        StatusCode = statusCode;
+        CorrelationId = correlationId;
+    }
+
+    /// <summary>Initializes a new instance with the specified HTTP status code, message, correlation id, and the failure it was classified from.</summary>
+    /// <param name="statusCode">The HTTP status code returned by the server.</param>
+    /// <param name="message">The message describing the failure.</param>
+    /// <param name="correlationId">The id identifying the failed request in the server log, or <c>null</c> when there is none.</param>
+    /// <param name="innerException">The failure this exception was classified from, kept so that the original error is still available for diagnosis.</param>
+    public RemoteRepositoryException(
+        int statusCode,
+        string message,
+        string? correlationId,
+        Exception? innerException
+    )
+        : base(message, innerException)
     {
         StatusCode = statusCode;
         CorrelationId = correlationId;
@@ -8796,7 +8937,19 @@ public static class RemoteEntityGraph
 /// The wire format is not promised to stay compatible across QuickER versions while the tool is at 0.x, so
 /// regenerate the client and the server together and deploy them together. A server that moves ahead on its own
 /// does not announce the mismatch: a request the newer endpoints no longer recognize surfaces as an ordinary transport
-/// failure - a 404 or a 400 - rather than as a version error.
+/// failure - a 404 or a 400 - rather than as a version error, and a successful response whose payload changed shape is
+/// reported as <see cref="RemoteRepositoryException"/> only when it cannot be read into the expected type at all. A shape
+/// that merely gained or lost a field deserializes quietly, leaving the missing part at its default, which is why keeping
+/// the two sides in step is the actual safeguard rather than anything the client can detect.
+/// </para>
+/// <para>
+/// <b>Do not put an automatic retry policy (Polly and the like) in front of the mutating operations</b> - Insert, Update,
+/// Delete, and both forms of Save. None of them carries an idempotency key, so the server cannot tell a retry from a new
+/// request: a call that in fact succeeded but whose response was lost is applied a second time, inserting a duplicate row
+/// or replaying a graph save. Retrying is safe only for the read-only operations - GetById, GetAll, the named queries, and
+/// the health probe - so scope any handler-level policy to those. A conflict reported by the server
+/// (<see cref="SaveConflictException"/>) is retried by re-reading the entity and saving again, not by resending the same
+/// body.
 /// </para>
 /// </remarks>
 public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepository<TEntity, TKey>
@@ -8863,7 +9016,11 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     /// On a failure response, reads the <see cref="RemoteError"/>; 409 with SaveConflict throws <see cref="SaveConflictException"/>,
     /// anything else throws <see cref="RemoteRepositoryException"/>. A success response whose body is not the expected JSON throws
     /// <see cref="RemoteRepositoryException"/> as well: something other than the generated endpoint answered - a proxy's or a portal's
-    /// success page, most often - and letting the raw <c>JsonException</c> out would hide that behind a parsing detail.
+    /// success page, most often - and letting the raw <c>JsonException</c> out would hide that behind a parsing detail. A body that is
+    /// JSON but of another shape than this call expects (an endpoint from a differently generated server, say) is reported the same way
+    /// when it cannot be read into <typeparamref name="TResult"/> at all; a shape that only gained or lost a field is read without
+    /// complaint and leaves the missing part at its default, so this is not a version check. The parse failure itself is kept as the
+    /// inner exception, since the reason the body could not be read is exactly what tells the two apart.
     /// </remarks>
     protected async Task<TResult> InvokeAsync<TResult>(
         string operation,
@@ -8894,7 +9051,9 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
             // kinds the error path folds away, classified here as the transport failure they are
             throw new RemoteRepositoryException(
                 (int)response.StatusCode,
-                $"The remote call succeeded (HTTP {(int)response.StatusCode}) but its response body could not be interpreted: {parseError.Message}"
+                $"The remote call succeeded (HTTP {(int)response.StatusCode}) but its response body could not be interpreted: {parseError.Message}",
+                correlationId: null,
+                innerException: parseError
             );
         }
     }
@@ -8981,7 +9140,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         InvokeAsync<IReadOnlyList<TEntity>>("GetAll", null, cancellationToken);
 
     /// <summary>Inserts an entity.</summary>
-    /// <remarks>As on a direct connection, the row version the database assigned is written back to <paramref name="entity"/> when the table carries a rowversion column, so the inserted entity can be updated straight away without re-reading it.</remarks>
+    /// <remarks>As on a direct connection, the row version the database assigned is written back to <paramref name="entity"/> when the table carries a rowversion column, so the inserted entity can be updated straight away without re-reading it. Being a mutating call it carries no idempotency key, so it must not be resent by an automatic retry policy - a resend after a lost response inserts the row twice.</remarks>
     public async Task InsertAsync(TEntity entity, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(entity);
@@ -8999,7 +9158,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     }
 
     /// <summary>Updates an entity (returns true when a matching row was updated).</summary>
-    /// <remarks>The policy travels with the request, so a table with a rowversion column behaves exactly as it does on a direct connection: an optimistic conflict surfaces as <see cref="SaveConflictException"/> (HTTP 409) and a successful update writes the new version back to <paramref name="entity"/>.</remarks>
+    /// <remarks>The policy travels with the request, so a table with a rowversion column behaves exactly as it does on a direct connection: an optimistic conflict surfaces as <see cref="SaveConflictException"/> (HTTP 409) and a successful update writes the new version back to <paramref name="entity"/>. Being a mutating call it carries no idempotency key, so it must not be resent by an automatic retry policy - a conflict is retried by re-reading the entity, not by resending the same body.</remarks>
     /// <param name="entity">The entity to update.</param>
     /// <param name="mode">The concurrency policy applied on the server for tables that have a rowversion column (no effect otherwise). An undefined value throws <see cref="ArgumentOutOfRangeException"/> before anything is sent.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
@@ -9030,12 +9189,12 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         return result.Updated;
     }
 
-    /// <summary>Deletes an entity by primary key (returns true when a matching row was deleted).</summary>
+    /// <inheritdoc />
     public Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default) =>
         InvokeAsync<bool>("Delete", new RemoteIdRequest<TKey>(id), cancellationToken);
 
     /// <summary>Saves inserts, updates, and deletes according to RowState in a single transaction (cascades to children by default).</summary>
-    /// <remarks><paramref name="mode"/> travels with the request, and the response carries the row versions the save assigned so that the local graph ends up with the same versions a direct connection would leave behind.</remarks>
+    /// <remarks><paramref name="mode"/> travels with the request, and the response carries the row versions the save assigned so that the local graph ends up with the same versions a direct connection would leave behind. Being a mutating call it carries no idempotency key, so it must not be resent by an automatic retry policy - a resend after a lost response replays the whole graph.</remarks>
     public async Task<int> SaveAsync(
         TEntity entity,
         bool cascadeSave = true,
@@ -9070,7 +9229,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     }
 
     /// <summary>Saves multiple aggregate roots together in a single transaction (atomic: all succeed or all roll back).</summary>
-    /// <remarks><paramref name="mode"/> travels with the request, and the response carries the row versions the save assigned so that the local graphs end up with the same versions a direct connection would leave behind.</remarks>
+    /// <remarks><paramref name="mode"/> travels with the request, and the response carries the row versions the save assigned so that the local graphs end up with the same versions a direct connection would leave behind. Being a mutating call it carries no idempotency key, so it must not be resent by an automatic retry policy - a resend after a lost response replays every graph in the list.</remarks>
     public async Task<int> SaveAsync(
         IEnumerable<TEntity> entities,
         bool cascadeSave = true,
@@ -9935,7 +10094,11 @@ internal sealed class EntitySaveMetadata
     )
         where TEntity : EntityBase
     {
-        // The query executor's TEntity has no new() constraint, so create via Activator (entities always have a parameterless constructor)
+        // The query executor's TEntity has no new() constraint of its own, so the instance is created through Activator. The
+        // parameterless constructor it needs is guaranteed by the contract types the entity has to satisfy to get here
+        // (IRepository<TEntity, TKey> and IRemoteRepository<TEntity, TKey> both require "where TEntity : EntityBase, new()"),
+        // so a partial declaration that removed the default constructor would fail the build with CS0310 rather than reach
+        // this line
         var entity = (TEntity)Activator.CreateInstance(typeof(TEntity))!;
 
         for (var i = 0; i < properties.Count; i++)
@@ -12528,7 +12691,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
     private static object? KeyOf(object entity) =>
         EntitySaveMetadata.For(entity.GetType()).KeyProperty.GetValue(entity);
 
-    /// <summary>Deletes an entity by primary key (true when a target row was deleted).</summary>
+    /// <inheritdoc />
     public async Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default)
     {
         await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
@@ -12913,9 +13076,12 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
             {
                 if (ex.Entries.Count == 0)
                 {
-                    // EF Core could not attribute the failure to any entry, so there is nothing to classify or retry
+                    // EF Core could not attribute the failure to any entry, so there is nothing to classify or retry. The
+                    // original exception is kept as the inner one: with no entry to name, it is the only thing left that
+                    // says which statement EF Core was running
                     throw new SaveConflictException(
-                        "The save was rejected by a concurrency conflict that could not be attributed to a specific record. Reload the data and try again."
+                        "The save was rejected by a concurrency conflict that could not be attributed to a specific record. Reload the data and try again.",
+                        ex
                     );
                 }
 

@@ -114,6 +114,18 @@ namespace QuickER.CodeGen.CSharp.Resources {
             }
         }
 
+        public static string CodeGen_Error_PrimaryKeyRowVersionColumn {
+            get {
+                return ResourceManager.GetString("CodeGen_Error_PrimaryKeyRowVersionColumn", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Error_PrimaryKeyUnboundedBinaryColumn {
+            get {
+                return ResourceManager.GetString("CodeGen_Error_PrimaryKeyUnboundedBinaryColumn", resourceCulture);
+            }
+        }
+
         public static string CodeGen_Error_GeneratedMemberNameCollision {
             get {
                 return ResourceManager.GetString("CodeGen_Error_GeneratedMemberNameCollision", resourceCulture);

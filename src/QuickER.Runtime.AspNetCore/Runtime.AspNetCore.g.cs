@@ -105,7 +105,7 @@ public static class RemoteServerEngine
 
     /// <summary>Reports an unhandled failure as HTTP 500: the server side always sees all of it, the client only what the endpoint's policy allows.</summary>
     /// <remarks>
-    /// The single place a 500 is produced, so the four wrappers stay identical. Logging and the <c>OnServerError</c> hook
+    /// The single place a 500 is produced, so every wrapper that classifies a failure stays identical. Logging and the <c>OnServerError</c> hook
     /// run first and unconditionally receive the exception itself; the switch only decides what leaves the process. While
     /// it is off - the default - the body carries a fixed message plus the request's correlation id, which the log line
     /// carries as well, so a report from the caller can still be matched to the full server-side record without the
@@ -195,9 +195,18 @@ public static class RemoteServerEngine
 
     /// <summary>Validates the concurrency policy carried by a request body (an undefined value is reported to the client as HTTP 400).</summary>
     /// <remarks>
+    /// <para>
     /// JSON deserialization accepts any numeric value for an enum, so a hand-written client can put a value that names no
     /// policy into the body. Passing it on would silently fall through to the unguarded branch, disabling the version check,
     /// therefore it is rejected here as a fault in the payload the client sent.
+    /// </para>
+    /// <para>
+    /// The set of policies this accepts is part of the wire contract, and that contract is not promised to stay compatible
+    /// across QuickER versions while the tool is at 0.x. A body that carries no mode at all still falls back to
+    /// <see cref="ConcurrencyMode.Optimistic"/>, but a mode a newer client knows and this server does not is answered with a
+    /// 400 rather than with anything that names the mismatch. Regenerate the client and the server from the same diagram
+    /// and deploy them together.
+    /// </para>
     /// </remarks>
     public static ConcurrencyMode ValidatedMode(ConcurrencyMode mode) =>
         Enum.IsDefined(mode)
@@ -673,6 +682,12 @@ public static class RemoteServerEngine
     /// <para>
     /// The traversal and the identity of a row are shared with the row version table, so the same constraint applies: when a
     /// graph contains the same (type, key) twice, the entries collapse onto one entity on the client side.
+    /// </para>
+    /// <para>
+    /// The list is part of the wire contract, which is not promised to stay compatible across QuickER versions while the tool
+    /// is at 0.x. A client generated before this field existed ignores it and finalizes the rows the hook declined, so the
+    /// skip stays a server-side fact and never reaches the caller. Nothing announces that mismatch: regenerate the client and
+    /// the server from the same diagram and deploy them together.
     /// </para>
     /// </remarks>
     public static List<RemoteEntityRef> CollectSkipped<TEntity>(

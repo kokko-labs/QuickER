@@ -339,11 +339,14 @@ public sealed class BinaryColumnRemoteRuntimeTests : IAsyncLifetime
     /// 共有サーバーは <c>MapGeneratedRemoteEndpoints()</c>（既定引数＝解除なし）で起動しているため、そのまま使える。
     /// 413 は Kestrel の <c>BadHttpRequestException</c> がステータス素通しで分類された結果で、クライアントは
     /// <see cref="RemoteRepositoryException"/> としてその状態コードを保って復元する。応答には他の分類済み拒否と
-    /// 同じ <c>RemoteError</c> 本文が載るため、状態コードだけでなく「本文の文言が復元されていること」まで固定する
-    /// （本文が読めなければクライアントは汎用の代替文言へ落ちる）。
+    /// 同じ <c>RemoteError</c> 本文が載るため、応答を読めた場合は「本文の文言が復元されていること」まで固定する。
+    /// ただし Kestrel は上限超過検知時に本文の受信を打ち切るため、フルスイート並列実行などタイミング次第では
+    /// クライアントが 413 を読む前に接続リセット（<see cref="HttpRequestException"/>）を観測し得る
+    /// （タイミング依存の正常系＝単独実行の実測では 10/10 で 413 だが、負荷並列時に窓が開くことが実測されている）。
+    /// どちらの形でも「既定では 31MB の書き込みが拒否される」契約は成立しているため、両方を合格とする。
     /// </remarks>
     [Fact(
-        DisplayName = "[Binary/Remote] 9b: 既定（オプトインなし）のバイナリ PUT は 31MB が 413 で拒否される"
+        DisplayName = "[Binary/Remote] 9b: 既定（オプトインなし）のバイナリ PUT は 31MB が拒否される（413 または送信中断）"
     )]
     public async Task Stream_Put_WithoutOptIn_IsRejectedByDefaultRequestSizeLimit()
     {
@@ -355,17 +358,26 @@ public sealed class BinaryColumnRemoteRuntimeTests : IAsyncLifetime
         var act = async () =>
             await Documents.WritePayloadAsync(1, new MemoryStream(payload), cancellationToken: Ct);
 
-        var remote = (await act.Should().ThrowAsync<RemoteRepositoryException>()).Which;
+        var thrown = (await act.Should().ThrowAsync<Exception>()).Which;
 
-        remote.StatusCode.Should().Be(413, "既定ではホストのボディサイズ上限がそのまま効く");
-        remote
-            .Message.Should()
-            .NotBe(
-                "The remote call failed (HTTP 413).",
-                "413 にも RemoteError 本文が載るため、汎用の代替文言にはならない"
-            );
-        remote.Message.Should().NotBeEmpty();
-        remote.CorrelationId.Should().BeNull("相関 ID は詳細を伏せた 500 だけに載る");
+        if (thrown is RemoteRepositoryException remote)
+        {
+            remote.StatusCode.Should().Be(413, "既定ではホストのボディサイズ上限がそのまま効く");
+            remote
+                .Message.Should()
+                .NotBe(
+                    "The remote call failed (HTTP 413).",
+                    "413 にも RemoteError 本文が載るため、汎用の代替文言にはならない"
+                );
+            remote.Message.Should().NotBeEmpty();
+            remote.CorrelationId.Should().BeNull("相関 ID は詳細を伏せた 500 だけに載る");
+        }
+        else
+        {
+            thrown
+                .Should()
+                .BeOfType<HttpRequestException>("413 が読めない場合は送信中断＝接続リセットになる");
+        }
     }
 
     /// <summary>

@@ -131,6 +131,112 @@ public sealed class InMemoryStoreAtomicityTests
     }
 
     /// <summary>
+    /// 版を持つ型でも「更新として開始した行が消えていた」は <see cref="SaveConflictReason.NotFound"/>。
+    /// </summary>
+    /// <remarks>
+    /// 存否の判定は版の比較より先に行う（無くなった行に対して版を比べても何も言えない）。旧実装は版比較が先だったため、
+    /// 版を持つ型では「行が消えている」事実に到達せず <see cref="SaveConflictReason.Modified"/> を返していた
+    /// ＝呼び出し側が再取得しても行が無く、再試行の指示が空振りする。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[InMemory/Atomicity] Publish: 版あり型でも削除された行への staged 更新は NotFound"
+    )]
+    public void Publish_VersionedRowDeletedMeanwhile_ThrowsNotFound()
+    {
+        var store = new InMemoryDataStore();
+        store.Put(new VersionedRowEntity { Id = 1, Name = "Alice" });
+
+        var staging = new InMemorySaveStaging();
+        store.Write(
+            scope =>
+            {
+                scope.Put(new VersionedRowEntity { Id = 1, Name = "Bob" });
+                return 0;
+            },
+            staging
+        );
+
+        store.Remove(typeof(VersionedRowEntity), 1).Should().BeTrue();
+
+        var act = () => store.Publish(staging, ConcurrencyMode.Optimistic);
+
+        act.Should()
+            .Throw<SaveConflictException>()
+            .Which.Reason.Should()
+            .Be(
+                SaveConflictReason.NotFound,
+                "版の有無に関わらず、消えた行への更新は「変更された」ではなく「無くなった」"
+            );
+
+        store.Snapshot<VersionedRowEntity>().Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// 版を持つ型でも、staged 側が「削除」なら行が既に消えていることは競合にしない（実 DB でも no-op）。
+    /// </summary>
+    /// <remarks>
+    /// 旧実装では版比較が先に成立してしまい、版を持つ型に限ってこの黙認が効かず
+    /// <see cref="SaveConflictReason.Modified"/> になっていた。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[InMemory/Atomicity] Publish: 版あり型でも削除された行への staged 削除は競合にしない"
+    )]
+    public void Publish_VersionedStagedDeleteOfRowDeletedMeanwhile_IsNoOp()
+    {
+        var store = new InMemoryDataStore();
+        store.Put(new VersionedRowEntity { Id = 1, Name = "Alice" });
+
+        var staging = new InMemorySaveStaging();
+        store.Write(
+            scope =>
+            {
+                scope.Remove(typeof(VersionedRowEntity), 1);
+                return 0;
+            },
+            staging
+        );
+
+        store.Remove(typeof(VersionedRowEntity), 1).Should().BeTrue();
+
+        var act = () => store.Publish(staging, ConcurrencyMode.Optimistic);
+
+        act.Should().NotThrow("削除したい行が既に無いのは版があっても矛盾ではない");
+        store.Snapshot<VersionedRowEntity>().Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// 対照: 行が「残っていて」他者に更新されていた場合は、版を持つ型で従来どおり
+    /// <see cref="SaveConflictReason.Modified"/>（存否判定を先にしても版検証は失われない）。
+    /// </summary>
+    [Fact(
+        DisplayName = "[InMemory/Atomicity] Publish: 版あり型で残っている行の他者更新は Modified"
+    )]
+    public void Publish_VersionedRowUpdatedMeanwhile_ThrowsModified()
+    {
+        var store = new InMemoryDataStore();
+        store.Put(new VersionedRowEntity { Id = 1, Name = "Alice" });
+
+        var staging = new InMemorySaveStaging();
+        store.Write(
+            scope =>
+            {
+                scope.Put(new VersionedRowEntity { Id = 1, Name = "Bob" });
+                return 0;
+            },
+            staging
+        );
+
+        store.Put(new VersionedRowEntity { Id = 1, Name = "Carol" });
+
+        var act = () => store.Publish(staging, ConcurrencyMode.Optimistic);
+
+        act.Should()
+            .Throw<SaveConflictException>()
+            .Which.Reason.Should()
+            .Be(SaveConflictReason.Modified);
+    }
+
+    /// <summary>
     /// 対照: 行が削除ではなく「更新」されていた場合は従来どおり後勝ちで staged スナップショットが適用される
     /// （版を持たない型の契約は last-write-wins のまま）。
     /// </summary>
@@ -179,6 +285,29 @@ public sealed class CascadeRootEntity : EntityBase
 
     /// <summary>自己参照 FK 列</summary>
     public int? ParentId { get; set; }
+}
+
+/// <summary>
+/// 版列（rowversion 相当）を持つテスト専用型。<c>InMemoryFixture</c> の図には版列が無いため、
+/// <c>Publish</c> の「版あり／版なし」の 4 象限を同じストア型のまま並べるために用意する。
+/// </summary>
+/// <remarks>
+/// 版列の判定は <c>EntitySaveMetadata</c> がリフレクションで <c>[StoreGeneratedColumn]</c> を読むだけなので、
+/// 生成エンティティとまったく同じ経路で「版を持つ型」として扱われる。
+/// </remarks>
+[Table("versioned_rows")]
+public sealed class VersionedRowEntity : EntityBase
+{
+    /// <summary>主キー</summary>
+    [Key]
+    public int Id { get; set; }
+
+    /// <summary>任意の値列（更新の有無を観測するために使う）</summary>
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>版列（DB 採番相当＝ストアが単調増加の擬似版を書き込む）</summary>
+    [StoreGeneratedColumn]
+    public byte[]? RowVer { get; set; }
 }
 
 /// <summary>循環カスケード再現用の葉型（削除自体は成功する側）。</summary>
