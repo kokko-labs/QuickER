@@ -3151,12 +3151,15 @@ public partial class DocumentEditModel : EditModelBase
     /// value it was supposed to leave untouched.
     /// </para>
     /// <para>
-    /// Restoring the values also withdraws the duplicate-value findings the database check registered, exactly as an
-    /// ordinary assignment to a confirmed value does. That withdrawal is normally the setter's job, but the restore runs
-    /// as a load, and a load deliberately keeps the setters quiet - so a cancel would otherwise leave a finding about the
-    /// discarded value behind and hold <see cref="EditModelBase.Validate"/> false forever. Only the database check's
-    /// findings are withdrawn, on the same reasoning the setters use: the value they were reached about is gone, whereas
-    /// the findings among the siblings are about the collection as it stands and belong to the next check over it.
+    /// Restoring the values also withdraws the duplicate-value findings the database check registered, on the reasoning a
+    /// confirmed-value setter uses: the value they were reached about is no longer the one the model holds. The setter
+    /// cannot do it here, because the restore runs as a load and a load deliberately keeps the setters quiet - so a cancel
+    /// would otherwise leave a finding about the discarded value behind and hold <see cref="EditModelBase.Validate"/>
+    /// false forever. It is done unconditionally, though, where a setter withdraws them only when the value actually
+    /// changes: a cancel does not track whether anything was edited, so a row that was begun and then canceled without a
+    /// single change drops a database finding that was still perfectly valid. Run the database check again before saving -
+    /// a finding of its is only ever as current as its last run. Only that check's findings are withdrawn, whereas the
+    /// findings among the siblings are about the collection as it stands and belong to the next check over it.
     /// </para>
     /// <para>
     /// Leaving them to that check cuts both ways, and nothing here runs it: a cancel that puts back a value which
@@ -3762,12 +3765,15 @@ public partial class DocumentNoteEditModel : EditModelBase
     /// value it was supposed to leave untouched.
     /// </para>
     /// <para>
-    /// Restoring the values also withdraws the duplicate-value findings the database check registered, exactly as an
-    /// ordinary assignment to a confirmed value does. That withdrawal is normally the setter's job, but the restore runs
-    /// as a load, and a load deliberately keeps the setters quiet - so a cancel would otherwise leave a finding about the
-    /// discarded value behind and hold <see cref="EditModelBase.Validate"/> false forever. Only the database check's
-    /// findings are withdrawn, on the same reasoning the setters use: the value they were reached about is gone, whereas
-    /// the findings among the siblings are about the collection as it stands and belong to the next check over it.
+    /// Restoring the values also withdraws the duplicate-value findings the database check registered, on the reasoning a
+    /// confirmed-value setter uses: the value they were reached about is no longer the one the model holds. The setter
+    /// cannot do it here, because the restore runs as a load and a load deliberately keeps the setters quiet - so a cancel
+    /// would otherwise leave a finding about the discarded value behind and hold <see cref="EditModelBase.Validate"/>
+    /// false forever. It is done unconditionally, though, where a setter withdraws them only when the value actually
+    /// changes: a cancel does not track whether anything was edited, so a row that was begun and then canceled without a
+    /// single change drops a database finding that was still perfectly valid. Run the database check again before saving -
+    /// a finding of its is only ever as current as its last run. Only that check's findings are withdrawn, whereas the
+    /// findings among the siblings are about the collection as it stands and belong to the next check over it.
     /// </para>
     /// <para>
     /// Leaving them to that check cuts both ways, and nothing here runs it: a cancel that puts back a value which

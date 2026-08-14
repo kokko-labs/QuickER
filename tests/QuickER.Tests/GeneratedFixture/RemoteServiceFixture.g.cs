@@ -3739,12 +3739,15 @@ public partial class CustomerEditModel : EditModelBase
     /// value it was supposed to leave untouched.
     /// </para>
     /// <para>
-    /// Restoring the values also withdraws the duplicate-value findings the database check registered, exactly as an
-    /// ordinary assignment to a confirmed value does. That withdrawal is normally the setter's job, but the restore runs
-    /// as a load, and a load deliberately keeps the setters quiet - so a cancel would otherwise leave a finding about the
-    /// discarded value behind and hold <see cref="EditModelBase.Validate"/> false forever. Only the database check's
-    /// findings are withdrawn, on the same reasoning the setters use: the value they were reached about is gone, whereas
-    /// the findings among the siblings are about the collection as it stands and belong to the next check over it.
+    /// Restoring the values also withdraws the duplicate-value findings the database check registered, on the reasoning a
+    /// confirmed-value setter uses: the value they were reached about is no longer the one the model holds. The setter
+    /// cannot do it here, because the restore runs as a load and a load deliberately keeps the setters quiet - so a cancel
+    /// would otherwise leave a finding about the discarded value behind and hold <see cref="EditModelBase.Validate"/>
+    /// false forever. It is done unconditionally, though, where a setter withdraws them only when the value actually
+    /// changes: a cancel does not track whether anything was edited, so a row that was begun and then canceled without a
+    /// single change drops a database finding that was still perfectly valid. Run the database check again before saving -
+    /// a finding of its is only ever as current as its last run. Only that check's findings are withdrawn, whereas the
+    /// findings among the siblings are about the collection as it stands and belong to the next check over it.
     /// </para>
     /// <para>
     /// Leaving them to that check cuts both ways, and nothing here runs it: a cancel that puts back a value which
@@ -4518,12 +4521,15 @@ public partial class OrderEditModel : EditModelBase
     /// value it was supposed to leave untouched.
     /// </para>
     /// <para>
-    /// Restoring the values also withdraws the duplicate-value findings the database check registered, exactly as an
-    /// ordinary assignment to a confirmed value does. That withdrawal is normally the setter's job, but the restore runs
-    /// as a load, and a load deliberately keeps the setters quiet - so a cancel would otherwise leave a finding about the
-    /// discarded value behind and hold <see cref="EditModelBase.Validate"/> false forever. Only the database check's
-    /// findings are withdrawn, on the same reasoning the setters use: the value they were reached about is gone, whereas
-    /// the findings among the siblings are about the collection as it stands and belong to the next check over it.
+    /// Restoring the values also withdraws the duplicate-value findings the database check registered, on the reasoning a
+    /// confirmed-value setter uses: the value they were reached about is no longer the one the model holds. The setter
+    /// cannot do it here, because the restore runs as a load and a load deliberately keeps the setters quiet - so a cancel
+    /// would otherwise leave a finding about the discarded value behind and hold <see cref="EditModelBase.Validate"/>
+    /// false forever. It is done unconditionally, though, where a setter withdraws them only when the value actually
+    /// changes: a cancel does not track whether anything was edited, so a row that was begun and then canceled without a
+    /// single change drops a database finding that was still perfectly valid. Run the database check again before saving -
+    /// a finding of its is only ever as current as its last run. Only that check's findings are withdrawn, whereas the
+    /// findings among the siblings are about the collection as it stands and belong to the next check over it.
     /// </para>
     /// <para>
     /// Leaving them to that check cuts both ways, and nothing here runs it: a cancel that puts back a value which
@@ -8620,7 +8626,9 @@ public sealed class RemoteRepositoryException : Exception
     /// Reporting it therefore lets the failure be looked up on the server without the message having crossed the trust
     /// boundary. It stays <c>null</c> when the server exposes its error details, for a response from a server built
     /// before the id existed, and for the failures this client classifies on its own - a success status whose body could
-    /// not be read is raised here rather than reported by the server, so there is no id to carry.
+    /// not be read is raised here rather than reported by the server, so there is no id to carry. A failure response whose
+    /// body could not be read as a <see cref="RemoteError"/> at all leaves it <c>null</c> for the same reason: the id would
+    /// have travelled in that body, so a proxy's HTML error page carries none however the server was configured.
     /// </remarks>
     public string? CorrelationId { get; }
 }
@@ -8986,6 +8994,8 @@ public static class RemoteEntityGraph
 /// reported as <see cref="RemoteRepositoryException"/> only when it cannot be read into the expected type at all. A shape
 /// that merely gained or lost a field deserializes quietly, leaving the missing part at its default, which is why keeping
 /// the two sides in step is the actual safeguard rather than anything the client can detect.
+/// A value the body does carry but a value object here refuses counts as unreadable in the same way and is reported as that
+/// exception too, so a value this side's rules reject while the server's accept surfaces rather than passing silently.
 /// </para>
 /// <para>
 /// <b>Do not put an automatic retry policy (Polly and the like) in front of the mutating operations</b> - Insert, Update,
@@ -9066,8 +9076,12 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     /// when it cannot be read into <typeparamref name="TResult"/> at all; a shape that only gained or lost a field is read without
     /// complaint and leaves the missing part at its default, so this is not a version check. The parse failure itself is kept as the
     /// inner exception, since the reason the body could not be read is exactly what tells the two apart.
-    /// A value the body does carry but a value object refuses is "cannot be read" as well, and is classified the same way rather than
-    /// leaving <see cref="ValueObjectValidationException"/> - which no direct call raises on a read - to reach the caller.
+    /// A value the body does carry but a value object refuses is "cannot be read" as well, and is classified the same way. It does not
+    /// mean what a <see cref="ValueObjectValidationException"/> from a direct read means - stored data that violates the invariant - because
+    /// a server reading that same value would have been refused by it too and answered 500: a 2xx body carrying it points at the transport
+    /// or at the two sides having been generated apart. That refusal on the server reaches a remote caller as this same exception (a 500
+    /// classified like any other server-side failure), so classifying the client-side one here keeps a single exception for the case
+    /// instead of raising, remotely, the one a direct read uses to report bad data.
     /// </remarks>
     protected async Task<TResult> InvokeAsync<TResult>(
         string operation,
@@ -9130,7 +9144,11 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     /// goes through this one read and then passes the result on to <see cref="ToException"/>. The failure travels with it
     /// so that the exception can carry it as its inner exception: without it, "the body was not a RemoteError at all" and
     /// "the body was a RemoteError that carried no message" reach the caller as the same exception, and the two point at
-    /// entirely different things - something else answering on this route, or the generated endpoint itself.
+    /// entirely different things - something else answering on this route, or the generated endpoint itself. The line it
+    /// draws is between a body that could not be read and one that was, not between a real error payload and something
+    /// else: a JSON object of another shape - as long as no member of it collides with a property of this type - is read
+    /// without complaint into a <see cref="RemoteError"/> left at its defaults, so it arrives on the same side as a genuine
+    /// one that carried no message.
     /// </remarks>
     private static async Task<(RemoteError? Error, Exception? ParseError)> ReadErrorAsync(
         HttpResponseMessage response,
