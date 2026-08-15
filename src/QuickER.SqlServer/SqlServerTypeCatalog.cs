@@ -9,8 +9,10 @@ namespace QuickER.SqlServer;
 /// ネイティブ型文字列（<c>nvarchar(100)</c> 等）と正規型 <see cref="CanonicalType"/> を相互変換する。
 /// </summary>
 /// <remarks>
-/// <c>hierarchyid</c> / <c>geography</c> / <c>geometry</c> / <c>sql_variant</c> / <c>timestamp</c>（<c>rowversion</c>）は
+/// <c>hierarchyid</c> / <c>geography</c> / <c>geometry</c> / <c>sql_variant</c> は
 /// 正規型に対応する概念が無いため変換不能として扱う（<see cref="TryParse"/> が <c>false</c> を返す）。
+/// <c>timestamp</c> / <c>rowversion</c> は <see cref="CanonicalTypeKind.RowVersion"/> として解析し、
+/// <see cref="TryFormat"/> は代表表記 <c>rowversion</c> を出力する（<c>timestamp</c> は非推奨の別名のため）。
 /// <c>numeric</c> / <c>ntext</c> / <c>text</c> / <c>image</c> / <c>datetime</c> / <c>smalldatetime</c> / <c>smallmoney</c> は
 /// 解析のみ対応する「parse-only」型で、<see cref="TryFormat"/> では代表型（<c>decimal</c> / <c>nvarchar(max)</c> /
 /// <c>varchar(max)</c> / <c>varbinary(max)</c> / <c>datetime2</c> / <c>money</c>）を出力する。
@@ -151,8 +153,15 @@ public sealed partial class SqlServerTypeCatalog : ITypeCatalog
                 canonical = new CanonicalType(CanonicalTypeKind.Xml);
                 return true;
 
+            // rowversion（別名 timestamp）は DB が採番する行バージョン列。他方言には同じ概念が無いが、
+            // 「ミラー用のバイナリ列として持ち出せる」ようにするため正規型として解析する（変換先が持てない方言は TryFormat が false）
+            case "rowversion":
+            case "timestamp":
+                canonical = new CanonicalType(CanonicalTypeKind.RowVersion);
+                return true;
+
             default:
-                // hierarchyid / geography / geometry / sql_variant / timestamp / rowversion / 未知の型は変換不能
+                // hierarchyid / geography / geometry / sql_variant / 未知の型は変換不能
                 return false;
         }
     }
@@ -256,6 +265,11 @@ public sealed partial class SqlServerTypeCatalog : ITypeCatalog
             case CanonicalTypeKind.Json:
                 // SqlServerDataTypes.All に json 型が無いため、代替として nvarchar(max) を出力する
                 nativeType = "nvarchar(max)";
+                return true;
+
+            case CanonicalTypeKind.RowVersion:
+                // timestamp は同義の非推奨別名のため、代表表記 rowversion を出力する
+                nativeType = "rowversion";
                 return true;
 
             default:

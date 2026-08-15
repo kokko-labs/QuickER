@@ -50,6 +50,7 @@ public static partial class CanonicalTypeToken
             [CanonicalTypeKind.Guid] = "guid",
             [CanonicalTypeKind.Xml] = "xml",
             [CanonicalTypeKind.Json] = "json",
+            [CanonicalTypeKind.RowVersion] = "rowversion",
         };
 
     /// <summary>トークンの種別名（小文字）→ 正規型の種別。<see cref="KindNames"/> の逆引き</summary>

@@ -191,8 +191,6 @@ public class SqlServerTypeCatalogTests
     [InlineData("geography")]
     [InlineData("geometry")]
     [InlineData("sql_variant")]
-    [InlineData("timestamp")]
-    [InlineData("rowversion")]
     [InlineData("no_such_type")]
     [InlineData("nvarchar(-5)")] // 負数の型引数は例外ではなく false
     [InlineData("nvarchar(99999999999)")] // int 範囲外の型引数は例外ではなく false
@@ -200,6 +198,28 @@ public class SqlServerTypeCatalogTests
     public void TryParse_UnconvertibleTypes_ReturnsFalse(string nativeType)
     {
         Catalog.TryParse(nativeType, out _).Should().BeFalse();
+    }
+
+    /// <summary>
+    /// 行バージョン型（<c>rowversion</c> と非推奨別名 <c>timestamp</c>）が
+    /// <see cref="CanonicalTypeKind.RowVersion"/> として解析され、代表表記へ整形されることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 他方言へ持ち出すために正規型を持たせている（SQLite は <c>BLOB</c>＝ミラー列へ落とす）。
+    /// <c>timestamp</c> は同義の非推奨別名のため、整形（<see cref="ITypeCatalog.TryFormat"/>）では
+    /// 代表表記 <c>rowversion</c> の 1 つに寄せる。
+    /// </remarks>
+    [Theory(DisplayName = "rowversion / timestamp は行バージョンの正規型として解析される")]
+    [InlineData("rowversion")]
+    [InlineData("timestamp")]
+    [InlineData("TIMESTAMP")]
+    public void TryParse_RowVersionTypes_ResolvesRowVersionKind(string nativeType)
+    {
+        Catalog.TryParse(nativeType, out var canonical).Should().BeTrue();
+        canonical.Kind.Should().Be(CanonicalTypeKind.RowVersion);
+
+        Catalog.TryFormat(canonical, out var formatted).Should().BeTrue();
+        formatted.Should().Be("rowversion", "timestamp は非推奨別名のため代表表記へ寄せる");
     }
 
     [Theory(DisplayName = "TryFormat が主要な正規型からネイティブ型文字列を生成する")]

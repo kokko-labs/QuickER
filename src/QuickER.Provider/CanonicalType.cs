@@ -70,6 +70,17 @@ public enum CanonicalTypeKind
 
     /// <summary>JSON</summary>
     Json,
+
+    /// <summary>
+    /// 行バージョン（SQL Server の <c>rowversion</c> / <c>timestamp</c>）。DB が採番する 8 バイトのバイナリ。
+    /// </summary>
+    /// <remarks>
+    /// 「DB が採番する」という意味はこの種別を持つ方言（SQL Server）でしか再現できないため、
+    /// 他方言の <see cref="ITypeCatalog.TryFormat"/> は「ただのバイナリ列」へ落とすか、対応がなければ <c>false</c> を返す
+    /// （SQLite は BLOB へ落とす＝サーバー版のミラー置き場・PostgreSQL / MySQL / Oracle は変換不能のまま）。
+    /// 落とした先では版ガードが働かないため、変換は非可逆（BLOB を SQL Server へ戻しても <c>varbinary</c> にしかならない）。
+    /// </remarks>
+    RowVersion,
 }
 
 /// <summary>

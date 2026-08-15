@@ -153,16 +153,27 @@ public sealed class CSharpCodeGenerationService
 
         if (columnTypesByDialect is not null)
         {
+            // 行バージョン列は方言によって型が食い違う（sqlserver: byte[] / sqlite: DateTime）が、統一先が
+            // 一意に決まるため不一致エラーにせず、行バージョンとして解決した方言の型へ共有 Entity を寄せる
+            var rowVersions = MultiDialectTypeReconciler.ReconcileRowVersionTypes(
+                diagram,
+                effectiveDialects,
+                primaryColumnTypes,
+                columnTypesByDialect
+            );
             MultiDialectTypeReconciler.DiagnoseTypeMismatches(
                 diagram,
                 effectiveDialects,
                 columnTypesByDialect,
+                rowVersions.UnifiedColumnIds,
                 diagnostics
             );
             columnTypes = MultiDialectTypeReconciler.SupplementSqlColumnTypes(
-                primaryColumnTypes,
+                rowVersions.ColumnTypes,
                 columnTypesByDialect
             );
+
+            AddMultiTargetRowVersionInfo(rowVersions, diagnostics);
         }
 
         // 版列の本数は型解決の結果（CSharpTypeInfo.IsRowVersion）で決まるため、列型辞書が確定した後で検証する
@@ -259,6 +270,41 @@ public sealed class CSharpCodeGenerationService
         }
 
         return new CodeGenerationResult { Files = files, Diagnostics = diagnostics };
+    }
+
+    /// <summary>
+    /// マルチターゲットで行バージョン列の型を統一したとき、方言間の意味の違いを Info 診断で通知する。
+    /// </summary>
+    /// <remarks>
+    /// 「共有 Entity は 1 つの <c>byte[]</c> プロパティだが、並行性トークンとして扱うのは行バージョンとして
+    /// 解決した方言の Repository だけで、他方言では通常のバイナリ列（INSERT / UPDATE で書き込む・版ガードなし）になる」
+    /// という非対称は生成物のどこにも書かれないため、生成時に一度だけ明示する。
+    /// 統一対象が 1 つも無いとき（単一方言・行バージョン列のない図）は何も出さない＝診断はバイト不変。
+    /// </remarks>
+    private static void AddMultiTargetRowVersionInfo(
+        MultiDialectTypeReconciler.RowVersionReconciliation rowVersions,
+        ICollection<GenerationDiagnostic> diagnostics
+    )
+    {
+        if (rowVersions.Lines.Count == 0)
+        {
+            return;
+        }
+
+        // ダイアログ／CLI で 1 行 1 列に見えるよう、導入文の後に改行＋インデント 2 スペースで各列を並べる
+        var columnList = string.Join(
+            Environment.NewLine,
+            rowVersions.Lines.Select(line => "  " + line)
+        );
+        diagnostics.Add(
+            GenerationDiagnostic.Info(
+                string.Format(
+                    Strings.CodeGen_Info_MultiTargetRowVersionColumns,
+                    rowVersions.RowVersionDialect,
+                    Environment.NewLine + columnList
+                )
+            )
+        );
     }
 
     /// <summary>

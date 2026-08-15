@@ -11,25 +11,141 @@ namespace QuickER.CodeGen.CSharp;
 /// 共有 Entity は 1 型のため、方言間で C# 型（型名・参照/値区分）が食い違うと生成物が壊れる。ここで不一致を
 /// 診断エラーにして黙って劣化させないほか、sqlserver がターゲットに含まれる場合は <c>[SqlColumnType]</c> の
 /// メタ情報（SqlDbType・Size 等）を sqlserver 辞書から主辞書へ補完する（図の方言が非 sqlserver でも属性を出す）。
+/// 行バージョン列だけは食い違いを不一致とせず、行バージョンとして解決した方言の型（<c>byte[]</c>）へ統一する
+/// （<see cref="ReconcileRowVersionTypes"/>）。
 /// </remarks>
 internal static class MultiDialectTypeReconciler
 {
     /// <summary>
+    /// 行バージョン列の型統一の結果。
+    /// </summary>
+    /// <param name="ColumnTypes">統一後の主辞書（統一対象が無ければ入力と同一インスタンス）</param>
+    /// <param name="UnifiedColumnIds">統一した（＝型不一致検証の対象外にする）カラム ID の集合</param>
+    /// <param name="Lines">Info 診断へ載せる <c>{テーブル}.{列}</c> 表記の一覧（図の並び順）</param>
+    /// <param name="RowVersionDialect">行バージョンとして解決した方言名（統一対象が無ければ <c>null</c>）</param>
+    public sealed record RowVersionReconciliation(
+        IReadOnlyDictionary<Guid, CSharpTypeInfo> ColumnTypes,
+        IReadOnlySet<Guid> UnifiedColumnIds,
+        IReadOnlyList<string> Lines,
+        string? RowVersionDialect
+    );
+
+    /// <summary>
+    /// 行バージョン列（<see cref="CSharpTypeInfo.IsRowVersion"/>）を、そう解決した方言の型で主辞書へ統一する。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 同じ DB 型表記が方言によって別の意味を持つことがある。<c>timestamp</c> は SQL Server では行バージョン
+    /// （<c>byte[]</c>）だが SQLite では日時（<c>DateTime</c>）で、そのままでは
+    /// <see cref="DiagnoseTypeMismatches"/> が食い違いエラーにしてマルチターゲット生成自体が通らない。
+    /// 行バージョンは「DB が採番する 8 バイトのバイナリ」という具体的な形を持つため、共有 Entity はその解決
+    /// （<c>byte[]</c>・<see cref="CSharpTypeInfo.IsRowVersion"/>）へ寄せるのが唯一意味の通る統一先になる。
+    /// </para>
+    /// <para>
+    /// 統一しても行バージョンとして扱うのはそう解決した方言の Repository だけで、他方言の実装ではただのバイナリ列
+    /// （INSERT / UPDATE で書き込む・版ガードなし）になる。呼び出し側はこの非対称を Info 診断で通知する。
+    /// </para>
+    /// <para>
+    /// 実効方言の辞書が 1 つ以下のとき（単一方言）は何もしない（統一する相手がおらず、出力もバイト不変）。
+    /// </para>
+    /// </remarks>
+    public static RowVersionReconciliation ReconcileRowVersionTypes(
+        ErDiagram diagram,
+        IReadOnlyList<string> effectiveDialects,
+        IReadOnlyDictionary<Guid, CSharpTypeInfo> primaryColumnTypes,
+        IReadOnlyDictionary<string, IReadOnlyDictionary<Guid, CSharpTypeInfo>> columnTypesByDialect
+    )
+    {
+        var dicts = ResolveDialectDictionaries(effectiveDialects, columnTypesByDialect);
+
+        if (dicts.Count < 2)
+        {
+            return new RowVersionReconciliation(
+                primaryColumnTypes,
+                new HashSet<Guid>(),
+                [],
+                RowVersionDialect: null
+            );
+        }
+
+        var unified = new HashSet<Guid>();
+        var lines = new List<string>();
+        string? rowVersionDialect = null;
+        Dictionary<Guid, CSharpTypeInfo>? replaced = null;
+
+        foreach (var entity in diagram.Entities)
+        {
+            foreach (var column in entity.Columns)
+            {
+                // 行バージョンとして解決した方言を探す（実効方言の並び順＝先に指定した方言を優先する）
+                var owner = dicts.FirstOrDefault(pair =>
+                    pair.Types.TryGetValue(column.Id, out var info) && info.IsRowVersion
+                );
+
+                if (owner.Types is null)
+                {
+                    continue;
+                }
+
+                unified.Add(column.Id);
+                lines.Add($"{entity.TableName}.{column.Name}");
+                rowVersionDialect ??= owner.Dialect;
+
+                // 主辞書が既に行バージョンの解決（図の方言が sqlserver の通常ケース）ならそのままでよい
+                if (
+                    primaryColumnTypes.TryGetValue(column.Id, out var primary)
+                    && primary.IsRowVersion
+                )
+                {
+                    continue;
+                }
+
+                replaced ??= new Dictionary<Guid, CSharpTypeInfo>(primaryColumnTypes);
+                // 行バージョンの解決をそのまま採る。中立トークン（[DbColumnMeta]）は行バージョン列には刻まない規則
+                // （CanonicalTypeTokenAttacher）なので、主辞書側に載っていたトークンごと差し替えるのが正しい
+                replaced[column.Id] = owner.Types[column.Id];
+            }
+        }
+
+        return new RowVersionReconciliation(
+            replaced ?? primaryColumnTypes,
+            unified,
+            lines,
+            rowVersionDialect
+        );
+    }
+
+    /// <summary>実効方言のうち列型辞書が渡されているものを、指定順で <c>(方言, 辞書)</c> の一覧にする</summary>
+    private static List<(
+        string Dialect,
+        IReadOnlyDictionary<Guid, CSharpTypeInfo> Types
+    )> ResolveDialectDictionaries(
+        IReadOnlyList<string> effectiveDialects,
+        IReadOnlyDictionary<string, IReadOnlyDictionary<Guid, CSharpTypeInfo>> columnTypesByDialect
+    ) =>
+        effectiveDialects
+            .Where(columnTypesByDialect.ContainsKey)
+            .Select(d => (Dialect: d, Types: columnTypesByDialect[d]))
+            .ToList();
+
+    /// <summary>
     /// 方言間で共有 Entity の C# 型（型名・参照/値区分）が食い違うカラムを診断エラーにする。
     /// </summary>
-    /// <remarks>共有 Entity は単一型のため、方言間で型が食い違うと生成物が壊れる。黙って劣化させず明示エラーにする。</remarks>
+    /// <remarks>
+    /// 共有 Entity は単一型のため、方言間で型が食い違うと生成物が壊れる。黙って劣化させず明示エラーにする。
+    /// ただし <paramref name="rowVersionColumnIds"/>（<see cref="ReconcileRowVersionTypes"/> が統一した行バージョン列）は
+    /// 意味の通る統一先が決まっているため、食い違っていてもエラーにしない。
+    /// </remarks>
     public static void DiagnoseTypeMismatches(
         ErDiagram diagram,
         IReadOnlyList<string> effectiveDialects,
         IReadOnlyDictionary<string, IReadOnlyDictionary<Guid, CSharpTypeInfo>> columnTypesByDialect,
+        IReadOnlySet<Guid> rowVersionColumnIds,
         ICollection<GenerationDiagnostic> diagnostics
     )
     {
         // 実効方言のうち辞書が渡されているものだけを対象にする
-        var dicts = effectiveDialects
-            .Where(columnTypesByDialect.ContainsKey)
-            .Select(d => (Dialect: d, Types: columnTypesByDialect[d]))
-            .ToList();
+        var dicts = ResolveDialectDictionaries(effectiveDialects, columnTypesByDialect);
 
         if (dicts.Count < 2)
         {
@@ -42,7 +158,10 @@ internal static class MultiDialectTypeReconciler
         {
             foreach (var column in entity.Columns)
             {
-                if (!baseline.Types.TryGetValue(column.Id, out var baseInfo))
+                if (
+                    rowVersionColumnIds.Contains(column.Id)
+                    || !baseline.Types.TryGetValue(column.Id, out var baseInfo)
+                )
                 {
                     continue;
                 }

@@ -447,6 +447,7 @@ DB が値を生成する列（SQL Server の `rowversion` / `timestamp` など�
 - **SELECT では取得する**: `GetByIdAsync` / `GetAllAsync` / `Query()` の結果に含まれ、値を読めます（並行性トークンとして参照できます）。
 - **EF Core モード**では Fluent 構成の `IsRowVersion()` が同じく store-generated として扱うため、この機構は適用されません。
 - **テーブルの並行性トークンを兼ねます**。保存時にエンティティが読んだ版と現在の行が比較されます（次節）。
+- **書き込み除外は SQL Server だけの話です。** 値を採番するのは SQL Server だけなので、除外するのもそのエンジンだけです。マルチターゲット生成（`--repository-dialects sqlserver,sqlite`）では、SQLite エンジンは同じ列を通常のバイナリ列として INSERT / BulkInsert / UPDATE で書き込みます（ローカル側がサーバーの版を写して持つ場所になります）。[マルチターゲット Repository](#マルチターゲット-repositorysqlserver--sqlite) を参照してください。
 
 ### rowversion による楽観排他
 
@@ -497,7 +498,7 @@ catch (SaveConflictException ex) when (ex.Reason == SaveConflictReason.Modified)
 
 既知の制限:
 
-- `rowversion` 型を持つのは SQL Server だけのため、QuickER 版 Repository では `sqlserver` 方言のみが対象です。SQLite（や他方言）向けの図にはそもそも該当列がないため影響しません。
+- `rowversion` 型を持つのは SQL Server だけのため、QuickER 版 Repository では `sqlserver` 方言のみが対象です。SQLite（や他方言）**単独**向けの図にはそもそも該当列がないため影響しません。`sqlserver` を含む**マルチターゲット**生成では列そのものは他方言と共有されますが、版で守るのは SQL Server エンジンだけです（[マルチターゲット Repository](#マルチターゲット-repositorysqlserver--sqlite)）。
 - `BulkInsertAsync` は `SqlBulkCopy` を使い、生成値を返せないためエンティティの版は元のままです。後続の更新で版が要る場合は再取得してください。
 - 版の読み戻しには `OUTPUT` 句を使いますが、SQL Server はトリガーのあるテーブルでこれを拒否します。QuickER の DDL 生成はトリガーを出力しないため、QuickER 外でトリガーを足したテーブルにのみ関係します。
 - 既に消えている行の削除は、従来どおりバックエンド間で非対称です。QuickER 版 Repository は黙って許容し、EF Core のグラフ保存は `SaveConflictException` として報告します。
@@ -622,6 +623,24 @@ services.AddGeneratedSqliteRepositories(serviceKey: "local", sqliteConn);
 var primary = provider.GetRequiredKeyedService<ICustomerRepository>("primary");
 var local   = provider.GetRequiredKeyedService<ICustomerRepository>("local");
 ```
+
+### マルチターゲットでの rowversion 列
+
+`rowversion` 列は方言ごとに別の C# 型へ解決されます（SQL Server は `byte[]`、SQLite は日時または未知の型）が、共有 Entity は 1 つの型しか持てません。QuickER はこれを行バージョンの解決＝`byte[]`＋`[StoreGeneratedColumn]` へ統一し、型不一致エラーで止める代わりに、統一した列を Info 診断で通知します。統一後の両者は別のものを意味しますが、その違いこそが狙いです:
+
+| 側 | 列の意味 | 書き込み | 版ガード |
+|---|---|---|---|
+| SQL Server（サーバー） | DB が採番する並行性トークン | INSERT / BulkInsert / UPDATE の対象外。採番された版はエンティティへ書き戻される | あり（古い版は `SaveConflictException`） |
+| SQLite（ローカル） | 通常のバイナリ列 | 他の列と同じく INSERT / BulkInsert / UPDATE が書き込む | **なし**（エンティティが持つ値のまま書かれる） |
+
+このため、この列はローカル側がサーバーの版を写して持つ場所として使えます。サーバーから行を（版込みで）読んでそのままローカルへ格納し、後でその版をサーバー側更新のガード値として送り返す、という流れです。ローカルで作った行はまだ版を持たないため、方言切替では同時に NOT NULL も解除されます（[方言切替](database.ja.md#方言切替)）。
+
+既知の制限:
+
+- **ローカル側は守られません。** SQLite では版ガードが働かないため、ローカルの書き手どうしは依然として上書きし合います。そこでの版はロックではなくデータです。
+- **ミラーの鮮度は誰も保証しません。** 列には最後に書かれた値が入っているだけです。同期を飛ばしたまま古い値で押し戻せばサーバーが競合として拒否しますが、これは意図した結果です（再取得して適用し直してください）。
+- **ローカル側の `ForceOverwrite` は no-op です**（外すべきガードがありません）。
+- EF Core 版 Repository はマルチターゲットと併用できない（診断エラー）ため、ここで説明したミラーは QuickER 版 Repository の話です。
 
 ## リモート対応インターフェイス（--generate-remote-contracts）
 

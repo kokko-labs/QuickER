@@ -93,6 +93,7 @@ The "Target DB:" combo on the right of the toolbar switches the diagram's target
 - Each column type is converted automatically along the path "source dialect → neutral canonical type → new dialect" where a mapping exists
 - Columns that could not be converted keep their original types and are listed in a warning dialog
 - The switch and the type conversions are undone together with a single Undo
+- SQL Server's `rowversion` / `timestamp` becomes a plain `BLOB` on SQLite, and its NOT NULL is lifted at the same time (SQLite assigns nothing, so a locally created row has no version until a sync writes one). The conversion is one-way: converting that `BLOB` back to SQL Server yields `varbinary(max)`, not a row version — see [Multi-target repositories](code-generation.md#multi-target-repositories-sqlserver--sqlite) for what the column means on each side. Other dialects have no equivalent at all, so a `rowversion` column is reported as unconvertible there
 
 ## DDL generation
 

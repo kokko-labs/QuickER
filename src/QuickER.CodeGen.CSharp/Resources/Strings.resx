@@ -130,6 +130,9 @@
   <data name="CodeGen_Info_ExcludedUnboundedBinaryColumns" xml:space="preserve">
     <value>Excluded unbounded binary columns from SELECT / UPDATE:{0}</value>
   </data>
+  <data name="CodeGen_Info_MultiTargetRowVersionColumns" xml:space="preserve">
+    <value>Only the '{0}' repository treats the following row version columns as concurrency tokens. The other target dialects share the same byte[] property, but write the column with INSERT / UPDATE like any other binary column (a place to mirror the version '{0}' assigned) and run no version guard:{1}</value>
+  </data>
   <data name="CodeGen_Warning_ManyToManySkipped" xml:space="preserve">
     <value>Many-to-many relationship '{0}' is out of scope for C# generation and was skipped.</value>
   </data>

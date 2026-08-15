@@ -447,6 +447,7 @@ A column whose value the DB generates (SQL Server's `rowversion` / `timestamp`, 
 - **Read on SELECT**: they are included in the results of `GetByIdAsync` / `GetAllAsync` / `Query()`, and you can read their values (they can be referenced as a concurrency token).
 - **In EF Core mode** the Fluent configuration's `IsRowVersion()` already treats them as store-generated, so this mechanism is not applied.
 - **They double as the table's concurrency token**: saves compare the version the entity was read with against the current row (see the next section).
+- **The write exclusion is SQL Server's alone.** Only SQL Server assigns the value, so only its engine excludes the column. In a multi-target build (`--repository-dialects sqlserver,sqlite`) the SQLite engine writes the same column with INSERT / BulkInsert / UPDATE like any other binary column — it is the place a local copy mirrors the version the server assigned. See [Multi-target repositories](#multi-target-repositories-sqlserver--sqlite).
 
 ### Optimistic concurrency (rowversion)
 
@@ -497,7 +498,7 @@ Reload-and-reapply is the honest answer when the two edits can be merged. `Force
 
 Known limitations:
 
-- Only SQL Server has a `rowversion` type, so the QuickER Repository applies this to the `sqlserver` dialect only. A diagram targeting SQLite (or another dialect) has no such column and is unaffected.
+- Only SQL Server has a `rowversion` type, so the QuickER Repository applies this to the `sqlserver` dialect only. A diagram targeting SQLite (or another dialect) alone has no such column and is unaffected; a **multi-target** build that includes `sqlserver` does share the column with the other dialects, but only the SQL Server engine guards with it (see [Multi-target repositories](#multi-target-repositories-sqlserver--sqlite)).
 - `BulkInsertAsync` uses `SqlBulkCopy`, which cannot return generated values, so the entities keep whatever version they had. Re-read them when a later update needs the version.
 - The version is read back through an `OUTPUT` clause, which SQL Server rejects on a table that has a trigger. QuickER's DDL generation never emits triggers, so this only affects tables whose triggers were added outside QuickER.
 - Deleting a row that is already gone stays asymmetric between the backends, as it always has: the QuickER Repository tolerates it silently, while a graph save on EF Core reports it as `SaveConflictException`.
@@ -622,6 +623,24 @@ services.AddGeneratedSqliteRepositories(serviceKey: "local", sqliteConn);
 var primary = provider.GetRequiredKeyedService<ICustomerRepository>("primary");
 var local   = provider.GetRequiredKeyedService<ICustomerRepository>("local");
 ```
+
+### Row version columns in a multi-target build
+
+A `rowversion` column resolves to different C# types per dialect (`byte[]` on SQL Server, a date/time or an unknown type on SQLite), and the shared Entity can only have one. QuickER unifies it to the row-version resolution — `byte[]` with `[StoreGeneratedColumn]` — and reports the columns it unified through an Info diagnostic instead of failing with a type-mismatch error. The two sides then mean different things, and that difference is the point:
+
+| Side | What the column is | Writes | Version guard |
+|---|---|---|---|
+| SQL Server (server) | A concurrency token the database assigns | Excluded from INSERT / BulkInsert / UPDATE; the assigned version is read back onto the entity | Yes — a stale version raises `SaveConflictException` |
+| SQLite (local copy) | An ordinary binary column | Written by INSERT / BulkInsert / UPDATE like any other column | **No** — the write goes through whatever the entity holds |
+
+That makes the column the natural place for a local copy to mirror the server's version: read a row from the server (version included), store it locally as-is, and later send the mirrored version back as the guard value of the server-side update. A row created locally simply has no version yet, which is why the dialect switch also lifts NOT NULL on that column (see [Dialect switching](database.md#dialect-switching)).
+
+Known limitations:
+
+- **The local side is not protected.** SQLite runs no version guard, so two local writers still overwrite each other. The version is data there, not a lock.
+- **Nothing keeps the mirror fresh.** The column holds whatever was written last; if a sync is skipped, a later push using that value is rejected by the server as a conflict, which is the intended outcome (reload and reapply).
+- **`ForceOverwrite` is a no-op on the local side**, since there is no guard to waive.
+- The EF Core Repository cannot be combined with a multi-target build (a diagnostic error), so the mirroring described here applies to the QuickER Repository.
 
 ## Remote-capable interfaces (--generate-remote-contracts)
 

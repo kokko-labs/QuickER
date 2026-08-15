@@ -198,6 +198,12 @@ namespace QuickER.CodeGen.CSharp.Resources {
             }
         }
 
+        public static string CodeGen_Info_MultiTargetRowVersionColumns {
+            get {
+                return ResourceManager.GetString("CodeGen_Info_MultiTargetRowVersionColumns", resourceCulture);
+            }
+        }
+
         public static string CodeGen_Warning_ManyToManySkipped {
             get {
                 return ResourceManager.GetString("CodeGen_Warning_ManyToManySkipped", resourceCulture);

@@ -146,6 +146,45 @@ public class DbDefinitionMetadataTests
         content.Should().NotContain("sql_variant");
     }
 
+    /// <summary>
+    /// 行バージョン列には、型カタログが解析できても <c>[DbColumnMeta]</c> を付けないことを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 中立トークンは「DB が採番する」という意味を運べないため、刻むと C# リバースがその列を
+    /// ただのバイナリ列として復元し、版ガードが黙って消える。列の自己記述は
+    /// <c>[StoreGeneratedColumn]</c> が担うので、トークンを省いても定義情報は失われない。
+    /// </remarks>
+    [Fact(
+        DisplayName = "行バージョン列には [DbColumnMeta] を付けない（トークンが意味を運べないため）"
+    )]
+    public void RowVersionColumn_OmitsColumnMeta()
+    {
+        var diagram = BuildDiagram();
+        diagram
+            .Entities[0]
+            .Columns.Add(
+                new Column
+                {
+                    Id = new Guid("11110000-0000-0000-0000-000000000005"),
+                    Name = "row_ver",
+                    DataType = "rowversion",
+                    IsNullable = false,
+                }
+            );
+
+        // 前提: 型カタログ自体は rowversion を解析でき、トークン化もできる（省くのは意図的な判断）
+        new SqlServerTypeCatalog()
+            .TryParse("rowversion", out var canonical)
+            .Should()
+            .BeTrue();
+        CanonicalTypeToken.Format(canonical).Should().Be("rowversion");
+
+        var content = GenerateSqlServer(diagram, DefaultOptions());
+
+        content.Should().Contain("public byte[] RowVer");
+        content.Should().NotContain("[DbColumnMeta(\"rowversion\")]");
+    }
+
     [Fact(
         DisplayName = "DB 定義メタは対象 DB（sqlserver 単独 / sqlite 単独 / マルチ）に依らず同一"
     )]

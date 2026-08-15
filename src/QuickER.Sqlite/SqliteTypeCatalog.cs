@@ -21,6 +21,13 @@ namespace QuickER.Sqlite;
 /// （<c>INTEGER</c> / <c>TEXT</c> / <c>BLOB</c> 等）や別名（<c>NUMERIC</c> / <c>BOOLEAN</c> / <c>DATETIME</c> 等）も
 /// 受け付ける。生成（<see cref="TryFormat"/>）は往復無損失を優先し、SQL Server と同じ代表宣言型を出力する。
 /// </para>
+/// <para>
+/// 唯一の非可逆な種別は <see cref="CanonicalTypeKind.RowVersion"/>（SQL Server の <c>rowversion</c>）で、
+/// SQLite には「DB が採番する行バージョン」に当たる概念が無いため <c>BLOB</c>（ただのバイナリ列）へ落とす。
+/// 落とした列はサーバー側の版を写して持つミラー置き場として使う想定で、SQLite 側で版ガードは働かない。
+/// 逆向き（<see cref="TryParse"/>）は <c>BLOB</c> を <see cref="CanonicalTypeKind.Binary"/> として読むため、
+/// SQL Server へ戻しても <c>varbinary(max)</c> にしかならない（往復では rowversion に戻らない）。
+/// </para>
 /// </remarks>
 public sealed partial class SqliteTypeCatalog : ITypeCatalog
 {
@@ -258,6 +265,12 @@ public sealed partial class SqliteTypeCatalog : ITypeCatalog
 
             case CanonicalTypeKind.Json:
                 nativeType = "JSON";
+                return true;
+
+            case CanonicalTypeKind.RowVersion:
+                // SQLite に行バージョンの概念は無いため、値だけを写せる BLOB（ミラー列）へ落とす。
+                // VARBINARY ではなく BLOB を出すのは「SQL Server の varbinary から来た列」と読み分けられるようにするため
+                nativeType = "BLOB";
                 return true;
 
             default:

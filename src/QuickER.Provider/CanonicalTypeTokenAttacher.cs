@@ -18,6 +18,10 @@ namespace QuickER.Provider;
 /// （EF Core 単独出力の方言可搬性を維持する）。図の方言以外のマッパで解決した辞書へ付加する場合も、
 /// 図の方言の型カタログ 1 つを基準にすればよい。
 /// </para>
+/// <para>
+/// 例外は行バージョン列（<see cref="CSharpTypeInfo.IsRowVersion"/>）で、型カタログが解析できてもトークンを載せない
+/// （<c>[DbColumnMeta]</c> を付けない）。詳細は <see cref="Attach"/> 内のコメントを参照。
+/// </para>
 /// </remarks>
 public static class CanonicalTypeTokenAttacher
 {
@@ -53,7 +57,13 @@ public static class CanonicalTypeTokenAttacher
 
         foreach (var (columnId, typeInfo) in columnTypes)
         {
-            var token = ResolveToken(columnId, dataTypeByColumn, typeCatalog);
+            // 行バージョン列にはトークンを刻まない。中立トークンは「DB が採番する」という store-generated の
+            // 意味を運べないため、刻むと C# リバースがその列をただのバイナリ列として復元し、版ガードが黙って消える
+            // （リバース側は属性の型トークンだけを見るため、失われたことに気づけない）。列は [StoreGeneratedColumn] が
+            // 自己記述するので、トークンを省いても定義情報が失われるわけではない
+            var token = typeInfo.IsRowVersion
+                ? null
+                : ResolveToken(columnId, dataTypeByColumn, typeCatalog);
 
             // 既にトークンが載っている（外部で付加済み）場合や、解析不能でトークンが得られない場合は
             // それぞれ現状を尊重する。トークンが新たに解決できたときだけ載せ替える。

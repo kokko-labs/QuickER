@@ -14,6 +14,8 @@ namespace QuickER.UndoRedo;
 /// <remarks>
 /// Execute では対象プロバイダへ切り替えつつ各カラムの型を変換後の型へ更新し、
 /// Undo では元プロバイダと元の型へ同時に巻き戻す（両者が常に一体で戻ることを保証する）。
+/// 型変換にあわせて NOT NULL を解除する列（<see cref="ColumnTypeConversion.MakeNullable"/>＝行バージョン列が
+/// ただのバイナリ列へ落ちるケース）は、その NULL 許容の変更も同じ 1 履歴に含めて巻き戻す。
 /// </remarks>
 public sealed class ChangeTargetDbmsCommand : IUndoableCommand
 {
@@ -26,8 +28,13 @@ public sealed class ChangeTargetDbmsCommand : IUndoableCommand
     /// <summary>切替後のプロバイダ（Execute / Redo で適用する）</summary>
     private readonly IDatabaseProvider _to;
 
-    /// <summary>型変換対象のカラム ViewModel と新旧の型（適用・取消しに用いる）</summary>
-    private readonly List<(ColumnViewModel Column, string OldType, string NewType)> _changes;
+    /// <summary>型変換対象のカラム ViewModel と新旧の型・NULL 許容解除の有無（適用・取消しに用いる）</summary>
+    private readonly List<(
+        ColumnViewModel Column,
+        string OldType,
+        string NewType,
+        bool MakeNullable
+    )> _changes;
 
     /// <summary><see cref="ChangeTargetDbmsCommand"/> を生成する</summary>
     /// <param name="from">切替前のプロバイダ</param>
@@ -46,7 +53,7 @@ public sealed class ChangeTargetDbmsCommand : IUndoableCommand
         _from = from;
         _to = to;
         _applyProvider = applyProvider;
-        _changes = new List<(ColumnViewModel, string, string)>();
+        _changes = new List<(ColumnViewModel, string, string, bool)>();
 
         foreach (var conversion in conversions)
         {
@@ -55,7 +62,11 @@ public sealed class ChangeTargetDbmsCommand : IUndoableCommand
                 && columnsById.TryGetValue(conversion.ColumnId, out var column)
             )
             {
-                _changes.Add((column, conversion.OldType, conversion.NewType));
+                // MakeNullable は「NOT NULL → NULL 許容」への変更だけを表す（計画側で元の NULL 許容を除外済み）ため、
+                // Undo は無条件に IsNullable=false へ戻せばよい
+                _changes.Add(
+                    (column, conversion.OldType, conversion.NewType, conversion.MakeNullable)
+                );
             }
         }
     }
@@ -69,6 +80,11 @@ public sealed class ChangeTargetDbmsCommand : IUndoableCommand
         foreach (var change in _changes)
         {
             change.Column.DataType = change.NewType;
+
+            if (change.MakeNullable)
+            {
+                change.Column.IsNullable = true;
+            }
         }
 
         _applyProvider(_to);
@@ -80,6 +96,11 @@ public sealed class ChangeTargetDbmsCommand : IUndoableCommand
         foreach (var change in _changes)
         {
             change.Column.DataType = change.OldType;
+
+            if (change.MakeNullable)
+            {
+                change.Column.IsNullable = false;
+            }
         }
 
         _applyProvider(_from);

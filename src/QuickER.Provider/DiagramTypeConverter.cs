@@ -8,12 +8,18 @@ namespace QuickER.Provider;
 /// <param name="ColumnName">対象カラム名</param>
 /// <param name="OldType">変換前（from 方言）のネイティブ型文字列</param>
 /// <param name="NewType">変換後（to 方言）のネイティブ型文字列。<c>null</c> は変換不能（元の型を保持する）ことを表す</param>
+/// <param name="MakeNullable">
+/// 変換にあわせて NOT NULL を解除するか。行バージョン列（SQL Server の <c>rowversion</c>）が、
+/// 行バージョンを持たない方言のただのバイナリ列へ落ちるときだけ <c>true</c> になる。
+/// 元が NULL 許容の列は解除するものが無いため <c>false</c>（＝この値が真なら必ず NOT NULL → NULL 許容の変更になる）。
+/// </param>
 public sealed record ColumnTypeConversion(
     Guid ColumnId,
     string TableName,
     string ColumnName,
     string OldType,
-    string? NewType
+    string? NewType,
+    bool MakeNullable = false
 );
 
 /// <summary>方言切替時の型変換計画。<see cref="Unconverted"/> が警告一覧になる</summary>
@@ -72,7 +78,9 @@ public static class DiagramTypeConverter
                             entity.TableName,
                             column.Name,
                             oldType,
-                            newType
+                            newType,
+                            MakeNullable: LosesRowVersion(canonical, newType, to)
+                                && !column.IsNullable
                         )
                     );
                 }
@@ -95,9 +103,27 @@ public static class DiagramTypeConverter
     }
 
     /// <summary>
+    /// 行バージョン列が、変換先の方言では「行バージョンでないただの列」へ落ちるかを判定する。
+    /// </summary>
+    /// <remarks>
+    /// 判定は変換先の型を <paramref name="to"/> 自身で読み直し、<see cref="CanonicalTypeKind.RowVersion"/> のままかを見る
+    /// （方言名で分岐しない＝行バージョンを持つ方言が増えても正しく効く）。落ちる場合、その列は DB が採番しなくなり、
+    /// 書き手（同期処理）が値を入れるまで空になるため NOT NULL のままでは行を作れない。
+    /// </remarks>
+    private static bool LosesRowVersion(CanonicalType canonical, string newType, ITypeCatalog to) =>
+        canonical.Kind == CanonicalTypeKind.RowVersion
+        && !(
+            to.TryParse(newType, out var roundTripped)
+            && roundTripped.Kind == CanonicalTypeKind.RowVersion
+        );
+
+    /// <summary>
     /// 計画を図へ適用する（<see cref="DiagramTypeConversionPlan.Converted"/> のみ反映）。
     /// テスト・CLI 用の素朴な適用であり、Undo/Redo 対応は呼び出し側（GUI）の責務とする。
     /// </summary>
+    /// <remarks>
+    /// 型の書き換えに加え、<see cref="ColumnTypeConversion.MakeNullable"/> が真の列は NOT NULL を解除する。
+    /// </remarks>
     /// <param name="diagram">適用対象の図</param>
     /// <param name="plan">適用する変換計画</param>
     public static void Apply(ErDiagram diagram, DiagramTypeConversionPlan plan)
@@ -117,6 +143,11 @@ public static class DiagramTypeConverter
             )
             {
                 column.DataType = conversion.NewType;
+
+                if (conversion.MakeNullable)
+                {
+                    column.IsNullable = true;
+                }
             }
         }
     }

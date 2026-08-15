@@ -29,6 +29,7 @@ public class CanonicalTypeTokenTests
     [InlineData(CanonicalTypeKind.Guid, "guid")]
     [InlineData(CanonicalTypeKind.Xml, "xml")]
     [InlineData(CanonicalTypeKind.Json, "json")]
+    [InlineData(CanonicalTypeKind.RowVersion, "rowversion")]
     public void SimpleKinds_FormatAndRoundTrip(CanonicalTypeKind kind, string expectedToken)
     {
         var canonical = new CanonicalType(kind);

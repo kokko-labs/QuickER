@@ -1,6 +1,7 @@
 using AwesomeAssertions;
 using QuickER.Model;
 using QuickER.Provider;
+using QuickER.Sqlite;
 using QuickER.SqlServer;
 
 namespace QuickER.Tests.Provider;
@@ -87,6 +88,87 @@ public class DiagramTypeConverterTests
 
         diagram.Entities[0].Columns[0].DataType.Should().Be("NVARCHAR(100)");
         diagram.Entities[0].Columns[1].DataType.Should().Be("hierarchyid");
+    }
+
+    /// <summary>
+    /// SQL Server の rowversion が SQLite では BLOB（ただのバイナリ列）へ落ち、NOT NULL も解除されることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// ローカル側では DB が採番しないため、同期が値を書き込むまでその列は空になる。NOT NULL のままだと
+    /// ローカルで新しい行を作れない（＝ハイブリッド構成が成立しない）ので、変換にあわせて NULL 許容へ倒す。
+    /// </remarks>
+    [Fact(DisplayName = "SQL Server の rowversion は SQLite では BLOB かつ NULL 許容へ変換される")]
+    public void CreatePlan_RowVersionToSqlite_ConvertsToNullableBlob()
+    {
+        var diagram = BuildDiagram("rowversion");
+        diagram.Entities[0].Columns[0].IsNullable = false;
+
+        var plan = DiagramTypeConverter.CreatePlan(
+            diagram,
+            new SqlServerTypeCatalog(),
+            new SqliteTypeCatalog()
+        );
+
+        plan.Converted.Should().ContainSingle();
+        plan.Converted[0].NewType.Should().Be("BLOB");
+        plan.Converted[0].MakeNullable.Should().BeTrue();
+
+        DiagramTypeConverter.Apply(diagram, plan);
+        diagram.Entities[0].Columns[0].DataType.Should().Be("BLOB");
+        diagram.Entities[0].Columns[0].IsNullable.Should().BeTrue();
+    }
+
+    /// <summary>行バージョンのまま持てる方言へ変換する場合は NOT NULL を解除しないことを検証する</summary>
+    /// <remarks>
+    /// 判定は「変換先の型を読み直しても行バージョンのままか」で行うため、方言名では分岐しない。
+    /// <see cref="UpperCaseTypeCatalog"/> は <c>ROWVERSION</c> を出しつつ読み戻せるため、解除は起きない。
+    /// </remarks>
+    [Fact(DisplayName = "変換先でも行バージョンのままなら NOT NULL は解除しない")]
+    public void CreatePlan_RowVersionStaysRowVersion_KeepsNotNull()
+    {
+        var diagram = BuildDiagram("rowversion");
+        diagram.Entities[0].Columns[0].IsNullable = false;
+
+        var plan = DiagramTypeConverter.CreatePlan(
+            diagram,
+            new SqlServerTypeCatalog(),
+            new UpperCaseTypeCatalog()
+        );
+
+        plan.Converted.Should().ContainSingle();
+        plan.Converted[0].NewType.Should().Be("ROWVERSION");
+        plan.Converted[0].MakeNullable.Should().BeFalse();
+    }
+
+    /// <summary>元から NULL 許容の行バージョン列は「解除するもの」が無いことを検証する</summary>
+    [Fact(DisplayName = "元から NULL 許容の行バージョン列は MakeNullable が立たない")]
+    public void CreatePlan_NullableRowVersion_DoesNotFlagMakeNullable()
+    {
+        var diagram = BuildDiagram("rowversion");
+        diagram.Entities[0].Columns[0].IsNullable = true;
+
+        var plan = DiagramTypeConverter.CreatePlan(
+            diagram,
+            new SqlServerTypeCatalog(),
+            new SqliteTypeCatalog()
+        );
+
+        plan.Converted[0].MakeNullable.Should().BeFalse();
+    }
+
+    /// <summary>SQLite の BLOB を SQL Server へ戻しても rowversion には戻らない（非可逆）ことを固定する</summary>
+    [Fact(DisplayName = "SQLite の BLOB は SQL Server へ戻すと varbinary(max) になる（非可逆）")]
+    public void CreatePlan_SqliteBlobBackToSqlServer_IsNotRowVersion()
+    {
+        var diagram = BuildDiagram("BLOB");
+
+        var plan = DiagramTypeConverter.CreatePlan(
+            diagram,
+            new SqliteTypeCatalog(),
+            new SqlServerTypeCatalog()
+        );
+
+        plan.Converted[0].NewType.Should().Be("varbinary(max)");
     }
 
     private static ErDiagram BuildDiagram(string dataType)

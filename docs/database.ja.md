@@ -93,6 +93,7 @@ SQLite は `ALTER TABLE` でできる変更が限られているため、列の�
 - 各列の型は「元方言 → 中立の正規型 → 新方言」の経路で自動変換を試みます
 - 変換できなかった列は元の型を保持したまま、警告ダイアログに一覧表示されます
 - 切替と型変換は 1 回の Undo でまとめて戻せます
+- SQL Server の `rowversion` / `timestamp` は SQLite では通常の `BLOB` になり、同時に NOT NULL が解除されます（SQLite には採番する主体がいないため、ローカルで作った行は同期が書き込むまで版を持ちません）。この変換は非可逆で、その `BLOB` を SQL Server へ戻しても `varbinary(max)` にしかなりません（行バージョンには戻りません）。両者で列の意味がどう変わるかは [マルチターゲット Repository](code-generation.ja.md#マルチターゲット-repositorysqlserver--sqlite) を参照してください。他の方言には対応する型が無いため、`rowversion` 列は変換不能として警告に載ります
 
 ## DDL 生成
 
