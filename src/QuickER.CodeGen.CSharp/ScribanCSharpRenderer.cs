@@ -144,32 +144,11 @@ internal sealed class RenderScope
 /// <summary>生成モデルを Scriban テンプレートで C# ソースコードへレンダリングするレンダラー</summary>
 internal sealed class ScribanCSharpRenderer
 {
-    /// <summary>
-    /// テンプレート部品リソース名の固定連結順。番号順（＝元テンプレートの行順）で連結すると分割前の本文へバイト完全一致で復元される。
-    /// この配列の順序を崩すと生成コードが壊れるため、並べ替えてはならない。
-    /// </summary>
-    /// <remarks>
-    /// <see cref="TemplateText"/> の初期化子（<see cref="LoadTemplate"/>）から参照するため、静的フィールドの初期化順の都合で
-    /// <see cref="TemplateText"/> より前に宣言する（後ろに置くと初期化時にまだ null で NRE になる）。
-    /// </remarks>
-    private static readonly string[] TemplatePartResourceNames =
-    [
-        "QuickER.CodeGen.CSharp.Templates.CSharpRuntime._00_HeaderAttributes.scriban",
-        "QuickER.CodeGen.CSharp.Templates.CSharpRuntime._01_ValueObjects.scriban",
-        "QuickER.CodeGen.CSharp.Templates.CSharpRuntime._02_Entities.scriban",
-        "QuickER.CodeGen.CSharp.Templates.CSharpRuntime._03_EditModelsAndMappers.scriban",
-        "QuickER.CodeGen.CSharp.Templates.CSharpRuntime._04_RepositoryContractCore.scriban",
-        "QuickER.CodeGen.CSharp.Templates.CSharpRuntime._05_QueryPipeline.scriban",
-        "QuickER.CodeGen.CSharp.Templates.CSharpRuntime._06_RemoteSaveInfraAndDI.scriban",
-        "QuickER.CodeGen.CSharp.Templates.CSharpRuntime._07_InMemory.scriban",
-        "QuickER.CodeGen.CSharp.Templates.CSharpRuntime._08_EfCore.scriban",
-        "QuickER.CodeGen.CSharp.Templates.CSharpRuntime._09_RemoteServer.scriban",
-    ];
-
     /// <summary>Entity / EditModel / Mapper / Repository を一括出力する Scriban テンプレート本文</summary>
     /// <remarks>
     /// テンプレート本文はソースに埋め込まず、埋め込みリソース（Templates/CSharpRuntime/*.scriban）として保持する。
-    /// 保守性のため単一の巨大テンプレートを機能単位の部品ファイルへ物理分割し、上記 <see cref="TemplatePartResourceNames"/>
+    /// 保守性のため単一の巨大テンプレートを機能単位の部品ファイルへ物理分割し、
+    /// <see cref="CSharpTemplateParts.OrderedResourceNames"/>
     /// の固定順で単純連結して 1 本のテンプレート本文へ復元する（Scriban の include は使わず、連結結果を 1 回だけ解析する）。
     /// 各部品は元テンプレートの連続した行範囲そのもの（1 バイトも編集・並べ替えをしない）で、連結結果は分割前とバイト完全一致する
     /// ＝生成コードのバイト一致という不変条件を維持する。インデントは半角スペース 4 つで統一する（タブは使用しない）。
@@ -183,7 +162,7 @@ internal sealed class ScribanCSharpRenderer
         var assembly = typeof(ScribanCSharpRenderer).Assembly;
         var builder = new StringBuilder();
 
-        foreach (var resourceName in TemplatePartResourceNames)
+        foreach (var resourceName in CSharpTemplateParts.OrderedResourceNames)
         {
             using var stream =
                 assembly.GetManifestResourceStream(resourceName)
@@ -304,6 +283,19 @@ internal sealed class ScribanCSharpRenderer
         var emitUnboundedBinaryAttr =
             options.GeneratesRepositoryContract || options.ExcludeUnboundedBinaryColumns;
 
+        // 生成される QuickER 版 Repository のエンジン群で「DB が store-generated 列（rowversion）の値を採番するか」が
+        // 割れているか。マルチターゲット（例 sqlserver + sqlite）では、同じ列が一方では並行トークン・他方ではただの列に
+        // なるため、1 回しか出力されない共通契約の doc（ConcurrencyMode の param / enum）にその非対称を書く必要がある。
+        // 単一方言では割れようがないため false ＝ 契約の出力はバイト不変（能力ベースの判定であり方言名で分岐しない）。
+        var storeGeneratedDialectsDiffer =
+            options.GenerateRepositories
+            && options
+                .EffectiveRepositoryDialects.Select(
+                    RepositoryDialectVariables.AssignsStoreGenerated
+                )
+                .Distinct()
+                .Count() > 1;
+
         // store-generated 列のマーカー属性 [StoreGeneratedColumn] は (1) rowversion / timestamp 等の列へ生成オプションに依らず
         // 無条件で付与し、(2) 共通契約の EntitySaveMetadata が INSERT / UPDATE から除外する列の識別にリフレクションで参照する。
         // Entity は常時生成され、付与のみが起きる Entity 単独生成でも属性型の定義が要るため、定義は常に出力する
@@ -378,6 +370,13 @@ internal sealed class ScribanCSharpRenderer
             ["in_memory"] = scope.InMemory,
             // QuickER 版 Repository の生成方言と方言別プリミティブ（識別子クォート・ADO 型名）。
             ["repository_dialect"] = dialect.Dialect,
+            // このスコープの方言エンジンが「DB が store-generated 列（rowversion）の値を採番する」ものか（能力フラグ）。
+            // 方言名の比較（repository_dialect == "sqlserver"）で能力を問う代わりに用いる。方言を持たないスコープ
+            // （InMemory / EF Core の固定部）では repository_dialect が RepositoryDialects[0] になり意味を持たないため、
+            // このフラグを見る箇所は必ず repositories（方言エンジンを出力するスコープか）と併せて判定する。
+            ["dialect_assigns_store_generated"] = dialect.AssignsStoreGeneratedValues,
+            // 生成物に「値を採番するエンジン」と「採番しないエンジン」が同居するか（マルチターゲットの非対称）。
+            ["store_generated_dialects_differ"] = storeGeneratedDialectsDiffer,
             ["quote_open"] = dialect.QuoteOpen,
             ["quote_close"] = dialect.QuoteClose,
             ["quote_open_char"] = dialect.QuoteOpenChar,
@@ -446,9 +445,21 @@ internal sealed class ScribanCSharpRenderer
 /// </remarks>
 internal sealed class RepositoryDialectVariables
 {
+    /// <summary>
+    /// その方言の DB が store-generated 列（<c>rowversion</c> / <c>timestamp</c>）の値を採番するか（能力フラグ）。
+    /// </summary>
+    /// <remarks>
+    /// 採番する方言では当該列が並行トークンになり、Repository が INSERT / UPDATE の対象から外して版ガードを掛ける。
+    /// 採番しない方言では同じ列がただのバイナリ列で、書き込み除外も版ガードも無い（マルチターゲットのミラー置き場）。
+    /// テンプレート側はこの能力を <c>dialect_assigns_store_generated</c> として受け取り、方言名の比較を避ける。
+    /// </remarks>
+    public static bool AssignsStoreGenerated(string? dialect) =>
+        !string.Equals(dialect?.Trim(), "sqlite", StringComparison.OrdinalIgnoreCase);
+
     public RepositoryDialectVariables(string? dialect)
     {
         Dialect = string.IsNullOrWhiteSpace(dialect) ? "sqlserver" : dialect;
+        AssignsStoreGeneratedValues = AssignsStoreGenerated(Dialect);
 
         // 方言ごとに ADO 型名・識別子クォート・基底クラス名を切り替える。方言固有の SQL の塊
         // （FOR JSON プランナ vs マルチクエリ Include 等）はテンプレートの if 分岐が担うため、
@@ -494,6 +505,9 @@ internal sealed class RepositoryDialectVariables
 
     /// <summary>生成方言（既定 "sqlserver"）</summary>
     public string Dialect { get; }
+
+    /// <summary>この方言の DB が store-generated 列の値を採番するか（<see cref="AssignsStoreGenerated"/> の結果）</summary>
+    public bool AssignsStoreGeneratedValues { get; }
 
     /// <summary>識別子クォート開始（C# 文字列リテラル埋め込み用。SQL Server: <c>[</c>、SQLite: <c>""</c>）</summary>
     public string QuoteOpen { get; }

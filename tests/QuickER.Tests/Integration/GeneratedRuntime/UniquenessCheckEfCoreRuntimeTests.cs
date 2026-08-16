@@ -9,7 +9,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// QuickER 版（<see cref="UniquenessCheckAdoRuntimeTests"/>）と同一のアサーション集合を緑にすることで、
 /// 共有本体（式木クエリ 1 本）が両バックエンドで同じ意味論に翻訳されることを証明する。
 /// </summary>
-public sealed class UniquenessCheckEfCoreRuntimeTests : UniquenessCheckRuntimeTestsBase
+public sealed class UniquenessCheckEfCoreRuntimeTests : UniquenessCheckQueryFixtureRuntimeTestsBase
 {
     /// <summary>EF Core 版リポジトリ群を登録した DI コンテナ（UseSqlite・接続文字列は基底の一時 DB）</summary>
     private ServiceProvider? _provider;

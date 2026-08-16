@@ -440,39 +440,48 @@ public class GeneratedCodeCompilationTests
     public static TheoryData<string, CodeGenerationOptions> RemoteServiceMatrixCases()
     {
         var data = new TheoryData<string, CodeGenerationOptions>();
-        foreach (var vo in new[] { false, true })
+
+        // Split 軸を持つのは本ケース群だけが例外だったため、他のマトリクスと同じ Split{off,on} × VO{off,on} へ揃える
+        // （リモートサービスはサーバーファイルが別バケットに出るため、分割の有無で最も構成が変わる軸）
+        foreach (var split in new[] { false, true })
         {
+            foreach (var vo in new[] { false, true })
+            {
+                data.Add(
+                    $"remote-services QuickER sqlserver Split={split} VO={vo}",
+                    new CodeGenerationOptions
+                    {
+                        RootNamespace = "Sample.Domain",
+                        SplitFilesByCategory = split,
+                        GenerateValueObjects = vo,
+                        GenerateRemoteServices = true,
+                    }
+                );
+            }
+
             data.Add(
-                $"remote-services QuickER sqlserver VO={vo}",
+                $"remote-services SQLite + EF Core Split={split}",
                 new CodeGenerationOptions
                 {
                     RootNamespace = "Sample.Domain",
-                    GenerateValueObjects = vo,
+                    SplitFilesByCategory = split,
+                    RepositoryDialects = ["sqlite"],
+                    GenerateEfCore = true,
+                    GenerateRemoteServices = true,
+                }
+            );
+            data.Add(
+                $"remote-services EF Core 単独 Split={split}",
+                new CodeGenerationOptions
+                {
+                    RootNamespace = "Sample.Domain",
+                    SplitFilesByCategory = split,
+                    GenerateRepositories = false,
+                    GenerateEfCore = true,
                     GenerateRemoteServices = true,
                 }
             );
         }
-
-        data.Add(
-            "remote-services SQLite + EF Core",
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Domain",
-                RepositoryDialects = ["sqlite"],
-                GenerateEfCore = true,
-                GenerateRemoteServices = true,
-            }
-        );
-        data.Add(
-            "remote-services EF Core 単独",
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Domain",
-                GenerateRepositories = false,
-                GenerateEfCore = true,
-                GenerateRemoteServices = true,
-            }
-        );
 
         return data;
     }
@@ -575,9 +584,14 @@ public class GeneratedCodeCompilationTests
     }
 
     /// <summary>
-    /// 複合主キー・1対1・1対多・自己参照・VO 対象カラム（int/string/decimal/bool/binary）・
+    /// 複合主キー・1対1・1対多・自己参照・VO 対象カラム（int/string/decimal/bool/binary）・rowversion・
     /// 日本語テーブル名・NULL 許容混在を 1 つに収めた、全マトリクスケース共通のフルカバレッジ ER 図
     /// </summary>
+    /// <remarks>
+    /// ここへ 1 列足すと全マトリクスケース（Split × VO × 方言 × EF Core × InMemory × リモート）と一度に交差する。
+    /// フィクスチャは 1 個増やすたびに 1 万行前後のチェックイン生成物が増えるため、
+    /// 「実行時の挙動を見たい」以外の交差はまずこの図へ足す。
+    /// </remarks>
     private static ErDiagram FullCoverageDiagram()
     {
         var customer = Guid.NewGuid();
@@ -661,6 +675,16 @@ public class GeneratedCodeCompilationTests
                             Id = customerCreatedAt,
                             Name = "created_at",
                             DataType = "datetime2",
+                            IsNullable = false,
+                        },
+                        // rowversion（store-generated・楽観排他の版）。VO・分割・InMemory・EF Core・リモートの
+                        // 全マトリクスケースと交差させ、書き込み除外の方言ゲートと版ガードが同時に成立することを
+                        // コンパイル水準で押さえる（PK ではない・1 エンティティに 1 本＝生成時診断に抵触しない）
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "row_ver",
+                            DataType = "rowversion",
                             IsNullable = false,
                         },
                     ],

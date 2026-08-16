@@ -20,14 +20,34 @@ public sealed class SchemaImportResult
     /// <see cref="Entity.UniqueConstraints"/> が正本のため、ここには含まれない。
     /// </remarks>
     public IReadOnlyList<SchemaAuxiliaryObject> AuxiliaryObjects { get; init; } = [];
+
+    /// <summary>
+    /// テーブル名 → そのテーブルの <c>CREATE TABLE</c> 文全文（取得できた方言のみ・キーは大文字小文字非依存）。
+    /// </summary>
+    /// <remarks>
+    /// 現状は SQLite だけが埋める（他方言は空のまま）。テーブル再構築同期は意味モデルから
+    /// <c>CREATE TABLE</c> を組み立て直すため、モデルが持たない列レベル属性（<c>AUTOINCREMENT</c> /
+    /// <c>DEFAULT</c> / <c>CHECK</c> / <c>COLLATE</c> / 生成列）は再現されない。その喪失を実行前に警告するには
+    /// 「今 DB にある定義そのもの」が要るため、意味モデルとは別に原文を運ぶ
+    /// （<see cref="SchemaAuxiliaryObject"/> へ載せると再作成ループに乗ってしまうので別枠にしている）。
+    /// </remarks>
+    public IReadOnlyDictionary<string, string> TableCreateSql { get; init; } =
+        new Dictionary<string, string>();
 }
 
 /// <summary>接続文字列から DB スキーマを取得して意味モデルへ変換するインポーター（DB 方言ごとに実装）</summary>
 public interface ISchemaImporter
 {
     /// <summary>接続文字列で DB へ接続し、スキーマを取得する</summary>
+    /// <param name="connectionString">接続文字列</param>
+    /// <param name="commandTimeoutSeconds">
+    /// カタログ照会 1 本ごとの実行タイムアウト（秒）。<c>0</c> は無制限（ADO.NET の規約）。
+    /// 既定値を持たせないのは、呼び出し側（GUI の接続設定・CLI のオプション）に必ず選ばせるため。
+    /// </param>
+    /// <param name="cancellationToken">キャンセルトークン</param>
     Task<SchemaImportResult> ImportAsync(
         string connectionString,
+        int commandTimeoutSeconds,
         CancellationToken cancellationToken = default
     );
 }

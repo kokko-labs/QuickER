@@ -64,8 +64,11 @@ public sealed class MySqlSchemaSyncExecutor : ISchemaSyncExecutor
 
             try
             {
-                await using var cmd = new MySqlCommand(statement, conn);
-                cmd.CommandTimeout = 60;
+                await using var cmd = DbCommands.Create(
+                    conn,
+                    statement,
+                    settings.CommandTimeoutSeconds
+                );
                 await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
                 result.Batches.Add(new SchemaSyncBatchResult(index, statement, true, null));
             }

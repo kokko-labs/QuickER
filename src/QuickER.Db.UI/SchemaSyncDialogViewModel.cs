@@ -44,6 +44,10 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
     /// <summary>直近の取込で得た補助オブジェクト（再構築で温存するインデックス・トリガー・一意制約）</summary>
     private IReadOnlyList<SchemaAuxiliaryObject> _liveAuxiliaryObjects = [];
 
+    /// <summary>直近の取込で得たテーブルの CREATE 文全文（再構築で失われる列属性の検出に用いる）</summary>
+    private IReadOnlyDictionary<string, string> _liveTableCreateSql =
+        new Dictionary<string, string>();
+
     /// <summary>直近の <see cref="UpdatePreview"/> で組み立てた実行計画（実行確認の文言分岐に用いる）</summary>
     private SyncPlan _currentPlan = new();
 
@@ -111,7 +115,7 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
         {
             var connectionString = _provider.BuildConnectionString(_settings);
             var live = await _provider
-                .SchemaImporter.ImportAsync(connectionString)
+                .SchemaImporter.ImportAsync(connectionString, _settings.CommandTimeoutSeconds)
                 .ConfigureAwait(true);
 
             // rebuild 方言（SQLite）の再構築計画は「DB 現状（live）＋選択差分のみ」を合成するため、
@@ -119,6 +123,7 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
             _liveEntities = live.Entities;
             _liveRelationships = live.Relationships;
             _liveAuxiliaryObjects = live.AuxiliaryObjects;
+            _liveTableCreateSql = live.TableCreateSql;
 
             // 対象方言のケーパビリティを渡す（SQLite は説明差分を抑止し FK 制約名を比較から除外する）
             var diff = new SchemaDiffService().Compute(
@@ -196,6 +201,7 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
             LiveEntities = _liveEntities,
             LiveRelationships = _liveRelationships,
             AuxiliaryObjects = _liveAuxiliaryObjects,
+            TableCreateSql = _liveTableCreateSql,
         };
 
     /// <summary>選択中の差分から実行計画を組み立て、スクリプトプレビューを再生成する（選択変更時に呼ぶ）</summary>
@@ -400,6 +406,25 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
                 .Append(Environment.NewLine)
                 .Append(
                     string.Format(Strings.SchemaSync_ExecuteConfirmUniqueConstraintDropRisk, fkList)
+                );
+        }
+
+        // テーブル再構築で、意味モデルに無い列レベル属性（既定値・CHECK 等）が再現されず失われる
+        var attributeLosses = _currentPlan
+            .Warnings.Where(w => w.Kind == SyncPlanWarningKind.TableRebuildDropsColumnAttribute)
+            .Select(w => $"{w.TableName} / {w.Detail}")
+            .ToList();
+
+        if (attributeLosses.Count > 0)
+        {
+            var lossList = string.Join(
+                Environment.NewLine,
+                attributeLosses.Select(t => "  • " + t)
+            );
+            sb.Append(Environment.NewLine)
+                .Append(Environment.NewLine)
+                .Append(
+                    string.Format(Strings.SchemaSync_ExecuteConfirmRebuildDropsAttributes, lossList)
                 );
         }
 

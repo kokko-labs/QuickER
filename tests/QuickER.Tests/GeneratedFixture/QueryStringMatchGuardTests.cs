@@ -130,7 +130,7 @@ public sealed class QueryStringMatchGuardTests
             new QueryFixtureConnectionFactory(DummySqliteConnectionString)
         );
 
-        // SearchMemoAsync は Query().Where(e => e.Memo!.Contains(keyword)) へ展開されるため、
+        // SearchMemoAsync は Query().Where(e => (e.Memo != null && e.Memo!.Contains(keyword))) へ展開されるため、
         // 終端の ToListAsync へ到達する前に Where が同期的に throw する（Task は返らない）
         Action search = () => orders.SearchMemoAsync(null!);
         search.Should().Throw<ArgumentNullException>().Which.ParamName.Should().Be("value");

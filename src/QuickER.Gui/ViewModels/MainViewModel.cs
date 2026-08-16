@@ -1728,15 +1728,64 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _changeTracker.RunWithoutTracking(command.Execute);
         UndoRedo.Push(command);
 
-        // 変換できなかったカラムがあれば、導入文（message）と一覧（details）を分けて詳細ダイアログで提示する
-        if (plan.Unconverted.Count > 0)
+        // NOT NULL を解除したカラム（行バージョン列が行バージョンを持たない方言のただの列へ落ちた場合）を集める。
+        // 主キー列は除外する＝ColumnViewModel が主キー列の IsNullable を握り潰すため、
+        // 実際には NOT NULL が落ちない（変換計画側も主キーを除外するので二重の防御）
+        var nullable = plan
+            .Converted.Where(c =>
+                c.MakeNullable
+                && columnsById.TryGetValue(c.ColumnId, out var column)
+                && !column.IsPrimaryKey
+            )
+            .ToList();
+
+        // 変換できなかったカラムと NOT NULL を解除したカラムがあれば、
+        // 導入文（message）と一覧（details）を分けて詳細ダイアログで提示する
+        if (plan.Unconverted.Count > 0 || nullable.Count > 0)
         {
-            _dialogs.ShowInformationDetails(
-                Strings.TypeConversion_WarningHeader,
-                BuildUnconvertedColumnList(plan.Unconverted),
-                Strings.TypeConversion_WarningTitle
+            ShowTypeConversionWarning(plan.Unconverted, nullable);
+        }
+    }
+
+    /// <summary>方言切替の型変換結果（未変換カラム・NOT NULL 解除カラム）を 1 つの詳細ダイアログで提示する</summary>
+    /// <remarks>
+    /// 2 種類の告知を 1 回のダイアログへまとめるのは、どちらも「方言を切り替えた結果カラムがどう変わったか」という
+    /// 同じ話題であり、続けて 2 回モーダルを出すと後から出た方が前の内容を押し流してしまうため。
+    /// 未変換カラムだけの場合は従来と完全に同一の 3 引数になる（導入文＝未変換の見出し・本文＝未変換一覧のみ）。
+    /// </remarks>
+    /// <param name="unconverted">変換できなかったカラム（元の型を保持する）</param>
+    /// <param name="nullable">NOT NULL を解除したカラム（主キー列は除外済み）</param>
+    private void ShowTypeConversionWarning(
+        IReadOnlyList<ColumnTypeConversion> unconverted,
+        IReadOnlyList<ColumnTypeConversion> nullable
+    )
+    {
+        var sections = new List<string>();
+
+        if (unconverted.Count > 0)
+        {
+            sections.Add(BuildUnconvertedColumnList(unconverted));
+        }
+
+        if (nullable.Count > 0)
+        {
+            // 節の見出しは、未変換の節と並ぶときだけ本文へ入れる
+            // （NOT NULL 解除だけなら導入文（message）がそのまま見出しになる）
+            var list = BuildNullableColumnList(nullable);
+            sections.Add(
+                unconverted.Count > 0
+                    ? Strings.TypeConversion_NullableWarningHeader + Environment.NewLine + list
+                    : list
             );
         }
+
+        _dialogs.ShowInformationDetails(
+            unconverted.Count > 0
+                ? Strings.TypeConversion_WarningHeader
+                : Strings.TypeConversion_NullableWarningHeader,
+            string.Join(Environment.NewLine + Environment.NewLine, sections),
+            Strings.TypeConversion_WarningTitle
+        );
     }
 
     /// <summary>Undo コマンドから方言を切り替えるための内部フック（派生通知も発行する）</summary>
@@ -1759,6 +1808,27 @@ public partial class MainViewModel : ObservableObject, IDisposable
                         c.TableName,
                         c.ColumnName,
                         c.OldType
+                    )
+                )
+                .ToList(),
+            Strings.Common_MoreItems
+        );
+
+    /// <summary>NOT NULL を解除したカラムの一覧（本文のみ・見出しは含めない）を整形する（上限超過分は省略）</summary>
+    /// <remarks>
+    /// 表示する型は変換後（新方言）の型。<see cref="ColumnTypeConversion.NewType"/> は
+    /// <see cref="DiagramTypeConversionPlan.Converted"/> の要素では常に非 null だが、
+    /// 契約上は null 許容のため変換前の型へフォールバックする
+    /// </remarks>
+    private static string BuildNullableColumnList(IReadOnlyList<ColumnTypeConversion> nullable) =>
+        DialogItemList.Format(
+            nullable
+                .Select(c =>
+                    string.Format(
+                        Strings.TypeConversion_NullableColumnLine,
+                        c.TableName,
+                        c.ColumnName,
+                        c.NewType ?? c.OldType
                     )
                 )
                 .ToList(),

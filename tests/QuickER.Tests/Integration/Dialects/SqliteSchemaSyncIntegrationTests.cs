@@ -845,6 +845,98 @@ public sealed class SqliteSchemaSyncIntegrationTests
         return rows;
     }
 
+    /// <summary>
+    /// 再構築で失われる列レベル属性（AUTOINCREMENT / DEFAULT）が実行前に警告され、
+    /// 実際に適用後は失われる（現状固定）ことを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 再構築の CREATE TABLE は意味モデルから組み立て直すため、モデルが持たない属性は再現されない。
+    /// 暗黙の rowid 別名（INTEGER 主キー）は保たれるので、消えるのは明示 AUTOINCREMENT と DEFAULT のほう。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Integration] SQLite 同期: 再構築で失われる列属性を警告し、実際に失われる"
+    )]
+    public async Task Rebuild_WarnsAndDropsColumnAttributes()
+    {
+        using var db = SqliteTempDatabase.Create();
+        var provider = new SqliteProvider();
+
+        await RunStatementsAsync(
+            db,
+            "CREATE TABLE \"item\" ("
+                + "\"id\" INTEGER PRIMARY KEY AUTOINCREMENT, "
+                + "\"qty\" INTEGER NOT NULL DEFAULT 7, "
+                + "\"note\" TEXT NULL"
+                + ");",
+            "INSERT INTO \"item\" (\"qty\", \"note\") VALUES (1, 'a');"
+        );
+
+        // ---------- 計画の警告を確認する（実行前に利用者へ提示される材料） ----------
+        var live = await ImportAsync(db, provider);
+        live.TableCreateSql.Should().ContainKey("item");
+
+        var target = live.Entities.Select(e => e.Clone(preserveId: true)).ToList();
+        target.Single(e => e.TableName == "item").Columns.Single(c => c.Name == "note").DataType =
+            "VARCHAR(50)";
+
+        var diff = new SchemaDiffService().Compute(
+            live.Entities,
+            live.Relationships,
+            target,
+            [],
+            provider.SyncCapabilities
+        );
+
+        foreach (var item in diff.Items)
+        {
+            item.IsSelected = true;
+        }
+
+        var plan = new SyncPlanner().BuildPlan(
+            diff.Items,
+            provider.SyncCapabilities,
+            new SyncPlanContext
+            {
+                LiveEntities = live.Entities,
+                LiveRelationships = live.Relationships,
+                AuxiliaryObjects = live.AuxiliaryObjects,
+                TableCreateSql = live.TableCreateSql,
+            }
+        );
+
+        var warning = plan
+            .Warnings.Should()
+            .ContainSingle(w => w.Kind == SyncPlanWarningKind.TableRebuildDropsColumnAttribute)
+            .Which;
+        warning.TableName.Should().Be("item");
+        warning.Detail.Should().Be("AUTOINCREMENT, DEFAULT");
+
+        // ---------- 実行し、警告どおり属性が失われることを固定する ----------
+        var result = await provider.SyncExecutor.ExecuteAsync(
+            new DbConnectionSettings { FilePath = db.FilePath },
+            provider.SyncScriptBuilder.Build(plan),
+            Ct
+        );
+        result.Committed.Should().BeTrue(result.Error);
+
+        var reimported = await ImportAsync(db, provider);
+        var rebuiltDdl = reimported.TableCreateSql["item"];
+
+        // 型変更は反映され、AUTOINCREMENT / DEFAULT は消えている（現状固定）
+        rebuiltDdl.Should().Contain("VARCHAR(50)");
+        rebuiltDdl.Should().NotContain("AUTOINCREMENT");
+        rebuiltDdl.Should().NotContain("DEFAULT");
+        TableRebuildAttributeDetector.Detect(rebuiltDdl).Should().BeEmpty();
+
+        // 行データは温存される（喪失するのは属性だけ）
+        await using var conn = new SqliteConnection(db.ReadOnlyConnectionString);
+        await conn.OpenAsync(Ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT COUNT(*) FROM \"item\";";
+        var count = (long)(await cmd.ExecuteScalarAsync(Ct))!;
+        count.Should().Be(1);
+    }
+
     /// <summary>live DB を取り込み、目標スキーマを組み立て、差分計算→計画→スクリプト生成→実行までを通す</summary>
     private static async Task<(SchemaSyncResult Result, string Script)> RunSyncAsync(
         SqliteTempDatabase db,
@@ -883,6 +975,7 @@ public sealed class SqliteSchemaSyncIntegrationTests
             LiveEntities = live.Entities,
             LiveRelationships = live.Relationships,
             AuxiliaryObjects = live.AuxiliaryObjects,
+            TableCreateSql = live.TableCreateSql,
         };
         var plan = new SyncPlanner().BuildPlan(diff.Items, capabilities, context);
         var script = provider.SyncScriptBuilder.Build(plan);
@@ -905,7 +998,11 @@ public sealed class SqliteSchemaSyncIntegrationTests
     )
     {
         return await provider
-            .SchemaImporter.ImportAsync(db.ReadOnlyConnectionString, Ct)
+            .SchemaImporter.ImportAsync(
+                db.ReadOnlyConnectionString,
+                DbCommands.DefaultTimeoutSeconds,
+                Ct
+            )
             .ConfigureAwait(false);
     }
 

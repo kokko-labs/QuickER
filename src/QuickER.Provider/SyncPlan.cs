@@ -80,6 +80,18 @@ public enum SyncPlanWarningKind
     /// 過剰警告を許容して実行はブロックしない（<see cref="ForeignKeyRebuildMayLoseCandidateKey"/> と同じ方針）。
     /// </remarks>
     UniqueConstraintDropMayBreakForeignKey,
+
+    /// <summary>
+    /// テーブル再構築で、意味モデルが持たない列レベル属性（<c>AUTOINCREMENT</c> / <c>DEFAULT</c> /
+    /// <c>CHECK</c> / <c>COLLATE</c> / 生成列）が失われる。
+    /// </summary>
+    /// <remarks>
+    /// 再構築の <c>CREATE TABLE</c> はモデルから組み立て直すため、モデルに無い属性は再現されない
+    /// （インデックス・トリガーは <see cref="SchemaAuxiliaryObject"/> が CREATE 文全文で温存しているのと対照的）。
+    /// 検出は live の <c>CREATE TABLE</c> 文に対する文字列検査（<see cref="TableRebuildAttributeDetector"/>）で、
+    /// 断定はできないため実行ブロックではなく警告に留める（他 2 種と同じ方針）。
+    /// </remarks>
+    TableRebuildDropsColumnAttribute,
 }
 
 /// <summary>
@@ -94,6 +106,8 @@ public enum SyncPlanWarningKind
 /// <param name="Detail">
 /// 補足（外部キー制約名など。無ければ空文字）。
 /// <see cref="SyncPlanWarningKind.UniqueConstraintDropMayBreakForeignKey"/> では壊れうる外部キーの制約名。
+/// <see cref="SyncPlanWarningKind.TableRebuildDropsColumnAttribute"/> では失われる属性の SQL キーワードを
+/// カンマ区切りで並べたもの（<c>AUTOINCREMENT, DEFAULT</c> 等）。SQL の綴りそのものなので言語中立に扱える。
 /// </param>
 public sealed record SyncPlanWarning(
     SyncPlanWarningKind Kind,

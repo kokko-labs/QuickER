@@ -35,6 +35,25 @@ samples/ec-order-remote/Generated/EcOrderRemote.g.cs text eol=crlf
 samples/ec-order-remote/Generated/EcOrderRemote.RemoteServer.g.cs text eol=crlf
 
 ###############################################################################
+# ランタイム 6 パッケージの公開 API 面スナップショット（承認ファイル）は、リフレクションからの
+# レンダリング結果（CRLF）との完全一致で判定するため CRLF に固定する。
+###############################################################################
+tests/QuickER.Tests/PublicApi/*.approved.txt text eol=crlf
+
+###############################################################################
+# チェックイン済みの生成物は GitHub 上で「生成コード」として扱う（linguist-generated）。
+#
+# 追跡下の *.g.cs は手書きコードの 2 倍以上の行数があり、テンプレートを 1 行変えた PR が
+# 十数万行の差分に化けてレビューを実質不能にしていた。この属性を付けると GitHub の
+# 差分表示で既定折りたたみになり、言語統計からも除外される。
+# 属性が効くのは GitHub の表示だけで、Git の内容・ドリフト検知・ビルドには一切影響しない。
+###############################################################################
+tests/QuickER.Tests/GeneratedFixture/*.g.cs linguist-generated=true
+src/QuickER.Runtime*/Runtime*.g.cs linguist-generated=true
+samples/**/*.g.cs linguist-generated=true
+samples/**/*.g.md linguist-generated=true
+
+###############################################################################
 # Set default behavior for command prompt diff.
 #
 # This is need for earlier builds of msysgit that does not have it on by

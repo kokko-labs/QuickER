@@ -3,8 +3,17 @@ namespace QuickER.CodeGen.CSharp;
 /// <summary>
 /// SQL Server 型から解決された C# 型の情報
 /// </summary>
-/// <remarks><see cref="SqlServerCSharpTypeMapper"/> が生成し、Nullable 注釈の付与や [MaxLength] 属性の判定に使う</remarks>
-public sealed class CSharpTypeInfo
+/// <remarks>
+/// <para><see cref="SqlServerCSharpTypeMapper"/> が生成し、Nullable 注釈の付与や [MaxLength] 属性の判定に使う</para>
+/// <para>
+/// init-only の不変データキャリアであり、参照同一性に依存する箇所は無いため <c>record</c> とする。
+/// 一部の項目だけを差し替えた複製（<see cref="MultiDialectTypeReconciler"/> の <c>[SqlColumnType]</c> 補完・
+/// <c>CanonicalTypeTokenAttacher</c> のトークン付加）は <c>with</c> 式で作ること。
+/// 全項目を列挙して <c>new</c> し直す書き方は、プロパティが増えたときに写し漏れても
+/// コンパイルが通ってしまい、実際に <see cref="CanonicalTypeToken"/> が黙って消える不具合を起こした。
+/// </para>
+/// </remarks>
+public sealed record CSharpTypeInfo
 {
     /// <summary>C# の型名（例: int, string, byte[]）。Nullable 注釈 "?" は含まない</summary>
     public required string TypeName { get; init; }

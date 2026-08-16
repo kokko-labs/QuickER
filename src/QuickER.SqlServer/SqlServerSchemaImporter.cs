@@ -20,12 +20,14 @@ public class SqlServerSchemaImporter : ISchemaImporter
     /// <summary>接続文字列で接続を開きスキーマを取得する（<see cref="ISchemaImporter"/> 実装・CLI scaffold 用）</summary>
     public async Task<SchemaImportResult> ImportAsync(
         string connectionString,
+        int commandTimeoutSeconds,
         CancellationToken cancellationToken = default
     )
     {
         await using var conn = new SqlConnection(connectionString);
         await conn.OpenAsync(cancellationToken).ConfigureAwait(false);
-        var result = await ImportAsync(conn, cancellationToken).ConfigureAwait(false);
+        var result = await ImportAsync(conn, cancellationToken, commandTimeoutSeconds)
+            .ConfigureAwait(false);
         return new SchemaImportResult
         {
             Entities = result.Entities,
@@ -52,20 +54,32 @@ public class SqlServerSchemaImporter : ISchemaImporter
         var connStr = settings.Build();
         await using var conn = new SqlConnection(connStr);
         await conn.OpenAsync(ct).ConfigureAwait(false);
-        return await ImportAsync(conn, ct).ConfigureAwait(false);
+        return await ImportAsync(conn, ct, settings.CommandTimeoutSeconds).ConfigureAwait(false);
     }
 
     /// <summary>既に開かれた接続でスキーマを取得する（テストや接続再利用向け）</summary>
     /// <remarks>テーブル→カラム→主キー→説明→外部キーの順に段階的に補完していく</remarks>
-    public async Task<SchemaResult> ImportAsync(SqlConnection conn, CancellationToken ct = default)
+    /// <param name="conn">既に開かれた接続</param>
+    /// <param name="ct">キャンセルトークン</param>
+    /// <param name="commandTimeoutSeconds">
+    /// カタログ照会 1 本ごとの実行タイムアウト（秒）。既定値付きで <paramref name="ct"/> の後ろに置くのは、
+    /// 既存の位置指定呼び出し（統合テストの <c>ImportAsync(conn, ct)</c>）を壊さないため。
+    /// </param>
+    public async Task<SchemaResult> ImportAsync(
+        SqlConnection conn,
+        CancellationToken ct = default,
+        int commandTimeoutSeconds = DbCommands.DefaultTimeoutSeconds
+    )
     {
-        var tables = await LoadTablesAsync(conn, ct).ConfigureAwait(false);
-        await LoadColumnsAsync(conn, tables, ct).ConfigureAwait(false);
-        await LoadPrimaryKeysAsync(conn, tables, ct).ConfigureAwait(false);
-        await LoadDescriptionsAsync(conn, tables, ct).ConfigureAwait(false);
+        var tables = await LoadTablesAsync(conn, commandTimeoutSeconds, ct).ConfigureAwait(false);
+        await LoadColumnsAsync(conn, tables, commandTimeoutSeconds, ct).ConfigureAwait(false);
+        await LoadPrimaryKeysAsync(conn, tables, commandTimeoutSeconds, ct).ConfigureAwait(false);
+        await LoadDescriptionsAsync(conn, tables, commandTimeoutSeconds, ct).ConfigureAwait(false);
         // 一意制約は FK の 1 対 1 判定の材料になるため、外部キーより先にモデルへ載せる
-        await LoadUniqueConstraintsAsync(conn, tables, ct).ConfigureAwait(false);
-        var rels = await LoadForeignKeysAsync(conn, tables, ct).ConfigureAwait(false);
+        await LoadUniqueConstraintsAsync(conn, tables, commandTimeoutSeconds, ct)
+            .ConfigureAwait(false);
+        var rels = await LoadForeignKeysAsync(conn, tables, commandTimeoutSeconds, ct)
+            .ConfigureAwait(false);
 
         return new SchemaResult
         {
@@ -174,11 +188,12 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
     /// <summary>テーブル一覧を読み込み、テーブルキーをキーとするエントリ辞書を構築する</summary>
     private static async Task<Dictionary<string, SchemaTableEntry>> LoadTablesAsync(
         SqlConnection conn,
+        int commandTimeoutSeconds,
         CancellationToken ct
     )
     {
         var dict = new Dictionary<string, SchemaTableEntry>(StringComparer.OrdinalIgnoreCase);
-        await using var cmd = new SqlCommand(TablesSql, conn);
+        await using var cmd = DbCommands.Create(conn, TablesSql, commandTimeoutSeconds);
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
 
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
@@ -205,10 +220,11 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
     private static async Task LoadColumnsAsync(
         SqlConnection conn,
         Dictionary<string, SchemaTableEntry> tables,
+        int commandTimeoutSeconds,
         CancellationToken ct
     )
     {
-        await using var cmd = new SqlCommand(ColumnsSql, conn);
+        await using var cmd = DbCommands.Create(conn, ColumnsSql, commandTimeoutSeconds);
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
 
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
@@ -249,10 +265,11 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
     private static async Task LoadPrimaryKeysAsync(
         SqlConnection conn,
         Dictionary<string, SchemaTableEntry> tables,
+        int commandTimeoutSeconds,
         CancellationToken ct
     )
     {
-        await using var cmd = new SqlCommand(PrimaryKeysSql, conn);
+        await using var cmd = DbCommands.Create(conn, PrimaryKeysSql, commandTimeoutSeconds);
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
 
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
@@ -278,10 +295,11 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
     private static async Task LoadDescriptionsAsync(
         SqlConnection conn,
         Dictionary<string, SchemaTableEntry> tables,
+        int commandTimeoutSeconds,
         CancellationToken ct
     )
     {
-        await using var cmd = new SqlCommand(DescriptionsSql, conn);
+        await using var cmd = DbCommands.Create(conn, DescriptionsSql, commandTimeoutSeconds);
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
 
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
@@ -321,12 +339,13 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
     private static async Task<List<Relationship>> LoadForeignKeysAsync(
         SqlConnection conn,
         Dictionary<string, SchemaTableEntry> tables,
+        int commandTimeoutSeconds,
         CancellationToken ct
     )
     {
         var builder = new ForeignKeyRelationshipBuilder();
 
-        await using var cmd = new SqlCommand(ForeignKeysSql, conn);
+        await using var cmd = DbCommands.Create(conn, ForeignKeysSql, commandTimeoutSeconds);
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
 
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
@@ -353,12 +372,13 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
     private static async Task LoadUniqueConstraintsAsync(
         SqlConnection conn,
         Dictionary<string, SchemaTableEntry> tables,
+        int commandTimeoutSeconds,
         CancellationToken ct
     )
     {
         var builder = new UniqueConstraintImportBuilder();
 
-        await using (var cmd = new SqlCommand(UniqueConstraintSql, conn))
+        await using (var cmd = DbCommands.Create(conn, UniqueConstraintSql, commandTimeoutSeconds))
         await using (var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false))
         {
             while (await reader.ReadAsync(ct).ConfigureAwait(false))

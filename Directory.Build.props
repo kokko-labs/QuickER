@@ -12,6 +12,23 @@
   </PropertyGroup>
 
   <!--
+    警告をエラーとして扱う（全プロジェクト共通）。
+
+    本リポジトリはコード警告 0 を維持してきたが、それを守っていたのは規約だけで仕掛けが無く、
+    「1 件くらいなら」で積み上がると回帰の予兆（未使用変数・null 許容の綻び・古い API）が
+    ビルドログのノイズに埋もれる。0 の状態を仕掛けで固定する。
+
+    セキュリティ advisory（NU1901-NU1904）は「コードの誤り」ではなく「依存の更新要求」であり、
+    新しい advisory が出た日にビルドが止まるとリポジトリの作業が全面的に塞がる。エラーにはせず
+    警告のまま残して気づける状態を保つ（個別 advisory の NoWarn による握り潰しはしない
+    ＝別パッケージの新しい advisory まで一緒に消えてしまうため）。
+  -->
+  <PropertyGroup>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <WarningsNotAsErrors>NU1901;NU1902;NU1903;NU1904</WarningsNotAsErrors>
+  </PropertyGroup>
+
+  <!--
     NuGet パッケージ・アセンブリ共通メタデータ（発行 7 パッケージ＝CLI＋ランタイム 6 種が継承。
     パックしないプロジェクトにもアセンブリ情報として適用される）。
     nuget.org に表示される文字列（Description / PackageTags 等）は各 csproj 側で英語に統一する。

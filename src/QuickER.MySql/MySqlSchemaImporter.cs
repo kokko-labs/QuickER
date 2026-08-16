@@ -22,12 +22,14 @@ public class MySqlSchemaImporter : ISchemaImporter
     /// <summary>接続文字列で接続を開きスキーマを取得する（<see cref="ISchemaImporter"/> 実装・CLI scaffold 用）</summary>
     public async Task<SchemaImportResult> ImportAsync(
         string connectionString,
+        int commandTimeoutSeconds,
         CancellationToken cancellationToken = default
     )
     {
         await using var conn = new MySqlConnection(connectionString);
         await conn.OpenAsync(cancellationToken).ConfigureAwait(false);
-        var result = await ImportAsync(conn, cancellationToken).ConfigureAwait(false);
+        var result = await ImportAsync(conn, cancellationToken, commandTimeoutSeconds)
+            .ConfigureAwait(false);
         return new SchemaImportResult
         {
             Entities = result.Entities,
@@ -47,17 +49,26 @@ public class MySqlSchemaImporter : ISchemaImporter
 
     /// <summary>既に開かれた接続でスキーマを取得する（テストや接続再利用向け）</summary>
     /// <remarks>テーブル→カラム→主キー→説明→外部キーの順に段階的に補完していく</remarks>
+    /// <param name="conn">既に開かれた接続</param>
+    /// <param name="ct">キャンセルトークン</param>
+    /// <param name="commandTimeoutSeconds">
+    /// カタログ照会 1 本ごとの実行タイムアウト（秒）。既定値付きで <paramref name="ct"/> の後ろに置くのは、
+    /// 既存の位置指定呼び出し（統合テストの <c>ImportAsync(conn, ct)</c>）を壊さないため。
+    /// </param>
     public async Task<SchemaResult> ImportAsync(
         MySqlConnection conn,
-        CancellationToken ct = default
+        CancellationToken ct = default,
+        int commandTimeoutSeconds = DbCommands.DefaultTimeoutSeconds
     )
     {
-        var tables = await LoadTablesAsync(conn, ct).ConfigureAwait(false);
-        await LoadColumnsAsync(conn, tables, ct).ConfigureAwait(false);
-        await LoadPrimaryKeysAsync(conn, tables, ct).ConfigureAwait(false);
+        var tables = await LoadTablesAsync(conn, commandTimeoutSeconds, ct).ConfigureAwait(false);
+        await LoadColumnsAsync(conn, tables, commandTimeoutSeconds, ct).ConfigureAwait(false);
+        await LoadPrimaryKeysAsync(conn, tables, commandTimeoutSeconds, ct).ConfigureAwait(false);
         // 一意制約は FK の 1 対 1 判定の材料になるため、外部キーより先にモデルへ載せる
-        await LoadUniqueConstraintsAsync(conn, tables, ct).ConfigureAwait(false);
-        var rels = await LoadForeignKeysAsync(conn, tables, ct).ConfigureAwait(false);
+        await LoadUniqueConstraintsAsync(conn, tables, commandTimeoutSeconds, ct)
+            .ConfigureAwait(false);
+        var rels = await LoadForeignKeysAsync(conn, tables, commandTimeoutSeconds, ct)
+            .ConfigureAwait(false);
 
         return new SchemaResult
         {
@@ -145,11 +156,12 @@ ORDER BY kcu.CONSTRAINT_NAME, kcu.ORDINAL_POSITION;";
     /// <summary>テーブル一覧・テーブルコメントを読み込み、テーブル名をキーとするエントリ辞書を構築する</summary>
     private static async Task<Dictionary<string, SchemaTableEntry>> LoadTablesAsync(
         MySqlConnection conn,
+        int commandTimeoutSeconds,
         CancellationToken ct
     )
     {
         var dict = new Dictionary<string, SchemaTableEntry>(StringComparer.OrdinalIgnoreCase);
-        await using var cmd = new MySqlCommand(TablesSql, conn);
+        await using var cmd = DbCommands.Create(conn, TablesSql, commandTimeoutSeconds);
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
 
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
@@ -177,10 +189,11 @@ ORDER BY kcu.CONSTRAINT_NAME, kcu.ORDINAL_POSITION;";
     private static async Task LoadColumnsAsync(
         MySqlConnection conn,
         Dictionary<string, SchemaTableEntry> tables,
+        int commandTimeoutSeconds,
         CancellationToken ct
     )
     {
-        await using var cmd = new MySqlCommand(ColumnsSql, conn);
+        await using var cmd = DbCommands.Create(conn, ColumnsSql, commandTimeoutSeconds);
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
 
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
@@ -218,10 +231,11 @@ ORDER BY kcu.CONSTRAINT_NAME, kcu.ORDINAL_POSITION;";
     private static async Task LoadPrimaryKeysAsync(
         MySqlConnection conn,
         Dictionary<string, SchemaTableEntry> tables,
+        int commandTimeoutSeconds,
         CancellationToken ct
     )
     {
-        await using var cmd = new MySqlCommand(PrimaryKeysSql, conn);
+        await using var cmd = DbCommands.Create(conn, PrimaryKeysSql, commandTimeoutSeconds);
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
 
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
@@ -246,12 +260,13 @@ ORDER BY kcu.CONSTRAINT_NAME, kcu.ORDINAL_POSITION;";
     private static async Task<List<Relationship>> LoadForeignKeysAsync(
         MySqlConnection conn,
         Dictionary<string, SchemaTableEntry> tables,
+        int commandTimeoutSeconds,
         CancellationToken ct
     )
     {
         var builder = new ForeignKeyRelationshipBuilder();
 
-        await using (var cmd = new MySqlCommand(ForeignKeysSql, conn))
+        await using (var cmd = DbCommands.Create(conn, ForeignKeysSql, commandTimeoutSeconds))
         await using (var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false))
         {
             while (await reader.ReadAsync(ct).ConfigureAwait(false))
@@ -287,12 +302,13 @@ ORDER BY kcu.CONSTRAINT_NAME, kcu.ORDINAL_POSITION;";
     private static async Task LoadUniqueConstraintsAsync(
         MySqlConnection conn,
         Dictionary<string, SchemaTableEntry> tables,
+        int commandTimeoutSeconds,
         CancellationToken ct
     )
     {
         var builder = new UniqueConstraintImportBuilder();
 
-        await using (var cmd = new MySqlCommand(UniqueConstraintSql, conn))
+        await using (var cmd = DbCommands.Create(conn, UniqueConstraintSql, commandTimeoutSeconds))
         await using (var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false))
         {
             while (await reader.ReadAsync(ct).ConfigureAwait(false))

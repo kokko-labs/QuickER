@@ -500,4 +500,85 @@ public class DbConnectionDialogViewModelTests : IDisposable
         vm.ShowFilePath.Should().BeFalse();
         vm.ShowServerFields.Should().BeTrue();
     }
+
+    // ---------------- コマンドタイムアウト ----------------
+
+    /// <summary>新規入力の既定値が共通ヘルパーの既定（＝従来のハードコード値）であることを検証する</summary>
+    [Fact(DisplayName = "コマンドタイムアウトの既定は DbCommands の既定値")]
+    public void CommandTimeout_DefaultsToHelperDefault()
+    {
+        var vm = CreateVm(CreateStore());
+
+        vm.CommandTimeoutSeconds.Should().Be(DbCommands.DefaultTimeoutSeconds);
+    }
+
+    /// <summary>キーを持たない旧プロファイルを読んでも既定値へ落ちる（JSON 後方互換）ことを検証する</summary>
+    [Fact(DisplayName = "コマンドタイムアウトを持たない旧プロファイルは既定値で読み込まれる")]
+    public void CommandTimeout_MissingInLegacyProfile_FallsBackToDefault()
+    {
+        var store = CreateStore();
+        // キーが無い旧 JSON を模して、既定値のまま保存されたプロファイルを読み戻す
+        store.Upsert(
+            new SqlConnectionProfile { Name = "旧プロファイル", Server = "legacy" },
+            password: ""
+        );
+
+        var vm = CreateVm(store);
+        vm.SelectedProfileItem = vm.Profiles[0];
+
+        vm.CommandTimeoutSeconds.Should().Be(DbCommands.DefaultTimeoutSeconds);
+    }
+
+    /// <summary>プロファイルへ保存した値が復元され、確定結果（接続設定）へも載ることを検証する</summary>
+    [Fact(DisplayName = "コマンドタイムアウトはプロファイルへ保存され接続設定へ流れる")]
+    public void CommandTimeout_RoundTripsThroughProfileAndSettings()
+    {
+        var store = CreateStore();
+        var vm = CreateVm(store);
+        vm.Host = "server";
+        vm.Database = "db";
+        vm.CommandTimeoutSeconds = 180;
+        vm.ProfileName = "長時間取込";
+        vm.SaveProfileCommand.Execute(null);
+
+        var reopened = CreateVm(store);
+        reopened.SelectedProfileItem = reopened.Profiles.Single(p =>
+            p.Profile.Name == "長時間取込"
+        );
+        reopened.OkCommand.Execute(null);
+
+        reopened.CommandTimeoutSeconds.Should().Be(180);
+        reopened.Result.Should().NotBeNull();
+        reopened.Result!.CommandTimeoutSeconds.Should().Be(180);
+    }
+
+    /// <summary>0（無制限）は ADO.NET の規約どおり通ることを検証する</summary>
+    [Fact(DisplayName = "コマンドタイムアウト 0（無制限）は確定できる")]
+    public void CommandTimeout_ZeroIsAccepted()
+    {
+        var vm = CreateVm(CreateStore());
+        vm.Host = "server";
+        vm.Database = "db";
+        vm.CommandTimeoutSeconds = 0;
+
+        vm.OkCommand.Execute(null);
+
+        vm.Result.Should().NotBeNull();
+        vm.Result!.CommandTimeoutSeconds.Should().Be(0);
+    }
+
+    /// <summary>負値は確定時に弾く（黙って既定へ丸めない）ことを検証する</summary>
+    [Fact(DisplayName = "負のコマンドタイムアウトは OK を拒否する")]
+    public void CommandTimeout_NegativeRejectsOk()
+    {
+        var vm = CreateVm(CreateStore());
+        vm.Host = "server";
+        vm.Database = "db";
+        vm.CommandTimeoutSeconds = -1;
+
+        vm.OkCommand.Execute(null);
+
+        vm.Result.Should().BeNull();
+        vm.StatusMessage.Should().Be(Strings.DbConnection_CommandTimeoutInvalid);
+    }
 }

@@ -17,17 +17,26 @@ namespace QuickER.CodeGen.CSharp;
 internal static class MultiDialectTypeReconciler
 {
     /// <summary>
+    /// 行バージョンとして解決した方言（owner）ごとの統一列のまとまり。
+    /// </summary>
+    /// <param name="Dialect">行バージョンとして解決した方言名</param>
+    /// <param name="Lines">その方言が owner になった列の <c>{テーブル}.{列}</c> 表記（図の並び順）</param>
+    public sealed record RowVersionDialectGroup(string Dialect, IReadOnlyList<string> Lines);
+
+    /// <summary>
     /// 行バージョン列の型統一の結果。
     /// </summary>
     /// <param name="ColumnTypes">統一後の主辞書（統一対象が無ければ入力と同一インスタンス）</param>
     /// <param name="UnifiedColumnIds">統一した（＝型不一致検証の対象外にする）カラム ID の集合</param>
-    /// <param name="Lines">Info 診断へ載せる <c>{テーブル}.{列}</c> 表記の一覧（図の並び順）</param>
-    /// <param name="RowVersionDialect">行バージョンとして解決した方言名（統一対象が無ければ <c>null</c>）</param>
+    /// <param name="Groups">
+    /// 統一した列を owner 方言ごとにまとめたもの（初出順＝図のエンティティ順・列順。統一対象が無ければ空）。
+    /// 列ごとに owner を持つのは、行バージョンを解決できる方言が 2 つ以上になったとき「最初の 1 列の owner で
+    /// 全列を括る」と、実際には別方言が採番する列まで誤った方言名で通知してしまうため。
+    /// </param>
     public sealed record RowVersionReconciliation(
         IReadOnlyDictionary<Guid, CSharpTypeInfo> ColumnTypes,
         IReadOnlySet<Guid> UnifiedColumnIds,
-        IReadOnlyList<string> Lines,
-        string? RowVersionDialect
+        IReadOnlyList<RowVersionDialectGroup> Groups
     );
 
     /// <summary>
@@ -60,17 +69,14 @@ internal static class MultiDialectTypeReconciler
 
         if (dicts.Count < 2)
         {
-            return new RowVersionReconciliation(
-                primaryColumnTypes,
-                new HashSet<Guid>(),
-                [],
-                RowVersionDialect: null
-            );
+            return new RowVersionReconciliation(primaryColumnTypes, new HashSet<Guid>(), []);
         }
 
         var unified = new HashSet<Guid>();
-        var lines = new List<string>();
-        string? rowVersionDialect = null;
+        // owner 方言ごとの行一覧。並びは初出順（＝図のエンティティ順・列順）で決定的にするため、
+        // 出現順のリストと引き当て用の辞書を併用する
+        var groups = new List<(string Dialect, List<string> Lines)>();
+        var groupsByDialect = new Dictionary<string, List<string>>(StringComparer.Ordinal);
         Dictionary<Guid, CSharpTypeInfo>? replaced = null;
 
         foreach (var entity in diagram.Entities)
@@ -88,8 +94,17 @@ internal static class MultiDialectTypeReconciler
                 }
 
                 unified.Add(column.Id);
-                lines.Add($"{entity.TableName}.{column.Name}");
-                rowVersionDialect ??= owner.Dialect;
+
+                // 通知は owner 方言ごとに分ける（列によって採番する方言が違い得るため、
+                // 最初の 1 列の owner で全列を括らない）
+                if (!groupsByDialect.TryGetValue(owner.Dialect, out var groupLines))
+                {
+                    groupLines = [];
+                    groupsByDialect.Add(owner.Dialect, groupLines);
+                    groups.Add((owner.Dialect, groupLines));
+                }
+
+                groupLines.Add($"{entity.TableName}.{column.Name}");
 
                 // 主辞書が既に行バージョンの解決（図の方言が sqlserver の通常ケース）ならそのままでよい
                 if (
@@ -110,8 +125,7 @@ internal static class MultiDialectTypeReconciler
         return new RowVersionReconciliation(
             replaced ?? primaryColumnTypes,
             unified,
-            lines,
-            rowVersionDialect
+            groups.Select(g => new RowVersionDialectGroup(g.Dialect, g.Lines)).ToList()
         );
     }
 
@@ -237,18 +251,16 @@ internal static class MultiDialectTypeReconciler
                 continue;
             }
 
-            // 主辞書の型（型名・参照区分・MaxLength）は保ちつつ、SqlServer 由来の SqlColumnType メタ情報だけ載せる
-            result[columnId] = new CSharpTypeInfo
+            // 主辞書の型（型名・参照区分・MaxLength・中立トークン等）は保ちつつ、SqlServer 由来の SqlColumnType
+            // メタ情報だけを差し替える。全項目を列挙して new し直すと、プロパティが増えたときに写し漏れても
+            // コンパイルが通ってしまう（実際に CanonicalTypeToken の写し漏れで、図の方言が非 sqlserver の
+            // マルチターゲットから [DbColumnMeta] が黙って消えていた）ため with 式で差分だけを書く
+            result[columnId] = primary with
             {
-                TypeName = primary.TypeName,
-                IsReferenceType = primary.IsReferenceType,
-                MaxLength = primary.MaxLength,
                 Precision = sqlServer.Precision,
                 Scale = sqlServer.Scale,
                 SqlDbTypeName = sqlServer.SqlDbTypeName,
                 SqlDeclaredLength = sqlServer.SqlDeclaredLength,
-                IsRowVersion = primary.IsRowVersion,
-                IsUnboundedBinary = primary.IsUnboundedBinary,
             };
         }
 

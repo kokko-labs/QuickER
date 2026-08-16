@@ -20,6 +20,47 @@ namespace QuickER.Tests.Gui.ViewModels;
 /// </summary>
 public class MainViewModelTargetDbmsTests
 {
+    /// <summary>SQL Server と SQLite（実プロバイダ）を登録したレジストリを作る</summary>
+    /// <remarks>
+    /// rowversion → BLOB の「NOT NULL 解除を伴う変換」は実カタログ 2 つの組み合わせでしか起きないため、
+    /// 擬似プロバイダではなく実プロバイダを使う
+    /// </remarks>
+    private static (
+        MainViewModel Vm,
+        SqliteProvider Sqlite,
+        StubDialogService Dialogs
+    ) CreateSqliteVm()
+    {
+        var sqlite = new SqliteProvider();
+        var registry = new DatabaseProviderRegistry(
+            new IDatabaseProvider[] { new SqlServerProvider(), sqlite }
+        );
+        var dialogs = new StubDialogService();
+        var vm = new MainViewModel(
+            dialogs,
+            new NoopAppDialogService(),
+            new NoopFileDialogService(),
+            providers: registry
+        );
+        return (vm, sqlite, dialogs);
+    }
+
+    /// <summary>選択中エンティティへ指定の名前・型・NULL 許容のカラムを追加する</summary>
+    private static ColumnViewModel AddColumn(
+        MainViewModel vm,
+        string name,
+        string dataType,
+        bool isNullable = false
+    )
+    {
+        vm.AddColumnCommand.Execute(null);
+        var column = vm.Entities[0].Columns[^1];
+        column.Name = name;
+        column.DataType = dataType;
+        column.IsNullable = isNullable;
+        return column;
+    }
+
     /// <summary>SQL Server と、int↔integer を変換する擬似プロバイダを登録したレジストリを作る</summary>
     private static (MainViewModel Vm, FakeProvider Fake, StubDialogService Dialogs) CreateVm()
     {
@@ -89,6 +130,79 @@ public class MainViewModelTargetDbmsTests
         // 導入文（message）は変換警告の見出し・一覧（details）に未変換列が並ぶ
         entry.Message.Should().Be(GuiStrings.TypeConversion_WarningHeader);
         entry.Details.Should().Contain("NewTable").And.Contain("uniqueidentifier");
+        // NOT NULL 解除の列が無いので、その節の見出しは本文へ出ない（従来と同一の 3 引数）
+        entry.Details.Should().NotContain(GuiStrings.TypeConversion_NullableWarningHeader);
+    }
+
+    /// <summary>NOT NULL 解除だけが起きた場合に、その見出しが導入文（message）になることを検証する</summary>
+    [Fact(DisplayName = "NOT NULL 解除のみなら解除の見出しを導入文にして列挙する")]
+    public void ChangeDbms_MakeNullableOnly_ShowsNullableWarning()
+    {
+        var (vm, sqlite, dialogs) = CreateSqliteVm();
+        vm.AddEntityCommand.Execute(null); // int の PK 列を持つ NewTable
+        AddColumn(vm, "RowVer", "rowversion");
+
+        vm.SelectedProvider = sqlite;
+
+        var entry = dialogs.InformationDetailsMessages.Should().ContainSingle().Subject;
+        entry.Message.Should().Be(GuiStrings.TypeConversion_NullableWarningHeader);
+        entry.Details.Should().Contain("NewTable").And.Contain("RowVer").And.Contain("BLOB");
+        // 未変換の見出しは message 側にも本文側にも出ない
+        entry.Details.Should().NotContain(GuiStrings.TypeConversion_WarningHeader);
+        entry.Title.Should().Be(GuiStrings.TypeConversion_WarningTitle);
+    }
+
+    /// <summary>未変換と NOT NULL 解除が同時に起きた場合に、1 回のダイアログで 2 節に分けて提示することを検証する</summary>
+    [Fact(DisplayName = "未変換と NOT NULL 解除は 1 回のダイアログへ 2 節でまとめる")]
+    public void ChangeDbms_UnconvertedAndMakeNullable_ShowsBothSections()
+    {
+        var (vm, sqlite, dialogs) = CreateSqliteVm();
+        vm.AddEntityCommand.Execute(null);
+        AddColumn(vm, "RowVer", "rowversion");
+        AddColumn(vm, "Tree", "hierarchyid"); // SQL Server カタログが解析できない＝未変換
+
+        vm.SelectedProvider = sqlite;
+
+        var entry = dialogs.InformationDetailsMessages.Should().ContainSingle().Subject;
+        // 導入文は未変換側の見出し（より重い告知を先に出す）
+        entry.Message.Should().Be(GuiStrings.TypeConversion_WarningHeader);
+        entry
+            .Details.Should()
+            .Contain("Tree")
+            .And.Contain("hierarchyid")
+            .And.Contain(GuiStrings.TypeConversion_NullableWarningHeader)
+            .And.Contain("RowVer")
+            .And.Contain("BLOB");
+    }
+
+    /// <summary>未変換も NOT NULL 解除も無ければダイアログを出さないことを検証する</summary>
+    [Fact(DisplayName = "未変換も NOT NULL 解除も無ければ通知しない")]
+    public void ChangeDbms_NothingToReport_ShowsNoDialog()
+    {
+        var (vm, sqlite, dialogs) = CreateSqliteVm();
+        vm.AddEntityCommand.Execute(null); // int の PK 列のみ＝素直に変換できる
+
+        vm.SelectedProvider = sqlite;
+
+        dialogs.InformationDetailsMessages.Should().BeEmpty();
+        dialogs.InformationMessages.Should().BeEmpty();
+    }
+
+    /// <summary>主キーの行バージョン列は NOT NULL 解除の対象外（通知しない）ことを検証する</summary>
+    [Fact(DisplayName = "主キーの行バージョン列は NOT NULL 解除として通知しない")]
+    public void ChangeDbms_PrimaryKeyRowVersion_IsNotListed()
+    {
+        var (vm, sqlite, dialogs) = CreateSqliteVm();
+        vm.AddEntityCommand.Execute(null);
+        var key = vm.Entities[0].Columns[0];
+        key.IsPrimaryKey.Should().BeTrue();
+        key.DataType = "rowversion";
+
+        vm.SelectedProvider = sqlite;
+
+        // 主キー列は 3 層が NOT NULL へクランプするため、解除の告知そのものが出ない
+        dialogs.InformationDetailsMessages.Should().BeEmpty();
+        key.IsNullable.Should().BeFalse();
     }
 
     /// <summary>未知の TargetDbms を持つ図の読込相当で、SQL Server として動作することを検証する</summary>
@@ -200,6 +314,7 @@ public class MainViewModelTargetDbmsTests
     {
         public Task<SchemaImportResult> ImportAsync(
             string connectionString,
+            int commandTimeoutSeconds,
             CancellationToken cancellationToken = default
         ) => Task.FromResult(new SchemaImportResult());
     }

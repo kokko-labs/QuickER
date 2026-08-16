@@ -1525,12 +1525,22 @@ public abstract partial class EditModelBase
 
     /// <summary>Cancels the row edit: the confirmed values and the RowState go back to the snapshot <see cref="BeginEdit"/> took, and the input strings are derived from the restored confirmed values.</summary>
     /// <remarks>
+    /// <para>
     /// The input errors are cleared for every property, not only for the ones the canceled edit touched, because rebuilding
     /// the input strings from the restored confirmed values goes through <see cref="RevertInput"/>, which clears each
     /// property's input error unconditionally. A conversion error that was already there when <see cref="BeginEdit"/> ran
     /// therefore disappears as well. The value it complained about is gone from the display in the same step - the input
     /// string is rebuilt from the confirmed value, so the unconvertible text is no longer on screen for the message to refer
     /// to - and it comes back as soon as that text is typed again.
+    /// </para>
+    /// <para>
+    /// The duplicate-value findings do not survive a cancel either, and no check is re-run to replace them: the ones the
+    /// database check registered are withdrawn unconditionally - even for a row that was begun and then canceled without a
+    /// single change, whose finding was still perfectly valid - and the ones about duplicates among the siblings are left
+    /// standing whether or not the restored value still duplicates one. Run the database check and the collection's
+    /// <c>Validate</c> again before saving; a finding of either is only ever as current as its last run.
+    /// See <see cref="CancelEditCore"/> for the reasoning.
+    /// </para>
     /// </remarks>
     public void CancelEdit()
     {
@@ -6098,6 +6108,84 @@ public static class SqliteSchemaBootstrap
     }
 }
 
+/// <summary>Converts a raw value read from the database into a target CLR type, including the types <see cref="Convert.ChangeType(object, Type, IFormatProvider)"/> cannot reach on its own.</summary>
+/// <remarks>
+/// <para>
+/// <c>Convert.ChangeType</c> only converts types that implement <see cref="IConvertible"/>. <see cref="TimeSpan"/>,
+/// <see cref="Guid"/>, <see cref="DateTimeOffset"/>, <see cref="DateOnly"/> and <see cref="TimeOnly"/> do not, so a driver
+/// that hands such a column back as text makes it throw <see cref="InvalidCastException"/> - which is what SQLite does for
+/// every one of them, since it stores them as TEXT. Those types are parsed from the string instead, with the invariant culture.
+/// SQL Server returns them already typed, so they take the pass-through above and never reach the parsing.
+/// </para>
+/// <para>
+/// This is the single conversion shared by value object rewrapping, raw SQL scalars and raw SQL projection properties. The
+/// SQLite engine's own column coercion (<c>EntitySaveMetadata.CoerceScalar</c>) accepts the same stored formats for the same
+/// types, so a value object column and a plain column read the same text the same way.
+/// </para>
+/// </remarks>
+internal static class RawValueConverter
+{
+    /// <summary>Converts the raw value to the target type (a nullable target is judged by its underlying type); a value already of that type is returned as is.</summary>
+    /// <param name="raw">The value the driver returned (never <c>null</c>: the callers map null and <c>DBNull</c> before this point).</param>
+    /// <param name="targetType">The type to convert to.</param>
+    /// <exception cref="InvalidCastException">No conversion exists between the two types.</exception>
+    /// <exception cref="FormatException">The text does not have the shape the target type requires.</exception>
+    /// <exception cref="OverflowException">The value does not fit the target type.</exception>
+    public static object ConvertRaw(object raw, Type targetType)
+    {
+        var underlying = Nullable.GetUnderlyingType(targetType) ?? targetType;
+
+        if (underlying.IsInstanceOfType(raw))
+        {
+            return raw;
+        }
+
+        // Text is the only shape these types can arrive in, and none of them implements IConvertible,
+        // so leaving them to ChangeType would fail on every value rather than on a malformed one
+        if (raw is string text && !typeof(IConvertible).IsAssignableFrom(underlying))
+        {
+            if (underlying == typeof(Guid))
+            {
+                return Guid.Parse(text);
+            }
+
+            if (underlying == typeof(TimeSpan))
+            {
+                return ParseTimeSpan(text);
+            }
+
+            if (underlying == typeof(DateTimeOffset))
+            {
+                return DateTimeOffset.Parse(text, CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind);
+            }
+
+            if (underlying == typeof(DateOnly))
+            {
+                return DateOnly.Parse(text, CultureInfo.InvariantCulture);
+            }
+
+            if (underlying == typeof(TimeOnly))
+            {
+                return TimeOnly.Parse(text, CultureInfo.InvariantCulture);
+            }
+        }
+
+        return Convert.ChangeType(raw, underlying, CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>Parses a <see cref="TimeSpan"/> stored as text.</summary>
+    /// <remarks>
+    /// The round-trip format "c" ([-][d.]hh:mm:ss[.fffffff]) is what the SQLite provider writes, and it also accepts the
+    /// forms that round-trip shorter values ("01:00:00", "1.02:03:04", "10:20:30.1234567"). The fallback covers text that
+    /// something other than this library stored (a hand-written INSERT such as "1:2:3"), which is the same set the plain
+    /// column path has always accepted, so both paths read the same rows.
+    /// </remarks>
+    private static TimeSpan ParseTimeSpan(string text) =>
+        TimeSpan.TryParseExact(text, "c", CultureInfo.InvariantCulture, out var roundTripped)
+            ? roundTripped
+            : TimeSpan.Parse(text, CultureInfo.InvariantCulture);
+}
+
 /// <summary>
 /// Shared helper responsible for raw SQL binding, scalar conversion, and projection mapping (a single implementation shared
 /// by QuickER's SQL Server implementation and the EF Core executor).
@@ -6297,7 +6385,7 @@ internal static class RawSqlMapper
 
         try
         {
-            return (TResult)Convert.ChangeType(raw, targetType, CultureInfo.InvariantCulture);
+            return (TResult)RawValueConverter.ConvertRaw(raw, targetType);
         }
         catch (Exception ex)
             when (ex is InvalidCastException or FormatException or OverflowException)
@@ -6390,14 +6478,9 @@ internal static class RawSqlMapper
         string propertyName
     )
     {
-        if (underlyingType.IsInstanceOfType(raw))
-        {
-            return raw;
-        }
-
         try
         {
-            return Convert.ChangeType(raw, underlyingType, CultureInfo.InvariantCulture);
+            return RawValueConverter.ConvertRaw(raw, underlyingType);
         }
         catch (Exception ex)
             when (ex is InvalidCastException or FormatException or OverflowException)
@@ -9675,6 +9758,11 @@ internal sealed class EntitySaveMetadata
     /// stored as TEXT, bool as INTEGER). Values already assignable are returned as-is, and Nullable types are judged by
     /// their underlying type. When conversion is impossible, throws an exception with a clear message.
     /// </remarks>
+    /// <seealso cref="RawValueConverter.ConvertRaw"/>
+    // The TEXT parsing below is deliberately kept alongside RawValueConverter.ConvertRaw (the shared conversion behind value
+    // object rewrapping and raw SQL) rather than delegating to it: this method reads DateTime with RoundtripKind, which the
+    // shared converter leaves to Convert.ChangeType because DateTime is IConvertible. Both accept the same text for the
+    // types they share (Guid, TimeSpan, DateTimeOffset), so keep them in step when either one changes.
     private static object CoerceScalar(object value, Type targetType)
     {
         var underlying = Nullable.GetUnderlyingType(targetType) ?? targetType;

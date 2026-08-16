@@ -77,17 +77,11 @@ public static class CanonicalTypeTokenAttacher
                 continue;
             }
 
-            result[columnId] = new CSharpTypeInfo
+            // 差分（トークン）だけを with 式で載せ替える。全項目を列挙して new し直すと、プロパティが増えたときの
+            // 写し漏れがコンパイルを通ってしまう（同じ書き方をしていた [SqlColumnType] 補完側では、実際に
+            // CanonicalTypeToken が写されず属性が黙って消えていた）
+            result[columnId] = typeInfo with
             {
-                TypeName = typeInfo.TypeName,
-                IsReferenceType = typeInfo.IsReferenceType,
-                MaxLength = typeInfo.MaxLength,
-                Precision = typeInfo.Precision,
-                Scale = typeInfo.Scale,
-                SqlDbTypeName = typeInfo.SqlDbTypeName,
-                SqlDeclaredLength = typeInfo.SqlDeclaredLength,
-                IsRowVersion = typeInfo.IsRowVersion,
-                IsUnboundedBinary = typeInfo.IsUnboundedBinary,
                 CanonicalTypeToken = token,
             };
         }

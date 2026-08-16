@@ -863,12 +863,22 @@ public abstract partial class EditModelBase
 
     /// <summary>Cancels the row edit: the confirmed values and the RowState go back to the snapshot <see cref="BeginEdit"/> took, and the input strings are derived from the restored confirmed values.</summary>
     /// <remarks>
+    /// <para>
     /// The input errors are cleared for every property, not only for the ones the canceled edit touched, because rebuilding
     /// the input strings from the restored confirmed values goes through <see cref="RevertInput"/>, which clears each
     /// property's input error unconditionally. A conversion error that was already there when <see cref="BeginEdit"/> ran
     /// therefore disappears as well. The value it complained about is gone from the display in the same step - the input
     /// string is rebuilt from the confirmed value, so the unconvertible text is no longer on screen for the message to refer
     /// to - and it comes back as soon as that text is typed again.
+    /// </para>
+    /// <para>
+    /// The duplicate-value findings do not survive a cancel either, and no check is re-run to replace them: the ones the
+    /// database check registered are withdrawn unconditionally - even for a row that was begun and then canceled without a
+    /// single change, whose finding was still perfectly valid - and the ones about duplicates among the siblings are left
+    /// standing whether or not the restored value still duplicates one. Run the database check and the collection's
+    /// <c>Validate</c> again before saving; a finding of either is only ever as current as its last run.
+    /// See <see cref="CancelEditCore"/> for the reasoning.
+    /// </para>
     /// </remarks>
     public void CancelEdit()
     {

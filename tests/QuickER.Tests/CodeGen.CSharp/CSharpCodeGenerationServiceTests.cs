@@ -1290,10 +1290,11 @@ public class CSharpCodeGenerationServiceTests
                 "catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentOutOfRangeException)"
             );
         content.Should().Contain("columns ({ColumnList})");
-        // スカラー・単一値変換は ChangeType(InvariantCulture) / 変換不能で例外
+        // スカラー・単一値変換は共有変換ヘルパー経由（ChangeType が扱えない TimeSpan / Guid 等も復元できる）
+        content.Should().Contain("RawValueConverter.ConvertRaw(raw, targetType)");
         content
             .Should()
-            .Contain("Convert.ChangeType(raw, targetType, CultureInfo.InvariantCulture)");
+            .Contain("return Convert.ChangeType(raw, underlying, CultureInfo.InvariantCulture);");
         // InvariantCulture 使用のため System.Globalization を using
         content.Should().Contain("using System.Globalization;");
     }

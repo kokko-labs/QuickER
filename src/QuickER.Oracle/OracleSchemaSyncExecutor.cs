@@ -56,9 +56,7 @@ public sealed class OracleSchemaSyncExecutor : ISchemaSyncExecutor
 
             try
             {
-                await using var cmd = conn.CreateCommand();
-                cmd.CommandText = sql;
-                cmd.CommandTimeout = 60;
+                await using var cmd = DbCommands.Create(conn, sql, settings.CommandTimeoutSeconds);
                 await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
                 result.Batches.Add(new SchemaSyncBatchResult(i + 1, sql, true, null));
             }

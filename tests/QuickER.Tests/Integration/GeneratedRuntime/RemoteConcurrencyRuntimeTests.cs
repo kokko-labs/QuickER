@@ -1,9 +1,8 @@
-using System;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
-using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
 using Microsoft.Extensions.DependencyInjection;
@@ -13,34 +12,27 @@ using Xunit;
 namespace QuickER.Tests.Integration.GeneratedRuntime;
 
 /// <summary>
-/// rowversion 列を持つテーブルの楽観排他（<c>ConcurrencyMode</c>）が、<b>実 HTTP のリモート 3 階層</b>でも
-/// 直結と同じ意味論になることを検証する（Kestrel を 127.0.0.1 の空きポートで in-process 起動）。
+/// 楽観排他のランタイムスイートを<b>実 HTTP のリモート 3 階層</b>で流す派生
+/// （Kestrel を 127.0.0.1 の空きポートで in-process 起動・Docker 不要＝CI 常時実行）。
 /// </summary>
 /// <remarks>
 /// <para>
 /// サーバー実体は BinaryFixture の<b>インメモリ Repository</b>（<c>AddGeneratedInMemoryRepositories</c> はリモート面
-/// <c>I{Entity}RemoteRepository</c> への転送登録も行う）で、実 DB を使わないため Docker 不要＝CI 常時実行。
-/// クライアントは生成された HTTP リモート実装のみを使う。
+/// <c>I{Entity}RemoteRepository</c> への転送登録も行う）。クライアントは生成された HTTP リモート実装のみを使う。
+/// バックエンド非依存のシナリオは基底 <see cref="ConcurrencyRuntimeTestsBase{TEntity, TConflictException}"/> が持ち、
+/// それが緑になること自体が「<c>ConcurrencyMode</c> がリクエストへ載る」「応答の版対応表が手元のグラフへ書き戻る」
+/// 「サーバーの競合が HTTP 409 経由で同じ型のまま復元される」の証明になる。
 /// </para>
 /// <para>
-/// 柱は「転送」と「反映」の 2 点:
-/// </para>
-/// <list type="bullet">
-///   <item><c>ConcurrencyMode</c> がリクエストへ載る＝古い版のままでも <c>ForceOverwrite</c> なら通る</item>
-///   <item>Insert / Update / Save の応答が版（対応表）を運び、手元のグラフへ書き戻される＝再取得なしで続けて保存できる</item>
-///   <item>競合はサーバーの <c>SaveConflictException</c> が HTTP 409 経由で同じ型のまま復元される</item>
-/// </list>
-/// <para>
-/// 旧エンベロープ（<c>Mode</c> フィールドなし）は既定の <c>Optimistic</c> として読まれることも、生の JSON を直接
-/// POST して固定する。除外列（payload / thumb）は値を持ったままだと UPDATE が拒否される既存仕様のため、
-/// 本テストは一貫して未取得状態（null / 空配列）のまま扱う。
+/// 本クラスはリモート固有の検証——複数ルートの版書き戻し・親子グラフの版対応表・旧エンベロープ（<c>Mode</c> 欠落）の
+/// 既定 Optimistic 退化・クライアント検証を迂回した生 JSON の未定義 <c>Mode</c> を 400 で弾くこと——を持つ。
+/// 除外列（payload / thumb）は値を持ったままだと UPDATE が拒否される既存仕様のため、一貫して未取得状態のまま扱う。
 /// </para>
 /// </remarks>
-[Trait("Category", "Integration")]
-public sealed class RemoteConcurrencyRuntimeTests : IAsyncLifetime
+public sealed class RemoteConcurrencyRuntimeTests
+    : ConcurrencyRuntimeTestsBase<DocumentEntity, SaveConflictException>,
+        IAsyncLifetime
 {
-    private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;
-
     private InProcessRemoteServer? _server;
     private ServiceProvider? _clientProvider;
     private string _baseUrl = string.Empty;
@@ -60,33 +52,144 @@ public sealed class RemoteConcurrencyRuntimeTests : IAsyncLifetime
             .BuildServiceProvider();
     }
 
+    /// <summary>使い終えたクライアント DI・サーバーを破棄する</summary>
+    public async ValueTask DisposeAsync()
+    {
+        _clientProvider?.Dispose();
+
+        if (_server is not null)
+        {
+            await _server.DisposeAsync();
+        }
+    }
+
     /// <summary>クライアント側の文書リモート面を解決する</summary>
     private IDocumentRemoteRepository Documents =>
         _clientProvider!.GetRequiredService<IDocumentRemoteRepository>();
 
-    /// <summary>文書 1 件をリモート経由で挿入し、版が書き戻されたインスタンスを返す</summary>
-    private async Task<DocumentEntity> InsertedAsync(int id, string title)
+    /// <summary>クライアント側のメモリモート面を解決する</summary>
+    private IDocumentNoteRemoteRepository Notes =>
+        _clientProvider!.GetRequiredService<IDocumentNoteRemoteRepository>();
+
+    /// <summary>中立表現の楽観排他ポリシーを、このフィクスチャの <c>ConcurrencyMode</c> へ翻訳する</summary>
+    private static ConcurrencyMode Translate(ConcurrencyChoice choice) =>
+        choice switch
+        {
+            ConcurrencyChoice.Optimistic => ConcurrencyMode.Optimistic,
+            ConcurrencyChoice.ForceOverwrite => ConcurrencyMode.ForceOverwrite,
+            _ => (ConcurrencyMode)99,
+        };
+
+    /// <summary>サーバーはテストごとに空で起動するため、リモート経由でシードを投入するだけでよい</summary>
+    protected override async Task ResetAndSeedAsync()
     {
-        var entity = new DocumentEntity { DocumentId = id, Title = title };
-        await Documents.InsertAsync(entity, Ct);
-        return entity;
+        await Documents.InsertAsync(NewEntity(SeededRootId, "alpha"), Ct);
+        await Documents.InsertAsync(NewEntity(SeededChildlessRootId, "beta"), Ct);
+        await Notes.InsertAsync(
+            new DocumentNoteEntity
+            {
+                NoteId = SeededChildId,
+                DocumentId = SeededRootId,
+                Note = "first",
+            },
+            Ct
+        );
     }
 
-    // ── 版の書き戻し ──
+    protected override DocumentEntity NewEntity(int id, string title) =>
+        new() { DocumentId = id, Title = title };
 
-    /// <summary>1. グラフ保存の応答が版を運び、同じグラフをそのまま 2 回目も保存できる</summary>
+    protected override Task InsertAsync(DocumentEntity entity) => Documents.InsertAsync(entity, Ct);
+
+    protected override Task<DocumentEntity?> GetAsync(int id) => Documents.GetByIdAsync(id, Ct);
+
+    /// <summary>リモート面は <c>Query()</c> を持たないため、親と子を別々に取得してグラフを組み立てる</summary>
+    protected override async Task<DocumentEntity?> GetWithChildrenAsync(int id)
+    {
+        var root = await Documents.GetByIdAsync(id, Ct);
+
+        if (root is null)
+        {
+            return null;
+        }
+
+        var child = await Notes.GetByIdAsync(SeededChildId, Ct);
+
+        if (child is not null)
+        {
+            root.DocumentNotes.Add(child);
+        }
+
+        return root;
+    }
+
+    protected override string GetTitle(DocumentEntity entity) => entity.Title;
+
+    protected override void SetTitle(DocumentEntity entity, string title) => entity.Title = title;
+
+    protected override byte[]? GetRowVersion(DocumentEntity entity) => entity.RowVer;
+
+    protected override void SetRowVersion(DocumentEntity entity, byte[]? rowVersion) =>
+        entity.RowVer = rowVersion;
+
+    protected override void MarkAdded(DocumentEntity entity) => entity.MarkAdded();
+
+    protected override void MarkUpdated(DocumentEntity entity) => entity.MarkUpdated();
+
+    protected override void MarkRemoved(DocumentEntity entity) => entity.MarkRemoved();
+
+    protected override Task<bool> UpdateAsync(
+        DocumentEntity entity,
+        ConcurrencyChoice mode = ConcurrencyChoice.Optimistic
+    ) => Documents.UpdateAsync(entity, Translate(mode), Ct);
+
+    protected override Task<int> SaveAsync(
+        DocumentEntity entity,
+        ConcurrencyChoice mode = ConcurrencyChoice.Optimistic,
+        bool insertWhenUpdateMissing = false
+    ) =>
+        Documents.SaveAsync(
+            entity,
+            insertWhenUpdateMissing: insertWhenUpdateMissing,
+            mode: Translate(mode),
+            cancellationToken: Ct
+        );
+
+    /// <summary>別途取得した最新インスタンス経由で更新する（手元のインスタンスの版は古いまま残る）</summary>
+    protected override async Task BumpByAnotherUserAsync(int id, string title)
+    {
+        var fresh = await Documents.GetByIdAsync(id, Ct);
+        fresh.Should().NotBeNull();
+
+        fresh!.Title = title;
+        (await Documents.UpdateAsync(fresh, cancellationToken: Ct)).Should().BeTrue();
+    }
+
+    protected override void EditFirstChild(DocumentEntity root, string note)
+    {
+        var child = root.DocumentNotes.First();
+        child.Note = note;
+        child.MarkUpdated();
+    }
+
+    protected override async Task<string?> ReadChildNoteAsync(int noteId) =>
+        (await Notes.GetByIdAsync(noteId, Ct))?.Note;
+
+    // ── リモート固有 1: グラフ保存の版対応表 ──
+
+    /// <summary>グラフ保存の応答は親子それぞれの版を運び、同じグラフをそのまま 2 回目も保存できる</summary>
     [Fact(
-        DisplayName = "[Concurrency/Remote] 1: SaveAsync の応答で版が書き戻り同じグラフを続けて保存できる"
+        DisplayName = "[Concurrency/Remote] SaveAsync の応答で親子の版が書き戻り同じグラフを続けて保存できる"
     )]
     public async Task SaveAsync_WritesBackRowVersion_AndAllowsConsecutiveSaves()
     {
-        var document = new DocumentEntity { DocumentId = 1, Title = "alpha" };
+        var document = NewEntity(SeededRootId, "alpha");
         document.MarkAdded();
 
         var note = new DocumentNoteEntity
         {
-            NoteId = 100,
-            DocumentId = 1,
+            NoteId = SeededChildId,
+            DocumentId = SeededRootId,
             Note = "first",
         };
         note.MarkAdded();
@@ -101,7 +204,7 @@ public sealed class RemoteConcurrencyRuntimeTests : IAsyncLifetime
         note.RowState.Should().Be(RowState.Unchanged);
         var afterInsert = document.RowVer;
 
-        // 2 回目: 再取得せずそのまま保存できる＝書き戻された版がストアの現在値と一致している証明
+        // 2 回目: 再取得せずそのまま保存できる＝書き戻された版がサーバーの現在値と一致している証明
         document.Title = "beta";
         document.MarkUpdated();
         note.Note = "second";
@@ -113,27 +216,12 @@ public sealed class RemoteConcurrencyRuntimeTests : IAsyncLifetime
         document.RowVer.Should().NotEqual(afterInsert, "保存のたびに新しい版が反映される");
     }
 
-    /// <summary>2. 挿入の応答も版を運ぶ（挿入直後のインスタンスをそのまま更新できる）</summary>
-    [Fact(DisplayName = "[Concurrency/Remote] 2: InsertAsync も応答で版を書き戻す")]
-    public async Task InsertAsync_WritesBackRowVersion()
-    {
-        var document = await InsertedAsync(1, "alpha");
-
-        document.RowVer.Should().NotBeNull("挿入で採番された版が応答で戻る");
-        document.RowVer!.Length.Should().Be(8, "インメモリの擬似版も rowversion と同じ 8 バイト");
-
-        document.Title = "updated";
-        (await Documents.UpdateAsync(document, cancellationToken: Ct))
-            .Should()
-            .BeTrue("再取得なしで更新できる＝直結と同じ挙動");
-    }
-
-    /// <summary>3. 複数ルートの保存でもルートごとに版が書き戻される</summary>
-    [Fact(DisplayName = "[Concurrency/Remote] 3: SaveMany は複数ルートそれぞれへ版を書き戻す")]
+    /// <summary>複数ルートの保存でもルートごとに版が書き戻される</summary>
+    [Fact(DisplayName = "[Concurrency/Remote] SaveMany は複数ルートそれぞれへ版を書き戻す")]
     public async Task SaveManyAsync_WritesBackRowVersionPerRoot()
     {
-        var first = new DocumentEntity { DocumentId = 1, Title = "alpha" };
-        var second = new DocumentEntity { DocumentId = 2, Title = "beta" };
+        var first = NewEntity(1, "alpha");
+        var second = NewEntity(2, "beta");
         first.MarkAdded();
         second.MarkAdded();
 
@@ -153,116 +241,18 @@ public sealed class RemoteConcurrencyRuntimeTests : IAsyncLifetime
             .Be(2, "どちらのルートも書き戻された版で版チェックが通る");
     }
 
-    // ── 単一 UpdateAsync ──
+    // ── リモート固有 2: 旧エンベロープ互換 ──
 
-    /// <summary>4. 単一更新は成功で版を書き戻し、古い版は 409 経由の SaveConflictException、行なしは false</summary>
+    /// <summary>Mode を持たない旧エンベロープは既定の Optimistic として読まれる</summary>
     [Fact(
-        DisplayName = "[Concurrency/Remote] 4: UpdateAsync は版を書き戻し・古い版は SaveConflictException・行なしは false"
-    )]
-    public async Task UpdateAsync_WritesBackRowVersion_AndReportsConflictOrMissingRow()
-    {
-        var document = await InsertedAsync(1, "alpha");
-        var stale = await Documents.GetByIdAsync(1, Ct);
-        stale.Should().NotBeNull();
-        stale!.RowVer.Should().Equal(document.RowVer, "同時点の取得は同じ版を持つ");
-
-        document.Title = "by-first";
-        (await Documents.UpdateAsync(document, cancellationToken: Ct)).Should().BeTrue();
-        document.RowVer.Should().NotEqual(stale.RowVer, "更新の応答で新しい版が反映される");
-
-        // 古い版のまま更新すると、サーバー側の SaveConflictException が HTTP 409 経由で同じ型のまま戻る
-        stale.Title = "by-second";
-        var conflict = async () => await Documents.UpdateAsync(stale, cancellationToken: Ct);
-
-        await conflict
-            .Should()
-            .ThrowAsync<SaveConflictException>()
-            .WithMessage("*modified by another user*");
-
-        (await Documents.GetByIdAsync(1, Ct))!
-            .Title.Should()
-            .Be("by-first", "競合した更新は適用されない（先勝ち）");
-
-        // 行なしは競合ではなく従来契約の false
-        var missing = new DocumentEntity
-        {
-            DocumentId = 999,
-            Title = "ghost",
-            RowVer = [0, 0, 0, 0, 0, 0, 0, 1],
-        };
-
-        (await Documents.UpdateAsync(missing, cancellationToken: Ct)).Should().BeFalse();
-    }
-
-    /// <summary>5. ForceOverwrite がリクエストへ載る（古い版のままでも上書きできる）</summary>
-    [Fact(DisplayName = "[Concurrency/Remote] 5: ForceOverwrite が転送され古い版でも上書きできる")]
-    public async Task UpdateAsync_ForceOverwrite_IsCarriedOverTheWire()
-    {
-        var document = await InsertedAsync(1, "alpha");
-        var stale = await Documents.GetByIdAsync(1, Ct);
-        var staleVersion = stale!.RowVer;
-
-        document.Title = "by-first";
-        await Documents.UpdateAsync(document, cancellationToken: Ct);
-
-        stale.Title = "forced";
-        (await Documents.UpdateAsync(stale, ConcurrencyMode.ForceOverwrite, Ct))
-            .Should()
-            .BeTrue("ポリシーが転送されるので版条件が外れる");
-
-        (await Documents.GetByIdAsync(1, Ct))!.Title.Should().Be("forced");
-        stale.RowVer.Should().NotEqual(staleVersion, "上書き後の新しい版も書き戻される");
-    }
-
-    // ── グラフ保存の競合 ──
-
-    /// <summary>6. グラフ保存の競合も 409 経由で SaveConflictException になる</summary>
-    [Fact(DisplayName = "[Concurrency/Remote] 6: グラフ保存の競合は SaveConflictException になる")]
-    public async Task SaveAsync_Throws_WhenRowVersionIsStale()
-    {
-        var document = await InsertedAsync(1, "alpha");
-        var stale = await Documents.GetByIdAsync(1, Ct);
-
-        document.Title = "by-first";
-        document.MarkUpdated();
-        await Documents.SaveAsync(document, cancellationToken: Ct);
-
-        stale!.Title = "by-second";
-        stale.MarkUpdated();
-        var conflict = async () => await Documents.SaveAsync(stale, cancellationToken: Ct);
-
-        await conflict
-            .Should()
-            .ThrowAsync<SaveConflictException>()
-            .WithMessage("*modified by another user*");
-        (await Documents.GetByIdAsync(1, Ct))!.Title.Should().Be("by-first");
-
-        // 版条件を外せば同じ古いインスタンスでも保存できる
-        (
-            await Documents.SaveAsync(
-                stale,
-                mode: ConcurrencyMode.ForceOverwrite,
-                cancellationToken: Ct
-            )
-        )
-            .Should()
-            .Be(1);
-        (await Documents.GetByIdAsync(1, Ct))!.Title.Should().Be("by-second");
-    }
-
-    // ── 旧エンベロープ互換 ──
-
-    /// <summary>7. Mode を持たない旧エンベロープは既定の Optimistic として読まれる</summary>
-    [Fact(
-        DisplayName = "[Concurrency/Remote] 7: Mode なしの旧エンベロープは Optimistic として扱われる"
+        DisplayName = "[Concurrency/Remote] Mode なしの旧エンベロープは Optimistic として扱われる"
     )]
     public async Task LegacyEnvelopeWithoutMode_IsReadAsOptimistic()
     {
-        var document = await InsertedAsync(1, "alpha");
-        var stale = await Documents.GetByIdAsync(1, Ct);
+        await ResetAndSeedAsync();
 
-        document.Title = "by-first";
-        await Documents.UpdateAsync(document, cancellationToken: Ct);
+        var stale = await Documents.GetByIdAsync(SeededRootId, Ct);
+        await BumpByAnotherUserAsync(SeededRootId, "by-first");
 
         using var raw = new HttpClient();
 
@@ -275,12 +265,44 @@ public sealed class RemoteConcurrencyRuntimeTests : IAsyncLifetime
             .Be(HttpStatusCode.Conflict, "Mode 欠落は既定の Optimistic＝版チェックが効く");
 
         // 版が最新なら同じ旧エンベロープで成功する（常に失敗しているわけではないことの対照）
-        var fresh = await Documents.GetByIdAsync(1, Ct);
+        var fresh = await Documents.GetByIdAsync(SeededRootId, Ct);
         fresh!.Title = "by-legacy";
         var accepted = await PostUpdateAsync(raw, new RemoteEntityRequest<DocumentEntity>(fresh));
 
         accepted.Should().Be(HttpStatusCode.OK);
-        (await Documents.GetByIdAsync(1, Ct))!.Title.Should().Be("by-legacy");
+        (await ReadTitleAsync(SeededRootId)).Should().Be("by-legacy");
+    }
+
+    /// <summary>
+    /// クライアント検証を迂回した手書きクライアント（生の JSON で <c>"Mode":99</c>）はサーバーが 400 で拒否する
+    /// （enum は JSON で任意の数値を受けるため、素通しすると版チェックが黙って無効化される）。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Concurrency/Remote] 生 JSON の未定義 Mode はサーバーが 400 BadRequest で拒否する"
+    )]
+    public async Task UndefinedConcurrencyModeOverTheWire_IsRejectedWith400()
+    {
+        await ResetAndSeedAsync();
+
+        var document = await Documents.GetByIdAsync(SeededRootId, Ct);
+        document!.Title = "by-undefined";
+        var entityJson = JsonSerializer.Serialize(document, RemoteJson.Options);
+
+        using var raw = new HttpClient();
+        var (status, body) = await PostUpdateJsonAsync(
+            raw,
+            $$"""{"Entity":{{entityJson}},"Mode":99}"""
+        );
+
+        status.Should().Be(HttpStatusCode.BadRequest, "リクエスト解釈の失敗＝クライアント起因");
+
+        var error = JsonSerializer.Deserialize<RemoteError>(body, RemoteJson.Options);
+        error.Should().NotBeNull();
+        error!.Type.Should().Be("BadRequest");
+
+        (await ReadTitleAsync(SeededRootId))
+            .Should()
+            .Be("alpha", "拒否されたので更新は適用されない");
     }
 
     /// <summary>生の JSON をそのまま Update エンドポイントへ POST し、応答のステータスコードを返す</summary>
@@ -306,73 +328,5 @@ public sealed class RemoteConcurrencyRuntimeTests : IAsyncLifetime
             Ct
         );
         return (response.StatusCode, await response.Content.ReadAsStringAsync(Ct));
-    }
-
-    // ── 未定義の ConcurrencyMode ──
-
-    /// <summary>8. クライアントは未定義値を送信前に弾く（ArgumentOutOfRangeException）</summary>
-    [Fact(
-        DisplayName = "[Concurrency/Remote] 8: 未定義の ConcurrencyMode はクライアントが送信前に弾く"
-    )]
-    public async Task UndefinedConcurrencyMode_IsRejectedBeforeSending()
-    {
-        var document = await InsertedAsync(1, "alpha");
-
-        document.Title = "by-undefined";
-        var update = async () => await Documents.UpdateAsync(document, (ConcurrencyMode)99, Ct);
-
-        await update.Should().ThrowAsync<ArgumentOutOfRangeException>().WithParameterName("mode");
-
-        document.MarkUpdated();
-        var save = async () =>
-            await Documents.SaveAsync(document, mode: (ConcurrencyMode)99, cancellationToken: Ct);
-
-        await save.Should().ThrowAsync<ArgumentOutOfRangeException>().WithParameterName("mode");
-
-        (await Documents.GetByIdAsync(1, Ct))!
-            .Title.Should()
-            .Be("alpha", "送信前に弾かれるのでサーバー側は無変更");
-    }
-
-    /// <summary>
-    /// 9. クライアント検証を迂回した手書きクライアント（生の JSON で <c>"Mode":99</c>）はサーバーが 400 で拒否する
-    /// （enum は JSON で任意の数値を受けるため、素通しすると版チェックが黙って無効化される）。
-    /// </summary>
-    [Fact(
-        DisplayName = "[Concurrency/Remote] 9: 生 JSON の未定義 Mode はサーバーが 400 BadRequest で拒否する"
-    )]
-    public async Task UndefinedConcurrencyModeOverTheWire_IsRejectedWith400()
-    {
-        var document = await InsertedAsync(1, "alpha");
-
-        document.Title = "by-undefined";
-        var entityJson = JsonSerializer.Serialize(document, RemoteJson.Options);
-
-        using var raw = new HttpClient();
-        var (status, body) = await PostUpdateJsonAsync(
-            raw,
-            $$"""{"Entity":{{entityJson}},"Mode":99}"""
-        );
-
-        status.Should().Be(HttpStatusCode.BadRequest, "リクエスト解釈の失敗＝クライアント起因");
-
-        var error = JsonSerializer.Deserialize<RemoteError>(body, RemoteJson.Options);
-        error.Should().NotBeNull();
-        error!.Type.Should().Be("BadRequest");
-
-        (await Documents.GetByIdAsync(1, Ct))!
-            .Title.Should()
-            .Be("alpha", "拒否されたので更新は適用されない");
-    }
-
-    /// <summary>使い終えたクライアント DI・サーバーを破棄する</summary>
-    public async ValueTask DisposeAsync()
-    {
-        _clientProvider?.Dispose();
-
-        if (_server is not null)
-        {
-            await _server.DisposeAsync();
-        }
     }
 }

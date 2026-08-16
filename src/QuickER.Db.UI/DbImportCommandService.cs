@@ -65,7 +65,10 @@ public sealed class DbImportCommandService
         {
             var connectionString = picked.Provider.BuildConnectionString(picked.Settings);
             var result = await picked
-                .Provider.SchemaImporter.ImportAsync(connectionString)
+                .Provider.SchemaImporter.ImportAsync(
+                    connectionString,
+                    picked.Settings.CommandTimeoutSeconds
+                )
                 .ConfigureAwait(true);
 
             // Guid 引継マージ: 取込結果の Id を現在図の Guid へ寄せ、クエリ定義・レイアウトを温存できるようにする。

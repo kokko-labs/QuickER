@@ -1,4 +1,4 @@
-using System.Threading;
+using System.Linq;
 using System.Threading.Tasks;
 using AwesomeAssertions;
 using Microsoft.Extensions.DependencyInjection;
@@ -8,26 +8,27 @@ using Xunit;
 namespace QuickER.Tests.Integration.GeneratedRuntime;
 
 /// <summary>
-/// rowversion 列 <b>× 値オブジェクト</b>の楽観排他が、実 HTTP のリモート 3 階層でも直結と同じ意味論になることを
-/// 検証する（Kestrel を 127.0.0.1 の空きポートで in-process 起動・Docker 不要＝CI 常時実行）。
+/// 楽観排他のランタイムスイートを <b>rowversion 列 × 値オブジェクト</b>の図で、<b>実 HTTP のリモート 3 階層</b>へ
+/// 流す派生（Kestrel を 127.0.0.1 の空きポートで in-process 起動・Docker 不要＝CI 常時実行）。
 /// </summary>
 /// <remarks>
 /// <para>
 /// 版対応表（<c>RemoteRowVersionEntry</c>）が運ぶのは生の <c>byte[]</c> なので、VO 有効時は
 /// <b>サーバー側の収集</b>（VO を素値へ開く）と<b>クライアント側の書き戻し</b>（素値を VO へ包む）の両方で
 /// 変換が要る。旧実装は収集側が常に <c>null</c>（VO は <c>byte[]</c> にキャストできない）で対応表が空になり、
-/// 書き戻し側は生 <c>byte[]</c> の <c>SetValue</c> で例外になっていた。
+/// 書き戻し側は生 <c>byte[]</c> の <c>SetValue</c> で例外になっていた。基底
+/// <see cref="ConcurrencyRuntimeTestsBase{TEntity, TConflictException}"/> のシナリオが緑になること自体が
+/// 両側の変換の実証で、本クラスは加えて親子グラフの版対応表を VO 固有の観点として持つ。
 /// </para>
 /// <para>
 /// サーバー実体は本フィクスチャの<b>インメモリ Repository</b>（<c>AddGeneratedInMemoryRepositories</c> は
 /// リモート面への転送登録も行う）。クライアントは生成された HTTP リモート実装のみを使う。
 /// </para>
 /// </remarks>
-[Trait("Category", "Integration")]
-public sealed class ConcurrencyVoRemoteRuntimeTests : IAsyncLifetime
+public sealed class ConcurrencyVoRemoteRuntimeTests
+    : ConcurrencyRuntimeTestsBase<GadgetEntity, SaveConflictException>,
+        IAsyncLifetime
 {
-    private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;
-
     private InProcessRemoteServer? _server;
     private ServiceProvider? _clientProvider;
 
@@ -60,57 +61,130 @@ public sealed class ConcurrencyVoRemoteRuntimeTests : IAsyncLifetime
     private IGadgetRemoteRepository Gadgets =>
         _clientProvider!.GetRequiredService<IGadgetRemoteRepository>();
 
-    /// <summary>gadget 1 件をリモート経由で挿入し、版が書き戻されたインスタンスを返す</summary>
-    private async Task<GadgetEntity> InsertedAsync(int id, string name)
-    {
-        var entity = new GadgetEntity
+    /// <summary>クライアント側のメモリモート面を解決する</summary>
+    private IGadgetNoteRemoteRepository Notes =>
+        _clientProvider!.GetRequiredService<IGadgetNoteRemoteRepository>();
+
+    /// <summary>中立表現の楽観排他ポリシーを、このフィクスチャの <c>ConcurrencyMode</c> へ翻訳する</summary>
+    private static ConcurrencyMode Translate(ConcurrencyChoice choice) =>
+        choice switch
         {
-            GadgetId = GadgetIdValue.Create(id),
-            Name = NameValue.Create(name),
+            ConcurrencyChoice.Optimistic => ConcurrencyMode.Optimistic,
+            ConcurrencyChoice.ForceOverwrite => ConcurrencyMode.ForceOverwrite,
+            _ => (ConcurrencyMode)99,
         };
-        await Gadgets.InsertAsync(entity, Ct);
 
-        return entity;
-    }
-
-    // ── 版の往復 ──
-
-    /// <summary>1. 挿入の応答が版を運び、VO 型として書き戻る（再取得なしで続けて更新できる）</summary>
-    [Fact(DisplayName = "[Concurrency/VO/Remote] 1: InsertAsync が VO 型の版を応答で書き戻す")]
-    public async Task InsertAsync_WritesBackRowVersion_AsValueObject()
+    /// <summary>サーバーはテストごとに空で起動するため、リモート経由でシードを投入するだけでよい</summary>
+    protected override async Task ResetAndSeedAsync()
     {
-        var gadget = await InsertedAsync(1, "alpha");
-
-        gadget.RowVer.Should().NotBeNull("応答の版対応表から VO として書き戻される");
-        gadget
-            .RowVer.Value.Length.Should()
-            .Be(8, "インメモリの擬似版も rowversion と同じ 8 バイト");
-
-        gadget.Name = NameValue.Create("updated");
-        (await Gadgets.UpdateAsync(gadget, cancellationToken: Ct))
-            .Should()
-            .BeTrue("再取得なしで更新できる＝直結と同じ挙動");
+        await Gadgets.InsertAsync(NewEntity(SeededRootId, "alpha"), Ct);
+        await Gadgets.InsertAsync(NewEntity(SeededChildlessRootId, "beta"), Ct);
+        await Notes.InsertAsync(NewNote(SeededChildId, SeededRootId, "first"), Ct);
     }
 
-    /// <summary>2. グラフ保存の応答は親子それぞれの版を運び、同じグラフをそのまま 2 回目も保存できる</summary>
+    /// <summary>gadget を組み立てる（キー・名前とも VO へ包む）</summary>
+    protected override GadgetEntity NewEntity(int id, string title) =>
+        new() { GadgetId = GadgetIdValue.Create(id), Name = NameValue.Create(title) };
+
+    /// <summary>メモ（子）を組み立てる</summary>
+    private static GadgetNoteEntity NewNote(int noteId, int gadgetId, string note) =>
+        new()
+        {
+            NoteId = NoteIdValue.Create(noteId),
+            GadgetId = GadgetIdValue.Create(gadgetId),
+            Note = NoteValue.Create(note),
+        };
+
+    protected override Task InsertAsync(GadgetEntity entity) => Gadgets.InsertAsync(entity, Ct);
+
+    protected override Task<GadgetEntity?> GetAsync(int id) =>
+        Gadgets.GetByIdAsync(GadgetIdValue.Create(id), Ct);
+
+    /// <summary>リモート面は <c>Query()</c> を持たないため、親と子を別々に取得してグラフを組み立てる</summary>
+    protected override async Task<GadgetEntity?> GetWithChildrenAsync(int id)
+    {
+        var root = await GetAsync(id);
+
+        if (root is null)
+        {
+            return null;
+        }
+
+        var child = await Notes.GetByIdAsync(NoteIdValue.Create(SeededChildId), Ct);
+
+        if (child is not null)
+        {
+            root.GadgetNotes.Add(child);
+        }
+
+        return root;
+    }
+
+    protected override string GetTitle(GadgetEntity entity) => entity.Name.Value;
+
+    protected override void SetTitle(GadgetEntity entity, string title) =>
+        entity.Name = NameValue.Create(title);
+
+    protected override byte[]? GetRowVersion(GadgetEntity entity) => entity.RowVer?.Value;
+
+    protected override void SetRowVersion(GadgetEntity entity, byte[] rowVersion) =>
+        entity.RowVer = RowVerValue.Create(rowVersion);
+
+    protected override void MarkAdded(GadgetEntity entity) => entity.MarkAdded();
+
+    protected override void MarkUpdated(GadgetEntity entity) => entity.MarkUpdated();
+
+    protected override void MarkRemoved(GadgetEntity entity) => entity.MarkRemoved();
+
+    protected override Task<bool> UpdateAsync(
+        GadgetEntity entity,
+        ConcurrencyChoice mode = ConcurrencyChoice.Optimistic
+    ) => Gadgets.UpdateAsync(entity, Translate(mode), Ct);
+
+    protected override Task<int> SaveAsync(
+        GadgetEntity entity,
+        ConcurrencyChoice mode = ConcurrencyChoice.Optimistic,
+        bool insertWhenUpdateMissing = false
+    ) =>
+        Gadgets.SaveAsync(
+            entity,
+            insertWhenUpdateMissing: insertWhenUpdateMissing,
+            mode: Translate(mode),
+            cancellationToken: Ct
+        );
+
+    /// <summary>別途取得した最新インスタンス経由で更新する（手元のインスタンスの版は古いまま残る）</summary>
+    protected override async Task BumpByAnotherUserAsync(int id, string title)
+    {
+        var fresh = await GetAsync(id);
+        fresh.Should().NotBeNull();
+
+        fresh!.Name = NameValue.Create(title);
+        (await Gadgets.UpdateAsync(fresh, cancellationToken: Ct)).Should().BeTrue();
+    }
+
+    protected override void EditFirstChild(GadgetEntity root, string note)
+    {
+        var child = root.GadgetNotes.First();
+        child.Note = NoteValue.Create(note);
+        child.MarkUpdated();
+    }
+
+    protected override async Task<string?> ReadChildNoteAsync(int noteId) =>
+        (await Notes.GetByIdAsync(NoteIdValue.Create(noteId), Ct))?.Note.Value;
+
+    // ── VO 固有: 親子グラフの版対応表 ──
+
+    /// <summary>グラフ保存の応答は親子それぞれの版を VO 型で運び、同じグラフをそのまま 2 回目も保存できる</summary>
     [Fact(
-        DisplayName = "[Concurrency/VO/Remote] 2: SaveAsync は親子の版を書き戻し続けて保存できる"
+        DisplayName = "[Concurrency/VO/Remote] SaveAsync は親子の版を VO 型で書き戻し続けて保存できる"
     )]
     public async Task SaveAsync_WritesBackRowVersion_AndAllowsConsecutiveSaves()
     {
-        var gadget = new GadgetEntity
-        {
-            GadgetId = GadgetIdValue.Create(1),
-            Name = NameValue.Create("alpha"),
-        };
+        var gadget = NewEntity(SeededRootId, "alpha");
         gadget.MarkAdded();
 
-        var note = new GadgetNoteEntity
-        {
-            NoteId = NoteIdValue.Create(100),
-            GadgetId = GadgetIdValue.Create(1),
-            Note = NoteValue.Create("first"),
-        };
+        var note = NewNote(SeededChildId, SeededRootId, "first");
         note.MarkAdded();
         gadget.GadgetNotes.Add(note);
 
@@ -121,6 +195,7 @@ public sealed class ConcurrencyVoRemoteRuntimeTests : IAsyncLifetime
         gadget
             .RowVer.Should()
             .NotBeNull("親の版が書き戻る（対応表の収集がサーバー側で VO を開けている証明）");
+        gadget.RowVer.Value.Length.Should().Be(8, "擬似版も rowversion と同じ 8 バイト");
         note.RowVer.Should().NotBeNull("子の版も書き戻る");
         gadget.RowState.Should().Be(RowState.Unchanged, "保存後の状態確定は従来どおり");
         note.RowState.Should().Be(RowState.Unchanged);
@@ -136,55 +211,5 @@ public sealed class ConcurrencyVoRemoteRuntimeTests : IAsyncLifetime
             .Should()
             .Be(2, "書き戻された版で版チェックが通る");
         gadget.RowVer.Should().NotBe(afterInsert, "保存のたびに新しい版が反映される");
-    }
-
-    // ── 競合 ──
-
-    /// <summary>3. 古い版のままの更新は HTTP 409 経由で SaveConflictException として復元される</summary>
-    [Fact(
-        DisplayName = "[Concurrency/VO/Remote] 3: 版が古い更新は 409 経由の SaveConflictException になる"
-    )]
-    public async Task UpdateAsync_Throws_WhenRowVersionIsStale()
-    {
-        var gadget = await InsertedAsync(1, "alpha");
-        var stale = await Gadgets.GetByIdAsync(GadgetIdValue.Create(1), Ct);
-        stale!.RowVer.Should().Be(gadget.RowVer, "同時点の取得は同じ版を持つ");
-
-        gadget.Name = NameValue.Create("by-first");
-        (await Gadgets.UpdateAsync(gadget, cancellationToken: Ct)).Should().BeTrue();
-
-        stale.Name = NameValue.Create("by-second");
-        var conflict = async () => await Gadgets.UpdateAsync(stale, cancellationToken: Ct);
-
-        await conflict
-            .Should()
-            .ThrowAsync<SaveConflictException>()
-            .WithMessage("*modified by another user*");
-
-        (await Gadgets.GetByIdAsync(GadgetIdValue.Create(1), Ct))!
-            .Name.Value.Should()
-            .Be("by-first", "競合した更新は適用されない（先勝ち）");
-    }
-
-    /// <summary>4. ForceOverwrite はリクエストへ載り、古い版のままでも上書きできる</summary>
-    [Fact(
-        DisplayName = "[Concurrency/VO/Remote] 4: ForceOverwrite が転送され古い版でも上書きできる"
-    )]
-    public async Task UpdateAsync_ForceOverwrite_IsCarriedOverTheWire()
-    {
-        var gadget = await InsertedAsync(1, "alpha");
-        var stale = await Gadgets.GetByIdAsync(GadgetIdValue.Create(1), Ct);
-        var staleVersion = stale!.RowVer;
-
-        gadget.Name = NameValue.Create("by-first");
-        await Gadgets.UpdateAsync(gadget, cancellationToken: Ct);
-
-        stale.Name = NameValue.Create("forced");
-        (await Gadgets.UpdateAsync(stale, ConcurrencyMode.ForceOverwrite, Ct))
-            .Should()
-            .BeTrue("ポリシーが転送されるので版条件が外れる");
-
-        (await Gadgets.GetByIdAsync(GadgetIdValue.Create(1), Ct))!.Name.Value.Should().Be("forced");
-        stale.RowVer.Should().NotBe(staleVersion, "上書き後の新しい版も書き戻される");
     }
 }

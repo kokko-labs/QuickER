@@ -7,7 +7,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// 重複事前チェックのランタイムスイートを<b>QuickER の <c>SqliteRepository</c> 版</b>で実行する派生。
 /// リポジトリは実運用と同じ DI 経路（<c>AddGeneratedSqliteRepositories(connectionString)</c>）で解決する。
 /// </summary>
-public sealed class UniquenessCheckAdoRuntimeTests : UniquenessCheckRuntimeTestsBase
+public sealed class UniquenessCheckAdoRuntimeTests : UniquenessCheckQueryFixtureRuntimeTestsBase
 {
     /// <summary>QuickER の SQLite リポジトリ群を登録した DI コンテナ（接続文字列は基底の一時 DB）</summary>
     private ServiceProvider? _provider;

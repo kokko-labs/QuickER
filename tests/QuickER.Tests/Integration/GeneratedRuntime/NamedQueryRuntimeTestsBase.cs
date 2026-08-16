@@ -1,24 +1,27 @@
-using System;
-using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
 using QuickER.Tests.GeneratedQueryFixture;
-using QuickER.Tests.Integration;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
 
 /// <summary>
-/// 名前付きクエリの生成メソッドを、実 SQLite（一時ファイル DB・Docker 不要＝CI 常時実行）で意味検証する
-/// パリティスイートの共通基底。QuickER の <c>SqliteRepository</c> 版と EF Core Sqlite 版の派生が同一シナリオを流す。
+/// 名前付きクエリの生成メソッドのうち、<b>実装先を問わず生成される部分</b>（ミニ DSL の全戻り形と manual）を
+/// 意味検証するパリティスイートの共通基底。QuickER の <c>SqliteRepository</c> 版・EF Core Sqlite 版・
+/// インメモリ版の 3 派生が同一シナリオを流す。
 /// </summary>
 /// <remarks>
 /// <para>
 /// 入力はクエリフィクスチャ（<see cref="QueryFixtureDefinition"/>）。ミニ DSL の全戻り形
 /// （一覧＋ページング・単一・件数・射影）・文字列一致（LIKE→Contains）・IN（VO 列×リストパラメータ）・
-/// 自由 SQL の全戻り形（一覧＝IN のリスト展開・空リスト・単一・件数・スカラー集計・射影）・
-/// manual（partial 実装）を、生成された <see cref="IOrderRepository"/> のメソッド呼び出しだけで検証する。
+/// 列参照型付け（VO 引数）・Include＋射影のフォールバック・manual（partial 実装）を、生成された
+/// <see cref="IOrderRepository"/> のメソッド呼び出しだけで検証する。
+/// </para>
+/// <para>
+/// <b>自由 SQL の戻り形は本基底に置かない</b>。SQL 文そのもの（IN のリスト展開・列別名の DTO マップ）の検証であり、
+/// SQL を持たないインメモリには対象が無いためで、実 DB を持つ派生の共通基底
+/// <see cref="NamedQueryRawSqlRuntimeTestsBase"/> が担う（＝条件スキップではなくサブクラス階層で分ける）。
 /// </para>
 /// <para>
 /// EF Core Sqlite の decimal 制約（サーバーサイド比較・並び替え非対応）に合わせ、フィクスチャの
@@ -26,33 +29,27 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// </para>
 /// </remarks>
 [Trait("Category", "Integration")]
-public abstract class NamedQueryRuntimeTestsBase : IDisposable
+public abstract class NamedQueryRuntimeTestsBase
 {
     /// <summary>テスト全体で使うキャンセルトークン</summary>
     protected static readonly CancellationToken Ct = TestContext.Current.CancellationToken;
 
-    /// <summary>各テストが読み書きする一時ファイル DB</summary>
-    private readonly SqliteTempDatabase _db = SqliteTempDatabase.Create();
-
-    /// <summary>書き込み可能な接続文字列（バックエンドはこの実ファイルへ読み書きする）</summary>
-    protected string ConnectionString => _db.ReadWriteCreateConnectionString;
-
-    /// <summary>顧客リポジトリを生成する（QuickER 版 Repository = AddGenerated{方言}Repositories / EF Core = AddGeneratedEfCoreRepositories）</summary>
+    /// <summary>顧客リポジトリを生成する（QuickER 版 Repository = AddGenerated{方言}Repositories / EF Core = AddGeneratedEfCoreRepositories / インメモリ = 共有ストア）</summary>
     protected abstract ICustomerRepository CreateCustomerRepository();
 
     /// <summary>注文リポジトリを生成する</summary>
     protected abstract IOrderRepository CreateOrderRepository();
 
-    /// <summary>スキーマを作成し、共通のシードデータを投入する</summary>
+    /// <summary>保存先（スキーマまたはストア）を空にし、共通のシードデータを投入する</summary>
+    protected abstract Task ResetAndSeedAsync();
+
+    /// <summary>共通のシードデータをリポジトリ経由で投入する（保存先を空にした直後に派生が呼ぶ）</summary>
     /// <remarks>
     /// customers: 1=Alice / 2=Bob。orders: (10,顧客1,100,apple pie)・(11,顧客1,50,banana)・
     /// (12,顧客2,200,apple juice)・(13,顧客1,75,memo なし)。
     /// </remarks>
-    protected async Task ResetAndSeedAsync()
+    protected async Task SeedAsync()
     {
-        await _db.ResetSchemaAsync(Ct);
-        await _db.ApplyDdlAsync(QueryFixtureDefinition.Build(), Ct);
-
         var customers = CreateCustomerRepository();
         var orders = CreateOrderRepository();
 
@@ -163,34 +160,19 @@ public abstract class NamedQueryRuntimeTestsBase : IDisposable
         rows.Select(r => r.Amount!.Value).Should().Equal(75m, 50m);
     }
 
-    /// <summary>7. 自由 SQL のスカラー集計（SumAmounts）が合計を返す（該当なしは null）</summary>
-    [Fact(DisplayName = "[NamedQuery] 7: 自由 SQL スカラー（SUM）が合計を返す")]
-    public async Task SqlScalar_ReturnsSum()
+    /// <summary>9. manual クエリ（SpecialLookup・partial 実装）が契約経由で呼び出せる</summary>
+    [Fact(DisplayName = "[NamedQuery] 9: manual クエリ（partial 実装）が契約経由で動く")]
+    public async Task Manual_PartialImplementation_Works()
     {
         await ResetAndSeedAsync();
         var orders = CreateOrderRepository();
 
-        (await orders.SumAmountsAsync(1, Ct)).Should().Be(225m);
-        (await orders.SumAmountsAsync(999, Ct)).Should().BeNull();
+        var first = await orders.SpecialLookupAsync(1, Ct);
+        first.Should().NotBeNull();
+        first!.OrderId.Value.Should().Be(10);
     }
 
-    /// <summary>8. 自由 SQL の IN リスト展開（GetByIdsRaw）が正しい行を返し、空リストは空を返す</summary>
-    [Fact(DisplayName = "[NamedQuery] 8: 自由 SQL の IN リスト展開が機能する（空リスト含む）")]
-    public async Task SqlList_WithCollectionParameter_ExpandsIn()
-    {
-        await ResetAndSeedAsync();
-        var orders = CreateOrderRepository();
-
-        var found = await orders.GetByIdsRawAsync([12, 10], Ct);
-        found.Select(o => o.OrderId.Value).Should().Equal(10, 12);
-
-        // 空リストは IN (NULL) へ展開され、どの行にも一致しない
-        (await orders.GetByIdsRawAsync([], Ct))
-            .Should()
-            .BeEmpty();
-    }
-
-    /// <summary>10. 列参照型付け（VO 型引数）のクエリが VO のまま呼び出せ、両バックエンドで正しい行を返す</summary>
+    /// <summary>10. 列参照型付け（VO 型引数）のクエリが VO のまま呼び出せ、全バックエンドで正しい行を返す</summary>
     [Fact(DisplayName = "[NamedQuery] 10: VO 型引数のクエリが正しい行を返す")]
     public async Task DslColumnTypedParameter_AcceptsValueObject()
     {
@@ -206,7 +188,7 @@ public abstract class NamedQueryRuntimeTestsBase : IDisposable
 
     /// <summary>
     /// 11. Include＋射影（ナビゲーション参照）は列刈り込み対象外で従来経路（全列取得→メモリ内射影）へ
-    /// フォールバックし、Include で読み込んだナビゲーションを射影できる（Ado・EF Core 両実装で同一結果）。
+    /// フォールバックし、Include で読み込んだナビゲーションを射影できる（全実装で同一結果）。
     /// </summary>
     [Fact(
         DisplayName = "[NamedQuery] 11: Include＋射影はフォールバックしナビゲーションを射影できる"
@@ -230,65 +212,6 @@ public abstract class NamedQueryRuntimeTestsBase : IDisposable
         rows.Select(r => r.OrderId).Should().Equal(10, 11, 13);
         rows.Should().OnlyContain(r => r.CustomerName == "Alice");
     }
-
-    /// <summary>9. manual クエリ（SpecialLookup・partial 実装）が契約経由で呼び出せる</summary>
-    [Fact(DisplayName = "[NamedQuery] 9: manual クエリ（partial 実装）が契約経由で動く")]
-    public async Task Manual_PartialImplementation_Works()
-    {
-        await ResetAndSeedAsync();
-        var orders = CreateOrderRepository();
-
-        var first = await orders.SpecialLookupAsync(1, Ct);
-        first.Should().NotBeNull();
-        first!.OrderId.Value.Should().Be(10);
-    }
-
-    /// <summary>12. 自由 SQL の単一戻り形（FindTopRaw）が 1 件を返す（行なしは null）</summary>
-    [Fact(DisplayName = "[NamedQuery] 12: 自由 SQL の単一戻り形が 1 件（行なしは null）を返す")]
-    public async Task SqlSingle_ReturnsFirstRowOrNull()
-    {
-        await ResetAndSeedAsync();
-        var orders = CreateOrderRepository();
-
-        var top = await orders.FindTopRawAsync(Ct);
-        top.Should().NotBeNull();
-        top!.OrderId.Value.Should().Be(13);
-        top.Memo.Should().BeNull("注文 13 のメモは NULL（VO 復元込みの行マップを確認）");
-
-        // 全行削除後は null
-        await orders.ExecuteSqlAsync("DELETE FROM \"orders\"", null, Ct);
-        (await orders.FindTopRawAsync(Ct)).Should().BeNull();
-    }
-
-    /// <summary>13. 自由 SQL の件数戻り形（CountByCustomerRaw）が条件一致数を返す</summary>
-    [Fact(DisplayName = "[NamedQuery] 13: 自由 SQL の件数戻り形が条件一致数を返す")]
-    public async Task SqlCount_ReturnsMatchingCount()
-    {
-        await ResetAndSeedAsync();
-        var orders = CreateOrderRepository();
-
-        (await orders.CountByCustomerRawAsync(1, Ct)).Should().Be(3);
-        (await orders.CountByCustomerRawAsync(2, Ct)).Should().Be(1);
-        (await orders.CountByCustomerRawAsync(999, Ct)).Should().Be(0);
-    }
-
-    /// <summary>14. 自由 SQL の射影戻り形（GetMemoRowsRaw）が列別名で DTO へマップされる（NULL 列含む）</summary>
-    [Fact(DisplayName = "[NamedQuery] 14: 自由 SQL の射影戻り形が DTO 一覧を返す（NULL 列含む）")]
-    public async Task SqlProjection_ReturnsDtoRows()
-    {
-        await ResetAndSeedAsync();
-        var orders = CreateOrderRepository();
-
-        // 顧客 1 の注文（10, 11, 13 の昇順）。13 のメモは NULL＝DTO の null 許容プロパティで受ける
-        var rows = await orders.GetMemoRowsRawAsync(1, Ct);
-        rows.Select(r => r.OrderId).Should().Equal(10, 11, 13);
-        rows.Select(r => r.Memo).Should().Equal("apple pie", "banana", null);
-
-        (await orders.GetMemoRowsRawAsync(999, Ct)).Should().BeEmpty();
-    }
-
-    /// <summary>使い終えた一時 DB を破棄する（派生の DI コンテナ破棄は派生側で行う）</summary>
-    public virtual void Dispose() => _db.Dispose();
 }
 
 /// <summary>Include＋射影のフォールバック検証で使う DTO（注文ID と Include で読んだ顧客名）</summary>

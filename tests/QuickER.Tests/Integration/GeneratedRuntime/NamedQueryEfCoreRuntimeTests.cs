@@ -10,7 +10,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// ミニ DSL 由来の共有本体（単一ラムダ→両バックエンド翻訳）のパリティを証明する。
 /// 自由 SQL・manual 分は partial 実装（QueryFixtureManualImplementations）が担う。
 /// </summary>
-public sealed class NamedQueryEfCoreRuntimeTests : NamedQueryRuntimeTestsBase
+public sealed class NamedQueryEfCoreRuntimeTests : NamedQueryRawSqlRuntimeTestsBase
 {
     /// <summary>EF Core 版リポジトリ群を登録した DI コンテナ（UseSqlite・接続文字列は基底の一時 DB）</summary>
     private ServiceProvider? _provider;

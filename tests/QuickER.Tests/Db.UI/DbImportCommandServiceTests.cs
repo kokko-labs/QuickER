@@ -59,6 +59,29 @@ public class DbImportCommandServiceTests
         dialogs.ConfirmMessages.Should().BeEmpty();
     }
 
+    /// <summary>接続ダイアログで指定したコマンドタイムアウトが、取込のカタログ照会まで届く</summary>
+    [Fact(DisplayName = "接続設定のコマンドタイムアウトが取込へ渡る")]
+    public async Task RunAsync_PassesCommandTimeoutFromSettings()
+    {
+        var host = new StubErDiagramHost { DiagramToReturn = DiagramWith("Existing") };
+        var dialogs = new StubDialogService { ConfirmResult = false };
+        var provider = new FakeImportProvider(ImportedEntities("Imported"));
+        var service = new DbImportCommandService(
+            host,
+            dialogs,
+            new FakeConnectionPresenter(
+                new DbConnectionDialogResult(
+                    new DbConnectionSettings { CommandTimeoutSeconds = 240 },
+                    provider
+                )
+            )
+        );
+
+        await service.RunAsync();
+
+        ((FakeSchemaImporter)provider.SchemaImporter).LastCommandTimeoutSeconds.Should().Be(240);
+    }
+
     /// <summary>現在図と構造が異なり置換確認を拒否した場合は、図を差し替えない</summary>
     [Fact(DisplayName = "置換確認を拒否すると図を差し替えない")]
     public async Task RunAsync_ReplacementDeclined_DoesNotReplace()
@@ -591,11 +614,17 @@ public class DbImportCommandServiceTests
 
         public FakeSchemaImporter(Exception toThrow) => _toThrow = toThrow;
 
+        /// <summary>直近の取込で渡されたコマンドタイムアウト（接続設定からの伝搬を検証するために記録する）</summary>
+        public int? LastCommandTimeoutSeconds { get; private set; }
+
         public Task<SchemaImportResult> ImportAsync(
             string connectionString,
+            int commandTimeoutSeconds,
             CancellationToken cancellationToken = default
         )
         {
+            LastCommandTimeoutSeconds = commandTimeoutSeconds;
+
             if (_toThrow is not null)
             {
                 throw _toThrow;

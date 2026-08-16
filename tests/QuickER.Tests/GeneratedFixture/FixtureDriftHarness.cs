@@ -128,6 +128,20 @@ internal static class FixtureDriftHarness
         string rendered,
         string repoRelativePath,
         string driftReason
+    ) => VerifyOrRegenerateRepoFile(rendered, repoRelativePath, driftReason);
+
+    /// <summary>
+    /// リポジトリ直下からの相対パスに置かれたチェックイン済みテキスト（承認ファイル等）を照合、または再生成する。
+    /// 生成コードに限らず「決定的に作り直せるチェックイン済みテキスト」全般が対象で、
+    /// 既存フィクスチャと同一経路（<see cref="RegenEnvVar"/>）で上書き再生成される。
+    /// </summary>
+    /// <param name="rendered">現在の内容から決定的に作り直したテキスト（CRLF・完全一致の基準）</param>
+    /// <param name="repoRelativePath">リポジトリ直下からの相対パス（例 <c>tests/QuickER.Tests/PublicApi/QuickER.Runtime.approved.txt</c>）</param>
+    /// <param name="driftReason">ドリフト時に表示する理由（末尾に再生成コマンドが自動付与される）</param>
+    public static void VerifyOrRegenerateRepoFile(
+        string rendered,
+        string repoRelativePath,
+        string driftReason
     )
     {
         var checkedInPath = ResolveRepoRelativePath(repoRelativePath);

@@ -570,6 +570,12 @@
   <data name="TypeConversion_ColumnLine" xml:space="preserve">
     <value>・{0}.{1} ({2})</value>
   </data>
+  <data name="TypeConversion_NullableWarningHeader" xml:space="preserve">
+    <value>新しい方言に行バージョン型が無いため NOT NULL を解除した列:</value>
+  </data>
+  <data name="TypeConversion_NullableColumnLine" xml:space="preserve">
+    <value>・{0}.{1} ({2})</value>
+  </data>
   <data name="Common_MoreItems" xml:space="preserve">
     <value>…他 {0} 件</value>
   </data>

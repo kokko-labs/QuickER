@@ -79,6 +79,9 @@
   <data name="Cli_Opt_Connection" xml:space="preserve">
     <value>Connection string (e.g. Server=.;Database=Foo;Integrated Security=true;TrustServerCertificate=true)</value>
   </data>
+  <data name="Cli_Opt_CommandTimeout" xml:space="preserve">
+    <value>Timeout in seconds for each schema import statement (0 = no limit)</value>
+  </data>
   <data name="Cli_Cmd_Scaffold" xml:space="preserve">
     <value>Connect directly to a database and generate C# code from its schema</value>
   </data>

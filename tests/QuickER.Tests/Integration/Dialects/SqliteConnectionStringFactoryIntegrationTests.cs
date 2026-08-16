@@ -68,7 +68,11 @@ public sealed class SqliteConnectionStringFactoryIntegrationTests
         var connectionString = new SqliteProvider().BuildConnectionString(settings);
 
         // 取込専用の接続文字列で取込が成功すること
-        var result = await new SqliteSchemaImporter().ImportAsync(connectionString, Ct);
+        var result = await new SqliteSchemaImporter().ImportAsync(
+            connectionString,
+            settings.CommandTimeoutSeconds,
+            Ct
+        );
 
         result
             .Entities.Select(e => e.TableName)

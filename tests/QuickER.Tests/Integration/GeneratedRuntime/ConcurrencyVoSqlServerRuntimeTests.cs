@@ -1,9 +1,7 @@
 using System.Linq;
-using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
 using Microsoft.Extensions.DependencyInjection;
-using QuickER.SqlServer;
 using QuickER.Tests.GeneratedConcurrencyFixture;
 using QuickER.Tests.Integration;
 using Xunit;
@@ -11,27 +9,29 @@ using Xunit;
 namespace QuickER.Tests.Integration.GeneratedRuntime;
 
 /// <summary>
-/// rowversion 列 <b>× 値オブジェクト</b>の楽観排他を、QuickER 版 Repository（SQL Server 方言）で
-/// 実 SQL Server（Testcontainers・Docker 依存）に流して検証する。
+/// 楽観排他のランタイムスイートを <b>rowversion 列 × 値オブジェクト</b>の図で、QuickER 版 Repository
+/// （SQL Server 方言）から実 SQL Server（Testcontainers・Docker 依存）へ流す派生。
 /// </summary>
 /// <remarks>
 /// <para>
 /// VO 有効時の rowversion プロパティは <c>RowVerValue</c> になる。DB が <c>OUTPUT INSERTED</c> で返すのは生の
 /// <c>byte[]</c> なので、書き戻しの <c>PropertyInfo.SetValue</c> は VO へ包み直さなければ <c>ArgumentException</c> に
 /// なる（実バグ＝UPDATE はコミット済みなのに保存が例外・手元の版は古いまま＝次回保存が偽の競合）。
-/// 本テストは Insert / Update / SaveAsync の 3 経路と、版ガード（競合・ForceOverwrite）を実 DB で固定する。
+/// 基底 <see cref="ConcurrencyRuntimeTestsBase{TEntity, TConflictException}"/> のシナリオはアダプタで VO を開閉するため、
+/// それが緑になること自体が包み直しの実証になる。本クラスは加えて「版が VO 型として載る」ことと、
+/// カスケード子の版も書き戻ることを VO 固有の観点として持つ。
 /// </para>
 /// <para>
 /// 「他者による更新」は生 SQL（<c>ExecuteSqlAsync</c>）で直接 UPDATE して作る＝Repository を経由しないため
-/// 手元のエンティティの <c>RowVer</c> は古いまま残り、実際の競合と同じ状態を決定的に再現できる。
-/// Docker 不在時は <see cref="SqlServerContainerFixture"/> の検出でスキップされる。
+/// 手元のエンティティの <c>RowVer</c> は古いまま残る。Docker 不在時は
+/// <see cref="SqlServerContainerFixture"/> の検出でスキップされる。
 /// </para>
 /// </remarks>
-[Trait("Category", "Integration")]
 [Collection(SqlServerContainerCollection.Name)]
 [Trait("RequiresDocker", "true")]
 public sealed class ConcurrencyVoSqlServerRuntimeTests(SqlServerContainerFixture fixture)
-    : IAsyncLifetime
+    : ConcurrencyRuntimeTestsBase<GadgetEntity, SaveConflictException>,
+        IAsyncLifetime
 {
     /// <summary>共有する SQL Server コンテナ</summary>
     private readonly SqlServerContainerFixture _fixture = fixture;
@@ -39,40 +39,16 @@ public sealed class ConcurrencyVoSqlServerRuntimeTests(SqlServerContainerFixture
     /// <summary>QuickER の SQL Server リポジトリ群を登録した DI コンテナ</summary>
     private ServiceProvider _provider = null!;
 
-    /// <summary>テスト全体で使うキャンセルトークン</summary>
-    private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;
-
-    /// <summary>スキーマを作成し、gadget 1 件（メモ 1 件つき）をシードする</summary>
-    public async ValueTask InitializeAsync()
+    /// <summary>Docker の有無を判定し、リポジトリ DI を構築する</summary>
+    public ValueTask InitializeAsync()
     {
         Assert.SkipUnless(_fixture.IsAvailable, _fixture.UnavailableReason);
-
-        await _fixture.ResetSchemaAsync(Ct);
-        await _fixture.ApplyDdlAsync(ConcurrencyFixtureDefinition.Build(), Ct);
 
         _provider = new ServiceCollection()
             .AddGeneratedSqlServerRepositories(_fixture.ConnectionString)
             .BuildServiceProvider();
 
-        await Gadgets()
-            .InsertAsync(
-                new GadgetEntity
-                {
-                    GadgetId = GadgetIdValue.Create(1),
-                    Name = NameValue.Create("alpha"),
-                },
-                Ct
-            );
-        await Notes()
-            .InsertAsync(
-                new GadgetNoteEntity
-                {
-                    NoteId = NoteIdValue.Create(1),
-                    GadgetId = GadgetIdValue.Create(1),
-                    Note = NoteValue.Create("first"),
-                },
-                Ct
-            );
+        return ValueTask.CompletedTask;
     }
 
     /// <summary>DI コンテナを破棄する</summary>
@@ -89,87 +65,138 @@ public sealed class ConcurrencyVoSqlServerRuntimeTests(SqlServerContainerFixture
     /// <summary>メモリポジトリを解決する</summary>
     private IGadgetNoteRepository Notes() => _provider.GetRequiredService<IGadgetNoteRepository>();
 
-    /// <summary>Repository を経由せず生 SQL で直接 1 行更新して「他者による更新」を作る</summary>
-    private Task BumpByAnotherUserAsync(int gadgetId) =>
-        Gadgets()
-            .ExecuteSqlAsync(
-                "UPDATE gadgets SET name = 'by-another-user' WHERE gadget_id = @id",
-                new { id = gadgetId },
-                Ct
-            );
-
-    /// <summary>DB 上の現在の名前を読む（先勝ち／上書きの確認用）</summary>
-    private Task<string?> ReadNameAsync(int gadgetId) =>
-        Gadgets()
-            .ExecuteScalarSqlAsync<string>(
-                "SELECT name FROM gadgets WHERE gadget_id = @id",
-                new { id = gadgetId },
-                Ct
-            );
-
-    // ── 版の書き戻し（本バグの回帰本体） ──
-
-    /// <summary>1. Insert / Update / SaveAsync の 3 経路とも、DB 採番の版が VO 型で同一インスタンスへ書き戻る</summary>
-    [Fact(
-        DisplayName = "[Concurrency/VO/SqlServer] 版反映: Insert / Update / Save が VO 型の版を書き戻す"
-    )]
-    public async Task RowVersion_IsWrittenBack_AsValueObject()
-    {
-        var gadgets = Gadgets();
-
-        var entity = new GadgetEntity
+    /// <summary>中立表現の楽観排他ポリシーを、このフィクスチャの <c>ConcurrencyMode</c> へ翻訳する</summary>
+    private static ConcurrencyMode Translate(ConcurrencyChoice choice) =>
+        choice switch
         {
-            GadgetId = GadgetIdValue.Create(2),
-            Name = NameValue.Create("inserted"),
+            ConcurrencyChoice.Optimistic => ConcurrencyMode.Optimistic,
+            ConcurrencyChoice.ForceOverwrite => ConcurrencyMode.ForceOverwrite,
+            _ => (ConcurrencyMode)99,
         };
 
-        // 旧実装はここで ArgumentException（Byte[] を RowVerValue へ SetValue できない）になっていた
-        await gadgets.InsertAsync(entity, Ct);
+    protected override async Task ResetAndSeedAsync()
+    {
+        await _fixture.ResetSchemaAsync(Ct);
+        await _fixture.ApplyDdlAsync(ConcurrencyFixtureDefinition.Build(), Ct);
+
+        await Gadgets().InsertAsync(NewEntity(SeededRootId, "alpha"), Ct);
+        await Gadgets().InsertAsync(NewEntity(SeededChildlessRootId, "beta"), Ct);
+        await Notes().InsertAsync(NewNote(SeededChildId, SeededRootId, "first"), Ct);
+    }
+
+    /// <summary>gadget を組み立てる（キー・名前とも VO へ包む）</summary>
+    protected override GadgetEntity NewEntity(int id, string title) =>
+        new() { GadgetId = GadgetIdValue.Create(id), Name = NameValue.Create(title) };
+
+    /// <summary>メモ（子）を組み立てる</summary>
+    private static GadgetNoteEntity NewNote(int noteId, int gadgetId, string note) =>
+        new()
+        {
+            NoteId = NoteIdValue.Create(noteId),
+            GadgetId = GadgetIdValue.Create(gadgetId),
+            Note = NoteValue.Create(note),
+        };
+
+    protected override Task InsertAsync(GadgetEntity entity) => Gadgets().InsertAsync(entity, Ct);
+
+    protected override Task<GadgetEntity?> GetAsync(int id) =>
+        Gadgets().GetByIdAsync(GadgetIdValue.Create(id), Ct);
+
+    protected override Task<GadgetEntity?> GetWithChildrenAsync(int id)
+    {
+        var key = GadgetIdValue.Create(id);
+
+        return Gadgets()
+            .Query()
+            .Where(g => g.GadgetId == key)
+            .Include(g => g.GadgetNotes)
+            .FirstOrDefaultAsync(Ct);
+    }
+
+    protected override string GetTitle(GadgetEntity entity) => entity.Name.Value;
+
+    protected override void SetTitle(GadgetEntity entity, string title) =>
+        entity.Name = NameValue.Create(title);
+
+    protected override byte[]? GetRowVersion(GadgetEntity entity) => entity.RowVer?.Value;
+
+    protected override void SetRowVersion(GadgetEntity entity, byte[] rowVersion) =>
+        entity.RowVer = RowVerValue.Create(rowVersion);
+
+    protected override void MarkAdded(GadgetEntity entity) => entity.MarkAdded();
+
+    protected override void MarkUpdated(GadgetEntity entity) => entity.MarkUpdated();
+
+    protected override void MarkRemoved(GadgetEntity entity) => entity.MarkRemoved();
+
+    protected override Task<bool> UpdateAsync(
+        GadgetEntity entity,
+        ConcurrencyChoice mode = ConcurrencyChoice.Optimistic
+    ) => Gadgets().UpdateAsync(entity, Translate(mode), Ct);
+
+    protected override Task<int> SaveAsync(
+        GadgetEntity entity,
+        ConcurrencyChoice mode = ConcurrencyChoice.Optimistic,
+        bool insertWhenUpdateMissing = false
+    ) =>
+        Gadgets()
+            .SaveAsync(
+                entity,
+                insertWhenUpdateMissing: insertWhenUpdateMissing,
+                mode: Translate(mode),
+                cancellationToken: Ct
+            );
+
+    protected override Task BumpByAnotherUserAsync(int id, string title) =>
+        Gadgets()
+            .ExecuteSqlAsync(
+                "UPDATE gadgets SET name = @name WHERE gadget_id = @id",
+                new { name = title, id },
+                Ct
+            );
+
+    protected override void EditFirstChild(GadgetEntity root, string note)
+    {
+        var child = root.GadgetNotes.First();
+        child.Note = NoteValue.Create(note);
+        child.MarkUpdated();
+    }
+
+    protected override async Task<string?> ReadChildNoteAsync(int noteId) =>
+        (await Notes().GetByIdAsync(NoteIdValue.Create(noteId), Ct))?.Note.Value;
+
+    // ── VO 固有 1: 版が VO 型として載る ──
+
+    /// <summary>DB 採番の版が生の <c>byte[]</c> ではなく <c>RowVerValue</c> として同一インスタンスへ書き戻る</summary>
+    /// <remarks>旧実装は INSERT の <c>OUTPUT INSERTED</c> 戻り値を包み直さず <c>ArgumentException</c> になっていた。</remarks>
+    [Fact(DisplayName = "[Concurrency/VO/SqlServer] 版反映: 採番された版が VO 型で書き戻る")]
+    public async Task RowVersion_IsWrittenBack_AsValueObject()
+    {
+        await ResetAndSeedAsync();
+
+        var entity = NewEntity(7, "inserted");
+        await InsertAsync(entity);
 
         entity.RowVer.Should().NotBeNull("OUTPUT INSERTED で採番された版が VO として入る");
         entity.RowVer.Value.Length.Should().Be(8, "SQL Server の rowversion は 8 バイト");
-        var afterInsert = entity.RowVer;
-
-        entity.Name = NameValue.Create("updated");
-        (await gadgets.UpdateAsync(entity, cancellationToken: Ct)).Should().BeTrue();
-        entity.RowVer.Should().NotBe(afterInsert, "UPDATE のたびに版が進む");
-        var afterUpdate = entity.RowVer;
-
-        entity.Name = NameValue.Create("saved");
-        entity.MarkUpdated();
-        (await gadgets.SaveAsync(entity, cancellationToken: Ct)).Should().Be(1);
-        entity.RowVer.Should().NotBe(afterUpdate, "グラフ保存でもコミット後に新版が反映される");
-
-        // 反映された版がそのまま次の更新に使える（再読込せずに更新が通る＝書き戻しが正しい証明）
-        entity.Name = NameValue.Create("again");
-        (await gadgets.UpdateAsync(entity, cancellationToken: Ct))
-            .Should()
-            .BeTrue("書き戻された版は DB の現在値と一致する");
     }
 
-    /// <summary>2. グラフ保存では子（カスケード）の版も VO 型で書き戻り、続けて保存できる</summary>
+    // ── VO 固有 2: カスケード子の版 ──
+
+    /// <summary>グラフ保存では子（カスケード）の版も VO 型で書き戻り、そのまま続けて保存できる</summary>
     [Fact(DisplayName = "[Concurrency/VO/SqlServer] 版反映: グラフ保存は子の版も書き戻す")]
     public async Task SaveAsync_WritesBackRowVersion_ForCascadedChildren()
     {
-        var gadgets = Gadgets();
+        await ResetAndSeedAsync();
 
-        var gadget = new GadgetEntity
-        {
-            GadgetId = GadgetIdValue.Create(3),
-            Name = NameValue.Create("parent"),
-        };
+        var gadget = NewEntity(8, "parent");
         gadget.MarkAdded();
 
-        var note = new GadgetNoteEntity
-        {
-            NoteId = NoteIdValue.Create(30),
-            GadgetId = GadgetIdValue.Create(3),
-            Note = NoteValue.Create("child"),
-        };
+        var note = NewNote(80, 8, "child");
         note.MarkAdded();
         gadget.GadgetNotes.Add(note);
 
-        (await gadgets.SaveAsync(gadget, cancellationToken: Ct))
+        (await Gadgets().SaveAsync(gadget, cancellationToken: Ct))
             .Should()
             .Be(2, "親 1 件＋子 1 件が保存される");
 
@@ -182,95 +209,8 @@ public sealed class ConcurrencyVoSqlServerRuntimeTests(SqlServerContainerFixture
         note.Note = NoteValue.Create("child-2");
         note.MarkUpdated();
 
-        (await gadgets.SaveAsync(gadget, cancellationToken: Ct))
+        (await Gadgets().SaveAsync(gadget, cancellationToken: Ct))
             .Should()
             .Be(2, "書き戻された版で版チェックが通る");
-    }
-
-    // ── 版ガード ──
-
-    /// <summary>3. 版が古い更新は SaveConflictException（DB は先勝ちのまま）</summary>
-    [Fact(
-        DisplayName = "[Concurrency/VO/SqlServer] UpdateAsync: 版が古いと SaveConflictException・DB は先勝ちのまま"
-    )]
-    public async Task UpdateAsync_Throws_WhenRowVersionIsStale()
-    {
-        var gadgets = Gadgets();
-
-        var stale = await gadgets.GetByIdAsync(GadgetIdValue.Create(1), Ct);
-        stale.Should().NotBeNull();
-        stale!.RowVer.Should().NotBeNull("取得時点で版が VO として読める");
-
-        await BumpByAnotherUserAsync(1);
-
-        stale.Name = NameValue.Create("by-me");
-        var act = async () => await gadgets.UpdateAsync(stale, cancellationToken: Ct);
-
-        await act.Should()
-            .ThrowAsync<SaveConflictException>()
-            .WithMessage(
-                "*modified by another user*",
-                "VO の版でも WHERE 条件に載り競合が検出される"
-            );
-
-        (await ReadNameAsync(1)).Should().Be("by-another-user", "競合した更新は適用されない");
-    }
-
-    /// <summary>4. ForceOverwrite は版条件を外して上書きし、新しい版を VO で書き戻す</summary>
-    [Fact(
-        DisplayName = "[Concurrency/VO/SqlServer] UpdateAsync: ForceOverwrite は版を無視して上書きし新版を反映する"
-    )]
-    public async Task UpdateAsync_ForceOverwrite_OverwritesAndRefreshesRowVersion()
-    {
-        var gadgets = Gadgets();
-
-        var stale = await gadgets.GetByIdAsync(GadgetIdValue.Create(1), Ct);
-        var staleVersion = stale!.RowVer;
-
-        await BumpByAnotherUserAsync(1);
-
-        stale.Name = NameValue.Create("forced");
-        (await gadgets.UpdateAsync(stale, ConcurrencyMode.ForceOverwrite, Ct))
-            .Should()
-            .BeTrue("版条件を外すので更新は成立する");
-
-        (await ReadNameAsync(1)).Should().Be("forced", "last-write-wins で上書きされる");
-        stale.RowVer.Should().NotBe(staleVersion, "上書き後の新しい版が反映される");
-    }
-
-    /// <summary>5. 競合ノードを含むグラフ保存は SaveConflictException で全ロールバックする</summary>
-    [Fact(
-        DisplayName = "[Concurrency/VO/SqlServer] SaveAsync: 競合ノードがあると全ロールバックする"
-    )]
-    public async Task SaveAsync_RollsBackEverything_OnConflict()
-    {
-        var gadgets = Gadgets();
-
-        var key = GadgetIdValue.Create(1);
-        var root = await gadgets
-            .Query()
-            .Where(g => g.GadgetId == key)
-            .Include(g => g.GadgetNotes)
-            .FirstOrDefaultAsync(Ct);
-        root.Should().NotBeNull();
-        root!.GadgetNotes.Should().HaveCount(1, "シードしたメモ 1 件が読める");
-
-        await BumpByAnotherUserAsync(1);
-
-        // 子（メモ）は競合していないが、親が競合するため全体が巻き戻る
-        root.Name = NameValue.Create("by-me");
-        root.MarkUpdated();
-        var note = root.GadgetNotes.First();
-        note.Note = NoteValue.Create("note-by-me");
-        note.MarkUpdated();
-
-        var act = async () => await gadgets.SaveAsync(root, cancellationToken: Ct);
-
-        await act.Should().ThrowAsync<SaveConflictException>();
-
-        (await ReadNameAsync(1)).Should().Be("by-another-user", "親は先勝ちのまま");
-        (await Notes().GetByIdAsync(NoteIdValue.Create(1), Ct))!
-            .Note.Value.Should()
-            .Be("first", "競合していない子の更新もロールバックされる（all-or-nothing）");
     }
 }

@@ -201,6 +201,8 @@ var result = await customers.Query()
 
 補償は等値のみが対象で、関係演算子（`<` `<=` `>` `>=`）は従来どおり null をパラメータとして束縛します（null 対応の SQL 対応物が無いため）。
 
+簡易 DSL の文字列一致（`LIKE` / `CONTAINS` / `STARTSWITH` / `ENDSWITH`）も、NULL 許容列に対しては「列が `NULL` でないこと」を AND した形へエミットされます（`NOT LIKE` も同じ前提の内側に入るため、`NULL` の行はどちらの向きでも一致しません）。SQL の `LIKE` は `NULL` の行を UNKNOWN で落とすので SQL 側では意味が変わりませんが、インメモリ実装は式木をコンパイルして実際に評価するため、この前提が無いと `NULL` の行で `NullReferenceException` になります。
+
 日付部品（`Year`・`Month` など）へ変換されるのは、読み出し元が `DateTime` / `DateOnly` / `DateTimeOffset`（いずれも nullable を含む）の列である場合だけです。同名のプロパティを別の型に持たせても——値オブジェクトへ partial で足した場合など——日付部品とは見なさず、黙って `YEAR([col])` になる代わりに `NotSupportedException` で失敗します。
 
 リストの `Contains` は要素 1 個につきバインド変数 1 個へ展開され、チャンク分割はしません。そのため巨大なリストは方言のバインド変数・IN リスト上限（Oracle の 1000、SQL Server の 2100 パラメータ、SQLite の歴史的な 999 など）を超えて実行時エラーになります。大量のキーを渡す場合は一時テーブルへ入れて結合するか、生 SQL を使ってください。
@@ -543,6 +545,8 @@ await documents.ExecuteSqlAsync(
     new { payload = bytes, id = 1 });
 ```
 
+> **注意**: DB 間のデータ移送では注意が必要です。`GetAllAsync` して `BulkInsertAsync` する形では、除外列は取得時のまま（`null`、非 nullable 列なら空配列）書き込まれます。INSERT は全列を対象にするため例外にもならず、移送先で BLOB だけが黙って失われます（UPDATE のガードは効きません。あれは「除外列に値が残っている」ときに発動するもので、移送が運ぶのはその逆の状態です）。移送では `Query().WithUnboundedBinary()` で読むか、行をコピーしてから `Read/Write{Column}Async` の Stream アクセサで BLOB を個別に移送してください（後者は BLOB 全体をメモリに載せない唯一の手段でもあります）。
+
 #### 読み取りオプトイン `WithUnboundedBinary()`
 
 除外を有効にした図でも、**この呼び出しに限り**除外列を含めてエンティティを取得したい場合は、`Query()` チェーンに `WithUnboundedBinary()` を挟みます（除外列が無ければ何もしない no-op のため、API は常に存在します）。生 SQL の射影を書かずに、通常のエンティティ（`RowState = Unchanged`・除外列も実データでマップ済み）を取得できます。
@@ -710,6 +714,18 @@ app.Run();
 - **楽観排他も転送されます**。`ConcurrencyMode` 引数は Update / Save のリクエストに含まれ、Insert / Update / Save の応答は保存で採番された版を「エンティティ型名＋主キー」の対応表として運び、クライアントが手元のグラフへ書き戻します。これによりリモートでも直結と同じ版を保持でき、再取得なしで同じエンティティを続けて保存できます
 - **500 応答はサーバー側の詳細を既定で公開しません**。本文には固定文言（`An unexpected error occurred on the server.`）と `CorrelationId` が載り、クライアントでは `RemoteRepositoryException.CorrelationId` として取り出せます。スタックトレースを含む例外全体は従来どおり常にサーバー側へ記録され（`ILoggerFactory` 経由・カテゴリ `QuickER.RemoteServer`。ロギング未構成のホストでは何もしません）、**そのログ行にも同じ相関 ID が載る**ので、利用者から報告された ID を突き合わせれば、内部メッセージ（テーブル名・列名・接続文字列・ファイルパス）を信頼境界の外へ出さないまま完全な記録に辿り着けます。従来どおりメッセージを透過させたい場合は `MapGeneratedRemoteEndpoints(exposeErrorDetails: true)` を渡してください（このとき `CorrelationId` は null＝ボディは以前のバージョンと同一です）。定型は `exposeErrorDetails: app.Environment.IsDevelopment()` で、これを生成時オプションでなく実行時引数にしているのは、同じ生成物のまま開発と本番を使い分けられるようにするためです。スイッチが変えるのは**クライアントから見える 500 の内容だけ**で、サーバー側のログ出力と `OnServerError` フックはどちらのモードでも例外そのものを受け取ります。また 400（クライアント自身のペイロードについての説明）と 409 の競合内訳（`Reason` / `EntityType` / `Key`＝再取得リトライを組むための材料）は自前の文言なのでスイッチの影響を受けず、常に従来どおり返ります。バイナリ転送エンドポイントの 500 も同じスイッチに従います
 - **認証・TLS はスコープ外で、付与するまでエンドポイントは無防備です。** クライアントは `AddGeneratedHttpRemoteRepositories(Func<IServiceProvider, HttpClient>)` で認証ハンドラ付きの HttpClient を構成し、サーバーは `MapGeneratedRemoteEndpoints()` の戻り値（`RouteGroupBuilder`）へ ASP.NET Core の認可を付与してください（`MapGeneratedRemoteEndpoints(...).RequireAuthorization()` で生成グループ全体を 1 行で覆えます）。**認可はエンドポイントを選ばずグループ全体へ掛けてください。** `Save` は `Delete` と同じ強さを持つからです＝`RowState.Removed` を含むグラフを送れば該当行は削除されるため、`Delete` だけを守って `Save` を開けておく方針は何も守っていません。エンティティのペイロード全般についても同様で、ワイヤ形式は主キーを含む全列を受け付けます。呼び出し側が名指しできる行との間に立つのは認可だけです
+- **どちらの登録オーバーロードにも keyed 版があり、複数のバックエンドを同時に抱えられます**。`AddGeneratedHttpRemoteRepositories(serviceKey, baseAddress)` と `AddGeneratedHttpRemoteRepositories(serviceKey, httpClientFactory)` は `I{Entity}RemoteRepository` をサービスキー付きで登録し、方言別拡張が元から持つ keyed 版（`AddGeneratedSqliteRepositories(serviceKey, connectionString)`）と対になります。ハイブリッド構成はこの形で組みます＝サーバーを HTTP で 1 つのキーへ、ローカル DB をもう 1 つのキーへ登録し、利用側が欲しい方を名指しで受け取ります。
+
+  ```csharp
+  services.AddGeneratedHttpRemoteRepositories("server", "https://server:5001/quicker");
+  services.AddGeneratedSqliteRepositories("local", localConnectionString);
+
+  // コンストラクタ引数:
+  //   [FromKeyedServices("server")] IOrderRemoteRepository remote
+  //   [FromKeyedServices("local")]  IOrderRepository       local
+  ```
+
+  ベースアドレス版が作る共有 HttpClient も同じキーで登録されるため、非 keyed 登録とも別キーとも衝突せず、所有者が DI コンテナである点も非 keyed 版と同じです。keyed 登録と非 keyed 登録は別の名簿で（keyed 登録は `GetRequiredKeyedService` にしか応えません）、同じキーへ 2 回登録すると後の登録が有効になります
 - **ファクトリ版が返す HttpClient の所有権は呼び出し側にあります**。`AddGeneratedHttpRemoteRepositories(Func<IServiceProvider, HttpClient>)` はリポジトリ解決のたび（スコープ×エンティティ数だけ）ファクトリを呼び出し、返された HttpClient は生成コードも DI コンテナも破棄しません。共有インスタンスか `IHttpClientFactory` 管理のインスタンスを返してください（毎回 new するとソケットが枯渇します）。ベースアドレス版は共有インスタンスを 1 つだけ作り、それを DI コンテナが所有します（`ServiceProvider` の破棄と同時に HttpClient も破棄されるため、破棄済み provider から取得したリポジトリを使うと `ObjectDisposedException` になります）
 - **ベースアドレス版が作る HttpClient は、タイムアウトを持たず 5 分でコネクションを作り直します**。`PooledConnectionLifetime`（`SocketsHttpHandler`）を設定しているのは、長命のシングルトンが最初に解決したアドレスを固定し続けず DNS 変更に追従するためです。`Timeout` は `Timeout.InfiniteTimeSpan` にしています＝`HttpClient.Timeout` は本文を含むリクエスト全体に掛かるため、既定の 100 秒では大きな blob 転送が途中で切られてしまうからです。したがって**個々の呼び出しの制限時間は、もともと渡している `CancellationToken` で与えてください**（それがタイムアウトです）。クライアント全体に有限の期限を持たせたい場合はファクトリ版を使い、自分で構成した HttpClient を渡してください（ファクトリ版の HttpClient は利用者の所有物で、生成コードは設定に手を入れません）
 - **0.x の間はワイヤ形式の互換を約束しないため、クライアントとサーバーは同時に再生成し、同時に配置してください**。サーバーだけを先に更新しても不一致はバージョンエラーとして報告されません＝新しいエンドポイントが受け付けなくなったリクエストは、ただの転送失敗（404 や 400）として返ります。バイナリエンドポイントが自分の出す 404 へマーカーを載せている（後述）のも、クライアントが 404 を一律「データなし」と読まないためです

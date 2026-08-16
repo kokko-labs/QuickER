@@ -560,6 +560,12 @@
   <data name="TypeConversion_ColumnLine" xml:space="preserve">
     <value>• {0}.{1} ({2})</value>
   </data>
+  <data name="TypeConversion_NullableWarningHeader" xml:space="preserve">
+    <value>Columns that lost NOT NULL because the new dialect has no row version type:</value>
+  </data>
+  <data name="TypeConversion_NullableColumnLine" xml:space="preserve">
+    <value>• {0}.{1} ({2})</value>
+  </data>
   <data name="Common_MoreItems" xml:space="preserve">
     <value>…and {0} more</value>
   </data>

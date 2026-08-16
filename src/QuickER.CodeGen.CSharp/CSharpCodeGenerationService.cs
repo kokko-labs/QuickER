@@ -280,31 +280,33 @@ public sealed class CSharpCodeGenerationService
     /// 解決した方言の Repository だけで、他方言では通常のバイナリ列（INSERT / UPDATE で書き込む・版ガードなし）になる」
     /// という非対称は生成物のどこにも書かれないため、生成時に一度だけ明示する。
     /// 統一対象が 1 つも無いとき（単一方言・行バージョン列のない図）は何も出さない＝診断はバイト不変。
+    /// 診断は行バージョンとして解決した方言（owner）ごとに 1 件出し、その方言が採番する列だけを並べる
+    /// （行バージョンを解決できる方言が 2 つ以上になったとき、最初の 1 列の owner で全列を括ると
+    /// 実際には別方言が採番する列まで誤った方言名で通知してしまうため）。owner が 1 つの通常ケースでは
+    /// 従来どおり 1 件・同一文面になる。
     /// </remarks>
     private static void AddMultiTargetRowVersionInfo(
         MultiDialectTypeReconciler.RowVersionReconciliation rowVersions,
         ICollection<GenerationDiagnostic> diagnostics
     )
     {
-        if (rowVersions.Lines.Count == 0)
+        foreach (var group in rowVersions.Groups)
         {
-            return;
-        }
-
-        // ダイアログ／CLI で 1 行 1 列に見えるよう、導入文の後に改行＋インデント 2 スペースで各列を並べる
-        var columnList = string.Join(
-            Environment.NewLine,
-            rowVersions.Lines.Select(line => "  " + line)
-        );
-        diagnostics.Add(
-            GenerationDiagnostic.Info(
-                string.Format(
-                    Strings.CodeGen_Info_MultiTargetRowVersionColumns,
-                    rowVersions.RowVersionDialect,
-                    Environment.NewLine + columnList
+            // ダイアログ／CLI で 1 行 1 列に見えるよう、導入文の後に改行＋インデント 2 スペースで各列を並べる
+            var columnList = string.Join(
+                Environment.NewLine,
+                group.Lines.Select(line => "  " + line)
+            );
+            diagnostics.Add(
+                GenerationDiagnostic.Info(
+                    string.Format(
+                        Strings.CodeGen_Info_MultiTargetRowVersionColumns,
+                        group.Dialect,
+                        Environment.NewLine + columnList
+                    )
                 )
-            )
-        );
+            );
+        }
     }
 
     /// <summary>

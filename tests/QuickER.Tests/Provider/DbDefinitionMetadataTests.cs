@@ -235,6 +235,138 @@ public class DbDefinitionMetadataTests
     }
 
     /// <summary>
+    /// 図の方言が sqlite（＝主辞書に SqlDbTypeName が無い）のマルチターゲットでも、
+    /// <c>[DbColumnMeta]</c> が単一方言生成と一致することを検証する。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 実生成の順序は「主辞書へ中立トークンを付加（<see cref="CanonicalTypeTokenAttacher"/>）→
+    /// sqlserver 辞書から <c>[SqlColumnType]</c> のメタ情報を補完（<c>MultiDialectTypeReconciler</c>）」で、
+    /// 補完は主辞書の <c>SqlDbTypeName</c> が空の列だけを作り直す。sqlite の型マッパは <c>SqlDbTypeName</c> を
+    /// 設定しないため、この図では補完対象が全列になり、作り直しでトークンを写し落とすと
+    /// 付加済みの <c>[DbColumnMeta]</c> が全列から黙って消える（C# リバースが劣化する）。
+    /// </para>
+    /// <para>
+    /// 上の対象 DB 非依存テストは主辞書が SQL Server なので、この作り直し経路自体を通らない。
+    /// ここでは実際の利用経路（<see cref="DiagramCodeGenerator"/>）で図の方言を sqlite にして固定する。
+    /// </para>
+    /// </remarks>
+    [Fact(
+        DisplayName = "図の方言が sqlite のマルチターゲットでも [DbColumnMeta] が単一方言生成と一致する"
+    )]
+    public void Metadata_SurvivesSqlColumnTypeSupplement_WhenPrimaryDialectIsSqlite()
+    {
+        var diagram = BuildSqliteDialectDiagram();
+
+        // 単一方言（sqlite）＝補完が走らない基準
+        var single = ExtractMetaLines(
+            DiagramCodeGenerator.Generate(
+                new SqliteCSharpTypeMapper(),
+                new SqliteTypeCatalog(),
+                diagram,
+                MultiTargetOptions(["sqlite"])
+            )
+        );
+
+        // マルチターゲット（sqlite ＋ sqlserver）＝sqlserver 辞書からの [SqlColumnType] 補完が全列で走る
+        var multi = ExtractMetaLines(
+            DiagramCodeGenerator.Generate(
+                new SqliteCSharpTypeMapper(),
+                new SqliteTypeCatalog(),
+                new Dictionary<string, IColumnTypeMapper>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["sqlite"] = new SqliteCSharpTypeMapper(),
+                    ["sqlserver"] = new SqlServerCSharpTypeMapper(),
+                },
+                diagram,
+                MultiTargetOptions(["sqlite", "sqlserver"])
+            )
+        );
+
+        // 空集合どうしの一致で緑になる事故を防ぐ（補完対象になる列のトークンが実在すること）
+        single.Should().Contain("[DbColumnMeta(\"string(50)\")]");
+        single.Should().Contain("[DbColumnMeta(\"decimal(10,2)\")]");
+
+        multi.Should().Equal(single);
+    }
+
+    /// <summary>補完の検証用に、5 方言で解釈の割れない型だけで構成した sqlite 方言の図を作る</summary>
+    private static ErDiagram BuildSqliteDialectDiagram() =>
+        new()
+        {
+            TargetDbms = "sqlite",
+            Entities =
+            {
+                new Entity
+                {
+                    Id = CustomerId,
+                    TableName = "customers",
+                    Columns =
+                    {
+                        new Column
+                        {
+                            Id = PkColId,
+                            Name = "customer_id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                        new Column
+                        {
+                            Id = NameColId,
+                            Name = "name",
+                            DataType = "nvarchar(50)",
+                            IsNullable = false,
+                        },
+                        new Column
+                        {
+                            Id = FreeColId,
+                            Name = "balance",
+                            DataType = "decimal(10,2)",
+                            IsNullable = true,
+                        },
+                    },
+                },
+            },
+        };
+
+    /// <summary>指定方言のQuickER 版 Repository を生成するオプション</summary>
+    private static CodeGenerationOptions MultiTargetOptions(IReadOnlyList<string> dialects) =>
+        new()
+        {
+            RootNamespace = "Sample.Domain",
+            GenerateRepositories = true,
+            GenerateEfCore = false,
+            RepositoryDialects = dialects,
+        };
+
+    /// <summary>生成結果の全ファイルから DB 定義メタ関連行だけを抽出する</summary>
+    private static IReadOnlyList<string> ExtractMetaLines(CodeGenerationResult result)
+    {
+        result.HasErrors.Should().BeFalse();
+
+        var lines = new List<string>();
+
+        foreach (var file in result.Files)
+        {
+            foreach (var line in file.Content.Split('\n'))
+            {
+                var trimmed = line.TrimEnd('\r').Trim();
+
+                if (
+                    trimmed.Contains("DbColumnMeta", StringComparison.Ordinal)
+                    || trimmed.Contains("DbTableMeta", StringComparison.Ordinal)
+                )
+                {
+                    lines.Add(trimmed);
+                }
+            }
+        }
+
+        return lines;
+    }
+
+    /// <summary>
     /// 主辞書（図の方言＝SQL Server）へトークンを付加し、マルチ辞書オーバーロードで生成した中の
     /// DB 定義メタ関連行だけを抽出して返す（対象 DB 差の影響を受けない共有 Entity メタを比較するため）。
     /// </summary>

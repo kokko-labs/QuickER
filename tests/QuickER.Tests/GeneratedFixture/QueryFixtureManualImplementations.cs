@@ -135,3 +135,82 @@ public sealed partial class EfCoreOrderRepository
             .OrderBy(e => e.OrderId)
             .FirstOrDefaultAsync(cancellationToken);
 }
+
+/// <summary>インメモリ実装で生成されないメンバー（自由 SQL 5 件＋manual 1 件）の partial 実装</summary>
+/// <remarks>
+/// インメモリは方言ではないため自由 SQL のクエリも manual 扱い（契約宣言のみ生成）になる＝統一規則
+/// 「SQL（または DSL 共有本体）が与えられていない実装先は手動実装」の実証。意味論は EF Core 側の partial 実装と
+/// 同じで、名前付きクエリのランタイムスイートは DSL 部だけをインメモリでも流す
+/// （自由 SQL 部は SQL 文そのものの検証なので、SQL を持たないインメモリには対象が無い）。
+/// </remarks>
+public sealed partial class InMemoryOrderRepository
+{
+    /// <summary>ユーザー定義の重複チェックを登録する（QuickER 版・EF Core 版と同一のデリゲートを共有する）</summary>
+    partial void CollectCustomUniquenessChecks(ref List<UniquenessCheck<OrderEntity>>? checks) =>
+        (checks ??= new List<UniquenessCheck<OrderEntity>>()).Add(
+            OrderUniquenessCustomCheck.CheckAsync
+        );
+
+    /// <summary>最新（注文IDが最大）の注文を 1 件取得する（QuickER 側の自由 SQL と同じ意味論）</summary>
+    public Task<OrderEntity?> FindTopRawAsync(CancellationToken cancellationToken = default) =>
+        Query().OrderByDescending(e => e.OrderId).FirstOrDefaultAsync(cancellationToken);
+
+    /// <summary>顧客IDに紐づく注文件数を取得する（QuickER 側の自由 SQL と同じ意味論）</summary>
+    public Task<int> CountByCustomerRawAsync(
+        int customerId,
+        CancellationToken cancellationToken = default
+    ) =>
+        Query()
+            .Where(e => e.CustomerId == CustomerIdValue.Create(customerId))
+            .CountAsync(cancellationToken);
+
+    /// <summary>顧客IDに紐づく注文のメモ一覧を取得する（QuickER 側の自由 SQL と同じ意味論）</summary>
+    public async Task<IReadOnlyList<OrderMemoRow>> GetMemoRowsRawAsync(
+        int customerId,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var items = await Query()
+            .Where(e => e.CustomerId == CustomerIdValue.Create(customerId))
+            .OrderBy(e => e.OrderId)
+            .ToListAsync(cancellationToken);
+        return items
+            .Select(e => new OrderMemoRow { OrderId = e.OrderId.Value, Memo = e.Memo?.Value })
+            .ToList();
+    }
+
+    /// <summary>顧客IDに紐づく注文金額の合計（該当なしは null。QuickER 側の SUM と同じ意味論）</summary>
+    public async Task<decimal?> SumAmountsAsync(
+        int customerId,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var items = await Query()
+            .Where(e => e.CustomerId == CustomerIdValue.Create(customerId))
+            .ToListAsync(cancellationToken);
+        return items.Count == 0 ? null : items.Sum(e => e.Amount!.Value);
+    }
+
+    /// <summary>注文IDの一覧で注文を取得する（QuickER 側の自由 SQL と同じ意味論）</summary>
+    public Task<IReadOnlyList<OrderEntity>> GetByIdsRawAsync(
+        IReadOnlyList<int> ids,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var idsValues = ids.Select(OrderIdValue.Create).ToList();
+        return Query()
+            .Where(e => idsValues.Contains(e.OrderId))
+            .OrderBy(e => e.OrderId)
+            .ToListAsync(cancellationToken);
+    }
+
+    /// <summary>顧客IDに紐づく注文のうち最初の 1 件を返す（manual 実装の見本）</summary>
+    public Task<OrderEntity?> SpecialLookupAsync(
+        int customerId,
+        CancellationToken cancellationToken = default
+    ) =>
+        Query()
+            .Where(e => e.CustomerId == CustomerIdValue.Create(customerId))
+            .OrderBy(e => e.OrderId)
+            .FirstOrDefaultAsync(cancellationToken);
+}

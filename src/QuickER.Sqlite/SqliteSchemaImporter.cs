@@ -27,17 +27,20 @@ public class SqliteSchemaImporter : ISchemaImporter
     /// <summary>接続文字列で接続を開きスキーマを取得する（<see cref="ISchemaImporter"/> 実装・CLI scaffold 用）</summary>
     public async Task<SchemaImportResult> ImportAsync(
         string connectionString,
+        int commandTimeoutSeconds,
         CancellationToken cancellationToken = default
     )
     {
         await using var conn = new SqliteConnection(connectionString);
         await conn.OpenAsync(cancellationToken).ConfigureAwait(false);
-        var result = await ImportAsync(conn, cancellationToken).ConfigureAwait(false);
+        var result = await ImportAsync(conn, cancellationToken, commandTimeoutSeconds)
+            .ConfigureAwait(false);
         return new SchemaImportResult
         {
             Entities = result.Entities,
             Relationships = result.Relationships,
             AuxiliaryObjects = result.AuxiliaryObjects,
+            TableCreateSql = result.TableCreateSql,
         };
     }
 
@@ -52,33 +55,50 @@ public class SqliteSchemaImporter : ISchemaImporter
 
         /// <summary>取得した補助オブジェクト（インデックス・トリガー・テーブルレベル一意制約）</summary>
         public List<SchemaAuxiliaryObject> AuxiliaryObjects { get; init; } = new();
+
+        /// <summary>テーブル名 → <c>CREATE TABLE</c> 文全文（再構築で失われる列属性の検出材料）</summary>
+        public Dictionary<string, string> TableCreateSql { get; init; } =
+            new(StringComparer.OrdinalIgnoreCase);
     }
 
     /// <summary>既に開かれた接続でスキーマを取得する（テストや接続再利用向け）</summary>
     /// <remarks>テーブル→カラム／主キー→一意制約→外部キーの順に段階的に補完していく</remarks>
+    /// <param name="conn">既に開かれた接続</param>
+    /// <param name="ct">キャンセルトークン</param>
+    /// <param name="commandTimeoutSeconds">
+    /// カタログ照会 1 本ごとの実行タイムアウト（秒）。既定値付きで <paramref name="ct"/> の後ろに置くのは、
+    /// 既存の位置指定呼び出し（統合テストの <c>ImportAsync(conn, ct)</c>）を壊さないため。
+    /// </param>
     public async Task<SchemaResult> ImportAsync(
         SqliteConnection conn,
-        CancellationToken ct = default
+        CancellationToken ct = default,
+        int commandTimeoutSeconds = DbCommands.DefaultTimeoutSeconds
     )
     {
-        var tables = await LoadTablesAsync(conn, ct).ConfigureAwait(false);
+        var (tables, tableCreateSql) = await LoadTablesAsync(conn, commandTimeoutSeconds, ct)
+            .ConfigureAwait(false);
 
         // 各テーブルの列・主キーは PRAGMA table_info でまとめて取得する
         foreach (var entry in tables.Values)
         {
-            await LoadColumnsAndPrimaryKeyAsync(conn, entry, ct).ConfigureAwait(false);
+            await LoadColumnsAndPrimaryKeyAsync(conn, entry, commandTimeoutSeconds, ct)
+                .ConfigureAwait(false);
         }
 
         // 一意制約は FK の 1 対 1 判定の材料になるため、外部キーより先にモデルへ載せる
-        await LoadUniqueConstraintsAsync(conn, tables, ct).ConfigureAwait(false);
-        var rels = await LoadForeignKeysAsync(conn, tables, ct).ConfigureAwait(false);
-        var aux = await LoadAuxiliaryObjectsAsync(conn, tables, ct).ConfigureAwait(false);
+        await LoadUniqueConstraintsAsync(conn, tables, commandTimeoutSeconds, ct)
+            .ConfigureAwait(false);
+        var rels = await LoadForeignKeysAsync(conn, tables, commandTimeoutSeconds, ct)
+            .ConfigureAwait(false);
+        var aux = await LoadAuxiliaryObjectsAsync(conn, tables, commandTimeoutSeconds, ct)
+            .ConfigureAwait(false);
 
         return new SchemaResult
         {
             Entities = tables.Values.Select(t => t.Entity).ToList(),
             Relationships = rels,
             AuxiliaryObjects = aux,
+            TableCreateSql = tableCreateSql,
         };
     }
 
@@ -91,20 +111,25 @@ public class SqliteSchemaImporter : ISchemaImporter
     /// </remarks>
     private const string TablesSql =
         @"
-SELECT name
+SELECT name, sql
 FROM sqlite_master
 WHERE type = 'table' AND name NOT LIKE 'sqlite\_%' ESCAPE '\'
 ORDER BY name;";
 
-    /// <summary>テーブル一覧を読み込み、テーブル名をキーとするエントリ辞書を構築する</summary>
-    private static async Task<Dictionary<string, SchemaTableEntry>> LoadTablesAsync(
-        SqliteConnection conn,
-        CancellationToken ct
-    )
+    /// <summary>テーブル一覧を読み込み、テーブル名をキーとするエントリ辞書と CREATE 文全文を構築する</summary>
+    /// <remarks>
+    /// <c>CREATE TABLE</c> 文の原文（<c>sqlite_master.sql</c>）も同時に持ち帰る。意味モデルには載らない
+    /// 列レベル属性（<c>AUTOINCREMENT</c> / <c>DEFAULT</c> / <c>CHECK</c> / <c>COLLATE</c> / 生成列）が
+    /// テーブル再構築で失われることを、同期の実行前に警告するための材料になる。
+    /// </remarks>
+    private static async Task<(
+        Dictionary<string, SchemaTableEntry> Tables,
+        Dictionary<string, string> CreateSql
+    )> LoadTablesAsync(SqliteConnection conn, int commandTimeoutSeconds, CancellationToken ct)
     {
         var dict = new Dictionary<string, SchemaTableEntry>(StringComparer.OrdinalIgnoreCase);
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = TablesSql;
+        var createSql = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        await using var cmd = DbCommands.Create(conn, TablesSql, commandTimeoutSeconds);
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
 
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
@@ -117,9 +142,14 @@ ORDER BY name;";
             };
 
             dict[entry.Key] = entry;
+
+            if (!reader.IsDBNull(1))
+            {
+                createSql[name] = reader.GetString(1);
+            }
         }
 
-        return dict;
+        return (dict, createSql);
     }
 
     /// <summary>1 テーブルの列定義と主キーを PRAGMA table_info から読み込む</summary>
@@ -130,12 +160,15 @@ ORDER BY name;";
     private static async Task LoadColumnsAndPrimaryKeyAsync(
         SqliteConnection conn,
         SchemaTableEntry entry,
+        int commandTimeoutSeconds,
         CancellationToken ct
     )
     {
-        await using var cmd = conn.CreateCommand();
-        // PRAGMA はパラメータ化できないため、識別子として二重引用符でクォートして埋め込む
-        cmd.CommandText = $"PRAGMA table_info({SqliteIdentifier.Quote(entry.Key)});";
+        await using var cmd = DbCommands.Create(
+            conn,
+            $"PRAGMA table_info({SqliteIdentifier.Quote(entry.Key)});",
+            commandTimeoutSeconds
+        );
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
 
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
@@ -176,6 +209,7 @@ ORDER BY name;";
     private static async Task LoadUniqueConstraintsAsync(
         SqliteConnection conn,
         Dictionary<string, SchemaTableEntry> tables,
+        int commandTimeoutSeconds,
         CancellationToken ct
     )
     {
@@ -185,9 +219,14 @@ ORDER BY name;";
         {
             // index_list の列は seq / name / unique(0/1) / origin('c'=CREATE UNIQUE, 'u'=UNIQUE 制約, 'pk'=主キー) / partial
             var uniqueIndexes = new List<string>();
-            await using (var listCmd = conn.CreateCommand())
+            await using (
+                var listCmd = DbCommands.Create(
+                    conn,
+                    $"PRAGMA index_list({SqliteIdentifier.Quote(entry.Key)});",
+                    commandTimeoutSeconds
+                )
+            )
             {
-                listCmd.CommandText = $"PRAGMA index_list({SqliteIdentifier.Quote(entry.Key)});";
                 await using var listReader = await listCmd
                     .ExecuteReaderAsync(ct)
                     .ConfigureAwait(false);
@@ -207,8 +246,11 @@ ORDER BY name;";
 
             foreach (var indexName in uniqueIndexes)
             {
-                await using var infoCmd = conn.CreateCommand();
-                infoCmd.CommandText = $"PRAGMA index_info({SqliteIdentifier.Quote(indexName)});";
+                await using var infoCmd = DbCommands.Create(
+                    conn,
+                    $"PRAGMA index_info({SqliteIdentifier.Quote(indexName)});",
+                    commandTimeoutSeconds
+                );
                 await using var infoReader = await infoCmd
                     .ExecuteReaderAsync(ct)
                     .ConfigureAwait(false);
@@ -241,6 +283,7 @@ ORDER BY name;";
     private static async Task<List<Relationship>> LoadForeignKeysAsync(
         SqliteConnection conn,
         Dictionary<string, SchemaTableEntry> tables,
+        int commandTimeoutSeconds,
         CancellationToken ct
     )
     {
@@ -248,8 +291,11 @@ ORDER BY name;";
 
         foreach (var entry in tables.Values)
         {
-            await using var cmd = conn.CreateCommand();
-            cmd.CommandText = $"PRAGMA foreign_key_list({SqliteIdentifier.Quote(entry.Key)});";
+            await using var cmd = DbCommands.Create(
+                conn,
+                $"PRAGMA foreign_key_list({SqliteIdentifier.Quote(entry.Key)});",
+                commandTimeoutSeconds
+            );
             await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
 
             while (await reader.ReadAsync(ct).ConfigureAwait(false))
@@ -282,6 +328,14 @@ ORDER BY name;";
         return builder.Build(tables);
     }
 
+    /// <summary>インデックス・トリガーの CREATE SQL 全文を取得するクエリ</summary>
+    private const string AuxiliaryObjectsSql =
+        @"
+SELECT type, name, tbl_name, sql
+FROM sqlite_master
+WHERE type IN ('index','trigger') AND sql IS NOT NULL AND name NOT LIKE 'sqlite\_%' ESCAPE '\'
+ORDER BY name;";
+
     /// <summary>
     /// テーブルに付随する補助オブジェクト（インデックス・トリガー）を収集する。
     /// </summary>
@@ -300,20 +354,15 @@ ORDER BY name;";
     private static async Task<List<SchemaAuxiliaryObject>> LoadAuxiliaryObjectsAsync(
         SqliteConnection conn,
         Dictionary<string, SchemaTableEntry> tables,
+        int commandTimeoutSeconds,
         CancellationToken ct
     )
     {
         var aux = new List<SchemaAuxiliaryObject>();
 
         // ---- インデックス・トリガー（CREATE SQL 全文を温存する）----
-        await using (var cmd = conn.CreateCommand())
+        await using (var cmd = DbCommands.Create(conn, AuxiliaryObjectsSql, commandTimeoutSeconds))
         {
-            cmd.CommandText =
-                @"
-SELECT type, name, tbl_name, sql
-FROM sqlite_master
-WHERE type IN ('index','trigger') AND sql IS NOT NULL AND name NOT LIKE 'sqlite\_%' ESCAPE '\'
-ORDER BY name;";
             await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
 
             while (await reader.ReadAsync(ct).ConfigureAwait(false))

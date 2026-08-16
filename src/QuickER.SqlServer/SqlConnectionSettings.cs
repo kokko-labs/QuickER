@@ -27,6 +27,14 @@ public class SqlConnectionSettings
     /// <summary>接続タイムアウト（秒）</summary>
     public int ConnectTimeoutSeconds { get; set; } = 15;
 
+    /// <summary>コマンド実行タイムアウト（秒）</summary>
+    /// <remarks>
+    /// スキーマ取込の各カタログ照会に適用し、<see cref="ToDbConnectionSettings"/> 経由で同期実行器へも渡る
+    /// （<see cref="DbConnectionSettings.CommandTimeoutSeconds"/> と同じ意味論＝<c>0</c> は無制限）。
+    /// 接続文字列（<see cref="Build"/>）には載せない。
+    /// </remarks>
+    public int CommandTimeoutSeconds { get; set; } = DbCommands.DefaultTimeoutSeconds;
+
     /// <summary>現在の設定値から ADO.NET の接続文字列を構築する</summary>
     public string Build()
     {
@@ -89,5 +97,6 @@ public class SqlConnectionSettings
             Password = Password,
             TrustServerCertificate = TrustServerCertificate,
             ConnectTimeoutSeconds = ConnectTimeoutSeconds,
+            CommandTimeoutSeconds = CommandTimeoutSeconds,
         };
 }

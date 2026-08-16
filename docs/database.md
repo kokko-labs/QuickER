@@ -24,6 +24,7 @@ The "DB Import" button on the toolbar opens the "Import from Database" connectio
 
 - **Server-type DBMS** — specify the target DB, host, port (leave empty for the dialect's default), database name, user name, and password. For SQL Server you can also choose the authentication mode (Windows / SQL Server) and "Trust the server certificate (TrustServerCertificate)". Oracle has a service-name field
 - **SQLite** — specify the file path via "Browse" (import works on existing files only)
+- **Timeouts** — *Connect timeout* is how long to wait for the connection itself (server-type DBMS only); *Command timeout* is how long a single schema-import or sync statement may run. The command timeout defaults to 60 seconds and applies to every dialect including SQLite; `0` means no limit (the ADO.NET convention), and negative values are rejected when you confirm the dialog. Both are saved per connection profile, and profiles written before this setting existed load with the default
 - **Test Connection** — runs a real schema fetch and reports the number of tables detected
 
 > **Note:** "Trust the server certificate (TrustServerCertificate)" is checked by default so that local or containerized SQL Server instances with self-signed certificates work out of the box. This setting skips server certificate validation, so when connecting to a production or remote server that has a properly issued certificate, uncheck it to keep man-in-the-middle detection effective. The setting is saved per connection profile.
@@ -39,9 +40,38 @@ Connection settings can be saved under a name and recalled later from "Saved Con
 - Foreign keys (including the constraint name and the ON DELETE / ON UPDATE referential actions). When the FK columns on the referencing side themselves form that table's primary key or a unique constraint, the relationship is classified as one-to-one. A foreign key made up of multiple columns is imported as a relationship, but the column-to-column mapping is not restored (one relationship carries a single column pair). SQLite does not persist FK constraint names, so a constraint name is synthesized on import
 - Table and column descriptions (SQL Server's MS_Description extended properties, PostgreSQL's `obj_description` / `col_description`, MySQL's `TABLE_COMMENT` / `COLUMN_COMMENT`, and Oracle's `user_tab_comments` / `user_col_comments`). SQLite has no description mechanism and is out of scope
 
+Nothing else is imported — see [Modeling fidelity](#modeling-fidelity) for the full boundary and what it means for DDL generation.
+
 The import result is merged into the current diagram. Tables and columns are matched by name, and matching elements take over the identity of the current diagram's elements, so their layout, width, color, and notes — along with the named queries that reference them — are preserved. Only newly imported tables are placed in free space; the whole diagram is auto-arranged only when nothing in the current diagram matches (a completely new import). A confirmation appears when the current diagram differs structurally, and also when the import would break named queries — in which case the queries to be removed are listed by name.
 
 For how to pair your existing entity assets with the generated code after importing, see ["Coexisting with an existing codebase" in Using the generated code](code-generation.md#coexisting-with-an-existing-codebase).
+
+## Modeling fidelity
+
+The diagram is a design model, not a copy of the database. What it models is exactly what round-trips:
+
+- Tables and columns (type, length, precision, nullability)
+- Primary keys, including the column order of a composite key
+- Foreign keys with their column pairs, constraint name, and referential actions
+- UNIQUE constraints
+- Table and column descriptions
+
+Everything else is outside the model. It is not imported, it never appears in generated DDL, and the diff sync neither detects nor touches it:
+
+| Schema element | On import | In generated DDL | In a SQLite table rebuild |
+|---|---|---|---|
+| `DEFAULT` | Not imported | Not emitted | Lost |
+| `CHECK` constraint | Not imported | Not emitted | Lost |
+| `COLLATE` | Not imported | Not emitted | Lost |
+| Generated / computed column | Imported as an ordinary column; the expression is lost | Emitted as an ordinary column | Lost |
+| `IDENTITY` / `AUTO_INCREMENT` / `AUTOINCREMENT` | Not imported | Not emitted | Lost (an `INTEGER` primary key stays a rowid alias, so implicit auto-numbering survives) |
+| Non-unique index | Not imported | Not emitted | Preserved (captured as its `CREATE` statement and replayed) |
+| Trigger | Not imported | Not emitted | Preserved (same) |
+| View, stored procedure, function, sequence | Not imported | Not emitted | Not applicable |
+
+Outside a SQLite table rebuild, these objects are simply left alone: the diff sync does not diff them, so an index or a `DEFAULT` you created by hand stays in the database. The rebuild is the one operation that recreates a table from the diagram's definition, which is why it can drop what the diagram cannot express — QuickER lists the attributes it found on the table in the execution confirmation (see [SQLite diff sync](#sqlite-diff-sync-table-rebuilds)).
+
+**DDL generation creates a new schema from a design; it does not reproduce a database you imported.** Unless the source database happens to use nothing outside the modeled set above, the generated `CREATE` statements are a different schema — one that shares the tables, columns, keys, and constraints, and has none of the defaults, checks, collations, auto-numbering, indexes, or triggers. To move an existing database, use its own tooling; use QuickER's DDL to stand up a new one from the design.
 
 ## Diff sync (diagram → DB)
 
@@ -83,6 +113,8 @@ Table and column descriptions sync on the four dialects that have a description 
 ### SQLite diff sync (table rebuilds)
 
 Because SQLite's `ALTER TABLE` supports only limited changes, sync operations that involve column changes or deletions use a table-rebuild approach. A new table is created from the combined definition of "the database's current state + the selected differences," the data is migrated, the old table is swapped out, and auxiliary objects such as indexes are recreated. The rebuild runs inside a transaction, and before committing it checks foreign-key integrity (`PRAGMA foreign_key_check`); on violations it rolls back and reports the violating tables.
+
+The rebuilt table is created from the diagram's definition, so anything outside [what the diagram models](#modeling-fidelity) — `AUTOINCREMENT`, `DEFAULT`, `CHECK`, `COLLATE`, and generated columns — is **not** reproduced and is silently lost, which is exactly why the `DEFAULT` values you set outside QuickER disappear after a rebuild. Indexes and triggers are safe: they are captured as their full `CREATE` statements and replayed. Implicit auto-numbering is also safe, because an `INTEGER` primary key stays a rowid alias in the rebuilt table. To make the loss visible, QuickER reads the live `CREATE TABLE` statement of every table it is about to rebuild and lists the attributes it found in the execution-confirmation dialog; if the table needs those attributes, re-apply them yourself after the sync (or run the change as hand-written SQL).
 
 The sync-target SQLite file can also be created fresh with the "Create new" button in the connection dialog — apply the whole diagram to an empty database to set it up from scratch.
 

@@ -1,0 +1,105 @@
+// QuickER 公開 API スナップショット: QuickER.Runtime.EntityFrameworkCore
+// 手編集しない。更新は QUICKER_REGEN_FIXTURES=1 での再生成（失敗メッセージにコマンドあり）。
+
+public abstract class QuickER.Runtime.EntityFrameworkCore.EfCoreRepository<TEntity, TKey, TContext> : QuickER.Runtime.IRemoteRepository<TEntity, TKey>, QuickER.Runtime.IRepository<TEntity, TKey>
+    protected .ctor(Microsoft.EntityFrameworkCore.IDbContextFactory<TContext> contextFactory, QuickER.Runtime.ISaveHookRegistry saveHooks = null, QuickER.Runtime.ISqlExecutor sqlExecutor = null)
+    public QuickER.Runtime.SqlQuery<TEntity> Query()
+    public System.Threading.Tasks.Task InsertAsync(TEntity entity, System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TEntity>> GetAllAsync(System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TEntity>> QueryBySqlAsync(string sql, object parameters = null, System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<TEntity> GetByIdAsync(TKey id, System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<TResult> ExecuteScalarSqlAsync<TResult>(string sql, object parameters = null, System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<bool> DeleteAsync(TKey id, System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<bool> UpdateAsync(TEntity entity, QuickER.Runtime.ConcurrencyMode mode = 0, System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<int> BulkInsertAsync(System.Collections.Generic.IEnumerable<TEntity> entities, System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<int> ExecuteSqlAsync(string sql, object parameters = null, System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<int> SaveAsync(System.Collections.Generic.IEnumerable<TEntity> entities, bool cascadeSave = true, bool cascadeDelete = true, bool insertWhenUpdateMissing = false, QuickER.Runtime.ConcurrencyMode mode = 0, System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<int> SaveAsync(TEntity entity, bool cascadeSave = true, bool cascadeDelete = true, bool insertWhenUpdateMissing = false, QuickER.Runtime.ConcurrencyMode mode = 0, System.Threading.CancellationToken cancellationToken = default)
+
+public sealed class QuickER.Runtime.EntityFrameworkCore.EfCoreSaveHookContext : QuickER.Runtime.ISaveHookContext
+    public .ctor(Microsoft.EntityFrameworkCore.DbContext context)
+    public System.Threading.Tasks.Task<bool> WriteBinaryColumnAsync(string propertyName, object key, System.IO.Stream source, long? length = default, System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<int> ExecuteSqlAsync(string sql, object parameters = null, System.Threading.CancellationToken cancellationToken = default)
+
+public sealed class QuickER.Runtime.EntityFrameworkCore.EfCoreSqlExecutor<TContext> : QuickER.Runtime.ISqlExecutor
+    public .ctor(Microsoft.EntityFrameworkCore.IDbContextFactory<TContext> contextFactory)
+    public System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TEntity>> QueryBySqlAsync<TEntity>(string sql, object parameters = null, System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TResult>> QueryProjectionBySqlAsync<TResult>(string sql, object parameters = null, System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<TResult> ExecuteScalarSqlAsync<TResult>(string sql, object parameters = null, System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<int> ExecuteSqlAsync(string sql, object parameters = null, System.Threading.CancellationToken cancellationToken = default)
+
+public sealed class QuickER.Runtime.EntityFrameworkCore.EfCoreSqlQueryExecutor<TEntity, TContext> : QuickER.Runtime.ISqlQueryExecutor<TEntity>
+    public .ctor(Microsoft.EntityFrameworkCore.IDbContextFactory<TContext> contextFactory)
+    public System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TEntity>> ToListAsync(QuickER.Runtime.SqlQueryPlan<TEntity> plan, System.Threading.CancellationToken cancellationToken)
+    public System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TResult>> ToProjectionListAsync<TResult>(QuickER.Runtime.SqlQueryPlan<TEntity> plan, System.Linq.Expressions.Expression<System.Func<TEntity, TResult>> selector, System.Threading.CancellationToken cancellationToken)
+    public System.Threading.Tasks.Task<TEntity> FirstOrDefaultAsync(QuickER.Runtime.SqlQueryPlan<TEntity> plan, System.Threading.CancellationToken cancellationToken)
+    public System.Threading.Tasks.Task<bool> AnyAsync(QuickER.Runtime.SqlQueryPlan<TEntity> plan, System.Threading.CancellationToken cancellationToken)
+    public System.Threading.Tasks.Task<int> CountAsync(QuickER.Runtime.SqlQueryPlan<TEntity> plan, System.Threading.CancellationToken cancellationToken)
+    public System.Threading.Tasks.Task<int> ExecuteDeleteAsync(QuickER.Runtime.SqlQueryPlan<TEntity> plan, bool cascadeDelete, System.Threading.CancellationToken cancellationToken)
+
+public static class QuickER.Runtime.EntityFrameworkCore.EntityGraphSaver
+    public static bool HasChanges(QuickER.Runtime.EntityBase entity, bool cascade)
+    public static void AcceptChanges(QuickER.Runtime.EntityBase entity, bool cascade)
+    public static void AcceptChanges(QuickER.Runtime.EntityBase entity, bool cascade, System.Collections.Generic.IReadOnlySet<QuickER.Runtime.EntityBase> skip)
+
+public sealed class QuickER.Runtime.EntityFrameworkCore.EntitySaveMetadata
+    public .ctor()
+    public QuickER.Runtime.EntityFrameworkCore.EntitySaveMetadata.RawSqlRowPlan CreateRawSqlRowPlan(System.Data.Common.DbDataReader reader)
+    public System.Collections.Generic.IReadOnlyDictionary<System.Reflection.PropertyInfo, string> ColumnNameByProperty { get; init; }
+    public System.Collections.Generic.IReadOnlyDictionary<string, System.Reflection.PropertyInfo> PropertyByColumn { get; init; }
+    public System.Collections.Generic.IReadOnlyList<QuickER.Runtime.CascadeNavigation> CascadeNavigations { get; init; }
+    public System.Collections.Generic.IReadOnlyList<System.Reflection.PropertyInfo> AllProperties { get; init; }
+    public System.Collections.Generic.IReadOnlyList<System.Reflection.PropertyInfo> ExcludedProperties { get; init; }
+    public System.Collections.Generic.IReadOnlyList<System.Reflection.PropertyInfo> ResolveProjectionColumns(System.Collections.Generic.IReadOnlyCollection<string> propertyNames)
+    public System.Collections.Generic.IReadOnlyList<System.Reflection.PropertyInfo> SelectProperties { get; init; }
+    public System.Collections.Generic.IReadOnlyList<System.ValueTuple<System.Reflection.PropertyInfo, string>> SelectColumns { get; init; }
+    public System.Func<System.Data.Common.DbDataReader, int[], QuickER.Runtime.EntityBase> SelectMaterializer { get; init; }
+    public System.Reflection.PropertyInfo ColumnByPropertyName(string propertyName)
+    public System.Reflection.PropertyInfo KeyProperty { get; init; }
+    public System.Reflection.PropertyInfo RowVersionProperty { get; init; }
+    public TEntity MapEntity<TEntity>(System.Data.Common.DbDataReader reader)
+    public TEntity MapEntity<TEntity>(System.Data.Common.DbDataReader reader, int[] ordinals)
+    public TEntity MapEntityFromRawSql<TEntity>(System.Data.Common.DbDataReader reader)
+    public TEntity MapEntityFromRawSql<TEntity>(System.Data.Common.DbDataReader reader, QuickER.Runtime.EntityFrameworkCore.EntitySaveMetadata.RawSqlRowPlan plan)
+    public int[] SelectOrdinals(System.Data.Common.DbDataReader reader)
+    public static QuickER.Runtime.EntityFrameworkCore.EntitySaveMetadata For(System.Type entityType)
+    public static QuickER.Runtime.NavigationReferenceAttribute NavigationAttribute(System.Reflection.PropertyInfo property)
+    public string ColumnList { get; init; }
+
+public sealed class QuickER.Runtime.EntityFrameworkCore.EntitySaveMetadata.RawSqlRowPlan
+    public .ctor()
+    public System.ValueTuple<System.Reflection.PropertyInfo, int>[] ExcludedOrdinals { get; init; }
+    public int[] SelectOrdinals { get; init; }
+
+public struct QuickER.Runtime.EntityFrameworkCore.LikeEscapeBehavior : System.IEquatable<QuickER.Runtime.EntityFrameworkCore.LikeEscapeBehavior>
+    public .ctor(string EscapeChar, bool EscapeBracket, bool EmitEscapeClause)
+    public bool EmitEscapeClause { get; init; }
+    public bool EscapeBracket { get; init; }
+    public static QuickER.Runtime.EntityFrameworkCore.LikeEscapeBehavior FromProviderName(string providerName)
+    public string EscapeChar { get; init; }
+
+public sealed class QuickER.Runtime.EntityFrameworkCore.SaveHookSession
+    public .ctor(QuickER.Runtime.ISaveHookRegistry registry, System.Func<QuickER.Runtime.EntityBase, QuickER.Runtime.ISaveHookContext> contextFactory)
+    public System.Collections.Generic.IReadOnlySet<QuickER.Runtime.EntityBase> Skipped { get; }
+    public System.Threading.Tasks.Task InvokeAfterAsync(QuickER.Runtime.EntityBase entity, QuickER.Runtime.SaveOperation operation, System.Threading.CancellationToken cancellationToken)
+    public System.Threading.Tasks.Task<bool> InvokeBeforeAsync(QuickER.Runtime.EntityBase entity, QuickER.Runtime.SaveOperation operation, System.Threading.CancellationToken cancellationToken)
+    public void Skip(QuickER.Runtime.EntityBase entity)
+
+public sealed class QuickER.Runtime.EntityFrameworkCore.ValueObjectStringMethodTranslator : Microsoft.EntityFrameworkCore.Query.IMethodCallTranslator
+    public .ctor(Microsoft.EntityFrameworkCore.Query.ISqlExpressionFactory sqlExpressionFactory, Microsoft.EntityFrameworkCore.Storage.RelationalTypeMapping stringTypeMapping, QuickER.Runtime.EntityFrameworkCore.LikeEscapeBehavior escapeBehavior)
+    public Microsoft.EntityFrameworkCore.Query.SqlExpressions.SqlExpression Translate(Microsoft.EntityFrameworkCore.Query.SqlExpressions.SqlExpression instance, System.Reflection.MethodInfo method, System.Collections.Generic.IReadOnlyList<Microsoft.EntityFrameworkCore.Query.SqlExpressions.SqlExpression> arguments, Microsoft.EntityFrameworkCore.Diagnostics.IDiagnosticsLogger<Microsoft.EntityFrameworkCore.DbLoggerCategory.Query> logger)
+
+public sealed class QuickER.Runtime.EntityFrameworkCore.ValueObjectTranslationDbContextOptionsExtension : Microsoft.EntityFrameworkCore.Infrastructure.IDbContextOptionsExtension
+    public .ctor()
+    public Microsoft.EntityFrameworkCore.Infrastructure.DbContextOptionsExtensionInfo Info { get; }
+    public void ApplyServices(Microsoft.Extensions.DependencyInjection.IServiceCollection services)
+    public void Validate(Microsoft.EntityFrameworkCore.Infrastructure.IDbContextOptions options)
+
+public sealed class QuickER.Runtime.EntityFrameworkCore.ValueObjectTranslatorPlugin : Microsoft.EntityFrameworkCore.Query.IMemberTranslatorPlugin, Microsoft.EntityFrameworkCore.Query.IMethodCallTranslatorPlugin
+    public .ctor(Microsoft.EntityFrameworkCore.Query.ISqlExpressionFactory sqlExpressionFactory, Microsoft.EntityFrameworkCore.Storage.IRelationalTypeMappingSource typeMappingSource, Microsoft.EntityFrameworkCore.Storage.IDatabaseProvider databaseProvider)
+    public System.Collections.Generic.IEnumerable<Microsoft.EntityFrameworkCore.Query.IMethodCallTranslator> Translators { get; }
+
+public sealed class QuickER.Runtime.EntityFrameworkCore.ValueObjectValueMemberTranslator : Microsoft.EntityFrameworkCore.Query.IMemberTranslator
+    public .ctor(Microsoft.EntityFrameworkCore.Query.ISqlExpressionFactory sqlExpressionFactory, Microsoft.EntityFrameworkCore.Storage.IRelationalTypeMappingSource typeMappingSource)
+    public Microsoft.EntityFrameworkCore.Query.SqlExpressions.SqlExpression Translate(Microsoft.EntityFrameworkCore.Query.SqlExpressions.SqlExpression instance, System.Reflection.MemberInfo member, System.Type returnType, Microsoft.EntityFrameworkCore.Diagnostics.IDiagnosticsLogger<Microsoft.EntityFrameworkCore.DbLoggerCategory.Query> logger)
+

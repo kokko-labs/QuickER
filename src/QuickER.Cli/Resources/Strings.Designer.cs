@@ -96,6 +96,12 @@ namespace QuickER.Cli.Resources {
             }
         }
 
+        public static string Cli_Opt_CommandTimeout {
+            get {
+                return ResourceManager.GetString("Cli_Opt_CommandTimeout", resourceCulture);
+            }
+        }
+
         public static string Cli_Cmd_Scaffold {
             get {
                 return ResourceManager.GetString("Cli_Cmd_Scaffold", resourceCulture);

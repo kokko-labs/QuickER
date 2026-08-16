@@ -1,0 +1,153 @@
+// QuickER 公開 API スナップショット: QuickER.Runtime.SqlServer
+// 手編集しない。更新は QUICKER_REGEN_FIXTURES=1 での再生成（失敗メッセージにコマンドあり）。
+
+public static class QuickER.Runtime.SqlServer.CascadeDeletePlanner
+    public static System.Collections.Generic.IReadOnlyList<string> BuildDeleteStatements(System.Type rootType, string rootTable, string whereClause)
+
+public static class QuickER.Runtime.SqlServer.EntityGraphSaver
+    public static System.Threading.Tasks.Task<int> SaveAsync(QuickER.Runtime.EntityBase entity, Microsoft.Data.SqlClient.SqlConnection connection, Microsoft.Data.SqlClient.SqlTransaction transaction, bool cascadeSave, bool cascadeDelete, bool insertWhenUpdateMissing, System.Threading.CancellationToken cancellationToken, QuickER.Runtime.SqlServer.SaveHookSession hooks = null, bool changesAlreadyVerified = false, QuickER.Runtime.ConcurrencyMode mode = 0, QuickER.Runtime.SqlServer.RowVersionCollector versions = null)
+    public static bool HasChanges(QuickER.Runtime.EntityBase entity, bool cascade)
+    public static void AcceptChanges(QuickER.Runtime.EntityBase entity, bool cascade)
+    public static void AcceptChanges(QuickER.Runtime.EntityBase entity, bool cascade, System.Collections.Generic.IReadOnlySet<QuickER.Runtime.EntityBase> skip)
+
+public sealed class QuickER.Runtime.SqlServer.EntitySaveMetadata
+    public .ctor()
+    public QuickER.Runtime.SqlServer.EntitySaveMetadata.RawSqlRowPlan CreateRawSqlRowPlan(Microsoft.Data.SqlClient.SqlDataReader reader)
+    public System.Collections.Generic.IReadOnlyDictionary<System.Reflection.PropertyInfo, string> ColumnNameByProperty { get; init; }
+    public System.Collections.Generic.IReadOnlyDictionary<string, System.Reflection.PropertyInfo> PropertyByColumn { get; init; }
+    public System.Collections.Generic.IReadOnlyList<QuickER.Runtime.CascadeNavigation> CascadeNavigations { get; init; }
+    public System.Collections.Generic.IReadOnlyList<System.Reflection.PropertyInfo> AllProperties { get; init; }
+    public System.Collections.Generic.IReadOnlyList<System.Reflection.PropertyInfo> ExcludedProperties { get; init; }
+    public System.Collections.Generic.IReadOnlyList<System.Reflection.PropertyInfo> InsertProperties { get; init; }
+    public System.Collections.Generic.IReadOnlyList<System.Reflection.PropertyInfo> NonKeyProperties { get; init; }
+    public System.Collections.Generic.IReadOnlyList<System.Reflection.PropertyInfo> ResolveProjectionColumns(System.Collections.Generic.IReadOnlyCollection<string> propertyNames)
+    public System.Collections.Generic.IReadOnlyList<System.Reflection.PropertyInfo> SelectProperties { get; init; }
+    public System.Collections.Generic.IReadOnlyList<System.ValueTuple<System.Reflection.PropertyInfo, string>> SelectColumns { get; init; }
+    public System.Collections.Generic.IReadOnlyList<System.ValueTuple<string, string>> Columns { get; init; }
+    public System.Data.IDataReader CreateDataReader(System.Collections.Generic.IEnumerable<QuickER.Runtime.EntityBase> entities)
+    public System.Func<System.Data.Common.DbDataReader, int[], QuickER.Runtime.EntityBase> SelectMaterializer { get; init; }
+    public System.Reflection.PropertyInfo ColumnByPropertyName(string propertyName)
+    public System.Reflection.PropertyInfo KeyProperty { get; init; }
+    public System.Reflection.PropertyInfo RowVersionProperty { get; init; }
+    public TEntity MapEntity<TEntity>(Microsoft.Data.SqlClient.SqlDataReader reader)
+    public TEntity MapEntity<TEntity>(Microsoft.Data.SqlClient.SqlDataReader reader, int[] ordinals)
+    public TEntity MapEntityColumns<TEntity>(Microsoft.Data.SqlClient.SqlDataReader reader, System.Collections.Generic.IReadOnlyList<System.Reflection.PropertyInfo> properties, int[] ordinals, bool markUnchanged = false)
+    public TEntity MapEntityFromRawSql<TEntity>(Microsoft.Data.SqlClient.SqlDataReader reader)
+    public TEntity MapEntityFromRawSql<TEntity>(Microsoft.Data.SqlClient.SqlDataReader reader, QuickER.Runtime.SqlServer.EntitySaveMetadata.RawSqlRowPlan plan)
+    public int[] ColumnOrdinals(System.Data.Common.DbDataReader reader, System.Collections.Generic.IReadOnlyList<System.Reflection.PropertyInfo> properties)
+    public int[] SelectOrdinals(System.Data.Common.DbDataReader reader)
+    public static QuickER.Runtime.NavigationReferenceAttribute NavigationAttribute(System.Reflection.PropertyInfo property)
+    public static QuickER.Runtime.SqlServer.EntitySaveMetadata For(System.Type entityType)
+    public string BuildColumnList(System.Collections.Generic.IReadOnlyList<System.Reflection.PropertyInfo> properties)
+    public string ColumnList { get; init; }
+    public string DeleteSql { get; init; }
+    public string DeleteVersionedSql { get; init; }
+    public string ExistsByIdSql { get; init; }
+    public string InsertReturningSql { get; init; }
+    public string InsertSql { get; init; }
+    public string KeyColumnName { get; init; }
+    public string QuotedColumnName(System.Reflection.PropertyInfo property)
+    public string RawColumnName(System.Reflection.PropertyInfo property)
+    public string RawTableName { get; init; }
+    public string SelectAllSql { get; init; }
+    public string SelectByIdSql { get; init; }
+    public string TableName { get; init; }
+    public string UpdateForcedSql { get; init; }
+    public string UpdateSql { get; init; }
+    public string UpdateVersionedSql { get; init; }
+    public void AddQueryParameter(Microsoft.Data.SqlClient.SqlCommand command, string name, string columnName, object rawValue)
+    public void BindEntityKeyParameter(Microsoft.Data.SqlClient.SqlCommand command, QuickER.Runtime.EntityBase entity)
+    public void BindInsertParameters(Microsoft.Data.SqlClient.SqlCommand command, QuickER.Runtime.EntityBase entity)
+    public void BindKeyParameter(Microsoft.Data.SqlClient.SqlCommand command, object id)
+    public void BindRowVersionParameter(Microsoft.Data.SqlClient.SqlCommand command, QuickER.Runtime.EntityBase entity)
+    public void BindUpdateParameters(Microsoft.Data.SqlClient.SqlCommand command, QuickER.Runtime.EntityBase entity)
+
+public sealed class QuickER.Runtime.SqlServer.EntitySaveMetadata.RawSqlRowPlan
+    public .ctor()
+    public System.ValueTuple<System.Reflection.PropertyInfo, int>[] ExcludedOrdinals { get; init; }
+    public int[] SelectOrdinals { get; init; }
+
+public interface QuickER.Runtime.SqlServer.ISqlConnectionFactory
+    public virtual Microsoft.Data.SqlClient.SqlConnection CreateConnection()
+
+public static class QuickER.Runtime.SqlServer.JsonQueryPlanner
+    public static string BuildSelect(System.Type rootType, string whereClause, string orderAndPaging, System.Collections.Generic.IReadOnlyList<QuickER.Runtime.IncludeNode> includes)
+
+public sealed class QuickER.Runtime.SqlServer.RowVersionCollector
+    public .ctor()
+    public void Apply()
+    public void Record(QuickER.Runtime.EntityBase entity, byte[] version)
+
+public static class QuickER.Runtime.SqlServer.RowVersionConcurrency
+    public static QuickER.Runtime.SaveConflictException Conflict(QuickER.Runtime.SqlServer.EntitySaveMetadata metadata, QuickER.Runtime.EntityBase entity, string operation)
+    public static System.Threading.Tasks.Task<bool> RowExistsAsync(QuickER.Runtime.SqlServer.EntitySaveMetadata metadata, QuickER.Runtime.EntityBase entity, Microsoft.Data.SqlClient.SqlConnection connection, Microsoft.Data.SqlClient.SqlTransaction transaction, System.Threading.CancellationToken cancellationToken)
+    public static string UpdateSql(QuickER.Runtime.SqlServer.EntitySaveMetadata metadata, QuickER.Runtime.ConcurrencyMode mode)
+    public static void BindUpdate(QuickER.Runtime.SqlServer.EntitySaveMetadata metadata, Microsoft.Data.SqlClient.SqlCommand command, QuickER.Runtime.EntityBase entity, QuickER.Runtime.ConcurrencyMode mode)
+
+public sealed class QuickER.Runtime.SqlServer.SaveHookSession
+    public .ctor(QuickER.Runtime.ISaveHookRegistry registry, System.Func<QuickER.Runtime.EntityBase, QuickER.Runtime.ISaveHookContext> contextFactory)
+    public System.Collections.Generic.IReadOnlySet<QuickER.Runtime.EntityBase> Skipped { get; }
+    public System.Threading.Tasks.Task InvokeAfterAsync(QuickER.Runtime.EntityBase entity, QuickER.Runtime.SaveOperation operation, System.Threading.CancellationToken cancellationToken)
+    public System.Threading.Tasks.Task<bool> InvokeBeforeAsync(QuickER.Runtime.EntityBase entity, QuickER.Runtime.SaveOperation operation, System.Threading.CancellationToken cancellationToken)
+    public void Skip(QuickER.Runtime.EntityBase entity)
+
+public sealed class QuickER.Runtime.SqlServer.SqlConnectionFactory : QuickER.Runtime.SqlServer.ISqlConnectionFactory
+    public .ctor(string connectionString)
+    public Microsoft.Data.SqlClient.SqlConnection CreateConnection()
+
+public sealed class QuickER.Runtime.SqlServer.SqlExecutor : QuickER.Runtime.ISqlExecutor
+    public .ctor(QuickER.Runtime.SqlServer.ISqlConnectionFactory connectionFactory)
+    public System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TEntity>> QueryBySqlAsync<TEntity>(string sql, object parameters = null, System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TResult>> QueryProjectionBySqlAsync<TResult>(string sql, object parameters = null, System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<TResult> ExecuteScalarSqlAsync<TResult>(string sql, object parameters = null, System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<int> ExecuteSqlAsync(string sql, object parameters = null, System.Threading.CancellationToken cancellationToken = default)
+
+public static class QuickER.Runtime.SqlServer.SqlExpressionTranslator
+    public static string ToColumn(System.Linq.Expressions.LambdaExpression keySelector)
+    public static string ToCondition(System.Linq.Expressions.Expression expression, System.Collections.Generic.List<QuickER.Runtime.SqlServer.SqlQueryParameter> parameters)
+
+public struct QuickER.Runtime.SqlServer.SqlQueryParameter : System.IEquatable<QuickER.Runtime.SqlServer.SqlQueryParameter>
+    public .ctor(string Name, object Value, string ColumnName)
+    public object Value { get; init; }
+    public string ColumnName { get; init; }
+    public string Name { get; init; }
+
+public sealed class QuickER.Runtime.SqlServer.SqlSaveHookContext : QuickER.Runtime.ISaveHookContext
+    public .ctor(Microsoft.Data.SqlClient.SqlConnection connection, Microsoft.Data.SqlClient.SqlTransaction transaction, System.Type entityType)
+    public System.Threading.Tasks.Task<bool> WriteBinaryColumnAsync(string propertyName, object key, System.IO.Stream source, long? length = default, System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<int> ExecuteSqlAsync(string sql, object parameters = null, System.Threading.CancellationToken cancellationToken = default)
+
+public abstract class QuickER.Runtime.SqlServer.SqlServerRepository<TEntity, TKey> : QuickER.Runtime.IRemoteRepository<TEntity, TKey>, QuickER.Runtime.IRepository<TEntity, TKey>
+    protected .ctor(QuickER.Runtime.SqlServer.ISqlConnectionFactory connectionFactory, QuickER.Runtime.ISaveHookRegistry saveHooks = null, QuickER.Runtime.ISqlExecutor sqlExecutor = null)
+    protected System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TResult>> QueryProjectionBySqlAsync<TResult>(string sql, object parameters = null, System.Threading.CancellationToken cancellationToken = default)
+    protected System.Threading.Tasks.Task<bool> ReadUnboundedBinaryColumnAsync(string propertyName, TKey id, System.IO.Stream destination, System.Threading.CancellationToken cancellationToken = default)
+    protected System.Threading.Tasks.Task<bool> WriteUnboundedBinaryColumnAsync(string propertyName, TKey id, System.IO.Stream source, long? length = default, System.Threading.CancellationToken cancellationToken = default)
+    public QuickER.Runtime.SqlQuery<TEntity> Query()
+    public System.Threading.Tasks.Task InsertAsync(TEntity entity, System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TEntity>> GetAllAsync(System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TEntity>> QueryBySqlAsync(string sql, object parameters = null, System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<TEntity> GetByIdAsync(TKey id, System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<TResult> ExecuteScalarSqlAsync<TResult>(string sql, object parameters = null, System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<bool> DeleteAsync(TKey id, System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<bool> UpdateAsync(TEntity entity, QuickER.Runtime.ConcurrencyMode mode = 0, System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<int> BulkInsertAsync(System.Collections.Generic.IEnumerable<TEntity> entities, System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<int> ExecuteSqlAsync(string sql, object parameters = null, System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<int> SaveAsync(System.Collections.Generic.IEnumerable<TEntity> entities, bool cascadeSave = true, bool cascadeDelete = true, bool insertWhenUpdateMissing = false, QuickER.Runtime.ConcurrencyMode mode = 0, System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<int> SaveAsync(TEntity entity, bool cascadeSave = true, bool cascadeDelete = true, bool insertWhenUpdateMissing = false, QuickER.Runtime.ConcurrencyMode mode = 0, System.Threading.CancellationToken cancellationToken = default)
+
+public static class QuickER.Runtime.SqlServer.SqlServerSchemaBootstrap
+    public static System.Threading.Tasks.Task ApplyDdlAsync(string connectionString, string ddl, System.TimeSpan? commandTimeout = default, System.Threading.CancellationToken cancellationToken = default)
+
+public sealed class QuickER.Runtime.SqlServer.SqlServerSqlQueryExecutor<TEntity> : QuickER.Runtime.ISqlQueryExecutor<TEntity>
+    public .ctor(QuickER.Runtime.SqlServer.ISqlConnectionFactory connectionFactory)
+    public System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TEntity>> ToListAsync(QuickER.Runtime.SqlQueryPlan<TEntity> plan, System.Threading.CancellationToken cancellationToken)
+    public System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TResult>> ToProjectionListAsync<TResult>(QuickER.Runtime.SqlQueryPlan<TEntity> plan, System.Linq.Expressions.Expression<System.Func<TEntity, TResult>> selector, System.Threading.CancellationToken cancellationToken)
+    public System.Threading.Tasks.Task<TEntity> FirstOrDefaultAsync(QuickER.Runtime.SqlQueryPlan<TEntity> plan, System.Threading.CancellationToken cancellationToken)
+    public System.Threading.Tasks.Task<bool> AnyAsync(QuickER.Runtime.SqlQueryPlan<TEntity> plan, System.Threading.CancellationToken cancellationToken)
+    public System.Threading.Tasks.Task<int> CountAsync(QuickER.Runtime.SqlQueryPlan<TEntity> plan, System.Threading.CancellationToken cancellationToken)
+    public System.Threading.Tasks.Task<int> ExecuteDeleteAsync(QuickER.Runtime.SqlQueryPlan<TEntity> plan, bool cascadeDelete, System.Threading.CancellationToken cancellationToken)
+
+public static class QuickER.Runtime.SqlServer.UnboundedBinaryColumnEngine
+    public static System.Threading.Tasks.Task<bool> ReadAsync(QuickER.Runtime.SqlServer.EntitySaveMetadata metadata, string propertyName, object key, System.IO.Stream destination, Microsoft.Data.SqlClient.SqlConnection connection, Microsoft.Data.SqlClient.SqlTransaction transaction, System.Threading.CancellationToken cancellationToken)
+    public static System.Threading.Tasks.Task<bool> WriteAsync(QuickER.Runtime.SqlServer.EntitySaveMetadata metadata, string propertyName, object key, System.IO.Stream source, long? length, Microsoft.Data.SqlClient.SqlConnection connection, Microsoft.Data.SqlClient.SqlTransaction transaction, System.Threading.CancellationToken cancellationToken)
+

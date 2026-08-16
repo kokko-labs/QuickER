@@ -61,9 +61,14 @@ public sealed class SqliteSchemaSyncExecutor : ISchemaSyncExecutor
         await conn.OpenAsync(ct).ConfigureAwait(false);
 
         // FK 強制はトランザクション外で切る（トランザクション内の同 PRAGMA は no-op のため）
-        await using (var pragma = conn.CreateCommand())
+        await using (
+            var pragma = DbCommands.Create(
+                conn,
+                "PRAGMA foreign_keys=OFF;",
+                settings.CommandTimeoutSeconds
+            )
+        )
         {
-            pragma.CommandText = "PRAGMA foreign_keys=OFF;";
             await pragma.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
         }
 
@@ -73,15 +78,20 @@ public sealed class SqliteSchemaSyncExecutor : ISchemaSyncExecutor
         try
         {
             // スクリプト本文（複数文）を 1 コマンドで実行する
-            await using (var cmd = conn.CreateCommand())
+            await using (
+                var cmd = DbCommands.Create(conn, script, settings.CommandTimeoutSeconds, tran)
+            )
             {
-                cmd.Transaction = tran;
-                cmd.CommandText = script;
                 await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }
 
             // FK 整合性を実検査する（違反があれば安全側にロールバックする）
-            var violatingTables = await CollectForeignKeyViolationsAsync(conn, tran, ct)
+            var violatingTables = await CollectForeignKeyViolationsAsync(
+                    conn,
+                    tran,
+                    settings.CommandTimeoutSeconds,
+                    ct
+                )
                 .ConfigureAwait(false);
 
             if (violatingTables.Count > 0)
@@ -127,15 +137,19 @@ public sealed class SqliteSchemaSyncExecutor : ISchemaSyncExecutor
     private static async Task<List<string>> CollectForeignKeyViolationsAsync(
         SqliteConnection conn,
         SqliteTransaction tran,
+        int commandTimeoutSeconds,
         CancellationToken ct
     )
     {
         var tables = new List<string>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        await using var cmd = conn.CreateCommand();
-        cmd.Transaction = tran;
-        cmd.CommandText = "PRAGMA foreign_key_check;";
+        await using var cmd = DbCommands.Create(
+            conn,
+            "PRAGMA foreign_key_check;",
+            commandTimeoutSeconds,
+            tran
+        );
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
 
         while (await reader.ReadAsync(ct).ConfigureAwait(false))

@@ -36,8 +36,12 @@ public sealed class PostgreSqlSchemaSyncExecutor : ISchemaSyncExecutor
 
         try
         {
-            await using var cmd = new NpgsqlCommand(script, conn, tran);
-            cmd.CommandTimeout = 60;
+            await using var cmd = DbCommands.Create(
+                conn,
+                script,
+                settings.CommandTimeoutSeconds,
+                tran
+            );
             await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             result.Batches.Add(new SchemaSyncBatchResult(1, script, true, null));
 

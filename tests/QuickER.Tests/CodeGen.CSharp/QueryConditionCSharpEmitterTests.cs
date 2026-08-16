@@ -125,26 +125,33 @@ public class QueryConditionCSharpEmitterTests
             .Be("e => e.Memo == \"it's \\\"quoted\\\"\"");
     }
 
-    /// <summary>LIKE / CONTAINS 系が文字列メソッド呼び出しになることを検証する</summary>
-    [Fact(DisplayName = "文字列一致は Contains/StartsWith/EndsWith 呼び出しになる")]
+    /// <summary>LIKE / CONTAINS 系が文字列メソッド呼び出しになり、NULL 許容列では NULL 前提が AND されることを検証する</summary>
+    /// <remarks>
+    /// SQL の LIKE は NULL 行を UNKNOWN で落とすため <c>IS NOT NULL AND LIKE</c> は SQL 側で意味が変わらないが、
+    /// インメモリ実行器は式木を<b>実際に評価する</b>ので、前提がないと NULL 行で NullReferenceException になる。
+    /// 否定（NOT LIKE）も同じ前提の内側に入る＝NULL 行はどちらの向きでも一致しない（SQL と同じ観測結果）。
+    /// </remarks>
+    [Fact(
+        DisplayName = "文字列一致は Contains/StartsWith/EndsWith 呼び出し（NULL 許容列は NULL 前提つき）"
+    )]
     public void Emit_StringMatch()
     {
         Emit("Memo LIKE @keyword", CreatePlainBindings())
             .Lambda.Should()
-            .Be("e => e.Memo!.Contains(keyword)");
+            .Be("e => (e.Memo != null && e.Memo!.Contains(keyword))");
         Emit("Memo LIKE 'abc%'", CreatePlainBindings())
             .Lambda.Should()
-            .Be("e => e.Memo!.StartsWith(\"abc\")");
+            .Be("e => (e.Memo != null && e.Memo!.StartsWith(\"abc\"))");
         Emit("Memo NOT LIKE '%abc'", CreatePlainBindings())
             .Lambda.Should()
-            .Be("e => !(e.Memo!.EndsWith(\"abc\"))");
+            .Be("e => (e.Memo != null && !(e.Memo!.EndsWith(\"abc\")))");
         Emit("Memo STARTSWITH @keyword", CreatePlainBindings())
             .Lambda.Should()
-            .Be("e => e.Memo!.StartsWith(keyword)");
+            .Be("e => (e.Memo != null && e.Memo!.StartsWith(keyword))");
     }
 
-    /// <summary>NULL 非許容の文字列列には null 抑止（!）が付かないことを検証する</summary>
-    [Fact(DisplayName = "NULL 非許容列の文字列一致に ! は付かない")]
+    /// <summary>NULL 非許容の文字列列には null 抑止（!）も NULL 前提も付かないことを検証する</summary>
+    [Fact(DisplayName = "NULL 非許容列の文字列一致に ! と NULL 前提は付かない")]
     public void Emit_StringMatch_NonNullableColumn()
     {
         var bindings = CreatePlainBindings();
@@ -237,7 +244,7 @@ public class QueryConditionCSharpEmitterTests
     {
         Emit("Memo LIKE @keyword", CreateVoBindings())
             .Lambda.Should()
-            .Be("e => e.Memo!.Contains(keyword)");
+            .Be("e => (e.Memo != null && e.Memo!.Contains(keyword))");
     }
 
     /// <summary>ラムダ変数がパラメータ名と衝突しないことを検証する</summary>

@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -25,13 +25,23 @@ public class SqlServerSchemaSyncIntegrationTests : IAsyncLifetime
         .CancellationToken;
 
     /// <summary>テスト対象 DB への接続設定</summary>
+    /// <remarks>
+    /// コマンドタイムアウトは既定（60 秒）より長く取る。フルスイート並列実行では取込・同期の 1 文が
+    /// 負荷で伸びることがあり、既定のままだとタイムアウトによる偽赤が出る。**タイムアウトはスキップにしない**
+    /// （本物の回帰を隠すため）ので、余裕を持たせるのが正しい対処になる。
+    /// </remarks>
     private static readonly SqlConnectionSettings Settings = new()
     {
         Server = "localhost",
         Database = "TestDB",
         AuthMode = SqlAuthMode.Windows,
         TrustServerCertificate = true,
+        CommandTimeoutSeconds = 120,
     };
+
+    /// <summary>スキップ理由（localhost の実 SQL Server が要る＝Docker 不使用の第 3 機構）</summary>
+    private const string ServerUnavailableReason =
+        "SQL Server (localhost / TestDB / Windows auth) is not available.";
 
     /// <summary>親テーブル名（FK の参照先）</summary>
     private const string ParentTable = "_erd_sync_test_parent";
@@ -96,11 +106,7 @@ IF OBJECT_ID(N'{ItemTable}', N'U') IS NOT NULL DROP TABLE [{ItemTable}];";
     [Fact(DisplayName = "[Integration] AddTable / AddColumn / AddForeignKey が実 DB に適用される")]
     public async Task FullSync_AppliesChanges()
     {
-        if (!_serverAvailable)
-        {
-            // ローカル DB が無い環境ではスキップ扱い
-            return;
-        }
+        Assert.SkipUnless(_serverAvailable, ServerUnavailableReason);
 
         // ---------- 1) ER 図側の期待状態を構築 ----------
         var parent = new Entity { TableName = ParentTable };
@@ -227,10 +233,7 @@ IF OBJECT_ID(N'{ItemTable}', N'U') IS NOT NULL DROP TABLE [{ItemTable}];";
     )]
     public async Task DestructiveSync_AppliesChanges()
     {
-        if (!_serverAvailable)
-        {
-            return;
-        }
+        Assert.SkipUnless(_serverAvailable, ServerUnavailableReason);
 
         var setup =
             $@"
@@ -337,10 +340,7 @@ CREATE TABLE [{ChildTable}] (
     )]
     public async Task DescriptionSync_RoundTrip()
     {
-        if (!_serverAvailable)
-        {
-            return;
-        }
+        Assert.SkipUnless(_serverAvailable, ServerUnavailableReason);
 
         // ---------- 1) 期待状態 (説明付き) ----------
         var parent = new Entity { TableName = ParentTable, Description = "親テーブルの説明" };
@@ -475,10 +475,7 @@ CREATE TABLE [{ChildTable}] (
     )]
     public async Task PrimaryKeySync_MovesPrimaryKeyToAnotherColumn()
     {
-        if (!_serverAvailable)
-        {
-            return;
-        }
+        Assert.SkipUnless(_serverAvailable, ServerUnavailableReason);
 
         await RunScriptAsync(
             $@"
@@ -563,10 +560,7 @@ INSERT INTO [{ItemTable}] ([Code], [Id]) VALUES (N'A-002', 2);"
     )]
     public async Task AlterColumn_OnForeignKeyColumn_RebuildsDependentForeignKey()
     {
-        if (!_serverAvailable)
-        {
-            return;
-        }
+        Assert.SkipUnless(_serverAvailable, ServerUnavailableReason);
 
         await RunScriptAsync(
             $@"
@@ -685,10 +679,7 @@ INSERT INTO [{ChildTable}] ([Id], [ParentCode]) VALUES (1, N'P-1');"
     )]
     public async Task PrimaryKeyChange_BreakingDependentForeignKey_RollsBack()
     {
-        if (!_serverAvailable)
-        {
-            return;
-        }
+        Assert.SkipUnless(_serverAvailable, ServerUnavailableReason);
 
         await RunScriptAsync(
             $@"
@@ -793,10 +784,7 @@ INSERT INTO [{ChildTable}] ([Id], [ParentId]) VALUES (1, 1);"
     [Fact(DisplayName = "[Integration] UniqueConstraint: 追加・削除が実 DB へ反映される")]
     public async Task UniqueConstraintSync_AddsAndDrops()
     {
-        if (!_serverAvailable)
-        {
-            return;
-        }
+        Assert.SkipUnless(_serverAvailable, ServerUnavailableReason);
 
         await RunScriptAsync(
             $@"
@@ -897,10 +885,7 @@ INSERT INTO [{ItemTable}] ([Code], [Id]) VALUES (N'A-001', 1);"
     )]
     public async Task AlterColumn_OnUniqueConstraintColumn_RebuildsUniqueConstraint()
     {
-        if (!_serverAvailable)
-        {
-            return;
-        }
+        Assert.SkipUnless(_serverAvailable, ServerUnavailableReason);
 
         await RunScriptAsync(
             $@"

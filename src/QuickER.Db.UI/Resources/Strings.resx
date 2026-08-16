@@ -139,6 +139,21 @@
   <data name="DbConnection_PortTooltip" xml:space="preserve">
     <value>If left blank, the dialect's default port is used</value>
   </data>
+  <data name="DbConnection_ConnectTimeout" xml:space="preserve">
+    <value>Connect timeout (s)</value>
+  </data>
+  <data name="DbConnection_ConnectTimeoutTooltip" xml:space="preserve">
+    <value>How long to wait for the connection to be established</value>
+  </data>
+  <data name="DbConnection_CommandTimeout" xml:space="preserve">
+    <value>Command timeout (s)</value>
+  </data>
+  <data name="DbConnection_CommandTimeoutTooltip" xml:space="preserve">
+    <value>How long a single schema import / sync statement may run. 0 means no limit</value>
+  </data>
+  <data name="DbConnection_CommandTimeoutInvalid" xml:space="preserve">
+    <value>The command timeout must be 0 (no limit) or greater.</value>
+  </data>
   <data name="DbConnection_Database" xml:space="preserve">
     <value>Database</value>
   </data>
@@ -265,6 +280,10 @@ Do you want to run this against {0}?</value>
   </data>
   <data name="SchemaSync_ExecuteConfirmUniqueConstraintDropRisk" xml:space="preserve">
     <value>Note: the unique constraint(s) below cover a column that an existing foreign key references. Dropping them removes the candidate key, so the drop may be rejected or the foreign key may break (unless the primary key still covers the same column):
+{0}</value>
+  </data>
+  <data name="SchemaSync_ExecuteConfirmRebuildDropsAttributes" xml:space="preserve">
+    <value>Note: rebuilding a table recreates it from the diagram, which does not model column-level attributes such as default values or CHECK constraints. The attributes below exist in the database today and will NOT be reproduced (indexes and triggers are preserved):
 {0}</value>
   </data>
   <data name="SchemaSync_Executing" xml:space="preserve">

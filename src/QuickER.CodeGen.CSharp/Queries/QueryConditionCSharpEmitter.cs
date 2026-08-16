@@ -178,10 +178,19 @@ public static class QueryConditionCSharpEmitter
             ),
         };
 
-        // NULL 許容列は null 抑止（!）を付ける（式は翻訳されるだけで実行はされないため安全）
+        // NULL 許容列は「列が NULL でないこと」を明示的な前提として AND する。SQL の LIKE は NULL 行を
+        // UNKNOWN で落とすので、この前提は SQL 側では追加の選言にならず（IS NOT NULL AND LIKE ＝ LIKE 単独）
+        // 意味が変わらない。一方インメモリ実行器は式木をコンパイルして実際に評価するため、
+        // 前提を書かないと NULL 行で NullReferenceException になり、3 実装先の観測結果が割れる。
+        // 否定（NOT CONTAINS）も同じ前提の内側へ入れる＝NULL 行はどちらの向きでも一致しない（SQL と同じ）。
+        var access = $"{context.LambdaVar}.{column.PropertyName}";
+
+        // VO 列の != は利用者定義演算子のためコンパイラの NULL 状態解析が伝播しない。抑止（!）は残す
         var suppression = column.IsNullable ? "!" : string.Empty;
-        var call = $"{context.LambdaVar}.{column.PropertyName}{suppression}.{method}({operand})";
-        return node.Negated ? $"!({call})" : call;
+        var call = $"{access}{suppression}.{method}({operand})";
+        var matched = node.Negated ? $"!({call})" : call;
+
+        return column.IsNullable ? $"({access} != null && {matched})" : matched;
     }
 
     /// <summary>IN（コレクション Contains。VO 列はリストを VO へ持ち上げてから比較する）</summary>

@@ -156,6 +156,33 @@ public class DiagramTypeConverterTests
         plan.Converted[0].MakeNullable.Should().BeFalse();
     }
 
+    /// <summary>主キーの行バージョン列は変換に成功しても NOT NULL を解除しないことを検証する</summary>
+    /// <remarks>
+    /// DDL 生成・差分同期・列 ViewModel の 3 層が主キー列を NOT NULL へクランプするため実害は無いが、
+    /// モデル層に「NULL 許容の主キー」が一時的に載るのを避けるため、変換計画の段階で除外する。
+    /// </remarks>
+    [Fact(DisplayName = "主キーの行バージョン列は BLOB へ変換されるが MakeNullable は立たない")]
+    public void CreatePlan_PrimaryKeyRowVersionToSqlite_DoesNotFlagMakeNullable()
+    {
+        var diagram = BuildDiagram("rowversion");
+        diagram.Entities[0].Columns[0].IsNullable = false;
+        diagram.Entities[0].Columns[0].IsPrimaryKey = true;
+
+        var plan = DiagramTypeConverter.CreatePlan(
+            diagram,
+            new SqlServerTypeCatalog(),
+            new SqliteTypeCatalog()
+        );
+
+        plan.Converted.Should().ContainSingle();
+        plan.Converted[0].NewType.Should().Be("BLOB");
+        plan.Converted[0].MakeNullable.Should().BeFalse();
+
+        DiagramTypeConverter.Apply(diagram, plan);
+        diagram.Entities[0].Columns[0].DataType.Should().Be("BLOB");
+        diagram.Entities[0].Columns[0].IsNullable.Should().BeFalse();
+    }
+
     /// <summary>SQLite の BLOB を SQL Server へ戻しても rowversion には戻らない（非可逆）ことを固定する</summary>
     [Fact(DisplayName = "SQLite の BLOB は SQL Server へ戻すと varbinary(max) になる（非可逆）")]
     public void CreatePlan_SqliteBlobBackToSqlServer_IsNotRowVersion()

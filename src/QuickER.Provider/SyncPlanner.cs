@@ -27,6 +27,17 @@ public sealed class SyncPlanContext
     /// （<see cref="LiveEntities"/> から合成する）。
     /// </remarks>
     public IReadOnlyList<SchemaAuxiliaryObject> AuxiliaryObjects { get; init; } = [];
+
+    /// <summary>
+    /// DB から取得したテーブルの <c>CREATE TABLE</c> 文全文（テーブル名がキー・大文字小文字非依存）。
+    /// </summary>
+    /// <remarks>
+    /// 合成には使わない（合成の正本はあくまで <see cref="LiveEntities"/>）。再構築で失われる列レベル属性
+    /// （<c>AUTOINCREMENT</c> / <c>DEFAULT</c> / <c>CHECK</c> / <c>COLLATE</c> / 生成列）を検出して
+    /// 警告するためだけに参照する。取得できない方言では空のまま＝警告も出ない。
+    /// </remarks>
+    public IReadOnlyDictionary<string, string> TableCreateSql { get; init; } =
+        new Dictionary<string, string>();
 }
 
 /// <summary>
@@ -815,6 +826,10 @@ public sealed class SyncPlanner
             )
         );
 
+        // 既存テーブルの作り直し（CreateOnly=false）だけが列レベル属性を落とす。
+        // 新規テーブル作成（CreateOnly=true）は落とす元の定義が無いので対象外
+        WarnRebuildDropsColumnAttributes(rebuilds, context, warnings);
+
         // 転用済みの項目を除いた残りをセクション化する（転用できなかった項目はレンダラーがスキップを明示する）
         var sectionItems = selected.Where(i => !diverted.Contains(i)).ToList();
 
@@ -824,6 +839,55 @@ public sealed class SyncPlanner
             Rebuilds = rebuilds,
             Warnings = warnings,
         };
+    }
+
+    /// <summary>
+    /// 再構築で失われる列レベル属性を live の <c>CREATE TABLE</c> 文から検出し、テーブル単位の警告を積む。
+    /// </summary>
+    /// <remarks>
+    /// 再構築の <c>CREATE TABLE</c> は意味モデルから組み立て直すため、モデルが持たない
+    /// <c>AUTOINCREMENT</c> / <c>DEFAULT</c> / <c>CHECK</c> / <c>COLLATE</c> / 生成列は再現されない。
+    /// 検出材料（<see cref="SyncPlanContext.TableCreateSql"/>）を持たない方言では 1 件も積まれない
+    /// ＝逐次 DDL 方言の計画はバイト不変。
+    /// </remarks>
+    private static void WarnRebuildDropsColumnAttributes(
+        List<TableRebuildPlan> rebuilds,
+        SyncPlanContext context,
+        List<SyncPlanWarning> warnings
+    )
+    {
+        if (context.TableCreateSql.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var rebuild in rebuilds)
+        {
+            if (rebuild.CreateOnly)
+            {
+                continue;
+            }
+
+            if (!context.TableCreateSql.TryGetValue(rebuild.TableName.Trim(), out var createSql))
+            {
+                continue;
+            }
+
+            var lost = TableRebuildAttributeDetector.Detect(createSql);
+
+            if (lost.Count == 0)
+            {
+                continue;
+            }
+
+            warnings.Add(
+                new SyncPlanWarning(
+                    SyncPlanWarningKind.TableRebuildDropsColumnAttribute,
+                    rebuild.TableName,
+                    string.Join(", ", lost)
+                )
+            );
+        }
     }
 
     /// <summary>選択済み AddTable を CreateOnly の再構築計画へ変換する（新規テーブルへの FK はインラインへ畳む）</summary>

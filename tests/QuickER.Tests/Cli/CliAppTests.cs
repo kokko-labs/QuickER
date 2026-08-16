@@ -119,7 +119,7 @@ public class CliAppTests
             content
                 .Should()
                 .Contain("SearchByNameAsync(string keyword,")
-                .And.Contain("Query().Where(e => e.Name!.Contains(keyword))");
+                .And.Contain("Query().Where(e => (e.Name != null && e.Name!.Contains(keyword)))");
         }
         finally
         {

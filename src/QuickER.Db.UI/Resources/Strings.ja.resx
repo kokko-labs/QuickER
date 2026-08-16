@@ -139,6 +139,21 @@
   <data name="DbConnection_PortTooltip" xml:space="preserve">
     <value>空欄の場合は方言の既定ポートを使用します</value>
   </data>
+  <data name="DbConnection_ConnectTimeout" xml:space="preserve">
+    <value>接続タイムアウト（秒）</value>
+  </data>
+  <data name="DbConnection_ConnectTimeoutTooltip" xml:space="preserve">
+    <value>接続が確立するまで待つ時間です</value>
+  </data>
+  <data name="DbConnection_CommandTimeout" xml:space="preserve">
+    <value>コマンドタイムアウト（秒）</value>
+  </data>
+  <data name="DbConnection_CommandTimeoutTooltip" xml:space="preserve">
+    <value>スキーマ取込・同期の SQL 1 文が実行できる時間です。0 は無制限を意味します</value>
+  </data>
+  <data name="DbConnection_CommandTimeoutInvalid" xml:space="preserve">
+    <value>コマンドタイムアウトは 0（無制限）以上を指定してください。</value>
+  </data>
   <data name="DbConnection_Database" xml:space="preserve">
     <value>データベース</value>
   </data>
@@ -265,6 +280,10 @@
   </data>
   <data name="SchemaSync_ExecuteConfirmUniqueConstraintDropRisk" xml:space="preserve">
     <value>注意: 以下の一意制約は、既存の外部キーが参照している列を覆っています。削除すると候補キーが失われるため、削除自体が拒否されるか外部キーが壊れる可能性があります（主キーが同じ列を覆っている場合を除く）:
+{0}</value>
+  </data>
+  <data name="SchemaSync_ExecuteConfirmRebuildDropsAttributes" xml:space="preserve">
+    <value>注意: テーブルの再構築は図の定義から作り直すため、既定値や CHECK 制約といった列レベルの属性は図が持っておらず再現されません。以下は現在の DB にある属性で、再構築後は失われます（インデックス・トリガーは温存されます）:
 {0}</value>
   </data>
   <data name="SchemaSync_Executing" xml:space="preserve">

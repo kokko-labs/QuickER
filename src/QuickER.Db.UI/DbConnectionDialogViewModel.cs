@@ -81,6 +81,14 @@ public partial class DbConnectionDialogViewModel : ObservableObject
     [ObservableProperty]
     private int _connectTimeoutSeconds = 15;
 
+    /// <summary>コマンド実行タイムアウト（秒。<c>0</c> は無制限）</summary>
+    /// <remarks>
+    /// スキーマ取込・スキーマ同期の各 SQL に適用する（接続確立までの時間である
+    /// <see cref="ConnectTimeoutSeconds"/> とは別物）。負値は不正で、確定時に検証して弾く。
+    /// </remarks>
+    [ObservableProperty]
+    private int _commandTimeoutSeconds = DbCommands.DefaultTimeoutSeconds;
+
     /// <summary>サービス名（Oracle 固有・将来使用）</summary>
     [ObservableProperty]
     private string _serviceName = string.Empty;
@@ -280,6 +288,7 @@ public partial class DbConnectionDialogViewModel : ObservableObject
         ServiceName = profile.ServiceName;
         FilePath = profile.FilePath;
         ConnectTimeoutSeconds = profile.ConnectTimeoutSeconds;
+        CommandTimeoutSeconds = profile.CommandTimeoutSeconds;
         SavePassword = profile.SavePassword;
         Password = password;
 
@@ -305,6 +314,7 @@ public partial class DbConnectionDialogViewModel : ObservableObject
             ServiceName = ServiceName,
             FilePath = FilePath,
             ConnectTimeoutSeconds = ConnectTimeoutSeconds,
+            CommandTimeoutSeconds = CommandTimeoutSeconds,
             SavePassword = SavePassword,
         };
 
@@ -386,6 +396,7 @@ public partial class DbConnectionDialogViewModel : ObservableObject
             ServiceName = ServiceName,
             FilePath = FilePath,
             ConnectTimeoutSeconds = ConnectTimeoutSeconds,
+            CommandTimeoutSeconds = CommandTimeoutSeconds,
         };
 
     /// <summary>現在の入力で接続テストを行い、結果をステータスへ表示する</summary>
@@ -400,7 +411,7 @@ public partial class DbConnectionDialogViewModel : ObservableObject
         {
             var connectionString = SelectedProvider.BuildConnectionString(ToSettings());
             var result = await SelectedProvider
-                .SchemaImporter.ImportAsync(connectionString)
+                .SchemaImporter.ImportAsync(connectionString, CommandTimeoutSeconds)
                 .ConfigureAwait(true);
             StatusMessage = string.Format(
                 Strings.DbConnection_ConnectSucceeded,
@@ -514,6 +525,15 @@ public partial class DbConnectionDialogViewModel : ObservableObject
     [RelayCommand]
     private void Ok()
     {
+        // タイムアウトは方言に依らず効くため、方言別の検証より先に見る。
+        // 0 は ADO.NET の規約どおり「無制限」として通し、負値だけを弾く（黙って既定へ丸めると
+        // 「入れた値と違う値で動く」ため）
+        if (CommandTimeoutSeconds < 0)
+        {
+            StatusMessage = Strings.DbConnection_CommandTimeoutInvalid;
+            return;
+        }
+
         // SQLite はファイル型 DB のためファイルパスのみを検証する（ホスト・DB 名検証はスキップ）
         if (ShowFilePath)
         {

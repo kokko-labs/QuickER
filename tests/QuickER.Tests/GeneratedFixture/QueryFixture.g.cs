@@ -2554,12 +2554,22 @@ public abstract partial class EditModelBase
 
     /// <summary>Cancels the row edit: the confirmed values and the RowState go back to the snapshot <see cref="BeginEdit"/> took, and the input strings are derived from the restored confirmed values.</summary>
     /// <remarks>
+    /// <para>
     /// The input errors are cleared for every property, not only for the ones the canceled edit touched, because rebuilding
     /// the input strings from the restored confirmed values goes through <see cref="RevertInput"/>, which clears each
     /// property's input error unconditionally. A conversion error that was already there when <see cref="BeginEdit"/> ran
     /// therefore disappears as well. The value it complained about is gone from the display in the same step - the input
     /// string is rebuilt from the confirmed value, so the unconvertible text is no longer on screen for the message to refer
     /// to - and it comes back as soon as that text is typed again.
+    /// </para>
+    /// <para>
+    /// The duplicate-value findings do not survive a cancel either, and no check is re-run to replace them: the ones the
+    /// database check registered are withdrawn unconditionally - even for a row that was begun and then canceled without a
+    /// single change, whose finding was still perfectly valid - and the ones about duplicates among the siblings are left
+    /// standing whether or not the restored value still duplicates one. Run the database check and the collection's
+    /// <c>Validate</c> again before saving; a finding of either is only ever as current as its last run.
+    /// See <see cref="CancelEditCore"/> for the reasoning.
+    /// </para>
     /// </remarks>
     public void CancelEdit()
     {
@@ -5525,6 +5535,84 @@ public static class SqliteSchemaBootstrap
     }
 }
 
+/// <summary>Converts a raw value read from the database into a target CLR type, including the types <see cref="Convert.ChangeType(object, Type, IFormatProvider)"/> cannot reach on its own.</summary>
+/// <remarks>
+/// <para>
+/// <c>Convert.ChangeType</c> only converts types that implement <see cref="IConvertible"/>. <see cref="TimeSpan"/>,
+/// <see cref="Guid"/>, <see cref="DateTimeOffset"/>, <see cref="DateOnly"/> and <see cref="TimeOnly"/> do not, so a driver
+/// that hands such a column back as text makes it throw <see cref="InvalidCastException"/> - which is what SQLite does for
+/// every one of them, since it stores them as TEXT. Those types are parsed from the string instead, with the invariant culture.
+/// SQL Server returns them already typed, so they take the pass-through above and never reach the parsing.
+/// </para>
+/// <para>
+/// This is the single conversion shared by value object rewrapping, raw SQL scalars and raw SQL projection properties. The
+/// SQLite engine's own column coercion (<c>EntitySaveMetadata.CoerceScalar</c>) accepts the same stored formats for the same
+/// types, so a value object column and a plain column read the same text the same way.
+/// </para>
+/// </remarks>
+internal static class RawValueConverter
+{
+    /// <summary>Converts the raw value to the target type (a nullable target is judged by its underlying type); a value already of that type is returned as is.</summary>
+    /// <param name="raw">The value the driver returned (never <c>null</c>: the callers map null and <c>DBNull</c> before this point).</param>
+    /// <param name="targetType">The type to convert to.</param>
+    /// <exception cref="InvalidCastException">No conversion exists between the two types.</exception>
+    /// <exception cref="FormatException">The text does not have the shape the target type requires.</exception>
+    /// <exception cref="OverflowException">The value does not fit the target type.</exception>
+    public static object ConvertRaw(object raw, Type targetType)
+    {
+        var underlying = Nullable.GetUnderlyingType(targetType) ?? targetType;
+
+        if (underlying.IsInstanceOfType(raw))
+        {
+            return raw;
+        }
+
+        // Text is the only shape these types can arrive in, and none of them implements IConvertible,
+        // so leaving them to ChangeType would fail on every value rather than on a malformed one
+        if (raw is string text && !typeof(IConvertible).IsAssignableFrom(underlying))
+        {
+            if (underlying == typeof(Guid))
+            {
+                return Guid.Parse(text);
+            }
+
+            if (underlying == typeof(TimeSpan))
+            {
+                return ParseTimeSpan(text);
+            }
+
+            if (underlying == typeof(DateTimeOffset))
+            {
+                return DateTimeOffset.Parse(text, CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind);
+            }
+
+            if (underlying == typeof(DateOnly))
+            {
+                return DateOnly.Parse(text, CultureInfo.InvariantCulture);
+            }
+
+            if (underlying == typeof(TimeOnly))
+            {
+                return TimeOnly.Parse(text, CultureInfo.InvariantCulture);
+            }
+        }
+
+        return Convert.ChangeType(raw, underlying, CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>Parses a <see cref="TimeSpan"/> stored as text.</summary>
+    /// <remarks>
+    /// The round-trip format "c" ([-][d.]hh:mm:ss[.fffffff]) is what the SQLite provider writes, and it also accepts the
+    /// forms that round-trip shorter values ("01:00:00", "1.02:03:04", "10:20:30.1234567"). The fallback covers text that
+    /// something other than this library stored (a hand-written INSERT such as "1:2:3"), which is the same set the plain
+    /// column path has always accepted, so both paths read the same rows.
+    /// </remarks>
+    private static TimeSpan ParseTimeSpan(string text) =>
+        TimeSpan.TryParseExact(text, "c", CultureInfo.InvariantCulture, out var roundTripped)
+            ? roundTripped
+            : TimeSpan.Parse(text, CultureInfo.InvariantCulture);
+}
+
 /// <summary>Helper that unwraps values passed to SQL parameters into raw values (converts value objects to their underlying values, into types SqlClient can handle).</summary>
 internal static class SqlParameterValue
 {
@@ -5593,10 +5681,10 @@ internal static class SqlValueObjectActivator
 
         return raw =>
         {
-            // Convert only when the raw type returned by the DB differs from TValue (byte[]/Guid etc. do not implement IConvertible, so matching types pass through)
-            var converted = valueType.IsInstanceOfType(raw)
-                ? raw
-                : Convert.ChangeType(raw, valueType, CultureInfo.InvariantCulture);
+            // Convert only when the raw type returned by the DB differs from TValue. The shared converter also covers the
+            // underlying types Convert.ChangeType cannot reach (TimeSpan/Guid/DateTimeOffset and friends), which a driver
+            // that returns them as text - SQLite - would otherwise fail on for every row
+            var converted = RawValueConverter.ConvertRaw(raw, valueType);
 
             return invoker(converted);
         };
@@ -5817,7 +5905,7 @@ internal static class RawSqlMapper
 
         try
         {
-            return (TResult)Convert.ChangeType(raw, targetType, CultureInfo.InvariantCulture);
+            return (TResult)RawValueConverter.ConvertRaw(raw, targetType);
         }
         catch (Exception ex)
             when (ex is InvalidCastException or FormatException or OverflowException)
@@ -5930,14 +6018,9 @@ internal static class RawSqlMapper
             }
         }
 
-        if (underlyingType.IsInstanceOfType(raw))
-        {
-            return raw;
-        }
-
         try
         {
-            return Convert.ChangeType(raw, underlyingType, CultureInfo.InvariantCulture);
+            return RawValueConverter.ConvertRaw(raw, underlyingType);
         }
         catch (Exception ex)
             when (ex is InvalidCastException or FormatException or OverflowException)
@@ -9106,12 +9189,21 @@ internal sealed class EntitySaveMetadata
         }
         else
         {
-            // Value objects are converted to the wrapped type and re-wrapped (Wrap already applies Convert.ChangeType).
+            // Value objects are re-wrapped through Create; every other property is a plain column and is coerced from the
+            // SQLite storage type (int stored as long, decimal/Guid/DateTime as TEXT, etc.) - the same split MapEntityObject
+            // makes. Wrapping unconditionally would hand a plain column its raw storage value, because Wrap returns anything
+            // that is not a value object untouched and the setter then rejects the type.
             // A stored value the value object rejects surfaces as a validation failure with no hint of where it came from,
             // so the column is named here and the original exception is kept as the inner one
             try
             {
-                property.SetValue(entity, SqlValueObjectActivator.Wrap(value, property.PropertyType));
+                var propertyType = property.PropertyType;
+                property.SetValue(
+                    entity,
+                    typeof(IValueObject).IsAssignableFrom(propertyType)
+                        ? SqlValueObjectActivator.Wrap(value, propertyType)
+                        : CoerceScalar(value, propertyType)
+                );
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -9356,6 +9448,11 @@ internal sealed class EntitySaveMetadata
     /// stored as TEXT, bool as INTEGER). Values already assignable are returned as-is, and Nullable types are judged by
     /// their underlying type. When conversion is impossible, throws an exception with a clear message.
     /// </remarks>
+    /// <seealso cref="RawValueConverter.ConvertRaw"/>
+    // The TEXT parsing below is deliberately kept alongside RawValueConverter.ConvertRaw (the shared conversion behind value
+    // object rewrapping and raw SQL) rather than delegating to it: this method reads DateTime with RoundtripKind, which the
+    // shared converter leaves to Convert.ChangeType because DateTime is IConvertible. Both accept the same text for the
+    // types they share (Guid, TimeSpan, DateTimeOffset), so keep them in step when either one changes.
     private static object CoerceScalar(object value, Type targetType)
     {
         var underlying = Nullable.GetUnderlyingType(targetType) ?? targetType;
@@ -10308,7 +10405,7 @@ public sealed partial class OrderRepository(
 
     /// <summary>メモの部分一致で注文を検索する</summary>
     public Task<IReadOnlyList<OrderEntity>> SearchMemoAsync(string keyword, CancellationToken cancellationToken = default) =>
-        Query().Where(e => e.Memo!.Contains(keyword)).ToListAsync(cancellationToken);
+        Query().Where(e => (e.Memo != null && e.Memo!.Contains(keyword))).ToListAsync(cancellationToken);
 
     /// <summary>注文IDの一覧で注文を取得する</summary>
     public Task<IReadOnlyList<OrderEntity>> GetByIdsAsync(IReadOnlyList<int> ids, CancellationToken cancellationToken = default)
@@ -10463,6 +10560,2134 @@ public sealed partial class OrderRepository(
     partial void CollectCustomUniquenessChecks(
         ref List<UniquenessCheck<OrderEntity>>? checks
     );
+}
+
+/// <summary>
+/// In-memory data store that holds entities in memory without a database (shared as a DI singleton).
+/// </summary>
+/// <remarks>
+/// <para>
+/// Keeps a "primary key -> snapshot" dictionary per entity type. A write files away a copy of the entity's columns and a
+/// read hands out a clone produced by <see cref="EntityBase.Clone"/>, so mutating a returned entity on the caller
+/// side never changes the store contents (matching the by-value semantics of a real database). All operations are
+/// serialized with a <c>lock</c> to be thread-safe.
+/// </para>
+/// <para>
+/// The primary key is taken from <see cref="EntitySaveMetadata.KeyProperty"/>, and value objects are opened to their
+/// underlying value to form the dictionary key (so they match by value equality).
+/// </para>
+/// </remarks>
+public sealed class InMemoryDataStore
+{
+    private readonly object _gate = new();
+    private readonly Dictionary<Type, Dictionary<object, EntityBase>> _tables = new();
+    private long _rowVersion;
+
+    /// <summary>Gets the table (primary key -> snapshot) for the given type, creating it if absent. The caller must already hold the lock.</summary>
+    private Dictionary<object, EntityBase> Table(Type entityType)
+    {
+        if (!_tables.TryGetValue(entityType, out var table))
+        {
+            table = new Dictionary<object, EntityBase>();
+            _tables[entityType] = table;
+        }
+
+        return table;
+    }
+
+    /// <summary>Normalizes an entity's primary key value into a dictionary key (value objects are opened to their underlying value; null is not allowed).</summary>
+    internal static object KeyOf(EntityBase entity)
+    {
+        var metadata = EntitySaveMetadata.For(entity.GetType());
+        var raw = metadata.KeyProperty.GetValue(entity);
+        raw = raw is IValueObject vo ? vo.UnderlyingValue : raw;
+
+        return raw
+            ?? throw new InvalidOperationException(
+                $"The primary key of {entity.GetType().Name} is null. In-memory persistence requires a primary key value."
+            );
+    }
+
+    /// <summary>Gets all snapshots of the given type (as clones).</summary>
+    /// <remarks>The returned clones drop unbounded binary columns to their "not fetched" state (matching the real database's SELECT exclusion; the store's actual data is preserved).</remarks>
+    public IReadOnlyList<TEntity> Snapshot<TEntity>()
+        where TEntity : EntityBase, new()
+    {
+        lock (_gate)
+        {
+            return Table(typeof(TEntity))
+                .Values.Select(entity =>
+                {
+                    var clone = (TEntity)entity.Clone();
+                    UnboundedBinaryColumns.StripExcluded(clone);
+                    return clone;
+                })
+                .ToList();
+        }
+    }
+
+    /// <summary>Gets the snapshot for the given type and primary key (as a clone; null if not found).</summary>
+    /// <remarks>The returned clone drops unbounded binary columns to their "not fetched" state (matching the real database's SELECT exclusion; the store's actual data is preserved).</remarks>
+    public TEntity? Find<TEntity>(object key)
+        where TEntity : EntityBase, new()
+    {
+        lock (_gate)
+        {
+            if (!Table(typeof(TEntity)).TryGetValue(key, out var entity))
+            {
+                return null;
+            }
+
+            var clone = (TEntity)entity.Clone();
+            UnboundedBinaryColumns.StripExcluded(clone);
+            return clone;
+        }
+    }
+
+    /// <summary>
+    /// Assigns the next store-generated row version to <paramref name="snapshot"/> and returns the rowversion property that
+    /// was stamped (<c>null</c> for a type without a rowversion column, in which case nothing was assigned).
+    /// </summary>
+    /// <remarks>
+    /// The value is a monotonically increasing 8-byte big-endian token that emulates SQL Server's rowversion: every insert
+    /// and update moves it on, so an entity holding a stale version can be told apart from a current one. The counter is
+    /// advanced atomically because a save hook's After writes a column outside the store lock.
+    /// </remarks>
+    private PropertyInfo? StampRowVersion(EntityBase snapshot)
+    {
+        var property = EntitySaveMetadata.For(snapshot.GetType()).RowVersionProperty;
+
+        if (property is null)
+        {
+            return null;
+        }
+
+        var version = BitConverter.GetBytes(Interlocked.Increment(ref _rowVersion));
+
+        // Big-endian so that comparing the bytes orders the versions the same way as comparing the numbers
+        if (BitConverter.IsLittleEndian)
+        {
+            Array.Reverse(version);
+        }
+
+        property.SetValue(snapshot, SqlValueObjectActivator.Wrap(version, property.PropertyType));
+        return property;
+    }
+
+    /// <summary>Stamps <paramref name="snapshot"/> and hands the newly assigned version straight to <paramref name="source"/> (used by the writes that apply to the store immediately).</summary>
+    private void StampRowVersionDirect(EntityBase snapshot, EntityBase? source)
+    {
+        var property = StampRowVersion(snapshot);
+
+        if (property is null || source is null)
+        {
+            return;
+        }
+
+        ApplyRowVersion(source, property, snapshot);
+    }
+
+    /// <summary>Copies the row version a stored snapshot holds onto the caller's entity, mirroring how a real database hands the newly assigned version back.</summary>
+    /// <remarks>The caller's entity gets its own array so that mutating one side cannot reach into the store's snapshot.</remarks>
+    private static void ApplyRowVersion(
+        EntityBase source,
+        PropertyInfo property,
+        EntityBase snapshot
+    )
+    {
+        var stored = SqlParameterValue.Unwrap(property.GetValue(snapshot));
+
+        if (stored is byte[] version)
+        {
+            property.SetValue(source, SqlValueObjectActivator.Wrap(version.ToArray(), property.PropertyType));
+        }
+    }
+
+    /// <summary>Copies the columns of <paramref name="entity"/> onto a fresh instance of its type, leaving the navigations at the values the constructor gives them (an empty collection, a null reference).</summary>
+    /// <remarks>
+    /// <para>
+    /// The store holds rows, not graphs. A graph handed to a save would otherwise be filed away with its children still
+    /// hanging off the row - and still marked Added - whereas a real database stores rows: a fetch without Include comes back
+    /// with its navigations empty, and re-saving what it returned does not try to insert the children a second time. Nothing
+    /// is lost on the read side, where Include rebuilds the navigations from the child rows whenever a query asks for them.
+    /// </para>
+    /// <para>
+    /// Copying the columns alone is also what keeps a save linear. <see cref="EntityBase.Clone"/> deep-copies the whole
+    /// subtree (a JSON round trip) only for the children to be dropped again straight afterwards, so saving a graph of n
+    /// nodes copied the subtree of every one of them.
+    /// </para>
+    /// <para>
+    /// A binary column is copied rather than shared, because it is the one column value that can be mutated in place; that
+    /// keeps the by-value semantics cloning gave, where writing through the caller's array cannot reach the store's row.
+    /// </para>
+    /// </remarks>
+    private static EntityBase CopyColumns(EntityBase entity)
+    {
+        var entityType = entity.GetType();
+        var copy = (EntityBase)Activator.CreateInstance(entityType)!;
+
+        foreach (var property in EntitySaveMetadata.For(entityType).AllProperties)
+        {
+            var value = property.GetValue(entity);
+
+            // A binary value object hands out the very array it was created with, so the copy has to reach inside it
+            if (value is IValueObject valueObject && valueObject.UnderlyingValue is byte[] wrapped)
+            {
+                value = SqlValueObjectActivator.Wrap(
+                    (byte[])wrapped.Clone(),
+                    property.PropertyType
+                );
+            }
+
+            property.SetValue(copy, value is byte[] bytes ? (byte[])bytes.Clone() : value);
+        }
+
+        return copy;
+    }
+
+    /// <summary>Prepares the snapshot to store for <paramref name="entity"/>: a detached row carrying over whatever the row being replaced holds in columns this write does not name.</summary>
+    /// <remarks>
+    /// <paramref name="previous"/> is the row this write replaces (<c>null</c> for an insert, which writes every column just
+    /// as a real INSERT does).
+    /// </remarks>
+    private static EntityBase PrepareSnapshot(EntityBase entity, EntityBase? previous)
+    {
+        var snapshot = CopyColumns(entity);
+
+        if (previous is not null)
+        {
+            UnboundedBinaryColumns.PreserveUnset(snapshot, previous);
+        }
+
+        snapshot.MarkUnchanged();
+        return snapshot;
+    }
+
+    /// <summary>Gets the raw snapshot (no clone) for the given type and primary key. Used by internal traversals such as Include key matching. The caller must already hold the lock.</summary>
+    private EntityBase? FindRaw(Type entityType, object key) =>
+        Table(entityType).TryGetValue(key, out var entity) ? entity : null;
+
+    /// <summary>Gets the list of raw snapshots (no clones) for the given type. Used by the query executor's internal traversals. The caller must already hold the lock.</summary>
+    private IReadOnlyList<EntityBase> RawAll(Type entityType) => Table(entityType).Values.ToList();
+
+    /// <summary>Gets the list of raw snapshots (no clones) for the given type. Used inside the lock to hand pre-clone snapshots to the executor.</summary>
+    internal IReadOnlyList<EntityBase> RawSnapshotUnlocked(Type entityType) => RawAll(entityType);
+
+    /// <summary>Runs an arbitrary read traversal over the whole store under the lock (so Include key matching can span multiple tables).</summary>
+    internal TResult Read<TResult>(Func<InMemoryReadScope, TResult> reader)
+    {
+        lock (_gate)
+        {
+            return reader(new InMemoryReadScope(this));
+        }
+    }
+
+    /// <summary>Stores a snapshot (clone) for updates and seeding (an existing key is overwritten). Use <see cref="Insert"/> for inserts, which reject an existing key.</summary>
+    internal void Put(EntityBase entity)
+    {
+        lock (_gate)
+        {
+            var table = Table(entity.GetType());
+            var key = KeyOf(entity);
+            var snapshot = PrepareSnapshot(entity, table.GetValueOrDefault(key));
+            StampRowVersionDirect(snapshot, entity);
+            table[key] = snapshot;
+        }
+    }
+
+    /// <summary>Creates the exception for an insert that hits an existing primary key (mirroring the primary-key violation a real database would raise).</summary>
+    internal static InvalidOperationException DuplicateKeyError(Type entityType, object key) =>
+        new(
+            $"Cannot insert {entityType.Name} with key '{key}': an entity with the same primary key already exists (a real database would raise a primary-key violation)."
+        );
+
+    /// <summary>Stores a snapshot (clone) for an insert only. An existing primary key is rejected with an <see cref="InvalidOperationException"/> instead of being silently overwritten.</summary>
+    internal void Insert(EntityBase entity)
+    {
+        lock (_gate)
+        {
+            var key = KeyOf(entity);
+            var snapshot = PrepareSnapshot(entity, previous: null);
+
+            if (!Table(entity.GetType()).TryAdd(key, snapshot))
+            {
+                throw DuplicateKeyError(entity.GetType(), key);
+            }
+
+            // Stamped only once the row is in, so a rejected insert consumes no version and leaves the entity untouched
+            StampRowVersionDirect(snapshot, entity);
+        }
+    }
+
+    /// <summary>Removes the snapshot for the given type and primary key (true if one existed).</summary>
+    internal bool Remove(Type entityType, object key)
+    {
+        lock (_gate)
+        {
+            return Table(entityType).Remove(key);
+        }
+    }
+
+    /// <summary>Applies multiple writes (insert/update/delete) together under a single lock (preserving the atomicity of a graph save).</summary>
+    internal TResult Write<TResult>(Func<InMemoryWriteScope, TResult> writer) =>
+        Write(writer, staging: null);
+
+    /// <summary>
+    /// Runs multiple writes together under a single lock. Without <paramref name="staging"/> the writes are applied to the
+    /// store as they happen; with it they are staged instead and only become visible once <see cref="Publish"/> accepts them,
+    /// which is what lets a graph save stay all-or-nothing across the phases that run outside the lock.
+    /// </summary>
+    /// <remarks>
+    /// A failure part-way through simply lets the exception out: the staging is the only place the writes exist, so the
+    /// caller discarding it is all the rollback there is (nothing was ever applied to the store).
+    /// </remarks>
+    internal TResult Write<TResult>(
+        Func<InMemoryWriteScope, TResult> writer,
+        InMemorySaveStaging? staging
+    )
+    {
+        lock (_gate)
+        {
+            return writer(new InMemoryWriteScope(this, staging));
+        }
+    }
+
+    /// <summary>
+    /// Publishes everything a save staged, under the lock, after verifying that nobody else has written the rows the save
+    /// started from.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The verification is what makes the copy-on-write scheme safe. The staged writes were prepared against the rows the
+    /// save read while it held the lock, and the save hooks' After runs outside the lock in between, so another thread may
+    /// have written the same rows meanwhile. Every row the save touched is therefore compared against the snapshot it
+    /// started from; reference equality is enough because the store never hands its snapshots out and replaces them
+    /// wholesale on every write.
+    /// </para>
+    /// <para>
+    /// Whether the row is still there is settled first, and independently of the concurrency policy and of whether the type
+    /// carries a rowversion column at all, because a version comparison against a row that no longer exists cannot say
+    /// anything about it. Last-write-wins stops short of resurrection: a row the save started from that has been deleted
+    /// meanwhile cannot be written back, because putting the staged snapshot in would bring a deleted row to life, where a
+    /// real database's UPDATE simply affects no rows. Reporting that as <see cref="SaveConflictReason.NotFound"/> is what
+    /// keeps the save honest: the row count the save already returned counted this write, and its entities are about to be
+    /// accepted as saved, so dropping the write silently would leave the caller believing a row exists that does not. A
+    /// staged delete for such a row is not a conflict (deleting a row that is already gone is the same no-op it is against a
+    /// real database). This is the same split a real backend makes when its UPDATE affects no rows and it asks whether the
+    /// row exists before deciding between "gone" and "changed". <see cref="ConcurrencyMode.ForceOverwrite"/> does not lift
+    /// this: it waives the version comparison, not the existence check, so a staged update against a row that was deleted
+    /// meanwhile still fails.
+    /// </para>
+    /// <para>
+    /// <c>insertWhenUpdateMissing</c> does not reach here either. The save phase decides between an UPDATE and the fallback
+    /// INSERT while it holds the lock, so a row deleted after that decision leaves the save holding a staged update and this
+    /// verification reports <see cref="SaveConflictReason.NotFound"/> rather than turning the write into an insert. A real
+    /// database has no window in which that could happen - its own statement sees the row's absence at the moment it writes -
+    /// so this is a divergence of the in-memory backend rather than a rule it shares.
+    /// </para>
+    /// <para>
+    /// Only a row that is still there has its version compared. A row whose type has no rowversion column is not verified:
+    /// without a concurrency token the store's contract is last-write-wins, exactly as it is for a direct update, and
+    /// <see cref="ConcurrencyMode.ForceOverwrite"/> waives the verification for the same reason. A row the save inserted is
+    /// verified whatever the mode, because someone else having taken the same primary key meanwhile is a duplicate key
+    /// rather than something an overwrite policy can excuse.
+    /// </para>
+    /// <para>
+    /// Once the writes are in, the row versions they assigned are read back out of the published snapshots and handed to the
+    /// caller's entities. Reading them back (rather than remembering them when they were assigned) is what keeps a later
+    /// write to the same row - a hook writing a blob, for instance - from leaving the caller holding a superseded version.
+    /// </para>
+    /// </remarks>
+    internal void Publish(InMemorySaveStaging staging, ConcurrencyMode mode)
+    {
+        lock (_gate)
+        {
+            foreach (var (entityType, key, baseRow) in staging.Baseline)
+            {
+                var current = Table(entityType).GetValueOrDefault(key);
+
+                if (ReferenceEquals(current, baseRow))
+                {
+                    continue;
+                }
+
+                // The save is adding this row, but the primary key has been taken since: a real database would raise the
+                // primary-key violation at this point, and no concurrency policy makes that acceptable.
+                if (baseRow is null && staging.Staged(entityType, key) is not null)
+                {
+                    throw DuplicateKeyError(entityType, key);
+                }
+
+                // The row this write started from is gone. Whether it is still there is settled before whether its version
+                // still matches, because a version comparison against a row that no longer exists cannot say anything:
+                // overwriting last-write-wins does not extend to reviving it, and saying so beats dropping the write, which
+                // would report a saved row that is not there. A staged delete against an already deleted row stays the no-op
+                // it is against a real database, whether or not the type carries a rowversion column.
+                if (baseRow is not null && current is null)
+                {
+                    // "Staged a delete" is an entry holding a null snapshot, not the absence of an entry: a save that
+                    // captured this row without ever writing to it has nothing to revive, and reading the two as one
+                    // would let such a capture pass for a delete
+                    if (staging.TryGetStaged(entityType, key, out var staged) && staged is null)
+                    {
+                        continue;
+                    }
+
+                    throw SaveConflictException.NotFound(entityType, key);
+                }
+
+                if (
+                    mode == ConcurrencyMode.Optimistic
+                    && EntitySaveMetadata.For(entityType).RowVersionProperty is not null
+                )
+                {
+                    throw SaveConflictException.Modified(entityType, key, "save");
+                }
+            }
+
+            foreach (var ((entityType, key), snapshot) in staging.Overlay)
+            {
+                if (snapshot is null)
+                {
+                    Table(entityType).Remove(key);
+                }
+                else
+                {
+                    Table(entityType)[key] = snapshot;
+                }
+            }
+
+            foreach (var (source, property, entityType, key) in staging.Stamps)
+            {
+                if (Table(entityType).GetValueOrDefault(key) is { } published)
+                {
+                    ApplyRowVersion(source, property, published);
+                }
+            }
+        }
+    }
+
+    /// <summary>Clears all tables (for resetting in tests).</summary>
+    public void Clear()
+    {
+        lock (_gate)
+        {
+            _tables.Clear();
+        }
+    }
+
+    /// <summary>Scope for reading across multiple tables under the lock (used for Include key matching).</summary>
+    internal readonly struct InMemoryReadScope(InMemoryDataStore store)
+    {
+        /// <summary>The list of raw snapshots (no clones) for the given type.</summary>
+        public IReadOnlyList<EntityBase> All(Type entityType) => store.RawAll(entityType);
+
+        /// <summary>The raw snapshot (no clone) for the given type and primary key (null if not found).</summary>
+        public EntityBase? Find(Type entityType, object key) => store.FindRaw(entityType, key);
+    }
+
+    /// <summary>
+    /// Scope for applying writes across a whole graph under the lock. Without a staging the writes land in the store
+    /// straight away; with one they are staged and read back through the staging, so the save sees its own writes while
+    /// nobody else does until it publishes.
+    /// </summary>
+    internal readonly struct InMemoryWriteScope(
+        InMemoryDataStore store,
+        InMemorySaveStaging? staging
+    )
+    {
+        /// <summary>The row as this scope sees it: what the save has staged for it, or else the store's own row (null when there is none).</summary>
+        private EntityBase? Current(Type entityType, object key) =>
+            staging is not null && staging.TryGetStaged(entityType, key, out var staged)
+                ? staged
+                : store.FindRaw(entityType, key);
+
+        /// <summary>Applies or stages a prepared snapshot and arranges for the newly assigned row version to reach <paramref name="entity"/>.</summary>
+        private void Write(EntityBase entity, Type entityType, object key, EntityBase snapshot)
+        {
+            if (staging is null)
+            {
+                store.StampRowVersionDirect(snapshot, entity);
+                store.Table(entityType)[key] = snapshot;
+                return;
+            }
+
+            // The first touch of a row records the baseline that publishing verifies against
+            staging.CaptureBase(entityType, key, store.FindRaw(entityType, key));
+            var property = store.StampRowVersion(snapshot);
+            staging.Stage(entityType, key, snapshot);
+
+            if (property is not null)
+            {
+                // Only the row is remembered, not the version: the version handed over is whichever one gets published
+                staging.RecordStamp(entity, property, entityType, key);
+            }
+        }
+
+        /// <summary>Stores a snapshot for updates and seeding (an existing key is overwritten). Assumes the lock is held, so it writes directly to the internal dictionary.</summary>
+        public void Put(EntityBase entity)
+        {
+            var entityType = entity.GetType();
+            var key = KeyOf(entity);
+            var snapshot = PrepareSnapshot(entity, Current(entityType, key));
+            Write(entity, entityType, key, snapshot);
+        }
+
+        /// <summary>Stores a snapshot for an insert only (an existing primary key throws instead of being overwritten). Assumes the lock is held, so it writes directly to the internal dictionary.</summary>
+        public void Insert(EntityBase entity)
+        {
+            var entityType = entity.GetType();
+            var key = KeyOf(entity);
+
+            // Rejected before anything is written, so a rejected insert consumes no version and leaves the entity untouched
+            if (Exists(entityType, key))
+            {
+                throw DuplicateKeyError(entityType, key);
+            }
+
+            var snapshot = PrepareSnapshot(entity, previous: null);
+            Write(entity, entityType, key, snapshot);
+        }
+
+        /// <summary>Removes the snapshot for the given type and primary key (true if one existed).</summary>
+        public bool Remove(Type entityType, object key)
+        {
+            if (staging is null)
+            {
+                return store.Table(entityType).Remove(key);
+            }
+
+            var existed = Current(entityType, key) is not null;
+            staging.CaptureBase(entityType, key, store.FindRaw(entityType, key));
+            staging.Stage(entityType, key, null);
+            return existed;
+        }
+
+        /// <summary>Whether a snapshot exists for the given type and primary key.</summary>
+        public bool Exists(Type entityType, object key) => Current(entityType, key) is not null;
+
+        /// <summary>
+        /// Whether <paramref name="entity"/> may overwrite the stored row under the given concurrency policy: <c>true</c> when
+        /// the type has no rowversion column, when the policy is <see cref="ConcurrencyMode.ForceOverwrite"/>, when there is no
+        /// stored row at all (a missing row is the caller's decision to make), or when the entity still carries the version the
+        /// stored row has.
+        /// </summary>
+        /// <remarks>
+        /// The comparison is strict: an entity whose version is null (never read back from the store) never matches a stored
+        /// row, which is what a real database does with <c>WHERE ... AND row_ver = @originalRowVersion</c>.
+        /// </remarks>
+        public bool IsCurrent(EntityBase entity, ConcurrencyMode mode)
+        {
+            var property = EntitySaveMetadata.For(entity.GetType()).RowVersionProperty;
+
+            if (property is null || mode != ConcurrencyMode.Optimistic)
+            {
+                return true;
+            }
+
+            var stored = Current(entity.GetType(), KeyOf(entity));
+
+            if (stored is null)
+            {
+                return true;
+            }
+
+            return SqlParameterValue.Unwrap(property.GetValue(entity)) is byte[] carried
+                && SqlParameterValue.Unwrap(property.GetValue(stored)) is byte[] current
+                && carried.SequenceEqual(current);
+        }
+
+        /// <summary>The list of raw snapshots (no clones) for the given type. Used by the descendant traversal for cascade delete.</summary>
+        public IReadOnlyList<EntityBase> All(Type entityType) => store.RawAll(entityType);
+    }
+}
+
+/// <summary>
+/// Copy-on-write staging area holding the writes of one graph save, so that the whole save unit is all-or-nothing even
+/// though the <see cref="InMemoryDataStore"/> has no real transaction of its own.
+/// </summary>
+/// <remarks>
+/// <para>
+/// A staged write is invisible to everyone but the save that staged it: it never touches the store until
+/// <see cref="InMemoryDataStore.Publish"/> accepts the whole set at once. "At once" is about the outcome, not about
+/// isolation: the staging writes and <see cref="InMemoryDataStore.Publish"/> take the store lock separately, so a
+/// reader running in between sees the store as it was before the save. What the staging guarantees is
+/// that a save which stops half way - and the phases it runs outside the lock are where it can - never leaves part of
+/// itself behind. A save that fails simply drops its staging, which
+/// is all the rollback there is - the store was never changed, so there is nothing to undo and nothing another thread's
+/// write can be trampled by. That matters because a save hook's After runs outside the store lock: rolling a failed save
+/// back by restoring snapshots would silently discard whatever someone else wrote to the same rows while After was running.
+/// </para>
+/// <para>
+/// Alongside the writes, the row each save touched is recorded once, the first time it is touched, together with the
+/// snapshot the store held for it at that moment (or nothing at all, when the row did not exist yet). Publishing compares
+/// the store against those snapshots to detect a row someone else has written meanwhile.
+/// </para>
+/// <para>
+/// The row version counter is deliberately not rewound when a save is dropped: it only has to keep increasing for a stale
+/// version to be distinguishable from a current one, so the versions an abandoned save consumed are simply skipped. The
+/// caller entities awaiting a version are recorded here by the row they were written to, not by the version value, so the
+/// version that reaches the caller is whichever one is actually published. A save that fails therefore leaves the caller
+/// holding the versions it read, and a save hook's After still sees the pre-save version (the same "before commit" view the
+/// real backends give).
+/// </para>
+/// </remarks>
+internal sealed class InMemorySaveStaging
+{
+    private readonly Dictionary<(Type EntityType, object Key), EntityBase?> _overlay = new();
+    private readonly List<(Type EntityType, object Key, EntityBase? Base)> _baseline = new();
+    private readonly HashSet<(Type EntityType, object Key)> _touched = new();
+    private readonly List<(
+        EntityBase Source,
+        PropertyInfo Property,
+        Type EntityType,
+        object Key
+    )> _stamps = new();
+
+    /// <summary>The rows the save started from, in the order it first touched them (a null base means the row did not exist yet).</summary>
+    public IReadOnlyList<(Type EntityType, object Key, EntityBase? Base)> Baseline => _baseline;
+
+    /// <summary>The staged writes (a null value marks a delete).</summary>
+    public IReadOnlyDictionary<(Type EntityType, object Key), EntityBase?> Overlay => _overlay;
+
+    /// <summary>The caller entities awaiting the row version of the row they were written to.</summary>
+    public IReadOnlyList<(
+        EntityBase Source,
+        PropertyInfo Property,
+        Type EntityType,
+        object Key
+    )> Stamps => _stamps;
+
+    /// <summary>Records the snapshot the store held for a row when the save first touched it (later touches are ignored).</summary>
+    public void CaptureBase(Type entityType, object key, EntityBase? baseRow)
+    {
+        if (_touched.Add((entityType, key)))
+        {
+            _baseline.Add((entityType, key, baseRow));
+        }
+    }
+
+    /// <summary>Stages a write for a row (a null snapshot marks a delete), replacing whatever the save staged for it before.</summary>
+    public void Stage(Type entityType, object key, EntityBase? snapshot) =>
+        _overlay[(entityType, key)] = snapshot;
+
+    /// <summary>Gets the write the save has staged for a row (true when it staged one at all, including a delete).</summary>
+    public bool TryGetStaged(Type entityType, object key, out EntityBase? snapshot) =>
+        _overlay.TryGetValue((entityType, key), out snapshot);
+
+    /// <summary>The snapshot staged for a row (null for a delete as well as for a row the save never staged).</summary>
+    public EntityBase? Staged(Type entityType, object key) =>
+        _overlay.GetValueOrDefault((entityType, key));
+
+    /// <summary>Records that a caller entity is waiting for the row version the given row ends up published with.</summary>
+    public void RecordStamp(
+        EntityBase source,
+        PropertyInfo property,
+        Type entityType,
+        object key
+    ) => _stamps.Add((source, property, entityType, key));
+}
+
+/// <summary>
+/// In-memory implementation of <see cref="ISqlQueryExecutor{TEntity}"/>. It evaluates the predicates, orderings, and
+/// paging of <see cref="SqlQueryPlan{TEntity}"/> with LINQ-to-Objects, and reconstructs the Include tree's navigations
+/// from FK metadata to attach them.
+/// </summary>
+/// <remarks>
+/// Predicates (<see cref="LambdaExpression"/>) are turned into delegates with <see cref="LambdaExpression.Compile()"/> and
+/// evaluated directly (no SQL translation). Returned entities are always clones of the store's snapshots, and the
+/// navigations attached by Include point to cloned children/parents as well (so caller-side changes do not propagate to the store).
+/// </remarks>
+internal sealed class InMemoryQueryExecutor<TEntity>(InMemoryDataStore store)
+    : ISqlQueryExecutor<TEntity>
+    where TEntity : EntityBase, new()
+{
+    private readonly InMemoryDataStore _store = store;
+
+    /// <summary>Returns the result after applying predicates (AND-combined), orderings, and Skip/Take as Include-attached clones.</summary>
+    public Task<IReadOnlyList<TEntity>> ToListAsync(
+        SqlQueryPlan<TEntity> plan,
+        CancellationToken cancellationToken
+    )
+    {
+        var predicates = CompilePredicates(plan);
+        var orderings = CompileOrderings(plan);
+
+        var result = _store.Read(scope =>
+        {
+            var matched = ApplyOrderingAndPaging(FilterRaw(predicates), plan, orderings);
+            // Clone first, then attach Include (so the store's actual entities are not mutated). By default the returned clones drop
+            // unbounded binary columns to their not-fetched state (when WithUnboundedBinary is set they are returned as full clones
+            // without stripping, so excluded columns are also fetched; the Include-less case is already guarded at the terminal).
+            var cloned = matched
+                .Select(entity =>
+                {
+                    var clone = (TEntity)entity.Clone();
+
+                    if (!plan.WithUnboundedBinary)
+                    {
+                        UnboundedBinaryColumns.StripExcluded(clone);
+                    }
+
+                    return clone;
+                })
+                .ToList();
+
+            foreach (var entity in cloned)
+            {
+                IncludeAttacher.Attach(entity, plan.Includes, scope);
+            }
+
+            return (IReadOnlyList<TEntity>)cloned;
+        });
+
+        return Task.FromResult(result);
+    }
+
+    /// <summary>Applies the projection to clones after applying predicates, orderings, and Skip/Take, and returns the list (result-equivalent to the real database's column pruning).</summary>
+    /// <remarks>
+    /// For a selector with no Include and only column references, it projects "from a full clone" (so unbounded binary columns are
+    /// also referenceable, giving the same parity as the real database including the referenced columns in the SELECT). When Include
+    /// is used or column references cannot be extracted, it projects from the conventional path (a clone with unbounded binary columns
+    /// stripped, as in ToListAsync), giving the same parity as the real database's fallback - including <c>WithUnboundedBinary</c>,
+    /// which the dialect backends pick up on that path because their fallback goes through ToListAsync.
+    /// </remarks>
+    public Task<IReadOnlyList<TResult>> ToProjectionListAsync<TResult>(
+        SqlQueryPlan<TEntity> plan,
+        Expression<Func<TEntity, TResult>> selector,
+        CancellationToken cancellationToken
+    )
+    {
+        var project = selector.Compile();
+        var predicates = CompilePredicates(plan);
+        var orderings = CompileOrderings(plan);
+
+        // With no Include and only column references, project from a full clone (excluded columns are also referenceable). Otherwise project from a stripped clone.
+        var prunable =
+            plan.Includes.Count == 0
+            && ProjectionColumnCollector.TryCollect(selector, out var referenced)
+            && EntitySaveMetadata.For(typeof(TEntity)).ResolveProjectionColumns(referenced) is not null;
+
+        var result = _store.Read(scope =>
+        {
+            var matched = ApplyOrderingAndPaging(FilterRaw(predicates), plan, orderings);
+            var projected = new List<TResult>(matched.Count);
+
+            foreach (var entity in matched)
+            {
+                // Always clone before projecting so we do not share byte[] and the like with the store's actual entity.
+                var clone = (TEntity)entity.Clone();
+
+                if (!prunable)
+                {
+                    // Same parity as the conventional path (ToListAsync): strip unbounded binary columns unless they were asked for, attach Include, then project.
+                    if (!plan.WithUnboundedBinary)
+                    {
+                        UnboundedBinaryColumns.StripExcluded(clone);
+                    }
+
+                    IncludeAttacher.Attach(clone, plan.Includes, scope);
+                }
+
+                projected.Add(project(clone));
+            }
+
+            return (IReadOnlyList<TResult>)projected;
+        });
+
+        return Task.FromResult(result);
+    }
+
+    /// <summary>Returns the first item as an Include-attached clone (null if none).</summary>
+    public Task<TEntity?> FirstOrDefaultAsync(
+        SqlQueryPlan<TEntity> plan,
+        CancellationToken cancellationToken
+    )
+    {
+        var predicates = CompilePredicates(plan);
+        var orderings = CompileOrderings(plan);
+
+        var result = _store.Read(scope =>
+        {
+            var first = ApplyOrderingAndPaging(FilterRaw(predicates), plan, orderings)
+                .FirstOrDefault();
+
+            if (first is null)
+            {
+                return null;
+            }
+
+            var cloned = (TEntity)first.Clone();
+
+            // By default drop unbounded binary columns to their not-fetched state. When WithUnboundedBinary is set, return a full clone without stripping.
+            if (!plan.WithUnboundedBinary)
+            {
+                UnboundedBinaryColumns.StripExcluded(cloned);
+            }
+
+            IncludeAttacher.Attach(cloned, plan.Includes, scope);
+            return cloned;
+        });
+
+        return Task.FromResult(result);
+    }
+
+    /// <summary>Returns the count of rows matching the conditions (orderings, paging, and Include play no part).</summary>
+    public Task<int> CountAsync(SqlQueryPlan<TEntity> plan, CancellationToken cancellationToken)
+    {
+        var predicates = CompilePredicates(plan);
+        return Task.FromResult(_store.Read(_ => FilterRaw(predicates).Count()));
+    }
+
+    /// <summary>Returns whether any row matches the conditions.</summary>
+    public Task<bool> AnyAsync(SqlQueryPlan<TEntity> plan, CancellationToken cancellationToken)
+    {
+        var predicates = CompilePredicates(plan);
+        return Task.FromResult(_store.Read(_ => FilterRaw(predicates).Any()));
+    }
+
+    /// <summary>Deletes rows matching the conditions. With cascadeDelete=true, descendants are also deleted along the FK chain.</summary>
+    /// <remarks>
+    /// The deletes are staged and published as one unit, so a traversal that gives up part-way through - a cascade the fixed
+    /// descendant walk cannot express, for instance - leaves the store exactly as it found it: the writes only ever existed in
+    /// the staging, so there is nothing to undo. That is abort safety, not isolation - the staging writes and the publish take
+    /// the store lock separately, so another thread can still observe the store in between and change the rows this delete
+    /// started from, which a database's statement-level rollback would have held locks against. Publishing waives the version
+    /// check: a bulk delete states a condition, not the version of any particular row.
+    /// </remarks>
+    public Task<int> ExecuteDeleteAsync(
+        SqlQueryPlan<TEntity> plan,
+        bool cascadeDelete,
+        CancellationToken cancellationToken
+    )
+    {
+        var predicates = CompilePredicates(plan);
+        var staging = new InMemorySaveStaging();
+
+        var rows = _store.Write(
+            scope =>
+            {
+                // Determine the delete targets by the primary keys of the snapshots (pre-clone) as evaluated at this point.
+                var targets = FilterRaw(predicates).ToList();
+                var removed = 0;
+
+                foreach (var target in targets)
+                {
+                    if (cascadeDelete)
+                    {
+                        removed += InMemoryCascade.DeleteDescendants(target, scope);
+                    }
+
+                    if (scope.Remove(typeof(TEntity), InMemoryDataStore.KeyOf(target)))
+                    {
+                        removed++;
+                    }
+                }
+
+                return removed;
+            },
+            staging
+        );
+
+        _store.Publish(staging, ConcurrencyMode.ForceOverwrite);
+        return Task.FromResult(rows);
+    }
+
+    /// <summary>Compiles the plan's predicates into delegates.</summary>
+    /// <remarks>
+    /// Compiling an expression tree is expensive, and it is done before the store lock is taken on purpose: doing it inside
+    /// would serialize every read in the process behind one query's compilation.
+    /// </remarks>
+    private static Func<TEntity, bool>[] CompilePredicates(SqlQueryPlan<TEntity> plan) =>
+        plan.Predicates.Select(predicate => (Func<TEntity, bool>)predicate.Compile()).ToArray();
+
+    /// <summary>Compiles the plan's ordering key selectors into delegates (paired with their direction). Called outside the store lock, for the same reason as <see cref="CompilePredicates"/>.</summary>
+    private static (Func<TEntity, object?> KeySelector, bool Descending)[] CompileOrderings(
+        SqlQueryPlan<TEntity> plan
+    ) =>
+        plan
+            .Orderings.Select(ordering =>
+                ((Func<TEntity, object?>)ordering.KeySelector.Compile(), ordering.Descending)
+            )
+            .ToArray();
+
+    /// <summary>Filters the store's raw snapshots by applying the predicates (AND-combined) (pre-clone, enumeration only).</summary>
+    private IEnumerable<EntityBase> FilterRaw(Func<TEntity, bool>[] predicates)
+    {
+        IEnumerable<TEntity> query = _store.RawSnapshotUnlocked(typeof(TEntity)).Cast<TEntity>();
+
+        foreach (var predicate in predicates)
+        {
+            query = query.Where(predicate);
+        }
+
+        return query;
+    }
+
+    /// <summary>Applies the orderings (stable sort in the specified order) and Skip/Take.</summary>
+    private static IReadOnlyList<EntityBase> ApplyOrderingAndPaging(
+        IEnumerable<EntityBase> source,
+        SqlQueryPlan<TEntity> plan,
+        (Func<TEntity, object?> KeySelector, bool Descending)[] orderings
+    )
+    {
+        var typed = source.Cast<TEntity>();
+        IOrderedEnumerable<TEntity>? ordered = null;
+
+        foreach (var ordering in orderings)
+        {
+            var keySelector = ordering.KeySelector;
+
+            if (ordered is null)
+            {
+                ordered = ordering.Descending
+                    ? typed.OrderByDescending(keySelector, InMemoryOrderingComparer.Instance)
+                    : typed.OrderBy(keySelector, InMemoryOrderingComparer.Instance);
+            }
+            else
+            {
+                ordered = ordering.Descending
+                    ? ordered.ThenByDescending(keySelector, InMemoryOrderingComparer.Instance)
+                    : ordered.ThenBy(keySelector, InMemoryOrderingComparer.Instance);
+            }
+        }
+
+        IEnumerable<TEntity> result = ordered ?? typed;
+
+        if (plan.Skip is { } skip)
+        {
+            result = result.Skip(skip);
+        }
+
+        if (plan.Take is { } take)
+        {
+            result = result.Take(take);
+        }
+
+        return result.Cast<EntityBase>().ToList();
+    }
+}
+
+/// <summary>Compares the keys an ORDER BY sorts on, following the database's ordering rather than the CLR's default one.</summary>
+/// <remarks>
+/// <para>
+/// Two of the CLR defaults diverge from a database. Binary values do not implement <see cref="IComparable"/> at all, so
+/// <see cref="Comparer{T}.Default"/> throws on them, whereas ordering by a binary column is perfectly ordinary in SQL; they
+/// are compared byte by byte here, which is the order SQL Server gives <c>varbinary</c>. Strings compare culture-sensitively
+/// by default, while every other string comparison in this backend is ordinal, so ordering is ordinal too (a real database
+/// orders by its collation, which this backend does not model - see the divergences the documentation lists at
+/// https://github.com/kokko-labs/QuickER/blob/main/docs/code-generation.md).
+/// </para>
+/// <para>
+/// Null sorts before everything else, which an ascending <c>ORDER BY</c> does as well (and descending duly puts it last).
+/// </para>
+/// </remarks>
+internal sealed class InMemoryOrderingComparer : IComparer<object?>
+{
+    /// <summary>The shared instance (the comparer holds no state).</summary>
+    public static readonly InMemoryOrderingComparer Instance = new();
+
+    private InMemoryOrderingComparer() { }
+
+    /// <summary>Compares two ordering keys.</summary>
+    public int Compare(object? x, object? y)
+    {
+        // Value objects are opened first, so a wrapped value orders by the value it wraps
+        x = SqlParameterValue.Unwrap(x);
+        y = SqlParameterValue.Unwrap(y);
+
+        if (x is null || y is null)
+        {
+            return x is null ? (y is null ? 0 : -1) : 1;
+        }
+
+        if (x is byte[] left && y is byte[] right)
+        {
+            return left.AsSpan().SequenceCompareTo(right);
+        }
+
+        if (x is string first && y is string second)
+        {
+            return string.CompareOrdinal(first, second);
+        }
+
+        return Comparer<object>.Default.Compare(x, y);
+    }
+}
+
+/// <summary>Reconstructs navigations (child collections, parent references) from FK metadata along the Include tree and attaches them to the cloned graph.</summary>
+internal static class IncludeAttacher
+{
+    /// <summary>Recursively attaches the navigations for the Include tree onto the given (cloned) entity.</summary>
+    public static void Attach(
+        EntityBase entity,
+        IReadOnlyList<IncludeNode> includes,
+        InMemoryDataStore.InMemoryReadScope scope
+    )
+    {
+        foreach (var node in includes)
+        {
+            var attribute =
+                node.Property.GetCustomAttribute<NavigationReferenceAttribute>()
+                ?? throw new InvalidOperationException(
+                    $"{node.Property.Name} is not a navigation that has [NavigationReference]."
+                );
+
+            var metadata = EntitySaveMetadata.For(entity.GetType());
+
+            if (attribute.IsCollection || !attribute.IsParentReference)
+            {
+                AttachChildren(entity, node, attribute, metadata, scope);
+            }
+            else
+            {
+                AttachParent(entity, node, attribute, metadata, scope);
+            }
+        }
+    }
+
+    /// <summary>Fills a collection or child-direction single-reference navigation with the children whose FK matches the parent key.</summary>
+    private static void AttachChildren(
+        EntityBase parent,
+        IncludeNode node,
+        NavigationReferenceAttribute attribute,
+        EntitySaveMetadata parentMetadata,
+        InMemoryDataStore.InMemoryReadScope scope
+    )
+    {
+        var childType = attribute.IsCollection
+            ? node.Property.PropertyType.GetGenericArguments()[0]
+            : node.Property.PropertyType;
+        var childMetadata = EntitySaveMetadata.For(childType);
+
+        var parentKey = ColumnValue(parent, attribute.PrincipalColumn, parentMetadata);
+        var matched = new List<EntityBase>();
+
+        foreach (var child in scope.All(childType))
+        {
+            var fk = ColumnValue(child, attribute.DependentColumn, childMetadata);
+
+            if (parentKey is not null && Equals(fk, parentKey))
+            {
+                var clonedChild = child.Clone();
+                UnboundedBinaryColumns.StripExcluded(clonedChild);
+                Attach(clonedChild, node.Children, scope);
+                matched.Add(clonedChild);
+            }
+        }
+
+        if (attribute.IsCollection)
+        {
+            // Create a concrete List for ICollection<childType> and fill it.
+            var listType = typeof(List<>).MakeGenericType(childType);
+            var list = (System.Collections.IList)Activator.CreateInstance(listType)!;
+
+            foreach (var child in matched)
+            {
+                list.Add(child);
+            }
+
+            node.Property.SetValue(parent, list);
+        }
+        else
+        {
+            node.Property.SetValue(parent, matched.Count > 0 ? matched[0] : null);
+        }
+    }
+
+    /// <summary>Fills a parent-reference navigation with the parent that its own FK points to.</summary>
+    private static void AttachParent(
+        EntityBase dependent,
+        IncludeNode node,
+        NavigationReferenceAttribute attribute,
+        EntitySaveMetadata dependentMetadata,
+        InMemoryDataStore.InMemoryReadScope scope
+    )
+    {
+        var parentType = node.Property.PropertyType;
+        var parentMetadata = EntitySaveMetadata.For(parentType);
+
+        var fk = ColumnValue(dependent, attribute.DependentColumn, dependentMetadata);
+
+        if (fk is null)
+        {
+            node.Property.SetValue(dependent, null);
+            return;
+        }
+
+        foreach (var candidate in scope.All(parentType))
+        {
+            var principal = ColumnValue(candidate, attribute.PrincipalColumn, parentMetadata);
+
+            if (Equals(principal, fk))
+            {
+                var clonedParent = candidate.Clone();
+                UnboundedBinaryColumns.StripExcluded(clonedParent);
+                Attach(clonedParent, node.Children, scope);
+                node.Property.SetValue(dependent, clonedParent);
+                return;
+            }
+        }
+
+        node.Property.SetValue(dependent, null);
+    }
+
+    /// <summary>Reads the value of the given column from an entity (value objects are opened to their underlying value).</summary>
+    private static object? ColumnValue(
+        EntityBase entity,
+        string columnName,
+        EntitySaveMetadata metadata
+    )
+    {
+        if (!metadata.PropertyByColumn.TryGetValue(columnName, out var property))
+        {
+            throw new InvalidOperationException(
+                $"{entity.GetType().Name} has no property corresponding to column {columnName}."
+            );
+        }
+
+        var value = property.GetValue(entity);
+        return value is IValueObject vo ? vo.UnderlyingValue : value;
+    }
+}
+
+/// <summary>Cascade save/delete for the in-memory repository (traversing child navigations derived from FK metadata).</summary>
+internal static class InMemoryCascade
+{
+    /// <summary>Enumerates the child entities subject to cascade (null is excluded).</summary>
+    public static IEnumerable<EntityBase> EnumerateChildren(EntityBase entity)
+    {
+        foreach (var navigation in EntitySaveMetadata.For(entity.GetType()).CascadeNavigations)
+        {
+            var value = navigation.Property.GetValue(entity);
+
+            if (value is null)
+            {
+                continue;
+            }
+
+            if (navigation.IsCollection)
+            {
+                if (value is IEnumerable<EntityBase> children)
+                {
+                    foreach (var child in children)
+                    {
+                        if (child is not null)
+                        {
+                            yield return child;
+                        }
+                    }
+                }
+            }
+            else if (value is EntityBase child)
+            {
+                yield return child;
+            }
+        }
+    }
+
+    /// <summary>Saves the graph driven by RowState and returns the number of rows written (same semantics as QuickER's EntityGraphSaver).</summary>
+    /// <remarks>
+    /// IsRemoved deletes children first and then the entity itself, IsAdded inserts, and IsUpdated updates (when the target is
+    /// missing, insertWhenUpdateMissing either inserts or throws a conflict exception). Inserts/updates process the entity itself
+    /// first; deletes process the children first. When <paramref name="hooks"/> is provided, Put/Remove is suppressed for nodes
+    /// contained in <see cref="SaveHookSession.Skipped"/>, and the operations actually performed are recorded into
+    /// <paramref name="records"/> (in execution order), which is used to determine the After firing order and the actual operations.
+    /// Entities whose type has a rowversion column are guarded by <paramref name="mode"/>: updating or deleting a row that
+    /// someone else changed first is rejected. A conflict found part-way through does not leave the earlier writes behind:
+    /// when the caller gave the write scope a staging, none of them ever reached the store to begin with.
+    /// </remarks>
+    public static int Save(
+        EntityBase entity,
+        InMemoryDataStore.InMemoryWriteScope scope,
+        bool cascadeSave,
+        bool cascadeDelete,
+        bool insertWhenUpdateMissing,
+        ConcurrencyMode mode,
+        SaveHookSession? hooks = null,
+        List<(EntityBase Entity, SaveOperation Operation)>? records = null,
+        bool changesAlreadyVerified = false
+    )
+    {
+        // If the caller already verified HasChanges, skip the redundant graph traversal here (recursion into children keeps the default false so each branch is checked).
+        if (!changesAlreadyVerified && !EntityGraphSaver.HasChanges(entity, cascadeSave))
+        {
+            return 0;
+        }
+
+        var rows = 0;
+        var entityType = entity.GetType();
+        var key = InMemoryDataStore.KeyOf(entity);
+
+        if (entity.IsRemoved)
+        {
+            if (cascadeDelete)
+            {
+                foreach (var child in EnumerateChildren(entity))
+                {
+                    rows += DeleteGraph(child, scope, mode, hooks, records);
+                }
+            }
+
+            // If Before(Delete) returned false (skip), only the entity's own deletion is withheld (children were already deleted above, so the entity itself remains).
+            if (hooks is not null && hooks.Skipped.Contains(entity))
+            {
+                return rows;
+            }
+
+            // A row someone else changed first must not be deleted (a row that is simply gone stays tolerated silently).
+            if (!scope.IsCurrent(entity, mode))
+            {
+                throw SaveConflictException.Modified(entityType, key, "delete");
+            }
+
+            if (scope.Remove(entityType, key))
+            {
+                rows++;
+            }
+
+            records?.Add((entity, SaveOperation.Delete));
+            return rows;
+        }
+
+        if (entity.IsAdded)
+        {
+            // Insert unless skipped (even when skipped, the child cascade continues).
+            if (hooks is null || !hooks.Skipped.Contains(entity))
+            {
+                scope.Insert(entity);
+                rows++;
+                records?.Add((entity, SaveOperation.Insert));
+            }
+        }
+        else if (entity.IsUpdated)
+        {
+            if (hooks is null || !hooks.Skipped.Contains(entity))
+            {
+                // As with graph updates against a real database, reject updates that still carry values in unbounded binary columns.
+                UnboundedBinaryColumns.ThrowIfExcludedAssigned(entity);
+
+                if (scope.Exists(entityType, key))
+                {
+                    // A row someone else changed first must not be overwritten, and must never be switched to an INSERT
+                    // below (which would turn a stale version into a duplicate primary key).
+                    if (!scope.IsCurrent(entity, mode))
+                    {
+                        throw SaveConflictException.Modified(entityType, key, "update");
+                    }
+
+                    scope.Put(entity);
+                    rows++;
+                    records?.Add((entity, SaveOperation.Update));
+                }
+                else if (insertWhenUpdateMissing)
+                {
+                    // The update target was missing and we switched to INSERT, so After fires with the actual operation Insert.
+                    scope.Insert(entity);
+                    rows++;
+                    records?.Add((entity, SaveOperation.Insert));
+                }
+                else
+                {
+                    throw SaveConflictException.NotFound(entityType, key);
+                }
+            }
+        }
+
+        if (cascadeSave)
+        {
+            foreach (var child in EnumerateChildren(entity))
+            {
+                rows += Save(
+                    child,
+                    scope,
+                    cascadeSave,
+                    cascadeDelete,
+                    insertWhenUpdateMissing,
+                    mode,
+                    hooks,
+                    records
+                );
+            }
+        }
+
+        return rows;
+    }
+
+    /// <summary>Phase 1: traverses the graph in the same order as <see cref="Save"/>, fires the pre-operation hooks (Before), and builds the skip set (outside the lock, async).</summary>
+    /// <remarks>Before fires with the RowState-derived operation (even when <c>insertWhenUpdateMissing</c> switches to Insert, it fires once as Update). The actual operation is determined by the save phase.</remarks>
+    public static async Task InvokeBeforeGraphAsync(
+        EntityBase entity,
+        SaveHookSession hooks,
+        bool cascadeSave,
+        bool cascadeDelete,
+        CancellationToken cancellationToken,
+        bool changesAlreadyVerified = false
+    )
+    {
+        // If the caller already verified HasChanges, skip the redundant graph traversal here (recursion into children keeps the default false so each branch is checked).
+        if (!changesAlreadyVerified && !EntityGraphSaver.HasChanges(entity, cascadeSave))
+        {
+            return;
+        }
+
+        if (entity.IsRemoved)
+        {
+            // For deletes, fire Before starting from the children (same order as Save / DeleteGraph).
+            if (cascadeDelete)
+            {
+                foreach (var child in EnumerateChildren(entity))
+                {
+                    await InvokeBeforeDeleteGraphAsync(child, hooks, cancellationToken).ConfigureAwait(false);
+                }
+            }
+
+            if (!await hooks.InvokeBeforeAsync(entity, SaveOperation.Delete, cancellationToken).ConfigureAwait(false))
+            {
+                hooks.Skip(entity);
+            }
+
+            return;
+        }
+
+        if (entity.IsAdded)
+        {
+            if (!await hooks.InvokeBeforeAsync(entity, SaveOperation.Insert, cancellationToken).ConfigureAwait(false))
+            {
+                hooks.Skip(entity);
+            }
+        }
+        else if (entity.IsUpdated)
+        {
+            if (!await hooks.InvokeBeforeAsync(entity, SaveOperation.Update, cancellationToken).ConfigureAwait(false))
+            {
+                hooks.Skip(entity);
+            }
+        }
+
+        if (cascadeSave)
+        {
+            foreach (var child in EnumerateChildren(entity))
+            {
+                await InvokeBeforeGraphAsync(
+                    child,
+                    hooks,
+                    cascadeSave,
+                    cascadeDelete,
+                    cancellationToken
+                ).ConfigureAwait(false);
+            }
+        }
+    }
+
+    /// <summary>Fires Before for a subtree delete starting from the children (same order as <see cref="DeleteGraph"/>).</summary>
+    private static async Task InvokeBeforeDeleteGraphAsync(
+        EntityBase entity,
+        SaveHookSession hooks,
+        CancellationToken cancellationToken
+    )
+    {
+        foreach (var child in EnumerateChildren(entity))
+        {
+            await InvokeBeforeDeleteGraphAsync(child, hooks, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (!await hooks.InvokeBeforeAsync(entity, SaveOperation.Delete, cancellationToken).ConfigureAwait(false))
+        {
+            hooks.Skip(entity);
+        }
+    }
+
+    /// <summary>Deletes a subtree starting from the children (deletes regardless of state; when <paramref name="hooks"/> is provided, skipped rows are left in place and the deletes actually performed are recorded into <paramref name="records"/>).</summary>
+    private static int DeleteGraph(
+        EntityBase entity,
+        InMemoryDataStore.InMemoryWriteScope scope,
+        ConcurrencyMode mode,
+        SaveHookSession? hooks = null,
+        List<(EntityBase Entity, SaveOperation Operation)>? records = null
+    )
+    {
+        var rows = 0;
+
+        foreach (var child in EnumerateChildren(entity))
+        {
+            rows += DeleteGraph(child, scope, mode, hooks, records);
+        }
+
+        // If Before(Delete) returned false (skip), do not delete the entity itself (children are already deleted).
+        if (hooks is not null && hooks.Skipped.Contains(entity))
+        {
+            return rows;
+        }
+
+        var key = InMemoryDataStore.KeyOf(entity);
+
+        // A row someone else changed first must not be deleted (a row that is simply gone stays tolerated silently).
+        if (!scope.IsCurrent(entity, mode))
+        {
+            throw SaveConflictException.Modified(entity.GetType(), key, "delete");
+        }
+
+        if (scope.Remove(entity.GetType(), key))
+        {
+            rows++;
+        }
+
+        records?.Add((entity, SaveOperation.Delete));
+        return rows;
+    }
+
+    /// <summary>For ExecuteDelete, which has no loaded graph, deletes descendants in the store along the FK chain (grandchildren before children).</summary>
+    /// <remarks>
+    /// Follows the cascade navigations (FK metadata) and finds and deletes children in the store whose DependentColumn matches the
+    /// parent's PrincipalColumn value. Cyclic cascades (self-references and the like) cannot be expressed by this fixed traversal
+    /// and are therefore unsupported.
+    /// </remarks>
+    public static int DeleteDescendants(
+        EntityBase root,
+        InMemoryDataStore.InMemoryWriteScope scope
+    ) => DeleteDescendants(root, scope, new HashSet<Type> { root.GetType() });
+
+    private static int DeleteDescendants(
+        EntityBase parent,
+        InMemoryDataStore.InMemoryWriteScope scope,
+        HashSet<Type> visited
+    )
+    {
+        var rows = 0;
+        var parentMetadata = EntitySaveMetadata.For(parent.GetType());
+
+        foreach (var navigation in parentMetadata.CascadeNavigations)
+        {
+            if (!visited.Add(navigation.ChildType))
+            {
+                throw new NotSupportedException(
+                    $"A cyclic cascade ({navigation.ChildType.Name}) is not supported by ExecuteDeleteAsync. Load the graph and use SaveAsync, or use SaveAsync against an already loaded graph."
+                );
+            }
+
+            var childMetadata = EntitySaveMetadata.For(navigation.ChildType);
+            var parentKey = ColumnValue(parent, navigation.PrincipalColumn, parentMetadata);
+
+            // Materialize the child snapshots first so the enumeration is not broken while deleting.
+            var children = scope
+                .All(navigation.ChildType)
+                .Where(child =>
+                    parentKey is not null
+                    && Equals(
+                        ColumnValue(child, navigation.DependentColumn, childMetadata),
+                        parentKey
+                    )
+                )
+                .ToList();
+
+            foreach (var child in children)
+            {
+                // Delete grandchildren and below first, then the child (FK consistency).
+                rows += DeleteDescendants(child, scope, visited);
+
+                if (scope.Remove(navigation.ChildType, InMemoryDataStore.KeyOf(child)))
+                {
+                    rows++;
+                }
+            }
+
+            visited.Remove(navigation.ChildType);
+        }
+
+        return rows;
+    }
+
+    /// <summary>Reads the value of the given column from an entity (value objects are opened to their underlying value).</summary>
+    private static object? ColumnValue(
+        EntityBase entity,
+        string columnName,
+        EntitySaveMetadata metadata
+    )
+    {
+        if (!metadata.PropertyByColumn.TryGetValue(columnName, out var property))
+        {
+            throw new InvalidOperationException(
+                $"{entity.GetType().Name} has no property corresponding to column {columnName}."
+            );
+        }
+
+        var value = property.GetValue(entity);
+        return value is IValueObject vo ? vo.UnderlyingValue : value;
+    }
+}
+
+/// <summary>Base class for in-memory repositories implementing CRUD over the in-memory data store (dialect-independent, no real database required).</summary>
+/// <remarks>
+/// <para>
+/// Read operations (GetById/GetAll/Query) always return clones of the store's snapshots with RowState=Unchanged
+/// (mutating a returned entity leaves the store unchanged). Write operations (Insert/Update/Delete/Save) replace the snapshots.
+/// Raw SQL operations (QueryBySql/ExecuteSql/ExecuteScalarSql) cannot run in memory and throw <see cref="NotSupportedException"/>.
+/// </para>
+/// </remarks>
+public abstract partial class InMemoryRepository<TEntity, TKey>(
+    InMemoryDataStore store,
+    ISaveHookRegistry? saveHooks = null
+) : IRepository<TEntity, TKey>
+    where TEntity : EntityBase, new()
+{
+    /// <summary>The data store holding the snapshots (shared via DI).</summary>
+    protected InMemoryDataStore Store { get; } = store;
+
+    /// <summary>The save hook registry (unspecified = null = no hooks, a complete no-op).</summary>
+    private readonly ISaveHookRegistry? _saveHooks = saveHooks;
+
+    private const string RawSqlNotSupported =
+        "The in-memory repository cannot execute raw SQL. Switch to a real database repository.";
+
+    /// <summary>Gets a single entity by primary key (null if not found).</summary>
+    public Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default) =>
+        Task.FromResult(Store.Find<TEntity>(NormalizeKey(id)));
+
+    /// <summary>Gets all entities.</summary>
+    public Task<IReadOnlyList<TEntity>> GetAllAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(Store.Snapshot<TEntity>());
+
+    /// <summary>Inserts an entity (an existing primary key is rejected, as a real database would).</summary>
+    /// <remarks>
+    /// Like every other backend, the direct CRUD operations leave the argument's <c>RowState</c> alone: settling it is
+    /// what <c>SaveAsync</c> does after a successful graph save. Doing it here as well would make an entity marked
+    /// Added silently turn into a no-op on a following save, where a real database reports the duplicate key.
+    /// </remarks>
+    public Task InsertAsync(TEntity entity, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+        Store.Insert(entity);
+        return Task.CompletedTask;
+    }
+
+    /// <summary>Bulk-inserts a collection of entities.</summary>
+    /// <remarks>
+    /// Unlike the other backends, the whole batch is checked for duplicate primary keys (against the store and within the
+    /// batch itself) before any of it is applied, so a duplicate rejects the batch without leaving part of it inserted -
+    /// which is what a real database's single transaction gives.
+    /// </remarks>
+    public Task<int> BulkInsertAsync(
+        IEnumerable<TEntity> entities,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(entities);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        // A collection known to be empty is answered without touching the store
+        if (entities is ICollection<TEntity> { Count: 0 })
+        {
+            return Task.FromResult(0);
+        }
+
+        var targets = entities.Where(entity => entity is not null).ToList();
+
+        var count = Store.Write(scope =>
+        {
+            var batchKeys = new HashSet<object>();
+
+            // Pre-validate all keys, then apply: a duplicate must not leave a partially inserted batch behind.
+            foreach (var entity in targets)
+            {
+                var key = InMemoryDataStore.KeyOf(entity);
+
+                if (scope.Exists(entity.GetType(), key) || !batchKeys.Add(key))
+                {
+                    throw InMemoryDataStore.DuplicateKeyError(entity.GetType(), key);
+                }
+            }
+
+            foreach (var entity in targets)
+            {
+                scope.Insert(entity);
+            }
+
+            return targets.Count;
+        });
+
+        return Task.FromResult(count);
+    }
+
+    /// <summary>Updates an entity (true if the update target existed).</summary>
+    /// <remarks>
+    /// When the type has a rowversion column, <paramref name="mode"/> decides whether the update is guarded by the version
+    /// the entity was read with. A guarded update against a row someone else changed first throws a
+    /// <see cref="SaveConflictException"/>; a row that no longer exists still returns <c>false</c>. On success the entity
+    /// receives the newly assigned version.
+    /// </remarks>
+    /// <param name="entity">The entity to update.</param>
+    /// <param name="mode">How a concurrent modification is handled when the type has a rowversion column (no effect otherwise). An undefined value throws <see cref="ArgumentOutOfRangeException"/>.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    public Task<bool> UpdateAsync(
+        TEntity entity,
+        ConcurrencyMode mode = ConcurrencyMode.Optimistic,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+        mode = ConcurrencyModes.Validated(mode);
+
+        // As with a real database, reject updates that still carry values in unbounded binary columns (checked here individually because this path does not go through BindUpdateParameters).
+        UnboundedBinaryColumns.ThrowIfExcludedAssigned(entity);
+
+        var updated = Store.Write(scope =>
+        {
+            var key = InMemoryDataStore.KeyOf(entity);
+
+            if (!scope.Exists(typeof(TEntity), key))
+            {
+                return false;
+            }
+
+            // A row that is gone keeps the pre-existing "false" contract; a row someone else changed first is a conflict
+            if (!scope.IsCurrent(entity, mode))
+            {
+                throw SaveConflictException.Modified(typeof(TEntity), key, "update");
+            }
+
+            scope.Put(entity);
+            return true;
+        });
+
+        return Task.FromResult(updated);
+    }
+
+    /// <inheritdoc />
+    public Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default) =>
+        Task.FromResult(Store.Remove(typeof(TEntity), NormalizeKey(id)));
+
+    /// <summary>Starts a query that fetches entities with chained filter conditions, orderings, and Includes.</summary>
+    public SqlQuery<TEntity> Query() => new(new InMemoryQueryExecutor<TEntity>(Store));
+
+    /// <summary>Saves the graph according to RowState (cascading to children by default).</summary>
+    /// <remarks>
+    /// When save hooks are registered, this runs in 3 phases: (1) traverse the graph outside the lock, fire Before, and build the
+    /// skip set; (2) stage the save inside the lock applying the skips and record the (entity, operation) pairs performed;
+    /// (3) fire After outside the lock in execution order. After emulates "before commit": nothing it sees has been published
+    /// yet, so the entity still carries the row version it was read with. Once every phase has succeeded the staged writes are
+    /// published as one unit and the newly assigned versions reach the caller's entities.
+    /// Entities whose type has a rowversion column are guarded by <paramref name="mode"/>: updating or deleting a row that
+    /// someone else changed first is rejected, both while staging and again when publishing (which is when a row changed
+    /// during phase 3 is caught). The save is all-or-nothing because the store is only ever written by the publish step: a
+    /// conflict found part-way through, or an exception thrown by After, leaves the store exactly as it was and the caller's
+    /// entities holding the versions they had.
+    /// </remarks>
+    public async Task<int> SaveAsync(
+        TEntity entity,
+        bool cascadeSave = true,
+        bool cascadeDelete = true,
+        bool insertWhenUpdateMissing = false,
+        ConcurrencyMode mode = ConcurrencyMode.Optimistic,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+        mode = ConcurrencyModes.Validated(mode);
+
+        // Do nothing if the whole graph has no changes (the change check happens exactly once here and is passed to later phases as already verified).
+        if (!EntityGraphSaver.HasChanges(entity, cascadeSave))
+        {
+            return 0;
+        }
+
+        // Copy-on-write staging that makes the whole save all-or-nothing: every write goes here and reaches the store only
+        // once the last phase has succeeded.
+        var staging = new InMemorySaveStaging();
+
+        // If hooks are registered, build a session that supplies a context participating in the in-progress store write.
+        var hooks =
+            _saveHooks is null
+                ? null
+                : new SaveHookSession(
+                    _saveHooks,
+                    e => new InMemorySaveHookContext(Store, e.GetType())
+                );
+
+        // Phase 1 (outside the lock): traverse the graph in the same order as Save, fire Before, and build the skip set.
+        if (hooks is not null)
+        {
+            await InMemoryCascade.InvokeBeforeGraphAsync(
+                entity,
+                hooks,
+                cascadeSave,
+                cascadeDelete,
+                cancellationToken,
+                changesAlreadyVerified: true
+            ).ConfigureAwait(false);
+        }
+
+        // Phase 2 (inside the lock): stage the save applying the skip set and record the (entity, operation) pairs performed.
+        var records =
+            hooks is null ? null : new List<(EntityBase Entity, SaveOperation Operation)>();
+        var rows = Store.Write(
+            scope =>
+                InMemoryCascade.Save(
+                    entity,
+                    scope,
+                    cascadeSave,
+                    cascadeDelete,
+                    insertWhenUpdateMissing,
+                    mode,
+                    hooks,
+                    records,
+                    changesAlreadyVerified: true
+                ),
+            staging
+        );
+
+        // Phase 3 (outside the lock): fire After in execution order. An exception here leaves the staging unpublished, so the
+        // "row written but the hook's follow-up failed" half state cannot survive.
+        if (hooks is not null)
+        {
+            foreach (var (recordEntity, operation) in records!)
+            {
+                await hooks.InvokeAfterAsync(recordEntity, operation, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        // Every phase succeeded, so the staged writes become visible as one unit and hand their row versions to the caller.
+        Store.Publish(staging, mode);
+
+        // Finalize the saved graph as Unchanged (skipped rows are left as they are).
+        EntityGraphSaver.AcceptChanges(entity, cascadeSave, hooks?.Skipped);
+        return rows;
+    }
+
+    /// <summary>Saves multiple aggregate roots as one unit (atomic processing: all succeed or all roll back).</summary>
+    /// <remarks>
+    /// The hook firing order is the same 3 phases as the single-root overload (Before pre-pass, save, After post-pass), and roots are processed in the specified order.
+    /// Entities whose type has a rowversion column are guarded by <paramref name="mode"/>: updating or deleting a row that
+    /// someone else changed first is rejected. All the roots share one staging and are published together, so a conflict found
+    /// part-way through, or an exception thrown by After, leaves every root unwritten.
+    /// </remarks>
+    public async Task<int> SaveAsync(
+        IEnumerable<TEntity> entities,
+        bool cascadeSave = true,
+        bool cascadeDelete = true,
+        bool insertWhenUpdateMissing = false,
+        ConcurrencyMode mode = ConcurrencyMode.Optimistic,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(entities);
+        mode = ConcurrencyModes.Validated(mode);
+        // Target only graphs with changes (the change check happens exactly once here and is passed to later phases as already verified).
+        var roots = entities
+            .Where(entity => entity is not null && EntityGraphSaver.HasChanges(entity, cascadeSave))
+            .ToList();
+
+        if (roots.Count == 0)
+        {
+            return 0;
+        }
+
+        // Staging shared by every root, so the whole call is one all-or-nothing unit.
+        var staging = new InMemorySaveStaging();
+
+        var hooks =
+            _saveHooks is null
+                ? null
+                : new SaveHookSession(
+                    _saveHooks,
+                    e => new InMemorySaveHookContext(Store, e.GetType())
+                );
+
+        // Phase 1 (outside the lock): traverse the graphs of all roots and fire Before.
+        if (hooks is not null)
+        {
+            foreach (var entity in roots)
+            {
+                await InMemoryCascade.InvokeBeforeGraphAsync(
+                    entity,
+                    hooks,
+                    cascadeSave,
+                    cascadeDelete,
+                    cancellationToken,
+                    changesAlreadyVerified: true
+                ).ConfigureAwait(false);
+            }
+        }
+
+        // Phase 2 (inside the lock): stage all roots applying the skips and record the (entity, operation) pairs performed.
+        var records =
+            hooks is null ? null : new List<(EntityBase Entity, SaveOperation Operation)>();
+        var rows = Store.Write(
+            scope =>
+            {
+                var total = 0;
+
+                foreach (var entity in roots)
+                {
+                    total += InMemoryCascade.Save(
+                        entity,
+                        scope,
+                        cascadeSave,
+                        cascadeDelete,
+                        insertWhenUpdateMissing,
+                        mode,
+                        hooks,
+                        records,
+                        changesAlreadyVerified: true
+                    );
+                }
+
+                return total;
+            },
+            staging
+        );
+
+        // Phase 3 (outside the lock): fire After in execution order (an exception here leaves the staging unpublished).
+        if (hooks is not null)
+        {
+            foreach (var (recordEntity, operation) in records!)
+            {
+                await hooks.InvokeAfterAsync(recordEntity, operation, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        // Every phase succeeded, so the staged writes become visible as one unit and hand their row versions to the caller.
+        Store.Publish(staging, mode);
+
+        foreach (var entity in roots)
+        {
+            EntityGraphSaver.AcceptChanges(entity, cascadeSave, hooks?.Skipped);
+        }
+
+        return rows;
+    }
+
+    /// <summary>Raw SQL cannot run in memory.</summary>
+    public Task<IReadOnlyList<TEntity>> QueryBySqlAsync(
+        string sql,
+        object? parameters = null,
+        CancellationToken cancellationToken = default
+    ) => throw new NotSupportedException(RawSqlNotSupported);
+
+    /// <summary>Raw SQL cannot run in memory.</summary>
+    public Task<int> ExecuteSqlAsync(
+        string sql,
+        object? parameters = null,
+        CancellationToken cancellationToken = default
+    ) => throw new NotSupportedException(RawSqlNotSupported);
+
+    /// <summary>Raw SQL cannot run in memory.</summary>
+    public Task<TResult?> ExecuteScalarSqlAsync<TResult>(
+        string sql,
+        object? parameters = null,
+        CancellationToken cancellationToken = default
+    ) => throw new NotSupportedException(RawSqlNotSupported);
+
+    /// <summary>Normalizes the primary key argument (TKey) into a dictionary key (value objects are opened to their underlying value).</summary>
+    private static object NormalizeKey(TKey id)
+    {
+        object? raw = id is IValueObject vo ? vo.UnderlyingValue : id;
+
+        return raw
+            ?? throw new ArgumentNullException(nameof(id), "The primary key must not be null.");
+    }
+}
+
+/// <summary>In-memory context passed to a save hook's After that participates in the in-progress store write (created bound to an entity type).</summary>
+/// <remarks>
+/// Excluded-column binary writes are applied to the store with the same Stream-to-byte[] conversion as the existing in-memory
+/// stream accessors (strictly following the <c>ResolveWriteLength</c> contract validation and the clone/Put semantics). Raw SQL
+/// cannot run in memory and throws <see cref="NotSupportedException"/>. Writes made here join the save's staging, so they build
+/// on what the save has already staged for the row, become visible with it, and never reach the store if a later After throws.
+/// </remarks>
+internal sealed class InMemorySaveHookContext(InMemoryDataStore store, Type entityType)
+    : ISaveHookContext
+{
+    private readonly InMemoryDataStore _store = store;
+    private readonly Type _entityType = entityType;
+
+    /// <summary>Raw SQL cannot run in memory (switch to a real database repository, or handle it outside the hook).</summary>
+    public Task<int> ExecuteSqlAsync(
+        string sql,
+        object? parameters = null,
+        CancellationToken cancellationToken = default
+    ) =>
+        throw new NotSupportedException(
+            "The in-memory repository cannot execute raw SQL. Switch to a real database repository."
+        );
+
+    /// <summary>In a diagram without exclusion, writing unbounded binary columns is unsupported (points to enabling ExcludeUnboundedBinaryColumns).</summary>
+    public Task<bool> WriteBinaryColumnAsync(
+        string propertyName,
+        object key,
+        Stream? source,
+        long? length = null,
+        CancellationToken cancellationToken = default
+    ) =>
+        throw new NotSupportedException(
+            "Writing unbounded binary columns requires code generated with ExcludeUnboundedBinaryColumns enabled. "
+                + "Enable it, or update the column with raw SQL (ExecuteSqlAsync)."
+        );
+}
+
+/// <summary>In-memory implementation of the repository for CustomerEntity.</summary>
+public sealed partial class InMemoryCustomerRepository(
+    InMemoryDataStore store,
+    ISaveHookRegistry? saveHooks = null
+) : InMemoryRepository<CustomerEntity, CustomerIdValue>(store, saveHooks), ICustomerRepository
+{
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
+        CustomerEntity entity,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+        var violations = new List<UniquenessViolation>();
+
+        List<UniquenessCheck<CustomerEntity>>? customChecks = null;
+        CollectCustomUniquenessChecks(ref customChecks);
+
+        if (customChecks is not null)
+        {
+            foreach (var customCheck in customChecks)
+            {
+                if (
+                    await customCheck(entity, cancellationToken)
+                        .ConfigureAwait(false) is { } violation
+                )
+                {
+                    violations.Add(violation);
+                }
+            }
+        }
+
+        return violations;
+    }
+
+    /// <summary>Extension point for adding user-defined uniqueness checks (add delegates to the list in a partial implementation; while unimplemented the call is erased at no cost).</summary>
+    partial void CollectCustomUniquenessChecks(
+        ref List<UniquenessCheck<CustomerEntity>>? checks
+    );
+}
+
+/// <summary>In-memory implementation of the repository for OrderEntity.</summary>
+public sealed partial class InMemoryOrderRepository(
+    InMemoryDataStore store,
+    ISaveHookRegistry? saveHooks = null
+) : InMemoryRepository<OrderEntity, OrderIdValue>(store, saveHooks), IOrderRepository
+{
+    /// <summary>顧客IDで注文を新しい順（注文ID降順）に検索する（ページング付き）</summary>
+    public Task<IReadOnlyList<OrderEntity>> GetByCustomerAsync(int customerId, int take, int skip = 0, CancellationToken cancellationToken = default) =>
+        Query().Where(e => e.CustomerId == CustomerIdValue.Create(customerId)).OrderByDescending(e => e.OrderId).Skip(skip).Take(take).ToListAsync(cancellationToken);
+
+    /// <summary>最新（注文IDが最大）の注文を 1 件取得する</summary>
+    public Task<OrderEntity?> FindTopAsync(CancellationToken cancellationToken = default) =>
+        Query().OrderByDescending(e => e.OrderId).FirstOrDefaultAsync(cancellationToken);
+
+    /// <summary>顧客IDに紐づく注文件数を取得する</summary>
+    public Task<int> CountByCustomerAsync(int customerId, CancellationToken cancellationToken = default) =>
+        Query().Where(e => e.CustomerId == CustomerIdValue.Create(customerId)).CountAsync(cancellationToken);
+
+    /// <summary>メモの部分一致で注文を検索する</summary>
+    public Task<IReadOnlyList<OrderEntity>> SearchMemoAsync(string keyword, CancellationToken cancellationToken = default) =>
+        Query().Where(e => (e.Memo != null && e.Memo!.Contains(keyword))).ToListAsync(cancellationToken);
+
+    /// <summary>注文IDの一覧で注文を取得する</summary>
+    public Task<IReadOnlyList<OrderEntity>> GetByIdsAsync(IReadOnlyList<int> ids, CancellationToken cancellationToken = default)
+    {
+        var idsValues = ids.Select(OrderIdValue.Create).ToList();
+        return Query().Where(e => idsValues.Contains(e.OrderId)).ToListAsync(cancellationToken);
+    }
+
+    /// <summary>顧客IDに紐づく注文を射影（顧客ID・金額）で新しい順に取得する</summary>
+    public Task<IReadOnlyList<OrderSummaryRow>> GetSummariesAsync(int customerId, int take, int skip = 0, CancellationToken cancellationToken = default) =>
+        Query().Where(e => e.CustomerId == CustomerIdValue.Create(customerId)).OrderByDescending(e => e.OrderId).Skip(skip).Take(take).ToProjectionListAsync(e => new OrderSummaryRow { CustomerId = e.CustomerId, Amount = e.Amount }, cancellationToken);
+
+    /// <summary>顧客IDで注文を古い順に検索する（列参照型付け＝VO 有効時は VO 引数）</summary>
+    public Task<IReadOnlyList<OrderEntity>> GetByCustomerTypedAsync(CustomerIdValue customerId, CancellationToken cancellationToken = default) =>
+        Query().Where(e => e.CustomerId == customerId).OrderBy(e => e.OrderId).ToListAsync(cancellationToken);
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
+        OrderEntity entity,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+        var violations = new List<UniquenessViolation>();
+
+        // UQ_orders_memo: Memo
+        if (entity.Memo is not null)
+        {
+            var query1 = Query()
+                .Where(candidate => candidate.Memo == entity.Memo);
+
+            // A row that has no primary key yet (a new row) has no row of its own to exclude
+            if (entity.OrderId is not null)
+            {
+                query1 = query1.Where(candidate => candidate.OrderId != entity.OrderId);
+            }
+
+            var duplicated1 = await query1
+                .AnyAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            if (duplicated1)
+            {
+                violations.Add(
+                    new UniquenessViolation(
+                        "UQ_orders_memo",
+                        new[]
+                        {
+                            nameof(OrderEntity.Memo),
+                        }
+                    )
+                );
+            }
+        }
+
+        // UQ_orders_customer_id_amount: CustomerId, Amount
+        if (entity.CustomerId is not null && entity.Amount is not null)
+        {
+            var query2 = Query()
+                .Where(candidate => candidate.CustomerId == entity.CustomerId)
+                .Where(candidate => candidate.Amount == entity.Amount);
+
+            // A row that has no primary key yet (a new row) has no row of its own to exclude
+            if (entity.OrderId is not null)
+            {
+                query2 = query2.Where(candidate => candidate.OrderId != entity.OrderId);
+            }
+
+            var duplicated2 = await query2
+                .AnyAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            if (duplicated2)
+            {
+                violations.Add(
+                    new UniquenessViolation(
+                        "UQ_orders_customer_id_amount",
+                        new[]
+                        {
+                            nameof(OrderEntity.CustomerId),
+                            nameof(OrderEntity.Amount),
+                        }
+                    )
+                );
+            }
+        }
+
+        List<UniquenessCheck<OrderEntity>>? customChecks = null;
+        CollectCustomUniquenessChecks(ref customChecks);
+
+        if (customChecks is not null)
+        {
+            foreach (var customCheck in customChecks)
+            {
+                if (
+                    await customCheck(entity, cancellationToken)
+                        .ConfigureAwait(false) is { } violation
+                )
+                {
+                    violations.Add(violation);
+                }
+            }
+        }
+
+        return violations;
+    }
+
+    /// <summary>Extension point for adding user-defined uniqueness checks (add delegates to the list in a partial implementation; while unimplemented the call is erased at no cost).</summary>
+    partial void CollectCustomUniquenessChecks(
+        ref List<UniquenessCheck<OrderEntity>>? checks
+    );
+}
+
+/// <summary>Seeder that loads deterministic sample data into the in-memory store (3 rows per entity, in FK dependency order).</summary>
+/// <remarks>
+/// Values are generated deterministically from the column metadata (int keys = 1,2,3; string keys = "{TABLE}-00n";
+/// Guids are deterministic from a fixed seed; string columns = "{column name} n"; numbers/dates are type-based fixed
+/// values; nullable columns get null in 1 of the 3 rows). FK columns reference existing parent key values, so seeding
+/// runs parent-first, then children.
+/// </remarks>
+public static class InMemorySampleData
+{
+    /// <summary>Number of rows seeded per entity.</summary>
+    public const int RowsPerEntity = 3;
+
+    /// <summary>Seeds sample data for all entities (in parent-to-child FK dependency order).</summary>
+    public static void Seed(InMemoryDataStore store)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+        SeedCustomerEntity(store);
+        SeedOrderEntity(store);
+
+    }
+
+    /// <summary>Seeds sample data for customers.</summary>
+    private static void SeedCustomerEntity(InMemoryDataStore store)
+    {
+        for (var index = 1; index <= RowsPerEntity; index++)
+        {
+            var entity = new CustomerEntity
+            {
+                CustomerId = CustomerIdValue.Create(index),
+                Name = NameValue.Create(($"name {index}").Length > 50 ? ($"name {index}")[..50] : ($"name {index}")),
+                Balance = index == 3 ? null : BalanceValue.Create(index * 100.50m),
+            };
+            entity.MarkAdded();
+            store.Put(entity);
+            entity.MarkUnchanged();
+        }
+    }
+
+    /// <summary>Seeds sample data for orders.</summary>
+    private static void SeedOrderEntity(InMemoryDataStore store)
+    {
+        for (var index = 1; index <= RowsPerEntity; index++)
+        {
+            var entity = new OrderEntity
+            {
+                OrderId = OrderIdValue.Create(index),
+                CustomerId = CustomerIdValue.Create(index),
+                Memo = index == 3 ? null : MemoValue.Create(($"memo {index}").Length > 50 ? ($"memo {index}")[..50] : ($"memo {index}")),
+                Amount = AmountValue.Create(index * 100.50m),
+            };
+            entity.MarkAdded();
+            store.Put(entity);
+            entity.MarkUnchanged();
+        }
+    }
+}
+
+/// <summary>Extensions that register the in-memory repositories with the DI container.</summary>
+public static class GeneratedInMemoryRepositoryServiceCollectionExtensions
+{
+    /// <summary>Registers the in-memory data store (singleton) and each in-memory repository (scoped).</summary>
+    /// <param name="services">The service collection to register into.</param>
+    /// <param name="seedSampleData">When true (the default), the store is registered already seeded with the deterministic sample data of <see cref="InMemorySampleData"/>.</param>
+    public static IServiceCollection AddGeneratedInMemoryRepositories(
+        this IServiceCollection services,
+        bool seedSampleData = true
+    )
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        var store = new InMemoryDataStore();
+
+        if (seedSampleData)
+        {
+            InMemorySampleData.Seed(store);
+        }
+
+        services.AddSingleton(store);
+
+        // Register the save hook registry by default (a complete no-op if no ISaveHook<T> is registered).
+        services.TryAddScoped<ISaveHookRegistry>(provider => new ServiceProviderSaveHookRegistry(
+            provider
+        ));
+        services.AddScoped<ICustomerRepository, InMemoryCustomerRepository>();
+        services.AddScoped<IOrderRepository, InMemoryOrderRepository>();
+
+        return services;
+    }
 }
 
 /// <summary>
@@ -12262,7 +14487,7 @@ public sealed partial class EfCoreOrderRepository(
 
     /// <summary>メモの部分一致で注文を検索する</summary>
     public Task<IReadOnlyList<OrderEntity>> SearchMemoAsync(string keyword, CancellationToken cancellationToken = default) =>
-        Query().Where(e => e.Memo!.Contains(keyword)).ToListAsync(cancellationToken);
+        Query().Where(e => (e.Memo != null && e.Memo!.Contains(keyword))).ToListAsync(cancellationToken);
 
     /// <summary>注文IDの一覧で注文を取得する</summary>
     public Task<IReadOnlyList<OrderEntity>> GetByIdsAsync(IReadOnlyList<int> ids, CancellationToken cancellationToken = default)

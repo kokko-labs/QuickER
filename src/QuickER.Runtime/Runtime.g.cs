@@ -1881,12 +1881,22 @@ public abstract partial class EditModelBase
 
     /// <summary>Cancels the row edit: the confirmed values and the RowState go back to the snapshot <see cref="BeginEdit"/> took, and the input strings are derived from the restored confirmed values.</summary>
     /// <remarks>
+    /// <para>
     /// The input errors are cleared for every property, not only for the ones the canceled edit touched, because rebuilding
     /// the input strings from the restored confirmed values goes through <see cref="RevertInput"/>, which clears each
     /// property's input error unconditionally. A conversion error that was already there when <see cref="BeginEdit"/> ran
     /// therefore disappears as well. The value it complained about is gone from the display in the same step - the input
     /// string is rebuilt from the confirmed value, so the unconvertible text is no longer on screen for the message to refer
     /// to - and it comes back as soon as that text is typed again.
+    /// </para>
+    /// <para>
+    /// The duplicate-value findings do not survive a cancel either, and no check is re-run to replace them: the ones the
+    /// database check registered are withdrawn unconditionally - even for a row that was begun and then canceled without a
+    /// single change, whose finding was still perfectly valid - and the ones about duplicates among the siblings are left
+    /// standing whether or not the restored value still duplicates one. Run the database check and the collection's
+    /// <c>Validate</c> again before saving; a finding of either is only ever as current as its last run.
+    /// See <see cref="CancelEditCore"/> for the reasoning.
+    /// </para>
     /// </remarks>
     public void CancelEdit()
     {
@@ -2606,7 +2616,7 @@ public partial interface IRemoteRepository<TEntity, TKey>
 public partial interface IRepository<TEntity, TKey> : IRemoteRepository<TEntity, TKey>
     where TEntity : EntityBase, new()
 {
-    /// <summary>Bulk inserts a collection of entities using SqlBulkCopy.</summary>
+    /// <summary>Bulk inserts a collection of entities.</summary>
     /// <remarks>
     /// The contract every backend keeps to:
     /// <list type="bullet">
@@ -3151,6 +3161,84 @@ public sealed class SaveHookInvoker<TEntity>(IEnumerable<ISaveHook<TEntity>> hoo
     }
 }
 
+/// <summary>Converts a raw value read from the database into a target CLR type, including the types <see cref="Convert.ChangeType(object, Type, IFormatProvider)"/> cannot reach on its own.</summary>
+/// <remarks>
+/// <para>
+/// <c>Convert.ChangeType</c> only converts types that implement <see cref="IConvertible"/>. <see cref="TimeSpan"/>,
+/// <see cref="Guid"/>, <see cref="DateTimeOffset"/>, <see cref="DateOnly"/> and <see cref="TimeOnly"/> do not, so a driver
+/// that hands such a column back as text makes it throw <see cref="InvalidCastException"/> - which is what SQLite does for
+/// every one of them, since it stores them as TEXT. Those types are parsed from the string instead, with the invariant culture.
+/// SQL Server returns them already typed, so they take the pass-through above and never reach the parsing.
+/// </para>
+/// <para>
+/// This is the single conversion shared by value object rewrapping, raw SQL scalars and raw SQL projection properties. The
+/// SQLite engine's own column coercion (<c>EntitySaveMetadata.CoerceScalar</c>) accepts the same stored formats for the same
+/// types, so a value object column and a plain column read the same text the same way.
+/// </para>
+/// </remarks>
+public static class RawValueConverter
+{
+    /// <summary>Converts the raw value to the target type (a nullable target is judged by its underlying type); a value already of that type is returned as is.</summary>
+    /// <param name="raw">The value the driver returned (never <c>null</c>: the callers map null and <c>DBNull</c> before this point).</param>
+    /// <param name="targetType">The type to convert to.</param>
+    /// <exception cref="InvalidCastException">No conversion exists between the two types.</exception>
+    /// <exception cref="FormatException">The text does not have the shape the target type requires.</exception>
+    /// <exception cref="OverflowException">The value does not fit the target type.</exception>
+    public static object ConvertRaw(object raw, Type targetType)
+    {
+        var underlying = Nullable.GetUnderlyingType(targetType) ?? targetType;
+
+        if (underlying.IsInstanceOfType(raw))
+        {
+            return raw;
+        }
+
+        // Text is the only shape these types can arrive in, and none of them implements IConvertible,
+        // so leaving them to ChangeType would fail on every value rather than on a malformed one
+        if (raw is string text && !typeof(IConvertible).IsAssignableFrom(underlying))
+        {
+            if (underlying == typeof(Guid))
+            {
+                return Guid.Parse(text);
+            }
+
+            if (underlying == typeof(TimeSpan))
+            {
+                return ParseTimeSpan(text);
+            }
+
+            if (underlying == typeof(DateTimeOffset))
+            {
+                return DateTimeOffset.Parse(text, CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind);
+            }
+
+            if (underlying == typeof(DateOnly))
+            {
+                return DateOnly.Parse(text, CultureInfo.InvariantCulture);
+            }
+
+            if (underlying == typeof(TimeOnly))
+            {
+                return TimeOnly.Parse(text, CultureInfo.InvariantCulture);
+            }
+        }
+
+        return Convert.ChangeType(raw, underlying, CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>Parses a <see cref="TimeSpan"/> stored as text.</summary>
+    /// <remarks>
+    /// The round-trip format "c" ([-][d.]hh:mm:ss[.fffffff]) is what the SQLite provider writes, and it also accepts the
+    /// forms that round-trip shorter values ("01:00:00", "1.02:03:04", "10:20:30.1234567"). The fallback covers text that
+    /// something other than this library stored (a hand-written INSERT such as "1:2:3"), which is the same set the plain
+    /// column path has always accepted, so both paths read the same rows.
+    /// </remarks>
+    private static TimeSpan ParseTimeSpan(string text) =>
+        TimeSpan.TryParseExact(text, "c", CultureInfo.InvariantCulture, out var roundTripped)
+            ? roundTripped
+            : TimeSpan.Parse(text, CultureInfo.InvariantCulture);
+}
+
 /// <summary>Helper that unwraps values passed to SQL parameters into raw values (converts value objects to their underlying values, into types SqlClient can handle).</summary>
 public static class SqlParameterValue
 {
@@ -3219,10 +3307,10 @@ public static class SqlValueObjectActivator
 
         return raw =>
         {
-            // Convert only when the raw type returned by the DB differs from TValue (byte[]/Guid etc. do not implement IConvertible, so matching types pass through)
-            var converted = valueType.IsInstanceOfType(raw)
-                ? raw
-                : Convert.ChangeType(raw, valueType, CultureInfo.InvariantCulture);
+            // Convert only when the raw type returned by the DB differs from TValue. The shared converter also covers the
+            // underlying types Convert.ChangeType cannot reach (TimeSpan/Guid/DateTimeOffset and friends), which a driver
+            // that returns them as text - SQLite - would otherwise fail on for every row
+            var converted = RawValueConverter.ConvertRaw(raw, valueType);
 
             return invoker(converted);
         };
@@ -3443,7 +3531,7 @@ public static class RawSqlMapper
 
         try
         {
-            return (TResult)Convert.ChangeType(raw, targetType, CultureInfo.InvariantCulture);
+            return (TResult)RawValueConverter.ConvertRaw(raw, targetType);
         }
         catch (Exception ex)
             when (ex is InvalidCastException or FormatException or OverflowException)
@@ -3556,14 +3644,9 @@ public static class RawSqlMapper
             }
         }
 
-        if (underlyingType.IsInstanceOfType(raw))
-        {
-            return raw;
-        }
-
         try
         {
-            return Convert.ChangeType(raw, underlyingType, CultureInfo.InvariantCulture);
+            return RawValueConverter.ConvertRaw(raw, underlyingType);
         }
         catch (Exception ex)
             when (ex is InvalidCastException or FormatException or OverflowException)
@@ -4318,11 +4401,15 @@ public sealed class RemoteRepositoryException : Exception
     /// A server that hides its error details (the default of <c>MapGeneratedRemoteEndpoints</c>) replaces the message with
     /// a fixed generic one and sends this id instead, and it writes the same id next to the full exception in its own log.
     /// Reporting it therefore lets the failure be looked up on the server without the message having crossed the trust
-    /// boundary. It stays <c>null</c> when the server exposes its error details, for a response from a server built
-    /// before the id existed, and for the failures this client classifies on its own - a success status whose body could
-    /// not be read is raised here rather than reported by the server, so there is no id to carry. A failure response whose
-    /// body could not be read as a <see cref="RemoteError"/> at all leaves it <c>null</c> for the same reason: the id would
-    /// have travelled in that body, so a proxy's HTML error page carries none however the server was configured.
+    /// boundary. A 500 with its details withheld is the only response the server puts an id on, so this is <c>null</c>
+    /// everywhere else: on a 500 whose details are exposed (the message itself crossed over), and on every failure the
+    /// server classified and answered with a message of its own - a 400 for a request it could not interpret, the status
+    /// a host-level rejection carries (413 for a body over the size limit, 411 for a chunked binary upload), and the 404
+    /// the binary endpoints answer with when the addressed row or column value does not exist. It is <c>null</c> as well
+    /// for a response from a server built before the id existed, and for the failures this client classifies on its own:
+    /// a success status whose body could not be read is raised here rather than reported by the server, and a failure
+    /// response whose body could not be read as a <see cref="RemoteError"/> at all carries nothing to read an id out of -
+    /// a proxy's HTML error page has none however the server was configured.
     /// </remarks>
     public string? CorrelationId { get; }
 }
@@ -4354,8 +4441,11 @@ public sealed class RemoteError
     /// <summary>Gets or sets the id that identifies the failed request in the server log (written only for a 500 whose details are hidden).</summary>
     /// <remarks>
     /// The server writes it in place of the exception message it withheld, and records the same id next to the full
-    /// exception in its own log, so the two can be matched up. It stays null on a 500 whose details are exposed, and on
-    /// every classified response (400 and 409), which carry their own messages rather than a withheld one.
+    /// exception in its own log, so the two can be matched up. A 500 with its details withheld is the only response it is
+    /// written on: it stays null on a 500 whose details are exposed, and on every classified failure - 400, 409, the
+    /// status a host-level rejection carries (413 for a body over the size limit, 411 for a chunked binary upload), and
+    /// the 404 the binary endpoints answer with when the addressed row or column value does not exist - because each of
+    /// those carries a message of its own rather than a withheld one.
     /// </remarks>
     public string? CorrelationId { get; set; }
 }
@@ -4772,10 +4862,12 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     /// inner exception, since the reason the body could not be read is exactly what tells the two apart.
     /// A value the body does carry but a value object refuses is "cannot be read" as well, and is classified the same way. It does not
     /// mean what a <see cref="ValueObjectValidationException"/> from a direct read means - stored data that violates the invariant - because
-    /// a server reading that same value would have been refused by it too and answered 500: a 2xx body carrying it points at the transport
-    /// or at the two sides having been generated apart. That refusal on the server reaches a remote caller as this same exception (a 500
-    /// classified like any other server-side failure), so classifying the client-side one here keeps a single exception for the case
-    /// instead of raising, remotely, the one a direct read uses to report bad data.
+    /// a server whose value objects validate the same way would have refused that value too and answered 500: a 2xx body carrying it points
+    /// at the transport, at the two sides having been generated apart, or at them validating apart - a hand-written <c>OnValidate</c>
+    /// extension present on one side only narrows what that side accepts while the generated half of both stays identical. That refusal
+    /// on the server reaches a remote caller as this same exception (a 500 classified like any other server-side failure), so classifying
+    /// the client-side one here keeps a single exception for the case instead of raising, remotely, the one a direct read uses to report
+    /// bad data.
     /// </remarks>
     protected async Task<TResult> InvokeAsync<TResult>(
         string operation,

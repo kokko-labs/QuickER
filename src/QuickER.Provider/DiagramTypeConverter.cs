@@ -12,6 +12,8 @@ namespace QuickER.Provider;
 /// 変換にあわせて NOT NULL を解除するか。行バージョン列（SQL Server の <c>rowversion</c>）が、
 /// 行バージョンを持たない方言のただのバイナリ列へ落ちるときだけ <c>true</c> になる。
 /// 元が NULL 許容の列は解除するものが無いため <c>false</c>（＝この値が真なら必ず NOT NULL → NULL 許容の変更になる）。
+/// 主キー列も <c>false</c>＝DDL 生成・差分同期・列 ViewModel の 3 層が主キー列を NOT NULL へクランプするため
+/// 実害は無いが、モデル層に「NULL 許容の主キー」が一時的に載るのを避けるため、変換計画の段階で除外する。
 /// </param>
 public sealed record ColumnTypeConversion(
     Guid ColumnId,
@@ -79,8 +81,11 @@ public static class DiagramTypeConverter
                             column.Name,
                             oldType,
                             newType,
+                            // 主キー列は NULL 許容へ倒さない（下位 3 層が NOT NULL へクランプするので
+                            // 実害は無いが、モデル層に「NULL 許容の主キー」を一時的にも載せない）
                             MakeNullable: LosesRowVersion(canonical, newType, to)
                                 && !column.IsNullable
+                                && !column.IsPrimaryKey
                         )
                     );
                 }

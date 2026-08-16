@@ -1,4 +1,4 @@
-{{~ if (repository_classes.size > 0 || runtime_package_export) && (render_contract || repositories || in_memory || (ef_core && render_ef_core)) ~}}
+﻿{{~ if (repository_classes.size > 0 || runtime_package_export) && (render_contract || repositories || in_memory || (ef_core && render_ef_core)) ~}}
 {{~ if render_contract && emit_shared_infra ~}}
 /// <summary>A single UNIQUE constraint violation reported by a uniqueness pre-check.</summary>
 /// <param name="ConstraintName">Name of the violated constraint (the synthesized name when the diagram does not set one; a caller-defined name for user-defined checks).</param>
@@ -48,7 +48,7 @@ public partial interface IRemoteRepository<TEntity, TKey>
 
     /// <summary>Updates an entity (true when a matching row was updated).</summary>
     /// <param name="entity">The entity to update.</param>
-    /// <param name="mode">How a concurrent modification is handled when the table has a rowversion column (no effect otherwise). An undefined value throws <see cref="ArgumentOutOfRangeException"/>.</param>
+    /// <param name="mode">How a concurrent modification is handled when the table has a rowversion column (no effect otherwise).{{ if store_generated_dialects_differ }} Not every engine behind this contract honours it: an engine whose database does not assign that column's value writes the column as an ordinary one, so it has no version to compare and ignores this argument.{{ end }} An undefined value throws <see cref="ArgumentOutOfRangeException"/>.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     Task<bool> UpdateAsync(
         TEntity entity,
@@ -72,7 +72,7 @@ public partial interface IRemoteRepository<TEntity, TKey>
     /// <param name="cascadeSave">Whether to cascade the save to child objects.</param>
     /// <param name="cascadeDelete">Whether to cascade deletes to child objects.</param>
     /// <param name="insertWhenUpdateMissing">Whether to switch to INSERT when no row exists to update (throws by default).</param>
-    /// <param name="mode">How a concurrent modification is handled for entities whose table has a rowversion column (no effect otherwise). An undefined value throws <see cref="ArgumentOutOfRangeException"/>.</param>
+    /// <param name="mode">How a concurrent modification is handled for entities whose table has a rowversion column (no effect otherwise).{{ if store_generated_dialects_differ }} Not every engine behind this contract honours it: an engine whose database does not assign that column's value writes the column as an ordinary one, so it has no version to compare and ignores this argument.{{ end }} An undefined value throws <see cref="ArgumentOutOfRangeException"/>.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The number of records saved.</returns>
     Task<int> SaveAsync(
@@ -89,7 +89,7 @@ public partial interface IRemoteRepository<TEntity, TKey>
     /// <param name="cascadeSave">Whether to cascade the save to child objects.</param>
     /// <param name="cascadeDelete">Whether to cascade deletes to child objects.</param>
     /// <param name="insertWhenUpdateMissing">Whether to switch to INSERT when no row exists to update (throws by default).</param>
-    /// <param name="mode">How a concurrent modification is handled for entities whose table has a rowversion column (no effect otherwise). An undefined value throws <see cref="ArgumentOutOfRangeException"/>.</param>
+    /// <param name="mode">How a concurrent modification is handled for entities whose table has a rowversion column (no effect otherwise).{{ if store_generated_dialects_differ }} Not every engine behind this contract honours it: an engine whose database does not assign that column's value writes the column as an ordinary one, so it has no version to compare and ignores this argument.{{ end }} An undefined value throws <see cref="ArgumentOutOfRangeException"/>.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The number of records saved.</returns>
     Task<int> SaveAsync(
@@ -111,7 +111,7 @@ public partial interface IRemoteRepository<TEntity, TKey>
 public partial interface IRepository<TEntity, TKey> : IRemoteRepository<TEntity, TKey>
     where TEntity : EntityBase, new()
 {
-    /// <summary>Bulk inserts a collection of entities{{ if repository_dialect == "sqlserver" }} using SqlBulkCopy{{ end }}.</summary>
+    /// <summary>Bulk inserts a collection of entities.</summary>
     /// <remarks>
     /// The contract every backend keeps to:
     /// <list type="bullet">
@@ -303,6 +303,12 @@ public enum SaveOperation
 }
 
 /// <summary>Selects how concurrent modifications are handled when saving an entity whose table has a rowversion column (no effect otherwise).</summary>
+{{~ if store_generated_dialects_differ ~}}
+/// <remarks>
+/// Not every engine generated from this diagram honours it: an engine whose database does not assign that column's value writes the
+/// column as an ordinary one, so it has no version to compare and neither member changes what a save against it does.
+/// </remarks>
+{{~ end ~}}
 public enum ConcurrencyMode
 {
     /// <summary>Rejects the save with a SaveConflictException when the row was modified by someone else after it was read (the default).</summary>
@@ -823,6 +829,84 @@ public static class SqlServerSchemaBootstrap
 {{~ end ~}}
 {{~ end ~}}
 {{~ if render_contract && emit_shared_infra ~}}
+
+/// <summary>Converts a raw value read from the database into a target CLR type, including the types <see cref="Convert.ChangeType(object, Type, IFormatProvider)"/> cannot reach on its own.</summary>
+/// <remarks>
+/// <para>
+/// <c>Convert.ChangeType</c> only converts types that implement <see cref="IConvertible"/>. <see cref="TimeSpan"/>,
+/// <see cref="Guid"/>, <see cref="DateTimeOffset"/>, <see cref="DateOnly"/> and <see cref="TimeOnly"/> do not, so a driver
+/// that hands such a column back as text makes it throw <see cref="InvalidCastException"/> - which is what SQLite does for
+/// every one of them, since it stores them as TEXT. Those types are parsed from the string instead, with the invariant culture.
+/// SQL Server returns them already typed, so they take the pass-through above and never reach the parsing.
+/// </para>
+/// <para>
+/// This is the single conversion shared by value object rewrapping, raw SQL scalars and raw SQL projection properties. The
+/// SQLite engine's own column coercion (<c>EntitySaveMetadata.CoerceScalar</c>) accepts the same stored formats for the same
+/// types, so a value object column and a plain column read the same text the same way.
+/// </para>
+/// </remarks>
+{{ infra_visibility }} static class RawValueConverter
+{
+    /// <summary>Converts the raw value to the target type (a nullable target is judged by its underlying type); a value already of that type is returned as is.</summary>
+    /// <param name="raw">The value the driver returned (never <c>null</c>: the callers map null and <c>DBNull</c> before this point).</param>
+    /// <param name="targetType">The type to convert to.</param>
+    /// <exception cref="InvalidCastException">No conversion exists between the two types.</exception>
+    /// <exception cref="FormatException">The text does not have the shape the target type requires.</exception>
+    /// <exception cref="OverflowException">The value does not fit the target type.</exception>
+    public static object ConvertRaw(object raw, Type targetType)
+    {
+        var underlying = Nullable.GetUnderlyingType(targetType) ?? targetType;
+
+        if (underlying.IsInstanceOfType(raw))
+        {
+            return raw;
+        }
+
+        // Text is the only shape these types can arrive in, and none of them implements IConvertible,
+        // so leaving them to ChangeType would fail on every value rather than on a malformed one
+        if (raw is string text && !typeof(IConvertible).IsAssignableFrom(underlying))
+        {
+            if (underlying == typeof(Guid))
+            {
+                return Guid.Parse(text);
+            }
+
+            if (underlying == typeof(TimeSpan))
+            {
+                return ParseTimeSpan(text);
+            }
+
+            if (underlying == typeof(DateTimeOffset))
+            {
+                return DateTimeOffset.Parse(text, CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind);
+            }
+
+            if (underlying == typeof(DateOnly))
+            {
+                return DateOnly.Parse(text, CultureInfo.InvariantCulture);
+            }
+
+            if (underlying == typeof(TimeOnly))
+            {
+                return TimeOnly.Parse(text, CultureInfo.InvariantCulture);
+            }
+        }
+
+        return Convert.ChangeType(raw, underlying, CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>Parses a <see cref="TimeSpan"/> stored as text.</summary>
+    /// <remarks>
+    /// The round-trip format "c" ([-][d.]hh:mm:ss[.fffffff]) is what the SQLite provider writes, and it also accepts the
+    /// forms that round-trip shorter values ("01:00:00", "1.02:03:04", "10:20:30.1234567"). The fallback covers text that
+    /// something other than this library stored (a hand-written INSERT such as "1:2:3"), which is the same set the plain
+    /// column path has always accepted, so both paths read the same rows.
+    /// </remarks>
+    private static TimeSpan ParseTimeSpan(string text) =>
+        TimeSpan.TryParseExact(text, "c", CultureInfo.InvariantCulture, out var roundTripped)
+            ? roundTripped
+            : TimeSpan.Parse(text, CultureInfo.InvariantCulture);
+}
 {{~ if generate_value_objects ~}}
 
 /// <summary>Helper that unwraps values passed to SQL parameters into raw values (converts value objects to their underlying values, into types SqlClient can handle).</summary>
@@ -893,10 +977,10 @@ public static class SqlServerSchemaBootstrap
 
         return raw =>
         {
-            // Convert only when the raw type returned by the DB differs from TValue (byte[]/Guid etc. do not implement IConvertible, so matching types pass through)
-            var converted = valueType.IsInstanceOfType(raw)
-                ? raw
-                : Convert.ChangeType(raw, valueType, CultureInfo.InvariantCulture);
+            // Convert only when the raw type returned by the DB differs from TValue. The shared converter also covers the
+            // underlying types Convert.ChangeType cannot reach (TimeSpan/Guid/DateTimeOffset and friends), which a driver
+            // that returns them as text - SQLite - would otherwise fail on for every row
+            var converted = RawValueConverter.ConvertRaw(raw, valueType);
 
             return invoker(converted);
         };
@@ -1120,7 +1204,7 @@ public static class SqlServerSchemaBootstrap
 
         try
         {
-            return (TResult)Convert.ChangeType(raw, targetType, CultureInfo.InvariantCulture);
+            return (TResult)RawValueConverter.ConvertRaw(raw, targetType);
         }
         catch (Exception ex)
             when (ex is InvalidCastException or FormatException or OverflowException)
@@ -1237,14 +1321,9 @@ public static class SqlServerSchemaBootstrap
         }
 
         {{~ end ~}}
-        if (underlyingType.IsInstanceOfType(raw))
-        {
-            return raw;
-        }
-
         try
         {
-            return Convert.ChangeType(raw, underlyingType, CultureInfo.InvariantCulture);
+            return RawValueConverter.ConvertRaw(raw, underlyingType);
         }
         catch (Exception ex)
             when (ex is InvalidCastException or FormatException or OverflowException)

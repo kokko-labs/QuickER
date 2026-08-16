@@ -40,6 +40,16 @@ public class DbConnectionSettings
     /// <summary>接続タイムアウト（秒）</summary>
     public int ConnectTimeoutSeconds { get; set; } = 15;
 
+    /// <summary>コマンド実行タイムアウト（秒）</summary>
+    /// <remarks>
+    /// スキーマ取込・スキーマ同期の各 SQL に適用する（接続確立までの時間である
+    /// <see cref="ConnectTimeoutSeconds"/> とは別物）。<c>0</c> は ADO.NET の規約どおり「無制限」を意味し、
+    /// 負値は不正（<see cref="DbCommands.Create"/> が <see cref="ArgumentOutOfRangeException"/> を投げる）。
+    /// 接続文字列キーワードには載せない——方言によってキーワードの有無・名前が割れるため、
+    /// コマンド生成時に <see cref="DbCommands"/> 経由で設定する。
+    /// </remarks>
+    public int CommandTimeoutSeconds { get; set; } = DbCommands.DefaultTimeoutSeconds;
+
     /// <summary>サービス名（Oracle 固有・将来使用）</summary>
     public string ServiceName { get; set; } = "";
 

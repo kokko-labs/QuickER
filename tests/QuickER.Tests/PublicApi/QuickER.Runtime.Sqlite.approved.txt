@@ -1,0 +1,141 @@
+// QuickER 公開 API スナップショット: QuickER.Runtime.Sqlite
+// 手編集しない。更新は QUICKER_REGEN_FIXTURES=1 での再生成（失敗メッセージにコマンドあり）。
+
+public static class QuickER.Runtime.Sqlite.CascadeDeletePlanner
+    public static System.Collections.Generic.IReadOnlyList<string> BuildDeleteStatements(System.Type rootType, string rootTable, string whereClause)
+
+public static class QuickER.Runtime.Sqlite.EntityGraphSaver
+    public static System.Threading.Tasks.Task<int> SaveAsync(QuickER.Runtime.EntityBase entity, Microsoft.Data.Sqlite.SqliteConnection connection, Microsoft.Data.Sqlite.SqliteTransaction transaction, bool cascadeSave, bool cascadeDelete, bool insertWhenUpdateMissing, System.Threading.CancellationToken cancellationToken, QuickER.Runtime.Sqlite.SaveHookSession hooks = null, bool changesAlreadyVerified = false)
+    public static bool HasChanges(QuickER.Runtime.EntityBase entity, bool cascade)
+    public static void AcceptChanges(QuickER.Runtime.EntityBase entity, bool cascade)
+    public static void AcceptChanges(QuickER.Runtime.EntityBase entity, bool cascade, System.Collections.Generic.IReadOnlySet<QuickER.Runtime.EntityBase> skip)
+
+public sealed class QuickER.Runtime.Sqlite.EntitySaveMetadata
+    public .ctor()
+    public QuickER.Runtime.EntityBase MapEntityObject(System.Data.Common.DbDataReader reader)
+    public QuickER.Runtime.EntityBase MapEntityObject(System.Data.Common.DbDataReader reader, int[] ordinals)
+    public QuickER.Runtime.Sqlite.EntitySaveMetadata.RawSqlRowPlan CreateRawSqlRowPlan(Microsoft.Data.Sqlite.SqliteDataReader reader)
+    public System.Collections.Generic.IReadOnlyDictionary<System.Reflection.PropertyInfo, string> ColumnNameByProperty { get; init; }
+    public System.Collections.Generic.IReadOnlyDictionary<string, System.Reflection.PropertyInfo> PropertyByColumn { get; init; }
+    public System.Collections.Generic.IReadOnlyList<QuickER.Runtime.CascadeNavigation> CascadeNavigations { get; init; }
+    public System.Collections.Generic.IReadOnlyList<System.Reflection.PropertyInfo> AllProperties { get; init; }
+    public System.Collections.Generic.IReadOnlyList<System.Reflection.PropertyInfo> ExcludedProperties { get; init; }
+    public System.Collections.Generic.IReadOnlyList<System.Reflection.PropertyInfo> InsertProperties { get; init; }
+    public System.Collections.Generic.IReadOnlyList<System.Reflection.PropertyInfo> NonKeyProperties { get; init; }
+    public System.Collections.Generic.IReadOnlyList<System.Reflection.PropertyInfo> ResolveProjectionColumns(System.Collections.Generic.IReadOnlyCollection<string> propertyNames)
+    public System.Collections.Generic.IReadOnlyList<System.Reflection.PropertyInfo> SelectProperties { get; init; }
+    public System.Collections.Generic.IReadOnlyList<System.ValueTuple<System.Reflection.PropertyInfo, string>> SelectColumns { get; init; }
+    public System.Collections.Generic.IReadOnlyList<System.ValueTuple<string, string>> Columns { get; init; }
+    public System.Func<System.Data.Common.DbDataReader, int[], QuickER.Runtime.EntityBase> SelectMaterializer { get; init; }
+    public System.Reflection.PropertyInfo ColumnByPropertyName(string propertyName)
+    public System.Reflection.PropertyInfo KeyProperty { get; init; }
+    public System.Reflection.PropertyInfo RowVersionProperty { get; init; }
+    public System.Type EntityType { get; init; }
+    public TEntity MapEntity<TEntity>(Microsoft.Data.Sqlite.SqliteDataReader reader)
+    public TEntity MapEntity<TEntity>(Microsoft.Data.Sqlite.SqliteDataReader reader, int[] ordinals)
+    public TEntity MapEntityColumns<TEntity>(Microsoft.Data.Sqlite.SqliteDataReader reader, System.Collections.Generic.IReadOnlyList<System.Reflection.PropertyInfo> properties, int[] ordinals, bool markUnchanged = false)
+    public TEntity MapEntityFromRawSql<TEntity>(Microsoft.Data.Sqlite.SqliteDataReader reader)
+    public TEntity MapEntityFromRawSql<TEntity>(Microsoft.Data.Sqlite.SqliteDataReader reader, QuickER.Runtime.Sqlite.EntitySaveMetadata.RawSqlRowPlan plan)
+    public int[] ColumnOrdinals(System.Data.Common.DbDataReader reader, System.Collections.Generic.IReadOnlyList<System.Reflection.PropertyInfo> properties)
+    public int[] SelectOrdinals(System.Data.Common.DbDataReader reader)
+    public object GetColumnValue(QuickER.Runtime.EntityBase entity, string columnName)
+    public static QuickER.Runtime.NavigationReferenceAttribute NavigationAttribute(System.Reflection.PropertyInfo property)
+    public static QuickER.Runtime.Sqlite.EntitySaveMetadata For(System.Type entityType)
+    public string BuildColumnList(System.Collections.Generic.IReadOnlyList<System.Reflection.PropertyInfo> properties)
+    public string ColumnList { get; init; }
+    public string DeleteSql { get; init; }
+    public string ExistsByIdSql { get; init; }
+    public string InsertSql { get; init; }
+    public string KeyColumnName { get; init; }
+    public string QuotedColumnName(System.Reflection.PropertyInfo property)
+    public string RawColumnName(System.Reflection.PropertyInfo property)
+    public string RawTableName { get; init; }
+    public string SelectAllSql { get; init; }
+    public string SelectByIdSql { get; init; }
+    public string TableName { get; init; }
+    public string UpdateSql { get; init; }
+    public void AddQueryParameter(Microsoft.Data.Sqlite.SqliteCommand command, string name, string columnName, object rawValue)
+    public void BindEntityKeyParameter(Microsoft.Data.Sqlite.SqliteCommand command, QuickER.Runtime.EntityBase entity)
+    public void BindInsertParameters(Microsoft.Data.Sqlite.SqliteCommand command, QuickER.Runtime.EntityBase entity)
+    public void BindKeyParameter(Microsoft.Data.Sqlite.SqliteCommand command, object id)
+    public void BindUpdateParameters(Microsoft.Data.Sqlite.SqliteCommand command, QuickER.Runtime.EntityBase entity)
+
+public sealed class QuickER.Runtime.Sqlite.EntitySaveMetadata.RawSqlRowPlan
+    public .ctor()
+    public System.ValueTuple<System.Reflection.PropertyInfo, int>[] ExcludedOrdinals { get; init; }
+    public int[] SelectOrdinals { get; init; }
+
+public interface QuickER.Runtime.Sqlite.ISqlConnectionFactory
+    public virtual Microsoft.Data.Sqlite.SqliteConnection CreateConnection()
+
+public sealed class QuickER.Runtime.Sqlite.IncludeLoader
+    public System.Threading.Tasks.Task LoadAsync(System.Collections.Generic.IReadOnlyList<object> parents, System.Collections.Generic.IReadOnlyList<QuickER.Runtime.IncludeNode> includes, Microsoft.Data.Sqlite.SqliteConnection connection, System.Threading.CancellationToken cancellationToken)
+    public static QuickER.Runtime.Sqlite.IncludeLoader For(System.Type entityType)
+
+public sealed class QuickER.Runtime.Sqlite.SaveHookSession
+    public .ctor(QuickER.Runtime.ISaveHookRegistry registry, System.Func<QuickER.Runtime.EntityBase, QuickER.Runtime.ISaveHookContext> contextFactory)
+    public System.Collections.Generic.IReadOnlySet<QuickER.Runtime.EntityBase> Skipped { get; }
+    public System.Threading.Tasks.Task InvokeAfterAsync(QuickER.Runtime.EntityBase entity, QuickER.Runtime.SaveOperation operation, System.Threading.CancellationToken cancellationToken)
+    public System.Threading.Tasks.Task<bool> InvokeBeforeAsync(QuickER.Runtime.EntityBase entity, QuickER.Runtime.SaveOperation operation, System.Threading.CancellationToken cancellationToken)
+    public void Skip(QuickER.Runtime.EntityBase entity)
+
+public sealed class QuickER.Runtime.Sqlite.SqlConnectionFactory : QuickER.Runtime.Sqlite.ISqlConnectionFactory
+    public .ctor(string connectionString)
+    public Microsoft.Data.Sqlite.SqliteConnection CreateConnection()
+
+public sealed class QuickER.Runtime.Sqlite.SqlExecutor : QuickER.Runtime.ISqlExecutor
+    public .ctor(QuickER.Runtime.Sqlite.ISqlConnectionFactory connectionFactory)
+    public System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TEntity>> QueryBySqlAsync<TEntity>(string sql, object parameters = null, System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TResult>> QueryProjectionBySqlAsync<TResult>(string sql, object parameters = null, System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<TResult> ExecuteScalarSqlAsync<TResult>(string sql, object parameters = null, System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<int> ExecuteSqlAsync(string sql, object parameters = null, System.Threading.CancellationToken cancellationToken = default)
+
+public static class QuickER.Runtime.Sqlite.SqlExpressionTranslator
+    public static string ToColumn(System.Linq.Expressions.LambdaExpression keySelector)
+    public static string ToCondition(System.Linq.Expressions.Expression expression, System.Collections.Generic.List<QuickER.Runtime.Sqlite.SqlQueryParameter> parameters)
+
+public struct QuickER.Runtime.Sqlite.SqlQueryParameter : System.IEquatable<QuickER.Runtime.Sqlite.SqlQueryParameter>
+    public .ctor(string Name, object Value, string ColumnName)
+    public object Value { get; init; }
+    public string ColumnName { get; init; }
+    public string Name { get; init; }
+
+public sealed class QuickER.Runtime.Sqlite.SqlSaveHookContext : QuickER.Runtime.ISaveHookContext
+    public .ctor(Microsoft.Data.Sqlite.SqliteConnection connection, Microsoft.Data.Sqlite.SqliteTransaction transaction, System.Type entityType)
+    public System.Threading.Tasks.Task<bool> WriteBinaryColumnAsync(string propertyName, object key, System.IO.Stream source, long? length = default, System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<int> ExecuteSqlAsync(string sql, object parameters = null, System.Threading.CancellationToken cancellationToken = default)
+
+public abstract class QuickER.Runtime.Sqlite.SqliteRepository<TEntity, TKey> : QuickER.Runtime.IRemoteRepository<TEntity, TKey>, QuickER.Runtime.IRepository<TEntity, TKey>
+    protected .ctor(QuickER.Runtime.Sqlite.ISqlConnectionFactory connectionFactory, QuickER.Runtime.ISaveHookRegistry saveHooks = null, QuickER.Runtime.ISqlExecutor sqlExecutor = null)
+    protected System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TResult>> QueryProjectionBySqlAsync<TResult>(string sql, object parameters = null, System.Threading.CancellationToken cancellationToken = default)
+    protected System.Threading.Tasks.Task<bool> ReadUnboundedBinaryColumnAsync(string propertyName, TKey id, System.IO.Stream destination, System.Threading.CancellationToken cancellationToken = default)
+    protected System.Threading.Tasks.Task<bool> WriteUnboundedBinaryColumnAsync(string propertyName, TKey id, System.IO.Stream source, long? length = default, System.Threading.CancellationToken cancellationToken = default)
+    public QuickER.Runtime.SqlQuery<TEntity> Query()
+    public System.Threading.Tasks.Task InsertAsync(TEntity entity, System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TEntity>> GetAllAsync(System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TEntity>> QueryBySqlAsync(string sql, object parameters = null, System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<TEntity> GetByIdAsync(TKey id, System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<TResult> ExecuteScalarSqlAsync<TResult>(string sql, object parameters = null, System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<bool> DeleteAsync(TKey id, System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<bool> UpdateAsync(TEntity entity, QuickER.Runtime.ConcurrencyMode mode = 0, System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<int> BulkInsertAsync(System.Collections.Generic.IEnumerable<TEntity> entities, System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<int> ExecuteSqlAsync(string sql, object parameters = null, System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<int> SaveAsync(System.Collections.Generic.IEnumerable<TEntity> entities, bool cascadeSave = true, bool cascadeDelete = true, bool insertWhenUpdateMissing = false, QuickER.Runtime.ConcurrencyMode mode = 0, System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<int> SaveAsync(TEntity entity, bool cascadeSave = true, bool cascadeDelete = true, bool insertWhenUpdateMissing = false, QuickER.Runtime.ConcurrencyMode mode = 0, System.Threading.CancellationToken cancellationToken = default)
+
+public static class QuickER.Runtime.Sqlite.SqliteSchemaBootstrap
+    public static System.Threading.Tasks.Task ApplyDdlAsync(string connectionString, string ddl, System.TimeSpan? commandTimeout = default, System.Threading.CancellationToken cancellationToken = default)
+
+public sealed class QuickER.Runtime.Sqlite.SqliteSqlQueryExecutor<TEntity> : QuickER.Runtime.ISqlQueryExecutor<TEntity>
+    public .ctor(QuickER.Runtime.Sqlite.ISqlConnectionFactory connectionFactory)
+    public System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TEntity>> ToListAsync(QuickER.Runtime.SqlQueryPlan<TEntity> plan, System.Threading.CancellationToken cancellationToken)
+    public System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TResult>> ToProjectionListAsync<TResult>(QuickER.Runtime.SqlQueryPlan<TEntity> plan, System.Linq.Expressions.Expression<System.Func<TEntity, TResult>> selector, System.Threading.CancellationToken cancellationToken)
+    public System.Threading.Tasks.Task<TEntity> FirstOrDefaultAsync(QuickER.Runtime.SqlQueryPlan<TEntity> plan, System.Threading.CancellationToken cancellationToken)
+    public System.Threading.Tasks.Task<bool> AnyAsync(QuickER.Runtime.SqlQueryPlan<TEntity> plan, System.Threading.CancellationToken cancellationToken)
+    public System.Threading.Tasks.Task<int> CountAsync(QuickER.Runtime.SqlQueryPlan<TEntity> plan, System.Threading.CancellationToken cancellationToken)
+    public System.Threading.Tasks.Task<int> ExecuteDeleteAsync(QuickER.Runtime.SqlQueryPlan<TEntity> plan, bool cascadeDelete, System.Threading.CancellationToken cancellationToken)
+
+public static class QuickER.Runtime.Sqlite.UnboundedBinaryColumnEngine
+    public static System.Threading.Tasks.Task<bool> ReadAsync(QuickER.Runtime.Sqlite.EntitySaveMetadata metadata, string propertyName, object key, System.IO.Stream destination, Microsoft.Data.Sqlite.SqliteConnection connection, Microsoft.Data.Sqlite.SqliteTransaction transaction, System.Threading.CancellationToken cancellationToken)
+    public static System.Threading.Tasks.Task<bool> WriteAsync(QuickER.Runtime.Sqlite.EntitySaveMetadata metadata, string propertyName, object key, System.IO.Stream source, long? length, Microsoft.Data.Sqlite.SqliteConnection connection, Microsoft.Data.Sqlite.SqliteTransaction transaction, System.Threading.CancellationToken cancellationToken)
+

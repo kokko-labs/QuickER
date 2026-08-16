@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
@@ -544,9 +545,10 @@ public abstract class RemoteServiceRuntimeTestsBase : IAsyncLifetime
                     "BadHttpRequestException が持つステータスコードを素通しする"
                 );
         }
-        catch (HttpRequestException)
+        catch (Exception ex) when (ex is HttpRequestException or IOException)
         {
-            // 413 が読めない場合は送信中断＝接続リセット（拒否されたこと自体は成立している）
+            // 413 が読めない場合は送信中断＝接続リセット（拒否されたこと自体は成立している）。
+            // 負荷並列時は HTTP スタックが下位のソケット例外（IOException）をそのまま伝播する枝も観測される
         }
 
         await server.StopAsync(Ct);

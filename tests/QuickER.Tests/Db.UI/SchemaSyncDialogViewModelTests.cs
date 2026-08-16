@@ -314,6 +314,24 @@ public class SchemaSyncDialogViewModelTests
         message.Should().Be(string.Format(DbStrings.SchemaSync_ExecuteConfirm, "Shop"));
     }
 
+    /// <summary>接続設定のコマンドタイムアウトが、差分取込のカタログ照会まで届くことを検証する</summary>
+    [Fact(DisplayName = "Refresh: 接続設定のコマンドタイムアウトが取込へ渡る")]
+    public async Task Refresh_PassesCommandTimeoutFromSettings()
+    {
+        var importer = new FakeSchemaImporter(new SchemaImportResult());
+        var provider = new FakeSqliteProvider(importer);
+        var vm = new SchemaSyncDialogViewModel(
+            provider,
+            new DbConnectionSettings { FilePath = "shop.db", CommandTimeoutSeconds = 180 },
+            [],
+            []
+        );
+
+        await vm.RefreshCommand.ExecuteAsync(null);
+
+        importer.LastCommandTimeoutSeconds.Should().Be(180);
+    }
+
     /// <summary>実行成功後の再計算で差分が 0 になったとき、ダイアログが自動で閉じることを検証する</summary>
     [Fact(DisplayName = "Execute: 成功後に差分 0 ならダイアログを自動で閉じる")]
     public async Task Execute_Success_NoRemainingDiff_ClosesDialog()
@@ -978,10 +996,18 @@ public class SchemaSyncDialogViewModelTests
         /// <summary>次回の取込で返す結果（同期実行後の「適用済み live」を再現するために差し替える）</summary>
         public SchemaImportResult Result { get; set; }
 
+        /// <summary>直近の取込で渡されたコマンドタイムアウト（接続設定からの伝搬を検証するために記録する）</summary>
+        public int? LastCommandTimeoutSeconds { get; private set; }
+
         public Task<SchemaImportResult> ImportAsync(
             string connectionString,
+            int commandTimeoutSeconds,
             CancellationToken cancellationToken = default
-        ) => Task.FromResult(Result);
+        )
+        {
+            LastCommandTimeoutSeconds = commandTimeoutSeconds;
+            return Task.FromResult(Result);
+        }
     }
 
     /// <summary>常に成功（COMMIT）を返すフェイク実行器（実 DB へ接続しない）</summary>

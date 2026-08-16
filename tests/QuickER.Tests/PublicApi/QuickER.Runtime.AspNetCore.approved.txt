@@ -1,0 +1,51 @@
+// QuickER 公開 API スナップショット: QuickER.Runtime.AspNetCore
+// 手編集しない。更新は QUICKER_REGEN_FIXTURES=1 での再生成（失敗メッセージにコマンドあり）。
+
+public sealed class QuickER.Runtime.AspNetCore.DeferredOctetStreamBody : System.IO.Stream, System.IAsyncDisposable, System.IDisposable
+    public .ctor(Microsoft.AspNetCore.Http.HttpResponse response)
+    public override System.Threading.Tasks.Task FlushAsync(System.Threading.CancellationToken cancellationToken)
+    public override System.Threading.Tasks.Task WriteAsync(byte[] buffer, int offset, int count, System.Threading.CancellationToken cancellationToken)
+    public override System.Threading.Tasks.ValueTask WriteAsync(System.ReadOnlyMemory<byte> buffer, System.Threading.CancellationToken cancellationToken = default)
+    public override bool CanRead { get; }
+    public override bool CanSeek { get; }
+    public override bool CanWrite { get; }
+    public override int Read(byte[] buffer, int offset, int count)
+    public override long Length { get; }
+    public override long Position { get; set; }
+    public override long Seek(long offset, System.IO.SeekOrigin origin)
+    public override void Flush()
+    public override void SetLength(long value)
+    public override void Write(byte[] buffer, int offset, int count)
+    public void EnsureStarted()
+
+public sealed class QuickER.Runtime.AspNetCore.DisableRequestBodySizeLimit : Microsoft.AspNetCore.Http.Metadata.IRequestSizeLimitMetadata
+    public .ctor()
+    public long? MaxRequestBodySize { get; }
+    public static readonly QuickER.Runtime.AspNetCore.DisableRequestBodySizeLimit Instance
+
+public sealed class QuickER.Runtime.AspNetCore.RemoteBadRequestException : System.Exception, System.Runtime.Serialization.ISerializable
+    public .ctor(string message)
+    public .ctor(string message, System.Exception innerException)
+
+public sealed class QuickER.Runtime.AspNetCore.RemoteErrorDetailPolicy
+    public .ctor(bool expose, System.Action<Microsoft.AspNetCore.Http.HttpContext, System.Exception> onServerError)
+    public System.Action<Microsoft.AspNetCore.Http.HttpContext, System.Exception> OnServerError { get; }
+    public bool Expose { get; }
+
+public static class QuickER.Runtime.AspNetCore.RemoteServerEngine
+    public static QuickER.Runtime.ConcurrencyMode ValidatedMode(QuickER.Runtime.ConcurrencyMode mode)
+    public static System.Collections.Generic.List<QuickER.Runtime.RemoteEntityRef> CollectSkipped<TEntity>(System.Collections.Generic.IEnumerable<TEntity> entities, bool cascade)
+    public static System.Collections.Generic.List<QuickER.Runtime.RemoteRowVersionEntry> CollectRowVersions<TEntity>(System.Collections.Generic.IEnumerable<TEntity> entities, bool cascade)
+    public static System.Threading.Tasks.Task ExecuteAsync(Microsoft.AspNetCore.Http.HttpContext context, System.Func<System.Threading.Tasks.Task<object>> handler)
+    public static System.Threading.Tasks.Task ExecuteDeleteAsync(Microsoft.AspNetCore.Http.HttpContext context, System.Func<System.Threading.Tasks.Task<bool>> deleteToNull)
+    public static System.Threading.Tasks.Task ExecuteDownloadAsync(Microsoft.AspNetCore.Http.HttpContext context, System.Func<System.IO.Stream, System.Threading.Tasks.Task<bool>> read)
+    public static System.Threading.Tasks.Task ExecuteUploadAsync(Microsoft.AspNetCore.Http.HttpContext context, System.Func<System.IO.Stream, long, System.Threading.Tasks.Task<bool>> write)
+    public static System.Threading.Tasks.Task WriteErrorAsync(Microsoft.AspNetCore.Http.HttpContext context, int statusCode, string type, string message, QuickER.Runtime.SaveConflictException conflict = null, string correlationId = null)
+    public static System.Threading.Tasks.Task WriteServerErrorAsync(Microsoft.AspNetCore.Http.HttpContext context, System.Exception ex)
+    public static System.Threading.Tasks.Task<TRequest> ReadRequestAsync<TRequest>(Microsoft.AspNetCore.Http.HttpContext context)
+    public static T Required<T>(T value, string name)
+    public static TKey ParseKeyFromQuery<TKey>(Microsoft.AspNetCore.Http.HttpContext context)
+    public static TRepository Repository<TRepository>(Microsoft.AspNetCore.Http.HttpContext context)
+    public static void LogServerError(Microsoft.AspNetCore.Http.HttpContext context, System.Exception ex)
+    public static void MapCrud<TEntity, TKey, TRepository>(Microsoft.AspNetCore.Routing.RouteGroupBuilder group, string entityRoute)
+

@@ -237,6 +237,65 @@ public class RemoteServiceGenerationTests
         main.Should().NotContain("AddGeneratedHttpRemoteRepositories");
     }
 
+    /// <summary>
+    /// HTTP クライアントの DI 登録が非 keyed・keyed の 2 系統（それぞれ baseAddress 版と HttpClient ファクトリ版）で
+    /// 出力されることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// keyed 版はハイブリッド構成（キー "server"＝HTTP・キー "local"＝方言エンジン）の必須部品で、方言側の
+    /// <c>AddGenerated{方言}Repositories(serviceKey, ...)</c> と対になる。共有 HttpClient も同じキーで登録するため、
+    /// 非 keyed 登録とも別キーとも衝突しない（コンテナ所有＝破棄も従来どおり）。
+    /// </remarks>
+    [Fact(DisplayName = "ON: HTTP クライアント DI に keyed オーバーロード 2 本が追加される")]
+    public void Generate_RemoteServices_EmitsKeyedHttpRegistrationOverloads()
+    {
+        var result = Generate(
+            CreateDiagram(),
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Test.Ns",
+                GenerateRepositories = true,
+                GenerateRemoteServices = true,
+            }
+        );
+
+        result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
+
+        // 改行を LF へ正規化して、複数行のシグネチャをそのままの形で照合する
+        var main = result.Files[0].Content.ReplaceLineEndings("\n");
+        const string Signature =
+            "public static IServiceCollection AddGeneratedHttpRemoteRepositories(\n        this IServiceCollection services,\n";
+
+        // 非 keyed の 2 本（従来どおり）
+        main.Should().Contain(Signature + "        string baseAddress\n    )");
+        main.Should()
+            .Contain(
+                Signature + "        Func<IServiceProvider, HttpClient> httpClientFactory\n    )"
+            );
+
+        // keyed の 2 本
+        main.Should()
+            .Contain(Signature + "        object? serviceKey,\n        string baseAddress\n    )");
+        main.Should()
+            .Contain(
+                Signature
+                    + "        object? serviceKey,\n        Func<IServiceProvider, HttpClient> httpClientFactory\n    )"
+            );
+
+        // 共有 HttpClient は同じキーで登録し、per-entity のリモート面は keyed scoped で登録する
+        main.Should().Contain("services.AddKeyedSingleton(\n            serviceKey,");
+        main.Should()
+            .Contain("provider.GetRequiredKeyedService<OwnedHttpClient>(serviceKey).Client");
+        main.Should().Contain("services.AddKeyedScoped<IOrderRemoteRepository>(");
+
+        // 非 keyed 版は従来のまま（キー無しの登録が keyed へ置き換わっていない）
+        main.Should()
+            .Contain(
+                "services.AddScoped<IOrderRemoteRepository>(provider => new HttpOrderRemoteRepository("
+            );
+        main.Should().Contain("services.AddSingleton(_ => new OwnedHttpClient(");
+    }
+
     /// <summary>分割出力: サーバーは RemoteServer.g.cs・専用 namespace で出て、他バケットの namespace を using することを検証する</summary>
     [Fact(DisplayName = "分割出力: RemoteServer.g.cs が専用 namespace＋クロス using で出る")]
     public void Generate_RemoteServicesWithSplit_EmitsServerFileWithCrossUsings()

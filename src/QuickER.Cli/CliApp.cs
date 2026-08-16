@@ -173,6 +173,13 @@ public static class CliApp
             Required = true,
         };
         var config = new Option<FileInfo>("--config") { Description = Strings.Cli_Opt_Config };
+
+        // GUI の接続設定と同じ既定値を CLI にも出す（大規模スキーマの取込が ADO 既定で切れないようにする）
+        var commandTimeout = new Option<int>("--command-timeout")
+        {
+            Description = Strings.Cli_Opt_CommandTimeout,
+            DefaultValueFactory = _ => DbCommands.DefaultTimeoutSeconds,
+        };
         var provider = ProviderOption();
         var generation = new GenerationOptionSet();
 
@@ -181,6 +188,7 @@ public static class CliApp
             connection,
             output,
             config,
+            commandTimeout,
             provider,
         };
 
@@ -195,6 +203,7 @@ public static class CliApp
                     parseResult.GetValue(connection)!,
                     parseResult.GetValue(output)!,
                     parseResult.GetValue(config),
+                    parseResult.GetValue(commandTimeout),
                     parseResult.GetValue(provider)!,
                     parseResult,
                     generation,
@@ -211,6 +220,7 @@ public static class CliApp
         string connectionString,
         DirectoryInfo output,
         FileInfo? config,
+        int commandTimeoutSeconds,
         string providerName,
         ParseResult parseResult,
         GenerationOptionSet generation,
@@ -226,7 +236,8 @@ public static class CliApp
             generation,
             stdout,
             stderr,
-            (provider, ct) => ImportDiagramAsync(provider, connectionString, stderr, ct),
+            (provider, ct) =>
+                ImportDiagramAsync(provider, connectionString, commandTimeoutSeconds, stderr, ct),
             cancellationToken
         );
 
@@ -234,6 +245,7 @@ public static class CliApp
     private static async Task<ErDiagram?> ImportDiagramAsync(
         IDatabaseProvider provider,
         string connectionString,
+        int commandTimeoutSeconds,
         TextWriter stderr,
         CancellationToken cancellationToken
     )
@@ -242,7 +254,11 @@ public static class CliApp
         try
         {
             imported = await provider
-                .SchemaImporter.ImportAsync(connectionString, cancellationToken)
+                .SchemaImporter.ImportAsync(
+                    connectionString,
+                    commandTimeoutSeconds,
+                    cancellationToken
+                )
                 .ConfigureAwait(false);
         }
         catch (Exception ex)

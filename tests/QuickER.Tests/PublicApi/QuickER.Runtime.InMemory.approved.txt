@@ -1,0 +1,106 @@
+// QuickER 公開 API スナップショット: QuickER.Runtime.InMemory
+// 手編集しない。更新は QUICKER_REGEN_FIXTURES=1 での再生成（失敗メッセージにコマンドあり）。
+
+public static class QuickER.Runtime.InMemory.EntityGraphSaver
+    public static bool HasChanges(QuickER.Runtime.EntityBase entity, bool cascade)
+    public static void AcceptChanges(QuickER.Runtime.EntityBase entity, bool cascade)
+    public static void AcceptChanges(QuickER.Runtime.EntityBase entity, bool cascade, System.Collections.Generic.IReadOnlySet<QuickER.Runtime.EntityBase> skip)
+
+public sealed class QuickER.Runtime.InMemory.EntitySaveMetadata
+    public .ctor()
+    public System.Collections.Generic.IReadOnlyDictionary<string, System.Reflection.PropertyInfo> PropertyByColumn { get; init; }
+    public System.Collections.Generic.IReadOnlyList<QuickER.Runtime.CascadeNavigation> CascadeNavigations { get; init; }
+    public System.Collections.Generic.IReadOnlyList<System.Reflection.PropertyInfo> AllProperties { get; init; }
+    public System.Collections.Generic.IReadOnlyList<System.Reflection.PropertyInfo> ExcludedProperties { get; init; }
+    public System.Collections.Generic.IReadOnlyList<System.Reflection.PropertyInfo> ResolveProjectionColumns(System.Collections.Generic.IReadOnlyCollection<string> propertyNames)
+    public System.Collections.Generic.IReadOnlyList<System.Reflection.PropertyInfo> SelectProperties { get; init; }
+    public System.Reflection.PropertyInfo ColumnByPropertyName(string propertyName)
+    public System.Reflection.PropertyInfo KeyProperty { get; init; }
+    public System.Reflection.PropertyInfo RowVersionProperty { get; init; }
+    public static QuickER.Runtime.InMemory.EntitySaveMetadata For(System.Type entityType)
+    public static QuickER.Runtime.NavigationReferenceAttribute NavigationAttribute(System.Reflection.PropertyInfo property)
+
+public static class QuickER.Runtime.InMemory.InMemoryCascade
+    public static System.Collections.Generic.IEnumerable<QuickER.Runtime.EntityBase> EnumerateChildren(QuickER.Runtime.EntityBase entity)
+    public static System.Threading.Tasks.Task InvokeBeforeGraphAsync(QuickER.Runtime.EntityBase entity, QuickER.Runtime.InMemory.SaveHookSession hooks, bool cascadeSave, bool cascadeDelete, System.Threading.CancellationToken cancellationToken, bool changesAlreadyVerified = false)
+    public static int DeleteDescendants(QuickER.Runtime.EntityBase root, QuickER.Runtime.InMemory.InMemoryDataStore.InMemoryWriteScope scope)
+    public static int Save(QuickER.Runtime.EntityBase entity, QuickER.Runtime.InMemory.InMemoryDataStore.InMemoryWriteScope scope, bool cascadeSave, bool cascadeDelete, bool insertWhenUpdateMissing, QuickER.Runtime.ConcurrencyMode mode, QuickER.Runtime.InMemory.SaveHookSession hooks = null, System.Collections.Generic.List<System.ValueTuple<QuickER.Runtime.EntityBase, QuickER.Runtime.SaveOperation>> records = null, bool changesAlreadyVerified = false)
+
+public sealed class QuickER.Runtime.InMemory.InMemoryDataStore
+    public .ctor()
+    public System.Collections.Generic.IReadOnlyList<TEntity> Snapshot<TEntity>()
+    public TEntity Find<TEntity>(object key)
+    public void Clear()
+    public void Put(QuickER.Runtime.EntityBase entity)
+
+public struct QuickER.Runtime.InMemory.InMemoryDataStore.InMemoryReadScope
+    public .ctor(QuickER.Runtime.InMemory.InMemoryDataStore store)
+    public QuickER.Runtime.EntityBase Find(System.Type entityType, object key)
+    public System.Collections.Generic.IReadOnlyList<QuickER.Runtime.EntityBase> All(System.Type entityType)
+
+public struct QuickER.Runtime.InMemory.InMemoryDataStore.InMemoryWriteScope
+    public .ctor(QuickER.Runtime.InMemory.InMemoryDataStore store, QuickER.Runtime.InMemory.InMemorySaveStaging staging)
+    public System.Collections.Generic.IReadOnlyList<QuickER.Runtime.EntityBase> All(System.Type entityType)
+    public bool Exists(System.Type entityType, object key)
+    public bool IsCurrent(QuickER.Runtime.EntityBase entity, QuickER.Runtime.ConcurrencyMode mode)
+    public bool Remove(System.Type entityType, object key)
+    public void Insert(QuickER.Runtime.EntityBase entity)
+    public void Put(QuickER.Runtime.EntityBase entity)
+
+public sealed class QuickER.Runtime.InMemory.InMemoryOrderingComparer : System.Collections.Generic.IComparer<object>
+    public int Compare(object x, object y)
+    public static readonly QuickER.Runtime.InMemory.InMemoryOrderingComparer Instance
+
+public sealed class QuickER.Runtime.InMemory.InMemoryQueryExecutor<TEntity> : QuickER.Runtime.ISqlQueryExecutor<TEntity>
+    public .ctor(QuickER.Runtime.InMemory.InMemoryDataStore store)
+    public System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TEntity>> ToListAsync(QuickER.Runtime.SqlQueryPlan<TEntity> plan, System.Threading.CancellationToken cancellationToken)
+    public System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TResult>> ToProjectionListAsync<TResult>(QuickER.Runtime.SqlQueryPlan<TEntity> plan, System.Linq.Expressions.Expression<System.Func<TEntity, TResult>> selector, System.Threading.CancellationToken cancellationToken)
+    public System.Threading.Tasks.Task<TEntity> FirstOrDefaultAsync(QuickER.Runtime.SqlQueryPlan<TEntity> plan, System.Threading.CancellationToken cancellationToken)
+    public System.Threading.Tasks.Task<bool> AnyAsync(QuickER.Runtime.SqlQueryPlan<TEntity> plan, System.Threading.CancellationToken cancellationToken)
+    public System.Threading.Tasks.Task<int> CountAsync(QuickER.Runtime.SqlQueryPlan<TEntity> plan, System.Threading.CancellationToken cancellationToken)
+    public System.Threading.Tasks.Task<int> ExecuteDeleteAsync(QuickER.Runtime.SqlQueryPlan<TEntity> plan, bool cascadeDelete, System.Threading.CancellationToken cancellationToken)
+
+public abstract class QuickER.Runtime.InMemory.InMemoryRepository<TEntity, TKey> : QuickER.Runtime.IRemoteRepository<TEntity, TKey>, QuickER.Runtime.IRepository<TEntity, TKey>
+    protected .ctor(QuickER.Runtime.InMemory.InMemoryDataStore store, QuickER.Runtime.ISaveHookRegistry saveHooks = null)
+    protected QuickER.Runtime.InMemory.InMemoryDataStore Store { get; }
+    protected System.Threading.Tasks.Task<bool> ReadUnboundedBinaryColumnAsync(string propertyName, TKey id, System.IO.Stream destination, System.Threading.CancellationToken cancellationToken = default)
+    protected System.Threading.Tasks.Task<bool> WriteUnboundedBinaryColumnAsync(string propertyName, TKey id, System.IO.Stream source, long? length = default, System.Threading.CancellationToken cancellationToken = default)
+    public QuickER.Runtime.SqlQuery<TEntity> Query()
+    public System.Threading.Tasks.Task InsertAsync(TEntity entity, System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TEntity>> GetAllAsync(System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TEntity>> QueryBySqlAsync(string sql, object parameters = null, System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<TEntity> GetByIdAsync(TKey id, System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<TResult> ExecuteScalarSqlAsync<TResult>(string sql, object parameters = null, System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<bool> DeleteAsync(TKey id, System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<bool> UpdateAsync(TEntity entity, QuickER.Runtime.ConcurrencyMode mode = 0, System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<int> BulkInsertAsync(System.Collections.Generic.IEnumerable<TEntity> entities, System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<int> ExecuteSqlAsync(string sql, object parameters = null, System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<int> SaveAsync(System.Collections.Generic.IEnumerable<TEntity> entities, bool cascadeSave = true, bool cascadeDelete = true, bool insertWhenUpdateMissing = false, QuickER.Runtime.ConcurrencyMode mode = 0, System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<int> SaveAsync(TEntity entity, bool cascadeSave = true, bool cascadeDelete = true, bool insertWhenUpdateMissing = false, QuickER.Runtime.ConcurrencyMode mode = 0, System.Threading.CancellationToken cancellationToken = default)
+
+public sealed class QuickER.Runtime.InMemory.InMemorySaveHookContext : QuickER.Runtime.ISaveHookContext
+    public .ctor(QuickER.Runtime.InMemory.InMemoryDataStore store, System.Type entityType, QuickER.Runtime.InMemory.InMemorySaveStaging staging)
+    public System.Threading.Tasks.Task<bool> WriteBinaryColumnAsync(string propertyName, object key, System.IO.Stream source, long? length = default, System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<int> ExecuteSqlAsync(string sql, object parameters = null, System.Threading.CancellationToken cancellationToken = default)
+
+public sealed class QuickER.Runtime.InMemory.InMemorySaveStaging
+    public .ctor()
+    public QuickER.Runtime.EntityBase Staged(System.Type entityType, object key)
+    public System.Collections.Generic.IReadOnlyDictionary<System.ValueTuple<System.Type, object>, QuickER.Runtime.EntityBase> Overlay { get; }
+    public System.Collections.Generic.IReadOnlyList<System.ValueTuple<QuickER.Runtime.EntityBase, System.Reflection.PropertyInfo, System.Type, object>> Stamps { get; }
+    public System.Collections.Generic.IReadOnlyList<System.ValueTuple<System.Type, object, QuickER.Runtime.EntityBase>> Baseline { get; }
+    public bool TryGetStaged(System.Type entityType, object key, out QuickER.Runtime.EntityBase snapshot)
+    public void CaptureBase(System.Type entityType, object key, QuickER.Runtime.EntityBase baseRow)
+    public void RecordStamp(QuickER.Runtime.EntityBase source, System.Reflection.PropertyInfo property, System.Type entityType, object key)
+    public void Stage(System.Type entityType, object key, QuickER.Runtime.EntityBase snapshot)
+
+public static class QuickER.Runtime.InMemory.IncludeAttacher
+    public static void Attach(QuickER.Runtime.EntityBase entity, System.Collections.Generic.IReadOnlyList<QuickER.Runtime.IncludeNode> includes, QuickER.Runtime.InMemory.InMemoryDataStore.InMemoryReadScope scope)
+
+public sealed class QuickER.Runtime.InMemory.SaveHookSession
+    public .ctor(QuickER.Runtime.ISaveHookRegistry registry, System.Func<QuickER.Runtime.EntityBase, QuickER.Runtime.ISaveHookContext> contextFactory)
+    public System.Collections.Generic.IReadOnlySet<QuickER.Runtime.EntityBase> Skipped { get; }
+    public System.Threading.Tasks.Task InvokeAfterAsync(QuickER.Runtime.EntityBase entity, QuickER.Runtime.SaveOperation operation, System.Threading.CancellationToken cancellationToken)
+    public System.Threading.Tasks.Task<bool> InvokeBeforeAsync(QuickER.Runtime.EntityBase entity, QuickER.Runtime.SaveOperation operation, System.Threading.CancellationToken cancellationToken)
+    public void Skip(QuickER.Runtime.EntityBase entity)
+

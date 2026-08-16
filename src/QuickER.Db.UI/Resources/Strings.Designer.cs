@@ -216,6 +216,36 @@ namespace QuickER.Db.UI.Resources {
             }
         }
 
+        public static string DbConnection_ConnectTimeout {
+            get {
+                return ResourceManager.GetString("DbConnection_ConnectTimeout", resourceCulture);
+            }
+        }
+
+        public static string DbConnection_ConnectTimeoutTooltip {
+            get {
+                return ResourceManager.GetString("DbConnection_ConnectTimeoutTooltip", resourceCulture);
+            }
+        }
+
+        public static string DbConnection_CommandTimeout {
+            get {
+                return ResourceManager.GetString("DbConnection_CommandTimeout", resourceCulture);
+            }
+        }
+
+        public static string DbConnection_CommandTimeoutTooltip {
+            get {
+                return ResourceManager.GetString("DbConnection_CommandTimeoutTooltip", resourceCulture);
+            }
+        }
+
+        public static string DbConnection_CommandTimeoutInvalid {
+            get {
+                return ResourceManager.GetString("DbConnection_CommandTimeoutInvalid", resourceCulture);
+            }
+        }
+
         public static string DbConnection_Database {
             get {
                 return ResourceManager.GetString("DbConnection_Database", resourceCulture);
@@ -459,6 +489,12 @@ namespace QuickER.Db.UI.Resources {
         public static string SchemaSync_ExecuteConfirmUniqueConstraintDropRisk {
             get {
                 return ResourceManager.GetString("SchemaSync_ExecuteConfirmUniqueConstraintDropRisk", resourceCulture);
+            }
+        }
+
+        public static string SchemaSync_ExecuteConfirmRebuildDropsAttributes {
+            get {
+                return ResourceManager.GetString("SchemaSync_ExecuteConfirmRebuildDropsAttributes", resourceCulture);
             }
         }
 

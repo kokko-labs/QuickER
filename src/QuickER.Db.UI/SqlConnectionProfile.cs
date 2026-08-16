@@ -47,6 +47,13 @@ public class SqlConnectionProfile
     /// <summary>接続タイムアウト（秒）</summary>
     public int ConnectTimeoutSeconds { get; set; } = 15;
 
+    /// <summary>コマンド実行タイムアウト（秒）</summary>
+    /// <remarks>
+    /// キーを持たない旧プロファイル JSON は既定値（<see cref="DbCommands.DefaultTimeoutSeconds"/>）で読み込まれる
+    /// ＝従来のハードコード値と同じため、既存プロファイルの挙動は変わらない。
+    /// </remarks>
+    public int CommandTimeoutSeconds { get; set; } = DbCommands.DefaultTimeoutSeconds;
+
     /// <summary>パスワードを暗号化保存するかどうか</summary>
     public bool SavePassword { get; set; }
 
@@ -64,5 +71,6 @@ public class SqlConnectionProfile
             ServiceName = ServiceName,
             FilePath = FilePath,
             ConnectTimeoutSeconds = ConnectTimeoutSeconds,
+            CommandTimeoutSeconds = CommandTimeoutSeconds,
         };
 }

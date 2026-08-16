@@ -374,9 +374,16 @@ public sealed class BinaryColumnRemoteRuntimeTests : IAsyncLifetime
         }
         else
         {
+            // 413 が読めない場合は送信中断＝接続リセット。負荷並列時の観測形は HttpRequestException と
+            // IOException（HTTP スタックが下位のソケット例外をそのまま伝播する枝）の 2 通りがあり、
+            // どちらも「拒否されたこと自体は成立している」という同じ結論を運ぶ
+            thrown.Should().BeAssignableTo<Exception>();
             thrown
                 .Should()
-                .BeOfType<HttpRequestException>("413 が読めない場合は送信中断＝接続リセットになる");
+                .Match(
+                    e => e is HttpRequestException || e is IOException,
+                    "413 が読めない場合は送信中断＝接続リセット（HttpRequestException / IOException）になる"
+                );
         }
     }
 

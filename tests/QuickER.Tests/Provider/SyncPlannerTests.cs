@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using System.Linq;
 using AwesomeAssertions;
 using QuickER.Model;
@@ -2208,5 +2210,138 @@ public class SyncPlannerTests
             .ColumnIds.Select(id => rebuild.NewDefinition.Columns.Single(c => c.Id == id).Name)
             .Should()
             .Equal("sku");
+    }
+
+    // ---------------- 再構築で失われる列レベル属性の警告 ----------------
+
+    /// <summary>1 列だけの単純な live テーブル（列型変更で再構築を誘発するための土台）</summary>
+    private static Entity RebuildTargetLive() =>
+        new() { TableName = "items", Columns = { PkId(), Col("note", "TEXT") } };
+
+    /// <summary>note 列の型変更（＝再構築トリガー）1 件を作る</summary>
+    private static SchemaDiffItem AlterNoteColumn() =>
+        new()
+        {
+            Kind = SchemaDiffKind.AlterColumn,
+            TableName = "items",
+            ColumnName = "note",
+            Column = Col("note", "VARCHAR(200)"),
+            OldColumn = Col("note", "TEXT"),
+            IsSelected = true,
+        };
+
+    /// <summary>再構築対象テーブルの live DDL に属性があれば、種別を列挙した警告を積むことを検証する</summary>
+    [Fact(DisplayName = "再構築: live DDL の列属性を警告する")]
+    public void Rebuild_WarnsAboutDroppedColumnAttributes()
+    {
+        var plan = new SyncPlanner().BuildPlan(
+            [AlterNoteColumn()],
+            RebuildCaps,
+            new SyncPlanContext
+            {
+                LiveEntities = [RebuildTargetLive()],
+                TableCreateSql = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["items"] =
+                        "CREATE TABLE items (id INTEGER PRIMARY KEY AUTOINCREMENT, note TEXT DEFAULT 'x')",
+                },
+            }
+        );
+
+        var warning = plan
+            .Warnings.Should()
+            .ContainSingle(w => w.Kind == SyncPlanWarningKind.TableRebuildDropsColumnAttribute)
+            .Which;
+        warning.TableName.Should().Be("items");
+        warning.Detail.Should().Be("AUTOINCREMENT, DEFAULT");
+    }
+
+    /// <summary>属性を持たない live DDL では警告を出さないことを検証する（過剰警告で本当の喪失を埋もれさせない）</summary>
+    [Fact(DisplayName = "再構築: 属性のない DDL では警告しない")]
+    public void Rebuild_DoesNotWarnWhenNoAttributes()
+    {
+        var plan = new SyncPlanner().BuildPlan(
+            [AlterNoteColumn()],
+            RebuildCaps,
+            new SyncPlanContext
+            {
+                LiveEntities = [RebuildTargetLive()],
+                TableCreateSql = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["items"] = "CREATE TABLE items (id INTEGER, note TEXT, PRIMARY KEY(id))",
+                },
+            }
+        );
+
+        plan.Rebuilds.Should().ContainSingle();
+        plan.Warnings.Should().BeEmpty();
+    }
+
+    /// <summary>再構築されないテーブルの属性は警告しないことを検証する（対象テーブルに限る）</summary>
+    [Fact(DisplayName = "再構築: 対象外テーブルの属性は警告しない")]
+    public void Rebuild_DoesNotWarnForUnrelatedTables()
+    {
+        var plan = new SyncPlanner().BuildPlan(
+            [AlterNoteColumn()],
+            RebuildCaps,
+            new SyncPlanContext
+            {
+                LiveEntities =
+                [
+                    RebuildTargetLive(),
+                    new Entity { TableName = "others", Columns = { PkId() } },
+                ],
+                TableCreateSql = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["items"] = "CREATE TABLE items (id INTEGER, note TEXT, PRIMARY KEY(id))",
+                    ["others"] = "CREATE TABLE others (id INTEGER PRIMARY KEY AUTOINCREMENT)",
+                },
+            }
+        );
+
+        plan.Warnings.Should().BeEmpty();
+    }
+
+    /// <summary>新規テーブル作成（CreateOnly）では警告しないことを検証する（失う元の定義が無い）</summary>
+    [Fact(DisplayName = "再構築: 新規テーブル作成では警告しない")]
+    public void Rebuild_DoesNotWarnForCreateOnly()
+    {
+        var added = new Entity { TableName = "fresh", Columns = { PkId() } };
+        var plan = new SyncPlanner().BuildPlan(
+            [
+                new SchemaDiffItem
+                {
+                    Kind = SchemaDiffKind.AddTable,
+                    TableName = "fresh",
+                    Entity = added,
+                    IsSelected = true,
+                },
+            ],
+            RebuildCaps,
+            new SyncPlanContext
+            {
+                TableCreateSql = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["fresh"] = "CREATE TABLE fresh (id INTEGER PRIMARY KEY AUTOINCREMENT)",
+                },
+            }
+        );
+
+        plan.Rebuilds.Should().ContainSingle().Which.CreateOnly.Should().BeTrue();
+        plan.Warnings.Should().BeEmpty();
+    }
+
+    /// <summary>DDL を取得できない方言（TableCreateSql が空）では警告が 1 件も出ないことを検証する</summary>
+    [Fact(DisplayName = "再構築: live DDL が無ければ警告しない")]
+    public void Rebuild_DoesNotWarnWithoutLiveDdl()
+    {
+        var plan = new SyncPlanner().BuildPlan(
+            [AlterNoteColumn()],
+            RebuildCaps,
+            new SyncPlanContext { LiveEntities = [RebuildTargetLive()] }
+        );
+
+        plan.Rebuilds.Should().ContainSingle();
+        plan.Warnings.Should().BeEmpty();
     }
 }

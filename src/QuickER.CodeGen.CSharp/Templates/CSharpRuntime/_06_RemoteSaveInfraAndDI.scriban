@@ -1,4 +1,4 @@
-{{~ if render_contract && emit_shared_infra ~}}
+﻿{{~ if render_contract && emit_shared_infra ~}}
 
 /// <summary>Why a save was rejected as a conflict (the classification carried by <see cref="SaveConflictException"/>).</summary>
 public enum SaveConflictReason
@@ -194,11 +194,15 @@ public sealed class RemoteRepositoryException : Exception
     /// A server that hides its error details (the default of <c>MapGeneratedRemoteEndpoints</c>) replaces the message with
     /// a fixed generic one and sends this id instead, and it writes the same id next to the full exception in its own log.
     /// Reporting it therefore lets the failure be looked up on the server without the message having crossed the trust
-    /// boundary. It stays <c>null</c> when the server exposes its error details, for a response from a server built
-    /// before the id existed, and for the failures this client classifies on its own - a success status whose body could
-    /// not be read is raised here rather than reported by the server, so there is no id to carry. A failure response whose
-    /// body could not be read as a <see cref="RemoteError"/> at all leaves it <c>null</c> for the same reason: the id would
-    /// have travelled in that body, so a proxy's HTML error page carries none however the server was configured.
+    /// boundary. A 500 with its details withheld is the only response the server puts an id on, so this is <c>null</c>
+    /// everywhere else: on a 500 whose details are exposed (the message itself crossed over), and on every failure the
+    /// server classified and answered with a message of its own - a 400 for a request it could not interpret, the status
+    /// a host-level rejection carries (413 for a body over the size limit, 411 for a chunked binary upload), and the 404
+    /// the binary endpoints answer with when the addressed row or column value does not exist. It is <c>null</c> as well
+    /// for a response from a server built before the id existed, and for the failures this client classifies on its own:
+    /// a success status whose body could not be read is raised here rather than reported by the server, and a failure
+    /// response whose body could not be read as a <see cref="RemoteError"/> at all carries nothing to read an id out of -
+    /// a proxy's HTML error page has none however the server was configured.
     /// </remarks>
     public string? CorrelationId { get; }
 }
@@ -230,8 +234,11 @@ public sealed class RemoteError
     /// <summary>Gets or sets the id that identifies the failed request in the server log (written only for a 500 whose details are hidden).</summary>
     /// <remarks>
     /// The server writes it in place of the exception message it withheld, and records the same id next to the full
-    /// exception in its own log, so the two can be matched up. It stays null on a 500 whose details are exposed, and on
-    /// every classified response (400 and 409), which carry their own messages rather than a withheld one.
+    /// exception in its own log, so the two can be matched up. A 500 with its details withheld is the only response it is
+    /// written on: it stays null on a 500 whose details are exposed, and on every classified failure - 400, 409, the
+    /// status a host-level rejection carries (413 for a body over the size limit, 411 for a chunked binary upload), and
+    /// the 404 the binary endpoints answer with when the addressed row or column value does not exist - because each of
+    /// those carries a message of its own rather than a withheld one.
     /// </remarks>
     public string? CorrelationId { get; set; }
 }
@@ -661,10 +668,12 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
 {{~ if generate_value_objects || runtime_package_export ~}}
     /// A value the body does carry but a value object refuses is "cannot be read" as well, and is classified the same way. It does not
     /// mean what a <see cref="ValueObjectValidationException"/> from a direct read means - stored data that violates the invariant - because
-    /// a server reading that same value would have been refused by it too and answered 500: a 2xx body carrying it points at the transport
-    /// or at the two sides having been generated apart. That refusal on the server reaches a remote caller as this same exception (a 500
-    /// classified like any other server-side failure), so classifying the client-side one here keeps a single exception for the case
-    /// instead of raising, remotely, the one a direct read uses to report bad data.
+    /// a server whose value objects validate the same way would have refused that value too and answered 500: a 2xx body carrying it points
+    /// at the transport, at the two sides having been generated apart, or at them validating apart - a hand-written <c>OnValidate</c>
+    /// extension present on one side only narrows what that side accepts while the generated half of both stays identical. That refusal
+    /// on the server reaches a remote caller as this same exception (a 500 classified like any other server-side failure), so classifying
+    /// the client-side one here keeps a single exception for the case instead of raising, remotely, the one a direct read uses to report
+    /// bad data.
 {{~ end ~}}
     /// </remarks>
     protected async Task<TResult> InvokeAsync<TResult>(
@@ -1260,7 +1269,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
 {
     private static readonly ConcurrentDictionary<Type, EntitySaveMetadata> _cache = new();
 
-{{~ if repository_dialect != "sqlserver" ~}}
+{{~ if repositories && repository_dialect != "sqlserver" ~}}
     /// <summary>Gets the entity type this metadata describes (used to instantiate entities for multi-query Include).</summary>
     public required Type EntityType { get; init; }
 {{~ end ~}}
@@ -1292,15 +1301,30 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     /// <summary>Gets the unbounded binary columns excluded from SELECT / UPDATE (marked with <see cref="UnboundedBinaryColumnAttribute"/>). Empty when there are no excluded columns.</summary>
     public required IReadOnlyList<PropertyInfo> ExcludedProperties { get; init; }
 
-{{~ if repository_dialect == "sqlserver" ~}}
+{{~ if repositories && dialect_assigns_store_generated ~}}
     /// <summary>Gets the rowversion (concurrency token) property, or <c>null</c> when the table has no such column.</summary>
     /// <remarks>Resolved from <see cref="StoreGeneratedColumnAttribute"/>. A table carries at most one rowversion column, so the first match is used.</remarks>
-{{~ else ~}}
+{{~ else if repositories ~}}
     /// <summary>Gets the rowversion property, or <c>null</c> when the table has no such column.</summary>
     /// <remarks>
     /// Resolved from <see cref="StoreGeneratedColumnAttribute"/>. A table carries at most one rowversion column, so the first match is used.
     /// It is a concurrency token only where the database assigns it (SQL Server); this engine reads and writes it as an ordinary column
     /// and runs no version guard, so a value stored here is whatever the caller put in it.
+    /// </remarks>
+{{~ else if in_memory ~}}
+    /// <summary>Gets the rowversion (concurrency token) property, or <c>null</c> when the table has no such column.</summary>
+    /// <remarks>
+    /// Resolved from <see cref="StoreGeneratedColumnAttribute"/>. A table carries at most one rowversion column, so the first match is used.
+    /// The in-memory store stands in for the database that would assign the value: it stamps a monotonically increasing pseudo version on
+    /// this property at every insert and update, and a save under <c>ConcurrencyMode.Optimistic</c> compares the version the entity carries
+    /// against the stored row's before overwriting it.
+    /// </remarks>
+{{~ else ~}}
+    /// <summary>Gets the rowversion (concurrency token) property, or <c>null</c> when the table has no such column.</summary>
+    /// <remarks>
+    /// Resolved from <see cref="StoreGeneratedColumnAttribute"/>. A table carries at most one rowversion column, so the first match is used.
+    /// EF Core runs the version guard itself, from the <c>IsRowVersion()</c> the model configures on the same column; this property is read
+    /// only to hold on to the version an entity was loaded with while the save hooks run before the commit.
     /// </remarks>
 {{~ end ~}}
     public PropertyInfo? RowVersionProperty { get; init; }
@@ -1314,7 +1338,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
 {{~ end ~}}
 
 {{~ if repositories ~}}
-{{~ if repository_dialect == "sqlserver" ~}}
+{{~ if dialect_assigns_store_generated ~}}
     /// <summary>Gets the column properties targeted by INSERT / BulkInsert (all columns minus store-generated columns; identical to all columns when there are no store-generated columns).</summary>
 {{~ else ~}}
     /// <summary>Gets the column properties targeted by INSERT / BulkInsert (every column: store-generated columns are excluded from writes by the SQL Server engine only).</summary>
@@ -1331,8 +1355,10 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     /// <summary>Gets the column name to column property map (used to look up column types when explicitly typing query WHERE-clause parameters).</summary>
     public required IReadOnlyDictionary<string, PropertyInfo> PropertyByColumn { get; init; }
 
+{{~ if repositories || ef_core ~}}
     /// <summary>Gets the quoted column list for SELECT (for example: [id], [name]).</summary>
     public required string ColumnList { get; init; }
+{{~ end ~}}
 
 {{~ if repositories ~}}
     /// <summary>Gets the SELECT statement that fetches all rows.</summary>
@@ -1430,15 +1456,18 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
             excludedColumns.Count == 0
                 ? columns
                 : columns.Where(property => !excludedColumns.Contains(property)).ToList();
-{{~ if repository_dialect == "sqlserver" ~}}
+{{~ if repositories && dialect_assigns_store_generated ~}}
         // Columns whose values are generated by the database (rowversion / timestamp etc., StoreGeneratedColumnAttribute)
         // are excluded from INSERT / UPDATE. The database assigns them, so an explicit write fails at runtime
         // (e.g. SQL Server timestamp columns). They are still fetched by SELECT
-{{~ else ~}}
+{{~ else if repositories ~}}
         // Columns marked as store-generated (rowversion / timestamp etc., StoreGeneratedColumnAttribute). Only the
         // SQL Server engine excludes them from writes, because only SQL Server assigns them. Here the same column is an
         // ordinary column that INSERT / UPDATE write like any other - a place to mirror the version the SQL Server side
         // assigned in a multi-target (server + local mirror) setup - so nothing is excluded from the write statements
+{{~ else ~}}
+        // Columns marked as store-generated (rowversion / timestamp etc., StoreGeneratedColumnAttribute). No SQL statement
+        // is built here, so they serve only to single out the concurrency token below
 {{~ end ~}}
         var storeGeneratedColumns = columns
             .Where(property =>
@@ -1448,7 +1477,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         // A store-generated column doubles as the table's concurrency token; a table carries at most one of them
         var rowVersionProperty =
             storeGeneratedColumns.Count == 0 ? null : storeGeneratedColumns[0];
-{{~ if repositories && repository_dialect == "sqlserver" ~}}
+{{~ if repositories && dialect_assigns_store_generated ~}}
         // INSERT / BulkInsert targets are all columns minus store-generated columns (identical to all columns when there are none)
         var insertProperties =
             storeGeneratedColumns.Count == 0
@@ -1470,7 +1499,9 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         var tableName = $"{{ quote_open }}{tableAttribute.Name}{{ quote_close }}";
         var keyColumnName = GetColumnName(keyProperty);
 {{~ end ~}}
+{{~ if repositories || ef_core ~}}
         var columnList = string.Join(", ", selectProperties.Select(property => $"{{ quote_open }}{GetColumnName(property)}{{ quote_close }}"));
+{{~ end ~}}
 {{~ if repositories ~}}
         var updateAssignments = nonKeyProperties.Select(property =>
             $"{{ quote_open }}{GetColumnName(property)}{{ quote_close }} = @{property.Name}"
@@ -1478,7 +1509,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         var insertColumnList = string.Join(", ", insertProperties.Select(property => $"{{ quote_open }}{GetColumnName(property)}{{ quote_close }}"));
         var insertValueList = string.Join(", ", insertProperties.Select(property => $"@{property.Name}"));
 {{~ end ~}}
-{{~ if repositories && repository_dialect == "sqlserver" ~}}
+{{~ if repositories && dialect_assigns_store_generated ~}}
         // Quoted rowversion column, non-null only for tables that carry one. The optimistic concurrency statements below
         // are built solely for those tables (every other table keeps exactly the statements it had before)
         var rowVersionColumn =
@@ -1504,7 +1535,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
 
         return new EntitySaveMetadata
         {
-{{~ if repository_dialect != "sqlserver" ~}}
+{{~ if repositories && repository_dialect != "sqlserver" ~}}
             EntityType = entityType,
 {{~ end ~}}
 {{~ if repositories ~}}
@@ -1538,7 +1569,9 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
                 property => property,
                 StringComparer.Ordinal
             ),
+{{~ if repositories || ef_core ~}}
             ColumnList = columnList,
+{{~ end ~}}
 {{~ if repositories ~}}
             SelectAllSql = $"SELECT {columnList} FROM {tableName};",
             SelectByIdSql = $"SELECT {columnList} FROM {tableName} WHERE {{ quote_open }}{keyColumnName}{{ quote_close }} = @id;",
@@ -1924,7 +1957,31 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         }
         else
         {
-{{~ if generate_value_objects ~}}
+{{~ if generate_value_objects && repositories && repository_dialect != "sqlserver" ~}}
+            // Value objects are re-wrapped through Create; every other property is a plain column and is coerced from the
+            // SQLite storage type (int stored as long, decimal/Guid/DateTime as TEXT, etc.) - the same split MapEntityObject
+            // makes. Wrapping unconditionally would hand a plain column its raw storage value, because Wrap returns anything
+            // that is not a value object untouched and the setter then rejects the type.
+            // A stored value the value object rejects surfaces as a validation failure with no hint of where it came from,
+            // so the column is named here and the original exception is kept as the inner one
+            try
+            {
+                var propertyType = property.PropertyType;
+                property.SetValue(
+                    entity,
+                    typeof(IValueObject).IsAssignableFrom(propertyType)
+                        ? SqlValueObjectActivator.Wrap(value, propertyType)
+                        : CoerceScalar(value, propertyType)
+                );
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                throw new InvalidOperationException(
+                    $"The stored value of column '{GetColumnName(property)}' could not be mapped to {entity.GetType().Name}.{property.Name} ({property.PropertyType.Name}): {ex.Message}",
+                    ex
+                );
+            }
+{{~ else if generate_value_objects ~}}
             // Value objects are converted to the wrapped type and re-wrapped (Wrap already applies Convert.ChangeType).
             // A stored value the value object rejects surfaces as a validation failure with no hint of where it came from,
             // so the column is named here and the original exception is kept as the inner one
@@ -2192,6 +2249,11 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     /// stored as TEXT, bool as INTEGER). Values already assignable are returned as-is, and Nullable types are judged by
     /// their underlying type. When conversion is impossible, throws an exception with a clear message.
     /// </remarks>
+    /// <seealso cref="RawValueConverter.ConvertRaw"/>
+    // The TEXT parsing below is deliberately kept alongside RawValueConverter.ConvertRaw (the shared conversion behind value
+    // object rewrapping and raw SQL) rather than delegating to it: this method reads DateTime with RoundtripKind, which the
+    // shared converter leaves to Convert.ChangeType because DateTime is IConvertible. Both accept the same text for the
+    // types they share (Guid, TimeSpan, DateTimeOffset), so keep them in step when either one changes.
     private static object CoerceScalar(object value, Type targetType)
     {
         var underlying = Nullable.GetUnderlyingType(targetType) ?? targetType;
@@ -3540,6 +3602,12 @@ public sealed partial class {{ repository.remote_client_class_name }}(HttpClient
 {{~ end ~}}
 
 /// <summary>Extensions that register the HTTP client implementations of the remote surface (I{Entity}RemoteRepository) with the DI container.</summary>
+/// <remarks>
+/// Each overload comes in a plain and a keyed form. Use the keyed one (<c>object? serviceKey</c>) to hold more than one
+/// back end at a time - a remote server under one key and a local engine registered by
+/// <c>AddGenerated{Dialect}Repositories(serviceKey, ...)</c> under another - and resolve them with
+/// <c>[FromKeyedServices("...")]</c>.
+/// </remarks>
 public static class GeneratedHttpRemoteRepositoryServiceCollectionExtensions
 {
     /// <summary>Registers the HTTP client implementations using a base address (for simple setups; the HttpClient is a shared singleton owned by the container).</summary>
@@ -3637,11 +3705,105 @@ public static class GeneratedHttpRemoteRepositoryServiceCollectionExtensions
         return services;
     }
 
-    /// <summary>Container-owned holder for the shared HttpClient created by the base-address overload.</summary>
+    /// <summary>Registers the HTTP client implementations under a service key using a base address (keyed DI, for talking to more than one back end at a time).</summary>
+    /// <remarks>
+    /// <para>
+    /// Registers I{Entity}RemoteRepository keyed by <paramref name="serviceKey"/>. Consumers resolve the one they want
+    /// like <c>[FromKeyedServices(serviceKey)] ICustomerRemoteRepository</c>. This is what a hybrid setup is built from:
+    /// register the HTTP client under one key and a local engine (<c>AddGeneratedSqliteRepositories(key, ...)</c>) under
+    /// another, and the same contract resolves to whichever side the caller asks for.
+    /// </para>
+    /// <para>
+    /// The shared HttpClient is registered under the same key, so it collides with neither the non-keyed overload's client
+    /// nor another key's, and stays owned by the DI container exactly as in the non-keyed overload: created lazily on the
+    /// first resolve and disposed with the <see cref="IServiceProvider"/>. Registering the same key twice registers the
+    /// repositories twice and the last one wins, which is how <c>AddKeyedScoped</c> behaves.
+    /// </para>
+    /// <para>
+    /// The client is configured exactly as the non-keyed base-address overload configures it - connections recycled every
+    /// five minutes, no client-wide timeout - and the same warning applies: do not put an HTTP-level retry policy in front
+    /// of the mutating operations. See the remarks on the factory overload.
+    /// </para>
+    /// </remarks>
+    /// <param name="services">The service collection to register into</param>
+    /// <param name="serviceKey">The key the repositories (and the shared HttpClient) are registered under</param>
+    /// <param name="baseAddress">The base address including the server prefix - the one <c>MapGeneratedRemoteEndpoints</c> was mapped under, <see cref="RemotePaths.DefaultPrefix"/> unless it was passed another (for example <c>https://server:5001/quicker</c>; a trailing / is appended automatically)</param>
+    public static IServiceCollection AddGeneratedHttpRemoteRepositories(
+        this IServiceCollection services,
+        object? serviceKey,
+        string baseAddress
+    )
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentException.ThrowIfNullOrWhiteSpace(baseAddress);
+
+        // A trailing / is required to resolve relative paths ("Order/GetById" etc.), so append it
+        var normalized = baseAddress.EndsWith('/') ? baseAddress : baseAddress + "/";
+
+        // Keyed, and produced by a factory for the same reason the non-keyed overload uses one: the container disposes
+        // only the singletons it created itself, and the key keeps this client apart from any other registration's
+        services.AddKeyedSingleton(
+            serviceKey,
+            (_, _) => new OwnedHttpClient(
+                new HttpClient(
+                    new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(5) },
+                    disposeHandler: true
+                )
+                {
+                    BaseAddress = new Uri(normalized),
+                    // No client-wide deadline: the 100-second default covers the entire request, body included, and would
+                    // abort a large blob upload or download. The per-call CancellationToken is the timeout instead
+                    Timeout = Timeout.InfiniteTimeSpan,
+                }
+            )
+        );
+
+        return AddGeneratedHttpRemoteRepositories(
+            services,
+            serviceKey,
+            provider => provider.GetRequiredKeyedService<OwnedHttpClient>(serviceKey).Client
+        );
+    }
+
+    /// <summary>Registers the HTTP client implementations under a service key using an HttpClient factory (keyed DI, when configuring authentication handlers etc.).</summary>
+    /// <remarks>
+    /// <para>
+    /// The keyed counterpart of the factory overload: the same ownership contract holds (the factory runs on every
+    /// resolve and the HttpClient it returns is disposed by neither the generated code nor the container), and the same
+    /// warning about retrying the mutating operations applies. Only the registration is keyed.
+    /// </para>
+    /// <para>
+    /// Registering the same key twice registers the repositories twice and the last one wins. Keyed and non-keyed
+    /// registrations do not see each other: a keyed registration answers only <c>GetRequiredKeyedService</c> with that
+    /// key, and a plain <c>GetRequiredService</c> still needs a non-keyed one.
+    /// </para>
+    /// </remarks>
+    /// <param name="services">The service collection to register into</param>
+    /// <param name="serviceKey">The key the repositories are registered under</param>
+    /// <param name="httpClientFactory">A factory returning the HttpClient to use when creating a repository</param>
+    public static IServiceCollection AddGeneratedHttpRemoteRepositories(
+        this IServiceCollection services,
+        object? serviceKey,
+        Func<IServiceProvider, HttpClient> httpClientFactory
+    )
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(httpClientFactory);
+
+{{ for repository in repository_classes }}        services.AddKeyedScoped<{{ repository.remote_interface_name }}>(
+            serviceKey,
+            (provider, _) => new {{ repository.remote_client_class_name }}(httpClientFactory(provider))
+        );
+{{ end }}
+        return services;
+    }
+
+    /// <summary>Container-owned holder for the shared HttpClient created by a base-address overload.</summary>
     /// <remarks>
     /// Registering the holder as a singleton produced by a factory is what makes the DI container the owner:
     /// the container disposes the singletons it creates itself, so the wrapped HttpClient is disposed together
-    /// with the <see cref="IServiceProvider"/>.
+    /// with the <see cref="IServiceProvider"/>. The keyed overload registers the same holder under its key, so
+    /// each key owns its own client and none of them collides with the non-keyed registration.
     /// </remarks>
     private sealed class OwnedHttpClient(HttpClient client) : IDisposable
     {

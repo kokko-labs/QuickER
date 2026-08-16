@@ -216,7 +216,7 @@ public class QueryGenerationTests
         content
             .Should()
             .Contain(
-                "Query().Where(e => e.Memo!.Contains(keyword)).ToListAsync(cancellationToken)"
+                "Query().Where(e => (e.Memo != null && e.Memo!.Contains(keyword))).ToListAsync(cancellationToken)"
             );
         content
             .Should()

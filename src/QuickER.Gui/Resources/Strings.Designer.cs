@@ -1143,7 +1143,19 @@ namespace QuickER.Resources {
                 return ResourceManager.GetString("TypeConversion_ColumnLine", resourceCulture);
             }
         }
-        
+
+        public static string TypeConversion_NullableWarningHeader {
+            get {
+                return ResourceManager.GetString("TypeConversion_NullableWarningHeader", resourceCulture);
+            }
+        }
+
+        public static string TypeConversion_NullableColumnLine {
+            get {
+                return ResourceManager.GetString("TypeConversion_NullableColumnLine", resourceCulture);
+            }
+        }
+
         public static string Common_MoreItems {
             get {
                 return ResourceManager.GetString("Common_MoreItems", resourceCulture);

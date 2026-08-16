@@ -12,7 +12,8 @@ namespace QuickER.Tests.CodeGen.CSharp;
 
 /// <summary>
 /// マルチターゲット生成（sqlserver + sqlite）で共有 Entity の C# 型が方言間で食い違うときの
-/// <c>MultiDialectTypeReconciler.DiagnoseTypeMismatches</c> のエラー分岐を検証する。
+/// <c>MultiDialectTypeReconciler.DiagnoseTypeMismatches</c> のエラー分岐と、
+/// <c>MultiDialectTypeReconciler.ReconcileRowVersionTypes</c> の owner 方言別グルーピングを検証する。
 /// </summary>
 /// <remarks>
 /// <para>
@@ -102,6 +103,149 @@ public sealed class MultiDialectTypeReconcilerTests
 
     private static IEnumerable<GenerationDiagnostic> Errors(CodeGenerationResult result) =>
         result.Diagnostics.Where(d => d.Severity == GenerationDiagnosticSeverity.Error);
+
+    private static List<GenerationDiagnostic> Infos(CodeGenerationResult result) =>
+        result.Diagnostics.Where(d => d.Severity == GenerationDiagnosticSeverity.Info).ToList();
+
+    // 行バージョンの owner（＝行バージョンとして解決した方言）が列ごとに違う図を組むための材料。
+    // 実装済みの型マッパで IsRowVersion を立てるのは SqlServerCSharpTypeMapper だけなので、
+    // 「2 つ目の行バージョン対応方言」は解決辞書を人工的に差し替えて作る。
+    private static readonly Guid OrderId = Guid.NewGuid();
+    private static readonly Guid OrderVer = Guid.NewGuid();
+    private static readonly Guid ShipmentId = Guid.NewGuid();
+    private static readonly Guid ShipmentVer = Guid.NewGuid();
+
+    /// <summary>行バージョン列を 1 本ずつ持つ 2 エンティティの図（同一エンティティ 2 本は別の診断エラーになるため分ける）</summary>
+    private static ErDiagram BuildRowVersionDiagram() =>
+        new()
+        {
+            Entities =
+            [
+                new Entity
+                {
+                    Id = Guid.NewGuid(),
+                    TableName = "orders",
+                    Columns =
+                    [
+                        new Column
+                        {
+                            Id = OrderId,
+                            Name = "order_id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                        new Column
+                        {
+                            Id = OrderVer,
+                            Name = "order_ver",
+                            DataType = "rowversion",
+                            IsNullable = false,
+                        },
+                    ],
+                },
+                new Entity
+                {
+                    Id = Guid.NewGuid(),
+                    TableName = "shipments",
+                    Columns =
+                    [
+                        new Column
+                        {
+                            Id = ShipmentId,
+                            Name = "shipment_id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                        new Column
+                        {
+                            Id = ShipmentVer,
+                            Name = "shipment_ver",
+                            DataType = "rowversion",
+                            IsNullable = false,
+                        },
+                    ],
+                },
+            ],
+        };
+
+    [Fact(
+        DisplayName = "行バージョンの owner が列ごとに違うと、方言ごとに 1 件ずつ Info 診断が出て列も分かれる"
+    )]
+    public void ReconcileRowVersionTypes_OwnerPerColumn_ReportsInfoPerDialect()
+    {
+        var diagram = BuildRowVersionDiagram();
+
+        // sqlserver は両方の版列を行バージョンとして解決する。shipment_ver だけ「ただの byte[]」へ落とし、
+        // 代わりに sqlite 辞書側へ行バージョンの解決を持たせる＝列ごとに owner が違う状態を作る
+        var sqlServer = new Dictionary<Guid, CSharpTypeInfo>(
+            SqlServerCSharpTypeMapper.ResolveColumnTypes(diagram)
+        );
+        var rowVersionInfo = sqlServer[ShipmentVer];
+        rowVersionInfo
+            .IsRowVersion.Should()
+            .BeTrue("前提: sqlserver マッパは rowversion を行バージョンへ解決する");
+        sqlServer[ShipmentVer] = rowVersionInfo with { IsRowVersion = false };
+
+        var sqlite = CloneSqlite(diagram);
+        sqlite[ShipmentVer] = rowVersionInfo;
+
+        var result = Generate(
+            diagram,
+            sqlServer,
+            ByDialect(sqlServer, sqlite),
+            "sqlserver",
+            "sqlite"
+        );
+
+        result.HasErrors.Should().BeFalse();
+
+        // 図の走査順（orders → shipments）で owner の初出順に並ぶ
+        var infos = Infos(result);
+        infos.Should().HaveCount(2, "owner 方言ごとに 1 件ずつ通知する");
+
+        infos[0].Message.Should().Contain("sqlserver").And.Contain("orders.order_ver");
+        infos[0]
+            .Message.Should()
+            .NotContain(
+                "shipments.shipment_ver",
+                "sqlserver が採番しない列を sqlserver の通知へ混ぜてはならない"
+            );
+
+        infos[1].Message.Should().Contain("sqlite").And.Contain("shipments.shipment_ver");
+        infos[1]
+            .Message.Should()
+            .NotContain(
+                "orders.order_ver",
+                "sqlite が採番しない列を sqlite の通知へ混ぜてはならない"
+            );
+    }
+
+    [Fact(DisplayName = "owner が 1 方言だけなら Info 診断は 1 件で、その方言の全列がまとまる")]
+    public void ReconcileRowVersionTypes_SingleOwner_ReportsOneInfoWithAllColumns()
+    {
+        var diagram = BuildRowVersionDiagram();
+        var sqlServer = SqlServerCSharpTypeMapper.ResolveColumnTypes(diagram);
+
+        var result = Generate(
+            diagram,
+            sqlServer,
+            ByDialect(sqlServer, CloneSqlite(diagram)),
+            "sqlserver",
+            "sqlite"
+        );
+
+        result.HasErrors.Should().BeFalse();
+
+        var infos = Infos(result);
+        infos.Should().ContainSingle();
+        infos[0]
+            .Message.Should()
+            .Contain("sqlserver")
+            .And.Contain("orders.order_ver")
+            .And.Contain("shipments.shipment_ver");
+    }
 
     [Fact(
         DisplayName = "方言間で型名だけが食い違う（int と long／どちらも値型）と診断エラーになる"

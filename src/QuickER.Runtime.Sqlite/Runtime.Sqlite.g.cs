@@ -2903,12 +2903,21 @@ public sealed class EntitySaveMetadata
         }
         else
         {
-            // Value objects are converted to the wrapped type and re-wrapped (Wrap already applies Convert.ChangeType).
+            // Value objects are re-wrapped through Create; every other property is a plain column and is coerced from the
+            // SQLite storage type (int stored as long, decimal/Guid/DateTime as TEXT, etc.) - the same split MapEntityObject
+            // makes. Wrapping unconditionally would hand a plain column its raw storage value, because Wrap returns anything
+            // that is not a value object untouched and the setter then rejects the type.
             // A stored value the value object rejects surfaces as a validation failure with no hint of where it came from,
             // so the column is named here and the original exception is kept as the inner one
             try
             {
-                property.SetValue(entity, SqlValueObjectActivator.Wrap(value, property.PropertyType));
+                var propertyType = property.PropertyType;
+                property.SetValue(
+                    entity,
+                    typeof(IValueObject).IsAssignableFrom(propertyType)
+                        ? SqlValueObjectActivator.Wrap(value, propertyType)
+                        : CoerceScalar(value, propertyType)
+                );
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -3153,6 +3162,11 @@ public sealed class EntitySaveMetadata
     /// stored as TEXT, bool as INTEGER). Values already assignable are returned as-is, and Nullable types are judged by
     /// their underlying type. When conversion is impossible, throws an exception with a clear message.
     /// </remarks>
+    /// <seealso cref="RawValueConverter.ConvertRaw"/>
+    // The TEXT parsing below is deliberately kept alongside RawValueConverter.ConvertRaw (the shared conversion behind value
+    // object rewrapping and raw SQL) rather than delegating to it: this method reads DateTime with RoundtripKind, which the
+    // shared converter leaves to Convert.ChangeType because DateTime is IConvertible. Both accept the same text for the
+    // types they share (Guid, TimeSpan, DateTimeOffset), so keep them in step when either one changes.
     private static object CoerceScalar(object value, Type targetType)
     {
         var underlying = Nullable.GetUnderlyingType(targetType) ?? targetType;
