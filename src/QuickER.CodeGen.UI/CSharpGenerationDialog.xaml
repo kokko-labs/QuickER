@@ -5,8 +5,10 @@
   xmlns:res="clr-namespace:QuickER.CodeGen.UI.Resources"
   Title="{x:Static res:Strings.CodeGen_WindowTitle}"
   Width="720"
-  SizeToContent="Height"
-  ResizeMode="NoResize"
+  Height="800"
+  MinWidth="680"
+  MinHeight="520"
+  ResizeMode="CanResize"
   WindowStartupLocation="CenterOwner"
   FontFamily="Segoe UI, Yu Gothic UI, Meiryo"
   FontSize="13"
@@ -31,499 +33,559 @@
     </ResourceDictionary>
   </Window.Resources>
 
-  <StackPanel Margin="18">
-    <!-- 出力モード -->
-    <Border Style="{StaticResource Card}">
-      <StackPanel>
-        <TextBlock
-          Style="{StaticResource SectionHeader}"
-          Text="{x:Static res:Strings.CodeGen_OutputMode}"
-        />
-        <StackPanel Orientation="Horizontal">
-          <RadioButton
-            Margin="0,0,28,0"
-            Content="{x:Static res:Strings.CodeGen_MergeSingleFile}"
-            GroupName="OutputMode"
-            IsChecked="{Binding MergeIntoSingleFile}"
-          />
-          <RadioButton
-            Content="{x:Static res:Strings.CodeGen_SplitByLayer}"
-            GroupName="OutputMode"
-            IsChecked="{Binding SplitFilesByCategory}"
-          />
-        </StackPanel>
-      </StackPanel>
-    </Border>
-
-    <!-- 生成内容 -->
-    <Border Style="{StaticResource Card}">
-      <StackPanel>
-        <TextBlock
-          Style="{StaticResource SectionHeader}"
-          Text="{x:Static res:Strings.CodeGen_GenerationContent}"
-        />
-
-        <Grid Margin="0,0,0,10">
-          <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="96" />
-            <ColumnDefinition Width="*" />
-          </Grid.ColumnDefinitions>
-          <TextBlock
-            Grid.Column="0"
-            Style="{StaticResource FieldLabel}"
-            VerticalAlignment="Top"
-            Margin="0,2,0,0"
-            Text="{x:Static res:Strings.CodeGen_GenerationTarget}"
-          />
-          <StackPanel Grid.Column="1" Orientation="Horizontal">
-            <!-- Entity は常に生成対象（表示専用の固定チェック。処理判定には使わない） -->
-            <CheckBox Margin="0,0,18,0" Content="Entity" IsChecked="True" IsEnabled="False" />
-            <CheckBox
-              Margin="0,0,18,0"
-              Content="EditModel"
-              IsChecked="{Binding GenerateEditModels}"
-            />
-            <CheckBox Content="Mapper" IsChecked="{Binding GenerateMappers}" />
-          </StackPanel>
-        </Grid>
-
-        <Grid Margin="0,0,0,10">
-          <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="96" />
-            <ColumnDefinition Width="*" />
-          </Grid.ColumnDefinitions>
-          <TextBlock
-            Grid.Column="0"
-            Style="{StaticResource FieldLabel}"
-            VerticalAlignment="Top"
-            Margin="0,2,0,0"
-            Text="{x:Static res:Strings.CodeGen_ValueObject}"
-          />
-          <StackPanel Grid.Column="1" Orientation="Horizontal">
-            <CheckBox
-              Margin="0,0,18,0"
-              Content="{x:Static res:Strings.CodeGen_AllColumnsValueObject}"
-              IsChecked="{Binding GenerateValueObjects}"
-            />
-            <CheckBox
-              Content="{x:Static res:Strings.CodeGen_StringPkGuidKey}"
-              IsChecked="{Binding UseGuidKeyForStringPrimaryKey}"
-              IsEnabled="{Binding GenerateValueObjects}"
-            />
-          </StackPanel>
-        </Grid>
-
-        <!-- DB アクセス（排他選択。Repository (QuickER) の対象 DB は下のチェック群で選ぶ） -->
-        <Grid>
-          <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="96" />
-            <ColumnDefinition Width="*" />
-          </Grid.ColumnDefinitions>
-          <TextBlock
-            Grid.Column="0"
-            Style="{StaticResource FieldLabel}"
-            VerticalAlignment="Top"
-            Margin="0,2,0,0"
-            Text="{x:Static res:Strings.CodeGen_DbAccess}"
-          />
-          <StackPanel Grid.Column="1" Orientation="Horizontal">
-            <RadioButton
-              Margin="0,0,18,0"
-              Content="{x:Static res:Strings.CodeGen_DbAccessNone}"
-              GroupName="DbAccess"
-              IsChecked="{Binding DbAccessNone}"
-            />
-            <RadioButton
-              Margin="0,0,18,0"
-              Content="Repository (QuickER)"
-              GroupName="DbAccess"
-              IsChecked="{Binding DbAccessRepository}"
-              ToolTip="{Binding QuickErRepositoryToolTip}"
-            />
-            <RadioButton
-              Content="Repository (EF Core)"
-              GroupName="DbAccess"
-              IsChecked="{Binding DbAccessEfCore}"
-              ToolTip="{x:Static res:Strings.CodeGen_DbAccessEfCoreTooltip}"
-            />
-          </StackPanel>
-        </Grid>
-
-        <!-- インメモリ実装（テスト用。DB アクセス配下＝インデント表示。排他ラジオと独立に常時選択可） -->
-        <Grid Margin="12,10,0,0">
-          <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="84" />
-            <ColumnDefinition Width="*" />
-          </Grid.ColumnDefinitions>
-          <CheckBox
-            Grid.Column="1"
-            Content="{x:Static res:Strings.CodeGen_GenerateInMemory}"
-            IsChecked="{Binding GenerateInMemoryRepositories}"
-            ToolTip="{Binding GenerateInMemoryToolTip}"
-          />
-        </Grid>
-
-        <!-- Repository (QuickER) の対象 DB（DB アクセス配下＝インデント表示。Repository (QuickER) 選択時のみ表示。表示順固定: SQL Server → SQLite） -->
-        <Grid
-          Margin="12,10,0,0"
-          Visibility="{Binding ShowRepositoryDialectTargets, Converter={StaticResource BoolToVisibilityConverter}}"
-        >
-          <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="84" />
-            <ColumnDefinition Width="*" />
-          </Grid.ColumnDefinitions>
-          <TextBlock
-            Grid.Column="0"
-            Style="{StaticResource FieldLabel}"
-            Text="{x:Static res:Strings.CodeGen_TargetDb}"
-          />
-          <StackPanel Grid.Column="1" Orientation="Horizontal">
-            <CheckBox
-              Margin="0,0,18,0"
-              Content="SQL Server"
-              IsChecked="{Binding TargetSqlServer}"
-            />
-            <CheckBox Content="SQLite" IsChecked="{Binding TargetSqlite}" />
-          </StackPanel>
-        </Grid>
-
-        <!-- 双方向同期支援（DB アクセス配下＝インデント表示。対象 DB が SQL Server と SQLite の両方のときのみ表示） -->
-        <Grid
-          Margin="12,10,0,0"
-          Visibility="{Binding ShowSyncSupport, Converter={StaticResource BoolToVisibilityConverter}}"
-        >
-          <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="84" />
-            <ColumnDefinition Width="*" />
-          </Grid.ColumnDefinitions>
-          <CheckBox
-            Grid.Column="1"
-            Content="{x:Static res:Strings.CodeGen_GenerateSyncSupport}"
-            IsChecked="{Binding GenerateSyncSupport}"
-            ToolTip="{x:Static res:Strings.CodeGen_GenerateSyncSupportToolTip}"
-          />
-        </Grid>
-
-        <!-- 無制限バイナリ列の除外（DB アクセス配下＝インデント表示。Repository (QuickER) 選択時のみ表示） -->
-        <Grid
-          Margin="12,10,0,0"
-          Visibility="{Binding ShowExcludeUnboundedBinary, Converter={StaticResource BoolToVisibilityConverter}}"
-        >
-          <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="84" />
-            <ColumnDefinition Width="*" />
-          </Grid.ColumnDefinitions>
-          <CheckBox
-            Grid.Column="1"
-            Content="{x:Static res:Strings.CodeGen_ExcludeUnboundedBinary}"
-            IsChecked="{Binding ExcludeUnboundedBinaryColumns}"
-            ToolTip="{Binding ExcludeUnboundedBinaryToolTip}"
-          />
-        </Grid>
-
-        <!-- リモート対応（DB アクセス配下＝インデント表示。Repository を生成する場合のみ表示） -->
-        <Grid
-          Margin="12,10,0,0"
-          Visibility="{Binding ShowRemoteContracts, Converter={StaticResource BoolToVisibilityConverter}}"
-        >
-          <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="84" />
-            <ColumnDefinition Width="*" />
-          </Grid.ColumnDefinitions>
-          <!-- 2 段チェックの行のため、ラベルは中央寄せ（FieldLabel 既定）でなく上段チェックと揃う上詰めにする -->
-          <TextBlock
-            Grid.Column="0"
-            VerticalAlignment="Top"
-            Margin="0,2,0,0"
-            Style="{StaticResource FieldLabel}"
-            Text="{x:Static res:Strings.CodeGen_RemoteAccess}"
-          />
-          <StackPanel Grid.Column="1" Orientation="Vertical">
-            <CheckBox
-              Content="{x:Static res:Strings.CodeGen_GenerateRemoteContracts}"
-              IsChecked="{Binding GenerateRemoteContracts}"
-              ToolTip="{Binding RemoteContractsToolTip}"
-            />
-            <CheckBox
-              Margin="0,10,0,0"
-              Content="{x:Static res:Strings.CodeGen_GenerateRemoteServices}"
-              IsChecked="{Binding GenerateRemoteServices}"
-              ToolTip="{Binding RemoteServicesToolTip}"
-            />
-          </StackPanel>
-        </Grid>
-
-        <!-- ランタイムのパッケージ参照モード（EF Core 選択中は併用不可のため無効化） -->
-        <Grid Margin="0,10,0,0">
-          <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="96" />
-            <ColumnDefinition Width="*" />
-          </Grid.ColumnDefinitions>
-          <TextBlock
-            Grid.Column="0"
-            Style="{StaticResource FieldLabel}"
-            Text="{x:Static res:Strings.CodeGen_Runtime}"
-          />
-          <CheckBox
-            Grid.Column="1"
-            Content="{x:Static res:Strings.CodeGen_UseRuntimePackages}"
-            IsChecked="{Binding UseRuntimePackages}"
-            ToolTip="{Binding UseRuntimePackagesToolTip}"
-          />
-        </Grid>
-
-        <!-- API リファレンス出力（DB アクセス選択とは独立。常に選択可） -->
-        <Grid Margin="0,10,0,0">
-          <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="96" />
-            <ColumnDefinition Width="*" />
-          </Grid.ColumnDefinitions>
-          <!-- 2 段チェックの行のため、ラベルは中央寄せ（FieldLabel 既定）でなく上段チェックと揃う上詰めにする -->
-          <TextBlock
-            Grid.Column="0"
-            VerticalAlignment="Top"
-            Margin="0,2,0,0"
-            Style="{StaticResource FieldLabel}"
-            Text="{x:Static res:Strings.CodeGen_Documentation}"
-          />
-          <StackPanel Grid.Column="1">
-            <CheckBox
-              Content="{x:Static res:Strings.CodeGen_GenerateApiDocs}"
-              IsChecked="{Binding GenerateApiDocs}"
-              ToolTip="{x:Static res:Strings.CodeGen_ApiDocsTooltip}"
-            />
-            <!-- 日本語版 API リファレンスの併産（API リファレンス出力の下位＝インデント＋GenerateApiDocs 連動） -->
-            <CheckBox
-              Margin="18,8,0,0"
-              Content="{x:Static res:Strings.CodeGen_IncludeJapaneseApiDocs}"
-              IsChecked="{Binding IncludeJapaneseApiDocs}"
-              IsEnabled="{Binding GenerateApiDocs}"
-            />
-          </StackPanel>
-        </Grid>
-      </StackPanel>
-    </Border>
-
-    <!-- 出力先（非分割時はファイル、分割時はフォルダ。ラベルはモードで出し分け。参照ボタンは 1 つ） -->
-    <Border Style="{StaticResource Card}">
-      <StackPanel>
-        <TextBlock
-          Style="{StaticResource SectionHeader}"
-          Text="{x:Static res:Strings.CodeGen_OutputDestination}"
-        />
-        <Grid>
-          <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="96" />
-            <ColumnDefinition Width="*" />
-            <ColumnDefinition Width="Auto" />
-          </Grid.ColumnDefinitions>
-          <!-- ラベルは 2 つ重ね、Visibility でモードごとに片方だけ表示する（非分割=ファイル / 分割=フォルダ） -->
-          <TextBlock
-            Grid.Column="0"
-            Style="{StaticResource FieldLabel}"
-            Text="{x:Static res:Strings.CodeGen_File}"
-            Visibility="{Binding ShowSingleFileOutput, Converter={StaticResource BoolToVisibilityConverter}}"
-          />
-          <TextBlock
-            Grid.Column="0"
-            Style="{StaticResource FieldLabel}"
-            Text="{x:Static res:Strings.CodeGen_Folder}"
-            Visibility="{Binding ShowSplitOptions, Converter={StaticResource BoolToVisibilityConverter}}"
-          />
-          <TextBox
-            Grid.Column="1"
-            Style="{StaticResource FormInput}"
-            Text="{Binding OutputPath, UpdateSourceTrigger=PropertyChanged}"
+  <!-- 設定項目が増えて自動高さでは画面に収まらなくなったため、ウィンドウは固定初期サイズ（リサイズ可）とし、
+       本文をスクロールさせる。フッタ（生成・キャンセル等の確定ボタン）はスクロールの外＝下端固定で常に見える -->
+  <DockPanel>
+    <!-- フッタ（下端固定・スクロール対象外。本文との境界に区切り線） -->
+    <Border
+      DockPanel.Dock="Bottom"
+      BorderBrush="{StaticResource Divider}"
+      BorderThickness="0,1,0,0"
+    >
+      <DockPanel Margin="18,10,18,14">
+        <!-- 左寄せ: 設定プリセットの読み込み・名前を付けて保存（右寄せの確定系ボタンとは用途が異なるため左に分ける） -->
+        <StackPanel DockPanel.Dock="Left" Orientation="Horizontal">
+          <Button
+            Margin="0,0,8,0"
+            Content="{x:Static res:Strings.CodeGen_LoadSettings}"
+            Style="{StaticResource SecondaryButton}"
+            Command="{Binding LoadSettingsFromCommand}"
+            ToolTip="{x:Static res:Strings.CodeGen_LoadSettingsToolTip}"
           />
           <Button
-            Grid.Column="2"
-            Margin="8,0,0,0"
-            Content="{x:Static res:Strings.CodeGen_Browse}"
+            Content="{x:Static res:Strings.CodeGen_SaveSettings}"
             Style="{StaticResource SecondaryButton}"
-            Command="{Binding BrowseOutputCommand}"
+            Command="{Binding SaveSettingsAsCommand}"
+            ToolTip="{x:Static res:Strings.CodeGen_SaveSettingsToolTip}"
           />
-        </Grid>
-      </StackPanel>
+        </StackPanel>
+        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
+          <Button
+            Margin="0,0,8,0"
+            Content="{x:Static res:Strings.CodeGen_RestoreDefaults}"
+            Style="{StaticResource SecondaryButton}"
+            Command="{Binding ClearCommand}"
+          />
+          <Button
+            Margin="0,0,8,0"
+            IsDefault="True"
+            Content="{x:Static res:Strings.CodeGen_Generate}"
+            Style="{StaticResource PrimaryButton}"
+            Command="{Binding OkCommand}"
+          />
+          <Button
+            Content="{x:Static res:Strings.CodeGen_Cancel}"
+            IsCancel="True"
+            Style="{StaticResource SecondaryButton}"
+            Command="{Binding CancelCommand}"
+          />
+        </StackPanel>
+        <!-- 残り幅を占有する fill 要素として最後に置く（DockPanel の LastChildFill 既定に従う） -->
+        <TextBlock
+          Margin="12,0"
+          VerticalAlignment="Center"
+          Foreground="#B91C1C"
+          TextWrapping="Wrap"
+          Text="{Binding StatusMessage}"
+        />
+      </DockPanel>
     </Border>
 
-    <!-- 名前空間（ルートは出力モードに依らず常に表示。カテゴリ別・生成ファイルは分割モード時のみ） -->
-    <Border Style="{StaticResource Card}">
-      <StackPanel>
-        <TextBlock
-          Style="{StaticResource SectionHeader}"
-          Text="{x:Static res:Strings.CodeGen_NamespaceSection}"
-        />
-
-        <!-- ルート名前空間（出力モードに依らず常に表示） -->
-        <Grid>
-          <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="96" />
-            <ColumnDefinition Width="*" />
-          </Grid.ColumnDefinitions>
-          <TextBlock
-            Grid.Column="0"
-            Style="{StaticResource FieldLabel}"
-            Text="{x:Static res:Strings.CodeGen_RootLabel}"
-          />
-          <TextBox
-            Grid.Column="1"
-            Style="{StaticResource FormInput}"
-            Text="{Binding RootNamespace, UpdateSourceTrigger=PropertyChanged}"
-          />
-        </Grid>
-
-        <!-- カテゴリ別 namespace（分割モード時のみ表示） -->
-        <TextBlock
-          Margin="0,14,0,6"
-          Foreground="{StaticResource MutedText}"
-          Text="{x:Static res:Strings.CodeGen_CategoryNamespace}"
-          Visibility="{Binding ShowSplitOptions, Converter={StaticResource BoolToVisibilityConverter}}"
-        />
-        <Grid Visibility="{Binding ShowSplitOptions, Converter={StaticResource BoolToVisibilityConverter}}">
-          <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="96" />
-            <ColumnDefinition Width="*" />
-          </Grid.ColumnDefinitions>
-          <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-          </Grid.RowDefinitions>
-
-          <TextBlock
-            Grid.Row="0"
-            Grid.Column="0"
-            Margin="0,4"
-            Style="{StaticResource FieldLabel}"
-            Text="Entity"
-            Visibility="{Binding ShowEntityNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
-          />
-          <TextBox
-            Grid.Row="0"
-            Grid.Column="1"
-            Margin="0,4"
-            Style="{StaticResource FormInput}"
-            Text="{Binding EntityNamespace, UpdateSourceTrigger=PropertyChanged}"
-            Visibility="{Binding ShowEntityNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
-          />
-
-          <TextBlock
-            Grid.Row="1"
-            Grid.Column="0"
-            Margin="0,4"
-            Style="{StaticResource FieldLabel}"
-            Text="EditModel"
-            Visibility="{Binding ShowEditModelNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
-          />
-          <TextBox
-            Grid.Row="1"
-            Grid.Column="1"
-            Margin="0,4"
-            Style="{StaticResource FormInput}"
-            Text="{Binding EditModelNamespace, UpdateSourceTrigger=PropertyChanged}"
-            Visibility="{Binding ShowEditModelNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
-          />
-
-          <TextBlock
-            Grid.Row="2"
-            Grid.Column="0"
-            Margin="0,4"
-            Style="{StaticResource FieldLabel}"
-            Text="Mapper"
-            Visibility="{Binding ShowMapperNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
-          />
-          <TextBox
-            Grid.Row="2"
-            Grid.Column="1"
-            Margin="0,4"
-            Style="{StaticResource FormInput}"
-            Text="{Binding MapperNamespace, UpdateSourceTrigger=PropertyChanged}"
-            Visibility="{Binding ShowMapperNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
-          />
-
-          <TextBlock
-            Grid.Row="3"
-            Grid.Column="0"
-            Margin="0,4"
-            Style="{StaticResource FieldLabel}"
-            Text="ValueObject"
-            Visibility="{Binding ShowValueObjectNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
-          />
-          <TextBox
-            Grid.Row="3"
-            Grid.Column="1"
-            Margin="0,4"
-            Style="{StaticResource FormInput}"
-            Text="{Binding ValueObjectNamespace, UpdateSourceTrigger=PropertyChanged}"
-            Visibility="{Binding ShowValueObjectNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
-          />
-
-          <!-- DB アクセス系は「生成内容」の並びに合わせて末尾。EF Core 実装は Repository 契約 namespace の
-               サブ名前空間（{Repository}.EfCore）へ導出するため専用の欄は持たない -->
-          <TextBlock
-            Grid.Row="4"
-            Grid.Column="0"
-            Margin="0,4"
-            Style="{StaticResource FieldLabel}"
-            Text="Repository"
-            Visibility="{Binding ShowRepositoryNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
-          />
-          <TextBox
-            Grid.Row="4"
-            Grid.Column="1"
-            Margin="0,4"
-            Style="{StaticResource FormInput}"
-            Text="{Binding RepositoryNamespace, UpdateSourceTrigger=PropertyChanged}"
-            Visibility="{Binding ShowRepositoryNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
-          />
-        </Grid>
-
-        <!-- Runtime（共通基盤: 基底クラス・属性・JSON コンバータなど全カテゴリが使う土台） -->
-        <Grid
-          Margin="0,8,0,0"
-          Visibility="{Binding ShowRuntimeNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
-        >
-          <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="96" />
-            <ColumnDefinition Width="*" />
-          </Grid.ColumnDefinitions>
-          <StackPanel
-            Grid.Column="0"
-            VerticalAlignment="Center"
-            ToolTip="{x:Static res:Strings.CodeGen_RuntimeTooltip}"
-          >
-            <TextBlock Foreground="{StaticResource HeaderText}" Text="Runtime" />
+    <!-- 本文（縦スクロール。ウィンドウを広げればスクロールなしでも収まる） -->
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+      <StackPanel Margin="18,18,18,4">
+        <!-- 出力モード -->
+        <Border Style="{StaticResource Card}">
+          <StackPanel>
             <TextBlock
-              FontSize="11"
-              Foreground="{StaticResource MutedText}"
-              Text="{x:Static res:Strings.CodeGen_RuntimeBaseNote}"
+              Style="{StaticResource SectionHeader}"
+              Text="{x:Static res:Strings.CodeGen_OutputMode}"
             />
+            <StackPanel Orientation="Horizontal">
+              <RadioButton
+                Margin="0,0,28,0"
+                Content="{x:Static res:Strings.CodeGen_MergeSingleFile}"
+                GroupName="OutputMode"
+                IsChecked="{Binding MergeIntoSingleFile}"
+              />
+              <RadioButton
+                Content="{x:Static res:Strings.CodeGen_SplitByLayer}"
+                GroupName="OutputMode"
+                IsChecked="{Binding SplitFilesByCategory}"
+              />
+            </StackPanel>
           </StackPanel>
-          <TextBox
-            Grid.Column="1"
-            VerticalAlignment="Center"
-            Style="{StaticResource FormInput}"
-            Text="{Binding RuntimeNamespace, UpdateSourceTrigger=PropertyChanged}"
-          />
-        </Grid>
+        </Border>
 
-        <!-- 生成されるファイル（分割モード時のみ・折り畳み可能。既定は折り畳み） -->
-        <Expander
-          Margin="0,14,0,0"
-          Header="{x:Static res:Strings.CodeGen_GeneratedFiles}"
-          IsExpanded="False"
-          Visibility="{Binding ShowSplitOptions, Converter={StaticResource BoolToVisibilityConverter}}"
-        >
-          <Border
-            Margin="0,8,0,0"
-            Background="#F9FAFB"
-            BorderBrush="{StaticResource Divider}"
-            BorderThickness="1"
-            CornerRadius="8"
-          >
-            <ScrollViewer MaxHeight="150" VerticalScrollBarVisibility="Auto">
+        <!-- 生成内容 -->
+        <Border Style="{StaticResource Card}">
+          <StackPanel>
+            <TextBlock
+              Style="{StaticResource SectionHeader}"
+              Text="{x:Static res:Strings.CodeGen_GenerationContent}"
+            />
+
+            <Grid Margin="0,0,0,10">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="96" />
+                <ColumnDefinition Width="*" />
+              </Grid.ColumnDefinitions>
+              <TextBlock
+                Grid.Column="0"
+                Style="{StaticResource FieldLabel}"
+                VerticalAlignment="Top"
+                Margin="0,2,0,0"
+                Text="{x:Static res:Strings.CodeGen_GenerationTarget}"
+              />
+              <StackPanel Grid.Column="1" Orientation="Horizontal">
+                <!-- Entity は常に生成対象（表示専用の固定チェック。処理判定には使わない） -->
+                <CheckBox Margin="0,0,18,0" Content="Entity" IsChecked="True" IsEnabled="False" />
+                <CheckBox
+                  Margin="0,0,18,0"
+                  Content="EditModel"
+                  IsChecked="{Binding GenerateEditModels}"
+                />
+                <CheckBox Content="Mapper" IsChecked="{Binding GenerateMappers}" />
+              </StackPanel>
+            </Grid>
+
+            <Grid Margin="0,0,0,10">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="96" />
+                <ColumnDefinition Width="*" />
+              </Grid.ColumnDefinitions>
+              <TextBlock
+                Grid.Column="0"
+                Style="{StaticResource FieldLabel}"
+                VerticalAlignment="Top"
+                Margin="0,2,0,0"
+                Text="{x:Static res:Strings.CodeGen_ValueObject}"
+              />
+              <StackPanel Grid.Column="1" Orientation="Horizontal">
+                <CheckBox
+                  Margin="0,0,18,0"
+                  Content="{x:Static res:Strings.CodeGen_AllColumnsValueObject}"
+                  IsChecked="{Binding GenerateValueObjects}"
+                />
+                <CheckBox
+                  Content="{x:Static res:Strings.CodeGen_StringPkGuidKey}"
+                  IsChecked="{Binding UseGuidKeyForStringPrimaryKey}"
+                  IsEnabled="{Binding GenerateValueObjects}"
+                />
+              </StackPanel>
+            </Grid>
+
+            <!-- DB アクセス（排他選択。Repository (QuickER) の対象 DB は下のチェック群で選ぶ） -->
+            <Grid>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="96" />
+                <ColumnDefinition Width="*" />
+              </Grid.ColumnDefinitions>
+              <TextBlock
+                Grid.Column="0"
+                Style="{StaticResource FieldLabel}"
+                VerticalAlignment="Top"
+                Margin="0,2,0,0"
+                Text="{x:Static res:Strings.CodeGen_DbAccess}"
+              />
+              <StackPanel Grid.Column="1" Orientation="Horizontal">
+                <RadioButton
+                  Margin="0,0,18,0"
+                  Content="{x:Static res:Strings.CodeGen_DbAccessNone}"
+                  GroupName="DbAccess"
+                  IsChecked="{Binding DbAccessNone}"
+                />
+                <RadioButton
+                  Margin="0,0,18,0"
+                  Content="Repository (QuickER)"
+                  GroupName="DbAccess"
+                  IsChecked="{Binding DbAccessRepository}"
+                  ToolTip="{Binding QuickErRepositoryToolTip}"
+                />
+                <RadioButton
+                  Content="Repository (EF Core)"
+                  GroupName="DbAccess"
+                  IsChecked="{Binding DbAccessEfCore}"
+                  ToolTip="{x:Static res:Strings.CodeGen_DbAccessEfCoreTooltip}"
+                />
+              </StackPanel>
+            </Grid>
+
+            <!-- インメモリ実装（テスト用。DB アクセス配下＝インデント表示。排他ラジオと独立に常時選択可） -->
+            <Grid Margin="12,10,0,0">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="84" />
+                <ColumnDefinition Width="*" />
+              </Grid.ColumnDefinitions>
+              <CheckBox
+                Grid.Column="1"
+                Content="{x:Static res:Strings.CodeGen_GenerateInMemory}"
+                IsChecked="{Binding GenerateInMemoryRepositories}"
+                ToolTip="{Binding GenerateInMemoryToolTip}"
+              />
+            </Grid>
+
+            <!-- Repository (QuickER) の対象 DB（DB アクセス配下＝インデント表示。Repository (QuickER) 選択時のみ表示。表示順固定: SQL Server → SQLite） -->
+            <Grid
+              Margin="12,10,0,0"
+              Visibility="{Binding ShowRepositoryDialectTargets, Converter={StaticResource BoolToVisibilityConverter}}"
+            >
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="84" />
+                <ColumnDefinition Width="*" />
+              </Grid.ColumnDefinitions>
+              <TextBlock
+                Grid.Column="0"
+                Style="{StaticResource FieldLabel}"
+                Text="{x:Static res:Strings.CodeGen_TargetDb}"
+              />
+              <StackPanel Grid.Column="1" Orientation="Horizontal">
+                <CheckBox
+                  Margin="0,0,18,0"
+                  Content="SQL Server"
+                  IsChecked="{Binding TargetSqlServer}"
+                />
+                <CheckBox Content="SQLite" IsChecked="{Binding TargetSqlite}" />
+              </StackPanel>
+            </Grid>
+
+            <!-- 双方向同期支援（DB アクセス配下＝インデント表示。対象 DB が SQL Server と SQLite の両方のときのみ表示） -->
+            <Grid
+              Margin="12,10,0,0"
+              Visibility="{Binding ShowSyncSupport, Converter={StaticResource BoolToVisibilityConverter}}"
+            >
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="84" />
+                <ColumnDefinition Width="*" />
+              </Grid.ColumnDefinitions>
+              <CheckBox
+                Grid.Column="1"
+                Content="{x:Static res:Strings.CodeGen_GenerateSyncSupport}"
+                IsChecked="{Binding GenerateSyncSupport}"
+                ToolTip="{x:Static res:Strings.CodeGen_GenerateSyncSupportToolTip}"
+              />
+            </Grid>
+
+            <!-- 無制限バイナリ列の除外（DB アクセス配下＝インデント表示。Repository (QuickER) 選択時のみ表示） -->
+            <Grid
+              Margin="12,10,0,0"
+              Visibility="{Binding ShowExcludeUnboundedBinary, Converter={StaticResource BoolToVisibilityConverter}}"
+            >
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="84" />
+                <ColumnDefinition Width="*" />
+              </Grid.ColumnDefinitions>
+              <CheckBox
+                Grid.Column="1"
+                Content="{x:Static res:Strings.CodeGen_ExcludeUnboundedBinary}"
+                IsChecked="{Binding ExcludeUnboundedBinaryColumns}"
+                ToolTip="{Binding ExcludeUnboundedBinaryToolTip}"
+              />
+            </Grid>
+
+            <!-- リモート対応（DB アクセス配下＝インデント表示。Repository を生成する場合のみ表示） -->
+            <Grid
+              Margin="12,10,0,0"
+              Visibility="{Binding ShowRemoteContracts, Converter={StaticResource BoolToVisibilityConverter}}"
+            >
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="84" />
+                <ColumnDefinition Width="*" />
+              </Grid.ColumnDefinitions>
+              <!-- 2 段チェックの行のため、ラベルは中央寄せ（FieldLabel 既定）でなく上段チェックと揃う上詰めにする -->
+              <TextBlock
+                Grid.Column="0"
+                VerticalAlignment="Top"
+                Margin="0,2,0,0"
+                Style="{StaticResource FieldLabel}"
+                Text="{x:Static res:Strings.CodeGen_RemoteAccess}"
+              />
+              <StackPanel Grid.Column="1" Orientation="Vertical">
+                <CheckBox
+                  Content="{x:Static res:Strings.CodeGen_GenerateRemoteContracts}"
+                  IsChecked="{Binding GenerateRemoteContracts}"
+                  ToolTip="{Binding RemoteContractsToolTip}"
+                />
+                <CheckBox
+                  Margin="0,10,0,0"
+                  Content="{x:Static res:Strings.CodeGen_GenerateRemoteServices}"
+                  IsChecked="{Binding GenerateRemoteServices}"
+                  ToolTip="{Binding RemoteServicesToolTip}"
+                />
+              </StackPanel>
+            </Grid>
+
+            <!-- ランタイムのパッケージ参照モード（EF Core 選択中は併用不可のため無効化） -->
+            <Grid Margin="0,10,0,0">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="96" />
+                <ColumnDefinition Width="*" />
+              </Grid.ColumnDefinitions>
+              <TextBlock
+                Grid.Column="0"
+                Style="{StaticResource FieldLabel}"
+                Text="{x:Static res:Strings.CodeGen_Runtime}"
+              />
+              <CheckBox
+                Grid.Column="1"
+                Content="{x:Static res:Strings.CodeGen_UseRuntimePackages}"
+                IsChecked="{Binding UseRuntimePackages}"
+                ToolTip="{Binding UseRuntimePackagesToolTip}"
+              />
+            </Grid>
+
+            <!-- API リファレンス出力（DB アクセス選択とは独立。常に選択可） -->
+            <Grid Margin="0,10,0,0">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="96" />
+                <ColumnDefinition Width="*" />
+              </Grid.ColumnDefinitions>
+              <!-- 2 段チェックの行のため、ラベルは中央寄せ（FieldLabel 既定）でなく上段チェックと揃う上詰めにする -->
+              <TextBlock
+                Grid.Column="0"
+                VerticalAlignment="Top"
+                Margin="0,2,0,0"
+                Style="{StaticResource FieldLabel}"
+                Text="{x:Static res:Strings.CodeGen_Documentation}"
+              />
+              <StackPanel Grid.Column="1">
+                <CheckBox
+                  Content="{x:Static res:Strings.CodeGen_GenerateApiDocs}"
+                  IsChecked="{Binding GenerateApiDocs}"
+                  ToolTip="{x:Static res:Strings.CodeGen_ApiDocsTooltip}"
+                />
+                <!-- 日本語版 API リファレンスの併産（API リファレンス出力の下位＝インデント＋GenerateApiDocs 連動） -->
+                <CheckBox
+                  Margin="18,8,0,0"
+                  Content="{x:Static res:Strings.CodeGen_IncludeJapaneseApiDocs}"
+                  IsChecked="{Binding IncludeJapaneseApiDocs}"
+                  IsEnabled="{Binding GenerateApiDocs}"
+                />
+              </StackPanel>
+            </Grid>
+          </StackPanel>
+        </Border>
+
+        <!-- 出力先（非分割時はファイル、分割時はフォルダ。ラベルはモードで出し分け。参照ボタンは 1 つ） -->
+        <Border Style="{StaticResource Card}">
+          <StackPanel>
+            <TextBlock
+              Style="{StaticResource SectionHeader}"
+              Text="{x:Static res:Strings.CodeGen_OutputDestination}"
+            />
+            <Grid>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="96" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+              </Grid.ColumnDefinitions>
+              <!-- ラベルは 2 つ重ね、Visibility でモードごとに片方だけ表示する（非分割=ファイル / 分割=フォルダ） -->
+              <TextBlock
+                Grid.Column="0"
+                Style="{StaticResource FieldLabel}"
+                Text="{x:Static res:Strings.CodeGen_File}"
+                Visibility="{Binding ShowSingleFileOutput, Converter={StaticResource BoolToVisibilityConverter}}"
+              />
+              <TextBlock
+                Grid.Column="0"
+                Style="{StaticResource FieldLabel}"
+                Text="{x:Static res:Strings.CodeGen_Folder}"
+                Visibility="{Binding ShowSplitOptions, Converter={StaticResource BoolToVisibilityConverter}}"
+              />
+              <TextBox
+                Grid.Column="1"
+                Style="{StaticResource FormInput}"
+                Text="{Binding OutputPath, UpdateSourceTrigger=PropertyChanged}"
+              />
+              <Button
+                Grid.Column="2"
+                Margin="8,0,0,0"
+                Content="{x:Static res:Strings.CodeGen_Browse}"
+                Style="{StaticResource SecondaryButton}"
+                Command="{Binding BrowseOutputCommand}"
+              />
+            </Grid>
+          </StackPanel>
+        </Border>
+
+        <!-- 名前空間（ルートは出力モードに依らず常に表示。カテゴリ別・生成ファイルは分割モード時のみ） -->
+        <Border Style="{StaticResource Card}">
+          <StackPanel>
+            <TextBlock
+              Style="{StaticResource SectionHeader}"
+              Text="{x:Static res:Strings.CodeGen_NamespaceSection}"
+            />
+
+            <!-- ルート名前空間（出力モードに依らず常に表示） -->
+            <Grid>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="96" />
+                <ColumnDefinition Width="*" />
+              </Grid.ColumnDefinitions>
+              <TextBlock
+                Grid.Column="0"
+                Style="{StaticResource FieldLabel}"
+                Text="{x:Static res:Strings.CodeGen_RootLabel}"
+              />
+              <TextBox
+                Grid.Column="1"
+                Style="{StaticResource FormInput}"
+                Text="{Binding RootNamespace, UpdateSourceTrigger=PropertyChanged}"
+              />
+            </Grid>
+
+            <!-- カテゴリ別 namespace（分割モード時のみ表示） -->
+            <TextBlock
+              Margin="0,14,0,6"
+              Foreground="{StaticResource MutedText}"
+              Text="{x:Static res:Strings.CodeGen_CategoryNamespace}"
+              Visibility="{Binding ShowSplitOptions, Converter={StaticResource BoolToVisibilityConverter}}"
+            />
+            <Grid Visibility="{Binding ShowSplitOptions, Converter={StaticResource BoolToVisibilityConverter}}">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="96" />
+                <ColumnDefinition Width="*" />
+              </Grid.ColumnDefinitions>
+              <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+              </Grid.RowDefinitions>
+
+              <TextBlock
+                Grid.Row="0"
+                Grid.Column="0"
+                Margin="0,4"
+                Style="{StaticResource FieldLabel}"
+                Text="Entity"
+                Visibility="{Binding ShowEntityNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
+              />
+              <TextBox
+                Grid.Row="0"
+                Grid.Column="1"
+                Margin="0,4"
+                Style="{StaticResource FormInput}"
+                Text="{Binding EntityNamespace, UpdateSourceTrigger=PropertyChanged}"
+                Visibility="{Binding ShowEntityNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
+              />
+
+              <TextBlock
+                Grid.Row="1"
+                Grid.Column="0"
+                Margin="0,4"
+                Style="{StaticResource FieldLabel}"
+                Text="EditModel"
+                Visibility="{Binding ShowEditModelNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
+              />
+              <TextBox
+                Grid.Row="1"
+                Grid.Column="1"
+                Margin="0,4"
+                Style="{StaticResource FormInput}"
+                Text="{Binding EditModelNamespace, UpdateSourceTrigger=PropertyChanged}"
+                Visibility="{Binding ShowEditModelNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
+              />
+
+              <TextBlock
+                Grid.Row="2"
+                Grid.Column="0"
+                Margin="0,4"
+                Style="{StaticResource FieldLabel}"
+                Text="Mapper"
+                Visibility="{Binding ShowMapperNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
+              />
+              <TextBox
+                Grid.Row="2"
+                Grid.Column="1"
+                Margin="0,4"
+                Style="{StaticResource FormInput}"
+                Text="{Binding MapperNamespace, UpdateSourceTrigger=PropertyChanged}"
+                Visibility="{Binding ShowMapperNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
+              />
+
+              <TextBlock
+                Grid.Row="3"
+                Grid.Column="0"
+                Margin="0,4"
+                Style="{StaticResource FieldLabel}"
+                Text="ValueObject"
+                Visibility="{Binding ShowValueObjectNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
+              />
+              <TextBox
+                Grid.Row="3"
+                Grid.Column="1"
+                Margin="0,4"
+                Style="{StaticResource FormInput}"
+                Text="{Binding ValueObjectNamespace, UpdateSourceTrigger=PropertyChanged}"
+                Visibility="{Binding ShowValueObjectNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
+              />
+
+              <!-- DB アクセス系は「生成内容」の並びに合わせて末尾。EF Core 実装は Repository 契約 namespace の
+               サブ名前空間（{Repository}.EfCore）へ導出するため専用の欄は持たない -->
+              <TextBlock
+                Grid.Row="4"
+                Grid.Column="0"
+                Margin="0,4"
+                Style="{StaticResource FieldLabel}"
+                Text="Repository"
+                Visibility="{Binding ShowRepositoryNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
+              />
+              <TextBox
+                Grid.Row="4"
+                Grid.Column="1"
+                Margin="0,4"
+                Style="{StaticResource FormInput}"
+                Text="{Binding RepositoryNamespace, UpdateSourceTrigger=PropertyChanged}"
+                Visibility="{Binding ShowRepositoryNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
+              />
+            </Grid>
+
+            <!-- Runtime（共通基盤: 基底クラス・属性・JSON コンバータなど全カテゴリが使う土台） -->
+            <Grid
+              Margin="0,8,0,0"
+              Visibility="{Binding ShowRuntimeNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
+            >
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="96" />
+                <ColumnDefinition Width="*" />
+              </Grid.ColumnDefinitions>
+              <StackPanel
+                Grid.Column="0"
+                VerticalAlignment="Center"
+                ToolTip="{x:Static res:Strings.CodeGen_RuntimeTooltip}"
+              >
+                <TextBlock Foreground="{StaticResource HeaderText}" Text="Runtime" />
+                <TextBlock
+                  FontSize="11"
+                  Foreground="{StaticResource MutedText}"
+                  Text="{x:Static res:Strings.CodeGen_RuntimeBaseNote}"
+                />
+              </StackPanel>
+              <TextBox
+                Grid.Column="1"
+                VerticalAlignment="Center"
+                Style="{StaticResource FormInput}"
+                Text="{Binding RuntimeNamespace, UpdateSourceTrigger=PropertyChanged}"
+              />
+            </Grid>
+
+            <!-- 生成されるファイル（分割モード時のみ） -->
+            <TextBlock
+              Margin="0,14,0,0"
+              Foreground="{StaticResource MutedText}"
+              Text="{x:Static res:Strings.CodeGen_GeneratedFiles}"
+              Visibility="{Binding ShowSplitOptions, Converter={StaticResource BoolToVisibilityConverter}}"
+            />
+            <Border
+              Margin="0,8,0,0"
+              Background="#F9FAFB"
+              BorderBrush="{StaticResource Divider}"
+              BorderThickness="1"
+              CornerRadius="8"
+              Visibility="{Binding ShowSplitOptions, Converter={StaticResource BoolToVisibilityConverter}}"
+            >
               <ItemsControl Margin="12,10" ItemsSource="{Binding PreviewFiles}">
                 <ItemsControl.ItemTemplate>
                   <DataTemplate>
@@ -537,59 +599,10 @@
                   </DataTemplate>
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
-            </ScrollViewer>
-          </Border>
-        </Expander>
+            </Border>
+          </StackPanel>
+        </Border>
       </StackPanel>
-    </Border>
-
-    <!-- フッタ -->
-    <DockPanel Margin="0,10,0,0">
-      <!-- 左寄せ: 設定プリセットの読み込み・名前を付けて保存（右寄せの確定系ボタンとは用途が異なるため左に分ける） -->
-      <StackPanel DockPanel.Dock="Left" Orientation="Horizontal">
-        <Button
-          Margin="0,0,8,0"
-          Content="{x:Static res:Strings.CodeGen_LoadSettings}"
-          Style="{StaticResource SecondaryButton}"
-          Command="{Binding LoadSettingsFromCommand}"
-          ToolTip="{x:Static res:Strings.CodeGen_LoadSettingsToolTip}"
-        />
-        <Button
-          Content="{x:Static res:Strings.CodeGen_SaveSettings}"
-          Style="{StaticResource SecondaryButton}"
-          Command="{Binding SaveSettingsAsCommand}"
-          ToolTip="{x:Static res:Strings.CodeGen_SaveSettingsToolTip}"
-        />
-      </StackPanel>
-      <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
-        <Button
-          Margin="0,0,8,0"
-          Content="{x:Static res:Strings.CodeGen_RestoreDefaults}"
-          Style="{StaticResource SecondaryButton}"
-          Command="{Binding ClearCommand}"
-        />
-        <Button
-          Margin="0,0,8,0"
-          IsDefault="True"
-          Content="{x:Static res:Strings.CodeGen_Generate}"
-          Style="{StaticResource PrimaryButton}"
-          Command="{Binding OkCommand}"
-        />
-        <Button
-          Content="{x:Static res:Strings.CodeGen_Cancel}"
-          IsCancel="True"
-          Style="{StaticResource SecondaryButton}"
-          Command="{Binding CancelCommand}"
-        />
-      </StackPanel>
-      <!-- 残り幅を占有する fill 要素として最後に置く（DockPanel の LastChildFill 既定に従う） -->
-      <TextBlock
-        Margin="12,0"
-        VerticalAlignment="Center"
-        Foreground="#B91C1C"
-        TextWrapping="Wrap"
-        Text="{Binding StatusMessage}"
-      />
-    </DockPanel>
-  </StackPanel>
+    </ScrollViewer>
+  </DockPanel>
 </Window>
