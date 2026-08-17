@@ -4,8 +4,8 @@ using QuickER.Tests.GeneratedFixture;
 namespace QuickER.Tests.PublicApi;
 
 /// <summary>
-/// 配布ランタイム 6 パッケージ（<c>QuickER.Runtime</c> / <c>.SqlServer</c> / <c>.Sqlite</c> /
-/// <c>.EntityFrameworkCore</c> / <c>.InMemory</c> / <c>.AspNetCore</c>）の公開 API 面が、
+/// 配布ランタイム 7 パッケージ（<c>QuickER.Runtime</c> / <c>.SqlServer</c> / <c>.Sqlite</c> /
+/// <c>.EntityFrameworkCore</c> / <c>.InMemory</c> / <c>.AspNetCore</c> / <c>.Sync</c>）の公開 API 面が、
 /// チェックイン済みの承認ファイル（<c>PublicApi/*.approved.txt</c>）と一致することを検証するテストクラス。
 /// </summary>
 /// <remarks>
@@ -67,6 +67,11 @@ public sealed class RuntimePackagePublicApiDriftTests
     )]
     public void AspNetCoreAssembly_MatchesApprovedApi() =>
         Verify(typeof(global::QuickER.Runtime.AspNetCore.RemoteServerEngine).Assembly);
+
+    /// <summary>双方向同期エンジン（<c>QuickER.Runtime.Sync</c>）の公開 API 面が承認ファイルと一致する</summary>
+    [Fact(DisplayName = "Sync パッケージの公開 API 面が承認ファイルと一致する（スナップショット）")]
+    public void SyncAssembly_MatchesApprovedApi() =>
+        Verify(typeof(global::QuickER.Runtime.Sync.SyncEngine).Assembly);
 
     /// <summary>アセンブリ名から承認ファイルのパスを導き、公開 API 面を照合（または再生成）する。</summary>
     private static void Verify(Assembly assembly)

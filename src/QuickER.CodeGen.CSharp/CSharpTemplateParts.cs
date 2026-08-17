@@ -41,5 +41,6 @@ public static class CSharpTemplateParts
         ResourceNamePrefix + "_07_InMemory" + ResourceNameSuffix,
         ResourceNamePrefix + "_08_EfCore" + ResourceNameSuffix,
         ResourceNamePrefix + "_09_RemoteServer" + ResourceNameSuffix,
+        ResourceNamePrefix + "_10_Sync" + ResourceNameSuffix,
     ];
 }

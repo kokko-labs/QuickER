@@ -89,6 +89,11 @@ internal sealed class GenerationOptionSet
             "--generate-in-memory-repositories",
             Strings.Cli_Opt_GenerateInMemoryRepositories
         );
+        AddBool(
+            "GenerateSyncSupport",
+            "--generate-sync-support",
+            Strings.Cli_Opt_GenerateSyncSupport
+        );
 
         // リモート対応
         AddBool(

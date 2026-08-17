@@ -6707,9 +6707,16 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
 
     /// <summary>Bulk inserts a collection of entities as a batch of INSERTs in a single transaction.</summary>
     /// <remarks>
-    /// SQLite has no SqlBulkCopy equivalent, so INSERTs are repeated over a single connection and transaction (the command
-    /// is prepared once and reused with swapped parameter values). The performance characteristics differ from the
-    /// SQL Server variant that uses SqlBulkCopy, and large row counts may be slow.
+    /// <para>
+    /// SQLite has no SqlBulkCopy equivalent, so INSERTs are repeated over a single connection and transaction. One command
+    /// carries the whole batch and only its parameter values change between rows, which is what lets SQLite keep the
+    /// statement it prepared for the first row: a fresh command per row would have it parse and plan the same INSERT again
+    /// for every one of them, and on a batch of any size that parsing costs several times what the inserts do.
+    /// </para>
+    /// <para>
+    /// The performance characteristics still differ from the SQL Server variant that uses SqlBulkCopy, and very large row
+    /// counts may be slow.
+    /// </para>
     /// </remarks>
     public async Task<int> BulkInsertAsync(
         IEnumerable<TEntity> entities,
@@ -6734,6 +6741,14 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
         try
         {
             var rows = 0;
+
+            await using var command = new SqliteCommand(
+                _metadata.InsertSql,
+                connection,
+                transaction
+            );
+            var declared = false;
+
             foreach (var entity in entities)
             {
                 if (entity is null)
@@ -6741,12 +6756,18 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
                     continue;
                 }
 
-                await using var command = new SqliteCommand(
-                    _metadata.InsertSql,
-                    connection,
-                    transaction
-                );
-                _metadata.BindInsertParameters(command, entity);
+                // The first row declares the parameters; every row after it only writes new values into them, which is
+                // what keeps the command - and so the statement behind it - the same one throughout the batch
+                if (declared)
+                {
+                    _metadata.RebindInsertParameters(command, entity);
+                }
+                else
+                {
+                    _metadata.BindInsertParameters(command, entity);
+                    declared = true;
+                }
+
                 rows += await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
             }
 
@@ -9846,6 +9867,23 @@ internal sealed class EntitySaveMetadata
                 property,
                 property.GetValue(entity)
             );
+        }
+    }
+
+    /// <summary>Writes a row's INSERT values into the parameters a previous <see cref="BindInsertParameters"/> declared on the same command.</summary>
+    /// <remarks>
+    /// This is what lets one command carry a whole batch: adding parameters would replace the statement the provider
+    /// prepared, while writing values into the ones already there leaves it in place. It walks
+    /// <see cref="InsertProperties"/> in the same order <see cref="BindInsertParameters"/> did, so the parameter at each
+    /// position belongs to the property at that position - which holds because the only caller declares and rebinds on
+    /// one command it owns for the length of the batch.
+    /// </remarks>
+    public void RebindInsertParameters(SqliteCommand command, EntityBase entity)
+    {
+        for (var index = 0; index < InsertProperties.Count; index++)
+        {
+            var value = InsertProperties[index].GetValue(entity);
+            command.Parameters[index].Value = value ?? DBNull.Value;
         }
     }
 

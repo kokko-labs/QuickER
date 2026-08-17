@@ -133,6 +133,21 @@
   <data name="CodeGen_Info_MultiTargetRowVersionColumns" xml:space="preserve">
     <value>次の行バージョン列を並行性トークンとして扱うのは '{0}' の Repository だけです。他の対象方言は同じ byte[] プロパティを共有しますが、その列を通常のバイナリ列として INSERT / UPDATE で書き込み（'{0}' が採番した版のミラー置き場）、版ガードは行いません:{1}</value>
   </data>
+  <data name="CodeGen_Error_SyncSupportRequiresDialects" xml:space="preserve">
+    <value>同期支援は Repository の生成方言が 'sqlserver'（サーバー）と 'sqlite'（ローカル）のちょうど 2 つであることを要求します。現在の指定は '{0}' です。</value>
+  </data>
+  <data name="CodeGen_Error_SyncSupportRequiresRepositories" xml:space="preserve">
+    <value>同期支援は QuickER 版 Repository の実装生成（GenerateRepositories）を前提とします（同期エンジンはその読み書き経路を使うため）。</value>
+  </data>
+  <data name="CodeGen_Error_SyncSupportRequiresRowVersion" xml:space="preserve">
+    <value>同期対象のテーブルが 1 つもありません。同期対象になるのは rowversion（timestamp）列を持つテーブルだけです（差分走査と版ガードがその列の上に成り立っているため）。</value>
+  </data>
+  <data name="CodeGen_Info_SyncSupportUnboundedBinaryColumns" xml:space="preserve">
+    <value>同期対象テーブルの次の無制限バイナリ列は、通常の同期では運ばれません（行の転送がこれらの列を含まないため、降りてきた行にも上げる行にも中身が入りません）。列単位でコピーさせるには SyncOptions.IncludeUnboundedBinary（洗い替えは SyncRefreshOptions.IncludeUnboundedBinary）を指定してください:{0}</value>
+  </data>
+  <data name="CodeGen_Info_SyncSupportTables" xml:space="preserve">
+    <value>次のテーブルに対して同期支援を生成しました（エンジンが適用する FK 順＝親が先の並びで表示しています）:{0}</value>
+  </data>
   <data name="CodeGen_Warning_ManyToManySkipped" xml:space="preserve">
     <value>多対多リレーション '{0}' は C# 生成対象外のためスキップしました。</value>
   </data>

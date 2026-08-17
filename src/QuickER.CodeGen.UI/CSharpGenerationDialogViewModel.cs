@@ -153,6 +153,17 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     [ObservableProperty]
     private bool _generateInMemoryRepositories;
 
+    /// <summary>
+    /// サーバー（SQL Server）＋ローカル（SQLite）構成の双方向同期支援を生成するかどうか（既定 OFF）。
+    /// </summary>
+    /// <remarks>
+    /// QuickER 版 Repository で対象 DB を SQL Server と SQLite の両方に選び、かつ図に <c>rowversion</c> 列を持つ
+    /// テーブルがあるときだけ意味を持つ（満たさない構成は生成時に診断エラーになる）。チェック欄の表示は
+    /// <see cref="ShowSyncSupport"/> が両方言選択に連動させる。
+    /// </remarks>
+    [ObservableProperty]
+    private bool _generateSyncSupport;
+
     /// <summary>インメモリ実装生成チェックボックスのツールチップ</summary>
     public string GenerateInMemoryToolTip => Strings.CodeGen_GenerateInMemoryToolTip;
 
@@ -355,9 +366,10 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     /// <summary>無制限バイナリ列の除外チェックボックスのツールチップ</summary>
     public string ExcludeUnboundedBinaryToolTip => Strings.CodeGen_ExcludeUnboundedBinaryToolTip;
 
-    partial void OnTargetSqlServerChanged(bool value) => RefreshPreview();
+    // 対象 DB の選択は同期支援の欄の表示可否（両方言のときだけ意味を持つ）にも効くため、派生を再通知する
+    partial void OnTargetSqlServerChanged(bool value) => RaiseDerivedChanged();
 
-    partial void OnTargetSqliteChanged(bool value) => RefreshPreview();
+    partial void OnTargetSqliteChanged(bool value) => RaiseDerivedChanged();
 
     /// <summary>生成されるファイルのプレビュー（「ファイル名 → namespace」の一覧。設定に追従して更新）</summary>
     public ObservableCollection<string> PreviewFiles { get; } = new();
@@ -422,6 +434,18 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     // インメモリ実装の切替は Repository バケット（契約＋インメモリ実装）の有無を変えるため、表示制御・プレビューを追従させる
     partial void OnGenerateInMemoryRepositoriesChanged(bool value) => RaiseDerivedChanged();
 
+    // 同期支援の切替は Sync バケット（同期記述子・デコレータ・DI）の有無を変えるため、プレビューを追従させる
+    partial void OnGenerateSyncSupportChanged(bool value) => RaiseDerivedChanged();
+
+    /// <summary>
+    /// 同期支援のチェック欄を表示するか（QuickER 版 Repository で SQL Server と SQLite の両方を対象にしたときのみ）。
+    /// </summary>
+    /// <remarks>
+    /// 同期はサーバー＝SQL Server・ローカル＝SQLite のハイブリッド構成専用のため、片方言だけの構成では
+    /// 選べても生成できない。選べない構成では欄ごと隠して、生成してからエラーで気づく形にしない。
+    /// </remarks>
+    public bool ShowSyncSupport => GenerateRepositories && TargetSqlServer && TargetSqlite;
+
     partial void OnGenerateValueObjectsChanged(bool value) => RaiseDerivedChanged();
 
     // パッケージ参照モードの切替は Runtime ファイルの有無を変えるため、生成されるファイルのプレビューを追従させる
@@ -475,6 +499,8 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
         OnPropertyChanged(nameof(ShowValueObjectNamespace));
         OnPropertyChanged(nameof(ShowRepositoryDialectTargets));
         OnPropertyChanged(nameof(ShowExcludeUnboundedBinary));
+        // 同期支援の欄はQuickER 版 Repository の選択と対象 DB（両方言）に連動する
+        OnPropertyChanged(nameof(ShowSyncSupport));
         RefreshPreview();
     }
 
@@ -599,6 +625,9 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             }
             // インメモリ実装（テスト用）は排他ラジオと独立のため、保存値をそのまま復元する
             GenerateInMemoryRepositories = settings.GenerateInMemoryRepositories;
+            // 同期支援は対象 DB の選択（両方言）に意味が依存するが、保存値はそのまま復元する
+            // （欄の表示は ShowSyncSupport が連動し、成立しない構成は生成時の診断が止める）
+            GenerateSyncSupport = settings.GenerateSyncSupport;
             // 属性系（UI 非表示）は読込値を保持し、ToSettings / ToOptions で書き戻す（GUI 経由でも値が失われない）
             _includeDataAnnotations = settings.IncludeDataAnnotations;
             _includeJsonIgnoreOnParentNavigation = settings.IncludeJsonIgnoreOnParentNavigation;
@@ -658,6 +687,8 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             RepositoryDialects = SelectedRepositoryDialects(),
             GenerateEfCore = GenerateEfCore,
             GenerateInMemoryRepositories = GenerateInMemoryRepositories,
+            // 選択できない構成（片方言）では保存値をそのまま持ち越さず落とす（隠れた欄の値で生成が止まらないように）
+            GenerateSyncSupport = ShowSyncSupport && GenerateSyncSupport,
             UseRuntimePackages = UseRuntimePackages,
             GenerateRemoteContracts = GenerateRemoteContracts,
             GenerateRemoteServices = GenerateRemoteServices,

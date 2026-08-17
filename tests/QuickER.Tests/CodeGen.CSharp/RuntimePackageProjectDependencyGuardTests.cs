@@ -201,6 +201,32 @@ public sealed class RuntimePackageProjectDependencyGuardTests
         projects.Should().ContainSingle().Which.Should().EndWith("QuickER.Runtime.csproj");
     }
 
+    /// <summary>Sync パッケージは PackageReference を 1 つも持たない（BCL のみ・ADO / EF Core / DI なし）</summary>
+    [Fact(
+        DisplayName = "QuickER.Runtime.Sync は PackageReference ゼロ（BCL のみ・Core への ProjectReference だけ）"
+    )]
+    public void Sync_HasNoPackageReferences()
+    {
+        var packages = PackageReferences("src/QuickER.Runtime.Sync/QuickER.Runtime.Sync.csproj");
+
+        packages
+            .Should()
+            .BeEmpty(
+                "同期エンジンは中立契約（IRepository / ISqlExecutor / ConcurrencyMode）だけを使うため BCL のみに依存し、"
+                    + "いかなる NuGet 依存も持ってはならない（ADO（SqlClient / Sqlite）／EF Core／DI 系が混ざってはならない。"
+                    + "DI 登録拡張 AddGeneratedSyncSupport と per-entity の記述子・デコレータ・直結差分ソースは"
+                    + "スキーマ依存物として生成側に出力される）"
+            );
+
+        // 依存はコアへの ProjectReference のみ（方言プロジェクトを参照しない）
+        var projects = ProjectReferences("src/QuickER.Runtime.Sync/QuickER.Runtime.Sync.csproj");
+        projects.Should().ContainSingle().Which.Should().EndWith("QuickER.Runtime.csproj");
+
+        FrameworkReferences("src/QuickER.Runtime.Sync/QuickER.Runtime.Sync.csproj")
+            .Should()
+            .BeEmpty(NoFrameworkReferenceReason);
+    }
+
     /// <summary>AspNetCore 以外のパッケージが FrameworkReference を持たないことの理由文（逆表明の共有文言）</summary>
     private const string NoFrameworkReferenceReason =
         "共有フレームワーク参照（FrameworkReference）を持ってよいのは QuickER.Runtime.AspNetCore だけで、"

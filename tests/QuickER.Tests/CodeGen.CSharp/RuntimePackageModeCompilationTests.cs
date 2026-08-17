@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using AwesomeAssertions;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -893,7 +893,7 @@ internal sealed class RuntimeReferenceSet
         "Microsoft.EntityFrameworkCore.Abstractions",
         "Microsoft.Extensions.DependencyInjection",
         "Microsoft.Extensions.DependencyInjection.Abstractions",
-        // 配布ランタイム 6 パッケージ。テストプロジェクトは公開 API 面のスナップショット検証
+        // 配布ランタイム 7 パッケージ。テストプロジェクトは公開 API 面のスナップショット検証
         // （PublicApi/）のためだけにこれらを参照しており、その実アセンブリが TPA に載る。
         // 本テストは同じ型をソースからその場でコンパイルするため、混ざると同名型が 2 アセンブリに
         // 存在して CS0433（型があいまい）になる。参照集合からは常に外す。
@@ -903,6 +903,7 @@ internal sealed class RuntimeReferenceSet
         "QuickER.Runtime.EntityFrameworkCore",
         "QuickER.Runtime.InMemory",
         "QuickER.Runtime.AspNetCore",
+        "QuickER.Runtime.Sync",
     ];
 
     public IReadOnlyList<MetadataReference> Build()

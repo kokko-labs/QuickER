@@ -45,6 +45,15 @@ public static class RuntimePackages
     public const string AspNetCore = "QuickER.Runtime.AspNetCore";
 
     /// <summary>
+    /// 双方向同期エンジンパッケージ（DB 非依存・BCL のみ依存）の ID＝固定名前空間。
+    /// </summary>
+    /// <remarks>
+    /// 同期の固定エンジン（<c>SyncEngine</c>・ジャーナル・セッション抑制・結果／競合レコード）を収載する。
+    /// per-entity の同期記述子・ジャーナル記録デコレータ・直結差分ソース・DI 登録はスキーマ依存物のため常に生成側に残る。
+    /// </remarks>
+    public const string Sync = "QuickER.Runtime.Sync";
+
+    /// <summary>
     /// パッケージ参照の案内（生成ヘッダ・GUI/CLI）に載せる既定バージョン。
     /// </summary>
     /// <remarks>

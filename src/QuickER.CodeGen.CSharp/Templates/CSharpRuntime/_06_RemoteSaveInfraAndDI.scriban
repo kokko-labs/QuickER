@@ -2342,6 +2342,25 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         }
     }
 
+{{~ if repository_dialect != "sqlserver" ~}}
+    /// <summary>Writes a row's INSERT values into the parameters a previous <see cref="BindInsertParameters"/> declared on the same command.</summary>
+    /// <remarks>
+    /// This is what lets one command carry a whole batch: adding parameters would replace the statement the provider
+    /// prepared, while writing values into the ones already there leaves it in place. It walks
+    /// <see cref="InsertProperties"/> in the same order <see cref="BindInsertParameters"/> did, so the parameter at each
+    /// position belongs to the property at that position - which holds because the only caller declares and rebinds on
+    /// one command it owns for the length of the batch.
+    /// </remarks>
+    public void RebindInsertParameters({{ sql_command_type }} command, EntityBase entity)
+    {
+        for (var index = 0; index < InsertProperties.Count; index++)
+        {
+            var value = {{ if generate_value_objects }}SqlParameterValue.Unwrap(InsertProperties[index].GetValue(entity)){{ else }}InsertProperties[index].GetValue(entity){{ end }};
+            command.Parameters[index].Value = value ?? DBNull.Value;
+        }
+    }
+
+{{~ end ~}}
     /// <summary>Binds the UPDATE parameters (non-key columns plus the primary key) (shared by update and graph update).</summary>
     public void BindUpdateParameters({{ sql_command_type }} command, EntityBase entity)
     {

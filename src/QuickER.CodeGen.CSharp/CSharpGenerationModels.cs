@@ -23,6 +23,122 @@ internal sealed class CSharpGenerationModel
 
     /// <summary>EF Core（DbContext・Fluent 構成）の生成モデル。GenerateEfCore が OFF のときは null</summary>
     public CSharpEfCoreModel? EfCore { get; init; }
+
+    /// <summary>
+    /// 同期対象テーブル（<c>rowversion</c> 列を持つテーブル）の生成モデル一覧。FK トポロジカル順（親が先）。
+    /// </summary>
+    /// <remarks><c>GenerateSyncSupport</c> が OFF のときは空（テンプレートの同期ブロックはスコープ側で落ちる）。</remarks>
+    public IReadOnlyList<CSharpSyncTableModel> SyncTables { get; init; } = [];
+}
+
+/// <summary>1 つの同期対象テーブル（<c>rowversion</c> 列を持つテーブル）の生成モデル</summary>
+/// <remarks>
+/// 同期支援は「サーバー（SQL Server）＋ローカル（SQLite）」の 2 方言を同時に扱うため、方言別のクォート規則を
+/// テンプレートのスコープ変数（<c>quote_open</c> 等）から得られない。SQL 文はここで両方言分を組み立てて渡す。
+/// </remarks>
+internal sealed class CSharpSyncTableModel
+{
+    /// <summary>対象の Entity クラス名（例 <c>SyncItemEntity</c>）</summary>
+    public required string EntityClassName { get; init; }
+
+    /// <summary>対象の Repository 契約インターフェイス名（例 <c>ISyncItemRepository</c>）</summary>
+    public required string InterfaceName { get; init; }
+
+    /// <summary>主キーの C# 型名（値オブジェクト有効時は VO 型名）</summary>
+    public required string KeyTypeName { get; init; }
+
+    /// <summary>対象テーブル名（ジャーナルへ記録する識別子でもある）</summary>
+    public required string TableName { get; init; }
+
+    /// <summary>直結差分ソースのクラス名（例 <c>SyncItemDirectSyncSource</c>）</summary>
+    public required string SourceClassName { get; init; }
+
+    /// <summary>HTTP 差分ソースのクラス名（例 <c>HttpSyncItemSyncSource</c>・リモートサービス生成時のみ出力）</summary>
+    public required string HttpSourceClassName { get; init; }
+
+    /// <summary>
+    /// リモートエンドポイントのルート名（例 <c>SyncItem</c>）＝<see cref="CSharpRepositoryModel.RemoteRouteName"/> と同値。
+    /// </summary>
+    /// <remarks>
+    /// 同期専用エンドポイント（<c>POST {prefix}/{ルート名}/Sync*</c>）はサーバー側の <c>RemoteServer</c> バケットが
+    /// <c>sync_tables</c> を直接ループして張るため、リポジトリモデルを引かずにルート名を解決できるよう写しておく。
+    /// </remarks>
+    public required string RemoteRouteName { get; init; }
+
+    /// <summary>同期記述子のクラス名（例 <c>SyncItemSyncTable</c>）</summary>
+    public required string TableClassName { get; init; }
+
+    /// <summary>ジャーナル記録デコレータのクラス名（例 <c>JournalingSyncItemRepository</c>）</summary>
+    public required string DecoratorClassName { get; init; }
+
+    /// <summary>主キーのプロパティ名</summary>
+    public required string KeyPropertyName { get; init; }
+
+    /// <summary>サーバー側の差分取得 SQL（C# 文字列リテラル・SQL Server クォート・昇順）</summary>
+    public required string ServerChangesSql { get; init; }
+
+    /// <summary>サーバー側の全キー取得 SQL（C# 文字列リテラル・SQL Server クォート）</summary>
+    public required string ServerKeysSql { get; init; }
+
+    /// <summary>ローカルのアンカー導出 SQL（C# 文字列リテラル・SQLite クォート・ミラー列の MAX）</summary>
+    public required string LocalAnchorSql { get; init; }
+
+    /// <summary>ローカルの全キー取得 SQL（C# 文字列リテラル・SQLite クォート）</summary>
+    public required string LocalKeysSql { get; init; }
+
+    /// <summary>ローカルの存在確認 SQL（C# 文字列リテラル・SQLite クォート・<c>@keys</c> のコレクション展開）</summary>
+    public required string LocalExistingKeysSql { get; init; }
+
+    /// <summary>ローカルの全行削除 SQL（C# 文字列リテラル・SQLite クォート・洗い替えの前半）</summary>
+    public required string LocalDeleteAllSql { get; init; }
+
+    /// <summary>エンティティからミラー版を読む式（VO 有効時は内包値を取り出す）</summary>
+    public required string RowVersionReadExpression { get; init; }
+
+    /// <summary>デコレータの削除経路で <c>existing</c> 変数からミラー版を読む式</summary>
+    public required string RowVersionReadExistingExpression { get; init; }
+
+    /// <summary>エンティティへミラー版を書く式（VO 有効時は再ラップする）</summary>
+    public required string RowVersionWriteExpression { get; init; }
+
+    /// <summary>キー変数 <c>key</c> をジャーナルのテキスト形へ変換する式</summary>
+    public required string FormatKeyExpression { get; init; }
+
+    /// <summary>デコレータで <c>entity</c> の主キーをテキスト形へ変換する式</summary>
+    public required string FormatKeyEntityExpression { get; init; }
+
+    /// <summary>デコレータで引数 <c>id</c> をテキスト形へ変換する式</summary>
+    public required string FormatKeyIdExpression { get; init; }
+
+    /// <summary>ジャーナルのテキスト形 <c>keyText</c> から主キーを復元する式</summary>
+    public required string ParseKeyExpression { get; init; }
+
+    /// <summary>デコレータへ追加で挿入する委譲メンバー群（名前付きクエリ・重複事前チェック等。整形済み・無ければ空文字）</summary>
+    public string DecoratorDelegationBlock { get; init; } = string.Empty;
+
+    /// <summary>
+    /// このテーブルの無制限バイナリ列（除外列）の C# プロパティ名一覧（宣言順。除外オプション OFF・該当列なしでは空）。
+    /// </summary>
+    /// <remarks>
+    /// 行の転送（SELECT / UPDATE）から外れる列＝通常の同期では運ばれない列。空でなければ同期の
+    /// <c>IncludeUnboundedBinary</c> 経路と洗い替えの損失ガードが意味を持つ。
+    /// </remarks>
+    public IReadOnlyList<string> BinaryColumnPropertyNames { get; init; } = [];
+
+    /// <summary>同期記述子へ足す実装インターフェイス宣言（除外列があるとき <c>, ISyncBinaryColumns&lt;キー型&gt;</c>・無ければ空文字）</summary>
+    public string BinaryInterfaceDeclaration { get; init; } = string.Empty;
+
+    /// <summary>直結差分ソースへ挿入する除外列アクセサ実装（整形済み・無ければ空文字）</summary>
+    public string DirectSourceBinaryBlock { get; init; } = string.Empty;
+
+    /// <summary>HTTP 差分ソースへ挿入する除外列アクセサ実装（整形済み・無ければ空文字）</summary>
+    public string HttpSourceBinaryBlock { get; init; } = string.Empty;
+
+    /// <summary>同期記述子へ挿入するローカル側の除外列アクセサ実装（整形済み・無ければ空文字）</summary>
+    public string TableBinaryBlock { get; init; } = string.Empty;
+
+    /// <summary>ジャーナル記録デコレータへ挿入する除外列アクセサ（Read は素通し・Write は journal-first。無ければ空文字）</summary>
+    public string DecoratorBinaryBlock { get; init; } = string.Empty;
 }
 
 /// <summary>EF Core 用コード（DbContext と OnModelCreating の Fluent 構成）のルート生成モデル</summary>

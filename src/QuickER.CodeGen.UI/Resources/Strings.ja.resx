@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <root>
   <!--
     日本語サテライトリソース。中立（英語）の Strings.resx と同じキー集合を保つこと（ResxKeyParityTests がキー集合一致を検証）。
@@ -102,6 +102,12 @@
   </data>
   <data name="CodeGen_GenerateInMemory" xml:space="preserve">
     <value>インメモリ実装 (テスト用) を生成する</value>
+  </data>
+  <data name="CodeGen_GenerateSyncSupport" xml:space="preserve">
+    <value>双方向同期の支援コードを生成する</value>
+  </data>
+  <data name="CodeGen_GenerateSyncSupportToolTip" xml:space="preserve">
+    <value>サーバー（SQL Server）＋ローカル（SQLite）構成の同期エンジン・同期記述子・ジャーナル記録デコレータ・直結差分ソース・DI 登録を生成します。&#xD;&#xA;対象は rowversion 列を持つテーブルだけで、サーバーには追加スキーマを作らず、ローカルにのみ共有ジャーナル 1 テーブルを実行時に用意します。</value>
   </data>
   <data name="CodeGen_GenerateInMemoryToolTip" xml:space="preserve">
     <value>DB 非依存のインメモリ Repository（プロトタイピング・単体テスト向け）を生成します。ランタイムの NuGet パッケージ参照モードとは併用できません</value>

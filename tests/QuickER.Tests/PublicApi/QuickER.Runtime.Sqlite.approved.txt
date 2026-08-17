@@ -59,6 +59,7 @@ public sealed class QuickER.Runtime.Sqlite.EntitySaveMetadata
     public void BindInsertParameters(Microsoft.Data.Sqlite.SqliteCommand command, QuickER.Runtime.EntityBase entity)
     public void BindKeyParameter(Microsoft.Data.Sqlite.SqliteCommand command, object id)
     public void BindUpdateParameters(Microsoft.Data.Sqlite.SqliteCommand command, QuickER.Runtime.EntityBase entity)
+    public void RebindInsertParameters(Microsoft.Data.Sqlite.SqliteCommand command, QuickER.Runtime.EntityBase entity)
 
 public sealed class QuickER.Runtime.Sqlite.EntitySaveMetadata.RawSqlRowPlan
     public .ctor()

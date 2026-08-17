@@ -90,6 +90,15 @@ public class CSharpGenerationSettings
     /// </summary>
     public bool GenerateInMemoryRepositories { get; set; }
 
+    /// <summary>
+    /// サーバー（SQL Server）＋ローカル（SQLite）構成の双方向同期支援を生成するか（既定 false）
+    /// </summary>
+    /// <remarks>
+    /// 対象 DB が sqlserver と sqlite のちょうど 2 つで、かつ rowversion 列を持つテーブルが必要
+    /// （満たさない構成は生成時に診断エラーになる）。
+    /// </remarks>
+    public bool GenerateSyncSupport { get; set; }
+
     // ===== リモート対応 =====
 
     /// <summary>
@@ -180,6 +189,7 @@ public class CSharpGenerationSettings
             RepositoryDialects = RepositoryDialects,
             GenerateEfCore = GenerateEfCore,
             GenerateInMemoryRepositories = GenerateInMemoryRepositories,
+            GenerateSyncSupport = GenerateSyncSupport,
             UseRuntimePackages = UseRuntimePackages,
             GenerateRemoteContracts = GenerateRemoteContracts,
             GenerateRemoteServices = GenerateRemoteServices,

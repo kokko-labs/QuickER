@@ -44,7 +44,7 @@ jobs:
       - name: テスト
         run: dotnet test QuickER.slnx --no-build --logger "console;verbosity=normal"
 
-      - name: パッケージ生成（ランタイム6種+CLI）
+      - name: パッケージ生成（ランタイム7種+CLI）
         # 上の「ビルド」ステップは Debug 構成だが、dotnet pack は .NET 8 以降の SDK 既定で
         # Release を対象にするため --no-build だと Release バイナリ不在で失敗する（NU5026）。
         # ここでは pack に事前ビルドをさせる（-c Release 明示・ci.yml の同名ステップと同じ規約）。
@@ -57,6 +57,7 @@ jobs:
           dotnet pack src/QuickER.Runtime.EntityFrameworkCore/QuickER.Runtime.EntityFrameworkCore.csproj -c Release -p:ContinuousIntegrationBuild=true --output ${{ runner.temp }}/nupkg
           dotnet pack src/QuickER.Runtime.InMemory/QuickER.Runtime.InMemory.csproj -c Release -p:ContinuousIntegrationBuild=true --output ${{ runner.temp }}/nupkg
           dotnet pack src/QuickER.Runtime.AspNetCore/QuickER.Runtime.AspNetCore.csproj -c Release -p:ContinuousIntegrationBuild=true --output ${{ runner.temp }}/nupkg
+          dotnet pack src/QuickER.Runtime.Sync/QuickER.Runtime.Sync.csproj -c Release -p:ContinuousIntegrationBuild=true --output ${{ runner.temp }}/nupkg
           dotnet pack src/QuickER.Cli/QuickER.Cli.csproj -c Release -p:ContinuousIntegrationBuild=true --output ${{ runner.temp }}/nupkg
 
       - name: 生成物一覧を表示

@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net10.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>
@@ -30,6 +30,7 @@
     <ProjectReference Include="..\..\src\QuickER.Runtime.EntityFrameworkCore\QuickER.Runtime.EntityFrameworkCore.csproj" />
     <ProjectReference Include="..\..\src\QuickER.Runtime.InMemory\QuickER.Runtime.InMemory.csproj" />
     <ProjectReference Include="..\..\src\QuickER.Runtime.AspNetCore\QuickER.Runtime.AspNetCore.csproj" />
+    <ProjectReference Include="..\..\src\QuickER.Runtime.Sync\QuickER.Runtime.Sync.csproj" />
   </ItemGroup>
 
   <ItemGroup>

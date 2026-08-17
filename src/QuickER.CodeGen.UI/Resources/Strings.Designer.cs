@@ -102,6 +102,18 @@ namespace QuickER.CodeGen.UI.Resources {
             }
         }
 
+        public static string CodeGen_GenerateSyncSupport {
+            get {
+                return ResourceManager.GetString("CodeGen_GenerateSyncSupport", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_GenerateSyncSupportToolTip {
+            get {
+                return ResourceManager.GetString("CodeGen_GenerateSyncSupportToolTip", resourceCulture);
+            }
+        }
+
         public static string CodeGen_GenerateInMemoryToolTip {
             get {
                 return ResourceManager.GetString("CodeGen_GenerateInMemoryToolTip", resourceCulture);

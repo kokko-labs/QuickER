@@ -531,6 +531,7 @@ catch (SaveConflictException ex) when (ex.Reason == SaveConflictReason.Modified)
 - **生 SQL** で明示的に SELECT すれば取得できる（下記の運用例）
 - **EF Core モード（`DbSet` 経由のクエリ / `SaveChanges`）には適用されない**（EF Core の列選択は EF Core の責務）
 - インメモリ Repository（`GenerateInMemoryRepositories`）は実 DB とパリティ（同じ除外挙動）
+- **双方向同期でも行の転送からは外れます**。列単位でコピーさせる方法は同期支援の[無制限バイナリ列](#無制限バイナリ列)を参照してください
 
 除外列の読み書きは生 SQL でも行えます（他の手段は後述）:
 
@@ -645,6 +646,181 @@ var local   = provider.GetRequiredKeyedService<ICustomerRepository>("local");
 - **ミラーの鮮度は誰も保証しません。** 列には最後に書かれた値が入っているだけです。同期を飛ばしたまま古い値で押し戻せばサーバーが競合として拒否しますが、これは意図した結果です（再取得して適用し直してください）。
 - **ローカル側の `ForceOverwrite` は no-op です**（外すべきガードがありません）。
 - EF Core 版 Repository はマルチターゲットと併用できない（診断エラー）ため、ここで説明したミラーは QuickER 版 Repository の話です。
+
+ミラーを実際に同期させる処理は、この 2 つの Repository を使って自分で書くこともできますし、[双方向同期の支援](#双方向同期の支援--generate-sync-support)に生成させることもできます。
+
+## 双方向同期の支援（--generate-sync-support）
+
+上のマルチターゲット構成は、ローカルにサーバーの版をミラーする場所を与えます。`--generate-sync-support`（quicker.json の `GenerateSyncSupport`・GUI では対象 DB を両方選んだときに現れる「双方向同期の支援コードを生成する」チェック）は、その 2 つを実際に同期させる仕掛けを、サーバーを正として生成します。
+
+前提は「実効方言が `sqlserver`（サーバー）と `sqlite`（ローカル）のちょうど 2 つ」「QuickER 版 Repository の実装を生成する」「`rowversion` 列を持つテーブルが 1 つ以上ある」の 3 つです。**同期対象になるのはその列を持つテーブルだけ**で（差分走査も版ガードもその列の上に成り立っています）、拾われたテーブルは生成時の Info 診断に一覧されます。その列が両者で何を意味するかは[マルチターゲットでの rowversion 列](#マルチターゲットでの-rowversion-列)にあり、この節はその上に載る仕掛けの話です。
+
+### どこに何を作るか
+
+サーバー側には**追加スキーマを一切作りません**。ローカルにだけ共有テーブル `quicker_sync_journal` を初回利用時に `CREATE TABLE IF NOT EXISTS` で用意し、オフライン編集（テーブル・キー・操作・削除時はその行が持っていた版）を記録します。
+
+再開点は**保存せず導出**します。ローカル行のミラー版の最大値がそれで、データと食い違い得る管理行が存在しません。この導出が正しいことは 2 つの性質に支えられており、どちらも外せません——サーバーの変更は版の昇順で取得し、バッチはローカル 1 トランザクションで適用する。どこで中断してもローカルには順序付きストリームの接頭辞だけが残り、その最大値が次回の再開点そのものになります。ローカルで作られてまだアップロードしていない行はミラー版を持たないため、最大値から自然に外れます。
+
+1 回のパスの上限は `MIN_ACTIVE_ROWVERSION()` で、実行ごとに 1 回だけ取得します。後からコミットされた行が先にコミットされた行より小さい版を持ち得るため、「現在の最大値まで」で読むと未コミットの行を跨いで読み飛ばし、二度と戻ってこられなくなるからです。
+
+### 組み立て方
+
+```csharp
+services.AddGeneratedSqlServerRepositories(serviceKey: "server", sqlServerConn);
+services.AddGeneratedSqliteRepositories(serviceKey: "local", sqliteConn);
+services.AddGeneratedSyncSupport(serverServiceKey: "server", localServiceKey: "local");
+
+// キーで解決するローカルのリポジトリは、全書き込みを記録するデコレータへ差し替わっている
+var local = provider.GetRequiredKeyedService<ICustomerRepository>("local");
+
+var result = await provider.GetRequiredService<SyncEngine>().SyncAsync(cancellationToken: ct);
+
+if (result.HasConflicts)
+{
+    foreach (var conflict in result.Conflicts)
+    {
+        // conflict はテーブル・キー・操作・理由・両者の行を持つ
+    }
+}
+```
+
+DI 登録は 2 つの半分に分かれており、サーバー側の半分をどちらにするかだけで転送経路が決まります。
+
+| 呼び出し | 登録されるもの |
+|---|---|
+| `AddGeneratedSyncEngine(localServiceKey)` | ローカル側の半分＝ジャーナル・テーブル記述子・エンジン・ローカル Repository を包むジャーナル記録デコレータ |
+| `AddGeneratedDirectSyncSources(serverServiceKey)` | サーバー側の半分（このプロセスが持つ DB 接続で読む） |
+| `AddGeneratedHttpSyncSources(baseAddress)` / `(httpClientFactory)` | サーバー側の半分（HTTP 越しに読む。下記） |
+| `AddGeneratedSyncSupport(serverServiceKey, localServiceKey)` | 上の 2 つを合わせた全直結構成（両方の DB が同一プロセスから届く、いちばん多い形） |
+
+キー引数はいずれも `null` を受け取れ、これは「値が null のキー」ではなく**非 keyed の通常登録**を指します（keyed 登録は null キーを取れないため、両者が衝突することはありません）。サーバー側の半分を呼び忘れても黙って壊れることはなく、エンジンの解決がソース不在で失敗します。
+
+1 回の実行はアップロードが先、ダウンロードが後です。テーブルは外部キー順（書き込みは親から・削除は子から）で巡ります。つまみは `SyncOptions` です:
+
+| オプション | 既定 | 意味 |
+|---|---|---|
+| `DownloadBatchSize` | 500 | 1 バッチで取得し、ローカル 1 トランザクションで適用する行数 |
+| `PropagateDeletes` | `true` | サーバーから消えたキーのローカル行を削除するか。判定はキー全比較で、サーバーの各テーブルをキーだけ 1 回走査するコストがかかるため、テーブルが大きいときは off にして低頻度で回す |
+| `ConflictPolicy` | `Collect` | サーバーと衝突したローカル変更の扱い（[競合](#競合)） |
+| `IncludeUnboundedBinary` | `false` | 行の転送から外れる無制限バイナリ列も運ぶか（[無制限バイナリ列](#無制限バイナリ列)）。除外列を持たない生成物では意味を持ちません |
+
+実行結果は `SyncResult` が報告します:
+
+| メンバー | 意味 |
+|---|---|
+| `Uploaded` | サーバーへ届いたローカル変更 |
+| `Downloaded` | ローカルへ適用したサーバー行 |
+| `DeletedLocally` | サーバーにキーが無くなったため削除したローカル行 |
+| `Discarded` | 送らずに決着した変更＝行が既に無い陳腐化した意図、または `ServerWins` でジャーナルごと捨てた分 |
+| `Conflicts` / `HasConflicts` | 再生できなかったローカル変更（ジャーナルに残る） |
+
+1 件の再生の結果は 2 通りではなく**3 通り**で、`Uploaded` / `Discarded` / `Conflicts` がちょうどその 3 つです（送った／送るものが無かった／拒まれた）。真ん中をどちらかへ畳むと、何も送っていないのに「変更を届けた」と報告することになります。`Uploaded` と `Discarded` が数えるのはジャーナルのエントリではなく行です（オフラインで何度も編集した行は最新の意図 1 件へ畳まれます）。ただし何も送らない `ServerWins` だけは、捨てたエントリ数がそのまま `Discarded` になります。
+
+### HTTP 越しにサーバーへ届く
+
+`--generate-sync-support` と [`--generate-remote-services`](#リモートサービス--generate-remote-services-3-階層構成) を併用すると、DB 接続の代わりに HTTP でサーバーへ届くクライアントが加わります。どちらに差し替えても変わるのは登録 1 行だけです（エンジンはどちらでも同じ `ISyncServerSource<TEntity, TKey>` を解決するため）。
+
+```csharp
+// クライアント側: ローカルは従来どおり・サーバー側の半分だけが HTTP になる
+services.AddGeneratedSqliteRepositories(serviceKey: "local", sqliteConn);
+services.AddGeneratedHttpSyncSources("https://example.com/quicker");   // HttpClient ファクトリ版もある
+services.AddGeneratedSyncEngine(localServiceKey: "local");
+
+// サーバー側: 通常の Repository ＋ エンドポイントが答えるためのソース ＋ エンドポイントのマップ
+services.AddGeneratedSqlServerRepositories(sqlServerConn);
+services.AddGeneratedDirectSyncSources(serverServiceKey: null);
+app.MapGeneratedRemoteEndpoints().RequireAuthorization();
+```
+
+既存のエンドポイントグループへ 3 本（`POST {prefix}/{エンティティ}/…` の `SyncCeiling` / `SyncChanges` / `SyncKeys`）が加わります。これは差分ソースの薄い remoting で、各ハンドラは DI から `ISyncServerSource<,>` を解決して呼ぶだけ＝意味論の実装は 1 つを両経路が共有します。グループのメンバーなので、グループに掛けた `RequireAuthorization()` はそのまま効きます。アップロードは新しい経路を作らず、既存の CRUD／保存エンドポイントを通ります（`ConcurrencyMode` は既に転送され、版の競合は 409 として返ります）。
+
+サーバーは**クライアント別の状態を持ちません**。再開点はリクエストの anchor、上限は ceiling として毎回送られます。その裏返しとして上限は呼び出し側の値であり、導出アンカーの保証は「その回の `SyncCeiling` が返した値をそのまま送り返す」限りで成立します（自前で大きな ceiling を送ると、その下で実行中のトランザクションの行を恒久的に読み飛ばします）。バッチサイズが 0 以下なら 400 で拒否します。上限は設けていません——取り放題を止めるのはグループの認可の仕事だからです。
+
+### ローカル編集の捕まえ方
+
+生成される `Journaling{Entity}Repository` がローカルのリポジトリを包み、**全書き込み入口**（`InsertAsync` / `UpdateAsync` / `DeleteAsync` / `BulkInsertAsync` / `SaveAsync` 2 種）で記録します。保存フックでは足りません——グラフ保存でしか発火せず、直接の挿入や削除が素通りしてしまいます。
+
+記録は業務書き込みの**前**に行います。生成 Repository は接続を自分で管理するため、デコレータの INSERT を包んだ書き込みのトランザクションへ乗せられません。どちらかを先にせざるを得ず、意図を先に記録する方が安全です。業務書き込みが失敗した場合、ジャーナルには書かれなかった行のエントリが残りますが、アップロードはローカルの現在行を読み直して送るため「送るものが無い」として破棄されます。逆順にすると変更がそのまま失われます。
+
+**生 SQL は記録されません。** `ExecuteSqlAsync` は素通しで、文の形からはどの行が変わったかが読めないためジャーナルに書くキーがありません。その経路で変えた行は、別の何かが記録しない限りサーバーへ届きません。
+
+**保存フックには影響しません。** デコレータは包んだ Repository へそのまま委譲するため、`ISaveHook<T>` は従来どおり発火します——同期中にエンジン自身が適用する行に対しても発火します（同期の実行が抑制するのはジャーナル記録だけです）。洗い替え（下記）は `BulkInsertAsync` で書くため、通常の契約どおりフックは発火しません。1 つ知っておく価値があるのは、`BeforeSaveAsync` が `false` を返して止めた書き込みでもジャーナルにはエントリが残ることです（記録が先に走るため）。挿入なら読む行が無いので破棄され、更新ならその行が現在の内容（＝編集前のまま）で送られます。サーバーはそれを受け入れ、新しい版を採番します。
+
+### 無制限バイナリ列
+
+`--generate-sync-support` と [`--exclude-unbounded-binary-columns`](#無制限バイナリ列の除外excludeunboundedbinarycolumns) は併用できます。同期対象テーブルにある除外列は生成時に Info 診断で名指しされます。名指しする理由は、**同期が読み書きする「行」にそれらの列が入っていない**ためです（差分取得の SELECT は残りの列を明示列挙し、UPDATE は除外列に触れません）。
+
+既定（`IncludeUnboundedBinary = false`）ではその帰結が 3 つあり、意外なのは 3 つ目です。
+
+- サーバーから**降りてきた行**には blob が入っていません。
+- サーバーへ**上げる行**にも blob は載りません。
+- 受け取り側に**既にある** blob は残ります（更新は除外列に触れないため）。**ただし、その側にとって新しい行には残す中身が無く、列は空のまま届きます。** 「blob は温存される」は既にある行についてだけ真で、降りてきたばかりの行では偽です。空のローカル DB への初回同期では、したがって blob はすべて空になります。
+
+`SyncOptions.IncludeUnboundedBinary` を立てると、行の転送のあとに列を 1 本ずつ、両方向でコピーします。
+
+```csharp
+var result = await engine.SyncAsync(new SyncOptions { IncludeUnboundedBinary = true }, ct);
+```
+
+コピーは一時ファイルを経由するため、どちらの側も blob をメモリへ載せません（読みは渡されたストリームへ押し出し、書きは渡されたストリームから引き出す形なので、両者を繋ぐには間に何かが要ります。ファイルなら、書き込みが前もって必要とする長さもそのまま得られます）。HTTP 経路では[ストリーミングアクセサ](#無制限バイナリ列の除外excludeunboundedbinarycolumns)が使う既存のエンドポイント `GET`/`PUT`/`DELETE {prefix}/{エンティティ}/{列名}?id=` をそのまま使うため、新しいルートは増えません。
+
+列を別々にコピーすることから、2 点が従います。
+
+- **コピー元が NULL なら、コピー先も NULL にします。** この機能の目的は両側を揃えることなので、サーバー側に blob が無い行はローカルの blob を残さず消します。
+- **アップロードの後にサーバーの版を読み直します。** blob の書き込みも行への書き込みなので、サーバーの版は挿入・更新が返した値よりさらに進みます。古い版をミラーへ書くとローカルのアンカーが行の現在版より下に留まり、次のダウンロードがその行を「サーバー側の変更」として返してきます。
+
+**blob だけの編集も追跡されます。** `Write{列}Async`（およびファイル糖衣）は他の書き込みと同じくジャーナル記録デコレータを通り、意図を先に記録します。したがって「blob しか変えていないオフライン編集」もサーバーへ届きます。記録は `IncludeUnboundedBinary` に依存しません（何を送るかは送信時の判断で、生成時には決まらないため）。既定のまま同期すれば、行だけが送られてエントリは片付きます。
+
+代償は「変更行 1 件・列 1 本につき 1 往復」です。既定を OFF にしているのはこのためで、大きな blob を持つ表の行が頻繁に変わる構成では毎回その分を払うことになります。
+
+### 競合
+
+黙って解決することはありません。既定では、サーバーと衝突したローカル変更はジャーナルに残り、テーブル・キー・操作・理由・両者の行を添えて `SyncResult.Conflicts` に返ります。
+
+| `SyncConflictPolicy` | 挙動 |
+|---|---|
+| `Collect`（既定） | エントリをジャーナルに残して報告する（判断してから再実行） |
+| `ServerWins` | ジャーナルを捨て、ダウンロードがサーバー行でローカルを上書きする |
+| `LocalWins` | `ConcurrencyMode.ForceOverwrite` で再送し、サーバー行を上書きする |
+
+### ローカル DB の作り直し（RefreshAsync）
+
+`SyncEngine.RefreshAsync` は同期対象テーブルを全消しし、サーバーの行で入れ直します。用途は**ローカル DB の初回構築・失われた（壊れた）DB の復旧・長期間未同期で 1 行ずつ追いつく価値が無くなったときの作り直し**で、増分同期のためのものではありません（そちらは `SyncAsync` です）。
+
+```csharp
+var refreshed = await engine.RefreshAsync(new SyncRefreshOptions { BatchSize = 2000 }, ct);
+
+// refreshed.Tables はテーブル別の Deleted / Inserted（行を書いた順）、
+// refreshed.Deleted / .Inserted はその合計、.Elapsed は実行時間
+```
+
+未送信のローカル変更は失わずに拒否します。ジャーナルが空でなければ**何も消す前に** `SyncPendingChangesException` を送出し、テーブル別の内訳（`PendingChanges`・`PendingCount`）を添えます。呼び出し側は先に `SyncAsync` で送ってから洗い替えられます。`SyncRefreshOptions.Force` は「捨ててよい」という明示の指定で、捨てた件数は `SyncRefreshResult.DiscardedChanges` に出ます。
+
+ローカルの blob も同じ扱いで拒否します。同期対象テーブルが[無制限バイナリ列](#無制限バイナリ列)を持つ場合（行の転送に載らない＝作り直しでは戻ってこない）、**何も消す前に** `SyncUnboundedBinaryLossException` を送出し、テーブルごとに列を名指しします。答えは 2 つのフラグのどちらかで、いずれかの指定が要ります。
+
+| `SyncRefreshOptions` | 既定 | 意味 |
+|---|---|---|
+| `IncludeUnboundedBinary` | `false` | 行を書いたあとに除外列も降ろし直す（作り直したローカルが完全な複製になる） |
+| `DiscardLocalUnboundedBinaries` | `false` | 損失を受け入れる（blob が作り直せるローカルキャッシュのときの答え）。損失を許可するだけで、何かを降ろし直すわけではありません |
+
+除外列を持たない生成物ではこの例外は起きないため、挙動は従来どおりです。
+
+`BatchSize` の既定は **2000** で、通常同期のダウンロードより数倍大きくしてあります。1 バッチ＝1 ローカルトランザクションであり、洗い替えの速さはほぼここから来ること、そして途中で落ちても再実行で直るので細かい再開粒度の価値が低いことが理由です。上げる代償はメモリ（1 バッチを丸ごと保持する）と、HTTP 経由なら 1 応答の本文サイズです。大きなバイナリ列を持つテーブルは、上げるのではなく下げたい側です。
+
+速いのは、やらないことがあるからです——置き換える行との比較なし・バッチごとのアンカー導出なし・消えた行を探すキー集合の取得なし・ジャーナルの再生なし。親子 2 テーブル・2 万行・出荷時の既定どうしの実測で、通常同期の **3〜4.5 倍速**でした（両方の DB がローカルのときが上側、実 SQL Server をサーバーにしたときで 3 倍前後）。この比には構造的な上限があります。サーバーから行を読み出す時間は、どちらの経路も等しく払うためです。
+
+**通常同期の安い代替ではありません。** 転送するのは同期対象テーブルの**全行**なので、低速回線かつ大きなテーブルでは転送が支配的になり、2 回目以降は「変わった分だけ運ぶ」通常同期の方が安くなります。ローカル専用のテーブル（版列を持たないもの）は対象外で、まったく手を触れません。
+
+**実行全体は 1 トランザクションではありません。** 生成 Repository は接続を自分で管理するため、ここで作ったトランザクションに乗せられないからです。代わりに成り立っているのは「コミットするどの時点も、後の実行が再開できる状態である」ことです。削除は子から・書き戻しは親から進むので外部キーが宙に浮くことは無く、各テーブルの行は版の昇順で届くので、途中で止まったテーブルは「その版以下の全行」を持っています——これは導出アンカーが指す状態そのものです。単一トランザクションとの唯一の差は、**作り直しの途中のローカル DB が見える**ことです。最初の削除から最後のテーブルの最終行までの間、読み手にはどちらの DB より少ない行が見えます。失われるものはありませんが、画面が動いている裏で流す操作ではありません。
+
+### 既知の割り切り
+
+- **Repository を通らない書き込みは追跡されません。** 上記の生 SQL（`ExecuteSqlAsync`）はもちろん、別経路でローカル DB へ届く書き込みも同様です。ジャーナルが見えるのはデコレータが包む書き込み入口だけです。
+- **無制限バイナリ列は指定しない限り運ばれません**（`SyncOptions.IncludeUnboundedBinary`）。運ぶ場合の代償は「変更行 1 件・列 1 本につき 1 往復」です。[無制限バイナリ列](#無制限バイナリ列)を参照してください。
+- **EF Core 版 Repository とは併用できません。** 同期支援はマルチターゲット前提で、その組合せが元から排他だからです。
+- **HTTP 経路には `--generate-remote-services` が要ります。** 無くても直結ソースは生成されエンジンは動きますが、サーバーへ届くためのクライアントもエンドポイントもありません。
+- **ローカル側に版ガードはありません**（[マルチターゲットでの rowversion 列](#マルチターゲットでの-rowversion-列)）。ローカルの書き手どうしは依然として上書きし合い、エンジンが検出する競合はサーバー側の版についての話です。
+- 対応するランタイムパッケージは `QuickER.Runtime.Sync` です。
 
 ## リモート対応インターフェイス（--generate-remote-contracts）
 
@@ -779,6 +955,7 @@ DB なしでユニットテストするためのインメモリ実装を追加�
 | `QuickER.Runtime.EntityFrameworkCore` | EF Core 共通部品 | Microsoft.EntityFrameworkCore.Relational |
 | `QuickER.Runtime.InMemory` | インメモリエンジン（テスト用） | なし |
 | `QuickER.Runtime.AspNetCore` | 生成されるリモートエンドポイントのサーバー側固定エンジン | ASP.NET Core（NuGet 依存ではなく `FrameworkReference`） |
+| `QuickER.Runtime.Sync` | 双方向同期エンジン（ジャーナル・テーブル記述子・競合の型） | なし |
 
 パッケージ版とツール版はロックステップ（同一バージョン）で公開されるため、両者には同じバージョンを使ってください。0.x の間は minor 間の互換性を約束していません（[CONTRIBUTING](../CONTRIBUTING.ja.md) のバージョニング方針を参照）。DI 登録拡張・`QuickErDbContext`・エンティティ別実装などのスキーマ依存物は、本モードでも常に生成側に出力されます。
 
@@ -793,9 +970,10 @@ DB なしでユニットテストするためのインメモリ実装を追加�
 | `Runtime.EntityFrameworkCore.g.cs`（`{Runtime}.EntityFrameworkCore`） | `QuickER.Runtime.EntityFrameworkCore` | EF Core 共通部品（`TContext : DbContext` ジェネリックの Repository 基底・VO 翻訳プラグイン） |
 | `Runtime.InMemory.g.cs`（`{Runtime}.InMemory`） | `QuickER.Runtime.InMemory` | インメモリ基盤（ストア・Repository 基底・保存ステージング） |
 | `Runtime.AspNetCore.g.cs`（`{Runtime}.AspNetCore`） | `QuickER.Runtime.AspNetCore` | サーバー側固定エンジン（`RemoteServerEngine`＝リクエスト読み取り・エラー分類・詳細公開ポリシー・バイナリ転送の補助） |
-| `Repositories.g.cs`・`Repositories.SqlServer.g.cs` / `Repositories.Sqlite.g.cs` / `Repositories.EntityFrameworkCore.g.cs` / `Repositories.InMemory.g.cs`・`RemoteServer.g.cs` | —（対応パッケージなし＝常に生成） | スキーマ依存物のみ（per-entity の契約と実装・DI 登録・`QuickErDbContext` と Fluent 構成・HTTP クライアント・射影 DTO・per-entity のエンドポイント（`GeneratedRemoteEndpoints`）） |
+| `Runtime.Sync.g.cs`（`{Runtime}.Sync`） | `QuickER.Runtime.Sync` | 同期エンジン（`SyncEngine`・`SyncJournal`・`SyncTable<,>`・オプション／結果／競合の型。リモートサービス併用時は同期エンベロープと HTTP ソース基底） |
+| `Repositories.g.cs`・`Repositories.SqlServer.g.cs` / `Repositories.Sqlite.g.cs` / `Repositories.EntityFrameworkCore.g.cs` / `Repositories.InMemory.g.cs` / `Repositories.Sync.g.cs`・`RemoteServer.g.cs` | —（対応パッケージなし＝常に生成） | スキーマ依存物のみ（per-entity の契約と実装・DI 登録・`QuickErDbContext` と Fluent 構成・HTTP クライアント・射影 DTO・per-entity のエンドポイント（`GeneratedRemoteEndpoints`）・per-table の同期記述子とジャーナル記録デコレータ） |
 
-`Runtime.g.cs` は常に出力され、それ以降のファイルは有効にした機能の分だけ出力されます（方言ファイルは QuickER 版 Repository を生成するとき・EF Core ファイルは `GenerateEfCore`・インメモリファイルは `GenerateInMemoryRepositories`・ASP.NET Core ファイルは `GenerateRemoteServices` のときだけ）＝参照すべきパッケージの集合とそのまま一致します。
+`Runtime.g.cs` は常に出力され、それ以降のファイルは有効にした機能の分だけ出力されます（方言ファイルは QuickER 版 Repository を生成するとき・EF Core ファイルは `GenerateEfCore`・インメモリファイルは `GenerateInMemoryRepositories`・ASP.NET Core ファイルは `GenerateRemoteServices`・同期ファイルは `GenerateSyncSupport` のときだけ）＝参照すべきパッケージの集合とそのまま一致します。
 
 この構成のため、`--use-runtime-packages` の意味は 1 つに収まります。**`Runtime*.g.cs` を 1 本も出力せず、生成コードの `using` が `{Runtime}…` ではなく固定のパッケージ名前空間（`QuickER.Runtime`・`QuickER.Runtime.SqlServer` …）を指すようになる**、それだけです。`Repositories*` 側はモードの ON / OFF で内容が変わりません。
 

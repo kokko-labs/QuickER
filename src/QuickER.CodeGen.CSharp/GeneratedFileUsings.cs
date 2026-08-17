@@ -151,6 +151,18 @@ internal static class GeneratedFileUsings
         {
             yield return RuntimePackages.AspNetCore;
         }
+
+        // 同期支援の per-entity 生成物（記述子・デコレータ・直結差分ソース・DI）は、固定エンジン
+        // （SyncEngine・SyncJournal・SyncTable 基底）を持つ同期パッケージを参照する。
+        // サーバー実装ファイルも同期エンドポイントを張るとき同じパッケージを参照する
+        // （ISyncServerSource と同期エンベロープ＝エンドポイントは差分ソースの薄い remoting）。
+        if (
+            spec.Buckets.Contains(GenerationBucket.Sync)
+            || (spec.Buckets.Contains(GenerationBucket.RemoteServer) && options.GenerateSyncSupport)
+        )
+        {
+            yield return RuntimePackages.Sync;
+        }
     }
 
     /// <summary>このスペックの方言が SQLite かどうか（ADO using の出し分けに使う）</summary>
@@ -446,6 +458,39 @@ internal static class GeneratedFileUsings
                     yield return "System.Threading";
                     yield return "Microsoft.AspNetCore.Http.Metadata";
                 }
+                break;
+
+            // Sync: 双方向同期の固定エンジンと per-entity の記述子・デコレータ・直結差分ソース・DI 登録。
+            //   固定エンジン: AsyncLocal（System.Threading）・非同期（System.Threading.Tasks）・
+            //     集合演算とグルーピング（System.Linq / System.Collections.Generic）・
+            //     ジャーナルの記録時刻と主キーの往復書式（System / System.Globalization）・
+            //     洗い替えの所要時間計測（Stopwatch＝System.Diagnostics）。
+            //   per-entity: DI 登録拡張（Microsoft.Extensions.DependencyInjection）＝キー付き解決とデコレーション。
+            //   ADO・EF Core・ASP.NET Core への依存は一切持たない（中立契約 ISqlExecutor / IRepository のみを使う）。
+            //   リモートサービス併用時: HTTP 差分ソース（HttpSyncServerSource 基底・per-entity クライアント・
+            //     ベースアドレス版 DI の HttpClient / SocketsHttpHandler）が System.Net.Http を使う。
+            case GenerationBucket.Sync:
+                yield return "System";
+                yield return "System.Collections.Generic";
+                yield return "System.Diagnostics";
+                yield return "System.Globalization";
+                // 除外列（無制限バイナリ列）のコピー（Stream・一時ファイル）は固定エンジンが常に持つため、
+                // 除外オプションの有無に依らず System.IO を要求する（Repository バケットと同じ扱い）
+                yield return "System.IO";
+                yield return "System.Linq";
+                yield return "System.Threading";
+                yield return "System.Threading.Tasks";
+
+                if (options.GenerateRemoteServices)
+                {
+                    yield return "System.Net.Http";
+                }
+
+                if (spec.EmitSchemaDependent)
+                {
+                    yield return "Microsoft.Extensions.DependencyInjection";
+                }
+
                 break;
         }
     }

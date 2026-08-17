@@ -159,6 +159,13 @@ public static class GenerationConfigSchema
             "Data access",
             "Generate DB-independent in-memory Repository implementations for prototyping and testing (raw-SQL methods throw)."
         ),
+        new(
+            "GenerateSyncSupport",
+            "boolean",
+            false,
+            "Data access",
+            "Generate the bidirectional sync support (engine, per-table descriptors, journaling decorators, direct differential sources, DI) for a server (SQL Server) plus local (SQLite) setup. Requires exactly those two RepositoryDialects and at least one table with a rowversion column."
+        ),
         // リモート対応
         new(
             "GenerateRemoteContracts",

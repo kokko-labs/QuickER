@@ -243,7 +243,36 @@ public class RuntimeTestMatrixTests
                     "インメモリは擬似版を採番する SQL Server の代役として振る舞う（案 B のスコープ外）。"
                         + "ハイブリッド構成での併用は未検証"
                 ),
-                Gap("同期のリモート経路は案 B のスコープ外（同期ロジックはアプリ側の責務）")
+                Gap(
+                    "ミラー列をリモート面越しに往復させる専用テストは無い"
+                        + "（HTTP 越しに実 rowversion を運ぶ経路自体は SyncSupport 行が押さえている）"
+                )
+            )
+        ),
+        ["SyncSupport"] = new(
+            "双方向同期支援（差分ダウンロード・ジャーナル再生・削除伝搬・競合収集・ループ防止）",
+            Row(
+                Covered(),
+                Covered(),
+                NotApplicable("同期支援はマルチターゲット前提で、EF Core とは生成時に排他"),
+                NotApplicable(
+                    "同期はサーバー DB とローカル DB の 2 つの実 DB の間の話で、"
+                        + "インメモリにはミラーすべきサーバー版を採番する主体が居ない"
+                ),
+                Covered()
+            )
+        ),
+        ["SyncRefresh"] = new(
+            "洗い替え（全消し＋サーバー全行の流し込み・未送信変更の拒否と force・FK 順・アンカーの継続）",
+            Row(
+                Covered(),
+                Covered(),
+                NotApplicable("同期支援はマルチターゲット前提で、EF Core とは生成時に排他"),
+                NotApplicable(
+                    "洗い替えはサーバー DB の全行でローカル DB を作り直す操作で、"
+                        + "インメモリには作り直す先の実 DB が無い"
+                ),
+                Covered()
             )
         ),
         ["DialectPortability"] = new(
@@ -394,6 +423,14 @@ public class RuntimeTestMatrixTests
         new("MultiTargetRowVersionRuntimeTests", "MultiTargetRowVersion", Backend.AdoSqlServer),
         new("MultiTargetRowVersionRuntimeTests", "MultiTargetRowVersion", Backend.AdoSqlite),
         new("MultiTargetRowVersionSqliteRuntimeTests", "MultiTargetRowVersion", Backend.AdoSqlite),
+        new("SyncSqliteRuntimeTests", "SyncSupport", Backend.AdoSqlite),
+        new("SyncSqlServerRuntimeTests", "SyncSupport", Backend.AdoSqlServer),
+        new("SyncHttpRuntimeTests", "SyncSupport", Backend.Remote),
+        new("SyncSqlServerHttpRuntimeTests", "SyncSupport", Backend.Remote),
+        new("SyncSqliteRuntimeTests", "SyncRefresh", Backend.AdoSqlite),
+        new("SyncRefreshBenchmarkRuntimeTests", "SyncRefresh", Backend.AdoSqlite),
+        new("SyncSqlServerRuntimeTests", "SyncRefresh", Backend.AdoSqlServer),
+        new("SyncHttpRuntimeTests", "SyncRefresh", Backend.Remote),
         // --- 方言可搬性 ---
         new("GeneratedEfCoreSqliteRuntimeTests", "DialectPortability", Backend.EfCore),
         new("GeneratedEfCorePostgreSqlRuntimeTests", "DialectPortability", Backend.EfCore),

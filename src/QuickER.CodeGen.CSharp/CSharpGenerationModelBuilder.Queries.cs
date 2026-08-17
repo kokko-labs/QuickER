@@ -62,7 +62,8 @@ internal sealed partial class CSharpGenerationModelBuilder
         string DtoBlock,
         string RemoteClientBlock,
         string RemoteServerBlock,
-        string RemoteServerRecordsBlock
+        string RemoteServerRecordsBlock,
+        string DelegationBlock
     );
 
     /// <summary>クエリメソッドのペイロードパラメータ（HTTP 転送のエンベロープに載る引数。CancellationToken は含まない）</summary>
@@ -80,7 +81,8 @@ internal sealed partial class CSharpGenerationModelBuilder
         string ParameterList,
         string ReturnTypeName,
         string Summary,
-        IReadOnlyList<QueryPayloadParameter> PayloadParameters
+        IReadOnlyList<QueryPayloadParameter> PayloadParameters,
+        IReadOnlyList<string> ArgumentNames
     );
 
     /// <summary>1 クエリ分の生成済みメンバー（出し分け前の素材）</summary>
@@ -97,6 +99,7 @@ internal sealed partial class CSharpGenerationModelBuilder
         string.Empty,
         string.Empty,
         CSharpRepositoryModel.EmptyQueryImplBlocks,
+        string.Empty,
         string.Empty,
         string.Empty,
         string.Empty,
@@ -227,6 +230,9 @@ internal sealed partial class CSharpGenerationModelBuilder
         var remoteClientMembers = new List<string>();
         var remoteServerMaps = new List<string>();
         var remoteServerRecords = new List<string>();
+        // 同期支援のジャーナル記録デコレータは I{Entity}Repository を実装するため、名前付きクエリも委譲メンバーとして
+        // 実装しなければならない（読み取り専用なので記録はせず素通し）。契約と同じシグネチャを 1 箇所から出す。
+        var delegationMembers = new List<string>();
         var usedMethodNames = new HashSet<string>(ReservedQueryMethodNames, StringComparer.Ordinal);
 
         foreach (var query in queries)
@@ -239,6 +245,11 @@ internal sealed partial class CSharpGenerationModelBuilder
             }
 
             interfaceMembers.Add(members.InterfaceMember);
+
+            if (options.GenerateSyncSupport)
+            {
+                delegationMembers.Add(BuildDelegationMember(members.Shape));
+            }
 
             if (members.SharedImplMember is { } shared)
             {
@@ -289,8 +300,34 @@ internal sealed partial class CSharpGenerationModelBuilder
             string.Join("\n\n", dtoClasses),
             string.Join("\n\n", remoteClientMembers),
             string.Join("\n\n", remoteServerMaps),
-            string.Join("\n\n", remoteServerRecords)
+            string.Join("\n\n", remoteServerRecords),
+            string.Join("\n\n", delegationMembers)
         );
+    }
+
+    /// <summary>名前付きクエリの委譲メンバー（同期支援のジャーナル記録デコレータ用）を組み立てる</summary>
+    /// <remarks>
+    /// クエリは読み取りのみのため記録の対象にならず、内側のリポジトリへそのまま転送する。契約の
+    /// <c>ParameterList</c> と引数名リストを共有するので、契約とシグネチャがずれることはない。
+    /// </remarks>
+    private static string BuildDelegationMember(QueryMethodShape shape)
+    {
+        var builder = new StringBuilder("    /// <inheritdoc />\n");
+        AppendMethodHeader(
+            builder,
+            "public ",
+            shape.ReturnTypeName,
+            shape.MethodName,
+            shape.ParameterList
+        );
+        builder
+            .Append(" =>\n        inner.")
+            .Append(shape.MethodName)
+            .Append('(')
+            .Append(string.Join(", ", shape.ArgumentNames))
+            .Append(");");
+
+        return builder.ToString();
     }
 
     /// <summary>
@@ -847,7 +884,15 @@ internal sealed partial class CSharpGenerationModelBuilder
                 plan.ParameterList,
                 plan.ReturnTypeName,
                 plan.Summary,
-                plan.PayloadParameters
+                plan.PayloadParameters,
+                // 委譲メンバー用の完全な実引数列（宣言順＝ページング引数と CancellationToken まで含む）
+                (
+                    query.HasPaging
+                        ? plan.ArgumentNames.Concat(["take", "skip"])
+                        : plan.ArgumentNames
+                )
+                    .Concat(["cancellationToken"])
+                    .ToList()
             )
         );
     }

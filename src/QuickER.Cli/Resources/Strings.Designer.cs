@@ -216,6 +216,12 @@ namespace QuickER.Cli.Resources {
             }
         }
 
+        public static string Cli_Opt_GenerateSyncSupport {
+            get {
+                return ResourceManager.GetString("Cli_Opt_GenerateSyncSupport", resourceCulture);
+            }
+        }
+
         public static string Cli_Opt_GenerateRemoteContracts {
             get {
                 return ResourceManager.GetString("Cli_Opt_GenerateRemoteContracts", resourceCulture);

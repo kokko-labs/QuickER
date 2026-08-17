@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <root>
   <!--
     中立（既定）リソース＝英語。日本語は Strings.ja.resx サテライトで賦与する（ResxKeyParityTests がキー集合の一致を検証する）。
@@ -102,6 +102,12 @@
   </data>
   <data name="CodeGen_GenerateInMemory" xml:space="preserve">
     <value>Generate in-memory repositories (for testing)</value>
+  </data>
+  <data name="CodeGen_GenerateSyncSupport" xml:space="preserve">
+    <value>Generate bidirectional sync support</value>
+  </data>
+  <data name="CodeGen_GenerateSyncSupportToolTip" xml:space="preserve">
+    <value>Generates the sync engine, per-table descriptors, journaling decorators, direct differential sources, and DI registration for a server (SQL Server) plus local (SQLite) setup.&#xD;&#xA;Only tables with a rowversion column take part; the server gets no extra schema, and the local database gets one shared journal table created at run time.</value>
   </data>
   <data name="CodeGen_GenerateInMemoryToolTip" xml:space="preserve">
     <value>Generates DB-independent in-memory repositories for prototyping and unit tests. Cannot be combined with the runtime NuGet package reference mode</value>

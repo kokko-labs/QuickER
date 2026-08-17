@@ -102,6 +102,7 @@
     <Project Path="src/QuickER.Runtime.InMemory/QuickER.Runtime.InMemory.csproj" />
     <Project Path="src/QuickER.Runtime.Sqlite/QuickER.Runtime.Sqlite.csproj" />
     <Project Path="src/QuickER.Runtime.SqlServer/QuickER.Runtime.SqlServer.csproj" />
+    <Project Path="src/QuickER.Runtime.Sync/QuickER.Runtime.Sync.csproj" />
     <Project Path="src/QuickER.Runtime/QuickER.Runtime.csproj" />
     <Project Path="src/QuickER.Settings/QuickER.Settings.csproj" />
     <Project Path="src/QuickER.Sqlite/QuickER.Sqlite.csproj" />

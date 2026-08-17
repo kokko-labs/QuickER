@@ -436,6 +436,46 @@ public class GeneratedCodeCompilationTests
         CodeGenerationOptions options
     ) => AssertCompiles(caseName, options);
 
+    /// <summary>
+    /// マトリクスケース: 双方向同期支援（サーバー＝SQL Server・ローカル＝SQLite）× Split{off,on} × VO{off,on} の 4 ケース
+    /// </summary>
+    /// <remarks>
+    /// 同期の per-entity 生成物（記述子・ジャーナル記録デコレータ・直結差分ソース・DI）は、値オブジェクトの有無で
+    /// 主キー・ミラー版の読み書き式が変わり、分割の有無で名前空間の跨ぎ方が変わる。どちらも型検査でしか出ない
+    /// 崩れ方をするため、4 象限をコンパイルで押さえる。
+    /// </remarks>
+    public static TheoryData<string, CodeGenerationOptions> SyncSupportMatrixCases()
+    {
+        var data = new TheoryData<string, CodeGenerationOptions>();
+
+        foreach (var split in new[] { false, true })
+        foreach (var vo in new[] { false, true })
+        {
+            data.Add(
+                $"同期支援 Split={split} VO={vo}",
+                new CodeGenerationOptions
+                {
+                    RootNamespace = "Sample.Domain",
+                    SplitFilesByCategory = split,
+                    GenerateValueObjects = vo,
+                    GenerateRepositories = true,
+                    RepositoryDialects = ["sqlserver", "sqlite"],
+                    GenerateSyncSupport = true,
+                }
+            );
+        }
+
+        return data;
+    }
+
+    /// <summary>同期支援の横断ケースで、生成コードがエラー・警告なしでコンパイルできることを検証する</summary>
+    [Theory]
+    [MemberData(nameof(SyncSupportMatrixCases))]
+    public void Generate_SyncSupportMatrix_ShouldProduceCompilableCode(
+        string caseName,
+        CodeGenerationOptions options
+    ) => AssertCompiles(caseName, options);
+
     /// <summary>マトリクスケース: リモートサービス生成（HTTP クライアント同梱）の横断ケース</summary>
     public static TheoryData<string, CodeGenerationOptions> RemoteServiceMatrixCases()
     {

@@ -174,6 +174,28 @@ public sealed record CodeGenerationOptions
     /// </remarks>
     public bool GenerateInMemoryRepositories { get; init; }
 
+    /// <summary>
+    /// サーバー（SQL Server）とローカル（SQLite）のハイブリッド構成で双方向の差分同期を行う支援コード
+    /// （同期エンジン・同期記述子・ジャーナル記録デコレータ・差分ソース・DI 登録）を生成するかどうか（既定 false）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>true</c> のとき、<see cref="RepositoryDialects"/> がちょうど <c>"sqlserver"</c> と <c>"sqlite"</c> の 2 方言で、
+    /// かつ <c>rowversion</c>（<c>timestamp</c>）列を持つテーブルが 1 つ以上あることを要求する（満たさない指定は生成時の診断エラー）。
+    /// 同期対象はその <c>rowversion</c> 列を持つテーブルだけで、「列の有無がそのままポリシー」という楽観排他と同じ流儀に従う。
+    /// </para>
+    /// <para>
+    /// サーバー側には追加スキーマを一切作らない。ローカル（SQLite）にだけ共有ジャーナル 1 テーブル
+    /// （<c>quicker_sync_journal</c>）を実行時に <c>CREATE TABLE IF NOT EXISTS</c> で用意し、オフライン編集を記録する。
+    /// 差分の再開点（アンカー）は保存せず、ローカルのミラー版列の <c>MAX</c> から導出する。
+    /// </para>
+    /// <para>
+    /// <see cref="GenerateRepositories"/> が前提（QuickER 版 Repository の実装が同期の読み書き経路になる）。
+    /// <see cref="GenerateEfCore"/> とはマルチターゲットの排他規則により自動的に併用できない。
+    /// </para>
+    /// </remarks>
+    public bool GenerateSyncSupport { get; init; }
+
     /// <summary>Repository 契約（共通契約バケット）の生成が必要か（QuickER 版 / EF Core / インメモリのいずれかが有効）</summary>
     public bool GeneratesRepositoryContract =>
         GenerateRepositories || GenerateEfCore || GenerateInMemoryRepositories;

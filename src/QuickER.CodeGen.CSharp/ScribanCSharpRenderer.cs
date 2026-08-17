@@ -48,6 +48,10 @@ internal sealed class RenderScope
     /// <summary>リモート面の ASP.NET Core サーバー実装（MapGeneratedRemoteEndpoints）を出力するか（サーバー専用スペックのみ true）</summary>
     public bool RemoteServer { get; init; }
 
+    /// <summary>双方向同期の支援コード（同期エンジンの固定部・同期記述子・ジャーナル記録デコレータ・直結差分ソース・DI）を出力するか</summary>
+    /// <remarks>Sync バケットを含むスペックだけが true。既存経路は常に false のため出力はバイト不変。</remarks>
+    public bool Sync { get; init; }
+
     /// <summary>このスコープがレンダリングするQuickER 版 Repository の方言（"sqlserver" / "sqlite"）</summary>
     public required string Dialect { get; init; }
 
@@ -365,6 +369,15 @@ internal sealed class ScribanCSharpRenderer
             ["remote_services"] = options.GenerateRemoteServices,
             // このスペックがサーバー実装ファイル（{ベース名}.RemoteServer.g.cs）かどうか。
             ["render_remote_server"] = scope.RemoteServer,
+            // 双方向同期の支援コード（固定エンジン・per-entity 記述子／デコレータ／直結差分ソース・DI）を出力するか。
+            // Sync バケットを含むスペックだけが true（既存経路は false でバイト不変）。
+            ["render_sync"] = scope.Sync,
+            // 同期専用エンドポイント（POST {prefix}/{ルート名}/Sync*）をサーバー実装ファイルへ張るか。
+            // サーバー実装スペック（Sync バケットではなく RemoteServer バケット）で同期支援が有効なときだけ true＝
+            // render_sync とは別軸（render_sync を立てると同期の固定エンジンごとサーバーファイルへ出てしまう）。
+            ["render_sync_endpoints"] = scope.RemoteServer && options.GenerateSyncSupport,
+            // 同期対象テーブル（rowversion 列を持つテーブル）の per-entity 生成素材。FK トポロジカル順（親→子）。
+            ["sync_tables"] = model.SyncTables,
             // DB 非依存のインメモリ Repository 群（InMemoryDataStore・InMemory{Entity}Repository・シーダー・DI）を出力するか。
             // 方言非依存のため契約を出すスペックで 1 度だけ true（既存経路は常に false でバイト不変）
             ["in_memory"] = scope.InMemory,

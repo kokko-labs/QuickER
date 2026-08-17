@@ -127,6 +127,7 @@ Optionally generated:
 - Remote Repository interfaces
 - An HTTP + JSON client
 - An ASP.NET Core Minimal API server
+- Bidirectional sync between a SQL Server database and a local SQLite copy (with a fast full reload)
 
 The EditModel accepts screen input as strings, keeps values that pass validation as confirmed values, and holds error information for those that fail. The Mapper applies only the confirmed values and change state to the entity, preventing invalid input from entering the entity.
 

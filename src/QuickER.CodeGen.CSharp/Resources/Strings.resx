@@ -133,6 +133,21 @@
   <data name="CodeGen_Info_MultiTargetRowVersionColumns" xml:space="preserve">
     <value>Only the '{0}' repository treats the following row version columns as concurrency tokens. The other target dialects share the same byte[] property, but write the column with INSERT / UPDATE like any other binary column (a place to mirror the version '{0}' assigned) and run no version guard:{1}</value>
   </data>
+  <data name="CodeGen_Error_SyncSupportRequiresDialects" xml:space="preserve">
+    <value>Sync support requires exactly the two repository dialects 'sqlserver' (the server) and 'sqlite' (the local database); the current selection is '{0}'.</value>
+  </data>
+  <data name="CodeGen_Error_SyncSupportRequiresRepositories" xml:space="preserve">
+    <value>Sync support requires the QuickER repository implementations to be generated (GenerateRepositories), because the sync engine reads and writes through them.</value>
+  </data>
+  <data name="CodeGen_Error_SyncSupportRequiresRowVersion" xml:space="preserve">
+    <value>Sync support found no table to synchronise: a table takes part only when it has a rowversion (timestamp) column, which is what the differential scan and the version guard are built on.</value>
+  </data>
+  <data name="CodeGen_Info_SyncSupportUnboundedBinaryColumns" xml:space="preserve">
+    <value>The following unbounded binary columns of the synchronised tables are not carried by an ordinary sync run, because the row transfer leaves them out: a downloaded row arrives without them and an uploaded row is sent without them. Set SyncOptions.IncludeUnboundedBinary (and SyncRefreshOptions.IncludeUnboundedBinary) to copy them column by column as well:{0}</value>
+  </data>
+  <data name="CodeGen_Info_SyncSupportTables" xml:space="preserve">
+    <value>Sync support is generated for the following tables (listed in the foreign-key order the engine applies them in, parents first):{0}</value>
+  </data>
   <data name="CodeGen_Warning_ManyToManySkipped" xml:space="preserve">
     <value>Many-to-many relationship '{0}' is out of scope for C# generation and was skipped.</value>
   </data>

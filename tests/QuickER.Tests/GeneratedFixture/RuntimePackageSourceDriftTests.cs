@@ -108,4 +108,18 @@ public sealed class RuntimePackageSourceDriftTests
                 + "テンプレート（QuickER.CodeGen.CSharp/Templates/CSharpRuntime/*.scriban 等）を変更した場合は再生成が必要です。"
         );
     }
+
+    /// <summary>双方向同期エンジン（<c>QuickER.Runtime.Sync</c>・BCL のみ）のチェックイン済みソースが一致する</summary>
+    [Fact(
+        DisplayName = "Sync パッケージのチェックイン済みソースが現在のレンダラー出力と完全一致する（ドリフト検知）"
+    )]
+    public void SyncSource_MatchesRenderedOutput()
+    {
+        FixtureDriftHarness.VerifyOrRegeneratePackageSource(
+            Renderer.RenderSync(),
+            "src/QuickER.Runtime.Sync/Runtime.Sync.g.cs",
+            "Sync パッケージのチェックイン済みソースが現在のテンプレート出力と乖離しています。"
+                + "テンプレート（QuickER.CodeGen.CSharp/Templates/CSharpRuntime/*.scriban 等）を変更した場合は再生成が必要です。"
+        );
+    }
 }

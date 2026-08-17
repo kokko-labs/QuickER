@@ -182,6 +182,9 @@ public sealed class CSharpCodeGenerationService
         // 無制限バイナリ列かどうかも型解決の結果（CSharpTypeInfo.IsUnboundedBinary）で決まるため同じ位置で検証する
         ValidateUnboundedBinaryPrimaryKeys(diagram, columnTypes, options, diagnostics);
 
+        // 同期支援の前提（方言構成・Repository 実装・行バージョン列の存在）も列型辞書が確定した後で検証する
+        ValidateSyncSupport(diagram, columnTypes, options, effectiveDialects, diagnostics);
+
         // エラー検出時（検証・型不一致）は生成処理に進まず、診断のみを返して呼び出し側に修正を促す
         if (
             diagnostics.Any(diagnostic => diagnostic.Severity == GenerationDiagnosticSeverity.Error)
@@ -237,6 +240,47 @@ public sealed class CSharpCodeGenerationService
                     )
                 )
             );
+        }
+
+        // 同期支援が有効なとき、実際に同期対象になったテーブルを FK 順のまま Info 診断で通知する
+        // （対象は「行バージョン列を持ち Repository 契約が生成されるテーブル」という導出条件なので、
+        //   どのテーブルが入ったかは生成物を読むまで分からない）
+        if (options.GenerateSyncSupport && model.SyncTables.Count > 0)
+        {
+            var syncTableList = string.Join(
+                Environment.NewLine,
+                model.SyncTables.Select(table => $"  {table.TableName}（{table.EntityClassName}）")
+            );
+            diagnostics.Add(
+                GenerationDiagnostic.Info(
+                    string.Format(
+                        Strings.CodeGen_Info_SyncSupportTables,
+                        Environment.NewLine + syncTableList
+                    )
+                )
+            );
+
+            // 同期対象テーブルに除外列があるときだけ、「通常の同期では運ばれない列」を名指しで通知する。
+            // 除外オプションが OFF の図・除外列を持つ同期対象テーブルが 1 つも無い図では発火しない
+            // （＝知らせるべき乖離が実在しないため。全体の除外列一覧は別の Info が既に出している）。
+            var syncBinaryLines = model
+                .SyncTables.Where(table => table.BinaryColumnPropertyNames.Count > 0)
+                .Select(table =>
+                    $"  {table.TableName}: {string.Join(", ", table.BinaryColumnPropertyNames)}"
+                )
+                .ToList();
+
+            if (syncBinaryLines.Count > 0)
+            {
+                diagnostics.Add(
+                    GenerationDiagnostic.Info(
+                        string.Format(
+                            Strings.CodeGen_Info_SyncSupportUnboundedBinaryColumns,
+                            Environment.NewLine + string.Join(Environment.NewLine, syncBinaryLines)
+                        )
+                    )
+                );
+            }
         }
 
         // 出力ファイルの構成（非分割=1 ファイル、分割=カテゴリごと、マルチ方言=契約＋方言別実装）を決め、
@@ -487,6 +531,9 @@ public sealed class CSharpCodeGenerationService
             InMemory = spec.Buckets.Contains(GenerationBucket.InMemory),
             // リモート面のサーバー実装はサーバー専用スペック（{ベース名}.RemoteServer.g.cs）だけが出力する
             RemoteServer = spec.Buckets.Contains(GenerationBucket.RemoteServer),
+            // 同期支援は Sync バケットを含むスペックだけが出力する
+            // （分割時は Repositories.Sync.g.cs＋Runtime.Sync.g.cs・非分割時は本体ファイルへ同居）
+            Sync = spec.Buckets.Contains(GenerationBucket.Sync),
             // パッケージ参照モードでは固定 infra（契約・方言エンジン・EntityBase/属性/VO 基底 等）を出力せず、
             // 生成コードはパッケージ QuickER.Runtime.* の型を using で参照する。スキーマ依存物（Entity/EditModel/
             // Mapper/VO 具象/I{Entity}Repository/エンティティ別実装/DI 登録）は本フラグに依らず出力する。
@@ -662,6 +709,72 @@ public sealed class CSharpCodeGenerationService
                     )
                 );
             }
+        }
+    }
+
+    /// <summary>
+    /// 同期支援（<see cref="CodeGenerationOptions.GenerateSyncSupport"/>）の前提条件を検証する
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 前提は 3 つ。(1) 実効方言がちょうど <c>sqlserver</c>（サーバー）と <c>sqlite</c>（ローカル）の 2 つであること
+    /// ＝差分走査は SQL Server の <c>rowversion</c> と <c>MIN_ACTIVE_ROWVERSION()</c> に、ミラー列の書き込みは
+    /// SQLite が同じ列を通常列として扱うことに、それぞれ依存している。(2) QuickER 版 Repository の実装を生成すること
+    /// ＝エンジンはその読み書き経路そのものを使う。(3) 行バージョン列を持つテーブルが 1 つ以上あること
+    /// ＝「列の有無がそのままポリシー」なので、1 つも無ければ同期対象が空の生成物が黙って出てしまう。
+    /// </para>
+    /// <para>
+    /// 無制限バイナリ列の除外との併用は<b>止めない</b>。除外列は行の転送に載らないだけで、blob は列単位の
+    /// ストリーミングコピー（実行時引数 <c>SyncOptions.IncludeUnboundedBinary</c>）で運べる。何が運ばれないかは
+    /// エラーでなく Info 診断で伝える（生成後に <c>model.SyncTables</c> から組み立てる）。
+    /// </para>
+    /// </remarks>
+    private static void ValidateSyncSupport(
+        ErDiagram diagram,
+        IReadOnlyDictionary<Guid, CSharpTypeInfo> columnTypes,
+        CodeGenerationOptions options,
+        IReadOnlyList<string> effectiveDialects,
+        ICollection<GenerationDiagnostic> diagnostics
+    )
+    {
+        if (!options.GenerateSyncSupport)
+        {
+            return;
+        }
+
+        if (!options.GenerateRepositories)
+        {
+            diagnostics.Add(
+                GenerationDiagnostic.Error(Strings.CodeGen_Error_SyncSupportRequiresRepositories)
+            );
+        }
+        else if (
+            effectiveDialects.Count != 2
+            || !effectiveDialects.Contains("sqlserver", StringComparer.OrdinalIgnoreCase)
+            || !effectiveDialects.Contains("sqlite", StringComparer.OrdinalIgnoreCase)
+        )
+        {
+            diagnostics.Add(
+                GenerationDiagnostic.Error(
+                    string.Format(
+                        Strings.CodeGen_Error_SyncSupportRequiresDialects,
+                        string.Join(", ", effectiveDialects)
+                    )
+                )
+            );
+        }
+
+        var hasRowVersionTable = diagram.Entities.Any(entity =>
+            entity.Columns.Any(column =>
+                columnTypes.TryGetValue(column.Id, out var typeInfo) && typeInfo.IsRowVersion
+            )
+        );
+
+        if (!hasRowVersionTable)
+        {
+            diagnostics.Add(
+                GenerationDiagnostic.Error(Strings.CodeGen_Error_SyncSupportRequiresRowVersion)
+            );
         }
     }
 

@@ -187,6 +187,23 @@
           </StackPanel>
         </Grid>
 
+        <!-- 双方向同期支援（DB アクセス配下＝インデント表示。対象 DB が SQL Server と SQLite の両方のときのみ表示） -->
+        <Grid
+          Margin="12,10,0,0"
+          Visibility="{Binding ShowSyncSupport, Converter={StaticResource BoolToVisibilityConverter}}"
+        >
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="84" />
+            <ColumnDefinition Width="*" />
+          </Grid.ColumnDefinitions>
+          <CheckBox
+            Grid.Column="1"
+            Content="{x:Static res:Strings.CodeGen_GenerateSyncSupport}"
+            IsChecked="{Binding GenerateSyncSupport}"
+            ToolTip="{x:Static res:Strings.CodeGen_GenerateSyncSupportToolTip}"
+          />
+        </Grid>
+
         <!-- 無制限バイナリ列の除外（DB アクセス配下＝インデント表示。Repository (QuickER) 選択時のみ表示） -->
         <Grid
           Margin="12,10,0,0"

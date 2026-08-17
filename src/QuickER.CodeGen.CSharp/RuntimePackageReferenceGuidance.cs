@@ -23,6 +23,7 @@ namespace QuickER.CodeGen.CSharp;
 ///   <item><see cref="CodeGenerationOptions.GenerateInMemoryRepositories"/> 時: <see cref="RuntimePackages.InMemory"/></item>
 ///   <item><see cref="CodeGenerationOptions.GenerateRemoteServices"/> 時: <see cref="RuntimePackages.AspNetCore"/>
 ///     （サーバー実装ファイルの固定部。参照するのはサーバー側プロジェクトのみだが、案内は生成単位で出す）</item>
+///   <item><see cref="CodeGenerationOptions.GenerateSyncSupport"/> 時: <see cref="RuntimePackages.Sync"/></item>
 /// </list>
 /// バージョンは呼び出し側から受け取る（版の実配線は後続タスク）。
 /// </para>
@@ -84,6 +85,12 @@ public static class RuntimePackageReferenceGuidance
         if (options.GenerateRemoteServices && !packages.Contains(RuntimePackages.AspNetCore))
         {
             packages.Add(RuntimePackages.AspNetCore);
+        }
+
+        // 同期支援の固定エンジン（SyncEngine・SyncJournal・SyncTable 基底）は専用パッケージが持つ。
+        if (options.GenerateSyncSupport && !packages.Contains(RuntimePackages.Sync))
+        {
+            packages.Add(RuntimePackages.Sync);
         }
 
         return packages;

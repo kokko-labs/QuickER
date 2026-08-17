@@ -204,6 +204,36 @@ namespace QuickER.CodeGen.CSharp.Resources {
             }
         }
 
+        public static string CodeGen_Error_SyncSupportRequiresDialects {
+            get {
+                return ResourceManager.GetString("CodeGen_Error_SyncSupportRequiresDialects", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Error_SyncSupportRequiresRepositories {
+            get {
+                return ResourceManager.GetString("CodeGen_Error_SyncSupportRequiresRepositories", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Error_SyncSupportRequiresRowVersion {
+            get {
+                return ResourceManager.GetString("CodeGen_Error_SyncSupportRequiresRowVersion", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Info_SyncSupportUnboundedBinaryColumns {
+            get {
+                return ResourceManager.GetString("CodeGen_Info_SyncSupportUnboundedBinaryColumns", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Info_SyncSupportTables {
+            get {
+                return ResourceManager.GetString("CodeGen_Info_SyncSupportTables", resourceCulture);
+            }
+        }
+
         public static string CodeGen_Warning_ManyToManySkipped {
             get {
                 return ResourceManager.GetString("CodeGen_Warning_ManyToManySkipped", resourceCulture);

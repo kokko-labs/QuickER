@@ -45,6 +45,15 @@ internal sealed partial class CSharpGenerationModelBuilder
         var navigationsByEntity = ResolveAllNavigations(diagram, diagnostics);
         _valueObjects = BuildValueObjects(diagram, options, diagnostics);
 
+        // 同期支援は Repository 契約の生成モデル（インターフェイス名・主キー型）を素材にするため、先に確定させる
+        var repositoryClasses = options.GeneratesRepositoryContract
+            ? diagram
+                .Entities.Select(entity => BuildRepositoryClass(entity, options, diagnostics))
+                .Where(repository => repository is not null)
+                .Cast<CSharpRepositoryModel>()
+                .ToList()
+            : [];
+
         var model = new CSharpGenerationModel
         {
             NamespaceName = string.IsNullOrWhiteSpace(options.RootNamespace)
@@ -79,17 +88,14 @@ internal sealed partial class CSharpGenerationModelBuilder
             // QuickER の SQL Server 実装（GenerateRepositories）・EF Core 実装（GenerateEfCore）・インメモリ実装
             // （GenerateInMemoryRepositories）のいずれかが有効なら必要になる。
             // EF Core・インメモリ単独出力でも各 Repository が I{Entity}Repository を実装するため、モデルを構築しておく
-            RepositoryClasses = options.GeneratesRepositoryContract
-                ? diagram
-                    .Entities.Select(entity => BuildRepositoryClass(entity, options, diagnostics))
-                    .Where(repository => repository is not null)
-                    .Cast<CSharpRepositoryModel>()
-                    .ToList()
-                : [],
+            RepositoryClasses = repositoryClasses,
             ValueObjectClasses = _valueObjects
                 .Values.OrderBy(vo => vo.ClassName, StringComparer.Ordinal)
                 .ToList(),
             EfCore = BuildEfCoreModel(diagram, options),
+            // 同期対象テーブルは「行バージョン列を持ち Repository 契約が生成されるテーブル」で、FK トポロジカル順に並べる
+            // （ダウンロードの適用は親→子・削除は子→親でなければ FK 制約に触れるため、順序そのものが生成物の一部）
+            SyncTables = BuildSyncTables(diagram, options, repositoryClasses),
         };
 
         // 構築直後のモデルに対し、テンプレートが発行する全メンバー名をシンボル表で突き合わせて

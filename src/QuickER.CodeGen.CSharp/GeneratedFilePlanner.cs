@@ -29,6 +29,9 @@ public enum GenerationBucket
 
     /// <summary>リモート面の ASP.NET Core サーバー実装（エンドポイントマッピング。常に別ファイル）</summary>
     RemoteServer,
+
+    /// <summary>双方向同期の支援コード（同期記述子・ジャーナル記録デコレータ・直結差分ソース・DI 登録）</summary>
+    Sync,
 }
 
 /// <summary>1 つの生成ファイルが「どの名前空間で・どのバケットを含み・どの名前空間を using するか」を表す計画</summary>
@@ -159,6 +162,7 @@ public static class GeneratedFilePlanner
             GenerationBucket.EfCore => "EntityFrameworkCore",
             GenerationBucket.InMemory => "InMemory",
             GenerationBucket.RemoteServer => "RemoteServer",
+            GenerationBucket.Sync => "Sync",
             _ => "Generated",
         };
 
@@ -231,6 +235,16 @@ public static class GeneratedFilePlanner
                 GenerationBucket.Runtime,
                 GenerationBucket.ValueObject,
             ],
+            // 同期支援はエンティティ・中立契約（Repository バケット＝I{Entity}Repository / ISqlExecutor /
+            // ConcurrencyMode / SaveConflictException）・共有基盤（EntityBase / RowState / RemoteJson）・
+            // VO（主キーの unwrap）を参照する
+            GenerationBucket.Sync =>
+            [
+                GenerationBucket.Entity,
+                GenerationBucket.Repository,
+                GenerationBucket.Runtime,
+                GenerationBucket.ValueObject,
+            ],
             _ => [],
         };
 
@@ -281,6 +295,14 @@ public static class GeneratedFilePlanner
         if (options.GenerateEfCore)
         {
             active.Add(GenerationBucket.EfCore);
+        }
+
+        // 同期支援は方言別実装ではなく「サーバー方言とローカル方言の 2 実装を束ねる」独立バケット。
+        // 分割時は Repositories.Sync.g.cs へ単独出力する（EfCore / InMemory と同じ流儀）。
+        // Repository 契約が無い構成では実装先が無いため出力しない（診断側でも早期にエラーにする）。
+        if (options.GenerateSyncSupport && options.GeneratesRepositoryContract)
+        {
+            active.Add(GenerationBucket.Sync);
         }
 
         // Entity を常に生成する＝何らかのクラスが必ず出力されるため、共有基盤（Runtime）は常に必要
@@ -603,6 +625,7 @@ public static class GeneratedFilePlanner
         {
             GenerationBucket.EfCore => DefaultSuffix(GenerationBucket.EfCore),
             GenerationBucket.InMemory => DefaultSuffix(GenerationBucket.InMemory),
+            GenerationBucket.Sync => DefaultSuffix(GenerationBucket.Sync),
             _ => null,
         };
 
@@ -702,6 +725,12 @@ public static class GeneratedFilePlanner
                 GenerationBucket.InMemory,
                 primaryDialect
             );
+        }
+
+        // 同期エンジンの固定部（SyncEngine・ジャーナル・セッション抑制・結果／競合レコード）
+        if (activeSet.Contains(GenerationBucket.Sync))
+        {
+            AddFixedRuntimeSubSpec(specs, runtimeNamespace, GenerationBucket.Sync, primaryDialect);
         }
     }
 
@@ -836,6 +865,16 @@ public static class GeneratedFilePlanner
 
             // per-entity 側は固定部の namespace も using する（方言別実装が Runtime.{方言} を using するのと同型）
             dependencyNamespaces.Add(aspNetCoreNamespace);
+
+            // 同期エンドポイントは同期の固定部（ISyncServerSource・同期エンベロープ・操作名）を参照する。
+            // per-entity の同期生成物（記述子・デコレータ・HTTP 差分ソース）は参照しないため、Sync バケット
+            // そのものではなく Runtime サブ名前空間だけを足す。
+            if (activeSet.Contains(GenerationBucket.Sync))
+            {
+                dependencyNamespaces.Add(
+                    $"{runtimeNamespace}.{DefaultSuffix(GenerationBucket.Sync)}"
+                );
+            }
         }
 
         InsertAfterRepositorySpecs(
@@ -943,6 +982,7 @@ public static class GeneratedFilePlanner
     [
         GenerationBucket.EfCore,
         GenerationBucket.InMemory,
+        GenerationBucket.Sync,
     ];
 
     /// <summary>導出サブバケットの分割ファイル名（例: <c>Repositories.EntityFrameworkCore.g.cs</c>）＝方言別実装と同じ流儀</summary>

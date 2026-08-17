@@ -113,6 +113,7 @@ quicker mcp
 | `GenerateInMemoryRepositories`（`false`） | テスト用のインメモリ Repository 実装を生成する |
 | `GenerateRemoteContracts`（`false`） | リモート操作用インターフェイス `I{Entity}RemoteRepository` を追加生成する（CLI の `--generate-remote-contracts` に対応。QuickER 版 Repository・EF Core 版 Repository・インメモリ Repository のいずれか＝`GenerateRepositories` / `GenerateEfCore` / `GenerateInMemoryRepositories` のいずれかが前提。[生成コードの使い方](code-generation.ja.md) 参照） |
 | `GenerateRemoteServices`（`false`） | リモート面の HTTP クライアント／サーバー実装を生成する（`GenerateRemoteContracts` を自動的に含意。CLI の `--generate-remote-services` に対応。[生成コードの使い方](code-generation.ja.md) 参照） |
+| `GenerateSyncSupport`（`false`） | サーバー（SQL Server）＋ローカル（SQLite）構成の双方向同期支援を生成する。`GenerateRepositories` が有効で実効方言が `sqlserver` と `sqlite` のちょうど 2 つ、かつ `rowversion` 列を持つテーブルが 1 つ以上あることが前提（`ExcludeUnboundedBinaryColumns` とは併用可能で、除外列は `SyncOptions.IncludeUnboundedBinary` を指定したときだけ運ばれる）。CLI の `--generate-sync-support` に対応。[生成コードの使い方](code-generation.ja.md#双方向同期の支援--generate-sync-support) 参照 |
 | `UseRuntimePackages`（`false`） | ランタイム固定コードを出力せず NuGet パッケージ参照で賄う（[生成コードの使い方](code-generation.ja.md) 参照） |
 | `GenerateApiDocs`（`false`） | API リファレンス Markdown（`{ベース名}.g.md`・英語正本）を追加出力する（CLI の `--generate-api-docs` に対応。[生成コードの使い方](code-generation.ja.md) 参照） |
 | `IncludeJapaneseApiDocs`（`false`） | 日本語版 API リファレンス Markdown（`{ベース名}.ja.g.md`）も併産する（`GenerateApiDocs` が前提。CLI の `--api-docs-ja` に対応） |

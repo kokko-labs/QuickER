@@ -949,9 +949,109 @@ public static partial class GeneratedRemoteEndpoints
         // the database - a 200 states that the process is listening and the endpoints are mapped, nothing more
         group.MapGet(RemotePaths.HealthRoute, () => Results.Ok());
 {{ for repository in repository_classes }}        Map{{ repository.remote_route_name }}Endpoints(group{{ if repository.binary_stream_remote_server_block != "" }}, allowUnboundedUploads{{ end }});
-{{ end }}
+{{ end }}{{ if render_sync_endpoints }}{{ for sync in sync_tables }}        MapSyncEndpoints<{{ sync.entity_class_name }}, {{ sync.key_type_name }}>(group, "{{ sync.remote_route_name }}");
+{{ end }}{{ end }}
         return group;
     }
+{{~ if render_sync_endpoints ~}}
+
+    /// <summary>Maps the sync-only endpoints of one synchronised table onto the group.</summary>
+    /// <remarks>
+    /// <para>
+    /// They exist because the remote surface deliberately has no <c>Query()</c>: a differential pass needs rows above a
+    /// version, the version ceiling of the pass, and the key set of the table, and none of those can be expressed
+    /// through CRUD. Uploading needs nothing new - a replayed change is an ordinary Insert, Update, Save, or Delete, and
+    /// travels over the endpoints that already exist, conflict reporting included.
+    /// </para>
+    /// <para>
+    /// The handlers are a thin remoting of <c>ISyncServerSource&lt;,&gt;</c>, which the server resolves from DI
+    /// (<c>AddGeneratedDirectSyncSources</c>): the answers a remote client gets are produced by the same source a
+    /// co-located client would call directly, so there is one implementation of the semantics rather than two.
+    /// </para>
+    /// <para>
+    /// Nothing is remembered between requests. The resume point arrives as the anchor and the bound as the ceiling, so
+    /// two clients syncing the same table do not interfere and an interrupted run resumes by asking again. The flip side
+    /// is that the ceiling is the caller's value: a client that sends one above the server's own lowest active version
+    /// skips whatever is still in flight below it for good, which is why the ceiling endpoint exists and its answer is
+    /// what a client is expected to send back.
+    /// </para>
+    /// <para>
+    /// They are members of the group like every other endpoint, so authorization applied to the group covers them - and
+    /// it has to: the changed-rows endpoint hands out whole rows and honors the batch size the caller asks for, and the
+    /// key endpoint hands out an entire table's key set in one response.
+    /// </para>
+    /// </remarks>
+    private static void MapSyncEndpoints<TEntity, TKey>(RouteGroupBuilder group, string entityRoute)
+        where TEntity : EntityBase, new()
+    {
+        group.MapPost(
+            $"{entityRoute}/{RemoteSyncOperations.Ceiling}",
+            (HttpContext context) =>
+                RemoteServerEngine.ExecuteAsync(
+                    context,
+                    async () =>
+                        (object?)
+                            new RemoteSyncCeilingResult(
+                                await SyncSource<TEntity, TKey>(context)
+                                    .GetChangeCeilingAsync(context.RequestAborted).ConfigureAwait(false)
+                            )
+                )
+        );
+        group.MapPost(
+            $"{entityRoute}/{RemoteSyncOperations.Changes}",
+            (HttpContext context) =>
+                RemoteServerEngine.ExecuteAsync(
+                    context,
+                    async () =>
+                    {
+                        var request = await RemoteServerEngine.ReadRequestAsync<RemoteSyncChangesRequest>(
+                            context
+                        ).ConfigureAwait(false);
+                        var batch = await SyncSource<TEntity, TKey>(context)
+                            .GetChangesAsync(
+                                request.Anchor,
+                                request.Ceiling,
+                                ValidatedBatchSize(request.BatchSize),
+                                context.RequestAborted
+                            ).ConfigureAwait(false);
+                        return (object?)
+                            new RemoteSyncChangesResult<TEntity>(batch.Rows, batch.HasMore);
+                    }
+                )
+        );
+        group.MapPost(
+            $"{entityRoute}/{RemoteSyncOperations.Keys}",
+            (HttpContext context) =>
+                RemoteServerEngine.ExecuteAsync(
+                    context,
+                    async () =>
+                        (object?)
+                            new RemoteSyncKeysResult<TKey>(
+                                await SyncSource<TEntity, TKey>(context)
+                                    .GetAllKeysAsync(context.RequestAborted).ConfigureAwait(false)
+                            )
+                )
+        );
+    }
+
+    /// <summary>Resolves the differential source the sync endpoints answer from.</summary>
+    private static ISyncServerSource<TEntity, TKey> SyncSource<TEntity, TKey>(HttpContext context)
+        where TEntity : EntityBase, new() =>
+        context.RequestServices.GetRequiredService<ISyncServerSource<TEntity, TKey>>();
+
+    /// <summary>Validates the batch size carried by a request body (a non-positive value is reported to the client as HTTP 400).</summary>
+    /// <remarks>
+    /// The generated client never sends one - its own engine rejects it first - but the number arrives from the wire and
+    /// a value of zero or less has no meaning the server could act on: it would either return nothing forever or reach
+    /// the database as a malformed limit, therefore it is rejected here as a fault in the payload the client sent. There
+    /// is deliberately no upper bound: the caller chooses how much it wants per round trip, and what keeps that from
+    /// being abused is the authorization on the group rather than a number chosen here.
+    /// </remarks>
+    private static int ValidatedBatchSize(int batchSize) =>
+        batchSize > 0
+            ? batchSize
+            : throw new RemoteBadRequestException("The batch size must be greater than zero.");
+{{~ end ~}}
 
     /// <summary>Invokes the <c>OnServerError</c> extension hook while isolating any failure inside it.</summary>
     /// <remarks>
@@ -1018,8 +1118,5 @@ public static partial class GeneratedRemoteEndpoints
 {{ repository.uniqueness_remote_server_records_block }}
 {{~ end ~}}
 {{~ end ~}}
-}
-{{~ end ~}}
-{{~ if block_namespace ~}}
 }
 {{~ end ~}}

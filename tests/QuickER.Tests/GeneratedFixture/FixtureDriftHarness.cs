@@ -220,6 +220,52 @@ internal static class FixtureDriftHarness
         }
     }
 
+    /// <summary>
+    /// マルチ辞書（方言ごとに解決した列型辞書）かつ複数ファイルを出力するフィクスチャ向けのオーバーロード。
+    /// </summary>
+    /// <remarks>
+    /// マルチターゲット × リモートサービス（本体＋RemoteServer）の組合せで使う。方言辞書の受け渡しは
+    /// マルチ辞書オーバーロードと、ファイル構成の照合は複数ファイルオーバーロードとそれぞれ同一。
+    /// </remarks>
+    /// <param name="diagram">単一ソース定義が返す決定的な ER 図</param>
+    /// <param name="primaryColumnTypes">共有バケット（Entity/EditModel/Mapper/VO）に使う主辞書</param>
+    /// <param name="columnTypesByDialect">方言名 → その方言で解決した列型辞書（各方言実装バケット用）</param>
+    /// <param name="options">フィクスチャ生成に用いる決定的なオプション</param>
+    /// <param name="expectedFileNames">期待する出力ファイル名の一覧（生成結果と完全一致していること）</param>
+    /// <param name="driftReason">ドリフト時に表示する理由（末尾に再生成コマンドが自動付与される）</param>
+    public static void VerifyOrRegenerate(
+        ErDiagram diagram,
+        IReadOnlyDictionary<Guid, CSharpTypeInfo> primaryColumnTypes,
+        IReadOnlyDictionary<string, IReadOnlyDictionary<Guid, CSharpTypeInfo>> columnTypesByDialect,
+        CodeGenerationOptions options,
+        IReadOnlyList<string> expectedFileNames,
+        string driftReason
+    )
+    {
+        var primaryWithToken = CanonicalTypeTokenAttacher.Attach(
+            primaryColumnTypes,
+            diagram,
+            new SqlServerTypeCatalog()
+        );
+        var result = new CSharpCodeGenerationService().Generate(
+            diagram,
+            primaryWithToken,
+            columnTypesByDialect,
+            options
+        );
+
+        result.HasErrors.Should().BeFalse("フィクスチャ図の生成でエラーが出てはならない");
+        result
+            .Files.Select(file => file.FileName)
+            .Should()
+            .Equal(expectedFileNames, "出力ファイル構成そのものもドリフト検知の対象とする");
+
+        foreach (var file in result.Files)
+        {
+            VerifyOrRegenerateFile(file.Content, file.FileName, driftReason);
+        }
+    }
+
     /// <summary>1 ファイル分の照合（または再生成）を行う。</summary>
     private static void VerifyOrRegenerateFile(
         string regenerated,

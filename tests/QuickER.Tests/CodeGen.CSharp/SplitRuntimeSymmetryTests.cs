@@ -111,6 +111,53 @@ public class SplitRuntimeSymmetryTests
     }
 
     /// <summary>
+    /// 分割の <c>Runtime.Sync.g.cs</c> が同期エンジンパッケージと同じトップレベル型集合になることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 同期支援は rowversion 列を持つマルチターゲット図でしか成立しないため、図・オプションとも専用のものを使う
+    /// （<see cref="MultiDialectOptions"/> は無制限バイナリ除外が ON で、同期支援とは排他）。
+    /// </remarks>
+    [Fact]
+    public void SplitSyncRuntimeFile_ShouldDeclareSameTypesAsSyncPackage()
+    {
+        var files = GenerateSyncSplit();
+
+        DeclaredTypes(files["Runtime.Sync.g.cs"])
+            .Should()
+            .BeEquivalentTo(
+                DeclaredTypes(PackageRenderer.RenderSync()),
+                "Runtime.Sync.g.cs は QuickER.Runtime.Sync と同じ守備範囲でなければならない"
+            );
+    }
+
+    /// <summary>
+    /// 同期支援の分割生成でも、固定 infra（<c>Runtime.Sync.g.cs</c>）とスキーマ依存物
+    /// （<c>Repositories.Sync.g.cs</c>）の分離が保たれることを検証する。
+    /// </summary>
+    [Fact]
+    public void SplitSyncFiles_ShouldSeparateFixedEngineFromPerEntityCode()
+    {
+        var files = GenerateSyncSplit();
+
+        files.Keys.Should().Contain("Runtime.Sync.g.cs");
+        files.Keys.Should().Contain("Repositories.Sync.g.cs");
+
+        // 固定エンジン側に per-entity 生成物（記述子・デコレータ・DI 登録）が混じらない
+        files["Runtime.Sync.g.cs"].Should().NotContain("Journaling");
+        files["Runtime.Sync.g.cs"].Should().NotContain("AddGeneratedSyncSupport");
+        files["Runtime.Sync.g.cs"]
+            .Should()
+            .NotContain(
+                "Microsoft.Extensions.DependencyInjection",
+                "同期の固定エンジンは DI へ触れず、パッケージの依存ゼロを保つ"
+            );
+
+        // per-entity 側に固定エンジンの型定義が混じらない
+        files["Repositories.Sync.g.cs"].Should().NotContain("class SyncEngine");
+        files["Repositories.Sync.g.cs"].Should().NotContain("class SyncJournal");
+    }
+
+    /// <summary>
     /// 固定 infra ファイルにスキーマ依存物（エンティティ別の型）が 1 つも混じらないことを検証する
     /// （型集合の一致は「パッケージ側にも同じ漏れがある」場合に素通りしうるため、独立した観点で押さえる）。
     /// </summary>
@@ -247,6 +294,32 @@ public class SplitRuntimeSymmetryTests
         {
             ["sqlserver"] = primary,
             ["sqlite"] = SqliteCSharpTypeMapper.ResolveColumnTypes(diagram),
+        };
+
+        var result = new CSharpCodeGenerationService().Generate(
+            diagram,
+            primary,
+            byDialect,
+            options
+        );
+
+        result.HasErrors.Should().BeFalse();
+
+        return result.Files.ToDictionary(file => file.FileName, file => file.Content);
+    }
+
+    /// <summary>
+    /// 同期支援つきの分割生成を実行し、ファイル名→内容の辞書を返す（図は同期フィクスチャの単一ソースを共有する）。
+    /// </summary>
+    private static IReadOnlyDictionary<string, string> GenerateSyncSplit()
+    {
+        var diagram = GeneratedSyncFixture.SyncFixtureDefinition.Build();
+        var (primary, byDialect) = GeneratedSyncFixture.SyncFixtureDefinition.ResolveColumnTypes(
+            diagram
+        );
+        var options = GeneratedSyncFixture.SyncFixtureDefinition.Options with
+        {
+            SplitFilesByCategory = true,
         };
 
         var result = new CSharpCodeGenerationService().Generate(

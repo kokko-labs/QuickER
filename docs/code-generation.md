@@ -531,6 +531,7 @@ Key behaviors:
 - It can be fetched by explicitly SELECTing it in **raw SQL** (see the operational example below).
 - **Not applied in EF Core mode** (queries via `DbSet` / `SaveChanges`) (column selection in EF Core is EF Core's responsibility).
 - The in-memory repository (`GenerateInMemoryRepositories`) has parity with a real DB (the same exclusion behavior).
+- **Bidirectional sync leaves them out too**, and copies them separately when asked to: see [Unbounded binary columns](#unbounded-binary-columns) under the sync support.
 
 Read and write an excluded column with raw SQL:
 
@@ -645,6 +646,181 @@ Known limitations:
 - **Nothing keeps the mirror fresh.** The column holds whatever was written last; if a sync is skipped, a later push using that value is rejected by the server as a conflict, which is the intended outcome (reload and reapply).
 - **`ForceOverwrite` is a no-op on the local side**, since there is no guard to waive.
 - The EF Core Repository cannot be combined with a multi-target build (a diagnostic error), so the mirroring described here applies to the QuickER Repository.
+
+Keeping the mirror in step is a job you can write yourself against these two repositories, or hand to [Bidirectional sync support](#bidirectional-sync-support---generate-sync-support), which generates it.
+
+## Bidirectional sync support (--generate-sync-support)
+
+The multi-target build above gives a local copy a place to mirror the server's version. `--generate-sync-support` (`GenerateSyncSupport` in quicker.json, the "Generate bidirectional sync support" checkbox in the GUI, shown once both target databases are selected) generates the machinery that actually keeps the two in step, with the server as the source of truth.
+
+It requires exactly the two dialects `sqlserver` (the server) and `sqlite` (the local database), the QuickER Repository implementations, and at least one table with a `rowversion` column. **Only tables with that column take part** - the differential scan and the version guard are both built on it - and the tables it picked up are listed in an Info diagnostic at generation time. What that column means on each of the two sides is described under [Row version columns in a multi-target build](#row-version-columns-in-a-multi-target-build); this section is about the machinery built on top of it.
+
+### What it puts where
+
+The server gets **no extra schema at all**. The local database gets one shared table, `quicker_sync_journal`, created on first use with `CREATE TABLE IF NOT EXISTS`; it records offline edits (table, key, operation, and for a delete the version the row carried).
+
+The resume point is **derived, not stored**: it is the highest mirrored version among the local rows, so there is no bookkeeping row that can drift out of step with the data. Two properties make that derivation correct, and both are load-bearing: server changes are fetched in ascending version order, and each batch is applied in a single local transaction. A run interrupted anywhere leaves the local database holding a prefix of the ordered stream, and the maximum of that prefix is exactly where the next run resumes. Rows created locally and not yet uploaded have no mirrored version, so they drop out of the maximum on their own.
+
+The upper bound of a pass is `MIN_ACTIVE_ROWVERSION()`, taken once per run: a row committed later can carry a lower version than one committed earlier, so reading up to "the current maximum" would step over rows that are still uncommitted and never come back for them.
+
+### Wiring it up
+
+```csharp
+services.AddGeneratedSqlServerRepositories(serviceKey: "server", sqlServerConn);
+services.AddGeneratedSqliteRepositories(serviceKey: "local", sqliteConn);
+services.AddGeneratedSyncSupport(serverServiceKey: "server", localServiceKey: "local");
+
+// The local repositories resolved by key are now wrapped so every write is recorded
+var local = provider.GetRequiredKeyedService<ICustomerRepository>("local");
+
+var result = await provider.GetRequiredService<SyncEngine>().SyncAsync(cancellationToken: ct);
+
+if (result.HasConflicts)
+{
+    foreach (var conflict in result.Conflicts)
+    {
+        // conflict carries the table, the key, the operation, the reason, and both sides' rows
+    }
+}
+```
+
+The registration comes in two halves, and which server half you combine with the local one is the only thing that decides how the server is reached.
+
+| Call | What it registers |
+|---|---|
+| `AddGeneratedSyncEngine(localServiceKey)` | The local half: the journal, the per-table descriptors, the engine, and the journaling decorators that wrap the local repositories |
+| `AddGeneratedDirectSyncSources(serverServiceKey)` | The server half over a database connection this process holds |
+| `AddGeneratedHttpSyncSources(baseAddress)` / `(httpClientFactory)` | The server half over HTTP (see below) |
+| `AddGeneratedSyncSupport(serverServiceKey, localServiceKey)` | The two halves above for the all-direct setup - the common case when both databases are reachable from the same process |
+
+Every key argument accepts `null`, which means the ordinary non-keyed registration rather than a key whose value is null: a keyed registration cannot be made with a null key, so the two never collide. Registering the local half without a server half is not a silent failure - resolving the engine then fails on the missing source.
+
+A run uploads first and downloads second, and visits tables in foreign-key order - parents first when rows are written, children first when rows are deleted. `SyncOptions` is what you turn:
+
+| Option | Default | Meaning |
+|---|---|---|
+| `DownloadBatchSize` | 500 | How many rows one download batch fetches and applies in a single local transaction |
+| `PropagateDeletes` | `true` | Whether to delete local rows whose key no longer exists on the server. The check compares the full key set, which costs one key-only pass over each server table; turn it off and run it on a slower schedule when the tables are large |
+| `ConflictPolicy` | `Collect` | How a local change that collides with the server is treated (see [Conflicts](#conflicts)) |
+| `IncludeUnboundedBinary` | `false` | Whether to carry the unbounded binary columns the row transfer leaves out (see [Unbounded binary columns](#unbounded-binary-columns)). Nothing changes for a build without such columns |
+
+`SyncResult` reports what the run did:
+
+| Member | Meaning |
+|---|---|
+| `Uploaded` | Local changes that reached the server |
+| `Downloaded` | Server rows applied locally |
+| `DeletedLocally` | Local rows removed because the server no longer has that key |
+| `Discarded` | Changes settled without being sent - a stale intent whose row is no longer there, or everything the journal held under `ServerWins` |
+| `Conflicts` / `HasConflicts` | The local changes that could not be replayed; they stay in the journal |
+
+Replaying one change has **three** outcomes, not two, and `Uploaded` / `Discarded` / `Conflicts` are exactly those three: sent, nothing to send, refused. Folding the middle one into either of the others would report a change as delivered when nothing crossed the wire. `Uploaded` and `Discarded` count rows rather than journal entries - a row edited several times offline collapses into its latest intent - except under `ServerWins`, where nothing is sent at all and `Discarded` is the number of entries dropped.
+
+### Reaching the server over HTTP
+
+Combining `--generate-sync-support` with [`--generate-remote-services`](#remote-services---generate-remote-services--three-tier-layout) adds a client that reaches the server over HTTP instead of a database connection. Swapping one for the other is a change of one registration line and of nothing else, because the engine resolves the same `ISyncServerSource<TEntity, TKey>` either way.
+
+```csharp
+// Client: local repositories as before, but the server half now speaks HTTP
+services.AddGeneratedSqliteRepositories(serviceKey: "local", sqliteConn);
+services.AddGeneratedHttpSyncSources("https://example.com/quicker");   // or an HttpClient factory
+services.AddGeneratedSyncEngine(localServiceKey: "local");
+
+// Server: the ordinary repositories, the sources the endpoints answer from, and the endpoint group
+services.AddGeneratedSqlServerRepositories(sqlServerConn);
+services.AddGeneratedDirectSyncSources(serverServiceKey: null);
+app.MapGeneratedRemoteEndpoints().RequireAuthorization();
+```
+
+Three endpoints join the existing group - `SyncCeiling`, `SyncChanges`, and `SyncKeys` under `POST {prefix}/{entity}/…` - and they are a thin remoting of the differential source: each handler resolves `ISyncServerSource<,>` from DI and calls it, so the meaning lives in one implementation that both transports share. Being group members, they are covered by whatever `RequireAuthorization()` the group carries. Uploads add nothing new: they go through the ordinary CRUD and save endpoints, which already carry `ConcurrencyMode` and already turn a version conflict into a 409.
+
+The server keeps **no per-client state**: the resume point travels as the request's anchor and the upper bound as its ceiling. The flip side is that the bound is the caller's value, so the guarantee behind the derived anchor holds only as long as you send back the ceiling `SyncCeiling` returned for that same pass - a hand-made larger ceiling permanently skips the rows of transactions running below it. A batch size of zero or less is refused with 400; there is no upper limit, because what stops a client from asking for everything is the group's authorization.
+
+### How local edits are captured
+
+The generated `Journaling{Entity}Repository` wraps the local repository and records **every write entry point**: `InsertAsync`, `UpdateAsync`, `DeleteAsync`, `BulkInsertAsync`, and both `SaveAsync` overloads. A save hook would not do: it only fires for a graph save, and a direct insert or delete would pass it by.
+
+The record is written **before** the business write. The generated repositories manage their own connection, so a decorator cannot enlist its INSERT in the transaction of the write it wraps; something has to go first, and recording the intent first is the safe order. If the business write then fails, the journal holds an entry for a row that was never written - and the upload discards it, because it re-reads the current local row and finds nothing. The opposite order would lose changes outright.
+
+**Raw SQL is not recorded.** `ExecuteSqlAsync` forwards untouched: the statement's shape is opaque to the decorator, so there is no key to journal. Rows changed that way reach the server only if something else records them.
+
+**Save hooks are unaffected.** The decorator delegates to the repository it wraps, so `ISaveHook<T>` fires exactly as it did before - including for the rows the engine itself applies during a download, since a sync run suppresses journaling and nothing else. A refresh (below) writes through `BulkInsertAsync`, which is outside the save pipeline and fires no hooks, in keeping with the ordinary contract. One consequence is worth knowing: a write a `BeforeSaveAsync` returned `false` for still leaves a journal entry, because the entry is written first. For an insert that entry is discarded (there is no row to read), and for an update the row is uploaded as it stands - unchanged content, which the server accepts and stamps with a new version.
+
+### Unbounded binary columns
+
+Combining `--generate-sync-support` with [`--exclude-unbounded-binary-columns`](#excluding-unbounded-binary-columns-excludeunboundedbinarycolumns) is allowed, and the excluded columns of a synchronised table are named in an Info diagnostic at generation time. They need saying, because **the row a run reads and writes does not contain them**: the differential SELECT lists the remaining columns explicitly, and an UPDATE never touches an excluded column.
+
+By default (`IncludeUnboundedBinary = false`) that has three consequences, and the third is the one that surprises:
+
+- A row **downloaded** from the server arrives without its blob.
+- A row **uploaded** to the server is sent without its blob.
+- A blob **already stored** on the receiving side survives - an update does not touch the column - **but a row that is new to that side has nothing to keep and arrives with the column empty.** "The blob is preserved" is true of rows that are already there and false of rows that have just arrived; a first sync into an empty local database therefore leaves every blob empty.
+
+Setting `SyncOptions.IncludeUnboundedBinary` copies each such column separately after its row has been transferred, in both directions:
+
+```csharp
+var result = await engine.SyncAsync(new SyncOptions { IncludeUnboundedBinary = true }, ct);
+```
+
+The copy streams through a temporary file, so neither side holds the blob in memory: the read pushes bytes into a stream and the write pulls them out of one, and the file is what joins the two while also supplying the length the write needs up front. Over HTTP it reuses the existing `GET`/`PUT`/`DELETE {prefix}/{entity}/{column}?id=` endpoints - the ones the [streaming accessors](#excluding-unbounded-binary-columns-excludeunboundedbinarycolumns) already use - so nothing new is mapped.
+
+Two details follow from copying columns separately:
+
+- **A NULL source clears the destination.** The point of carrying these columns is that both sides end up alike, so a row whose server copy has no blob loses the local one rather than keeping a stale copy.
+- **After an upload the server's version is read again.** Writing a blob is a write to the row, so the server moves the version on past the one the insert or update handed back. Mirroring the stale value would leave the local anchor below the row's current version, and the very next download would hand the row back as if the server had changed it.
+
+**A blob written on its own is tracked.** `Write{Column}Async` (and the file convenience method) goes through the journaling decorator like every other write and records its intent first, so an offline edit that changes nothing but a blob still reaches the server. The recording does not depend on `IncludeUnboundedBinary` - what to send is decided when sending, not when generating - so a run left at the default uploads the row (without the blob) and settles the entry.
+
+The cost is one round trip per column per changed row, which is why it is off by default: a table of large blobs whose rows change often pays for it on every run.
+
+### Conflicts
+
+Nothing is resolved silently. Under the default policy a local change that collides with the server stays in the journal and comes back in `SyncResult.Conflicts` with the table, the key, the operation, the reason, and both sides' rows attached.
+
+| `SyncConflictPolicy` | What happens |
+|---|---|
+| `Collect` (default) | The entry stays in the journal and is reported; re-run after deciding |
+| `ServerWins` | The journal is dropped and the download overwrites the local row with the server's |
+| `LocalWins` | The change is resent with `ConcurrencyMode.ForceOverwrite`, overwriting the server row |
+
+### Rebuilding the local database (RefreshAsync)
+
+`SyncEngine.RefreshAsync` empties every synchronised table and reloads it from the server. It is for **building the local database the first time, recovering one that was lost or corrupted, and starting over when a database has fallen so far behind that catching up row by row is not worth it** - not for the incremental case, which is what `SyncAsync` is for.
+
+```csharp
+var refreshed = await engine.RefreshAsync(new SyncRefreshOptions { BatchSize = 2000 }, ct);
+
+// refreshed.Tables holds per-table Deleted / Inserted counts in the order rows were written;
+// refreshed.Deleted / .Inserted are the totals, and .Elapsed is the wall time of the run
+```
+
+Unsent local changes are refused rather than lost: when the journal is not empty the run throws `SyncPendingChangesException` **before deleting anything**, with a per-table breakdown (`PendingChanges`, `PendingCount`) so the caller can upload them with `SyncAsync` first and refresh afterwards. `SyncRefreshOptions.Force` is the explicit request to drop them instead, and `SyncRefreshResult.DiscardedChanges` reports how many went.
+
+Local blobs are refused on the same terms. When a synchronised table has [unbounded binary columns](#unbounded-binary-columns) - which the row transfer leaves out, so the reload does not bring them back - the run throws `SyncUnboundedBinaryLossException` **before deleting anything**, naming the columns per table. Two flags answer it, and one of them has to be set:
+
+| `SyncRefreshOptions` | Default | Meaning |
+|---|---|---|
+| `IncludeUnboundedBinary` | `false` | Copy each excluded column back down after its row has been written, making the rebuilt database a complete copy |
+| `DiscardLocalUnboundedBinaries` | `false` | Accept the loss - the right answer when the blobs are a local cache that can be rebuilt. It permits the loss; it does not reload anything |
+
+A generated setup without such columns never sees this exception, so nothing changes for it.
+
+`BatchSize` defaults to **2000**, several times the download batch of an ordinary run: each batch is one local transaction, a refresh gains most of its speed there, and an interrupted run is repaired by running it again, so a fine resume granularity is worth less here. The cost of raising it is memory, and over HTTP the size of one response body; a table with large binary columns is the case for lowering it.
+
+What makes a refresh fast is what it leaves out - nothing is compared with the row it replaces, no anchor is derived per batch, no key set is fetched, and no journal is replayed. Measured on a two-table, 20,000-row diagram at the shipped defaults, it runs about **3 to 4.5 times faster** than an ordinary run - the upper end with both databases local, around 3x with a real SQL Server as the server. The ceiling on that ratio is structural: reading the rows out of the server is work both paths do.
+
+It is not a cheaper `SyncAsync`. It transfers **every row of every synchronised table**, so over a slow link and a large table the transfer dominates and an ordinary run - which carries only what changed - is the cheaper one from the second run onwards. Tables the local database keeps for itself (anything without a version column) are not part of it and are left exactly as they were.
+
+The run is **not one transaction**. The generated repositories manage their own connections, so nothing here can enlist in a transaction of its own making; what holds instead is that every point at which it commits is a state a later run can start from. Deletes go children first and reloads parents first, so no foreign key ever points at a row that is not there, and each table's rows arrive in ascending version order, so a table interrupted part way holds exactly the rows below the version it stopped at - which is the resume point the local maximum yields anyway. The state this leaves that a single transaction would not is a **partly rebuilt local database**: between the first delete and the last row of the last table, a reader sees fewer rows than either side holds. Nothing is lost by it, but a refresh is not something to run underneath a live screen.
+
+### Known limitations
+
+- **Writes that do not go through the repository are not tracked.** That includes raw SQL (`ExecuteSqlAsync`), as described above, and anything that reaches the local database by another route. The journal only sees the write entry points the decorator wraps.
+- **Unbounded binary columns are not carried unless you ask for them** (`SyncOptions.IncludeUnboundedBinary`), and carrying them costs one round trip per column per changed row. See [Unbounded binary columns](#unbounded-binary-columns).
+- **Cannot be combined with the EF Core Repository**, since the sync support requires a multi-target build and that combination is already exclusive.
+- **The HTTP transport requires `--generate-remote-services`.** Without it the direct sources are generated and the engine still works, but there is no client or endpoint to reach the server with.
+- **The local side has no version guard**, as under [Row version columns in a multi-target build](#row-version-columns-in-a-multi-target-build): two local writers still overwrite each other, and the engine's conflict detection is about the server's version, not theirs.
+- The runtime package for this is `QuickER.Runtime.Sync`.
 
 ## Remote-capable interfaces (--generate-remote-contracts)
 
@@ -780,6 +956,7 @@ By default, the generated code is self-contained inline output that includes the
 | `QuickER.Runtime.EntityFrameworkCore` | EF Core shared parts | Microsoft.EntityFrameworkCore.Relational |
 | `QuickER.Runtime.InMemory` | The in-memory engine (for tests) | None |
 | `QuickER.Runtime.AspNetCore` | The fixed server-side engine behind the generated remote endpoints | ASP.NET Core (a `FrameworkReference`, not a NuGet dependency) |
+| `QuickER.Runtime.Sync` | The bidirectional sync engine (journal, table descriptors, conflict types) | None |
 
 The package version and the tool version are published in lockstep (the same version), so use the same version for both. While the project is on 0.x, compatibility between minor versions is not promised (see the versioning policy in [CONTRIBUTING](../CONTRIBUTING.md)). Schema-dependent items such as the DI-registration extensions, `QuickErDbContext`, and per-entity implementations are always emitted on the generation side even in this mode.
 
@@ -794,9 +971,10 @@ With file splitting, the fixed runtime and the schema-dependent code go into sep
 | `Runtime.EntityFrameworkCore.g.cs` (`{Runtime}.EntityFrameworkCore`) | `QuickER.Runtime.EntityFrameworkCore` | EF Core shared parts (the `TContext : DbContext` generic repository base, VO translation plugins) |
 | `Runtime.InMemory.g.cs` (`{Runtime}.InMemory`) | `QuickER.Runtime.InMemory` | The in-memory foundation (store, repository base, save staging) |
 | `Runtime.AspNetCore.g.cs` (`{Runtime}.AspNetCore`) | `QuickER.Runtime.AspNetCore` | The fixed server-side engine (`RemoteServerEngine` — request reading, error classification, the error-detail exposure policy, the binary streaming helpers) |
-| `Repositories.g.cs`, `Repositories.SqlServer.g.cs` / `Repositories.Sqlite.g.cs` / `Repositories.EntityFrameworkCore.g.cs` / `Repositories.InMemory.g.cs`, `RemoteServer.g.cs` | — (no package; always generated) | Schema-dependent code only: per-entity contracts and implementations, DI registration, `QuickErDbContext` and its Fluent configuration, the HTTP client, projection DTOs, the per-entity endpoints (`GeneratedRemoteEndpoints`) |
+| `Runtime.Sync.g.cs` (`{Runtime}.Sync`) | `QuickER.Runtime.Sync` | The sync engine (`SyncEngine`, `SyncJournal`, `SyncTable<,>`, the options, results, and conflict types; with remote services, the sync envelopes and the HTTP source base) |
+| `Repositories.g.cs`, `Repositories.SqlServer.g.cs` / `Repositories.Sqlite.g.cs` / `Repositories.EntityFrameworkCore.g.cs` / `Repositories.InMemory.g.cs` / `Repositories.Sync.g.cs`, `RemoteServer.g.cs` | — (no package; always generated) | Schema-dependent code only: per-entity contracts and implementations, DI registration, `QuickErDbContext` and its Fluent configuration, the HTTP client, projection DTOs, the per-entity endpoints (`GeneratedRemoteEndpoints`), the per-table sync descriptors and journaling decorators |
 
-`Runtime.g.cs` is always there, while the files below it are emitted only for a feature you actually enabled (the dialect files only when the QuickER Repository is generated, the EF Core file only with `GenerateEfCore`, the in-memory file only with `GenerateInMemoryRepositories`, the ASP.NET Core file only with `GenerateRemoteServices`) — exactly the same set of packages you would have to reference.
+`Runtime.g.cs` is always there, while the files below it are emitted only for a feature you actually enabled (the dialect files only when the QuickER Repository is generated, the EF Core file only with `GenerateEfCore`, the in-memory file only with `GenerateInMemoryRepositories`, the ASP.NET Core file only with `GenerateRemoteServices`, the sync file only with `GenerateSyncSupport`) — exactly the same set of packages you would have to reference.
 
 Because of this layout, `--use-runtime-packages` means exactly one thing: **no `Runtime*.g.cs` is emitted at all, and the `using` directives in the generated code point at the fixed package namespaces (`QuickER.Runtime`, `QuickER.Runtime.SqlServer`, …) instead of `{Runtime}…`.** The `Repositories*` files are the same either way — turning the mode on or off does not change their contents.
 

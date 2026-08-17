@@ -125,7 +125,8 @@ internal sealed partial class CSharpGenerationModelBuilder
             // クライアントの転送メソッドは「実体はサーバー側」であることを summary へ明示する（フックはサーバー側にしか無い）
             summary
                 + " The check, including any user-defined hooks, runs in the server-side repository.",
-            [new QueryPayloadParameter(entityClassName, "entity", true)]
+            [new QueryPayloadParameter(entityClassName, "entity", true)],
+            ["entity", "cancellationToken"]
         );
 
         return new UniquenessBlocks(

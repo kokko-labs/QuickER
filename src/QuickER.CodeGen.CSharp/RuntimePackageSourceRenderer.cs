@@ -266,6 +266,49 @@ public sealed class RuntimePackageSourceRenderer
         return Wrap(_renderer.Render(model, options, scope));
     }
 
+    /// <summary>
+    /// 双方向同期エンジンパッケージ（<see cref="RuntimePackages.Sync"/>）のソースをレンダリングする。
+    /// </summary>
+    /// <remarks>
+    /// 同期の固定エンジン（<c>SyncEngine</c>・<c>SyncJournal</c>・<c>SyncTable</c> 基底・<c>SyncSession</c>・
+    /// 結果／競合レコード）を、名前空間 <c>QuickER.Runtime.Sync</c> で 1 ファイルへ出力する。共通契約
+    /// （<c>IRepository</c>・<c>ISqlExecutor</c>・<c>ConcurrencyMode</c>・<c>SaveConflictException</c>・<c>EntityBase</c>）は
+    /// コアを <c>using QuickER.Runtime;</c> で参照する。per-entity の記述子・デコレータ・直結差分ソース・DI 登録は
+    /// スキーマ依存物として生成側に残るため、DI への依存も持たない（BCL のみ）。
+    /// </remarks>
+    public string RenderSync()
+    {
+        var options = BuildAllFeaturesOptions();
+        var model = BuildEmptyModel();
+
+        // HTTP 差分ソースの固定基底（HttpSyncServerSource＝コアの HttpRemoteRepository 派生）を含めるため
+        // includeRemoteServices を立てる（HttpClient の using が要る）。DI 登録拡張と per-entity クライアントは
+        // スキーマ依存物のため入らない（emitSchemaDependent: false）。
+        var usings = ResolveUsings(
+            options,
+            [GenerationBucket.Sync],
+            dialect: "sqlserver",
+            contractOnly: false,
+            generateRepositories: false,
+            crossUsings: [RuntimePackages.Core],
+            includeRemoteServices: true,
+            emitSchemaDependent: false
+        );
+
+        var scope = BuildScope(
+            RuntimePackages.Sync,
+            usings,
+            dialect: "sqlserver",
+            runtime: false,
+            renderContract: false,
+            repositoryImpl: false,
+            efCore: false,
+            sync: true
+        );
+
+        return Wrap(_renderer.Render(model, options, scope));
+    }
+
     /// <summary>全機能 ON（VO・データアノテーション等すべて有効）の生成オプションを構築する</summary>
     /// <remarks>
     /// 固定 infra を最大構成で書き出すため、機能フラグはすべて有効にする。空の ER 図と組み合わせるため、
@@ -360,7 +403,8 @@ public sealed class RuntimePackageSourceRenderer
         bool repositoryImpl,
         bool efCore,
         bool inMemory = false,
-        bool remoteServer = false
+        bool remoteServer = false,
+        bool sync = false
     ) =>
         new()
         {
@@ -384,6 +428,9 @@ public sealed class RuntimePackageSourceRenderer
             // per-entity のエンドポイント（GeneratedRemoteEndpoints）はスキーマ依存物として生成側に残る
             // （EmitSchemaDependent=false が抑止する）。
             RemoteServer = remoteServer,
+            // 同期の固定エンジンは専用パッケージ（QuickER.Runtime.Sync）だけが持つ。per-entity の記述子・
+            // デコレータ・直結差分ソース・DI 登録はスキーマ依存物として生成側に残る（EmitSchemaDependent=false が抑止する）。
+            Sync = sync,
             Dialect = dialect,
             MultiDialect = false,
             BlockNamespace = false,
