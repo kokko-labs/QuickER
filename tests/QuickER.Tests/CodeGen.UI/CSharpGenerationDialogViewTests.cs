@@ -105,6 +105,106 @@ public class CSharpGenerationDialogViewTests
         });
     }
 
+    /// <summary>
+    /// 生成ファイルプレビューがスクロール可能な欄（横=Auto・縦=Auto＋高さ上限）に包まれていることを検証する
+    /// （層フォルダ＋名前空間で行が長くなり、右端で見切れていた回帰の防止）
+    /// </summary>
+    [Fact(DisplayName = "生成ファイルプレビューは横スクロール可能な欄に包まれている")]
+    public void PreviewFilesList_IsWrappedInScrollViewer()
+    {
+        WpfApplicationTestSupport.RunSta(() =>
+        {
+            var viewModel = CreateViewModel(out var folder);
+
+            try
+            {
+                // BAML ロードは並列テストと競合しないよう直列化する
+                var dialog = WpfApplicationTestSupport.LoadXamlComponent(() =>
+                    new CSharpGenerationDialog(viewModel)
+                );
+
+                var previewList = FindByItemsSourceBinding(
+                    dialog,
+                    nameof(CSharpGenerationDialogViewModel.PreviewFiles)
+                );
+                previewList.Should().NotBeNull("プレビューの ItemsControl が XAML に存在する前提");
+
+                var scrollViewer = FindAncestor<System.Windows.Controls.ScrollViewer>(previewList!);
+                scrollViewer.Should().NotBeNull("プレビューは ScrollViewer に包まれている前提");
+                scrollViewer!
+                    .HorizontalScrollBarVisibility.Should()
+                    .Be(
+                        System.Windows.Controls.ScrollBarVisibility.Auto,
+                        "長い行（層フォルダ＋名前空間）を横スクロールで読めるようにする"
+                    );
+                scrollViewer
+                    .VerticalScrollBarVisibility.Should()
+                    .Be(System.Windows.Controls.ScrollBarVisibility.Auto);
+                scrollViewer
+                    .MaxHeight.Should()
+                    .NotBe(double.PositiveInfinity, "ファイル数が多くても欄内スクロールに収める");
+            }
+            finally
+            {
+                DeleteFolder(folder);
+            }
+        });
+    }
+
+    /// <summary>ItemsSource を指定パスへバインドしている ItemsControl を論理ツリーから探す</summary>
+    private static System.Windows.Controls.ItemsControl? FindByItemsSourceBinding(
+        DependencyObject root,
+        string path
+    )
+    {
+        foreach (var child in LogicalTreeHelper.GetChildren(root))
+        {
+            if (child is not DependencyObject dependency)
+            {
+                continue;
+            }
+
+            if (
+                dependency is System.Windows.Controls.ItemsControl items
+                && BindingOperations.GetBinding(
+                    items,
+                    System.Windows.Controls.ItemsControl.ItemsSourceProperty
+                )
+                    is { } binding
+                && binding.Path?.Path == path
+            )
+            {
+                return items;
+            }
+
+            if (FindByItemsSourceBinding(dependency, path) is { } found)
+            {
+                return found;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>論理ツリーを親方向へ辿り、指定型の祖先を探す</summary>
+    private static T? FindAncestor<T>(DependencyObject element)
+        where T : DependencyObject
+    {
+        var current = LogicalTreeHelper.GetParent(element);
+
+        while (current is not null)
+        {
+            if (current is T match)
+            {
+                return match;
+            }
+
+            current = LogicalTreeHelper.GetParent(current);
+        }
+
+        return null;
+    }
+
     /// <summary>バインディングの反映（DataBind 優先度のディスパッチ）を待つ</summary>
     private static void PumpBindings() =>
         System.Windows.Threading.Dispatcher.CurrentDispatcher.Invoke(
