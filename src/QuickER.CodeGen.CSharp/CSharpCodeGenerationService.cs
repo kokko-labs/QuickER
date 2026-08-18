@@ -389,6 +389,8 @@ public sealed class CSharpCodeGenerationService
                     new GeneratedFile
                     {
                         FileName = group.Key,
+                        // 層別出力の層フォルダをそのまま引き継ぐ（層別でなければ null＝出力ディレクトリ直下）
+                        RelativeDirectory = members[0].RelativeDirectory,
                         Content = _renderer.Render(model, options, scope),
                     }
                 );
@@ -443,6 +445,8 @@ public sealed class CSharpCodeGenerationService
                 new GeneratedFile
                 {
                     FileName = group.Key,
+                    // 連結出力（非分割マルチ方言）は層別出力と組み合わさらないため実質 null だが、先頭スペックから引き継ぐ
+                    RelativeDirectory = members[0].RelativeDirectory,
                     Content = header + string.Join(Environment.NewLine, bodies),
                 }
             );
@@ -534,6 +538,9 @@ public sealed class CSharpCodeGenerationService
             // 同期支援は Sync バケットを含むスペックだけが出力する
             // （分割時は Repositories.Sync.g.cs＋Runtime.Sync.g.cs・非分割時は本体ファイルへ同居）
             Sync = spec.Buckets.Contains(GenerationBucket.Sync),
+            // リモート面の HTTP クライアントは Http バケットを含むスペックだけが出力する
+            // （分割時は Repositories.Http.g.cs・非分割時は本体スペックに同居し従来位置へ描画される）
+            RenderHttpClient = spec.Buckets.Contains(GenerationBucket.Http),
             // パッケージ参照モードでは固定 infra（契約・方言エンジン・EntityBase/属性/VO 基底 等）を出力せず、
             // 生成コードはパッケージ QuickER.Runtime.* の型を using で参照する。スキーマ依存物（Entity/EditModel/
             // Mapper/VO 具象/I{Entity}Repository/エンティティ別実装/DI 登録）は本フラグに依らず出力する。
@@ -619,6 +626,7 @@ public sealed class CSharpCodeGenerationService
         }
 
         ValidateNamespaces(options, diagnostics);
+        ValidateLayerDirectories(options, diagnostics);
 
         if (diagram.Entities.Count == 0)
         {
@@ -1015,13 +1023,163 @@ public sealed class CSharpCodeGenerationService
         {
             var used =
                 activeBuckets.Contains(target.Bucket)
-                && (options.SplitFilesByCategory || target.Bucket == GenerationBucket.Repository);
+                && (
+                    options.EffectiveSplitFilesByCategory
+                    || target.Bucket == GenerationBucket.Repository
+                );
 
             if (used)
             {
                 AddInvalidNamespaceDiagnostic(target.Name, target.Value, diagnostics);
             }
         }
+    }
+
+    /// <summary>
+    /// 層別出力（<see cref="CodeGenerationOptions.LayeredOutput"/>）の層フォルダパスを検証する
+    /// </summary>
+    /// <remarks>
+    /// 判定は書き出し時の防御と同じ <see cref="LayerDirectoryValidator"/>（単一正本）。空白のオプションは
+    /// 既定フォルダ名（Domain 等）へフォールバックするため検証対象外。名前空間検証と同じく
+    /// 「実際に使われる層」だけを検証する（例: リモートサービスなしの構成ではサーバー層フォルダを検証しない）＝
+    /// 使われる層は計画（<see cref="GeneratedFilePlanner.Plan"/>）から導く。
+    /// </remarks>
+    private static void ValidateLayerDirectories(
+        CodeGenerationOptions options,
+        ICollection<GenerationDiagnostic> diagnostics
+    )
+    {
+        if (!options.LayeredOutput)
+        {
+            return;
+        }
+
+        var usedLayers = GeneratedFilePlanner
+            .Plan(options)
+            .Select(GeneratedFilePlanner.LayerOf)
+            .ToHashSet();
+
+        (GeneratedLayer Layer, string Name, string? Value)[] layerDirectories =
+        [
+            (
+                GeneratedLayer.Domain,
+                nameof(CodeGenerationOptions.DomainLayerDirectory),
+                options.DomainLayerDirectory
+            ),
+            (
+                GeneratedLayer.Infrastructure,
+                nameof(CodeGenerationOptions.InfrastructureLayerDirectory),
+                options.InfrastructureLayerDirectory
+            ),
+            (
+                GeneratedLayer.Presentation,
+                nameof(CodeGenerationOptions.PresentationLayerDirectory),
+                options.PresentationLayerDirectory
+            ),
+            (
+                GeneratedLayer.Server,
+                nameof(CodeGenerationOptions.ServerLayerDirectory),
+                options.ServerLayerDirectory
+            ),
+        ];
+
+        foreach (var target in layerDirectories)
+        {
+            if (!usedLayers.Contains(target.Layer))
+            {
+                continue;
+            }
+
+            if (
+                !string.IsNullOrWhiteSpace(target.Value)
+                && !LayerDirectoryValidator.IsValid(target.Value)
+            )
+            {
+                diagnostics.Add(
+                    GenerationDiagnostic.Error(
+                        string.Format(
+                            Strings.CodeGen_Error_InvalidLayerDirectory,
+                            target.Name,
+                            target.Value.Trim()
+                        )
+                    )
+                );
+
+                continue;
+            }
+
+            // 層別出力は名前空間の既定を層フォルダから導出する（フォルダ追従）ため、その層で導出が実際に
+            // 使われる（＝明示の名前空間オプションで全バケットが賄われていない）場合は、フォルダが C# の
+            // 名前空間として成立することも要求する（ハイフン等はパスとしては合法でも名前空間になれない）。
+            if (
+                LayerNamespaceDerivationUsed(options, target.Layer)
+                && !CSharpNamespaceValidator.IsValid(
+                    GeneratedFilePlanner.LayerNamespaceRoot(options, target.Layer)
+                )
+            )
+            {
+                diagnostics.Add(
+                    GenerationDiagnostic.Error(
+                        string.Format(
+                            Strings.CodeGen_Error_LayerDirectoryNotNamespace,
+                            target.Name,
+                            GeneratedFilePlanner.ResolveLayerDirectory(options, target.Layer),
+                            GeneratedFilePlanner.LayerNamespaceRoot(options, target.Layer)
+                        )
+                    )
+                );
+            }
+        }
+    }
+
+    /// <summary>
+    /// 層別出力時、その層で「フォルダ由来の名前空間導出」が実際に使われるかを判定する
+    /// </summary>
+    /// <remarks>
+    /// 明示の名前空間オプションを持たないバケット（EF Core / インメモリ / 同期 / HTTP / サーバー実装）と、
+    /// QuickER 版 Repository の方言別実装（{インフラ層ルート}.SqlServer 等へ常に導出）は無条件に導出を使う。
+    /// 明示オプションを持つバケットは、そのオプションが空白のときだけ導出へフォールバックする。
+    /// すべて明示指定で賄われている層は、フォルダが名前空間になれなくてもエラーにしない（パス検証だけで足りる）。
+    /// </remarks>
+    private static bool LayerNamespaceDerivationUsed(
+        CodeGenerationOptions options,
+        GeneratedLayer layer
+    )
+    {
+        // 方言別実装（Repositories.{方言}.g.cs / Runtime.{方言}.g.cs）は常にインフラ層ルートから導出する
+        if (
+            layer == GeneratedLayer.Infrastructure
+            && options.GenerateRepositories
+            && options.GeneratesRepositoryContract
+        )
+        {
+            return true;
+        }
+
+        var active = GeneratedFilePlanner.ActiveBuckets(options).ToHashSet();
+
+        // サーバー実装（RemoteServer バケット）は ActiveBuckets に載らない専用スペックのため個別に加える
+        if (options.GenerateRemoteServices && active.Contains(GenerationBucket.Repository))
+        {
+            active.Add(GenerationBucket.RemoteServer);
+        }
+
+        return active.Any(bucket =>
+            GeneratedFilePlanner.LayerOfBucket(bucket) == layer
+            && string.IsNullOrWhiteSpace(
+                bucket switch
+                {
+                    GenerationBucket.Runtime => options.RuntimeNamespace,
+                    GenerationBucket.ValueObject => options.ValueObjectNamespace,
+                    GenerationBucket.Entity => options.EntityNamespace,
+                    GenerationBucket.EditModel => options.EditModelNamespace,
+                    GenerationBucket.Mapper => options.MapperNamespace,
+                    GenerationBucket.Repository => options.RepositoryNamespace,
+                    // 明示オプションを持たないバケットは常に導出（空白扱い）
+                    _ => null,
+                }
+            )
+        );
     }
 
     /// <summary>名前空間オプションが非空かつ不正な形式のときだけエラー診断を追加する</summary>
@@ -1080,7 +1238,7 @@ public sealed class CSharpCodeGenerationService
     /// </remarks>
     private static string ApiDocsFileName(CodeGenerationOptions options)
     {
-        if (options.SplitFilesByCategory)
+        if (options.EffectiveSplitFilesByCategory)
         {
             return SplitApiDocsFileName;
         }
@@ -1099,7 +1257,7 @@ public sealed class CSharpCodeGenerationService
     /// </remarks>
     private static string JapaneseApiDocsFileName(CodeGenerationOptions options)
     {
-        if (options.SplitFilesByCategory)
+        if (options.EffectiveSplitFilesByCategory)
         {
             return SplitJapaneseApiDocsFileName;
         }

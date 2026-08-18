@@ -221,6 +221,42 @@ public sealed record CodeGenerationOptions
     /// </remarks>
     public bool SplitFilesByCategory { get; init; }
 
+    /// <summary>
+    /// 生成ファイルを層別フォルダ（ドメイン／インフラストラクチャ／プレゼンテーション／サーバー）へ振り分けて出力するかどうか（既定 false）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>true</c> のとき <see cref="SplitFilesByCategory"/> を自動的に含意し（リモートサービスがリモート面を含意するのと同じ流儀）、
+    /// 分割された各ファイルを出力ディレクトリ直下の層別サブフォルダへ書き出す。バケット→層の対応は固定:
+    /// ドメイン層＝Entity / ValueObject / Repository 契約 / Runtime コア（インライン時）、
+    /// インフラ層＝方言別実装 / EF Core / インメモリ / 同期 / HTTP クライアントと各固定 infra、
+    /// プレゼンテーション層＝EditModel / Mapper、サーバー層＝リモートサーバー実装＋ASP.NET Core 固定部。
+    /// API リファレンス Markdown（.g.md）はどの csproj にも属さないため出力ディレクトリ直下のまま。
+    /// </para>
+    /// <para>
+    /// 層分けはファイル配置だけを変え、生成テキスト（ファイル名・名前空間・内容）は <see cref="SplitFilesByCategory"/> 単独時と
+    /// バイト一致する（名前空間の既定導出も従来のまま＝層名は名前空間に入らない。層名を反映したければ
+    /// <see cref="EntityNamespace"/> 等の既存オプションで指定する）。
+    /// </para>
+    /// </remarks>
+    public bool LayeredOutput { get; init; }
+
+    /// <summary>層別出力時のドメイン層フォルダ（出力ディレクトリからの相対パス）。空なら <c>Domain</c>。<c>MyApp.Domain/Generated</c> のような複数階層も可（絶対パス・<c>..</c> は診断エラー）</summary>
+    public string? DomainLayerDirectory { get; init; }
+
+    /// <summary>層別出力時のインフラストラクチャ層フォルダ（出力ディレクトリからの相対パス）。空なら <c>Infrastructure</c></summary>
+    public string? InfrastructureLayerDirectory { get; init; }
+
+    /// <summary>層別出力時のプレゼンテーション層フォルダ（出力ディレクトリからの相対パス）。空なら <c>Presentation</c></summary>
+    public string? PresentationLayerDirectory { get; init; }
+
+    /// <summary>層別出力時のサーバー層フォルダ（出力ディレクトリからの相対パス）。空なら <c>Server</c>。リモートサービス生成時のみ使われる</summary>
+    public string? ServerLayerDirectory { get; init; }
+
+    /// <summary>分割出力が実際に有効か（<see cref="SplitFilesByCategory"/> の明示指定、または <see cref="LayeredOutput"/> による含意）</summary>
+    /// <remarks>生成側の分割判定はすべて本プロパティを読む（単一ファイルは層へ割れないため、層別出力は分割を構造的に前提とする）</remarks>
+    public bool EffectiveSplitFilesByCategory => SplitFilesByCategory || LayeredOutput;
+
     /// <summary>分割時の共有基盤（基底クラス・属性・VO 基底・JSON コンバータ）の名前空間。空なら <c>{RootNamespace}.Runtime</c> へフォールバックする</summary>
     public string? RuntimeNamespace { get; init; }
 

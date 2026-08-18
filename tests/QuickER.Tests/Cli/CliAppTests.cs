@@ -1445,4 +1445,150 @@ public class CliAppTests
             }
         }
     }
+
+    /// <summary>
+    /// --layered-output 指定で生成ファイルが層別サブフォルダ（Domain / Presentation）へ配置され、
+    /// 出力ディレクトリ直下には出ないことを検証する（既定フォルダ名。CLI の end-to-end）
+    /// </summary>
+    [Fact(DisplayName = "--layered-output で生成ファイルが層別サブフォルダへ出力される")]
+    public async Task Generate_LayeredOutputFlag_PlacesFilesUnderLayerFolders()
+    {
+        var (schemaPath, outDir, root) = CreateSampleSchema();
+
+        try
+        {
+            var exit = await CliApp.InvokeAsync([
+                "generate",
+                "--schema",
+                schemaPath,
+                "--out",
+                outDir,
+                "--root-namespace",
+                "Test.Layered",
+                "--layered-output",
+            ]);
+
+            exit.Should().Be(0);
+
+            // Entity はドメイン層・EditModel はプレゼンテーション層の既定フォルダへ入る（GenerateEditModels は既定 true）
+            File.Exists(Path.Combine(outDir, "Domain", "Entities.g.cs")).Should().BeTrue();
+            File.Exists(Path.Combine(outDir, "Presentation", "EditModels.g.cs")).Should().BeTrue();
+
+            // 出力ディレクトリ直下（層フォルダの外）には .g.cs が出ない
+            Directory.GetFiles(outDir, "*.g.cs", SearchOption.TopDirectoryOnly).Should().BeEmpty();
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// --layered-output と 4 つの層フォルダ上書きフラグ（--domain-layer-dir 等）が
+    /// 実際の出力先フォルダへ反映されることを検証する（サーバー層は --generate-remote-services で有効化。CLI の end-to-end）
+    /// </summary>
+    [Fact(DisplayName = "層フォルダ上書きフラグ 4 つが実際の出力先へ反映される")]
+    public async Task Generate_LayerDirectoryFlags_OverrideOutputFolders()
+    {
+        var (schemaPath, outDir, root) = CreateSampleSchema();
+
+        try
+        {
+            var exit = await CliApp.InvokeAsync([
+                "generate",
+                "--schema",
+                schemaPath,
+                "--out",
+                outDir,
+                "--root-namespace",
+                "Test.LayeredDirs",
+                "--layered-output",
+                "--generate-repositories",
+                "--generate-remote-services",
+                "--domain-layer-dir",
+                "MyDomain",
+                "--infrastructure-layer-dir",
+                "MyInfra",
+                "--presentation-layer-dir",
+                "MyUi",
+                "--server-layer-dir",
+                "MyServer",
+            ]);
+
+            exit.Should().Be(0);
+            File.Exists(Path.Combine(outDir, "MyDomain", "Entities.g.cs")).Should().BeTrue();
+            File.Exists(Path.Combine(outDir, "MyInfra", "Repositories.SqlServer.g.cs"))
+                .Should()
+                .BeTrue();
+            File.Exists(Path.Combine(outDir, "MyUi", "EditModels.g.cs")).Should().BeTrue();
+            File.Exists(Path.Combine(outDir, "MyServer", "RemoteServer.g.cs")).Should().BeTrue();
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// quicker.json 側で LayeredOutput と層フォルダ 4 キーを指定しても、CLI フラグと同様に
+    /// 実際の出力先フォルダへ反映されることを検証する（quicker.json → CodeGenerationOptions の読込経路）
+    /// </summary>
+    [Fact(DisplayName = "quicker.json の LayeredOutput と層フォルダキーが出力先へ反映される")]
+    public async Task Generate_LayeredOutputFromConfig_OverridesOutputFolders()
+    {
+        var (schemaPath, outDir, root) = CreateSampleSchema();
+        var configPath = Path.Combine(root, "quicker.json");
+        File.WriteAllText(
+            configPath,
+            """
+            {
+                "GenerateRepositories": true,
+                "GenerateRemoteServices": true,
+                "LayeredOutput": true,
+                "DomainLayerDirectory": "ConfigDomain",
+                "InfrastructureLayerDirectory": "ConfigInfra",
+                "PresentationLayerDirectory": "ConfigUi",
+                "ServerLayerDirectory": "ConfigServer"
+            }
+            """
+        );
+
+        try
+        {
+            var exit = await CliApp.InvokeAsync([
+                "generate",
+                "--schema",
+                schemaPath,
+                "--out",
+                outDir,
+                "--root-namespace",
+                "Test.LayeredConfig",
+                "--config",
+                configPath,
+            ]);
+
+            exit.Should().Be(0);
+            File.Exists(Path.Combine(outDir, "ConfigDomain", "Entities.g.cs")).Should().BeTrue();
+            File.Exists(Path.Combine(outDir, "ConfigInfra", "Repositories.SqlServer.g.cs"))
+                .Should()
+                .BeTrue();
+            File.Exists(Path.Combine(outDir, "ConfigUi", "EditModels.g.cs")).Should().BeTrue();
+            File.Exists(Path.Combine(outDir, "ConfigServer", "RemoteServer.g.cs"))
+                .Should()
+                .BeTrue();
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
 }

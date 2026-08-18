@@ -60,6 +60,57 @@ public class CSharpGenerationSettingsStoreTests
         }
     }
 
+    /// <summary>層別フォルダ出力の 5 設定（有効フラグ＋層フォルダ 4 つ）が保存・読込で往復することを検証する</summary>
+    [Fact(DisplayName = "層別フォルダ出力の設定が保存・読込で往復する")]
+    public void SaveThenLoad_RoundTripsLayeredOutputSettings()
+    {
+        var folder = TempFolder();
+
+        try
+        {
+            var store = new CSharpGenerationSettingsStore(folder);
+            store.Save(
+                new CSharpGenerationSettings
+                {
+                    SplitFilesByCategory = true,
+                    LayeredOutput = true,
+                    DomainLayerDirectory = "Acme.Domain/Generated",
+                    InfrastructureLayerDirectory = "Acme.Infrastructure",
+                    PresentationLayerDirectory = "Acme.App",
+                    ServerLayerDirectory = "Acme.Api",
+                }
+            );
+
+            var loaded = store.Load();
+
+            loaded.LayeredOutput.Should().BeTrue();
+            loaded.DomainLayerDirectory.Should().Be("Acme.Domain/Generated");
+            loaded.InfrastructureLayerDirectory.Should().Be("Acme.Infrastructure");
+            loaded.PresentationLayerDirectory.Should().Be("Acme.App");
+            loaded.ServerLayerDirectory.Should().Be("Acme.Api");
+        }
+        finally
+        {
+            if (Directory.Exists(folder))
+            {
+                Directory.Delete(folder, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>層別フォルダ出力の工場出荷既定（OFF・層フォルダは空＝planner の既定名へフォールバック）を検証する</summary>
+    [Fact(DisplayName = "層別フォルダ出力の既定は OFF・層フォルダは空")]
+    public void Load_WhenMissing_ReturnsLayeredOutputDefaults()
+    {
+        var loaded = new CSharpGenerationSettingsStore(TempFolder()).Load();
+
+        loaded.LayeredOutput.Should().BeFalse();
+        loaded.DomainLayerDirectory.Should().BeEmpty();
+        loaded.InfrastructureLayerDirectory.Should().BeEmpty();
+        loaded.PresentationLayerDirectory.Should().BeEmpty();
+        loaded.ServerLayerDirectory.Should().BeEmpty();
+    }
+
     /// <summary>設定ファイルが無い場合は工場出荷既定を返すことを検証する</summary>
     [Fact(DisplayName = "未保存なら工場出荷既定を返す")]
     public void Load_WhenMissing_ReturnsDefault()
@@ -263,6 +314,12 @@ public class CSharpGenerationSettingsStoreTests
                     IncludeDataAnnotations = false,
                     OutputPath = "Acme.g.cs",
                     GenerateValueObjects = true,
+                    // 層別フォルダ出力も CLI の --config へそのまま渡せるキー集合であること
+                    LayeredOutput = true,
+                    DomainLayerDirectory = "Acme.Domain",
+                    InfrastructureLayerDirectory = "Acme.Infrastructure",
+                    PresentationLayerDirectory = "Acme.App",
+                    ServerLayerDirectory = "Acme.Api",
                 }
             );
 
@@ -298,6 +355,12 @@ public class CSharpGenerationSettingsStoreTests
             options.GenerateValueObjects.Should().BeTrue();
             // GUI で選んだ対象 DB が EffectiveRepositoryDialects（リスト優先）でそのまま有効になる
             options.EffectiveRepositoryDialects.Should().Equal("sqlserver", "sqlite");
+            // 層別フォルダ出力（有効フラグ＋層フォルダ 4 つ）も CLI 経路でそのまま解釈される
+            options.LayeredOutput.Should().BeTrue();
+            options.DomainLayerDirectory.Should().Be("Acme.Domain");
+            options.InfrastructureLayerDirectory.Should().Be("Acme.Infrastructure");
+            options.PresentationLayerDirectory.Should().Be("Acme.App");
+            options.ServerLayerDirectory.Should().Be("Acme.Api");
         }
         finally
         {

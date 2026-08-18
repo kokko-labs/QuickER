@@ -24,6 +24,13 @@ public sealed class GeneratedFile
     /// <summary>出力ファイル名（".g.cs" 拡張子に正規化済み）</summary>
     public required string FileName { get; init; }
 
+    /// <summary>
+    /// 出力ディレクトリからの相対サブディレクトリ（null＝出力ディレクトリ直下）。
+    /// 層別出力（<see cref="CodeGenerationOptions.LayeredOutput"/>）のときだけ層フォルダが入る
+    /// （API リファレンス Markdown はどの csproj にも属さないため常に null）。
+    /// </summary>
+    public string? RelativeDirectory { get; init; }
+
     /// <summary>生成された C# ソースコード全文</summary>
     public required string Content { get; init; }
 }

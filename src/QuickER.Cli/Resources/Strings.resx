@@ -91,6 +91,21 @@
   <data name="Cli_Opt_SplitFilesByCategory" xml:space="preserve">
     <value>Output each category in a separate file and namespace (overrides the settings file)</value>
   </data>
+  <data name="Cli_Opt_LayeredOutput" xml:space="preserve">
+    <value>Split generated files into per-layer subfolders (Domain / Infrastructure / Presentation / Server); implies --split-files-by-category (overrides the settings file)</value>
+  </data>
+  <data name="Cli_Opt_DomainLayerDirectory" xml:space="preserve">
+    <value>Domain layer folder for layered output, relative to --out (default: Domain; overrides the settings file)</value>
+  </data>
+  <data name="Cli_Opt_InfrastructureLayerDirectory" xml:space="preserve">
+    <value>Infrastructure layer folder for layered output, relative to --out (default: Infrastructure; overrides the settings file)</value>
+  </data>
+  <data name="Cli_Opt_PresentationLayerDirectory" xml:space="preserve">
+    <value>Presentation layer folder for layered output, relative to --out (default: Presentation; overrides the settings file)</value>
+  </data>
+  <data name="Cli_Opt_ServerLayerDirectory" xml:space="preserve">
+    <value>Server layer folder for layered output, relative to --out; only used with remote services (default: Server; overrides the settings file)</value>
+  </data>
   <data name="Cli_Opt_RootNamespace" xml:space="preserve">
     <value>Root namespace of the generated code (overrides the settings file)</value>
   </data>

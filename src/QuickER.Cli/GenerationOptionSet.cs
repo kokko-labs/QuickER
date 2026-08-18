@@ -34,6 +34,29 @@ internal sealed class GenerationOptionSet
             "--split-files-by-category",
             Strings.Cli_Opt_SplitFilesByCategory
         );
+        AddBool("LayeredOutput", "--layered-output", Strings.Cli_Opt_LayeredOutput);
+
+        // 層別出力フォルダ（LayeredOutput のときのみ使用。出力ディレクトリからの相対パス）
+        AddString(
+            "DomainLayerDirectory",
+            "--domain-layer-dir",
+            Strings.Cli_Opt_DomainLayerDirectory
+        );
+        AddString(
+            "InfrastructureLayerDirectory",
+            "--infrastructure-layer-dir",
+            Strings.Cli_Opt_InfrastructureLayerDirectory
+        );
+        AddString(
+            "PresentationLayerDirectory",
+            "--presentation-layer-dir",
+            Strings.Cli_Opt_PresentationLayerDirectory
+        );
+        AddString(
+            "ServerLayerDirectory",
+            "--server-layer-dir",
+            Strings.Cli_Opt_ServerLayerDirectory
+        );
 
         // 名前空間
         AddString("RootNamespace", "--root-namespace", Strings.Cli_Opt_RootNamespace);

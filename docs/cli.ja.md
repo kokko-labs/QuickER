@@ -102,6 +102,8 @@ quicker mcp
 | キー | 説明 |
 |---|---|
 | `SplitFilesByCategory`（`false`） | カテゴリごとに別ファイル・別名前空間で出力する。`EntityNamespace` / `RepositoryNamespace` などで名前空間を個別指定できる |
+| `LayeredOutput`（`false`） | 分割ファイルを出力ディレクトリ配下の層別サブフォルダ（ドメイン／インフラ／プレゼンテーション／サーバー）へ振り分け、各層を独立プロジェクトにできるようにする。`SplitFilesByCategory` を自動含意（[生成コードの使い方](code-generation.ja.md#層別フォルダ出力--layered-output) 参照） |
+| `DomainLayerDirectory` / `InfrastructureLayerDirectory` / `PresentationLayerDirectory` / `ServerLayerDirectory`（`Domain` / `Infrastructure` / `Presentation` / `Server`） | `LayeredOutput` の層別フォルダ（出力ディレクトリからの相対パス）。複数階層（`MyApp.Domain/Generated`）も可。`LayeredOutput` では空の名前空間キーの既定もこのフォルダから導出され、フォルダと名前空間が揃う。絶対パス・ドライブ指定・`..` は生成時エラーで拒否され、空の値は既定へフォールバックする。`ServerLayerDirectory` は `GenerateRemoteServices` のときのみ使われる |
 | `RootNamespace`（`Generated`） | 生成コードのルート名前空間 |
 | `GenerateEditModels` / `GenerateMappers`（ともに `true`） | 各カテゴリの生成有無。**Entity クラスは常時生成**され、専用キーはない |
 | `GenerateValueObjects`（`false`） | 列ごとの値オブジェクト型（`CustomerIdValue` など）を生成する（[生成コードの使い方](code-generation.ja.md#値オブジェクトgeneratevalueobjects) 参照） |

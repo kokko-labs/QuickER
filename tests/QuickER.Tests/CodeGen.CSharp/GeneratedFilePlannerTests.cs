@@ -229,7 +229,7 @@ public class GeneratedFilePlannerTests
 
         var plan = GeneratedFilePlanner.Plan(options);
 
-        // RemoteServer は Repository バケットを含む最後のスキーマ依存スペック（方言別実装）の直後に並ぶ
+        // RemoteServer は Repository / Http バケットを含む最後のスキーマ依存スペック（HTTP クライアント）の直後に並ぶ
         // （Runtime 系の固定 infra ファイルはさらに後ろ。サーバー固定部の Runtime.AspNetCore.g.cs もその一員）
         plan.Select(spec => spec.FileName)
             .Should()
@@ -239,11 +239,79 @@ public class GeneratedFilePlannerTests
                 "Mappers.g.cs",
                 "Repositories.g.cs",
                 "Repositories.SqlServer.g.cs",
+                "Repositories.Http.g.cs",
                 "RemoteServer.g.cs",
                 "Runtime.g.cs",
                 "Runtime.SqlServer.g.cs",
                 "Runtime.AspNetCore.g.cs"
             );
+    }
+
+    /// <summary>
+    /// 分割＋リモートサービス生成時、HTTP クライアントが Repositories.Http.g.cs（Http バケット単独・
+    /// 契約と同一名前空間・固定 infra なし）へ分かれ、契約ファイルには Http バケットが同居しないことを検証する。
+    /// </summary>
+    [Fact]
+    public void Plan_Split_HttpClient_SeparatesIntoOwnFileWithContractNamespace()
+    {
+        var options = new CodeGenerationOptions
+        {
+            RootNamespace = "Acme.App",
+            SplitFilesByCategory = true,
+            GenerateRepositories = true,
+            GenerateRemoteServices = true,
+        };
+
+        var plan = GeneratedFilePlanner.Plan(options);
+
+        var http = plan.Single(spec => spec.FileName == "Repositories.Http.g.cs");
+        http.Buckets.Should().Equal(GenerationBucket.Http);
+        // 名前空間は契約と同一（サブ名前空間にしない＝型 FQN・非分割出力を変えない）
+        http.NamespaceName.Should().Be("Acme.App.Repositories");
+        http.EmitSharedInfra.Should().BeFalse();
+        // 契約 namespace は自分自身のため using に含めない（Entity・Runtime は依存として含む）
+        http.CrossNamespaceUsings.Should().NotContain("Acme.App.Repositories");
+        http.CrossNamespaceUsings.Should().Contain("Acme.App.Entities");
+        http.CrossNamespaceUsings.Should().Contain("Acme.App.Runtime");
+
+        var contract = plan.Single(spec => spec.FileName == "Repositories.g.cs");
+        contract.Buckets.Should().NotContain(GenerationBucket.Http);
+    }
+
+    /// <summary>リモートサービスを生成しない分割構成では、HTTP クライアントのファイルを計画しないことを検証する</summary>
+    [Fact]
+    public void Plan_Split_NoRemoteServices_PlansNoHttpFile()
+    {
+        var options = new CodeGenerationOptions
+        {
+            RootNamespace = "Acme.App",
+            SplitFilesByCategory = true,
+            GenerateRepositories = true,
+        };
+
+        var plan = GeneratedFilePlanner.Plan(options);
+
+        plan.Should().NotContain(spec => spec.FileName == "Repositories.Http.g.cs");
+        plan.SelectMany(spec => spec.Buckets).Should().NotContain(GenerationBucket.Http);
+    }
+
+    /// <summary>非分割＋リモートサービス生成時、Http バケットは本体スペックへ同居し独立ファイルを作らないことを検証する</summary>
+    [Fact]
+    public void Plan_NonSplit_HttpBucket_StaysInMainFile()
+    {
+        var options = new CodeGenerationOptions
+        {
+            RootNamespace = "Acme.App",
+            OutputFileName = "All.g.cs",
+            GenerateRepositories = true,
+            GenerateRemoteServices = true,
+        };
+
+        var plan = GeneratedFilePlanner.Plan(options);
+
+        // 本体＋RemoteServer の 2 ファイル構成は不変で、Http バケットは本体スペックが持つ
+        plan.Select(spec => spec.FileName).Should().Equal("All.g.cs", "All.RemoteServer.g.cs");
+        plan[0].Buckets.Should().Contain(GenerationBucket.Http);
     }
 
     /// <summary>

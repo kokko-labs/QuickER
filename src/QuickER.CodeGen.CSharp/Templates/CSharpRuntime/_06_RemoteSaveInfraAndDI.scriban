@@ -3606,7 +3606,7 @@ public sealed partial class {{ repository.class_name }}(
 {{~ end ~}}
 {{~ end ~}}
 {{~ end ~}}
-{{~ if remote_services && render_contract && emit_schema_dependent ~}}
+{{~ if remote_services && render_http_client && emit_schema_dependent ~}}
 {{~ for repository in repository_classes ~}}
 
 /// <summary>HTTP client implementation of the remote surface ({{ repository.remote_interface_name }}) for {{ repository.entity_class_name }}.</summary>

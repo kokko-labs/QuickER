@@ -89,6 +89,100 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
         set => SplitFilesByCategory = !value;
     }
 
+    /// <summary>
+    /// 生成ファイルを層別サブフォルダ（ドメイン／インフラ／プレゼンテーション／サーバー）へ振り分けて出力するか（既定 OFF）
+    /// </summary>
+    /// <remarks>
+    /// ON は分割出力（<see cref="SplitFilesByCategory"/>）を自動的に含意する（単一ファイルは層へ割れないため）。
+    /// UI では含意を可視化するため、ON の間だけ出力モードのラジオを分割固定＋操作不可にする
+    /// （<see cref="OnLayeredOutputChanged"/> / <see cref="CanEditSplitFilesByCategory"/>）。
+    /// 生成オプションへは <see cref="LayeredOutput"/> と <see cref="SplitFilesByCategory"/> の両方をそのまま渡し、
+    /// 含意の解釈はコア側（<c>CodeGenerationOptions.EffectiveSplitFilesByCategory</c>）へ委ねる
+    /// </remarks>
+    [ObservableProperty]
+    private bool _layeredOutput;
+
+    /// <summary>層別出力時のドメイン層フォルダ（出力先からの相対パス。既定値でプリフィルする）</summary>
+    [ObservableProperty]
+    private string _domainLayerDirectory = GeneratedFilePlanner.DefaultLayerDirectory(
+        GeneratedLayer.Domain
+    );
+
+    /// <summary>層別出力時のインフラストラクチャ層フォルダ（出力先からの相対パス）</summary>
+    [ObservableProperty]
+    private string _infrastructureLayerDirectory = GeneratedFilePlanner.DefaultLayerDirectory(
+        GeneratedLayer.Infrastructure
+    );
+
+    /// <summary>層別出力時のプレゼンテーション層フォルダ（出力先からの相対パス）</summary>
+    [ObservableProperty]
+    private string _presentationLayerDirectory = GeneratedFilePlanner.DefaultLayerDirectory(
+        GeneratedLayer.Presentation
+    );
+
+    /// <summary>層別出力時のサーバー層フォルダ（出力先からの相対パス。リモートサービス生成時のみ使われる）</summary>
+    [ObservableProperty]
+    private string _serverLayerDirectory = GeneratedFilePlanner.DefaultLayerDirectory(
+        GeneratedLayer.Server
+    );
+
+    /// <summary>層別出力チェックボックスのツールチップ</summary>
+    public string LayeredOutputToolTip => Strings.CodeGen_LayeredOutputToolTip;
+
+    /// <summary>
+    /// 出力モード（1 ファイル／分割）のラジオを操作できるか。層別出力 ON の間は分割固定のため false になる
+    /// </summary>
+    public bool CanEditSplitFilesByCategory => !LayeredOutput;
+
+    /// <summary>層フォルダの入力欄を表示するか（層別出力 ON のときのみ）</summary>
+    public bool ShowLayerDirectories => LayeredOutput;
+
+    /// <summary>
+    /// サーバー層フォルダの入力欄を表示するか（層別出力 ON かつリモートサービス生成 ON のときのみ）
+    /// </summary>
+    /// <remarks>サーバー層へ出るのはリモートサーバー実装だけのため、生成しない構成では欄ごと隠す</remarks>
+    public bool ShowServerLayerDirectory => LayeredOutput && GenerateRemoteServices;
+
+    /// <summary>
+    /// 層別出力の切替に伴い、分割出力の強制 ON・名前空間の既定切替・関連する表示制御を反映する
+    /// </summary>
+    /// <remarks>
+    /// 名前空間の既定は層別出力の ON/OFF でモードごと変わる（層由来 ⇔ ルート由来）ため、
+    /// 既定のままの欄を新しい既定へ追従させる（手編集済みの欄は保持）
+    /// </remarks>
+    partial void OnLayeredOutputChanged(bool value)
+    {
+        if (value)
+        {
+            // 層別出力は分割出力を構造的に前提とする（単一ファイルは層へ割れない）。
+            // OFF に戻したときは分割の値はそのままにし、ラジオの操作可能状態だけを戻す
+            SplitFilesByCategory = true;
+        }
+
+        if (!_suppressNamespaceFollow)
+        {
+            // bool の切替なので、変更前の状態は「反転した層別出力」で再現できる
+            FollowDefaultNamespaces(NamespaceDefaultContext(layeredOutput: !value));
+        }
+
+        OnPropertyChanged(nameof(CanEditSplitFilesByCategory));
+        RaiseDerivedChanged();
+    }
+
+    // 層フォルダの変更は生成ファイルの配置（プレビュー表示）と、層別出力時の名前空間の既定を変えるため、
+    // 既定のままの名前空間欄（その層に属するバケットのもの）とプレビューを追従させる
+    partial void OnDomainLayerDirectoryChanged(string? oldValue, string newValue) =>
+        ApplyLayerDirectoryChange(NamespaceDefaultContext(domainLayerDirectory: oldValue));
+
+    partial void OnInfrastructureLayerDirectoryChanged(string? oldValue, string newValue) =>
+        ApplyLayerDirectoryChange(NamespaceDefaultContext(infrastructureLayerDirectory: oldValue));
+
+    partial void OnPresentationLayerDirectoryChanged(string? oldValue, string newValue) =>
+        ApplyLayerDirectoryChange(NamespaceDefaultContext(presentationLayerDirectory: oldValue));
+
+    partial void OnServerLayerDirectoryChanged(string? oldValue, string newValue) =>
+        ApplyLayerDirectoryChange(NamespaceDefaultContext(serverLayerDirectory: oldValue));
+
     // ===== 名前空間 =====
 
     /// <summary>ルート名前空間</summary>
@@ -281,6 +375,8 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             GenerateRemoteContracts = true;
         }
 
+        // サーバー層フォルダの欄はリモートサーバー実装を生成するときだけ意味を持つため、表示可否を再通知する
+        OnPropertyChanged(nameof(ShowServerLayerDirectory));
         // サーバーファイル（{ベース名}.RemoteServer.g.cs）の有無が変わるため、出力ファイルのプレビューを更新する
         RefreshPreview();
     }
@@ -480,7 +576,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     {
         if (!_suppressNamespaceFollow && oldValue is not null)
         {
-            FollowRootNamespace(oldValue, newValue);
+            FollowDefaultNamespaces(NamespaceDefaultContext(rootNamespace: oldValue));
         }
 
         RefreshPreview();
@@ -501,11 +597,14 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
         OnPropertyChanged(nameof(ShowExcludeUnboundedBinary));
         // 同期支援の欄はQuickER 版 Repository の選択と対象 DB（両方言）に連動する
         OnPropertyChanged(nameof(ShowSyncSupport));
+        // 層フォルダの欄は層別出力の ON/OFF に、サーバー層はさらにリモートサービス生成に連動する
+        OnPropertyChanged(nameof(ShowLayerDirectories));
+        OnPropertyChanged(nameof(ShowServerLayerDirectory));
         RefreshPreview();
     }
 
     /// <summary>
-    /// ルート追従（<see cref="FollowRootNamespace"/>）とプリフィル（<see cref="ApplySettings"/>）が対象にする
+    /// 既定追従（<see cref="FollowDefaultNamespaces"/>）とプリフィル（<see cref="ApplySettings"/>）が対象にする
     /// 6 つの子カテゴリ名前空間の入出力（現在値の取得・設定・対応バケット・設定オブジェクトからの取得）を 1 箇所へ集約する。
     /// </summary>
     /// <remarks>
@@ -557,15 +656,62 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             ),
         ];
 
-    /// <summary>各子名前空間が「{旧root}.{接尾辞}」既定のままなら新ルートへ更新する（手編集済みは保持）</summary>
-    private void FollowRootNamespace(string oldRoot, string newRoot)
+    /// <summary>
+    /// 名前空間の既定（プリフィル・追従）を求めるための最小の生成オプションを組み立てる。
+    /// </summary>
+    /// <remarks>
+    /// 既定の規約（通常分割は <c>{root}.{接尾辞}</c>・層別出力は <c>{層フォルダ由来ルート}.{接尾辞}</c>）は
+    /// planner が正本のため、UI 側で規約を再実装せず <see cref="GeneratedFilePlanner.ResolveNamespace"/> へ委ねる。
+    /// 明示の名前空間は載せない（載せると既定でなく明示値が返り、既定値そのものが求まらない）。
+    /// 各引数は「変更前の状態」を再現するための差し替えで、省略（null）時は現在の VM の値を使う
+    /// </remarks>
+    private CodeGenerationOptions NamespaceDefaultContext(
+        bool? layeredOutput = null,
+        string? rootNamespace = null,
+        string? domainLayerDirectory = null,
+        string? infrastructureLayerDirectory = null,
+        string? presentationLayerDirectory = null,
+        string? serverLayerDirectory = null
+    ) =>
+        new()
+        {
+            RootNamespace = rootNamespace ?? RootNamespace,
+            LayeredOutput = layeredOutput ?? LayeredOutput,
+            DomainLayerDirectory = domainLayerDirectory ?? DomainLayerDirectory,
+            InfrastructureLayerDirectory =
+                infrastructureLayerDirectory ?? InfrastructureLayerDirectory,
+            PresentationLayerDirectory = presentationLayerDirectory ?? PresentationLayerDirectory,
+            ServerLayerDirectory = serverLayerDirectory ?? ServerLayerDirectory,
+        };
+
+    /// <summary>
+    /// 名前空間の既定が変わったとき、既定のままの子名前空間欄だけを新しい既定へ追従させる（手編集済みは保持）。
+    /// </summary>
+    /// <param name="previousContext">
+    /// 変更前の状態を表す文脈（<see cref="NamespaceDefaultContext"/> で 1 つだけ旧値へ差し替えたもの）。
+    /// 旧既定と一致する欄が「ユーザーが触っていない欄」の判定基準になる
+    /// </param>
+    /// <remarks>
+    /// ルート名前空間の変更・層別出力の ON/OFF・層フォルダの変更のいずれもこの 1 経路へ集約する
+    /// （既定の求め方が planner 1 箇所なので、モードが増えても追従規則を書き足す必要がない）。
+    /// 旧既定と新既定が同じ変更（例: 層別出力 ON 中のルート変更）では代入しても値が変わらず実質 no-op になる
+    /// </remarks>
+    private void FollowDefaultNamespaces(CodeGenerationOptions previousContext)
     {
+        var currentContext = NamespaceDefaultContext();
+
         _suppressNamespaceFollow = true;
         try
         {
             foreach (var (get, set, bucket, _) in ChildNamespaceAccessors)
             {
-                set(FollowOne(get(), oldRoot, newRoot, bucket));
+                var current = get();
+                var oldDefault = GeneratedFilePlanner.ResolveNamespace(previousContext, bucket);
+
+                if (string.IsNullOrWhiteSpace(current) || current == oldDefault)
+                {
+                    set(GeneratedFilePlanner.ResolveNamespace(currentContext, bucket));
+                }
             }
         }
         finally
@@ -574,31 +720,52 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
         }
     }
 
-    /// <summary>子名前空間が空または旧既定なら新既定へ、手編集済みならそのままにする</summary>
-    private static string FollowOne(
-        string current,
-        string oldRoot,
-        string newRoot,
-        GenerationBucket bucket
-    )
+    /// <summary>層フォルダの変更を、既定のままの名前空間欄の追従とプレビュー更新へ反映する</summary>
+    /// <param name="previousContext">変更前の層フォルダを持つ文脈（旧既定の判定に使う）</param>
+    private void ApplyLayerDirectoryChange(CodeGenerationOptions previousContext)
     {
-        var suffix = GeneratedFilePlanner.DefaultSuffix(bucket);
-        var oldDefault = $"{oldRoot}.{suffix}";
-        return string.IsNullOrWhiteSpace(current) || current == oldDefault
-            ? $"{newRoot}.{suffix}"
-            : current;
+        if (!_suppressNamespaceFollow)
+        {
+            FollowDefaultNamespaces(previousContext);
+        }
+
+        RefreshPreview();
     }
 
-    /// <summary>設定値を各プロパティへ適用する（空の子名前空間は {root}.{接尾辞} でプリフィルする）</summary>
+    /// <summary>
+    /// 設定値を各プロパティへ適用する（空の子名前空間はモード別の既定＝通常分割なら <c>{root}.{接尾辞}</c>・
+    /// 層別出力なら <c>{層フォルダ由来ルート}.{接尾辞}</c> でプリフィルする）
+    /// </summary>
     private void ApplySettings(CSharpGenerationSettings settings)
     {
         _suppressNamespaceFollow = true;
         try
         {
             SplitFilesByCategory = settings.SplitFilesByCategory;
+            // 層別出力は分割出力より後に適用する（含意の連動で分割が強制 ON になるため。
+            // 外部編集された「層別 ON＋分割 OFF」の設定でも UI 不変条件へ揃う）
+            LayeredOutput = settings.LayeredOutput;
+            // 空の層フォルダは planner の既定名（Domain / Infrastructure / …）でプリフィルする
+            DomainLayerDirectory = PrefillLayer(
+                settings.DomainLayerDirectory,
+                GeneratedLayer.Domain
+            );
+            InfrastructureLayerDirectory = PrefillLayer(
+                settings.InfrastructureLayerDirectory,
+                GeneratedLayer.Infrastructure
+            );
+            PresentationLayerDirectory = PrefillLayer(
+                settings.PresentationLayerDirectory,
+                GeneratedLayer.Presentation
+            );
+            ServerLayerDirectory = PrefillLayer(
+                settings.ServerLayerDirectory,
+                GeneratedLayer.Server
+            );
             RootNamespace = settings.RootNamespace;
 
-            // 空の子名前空間は {root}.{接尾辞} でプリフィルする（6 バケット分を集約表で回す）
+            // 空の子名前空間は現在のモードの既定でプリフィルする（6 バケット分を集約表で回す）。
+            // 層別出力・層フォルダ・ルート名前空間はこの時点で適用済み＝既定が正しいモードで求まる
             foreach (var (_, set, bucket, fromSettings) in ChildNamespaceAccessors)
             {
                 set(Prefill(fromSettings(settings), bucket));
@@ -663,10 +830,22 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
         RaiseDerivedChanged();
     }
 
-    /// <summary>子名前空間が空なら {root}.{接尾辞} を返す（プリフィル）</summary>
+    /// <summary>層フォルダが空なら層の既定フォルダ名（<c>Domain</c> 等）を返す（プリフィル）</summary>
+    private static string PrefillLayer(string value, GeneratedLayer layer) =>
+        string.IsNullOrWhiteSpace(value)
+            ? GeneratedFilePlanner.DefaultLayerDirectory(layer)
+            : value;
+
+    /// <summary>
+    /// 子名前空間が空なら現在のモードの既定（通常分割は <c>{root}.{接尾辞}</c>・層別出力は
+    /// <c>{層フォルダ由来ルート}.{接尾辞}</c>）を返す（プリフィル）
+    /// </summary>
+    /// <remarks>
+    /// 呼び出し前に層別出力・層フォルダ・ルート名前空間を適用しておくこと（既定の算出がそれらを読む）
+    /// </remarks>
     private string Prefill(string value, GenerationBucket bucket) =>
         string.IsNullOrWhiteSpace(value)
-            ? $"{RootNamespace}.{GeneratedFilePlanner.DefaultSuffix(bucket)}"
+            ? GeneratedFilePlanner.ResolveNamespace(NamespaceDefaultContext(), bucket)
             : value;
 
     /// <summary>現在の設定値から設定オブジェクトを組み立てる（永続化用）</summary>
@@ -674,6 +853,11 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
         new()
         {
             SplitFilesByCategory = SplitFilesByCategory,
+            LayeredOutput = LayeredOutput,
+            DomainLayerDirectory = DomainLayerDirectory.Trim(),
+            InfrastructureLayerDirectory = InfrastructureLayerDirectory.Trim(),
+            PresentationLayerDirectory = PresentationLayerDirectory.Trim(),
+            ServerLayerDirectory = ServerLayerDirectory.Trim(),
             RootNamespace = RootNamespace.Trim(),
             RuntimeNamespace = RuntimeNamespace.Trim(),
             EntityNamespace = EntityNamespace.Trim(),
@@ -750,7 +934,13 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
 
         foreach (var spec in GeneratedFilePlanner.Plan(ToOptions()))
         {
-            PreviewFiles.Add($"{spec.FileName}  →  namespace {spec.NamespaceName}");
+            // 層別出力では出力先が層フォルダ配下へ変わるため、相対フォルダを付けて配置まで見せる
+            // （層別でないスペックは RelativeDirectory が null＝従来どおりファイル名だけ）
+            var displayPath = string.IsNullOrWhiteSpace(spec.RelativeDirectory)
+                ? spec.FileName
+                : $"{spec.RelativeDirectory}/{spec.FileName}";
+
+            PreviewFiles.Add($"{displayPath}  →  namespace {spec.NamespaceName}");
         }
     }
 

@@ -334,12 +334,19 @@ internal static class GeneratedFileUsings
                     }
                 }
 
-                // リモートサービス（クライアント側）: 固定 infra（RemoteJson・RemoteRepositoryException・
-                // HttpRemoteRepository）と per-entity クライアント・AddGeneratedHttpRemoteRepositories は
-                // 契約を出すスペック（単一方言＝契約＋実装、マルチ方言＝契約スペック）にのみ出力される。
+                // リモートサービス（クライアント側の固定 infra）: RemoteJson・RemoteRepositoryException・
+                // HttpRemoteRepository 基底は「契約を出すスペックのうち固定 infra も出すもの」にのみ出力される
+                // （非分割の本体スペック・分割の Runtime.g.cs・パッケージソースのコア）。per-entity クライアント・
+                // AddGeneratedHttpRemoteRepositories は Http バケットへ分離済みで、その using は Http ケースが持つ
+                // （分割の契約ファイル Repositories.g.cs は EmitSharedInfra=false のためここでは何も足さない＝
+                //   HTTP 系 using が契約だけのファイルへ漏れない）。
                 // HttpClient / PostAsJsonAsync（System.Net.Http(.Json)）・JSON 設定（System.Text.Json(.Serialization)）・
                 // DI 登録拡張（Microsoft.Extensions.DependencyInjection）を使う（すべて BCL＋共有フレームワーク）。
-                if (options.GenerateRemoteServices && (spec.ContractOnly || !spec.MultiDialect))
+                if (
+                    options.GenerateRemoteServices
+                    && (spec.ContractOnly || !spec.MultiDialect)
+                    && spec.EmitSharedInfra
+                )
                 {
                     yield return "System.Net.Http";
                     yield return "System.Net.Http.Json";
@@ -428,6 +435,34 @@ internal static class GeneratedFileUsings
                 {
                     yield return "System.ComponentModel.DataAnnotations";
                     yield return "System.ComponentModel.DataAnnotations.Schema";
+                }
+
+                break;
+
+            // Http: リモート面の HTTP クライアント（Http{Entity}RemoteRepository・AddGeneratedHttpRemoteRepositories・
+            //   OwnedHttpClient）。HttpClient / SocketsHttpHandler（System.Net.Http）・PostAsJsonAsync（System.Net.Http.Json）・
+            //   JSON 設定（System.Text.Json(.Serialization)）・DI 登録（Microsoft.Extensions.DependencyInjection）・
+            //   Task / CancellationToken・Timeout.InfiniteTimeSpan（System.Threading(.Tasks)）を使う（すべて BCL＋共有フレームワーク）。
+            //   固定 infra（HttpRemoteRepository 基底・RemoteJson）は Runtime コア側＝クロス using / Core パッケージで解決する。
+            case GenerationBucket.Http:
+                yield return "System";
+                yield return "System.Collections.Generic";
+                yield return "System.Net.Http";
+                yield return "System.Net.Http.Json";
+                yield return "System.Text.Json";
+                yield return "System.Text.Json.Serialization";
+                yield return "System.Threading";
+                yield return "System.Threading.Tasks";
+                yield return "Microsoft.Extensions.DependencyInjection";
+
+                // 無制限バイナリ列のストリーミング転送（クライアントの GET/PUT/DELETE）は Stream（System.IO）・
+                // ステータス判定（HttpStatusCode＝System.Net）・octet-stream の Content-Type
+                // （MediaTypeHeaderValue＝System.Net.Http.Headers）を使う
+                if (options.ExcludeUnboundedBinaryColumns)
+                {
+                    yield return "System.IO";
+                    yield return "System.Net";
+                    yield return "System.Net.Http.Headers";
                 }
 
                 break;

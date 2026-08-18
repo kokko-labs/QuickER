@@ -52,6 +52,14 @@ internal sealed class RenderScope
     /// <remarks>Sync バケットを含むスペックだけが true。既存経路は常に false のため出力はバイト不変。</remarks>
     public bool Sync { get; init; }
 
+    /// <summary>リモート面の HTTP クライアント（Http{Entity}RemoteRepository・AddGeneratedHttpRemoteRepositories・OwnedHttpClient）を出力するか</summary>
+    /// <remarks>
+    /// Http バケットを含むスペックだけが true（非分割は本体スペックに Http バケットが同居し従来位置へ描画・
+    /// 分割は Repositories.Http.g.cs のみ）。契約（render_contract）とは別軸＝契約ファイルには HTTP 実装を出さない。
+    /// クライアント固定 infra（HttpRemoteRepository 基底・RemoteJson）は render_contract && emit_shared_infra 側のまま。
+    /// </remarks>
+    public bool RenderHttpClient { get; init; }
+
     /// <summary>このスコープがレンダリングするQuickER 版 Repository の方言（"sqlserver" / "sqlite"）</summary>
     public required string Dialect { get; init; }
 
@@ -369,6 +377,9 @@ internal sealed class ScribanCSharpRenderer
             ["remote_services"] = options.GenerateRemoteServices,
             // このスペックがサーバー実装ファイル（{ベース名}.RemoteServer.g.cs）かどうか。
             ["render_remote_server"] = scope.RemoteServer,
+            // リモート面の HTTP クライアント（per-entity クライアント・DI 登録・OwnedHttpClient）を出力するか。
+            // Http バケットを含むスペックだけが true（分割時は Repositories.Http.g.cs・非分割時は本体スペックに同居）。
+            ["render_http_client"] = scope.RenderHttpClient,
             // 双方向同期の支援コード（固定エンジン・per-entity 記述子／デコレータ／直結差分ソース・DI）を出力するか。
             // Sync バケットを含むスペックだけが true（既存経路は false でバイト不変）。
             ["render_sync"] = scope.Sync,

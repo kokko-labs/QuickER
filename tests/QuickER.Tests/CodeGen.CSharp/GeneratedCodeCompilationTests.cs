@@ -586,6 +586,76 @@ public class GeneratedCodeCompilationTests
             );
     }
 
+    /// <summary>マトリクスケース: 層別フォルダ出力（名前空間の層フォルダ追従）の横断ケース</summary>
+    public static TheoryData<string, CodeGenerationOptions> LayeredOutputMatrixCases()
+    {
+        var data = new TheoryData<string, CodeGenerationOptions>();
+
+        // 全層が埋まる代表構成（既定フォルダ＝Domain.Entities 等の導出名前空間でコンパイルが通ること）
+        data.Add(
+            "layered QuickER + remote-services + VO",
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Sample.Domain",
+                LayeredOutput = true,
+                GenerateValueObjects = true,
+                GenerateRepositories = true,
+                GenerateRemoteServices = true,
+            }
+        );
+
+        // EF Core 単独（契約=ドメイン層・DbContext=インフラ層の導出。契約ファイルが方言実装レイアウトを通らない構成）
+        data.Add(
+            "layered EF Core 単独",
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Sample.Domain",
+                LayeredOutput = true,
+                GenerateRepositories = false,
+                GenerateEfCore = true,
+            }
+        );
+
+        // マルチターゲット＋同期＋インメモリ＋リモート（インフラ層のサブ名前空間が全系統そろう最重構成）
+        data.Add(
+            "layered multi-target + sync + in-memory + remote",
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Sample.Domain",
+                LayeredOutput = true,
+                GenerateRepositories = true,
+                RepositoryDialects = ["sqlserver", "sqlite"],
+                GenerateSyncSupport = true,
+                GenerateInMemoryRepositories = true,
+                GenerateRemoteServices = true,
+            }
+        );
+
+        // 複数階層フォルダ＋明示名前空間の混在（導出と明示が同居してもコンパイルが通ること）
+        data.Add(
+            "layered custom folders + explicit entity namespace",
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Sample.Domain",
+                LayeredOutput = true,
+                GenerateRepositories = true,
+                DomainLayerDirectory = "MyApp.Domain/Generated",
+                InfrastructureLayerDirectory = "MyApp.Infrastructure",
+                EntityNamespace = "MyApp.Domain.Model",
+            }
+        );
+
+        return data;
+    }
+
+    /// <summary>層別フォルダ出力の横断ケースで、導出名前空間の生成コードがエラー・警告なしでコンパイルできることを検証する</summary>
+    [Theory]
+    [MemberData(nameof(LayeredOutputMatrixCases))]
+    public void Generate_LayeredOutputMatrix_ShouldProduceCompilableCode(
+        string caseName,
+        CodeGenerationOptions options
+    ) => AssertCompiles(caseName, options);
+
     /// <summary>指定オプションで生成し、Roslyn コンパイルがエラー・報告対象警告なしで成功することを検証する共通アサーション</summary>
     private static void AssertCompiles(string caseName, CodeGenerationOptions options)
     {

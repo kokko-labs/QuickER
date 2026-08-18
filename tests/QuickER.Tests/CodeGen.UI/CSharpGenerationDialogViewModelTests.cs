@@ -1,6 +1,7 @@
 using System.IO;
 using System.Linq;
 using AwesomeAssertions;
+using QuickER.CodeGen.CSharp;
 using QuickER.CodeGen.UI;
 using QuickER.Gui.Abstractions;
 using QuickER.Tests.TestDoubles;
@@ -670,6 +671,412 @@ public class CSharpGenerationDialogViewModelTests
                 Directory.Delete(folder, recursive: true);
             }
         }
+    }
+
+    /// <summary>
+    /// 層別出力を ON にすると分割出力が強制 ON になり、出力モードのラジオが操作不可になること、
+    /// OFF に戻すと（分割の値はそのままに）操作可能へ戻ることを検証する（含意の可視化）
+    /// </summary>
+    [Fact(DisplayName = "層別出力 ON で分割出力が強制 ON＋出力モードが操作不可になる")]
+    public void LayeredOutput_On_ForcesSplit_AndLocksOutputMode()
+    {
+        var vm = CreateViewModel(out _);
+        vm.RootNamespace = "Acme.App";
+
+        vm.LayeredOutput.Should().BeFalse("既定は OFF");
+        vm.SplitFilesByCategory.Should().BeFalse("既定は 1 ファイルにまとめる");
+        vm.CanEditSplitFilesByCategory.Should().BeTrue("層別出力 OFF では出力モードを選べる");
+
+        vm.LayeredOutput = true;
+
+        vm.SplitFilesByCategory.Should().BeTrue("層別出力は分割出力を含意する");
+        vm.MergeIntoSingleFile.Should().BeFalse();
+        vm.CanEditSplitFilesByCategory.Should().BeFalse("含意の可視化として操作不可にする");
+        vm.ShowLayerDirectories.Should().BeTrue("層フォルダの入力欄が現れる");
+
+        vm.LayeredOutput = false;
+
+        vm.CanEditSplitFilesByCategory.Should().BeTrue("OFF に戻すと出力モードを再び選べる");
+        vm.SplitFilesByCategory.Should().BeTrue("分割出力の値そのものは維持する");
+        vm.ShowLayerDirectories.Should().BeFalse("層フォルダの入力欄は隠れる");
+    }
+
+    /// <summary>層フォルダの入力欄が planner の既定フォルダ名でプリフィルされることを検証する</summary>
+    [Fact(DisplayName = "層フォルダ欄は既定フォルダ名でプリフィルされる")]
+    public void LayerDirectories_ArePrefilledWithDefaults()
+    {
+        var vm = CreateViewModel(out _);
+
+        vm.DomainLayerDirectory.Should()
+            .Be(GeneratedFilePlanner.DefaultLayerDirectory(GeneratedLayer.Domain));
+        vm.InfrastructureLayerDirectory.Should()
+            .Be(GeneratedFilePlanner.DefaultLayerDirectory(GeneratedLayer.Infrastructure));
+        vm.PresentationLayerDirectory.Should()
+            .Be(GeneratedFilePlanner.DefaultLayerDirectory(GeneratedLayer.Presentation));
+        vm.ServerLayerDirectory.Should()
+            .Be(GeneratedFilePlanner.DefaultLayerDirectory(GeneratedLayer.Server));
+    }
+
+    /// <summary>
+    /// サーバー層フォルダの欄は「層別出力 ON かつリモートサービス生成 ON」のときだけ表示されることを検証する
+    /// （サーバー層へ出るのはリモートサーバー実装だけのため）
+    /// </summary>
+    [Fact(DisplayName = "サーバー層フォルダ欄はリモートサービス生成 ON のときだけ表示される")]
+    public void ShowServerLayerDirectory_TracksRemoteServices()
+    {
+        var vm = CreateViewModel(out _, currentProvider: new QuickER.SqlServer.SqlServerProvider());
+        vm.RootNamespace = "Acme.App";
+        vm.DbAccessRepository = true;
+
+        vm.ShowServerLayerDirectory.Should().BeFalse("層別出力 OFF では表示しない");
+
+        vm.LayeredOutput = true;
+        vm.ShowServerLayerDirectory.Should()
+            .BeFalse("層別出力だけではサーバー層のファイルが出ないため表示しない");
+
+        vm.GenerateRemoteServices = true;
+        vm.ShowServerLayerDirectory.Should().BeTrue("リモートサービス生成 ON で表示する");
+
+        vm.GenerateRemoteServices = false;
+        vm.ShowServerLayerDirectory.Should().BeFalse("OFF に戻すと隠れる");
+
+        vm.GenerateRemoteServices = true;
+        vm.LayeredOutput = false;
+        vm.ShowServerLayerDirectory.Should().BeFalse("層別出力 OFF でも隠れる");
+    }
+
+    /// <summary>層別出力と 4 つの層フォルダが結果オプション（CodeGenerationOptions）へ写像されることを検証する</summary>
+    [Fact(DisplayName = "層別出力と層フォルダが生成オプションへ写像される")]
+    public void LayeredOutput_AndDirectories_AreMappedToOptions()
+    {
+        var vm = CreateViewModel(out _, currentProvider: new QuickER.SqlServer.SqlServerProvider());
+        vm.RootNamespace = "Acme.App";
+        vm.OutputPath = @"C:\out";
+        vm.DbAccessRepository = true;
+        vm.GenerateRemoteServices = true;
+
+        // 既定（OFF）では層別出力を要求せず、層フォルダも生成オプションへ影響しない
+        vm.ToOptions().LayeredOutput.Should().BeFalse();
+
+        vm.LayeredOutput = true;
+        vm.DomainLayerDirectory = "Acme.Domain/Generated";
+        vm.InfrastructureLayerDirectory = "Acme.Infrastructure";
+        vm.PresentationLayerDirectory = "Acme.App/Generated";
+        vm.ServerLayerDirectory = "Acme.Api";
+
+        vm.OkCommand.Execute(null);
+
+        vm.Result.Should().NotBeNull();
+        var options = vm.Result!.Options;
+        options.LayeredOutput.Should().BeTrue();
+        // 層別出力は分割を含意するため、分割フラグも ON のまま渡る（コア側は EffectiveSplitFilesByCategory で解釈）
+        options.SplitFilesByCategory.Should().BeTrue();
+        options.EffectiveSplitFilesByCategory.Should().BeTrue();
+        options.DomainLayerDirectory.Should().Be("Acme.Domain/Generated");
+        options.InfrastructureLayerDirectory.Should().Be("Acme.Infrastructure");
+        options.PresentationLayerDirectory.Should().Be("Acme.App/Generated");
+        options.ServerLayerDirectory.Should().Be("Acme.Api");
+    }
+
+    /// <summary>
+    /// 層フォルダを空にすると生成オプションでは null へ畳まれ、planner の既定フォルダ名へフォールバックする
+    /// ことを検証する（既存の名前空間欄と同じ流儀）
+    /// </summary>
+    [Fact(DisplayName = "空の層フォルダは null へ畳まれ既定フォルダ名へフォールバックする")]
+    public void EmptyLayerDirectory_FallsBackToDefault()
+    {
+        var vm = CreateViewModel(out _);
+        vm.RootNamespace = "Acme.App";
+        vm.OutputPath = @"C:\out";
+        vm.LayeredOutput = true;
+        vm.DomainLayerDirectory = "   ";
+
+        var options = vm.ToOptions();
+
+        options.DomainLayerDirectory.Should().BeNull();
+        GeneratedFilePlanner
+            .ResolveLayerDirectory(options, GeneratedLayer.Domain)
+            .Should()
+            .Be(GeneratedFilePlanner.DefaultLayerDirectory(GeneratedLayer.Domain));
+    }
+
+    /// <summary>
+    /// 層別出力の切替で、生成ファイルのプレビュー表示に層フォルダが現れ・消えることを検証する
+    /// （層別でないときは従来どおりファイル名のみ）
+    /// </summary>
+    [Fact(DisplayName = "層別出力の切替でプレビューに層フォルダが連動する")]
+    public void LayeredOutput_TogglesLayerFolderInPreview()
+    {
+        var vm = CreateViewModel(out _);
+        vm.RootNamespace = "Acme.App";
+        vm.SplitFilesByCategory = true;
+
+        vm.PreviewFiles.Should()
+            .Contain(line => line.StartsWith("Entities.g.cs", StringComparison.Ordinal));
+
+        vm.LayeredOutput = true;
+
+        vm.PreviewFiles.Should()
+            .Contain(line => line.StartsWith("Domain/Entities.g.cs", StringComparison.Ordinal));
+        vm.PreviewFiles.Should()
+            .Contain(line =>
+                line.StartsWith("Presentation/EditModels.g.cs", StringComparison.Ordinal)
+            );
+
+        // 層フォルダを変えるとプレビューも即座に追従する
+        vm.DomainLayerDirectory = "Acme.Domain";
+        vm.PreviewFiles.Should()
+            .Contain(line =>
+                line.StartsWith("Acme.Domain/Entities.g.cs", StringComparison.Ordinal)
+            );
+
+        vm.LayeredOutput = false;
+
+        vm.PreviewFiles.Should()
+            .Contain(line => line.StartsWith("Entities.g.cs", StringComparison.Ordinal));
+    }
+
+    /// <summary>層別出力と層フォルダの設定が保存され、次回起動時に復元されることを検証する</summary>
+    [Fact(DisplayName = "層別出力と層フォルダが次回起動時に復元される")]
+    public void LayeredOutput_AndDirectories_ArePersistedAndRestored()
+    {
+        var vm = CreateViewModel(out var folder);
+
+        try
+        {
+            vm.RootNamespace = "Acme.App";
+            vm.OutputPath = @"C:\out";
+            vm.LayeredOutput = true;
+            vm.DomainLayerDirectory = "Acme.Domain";
+            vm.InfrastructureLayerDirectory = "Acme.Infrastructure";
+            vm.PresentationLayerDirectory = "Acme.App";
+            vm.ServerLayerDirectory = "Acme.Api";
+            vm.OkCommand.Execute(null);
+
+            var restored = new CSharpGenerationDialogViewModel(
+                new CSharpGenerationSettingsStore(folder)
+            );
+
+            restored.LayeredOutput.Should().BeTrue();
+            restored
+                .SplitFilesByCategory.Should()
+                .BeTrue("含意により分割出力も ON のまま復元される");
+            restored.CanEditSplitFilesByCategory.Should().BeFalse();
+            restored.DomainLayerDirectory.Should().Be("Acme.Domain");
+            restored.InfrastructureLayerDirectory.Should().Be("Acme.Infrastructure");
+            restored.PresentationLayerDirectory.Should().Be("Acme.App");
+            restored.ServerLayerDirectory.Should().Be("Acme.Api");
+        }
+        finally
+        {
+            if (Directory.Exists(folder))
+            {
+                Directory.Delete(folder, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// 外部編集された「層別 ON＋分割 OFF」の設定ファイルでも、復元時に UI 不変条件
+    /// （層別出力は分割を含意する）へ揃うことを検証する
+    /// </summary>
+    [Fact(DisplayName = "層別 ON＋分割 OFF の保存値は復元時に分割 ON へ揃う")]
+    public void LayeredOutput_Restore_ForcesSplitOn()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+
+        try
+        {
+            var store = new CSharpGenerationSettingsStore(folder);
+            store.Save(
+                new CSharpGenerationSettings { LayeredOutput = true, SplitFilesByCategory = false }
+            );
+
+            var vm = new CSharpGenerationDialogViewModel(store);
+
+            vm.LayeredOutput.Should().BeTrue();
+            vm.SplitFilesByCategory.Should().BeTrue("含意により分割出力へ強制される");
+        }
+        finally
+        {
+            if (Directory.Exists(folder))
+            {
+                Directory.Delete(folder, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// 「層別 ON＋名前空間欄が空」の設定を開くと、名前空間欄が層フォルダ由来の既定
+    /// （<c>Domain.Entities</c> など）でプリフィルされることを検証する
+    /// </summary>
+    [Fact(DisplayName = "層別 ON の設定を開くと名前空間が層フォルダ由来でプリフィルされる")]
+    public void ApplySettings_LayeredOutput_PrefillsNamespacesFromLayerFolders()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+
+        try
+        {
+            var store = new CSharpGenerationSettingsStore(folder);
+            // 名前空間は 6 欄とも空（＝未指定）で保存する
+            store.Save(
+                new CSharpGenerationSettings { RootNamespace = "Acme.App", LayeredOutput = true }
+            );
+
+            var vm = new CSharpGenerationDialogViewModel(store);
+
+            vm.EntityNamespace.Should().Be("Domain.Entities");
+            vm.ValueObjectNamespace.Should().Be("Domain.ValueObjects");
+            vm.RepositoryNamespace.Should().Be("Domain.Repositories");
+            vm.RuntimeNamespace.Should().Be("Domain.Runtime");
+            vm.EditModelNamespace.Should().Be("Presentation.EditModels");
+            vm.MapperNamespace.Should().Be("Presentation.Mappers");
+        }
+        finally
+        {
+            if (Directory.Exists(folder))
+            {
+                Directory.Delete(folder, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// 層フォルダが複数階層（<c>MyApp.Domain/Generated</c>）でも、名前空間の既定が区切りをドットへ
+    /// 変換した形（<c>MyApp.Domain.Generated.Entities</c>）でプリフィルされることを検証する
+    /// </summary>
+    [Fact(DisplayName = "複数階層の層フォルダはドット区切りの名前空間既定になる")]
+    public void ApplySettings_NestedLayerFolder_PrefillsDottedNamespace()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+
+        try
+        {
+            var store = new CSharpGenerationSettingsStore(folder);
+            store.Save(
+                new CSharpGenerationSettings
+                {
+                    RootNamespace = "Acme.App",
+                    LayeredOutput = true,
+                    DomainLayerDirectory = "MyApp.Domain/Generated",
+                }
+            );
+
+            var vm = new CSharpGenerationDialogViewModel(store);
+
+            vm.EntityNamespace.Should().Be("MyApp.Domain.Generated.Entities");
+            // 明示しなかった層は既定フォルダ由来のまま
+            vm.EditModelNamespace.Should().Be("Presentation.EditModels");
+        }
+        finally
+        {
+            if (Directory.Exists(folder))
+            {
+                Directory.Delete(folder, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// 層別出力の ON/OFF 切替で、既定のままの名前空間欄が新しい既定へ追従し、
+    /// 手編集済みの欄は保持されることを検証する
+    /// </summary>
+    [Fact(DisplayName = "層別出力の切替で既定のままの名前空間だけが追従する")]
+    public void LayeredOutput_Toggle_FollowsDefaultNamespacesOnly()
+    {
+        var vm = CreateViewModel(out _);
+        vm.RootNamespace = "Acme.App";
+        // EditModel だけ手編集（追従対象外にする）
+        vm.EditModelNamespace = "Custom.Edit";
+
+        vm.EntityNamespace.Should().Be("Acme.App.Entities", "層別 OFF の既定はルート由来");
+
+        vm.LayeredOutput = true;
+
+        vm.EntityNamespace.Should().Be("Domain.Entities", "層別 ON の既定は層フォルダ由来");
+        vm.MapperNamespace.Should().Be("Presentation.Mappers");
+        vm.EditModelNamespace.Should().Be("Custom.Edit", "手編集済みの欄は触らない");
+
+        vm.LayeredOutput = false;
+
+        vm.EntityNamespace.Should().Be("Acme.App.Entities", "OFF に戻すとルート由来の既定へ戻る");
+        vm.MapperNamespace.Should().Be("Acme.App.Mappers");
+        vm.EditModelNamespace.Should().Be("Custom.Edit", "手編集済みの欄は戻すときも触らない");
+    }
+
+    /// <summary>
+    /// 層フォルダを編集すると、その層に属するバケットの名前空間欄だけが追従し、
+    /// 他の層の欄と手編集済みの欄は変わらないことを検証する
+    /// </summary>
+    [Fact(DisplayName = "層フォルダの編集はその層の名前空間だけを追従させる")]
+    public void LayerDirectoryEdit_FollowsOnlyThatLayersNamespaces()
+    {
+        var vm = CreateViewModel(out _);
+        vm.RootNamespace = "Acme.App";
+        vm.LayeredOutput = true;
+
+        vm.DomainLayerDirectory = "MyApp.Domain";
+
+        // ドメイン層のバケット（Entity / ValueObject / Repository 契約 / Runtime コア）が追従する
+        vm.EntityNamespace.Should().Be("MyApp.Domain.Entities");
+        vm.ValueObjectNamespace.Should().Be("MyApp.Domain.ValueObjects");
+        vm.RepositoryNamespace.Should().Be("MyApp.Domain.Repositories");
+        vm.RuntimeNamespace.Should().Be("MyApp.Domain.Runtime");
+        // プレゼンテーション層は無関係
+        vm.EditModelNamespace.Should().Be("Presentation.EditModels");
+        vm.MapperNamespace.Should().Be("Presentation.Mappers");
+
+        // 手編集した欄は、その層のフォルダを変えても保持する
+        vm.MapperNamespace = "Custom.Mapping";
+        vm.PresentationLayerDirectory = "MyApp.App/Ui";
+
+        vm.EditModelNamespace.Should().Be("MyApp.App.Ui.EditModels");
+        vm.MapperNamespace.Should().Be("Custom.Mapping");
+        vm.EntityNamespace.Should().Be("MyApp.Domain.Entities", "ドメイン層は影響を受けない");
+    }
+
+    /// <summary>
+    /// 層別出力時も名前空間欄の値はそのまま生成オプションへ（明示指定として）渡り、
+    /// プレビューが層フォルダ・層由来名前空間の両方を反映することを検証する
+    /// </summary>
+    [Fact(DisplayName = "層別出力時も名前空間欄の値がそのまま生成オプションへ渡る")]
+    public void LayeredOutput_NamespaceFields_ArePassedThroughToOptions()
+    {
+        var vm = CreateViewModel(out _);
+        vm.RootNamespace = "Acme.App";
+        vm.OutputPath = @"C:\out";
+        vm.LayeredOutput = true;
+        vm.DomainLayerDirectory = "MyApp.Domain";
+        // Entity だけ手編集（明示指定が既定より優先されること）
+        vm.EntityNamespace = "Custom.Entities";
+
+        var options = vm.ToOptions();
+
+        options.EntityNamespace.Should().Be("Custom.Entities");
+        options.MapperNamespace.Should().Be("Presentation.Mappers");
+        options.RuntimeNamespace.Should().Be("MyApp.Domain.Runtime");
+
+        // プレビューは層フォルダ配置と名前空間の両方に追従する（Plan 経由のため自動）
+        vm.PreviewFiles.Should()
+            .Contain("MyApp.Domain/Entities.g.cs  →  namespace Custom.Entities");
+        vm.PreviewFiles.Should()
+            .Contain("Presentation/Mappers.g.cs  →  namespace Presentation.Mappers");
+    }
+
+    /// <summary>クリアで層別出力と層フォルダが工場出荷既定（OFF・既定フォルダ名）へ戻ることを検証する</summary>
+    [Fact(DisplayName = "クリアで層別出力が OFF・層フォルダが既定名へ戻る")]
+    public void Clear_RestoresLayeredOutputDefaults()
+    {
+        var vm = CreateViewModel(out _);
+        vm.LayeredOutput = true;
+        vm.DomainLayerDirectory = "Acme.Domain";
+
+        vm.ClearCommand.Execute(null);
+
+        vm.LayeredOutput.Should().BeFalse();
+        vm.CanEditSplitFilesByCategory.Should().BeTrue();
+        vm.DomainLayerDirectory.Should()
+            .Be(GeneratedFilePlanner.DefaultLayerDirectory(GeneratedLayer.Domain));
     }
 
     /// <summary>不正な名前空間ではエラーメッセージを表示し、確定・クローズしないことを検証する</summary>

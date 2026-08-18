@@ -20,6 +20,24 @@ public class CSharpGenerationSettings
     /// <summary>出力をカテゴリごとに別ファイル・別名前空間へ分割するか（false=1ファイルにまとめる）</summary>
     public bool SplitFilesByCategory { get; set; }
 
+    /// <summary>
+    /// 分割した生成ファイルを層別サブフォルダ（ドメイン／インフラ／プレゼンテーション／サーバー）へ
+    /// 振り分けて出力するか（既定 false。true は <see cref="SplitFilesByCategory"/> を自動的に含意する）
+    /// </summary>
+    public bool LayeredOutput { get; set; }
+
+    /// <summary>層別出力時のドメイン層フォルダ（出力先からの相対パス）。空なら <c>Domain</c></summary>
+    public string DomainLayerDirectory { get; set; } = string.Empty;
+
+    /// <summary>層別出力時のインフラストラクチャ層フォルダ（出力先からの相対パス）。空なら <c>Infrastructure</c></summary>
+    public string InfrastructureLayerDirectory { get; set; } = string.Empty;
+
+    /// <summary>層別出力時のプレゼンテーション層フォルダ（出力先からの相対パス）。空なら <c>Presentation</c></summary>
+    public string PresentationLayerDirectory { get; set; } = string.Empty;
+
+    /// <summary>層別出力時のサーバー層フォルダ（出力先からの相対パス）。空なら <c>Server</c></summary>
+    public string ServerLayerDirectory { get; set; } = string.Empty;
+
     // ===== 名前空間 =====
 
     /// <summary>
@@ -177,6 +195,13 @@ public class CSharpGenerationSettings
             RootNamespace = RootNamespace.Trim(),
             OutputFileName = outputFileName,
             SplitFilesByCategory = SplitFilesByCategory,
+            // 層別出力は分割出力を含意する（含意の解釈はコア側の EffectiveSplitFilesByCategory が担うため、
+            // ここでは両方の値をそのまま渡す）。層フォルダの空白は null へ畳み、planner の既定名へフォールバックさせる
+            LayeredOutput = LayeredOutput,
+            DomainLayerDirectory = NullIfEmpty(DomainLayerDirectory),
+            InfrastructureLayerDirectory = NullIfEmpty(InfrastructureLayerDirectory),
+            PresentationLayerDirectory = NullIfEmpty(PresentationLayerDirectory),
+            ServerLayerDirectory = NullIfEmpty(ServerLayerDirectory),
             RuntimeNamespace = NullIfEmpty(RuntimeNamespace),
             EntityNamespace = NullIfEmpty(EntityNamespace),
             EditModelNamespace = NullIfEmpty(EditModelNamespace),

@@ -101,18 +101,116 @@
               Style="{StaticResource SectionHeader}"
               Text="{x:Static res:Strings.CodeGen_OutputMode}"
             />
+            <!-- 層別出力 ON の間は分割固定のため、ラジオは操作不可にする（含意の可視化） -->
             <StackPanel Orientation="Horizontal">
               <RadioButton
                 Margin="0,0,28,0"
                 Content="{x:Static res:Strings.CodeGen_MergeSingleFile}"
                 GroupName="OutputMode"
                 IsChecked="{Binding MergeIntoSingleFile}"
+                IsEnabled="{Binding CanEditSplitFilesByCategory}"
               />
               <RadioButton
                 Content="{x:Static res:Strings.CodeGen_SplitByLayer}"
                 GroupName="OutputMode"
                 IsChecked="{Binding SplitFilesByCategory}"
+                IsEnabled="{Binding CanEditSplitFilesByCategory}"
               />
+            </StackPanel>
+
+            <!-- 層別フォルダ出力（ON で分割出力を含意。層フォルダの相対パスは下の欄で調整する） -->
+            <CheckBox
+              Margin="0,12,0,0"
+              Content="{x:Static res:Strings.CodeGen_LayeredOutput}"
+              IsChecked="{Binding LayeredOutput}"
+              ToolTip="{Binding LayeredOutputToolTip}"
+            />
+
+            <!-- 層フォルダの相対パス（層別出力 ON のときのみ表示。サーバー層はリモートサービス生成時のみ） -->
+            <StackPanel
+              Margin="18,10,0,0"
+              Visibility="{Binding ShowLayerDirectories, Converter={StaticResource BoolToVisibilityConverter}}"
+            >
+              <TextBlock
+                Margin="0,0,0,6"
+                Foreground="{StaticResource MutedText}"
+                Text="{x:Static res:Strings.CodeGen_LayerDirectories}"
+              />
+              <Grid>
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="130" />
+                  <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                  <RowDefinition Height="Auto" />
+                  <RowDefinition Height="Auto" />
+                  <RowDefinition Height="Auto" />
+                  <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <TextBlock
+                  Grid.Row="0"
+                  Grid.Column="0"
+                  Margin="0,4"
+                  Style="{StaticResource FieldLabel}"
+                  Text="{x:Static res:Strings.CodeGen_LayerLabel_Domain}"
+                />
+                <TextBox
+                  Grid.Row="0"
+                  Grid.Column="1"
+                  Margin="0,4"
+                  Style="{StaticResource FormInput}"
+                  Text="{Binding DomainLayerDirectory, UpdateSourceTrigger=PropertyChanged}"
+                />
+
+                <TextBlock
+                  Grid.Row="1"
+                  Grid.Column="0"
+                  Margin="0,4"
+                  Style="{StaticResource FieldLabel}"
+                  Text="{x:Static res:Strings.CodeGen_LayerLabel_Infrastructure}"
+                />
+                <TextBox
+                  Grid.Row="1"
+                  Grid.Column="1"
+                  Margin="0,4"
+                  Style="{StaticResource FormInput}"
+                  Text="{Binding InfrastructureLayerDirectory, UpdateSourceTrigger=PropertyChanged}"
+                />
+
+                <TextBlock
+                  Grid.Row="2"
+                  Grid.Column="0"
+                  Margin="0,4"
+                  Style="{StaticResource FieldLabel}"
+                  Text="{x:Static res:Strings.CodeGen_LayerLabel_Presentation}"
+                />
+                <TextBox
+                  Grid.Row="2"
+                  Grid.Column="1"
+                  Margin="0,4"
+                  Style="{StaticResource FormInput}"
+                  Text="{Binding PresentationLayerDirectory, UpdateSourceTrigger=PropertyChanged}"
+                />
+
+                <!-- サーバー層はリモートサーバー実装を生成するときだけ出力されるため、欄ごと連動させる -->
+                <TextBlock
+                  Grid.Row="3"
+                  Grid.Column="0"
+                  Margin="0,4"
+                  Style="{StaticResource FieldLabel}"
+                  Text="{x:Static res:Strings.CodeGen_LayerLabel_Server}"
+                  Visibility="{Binding ShowServerLayerDirectory, Converter={StaticResource BoolToVisibilityConverter}}"
+                />
+                <TextBox
+                  Grid.Row="3"
+                  Grid.Column="1"
+                  Margin="0,4"
+                  Style="{StaticResource FormInput}"
+                  Text="{Binding ServerLayerDirectory, UpdateSourceTrigger=PropertyChanged}"
+                  Visibility="{Binding ShowServerLayerDirectory, Converter={StaticResource BoolToVisibilityConverter}}"
+                />
+              </Grid>
             </StackPanel>
           </StackPanel>
         </Border>

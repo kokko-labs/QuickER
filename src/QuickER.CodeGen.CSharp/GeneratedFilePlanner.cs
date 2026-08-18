@@ -32,13 +32,29 @@ public enum GenerationBucket
 
     /// <summary>双方向同期の支援コード（同期記述子・ジャーナル記録デコレータ・直結差分ソース・DI 登録）</summary>
     Sync,
+
+    /// <summary>リモート面の HTTP クライアント実装（Http{Entity}RemoteRepository・AddGeneratedHttpRemoteRepositories・OwnedHttpClient）</summary>
+    /// <remarks>
+    /// 契約（Repository バケット）から分離した実装バケット。分割時は <c>Repositories.Http.g.cs</c> へ単独出力し、
+    /// 名前空間は契約と同じ <c>{RepositoryNamespace}</c> のまま（型 FQN・非分割出力を変えない＝ファイルだけを分ける）。
+    /// 契約ファイルを「インターフェイス・DTO だけ」に純化し、HTTP 実装と DI 登録をインフラ側ファイルへ退避するための分割。
+    /// </remarks>
+    Http,
 }
 
 /// <summary>1 つの生成ファイルが「どの名前空間で・どのバケットを含み・どの名前空間を using するか」を表す計画</summary>
-public sealed class GeneratedFileSpec
+/// <remarks>record なのは層別出力（<see cref="CodeGenerationOptions.LayeredOutput"/>）が計画確定後に
+/// <c>with</c> で出力先ディレクトリだけを差し替えるため（他プロパティの複製漏れを構造的に防ぐ）</remarks>
+public sealed record GeneratedFileSpec
 {
     /// <summary>出力ファイル名</summary>
     public required string FileName { get; init; }
+
+    /// <summary>
+    /// 出力ディレクトリからの相対サブディレクトリ（null＝出力ディレクトリ直下）。
+    /// 層別出力（<see cref="CodeGenerationOptions.LayeredOutput"/>）のときだけ層フォルダが入る。
+    /// </summary>
+    public string? RelativeDirectory { get; init; }
 
     /// <summary>このファイルの名前空間</summary>
     public required string NamespaceName { get; init; }
@@ -99,6 +115,28 @@ public sealed class GeneratedFileSpec
     public bool EmitSchemaDependent { get; init; } = true;
 }
 
+/// <summary>層別出力（<see cref="CodeGenerationOptions.LayeredOutput"/>）の振り分け先レイヤ</summary>
+/// <remarks>
+/// バケット→層の対応は QuickER 固定（ユーザーが変えられるのは各層のフォルダパスだけ）。
+/// ドメイン層に Runtime コアと Repository 契約を置くのは、パッケージ参照モードで
+/// ドメイン csproj が <c>QuickER.Runtime</c> を参照する構造とインライン生成を対称にするため
+/// （契約は DDD のポート＝EditModel の DB 照合依存を「プレゼンテーション→ドメイン」参照へ収める）。
+/// </remarks>
+public enum GeneratedLayer
+{
+    /// <summary>ドメイン層（Entity / ValueObject / Repository 契約 / Runtime コア）</summary>
+    Domain,
+
+    /// <summary>インフラストラクチャ層（方言別実装 / EF Core / インメモリ / 同期 / HTTP クライアントと各固定 infra）</summary>
+    Infrastructure,
+
+    /// <summary>プレゼンテーション層（EditModel / Mapper）</summary>
+    Presentation,
+
+    /// <summary>サーバー層（リモートサーバー実装＋ASP.NET Core 固定部。FrameworkReference を要するため独立プロジェクト前提）</summary>
+    Server,
+}
+
 /// <summary>
 /// 生成オプションから「どのファイルを・どの名前空間で・どのバケット構成で出力するか」を決める純粋ロジック
 /// </summary>
@@ -117,14 +155,16 @@ public static class GeneratedFilePlanner
             : options.RootNamespace.Trim();
     }
 
-    /// <summary>指定バケットの名前空間を解決する（個別指定が空なら <c>{root}.{サフィックス}</c> へフォールバック）</summary>
+    /// <summary>指定バケットの名前空間を解決する（個別指定が空ならモード別の既定へフォールバック）</summary>
     /// <remarks>
     /// この解決は分割時のみ使用する。フォールバックは UI のプリフィル（<see cref="DefaultSuffix"/>）と一致させ、
-    /// 規約を 1 箇所に集約する（例 <c>{root}.Entities</c>、Runtime は <c>{root}.Runtime</c>）
+    /// 規約を 1 箇所に集約する。既定は通常分割で <c>{root}.{サフィックス}</c>（例 <c>{root}.Entities</c>）、
+    /// 層別出力（<see cref="CodeGenerationOptions.LayeredOutput"/>）では <c>{層ルート}.{サフィックス}</c>
+    /// （例 <c>MyApp.Domain.Entities</c>＝層ルートは <see cref="LayerNamespaceRoot"/> がフォルダパスから導出する。
+    /// 出力フォルダと名前空間を揃えるための既定切替で、明示指定が勝つのは従来どおり）
     /// </remarks>
     public static string ResolveNamespace(CodeGenerationOptions options, GenerationBucket bucket)
     {
-        var root = ResolveRootNamespace(options);
         var explicitValue = bucket switch
         {
             GenerationBucket.Runtime => options.RuntimeNamespace,
@@ -133,8 +173,8 @@ public static class GeneratedFilePlanner
             GenerationBucket.EditModel => options.EditModelNamespace,
             GenerationBucket.Mapper => options.MapperNamespace,
             GenerationBucket.Repository => options.RepositoryNamespace,
-            // EfCore に個別の名前空間オプションは設けない（分割時は {RepositoryNamespace}.EntityFrameworkCore へ導出専用。
-            // 方言別実装 {RepositoryNamespace}.SqlServer 等と同じ扱い）
+            // EfCore に個別の名前空間オプションは設けない（通常分割では {RepositoryNamespace}.EntityFrameworkCore へ
+            // 導出専用＝Plan 側の上書き。層別出力では {インフラ層ルート}.EntityFrameworkCore＝ここのフォールバック）
             _ => null,
         };
 
@@ -143,8 +183,45 @@ public static class GeneratedFilePlanner
             return explicitValue.Trim();
         }
 
-        return $"{root}.{DefaultSuffix(bucket)}";
+        // 層別出力: 名前空間の既定を層フォルダ由来にする（フォルダと名前空間が揃う）。
+        // 通常分割: 従来どおり {root}.{サフィックス}
+        var baseNamespace = options.LayeredOutput
+            ? LayerNamespaceRoot(options, LayerOfBucket(bucket))
+            : ResolveRootNamespace(options);
+
+        return $"{baseNamespace}.{DefaultSuffix(bucket)}";
     }
+
+    /// <summary>バケットの既定名前空間が属する層（バケット水準の対応。方言実装・固定部などスペック水準の分類は <see cref="LayerOf"/>）</summary>
+    public static GeneratedLayer LayerOfBucket(GenerationBucket bucket) =>
+        bucket switch
+        {
+            GenerationBucket.Entity => GeneratedLayer.Domain,
+            GenerationBucket.ValueObject => GeneratedLayer.Domain,
+            // 契約（Repositories.g.cs）と Runtime コアはドメイン層（LayerOf と同じ判断＝DDD のポート／パッケージ対称）
+            GenerationBucket.Repository => GeneratedLayer.Domain,
+            GenerationBucket.Runtime => GeneratedLayer.Domain,
+            GenerationBucket.EditModel => GeneratedLayer.Presentation,
+            GenerationBucket.Mapper => GeneratedLayer.Presentation,
+            GenerationBucket.EfCore => GeneratedLayer.Infrastructure,
+            GenerationBucket.InMemory => GeneratedLayer.Infrastructure,
+            GenerationBucket.Sync => GeneratedLayer.Infrastructure,
+            GenerationBucket.Http => GeneratedLayer.Infrastructure,
+            GenerationBucket.RemoteServer => GeneratedLayer.Server,
+            _ => GeneratedLayer.Domain,
+        };
+
+    /// <summary>
+    /// 層フォルダから名前空間ルートを導出する（パス区切り <c>/</c>・<c>\</c> を <c>.</c> へ変換。
+    /// 例: <c>MyApp.Domain/Generated</c> → <c>MyApp.Domain.Generated</c>・既定フォルダ <c>Domain</c> → <c>Domain</c>）。
+    /// </summary>
+    /// <remarks>
+    /// csproj の「プロジェクトフォルダ名＝RootNamespace」慣行に合わせ、フォルダと名前空間を機械的に揃える。
+    /// 識別子として不正なフォルダ名（ハイフン等）は黙ってサニタイズせず、生成本体の診断がエラーにする
+    /// （Plan はプレビューでも呼ばれるためここでは検証しない）。
+    /// </remarks>
+    public static string LayerNamespaceRoot(CodeGenerationOptions options, GeneratedLayer layer) =>
+        string.Join('.', ResolveLayerDirectory(options, layer).TrimEnd('/', '\\').Split('/', '\\'));
 
     /// <summary>分割時のバケット既定名前空間サフィックス（UI のプリフィルと一致させる）</summary>
     public static string DefaultSuffix(GenerationBucket bucket) =>
@@ -163,6 +240,9 @@ public static class GeneratedFilePlanner
             GenerationBucket.InMemory => "InMemory",
             GenerationBucket.RemoteServer => "RemoteServer",
             GenerationBucket.Sync => "Sync",
+            // HTTP クライアントはファイル名サフィックスのみに使う（名前空間は契約と同じ {RepositoryNamespace} へ
+            // 上書きされるため、ここのサフィックスが名前空間に現れることはない）
+            GenerationBucket.Http => "Http",
             _ => "Generated",
         };
 
@@ -245,6 +325,16 @@ public static class GeneratedFilePlanner
                 GenerationBucket.Runtime,
                 GenerationBucket.ValueObject,
             ],
+            // HTTP クライアントはエンティティ・リモート契約（Repository バケット＝I{Entity}RemoteRepository。
+            // 通常は同一名前空間のため using からは自然に落ちる）・共有基盤（HttpRemoteRepository 基底 /
+            // RemoteJson / RemotePaths）・VO（主キー型）を参照する
+            GenerationBucket.Http =>
+            [
+                GenerationBucket.Entity,
+                GenerationBucket.Repository,
+                GenerationBucket.Runtime,
+                GenerationBucket.ValueObject,
+            ],
             _ => [],
         };
 
@@ -283,6 +373,15 @@ public static class GeneratedFilePlanner
         if (options.GeneratesRepositoryContract)
         {
             active.Add(GenerationBucket.Repository);
+        }
+
+        // リモート面の HTTP クライアント（Http{Entity}RemoteRepository・AddGeneratedHttpRemoteRepositories）は
+        // 契約から分離した実装バケット。分割時は Repositories.Http.g.cs へ単独出力し、契約ファイルを
+        // インターフェイス・DTO だけに保つ（実装先が要るため Repository バケットが有効なときのみ）。
+        // 非分割時は従来どおり同一ファイル内の同じ位置へ描画される（テンプレートの物理順が位置を決める）。
+        if (options.GenerateRemoteServices && options.GeneratesRepositoryContract)
+        {
+            active.Add(GenerationBucket.Http);
         }
 
         // インメモリ実装は方言非依存の独立バケット。分割時は Repositories.InMemory.g.cs へ単独出力し、
@@ -388,7 +487,7 @@ public static class GeneratedFilePlanner
         // マルチターゲットと同じ形＝Repositories.g.cs＋Repositories.{方言}.g.cs）。Repository を生成するときのみ。
         var repositorySplitLayout = options.GenerateRepositories && repositoryActive;
 
-        if (!options.SplitFilesByCategory)
+        if (!options.EffectiveSplitFilesByCategory)
         {
             // 非分割: 全バケットを 1 ファイルへ。マルチ方言時は Repository を「契約スペック＋方言別実装スペック」へ
             // 展開し、同一ファイル名で連結する（RenderFiles が block namespace で連結・using を先頭へ集約）。
@@ -467,15 +566,30 @@ public static class GeneratedFilePlanner
             bucket => ResolveNamespace(options, bucket)
         );
 
-        // EF Core / インメモリ実装は方言別実装（{RepositoryNamespace}.SqlServer 等）と同じ扱いで、契約（Repository）
+        // 通常分割: EF Core / インメモリ実装は方言別実装（{RepositoryNamespace}.SqlServer 等）と同じ扱いで、契約（Repository）
         // namespace のサブ名前空間 {RepositoryNamespace}.{接尾辞} へ導出する（専用の名前空間オプションは持たない）。
         // これらのバケットが有効なら Repository バケットも必ず有効（ActiveBuckets が保証）。
-        foreach (var bucket in DerivedRepositorySubBuckets)
+        // 層別出力: 名前空間はフォルダ追従＝ResolveNamespace が {インフラ層ルート}.{接尾辞} を返しており上書きしない
+        // （契約名前空間の下へインフラ実装がぶら下がる従来のねじれを解消する）。
+        if (!options.LayeredOutput)
         {
-            if (namespaceByBucket.ContainsKey(bucket))
+            foreach (var bucket in DerivedRepositorySubBuckets)
             {
-                namespaceByBucket[bucket] =
-                    $"{namespaceByBucket[GenerationBucket.Repository]}.{DefaultSuffix(bucket)}";
+                if (namespaceByBucket.ContainsKey(bucket))
+                {
+                    namespaceByBucket[bucket] =
+                        $"{namespaceByBucket[GenerationBucket.Repository]}.{DefaultSuffix(bucket)}";
+                }
+            }
+
+            // HTTP クライアントはファイルだけを分け、名前空間は契約と同じ {RepositoryNamespace} に据え置く
+            // （サブ名前空間にすると型 FQN と非分割出力まで変わるため。EfCore 等の導出サブバケットとは意図的に別規則。
+            //   層別出力では {インフラ層ルート}.Http＝フォルダ追従の一環として移る）。
+            if (namespaceByBucket.ContainsKey(GenerationBucket.Http))
+            {
+                namespaceByBucket[GenerationBucket.Http] = namespaceByBucket[
+                    GenerationBucket.Repository
+                ];
             }
         }
 
@@ -511,7 +625,13 @@ public static class GeneratedFilePlanner
             // 固定 infra は Runtime 系ファイルへ分かれたため、実装バケット（EF Core・インメモリ）は
             // 対応する Runtime サブ名前空間も using する（パッケージ参照モードでは PackageRuntimeUsings が
             // 固定名前空間を付けるため runtimeNamespace は null＝ここでは何も足さない）。
-            if (runtimeNamespace is not null && FixedRuntimeSuffix(bucket) is { } fixedSuffix)
+            // 層別出力では固定部ファイルが per-entity と同じ層サブ名前空間（{インフラ}.{接尾辞}）へ統合される
+            // ＝自分自身の名前空間なので足さない。
+            if (
+                !options.LayeredOutput
+                && runtimeNamespace is not null
+                && FixedRuntimeSuffix(bucket) is { } fixedSuffix
+            )
             {
                 dependencyNamespaces.Add($"{runtimeNamespace}.{fixedSuffix}");
             }
@@ -540,19 +660,23 @@ public static class GeneratedFilePlanner
 
                 // 方言別実装ファイル（Repositories.SqlServer.g.cs 等）。契約 namespace（＝Repository 自身の namespace）
                 // と、方言実装が参照する他バケット（Entity 等）を using する。
+                // 層別出力では方言 namespace の基底を契約でなくインフラ層ルートにする（{インフラ}.SqlServer 等＝
+                // Runtime.{方言}.g.cs の固定部と同一 namespace へ統合されるため fixedRuntimeNamespace の追加 using も不要）。
                 foreach (var dialect in dialects)
                 {
                     splitSpecs.Add(
                         BuildDialectRepositorySpec(
                             options,
                             DialectRepositoryFileName(dialect),
-                            ownNamespace,
+                            options.LayeredOutput
+                                ? LayerNamespaceRoot(options, GeneratedLayer.Infrastructure)
+                                : ownNamespace,
                             dialect,
                             contractNamespace: ownNamespace,
                             extraCrossUsings: crossUsings,
                             // 方言エンジンの固定 infra は Runtime.{方言}.g.cs が持つ（ここは per-entity 実装＋DI のみ）
                             emitSharedInfra: false,
-                            fixedRuntimeNamespace: runtimeNamespace is null
+                            fixedRuntimeNamespace: runtimeNamespace is null || options.LayeredOutput
                                 ? null
                                 : $"{runtimeNamespace}.{DialectNamespaceSuffix(dialect)}"
                         )
@@ -565,11 +689,14 @@ public static class GeneratedFilePlanner
             splitSpecs.Add(
                 new GeneratedFileSpec
                 {
-                    // EF Core 実装は Repositories.EntityFrameworkCore.g.cs、インメモリ実装は Repositories.InMemory.g.cs へ出す
-                    // （いずれも方言別実装 Repositories.SqlServer.g.cs 等と同じ流儀）
-                    FileName = DerivedRepositorySubBuckets.Contains(bucket)
-                        ? DerivedRepositoryFileName(bucket)
-                        : DefaultFileName(bucket),
+                    // EF Core 実装は Repositories.EntityFrameworkCore.g.cs、インメモリ実装は Repositories.InMemory.g.cs、
+                    // HTTP クライアントは Repositories.Http.g.cs へ出す（いずれも方言別実装 Repositories.SqlServer.g.cs 等と同じ流儀。
+                    // Http は名前空間だけ契約と同一のため DerivedRepositorySubBuckets には含めず、ファイル名のみ同規則を使う）
+                    FileName =
+                        bucket == GenerationBucket.Http
+                        || DerivedRepositorySubBuckets.Contains(bucket)
+                            ? DerivedRepositoryFileName(bucket)
+                            : DefaultFileName(bucket),
                     NamespaceName = ownNamespace,
                     Buckets = [bucket],
                     CrossNamespaceUsings = crossUsings,
@@ -598,7 +725,8 @@ public static class GeneratedFilePlanner
 
         AddRemoteServerSpec(splitSpecs, options, active, primaryDialect);
 
-        return splitSpecs;
+        // 層別出力ならバケット→層の固定対応で各スペックへ層フォルダを付与する（内容・名前・順序は不変）
+        return ApplyLayerDirectories(splitSpecs, options);
     }
 
     /// <summary>クロス using を「自分自身を除外・重複排除・序数昇順」で整える（分割時の唯一の正）</summary>
@@ -683,17 +811,22 @@ public static class GeneratedFilePlanner
             }
         );
 
-        // 方言エンジンの固定部（方言 Repository 基底・式木翻訳・実行器・接続ファクトリ・方言別メタデータ）
+        // 方言エンジンの固定部（方言 Repository 基底・式木翻訳・実行器・接続ファクトリ・方言別メタデータ）。
+        // 層別出力では per-entity 実装（Repositories.{方言}.g.cs）と同じ {インフラ層ルート}.{方言} へ統合する
+        // （型衝突なし＝両ファイルは元から対で参照し合う。フォルダと名前空間を揃える追従の一環）。
         if (options.GenerateRepositories && repositoryActive)
         {
             foreach (var dialect in dialects)
             {
                 var suffix = DialectNamespaceSuffix(dialect);
+                var fixedNamespaceBase = options.LayeredOutput
+                    ? LayerNamespaceRoot(options, GeneratedLayer.Infrastructure)
+                    : runtimeNamespace;
                 specs.Add(
                     new GeneratedFileSpec
                     {
                         FileName = FixedRuntimeFileName(suffix),
-                        NamespaceName = $"{runtimeNamespace}.{suffix}",
+                        NamespaceName = $"{fixedNamespaceBase}.{suffix}",
                         Buckets = [GenerationBucket.Repository],
                         CrossNamespaceUsings = [runtimeNamespace],
                         Dialect = dialect,
@@ -710,6 +843,7 @@ public static class GeneratedFilePlanner
         {
             AddFixedRuntimeSubSpec(
                 specs,
+                options,
                 runtimeNamespace,
                 GenerationBucket.EfCore,
                 primaryDialect
@@ -721,6 +855,7 @@ public static class GeneratedFilePlanner
         {
             AddFixedRuntimeSubSpec(
                 specs,
+                options,
                 runtimeNamespace,
                 GenerationBucket.InMemory,
                 primaryDialect
@@ -730,13 +865,24 @@ public static class GeneratedFilePlanner
         // 同期エンジンの固定部（SyncEngine・ジャーナル・セッション抑制・結果／競合レコード）
         if (activeSet.Contains(GenerationBucket.Sync))
         {
-            AddFixedRuntimeSubSpec(specs, runtimeNamespace, GenerationBucket.Sync, primaryDialect);
+            AddFixedRuntimeSubSpec(
+                specs,
+                options,
+                runtimeNamespace,
+                GenerationBucket.Sync,
+                primaryDialect
+            );
         }
     }
 
-    /// <summary>方言を持たない固定部サブファイル（EF Core / インメモリ）のスペックを追加する</summary>
+    /// <summary>方言を持たない固定部サブファイル（EF Core / インメモリ / 同期）のスペックを追加する</summary>
+    /// <remarks>
+    /// 名前空間は通常分割で <c>{Runtime}.{接尾辞}</c>、層別出力では per-entity 側と同じ
+    /// <c>{インフラ層ルート}.{接尾辞}</c>（＝<see cref="ResolveNamespace"/> のフォールバックと一致）へ統合する。
+    /// </remarks>
     private static void AddFixedRuntimeSubSpec(
         List<GeneratedFileSpec> specs,
+        CodeGenerationOptions options,
         string runtimeNamespace,
         GenerationBucket bucket,
         string primaryDialect
@@ -747,7 +893,9 @@ public static class GeneratedFilePlanner
             new GeneratedFileSpec
             {
                 FileName = FixedRuntimeFileName(suffix),
-                NamespaceName = $"{runtimeNamespace}.{suffix}",
+                NamespaceName = options.LayeredOutput
+                    ? ResolveNamespace(options, bucket)
+                    : $"{runtimeNamespace}.{suffix}",
                 Buckets = [bucket],
                 CrossNamespaceUsings = [runtimeNamespace],
                 Dialect = primaryDialect,
@@ -806,7 +954,7 @@ public static class GeneratedFilePlanner
             return;
         }
 
-        if (!options.SplitFilesByCategory)
+        if (!options.EffectiveSplitFilesByCategory)
         {
             // 非分割: 本体と同じルート namespace（同一プロジェクト内なら using 不要）で別ファイルへ出す
             InsertAfterRepositorySpecs(
@@ -845,7 +993,11 @@ public static class GeneratedFilePlanner
         if (!options.UseRuntimePackages)
         {
             var runtimeNamespace = ResolveNamespace(options, GenerationBucket.Runtime);
-            var aspNetCoreNamespace = $"{runtimeNamespace}.{AspNetCoreSuffix}";
+            // 層別出力ではサーバー固定部も per-entity と同じサーバー層のフォルダへ入るため、
+            // 名前空間の基底をサーバー層ルートにする（{サーバー}.AspNetCore＝フォルダ追従）
+            var aspNetCoreNamespace = options.LayeredOutput
+                ? $"{LayerNamespaceRoot(options, GeneratedLayer.Server)}.{AspNetCoreSuffix}"
+                : $"{runtimeNamespace}.{AspNetCoreSuffix}";
 
             // 固定部は共通契約（RemoteJson・エンベロープ・SaveConflictException 等）をコア相当のファイルから
             // using で参照する（パッケージが using QuickER.Runtime; するのと同じ構造）
@@ -868,11 +1020,14 @@ public static class GeneratedFilePlanner
 
             // 同期エンドポイントは同期の固定部（ISyncServerSource・同期エンベロープ・操作名）を参照する。
             // per-entity の同期生成物（記述子・デコレータ・HTTP 差分ソース）は参照しないため、Sync バケット
-            // そのものではなく Runtime サブ名前空間だけを足す。
+            // そのものではなく固定部の namespace だけを足す（層別出力では固定部が {インフラ}.Sync へ統合
+            // されているため ResolveNamespace のフォールバックがそのまま固定部の namespace になる）。
             if (activeSet.Contains(GenerationBucket.Sync))
             {
                 dependencyNamespaces.Add(
-                    $"{runtimeNamespace}.{DefaultSuffix(GenerationBucket.Sync)}"
+                    options.LayeredOutput
+                        ? ResolveNamespace(options, GenerationBucket.Sync)
+                        : $"{runtimeNamespace}.{DefaultSuffix(GenerationBucket.Sync)}"
                 );
             }
         }
@@ -901,7 +1056,8 @@ public static class GeneratedFilePlanner
     /// <remarks>
     /// 固定 infra ファイル（<c>Runtime.g.cs</c> / <c>Runtime.{方言}.g.cs</c>）も Repository バケットを含むため、
     /// スキーマ依存（<see cref="GeneratedFileSpec.EmitSchemaDependent"/>）であることを条件に加えて
-    /// リモート面の契約・実装の隣という位置づけを保つ。
+    /// リモート面の契約・実装の隣という位置づけを保つ。HTTP クライアントファイル（Http バケット）も
+    /// リモート面の実装のため同じ並びに含める（分割時は Repositories.Http.g.cs の直後に RemoteServer.g.cs が来る）。
     /// </remarks>
     private static void InsertAfterRepositorySpecs(
         List<GeneratedFileSpec> specs,
@@ -909,7 +1065,10 @@ public static class GeneratedFilePlanner
     )
     {
         var lastRepositoryIndex = specs.FindLastIndex(spec =>
-            spec.Buckets.Contains(GenerationBucket.Repository) && spec.EmitSchemaDependent
+            (
+                spec.Buckets.Contains(GenerationBucket.Repository)
+                || spec.Buckets.Contains(GenerationBucket.Http)
+            ) && spec.EmitSchemaDependent
         );
 
         // 呼び出し元で Repository バケットの有効性を確認済みだが、万一見つからない場合は末尾へ退避する
@@ -988,4 +1147,113 @@ public static class GeneratedFilePlanner
     /// <summary>導出サブバケットの分割ファイル名（例: <c>Repositories.EntityFrameworkCore.g.cs</c>）＝方言別実装と同じ流儀</summary>
     private static string DerivedRepositoryFileName(GenerationBucket bucket) =>
         $"{DefaultSuffix(GenerationBucket.Repository)}.{DefaultSuffix(bucket)}.g.cs";
+
+    /// <summary>層の既定フォルダ名（未指定・空白時のフォールバック。GUI のプリフィルとも一致させる）</summary>
+    public static string DefaultLayerDirectory(GeneratedLayer layer) =>
+        layer switch
+        {
+            GeneratedLayer.Domain => "Domain",
+            GeneratedLayer.Infrastructure => "Infrastructure",
+            GeneratedLayer.Presentation => "Presentation",
+            GeneratedLayer.Server => "Server",
+            _ => "Generated",
+        };
+
+    /// <summary>層のフォルダパスを解決する（明示指定が空白なら既定フォルダ名へフォールバック）</summary>
+    public static string ResolveLayerDirectory(CodeGenerationOptions options, GeneratedLayer layer)
+    {
+        var explicitValue = layer switch
+        {
+            GeneratedLayer.Domain => options.DomainLayerDirectory,
+            GeneratedLayer.Infrastructure => options.InfrastructureLayerDirectory,
+            GeneratedLayer.Presentation => options.PresentationLayerDirectory,
+            GeneratedLayer.Server => options.ServerLayerDirectory,
+            _ => null,
+        };
+
+        return string.IsNullOrWhiteSpace(explicitValue)
+            ? DefaultLayerDirectory(layer)
+            : explicitValue.Trim();
+    }
+
+    /// <summary>
+    /// スペックの振り分け先レイヤを「含有バケット＋契約フラグ」だけから導出する（分割時の全スペックが一意に分類できる）。
+    /// </summary>
+    /// <remarks>
+    /// 判定順が意味を持つのは Repository バケットだけ:
+    /// 方言実装スペック（Repositories.{方言}.g.cs / Runtime.{方言}.g.cs＝<see cref="GeneratedFileSpec.MultiDialect"/> が
+    /// true かつ契約のみでない）だけがインフラ層で、契約スペック（Repositories.g.cs / Runtime.g.cs）はドメイン層。
+    /// 判別に <see cref="GeneratedFileSpec.ContractOnly"/> 単独を使えないのは、QuickER 版 Repository を生成しない構成
+    /// （EF Core / インメモリ単独）では契約ファイルが方言実装レイアウトを通らず ContractOnly=false のまま出るため。
+    /// それ以外のバケットは層が 1 対 1 に決まる（RemoteServer バケットは per-entity・固定部ともサーバー層＝
+    /// ASP.NET Core の FrameworkReference を要するため通常のクラスライブラリへ置けない）。
+    /// </remarks>
+    public static GeneratedLayer LayerOf(GeneratedFileSpec spec)
+    {
+        ArgumentNullException.ThrowIfNull(spec);
+
+        if (spec.Buckets.Contains(GenerationBucket.RemoteServer))
+        {
+            return GeneratedLayer.Server;
+        }
+
+        if (
+            spec.Buckets.Contains(GenerationBucket.EditModel)
+            || spec.Buckets.Contains(GenerationBucket.Mapper)
+        )
+        {
+            return GeneratedLayer.Presentation;
+        }
+
+        if (
+            spec.Buckets.Contains(GenerationBucket.EfCore)
+            || spec.Buckets.Contains(GenerationBucket.InMemory)
+            || spec.Buckets.Contains(GenerationBucket.Sync)
+            || spec.Buckets.Contains(GenerationBucket.Http)
+        )
+        {
+            return GeneratedLayer.Infrastructure;
+        }
+
+        if (
+            spec.Buckets.Contains(GenerationBucket.Repository)
+            && !spec.ContractOnly
+            && spec.MultiDialect
+        )
+        {
+            return GeneratedLayer.Infrastructure;
+        }
+
+        // Entity / ValueObject / Runtime コア / Repository 契約はドメイン層
+        return GeneratedLayer.Domain;
+    }
+
+    /// <summary>
+    /// 層別出力時、計画済みスペックへ層フォルダ（<see cref="GeneratedFileSpec.RelativeDirectory"/>）を付与する。
+    /// </summary>
+    /// <remarks>
+    /// 層別出力でなければ何もしない（RelativeDirectory は null のまま＝従来どおり出力ディレクトリ直下）。
+    /// ファイル名・名前空間・バケット構成は一切変えない＝層分け ON/OFF で生成テキストはバイト一致し、配置だけが変わる。
+    /// パスの妥当性検証（絶対パス・<c>..</c> の拒否）は生成本体の診断が担い、ここでは値を素通しする
+    /// （Plan はプレビューでも呼ばれるため例外を投げない）。
+    /// </remarks>
+    private static IReadOnlyList<GeneratedFileSpec> ApplyLayerDirectories(
+        List<GeneratedFileSpec> specs,
+        CodeGenerationOptions options
+    )
+    {
+        if (!options.LayeredOutput)
+        {
+            return specs;
+        }
+
+        return specs
+            .Select(spec =>
+                spec with
+                {
+                    RelativeDirectory = ResolveLayerDirectory(options, LayerOf(spec)),
+                }
+            )
+            .ToList();
+    }
 }

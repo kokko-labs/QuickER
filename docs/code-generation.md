@@ -974,7 +974,7 @@ With file splitting, the fixed runtime and the schema-dependent code go into sep
 | `Runtime.InMemory.g.cs` (`{Runtime}.InMemory`) | `QuickER.Runtime.InMemory` | The in-memory foundation (store, repository base, save staging) |
 | `Runtime.AspNetCore.g.cs` (`{Runtime}.AspNetCore`) | `QuickER.Runtime.AspNetCore` | The fixed server-side engine (`RemoteServerEngine` — request reading, error classification, the error-detail exposure policy, the binary streaming helpers) |
 | `Runtime.Sync.g.cs` (`{Runtime}.Sync`) | `QuickER.Runtime.Sync` | The sync engine (`SyncEngine`, `SyncJournal`, `SyncTable<,>`, the options, results, and conflict types; with remote services, the sync envelopes and the HTTP source base) |
-| `Repositories.g.cs`, `Repositories.SqlServer.g.cs` / `Repositories.Sqlite.g.cs` / `Repositories.EntityFrameworkCore.g.cs` / `Repositories.InMemory.g.cs` / `Repositories.Sync.g.cs`, `RemoteServer.g.cs` | — (no package; always generated) | Schema-dependent code only: per-entity contracts and implementations, DI registration, `QuickErDbContext` and its Fluent configuration, the HTTP client, projection DTOs, the per-entity endpoints (`GeneratedRemoteEndpoints`), the per-table sync descriptors and journaling decorators |
+| `Repositories.g.cs`, `Repositories.SqlServer.g.cs` / `Repositories.Sqlite.g.cs` / `Repositories.EntityFrameworkCore.g.cs` / `Repositories.InMemory.g.cs` / `Repositories.Sync.g.cs` / `Repositories.Http.g.cs`, `RemoteServer.g.cs` | — (no package; always generated) | Schema-dependent code only: per-entity contracts and implementations, DI registration, `QuickErDbContext` and its Fluent configuration, projection DTOs, the per-entity endpoints (`GeneratedRemoteEndpoints`), the per-table sync descriptors and journaling decorators. With remote services, the HTTP client (`Http{Entity}RemoteRepository` and its DI registration) is split into its own `Repositories.Http.g.cs`, keeping the contract file pure interfaces — the namespace stays the contract namespace, so type names do not change |
 
 `Runtime.g.cs` is always there, while the files below it are emitted only for a feature you actually enabled (the dialect files only when the QuickER Repository is generated, the EF Core file only with `GenerateEfCore`, the in-memory file only with `GenerateInMemoryRepositories`, the ASP.NET Core file only with `GenerateRemoteServices`, the sync file only with `GenerateSyncSupport`) — exactly the same set of packages you would have to reference.
 
@@ -983,6 +983,40 @@ Because of this layout, `--use-runtime-packages` means exactly one thing: **no `
 Note that the file and namespace suffix `EntityFrameworkCore` is about matching the package name; the **C# type names are unchanged** (`EfCore{Entity}Repository`, `QuickErDbContext`, `AddGeneratedEfCoreRepositories`).
 
 `Entities.g.cs`, `ValueObjects.g.cs`, `EditModels.g.cs`, and `Mappers.g.cs` are schema-dependent in their entirety and are unchanged by this mode. `RemoteServer.g.cs` is schema-dependent too — with split output the fixed engine behind it lives in `Runtime.AspNetCore.g.cs` (or, in package mode, in `QuickER.Runtime.AspNetCore`) and the file itself holds only the per-entity endpoints and the `OnServerError` hook; with non-split inline output the engine is embedded in `RemoteServer.g.cs` itself. Either way it stays a separate file, because it needs the ASP.NET Core `FrameworkReference`; all the other files above are concatenated into one with non-split generation.
+
+## Layered folder output (--layered-output)
+
+`--layered-output` (config key `LayeredOutput`, **default OFF**) sorts the split files into layer subfolders under the output directory, so that each layer can be its own project — a DDD-style domain / infrastructure / presentation split, plus a server project when remote services are generated. It implies `SplitFilesByCategory` (a single file cannot be split across folders).
+
+The bucket-to-layer mapping is fixed:
+
+| Layer (default folder) | Files |
+|---|---|
+| Domain (`Domain/`) | `Entities.g.cs`, `ValueObjects.g.cs`, `Repositories.g.cs` (the contracts), `Runtime.g.cs` (inline runtime) |
+| Infrastructure (`Infrastructure/`) | `Repositories.SqlServer.g.cs` / `.Sqlite` / `.EntityFrameworkCore` / `.InMemory` / `.Sync` / `.Http` and the matching `Runtime.{...}.g.cs` fixed-infrastructure files |
+| Presentation (`Presentation/`) | `EditModels.g.cs`, `Mappers.g.cs` |
+| Server (`Server/`) | `RemoteServer.g.cs`, `Runtime.AspNetCore.g.cs` (they need the ASP.NET Core `FrameworkReference`, so they cannot live in a plain class library) |
+| Output directory root | The API reference (`*.g.md`) — it belongs to no csproj |
+
+Each layer's folder can be overridden with `--domain-layer-dir` / `--infrastructure-layer-dir` / `--presentation-layer-dir` / `--server-layer-dir` (config keys `DomainLayerDirectory`, `InfrastructureLayerDirectory`, `PresentationLayerDirectory`, `ServerLayerDirectory`). A value is a relative path under the output directory and may have several segments (`MyApp.Domain/Generated`), so you can point the output directory at your solution's source folder and generate straight into the layer projects. Absolute paths, drive letters, and `..` are rejected as a generation error; a blank value falls back to the default folder name.
+
+**The default namespaces follow the layer folders**, so folders and namespaces stay aligned. Each layer's namespace root is its folder path with the separators turned into dots (folder `MyApp.Domain/Generated` → root `MyApp.Domain.Generated`, matching the "project folder name = RootNamespace" csproj convention), and the buckets hang under it as `{root}.{suffix}`:
+
+| Layer (folder `MyApp.Domain` etc.) | Namespaces |
+|---|---|
+| Domain | `MyApp.Domain.Entities` / `.ValueObjects` / `.Repositories` (contracts) / `.Runtime` |
+| Infrastructure | `MyApp.Infrastructure.SqlServer` / `.Sqlite` / `.EntityFrameworkCore` / `.InMemory` / `.Sync` / `.Http` — the fixed-infrastructure file (`Runtime.SqlServer.g.cs` etc.) and the per-entity file (`Repositories.SqlServer.g.cs` etc.) of each family share one namespace |
+| Presentation | `MyApp.Presentation.EditModels` / `.Mappers` |
+| Server | `MyApp.Server.RemoteServer` / `.AspNetCore` |
+
+The explicit namespace options (`EntityNamespace`, `RepositoryNamespace`, and so on) still win over the derivation, exactly as before. A layer folder that cannot form a C# namespace (a hyphen and so on) is a generation error, unless every namespace in that layer is set explicitly. This also untangles the plain-split quirk where the dialect implementations hung under the contract namespace (`{contracts}.SqlServer`) even though they live in another project — with layered output they sit under the infrastructure root instead. `RootNamespace` no longer appears in the derived defaults (the layer folders take its place).
+
+Points worth knowing:
+
+- **Only namespaces and file placement change.** Apart from the `namespace` declarations and `using` directives, the generated code is identical to plain split output, and the API reference (`.g.md`) shows the actual (derived) namespaces.
+- The repository contracts sit in the domain layer as DDD-style ports: the presentation project (edit models check uniqueness through `I{Entity}Repository`) only needs a reference to the domain project, and infrastructure implements the domain's contracts. The resulting project references are `presentation → domain ← infrastructure ← server` (the server project also references infrastructure to wire up DI).
+- The inline runtime (`Runtime.g.cs`) goes into the domain layer, mirroring package mode: with `--use-runtime-packages` the domain project references `QuickER.Runtime` instead, and the other layers see the runtime transitively either way.
+- Switching the mode (or renaming a layer folder) does not delete files written to the previous location — remove them yourself.
 
 ## API reference (.g.md)
 

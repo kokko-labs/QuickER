@@ -174,6 +174,24 @@ namespace QuickER.CodeGen.CSharp.Resources {
             }
         }
 
+        public static string CodeGen_Error_InvalidLayerDirectory {
+            get {
+                return ResourceManager.GetString("CodeGen_Error_InvalidLayerDirectory", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Error_LayerDirectoryOutsideOutput {
+            get {
+                return ResourceManager.GetString("CodeGen_Error_LayerDirectoryOutsideOutput", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Error_LayerDirectoryNotNamespace {
+            get {
+                return ResourceManager.GetString("CodeGen_Error_LayerDirectoryNotNamespace", resourceCulture);
+            }
+        }
+
         public static string CodeGen_Warning_EntityDisplayNameCollision {
             get {
                 return ResourceManager.GetString("CodeGen_Warning_EntityDisplayNameCollision", resourceCulture);

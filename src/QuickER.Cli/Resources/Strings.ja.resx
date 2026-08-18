@@ -91,6 +91,21 @@
   <data name="Cli_Opt_SplitFilesByCategory" xml:space="preserve">
     <value>カテゴリごとに別ファイル・別名前空間で出力する（設定ファイルを上書き）</value>
   </data>
+  <data name="Cli_Opt_LayeredOutput" xml:space="preserve">
+    <value>生成ファイルを層別サブフォルダ（Domain / Infrastructure / Presentation / Server）へ振り分けて出力する（--split-files-by-category を自動的に含意。設定ファイルを上書き）</value>
+  </data>
+  <data name="Cli_Opt_DomainLayerDirectory" xml:space="preserve">
+    <value>層別出力時のドメイン層フォルダ（--out からの相対パス。既定: Domain。設定ファイルを上書き）</value>
+  </data>
+  <data name="Cli_Opt_InfrastructureLayerDirectory" xml:space="preserve">
+    <value>層別出力時のインフラストラクチャ層フォルダ（--out からの相対パス。既定: Infrastructure。設定ファイルを上書き）</value>
+  </data>
+  <data name="Cli_Opt_PresentationLayerDirectory" xml:space="preserve">
+    <value>層別出力時のプレゼンテーション層フォルダ（--out からの相対パス。既定: Presentation。設定ファイルを上書き）</value>
+  </data>
+  <data name="Cli_Opt_ServerLayerDirectory" xml:space="preserve">
+    <value>層別出力時のサーバー層フォルダ（--out からの相対パス。リモートサービス生成時のみ使用。既定: Server。設定ファイルを上書き）</value>
+  </data>
   <data name="Cli_Opt_RootNamespace" xml:space="preserve">
     <value>生成コードのルート名前空間（設定ファイルを上書き）</value>
   </data>

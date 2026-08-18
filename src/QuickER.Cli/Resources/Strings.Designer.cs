@@ -120,6 +120,36 @@ namespace QuickER.Cli.Resources {
             }
         }
 
+        public static string Cli_Opt_LayeredOutput {
+            get {
+                return ResourceManager.GetString("Cli_Opt_LayeredOutput", resourceCulture);
+            }
+        }
+
+        public static string Cli_Opt_DomainLayerDirectory {
+            get {
+                return ResourceManager.GetString("Cli_Opt_DomainLayerDirectory", resourceCulture);
+            }
+        }
+
+        public static string Cli_Opt_InfrastructureLayerDirectory {
+            get {
+                return ResourceManager.GetString("Cli_Opt_InfrastructureLayerDirectory", resourceCulture);
+            }
+        }
+
+        public static string Cli_Opt_PresentationLayerDirectory {
+            get {
+                return ResourceManager.GetString("Cli_Opt_PresentationLayerDirectory", resourceCulture);
+            }
+        }
+
+        public static string Cli_Opt_ServerLayerDirectory {
+            get {
+                return ResourceManager.GetString("Cli_Opt_ServerLayerDirectory", resourceCulture);
+            }
+        }
+
         public static string Cli_Opt_RootNamespace {
             get {
                 return ResourceManager.GetString("Cli_Opt_RootNamespace", resourceCulture);

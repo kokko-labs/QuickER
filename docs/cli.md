@@ -102,6 +102,8 @@ Main keys (the default is in parentheses; category order):
 | Key | Description |
 |---|---|
 | `SplitFilesByCategory` (`false`) | Output each category in a separate file and namespace. You can specify namespaces individually with `EntityNamespace` / `RepositoryNamespace`, and so on |
+| `LayeredOutput` (`false`) | Sort the split files into layer subfolders (domain / infrastructure / presentation / server) under the output directory, so each layer can be its own project. Implies `SplitFilesByCategory` (see [Using the generated code](code-generation.md#layered-folder-output---layered-output)) |
+| `DomainLayerDirectory` / `InfrastructureLayerDirectory` / `PresentationLayerDirectory` / `ServerLayerDirectory` (`Domain` / `Infrastructure` / `Presentation` / `Server`) | The per-layer folders for `LayeredOutput`, as relative paths under the output directory; several segments are allowed (`MyApp.Domain/Generated`). With `LayeredOutput`, blank namespace keys also derive their defaults from these folders, keeping folders and namespaces aligned. Absolute paths, drive letters, and `..` are rejected as a generation error; a blank value falls back to the default. `ServerLayerDirectory` is used only with `GenerateRemoteServices` |
 | `RootNamespace` (`Generated`) | The root namespace of the generated code |
 | `GenerateEditModels` / `GenerateMappers` (both `true`) | Whether to generate each category. **Entity classes are always generated**, and there is no dedicated key for them |
 | `GenerateValueObjects` (`false`) | Generate a per-column value object type (such as `CustomerIdValue`) (see [Using the generated code](code-generation.md#value-objects-generatevalueobjects)) |

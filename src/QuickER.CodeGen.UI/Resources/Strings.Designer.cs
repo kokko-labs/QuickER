@@ -84,6 +84,48 @@ namespace QuickER.CodeGen.UI.Resources {
             }
         }
 
+        public static string CodeGen_LayeredOutput {
+            get {
+                return ResourceManager.GetString("CodeGen_LayeredOutput", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_LayeredOutputToolTip {
+            get {
+                return ResourceManager.GetString("CodeGen_LayeredOutputToolTip", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_LayerDirectories {
+            get {
+                return ResourceManager.GetString("CodeGen_LayerDirectories", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_LayerLabel_Domain {
+            get {
+                return ResourceManager.GetString("CodeGen_LayerLabel_Domain", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_LayerLabel_Infrastructure {
+            get {
+                return ResourceManager.GetString("CodeGen_LayerLabel_Infrastructure", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_LayerLabel_Presentation {
+            get {
+                return ResourceManager.GetString("CodeGen_LayerLabel_Presentation", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_LayerLabel_Server {
+            get {
+                return ResourceManager.GetString("CodeGen_LayerLabel_Server", resourceCulture);
+            }
+        }
+
         public static string CodeGen_GenerationContent {
             get {
                 return ResourceManager.GetString("CodeGen_GenerationContent", resourceCulture);

@@ -469,4 +469,75 @@ public class RemoteServiceGenerationTests
         server.Should().NotContain("\"/quicker\"");
         server.Should().NotContain("\"health\"");
     }
+
+    /// <summary>
+    /// 分割時、HTTP クライアント（per-entity クライアント・DI 登録・OwnedHttpClient）が契約ファイルから
+    /// Repositories.Http.g.cs へ分離され、名前空間は契約と同一のままであることを検証する
+    /// （層分け出力で契約＝ドメイン層・HTTP 実装＝インフラ層へ振り分けるための分割。型 FQN は不変）。
+    /// </summary>
+    [Fact(
+        DisplayName = "分割時: HTTP クライアントは Repositories.Http.g.cs へ分離され契約ファイルには残らない"
+    )]
+    public void Generate_Split_MovesHttpClientToOwnFile()
+    {
+        var result = Generate(
+            CreateDiagram(),
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Test.Ns",
+                SplitFilesByCategory = true,
+                GenerateRepositories = true,
+                GenerateRemoteServices = true,
+            }
+        );
+
+        result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
+
+        var contract = result.Files.Single(file => file.FileName == "Repositories.g.cs").Content;
+        var http = result.Files.Single(file => file.FileName == "Repositories.Http.g.cs").Content;
+
+        // 契約ファイル: リモート面インターフェイスは残り、HTTP 実装・DI 登録・HTTP 系 using は出ない
+        contract.Should().Contain("public partial interface IOrderRemoteRepository");
+        contract.Should().NotContain("HttpOrderRemoteRepository");
+        contract.Should().NotContain("AddGeneratedHttpRemoteRepositories");
+        contract.Should().NotContain("using System.Net.Http;");
+
+        // HTTP クライアントファイル: per-entity クライアント＋DI 登録＋OwnedHttpClient が揃い、
+        // 名前空間は契約と同一（サブ名前空間にしない＝利用側の using・型 FQN が変わらない）
+        http.Should().Contain("namespace Test.Ns.Repositories;");
+        http.Should()
+            .Contain(
+                "public sealed partial class HttpOrderRemoteRepository(HttpClient httpClient)"
+            );
+        http.Should()
+            .Contain(
+                "public static class GeneratedHttpRemoteRepositoryServiceCollectionExtensions"
+            );
+        http.Should().Contain("private sealed class OwnedHttpClient(HttpClient client)");
+    }
+
+    /// <summary>非分割時は HTTP クライアントが従来どおり本体ファイルへ同居することを検証する（分離はファイル分割時のみ）</summary>
+    [Fact(DisplayName = "非分割時: HTTP クライアントは従来どおり本体ファイルへ同居する")]
+    public void Generate_NonSplit_KeepsHttpClientInMainFile()
+    {
+        var result = Generate(
+            CreateDiagram(),
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Test.Ns",
+                GenerateRepositories = true,
+                GenerateRemoteServices = true,
+            }
+        );
+
+        result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
+        result.Files.Should().HaveCount(2);
+
+        var main = result.Files[0].Content;
+        main.Should().Contain("public sealed partial class HttpOrderRemoteRepository");
+        main.Should()
+            .Contain(
+                "public static class GeneratedHttpRemoteRepositoryServiceCollectionExtensions"
+            );
+    }
 }
