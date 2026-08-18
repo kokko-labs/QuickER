@@ -35,10 +35,25 @@ internal static class GeneratedCodeCompiler
     public static GeneratedCodeCompilationResult Compile(
         CodeGenerationResult result,
         string assemblyName
+    ) => CompileProject(result.Files, assemblyName, projectReferences: [], out _);
+
+    /// <summary>
+    /// ファイル群を 1 プロジェクト（1 アセンブリ）としてコンパイルし、成功時は他プロジェクトから参照できる
+    /// メタデータ参照も返す（層別出力の「別アセンブリに分けても参照グラフだけでビルドが通る」検証用）
+    /// </summary>
+    /// <param name="files">このプロジェクトに属する生成ファイル群</param>
+    /// <param name="assemblyName">アセンブリ名（internal 可視性の判定・診断の可読性に効く）</param>
+    /// <param name="projectReferences">参照する兄弟プロジェクトのメタデータ参照（例: Infrastructure → Domain）</param>
+    /// <param name="emittedReference">成功時に生成されるこのプロジェクトのメタデータ参照（失敗時は null）</param>
+    public static GeneratedCodeCompilationResult CompileProject(
+        IEnumerable<GeneratedFile> files,
+        string assemblyName,
+        IReadOnlyList<MetadataReference> projectReferences,
+        out MetadataReference? emittedReference
     )
     {
-        var syntaxTrees = result
-            .Files.Select(file =>
+        var syntaxTrees = files
+            .Select(file =>
                 CSharpSyntaxTree.ParseText(
                     file.Content,
                     new CSharpParseOptions(LanguageVersion.Latest),
@@ -50,7 +65,7 @@ internal static class GeneratedCodeCompiler
         var compilation = CSharpCompilation.Create(
             assemblyName,
             syntaxTrees,
-            MetadataReferences.Value,
+            MetadataReferences.Value.Concat(projectReferences),
             new CSharpCompilationOptions(
                 OutputKind.DynamicallyLinkedLibrary,
                 nullableContextOptions: NullableContextOptions.Enable
@@ -59,6 +74,10 @@ internal static class GeneratedCodeCompiler
 
         using var peStream = new MemoryStream();
         var emitResult = compilation.Emit(peStream);
+
+        emittedReference = emitResult.Success
+            ? MetadataReference.CreateFromImage(peStream.ToArray())
+            : null;
 
         var diagnostics = emitResult
             .Diagnostics.Where(diagnostic => diagnostic.Severity >= DiagnosticSeverity.Warning)

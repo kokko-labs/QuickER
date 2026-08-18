@@ -1013,7 +1013,7 @@ The explicit namespace options (`EntityNamespace`, `RepositoryNamespace`, and so
 
 Points worth knowing:
 
-- **Only namespaces and file placement change.** Apart from the `namespace` declarations and `using` directives, the generated code is identical to plain split output, and the API reference (`.g.md`) shows the actual (derived) namespaces.
+- **Only namespaces, file placement, and the fixed runtime's visibility change.** Apart from the `namespace` declarations and `using` directives, the schema-dependent code is identical to plain split output, and the API reference (`.g.md`) shows the actual (derived) namespaces. The fixed runtime (`Runtime*.g.cs`) is emitted with `public` visibility: the layers are separate assemblies, so the runtime surface follows the same rule as the NuGet packages, which publish the same types as `public` for the same reason. The generated projects therefore build with plain project references and **no `InternalsVisibleTo` is needed**.
 - The repository contracts sit in the domain layer as DDD-style ports: the presentation project (edit models check uniqueness through `I{Entity}Repository`) only needs a reference to the domain project, and infrastructure implements the domain's contracts. The resulting project references are `presentation → domain ← infrastructure ← server` (the server project also references infrastructure to wire up DI).
 - The inline runtime (`Runtime.g.cs`) goes into the domain layer, mirroring package mode: with `--use-runtime-packages` the domain project references `QuickER.Runtime` instead, and the other layers see the runtime transitively either way.
 - Switching the mode (or renaming a layer folder) does not delete files written to the previous location — remove them yourself.

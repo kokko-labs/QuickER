@@ -203,8 +203,10 @@ public sealed class LayeredOutputTests
         split.HasErrors.Should().BeFalse();
         layered.HasErrors.Should().BeFalse();
 
-        // ファイル名集合は完全一致。内容は名前空間が層フォルダへ追従する分だけ変わる
-        // （.g.cs は namespace 宣言と using 行を除けば一致＝コード本体は不変）
+        // ファイル名集合は完全一致。内容は「名前空間の層フォルダ追従」と「固定 infra の可視性」の分だけ変わる:
+        // スキーマ依存ファイル（per-entity）は namespace 宣言と using 行を除けば一致＝コード本体は不変。
+        // 固定ランタイム（Runtime*.g.cs）はさらに可視性が public へ切り替わる（層別出力は複数アセンブリ配置の
+        // ため、パッケージ配布と同じ規則＝別層の生成物が Owner/IncludeNode 等を参照できる）。
         layered
             .Files.Select(file => file.FileName)
             .Should()
@@ -212,7 +214,10 @@ public sealed class LayeredOutputTests
 
         foreach (var (layeredFile, splitFile) in layered.Files.Zip(split.Files))
         {
-            if (!layeredFile.FileName.EndsWith(".g.cs", StringComparison.Ordinal))
+            if (
+                !layeredFile.FileName.EndsWith(".g.cs", StringComparison.Ordinal)
+                || layeredFile.FileName.StartsWith("Runtime", StringComparison.Ordinal)
+            )
             {
                 continue;
             }
@@ -221,6 +226,14 @@ public sealed class LayeredOutputTests
                 .Should()
                 .Be(StripNamespaceLines(splitFile.Content), layeredFile.FileName);
         }
+
+        // 固定ランタイムの可視性の切り替えを名指しで固定（多アセンブリでの成立自体は
+        // GeneratedCodeCompilationTests の 4 プロジェクト分割コンパイルが検証する）
+        var layeredRuntime = layered.Files.Single(file => file.FileName == "Runtime.g.cs").Content;
+        var splitRuntime = split.Files.Single(file => file.FileName == "Runtime.g.cs").Content;
+        layeredRuntime.Should().Contain("public sealed class IncludeNode");
+        layeredRuntime.Should().NotContain("internal sealed class IncludeNode");
+        splitRuntime.Should().Contain("internal sealed class IncludeNode");
 
         // API リファレンス（.g.md）のファイル一覧表は実際の名前空間を載せるため、層追従がそのまま反映される
         var layeredApiDocs = layered.Files.Single(file => file.FileName == "ApiDocs.g.md").Content;

@@ -550,6 +550,11 @@ public sealed class CSharpCodeGenerationService
             // スキーマ依存物（per-entity・DI 登録・DbContext）は固定 infra 専用ファイル以外が出力する
             // （非分割・スキーマ依存ファイルとも true。パッケージ用ソースの書き出しは RuntimePackageSourceRenderer が false）。
             EmitSchemaDependent = spec.EmitSchemaDependent,
+            // 固定 infra の可視性。層別出力は生成物を複数プロジェクト（別アセンブリ）へ分けるため、
+            // NuGet パッケージ配布（RuntimePackageSourceRenderer）と同じ public にする＝EditModel の
+            // Owner/OwnerModel・IncludeNode・CascadeNavigation 等を別層の生成物が参照できる
+            // （単一アセンブリ配置＝非分割・通常分割は従来どおり internal でバイト不変）。
+            InfraVisibility = options.LayeredOutput ? "public" : "internal",
             // ヘッダ（render_header=true のファイル）へ載せる案内行。renderHeader=false の連結スペックでは
             // テンプレート側で出さないため空でよいが、呼び出し側が共通で渡す（render_header 経路のみ描画する）。
             PackageGuidanceLines = renderHeader ? packageGuidanceLines : [],

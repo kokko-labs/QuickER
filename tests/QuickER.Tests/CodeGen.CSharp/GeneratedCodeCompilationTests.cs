@@ -656,6 +656,128 @@ public class GeneratedCodeCompilationTests
         CodeGenerationOptions options
     ) => AssertCompiles(caseName, options);
 
+    /// <summary>マトリクスケース: 層別出力を実際の 4 プロジェクト（別アセンブリ）構成で組む横断ケース</summary>
+    public static TheoryData<string, CodeGenerationOptions> LayeredProjectCases()
+    {
+        var data = new TheoryData<string, CodeGenerationOptions>();
+
+        data.Add(
+            "layered 4-projects QuickER + remote + in-memory + VO",
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Sample.Domain",
+                LayeredOutput = true,
+                GenerateValueObjects = true,
+                GenerateRepositories = true,
+                GenerateRemoteServices = true,
+                GenerateInMemoryRepositories = true,
+            }
+        );
+        data.Add(
+            "layered 4-projects multi-target + sync + remote",
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Sample.Domain",
+                LayeredOutput = true,
+                GenerateRepositories = true,
+                RepositoryDialects = ["sqlserver", "sqlite"],
+                GenerateSyncSupport = true,
+                GenerateRemoteServices = true,
+            }
+        );
+
+        return data;
+    }
+
+    /// <summary>
+    /// 層別出力の生成物を層ごとに別アセンブリとしてコンパイルし、プロジェクト参照
+    /// （Infrastructure→Domain・Presentation→Domain・Server→Domain+Infrastructure）を張るだけで
+    /// ビルドが通ることを検証する（第 7 次指示書 A-1 の受け入れ条件 1・2）。
+    /// </summary>
+    /// <remarks>
+    /// 単一コンパイルの検証（<see cref="Generate_LayeredOutputMatrix_ShouldProduceCompilableCode"/>）では
+    /// internal がアセンブリ内で見えてしまい境界越えの可視性問題を検出できない＝418 件のビルドエラーを
+    /// 見逃した盲点をここで塞ぐ。固定 infra の可視性はパッケージ配布と同じ public で解決しており、
+    /// 利用者側の InternalsVisibleTo 手書きは不要。
+    /// </remarks>
+    [Theory]
+    [MemberData(nameof(LayeredProjectCases))]
+    public void Generate_Layered_CompilesAsSeparateProjects(
+        string caseName,
+        CodeGenerationOptions options
+    )
+    {
+        var result = new CSharpCodeGenerationService().Generate(FullCoverageDiagram(), options);
+
+        result
+            .HasErrors.Should()
+            .BeFalse(
+                $"「{caseName}」の生成自体でエラーが発生: "
+                    + string.Join(
+                        " / ",
+                        result
+                            .Diagnostics.Where(diagnostic =>
+                                diagnostic.Severity == GenerationDiagnosticSeverity.Error
+                            )
+                            .Select(diagnostic => diagnostic.Message)
+                    )
+            );
+
+        var filesByLayer = result
+            .Files.GroupBy(file => file.RelativeDirectory ?? string.Empty)
+            .ToDictionary(group => group.Key, group => group.ToList());
+
+        var suffix = Guid.NewGuid().ToString("N");
+        var domain = CompileLayer(caseName, filesByLayer, "Domain", suffix, references: []);
+        var infrastructure = CompileLayer(
+            caseName,
+            filesByLayer,
+            "Infrastructure",
+            suffix,
+            references: [domain]
+        );
+        CompileLayer(caseName, filesByLayer, "Presentation", suffix, references: [domain]);
+        CompileLayer(
+            caseName,
+            filesByLayer,
+            "Server",
+            suffix,
+            references: [domain, infrastructure]
+        );
+    }
+
+    /// <summary>1 層分のファイル群を別アセンブリとしてコンパイルし、成功を表明してメタデータ参照を返す</summary>
+    private static Microsoft.CodeAnalysis.MetadataReference CompileLayer(
+        string caseName,
+        IReadOnlyDictionary<string, List<GeneratedFile>> filesByLayer,
+        string layer,
+        string assemblySuffix,
+        IReadOnlyList<Microsoft.CodeAnalysis.MetadataReference> references
+    )
+    {
+        filesByLayer.Should().ContainKey(layer, $"「{caseName}」は {layer} 層のファイルを持つ前提");
+
+        var compilation = GeneratedCodeCompiler.CompileProject(
+            filesByLayer[layer],
+            assemblyName: $"QuickER.Layered.{assemblySuffix}.{layer}",
+            projectReferences: references,
+            out var emittedReference
+        );
+
+        compilation
+            .Success.Should()
+            .BeTrue(
+                $"「{caseName}」の {layer} 層にコンパイルエラーが発生:{Environment.NewLine}{compilation.DescribeErrors()}"
+            );
+        compilation
+            .Warnings.Should()
+            .BeEmpty(
+                $"「{caseName}」の {layer} 層に生成コード起因の警告が発生:{Environment.NewLine}{compilation.DescribeWarnings()}"
+            );
+
+        return emittedReference!;
+    }
+
     /// <summary>指定オプションで生成し、Roslyn コンパイルがエラー・報告対象警告なしで成功することを検証する共通アサーション</summary>
     private static void AssertCompiles(string caseName, CodeGenerationOptions options)
     {

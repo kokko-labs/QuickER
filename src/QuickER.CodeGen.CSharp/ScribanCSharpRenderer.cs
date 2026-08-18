@@ -93,8 +93,11 @@ internal sealed class RenderScope
     /// パッケージ化対象の固定 infra 型・メンバーの可視性（既定 <c>"internal"</c>）。
     /// </summary>
     /// <remarks>
-    /// 通常生成では <c>"internal"</c> のままで出力はバイト不変。パッケージ書き出し時は <c>"public"</c> を渡し、
-    /// 生成コード（別アセンブリ）や別パッケージから参照可能にする。
+    /// 単一アセンブリ配置（非分割・通常分割）では <c>"internal"</c> のままで出力はバイト不変。
+    /// 生成物が複数アセンブリへ分かれる配置では <c>"public"</c> を渡す＝パッケージ書き出し
+    /// （<see cref="RuntimePackageSourceRenderer"/>）と層別出力（<see cref="CodeGenerationOptions.LayeredOutput"/>）の
+    /// 2 経路。別アセンブリの生成物・別パッケージから固定 infra（EditModel の Owner/OwnerModel・IncludeNode・
+    /// CascadeNavigation 等）を参照可能にする。
     /// </remarks>
     public string InfraVisibility { get; init; } = "internal";
 
