@@ -917,6 +917,10 @@ public static partial class GeneratedRemoteEndpoints
     /// the group covers it as well; a probe that has to stay anonymous can be given its own route mapped outside the
     /// group instead.
     /// </para>
+    /// <para>
+    /// The sync endpoints check here, while they are being mapped, that a differential source is registered for every
+    /// synchronised table, so a server missing that registration fails at startup rather than on the first sync request.
+    /// </para>
     /// </remarks>
     /// <param name="endpoints">The mapping target (for example a <c>WebApplication</c>).</param>
     /// <param name="prefix">The route prefix for the endpoint group.</param>
@@ -959,10 +963,67 @@ public static partial class GeneratedRemoteEndpoints
         group.MapGet(RemotePaths.HealthRoute, () => Results.Ok());
         MapSyncOrderEndpoints(group, allowUnboundedUploads);
         MapSyncOrderLineEndpoints(group);
+
+        // Asked before the sync endpoints are mapped rather than when one is called: a handler resolves its source from
+        // the request's services, so a missing registration would surface as an opaque 500 on the first sync of a
+        // deployed server whose CRUD endpoints all answer normally
+        RequireSyncSources(endpoints.ServiceProvider);
+
         MapSyncEndpoints<SyncOrderEntity, int>(group, "SyncOrder");
         MapSyncEndpoints<SyncOrderLineEntity, int>(group, "SyncOrderLine");
 
         return group;
+    }
+
+    /// <summary>Verifies, while the endpoints are being mapped, that a differential source is registered for every synchronised table.</summary>
+    /// <remarks>
+    /// <para>
+    /// The handlers resolve <c>ISyncServerSource&lt;,&gt;</c> from the services of the request they are answering, so a
+    /// server that never registered the sources starts, answers every CRUD endpoint normally, and fails only when a
+    /// client first syncs - with a 500 whose cause is here rather than there. Asking at mapping time turns that into a
+    /// startup failure naming what is missing, which is how the local half already treats a repository registration it
+    /// cannot find.
+    /// </para>
+    /// <para>
+    /// <see cref="IServiceProviderIsService"/> answers whether a type would resolve without building anything, so the
+    /// check creates no instance and reaches into no scope. A container that does not offer it - a third-party one
+    /// substituted for the default - cannot be asked, and the check is then skipped rather than guessed at: those
+    /// endpoints behave exactly as they did before it existed.
+    /// </para>
+    /// </remarks>
+    /// <param name="services">The services the endpoints are being mapped against (<c>IEndpointRouteBuilder.ServiceProvider</c>).</param>
+    private static void RequireSyncSources(IServiceProvider services)
+    {
+        if (services.GetService<IServiceProviderIsService>() is not { } registrations)
+        {
+            return;
+        }
+
+        var missing = new List<string>();
+
+        if (!registrations.IsService(typeof(ISyncServerSource<SyncOrderEntity, int>)))
+        {
+            missing.Add("ISyncServerSource<SyncOrderEntity, int>");
+        }
+
+        if (!registrations.IsService(typeof(ISyncServerSource<SyncOrderLineEntity, int>)))
+        {
+            missing.Add("ISyncServerSource<SyncOrderLineEntity, int>");
+        }
+
+        if (missing.Count == 0)
+        {
+            return;
+        }
+
+        throw new InvalidOperationException(
+            "The sync endpoints resolve a differential source from DI, and none is registered for: "
+                + string.Join(", ", missing)
+                + ". Call AddGeneratedDirectSyncSources on the server's service collection before mapping the "
+                + "endpoints. Its serverServiceKey argument selects which repository registrations the source reads "
+                + "from; it does not key the source itself, which is always registered without a key because that is "
+                + "how these endpoints resolve it."
+        );
     }
 
     /// <summary>Maps the sync-only endpoints of one synchronised table onto the group.</summary>

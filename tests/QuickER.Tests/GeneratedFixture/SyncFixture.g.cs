@@ -3649,6 +3649,12 @@ public static class GeneratedHttpRemoteRepositoryServiceCollectionExtensions
     /// Do not wrap this client in an HTTP-level retry policy that also retries the mutating operations
     /// (Insert / Update / Save / SaveMany / Delete); see the remarks on the factory overload.
     /// </para>
+    /// <para>
+    /// The client is this registration's own, and passing the same base address to
+    /// <c>AddGeneratedHttpSyncSources</c> does not join the two: each base-address overload builds a client of its own.
+    /// To have the remote repositories and the sync sources talk through one HttpClient, hand the same factory to the
+    /// factory overload of both.
+    /// </para>
     /// </remarks>
     /// <param name="services">The service collection to register into</param>
     /// <param name="baseAddress">The base address including the server prefix - the one <c>MapGeneratedRemoteEndpoints</c> was mapped under, <see cref="RemotePaths.DefaultPrefix"/> unless it was passed another (for example <c>https://server:5001/quicker</c>; a trailing / is appended automatically)</param>
@@ -3739,6 +3745,12 @@ public static class GeneratedHttpRemoteRepositoryServiceCollectionExtensions
     /// The client is configured exactly as the non-keyed base-address overload configures it - connections recycled every
     /// five minutes, no client-wide timeout - and the same warning applies: do not put an HTTP-level retry policy in front
     /// of the mutating operations. See the remarks on the factory overload.
+    /// </para>
+    /// <para>
+    /// The key keeps this client apart from the one <c>AddGeneratedHttpSyncSources</c> builds as well, and the same base
+    /// address does not join them: each base-address overload builds a client of its own. To have the remote
+    /// repositories and the sync sources talk through one HttpClient, hand the same factory to the factory overload of
+    /// both.
     /// </para>
     /// </remarks>
     /// <param name="services">The service collection to register into</param>

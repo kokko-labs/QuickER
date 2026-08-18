@@ -77,6 +77,13 @@ public class SyncSupportGenerationTests
         content.Should().NotContain("MapSyncEndpoints");
         content.Should().NotContain("RemoteSyncOperations");
         content.Should().NotContain("HttpSyncServerSource");
+
+        // 差分ソースの登録検査もゲートの内側（同期の無いサーバーには検査する対象が無い）
+        content.Should().NotContain("RequireSyncSources");
+        content.Should().NotContain("IServiceProviderIsService");
+
+        // HttpClient 共有の注意書きは、同期ソースの登録メソッドが在る構成でしか意味を持たない
+        content.Should().NotContain("AddGeneratedHttpSyncSources");
     }
 
     /// <summary>
@@ -170,6 +177,68 @@ public class SyncSupportGenerationTests
         // 転送経路の選択は DI 1 行の差でしかない（直結の登録も併存する）
         main.Should().Contain("public static IServiceCollection AddGeneratedDirectSyncSources(");
         main.Should().Contain("public static IServiceCollection AddGeneratedSyncEngine(");
+    }
+
+    /// <summary>
+    /// 同期エンドポイントは、マップ時に差分ソースの登録を同期対象テーブルごとに検査する。
+    /// </summary>
+    /// <remarks>
+    /// ハンドラはリクエスト時に解決するため、登録漏れは「正常起動・CRUD 全部 200・同期だけ不透明な 500」に
+    /// なる。検査はテーブルを 1 つでも取りこぼすとそのテーブルだけ黙って抜けるので、対象ごとに 1 件ずつ
+    /// 名指しで表明する（呼び出し側は <c>MapGeneratedRemoteEndpoints</c> の 1 行だけ）。
+    /// </remarks>
+    [Fact(DisplayName = "同期エンドポイントはマップ時に差分ソースの登録を全テーブル分検査する")]
+    public void SyncEndpoints_CheckSourceRegistrationAtMappingTime()
+    {
+        var (files, diagnostics) = Generate(Diagram(), SyncOptions());
+
+        diagnostics.Should().NotContain(d => d.Severity == GenerationDiagnosticSeverity.Error);
+
+        var server = files[SyncFixtureDefinition.RemoteServerOutputFileName];
+
+        // マップ側は 1 行（エンドポイントを張る前に検査する）
+        server.Should().Contain("RequireSyncSources(endpoints.ServiceProvider);");
+
+        // 検査は「登録の有無だけを問う面」で行う＝実体を作らずスコープにも触れない
+        server
+            .Should()
+            .Contain("services.GetService<IServiceProviderIsService>() is not { } registrations");
+
+        // 同期対象テーブルごとに 1 件（漏れたテーブルは検査から静かに抜ける）
+        server
+            .Should()
+            .Contain("!registrations.IsService(typeof(ISyncServerSource<SyncOrderEntity, int>))");
+        server
+            .Should()
+            .Contain(
+                "!registrations.IsService(typeof(ISyncServerSource<SyncOrderLineEntity, int>))"
+            );
+
+        // 例外は「何をすべきか」まで書く（クライアント側 fail-fast と同水準）
+        server.Should().Contain("Call AddGeneratedDirectSyncSources on the server's service");
+    }
+
+    /// <summary>
+    /// リモートリポジトリの HttpClient 共有の注意書きが、同期ソース側と対称に両オーバーロードへ出る。
+    /// </summary>
+    /// <remarks>
+    /// ベースアドレス版どうしは同じアドレスでも HttpClient を共有しない（別ホルダ）。この注意は従来
+    /// 同期ソース側にしか書かれておらず、リモートリポジトリ側だけを読んだ利用者には共有されているように見えた。
+    /// </remarks>
+    [Fact(DisplayName = "HttpClient 共有の注意書きがリモートリポジトリ側の両オーバーロードに出る")]
+    public void HttpRemoteRepositories_DocumentClientSharingWithSyncSources()
+    {
+        var (files, _) = Generate(Diagram(), SyncOptions());
+
+        var main = files[SyncFixtureDefinition.OutputFileName];
+
+        // 非 keyed 版と keyed 版の 2 箇所（片側だけ直すと読んだ順で結論が変わる）
+        main.Should()
+            .Contain("The client is this registration's own, and passing the same base address to");
+        main.Should()
+            .Contain(
+                "The key keeps this client apart from the one <c>AddGeneratedHttpSyncSources</c> builds as well"
+            );
     }
 
     /// <summary>

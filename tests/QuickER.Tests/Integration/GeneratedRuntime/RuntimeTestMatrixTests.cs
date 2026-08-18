@@ -427,6 +427,8 @@ public class RuntimeTestMatrixTests
         new("SyncSqlServerRuntimeTests", "SyncSupport", Backend.AdoSqlServer),
         new("SyncHttpRuntimeTests", "SyncSupport", Backend.Remote),
         new("SyncSqlServerHttpRuntimeTests", "SyncSupport", Backend.Remote),
+        // 同期エンドポイントのマップ時 fail-fast（第 6 次 A-1）＝ソース未登録の起動時検出
+        new("SyncEndpointRegistrationRuntimeTests", "SyncSupport", Backend.Remote),
         new("SyncSqliteRuntimeTests", "SyncRefresh", Backend.AdoSqlite),
         new("SyncRefreshBenchmarkRuntimeTests", "SyncRefresh", Backend.AdoSqlite),
         new("SyncSqlServerRuntimeTests", "SyncRefresh", Backend.AdoSqlServer),

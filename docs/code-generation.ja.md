@@ -734,7 +734,7 @@ services.AddGeneratedDirectSyncSources(serverServiceKey: null);
 app.MapGeneratedRemoteEndpoints().RequireAuthorization();
 ```
 
-既存のエンドポイントグループへ 3 本（`POST {prefix}/{エンティティ}/…` の `SyncCeiling` / `SyncChanges` / `SyncKeys`）が加わります。これは差分ソースの薄い remoting で、各ハンドラは DI から `ISyncServerSource<,>` を解決して呼ぶだけ＝意味論の実装は 1 つを両経路が共有します。グループのメンバーなので、グループに掛けた `RequireAuthorization()` はそのまま効きます。アップロードは新しい経路を作らず、既存の CRUD／保存エンドポイントを通ります（`ConcurrencyMode` は既に転送され、版の競合は 409 として返ります）。
+既存のエンドポイントグループへ 3 本（`POST {prefix}/{エンティティ}/…` の `SyncCeiling` / `SyncChanges` / `SyncKeys`）が加わります。これは差分ソースの薄い remoting で、各ハンドラは DI から `ISyncServerSource<,>` を解決して呼ぶだけ＝意味論の実装は 1 つを両経路が共有します。この登録は `MapGeneratedRemoteEndpoints` がマップ時に同期対象テーブルごとに検査するため、`AddGeneratedDirectSyncSources` を呼び忘れたサーバーは、正常に起動して CRUD を全部答えたうえで最初の同期でだけ落ちるのではなく、起動時に足りないソースを名指しして失敗します。グループのメンバーなので、グループに掛けた `RequireAuthorization()` はそのまま効きます。アップロードは新しい経路を作らず、既存の CRUD／保存エンドポイントを通ります（`ConcurrencyMode` は既に転送され、版の競合は 409 として返ります）。
 
 サーバーは**クライアント別の状態を持ちません**。再開点はリクエストの anchor、上限は ceiling として毎回送られます。その裏返しとして上限は呼び出し側の値であり、導出アンカーの保証は「その回の `SyncCeiling` が返した値をそのまま送り返す」限りで成立します（自前で大きな ceiling を送ると、その下で実行中のトランザクションの行を恒久的に読み飛ばします）。バッチサイズが 0 以下なら 400 で拒否します。上限は設けていません——取り放題を止めるのはグループの認可の仕事だからです。
 
