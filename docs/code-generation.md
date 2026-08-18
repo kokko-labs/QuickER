@@ -996,7 +996,7 @@ The bucket-to-layer mapping is fixed:
 | Infrastructure (`Infrastructure/`) | `Repositories.SqlServer.g.cs` / `.Sqlite` / `.EntityFrameworkCore` / `.InMemory` / `.Sync` / `.Http` and the matching `Runtime.{...}.g.cs` fixed-infrastructure files |
 | Presentation (`Presentation/`) | `EditModels.g.cs`, `Mappers.g.cs` |
 | Server (`Server/`) | `RemoteServer.g.cs`, `Runtime.AspNetCore.g.cs` (they need the ASP.NET Core `FrameworkReference`, so they cannot live in a plain class library) |
-| Output directory root | The API reference (`*.g.md`) — it belongs to no csproj |
+| Output directory root | The API reference (`*.g.md`) — it belongs to no csproj. `--api-docs-dir` can move it into a subfolder such as `docs` (independent of the layers) |
 
 Each layer's folder can be overridden with `--domain-layer-dir` / `--infrastructure-layer-dir` / `--presentation-layer-dir` / `--server-layer-dir` (config keys `DomainLayerDirectory`, `InfrastructureLayerDirectory`, `PresentationLayerDirectory`, `ServerLayerDirectory`). A value is a relative path under the output directory and may have several segments (`MyApp.Domain/Generated`), so you can point the output directory at your solution's source folder and generate straight into the layer projects. Absolute paths, drive letters, and `..` are rejected as a generation error; a blank value falls back to the default folder name.
 
@@ -1030,6 +1030,8 @@ When enabled, one `.g.md` with the same base name as the `.g.cs` is output (e.g.
 - A generated-file layout table.
 
 **English is the canonical version.** If you also want a Japanese version, enable the GUI's sub-checkbox "Also output a Japanese version", or the CLI's `--api-docs-ja` flag (config key `IncludeJapaneseApiDocs`) (**default OFF**; requires `--generate-api-docs`). When enabled, a `.ja.g.md` is produced alongside the canonical English `.g.md` (e.g. `EcOrder.g.cs` → `EcOrder.ja.g.md`).
+
+By default the Markdown lands in the output directory itself. `--api-docs-dir` (config key `ApiDocsDirectory`) moves it into a subfolder, as a relative path under the output directory (e.g. `docs`; several segments are allowed, absolute paths and `..` are rejected). This works in every output mode — with layered output it keeps the documentation out of the layer projects.
 
 `.g.md` / `.ja.g.md` are auto-generated files. They are overwritten on regeneration, so do not edit them directly.
 

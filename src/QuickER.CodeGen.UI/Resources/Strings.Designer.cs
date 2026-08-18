@@ -234,6 +234,18 @@ namespace QuickER.CodeGen.UI.Resources {
             }
         }
 
+        public static string CodeGen_ApiDocsDirectory {
+            get {
+                return ResourceManager.GetString("CodeGen_ApiDocsDirectory", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_ApiDocsDirectoryToolTip {
+            get {
+                return ResourceManager.GetString("CodeGen_ApiDocsDirectoryToolTip", resourceCulture);
+            }
+        }
+
         public static string CodeGen_ApiDocsTooltip {
             get {
                 return ResourceManager.GetString("CodeGen_ApiDocsTooltip", resourceCulture);

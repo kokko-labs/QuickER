@@ -119,10 +119,10 @@
     <value>Only generated files can be overwritten. The output file name must end with .g.cs or .g.md.</value>
   </data>
   <data name="CodeGen_Error_InvalidLayerDirectory" xml:space="preserve">
-    <value>The '{0}' option has an invalid layer folder: '{1}'. Specify a relative path inside the output directory (absolute paths, drive letters, '..', and characters not allowed in file names are rejected).</value>
+    <value>The '{0}' option has an invalid output subfolder: '{1}'. Specify a relative path inside the output directory (absolute paths, drive letters, '..', and characters not allowed in file names are rejected).</value>
   </data>
   <data name="CodeGen_Error_LayerDirectoryOutsideOutput" xml:space="preserve">
-    <value>Refusing to write outside the output directory: the layer folder '{0}' is not a valid relative path.</value>
+    <value>Refusing to write outside the output directory: the subfolder '{0}' is not a valid relative path.</value>
   </data>
   <data name="CodeGen_Error_LayerDirectoryNotNamespace" xml:space="preserve">
     <value>The '{0}' layer folder '{1}' cannot be used to derive a namespace ('{2}' is not a valid C# namespace). With layered output, the default namespaces follow the layer folders, so either rename the folder to a namespace-compatible name or set the namespace options explicitly.</value>

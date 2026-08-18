@@ -285,6 +285,13 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     private bool _includeJapaneseApiDocs;
 
     /// <summary>
+    /// API リファレンス Markdown の出力先サブフォルダ（出力フォルダからの相対パス。空＝直下）。
+    /// 層別出力に依らず有効で、既定は空のままプリフィルしない（直下が既定であることを空欄で表す）
+    /// </summary>
+    [ObservableProperty]
+    private string _apiDocsDirectory = string.Empty;
+
+    /// <summary>
     /// データアノテーション属性（[Table] / [Key] / [Column] 等）を付与するかどうか（UI 非表示。既定 true）。
     /// </summary>
     /// <remarks>
@@ -810,6 +817,8 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             // 日本語版 API リファレンスの併産は「親 OFF なら子も OFF」の UI 不変条件に合わせてクランプして復元する
             // （外部編集された設定ファイルの親 OFF＋子 ON の組み合わせで、無効なのにチェック済みの表示になるのを防ぐ）
             IncludeJapaneseApiDocs = settings.GenerateApiDocs && settings.IncludeJapaneseApiDocs;
+            // API リファレンスの出力先サブフォルダは保存値をそのまま復元する（空＝直下が既定・プリフィルなし）
+            ApiDocsDirectory = settings.ApiDocsDirectory;
             // 無制限バイナリ列の除外はQuickER 版 Repository 選択時のみ効くが、値は保存値のまま復元する（行の表示/非表示は UI 側で連動）
             ExcludeUnboundedBinaryColumns = settings.ExcludeUnboundedBinaryColumns;
             GenerateValueObjects = settings.GenerateValueObjects;
@@ -947,6 +956,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             GenerateRemoteServices = GenerateRemoteServices,
             GenerateApiDocs = GenerateApiDocs,
             IncludeJapaneseApiDocs = IncludeJapaneseApiDocs,
+            ApiDocsDirectory = ApiDocsDirectory.Trim(),
             ExcludeUnboundedBinaryColumns = ExcludeUnboundedBinaryColumns,
             GenerateValueObjects = GenerateValueObjects,
             UseGuidKeyForStringPrimaryKey = UseGuidKeyForStringPrimaryKey,

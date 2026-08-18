@@ -995,7 +995,7 @@ DB なしでユニットテストするためのインメモリ実装を追加�
 | インフラストラクチャ（`Infrastructure/`） | `Repositories.SqlServer.g.cs` / `.Sqlite` / `.EntityFrameworkCore` / `.InMemory` / `.Sync` / `.Http` と対応する固定 infra の `Runtime.{...}.g.cs` |
 | プレゼンテーション（`Presentation/`） | `EditModels.g.cs`・`Mappers.g.cs` |
 | サーバー（`Server/`） | `RemoteServer.g.cs`・`Runtime.AspNetCore.g.cs`（ASP.NET Core の `FrameworkReference` を要するため通常のクラスライブラリには置けません） |
-| 出力ディレクトリ直下 | API リファレンス（`*.g.md`）＝どの csproj にも属さないため |
+| 出力ディレクトリ直下 | API リファレンス（`*.g.md`）＝どの csproj にも属さないため。`--api-docs-dir` で `docs` などのサブフォルダへ移せます（層とは独立） |
 
 各層のフォルダは `--domain-layer-dir` / `--infrastructure-layer-dir` / `--presentation-layer-dir` / `--server-layer-dir`（設定キー `DomainLayerDirectory`・`InfrastructureLayerDirectory`・`PresentationLayerDirectory`・`ServerLayerDirectory`）で上書きできます。値は出力ディレクトリからの相対パスで、複数階層（`MyApp.Domain/Generated`）も指定できるため、出力ディレクトリをソリューションのソースフォルダへ向ければ層プロジェクトの中へ直接生成できます。絶対パス・ドライブ指定・`..` は生成時エラーとして拒否され、空の値は既定フォルダ名へフォールバックします。
 
@@ -1029,6 +1029,8 @@ DB なしでユニットテストするためのインメモリ実装を追加�
 - 生成ファイル構成表
 
 **英語が正本です。** 日本語版も併産したい場合は、GUI の下位チェック「日本語版を出力する」、または CLI の `--api-docs-ja` フラグ（設定キー `IncludeJapaneseApiDocs`）を有効化します（**既定 OFF**・`--generate-api-docs` が前提）。有効化すると、英語正本の `.g.md` に加えて `.ja.g.md` が併産されます（例: `EcOrder.g.cs` → `EcOrder.ja.g.md`）。
+
+Markdown は既定で出力ディレクトリ直下に出ます。`--api-docs-dir`（設定キー `ApiDocsDirectory`）で出力ディレクトリからの相対パスのサブフォルダへ移せます（例: `docs`・複数階層可・絶対パスと `..` は拒否）。全出力モードで有効で、層別出力ではドキュメントを層プロジェクトの外へ寄せる用途に使えます。
 
 `.g.md` / `.ja.g.md` は自動生成ファイルです。再生成で上書きされるため、直接編集しないでください。
 

@@ -470,4 +470,94 @@ public sealed class ApiReferenceDocTests
                 file.FileName.EndsWith(".g.md", StringComparison.OrdinalIgnoreCase)
             );
     }
+
+    [Fact(
+        DisplayName = "ApiDocsDirectory 指定で .g.md / .ja.g.md がサブフォルダ配置になる（.g.cs は不変）"
+    )]
+    public void ApiDocsDirectory_PlacesMarkdownIntoSubfolder()
+    {
+        var result = Generate(
+            BuildDiagram(),
+            new CodeGenerationOptions
+            {
+                GenerateApiDocs = true,
+                IncludeJapaneseApiDocs = true,
+                ApiDocsDirectory = "docs",
+            }
+        );
+
+        result.HasErrors.Should().BeFalse();
+
+        result
+            .Files.Where(file =>
+                file.FileName.EndsWith(".g.md", StringComparison.OrdinalIgnoreCase)
+            )
+            .Should()
+            .HaveCount(2)
+            .And.OnlyContain(file => file.RelativeDirectory == "docs");
+
+        // 生成コード（.g.cs）の配置は本オプションの影響を受けない（層別出力とは独立）
+        result
+            .Files.Where(file => file.FileName.EndsWith(".g.cs", StringComparison.Ordinal))
+            .Should()
+            .OnlyContain(file => file.RelativeDirectory == null);
+    }
+
+    [Fact(DisplayName = "ApiDocsDirectory 未指定（既定）は従来どおり出力ディレクトリ直下")]
+    public void ApiDocsDirectory_Default_KeepsRootPlacement()
+    {
+        var result = Generate(BuildDiagram(), new CodeGenerationOptions { GenerateApiDocs = true });
+
+        result.HasErrors.Should().BeFalse();
+        MarkdownFile(result)!.RelativeDirectory.Should().BeNull();
+    }
+
+    [Fact(DisplayName = "ApiDocsDirectory の不正パス（.. / 絶対パス）は生成時エラーになる")]
+    public void ApiDocsDirectory_Invalid_ReportsError()
+    {
+        var result = Generate(
+            BuildDiagram(),
+            new CodeGenerationOptions { GenerateApiDocs = true, ApiDocsDirectory = @"..\docs" }
+        );
+
+        result.HasErrors.Should().BeTrue();
+        result
+            .Diagnostics.Select(diagnostic => diagnostic.Message)
+            .Should()
+            .Contain(message => message.Contains("ApiDocsDirectory"));
+    }
+
+    [Fact(DisplayName = "GeneratedFileWriter は .g.md をサブフォルダへ書き出せる")]
+    public void Writer_WritesMarkdownIntoSubfolder()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "quicker_apidoc_" + Guid.NewGuid());
+
+        try
+        {
+            var result = new CodeGenerationResult
+            {
+                Files =
+                [
+                    new GeneratedFile
+                    {
+                        FileName = "ApiDocs.g.md",
+                        RelativeDirectory = "docs",
+                        Content = "# doc",
+                    },
+                ],
+            };
+
+            var written = new GeneratedFileWriter().WriteFiles(directory, result);
+
+            written.Should().ContainSingle();
+            File.ReadAllText(Path.Combine(directory, "docs", "ApiDocs.g.md")).Should().Be("# doc");
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
 }

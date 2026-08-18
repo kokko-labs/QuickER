@@ -147,6 +147,12 @@ public class CSharpGenerationSettings
     /// </summary>
     public bool IncludeJapaneseApiDocs { get; set; }
 
+    /// <summary>
+    /// API リファレンス Markdown の出力先サブフォルダ（出力ディレクトリからの相対パス）。空なら直下（既定）。
+    /// <see cref="GenerateApiDocs"/> が true のときのみ実効
+    /// </summary>
+    public string ApiDocsDirectory { get; set; } = string.Empty;
+
     // ===== 属性（UI 非表示。読込値を保持して生成へ反映する） =====
 
     /// <summary>データアノテーション属性（[Table] / [Key] / [Column] / [Required] / [MaxLength] 等）を付与するか（既定 true）</summary>
@@ -220,6 +226,8 @@ public class CSharpGenerationSettings
             GenerateRemoteServices = GenerateRemoteServices,
             GenerateApiDocs = GenerateApiDocs,
             IncludeJapaneseApiDocs = IncludeJapaneseApiDocs,
+            // 空＝直下は null へ畳む（生成側の既定＝出力ディレクトリ直下に任せる）
+            ApiDocsDirectory = NullIfEmpty(ApiDocsDirectory),
             ExcludeUnboundedBinaryColumns = ExcludeUnboundedBinaryColumns,
             GenerateValueObjects = GenerateValueObjects,
             UseGuidKeyForStringPrimaryKey = UseGuidKeyForStringPrimaryKey,

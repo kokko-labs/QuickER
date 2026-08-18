@@ -148,6 +148,12 @@
   <data name="CodeGen_IncludeJapaneseApiDocs" xml:space="preserve">
     <value>日本語版を出力する</value>
   </data>
+  <data name="CodeGen_ApiDocsDirectory" xml:space="preserve">
+    <value>出力先サブフォルダ</value>
+  </data>
+  <data name="CodeGen_ApiDocsDirectoryToolTip" xml:space="preserve">
+    <value>API リファレンス Markdown の出力先サブフォルダ（出力フォルダからの相対パス。例: docs）。空なら出力フォルダ直下。絶対パス・".." は使えません。</value>
+  </data>
   <data name="CodeGen_ApiDocsTooltip" xml:space="preserve">
     <value>スキーマに即した API リファレンス Markdown（英語）を 1 つ追加出力します。ファイル名は非分割時 {ベース名}.g.md・分割時 ApiDocs.g.md（再生成で上書き）</value>
   </data>

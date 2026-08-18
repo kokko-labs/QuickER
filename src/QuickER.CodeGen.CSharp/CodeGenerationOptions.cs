@@ -332,6 +332,17 @@ public sealed record CodeGenerationOptions
     public bool IncludeJapaneseApiDocs { get; init; }
 
     /// <summary>
+    /// API リファレンス Markdown（<c>.g.md</c> / <c>.ja.g.md</c>）の出力先サブフォルダ（出力ディレクトリからの相対パス。既定 null＝直下）。
+    /// </summary>
+    /// <remarks>
+    /// <see cref="GenerateApiDocs"/> が ON のときだけ意味を持つ。複数階層（<c>docs/api</c>）可で、
+    /// 絶対パス・ドライブ指定・<c>..</c> は生成時診断エラー（層フォルダと同じ規則＝<see cref="LayerDirectoryValidator"/> を共有）。
+    /// 層別出力（<see cref="LayeredOutput"/>）に依らず全出力モードで有効（既定の直下配置は従来どおり）。
+    /// ドキュメントはどの csproj にも属さないため、層フォルダへの自動振り分け対象にはしない＝置き場は本オプションだけが決める。
+    /// </remarks>
+    public string? ApiDocsDirectory { get; init; }
+
+    /// <summary>
     /// 無制限バイナリ列（<c>varbinary(max)</c> / <c>image</c> / 長さ宣言なし BLOB / <c>bytea</c> 等）を、生成 Entity のプロパティに
     /// マーカー属性 <c>[UnboundedBinaryColumn]</c> で印付けし、QuickER 版 Repository の SELECT / UPDATE 対象から除外するかどうか（既定 false）。
     /// </summary>

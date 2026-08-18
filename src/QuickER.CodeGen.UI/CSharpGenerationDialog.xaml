@@ -459,6 +459,25 @@
                   IsChecked="{Binding IncludeJapaneseApiDocs}"
                   IsEnabled="{Binding GenerateApiDocs}"
                 />
+                <!-- API リファレンスの出力先サブフォルダ（空＝出力フォルダ直下。GenerateApiDocs 連動） -->
+                <Grid Margin="18,8,0,0" IsEnabled="{Binding GenerateApiDocs}">
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="130" />
+                    <ColumnDefinition Width="*" />
+                  </Grid.ColumnDefinitions>
+                  <TextBlock
+                    Grid.Column="0"
+                    VerticalAlignment="Center"
+                    Style="{StaticResource FieldLabel}"
+                    Text="{x:Static res:Strings.CodeGen_ApiDocsDirectory}"
+                  />
+                  <TextBox
+                    Grid.Column="1"
+                    Style="{StaticResource FormInput}"
+                    Text="{Binding ApiDocsDirectory, UpdateSourceTrigger=PropertyChanged}"
+                    ToolTip="{x:Static res:Strings.CodeGen_ApiDocsDirectoryToolTip}"
+                  />
+                </Grid>
               </StackPanel>
             </Grid>
           </StackPanel>

@@ -292,10 +292,16 @@ public sealed class CSharpCodeGenerationService
         // ここは検証エラーで早期 return した後の経路のため、Files が空になる場合は Markdown も出ない（自然に乗る）。
         if (options.GenerateApiDocs)
         {
+            // 出力先サブフォルダ（ApiDocsDirectory）。空白は既定＝出力ディレクトリ直下（null）
+            var apiDocsDirectory = string.IsNullOrWhiteSpace(options.ApiDocsDirectory)
+                ? null
+                : options.ApiDocsDirectory.Trim();
+
             files.Add(
                 new GeneratedFile
                 {
                     FileName = ApiDocsFileName(options),
+                    RelativeDirectory = apiDocsDirectory,
                     Content = _apiDocRenderer.Render(model, options, ApiDocLanguage.English),
                 }
             );
@@ -307,6 +313,7 @@ public sealed class CSharpCodeGenerationService
                     new GeneratedFile
                     {
                         FileName = JapaneseApiDocsFileName(options),
+                        RelativeDirectory = apiDocsDirectory,
                         Content = _apiDocRenderer.Render(model, options, ApiDocLanguage.Japanese),
                     }
                 );
@@ -632,6 +639,7 @@ public sealed class CSharpCodeGenerationService
 
         ValidateNamespaces(options, diagnostics);
         ValidateLayerDirectories(options, diagnostics);
+        ValidateApiDocsDirectory(options, diagnostics);
 
         if (diagram.Entities.Count == 0)
         {
@@ -1134,6 +1142,37 @@ public sealed class CSharpCodeGenerationService
                     )
                 );
             }
+        }
+    }
+
+    /// <summary>
+    /// API リファレンスの出力先サブフォルダ（<see cref="CodeGenerationOptions.ApiDocsDirectory"/>）を検証する
+    /// </summary>
+    /// <remarks>
+    /// 判定は層フォルダ・書き出し防御と同じ <see cref="LayerDirectoryValidator"/>（単一正本）。
+    /// 層別出力に依らず、API リファレンスを出力する構成でのみ検証する（空白は既定＝直下のため対象外）。
+    /// ドキュメントは C# コードでないため名前空間導出の検証はない（パスの妥当性だけ）。
+    /// </remarks>
+    private static void ValidateApiDocsDirectory(
+        CodeGenerationOptions options,
+        ICollection<GenerationDiagnostic> diagnostics
+    )
+    {
+        if (
+            options.GenerateApiDocs
+            && !string.IsNullOrWhiteSpace(options.ApiDocsDirectory)
+            && !LayerDirectoryValidator.IsValid(options.ApiDocsDirectory)
+        )
+        {
+            diagnostics.Add(
+                GenerationDiagnostic.Error(
+                    string.Format(
+                        Strings.CodeGen_Error_InvalidLayerDirectory,
+                        nameof(CodeGenerationOptions.ApiDocsDirectory),
+                        options.ApiDocsDirectory.Trim()
+                    )
+                )
+            );
         }
     }
 

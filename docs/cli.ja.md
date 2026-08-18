@@ -119,6 +119,7 @@ quicker mcp
 | `UseRuntimePackages`（`false`） | ランタイム固定コードを出力せず NuGet パッケージ参照で賄う（[生成コードの使い方](code-generation.ja.md) 参照） |
 | `GenerateApiDocs`（`false`） | API リファレンス Markdown（`{ベース名}.g.md`・英語正本）を追加出力する（CLI の `--generate-api-docs` に対応。[生成コードの使い方](code-generation.ja.md) 参照） |
 | `IncludeJapaneseApiDocs`（`false`） | 日本語版 API リファレンス Markdown（`{ベース名}.ja.g.md`）も併産する（`GenerateApiDocs` が前提。CLI の `--api-docs-ja` に対応） |
+| `ApiDocsDirectory`（未指定＝出力ディレクトリ直下） | API リファレンス Markdown の出力先サブフォルダ（出力ディレクトリからの相対パス。例: `docs`・複数階層可・絶対パスと `..` は拒否）。`GenerateApiDocs` が前提で `LayeredOutput` とは独立（CLI の `--api-docs-dir` に対応） |
 | `IncludeDataAnnotations`（`true`） | `[Required]` / `[MaxLength]` 等の DataAnnotations と、DB 定義メタ属性（`[DbTableMeta]` / `[DbColumnMeta]`）を付与する |
 | `IncludeJsonIgnoreOnParentNavigation`（`true`） | 親参照ナビゲーションへ `[JsonIgnore]` を付与する（JSON シリアライズ時の循環参照対策） |
 | `OutputFileName`（`QuickEREntities.g.cs`）— 別名 `OutputPath` も受け付ける | 単一ファイル出力のファイル名（`.g.cs` が無ければ補われる。`SplitFilesByCategory` が真のときは無視）。正準キーは `OutputFileName` で、`get_generation_config_schema` が返すのもこの名前。`OutputPath` はその別名で、ファイル名部分のみが使われる（出力先ディレクトリは常に `--out`）。GUI では `OutputPath` に出力先のフルパス（非分割時はファイル・分割時はフォルダ）が入ることがあるが、CLI は同じ規則で解釈する。**ここだけは「CLI フラグ ＞ 設定ファイル」の例外**で、`--output-path` が効くのは設定ファイルに `OutputFileName` が無い場合のみ。設定ファイルに `OutputFileName` があるときはそちらが優先される |

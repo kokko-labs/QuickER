@@ -1952,4 +1952,41 @@ public class CSharpGenerationDialogViewModelTests
             }
         }
     }
+
+    /// <summary>API リファレンスの出力先サブフォルダが生成オプションへ渡り、保存・復元されることを検証する</summary>
+    [Fact(DisplayName = "ApiDocsDirectory が生成オプションへ渡り保存・復元される")]
+    public void ApiDocsDirectory_MapsToOptions_AndPersists()
+    {
+        var vm = CreateViewModel(out var folder);
+
+        try
+        {
+            vm.RootNamespace = "Acme.App";
+            vm.OutputPath = @"C:\temp\Entities.g.cs";
+            vm.GenerateApiDocs = true;
+            vm.ApiDocsDirectory = " docs ";
+            vm.CloseAction = _ => { };
+
+            // 前後空白は除去して明示指定として渡る
+            vm.ToOptions().ApiDocsDirectory.Should().Be("docs");
+
+            vm.OkCommand.Execute(null);
+            var restored = new CSharpGenerationDialogViewModel(
+                new CSharpGenerationSettingsStore(folder)
+            );
+            restored.GenerateApiDocs.Should().BeTrue();
+            restored.ApiDocsDirectory.Should().Be("docs");
+
+            // 空欄は null（既定＝出力フォルダ直下）として生成へ渡る
+            vm.ApiDocsDirectory = string.Empty;
+            vm.ToOptions().ApiDocsDirectory.Should().BeNull();
+        }
+        finally
+        {
+            if (Directory.Exists(folder))
+            {
+                Directory.Delete(folder, recursive: true);
+            }
+        }
+    }
 }

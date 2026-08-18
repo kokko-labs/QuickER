@@ -1591,4 +1591,44 @@ public class CliAppTests
             }
         }
     }
+
+    /// <summary>
+    /// --api-docs-dir で API リファレンス Markdown がサブフォルダへ出力され、生成コードの配置は
+    /// 影響を受けないことを検証する（CLI の end-to-end）
+    /// </summary>
+    [Fact(DisplayName = "--api-docs-dir で API リファレンスがサブフォルダへ出力される")]
+    public async Task Generate_ApiDocsDirFlag_PlacesMarkdownUnderSubfolder()
+    {
+        var (schemaPath, outDir, root) = CreateSampleSchema();
+
+        try
+        {
+            var exit = await CliApp.InvokeAsync([
+                "generate",
+                "--schema",
+                schemaPath,
+                "--out",
+                outDir,
+                "--root-namespace",
+                "Test.ApiDocsDir",
+                "--split-files-by-category",
+                "--generate-api-docs",
+                "--api-docs-dir",
+                "docs",
+            ]);
+
+            exit.Should().Be(0);
+            File.Exists(Path.Combine(outDir, "docs", "ApiDocs.g.md")).Should().BeTrue();
+            File.Exists(Path.Combine(outDir, "ApiDocs.g.md")).Should().BeFalse();
+            // 生成コード（.g.cs）は従来どおり出力ディレクトリ直下のまま
+            File.Exists(Path.Combine(outDir, "Entities.g.cs")).Should().BeTrue();
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
 }

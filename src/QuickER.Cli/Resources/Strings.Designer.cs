@@ -282,6 +282,12 @@ namespace QuickER.Cli.Resources {
             }
         }
 
+        public static string Cli_Opt_ApiDocsDirectory {
+            get {
+                return ResourceManager.GetString("Cli_Opt_ApiDocsDirectory", resourceCulture);
+            }
+        }
+
         public static string Cli_Opt_IncludeDataAnnotations {
             get {
                 return ResourceManager.GetString("Cli_Opt_IncludeDataAnnotations", resourceCulture);

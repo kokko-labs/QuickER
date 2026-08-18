@@ -148,6 +148,12 @@
   <data name="CodeGen_IncludeJapaneseApiDocs" xml:space="preserve">
     <value>Also output a Japanese version</value>
   </data>
+  <data name="CodeGen_ApiDocsDirectory" xml:space="preserve">
+    <value>Output subfolder</value>
+  </data>
+  <data name="CodeGen_ApiDocsDirectoryToolTip" xml:space="preserve">
+    <value>Subfolder for the API reference Markdown, relative to the output folder (e.g. docs). Blank = the output folder itself. Absolute paths and ".." are rejected.</value>
+  </data>
   <data name="CodeGen_ApiDocsTooltip" xml:space="preserve">
     <value>Additionally outputs one API reference Markdown (in English) for the diagram's schema. The file is named {baseName}.g.md, or ApiDocs.g.md in split mode (overwritten on regeneration)</value>
   </data>

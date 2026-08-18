@@ -238,6 +238,13 @@ public static class GenerationConfigSchema
             "Runtime & documentation",
             "Also produce the Japanese API reference Markdown ({base name}.ja.g.md); has no effect unless GenerateApiDocs is true."
         ),
+        new(
+            "ApiDocsDirectory",
+            "string",
+            null,
+            "Runtime & documentation",
+            "Output subfolder for the API reference Markdown, relative to out_dir (e.g. \"docs\"; several segments are allowed). Blank means out_dir itself. Absolute paths and \"..\" are rejected. Has no effect unless GenerateApiDocs is true; independent of LayeredOutput."
+        ),
         // 属性
         new(
             "IncludeDataAnnotations",
