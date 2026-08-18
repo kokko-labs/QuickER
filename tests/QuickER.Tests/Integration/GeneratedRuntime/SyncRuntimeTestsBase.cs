@@ -659,6 +659,36 @@ public abstract class SyncRuntimeTestsBase : IAsyncLifetime
         (await Journal.CountPendingAsync(Ct)).Should().Be(0);
     }
 
+    /// <summary>ServerWins はサーバーに無いローカル新規行を「上書き」でなく削除で解決する</summary>
+    /// <remarks>
+    /// ServerWins はジャーナルを丸ごと捨てるため保留キー集合が空になり、サーバーに一度も上がっていない行は
+    /// 削除伝搬の対象になる＝「サーバーの状態が勝つ」の削除側。XmlDoc の主張（上書き・削除の両面）を固定する。
+    /// </remarks>
+    [Fact(DisplayName = "[Sync] ServerWins はサーバーに無いローカル新規行を削除で解決する")]
+    public async Task ServerWins_RemovesLocalInsertServerNeverReceived()
+    {
+        await SeedServerAsync(1, "alice", 11, "widget");
+        await Engine.SyncAsync(cancellationToken: Ct);
+
+        await LocalOrders.InsertAsync(
+            new SyncOrderEntity { OrderId = 6, CustomerName = "erin" },
+            Ct
+        );
+
+        var result = await Engine.SyncAsync(
+            new SyncOptions { ConflictPolicy = SyncConflictPolicy.ServerWins },
+            Ct
+        );
+
+        result.Conflicts.Should().BeEmpty();
+        result.Discarded.Should().BeGreaterThan(0, "未送信の挿入意図はジャーナルごと破棄される");
+        result.DeletedLocally.Should().Be(1, "サーバーに無い行は上書きでなく削除伝搬で消える");
+        (await LocalOrdersRaw.GetByIdAsync(6, Ct))
+            .Should()
+            .BeNull("ServerWins はサーバーの状態＝行なしへ揃える");
+        (await Journal.CountPendingAsync(Ct)).Should().Be(0);
+    }
+
     /// <summary>LocalWins は版比較を免除して再送し、サーバー行を上書きする</summary>
     [Fact(DisplayName = "[Sync] LocalWins は版比較を免除してサーバー行を上書きする")]
     public async Task LocalWins_OverwritesServerRow()

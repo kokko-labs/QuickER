@@ -45,7 +45,7 @@ public enum SyncConflictPolicy
     /// <summary>Leaves the entry in the journal and reports it (the default: nothing is resolved silently).</summary>
     Collect,
 
-    /// <summary>Discards the local change, letting the download overwrite the local row with the server's.</summary>
+    /// <summary>Discards the local change and lets the download make the row match the server's state: overwritten with the server's row when the server has the key, removed by delete propagation when it does not (a local insert the server never received).</summary>
     ServerWins,
 
     /// <summary>Resends the local change with <see cref="ConcurrencyMode.ForceOverwrite"/>, overwriting the server row.</summary>
@@ -1433,7 +1433,8 @@ public abstract class SyncTable<TEntity, TKey> : ISyncTable
 /// A run uploads first and downloads second. Uploading first means a local change reaches the server before the server's
 /// rows come back down, so a change accepted by the server is not immediately overwritten by its own pre-upload state;
 /// it is also what makes <see cref="SyncConflictPolicy.ServerWins"/> a matter of simply dropping the journal entry and
-/// letting the download bring the server's row in.
+/// letting the download reconcile the row with the server's state - bringing the server's row in, or removing a row the
+/// server never received.
 /// </para>
 /// <para>
 /// Tables are visited in foreign-key order - parents before children when rows are written, children before parents when
