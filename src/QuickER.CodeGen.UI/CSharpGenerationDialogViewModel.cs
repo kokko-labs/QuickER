@@ -841,12 +841,58 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     /// <c>{層フォルダ由来ルート}.{接尾辞}</c>）を返す（プリフィル）
     /// </summary>
     /// <remarks>
-    /// 呼び出し前に層別出力・層フォルダ・ルート名前空間を適用しておくこと（既定の算出がそれらを読む）
+    /// 呼び出し前に層別出力・層フォルダ・ルート名前空間を適用しておくこと（既定の算出がそれらを読む）。
+    /// 保存値が「どちらかのモードの既定形」と一致する場合も未編集として扱い、現在のモードの既定へ
+    /// 置き換える（過去のビルドは既定を実体化したまま保存しており、それを明示値扱いすると層フォルダの
+    /// 変更に追従しない欄が残るため。既定形と偶然一致する明示値は選び直せば済む＝実害より回復を優先）
     /// </remarks>
-    private string Prefill(string value, GenerationBucket bucket) =>
-        string.IsNullOrWhiteSpace(value)
-            ? GeneratedFilePlanner.ResolveNamespace(NamespaceDefaultContext(), bucket)
-            : value;
+    private string Prefill(string value, GenerationBucket bucket)
+    {
+        var current = GeneratedFilePlanner.ResolveNamespace(NamespaceDefaultContext(), bucket);
+
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return current;
+        }
+
+        var trimmed = value.Trim();
+        var layeredDefault = GeneratedFilePlanner.ResolveNamespace(
+            NamespaceDefaultContext(layeredOutput: true),
+            bucket
+        );
+        var plainDefault = GeneratedFilePlanner.ResolveNamespace(
+            NamespaceDefaultContext(layeredOutput: false),
+            bucket
+        );
+
+        return trimmed == layeredDefault || trimmed == plainDefault ? current : trimmed;
+    }
+
+    /// <summary>永続化する子名前空間の値を決める（現在の既定と一致する欄は空＝既定は保存しない）</summary>
+    /// <remarks>
+    /// プリフィルは欄へ実体化されるため、そのまま保存すると次回以降「手編集した明示値」と区別できず、
+    /// 層フォルダ・モード・ルート名前空間の変更に追従しない欄になる。既定は空として保存し、読込時に
+    /// 改めて導出する。生成オプションへも空（＝導出）として渡るが、導出結果は欄の表示と同じ値になる
+    /// </remarks>
+    private string NamespaceForPersistence(string value, GenerationBucket bucket)
+    {
+        var trimmed = value.Trim();
+
+        return trimmed == GeneratedFilePlanner.ResolveNamespace(NamespaceDefaultContext(), bucket)
+            ? string.Empty
+            : trimmed;
+    }
+
+    /// <summary>永続化する層フォルダの値を決める（既定フォルダ名と一致する欄は空＝既定は保存しない）</summary>
+    /// <remarks>子名前空間（<see cref="NamespaceForPersistence"/>）と同じ理由の同型規則</remarks>
+    private static string LayerDirectoryForPersistence(string value, GeneratedLayer layer)
+    {
+        var trimmed = value.Trim();
+
+        return trimmed == GeneratedFilePlanner.DefaultLayerDirectory(layer)
+            ? string.Empty
+            : trimmed;
+    }
 
     /// <summary>現在の設定値から設定オブジェクトを組み立てる（永続化用）</summary>
     private CSharpGenerationSettings ToSettings() =>
@@ -854,17 +900,40 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
         {
             SplitFilesByCategory = SplitFilesByCategory,
             LayeredOutput = LayeredOutput,
-            DomainLayerDirectory = DomainLayerDirectory.Trim(),
-            InfrastructureLayerDirectory = InfrastructureLayerDirectory.Trim(),
-            PresentationLayerDirectory = PresentationLayerDirectory.Trim(),
-            ServerLayerDirectory = ServerLayerDirectory.Trim(),
+            // 層フォルダ・子名前空間とも「既定と一致する欄」は空で保存する（プリフィルの実体化値を
+            // 明示値として持ち越さない＝次回以降もフォルダ・モード変更への追従が効き続ける）
+            DomainLayerDirectory = LayerDirectoryForPersistence(
+                DomainLayerDirectory,
+                GeneratedLayer.Domain
+            ),
+            InfrastructureLayerDirectory = LayerDirectoryForPersistence(
+                InfrastructureLayerDirectory,
+                GeneratedLayer.Infrastructure
+            ),
+            PresentationLayerDirectory = LayerDirectoryForPersistence(
+                PresentationLayerDirectory,
+                GeneratedLayer.Presentation
+            ),
+            ServerLayerDirectory = LayerDirectoryForPersistence(
+                ServerLayerDirectory,
+                GeneratedLayer.Server
+            ),
             RootNamespace = RootNamespace.Trim(),
-            RuntimeNamespace = RuntimeNamespace.Trim(),
-            EntityNamespace = EntityNamespace.Trim(),
-            EditModelNamespace = EditModelNamespace.Trim(),
-            MapperNamespace = MapperNamespace.Trim(),
-            RepositoryNamespace = RepositoryNamespace.Trim(),
-            ValueObjectNamespace = ValueObjectNamespace.Trim(),
+            RuntimeNamespace = NamespaceForPersistence(RuntimeNamespace, GenerationBucket.Runtime),
+            EntityNamespace = NamespaceForPersistence(EntityNamespace, GenerationBucket.Entity),
+            EditModelNamespace = NamespaceForPersistence(
+                EditModelNamespace,
+                GenerationBucket.EditModel
+            ),
+            MapperNamespace = NamespaceForPersistence(MapperNamespace, GenerationBucket.Mapper),
+            RepositoryNamespace = NamespaceForPersistence(
+                RepositoryNamespace,
+                GenerationBucket.Repository
+            ),
+            ValueObjectNamespace = NamespaceForPersistence(
+                ValueObjectNamespace,
+                GenerationBucket.ValueObject
+            ),
             GenerateEditModels = GenerateEditModels,
             GenerateMappers = GenerateMappers,
             GenerateRepositories = GenerateRepositories,

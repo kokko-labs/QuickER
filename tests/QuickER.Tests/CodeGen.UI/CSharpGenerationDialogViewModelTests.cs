@@ -1036,10 +1036,11 @@ public class CSharpGenerationDialogViewModelTests
     }
 
     /// <summary>
-    /// 層別出力時も名前空間欄の値はそのまま生成オプションへ（明示指定として）渡り、
-    /// プレビューが層フォルダ・層由来名前空間の両方を反映することを検証する
+    /// 層別出力時、手編集した名前空間欄だけが明示指定として生成オプションへ渡り、既定のままの欄は
+    /// 導出（null）に任せても同じ名前空間へ解決されること、プレビューが層フォルダ・層由来名前空間の
+    /// 両方を反映することを検証する
     /// </summary>
-    [Fact(DisplayName = "層別出力時も名前空間欄の値がそのまま生成オプションへ渡る")]
+    [Fact(DisplayName = "層別出力時は手編集欄のみ明示指定で渡り既定欄は導出に任せる")]
     public void LayeredOutput_NamespaceFields_ArePassedThroughToOptions()
     {
         var vm = CreateViewModel(out _);
@@ -1053,8 +1054,18 @@ public class CSharpGenerationDialogViewModelTests
         var options = vm.ToOptions();
 
         options.EntityNamespace.Should().Be("Custom.Entities");
-        options.MapperNamespace.Should().Be("Presentation.Mappers");
-        options.RuntimeNamespace.Should().Be("MyApp.Domain.Runtime");
+        // 既定のままの欄は明示値として渡さず導出（null）に任せる（既定を明示値化すると
+        // 設定へ持ち越されたとき層フォルダ変更への追従が止まるため）。導出結果は欄の表示と一致する
+        options.MapperNamespace.Should().BeNull();
+        options.RuntimeNamespace.Should().BeNull();
+        GeneratedFilePlanner
+            .ResolveNamespace(options, GenerationBucket.Mapper)
+            .Should()
+            .Be("Presentation.Mappers");
+        GeneratedFilePlanner
+            .ResolveNamespace(options, GenerationBucket.Runtime)
+            .Should()
+            .Be("MyApp.Domain.Runtime");
 
         // プレビューは層フォルダ配置と名前空間の両方に追従する（Plan 経由のため自動）
         vm.PreviewFiles.Should()
@@ -1838,6 +1849,100 @@ public class CSharpGenerationDialogViewModelTests
             reloaded.Should().NotBeNull();
             reloaded!.IncludeDataAnnotations.Should().BeFalse();
             reloaded.IncludeJsonIgnoreOnParentNavigation.Should().BeFalse();
+        }
+        finally
+        {
+            if (Directory.Exists(folder))
+            {
+                Directory.Delete(folder, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// 旧ビルドが実体化して保存した既定名前空間（{root}.{接尾辞} 形）は読込時に未編集として回復され、
+    /// 層フォルダの変更へ追従することを検証する（保存済みの既定値が手編集扱いになり追従が止まっていた不具合の再現）
+    /// </summary>
+    [Fact(DisplayName = "保存済みの実体化既定は読込時に回復され層フォルダ変更へ追従する")]
+    public void LegacyMaterializedNamespaces_AreHealed_AndFollowLayerFolders()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+
+        try
+        {
+            // 旧ビルド相当の保存値: 層別 ON なのに名前空間は {root}.{接尾辞} 形の実体化値・Mapper だけ真の手編集値
+            new CSharpGenerationSettingsStore(folder).Save(
+                new CSharpGenerationSettings
+                {
+                    SplitFilesByCategory = true,
+                    LayeredOutput = true,
+                    RootNamespace = "Acme.App",
+                    RuntimeNamespace = "Acme.App.Runtime",
+                    EntityNamespace = "Acme.App.Entities",
+                    EditModelNamespace = "Acme.App.EditModels",
+                    MapperNamespace = "Custom.Mappers",
+                    RepositoryNamespace = "Acme.App.Repositories",
+                    ValueObjectNamespace = "Acme.App.ValueObjects",
+                }
+            );
+
+            var vm = new CSharpGenerationDialogViewModel(new CSharpGenerationSettingsStore(folder));
+
+            // 実体化された旧既定は現在のモードの既定（層フォルダ由来）へ回復し、手編集値だけが残る
+            vm.EntityNamespace.Should().Be("Domain.Entities");
+            vm.RuntimeNamespace.Should().Be("Domain.Runtime");
+            vm.RepositoryNamespace.Should().Be("Domain.Repositories");
+            vm.EditModelNamespace.Should().Be("Presentation.EditModels");
+            vm.MapperNamespace.Should().Be("Custom.Mappers");
+
+            // 回復後は層フォルダの変更に追従する（報告された症状の end-to-end）
+            vm.DomainLayerDirectory = "MyApp.Domain";
+
+            vm.EntityNamespace.Should().Be("MyApp.Domain.Entities");
+            vm.RuntimeNamespace.Should().Be("MyApp.Domain.Runtime");
+            vm.MapperNamespace.Should().Be("Custom.Mappers", "手編集値は追従で上書きしない");
+        }
+        finally
+        {
+            if (Directory.Exists(folder))
+            {
+                Directory.Delete(folder, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// 既定と一致する名前空間欄・層フォルダ欄は空で永続化され（既定を明示値として持ち越さない）、
+    /// 生成オプションへも導出（null）として渡ることを検証する
+    /// </summary>
+    [Fact(DisplayName = "既定のままの名前空間・層フォルダは空で保存され導出として生成へ渡る")]
+    public void DefaultNamespacesAndLayerFolders_PersistAsBlank()
+    {
+        var vm = CreateViewModel(out var folder);
+
+        try
+        {
+            vm.RootNamespace = "Acme.App";
+            vm.LayeredOutput = true;
+            vm.OutputPath = @"C:\temp";
+            vm.MapperNamespace = "Custom.Mappers";
+            vm.CloseAction = _ => { };
+
+            vm.OkCommand.Execute(null);
+
+            // 生成オプション: 既定のままの欄は導出（null）・手編集値は明示指定
+            vm.Result.Should().NotBeNull();
+            vm.Result!.Options.LayeredOutput.Should().BeTrue();
+            vm.Result.Options.EntityNamespace.Should().BeNull("既定のままの欄は導出に任せる");
+            vm.Result.Options.MapperNamespace.Should().Be("Custom.Mappers");
+
+            // 永続化: 既定のままの欄・既定フォルダは空で保存される
+            var saved = new CSharpGenerationSettingsStore(folder).Load();
+            saved.LayeredOutput.Should().BeTrue();
+            saved.EntityNamespace.Should().BeEmpty();
+            saved.RuntimeNamespace.Should().BeEmpty();
+            saved.DomainLayerDirectory.Should().BeEmpty();
+            saved.MapperNamespace.Should().Be("Custom.Mappers");
         }
         finally
         {
