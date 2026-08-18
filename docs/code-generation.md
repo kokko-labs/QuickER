@@ -700,7 +700,7 @@ A run uploads first and downloads second, and visits tables in foreign-key order
 | Option | Default | Meaning |
 |---|---|---|
 | `DownloadBatchSize` | 500 | How many rows one download batch fetches and applies in a single local transaction |
-| `PropagateDeletes` | `true` | Whether to delete local rows whose key no longer exists on the server. The check compares the full key set, which costs one key-only pass over each server table; turn it off and run it on a slower schedule when the tables are large |
+| `PropagateDeletes` | `true` | Whether to delete local rows whose key no longer exists on the server. The check compares the full key set, which costs one key-only pass over each server table; turn it off and run it on a slower schedule when the tables are large. A key the journal still holds an unsent entry for is spared - see below |
 | `ConflictPolicy` | `Collect` | How a local change that collides with the server is treated (see [Conflicts](#conflicts)) |
 | `IncludeUnboundedBinary` | `false` | Whether to carry the unbounded binary columns the row transfer leaves out (see [Unbounded binary columns](#unbounded-binary-columns)). Nothing changes for a build without such columns |
 
@@ -713,6 +713,8 @@ A run uploads first and downloads second, and visits tables in foreign-key order
 | `DeletedLocally` | Local rows removed because the server no longer has that key |
 | `Discarded` | Changes settled without being sent - a stale intent whose row is no longer there, or everything the journal held under `ServerWins` |
 | `Conflicts` / `HasConflicts` | The local changes that could not be replayed; they stay in the journal |
+
+**Delete propagation spares the rows the journal still speaks for.** Before it removes anything it reads the journal, and a key with an unsent entry is left alone - including one this same run has just reported as a conflict, which is what keeps `Collect` from resolving a "the server no longer has this row" conflict in the server's favour by deleting the row. Once the entry is settled - uploaded, discarded as a stale intent, or dropped by `ServerWins` - a later run propagates the deletion as usual. The protection reaches exactly as far as the journal does: a row written into a synchronised table by some other route has no entry, and while propagation is on it is deleted (see [Known limitations](#known-limitations)).
 
 Replaying one change has **three** outcomes, not two, and `Uploaded` / `Discarded` / `Conflicts` are exactly those three: sent, nothing to send, refused. Folding the middle one into either of the others would report a change as delivered when nothing crossed the wire. `Uploaded` and `Discarded` count rows rather than journal entries - a row edited several times offline collapses into its latest intent - except under `ServerWins`, where nothing is sent at all and `Discarded` is the number of entries dropped.
 
@@ -742,7 +744,7 @@ The generated `Journaling{Entity}Repository` wraps the local repository and reco
 
 The record is written **before** the business write. The generated repositories manage their own connection, so a decorator cannot enlist its INSERT in the transaction of the write it wraps; something has to go first, and recording the intent first is the safe order. If the business write then fails, the journal holds an entry for a row that was never written - and the upload discards it, because it re-reads the current local row and finds nothing. The opposite order would lose changes outright.
 
-**Raw SQL is not recorded.** `ExecuteSqlAsync` forwards untouched: the statement's shape is opaque to the decorator, so there is no key to journal. Rows changed that way reach the server only if something else records them.
+**Raw SQL is not recorded.** `ExecuteSqlAsync` forwards untouched: the statement's shape is opaque to the decorator, so there is no key to journal. Rows changed that way reach the server only if something else records them - and a row *created* that way fares worse than that: with no journal entry to spare it and no key on the server, delete propagation removes it on the next run. A row the local database is meant to keep to itself belongs in a table that is not synchronised (one without a version column).
 
 **Save hooks are unaffected.** The decorator delegates to the repository it wraps, so `ISaveHook<T>` fires exactly as it did before - including for the rows the engine itself applies during a download, since a sync run suppresses journaling and nothing else. A refresh (below) writes through `BulkInsertAsync`, which is outside the save pipeline and fires no hooks, in keeping with the ordinary contract. One consequence is worth knowing: a write a `BeforeSaveAsync` returned `false` for still leaves a journal entry, because the entry is written first. For an insert that entry is discarded (there is no row to read), and for an update the row is uploaded as it stands - unchanged content, which the server accepts and stamps with a new version.
 
@@ -762,7 +764,7 @@ Setting `SyncOptions.IncludeUnboundedBinary` copies each such column separately 
 var result = await engine.SyncAsync(new SyncOptions { IncludeUnboundedBinary = true }, ct);
 ```
 
-The copy streams through a temporary file, so neither side holds the blob in memory: the read pushes bytes into a stream and the write pulls them out of one, and the file is what joins the two while also supplying the length the write needs up front. Over HTTP it reuses the existing `GET`/`PUT`/`DELETE {prefix}/{entity}/{column}?id=` endpoints - the ones the [streaming accessors](#excluding-unbounded-binary-columns-excludeunboundedbinarycolumns) already use - so nothing new is mapped.
+The copy streams through a temporary file, so neither side holds the blob in memory: the read pushes bytes into a stream and the write pulls them out of one, and the file is what joins the two while also supplying the length the write needs up front. That file is created in the operating system's temporary folder (`Path.GetTempPath()`) and deleted once the column has been written, which is worth knowing when the blobs are sensitive: this is the one place where they land on disk unencrypted without the caller choosing where, unlike the file convenience methods of the [streaming accessors](#excluding-unbounded-binary-columns-excludeunboundedbinarycolumns). Over HTTP it reuses the existing `GET`/`PUT`/`DELETE {prefix}/{entity}/{column}?id=` endpoints - the ones the [streaming accessors](#excluding-unbounded-binary-columns-excludeunboundedbinarycolumns) already use - so nothing new is mapped.
 
 Two details follow from copying columns separately:
 
@@ -775,7 +777,7 @@ The cost is one round trip per column per changed row, which is why it is off by
 
 ### Conflicts
 
-Nothing is resolved silently. Under the default policy a local change that collides with the server stays in the journal and comes back in `SyncResult.Conflicts` with the table, the key, the operation, the reason, and both sides' rows attached.
+Nothing is resolved silently. Under the default policy a local change that collides with the server stays in the journal and comes back in `SyncResult.Conflicts` with the table, the key, the operation, the reason, and both sides' rows attached - and the local row stays where it is, including when the reason is `MissingOnServer`, because delete propagation spares every key the journal still holds an entry for.
 
 | `SyncConflictPolicy` | What happens |
 |---|---|
@@ -815,7 +817,7 @@ The run is **not one transaction**. The generated repositories manage their own 
 
 ### Known limitations
 
-- **Writes that do not go through the repository are not tracked.** That includes raw SQL (`ExecuteSqlAsync`), as described above, and anything that reaches the local database by another route. The journal only sees the write entry points the decorator wraps.
+- **Writes that do not go through the repository are not tracked.** That includes raw SQL (`ExecuteSqlAsync`), as described above, and anything that reaches the local database by another route. The journal only sees the write entry points the decorator wraps - and what it does not see it cannot protect: a row created that way is not merely left unsent, it is **deleted on the next run** while `PropagateDeletes` is on, because the server has no such key. Keep local-only rows in a table that is not synchronised.
 - **Unbounded binary columns are not carried unless you ask for them** (`SyncOptions.IncludeUnboundedBinary`), and carrying them costs one round trip per column per changed row. See [Unbounded binary columns](#unbounded-binary-columns).
 - **Cannot be combined with the EF Core Repository**, since the sync support requires a multi-target build and that combination is already exclusive.
 - **The HTTP transport requires `--generate-remote-services`.** Without it the direct sources are generated and the engine still works, but there is no client or endpoint to reach the server with.

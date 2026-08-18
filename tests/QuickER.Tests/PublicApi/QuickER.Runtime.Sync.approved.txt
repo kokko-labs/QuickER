@@ -27,7 +27,7 @@ public interface QuickER.Runtime.Sync.ISyncTable
     public virtual System.Threading.Tasks.Task<byte[]> GetChangeCeilingAsync(System.Threading.CancellationToken cancellationToken = default)
     public virtual System.Threading.Tasks.Task<int> DeleteAllLocalAsync(System.Threading.CancellationToken cancellationToken = default)
     public virtual System.Threading.Tasks.Task<int> DownloadAsync(byte[] ceiling, int batchSize, bool includeUnboundedBinary, System.Threading.CancellationToken cancellationToken = default)
-    public virtual System.Threading.Tasks.Task<int> PropagateDeletesAsync(System.Threading.CancellationToken cancellationToken = default)
+    public virtual System.Threading.Tasks.Task<int> PropagateDeletesAsync(System.Collections.Generic.IReadOnlySet<string> pendingKeyTexts, System.Threading.CancellationToken cancellationToken = default)
     public virtual System.Threading.Tasks.Task<int> RefreshAsync(byte[] ceiling, int batchSize, bool includeUnboundedBinary, System.Threading.CancellationToken cancellationToken = default)
     public virtual string TableName { get; }
 
@@ -172,7 +172,7 @@ public abstract class QuickER.Runtime.Sync.SyncTable<TEntity, TKey> : QuickER.Ru
     public System.Threading.Tasks.Task<byte[]> GetChangeCeilingAsync(System.Threading.CancellationToken cancellationToken = default)
     public System.Threading.Tasks.Task<int> DeleteAllLocalAsync(System.Threading.CancellationToken cancellationToken = default)
     public System.Threading.Tasks.Task<int> DownloadAsync(byte[] ceiling, int batchSize, bool includeUnboundedBinary, System.Threading.CancellationToken cancellationToken = default)
-    public System.Threading.Tasks.Task<int> PropagateDeletesAsync(System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<int> PropagateDeletesAsync(System.Collections.Generic.IReadOnlySet<string> pendingKeyTexts, System.Threading.CancellationToken cancellationToken = default)
     public System.Threading.Tasks.Task<int> RefreshAsync(byte[] ceiling, int batchSize, bool includeUnboundedBinary, System.Threading.CancellationToken cancellationToken = default)
     public abstract TKey ParseKey(string keyText)
     public abstract string FormatKey(TKey key)

@@ -414,6 +414,96 @@ public abstract class SyncRuntimeTestsBase : IAsyncLifetime
         (await LocalOrdersRaw.GetAllAsync(Ct)).Should().HaveCount(1);
     }
 
+    /// <summary>
+    /// 競合として保留した行は、同じ実行の削除伝搬に消されない（未送信ジャーナルが守る）。
+    /// </summary>
+    /// <remarks>
+    /// サーバーで消えた行をローカルが編集した状態は、アップロードでは <see cref="SyncConflictReason.MissingOnServer"/>
+    /// 競合として保留されるのに、続くダウンロードの削除伝搬から見ると「サーバーのキー集合に無い行」でもある。
+    /// ジャーナルを参照しないと、既定の収集ポリシーが宣言どおり保留したはずの行を同じ実行が黙って消し、
+    /// <c>Collect</c> がこの競合クラスに限って <c>ServerWins</c> と同じ結果になる。
+    /// </remarks>
+    [Fact(DisplayName = "[Sync] 競合で保留した行は削除伝搬の対象外（未送信ジャーナルが守る）")]
+    public async Task DeletePropagation_SparesRowWithPendingJournalEntry()
+    {
+        await SeedServerAsync(1, "alice", 11, "widget");
+        await Engine.SyncAsync(cancellationToken: Ct);
+
+        // サーバー側から行が消えたあとにローカルが同じ行を編集する（＝アップロードは MissingOnServer 競合）
+        await ServerLines.DeleteAsync(11, Ct);
+        await ServerOrders.DeleteAsync(1, Ct);
+
+        var local = await LocalOrders.GetByIdAsync(1, Ct);
+        local!.CustomerName = "alice-local";
+        await LocalOrders.UpdateAsync(local, cancellationToken: Ct);
+
+        var result = await Engine.SyncAsync(cancellationToken: Ct);
+
+        var conflict = result.Conflicts.Should().ContainSingle().Subject;
+        conflict.TableName.Should().Be("sync_orders");
+        conflict.Reason.Should().Be(SyncConflictReason.MissingOnServer);
+
+        var survivor = await LocalOrdersRaw.GetByIdAsync(1, Ct);
+        survivor.Should().NotBeNull("競合として保留した行を同じ実行の削除伝搬が消してはいけない");
+        survivor!.CustomerName.Should().Be("alice-local", "ローカルの編集内容も残る");
+        (await Journal.CountPendingAsync(Ct)).Should().Be(1, "エントリは未解決のまま残る");
+
+        result.DeletedLocally.Should().Be(1, "ジャーナルに載っていない明細行は従来どおり消える");
+        (await LocalLinesRaw.GetAllAsync(Ct)).Should().BeEmpty();
+    }
+
+    /// <summary>エントリが解決されれば、以降の実行では従来どおり削除が伝搬される（恒久的な削除漏れではない）</summary>
+    [Fact(DisplayName = "[Sync] 競合を解決した実行では削除が伝搬される")]
+    public async Task DeletePropagation_ResumesOnceJournalEntryIsSettled()
+    {
+        await SeedServerAsync(1, "alice", 11, "widget");
+        await Engine.SyncAsync(cancellationToken: Ct);
+
+        await ServerLines.DeleteAsync(11, Ct);
+        await ServerOrders.DeleteAsync(1, Ct);
+
+        var local = await LocalOrders.GetByIdAsync(1, Ct);
+        local!.CustomerName = "alice-local";
+        await LocalOrders.UpdateAsync(local, cancellationToken: Ct);
+
+        await Engine.SyncAsync(cancellationToken: Ct);
+        (await LocalOrdersRaw.GetByIdAsync(1, Ct)).Should().NotBeNull("保留中は守られる");
+
+        // ServerWins はジャーナルを捨てる＝エントリが解決された状態。守る理由が無くなるので伝搬が効く
+        var resolved = await Engine.SyncAsync(
+            new SyncOptions { ConflictPolicy = SyncConflictPolicy.ServerWins },
+            Ct
+        );
+
+        resolved.Conflicts.Should().BeEmpty();
+        resolved.DeletedLocally.Should().Be(1);
+        (await LocalOrdersRaw.GetByIdAsync(1, Ct))
+            .Should()
+            .BeNull("解決済みのキーは守られない＝削除漏れが恒久化しない");
+        (await Journal.CountPendingAsync(Ct)).Should().Be(0);
+    }
+
+    /// <summary>まだアップロードを試みていないローカル新規行も、ジャーナルにある限り削除伝搬から守られる</summary>
+    /// <remarks>
+    /// 競合キーを Upload から Download へ引き回す実装では救えない側＝ジャーナルを見る実装であることの直接の証拠。
+    /// ダウンロードだけを回す（アップロードを挟まない）と、この行はサーバーのキー集合に無いまま伝搬に晒される。
+    /// </remarks>
+    [Fact(DisplayName = "[Sync] 未アップロードのローカル新規行は削除伝搬で消えない")]
+    public async Task DeletePropagation_SparesLocalInsertNotYetUploaded()
+    {
+        await LocalOrders.InsertAsync(
+            new SyncOrderEntity { OrderId = 5, CustomerName = "dave" },
+            Ct
+        );
+
+        var result = await Engine.DownloadAsync(new SyncOptions(), Ct);
+
+        result.DeletedLocally.Should().Be(0);
+        (await LocalOrdersRaw.GetByIdAsync(5, Ct))
+            .Should()
+            .NotBeNull("未送信の意図が残っている行はサーバーが消した行ではない");
+    }
+
     // ---- ループ防止 ----
 
     /// <summary>ダウンロードで適用した行はジャーナルへ記録されない（記録されると自分の変更を送り返し続ける）</summary>

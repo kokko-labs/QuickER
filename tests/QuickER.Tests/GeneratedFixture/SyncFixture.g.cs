@@ -3914,8 +3914,18 @@ public sealed class SyncOptions
 
     /// <summary>Whether to delete local rows whose key no longer exists on the server (default true).</summary>
     /// <remarks>
+    /// <para>
     /// The check compares the full key set of each table, which costs one key-only pass over the server table. Turn it
     /// off (and run it on a slower schedule) when the tables are large enough for that pass to matter.
+    /// </para>
+    /// <para>
+    /// A key the journal still holds an unsent entry for is spared, so a local edit awaiting upload - including one this
+    /// run reported as a conflict - is not removed underneath the caller. That protection reaches exactly as far as the
+    /// journal does: <b>a row written into a synchronised table without going through the generated repositories - raw
+    /// SQL above all - has no entry, and while this is on it is deleted on the next run</b>, because from the key set's
+    /// point of view it is a row the server does not have. Rows the local database is meant to keep to itself belong in
+    /// a table that is not synchronised (one without a version column).
+    /// </para>
     /// </remarks>
     public bool PropagateDeletes { get; init; } = true;
 
@@ -3935,6 +3945,11 @@ public sealed class SyncOptions
     /// With it on, each such column is copied separately after the row itself has been transferred, streamed through a
     /// temporary file so neither side has to hold the blob in memory. That is one round trip per column per changed row,
     /// which is why it is not the default: a table of large blobs whose rows change often pays for it on every run.
+    /// </para>
+    /// <para>
+    /// That file is created in the operating system's temporary folder (<c>Path.GetTempPath()</c>) and deleted when the
+    /// column has been written, so a blob whose contents are sensitive passes through the file system unencrypted for the
+    /// duration of its copy - on a machine where that matters, point the temporary folder somewhere it does not.
     /// </para>
     /// </remarks>
     public bool IncludeUnboundedBinary { get; init; }
@@ -4473,7 +4488,27 @@ public interface ISyncTable
     );
 
     /// <summary>Deletes the local rows whose key the server no longer has, and returns how many went.</summary>
-    Task<int> PropagateDeletesAsync(CancellationToken cancellationToken = default);
+    /// <param name="pendingKeyTexts">The keys of this table that still hold an unsent journal entry; they are left alone.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <remarks>
+    /// <para>
+    /// A key the journal still holds an entry for is not treated as one the server dropped. The entry is a local
+    /// intention this run has not settled - a conflict it collected, or a change it never reached - and deleting the row
+    /// underneath it would resolve that in the server's favour without saying so, which is exactly what
+    /// <see cref="SyncConflictPolicy.Collect"/> promises not to do. Once the entry is settled - uploaded, discarded as a
+    /// stale intent, or dropped by <see cref="SyncConflictPolicy.ServerWins"/> - the next run propagates the deletion as
+    /// usual.
+    /// </para>
+    /// <para>
+    /// The protection reaches exactly as far as the journal does. A row written without going through the generated
+    /// repositories - raw SQL, most of all - has no entry to hold it back and is deleted like any other row the server
+    /// does not have (see <see cref="SyncOptions.PropagateDeletes"/>).
+    /// </para>
+    /// </remarks>
+    Task<int> PropagateDeletesAsync(
+        IReadOnlySet<string> pendingKeyTexts,
+        CancellationToken cancellationToken = default
+    );
 
     /// <summary>Removes every local row of this table and returns how many went (the first half of a refresh).</summary>
     Task<int> DeleteAllLocalAsync(CancellationToken cancellationToken = default);
@@ -4714,7 +4749,8 @@ public abstract class SyncTable<TEntity, TKey> : ISyncTable
     /// The two accessors meet in the middle rather than end to end: reading pushes the bytes into a stream that is
     /// handed to it, writing pulls them out of a stream that is handed to it, and a stream cannot be both. A temporary
     /// file is what joins them without either side holding the blob in memory - and it answers the other question the
-    /// write asks, since a length has to be known up front and the finished file reports its own.
+    /// write asks, since a length has to be known up front and the finished file reports its own. It lives in the
+    /// operating system's temporary folder and is removed once the column has been written.
     /// </para>
     /// <para>
     /// A source column that is NULL (or a row the source no longer has) clears the destination rather than leaving what
@@ -4786,7 +4822,17 @@ public abstract class SyncTable<TEntity, TKey> : ISyncTable
         }
         finally
         {
-            File.Delete(path);
+            // Swallowed on purpose: this runs while an exception from the copy itself may be in flight, and letting a
+            // failure to delete replace it would erase why the copy failed. What is lost by ignoring it is one
+            // temporary file left in the operating system's temporary folder.
+            try
+            {
+                File.Delete(path);
+            }
+            catch
+            {
+                // Nothing to do here - see above.
+            }
         }
     }
 
@@ -4840,8 +4886,13 @@ public abstract class SyncTable<TEntity, TKey> : ISyncTable
     }
 
     /// <inheritdoc />
-    public async Task<int> PropagateDeletesAsync(CancellationToken cancellationToken = default)
+    public async Task<int> PropagateDeletesAsync(
+        IReadOnlySet<string> pendingKeyTexts,
+        CancellationToken cancellationToken = default
+    )
     {
+        ArgumentNullException.ThrowIfNull(pendingKeyTexts);
+
         var serverKeys = await _server.GetAllKeysAsync(cancellationToken).ConfigureAwait(false);
         var serverKeyTexts = serverKeys.Select(FormatKey).ToHashSet(StringComparer.Ordinal);
         var localKeys = await _localSqlExecutor
@@ -4854,7 +4905,16 @@ public abstract class SyncTable<TEntity, TKey> : ISyncTable
         {
             foreach (var key in localKeys)
             {
-                if (serverKeyTexts.Contains(FormatKey(key)))
+                var keyText = FormatKey(key);
+
+                if (serverKeyTexts.Contains(keyText))
+                {
+                    continue;
+                }
+
+                // An unsent journal entry outranks the server's key set: the row is the subject of a local intention
+                // this run has not settled, and removing it here would settle it silently against the local side.
+                if (pendingKeyTexts.Contains(keyText))
                 {
                     continue;
                 }
@@ -5201,11 +5261,18 @@ public abstract class SyncTable<TEntity, TKey> : ISyncTable
 /// </para>
 /// <para>
 /// Nothing here resolves a conflict silently. Under the default policy a local change that collides with the server stays
-/// in the journal and comes back in <see cref="SyncResult.Conflicts"/> with both sides of the disagreement attached.
+/// in the journal and comes back in <see cref="SyncResult.Conflicts"/> with both sides of the disagreement attached - and
+/// the row it describes stays where it is, because the delete propagation that ends the download spares every key the
+/// journal still holds an entry for.
 /// </para>
 /// </remarks>
 public sealed class SyncEngine
 {
+    /// <summary>The answer for a table with nothing left in the journal (shared rather than allocated per table).</summary>
+    private static readonly IReadOnlySet<string> NoPendingKeyTexts = new HashSet<string>(
+        StringComparer.Ordinal
+    );
+
     private readonly IReadOnlyList<ISyncTable> _tables;
     private readonly SyncJournal _journal;
 
@@ -5586,16 +5653,48 @@ public sealed class SyncEngine
             return (downloaded, 0);
         }
 
+        // Read once for the whole pass, after the upload has settled what it could: what is left is genuinely unsent,
+        // and those rows are not the propagation's to remove.
+        var pendingKeyTexts = await ReadPendingKeyTextsAsync(cancellationToken)
+            .ConfigureAwait(false);
         var deleted = 0;
 
         for (var index = _tables.Count - 1; index >= 0; index--)
         {
-            deleted += await _tables[index]
-                .PropagateDeletesAsync(cancellationToken)
+            var table = _tables[index];
+            deleted += await table
+                .PropagateDeletesAsync(
+                    pendingKeyTexts.TryGetValue(table.TableName, out var keyTexts)
+                        ? keyTexts
+                        : NoPendingKeyTexts,
+                    cancellationToken
+                )
                 .ConfigureAwait(false);
         }
 
         return (downloaded, deleted);
+    }
+
+    /// <summary>Groups the keys of the still-unsent journal entries by table, for the delete propagation to spare.</summary>
+    private async Task<Dictionary<string, HashSet<string>>> ReadPendingKeyTextsAsync(
+        CancellationToken cancellationToken
+    )
+    {
+        var entries = await _journal.ReadAllAsync(cancellationToken).ConfigureAwait(false);
+        var byTable = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+
+        foreach (var entry in entries)
+        {
+            if (!byTable.TryGetValue(entry.TableName, out var keyTexts))
+            {
+                keyTexts = new HashSet<string>(StringComparer.Ordinal);
+                byTable.Add(entry.TableName, keyTexts);
+            }
+
+            keyTexts.Add(entry.KeyText);
+        }
+
+        return byTable;
     }
 }
 

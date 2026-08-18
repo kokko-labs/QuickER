@@ -218,6 +218,42 @@ public sealed class SyncSqlServerRuntimeTests(
     }
 
     /// <summary>
+    /// サーバーから消えた行をローカルが編集していた場合、競合として保留され、同じ実行の削除伝搬にも消されない。
+    /// </summary>
+    /// <remarks>
+    /// 実 SQL Server では削除の検出も差分走査の相手も本物（キー集合は実テーブルの SELECT・アンカーは
+    /// <c>MIN_ACTIVE_ROWVERSION()</c> 下の実 rowversion）なので、代役 SQLite で通っているガードが
+    /// 本物の構成でも同じ順序（アップロード → ダウンロード → 伝搬）で効くことをここで確かめる。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Sync/SqlServer] サーバーで消えた行のローカル編集は競合として保留され削除伝搬に消されない"
+    )]
+    public async Task MissingOnServerConflict_SurvivesDeletePropagation()
+    {
+        await ServerOrders()
+            .InsertAsync(new SyncOrderEntity { OrderId = 1, CustomerName = "alice" }, Ct);
+        await Engine().SyncAsync(cancellationToken: Ct);
+
+        await ServerOrders().DeleteAsync(1, Ct);
+
+        var local = await LocalOrders().GetByIdAsync(1, Ct);
+        local!.CustomerName = "offline-edit";
+        await LocalOrders().UpdateAsync(local, cancellationToken: Ct);
+
+        var result = await Engine().SyncAsync(cancellationToken: Ct);
+
+        var conflict = result.Conflicts.Should().ContainSingle().Subject;
+        conflict.Reason.Should().Be(SyncConflictReason.MissingOnServer);
+        result.DeletedLocally.Should().Be(0, "守られた行以外に消す対象が無い");
+
+        // 読み取りはデコレータを素通しするので、ジャーナルへ余計なエントリを足さずに現状を見られる
+        var survivor = await LocalOrders().GetByIdAsync(1, Ct);
+        survivor.Should().NotBeNull("保留した競合の行を同じ実行が消してはいけない");
+        survivor!.CustomerName.Should().Be("offline-edit");
+        (await Journal().CountPendingAsync(Ct)).Should().Be(1);
+    }
+
+    /// <summary>
     /// 実 SQL Server に対する除外列（<c>varbinary(max)</c>）の往復＝含めるモードで両方向へ運ばれる。
     /// </summary>
     /// <remarks>
