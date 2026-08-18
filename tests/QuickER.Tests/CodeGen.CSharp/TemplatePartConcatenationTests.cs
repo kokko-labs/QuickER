@@ -143,6 +143,35 @@ public class TemplatePartConcatenationTests
         }
     }
 
+    /// <summary>
+    /// 各部品の本文が生の制御文字（CR・LF・TAB 以外の U+0000〜U+001F）を含まないことを検証する。
+    /// </summary>
+    /// <remarks>
+    /// Scriban はテンプレート本文中の生 NUL を<b>黙って落とす</b>ため、文字列リテラルへ生バイトで埋め込んだ区切り文字が
+    /// 生成物では空文字列に化ける（実例: 複合キー <c>TableName + "\0" + KeyText</c> の生 NUL が消え、区切りなし連結＝
+    /// テーブル名が別名の接頭辞のとき衝突する退化が黙って起きた）。さらに生 NUL は Visual Studio のバイナリ判定を
+    /// 誘発し、差分比較もできなくなる。制御文字が要るならエスケープ（<c>\0</c> 等）で書く。
+    /// </remarks>
+    [Fact(DisplayName = "テンプレート部品の本文が生の制御文字（CR/LF/TAB 以外）を含まない")]
+    public void TemplateParts_ShouldNotContainRawControlCharacters()
+    {
+        foreach (var resourceName in CSharpTemplateParts.OrderedResourceNames)
+        {
+            var text = ReadPart(resourceName);
+            var offenders = text.Where(c => c < ' ' && c is not '\r' and not '\n' and not '\t')
+                .Distinct()
+                .Select(c => $"U+{(int)c:X4}")
+                .ToList();
+
+            offenders
+                .Should()
+                .BeEmpty(
+                    $"部品 '{resourceName}' に生の制御文字がある: {string.Join(", ", offenders)}"
+                        + "（Scriban が黙って落として生成物が変質し、VS の差分比較もバイナリ判定で不能になる。エスケープで書くこと）"
+                );
+        }
+    }
+
     /// <summary>リソース名の数値プレフィックス（<c>_NN_</c>）を取り出す。規約から外れていれば <c>null</c></summary>
     private static int? ParsePartNumber(string resourceName)
     {

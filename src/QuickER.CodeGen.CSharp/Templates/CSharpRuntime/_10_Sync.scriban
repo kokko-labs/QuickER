@@ -1643,12 +1643,14 @@ public sealed class SyncEngine
 
         // The journal is append-only, so a row edited several times has several entries. Only the last one describes
         // what to do now; the earlier ones are superseded and go with it once the last one has been dealt with.
-        var latestByRow = new Dictionary<string, SyncJournalRow>(StringComparer.Ordinal);
-        var idsByRow = new Dictionary<string, List<long>>(StringComparer.Ordinal);
+        // A tuple key needs no separator, so two rows can never collide the way a concatenated string key can
+        // when one table name is a prefix of another.
+        var latestByRow = new Dictionary<(string TableName, string KeyText), SyncJournalRow>();
+        var idsByRow = new Dictionary<(string TableName, string KeyText), List<long>>();
 
         foreach (var entry in entries)
         {
-            var rowId = entry.TableName + " " + entry.KeyText;
+            var rowId = (entry.TableName, entry.KeyText);
             latestByRow[rowId] = entry;
 
             if (!idsByRow.TryGetValue(rowId, out var ids))
@@ -1719,8 +1721,8 @@ public sealed class SyncEngine
     /// <summary>Replays every entry of one operation kind for one table.</summary>
     private static async Task<(int Uploaded, int Discarded)> ReplayAsync(
         ISyncTable table,
-        Dictionary<string, SyncJournalRow> latestByRow,
-        Dictionary<string, List<long>> idsByRow,
+        Dictionary<(string TableName, string KeyText), SyncJournalRow> latestByRow,
+        Dictionary<(string TableName, string KeyText), List<long>> idsByRow,
         List<long> settledIds,
         ICollection<SyncConflict> conflicts,
         SyncConflictPolicy policy,
