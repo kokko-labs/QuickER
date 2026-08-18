@@ -106,6 +106,51 @@ public class CSharpGenerationDialogViewTests
     }
 
     /// <summary>
+    /// API リファレンスの下位オプション（日本語版チェック・出力先サブフォルダ欄）が、
+    /// 「API リファレンスを出力する」チェック ON のときだけ表示されることを検証する
+    /// </summary>
+    [Fact(DisplayName = "API リファレンスの下位オプションは出力チェック ON のときだけ表示される")]
+    public void ApiDocsSubOptions_FollowGenerateApiDocsVisibility()
+    {
+        WpfApplicationTestSupport.RunSta(() =>
+        {
+            var viewModel = CreateViewModel(out var folder);
+
+            try
+            {
+                // BAML ロードは並列テストと競合しないよう直列化する
+                var dialog = WpfApplicationTestSupport.LoadXamlComponent(() =>
+                    new CSharpGenerationDialog(viewModel)
+                );
+
+                // 下位オプションは 1 つのパネルにまとめて GenerateApiDocs へ Visibility バインドしている
+                var subOptions = FindByVisibilityBinding(
+                    dialog,
+                    nameof(CSharpGenerationDialogViewModel.GenerateApiDocs)
+                );
+                subOptions.Should().NotBeNull("下位オプションのパネルが XAML に存在する前提");
+
+                PumpBindings();
+
+                subOptions!
+                    .Visibility.Should()
+                    .Be(Visibility.Collapsed, "既定（API リファレンス出力 OFF）では畳まれている");
+
+                viewModel.GenerateApiDocs = true;
+                PumpBindings();
+
+                subOptions
+                    .Visibility.Should()
+                    .Be(Visibility.Visible, "API リファレンス出力 ON で表示される");
+            }
+            finally
+            {
+                DeleteFolder(folder);
+            }
+        });
+    }
+
+    /// <summary>
     /// 生成ファイルプレビューがスクロール可能な欄（横=Auto・縦=Auto＋高さ上限）に包まれていることを検証する
     /// （層フォルダ＋名前空間で行が長くなり、右端で見切れていた回帰の防止）
     /// </summary>

@@ -452,32 +452,38 @@
                   IsChecked="{Binding GenerateApiDocs}"
                   ToolTip="{x:Static res:Strings.CodeGen_ApiDocsTooltip}"
                 />
-                <!-- 日本語版 API リファレンスの併産（API リファレンス出力の下位＝インデント＋GenerateApiDocs 連動） -->
-                <CheckBox
+                <!--
+                  下位オプション（日本語版の併産・出力先サブフォルダ）は API リファレンス出力 ON のときだけ表示する
+                  （層フォルダ欄と同じ流儀＝使わない構成では欄ごと畳む。親 OFF 時の値は VM 側がクランプ／無視する）
+                -->
+                <StackPanel
                   Margin="18,8,0,0"
-                  Content="{x:Static res:Strings.CodeGen_IncludeJapaneseApiDocs}"
-                  IsChecked="{Binding IncludeJapaneseApiDocs}"
-                  IsEnabled="{Binding GenerateApiDocs}"
-                />
-                <!-- API リファレンスの出力先サブフォルダ（空＝出力フォルダ直下。GenerateApiDocs 連動） -->
-                <Grid Margin="18,8,0,0" IsEnabled="{Binding GenerateApiDocs}">
-                  <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="130" />
-                    <ColumnDefinition Width="*" />
-                  </Grid.ColumnDefinitions>
-                  <TextBlock
-                    Grid.Column="0"
-                    VerticalAlignment="Center"
-                    Style="{StaticResource FieldLabel}"
-                    Text="{x:Static res:Strings.CodeGen_ApiDocsDirectory}"
+                  Visibility="{Binding GenerateApiDocs, Converter={StaticResource BoolToVisibilityConverter}}"
+                >
+                  <CheckBox
+                    Content="{x:Static res:Strings.CodeGen_IncludeJapaneseApiDocs}"
+                    IsChecked="{Binding IncludeJapaneseApiDocs}"
                   />
-                  <TextBox
-                    Grid.Column="1"
-                    Style="{StaticResource FormInput}"
-                    Text="{Binding ApiDocsDirectory, UpdateSourceTrigger=PropertyChanged}"
-                    ToolTip="{x:Static res:Strings.CodeGen_ApiDocsDirectoryToolTip}"
-                  />
-                </Grid>
+                  <!-- API リファレンスの出力先サブフォルダ（空＝出力フォルダ直下） -->
+                  <Grid Margin="0,8,0,0">
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="130" />
+                      <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock
+                      Grid.Column="0"
+                      VerticalAlignment="Center"
+                      Style="{StaticResource FieldLabel}"
+                      Text="{x:Static res:Strings.CodeGen_ApiDocsDirectory}"
+                    />
+                    <TextBox
+                      Grid.Column="1"
+                      Style="{StaticResource FormInput}"
+                      Text="{Binding ApiDocsDirectory, UpdateSourceTrigger=PropertyChanged}"
+                      ToolTip="{x:Static res:Strings.CodeGen_ApiDocsDirectoryToolTip}"
+                    />
+                  </Grid>
+                </StackPanel>
               </StackPanel>
             </Grid>
           </StackPanel>
