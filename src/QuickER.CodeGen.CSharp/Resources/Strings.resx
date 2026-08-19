@@ -148,14 +148,17 @@
   <data name="CodeGen_Error_SyncSupportRequiresRepositories" xml:space="preserve">
     <value>Sync support requires the QuickER repository implementations to be generated (GenerateRepositories), because the sync engine reads and writes through them.</value>
   </data>
-  <data name="CodeGen_Error_SyncSupportRequiresRowVersion" xml:space="preserve">
-    <value>Sync support found no table to synchronise: a table takes part only when it has a rowversion (timestamp) column, which is what the differential scan and the version guard are built on.</value>
+  <data name="CodeGen_Error_SyncSupportRequiresEligibleTables" xml:space="preserve">
+    <value>Sync support found no table to synchronise: a table takes part only when a repository contract is generated for it (a single primary-key column).</value>
   </data>
   <data name="CodeGen_Info_SyncSupportUnboundedBinaryColumns" xml:space="preserve">
     <value>The following unbounded binary columns of the synchronised tables are not carried by an ordinary sync run, because the row transfer leaves them out: a downloaded row arrives without them and an uploaded row is sent without them. Set SyncOptions.IncludeUnboundedBinary (and SyncRefreshOptions.IncludeUnboundedBinary) to copy them column by column as well:{0}</value>
   </data>
   <data name="CodeGen_Info_SyncSupportTables" xml:space="preserve">
-    <value>Sync support is generated for the following tables (listed in the foreign-key order the engine applies them in, parents first):{0}</value>
+    <value>Sync support is generated for the following tables (listed in the foreign-key order the engine applies them in, parents first; a table without a rowversion column syncs by last-write-wins only):{0}</value>
+  </data>
+  <data name="CodeGen_Info_SyncSupportVersionlessTableSuffix" xml:space="preserve">
+    <value> - last-write-wins (no rowversion column; takes part in LastWriteWins runs only)</value>
   </data>
   <data name="CodeGen_Warning_ManyToManySkipped" xml:space="preserve">
     <value>Many-to-many relationship '{0}' is out of scope for C# generation and was skipped.</value>

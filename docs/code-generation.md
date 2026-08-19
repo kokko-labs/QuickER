@@ -653,7 +653,7 @@ Keeping the mirror in step is a job you can write yourself against these two rep
 
 The multi-target build above gives a local copy a place to mirror the server's version. `--generate-sync-support` (`GenerateSyncSupport` in quicker.json, the "Generate bidirectional sync support" checkbox in the GUI, shown once both target databases are selected) generates the machinery that actually keeps the two in step, with the server as the source of truth.
 
-It requires exactly the two dialects `sqlserver` (the server) and `sqlite` (the local database), the QuickER Repository implementations, and at least one table with a `rowversion` column. **Only tables with that column take part** - the differential scan and the version guard are both built on it - and the tables it picked up are listed in an Info diagnostic at generation time. What that column means on each of the two sides is described under [Row version columns in a multi-target build](#row-version-columns-in-a-multi-target-build); this section is about the machinery built on top of it.
+It requires exactly the two dialects `sqlserver` (the server) and `sqlite` (the local database), the QuickER Repository implementations, and at least one table that can sync at all (one a repository contract is generated for - a single primary-key column). **Every such table takes part**, and what the `rowversion` column decides is not membership but the *mode*: a table with the column syncs incrementally under version guards (the default story this section tells), and a table without one takes part only in [last-write-wins runs](#versionless-tables-and-last-write-wins-syncmodelastwritewins). The tables picked up are listed in an Info diagnostic at generation time, with the versionless ones named as such. What the column means on each of the two sides is described under [Row version columns in a multi-target build](#row-version-columns-in-a-multi-target-build); this section is about the machinery built on top of it.
 
 ### What it puts where
 
@@ -699,6 +699,8 @@ A run uploads first and downloads second, and visits tables in foreign-key order
 
 | Option | Default | Meaning |
 |---|---|---|
+| `Mode` | `Versioned` | The run's semantics. The default syncs the versioned tables incrementally under version guards and leaves the versionless ones alone (the pre-existing behaviour); `LastWriteWins` is [last-write-wins](#versionless-tables-and-last-write-wins-syncmodelastwritewins) |
+| `ExcludedEntityTypes` | empty | Entity types this run leaves out. Recording continues, and the next run that covers them replays what accumulated (excluding a table permanently is the construction-time `excludeFromSync` instead). A type the engine does not synchronise is rejected with `ArgumentException` |
 | `DownloadBatchSize` | 500 | How many rows one download batch fetches and applies in a single local transaction |
 | `PropagateDeletes` | `true` | Whether to delete local rows whose key no longer exists on the server. The check compares the full key set, which costs one key-only pass over each server table; turn it off and run it on a slower schedule when the tables are large. A key the journal still holds an unsent entry for is spared - see below |
 | `ConflictPolicy` | `Collect` | How a local change that collides with the server is treated (see [Conflicts](#conflicts)) |
@@ -746,7 +748,7 @@ A graph save records **the whole cascade**. The generated `SyncGraphRecorder` wa
 
 The record is written **before** the business write. The generated repositories manage their own connection, so a decorator cannot enlist its INSERT in the transaction of the write it wraps; something has to go first, and recording the intent first is the safe order. If the business write then fails, the journal holds an entry for a row that was never written - and the upload discards it, because it re-reads the current local row and finds nothing. The opposite order would lose changes outright.
 
-**Raw SQL is not recorded.** `ExecuteSqlAsync` forwards untouched: the statement's shape is opaque to the decorator, so there is no key to journal. The same holds for the bulk delete behind `Query().ExecuteDeleteAsync`, whose rows are chosen by a predicate the decorator never sees. Rows changed either way reach the server only if something else records them - and a row *created* that way fares worse than that: with no journal entry to spare it and no key on the server, delete propagation removes it on the next run. A row the local database is meant to keep to itself belongs in a table that is not synchronised (one without a version column).
+**Raw SQL is not recorded.** `ExecuteSqlAsync` forwards untouched: the statement's shape is opaque to the decorator, so there is no key to journal. The same holds for the bulk delete behind `Query().ExecuteDeleteAsync`, whose rows are chosen by a predicate the decorator never sees. Rows changed either way reach the server only if something else records them - and a row *created* that way fares worse than that: with no journal entry to spare it and no key on the server, delete propagation removes it on the next run. A row the local database is meant to keep to itself belongs in a table excluded from sync where the engine is put together (the `excludeFromSync` argument of `AddGeneratedSyncEngine`).
 
 **Save hooks are unaffected.** The decorator delegates to the repository it wraps, so `ISaveHook<T>` fires exactly as it did before - including for the rows the engine itself applies during a download, since a sync run suppresses journaling and nothing else. A refresh (below) writes through `BulkInsertAsync`, which is outside the save pipeline and fires no hooks, in keeping with the ordinary contract. One consequence is worth knowing: a write a `BeforeSaveAsync` returned `false` for still leaves a journal entry, because the entry is written first. For an insert that entry is discarded (there is no row to read), and for an update the row is uploaded as it stands - unchanged content, which the server accepts and stamps with a new version.
 
@@ -784,8 +786,37 @@ Nothing is resolved silently. Under the default policy a local change that colli
 | `SyncConflictPolicy` | What happens |
 |---|---|
 | `Collect` (default) | The entry stays in the journal and is reported; re-run after deciding |
-| `ServerWins` | The journal is dropped and the download overwrites the local row with the server's |
+| `ServerWins` | The run's entries are dropped and the download overwrites the local rows with the server's (entries of tables outside the run's scope - versionless or excluded ones - stay put) |
 | `LocalWins` | The change is resent with `ConcurrencyMode.ForceOverwrite`, overwriting the server row |
+
+### Versionless tables and last-write-wins (SyncMode.LastWriteWins)
+
+A table without a `rowversion` column has no change stream to scan and no original version to guard with. Last-write-wins mode is the answer for when such a table should sync anyway - a small, rarely changing master table you want to distribute without adding a column to the server.
+
+```csharp
+var result = await engine.SyncAsync(new SyncOptions { Mode = SyncMode.LastWriteWins }, ct);
+```
+
+**A default (`Versioned`) run never touches a versionless table** - no download, no upload, no delete propagation (recording continues, and a last-write-wins run collects what accumulated). Adding a versionless table to a diagram therefore changes nothing about what the default runs do.
+
+A `LastWriteWins` run covers **every table** and gives the whole run one semantics:
+
+- **Uploads are uniform across all tables**: update with `ForceOverwrite`, insert when the update finds no row, delete unconditionally. No version is read, no existence is probed, and **nothing is ever reported as a conflict** (`Conflicts` stays empty; `ConflictPolicy` is ignored). Versioned tables overwrite without their guards too - their mirrored versions are still written back afterwards, so the next run does not hand your own change back.
+- **The winner is whoever uploads last, not whoever edited last.** An update lost to the crossing is neither detected nor reported - that is the trade this mode names.
+- **A delete crossed with an edit resurrects the row.** A row deleted on the server while it was being edited offline comes back when the upload's update finds nothing and inserts; a local delete likewise removes whatever the server did to the row meanwhile. Consistent, as last-write-wins goes.
+- **A versionless table downloads as a full key-ordered scan on every run** (`SELECT TOP … WHERE key > @afterKey ORDER BY key` paging, plus the ordinary delete propagation). The cost is O(table) per run - which is why this mode is meant for small, rarely changing tables, and why **a large or busy table is better served by adding a rowversion column** and riding the incremental side. Versioned tables still download incrementally in this mode; the result is the same, the transfer just smaller.
+
+**A table that should never sync (local-only data) is declared where the engine is put together, not per run:**
+
+```csharp
+services.AddGeneratedSyncSupport("server", "local", excludeFromSync: [typeof(LocalCacheEntity)]);
+```
+
+A construction-excluded table gets no journaling decorator (nothing is recorded, and writes cost nothing extra) and no descriptor (no run downloads it, propagates deletes into it, or wipes it in a refresh). A type that is not a synchronised entity type, or an exclusion that leaves no table at all, is rejected at registration with `ArgumentException` rather than discovered at the first run. `SyncOptions.ExcludedEntityTypes` sits at a different altitude: it takes a table out of **one run**, while recording continues and the next covering run replays the backlog.
+
+Entries recorded before a table was excluded are never replayed, keep counting as unsent changes, and block a refresh for ever. Journal maintenance exists for exactly that: `SyncJournal.RemoveTableAsync(tableName)` drops one table's entries and `RemoveAllAsync()` drops them all - both are the explicit statement that those local edits will never reach the server, and neither should run while a sync is in flight.
+
+One topological note. A versionless table referencing a versioned one is kept consistent inside a single last-write-wins run by the foreign-key ordering; but a foreign key between a **construction-excluded** table and a synchronised one is nobody's job to protect (an application may legitimately maintain the excluded side by hand, so this is a documented caution rather than a block).
 
 ### Rebuilding the local database (RefreshAsync)
 
@@ -804,8 +835,12 @@ Local blobs are refused on the same terms. When a synchronised table has [unboun
 
 | `SyncRefreshOptions` | Default | Meaning |
 |---|---|---|
+| `Mode` | `LastWriteWins` | Which tables the refresh covers. **The default takes everything**: a refresh rebuilds the local database as a copy of the server's, and leaving the versionless tables out would keep stale rows pointing at parents the wipe removes (a foreign-key failure whenever a versionless table references a versioned one). `Versioned` narrows it to the versioned tables, which is sound only while no versionless row references a table being rebuilt. The unsent-changes refusal and the forced discard follow the scope |
+| `ExcludedEntityTypes` | empty | Entity types this refresh leaves out (the same per-run scope as on `SyncOptions`) |
 | `IncludeUnboundedBinary` | `false` | Copy each excluded column back down after its row has been written, making the rebuilt database a complete copy |
 | `DiscardLocalUnboundedBinaries` | `false` | Accept the loss - the right answer when the blobs are a local cache that can be rebuilt. It permits the loss; it does not reload anything |
+
+A versionless table reloads in ascending **key** order rather than version order (the same paging its download uses). The resume property holds in the same shape, so a refresh cut short is still repaired by running it again.
 
 A generated setup without such columns never sees this exception, so nothing changes for it.
 
@@ -813,13 +848,14 @@ A generated setup without such columns never sees this exception, so nothing cha
 
 What makes a refresh fast is what it leaves out - nothing is compared with the row it replaces, no anchor is derived per batch, no key set is fetched, and no journal is replayed. Measured on a two-table, 20,000-row diagram at the shipped defaults, it runs about **3 to 4.5 times faster** than an ordinary run - the upper end with both databases local, around 3x with a real SQL Server as the server. The ceiling on that ratio is structural: reading the rows out of the server is work both paths do.
 
-It is not a cheaper `SyncAsync`. It transfers **every row of every synchronised table**, so over a slow link and a large table the transfer dominates and an ordinary run - which carries only what changed - is the cheaper one from the second run onwards. Tables the local database keeps for itself (anything without a version column) are not part of it and are left exactly as they were.
+It is not a cheaper `SyncAsync`. It transfers **every row of every synchronised table**, so over a slow link and a large table the transfer dominates and an ordinary run - which carries only what changed - is the cheaper one from the second run onwards. Tables the local database keeps for itself (anything excluded with `excludeFromSync` where the engine was put together) are not part of it and are left exactly as they were.
 
 The run is **not one transaction**. The generated repositories manage their own connections, so nothing here can enlist in a transaction of its own making; what holds instead is that every point at which it commits is a state a later run can start from. Deletes go children first and reloads parents first, so no foreign key ever points at a row that is not there, and each table's rows arrive in ascending version order, so a table interrupted part way holds exactly the rows below the version it stopped at - which is the resume point the local maximum yields anyway. The state this leaves that a single transaction would not is a **partly rebuilt local database**: between the first delete and the last row of the last table, a reader sees fewer rows than either side holds. Nothing is lost by it, but a refresh is not something to run underneath a live screen.
 
 ### Known limitations
 
-- **Writes that do not go through the repository are not tracked.** That includes raw SQL (`ExecuteSqlAsync`), as described above, and anything that reaches the local database by another route. The journal only sees the write entry points the decorator wraps - and what it does not see it cannot protect: a row created that way is not merely left unsent, it is **deleted on the next run** while `PropagateDeletes` is on, because the server has no such key. Keep local-only rows in a table that is not synchronised.
+- **Writes that do not go through the repository are not tracked.** That includes raw SQL (`ExecuteSqlAsync`), as described above, and anything that reaches the local database by another route. The journal only sees the write entry points the decorator wraps - and what it does not see it cannot protect: a row created that way is not merely left unsent, it is **deleted on the next run** while `PropagateDeletes` is on, because the server has no such key. Keep local-only rows in a table excluded with `excludeFromSync` where the engine is put together.
+- **Last-write-wins does not detect lost updates.** A crossing is silently won by whoever uploads last, and a delete crossed with an edit resurrects the row. Give a table a rowversion column when its conflicts should be detected (see [Versionless tables and last-write-wins](#versionless-tables-and-last-write-wins-syncmodelastwritewins)).
 - **Unbounded binary columns are not carried unless you ask for them** (`SyncOptions.IncludeUnboundedBinary`), and carrying them costs one round trip per column per changed row. See [Unbounded binary columns](#unbounded-binary-columns).
 - **Cannot be combined with the EF Core Repository**, since the sync support requires a multi-target build and that combination is already exclusive.
 - **The HTTP transport requires `--generate-remote-services`.** Without it the direct sources are generated and the engine still works, but there is no client or endpoint to reach the server with.

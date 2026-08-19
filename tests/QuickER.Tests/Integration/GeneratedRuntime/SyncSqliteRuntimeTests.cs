@@ -21,12 +21,14 @@ public sealed class SyncSqliteRuntimeTests : SyncRuntimeTestsBase
     /// <inheritdoc />
     protected override Task<(
         ISyncServerSource<SyncOrderEntity, int> Orders,
-        ISyncServerSource<SyncOrderLineEntity, int> Lines
+        ISyncServerSource<SyncOrderLineEntity, int> Lines,
+        ISyncServerSource<SyncNoteEntity, int> Notes
     )> CreateServerSourcesAsync() =>
         Task.FromResult<(
             ISyncServerSource<SyncOrderEntity, int>,
-            ISyncServerSource<SyncOrderLineEntity, int>
-        )>((CreateOrderTestSource(), CreateLineTestSource()));
+            ISyncServerSource<SyncOrderLineEntity, int>,
+            ISyncServerSource<SyncNoteEntity, int>
+        )>((CreateOrderTestSource(), CreateLineTestSource(), CreateNoteTestSource()));
 
     /// <summary>
     /// 再開点が進まないまま「まだ続きがある」と言い続ける差分ソースは、無限ループではなく例外で止まる。

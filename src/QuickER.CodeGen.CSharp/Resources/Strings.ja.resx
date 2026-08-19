@@ -148,14 +148,17 @@
   <data name="CodeGen_Error_SyncSupportRequiresRepositories" xml:space="preserve">
     <value>同期支援は QuickER 版 Repository の実装生成（GenerateRepositories）を前提とします（同期エンジンはその読み書き経路を使うため）。</value>
   </data>
-  <data name="CodeGen_Error_SyncSupportRequiresRowVersion" xml:space="preserve">
-    <value>同期対象のテーブルが 1 つもありません。同期対象になるのは rowversion（timestamp）列を持つテーブルだけです（差分走査と版ガードがその列の上に成り立っているため）。</value>
+  <data name="CodeGen_Error_SyncSupportRequiresEligibleTables" xml:space="preserve">
+    <value>同期対象のテーブルが 1 つもありません。同期対象になるのは Repository 契約が生成される（単一の主キー列を持つ）テーブルだけです。</value>
   </data>
   <data name="CodeGen_Info_SyncSupportUnboundedBinaryColumns" xml:space="preserve">
     <value>同期対象テーブルの次の無制限バイナリ列は、通常の同期では運ばれません（行の転送がこれらの列を含まないため、降りてきた行にも上げる行にも中身が入りません）。列単位でコピーさせるには SyncOptions.IncludeUnboundedBinary（洗い替えは SyncRefreshOptions.IncludeUnboundedBinary）を指定してください:{0}</value>
   </data>
   <data name="CodeGen_Info_SyncSupportTables" xml:space="preserve">
-    <value>次のテーブルに対して同期支援を生成しました（エンジンが適用する FK 順＝親が先の並びで表示しています）:{0}</value>
+    <value>次のテーブルに対して同期支援を生成しました（エンジンが適用する FK 順＝親が先の並びで表示しています。rowversion 列を持たないテーブルは後勝ちモードでのみ同期されます）:{0}</value>
+  </data>
+  <data name="CodeGen_Info_SyncSupportVersionlessTableSuffix" xml:space="preserve">
+    <value>・後勝ち（rowversion 列なし＝LastWriteWins のランでのみ同期）</value>
   </data>
   <data name="CodeGen_Warning_ManyToManySkipped" xml:space="preserve">
     <value>多対多リレーション '{0}' は C# 生成対象外のためスキップしました。</value>

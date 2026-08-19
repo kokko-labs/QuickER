@@ -17,11 +17,13 @@ namespace QuickER.Tests.GeneratedSyncFixture;
 /// デコレータ・直結差分ソース・DI 登録が生成されることを固定する。
 /// </para>
 /// <para>
-/// 図は親子 2 テーブルの最小構成（FK 順の検証を含めるため 1 テーブルでは足りない）:
+/// 図は親子 2 テーブル（版あり）＋版なし子テーブル 1 つの最小構成（FK 順の検証を含めるため 1 テーブルでは
+/// 足りず、版あり／版なしの混在＝後勝ちモードの検証には rowversion を持たないテーブルが要る）:
 /// </para>
 /// <list type="bullet">
 ///   <item><c>sync_orders</c>: <c>order_id</c>（int・PK）／<c>customer_name</c>（nvarchar(50)）／<c>attachment</c>（varbinary(max)・NULL 許容）／<c>row_ver</c>（rowversion）</item>
 ///   <item><c>sync_order_lines</c>: <c>line_id</c>（int・PK）／<c>order_id</c>（int・FK）／<c>product</c>（nvarchar(50)）／<c>row_ver</c>（rowversion）</item>
+///   <item><c>sync_notes</c>: <c>note_id</c>（int・PK）／<c>order_id</c>（int・FK）／<c>body</c>（nvarchar(100)）＝<b>rowversion なし</b>（後勝ち専用・キー順全量ダウンロード・版ありの親を参照する混在 FK トポロジ）</item>
 /// </list>
 /// <para>
 /// 無制限バイナリ列の除外（<see cref="CodeGenerationOptions.ExcludeUnboundedBinaryColumns"/>）を併用し、
@@ -93,6 +95,13 @@ public static class SyncFixtureDefinition
     private static readonly Guid LineRowVerColId = new("c1000000-0000-0000-0000-000000000015");
     private static readonly Guid OrderLineRelationshipId = new(
         "c1000000-0000-0000-0000-000000000021"
+    );
+    private static readonly Guid NoteEntityId = new("c1000000-0000-0000-0000-000000000031");
+    private static readonly Guid NotePkColId = new("c1000000-0000-0000-0000-000000000032");
+    private static readonly Guid NoteOrderColId = new("c1000000-0000-0000-0000-000000000033");
+    private static readonly Guid NoteBodyColId = new("c1000000-0000-0000-0000-000000000034");
+    private static readonly Guid OrderNoteRelationshipId = new(
+        "c1000000-0000-0000-0000-000000000041"
     );
 
     /// <summary>同期支援の検証用 ER 図を決定的に構築する（型は SQL Server 表記）</summary>
@@ -175,6 +184,40 @@ public static class SyncFixtureDefinition
             },
         };
 
+        // 版なしテーブル（rowversion 列なし）＝後勝ちモード専用。版ありの親（sync_orders）を参照する
+        // 混在 FK トポロジで、キー順全量ダウンロードと FK 順の交差を 1 つの図で固定する
+        var note = new Entity
+        {
+            Id = NoteEntityId,
+            TableName = "sync_notes",
+            Columns =
+            {
+                new Column
+                {
+                    Id = NotePkColId,
+                    Name = "note_id",
+                    DataType = "int",
+                    IsPrimaryKey = true,
+                    IsNullable = false,
+                },
+                new Column
+                {
+                    Id = NoteOrderColId,
+                    Name = "order_id",
+                    DataType = "int",
+                    IsForeignKey = true,
+                    IsNullable = false,
+                },
+                new Column
+                {
+                    Id = NoteBodyColId,
+                    Name = "body",
+                    DataType = "nvarchar(100)",
+                    IsNullable = false,
+                },
+            },
+        };
+
         var relationship = new Relationship
         {
             Id = OrderLineRelationshipId,
@@ -185,11 +228,21 @@ public static class SyncFixtureDefinition
             ColumnPairs = { new RelationshipColumnPair(OrderPkColId, LineOrderColId) },
         };
 
+        var noteRelationship = new Relationship
+        {
+            Id = OrderNoteRelationshipId,
+            SourceEntityId = OrderEntityId,
+            TargetEntityId = NoteEntityId,
+            Type = RelationshipType.OneToMany,
+            ConstraintName = "FK_sync_notes_sync_orders",
+            ColumnPairs = { new RelationshipColumnPair(OrderPkColId, NoteOrderColId) },
+        };
+
         return new ErDiagram
         {
             TargetDbms = "sqlserver",
-            Entities = { order, line },
-            Relationships = { relationship },
+            Entities = { order, line, note },
+            Relationships = { relationship, noteRelationship },
         };
     }
 

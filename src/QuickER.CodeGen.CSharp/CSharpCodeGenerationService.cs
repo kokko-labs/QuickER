@@ -243,13 +243,20 @@ public sealed class CSharpCodeGenerationService
         }
 
         // 同期支援が有効なとき、実際に同期対象になったテーブルを FK 順のまま Info 診断で通知する
-        // （対象は「行バージョン列を持ち Repository 契約が生成されるテーブル」という導出条件なので、
-        //   どのテーブルが入ったかは生成物を読むまで分からない）
+        // （対象は「Repository 契約が生成される単一主キーのテーブル」という導出条件なので、どのテーブルが
+        //   入ったかは生成物を読むまで分からない）。rowversion 列を持たないテーブルは後勝ち専用として名指しする
         if (options.GenerateSyncSupport && model.SyncTables.Count > 0)
         {
             var syncTableList = string.Join(
                 Environment.NewLine,
-                model.SyncTables.Select(table => $"  {table.TableName}（{table.EntityClassName}）")
+                model.SyncTables.Select(table =>
+                    $"  {table.TableName}（{table.EntityClassName}）"
+                    + (
+                        table.IsVersionless
+                            ? Strings.CodeGen_Info_SyncSupportVersionlessTableSuffix
+                            : string.Empty
+                    )
+                )
             );
             diagnostics.Add(
                 GenerationDiagnostic.Info(
@@ -741,8 +748,9 @@ public sealed class CSharpCodeGenerationService
     /// 前提は 3 つ。(1) 実効方言がちょうど <c>sqlserver</c>（サーバー）と <c>sqlite</c>（ローカル）の 2 つであること
     /// ＝差分走査は SQL Server の <c>rowversion</c> と <c>MIN_ACTIVE_ROWVERSION()</c> に、ミラー列の書き込みは
     /// SQLite が同じ列を通常列として扱うことに、それぞれ依存している。(2) QuickER 版 Repository の実装を生成すること
-    /// ＝エンジンはその読み書き経路そのものを使う。(3) 行バージョン列を持つテーブルが 1 つ以上あること
-    /// ＝「列の有無がそのままポリシー」なので、1 つも無ければ同期対象が空の生成物が黙って出てしまう。
+    /// ＝エンジンはその読み書き経路そのものを使う。(3) 同期可能なテーブル（Repository 契約が生成される単一主キーの
+    /// テーブル）が 1 つ以上あること＝1 つも無ければ同期対象が空の生成物が黙って出てしまう。rowversion 列の有無は
+    /// 対象かどうかを決めず、モード（版あり＝増分＋競合検出／版なし＝後勝ち・全量）を決める。
     /// </para>
     /// <para>
     /// 無制限バイナリ列の除外との併用は<b>止めない</b>。除外列は行の転送に載らないだけで、blob は列単位の
@@ -785,16 +793,16 @@ public sealed class CSharpCodeGenerationService
             );
         }
 
-        var hasRowVersionTable = diagram.Entities.Any(entity =>
-            entity.Columns.Any(column =>
-                columnTypes.TryGetValue(column.Id, out var typeInfo) && typeInfo.IsRowVersion
-            )
+        // 対象は「Repository 契約が生成される（単一主キーの）テーブル」。rowversion 列の有無はモード素材であって
+        // 対象かどうかを決めない（版なしテーブルは後勝ちランでのみ同期される）
+        var hasEligibleTable = diagram.Entities.Any(entity =>
+            entity.Columns.Count(column => column.IsPrimaryKey) == 1
         );
 
-        if (!hasRowVersionTable)
+        if (!hasEligibleTable)
         {
             diagnostics.Add(
-                GenerationDiagnostic.Error(Strings.CodeGen_Error_SyncSupportRequiresRowVersion)
+                GenerationDiagnostic.Error(Strings.CodeGen_Error_SyncSupportRequiresEligibleTables)
             );
         }
     }

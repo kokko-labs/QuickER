@@ -963,6 +963,7 @@ public static partial class GeneratedRemoteEndpoints
         group.MapGet(RemotePaths.HealthRoute, () => Results.Ok());
         MapSyncOrderEndpoints(group, allowUnboundedUploads);
         MapSyncOrderLineEndpoints(group);
+        MapSyncNoteEndpoints(group);
 
         // Asked before the sync endpoints are mapped rather than when one is called: a handler resolves its source from
         // the request's services, so a missing registration would surface as an opaque 500 on the first sync of a
@@ -971,6 +972,7 @@ public static partial class GeneratedRemoteEndpoints
 
         MapSyncEndpoints<SyncOrderEntity, int>(group, "SyncOrder");
         MapSyncEndpoints<SyncOrderLineEntity, int>(group, "SyncOrderLine");
+        MapVersionlessSyncEndpoints<SyncNoteEntity, int>(group, "SyncNote");
 
         return group;
     }
@@ -1009,6 +1011,11 @@ public static partial class GeneratedRemoteEndpoints
         if (!registrations.IsService(typeof(ISyncServerSource<SyncOrderLineEntity, int>)))
         {
             missing.Add("ISyncServerSource<SyncOrderLineEntity, int>");
+        }
+
+        if (!registrations.IsService(typeof(ISyncServerSource<SyncNoteEntity, int>)))
+        {
+            missing.Add("ISyncServerSource<SyncNoteEntity, int>");
         }
 
         if (missing.Count == 0)
@@ -1082,6 +1089,67 @@ public static partial class GeneratedRemoteEndpoints
                             .GetChangesAsync(
                                 request.Anchor,
                                 request.Ceiling,
+                                ValidatedBatchSize(request.BatchSize),
+                                context.RequestAborted
+                            ).ConfigureAwait(false);
+                        return (object?)
+                            new RemoteSyncChangesResult<TEntity>(batch.Rows, batch.HasMore);
+                    }
+                )
+        );
+        group.MapPost(
+            $"{entityRoute}/{RemoteSyncOperations.Keys}",
+            (HttpContext context) =>
+                RemoteServerEngine.ExecuteAsync(
+                    context,
+                    async () =>
+                        (object?)
+                            new RemoteSyncKeysResult<TKey>(
+                                await SyncSource<TEntity, TKey>(context)
+                                    .GetAllKeysAsync(context.RequestAborted).ConfigureAwait(false)
+                            )
+                )
+        );
+    }
+
+    /// <summary>Maps the sync-only endpoints of one synchronised table without a version column onto the group.</summary>
+    /// <remarks>
+    /// Two of the three versioned endpoints have no meaning here - a key-ordered scan reads no ceiling and batches no
+    /// change stream - so the table gets the key set (what delete propagation compares) and the key-ordered page (the
+    /// full scan a last-write-wins download reads) instead. Uploading still travels over the ordinary CRUD endpoints.
+    /// </remarks>
+    private static void MapVersionlessSyncEndpoints<TEntity, TKey>(
+        RouteGroupBuilder group,
+        string entityRoute
+    )
+        where TEntity : EntityBase, new()
+    {
+        group.MapPost(
+            $"{entityRoute}/{RemoteSyncOperations.Page}",
+            (HttpContext context) =>
+                RemoteServerEngine.ExecuteAsync(
+                    context,
+                    async () =>
+                    {
+                        var request = await RemoteServerEngine.ReadRequestAsync<RemoteSyncPageRequest<TKey>>(
+                            context
+                        ).ConfigureAwait(false);
+
+                        if (request.HasAfterKey && request.AfterKey is null)
+                        {
+                            throw new RemoteBadRequestException(
+                                "HasAfterKey is set but AfterKey is missing."
+                            );
+                        }
+
+                        var source = SyncSource<TEntity, TKey>(context);
+                        var batch = request.HasAfterKey
+                            ? await source.GetPageAfterAsync(
+                                request.AfterKey!,
+                                ValidatedBatchSize(request.BatchSize),
+                                context.RequestAborted
+                            ).ConfigureAwait(false)
+                            : await source.GetFirstPageAsync(
                                 ValidatedBatchSize(request.BatchSize),
                                 context.RequestAborted
                             ).ConfigureAwait(false);
@@ -1267,4 +1335,30 @@ public static partial class GeneratedRemoteEndpoints
 
     /// <summary>Request body for CheckUniqueness (SyncOrderLine).</summary>
     private sealed record SyncOrderLineCheckUniquenessRequest(SyncOrderLineEntity Entity);
+
+    /// <summary>Maps the remote-surface endpoints for SyncNoteEntity.</summary>
+    private static void MapSyncNoteEndpoints(RouteGroupBuilder group)
+    {
+        RemoteServerEngine.MapCrud<SyncNoteEntity, int, ISyncNoteRemoteRepository>(
+            group,
+            "SyncNote"
+        );
+
+        group.MapPost(
+            "SyncNote/CheckUniqueness",
+            (HttpContext context) =>
+                RemoteServerEngine.ExecuteAsync(
+                    context,
+                    async () =>
+                    {
+                        var request = await RemoteServerEngine.ReadRequestAsync<SyncNoteCheckUniquenessRequest>(context).ConfigureAwait(false);
+                        var repository = RemoteServerEngine.Repository<ISyncNoteRemoteRepository>(context);
+                        return (object?)await repository.CheckUniquenessAsync(RemoteServerEngine.Required(request.Entity, "Entity"), context.RequestAborted).ConfigureAwait(false);
+                    }
+                )
+        );
+    }
+
+    /// <summary>Request body for CheckUniqueness (SyncNote).</summary>
+    private sealed record SyncNoteCheckUniquenessRequest(SyncNoteEntity Entity);
 }

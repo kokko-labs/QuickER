@@ -961,7 +961,7 @@ public static partial class GeneratedRemoteEndpoints
         // deployed server whose CRUD endpoints all answer normally
         RequireSyncSources(endpoints.ServiceProvider);
 
-{{ for sync in sync_tables }}        MapSyncEndpoints<{{ sync.entity_class_name }}, {{ sync.key_type_name }}>(group, "{{ sync.remote_route_name }}");
+{{ for sync in sync_tables }}        {{ if sync.is_versionless }}MapVersionlessSyncEndpoints{{ else }}MapSyncEndpoints{{ end }}<{{ sync.entity_class_name }}, {{ sync.key_type_name }}>(group, "{{ sync.remote_route_name }}");
 {{ end }}{{ end }}
         return group;
     }
@@ -1071,6 +1071,67 @@ public static partial class GeneratedRemoteEndpoints
                             .GetChangesAsync(
                                 request.Anchor,
                                 request.Ceiling,
+                                ValidatedBatchSize(request.BatchSize),
+                                context.RequestAborted
+                            ).ConfigureAwait(false);
+                        return (object?)
+                            new RemoteSyncChangesResult<TEntity>(batch.Rows, batch.HasMore);
+                    }
+                )
+        );
+        group.MapPost(
+            $"{entityRoute}/{RemoteSyncOperations.Keys}",
+            (HttpContext context) =>
+                RemoteServerEngine.ExecuteAsync(
+                    context,
+                    async () =>
+                        (object?)
+                            new RemoteSyncKeysResult<TKey>(
+                                await SyncSource<TEntity, TKey>(context)
+                                    .GetAllKeysAsync(context.RequestAborted).ConfigureAwait(false)
+                            )
+                )
+        );
+    }
+
+    /// <summary>Maps the sync-only endpoints of one synchronised table without a version column onto the group.</summary>
+    /// <remarks>
+    /// Two of the three versioned endpoints have no meaning here - a key-ordered scan reads no ceiling and batches no
+    /// change stream - so the table gets the key set (what delete propagation compares) and the key-ordered page (the
+    /// full scan a last-write-wins download reads) instead. Uploading still travels over the ordinary CRUD endpoints.
+    /// </remarks>
+    private static void MapVersionlessSyncEndpoints<TEntity, TKey>(
+        RouteGroupBuilder group,
+        string entityRoute
+    )
+        where TEntity : EntityBase, new()
+    {
+        group.MapPost(
+            $"{entityRoute}/{RemoteSyncOperations.Page}",
+            (HttpContext context) =>
+                RemoteServerEngine.ExecuteAsync(
+                    context,
+                    async () =>
+                    {
+                        var request = await RemoteServerEngine.ReadRequestAsync<RemoteSyncPageRequest<TKey>>(
+                            context
+                        ).ConfigureAwait(false);
+
+                        if (request.HasAfterKey && request.AfterKey is null)
+                        {
+                            throw new RemoteBadRequestException(
+                                "HasAfterKey is set but AfterKey is missing."
+                            );
+                        }
+
+                        var source = SyncSource<TEntity, TKey>(context);
+                        var batch = request.HasAfterKey
+                            ? await source.GetPageAfterAsync(
+                                request.AfterKey!,
+                                ValidatedBatchSize(request.BatchSize),
+                                context.RequestAborted
+                            ).ConfigureAwait(false)
+                            : await source.GetFirstPageAsync(
                                 ValidatedBatchSize(request.BatchSize),
                                 context.RequestAborted
                             ).ConfigureAwait(false);

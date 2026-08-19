@@ -21,11 +21,12 @@ internal sealed partial class CSharpGenerationModelBuilder
     private const string SqlServerQuoteClose = "]";
 
     /// <summary>
-    /// 同期対象テーブル（<c>rowversion</c> 列を持ち単一主キーを持つテーブル）の生成モデルを FK トポロジカル順で組み立てる
+    /// 同期対象テーブル（Repository 契約を持つ単一主キーのテーブル）の生成モデルを FK トポロジカル順で組み立てる
     /// </summary>
     /// <remarks>
-    /// 対象が 0 件になる構成（オプション OFF・行バージョン列なし）では空リストを返す。オプション ON で 0 件になる
-    /// 場合の診断は生成サービス側が担う（ここは素材の組み立てに徹する）。
+    /// rowversion 列の有無は対象かどうかを決めず、モード素材（版あり＝増分＋競合検出／版なし＝後勝ち・全量）に
+    /// なる。対象が 0 件になる構成（オプション OFF・Repository 対象テーブルなし）では空リストを返す。オプション
+    /// ON で 0 件になる場合の診断は生成サービス側が担う（ここは素材の組み立てに徹する）。
     /// </remarks>
     private IReadOnlyList<CSharpSyncTableModel> BuildSyncTables(
         ErDiagram diagram,
@@ -49,10 +50,7 @@ internal sealed partial class CSharpGenerationModelBuilder
         {
             var className = _nameConverter.ToEntityClassName(entity.TableName);
 
-            if (
-                !repositoriesByEntityClass.ContainsKey(className)
-                || FindRowVersionColumn(entity) is null
-            )
+            if (!repositoriesByEntityClass.ContainsKey(className))
             {
                 continue;
             }
@@ -157,13 +155,17 @@ internal sealed partial class CSharpGenerationModelBuilder
     )
     {
         var keyColumn = entity.Columns.First(column => column.IsPrimaryKey);
-        var rowVersionColumn = FindRowVersionColumn(entity)!;
+
+        // rowversion 列の有無がモードを決める（版あり＝増分＋版ガード／版なし＝後勝ち・キー順全量）
+        var rowVersionColumn = FindRowVersionColumn(entity);
+        var isVersionless = rowVersionColumn is null;
         var repositoryName = repository.InterfaceName[1..^"Repository".Length];
 
         var keyPropertyName = _nameConverter.ToPropertyName(keyColumn.Name);
-        var rowVersionPropertyName = _nameConverter.ToPropertyName(rowVersionColumn.Name);
         var keyValueObject = ResolveValueObject(keyColumn);
-        var rowVersionValueObject = ResolveValueObject(rowVersionColumn);
+        var rowVersionValueObject = rowVersionColumn is null
+            ? null
+            : ResolveValueObject(rowVersionColumn);
 
         // 除外列（無制限バイナリ列）は行の転送に載らないため、blob を運ぶには列単位のコピーが要る。
         // オプション OFF・該当列なしなら空＝関連ブロックを 1 つも出さない（生成物はこの機能の追加前と同一）。
@@ -194,8 +196,15 @@ internal sealed partial class CSharpGenerationModelBuilder
         var localTable = QuoteQualified(entity.TableName, "\"", "\"");
         var serverKey = SqlServerQuoteOpen + keyColumn.Name + SqlServerQuoteClose;
         var localKey = "\"" + keyColumn.Name + "\"";
-        var serverRowVersion = SqlServerQuoteOpen + rowVersionColumn.Name + SqlServerQuoteClose;
-        var localRowVersion = "\"" + rowVersionColumn.Name + "\"";
+        var rowVersionPropertyName = rowVersionColumn is null
+            ? string.Empty
+            : _nameConverter.ToPropertyName(rowVersionColumn.Name);
+        var serverRowVersion = rowVersionColumn is null
+            ? string.Empty
+            : SqlServerQuoteOpen + rowVersionColumn.Name + SqlServerQuoteClose;
+        var localRowVersion = rowVersionColumn is null
+            ? string.Empty
+            : "\"" + rowVersionColumn.Name + "\"";
 
         return new CSharpSyncTableModel
         {
@@ -203,48 +212,73 @@ internal sealed partial class CSharpGenerationModelBuilder
             InterfaceName = repository.InterfaceName,
             KeyTypeName = repository.KeyTypeName,
             TableName = entity.TableName,
+            IsVersionless = isVersionless,
+            TableBaseClassName = isVersionless ? "VersionlessSyncTable" : "SyncTable",
             SourceClassName = $"{repositoryName}DirectSyncSource",
             HttpSourceClassName = $"Http{repositoryName}SyncSource",
             RemoteRouteName = repositoryName,
             TableClassName = $"{repositoryName}SyncTable",
             DecoratorClassName = $"Journaling{repositoryName}Repository",
             KeyPropertyName = keyPropertyName,
-            // 昇順・上限つきの差分走査。2 点が効いている:
+            // 昇順・上限つきの差分走査（版ありのみ）。2 点が効いている:
             //  (1) @anchor / @ceiling は NULL を取り得るため、素の比較では 3 値論理で全行が UNKNOWN になる
             //      （初回の全量取得が 0 件になる）。NULL を「制約なし」として明示的に外す。
             //  (2) 生 SQL のパラメータは列の文脈を持たず型なしでバインドされるため、NULL は nvarchar と推論される。
             //      rowversion と nvarchar は暗黙変換できず実行時エラーになるので、比較の相手を binary(8) へ明示的に
             //      キャストする（非 NULL のときは byte[] がそのまま binary(8) として読まれる）。
-            ServerChangesSql = CSharpLiteral(
-                $"SELECT TOP (@batchSize) {serverSelectList} FROM {serverTable} "
-                    + $"WHERE (@anchor IS NULL OR {serverRowVersion} > CAST(@anchor AS binary(8))) "
-                    + $"AND (@ceiling IS NULL OR {serverRowVersion} < CAST(@ceiling AS binary(8))) "
-                    + $"ORDER BY {serverRowVersion}"
-            ),
+            ServerChangesSql = isVersionless
+                ? string.Empty
+                : CSharpLiteral(
+                    $"SELECT TOP (@batchSize) {serverSelectList} FROM {serverTable} "
+                        + $"WHERE (@anchor IS NULL OR {serverRowVersion} > CAST(@anchor AS binary(8))) "
+                        + $"AND (@ceiling IS NULL OR {serverRowVersion} < CAST(@ceiling AS binary(8))) "
+                        + $"ORDER BY {serverRowVersion}"
+                ),
+            // 版なしテーブルの全量走査はキー昇順のページング（@afterKey はキー型の値がそのままバインドされる）
+            ServerPageFirstSql = isVersionless
+                ? CSharpLiteral(
+                    $"SELECT TOP (@batchSize) {serverSelectList} FROM {serverTable} ORDER BY {serverKey}"
+                )
+                : string.Empty,
+            ServerPageAfterSql = isVersionless
+                ? CSharpLiteral(
+                    $"SELECT TOP (@batchSize) {serverSelectList} FROM {serverTable} "
+                        + $"WHERE {serverKey} > @afterKey ORDER BY {serverKey}"
+                )
+                : string.Empty,
             ServerKeysSql = CSharpLiteral($"SELECT {serverKey} FROM {serverTable}"),
-            LocalAnchorSql = CSharpLiteral($"SELECT MAX({localRowVersion}) FROM {localTable}"),
+            LocalAnchorSql = isVersionless
+                ? string.Empty
+                : CSharpLiteral($"SELECT MAX({localRowVersion}) FROM {localTable}"),
             LocalKeysSql = CSharpLiteral($"SELECT {localKey} FROM {localTable}"),
             LocalExistingKeysSql = CSharpLiteral(
                 $"SELECT {localKey} FROM {localTable} WHERE {localKey} IN (@keys)"
             ),
             LocalDeleteAllSql = CSharpLiteral($"DELETE FROM {localTable}"),
-            RowVersionReadExpression = BuildRowVersionRead(
-                "entity",
-                rowVersionPropertyName,
-                rowVersionColumn,
-                rowVersionValueObject
-            ),
-            RowVersionReadExistingExpression = BuildRowVersionRead(
-                "existing",
-                rowVersionPropertyName,
-                rowVersionColumn,
-                rowVersionValueObject
-            ),
-            RowVersionWriteExpression = BuildRowVersionWrite(
-                rowVersionPropertyName,
-                rowVersionColumn,
-                rowVersionValueObject
-            ),
+            // 版なしテーブルのミラー版は存在しない＝記録（SyncGraphRecorder の Delete）は常に null を添える
+            RowVersionReadExpression = rowVersionColumn is null
+                ? "null"
+                : BuildRowVersionRead(
+                    "entity",
+                    rowVersionPropertyName,
+                    rowVersionColumn,
+                    rowVersionValueObject
+                ),
+            RowVersionReadExistingExpression = rowVersionColumn is null
+                ? string.Empty
+                : BuildRowVersionRead(
+                    "existing",
+                    rowVersionPropertyName,
+                    rowVersionColumn,
+                    rowVersionValueObject
+                ),
+            RowVersionWriteExpression = rowVersionColumn is null
+                ? string.Empty
+                : BuildRowVersionWrite(
+                    rowVersionPropertyName,
+                    rowVersionColumn,
+                    rowVersionValueObject
+                ),
             FormatKeyExpression = BuildFormatKey("key", keyColumn, keyValueObject),
             FormatKeyEntityExpression = BuildFormatKey(
                 $"entity.{keyPropertyName}",

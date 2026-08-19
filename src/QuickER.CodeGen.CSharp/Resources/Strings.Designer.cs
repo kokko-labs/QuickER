@@ -234,9 +234,9 @@ namespace QuickER.CodeGen.CSharp.Resources {
             }
         }
 
-        public static string CodeGen_Error_SyncSupportRequiresRowVersion {
+        public static string CodeGen_Error_SyncSupportRequiresEligibleTables {
             get {
-                return ResourceManager.GetString("CodeGen_Error_SyncSupportRequiresRowVersion", resourceCulture);
+                return ResourceManager.GetString("CodeGen_Error_SyncSupportRequiresEligibleTables", resourceCulture);
             }
         }
 
@@ -249,6 +249,12 @@ namespace QuickER.CodeGen.CSharp.Resources {
         public static string CodeGen_Info_SyncSupportTables {
             get {
                 return ResourceManager.GetString("CodeGen_Info_SyncSupportTables", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Info_SyncSupportVersionlessTableSuffix {
+            get {
+                return ResourceManager.GetString("CodeGen_Info_SyncSupportVersionlessTableSuffix", resourceCulture);
             }
         }
 

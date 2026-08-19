@@ -63,17 +63,26 @@ public abstract class SyncRuntimeTestsBase : IAsyncLifetime
     /// <summary>サーバー役の除外列アクセサ（blob 書き込みで版を進める＝実 SQL Server の代役）</summary>
     protected ISyncBinaryColumns<int> ServerOrderBlobs { get; private set; } = null!;
 
+    /// <summary>サーバー役のメモ（版なしテーブル）リポジトリ（版採番なし＝素のリポジトリそのまま）</summary>
+    protected ISyncNoteRepository ServerNotes { get; private set; } = null!;
+
     /// <summary>ローカルの素の注文リポジトリ（ジャーナル記録を通らない観測用）</summary>
     protected ISyncOrderRepository LocalOrdersRaw { get; private set; } = null!;
 
     /// <summary>ローカルの素の明細リポジトリ</summary>
     protected ISyncOrderLineRepository LocalLinesRaw { get; private set; } = null!;
 
+    /// <summary>ローカルの素のメモリポジトリ</summary>
+    protected ISyncNoteRepository LocalNotesRaw { get; private set; } = null!;
+
     /// <summary>ローカルのジャーナル記録デコレータ（アプリが触る側）</summary>
     protected ISyncOrderRepository LocalOrders { get; private set; } = null!;
 
     /// <summary>ローカルのジャーナル記録デコレータ（明細）</summary>
     protected ISyncOrderLineRepository LocalLines { get; private set; } = null!;
+
+    /// <summary>ローカルのジャーナル記録デコレータ（メモ＝版なしテーブル）</summary>
+    protected ISyncNoteRepository LocalNotes { get; private set; } = null!;
 
     /// <summary>ローカルのジャーナル</summary>
     protected SyncJournal Journal { get; private set; } = null!;
@@ -87,7 +96,8 @@ public abstract class SyncRuntimeTestsBase : IAsyncLifetime
     /// </summary>
     protected abstract Task<(
         ISyncServerSource<SyncOrderEntity, int> Orders,
-        ISyncServerSource<SyncOrderLineEntity, int> Lines
+        ISyncServerSource<SyncOrderLineEntity, int> Lines,
+        ISyncServerSource<SyncNoteEntity, int> Notes
     )> CreateServerSourcesAsync();
 
     /// <summary>転送経路の後始末（HTTP 派生が Kestrel とクライアントを畳む）</summary>
@@ -127,22 +137,30 @@ public abstract class SyncRuntimeTestsBase : IAsyncLifetime
             (entity, version) => entity.RowVer = version
         );
 
+        // 版なしテーブルのサーバー役は素のリポジトリ（版の採番も版ガードも存在しないのが本物の意味論）
+        ServerNotes = new SyncNoteRepository(serverFactory);
+
         LocalOrdersRaw = new SyncOrderRepository(localFactory);
         LocalLinesRaw = new SyncOrderLineRepository(localFactory);
+        LocalNotesRaw = new SyncNoteRepository(localFactory);
 
         Journal = new SyncJournal(LocalSql);
         await Journal.EnsureCreatedAsync(Ct);
 
         LocalOrders = new JournalingSyncOrderRepository(LocalOrdersRaw, Journal);
         LocalLines = new JournalingSyncOrderLineRepository(LocalLinesRaw, Journal);
+        LocalNotes = new JournalingSyncNoteRepository(LocalNotesRaw, Journal);
 
         var sources = await CreateServerSourcesAsync();
 
-        // 記述子はデコレータ越しのローカルリポジトリを持つ（エンジンの書き込みは SyncSession で抑制される）
+        // 記述子はデコレータ越しのローカルリポジトリを持つ（エンジンの書き込みは SyncSession で抑制される）。
+        // 版なしテーブル（sync_notes）も同じエンジンへ登録する＝既定（Versioned）のランはそれを対象外にする
+        // こと自体が既存シナリオの互換の主張になっている
         Engine = new SyncEngine(
             [
                 new SyncOrderSyncTable(LocalOrders, LocalSql, sources.Orders),
                 new SyncOrderLineSyncTable(LocalLines, LocalSql, sources.Lines),
+                new SyncNoteSyncTable(LocalNotes, LocalSql, sources.Notes),
             ],
             Journal
         );
@@ -174,6 +192,10 @@ public abstract class SyncRuntimeTestsBase : IAsyncLifetime
     /// <summary>サーバー役の明細差分ソース（SQLite 版）を組み立てる</summary>
     protected ISyncServerSource<SyncOrderLineEntity, int> CreateLineTestSource() =>
         SyncTestServerSources.CreateLines(ServerSql, ServerLines);
+
+    /// <summary>サーバー役のメモ（版なしテーブル）差分ソース（SQLite 版）を組み立てる</summary>
+    protected ISyncServerSource<SyncNoteEntity, int> CreateNoteTestSource() =>
+        SyncTestServerSources.CreateNotes(ServerSql, ServerNotes);
 
     /// <summary>除外列（blob）まで運ぶ同期オプション</summary>
     protected static SyncOptions BlobOptions => new() { IncludeUnboundedBinary = true };
@@ -235,6 +257,18 @@ public abstract class SyncRuntimeTestsBase : IAsyncLifetime
 
         return present ? destination.ToArray() : null;
     }
+
+    /// <summary>サーバー役へメモ（版なしテーブル）を 1 件入れる（版の採番は存在しない）</summary>
+    protected async Task SeedServerNoteAsync(int noteId, int orderId, string body) =>
+        await ServerNotes.InsertAsync(
+            new SyncNoteEntity
+            {
+                NoteId = noteId,
+                OrderId = orderId,
+                Body = body,
+            },
+            Ct
+        );
 
     /// <summary>サーバー役へ注文とその明細を 1 件ずつ入れる（版はラッパーが採番する）</summary>
     protected async Task SeedServerAsync(int orderId, string customer, int lineId, string product)
@@ -725,6 +759,363 @@ public abstract class SyncRuntimeTestsBase : IAsyncLifetime
         (await Journal.CountPendingAsync(Ct)).Should().Be(0, "全エントリが決着して掃除される");
     }
 
+    // ---- 後勝ちモード（版なしテーブル・SyncMode.LastWriteWins） ----
+
+    /// <summary>既定（Versioned）のランは版なしテーブルに一切触れない（実行時挙動の完全互換）</summary>
+    [Fact(DisplayName = "[Sync/LWW] 既定（Versioned）のランは版なしテーブルに触れない")]
+    public async Task VersionedRun_LeavesVersionlessTableAlone()
+    {
+        await SeedServerAsync(1, "alice", 11, "widget");
+        await SeedServerNoteAsync(101, 1, "server note");
+
+        var result = await Engine.SyncAsync(cancellationToken: Ct);
+
+        result.Downloaded.Should().Be(2, "注文と明細だけが降り、メモは対象外");
+        (await LocalNotesRaw.GetAllAsync(Ct)).Should().BeEmpty();
+
+        // ローカルのメモ書き込みは記録されるが、Versioned のランでは回収も削除伝搬もされない
+        await LocalNotes.InsertAsync(
+            new SyncNoteEntity
+            {
+                NoteId = 102,
+                OrderId = 1,
+                Body = "local note",
+            },
+            Ct
+        );
+        var second = await Engine.SyncAsync(cancellationToken: Ct);
+
+        second.Uploaded.Should().Be(0);
+        (await ServerNotes.GetByIdAsync(102, Ct)).Should().BeNull();
+        (await LocalNotesRaw.GetByIdAsync(102, Ct)).Should().NotBeNull();
+        (await Journal.CountPendingAsync(Ct)).Should().Be(1, "エントリは次の後勝ちランまで残る");
+    }
+
+    /// <summary>後勝ちランは版なしテーブルをキー順の全量スキャンで降ろし、FK 順（親→子）を守る</summary>
+    [Fact(DisplayName = "[Sync/LWW] 後勝ちランは版なしテーブルを全量ダウンロードする（毎回）")]
+    public async Task LastWriteWins_DownloadsVersionlessTable()
+    {
+        await SeedServerAsync(1, "alice", 11, "widget");
+        await SeedServerNoteAsync(101, 1, "server note");
+
+        var options = new SyncOptions { Mode = SyncMode.LastWriteWins };
+        var result = await Engine.SyncAsync(options, Ct);
+
+        result.Conflicts.Should().BeEmpty();
+        result.Downloaded.Should().Be(3, "注文・明細＝増分 2 行＋メモ＝全量 1 行");
+        (await LocalNotesRaw.GetByIdAsync(101, Ct))!.Body.Should().Be("server note");
+
+        // 変更が無くても版なしテーブルは毎回全量降りる（O(テーブル)＝設計どおりのコスト）。版ありは増分＝0
+        var second = await Engine.SyncAsync(options, Ct);
+
+        second.Downloaded.Should().Be(1, "メモの全量スキャン 1 行だけが再適用される");
+    }
+
+    /// <summary>版なしテーブルのローカル編集（追加・更新・削除）が後勝ちで届き、ジャーナルが決着する</summary>
+    [Fact(
+        DisplayName = "[Sync/LWW] 版なしテーブルのローカル編集（追加・更新・削除）が後勝ちで届く"
+    )]
+    public async Task LastWriteWins_UploadsVersionlessEdits()
+    {
+        await SeedServerAsync(1, "alice", 11, "widget");
+        await SeedServerNoteAsync(101, 1, "original");
+        var options = new SyncOptions { Mode = SyncMode.LastWriteWins };
+        await Engine.SyncAsync(options, Ct);
+
+        var note = await LocalNotesRaw.GetByIdAsync(101, Ct);
+        note!.Body = "edited locally";
+        await LocalNotes.UpdateAsync(note, cancellationToken: Ct);
+        await LocalNotes.InsertAsync(
+            new SyncNoteEntity
+            {
+                NoteId = 102,
+                OrderId = 1,
+                Body = "new local",
+            },
+            Ct
+        );
+
+        var result = await Engine.SyncAsync(options, Ct);
+
+        result.Conflicts.Should().BeEmpty();
+        result.Uploaded.Should().Be(2);
+        (await ServerNotes.GetByIdAsync(101, Ct))!.Body.Should().Be("edited locally");
+        (await ServerNotes.GetByIdAsync(102, Ct))!.Body.Should().Be("new local");
+        (await LocalNotesRaw.GetByIdAsync(102, Ct))
+            .Should()
+            .NotBeNull("アップロード済みの新規行は削除伝搬に消されない");
+
+        await LocalNotes.DeleteAsync(101, Ct);
+        var third = await Engine.SyncAsync(options, Ct);
+
+        third.Uploaded.Should().Be(1);
+        (await ServerNotes.GetByIdAsync(101, Ct)).Should().BeNull();
+        (await Journal.CountPendingAsync(Ct)).Should().Be(0);
+    }
+
+    /// <summary>
+    /// 後勝ちの意味論そのもの＝すれ違いは後からアップロードした側が黙って勝ち、削除とのすれ違いは行を復活させる。
+    /// </summary>
+    /// <remarks>
+    /// どちらも検出も報告もされない（<c>Conflicts</c> は常に空）。これが後勝ちモードの名づけた取引で、
+    /// docs が明記する意味論をそのまま固定する。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Sync/LWW] すれ違いは後勝ちで黙って上書きされ、削除とのすれ違いは行が復活する"
+    )]
+    public async Task LastWriteWins_OverwritesAndResurrectsWithoutConflict()
+    {
+        await SeedServerAsync(1, "alice", 11, "widget");
+        await SeedServerNoteAsync(101, 1, "original");
+        await SeedServerNoteAsync(103, 1, "doomed");
+        var options = new SyncOptions { Mode = SyncMode.LastWriteWins };
+        await Engine.SyncAsync(options, Ct);
+
+        // 101: 両側更新 → ローカルが勝つ
+        var server = await ServerNotes.GetByIdAsync(101, Ct);
+        server!.Body = "changed on server";
+        await ServerNotes.UpdateAsync(server, cancellationToken: Ct);
+        var local = await LocalNotesRaw.GetByIdAsync(101, Ct);
+        local!.Body = "changed locally";
+        await LocalNotes.UpdateAsync(local, cancellationToken: Ct);
+
+        // 103: サーバー削除 × ローカル編集 → アップロード（update→false→insert）が復活させる
+        await ServerNotes.DeleteAsync(103, Ct);
+        var doomed = await LocalNotesRaw.GetByIdAsync(103, Ct);
+        doomed!.Body = "revived";
+        await LocalNotes.UpdateAsync(doomed, cancellationToken: Ct);
+
+        var result = await Engine.SyncAsync(options, Ct);
+
+        result.Conflicts.Should().BeEmpty();
+        (await ServerNotes.GetByIdAsync(101, Ct))!.Body.Should().Be("changed locally");
+        (await ServerNotes.GetByIdAsync(103, Ct))!
+            .Body.Should()
+            .Be("revived", "後勝ちは削除とのすれ違いで行を復活させる（docs 明記の意味論）");
+    }
+
+    /// <summary>版ありテーブルも後勝ちランでは版ガードなしで上書きし、ミラー版の書き戻しでエコーしない</summary>
+    [Fact(
+        DisplayName = "[Sync/LWW] 版ありテーブルも後勝ちランでは版ガードなしで上書きし競合を報告しない"
+    )]
+    public async Task LastWriteWins_BypassesVersionGuardOnVersionedTables()
+    {
+        await SeedServerAsync(1, "alice", 11, "widget");
+        await Engine.SyncAsync(cancellationToken: Ct);
+
+        // すれ違い: サーバーとローカルの両方で注文を更新（Versioned なら ModifiedOnServer 競合になる形）
+        var server = await ServerOrders.GetByIdAsync(1, Ct);
+        server!.CustomerName = "server-edit";
+        await ServerOrders.UpdateAsync(server, cancellationToken: Ct);
+        var local = await LocalOrdersRaw.GetByIdAsync(1, Ct);
+        local!.CustomerName = "local-edit";
+        await LocalOrders.UpdateAsync(local, ConcurrencyMode.ForceOverwrite, Ct);
+
+        var lww = new SyncOptions { Mode = SyncMode.LastWriteWins };
+        var result = await Engine.SyncAsync(lww, Ct);
+
+        result.Conflicts.Should().BeEmpty();
+        result.Uploaded.Should().Be(1);
+        (await ServerOrders.GetByIdAsync(1, Ct))!.CustomerName.Should().Be("local-edit");
+
+        // ミラー版が書き戻り、次のランが自分の変更を取り戻さない
+        var second = await Engine.SyncAsync(lww, Ct);
+
+        second.Uploaded.Should().Be(0);
+        second.Downloaded.Should().Be(0, "版ありは増分＝エコーなし（版なしテーブルは空）");
+        (await LocalOrdersRaw.GetByIdAsync(1, Ct))!.CustomerName.Should().Be("local-edit");
+    }
+
+    /// <summary>版なしの子（sync_notes はカスケードナビゲーション）を含むグラフ保存も記録され、後勝ちで届く</summary>
+    [Fact(DisplayName = "[Sync/LWW] 版なしの子を含むカスケード保存も記録され後勝ちランで届く")]
+    public async Task LastWriteWins_CascadeSaveWithVersionlessChild_Uploads()
+    {
+        var order = new SyncOrderEntity { OrderId = 1, CustomerName = "alice" };
+        order.MarkAdded();
+        var note = new SyncNoteEntity
+        {
+            NoteId = 101,
+            OrderId = 1,
+            Body = "memo",
+        };
+        note.MarkAdded();
+        order.SyncNotes.Add(note);
+
+        await LocalOrders.SaveAsync(order, cancellationToken: Ct);
+
+        var result = await Engine.SyncAsync(new SyncOptions { Mode = SyncMode.LastWriteWins }, Ct);
+
+        result.Conflicts.Should().BeEmpty();
+        result.Uploaded.Should().Be(2, "注文＋版なしの子メモの両方が送られる");
+        (await ServerNotes.GetByIdAsync(101, Ct))!.Body.Should().Be("memo");
+    }
+
+    /// <summary>ラン単位の除外は今回のランから外すだけで、記録は続き次の対象ランで回収される</summary>
+    [Fact(DisplayName = "[Sync/LWW] ラン単位の除外は今回のランから外すだけで記録は残る")]
+    public async Task ExcludedEntityTypes_SkipTablesForOneRun()
+    {
+        await SeedServerAsync(1, "alice", 11, "widget");
+        await SeedServerNoteAsync(101, 1, "server note");
+        var lww = new SyncOptions { Mode = SyncMode.LastWriteWins };
+        await Engine.SyncAsync(lww, Ct);
+
+        var note = await LocalNotesRaw.GetByIdAsync(101, Ct);
+        note!.Body = "edited locally";
+        await LocalNotes.UpdateAsync(note, cancellationToken: Ct);
+
+        var excluded = new SyncOptions
+        {
+            Mode = SyncMode.LastWriteWins,
+            ExcludedEntityTypes = [typeof(SyncNoteEntity)],
+        };
+        var result = await Engine.SyncAsync(excluded, Ct);
+
+        result.Uploaded.Should().Be(0);
+        (await ServerNotes.GetByIdAsync(101, Ct))!.Body.Should().Be("server note");
+        (await Journal.CountPendingAsync(Ct)).Should().Be(1);
+
+        var inclusive = await Engine.SyncAsync(lww, Ct);
+
+        inclusive.Uploaded.Should().Be(1);
+        (await ServerNotes.GetByIdAsync(101, Ct))!.Body.Should().Be("edited locally");
+    }
+
+    /// <summary>エンジンが同期しない型の除外指定は黙殺せず拒否する（タイポ・構築時除外済みの型）</summary>
+    [Fact(
+        DisplayName = "[Sync/LWW] エンジンが知らない型の除外指定は ArgumentException で拒否される"
+    )]
+    public async Task UnknownExcludedType_IsRejected()
+    {
+        var act = async () =>
+            await Engine.SyncAsync(new SyncOptions { ExcludedEntityTypes = [typeof(string)] }, Ct);
+
+        await act.Should().ThrowAsync<System.ArgumentException>();
+    }
+
+    /// <summary>
+    /// 洗い替えの既定スコープは全テーブル（版なしテーブルも作り直す）＝「ローカルをサーバーの姿にする」の意味論。
+    /// Versioned への絞り込みは明示指定で、未送信の拒否・破棄もスコープ内のエントリだけを数える。
+    /// </summary>
+    /// <remarks>
+    /// 既定を Versioned にすると、版なし子テーブル（sync_notes）が版あり親（sync_orders）を参照する図で
+    /// 「親の全消しが版なし子の FK に阻まれる」＝既定の洗い替えが構造的に失敗する（実装時に実測で発覚し、
+    /// 既定を全テーブルへ補正した）。版ありだけの図では両者のスコープが一致するため挙動差はない。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Sync/LWW] 洗い替えの既定は全テーブル・Versioned 絞り込みは明示指定でスコープされる"
+    )]
+    public async Task Refresh_ScopesVersionlessTablesByMode()
+    {
+        await SeedServerAsync(1, "alice", 11, "widget");
+        await SeedServerNoteAsync(101, 1, "server note");
+
+        // Versioned スコープ（明示）＝メモに触れない（ローカルのメモが空なら親の全消しも FK に触れない）
+        var versionedScope = await Engine.RefreshAsync(
+            new SyncRefreshOptions
+            {
+                Mode = SyncMode.Versioned,
+                DiscardLocalUnboundedBinaries = true,
+            },
+            Ct
+        );
+
+        versionedScope
+            .Tables.Select(table => table.TableName)
+            .Should()
+            .BeEquivalentTo(["sync_orders", "sync_order_lines"]);
+        (await LocalNotesRaw.GetAllAsync(Ct)).Should().BeEmpty("版なしテーブルは対象外のまま");
+
+        // 既定（Mode 未指定＝全テーブル）で版なしも降ろし、未送信エントリを作ってから既定の洗い替えへ
+        await Engine.SyncAsync(new SyncOptions { Mode = SyncMode.LastWriteWins }, Ct);
+        await LocalNotes.InsertAsync(
+            new SyncNoteEntity
+            {
+                NoteId = 102,
+                OrderId = 1,
+                Body = "pending",
+            },
+            Ct
+        );
+
+        // 既定スコープは版なしを含む＝その未送信エントリが拒否の対象になる
+        var refuse = async () => await Engine.RefreshAsync(RefreshDefaults, Ct);
+        await refuse.Should().ThrowAsync<SyncPendingChangesException>();
+
+        var forced = await Engine.RefreshAsync(
+            new SyncRefreshOptions { DiscardLocalUnboundedBinaries = true, Force = true },
+            Ct
+        );
+
+        forced.DiscardedChanges.Should().Be(1);
+        forced
+            .Tables.Select(table => table.TableName)
+            .Should()
+            .BeEquivalentTo(["sync_orders", "sync_order_lines", "sync_notes"]);
+        (await LocalNotesRaw.GetByIdAsync(102, Ct))
+            .Should()
+            .BeNull("洗い替えでサーバーの姿へ揃った（未送信は明示破棄済み）");
+        (await LocalNotesRaw.GetByIdAsync(101, Ct)).Should().NotBeNull();
+    }
+
+    /// <summary>ジャーナルの掃除＝RemoveTableAsync は 1 テーブル・RemoveAllAsync は全部を破棄する</summary>
+    [Fact(
+        DisplayName = "[Sync] ジャーナル掃除は RemoveTableAsync＝1 テーブル・RemoveAllAsync＝全部"
+    )]
+    public async Task JournalCleanup_RemovesEntriesByTableAndWholesale()
+    {
+        await LocalOrders.InsertAsync(new SyncOrderEntity { OrderId = 1, CustomerName = "a" }, Ct);
+        await LocalNotes.InsertAsync(
+            new SyncNoteEntity
+            {
+                NoteId = 101,
+                OrderId = 1,
+                Body = "b",
+            },
+            Ct
+        );
+        (await Journal.CountPendingAsync(Ct)).Should().Be(2);
+
+        await Journal.RemoveTableAsync("sync_notes", Ct);
+
+        var entries = await Journal.ReadAllAsync(Ct);
+        entries.Should().ContainSingle(entry => entry.TableName == "sync_orders");
+
+        await Journal.RemoveAllAsync(Ct);
+
+        (await Journal.CountPendingAsync(Ct)).Should().Be(0);
+    }
+
+    /// <summary>ServerWins の全破棄はランのスコープ内だけ＝版なしテーブルの未送信は残る</summary>
+    [Fact(DisplayName = "[Sync] ServerWins の破棄はランのスコープ内だけ＝版なしの未送信は残る")]
+    public async Task ServerWins_DropsOnlyScopedEntries()
+    {
+        await SeedServerAsync(1, "alice", 11, "widget");
+        await Engine.SyncAsync(cancellationToken: Ct);
+
+        var order = await LocalOrdersRaw.GetByIdAsync(1, Ct);
+        order!.CustomerName = "local-edit";
+        await LocalOrders.UpdateAsync(order, ConcurrencyMode.ForceOverwrite, Ct);
+        await LocalNotes.InsertAsync(
+            new SyncNoteEntity
+            {
+                NoteId = 102,
+                OrderId = 1,
+                Body = "pending",
+            },
+            Ct
+        );
+
+        var result = await Engine.SyncAsync(
+            new SyncOptions { ConflictPolicy = SyncConflictPolicy.ServerWins },
+            Ct
+        );
+
+        result.Discarded.Should().Be(1, "捨てられるのはスコープ内（版あり）のエントリだけ");
+        (await Journal.CountPendingAsync(Ct))
+            .Should()
+            .Be(1, "版なしのエントリは後勝ちランまで残る");
+    }
+
     // ---- 競合 ----
 
     /// <summary>既定（収集）では競合をジャーナルへ残し、両者の値を添えて報告する</summary>
@@ -917,7 +1308,7 @@ public abstract class SyncRuntimeTestsBase : IAsyncLifetime
         result
             .Tables.Select(table => table.TableName)
             .Should()
-            .Equal("sync_orders", "sync_order_lines");
+            .Equal("sync_orders", "sync_order_lines", "sync_notes");
         result.Elapsed.Should().BeGreaterThan(TimeSpan.Zero);
 
         var orders = await LocalOrdersRaw.GetAllAsync(Ct);

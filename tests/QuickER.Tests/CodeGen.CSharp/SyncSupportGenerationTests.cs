@@ -459,9 +459,80 @@ public class SyncSupportGenerationTests
             );
     }
 
-    /// <summary>行バージョン列を持つテーブルが 1 つも無い図では生成時エラーになる。</summary>
-    [Fact(DisplayName = "行バージョン列を持つテーブルが無ければ同期支援は生成時エラー")]
-    public void SyncSupport_RequiresAtLeastOneRowVersionTable()
+    /// <summary>
+    /// 混在図（版あり 2＋版なし 1）の版なしテーブルは、後勝ち専用の生成形になる。
+    /// </summary>
+    /// <remarks>
+    /// 名指しする形＝①記述子は <c>VersionlessSyncTable</c> 派生（版・アンカー系メンバーなし）②直結ソースは
+    /// キー順ページング（<c>GetFirstPageAsync</c>／<c>GetPageAfterAsync</c>）で ceiling は null・change stream は
+    /// <c>NotSupportedException</c> ③デコレータの Delete は事前読みなしで null 版を記録 ④サーバーの同期
+    /// エンドポイントは版なしテーブルだけ <c>MapVersionlessSyncEndpoints</c>（SyncPage＋SyncKeys）を張る。
+    /// </remarks>
+    [Fact(
+        DisplayName = "混在図の版なしテーブルは後勝ち専用の生成形（記述子・ソース・エンドポイント）になる"
+    )]
+    public void MixedDiagram_EmitsVersionlessShapes()
+    {
+        var (files, diagnostics) = Generate(Diagram(), SyncOptions());
+
+        diagnostics.Should().NotContain(d => d.Severity == GenerationDiagnosticSeverity.Error);
+        var content = string.Concat(files.Values);
+
+        // ① 記述子の基底が版の有無で分かれる
+        content.Should().Contain(": VersionlessSyncTable<SyncNoteEntity, int>(");
+        content.Should().Contain(": SyncTable<SyncOrderEntity, int>(");
+
+        // ② 直結ソース＝キー順ページング（版なしのみ）
+        var noteSource = ExtractClass(content, "public sealed class SyncNoteDirectSyncSource");
+        noteSource.Should().Contain("GetFirstPageAsync");
+        noteSource.Should().Contain("WHERE [note_id] > @afterKey ORDER BY [note_id]");
+        noteSource.Should().Contain("Task.FromResult<byte[]?>(null)");
+        var orderSource = ExtractClass(content, "public sealed class SyncOrderDirectSyncSource");
+        orderSource.Should().Contain("MIN_ACTIVE_ROWVERSION()");
+        orderSource.Should().NotContain("GetFirstPageAsync");
+
+        // ③ 版なしデコレータの Delete は事前読みなし・null 版で記録する
+        var noteDecorator = ExtractClass(
+            content,
+            "public sealed class JournalingSyncNoteRepository"
+        );
+        noteDecorator.Should().NotContain("GetByIdAsync(id, cancellationToken).ConfigureAwait");
+        var orderDecorator = ExtractClass(
+            content,
+            "public sealed class JournalingSyncOrderRepository"
+        );
+        orderDecorator
+            .Should()
+            .Contain("var existing = await inner.GetByIdAsync(id, cancellationToken)");
+
+        // ④ サーバー側エンドポイントの選別（版あり＝3 本・版なし＝SyncPage＋SyncKeys）
+        var server = files[SyncFixtureDefinition.RemoteServerOutputFileName];
+        server.Should().Contain("MapSyncEndpoints<SyncOrderEntity, int>(group, \"SyncOrder\");");
+        server
+            .Should()
+            .Contain("MapVersionlessSyncEndpoints<SyncNoteEntity, int>(group, \"SyncNote\");");
+        server.Should().NotContain("MapVersionlessSyncEndpoints<SyncOrderEntity");
+
+        // Info 診断は版なしテーブルを後勝ち専用として名指しする
+        diagnostics
+            .Should()
+            .Contain(d =>
+                d.Severity == GenerationDiagnosticSeverity.Info
+                && d.Message.Contains("sync_notes")
+                && (d.Message.Contains("後勝ち") || d.Message.Contains("last-write-wins"))
+            );
+    }
+
+    /// <summary>
+    /// rowversion 列を 1 つも持たない図でも生成は成立する（全テーブルが後勝ち専用の版なしテーブルになる）。
+    /// </summary>
+    /// <remarks>
+    /// かつては「rowversion 列を持つテーブルが 1 つも無い＝生成時エラー」だったが、版なしテーブルの後勝ち同期
+    /// 対応で列の有無は「対象かどうか」でなく「モード素材」になった。全版なし図は LastWriteWins ラン専用の
+    /// 生成物として有効で、記述子は VersionlessSyncTable 派生になる。
+    /// </remarks>
+    [Fact(DisplayName = "rowversion 列が 1 つも無い図でも同期支援は生成できる（全テーブル後勝ち）")]
+    public void SyncSupport_AllowsAllVersionlessDiagram()
     {
         var diagram = Diagram();
 
@@ -470,13 +541,34 @@ public class SyncSupportGenerationTests
             entity.Columns.RemoveAll(column => column.DataType == "rowversion");
         }
 
+        var (files, diagnostics) = Generate(diagram, SyncOptions());
+
+        diagnostics.Should().NotContain(d => d.Severity == GenerationDiagnosticSeverity.Error);
+        var content = string.Concat(files.Values);
+        content.Should().Contain(": VersionlessSyncTable<SyncOrderEntity, int>(");
+        content.Should().NotContain(": SyncTable<SyncOrderEntity, int>(");
+    }
+
+    /// <summary>
+    /// 同期可能なテーブル（Repository 契約が生成される単一主キーのテーブル）が 1 つも無い図では生成時エラーになる。
+    /// </summary>
+    [Fact(DisplayName = "同期可能なテーブルが 1 つも無ければ同期支援は生成時エラー")]
+    public void SyncSupport_RequiresAtLeastOneEligibleTable()
+    {
+        var diagram = Diagram();
+
+        // 全テーブルを複合主キー化して Repository 契約の生成対象から外す＝同期可能テーブル 0 件の図を作る
+        foreach (var entity in diagram.Entities)
+        {
+            foreach (var column in entity.Columns)
+            {
+                column.IsPrimaryKey = column.DataType != "rowversion";
+            }
+        }
+
         var (_, diagnostics) = Generate(diagram, SyncOptions());
 
-        diagnostics
-            .Should()
-            .Contain(d =>
-                d.Severity == GenerationDiagnosticSeverity.Error && d.Message.Contains("rowversion")
-            );
+        diagnostics.Should().Contain(d => d.Severity == GenerationDiagnosticSeverity.Error);
     }
 
     /// <summary>

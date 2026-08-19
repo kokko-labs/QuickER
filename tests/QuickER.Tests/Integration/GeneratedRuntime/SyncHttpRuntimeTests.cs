@@ -37,11 +37,13 @@ public sealed class SyncHttpRuntimeTests : SyncRuntimeTestsBase
     /// <inheritdoc />
     protected override async Task<(
         ISyncServerSource<SyncOrderEntity, int> Orders,
-        ISyncServerSource<SyncOrderLineEntity, int> Lines
+        ISyncServerSource<SyncOrderLineEntity, int> Lines,
+        ISyncServerSource<SyncNoteEntity, int> Notes
     )> CreateServerSourcesAsync()
     {
         var serverOrderSource = CreateOrderTestSource();
         var serverLineSource = CreateLineTestSource();
+        var serverNoteSource = CreateNoteTestSource();
 
         _remoteServer = await InProcessRemoteServer.StartAsync(
             services =>
@@ -51,14 +53,19 @@ public sealed class SyncHttpRuntimeTests : SyncRuntimeTestsBase
                 services.AddSingleton<ISyncServerSource<SyncOrderLineEntity, int>>(
                     serverLineSource
                 );
+                services.AddSingleton<ISyncServerSource<SyncNoteEntity, int>>(serverNoteSource);
 
                 // アップロード（既存の CRUD／保存エンドポイント）が使う面。版採番ラッパーを噛ませる
+                // （版なしのメモは採番なし＝素のリポジトリへ委譲するだけのアダプタ）
                 services.AddScoped<ISyncOrderRemoteRepository>(
                     _ => new SyncTestOrderRemoteRepository(ServerOrders, ServerOrderBlobs)
                 );
                 services.AddScoped<ISyncOrderLineRemoteRepository>(
                     _ => new SyncTestOrderLineRemoteRepository(ServerLines)
                 );
+                services.AddScoped<ISyncNoteRemoteRepository>(_ => new SyncTestNoteRemoteRepository(
+                    ServerNotes
+                ));
             },
             app => app.MapGeneratedRemoteEndpoints(),
             Ct
@@ -70,7 +77,8 @@ public sealed class SyncHttpRuntimeTests : SyncRuntimeTestsBase
 
         return (
             _clientProvider.GetRequiredService<ISyncServerSource<SyncOrderEntity, int>>(),
-            _clientProvider.GetRequiredService<ISyncServerSource<SyncOrderLineEntity, int>>()
+            _clientProvider.GetRequiredService<ISyncServerSource<SyncOrderLineEntity, int>>(),
+            _clientProvider.GetRequiredService<ISyncServerSource<SyncNoteEntity, int>>()
         );
     }
 

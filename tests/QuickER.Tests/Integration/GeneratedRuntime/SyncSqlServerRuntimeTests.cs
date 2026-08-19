@@ -108,6 +108,103 @@ public sealed class SyncSqlServerRuntimeTests(
     }
 
     /// <summary>
+    /// 実 SQL Server 上の版なしテーブル＝後勝ちランの全量ダウンロード（TOP＋キー順ページング）とアップロード。
+    /// </summary>
+    /// <remarks>
+    /// CI 常時の SQLite サーバー役はキー順ページングを LIMIT で代役するため、生成された
+    /// <c>SELECT TOP (@batchSize) ... WHERE [note_id] &gt; @afterKey ORDER BY [note_id]</c> が本物の
+    /// SQL Server で動くことはここでしか確かめられない。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Sync/SqlServer] 版なしテーブルは後勝ちランで実サーバーと往復する（キー順 TOP ページング）"
+    )]
+    public async Task LastWriteWins_RoundTripsVersionlessTableAgainstRealServer()
+    {
+        var serverNotes = _provider.GetRequiredKeyedService<ISyncNoteRepository>(ServerKey);
+        var localNotes = _provider.GetRequiredKeyedService<ISyncNoteRepository>(LocalKey);
+        await ServerOrders()
+            .InsertAsync(new SyncOrderEntity { OrderId = 1, CustomerName = "alice" }, Ct);
+        await serverNotes.InsertAsync(
+            new SyncNoteEntity
+            {
+                NoteId = 101,
+                OrderId = 1,
+                Body = "server note",
+            },
+            Ct
+        );
+
+        var lww = new SyncOptions { Mode = SyncMode.LastWriteWins };
+        var result = await Engine().SyncAsync(lww, Ct);
+
+        result.Conflicts.Should().BeEmpty();
+        (await localNotes.GetByIdAsync(101, Ct))!.Body.Should().Be("server note");
+
+        // ローカル編集（更新＋追加）が後勝ちで実サーバーへ届き、ジャーナルが決着する
+        var local = await localNotes.GetByIdAsync(101, Ct);
+        local!.Body = "edited locally";
+        await localNotes.UpdateAsync(local, cancellationToken: Ct);
+        await localNotes.InsertAsync(
+            new SyncNoteEntity
+            {
+                NoteId = 102,
+                OrderId = 1,
+                Body = "new local",
+            },
+            Ct
+        );
+
+        var second = await Engine().SyncAsync(lww, Ct);
+
+        second.Uploaded.Should().Be(2);
+        (await serverNotes.GetByIdAsync(101, Ct))!.Body.Should().Be("edited locally");
+        (await serverNotes.GetByIdAsync(102, Ct))!.Body.Should().Be("new local");
+        (await Journal().CountPendingAsync(Ct)).Should().Be(0);
+
+        // バッチ 1 でも全量が取り切れる＝実 SQL Server の TOP＋キー比較＋継続判定の実地検証
+        var paged = await Engine()
+            .SyncAsync(
+                new SyncOptions { Mode = SyncMode.LastWriteWins, DownloadBatchSize = 1 },
+                Ct
+            );
+
+        paged.Downloaded.Should().Be(2, "メモ全量（2 行）が 1 行バッチの継続取得で降りる");
+    }
+
+    /// <summary>実 rowversion の版ガードを後勝ちランは通過し、書き戻った版で次のランがエコーしない</summary>
+    [Fact(
+        DisplayName = "[Sync/SqlServer] 後勝ちランは実 rowversion の版ガードなしで上書きしエコーもしない"
+    )]
+    public async Task LastWriteWins_OverwritesDespiteRealRowVersion()
+    {
+        await ServerOrders()
+            .InsertAsync(new SyncOrderEntity { OrderId = 1, CustomerName = "alice" }, Ct);
+        await Engine().SyncAsync(cancellationToken: Ct);
+
+        // すれ違い（Versioned なら ModifiedOnServer 競合になる形）
+        var server = await ServerOrders().GetByIdAsync(1, Ct);
+        server!.CustomerName = "server-edit";
+        await ServerOrders().UpdateAsync(server, cancellationToken: Ct);
+        var local = await LocalOrders().GetByIdAsync(1, Ct);
+        local!.CustomerName = "local-edit";
+        await LocalOrders().UpdateAsync(local, ConcurrencyMode.ForceOverwrite, Ct);
+
+        var lww = new SyncOptions { Mode = SyncMode.LastWriteWins };
+        var result = await Engine().SyncAsync(lww, Ct);
+
+        result.Conflicts.Should().BeEmpty();
+        result.Uploaded.Should().Be(1);
+        (await ServerOrders().GetByIdAsync(1, Ct))!.CustomerName.Should().Be("local-edit");
+
+        var second = await Engine().SyncAsync(lww, Ct);
+
+        second.Uploaded.Should().Be(0);
+        second
+            .Downloaded.Should()
+            .Be(0, "実 rowversion の書き戻しでアンカーが進んでいる＝自分の変更を取り戻さない");
+    }
+
+    /// <summary>
     /// 実 rowversion に対する初回同期＝サーバーの全行がローカルへ降り、DB 採番の版がミラー列へ入る。
     /// </summary>
     [Fact(

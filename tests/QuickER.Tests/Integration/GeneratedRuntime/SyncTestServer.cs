@@ -271,6 +271,75 @@ internal sealed class SyncTestServerSource<TEntity, TKey>(
 }
 
 /// <summary>
+/// サーバー役（2 つ目の SQLite DB）に対する<b>版なしテーブル</b>の差分ソース。生成される直結実装の
+/// SQL Server 版（キー順ページング）と同じ意味論を SQLite の語彙で表現する。
+/// </summary>
+/// <remarks>
+/// 版なしテーブルに版の change stream は無いため、<c>GetChangesAsync</c> は生成側と同じく
+/// <see cref="NotSupportedException"/>・上限（ceiling）は常に null。ダウンロードはキー昇順の全量走査で、
+/// 継続フラグの決め方（満杯のバッチ＝まだ続きがあり得る）も生成側と同じ。
+/// </remarks>
+/// <typeparam name="TEntity">エンティティ型</typeparam>
+/// <typeparam name="TKey">主キー型</typeparam>
+internal sealed class SyncTestVersionlessServerSource<TEntity, TKey>(
+    ISqlExecutor serverSqlExecutor,
+    IRepository<TEntity, TKey> writer,
+    string firstPageSql,
+    string pageAfterSql,
+    string keysSql
+) : ISyncServerSource<TEntity, TKey>
+    where TEntity : EntityBase, new()
+{
+    public IRemoteRepository<TEntity, TKey> Writer => writer;
+
+    public Task<byte[]?> GetChangeCeilingAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult<byte[]?>(null);
+
+    public Task<SyncChangeBatch<TEntity>> GetChangesAsync(
+        byte[]? anchor,
+        byte[]? ceiling,
+        int batchSize,
+        CancellationToken cancellationToken = default
+    ) =>
+        throw new NotSupportedException(
+            "The table has no version column; its download pages by primary key."
+        );
+
+    public async Task<SyncChangeBatch<TEntity>> GetFirstPageAsync(
+        int batchSize,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var rows = await serverSqlExecutor.QueryBySqlAsync<TEntity>(
+            firstPageSql,
+            new { batchSize },
+            cancellationToken
+        );
+
+        return new SyncChangeBatch<TEntity>(rows, rows.Count >= batchSize);
+    }
+
+    public async Task<SyncChangeBatch<TEntity>> GetPageAfterAsync(
+        TKey afterKey,
+        int batchSize,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var rows = await serverSqlExecutor.QueryBySqlAsync<TEntity>(
+            pageAfterSql,
+            new { afterKey, batchSize },
+            cancellationToken
+        );
+
+        return new SyncChangeBatch<TEntity>(rows, rows.Count >= batchSize);
+    }
+
+    public Task<IReadOnlyList<TKey>> GetAllKeysAsync(
+        CancellationToken cancellationToken = default
+    ) => serverSqlExecutor.QueryProjectionBySqlAsync<TKey>(keysSql, null, cancellationToken);
+}
+
+/// <summary>
 /// サーバー役をリモートエンドポイントの背後へ置くための、リモート面だけの薄いアダプタ。
 /// </summary>
 /// <remarks>
@@ -399,6 +468,31 @@ internal static class SyncTestServerSources
             LineChangesSql,
             LineKeysSql
         );
+
+    /// <summary>メモ（版なしテーブル）の先頭ページ取得 SQL（キー昇順＝生成される SQL Server 版と同じ意味論）</summary>
+    public const string NoteFirstPageSql =
+        "SELECT * FROM \"sync_notes\" ORDER BY \"note_id\" LIMIT @batchSize";
+
+    /// <summary>メモの続きページ取得 SQL（<c>@afterKey</c> より上のキーだけ）</summary>
+    public const string NotePageAfterSql =
+        "SELECT * FROM \"sync_notes\" WHERE \"note_id\" > @afterKey "
+        + "ORDER BY \"note_id\" LIMIT @batchSize";
+
+    /// <summary>メモのキー取得 SQL</summary>
+    public const string NoteKeysSql = "SELECT \"note_id\" FROM \"sync_notes\"";
+
+    /// <summary>メモ（版なしテーブル）の差分ソースを組み立てる（版採番ラッパーは要らない＝素のリポジトリが writer）</summary>
+    public static ISyncServerSource<SyncNoteEntity, int> CreateNotes(
+        ISqlExecutor serverSql,
+        IRepository<SyncNoteEntity, int> writer
+    ) =>
+        new SyncTestVersionlessServerSource<SyncNoteEntity, int>(
+            serverSql,
+            writer,
+            NoteFirstPageSql,
+            NotePageAfterSql,
+            NoteKeysSql
+        );
 }
 
 /// <summary>
@@ -502,6 +596,17 @@ internal sealed class SyncTestOrderLineRemoteRepository(IRepository<SyncOrderLin
 {
     public Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
         SyncOrderLineEntity entity,
+        CancellationToken cancellationToken = default
+    ) => Task.FromResult<IReadOnlyList<UniquenessViolation>>([]);
+}
+
+/// <summary>メモ（版なし）テーブルのリモート面アダプタ（版採番なし＝素のリポジトリへ委譲するだけ）</summary>
+internal sealed class SyncTestNoteRemoteRepository(IRepository<SyncNoteEntity, int> inner)
+    : SyncTestRemoteServerRepository<SyncNoteEntity, int>(inner),
+        ISyncNoteRemoteRepository
+{
+    public Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
+        SyncNoteEntity entity,
         CancellationToken cancellationToken = default
     ) => Task.FromResult<IReadOnlyList<UniquenessViolation>>([]);
 }

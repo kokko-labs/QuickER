@@ -41,15 +41,33 @@ internal sealed class CSharpGenerationModel
     public string SyncGraphRecorder { get; init; } = string.Empty;
 }
 
-/// <summary>1 つの同期対象テーブル（<c>rowversion</c> 列を持つテーブル）の生成モデル</summary>
+/// <summary>1 つの同期対象テーブル（Repository 契約を持つ単一主キーのテーブル）の生成モデル</summary>
 /// <remarks>
+/// <para>
 /// 同期支援は「サーバー（SQL Server）＋ローカル（SQLite）」の 2 方言を同時に扱うため、方言別のクォート規則を
 /// テンプレートのスコープ変数（<c>quote_open</c> 等）から得られない。SQL 文はここで両方言分を組み立てて渡す。
+/// </para>
+/// <para>
+/// rowversion 列の有無はモード素材（版あり＝増分＋競合検出／版なし＝後勝ち・全量）で、対象かどうかは決めない。
+/// 版なしテーブルでは版・アンカー系のプロパティが空文字（テンプレートの <c>is_versionless</c> 分岐で参照されない）。
+/// </para>
 /// </remarks>
 internal sealed class CSharpSyncTableModel
 {
     /// <summary>対象の Entity クラス名（例 <c>SyncItemEntity</c>）</summary>
     public required string EntityClassName { get; init; }
+
+    /// <summary>rowversion 列を持たないテーブルか（後勝ちモード専用＝キー順全量ダウンロード・版ガードなし）</summary>
+    public required bool IsVersionless { get; init; }
+
+    /// <summary>記述子が継承する固定基底のクラス名（<c>SyncTable</c> または <c>VersionlessSyncTable</c>）</summary>
+    public required string TableBaseClassName { get; init; }
+
+    /// <summary>版なしテーブルの先頭ページ取得 SQL（C# 文字列リテラル・SQL Server クォート・キー昇順。版ありでは空文字）</summary>
+    public required string ServerPageFirstSql { get; init; }
+
+    /// <summary>版なしテーブルの続きページ取得 SQL（C# 文字列リテラル・<c>@afterKey</c> より上・キー昇順。版ありでは空文字）</summary>
+    public required string ServerPageAfterSql { get; init; }
 
     /// <summary>対象の Repository 契約インターフェイス名（例 <c>ISyncItemRepository</c>）</summary>
     public required string InterfaceName { get; init; }

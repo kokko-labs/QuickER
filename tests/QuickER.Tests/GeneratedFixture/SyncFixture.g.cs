@@ -610,6 +610,10 @@ public partial class SyncOrderEntity : EntityBase
     /// <summary>SyncOrderLines navigation property</summary>
     [NavigationReference("sync_orders", "order_id", "sync_order_lines", "order_id", true, true, false, ConstraintName = "FK_sync_order_lines_sync_orders")]
     public ICollection<SyncOrderLineEntity> SyncOrderLines { get; set; } = new List<SyncOrderLineEntity>();
+
+    /// <summary>SyncNotes navigation property</summary>
+    [NavigationReference("sync_orders", "order_id", "sync_notes", "order_id", true, true, false, ConstraintName = "FK_sync_notes_sync_orders")]
+    public ICollection<SyncNoteEntity> SyncNotes { get; set; } = new List<SyncNoteEntity>();
 }
 
 /// <summary>Entity for the sync_order_lines table</summary>
@@ -646,6 +650,37 @@ public partial class SyncOrderLineEntity : EntityBase
     /// <summary>SyncOrder navigation property</summary>
     [JsonIgnore]
     [NavigationReference("sync_orders", "order_id", "sync_order_lines", "order_id", false, false, true, ConstraintName = "FK_sync_order_lines_sync_orders")]
+    public SyncOrderEntity SyncOrder { get; set; } = null!;
+}
+
+/// <summary>Entity for the sync_notes table</summary>
+[Table("sync_notes")]
+public partial class SyncNoteEntity : EntityBase
+{
+    /// <summary>Property for the note_id column</summary>
+    [Key]
+    [Column("note_id")]
+    [SqlColumnType(SqlDbType.Int)]
+    [DbColumnMeta("int32")]
+    public int NoteId { get; set; }
+
+    /// <summary>Property for the order_id column</summary>
+    [Column("order_id")]
+    [SqlColumnType(SqlDbType.Int)]
+    [DbColumnMeta("int32")]
+    public int OrderId { get; set; }
+
+    /// <summary>Property for the body column</summary>
+    [Column("body")]
+    [Required]
+    [MaxLength(100)]
+    [SqlColumnType(SqlDbType.NVarChar, Size = 100)]
+    [DbColumnMeta("string(100)")]
+    public string Body { get; set; } = string.Empty;
+
+    /// <summary>SyncOrder navigation property</summary>
+    [JsonIgnore]
+    [NavigationReference("sync_orders", "order_id", "sync_notes", "order_id", false, false, true, ConstraintName = "FK_sync_notes_sync_orders")]
     public SyncOrderEntity SyncOrder { get; set; } = null!;
 }
 
@@ -3586,6 +3621,28 @@ public partial interface ISyncOrderLineRepository
     : ISyncOrderLineRemoteRepository,
         IRepository<SyncOrderLineEntity, int> { }
 
+/// <summary>Remote surface of the SyncNoteEntity repository (only CRUD, save, and named queries that can cross a network boundary; swappable for a remote implementation later).</summary>
+public partial interface ISyncNoteRemoteRepository : IRemoteRepository<SyncNoteEntity, int>
+{
+    /// <summary>Checks the UNIQUE constraints of sync_notes against the database and returns the violations (an empty list when there are none).</summary>
+    /// <remarks>
+    /// Rows that share the entity's primary key are excluded, so the same call is correct for both insert and update (an entity whose key is not set yet excludes nothing). Constraint member values that contain
+    /// a null are skipped (NULL collision semantics differ per dialect). The result is advisory only: the definitive guarantee is the database's own UNIQUE
+    /// constraint, and a concurrent insert between this check and the save can still make the save fail (TOCTOU).
+    /// </remarks>
+    /// <param name="entity">The entity whose constraint member values are checked.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
+        SyncNoteEntity entity,
+        CancellationToken cancellationToken = default
+    );
+}
+
+/// <summary>Repository interface for SyncNoteEntity (the full-featured surface = the remote surface plus expression-tree queries, raw SQL, and bulk insert).</summary>
+public partial interface ISyncNoteRepository
+    : ISyncNoteRemoteRepository,
+        IRepository<SyncNoteEntity, int> { }
+
 /// <summary>HTTP client implementation of the remote surface (ISyncOrderRemoteRepository) for SyncOrderEntity.</summary>
 /// <remarks>Calls the server-side <c>MapGeneratedRemoteEndpoints</c> endpoints. The HttpClient's BaseAddress must include the prefix (default /quicker/).</remarks>
 public sealed partial class HttpSyncOrderRemoteRepository(HttpClient httpClient)
@@ -3611,6 +3668,16 @@ public sealed partial class HttpSyncOrderLineRemoteRepository(HttpClient httpCli
 {
     /// <summary>Checks the UNIQUE constraints of sync_order_lines against the database and returns the violations (an empty list when there are none). The check, including any user-defined hooks, runs in the server-side repository.</summary>
     public Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(SyncOrderLineEntity entity, CancellationToken cancellationToken = default) =>
+        InvokeAsync<IReadOnlyList<UniquenessViolation>>("CheckUniqueness", new { entity }, cancellationToken);
+}
+
+/// <summary>HTTP client implementation of the remote surface (ISyncNoteRemoteRepository) for SyncNoteEntity.</summary>
+/// <remarks>Calls the server-side <c>MapGeneratedRemoteEndpoints</c> endpoints. The HttpClient's BaseAddress must include the prefix (default /quicker/).</remarks>
+public sealed partial class HttpSyncNoteRemoteRepository(HttpClient httpClient)
+    : HttpRemoteRepository<SyncNoteEntity, int>(httpClient, "SyncNote"), ISyncNoteRemoteRepository
+{
+    /// <summary>Checks the UNIQUE constraints of sync_notes against the database and returns the violations (an empty list when there are none). The check, including any user-defined hooks, runs in the server-side repository.</summary>
+    public Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(SyncNoteEntity entity, CancellationToken cancellationToken = default) =>
         InvokeAsync<IReadOnlyList<UniquenessViolation>>("CheckUniqueness", new { entity }, cancellationToken);
 }
 
@@ -3723,6 +3790,9 @@ public static class GeneratedHttpRemoteRepositoryServiceCollectionExtensions
         services.AddScoped<ISyncOrderLineRemoteRepository>(provider => new HttpSyncOrderLineRemoteRepository(
             httpClientFactory(provider)
         ));
+        services.AddScoped<ISyncNoteRemoteRepository>(provider => new HttpSyncNoteRemoteRepository(
+            httpClientFactory(provider)
+        ));
 
         return services;
     }
@@ -3826,6 +3896,10 @@ public static class GeneratedHttpRemoteRepositoryServiceCollectionExtensions
             serviceKey,
             (provider, _) => new HttpSyncOrderLineRemoteRepository(httpClientFactory(provider))
         );
+        services.AddKeyedScoped<ISyncNoteRemoteRepository>(
+            serviceKey,
+            (provider, _) => new HttpSyncNoteRemoteRepository(httpClientFactory(provider))
+        );
 
         return services;
     }
@@ -3918,9 +3992,43 @@ public readonly record struct SyncUploadOutcome(bool Sent, SyncConflict? Conflic
     public static SyncUploadOutcome Conflicted(SyncConflict conflict) => new(false, conflict);
 }
 
+/// <summary>How one run treats versions and conflicts.</summary>
+public enum SyncMode
+{
+    /// <summary>
+    /// Versioned differential sync (the default): tables with a version column sync incrementally under version
+    /// guards, and tables without one take no part in the run. This is the pre-existing behaviour, unchanged.
+    /// </summary>
+    Versioned,
+
+    /// <summary>
+    /// Last-write-wins: every table takes part. Uploads overwrite the server unconditionally - an update that finds
+    /// no row inserts it, a delete needs no version - so nothing is ever reported as a conflict, and
+    /// <see cref="SyncOptions.ConflictPolicy"/> is ignored. Tables without a version column download as a full
+    /// key-ordered scan on every run; tables with one still download incrementally, because the result is the same
+    /// and the transfer is smaller. The winner is whoever <i>uploads</i> last, not whoever edited last, and a lost
+    /// update is neither detected nor reported - that is the trade this mode names.
+    /// </summary>
+    LastWriteWins,
+}
+
 /// <summary>Knobs for one sync run.</summary>
 public sealed class SyncOptions
 {
+    /// <summary>How versions and conflicts are treated in this run (default <see cref="SyncMode.Versioned"/>).</summary>
+    public SyncMode Mode { get; init; } = SyncMode.Versioned;
+
+    /// <summary>The entity types this run leaves out entirely (upload, download, and delete propagation alike).</summary>
+    /// <remarks>
+    /// This is a per-run scope, not a way to keep a table local: the journaling decorators keep recording the
+    /// excluded tables' writes, and the next run that includes them replays what accumulated. A table that should
+    /// never sync is excluded where the engine is put together instead (the <c>excludeFromSync</c> argument of
+    /// <c>AddGeneratedSyncEngine</c>), which also stops the recording. A type the engine does not synchronise -
+    /// including one excluded at construction - is rejected with <see cref="ArgumentException"/> rather than
+    /// silently skipped.
+    /// </remarks>
+    public IReadOnlyCollection<Type> ExcludedEntityTypes { get; init; } = [];
+
     /// <summary>How many rows one download batch fetches and applies in a single local transaction (default 500).</summary>
     public int DownloadBatchSize { get; init; } = 500;
 
@@ -3936,7 +4044,8 @@ public sealed class SyncOptions
     /// journal does: <b>a row written into a synchronised table without going through the generated repositories - raw
     /// SQL above all - has no entry, and while this is on it is deleted on the next run</b>, because from the key set's
     /// point of view it is a row the server does not have. Rows the local database is meant to keep to itself belong in
-    /// a table that is not synchronised (one without a version column).
+    /// a table that is not synchronised (one excluded where the engine is put together - the <c>excludeFromSync</c>
+    /// argument of <c>AddGeneratedSyncEngine</c>).
     /// </para>
     /// </remarks>
     public bool PropagateDeletes { get; init; } = true;
@@ -3988,6 +4097,32 @@ public sealed record SyncResult(
 /// <summary>Knobs for one refresh run.</summary>
 public sealed class SyncRefreshOptions
 {
+    /// <summary>Which tables the refresh covers (default <see cref="SyncMode.LastWriteWins"/> = every synchronised table).</summary>
+    /// <remarks>
+    /// <para>
+    /// A refresh has no upload, so the mode is purely a scope here - and unlike an ordinary run, the default takes
+    /// everything: a refresh rebuilds the local database as a copy of the server's, and leaving the versionless
+    /// tables out of that rebuild would keep stale rows pointing at parents the wipe is about to remove (a foreign
+    /// key failure whenever a versionless table references a versioned one). On a diagram whose tables all carry a
+    /// version column the two defaults cover the same set, so nothing changes there.
+    /// </para>
+    /// <para>
+    /// <see cref="SyncMode.Versioned"/> narrows the refresh to the versioned tables. That is sound only while no
+    /// versionless row references a versioned table being rebuilt - the scope is the caller's to choose soundly.
+    /// The unsent-changes refusal and the forced discard follow the scope either way: entries of tables outside
+    /// this refresh are neither counted nor dropped.
+    /// </para>
+    /// </remarks>
+    public SyncMode Mode { get; init; } = SyncMode.LastWriteWins;
+
+    /// <summary>The entity types this refresh leaves out (neither emptied nor reloaded).</summary>
+    /// <remarks>
+    /// The same per-run scope as <see cref="SyncOptions.ExcludedEntityTypes"/>, with the same rejection of a type the
+    /// engine does not synchronise. Leaving a parent table out while reloading its children can break a foreign key
+    /// mid-run; the scope is the caller's to choose soundly.
+    /// </remarks>
+    public IReadOnlyCollection<Type> ExcludedEntityTypes { get; init; } = [];
+
     /// <summary>How many rows one batch fetches from the server and writes locally (default 2000).</summary>
     /// <remarks>
     /// <para>
@@ -4342,6 +4477,52 @@ public sealed class SyncJournal
             .ConfigureAwait(false);
     }
 
+    /// <summary>Removes every entry of one table, discarding the unsent local changes it held.</summary>
+    /// <remarks>
+    /// <para>
+    /// This is journal maintenance for a table that is no longer synchronised - one excluded where the engine is put
+    /// together after entries had already accumulated. Such entries can never be replayed (no run knows the table),
+    /// yet they count as unsent changes and block <see cref="SyncEngine.RefreshAsync"/> for ever. Removing them is
+    /// the deliberate statement that those local edits will never reach the server.
+    /// </para>
+    /// <para>
+    /// Do not call it while a sync run is in flight: the run reads the journal once at its start and settles entries
+    /// by id, and removing rows underneath it makes the two views disagree.
+    /// </para>
+    /// </remarks>
+    /// <param name="tableName">The table whose entries are dropped.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    public async Task RemoveTableAsync(
+        string tableName,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(tableName);
+        await EnsureCreatedAsync(cancellationToken).ConfigureAwait(false);
+        await _localSqlExecutor
+            .ExecuteSqlAsync(
+                "DELETE FROM quicker_sync_journal WHERE table_name = @tableName",
+                new { tableName },
+                cancellationToken
+            )
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>Removes every entry of every table, discarding all unsent local changes.</summary>
+    /// <remarks>
+    /// The whole-journal counterpart of <see cref="RemoveTableAsync"/>, with the same warnings: it is what
+    /// <see cref="SyncConflictPolicy.ServerWins"/> does to the journal at upload time, done without a run. The next
+    /// download simply makes the local rows match the server's.
+    /// </remarks>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    public async Task RemoveAllAsync(CancellationToken cancellationToken = default)
+    {
+        await EnsureCreatedAsync(cancellationToken).ConfigureAwait(false);
+        await _localSqlExecutor
+            .ExecuteSqlAsync("DELETE FROM quicker_sync_journal", null, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
     /// <summary>Counts the entries still waiting to be uploaded.</summary>
     public async Task<int> CountPendingAsync(CancellationToken cancellationToken = default)
     {
@@ -4454,6 +4635,35 @@ public interface ISyncServerSource<TEntity, TKey>
         CancellationToken cancellationToken = default
     );
 
+    /// <summary>Gets the first batch of rows in ascending primary-key order (the versionless full scan).</summary>
+    /// <remarks>
+    /// A table without a version column has no change stream to resume, so its download reads every row, paged by the
+    /// primary key. The default refuses rather than answers: a source written for a versioned table has no key-ordered
+    /// SQL to serve it with, and only the generated versionless sources override it.
+    /// </remarks>
+    /// <param name="batchSize">The maximum number of rows to return.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    Task<SyncChangeBatch<TEntity>> GetFirstPageAsync(
+        int batchSize,
+        CancellationToken cancellationToken = default
+    ) =>
+        throw new NotSupportedException(
+            "This source does not page by primary key; it serves a versioned table."
+        );
+
+    /// <summary>Gets the next batch of rows whose primary key is above <paramref name="afterKey"/>, in ascending key order.</summary>
+    /// <param name="afterKey">The last key of the previous batch (the exclusive lower bound).</param>
+    /// <param name="batchSize">The maximum number of rows to return.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    Task<SyncChangeBatch<TEntity>> GetPageAfterAsync(
+        TKey afterKey,
+        int batchSize,
+        CancellationToken cancellationToken = default
+    ) =>
+        throw new NotSupportedException(
+            "This source does not page by primary key; it serves a versioned table."
+        );
+
     /// <summary>Gets every primary key the server holds for this table (the input to delete propagation).</summary>
     Task<IReadOnlyList<TKey>> GetAllKeysAsync(CancellationToken cancellationToken = default);
 
@@ -4480,6 +4690,15 @@ public interface ISyncTable
 {
     /// <summary>The table name, as it appears in the journal.</summary>
     string TableName { get; }
+
+    /// <summary>The CLR entity type the table synchronises (what the exclusion lists are matched against).</summary>
+    Type EntityType { get; }
+
+    /// <summary>
+    /// Whether the table has no version column - synchronised only by <see cref="SyncMode.LastWriteWins"/> runs,
+    /// downloaded as a full key-ordered scan, and uploaded without version guards.
+    /// </summary>
+    bool IsVersionless { get; }
 
     /// <summary>The unbounded binary columns the ordinary row transfer leaves out (empty when the table has none).</summary>
     /// <remarks>
@@ -4534,8 +4753,14 @@ public interface ISyncTable
     );
 
     /// <summary>Replays one journal entry against the server.</summary>
+    /// <param name="entry">The journal entry to replay.</param>
+    /// <param name="mode">The run's mode; <see cref="SyncMode.LastWriteWins"/> replays without version guards and ignores <paramref name="policy"/>.</param>
+    /// <param name="policy">How a collision with the server is treated (versioned mode only).</param>
+    /// <param name="includeUnboundedBinary">Whether the excluded unbounded binary columns are carried as well.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
     Task<SyncUploadOutcome> UploadAsync(
         SyncJournalRow entry,
+        SyncMode mode,
         SyncConflictPolicy policy,
         bool includeUnboundedBinary,
         CancellationToken cancellationToken = default
@@ -4543,34 +4768,32 @@ public interface ISyncTable
 }
 
 /// <summary>
-/// The fixed half of one synchronised table: batching, anchor derivation, delete propagation, and journal replay.
+/// The shared half of one synchronised table: the pieces that do not depend on whether the table carries a version
+/// column - batch application, delete propagation, the local wipe of a refresh, the unbounded-binary column copy,
+/// and the last-write-wins replay of a journal entry.
 /// </summary>
 /// <remarks>
-/// <para>
-/// The generated subclass supplies only what depends on the diagram - the table name, the SQL that reads the local
-/// anchor and key set, how to read and write the key and the mirrored version on the entity, and how a key turns into
-/// the journal's text form and back.
-/// </para>
-/// <para>
-/// <b>The resume point is derived, never stored.</b> The anchor is the maximum mirrored version among the local rows,
-/// so it is a fact about the data rather than a separate bookkeeping row that could disagree with it. Two things make
-/// that derivation correct, and both are load-bearing: rows are fetched in ascending version order, and each batch is
-/// applied in a single local transaction. A run interrupted anywhere leaves the local database holding a prefix of the
-/// ordered stream, and the maximum of that prefix is exactly where the next run must start. Rows created locally and
-/// not yet uploaded have no mirrored version, so they drop out of the maximum on their own.
-/// </para>
+/// The two shapes a table can take derive from this: <see cref="SyncTable{TEntity, TKey}"/> for a table with a
+/// version column (incremental download, version-guarded replay) and <see cref="VersionlessSyncTable{TEntity, TKey}"/>
+/// for one without (full key-ordered download, last-write-wins replay). They are classes rather than a flag because
+/// the two differ in what they are able to promise, not in how they are configured.
 /// </remarks>
 /// <typeparam name="TEntity">The entity type.</typeparam>
 /// <typeparam name="TKey">The primary key type.</typeparam>
-public abstract class SyncTable<TEntity, TKey> : ISyncTable
+public abstract class SyncTableBase<TEntity, TKey> : ISyncTable
     where TEntity : EntityBase, new()
 {
-    private readonly IRepository<TEntity, TKey> _local;
-    private readonly ISqlExecutor _localSqlExecutor;
-    private readonly ISyncServerSource<TEntity, TKey> _server;
+    /// <summary>The local repository, reached through the journaling decorator (engine writes suppress the recording).</summary>
+    protected readonly IRepository<TEntity, TKey> _local;
+
+    /// <summary>The local raw SQL surface (key sets, the derived anchor, the wipe of a refresh).</summary>
+    protected readonly ISqlExecutor _localSqlExecutor;
+
+    /// <summary>The server side: where changed rows and key sets come from, and where local changes are replayed to.</summary>
+    protected readonly ISyncServerSource<TEntity, TKey> _server;
 
     /// <summary>Creates the table with its local repository, the local raw SQL surface, and the server source.</summary>
-    protected SyncTable(
+    protected SyncTableBase(
         IRepository<TEntity, TKey> local,
         ISqlExecutor localSqlExecutor,
         ISyncServerSource<TEntity, TKey> server
@@ -4587,6 +4810,12 @@ public abstract class SyncTable<TEntity, TKey> : ISyncTable
     /// <inheritdoc />
     public abstract string TableName { get; }
 
+    /// <inheritdoc />
+    public Type EntityType => typeof(TEntity);
+
+    /// <inheritdoc />
+    public abstract bool IsVersionless { get; }
+
     /// <summary>The local side's unbounded binary columns, or null when the table has none.</summary>
     /// <remarks>
     /// Overridden by the generated subclass only when the table has such columns; the two sides are asked separately
@@ -4601,9 +4830,6 @@ public abstract class SyncTable<TEntity, TKey> : ISyncTable
     /// the names the engine reads and the names the copy iterates cannot come apart.
     /// </remarks>
     public virtual IReadOnlyList<string> UnboundedBinaryColumnNames => [];
-
-    /// <summary>SELECT that returns the highest mirrored version among the local rows (the derived resume point).</summary>
-    protected abstract string LocalAnchorSql { get; }
 
     /// <summary>SELECT that returns every local primary key.</summary>
     protected abstract string LocalKeysSql { get; }
@@ -4620,12 +4846,6 @@ public abstract class SyncTable<TEntity, TKey> : ISyncTable
     /// <summary>Writes the entity's primary key (used to build the stub a version-guarded delete is sent as).</summary>
     protected abstract void WriteKey(TEntity entity, TKey key);
 
-    /// <summary>Reads the mirrored server version off the entity (null when the row has never been uploaded).</summary>
-    protected abstract byte[]? ReadRowVersion(TEntity entity);
-
-    /// <summary>Writes the mirrored server version onto the entity.</summary>
-    protected abstract void WriteRowVersion(TEntity entity, byte[]? rowVersion);
-
     /// <summary>Renders a primary key into the text form the journal stores.</summary>
     public abstract string FormatKey(TKey key);
 
@@ -4633,86 +4853,109 @@ public abstract class SyncTable<TEntity, TKey> : ISyncTable
     public abstract TKey ParseKey(string keyText);
 
     /// <inheritdoc />
-    public Task<byte[]?> GetChangeCeilingAsync(CancellationToken cancellationToken = default) =>
-        _server.GetChangeCeilingAsync(cancellationToken);
+    public virtual Task<byte[]?> GetChangeCeilingAsync(
+        CancellationToken cancellationToken = default
+    ) => _server.GetChangeCeilingAsync(cancellationToken);
 
     /// <inheritdoc />
-    public async Task<int> DownloadAsync(
+    public abstract Task<int> DownloadAsync(
         byte[]? ceiling,
         int batchSize,
         bool includeUnboundedBinary,
         CancellationToken cancellationToken = default
+    );
+
+    /// <inheritdoc />
+    public abstract Task<int> RefreshAsync(
+        byte[]? ceiling,
+        int batchSize,
+        bool includeUnboundedBinary,
+        CancellationToken cancellationToken = default
+    );
+
+    /// <inheritdoc />
+    public abstract Task<SyncUploadOutcome> UploadAsync(
+        SyncJournalRow entry,
+        SyncMode mode,
+        SyncConflictPolicy policy,
+        bool includeUnboundedBinary,
+        CancellationToken cancellationToken = default
+    );
+
+    /// <summary>
+    /// Replays one journal entry without version guards: the local change overwrites whatever the server holds.
+    /// </summary>
+    /// <remarks>
+    /// One code path for every table. An upsert re-reads the current local row (nothing to send is a stale intent,
+    /// discarded), overwrites the server's row with <see cref="ConcurrencyMode.ForceOverwrite"/>, and inserts it when
+    /// the update finds no row - which also means a row deleted on the server is resurrected by a local edit, exactly
+    /// what last-write-wins promises. A delete needs no version and no probe, and a delete of a row the server no
+    /// longer has is a no-op. Nothing can conflict, so nothing is ever collected.
+    /// </remarks>
+    protected async Task<SyncUploadOutcome> UploadLastWriteWinsAsync(
+        SyncJournalRow entry,
+        bool includeUnboundedBinary,
+        CancellationToken cancellationToken
     )
     {
-        if (batchSize <= 0)
+        var key = ParseKey(entry.KeyText);
+
+        if (
+            string.Equals(
+                entry.Operation,
+                nameof(SyncJournalOperation.Delete),
+                StringComparison.Ordinal
+            )
+        )
         {
-            throw new ArgumentOutOfRangeException(
-                nameof(batchSize),
-                "The download batch size must be greater than zero."
-            );
+            await _server.Writer.DeleteAsync(key, cancellationToken).ConfigureAwait(false);
+
+            return SyncUploadOutcome.Uploaded;
         }
 
-        var applied = 0;
-        byte[]? previousAnchor = null;
-        var appliedAnyBatch = false;
+        var local = await _local.GetByIdAsync(key, cancellationToken).ConfigureAwait(false);
 
-        while (true)
+        if (local is null)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            // The anchor is re-derived for every batch: the previous batch committed, so the maximum has moved on.
-            var anchor = await _localSqlExecutor
-                .ExecuteScalarSqlAsync<byte[]>(LocalAnchorSql, null, cancellationToken)
-                .ConfigureAwait(false);
-
-            if (appliedAnyBatch && SameAnchor(anchor, previousAnchor))
-            {
-                // A batch was applied and yet the resume point did not move, so asking again would hand back the same
-                // rows for ever. Every reason for it is a defect rather than a state to wait out - a source that
-                // ignores the anchor it is given, or rows whose version column is empty and cannot raise the maximum -
-                // so it is reported instead of spun on. Without this the download has no way to end.
-                throw new InvalidOperationException(
-                    $"The download of '{TableName}' is not making progress: a batch was applied but the resume point "
-                        + "derived from the local rows did not move. The server source is returning rows that do not "
-                        + "advance past the anchor it was given."
-                );
-            }
-
-            previousAnchor = anchor;
-
-            var batch = await _server
-                .GetChangesAsync(anchor, ceiling, batchSize, cancellationToken)
-                .ConfigureAwait(false);
-
-            if (batch.Rows.Count == 0)
-            {
-                return applied;
-            }
-
-            await ApplyBatchAsync(batch.Rows, includeUnboundedBinary, cancellationToken)
-                .ConfigureAwait(false);
-            applied += batch.Rows.Count;
-            appliedAnyBatch = true;
-
-            // The source itself says whether the stream is drained; what is left over is above the ceiling either way
-            // and waits for the next run. Asking again is safe but pointless, so the flag is what ends the loop.
-            if (!batch.HasMore)
-            {
-                return applied;
-            }
+            // A journal-first entry whose business write never landed, or a row deleted afterwards. Nothing to send.
+            return SyncUploadOutcome.Discarded;
         }
+
+        local.MarkUpdated();
+        var updated = await _server
+            .Writer.UpdateAsync(local, ConcurrencyMode.ForceOverwrite, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (!updated)
+        {
+            local.MarkAdded();
+            await _server.Writer.InsertAsync(local, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (includeUnboundedBinary)
+        {
+            await CopyBinaryColumnsUpAsync(key, cancellationToken).ConfigureAwait(false);
+        }
+
+        await OnLastWriteWinsUploadedAsync(local, includeUnboundedBinary, cancellationToken)
+            .ConfigureAwait(false);
+
+        return SyncUploadOutcome.Uploaded;
     }
 
-    /// <summary>Compares two derived anchors (null means "no local row carries a version yet").</summary>
-    private static bool SameAnchor(byte[]? left, byte[]? right) =>
-        left is null || right is null ? left is null && right is null : left.SequenceEqual(right);
+    /// <summary>Called after a last-write-wins upsert reached the server (a versioned table mirrors the new version here).</summary>
+    protected virtual Task OnLastWriteWinsUploadedAsync(
+        TEntity local,
+        bool includeUnboundedBinary,
+        CancellationToken cancellationToken
+    ) => Task.CompletedTask;
 
     /// <summary>Copies every unbounded binary column of the given rows from the server down to the local database.</summary>
     /// <remarks>
     /// Suppressed as a whole: the local write goes through the journaling decorator like any other, and a downloaded
     /// blob recorded as a local change would be uploaded straight back on the next run.
     /// </remarks>
-    private async Task CopyBinaryColumnsDownAsync(
+    protected async Task CopyBinaryColumnsDownAsync(
         IReadOnlyList<TEntity> rows,
         CancellationToken cancellationToken
     )
@@ -4738,7 +4981,7 @@ public abstract class SyncTable<TEntity, TKey> : ISyncTable
     }
 
     /// <summary>Copies every unbounded binary column of one row from the local database up to the server.</summary>
-    private async Task CopyBinaryColumnsUpAsync(TKey key, CancellationToken cancellationToken)
+    protected async Task CopyBinaryColumnsUpAsync(TKey key, CancellationToken cancellationToken)
     {
         if (_server.BinaryColumns is not { } server || LocalBinaryColumns is not { } local)
         {
@@ -4849,7 +5092,7 @@ public abstract class SyncTable<TEntity, TKey> : ISyncTable
     }
 
     /// <summary>Applies one ordered batch of server rows to the local database inside a single transaction.</summary>
-    private async Task ApplyBatchAsync(
+    protected async Task ApplyBatchAsync(
         IReadOnlyList<TEntity> rows,
         bool includeUnboundedBinary,
         CancellationToken cancellationToken
@@ -4956,6 +5199,155 @@ public abstract class SyncTable<TEntity, TKey> : ISyncTable
                 .ConfigureAwait(false);
         }
     }
+}
+
+/// <summary>
+/// The fixed half of one synchronised table that carries a version column: batching, anchor derivation, and the
+/// version-guarded journal replay.
+/// </summary>
+/// <remarks>
+/// <para>
+/// The generated subclass supplies only what depends on the diagram - the table name, the SQL that reads the local
+/// anchor and key set, how to read and write the key and the mirrored version on the entity, and how a key turns into
+/// the journal's text form and back.
+/// </para>
+/// <para>
+/// <b>The resume point is derived, never stored.</b> The anchor is the maximum mirrored version among the local rows,
+/// so it is a fact about the data rather than a separate bookkeeping row that could disagree with it. Two things make
+/// that derivation correct, and both are load-bearing: rows are fetched in ascending version order, and each batch is
+/// applied in a single local transaction. A run interrupted anywhere leaves the local database holding a prefix of the
+/// ordered stream, and the maximum of that prefix is exactly where the next run must start. Rows created locally and
+/// not yet uploaded have no mirrored version, so they drop out of the maximum on their own.
+/// </para>
+/// </remarks>
+/// <typeparam name="TEntity">The entity type.</typeparam>
+/// <typeparam name="TKey">The primary key type.</typeparam>
+public abstract class SyncTable<TEntity, TKey> : SyncTableBase<TEntity, TKey>
+    where TEntity : EntityBase, new()
+{
+    /// <summary>Creates the table with its local repository, the local raw SQL surface, and the server source.</summary>
+    protected SyncTable(
+        IRepository<TEntity, TKey> local,
+        ISqlExecutor localSqlExecutor,
+        ISyncServerSource<TEntity, TKey> server
+    )
+        : base(local, localSqlExecutor, server) { }
+
+    /// <inheritdoc />
+    public override bool IsVersionless => false;
+
+    /// <summary>SELECT that returns the highest mirrored version among the local rows (the derived resume point).</summary>
+    protected abstract string LocalAnchorSql { get; }
+
+    /// <summary>Reads the mirrored server version off the entity (null when the row has never been uploaded).</summary>
+    protected abstract byte[]? ReadRowVersion(TEntity entity);
+
+    /// <summary>Writes the mirrored server version onto the entity.</summary>
+    protected abstract void WriteRowVersion(TEntity entity, byte[]? rowVersion);
+
+    /// <inheritdoc />
+    public override async Task<int> DownloadAsync(
+        byte[]? ceiling,
+        int batchSize,
+        bool includeUnboundedBinary,
+        CancellationToken cancellationToken = default
+    )
+    {
+        if (batchSize <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(batchSize),
+                "The download batch size must be greater than zero."
+            );
+        }
+
+        var applied = 0;
+        byte[]? previousAnchor = null;
+        var appliedAnyBatch = false;
+
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            // The anchor is re-derived for every batch: the previous batch committed, so the maximum has moved on.
+            var anchor = await _localSqlExecutor
+                .ExecuteScalarSqlAsync<byte[]>(LocalAnchorSql, null, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (appliedAnyBatch && SameAnchor(anchor, previousAnchor))
+            {
+                // A batch was applied and yet the resume point did not move, so asking again would hand back the same
+                // rows for ever. Every reason for it is a defect rather than a state to wait out - a source that
+                // ignores the anchor it is given, or rows whose version column is empty and cannot raise the maximum -
+                // so it is reported instead of spun on. Without this the download has no way to end.
+                throw new InvalidOperationException(
+                    $"The download of '{TableName}' is not making progress: a batch was applied but the resume point "
+                        + "derived from the local rows did not move. The server source is returning rows that do not "
+                        + "advance past the anchor it was given."
+                );
+            }
+
+            previousAnchor = anchor;
+
+            var batch = await _server
+                .GetChangesAsync(anchor, ceiling, batchSize, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (batch.Rows.Count == 0)
+            {
+                return applied;
+            }
+
+            await ApplyBatchAsync(batch.Rows, includeUnboundedBinary, cancellationToken)
+                .ConfigureAwait(false);
+            applied += batch.Rows.Count;
+            appliedAnyBatch = true;
+
+            // The source itself says whether the stream is drained; what is left over is above the ceiling either way
+            // and waits for the next run. Asking again is safe but pointless, so the flag is what ends the loop.
+            if (!batch.HasMore)
+            {
+                return applied;
+            }
+        }
+    }
+
+    /// <summary>Compares two derived anchors (null means "no local row carries a version yet").</summary>
+    private static bool SameAnchor(byte[]? left, byte[]? right) =>
+        left is null || right is null ? left is null && right is null : left.SequenceEqual(right);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// The server assigned a new version during the overwrite and wrote it back onto the entity; mirroring it locally
+    /// is what moves the anchor past this row, so the next download does not hand the change straight back. A blob
+    /// copy moves the version once more, so with the columns carried the server row is re-read first.
+    /// </remarks>
+    protected override async Task OnLastWriteWinsUploadedAsync(
+        TEntity local,
+        bool includeUnboundedBinary,
+        CancellationToken cancellationToken
+    )
+    {
+        if (includeUnboundedBinary)
+        {
+            var refreshed = await _server
+                .Writer.GetByIdAsync(ReadKey(local), cancellationToken)
+                .ConfigureAwait(false);
+
+            if (refreshed is not null)
+            {
+                WriteRowVersion(local, ReadRowVersion(refreshed));
+            }
+        }
+
+        using (SyncSession.Suppress())
+        {
+            local.MarkUpdated();
+            await _local
+                .UpdateAsync(local, ConcurrencyMode.ForceOverwrite, cancellationToken)
+                .ConfigureAwait(false);
+        }
+    }
 
     /// <inheritdoc />
     /// <remarks>
@@ -4977,7 +5369,7 @@ public abstract class SyncTable<TEntity, TKey> : ISyncTable
     /// refresh comes from.
     /// </para>
     /// </remarks>
-    public async Task<int> RefreshAsync(
+    public override async Task<int> RefreshAsync(
         byte[]? ceiling,
         int batchSize,
         bool includeUnboundedBinary,
@@ -5044,14 +5436,24 @@ public abstract class SyncTable<TEntity, TKey> : ISyncTable
     }
 
     /// <inheritdoc />
-    public async Task<SyncUploadOutcome> UploadAsync(
+    public override async Task<SyncUploadOutcome> UploadAsync(
         SyncJournalRow entry,
+        SyncMode mode,
         SyncConflictPolicy policy,
         bool includeUnboundedBinary,
         CancellationToken cancellationToken = default
     )
     {
         ArgumentNullException.ThrowIfNull(entry);
+
+        if (mode == SyncMode.LastWriteWins)
+        {
+            // The run asked for overwrites, so the version guards - and the policy that decides what happens when
+            // they fire - have nothing to do. The mirrored version is still refreshed afterwards (the hook above).
+            return await UploadLastWriteWinsAsync(entry, includeUnboundedBinary, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
         var key = ParseKey(entry.KeyText);
 
         // A delete carries nothing extra: the excluded columns go with the row it removes.
@@ -5257,6 +5659,204 @@ public abstract class SyncTable<TEntity, TKey> : ISyncTable
 }
 
 /// <summary>
+/// The fixed half of one synchronised table without a version column: a full key-ordered download and a
+/// last-write-wins replay.
+/// </summary>
+/// <remarks>
+/// <para>
+/// No version column means no change stream: there is nothing to derive a resume point from and nothing to bound a
+/// pass with, so every download reads the whole table in ascending primary-key order and applies each batch as an
+/// upsert. The cost is O(table) per run, which is why these tables are meant to be the small, rarely changing kind -
+/// a large or busy table is better served by a rowversion column and the incremental download it buys.
+/// </para>
+/// <para>
+/// Uploads carry no version either, so a replay can only overwrite. These tables therefore take part exclusively in
+/// <see cref="SyncMode.LastWriteWins"/> runs; a <see cref="SyncMode.Versioned"/> run leaves them - and their journal
+/// entries - untouched.
+/// </para>
+/// </remarks>
+/// <typeparam name="TEntity">The entity type.</typeparam>
+/// <typeparam name="TKey">The primary key type.</typeparam>
+public abstract class VersionlessSyncTable<TEntity, TKey> : SyncTableBase<TEntity, TKey>
+    where TEntity : EntityBase, new()
+{
+    /// <summary>Creates the table with its local repository, the local raw SQL surface, and the server source.</summary>
+    protected VersionlessSyncTable(
+        IRepository<TEntity, TKey> local,
+        ISqlExecutor localSqlExecutor,
+        ISyncServerSource<TEntity, TKey> server
+    )
+        : base(local, localSqlExecutor, server) { }
+
+    /// <inheritdoc />
+    public override bool IsVersionless => true;
+
+    /// <inheritdoc />
+    /// <remarks>A key-ordered scan has no version to bound, so the answer is always null and the engine never asks.</remarks>
+    public override Task<byte[]?> GetChangeCeilingAsync(
+        CancellationToken cancellationToken = default
+    ) => Task.FromResult<byte[]?>(null);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// The ceiling is ignored - there is no version to bound by. Every row comes down and is applied as an upsert
+    /// through the same batch application a versioned download uses (one local transaction per batch, journaling
+    /// suppressed), so a row that did not change is overwritten with itself; the delete propagation that follows a
+    /// download is what removes the rows the server dropped. A source whose last key fails to advance while it still
+    /// claims more is reported rather than spun on, exactly like a versioned source that ignores its anchor.
+    /// </remarks>
+    public override async Task<int> DownloadAsync(
+        byte[]? ceiling,
+        int batchSize,
+        bool includeUnboundedBinary,
+        CancellationToken cancellationToken = default
+    )
+    {
+        if (batchSize <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(batchSize),
+                "The download batch size must be greater than zero."
+            );
+        }
+
+        var applied = 0;
+        string? previousKeyText = null;
+        var batch = await _server
+            .GetFirstPageAsync(batchSize, cancellationToken)
+            .ConfigureAwait(false);
+
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (batch.Rows.Count == 0)
+            {
+                return applied;
+            }
+
+            await ApplyBatchAsync(batch.Rows, includeUnboundedBinary, cancellationToken)
+                .ConfigureAwait(false);
+            applied += batch.Rows.Count;
+
+            if (!batch.HasMore)
+            {
+                return applied;
+            }
+
+            var lastKey = ReadKey(batch.Rows[^1]);
+            var lastKeyText = FormatKey(lastKey);
+
+            if (string.Equals(lastKeyText, previousKeyText, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    $"The download of '{TableName}' is not making progress: the last key of a batch did not advance "
+                        + "past the one the batch was asked for. The server source is not returning rows in ascending "
+                        + "primary-key order above the key it was given."
+                );
+            }
+
+            previousKeyText = lastKeyText;
+            batch = await _server
+                .GetPageAfterAsync(lastKey, batchSize, cancellationToken)
+                .ConfigureAwait(false);
+        }
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Rows are inserted rather than saved - the table was emptied first, so there is nothing to compare against -
+    /// and the scan is paged by key like a download, with the same progress guard. The ceiling is ignored for the
+    /// same reason it is during a download.
+    /// </remarks>
+    public override async Task<int> RefreshAsync(
+        byte[]? ceiling,
+        int batchSize,
+        bool includeUnboundedBinary,
+        CancellationToken cancellationToken = default
+    )
+    {
+        if (batchSize <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(batchSize),
+                "The refresh batch size must be greater than zero."
+            );
+        }
+
+        var inserted = 0;
+        string? previousKeyText = null;
+        var batch = await _server
+            .GetFirstPageAsync(batchSize, cancellationToken)
+            .ConfigureAwait(false);
+
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (batch.Rows.Count == 0)
+            {
+                return inserted;
+            }
+
+            using (SyncSession.Suppress())
+            {
+                inserted += await _local
+                    .BulkInsertAsync(batch.Rows, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            if (includeUnboundedBinary)
+            {
+                await CopyBinaryColumnsDownAsync(batch.Rows, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            if (!batch.HasMore)
+            {
+                return inserted;
+            }
+
+            var lastKey = ReadKey(batch.Rows[^1]);
+            var lastKeyText = FormatKey(lastKey);
+
+            if (string.Equals(lastKeyText, previousKeyText, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    $"The refresh of '{TableName}' is not making progress: the last key of a batch did not advance "
+                        + "past the one the batch was asked for. The server source is not returning rows in ascending "
+                        + "primary-key order above the key it was given."
+                );
+            }
+
+            previousKeyText = lastKeyText;
+            batch = await _server
+                .GetPageAfterAsync(lastKey, batchSize, cancellationToken)
+                .ConfigureAwait(false);
+        }
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Only <see cref="SyncMode.LastWriteWins"/> runs include this table, and without a version the replay can only
+    /// overwrite, so neither the mode nor the policy has anything left to choose.
+    /// </remarks>
+    public override async Task<SyncUploadOutcome> UploadAsync(
+        SyncJournalRow entry,
+        SyncMode mode,
+        SyncConflictPolicy policy,
+        bool includeUnboundedBinary,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+
+        return await UploadLastWriteWinsAsync(entry, includeUnboundedBinary, cancellationToken)
+            .ConfigureAwait(false);
+    }
+}
+
+/// <summary>
 /// Bidirectional differential sync between the server database and the local one, with the server as the source of truth.
 /// </summary>
 /// <remarks>
@@ -5337,7 +5937,8 @@ public sealed class SyncEngine
     /// </para>
     /// <para>
     /// It touches the synchronised tables and nothing else. A table the local database keeps for itself - a settings
-    /// table, a cache, anything without a version column - is not part of this and is left exactly as it was.
+    /// table, a cache, anything excluded where the engine was put together - is not part of this and is left
+    /// exactly as it was; and <see cref="SyncRefreshOptions.Mode"/> can narrow a run further.
     /// </para>
     /// <para>
     /// Unsent local changes are refused rather than lost. When the journal is not empty the run throws
@@ -5391,11 +5992,13 @@ public sealed class SyncEngine
             );
         }
 
+        var scope = ResolveScope(options.Mode, options.ExcludedEntityTypes);
+
         // Also before anything is deleted, and before the journal is even read: a local blob that only exists here is
         // gone for good once its row is, and neither answer to that is one the engine may pick on the caller's behalf.
         if (!options.IncludeUnboundedBinary && !options.DiscardLocalUnboundedBinaries)
         {
-            var atStake = _tables
+            var atStake = scope
                 .Where(table => table.UnboundedBinaryColumnNames.Count > 0)
                 .Select(table => new SyncUnboundedBinaryColumns(
                     table.TableName,
@@ -5412,7 +6015,13 @@ public sealed class SyncEngine
         var startedAt = Stopwatch.GetTimestamp();
 
         await _journal.EnsureCreatedAsync(cancellationToken).ConfigureAwait(false);
-        var pending = await _journal.ReadAllAsync(cancellationToken).ConfigureAwait(false);
+
+        // Only the entries of the tables this refresh covers count as being at stake: an entry of a table outside
+        // the scope describes rows the run will not touch, so it neither blocks the run nor is dropped by Force.
+        var scopeTableNames = scope.Select(table => table.TableName).ToHashSet(StringComparer.Ordinal);
+        var pending = (await _journal.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+            .Where(entry => scopeTableNames.Contains(entry.TableName))
+            .ToList();
 
         if (pending.Count > 0 && !options.Force)
         {
@@ -5432,31 +6041,33 @@ public sealed class SyncEngine
                 .ConfigureAwait(false);
         }
 
-        if (_tables.Count == 0)
+        if (scope.Count == 0)
         {
             return new SyncRefreshResult([], pending.Count, Stopwatch.GetElapsedTime(startedAt));
         }
 
-        // One ceiling for the whole run, for the same reason an ordinary run uses one.
-        var ceiling = await _tables[0]
-            .GetChangeCeilingAsync(cancellationToken)
-            .ConfigureAwait(false);
-        var deleted = new int[_tables.Count];
+        // One ceiling for the whole run, for the same reason an ordinary run uses one (and from a versioned table,
+        // for the same reason as well).
+        var ceilingTable = scope.FirstOrDefault(table => !table.IsVersionless);
+        var ceiling = ceilingTable is null
+            ? null
+            : await ceilingTable.GetChangeCeilingAsync(cancellationToken).ConfigureAwait(false);
+        var deleted = new int[scope.Count];
 
         // Children first: emptying a parent while its children are still there is what a foreign key forbids.
-        for (var index = _tables.Count - 1; index >= 0; index--)
+        for (var index = scope.Count - 1; index >= 0; index--)
         {
-            deleted[index] = await _tables[index]
+            deleted[index] = await scope[index]
                 .DeleteAllLocalAsync(cancellationToken)
                 .ConfigureAwait(false);
         }
 
-        var tables = new List<SyncRefreshTableResult>(_tables.Count);
+        var tables = new List<SyncRefreshTableResult>(scope.Count);
 
         // Parents first, for the same reason in reverse.
-        for (var index = 0; index < _tables.Count; index++)
+        for (var index = 0; index < scope.Count; index++)
         {
-            var table = _tables[index];
+            var table = scope[index];
             var inserted = await table
                 .RefreshAsync(
                     ceiling,
@@ -5509,13 +6120,23 @@ public sealed class SyncEngine
             ids.Add(entry.Id);
         }
 
-        if (options.ConflictPolicy == SyncConflictPolicy.ServerWins)
-        {
-            // Nothing local is worth sending: drop the whole journal and let the download bring the server's rows in.
-            await RemoveAsync(idsByRow.Values.SelectMany(ids => ids).ToList(), cancellationToken)
-                .ConfigureAwait(false);
+        var scope = ResolveScope(options.Mode, options.ExcludedEntityTypes);
 
-            return (0, entries.Count);
+        if (options.Mode == SyncMode.Versioned && options.ConflictPolicy == SyncConflictPolicy.ServerWins)
+        {
+            // Nothing local is worth sending: drop this run's entries and let the download bring the server's rows
+            // in. Scoped to the tables the run covers - an entry of an excluded or out-of-mode table is not this
+            // run's to decide about, so it stays for the run that does cover it. (In a last-write-wins run the
+            // policy has nothing to decide at all, so it is not consulted.)
+            var scopeTableNames = scope.Select(table => table.TableName)
+                .ToHashSet(StringComparer.Ordinal);
+            var dropIds = idsByRow
+                .Where(pair => scopeTableNames.Contains(pair.Key.TableName))
+                .SelectMany(pair => pair.Value)
+                .ToList();
+            await RemoveAsync(dropIds, cancellationToken).ConfigureAwait(false);
+
+            return (0, dropIds.Count);
         }
 
         var uploaded = 0;
@@ -5523,7 +6144,7 @@ public sealed class SyncEngine
         var settledIds = new List<long>();
 
         // Upserts run parents first so a child never reaches the server before the row it points at.
-        foreach (var table in _tables)
+        foreach (var table in scope)
         {
             var (sent, dropped) = await ReplayAsync(
                     table,
@@ -5531,6 +6152,7 @@ public sealed class SyncEngine
                     idsByRow,
                     settledIds,
                     conflicts,
+                    options.Mode,
                     options.ConflictPolicy,
                     options.IncludeUnboundedBinary,
                     SyncJournalOperation.Upsert,
@@ -5542,14 +6164,15 @@ public sealed class SyncEngine
         }
 
         // Deletes run the other way round, children first, for the same reason in reverse.
-        for (var index = _tables.Count - 1; index >= 0; index--)
+        for (var index = scope.Count - 1; index >= 0; index--)
         {
             var (sent, dropped) = await ReplayAsync(
-                    _tables[index],
+                    scope[index],
                     latestByRow,
                     idsByRow,
                     settledIds,
                     conflicts,
+                    options.Mode,
                     options.ConflictPolicy,
                     options.IncludeUnboundedBinary,
                     SyncJournalOperation.Delete,
@@ -5572,6 +6195,7 @@ public sealed class SyncEngine
         Dictionary<(string TableName, string KeyText), List<long>> idsByRow,
         List<long> settledIds,
         ICollection<SyncConflict> conflicts,
+        SyncMode mode,
         SyncConflictPolicy policy,
         bool includeUnboundedBinary,
         SyncJournalOperation operation,
@@ -5595,7 +6219,7 @@ public sealed class SyncEngine
             }
 
             var outcome = await table
-                .UploadAsync(entry, policy, includeUnboundedBinary, cancellationToken)
+                .UploadAsync(entry, mode, policy, includeUnboundedBinary, cancellationToken)
                 .ConfigureAwait(false);
 
             if (outcome.Conflict is { } conflict)
@@ -5639,19 +6263,23 @@ public sealed class SyncEngine
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        if (_tables.Count == 0)
+        var scope = ResolveScope(options.Mode, options.ExcludedEntityTypes);
+
+        if (scope.Count == 0)
         {
             return (0, 0);
         }
 
         // One ceiling for the whole pass: asking per table would let a row committed between two tables slip through
-        // the gap between their bounds.
-        var ceiling = await _tables[0]
-            .GetChangeCeilingAsync(cancellationToken)
-            .ConfigureAwait(false);
+        // the gap between their bounds. Only a versioned table can answer - a key-ordered scan has no bound to apply -
+        // so an all-versionless scope runs without one.
+        var ceilingTable = scope.FirstOrDefault(table => !table.IsVersionless);
+        var ceiling = ceilingTable is null
+            ? null
+            : await ceilingTable.GetChangeCeilingAsync(cancellationToken).ConfigureAwait(false);
         var downloaded = 0;
 
-        foreach (var table in _tables)
+        foreach (var table in scope)
         {
             downloaded += await table
                 .DownloadAsync(
@@ -5674,9 +6302,9 @@ public sealed class SyncEngine
             .ConfigureAwait(false);
         var deleted = 0;
 
-        for (var index = _tables.Count - 1; index >= 0; index--)
+        for (var index = scope.Count - 1; index >= 0; index--)
         {
-            var table = _tables[index];
+            var table = scope[index];
             deleted += await table
                 .PropagateDeletesAsync(
                     pendingKeyTexts.TryGetValue(table.TableName, out var keyTexts)
@@ -5688,6 +6316,39 @@ public sealed class SyncEngine
         }
 
         return (downloaded, deleted);
+    }
+
+    /// <summary>Resolves which tables one run covers: the mode keeps the versionless ones out of a versioned run, and the exclusions take named types away.</summary>
+    /// <remarks>
+    /// A type the engine does not synchronise is rejected rather than skipped: the caller either mistyped, or named a
+    /// table that was already excluded where the engine was put together - and a silently ignored exclusion would read
+    /// as if it had worked. The order of the remaining tables is the foreign-key order the engine was built with.
+    /// </remarks>
+    private IReadOnlyList<ISyncTable> ResolveScope(
+        SyncMode mode,
+        IReadOnlyCollection<Type> excludedEntityTypes
+    )
+    {
+        ArgumentNullException.ThrowIfNull(excludedEntityTypes);
+
+        foreach (var type in excludedEntityTypes)
+        {
+            if (_tables.All(table => table.EntityType != type))
+            {
+                throw new ArgumentException(
+                    $"The type '{type}' is not an entity type this engine synchronises - a typo, or a table that was "
+                        + "already excluded where the engine was put together.",
+                    nameof(excludedEntityTypes)
+                );
+            }
+        }
+
+        return _tables
+            .Where(table =>
+                (mode == SyncMode.LastWriteWins || !table.IsVersionless)
+                && !excludedEntityTypes.Contains(table.EntityType)
+            )
+            .ToList();
     }
 
     /// <summary>Groups the keys of the still-unsent journal entries by table, for the delete propagation to spare.</summary>
@@ -5730,6 +6391,9 @@ public static class RemoteSyncOperations
 
     /// <summary>Reads every primary key the server holds for a table.</summary>
     public const string Keys = "SyncKeys";
+
+    /// <summary>Reads one ascending batch of rows above a primary key (the versionless full scan; mapped only for tables without a version column).</summary>
+    public const string Page = "SyncPage";
 }
 
 /// <summary>The response of <see cref="RemoteSyncOperations.Ceiling"/>.</summary>
@@ -5761,6 +6425,17 @@ public sealed record RemoteSyncChangesResult<TEntity>(IReadOnlyList<TEntity> Row
 /// <param name="Keys">Every primary key the server holds for the table.</param>
 /// <typeparam name="TKey">The primary key type.</typeparam>
 public sealed record RemoteSyncKeysResult<TKey>(IReadOnlyList<TKey> Keys);
+
+/// <summary>The request of <see cref="RemoteSyncOperations.Page"/> (the response is a <see cref="RemoteSyncChangesResult{TEntity}"/>).</summary>
+/// <param name="HasAfterKey">Whether <paramref name="AfterKey"/> carries a cursor (false asks for the first page).</param>
+/// <param name="AfterKey">The last key of the previous batch (the exclusive lower bound), meaningful only when <paramref name="HasAfterKey"/> is true.</param>
+/// <param name="BatchSize">The maximum number of rows to return (must be greater than zero).</param>
+/// <remarks>
+/// The cursor travels beside a flag rather than as a nullable value, because the key type is generic: a value-typed
+/// key has no null to stand for "from the beginning", and a default value (zero, say) is a legitimate key.
+/// </remarks>
+/// <typeparam name="TKey">The primary key type.</typeparam>
+public sealed record RemoteSyncPageRequest<TKey>(bool HasAfterKey, TKey? AfterKey, int BatchSize);
 
 /// <summary>
 /// The differential source for one entity type over HTTP: the sync-only endpoints for reading, and the ordinary remote
@@ -5846,6 +6521,38 @@ public abstract class HttpSyncServerSource<TEntity, TKey>
         ).ConfigureAwait(false);
 
         return result.Keys;
+    }
+
+    /// <inheritdoc />
+    /// <remarks>The server maps the page endpoint only for tables without a version column; nothing asks a versioned table for it.</remarks>
+    public async Task<SyncChangeBatch<TEntity>> GetFirstPageAsync(
+        int batchSize,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var result = await InvokeAsync<RemoteSyncChangesResult<TEntity>>(
+            RemoteSyncOperations.Page,
+            new RemoteSyncPageRequest<TKey>(false, default, batchSize),
+            cancellationToken
+        ).ConfigureAwait(false);
+
+        return new SyncChangeBatch<TEntity>(result.Rows, result.HasMore);
+    }
+
+    /// <inheritdoc />
+    public async Task<SyncChangeBatch<TEntity>> GetPageAfterAsync(
+        TKey afterKey,
+        int batchSize,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var result = await InvokeAsync<RemoteSyncChangesResult<TEntity>>(
+            RemoteSyncOperations.Page,
+            new RemoteSyncPageRequest<TKey>(true, afterKey, batchSize),
+            cancellationToken
+        ).ConfigureAwait(false);
+
+        return new SyncChangeBatch<TEntity>(result.Rows, result.HasMore);
     }
 }
 
@@ -6683,6 +7390,345 @@ public sealed class JournalingSyncOrderLineRepository(
     ) => inner.CheckUniquenessAsync(entity, cancellationToken);
 }
 
+/// <summary>Reads the server side of sync_notes over a direct database connection.</summary>
+/// <remarks>
+/// Nothing here is new database code: the changed rows and the key set come through the server's raw SQL surface, and
+/// the local changes are replayed through the server's ordinary repository.
+/// </remarks>
+public sealed class SyncNoteDirectSyncSource(
+    ISqlExecutor serverSqlExecutor,
+    ISyncNoteRepository serverRepository
+) : ISyncServerSource<SyncNoteEntity, int>
+{
+    /// <inheritdoc />
+    public IRemoteRepository<SyncNoteEntity, int> Writer =>
+        serverRepository;
+
+    /// <inheritdoc />
+    /// <remarks>A key-ordered scan has no version to bound, so there is no ceiling to read.</remarks>
+    public Task<byte[]?> GetChangeCeilingAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult<byte[]?>(null);
+
+    /// <inheritdoc />
+    /// <remarks>Never called for a table without a version column; the download pages by key instead.</remarks>
+    public Task<SyncChangeBatch<SyncNoteEntity>> GetChangesAsync(
+        byte[]? anchor,
+        byte[]? ceiling,
+        int batchSize,
+        CancellationToken cancellationToken = default
+    ) =>
+        throw new NotSupportedException(
+            "The table has no version column; its download pages by primary key."
+        );
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// A full batch is reported as "there is more", which the next call settles: it either returns the rest or comes
+    /// back empty when the batch happened to end exactly on the boundary - the same trade the versioned change scan
+    /// makes.
+    /// </remarks>
+    public async Task<SyncChangeBatch<SyncNoteEntity>> GetFirstPageAsync(
+        int batchSize,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var rows = await serverSqlExecutor.QueryBySqlAsync<SyncNoteEntity>(
+            "SELECT TOP (@batchSize) * FROM [sync_notes] ORDER BY [note_id]",
+            new { batchSize },
+            cancellationToken
+        )
+            .ConfigureAwait(false);
+
+        return new SyncChangeBatch<SyncNoteEntity>(rows, rows.Count >= batchSize);
+    }
+
+    /// <inheritdoc />
+    public async Task<SyncChangeBatch<SyncNoteEntity>> GetPageAfterAsync(
+        int afterKey,
+        int batchSize,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var rows = await serverSqlExecutor.QueryBySqlAsync<SyncNoteEntity>(
+            "SELECT TOP (@batchSize) * FROM [sync_notes] WHERE [note_id] > @afterKey ORDER BY [note_id]",
+            new { afterKey, batchSize },
+            cancellationToken
+        )
+            .ConfigureAwait(false);
+
+        return new SyncChangeBatch<SyncNoteEntity>(rows, rows.Count >= batchSize);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<int>> GetAllKeysAsync(
+        CancellationToken cancellationToken = default
+    ) =>
+        await serverSqlExecutor.QueryProjectionBySqlAsync<int>(
+            "SELECT [note_id] FROM [sync_notes]",
+            null,
+            cancellationToken
+        )
+            .ConfigureAwait(false);
+}
+
+/// <summary>Reads the server side of sync_notes over HTTP, and replays the local changes over HTTP as well.</summary>
+/// <remarks>
+/// The counterpart of <see cref="SyncNoteDirectSyncSource"/> for a server that is reached across the network: it
+/// carries no logic of its own beyond binding the entity type and the route, because the transport, the failure
+/// classification, and the write surface all come from <see cref="HttpSyncServerSource{TEntity, TKey}"/>. Swapping the
+/// two is a matter of which one is registered.
+/// </remarks>
+public sealed class HttpSyncNoteSyncSource(HttpClient httpClient)
+    : HttpSyncServerSource<SyncNoteEntity, int>(httpClient, "SyncNote") { }
+
+/// <summary>The synchronised table descriptor for sync_notes.</summary>
+public sealed class SyncNoteSyncTable(
+    ISyncNoteRepository localRepository,
+    ISqlExecutor localSqlExecutor,
+    ISyncServerSource<SyncNoteEntity, int> server
+) : VersionlessSyncTable<SyncNoteEntity, int>(
+    localRepository,
+    localSqlExecutor,
+    server
+)
+{
+    /// <inheritdoc />
+    public override string TableName => "sync_notes";
+
+    /// <inheritdoc />
+    protected override string LocalKeysSql => "SELECT \"note_id\" FROM \"sync_notes\"";
+
+    /// <inheritdoc />
+    protected override string LocalExistingKeysSql => "SELECT \"note_id\" FROM \"sync_notes\" WHERE \"note_id\" IN (@keys)";
+
+    /// <inheritdoc />
+    protected override string LocalDeleteAllSql => "DELETE FROM \"sync_notes\"";
+
+    /// <inheritdoc />
+    protected override int ReadKey(SyncNoteEntity entity) =>
+        entity.NoteId;
+
+    /// <inheritdoc />
+    protected override void WriteKey(SyncNoteEntity entity, int key) =>
+        entity.NoteId = key;
+
+    /// <inheritdoc />
+    public override string FormatKey(int key) => key.ToString(CultureInfo.InvariantCulture);
+
+    /// <inheritdoc />
+    public override int ParseKey(string keyText) => int.Parse(keyText, CultureInfo.InvariantCulture);
+}
+
+/// <summary>
+/// The local SyncNoteEntity repository with journaling: every write is recorded before it is performed.
+/// </summary>
+/// <remarks>
+/// <para>
+/// It wraps the repository rather than hooking into the save pipeline because a save hook only fires for a graph save -
+/// a direct Insert, Update, Delete, or BulkInsert passes it by. Offline editing has to be caught at every write, so
+/// every write entry point on the contract records its intent here. A graph save is recorded through
+/// <see cref="SyncGraphRecorder"/>, which walks the same cascade navigations the saver walks, so the children the
+/// save writes or deletes are journaled exactly like the root.
+/// </para>
+/// <para>
+/// Raw SQL (<c>ExecuteSqlAsync</c>) is forwarded untouched and is <b>not</b> recorded: the statement's shape is opaque
+/// to the decorator, so there is no key to journal. The same holds for the bulk delete behind
+/// <c>Query().ExecuteDeleteAsync</c>, whose rows are chosen by a predicate the decorator never sees. Rows changed
+/// either way reach the server only if something else records them.
+/// </para>
+/// </remarks>
+public sealed class JournalingSyncNoteRepository(
+    ISyncNoteRepository inner,
+    SyncJournal journal
+) : ISyncNoteRepository
+{
+    /// <summary>Records the intent to write the given row, unless the sync engine is the one writing.</summary>
+    private Task RecordUpsertAsync(SyncNoteEntity entity, CancellationToken cancellationToken) =>
+        journal.RecordAsync(
+            "sync_notes",
+            entity.NoteId.ToString(CultureInfo.InvariantCulture),
+            SyncJournalOperation.Upsert,
+            null,
+            cancellationToken
+        );
+
+    /// <inheritdoc />
+    public Task<SyncNoteEntity?> GetByIdAsync(
+        int id,
+        CancellationToken cancellationToken = default
+    ) => inner.GetByIdAsync(id, cancellationToken);
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<SyncNoteEntity>> GetAllAsync(
+        CancellationToken cancellationToken = default
+    ) => inner.GetAllAsync(cancellationToken);
+
+    /// <inheritdoc />
+    public async Task InsertAsync(
+        SyncNoteEntity entity,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+        await RecordUpsertAsync(entity, cancellationToken).ConfigureAwait(false);
+        await inner.InsertAsync(entity, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> UpdateAsync(
+        SyncNoteEntity entity,
+        ConcurrencyMode mode = ConcurrencyMode.Optimistic,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+        await RecordUpsertAsync(entity, cancellationToken).ConfigureAwait(false);
+
+        return await inner.UpdateAsync(entity, mode, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> DeleteAsync(
+        int id,
+        CancellationToken cancellationToken = default
+    )
+    {
+        // No version column means there is no mirrored version to capture before the row goes; the delete replays
+        // without a guard, which is all a last-write-wins table can promise anyway.
+        await journal.RecordAsync(
+            "sync_notes",
+            id.ToString(CultureInfo.InvariantCulture),
+            SyncJournalOperation.Delete,
+            null,
+            cancellationToken
+        )
+            .ConfigureAwait(false);
+
+        return await inner.DeleteAsync(id, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<int> BulkInsertAsync(
+        IEnumerable<SyncNoteEntity> entities,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(entities);
+        var materialized = entities.ToList();
+
+        foreach (var entity in materialized)
+        {
+            if (entity is not null)
+            {
+                await RecordUpsertAsync(entity, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        return await inner.BulkInsertAsync(materialized, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<int> SaveAsync(
+        SyncNoteEntity entity,
+        bool cascadeSave = true,
+        bool cascadeDelete = true,
+        bool insertWhenUpdateMissing = false,
+        ConcurrencyMode mode = ConcurrencyMode.Optimistic,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+        await SyncGraphRecorder.RecordSaveAsync(
+            journal,
+            entity,
+            cascadeSave,
+            cascadeDelete,
+            cancellationToken
+        )
+            .ConfigureAwait(false);
+
+        return await inner.SaveAsync(
+            entity,
+            cascadeSave,
+            cascadeDelete,
+            insertWhenUpdateMissing,
+            mode,
+            cancellationToken
+        )
+            .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<int> SaveAsync(
+        IEnumerable<SyncNoteEntity> entities,
+        bool cascadeSave = true,
+        bool cascadeDelete = true,
+        bool insertWhenUpdateMissing = false,
+        ConcurrencyMode mode = ConcurrencyMode.Optimistic,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(entities);
+        var materialized = entities.ToList();
+
+        foreach (var entity in materialized)
+        {
+            if (entity is not null)
+            {
+                await SyncGraphRecorder.RecordSaveAsync(
+                    journal,
+                    entity,
+                    cascadeSave,
+                    cascadeDelete,
+                    cancellationToken
+                )
+                    .ConfigureAwait(false);
+            }
+        }
+
+        return await inner.SaveAsync(
+            materialized,
+            cascadeSave,
+            cascadeDelete,
+            insertWhenUpdateMissing,
+            mode,
+            cancellationToken
+        )
+            .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public SqlQuery<SyncNoteEntity> Query() => inner.Query();
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<SyncNoteEntity>> QueryBySqlAsync(
+        string sql,
+        object? parameters = null,
+        CancellationToken cancellationToken = default
+    ) => inner.QueryBySqlAsync(sql, parameters, cancellationToken);
+
+    /// <inheritdoc />
+    public Task<int> ExecuteSqlAsync(
+        string sql,
+        object? parameters = null,
+        CancellationToken cancellationToken = default
+    ) => inner.ExecuteSqlAsync(sql, parameters, cancellationToken);
+
+    /// <inheritdoc />
+    public Task<TResult?> ExecuteScalarSqlAsync<TResult>(
+        string sql,
+        object? parameters = null,
+        CancellationToken cancellationToken = default
+    ) => inner.ExecuteScalarSqlAsync<TResult>(sql, parameters, cancellationToken);
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
+        SyncNoteEntity entity,
+        CancellationToken cancellationToken = default
+    ) => inner.CheckUniquenessAsync(entity, cancellationToken);
+}
+
 /// <summary>
 /// Records the journal entries a graph save is about to need, before the save itself runs ("journal-first").
 /// </summary>
@@ -6752,6 +7798,15 @@ public static class SyncGraphRecorder
                         .ConfigureAwait(false);
                 }
             }
+
+            foreach (var child in entity.SyncNotes)
+            {
+                if (child is not null)
+                {
+                    await RecordSaveAsync(journal, child, cascadeSave, cascadeDelete, cancellationToken)
+                        .ConfigureAwait(false);
+                }
+            }
         }
     }
 
@@ -6763,6 +7818,14 @@ public static class SyncGraphRecorder
     )
     {
         foreach (var child in entity.SyncOrderLines)
+        {
+            if (child is not null)
+            {
+                await RecordDeleteGraphAsync(journal, child, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        foreach (var child in entity.SyncNotes)
         {
             if (child is not null)
             {
@@ -6832,6 +7895,52 @@ public static class SyncGraphRecorder
             entity.RowVer,
             cancellationToken
         );
+
+    /// <summary>Records the entries for a graph save rooted at this SyncNoteEntity (the cascade children included).</summary>
+    public static async Task RecordSaveAsync(
+        SyncJournal journal,
+        SyncNoteEntity entity,
+        bool cascadeSave,
+        bool cascadeDelete,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(journal);
+        ArgumentNullException.ThrowIfNull(entity);
+
+        if (entity.RowState == RowState.Removed)
+        {
+            await RecordDeleteGraphAsync(journal, entity, cancellationToken).ConfigureAwait(false);
+
+            return;
+        }
+
+        if (entity.RowState != RowState.Unchanged)
+        {
+            await journal.RecordAsync(
+                "sync_notes",
+                entity.NoteId.ToString(CultureInfo.InvariantCulture),
+                SyncJournalOperation.Upsert,
+                null,
+                cancellationToken
+            )
+                .ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Records the delete of this SyncNoteEntity, carrying the mirrored version the row holds.</summary>
+    private static Task RecordDeleteGraphAsync(
+        SyncJournal journal,
+        SyncNoteEntity entity,
+        CancellationToken cancellationToken
+    ) =>
+        journal.RecordAsync(
+            "sync_notes",
+            entity.NoteId.ToString(CultureInfo.InvariantCulture),
+            SyncJournalOperation.Delete,
+            null,
+            cancellationToken
+        );
 }
 
 /// <summary>DI registration for the bidirectional sync support.</summary>
@@ -6866,16 +7975,18 @@ public static class GeneratedSyncServiceCollectionExtensions
     /// <param name="services">The service collection.</param>
     /// <param name="serverServiceKey">The key the server (SQL Server) repositories were registered under (null for the non-keyed registration).</param>
     /// <param name="localServiceKey">The key the local (SQLite) repositories were registered under (null for the non-keyed registration).</param>
+    /// <param name="excludeFromSync">Entity types this engine never synchronises (see <c>AddGeneratedSyncEngine</c>).</param>
     public static IServiceCollection AddGeneratedSyncSupport(
         this IServiceCollection services,
         object? serverServiceKey,
-        object? localServiceKey
+        object? localServiceKey,
+        IReadOnlyCollection<Type>? excludeFromSync = null
     )
     {
         ArgumentNullException.ThrowIfNull(services);
         AddGeneratedDirectSyncSources(services, serverServiceKey);
 
-        return AddGeneratedSyncEngine(services, localServiceKey);
+        return AddGeneratedSyncEngine(services, localServiceKey, excludeFromSync);
     }
 
     /// <summary>Registers the differential sources that read the server over a direct database connection.</summary>
@@ -6903,6 +8014,13 @@ public static class GeneratedSyncServiceCollectionExtensions
             provider => new SyncOrderLineDirectSyncSource(
                 Resolve<ISqlExecutor>(provider, serverServiceKey),
                 Resolve<ISyncOrderLineRepository>(provider, serverServiceKey)
+            )
+        );
+
+        services.AddScoped<ISyncServerSource<SyncNoteEntity, int>>(
+            provider => new SyncNoteDirectSyncSource(
+                Resolve<ISqlExecutor>(provider, serverServiceKey),
+                Resolve<ISyncNoteRepository>(provider, serverServiceKey)
             )
         );
 
@@ -6980,59 +8098,102 @@ public static class GeneratedSyncServiceCollectionExtensions
             provider => new HttpSyncOrderLineSyncSource(httpClientFactory(provider))
         );
 
+        services.AddScoped<ISyncServerSource<SyncNoteEntity, int>>(
+            provider => new HttpSyncNoteSyncSource(httpClientFactory(provider))
+        );
+
         return services;
     }
 
     /// <summary>Registers the local half: the journal, the journaling decorators, the table descriptors, and the engine.</summary>
     /// <remarks>
+    /// <para>
     /// The differential sources are resolved rather than registered here, so exactly one of
     /// <c>AddGeneratedDirectSyncSources</c> / <c>AddGeneratedHttpSyncSources</c> has to be
     /// called as well. Leaving that out is not a silent failure: resolving the engine then fails on the missing source.
+    /// </para>
+    /// <para>
+    /// <c>excludeFromSync</c> is the local-only declaration: an excluded table gets no journaling decorator (its
+    /// writes are not recorded, and cost nothing extra) and no descriptor (no run downloads it, propagates deletes
+    /// into it, or wipes it in a refresh). It is not a per-run scope - that is
+    /// <see cref="SyncOptions.ExcludedEntityTypes"/> - and entries recorded before a table was excluded are never
+    /// replayed; <see cref="SyncJournal.RemoveTableAsync"/> is how they are cleaned up. A type that is not a
+    /// synchronised entity type, or an exclusion that leaves no table at all, is rejected here rather than
+    /// discovered at the first run.
+    /// </para>
     /// </remarks>
     /// <param name="services">The service collection.</param>
     /// <param name="localServiceKey">The key the local (SQLite) repositories were registered under (null for the non-keyed registration).</param>
+    /// <param name="excludeFromSync">Entity types this engine never synchronises (null or empty keeps every table).</param>
     public static IServiceCollection AddGeneratedSyncEngine(
         this IServiceCollection services,
-        object? localServiceKey
+        object? localServiceKey,
+        IReadOnlyCollection<Type>? excludeFromSync = null
     )
     {
         ArgumentNullException.ThrowIfNull(services);
+        var excluded = ValidatedSyncExclusions(excludeFromSync);
 
         services.AddScoped(provider => new SyncJournal(
             Resolve<ISqlExecutor>(provider, localServiceKey)
         ));
 
-        Decorate<ISyncOrderRepository>(
-            services,
-            localServiceKey,
-            (inner, provider) => new JournalingSyncOrderRepository(
-                inner,
-                provider.GetRequiredService<SyncJournal>()
-            )
-        );
-        services.AddScoped<ISyncTable>(provider => new SyncOrderSyncTable(
-            Resolve<ISyncOrderRepository>(provider, localServiceKey),
-            Resolve<ISqlExecutor>(provider, localServiceKey),
-            provider.GetRequiredService<
-                ISyncServerSource<SyncOrderEntity, int>
-            >()
-        ));
+        if (!excluded.Contains(typeof(SyncOrderEntity)))
+        {
+            Decorate<ISyncOrderRepository>(
+                services,
+                localServiceKey,
+                (inner, provider) => new JournalingSyncOrderRepository(
+                    inner,
+                    provider.GetRequiredService<SyncJournal>()
+                )
+            );
+            services.AddScoped<ISyncTable>(provider => new SyncOrderSyncTable(
+                Resolve<ISyncOrderRepository>(provider, localServiceKey),
+                Resolve<ISqlExecutor>(provider, localServiceKey),
+                provider.GetRequiredService<
+                    ISyncServerSource<SyncOrderEntity, int>
+                >()
+            ));
+        }
 
-        Decorate<ISyncOrderLineRepository>(
-            services,
-            localServiceKey,
-            (inner, provider) => new JournalingSyncOrderLineRepository(
-                inner,
-                provider.GetRequiredService<SyncJournal>()
-            )
-        );
-        services.AddScoped<ISyncTable>(provider => new SyncOrderLineSyncTable(
-            Resolve<ISyncOrderLineRepository>(provider, localServiceKey),
-            Resolve<ISqlExecutor>(provider, localServiceKey),
-            provider.GetRequiredService<
-                ISyncServerSource<SyncOrderLineEntity, int>
-            >()
-        ));
+        if (!excluded.Contains(typeof(SyncOrderLineEntity)))
+        {
+            Decorate<ISyncOrderLineRepository>(
+                services,
+                localServiceKey,
+                (inner, provider) => new JournalingSyncOrderLineRepository(
+                    inner,
+                    provider.GetRequiredService<SyncJournal>()
+                )
+            );
+            services.AddScoped<ISyncTable>(provider => new SyncOrderLineSyncTable(
+                Resolve<ISyncOrderLineRepository>(provider, localServiceKey),
+                Resolve<ISqlExecutor>(provider, localServiceKey),
+                provider.GetRequiredService<
+                    ISyncServerSource<SyncOrderLineEntity, int>
+                >()
+            ));
+        }
+
+        if (!excluded.Contains(typeof(SyncNoteEntity)))
+        {
+            Decorate<ISyncNoteRepository>(
+                services,
+                localServiceKey,
+                (inner, provider) => new JournalingSyncNoteRepository(
+                    inner,
+                    provider.GetRequiredService<SyncJournal>()
+                )
+            );
+            services.AddScoped<ISyncTable>(provider => new SyncNoteSyncTable(
+                Resolve<ISyncNoteRepository>(provider, localServiceKey),
+                Resolve<ISqlExecutor>(provider, localServiceKey),
+                provider.GetRequiredService<
+                    ISyncServerSource<SyncNoteEntity, int>
+                >()
+            ));
+        }
 
         services.AddScoped(provider => new SyncEngine(
             provider.GetServices<ISyncTable>(),
@@ -7040,6 +8201,47 @@ public static class GeneratedSyncServiceCollectionExtensions
         ));
 
         return services;
+    }
+
+    /// <summary>Validates the construction-time exclusions: every named type must be synchronised, and at least one table must remain.</summary>
+    /// <remarks>
+    /// A name outside the synchronised set is rejected rather than skipped - a silently ignored exclusion would read
+    /// as if it had worked - and excluding everything is rejected because an engine with no table is a configuration
+    /// error wearing a valid registration.
+    /// </remarks>
+    private static HashSet<Type> ValidatedSyncExclusions(
+        IReadOnlyCollection<Type>? excludeFromSync
+    )
+    {
+        Type[] synchronised =
+        [
+            typeof(SyncOrderEntity),
+            typeof(SyncOrderLineEntity),
+            typeof(SyncNoteEntity),
+        ];
+        var excluded = new HashSet<Type>(excludeFromSync ?? []);
+        var unknown = excluded.Where(type => !synchronised.Contains(type)).ToList();
+
+        if (unknown.Count > 0)
+        {
+            throw new ArgumentException(
+                "excludeFromSync names types that are not synchronised entity types: "
+                    + string.Join(", ", unknown.Select(type => type.Name))
+                    + ".",
+                nameof(excludeFromSync)
+            );
+        }
+
+        if (excluded.Count >= synchronised.Length)
+        {
+            throw new ArgumentException(
+                "excludeFromSync excludes every synchronised table, which leaves the engine nothing to do. "
+                    + "Generate without sync support instead of excluding everything.",
+                nameof(excludeFromSync)
+            );
+        }
+
+        return excluded;
     }
 
     /// <summary>Resolves a service that was registered either under a key or plainly (<c>null</c> means the plain one).</summary>
@@ -11056,6 +12258,14 @@ public static class GeneratedSqlServerRepositoryServiceCollectionExtensions
         services.AddScoped<ISyncOrderLineRemoteRepository>(provider =>
             provider.GetRequiredService<ISyncOrderLineRepository>()
         );
+        services.AddScoped<ISyncNoteRepository>(provider => new SyncNoteRepository(
+            provider.GetRequiredService<ISqlConnectionFactory>(),
+            provider.GetService<ISaveHookRegistry>(),
+            provider.GetService<ISqlExecutor>()
+        ));
+        services.AddScoped<ISyncNoteRemoteRepository>(provider =>
+            provider.GetRequiredService<ISyncNoteRepository>()
+        );
 
         return services;
     }
@@ -11109,6 +12319,18 @@ public static class GeneratedSqlServerRepositoryServiceCollectionExtensions
         services.AddKeyedScoped<ISyncOrderLineRemoteRepository>(
             serviceKey,
             (provider, key) => provider.GetRequiredKeyedService<ISyncOrderLineRepository>(key)
+        );
+        services.AddKeyedScoped<ISyncNoteRepository>(
+            serviceKey,
+            (provider, key) => new SyncNoteRepository(
+                connectionFactory,
+                provider.GetService<ISaveHookRegistry>(),
+                provider.GetKeyedService<ISqlExecutor>(key)
+            )
+        );
+        services.AddKeyedScoped<ISyncNoteRemoteRepository>(
+            serviceKey,
+            (provider, key) => provider.GetRequiredKeyedService<ISyncNoteRepository>(key)
         );
 
         return services;
@@ -11204,6 +12426,48 @@ public sealed partial class SyncOrderLineRepository(
     /// <summary>Extension point for adding user-defined uniqueness checks (add delegates to the list in a partial implementation; while unimplemented the call is erased at no cost).</summary>
     partial void CollectCustomUniquenessChecks(
         ref List<UniquenessCheck<SyncOrderLineEntity>>? checks
+    );
+}
+
+/// <summary>Repository implementation for SyncNoteEntity.</summary>
+public sealed partial class SyncNoteRepository(
+    ISqlConnectionFactory connectionFactory,
+    ISaveHookRegistry? saveHooks = null,
+    ISqlExecutor? sqlExecutor = null
+) : SqlServerRepository<SyncNoteEntity, int>(connectionFactory, saveHooks, sqlExecutor), ISyncNoteRepository
+{
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
+        SyncNoteEntity entity,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+        var violations = new List<UniquenessViolation>();
+
+        List<UniquenessCheck<SyncNoteEntity>>? customChecks = null;
+        CollectCustomUniquenessChecks(ref customChecks);
+
+        if (customChecks is not null)
+        {
+            foreach (var customCheck in customChecks)
+            {
+                if (
+                    await customCheck(entity, cancellationToken)
+                        .ConfigureAwait(false) is { } violation
+                )
+                {
+                    violations.Add(violation);
+                }
+            }
+        }
+
+        return violations;
+    }
+
+    /// <summary>Extension point for adding user-defined uniqueness checks (add delegates to the list in a partial implementation; while unimplemented the call is erased at no cost).</summary>
+    partial void CollectCustomUniquenessChecks(
+        ref List<UniquenessCheck<SyncNoteEntity>>? checks
     );
 }
 }
@@ -14963,6 +16227,14 @@ public static class GeneratedSqliteRepositoryServiceCollectionExtensions
         services.AddScoped<ISyncOrderLineRemoteRepository>(provider =>
             provider.GetRequiredService<ISyncOrderLineRepository>()
         );
+        services.AddScoped<ISyncNoteRepository>(provider => new SyncNoteRepository(
+            provider.GetRequiredService<ISqlConnectionFactory>(),
+            provider.GetService<ISaveHookRegistry>(),
+            provider.GetService<ISqlExecutor>()
+        ));
+        services.AddScoped<ISyncNoteRemoteRepository>(provider =>
+            provider.GetRequiredService<ISyncNoteRepository>()
+        );
 
         return services;
     }
@@ -15016,6 +16288,18 @@ public static class GeneratedSqliteRepositoryServiceCollectionExtensions
         services.AddKeyedScoped<ISyncOrderLineRemoteRepository>(
             serviceKey,
             (provider, key) => provider.GetRequiredKeyedService<ISyncOrderLineRepository>(key)
+        );
+        services.AddKeyedScoped<ISyncNoteRepository>(
+            serviceKey,
+            (provider, key) => new SyncNoteRepository(
+                connectionFactory,
+                provider.GetService<ISaveHookRegistry>(),
+                provider.GetKeyedService<ISqlExecutor>(key)
+            )
+        );
+        services.AddKeyedScoped<ISyncNoteRemoteRepository>(
+            serviceKey,
+            (provider, key) => provider.GetRequiredKeyedService<ISyncNoteRepository>(key)
         );
 
         return services;
@@ -15111,6 +16395,48 @@ public sealed partial class SyncOrderLineRepository(
     /// <summary>Extension point for adding user-defined uniqueness checks (add delegates to the list in a partial implementation; while unimplemented the call is erased at no cost).</summary>
     partial void CollectCustomUniquenessChecks(
         ref List<UniquenessCheck<SyncOrderLineEntity>>? checks
+    );
+}
+
+/// <summary>Repository implementation for SyncNoteEntity.</summary>
+public sealed partial class SyncNoteRepository(
+    ISqlConnectionFactory connectionFactory,
+    ISaveHookRegistry? saveHooks = null,
+    ISqlExecutor? sqlExecutor = null
+) : SqliteRepository<SyncNoteEntity, int>(connectionFactory, saveHooks, sqlExecutor), ISyncNoteRepository
+{
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
+        SyncNoteEntity entity,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+        var violations = new List<UniquenessViolation>();
+
+        List<UniquenessCheck<SyncNoteEntity>>? customChecks = null;
+        CollectCustomUniquenessChecks(ref customChecks);
+
+        if (customChecks is not null)
+        {
+            foreach (var customCheck in customChecks)
+            {
+                if (
+                    await customCheck(entity, cancellationToken)
+                        .ConfigureAwait(false) is { } violation
+                )
+                {
+                    violations.Add(violation);
+                }
+            }
+        }
+
+        return violations;
+    }
+
+    /// <summary>Extension point for adding user-defined uniqueness checks (add delegates to the list in a partial implementation; while unimplemented the call is erased at no cost).</summary>
+    partial void CollectCustomUniquenessChecks(
+        ref List<UniquenessCheck<SyncNoteEntity>>? checks
     );
 }
 }
