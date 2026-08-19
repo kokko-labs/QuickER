@@ -550,4 +550,377 @@ internal sealed partial class CSharpGenerationModelBuilder
 
         return valueObject is null ? parsed : $"{valueObject.ClassName}.Create({parsed})";
     }
+
+    /// <summary>
+    /// グラフ保存のジャーナル記録クラス（<c>SyncGraphRecorder</c>）の全文を組み立てる（同期支援が無効なら空文字）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// デコレータの SaveAsync はルートの RowState しか見えないが、保存側（EntityGraphSaver）はカスケード
+    /// ナビゲーションを辿って子孫も書く。記録が保存の決定手順をミラーしないと、カスケード子の変更が
+    /// ジャーナルに載らず「アップロードされない・削除伝搬にローカル行が消される・削除再生がサーバー FK に
+    /// 阻まれて同期が恒久失敗する」というサイレント損失になる（2026-08-19 実測）。
+    /// </para>
+    /// <para>
+    /// 生成対象の型集合は「同期対象をルートとするカスケード閉包のうち、自身または子孫に同期対象を含む型」。
+    /// 対象を含まない部分木は保存側が書いても記録すべきものが無いため、走査ごと刈る。閉包内の非対象型は
+    /// 自身を記録せず子へ降りるだけのメソッドになる（対象→非対象→対象と挟まる混在トポロジ対応）。
+    /// 走査はコード生成が図から静的に組み立てる（リフレクションなし・保存側と同じ図が正本）。
+    /// </para>
+    /// </remarks>
+    private string BuildSyncGraphRecorder(
+        ErDiagram diagram,
+        IReadOnlyDictionary<Guid, List<NavigationInfo>> navigationsByEntity,
+        IReadOnlyList<CSharpSyncTableModel> syncTables
+    )
+    {
+        if (syncTables.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        var targetsByTable = syncTables.ToDictionary(
+            table => table.TableName,
+            StringComparer.Ordinal
+        );
+        var entitiesByTable = new Dictionary<string, Entity>(StringComparer.Ordinal);
+
+        foreach (var entity in diagram.Entities)
+        {
+            entitiesByTable.TryAdd(entity.TableName, entity);
+        }
+
+        // 子方向（カスケード）ナビゲーションの辺。保存側の EnumerateCascadeChildren と同じ向き＝親参照は辿らない
+        var edges = new Dictionary<Guid, List<(NavigationInfo Nav, Entity Child)>>();
+
+        foreach (var entity in diagram.Entities)
+        {
+            var list = new List<(NavigationInfo, Entity)>();
+
+            if (navigationsByEntity.TryGetValue(entity.Id, out var navigations))
+            {
+                foreach (var nav in navigations)
+                {
+                    if (
+                        !nav.IsParentReference
+                        && entitiesByTable.TryGetValue(nav.TargetTableName, out var child)
+                    )
+                    {
+                        list.Add((nav, child));
+                    }
+                }
+            }
+
+            edges[entity.Id] = list;
+        }
+
+        // contributes: 自身または子孫のいずれかが同期対象（循環カスケードがあり得るため不動点で解く）
+        var contributes = diagram.Entities.ToDictionary(
+            entity => entity.Id,
+            entity => targetsByTable.ContainsKey(entity.TableName)
+        );
+        var changed = true;
+
+        while (changed)
+        {
+            changed = false;
+
+            foreach (var entity in diagram.Entities)
+            {
+                if (
+                    !contributes[entity.Id]
+                    && edges[entity.Id].Any(edge => contributes[edge.Child.Id])
+                )
+                {
+                    contributes[entity.Id] = true;
+                    changed = true;
+                }
+            }
+        }
+
+        // included: デコレータが記録の起点にする同期対象ルートから、contributes な辺だけを辿って到達できる型
+        var included = new HashSet<Guid>();
+        var queue = new Queue<Entity>(
+            diagram.Entities.Where(entity => targetsByTable.ContainsKey(entity.TableName))
+        );
+
+        while (queue.Count > 0)
+        {
+            var entity = queue.Dequeue();
+
+            if (!included.Add(entity.Id))
+            {
+                continue;
+            }
+
+            foreach (var (_, child) in edges[entity.Id])
+            {
+                if (contributes[child.Id] && !included.Contains(child.Id))
+                {
+                    queue.Enqueue(child);
+                }
+            }
+        }
+
+        var members = OrderEntitiesByForeignKey(diagram)
+            .Where(entity => included.Contains(entity.Id))
+            .Select(entity =>
+                BuildSyncGraphRecorderMembers(
+                    _nameConverter.ToEntityClassName(entity.TableName),
+                    targetsByTable.GetValueOrDefault(entity.TableName),
+                    edges[entity.Id]
+                        .Where(edge => contributes[edge.Child.Id])
+                        .Select(edge => edge.Nav)
+                        .ToList()
+                )
+            )
+            .ToList();
+
+        return "/// <summary>\n"
+            + "/// Records the journal entries a graph save is about to need, before the save itself runs (\"journal-first\").\n"
+            + "/// </summary>\n"
+            + "/// <remarks>\n"
+            + "/// <para>\n"
+            + "/// The traversal mirrors the decision procedure of the graph saver: a removed node has its cascade subtree\n"
+            + "/// recorded as deletes (children first, each regardless of its own state) followed by the node itself, an added\n"
+            + "/// or updated node is recorded as an upsert, and an unchanged node contributes nothing of its own - but its\n"
+            + "/// children are still visited while the save cascades, because a changed child under an unchanged root is\n"
+            + "/// written all the same. Only synchronised tables are recorded; a table on the path that is not synchronised\n"
+            + "/// is walked through without an entry of its own.\n"
+            + "/// </para>\n"
+            + "/// <para>\n"
+            + "/// Recording the whole graph first keeps the journal-first safety order for every row the save is going to\n"
+            + "/// touch: an entry whose write then fails or is rolled back describes a row the upload re-reads and settles\n"
+            + "/// without a round trip.\n"
+            + "/// </para>\n"
+            + "/// </remarks>\n"
+            + "public static class SyncGraphRecorder\n"
+            + "{\n"
+            + string.Join("\n\n", members)
+            + "\n}";
+    }
+
+    /// <summary>1 つの参加型ぶんの SyncGraphRecorder メンバー群（RecordSaveAsync ほか）を組み立てる</summary>
+    /// <param name="entityClassName">エンティティクラス名</param>
+    /// <param name="target">同期対象ならその生成モデル（テーブル名・キー整形・ミラー版式の供給元）・非対象なら null</param>
+    /// <param name="children">カスケード子ナビゲーション（対象を含む部分木のものだけに刈られている）</param>
+    private static string BuildSyncGraphRecorderMembers(
+        string entityClassName,
+        CSharpSyncTableModel? target,
+        IReadOnlyList<NavigationInfo> children
+    )
+    {
+        var members = new List<string>
+        {
+            BuildRecorderSaveMethod(entityClassName, target, children),
+            BuildRecorderDeleteGraphMethod(entityClassName, target, children),
+        };
+
+        // 子を持つ対象型だけ、自身の削除記録を別メソッドへ切り出す（cascadeDelete=false の枝と
+        // RecordDeleteGraphAsync の両方が使う）。子なしの対象型は RecordDeleteGraphAsync 自体が自身の記録になる
+        if (target is not null && children.Count > 0)
+        {
+            members.Add(BuildRecorderDeleteMethod(entityClassName, target));
+        }
+
+        return string.Join("\n\n", members);
+    }
+
+    /// <summary>RecordSaveAsync（保存側 SaveAsync の RowState 分岐をミラーする記録メソッド）を組み立てる</summary>
+    private static string BuildRecorderSaveMethod(
+        string entityClassName,
+        CSharpSyncTableModel? target,
+        IReadOnlyList<NavigationInfo> children
+    )
+    {
+        var body = new List<string>();
+
+        // Removed: cascadeDelete なら部分木ごと・さもなくば自身のみ（保存側と同じく子への保存再帰はしない）
+        string removedBranch;
+
+        if (children.Count == 0)
+        {
+            // 子なし＝cascadeDelete の別なく自身の削除だけ（RecordDeleteGraphAsync が自身の記録そのもの）
+            removedBranch =
+                "        if (entity.RowState == RowState.Removed)\n"
+                + "        {\n"
+                + "            await RecordDeleteGraphAsync(journal, entity, cancellationToken).ConfigureAwait(false);\n"
+                + "\n"
+                + "            return;\n"
+                + "        }";
+        }
+        else if (target is not null)
+        {
+            removedBranch =
+                "        if (entity.RowState == RowState.Removed)\n"
+                + "        {\n"
+                + "            if (cascadeDelete)\n"
+                + "            {\n"
+                + "                await RecordDeleteGraphAsync(journal, entity, cancellationToken)\n"
+                + "                    .ConfigureAwait(false);\n"
+                + "            }\n"
+                + "            else\n"
+                + "            {\n"
+                + "                await RecordDeleteAsync(journal, entity, cancellationToken).ConfigureAwait(false);\n"
+                + "            }\n"
+                + "\n"
+                + "            return;\n"
+                + "        }";
+        }
+        else
+        {
+            // 非対象型は自身の記録が無い＝cascadeDelete のときだけ部分木の対象を記録する
+            removedBranch =
+                "        if (entity.RowState == RowState.Removed)\n"
+                + "        {\n"
+                + "            if (cascadeDelete)\n"
+                + "            {\n"
+                + "                await RecordDeleteGraphAsync(journal, entity, cancellationToken)\n"
+                + "                    .ConfigureAwait(false);\n"
+                + "            }\n"
+                + "\n"
+                + "            return;\n"
+                + "        }";
+        }
+
+        body.Add(removedBranch);
+
+        if (target is not null)
+        {
+            body.Add(
+                "        if (entity.RowState != RowState.Unchanged)\n"
+                    + "        {\n"
+                    + "            await journal.RecordAsync(\n"
+                    + $"                \"{target.TableName}\",\n"
+                    + $"                {target.FormatKeyEntityExpression},\n"
+                    + "                SyncJournalOperation.Upsert,\n"
+                    + "                null,\n"
+                    + "                cancellationToken\n"
+                    + "            )\n"
+                    + "                .ConfigureAwait(false);\n"
+                    + "        }"
+            );
+        }
+
+        if (children.Count > 0)
+        {
+            var loops = string.Join(
+                "\n\n",
+                children.Select(child =>
+                    child.IsCollection
+                        ? $"            foreach (var child in entity.{child.PropertyName})\n"
+                            + "            {\n"
+                            + "                if (child is not null)\n"
+                            + "                {\n"
+                            + "                    await RecordSaveAsync(journal, child, cascadeSave, cascadeDelete, cancellationToken)\n"
+                            + "                        .ConfigureAwait(false);\n"
+                            + "                }\n"
+                            + "            }"
+                        : $"            if (entity.{child.PropertyName} is not null)\n"
+                            + "            {\n"
+                            + $"                await RecordSaveAsync(journal, entity.{child.PropertyName}, cascadeSave, cascadeDelete, cancellationToken)\n"
+                            + "                    .ConfigureAwait(false);\n"
+                            + "            }"
+                )
+            );
+            body.Add("        if (cascadeSave)\n        {\n" + loops + "\n        }");
+        }
+
+        return $"    /// <summary>Records the entries for a graph save rooted at this {entityClassName} (the cascade children included).</summary>\n"
+            + "    public static async Task RecordSaveAsync(\n"
+            + "        SyncJournal journal,\n"
+            + $"        {entityClassName} entity,\n"
+            + "        bool cascadeSave,\n"
+            + "        bool cascadeDelete,\n"
+            + "        CancellationToken cancellationToken = default\n"
+            + "    )\n"
+            + "    {\n"
+            + "        ArgumentNullException.ThrowIfNull(journal);\n"
+            + "        ArgumentNullException.ThrowIfNull(entity);\n"
+            + "\n"
+            + string.Join("\n\n", body)
+            + "\n    }";
+    }
+
+    /// <summary>RecordDeleteGraphAsync（保存側 DeleteGraphAsync＝子から順の部分木削除をミラーする記録メソッド）を組み立てる</summary>
+    private static string BuildRecorderDeleteGraphMethod(
+        string entityClassName,
+        CSharpSyncTableModel? target,
+        IReadOnlyList<NavigationInfo> children
+    )
+    {
+        if (children.Count == 0)
+        {
+            // 子なしの対象型: 部分木の記録＝自身の削除記録（非対象の子なし型は included に入らないためここへ来ない）
+            return $"    /// <summary>Records the delete of this {entityClassName}, carrying the mirrored version the row holds.</summary>\n"
+                + "    private static Task RecordDeleteGraphAsync(\n"
+                + "        SyncJournal journal,\n"
+                + $"        {entityClassName} entity,\n"
+                + "        CancellationToken cancellationToken\n"
+                + "    ) =>\n"
+                + "        journal.RecordAsync(\n"
+                + $"            \"{target!.TableName}\",\n"
+                + $"            {target.FormatKeyEntityExpression},\n"
+                + "            SyncJournalOperation.Delete,\n"
+                + $"            {target.RowVersionReadExpression},\n"
+                + "            cancellationToken\n"
+                + "        );";
+        }
+
+        var loops = string.Join(
+            "\n\n",
+            children.Select(child =>
+                child.IsCollection
+                    ? $"        foreach (var child in entity.{child.PropertyName})\n"
+                        + "        {\n"
+                        + "            if (child is not null)\n"
+                        + "            {\n"
+                        + "                await RecordDeleteGraphAsync(journal, child, cancellationToken).ConfigureAwait(false);\n"
+                        + "            }\n"
+                        + "        }"
+                    : $"        if (entity.{child.PropertyName} is not null)\n"
+                        + "        {\n"
+                        + $"            await RecordDeleteGraphAsync(journal, entity.{child.PropertyName}, cancellationToken)\n"
+                        + "                .ConfigureAwait(false);\n"
+                        + "        }"
+            )
+        );
+
+        var summary = target is null
+            ? $"Walks the subtree of this {entityClassName} and records the synchronised descendants as deletes (this table itself is not synchronised)."
+            : $"Records the whole subtree of this {entityClassName} as deletes, children first (the saver removes them regardless of their own state).";
+        var selfRecord = target is null
+            ? string.Empty
+            : "\n\n        await RecordDeleteAsync(journal, entity, cancellationToken).ConfigureAwait(false);";
+
+        return $"    /// <summary>{summary}</summary>\n"
+            + "    private static async Task RecordDeleteGraphAsync(\n"
+            + "        SyncJournal journal,\n"
+            + $"        {entityClassName} entity,\n"
+            + "        CancellationToken cancellationToken\n"
+            + "    )\n"
+            + "    {\n"
+            + loops
+            + selfRecord
+            + "\n    }";
+    }
+
+    /// <summary>RecordDeleteAsync（自身 1 行の削除記録＝グラフに載っている実体のミラー版を添える）を組み立てる</summary>
+    private static string BuildRecorderDeleteMethod(
+        string entityClassName,
+        CSharpSyncTableModel target
+    ) =>
+        $"    /// <summary>Records the delete of this {entityClassName}, carrying the mirrored version the row holds.</summary>\n"
+        + "    private static Task RecordDeleteAsync(\n"
+        + "        SyncJournal journal,\n"
+        + $"        {entityClassName} entity,\n"
+        + "        CancellationToken cancellationToken\n"
+        + "    ) =>\n"
+        + "        journal.RecordAsync(\n"
+        + $"            \"{target.TableName}\",\n"
+        + $"            {target.FormatKeyEntityExpression},\n"
+        + "            SyncJournalOperation.Delete,\n"
+        + $"            {target.RowVersionReadExpression},\n"
+        + "            cancellationToken\n"
+        + "        );";
 }

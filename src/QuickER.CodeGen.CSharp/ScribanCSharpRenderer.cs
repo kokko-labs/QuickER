@@ -392,6 +392,9 @@ internal sealed class ScribanCSharpRenderer
             ["render_sync_endpoints"] = scope.RemoteServer && options.GenerateSyncSupport,
             // 同期対象テーブル（rowversion 列を持つテーブル）の per-entity 生成素材。FK トポロジカル順（親→子）。
             ["sync_tables"] = model.SyncTables,
+            // グラフ保存のジャーナル記録クラス（SyncGraphRecorder）の整形済み全文（同期支援が無効なら空文字）。
+            // 分岐の多い再帰メソッド群のためビルダー側で組み立て、テンプレートは埋め込むだけにする（方言 SQL と同じ流儀）。
+            ["sync_graph_recorder"] = model.SyncGraphRecorder,
             // DB 非依存のインメモリ Repository 群（InMemoryDataStore・InMemory{Entity}Repository・シーダー・DI）を出力するか。
             // 方言非依存のため契約を出すスペックで 1 度だけ true（既存経路は常に false でバイト不変）
             ["in_memory"] = scope.InMemory,

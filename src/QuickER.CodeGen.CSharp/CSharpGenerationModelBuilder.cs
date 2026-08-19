@@ -54,6 +54,8 @@ internal sealed partial class CSharpGenerationModelBuilder
                 .ToList()
             : [];
 
+        var syncTables = BuildSyncTables(diagram, options, repositoryClasses);
+
         var model = new CSharpGenerationModel
         {
             NamespaceName = string.IsNullOrWhiteSpace(options.RootNamespace)
@@ -95,7 +97,10 @@ internal sealed partial class CSharpGenerationModelBuilder
             EfCore = BuildEfCoreModel(diagram, options),
             // 同期対象テーブルは「行バージョン列を持ち Repository 契約が生成されるテーブル」で、FK トポロジカル順に並べる
             // （ダウンロードの適用は親→子・削除は子→親でなければ FK 制約に触れるため、順序そのものが生成物の一部）
-            SyncTables = BuildSyncTables(diagram, options, repositoryClasses),
+            SyncTables = syncTables,
+            // グラフ保存のジャーナル記録は保存側（EntityGraphSaver）のカスケード走査をミラーする必要があるため、
+            // 同期対象と同じナビゲーション解決結果から再帰記録メソッド群を静的に組み立てる
+            SyncGraphRecorder = BuildSyncGraphRecorder(diagram, navigationsByEntity, syncTables),
         };
 
         // 構築直後のモデルに対し、テンプレートが発行する全メンバー名をシンボル表で突き合わせて

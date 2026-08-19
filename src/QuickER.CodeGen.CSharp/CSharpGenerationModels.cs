@@ -29,6 +29,16 @@ internal sealed class CSharpGenerationModel
     /// </summary>
     /// <remarks><c>GenerateSyncSupport</c> が OFF のときは空（テンプレートの同期ブロックはスコープ側で落ちる）。</remarks>
     public IReadOnlyList<CSharpSyncTableModel> SyncTables { get; init; } = [];
+
+    /// <summary>
+    /// グラフ保存のジャーナル記録クラス（<c>SyncGraphRecorder</c>）の整形済み全文。同期支援が無効なら空文字。
+    /// </summary>
+    /// <remarks>
+    /// デコレータの SaveAsync はルートしか見えないが、保存側（EntityGraphSaver）はカスケードナビゲーションを
+    /// 辿って子孫も書く。記録が保存の決定手順をミラーしないと、カスケード子の変更がジャーナルに載らず
+    /// サイレントなデータ損失になるため、図から静的に組み立てた再帰記録メソッド群をテンプレートへ渡す。
+    /// </remarks>
+    public string SyncGraphRecorder { get; init; } = string.Empty;
 }
 
 /// <summary>1 つの同期対象テーブル（<c>rowversion</c> 列を持つテーブル）の生成モデル</summary>

@@ -598,6 +598,133 @@ public abstract class SyncRuntimeTestsBase : IAsyncLifetime
         (await Journal.CountPendingAsync(Ct)).Should().Be(0, "送るものが無いエントリは掃除される");
     }
 
+    // ---- カスケードグラフの記録（SyncGraphRecorder） ----
+
+    /// <summary>
+    /// カスケード保存（グラフ保存）で書かれた子行もジャーナルへ載り、同期でサーバーへ届く。
+    /// </summary>
+    /// <remarks>
+    /// 記録がルートしか見ない旧実装では、①子がアップロードされず、②同じランの削除伝搬が「サーバーに無い
+    /// キー」としてローカルの子行を消す＝同期 1 回で子データが両側から失われていた（2026-08-19 実測）。
+    /// このテストは両方の穴を固定する。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Sync] カスケード保存の親子グラフは両方ジャーナルへ載り同期でサーバーへ届く"
+    )]
+    public async Task CascadeGraphSave_UploadsParentAndChild()
+    {
+        var order = new SyncOrderEntity { OrderId = 1, CustomerName = "alice" };
+        order.MarkAdded();
+        var line = new SyncOrderLineEntity
+        {
+            LineId = 11,
+            OrderId = 1,
+            Product = "widget",
+        };
+        line.MarkAdded();
+        order.SyncOrderLines.Add(line);
+
+        await LocalOrders.SaveAsync(order, cancellationToken: Ct);
+
+        var entries = await Journal.ReadAllAsync(Ct);
+        entries
+            .Select(entry => entry.TableName)
+            .Should()
+            .Contain(["sync_orders", "sync_order_lines"]);
+
+        var result = await Engine.SyncAsync(cancellationToken: Ct);
+
+        result.Conflicts.Should().BeEmpty();
+        result.Uploaded.Should().Be(2, "親子 2 行が送られる");
+        result.DeletedLocally.Should().Be(0, "記録済みの子行は削除伝搬に消されない");
+        (await ServerOrders.GetByIdAsync(1, Ct)).Should().NotBeNull();
+        (await ServerLines.GetByIdAsync(11, Ct)).Should().NotBeNull();
+
+        var localLine = await LocalLinesRaw.GetByIdAsync(11, Ct);
+        localLine.Should().NotBeNull("ローカルの子行が同期後も残っている");
+        localLine!.RowVer.Should().NotBeNullOrEmpty("サーバーが採番した版がミラーへ書き戻る");
+
+        var second = await Engine.SyncAsync(cancellationToken: Ct);
+        second.Uploaded.Should().Be(0);
+        second.Downloaded.Should().Be(0, "自分の変更を取り戻さない（アンカーが進んでいる）");
+    }
+
+    /// <summary>Unchanged のルート配下で子だけを編集したグラフ保存も、子の変更が記録され届く</summary>
+    /// <remarks>
+    /// 保存側の変更検出（HasChanges）はカスケード全体を見るためこの保存は実行される。記録も同じ走査で
+    /// 「ルートは記録なし・子は Upsert」にならなければ、片方だけが真実になる。
+    /// </remarks>
+    [Fact(DisplayName = "[Sync] Unchanged ルート下の子だけ編集したグラフ保存も子の変更が届く")]
+    public async Task CascadeGraphSave_ChildEditUnderUnchangedRoot_Uploads()
+    {
+        await SeedServerAsync(1, "alice", 11, "widget");
+        await Engine.SyncAsync(cancellationToken: Ct);
+
+        var order = await LocalOrdersRaw.GetByIdAsync(1, Ct);
+        var line = await LocalLinesRaw.GetByIdAsync(11, Ct);
+        line!.Product = "widget-v2";
+        line.MarkUpdated();
+        order!.SyncOrderLines.Add(line);
+
+        await LocalOrders.SaveAsync(order, cancellationToken: Ct);
+
+        var entries = await Journal.ReadAllAsync(Ct);
+        entries.Should().ContainSingle(entry => entry.TableName == "sync_order_lines");
+        entries
+            .Should()
+            .NotContain(
+                entry => entry.TableName == "sync_orders",
+                "Unchanged のルートは記録されない"
+            );
+
+        var result = await Engine.SyncAsync(cancellationToken: Ct);
+
+        result.Uploaded.Should().Be(1);
+        (await ServerLines.GetByIdAsync(11, Ct))!.Product.Should().Be("widget-v2");
+    }
+
+    /// <summary>
+    /// カスケード削除は子のエントリも記録され、再生は子→親の順でサーバーの FK を壊さない。
+    /// </summary>
+    /// <remarks>
+    /// 旧実装では親の Delete だけが残り、再生がサーバー側の子の FK 制約に阻まれて同期が例外で恒久失敗
+    /// していた（エントリが残留し以後のランも同じ例外・2026-08-19 実測）。
+    /// </remarks>
+    [Fact(DisplayName = "[Sync] カスケード削除は子から順に再生されサーバーの FK を壊さない")]
+    public async Task CascadeGraphDelete_ReplaysChildFirst()
+    {
+        await SeedServerAsync(1, "alice", 11, "widget");
+        await Engine.SyncAsync(cancellationToken: Ct);
+
+        var order = await LocalOrdersRaw.GetByIdAsync(1, Ct);
+        var line = await LocalLinesRaw.GetByIdAsync(11, Ct);
+        order!.SyncOrderLines.Add(line!);
+        order.MarkRemoved();
+
+        await LocalOrders.SaveAsync(order, cancellationToken: Ct);
+
+        (await LocalLinesRaw.GetByIdAsync(11, Ct))
+            .Should()
+            .BeNull("カスケード削除で子もローカルから消えている");
+
+        var entries = await Journal.ReadAllAsync(Ct);
+        entries
+            .Select(entry => (entry.TableName, entry.Operation))
+            .Should()
+            .BeEquivalentTo(
+                [("sync_order_lines", "Delete"), ("sync_orders", "Delete")],
+                "子の削除もミラー版付きで記録される"
+            );
+
+        var result = await Engine.SyncAsync(cancellationToken: Ct);
+
+        result.Conflicts.Should().BeEmpty();
+        result.Uploaded.Should().Be(2);
+        (await ServerOrders.GetByIdAsync(1, Ct)).Should().BeNull();
+        (await ServerLines.GetByIdAsync(11, Ct)).Should().BeNull();
+        (await Journal.CountPendingAsync(Ct)).Should().Be(0, "全エントリが決着して掃除される");
+    }
+
     // ---- 競合 ----
 
     /// <summary>既定（収集）では競合をジャーナルへ残し、両者の値を添えて報告する</summary>

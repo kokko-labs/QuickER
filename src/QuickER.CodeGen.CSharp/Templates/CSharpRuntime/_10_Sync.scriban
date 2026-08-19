@@ -2157,12 +2157,15 @@ public sealed class {{ sync.table_class_name }}(
 /// <para>
 /// It wraps the repository rather than hooking into the save pipeline because a save hook only fires for a graph save -
 /// a direct Insert, Update, Delete, or BulkInsert passes it by. Offline editing has to be caught at every write, so
-/// every write entry point on the contract records its intent here.
+/// every write entry point on the contract records its intent here. A graph save is recorded through
+/// <see cref="SyncGraphRecorder"/>, which walks the same cascade navigations the saver walks, so the children the
+/// save writes or deletes are journaled exactly like the root.
 /// </para>
 /// <para>
 /// Raw SQL (<c>ExecuteSqlAsync</c>) is forwarded untouched and is <b>not</b> recorded: the statement's shape is opaque
-/// to the decorator, so there is no key to journal. Rows changed that way reach the server only if something else
-/// records them.
+/// to the decorator, so there is no key to journal. The same holds for the bulk delete behind
+/// <c>Query().ExecuteDeleteAsync</c>, whose rows are chosen by a predicate the decorator never sees. Rows changed
+/// either way reach the server only if something else records them.
 /// </para>
 /// </remarks>
 public sealed class {{ sync.decorator_class_name }}(
@@ -2271,7 +2274,14 @@ public sealed class {{ sync.decorator_class_name }}(
     )
     {
         ArgumentNullException.ThrowIfNull(entity);
-        await RecordSaveAsync(entity, cancellationToken).ConfigureAwait(false);
+        await SyncGraphRecorder.RecordSaveAsync(
+            journal,
+            entity,
+            cascadeSave,
+            cascadeDelete,
+            cancellationToken
+        )
+            .ConfigureAwait(false);
 
         return await inner.SaveAsync(
             entity,
@@ -2301,7 +2311,14 @@ public sealed class {{ sync.decorator_class_name }}(
         {
             if (entity is not null)
             {
-                await RecordSaveAsync(entity, cancellationToken).ConfigureAwait(false);
+                await SyncGraphRecorder.RecordSaveAsync(
+                    journal,
+                    entity,
+                    cascadeSave,
+                    cascadeDelete,
+                    cancellationToken
+                )
+                    .ConfigureAwait(false);
             }
         }
 
@@ -2314,34 +2331,6 @@ public sealed class {{ sync.decorator_class_name }}(
             cancellationToken
         )
             .ConfigureAwait(false);
-    }
-
-    /// <summary>Records a graph-save root according to the state it carries (an unchanged root writes nothing).</summary>
-    private async Task RecordSaveAsync(
-        {{ sync.entity_class_name }} entity,
-        CancellationToken cancellationToken
-    )
-    {
-        if (entity.RowState == RowState.Unchanged)
-        {
-            return;
-        }
-
-        if (entity.RowState == RowState.Removed)
-        {
-            await journal.RecordAsync(
-                "{{ sync.table_name }}",
-                {{ sync.format_key_entity_expression }},
-                SyncJournalOperation.Delete,
-                {{ sync.row_version_read_expression }},
-                cancellationToken
-            )
-                .ConfigureAwait(false);
-
-            return;
-        }
-
-        await RecordUpsertAsync(entity, cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -2377,6 +2366,8 @@ public sealed class {{ sync.decorator_class_name }}(
 {{~ end ~}}
 }
 {{~ end ~}}
+
+{{ sync_graph_recorder }}
 
 /// <summary>DI registration for the bidirectional sync support.</summary>
 /// <remarks>

@@ -356,15 +356,26 @@ public class SyncSupportGenerationTests
             .Contain("var existing = await inner.GetByIdAsync(id, cancellationToken)");
         decorator.Should().Contain("SyncJournalOperation.Delete");
 
-        // グラフ保存（単一・複数）は RowState で記録内容を切り替える
-        decorator.Should().Contain("await RecordSaveAsync(entity, cancellationToken)");
-        decorator.Should().Contain("if (entity.RowState == RowState.Removed)");
+        // グラフ保存（単一・複数）はカスケード全体の記録を SyncGraphRecorder へ委譲する
+        // （保存側と同じ cascadeSave / cascadeDelete のフラグ解釈で子孫まで記録するため）
+        decorator.Should().Contain("await SyncGraphRecorder.RecordSaveAsync(");
+        decorator.Should().Contain("cascadeDelete,");
 
         // 読み取り経路は素通し（記録しない）
         decorator.Should().Contain("public SqlQuery<SyncOrderEntity> Query() => inner.Query();");
         decorator
             .Should()
             .Contain("public Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(");
+
+        // RowState の分岐と子の走査は SyncGraphRecorder 側にある（保存側の決定手順のミラー）
+        var recorder = ExtractClass(
+            string.Concat(files.Values),
+            "public static class SyncGraphRecorder"
+        );
+        recorder.Should().Contain("if (entity.RowState == RowState.Removed)");
+        recorder.Should().Contain("if (entity.RowState != RowState.Unchanged)");
+        recorder.Should().Contain("foreach (var child in entity.SyncOrderLines)");
+        recorder.Should().Contain("SyncJournalOperation.Delete");
     }
 
     /// <summary>ループ防止の抑制フラグを、エンジンの書き込み経路とジャーナル記録の双方が参照する。</summary>

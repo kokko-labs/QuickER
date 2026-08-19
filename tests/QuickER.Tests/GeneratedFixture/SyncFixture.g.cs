@@ -6105,12 +6105,15 @@ public sealed class SyncOrderSyncTable(
 /// <para>
 /// It wraps the repository rather than hooking into the save pipeline because a save hook only fires for a graph save -
 /// a direct Insert, Update, Delete, or BulkInsert passes it by. Offline editing has to be caught at every write, so
-/// every write entry point on the contract records its intent here.
+/// every write entry point on the contract records its intent here. A graph save is recorded through
+/// <see cref="SyncGraphRecorder"/>, which walks the same cascade navigations the saver walks, so the children the
+/// save writes or deletes are journaled exactly like the root.
 /// </para>
 /// <para>
 /// Raw SQL (<c>ExecuteSqlAsync</c>) is forwarded untouched and is <b>not</b> recorded: the statement's shape is opaque
-/// to the decorator, so there is no key to journal. Rows changed that way reach the server only if something else
-/// records them.
+/// to the decorator, so there is no key to journal. The same holds for the bulk delete behind
+/// <c>Query().ExecuteDeleteAsync</c>, whose rows are chosen by a predicate the decorator never sees. Rows changed
+/// either way reach the server only if something else records them.
 /// </para>
 /// </remarks>
 public sealed class JournalingSyncOrderRepository(
@@ -6219,7 +6222,14 @@ public sealed class JournalingSyncOrderRepository(
     )
     {
         ArgumentNullException.ThrowIfNull(entity);
-        await RecordSaveAsync(entity, cancellationToken).ConfigureAwait(false);
+        await SyncGraphRecorder.RecordSaveAsync(
+            journal,
+            entity,
+            cascadeSave,
+            cascadeDelete,
+            cancellationToken
+        )
+            .ConfigureAwait(false);
 
         return await inner.SaveAsync(
             entity,
@@ -6249,7 +6259,14 @@ public sealed class JournalingSyncOrderRepository(
         {
             if (entity is not null)
             {
-                await RecordSaveAsync(entity, cancellationToken).ConfigureAwait(false);
+                await SyncGraphRecorder.RecordSaveAsync(
+                    journal,
+                    entity,
+                    cascadeSave,
+                    cascadeDelete,
+                    cancellationToken
+                )
+                    .ConfigureAwait(false);
             }
         }
 
@@ -6262,34 +6279,6 @@ public sealed class JournalingSyncOrderRepository(
             cancellationToken
         )
             .ConfigureAwait(false);
-    }
-
-    /// <summary>Records a graph-save root according to the state it carries (an unchanged root writes nothing).</summary>
-    private async Task RecordSaveAsync(
-        SyncOrderEntity entity,
-        CancellationToken cancellationToken
-    )
-    {
-        if (entity.RowState == RowState.Unchanged)
-        {
-            return;
-        }
-
-        if (entity.RowState == RowState.Removed)
-        {
-            await journal.RecordAsync(
-                "sync_orders",
-                entity.OrderId.ToString(CultureInfo.InvariantCulture),
-                SyncJournalOperation.Delete,
-                entity.RowVer,
-                cancellationToken
-            )
-                .ConfigureAwait(false);
-
-            return;
-        }
-
-        await RecordUpsertAsync(entity, cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -6487,12 +6476,15 @@ public sealed class SyncOrderLineSyncTable(
 /// <para>
 /// It wraps the repository rather than hooking into the save pipeline because a save hook only fires for a graph save -
 /// a direct Insert, Update, Delete, or BulkInsert passes it by. Offline editing has to be caught at every write, so
-/// every write entry point on the contract records its intent here.
+/// every write entry point on the contract records its intent here. A graph save is recorded through
+/// <see cref="SyncGraphRecorder"/>, which walks the same cascade navigations the saver walks, so the children the
+/// save writes or deletes are journaled exactly like the root.
 /// </para>
 /// <para>
 /// Raw SQL (<c>ExecuteSqlAsync</c>) is forwarded untouched and is <b>not</b> recorded: the statement's shape is opaque
-/// to the decorator, so there is no key to journal. Rows changed that way reach the server only if something else
-/// records them.
+/// to the decorator, so there is no key to journal. The same holds for the bulk delete behind
+/// <c>Query().ExecuteDeleteAsync</c>, whose rows are chosen by a predicate the decorator never sees. Rows changed
+/// either way reach the server only if something else records them.
 /// </para>
 /// </remarks>
 public sealed class JournalingSyncOrderLineRepository(
@@ -6601,7 +6593,14 @@ public sealed class JournalingSyncOrderLineRepository(
     )
     {
         ArgumentNullException.ThrowIfNull(entity);
-        await RecordSaveAsync(entity, cancellationToken).ConfigureAwait(false);
+        await SyncGraphRecorder.RecordSaveAsync(
+            journal,
+            entity,
+            cascadeSave,
+            cascadeDelete,
+            cancellationToken
+        )
+            .ConfigureAwait(false);
 
         return await inner.SaveAsync(
             entity,
@@ -6631,7 +6630,14 @@ public sealed class JournalingSyncOrderLineRepository(
         {
             if (entity is not null)
             {
-                await RecordSaveAsync(entity, cancellationToken).ConfigureAwait(false);
+                await SyncGraphRecorder.RecordSaveAsync(
+                    journal,
+                    entity,
+                    cascadeSave,
+                    cascadeDelete,
+                    cancellationToken
+                )
+                    .ConfigureAwait(false);
             }
         }
 
@@ -6644,34 +6650,6 @@ public sealed class JournalingSyncOrderLineRepository(
             cancellationToken
         )
             .ConfigureAwait(false);
-    }
-
-    /// <summary>Records a graph-save root according to the state it carries (an unchanged root writes nothing).</summary>
-    private async Task RecordSaveAsync(
-        SyncOrderLineEntity entity,
-        CancellationToken cancellationToken
-    )
-    {
-        if (entity.RowState == RowState.Unchanged)
-        {
-            return;
-        }
-
-        if (entity.RowState == RowState.Removed)
-        {
-            await journal.RecordAsync(
-                "sync_order_lines",
-                entity.LineId.ToString(CultureInfo.InvariantCulture),
-                SyncJournalOperation.Delete,
-                entity.RowVer,
-                cancellationToken
-            )
-                .ConfigureAwait(false);
-
-            return;
-        }
-
-        await RecordUpsertAsync(entity, cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -6703,6 +6681,157 @@ public sealed class JournalingSyncOrderLineRepository(
         SyncOrderLineEntity entity,
         CancellationToken cancellationToken = default
     ) => inner.CheckUniquenessAsync(entity, cancellationToken);
+}
+
+/// <summary>
+/// Records the journal entries a graph save is about to need, before the save itself runs ("journal-first").
+/// </summary>
+/// <remarks>
+/// <para>
+/// The traversal mirrors the decision procedure of the graph saver: a removed node has its cascade subtree
+/// recorded as deletes (children first, each regardless of its own state) followed by the node itself, an added
+/// or updated node is recorded as an upsert, and an unchanged node contributes nothing of its own - but its
+/// children are still visited while the save cascades, because a changed child under an unchanged root is
+/// written all the same. Only synchronised tables are recorded; a table on the path that is not synchronised
+/// is walked through without an entry of its own.
+/// </para>
+/// <para>
+/// Recording the whole graph first keeps the journal-first safety order for every row the save is going to
+/// touch: an entry whose write then fails or is rolled back describes a row the upload re-reads and settles
+/// without a round trip.
+/// </para>
+/// </remarks>
+public static class SyncGraphRecorder
+{
+    /// <summary>Records the entries for a graph save rooted at this SyncOrderEntity (the cascade children included).</summary>
+    public static async Task RecordSaveAsync(
+        SyncJournal journal,
+        SyncOrderEntity entity,
+        bool cascadeSave,
+        bool cascadeDelete,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(journal);
+        ArgumentNullException.ThrowIfNull(entity);
+
+        if (entity.RowState == RowState.Removed)
+        {
+            if (cascadeDelete)
+            {
+                await RecordDeleteGraphAsync(journal, entity, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            else
+            {
+                await RecordDeleteAsync(journal, entity, cancellationToken).ConfigureAwait(false);
+            }
+
+            return;
+        }
+
+        if (entity.RowState != RowState.Unchanged)
+        {
+            await journal.RecordAsync(
+                "sync_orders",
+                entity.OrderId.ToString(CultureInfo.InvariantCulture),
+                SyncJournalOperation.Upsert,
+                null,
+                cancellationToken
+            )
+                .ConfigureAwait(false);
+        }
+
+        if (cascadeSave)
+        {
+            foreach (var child in entity.SyncOrderLines)
+            {
+                if (child is not null)
+                {
+                    await RecordSaveAsync(journal, child, cascadeSave, cascadeDelete, cancellationToken)
+                        .ConfigureAwait(false);
+                }
+            }
+        }
+    }
+
+    /// <summary>Records the whole subtree of this SyncOrderEntity as deletes, children first (the saver removes them regardless of their own state).</summary>
+    private static async Task RecordDeleteGraphAsync(
+        SyncJournal journal,
+        SyncOrderEntity entity,
+        CancellationToken cancellationToken
+    )
+    {
+        foreach (var child in entity.SyncOrderLines)
+        {
+            if (child is not null)
+            {
+                await RecordDeleteGraphAsync(journal, child, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        await RecordDeleteAsync(journal, entity, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Records the delete of this SyncOrderEntity, carrying the mirrored version the row holds.</summary>
+    private static Task RecordDeleteAsync(
+        SyncJournal journal,
+        SyncOrderEntity entity,
+        CancellationToken cancellationToken
+    ) =>
+        journal.RecordAsync(
+            "sync_orders",
+            entity.OrderId.ToString(CultureInfo.InvariantCulture),
+            SyncJournalOperation.Delete,
+            entity.RowVer,
+            cancellationToken
+        );
+
+    /// <summary>Records the entries for a graph save rooted at this SyncOrderLineEntity (the cascade children included).</summary>
+    public static async Task RecordSaveAsync(
+        SyncJournal journal,
+        SyncOrderLineEntity entity,
+        bool cascadeSave,
+        bool cascadeDelete,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(journal);
+        ArgumentNullException.ThrowIfNull(entity);
+
+        if (entity.RowState == RowState.Removed)
+        {
+            await RecordDeleteGraphAsync(journal, entity, cancellationToken).ConfigureAwait(false);
+
+            return;
+        }
+
+        if (entity.RowState != RowState.Unchanged)
+        {
+            await journal.RecordAsync(
+                "sync_order_lines",
+                entity.LineId.ToString(CultureInfo.InvariantCulture),
+                SyncJournalOperation.Upsert,
+                null,
+                cancellationToken
+            )
+                .ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Records the delete of this SyncOrderLineEntity, carrying the mirrored version the row holds.</summary>
+    private static Task RecordDeleteGraphAsync(
+        SyncJournal journal,
+        SyncOrderLineEntity entity,
+        CancellationToken cancellationToken
+    ) =>
+        journal.RecordAsync(
+            "sync_order_lines",
+            entity.LineId.ToString(CultureInfo.InvariantCulture),
+            SyncJournalOperation.Delete,
+            entity.RowVer,
+            cancellationToken
+        );
 }
 
 /// <summary>DI registration for the bidirectional sync support.</summary>
