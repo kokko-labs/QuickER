@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net10.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>
@@ -34,22 +34,22 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="AwesomeAssertions" Version="9.5.0" />
+    <PackageReference Include="AwesomeAssertions" Version="9.6.0" />
     <PackageReference Include="coverlet.collector" Version="10.0.1">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
-    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.6.0" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.9" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.9" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.9" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.9.0" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.11" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.11" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.11" />
     <!-- 方言ランタイムテスト（PostgreSQL / MySQL / Oracle）用の EF Core プロバイダ -->
-    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.2" />
-    <PackageReference Include="MySql.EntityFrameworkCore" Version="10.0.7" />
-    <PackageReference Include="Oracle.EntityFrameworkCore" Version="10.23.26200" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
+    <PackageReference Include="MySql.EntityFrameworkCore" Version="10.0.9" />
+    <PackageReference Include="Oracle.EntityFrameworkCore" Version="10.23.26300" />
     <!-- SQLite 方言ランタイムテスト用の EF Core プロバイダ（インプロセス・Docker 不要） -->
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.9" />
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.7.0" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.11" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
     <PackageReference Include="Moq" Version="4.20.72" />
     <!--
       SSH.NET は Testcontainers 4.13.0 の推移的依存（[2025.1.0, )）だが、既定で解決される 2025.1.0 には
@@ -58,10 +58,10 @@
       （Testcontainers 側の要求は下限のみのため、上書きしても依存の整合は崩れない）。
     -->
     <PackageReference Include="SSH.NET" Version="2026.0.0" />
-    <PackageReference Include="Testcontainers.MsSql" Version="4.13.0" />
-    <PackageReference Include="Testcontainers.MySql" Version="4.13.0" />
-    <PackageReference Include="Testcontainers.Oracle" Version="4.13.0" />
-    <PackageReference Include="Testcontainers.PostgreSql" Version="4.13.0" />
+    <PackageReference Include="Testcontainers.MsSql" Version="4.14.0" />
+    <PackageReference Include="Testcontainers.MySql" Version="4.14.0" />
+    <PackageReference Include="Testcontainers.Oracle" Version="4.14.0" />
+    <PackageReference Include="Testcontainers.PostgreSql" Version="4.14.0" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>

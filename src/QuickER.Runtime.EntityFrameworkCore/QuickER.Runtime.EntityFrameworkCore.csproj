@@ -27,7 +27,7 @@
          DI 登録拡張（AddGeneratedEfCoreRepositories）は具象 QuickErDbContext を参照するスキーマ依存物として生成側に
          出力されるため、本パッケージは Microsoft.Extensions.DependencyInjection 系・ADO（SqlClient / Sqlite）へ依存しない
          （依存排他ガードテストで検証） -->
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.9" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.11" />
   </ItemGroup>
 
   <ItemGroup>

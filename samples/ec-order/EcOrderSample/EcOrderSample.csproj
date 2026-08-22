@@ -12,11 +12,11 @@
       利用者のプロジェクトを模すため、QuickER 本体プロジェクトへは参照せず NuGet パッケージのみを参照する。
       Microsoft.Data.Sqlite / SQLitePCLRaw のバージョンは src/QuickER.Runtime.Sqlite と同一のピンに揃える。
     -->
-    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.9" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.11" />
     <!-- Microsoft.Data.Sqlite 10.0.9 が推移的に持ち込む SQLitePCLRaw 2.1.11 には既知の脆弱性
          (GHSA-2m69-gcr7-jv3q) があるため、修正済みの 3.0.3 を明示参照して上書きする -->
-    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.3" />
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.9" />
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.5" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.11" />
   </ItemGroup>
 
   <ItemGroup>
