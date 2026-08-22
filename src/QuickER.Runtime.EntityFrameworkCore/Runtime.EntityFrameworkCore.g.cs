@@ -219,7 +219,7 @@ public sealed class EntitySaveMetadata
         // Type-specialized accessors for the declared column types the generated SELECT returns. On SQLite each GetXxx
         // coerces the storage type (long to int, TEXT to DateTime, etc.), equivalent to CoerceScalar; on SQL Server each
         // returns the column's CLR type directly, equivalent to the previous pass-through. Types not listed here
-        // (byte[], enums, DateTimeOffset, TimeSpan, etc.) are converted via the fallback as before.
+        // (byte[], enums, DateTimeOffset, TimeSpan, etc.) are converted via the fallback.
         return new Dictionary<Type, MethodInfo>
         {
             [typeof(bool)] = Getter(nameof(DbDataReader.GetBoolean)),

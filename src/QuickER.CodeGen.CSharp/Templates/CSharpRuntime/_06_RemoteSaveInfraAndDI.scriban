@@ -1646,7 +1646,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         // Type-specialized accessors for the declared column types the generated SELECT returns. On SQLite each GetXxx
         // coerces the storage type (long to int, TEXT to DateTime, etc.), equivalent to CoerceScalar; on SQL Server each
         // returns the column's CLR type directly, equivalent to the previous pass-through. Types not listed here
-        // (byte[], enums, DateTimeOffset, TimeSpan, etc.) are converted via the fallback as before.
+        // (byte[], enums, DateTimeOffset, TimeSpan, etc.) are converted via the fallback.
         return new Dictionary<Type, MethodInfo>
         {
             [typeof(bool)] = Getter(nameof(DbDataReader.GetBoolean)),
@@ -2433,7 +2433,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     /// <summary>
     /// Builds and adds an explicitly typed <see cref="{{ sql_parameter_type }}"/> from the column property's
     /// [SqlColumnType] attribute. When the attribute is absent (hand-written entities, unknown types), falls back to
-    /// AddWithValue as before.
+    /// AddWithValue.
     /// </summary>
     /// <param name="command">The command to add the parameter to</param>
     /// <param name="name">The parameter name (with the @ prefix)</param>
@@ -2488,7 +2488,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     }
 {{~ else ~}}
 
-    /// <summary>Binding used when the [SqlColumnType] attribute is not generated. Adds via AddWithValue as before.</summary>
+    /// <summary>Binding used when the [SqlColumnType] attribute is not generated. Adds via AddWithValue.</summary>
     /// <param name="command">The command to add the parameter to</param>
     /// <param name="name">The parameter name (with the @ prefix)</param>
     /// <param name="property">The property corresponding to the target column (unused in this branch)</param>
@@ -2912,7 +2912,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     /// When <c>changesAlreadyVerified</c> is <c>true</c> (the caller has already checked <see cref="HasChanges"/>, i.e.
     /// changes are known to exist), the redundant graph traversal (change detection) at the start is skipped. Recursion
     /// into children passes the default <c>false</c>, so per-subtree change detection (pruning clean branches) is still
-    /// performed as before.
+    /// performed.
     /// </remarks>
     public static async Task<int> SaveAsync(
         EntityBase entity,

@@ -1032,7 +1032,7 @@ public sealed class SqliteSqlQueryExecutor<TEntity>(ISqlConnectionFactory connec
     /// <summary>Fetches the entities matching the conditions with a projection (when the selector references only columns and there is no Include, only the referenced columns are plain-SELECTed).</summary>
     /// <remarks>
     /// When there is an Include, or column references cannot be safely extracted from the selector alone, falls back to
-    /// the legacy path (fetch all columns, then project in memory). When pruning is possible, only the referenced columns
+    /// fetching all columns and projecting in memory. When pruning is possible, only the referenced columns
     /// are issued as a plain SELECT (no JSON), partially materialized, then projected.
     /// </remarks>
     public async Task<IReadOnlyList<TResult>> ToProjectionListAsync<TResult>(
@@ -2256,7 +2256,7 @@ public static class SqlExpressionTranslator
     /// Evaluates constants, closure variables, and the like to obtain the actual value. Most cases are constants or
     /// field/property references on a closure capturing local variables, so they are read directly via reflection,
     /// avoiding (expensive) expression-tree compilation. Only other expressions such as method calls are evaluated
-    /// with <see cref="Expression.Lambda(Expression, ParameterExpression[])"/> as before.
+    /// with <see cref="Expression.Lambda(Expression, ParameterExpression[])"/>.
     /// </summary>
     private static object? Evaluate(Expression expression)
     {
@@ -2619,7 +2619,7 @@ public sealed class EntitySaveMetadata
         // Type-specialized accessors for the declared column types the generated SELECT returns. On SQLite each GetXxx
         // coerces the storage type (long to int, TEXT to DateTime, etc.), equivalent to CoerceScalar; on SQL Server each
         // returns the column's CLR type directly, equivalent to the previous pass-through. Types not listed here
-        // (byte[], enums, DateTimeOffset, TimeSpan, etc.) are converted via the fallback as before.
+        // (byte[], enums, DateTimeOffset, TimeSpan, etc.) are converted via the fallback.
         return new Dictionary<Type, MethodInfo>
         {
             [typeof(bool)] = Getter(nameof(DbDataReader.GetBoolean)),
@@ -3337,7 +3337,7 @@ public sealed class EntitySaveMetadata
         AddColumnParameter(command, "@id", KeyProperty, value);
     }
 
-    /// <summary>Binding used when the [SqlColumnType] attribute is not generated. Adds via AddWithValue as before.</summary>
+    /// <summary>Binding used when the [SqlColumnType] attribute is not generated. Adds via AddWithValue.</summary>
     /// <param name="command">The command to add the parameter to</param>
     /// <param name="name">The parameter name (with the @ prefix)</param>
     /// <param name="property">The property corresponding to the target column (unused in this branch)</param>
@@ -3519,7 +3519,7 @@ public static class EntityGraphSaver
     /// When <c>changesAlreadyVerified</c> is <c>true</c> (the caller has already checked <see cref="HasChanges"/>, i.e.
     /// changes are known to exist), the redundant graph traversal (change detection) at the start is skipped. Recursion
     /// into children passes the default <c>false</c>, so per-subtree change detection (pruning clean branches) is still
-    /// performed as before.
+    /// performed.
     /// </remarks>
     public static async Task<int> SaveAsync(
         EntityBase entity,

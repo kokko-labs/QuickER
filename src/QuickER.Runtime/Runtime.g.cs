@@ -3741,7 +3741,7 @@ public interface ISqlQueryExecutor<TEntity>
 /// or receiver, a multi-hop navigation reference, and so on). Whether each collected name is actually a column property
 /// (rather than a navigation) is reconciled by the caller (each executor) via <c>EntitySaveMetadata.ResolveProjectionColumns</c>
 /// (not referenced with cref because EntitySaveMetadata is not co-located in configurations that include only this class).
-/// When extraction is impossible, the executor falls back to the legacy path (fetch all columns, then project in memory).
+/// When extraction is impossible, the executor falls back to fetching all columns and projecting in memory.
 /// </remarks>
 public sealed class ProjectionColumnCollector : ExpressionVisitor
 {
@@ -4045,7 +4045,7 @@ public sealed class SqlQuery<TEntity>
     /// Conditions, orderings, and paging are applied on the backend side (dialect SQL / EF Core / in-memory).
     /// The projected columns are pruned server-side when the selector references only column properties (with no Include) and the backend supports it
     /// (narrowing the SELECTed columns, the EF Core projection, and the in-memory copy to the referenced columns). When Include is combined or column
-    /// references cannot be safely extracted from the selector, all columns are fetched as before and the projection is applied in memory.
+    /// references cannot be safely extracted from the selector, all columns are fetched and the projection is applied in memory.
     /// </remarks>
     /// <param name="selector">The expression that transforms an entity into a projection DTO.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
