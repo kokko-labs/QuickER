@@ -1890,7 +1890,7 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
     /// <summary>Moves an element (reorders only, no deletion tracking). Raises position property change notifications after the move.</summary>
     protected override void MoveItem(int oldIndex, int newIndex)
     {
-        // base.MoveItem calls the non-virtual Remove/Insert of Collection&lt;T&gt;, so it does not go through our deletion-tracking overrides.
+        // base.MoveItem calls the non-virtual Remove/Insert of Collection&lt;T&gt;, so it does not go through the deletion-tracking overrides in this class.
         base.MoveItem(oldIndex, newIndex);
         NotifyPositionsChanged();
     }
@@ -7231,7 +7231,7 @@ internal sealed class InMemoryQueryExecutor<TEntity>(InMemoryDataStore store)
 
             foreach (var entity in matched)
             {
-                // Always clone before projecting so we do not share byte[] and the like with the store's actual entity.
+                // Always clone before projecting so the projection does not share byte[] and the like with the store's actual entity.
                 var clone = (TEntity)entity.Clone();
 
                 if (!prunable)
@@ -7734,7 +7734,7 @@ internal static class InMemoryCascade
                 }
                 else if (insertWhenUpdateMissing)
                 {
-                    // The update target was missing and we switched to INSERT, so After fires with the actual operation Insert.
+                    // The update target was missing and the operation switched to INSERT, so After fires with the actual operation Insert.
                     scope.Insert(entity);
                     rows++;
                     records?.Add((entity, SaveOperation.Insert));

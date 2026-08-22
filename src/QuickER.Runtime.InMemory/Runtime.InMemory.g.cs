@@ -1125,7 +1125,7 @@ public sealed class InMemoryQueryExecutor<TEntity>(InMemoryDataStore store)
 
             foreach (var entity in matched)
             {
-                // Always clone before projecting so we do not share byte[] and the like with the store's actual entity.
+                // Always clone before projecting so the projection does not share byte[] and the like with the store's actual entity.
                 var clone = (TEntity)entity.Clone();
 
                 if (!prunable)
@@ -1632,7 +1632,7 @@ public static class InMemoryCascade
                 }
                 else if (insertWhenUpdateMissing)
                 {
-                    // The update target was missing and we switched to INSERT, so After fires with the actual operation Insert.
+                    // The update target was missing and the operation switched to INSERT, so After fires with the actual operation Insert.
                     scope.Insert(entity);
                     rows++;
                     records?.Add((entity, SaveOperation.Insert));

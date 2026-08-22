@@ -1678,7 +1678,7 @@ public abstract class SyncTable<TEntity, TKey> : SyncTableBase<TEntity, TKey>
         }
 
         // The server assigned a new version and wrote it back onto the entity; mirroring it locally is what moves the
-        // anchor past this row, so the next download does not hand our own change back to us.
+        // anchor past this row, so the next download does not fetch this row back as if it were a server-side change.
         using (SyncSession.Suppress())
         {
             local.MarkUpdated();
