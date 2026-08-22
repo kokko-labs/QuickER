@@ -129,7 +129,7 @@ public class TableDefinitionUniqueConstraintTests
             .BeEquivalentTo(new[] { new[] { "Sku" }, new[] { "CategoryId", "Code" } });
         product.UniqueConstraints.Should().OnlyContain(constraint => constraint.Name == null);
 
-        // PK / FK の復元は従来どおり
+        // PK / FK も併せて復元される
         product
             .Columns.Single(column => column.Name == "ProductId")
             .IsPrimaryKey.Should()
@@ -140,7 +140,7 @@ public class TableDefinitionUniqueConstraintTests
             .BeTrue();
     }
 
-    [Fact(DisplayName = "一意制約が無い図のキー表記は従来どおり（PK / FK1）")]
+    [Fact(DisplayName = "一意制約が無い図のキー表記は PK / FK1 のみ")]
     public void Export_WithoutUniqueConstraints_KeepsExistingLabels()
     {
         var diagram = BuildDiagram();

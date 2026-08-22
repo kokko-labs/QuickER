@@ -12,8 +12,8 @@ namespace QuickER.Tests.CodeGen.CSharp;
 /// </summary>
 /// <remarks>
 /// ON では I{Entity}RemoteRepository（IRemoteRepository 継承＋名前付きクエリ）が追加され、
-/// I{Entity}Repository はそれと IRepository を継承する全機能面のまま。実装クラス・DI 実装登録は従来どおりで、
-/// リモート面の転送 DI 登録だけが増える（純粋に追加的）。OFF（既定）は従来どおりの一体型契約。
+/// I{Entity}Repository はそれと IRepository を継承する全機能面のまま。実装クラス・DI 実装登録は全機能面基準のままで、
+/// リモート面の転送 DI 登録だけが増える（純粋に追加的）。OFF（既定）は一体型契約のみ。
 /// </remarks>
 public class RemoteContractGenerationTests
 {
@@ -119,7 +119,7 @@ public class RemoteContractGenerationTests
         content.Should().Contain("public partial interface IOrderRepository");
         content.Should().Contain("IRepository<OrderEntity, int> { }");
 
-        // 実装クラス・DI 実装登録は従来どおり（全機能面を実装・登録）
+        // 実装クラス・DI 実装登録は全機能面基準（全機能面を実装・登録）
         content.Should().Contain("(connectionFactory, saveHooks, sqlExecutor), IOrderRepository");
         content
             .Should()
@@ -130,7 +130,7 @@ public class RemoteContractGenerationTests
         content.Should().Contain("provider.GetRequiredService<IOrderRepository>()");
     }
 
-    /// <summary>OFF（既定）: 従来どおりの一体型契約で、リモート面が出ないことを検証する</summary>
+    /// <summary>OFF（既定）: 一体型契約で、リモート面が出ないことを検証する</summary>
     [Fact(DisplayName = "OFF（既定）: 一体型契約のまま・リモート面は出ない・基底分割は常時出る")]
     public void Generate_Default_KeepsUnifiedContract()
     {
@@ -142,7 +142,7 @@ public class RemoteContractGenerationTests
         result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
         var content = AllContent(result);
 
-        // per-entity 契約は従来どおり IRepository 継承の一体型
+        // per-entity 契約は IRepository 継承の一体型
         content
             .Should()
             .Contain("public partial interface IOrderRepository : IRepository<OrderEntity, int>");
@@ -156,7 +156,7 @@ public class RemoteContractGenerationTests
                 "public partial interface IRepository<TEntity, TKey> : IRemoteRepository<TEntity, TKey>"
             );
 
-        // DI は従来どおり単一登録
+        // DI は単一登録
         content
             .Should()
             .Contain("services.AddScoped<IOrderRepository>(provider => new OrderRepository(");
@@ -165,7 +165,7 @@ public class RemoteContractGenerationTests
 
     /// <summary>ON×EF Core: EF Core の DI にもリモート面の転送登録が増えることを検証する</summary>
     [Fact(
-        DisplayName = "ON×EF Core: EF Core 版 Repository は従来どおり・リモート面の転送 DI が増える"
+        DisplayName = "ON×EF Core: EF Core 版 Repository は全機能面基準・リモート面の転送 DI が増える"
     )]
     public void Generate_RemoteContractsWithEfCore_AddsForwardingRegistration()
     {
@@ -183,7 +183,7 @@ public class RemoteContractGenerationTests
         result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
         var content = AllContent(result);
 
-        // EF Core 版 Repository・実装登録は従来どおり全機能面基準
+        // EF Core 版 Repository・実装登録は全機能面基準
         content.Should().Contain("public sealed partial class EfCoreOrderRepository(");
         content
             .Should()
@@ -194,7 +194,7 @@ public class RemoteContractGenerationTests
     }
 
     /// <summary>ON×インメモリ: InMemory の DI にもリモート面の転送登録が増えることを検証する</summary>
-    [Fact(DisplayName = "ON×インメモリ: InMemory 実装は従来どおり・リモート面の転送 DI が増える")]
+    [Fact(DisplayName = "ON×インメモリ: InMemory 実装は全機能面基準・リモート面の転送 DI が増える")]
     public void Generate_RemoteContractsWithInMemory_AddsForwardingRegistration()
     {
         var result = Generate(

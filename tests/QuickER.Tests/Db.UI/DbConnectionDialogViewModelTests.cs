@@ -389,7 +389,7 @@ public class DbConnectionDialogViewModelTests : IDisposable
         vm.BrowseNewFileCommand.CanExecute(null).Should().BeTrue();
     }
 
-    /// <summary>新規作成が許可されていても、手入力の存在しないパスは従来どおり拒否されることを検証する（回帰）</summary>
+    /// <summary>新規作成が許可されていても、手入力の存在しないパスは拒否されることを検証する（回帰）</summary>
     [Fact(DisplayName = "SQLite: 新規作成許可でも手入力の存在しないパスは拒否される")]
     public void Sqlite_CreationAllowed_HandTypedMissingPath_RejectsOk()
     {
@@ -481,8 +481,8 @@ public class DbConnectionDialogViewModelTests : IDisposable
         closed.Should().BeEmpty("作成失敗時はダイアログを閉じない");
     }
 
-    /// <summary>SQL Server 選択時は従来どおりサーバー系フィールドを表示しファイルパスを隠すことを検証する</summary>
-    [Fact(DisplayName = "SQL Server 選択時は従来どおりサーバー系フィールドを表示する")]
+    /// <summary>SQL Server 選択時はサーバー系フィールドを表示しファイルパスを隠すことを検証する</summary>
+    [Fact(DisplayName = "SQL Server 選択時はサーバー系フィールドを表示する")]
     public void SqlServer_ShowsServerFields_HidesFilePath()
     {
         var vm = new DbConnectionDialogViewModel(

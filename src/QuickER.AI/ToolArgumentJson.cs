@@ -33,7 +33,7 @@ public static class ToolArgumentJson
 
     /// <summary>
     /// ツール実行用の引数文字列を解決する。有効ならそのまま・修復できたら修復後・
-    /// 修復不能なら原文のまま返す（ツールホストが解析エラーを返し、モデルにリトライさせる既存経路を維持）。
+    /// 修復不能なら原文のまま返す（ツールホストが解析エラーを返し、モデルにリトライさせる経路へ委ねる）。
     /// </summary>
     /// <param name="raw">モデルが出力した引数文字列（null/空は既存の「空＝空オブジェクト」扱いに任せるため素通し）</param>
     public static string NormalizeForExecution(string? raw)

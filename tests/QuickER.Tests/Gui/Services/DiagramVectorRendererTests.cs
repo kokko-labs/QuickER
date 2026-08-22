@@ -129,8 +129,8 @@ public class DiagramVectorRendererTests
         });
     }
 
-    /// <summary>通常リレーションが従来どおり端点間の線として描かれることを検証する</summary>
-    [Fact(DisplayName = "RenderDiagram は通常リレーションを従来どおりの線として描く")]
+    /// <summary>通常リレーションが端点間の線として描かれることを検証する</summary>
+    [Fact(DisplayName = "RenderDiagram は通常リレーションを線として描く")]
     public void RenderDiagram_DrawsLine_ForNormalRelationship()
     {
         RunSta(() =>

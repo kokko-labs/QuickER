@@ -142,8 +142,8 @@ public class MainViewModelMergeImportTests : IDisposable
         vm.Queries.Should().ContainSingle().Which.Name.Should().Be("KeptQuery");
     }
 
-    /// <summary>一致が 1 件も無い置換（AI 生成・全新規取込相当）は従来どおり全体を自動整列する</summary>
-    [Fact(DisplayName = "一致 0 件の置換は従来どおり全体自動整列される")]
+    /// <summary>一致が 1 件も無い置換（AI 生成・全新規取込相当）は全体を自動整列する</summary>
+    [Fact(DisplayName = "一致 0 件の置換は全体自動整列される")]
     public void ReplaceDiagramFromModule_NoMatch_AutoLayouts()
     {
         var vm = CreateViewModel();

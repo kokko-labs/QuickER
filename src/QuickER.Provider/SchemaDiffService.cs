@@ -15,7 +15,7 @@ public class SchemaDiffService
     /// <param name="targetEntities">ダイアグラム上のエンティティ（期待状態）</param>
     /// <param name="targetRelationships">ダイアグラム上のリレーション</param>
     /// <param name="capabilities">
-    /// 対象方言の同期ケーパビリティ。<c>null</c>（既定）なら従来どおり全差分を生成する。
+    /// 対象方言の同期ケーパビリティ。<c>null</c>（既定）なら全差分を生成する。
     /// <see cref="SyncDialectCapabilities.SupportsDescriptions"/> が <c>false</c> の方言（SQLite）では
     /// 説明差分を生成しない（コメント機構が無く live 側が常に空＝恒常的な幻の差分になるため）。
     /// <see cref="SyncDialectCapabilities.PersistsForeignKeyConstraintNames"/> が <c>false</c> の方言（SQLite）では

@@ -179,7 +179,7 @@ public sealed class RemoteContractRuntimeTests : IDisposable
             Ct
         );
 
-        // 全機能面（I{Entity}Repository）は従来どおり式木クエリ・生 SQL を持つ
+        // 全機能面（I{Entity}Repository）は式木クエリ・生 SQL を持つ
         var byQuery = await full.Query()
             .Where(e => e.OrderId == OrderIdValue.Create(10))
             .ToListAsync(Ct);
@@ -228,7 +228,7 @@ public sealed class RemoteContractRuntimeTests : IDisposable
                 "BulkInsertAsync",
             ]);
 
-        // 全機能面: リモート面＋ローカル実行前提のメンバーの全部入り（従来どおり）
+        // 全機能面: リモート面＋ローカル実行前提のメンバーの全部入り
         full.Should()
             .Contain([
                 "Query",

@@ -80,7 +80,7 @@ public sealed record GeneratedFileSpec
     /// </summary>
     /// <remarks>
     /// マルチ方言時に契約を 1 回だけ出すためのフラグ。true のとき Repository バケットは契約のみをレンダリングし、
-    /// 方言実装は別の方言実装スペックが担う。単一方言時は常に false（契約＋実装を同一スコープで従来どおり出力する）。
+    /// 方言実装は別の方言実装スペックが担う。単一方言時は常に false（契約＋実装を同一スコープへ出力する）。
     /// </remarks>
     public required bool ContractOnly { get; init; }
 
@@ -161,7 +161,7 @@ public static class GeneratedFilePlanner
     /// 規約を 1 箇所に集約する。既定は通常分割で <c>{root}.{サフィックス}</c>（例 <c>{root}.Entities</c>）、
     /// 層別出力（<see cref="CodeGenerationOptions.LayeredOutput"/>）では <c>{層ルート}.{サフィックス}</c>
     /// （例 <c>MyApp.Domain.Entities</c>＝層ルートは <see cref="LayerNamespaceRoot"/> がフォルダパスから導出する。
-    /// 出力フォルダと名前空間を揃えるための既定切替で、明示指定が勝つのは従来どおり）
+    /// 出力フォルダと名前空間を揃えるための既定で、明示指定があればそちらが勝つ）
     /// </remarks>
     public static string ResolveNamespace(CodeGenerationOptions options, GenerationBucket bucket)
     {
@@ -184,7 +184,7 @@ public static class GeneratedFilePlanner
         }
 
         // 層別出力: 名前空間の既定を層フォルダ由来にする（フォルダと名前空間が揃う）。
-        // 通常分割: 従来どおり {root}.{サフィックス}
+        // 通常分割: {root}.{サフィックス}
         var baseNamespace = options.LayeredOutput
             ? LayerNamespaceRoot(options, LayerOfBucket(bucket))
             : ResolveRootNamespace(options);
@@ -378,7 +378,7 @@ public static class GeneratedFilePlanner
         // リモート面の HTTP クライアント（Http{Entity}RemoteRepository・AddGeneratedHttpRemoteRepositories）は
         // 契約から分離した実装バケット。分割時は Repositories.Http.g.cs へ単独出力し、契約ファイルを
         // インターフェイス・DTO だけに保つ（実装先が要るため Repository バケットが有効なときのみ）。
-        // 非分割時は従来どおり同一ファイル内の同じ位置へ描画される（テンプレートの物理順が位置を決める）。
+        // 非分割時は同一ファイル内の同じ位置へ描画される（テンプレートの物理順が位置を決める）。
         if (options.GenerateRemoteServices && options.GeneratesRepositoryContract)
         {
             active.Add(GenerationBucket.Http);
@@ -448,8 +448,8 @@ public static class GeneratedFilePlanner
     /// （同一名前空間に解決されてもファイルは分け、自分自身の名前空間は using しない）。
     /// </para>
     /// <para>
-    /// 実効方言（<see cref="CodeGenerationOptions.EffectiveRepositoryDialects"/>）が 1 つのときは現行プランを完全維持する
-    /// （出力バイト不変）。2 つ以上のときは Repository バケットを「中立契約（1 回）」と「方言別実装（方言ごと）」に分割し、
+    /// 実効方言（<see cref="CodeGenerationOptions.EffectiveRepositoryDialects"/>）が 1 つのときは Repository バケットを
+    /// 分割しない。2 つ以上のときは「中立契約（1 回）」と「方言別実装（方言ごと）」に分割し、
     /// 方言実装は <c>{RepositoryNamespace}.SqlServer</c> / <c>.Sqlite</c> の別 namespace へ出す（分割時は別ファイル、
     /// 非分割時は同一ファイルへ namespace ブロックとして連結）。
     /// </para>
@@ -479,7 +479,7 @@ public static class GeneratedFilePlanner
         var repositoryActive = active.Contains(GenerationBucket.Repository);
 
         // 非分割: マルチ方言（実効方言 2 つ以上）で Repository を生成するときだけ、契約 1 回＋方言別 namespace 実装へ
-        // 展開する。単一方言・Repository 非生成時は従来どおり全バケットを 1 ファイル・1 namespace へまとめる（バイト不変）。
+        // 展開する。単一方言・Repository 非生成時は全バケットを 1 ファイル・1 namespace へまとめる。
         var repositoryMultiDialectInlineLayout =
             options.GenerateRepositories && dialects.Count >= 2 && repositoryActive;
 
@@ -515,7 +515,7 @@ public static class GeneratedFilePlanner
             var repositoryNamespace = ResolveNamespace(options, GenerationBucket.Repository);
             var specs = new List<GeneratedFileSpec>();
 
-            // 契約＋非 Repository バケット（Entity/EditModel/Mapper/VO/Runtime）は従来どおりルート namespace の
+            // 契約＋非 Repository バケット（Entity/EditModel/Mapper/VO/Runtime）はルート namespace の
             // 契約スペックへまとめる。ContractOnly=true で Repository バケットは契約のみを描画する。
             specs.Add(
                 new GeneratedFileSpec
@@ -614,7 +614,7 @@ public static class GeneratedFilePlanner
 
             var ownNamespace = namespaceByBucket[bucket];
             // 依存グラフから「実際に参照する他バケット」の名前空間だけを using する
-            // （無差別に全バケットを using していた従来動作の不要 using を排除する）。
+            // （全バケットを無差別に using すると、参照しない名前空間まで開くことになる）。
             // 有効でない依存先（例: VO 無効時の ValueObject）は自然に除外される。また依存先が
             // 自分と同一名前空間へ解決される場合は自分自身の using になるため除外する。
             var dependencyNamespaces = BucketDependencies(bucket)
@@ -763,7 +763,7 @@ public static class GeneratedFilePlanner
     /// <remarks>
     /// RemoteServer バケットは <see cref="ActiveBuckets"/> に載らず（サーバー実装は常に専用スペック）、
     /// <see cref="FixedRuntimeSuffix"/> のバケットループを通らないため、<see cref="AddRemoteServerSpec"/> が直接使う。
-    /// スキーマ依存側のファイル名・名前空間サフィックスは従来どおり <c>RemoteServer</c> で、両者は別軸。
+    /// スキーマ依存側のファイル名・名前空間サフィックスは <c>RemoteServer</c> で、両者は別軸。
     /// </remarks>
     private const string AspNetCoreSuffix = "AspNetCore";
 
@@ -793,7 +793,7 @@ public static class GeneratedFilePlanner
         var repositoryActive = activeSet.Contains(GenerationBucket.Repository);
 
         // 共有基盤（EntityBase・属性・VO 基底・JSON コンバータ）＋方言中立の Repository 共通契約。
-        // 契約は Repository バケットが有効なときだけ載る（Entity 単独生成では従来どおり共有基盤のみ）。
+        // 契約は Repository バケットが有効なときだけ載る（Entity 単独生成では共有基盤のみ）。
         specs.Add(
             new GeneratedFileSpec
             {
@@ -932,7 +932,7 @@ public static class GeneratedFilePlanner
     /// サーバー実装は ASP.NET Core（FrameworkReference）を要するため、非分割でも本体ファイルへは連結しない。
     /// Repository バケット（＝リモート面の契約）が有効でない構成では何も追加しない（契約が無ければ実装先が無い）。
     /// 挿入位置は「Repository バケットを含む最後のスペックの直後」＝リモート面の契約・実装の隣に並べる
-    /// （プレビュー・出力順で Repositories の下に RemoteServer が来る。非分割は本体 1 ファイルの後ろ＝従来どおり末尾）。
+    /// （プレビュー・出力順で Repositories の下に RemoteServer が来る。非分割は本体 1 ファイルの後ろ＝末尾）。
     /// </para>
     /// <para>
     /// 分割時は他バケットと同じ対称構成で、固定部（<c>RemoteServerEngine</c> ほか）を <c>Runtime.AspNetCore.g.cs</c>
@@ -1232,8 +1232,8 @@ public static class GeneratedFilePlanner
     /// 層別出力時、計画済みスペックへ層フォルダ（<see cref="GeneratedFileSpec.RelativeDirectory"/>）を付与する。
     /// </summary>
     /// <remarks>
-    /// 層別出力でなければ何もしない（RelativeDirectory は null のまま＝従来どおり出力ディレクトリ直下）。
-    /// ファイル名・名前空間・バケット構成は一切変えない＝層分け ON/OFF で生成テキストはバイト一致し、配置だけが変わる。
+    /// 層別出力でなければ何もしない（RelativeDirectory は null のまま＝出力ディレクトリ直下）。
+    /// ファイル名・名前空間・バケット構成には触れない＝本メソッドが変えるのは配置だけ。
     /// パスの妥当性検証（絶対パス・<c>..</c> の拒否）は生成本体の診断が担い、ここでは値を素通しする
     /// （Plan はプレビューでも呼ばれるため例外を投げない）。
     /// </remarks>

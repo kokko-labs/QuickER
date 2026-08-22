@@ -356,7 +356,7 @@ public sealed class ApiReferenceDocTests
         }
     }
 
-    [Fact(DisplayName = "GeneratedFileWriter は .g なしの .md を従来どおり拒否する")]
+    [Fact(DisplayName = "GeneratedFileWriter は .g なしの .md を拒否する")]
     public void Writer_RejectsPlainMarkdown()
     {
         var directory = Path.Combine(Path.GetTempPath(), "quicker_apidoc_" + Guid.NewGuid());
@@ -503,7 +503,7 @@ public sealed class ApiReferenceDocTests
             .OnlyContain(file => file.RelativeDirectory == null);
     }
 
-    [Fact(DisplayName = "ApiDocsDirectory 未指定（既定）は従来どおり出力ディレクトリ直下")]
+    [Fact(DisplayName = "ApiDocsDirectory 未指定（既定）は出力ディレクトリ直下")]
     public void ApiDocsDirectory_Default_KeepsRootPlacement()
     {
         var result = Generate(BuildDiagram(), new CodeGenerationOptions { GenerateApiDocs = true });
@@ -616,9 +616,7 @@ public sealed class ApiReferenceDocTests
             .Contain(message => message.Contains("ApiDocsFileName"));
     }
 
-    [Fact(
-        DisplayName = "ApiDocsFileName 未指定（既定）は従来どおり OutputFileName のベース名から導出する"
-    )]
+    [Fact(DisplayName = "ApiDocsFileName 未指定（既定）は OutputFileName のベース名から導出する")]
     public void ApiDocsFileName_Default_KeepsDerivedName()
     {
         var result = Generate(

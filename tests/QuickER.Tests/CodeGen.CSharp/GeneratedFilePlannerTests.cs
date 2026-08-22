@@ -193,7 +193,7 @@ public class GeneratedFilePlannerTests
         contract.Buckets.Should().NotContain(GenerationBucket.InMemory);
     }
 
-    /// <summary>非分割時はインメモリ実装も 1 ファイルへ同居し、独立ファイルを作らないことを検証する（従来どおり）</summary>
+    /// <summary>非分割時はインメモリ実装も 1 ファイルへ同居し、独立ファイルを作らないことを検証する</summary>
     [Fact]
     public void Plan_NonSplit_InMemory_StaysInSingleFile()
     {

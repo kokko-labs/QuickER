@@ -116,7 +116,7 @@ public class AnthropicChatTurnDriverTests
         source.Data.Should().Be(Convert.ToBase64String(pdfData));
     }
 
-    /// <summary>添付が無い User 項目は従来どおり単純なテキストメッセージになることを検証する（挙動不変）</summary>
+    /// <summary>添付が無い User 項目は単純なテキストメッセージになることを検証する（挙動不変）</summary>
     [Fact(DisplayName = "添付なし User はテキストメッセージのまま")]
     public void ToUserParam_NoAttachments_ProducesPlainText()
     {

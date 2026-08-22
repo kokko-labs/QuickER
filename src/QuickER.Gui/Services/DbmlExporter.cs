@@ -218,7 +218,7 @@ public static class DbmlExporter
     /// 制約名は note 設定として出力する。標準 DBML では設定をエンドポイントの後ろへ置くが、
     /// ここでは <see cref="DbmlImporter"/> との往復を前提に <c>Ref:</c> 直後へ配置する独自形式を採る。
     /// 列ペアが 2 組以上（複合外部キー）なら DBML 標準の複合 Ref 構文 <c>親.(a, b) &lt; 子.(x, y)</c> で書き出し、
-    /// 1 組なら従来どおりの単一列形式を保つ。参照カラム未指定のリレーションは各エンティティの先頭カラムで代用する
+    /// 1 組なら単一列形式になる。参照カラム未指定のリレーションは各エンティティの先頭カラムで代用する
     /// </remarks>
     private static string? BuildRelationshipLine(
         Relationship relationship,

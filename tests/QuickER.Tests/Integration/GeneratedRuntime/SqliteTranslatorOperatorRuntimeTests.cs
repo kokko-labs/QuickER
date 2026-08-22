@@ -280,7 +280,7 @@ public sealed class SqliteTranslatorOperatorRuntimeTests : IDisposable
             .ToListAsync(Ct);
         notBob.Select(c => c.CustomerId.Value).Should().BeEquivalentTo([1, 3, 4]);
 
-        // 等値以外（>）の否定は従来どおり NOT (...) で包まれる → 150 超でない＝100 のみ（NULL 残高は含まない）
+        // 等値以外（>）の否定は NOT (...) で包まれる → 150 超でない＝100 のみ（NULL 残高は含まない）
         var notGreater = await repo.Query().Where(c => !(c.Balance!.Value > 150m)).ToListAsync(Ct);
         notGreater.Select(c => c.CustomerId.Value).Should().BeEquivalentTo([1]);
     }

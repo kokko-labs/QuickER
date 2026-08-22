@@ -22,9 +22,9 @@ internal sealed partial class CSharpGenerationModelBuilder
     /// <summary>ER 図定義とオプションから生成モデル全体を構築する</summary>
     /// <param name="diagnostics">生成中に検出した警告などを蓄積する出力先</param>
     /// <remarks>
-    /// ナビゲーションは全エンティティ分を一度だけ解決する。以前は Entity / EditModel / Mapper の
-    /// 各構築で個別に <see cref="ResolveNavigations"/> を呼んでいたため、同一リレーションの警告が
-    /// （エンティティ数 × パス数）回重複していた。解決結果を共有して重複と再計算を防ぐ。
+    /// ナビゲーションは全エンティティ分を一度だけ解決し、Entity / EditModel / Mapper の各構築で共有する
+    /// （構築ごとに <see cref="ResolveNavigations"/> を呼ぶと、同一リレーションの警告が
+    /// エンティティ数 × パス数 回重複し、解決も繰り返される）。
     /// また生成対象として無効なクラス群は構築自体を行わない。
     /// </remarks>
     public CSharpGenerationModel Build(
@@ -173,7 +173,7 @@ internal sealed partial class CSharpGenerationModelBuilder
 
         // 列由来プロパティ名（確定値・バインディング両方）が表示名解決ヘルパ（GetDisplayName /
         // CustomizePropertyDisplayName）と衝突する場合は、この EditModel のみ表示名機構を省略し、
-        // 検証メッセージを従来どおりプロパティ名で構築する（生成は完走・警告診断を出す）。
+        // 検証メッセージをプロパティ名で構築する（生成は完走・警告診断を出す）。
         var hasDisplayNameCollision = properties.Any(property =>
             GeneratedFixedMemberNames.EditModelDisplayNameHelpers.Contains(property.PropertyName)
             || GeneratedFixedMemberNames.EditModelDisplayNameHelpers.Contains(
@@ -194,7 +194,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             );
         }
 
-        // 各プロパティの検証メッセージへ渡す表示名式を解決する（衝突時は従来どおり nameof(Prop)）
+        // 各プロパティの検証メッセージへ渡す表示名式を解決する（衝突時は nameof(Prop)）
         properties = properties
             .Select(property =>
                 property with
@@ -231,7 +231,7 @@ internal sealed partial class CSharpGenerationModelBuilder
     /// EditModel プロパティの検証メッセージへ渡す表示名の C# 式を解決する。
     /// VO 有効時は VO の静的 <c>DisplayName</c> を参照（VO 側の Customize 上書きが自動反映）、
     /// VO 無効時は列の説明を渡す <c>GetDisplayName</c> ヘルパ経由（<c>GeneratedDisplayNames.Resolve</c>＋<c>CustomizePropertyDisplayName</c> フック）。
-    /// 表示名衝突（<paramref name="hasCollision"/>）のときは従来どおり <c>nameof(Prop)</c> を返す（後方互換）。
+    /// 表示名衝突（<paramref name="hasCollision"/>）のときは <c>nameof(Prop)</c> を返す。
     /// </summary>
     private string ResolveEditModelDisplayNameExpression(
         CSharpEditModelPropertyModel property,
@@ -244,7 +244,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             return $"{property.ValueObjectClassName}.DisplayName";
         }
 
-        // 衝突時はヘルパを生成しないため、従来どおりプロパティ名を渡す（メッセージは変わらない）
+        // 衝突時はヘルパを生成しないため、プロパティ名をそのまま渡す（メッセージは変わらない）
         if (hasCollision)
         {
             return $"nameof({property.PropertyName})";
@@ -687,7 +687,7 @@ internal sealed partial class CSharpGenerationModelBuilder
     /// <remarks>
     /// 日付のみの列（SQL の <c>date</c>）は既定の <c>ToString()</c> だと時刻部 "0:00:00" が常に付いて画面に出るため、
     /// カルチャ依存の短い日付書式（"d"）で導出する。入力側は無変更で往復する（<c>DateTime.TryParse</c> は
-    /// 日付のみの文字列をそのまま受ける）。時刻を持つ列（<c>datetime2</c> 等）は従来どおり既定書式。
+    /// 日付のみの文字列をそのまま受ける）。時刻を持つ列（<c>datetime2</c> 等）は既定書式。
     /// </remarks>
     private static string BuildBindingExpression(
         string propertyName,
@@ -712,7 +712,7 @@ internal sealed partial class CSharpGenerationModelBuilder
     /// <remarks>
     /// 判定材料は方言中立トークン（<see cref="CSharpTypeInfo.CanonicalTypeToken"/>）の <c>date</c> で、生成器は
     /// DB 非依存を保つため方言の型表記そのものは見ない。トークンが載らない経路（型カタログで解析できない自由記述型・
-    /// トークン付加を通していない呼び出し）では false ＝従来どおりの表示になる。
+    /// トークン付加を通していない呼び出し）では false ＝日付のみ扱いをせず既定書式で表示する。
     /// </remarks>
     private static bool IsDateOnly(CSharpTypeInfo typeInfo) =>
         typeInfo.TypeName == "DateTime"
@@ -996,7 +996,7 @@ internal sealed partial class CSharpGenerationModelBuilder
                 );
 
             // target 側（子）は親への単一参照ナビゲーションを持つ。
-            // 自己参照（source == target）の場合は従来どおり子側ナビゲーションのみとし、重複を避ける
+            // 自己参照（source == target）の場合は子側ナビゲーションのみとし、重複を避ける
             if (target.Id != source.Id)
             {
                 navigationsByEntity[target.Id]

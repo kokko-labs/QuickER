@@ -49,7 +49,7 @@ internal sealed class RenderScope
     public bool RemoteServer { get; init; }
 
     /// <summary>双方向同期の支援コード（同期エンジンの固定部・同期記述子・ジャーナル記録デコレータ・直結差分ソース・DI）を出力するか</summary>
-    /// <remarks>Sync バケットを含むスペックだけが true。既存経路は常に false のため出力はバイト不変。</remarks>
+    /// <remarks>Sync バケットを含むスペックだけが true（他のスペックでは false で、同期支援のコードは 1 行も出ない）。</remarks>
     public bool Sync { get; init; }
 
     /// <summary>リモート面の HTTP クライアント（Http{Entity}RemoteRepository・AddGeneratedHttpRemoteRepositories・OwnedHttpClient）を出力するか</summary>
@@ -93,7 +93,7 @@ internal sealed class RenderScope
     /// パッケージ化対象の固定 infra 型・メンバーの可視性（既定 <c>"internal"</c>）。
     /// </summary>
     /// <remarks>
-    /// 単一アセンブリ配置（非分割・通常分割）では <c>"internal"</c> のままで出力はバイト不変。
+    /// 単一アセンブリ配置（非分割・通常分割）では <c>"internal"</c> のまま。
     /// 生成物が複数アセンブリへ分かれる配置では <c>"public"</c> を渡す＝パッケージ書き出し
     /// （<see cref="RuntimePackageSourceRenderer"/>）と層別出力（<see cref="CodeGenerationOptions.LayeredOutput"/>）の
     /// 2 経路。別アセンブリの生成物・別パッケージから固定 infra（EditModel の Owner/OwnerModel・IncludeNode・
@@ -106,7 +106,7 @@ internal sealed class RenderScope
     /// </summary>
     /// <remarks>
     /// <para>
-    /// 通常生成（インライン）では <c>true</c> で固定 infra を生成コードに同梱し、出力はバイト不変。
+    /// 通常生成（インライン）では <c>true</c> で固定 infra を生成コードに同梱する。
     /// パッケージ参照モード（<see cref="CodeGenerationOptions.UseRuntimePackages"/>）の生成では <c>false</c> を渡し、
     /// 固定 infra を出力せず NuGet パッケージ <c>QuickER.Runtime.*</c> の型を <c>using</c> で参照する。
     /// </para>
@@ -123,7 +123,7 @@ internal sealed class RenderScope
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <see cref="EmitSharedInfra"/>（固定 infra 軸）と直交する第 2 軸。通常生成は <c>true</c>（従来どおり全部出す＝バイト不変）、
+    /// <see cref="EmitSharedInfra"/>（固定 infra 軸）と直交する第 2 軸。通常生成は <c>true</c>（スキーマ依存物も含めて全部出す）、
     /// パッケージ用ソースの書き出し（<see cref="RuntimePackageSourceRenderer"/>）は <c>false</c>（パッケージにスキーマ依存物は入らない）。
     /// </para>
     /// <para>
@@ -138,7 +138,7 @@ internal sealed class RenderScope
     /// パッケージ参照モードで生成ファイルの先頭コメントへ載せる案内テキスト（必要な PackageReference 等）。既定は空。
     /// </summary>
     /// <remarks>
-    /// 通常生成（インライン）では空リストを渡し、ヘッダに追加行は出ない（バイト不変）。パッケージ参照モードのみ
+    /// 通常生成（インライン）では空リストを渡し、ヘッダに追加行は出ない。パッケージ参照モードのみ
     /// <see cref="RuntimePackageReferenceGuidance"/> の出力を渡し、各行を <c>// </c> 接頭辞でヘッダへ差し込む。
     /// </remarks>
     public IReadOnlyList<string> PackageGuidanceLines { get; init; } = [];
@@ -151,7 +151,7 @@ internal sealed class RenderScope
     /// <c>QuickER.Runtime.Sqlite</c>）を各方言 namespace ブロックの内側へ限定して <c>using</c> する。
     /// ファイル先頭で両方言パッケージを開くと <c>ISqlConnectionFactory</c> 等が方言間で曖昧参照になるため、
     /// 方言別実装のブロック内でだけ自方言のパッケージを開く（インライン多方言が方言別 namespace 内で型を定義していたのと対称）。
-    /// 通常生成では空（追加行なし＝バイト不変）。
+    /// 通常生成では空（追加行なし）。
     /// </remarks>
     public IReadOnlyList<string> BlockUsings { get; init; } = [];
 }
@@ -234,9 +234,9 @@ internal sealed class ScribanCSharpRenderer
         // コンパイル不能になる不具合の修正。GuidKeyValueObjectExecutionTests が回帰を検知する）。
         var emitNavRefAttr = model.EntityClasses.Count > 0 || options.GeneratesRepositoryContract;
 
-        // QuickER 版 Repository の生成方言に応じた原始変数群。sqlserver のときは現行値（識別子クォート [ ]・
-        // ADO 型 SqlXxx）そのままで、テンプレートは細粒度置換した箇所でこれらを参照する。方言リテラルを
-        // 変数参照へ置き換えてもレンダリング結果は変わらないため、sqlserver 出力はバイト不変を保つ。
+        // QuickER 版 Repository の生成方言に応じた原始変数群。sqlserver では識別子クォート [ ]・
+        // ADO 型 SqlXxx を返し、テンプレートは細粒度置換した箇所でこれらを参照する。方言リテラルと
+        // 同じ値を返すため、変数参照にしても sqlserver のレンダリング結果は変わらない。
         // 塊で異なる領域（FOR JSON プランナ vs マルチクエリ Include・OFFSET/FETCH vs LIMIT/OFFSET・
         // SqlParameter 型付け等）はテンプレート側で {{ if repository_dialect == "sqlserver" }} ／ else により出し分ける。
         // 方言はスコープから受け取る（マルチ方言時は方言実装スペックごとに異なる。単一方言時は実効単一方言）。
@@ -301,7 +301,7 @@ internal sealed class ScribanCSharpRenderer
         // 生成される QuickER 版 Repository のエンジン群で「DB が store-generated 列（rowversion）の値を採番するか」が
         // 割れているか。マルチターゲット（例 sqlserver + sqlite）では、同じ列が一方では並行トークン・他方ではただの列に
         // なるため、1 回しか出力されない共通契約の doc（ConcurrencyMode の param / enum）にその非対称を書く必要がある。
-        // 単一方言では割れようがないため false ＝ 契約の出力はバイト不変（能力ベースの判定であり方言名で分岐しない）。
+        // 単一方言では割れようがないため false ＝ 契約に非対称の記述は出ない（能力ベースの判定であり方言名で分岐しない）。
         var storeGeneratedDialectsDiffer =
             options.GenerateRepositories
             && options
@@ -324,7 +324,7 @@ internal sealed class ScribanCSharpRenderer
             ["namespace_name"] = scope.NamespaceName,
             ["usings"] = scope.Usings,
             // ファイルヘッダ（auto-generated・using）と namespace 形式（file-scoped / block）の出し分け。
-            // 単一スペックのファイルは render_header=true・block_namespace=false で従来出力（バイト不変）。
+            // 単一スペックのファイルは render_header=true・block_namespace=false ＝ ヘッダ＋file-scoped namespace になる。
             // 非分割マルチ方言で 1 ファイルへ複数 namespace を連結するときは、先頭スペックのみヘッダを出し
             // 各スペックを block namespace で包む。
             ["render_header"] = scope.RenderHeader,
@@ -384,7 +384,7 @@ internal sealed class ScribanCSharpRenderer
             // Http バケットを含むスペックだけが true（分割時は Repositories.Http.g.cs・非分割時は本体スペックに同居）。
             ["render_http_client"] = scope.RenderHttpClient,
             // 双方向同期の支援コード（固定エンジン・per-entity 記述子／デコレータ／直結差分ソース・DI）を出力するか。
-            // Sync バケットを含むスペックだけが true（既存経路は false でバイト不変）。
+            // Sync バケットを含むスペックだけが true。
             ["render_sync"] = scope.Sync,
             // 同期専用エンドポイント（POST {prefix}/{ルート名}/Sync*）をサーバー実装ファイルへ張るか。
             // サーバー実装スペック（Sync バケットではなく RemoteServer バケット）で同期支援が有効なときだけ true＝
@@ -396,7 +396,7 @@ internal sealed class ScribanCSharpRenderer
             // 分岐の多い再帰メソッド群のためビルダー側で組み立て、テンプレートは埋め込むだけにする（方言 SQL と同じ流儀）。
             ["sync_graph_recorder"] = model.SyncGraphRecorder,
             // DB 非依存のインメモリ Repository 群（InMemoryDataStore・InMemory{Entity}Repository・シーダー・DI）を出力するか。
-            // 方言非依存のため契約を出すスペックで 1 度だけ true（既存経路は常に false でバイト不変）
+            // 方言非依存のため契約を出すスペックで 1 度だけ true
             ["in_memory"] = scope.InMemory,
             // QuickER 版 Repository の生成方言と方言別プリミティブ（識別子クォート・ADO 型名）。
             ["repository_dialect"] = dialect.Dialect,
@@ -423,19 +423,19 @@ internal sealed class ScribanCSharpRenderer
             // インライン三項（{{ if repository_dialect == "sqlserver" }}...{{ end }}）の重複を避けるための変数。
             ["dialect_display_name"] = dialect.DisplayName,
             // ランタイムのパッケージ書き出しモードと固定 infra の可視性。通常生成では既定（false / "internal"）で
-            // 供給し、出力はバイト不変。パッケージ書き出し時のみ RuntimePackageSourceRenderer が true / "public" を渡す。
-            // 全既存経路へ必ず供給する（供給漏れがあると scriban が空文字を出しバイト不変が壊れるため）。
+            // 供給し、パッケージ書き出し時のみ RuntimePackageSourceRenderer が true / "public" を渡す。
+            // 全経路へ必ず供給する（供給漏れがあると scriban が空文字を出し、その経路の出力が壊れるため）。
             ["runtime_package_export"] = scope.RuntimePackageExport,
             ["infra_visibility"] = scope.InfraVisibility,
-            // スキーマ非依存の固定 infra を出力するか。通常生成は true（バイト不変）。パッケージ参照モードの
+            // スキーマ非依存の固定 infra を出力するか。通常生成は true。パッケージ参照モードの
             // 通常生成のみ false を渡し、固定 infra を落として per-entity・DI・DbContext だけを残す。
-            // 全既存経路へ必ず供給する（供給漏れは scriban が空文字を出しバイト不変を壊すため）。
+            // 全経路へ必ず供給する（供給漏れは scriban が空文字を出し、その経路の出力を壊すため）。
             ["emit_shared_infra"] = scope.EmitSharedInfra,
-            // スキーマ依存物（per-entity・DI 登録・DbContext）を出力するか。通常生成は true（バイト不変）。
+            // スキーマ依存物（per-entity・DI 登録・DbContext）を出力するか。通常生成は true。
             // パッケージ用ソースの書き出しのみ false を渡し、固定 infra だけを残す（emit_shared_infra と直交する第 2 軸）。
-            // 全既存経路へ必ず供給する（供給漏れは scriban が空文字を出しバイト不変を壊すため）。
+            // 全経路へ必ず供給する（供給漏れは scriban が空文字を出し、その経路の出力を壊すため）。
             ["emit_schema_dependent"] = scope.EmitSchemaDependent,
-            // パッケージ参照モードでヘッダへ載せる案内行。通常生成は空リスト（追加行なし＝バイト不変）。
+            // パッケージ参照モードでヘッダへ載せる案内行。通常生成は空リスト（追加行なし）。
             ["package_guidance_lines"] = scope.PackageGuidanceLines,
             // ブロック名前空間の内側へ出す方言限定 using（非分割マルチ方言のパッケージ参照モードのみ非空）。
             ["block_usings"] = scope.BlockUsings,
@@ -467,8 +467,8 @@ internal sealed class ScribanCSharpRenderer
 /// QuickER 版 Repository の生成方言ごとに変わるプリミティブ（識別子クォート文字・ADO 型名）を保持する。
 /// </summary>
 /// <remarks>
-/// テンプレートはこれらを細粒度置換した箇所で参照する。sqlserver は現行値（識別子クォート <c>[</c> <c>]</c>・
-/// <c>SqlConnection</c> 等）を返し、レンダリング結果を変えない（SQL Server 生成物のバイト不変を保つ）。
+/// テンプレートはこれらを細粒度置換した箇所で参照する。sqlserver は識別子クォート <c>[</c> <c>]</c>・
+/// <c>SqlConnection</c> 等を返す。
 /// sqlite は識別子クォート <c>"</c> と Microsoft.Data.Sqlite の <c>SqliteConnection</c> 等を返す。
 /// 未知方言は sqlserver 相当へフォールバックする（塊で異なる SQL は
 /// テンプレート側の <c>{{ if repository_dialect == "sqlserver" }}</c> ／ <c>else</c> で出し分ける）。

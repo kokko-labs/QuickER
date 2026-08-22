@@ -165,8 +165,8 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
 
     /// <summary>主キー変更の 1 項目を、セクションのフェーズに応じた解除 / 付与の文へ振り分ける</summary>
     /// <remarks>
-    /// フェーズ指定の無いセクション（<see cref="PrimaryKeyPhase.None"/>＝旧形の計画）は、従来どおり
-    /// 解除 → 付与を連続して追加する（後方互換）。
+    /// フェーズ指定の無いセクション（<see cref="PrimaryKeyPhase.None"/>）は、
+    /// 解除 → 付与を連続して追加する。
     /// </remarks>
     private static void AppendPrimaryKeyPhase(
         List<string> statements,

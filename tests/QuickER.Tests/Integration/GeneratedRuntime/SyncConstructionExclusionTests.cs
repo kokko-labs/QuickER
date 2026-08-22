@@ -71,7 +71,7 @@ public sealed class SyncConstructionExclusionTests : IDisposable
             .Should()
             .BeOfType<QuickER.Tests.GeneratedSyncFixture.Repositories.Sqlite.SyncNoteRepository>();
 
-        // 非除外テーブル: 従来どおりジャーナル記録デコレータ
+        // 非除外テーブル: ジャーナル記録デコレータ
         provider
             .GetRequiredKeyedService<ISyncOrderRepository>(LocalKey)
             .Should()

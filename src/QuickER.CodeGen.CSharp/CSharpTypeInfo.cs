@@ -32,7 +32,7 @@ public sealed record CSharpTypeInfo
 
     /// <summary>
     /// SQL パラメータの型明示化に使う <c>System.Data.SqlDbType</c> の列挙名（例: "VarChar", "NVarChar", "Decimal", "Int"）。
-    /// 未知の型・型を特定できない場合は null で、生成物側は従来どおり AddWithValue にフォールバックする。
+    /// 未知の型・型を特定できない場合は null で、生成物側は AddWithValue にフォールバックする。
     /// </summary>
     /// <remarks>
     /// Generator は DB 非依存を保つため <c>SqlDbType</c> 型そのものは扱わず、列挙名を文字列で運ぶ。

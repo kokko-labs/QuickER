@@ -1178,7 +1178,7 @@ public class SyncPlannerTests
         warning.TableName.Should().Be("orders");
         warning.Detail.Should().Be("FK_orders_customer");
 
-        // 一意制約は取り込んでいないため断定できず、警告に留める（FK の自動 DROP → 再 ADD は従来どおり出る）
+        // 一意制約は取り込んでいないため断定できず、警告に留める（FK の自動 DROP → 再 ADD は出る）
         plan.Sections.Should().Contain(s => s.Kind == SchemaDiffKind.AddForeignKey);
     }
 
@@ -1695,10 +1695,10 @@ public class SyncPlannerTests
     }
 
     /// <summary>
-    /// 主キー変更を含まない計画の出力が 3 フェーズ化の前後でバイト不変であることを固定する
-    /// （フェーズを持たないセクションの見出しは従来どおり種別名のみ）。
+    /// 主キー変更を含まない計画の出力にフェーズ表記が混ざらないことを固定する
+    /// （フェーズを持たないセクションの見出しは種別名のみ）。
     /// </summary>
-    [Fact(DisplayName = "主キー変更を含まない計画の出力はバイト不変")]
+    [Fact(DisplayName = "主キー変更を含まない計画にフェーズ表記は出ない")]
     public void PlanWithoutPrimaryKeyChange_RendersUnchangedBytes()
     {
         var addColumn = new SchemaDiffItem
@@ -1868,7 +1868,7 @@ public class SyncPlannerTests
         );
 
         plan.Warnings.Should().BeEmpty();
-        // 依存 FK の自動 DROP → 再 ADD 自体は従来どおり行う
+        // 依存 FK の自動 DROP → 再 ADD 自体は行う
         plan.Sections.Should().Contain(s => s.Kind == SchemaDiffKind.AddForeignKey);
     }
 

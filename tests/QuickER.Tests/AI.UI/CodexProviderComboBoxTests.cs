@@ -80,7 +80,7 @@ public class CodexProviderComboBoxTests
                     ItemsSource = new[] { "openai", "custom-provider" },
                     ItemTemplate = itemTemplate,
                 };
-                // 画面外＋非アクティブで Show し、テスト実行中にユーザーの画面を邪魔しない（lessons 2026-07-10）
+                // 画面外＋非アクティブで Show し、テスト実行中にユーザーの画面を邪魔しない
                 var window = new Window
                 {
                     Content = combo,

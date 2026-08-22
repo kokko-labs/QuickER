@@ -24,7 +24,7 @@
   <SolidColorBrush x:Key="FieldBorder" Color="#D1D5DB" />
   <SolidColorBrush x:Key="ErrorText" Color="#B91C1C" />
   <SolidColorBrush x:Key="OkText" Color="#15803D" />
-  <!-- ウィンドウ背景（従来は各ダイアログで Background="#F5F7FA" とインライン指定していた色） -->
+  <!-- ウィンドウ背景（各ダイアログはこのキーを参照し、色を直接指定しない） -->
   <SolidColorBrush x:Key="WindowBackground" Color="#F5F7FA" />
 
   <!-- ── カード（角丸 10 の白カード） ── -->

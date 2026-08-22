@@ -302,7 +302,7 @@ public class DbmlTests
 
         var dbml = DbmlExporter.Build(diagram);
 
-        // 単一列は従来どおりの表記のまま
+        // 単一列は表記のまま
         dbml.Should()
             .Contain(
                 "Ref: [note: 'FK_TenantAudit_TenantUser'] TenantUser.TenantUserId < TenantAudit.TenantUserId"

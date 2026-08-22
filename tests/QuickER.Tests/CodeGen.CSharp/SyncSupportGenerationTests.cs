@@ -116,7 +116,7 @@ public class SyncSupportGenerationTests
 
         var content = string.Concat(files.Values);
 
-        // 同期エンジンと直結経路は従来どおり出る
+        // 同期エンジンと直結経路は出る
         content.Should().Contain("public sealed class SyncEngine");
         content.Should().Contain("public sealed class SyncOrderDirectSyncSource");
         content.Should().Contain("AddGeneratedDirectSyncSources");
@@ -289,7 +289,7 @@ public class SyncSupportGenerationTests
                     + "ORDER BY [row_ver]\""
             );
 
-        // 除外列を持たないテーブルは従来どおり "*"（列挙は除外があるときだけの切り替え）
+        // 除外列を持たないテーブルは "*"（列挙は除外があるときだけの切り替え）
         content.Should().Contain("\"SELECT TOP (@batchSize) * FROM [sync_order_lines] ");
         content.Should().Contain("\"SELECT [order_id] FROM [sync_orders]\"");
         content.Should().Contain("\"SELECT MIN_ACTIVE_ROWVERSION()\"");

@@ -24,7 +24,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// </para>
 /// <para>
 /// 内訳フィールドはワイヤ上は省略可能なので、それらを持たない旧ボディ（旧サーバー）でも
-/// <c>SaveConflictException</c> の型とメッセージは従来どおりで、内訳だけが <c>Unknown</c> / null に退化する。
+/// <c>SaveConflictException</c> の型とメッセージは保たれ、内訳だけが <c>Unknown</c> / null に退化する。
 /// この後方互換は、レガシー応答だけを返す最小サーバーを立てて固定する。
 /// </para>
 /// <para>実 DB を使わない（サーバー実体はインメモリ Repository）ため Docker 不要＝CI 常時実行。</para>
@@ -130,7 +130,7 @@ public sealed class SaveConflictDetailsRuntimeTests : IAsyncLifetime
         thrown.Reason.Should().Be(SaveConflictReason.Modified);
         thrown.EntityTypeName.Should().Be(nameof(DocumentEntity));
         thrown.Key.Should().Be("1", "主キーは表示用の文字列として載る");
-        thrown.Message.Should().Contain("modified by another user", "メッセージは従来どおり");
+        thrown.Message.Should().Contain("modified by another user", "メッセージ本文は変換されない");
     }
 
     /// <summary>存在しない行のグラフ更新は Reason=NotFound を伴う</summary>
@@ -198,7 +198,7 @@ public sealed class SaveConflictDetailsRuntimeTests : IAsyncLifetime
             await LegacyRemoteDocuments.UpdateAsync(entity, cancellationToken: Ct);
 
         var thrown = (await act.Should().ThrowAsync<SaveConflictException>()).Which;
-        thrown.Message.Should().Be("legacy conflict", "メッセージの復元は従来どおり");
+        thrown.Message.Should().Be("legacy conflict", "メッセージは元の本文のまま復元される");
         thrown
             .Reason.Should()
             .Be(SaveConflictReason.Unknown, "内訳のない旧ボディは Unknown へ退化");

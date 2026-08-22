@@ -7,7 +7,7 @@ namespace QuickER.Tests.GeneratedRemoteServiceFixture;
 
 // 名前付きクエリの manual／実装が生成されない実装先（EF Core の自由 SQL 分）を、
 // 利用者がそうするのと同じ形（partial クラス）で実装する（クエリフィクスチャの見本と同一内容）。
-// リモートサービス生成でもサーバー側の実装クラスは従来どおりで、HTTP クライアント側は全クエリを
+// リモートサービス生成でもサーバー側の実装クラスはそのままで、HTTP クライアント側は全クエリを
 // 転送メソッドとして自動生成するため、manual 実装が必要なのはサーバー側だけになる。
 
 /// <summary>manual クエリ（SpecialLookup）とユーザー定義重複チェックのQuickER 版 Repository 側実装</summary>

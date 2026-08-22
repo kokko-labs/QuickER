@@ -421,7 +421,7 @@ public sealed class InMemoryFixtureRuntimeTests
         var endsWith = () => customers.Query().Where(c => c.Name.EndsWith(null!));
         endsWith.Should().Throw<ArgumentNullException>().Which.ParamName.Should().Be("value");
 
-        // 非 null の引数は従来どおり通る（ガードは null のみを弾く）
+        // 非 null の引数は通る（ガードは null のみを弾く）
         var valid = () => customers.Query().Where(c => c.Name.Contains("A"));
         valid.Should().NotThrow();
     }
@@ -543,7 +543,7 @@ public sealed class InMemoryFixtureRuntimeTests
         (await customers.GetAllAsync(Ct))[0].Orders.Should().BeEmpty();
         (await customers.Query().ToListAsync(Ct))[0].Orders.Should().BeEmpty();
 
-        // Include すれば従来どおり FK から復元される
+        // Include すれば FK から復元される
         var included = await customers
             .Query()
             .Where(c => c.CustomerId == 1)

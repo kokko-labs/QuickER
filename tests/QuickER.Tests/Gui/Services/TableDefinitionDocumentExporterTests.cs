@@ -13,7 +13,7 @@ namespace QuickER.Tests.Gui.Services;
 /// <remarks>
 /// カルチャ検証はグローバル静的（<c>Thread.CurrentUICulture</c> 等）を一切変更せず、
 /// <see cref="TableDefinitionDocumentExporter.BuildWorkbook"/> の culture 引数へ明示注入する
-/// （xUnit の並列実行でフレークする実績があるため。tasks/lessons.md 2026-07-08）。
+/// （xUnit の並列実行でフレークする実績があるため）。
 /// 期待値は同じ明示カルチャの ResourceManager 読みで導出する。
 /// </remarks>
 public class TableDefinitionDocumentExporterTests

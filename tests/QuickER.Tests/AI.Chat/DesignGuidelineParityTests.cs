@@ -15,7 +15,7 @@ namespace QuickER.Tests.AI.Chat;
 /// 将来ルールを変更する際に片方だけ更新される事故を検知する。文言の一字一句は比較せず、
 /// 核心キーワードの含有のみを検証する（軽い整合テスト）。
 /// カルチャ切替は静的 <c>Strings.Culture</c> を変更せず、スレッドローカルの
-/// <see cref="CultureInfo.CurrentUICulture"/> を try/finally で一時変更・復元して行う（tasks/lessons.md の方針）。
+/// <see cref="CultureInfo.CurrentUICulture"/> を try/finally で一時変更・復元して行う。
 /// </remarks>
 public class DesignGuidelineParityTests
 {

@@ -48,7 +48,7 @@ public sealed class SqlExpressionTranslatorDatePartTests
     private static string RunSqlite(Expression<Func<Probe, bool>> predicate) =>
         SqliteTranslator.ToCondition(predicate.Body, new List<SqliteParam>());
 
-    [Fact(DisplayName = "日付型の列の Year は従来どおり日付部品 SQL へ翻訳される（両方言）")]
+    [Fact(DisplayName = "日付型の列の Year は日付部品 SQL へ翻訳される（両方言）")]
     public void DateTimeColumn_YearTranslatesToDatePart()
     {
         RunSqlServer(p => p.Created.Year == 2020).Should().Be("YEAR([Created]) = @p0");

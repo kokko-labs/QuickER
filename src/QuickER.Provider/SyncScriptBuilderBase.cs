@@ -21,7 +21,7 @@ public abstract class SyncScriptBuilderBase : ISyncScriptBuilder
     /// <remarks>
     /// テーブル再構築を要する方言（SQLite）は本メソッドを上書きし、<see cref="AppendSection"/> でセクション単位の
     /// レンダリングを再利用しつつ、再構築ブロックを織り交ぜる。逐次 DDL 方言はこの既定実装をそのまま用いる
-    /// （<see cref="SyncPlan.Rebuilds"/> は空のため参照しない＝出力は従来どおり）。
+    /// （<see cref="SyncPlan.Rebuilds"/> は空のため参照しない）。
     /// </remarks>
     public virtual string Build(SyncPlan plan)
     {
@@ -41,7 +41,7 @@ public abstract class SyncScriptBuilderBase : ISyncScriptBuilder
     /// <summary>ネイティブ列順変更（<see cref="SyncPlan.Reorders"/>）を書き出す（既定は no-op）</summary>
     /// <remarks>
     /// ネイティブ並べ替えを持つ方言（MySQL）だけが上書きする。<see cref="SyncPlan.Reorders"/> は
-    /// Native 方言以外では常に空のため、既定 no-op により他方言の出力はセクションのみで従来どおり不変になる。
+    /// Native 方言以外では常に空のため、既定 no-op により他方言の出力はセクションのみになる。
     /// </remarks>
     protected virtual void AppendReorders(StringBuilder sb, SyncPlan plan) { }
 
@@ -62,7 +62,7 @@ public abstract class SyncScriptBuilderBase : ISyncScriptBuilder
     /// <summary>セクション見出しに使う識別（主キー変更のみフェーズを併記する・固定文は英語が正本）</summary>
     /// <remarks>
     /// 主キー変更は Drop / Add の 2 セクションへ分かれるため、見出しだけでは区別できない。フェーズを持たない
-    /// セクション（<see cref="PrimaryKeyPhase.None"/>）は従来どおり種別名のみ＝既存出力はバイト不変。
+    /// セクション（<see cref="PrimaryKeyPhase.None"/>）は種別名のみを見出しに使う。
     /// </remarks>
     private static string SectionLabel(SyncPlanSection section) =>
         section.PrimaryKeyPhase == PrimaryKeyPhase.None
@@ -136,8 +136,8 @@ public abstract class SyncScriptBuilderBase : ISyncScriptBuilder
 
     /// <summary>主キー変更の 1 項目を、セクションのフェーズに応じた解除 / 付与へ振り分ける</summary>
     /// <remarks>
-    /// フェーズ指定の無いセクション（<see cref="PrimaryKeyPhase.None"/>＝旧形の計画や再構築方言の残余）は、
-    /// 従来どおり解除 → 付与を 1 セクション内で連続出力する（後方互換）。
+    /// フェーズ指定の無いセクション（<see cref="PrimaryKeyPhase.None"/>＝再構築方言の残余など）は、
+    /// 解除 → 付与を 1 セクション内で連続出力する。
     /// </remarks>
     private void AppendPrimaryKeyPhase(StringBuilder sb, PrimaryKeyPhase phase, SchemaDiffItem item)
     {

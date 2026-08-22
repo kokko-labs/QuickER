@@ -46,7 +46,7 @@ public class ToolArgumentJsonTests
         var garbage = "not json at all";
 
         ToolArgumentJson.TryRepair(garbage).Should().BeNull();
-        // 実行側は原文のまま＝ツールホストが解析エラーを返し、モデルにリトライさせる既存経路を維持
+        // 実行側は原文のまま＝ツールホストが解析エラーを返し、モデルにリトライさせる経路へ委ねる
         ToolArgumentJson.NormalizeForExecution(garbage).Should().Be(garbage);
         // 履歴側は {} へ置換＝壊れた引数の再送で以後の要求が拒否される事故を防ぐ
         ToolArgumentJson.SanitizeForHistory(garbage).Should().Be("{}");

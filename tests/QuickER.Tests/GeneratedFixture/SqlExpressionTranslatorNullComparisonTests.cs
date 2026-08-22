@@ -39,7 +39,7 @@ namespace QuickER.Tests.GeneratedFixture;
 /// </para>
 /// <para>
 /// 否定: <c>!(a == b)</c> は <c>NOT (...)</c> で包むと補償の外側に出てしまうため、演算子を反転して
-/// <c>a != b</c> と同じ経路へ流す（等値以外の否定は従来どおり <c>NOT (...)</c>）。二重否定は単項 Not の入口で
+/// <c>a != b</c> と同じ経路へ流す（等値以外の否定は <c>NOT (...)</c>）。二重否定は単項 Not の入口で
 /// 畳み込む——畳まないと外側の Not は「オペランドが等値比較でない」ため <c>NOT (...)</c> 枝へ落ち、内側の反転と
 /// 合成されて補償の外へ出てしまう。
 /// </para>
@@ -52,7 +52,7 @@ namespace QuickER.Tests.GeneratedFixture;
 /// 割り切っている。
 /// </para>
 /// <para>
-/// 補償範囲は <c>==</c> / <c>!=</c> のみで、関係演算子（&lt; &lt;= &gt; &gt;=）は従来どおり NULL パラメータの
+/// 補償範囲は <c>==</c> / <c>!=</c> のみで、関係演算子（&lt; &lt;= &gt; &gt;=）は NULL パラメータの
 /// ままにする（null 対応の SQL 対応物が無いため）。ここではその線引きも対照として固定する。
 /// </para>
 /// </remarks>
@@ -119,7 +119,7 @@ public sealed class SqlExpressionTranslatorNullComparisonTests
         RunSqlServer(p => missing != p.Name1).Sql.Should().Be("[Name1] IS NOT NULL");
     }
 
-    [Fact(DisplayName = "回帰: リテラル null の等値比較は従来どおり IS NULL のまま")]
+    [Fact(DisplayName = "回帰: リテラル null の等値比較は IS NULL のまま")]
     public void LiteralNull_StillEmitsIsNull()
     {
         RunSqlServer(p => p.Name1 == null).Sql.Should().Be("[Name1] IS NULL");
@@ -127,7 +127,7 @@ public sealed class SqlExpressionTranslatorNullComparisonTests
         RunSqlite(p => p.Name1 == null).Sql.Should().Be("\"Name1\" IS NULL");
     }
 
-    [Fact(DisplayName = "回帰: null でない変数は従来どおりパラメータ化される")]
+    [Fact(DisplayName = "回帰: null でない変数はパラメータ化される")]
     public void NonNullVariable_StillParameterizes()
     {
         var name = "Alice";
@@ -366,7 +366,7 @@ public sealed class SqlExpressionTranslatorNullComparisonTests
         RunSqlServerBody(Negate(p => p.Flag, 1)).Should().Be("[Flag] = 0");
     }
 
-    [Fact(DisplayName = "対照: 等値以外の否定は従来どおり NOT (...) で包まれる")]
+    [Fact(DisplayName = "対照: 等値以外の否定は NOT (...) で包まれる")]
     public void NegatedNonEqualityComparison_StillWrapsInNot()
     {
         RunSqlServer(p => !(p.A > 1)).Sql.Should().Be("NOT ([A] > @p0)");

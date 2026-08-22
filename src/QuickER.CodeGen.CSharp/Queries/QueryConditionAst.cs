@@ -5,7 +5,7 @@ namespace QuickER.CodeGen.CSharp.Queries;
 /// ミニ DSL は「SQL（全方言）と EF Core の LINQ の両方へ翻訳できる」ことを目的とした
 /// パース可能なサブセット。文法は 比較（= &lt;&gt; != &lt; &lt;= &gt; &gt;=）・AND / OR / NOT・括弧・
 /// IS [NOT] NULL・[NOT] LIKE・[NOT] IN のみで、列参照と <c>@パラメータ</c>・数値/文字列リテラルを扱う。
-/// これを超えるクエリは自由 SQL / manual モードの担当（設計判断は tasks/todo.md 参照）。
+/// これを超えるクエリは自由 SQL / manual モードの担当。
 /// </remarks>
 public abstract class ConditionNode { }
 

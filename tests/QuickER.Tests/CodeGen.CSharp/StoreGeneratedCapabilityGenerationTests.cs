@@ -20,11 +20,11 @@ namespace QuickER.Tests.CodeGen.CSharp;
 /// 方言を持たない後 2 者では <c>repository_dialect</c> が単に <c>RepositoryDialects[0]</c> になる。
 /// 旧実装はその値で <c>RowVersionProperty</c> の XmlDoc を出し分けていたため、
 /// <c>RepositoryDialects=["sqlite","sqlserver"]</c> のときだけインメモリ基盤の doc が
-/// 「版ガードを行わない」という誤りに転んだ（改善報告書 B-1）。
+/// 「版ガードを行わない」という誤りに転んだ（能力フラグを見ない実装での実測）。
 /// </para>
 /// <para>
 /// ドリフト検知は「変化に気づく」仕掛けであって「変化が正しい」ことは保証しないため、
-/// ここでは再生成に依存しない生成テキストで両アームを固定する（lessons.md の T-5 規約）。
+/// ここでは再生成に依存しない生成テキストで両アームを固定する。
 /// </para>
 /// </remarks>
 public class StoreGeneratedCapabilityGenerationTests
@@ -197,8 +197,8 @@ public class StoreGeneratedCapabilityGenerationTests
     /// マルチターゲットのときだけ、共有契約の <c>mode</c> doc へ「値を採番しないエンジンは無視する」旨が足ることを検証する。
     /// </summary>
     /// <remarks>
-    /// 契約は 1 回しか出力されないため実装ごとの doc では補えない（改善報告書 B-5）。
-    /// 単一方言の出力はバイト不変でなければならないので、両アームを名指しで固定する。
+    /// 契約は 1 回しか出力されないため実装ごとの doc では補えない。
+    /// 単一方言の出力にはこの文が混ざってはならないので、両アームを名指しで固定する。
     /// </remarks>
     [Fact(DisplayName = "マルチターゲットの契約は mode を無視するエンジンがある旨を doc へ載せる")]
     public void Contract_MultiTarget_DocumentsThatSomeEngineIgnoresMode()

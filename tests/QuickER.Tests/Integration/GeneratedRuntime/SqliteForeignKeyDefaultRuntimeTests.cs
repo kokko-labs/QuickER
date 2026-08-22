@@ -91,9 +91,9 @@ public sealed class SqliteForeignKeyDefaultRuntimeTests : IAsyncLifetime
     }
 
     /// <summary>
-    /// <c>Foreign Keys=False</c> を明示した接続文字列では従来どおり FK が強制されない（明示指定の尊重）
+    /// <c>Foreign Keys=False</c> を明示した接続文字列では FK が強制されない（明示指定の尊重）
     /// </summary>
-    [Fact(DisplayName = "[SQLite FK] 明示 Foreign Keys=False は尊重され従来どおり通る")]
+    [Fact(DisplayName = "[SQLite FK] 明示 Foreign Keys=False は尊重され通る")]
     public async Task ForeignKeys_ExplicitlyDisabled_IsRespected()
     {
         var connectionString = new SqliteConnectionStringBuilder(

@@ -471,7 +471,7 @@ public class SchemaDiffServiceTests
             capabilities
         );
 
-        // 説明差分はゼロ・構造差分（新規テーブル Order）は従来どおり生成される
+        // 説明差分はゼロ・構造差分（新規テーブル Order）は生成される
         diff.Items.Should().NotContain(i => i.Kind == SchemaDiffKind.SetTableDescription);
         diff.Items.Should().NotContain(i => i.Kind == SchemaDiffKind.SetColumnDescription);
         diff.Items.Should()

@@ -726,7 +726,7 @@ internal sealed class CSharpEditModelClassModel
 
     /// <summary>
     /// 列由来プロパティ名が表示名解決ヘルパ（<c>GetDisplayName</c> / <c>CustomizePropertyDisplayName</c>）と衝突するため、
-    /// 表示名機構（ヘルパ・フック）を省略し、検証メッセージを従来どおりプロパティ名で構築するかどうか。
+    /// 表示名機構（ヘルパ・フック）を省略し、検証メッセージをプロパティ名で構築するかどうか。
     /// </summary>
     public required bool HasDisplayNameCollision { get; init; }
 
@@ -833,7 +833,7 @@ internal sealed record CSharpEditModelPropertyModel
     /// <summary>
     /// 検証メッセージ（必須・入力変換）へ渡す表示名の C# 式。
     /// VO 有効時は <c>{VoClass}.DisplayName</c>、VO 無効時は <c>GetDisplayName(nameof(Prop), "説明")</c>（説明なしは <c>null</c>）。
-    /// EditModel が表示名衝突（<see cref="CSharpEditModelClassModel.HasDisplayNameCollision"/>）のときは従来どおり <c>nameof(Prop)</c>。
+    /// EditModel が表示名衝突（<see cref="CSharpEditModelClassModel.HasDisplayNameCollision"/>）のときは <c>nameof(Prop)</c>。
     /// クラス構築時（<c>with</c>）に確定するため既定は空文字列。
     /// </summary>
     public string DisplayNameExpression { get; init; } = string.Empty;

@@ -87,7 +87,7 @@ public sealed class RemoteValueObjectBodyRuntimeTests
         }
     }
 
-    [Fact(DisplayName = "[Remote/VO 本文] 対照: 制約を満たす値は従来どおり解釈される")]
+    [Fact(DisplayName = "[Remote/VO 本文] 対照: 制約を満たす値は解釈される")]
     public async Task SuccessWithValidValueObject_IsDeserialized()
     {
         var (server, clients) = await StartFakeAsync("""[{"GadgetId":7,"Name":"alpha"}]""");

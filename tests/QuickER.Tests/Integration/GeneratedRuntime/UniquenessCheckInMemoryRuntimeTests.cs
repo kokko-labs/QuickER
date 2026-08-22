@@ -19,7 +19,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// （<c>customer_id</c>＋<c>amount</c>・名前なし＝合成名）がある。
 /// </para>
 /// <para>
-/// 本フィクスチャの主キーは非 NULL の <c>int</c>（＝未設定は既定値 0）なので、自分自身の除外は従来どおり
+/// 本フィクスチャの主キーは非 NULL の <c>int</c>（＝未設定は既定値 0）なので、自分自身の除外は
 /// 無条件に連なる。VO／string 主キーで null になる経路と<b>同じ観測結果</b>になることを固定する。
 /// </para>
 /// </remarks>

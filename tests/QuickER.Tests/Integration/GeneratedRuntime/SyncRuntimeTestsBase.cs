@@ -482,11 +482,11 @@ public abstract class SyncRuntimeTestsBase : IAsyncLifetime
         survivor!.CustomerName.Should().Be("alice-local", "ローカルの編集内容も残る");
         (await Journal.CountPendingAsync(Ct)).Should().Be(1, "エントリは未解決のまま残る");
 
-        result.DeletedLocally.Should().Be(1, "ジャーナルに載っていない明細行は従来どおり消える");
+        result.DeletedLocally.Should().Be(1, "ジャーナルに載っていない明細行は消える");
         (await LocalLinesRaw.GetAllAsync(Ct)).Should().BeEmpty();
     }
 
-    /// <summary>エントリが解決されれば、以降の実行では従来どおり削除が伝搬される（恒久的な削除漏れではない）</summary>
+    /// <summary>エントリが解決されれば、以降の実行では削除が伝搬される（恒久的な削除漏れではない）</summary>
     [Fact(DisplayName = "[Sync] 競合を解決した実行では削除が伝搬される")]
     public async Task DeletePropagation_ResumesOnceJournalEntryIsSettled()
     {

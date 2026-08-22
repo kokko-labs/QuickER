@@ -124,9 +124,7 @@ public sealed class SqlExpressionTranslatorColumnArgumentTests
         sqlite.Parameters.Should().BeEmpty();
     }
 
-    [Fact(
-        DisplayName = "回帰: 値引数の Contains は従来どおりパラメータ化される（列版に巻き込まれない）"
-    )]
+    [Fact(DisplayName = "回帰: 値引数の Contains はパラメータ化される（列版に巻き込まれない）")]
     public void Contains_ValueArgument_StillParameterizes()
     {
         // ローカル変数（クロージャ捕捉）の値引数。ワイルドカードはリテラル一致になるようエスケープされる
@@ -149,7 +147,7 @@ public sealed class SqlExpressionTranslatorColumnArgumentTests
     public void ColumnArgument_IsNotRejectedByNullPatternGuard()
     {
         // SqlQuery.Where が呼ぶ共有ガードは「レシーバが列・引数が値」の形だけを検査する。
-        // 列引数（引数側もラムダパラメータを参照する）は値評価の対象外なので素通りし、従来どおり列同士の LIKE へ落ちる
+        // 列引数（引数側もラムダパラメータを参照する）は値評価の対象外なので素通りし、列同士の LIKE へ落ちる
         var contains = () =>
             QueryStringMatchGuard.Validate(
                 ((Expression<Func<Probe, bool>>)(p => p.Name1.Contains(p.Name2))).Body

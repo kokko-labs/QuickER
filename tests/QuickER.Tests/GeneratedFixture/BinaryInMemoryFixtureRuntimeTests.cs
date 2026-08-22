@@ -228,7 +228,7 @@ public sealed class BinaryInMemoryFixtureRuntimeTests
             .ToProjectionListAsync(d => PayloadOf(d), Ct);
         withFlag.Should().ContainSingle().Which.Should().Equal(Doc1Payload);
 
-        // 指定しなければ従来どおり除外列は未取得状態のまま射影される
+        // 指定しなければ除外列は未取得状態のまま射影される
         var withoutFlag = await documents
             .Query()
             .Where(d => d.DocumentId == 1)

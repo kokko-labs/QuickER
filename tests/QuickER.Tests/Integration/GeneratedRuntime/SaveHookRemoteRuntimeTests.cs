@@ -224,7 +224,7 @@ public sealed class SaveHookRemoteRuntimeTests : IAsyncLifetime
 
     /// <summary>
     /// 5. サーバー側でスキップされた行は保存応答の <c>Skipped</c> に載って戻り、クライアントの <c>AcceptChanges</c> が
-    /// その行を確定しない＝ RowState が据え置かれる。同じ保存単位の非スキップ行は従来どおり <c>Unchanged</c> へ確定する。
+    /// その行を確定しない＝ RowState が据え置かれる。同じ保存単位の非スキップ行は <c>Unchanged</c> へ確定する。
     /// </summary>
     /// <remarks>
     /// 直結（ADO / EF Core / インメモリ）と同じ挙動
@@ -254,7 +254,7 @@ public sealed class SaveHookRemoteRuntimeTests : IAsyncLifetime
             .RowState.Should()
             .Be(RowState.Added, "サーバーのスキップが応答で伝わり RowState は据え置かれる");
 
-        // 同じ保存単位の非スキップ行は従来どおり確定する
+        // 同じ保存単位の非スキップ行は確定する
         saved.RowState.Should().Be(RowState.Unchanged, "スキップされていない行は確定する");
 
         (await documents.GetByIdAsync(5, Ct)).Should().BeNull("スキップ行は保存されない");
@@ -348,7 +348,7 @@ public sealed class SaveHookRemoteRuntimeTests : IAsyncLifetime
         RemoteEntityGraph
             .SkippedLookup(legacy.Skipped)
             .Should()
-            .BeNull("スキップなしとして扱われ、AcceptChanges は従来どおり全件を確定する");
+            .BeNull("スキップなしとして扱われ、AcceptChanges は全件を確定する");
     }
 
     /// <summary>使い終えたクライアント DI・サーバー・一時 DB を破棄する</summary>

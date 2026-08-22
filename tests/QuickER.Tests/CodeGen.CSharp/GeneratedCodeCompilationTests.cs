@@ -692,12 +692,12 @@ public class GeneratedCodeCompilationTests
     /// <summary>
     /// 層別出力の生成物を層ごとに別アセンブリとしてコンパイルし、プロジェクト参照
     /// （Infrastructure→Domain・Presentation→Domain・Server→Domain+Infrastructure）を張るだけで
-    /// ビルドが通ることを検証する（第 7 次指示書 A-1 の受け入れ条件 1・2）。
+    /// ビルドが通ることを検証する。
     /// </summary>
     /// <remarks>
     /// 単一コンパイルの検証（<see cref="Generate_LayeredOutputMatrix_ShouldProduceCompilableCode"/>）では
-    /// internal がアセンブリ内で見えてしまい境界越えの可視性問題を検出できない＝418 件のビルドエラーを
-    /// 見逃した盲点をここで塞ぐ。固定 infra の可視性はパッケージ配布と同じ public で解決しており、
+    /// internal がアセンブリ内で見えてしまい、境界越えの可視性問題を検出できない。その盲点をここで塞ぐ。
+    /// 固定 infra の可視性はパッケージ配布と同じ public で解決しており、
     /// 利用者側の InternalsVisibleTo 手書きは不要。
     /// </remarks>
     [Theory]

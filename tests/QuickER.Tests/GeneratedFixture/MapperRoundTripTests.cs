@@ -333,9 +333,9 @@ public sealed class MapperRoundTripTests
     }
 
     [Fact(
-        DisplayName = "ロード: DateTime 列の表示文字列は従来どおり ToString() の既定書式（\"O\" 化しない）"
+        DisplayName = "ロード: DateTime 列の表示文字列は ToString() の既定書式（\"O\" 化しない）"
     )]
-    public void ロード_DateTimeの表示書式は従来どおり()
+    public void ロード_DateTimeの表示書式は既定書式()
     {
         var orderedAt = PreciseOrderedAt();
 
@@ -346,7 +346,7 @@ public sealed class MapperRoundTripTests
     }
 
     [Fact(
-        DisplayName = "編集: ユーザーが入力した欄だけが入力文字列の精度になる（パース経路は従来どおり）"
+        DisplayName = "編集: ユーザーが入力した欄だけが入力文字列の精度になる（パース経路は既定のまま）"
     )]
     public void 編集_入力欄はパース経路を通る()
     {
@@ -359,7 +359,7 @@ public sealed class MapperRoundTripTests
         em.OrderedAt.Value.Ticks.Should().Be(new DateTime(2026, 1, 2, 3, 4, 5).Ticks);
     }
 
-    [Fact(DisplayName = "編集: DateTime 欄の不正文字列は従来どおり変換エラーになる")]
+    [Fact(DisplayName = "編集: DateTime 欄の不正文字列は変換エラーになる")]
     public void 編集_不正入力は変換エラー()
     {
         var em = new OrderMapper().CreateEditModel(BuildOrder(1, PreciseOrderedAt()));

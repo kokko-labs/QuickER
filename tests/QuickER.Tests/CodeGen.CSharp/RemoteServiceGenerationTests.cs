@@ -244,7 +244,7 @@ public class RemoteServiceGenerationTests
     /// <remarks>
     /// keyed 版はハイブリッド構成（キー "server"＝HTTP・キー "local"＝方言エンジン）の必須部品で、方言側の
     /// <c>AddGenerated{方言}Repositories(serviceKey, ...)</c> と対になる。共有 HttpClient も同じキーで登録するため、
-    /// 非 keyed 登録とも別キーとも衝突しない（コンテナ所有＝破棄も従来どおり）。
+    /// 非 keyed 登録とも別キーとも衝突しない（コンテナ所有＝破棄もコンテナが行う）。
     /// </remarks>
     [Fact(DisplayName = "ON: HTTP クライアント DI に keyed オーバーロード 2 本が追加される")]
     public void Generate_RemoteServices_EmitsKeyedHttpRegistrationOverloads()
@@ -266,7 +266,7 @@ public class RemoteServiceGenerationTests
         const string Signature =
             "public static IServiceCollection AddGeneratedHttpRemoteRepositories(\n        this IServiceCollection services,\n";
 
-        // 非 keyed の 2 本（従来どおり）
+        // 非 keyed の 2 本
         main.Should().Contain(Signature + "        string baseAddress\n    )");
         main.Should()
             .Contain(
@@ -516,8 +516,8 @@ public class RemoteServiceGenerationTests
         http.Should().Contain("private sealed class OwnedHttpClient(HttpClient client)");
     }
 
-    /// <summary>非分割時は HTTP クライアントが従来どおり本体ファイルへ同居することを検証する（分離はファイル分割時のみ）</summary>
-    [Fact(DisplayName = "非分割時: HTTP クライアントは従来どおり本体ファイルへ同居する")]
+    /// <summary>非分割時は HTTP クライアントが本体ファイルへ同居することを検証する（分離はファイル分割時のみ）</summary>
+    [Fact(DisplayName = "非分割時: HTTP クライアントは本体ファイルへ同居する")]
     public void Generate_NonSplit_KeepsHttpClientInMainFile()
     {
         var result = Generate(

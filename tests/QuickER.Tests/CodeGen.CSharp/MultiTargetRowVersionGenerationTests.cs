@@ -261,9 +261,7 @@ public sealed class MultiTargetRowVersionGenerationTests
         result.Files.Single().Content.Should().Contain("public byte[] RowVer { get; set; }");
     }
 
-    [Fact(
-        DisplayName = "単一方言 sqlite 生成では timestamp は従来どおり日時で store-generated にならない"
-    )]
+    [Fact(DisplayName = "単一方言 sqlite 生成では timestamp は日時で store-generated にならない")]
     public void Generate_SqliteOnly_TimestampStaysDateTime()
     {
         var diagram = BuildTimestampSpellingDiagram();

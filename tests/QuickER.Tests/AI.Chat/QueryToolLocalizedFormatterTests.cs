@@ -15,7 +15,7 @@ namespace QuickER.Tests.AI.Chat;
 /// カルチャ切替はプロセス共有の静的 <c>Strings.Culture</c> を変更せず、スレッドローカルの
 /// <see cref="CultureInfo.CurrentUICulture"/> を try/finally で一時変更・復元して行う（同期テストのため
 /// スレッド外へ漏れない）。<c>Strings.Culture</c> 未設定時に <c>GetString</c> が CurrentUICulture へ
-/// フォールバックする挙動を利用する（tasks/lessons.md の「静的 Culture を変更しない」方針に沿う安全な方式）。
+/// フォールバックする挙動を利用する（静的 Culture を変更しない安全な方式）。
 /// </remarks>
 public class QueryToolLocalizedFormatterTests
 {

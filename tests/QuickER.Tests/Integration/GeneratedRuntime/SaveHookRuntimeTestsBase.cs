@@ -289,8 +289,8 @@ public abstract class SaveHookRuntimeTestsBase
 
     // ── 9. 未登録 no-op ──
 
-    /// <summary>9. フックを 1 つも登録しなければ SaveAsync は従来どおり動く（レジストリは既定登録されるが完全 no-op）</summary>
-    [Fact(DisplayName = "[SaveHook] 9: フック未登録なら SaveAsync は従来どおり（no-op）")]
+    /// <summary>9. フックを 1 つも登録しなければ SaveAsync は動く（レジストリは既定登録されるが完全 no-op）</summary>
+    [Fact(DisplayName = "[SaveHook] 9: フック未登録なら SaveAsync は no-op として動く")]
     public async Task NoHooks_SaveWorksAsBefore()
     {
         await ResetAndSeedAsync();

@@ -147,7 +147,7 @@ public sealed class MainViewModelDiscardConfirmTests : IDisposable
             .Be(Strings.Confirm_ClearDiagram);
     }
 
-    /// <summary>完全に空でクリーンな図の新規作成は、従来どおり無確認で進むことを検証する</summary>
+    /// <summary>完全に空でクリーンな図の新規作成は、無確認で進むことを検証する</summary>
     [Fact(DisplayName = "NewDiagram: 空でクリーンなら確認を出さない")]
     public void NewDiagram_EmptyAndClean_DoesNotConfirm()
     {
@@ -189,7 +189,7 @@ public sealed class MainViewModelDiscardConfirmTests : IDisposable
         vm.Queries.Should().HaveCount(2, "キャンセルすればクエリは残る");
     }
 
-    /// <summary>構造が同一でクエリも未保存変更も無い Mermaid 再取込は、従来どおり無確認で進むことを検証する</summary>
+    /// <summary>構造が同一でクエリも未保存変更も無い Mermaid 再取込は、無確認で進むことを検証する</summary>
     /// <remarks>直前のテストの対照。構造署名の一致判定そのものが効いていることを示す</remarks>
     [Fact(DisplayName = "Mermaid 再取込: 構造同一でクエリが無ければ確認しない")]
     public void ImportMermaid_SameStructureWithoutQueries_DoesNotConfirm()

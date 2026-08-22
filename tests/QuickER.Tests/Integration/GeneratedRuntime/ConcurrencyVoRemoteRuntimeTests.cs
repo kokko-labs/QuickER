@@ -197,7 +197,7 @@ public sealed class ConcurrencyVoRemoteRuntimeTests
             .NotBeNull("親の版が書き戻る（対応表の収集がサーバー側で VO を開けている証明）");
         gadget.RowVer.Value.Length.Should().Be(8, "擬似版も rowversion と同じ 8 バイト");
         note.RowVer.Should().NotBeNull("子の版も書き戻る");
-        gadget.RowState.Should().Be(RowState.Unchanged, "保存後の状態確定は従来どおり");
+        gadget.RowState.Should().Be(RowState.Unchanged, "保存後の状態確定はカスケードで行われる");
         note.RowState.Should().Be(RowState.Unchanged);
         var afterInsert = gadget.RowVer;
 

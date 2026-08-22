@@ -185,7 +185,7 @@ public class ErDiagramHostChatAdapterQueryToolsTests
         host.LastReplacedQueries.Should().BeNull();
     }
 
-    /// <summary>非クエリツールは従来どおりホストの ExecuteTool へ素通りすることを検証する</summary>
+    /// <summary>非クエリツールはホストの ExecuteTool へ素通りすることを検証する</summary>
     [Fact(DisplayName = "非クエリツールは ExecuteTool へ素通りする")]
     public void NonQueryTool_PassesThroughToExecuteTool()
     {

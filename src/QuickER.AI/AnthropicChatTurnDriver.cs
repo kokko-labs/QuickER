@@ -135,7 +135,7 @@ public sealed class AnthropicChatTurnDriver : IChatTurnDriver
 
     /// <summary>
     /// ユーザー履歴項目を MessageParam へ変換する。画像・PDF 添付は image / document(PDF) ブロックへ、
-    /// テキスト添付は本文末尾へインライン展開する（添付なしなら従来どおり単純なテキストメッセージ）。
+    /// テキスト添付は本文末尾へインライン展開する（添付なしなら単純なテキストメッセージ）。
     /// </summary>
     internal static MessageParam ToUserParam(ChatHistoryItem item)
     {

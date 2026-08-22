@@ -5,11 +5,11 @@ namespace QuickER.Settings;
 /// <summary>ファイルを原子的に（書き込み途中の中断で保存先を壊さずに）書き出すユーティリティ</summary>
 /// <remarks>
 /// <para>
-/// <b>原子的書き込みの単一正本。</b>かつては図ファイル（<c>QuickER.Documents.JsonStorageService.SaveAtomic</c>）・
+/// <b>原子的書き込みの単一正本。</b>図ファイル（<c>QuickER.Documents.JsonStorageService.SaveAtomic</c>）・
 /// 設定ファイル（<see cref="JsonSettingsStore{TSettings}"/>）・接続プロファイル
-/// （<c>QuickER.Db.UI.SqlConnectionProfileStore</c>）の 3 箇所へ同じアルゴリズムを逐語コピーしており、
-/// 一時ファイル名が 1 箇所だけ固定名のまま取り残されるドリフトが実際に起きた。同期を守る仕組みのない
-/// コピーを解消するため、ここへ一元化した（2026-08-05）。
+/// （<c>QuickER.Db.UI.SqlConnectionProfileStore</c>）はいずれもここを経由する。同じアルゴリズムを
+/// 各所へ逐語コピーすると、一時ファイル名の付け方のような細部が 1 箇所だけ取り残されても
+/// 揃っているかを保証する仕組みが無いため、実装はここ 1 箇所に閉じる。
 /// </para>
 /// <para>
 /// 素の <see cref="File.WriteAllText(string, string?)"/> は既存ファイルを切り詰めてから書くため、
@@ -78,8 +78,8 @@ public static class AtomicFile
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
                 // 掃除に失敗した tmp は GUID 名のため次回保存で再利用されず、そのまま残り続ける
-                // （＝自動では消えない）。ただし本体の内容には一切影響せず、実測でも掃除の失敗は
-                // 観測されていないため、元の例外を握り潰してまで対処はしない。
+                // （＝自動では消えない）。ただし本体の内容には一切影響しないため、
+                // 元の例外を握り潰してまで対処はしない。
             }
         }
     }

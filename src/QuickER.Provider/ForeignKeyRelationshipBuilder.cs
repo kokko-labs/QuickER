@@ -29,7 +29,7 @@ namespace QuickER.Provider;
 /// </para>
 /// <para>
 /// 複合外部キー（列ペアが 2 組以上）も <see cref="Relationship.ColumnPairs"/> へ全ペアをそのまま載せる
-/// （意味モデルが複数列に対応したため、劣化は起きない）。
+/// （意味モデルが複数列を表現できるため、取込で列ペアが欠けることはない）。
 /// </para>
 /// </remarks>
 public sealed class ForeignKeyRelationshipBuilder

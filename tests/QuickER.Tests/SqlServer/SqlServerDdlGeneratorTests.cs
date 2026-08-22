@@ -508,7 +508,7 @@ public class SqlServerDdlGeneratorTests
         sql.Should().Contain("CONSTRAINT [UQ_shops_code] UNIQUE ([code])");
     }
 
-    /// <summary>一意制約を持たない図では UNIQUE 行を 1 行も出力しないことを検証する（既存出力のバイト不変）</summary>
+    /// <summary>一意制約を持たない図では UNIQUE 行を 1 行も出力しないことを検証する</summary>
     [Fact(DisplayName = "Build: 一意制約が無ければ UNIQUE を出力しない")]
     public void Build_WithoutUniqueConstraints_EmitsNoUnique()
     {

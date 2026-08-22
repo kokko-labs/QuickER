@@ -263,7 +263,7 @@ public class CodeReverseCommandServiceTests
         }
     }
 
-    /// <summary>構造同一かつ説明も一致する取込は、従来どおり無確認で続行する</summary>
+    /// <summary>構造同一かつ説明も一致する取込は、無確認で続行する</summary>
     [Fact(DisplayName = "構造同一かつ説明も一致する取込は無確認のまま")]
     public void Run_SameStructureAndDescriptions_NoConfirm()
     {

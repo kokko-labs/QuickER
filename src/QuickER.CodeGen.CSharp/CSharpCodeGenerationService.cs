@@ -210,7 +210,7 @@ public sealed class CSharpCodeGenerationService
         }
 
         // パッケージ参照モードでは、各生成ファイルの先頭コメントへ必要な PackageReference を案内する。
-        // 通常生成では空リスト（ヘッダに追加行なし＝バイト不変）。案内はファイル横断で同一のため 1 度だけ組み立てる。
+        // 通常生成では空リスト（ヘッダに追加行なし）。案内はファイル横断で同一のため 1 度だけ組み立てる。
         var packageGuidanceLines = options.UseRuntimePackages
             ? RuntimePackageReferenceGuidance.BuildGuidanceLines(
                 options,
@@ -337,11 +337,11 @@ public sealed class CSharpCodeGenerationService
     /// 「共有 Entity は 1 つの <c>byte[]</c> プロパティだが、並行性トークンとして扱うのは行バージョンとして
     /// 解決した方言の Repository だけで、他方言では通常のバイナリ列（INSERT / UPDATE で書き込む・版ガードなし）になる」
     /// という非対称は生成物のどこにも書かれないため、生成時に一度だけ明示する。
-    /// 統一対象が 1 つも無いとき（単一方言・行バージョン列のない図）は何も出さない＝診断はバイト不変。
+    /// 統一対象が 1 つも無いとき（単一方言・行バージョン列のない図）は何も出さない。
     /// 診断は行バージョンとして解決した方言（owner）ごとに 1 件出し、その方言が採番する列だけを並べる
     /// （行バージョンを解決できる方言が 2 つ以上になったとき、最初の 1 列の owner で全列を括ると
     /// 実際には別方言が採番する列まで誤った方言名で通知してしまうため）。owner が 1 つの通常ケースでは
-    /// 従来どおり 1 件・同一文面になる。
+    /// 1 件・同一文面になる。
     /// </remarks>
     private static void AddMultiTargetRowVersionInfo(
         MultiDialectTypeReconciler.RowVersionReconciliation rowVersions,
@@ -371,7 +371,7 @@ public sealed class CSharpCodeGenerationService
     /// ファイルスペック群を描画し、同一ファイル名のスペックを 1 ファイルへ連結する。
     /// </summary>
     /// <remarks>
-    /// 1 ファイル 1 スペックの場合は従来どおり（ヘッダ＋file-scoped namespace・バイト不変）。
+    /// 1 ファイル 1 スペックの場合はヘッダ＋file-scoped namespace で出す。
     /// 同一ファイルへ複数スペック（非分割マルチ方言）が対応する場合は、using を全スペックの和集合として
     /// 先頭でまとめて出し、各スペックを block namespace で包んで連結する（using は namespace より前必須のため）。
     /// </remarks>
@@ -428,7 +428,7 @@ public sealed class CSharpCodeGenerationService
                 .Where(ns => !topExcludedUsings.Contains(ns))
                 .ToList();
             // パッケージ参照モードでは、テンプレートのヘッダ経路（render_header）を通らないこの連結ヘッダにも
-            // 案内コメントを差し込む（各行に // 接頭辞）。通常生成では空リストで追加行なし（バイト不変）。
+            // 案内コメントを差し込む（各行に // 接頭辞）。通常生成では空リストで追加行なし。
             var guidanceComment = string.Concat(
                 packageGuidanceLines.Select(line => $"// {line}" + Environment.NewLine)
             );
@@ -567,7 +567,7 @@ public sealed class CSharpCodeGenerationService
             // 固定 infra の可視性。層別出力は生成物を複数プロジェクト（別アセンブリ）へ分けるため、
             // NuGet パッケージ配布（RuntimePackageSourceRenderer）と同じ public にする＝EditModel の
             // Owner/OwnerModel・IncludeNode・CascadeNavigation 等を別層の生成物が参照できる
-            // （単一アセンブリ配置＝非分割・通常分割は従来どおり internal でバイト不変）。
+            // （単一アセンブリ配置＝非分割・通常分割は internal）。
             InfraVisibility = options.LayeredOutput ? "public" : "internal",
             // ヘッダ（render_header=true のファイル）へ載せる案内行。renderHeader=false の連結スペックでは
             // テンプレート側で出さないため空でよいが、呼び出し側が共通で渡す（render_header 経路のみ描画する）。
@@ -624,7 +624,7 @@ public sealed class CSharpCodeGenerationService
     )
     {
         // Entity は常時生成されるため、生成対象が皆無になることはなく、Repository / EF Core / インメモリの
-        // 前提となる Entity 生成も常に満たされる（かつての「生成対象なし」「Repository は Entity 必須」検証は不要になった）。
+        // 前提となる Entity 生成も常に満たされる（＝「生成対象なし」「Repository は Entity 必須」の検証は不要）。
 
         // Mapper は Entity クラスと EditModel クラスの両方を参照する。Entity は常時生成されるため、
         // EditModel を出さないと単独生成になりコンパイル不能になる
@@ -1355,7 +1355,7 @@ public sealed class CSharpCodeGenerationService
     /// </summary>
     /// <remarks>
     /// <see cref="CodeGenerationOptions.ApiDocsFileName"/> の指定があればそれ（拡張子は ".g.md" へ正規化）を
-    /// 出力モードに依らず優先する。空白なら従来どおりの導出で、非分割時は <see cref="SanitizeFileName"/> で
+    /// 出力モードに依らず優先する。空白なら既定の導出で、非分割時は <see cref="SanitizeFileName"/> で
     /// ".g.cs" に正規化した <see cref="CodeGenerationOptions.OutputFileName"/> の
     /// 末尾を ".g.md" に置換する（例: <c>EcOrder.g.cs</c> → <c>EcOrder.g.md</c>＝生成コードと同じベース名・拡張子で
     /// ドキュメントと判別する）。分割時（<see cref="CodeGenerationOptions.SplitFilesByCategory"/>）は <c>Entities.g.cs</c> 等の
@@ -1373,7 +1373,7 @@ public sealed class CSharpCodeGenerationService
     /// <see cref="ApiDocsFileName"/> の英語版（<c>.g.md</c>）に対し、日本語版は同じベース名へ <c>.ja.g.md</c> を付す
     /// （非分割時の例: <c>EcOrder.g.cs</c> → <c>EcOrder.ja.g.md</c>・分割時は固定名 <c>ApiDocs.ja.g.md</c>・
     /// <see cref="CodeGenerationOptions.ApiDocsFileName"/> 指定時はその指定名のベース名）。
-    /// <c>.g.md</c> で終わるため <see cref="GeneratedFileWriter"/> の書き出しガードも従来どおり通る。
+    /// <c>.g.md</c> で終わるため <see cref="GeneratedFileWriter"/> の書き出しガードも通る。
     /// </remarks>
     private static string JapaneseApiDocsFileName(CodeGenerationOptions options) =>
         ApiDocsBaseName(options) + JapaneseApiDocsSuffix;

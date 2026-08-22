@@ -175,7 +175,7 @@ public sealed class RemoteResponseBodyRuntimeTests
         remote.CorrelationId.Should().Be("trace-1");
         remote.InnerException.Should().BeSameAs(cause);
 
-        // 既存の 3 引数形は追加的な変更なので従来どおり（inner なし）
+        // 3 引数形は inner を取らない（追加的な変更のため）
         new RemoteRepositoryException(500, "message")
             .InnerException.Should()
             .BeNull();
@@ -189,7 +189,7 @@ public sealed class RemoteResponseBodyRuntimeTests
         new SaveConflictException("message").InnerException.Should().BeNull();
     }
 
-    [Fact(DisplayName = "[Remote/応答本文] 対照: 正しい JSON 本文は従来どおり解釈される")]
+    [Fact(DisplayName = "[Remote/応答本文] 対照: 正しい JSON 本文は解釈される")]
     public async Task SuccessWithValidJson_IsDeserialized()
     {
         var (server, clients) = await StartFakeAsync(

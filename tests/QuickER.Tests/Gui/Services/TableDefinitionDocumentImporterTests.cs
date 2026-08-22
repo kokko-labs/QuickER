@@ -13,7 +13,7 @@ namespace QuickER.Tests.Gui.Services;
 /// <remarks>
 /// 取込は役割タグ（非表示の定義名）でシートを特定するためカルチャ非依存。
 /// エクスポータのカルチャは <c>BuildWorkbook</c> の culture 引数へ明示注入する
-/// （グローバル静的は変更しない。tasks/lessons.md 2026-07-08）。
+/// （グローバル静的は変更しない）。
 /// </remarks>
 public class TableDefinitionDocumentImporterTests
 {

@@ -53,7 +53,7 @@ public class OpenAiTurnDriverTests
         message.Content.Should().NotContain(part => part.Kind == ChatMessageContentPartKind.Image);
     }
 
-    /// <summary>添付なし User 項目は従来どおりテキストメッセージになることを検証する（挙動不変）</summary>
+    /// <summary>添付なし User 項目はテキストメッセージになることを検証する（挙動不変）</summary>
     [Fact(DisplayName = "添付なし User はテキストメッセージのまま")]
     public void ToUserMessage_NoAttachments_ProducesText()
     {

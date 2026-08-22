@@ -84,9 +84,7 @@ public sealed class QueryStringMatchGuardTests
         endsWith.Should().Throw<ArgumentNullException>().Which.ParamName.Should().Be("value");
     }
 
-    [Fact(
-        DisplayName = "非 null の文字列一致は従来どおり Where を通る（ガードは null のみを弾く）"
-    )]
+    [Fact(DisplayName = "非 null の文字列一致は Where を通る（ガードは null のみを弾く）")]
     public void NonNullPattern_PassesThrough()
     {
         var customers = new CustomerRepository(

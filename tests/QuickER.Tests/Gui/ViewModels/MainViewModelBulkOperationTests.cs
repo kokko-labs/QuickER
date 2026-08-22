@@ -247,7 +247,7 @@ public class MainViewModelBulkOperationTests
 
     // ---------------- 単一選択時の従来挙動（非回帰） ----------------
 
-    [Fact(DisplayName = "単一選択: 削除は従来どおり単一エンティティに作用（複合化しない）")]
+    [Fact(DisplayName = "単一選択: 削除は単一エンティティに作用（複合化しない）")]
     public void SingleSelection_DeleteRemovesOnlyPrimary()
     {
         var vm = new MainViewModel();

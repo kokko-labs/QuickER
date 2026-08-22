@@ -346,7 +346,7 @@ public static partial class TableDefinitionDocumentImporter
 
             if (type != RelationshipType.ManyToMany)
             {
-                // 複合外部キーはカンマ区切りの複数列表記（単一列は従来どおり列名 1 つ）
+                // 複合外部キーはカンマ区切りの複数列表記（単一列は列名 1 つ）
                 var childColumnNames = SplitColumnNames(GetCellText(worksheet, row, 4));
                 var parentColumnNames = SplitColumnNames(GetCellText(worksheet, row, 6));
 

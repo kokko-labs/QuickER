@@ -131,7 +131,7 @@ public sealed class DbImportCommandService
             (current.Entities.Count == 0 && current.Queries.Count == 0 && !_host.IsDirty)
             || HasSameStructure(current, merged.Entities, merged.Relationships);
 
-        // 構造同一かつ壊れクエリ・説明の上書きなしなら従来どおり無確認で続行する
+        // 構造同一かつ壊れクエリ・説明の上書きなしなら無確認で続行する
         if (
             structurallySame
             && merged.BrokenQueries.Count == 0

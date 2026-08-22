@@ -167,7 +167,7 @@ public sealed class LayeredOutputTests
             .Be("Server");
     }
 
-    [Fact(DisplayName = "計画: 層別出力でなければ RelativeDirectory は全て null（従来どおり直下）")]
+    [Fact(DisplayName = "計画: 層別出力でなければ RelativeDirectory は全て null（直下）")]
     public void Plan_NonLayered_LeavesRelativeDirectoryNull()
     {
         var plan = GeneratedFilePlanner.Plan(
@@ -313,7 +313,7 @@ public sealed class LayeredOutputTests
             }
         );
 
-        // 明示指定が最優先（従来どおり）
+        // 明示指定が最優先
         plan.Single(spec => spec.FileName == "Entities.g.cs")
             .NamespaceName.Should()
             .Be("MyApp.Model");

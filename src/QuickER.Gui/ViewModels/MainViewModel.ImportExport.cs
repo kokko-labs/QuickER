@@ -574,7 +574,7 @@ public partial class MainViewModel
     {
         // 並び順は「画像 → DB 構築 → スキーマ交換（可逆な Schema JSON を先頭）→ 定義書」の用途グループ。
         // 標準ダイアログのフィルタは見出し行を持てないため、接頭辞（Image/Database/Schema/Document）で
-        // グループを可視化する。先頭＝既定形式（PNG）は従来どおり
+        // グループを可視化する。先頭＝既定形式は PNG
         var picked = _files.PickSaveFile(
             "Image - PNG (*.png)|*.png|Image - SVG (*.svg)|*.svg|Database - SQL Script (*.sql)|*.sql|Schema - JSON (*.json)|*.json|Schema - Mermaid (*.mmd)|*.mmd|Schema - Mermaid (*.mermaid)|*.mermaid|Schema - DBML (*.dbml)|*.dbml|Document - Excel Workbook (*.xlsx)|*.xlsx|Document - HTML (*.html)|*.html",
             ".png"
@@ -883,7 +883,7 @@ public partial class MainViewModel
         };
 
         // Excel 定義書は再取込のマージ（Guid 引継＝クエリ定義・手配置レイアウトの温存）に対応する。
-        // Mermaid / DBML は方言情報を持たず定義書用途でもないため、従来どおり丸ごと置換（クエリ消滅・全体整列）。
+        // Mermaid / DBML は方言情報を持たず定義書用途でもないため、丸ごと置換（クエリ消滅・全体整列）。
         if (format == DiagramImportFormat.Excel)
         {
             ImportExcelMerging(diagram, displayName);
@@ -963,7 +963,7 @@ public partial class MainViewModel
         var structurallySame =
             HasNothingToLose || HasSameStructure(merged.Entities, merged.Relationships);
 
-        // 構造同一かつ壊れクエリ・説明/Memo の上書きなしなら従来どおり無確認で続行する
+        // 構造同一かつ壊れクエリ・説明/Memo の上書きなしなら無確認で続行する
         if (
             structurallySame
             && merged.BrokenQueries.Count == 0
@@ -1073,7 +1073,7 @@ public partial class MainViewModel
             return;
         }
 
-        // 無題（未保存）なら従来どおり保存ダイアログで保存先を選ばせる
+        // 無題（未保存）なら保存ダイアログで保存先を選ばせる
         SaveWithDialog();
     }
 
@@ -1150,7 +1150,7 @@ public partial class MainViewModel
             return;
         }
 
-        // 失うものがない（空・クエリなし・クリーン）ときは従来どおり無確認で開く
+        // 失うものがない（空・クエリなし・クリーン）ときは無確認で開く
         if (
             !HasNothingToLose
             && !_dialogs.ConfirmDiscard(

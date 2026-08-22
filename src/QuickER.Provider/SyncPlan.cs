@@ -14,7 +14,7 @@ namespace QuickER.Provider;
 /// </para>
 /// <para>
 /// <see cref="None"/> は主キー変更以外の全セクション（既定値）。主キー変更セクションに <see cref="None"/> が
-/// 現れた場合、レンダラーは従来どおり DROP → ADD を 1 セクション内で連続出力する（旧形の計画への後方互換）。
+/// 現れた場合、レンダラーは DROP → ADD を 1 セクション内で連続出力する。
 /// </para>
 /// </remarks>
 public enum PrimaryKeyPhase

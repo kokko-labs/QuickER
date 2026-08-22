@@ -321,7 +321,7 @@ public class DbImportCommandServiceTests
         host.LastReplacedDiagram.Should().BeNull();
     }
 
-    /// <summary>構造同一かつ説明も一致する再取込は、従来どおり無確認で続行する</summary>
+    /// <summary>構造同一かつ説明も一致する再取込は、無確認で続行する</summary>
     [Fact(DisplayName = "構造同一かつ説明も一致する再取込は無確認のまま")]
     public async Task RunAsync_SameStructureAndDescriptions_NoConfirm()
     {

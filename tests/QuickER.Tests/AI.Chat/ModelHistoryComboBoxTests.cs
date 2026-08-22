@@ -103,7 +103,7 @@ public class ModelHistoryComboBoxTests
                     ItemContainerStyle = itemContainerStyle,
                     DataContext = vm,
                 };
-                // 画面外＋非アクティブで Show し、テスト実行中にユーザーの画面を邪魔しない（lessons 2026-07-10）
+                // 画面外＋非アクティブで Show し、テスト実行中にユーザーの画面を邪魔しない
                 var window = new Window
                 {
                     Content = combo,
@@ -274,7 +274,7 @@ public class ModelHistoryComboBoxTests
                     ItemContainerStyle = itemContainerStyle,
                     DataContext = new ConnectionHost(connection),
                 };
-                // 画面外＋非アクティブで Show し、テスト実行中にユーザーの画面を邪魔しない（lessons 2026-07-10）
+                // 画面外＋非アクティブで Show し、テスト実行中にユーザーの画面を邪魔しない
                 var window = new Window
                 {
                     Content = combo,
@@ -444,7 +444,7 @@ public class ModelHistoryComboBoxTests
                     ItemContainerStyle = itemContainerStyle,
                     DataContext = new ConnectionHost(connection),
                 };
-                // 画面外＋非アクティブで Show し、テスト実行中にユーザーの画面を邪魔しない（lessons 2026-07-10）
+                // 画面外＋非アクティブで Show し、テスト実行中にユーザーの画面を邪魔しない
                 var window = new Window
                 {
                     Content = combo,
@@ -584,7 +584,7 @@ public class ModelHistoryComboBoxTests
                         UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged,
                     }
                 );
-                // 画面外＋非アクティブで Show し、テスト実行中にユーザーの画面を邪魔しない（lessons 2026-07-10）
+                // 画面外＋非アクティブで Show し、テスト実行中にユーザーの画面を邪魔しない
                 var window = new Window
                 {
                     Content = combo,

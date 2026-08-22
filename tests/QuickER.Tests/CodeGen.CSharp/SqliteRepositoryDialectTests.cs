@@ -144,7 +144,7 @@ public class SqliteRepositoryDialectTests
         code.Should().NotContain("SqliteConnection");
         code.Should().NotContain("SqliteRepository");
         code.Should().NotContain("IncludeLoader");
-        // SQL Server 版は従来どおり FOR JSON / SqlServerRepository を維持
+        // SQL Server 版は FOR JSON / SqlServerRepository を維持
         code.Should().Contain("SqlServerRepository<");
         code.Should().Contain("FOR JSON");
         // 楽観排他の共有部品は SQL Server 方言側に出る（rowversion 列の有無に依らず固定 infra として存在する）

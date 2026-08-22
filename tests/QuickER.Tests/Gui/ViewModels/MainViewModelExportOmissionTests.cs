@@ -113,7 +113,7 @@ public class MainViewModelExportOmissionTests
         }
     }
 
-    /// <summary>落ちる情報が無い形式（スキーマのみ JSON）では従来どおり完了文だけを出すことを検証する</summary>
+    /// <summary>落ちる情報が無い形式（スキーマのみ JSON）では完了文だけを出すことを検証する</summary>
     [Fact(DisplayName = "落ちる情報が無ければ完了文だけを出す")]
     public void Export_WithoutOmissions_ShowsPlainCompletion()
     {

@@ -6,7 +6,7 @@
 /// </summary>
 /// <remarks>
 /// 複合外部キーは <see cref="Relationship.ColumnPairs"/> へ宣言順で複数組を並べて表現する。
-/// 1 組だけなら従来どおりの単列外部キーになる。
+/// 1 組だけなら単列外部キーになる。
 /// </remarks>
 public class RelationshipColumnPair
 {

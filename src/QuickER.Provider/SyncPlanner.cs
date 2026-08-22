@@ -643,7 +643,7 @@ public sealed class SyncPlanner
     /// </summary>
     /// <remarks>
     /// 主キーが同じ列を覆っていれば実際には壊れないが、その判定には同期後の主キー構成が要る。誤警告を許容して
-    /// 単純な「被参照列と完全一致するか」で判定し、実行はブロックしない（レンダラーは従来どおり DROP を出す）。
+    /// 単純な「被参照列と完全一致するか」で判定し、実行はブロックしない（レンダラーは DROP を出す）。
     /// </remarks>
     private static void WarnUniqueConstraintDropsBreakingForeignKeys(
         IReadOnlyList<SchemaDiffItem> selected,
@@ -779,7 +779,7 @@ public sealed class SyncPlanner
 
     /// <summary>
     /// rebuild 方言の実行計画を組み立てる。逐次 DDL で表現できない変更をテーブル単位の再構築へ集約し、
-    /// 残り（新規テーブル対象でない列追加・テーブル削除）は従来どおりセクションへ残す。
+    /// 残り（新規テーブル対象でない列追加・テーブル削除）はセクションへ残す。
     /// </summary>
     private static SyncPlan BuildRebuildPlan(
         List<SchemaDiffItem> selected,
@@ -848,7 +848,7 @@ public sealed class SyncPlanner
     /// 再構築の <c>CREATE TABLE</c> は意味モデルから組み立て直すため、モデルが持たない
     /// <c>AUTOINCREMENT</c> / <c>DEFAULT</c> / <c>CHECK</c> / <c>COLLATE</c> / 生成列は再現されない。
     /// 検出材料（<see cref="SyncPlanContext.TableCreateSql"/>）を持たない方言では 1 件も積まれない
-    /// ＝逐次 DDL 方言の計画はバイト不変。
+    /// ＝逐次 DDL 方言の計画にこの警告は出ない。
     /// </remarks>
     private static void WarnRebuildDropsColumnAttributes(
         List<TableRebuildPlan> rebuilds,

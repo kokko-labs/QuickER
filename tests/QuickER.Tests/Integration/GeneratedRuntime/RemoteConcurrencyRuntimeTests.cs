@@ -200,7 +200,7 @@ public sealed class RemoteConcurrencyRuntimeTests
             .Be(2, "親 1 件＋子 1 件が保存される");
 
         document.RowVer.Should().NotBeNull("応答の版対応表から手元のエンティティへ書き戻される");
-        document.RowState.Should().Be(RowState.Unchanged, "保存後の状態確定は従来どおり");
+        document.RowState.Should().Be(RowState.Unchanged, "保存後の状態確定はカスケードで行われる");
         note.RowState.Should().Be(RowState.Unchanged);
         var afterInsert = document.RowVer;
 

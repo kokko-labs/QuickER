@@ -2,8 +2,8 @@ namespace QuickER.AI.Mock;
 
 /// <summary>WPF (.NET) ターゲットのプロファイル。csproj／README とプロンプトの WPF 固有文面を提供する。</summary>
 /// <remarks>
-/// ここで返すフラグメントは、リファクタリング前に <see cref="MockProjectScaffoldService"/> と
-/// <see cref="MockProjectPromptBuilder"/> に直書きされていた WPF 固有文面をそのまま切り出したもの（挙動不変）。
+/// ここで返すフラグメントは <see cref="MockProjectScaffoldService"/> と
+/// <see cref="MockProjectPromptBuilder"/> が組み立てに使う WPF 固有文面の正本。
 /// README とプロンプトの本文はすべて英語固定（ヘッドレス実行の機械向け指示・生成物に同梱する規約ドキュメントは
 /// UI 言語に追従させない方針。CJK 混入は英語ガードテストが検知する）。
 /// </remarks>

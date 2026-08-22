@@ -114,7 +114,7 @@ public sealed class SqlExpressionTranslatorNavigationTests
         sqlite.Should().Throw<NotSupportedException>().WithMessage("*navigation property*");
     }
 
-    [Fact(DisplayName = "対照: 素の列は従来どおり列として翻訳される（両方言）")]
+    [Fact(DisplayName = "対照: 素の列は列として翻訳される（両方言）")]
     public void PlainColumn_StillTranslates()
     {
         RunSqlServer(p => p.Id == 1).Should().Be("[Id] = @p0");

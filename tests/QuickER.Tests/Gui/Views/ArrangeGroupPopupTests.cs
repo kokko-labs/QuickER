@@ -15,7 +15,7 @@ namespace QuickER.Tests.Gui.Views;
 /// ツールバーの整列グループ（トグル＋直下ポップアップ）の配線を検証するテストクラス。
 /// トグルとポップアップ開閉の同期・ポップアップ内 4 ボタンのコマンド束縛・項目クリックでの
 /// クローズは XAML 配線（ElementName 束縛＋コードビハインド）のため、VM テストでは守れず
-/// 実ウィンドウの Show を要する（lessons.md の「入力イベント配線はヘッドレスで検証できない」）。
+/// 実ウィンドウの Show を要する（入力イベントの配線はヘッドレスでは検証できない）。
 /// </summary>
 public class ArrangeGroupPopupTests
 {
@@ -70,7 +70,7 @@ public class ArrangeGroupPopupTests
                 );
                 var window = new MainWindow(vm)
                 {
-                    // 画面外・非アクティブで表示する（開発者のデスクトップを妨げない。lessons.md の先例）
+                    // 画面外・非アクティブで表示する（開発者のデスクトップを妨げない）
                     WindowStartupLocation = WindowStartupLocation.Manual,
                     Left = -4000,
                     Top = -4000,

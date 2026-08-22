@@ -174,7 +174,7 @@ public class AiChatDialogViewModelTests
     }
 
     /// <summary>
-    /// 検出済み・未ログインでは従来どおり ChatGPT ログインパネルが出て、案内文は出ないことを検証する
+    /// 検出済み・未ログインでは ChatGPT ログインパネルが出て、案内文は出ないことを検証する
     /// （未検出時の抑止が未ログインの案内まで巻き込んでいないことの対照）。
     /// </summary>
     [Fact(DisplayName = "codex 検出済み・未ログインならログインパネルを出す")]

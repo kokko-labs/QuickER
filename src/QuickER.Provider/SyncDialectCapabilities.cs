@@ -20,9 +20,8 @@ public enum ColumnReorderMode
 /// </summary>
 /// <remarks>
 /// <para>
-/// 将来フェーズで <see cref="SyncPlanner"/> がこの宣言を参照し、逐次 DDL で表現できない変更
+/// <see cref="SyncPlanner"/> がこの宣言を参照し、逐次 DDL で表現できない変更
 /// （SQLite のテーブル再構築・MySQL のネイティブ列順変更など）をセクションへ振り分ける。
-/// Phase 1 では契約定義と各プロバイダからの配線のみで、プランナーはまだ参照しない。
 /// </para>
 /// </remarks>
 public sealed record SyncDialectCapabilities

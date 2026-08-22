@@ -43,7 +43,7 @@
         Style="{StaticResource SecondaryButton}"
         Command="{Binding DeselectAllCommand}"
       />
-      <!-- 実行は肯定アクション＝アクセント（旧: 緑背景 #DCFCE7 直書き）。テーマの PrimaryButton へ統一 -->
+      <!-- 実行は肯定アクション＝アクセント。配色はテーマの PrimaryButton に従う -->
       <Button
         Content="{x:Static resources:Strings.SchemaSync_Execute}"
         Padding="14,3"

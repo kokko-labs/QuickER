@@ -16,7 +16,7 @@ namespace QuickER.Tests.GeneratedInMemoryFixture;
 /// （<c>Order.Customer</c>）は cascade ではないため辿らない＝走査は木で、循環しない。
 /// </para>
 /// <para>
-/// 既定（引数なし）は従来どおり自ノードだけを Added にする（呼び出し互換）。
+/// 既定（引数なし）は自ノードだけを Added にする（呼び出し互換）。
 /// </para>
 /// </remarks>
 public sealed class MarkAddedCascadeTests
@@ -132,8 +132,6 @@ public sealed class MarkAddedCascadeTests
 
         (await new InMemoryOrderRepository(store).GetAllAsync(Ct)).Should().HaveCount(2);
         (await new InMemoryCustomerProfileRepository(store).GetAllAsync(Ct)).Should().HaveCount(1);
-        customer
-            .RowState.Should()
-            .Be(RowState.Unchanged, "保存後の状態確定は従来どおりカスケードで行われる");
+        customer.RowState.Should().Be(RowState.Unchanged, "保存後の状態確定はカスケードで行われる");
     }
 }

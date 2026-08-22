@@ -240,8 +240,8 @@ public abstract class ConcurrencyRuntimeTestsBase<TEntity, TConflictException>
         GetRowVersion(stale!).Should().NotEqual(staleVersion, "上書き後の新しい版が反映される");
     }
 
-    /// <summary>4. 存在しない行の更新は従来どおり false（競合ではない）</summary>
-    [Fact(DisplayName = "[Concurrency] 4: UpdateAsync は行が存在しなければ従来どおり false")]
+    /// <summary>4. 存在しない行の更新は false（競合ではない）</summary>
+    [Fact(DisplayName = "[Concurrency] 4: UpdateAsync は行が存在しなければ false")]
     public async Task UpdateAsync_ReturnsFalse_WhenRowIsMissing()
     {
         await ResetAndSeedAsync();

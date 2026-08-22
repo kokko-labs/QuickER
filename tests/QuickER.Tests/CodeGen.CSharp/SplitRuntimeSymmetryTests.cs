@@ -429,7 +429,7 @@ public class SplitRuntimeSymmetryTests
                             IsPrimaryKey = true,
                             IsNullable = false,
                         },
-                        // 文字列列は Unicode で統一（Ansi/Unicode 差で canonical トークンが割れるため。lessons.md 参照）
+                        // 文字列列は Unicode で統一（Ansi/Unicode 差で canonical トークンが割れるため）
                         new Column
                         {
                             Id = customerCode,

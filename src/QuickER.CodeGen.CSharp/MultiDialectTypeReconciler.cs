@@ -55,7 +55,7 @@ internal static class MultiDialectTypeReconciler
     /// （INSERT / UPDATE で書き込む・版ガードなし）になる。呼び出し側はこの非対称を Info 診断で通知する。
     /// </para>
     /// <para>
-    /// 実効方言の辞書が 1 つ以下のとき（単一方言）は何もしない（統一する相手がおらず、出力もバイト不変）。
+    /// 実効方言の辞書が 1 つ以下のとき（単一方言）は何もしない（統一する相手がいない）。
     /// </para>
     /// </remarks>
     public static RowVersionReconciliation ReconcileRowVersionTypes(

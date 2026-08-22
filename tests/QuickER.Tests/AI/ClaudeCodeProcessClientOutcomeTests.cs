@@ -12,7 +12,7 @@ namespace QuickER.Tests.AI;
 /// </summary>
 public class ClaudeCodeProcessClientOutcomeTests
 {
-    /// <summary>result 受信・成功・正常終了は従来どおり成功（Error なし・セッション ID 保持）になることを検証する</summary>
+    /// <summary>result 受信・成功・正常終了は成功（Error なし・セッション ID 保持）になることを検証する</summary>
     [Fact(DisplayName = "result 成功かつ終了コード 0 は成功を返す")]
     public void EvaluateTurnOutcome_ResultSuccessAndZeroExit_ReturnsSuccess()
     {
@@ -97,7 +97,7 @@ public class ClaudeCodeProcessClientOutcomeTests
         error.Should().Be("first | second | third");
     }
 
-    /// <summary>文字列の result があるときは従来どおりそれを優先すること（errors は使わないこと）を検証する</summary>
+    /// <summary>文字列の result があるときはそれを優先すること（errors は使わないこと）を検証する</summary>
     [Fact(DisplayName = "文字列 result があれば errors より優先する")]
     public void ParseResult_ResultString_TakesPrecedenceOverErrors()
     {
@@ -116,7 +116,7 @@ public class ClaudeCodeProcessClientOutcomeTests
         notLoggedIn.Should().BeTrue();
     }
 
-    /// <summary>原因を示す情報が何も無い失敗では従来どおり汎用文言へ落ちることを検証する</summary>
+    /// <summary>原因を示す情報が何も無い失敗では汎用文言へ落ちることを検証する</summary>
     [Fact(DisplayName = "原因情報が無い失敗は汎用文言になる")]
     public void ParseResult_NoCause_FallsBackToGenericError()
     {

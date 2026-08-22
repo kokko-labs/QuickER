@@ -24,7 +24,7 @@ namespace QuickER.AI.UI;
 /// </para>
 /// <para>
 /// テスト隔離のため、config.toml 読込・API キーの読み書きは delegate として注入できる。
-/// 既定はいずれも現行の static 直呼びと同一挙動（本番挙動不変）。
+/// 既定はいずれも対応する static メソッドを直接呼ぶ。
 /// </para>
 /// </remarks>
 public partial class ChatConnectionSettingsViewModel : ObservableObject
@@ -577,7 +577,7 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
         ui.LastBackend = SelectedBackend.ToString();
 
         // API キー接続の選択（プロバイダー・エンドポイント）も次回起動へ引き継ぐ。
-        // API キー本体はここ（平文 JSON）へは入れず、従来どおり DPAPI ストアだけが持つ
+        // API キー本体はここ（平文 JSON）へは入れず、DPAPI ストアだけが持つ
         ui.ApiProvider = ApiProvider.ToString();
         ui.EndpointOverride = EndpointOverride?.Trim() ?? string.Empty;
 

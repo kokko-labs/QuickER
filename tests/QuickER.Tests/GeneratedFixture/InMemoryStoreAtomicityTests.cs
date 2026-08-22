@@ -69,7 +69,7 @@ public sealed class InMemoryStoreAtomicityTests
     /// <summary>
     /// 更新として開始した行がその間に削除されていた場合、<c>Publish</c> は staged スナップショットを適用せず
     /// <c>SaveConflictException</c>（<see cref="SaveConflictReason.NotFound"/>）で失敗する（復活させないのは
-    /// 従来どおりだが、黙って捨てると「保存できた」と報告しながら行が無い状態になる）。
+    /// 実 DB の UPDATE と同じだが、黙って捨てると「保存できた」と報告しながら行が無い状態になる）。
     /// </summary>
     [Fact(
         DisplayName = "[InMemory/Atomicity] Publish: 削除された行への staged 更新は NotFound の競合になる"
@@ -205,7 +205,7 @@ public sealed class InMemoryStoreAtomicityTests
     }
 
     /// <summary>
-    /// 対照: 行が「残っていて」他者に更新されていた場合は、版を持つ型で従来どおり
+    /// 対照: 行が「残っていて」他者に更新されていた場合は、版を持つ型では
     /// <see cref="SaveConflictReason.Modified"/>（存否判定を先にしても版検証は失われない）。
     /// </summary>
     [Fact(
@@ -237,10 +237,10 @@ public sealed class InMemoryStoreAtomicityTests
     }
 
     /// <summary>
-    /// 対照: 行が削除ではなく「更新」されていた場合は従来どおり後勝ちで staged スナップショットが適用される
+    /// 対照: 行が削除ではなく「更新」されていた場合は後勝ちで staged スナップショットが適用される
     /// （版を持たない型の契約は last-write-wins のまま）。
     /// </summary>
-    [Fact(DisplayName = "[InMemory/Atomicity] Publish: 他者の更新は従来どおり後勝ちで上書きされる")]
+    [Fact(DisplayName = "[InMemory/Atomicity] Publish: 他者の更新は後勝ちで上書きされる")]
     public void Publish_RowUpdatedMeanwhile_StillWins()
     {
         var store = new InMemoryDataStore();

@@ -78,7 +78,7 @@ public class MainViewModelDocumentTests : IDisposable
         vm.CurrentFilePath.Should().Be(path);
     }
 
-    /// <summary>無題（現在パスなし）での保存は従来どおりダイアログを開き、成功時にパスを設定することを検証する</summary>
+    /// <summary>無題（現在パスなし）での保存はダイアログを開き、成功時にパスを設定することを検証する</summary>
     [Fact(DisplayName = "Save: 無題ならダイアログを開き、成功でパスを設定する")]
     public void Save_Untitled_FallsBackToDialogAndSetsPath()
     {

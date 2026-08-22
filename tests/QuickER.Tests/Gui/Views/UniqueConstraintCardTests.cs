@@ -17,7 +17,7 @@ namespace QuickER.Tests.Gui.Views;
 /// </summary>
 /// <remarks>
 /// 構成列の編集は「行の並び＝宣言順、候補は他行の未使用列」という束縛の組み合わせで成り立っており、
-/// VM テストでは束縛そのものを守れない。lessons.md の先例に従い、画面外（Left/Top=-4000）・
+/// VM テストでは束縛そのものを守れない。画面外（Left/Top=-4000）・
 /// 非アクティブで Show した実ウィンドウ上で ItemsControl のコンテナを実体化して検証する。
 /// </remarks>
 public class UniqueConstraintCardTests
@@ -75,7 +75,7 @@ public class UniqueConstraintCardTests
                 );
                 var window = new MainWindow(vm)
                 {
-                    // 画面外・非アクティブで表示する（開発者のデスクトップを妨げない。lessons.md の先例）
+                    // 画面外・非アクティブで表示する（開発者のデスクトップを妨げない）
                     WindowStartupLocation = WindowStartupLocation.Manual,
                     Left = -4000,
                     Top = -4000,

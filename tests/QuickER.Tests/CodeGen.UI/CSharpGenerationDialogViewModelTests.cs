@@ -802,7 +802,7 @@ public class CSharpGenerationDialogViewModelTests
 
     /// <summary>
     /// 層別出力の切替で、生成ファイルのプレビュー表示に層フォルダが現れ・消えることを検証する
-    /// （層別でないときは従来どおりファイル名のみ）
+    /// （層別でないときはファイル名のみ）
     /// </summary>
     [Fact(DisplayName = "層別出力の切替でプレビューに層フォルダが連動する")]
     public void LayeredOutput_TogglesLayerFolderInPreview()

@@ -425,7 +425,7 @@ public class CliAppTests
 
     /// <summary>
     /// GUI が書き出す別名キー <c>OutputPath</c>（<c>OutputFileName</c> への橋渡し）は正当なキーとして
-    /// 未知キー警告の対象にならず、従来どおり出力ファイル名として効くことを検証する
+    /// 未知キー警告の対象にならず、出力ファイル名として効くことを検証する
     /// </summary>
     [Fact(DisplayName = "--config の OutputPath は警告なしで出力ファイル名になる")]
     public async Task Generate_ConfigOutputPathAlias_DoesNotWarn()
@@ -655,7 +655,7 @@ public class CliAppTests
     }
 
     /// <summary>
-    /// --repository-dialects 未指定時は従来どおり --provider から単一方言が導出されることを検証する
+    /// --repository-dialects 未指定時は --provider から単一方言が導出されることを検証する
     /// （後方互換：既存の Generate_SupportedDialectWithRepositories_Succeeds と同じ経路で sqlserver 実装のみが出る）
     /// </summary>
     [Fact(DisplayName = "--repository-dialects 未指定時は --provider から単一導出する")]
@@ -743,10 +743,10 @@ public class CliAppTests
     }
 
     /// <summary>
-    /// --use-runtime-packages 未指定時は従来どおりランタイム（固定コード）が生成物に含まれることを検証する
-    /// （バイト不変の回帰確認を兼ねる軽量チェック。厳密なバイト一致は GeneratedFixtureDriftTests が担保）
+    /// --use-runtime-packages 未指定時はランタイム（固定コード）が生成物に含まれることを検証する
+    /// （軽量チェック。厳密なバイト一致は GeneratedFixtureDriftTests が担保）
     /// </summary>
-    [Fact(DisplayName = "--use-runtime-packages 未指定時は従来どおりランタイムが同梱される")]
+    [Fact(DisplayName = "--use-runtime-packages 未指定時はランタイムが同梱される")]
     public async Task Generate_WithoutRuntimePackages_IncludesRuntimeAsBefore()
     {
         var (schemaPath, outDir, root) = CreateSampleSchema();
@@ -1620,7 +1620,7 @@ public class CliAppTests
             exit.Should().Be(0);
             File.Exists(Path.Combine(outDir, "docs", "ApiDocs.g.md")).Should().BeTrue();
             File.Exists(Path.Combine(outDir, "ApiDocs.g.md")).Should().BeFalse();
-            // 生成コード（.g.cs）は従来どおり出力ディレクトリ直下のまま
+            // 生成コード（.g.cs）は出力ディレクトリ直下のまま
             File.Exists(Path.Combine(outDir, "Entities.g.cs")).Should().BeTrue();
         }
         finally

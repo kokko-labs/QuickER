@@ -8,8 +8,8 @@ namespace QuickER.CodeGen.UI;
 /// <remarks>
 /// 参照元列（<see cref="SourceColumnId"/>）を選ぶと型トークン（<see cref="Type"/>）は列の宣言型に追従し、
 /// 手入力は不可（<see cref="IsTypeEditable"/> が false）になる。「なし」へ戻すと直近の手入力値を保持する。
-/// 型トークン導出関数は必須（非 null）で、両方の子行で同一の挙動に揃える
-/// （かつては片方が nullable 契約で列選択時に型追従しないドリフトがあった）。
+/// 型トークン導出関数は必須（非 null）とし、両方の子行で同一の挙動に揃える
+/// （nullable にすると、導出関数を渡さない子行だけ列選択時に型が追従しないドリフトが起きる）。
 /// </remarks>
 public abstract partial class QueryFieldViewModelBase : ObservableObject
 {

@@ -10,7 +10,7 @@ namespace QuickER.Tests.AI.Mock;
 /// </summary>
 /// <remarks>
 /// カルチャ切替は静的 <c>Strings.Culture</c> を変更せず、スレッドローカルの
-/// <see cref="CultureInfo.CurrentUICulture"/> を try/finally で一時変更・復元して行う（tasks/lessons.md の方針）。
+/// <see cref="CultureInfo.CurrentUICulture"/> を try/finally で一時変更・復元して行う。
 /// </remarks>
 public class MockFolderDesignPromptsTests
 {

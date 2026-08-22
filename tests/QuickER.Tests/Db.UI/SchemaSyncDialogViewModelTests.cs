@@ -503,7 +503,7 @@ public class SchemaSyncDialogViewModelTests
         vm.DiffItems.Should().NotContain(i => i.Kind == SchemaDiffKind.RebuildTable);
     }
 
-    /// <summary>None 方言（SQL Server）では従来どおり選択不可の案内項目（RebuildTable）になることを検証する</summary>
+    /// <summary>None 方言（SQL Server）では選択不可の案内項目（RebuildTable）になることを検証する</summary>
     [Fact(DisplayName = "None 方言: 列順変更は選択不可の案内項目のまま")]
     public async Task Refresh_NoneDialect_ColumnReorder_YieldsInformationalItem()
     {

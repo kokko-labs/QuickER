@@ -14,7 +14,7 @@ namespace QuickER.Tests.CodeGen.CSharp;
 /// <remarks>
 /// 既定の <c>ToString()</c> は時刻部（"0:00:00"）を必ず伴うため、日付のみの列はカルチャ依存の短い日付書式
 /// （<c>ToString("d")</c>）で導出する。判定材料は方言中立トークン（<c>date</c>）で、時刻を持つ列
-/// （<c>datetime2</c>）は従来どおり既定書式のまま。値オブジェクト有効時は内包値を同じ書式で表示する
+/// （<c>datetime2</c>）は既定書式のまま。値オブジェクト有効時は内包値を同じ書式で表示する
 /// （VO の <c>ToString()</c> は時刻部まで出るため）。
 /// </remarks>
 public sealed class EditModelDateBindingGenerationTests
@@ -84,7 +84,7 @@ public sealed class EditModelDateBindingGenerationTests
         return result.Files[0].Content;
     }
 
-    [Fact(DisplayName = "date 列の表示は日付のみの書式で導出される（時刻を持つ列は従来どおり）")]
+    [Fact(DisplayName = "date 列の表示は日付のみの書式で導出される（時刻を持つ列は既定書式）")]
     public void DateColumn_UsesShortDateFormat()
     {
         var content = Generate(generateValueObjects: false);

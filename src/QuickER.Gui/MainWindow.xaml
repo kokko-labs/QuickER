@@ -566,7 +566,7 @@
     >
       <!--
         WrapPanel: 英語などキャプションが長い言語やモジュール全部入り構成でウィンドウ幅に収まらないとき、
-        ボタンを切らずに 2 段目へ折り返す（収まる幅では従来どおり 1 段のまま）。
+        ボタンを切らずに 2 段目へ折り返す（収まる幅では 1 段のまま）。
       -->
       <WrapPanel x:Name="ToolbarWrapPanel" Orientation="Horizontal" Margin="6,4">
         <Button

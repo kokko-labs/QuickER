@@ -149,7 +149,7 @@ public class TableDefinitionCompositeForeignKeyTests
             .Should()
             .Equal(("TenantId", "TenantRef"), ("RegionCode", "RegionRef"));
 
-        // 単一列の外部キーは従来どおり 1 組のまま
+        // 単一列の外部キーは 1 組のまま
         diagram
             .Relationships.Single(relationship =>
                 relationship.ConstraintName == "FK_TenantUser_Plan"

@@ -679,9 +679,9 @@ public abstract class GeneratedRuntimeParityTestsBase(SqlServerContainerFixture 
         ex.Which.Message.Should().Contain("positional records are not supported");
     }
 
-    /// <summary>16. Repository 経由の生 SQL 3 メソッドが従来どおり動く（委譲後リグレッション）</summary>
+    /// <summary>16. Repository 経由の生 SQL 3 メソッドが動く（委譲後リグレッション）</summary>
     [Fact(
-        DisplayName = "[Parity] 16: Repository の生 SQL 3 メソッドが委譲後も従来どおり動く（リグレッション）"
+        DisplayName = "[Parity] 16: Repository の生 SQL 3 メソッドが委譲後も動く（リグレッション）"
     )]
     public async Task Repository_RawSqlMethods_StillWorkAfterDelegation()
     {

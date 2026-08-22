@@ -21,7 +21,7 @@ namespace QuickER.Behaviors;
 ///     エンティティ／リレーション要素配下の押下はビジュアルツリー判定で除外し <see cref="DragBehavior"/> 等へ委ねる</item>
 ///   <item>押下時点では矩形を出さず・キャプチャもせず・Handled にもしない（Ctrl 押下の追加選択時のみ
 ///     Handled にし、CanvasClickCommand の全解除から既存選択を保護する）。閾値を超えて動いた時のみ
-///     ラバーバンドを開始する。閾値未満のクリックは従来どおり CanvasClickCommand の全選択解除に委ねる</item>
+///     ラバーバンドを開始する。閾値未満のクリックは CanvasClickCommand の全選択解除に委ねる</item>
 ///   <item>ドラッグ中は VM の矩形状態（<see cref="MainViewModel.IsRubberBandVisible"/> ほか）を更新する。
 ///     矩形は DiagramCanvas 内に描画されるため LayoutTransform（ズーム）に透過的に追従する</item>
 ///   <item>解放時、ラバーバンドが成立していれば <see cref="MainViewModel.ApplyRubberBandSelection"/> で

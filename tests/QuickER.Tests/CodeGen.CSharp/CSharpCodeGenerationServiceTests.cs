@@ -1700,7 +1700,7 @@ public class CSharpCodeGenerationServiceTests
             );
         content.Should().Contain("[typeof(decimal)] = Getter(nameof(DbDataReader.GetDecimal)),");
 
-        // 分岐 1: 非 VO プロパティ×対応型は従来どおり typed getter 直読み
+        // 分岐 1: 非 VO プロパティ×対応型は typed getter 直読み
         content.Should().Contain("if (_typedReaders.TryGetValue(underlying, out var getter))");
         content
             .Should()
@@ -2223,7 +2223,7 @@ public class CSharpCodeGenerationServiceTests
             );
     }
 
-    /// <summary>rowversion 列が 1 本だけの図は従来どおり生成できることを検証する（診断の対照）</summary>
+    /// <summary>rowversion 列が 1 本だけの図は生成できることを検証する（診断の対照）</summary>
     [Fact]
     public void Generate_SingleRowVersionColumn_ShouldSucceed()
     {
@@ -2321,7 +2321,7 @@ public class CSharpCodeGenerationServiceTests
     }
 
     /// <summary>
-    /// 対照: 主キーでない rowversion 列は従来どおり生成できる（診断は主キーとの組合せだけを止める）
+    /// 対照: 主キーでない rowversion 列は生成できる（診断は主キーとの組合せだけを止める）
     /// </summary>
     [Fact]
     public void Generate_NonPrimaryKeyRowVersionColumn_ShouldSucceed()
@@ -2393,7 +2393,7 @@ public class CSharpCodeGenerationServiceTests
     }
 
     /// <summary>
-    /// 対照: 主キーでない無制限バイナリ列は除外が有効でも従来どおり生成できる（診断は主キーとの組合せだけを止める）
+    /// 対照: 主キーでない無制限バイナリ列は除外が有効でも生成できる（診断は主キーとの組合せだけを止める）
     /// </summary>
     [Fact]
     public void Generate_NonPrimaryKeyUnboundedBinaryColumn_WithExclusion_ShouldSucceed()
@@ -5440,7 +5440,7 @@ public class CSharpCodeGenerationServiceTests
     }
 
     /// <summary>
-    /// リモート契約 OFF（既定）のとき、Stream アクセサは従来どおり全機能面（<c>I{Entity}Repository</c>）へ直接載り、
+    /// リモート契約 OFF（既定）のとき、Stream アクセサは全機能面（<c>I{Entity}Repository</c>）へ直接載り、
     /// ファイル糖衣も全機能面を対象にする（リモート面インターフェイス自体が生成されないため）。
     /// </summary>
     [Fact(DisplayName = "Stream アクセサ: リモート契約 OFF では全機能面へ直載せ")]

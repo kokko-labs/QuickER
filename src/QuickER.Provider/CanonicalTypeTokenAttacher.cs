@@ -78,8 +78,7 @@ public static class CanonicalTypeTokenAttacher
             }
 
             // 差分（トークン）だけを with 式で載せ替える。全項目を列挙して new し直すと、プロパティが増えたときの
-            // 写し漏れがコンパイルを通ってしまう（同じ書き方をしていた [SqlColumnType] 補完側では、実際に
-            // CanonicalTypeToken が写されず属性が黙って消えていた）
+            // 写し漏れがコンパイルを通ってしまい、写されなかった項目に対応する属性が黙って消える
             result[columnId] = typeInfo with
             {
                 CanonicalTypeToken = token,

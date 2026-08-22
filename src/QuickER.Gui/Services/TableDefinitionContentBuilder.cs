@@ -43,7 +43,7 @@ internal static class TableDefinitionContentBuilder
     /// <summary>リレーション一覧シートの参照元列・参照先列セルの表記（カンマ区切りの列名）を返す</summary>
     /// <remarks>
     /// 1 行 1 リレーションを保ったまま複合外部キーを表すため、構成列を宣言順にカンマ区切りで並べる
-    /// （単一列なら従来どおり列名 1 つ）。解決できない参照を含む列ペアは読み飛ばす（DDL 生成と同じ規則）
+    /// （単一列なら列名 1 つ）。解決できない参照を含む列ペアは読み飛ばす（DDL 生成と同じ規則）
     /// </remarks>
     public static (string SourceColumns, string TargetColumns) GetRelationshipColumnTexts(
         Relationship relationship,

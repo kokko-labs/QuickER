@@ -168,7 +168,7 @@ public class QueryDefinitionDialogViewModelTests
 
         // 列参照は Type=null・トークン型付けは Type を保持する
         model.Parameters[^1].Type.Should().BeNull("列参照の型は列由来のため保存しない");
-        model.Parameters[0].Type.Should().Be("int32", "トークン型付けは従来どおり保存する");
+        model.Parameters[0].Type.Should().Be("int32", "トークン型付けは保存する");
         model.Fields[0].Type.Should().BeNull();
         model.Fields[1].Type.Should().Be("decimal(12,2)");
     }

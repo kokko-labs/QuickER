@@ -17,7 +17,7 @@ namespace QuickER.Tests.Gui.Views;
 /// </summary>
 /// <remarks>
 /// 列ペアの編集は「行の並び＝宣言順、候補は他行の未使用列、両側が揃って確定」という束縛の組み合わせで
-/// 成り立っており、VM テストでは束縛そのものを守れない。lessons.md の先例に従い、画面外
+/// 成り立っており、VM テストでは束縛そのものを守れない。画面外
 /// （Left/Top=-4000）・非アクティブで Show した実ウィンドウ上でコンテナを実体化して検証する。
 /// </remarks>
 public class RelationshipColumnPairCardTests
@@ -75,7 +75,7 @@ public class RelationshipColumnPairCardTests
                 );
                 var window = new MainWindow(vm)
                 {
-                    // 画面外・非アクティブで表示する（開発者のデスクトップを妨げない。lessons.md の先例）
+                    // 画面外・非アクティブで表示する（開発者のデスクトップを妨げない）
                     WindowStartupLocation = WindowStartupLocation.Manual,
                     Left = -4000,
                     Top = -4000,

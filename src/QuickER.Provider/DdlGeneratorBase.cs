@@ -150,7 +150,7 @@ public abstract class DdlGeneratorBase : IDdlGenerator
         }
 
         // 全 CREATE TABLE / FK の後に、テーブル・列の説明を方言別の構文で出力する
-        // （説明を持つ図でのみ出力＝説明が無い図では 1 行も出さずバイト不変）
+        // （説明を持つ図でのみ出力＝説明が無い図では 1 行も出さない）
         AppendDescriptions(sb, diagram);
 
         return sb.ToString();
@@ -204,7 +204,7 @@ public abstract class DdlGeneratorBase : IDdlGenerator
     /// テーブルとその列を順に走査し、空白でない説明を持つものだけ <paramref name="tableStatement"/> /
     /// <paramref name="columnStatement"/> で文へ変換して出力する。1 文でも出力する場合のみ、
     /// 直前の CREATE / FK ブロックと視覚的に区切るための空行を 1 行だけ前置する
-    /// （説明を持つ図でのみ出力＝説明が無ければ本メソッドは何も書かずバイト不変を保つ）。
+    /// （説明を持つ図でのみ出力＝説明が無ければ本メソッドは何も書かない）。
     /// </remarks>
     /// <param name="sb">出力先</param>
     /// <param name="diagram">対象の ER 図定義</param>
@@ -217,7 +217,7 @@ public abstract class DdlGeneratorBase : IDdlGenerator
         Func<Entity, Column, string> columnStatement
     )
     {
-        // 先に全説明文を収集し、1 件も無ければ何も出力しない（バイト不変のため）
+        // 先に全説明文を収集し、1 件も無ければ前置の空行ごと何も出力しない
         var statements = new List<string>();
 
         foreach (var entity in diagram.Entities)

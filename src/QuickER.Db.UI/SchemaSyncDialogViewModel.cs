@@ -357,7 +357,7 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
     /// 実行計画の警告（<see cref="SyncPlan.Warnings"/>）を、実行確認へ追記する文言へ整形する。
     /// </summary>
     /// <remarks>
-    /// 警告が無ければ空文字を返す（＝確認文言は従来どおり）。文言は UI 言語追従（resx）で、
+    /// 警告が無ければ空文字を返す（＝確認文言に追記しない）。文言は UI 言語追従（resx）で、
     /// スクリプト内コメント（英語固定）とは別系統である点に注意。
     /// </remarks>
     private string BuildPlanWarningSuffix()

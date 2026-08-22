@@ -549,7 +549,7 @@ public partial class DbConnectionDialogViewModel : ObservableObject
                 && _creationPath is not null
                 && IsSamePath(FilePath, _creationPath);
 
-            // 手入力・「参照」経由・選択後に別パスへ手編集した場合は、従来どおり存在しないファイルを拒否する
+            // 手入力・「参照」経由・選択後に別パスへ手編集した場合は、存在しないファイルを拒否する
             if (!isCreationPath && !File.Exists(FilePath))
             {
                 StatusMessage = Strings.DbConnection_FileNotFound;

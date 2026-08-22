@@ -17,7 +17,7 @@ public sealed class GeneratedFileWriter
     /// <returns>書き出したファイルの絶対パス一覧</returns>
     /// <remarks>
     /// 層別出力（<see cref="GeneratedFile.RelativeDirectory"/> が非 null）のファイルは、出力ディレクトリ配下の
-    /// 層フォルダ（必要なら作成する）へ書き出す。それ以外は従来どおり出力ディレクトリ直下。
+    /// 層フォルダ（必要なら作成する）へ書き出す。それ以外は出力ディレクトリ直下。
     /// </remarks>
     /// <exception cref="InvalidOperationException">
     /// ファイル名が ".g.cs" または ".g.md" で終わらない場合（手書きファイル保護のため上書きを拒否する）、

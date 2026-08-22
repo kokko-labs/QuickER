@@ -238,7 +238,7 @@ internal sealed partial class CSharpGenerationModelBuilder
     /// 自分自身の除外（主キー不一致の <c>Where</c>）は<b>主キーが null を取り得る型（値オブジェクト・string 等）のとき
     /// 条件付きで足す</b>。挿入前のエンティティは主キー未設定＝除外すべき行が存在しないため、除外条件そのものを
     /// 付けないのが正しい（付けたままだと「NULL との比較」に依存することになる）。非 NULL の値型（int 等）は
-    /// <c>is not null</c> が常に真で警告になるため、従来どおり無条件に連ねる＝そうした図の生成物はバイト不変。
+    /// <c>is not null</c> が常に真で警告になるため、除外条件を無条件に連ねる。
     /// </para>
     /// </remarks>
     /// <param name="ordinal">制約の 1 始まり通し番号（判定結果のローカル名に使う）</param>

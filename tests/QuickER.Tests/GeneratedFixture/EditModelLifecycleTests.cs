@@ -333,7 +333,7 @@ public sealed class EditModelLifecycleTests
         var clear = () => m.ClearDuplicateErrors(undefined);
         clear.Should().Throw<ArgumentOutOfRangeException>();
 
-        // 対照: 定義済みの値は従来どおり自分のスロットだけを扱う
+        // 対照: 定義済みの値は自分のスロットだけを扱う
         m.ClearDuplicateErrors(DuplicateErrorSource.Database);
         m.HasErrors.Should().BeTrue("消したのは Database 枠だけで、兄弟間の所見は残る");
         m.ClearDuplicateErrors(DuplicateErrorSource.Siblings);

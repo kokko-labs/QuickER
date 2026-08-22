@@ -20,18 +20,18 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 
 /// <summary>
 /// リモートサーバーの HTTP 500 応答が、既定では内部例外メッセージを公開せず
-/// （汎用文言＋相関 ID）、<c>exposeErrorDetails: true</c> のときだけ従来どおり透過することを実 HTTP で検証する。
+/// （汎用文言＋相関 ID）、<c>exposeErrorDetails: true</c> のときだけ透過することを実 HTTP で検証する。
 /// </summary>
 /// <remarks>
 /// <para>
 /// 500 の本文は「サーバー内部で何が起きたか」そのもの（テーブル名・列名・接続文字列・ファイルパス）を運びうるため、
 /// 既定は非公開とし、代わりに <c>HttpContext.TraceIdentifier</c> を相関 ID として返す。サーバーログは
-/// 従来どおりスタックトレース込みの完全な詳細を、同じ相関 ID を添えて出す＝利用者はエラー報告の ID と
+/// スタックトレース込みの完全な詳細を、同じ相関 ID を添えて出す＝利用者はエラー報告の ID と
 /// サーバーログを突き合わせられる。ここではその突き合わせが実際に成立することまで（テスト用ロガーで捕捉して）固定する。
 /// </para>
 /// <para>
 /// スイッチは 500 経路だけに効く。400（リクエスト解釈の失敗）と 409（楽観排他の競合）は自前の分類文言・
-/// 再取得リトライの材料であって内部情報ではないため、非公開時も従来どおり透過する（テスト 3 が対照）。
+/// 再取得リトライの材料であって内部情報ではないため、非公開時も透過する（テスト 3 が対照）。
 /// </para>
 /// <para>
 /// フィクスチャは BinaryFixture（除外バイナリ列あり＝JSON エンドポイントとバイナリストリーミング
@@ -141,21 +141,21 @@ public sealed class RemoteErrorDetailRuntimeTests : IAsyncLifetime
         response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
 
         var error = await response.Content.ReadFromJsonAsync<RemoteError>(Ct);
-        error!.Type.Should().Be("Error", "500 の種別は従来どおり固定値");
+        error!.Type.Should().Be("Error", "500 の種別は固定値");
         error.Message.Should().Be(GenericMessage, "内部例外メッセージは差し替えられる");
         error
             .Message.Should()
             .NotContain("UNIQUE constraint", "DB のテーブル名・列名を含む文言が漏れない");
         error.CorrelationId.Should().NotBeNullOrEmpty("突き合わせ用の相関 ID が代わりに載る");
 
-        // サーバーログは従来どおり完全な詳細を、同じ相関 ID とともに出す＝報告された ID からログを引ける
+        // サーバーログは完全な詳細を、同じ相関 ID とともに出す＝報告された ID からログを引ける
         var logged = _hiddenLog.Entries.Where(e => e.Contains(error.CorrelationId!)).ToList();
         logged.Should().ContainSingle("相関 ID はサーバーログにも出る");
         logged[0]
             .Should()
             .Contain("UNIQUE constraint", "サーバー側は非公開時も完全な詳細を記録する");
 
-        // 生成クライアント経由でも同じ（型は従来どおり RemoteRepositoryException のまま）
+        // 生成クライアント経由でも同じ（型は RemoteRepositoryException のまま）
         await HiddenDocuments.InsertAsync(new DocumentEntity { DocumentId = 2, Title = "b" }, Ct);
 
         var act = () =>
@@ -167,8 +167,8 @@ public sealed class RemoteErrorDetailRuntimeTests : IAsyncLifetime
         thrown.CorrelationId.Should().NotBeNullOrEmpty("相関 ID は例外プロパティとして復元される");
     }
 
-    /// <summary>2. exposeErrorDetails: true では従来どおりメッセージが透過し、相関 ID は載らない</summary>
-    [Fact(DisplayName = "[RemoteErrorDetail] 2: exposeErrorDetails: true では従来どおり透過する")]
+    /// <summary>2. exposeErrorDetails: true ではメッセージが透過し、相関 ID は載らない</summary>
+    [Fact(DisplayName = "[RemoteErrorDetail] 2: exposeErrorDetails: true では透過する")]
     public async Task ExposeErrorDetails_PassesTheMessageThrough()
     {
         using var response = await PostDuplicateInsertAsync(_exposed!.BaseUrl);
@@ -197,7 +197,7 @@ public sealed class RemoteErrorDetailRuntimeTests : IAsyncLifetime
     }
 
     /// <summary>
-    /// 3. 対照: 非公開設定でも 400 の分類文言と 409 の構造化材料（Reason / EntityType / Key）は従来どおり透過する
+    /// 3. 対照: 非公開設定でも 400 の分類文言と 409 の構造化材料（Reason / EntityType / Key）は透過する
     /// （どちらも自前の文言・再取得リトライの契約であって内部情報ではないため）。
     /// </summary>
     [Fact(DisplayName = "[RemoteErrorDetail] 3: 非公開でも 400 の文言と 409 の内訳は透過する")]
@@ -236,7 +236,7 @@ public sealed class RemoteErrorDetailRuntimeTests : IAsyncLifetime
 
     /// <summary>
     /// 4. 旧ボディ互換: 相関 ID を持たない 500 の <c>RemoteError</c> JSON を、クライアントは
-    /// <c>CorrelationId = null</c> へ安全に退化させて復元する（メッセージ・型・ステータスは従来どおり）。
+    /// <c>CorrelationId = null</c> へ安全に退化させて復元する（メッセージ・型・ステータスは保たれる）。
     /// </summary>
     [Fact(
         DisplayName = "[RemoteErrorDetail] 4: 相関 ID のない旧ボディは null へ退化して復元される"
@@ -273,7 +273,7 @@ public sealed class RemoteErrorDetailRuntimeTests : IAsyncLifetime
 
         var thrown = (await act.Should().ThrowAsync<RemoteRepositoryException>()).Which;
         thrown.StatusCode.Should().Be(500);
-        thrown.Message.Should().Be("legacy boom", "メッセージの復元は従来どおり");
+        thrown.Message.Should().Be("legacy boom", "メッセージは元の本文のまま復元される");
         thrown.CorrelationId.Should().BeNull("相関 ID のない旧ボディは null へ退化する");
     }
 

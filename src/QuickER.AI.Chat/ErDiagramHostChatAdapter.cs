@@ -58,7 +58,7 @@ public sealed class ErDiagramHostChatAdapter : IErDiagramChatHost
         public (string Result, bool Success) Execute(string toolName, string argumentsJson)
         {
             // 名前付きクエリツールは共有コアで処理し、成功時のみホストの Queries へ書き戻す（＝全か無か）。
-            // それ以外は従来どおりホストの ExecuteTool（VM 操作）へ委譲する。
+            // それ以外はホストの ExecuteTool（VM 操作）へ委譲する。
             return toolName switch
             {
                 QueryToolCore.SetQueryToolName => ExecuteSetQuery(argumentsJson),

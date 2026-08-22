@@ -46,7 +46,7 @@ internal static class GenerationConfigLoader
     /// <see cref="CodeGenerationOptions.RepositoryDialects"/> 未指定なら <paramref name="provider"/> の名前
     /// （図の TargetDbms から導出）を単一要素で設定する。(2) 出力先の橋渡し＝設定 JSON に <c>OutputPath</c> があり
     /// <c>OutputFileName</c> が無ければ、<c>Path.GetFileName(OutputPath)</c>（非空のとき）を <c>OutputFileName</c> へ導出する
-    /// （コアは従来どおり出力ファイル名のみを扱うため）。<c>--output-path</c> フラグ自体の設定 JSON への反映は
+    /// （コアは出力ファイル名のみを扱うため）。<c>--output-path</c> フラグ自体の設定 JSON への反映は
     /// 表駆動の <see cref="GenerationOptionSet.ApplyOverrides"/> が担う。
     /// </para>
     /// <para>

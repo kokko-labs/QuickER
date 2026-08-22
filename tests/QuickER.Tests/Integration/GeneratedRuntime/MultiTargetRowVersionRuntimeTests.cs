@@ -15,7 +15,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// </summary>
 /// <remarks>
 /// <para>
-/// 守るのは 2 点。(1) マルチターゲットにしても SQL Server 側の版ガードは従来どおり効く
+/// 守るのは 2 点。(1) マルチターゲットにしても SQL Server 側の版ガードは効く
 /// （<c>row_ver</c> は DB 採番・INSERT / UPDATE から除外・古い版での更新は <see cref="SaveConflictException"/>）。
 /// (2) その版をローカル SQLite の同じ列へ格納して読み戻せる（同期の最小形）。
 /// </para>

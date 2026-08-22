@@ -114,7 +114,7 @@ public sealed record CodeGenerationOptions
     /// <para>
     /// <c>true</c> のとき、ネットワーク境界を越えられる操作（CRUD・保存・名前付きクエリ）だけを持つ
     /// <c>I{Entity}RemoteRepository</c>（<see cref="IRemoteRepository{TEntity, TKey}"/> 相当の基底を継承）を追加生成し、
-    /// 既存の <c>I{Entity}Repository</c> はそれを継承する全機能面（従来どおり <c>Query()</c>・生 SQL・一括追加も持つ）になる。
+    /// 既存の <c>I{Entity}Repository</c> はそれを継承する全機能面（<c>Query()</c>・生 SQL・一括追加も持つ）になる。
     /// 純粋に追加的な変更のため、ON にしても既存の利用コードは一切壊れない。
     /// </para>
     /// <para>
@@ -234,9 +234,10 @@ public sealed record CodeGenerationOptions
     /// API リファレンス Markdown（.g.md）はどの csproj にも属さないため出力ディレクトリ直下のまま。
     /// </para>
     /// <para>
-    /// 層分けはファイル配置だけを変え、生成テキスト（ファイル名・名前空間・内容）は <see cref="SplitFilesByCategory"/> 単独時と
-    /// バイト一致する（名前空間の既定導出も従来のまま＝層名は名前空間に入らない。層名を反映したければ
-    /// <see cref="EntityNamespace"/> 等の既存オプションで指定する）。
+    /// 名前空間の既定も層フォルダへ追従する（層ルート＝フォルダパスの <c>/</c> を <c>.</c> へ変換した値。
+    /// 例 <c>MyApp.Domain/Generated</c> なら Entity は <c>MyApp.Domain.Generated.Entities</c>）。
+    /// <see cref="EntityNamespace"/> 等の明示指定があればそちらが優先される。層分けの ON/OFF で変わるのは
+    /// ファイル配置と名前空間宣言・using 行だけで、それ以外の生成テキストは <see cref="SplitFilesByCategory"/> 単独時と一致する。
     /// </para>
     /// </remarks>
     public bool LayeredOutput { get; init; }
@@ -284,7 +285,7 @@ public sealed record CodeGenerationOptions
     /// 方言 Repository 基底・式木翻訳・実行器・接続ファクトリ等）を出力せず、生成コードは
     /// <see cref="RuntimePackages.Core"/> / <see cref="RuntimePackages.SqlServer"/> / <see cref="RuntimePackages.Sqlite"/> /
     /// <see cref="RuntimePackages.EntityFrameworkCore"/> の型を <c>using</c> で参照する。スキーマ依存物
-    /// （Entity / EditModel / Mapper / VO 具象 / I{Entity}Repository / エンティティ別実装 / DI 登録）は従来どおり出力する。
+    /// （Entity / EditModel / Mapper / VO 具象 / I{Entity}Repository / エンティティ別実装 / DI 登録）はそのまま出力する。
     /// </para>
     /// <para>
     /// 分割時（<see cref="SplitFilesByCategory"/>）の共有基盤名前空間 <see cref="RuntimeNamespace"/> は本モードでは無視される
@@ -337,7 +338,7 @@ public sealed record CodeGenerationOptions
     /// <remarks>
     /// <see cref="GenerateApiDocs"/> が ON のときだけ意味を持つ。複数階層（<c>docs/api</c>）可で、
     /// 絶対パス・ドライブ指定・<c>..</c> は生成時診断エラー（層フォルダと同じ規則＝<see cref="LayerDirectoryValidator"/> を共有）。
-    /// 層別出力（<see cref="LayeredOutput"/>）に依らず全出力モードで有効（既定の直下配置は従来どおり）。
+    /// 層別出力（<see cref="LayeredOutput"/>）に依らず全出力モードで有効（既定は出力ディレクトリ直下）。
     /// ドキュメントはどの csproj にも属さないため、層フォルダへの自動振り分け対象にはしない＝置き場は本オプションだけが決める。
     /// </remarks>
     public string? ApiDocsDirectory { get; init; }
@@ -347,7 +348,7 @@ public sealed record CodeGenerationOptions
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <see cref="GenerateApiDocs"/> が ON のときだけ意味を持つ。空白なら従来どおり導出する
+    /// <see cref="GenerateApiDocs"/> が ON のときだけ意味を持つ。空白なら既定の規則で導出する
     /// （非分割＝<see cref="OutputFileName"/> のベース名 + <c>.g.md</c>／分割＝固定名 <c>ApiDocs.g.md</c>）。
     /// 指定した場合は出力モードに依らずその名前が勝ち、日本語版（<see cref="IncludeJapaneseApiDocs"/>）は
     /// そのベース名 + <c>.ja.g.md</c> になる。

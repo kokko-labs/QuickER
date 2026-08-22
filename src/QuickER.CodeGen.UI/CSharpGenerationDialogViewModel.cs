@@ -1059,7 +1059,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
         foreach (var spec in GeneratedFilePlanner.Plan(ToOptions()))
         {
             // 層別出力では出力先が層フォルダ配下へ変わるため、相対フォルダを付けて配置まで見せる
-            // （層別でないスペックは RelativeDirectory が null＝従来どおりファイル名だけ）
+            // （層別でないスペックは RelativeDirectory が null＝ファイル名だけ）
             var displayPath = string.IsNullOrWhiteSpace(spec.RelativeDirectory)
                 ? spec.FileName
                 : $"{spec.RelativeDirectory}/{spec.FileName}";
@@ -1073,7 +1073,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     /// 分割モードでフォルダを選んだときは、そのフォルダから名前空間の候補を導出し、確認ダイアログで
     /// 承諾された場合のみ <see cref="RootNamespace"/> を書き換える（既定パターンのままの子カテゴリ別
     /// namespace は <see cref="FollowRootNamespace"/> の連動で自動追従する）。
-    /// キャンセル・候補が現在値と同一・導出不能のいずれでも namespace は触らず、フォルダパスの反映のみ従来どおり行う
+    /// キャンセル・候補が現在値と同一・導出不能のいずれでも namespace は触らず、フォルダパスの反映だけを行う
     /// </remarks>
     [RelayCommand]
     private void BrowseOutput()

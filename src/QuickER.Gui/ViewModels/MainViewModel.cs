@@ -507,7 +507,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// （位置・色・幅）を引き継ぎ自動整列しない。新規エンティティは幅を自動調整したうえで、一致分を固定群として
     /// 空き領域へ追記配置する（<see cref="AutoLayoutService.LayoutAppend"/>＝一致分は不動・新規のみ配置）。
     /// クエリ（<see cref="ErDiagram.Queries"/>）はそのまま引き継ぐ</item>
-    /// <item>一致が 1 件も無ければ（＝AI 生成・全新規取込）: 従来どおり全体を自動整列する。クエリは空でも
+    /// <item>一致が 1 件も無ければ（＝AI 生成・全新規取込）: 全体を自動整列する。クエリは空でも
     /// 与えられていれば引き継ぐ（新規 Guid のみの経路では通常空）</item>
     /// </list>
     /// いずれも画面フィット要求までを含む。マージ照合（Id 書換え）自体は呼び出し側（DB 取込・Excel 取込）の責務。
@@ -523,7 +523,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             .Where(currentIds.Contains)
             .ToHashSet();
 
-        // 一致が 1 件も無ければ従来どおり全体自動整列（AI 生成・全新規取込の互換維持）
+        // 一致が 1 件も無ければ全体自動整列（AI 生成・全新規取込）
         if (matchedIds.Count == 0)
         {
             ReplaceDiagramWithoutHistory(

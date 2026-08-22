@@ -21,7 +21,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// 受け取り、DI 登録がそれを渡す形にしたことで、登録した実装が生 SQL 経路にも効く。
 /// </para>
 /// <para>
-/// 手で <c>new</c> するコード（引数省略）は従来どおり既定実装を組むため、既存の呼び出しは無変更で動く。
+/// 手で <c>new</c> するコード（引数省略）は既定実装を組むため、既存の呼び出しは無変更で動く。
 /// </para>
 /// </remarks>
 [Trait("Category", "Integration")]
@@ -120,9 +120,7 @@ public sealed class SqlExecutorInjectionRuntimeTests : IDisposable
             .Be("SELECT * FROM \"customers\"", "リポジトリは登録済みの実装へ委譲する");
     }
 
-    [Fact(
-        DisplayName = "[SQLite] 手で new したリポジトリは従来どおり既定の SqlExecutor を組む（互換）"
-    )]
+    [Fact(DisplayName = "[SQLite] 手で new したリポジトリは既定の SqlExecutor を組む（互換）")]
     public async Task Repository_ConstructedByHand_StillWorksWithoutExecutor()
     {
         await _db.ResetSchemaAsync(Ct);

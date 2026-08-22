@@ -148,7 +148,7 @@ public sealed class CSharpGenerationCommandService
             }
 
             // 詳細（診断一覧・PackageReference 案内）がある場合はコピー可能な専用ダイアログで提示し、
-            // 詳細が無い（診断ゼロかつパッケージ案内なし）場合は従来どおり単文の完了通知で知らせる
+            // 詳細が無い（診断ゼロかつパッケージ案内なし）場合は単文の完了通知で知らせる
             // （単文の完了通知に大型ダイアログは出さない）。
             if (detailSections.Count > 0)
             {

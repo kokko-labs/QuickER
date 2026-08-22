@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Linq;
 using AwesomeAssertions;
 using QuickER.CodeGen.CSharp;
@@ -226,10 +226,6 @@ public class MainViewModelTargetDbmsTests
         vm.AvailableDataTypes.Should().Contain("int");
         vm.CurrentProvider.Name.Should().Be("sqlserver");
     }
-
-    // DB 同期コマンドの実行可否・ツールチップ切替の検証は、DB ツールが
-    // フィーチャーモジュール（QuickER.Db.UI）へ移設されたため
-    // DbSyncCommandServiceTests / DbToolsFeatureModuleTests へ移した。
 
     /// <summary>Undo 可能件数を数える（履歴に積まれたか判定用）</summary>
     private static int CountUndoable(MainViewModel vm)

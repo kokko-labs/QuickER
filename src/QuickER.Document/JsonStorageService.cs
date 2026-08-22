@@ -87,7 +87,7 @@ public static class JsonStorageService
     /// 方針は「修復であって拒否ではない」。<c>System.Text.Json</c> の
     /// <c>RespectNullableAnnotations</c> による例外化は、キー欠落・古い形式もそのまま読める
     /// という <see cref="Options"/> の互換契約を壊すため採らない。図として妥当かどうか
-    /// （無関係な JSON でないか）の判断は、従来どおり呼び出し側の事前検証の責務とする。
+    /// （無関係な JSON でないか）の判断は、呼び出し側の事前検証の責務とする。
     /// </para>
     /// </remarks>
     private static DiagramDocument Normalize(DiagramDocument document)

@@ -29,7 +29,7 @@ internal enum ApiDocLanguage
 /// resx から <b>明示カルチャ</b>で解決する（<see cref="CultureInfo.CurrentUICulture"/> や静的 <c>Strings.Culture</c> には依存しない）。
 /// </para>
 /// <para>
-/// 出力に生成日時・環境依存値などの非決定的要素は一切含めない（後 Stage でバイト一致のドリフト検証を追加するため）。
+/// 出力に生成日時・環境依存値などの非決定的要素は一切含めない（同一入力に対して常にバイト一致し、ドリフト検証が成立する）。
 /// 改行は <see cref="Environment.NewLine"/> へ正規化する。
 /// </para>
 /// </remarks>

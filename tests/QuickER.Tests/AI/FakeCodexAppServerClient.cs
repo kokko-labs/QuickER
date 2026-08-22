@@ -41,7 +41,7 @@ internal sealed class FakeCodexAppServerClient : ICodexAppServerClient
 
     /// <summary>
     /// 非空なら StartTurnAsync がターン開始と同時に completed/failed 通知を自動発火する（先頭から 1 件ずつ消費）。
-    /// 多ターンをレース無く駆動するためのフック（空なら従来どおりテストが手動で RaiseTurnCompleted する）。
+    /// 多ターンをレース無く駆動するためのフック（空ならテストが手動で RaiseTurnCompleted する）。
     /// </summary>
     public Queue<(string Status, string? Error)> AutoTurnCompletions { get; } = new();
 

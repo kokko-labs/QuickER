@@ -272,8 +272,8 @@ public class ImageExportServiceTests
             .BeGreaterThanOrEqualTo(relationship.SelfLoopLeft + relationship.SelfLoopWidth);
     }
 
-    /// <summary>通常リレーションの出力（線・スタイル定義）が従来どおり変わらないことを検証する</summary>
-    [Fact(DisplayName = "BuildSvg は通常リレーションを従来どおりの線として出力する")]
+    /// <summary>通常リレーションの出力（線・スタイル定義）が変わらないことを検証する</summary>
+    [Fact(DisplayName = "BuildSvg は通常リレーションを線として出力する")]
     public void BuildSvg_OutputsLine_ForNormalRelationship()
     {
         var vm = CreateViewModelWithTwoEntitiesAndRelationship();
