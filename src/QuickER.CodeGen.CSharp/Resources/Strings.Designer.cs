@@ -180,6 +180,12 @@ namespace QuickER.CodeGen.CSharp.Resources {
             }
         }
 
+        public static string CodeGen_Error_InvalidApiDocsFileName {
+            get {
+                return ResourceManager.GetString("CodeGen_Error_InvalidApiDocsFileName", resourceCulture);
+            }
+        }
+
         public static string CodeGen_Error_LayerDirectoryOutsideOutput {
             get {
                 return ResourceManager.GetString("CodeGen_Error_LayerDirectoryOutsideOutput", resourceCulture);

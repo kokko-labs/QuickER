@@ -121,6 +121,9 @@
   <data name="CodeGen_Error_InvalidLayerDirectory" xml:space="preserve">
     <value>The '{0}' option has an invalid output subfolder: '{1}'. Specify a relative path inside the output directory (absolute paths, drive letters, '..', and characters not allowed in file names are rejected).</value>
   </data>
+  <data name="CodeGen_Error_InvalidApiDocsFileName" xml:space="preserve">
+    <value>The 'ApiDocsFileName' option has an invalid file name: '{0}'. Specify a file name only (path separators, drive letters, and characters not allowed in file names are rejected); use 'ApiDocsDirectory' to choose the folder.</value>
+  </data>
   <data name="CodeGen_Error_LayerDirectoryOutsideOutput" xml:space="preserve">
     <value>Refusing to write outside the output directory: the subfolder '{0}' is not a valid relative path.</value>
   </data>

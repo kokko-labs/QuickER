@@ -292,6 +292,41 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     private string _apiDocsDirectory = string.Empty;
 
     /// <summary>
+    /// API リファレンス Markdown の出力ファイル名（空＝導出名を使う）。
+    /// </summary>
+    /// <remarks>
+    /// 既定はプリフィルせず空のままにする（実名を焼き付けると、その後に出力ファイル名や出力モードを変えても
+    /// ドキュメント名だけ古い名前で固定されるため）。空欄のときに使われる名前は
+    /// <see cref="ApiDocsFileNameHint"/> がプレースホルダとして見せる
+    /// </remarks>
+    [ObservableProperty]
+    private string _apiDocsFileName = string.Empty;
+
+    /// <summary>出力ファイル名欄が空のとき、実際に使われる導出名をプレースホルダとして見せるか</summary>
+    public bool ShowApiDocsFileNameHint => string.IsNullOrWhiteSpace(ApiDocsFileName);
+
+    /// <summary>
+    /// 出力ファイル名を指定しなかったときに使われるファイル名（プレースホルダ表示用）
+    /// </summary>
+    /// <remarks>
+    /// 導出は生成本体と同じ経路（<see cref="CSharpCodeGenerationService.ResolveApiDocsFileName"/>）へ委ね、
+    /// 明示指定を外したオプションを渡して「空欄なら何になるか」を求める（表示と実出力がずれない）。
+    /// 出力ファイル名・出力モードの変更に追従する（<see cref="RaiseDerivedChanged"/> と
+    /// <see cref="OnOutputPathChanged"/> が通知する）
+    /// </remarks>
+    public string ApiDocsFileNameHint =>
+        CSharpCodeGenerationService.ResolveApiDocsFileName(
+            ToOptions() with
+            {
+                ApiDocsFileName = null,
+            }
+        );
+
+    /// <summary>出力ファイル名欄の入力有無でプレースホルダの表示が切り替わる</summary>
+    partial void OnApiDocsFileNameChanged(string value) =>
+        OnPropertyChanged(nameof(ShowApiDocsFileNameHint));
+
+    /// <summary>
     /// データアノテーション属性（[Table] / [Key] / [Column] 等）を付与するかどうか（UI 非表示。既定 true）。
     /// </summary>
     /// <remarks>
@@ -576,7 +611,12 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
 
     partial void OnValueObjectNamespaceChanged(string value) => RefreshPreview();
 
-    partial void OnOutputPathChanged(string value) => RefreshPreview();
+    partial void OnOutputPathChanged(string value)
+    {
+        // 非分割時の API リファレンス既定名は出力ファイル名から導出されるため、プレースホルダを追従させる
+        OnPropertyChanged(nameof(ApiDocsFileNameHint));
+        RefreshPreview();
+    }
 
     /// <summary>ルート名前空間が変わったら、既定（{旧root}.{接尾辞}）のままの子名前空間を新ルートへ追従させる</summary>
     partial void OnRootNamespaceChanged(string? oldValue, string newValue)
@@ -607,6 +647,8 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
         // 層フォルダの欄は層別出力の ON/OFF に、サーバー層はさらにリモートサービス生成に連動する
         OnPropertyChanged(nameof(ShowLayerDirectories));
         OnPropertyChanged(nameof(ShowServerLayerDirectory));
+        // API リファレンスの既定ファイル名は出力モード（分割／非分割）で変わるため、プレースホルダを追従させる
+        OnPropertyChanged(nameof(ApiDocsFileNameHint));
         RefreshPreview();
     }
 
@@ -819,6 +861,8 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             IncludeJapaneseApiDocs = settings.GenerateApiDocs && settings.IncludeJapaneseApiDocs;
             // API リファレンスの出力先サブフォルダは保存値をそのまま復元する（空＝直下が既定・プリフィルなし）
             ApiDocsDirectory = settings.ApiDocsDirectory;
+            // 出力ファイル名も同様に保存値をそのまま復元する（空＝導出名。プレースホルダで既定名を見せる）
+            ApiDocsFileName = settings.ApiDocsFileName;
             // 無制限バイナリ列の除外はQuickER 版 Repository 選択時のみ効くが、値は保存値のまま復元する（行の表示/非表示は UI 側で連動）
             ExcludeUnboundedBinaryColumns = settings.ExcludeUnboundedBinaryColumns;
             GenerateValueObjects = settings.GenerateValueObjects;
@@ -957,6 +1001,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             GenerateApiDocs = GenerateApiDocs,
             IncludeJapaneseApiDocs = IncludeJapaneseApiDocs,
             ApiDocsDirectory = ApiDocsDirectory.Trim(),
+            ApiDocsFileName = ApiDocsFileName.Trim(),
             ExcludeUnboundedBinaryColumns = ExcludeUnboundedBinaryColumns,
             GenerateValueObjects = GenerateValueObjects,
             UseGuidKeyForStringPrimaryKey = UseGuidKeyForStringPrimaryKey,

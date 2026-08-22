@@ -647,6 +647,7 @@ public sealed class CSharpCodeGenerationService
         ValidateNamespaces(options, diagnostics);
         ValidateLayerDirectories(options, diagnostics);
         ValidateApiDocsDirectory(options, diagnostics);
+        ValidateApiDocsFileName(options, diagnostics);
 
         if (diagram.Entities.Count == 0)
         {
@@ -1185,6 +1186,62 @@ public sealed class CSharpCodeGenerationService
     }
 
     /// <summary>
+    /// API リファレンスの出力ファイル名（<see cref="CodeGenerationOptions.ApiDocsFileName"/>）を検証する
+    /// </summary>
+    /// <remarks>
+    /// 許すのは「ディレクトリ要素を含まない単一のファイル名」だけ（置き場を決めるのは
+    /// <see cref="CodeGenerationOptions.ApiDocsDirectory"/> の役割）。<see cref="GeneratedFileWriter"/> は
+    /// <c>Path.GetFileName</c> でディレクトリ要素を落とすため、診断がないとパス付きの指定が黙って別の場所へ
+    /// 落ちるのでなく黙って無視される＝指定と結果が食い違う。空白は既定（導出）のため対象外。
+    /// </remarks>
+    private static void ValidateApiDocsFileName(
+        CodeGenerationOptions options,
+        ICollection<GenerationDiagnostic> diagnostics
+    )
+    {
+        if (
+            options.GenerateApiDocs
+            && !string.IsNullOrWhiteSpace(options.ApiDocsFileName)
+            && !IsValidApiDocsFileName(options.ApiDocsFileName)
+        )
+        {
+            diagnostics.Add(
+                GenerationDiagnostic.Error(
+                    string.Format(
+                        Strings.CodeGen_Error_InvalidApiDocsFileName,
+                        options.ApiDocsFileName.Trim()
+                    )
+                )
+            );
+        }
+    }
+
+    /// <summary>
+    /// API リファレンスの出力ファイル名として妥当か（単一のファイル名で、ベース名が空でないか）を判定する
+    /// </summary>
+    /// <remarks>
+    /// パス区切りとドライブ指定は <see cref="LayerDirectoryValidator"/> と同じ理由で明示的に拒否する
+    /// （<c>Path.GetInvalidFileNameChars</c> は Windows 以外では区切り文字を含まない）。
+    /// </remarks>
+    private static bool IsValidApiDocsFileName(string value)
+    {
+        var trimmed = value.Trim();
+
+        if (trimmed.Contains('/') || trimmed.Contains('\\') || trimmed.Contains(':'))
+        {
+            return false;
+        }
+
+        if (trimmed.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+        {
+            return false;
+        }
+
+        // 拡張子だけの指定（".g.md" 等）はベース名が空＝隠しファイルになるため拒否する
+        return StripApiDocsSuffix(trimmed).Length > 0;
+    }
+
+    /// <summary>
     /// 層別出力時、その層で「フォルダ由来の名前空間導出」が実際に使われるかを判定する
     /// </summary>
     /// <remarks>
@@ -1271,51 +1328,100 @@ public sealed class CSharpCodeGenerationService
             : Path.GetFileNameWithoutExtension(value) + GeneratedFilePlanner.GeneratedCSharpSuffix;
     }
 
-    /// <summary>分割出力時の API リファレンス Markdown の固定ファイル名（カテゴリ別固定名の流儀に合わせる）</summary>
-    private const string SplitApiDocsFileName = "ApiDocs.g.md";
+    /// <summary>分割出力時の API リファレンス Markdown の固定ベース名（カテゴリ別固定名の流儀に合わせる）</summary>
+    private const string SplitApiDocsBaseName = "ApiDocs";
 
-    /// <summary>分割出力時の日本語版 API リファレンス Markdown の固定ファイル名</summary>
-    private const string SplitJapaneseApiDocsFileName = "ApiDocs.ja.g.md";
+    /// <summary>
+    /// 現在のオプションで実際に出力される API リファレンス Markdown（英語版）のファイル名を返す。
+    /// </summary>
+    /// <remarks>
+    /// GUI が「未指定のときに使われる既定名」をプレースホルダとして見せるための公開口。
+    /// 生成本体と同じ導出（<see cref="ApiDocsFileName"/>）を通すため、表示と実出力がずれない。
+    /// </remarks>
+    public static string ResolveApiDocsFileName(CodeGenerationOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        return ApiDocsFileName(options);
+    }
+
+    /// <summary>API リファレンス Markdown の拡張子サフィックス（英語版）</summary>
+    private const string ApiDocsSuffix = ".g.md";
+
+    /// <summary>API リファレンス Markdown の拡張子サフィックス（日本語版）</summary>
+    private const string JapaneseApiDocsSuffix = ".ja.g.md";
 
     /// <summary>
     /// API リファレンス Markdown の出力ファイル名を導出する。
     /// </summary>
     /// <remarks>
-    /// 非分割時は <see cref="SanitizeFileName"/> で ".g.cs" に正規化した <see cref="CodeGenerationOptions.OutputFileName"/> の
+    /// <see cref="CodeGenerationOptions.ApiDocsFileName"/> の指定があればそれ（拡張子は ".g.md" へ正規化）を
+    /// 出力モードに依らず優先する。空白なら従来どおりの導出で、非分割時は <see cref="SanitizeFileName"/> で
+    /// ".g.cs" に正規化した <see cref="CodeGenerationOptions.OutputFileName"/> の
     /// 末尾を ".g.md" に置換する（例: <c>EcOrder.g.cs</c> → <c>EcOrder.g.md</c>＝生成コードと同じベース名・拡張子で
     /// ドキュメントと判別する）。分割時（<see cref="CodeGenerationOptions.SplitFilesByCategory"/>）は <c>Entities.g.cs</c> 等の
     /// カテゴリ別固定名と同じ流儀の固定名 <c>ApiDocs.g.md</c> にする（分割時の OutputFileName は .cs / .md とも出力名に
     /// 関与しない＝GUI / CLI で仕様が揃う）。<see cref="GeneratedFileWriter"/> は ".g.md" 末尾の書き出しを許可する
     /// （手書きファイルの保護は維持する）。
     /// </remarks>
-    private static string ApiDocsFileName(CodeGenerationOptions options)
-    {
-        if (options.EffectiveSplitFilesByCategory)
-        {
-            return SplitApiDocsFileName;
-        }
-
-        var normalized = SanitizeFileName(options.OutputFileName);
-        return GeneratedFilePlanner.StripGeneratedCSharpSuffix(normalized) + ".g.md";
-    }
+    private static string ApiDocsFileName(CodeGenerationOptions options) =>
+        ApiDocsBaseName(options) + ApiDocsSuffix;
 
     /// <summary>
     /// 日本語版 API リファレンス Markdown の出力ファイル名を導出する。
     /// </summary>
     /// <remarks>
-    /// <see cref="ApiDocsFileName"/> の英語版（<c>.g.md</c>）に対し、日本語版は <c>.ja.g.md</c> を付す
-    /// （非分割時の例: <c>EcOrder.g.cs</c> → <c>EcOrder.ja.g.md</c>・分割時は固定名 <c>ApiDocs.ja.g.md</c>）。
+    /// <see cref="ApiDocsFileName"/> の英語版（<c>.g.md</c>）に対し、日本語版は同じベース名へ <c>.ja.g.md</c> を付す
+    /// （非分割時の例: <c>EcOrder.g.cs</c> → <c>EcOrder.ja.g.md</c>・分割時は固定名 <c>ApiDocs.ja.g.md</c>・
+    /// <see cref="CodeGenerationOptions.ApiDocsFileName"/> 指定時はその指定名のベース名）。
     /// <c>.g.md</c> で終わるため <see cref="GeneratedFileWriter"/> の書き出しガードも従来どおり通る。
     /// </remarks>
-    private static string JapaneseApiDocsFileName(CodeGenerationOptions options)
+    private static string JapaneseApiDocsFileName(CodeGenerationOptions options) =>
+        ApiDocsBaseName(options) + JapaneseApiDocsSuffix;
+
+    /// <summary>
+    /// API リファレンス Markdown のベース名（拡張子を除いた部分）を決める。
+    /// </summary>
+    /// <remarks>
+    /// 明示指定（<see cref="CodeGenerationOptions.ApiDocsFileName"/>）があればそのベース名を出力モードに依らず使い、
+    /// 空白なら「分割＝固定名 <c>ApiDocs</c>／非分割＝出力ファイル名のベース名」へフォールバックする。
+    /// 英語版・日本語版はここで決まる同じベース名に拡張子だけを付け替える（両者の名前がずれない唯一の正）。
+    /// </remarks>
+    private static string ApiDocsBaseName(CodeGenerationOptions options)
     {
-        if (options.EffectiveSplitFilesByCategory)
+        if (!string.IsNullOrWhiteSpace(options.ApiDocsFileName))
         {
-            return SplitJapaneseApiDocsFileName;
+            return StripApiDocsSuffix(options.ApiDocsFileName.Trim());
         }
 
-        var normalized = SanitizeFileName(options.OutputFileName);
-        return GeneratedFilePlanner.StripGeneratedCSharpSuffix(normalized) + ".ja.g.md";
+        if (options.EffectiveSplitFilesByCategory)
+        {
+            return SplitApiDocsBaseName;
+        }
+
+        return GeneratedFilePlanner.StripGeneratedCSharpSuffix(
+            SanitizeFileName(options.OutputFileName)
+        );
+    }
+
+    /// <summary>
+    /// API リファレンスの出力ファイル名指定から、拡張子を除いたベース名を取り出す。
+    /// </summary>
+    /// <remarks>
+    /// 受け付ける表記は <c>EcOrder</c> / <c>EcOrder.md</c> / <c>EcOrder.g.md</c> / <c>EcOrder.g.cs</c> のいずれでも
+    /// ベース名は <c>EcOrder</c>。<c>.g.md</c> ／ <c>.g.cs</c> は 2 段拡張子のため
+    /// <see cref="Path.GetFileNameWithoutExtension(string)"/> だけでは <c>EcOrder.g</c> が残る（先に落とす）。
+    /// </remarks>
+    private static string StripApiDocsSuffix(string fileName)
+    {
+        if (fileName.EndsWith(ApiDocsSuffix, StringComparison.OrdinalIgnoreCase))
+        {
+            return fileName[..^ApiDocsSuffix.Length];
+        }
+
+        var stripped = GeneratedFilePlanner.StripGeneratedCSharpSuffix(fileName);
+        return stripped.Length == fileName.Length
+            ? Path.GetFileNameWithoutExtension(fileName)
+            : stripped;
     }
 
     /// <summary>

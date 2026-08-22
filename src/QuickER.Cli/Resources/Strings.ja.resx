@@ -175,6 +175,9 @@
   <data name="Cli_Opt_ApiDocsDirectory" xml:space="preserve">
     <value>API リファレンス Markdown の出力先サブフォルダ（出力ディレクトリからの相対パス。例: docs・空＝直下。--generate-api-docs が前提。設定ファイルを上書き）</value>
   </data>
+  <data name="Cli_Opt_ApiDocsFileName" xml:space="preserve">
+    <value>API リファレンス Markdown の出力ファイル名（拡張子は .g.md へ正規化。日本語版は同じベース名。空＝出力ファイル名から導出・分割時は ApiDocs.g.md。--generate-api-docs が前提。設定ファイルを上書き）</value>
+  </data>
   <data name="Cli_Opt_IncludeDataAnnotations" xml:space="preserve">
     <value>DataAnnotations と DB 定義メタ属性（[Required] / [MaxLength] / [DbTableMeta] 等）を付与する（設定ファイルを上書き）</value>
   </data>

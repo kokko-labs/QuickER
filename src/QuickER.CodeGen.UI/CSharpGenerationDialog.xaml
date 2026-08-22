@@ -137,8 +137,9 @@
                 Text="{x:Static res:Strings.CodeGen_LayerDirectories}"
               />
               <Grid>
+                <!-- ラベル列は最長の「インフラストラクチャー層」（実測 122px・右余白込み）が収まる幅にする（FieldLabel は折返し・省略なし） -->
                 <Grid.ColumnDefinitions>
-                  <ColumnDefinition Width="130" />
+                  <ColumnDefinition Width="150" />
                   <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
                 <Grid.RowDefinitions>
@@ -464,24 +465,58 @@
                     Content="{x:Static res:Strings.CodeGen_IncludeJapaneseApiDocs}"
                     IsChecked="{Binding IncludeJapaneseApiDocs}"
                   />
-                  <!-- API リファレンスの出力先サブフォルダ（空＝出力フォルダ直下） -->
+                  <!-- API リファレンスの出力先サブフォルダ（空＝出力フォルダ直下）と出力ファイル名（空＝導出名） -->
                   <Grid Margin="0,8,0,0">
                     <Grid.ColumnDefinitions>
                       <ColumnDefinition Width="130" />
                       <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                      <RowDefinition Height="Auto" />
+                      <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
                     <TextBlock
+                      Grid.Row="0"
                       Grid.Column="0"
                       VerticalAlignment="Center"
                       Style="{StaticResource FieldLabel}"
                       Text="{x:Static res:Strings.CodeGen_ApiDocsDirectory}"
                     />
                     <TextBox
+                      Grid.Row="0"
                       Grid.Column="1"
                       Style="{StaticResource FormInput}"
                       Text="{Binding ApiDocsDirectory, UpdateSourceTrigger=PropertyChanged}"
                       ToolTip="{x:Static res:Strings.CodeGen_ApiDocsDirectoryToolTip}"
                     />
+
+                    <TextBlock
+                      Grid.Row="1"
+                      Grid.Column="0"
+                      Margin="0,8,8,0"
+                      VerticalAlignment="Center"
+                      Style="{StaticResource FieldLabel}"
+                      Text="{x:Static res:Strings.CodeGen_ApiDocsFileName}"
+                    />
+                    <!--
+                      空欄のときは導出される既定名をグレーで重ねて見せる（プレースホルダ）。
+                      入力があるとその名前で固定されるため、既定へ戻すには欄を空にする
+                    -->
+                    <Grid Grid.Row="1" Grid.Column="1" Margin="0,8,0,0">
+                      <TextBox
+                        Style="{StaticResource FormInput}"
+                        Text="{Binding ApiDocsFileName, UpdateSourceTrigger=PropertyChanged}"
+                        ToolTip="{x:Static res:Strings.CodeGen_ApiDocsFileNameToolTip}"
+                      />
+                      <TextBlock
+                        Margin="11,0,0,0"
+                        VerticalAlignment="Center"
+                        Foreground="{StaticResource MutedText}"
+                        IsHitTestVisible="False"
+                        Text="{Binding ApiDocsFileNameHint}"
+                        Visibility="{Binding ShowApiDocsFileNameHint, Converter={StaticResource BoolToVisibilityConverter}}"
+                      />
+                    </Grid>
                   </Grid>
                 </StackPanel>
               </StackPanel>

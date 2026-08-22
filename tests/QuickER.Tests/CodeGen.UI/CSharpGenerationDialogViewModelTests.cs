@@ -1989,4 +1989,70 @@ public class CSharpGenerationDialogViewModelTests
             }
         }
     }
+
+    /// <summary>
+    /// API リファレンスの出力ファイル名が生成オプションへ渡り、保存・復元されることを検証する
+    /// （空欄は null＝導出名へフォールバック）
+    /// </summary>
+    [Fact(DisplayName = "ApiDocsFileName が生成オプションへ渡り保存・復元される")]
+    public void ApiDocsFileName_MapsToOptions_AndPersists()
+    {
+        var vm = CreateViewModel(out var folder);
+
+        try
+        {
+            vm.RootNamespace = "Acme.App";
+            vm.OutputPath = @"C:\temp\Entities.g.cs";
+            vm.GenerateApiDocs = true;
+            vm.ApiDocsFileName = " Reference ";
+            vm.CloseAction = _ => { };
+
+            // 前後空白は除去して明示指定として渡る
+            vm.ToOptions().ApiDocsFileName.Should().Be("Reference");
+
+            vm.OkCommand.Execute(null);
+            var restored = new CSharpGenerationDialogViewModel(
+                new CSharpGenerationSettingsStore(folder)
+            );
+            restored.ApiDocsFileName.Should().Be("Reference");
+
+            // 空欄は null（既定＝導出名）として生成へ渡る
+            vm.ApiDocsFileName = string.Empty;
+            vm.ToOptions().ApiDocsFileName.Should().BeNull();
+        }
+        finally
+        {
+            if (Directory.Exists(folder))
+            {
+                Directory.Delete(folder, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// 出力ファイル名欄が空のときだけプレースホルダを出し、その内容が出力ファイル名・出力モードへ
+    /// 追従することを検証する（表示と実出力がずれないことの担保）
+    /// </summary>
+    [Fact(DisplayName = "ApiDocsFileName のプレースホルダは空欄時のみ出て導出名に追従する")]
+    public void ApiDocsFileNameHint_FollowsDerivedName()
+    {
+        var vm = CreateViewModel(out _);
+        vm.RootNamespace = "Acme.App";
+        vm.OutputPath = @"C:\temp\EcOrder.g.cs";
+
+        vm.ShowApiDocsFileNameHint.Should().BeTrue("既定は空欄＝導出名を使う");
+        vm.ApiDocsFileNameHint.Should().Be("EcOrder.g.md");
+
+        // 出力ファイル名の変更に追従する
+        vm.OutputPath = @"C:\temp\Other.g.cs";
+        vm.ApiDocsFileNameHint.Should().Be("Other.g.md");
+
+        // 分割出力では固定名になる
+        vm.SplitFilesByCategory = true;
+        vm.ApiDocsFileNameHint.Should().Be("ApiDocs.g.md");
+
+        // 明示指定があるとプレースホルダは出さない
+        vm.ApiDocsFileName = "Reference";
+        vm.ShowApiDocsFileNameHint.Should().BeFalse();
+    }
 }

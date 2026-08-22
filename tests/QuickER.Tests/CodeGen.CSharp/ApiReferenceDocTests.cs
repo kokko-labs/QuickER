@@ -527,6 +527,138 @@ public sealed class ApiReferenceDocTests
             .Contain(message => message.Contains("ApiDocsDirectory"));
     }
 
+    [Theory(
+        DisplayName = "ApiDocsFileName 指定でファイル名が決まり、拡張子は .g.md へ正規化される"
+    )]
+    [InlineData("Api", "Api.g.md", "Api.ja.g.md")]
+    [InlineData("Api.md", "Api.g.md", "Api.ja.g.md")]
+    [InlineData("Api.g.md", "Api.g.md", "Api.ja.g.md")]
+    [InlineData("Api.g.cs", "Api.g.md", "Api.ja.g.md")]
+    [InlineData("  Api  ", "Api.g.md", "Api.ja.g.md")]
+    public void ApiDocsFileName_NormalizesExtension(
+        string fileName,
+        string expectedEnglish,
+        string expectedJapanese
+    )
+    {
+        var result = Generate(
+            BuildDiagram(),
+            new CodeGenerationOptions
+            {
+                OutputFileName = "EcOrder.g.cs",
+                GenerateApiDocs = true,
+                IncludeJapaneseApiDocs = true,
+                ApiDocsFileName = fileName,
+            }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        EnglishMarkdownFile(result)!.FileName.Should().Be(expectedEnglish);
+        JapaneseMarkdownFile(result)!.FileName.Should().Be(expectedJapanese);
+    }
+
+    [Fact(DisplayName = "ApiDocsFileName は分割生成でも固定名 ApiDocs.g.md より優先される")]
+    public void ApiDocsFileName_WinsOverSplitFixedName()
+    {
+        var result = Generate(
+            BuildDiagram(),
+            new CodeGenerationOptions
+            {
+                OutputFileName = "EcOrder.g.cs",
+                GenerateApiDocs = true,
+                IncludeJapaneseApiDocs = true,
+                SplitFilesByCategory = true,
+                ApiDocsFileName = "Reference",
+            }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        EnglishMarkdownFile(result)!.FileName.Should().Be("Reference.g.md");
+        JapaneseMarkdownFile(result)!.FileName.Should().Be("Reference.ja.g.md");
+    }
+
+    [Fact(DisplayName = "ApiDocsFileName は出力先サブフォルダ（ApiDocsDirectory）と併用できる")]
+    public void ApiDocsFileName_CombinesWithDirectory()
+    {
+        var result = Generate(
+            BuildDiagram(),
+            new CodeGenerationOptions
+            {
+                GenerateApiDocs = true,
+                ApiDocsDirectory = "docs",
+                ApiDocsFileName = "Reference",
+            }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        MarkdownFile(result)!.FileName.Should().Be("Reference.g.md");
+        MarkdownFile(result)!.RelativeDirectory.Should().Be("docs");
+    }
+
+    [Theory(
+        DisplayName = "ApiDocsFileName の不正指定（パス区切り・ドライブ・ベース名なし）は生成時エラーになる"
+    )]
+    [InlineData(@"docs\Api.g.md")]
+    [InlineData("docs/Api.g.md")]
+    [InlineData(@"C:\Api.g.md")]
+    [InlineData(".g.md")]
+    public void ApiDocsFileName_Invalid_ReportsError(string fileName)
+    {
+        var result = Generate(
+            BuildDiagram(),
+            new CodeGenerationOptions { GenerateApiDocs = true, ApiDocsFileName = fileName }
+        );
+
+        result.HasErrors.Should().BeTrue();
+        result
+            .Diagnostics.Select(diagnostic => diagnostic.Message)
+            .Should()
+            .Contain(message => message.Contains("ApiDocsFileName"));
+    }
+
+    [Fact(
+        DisplayName = "ApiDocsFileName 未指定（既定）は従来どおり OutputFileName のベース名から導出する"
+    )]
+    public void ApiDocsFileName_Default_KeepsDerivedName()
+    {
+        var result = Generate(
+            BuildDiagram(),
+            new CodeGenerationOptions
+            {
+                OutputFileName = "EcOrder.g.cs",
+                GenerateApiDocs = true,
+                IncludeJapaneseApiDocs = true,
+            }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        EnglishMarkdownFile(result)!.FileName.Should().Be("EcOrder.g.md");
+        JapaneseMarkdownFile(result)!.FileName.Should().Be("EcOrder.ja.g.md");
+    }
+
+    [Fact(
+        DisplayName = "ResolveApiDocsFileName は実出力のファイル名と一致する（GUI プレースホルダの正）"
+    )]
+    public void ResolveApiDocsFileName_MatchesEmittedName()
+    {
+        var options = new CodeGenerationOptions
+        {
+            OutputFileName = "EcOrder.g.cs",
+            GenerateApiDocs = true,
+        };
+
+        var result = Generate(BuildDiagram(), options);
+
+        CSharpCodeGenerationService
+            .ResolveApiDocsFileName(options)
+            .Should()
+            .Be(MarkdownFile(result)!.FileName);
+        CSharpCodeGenerationService
+            .ResolveApiDocsFileName(options with { SplitFilesByCategory = true })
+            .Should()
+            .Be("ApiDocs.g.md");
+    }
+
     [Fact(DisplayName = "GeneratedFileWriter は .g.md をサブフォルダへ書き出せる")]
     public void Writer_WritesMarkdownIntoSubfolder()
     {

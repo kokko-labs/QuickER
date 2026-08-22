@@ -175,6 +175,9 @@
   <data name="Cli_Opt_ApiDocsDirectory" xml:space="preserve">
     <value>Output subfolder for the API reference Markdown, relative to the output directory (e.g. docs; blank = the output directory itself; requires --generate-api-docs) (overrides the settings file)</value>
   </data>
+  <data name="Cli_Opt_ApiDocsFileName" xml:space="preserve">
+    <value>File name for the API reference Markdown (the extension is normalized to .g.md; the Japanese version reuses the base name; blank = derived from the output file name, or ApiDocs.g.md when files are split; requires --generate-api-docs) (overrides the settings file)</value>
+  </data>
   <data name="Cli_Opt_IncludeDataAnnotations" xml:space="preserve">
     <value>Add DataAnnotations and DB-definition meta attributes ([Required], [MaxLength], [DbTableMeta], etc.) (overrides the settings file)</value>
   </data>

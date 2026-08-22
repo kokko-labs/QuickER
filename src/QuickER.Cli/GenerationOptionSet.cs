@@ -135,6 +135,7 @@ internal sealed class GenerationOptionSet
         AddBool("GenerateApiDocs", "--generate-api-docs", Strings.Cli_Opt_GenerateApiDocs);
         AddBool("IncludeJapaneseApiDocs", "--api-docs-ja", Strings.Cli_Opt_IncludeJapaneseApiDocs);
         AddString("ApiDocsDirectory", "--api-docs-dir", Strings.Cli_Opt_ApiDocsDirectory);
+        AddString("ApiDocsFileName", "--api-docs-file", Strings.Cli_Opt_ApiDocsFileName);
 
         // 属性
         AddBool(

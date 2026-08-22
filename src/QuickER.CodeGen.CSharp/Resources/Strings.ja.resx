@@ -121,6 +121,9 @@
   <data name="CodeGen_Error_InvalidLayerDirectory" xml:space="preserve">
     <value>オプション '{0}' の出力サブフォルダが不正です: '{1}'。出力ディレクトリ内に収まる相対パスを指定してください（絶対パス・ドライブ指定・'..'・ファイル名に使えない文字は拒否されます）。</value>
   </data>
+  <data name="CodeGen_Error_InvalidApiDocsFileName" xml:space="preserve">
+    <value>オプション 'ApiDocsFileName' のファイル名が不正です: '{0}'。ファイル名だけを指定してください（パス区切り・ドライブ指定・ファイル名に使えない文字は拒否されます）。出力先フォルダは 'ApiDocsDirectory' で指定します。</value>
+  </data>
   <data name="CodeGen_Error_LayerDirectoryOutsideOutput" xml:space="preserve">
     <value>出力ディレクトリ外への書き込みは拒否されました: サブフォルダ '{0}' が有効な相対パスではありません。</value>
   </data>

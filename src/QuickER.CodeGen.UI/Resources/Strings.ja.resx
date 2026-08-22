@@ -77,7 +77,7 @@
     <value>層別フォルダへ振り分けて出力する</value>
   </data>
   <data name="CodeGen_LayeredOutputToolTip" xml:space="preserve">
-    <value>生成ファイルを出力フォルダ配下の層別サブフォルダへ書き出します。ドメイン層（Entity・値オブジェクト・Repository 契約・ランタイムのコア）／インフラストラクチャ層（方言別実装・EF Core・インメモリ・同期・HTTP クライアント）／プレゼンテーション層（EditModel・Mapper）／サーバー層（リモートサーバー実装）。&#xD;&#xA;ON にすると分割出力を含意するため、上の出力モードは分割固定になります。変わるのはファイルの配置だけで、ファイル名・名前空間・内容は分割出力と同一です</value>
+    <value>生成ファイルを出力フォルダ配下の層別サブフォルダへ書き出します。ドメイン層（Entity・値オブジェクト・Repository 契約・ランタイムのコア）／インフラストラクチャー層（方言別実装・EF Core・インメモリ・同期・HTTP クライアント）／プレゼンテーション層（EditModel・Mapper）／サーバー層（リモートサーバー実装）。&#xD;&#xA;ON にすると分割出力を含意するため、上の出力モードは分割固定になります。変わるのはファイルの配置だけで、ファイル名・名前空間・内容は分割出力と同一です</value>
   </data>
   <data name="CodeGen_LayerDirectories" xml:space="preserve">
     <value>層フォルダ（出力フォルダからの相対パス）</value>
@@ -86,10 +86,10 @@
     <value>ドメイン層</value>
   </data>
   <data name="CodeGen_LayerLabel_Infrastructure" xml:space="preserve">
-    <value>インフラ層</value>
+    <value>インフラストラクチャー層</value>
   </data>
   <data name="CodeGen_LayerLabel_Presentation" xml:space="preserve">
-    <value>プレゼン層</value>
+    <value>プレゼンテーション層</value>
   </data>
   <data name="CodeGen_LayerLabel_Server" xml:space="preserve">
     <value>サーバー層</value>
@@ -153,6 +153,12 @@
   </data>
   <data name="CodeGen_ApiDocsDirectoryToolTip" xml:space="preserve">
     <value>API リファレンス Markdown の出力先サブフォルダ（出力フォルダからの相対パス。例: docs）。空なら出力フォルダ直下。絶対パス・".." は使えません。</value>
+  </data>
+  <data name="CodeGen_ApiDocsFileName" xml:space="preserve">
+    <value>出力ファイル名</value>
+  </data>
+  <data name="CodeGen_ApiDocsFileNameToolTip" xml:space="preserve">
+    <value>API リファレンス Markdown の出力ファイル名。空ならグレーで表示している名前（出力ファイル名から導出。分割出力時は固定名 ApiDocs.g.md）になります。拡張子は .g.md へ正規化され、日本語版は同じベース名の .ja.g.md です。ファイル名だけを指定してください（フォルダは上の欄で指定します）。</value>
   </data>
   <data name="CodeGen_ApiDocsTooltip" xml:space="preserve">
     <value>スキーマに即した API リファレンス Markdown（英語）を 1 つ追加出力します。ファイル名は非分割時 {ベース名}.g.md・分割時 ApiDocs.g.md（再生成で上書き）</value>

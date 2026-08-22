@@ -1071,6 +1071,8 @@ When enabled, one `.g.md` with the same base name as the `.g.cs` is output (e.g.
 
 By default the Markdown lands in the output directory itself. `--api-docs-dir` (config key `ApiDocsDirectory`) moves it into a subfolder, as a relative path under the output directory (e.g. `docs`; several segments are allowed, absolute paths and `..` are rejected). This works in every output mode — with layered output it keeps the documentation out of the layer projects.
 
+The file name can be changed with `--api-docs-file` (config key `ApiDocsFileName`) — for example `--api-docs-file Api.md` yields `Api.g.md` (and `Api.ja.g.md` for the Japanese version). The extension is normalized to `.g.md`, so `Api`, `Api.md`, and `Api.g.md` all give the same result (overwriting is restricted to `.g.md` / `.g.cs`, so the extension is not left to the input). An explicit name wins in every output mode; when it is blank you get the derived name as before (the output file base name, or `ApiDocs.g.md` when files are split). Only a file name is accepted — a value containing path separators is a generation error (choosing the folder is `--api-docs-dir`'s job). In the GUI it is the "Output file name" box below "Output subfolder"; **when the box is empty, the name that will actually be used is shown in grey** (it follows the output file name and the output mode).
+
 `.g.md` / `.ja.g.md` are auto-generated files. They are overwritten on regeneration, so do not edit them directly.
 
 ## Coexisting with an existing codebase

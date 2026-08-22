@@ -245,6 +245,13 @@ public static class GenerationConfigSchema
             "Runtime & documentation",
             "Output subfolder for the API reference Markdown, relative to out_dir (e.g. \"docs\"; several segments are allowed). Blank means out_dir itself. Absolute paths and \"..\" are rejected. Has no effect unless GenerateApiDocs is true; independent of LayeredOutput."
         ),
+        new(
+            "ApiDocsFileName",
+            "string",
+            null,
+            "Runtime & documentation",
+            "File name for the API reference Markdown. The extension is normalized to \".g.md\" and the Japanese version reuses the same base name (\".ja.g.md\"). Blank means the derived name: the output file base name, or the fixed \"ApiDocs.g.md\" when files are split. File names only; path separators are rejected (use ApiDocsDirectory for the folder). Has no effect unless GenerateApiDocs is true."
+        ),
         // 属性
         new(
             "IncludeDataAnnotations",

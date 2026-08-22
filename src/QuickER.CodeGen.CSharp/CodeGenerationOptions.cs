@@ -343,6 +343,25 @@ public sealed record CodeGenerationOptions
     public string? ApiDocsDirectory { get; init; }
 
     /// <summary>
+    /// API リファレンス Markdown の出力ファイル名（既定 null＝<see cref="OutputFileName"/> ／固定名からの導出）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <see cref="GenerateApiDocs"/> が ON のときだけ意味を持つ。空白なら従来どおり導出する
+    /// （非分割＝<see cref="OutputFileName"/> のベース名 + <c>.g.md</c>／分割＝固定名 <c>ApiDocs.g.md</c>）。
+    /// 指定した場合は出力モードに依らずその名前が勝ち、日本語版（<see cref="IncludeJapaneseApiDocs"/>）は
+    /// そのベース名 + <c>.ja.g.md</c> になる。
+    /// </para>
+    /// <para>
+    /// 末尾は <c>.g.md</c> へ正規化する（<c>EcOrder</c> / <c>EcOrder.md</c> / <c>EcOrder.g.cs</c> はいずれも
+    /// <c>EcOrder.g.md</c>）。<see cref="GeneratedFileWriter"/> が手書きファイル保護のため <c>.g.md</c> 以外の
+    /// 書き出しを拒否するため、拡張子はユーザー入力に委ねない。ディレクトリ要素（<c>/</c> <c>\</c> <c>:</c>）・
+    /// ファイル名に使えない文字は生成時診断エラー（置き場は <see cref="ApiDocsDirectory"/> だけが決める）。
+    /// </para>
+    /// </remarks>
+    public string? ApiDocsFileName { get; init; }
+
+    /// <summary>
     /// 無制限バイナリ列（<c>varbinary(max)</c> / <c>image</c> / 長さ宣言なし BLOB / <c>bytea</c> 等）を、生成 Entity のプロパティに
     /// マーカー属性 <c>[UnboundedBinaryColumn]</c> で印付けし、QuickER 版 Repository の SELECT / UPDATE 対象から除外するかどうか（既定 false）。
     /// </summary>
