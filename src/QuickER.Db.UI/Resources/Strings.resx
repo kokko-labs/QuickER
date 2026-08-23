@@ -146,7 +146,7 @@
     <value>How long a single schema import / sync statement may run. 0 means no limit</value>
   </data>
   <data name="DbConnection_CommandTimeoutInvalid" xml:space="preserve">
-    <value>The command timeout must be 0 (no limit) or greater.</value>
+    <value>Enter an integer of 0 (no limit) or greater for the command timeout.</value>
   </data>
   <data name="DbConnection_Database" xml:space="preserve">
     <value>Database</value>

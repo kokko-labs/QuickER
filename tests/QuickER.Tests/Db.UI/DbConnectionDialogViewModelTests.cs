@@ -509,7 +509,7 @@ public class DbConnectionDialogViewModelTests : IDisposable
     {
         var vm = CreateVm(CreateStore());
 
-        vm.CommandTimeoutSeconds.Should().Be(DbCommands.DefaultTimeoutSeconds);
+        vm.CommandTimeout.Should().Be(DbCommands.DefaultTimeoutSeconds.ToString());
     }
 
     /// <summary>キーを持たない旧プロファイルを読んでも既定値へ落ちる（JSON 後方互換）ことを検証する</summary>
@@ -526,7 +526,7 @@ public class DbConnectionDialogViewModelTests : IDisposable
         var vm = CreateVm(store);
         vm.SelectedProfileItem = vm.Profiles[0];
 
-        vm.CommandTimeoutSeconds.Should().Be(DbCommands.DefaultTimeoutSeconds);
+        vm.CommandTimeout.Should().Be(DbCommands.DefaultTimeoutSeconds.ToString());
     }
 
     /// <summary>プロファイルへ保存した値が復元され、確定結果（接続設定）へも載ることを検証する</summary>
@@ -537,7 +537,7 @@ public class DbConnectionDialogViewModelTests : IDisposable
         var vm = CreateVm(store);
         vm.Host = "server";
         vm.Database = "db";
-        vm.CommandTimeoutSeconds = 180;
+        vm.CommandTimeout = "180";
         vm.ProfileName = "長時間取込";
         vm.SaveProfileCommand.Execute(null);
 
@@ -547,7 +547,7 @@ public class DbConnectionDialogViewModelTests : IDisposable
         );
         reopened.OkCommand.Execute(null);
 
-        reopened.CommandTimeoutSeconds.Should().Be(180);
+        reopened.CommandTimeout.Should().Be("180");
         reopened.Result.Should().NotBeNull();
         reopened.Result!.CommandTimeoutSeconds.Should().Be(180);
     }
@@ -559,12 +559,65 @@ public class DbConnectionDialogViewModelTests : IDisposable
         var vm = CreateVm(CreateStore());
         vm.Host = "server";
         vm.Database = "db";
-        vm.CommandTimeoutSeconds = 0;
+        vm.CommandTimeout = "0";
 
         vm.OkCommand.Execute(null);
 
         vm.Result.Should().NotBeNull();
         vm.Result!.CommandTimeoutSeconds.Should().Be(0);
+    }
+
+    /// <summary>空欄は確定時に弾く（直前の有効値で黙って動かない）ことを検証する</summary>
+    /// <remarks>
+    /// <c>int</c> へ直接バインドしていた頃は、空欄が型変換の失敗でソースへ届かず
+    /// 直前の有効値が残るため、この検証を素通りして「画面と違う値」で確定できていた。
+    /// </remarks>
+    [Fact(DisplayName = "空欄のコマンドタイムアウトは OK を拒否する")]
+    public void CommandTimeout_BlankRejectsOk()
+    {
+        var vm = CreateVm(CreateStore());
+        vm.Host = "server";
+        vm.Database = "db";
+        vm.CommandTimeout = string.Empty;
+
+        vm.OkCommand.Execute(null);
+
+        vm.Result.Should().BeNull();
+        vm.StatusMessage.Should().Be(Strings.DbConnection_CommandTimeoutInvalid);
+    }
+
+    /// <summary>数値として読めない入力を確定時に弾くことを検証する</summary>
+    [Theory(DisplayName = "数値でないコマンドタイムアウトは OK を拒否する")]
+    [InlineData("abc")]
+    [InlineData("   ")]
+    [InlineData("1.5")]
+    public void CommandTimeout_NonNumericRejectsOk(string input)
+    {
+        var vm = CreateVm(CreateStore());
+        vm.Host = "server";
+        vm.Database = "db";
+        vm.CommandTimeout = input;
+
+        vm.OkCommand.Execute(null);
+
+        vm.Result.Should().BeNull();
+        vm.StatusMessage.Should().Be(Strings.DbConnection_CommandTimeoutInvalid);
+    }
+
+    /// <summary>確定と同じ検証を接続テストも通す（不正なまま接続を試みない）ことを検証する</summary>
+    [Fact(DisplayName = "空欄のコマンドタイムアウトは接続テストを拒否する")]
+    public async Task CommandTimeout_BlankRejectsTestConnection()
+    {
+        var vm = CreateVm(CreateStore());
+        vm.Host = "server";
+        vm.Database = "db";
+        vm.CommandTimeout = string.Empty;
+
+        await vm.TestConnectionCommand.ExecuteAsync(null);
+
+        // 接続を試みる前に返るため、実行中フラグも立たない
+        vm.IsBusy.Should().BeFalse();
+        vm.StatusMessage.Should().Be(Strings.DbConnection_CommandTimeoutInvalid);
     }
 
     /// <summary>負値は確定時に弾く（黙って既定へ丸めない）ことを検証する</summary>
@@ -574,7 +627,7 @@ public class DbConnectionDialogViewModelTests : IDisposable
         var vm = CreateVm(CreateStore());
         vm.Host = "server";
         vm.Database = "db";
-        vm.CommandTimeoutSeconds = -1;
+        vm.CommandTimeout = "-1";
 
         vm.OkCommand.Execute(null);
 

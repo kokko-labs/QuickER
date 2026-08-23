@@ -146,7 +146,7 @@
     <value>スキーマ取込・同期の SQL 1 文が実行できる時間です。0 は無制限を意味します</value>
   </data>
   <data name="DbConnection_CommandTimeoutInvalid" xml:space="preserve">
-    <value>コマンドタイムアウトは 0（無制限）以上を指定してください。</value>
+    <value>コマンドタイムアウトには 0（無制限）以上の整数を入力してください。</value>
   </data>
   <data name="DbConnection_Database" xml:space="preserve">
     <value>データベース</value>
