@@ -237,17 +237,53 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// <summary>DBMS 切替 ComboBox の選択肢（登録済み全プロバイダ）</summary>
     public IReadOnlyList<IDatabaseProvider> AvailableProviders => _providers.All.ToList();
 
-    /// <summary>DBMS 切替 ComboBox の選択項目（現在方言）。設定時に方言切替を実行する</summary>
+    /// <summary>
+    /// 続行確認の応答待ちで ComboBox が暫定表示している選択項目（待ちがなければ null）。
+    /// </summary>
+    /// <remarks>
+    /// ComboBox の選択操作は、セッターが値を捨てても内部の選択状態（SelectedIndex・表示項目）だけは
+    /// 切替先へ進んでしまう。値を捨てると SelectedItem が旧値のまま＝内部状態と食い違い、
+    /// 後からいくら再通知しても「変化なし」と見なされて表示が戻らない。
+    /// そこで選択をいったん暫定値として受け入れて SelectedItem を切替先へ実際に動かし、
+    /// キャンセル時は暫定値を捨てて通知する＝バインディングが「切替先→現在方言」の実変更として
+    /// 転送するため、ComboBox の内部状態ごと巻き戻る。
+    /// </remarks>
+    private IDatabaseProvider? _pendingProvider;
+
+    /// <summary>DBMS 切替 ComboBox の選択項目。設定時に方言切替を実行する</summary>
+    /// <remarks>
+    /// 切替処理はセッター内で直接行わず、選択操作の完了後（Dispatcher 経由の <c>_uiPost</c>）に行う。
+    /// セッターは ComboBox のバインディングがソース更新している最中＝選択変更処理の内側で呼ばれるため、
+    /// そこでモーダル確認を開くと、確認中に回るネストしたメッセージループが選択変更処理と交錯する。
+    /// 暫定値の扱いは <see cref="_pendingProvider"/> を参照。
+    /// </remarks>
     public IDatabaseProvider SelectedProvider
     {
-        get => _currentProvider;
+        get => _pendingProvider ?? _currentProvider;
         set
         {
-            if (value is not null)
+            if (value is null || ReferenceEquals(value, SelectedProvider))
             {
-                ChangeTargetDbms(value);
+                return;
             }
+
+            // 選択を暫定的に受け入れる（ComboBox の内部状態と SelectedItem を一致させておく）
+            _pendingProvider = value;
+            OnPropertyChanged();
+            _uiPost(() => ChangeTargetDbms(value));
         }
+    }
+
+    /// <summary>暫定表示している選択項目を捨て、ComboBox の表示を現在方言へ戻す</summary>
+    private void ClearPendingProvider()
+    {
+        if (_pendingProvider is null)
+        {
+            return;
+        }
+
+        _pendingProvider = null;
+        OnPropertyChanged(nameof(SelectedProvider));
     }
 
     /// <summary>SQL Server のみを登録した既定のプロバイダレジストリを生成する（テスト・既定合成点用）</summary>
@@ -1682,6 +1718,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// <summary>方言変更に伴う派生プロパティの変更通知をまとめて発行する</summary>
     private void RaiseProviderChanged()
     {
+        // 方言が確定した以上、暫定表示は用済み（以降 SelectedProvider は確定値を返す）
+        _pendingProvider = null;
+
         OnPropertyChanged(nameof(CurrentProvider));
         OnPropertyChanged(nameof(SelectedProvider));
         OnPropertyChanged(nameof(AvailableDataTypes));
@@ -1693,6 +1732,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// <summary>
     /// 現在の図のターゲット DBMS を切り替える。既存カラムの型をピボット変換し、
     /// 「TargetDbms 変更＋変換対象カラムの型変更」を単一の Undo 単位として適用する。
+    /// 変換できないカラム・NOT NULL 解除を伴うカラムがあるときは、適用前に内容を提示して続行確認を取る。
     /// </summary>
     /// <param name="target">切替先のプロバイダ</param>
     private void ChangeTargetDbms(IDatabaseProvider target)
@@ -1700,6 +1740,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         // 同一方言なら何もしない
         if (ReferenceEquals(target, _currentProvider))
         {
+            ClearPendingProvider();
             return;
         }
 
@@ -1715,6 +1756,30 @@ public partial class MainViewModel : ObservableObject, IDisposable
             .SelectMany(entity => entity.Columns)
             .ToDictionary(column => column.Id);
 
+        // NOT NULL を解除するカラム（行バージョン列が行バージョンを持たない方言のただの列へ落ちる場合）を集める。
+        // 主キー列は除外する＝ColumnViewModel が主キー列の IsNullable を握り潰すため、
+        // 実際には NOT NULL が落ちない（変換計画側も主キーを除外するので二重の防御）
+        var nullable = plan
+            .Converted.Where(c =>
+                c.MakeNullable
+                && columnsById.TryGetValue(c.ColumnId, out var column)
+                && !column.IsPrimaryKey
+            )
+            .ToList();
+
+        // 変換できないカラム・NOT NULL 解除を伴うカラムがあるときは、適用前に内容を提示して
+        // OK / キャンセルを選ばせる（クリーンに変換できる切替は従来どおり無確認で適用する）
+        if (
+            (plan.Unconverted.Count > 0 || nullable.Count > 0)
+            && !ConfirmTypeConversion(target, plan.Unconverted, nullable)
+        )
+        {
+            // キャンセル: 図には何も適用しない。暫定値を捨てて ComboBox の表示を現在方言へ戻す
+            // （本メソッドはバインディングの外＝uiPost 経由で呼ばれるため同期発行でよい）
+            ClearPendingProvider();
+            return;
+        }
+
         var command = new ChangeTargetDbmsCommand(
             from,
             target,
@@ -1727,64 +1792,56 @@ public partial class MainViewModel : ObservableObject, IDisposable
         // 複合コマンドのみを 1 つの Undo 単位として履歴へ積む
         _changeTracker.RunWithoutTracking(command.Execute);
         UndoRedo.Push(command);
-
-        // NOT NULL を解除したカラム（行バージョン列が行バージョンを持たない方言のただの列へ落ちた場合）を集める。
-        // 主キー列は除外する＝ColumnViewModel が主キー列の IsNullable を握り潰すため、
-        // 実際には NOT NULL が落ちない（変換計画側も主キーを除外するので二重の防御）
-        var nullable = plan
-            .Converted.Where(c =>
-                c.MakeNullable
-                && columnsById.TryGetValue(c.ColumnId, out var column)
-                && !column.IsPrimaryKey
-            )
-            .ToList();
-
-        // 変換できなかったカラムと NOT NULL を解除したカラムがあれば、
-        // 導入文（message）と一覧（details）を分けて詳細ダイアログで提示する
-        if (plan.Unconverted.Count > 0 || nullable.Count > 0)
-        {
-            ShowTypeConversionWarning(plan.Unconverted, nullable);
-        }
     }
 
-    /// <summary>方言切替の型変換結果（未変換カラム・NOT NULL 解除カラム）を 1 つの詳細ダイアログで提示する</summary>
+    /// <summary>方言切替の型変換内容（未変換カラム・NOT NULL 解除カラム）を適用前に提示し、切替の続行確認を取る</summary>
     /// <remarks>
-    /// 2 種類の告知を 1 回のダイアログへまとめるのは、どちらも「方言を切り替えた結果カラムがどう変わったか」という
+    /// 2 種類の告知を 1 回の確認へまとめるのは、どちらも「方言を切り替えるとカラムがどう変わるか」という
     /// 同じ話題であり、続けて 2 回モーダルを出すと後から出た方が前の内容を押し流してしまうため。
-    /// 未変換カラムだけの場合は従来と完全に同一の 3 引数になる（導入文＝未変換の見出し・本文＝未変換一覧のみ）。
+    /// 変換に成功するカラムも方言間の往復では元の型へ戻らないことがあるため、その旨の注記を常に添える
+    /// （注記自体は確認のトリガーにしない＝方言をまたぐ切替では型の縮退がほぼ必ず起きるため、
+    /// トリガーへ含めるとほぼ全ての切替で確認が出て形骸化する）。
+    /// 切替は Undo で正確に戻せるが、履歴が消えた後は元の型を復元できないため確認は Warning 水準とする。
     /// </remarks>
-    /// <param name="unconverted">変換できなかったカラム（元の型を保持する）</param>
-    /// <param name="nullable">NOT NULL を解除したカラム（主キー列は除外済み）</param>
-    private void ShowTypeConversionWarning(
+    /// <param name="target">切替先のプロバイダ（導入文の表示名に用いる）</param>
+    /// <param name="unconverted">変換できないカラム（元の型を保持する）</param>
+    /// <param name="nullable">NOT NULL を解除するカラム（主キー列は除外済み）</param>
+    /// <returns>OK が選択された場合 true</returns>
+    private bool ConfirmTypeConversion(
+        IDatabaseProvider target,
         IReadOnlyList<ColumnTypeConversion> unconverted,
         IReadOnlyList<ColumnTypeConversion> nullable
     )
     {
-        var sections = new List<string>();
+        var sections = new List<string>
+        {
+            string.Format(Strings.TypeConversion_ConfirmIntro, target.DisplayName),
+        };
 
         if (unconverted.Count > 0)
         {
-            sections.Add(BuildUnconvertedColumnList(unconverted));
+            sections.Add(
+                Strings.TypeConversion_WarningHeader
+                    + Environment.NewLine
+                    + BuildUnconvertedColumnList(unconverted)
+            );
         }
 
         if (nullable.Count > 0)
         {
-            // 節の見出しは、未変換の節と並ぶときだけ本文へ入れる
-            // （NOT NULL 解除だけなら導入文（message）がそのまま見出しになる）
-            var list = BuildNullableColumnList(nullable);
             sections.Add(
-                unconverted.Count > 0
-                    ? Strings.TypeConversion_NullableWarningHeader + Environment.NewLine + list
-                    : list
+                Strings.TypeConversion_NullableWarningHeader
+                    + Environment.NewLine
+                    + BuildNullableColumnList(nullable)
             );
         }
 
-        _dialogs.ShowInformationDetails(
-            unconverted.Count > 0
-                ? Strings.TypeConversion_WarningHeader
-                : Strings.TypeConversion_NullableWarningHeader,
+        sections.Add(Strings.TypeConversion_ConfirmNote);
+        sections.Add(Strings.TypeConversion_ConfirmQuestion);
+
+        return _dialogs.ConfirmWarning(
             string.Join(Environment.NewLine + Environment.NewLine, sections),
-            Strings.TypeConversion_WarningTitle
+            Strings.TypeConversion_ConfirmTitle
         );
     }
 
@@ -1795,8 +1852,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         RaiseProviderChanged();
     }
 
-    /// <summary>変換できなかったカラムの一覧（本文のみ・導入文は含めない）を整形する（上限超過分は省略）</summary>
-    /// <remarks>導入文は呼び出し側が <see cref="Strings.TypeConversion_WarningHeader"/> を message に使う</remarks>
+    /// <summary>変換できないカラムの一覧（本文のみ・見出しは含めない）を整形する（上限超過分は省略）</summary>
+    /// <remarks>見出しは呼び出し側が <see cref="Strings.TypeConversion_WarningHeader"/> を先頭へ連結する</remarks>
     private static string BuildUnconvertedColumnList(
         IReadOnlyList<ColumnTypeConversion> unconverted
     ) =>
@@ -1814,7 +1871,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             Strings.Common_MoreItems
         );
 
-    /// <summary>NOT NULL を解除したカラムの一覧（本文のみ・見出しは含めない）を整形する（上限超過分は省略）</summary>
+    /// <summary>NOT NULL を解除するカラムの一覧（本文のみ・見出しは含めない）を整形する（上限超過分は省略）</summary>
     /// <remarks>
     /// 表示する型は変換後（新方言）の型。<see cref="ColumnTypeConversion.NewType"/> は
     /// <see cref="DiagramTypeConversionPlan.Converted"/> の要素では常に非 null だが、

@@ -561,8 +561,17 @@
   <data name="Dbms_Title" xml:space="preserve">
     <value>データベース種別</value>
   </data>
-  <data name="TypeConversion_WarningTitle" xml:space="preserve">
-    <value>型変換の警告</value>
+  <data name="TypeConversion_ConfirmTitle" xml:space="preserve">
+    <value>対象データベースの変更</value>
+  </data>
+  <data name="TypeConversion_ConfirmIntro" xml:space="preserve">
+    <value>対象データベースを {0} へ変更すると、次の列に影響があります:</value>
+  </data>
+  <data name="TypeConversion_ConfirmNote" xml:space="preserve">
+    <value>注意: 変換された型は、後で元の方言へ戻しても元の型に戻らない場合があります（この変更は「元に戻す」で正確に復元できます）。</value>
+  </data>
+  <data name="TypeConversion_ConfirmQuestion" xml:space="preserve">
+    <value>変更してよろしいですか？</value>
   </data>
   <data name="TypeConversion_WarningHeader" xml:space="preserve">
     <value>変換できなかった列（元の型を保持します）:</value>

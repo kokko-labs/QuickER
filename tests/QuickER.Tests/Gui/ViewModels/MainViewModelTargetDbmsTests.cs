@@ -15,7 +15,7 @@ using GuiStrings = QuickER.Resources.Strings;
 namespace QuickER.Tests.Gui.ViewModels;
 
 /// <summary>
-/// ターゲット DBMS 切替（型のピボット変換・単一 Undo・未変換警告・同一方言 no-op・
+/// ターゲット DBMS 切替（型のピボット変換・単一 Undo・適用前の続行確認・同一方言 no-op・
 /// 未知方言フォールバック）を検証するテストクラス。
 /// </summary>
 public class MainViewModelTargetDbmsTests
@@ -113,9 +113,9 @@ public class MainViewModelTargetDbmsTests
         CountUndoable(vm).Should().Be(undoCountBefore);
     }
 
-    /// <summary>変換できない型がある場合に、導入文（message）と一覧（details）が分割提示されることを検証する</summary>
-    [Fact(DisplayName = "未変換の列は導入文と一覧に分割して詳細ダイアログで列挙される")]
-    public void ChangeDbms_Unconverted_ShowsWarning()
+    /// <summary>変換できない型がある場合に、適用前の続行確認へ未変換一覧が列挙されることを検証する</summary>
+    [Fact(DisplayName = "未変換の列は適用前の続行確認に列挙される")]
+    public void ChangeDbms_Unconverted_ConfirmsBeforeApply()
     {
         var (vm, fake, dialogs) = CreateVm();
         vm.AddEntityCommand.Execute(null);
@@ -124,19 +124,27 @@ public class MainViewModelTargetDbmsTests
 
         vm.SelectedProvider = fake;
 
-        // 単文の ShowInformation ではなく、要約＋詳細の ShowInformationDetails に移行している
+        // 事後の詳細ダイアログではなく、適用前の ConfirmWarning に移行している
+        dialogs.InformationDetailsMessages.Should().BeEmpty();
         dialogs.InformationMessages.Should().BeEmpty();
-        var entry = dialogs.InformationDetailsMessages.Should().ContainSingle().Subject;
-        // 導入文（message）は変換警告の見出し・一覧（details）に未変換列が並ぶ
-        entry.Message.Should().Be(GuiStrings.TypeConversion_WarningHeader);
-        entry.Details.Should().Contain("NewTable").And.Contain("uniqueidentifier");
-        // NOT NULL 解除の列が無いので、その節の見出しは本文へ出ない（従来と同一の 3 引数）
-        entry.Details.Should().NotContain(GuiStrings.TypeConversion_NullableWarningHeader);
+        var message = dialogs.WarningConfirmMessages.Should().ContainSingle().Subject;
+        // 導入文・未変換の節・不可逆の注記・続行の問いが 1 つの確認メッセージへまとまる
+        message
+            .Should()
+            .Contain(GuiStrings.TypeConversion_WarningHeader)
+            .And.Contain("NewTable")
+            .And.Contain("uniqueidentifier")
+            .And.Contain(GuiStrings.TypeConversion_ConfirmNote)
+            .And.Contain(GuiStrings.TypeConversion_ConfirmQuestion);
+        // NOT NULL 解除の列が無いので、その節の見出しは出ない
+        message.Should().NotContain(GuiStrings.TypeConversion_NullableWarningHeader);
+        // 既定応答（OK）では切替が適用される
+        vm.CurrentProvider.Name.Should().Be(FakeProvider.FakeName);
     }
 
-    /// <summary>NOT NULL 解除だけが起きた場合に、その見出しが導入文（message）になることを検証する</summary>
-    [Fact(DisplayName = "NOT NULL 解除のみなら解除の見出しを導入文にして列挙する")]
-    public void ChangeDbms_MakeNullableOnly_ShowsNullableWarning()
+    /// <summary>NOT NULL 解除だけが起きる場合も、適用前の続行確認へその一覧が列挙されることを検証する</summary>
+    [Fact(DisplayName = "NOT NULL 解除のみでも適用前の続行確認に列挙される")]
+    public void ChangeDbms_MakeNullableOnly_ConfirmsBeforeApply()
     {
         var (vm, sqlite, dialogs) = CreateSqliteVm();
         vm.AddEntityCommand.Execute(null); // int の PK 列を持つ NewTable
@@ -144,17 +152,20 @@ public class MainViewModelTargetDbmsTests
 
         vm.SelectedProvider = sqlite;
 
-        var entry = dialogs.InformationDetailsMessages.Should().ContainSingle().Subject;
-        entry.Message.Should().Be(GuiStrings.TypeConversion_NullableWarningHeader);
-        entry.Details.Should().Contain("NewTable").And.Contain("RowVer").And.Contain("BLOB");
-        // 未変換の見出しは message 側にも本文側にも出ない
-        entry.Details.Should().NotContain(GuiStrings.TypeConversion_WarningHeader);
-        entry.Title.Should().Be(GuiStrings.TypeConversion_WarningTitle);
+        var message = dialogs.WarningConfirmMessages.Should().ContainSingle().Subject;
+        message
+            .Should()
+            .Contain(GuiStrings.TypeConversion_NullableWarningHeader)
+            .And.Contain("NewTable")
+            .And.Contain("RowVer")
+            .And.Contain("BLOB");
+        // 未変換の見出しは出ない
+        message.Should().NotContain(GuiStrings.TypeConversion_WarningHeader);
     }
 
-    /// <summary>未変換と NOT NULL 解除が同時に起きた場合に、1 回のダイアログで 2 節に分けて提示することを検証する</summary>
-    [Fact(DisplayName = "未変換と NOT NULL 解除は 1 回のダイアログへ 2 節でまとめる")]
-    public void ChangeDbms_UnconvertedAndMakeNullable_ShowsBothSections()
+    /// <summary>未変換と NOT NULL 解除が同時に起きる場合に、1 回の続行確認へ 2 節でまとめることを検証する</summary>
+    [Fact(DisplayName = "未変換と NOT NULL 解除は 1 回の続行確認へ 2 節でまとめる")]
+    public void ChangeDbms_UnconvertedAndMakeNullable_ConfirmsBothSections()
     {
         var (vm, sqlite, dialogs) = CreateSqliteVm();
         vm.AddEntityCommand.Execute(null);
@@ -163,20 +174,47 @@ public class MainViewModelTargetDbmsTests
 
         vm.SelectedProvider = sqlite;
 
-        var entry = dialogs.InformationDetailsMessages.Should().ContainSingle().Subject;
-        // 導入文は未変換側の見出し（より重い告知を先に出す）
-        entry.Message.Should().Be(GuiStrings.TypeConversion_WarningHeader);
-        entry
-            .Details.Should()
-            .Contain("Tree")
+        var message = dialogs.WarningConfirmMessages.Should().ContainSingle().Subject;
+        message
+            .Should()
+            .Contain(GuiStrings.TypeConversion_WarningHeader)
+            .And.Contain("Tree")
             .And.Contain("hierarchyid")
             .And.Contain(GuiStrings.TypeConversion_NullableWarningHeader)
             .And.Contain("RowVer")
             .And.Contain("BLOB");
     }
 
-    /// <summary>未変換も NOT NULL 解除も無ければダイアログを出さないことを検証する</summary>
-    [Fact(DisplayName = "未変換も NOT NULL 解除も無ければ通知しない")]
+    /// <summary>続行確認をキャンセルした場合に、切替も型変換も一切適用されないことを検証する</summary>
+    [Fact(DisplayName = "続行確認のキャンセルは切替も型変換も適用しない")]
+    public void ChangeDbms_ConfirmCancelled_AppliesNothing()
+    {
+        var (vm, fake, dialogs) = CreateVm();
+        vm.AddEntityCommand.Execute(null);
+        vm.Entities[0].Columns[0].DataType = "uniqueidentifier";
+        // 履歴の不変は世代カウンタで観測する（CountUndoable は生の UndoRedo.Undo() を呼ぶため、
+        // 追跡対象のプロパティ変更が履歴にあるここでは使えない＝巻き戻し自体が再追跡されて無限ループになる）
+        var generationBefore = vm.UndoRedo.ChangeGeneration;
+        // ComboBox の表示を現在方言へ戻すための再通知を観測する
+        var selectedProviderNotified = false;
+        vm.PropertyChanged += (_, e) =>
+            selectedProviderNotified |= e.PropertyName == nameof(vm.SelectedProvider);
+        dialogs.ConfirmResult = false;
+
+        vm.SelectedProvider = fake;
+
+        // 方言・型・履歴のいずれも変わらない（確認は出ている）
+        dialogs.WarningConfirmMessages.Should().ContainSingle();
+        vm.CurrentProvider.Name.Should().Be("sqlserver");
+        vm.Entities[0].Columns[0].DataType.Should().Be("uniqueidentifier");
+        vm.ToDiagramModel().TargetDbms.Should().Be("sqlserver");
+        vm.UndoRedo.ChangeGeneration.Should().Be(generationBefore);
+        // ComboBox が切替先を表示したままにならないよう、SelectedProvider の再通知が出る
+        selectedProviderNotified.Should().BeTrue();
+    }
+
+    /// <summary>クリーンに変換できる切替では確認を出さず即適用することを検証する（確認の形骸化防止）</summary>
+    [Fact(DisplayName = "未変換も NOT NULL 解除も無ければ確認なしで適用する")]
     public void ChangeDbms_NothingToReport_ShowsNoDialog()
     {
         var (vm, sqlite, dialogs) = CreateSqliteVm();
@@ -184,12 +222,15 @@ public class MainViewModelTargetDbmsTests
 
         vm.SelectedProvider = sqlite;
 
+        dialogs.WarningConfirmMessages.Should().BeEmpty();
+        dialogs.ConfirmMessages.Should().BeEmpty();
         dialogs.InformationDetailsMessages.Should().BeEmpty();
         dialogs.InformationMessages.Should().BeEmpty();
+        vm.CurrentProvider.Name.Should().Be("sqlite");
     }
 
-    /// <summary>主キーの行バージョン列は NOT NULL 解除の対象外（通知しない）ことを検証する</summary>
-    [Fact(DisplayName = "主キーの行バージョン列は NOT NULL 解除として通知しない")]
+    /// <summary>主キーの行バージョン列は NOT NULL 解除の対象外（確認を出さない）ことを検証する</summary>
+    [Fact(DisplayName = "主キーの行バージョン列は NOT NULL 解除として確認に載せない")]
     public void ChangeDbms_PrimaryKeyRowVersion_IsNotListed()
     {
         var (vm, sqlite, dialogs) = CreateSqliteVm();
@@ -200,7 +241,8 @@ public class MainViewModelTargetDbmsTests
 
         vm.SelectedProvider = sqlite;
 
-        // 主キー列は 3 層が NOT NULL へクランプするため、解除の告知そのものが出ない
+        // 主キー列は 3 層が NOT NULL へクランプするため、解除の告知そのものが出ない＝確認なしで適用される
+        dialogs.WarningConfirmMessages.Should().BeEmpty();
         dialogs.InformationDetailsMessages.Should().BeEmpty();
         key.IsNullable.Should().BeFalse();
     }

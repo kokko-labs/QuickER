@@ -1126,12 +1126,30 @@ namespace QuickER.Resources {
             }
         }
         
-        public static string TypeConversion_WarningTitle {
+        public static string TypeConversion_ConfirmTitle {
             get {
-                return ResourceManager.GetString("TypeConversion_WarningTitle", resourceCulture);
+                return ResourceManager.GetString("TypeConversion_ConfirmTitle", resourceCulture);
             }
         }
-        
+
+        public static string TypeConversion_ConfirmIntro {
+            get {
+                return ResourceManager.GetString("TypeConversion_ConfirmIntro", resourceCulture);
+            }
+        }
+
+        public static string TypeConversion_ConfirmNote {
+            get {
+                return ResourceManager.GetString("TypeConversion_ConfirmNote", resourceCulture);
+            }
+        }
+
+        public static string TypeConversion_ConfirmQuestion {
+            get {
+                return ResourceManager.GetString("TypeConversion_ConfirmQuestion", resourceCulture);
+            }
+        }
+
         public static string TypeConversion_WarningHeader {
             get {
                 return ResourceManager.GetString("TypeConversion_WarningHeader", resourceCulture);
