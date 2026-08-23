@@ -1390,6 +1390,9 @@ file sealed class NullDialogService : IDialogService
     public bool ConfirmWarning(string message, string title) => false;
 
     /// <inheritdoc />
+    public bool ConfirmWarningDetails(string message, string details, string title) => false;
+
+    /// <inheritdoc />
     public void ShowInformation(string message, string title) { }
 
     /// <inheritdoc />

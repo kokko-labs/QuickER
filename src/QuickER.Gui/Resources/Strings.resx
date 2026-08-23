@@ -555,7 +555,7 @@
     <value>Change Target Database</value>
   </data>
   <data name="TypeConversion_ConfirmIntro" xml:space="preserve">
-    <value>Switching the target database to {0} affects the following columns:</value>
+    <value>Switching the target database to {0} affects the columns listed below.</value>
   </data>
   <data name="TypeConversion_ConfirmNote" xml:space="preserve">
     <value>Note: converted types may not be restored by switching the dialect back later (Undo restores this change exactly).</value>

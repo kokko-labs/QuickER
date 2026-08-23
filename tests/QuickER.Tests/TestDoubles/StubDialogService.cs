@@ -17,6 +17,13 @@ public sealed class StubDialogService : IDialogService
     /// <summary>ConfirmWarning に渡されたメッセージの記録</summary>
     public List<string> WarningConfirmMessages { get; } = new();
 
+    /// <summary>ConfirmWarningDetails に渡された (要約, 詳細, タイトル) の記録</summary>
+    public List<(
+        string Message,
+        string Details,
+        string Title
+    )> WarningConfirmDetailsMessages { get; } = new();
+
     /// <summary>ShowInformation に渡されたメッセージの記録</summary>
     public List<string> InformationMessages { get; } = new();
 
@@ -45,6 +52,13 @@ public sealed class StubDialogService : IDialogService
     public bool ConfirmWarning(string message, string title)
     {
         WarningConfirmMessages.Add(message);
+        return ConfirmResult;
+    }
+
+    /// <summary>(要約, 詳細, タイトル) を記録し <see cref="ConfirmResult"/> を返す</summary>
+    public bool ConfirmWarningDetails(string message, string details, string title)
+    {
+        WarningConfirmDetailsMessages.Add((message, details, title));
         return ConfirmResult;
     }
 

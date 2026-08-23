@@ -149,6 +149,7 @@ public class ResxKeyParityTests
         var seededAssemblies = new[]
         {
             typeof(Strings).Assembly,
+            typeof(QuickER.Gui.Common.Resources.Strings).Assembly,
             typeof(QuickER.AI.UI.Resources.Strings).Assembly,
             typeof(QuickER.AI.Chat.Resources.Strings).Assembly,
             typeof(QuickER.AI.Mock.Resources.Strings).Assembly,

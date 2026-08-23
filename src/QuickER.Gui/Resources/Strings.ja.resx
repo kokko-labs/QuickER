@@ -565,7 +565,7 @@
     <value>対象データベースの変更</value>
   </data>
   <data name="TypeConversion_ConfirmIntro" xml:space="preserve">
-    <value>対象データベースを {0} へ変更すると、次の列に影響があります:</value>
+    <value>対象データベースを {0} へ変更すると、以下の列に影響があります。</value>
   </data>
   <data name="TypeConversion_ConfirmNote" xml:space="preserve">
     <value>注意: 変換された型は、後で元の方言へ戻しても元の型に戻らない場合があります（この変更は「元に戻す」で正確に復元できます）。</value>

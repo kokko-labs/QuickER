@@ -7,7 +7,8 @@ namespace QuickER.Tests.Gui.Common;
 
 /// <summary>
 /// <see cref="InformationDetailsDialog"/> の BAML 読み込み（InitializeComponent）が成功し、
-/// 要約メッセージ・詳細・タイトルが各コントロールへ流し込まれることを検証する。
+/// 要約メッセージ・詳細・タイトルが各コントロールへ流し込まれること、および
+/// 続行確認モード（<see cref="InformationDetailsDialog.CreateWarningConfirmation"/>）の構成を検証する。
 /// </summary>
 public class InformationDetailsDialogTests
 {
@@ -116,6 +117,60 @@ public class InformationDetailsDialogTests
             var copyButton = (Button)dialog.FindName("CopyButton");
             copyButton.Visibility.Should().Be(System.Windows.Visibility.Visible);
             copyButton.Content.Should().Be("詳細をコピー");
+        });
+    }
+
+    /// <summary>続行確認モードはキャンセルボタンが可視になり、Esc の割当が OK からキャンセルへ移ることを検証する</summary>
+    [Fact(
+        DisplayName = "InformationDetailsDialog: 続行確認モードはキャンセル可視・Esc はキャンセルへ割当"
+    )]
+    public void CreateWarningConfirmation_ShowsCancelAndReassignsEscape()
+    {
+        WpfApplicationTestSupport.RunSta(() =>
+        {
+            WpfApplicationTestSupport.EnsureApplicationResources();
+
+            var dialog = WpfApplicationTestSupport.LoadXamlComponent(() =>
+                InformationDetailsDialog.CreateWarningConfirmation("message", "details", "title")
+            );
+
+            // キャンセルボタンが現れ、文言はリソース（DetailsDialog_Cancel）から解決される
+            var cancelButton = (Button)dialog.FindName("CancelButton");
+            cancelButton.Visibility.Should().Be(System.Windows.Visibility.Visible);
+            cancelButton
+                .Content.Should()
+                .Be(QuickER.Gui.Common.Resources.Strings.DetailsDialog_Cancel);
+
+            // Esc の割当は OK からキャンセルへ移る（OK は Enter＝IsDefault のまま）
+            var okButton = (Button)dialog.FindName("OkButton");
+            okButton.IsCancel.Should().BeFalse();
+            okButton.IsDefault.Should().BeTrue();
+            cancelButton.IsCancel.Should().BeTrue();
+
+            // 続行前の注意＝Warning 意味論のグリフ
+            ((TextBlock)dialog.FindName("HeaderIcon"))
+                .Text.Should()
+                .Be("⚠");
+        });
+    }
+
+    /// <summary>情報／エラー表示（従来モード）ではキャンセルボタンが現れないことを検証する</summary>
+    [Fact(DisplayName = "InformationDetailsDialog: 情報・エラー表示ではキャンセルは非表示のまま")]
+    public void InformationMode_KeepsCancelCollapsed()
+    {
+        WpfApplicationTestSupport.RunSta(() =>
+        {
+            WpfApplicationTestSupport.EnsureApplicationResources();
+
+            var dialog = WpfApplicationTestSupport.LoadXamlComponent(() =>
+                new InformationDetailsDialog("要約", "詳細", "タイトル", isError: false)
+            );
+
+            // 従来モードは OK 単独（Esc も OK が兼ねる）＝既存挙動を変えない
+            ((Button)dialog.FindName("CancelButton"))
+                .Visibility.Should()
+                .Be(System.Windows.Visibility.Collapsed);
+            ((Button)dialog.FindName("OkButton")).IsCancel.Should().BeTrue();
         });
     }
 }

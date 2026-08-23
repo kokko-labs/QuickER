@@ -1323,6 +1323,8 @@ public class CSharpGenerationDialogViewModelTests
 
         public bool ConfirmWarning(string message, string title) => false;
 
+        public bool ConfirmWarningDetails(string message, string details, string title) => false;
+
         public void ShowInformation(string message, string title) =>
             InformationMessages.Add(message);
 

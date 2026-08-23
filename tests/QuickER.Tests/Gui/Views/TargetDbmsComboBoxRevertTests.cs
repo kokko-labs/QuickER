@@ -147,6 +147,14 @@ public class TargetDbmsComboBoxRevertTests
             return false;
         }
 
+        public bool ConfirmWarningDetails(string message, string details, string title)
+        {
+            WarningConfirmCount++;
+            // モーダル表示中のネストしたメッセージループ相当（キュー済みの Dispatcher 操作が処理される）
+            DoEvents();
+            return false;
+        }
+
         public void ShowInformation(string message, string title) { }
 
         public void ShowError(string message, string title) { }
@@ -192,7 +200,7 @@ public class TargetDbmsComboBoxRevertTests
             DoEvents();
 
             // キャンセルなので VM は現在方言のまま・ComboBox の表示も戻る
-            dialogs.WarningConfirmMessages.Should().ContainSingle();
+            dialogs.WarningConfirmDetailsMessages.Should().ContainSingle();
             vm.CurrentProvider.Name.Should().Be("sqlserver");
             combo.SelectedItem.Should().BeSameAs(vm.CurrentProvider);
             combo.SelectionBoxItem.Should().BeSameAs(vm.CurrentProvider);
@@ -222,7 +230,7 @@ public class TargetDbmsComboBoxRevertTests
             combo.SelectedItem = sqlite;
             DoEvents();
 
-            dialogs.WarningConfirmMessages.Should().ContainSingle();
+            dialogs.WarningConfirmDetailsMessages.Should().ContainSingle();
             vm.CurrentProvider.Name.Should().Be("sqlite");
             combo.SelectedItem.Should().BeSameAs(sqlite);
             combo.SelectionBoxItem.Should().BeSameAs(sqlite);

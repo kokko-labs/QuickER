@@ -124,20 +124,23 @@ public class MainViewModelTargetDbmsTests
 
         vm.SelectedProvider = fake;
 
-        // 事後の詳細ダイアログではなく、適用前の ConfirmWarning に移行している
+        // 事後の詳細ダイアログではなく、適用前の ConfirmWarningDetails（要約＋詳細の確認）に移行している
         dialogs.InformationDetailsMessages.Should().BeEmpty();
         dialogs.InformationMessages.Should().BeEmpty();
-        var message = dialogs.WarningConfirmMessages.Should().ContainSingle().Subject;
-        // 導入文・未変換の節・不可逆の注記・続行の問いが 1 つの確認メッセージへまとまる
-        message
-            .Should()
+        var entry = dialogs.WarningConfirmDetailsMessages.Should().ContainSingle().Subject;
+        // 要約（message）＝導入文・不可逆の注記・続行の問い／詳細（details）＝未変換の節
+        entry
+            .Message.Should()
+            .Contain(GuiStrings.TypeConversion_ConfirmNote)
+            .And.Contain(GuiStrings.TypeConversion_ConfirmQuestion);
+        entry
+            .Details.Should()
             .Contain(GuiStrings.TypeConversion_WarningHeader)
             .And.Contain("NewTable")
-            .And.Contain("uniqueidentifier")
-            .And.Contain(GuiStrings.TypeConversion_ConfirmNote)
-            .And.Contain(GuiStrings.TypeConversion_ConfirmQuestion);
+            .And.Contain("uniqueidentifier");
         // NOT NULL 解除の列が無いので、その節の見出しは出ない
-        message.Should().NotContain(GuiStrings.TypeConversion_NullableWarningHeader);
+        entry.Details.Should().NotContain(GuiStrings.TypeConversion_NullableWarningHeader);
+        entry.Title.Should().Be(GuiStrings.TypeConversion_ConfirmTitle);
         // 既定応答（OK）では切替が適用される
         vm.CurrentProvider.Name.Should().Be(FakeProvider.FakeName);
     }
@@ -152,15 +155,15 @@ public class MainViewModelTargetDbmsTests
 
         vm.SelectedProvider = sqlite;
 
-        var message = dialogs.WarningConfirmMessages.Should().ContainSingle().Subject;
-        message
-            .Should()
+        var entry = dialogs.WarningConfirmDetailsMessages.Should().ContainSingle().Subject;
+        entry
+            .Details.Should()
             .Contain(GuiStrings.TypeConversion_NullableWarningHeader)
             .And.Contain("NewTable")
             .And.Contain("RowVer")
             .And.Contain("BLOB");
         // 未変換の見出しは出ない
-        message.Should().NotContain(GuiStrings.TypeConversion_WarningHeader);
+        entry.Details.Should().NotContain(GuiStrings.TypeConversion_WarningHeader);
     }
 
     /// <summary>未変換と NOT NULL 解除が同時に起きる場合に、1 回の続行確認へ 2 節でまとめることを検証する</summary>
@@ -174,15 +177,36 @@ public class MainViewModelTargetDbmsTests
 
         vm.SelectedProvider = sqlite;
 
-        var message = dialogs.WarningConfirmMessages.Should().ContainSingle().Subject;
-        message
-            .Should()
+        var entry = dialogs.WarningConfirmDetailsMessages.Should().ContainSingle().Subject;
+        entry
+            .Details.Should()
             .Contain(GuiStrings.TypeConversion_WarningHeader)
             .And.Contain("Tree")
             .And.Contain("hierarchyid")
             .And.Contain(GuiStrings.TypeConversion_NullableWarningHeader)
             .And.Contain("RowVer")
             .And.Contain("BLOB");
+    }
+
+    /// <summary>確認の一覧は件数上限で畳まず全件を列挙することを検証する（判断材料の完全性）</summary>
+    [Fact(DisplayName = "確認の一覧は 30 件を超えても畳まず全件列挙する")]
+    public void ChangeDbms_ManyColumns_ListsAllWithoutFolding()
+    {
+        var (vm, sqlite, dialogs) = CreateSqliteVm();
+        vm.AddEntityCommand.Execute(null);
+
+        // 旧上限（DialogItemList.Format の 30 件）を超える数の NOT NULL 解除列を作る
+        for (var i = 1; i <= 35; i++)
+        {
+            AddColumn(vm, $"RowVer{i:D2}", "rowversion");
+        }
+
+        vm.SelectedProvider = sqlite;
+
+        var entry = dialogs.WarningConfirmDetailsMessages.Should().ContainSingle().Subject;
+        // 31 件目以降も落ちず、「…他 N 件」の畳み行も現れない
+        entry.Details.Should().Contain("RowVer31").And.Contain("RowVer35");
+        entry.Details.Should().NotContain(string.Format(GuiStrings.Common_MoreItems, 5));
     }
 
     /// <summary>続行確認をキャンセルした場合に、切替も型変換も一切適用されないことを検証する</summary>
@@ -204,7 +228,7 @@ public class MainViewModelTargetDbmsTests
         vm.SelectedProvider = fake;
 
         // 方言・型・履歴のいずれも変わらない（確認は出ている）
-        dialogs.WarningConfirmMessages.Should().ContainSingle();
+        dialogs.WarningConfirmDetailsMessages.Should().ContainSingle();
         vm.CurrentProvider.Name.Should().Be("sqlserver");
         vm.Entities[0].Columns[0].DataType.Should().Be("uniqueidentifier");
         vm.ToDiagramModel().TargetDbms.Should().Be("sqlserver");
@@ -222,6 +246,7 @@ public class MainViewModelTargetDbmsTests
 
         vm.SelectedProvider = sqlite;
 
+        dialogs.WarningConfirmDetailsMessages.Should().BeEmpty();
         dialogs.WarningConfirmMessages.Should().BeEmpty();
         dialogs.ConfirmMessages.Should().BeEmpty();
         dialogs.InformationDetailsMessages.Should().BeEmpty();
@@ -242,7 +267,7 @@ public class MainViewModelTargetDbmsTests
         vm.SelectedProvider = sqlite;
 
         // 主キー列は 3 層が NOT NULL へクランプするため、解除の告知そのものが出ない＝確認なしで適用される
-        dialogs.WarningConfirmMessages.Should().BeEmpty();
+        dialogs.WarningConfirmDetailsMessages.Should().BeEmpty();
         dialogs.InformationDetailsMessages.Should().BeEmpty();
         key.IsNullable.Should().BeFalse();
     }

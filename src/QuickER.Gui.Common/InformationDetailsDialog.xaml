@@ -71,7 +71,7 @@
       />
     </Border>
 
-    <!-- フッター: 詳細のコピー（任意・既定は非表示）と OK -->
+    <!-- フッター: 詳細のコピー（任意・既定は非表示）と OK／キャンセル（キャンセルは続行確認モードのみ表示） -->
     <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
       <Button
         x:Name="CopyButton"
@@ -82,12 +82,22 @@
         Click="OnCopyDetailsClick"
       />
       <Button
+        x:Name="OkButton"
         Content="OK"
         MinWidth="88"
         IsDefault="True"
         IsCancel="True"
         Style="{StaticResource PrimaryButton}"
         Click="OnOkClick"
+      />
+      <Button
+        x:Name="CancelButton"
+        MinWidth="88"
+        Margin="8,0,0,0"
+        Visibility="Collapsed"
+        IsCancel="False"
+        Style="{StaticResource SecondaryButton}"
+        Click="OnCancelClick"
       />
     </StackPanel>
   </Grid>

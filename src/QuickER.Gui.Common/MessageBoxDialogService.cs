@@ -17,6 +17,14 @@ public sealed class MessageBoxDialogService : IDialogService
         == MessageBoxResult.OK;
 
     /// <inheritdoc />
+    public bool ConfirmWarningDetails(string message, string details, string title)
+    {
+        var dialog = InformationDetailsDialog.CreateWarningConfirmation(message, details, title);
+        dialog.Owner = Application.Current?.MainWindow;
+        return dialog.ShowDialog() == true;
+    }
+
+    /// <inheritdoc />
     public void ShowInformation(string message, string title) =>
         MessageBox.Show(message, title, MessageBoxButton.OK, MessageBoxImage.Information);
 

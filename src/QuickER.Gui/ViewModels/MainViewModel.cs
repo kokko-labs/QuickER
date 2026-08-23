@@ -1798,6 +1798,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// <remarks>
     /// 2 種類の告知を 1 回の確認へまとめるのは、どちらも「方言を切り替えるとカラムがどう変わるか」という
     /// 同じ話題であり、続けて 2 回モーダルを出すと後から出た方が前の内容を押し流してしまうため。
+    /// 提示は要約（導入文・不可逆の注記・続行の問い）＋スクロール可能な詳細領域（一覧）の
+    /// <see cref="IDialogService.ConfirmWarningDetails"/> で行い、<b>一覧は畳まず全件</b>載せる
+    /// （この画面は実行可否を判断させる確認であり、「…他 N 件」に何が含まれるか確かめられないのは
+    /// 判断材料として不十分。標準 MessageBox と違いスクロールするため件数上限も不要）。
     /// 変換に成功するカラムも方言間の往復では元の型へ戻らないことがあるため、その旨の注記を常に添える
     /// （注記自体は確認のトリガーにしない＝方言をまたぐ切替では型の縮退がほぼ必ず起きるため、
     /// トリガーへ含めるとほぼ全ての切替で確認が出て形骸化する）。
@@ -1813,10 +1817,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
         IReadOnlyList<ColumnTypeConversion> nullable
     )
     {
-        var sections = new List<string>
-        {
+        var message = string.Join(
+            Environment.NewLine + Environment.NewLine,
             string.Format(Strings.TypeConversion_ConfirmIntro, target.DisplayName),
-        };
+            Strings.TypeConversion_ConfirmNote,
+            Strings.TypeConversion_ConfirmQuestion
+        );
+
+        var sections = new List<string>();
 
         if (unconverted.Count > 0)
         {
@@ -1836,10 +1844,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             );
         }
 
-        sections.Add(Strings.TypeConversion_ConfirmNote);
-        sections.Add(Strings.TypeConversion_ConfirmQuestion);
-
-        return _dialogs.ConfirmWarning(
+        return _dialogs.ConfirmWarningDetails(
+            message,
             string.Join(Environment.NewLine + Environment.NewLine, sections),
             Strings.TypeConversion_ConfirmTitle
         );
@@ -1852,44 +1858,45 @@ public partial class MainViewModel : ObservableObject, IDisposable
         RaiseProviderChanged();
     }
 
-    /// <summary>変換できないカラムの一覧（本文のみ・見出しは含めない）を整形する（上限超過分は省略）</summary>
-    /// <remarks>見出しは呼び出し側が <see cref="Strings.TypeConversion_WarningHeader"/> を先頭へ連結する</remarks>
+    /// <summary>変換できないカラムの一覧（本文のみ・見出しは含めない）を整形する（全件・畳まない）</summary>
+    /// <remarks>
+    /// 見出しは呼び出し側が <see cref="Strings.TypeConversion_WarningHeader"/> を先頭へ連結する。
+    /// 提示先はスクロール可能な詳細領域（<see cref="IDialogService.ConfirmWarningDetails"/>）のため、
+    /// 件数上限（<c>DialogItemList.Format</c>）は使わない
+    /// </remarks>
     private static string BuildUnconvertedColumnList(
         IReadOnlyList<ColumnTypeConversion> unconverted
     ) =>
-        DialogItemList.Format(
-            unconverted
-                .Select(c =>
-                    string.Format(
-                        Strings.TypeConversion_ColumnLine,
-                        c.TableName,
-                        c.ColumnName,
-                        c.OldType
-                    )
+        string.Join(
+            Environment.NewLine,
+            unconverted.Select(c =>
+                string.Format(
+                    Strings.TypeConversion_ColumnLine,
+                    c.TableName,
+                    c.ColumnName,
+                    c.OldType
                 )
-                .ToList(),
-            Strings.Common_MoreItems
+            )
         );
 
-    /// <summary>NOT NULL を解除するカラムの一覧（本文のみ・見出しは含めない）を整形する（上限超過分は省略）</summary>
+    /// <summary>NOT NULL を解除するカラムの一覧（本文のみ・見出しは含めない）を整形する（全件・畳まない）</summary>
     /// <remarks>
     /// 表示する型は変換後（新方言）の型。<see cref="ColumnTypeConversion.NewType"/> は
     /// <see cref="DiagramTypeConversionPlan.Converted"/> の要素では常に非 null だが、
-    /// 契約上は null 許容のため変換前の型へフォールバックする
+    /// 契約上は null 許容のため変換前の型へフォールバックする。
+    /// 全件を畳まない理由は <see cref="BuildUnconvertedColumnList"/> と同じ
     /// </remarks>
     private static string BuildNullableColumnList(IReadOnlyList<ColumnTypeConversion> nullable) =>
-        DialogItemList.Format(
-            nullable
-                .Select(c =>
-                    string.Format(
-                        Strings.TypeConversion_NullableColumnLine,
-                        c.TableName,
-                        c.ColumnName,
-                        c.NewType ?? c.OldType
-                    )
+        string.Join(
+            Environment.NewLine,
+            nullable.Select(c =>
+                string.Format(
+                    Strings.TypeConversion_NullableColumnLine,
+                    c.TableName,
+                    c.ColumnName,
+                    c.NewType ?? c.OldType
                 )
-                .ToList(),
-            Strings.Common_MoreItems
+            )
         );
 
     // ---------------- Collection changed handlers ----------------
