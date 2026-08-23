@@ -34,11 +34,10 @@
   </Window.Resources>
   <Grid Margin="14">
     <Grid.ColumnDefinitions>
-      <ColumnDefinition Width="120" />
+      <ColumnDefinition Width="150" />
       <ColumnDefinition Width="*" />
     </Grid.ColumnDefinitions>
     <Grid.RowDefinitions>
-      <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
@@ -308,44 +307,25 @@
       Visibility="{Binding ShowTrustServerCertificate, Converter={StaticResource BoolToVisibilityConverter}}"
     />
 
-    <!-- 接続タイムアウト: 接続確立までの待ち時間。ファイル型 DB（SQLite）には概念が無いためサーバー系のみ -->
-    <TextBlock
-      Grid.Row="12"
-      Grid.Column="0"
-      Text="{x:Static resources:Strings.DbConnection_ConnectTimeout}"
-      VerticalAlignment="Center"
-      Margin="0,4"
-      Visibility="{Binding ShowServerFields, Converter={StaticResource BoolToVisibilityConverter}}"
-    />
-    <TextBox
-      Grid.Row="12"
-      Grid.Column="1"
-      Margin="0,4"
-      Style="{StaticResource FormInput}"
-      Text="{Binding ConnectTimeoutSeconds, UpdateSourceTrigger=PropertyChanged}"
-      ToolTip="{x:Static resources:Strings.DbConnection_ConnectTimeoutTooltip}"
-      Visibility="{Binding ShowServerFields, Converter={StaticResource BoolToVisibilityConverter}}"
-    />
-
     <!-- コマンドタイムアウト: SQL 1 文の実行時間。SQLite を含む全方言に効くため常に表示する -->
     <TextBlock
-      Grid.Row="13"
+      Grid.Row="12"
       Grid.Column="0"
       Text="{x:Static resources:Strings.DbConnection_CommandTimeout}"
       VerticalAlignment="Center"
       Margin="0,4"
     />
     <TextBox
-      Grid.Row="13"
+      Grid.Row="12"
       Grid.Column="1"
       Margin="0,4"
       Style="{StaticResource FormInput}"
-      Text="{Binding CommandTimeoutSeconds, UpdateSourceTrigger=PropertyChanged}"
+      Text="{Binding CommandTimeout, UpdateSourceTrigger=PropertyChanged}"
       ToolTip="{x:Static resources:Strings.DbConnection_CommandTimeoutTooltip}"
     />
 
     <TextBlock
-      Grid.Row="14"
+      Grid.Row="13"
       Grid.ColumnSpan="2"
       Margin="0,6"
       TextWrapping="Wrap"
@@ -354,7 +334,7 @@
     />
 
     <StackPanel
-      Grid.Row="15"
+      Grid.Row="14"
       Grid.ColumnSpan="2"
       Orientation="Horizontal"
       HorizontalAlignment="Right"

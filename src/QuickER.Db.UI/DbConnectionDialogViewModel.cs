@@ -77,17 +77,16 @@ public partial class DbConnectionDialogViewModel : ObservableObject
     [ObservableProperty]
     private bool _trustServerCertificate = true;
 
-    /// <summary>接続タイムアウト（秒）</summary>
-    [ObservableProperty]
-    private int _connectTimeoutSeconds = 15;
-
-    /// <summary>コマンド実行タイムアウト（秒。<c>0</c> は無制限）</summary>
+    /// <summary>コマンド実行タイムアウト（秒。<c>0</c> は無制限）。入力テキストと同期する</summary>
     /// <remarks>
-    /// スキーマ取込・スキーマ同期の各 SQL に適用する（接続確立までの時間である
-    /// <see cref="ConnectTimeoutSeconds"/> とは別物）。負値は不正で、確定時に検証して弾く。
+    /// スキーマ取込・スキーマ同期の各 SQL に適用する（接続確立までの時間とは別物）。
+    /// <see cref="Port"/> と同じく入力テキストのまま保持し、解析は
+    /// <see cref="ParseCommandTimeout"/> が行う——<c>int</c> へ直接バインドすると空欄・非数値が
+    /// 型変換の失敗でソースへ届かず、直前の有効値が残ったまま確定時の検証を素通りするため
+    /// （画面の表示と実際に使う値が食い違う）。
     /// </remarks>
     [ObservableProperty]
-    private int _commandTimeoutSeconds = DbCommands.DefaultTimeoutSeconds;
+    private string _commandTimeout = DbCommands.DefaultTimeoutSeconds.ToString();
 
     /// <summary>サービス名（Oracle 固有・将来使用）</summary>
     [ObservableProperty]
@@ -287,8 +286,7 @@ public partial class DbConnectionDialogViewModel : ObservableObject
         TrustServerCertificate = profile.TrustServerCertificate;
         ServiceName = profile.ServiceName;
         FilePath = profile.FilePath;
-        ConnectTimeoutSeconds = profile.ConnectTimeoutSeconds;
-        CommandTimeoutSeconds = profile.CommandTimeoutSeconds;
+        CommandTimeout = profile.CommandTimeoutSeconds.ToString();
         SavePassword = profile.SavePassword;
         Password = password;
 
@@ -313,10 +311,18 @@ public partial class DbConnectionDialogViewModel : ObservableObject
             TrustServerCertificate = TrustServerCertificate,
             ServiceName = ServiceName,
             FilePath = FilePath,
-            ConnectTimeoutSeconds = ConnectTimeoutSeconds,
-            CommandTimeoutSeconds = CommandTimeoutSeconds,
+            CommandTimeoutSeconds = ParseCommandTimeout() ?? DbCommands.DefaultTimeoutSeconds,
             SavePassword = SavePassword,
         };
+
+    /// <summary>コマンドタイムアウト入力を秒数へ解析する（空欄・非数値・負値は不正＝null）</summary>
+    /// <remarks>
+    /// <c>0</c> は ADO.NET の規約どおり「無制限」を意味するため有効値として通す。空欄に
+    /// 「未指定」の意味は与えない——<see cref="Port"/> と違い <c>0</c> が既に別の意味を持っており、
+    /// 空欄を既定値へ倒すと入力と違う値で動くことになるため、不正として確定を止める。
+    /// </remarks>
+    private int? ParseCommandTimeout() =>
+        int.TryParse(CommandTimeout, out var value) && value >= 0 ? value : null;
 
     /// <summary>ポート入力を数値へ解析する（空欄・不正値は null＝方言既定）</summary>
     private int? ParsePort() => int.TryParse(Port, out var value) && value > 0 ? value : null;
@@ -395,8 +401,7 @@ public partial class DbConnectionDialogViewModel : ObservableObject
             TrustServerCertificate = TrustServerCertificate,
             ServiceName = ServiceName,
             FilePath = FilePath,
-            ConnectTimeoutSeconds = ConnectTimeoutSeconds,
-            CommandTimeoutSeconds = CommandTimeoutSeconds,
+            CommandTimeoutSeconds = ParseCommandTimeout() ?? DbCommands.DefaultTimeoutSeconds,
         };
 
     /// <summary>現在の入力で接続テストを行い、結果をステータスへ表示する</summary>
@@ -404,6 +409,13 @@ public partial class DbConnectionDialogViewModel : ObservableObject
     [RelayCommand]
     private async Task TestConnectionAsync()
     {
+        // 確定と同じ値でテストするため、ここでも先にタイムアウト入力を検証する
+        if (ParseCommandTimeout() is not { } commandTimeoutSeconds)
+        {
+            StatusMessage = Strings.DbConnection_CommandTimeoutInvalid;
+            return;
+        }
+
         IsBusy = true;
         StatusMessage = Strings.DbConnection_Connecting;
 
@@ -411,7 +423,7 @@ public partial class DbConnectionDialogViewModel : ObservableObject
         {
             var connectionString = SelectedProvider.BuildConnectionString(ToSettings());
             var result = await SelectedProvider
-                .SchemaImporter.ImportAsync(connectionString, CommandTimeoutSeconds)
+                .SchemaImporter.ImportAsync(connectionString, commandTimeoutSeconds)
                 .ConfigureAwait(true);
             StatusMessage = string.Format(
                 Strings.DbConnection_ConnectSucceeded,
@@ -526,9 +538,9 @@ public partial class DbConnectionDialogViewModel : ObservableObject
     private void Ok()
     {
         // タイムアウトは方言に依らず効くため、方言別の検証より先に見る。
-        // 0 は ADO.NET の規約どおり「無制限」として通し、負値だけを弾く（黙って既定へ丸めると
-        // 「入れた値と違う値で動く」ため）
-        if (CommandTimeoutSeconds < 0)
+        // 0 は ADO.NET の規約どおり「無制限」として通し、空欄・非数値・負値を弾く（黙って既定へ
+        // 丸めると「入れた値と違う値で動く」ため）
+        if (ParseCommandTimeout() is null)
         {
             StatusMessage = Strings.DbConnection_CommandTimeoutInvalid;
             return;

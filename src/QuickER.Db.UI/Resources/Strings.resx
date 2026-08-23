@@ -139,12 +139,6 @@
   <data name="DbConnection_PortTooltip" xml:space="preserve">
     <value>If left blank, the dialect's default port is used</value>
   </data>
-  <data name="DbConnection_ConnectTimeout" xml:space="preserve">
-    <value>Connect timeout (s)</value>
-  </data>
-  <data name="DbConnection_ConnectTimeoutTooltip" xml:space="preserve">
-    <value>How long to wait for the connection to be established</value>
-  </data>
   <data name="DbConnection_CommandTimeout" xml:space="preserve">
     <value>Command timeout (s)</value>
   </data>
@@ -152,7 +146,7 @@
     <value>How long a single schema import / sync statement may run. 0 means no limit</value>
   </data>
   <data name="DbConnection_CommandTimeoutInvalid" xml:space="preserve">
-    <value>The command timeout must be 0 (no limit) or greater.</value>
+    <value>Enter an integer of 0 (no limit) or greater for the command timeout.</value>
   </data>
   <data name="DbConnection_Database" xml:space="preserve">
     <value>Database</value>
