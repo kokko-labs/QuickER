@@ -32,6 +32,15 @@ public abstract class MockProjectTargetProfile
     /// <summary>UI 層の成果物ファイルを検出する検索パターン（成果物検証・承認待ち検知に使う。WPF は <c>*.xaml</c>）</summary>
     internal abstract string UiFileSearchPattern { get; }
 
+    /// <summary>
+    /// <c>emit_file</c> での提出を許可するファイル拡張子（先頭ドット付き・大文字小文字を無視して照合する集合）。
+    /// </summary>
+    /// <remarks>
+    /// このターゲットの UI 層ソースだけを列挙する。提出可否はこのホワイトリストで決まり、実効の許可集合は
+    /// <see cref="MockProjectEmitTools.SupportedEmitExtensions"/>（中央の上限集合）との積になる。
+    /// </remarks>
+    internal abstract IReadOnlySet<string> AllowedEmitExtensions { get; }
+
     // ── スキャフォールド差分（決定的な土台） ──
 
     /// <summary>csproj スケルトンを組み立てる（ターゲットの SDK・TFM・PackageReference 差分を含む）</summary>

@@ -55,7 +55,16 @@ This second step is an aid for PoCs and prototyping. Depending on the AI model a
 
 - With the API key method, Codex, Claude Code, and Copilot alike, the diagram contents (table definitions, etc.) are sent to the AI provider you selected. When handling sensitive schemas, follow your organization's policy
 - If you do not use the AI features, no API key or other configuration is required (the ER diagram designer and code generation work without connecting to the network)
+- The second step (mock project generation) **builds AI-written code on your machine with your own privileges**. What the AI is allowed to do differs by backend
 
+  | Backend | File writes | Command execution |
+  |---|---|---|
+  | API key | Submission through `emit_file` only. Limited to the output folder and to UI-layer source extensions (`.xaml` / `.cs` for WPF, `.razor` / `.css` / `.cs` for Blazor); build configuration files (`.csproj`, `Directory.Build.props` and the like) and anything under `Generated/`, `design/`, `obj/` or `bin/` are rejected | None |
+  | Copilot | Auto-approved only under the output folder | Auto-approved only when the command's paths resolve under the output folder |
+  | Codex | Inside the sandbox (`workspace-write`) | Runs without approval inside the sandbox |
+  | Claude Code | Edits files from the working folder (`Edit` / `Write` / `MultiEdit`) | `Bash` is unrestricted (it can run any command) |
+
+- The API key method is designed so that QuickER hands the model a restricted tool set, and the build itself runs with MSBuild's automatic imports (`Directory.Build.props` and friends) disabled. The agent backends (Codex / Claude Code / Copilot) run the CLI you installed under that CLI's own permission model, so QuickER does not restrict them. If you generate a mock from an untrusted schema or from input you do not control, choose the API key method or run it in an isolated environment
 ## License note
 
 The AI feature set (chat and mock generation = `QuickER.AI` / `AI.UI` / `AI.Chat` / `AI.Mock`) is covered by [PolyForm Noncommercial 1.0.0 plus additional grants](../LICENSE-NC.md), and those grants make the current releases **free for everyone, including commercial use**. For a plain-language guide see [LICENSING.md](../LICENSING.md); the formal terms are [LICENSE](../LICENSE) and [LICENSE-NC.md](../LICENSE-NC.md).

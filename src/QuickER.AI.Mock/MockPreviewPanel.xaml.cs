@@ -11,9 +11,14 @@ namespace QuickER.AI.Mock;
 /// <remarks>
 /// セキュリティのため、許可されたモックフォルダ直下の <c>*.html</c> ファイルへの遷移のみを許可し、
 /// それ以外（外部サイト・フォルダ外・新規ウィンドウ・DevTools）は遮断する
-/// （ページ内アンカー遷移 <c>#fragment</c> は許可＝同一ファイル扱い）。ページ内リンクで別画面へ
+/// （ページ内アンカー遷移 <c>#fragment</c> は許可＝同一ファイル扱い）。さらにサブリソース要求
+/// （画像・スクリプト・スタイルシート・fetch/XHR・WebSocket）も既定拒否で遮断し、許可フォルダ内の
+/// ファイルだけを通す＝モックはオフライン完結という <see cref="MockContentValidator"/> の規約を
+/// プレビューでも実施する。ページ内リンクで別画面へ
 /// 遷移したら <see cref="CurrentFileChanged"/> で通知する。WebView2 ランタイム未導入時は
 /// 初期化失敗を捕捉し、案内文へフォールバックしてアプリ全体は落とさない。
+/// 許可フォルダが決まるのは <see cref="Navigate"/> の時点だが、それ以前は WebView 自体が
+/// 非表示（プレースホルダ表示）なので、既定拒否が初期の <c>about:blank</c> に影響することはない。
 /// </remarks>
 public partial class MockPreviewPanel : UserControl
 {
@@ -82,6 +87,11 @@ public partial class MockPreviewPanel : UserControl
         core.FrameNavigationStarting += OnNavigationStarting;
         // 新規ウィンドウ要求（target=_blank・window.open）を遮断する
         core.NewWindowRequested += OnNewWindowRequested;
+
+        // ドキュメント遷移だけでなくサブリソース要求（img/script/fetch/XHR/WebSocket 等）も
+        // すべて拾い、許可フォルダ内のファイル以外を既定拒否する
+        core.AddWebResourceRequestedFilter("*", CoreWebView2WebResourceContext.All);
+        core.WebResourceRequested += OnWebResourceRequested;
 
         _webViewReady = true;
 
@@ -246,6 +256,88 @@ public partial class MockPreviewPanel : UserControl
         {
             // `..` を含む相対経路もフルパス化で正規化され、フォルダ外なら親フォルダが一致しない
             var directory = Path.GetDirectoryName(Path.GetFullPath(path));
+
+            if (directory is null)
+            {
+                return false;
+            }
+
+            var root = Path.GetFullPath(allowedRootFolder);
+
+            return string.Equals(
+                Path.TrimEndingDirectorySeparator(directory),
+                Path.TrimEndingDirectorySeparator(root),
+                StringComparison.OrdinalIgnoreCase
+            );
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// サブリソース要求（画像・スクリプト・スタイルシート・fetch/XHR・WebSocket 等）を既定拒否で遮断する。
+    /// 許可ルートフォルダ内のファイル要求だけを素通しし、それ以外は空の 403 応答を返す。
+    /// </summary>
+    /// <remarks>
+    /// 遮断は無言で行う（プレビュー上へ通知を出さない）。外部参照は保存時に
+    /// <see cref="MockContentValidator"/> が既に警告しており、二重通知にしないため。
+    /// ハンドラ内で例外を投げるとプレビュー全体が壊れるので、失敗時も握り潰して素通しにしない。
+    /// </remarks>
+    private void OnWebResourceRequested(object? sender, CoreWebView2WebResourceRequestedEventArgs e)
+    {
+        try
+        {
+            Uri.TryCreate(e.Request.Uri, UriKind.Absolute, out var target);
+
+            if (IsResourceAllowed(target, _allowedRootFolder))
+            {
+                return;
+            }
+
+            // 空の 403 を返して要求を打ち切る（ネットワークへは出さない）
+            e.Response = WebView.CoreWebView2.Environment.CreateWebResourceResponse(
+                null,
+                403,
+                "Blocked",
+                string.Empty
+            );
+        }
+        catch (Exception)
+        {
+            // 応答生成に失敗した場合も例外は外へ出さない（プレビューを落とさない）
+        }
+    }
+
+    /// <summary>
+    /// サブリソース要求先が許可ルートフォルダ内のファイルかどうかを判定する（純粋関数・単体テスト用）。
+    /// </summary>
+    /// <remarks>
+    /// <see cref="IsNavigationAllowed"/> と違い拡張子は問わない（共有 <c>style.css</c> や画像を
+    /// 通すため）。モックフォルダはフラット構成なので「許可フォルダ直下のファイル」だけを許可し、
+    /// <c>..</c> を含む経路はフルパス化で正規化してフォルダ外なら拒否する。
+    /// 許可フォルダ未設定（初期化直後）のときは既定拒否の原則どおり false を返す。
+    /// </remarks>
+    /// <param name="target">要求先 URI</param>
+    /// <param name="allowedRootFolder">許可するルートフォルダ</param>
+    /// <returns>許可フォルダ直下のファイル URI なら true（フォルダ外・<c>..</c>・http(s)/ws 等は false）</returns>
+    internal static bool IsResourceAllowed(Uri? target, string? allowedRootFolder)
+    {
+        if (target is null || !target.IsFile)
+        {
+            return false;
+        }
+
+        if (string.IsNullOrEmpty(allowedRootFolder))
+        {
+            return false;
+        }
+
+        try
+        {
+            // `..` を含む相対経路もフルパス化で正規化され、フォルダ外なら親フォルダが一致しない
+            var directory = Path.GetDirectoryName(Path.GetFullPath(target.LocalPath));
 
             if (directory is null)
             {

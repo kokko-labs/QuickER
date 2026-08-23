@@ -319,9 +319,62 @@ public class ApiKeyMockProjectAgentTests
 
             engineBox[0].LastToolResult!.Value.Success.Should().BeFalse();
             // 拒否理由（英語・カルチャ非依存）がツール結果として返る
-            engineBox[0].LastToolResult!.Value.Result.Should().Contain("scaffold-owned");
+            engineBox[0].LastToolResult!.Value.Result.Should().Contain("protected 'Generated/'");
             File.Exists(Path.Combine(work, "MockApp", "Generated", "Evil.cs")).Should().BeFalse();
-            string.Concat(progress).Should().Contain("scaffold-owned");
+            string.Concat(progress).Should().Contain("protected 'Generated/'");
+        }
+        finally
+        {
+            Cleanup(work);
+        }
+    }
+
+    /// <summary>
+    /// パス保護: 許可拡張子でない提出（MSBuild が自動 import する Directory.Build.props）はツール失敗結果になり、
+    /// ファイルが書かれず、run 自体は継続して成功することを検証する。
+    /// </summary>
+    [Fact(DisplayName = "非許可拡張子への emit はツール失敗・未書き込み・run は継続")]
+    public async Task RunAsync_RejectsDisallowedExtensionAndContinues()
+    {
+        var work = NewWork();
+        SetupScaffold(work, ("OrderList.html", "Order list", "ORDER-LIST"));
+
+        var (factory, engineBox, _) = BuildFactory(
+            new IReadOnlyList<(string, string)>[]
+            {
+                new[]
+                {
+                    Emit("Directory.Build.props", "<Project><Target Name=\"Evil\" /></Project>"),
+                    Emit("MockApp/App.xaml"),
+                },
+                new[] { Emit("MockApp/Views/OrderListView.xaml") },
+            }
+        );
+        var build = new QueueBuildRunner();
+        build.Results.Enqueue(true);
+
+        var agent = new ApiKeyMockProjectAgent(factory, build);
+        var progress = new List<string>();
+
+        try
+        {
+            var outcome = await agent.RunAsync(
+                Request(work),
+                progress.Add,
+                TestContext.Current.CancellationToken
+            );
+
+            // 拒否されたのは 1 件だけで、同ターンの正当な提出は書かれ、run は成功のまま続く
+            File.Exists(Path.Combine(work, "Directory.Build.props")).Should().BeFalse();
+            File.Exists(Path.Combine(work, "MockApp", "App.xaml")).Should().BeTrue();
+            File.Exists(Path.Combine(work, "MockApp", "Views", "OrderListView.xaml"))
+                .Should()
+                .BeTrue();
+            outcome.Success.Should().BeTrue();
+
+            // 拒否理由（許可拡張子の列挙）が進捗ログに残る
+            string.Concat(progress).Should().Contain("only .cs, .xaml files may be submitted");
+            engineBox[0].LastToolResult.Should().NotBeNull();
         }
         finally
         {

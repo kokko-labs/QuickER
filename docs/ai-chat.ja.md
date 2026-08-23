@@ -55,7 +55,16 @@
 
 - API キー方式・Codex・Claude Code・Copilot のいずれも、図の内容（テーブル定義など）が選択した AI プロバイダーへ送信されます。機密性の高いスキーマを扱う場合は、所属組織のポリシーに従ってください
 - AI 機能を使わない場合、API キー等の設定は不要です（ER 図デザイナ・コード生成はネットワークに接続せずに動作します）
+- 第 2 ステップ（モックプロジェクト生成）は、**AI が書いたコードをあなたの PC 上でユーザー権限でビルドします**。AI に与えられる権限はバックエンドによって異なります
 
+  | バックエンド | ファイル書き込み | コマンド実行 |
+  |---|---|---|
+  | API キー | `emit_file` による提出のみ。出力フォルダ配下かつ UI 層のソース拡張子（WPF は `.xaml` / `.cs`、Blazor は `.razor` / `.css` / `.cs`）に限られ、ビルド設定ファイル（`.csproj` / `Directory.Build.props` など）や `Generated/` `design/` `obj/` `bin/` への提出は拒否されます | なし |
+  | Copilot | 出力フォルダ配下のみ自動承認 | コマンドのパスが出力フォルダ配下と判断できるときのみ自動承認 |
+  | Codex | サンドボックス（`workspace-write`）の内側 | サンドボックスの内側で承認なしに実行 |
+  | Claude Code | 作業フォルダを起点にファイル編集（`Edit` / `Write` / `MultiEdit`） | `Bash` に制限なし（任意のコマンドを実行できます） |
+
+- API キー方式は QuickER が制限付きのツールだけを与える設計で、ビルド時も MSBuild の自動 import（`Directory.Build.props` など）を無効化して実行します。エージェント型（Codex / Claude Code / Copilot）は、あなたが導入した CLI をその CLI 自身の権限モデルで動かすため、QuickER 側では制限しません。信頼できないスキーマや不特定の入力からモックを生成する場合は、API キー方式を選ぶか、隔離した環境で実行してください
 ## ライセンス注記
 
 AI 機能群（チャット・モック生成＝`QuickER.AI` / `AI.UI` / `AI.Chat` / `AI.Mock`）には [PolyForm Noncommercial 1.0.0＋追加許諾](../LICENSE-NC.md)が適用され、この追加許諾により**現在の配布物は商用利用を含め全員無料**です。平易な解説は [LICENSING.ja.md](../LICENSING.ja.md)、正式な条件は [LICENSE](../LICENSE) と [LICENSE-NC.md](../LICENSE-NC.md) を参照してください。

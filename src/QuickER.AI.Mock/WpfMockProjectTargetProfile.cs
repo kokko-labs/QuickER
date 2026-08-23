@@ -15,6 +15,11 @@ internal sealed class WpfMockProjectTargetProfile : MockProjectTargetProfile
     /// <inheritdoc />
     internal override string UiFileSearchPattern => "*.xaml";
 
+    /// <inheritdoc />
+    /// <remarks>WPF の UI 層は XAML とその分離コード／ViewModel だけで成り立つ。</remarks>
+    internal override IReadOnlySet<string> AllowedEmitExtensions { get; } =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".xaml", ".cs" };
+
     // ── スキャフォールド差分 ──
 
     /// <inheritdoc />

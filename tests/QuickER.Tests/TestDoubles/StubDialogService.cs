@@ -24,6 +24,12 @@ public sealed class StubDialogService : IDialogService
         string Title
     )> WarningConfirmDetailsMessages { get; } = new();
 
+    /// <summary>
+    /// <see cref="ShowInformation"/> / <see cref="ShowError"/> の呼び出し直前に実行するフック（既定は無し）。
+    /// モーダルを出す時点の呼び出し側の状態を観測するために使う（例: 実行中フラグが解除済みか）。
+    /// </summary>
+    public Action? OnBeforeShow { get; set; }
+
     /// <summary>ShowInformation に渡されたメッセージの記録</summary>
     public List<string> InformationMessages { get; } = new();
 
@@ -63,10 +69,18 @@ public sealed class StubDialogService : IDialogService
     }
 
     /// <summary>情報メッセージを記録する</summary>
-    public void ShowInformation(string message, string title) => InformationMessages.Add(message);
+    public void ShowInformation(string message, string title)
+    {
+        OnBeforeShow?.Invoke();
+        InformationMessages.Add(message);
+    }
 
     /// <summary>エラーメッセージを記録する</summary>
-    public void ShowError(string message, string title) => ErrorMessages.Add(message);
+    public void ShowError(string message, string title)
+    {
+        OnBeforeShow?.Invoke();
+        ErrorMessages.Add(message);
+    }
 
     /// <summary>要約＋詳細の情報表示を (要約, 詳細, タイトル) として記録する</summary>
     public void ShowInformationDetails(string message, string details, string title) =>
