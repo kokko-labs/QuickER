@@ -126,9 +126,54 @@ public class ClaudeCodeChatEngineTests
         await engine.SendAsync("やあ", TestContext.Current.CancellationToken);
 
         completed!.Value.Success.Should().BeFalse();
-        completed!.Value.Error.Should().Be(Strings.ClaudeCode_TurnNotLoggedIn);
+        // 案内文に CLI の報告文を併記する（対処は同じでも原因が消えると状況を照合できない）
+        completed!
+            .Value.Error.Should()
+            .Be($"{Strings.ClaudeCode_TurnNotLoggedIn} (Not logged in)");
 
         await engine.DisposeAsync();
+    }
+
+    /// <summary>
+    /// 資格情報の失効（<c>Failed to authenticate: OAuth session expired ...</c>）でも、
+    /// 案内文とあわせて CLI が報告した原因が残ることを検証する。
+    /// </summary>
+    [Fact(DisplayName = "資格情報失効の未ログインは原因を併記して失敗完了する")]
+    public async Task SendAsync_ExpiredCredentials_KeepsReportedCause()
+    {
+        const string Reported =
+            "Failed to authenticate: OAuth session expired and could not be refreshed";
+
+        var client = new FakeClaudeCodeClient();
+        client.Outcomes.Enqueue(new ClaudeCodeTurnOutcome(false, Reported, null, true));
+        var engine = CreateEngine(client);
+
+        ErChatTurnResult? completed = null;
+        engine.TurnCompleted += (_, r) => completed = r;
+
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        await engine.SendAsync("やあ", TestContext.Current.CancellationToken);
+
+        completed!.Value.Success.Should().BeFalse();
+        completed!.Value.Error.Should().Be($"{Strings.ClaudeCode_TurnNotLoggedIn} ({Reported})");
+
+        await engine.DisposeAsync();
+    }
+
+    /// <summary>CLI が原因を報告しなかった場合は案内文だけを返すことを検証する</summary>
+    [Fact(DisplayName = "原因の報告が無い未ログインは案内文のみになる")]
+    public void BuildNotLoggedInMessage_NoReportedError_ReturnsGuidanceOnly()
+    {
+        ClaudeCodeChatEngine
+            .BuildNotLoggedInMessage(null)
+            .Should()
+            .Be(Strings.ClaudeCode_TurnNotLoggedIn);
+
+        ClaudeCodeChatEngine
+            .BuildNotLoggedInMessage("   ")
+            .Should()
+            .Be(Strings.ClaudeCode_TurnNotLoggedIn);
     }
 
     /// <summary>claude が見つからない場合は未準備となることを検証する</summary>

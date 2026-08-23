@@ -267,7 +267,7 @@ public sealed class ClaudeCodeChatEngine : IErChatEngine
                 );
                 TurnCompleted?.Invoke(
                     this,
-                    new ErChatTurnResult(false, Strings.ClaudeCode_TurnNotLoggedIn)
+                    new ErChatTurnResult(false, BuildNotLoggedInMessage(outcome.Error))
                 );
             }
             else if (outcome.Success)
@@ -295,6 +295,24 @@ public sealed class ClaudeCodeChatEngine : IErChatEngine
             _turnCts = null;
         }
     }
+
+    /// <summary>未ログイン失敗としてチャットへ表示する文言を組み立てる</summary>
+    /// <param name="reportedError">
+    /// claude CLI が報告した原因（例 <c>Failed to authenticate: OAuth session expired and could not be refreshed</c>）。
+    /// 報告が無ければ null または空。
+    /// </param>
+    /// <returns>
+    /// 再認証を促す案内文（UI 言語に追従）に、原因を <c>(...)</c> で括って続けた 1 行。
+    /// 原因が空なら案内文だけを返す。原因は CLI が返した英語のまま載せる（翻訳・要約はしない）。
+    /// </returns>
+    /// <remarks>
+    /// 原因を併記するのは、対処がどちらも <c>/login</c> である「一度もログインしていない」と
+    /// 「保存済みの資格情報が失効した」を、利用者が自分の状況と照合して区別できるようにするため。
+    /// </remarks>
+    internal static string BuildNotLoggedInMessage(string? reportedError) =>
+        string.IsNullOrWhiteSpace(reportedError)
+            ? Strings.ClaudeCode_TurnNotLoggedIn
+            : $"{Strings.ClaudeCode_TurnNotLoggedIn} ({reportedError})";
 
     /// <inheritdoc />
     public Task InterruptAsync(CancellationToken cancellationToken = default)

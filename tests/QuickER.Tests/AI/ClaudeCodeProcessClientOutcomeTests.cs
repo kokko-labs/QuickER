@@ -178,6 +178,119 @@ public class ClaudeCodeProcessClientOutcomeTests
         outcome.SessionId.Should().Be("s1");
     }
 
+    /// <summary>
+    /// 資格情報の失効（ヘッドレス実行で出る <c>Failed to authenticate: ...</c>）を再認証要と判定することを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 判定を <c>Not logged in</c> だけに絞るとこのテストが赤くなる。この文言を取りこぼすと状態表示は
+    /// 「判定不能＝しばらく待って再確認」へ落ちるが、資格情報の失効は待っても直らず <c>/login</c> が要る。
+    /// </remarks>
+    [Fact(DisplayName = "資格情報の失効は再認証要と判定する")]
+    public void ParseResult_ExpiredCredentials_FlagsNotLoggedIn()
+    {
+        using var document = JsonDocument.Parse(
+            """
+            {
+              "is_error": true,
+              "result": "Failed to authenticate: OAuth session expired and could not be refreshed"
+            }
+            """
+        );
+
+        var (success, error, notLoggedIn) = ClaudeCodeProcessClient.ParseResult(
+            document.RootElement
+        );
+
+        success.Should().BeFalse();
+        // 原因の文言は捨てない（対処は /login でも、状況の照合には報告文が要る）
+        error
+            .Should()
+            .Be("Failed to authenticate: OAuth session expired and could not be refreshed");
+        notLoggedIn.Should().BeTrue();
+    }
+
+    /// <summary>claude CLI が実際に出す認証エラー文言をいずれも再認証要と判定することを検証する</summary>
+    [Theory(DisplayName = "CLI の認証エラー文言は再認証要と判定する")]
+    [InlineData("Not logged in · Please run /login")]
+    [InlineData("Failed to authenticate: OAuth session expired and could not be refreshed")]
+    [InlineData("Failed to authenticate. Anthropic API: 401")]
+    [InlineData("API Error: 401 Invalid API key · Please run /login")]
+    [InlineData("Please run /login · Anthropic API: 401")]
+    public void IndicatesLoginRequired_AuthenticationFailures_ReturnsTrue(string message)
+    {
+        ClaudeCodeProcessClient.IndicatesLoginRequired(message).Should().BeTrue();
+    }
+
+    /// <summary>
+    /// 認証以外の失敗を再認証要と誤判定しないことを検証する（誤判定は「/login し直せ」の誤誘導になる）。
+    /// </summary>
+    /// <remarks>
+    /// MCP サーバー側の OAuth 失敗を含めるのは、<c>OAuth</c> / <c>expired</c> 単体をマーカーに加えると
+    /// claude 本体のログインとは無関係な失敗まで拾ってしまうため（マーカー選定の根拠を固定する）。
+    /// </remarks>
+    [Theory(DisplayName = "認証以外の失敗は再認証要と判定しない")]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("No conversation found with session ID: missing")]
+    [InlineData("Credit balance is too low")]
+    [InlineData("MCP server erdesigner: OAuth authorization expired")]
+    public void IndicatesLoginRequired_OtherFailures_ReturnsFalse(string? message)
+    {
+        ClaudeCodeProcessClient.IndicatesLoginRequired(message).Should().BeFalse();
+    }
+
+    /// <summary>ログインプローブが成功応答をログイン済みと解釈することを検証する</summary>
+    [Fact(DisplayName = "プローブの成功応答はログイン済み")]
+    public void InterpretProbe_Success_ReturnsLoggedIn()
+    {
+        ClaudeCodeProcessClient
+            .InterpretProbe("""{"is_error": false, "result": "pong"}""")
+            .Should()
+            .Be(ClaudeLoginProbeResult.LoggedIn);
+    }
+
+    /// <summary>
+    /// ログインプローブが資格情報の失効を「未ログイン」（＝/login の案内）として扱うことを検証する。
+    /// </summary>
+    [Fact(DisplayName = "プローブの資格情報失効は未ログイン")]
+    public void InterpretProbe_ExpiredCredentials_ReturnsNotLoggedIn()
+    {
+        ClaudeCodeProcessClient
+            .InterpretProbe(
+                """
+                {"is_error": true, "result": "Failed to authenticate: OAuth session expired and could not be refreshed"}
+                """
+            )
+            .Should()
+            .Be(ClaudeLoginProbeResult.NotLoggedIn);
+    }
+
+    /// <summary>
+    /// プローブが errors 配列だけの失敗でも実ターンと同じ規則で判定すること
+    /// （<see cref="ClaudeCodeProcessClient.ParseResult"/> への委譲）を検証する。
+    /// </summary>
+    [Fact(DisplayName = "プローブは errors 配列だけの失敗も実ターンと同じ規則で判定する")]
+    public void InterpretProbe_ErrorsArrayOnly_UsesSameRuleAsTurn()
+    {
+        ClaudeCodeProcessClient
+            .InterpretProbe("""{"is_error": true, "errors": ["Not logged in"]}""")
+            .Should()
+            .Be(ClaudeLoginProbeResult.NotLoggedIn);
+    }
+
+    /// <summary>認証と無関係な失敗・解析不能な応答は判定不能になることを検証する</summary>
+    [Theory(DisplayName = "認証以外の失敗と解析不能な応答は判定不能")]
+    [InlineData("""{"is_error": true, "result": "Credit balance is too low"}""")]
+    [InlineData("not json")]
+    [InlineData("")]
+    public void InterpretProbe_NonAuthFailures_ReturnUnavailable(string output)
+    {
+        ClaudeCodeProcessClient
+            .InterpretProbe(output)
+            .Should()
+            .Be(ClaudeLoginProbeResult.Unavailable);
+    }
+
     /// <summary>stderr が 1 行も無い場合は補足文を付けないことを検証する</summary>
     [Fact(DisplayName = "stderr が空なら補足文を付けない")]
     public void BuildStandardErrorSuffix_NoLines_ReturnsEmpty()

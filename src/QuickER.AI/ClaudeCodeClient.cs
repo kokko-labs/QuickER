@@ -125,6 +125,15 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
     /// <summary>失敗 result の errors 配列から取り込む最大件数（メッセージが際限なく伸びるのを防ぐ）</summary>
     private const int MaxReportedErrorEntries = 3;
 
+    /// <summary>再認証（<c>/login</c>）が必要な失敗を示す文言マーカー（判定規則は <see cref="IndicatesLoginRequired"/>）</summary>
+    private static readonly string[] LoginRequiredMarkers =
+    [
+        "Not logged in",
+        "Failed to authenticate",
+        "Invalid API key",
+        "/login",
+    ];
+
     private readonly Lazy<string?> _executablePath = new(ResolveExecutablePath);
     private Process? _currentProcess;
 
@@ -297,29 +306,23 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
     }
 
     /// <summary>プローブ応答（--output-format json の単一オブジェクト）をログイン状態へ解釈する</summary>
-    private static ClaudeLoginProbeResult InterpretProbe(string output)
+    /// <remarks>
+    /// 応答の形は result イベントと同じため、成否・再認証要否の判定は <see cref="ParseResult"/> へ委譲する
+    /// （プローブと実ターンで判定規則がずれると、状態表示と送信結果が食い違う）。
+    /// </remarks>
+    internal static ClaudeLoginProbeResult InterpretProbe(string output)
     {
         try
         {
             using var document = JsonDocument.Parse(output);
-            var root = document.RootElement;
+            var (success, _, notLoggedIn) = ParseResult(document.RootElement);
 
-            var isError =
-                root.TryGetProperty("is_error", out var isErrorEl)
-                && isErrorEl.ValueKind == JsonValueKind.True;
-
-            if (!isError)
+            if (success)
             {
                 return ClaudeLoginProbeResult.LoggedIn;
             }
 
-            var message = root.TryGetProperty("result", out var resultEl)
-                ? resultEl.GetString()
-                : null;
-
-            return
-                message is not null
-                && message.Contains("Not logged in", StringComparison.OrdinalIgnoreCase)
+            return notLoggedIn
                 ? ClaudeLoginProbeResult.NotLoggedIn
                 : ClaudeLoginProbeResult.Unavailable;
         }
@@ -596,12 +599,34 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
         }
 
         var message = ReadFailureMessage(root);
-        var notLoggedIn =
-            message is not null
-            && message.Contains("Not logged in", StringComparison.OrdinalIgnoreCase);
 
-        return (false, message ?? Strings.ClaudeCode_GenericError, notLoggedIn);
+        return (false, message ?? Strings.ClaudeCode_GenericError, IndicatesLoginRequired(message));
     }
+
+    /// <summary>
+    /// 失敗メッセージが「ターミナルで <c>/login</c> し直す必要がある」種類の認証エラーかを判定する。
+    /// </summary>
+    /// <remarks>
+    /// 判定材料は claude CLI が実際に出す認証エラー文言で、次の 4 系統を <see cref="LoginRequiredMarkers"/>
+    /// で拾う: <c>Not logged in · Please run /login</c>（未ログイン）、
+    /// <c>Failed to authenticate: OAuth session expired and could not be refreshed</c> および
+    /// <c>Failed to authenticate. {詳細}</c>（保存済み資格情報の失効。ヘッドレス実行はこちらへ落ちる）、
+    /// <c>Invalid API key · Fix external API key</c>（外部 API キー不正）、
+    /// <c>Please run /login · {詳細}</c>（CLI 自身の再ログイン指示）。
+    /// <para>
+    /// <c>OAuth</c> や <c>expired</c> 単体はマーカーにしない。MCP サーバー側の OAuth 失敗まで拾ってしまい、
+    /// claude 本体のログインとは無関係な失敗に「/login し直せ」と誤誘導するため。
+    /// </para>
+    /// <para>
+    /// 拾えなかった認証エラーは <see cref="ClaudeLoginProbeResult.Unavailable"/>（案内は「しばらく待って再確認」）
+    /// へ落ちる。待っても直らない失敗にその案内を出すことになるので、新しい文言を見つけたらここへ足す。
+    /// </para>
+    /// </remarks>
+    internal static bool IndicatesLoginRequired(string? message) =>
+        message is not null
+        && LoginRequiredMarkers.Any(marker =>
+            message.Contains(marker, StringComparison.OrdinalIgnoreCase)
+        );
 
     /// <summary>失敗した result イベントの原因文言を取り出す（result 文字列 → errors 配列の順）</summary>
     /// <remarks>
