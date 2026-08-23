@@ -216,18 +216,6 @@ namespace QuickER.Db.UI.Resources {
             }
         }
 
-        public static string DbConnection_ConnectTimeout {
-            get {
-                return ResourceManager.GetString("DbConnection_ConnectTimeout", resourceCulture);
-            }
-        }
-
-        public static string DbConnection_ConnectTimeoutTooltip {
-            get {
-                return ResourceManager.GetString("DbConnection_ConnectTimeoutTooltip", resourceCulture);
-            }
-        }
-
         public static string DbConnection_CommandTimeout {
             get {
                 return ResourceManager.GetString("DbConnection_CommandTimeout", resourceCulture);

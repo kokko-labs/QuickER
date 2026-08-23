@@ -44,9 +44,6 @@ public class SqlConnectionProfile
     /// <summary>データベースファイルのパス（SQLite 固有。旧データでは欠落＝空文字）</summary>
     public string FilePath { get; set; } = string.Empty;
 
-    /// <summary>接続タイムアウト（秒）</summary>
-    public int ConnectTimeoutSeconds { get; set; } = 15;
-
     /// <summary>コマンド実行タイムアウト（秒）</summary>
     /// <remarks>
     /// キーを持たない旧プロファイル JSON は既定値（<see cref="DbCommands.DefaultTimeoutSeconds"/>）で読み込まれる
@@ -70,7 +67,6 @@ public class SqlConnectionProfile
             TrustServerCertificate = TrustServerCertificate,
             ServiceName = ServiceName,
             FilePath = FilePath,
-            ConnectTimeoutSeconds = ConnectTimeoutSeconds,
             CommandTimeoutSeconds = CommandTimeoutSeconds,
         };
 }

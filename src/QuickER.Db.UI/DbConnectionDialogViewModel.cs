@@ -77,14 +77,10 @@ public partial class DbConnectionDialogViewModel : ObservableObject
     [ObservableProperty]
     private bool _trustServerCertificate = true;
 
-    /// <summary>接続タイムアウト（秒）</summary>
-    [ObservableProperty]
-    private int _connectTimeoutSeconds = 15;
-
     /// <summary>コマンド実行タイムアウト（秒。<c>0</c> は無制限）</summary>
     /// <remarks>
-    /// スキーマ取込・スキーマ同期の各 SQL に適用する（接続確立までの時間である
-    /// <see cref="ConnectTimeoutSeconds"/> とは別物）。負値は不正で、確定時に検証して弾く。
+    /// スキーマ取込・スキーマ同期の各 SQL に適用する（接続確立までの時間とは別物）。
+    /// 負値は不正で、確定時に検証して弾く。
     /// </remarks>
     [ObservableProperty]
     private int _commandTimeoutSeconds = DbCommands.DefaultTimeoutSeconds;
@@ -287,7 +283,6 @@ public partial class DbConnectionDialogViewModel : ObservableObject
         TrustServerCertificate = profile.TrustServerCertificate;
         ServiceName = profile.ServiceName;
         FilePath = profile.FilePath;
-        ConnectTimeoutSeconds = profile.ConnectTimeoutSeconds;
         CommandTimeoutSeconds = profile.CommandTimeoutSeconds;
         SavePassword = profile.SavePassword;
         Password = password;
@@ -313,7 +308,6 @@ public partial class DbConnectionDialogViewModel : ObservableObject
             TrustServerCertificate = TrustServerCertificate,
             ServiceName = ServiceName,
             FilePath = FilePath,
-            ConnectTimeoutSeconds = ConnectTimeoutSeconds,
             CommandTimeoutSeconds = CommandTimeoutSeconds,
             SavePassword = SavePassword,
         };
@@ -395,7 +389,6 @@ public partial class DbConnectionDialogViewModel : ObservableObject
             TrustServerCertificate = TrustServerCertificate,
             ServiceName = ServiceName,
             FilePath = FilePath,
-            ConnectTimeoutSeconds = ConnectTimeoutSeconds,
             CommandTimeoutSeconds = CommandTimeoutSeconds,
         };
 
