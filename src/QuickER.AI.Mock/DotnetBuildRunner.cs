@@ -26,8 +26,36 @@ public sealed class DotnetBuildRunner : IBuildRunner
         // -nologo と -clp:NoSummary は付けず、ログはそのまま保全する（診断性優先）。
         var startInfo = CreateStartInfo(workingDirectory);
         startInfo.ArgumentList.Add("build");
+        AddSelfContainedBuildProperties(startInfo);
 
         return await RunAsync(startInfo, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// 生成したモックプロジェクトを「置かれた場所から独立した成果物」としてビルドするための
+    /// MSBuild プロパティを付与する。
+    /// </summary>
+    /// <remarks>
+    /// MSBuild は既定でプロジェクト・ソリューションの祖先フォルダにある
+    /// <c>Directory.Build.props</c> / <c>Directory.Build.targets</c> /
+    /// <c>Directory.Solution.props</c> / <c>Directory.Solution.targets</c> /
+    /// <c>Directory.Packages.props</c> を自動 import する。モックプロジェクトは README が
+    /// 独立したソリューションとして説明する自己完結な成果物なので、出力先がたまたま
+    /// 別リポジトリの配下にあってもそのビルドカスタマイズを継承しないようにする
+    /// （中央パッケージ管理の強制やアナライザ設定の混入で、成果物単体では再現しない
+    /// ビルド結果になるのを防ぐ）。
+    /// <para>
+    /// 5 つとも実測でプロジェクト単体ビルド・ソリューションビルドの双方に効くことを確認済み。
+    /// バージョン確認（<c>dotnet --version</c>）にはプロジェクト評価が無いため付けない。
+    /// </para>
+    /// </remarks>
+    private static void AddSelfContainedBuildProperties(ProcessStartInfo startInfo)
+    {
+        startInfo.ArgumentList.Add("-p:ImportDirectoryBuildProps=false");
+        startInfo.ArgumentList.Add("-p:ImportDirectoryBuildTargets=false");
+        startInfo.ArgumentList.Add("-p:ImportDirectorySolutionProps=false");
+        startInfo.ArgumentList.Add("-p:ImportDirectorySolutionTargets=false");
+        startInfo.ArgumentList.Add("-p:ImportDirectoryPackagesProps=false");
     }
 
     /// <inheritdoc />

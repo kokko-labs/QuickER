@@ -45,6 +45,9 @@ public sealed class ApiKeyMockProjectAgent : IMockProjectAgent, IErDiagramToolHo
     /// <summary>出力フォルダ（相対パスの基点＝ソリューション直下）</summary>
     private string _workingDirectory = string.Empty;
 
+    /// <summary>生成ターゲットのプロファイル（emit_file の許可拡張子の宣言元）</summary>
+    private MockProjectTargetProfile? _targetProfile;
+
     /// <summary>進捗（emit のパス等）の転送先</summary>
     private Action<string>? _onProgress;
 
@@ -94,8 +97,9 @@ public sealed class ApiKeyMockProjectAgent : IMockProjectAgent, IErDiagramToolHo
         // スキャフォールド済みフォルダから素材（README/mock.json/画面 HTML/style.css/契約要約）を読む
         var materials = ReadMaterials(request);
 
-        // 生成ターゲットのプロファイル（プロンプト文面のターゲット差分の正本）
+        // 生成ターゲットのプロファイル（プロンプト文面のターゲット差分と emit_file の許可拡張子の正本）
         var targetProfile = request.Profile;
+        _targetProfile = targetProfile;
 
         var profile = new ErChatProfile(
             () =>
@@ -230,6 +234,7 @@ public sealed class ApiKeyMockProjectAgent : IMockProjectAgent, IErDiagramToolHo
             engine.AssistantDeltaReceived -= OnAssistantDelta;
             engine.TurnCompleted -= OnTurnCompleted;
             _engine = null;
+            _targetProfile = null;
 
             // エンジン（＝1 実行分）は使い捨てにする
             await engine.DisposeAsync().ConfigureAwait(false);
@@ -321,7 +326,16 @@ public sealed class ApiKeyMockProjectAgent : IMockProjectAgent, IErDiagramToolHo
             return ("content is empty. Submit the complete file content.", false);
         }
 
-        var resolved = MockProjectEmitTools.ResolveEmitPath(_workingDirectory, path);
+        if (_targetProfile is null)
+        {
+            return ("emit_file is only available while a generation run is in progress.", false);
+        }
+
+        var resolved = MockProjectEmitTools.ResolveEmitPath(
+            _workingDirectory,
+            _targetProfile,
+            path
+        );
 
         if (!resolved.Ok)
         {

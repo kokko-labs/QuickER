@@ -16,6 +16,11 @@ internal sealed class BlazorMockProjectTargetProfile : MockProjectTargetProfile
     /// <inheritdoc />
     internal override string UiFileSearchPattern => "*.razor";
 
+    /// <inheritdoc />
+    /// <remarks>Blazor の UI 層は Razor コンポーネント・共有スタイルシート（wwwroot/style.css）・C# ソースで成り立つ。</remarks>
+    internal override IReadOnlySet<string> AllowedEmitExtensions { get; } =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".razor", ".css", ".cs" };
+
     // ── スキャフォールド差分 ──
 
     /// <inheritdoc />

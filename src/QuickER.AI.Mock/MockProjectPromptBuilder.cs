@@ -132,6 +132,7 @@ QuickER has already generated the data layer (Entity / EditModel / Mapper / I{{E
 - Receive I{{Entity}}Repository through dependency injection instead of newing up a concrete implementation directly. Every screen's data display, insert, update and delete must go through the repository; you must not substitute your own data classes or a hard-coded list inside a ViewModel.
 - When inserting a new record, always assign the primary key in the application (QuickER repositories do not rely on database-generated keys; if the key is left unassigned, EditModel validation or saving fails). When the primary key is a value object (GuidKey), the parameterless Create() generates a new key. For a numeric key, assign for example the largest existing value plus one.
 - Do not submit NuGet.Config or any other package source configuration file (such a submission is rejected).
+- The mock needs no appsettings.json: it runs entirely on AddGeneratedInMemoryRepositories(), so there is no configuration value to read.
 - {profile.ApiKeyScreenReproductionRule}
 - Do not change anything under {projectName}/{MockProjectScaffoldService.GeneratedFolderName}/ (the data layer), anything under design/ (the design specification), {ReadmeFileName}, or the .sln/.csproj files (such a submission is rejected). You only add and update UI-layer sources.
 
