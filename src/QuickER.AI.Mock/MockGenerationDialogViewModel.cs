@@ -1108,9 +1108,11 @@ public partial class MockGenerationDialogViewModel : ObservableObject
 
         _mockGenCts = new CancellationTokenSource();
 
+        MockProjectGenerationResult? result = null;
+
         try
         {
-            var result = await _mockProjectGenerator
+            result = await _mockProjectGenerator
                 .GenerateAsync(
                     diagram,
                     mockFolder,
@@ -1129,37 +1131,6 @@ public partial class MockGenerationDialogViewModel : ObservableObject
 
             MockGenSucceeded = result.Success;
             StatusMessage = result.Message;
-
-            // 完了を明示する（ステータスバーだけでは見落としやすいため）。
-            // ただしユーザー自身の中断による終了時はダイアログを出さない。
-            if (!result.Interrupted)
-            {
-                if (result.Success)
-                {
-                    _dialogs.ShowInformation(
-                        string.Format(
-                            Strings.Mock_GenResultSuccessBodyFormat,
-                            result.Message,
-                            result.OutputDirectory
-                        ),
-                        Strings.Mock_WindowTitle
-                    );
-                }
-                else
-                {
-                    // 失敗はログパス（無ければ出力フォルダ）を添えて詳細確認へ誘導する
-                    _dialogs.ShowError(
-                        string.Format(
-                            Strings.Mock_GenResultFailureBodyFormat,
-                            result.Message,
-                            string.IsNullOrWhiteSpace(result.LogPath)
-                                ? result.OutputDirectory
-                                : result.LogPath
-                        ),
-                        Strings.Mock_WindowTitle
-                    );
-                }
-            }
         }
         catch (Exception ex)
         {
@@ -1173,6 +1144,41 @@ public partial class MockGenerationDialogViewModel : ObservableObject
             _mockGenCts = null;
             IsMockGenInProgress = false;
             MockGenCompleted = true;
+        }
+
+        // 完了を明示する（ステータスバーだけでは見落としやすいため）。モーダルは実行中フラグを
+        // 落としてから出す＝OK を待つ間も画面は完了状態で、ダイアログがウィンドウの背面へ
+        // 回り込んでも「生成を実行中」の表示とボタンの無効化が残らない。
+        // 例外で終わった場合（result が null）とユーザー自身の中断ではダイアログを出さない。
+        if (result is null || result.Interrupted)
+        {
+            return;
+        }
+
+        if (result.Success)
+        {
+            _dialogs.ShowInformation(
+                string.Format(
+                    Strings.Mock_GenResultSuccessBodyFormat,
+                    result.Message,
+                    result.OutputDirectory
+                ),
+                Strings.Mock_WindowTitle
+            );
+        }
+        else
+        {
+            // 失敗はログパス（無ければ出力フォルダ）を添えて詳細確認へ誘導する
+            _dialogs.ShowError(
+                string.Format(
+                    Strings.Mock_GenResultFailureBodyFormat,
+                    result.Message,
+                    string.IsNullOrWhiteSpace(result.LogPath)
+                        ? result.OutputDirectory
+                        : result.LogPath
+                ),
+                Strings.Mock_WindowTitle
+            );
         }
     }
 

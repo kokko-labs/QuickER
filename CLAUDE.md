@@ -110,6 +110,8 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Sq
 
 - **`MockProjectEmitTools.ResolveEmitPath` は拒否リストへ戻さない**（2026-08-22）。AI が提出したファイルは直後に同じ出力フォルダで `dotnet build` されるため、MSBuild が自動 import するファイル（`Directory.Build.props`/`.targets`・`Directory.Packages.props`・`Directory.Solution.*`・`*.rsp`・`obj/*.nuget.g.props`）を 1 つでも書けると**ビルド検証がそのままユーザー権限の任意コード実行**になる。自動 import 面は MSBuild の版で増えるため名前の列挙では原理的に追随できず、「UI 層のソース拡張子だけを通す」ホワイトリストであることが防御の本体（`obj/`・`bin/` のフォルダ拒否は、拡張子集合をいじるたびの再検証を不要にするための二重化）。守るべき性質は「**ユーザーが明示的にアプリを起動する前に、ビルド検証の瞬間に AI のコードが走らないこと**」で、`.cs` を許可してよいのはビルドでは実行されないから（ソースジェネレータは csproj 経由でしか追加できず csproj は保護済み）。プロファイルの宣言が中央上限集合の部分集合であることは `MockProjectEmitToolsTests` の全数列挙テストが固定する
 
+- **モーダルは必ずオーナー付きで出し、実行中フラグを落としてから出す**（2026-08-22）。`MessageBoxDialogService` の 6 メソッドはすべて `ResolveOwner()`（アクティブなウィンドウ→`MainWindow`）を通す。オーナーを与えない `MessageBox.Show` は、モードレスで開いた機能ウィンドウ（AI モック生成・`MockGenerationLauncher` が `Owner = null; Show()`）の**背面へ回り込んで見えなくなる**——モーダルは呼び出し元スレッドを止めるので、画面はダイアログを出す直前の状態のまま固まって見える（実際にモック生成の完了ダイアログで発生。`StatusMessage` だけ完了になり「生成を実行中です。」とボタン無効化が残った）。**Z 順序は WPF 実行時の挙動でテストでは守れない**ため、オーナー付与を外さないこと。あわせて完了・失敗のモーダルは `finally` で実行中フラグを解除した**後**に出す（背面に回り込んでも画面は完了状態として正しく見える。順序は `GenerateMockProject_ResetsProgressBeforeShowingDialog` が固定）
+
 これらのファイルに触るときは、対応するテスト（DdlGeneratorTests / PasswordBoxBehaviorTests / CSharpCodeGenerationServiceTests / GeneratedFixtureDriftTests）を必ず実行する。
 
 ## コーディング規約

@@ -1228,6 +1228,55 @@ public class MockGenerationDialogViewModelTests
         }
     }
 
+    /// <summary>
+    /// 完了モーダルを出す時点で実行中フラグが解除済みであることを検証する（成功・失敗の両方）。
+    /// </summary>
+    /// <remarks>
+    /// モーダルは呼び出し元スレッドを止めるため、フラグ解除より先に出すと「生成を実行中です。」の
+    /// 表示とボタンの無効化が OK を押すまで残る。ダイアログがウィンドウの背面へ回り込むと
+    /// 画面が固まったように見えるため、順序を固定する。
+    /// </remarks>
+    [Theory(DisplayName = "完了モーダルは実行中フラグ解除後に出す")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task GenerateMockProject_ResetsProgressBeforeShowingDialog(bool succeeds)
+    {
+        var dialogs = new StubDialogService();
+        var (vm, engineBox, generator, baseFolder, mockFolder) = CreateVmWithGenerator(
+            NonEmptyDiagram(),
+            dialogs
+        );
+
+        try
+        {
+            generator.ResultSuccess = succeeds;
+            await vm.RefreshMockGenAvailabilityAsync();
+            await SaveScreenOnClaudeCode(vm, engineBox, mockFolder);
+            vm.OutputFolder = Path.Combine(baseFolder, "out");
+            vm.ProjectName = "AcmeMock";
+
+            bool? inProgressWhenShown = null;
+            bool? completedWhenShown = null;
+            dialogs.OnBeforeShow = () =>
+            {
+                inProgressWhenShown = vm.IsMockGenInProgress;
+                completedWhenShown = vm.MockGenCompleted;
+            };
+
+            await vm.GenerateMockProjectCommand.ExecuteAsync(null);
+
+            // モーダルは実際に出ている（順序だけを見て見逃さないための前提確認）
+            inProgressWhenShown.Should().NotBeNull();
+            // その時点で実行中は解除済み・完了は確定済み
+            inProgressWhenShown.Should().BeFalse();
+            completedWhenShown.Should().BeTrue();
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
     /// <summary>生成失敗時はエラーダイアログでログパスを添えて詳細確認へ誘導することを検証する</summary>
     [Fact(DisplayName = "生成失敗でエラーダイアログ（ログパス含む）を出す")]
     public async Task GenerateMockProject_Failure_ShowsErrorDialogWithLogPath()
