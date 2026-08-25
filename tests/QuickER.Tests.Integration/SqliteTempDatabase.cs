@@ -101,8 +101,11 @@ internal sealed class SqliteTempDatabase : IDisposable
     /// </summary>
     /// <remarks>
     /// <c>sqlite_master</c> から実テーブルを列挙して落とすため、テスト側がテーブル名や削除順を持たなくてよい。
-    /// FK 依存順を気にせず落とせるよう <c>PRAGMA foreign_keys = OFF</c> の下で実行する
-    /// （PRAGMA は接続単位＝この接続を閉じれば元に戻る）。DB ファイルが未作成なら何もしない。
+    /// FK 依存順を気にせず落とせるよう <c>PRAGMA foreign_keys = OFF</c> の下で実行し、ON へは戻さない。
+    /// PRAGMA は接続単位で、既定の接続プーリングにより OFF は Close 後もプール内の接続へ残るが、
+    /// OFF は SQLite の既定値なので新品の接続と区別がつかない（FK 強制が要る消費者は
+    /// <c>Foreign Keys=True</c> を明示した別の接続文字列＝別プールに居て、ライブラリが open ごとに適用する）。
+    /// DB ファイルが未作成なら何もしない。
     /// </remarks>
     public async Task ResetSchemaAsync(CancellationToken ct = default)
     {
@@ -163,7 +166,7 @@ internal sealed class SqliteTempDatabase : IDisposable
         // Microsoft.Data.Sqlite はプールでファイルを掴むため、削除前にプールを解放する。
         // ClearAllPools はプロセス全体のプールを破棄し、並列実行中の他テスト（別の一時 DB）が
         // 使用中の native ハンドルまで破棄して稀に ObjectDisposedException を誘発するため、
-        // この DB の接続文字列（ReadWriteCreate / ReadOnly の 2 種）に限定して解放する
+        // この DB の接続文字列（ReadWriteCreate / ReadOnly / ReadWrite の 3 種）に限定して解放する
         using (var rw = new SqliteConnection(ReadWriteCreateConnectionString))
         {
             SqliteConnection.ClearPool(rw);
