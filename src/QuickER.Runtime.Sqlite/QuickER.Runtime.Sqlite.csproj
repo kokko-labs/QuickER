@@ -22,10 +22,10 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.11" />
-    <!-- Microsoft.Data.Sqlite 10.0.9 が推移的に持ち込む SQLitePCLRaw 2.1.11 には既知の脆弱性
-         (GHSA-2m69-gcr7-jv3q) があるため、修正済みの 3.0.3 を明示参照して上書きする -->
-    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.5" />
+    <PackageReference Include="Microsoft.Data.Sqlite" />
+    <!-- Microsoft.Data.Sqlite が推移的に持ち込む SQLitePCLRaw には既知の脆弱性
+         (GHSA-2m69-gcr7-jv3q) があるため、修正済みの版（Directory.Packages.props）を明示参照して上書きする -->
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" />
     <!-- DI 登録拡張（AddGenerated*Repositories）はスキーマ依存物として生成側に出力されるため、
          本パッケージは Microsoft.Extensions.DependencyInjection 系へ依存しない（依存排他ガードテストで検証） -->
   </ItemGroup>

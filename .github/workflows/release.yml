@@ -34,9 +34,10 @@ jobs:
         uses: actions/checkout@v7
 
       - name: .NET SDK をセットアップ
+        # SDK 版の正本は global.json（ci.yml と同じ。理由もそちらのコメントを参照）
         uses: actions/setup-dotnet@v5
         with:
-          dotnet-version: 10.0.x
+          global-json-file: global.json
 
       - name: ビルド
         run: dotnet build QuickER.slnx -c Release
@@ -70,10 +71,16 @@ jobs:
           Copy-Item LICENSE, LICENSE-NC.md, LICENSING.md, LICENSING.ja.md, THIRD-PARTY-NOTICES.md -Destination ${{ runner.temp }}/publish-lite
 
       - name: Velopack CLI (vpk) をインストール
-        run: dotnet tool install --global vpk
+        # アプリが参照する Velopack パッケージ（QuickER.Gui.csproj）と同版に固定する。
+        # パッケージングだけ最新版が使われると、配布物のフォーマットとアプリ内自動更新機構が
+        # 食い違う可能性があり、その破損はリリース後の自動更新まで発見できない。
+        # Velopack を更新するときは csproj とここを同時に上げる
+        run: dotnet tool install --global vpk --version 1.2.0
 
       # 差分更新パッケージを生成するため既存リリースの資産を取得する。リポジトリ未公開の間や
-      # 初回リリースでは資産が存在せず失敗するため、ワークフロー全体を止めないよう許容する
+      # 初回リリースでは資産が存在せず失敗するため、ワークフロー全体を止めないよう許容する。
+      # 副作用: 2 回目以降のリリースでこの取得が一時的要因で失敗しても緑のまま進み、その回は
+      # 差分更新パッケージが生成されずフル更新のみになる（利用者のダウンロードが太るだけで動作は正常）
       - name: 既存リリースを取得（win-full・差分更新用）
         continue-on-error: true
         run: vpk download github --repoUrl https://github.com/${{ github.repository }} --channel win-full --outputDir ${{ runner.temp }}/releases-full
@@ -81,6 +88,7 @@ jobs:
       - name: win-full を vpk pack（Setup.exe + Portable zip）
         run: vpk pack --packId QuickER --packVersion ${{ steps.version.outputs.version }} --packDir ${{ runner.temp }}/publish-full --mainExe QuickER.exe --icon assets/QuickER.ico --channel win-full --outputDir ${{ runner.temp }}/releases-full
 
+      # 失敗許容の理由と副作用は win-full 側のコメントを参照
       - name: 既存リリースを取得（win-lite・差分更新用）
         continue-on-error: true
         run: vpk download github --repoUrl https://github.com/${{ github.repository }} --channel win-lite --outputDir ${{ runner.temp }}/releases-lite

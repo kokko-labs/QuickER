@@ -5,6 +5,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <RootNamespace>EcOrderRemoteSample.Client</RootNamespace>
+    <!-- サンプルは利用者のプロジェクトを模すため、リポジトリの中央パッケージ管理（CPM）から外す（Shared 側の注記を参照） -->
+    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
   </PropertyGroup>
 
   <ItemGroup>

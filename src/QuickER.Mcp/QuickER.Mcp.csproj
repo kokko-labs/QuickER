@@ -13,7 +13,7 @@
     ツール定義は純粋なスキーマ POCO のため Model にも依存しない。
   -->
   <ItemGroup>
-    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.11" />
-    <PackageReference Include="ModelContextProtocol" Version="2.2.0" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+    <PackageReference Include="ModelContextProtocol" />
   </ItemGroup>
 </Project>

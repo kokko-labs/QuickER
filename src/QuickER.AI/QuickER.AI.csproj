@@ -22,10 +22,10 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Anthropic" Version="12.42.0" />
-    <PackageReference Include="GitHub.Copilot.SDK" Version="1.0.11" />
-    <PackageReference Include="ModelContextProtocol.AspNetCore" Version="2.2.0" />
-    <PackageReference Include="OpenAI" Version="2.13.0" />
+    <PackageReference Include="Anthropic" />
+    <PackageReference Include="GitHub.Copilot.SDK" />
+    <PackageReference Include="ModelContextProtocol.AspNetCore" />
+    <PackageReference Include="OpenAI" />
   </ItemGroup>
 
   <ItemGroup>

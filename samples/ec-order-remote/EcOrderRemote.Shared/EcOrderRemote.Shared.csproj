@@ -4,6 +4,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <RootNamespace>EcOrderRemoteSample</RootNamespace>
+    <!-- サンプルは利用者のプロジェクトを模すため、リポジトリの中央パッケージ管理（CPM）から外し、
+         バージョン直書きのピンを維持する（実際の利用者プロジェクトは QuickER の CPM 管理下に無い） -->
+    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
   </PropertyGroup>
 
   <ItemGroup>

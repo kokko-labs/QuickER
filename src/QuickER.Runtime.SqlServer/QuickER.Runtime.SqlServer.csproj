@@ -24,7 +24,7 @@
   <ItemGroup>
     <!-- DI 登録拡張（AddGenerated*Repositories）はスキーマ依存物として生成側に出力されるため、
          本パッケージは Microsoft.Extensions.DependencyInjection 系へ依存しない（依存排他ガードテストで検証） -->
-    <PackageReference Include="Microsoft.Data.SqlClient" Version="7.0.2" />
+    <PackageReference Include="Microsoft.Data.SqlClient" />
   </ItemGroup>
 
   <ItemGroup>
