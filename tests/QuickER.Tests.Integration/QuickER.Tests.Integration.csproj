@@ -1,0 +1,95 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    実 DB 統合テスト＋生成コードのランタイムテスト（クロスプラットフォーム）。
+
+    QuickER.Tests（net10.0-windows / WPF）から切り出した net10.0 プロジェクトで、CI の ubuntu ジョブが
+    実コンテナ（Testcontainers）でこのプロジェクトだけを実行する（windows-latest は Linux コンテナを
+    起動できないため、実 DB 検証はここが唯一の CI 経路になる）。WPF・GUI への依存を持ち込まないこと。
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <!-- 名前空間はテスト規約（QuickER.Tests.{フォルダ}）に従い QuickER.Tests を根とする -->
+    <RootNamespace>QuickER.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\QuickER.Cli\QuickER.Cli.csproj" />
+    <ProjectReference Include="..\..\src\QuickER.Model\QuickER.Model.csproj" />
+    <ProjectReference Include="..\..\src\QuickER.MySql\QuickER.MySql.csproj" />
+    <ProjectReference Include="..\..\src\QuickER.Oracle\QuickER.Oracle.csproj" />
+    <ProjectReference Include="..\..\src\QuickER.PostgreSql\QuickER.PostgreSql.csproj" />
+    <ProjectReference Include="..\..\src\QuickER.Provider\QuickER.Provider.csproj" />
+    <ProjectReference Include="..\..\src\QuickER.Sqlite\QuickER.Sqlite.csproj" />
+    <ProjectReference Include="..\..\src\QuickER.SqlServer\QuickER.SqlServer.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- RemoteServer フィクスチャ（Minimal API）と in-process Kestrel テストが ASP.NET Core を要求する -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="AwesomeAssertions" />
+    <PackageReference Include="coverlet.collector">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.EntityFrameworkCore" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" />
+    <!-- 方言ランタイムテスト（PostgreSQL / MySQL / Oracle）用の EF Core プロバイダ -->
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+    <PackageReference Include="MySql.EntityFrameworkCore" />
+    <PackageReference Include="Oracle.EntityFrameworkCore" />
+    <!-- SQLite 方言ランタイムテスト用の EF Core プロバイダ（インプロセス・Docker 不要） -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <!-- Testcontainers の推移的依存の脆弱性上書き（理由は Directory.Packages.props のコメントを参照） -->
+    <PackageReference Include="SSH.NET" />
+    <PackageReference Include="Testcontainers.MsSql" />
+    <PackageReference Include="Testcontainers.MySql" />
+    <PackageReference Include="Testcontainers.Oracle" />
+    <PackageReference Include="Testcontainers.PostgreSql" />
+    <PackageReference Include="xunit.runner.visualstudio">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="xunit.v3.mtp-off" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      生成フィクスチャの共有（実体パス不動の二重コンパイル）。
+
+      実体は tests/QuickER.Tests/GeneratedFixture/ のまま動かさない（ドリフト検知・再生成ハーネスの
+      「パス不動」不変条件）。QuickER.Tests 側は構造検証（ドリフト・EditModel・翻訳器）のため、
+      本プロジェクトは実行時挙動検証のために、同じソースをそれぞれのアセンブリへコンパイルする。
+      manual partial（*ManualImplementations / *CustomCheck）は生成側が契約宣言のみを出す設計のため、
+      .g.cs と同一アセンブリでなければコンパイルが通らない＝必ずセットでリンクする。
+    -->
+    <Compile Include="..\QuickER.Tests\GeneratedFixture\*.g.cs" LinkBase="GeneratedFixture" />
+    <Compile
+      Include="..\QuickER.Tests\GeneratedFixture\*FixtureDefinition.cs"
+      LinkBase="GeneratedFixture"
+    />
+    <Compile
+      Include="..\QuickER.Tests\GeneratedFixture\*ManualImplementations.cs"
+      LinkBase="GeneratedFixture"
+    />
+    <Compile
+      Include="..\QuickER.Tests\GeneratedFixture\InMemoryFixtureCustomUniquenessCheck.cs"
+      LinkBase="GeneratedFixture"
+    />
+    <Compile
+      Include="..\QuickER.Tests\GeneratedFixture\UniquenessSqlServerFixtureCustomCheck.cs"
+      LinkBase="GeneratedFixture"
+    />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+</Project>

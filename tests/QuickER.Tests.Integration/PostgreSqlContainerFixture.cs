@@ -47,12 +47,14 @@ public sealed class PostgreSqlContainerFixture : IAsyncLifetime
             ConnectionString = _container.GetConnectionString();
             IsAvailable = true;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (!DockerRequirement.IsStrict)
         {
-            // Docker が無い・デーモンに接続できない等の場合はテストをスキップさせる
+            // Docker が無い・デーモンに接続できない等の場合はテストをスキップさせる。
+            // 厳格モード（QUICKER_REQUIRE_DOCKER=1＝Docker があるはずの環境）ではフィルタが成立せず
+            // そのまま失敗する＝壊れた Docker 構成がスキップ緑に化けない（DockerRequirement を参照）
             IsAvailable = false;
             UnavailableReason =
-                $"PostgreSQL コンテナを起動できませんでした（Docker 不在または起動失敗）: {ex.Message}";
+                $"PostgreSQL コンテナを起動できませんでした（Docker 不在または起動失敗）: {ex}";
         }
     }
 

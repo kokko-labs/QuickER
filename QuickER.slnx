@@ -110,5 +110,6 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/QuickER.Tests/QuickER.Tests.csproj" />
+    <Project Path="tests/QuickER.Tests.Integration/QuickER.Tests.Integration.csproj" />
   </Folder>
 </Solution>
