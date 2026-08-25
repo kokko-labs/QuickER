@@ -127,8 +127,8 @@
             />
 
             <!-- 層フォルダの相対パス（層別出力 ON のときのみ表示。サーバー層はリモートサービス生成時のみ）。
-                 並びはドメイン→プレゼンテーション→インフラストラクチャー→サーバーで、GeneratedLayer の宣言順
-                 （診断の出力順）とは意図的に別＝画面は層の呼び方に馴染んだ順に並べる -->
+                 並びはドメイン→プレゼンテーション→インフラストラクチャ→サーバー＝GeneratedLayer の宣言順・
+                 診断の出力順・docs と同じ（層の並びは製品全体で 1 つ） -->
             <StackPanel
               Margin="18,10,0,0"
               Visibility="{Binding ShowLayerDirectories, Converter={StaticResource BoolToVisibilityConverter}}"
@@ -139,9 +139,10 @@
                 Text="{x:Static res:Strings.CodeGen_LayerDirectories}"
               />
               <Grid>
-                <!-- ラベル列は最長の「インフラストラクチャー層」（実測 122px・右余白込み）が収まる幅にする（FieldLabel は折返し・省略なし） -->
+                <!-- ラベル列は最長の「インフラストラクチャ層」が収まる幅にする（FieldLabel は折返しも省略記号もないため
+                     はみ出すと切れる）。右余白込みの実測は Yu Gothic UI 13px で 114px・Meiryo へフォールバックすると 151px -->
                 <Grid.ColumnDefinitions>
-                  <ColumnDefinition Width="150" />
+                  <ColumnDefinition Width="160" />
                   <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
                 <Grid.RowDefinitions>

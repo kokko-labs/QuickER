@@ -1081,6 +1081,8 @@ public sealed class CSharpCodeGenerationService
             .Select(GeneratedFilePlanner.LayerOf)
             .ToHashSet();
 
+        // 並びはドメイン→プレゼンテーション→インフラストラクチャ→サーバー＝GeneratedLayer の宣言順・
+        // GUI の層フォルダ欄と同じ順。複数の層フォルダが同時に不正なとき、診断の列挙順が画面の欄順と食い違わない
         (GeneratedLayer Layer, string Name, string? Value)[] layerDirectories =
         [
             (
@@ -1089,14 +1091,14 @@ public sealed class CSharpCodeGenerationService
                 options.DomainLayerDirectory
             ),
             (
-                GeneratedLayer.Infrastructure,
-                nameof(CodeGenerationOptions.InfrastructureLayerDirectory),
-                options.InfrastructureLayerDirectory
-            ),
-            (
                 GeneratedLayer.Presentation,
                 nameof(CodeGenerationOptions.PresentationLayerDirectory),
                 options.PresentationLayerDirectory
+            ),
+            (
+                GeneratedLayer.Infrastructure,
+                nameof(CodeGenerationOptions.InfrastructureLayerDirectory),
+                options.InfrastructureLayerDirectory
             ),
             (
                 GeneratedLayer.Server,

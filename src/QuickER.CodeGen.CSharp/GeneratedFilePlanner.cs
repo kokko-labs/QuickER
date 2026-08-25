@@ -127,11 +127,11 @@ public enum GeneratedLayer
     /// <summary>ドメイン層（Entity / ValueObject / Repository 契約 / Runtime コア）</summary>
     Domain,
 
-    /// <summary>インフラストラクチャ層（方言別実装 / EF Core / インメモリ / 同期 / HTTP クライアントと各固定 infra）</summary>
-    Infrastructure,
-
     /// <summary>プレゼンテーション層（EditModel / Mapper）</summary>
     Presentation,
+
+    /// <summary>インフラストラクチャ層（方言別実装 / EF Core / インメモリ / 同期 / HTTP クライアントと各固定 infra）</summary>
+    Infrastructure,
 
     /// <summary>サーバー層（リモートサーバー実装＋ASP.NET Core 固定部。FrameworkReference を要するため独立プロジェクト前提）</summary>
     Server,
@@ -1153,8 +1153,8 @@ public static class GeneratedFilePlanner
         layer switch
         {
             GeneratedLayer.Domain => "Domain",
-            GeneratedLayer.Infrastructure => "Infrastructure",
             GeneratedLayer.Presentation => "Presentation",
+            GeneratedLayer.Infrastructure => "Infrastructure",
             GeneratedLayer.Server => "Server",
             _ => "Generated",
         };
@@ -1165,8 +1165,8 @@ public static class GeneratedFilePlanner
         var explicitValue = layer switch
         {
             GeneratedLayer.Domain => options.DomainLayerDirectory,
-            GeneratedLayer.Infrastructure => options.InfrastructureLayerDirectory,
             GeneratedLayer.Presentation => options.PresentationLayerDirectory,
+            GeneratedLayer.Infrastructure => options.InfrastructureLayerDirectory,
             GeneratedLayer.Server => options.ServerLayerDirectory,
             _ => null,
         };

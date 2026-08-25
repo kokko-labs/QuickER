@@ -1026,27 +1026,27 @@ DB なしでユニットテストするためのインメモリ実装を追加�
 
 ## 層別フォルダ出力（--layered-output）
 
-`--layered-output`（設定キー `LayeredOutput`・**既定 OFF**）は、分割生成された各ファイルを出力ディレクトリ配下の層別サブフォルダへ振り分け、各層を独立プロジェクトにできるようにします——DDD 風のドメイン／インフラストラクチャ／プレゼンテーション分割＋リモートサービス生成時のサーバープロジェクトです。`SplitFilesByCategory` を自動的に含意します（単一ファイルはフォルダへ割れないため）。
+`--layered-output`（設定キー `LayeredOutput`・**既定 OFF**）は、分割生成された各ファイルを出力ディレクトリ配下の層別サブフォルダへ振り分け、各層を独立プロジェクトにできるようにします——DDD 風のドメイン／プレゼンテーション／インフラストラクチャ分割＋リモートサービス生成時のサーバープロジェクトです。`SplitFilesByCategory` を自動的に含意します（単一ファイルはフォルダへ割れないため）。
 
 バケット→層の対応は固定です：
 
 | 層（既定フォルダ） | ファイル |
 |---|---|
 | ドメイン（`Domain/`） | `Entities.g.cs`・`ValueObjects.g.cs`・`Repositories.g.cs`（契約）・`Runtime.g.cs`（インラインランタイム） |
-| インフラストラクチャ（`Infrastructure/`） | `Repositories.SqlServer.g.cs` / `.Sqlite` / `.EntityFrameworkCore` / `.InMemory` / `.Sync` / `.Http` と対応する固定 infra の `Runtime.{...}.g.cs` |
 | プレゼンテーション（`Presentation/`） | `EditModels.g.cs`・`Mappers.g.cs` |
+| インフラストラクチャ（`Infrastructure/`） | `Repositories.SqlServer.g.cs` / `.Sqlite` / `.EntityFrameworkCore` / `.InMemory` / `.Sync` / `.Http` と対応する固定 infra の `Runtime.{...}.g.cs` |
 | サーバー（`Server/`） | `RemoteServer.g.cs`・`Runtime.AspNetCore.g.cs`（ASP.NET Core の `FrameworkReference` を要するため通常のクラスライブラリには置けません） |
 | 出力ディレクトリ直下 | API リファレンス（`*.g.md`）＝どの csproj にも属さないため。`--api-docs-dir` で `docs` などのサブフォルダへ移せます（層とは独立） |
 
-各層のフォルダは `--domain-layer-dir` / `--infrastructure-layer-dir` / `--presentation-layer-dir` / `--server-layer-dir`（設定キー `DomainLayerDirectory`・`InfrastructureLayerDirectory`・`PresentationLayerDirectory`・`ServerLayerDirectory`）で上書きできます。値は出力ディレクトリからの相対パスで、複数階層（`MyApp.Domain/Generated`）も指定できるため、出力ディレクトリをソリューションのソースフォルダへ向ければ層プロジェクトの中へ直接生成できます。絶対パス・ドライブ指定・`..` は生成時エラーとして拒否され、空の値は既定フォルダ名へフォールバックします。
+各層のフォルダは `--domain-layer-dir` / `--presentation-layer-dir` / `--infrastructure-layer-dir` / `--server-layer-dir`（設定キー `DomainLayerDirectory`・`PresentationLayerDirectory`・`InfrastructureLayerDirectory`・`ServerLayerDirectory`）で上書きできます。値は出力ディレクトリからの相対パスで、複数階層（`MyApp.Domain/Generated`）も指定できるため、出力ディレクトリをソリューションのソースフォルダへ向ければ層プロジェクトの中へ直接生成できます。絶対パス・ドライブ指定・`..` は生成時エラーとして拒否され、空の値は既定フォルダ名へフォールバックします。
 
 **名前空間の既定は層フォルダに追従**し、フォルダと名前空間が揃います。各層の名前空間ルートはフォルダパスの区切りを `.` に変換したもの（フォルダ `MyApp.Domain/Generated` → ルート `MyApp.Domain.Generated`＝「プロジェクトフォルダ名＝RootNamespace」という csproj の慣行と一致）で、各種別がその下へ `{ルート}.{接尾辞}` でぶら下がります：
 
 | 層（フォルダ `MyApp.Domain` 等） | 名前空間 |
 |---|---|
 | ドメイン | `MyApp.Domain.Entities` / `.ValueObjects` / `.Repositories`（契約） / `.Runtime` |
-| インフラストラクチャ | `MyApp.Infrastructure.SqlServer` / `.Sqlite` / `.EntityFrameworkCore` / `.InMemory` / `.Sync` / `.Http`——各系統の固定 infra ファイル（`Runtime.SqlServer.g.cs` 等）と per-entity ファイル（`Repositories.SqlServer.g.cs` 等）は同一の名前空間を共有します |
 | プレゼンテーション | `MyApp.Presentation.EditModels` / `.Mappers` |
+| インフラストラクチャ | `MyApp.Infrastructure.SqlServer` / `.Sqlite` / `.EntityFrameworkCore` / `.InMemory` / `.Sync` / `.Http`——各系統の固定 infra ファイル（`Runtime.SqlServer.g.cs` 等）と per-entity ファイル（`Repositories.SqlServer.g.cs` 等）は同一の名前空間を共有します |
 | サーバー | `MyApp.Server.RemoteServer` / `.AspNetCore` |
 
 明示の名前空間オプション（`EntityNamespace`・`RepositoryNamespace` 等）は従来どおり導出より優先されます。名前空間として成立しないフォルダ名（ハイフン等）は生成時エラーになります（その層の名前空間をすべて明示指定している場合を除く）。通常分割で方言実装が契約名前空間の下（`{契約}.SqlServer`）にぶら下がっていたねじれ（別プロジェクト在住なのにドメインの名前空間）も、層別出力ではインフラ層ルートの下へ移って解消されます。`RootNamespace` は導出既定には現れなくなります（層フォルダが代わりを務めます）。

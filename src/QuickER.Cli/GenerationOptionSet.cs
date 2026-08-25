@@ -43,14 +43,14 @@ internal sealed class GenerationOptionSet
             Strings.Cli_Opt_DomainLayerDirectory
         );
         AddString(
-            "InfrastructureLayerDirectory",
-            "--infrastructure-layer-dir",
-            Strings.Cli_Opt_InfrastructureLayerDirectory
-        );
-        AddString(
             "PresentationLayerDirectory",
             "--presentation-layer-dir",
             Strings.Cli_Opt_PresentationLayerDirectory
+        );
+        AddString(
+            "InfrastructureLayerDirectory",
+            "--infrastructure-layer-dir",
+            Strings.Cli_Opt_InfrastructureLayerDirectory
         );
         AddString(
             "ServerLayerDirectory",

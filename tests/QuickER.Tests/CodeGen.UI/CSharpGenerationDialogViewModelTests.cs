@@ -709,10 +709,10 @@ public class CSharpGenerationDialogViewModelTests
 
         vm.DomainLayerDirectory.Should()
             .Be(GeneratedFilePlanner.DefaultLayerDirectory(GeneratedLayer.Domain));
-        vm.InfrastructureLayerDirectory.Should()
-            .Be(GeneratedFilePlanner.DefaultLayerDirectory(GeneratedLayer.Infrastructure));
         vm.PresentationLayerDirectory.Should()
             .Be(GeneratedFilePlanner.DefaultLayerDirectory(GeneratedLayer.Presentation));
+        vm.InfrastructureLayerDirectory.Should()
+            .Be(GeneratedFilePlanner.DefaultLayerDirectory(GeneratedLayer.Infrastructure));
         vm.ServerLayerDirectory.Should()
             .Be(GeneratedFilePlanner.DefaultLayerDirectory(GeneratedLayer.Server));
     }

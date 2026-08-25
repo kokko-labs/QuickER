@@ -108,15 +108,15 @@ namespace QuickER.CodeGen.UI.Resources {
             }
         }
 
-        public static string CodeGen_LayerLabel_Infrastructure {
-            get {
-                return ResourceManager.GetString("CodeGen_LayerLabel_Infrastructure", resourceCulture);
-            }
-        }
-
         public static string CodeGen_LayerLabel_Presentation {
             get {
                 return ResourceManager.GetString("CodeGen_LayerLabel_Presentation", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_LayerLabel_Infrastructure {
+            get {
+                return ResourceManager.GetString("CodeGen_LayerLabel_Infrastructure", resourceCulture);
             }
         }
 

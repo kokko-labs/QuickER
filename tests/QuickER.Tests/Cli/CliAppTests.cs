@@ -1552,8 +1552,8 @@ public class CliAppTests
                 "GenerateRemoteServices": true,
                 "LayeredOutput": true,
                 "DomainLayerDirectory": "ConfigDomain",
-                "InfrastructureLayerDirectory": "ConfigInfra",
                 "PresentationLayerDirectory": "ConfigUi",
+                "InfrastructureLayerDirectory": "ConfigInfra",
                 "ServerLayerDirectory": "ConfigServer"
             }
             """

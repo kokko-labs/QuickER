@@ -1028,27 +1028,27 @@ Note that the file and namespace suffix `EntityFrameworkCore` is about matching 
 
 ## Layered folder output (--layered-output)
 
-`--layered-output` (config key `LayeredOutput`, **default OFF**) sorts the split files into layer subfolders under the output directory, so that each layer can be its own project — a DDD-style domain / infrastructure / presentation split, plus a server project when remote services are generated. It implies `SplitFilesByCategory` (a single file cannot be split across folders).
+`--layered-output` (config key `LayeredOutput`, **default OFF**) sorts the split files into layer subfolders under the output directory, so that each layer can be its own project — a DDD-style domain / presentation / infrastructure split, plus a server project when remote services are generated. It implies `SplitFilesByCategory` (a single file cannot be split across folders).
 
 The bucket-to-layer mapping is fixed:
 
 | Layer (default folder) | Files |
 |---|---|
 | Domain (`Domain/`) | `Entities.g.cs`, `ValueObjects.g.cs`, `Repositories.g.cs` (the contracts), `Runtime.g.cs` (inline runtime) |
-| Infrastructure (`Infrastructure/`) | `Repositories.SqlServer.g.cs` / `.Sqlite` / `.EntityFrameworkCore` / `.InMemory` / `.Sync` / `.Http` and the matching `Runtime.{...}.g.cs` fixed-infrastructure files |
 | Presentation (`Presentation/`) | `EditModels.g.cs`, `Mappers.g.cs` |
+| Infrastructure (`Infrastructure/`) | `Repositories.SqlServer.g.cs` / `.Sqlite` / `.EntityFrameworkCore` / `.InMemory` / `.Sync` / `.Http` and the matching `Runtime.{...}.g.cs` fixed-infrastructure files |
 | Server (`Server/`) | `RemoteServer.g.cs`, `Runtime.AspNetCore.g.cs` (they need the ASP.NET Core `FrameworkReference`, so they cannot live in a plain class library) |
 | Output directory root | The API reference (`*.g.md`) — it belongs to no csproj. `--api-docs-dir` can move it into a subfolder such as `docs` (independent of the layers) |
 
-Each layer's folder can be overridden with `--domain-layer-dir` / `--infrastructure-layer-dir` / `--presentation-layer-dir` / `--server-layer-dir` (config keys `DomainLayerDirectory`, `InfrastructureLayerDirectory`, `PresentationLayerDirectory`, `ServerLayerDirectory`). A value is a relative path under the output directory and may have several segments (`MyApp.Domain/Generated`), so you can point the output directory at your solution's source folder and generate straight into the layer projects. Absolute paths, drive letters, and `..` are rejected as a generation error; a blank value falls back to the default folder name.
+Each layer's folder can be overridden with `--domain-layer-dir` / `--presentation-layer-dir` / `--infrastructure-layer-dir` / `--server-layer-dir` (config keys `DomainLayerDirectory`, `PresentationLayerDirectory`, `InfrastructureLayerDirectory`, `ServerLayerDirectory`). A value is a relative path under the output directory and may have several segments (`MyApp.Domain/Generated`), so you can point the output directory at your solution's source folder and generate straight into the layer projects. Absolute paths, drive letters, and `..` are rejected as a generation error; a blank value falls back to the default folder name.
 
 **The default namespaces follow the layer folders**, so folders and namespaces stay aligned. Each layer's namespace root is its folder path with the separators turned into dots (folder `MyApp.Domain/Generated` → root `MyApp.Domain.Generated`, matching the "project folder name = RootNamespace" csproj convention), and the buckets hang under it as `{root}.{suffix}`:
 
 | Layer (folder `MyApp.Domain` etc.) | Namespaces |
 |---|---|
 | Domain | `MyApp.Domain.Entities` / `.ValueObjects` / `.Repositories` (contracts) / `.Runtime` |
-| Infrastructure | `MyApp.Infrastructure.SqlServer` / `.Sqlite` / `.EntityFrameworkCore` / `.InMemory` / `.Sync` / `.Http` — the fixed-infrastructure file (`Runtime.SqlServer.g.cs` etc.) and the per-entity file (`Repositories.SqlServer.g.cs` etc.) of each family share one namespace |
 | Presentation | `MyApp.Presentation.EditModels` / `.Mappers` |
+| Infrastructure | `MyApp.Infrastructure.SqlServer` / `.Sqlite` / `.EntityFrameworkCore` / `.InMemory` / `.Sync` / `.Http` — the fixed-infrastructure file (`Runtime.SqlServer.g.cs` etc.) and the per-entity file (`Repositories.SqlServer.g.cs` etc.) of each family share one namespace |
 | Server | `MyApp.Server.RemoteServer` / `.AspNetCore` |
 
 The explicit namespace options (`EntityNamespace`, `RepositoryNamespace`, and so on) still win over the derivation, exactly as before. A layer folder that cannot form a C# namespace (a hyphen and so on) is a generation error, unless every namespace in that layer is set explicitly. This also untangles the plain-split quirk where the dialect implementations hung under the contract namespace (`{contracts}.SqlServer`) even though they live in another project — with layered output they sit under the infrastructure root instead. `RootNamespace` no longer appears in the derived defaults (the layer folders take its place).

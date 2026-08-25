@@ -90,7 +90,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     }
 
     /// <summary>
-    /// 生成ファイルを層別サブフォルダ（ドメイン／インフラ／プレゼンテーション／サーバー）へ振り分けて出力するか（既定 OFF）
+    /// 生成ファイルを層別サブフォルダ（ドメイン／プレゼンテーション／インフラ／サーバー）へ振り分けて出力するか（既定 OFF）
     /// </summary>
     /// <remarks>
     /// ON は分割出力（<see cref="SplitFilesByCategory"/>）を自動的に含意する（単一ファイルは層へ割れないため）。
@@ -108,16 +108,16 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
         GeneratedLayer.Domain
     );
 
-    /// <summary>層別出力時のインフラストラクチャ層フォルダ（出力先からの相対パス）</summary>
-    [ObservableProperty]
-    private string _infrastructureLayerDirectory = GeneratedFilePlanner.DefaultLayerDirectory(
-        GeneratedLayer.Infrastructure
-    );
-
     /// <summary>層別出力時のプレゼンテーション層フォルダ（出力先からの相対パス）</summary>
     [ObservableProperty]
     private string _presentationLayerDirectory = GeneratedFilePlanner.DefaultLayerDirectory(
         GeneratedLayer.Presentation
+    );
+
+    /// <summary>層別出力時のインフラストラクチャ層フォルダ（出力先からの相対パス）</summary>
+    [ObservableProperty]
+    private string _infrastructureLayerDirectory = GeneratedFilePlanner.DefaultLayerDirectory(
+        GeneratedLayer.Infrastructure
     );
 
     /// <summary>層別出力時のサーバー層フォルダ（出力先からの相対パス。リモートサービス生成時のみ使われる）</summary>
@@ -174,11 +174,11 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     partial void OnDomainLayerDirectoryChanged(string? oldValue, string newValue) =>
         ApplyLayerDirectoryChange(NamespaceDefaultContext(domainLayerDirectory: oldValue));
 
-    partial void OnInfrastructureLayerDirectoryChanged(string? oldValue, string newValue) =>
-        ApplyLayerDirectoryChange(NamespaceDefaultContext(infrastructureLayerDirectory: oldValue));
-
     partial void OnPresentationLayerDirectoryChanged(string? oldValue, string newValue) =>
         ApplyLayerDirectoryChange(NamespaceDefaultContext(presentationLayerDirectory: oldValue));
+
+    partial void OnInfrastructureLayerDirectoryChanged(string? oldValue, string newValue) =>
+        ApplyLayerDirectoryChange(NamespaceDefaultContext(infrastructureLayerDirectory: oldValue));
 
     partial void OnServerLayerDirectoryChanged(string? oldValue, string newValue) =>
         ApplyLayerDirectoryChange(NamespaceDefaultContext(serverLayerDirectory: oldValue));
@@ -718,8 +718,8 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
         bool? layeredOutput = null,
         string? rootNamespace = null,
         string? domainLayerDirectory = null,
-        string? infrastructureLayerDirectory = null,
         string? presentationLayerDirectory = null,
+        string? infrastructureLayerDirectory = null,
         string? serverLayerDirectory = null
     ) =>
         new()
@@ -727,9 +727,9 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             RootNamespace = rootNamespace ?? RootNamespace,
             LayeredOutput = layeredOutput ?? LayeredOutput,
             DomainLayerDirectory = domainLayerDirectory ?? DomainLayerDirectory,
+            PresentationLayerDirectory = presentationLayerDirectory ?? PresentationLayerDirectory,
             InfrastructureLayerDirectory =
                 infrastructureLayerDirectory ?? InfrastructureLayerDirectory,
-            PresentationLayerDirectory = presentationLayerDirectory ?? PresentationLayerDirectory,
             ServerLayerDirectory = serverLayerDirectory ?? ServerLayerDirectory,
         };
 
@@ -794,18 +794,18 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             // 層別出力は分割出力より後に適用する（含意の連動で分割が強制 ON になるため。
             // 外部編集された「層別 ON＋分割 OFF」の設定でも UI 不変条件へ揃う）
             LayeredOutput = settings.LayeredOutput;
-            // 空の層フォルダは planner の既定名（Domain / Infrastructure / …）でプリフィルする
+            // 空の層フォルダは planner の既定名（Domain / Presentation / …）でプリフィルする
             DomainLayerDirectory = PrefillLayer(
                 settings.DomainLayerDirectory,
                 GeneratedLayer.Domain
             );
-            InfrastructureLayerDirectory = PrefillLayer(
-                settings.InfrastructureLayerDirectory,
-                GeneratedLayer.Infrastructure
-            );
             PresentationLayerDirectory = PrefillLayer(
                 settings.PresentationLayerDirectory,
                 GeneratedLayer.Presentation
+            );
+            InfrastructureLayerDirectory = PrefillLayer(
+                settings.InfrastructureLayerDirectory,
+                GeneratedLayer.Infrastructure
             );
             ServerLayerDirectory = PrefillLayer(
                 settings.ServerLayerDirectory,
@@ -959,13 +959,13 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
                 DomainLayerDirectory,
                 GeneratedLayer.Domain
             ),
-            InfrastructureLayerDirectory = LayerDirectoryForPersistence(
-                InfrastructureLayerDirectory,
-                GeneratedLayer.Infrastructure
-            ),
             PresentationLayerDirectory = LayerDirectoryForPersistence(
                 PresentationLayerDirectory,
                 GeneratedLayer.Presentation
+            ),
+            InfrastructureLayerDirectory = LayerDirectoryForPersistence(
+                InfrastructureLayerDirectory,
+                GeneratedLayer.Infrastructure
             ),
             ServerLayerDirectory = LayerDirectoryForPersistence(
                 ServerLayerDirectory,

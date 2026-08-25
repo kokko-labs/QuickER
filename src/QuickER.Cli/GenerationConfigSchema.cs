@@ -47,7 +47,7 @@ public static class GenerationConfigSchema
             "boolean",
             false,
             "Output mode",
-            "Split generated files into per-layer subfolders (Domain / Infrastructure / Presentation / Server) under out_dir. Implies SplitFilesByCategory."
+            "Split generated files into per-layer subfolders (Domain / Presentation / Infrastructure / Server) under out_dir. Implies SplitFilesByCategory."
         ),
         new(
             "DomainLayerDirectory",
@@ -57,18 +57,18 @@ public static class GenerationConfigSchema
             "Domain layer folder for LayeredOutput, relative to out_dir. Falls back to \"Domain\" when blank. Absolute paths and \"..\" are rejected."
         ),
         new(
-            "InfrastructureLayerDirectory",
-            "string",
-            null,
-            "Output mode",
-            "Infrastructure layer folder for LayeredOutput, relative to out_dir. Falls back to \"Infrastructure\" when blank. Absolute paths and \"..\" are rejected."
-        ),
-        new(
             "PresentationLayerDirectory",
             "string",
             null,
             "Output mode",
             "Presentation layer folder for LayeredOutput, relative to out_dir. Falls back to \"Presentation\" when blank. Absolute paths and \"..\" are rejected."
+        ),
+        new(
+            "InfrastructureLayerDirectory",
+            "string",
+            null,
+            "Output mode",
+            "Infrastructure layer folder for LayeredOutput, relative to out_dir. Falls back to \"Infrastructure\" when blank. Absolute paths and \"..\" are rejected."
         ),
         new(
             "ServerLayerDirectory",
@@ -288,7 +288,7 @@ public static class GenerationConfigSchema
         "UseGuidKeyForStringPrimaryKey applies only when GenerateValueObjects is true and the primary key is a string.",
         "RepositoryDialects supports only \"sqlserver\" and \"sqlite\"; when null or empty, a single dialect is derived from the provider / diagram target DBMS.",
         "The namespace keys (RuntimeNamespace, EntityNamespace, EditModelNamespace, MapperNamespace, RepositoryNamespace, ValueObjectNamespace) apply only when SplitFilesByCategory is true.",
-        "The layer directory keys (DomainLayerDirectory, InfrastructureLayerDirectory, PresentationLayerDirectory, ServerLayerDirectory) apply only when LayeredOutput is true; ServerLayerDirectory only matters when remote services are also generated.",
+        "The layer directory keys (DomainLayerDirectory, PresentationLayerDirectory, InfrastructureLayerDirectory, ServerLayerDirectory) apply only when LayeredOutput is true; ServerLayerDirectory only matters when remote services are also generated.",
         "When LayeredOutput is true, blank namespace keys derive their defaults from the layer folders (path separators become dots, e.g. folder \"MyApp.Domain/Generated\" gives namespaces under MyApp.Domain.Generated), so the folders and namespaces stay aligned; explicit namespace keys still win. A layer folder that cannot form a C# namespace (a hyphen and so on) is a generation error unless every namespace in that layer is set explicitly.",
     ];
 

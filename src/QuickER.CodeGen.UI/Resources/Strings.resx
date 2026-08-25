@@ -85,11 +85,11 @@
   <data name="CodeGen_LayerLabel_Domain" xml:space="preserve">
     <value>Domain</value>
   </data>
-  <data name="CodeGen_LayerLabel_Infrastructure" xml:space="preserve">
-    <value>Infrastructure</value>
-  </data>
   <data name="CodeGen_LayerLabel_Presentation" xml:space="preserve">
     <value>Presentation</value>
+  </data>
+  <data name="CodeGen_LayerLabel_Infrastructure" xml:space="preserve">
+    <value>Infrastructure</value>
   </data>
   <data name="CodeGen_LayerLabel_Server" xml:space="preserve">
     <value>Server</value>

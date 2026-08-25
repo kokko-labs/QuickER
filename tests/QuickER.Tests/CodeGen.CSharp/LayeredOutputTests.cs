@@ -148,8 +148,8 @@ public sealed class LayeredOutputTests
             FullLayeredOptions() with
             {
                 DomainLayerDirectory = "MyApp.Domain/Generated",
-                InfrastructureLayerDirectory = "   ",
                 PresentationLayerDirectory = "MyApp.Wpf",
+                InfrastructureLayerDirectory = "   ",
             }
         );
 

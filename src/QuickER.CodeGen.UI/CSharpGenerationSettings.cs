@@ -21,7 +21,7 @@ public class CSharpGenerationSettings
     public bool SplitFilesByCategory { get; set; }
 
     /// <summary>
-    /// 分割した生成ファイルを層別サブフォルダ（ドメイン／インフラ／プレゼンテーション／サーバー）へ
+    /// 分割した生成ファイルを層別サブフォルダ（ドメイン／プレゼンテーション／インフラ／サーバー）へ
     /// 振り分けて出力するか（既定 false。true は <see cref="SplitFilesByCategory"/> を自動的に含意する）
     /// </summary>
     public bool LayeredOutput { get; set; }
@@ -29,11 +29,11 @@ public class CSharpGenerationSettings
     /// <summary>層別出力時のドメイン層フォルダ（出力先からの相対パス）。空なら <c>Domain</c></summary>
     public string DomainLayerDirectory { get; set; } = string.Empty;
 
-    /// <summary>層別出力時のインフラストラクチャ層フォルダ（出力先からの相対パス）。空なら <c>Infrastructure</c></summary>
-    public string InfrastructureLayerDirectory { get; set; } = string.Empty;
-
     /// <summary>層別出力時のプレゼンテーション層フォルダ（出力先からの相対パス）。空なら <c>Presentation</c></summary>
     public string PresentationLayerDirectory { get; set; } = string.Empty;
+
+    /// <summary>層別出力時のインフラストラクチャ層フォルダ（出力先からの相対パス）。空なら <c>Infrastructure</c></summary>
+    public string InfrastructureLayerDirectory { get; set; } = string.Empty;
 
     /// <summary>層別出力時のサーバー層フォルダ（出力先からの相対パス）。空なら <c>Server</c></summary>
     public string ServerLayerDirectory { get; set; } = string.Empty;
@@ -211,8 +211,8 @@ public class CSharpGenerationSettings
             // ここでは両方の値をそのまま渡す）。層フォルダの空白は null へ畳み、planner の既定名へフォールバックさせる
             LayeredOutput = LayeredOutput,
             DomainLayerDirectory = NullIfEmpty(DomainLayerDirectory),
-            InfrastructureLayerDirectory = NullIfEmpty(InfrastructureLayerDirectory),
             PresentationLayerDirectory = NullIfEmpty(PresentationLayerDirectory),
+            InfrastructureLayerDirectory = NullIfEmpty(InfrastructureLayerDirectory),
             ServerLayerDirectory = NullIfEmpty(ServerLayerDirectory),
             RuntimeNamespace = NullIfEmpty(RuntimeNamespace),
             EntityNamespace = NullIfEmpty(EntityNamespace),
