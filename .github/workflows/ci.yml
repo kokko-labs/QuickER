@@ -1,9 +1,12 @@
 # QuickER CI: push / PR ごとにビルドと全テストを実行する
 #
-# - ランナーは windows-latest（テストプロジェクトが net10.0-windows / WPF 依存のため Linux では実行不可）
-# - Testcontainers による実 DB 統合テストは、ランナーで Linux コンテナが使えないため
-#   フィクスチャの Docker 検出により自動スキップされる（ローカルの Docker 環境では全件実行される）
-# - 生成コードの Roslyn コンパイル検証（GeneratedCodeCompilationTests）はここで常時実行される
+# - build-and-test（windows-latest）: 全体のビルド＋全テスト。QuickER.Tests は net10.0-windows / WPF
+#   依存のため Windows が必須。Windows ランナーは Linux コンテナを起動できないため、Testcontainers 系は
+#   このジョブではフィクスチャの Docker 検出によりスキップされる
+# - integration-tests-linux（ubuntu-latest）: 切り出した QuickER.Tests.Integration（net10.0）を実 DB
+#   コンテナで実行する＝実 DB 検証の唯一の CI 経路。厳格モード（QUICKER_REQUIRE_DOCKER=1）により
+#   コンテナ起動失敗はスキップでなく失敗になる（壊れた Docker 構成がスキップ緑に化けない）
+# - 生成コードの Roslyn コンパイル検証（GeneratedCodeCompilationTests）は windows ジョブで常時実行される
 name: CI
 
 on:
@@ -35,6 +38,28 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # 実 DB 統合テスト（ubuntu＝Linux コンテナが使える唯一の GitHub ホストランナー）。
+  # イメージ pull（SQL Server / PostgreSQL / MySQL / Oracle）を毎回行うため 10〜15 分程度かかるが、
+  # windows ジョブと並走するので壁時計時間はほぼ増えない
+  integration-tests-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: リポジトリを取得
+        uses: actions/checkout@v7
+
+      - name: .NET SDK をセットアップ
+        uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: 統合テスト（実 DB コンテナ・厳格モード）
+        # QUICKER_REQUIRE_DOCKER=1: このジョブは Docker が確実にある環境なので、コンテナ起動失敗を
+        # スキップへ変換せず失敗させる（詳細はテスト側 DockerRequirement のコメントを参照）
+        env:
+          QUICKER_REQUIRE_DOCKER: "1"
+        run: dotnet test tests/QuickER.Tests.Integration/QuickER.Tests.Integration.csproj --logger "console;verbosity=normal"
+
   build-and-test:
     runs-on: windows-latest
     timeout-minutes: 30
