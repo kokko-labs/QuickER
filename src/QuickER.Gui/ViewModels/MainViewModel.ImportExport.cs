@@ -14,54 +14,28 @@ using QuickER.Services;
 
 namespace QuickER.ViewModels;
 
-/// <summary>ER 図のエクスポート形式</summary>
-internal enum DiagramExportFormat
-{
-    /// <summary>PNG 画像</summary>
-    Png,
-
-    /// <summary>SVG 画像</summary>
-    Svg,
-
-    /// <summary>SQL（DDL）スクリプト</summary>
-    Sql,
-
-    /// <summary>Mermaid 記法</summary>
-    Mermaid,
-
-    /// <summary>DBML 記法</summary>
-    Dbml,
-
-    /// <summary>Excel テーブル定義書</summary>
-    Excel,
-
-    /// <summary>HTML テーブル定義書</summary>
-    Html,
-
-    /// <summary>スキーマのみ JSON（配置情報なし・再取込可能）</summary>
-    SchemaJson,
-}
-
-/// <summary>ER 図のインポート形式</summary>
-internal enum DiagramImportFormat
-{
-    /// <summary>Mermaid 記法</summary>
-    Mermaid,
-
-    /// <summary>DBML 記法</summary>
-    Dbml,
-
-    /// <summary>Excel テーブル定義書</summary>
-    Excel,
-}
-
 /// <summary>MainViewModel の入出力機能を担う partial クラス</summary>
 /// <remarks>
-/// 自動保存・復元、各種フォーマットのエクスポート・インポート、SQL Server 連携、
-/// AI 生成、C# コード生成のコマンドを担当する
+/// 自動保存・復元、文書の保存／読込と外部変更検知を担当する。エクスポート・インポートの
+/// 実行本体は <see cref="DiagramExportService"/> / <see cref="DiagramImportService"/> へ抽出済みで、
+/// ここはコマンドの委譲と <see cref="IDiagramTransferHost"/>（サービスへ貸す能力）の実装だけを持つ
 /// </remarks>
-public partial class MainViewModel
+public partial class MainViewModel : IDiagramTransferHost
 {
+    // ---------------- Export / Import command services ----------------
+
+    /// <summary>エクスポートコマンドの実行サービス（初回使用時に遅延生成＝ダイアログ群の解決後）</summary>
+    private DiagramExportService? _exportService;
+
+    /// <summary>インポートコマンドの実行サービス（初回使用時に遅延生成）</summary>
+    private DiagramImportService? _importService;
+
+    /// <summary>エクスポートサービス（欠落告知のセッション 1 回状態を持つため VM と同寿命の単一インスタンス）</summary>
+    private DiagramExportService ExportService => _exportService ??= new(this, _dialogs, _files);
+
+    /// <summary>インポートサービス</summary>
+    private DiagramImportService ImportService => _importService ??= new(this, _dialogs, _files);
+
     // ---------------- Auto-save / restore ----------------
 
     /// <summary>現在編集中のダイアグラムに紐付くファイルのフルパス（無題＝未保存のときは null）</summary>
@@ -567,38 +541,10 @@ public partial class MainViewModel
 
     // ---------------- Export ----------------
 
-    /// <summary>保存ダイアログで選択した形式に応じて ER 図を書き出す</summary>
+    /// <summary>保存ダイアログで選択した形式に応じて ER 図を書き出す（実行本体は <see cref="DiagramExportService"/>）</summary>
     /// <param name="visual">PNG 出力時に使用するキャンバスの Visual</param>
     [RelayCommand]
-    private void ExportDiagram(object? visual)
-    {
-        // 並び順は「画像 → DB 構築 → スキーマ交換（可逆な Schema JSON を先頭）→ 定義書」の用途グループ。
-        // 標準ダイアログのフィルタは見出し行を持てないため、接頭辞（Image/Database/Schema/Document）で
-        // グループを可視化する。先頭＝既定形式は PNG
-        var picked = _files.PickSaveFile(
-            "Image - PNG (*.png)|*.png|Image - SVG (*.svg)|*.svg|Database - SQL Script (*.sql)|*.sql|Schema - JSON (*.json)|*.json|Schema - Mermaid (*.mmd)|*.mmd|Schema - Mermaid (*.mermaid)|*.mermaid|Schema - DBML (*.dbml)|*.dbml|Document - Excel Workbook (*.xlsx)|*.xlsx|Document - HTML (*.html)|*.html",
-            ".png"
-        );
-
-        if (picked is null)
-        {
-            return;
-        }
-
-        var format = GetExportFormat(picked.Path, picked.FilterIndex);
-
-        try
-        {
-            SaveDiagram(format, picked.Path, visual);
-        }
-        catch (Exception ex)
-        {
-            _dialogs.ShowError(
-                Strings.Export_Failed + Environment.NewLine + ex.Message,
-                Strings.Common_Error
-            );
-        }
-    }
+    private void ExportDiagram(object? visual) => ExportService.Export(visual);
 
     /// <summary>図全体を用紙 1 ページへ印刷する（縮小フィット／原寸大を選択）</summary>
     /// <remarks>
@@ -659,406 +605,38 @@ public partial class MainViewModel
             Layout = Entities.ToDictionary(entity => entity.Id, entity => entity.ToLayout()),
         };
 
-    /// <summary>指定スキーマが現在のダイアグラムと構造的に同一かを署名比較で判定する</summary>
-    private bool HasSameStructure(
-        IEnumerable<Entity> entities,
-        IEnumerable<Relationship> relationships
-    )
-    {
-        var current = ToDiagramModel();
-        var currentSignature = SchemaSignature.Compute(current.Entities, current.Relationships);
-        var newSignature = SchemaSignature.Compute(entities, relationships);
-
-        return currentSignature == newSignature;
-    }
-
-    /// <summary>置換で失うものがある場合のみ確認ダイアログを表示する（Mermaid / DBML の丸ごと置換用）</summary>
-    /// <remarks>
-    /// 失うものが無い（<see cref="HasNothingToLose"/>）か、構造が同一で失う中身も無いときは確認なしで続行する。
-    /// 構造署名（<see cref="HasSameStructure"/>）は名前付きクエリと未保存の編集内容（手配置レイアウトを含む）を
-    /// 見ないため、署名一致だけを根拠に無確認で置換するとそれらが無言で消える。
-    /// クエリがある場合は削除件数を確認メッセージへ付加する（マージ取込の壊れクエリ列挙と同じ流儀）。
-    /// </remarks>
-    /// <returns>置換を続行してよい場合 true</returns>
-    private bool ConfirmDiagramReplacement(
-        IReadOnlyList<Entity> entities,
-        IReadOnlyList<Relationship> relationships,
-        string message
-    )
-    {
-        if (
-            HasNothingToLose
-            || (Queries.Count == 0 && !IsDirty && HasSameStructure(entities, relationships))
-        )
-        {
-            return true;
-        }
-
-        // Mermaid / DBML はクエリ定義を持たないため、置換すると現在のクエリはすべて失われる
-        var fullMessage =
-            Queries.Count > 0
-                ? message
-                    + Environment.NewLine
-                    + Environment.NewLine
-                    + string.Format(Strings.Import_QueriesRemovedWarning, Queries.Count)
-                : message;
-
-        // 未保存変更があるときは置換で編集内容が失われるため警告水準（Warning）で確認する
-        return _dialogs.ConfirmDiscard(IsDirty, fullMessage, Strings.Common_Confirm);
-    }
-
-    /// <summary>ファイル選択ダイアログで選択したファイルの形式に応じて ER 図を取り込む</summary>
+    /// <summary>ファイル選択ダイアログで選択したファイルの形式に応じて ER 図を取り込む（実行本体は <see cref="DiagramImportService"/>）</summary>
     [RelayCommand]
-    private void ImportDiagram()
-    {
-        var picked = _files.PickOpenFile(
-            "Mermaid Diagram (*.mmd;*.mermaid)|*.mmd;*.mermaid|DBML Diagram (*.dbml)|*.dbml|Excel Workbook (*.xlsx)|*.xlsx"
-        );
+    private void ImportDiagram() => ImportService.Import();
 
-        if (picked is null)
-        {
-            return;
-        }
+    // ---------------- IDiagramTransferHost（入出力サービスへ貸す能力） ----------------
 
-        var format = GetImportFormat(picked.Path, picked.FilterIndex);
+    /// <inheritdoc />
+    ErDiagram IDiagramTransferHost.BuildModel() => ToDiagramModel();
 
-        try
-        {
-            ImportDiagramFile(format, picked.Path);
-        }
-        catch (Exception ex)
-        {
-            _dialogs.ShowError(
-                Strings.Import_Failed + Environment.NewLine + ex.Message,
-                Strings.Common_Error
-            );
-        }
-    }
+    /// <inheritdoc />
+    IDatabaseProvider IDiagramTransferHost.CurrentProvider => CurrentProvider;
 
-    /// <summary>指定形式でダイアグラムをファイルへ書き出し、完了を通知する</summary>
-    private void SaveDiagram(DiagramExportFormat format, string path, object? visual)
-    {
-        var displayName = format switch
-        {
-            DiagramExportFormat.Png => Strings.Format_Png,
-            DiagramExportFormat.Svg => Strings.Format_Svg,
-            DiagramExportFormat.Sql => Strings.Format_SqlDdl,
-            DiagramExportFormat.Mermaid => Strings.Format_Mermaid,
-            DiagramExportFormat.Dbml => Strings.Format_Dbml,
-            DiagramExportFormat.Excel => Strings.Format_DefinitionDocument,
-            DiagramExportFormat.Html => Strings.Format_DefinitionDocumentHtml,
-            DiagramExportFormat.SchemaJson => Strings.Format_SchemaJson,
-            _ => Strings.Format_File,
-        };
+    /// <inheritdoc />
+    bool IDiagramTransferHost.IsDirty => IsDirty;
 
-        // この形式では表現できず落ちた情報（Mermaid / DBML のみ検出する。他形式は常に空）
-        IReadOnlyList<ExportOmissionKind> omissions = [];
+    /// <inheritdoc />
+    bool IDiagramTransferHost.HasNothingToLose => HasNothingToLose;
 
-        switch (format)
-        {
-            case DiagramExportFormat.Png:
-                if (visual is not Visual pngVisual)
-                {
-                    throw new InvalidOperationException(Strings.Export_PngCanvasInfoMissing);
-                }
+    /// <inheritdoc />
+    int IDiagramTransferHost.QueryCount => Queries.Count;
 
-                ImageExportService.ExportPng(pngVisual, path);
-                break;
+    /// <inheritdoc />
+    void IDiagramTransferHost.RenderSvg(string path) => ImageExportService.ExportSvg(this, path);
 
-            case DiagramExportFormat.Svg:
-                ImageExportService.ExportSvg(this, path);
-                break;
+    /// <inheritdoc />
+    void IDiagramTransferHost.ReplaceWholesale(
+        IReadOnlyList<Entity> entities,
+        IReadOnlyList<Relationship> relationships
+    ) => ReplaceDiagramWithoutHistory(entities, relationships, autoLayout: true);
 
-            case DiagramExportFormat.Sql:
-                File.WriteAllText(
-                    path,
-                    CurrentProvider.DdlGenerator.Build(ToDiagramModel()),
-                    System.Text.Encoding.UTF8
-                );
-                break;
-
-            case DiagramExportFormat.Mermaid:
-                omissions = MermaidExporter.SaveTo(ToDiagramModel(), path);
-                break;
-
-            case DiagramExportFormat.Dbml:
-                omissions = DbmlExporter.SaveTo(ToDiagramModel(), path);
-                break;
-
-            case DiagramExportFormat.Excel:
-                TableDefinitionDocumentExporter.SaveTo(ToDiagramModel(), path);
-                break;
-
-            case DiagramExportFormat.Html:
-                TableDefinitionHtmlExporter.SaveTo(ToDiagramModel(), path);
-                break;
-
-            case DiagramExportFormat.SchemaJson:
-                // 配置情報（layout）を持たないスキーマのみ文書。Layout = null で保存すると
-                // layout キー自体が出力されず、読込時に自動整列される可逆形式になる。
-                // 保存ダイアログで既存ファイルを選べるため、原子的に差し替えて上書き破損を防ぐ
-                JsonStorageService.SaveAtomic(
-                    path,
-                    new DiagramDocument { Schema = ToDiagramModel(), Layout = null }
-                );
-                break;
-        }
-
-        NotifyExportCompleted(format, displayName, omissions);
-    }
-
-    /// <summary>出力形式ごとに「落ちる情報の告知」を済ませたかの記録（セッション中 1 回だけ内訳を見せるため）</summary>
-    private readonly HashSet<DiagramExportFormat> _omissionNotifiedFormats = [];
-
-    /// <summary>出力完了を通知する（落ちた情報があれば、その形式で初回のときだけ内訳を添える）</summary>
-    /// <remarks>
-    /// Mermaid は NOT NULL 列がある限りほぼ必ず告知対象になるため、毎回内訳を出すと通知が形骸化する。
-    /// 未対応方言のフォールバック警告（<c>_fallbackWarningShown</c>）と同じく、形式ごとに初回だけ見せる。
-    /// 内訳の提示形式（要約＋詳細）は型変換警告と揃える
-    /// </remarks>
-    private void NotifyExportCompleted(
-        DiagramExportFormat format,
-        string displayName,
-        IReadOnlyList<ExportOmissionKind> omissions
-    )
-    {
-        var completed = string.Format(Strings.Export_Completed, displayName);
-
-        // 落ちた情報が無い、またはこの形式では既に告知済み（Add が false）なら完了文だけを出す
-        if (omissions.Count == 0 || !_omissionNotifiedFormats.Add(format))
-        {
-            _dialogs.ShowInformation(completed, Strings.Common_Complete);
-            return;
-        }
-
-        var details = string.Join(
-            Environment.NewLine,
-            omissions.Select(kind =>
-                string.Format(Strings.ExportOmission_Line, DescribeOmission(kind))
-            )
-        );
-
-        _dialogs.ShowInformationDetails(
-            completed + Environment.NewLine + Environment.NewLine + Strings.Export_OmissionsHeader,
-            details,
-            Strings.Common_Complete
-        );
-    }
-
-    /// <summary>落ちた情報の種類を表示文言へ変換する</summary>
-    private static string DescribeOmission(ExportOmissionKind kind) =>
-        kind switch
-        {
-            ExportOmissionKind.TableDescription => Strings.ExportOmission_TableDescription,
-            ExportOmissionKind.TableMemo => Strings.ExportOmission_TableMemo,
-            ExportOmissionKind.ColumnDescription => Strings.ExportOmission_ColumnDescription,
-            ExportOmissionKind.ColumnNullability => Strings.ExportOmission_ColumnNullability,
-            ExportOmissionKind.CompositeUniqueConstraint =>
-                Strings.ExportOmission_CompositeUniqueConstraint,
-            ExportOmissionKind.UniqueConstraintName => Strings.ExportOmission_UniqueConstraintName,
-            ExportOmissionKind.ForeignKeyColumnPairs =>
-                Strings.ExportOmission_ForeignKeyColumnPairs,
-            ExportOmissionKind.ReferentialAction => Strings.ExportOmission_ReferentialAction,
-            ExportOmissionKind.NamedQuery => Strings.ExportOmission_NamedQuery,
-            _ => kind.ToString(),
-        };
-
-    /// <summary>指定形式のダイアグラムファイルを読み込み、確認のうえ現在の図を置換する</summary>
-    private void ImportDiagramFile(DiagramImportFormat format, string path)
-    {
-        var diagram = format switch
-        {
-            DiagramImportFormat.Mermaid => MermaidImporter.Load(path),
-            DiagramImportFormat.Dbml => DbmlImporter.Load(path),
-            DiagramImportFormat.Excel => TableDefinitionDocumentImporter.Load(path),
-            _ => throw new InvalidOperationException(Strings.Import_FormatUndetermined),
-        };
-
-        var displayName = format switch
-        {
-            DiagramImportFormat.Mermaid => Strings.Format_Mermaid,
-            DiagramImportFormat.Dbml => Strings.Format_Dbml,
-            DiagramImportFormat.Excel => Strings.Format_DefinitionDocument,
-            _ => Strings.Format_File,
-        };
-
-        // Excel 定義書は再取込のマージ（Guid 引継＝クエリ定義・手配置レイアウトの温存）に対応する。
-        // Mermaid / DBML は方言情報を持たず定義書用途でもないため、丸ごと置換（クエリ消滅・全体整列）。
-        if (format == DiagramImportFormat.Excel)
-        {
-            ImportExcelMerging(diagram, displayName);
-            return;
-        }
-
-        if (
-            !ConfirmDiagramReplacement(
-                diagram.Entities,
-                diagram.Relationships,
-                string.Format(Strings.Import_ReplaceConfirm, displayName)
-            )
-        )
-        {
-            return;
-        }
-
-        ReplaceDiagramWithoutHistory(diagram.Entities, diagram.Relationships, autoLayout: true);
-        _dialogs.ShowInformation(
-            string.Format(Strings.Import_Completed, displayName),
-            Strings.Common_Complete
-        );
-    }
-
-    /// <summary>Excel 定義書をマージ取込する（Guid 引継でクエリ定義・レイアウトを温存する）</summary>
-    /// <remarks>
-    /// 取込結果の Id を現在図へ寄せ、生存クエリ・レイアウト引継を <see cref="ReplaceDiagramFromModule"/> の
-    /// マージ経路に委ねる。Excel 定義書は Memo を保持するため、一致エンティティの Memo は取込値を正とする
-    /// （<c>preserveExistingMemo: false</c>）。壊れクエリがあれば確認メッセージへ削除対象名を付加する。
-    /// </remarks>
-    private void ImportExcelMerging(ErDiagram diagram, string displayName)
-    {
-        var merged = DiagramMergeReconciler.Reconcile(
-            ToDiagramModel(),
-            diagram.Entities,
-            diagram.Relationships,
-            preserveExistingMemo: false
-        );
-
-        if (
-            !ConfirmMergedReplacement(
-                merged,
-                string.Format(Strings.Import_ReplaceConfirm, displayName)
-            )
-        )
-        {
-            return;
-        }
-
-        // Excel 定義書は対象 DBMS を保持しているため方言も復元する（ReplaceDiagramFromModule 内で採用）。
-        // 生存クエリのみを引き継ぐ（壊れクエリは確認のうえ削除済み）。
-        var mergedDiagram = new ErDiagram
-        {
-            Entities = merged.Entities.ToList(),
-            Relationships = merged.Relationships.ToList(),
-            TargetDbms = diagram.TargetDbms,
-            Queries = merged.SurvivingQueries.ToList(),
-        };
-        ReplaceDiagramFromModule(mergedDiagram);
-
-        _dialogs.ShowInformation(
-            string.Format(Strings.Import_Completed, displayName),
-            Strings.Common_Complete
-        );
-    }
-
-    /// <summary>マージ取込用の置換確認（構造同一かつ失うものが無ければ無確認・失うものは内訳を付加する）</summary>
-    /// <remarks>
-    /// マージ取込はクエリ・レイアウトを温存するため、構造が同一なら「クエリ・レイアウトは失われない」。
-    /// ただし構造署名（<see cref="HasSameStructure"/>）はテーブル・列の説明・Memo を含まないため、
-    /// 署名一致だけを根拠に無確認で続行すると未保存の説明・Memo が取込値で無言のうちに消える。
-    /// 実差分の件数（<see cref="DiagramMergeResult.DescriptionOverwriteCount"/>）を条件へ加えてこれを防ぐ。
-    /// </remarks>
-    /// <returns>置換を続行してよい場合 true</returns>
-    private bool ConfirmMergedReplacement(DiagramMergeResult merged, string message)
-    {
-        var structurallySame =
-            HasNothingToLose || HasSameStructure(merged.Entities, merged.Relationships);
-
-        // 構造同一かつ壊れクエリ・説明/Memo の上書きなしなら無確認で続行する
-        if (
-            structurallySame
-            && merged.BrokenQueries.Count == 0
-            && merged.DescriptionOverwriteCount == 0
-        )
-        {
-            return true;
-        }
-
-        // 失うものがあれば内訳（削除対象のクエリ名・上書き件数）を確認メッセージへ付加する（キャンセルで取込中止）
-        var builder = new StringBuilder(message);
-
-        if (merged.BrokenQueries.Count > 0)
-        {
-            builder
-                .Append(Environment.NewLine)
-                .Append(Environment.NewLine)
-                .AppendFormat(
-                    Strings.Import_BrokenQueriesWarning,
-                    // 件数が多いとダイアログが縦に伸びてボタンが画面外へ出るため、上限で畳む
-                    DialogItemList.Format(
-                        merged.BrokenQueries.Select(query => "- " + query.Name).ToList(),
-                        Strings.Common_MoreItems
-                    )
-                );
-        }
-
-        if (merged.DescriptionOverwriteCount > 0)
-        {
-            builder
-                .Append(Environment.NewLine)
-                .Append(Environment.NewLine)
-                .AppendFormat(
-                    Strings.Import_DescriptionOverwriteWarning,
-                    merged.DescriptionOverwriteCount
-                );
-        }
-
-        // 未保存変更があるときは置換で編集内容が失われるため警告水準（Warning）で確認する
-        return _dialogs.ConfirmDiscard(IsDirty, builder.ToString(), Strings.Common_Confirm);
-    }
-
-    /// <summary>ファイル拡張子を優先し、無ければフィルター選択から出力形式を判定する</summary>
-    private static DiagramExportFormat GetExportFormat(string path, int filterIndex)
-    {
-        var extension = Path.GetExtension(path).ToLowerInvariant();
-
-        return extension switch
-        {
-            ".png" => DiagramExportFormat.Png,
-            ".svg" => DiagramExportFormat.Svg,
-            ".sql" => DiagramExportFormat.Sql,
-            ".mmd" => DiagramExportFormat.Mermaid,
-            ".mermaid" => DiagramExportFormat.Mermaid,
-            ".dbml" => DiagramExportFormat.Dbml,
-            ".xlsx" => DiagramExportFormat.Excel,
-            ".html" => DiagramExportFormat.Html,
-            ".htm" => DiagramExportFormat.Html,
-            ".json" => DiagramExportFormat.SchemaJson,
-            _ => filterIndex switch
-            {
-                1 => DiagramExportFormat.Png,
-                2 => DiagramExportFormat.Svg,
-                3 => DiagramExportFormat.Sql,
-                4 => DiagramExportFormat.SchemaJson,
-                5 => DiagramExportFormat.Mermaid,
-                6 => DiagramExportFormat.Mermaid,
-                7 => DiagramExportFormat.Dbml,
-                8 => DiagramExportFormat.Excel,
-                9 => DiagramExportFormat.Html,
-                _ => throw new InvalidOperationException(Strings.Export_FormatUndetermined),
-            },
-        };
-    }
-
-    /// <summary>ファイル拡張子を優先し、無ければフィルター選択から取込形式を判定する</summary>
-    private static DiagramImportFormat GetImportFormat(string path, int filterIndex)
-    {
-        var extension = Path.GetExtension(path).ToLowerInvariant();
-
-        return extension switch
-        {
-            ".mmd" => DiagramImportFormat.Mermaid,
-            ".mermaid" => DiagramImportFormat.Mermaid,
-            ".dbml" => DiagramImportFormat.Dbml,
-            ".xlsx" => DiagramImportFormat.Excel,
-            _ => filterIndex switch
-            {
-                1 => DiagramImportFormat.Mermaid,
-                2 => DiagramImportFormat.Dbml,
-                3 => DiagramImportFormat.Excel,
-                _ => throw new InvalidOperationException(Strings.Import_FormatUndetermined),
-            },
-        };
-    }
+    /// <inheritdoc />
+    void IDiagramTransferHost.ReplaceMerged(ErDiagram diagram) => ReplaceDiagramFromModule(diagram);
 
     // ---------------- Save / Load ----------------
 
