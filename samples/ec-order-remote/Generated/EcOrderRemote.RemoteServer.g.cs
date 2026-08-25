@@ -518,6 +518,33 @@ internal sealed class RemoteErrorDetailPolicy(
 }
 
 /// <summary>
+/// The authorization stance a caller must choose when mapping the generated remote endpoints. There is no default:
+/// the endpoints can read, write and delete every row of every entity, and whether that surface demands authorization
+/// is a decision of the hosting application - not one a library default should make silently, in either direction.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <see cref="RequireAuthorization"/> applies the host's default authorization policy to the whole endpoint group,
+/// the liveness endpoint included. The generated code can only demand authorization, never provide it: the host must
+/// have authentication and authorization configured, or every request to the group fails.
+/// </para>
+/// <para>
+/// <see cref="AllowAnonymous"/> states that this mapping itself demands nothing, and attaches no metadata at all.
+/// It deliberately does not attach <c>[AllowAnonymous]</c>: that would exempt the group from a host-level fallback
+/// authorization policy and so weaken a host that secures everything by default. Use it for local development, or
+/// when authorization is layered on elsewhere (the returned group, a fallback policy, or middleware).
+/// </para>
+/// </remarks>
+public enum RemoteAccess
+{
+    /// <summary>The endpoint group requires the host's default authorization policy (an authenticated user unless configured otherwise).</summary>
+    RequireAuthorization,
+
+    /// <summary>The mapping itself demands no authorization. No metadata is attached, so a host-level fallback policy still applies.</summary>
+    AllowAnonymous,
+}
+
+/// <summary>
 /// Endpoint mapping that exposes the generated remote surface (I{Entity}RemoteRepository) as an ASP.NET Core Minimal API.
 /// </summary>
 /// <remarks>
@@ -527,20 +554,20 @@ internal sealed class RemoteErrorDetailPolicy(
 /// (<c>AddGeneratedSqlServerRepositories</c> / <c>AddGeneratedEfCoreRepositories</c>, etc.) in the server-side DI container.
 /// </para>
 /// <para>
-/// Each operation is exposed as <c>POST {prefix}/{entity}/{operation}</c> (JSON body). Apply cross-cutting concerns
-/// such as authorization to the returned <see cref="RouteGroupBuilder"/>
-/// (for example <c>app.MapGeneratedRemoteEndpoints().RequireAuthorization()</c>).
+/// Each operation is exposed as <c>POST {prefix}/{entity}/{operation}</c> (JSON body). Further cross-cutting
+/// concerns can be applied to the returned <see cref="RouteGroupBuilder"/>.
 /// Exceptions are converted to structured JSON (RemoteError): <see cref="SaveConflictException"/> maps to 409 and
 /// an unhandled failure to 500, and the client (Http{Entity}RemoteRepository) restores the original exception type.
 /// </para>
 /// <para>
-/// Until authorization is supplied, every endpoint is open to anyone who can reach it, and the policy belongs on the
-/// group as a whole rather than on hand-picked endpoints. <c>Save</c> and <c>SaveMany</c> are as powerful as
+/// Whether the surface demands authorization is not defaulted: the first argument of the mapping call is a
+/// <see cref="RemoteAccess"/> value the caller must pick, and the chosen policy belongs to the group as a whole
+/// rather than to hand-picked endpoints. <c>Save</c> and <c>SaveMany</c> are as powerful as
 /// <c>Delete</c>: a graph whose nodes carry <c>RowState.Removed</c> deletes those rows, so a policy that guards
 /// <c>Delete</c> while leaving <c>Save</c> open guards nothing. The same holds for the payloads in general - the wire
 /// format accepts every column an entity has, the primary key included - so authorization is the only thing standing
-/// between a caller and any row it can name. Apply it in one line with
-/// <c>app.MapGeneratedRemoteEndpoints().RequireAuthorization()</c>.
+/// between a caller and any row it can name. <c>app.MapGeneratedRemoteEndpoints(RemoteAccess.RequireAuthorization)</c>
+/// applies it in one line; choose <see cref="RemoteAccess.AllowAnonymous"/> only where that openness is intended.
 /// </para>
 /// <para>
 /// An unhandled failure (500) does not report what went wrong to the client unless
@@ -579,11 +606,11 @@ public static partial class GeneratedRemoteEndpoints
     /// <summary>Maps every remote-surface endpoint under the given prefix (defaults to <see cref="RemotePaths.DefaultPrefix"/>).</summary>
     /// <remarks>
     /// <para>
-    /// Until authorization is applied to the returned group, every endpoint mapped here is open to anyone who can reach it,
-    /// and the wire format accepts any row a caller can name - <c>Save</c> deletes rows just as <c>Delete</c> does, so
-    /// guarding one operation and not the other guards nothing. Apply it to the group as a whole with
-    /// <c>app.MapGeneratedRemoteEndpoints().RequireAuthorization()</c> (see the remarks on
-    /// <see cref="GeneratedRemoteEndpoints"/> for the full reasoning).
+    /// The <paramref name="access"/> choice carries no default because the wire format accepts any row a caller can
+    /// name - <c>Save</c> deletes rows just as <c>Delete</c> does, so guarding one operation and not the other guards
+    /// nothing, and a surface with that power should not be open or closed by a value nobody wrote (see the remarks on
+    /// <see cref="GeneratedRemoteEndpoints"/> for the full reasoning). Further policies can still be layered onto the
+    /// returned group.
     /// </para>
     /// <para>
     /// The group also carries a liveness endpoint, <c>GET {prefix}/health</c>, which answers 200 with an empty body
@@ -593,6 +620,13 @@ public static partial class GeneratedRemoteEndpoints
     /// </para>
     /// </remarks>
     /// <param name="endpoints">The mapping target (for example a <c>WebApplication</c>).</param>
+    /// <param name="access">
+    /// Whether the endpoint group requires authorization. There is no default: the caller states either
+    /// <see cref="RemoteAccess.RequireAuthorization"/> (the host's default authorization policy is applied to the
+    /// whole group - authentication and authorization must be configured on the host, or every request fails) or
+    /// <see cref="RemoteAccess.AllowAnonymous"/> (no metadata is attached, so a host-level fallback policy still
+    /// applies). An undefined value throws <see cref="ArgumentOutOfRangeException"/>.
+    /// </param>
     /// <param name="prefix">The route prefix for the endpoint group.</param>
     /// <param name="exposeErrorDetails">
     /// Whether an HTTP 500 response reports the server-side exception message to the client. It is off by default, which
@@ -606,6 +640,7 @@ public static partial class GeneratedRemoteEndpoints
     /// <returns>The endpoint group, to which authorization and similar concerns can be applied.</returns>
     public static RouteGroupBuilder MapGeneratedRemoteEndpoints(
         this IEndpointRouteBuilder endpoints,
+        RemoteAccess access,
         string prefix = RemotePaths.DefaultPrefix,
         bool exposeErrorDetails = false
     )
@@ -613,6 +648,27 @@ public static partial class GeneratedRemoteEndpoints
         ArgumentNullException.ThrowIfNull(endpoints);
 
         var group = endpoints.MapGroup(prefix);
+
+        // Validated with a default arm that throws: an undefined value arriving through a cast must not silently map
+        // the surface as open (the same fail-fast rule ConcurrencyMode follows)
+        switch (access)
+        {
+            case RemoteAccess.RequireAuthorization:
+                // A group convention covers every endpoint mapped on the group, the liveness endpoint included
+                group.RequireAuthorization();
+                break;
+
+            case RemoteAccess.AllowAnonymous:
+                // Deliberately no metadata: a host-level fallback authorization policy must keep applying
+                break;
+
+            default:
+                throw new ArgumentOutOfRangeException(
+                    nameof(access),
+                    access,
+                    "Undefined RemoteAccess value."
+                );
+        }
 
         // The policy travels as endpoint metadata rather than as a handler argument: every 500 is written by one of the
         // wrappers in the engine, which already have the HttpContext, so no handler signature has to change to carry it.

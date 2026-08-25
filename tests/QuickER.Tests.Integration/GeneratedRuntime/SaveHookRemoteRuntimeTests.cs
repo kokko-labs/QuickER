@@ -64,7 +64,7 @@ public sealed class SaveHookRemoteRuntimeTests : IAsyncLifetime
                     services.AddSaveHook(hook);
                 }
             },
-            app => app.MapGeneratedRemoteEndpoints(),
+            app => app.MapGeneratedRemoteEndpoints(RemoteAccess.AllowAnonymous),
             Ct
         );
 

@@ -67,7 +67,7 @@ public sealed class SyncHttpRuntimeTests : SyncRuntimeTestsBase
                     ServerNotes
                 ));
             },
-            app => app.MapGeneratedRemoteEndpoints(),
+            app => app.MapGeneratedRemoteEndpoints(RemoteAccess.AllowAnonymous),
             Ct
         );
 

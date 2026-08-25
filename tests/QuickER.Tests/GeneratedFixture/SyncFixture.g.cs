@@ -2876,8 +2876,8 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     /// </para>
     /// <para>
     /// The endpoint lives on the group, so authorization applied to the group
-    /// (<c>MapGeneratedRemoteEndpoints().RequireAuthorization()</c>) covers it too, and an unauthenticated client then
-    /// reads a protected server as <c>false</c>.
+    /// (<c>RemoteAccess.RequireAuthorization</c> at mapping time, or a policy added afterwards) covers it too, and an
+    /// unauthenticated client then reads a protected server as <c>false</c>.
     /// </para>
     /// </remarks>
     /// <param name="cancellationToken">A token that cancels the check.</param>
@@ -6378,7 +6378,7 @@ public sealed class SyncEngine
 /// <remarks>
 /// The server maps them and the client posts to them, so both sides read the route from here and cannot drift apart.
 /// They are additions to the same endpoint group as the CRUD operations, which is what makes authorization applied to
-/// the group (<c>MapGeneratedRemoteEndpoints(...).RequireAuthorization()</c>) cover them as well - and it has to: the
+/// the group (<c>RemoteAccess.RequireAuthorization</c> at mapping time) cover them as well - and it has to: the
 /// changed-rows endpoint hands out whole rows and the key endpoint hands out the entire key set of a table.
 /// </remarks>
 public static class RemoteSyncOperations

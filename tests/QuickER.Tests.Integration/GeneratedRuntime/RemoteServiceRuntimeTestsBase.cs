@@ -59,7 +59,7 @@ public abstract class RemoteServiceRuntimeTestsBase : IAsyncLifetime
 
         _server = await InProcessRemoteServer.StartAsync(
             services => ConfigureServerRepositories(services, _db.ReadWriteCreateConnectionString),
-            app => app.MapGeneratedRemoteEndpoints(),
+            app => app.MapGeneratedRemoteEndpoints(RemoteAccess.AllowAnonymous),
             Ct
         );
 
@@ -511,7 +511,7 @@ public abstract class RemoteServiceRuntimeTestsBase : IAsyncLifetime
     {
         await using var server = await InProcessRemoteServer.StartAsync(
             services => ConfigureServerRepositories(services, _db.ReadWriteCreateConnectionString),
-            app => app.MapGeneratedRemoteEndpoints(),
+            app => app.MapGeneratedRemoteEndpoints(RemoteAccess.AllowAnonymous),
             Ct,
             builder =>
                 builder.WebHost.ConfigureKestrel(options =>

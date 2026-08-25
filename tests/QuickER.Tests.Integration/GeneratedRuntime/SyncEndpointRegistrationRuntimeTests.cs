@@ -57,7 +57,7 @@ public sealed class SyncEndpointRegistrationRuntimeTests
             services.AddScoped<ISyncOrderLineRemoteRepository>(_ => null!);
         });
 
-        Action act = () => app.MapGeneratedRemoteEndpoints();
+        Action act = () => app.MapGeneratedRemoteEndpoints(RemoteAccess.AllowAnonymous);
 
         var exception = act.Should().Throw<InvalidOperationException>().Which;
 
@@ -85,7 +85,7 @@ public sealed class SyncEndpointRegistrationRuntimeTests
             services.AddScoped<ISyncServerSource<SyncOrderEntity, int>>(_ => null!)
         );
 
-        Action act = () => app.MapGeneratedRemoteEndpoints();
+        Action act = () => app.MapGeneratedRemoteEndpoints(RemoteAccess.AllowAnonymous);
 
         var exception = act.Should().Throw<InvalidOperationException>().Which;
 
@@ -112,7 +112,7 @@ public sealed class SyncEndpointRegistrationRuntimeTests
     {
         await using var app = BuildApp(services => services.AddGeneratedDirectSyncSources(null));
 
-        var group = app.MapGeneratedRemoteEndpoints();
+        var group = app.MapGeneratedRemoteEndpoints(RemoteAccess.AllowAnonymous);
 
         group.Should().NotBeNull();
     }

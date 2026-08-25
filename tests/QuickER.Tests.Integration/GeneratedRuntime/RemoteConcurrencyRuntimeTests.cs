@@ -42,7 +42,7 @@ public sealed class RemoteConcurrencyRuntimeTests
     {
         _server = await InProcessRemoteServer.StartAsync(
             services => services.AddGeneratedInMemoryRepositories(seedSampleData: false),
-            app => app.MapGeneratedRemoteEndpoints(),
+            app => app.MapGeneratedRemoteEndpoints(RemoteAccess.AllowAnonymous),
             Ct
         );
 

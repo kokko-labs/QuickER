@@ -61,7 +61,7 @@ public sealed class RemoteKeyedRegistrationRuntimeTests : IAsyncLifetime
     private static Task<InProcessRemoteServer> StartAsync(SqliteTempDatabase db) =>
         InProcessRemoteServer.StartAsync(
             services => services.AddGeneratedSqliteRepositories(db.ReadWriteCreateConnectionString),
-            app => app.MapGeneratedRemoteEndpoints(),
+            app => app.MapGeneratedRemoteEndpoints(RemoteAccess.AllowAnonymous),
             Ct
         );
 

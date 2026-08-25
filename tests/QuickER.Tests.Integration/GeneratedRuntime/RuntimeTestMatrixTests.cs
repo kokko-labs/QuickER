@@ -310,7 +310,7 @@ public class RuntimeTestMatrixTests
             )
         ),
         ["RemoteTransport"] = new(
-            "HTTP 転送層（health・エラー分類と詳細秘匿・応答本文・VO 本文・keyed 登録）",
+            "HTTP 転送層（health・エラー分類と詳細秘匿・応答本文・VO 本文・keyed 登録・認可の明示選択）",
             Row(
                 NotApplicable(
                     "転送層はサーバー背後のエンジンに依らない（サーバー側実装は Ado/EfCore の 2 通りで実証）"
@@ -450,6 +450,7 @@ public class RuntimeTestMatrixTests
         new("RemoteResponseBodyRuntimeTests", "RemoteTransport", Backend.Remote),
         new("RemoteValueObjectBodyRuntimeTests", "RemoteTransport", Backend.Remote),
         new("RemoteKeyedRegistrationRuntimeTests", "RemoteTransport", Backend.Remote),
+        new("RemoteAccessRuntimeTests", "RemoteTransport", Backend.Remote),
         new("SaveConflictDetailsRuntimeTests", "Concurrency", Backend.Remote),
         // --- その他の単発機能 ---
         new("SqlExecutorInjectionRuntimeTests", "SqlExecutorInjection", Backend.AdoSqlite),

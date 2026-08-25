@@ -43,7 +43,7 @@ public sealed class BinaryColumnRemoteRuntimeTests : IAsyncLifetime
         _server = await InProcessRemoteServer.StartAsync(
             services =>
                 services.AddGeneratedSqliteRepositories(_db.ReadWriteCreateConnectionString),
-            app => app.MapGeneratedRemoteEndpoints(),
+            app => app.MapGeneratedRemoteEndpoints(RemoteAccess.AllowAnonymous),
             Ct
         );
 
@@ -299,7 +299,11 @@ public sealed class BinaryColumnRemoteRuntimeTests : IAsyncLifetime
         await using var server = await InProcessRemoteServer.StartAsync(
             services =>
                 services.AddGeneratedSqliteRepositories(_db.ReadWriteCreateConnectionString),
-            app => app.MapGeneratedRemoteEndpoints(allowUnboundedUploads: true),
+            app =>
+                app.MapGeneratedRemoteEndpoints(
+                    RemoteAccess.AllowAnonymous,
+                    allowUnboundedUploads: true
+                ),
             Ct
         );
         await using var clientProvider = new ServiceCollection()
@@ -336,7 +340,7 @@ public sealed class BinaryColumnRemoteRuntimeTests : IAsyncLifetime
     /// 9b. 対照: 既定（オプトインなし）のバイナリ PUT はホストのリクエストサイズ制限が効き、30MB 超は 413 になる。
     /// </summary>
     /// <remarks>
-    /// 共有サーバーは <c>MapGeneratedRemoteEndpoints()</c>（既定引数＝解除なし）で起動しているため、そのまま使える。
+    /// 共有サーバーは <c>MapGeneratedRemoteEndpoints(RemoteAccess.AllowAnonymous)</c>（既定引数＝解除なし）で起動しているため、そのまま使える。
     /// 413 は Kestrel の <c>BadHttpRequestException</c> がステータス素通しで分類された結果で、クライアントは
     /// <see cref="RemoteRepositoryException"/> としてその状態コードを保って復元する。応答には他の分類済み拒否と
     /// 同じ <c>RemoteError</c> 本文が載るため、応答を読めた場合は「本文の文言が復元されていること」まで固定する。
