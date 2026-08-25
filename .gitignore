@@ -371,3 +371,6 @@ ec-order.db
 # ツール（VS / dotnet run）が自動生成する launchSettings.json はコミットしない
 # （サンプルサーバーの待ち受け URL は Program.cs の UseUrls に一本化する設計のため）
 **/launchSettings.json
+
+# Claude Code のユーザーローカル設定（権限許可など個人環境の状態。スキルはコミット対象）
+.claude/settings.local.json
