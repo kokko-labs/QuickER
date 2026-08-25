@@ -733,10 +733,10 @@ services.AddGeneratedSyncEngine(localServiceKey: "local");
 // サーバー側: 通常の Repository ＋ エンドポイントが答えるためのソース ＋ エンドポイントのマップ
 services.AddGeneratedSqlServerRepositories(sqlServerConn);
 services.AddGeneratedDirectSyncSources(serverServiceKey: null);
-app.MapGeneratedRemoteEndpoints().RequireAuthorization();
+app.MapGeneratedRemoteEndpoints(RemoteAccess.RequireAuthorization);
 ```
 
-既存のエンドポイントグループへ 3 本（`POST {prefix}/{エンティティ}/…` の `SyncCeiling` / `SyncChanges` / `SyncKeys`）が加わります。これは差分ソースの薄い remoting で、各ハンドラは DI から `ISyncServerSource<,>` を解決して呼ぶだけ＝意味論の実装は 1 つを両経路が共有します。この登録は `MapGeneratedRemoteEndpoints` がマップ時に同期対象テーブルごとに検査するため、`AddGeneratedDirectSyncSources` を呼び忘れたサーバーは、正常に起動して CRUD を全部答えたうえで最初の同期でだけ落ちるのではなく、起動時に足りないソースを名指しして失敗します。グループのメンバーなので、グループに掛けた `RequireAuthorization()` はそのまま効きます。アップロードは新しい経路を作らず、既存の CRUD／保存エンドポイントを通ります（`ConcurrencyMode` は既に転送され、版の競合は 409 として返ります）。
+既存のエンドポイントグループへ 3 本（`POST {prefix}/{エンティティ}/…` の `SyncCeiling` / `SyncChanges` / `SyncKeys`）が加わります。これは差分ソースの薄い remoting で、各ハンドラは DI から `ISyncServerSource<,>` を解決して呼ぶだけ＝意味論の実装は 1 つを両経路が共有します。この登録は `MapGeneratedRemoteEndpoints` がマップ時に同期対象テーブルごとに検査するため、`AddGeneratedDirectSyncSources` を呼び忘れたサーバーは、正常に起動して CRUD を全部答えたうえで最初の同期でだけ落ちるのではなく、起動時に足りないソースを名指しして失敗します。グループのメンバーなので、マップ時に選んだ `RemoteAccess.RequireAuthorization`（やグループへ後付けしたポリシー）はそのまま効きます。アップロードは新しい経路を作らず、既存の CRUD／保存エンドポイントを通ります（`ConcurrencyMode` は既に転送され、版の競合は 409 として返ります）。
 
 サーバーは**クライアント別の状態を持ちません**。再開点はリクエストの anchor、上限は ceiling として毎回送られます。その裏返しとして上限は呼び出し側の値であり、導出アンカーの保証は「その回の `SyncCeiling` が返した値をそのまま送り返す」限りで成立します（自前で大きな ceiling を送ると、その下で実行中のトランザクションの行を恒久的に読み飛ばします）。バッチサイズが 0 以下なら 400 で拒否します。上限は設けていません——取り放題を止めるのはグループの認可の仕事だからです。
 
@@ -908,9 +908,12 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddGeneratedSqliteRepositories(connectionString);   // 実体は QuickER 版 Repository でも EF Core 版 Repository でもよい
 
 var app = builder.Build();
+// 認可の要否は既定値を持たない必須引数 RemoteAccess で明示する（詳細は「注意」節）。
 // 500 応答はサーバー側の詳細を既定で隠す。IsDevelopment() を渡せば開発時だけ実メッセージ・本番は汎用文言になる
-app.MapGeneratedRemoteEndpoints(exposeErrorDetails: app.Environment.IsDevelopment());
-// 認可を付けるなら .RequireAuthorization() を続ける
+app.MapGeneratedRemoteEndpoints(
+    RemoteAccess.RequireAuthorization,
+    exposeErrorDetails: app.Environment.IsDevelopment()
+);
 app.Run();
 
 // ---- クライアントアプリ（DI 登録 1 行で直結⇔リモートを切り替え）----
@@ -929,7 +932,7 @@ app.Run();
 - **グラフ保存（Save）成功後はローカルの RowState も確定**します（直結時と同じ挙動）
 - **楽観排他も転送されます**。`ConcurrencyMode` 引数は Update / Save のリクエストに含まれ、Insert / Update / Save の応答は保存で採番された版を「エンティティ型名＋主キー」の対応表として運び、クライアントが手元のグラフへ書き戻します。これによりリモートでも直結と同じ版を保持でき、再取得なしで同じエンティティを続けて保存できます
 - **500 応答はサーバー側の詳細を既定で公開しません**。本文には固定文言（`An unexpected error occurred on the server.`）と `CorrelationId` が載り、クライアントでは `RemoteRepositoryException.CorrelationId` として取り出せます。スタックトレースを含む例外全体は従来どおり常にサーバー側へ記録され（`ILoggerFactory` 経由・カテゴリ `QuickER.RemoteServer`。ロギング未構成のホストでは何もしません）、**そのログ行にも同じ相関 ID が載る**ので、利用者から報告された ID を突き合わせれば、内部メッセージ（テーブル名・列名・接続文字列・ファイルパス）を信頼境界の外へ出さないまま完全な記録に辿り着けます。従来どおりメッセージを透過させたい場合は `MapGeneratedRemoteEndpoints(exposeErrorDetails: true)` を渡してください（このとき `CorrelationId` は null＝ボディは以前のバージョンと同一です）。定型は `exposeErrorDetails: app.Environment.IsDevelopment()` で、これを生成時オプションでなく実行時引数にしているのは、同じ生成物のまま開発と本番を使い分けられるようにするためです。スイッチが変えるのは**クライアントから見える 500 の内容だけ**で、サーバー側のログ出力と `OnServerError` フックはどちらのモードでも例外そのものを受け取ります。また 400（クライアント自身のペイロードについての説明）と 409 の競合内訳（`Reason` / `EntityType` / `Key`＝再取得リトライを組むための材料）は自前の文言なのでスイッチの影響を受けず、常に従来どおり返ります。バイナリ転送エンドポイントの 500 も同じスイッチに従います
-- **認証・TLS はスコープ外で、付与するまでエンドポイントは無防備です。** クライアントは `AddGeneratedHttpRemoteRepositories(Func<IServiceProvider, HttpClient>)` で認証ハンドラ付きの HttpClient を構成し、サーバーは `MapGeneratedRemoteEndpoints()` の戻り値（`RouteGroupBuilder`）へ ASP.NET Core の認可を付与してください（`MapGeneratedRemoteEndpoints(...).RequireAuthorization()` で生成グループ全体を 1 行で覆えます）。**認可はエンドポイントを選ばずグループ全体へ掛けてください。** `Save` は `Delete` と同じ強さを持つからです＝`RowState.Removed` を含むグラフを送れば該当行は削除されるため、`Delete` だけを守って `Save` を開けておく方針は何も守っていません。エンティティのペイロード全般についても同様で、ワイヤ形式は主キーを含む全列を受け付けます。呼び出し側が名指しできる行との間に立つのは認可だけです
+- **認証・TLS はスコープ外です。認可を要求するかどうかは、既定値を持たない必須引数 `RemoteAccess` として呼び出し側が明示します。** ワイヤ形式は主キーを含む全列を受け付け、呼び出し側が名指しできる任意の行を読み書き削除できるため、この面を認可で守るかどうかを、誰も書いていない既定値が（開放側にも安全側にも）黙って決めることはしません。`RemoteAccess.RequireAuthorization` は ASP.NET Core の既定認可ポリシーをグループ全体（health 含む）へ適用します——生成コードにできるのは認可の**要求**までで**用意**はできないため、ホスト側で認証・認可を構成していなければ全リクエストが失敗します。`RemoteAccess.AllowAnonymous` は「このマップ自体は何も要求しない」という宣言で、メタデータを一切付けません（`[AllowAnonymous]` を付けてホストの FallbackPolicy＝全エンドポイント既定認証必須の網から生成面だけを抜くことはしない）。ローカル開発や、認可を別レイヤで掛ける構成で使ってください。未定義値はマップ時に `ArgumentOutOfRangeException` で fail-fast します。クライアント側は `AddGeneratedHttpRemoteRepositories(Func<IServiceProvider, HttpClient>)` で認証ハンドラ付きの HttpClient を構成してください。**認可がエンドポイントを選ばずグループ全体へ掛かるのは意図的です。** `Save` は `Delete` と同じ強さを持つからです＝`RowState.Removed` を含むグラフを送れば該当行は削除されるため、`Delete` だけを守って `Save` を開けておく方針は何も守っていません。追加のポリシーは戻り値の `RouteGroupBuilder` へ重ねられます
 - **どちらの登録オーバーロードにも keyed 版があり、複数のバックエンドを同時に抱えられます**。`AddGeneratedHttpRemoteRepositories(serviceKey, baseAddress)` と `AddGeneratedHttpRemoteRepositories(serviceKey, httpClientFactory)` は `I{Entity}RemoteRepository` をサービスキー付きで登録し、方言別拡張が元から持つ keyed 版（`AddGeneratedSqliteRepositories(serviceKey, connectionString)`）と対になります。ハイブリッド構成はこの形で組みます＝サーバーを HTTP で 1 つのキーへ、ローカル DB をもう 1 つのキーへ登録し、利用側が欲しい方を名指しで受け取ります。
 
   ```csharp
@@ -962,7 +965,7 @@ app.Run();
 - **これらのエンドポイント自身が返す 404 には、`Type` が `"NotFound"` の `RemoteError` 本文が載ります**。クライアントで `false` になるのはこの marker 付きの 404 だけです。本文なしの素の 404（ベースアドレスやプレフィックスの誤り、消えたルート、プロキシ自身の応答）は「データなし」と区別できないため、クライアントは `RemoteRepositoryException` として送出します＝設定ミスが空の結果に化けません。411 にも同様に `RemoteError` 本文（`Type` は他の分類済み拒否と同じ `"BadRequest"`）が載ります。
 - **キーは URL クエリ `?id=`** で運びます（本文は blob 本体に使うため）。VO キーは JSON エンベロープと同一規則（内包値）で直列化されます。
 - **0 バイトの PUT（空ボディ）と `NULL` 化（DELETE）は構造的に区別**されます（前者は `Read` が `true`＋空・後者は `false`）。
-- **バイナリ PUT のリクエストサイズ制限解除はオプトイン**です（`MapGeneratedRemoteEndpoints(prefix, exposeErrorDetails, allowUnboundedUploads)`）。既定は `false`＝ホスト側の上限（Kestrel 既定で 30MB）がこのエンドポイントにも効き、超過は **413** で拒否されます。GB 級を扱うときだけ `allowUnboundedUploads: true` を渡してください。**任意サイズの本文を受けるエンドポイントは DoS 面になるため、認可（`MapGeneratedRemoteEndpoints(...).RequireAuthorization()`）との併用を強く推奨**します。影響を受けるのはバイナリ PUT のみ（JSON エンドポイントは常にホストの上限のまま）で、別の値にする場合は戻り値の `RouteGroupBuilder` でグループ全体を上書きしてください。
+- **バイナリ PUT のリクエストサイズ制限解除はオプトイン**です（`MapGeneratedRemoteEndpoints(access, prefix, exposeErrorDetails, allowUnboundedUploads)`）。既定は `false`＝ホスト側の上限（Kestrel 既定で 30MB）がこのエンドポイントにも効き、超過は **413** で拒否されます。GB 級を扱うときだけ `allowUnboundedUploads: true` を渡してください。**任意サイズの本文を受けるエンドポイントは DoS 面になるため、`RemoteAccess.RequireAuthorization` との併用を強く推奨**します。影響を受けるのはバイナリ PUT のみ（JSON エンドポイントは常にホストの上限のまま）で、別の値にする場合は戻り値の `RouteGroupBuilder` でグループ全体を上書きしてください。
 - クライアント（`Http{Entity}RemoteRepository`）は `GET` を `ResponseHeadersRead` で受けて宛先へ O(チャンク) でコピーし、`PUT` は `StreamContent`（`Content-Length` 付き）で送ります。非シーク Stream で `length` を渡さない場合は**送信前**に `ArgumentException` になります（既存の長さ契約と同一）。**渡した Stream の所有権は呼び出し側のまま**で、クライアントは閉じも破棄もしません（直結実装と同じ＝実装を差し替えても Stream の扱いが変わりません。HTTP レイヤは送信後にリクエストコンテンツを破棄するため、Stream は非クローズのラッパー経由で `StreamContent` へ渡しています）。
 - **`WithUnboundedBinary()` / `Query()` / 生 SQL のリモート化はスコープ外**です（従来どおり）。
 

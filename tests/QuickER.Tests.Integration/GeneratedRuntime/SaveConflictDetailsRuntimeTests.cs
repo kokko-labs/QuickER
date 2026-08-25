@@ -48,7 +48,7 @@ public sealed class SaveConflictDetailsRuntimeTests : IAsyncLifetime
         builder.Services.AddGeneratedInMemoryRepositories(seedSampleData: false);
 
         _app = builder.Build();
-        _app.MapGeneratedRemoteEndpoints();
+        _app.MapGeneratedRemoteEndpoints(RemoteAccess.AllowAnonymous);
         await _app.StartAsync(Ct);
 
         _clientProvider = new ServiceCollection()

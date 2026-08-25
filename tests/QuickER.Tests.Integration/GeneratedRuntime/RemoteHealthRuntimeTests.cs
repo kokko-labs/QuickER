@@ -45,7 +45,7 @@ public sealed class RemoteHealthRuntimeTests : IAsyncLifetime
         _server = await InProcessRemoteServer.StartAsync(
             services =>
                 services.AddGeneratedSqliteRepositories(_db.ReadWriteCreateConnectionString),
-            app => app.MapGeneratedRemoteEndpoints(),
+            app => app.MapGeneratedRemoteEndpoints(RemoteAccess.AllowAnonymous),
             Ct
         );
 

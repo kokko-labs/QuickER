@@ -53,10 +53,14 @@ builder.Services.AddGeneratedSqliteRepositories(connectionString);
 var app = builder.Build();
 
 // Expose the generated remote endpoints (POST /quicker/{entity}/{operation}).
+// The RemoteAccess argument has no default: the endpoints can read, write and delete every row, so whether
+// they demand authorization is stated explicitly at the call site. This local sample runs without
+// authentication and says so with AllowAnonymous; a real deployment should configure authentication and
+// pass RemoteAccess.RequireAuthorization instead.
 // A 500 response keeps the server-side exception message to itself by default and sends a correlation id
 // instead, which also appears in the server log. Pass exposeErrorDetails: app.Environment.IsDevelopment()
 // to read the real message while developing; this sample keeps the safe default.
-app.MapGeneratedRemoteEndpoints();
+app.MapGeneratedRemoteEndpoints(RemoteAccess.AllowAnonymous);
 
 Console.WriteLine($"[Server] Listening on {url}{RemotePaths.DefaultPrefix}. Press Ctrl+C to exit.");
 app.Run();

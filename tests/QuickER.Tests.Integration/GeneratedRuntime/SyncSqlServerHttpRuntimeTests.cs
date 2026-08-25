@@ -23,7 +23,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// </para>
 /// <para>
 /// サーバープロセスの DI は実運用と同じ形＝リポジトリを素直に登録し、<c>AddGeneratedDirectSyncSources(null)</c> で
-/// 差分ソースを載せ、<c>MapGeneratedRemoteEndpoints()</c> を張るだけ。クライアントは
+/// 差分ソースを載せ、<c>MapGeneratedRemoteEndpoints(RemoteAccess.AllowAnonymous)</c> を張るだけ。クライアントは
 /// <c>AddGeneratedHttpSyncSources</c> ＋ ローカル SQLite の keyed 登録で組む。
 /// </para>
 /// </remarks>
@@ -60,7 +60,7 @@ public sealed class SyncSqlServerHttpRuntimeTests(SqlServerContainerFixture fixt
                 services.AddGeneratedSqlServerRepositories(_fixture.ConnectionString);
                 services.AddGeneratedDirectSyncSources(null);
             },
-            app => app.MapGeneratedRemoteEndpoints(),
+            app => app.MapGeneratedRemoteEndpoints(RemoteAccess.AllowAnonymous),
             Ct
         );
 

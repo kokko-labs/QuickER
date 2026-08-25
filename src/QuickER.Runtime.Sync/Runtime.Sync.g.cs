@@ -2473,7 +2473,7 @@ public sealed class SyncEngine
 /// <remarks>
 /// The server maps them and the client posts to them, so both sides read the route from here and cannot drift apart.
 /// They are additions to the same endpoint group as the CRUD operations, which is what makes authorization applied to
-/// the group (<c>MapGeneratedRemoteEndpoints(...).RequireAuthorization()</c>) cover them as well - and it has to: the
+/// the group (<c>RemoteAccess.RequireAuthorization</c> at mapping time) cover them as well - and it has to: the
 /// changed-rows endpoint hands out whole rows and the key endpoint hands out the entire key set of a table.
 /// </remarks>
 public static class RemoteSyncOperations

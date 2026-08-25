@@ -749,12 +749,39 @@ public sealed class RemoteErrorDetailPolicy(
     public Action<HttpContext, Exception>? OnServerError { get; } = onServerError;
 }
 
+/// <summary>
+/// The authorization stance a caller must choose when mapping the generated remote endpoints. There is no default:
+/// the endpoints can read, write and delete every row of every entity, and whether that surface demands authorization
+/// is a decision of the hosting application - not one a library default should make silently, in either direction.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <see cref="RequireAuthorization"/> applies the host's default authorization policy to the whole endpoint group,
+/// the liveness endpoint included. The generated code can only demand authorization, never provide it: the host must
+/// have authentication and authorization configured, or every request to the group fails.
+/// </para>
+/// <para>
+/// <see cref="AllowAnonymous"/> states that this mapping itself demands nothing, and attaches no metadata at all.
+/// It deliberately does not attach <c>[AllowAnonymous]</c>: that would exempt the group from a host-level fallback
+/// authorization policy and so weaken a host that secures everything by default. Use it for local development, or
+/// when authorization is layered on elsewhere (the returned group, a fallback policy, or middleware).
+/// </para>
+/// </remarks>
+public enum RemoteAccess
+{
+    /// <summary>The endpoint group requires the host's default authorization policy (an authenticated user unless configured otherwise).</summary>
+    RequireAuthorization,
+
+    /// <summary>The mapping itself demands no authorization. No metadata is attached, so a host-level fallback policy still applies.</summary>
+    AllowAnonymous,
+}
+
 /// <summary>Endpoint metadata that lifts the request size limit for the binary PUT (attached only when the group opted in to unbounded uploads).</summary>
 /// <remarks>
 /// It is attached only when the group was mapped with <c>allowUnboundedUploads: true</c>; without it the host's own
 /// limit - 30 MB under Kestrel's defaults - applies and a larger upload is rejected with HTTP 413. Because an endpoint
-/// that accepts a body of any size is a denial-of-service surface, combining the opt-in with authorization
-/// (<c>MapGeneratedRemoteEndpoints(...).RequireAuthorization()</c>) is recommended.
+/// that accepts a body of any size is a denial-of-service surface, combining the opt-in with
+/// <see cref="RemoteAccess.RequireAuthorization"/> is recommended.
 /// To set a limit of a different size, override the whole group via the returned <see cref="RouteGroupBuilder"/>.
 /// </remarks>
 public sealed class DisableRequestBodySizeLimit : IRequestSizeLimitMetadata

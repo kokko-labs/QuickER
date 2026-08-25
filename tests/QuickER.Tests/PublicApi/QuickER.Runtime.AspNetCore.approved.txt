@@ -23,6 +23,10 @@ public sealed class QuickER.Runtime.AspNetCore.DisableRequestBodySizeLimit : Mic
     public long? MaxRequestBodySize { get; }
     public static readonly QuickER.Runtime.AspNetCore.DisableRequestBodySizeLimit Instance
 
+public enum QuickER.Runtime.AspNetCore.RemoteAccess : int
+    AllowAnonymous = 1
+    RequireAuthorization = 0
+
 public sealed class QuickER.Runtime.AspNetCore.RemoteBadRequestException : System.Exception, System.Runtime.Serialization.ISerializable
     public .ctor(string message)
     public .ctor(string message, System.Exception innerException)

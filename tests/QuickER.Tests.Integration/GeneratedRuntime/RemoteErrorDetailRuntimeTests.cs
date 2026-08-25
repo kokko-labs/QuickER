@@ -67,7 +67,7 @@ public sealed class RemoteErrorDetailRuntimeTests : IAsyncLifetime
         _hidden = await InProcessRemoteServer.StartAsync(
             services =>
                 services.AddGeneratedSqliteRepositories(_db.ReadWriteCreateConnectionString),
-            app => app.MapGeneratedRemoteEndpoints(),
+            app => app.MapGeneratedRemoteEndpoints(RemoteAccess.AllowAnonymous),
             Ct,
             builder => builder.Logging.AddProvider(_hiddenLog)
         );
@@ -75,7 +75,11 @@ public sealed class RemoteErrorDetailRuntimeTests : IAsyncLifetime
         _exposed = await InProcessRemoteServer.StartAsync(
             services =>
                 services.AddGeneratedSqliteRepositories(_db.ReadWriteCreateConnectionString),
-            app => app.MapGeneratedRemoteEndpoints(exposeErrorDetails: true),
+            app =>
+                app.MapGeneratedRemoteEndpoints(
+                    RemoteAccess.AllowAnonymous,
+                    exposeErrorDetails: true
+                ),
             Ct
         );
 
