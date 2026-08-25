@@ -60,15 +60,8 @@ public sealed class SqlServerSchemaSyncExecutor : ISchemaSyncExecutor
                 ex.Message
             );
 
-            try
-            {
-                await tran.RollbackAsync(ct).ConfigureAwait(false);
-            }
-            catch
-            {
-                // ロールバック自体の失敗は最善努力で握りつぶす（元の例外情報を優先する）。
-                // 明示ロールバックに失敗しても、未コミットのトランザクションは破棄時に取り消される
-            }
+            // 後始末の作法（完了済みなら no-op・失敗は握りつぶし・キャンセル不可）は共有ヘルパーに集約
+            await DbTransactions.RollbackQuietlyAsync(tran).ConfigureAwait(false);
 
             result.Batches.Add(
                 new SchemaSyncBatchResult(result.Batches.Count + 1, "", false, ex.Message)

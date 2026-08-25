@@ -96,7 +96,8 @@ public sealed class SqliteSchemaSyncExecutor : ISchemaSyncExecutor
 
             if (violatingTables.Count > 0)
             {
-                await tran.RollbackAsync(ct).ConfigureAwait(false);
+                // 結果は「FK 違反」で確定しており、後始末の失敗・キャンセルでこの報告を壊さない
+                await DbTransactions.RollbackQuietlyAsync(tran).ConfigureAwait(false);
                 result.Error = string.Format(
                     QuickER.Provider.Resources.Strings.Sync_Error_SqliteForeignKeyViolation,
                     string.Join(", ", violatingTables)
@@ -117,15 +118,8 @@ public sealed class SqliteSchemaSyncExecutor : ISchemaSyncExecutor
                 ex.Message
             );
 
-            try
-            {
-                await tran.RollbackAsync(ct).ConfigureAwait(false);
-            }
-            catch
-            {
-                // ロールバック自体の失敗は最善努力で握りつぶす（元の例外情報を優先する）。
-                // 明示ロールバックに失敗しても、未コミットのトランザクションは破棄時に取り消される
-            }
+            // 後始末の作法（完了済みなら no-op・失敗は握りつぶし・キャンセル不可）は共有ヘルパーに集約
+            await DbTransactions.RollbackQuietlyAsync(tran).ConfigureAwait(false);
 
             result.Batches.Add(new SchemaSyncBatchResult(1, script, false, ex.Message));
         }
