@@ -126,7 +126,9 @@
               ToolTip="{Binding LayeredOutputToolTip}"
             />
 
-            <!-- 層フォルダの相対パス（層別出力 ON のときのみ表示。サーバー層はリモートサービス生成時のみ） -->
+            <!-- 層フォルダの相対パス（層別出力 ON のときのみ表示。サーバー層はリモートサービス生成時のみ）。
+                 並びはドメイン→プレゼンテーション→インフラストラクチャー→サーバーで、GeneratedLayer の宣言順
+                 （診断の出力順）とは意図的に別＝画面は層の呼び方に馴染んだ順に並べる -->
             <StackPanel
               Margin="18,10,0,0"
               Visibility="{Binding ShowLayerDirectories, Converter={StaticResource BoolToVisibilityConverter}}"
@@ -169,14 +171,14 @@
                   Grid.Column="0"
                   Margin="0,4"
                   Style="{StaticResource FieldLabel}"
-                  Text="{x:Static res:Strings.CodeGen_LayerLabel_Infrastructure}"
+                  Text="{x:Static res:Strings.CodeGen_LayerLabel_Presentation}"
                 />
                 <TextBox
                   Grid.Row="1"
                   Grid.Column="1"
                   Margin="0,4"
                   Style="{StaticResource FormInput}"
-                  Text="{Binding InfrastructureLayerDirectory, UpdateSourceTrigger=PropertyChanged}"
+                  Text="{Binding PresentationLayerDirectory, UpdateSourceTrigger=PropertyChanged}"
                 />
 
                 <TextBlock
@@ -184,14 +186,14 @@
                   Grid.Column="0"
                   Margin="0,4"
                   Style="{StaticResource FieldLabel}"
-                  Text="{x:Static res:Strings.CodeGen_LayerLabel_Presentation}"
+                  Text="{x:Static res:Strings.CodeGen_LayerLabel_Infrastructure}"
                 />
                 <TextBox
                   Grid.Row="2"
                   Grid.Column="1"
                   Margin="0,4"
                   Style="{StaticResource FormInput}"
-                  Text="{Binding PresentationLayerDirectory, UpdateSourceTrigger=PropertyChanged}"
+                  Text="{Binding InfrastructureLayerDirectory, UpdateSourceTrigger=PropertyChanged}"
                 />
 
                 <!-- サーバー層はリモートサーバー実装を生成するときだけ出力されるため、欄ごと連動させる -->
