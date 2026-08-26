@@ -89,8 +89,13 @@ public class UniquenessGenerationTests
             .Contain("Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(")
             .And.Contain("partial void CollectCustomUniquenessChecks(");
 
-        // 制約が無いので照合ブロックは 1 つも出ない（違反は必ず空リストかフック由来になる）
-        content.Should().NotContain("new UniquenessViolation(");
+        // 制約が無いので記述子クラスもエンジンの制約照合も出ない（違反は必ず空リストかフック由来になる）。
+        // フック実行のループ機械部分は共有エンジン（RunCustomChecksAsync）経由
+        content.Should().NotContain("static class OrderUniquenessConstraints");
+        content.Should().NotContain("UniquenessConstraints.Checks");
+        content
+            .Should()
+            .Contain(".RunCustomChecksAsync(entity, customChecks, violations, cancellationToken)");
     }
 
     /// <summary>単一列制約は NULL 検査つきの照合ブロックと、実名の違反レコードを生成する</summary>
@@ -103,12 +108,13 @@ public class UniquenessGenerationTests
 
         var content = AllContent(Generate(diagram, CreateOptions()));
 
-        content.Should().Contain("if (entity.Memo is not null)");
+        // NULL 検査は記述子の HasAllValues ラムダとして出る（照合本体は共有エンジン側）
+        content.Should().Contain("static entity => entity.Memo is not null,");
         content.Should().Contain(".Where(candidate => candidate.Memo == entity.Memo)");
         // 同一主キーの行は必ず除外する（挿入・更新のどちらでも同じ呼び方で正しくなる根拠）
         content.Should().Contain(".Where(candidate => candidate.OrderId != entity.OrderId)");
-        // 非 NULL の値型 PK は null になり得ないので除外条件は無条件に連ねる（is not null は常に真＝警告になる）
-        content.Should().NotContain("if (entity.OrderId is not null)");
+        // 非 NULL の値型 PK は null になり得ないので除外は無条件（is not null は常に真＝警告になる）
+        content.Should().NotContain("entity.OrderId is not null");
         content.Should().Contain("\"UQ_Order_Memo\"");
     }
 
@@ -136,18 +142,10 @@ public class UniquenessGenerationTests
             .Contain(
                 string.Join(
                         "\n",
-                        "            var query1 = Query()",
-                        "                .Where(candidate => candidate.Memo == entity.Memo);",
-                        "",
-                        "            // A row that has no primary key yet (a new row) has no row of its own to exclude",
-                        "            if (entity.OrderId is not null)",
-                        "            {",
-                        "                query1 = query1.Where(candidate => candidate.OrderId != entity.OrderId);",
-                        "            }",
-                        "",
-                        "            var duplicated1 = await query1",
-                        "                .AnyAsync(cancellationToken)",
-                        "                .ConfigureAwait(false);"
+                        "    public static SqlQuery<OrderEntity> ExcludeSelf(SqlQuery<OrderEntity> query, OrderEntity entity) =>",
+                        "        entity.OrderId is not null",
+                        "            ? query.Where(candidate => candidate.OrderId != entity.OrderId)",
+                        "            : query;"
                     )
                     .ReplaceLineEndings()
             );

@@ -543,6 +543,17 @@ public delegate QuickER.Runtime.UniquenessCheck<TEntity> : System.ICloneable, Sy
     public virtual System.Threading.Tasks.Task<QuickER.Runtime.UniquenessViolation> EndInvoke(System.IAsyncResult result)
     public virtual System.Threading.Tasks.Task<QuickER.Runtime.UniquenessViolation> Invoke(TEntity entity, System.Threading.CancellationToken cancellationToken)
 
+public static class QuickER.Runtime.UniquenessChecker
+    public static System.Threading.Tasks.Task RunCustomChecksAsync<TEntity>(TEntity entity, System.Collections.Generic.List<QuickER.Runtime.UniquenessCheck<TEntity>> checks, System.Collections.Generic.List<QuickER.Runtime.UniquenessViolation> violations, System.Threading.CancellationToken cancellationToken)
+    public static System.Threading.Tasks.Task<System.Collections.Generic.List<QuickER.Runtime.UniquenessViolation>> CheckAsync<TEntity>(TEntity entity, System.Func<QuickER.Runtime.SqlQuery<TEntity>> query, System.Func<QuickER.Runtime.SqlQuery<TEntity>, TEntity, QuickER.Runtime.SqlQuery<TEntity>> excludeSelf, System.Collections.Generic.IReadOnlyList<QuickER.Runtime.UniquenessConstraintCheck<TEntity>> constraints, System.Threading.CancellationToken cancellationToken)
+
+public sealed class QuickER.Runtime.UniquenessConstraintCheck<TEntity> : System.IEquatable<QuickER.Runtime.UniquenessConstraintCheck<TEntity>>
+    public .ctor(string ConstraintName, System.Collections.Generic.IReadOnlyList<string> PropertyNames, System.Func<TEntity, bool> HasAllValues, System.Func<QuickER.Runtime.SqlQuery<TEntity>, TEntity, QuickER.Runtime.SqlQuery<TEntity>> ApplyFilter)
+    public System.Collections.Generic.IReadOnlyList<string> PropertyNames { get; init; }
+    public System.Func<QuickER.Runtime.SqlQuery<TEntity>, TEntity, QuickER.Runtime.SqlQuery<TEntity>> ApplyFilter { get; init; }
+    public System.Func<TEntity, bool> HasAllValues { get; init; }
+    public string ConstraintName { get; init; }
+
 public sealed class QuickER.Runtime.UniquenessViolation : System.IEquatable<QuickER.Runtime.UniquenessViolation>
     public .ctor(string ConstraintName, System.Collections.Generic.IReadOnlyList<string> PropertyNames, string Message = null)
     public System.Collections.Generic.IReadOnlyList<string> PropertyNames { get; init; }

@@ -4431,6 +4431,98 @@ public delegate Task<UniquenessViolation?> UniquenessCheck<TEntity>(
     CancellationToken cancellationToken
 );
 
+/// <summary>One UNIQUE-constraint check as data: the guard that skips tuples containing null, the equality filter over the constraint members, and the names the violation reports.</summary>
+/// <typeparam name="TEntity">The entity type being checked.</typeparam>
+/// <param name="ConstraintName">Name of the constraint (the synthesized name when the diagram does not set one).</param>
+/// <param name="PropertyNames">Entity property names that make up the constraint, in declaration order.</param>
+/// <param name="HasAllValues">Returns whether every constraint member holds a value (tuples containing null are skipped; NULL collision semantics differ per dialect).</param>
+/// <param name="ApplyFilter">Adds the equality filter for the constraint members to a candidate query (one Where per member, AND-combined).</param>
+public sealed record UniquenessConstraintCheck<TEntity>(
+    string ConstraintName,
+    IReadOnlyList<string> PropertyNames,
+    Func<TEntity, bool> HasAllValues,
+    Func<SqlQuery<TEntity>, TEntity, SqlQuery<TEntity>> ApplyFilter
+)
+    where TEntity : class;
+
+/// <summary>Shared engine of the uniqueness pre-check: walks the constraint table, excludes the entity's own row, asks the store for existence, and runs the user-defined checks.</summary>
+/// <remarks>
+/// Everything type-specific stays with the generated code, either as data (the constraint table and the self-exclusion,
+/// whose expression trees must be built over the concrete entity type) or as code (the partial hook that collects the
+/// user-defined checks, which a shared engine cannot call). The checks run through <c>Query()</c>, so every
+/// implementation target - the dialect repositories, in-memory, and EF Core - answers with the same semantics.
+/// </remarks>
+public static class UniquenessChecker
+{
+    /// <summary>Checks the declared UNIQUE constraints and returns the violations (an empty list when there are none).</summary>
+    /// <param name="entity">The entity whose constraint member values are checked.</param>
+    /// <param name="query">Creates a fresh candidate query (called once per constraint).</param>
+    /// <param name="excludeSelf">Excludes the entity's own row from a candidate query (a row that has no primary key yet excludes nothing).</param>
+    /// <param name="constraints">The constraint table, in declaration order.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    public static async Task<List<UniquenessViolation>> CheckAsync<TEntity>(
+        TEntity entity,
+        Func<SqlQuery<TEntity>> query,
+        Func<SqlQuery<TEntity>, TEntity, SqlQuery<TEntity>> excludeSelf,
+        IReadOnlyList<UniquenessConstraintCheck<TEntity>> constraints,
+        CancellationToken cancellationToken
+    )
+        where TEntity : class
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+        var violations = new List<UniquenessViolation>();
+
+        foreach (var constraint in constraints)
+        {
+            // Tuples whose member values contain null are not checked (NULL collision semantics differ per dialect)
+            if (!constraint.HasAllValues(entity))
+            {
+                continue;
+            }
+
+            var duplicated = await excludeSelf(constraint.ApplyFilter(query(), entity), entity)
+                .AnyAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            if (duplicated)
+            {
+                violations.Add(
+                    new UniquenessViolation(constraint.ConstraintName, constraint.PropertyNames)
+                );
+            }
+        }
+
+        return violations;
+    }
+
+    /// <summary>Runs the user-defined checks collected by the generated hook, adding every reported violation (a null list - the hook unimplemented, or nothing added - is a no-op).</summary>
+    /// <param name="entity">The entity to check.</param>
+    /// <param name="checks">The user-defined checks, or null when there are none.</param>
+    /// <param name="violations">The list the reported violations are added to.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    public static async Task RunCustomChecksAsync<TEntity>(
+        TEntity entity,
+        List<UniquenessCheck<TEntity>>? checks,
+        List<UniquenessViolation> violations,
+        CancellationToken cancellationToken
+    )
+        where TEntity : class
+    {
+        if (checks is null)
+        {
+            return;
+        }
+
+        foreach (var check in checks)
+        {
+            if (await check(entity, cancellationToken).ConfigureAwait(false) is { } violation)
+            {
+                violations.Add(violation);
+            }
+        }
+    }
+}
+
 /// <summary>Common repository interface limited to operations that can be provided across a network boundary (the remote surface).</summary>
 /// <remarks>
 /// <para>
@@ -11167,20 +11259,9 @@ public sealed partial class GadgetRepository(
 
         List<UniquenessCheck<GadgetEntity>>? customChecks = null;
         CollectCustomUniquenessChecks(ref customChecks);
-
-        if (customChecks is not null)
-        {
-            foreach (var customCheck in customChecks)
-            {
-                if (
-                    await customCheck(entity, cancellationToken)
-                        .ConfigureAwait(false) is { } violation
-                )
-                {
-                    violations.Add(violation);
-                }
-            }
-        }
+        await UniquenessChecker
+            .RunCustomChecksAsync(entity, customChecks, violations, cancellationToken)
+            .ConfigureAwait(false);
 
         return violations;
     }
@@ -11231,20 +11312,9 @@ public sealed partial class GadgetNoteRepository(
 
         List<UniquenessCheck<GadgetNoteEntity>>? customChecks = null;
         CollectCustomUniquenessChecks(ref customChecks);
-
-        if (customChecks is not null)
-        {
-            foreach (var customCheck in customChecks)
-            {
-                if (
-                    await customCheck(entity, cancellationToken)
-                        .ConfigureAwait(false) is { } violation
-                )
-                {
-                    violations.Add(violation);
-                }
-            }
-        }
+        await UniquenessChecker
+            .RunCustomChecksAsync(entity, customChecks, violations, cancellationToken)
+            .ConfigureAwait(false);
 
         return violations;
     }
@@ -13376,20 +13446,9 @@ public sealed partial class InMemoryGadgetRepository(
 
         List<UniquenessCheck<GadgetEntity>>? customChecks = null;
         CollectCustomUniquenessChecks(ref customChecks);
-
-        if (customChecks is not null)
-        {
-            foreach (var customCheck in customChecks)
-            {
-                if (
-                    await customCheck(entity, cancellationToken)
-                        .ConfigureAwait(false) is { } violation
-                )
-                {
-                    violations.Add(violation);
-                }
-            }
-        }
+        await UniquenessChecker
+            .RunCustomChecksAsync(entity, customChecks, violations, cancellationToken)
+            .ConfigureAwait(false);
 
         return violations;
     }
@@ -13417,20 +13476,9 @@ public sealed partial class InMemoryGadgetNoteRepository(
 
         List<UniquenessCheck<GadgetNoteEntity>>? customChecks = null;
         CollectCustomUniquenessChecks(ref customChecks);
-
-        if (customChecks is not null)
-        {
-            foreach (var customCheck in customChecks)
-            {
-                if (
-                    await customCheck(entity, cancellationToken)
-                        .ConfigureAwait(false) is { } violation
-                )
-                {
-                    violations.Add(violation);
-                }
-            }
-        }
+        await UniquenessChecker
+            .RunCustomChecksAsync(entity, customChecks, violations, cancellationToken)
+            .ConfigureAwait(false);
 
         return violations;
     }
@@ -15323,20 +15371,9 @@ public sealed partial class EfCoreGadgetRepository(
 
         List<UniquenessCheck<GadgetEntity>>? customChecks = null;
         CollectCustomUniquenessChecks(ref customChecks);
-
-        if (customChecks is not null)
-        {
-            foreach (var customCheck in customChecks)
-            {
-                if (
-                    await customCheck(entity, cancellationToken)
-                        .ConfigureAwait(false) is { } violation
-                )
-                {
-                    violations.Add(violation);
-                }
-            }
-        }
+        await UniquenessChecker
+            .RunCustomChecksAsync(entity, customChecks, violations, cancellationToken)
+            .ConfigureAwait(false);
 
         return violations;
     }
@@ -15365,20 +15402,9 @@ public sealed partial class EfCoreGadgetNoteRepository(
 
         List<UniquenessCheck<GadgetNoteEntity>>? customChecks = null;
         CollectCustomUniquenessChecks(ref customChecks);
-
-        if (customChecks is not null)
-        {
-            foreach (var customCheck in customChecks)
-            {
-                if (
-                    await customCheck(entity, cancellationToken)
-                        .ConfigureAwait(false) is { } violation
-                )
-                {
-                    violations.Add(violation);
-                }
-            }
-        }
+        await UniquenessChecker
+            .RunCustomChecksAsync(entity, customChecks, violations, cancellationToken)
+            .ConfigureAwait(false);
 
         return violations;
     }
