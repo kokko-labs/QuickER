@@ -321,7 +321,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             shape.ParameterList
         );
         builder
-            .Append(" =>\n        inner.")
+            .Append(" =>\n        _inner.")
             .Append(shape.MethodName)
             .Append('(')
             .Append(string.Join(", ", shape.ArgumentNames))

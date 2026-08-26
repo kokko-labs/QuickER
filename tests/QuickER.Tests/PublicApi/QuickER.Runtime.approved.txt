@@ -98,6 +98,13 @@ public abstract class QuickER.Runtime.EditModelBase : System.ComponentModel.IEdi
     public void SetDuplicateError(string propertyName, string message, QuickER.Runtime.DuplicateErrorSource source = 0)
     public void SetParentModel(QuickER.Runtime.EditModelBase parentModel)
 
+public abstract class QuickER.Runtime.EditModelBase<TSelf> : QuickER.Runtime.EditModelBase, System.ComponentModel.IEditableObject, System.ComponentModel.INotifyDataErrorInfo, System.ComponentModel.INotifyPropertyChanged
+    protected .ctor()
+    protected override void MoveCore(int oldIndex, int newIndex)
+    public QuickER.Runtime.EditModelCollection<TSelf> ParentCollection { get; }
+    public TSelf GetNext()
+    public TSelf GetPrevious()
+
 public sealed class QuickER.Runtime.EditModelCollection<T> : System.Collections.ObjectModel.ObservableCollection<T>, System.Collections.Generic.ICollection<T>, System.Collections.Generic.IEnumerable<T>, System.Collections.Generic.IList<T>, System.Collections.Generic.IReadOnlyCollection<T>, System.Collections.Generic.IReadOnlyList<T>, System.Collections.ICollection, System.Collections.IEnumerable, System.Collections.IList, System.Collections.Specialized.INotifyCollectionChanged, System.ComponentModel.INotifyPropertyChanged
     protected override void ClearItems()
     protected override void InsertItem(int index, T item)
@@ -232,6 +239,7 @@ public interface QuickER.Runtime.IValueObject<TSelf, TValue> : QuickER.Runtime.I
     public static TSelf Create(TValue value)
     public static TSelf New(TValue value)
     public static bool TryCreate(TValue value, out TSelf result, out System.Collections.Generic.IReadOnlyList<string> errors)
+    public static string DisplayName { get; }
     public static void ValidateCore(TValue value, ref System.Collections.Generic.List<string> errors)
     public virtual TValue Value { get; }
 
@@ -259,12 +267,15 @@ public sealed class QuickER.Runtime.IncludeNode
 
 public abstract class QuickER.Runtime.MapperBase<TEntity, TEditModel>
     protected .ctor()
+    protected TEditModel CreateEditModelCore(TEntity entity)
+    protected static TEntity CreateEntityCore()
     public QuickER.Runtime.EditModelCollection<TEditModel> CreateEditModels(System.Collections.Generic.IEnumerable<TEntity> entities)
     public System.Collections.Generic.List<TEntity> CreateEntities(QuickER.Runtime.EditModelCollection<TEditModel> editModels, bool includeRemoved = false)
     public TEditModel CreateEditModel()
     public TEntity CreateEntity(TEditModel editModel, bool includeRemoved = false)
     public abstract TEditModel CreateEditModel(TEntity entity)
     public abstract TEntity CreateEntity()
+    public abstract void ApplyToEditModel(TEntity entity, TEditModel editModel)
     public abstract void ApplyToEntity(TEditModel editModel, TEntity entity, bool includeRemoved)
 
 public sealed class QuickER.Runtime.NavigationReferenceAttribute : System.Attribute

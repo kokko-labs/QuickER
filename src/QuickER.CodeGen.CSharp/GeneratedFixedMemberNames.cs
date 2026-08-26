@@ -33,8 +33,9 @@ public static class GeneratedFixedMemberNames
     /// L1236 <c>ResolveParseErrorMessage</c>・L1249 <c>CustomizeParseErrorMessage</c>・
     /// L1279 <c>_rowStateSnapshot</c>・L1282 <c>BeginEditCore</c>・L1290 <c>OnBeginEdit</c>・
     /// L1293 <c>EndEditCore</c>・L1296 <c>OnEndEdit</c>・L1299 <c>CancelEditCore</c>・L1311 <c>OnCancelEdit</c>・
-    /// <c>RegisterDuplicateError</c>・<c>ResolveDuplicateErrorMessage</c>・<c>CustomizeDuplicateErrorMessage</c>（重複値エラー）・
-    /// L1314 <c>GetNext</c>・L1317 <c>GetPrevious</c>・L1320 <c>ParentCollection</c>・L1330 <c>MoveCore</c>。
+    /// <c>RegisterDuplicateError</c>・<c>ResolveDuplicateErrorMessage</c>・<c>CustomizeDuplicateErrorMessage</c>（重複値エラー）。
+    /// 位置ヘルパー（GetNext / GetPrevious / ParentCollection / MoveCore）は第 10 次 A-6 で
+    /// <c>EditModelBase&lt;TSelf&gt;</c>（CRTP 層）へ移設済み＝per-type には出ない。
     /// </remarks>
     public static IReadOnlySet<string> EditModelAlways { get; } =
         Create(
@@ -54,12 +55,19 @@ public static class GeneratedFixedMemberNames
             "EndEditCore",
             "OnEndEdit",
             "CancelEditCore",
-            "OnCancelEdit",
-            "GetNext",
-            "GetPrevious",
-            "ParentCollection",
-            "MoveCore"
+            "OnCancelEdit"
         );
+
+    /// <summary>
+    /// <c>EditModelBase&lt;TSelf&gt;</c>（CRTP 層）が宣言する位置ヘルパーの予約名。
+    /// </summary>
+    /// <remarks>
+    /// 第 10 次 A-6 で per-type から基底へ移設したため生成 EditModel には出ないが、列由来プロパティが
+    /// この名前を取ると基底メンバを隠して型付きの面が壊れるため、衝突は従来どおり生成エラーにする
+    /// （＝シンボル表への登録は続け、名簿照合〔per-type の実宣言〕からは外す）。
+    /// </remarks>
+    public static IReadOnlySet<string> EditModelPositionHelpers { get; } =
+        Create("GetNext", "GetPrevious", "ParentCollection", "MoveCore");
 
     /// <summary>
     /// カスケード対象（子方向）のナビゲーションを持つ EditModel だけが宣言する固定メンバー名（L1267 <c>RegisterChildren</c>）。

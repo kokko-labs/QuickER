@@ -6416,6 +6416,490 @@ public sealed class SyncEngine
     }
 }
 
+/// <summary>
+/// Generic core of the journaling repository decorator: every write entry point on the repository contract records
+/// its intent to the journal before the write is performed, and everything else is forwarded untouched.
+/// </summary>
+/// <remarks>
+/// <para>
+/// It wraps the repository rather than hooking into the save pipeline because a save hook only fires for a graph save -
+/// a direct Insert, Update, Delete, or BulkInsert passes it by. Offline editing has to be caught at every write, so
+/// every write entry point on the contract records here. What stays with the generated derived class is only what the
+/// generic core cannot know: the table's name and key handling, and the graph-save recording, which walks the
+/// generated cascade closure (plus the members the concrete interface adds - named queries, the uniqueness pre-check,
+/// and the binary column accessors - which the derived class forwards itself).
+/// </para>
+/// <para>
+/// Raw SQL (<c>ExecuteSqlAsync</c>) is forwarded untouched and is <b>not</b> recorded: the statement's shape is opaque
+/// to the decorator, so there is no key to journal. The same holds for the bulk delete behind
+/// <c>Query().ExecuteDeleteAsync</c>, whose rows are chosen by a predicate the decorator never sees. Rows changed
+/// either way reach the server only if something else records them.
+/// </para>
+/// </remarks>
+/// <typeparam name="TEntity">The entity type.</typeparam>
+/// <typeparam name="TKey">The primary key type.</typeparam>
+public abstract class JournalingRepositoryBase<TEntity, TKey> : IRepository<TEntity, TKey>
+    where TEntity : EntityBase, new()
+{
+    /// <summary>Creates the decorator over the repository it wraps and the journal it records to.</summary>
+    protected JournalingRepositoryBase(IRepository<TEntity, TKey> inner, SyncJournal journal)
+    {
+        Inner = inner;
+        Journal = journal;
+    }
+
+    /// <summary>Gets the wrapped repository every call is forwarded to.</summary>
+    protected IRepository<TEntity, TKey> Inner { get; }
+
+    /// <summary>Gets the journal the write intents are recorded to.</summary>
+    protected SyncJournal Journal { get; }
+
+    /// <summary>Gets the server-side table name the journal entries are recorded under.</summary>
+    protected abstract string TableName { get; }
+
+    /// <summary>Reads the primary key of the given entity.</summary>
+    protected abstract TKey ReadKey(TEntity entity);
+
+    /// <summary>Formats a key into the journal's key text (the same serialization the sync engine reads back).</summary>
+    protected abstract string FormatKey(TKey key);
+
+    /// <summary>Records a delete intent for the given key (the versioned and versionless subclasses differ here).</summary>
+    protected abstract Task RecordDeleteAsync(TKey id, CancellationToken cancellationToken);
+
+    /// <summary>Records a graph save via the generated cascade recorder (the closure is schema knowledge the core cannot have).</summary>
+    protected abstract Task RecordGraphSaveAsync(
+        TEntity entity,
+        bool cascadeSave,
+        bool cascadeDelete,
+        CancellationToken cancellationToken
+    );
+
+    /// <summary>Records the intent to write the given row, unless the sync engine is the one writing.</summary>
+    protected Task RecordUpsertAsync(TEntity entity, CancellationToken cancellationToken) =>
+        Journal.RecordAsync(
+            TableName,
+            FormatKey(ReadKey(entity)),
+            SyncJournalOperation.Upsert,
+            null,
+            cancellationToken
+        );
+
+    /// <inheritdoc />
+    public Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default) =>
+        Inner.GetByIdAsync(id, cancellationToken);
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<TEntity>> GetAllAsync(CancellationToken cancellationToken = default) =>
+        Inner.GetAllAsync(cancellationToken);
+
+    /// <inheritdoc />
+    public async Task InsertAsync(TEntity entity, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+        await RecordUpsertAsync(entity, cancellationToken).ConfigureAwait(false);
+        await Inner.InsertAsync(entity, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> UpdateAsync(
+        TEntity entity,
+        ConcurrencyMode mode = ConcurrencyMode.Optimistic,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+        await RecordUpsertAsync(entity, cancellationToken).ConfigureAwait(false);
+
+        return await Inner.UpdateAsync(entity, mode, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default)
+    {
+        await RecordDeleteAsync(id, cancellationToken).ConfigureAwait(false);
+
+        return await Inner.DeleteAsync(id, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<int> BulkInsertAsync(
+        IEnumerable<TEntity> entities,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(entities);
+        var materialized = entities.ToList();
+
+        foreach (var entity in materialized)
+        {
+            if (entity is not null)
+            {
+                await RecordUpsertAsync(entity, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        return await Inner.BulkInsertAsync(materialized, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<int> SaveAsync(
+        TEntity entity,
+        bool cascadeSave = true,
+        bool cascadeDelete = true,
+        bool insertWhenUpdateMissing = false,
+        ConcurrencyMode mode = ConcurrencyMode.Optimistic,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+        await RecordGraphSaveAsync(entity, cascadeSave, cascadeDelete, cancellationToken)
+            .ConfigureAwait(false);
+
+        return await Inner.SaveAsync(
+            entity,
+            cascadeSave,
+            cascadeDelete,
+            insertWhenUpdateMissing,
+            mode,
+            cancellationToken
+        )
+            .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<int> SaveAsync(
+        IEnumerable<TEntity> entities,
+        bool cascadeSave = true,
+        bool cascadeDelete = true,
+        bool insertWhenUpdateMissing = false,
+        ConcurrencyMode mode = ConcurrencyMode.Optimistic,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(entities);
+        var materialized = entities.ToList();
+
+        foreach (var entity in materialized)
+        {
+            if (entity is not null)
+            {
+                await RecordGraphSaveAsync(entity, cascadeSave, cascadeDelete, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+        }
+
+        return await Inner.SaveAsync(
+            materialized,
+            cascadeSave,
+            cascadeDelete,
+            insertWhenUpdateMissing,
+            mode,
+            cancellationToken
+        )
+            .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public SqlQuery<TEntity> Query() => Inner.Query();
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<TEntity>> QueryBySqlAsync(
+        string sql,
+        object? parameters = null,
+        CancellationToken cancellationToken = default
+    ) => Inner.QueryBySqlAsync(sql, parameters, cancellationToken);
+
+    /// <inheritdoc />
+    public Task<int> ExecuteSqlAsync(
+        string sql,
+        object? parameters = null,
+        CancellationToken cancellationToken = default
+    ) => Inner.ExecuteSqlAsync(sql, parameters, cancellationToken);
+
+    /// <inheritdoc />
+    public Task<TResult?> ExecuteScalarSqlAsync<TResult>(
+        string sql,
+        object? parameters = null,
+        CancellationToken cancellationToken = default
+    ) => Inner.ExecuteScalarSqlAsync<TResult>(sql, parameters, cancellationToken);
+}
+
+/// <summary>Journaling decorator core for a table with a row-version column (a delete intent carries the mirrored version).</summary>
+/// <typeparam name="TEntity">The entity type.</typeparam>
+/// <typeparam name="TKey">The primary key type.</typeparam>
+public abstract class JournalingRepository<TEntity, TKey> : JournalingRepositoryBase<TEntity, TKey>
+    where TEntity : EntityBase, new()
+{
+    /// <summary>Creates the decorator over the repository it wraps and the journal it records to.</summary>
+    protected JournalingRepository(IRepository<TEntity, TKey> inner, SyncJournal journal)
+        : base(inner, journal) { }
+
+    /// <summary>Reads the mirrored row version of the given entity.</summary>
+    protected abstract byte[]? ReadRowVersion(TEntity entity);
+
+    /// <inheritdoc />
+    protected sealed override async Task RecordDeleteAsync(
+        TKey id,
+        CancellationToken cancellationToken
+    )
+    {
+        // The row has to be read before it goes: its mirrored version is the only thing that lets the delete be
+        // replayed under a version guard, and once the row is gone there is nowhere left to read it from.
+        if (!SyncSession.IsSuppressed)
+        {
+            var existing = await Inner.GetByIdAsync(id, cancellationToken).ConfigureAwait(false);
+            await Journal.RecordAsync(
+                TableName,
+                FormatKey(id),
+                SyncJournalOperation.Delete,
+                existing is null ? null : ReadRowVersion(existing),
+                cancellationToken
+            )
+                .ConfigureAwait(false);
+        }
+    }
+}
+
+/// <summary>Journaling decorator core for a table without a row-version column (a delete intent carries no version and replays unguarded).</summary>
+/// <typeparam name="TEntity">The entity type.</typeparam>
+/// <typeparam name="TKey">The primary key type.</typeparam>
+public abstract class VersionlessJournalingRepository<TEntity, TKey>
+    : JournalingRepositoryBase<TEntity, TKey>
+    where TEntity : EntityBase, new()
+{
+    /// <summary>Creates the decorator over the repository it wraps and the journal it records to.</summary>
+    protected VersionlessJournalingRepository(IRepository<TEntity, TKey> inner, SyncJournal journal)
+        : base(inner, journal) { }
+
+    /// <inheritdoc />
+    protected sealed override Task RecordDeleteAsync(TKey id, CancellationToken cancellationToken) =>
+        // No version column means there is no mirrored version to capture before the row goes; the delete replays
+        // without a guard, which is all a last-write-wins table can promise anyway.
+        Journal.RecordAsync(
+            TableName,
+            FormatKey(id),
+            SyncJournalOperation.Delete,
+            null,
+            cancellationToken
+        );
+}
+
+/// <summary>
+/// Generic core of the direct (same-process database connection) server source: the key set and the change stream
+/// come through the server's raw SQL surface, and the local changes are replayed through the server's ordinary
+/// repository. What stays with the generated derived class is only the SQL text, which carries the table's identity.
+/// </summary>
+/// <remarks>
+/// The paging members and <see cref="BinaryColumns"/> are virtual here rather than left to the interface's default
+/// implementations on purpose: interface mapping is fixed at the class that lists the interface - this one - so a
+/// member a derived class adds later would never be reached through the interface. A virtual with the same default
+/// keeps the dispatch open for the subclasses that do override.
+/// </remarks>
+/// <typeparam name="TEntity">The entity type.</typeparam>
+/// <typeparam name="TKey">The primary key type.</typeparam>
+public abstract class DirectSyncSourceBase<TEntity, TKey> : ISyncServerSource<TEntity, TKey>
+    where TEntity : EntityBase, new()
+{
+    /// <summary>Creates the source over the server's raw SQL surface and the repository local changes replay against.</summary>
+    protected DirectSyncSourceBase(
+        ISqlExecutor serverSqlExecutor,
+        IRemoteRepository<TEntity, TKey> writer
+    )
+    {
+        ServerSqlExecutor = serverSqlExecutor;
+        Writer = writer;
+    }
+
+    /// <summary>Gets the server's raw SQL surface the scans read through.</summary>
+    protected ISqlExecutor ServerSqlExecutor { get; }
+
+    /// <inheritdoc />
+    public IRemoteRepository<TEntity, TKey> Writer { get; }
+
+    /// <inheritdoc />
+    public virtual ISyncBinaryColumns<TKey>? BinaryColumns => null;
+
+    /// <summary>SELECT that returns every primary key of the table (SQL Server quoting).</summary>
+    protected abstract string ServerKeysSql { get; }
+
+    /// <inheritdoc />
+    public abstract Task<byte[]?> GetChangeCeilingAsync(
+        CancellationToken cancellationToken = default
+    );
+
+    /// <inheritdoc />
+    public abstract Task<SyncChangeBatch<TEntity>> GetChangesAsync(
+        byte[]? anchor,
+        byte[]? ceiling,
+        int batchSize,
+        CancellationToken cancellationToken = default
+    );
+
+    /// <inheritdoc />
+    public virtual Task<SyncChangeBatch<TEntity>> GetFirstPageAsync(
+        int batchSize,
+        CancellationToken cancellationToken = default
+    ) =>
+        throw new NotSupportedException(
+            "This source does not page by primary key; it serves a versioned table."
+        );
+
+    /// <inheritdoc />
+    public virtual Task<SyncChangeBatch<TEntity>> GetPageAfterAsync(
+        TKey afterKey,
+        int batchSize,
+        CancellationToken cancellationToken = default
+    ) =>
+        throw new NotSupportedException(
+            "This source does not page by primary key; it serves a versioned table."
+        );
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<TKey>> GetAllKeysAsync(
+        CancellationToken cancellationToken = default
+    ) =>
+        await ServerSqlExecutor.QueryProjectionBySqlAsync<TKey>(
+            ServerKeysSql,
+            null,
+            cancellationToken
+        )
+            .ConfigureAwait(false);
+}
+
+/// <summary>Direct server source for a table with a row-version column (an ascending, anchored change scan).</summary>
+/// <typeparam name="TEntity">The entity type.</typeparam>
+/// <typeparam name="TKey">The primary key type.</typeparam>
+public abstract class DirectSyncSource<TEntity, TKey> : DirectSyncSourceBase<TEntity, TKey>
+    where TEntity : EntityBase, new()
+{
+    /// <summary>Creates the source over the server's raw SQL surface and the repository local changes replay against.</summary>
+    protected DirectSyncSource(
+        ISqlExecutor serverSqlExecutor,
+        IRemoteRepository<TEntity, TKey> writer
+    )
+        : base(serverSqlExecutor, writer) { }
+
+    /// <summary>SELECT that returns one ascending batch of rows above the anchor and below the ceiling (SQL Server quoting).</summary>
+    protected abstract string ServerChangesSql { get; }
+
+    /// <inheritdoc />
+    public sealed override async Task<byte[]?> GetChangeCeilingAsync(
+        CancellationToken cancellationToken = default
+    ) =>
+        await ServerSqlExecutor.ExecuteScalarSqlAsync<byte[]>(
+            "SELECT MIN_ACTIVE_ROWVERSION()",
+            null,
+            cancellationToken
+        )
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// A full batch is reported as "there is more", which the next call settles: it either returns the rest or comes
+    /// back empty when the batch happened to end exactly on the boundary. The extra round trip in that case is the
+    /// price of not fetching a row beyond the batch to peek with, and it costs one empty query per drained table.
+    /// </remarks>
+    public sealed override async Task<SyncChangeBatch<TEntity>> GetChangesAsync(
+        byte[]? anchor,
+        byte[]? ceiling,
+        int batchSize,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var rows = await ServerSqlExecutor.QueryBySqlAsync<TEntity>(
+            ServerChangesSql,
+            new
+            {
+                anchor,
+                ceiling,
+                batchSize,
+            },
+            cancellationToken
+        )
+            .ConfigureAwait(false);
+
+        return new SyncChangeBatch<TEntity>(rows, rows.Count >= batchSize);
+    }
+}
+
+/// <summary>Direct server source for a table without a row-version column (a key-ordered full scan, paged by primary key).</summary>
+/// <typeparam name="TEntity">The entity type.</typeparam>
+/// <typeparam name="TKey">The primary key type.</typeparam>
+public abstract class VersionlessDirectSyncSource<TEntity, TKey>
+    : DirectSyncSourceBase<TEntity, TKey>
+    where TEntity : EntityBase, new()
+{
+    /// <summary>Creates the source over the server's raw SQL surface and the repository local changes replay against.</summary>
+    protected VersionlessDirectSyncSource(
+        ISqlExecutor serverSqlExecutor,
+        IRemoteRepository<TEntity, TKey> writer
+    )
+        : base(serverSqlExecutor, writer) { }
+
+    /// <summary>SELECT that returns the first ascending batch of rows by primary key (SQL Server quoting).</summary>
+    protected abstract string ServerPageFirstSql { get; }
+
+    /// <summary>SELECT that returns the next ascending batch of rows above a key (SQL Server quoting).</summary>
+    protected abstract string ServerPageAfterSql { get; }
+
+    /// <inheritdoc />
+    /// <remarks>A key-ordered scan has no version to bound, so there is no ceiling to read.</remarks>
+    public sealed override Task<byte[]?> GetChangeCeilingAsync(
+        CancellationToken cancellationToken = default
+    ) => Task.FromResult<byte[]?>(null);
+
+    /// <inheritdoc />
+    /// <remarks>Never called for a table without a version column; the download pages by key instead.</remarks>
+    public sealed override Task<SyncChangeBatch<TEntity>> GetChangesAsync(
+        byte[]? anchor,
+        byte[]? ceiling,
+        int batchSize,
+        CancellationToken cancellationToken = default
+    ) =>
+        throw new NotSupportedException(
+            "The table has no version column; its download pages by primary key."
+        );
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// A full batch is reported as "there is more", which the next call settles: it either returns the rest or comes
+    /// back empty when the batch happened to end exactly on the boundary - the same trade the versioned change scan
+    /// makes.
+    /// </remarks>
+    public sealed override async Task<SyncChangeBatch<TEntity>> GetFirstPageAsync(
+        int batchSize,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var rows = await ServerSqlExecutor.QueryBySqlAsync<TEntity>(
+            ServerPageFirstSql,
+            new { batchSize },
+            cancellationToken
+        )
+            .ConfigureAwait(false);
+
+        return new SyncChangeBatch<TEntity>(rows, rows.Count >= batchSize);
+    }
+
+    /// <inheritdoc />
+    public sealed override async Task<SyncChangeBatch<TEntity>> GetPageAfterAsync(
+        TKey afterKey,
+        int batchSize,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var rows = await ServerSqlExecutor.QueryBySqlAsync<TEntity>(
+            ServerPageAfterSql,
+            new { afterKey, batchSize },
+            cancellationToken
+        )
+            .ConfigureAwait(false);
+
+        return new SyncChangeBatch<TEntity>(rows, rows.Count >= batchSize);
+    }
+}
+
 /// <summary>The operation names of the sync-only endpoints (<c>POST {prefix}/{entity}/{operation}</c>).</summary>
 /// <remarks>
 /// The server maps them and the client posts to them, so both sides read the route from here and cannot drift apart.
@@ -6600,70 +7084,35 @@ public abstract class HttpSyncServerSource<TEntity, TKey>
 
 /// <summary>Reads the server side of sync_orders over a direct database connection.</summary>
 /// <remarks>
-/// Nothing here is new database code: the changed rows and the key set come through the server's raw SQL surface, and
-/// the local changes are replayed through the server's ordinary repository.
+/// Nothing here is new database code: the scans and the replay live on the generic core (see
+/// <see cref="DirectSyncSourceBase{TEntity, TKey}"/>); this class supplies the SQL text that carries the table's
+/// identity and forwards the binary column accessors.
 /// </remarks>
-public sealed class SyncOrderDirectSyncSource(
-    ISqlExecutor serverSqlExecutor,
-    ISyncOrderRepository serverRepository
-) : ISyncServerSource<SyncOrderEntity, int>, ISyncBinaryColumns<int>
+public sealed class SyncOrderDirectSyncSource
+    : DirectSyncSource<SyncOrderEntity, int>, ISyncBinaryColumns<int>
 {
-    /// <inheritdoc />
-    public IRemoteRepository<SyncOrderEntity, int> Writer =>
-        serverRepository;
+    // The binary accessors need the concrete interface (Read{Column}Async), which the base's writer-typed
+    // reference cannot provide
+    private readonly ISyncOrderRepository _serverRepository;
 
-    /// <inheritdoc />
-    public async Task<byte[]?> GetChangeCeilingAsync(
-        CancellationToken cancellationToken = default
-    ) =>
-        await serverSqlExecutor.ExecuteScalarSqlAsync<byte[]>(
-            "SELECT MIN_ACTIVE_ROWVERSION()",
-            null,
-            cancellationToken
-        )
-            .ConfigureAwait(false);
-
-    /// <inheritdoc />
-    /// <remarks>
-    /// A full batch is reported as "there is more", which the next call settles: it either returns the rest or comes
-    /// back empty when the batch happened to end exactly on the boundary. The extra round trip in that case is the
-    /// price of not fetching a row beyond the batch to peek with, and it costs one empty query per drained table.
-    /// </remarks>
-    public async Task<SyncChangeBatch<SyncOrderEntity>> GetChangesAsync(
-        byte[]? anchor,
-        byte[]? ceiling,
-        int batchSize,
-        CancellationToken cancellationToken = default
+    /// <summary>Creates the source over the server's raw SQL surface and its ordinary repository.</summary>
+    public SyncOrderDirectSyncSource(
+        ISqlExecutor serverSqlExecutor,
+        ISyncOrderRepository serverRepository
     )
+        : base(serverSqlExecutor, serverRepository)
     {
-        var rows = await serverSqlExecutor.QueryBySqlAsync<SyncOrderEntity>(
-            "SELECT TOP (@batchSize) [order_id], [customer_name], [row_ver] FROM [sync_orders] WHERE (@anchor IS NULL OR [row_ver] > CAST(@anchor AS binary(8))) AND (@ceiling IS NULL OR [row_ver] < CAST(@ceiling AS binary(8))) ORDER BY [row_ver]",
-            new
-            {
-                anchor,
-                ceiling,
-                batchSize,
-            },
-            cancellationToken
-        )
-            .ConfigureAwait(false);
-
-        return new SyncChangeBatch<SyncOrderEntity>(rows, rows.Count >= batchSize);
+        _serverRepository = serverRepository;
     }
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<int>> GetAllKeysAsync(
-        CancellationToken cancellationToken = default
-    ) =>
-        await serverSqlExecutor.QueryProjectionBySqlAsync<int>(
-            "SELECT [order_id] FROM [sync_orders]",
-            null,
-            cancellationToken
-        )
-            .ConfigureAwait(false);
+    protected override string ServerKeysSql => "SELECT [order_id] FROM [sync_orders]";
 
     /// <inheritdoc />
-    public ISyncBinaryColumns<int>? BinaryColumns => this;
+    protected override string ServerChangesSql => "SELECT TOP (@batchSize) [order_id], [customer_name], [row_ver] FROM [sync_orders] WHERE (@anchor IS NULL OR [row_ver] > CAST(@anchor AS binary(8))) AND (@ceiling IS NULL OR [row_ver] < CAST(@ceiling AS binary(8))) ORDER BY [row_ver]";
+
+    /// <inheritdoc />
+    public override ISyncBinaryColumns<int>? BinaryColumns => this;
 
     /// <inheritdoc />
     public IReadOnlyList<string> UnboundedBinaryColumnNames => ["Attachment"];
@@ -6677,7 +7126,7 @@ public sealed class SyncOrderDirectSyncSource(
     ) =>
         columnName switch
         {
-            "Attachment" => serverRepository.ReadAttachmentAsync(id, destination, cancellationToken),
+            "Attachment" => _serverRepository.ReadAttachmentAsync(id, destination, cancellationToken),
             _ => throw new ArgumentOutOfRangeException(
                 nameof(columnName),
                 columnName,
@@ -6695,7 +7144,7 @@ public sealed class SyncOrderDirectSyncSource(
     ) =>
         columnName switch
         {
-            "Attachment" => serverRepository.WriteAttachmentAsync(id, source, length, cancellationToken),
+            "Attachment" => _serverRepository.WriteAttachmentAsync(id, source, length, cancellationToken),
             _ => throw new ArgumentOutOfRangeException(
                 nameof(columnName),
                 columnName,
@@ -6851,215 +7300,61 @@ public sealed class SyncOrderSyncTable(
 /// The local SyncOrderEntity repository with journaling: every write is recorded before it is performed.
 /// </summary>
 /// <remarks>
-/// <para>
-/// It wraps the repository rather than hooking into the save pipeline because a save hook only fires for a graph save -
-/// a direct Insert, Update, Delete, or BulkInsert passes it by. Offline editing has to be caught at every write, so
-/// every write entry point on the contract records its intent here. A graph save is recorded through
-/// <see cref="SyncGraphRecorder"/>, which walks the same cascade navigations the saver walks, so the children the
-/// save writes or deletes are journaled exactly like the root.
-/// </para>
-/// <para>
-/// Raw SQL (<c>ExecuteSqlAsync</c>) is forwarded untouched and is <b>not</b> recorded: the statement's shape is opaque
-/// to the decorator, so there is no key to journal. The same holds for the bulk delete behind
-/// <c>Query().ExecuteDeleteAsync</c>, whose rows are chosen by a predicate the decorator never sees. Rows changed
-/// either way reach the server only if something else records them.
-/// </para>
+/// The recording and forwarding semantics live on the generic core (see
+/// <see cref="JournalingRepositoryBase{TEntity, TKey}"/>); this class supplies the table's identity and key handling,
+/// records a graph save through <see cref="SyncGraphRecorder"/> (which walks the same cascade navigations the saver
+/// walks, so the children the save writes or deletes are journaled exactly like the root), and forwards the members
+/// the concrete contract adds.
 /// </remarks>
-public sealed class JournalingSyncOrderRepository(
-    ISyncOrderRepository inner,
-    SyncJournal journal
-) : ISyncOrderRepository
+public sealed class JournalingSyncOrderRepository
+    : JournalingRepository<SyncOrderEntity, int>, ISyncOrderRepository
 {
-    /// <summary>Records the intent to write the given row, unless the sync engine is the one writing.</summary>
-    private Task RecordUpsertAsync(SyncOrderEntity entity, CancellationToken cancellationToken) =>
-        journal.RecordAsync(
-            "sync_orders",
-            entity.OrderId.ToString(CultureInfo.InvariantCulture),
-            SyncJournalOperation.Upsert,
-            null,
+    // The concrete contract's own members (named queries, the uniqueness pre-check, binary accessors) need the
+    // concrete interface, which the base's IRepository-typed reference cannot provide
+    private readonly ISyncOrderRepository _inner;
+
+    /// <summary>Creates the decorator over the repository it wraps and the journal it records to.</summary>
+    public JournalingSyncOrderRepository(ISyncOrderRepository inner, SyncJournal journal)
+        : base(inner, journal)
+    {
+        _inner = inner;
+    }
+
+    /// <inheritdoc />
+    protected override string TableName => "sync_orders";
+
+    /// <inheritdoc />
+    protected override int ReadKey(SyncOrderEntity entity) =>
+        entity.OrderId;
+
+    /// <inheritdoc />
+    protected override string FormatKey(int key) => key.ToString(CultureInfo.InvariantCulture);
+
+    /// <inheritdoc />
+    protected override byte[]? ReadRowVersion(SyncOrderEntity entity) =>
+        entity.RowVer;
+
+    /// <inheritdoc />
+    protected override Task RecordGraphSaveAsync(
+        SyncOrderEntity entity,
+        bool cascadeSave,
+        bool cascadeDelete,
+        CancellationToken cancellationToken
+    ) =>
+        SyncGraphRecorder.RecordSaveAsync(
+            Journal,
+            entity,
+            cascadeSave,
+            cascadeDelete,
             cancellationToken
         );
-
-    /// <inheritdoc />
-    public Task<SyncOrderEntity?> GetByIdAsync(
-        int id,
-        CancellationToken cancellationToken = default
-    ) => inner.GetByIdAsync(id, cancellationToken);
-
-    /// <inheritdoc />
-    public Task<IReadOnlyList<SyncOrderEntity>> GetAllAsync(
-        CancellationToken cancellationToken = default
-    ) => inner.GetAllAsync(cancellationToken);
-
-    /// <inheritdoc />
-    public async Task InsertAsync(
-        SyncOrderEntity entity,
-        CancellationToken cancellationToken = default
-    )
-    {
-        ArgumentNullException.ThrowIfNull(entity);
-        await RecordUpsertAsync(entity, cancellationToken).ConfigureAwait(false);
-        await inner.InsertAsync(entity, cancellationToken).ConfigureAwait(false);
-    }
-
-    /// <inheritdoc />
-    public async Task<bool> UpdateAsync(
-        SyncOrderEntity entity,
-        ConcurrencyMode mode = ConcurrencyMode.Optimistic,
-        CancellationToken cancellationToken = default
-    )
-    {
-        ArgumentNullException.ThrowIfNull(entity);
-        await RecordUpsertAsync(entity, cancellationToken).ConfigureAwait(false);
-
-        return await inner.UpdateAsync(entity, mode, cancellationToken).ConfigureAwait(false);
-    }
-
-    /// <inheritdoc />
-    public async Task<bool> DeleteAsync(
-        int id,
-        CancellationToken cancellationToken = default
-    )
-    {
-        // The row has to be read before it goes: its mirrored version is the only thing that lets the delete be
-        // replayed under a version guard, and once the row is gone there is nowhere left to read it from.
-        if (!SyncSession.IsSuppressed)
-        {
-            var existing = await inner.GetByIdAsync(id, cancellationToken).ConfigureAwait(false);
-            await journal.RecordAsync(
-                "sync_orders",
-                id.ToString(CultureInfo.InvariantCulture),
-                SyncJournalOperation.Delete,
-                existing is null ? null : existing.RowVer,
-                cancellationToken
-            )
-                .ConfigureAwait(false);
-        }
-
-        return await inner.DeleteAsync(id, cancellationToken).ConfigureAwait(false);
-    }
-
-    /// <inheritdoc />
-    public async Task<int> BulkInsertAsync(
-        IEnumerable<SyncOrderEntity> entities,
-        CancellationToken cancellationToken = default
-    )
-    {
-        ArgumentNullException.ThrowIfNull(entities);
-        var materialized = entities.ToList();
-
-        foreach (var entity in materialized)
-        {
-            if (entity is not null)
-            {
-                await RecordUpsertAsync(entity, cancellationToken).ConfigureAwait(false);
-            }
-        }
-
-        return await inner.BulkInsertAsync(materialized, cancellationToken)
-            .ConfigureAwait(false);
-    }
-
-    /// <inheritdoc />
-    public async Task<int> SaveAsync(
-        SyncOrderEntity entity,
-        bool cascadeSave = true,
-        bool cascadeDelete = true,
-        bool insertWhenUpdateMissing = false,
-        ConcurrencyMode mode = ConcurrencyMode.Optimistic,
-        CancellationToken cancellationToken = default
-    )
-    {
-        ArgumentNullException.ThrowIfNull(entity);
-        await SyncGraphRecorder.RecordSaveAsync(
-            journal,
-            entity,
-            cascadeSave,
-            cascadeDelete,
-            cancellationToken
-        )
-            .ConfigureAwait(false);
-
-        return await inner.SaveAsync(
-            entity,
-            cascadeSave,
-            cascadeDelete,
-            insertWhenUpdateMissing,
-            mode,
-            cancellationToken
-        )
-            .ConfigureAwait(false);
-    }
-
-    /// <inheritdoc />
-    public async Task<int> SaveAsync(
-        IEnumerable<SyncOrderEntity> entities,
-        bool cascadeSave = true,
-        bool cascadeDelete = true,
-        bool insertWhenUpdateMissing = false,
-        ConcurrencyMode mode = ConcurrencyMode.Optimistic,
-        CancellationToken cancellationToken = default
-    )
-    {
-        ArgumentNullException.ThrowIfNull(entities);
-        var materialized = entities.ToList();
-
-        foreach (var entity in materialized)
-        {
-            if (entity is not null)
-            {
-                await SyncGraphRecorder.RecordSaveAsync(
-                    journal,
-                    entity,
-                    cascadeSave,
-                    cascadeDelete,
-                    cancellationToken
-                )
-                    .ConfigureAwait(false);
-            }
-        }
-
-        return await inner.SaveAsync(
-            materialized,
-            cascadeSave,
-            cascadeDelete,
-            insertWhenUpdateMissing,
-            mode,
-            cancellationToken
-        )
-            .ConfigureAwait(false);
-    }
-
-    /// <inheritdoc />
-    public SqlQuery<SyncOrderEntity> Query() => inner.Query();
-
-    /// <inheritdoc />
-    public Task<IReadOnlyList<SyncOrderEntity>> QueryBySqlAsync(
-        string sql,
-        object? parameters = null,
-        CancellationToken cancellationToken = default
-    ) => inner.QueryBySqlAsync(sql, parameters, cancellationToken);
-
-    /// <inheritdoc />
-    public Task<int> ExecuteSqlAsync(
-        string sql,
-        object? parameters = null,
-        CancellationToken cancellationToken = default
-    ) => inner.ExecuteSqlAsync(sql, parameters, cancellationToken);
-
-    /// <inheritdoc />
-    public Task<TResult?> ExecuteScalarSqlAsync<TResult>(
-        string sql,
-        object? parameters = null,
-        CancellationToken cancellationToken = default
-    ) => inner.ExecuteScalarSqlAsync<TResult>(sql, parameters, cancellationToken);
 
     /// <inheritdoc />
     public Task<bool> ReadAttachmentAsync(
         int id,
         Stream destination,
         CancellationToken cancellationToken = default
-    ) => inner.ReadAttachmentAsync(id, destination, cancellationToken);
+    ) => _inner.ReadAttachmentAsync(id, destination, cancellationToken);
 
     /// <inheritdoc />
     /// <remarks>
@@ -7074,7 +7369,7 @@ public sealed class JournalingSyncOrderRepository(
         CancellationToken cancellationToken = default
     )
     {
-        await journal.RecordAsync(
+        await Journal.RecordAsync(
             "sync_orders",
             id.ToString(CultureInfo.InvariantCulture),
             SyncJournalOperation.Upsert,
@@ -7083,7 +7378,7 @@ public sealed class JournalingSyncOrderRepository(
         )
             .ConfigureAwait(false);
 
-        return await inner.WriteAttachmentAsync(id, source, length, cancellationToken)
+        return await _inner.WriteAttachmentAsync(id, source, length, cancellationToken)
             .ConfigureAwait(false);
     }
 
@@ -7091,72 +7386,32 @@ public sealed class JournalingSyncOrderRepository(
     public Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
         SyncOrderEntity entity,
         CancellationToken cancellationToken = default
-    ) => inner.CheckUniquenessAsync(entity, cancellationToken);
+    ) => _inner.CheckUniquenessAsync(entity, cancellationToken);
 }
 
 /// <summary>Reads the server side of sync_order_lines over a direct database connection.</summary>
 /// <remarks>
-/// Nothing here is new database code: the changed rows and the key set come through the server's raw SQL surface, and
-/// the local changes are replayed through the server's ordinary repository.
+/// Nothing here is new database code: the scans and the replay live on the generic core (see
+/// <see cref="DirectSyncSourceBase{TEntity, TKey}"/>); this class supplies the SQL text that carries the table's
+/// identity.
 /// </remarks>
-public sealed class SyncOrderLineDirectSyncSource(
-    ISqlExecutor serverSqlExecutor,
-    ISyncOrderLineRepository serverRepository
-) : ISyncServerSource<SyncOrderLineEntity, int>
+public sealed class SyncOrderLineDirectSyncSource
+    : DirectSyncSource<SyncOrderLineEntity, int>
 {
-    /// <inheritdoc />
-    public IRemoteRepository<SyncOrderLineEntity, int> Writer =>
-        serverRepository;
-
-    /// <inheritdoc />
-    public async Task<byte[]?> GetChangeCeilingAsync(
-        CancellationToken cancellationToken = default
-    ) =>
-        await serverSqlExecutor.ExecuteScalarSqlAsync<byte[]>(
-            "SELECT MIN_ACTIVE_ROWVERSION()",
-            null,
-            cancellationToken
-        )
-            .ConfigureAwait(false);
-
-    /// <inheritdoc />
-    /// <remarks>
-    /// A full batch is reported as "there is more", which the next call settles: it either returns the rest or comes
-    /// back empty when the batch happened to end exactly on the boundary. The extra round trip in that case is the
-    /// price of not fetching a row beyond the batch to peek with, and it costs one empty query per drained table.
-    /// </remarks>
-    public async Task<SyncChangeBatch<SyncOrderLineEntity>> GetChangesAsync(
-        byte[]? anchor,
-        byte[]? ceiling,
-        int batchSize,
-        CancellationToken cancellationToken = default
+    /// <summary>Creates the source over the server's raw SQL surface and its ordinary repository.</summary>
+    public SyncOrderLineDirectSyncSource(
+        ISqlExecutor serverSqlExecutor,
+        ISyncOrderLineRepository serverRepository
     )
+        : base(serverSqlExecutor, serverRepository)
     {
-        var rows = await serverSqlExecutor.QueryBySqlAsync<SyncOrderLineEntity>(
-            "SELECT TOP (@batchSize) * FROM [sync_order_lines] WHERE (@anchor IS NULL OR [row_ver] > CAST(@anchor AS binary(8))) AND (@ceiling IS NULL OR [row_ver] < CAST(@ceiling AS binary(8))) ORDER BY [row_ver]",
-            new
-            {
-                anchor,
-                ceiling,
-                batchSize,
-            },
-            cancellationToken
-        )
-            .ConfigureAwait(false);
-
-        return new SyncChangeBatch<SyncOrderLineEntity>(rows, rows.Count >= batchSize);
     }
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<int>> GetAllKeysAsync(
-        CancellationToken cancellationToken = default
-    ) =>
-        await serverSqlExecutor.QueryProjectionBySqlAsync<int>(
-            "SELECT [line_id] FROM [sync_order_lines]",
-            null,
-            cancellationToken
-        )
-            .ConfigureAwait(false);
+    protected override string ServerKeysSql => "SELECT [line_id] FROM [sync_order_lines]";
+
+    /// <inheritdoc />
+    protected override string ServerChangesSql => "SELECT TOP (@batchSize) * FROM [sync_order_lines] WHERE (@anchor IS NULL OR [row_ver] > CAST(@anchor AS binary(8))) AND (@ceiling IS NULL OR [row_ver] < CAST(@ceiling AS binary(8))) ORDER BY [row_ver]";
 }
 
 /// <summary>Reads the server side of sync_order_lines over HTTP, and replays the local changes over HTTP as well.</summary>
@@ -7222,295 +7477,88 @@ public sealed class SyncOrderLineSyncTable(
 /// The local SyncOrderLineEntity repository with journaling: every write is recorded before it is performed.
 /// </summary>
 /// <remarks>
-/// <para>
-/// It wraps the repository rather than hooking into the save pipeline because a save hook only fires for a graph save -
-/// a direct Insert, Update, Delete, or BulkInsert passes it by. Offline editing has to be caught at every write, so
-/// every write entry point on the contract records its intent here. A graph save is recorded through
-/// <see cref="SyncGraphRecorder"/>, which walks the same cascade navigations the saver walks, so the children the
-/// save writes or deletes are journaled exactly like the root.
-/// </para>
-/// <para>
-/// Raw SQL (<c>ExecuteSqlAsync</c>) is forwarded untouched and is <b>not</b> recorded: the statement's shape is opaque
-/// to the decorator, so there is no key to journal. The same holds for the bulk delete behind
-/// <c>Query().ExecuteDeleteAsync</c>, whose rows are chosen by a predicate the decorator never sees. Rows changed
-/// either way reach the server only if something else records them.
-/// </para>
+/// The recording and forwarding semantics live on the generic core (see
+/// <see cref="JournalingRepositoryBase{TEntity, TKey}"/>); this class supplies the table's identity and key handling,
+/// records a graph save through <see cref="SyncGraphRecorder"/> (which walks the same cascade navigations the saver
+/// walks, so the children the save writes or deletes are journaled exactly like the root), and forwards the members
+/// the concrete contract adds.
 /// </remarks>
-public sealed class JournalingSyncOrderLineRepository(
-    ISyncOrderLineRepository inner,
-    SyncJournal journal
-) : ISyncOrderLineRepository
+public sealed class JournalingSyncOrderLineRepository
+    : JournalingRepository<SyncOrderLineEntity, int>, ISyncOrderLineRepository
 {
-    /// <summary>Records the intent to write the given row, unless the sync engine is the one writing.</summary>
-    private Task RecordUpsertAsync(SyncOrderLineEntity entity, CancellationToken cancellationToken) =>
-        journal.RecordAsync(
-            "sync_order_lines",
-            entity.LineId.ToString(CultureInfo.InvariantCulture),
-            SyncJournalOperation.Upsert,
-            null,
+    // The concrete contract's own members (named queries, the uniqueness pre-check, binary accessors) need the
+    // concrete interface, which the base's IRepository-typed reference cannot provide
+    private readonly ISyncOrderLineRepository _inner;
+
+    /// <summary>Creates the decorator over the repository it wraps and the journal it records to.</summary>
+    public JournalingSyncOrderLineRepository(ISyncOrderLineRepository inner, SyncJournal journal)
+        : base(inner, journal)
+    {
+        _inner = inner;
+    }
+
+    /// <inheritdoc />
+    protected override string TableName => "sync_order_lines";
+
+    /// <inheritdoc />
+    protected override int ReadKey(SyncOrderLineEntity entity) =>
+        entity.LineId;
+
+    /// <inheritdoc />
+    protected override string FormatKey(int key) => key.ToString(CultureInfo.InvariantCulture);
+
+    /// <inheritdoc />
+    protected override byte[]? ReadRowVersion(SyncOrderLineEntity entity) =>
+        entity.RowVer;
+
+    /// <inheritdoc />
+    protected override Task RecordGraphSaveAsync(
+        SyncOrderLineEntity entity,
+        bool cascadeSave,
+        bool cascadeDelete,
+        CancellationToken cancellationToken
+    ) =>
+        SyncGraphRecorder.RecordSaveAsync(
+            Journal,
+            entity,
+            cascadeSave,
+            cascadeDelete,
             cancellationToken
         );
-
-    /// <inheritdoc />
-    public Task<SyncOrderLineEntity?> GetByIdAsync(
-        int id,
-        CancellationToken cancellationToken = default
-    ) => inner.GetByIdAsync(id, cancellationToken);
-
-    /// <inheritdoc />
-    public Task<IReadOnlyList<SyncOrderLineEntity>> GetAllAsync(
-        CancellationToken cancellationToken = default
-    ) => inner.GetAllAsync(cancellationToken);
-
-    /// <inheritdoc />
-    public async Task InsertAsync(
-        SyncOrderLineEntity entity,
-        CancellationToken cancellationToken = default
-    )
-    {
-        ArgumentNullException.ThrowIfNull(entity);
-        await RecordUpsertAsync(entity, cancellationToken).ConfigureAwait(false);
-        await inner.InsertAsync(entity, cancellationToken).ConfigureAwait(false);
-    }
-
-    /// <inheritdoc />
-    public async Task<bool> UpdateAsync(
-        SyncOrderLineEntity entity,
-        ConcurrencyMode mode = ConcurrencyMode.Optimistic,
-        CancellationToken cancellationToken = default
-    )
-    {
-        ArgumentNullException.ThrowIfNull(entity);
-        await RecordUpsertAsync(entity, cancellationToken).ConfigureAwait(false);
-
-        return await inner.UpdateAsync(entity, mode, cancellationToken).ConfigureAwait(false);
-    }
-
-    /// <inheritdoc />
-    public async Task<bool> DeleteAsync(
-        int id,
-        CancellationToken cancellationToken = default
-    )
-    {
-        // The row has to be read before it goes: its mirrored version is the only thing that lets the delete be
-        // replayed under a version guard, and once the row is gone there is nowhere left to read it from.
-        if (!SyncSession.IsSuppressed)
-        {
-            var existing = await inner.GetByIdAsync(id, cancellationToken).ConfigureAwait(false);
-            await journal.RecordAsync(
-                "sync_order_lines",
-                id.ToString(CultureInfo.InvariantCulture),
-                SyncJournalOperation.Delete,
-                existing is null ? null : existing.RowVer,
-                cancellationToken
-            )
-                .ConfigureAwait(false);
-        }
-
-        return await inner.DeleteAsync(id, cancellationToken).ConfigureAwait(false);
-    }
-
-    /// <inheritdoc />
-    public async Task<int> BulkInsertAsync(
-        IEnumerable<SyncOrderLineEntity> entities,
-        CancellationToken cancellationToken = default
-    )
-    {
-        ArgumentNullException.ThrowIfNull(entities);
-        var materialized = entities.ToList();
-
-        foreach (var entity in materialized)
-        {
-            if (entity is not null)
-            {
-                await RecordUpsertAsync(entity, cancellationToken).ConfigureAwait(false);
-            }
-        }
-
-        return await inner.BulkInsertAsync(materialized, cancellationToken)
-            .ConfigureAwait(false);
-    }
-
-    /// <inheritdoc />
-    public async Task<int> SaveAsync(
-        SyncOrderLineEntity entity,
-        bool cascadeSave = true,
-        bool cascadeDelete = true,
-        bool insertWhenUpdateMissing = false,
-        ConcurrencyMode mode = ConcurrencyMode.Optimistic,
-        CancellationToken cancellationToken = default
-    )
-    {
-        ArgumentNullException.ThrowIfNull(entity);
-        await SyncGraphRecorder.RecordSaveAsync(
-            journal,
-            entity,
-            cascadeSave,
-            cascadeDelete,
-            cancellationToken
-        )
-            .ConfigureAwait(false);
-
-        return await inner.SaveAsync(
-            entity,
-            cascadeSave,
-            cascadeDelete,
-            insertWhenUpdateMissing,
-            mode,
-            cancellationToken
-        )
-            .ConfigureAwait(false);
-    }
-
-    /// <inheritdoc />
-    public async Task<int> SaveAsync(
-        IEnumerable<SyncOrderLineEntity> entities,
-        bool cascadeSave = true,
-        bool cascadeDelete = true,
-        bool insertWhenUpdateMissing = false,
-        ConcurrencyMode mode = ConcurrencyMode.Optimistic,
-        CancellationToken cancellationToken = default
-    )
-    {
-        ArgumentNullException.ThrowIfNull(entities);
-        var materialized = entities.ToList();
-
-        foreach (var entity in materialized)
-        {
-            if (entity is not null)
-            {
-                await SyncGraphRecorder.RecordSaveAsync(
-                    journal,
-                    entity,
-                    cascadeSave,
-                    cascadeDelete,
-                    cancellationToken
-                )
-                    .ConfigureAwait(false);
-            }
-        }
-
-        return await inner.SaveAsync(
-            materialized,
-            cascadeSave,
-            cascadeDelete,
-            insertWhenUpdateMissing,
-            mode,
-            cancellationToken
-        )
-            .ConfigureAwait(false);
-    }
-
-    /// <inheritdoc />
-    public SqlQuery<SyncOrderLineEntity> Query() => inner.Query();
-
-    /// <inheritdoc />
-    public Task<IReadOnlyList<SyncOrderLineEntity>> QueryBySqlAsync(
-        string sql,
-        object? parameters = null,
-        CancellationToken cancellationToken = default
-    ) => inner.QueryBySqlAsync(sql, parameters, cancellationToken);
-
-    /// <inheritdoc />
-    public Task<int> ExecuteSqlAsync(
-        string sql,
-        object? parameters = null,
-        CancellationToken cancellationToken = default
-    ) => inner.ExecuteSqlAsync(sql, parameters, cancellationToken);
-
-    /// <inheritdoc />
-    public Task<TResult?> ExecuteScalarSqlAsync<TResult>(
-        string sql,
-        object? parameters = null,
-        CancellationToken cancellationToken = default
-    ) => inner.ExecuteScalarSqlAsync<TResult>(sql, parameters, cancellationToken);
 
     /// <inheritdoc />
     public Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
         SyncOrderLineEntity entity,
         CancellationToken cancellationToken = default
-    ) => inner.CheckUniquenessAsync(entity, cancellationToken);
+    ) => _inner.CheckUniquenessAsync(entity, cancellationToken);
 }
 
 /// <summary>Reads the server side of sync_notes over a direct database connection.</summary>
 /// <remarks>
-/// Nothing here is new database code: the changed rows and the key set come through the server's raw SQL surface, and
-/// the local changes are replayed through the server's ordinary repository.
+/// Nothing here is new database code: the scans and the replay live on the generic core (see
+/// <see cref="DirectSyncSourceBase{TEntity, TKey}"/>); this class supplies the SQL text that carries the table's
+/// identity.
 /// </remarks>
-public sealed class SyncNoteDirectSyncSource(
-    ISqlExecutor serverSqlExecutor,
-    ISyncNoteRepository serverRepository
-) : ISyncServerSource<SyncNoteEntity, int>
+public sealed class SyncNoteDirectSyncSource
+    : VersionlessDirectSyncSource<SyncNoteEntity, int>
 {
-    /// <inheritdoc />
-    public IRemoteRepository<SyncNoteEntity, int> Writer =>
-        serverRepository;
-
-    /// <inheritdoc />
-    /// <remarks>A key-ordered scan has no version to bound, so there is no ceiling to read.</remarks>
-    public Task<byte[]?> GetChangeCeilingAsync(CancellationToken cancellationToken = default) =>
-        Task.FromResult<byte[]?>(null);
-
-    /// <inheritdoc />
-    /// <remarks>Never called for a table without a version column; the download pages by key instead.</remarks>
-    public Task<SyncChangeBatch<SyncNoteEntity>> GetChangesAsync(
-        byte[]? anchor,
-        byte[]? ceiling,
-        int batchSize,
-        CancellationToken cancellationToken = default
-    ) =>
-        throw new NotSupportedException(
-            "The table has no version column; its download pages by primary key."
-        );
-
-    /// <inheritdoc />
-    /// <remarks>
-    /// A full batch is reported as "there is more", which the next call settles: it either returns the rest or comes
-    /// back empty when the batch happened to end exactly on the boundary - the same trade the versioned change scan
-    /// makes.
-    /// </remarks>
-    public async Task<SyncChangeBatch<SyncNoteEntity>> GetFirstPageAsync(
-        int batchSize,
-        CancellationToken cancellationToken = default
+    /// <summary>Creates the source over the server's raw SQL surface and its ordinary repository.</summary>
+    public SyncNoteDirectSyncSource(
+        ISqlExecutor serverSqlExecutor,
+        ISyncNoteRepository serverRepository
     )
+        : base(serverSqlExecutor, serverRepository)
     {
-        var rows = await serverSqlExecutor.QueryBySqlAsync<SyncNoteEntity>(
-            "SELECT TOP (@batchSize) * FROM [sync_notes] ORDER BY [note_id]",
-            new { batchSize },
-            cancellationToken
-        )
-            .ConfigureAwait(false);
-
-        return new SyncChangeBatch<SyncNoteEntity>(rows, rows.Count >= batchSize);
     }
 
     /// <inheritdoc />
-    public async Task<SyncChangeBatch<SyncNoteEntity>> GetPageAfterAsync(
-        int afterKey,
-        int batchSize,
-        CancellationToken cancellationToken = default
-    )
-    {
-        var rows = await serverSqlExecutor.QueryBySqlAsync<SyncNoteEntity>(
-            "SELECT TOP (@batchSize) * FROM [sync_notes] WHERE [note_id] > @afterKey ORDER BY [note_id]",
-            new { afterKey, batchSize },
-            cancellationToken
-        )
-            .ConfigureAwait(false);
-
-        return new SyncChangeBatch<SyncNoteEntity>(rows, rows.Count >= batchSize);
-    }
+    protected override string ServerKeysSql => "SELECT [note_id] FROM [sync_notes]";
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<int>> GetAllKeysAsync(
-        CancellationToken cancellationToken = default
-    ) =>
-        await serverSqlExecutor.QueryProjectionBySqlAsync<int>(
-            "SELECT [note_id] FROM [sync_notes]",
-            null,
-            cancellationToken
-        )
-            .ConfigureAwait(false);
+    protected override string ServerPageFirstSql => "SELECT TOP (@batchSize) * FROM [sync_notes] ORDER BY [note_id]";
+
+    /// <inheritdoc />
+    protected override string ServerPageAfterSql => "SELECT TOP (@batchSize) * FROM [sync_notes] WHERE [note_id] > @afterKey ORDER BY [note_id]";
 }
 
 /// <summary>Reads the server side of sync_notes over HTTP, and replays the local changes over HTTP as well.</summary>
@@ -7565,210 +7613,56 @@ public sealed class SyncNoteSyncTable(
 /// The local SyncNoteEntity repository with journaling: every write is recorded before it is performed.
 /// </summary>
 /// <remarks>
-/// <para>
-/// It wraps the repository rather than hooking into the save pipeline because a save hook only fires for a graph save -
-/// a direct Insert, Update, Delete, or BulkInsert passes it by. Offline editing has to be caught at every write, so
-/// every write entry point on the contract records its intent here. A graph save is recorded through
-/// <see cref="SyncGraphRecorder"/>, which walks the same cascade navigations the saver walks, so the children the
-/// save writes or deletes are journaled exactly like the root.
-/// </para>
-/// <para>
-/// Raw SQL (<c>ExecuteSqlAsync</c>) is forwarded untouched and is <b>not</b> recorded: the statement's shape is opaque
-/// to the decorator, so there is no key to journal. The same holds for the bulk delete behind
-/// <c>Query().ExecuteDeleteAsync</c>, whose rows are chosen by a predicate the decorator never sees. Rows changed
-/// either way reach the server only if something else records them.
-/// </para>
+/// The recording and forwarding semantics live on the generic core (see
+/// <see cref="JournalingRepositoryBase{TEntity, TKey}"/>); this class supplies the table's identity and key handling,
+/// records a graph save through <see cref="SyncGraphRecorder"/> (which walks the same cascade navigations the saver
+/// walks, so the children the save writes or deletes are journaled exactly like the root), and forwards the members
+/// the concrete contract adds.
 /// </remarks>
-public sealed class JournalingSyncNoteRepository(
-    ISyncNoteRepository inner,
-    SyncJournal journal
-) : ISyncNoteRepository
+public sealed class JournalingSyncNoteRepository
+    : VersionlessJournalingRepository<SyncNoteEntity, int>, ISyncNoteRepository
 {
-    /// <summary>Records the intent to write the given row, unless the sync engine is the one writing.</summary>
-    private Task RecordUpsertAsync(SyncNoteEntity entity, CancellationToken cancellationToken) =>
-        journal.RecordAsync(
-            "sync_notes",
-            entity.NoteId.ToString(CultureInfo.InvariantCulture),
-            SyncJournalOperation.Upsert,
-            null,
+    // The concrete contract's own members (named queries, the uniqueness pre-check, binary accessors) need the
+    // concrete interface, which the base's IRepository-typed reference cannot provide
+    private readonly ISyncNoteRepository _inner;
+
+    /// <summary>Creates the decorator over the repository it wraps and the journal it records to.</summary>
+    public JournalingSyncNoteRepository(ISyncNoteRepository inner, SyncJournal journal)
+        : base(inner, journal)
+    {
+        _inner = inner;
+    }
+
+    /// <inheritdoc />
+    protected override string TableName => "sync_notes";
+
+    /// <inheritdoc />
+    protected override int ReadKey(SyncNoteEntity entity) =>
+        entity.NoteId;
+
+    /// <inheritdoc />
+    protected override string FormatKey(int key) => key.ToString(CultureInfo.InvariantCulture);
+
+    /// <inheritdoc />
+    protected override Task RecordGraphSaveAsync(
+        SyncNoteEntity entity,
+        bool cascadeSave,
+        bool cascadeDelete,
+        CancellationToken cancellationToken
+    ) =>
+        SyncGraphRecorder.RecordSaveAsync(
+            Journal,
+            entity,
+            cascadeSave,
+            cascadeDelete,
             cancellationToken
         );
-
-    /// <inheritdoc />
-    public Task<SyncNoteEntity?> GetByIdAsync(
-        int id,
-        CancellationToken cancellationToken = default
-    ) => inner.GetByIdAsync(id, cancellationToken);
-
-    /// <inheritdoc />
-    public Task<IReadOnlyList<SyncNoteEntity>> GetAllAsync(
-        CancellationToken cancellationToken = default
-    ) => inner.GetAllAsync(cancellationToken);
-
-    /// <inheritdoc />
-    public async Task InsertAsync(
-        SyncNoteEntity entity,
-        CancellationToken cancellationToken = default
-    )
-    {
-        ArgumentNullException.ThrowIfNull(entity);
-        await RecordUpsertAsync(entity, cancellationToken).ConfigureAwait(false);
-        await inner.InsertAsync(entity, cancellationToken).ConfigureAwait(false);
-    }
-
-    /// <inheritdoc />
-    public async Task<bool> UpdateAsync(
-        SyncNoteEntity entity,
-        ConcurrencyMode mode = ConcurrencyMode.Optimistic,
-        CancellationToken cancellationToken = default
-    )
-    {
-        ArgumentNullException.ThrowIfNull(entity);
-        await RecordUpsertAsync(entity, cancellationToken).ConfigureAwait(false);
-
-        return await inner.UpdateAsync(entity, mode, cancellationToken).ConfigureAwait(false);
-    }
-
-    /// <inheritdoc />
-    public async Task<bool> DeleteAsync(
-        int id,
-        CancellationToken cancellationToken = default
-    )
-    {
-        // No version column means there is no mirrored version to capture before the row goes; the delete replays
-        // without a guard, which is all a last-write-wins table can promise anyway.
-        await journal.RecordAsync(
-            "sync_notes",
-            id.ToString(CultureInfo.InvariantCulture),
-            SyncJournalOperation.Delete,
-            null,
-            cancellationToken
-        )
-            .ConfigureAwait(false);
-
-        return await inner.DeleteAsync(id, cancellationToken).ConfigureAwait(false);
-    }
-
-    /// <inheritdoc />
-    public async Task<int> BulkInsertAsync(
-        IEnumerable<SyncNoteEntity> entities,
-        CancellationToken cancellationToken = default
-    )
-    {
-        ArgumentNullException.ThrowIfNull(entities);
-        var materialized = entities.ToList();
-
-        foreach (var entity in materialized)
-        {
-            if (entity is not null)
-            {
-                await RecordUpsertAsync(entity, cancellationToken).ConfigureAwait(false);
-            }
-        }
-
-        return await inner.BulkInsertAsync(materialized, cancellationToken)
-            .ConfigureAwait(false);
-    }
-
-    /// <inheritdoc />
-    public async Task<int> SaveAsync(
-        SyncNoteEntity entity,
-        bool cascadeSave = true,
-        bool cascadeDelete = true,
-        bool insertWhenUpdateMissing = false,
-        ConcurrencyMode mode = ConcurrencyMode.Optimistic,
-        CancellationToken cancellationToken = default
-    )
-    {
-        ArgumentNullException.ThrowIfNull(entity);
-        await SyncGraphRecorder.RecordSaveAsync(
-            journal,
-            entity,
-            cascadeSave,
-            cascadeDelete,
-            cancellationToken
-        )
-            .ConfigureAwait(false);
-
-        return await inner.SaveAsync(
-            entity,
-            cascadeSave,
-            cascadeDelete,
-            insertWhenUpdateMissing,
-            mode,
-            cancellationToken
-        )
-            .ConfigureAwait(false);
-    }
-
-    /// <inheritdoc />
-    public async Task<int> SaveAsync(
-        IEnumerable<SyncNoteEntity> entities,
-        bool cascadeSave = true,
-        bool cascadeDelete = true,
-        bool insertWhenUpdateMissing = false,
-        ConcurrencyMode mode = ConcurrencyMode.Optimistic,
-        CancellationToken cancellationToken = default
-    )
-    {
-        ArgumentNullException.ThrowIfNull(entities);
-        var materialized = entities.ToList();
-
-        foreach (var entity in materialized)
-        {
-            if (entity is not null)
-            {
-                await SyncGraphRecorder.RecordSaveAsync(
-                    journal,
-                    entity,
-                    cascadeSave,
-                    cascadeDelete,
-                    cancellationToken
-                )
-                    .ConfigureAwait(false);
-            }
-        }
-
-        return await inner.SaveAsync(
-            materialized,
-            cascadeSave,
-            cascadeDelete,
-            insertWhenUpdateMissing,
-            mode,
-            cancellationToken
-        )
-            .ConfigureAwait(false);
-    }
-
-    /// <inheritdoc />
-    public SqlQuery<SyncNoteEntity> Query() => inner.Query();
-
-    /// <inheritdoc />
-    public Task<IReadOnlyList<SyncNoteEntity>> QueryBySqlAsync(
-        string sql,
-        object? parameters = null,
-        CancellationToken cancellationToken = default
-    ) => inner.QueryBySqlAsync(sql, parameters, cancellationToken);
-
-    /// <inheritdoc />
-    public Task<int> ExecuteSqlAsync(
-        string sql,
-        object? parameters = null,
-        CancellationToken cancellationToken = default
-    ) => inner.ExecuteSqlAsync(sql, parameters, cancellationToken);
-
-    /// <inheritdoc />
-    public Task<TResult?> ExecuteScalarSqlAsync<TResult>(
-        string sql,
-        object? parameters = null,
-        CancellationToken cancellationToken = default
-    ) => inner.ExecuteScalarSqlAsync<TResult>(sql, parameters, cancellationToken);
 
     /// <inheritdoc />
     public Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
         SyncNoteEntity entity,
         CancellationToken cancellationToken = default
-    ) => inner.CheckUniquenessAsync(entity, cancellationToken);
+    ) => _inner.CheckUniquenessAsync(entity, cancellationToken);
 }
 
 /// <summary>

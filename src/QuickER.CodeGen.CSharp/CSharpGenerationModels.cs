@@ -99,6 +99,12 @@ internal sealed class CSharpSyncTableModel
     /// <summary>ジャーナル記録デコレータのクラス名（例 <c>JournalingSyncItemRepository</c>）</summary>
     public required string DecoratorClassName { get; init; }
 
+    /// <summary>デコレータが継承する汎用基底名（版あり <c>JournalingRepository</c>／版なし <c>VersionlessJournalingRepository</c>）</summary>
+    public required string DecoratorBaseClassName { get; init; }
+
+    /// <summary>直結差分ソースが継承する汎用基底名（版あり <c>DirectSyncSource</c>／版なし <c>VersionlessDirectSyncSource</c>）</summary>
+    public required string SourceBaseClassName { get; init; }
+
     /// <summary>主キーのプロパティ名</summary>
     public required string KeyPropertyName { get; init; }
 
@@ -122,9 +128,6 @@ internal sealed class CSharpSyncTableModel
 
     /// <summary>エンティティからミラー版を読む式（VO 有効時は内包値を取り出す）</summary>
     public required string RowVersionReadExpression { get; init; }
-
-    /// <summary>デコレータの削除経路で <c>existing</c> 変数からミラー版を読む式</summary>
-    public required string RowVersionReadExistingExpression { get; init; }
 
     /// <summary>エンティティへミラー版を書く式（VO 有効時は再ラップする）</summary>
     public required string RowVersionWriteExpression { get; init; }

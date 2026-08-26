@@ -219,6 +219,14 @@ internal sealed partial class CSharpGenerationModelBuilder
             RemoteRouteName = repositoryName,
             TableClassName = $"{repositoryName}SyncTable",
             DecoratorClassName = $"Journaling{repositoryName}Repository",
+            // デコレータ・直結ソースの汎用基底も SyncTable と同じく版の有無でサブクラス階層を選ぶ
+            // （デコレータは削除記録の形・ソースは走査の形〔版の昇順／キー順ページング〕だけが違う）
+            DecoratorBaseClassName = isVersionless
+                ? "VersionlessJournalingRepository"
+                : "JournalingRepository",
+            SourceBaseClassName = isVersionless
+                ? "VersionlessDirectSyncSource"
+                : "DirectSyncSource",
             KeyPropertyName = keyPropertyName,
             // 昇順・上限つきの差分走査（版ありのみ）。2 点が効いている:
             //  (1) @anchor / @ceiling は NULL を取り得るため、素の比較では 3 値論理で全行が UNKNOWN になる
@@ -264,14 +272,6 @@ internal sealed partial class CSharpGenerationModelBuilder
                     rowVersionColumn,
                     rowVersionValueObject
                 ),
-            RowVersionReadExistingExpression = rowVersionColumn is null
-                ? string.Empty
-                : BuildRowVersionRead(
-                    "existing",
-                    rowVersionPropertyName,
-                    rowVersionColumn,
-                    rowVersionValueObject
-                ),
             RowVersionWriteExpression = rowVersionColumn is null
                 ? string.Empty
                 : BuildRowVersionWrite(
@@ -296,10 +296,12 @@ internal sealed partial class CSharpGenerationModelBuilder
             DirectSourceBinaryBlock = BuildSyncBinaryAccessorBlock(
                 binaryColumns,
                 repository.KeyTypeName,
-                column => $"serverRepository.Read{column}Async(id, destination, cancellationToken)",
                 column =>
-                    $"serverRepository.Write{column}Async(id, source, length, cancellationToken)",
-                $"public ISyncBinaryColumns<{repository.KeyTypeName}>? BinaryColumns => this;"
+                    $"_serverRepository.Read{column}Async(id, destination, cancellationToken)",
+                column =>
+                    $"_serverRepository.Write{column}Async(id, source, length, cancellationToken)",
+                // 基底（DirectSyncSourceBase）が virtual の null 既定を持つため override で差し替える
+                $"public override ISyncBinaryColumns<{repository.KeyTypeName}>? BinaryColumns => this;"
             ),
             HttpSourceBinaryBlock = BuildSyncBinaryAccessorBlock(
                 binaryColumns,
@@ -433,7 +435,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             + $"        {keyTypeName} id,\n"
             + "        Stream destination,\n"
             + "        CancellationToken cancellationToken = default\n"
-            + $"    ) => inner.Read{column}Async(id, destination, cancellationToken);\n\n"
+            + $"    ) => _inner.Read{column}Async(id, destination, cancellationToken);\n\n"
             + "    /// <inheritdoc />\n"
             + "    /// <remarks>\n"
             + "    /// A blob written on its own changes no ordinary column, so no other entry point records it. The\n"
@@ -446,10 +448,10 @@ internal sealed partial class CSharpGenerationModelBuilder
             + "        long? length = null,\n"
             + "        CancellationToken cancellationToken = default\n"
             + "    )\n    {\n"
-            + $"        await journal.RecordAsync(\n            \"{tableName}\",\n            {formatKeyIdExpression},\n"
+            + $"        await Journal.RecordAsync(\n            \"{tableName}\",\n            {formatKeyIdExpression},\n"
             + "            SyncJournalOperation.Upsert,\n            null,\n            cancellationToken\n        )\n"
             + "            .ConfigureAwait(false);\n\n"
-            + $"        return await inner.Write{column}Async(id, source, length, cancellationToken)\n"
+            + $"        return await _inner.Write{column}Async(id, source, length, cancellationToken)\n"
             + "            .ConfigureAwait(false);\n    }"
         );
 
@@ -474,7 +476,7 @@ internal sealed partial class CSharpGenerationModelBuilder
                 + "    public Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(\n"
                 + $"        {repository.EntityClassName} entity,\n"
                 + "        CancellationToken cancellationToken = default\n"
-                + "    ) => inner.CheckUniquenessAsync(entity, cancellationToken);",
+                + "    ) => _inner.CheckUniquenessAsync(entity, cancellationToken);",
         };
 
         var queryBlocks = BuildQueryBlocks(

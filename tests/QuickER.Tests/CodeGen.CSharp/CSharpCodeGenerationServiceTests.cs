@@ -761,7 +761,7 @@ public class CSharpCodeGenerationServiceTests
             .Files[0]
             .Content.Should()
             .Contain(
-                "public void ApplyToEditModel(ProductEntity entity, ProductEditModel editModel)"
+                "public override void ApplyToEditModel(ProductEntity entity, ProductEditModel editModel)"
             );
         result.Files[0].Content.Should().Contain("editModel.Name = entity.Name;");
         result.Files[0].Content.Should().Contain("editModel.RevertInput();");
@@ -872,14 +872,13 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("public EditModelBase? GetPrevious()");
         content.Should().Contain("var index = Owner.IndexOf(this);");
         content.Should().Contain("item.Owner = this;");
+        // 型付き版は per-type でなく CRTP 層（EditModelBase<TSelf>）が 1 回だけ提供し、具象は TSelf を束縛して継承する
         content
             .Should()
-            .Contain("public new OrderEditModel? GetNext() => (OrderEditModel?)base.GetNext();");
-        content
-            .Should()
-            .Contain(
-                "public new OrderEditModel? GetPrevious() => (OrderEditModel?)base.GetPrevious();"
-            );
+            .Contain("public abstract partial class EditModelBase<TSelf> : EditModelBase");
+        content.Should().Contain("public new TSelf? GetNext() => (TSelf?)base.GetNext();");
+        content.Should().Contain("public new TSelf? GetPrevious() => (TSelf?)base.GetPrevious();");
+        content.Should().Contain(": EditModelBase<OrderEditModel>");
         // 親コレクション基準の位置取得・削除・並び替え。位置系と削除は Base（IList）、Move は型付き Parent と MoveCore の override で実装する
         content.Should().Contain("public int IndexInParent => Owner?.IndexOf(this) ?? -1;");
         content.Should().Contain("public bool IsFirstInParent => IndexInParent == 0;");
@@ -894,10 +893,8 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("public bool MoveToNext()");
         content.Should().Contain("public bool MoveToPrevious()");
         content.Should().Contain("protected virtual void MoveCore(int oldIndex, int newIndex)");
-        // 所属コレクション取得は ParentCollection に改名（親モデル取得の ParentModel と区別する）
-        content
-            .Should()
-            .Contain("public EditModelCollection<OrderEditModel>? ParentCollection =>");
+        // 所属コレクション取得は ParentCollection（親モデル取得の ParentModel と区別）＝CRTP 層が TSelf で提供する
+        content.Should().Contain("public EditModelCollection<TSelf>? ParentCollection =>");
         content.Should().NotContain("EditModelCollection<OrderEditModel>? Parent =>");
         // 親（親参照ナビ）を持たない単独エンティティでは型付き ParentModel は生成されず、基底の EditModelBase? のみ
         content.Should().Contain("public EditModelBase? ParentModel => _parentModel;");

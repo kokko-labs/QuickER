@@ -339,30 +339,45 @@ public class SyncSupportGenerationTests
     public void JournalingDecorator_CoversEveryWriteEntryPoint()
     {
         var (files, _) = Generate(Diagram(), SyncOptions());
-        var decorator = ExtractClass(
-            string.Concat(files.Values),
-            "public sealed class JournalingSyncOrderRepository"
+        var content = string.Concat(files.Values);
+
+        // 書き込み入口の網羅は汎用基底（第 10 次 A-2 で集約）が持つ:
+        // 直接 CRUD と一括追加は「アップサート」として記録し、削除は記録フック経由・グラフ保存は
+        // RecordGraphSaveAsync（per-type がカスケード閉包の記録へ委譲）を先に呼ぶ
+        var journalingBase = ExtractClass(
+            content,
+            "public abstract class JournalingRepositoryBase<TEntity, TKey>"
         );
-
-        // 直接 CRUD と一括追加は「アップサート」として記録する
-        decorator.Should().Contain("public async Task InsertAsync(");
-        decorator.Should().Contain("public async Task<bool> UpdateAsync(");
-        decorator.Should().Contain("public async Task<int> BulkInsertAsync(");
-
-        // 削除は「行が消える前に読む」ことでミラー版を捕まえ、版ガード付きで再生できるようにする
-        decorator.Should().Contain("public async Task<bool> DeleteAsync(");
-        decorator
+        journalingBase.Should().Contain("public async Task InsertAsync(");
+        journalingBase.Should().Contain("public async Task<bool> UpdateAsync(");
+        journalingBase.Should().Contain("public async Task<int> BulkInsertAsync(");
+        journalingBase.Should().Contain("public async Task<bool> DeleteAsync(");
+        journalingBase
             .Should()
-            .Contain("var existing = await inner.GetByIdAsync(id, cancellationToken)");
-        decorator.Should().Contain("SyncJournalOperation.Delete");
-
-        // グラフ保存（単一・複数）はカスケード全体の記録を SyncGraphRecorder へ委譲する
-        // （保存側と同じ cascadeSave / cascadeDelete のフラグ解釈で子孫まで記録するため）
-        decorator.Should().Contain("await SyncGraphRecorder.RecordSaveAsync(");
-        decorator.Should().Contain("cascadeDelete,");
+            .Contain(
+                "await RecordGraphSaveAsync(entity, cascadeSave, cascadeDelete, cancellationToken)"
+            );
 
         // 読み取り経路は素通し（記録しない）
-        decorator.Should().Contain("public SqlQuery<SyncOrderEntity> Query() => inner.Query();");
+        journalingBase.Should().Contain("public SqlQuery<TEntity> Query() => Inner.Query();");
+
+        // 削除は「行が消える前に読む」ことでミラー版を捕まえ、版ガード付きで再生できるようにする
+        // （版ありサブクラス基底の担当）
+        var versionedBase = ExtractClass(
+            content,
+            "public abstract class JournalingRepository<TEntity, TKey>"
+        );
+        versionedBase
+            .Should()
+            .Contain("var existing = await Inner.GetByIdAsync(id, cancellationToken)");
+        versionedBase.Should().Contain("SyncJournalOperation.Delete");
+
+        // per-type はテーブルの同一性・キーの読み書き・カスケード記録の委譲・契約固有メンバの転送だけを持つ
+        var decorator = ExtractClass(content, "public sealed class JournalingSyncOrderRepository");
+        decorator.Should().Contain(": JournalingRepository<SyncOrderEntity, int>");
+        decorator.Should().Contain("protected override string TableName =>");
+        decorator.Should().Contain("SyncGraphRecorder.RecordSaveAsync(");
+        decorator.Should().Contain("cascadeDelete,");
         decorator
             .Should()
             .Contain("public Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(");
@@ -482,28 +497,42 @@ public class SyncSupportGenerationTests
         content.Should().Contain(": VersionlessSyncTable<SyncNoteEntity, int>(");
         content.Should().Contain(": SyncTable<SyncOrderEntity, int>(");
 
-        // ② 直結ソース＝キー順ページング（版なしのみ）
+        // ② 直結ソース＝走査の形は基底（版あり＝版の昇順／版なし＝キー順ページング）が持ち、
+        //    per-type は基底の選択と SQL の身元だけを持つ
         var noteSource = ExtractClass(content, "public sealed class SyncNoteDirectSyncSource");
-        noteSource.Should().Contain("GetFirstPageAsync");
+        noteSource.Should().Contain(": VersionlessDirectSyncSource<SyncNoteEntity, int>");
         noteSource.Should().Contain("WHERE [note_id] > @afterKey ORDER BY [note_id]");
-        noteSource.Should().Contain("Task.FromResult<byte[]?>(null)");
+        noteSource.Should().NotContain("ServerChangesSql");
         var orderSource = ExtractClass(content, "public sealed class SyncOrderDirectSyncSource");
-        orderSource.Should().Contain("MIN_ACTIVE_ROWVERSION()");
-        orderSource.Should().NotContain("GetFirstPageAsync");
+        orderSource.Should().Contain(": DirectSyncSource<SyncOrderEntity, int>");
+        orderSource.Should().Contain("protected override string ServerChangesSql =>");
+        orderSource.Should().NotContain("ServerPageFirstSql");
 
-        // ③ 版なしデコレータの Delete は事前読みなし・null 版で記録する
+        // 基底側の両アーム: 版ありは MIN_ACTIVE_ROWVERSION の ceiling・版なしはキー順ページングと null ceiling
+        ExtractClass(content, "public abstract class DirectSyncSource<TEntity, TKey>")
+            .Should()
+            .Contain("MIN_ACTIVE_ROWVERSION()");
+        var versionlessSourceBase = ExtractClass(
+            content,
+            "public abstract class VersionlessDirectSyncSource<TEntity, TKey>"
+        );
+        versionlessSourceBase.Should().Contain("GetFirstPageAsync");
+        versionlessSourceBase.Should().Contain("Task.FromResult<byte[]?>(null)");
+
+        // ③ 版なしデコレータは版なし基底（Delete は事前読みなし・null 版で記録）を継承し、
+        //    版ありデコレータは版あり基底（事前読み＋ミラー版）＋ ReadRowVersion override を持つ
         var noteDecorator = ExtractClass(
             content,
             "public sealed class JournalingSyncNoteRepository"
         );
-        noteDecorator.Should().NotContain("GetByIdAsync(id, cancellationToken).ConfigureAwait");
+        noteDecorator.Should().Contain(": VersionlessJournalingRepository<SyncNoteEntity, int>");
+        noteDecorator.Should().NotContain("ReadRowVersion");
         var orderDecorator = ExtractClass(
             content,
             "public sealed class JournalingSyncOrderRepository"
         );
-        orderDecorator
-            .Should()
-            .Contain("var existing = await inner.GetByIdAsync(id, cancellationToken)");
+        orderDecorator.Should().Contain(": JournalingRepository<SyncOrderEntity, int>");
+        orderDecorator.Should().Contain("protected override byte[]? ReadRowVersion(");
 
         // ④ サーバー側エンドポイントの選別（版あり＝3 本・版なし＝SyncPage＋SyncKeys）
         var server = files[SyncFixtureDefinition.RemoteServerOutputFileName];
@@ -637,19 +666,19 @@ public class SyncSupportGenerationTests
         var (files, _) = Generate(Diagram(), SyncOptions());
         var decorator = ExtractClass(
             string.Concat(files.Values),
-            "public sealed class JournalingSyncOrderRepository("
+            "public sealed class JournalingSyncOrderRepository"
         );
 
         // 読みは素通し
         decorator
             .Should()
-            .Contain("=> inner.ReadAttachmentAsync(id, destination, cancellationToken);");
+            .Contain("=> _inner.ReadAttachmentAsync(id, destination, cancellationToken);");
 
         // 書きは journal-first（記録 → 実書き込み）
         decorator.Should().Contain("public async Task<bool> WriteAttachmentAsync(");
         var record = decorator.IndexOf("SyncJournalOperation.Upsert", StringComparison.Ordinal);
         var write = decorator.IndexOf(
-            "await inner.WriteAttachmentAsync(",
+            "await _inner.WriteAttachmentAsync(",
             StringComparison.Ordinal
         );
         record.Should().BeLessThan(write, "意図を先に記録してから業務書き込みを行う");
@@ -679,12 +708,11 @@ public class SyncSupportGenerationTests
             .Should()
             .Contain("localRepository.ReadAttachmentAsync(id, destination, cancellationToken)");
 
-        // 直結サーバー: サーバー側リポジトリのアクセサ
-        content.Should().Contain("public ISyncBinaryColumns<int>? BinaryColumns => this;");
+        // 直結サーバー: サーバー側リポジトリのアクセサ（基底 DirectSyncSourceBase の null 既定を override）
         content
             .Should()
             .Contain(
-                "serverRepository.WriteAttachmentAsync(id, source, length, cancellationToken)"
+                "_serverRepository.WriteAttachmentAsync(id, source, length, cancellationToken)"
             );
 
         // HTTP サーバー: 既存のバイナリエンドポイント（基底のヘルパー）へ委譲

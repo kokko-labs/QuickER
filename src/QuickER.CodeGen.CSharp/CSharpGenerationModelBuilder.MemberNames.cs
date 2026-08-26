@@ -124,7 +124,7 @@ internal sealed partial class CSharpGenerationModelBuilder
     ///   <item><description>L1276 <c>private (型) (p.field_name)Snapshot</c> ＝行編集の確定値スナップショットフィールド</description></item>
     ///   <item><description>L1157/L1181 <c>private (型) (navigation.field_name)</c> ＝カスケード子のバッキングフィールド（親参照ナビは field_name が空で発行されない）</description></item>
     ///   <item><description>L1160/L1184/L1201 <c>public (型) (navigation.property_name)</c> ＝ナビゲーションプロパティ</description></item>
-    ///   <item><description>L1205-L1330 の固定メンバー 18 名 ＝ <see cref="GeneratedFixedMemberNames.EditModelAlways"/>（無条件）</description></item>
+    ///   <item><description>固定メンバー ＝ <see cref="GeneratedFixedMemberNames.EditModelAlways"/>（無条件。位置ヘルパー 4 名は EditModelBase&lt;TSelf&gt; へ移設済みで per-type には出ない）</description></item>
     ///   <item><description>L1267 <c>RegisterChildren</c> ＝ <see cref="GeneratedFixedMemberNames.EditModelWithCascadeNavigations"/>（カスケード子を持つときのみ）</description></item>
     ///   <item><description>L1322 <c>ParentModel</c> ＝ <see cref="GeneratedFixedMemberNames.EditModelWithTypedParentModel"/>（型付き親モデルがあるときのみ）</description></item>
     ///   <item><description><c>ValidateUniqueAsync</c> ＝ <see cref="GeneratedFixedMemberNames.EditModelWithRepositoryFace"/>（Repository 契約面があるときのみ）</description></item>
@@ -177,6 +177,13 @@ internal sealed partial class CSharpGenerationModelBuilder
         }
 
         foreach (var name in GeneratedFixedMemberNames.EditModelAlways)
+        {
+            yield return new GeneratedMemberName(name, FormatFixedMemberOrigin(name));
+        }
+
+        // EditModelBase<TSelf> へ移設した位置ヘルパーは per-type には出ないが、列由来プロパティが同名を
+        // 取ると基底メンバを隠して型付きの面が壊れるため、予約名として従来どおり衝突を生成エラーにする
+        foreach (var name in GeneratedFixedMemberNames.EditModelPositionHelpers)
         {
             yield return new GeneratedMemberName(name, FormatFixedMemberOrigin(name));
         }

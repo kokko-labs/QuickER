@@ -143,7 +143,11 @@ public class SplitRuntimeSymmetryTests
         files.Keys.Should().Contain("Repositories.Sync.g.cs");
 
         // 固定エンジン側に per-entity 生成物（記述子・デコレータ・DI 登録）が混じらない
-        files["Runtime.Sync.g.cs"].Should().NotContain("Journaling");
+        // （汎用基底 JournalingRepositoryBase 系は固定エンジンの持ち物＝具象デコレータだけを弾く）
+        files["Runtime.Sync.g.cs"].Should().NotContain("sealed class Journaling");
+        files["Runtime.Sync.g.cs"]
+            .Should()
+            .Contain("public abstract class JournalingRepositoryBase<TEntity, TKey>");
         files["Runtime.Sync.g.cs"].Should().NotContain("AddGeneratedSyncSupport");
         files["Runtime.Sync.g.cs"]
             .Should()
