@@ -287,6 +287,9 @@ public interface IValueObject<TSelf, TValue> : IValueObject
     /// </remarks>
     static virtual void ValidateCore(TValue value, ref List<string>? errors) { }
 
+    /// <summary>Gets the display name of the value object type (used in error messages and similar). The generated static DisplayName implicitly implements it; the default is the type name.</summary>
+    static virtual string DisplayName => typeof(TSelf).Name;
+
     /// <summary>Validates and creates the value object (throws ValueObjectValidationException on violation).</summary>
     static abstract TSelf Create(TValue value);
 

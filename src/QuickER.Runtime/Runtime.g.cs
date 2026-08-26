@@ -367,6 +367,9 @@ public interface IValueObject<TSelf, TValue> : IValueObject
     /// </remarks>
     static virtual void ValidateCore(TValue value, ref List<string>? errors) { }
 
+    /// <summary>Gets the display name of the value object type (used in error messages and similar). The generated static DisplayName implicitly implements it; the default is the type name.</summary>
+    static virtual string DisplayName => typeof(TSelf).Name;
+
     /// <summary>Validates and creates the value object (throws ValueObjectValidationException on violation).</summary>
     static abstract TSelf Create(TValue value);
 
@@ -1370,7 +1373,7 @@ public abstract partial class EditModelBase
         OnPropertyChanged(nameof(IsLastInParent));
     }
 
-    /// <summary>Raises the change notification for the owning collection reference (ParentCollection), called when the element enters or leaves a collection (the concrete class's ParentCollection is always generated with this name).</summary>
+    /// <summary>Raises the change notification for the owning collection reference (ParentCollection), called when the element enters or leaves a collection (the property lives on <see cref="EditModelBase{TSelf}"/> under exactly this name).</summary>
     internal void RaiseParentCollectionChanged() => OnPropertyChanged("ParentCollection");
 
     /// <summary>The parent model that holds this element as a child (cascade parent). Set by the owning collection or single reference; null when not owned or at the root.</summary>
@@ -2210,6 +2213,32 @@ public static class EditModelUniquenessValidator
 /// <param name="Property">Name of the binding property the error is attached to (e.g. BindingTitle).</param>
 /// <param name="Message">The error message.</param>
 public sealed record EditModelError(string Path, string Property, string Message);
+
+/// <summary>Self-typed layer over <see cref="EditModelBase"/>: the sibling navigation and the owning collection surface in the concrete type, written once.</summary>
+/// <remarks>
+/// The non-generic <see cref="EditModelBase"/> stays as the type the ownership plumbing references
+/// (<see cref="EditModelCollection{T}"/>'s constraint, <see cref="EditModelBase.Owner"/>,
+/// <see cref="EditModelBase.ParentModel"/>), so this layer adds only what needs the concrete type. Generated edit
+/// models derive from it; the typed parent-model surface stays with them, because the parent is a second type this
+/// single type parameter cannot name.
+/// </remarks>
+/// <typeparam name="TSelf">The concrete edit model type deriving from this class.</typeparam>
+public abstract partial class EditModelBase<TSelf> : EditModelBase
+    where TSelf : EditModelBase<TSelf>
+{
+    /// <summary>Returns the next element after this one in its owning collection (null if not owned or at the end).</summary>
+    public new TSelf? GetNext() => (TSelf?)base.GetNext();
+
+    /// <summary>Returns the previous element before this one in its owning collection (null if not owned or at the start).</summary>
+    public new TSelf? GetPrevious() => (TSelf?)base.GetPrevious();
+
+    /// <summary>Gets the parent collection this element belongs to (null if not owned).</summary>
+    public EditModelCollection<TSelf>? ParentCollection => Owner as EditModelCollection<TSelf>;
+
+    /// <summary>Core reorder logic for the owning collection. Calls Move on the typed collection (used by the MoveTo* methods).</summary>
+    protected override void MoveCore(int oldIndex, int newIndex) =>
+        ParentCollection?.Move(oldIndex, newIndex);
+}
 
 /// <summary>Collection of edit models. Tracks existing elements removed via Remove as deletion targets.</summary>
 /// <remarks>
