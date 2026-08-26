@@ -2055,14 +2055,36 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
 /// boilerplate that composes them (creation from an edit model, collection conversion) is centralized here.
 /// </remarks>
 public abstract partial class MapperBase<TEntity, TEditModel>
-    where TEntity : EntityBase
-    where TEditModel : EditModelBase
+    where TEntity : EntityBase, new()
+    where TEditModel : EditModelBase, new()
 {
     /// <summary>Creates a new TEntity with initial values set (it will be an insertion target on save).</summary>
     public abstract TEntity CreateEntity();
 
     /// <summary>Creates a new TEditModel from a TEntity.</summary>
     public abstract TEditModel CreateEditModel(TEntity entity);
+
+    /// <summary>Applies a TEntity's values to an existing TEditModel (lossless load). Column copying is implemented by derived classes.</summary>
+    /// <param name="entity">The entity whose values are loaded.</param>
+    /// <param name="editModel">The edit model to load the values into.</param>
+    public abstract void ApplyToEditModel(TEntity entity, TEditModel editModel);
+
+    /// <summary>Creates the insertion-target entity (construction plus MarkAdded); the derived class's <see cref="CreateEntity()"/> adds its post-creation hook.</summary>
+    protected static TEntity CreateEntityCore()
+    {
+        var entity = new TEntity();
+        entity.MarkAdded();
+        return entity;
+    }
+
+    /// <summary>Creates the edit model for an entity and loads it (construction plus <see cref="ApplyToEditModel"/>); the derived class's <see cref="CreateEditModel(TEntity)"/> adds its post-creation hook.</summary>
+    /// <param name="entity">The entity whose values are loaded.</param>
+    protected TEditModel CreateEditModelCore(TEntity entity)
+    {
+        var editModel = new TEditModel();
+        ApplyToEditModel(entity, editModel);
+        return editModel;
+    }
 
     /// <summary>Applies the TEditModel's confirmed values to an existing TEntity (destructive update). Column copying is implemented by derived classes.</summary>
     /// <param name="editModel">The edit model whose confirmed values are applied.</param>
@@ -3830,8 +3852,7 @@ public sealed partial class DocumentMapper
     /// <summary>Creates a new DocumentEntity with initial values set (it will be an insertion target on save).</summary>
     public override DocumentEntity CreateEntity()
     {
-        var entity = new DocumentEntity();
-        entity.MarkAdded();
+        var entity = CreateEntityCore();
         OnEntityCreated(entity);
         return entity;
     }
@@ -3842,8 +3863,7 @@ public sealed partial class DocumentMapper
     /// <summary>Creates a new DocumentEditModel from a DocumentEntity.</summary>
     public override DocumentEditModel CreateEditModel(DocumentEntity entity)
     {
-        var editModel = new DocumentEditModel();
-        ApplyToEditModel(entity, editModel);
+        var editModel = CreateEditModelCore(entity);
         OnEditModelCreated(editModel);
         return editModel;
     }
@@ -3897,7 +3917,7 @@ public sealed partial class DocumentMapper
     /// are, so the array an entity receives on the way to being saved is the edit model's own - saving hands the buffer
     /// over rather than duplicating it, and writing into it afterwards is writing into both.
     /// </remarks>
-    public void ApplyToEditModel(DocumentEntity entity, DocumentEditModel editModel)
+    public override void ApplyToEditModel(DocumentEntity entity, DocumentEditModel editModel)
     {
         editModel.ExecuteLoad(() =>
         {
@@ -3933,8 +3953,7 @@ public sealed partial class DocumentNoteMapper
     /// <summary>Creates a new DocumentNoteEntity with initial values set (it will be an insertion target on save).</summary>
     public override DocumentNoteEntity CreateEntity()
     {
-        var entity = new DocumentNoteEntity();
-        entity.MarkAdded();
+        var entity = CreateEntityCore();
         OnEntityCreated(entity);
         return entity;
     }
@@ -3945,8 +3964,7 @@ public sealed partial class DocumentNoteMapper
     /// <summary>Creates a new DocumentNoteEditModel from a DocumentNoteEntity.</summary>
     public override DocumentNoteEditModel CreateEditModel(DocumentNoteEntity entity)
     {
-        var editModel = new DocumentNoteEditModel();
-        ApplyToEditModel(entity, editModel);
+        var editModel = CreateEditModelCore(entity);
         OnEditModelCreated(editModel);
         return editModel;
     }
@@ -3988,7 +4006,7 @@ public sealed partial class DocumentNoteMapper
     /// are, so the array an entity receives on the way to being saved is the edit model's own - saving hands the buffer
     /// over rather than duplicating it, and writing into it afterwards is writing into both.
     /// </remarks>
-    public void ApplyToEditModel(DocumentNoteEntity entity, DocumentNoteEditModel editModel)
+    public override void ApplyToEditModel(DocumentNoteEntity entity, DocumentNoteEditModel editModel)
     {
         editModel.ExecuteLoad(() =>
         {

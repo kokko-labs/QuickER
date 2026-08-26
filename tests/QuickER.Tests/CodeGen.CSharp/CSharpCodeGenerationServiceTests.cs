@@ -761,7 +761,7 @@ public class CSharpCodeGenerationServiceTests
             .Files[0]
             .Content.Should()
             .Contain(
-                "public void ApplyToEditModel(ProductEntity entity, ProductEditModel editModel)"
+                "public override void ApplyToEditModel(ProductEntity entity, ProductEditModel editModel)"
             );
         result.Files[0].Content.Should().Contain("editModel.Name = entity.Name;");
         result.Files[0].Content.Should().Contain("editModel.RevertInput();");

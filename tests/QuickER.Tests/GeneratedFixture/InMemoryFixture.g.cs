@@ -2090,14 +2090,36 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
 /// boilerplate that composes them (creation from an edit model, collection conversion) is centralized here.
 /// </remarks>
 public abstract partial class MapperBase<TEntity, TEditModel>
-    where TEntity : EntityBase
-    where TEditModel : EditModelBase
+    where TEntity : EntityBase, new()
+    where TEditModel : EditModelBase, new()
 {
     /// <summary>Creates a new TEntity with initial values set (it will be an insertion target on save).</summary>
     public abstract TEntity CreateEntity();
 
     /// <summary>Creates a new TEditModel from a TEntity.</summary>
     public abstract TEditModel CreateEditModel(TEntity entity);
+
+    /// <summary>Applies a TEntity's values to an existing TEditModel (lossless load). Column copying is implemented by derived classes.</summary>
+    /// <param name="entity">The entity whose values are loaded.</param>
+    /// <param name="editModel">The edit model to load the values into.</param>
+    public abstract void ApplyToEditModel(TEntity entity, TEditModel editModel);
+
+    /// <summary>Creates the insertion-target entity (construction plus MarkAdded); the derived class's <see cref="CreateEntity()"/> adds its post-creation hook.</summary>
+    protected static TEntity CreateEntityCore()
+    {
+        var entity = new TEntity();
+        entity.MarkAdded();
+        return entity;
+    }
+
+    /// <summary>Creates the edit model for an entity and loads it (construction plus <see cref="ApplyToEditModel"/>); the derived class's <see cref="CreateEditModel(TEntity)"/> adds its post-creation hook.</summary>
+    /// <param name="entity">The entity whose values are loaded.</param>
+    protected TEditModel CreateEditModelCore(TEntity entity)
+    {
+        var editModel = new TEditModel();
+        ApplyToEditModel(entity, editModel);
+        return editModel;
+    }
 
     /// <summary>Applies the TEditModel's confirmed values to an existing TEntity (destructive update). Column copying is implemented by derived classes.</summary>
     /// <param name="editModel">The edit model whose confirmed values are applied.</param>
@@ -4170,8 +4192,7 @@ public sealed partial class CustomerMapper
     /// <summary>Creates a new CustomerEntity with initial values set (it will be an insertion target on save).</summary>
     public override CustomerEntity CreateEntity()
     {
-        var entity = new CustomerEntity();
-        entity.MarkAdded();
+        var entity = CreateEntityCore();
         OnEntityCreated(entity);
         return entity;
     }
@@ -4182,8 +4203,7 @@ public sealed partial class CustomerMapper
     /// <summary>Creates a new CustomerEditModel from a CustomerEntity.</summary>
     public override CustomerEditModel CreateEditModel(CustomerEntity entity)
     {
-        var editModel = new CustomerEditModel();
-        ApplyToEditModel(entity, editModel);
+        var editModel = CreateEditModelCore(entity);
         OnEditModelCreated(editModel);
         return editModel;
     }
@@ -4226,7 +4246,7 @@ public sealed partial class CustomerMapper
     /// are, so the array an entity receives on the way to being saved is the edit model's own - saving hands the buffer
     /// over rather than duplicating it, and writing into it afterwards is writing into both.
     /// </remarks>
-    public void ApplyToEditModel(CustomerEntity entity, CustomerEditModel editModel)
+    public override void ApplyToEditModel(CustomerEntity entity, CustomerEditModel editModel)
     {
         editModel.ExecuteLoad(() =>
         {
@@ -4259,8 +4279,7 @@ public sealed partial class OrderMapper
     /// <summary>Creates a new OrderEntity with initial values set (it will be an insertion target on save).</summary>
     public override OrderEntity CreateEntity()
     {
-        var entity = new OrderEntity();
-        entity.MarkAdded();
+        var entity = CreateEntityCore();
         OnEntityCreated(entity);
         return entity;
     }
@@ -4271,8 +4290,7 @@ public sealed partial class OrderMapper
     /// <summary>Creates a new OrderEditModel from a OrderEntity.</summary>
     public override OrderEditModel CreateEditModel(OrderEntity entity)
     {
-        var editModel = new OrderEditModel();
-        ApplyToEditModel(entity, editModel);
+        var editModel = CreateEditModelCore(entity);
         OnEditModelCreated(editModel);
         return editModel;
     }
@@ -4315,7 +4333,7 @@ public sealed partial class OrderMapper
     /// are, so the array an entity receives on the way to being saved is the edit model's own - saving hands the buffer
     /// over rather than duplicating it, and writing into it afterwards is writing into both.
     /// </remarks>
-    public void ApplyToEditModel(OrderEntity entity, OrderEditModel editModel)
+    public override void ApplyToEditModel(OrderEntity entity, OrderEditModel editModel)
     {
         editModel.ExecuteLoad(() =>
         {
@@ -4347,8 +4365,7 @@ public sealed partial class CustomerProfileMapper
     /// <summary>Creates a new CustomerProfileEntity with initial values set (it will be an insertion target on save).</summary>
     public override CustomerProfileEntity CreateEntity()
     {
-        var entity = new CustomerProfileEntity();
-        entity.MarkAdded();
+        var entity = CreateEntityCore();
         OnEntityCreated(entity);
         return entity;
     }
@@ -4359,8 +4376,7 @@ public sealed partial class CustomerProfileMapper
     /// <summary>Creates a new CustomerProfileEditModel from a CustomerProfileEntity.</summary>
     public override CustomerProfileEditModel CreateEditModel(CustomerProfileEntity entity)
     {
-        var editModel = new CustomerProfileEditModel();
-        ApplyToEditModel(entity, editModel);
+        var editModel = CreateEditModelCore(entity);
         OnEditModelCreated(editModel);
         return editModel;
     }
@@ -4401,7 +4417,7 @@ public sealed partial class CustomerProfileMapper
     /// are, so the array an entity receives on the way to being saved is the edit model's own - saving hands the buffer
     /// over rather than duplicating it, and writing into it afterwards is writing into both.
     /// </remarks>
-    public void ApplyToEditModel(CustomerProfileEntity entity, CustomerProfileEditModel editModel)
+    public override void ApplyToEditModel(CustomerProfileEntity entity, CustomerProfileEditModel editModel)
     {
         editModel.ExecuteLoad(() =>
         {

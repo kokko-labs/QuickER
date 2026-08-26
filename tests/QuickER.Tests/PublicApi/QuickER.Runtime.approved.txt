@@ -259,12 +259,15 @@ public sealed class QuickER.Runtime.IncludeNode
 
 public abstract class QuickER.Runtime.MapperBase<TEntity, TEditModel>
     protected .ctor()
+    protected TEditModel CreateEditModelCore(TEntity entity)
+    protected static TEntity CreateEntityCore()
     public QuickER.Runtime.EditModelCollection<TEditModel> CreateEditModels(System.Collections.Generic.IEnumerable<TEntity> entities)
     public System.Collections.Generic.List<TEntity> CreateEntities(QuickER.Runtime.EditModelCollection<TEditModel> editModels, bool includeRemoved = false)
     public TEditModel CreateEditModel()
     public TEntity CreateEntity(TEditModel editModel, bool includeRemoved = false)
     public abstract TEditModel CreateEditModel(TEntity entity)
     public abstract TEntity CreateEntity()
+    public abstract void ApplyToEditModel(TEntity entity, TEditModel editModel)
     public abstract void ApplyToEntity(TEditModel editModel, TEntity entity, bool includeRemoved)
 
 public sealed class QuickER.Runtime.NavigationReferenceAttribute : System.Attribute
