@@ -2738,6 +2738,221 @@ public abstract class VersionlessJournalingRepository<TEntity, TKey>
         );
 }
 
+/// <summary>
+/// Generic core of the direct (same-process database connection) server source: the key set and the change stream
+/// come through the server's raw SQL surface, and the local changes are replayed through the server's ordinary
+/// repository. What stays with the generated derived class is only the SQL text, which carries the table's identity.
+/// </summary>
+/// <remarks>
+/// The paging members and <see cref="BinaryColumns"/> are virtual here rather than left to the interface's default
+/// implementations on purpose: interface mapping is fixed at the class that lists the interface - this one - so a
+/// member a derived class adds later would never be reached through the interface. A virtual with the same default
+/// keeps the dispatch open for the subclasses that do override.
+/// </remarks>
+/// <typeparam name="TEntity">The entity type.</typeparam>
+/// <typeparam name="TKey">The primary key type.</typeparam>
+public abstract class DirectSyncSourceBase<TEntity, TKey> : ISyncServerSource<TEntity, TKey>
+    where TEntity : EntityBase, new()
+{
+    /// <summary>Creates the source over the server's raw SQL surface and the repository local changes replay against.</summary>
+    protected DirectSyncSourceBase(
+        ISqlExecutor serverSqlExecutor,
+        IRemoteRepository<TEntity, TKey> writer
+    )
+    {
+        ServerSqlExecutor = serverSqlExecutor;
+        Writer = writer;
+    }
+
+    /// <summary>Gets the server's raw SQL surface the scans read through.</summary>
+    protected ISqlExecutor ServerSqlExecutor { get; }
+
+    /// <inheritdoc />
+    public IRemoteRepository<TEntity, TKey> Writer { get; }
+
+    /// <inheritdoc />
+    public virtual ISyncBinaryColumns<TKey>? BinaryColumns => null;
+
+    /// <summary>SELECT that returns every primary key of the table (SQL Server quoting).</summary>
+    protected abstract string ServerKeysSql { get; }
+
+    /// <inheritdoc />
+    public abstract Task<byte[]?> GetChangeCeilingAsync(
+        CancellationToken cancellationToken = default
+    );
+
+    /// <inheritdoc />
+    public abstract Task<SyncChangeBatch<TEntity>> GetChangesAsync(
+        byte[]? anchor,
+        byte[]? ceiling,
+        int batchSize,
+        CancellationToken cancellationToken = default
+    );
+
+    /// <inheritdoc />
+    public virtual Task<SyncChangeBatch<TEntity>> GetFirstPageAsync(
+        int batchSize,
+        CancellationToken cancellationToken = default
+    ) =>
+        throw new NotSupportedException(
+            "This source does not page by primary key; it serves a versioned table."
+        );
+
+    /// <inheritdoc />
+    public virtual Task<SyncChangeBatch<TEntity>> GetPageAfterAsync(
+        TKey afterKey,
+        int batchSize,
+        CancellationToken cancellationToken = default
+    ) =>
+        throw new NotSupportedException(
+            "This source does not page by primary key; it serves a versioned table."
+        );
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<TKey>> GetAllKeysAsync(
+        CancellationToken cancellationToken = default
+    ) =>
+        await ServerSqlExecutor.QueryProjectionBySqlAsync<TKey>(
+            ServerKeysSql,
+            null,
+            cancellationToken
+        )
+            .ConfigureAwait(false);
+}
+
+/// <summary>Direct server source for a table with a row-version column (an ascending, anchored change scan).</summary>
+/// <typeparam name="TEntity">The entity type.</typeparam>
+/// <typeparam name="TKey">The primary key type.</typeparam>
+public abstract class DirectSyncSource<TEntity, TKey> : DirectSyncSourceBase<TEntity, TKey>
+    where TEntity : EntityBase, new()
+{
+    /// <summary>Creates the source over the server's raw SQL surface and the repository local changes replay against.</summary>
+    protected DirectSyncSource(
+        ISqlExecutor serverSqlExecutor,
+        IRemoteRepository<TEntity, TKey> writer
+    )
+        : base(serverSqlExecutor, writer) { }
+
+    /// <summary>SELECT that returns one ascending batch of rows above the anchor and below the ceiling (SQL Server quoting).</summary>
+    protected abstract string ServerChangesSql { get; }
+
+    /// <inheritdoc />
+    public sealed override async Task<byte[]?> GetChangeCeilingAsync(
+        CancellationToken cancellationToken = default
+    ) =>
+        await ServerSqlExecutor.ExecuteScalarSqlAsync<byte[]>(
+            "SELECT MIN_ACTIVE_ROWVERSION()",
+            null,
+            cancellationToken
+        )
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// A full batch is reported as "there is more", which the next call settles: it either returns the rest or comes
+    /// back empty when the batch happened to end exactly on the boundary. The extra round trip in that case is the
+    /// price of not fetching a row beyond the batch to peek with, and it costs one empty query per drained table.
+    /// </remarks>
+    public sealed override async Task<SyncChangeBatch<TEntity>> GetChangesAsync(
+        byte[]? anchor,
+        byte[]? ceiling,
+        int batchSize,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var rows = await ServerSqlExecutor.QueryBySqlAsync<TEntity>(
+            ServerChangesSql,
+            new
+            {
+                anchor,
+                ceiling,
+                batchSize,
+            },
+            cancellationToken
+        )
+            .ConfigureAwait(false);
+
+        return new SyncChangeBatch<TEntity>(rows, rows.Count >= batchSize);
+    }
+}
+
+/// <summary>Direct server source for a table without a row-version column (a key-ordered full scan, paged by primary key).</summary>
+/// <typeparam name="TEntity">The entity type.</typeparam>
+/// <typeparam name="TKey">The primary key type.</typeparam>
+public abstract class VersionlessDirectSyncSource<TEntity, TKey>
+    : DirectSyncSourceBase<TEntity, TKey>
+    where TEntity : EntityBase, new()
+{
+    /// <summary>Creates the source over the server's raw SQL surface and the repository local changes replay against.</summary>
+    protected VersionlessDirectSyncSource(
+        ISqlExecutor serverSqlExecutor,
+        IRemoteRepository<TEntity, TKey> writer
+    )
+        : base(serverSqlExecutor, writer) { }
+
+    /// <summary>SELECT that returns the first ascending batch of rows by primary key (SQL Server quoting).</summary>
+    protected abstract string ServerPageFirstSql { get; }
+
+    /// <summary>SELECT that returns the next ascending batch of rows above a key (SQL Server quoting).</summary>
+    protected abstract string ServerPageAfterSql { get; }
+
+    /// <inheritdoc />
+    /// <remarks>A key-ordered scan has no version to bound, so there is no ceiling to read.</remarks>
+    public sealed override Task<byte[]?> GetChangeCeilingAsync(
+        CancellationToken cancellationToken = default
+    ) => Task.FromResult<byte[]?>(null);
+
+    /// <inheritdoc />
+    /// <remarks>Never called for a table without a version column; the download pages by key instead.</remarks>
+    public sealed override Task<SyncChangeBatch<TEntity>> GetChangesAsync(
+        byte[]? anchor,
+        byte[]? ceiling,
+        int batchSize,
+        CancellationToken cancellationToken = default
+    ) =>
+        throw new NotSupportedException(
+            "The table has no version column; its download pages by primary key."
+        );
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// A full batch is reported as "there is more", which the next call settles: it either returns the rest or comes
+    /// back empty when the batch happened to end exactly on the boundary - the same trade the versioned change scan
+    /// makes.
+    /// </remarks>
+    public sealed override async Task<SyncChangeBatch<TEntity>> GetFirstPageAsync(
+        int batchSize,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var rows = await ServerSqlExecutor.QueryBySqlAsync<TEntity>(
+            ServerPageFirstSql,
+            new { batchSize },
+            cancellationToken
+        )
+            .ConfigureAwait(false);
+
+        return new SyncChangeBatch<TEntity>(rows, rows.Count >= batchSize);
+    }
+
+    /// <inheritdoc />
+    public sealed override async Task<SyncChangeBatch<TEntity>> GetPageAfterAsync(
+        TKey afterKey,
+        int batchSize,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var rows = await ServerSqlExecutor.QueryBySqlAsync<TEntity>(
+            ServerPageAfterSql,
+            new { afterKey, batchSize },
+            cancellationToken
+        )
+            .ConfigureAwait(false);
+
+        return new SyncChangeBatch<TEntity>(rows, rows.Count >= batchSize);
+    }
+}
+
 /// <summary>The operation names of the sync-only endpoints (<c>POST {prefix}/{entity}/{operation}</c>).</summary>
 /// <remarks>
 /// The server maps them and the client posts to them, so both sides read the route from here and cannot drift apart.

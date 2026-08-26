@@ -497,14 +497,27 @@ public class SyncSupportGenerationTests
         content.Should().Contain(": VersionlessSyncTable<SyncNoteEntity, int>(");
         content.Should().Contain(": SyncTable<SyncOrderEntity, int>(");
 
-        // ② 直結ソース＝キー順ページング（版なしのみ）
+        // ② 直結ソース＝走査の形は基底（版あり＝版の昇順／版なし＝キー順ページング）が持ち、
+        //    per-type は基底の選択と SQL の身元だけを持つ
         var noteSource = ExtractClass(content, "public sealed class SyncNoteDirectSyncSource");
-        noteSource.Should().Contain("GetFirstPageAsync");
+        noteSource.Should().Contain(": VersionlessDirectSyncSource<SyncNoteEntity, int>");
         noteSource.Should().Contain("WHERE [note_id] > @afterKey ORDER BY [note_id]");
-        noteSource.Should().Contain("Task.FromResult<byte[]?>(null)");
+        noteSource.Should().NotContain("ServerChangesSql");
         var orderSource = ExtractClass(content, "public sealed class SyncOrderDirectSyncSource");
-        orderSource.Should().Contain("MIN_ACTIVE_ROWVERSION()");
-        orderSource.Should().NotContain("GetFirstPageAsync");
+        orderSource.Should().Contain(": DirectSyncSource<SyncOrderEntity, int>");
+        orderSource.Should().Contain("protected override string ServerChangesSql =>");
+        orderSource.Should().NotContain("ServerPageFirstSql");
+
+        // 基底側の両アーム: 版ありは MIN_ACTIVE_ROWVERSION の ceiling・版なしはキー順ページングと null ceiling
+        ExtractClass(content, "public abstract class DirectSyncSource<TEntity, TKey>")
+            .Should()
+            .Contain("MIN_ACTIVE_ROWVERSION()");
+        var versionlessSourceBase = ExtractClass(
+            content,
+            "public abstract class VersionlessDirectSyncSource<TEntity, TKey>"
+        );
+        versionlessSourceBase.Should().Contain("GetFirstPageAsync");
+        versionlessSourceBase.Should().Contain("Task.FromResult<byte[]?>(null)");
 
         // ③ 版なしデコレータは版なし基底（Delete は事前読みなし・null 版で記録）を継承し、
         //    版ありデコレータは版あり基底（事前読み＋ミラー版）＋ ReadRowVersion override を持つ
@@ -695,12 +708,11 @@ public class SyncSupportGenerationTests
             .Should()
             .Contain("localRepository.ReadAttachmentAsync(id, destination, cancellationToken)");
 
-        // 直結サーバー: サーバー側リポジトリのアクセサ
-        content.Should().Contain("public ISyncBinaryColumns<int>? BinaryColumns => this;");
+        // 直結サーバー: サーバー側リポジトリのアクセサ（基底 DirectSyncSourceBase の null 既定を override）
         content
             .Should()
             .Contain(
-                "serverRepository.WriteAttachmentAsync(id, source, length, cancellationToken)"
+                "_serverRepository.WriteAttachmentAsync(id, source, length, cancellationToken)"
             );
 
         // HTTP サーバー: 既存のバイナリエンドポイント（基底のヘルパー）へ委譲

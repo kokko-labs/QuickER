@@ -102,6 +102,9 @@ internal sealed class CSharpSyncTableModel
     /// <summary>デコレータが継承する汎用基底名（版あり <c>JournalingRepository</c>／版なし <c>VersionlessJournalingRepository</c>）</summary>
     public required string DecoratorBaseClassName { get; init; }
 
+    /// <summary>直結差分ソースが継承する汎用基底名（版あり <c>DirectSyncSource</c>／版なし <c>VersionlessDirectSyncSource</c>）</summary>
+    public required string SourceBaseClassName { get; init; }
+
     /// <summary>主キーのプロパティ名</summary>
     public required string KeyPropertyName { get; init; }
 

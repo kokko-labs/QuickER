@@ -219,10 +219,14 @@ internal sealed partial class CSharpGenerationModelBuilder
             RemoteRouteName = repositoryName,
             TableClassName = $"{repositoryName}SyncTable",
             DecoratorClassName = $"Journaling{repositoryName}Repository",
-            // デコレータの汎用基底も SyncTable と同じく版の有無でサブクラス階層を選ぶ（削除記録の形だけが違う）
+            // デコレータ・直結ソースの汎用基底も SyncTable と同じく版の有無でサブクラス階層を選ぶ
+            // （デコレータは削除記録の形・ソースは走査の形〔版の昇順／キー順ページング〕だけが違う）
             DecoratorBaseClassName = isVersionless
                 ? "VersionlessJournalingRepository"
                 : "JournalingRepository",
+            SourceBaseClassName = isVersionless
+                ? "VersionlessDirectSyncSource"
+                : "DirectSyncSource",
             KeyPropertyName = keyPropertyName,
             // 昇順・上限つきの差分走査（版ありのみ）。2 点が効いている:
             //  (1) @anchor / @ceiling は NULL を取り得るため、素の比較では 3 値論理で全行が UNKNOWN になる
@@ -292,10 +296,12 @@ internal sealed partial class CSharpGenerationModelBuilder
             DirectSourceBinaryBlock = BuildSyncBinaryAccessorBlock(
                 binaryColumns,
                 repository.KeyTypeName,
-                column => $"serverRepository.Read{column}Async(id, destination, cancellationToken)",
                 column =>
-                    $"serverRepository.Write{column}Async(id, source, length, cancellationToken)",
-                $"public ISyncBinaryColumns<{repository.KeyTypeName}>? BinaryColumns => this;"
+                    $"_serverRepository.Read{column}Async(id, destination, cancellationToken)",
+                column =>
+                    $"_serverRepository.Write{column}Async(id, source, length, cancellationToken)",
+                // 基底（DirectSyncSourceBase）が virtual の null 既定を持つため override で差し替える
+                $"public override ISyncBinaryColumns<{repository.KeyTypeName}>? BinaryColumns => this;"
             ),
             HttpSourceBinaryBlock = BuildSyncBinaryAccessorBlock(
                 binaryColumns,
