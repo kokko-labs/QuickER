@@ -31,6 +31,7 @@ internal sealed partial class CSharpGenerationModelBuilder
     /// <summary>1 エンティティ分の重複事前チェックブロック（テンプレートへ渡す整形済みテキスト群）</summary>
     private sealed record UniquenessBlocks(
         string ContractBlock,
+        string ConstraintsClassBlock,
         string SharedImplBlock,
         string RemoteClientBlock,
         string RemoteServerBlock,
@@ -134,7 +135,17 @@ internal sealed partial class CSharpGenerationModelBuilder
 
         return new UniquenessBlocks(
             BuildUniquenessContractMember(entityClassName, summary),
-            BuildUniquenessImplMember(entityClassName, keyProperty, constraints),
+            constraints.Count > 0
+                ? BuildUniquenessConstraintsClass(
+                    entity,
+                    entityClassName,
+                    repositoryName,
+                    keyProperty,
+                    constraints,
+                    options
+                )
+                : string.Empty,
+            BuildUniquenessImplMember(entityClassName, repositoryName, constraints),
             options.GenerateRemoteServices ? BuildRemoteClientMember(shape) : string.Empty,
             options.GenerateRemoteServices
                 ? BuildRemoteServerMap(shape, repositoryName)
@@ -164,11 +175,17 @@ internal sealed partial class CSharpGenerationModelBuilder
         );
 
     /// <summary>
-    /// 重複事前チェックの実装メンバー（式木クエリ経由・全実装先共通）と、ユーザー定義フックの partial 宣言を構築する。
+    /// 重複事前チェックの実装メンバー（共有エンジン <c>UniquenessChecker</c> への委譲・全実装先共通）と、
+    /// ユーザー定義フックの partial 宣言を構築する。
     /// </summary>
+    /// <remarks>
+    /// 制約の照合そのもの（NULL 組のスキップ・自己除外・存在確認・違反の収集）は固定ランタイムのエンジンが持ち、
+    /// ここが出すのは「記述子テーブルを渡してエンジンを呼び、フックを収集して渡す」定型だけになった（第 10 次 A-3）。
+    /// フック呼び出しは前提 1（partial は基底から呼べない・未実装ゼロコスト維持）により per-type に残る。
+    /// </remarks>
     private static string BuildUniquenessImplMember(
         string entityClassName,
-        CSharpPropertyModel keyProperty,
+        string repositoryName,
         IReadOnlyList<ResolvedUniqueConstraint> constraints
     )
     {
@@ -180,42 +197,38 @@ internal sealed partial class CSharpGenerationModelBuilder
             "        CancellationToken cancellationToken = default",
             "    )",
             "    {",
-            "        ArgumentNullException.ThrowIfNull(entity);",
-            "        var violations = new List<UniquenessViolation>();",
         };
 
-        for (var index = 0; index < constraints.Count; index++)
+        if (constraints.Count > 0)
         {
-            lines.Add(string.Empty);
-            lines.AddRange(
-                BuildUniquenessConstraintCheckLines(
-                    entityClassName,
-                    keyProperty,
-                    constraints[index],
-                    index + 1
-                )
-            );
+            lines.AddRange([
+                "        var violations = await UniquenessChecker",
+                "            .CheckAsync(",
+                "                entity,",
+                "                Query,",
+                $"                {repositoryName}UniquenessConstraints.ExcludeSelf,",
+                $"                {repositoryName}UniquenessConstraints.Checks,",
+                "                cancellationToken",
+                "            )",
+                "            .ConfigureAwait(false);",
+            ]);
+        }
+        else
+        {
+            lines.AddRange([
+                "        ArgumentNullException.ThrowIfNull(entity);",
+                "        var violations = new List<UniquenessViolation>();",
+            ]);
         }
 
-        // ユーザー定義チェック: 収集 → 順に await → null 以外を合流（フック未実装なら呼び出しごと消滅する）
+        // ユーザー定義チェック: 収集は partial フック（未実装なら呼び出しごと消滅）・実行はエンジンのループ
         lines.AddRange([
             string.Empty,
             $"        List<UniquenessCheck<{entityClassName}>>? customChecks = null;",
             "        CollectCustomUniquenessChecks(ref customChecks);",
-            string.Empty,
-            "        if (customChecks is not null)",
-            "        {",
-            "            foreach (var customCheck in customChecks)",
-            "            {",
-            "                if (",
-            "                    await customCheck(entity, cancellationToken)",
-            "                        .ConfigureAwait(false) is { } violation",
-            "                )",
-            "                {",
-            "                    violations.Add(violation);",
-            "                }",
-            "            }",
-            "        }",
+            "        await UniquenessChecker",
+            "            .RunCustomChecksAsync(entity, customChecks, violations, cancellationToken)",
+            "            .ConfigureAwait(false);",
             string.Empty,
             "        return violations;",
             "    }",
@@ -229,116 +242,116 @@ internal sealed partial class CSharpGenerationModelBuilder
         return string.Join("\n", lines);
     }
 
-    /// <summary>1 制約分の照合コード（NULL 組のスキップ → 存在確認 → 違反の追加）の行を組み立てる</summary>
+    /// <summary>
+    /// 制約記述子クラス（<c>{Repository}UniquenessConstraints</c>＝制約テーブル <c>Checks</c> と自己除外
+    /// <c>ExcludeSelf</c>）を構築する（制約が 1 件も無いエンティティは呼ばれない）。
+    /// </summary>
     /// <remarks>
     /// <para>
-    /// 条件は制約構成列ごとに 1 つずつ <c>Where</c> を重ねる（<c>SqlQuery.Where</c> は AND 結合）。1 行 1 比較になるため
-    /// 列数が増えても行が伸びず、方言翻訳・EF Core いずれでも同じ式木の形になる。
-    /// 判定結果のローカル名に連番を付けるのは、NULL 検査の有無で宣言スコープ（メソッド直下 / <c>if</c> ブロック内）が
-    /// 変わり、素の同名だと制約の組み合わせ次第で CS0136 になるため。
+    /// 記述子は <c>SqlQuery&lt;TEntity&gt;</c> と Entity しか参照しない方言中立のデータなので、契約ファイルへ
+    /// 1 回だけ出し、全実装先（2 方言・インメモリ・EF Core）が共有する（従来の実装先ごとのインライン展開を
+    /// 置き換える）。等値条件は制約構成列ごとに 1 つずつ <c>Where</c> を重ねる（AND 結合）＝旧インライン版と
+    /// 同じ式木の形になり、方言翻訳・EF Core いずれでも結果が変わらない。ラムダは <c>static</c> の
+    /// フィールド初期化子＝1 回だけの確保で、照合対象の <c>entity</c> はデリゲート引数として受ける。
     /// </para>
     /// <para>
-    /// 自分自身の除外（主キー不一致の <c>Where</c>）は<b>主キーが null を取り得る型（値オブジェクト・string 等）のとき
-    /// 条件付きで足す</b>。挿入前のエンティティは主キー未設定＝除外すべき行が存在しないため、除外条件そのものを
+    /// 自分自身の除外（主キー不一致の <c>Where</c>）は<b>主キーが null を取り得る型（値オブジェクト・string 等）の
+    /// とき条件付きで足す</b>。挿入前のエンティティは主キー未設定＝除外すべき行が存在しないため、除外条件そのものを
     /// 付けないのが正しい（付けたままだと「NULL との比較」に依存することになる）。非 NULL の値型（int 等）は
     /// <c>is not null</c> が常に真で警告になるため、除外条件を無条件に連ねる。
     /// </para>
+    /// <para>
+    /// 可視性は層別出力のとき public（契約＝domain 層のクラスを infrastructure 層の実装が参照するため。
+    /// 固定 infra の infra_visibility と同じ規則）・通常は internal。
+    /// </para>
     /// </remarks>
-    /// <param name="ordinal">制約の 1 始まり通し番号（判定結果のローカル名に使う）</param>
-    private static IEnumerable<string> BuildUniquenessConstraintCheckLines(
+    private string BuildUniquenessConstraintsClass(
+        Entity entity,
         string entityClassName,
+        string repositoryName,
         CSharpPropertyModel keyProperty,
-        ResolvedUniqueConstraint constraint,
-        int ordinal
+        IReadOnlyList<ResolvedUniqueConstraint> constraints,
+        CodeGenerationOptions options
     )
     {
+        var visibility = options.LayeredOutput ? "public" : "internal";
         var keyPropertyName = keyProperty.PropertyName;
 
         // 主キーが null を取り得るか（構成列の NULL 検査と同じ判定規則）
         var keyCanBeNull = keyProperty.IsNullable || keyProperty.IsReferenceType;
-        // 構成列の値に null を含む組は判定対象外。null を取り得るプロパティ（NULL 許容列・参照型・値オブジェクト）だけを検査する
-        var nullChecks = constraint
-            .Members.Where(member => member.IsNullable || member.IsReferenceType)
-            .Select(member => $"entity.{member.PropertyName} is not null")
-            .ToList();
 
-        var indent = nullChecks.Count > 0 ? "            " : "        ";
         var lines = new List<string>
         {
-            $"        // {constraint.ConstraintName}: {string.Join(", ", constraint.Members.Select(member => member.PropertyName))}",
+            $"/// <summary>UNIQUE constraints of the {EscapeForXmlDocSummary(entity.TableName)} table as data, walked by the shared engine (<see cref=\"UniquenessChecker\"/>).</summary>",
+            "/// <remarks>",
+            "/// The checks are dialect-neutral (they build the same expression trees the per-target inline code used to),",
+            "/// which is why the table lives beside the contract and is shared by every implementation target.",
+            "/// </remarks>",
+            $"{visibility} static class {repositoryName}UniquenessConstraints",
+            "{",
+            "    /// <summary>The constraint checks, in declaration order.</summary>",
+            $"    public static readonly IReadOnlyList<UniquenessConstraintCheck<{entityClassName}>> Checks =",
+            $"        new UniquenessConstraintCheck<{entityClassName}>[]",
+            "        {",
         };
 
-        if (nullChecks.Count > 0)
+        foreach (var constraint in constraints)
         {
-            lines.Add($"        if ({string.Join(" && ", nullChecks)})");
-            lines.Add("        {");
+            // 構成列の値に null を含む組は判定対象外。null を取り得るプロパティ（NULL 許容列・参照型・値オブジェクト）だけを検査する
+            var nullChecks = constraint
+                .Members.Where(member => member.IsNullable || member.IsReferenceType)
+                .Select(member => $"entity.{member.PropertyName} is not null")
+                .ToList();
+
+            lines.Add("            new(");
+            lines.Add($"                \"{EscapeForCSharpString(constraint.ConstraintName)}\",");
+            lines.Add("                new[]");
+            lines.Add("                {");
+            lines.AddRange(
+                constraint.Members.Select(member =>
+                    $"                    nameof({entityClassName}.{member.PropertyName}),"
+                )
+            );
+            lines.Add("                },");
+            lines.Add(
+                nullChecks.Count > 0
+                    ? $"                static entity => {string.Join(" && ", nullChecks)},"
+                    : "                static entity => true,"
+            );
+            lines.Add("                static (query, entity) =>");
+            lines.Add("                    query");
+            lines.AddRange(
+                constraint.Members.Select(member =>
+                    $"                        .Where(candidate => candidate.{member.PropertyName} == entity.{member.PropertyName})"
+                )
+            );
+            lines.Add("            ),");
         }
 
-        var duplicatedLocal = $"duplicated{ordinal}";
-        var memberFilters = constraint
-            .Members.Select(member =>
-                $"{indent}    .Where(candidate => candidate.{member.PropertyName} == entity.{member.PropertyName})"
-            )
-            .ToList();
+        lines.Add("        };");
+        lines.Add(string.Empty);
 
         if (keyCanBeNull)
         {
-            // 主キーを持ち得ない（＝未設定の）新規行では除外条件そのものを足さない
-            var queryLocal = $"query{ordinal}";
-
-            lines.Add($"{indent}var {queryLocal} = Query()");
-            lines.AddRange(memberFilters);
-            lines[^1] += ";";
-            lines.Add(string.Empty);
-            lines.Add(
-                $"{indent}// A row that has no primary key yet (a new row) has no row of its own to exclude"
-            );
-            lines.Add($"{indent}if (entity.{keyPropertyName} is not null)");
-            lines.Add($"{indent}{{");
-            lines.Add(
-                $"{indent}    {queryLocal} = {queryLocal}.Where(candidate => candidate.{keyPropertyName} != entity.{keyPropertyName});"
-            );
-            lines.Add($"{indent}}}");
-            lines.Add(string.Empty);
-            lines.Add($"{indent}var {duplicatedLocal} = await {queryLocal}");
-            lines.Add($"{indent}    .AnyAsync(cancellationToken)");
-            lines.Add($"{indent}    .ConfigureAwait(false);");
+            lines.AddRange([
+                "    /// <summary>Excludes the entity's own row from a candidate query (a row that has no primary key yet - a new row - has no row of its own to exclude).</summary>",
+                $"    public static SqlQuery<{entityClassName}> ExcludeSelf(SqlQuery<{entityClassName}> query, {entityClassName} entity) =>",
+                $"        entity.{keyPropertyName} is not null",
+                $"            ? query.Where(candidate => candidate.{keyPropertyName} != entity.{keyPropertyName})",
+                "            : query;",
+            ]);
         }
         else
         {
-            lines.Add($"{indent}var {duplicatedLocal} = await Query()");
-            lines.AddRange(memberFilters);
-            lines.Add(
-                $"{indent}    .Where(candidate => candidate.{keyPropertyName} != entity.{keyPropertyName})"
-            );
-            lines.Add($"{indent}    .AnyAsync(cancellationToken)");
-            lines.Add($"{indent}    .ConfigureAwait(false);");
+            lines.AddRange([
+                "    /// <summary>Excludes the entity's own row from a candidate query.</summary>",
+                $"    public static SqlQuery<{entityClassName}> ExcludeSelf(SqlQuery<{entityClassName}> query, {entityClassName} entity) =>",
+                $"        query.Where(candidate => candidate.{keyPropertyName} != entity.{keyPropertyName});",
+            ]);
         }
 
-        lines.Add(string.Empty);
-        lines.Add($"{indent}if ({duplicatedLocal})");
-        lines.Add($"{indent}{{");
-        lines.Add($"{indent}    violations.Add(");
-        lines.Add($"{indent}        new UniquenessViolation(");
-        lines.Add($"{indent}            \"{EscapeForCSharpString(constraint.ConstraintName)}\",");
-        lines.Add($"{indent}            new[]");
-        lines.Add($"{indent}            {{");
-        lines.AddRange(
-            constraint.Members.Select(member =>
-                $"{indent}                nameof({entityClassName}.{member.PropertyName}),"
-            )
-        );
-        lines.Add($"{indent}            }}");
-        lines.Add($"{indent}        )");
-        lines.Add($"{indent}    );");
-        lines.Add($"{indent}}}");
-
-        if (nullChecks.Count > 0)
-        {
-            lines.Add("        }");
-        }
-
-        return lines;
+        lines.Add("}");
+        return string.Join("\n", lines);
     }
 
     // ---- Entity 側（DB 定義の自己記述属性） ----

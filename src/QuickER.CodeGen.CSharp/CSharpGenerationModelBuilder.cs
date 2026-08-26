@@ -423,6 +423,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             BinaryStreamRemoteClientBlock = binaryStreamBlocks.RemoteClientBlock,
             BinaryStreamRemoteServerBlock = binaryStreamBlocks.RemoteServerBlock,
             UniquenessContractBlock = uniquenessBlocks.ContractBlock,
+            UniquenessConstraintsClassBlock = uniquenessBlocks.ConstraintsClassBlock,
             UniquenessSharedImplBlock = uniquenessBlocks.SharedImplBlock,
             UniquenessRemoteClientBlock = uniquenessBlocks.RemoteClientBlock,
             UniquenessRemoteServerBlock = uniquenessBlocks.RemoteServerBlock,

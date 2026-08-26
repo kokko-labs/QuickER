@@ -3625,6 +3625,10 @@ public partial interface {{ repository.interface_name }} : IRepository<{{ reposi
 {{ non_remote_interface_members }}
 }{{ end }}
 {{~ end ~}}
+{{~ if repository.uniqueness_constraints_class_block != "" ~}}
+
+{{ repository.uniqueness_constraints_class_block }}
+{{~ end ~}}
 {{~ if repository.query_dto_block != "" ~}}
 
 {{ repository.query_dto_block }}

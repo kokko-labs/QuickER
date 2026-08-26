@@ -4555,6 +4555,98 @@ public delegate Task<UniquenessViolation?> UniquenessCheck<TEntity>(
     CancellationToken cancellationToken
 );
 
+/// <summary>One UNIQUE-constraint check as data: the guard that skips tuples containing null, the equality filter over the constraint members, and the names the violation reports.</summary>
+/// <typeparam name="TEntity">The entity type being checked.</typeparam>
+/// <param name="ConstraintName">Name of the constraint (the synthesized name when the diagram does not set one).</param>
+/// <param name="PropertyNames">Entity property names that make up the constraint, in declaration order.</param>
+/// <param name="HasAllValues">Returns whether every constraint member holds a value (tuples containing null are skipped; NULL collision semantics differ per dialect).</param>
+/// <param name="ApplyFilter">Adds the equality filter for the constraint members to a candidate query (one Where per member, AND-combined).</param>
+public sealed record UniquenessConstraintCheck<TEntity>(
+    string ConstraintName,
+    IReadOnlyList<string> PropertyNames,
+    Func<TEntity, bool> HasAllValues,
+    Func<SqlQuery<TEntity>, TEntity, SqlQuery<TEntity>> ApplyFilter
+)
+    where TEntity : class;
+
+/// <summary>Shared engine of the uniqueness pre-check: walks the constraint table, excludes the entity's own row, asks the store for existence, and runs the user-defined checks.</summary>
+/// <remarks>
+/// Everything type-specific stays with the generated code, either as data (the constraint table and the self-exclusion,
+/// whose expression trees must be built over the concrete entity type) or as code (the partial hook that collects the
+/// user-defined checks, which a shared engine cannot call). The checks run through <c>Query()</c>, so every
+/// implementation target - the dialect repositories, in-memory, and EF Core - answers with the same semantics.
+/// </remarks>
+public static class UniquenessChecker
+{
+    /// <summary>Checks the declared UNIQUE constraints and returns the violations (an empty list when there are none).</summary>
+    /// <param name="entity">The entity whose constraint member values are checked.</param>
+    /// <param name="query">Creates a fresh candidate query (called once per constraint).</param>
+    /// <param name="excludeSelf">Excludes the entity's own row from a candidate query (a row that has no primary key yet excludes nothing).</param>
+    /// <param name="constraints">The constraint table, in declaration order.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    public static async Task<List<UniquenessViolation>> CheckAsync<TEntity>(
+        TEntity entity,
+        Func<SqlQuery<TEntity>> query,
+        Func<SqlQuery<TEntity>, TEntity, SqlQuery<TEntity>> excludeSelf,
+        IReadOnlyList<UniquenessConstraintCheck<TEntity>> constraints,
+        CancellationToken cancellationToken
+    )
+        where TEntity : class
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+        var violations = new List<UniquenessViolation>();
+
+        foreach (var constraint in constraints)
+        {
+            // Tuples whose member values contain null are not checked (NULL collision semantics differ per dialect)
+            if (!constraint.HasAllValues(entity))
+            {
+                continue;
+            }
+
+            var duplicated = await excludeSelf(constraint.ApplyFilter(query(), entity), entity)
+                .AnyAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            if (duplicated)
+            {
+                violations.Add(
+                    new UniquenessViolation(constraint.ConstraintName, constraint.PropertyNames)
+                );
+            }
+        }
+
+        return violations;
+    }
+
+    /// <summary>Runs the user-defined checks collected by the generated hook, adding every reported violation (a null list - the hook unimplemented, or nothing added - is a no-op).</summary>
+    /// <param name="entity">The entity to check.</param>
+    /// <param name="checks">The user-defined checks, or null when there are none.</param>
+    /// <param name="violations">The list the reported violations are added to.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    public static async Task RunCustomChecksAsync<TEntity>(
+        TEntity entity,
+        List<UniquenessCheck<TEntity>>? checks,
+        List<UniquenessViolation> violations,
+        CancellationToken cancellationToken
+    )
+        where TEntity : class
+    {
+        if (checks is null)
+        {
+            return;
+        }
+
+        foreach (var check in checks)
+        {
+            if (await check(entity, cancellationToken).ConfigureAwait(false) is { } violation)
+            {
+                violations.Add(violation);
+            }
+        }
+    }
+}
+
 /// <summary>Common repository interface limited to operations that can be provided across a network boundary (the remote surface).</summary>
 /// <remarks>
 /// <para>
@@ -10102,20 +10194,9 @@ public sealed partial class CustomerRepository(
 
         List<UniquenessCheck<CustomerEntity>>? customChecks = null;
         CollectCustomUniquenessChecks(ref customChecks);
-
-        if (customChecks is not null)
-        {
-            foreach (var customCheck in customChecks)
-            {
-                if (
-                    await customCheck(entity, cancellationToken)
-                        .ConfigureAwait(false) is { } violation
-                )
-                {
-                    violations.Add(violation);
-                }
-            }
-        }
+        await UniquenessChecker
+            .RunCustomChecksAsync(entity, customChecks, violations, cancellationToken)
+            .ConfigureAwait(false);
 
         return violations;
     }
@@ -10192,6 +10273,50 @@ public partial interface IOrderRemoteRepository : IRemoteRepository<OrderEntity,
 public partial interface IOrderRepository
     : IOrderRemoteRepository,
         IRepository<OrderEntity, OrderIdValue> { }
+
+/// <summary>UNIQUE constraints of the orders table as data, walked by the shared engine (<see cref="UniquenessChecker"/>).</summary>
+/// <remarks>
+/// The checks are dialect-neutral (they build the same expression trees the per-target inline code used to),
+/// which is why the table lives beside the contract and is shared by every implementation target.
+/// </remarks>
+internal static class OrderUniquenessConstraints
+{
+    /// <summary>The constraint checks, in declaration order.</summary>
+    public static readonly IReadOnlyList<UniquenessConstraintCheck<OrderEntity>> Checks =
+        new UniquenessConstraintCheck<OrderEntity>[]
+        {
+            new(
+                "UQ_orders_memo",
+                new[]
+                {
+                    nameof(OrderEntity.Memo),
+                },
+                static entity => entity.Memo is not null,
+                static (query, entity) =>
+                    query
+                        .Where(candidate => candidate.Memo == entity.Memo)
+            ),
+            new(
+                "UQ_orders_customer_id_amount",
+                new[]
+                {
+                    nameof(OrderEntity.CustomerId),
+                    nameof(OrderEntity.Amount),
+                },
+                static entity => entity.CustomerId is not null && entity.Amount is not null,
+                static (query, entity) =>
+                    query
+                        .Where(candidate => candidate.CustomerId == entity.CustomerId)
+                        .Where(candidate => candidate.Amount == entity.Amount)
+            ),
+        };
+
+    /// <summary>Excludes the entity's own row from a candidate query (a row that has no primary key yet - a new row - has no row of its own to exclude).</summary>
+    public static SqlQuery<OrderEntity> ExcludeSelf(SqlQuery<OrderEntity> query, OrderEntity entity) =>
+        entity.OrderId is not null
+            ? query.Where(candidate => candidate.OrderId != entity.OrderId)
+            : query;
+}
 
 /// <summary>Projection DTO for the named query GetSummaries (orders).</summary>
 public sealed partial class OrderSummaryRow
@@ -10300,87 +10425,21 @@ public sealed partial class OrderRepository(
         CancellationToken cancellationToken = default
     )
     {
-        ArgumentNullException.ThrowIfNull(entity);
-        var violations = new List<UniquenessViolation>();
-
-        // UQ_orders_memo: Memo
-        if (entity.Memo is not null)
-        {
-            var query1 = Query()
-                .Where(candidate => candidate.Memo == entity.Memo);
-
-            // A row that has no primary key yet (a new row) has no row of its own to exclude
-            if (entity.OrderId is not null)
-            {
-                query1 = query1.Where(candidate => candidate.OrderId != entity.OrderId);
-            }
-
-            var duplicated1 = await query1
-                .AnyAsync(cancellationToken)
-                .ConfigureAwait(false);
-
-            if (duplicated1)
-            {
-                violations.Add(
-                    new UniquenessViolation(
-                        "UQ_orders_memo",
-                        new[]
-                        {
-                            nameof(OrderEntity.Memo),
-                        }
-                    )
-                );
-            }
-        }
-
-        // UQ_orders_customer_id_amount: CustomerId, Amount
-        if (entity.CustomerId is not null && entity.Amount is not null)
-        {
-            var query2 = Query()
-                .Where(candidate => candidate.CustomerId == entity.CustomerId)
-                .Where(candidate => candidate.Amount == entity.Amount);
-
-            // A row that has no primary key yet (a new row) has no row of its own to exclude
-            if (entity.OrderId is not null)
-            {
-                query2 = query2.Where(candidate => candidate.OrderId != entity.OrderId);
-            }
-
-            var duplicated2 = await query2
-                .AnyAsync(cancellationToken)
-                .ConfigureAwait(false);
-
-            if (duplicated2)
-            {
-                violations.Add(
-                    new UniquenessViolation(
-                        "UQ_orders_customer_id_amount",
-                        new[]
-                        {
-                            nameof(OrderEntity.CustomerId),
-                            nameof(OrderEntity.Amount),
-                        }
-                    )
-                );
-            }
-        }
+        var violations = await UniquenessChecker
+            .CheckAsync(
+                entity,
+                Query,
+                OrderUniquenessConstraints.ExcludeSelf,
+                OrderUniquenessConstraints.Checks,
+                cancellationToken
+            )
+            .ConfigureAwait(false);
 
         List<UniquenessCheck<OrderEntity>>? customChecks = null;
         CollectCustomUniquenessChecks(ref customChecks);
-
-        if (customChecks is not null)
-        {
-            foreach (var customCheck in customChecks)
-            {
-                if (
-                    await customCheck(entity, cancellationToken)
-                        .ConfigureAwait(false) is { } violation
-                )
-                {
-                    violations.Add(violation);
-                }
-            }
-        }
+        await UniquenessChecker
+            .RunCustomChecksAsync(entity, customChecks, violations, cancellationToken)
+            .ConfigureAwait(false);
 
         return violations;
     }
@@ -12149,20 +12208,9 @@ public sealed partial class EfCoreCustomerRepository(
 
         List<UniquenessCheck<CustomerEntity>>? customChecks = null;
         CollectCustomUniquenessChecks(ref customChecks);
-
-        if (customChecks is not null)
-        {
-            foreach (var customCheck in customChecks)
-            {
-                if (
-                    await customCheck(entity, cancellationToken)
-                        .ConfigureAwait(false) is { } violation
-                )
-                {
-                    violations.Add(violation);
-                }
-            }
-        }
+        await UniquenessChecker
+            .RunCustomChecksAsync(entity, customChecks, violations, cancellationToken)
+            .ConfigureAwait(false);
 
         return violations;
     }
@@ -12217,87 +12265,21 @@ public sealed partial class EfCoreOrderRepository(
         CancellationToken cancellationToken = default
     )
     {
-        ArgumentNullException.ThrowIfNull(entity);
-        var violations = new List<UniquenessViolation>();
-
-        // UQ_orders_memo: Memo
-        if (entity.Memo is not null)
-        {
-            var query1 = Query()
-                .Where(candidate => candidate.Memo == entity.Memo);
-
-            // A row that has no primary key yet (a new row) has no row of its own to exclude
-            if (entity.OrderId is not null)
-            {
-                query1 = query1.Where(candidate => candidate.OrderId != entity.OrderId);
-            }
-
-            var duplicated1 = await query1
-                .AnyAsync(cancellationToken)
-                .ConfigureAwait(false);
-
-            if (duplicated1)
-            {
-                violations.Add(
-                    new UniquenessViolation(
-                        "UQ_orders_memo",
-                        new[]
-                        {
-                            nameof(OrderEntity.Memo),
-                        }
-                    )
-                );
-            }
-        }
-
-        // UQ_orders_customer_id_amount: CustomerId, Amount
-        if (entity.CustomerId is not null && entity.Amount is not null)
-        {
-            var query2 = Query()
-                .Where(candidate => candidate.CustomerId == entity.CustomerId)
-                .Where(candidate => candidate.Amount == entity.Amount);
-
-            // A row that has no primary key yet (a new row) has no row of its own to exclude
-            if (entity.OrderId is not null)
-            {
-                query2 = query2.Where(candidate => candidate.OrderId != entity.OrderId);
-            }
-
-            var duplicated2 = await query2
-                .AnyAsync(cancellationToken)
-                .ConfigureAwait(false);
-
-            if (duplicated2)
-            {
-                violations.Add(
-                    new UniquenessViolation(
-                        "UQ_orders_customer_id_amount",
-                        new[]
-                        {
-                            nameof(OrderEntity.CustomerId),
-                            nameof(OrderEntity.Amount),
-                        }
-                    )
-                );
-            }
-        }
+        var violations = await UniquenessChecker
+            .CheckAsync(
+                entity,
+                Query,
+                OrderUniquenessConstraints.ExcludeSelf,
+                OrderUniquenessConstraints.Checks,
+                cancellationToken
+            )
+            .ConfigureAwait(false);
 
         List<UniquenessCheck<OrderEntity>>? customChecks = null;
         CollectCustomUniquenessChecks(ref customChecks);
-
-        if (customChecks is not null)
-        {
-            foreach (var customCheck in customChecks)
-            {
-                if (
-                    await customCheck(entity, cancellationToken)
-                        .ConfigureAwait(false) is { } violation
-                )
-                {
-                    violations.Add(violation);
-                }
-            }
-        }
+        await UniquenessChecker
+            .RunCustomChecksAsync(entity, customChecks, violations, cancellationToken)
+            .ConfigureAwait(false);
 
         return violations;
     }

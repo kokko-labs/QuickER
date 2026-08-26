@@ -686,6 +686,12 @@ internal sealed class CSharpRepositoryModel
     public string UniquenessContractBlock { get; init; } = string.Empty;
 
     /// <summary>
+    /// 制約記述子クラス（<c>{Repository}UniquenessConstraints</c>＝制約テーブルと自己除外）。方言中立のため
+    /// 契約ファイルへ 1 回だけ挿入し、全実装先の <c>CheckUniquenessAsync</c> が共有する（制約なしは空文字）。
+    /// </summary>
+    public string UniquenessConstraintsClassBlock { get; init; } = string.Empty;
+
+    /// <summary>
     /// 重複事前チェックの実装メンバー（式木クエリ経由・全実装先で同一テキスト）。
     /// QuickER 版 Repository 2 方言・インメモリ・EF Core の各実装クラスへ同じテキストで挿入する（無ければ空文字）。
     /// </summary>
