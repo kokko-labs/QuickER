@@ -32,8 +32,14 @@ public enum QuickER.Runtime.DuplicateErrorSource : int
 public abstract class QuickER.Runtime.EditModelBase : System.ComponentModel.IEditableObject, System.ComponentModel.INotifyDataErrorInfo, System.ComponentModel.INotifyPropertyChanged
     protected .ctor()
     protected System.Collections.Generic.IEnumerable<QuickER.Runtime.EditModelError> CollectOwnErrors(string path)
+    protected bool AcceptBindingInput(ref string field, string value, string bindingPropertyName, out string normalized)
     protected bool IsLoading { get; }
     protected bool IsReverting { get; }
+    protected static QuickER.Runtime.EditModelBase.BindingConversion ConvertBinaryValueObjectInput<TVo>(string normalized, out TVo converted, out string rejection)
+    protected static QuickER.Runtime.EditModelBase.BindingConversion ConvertParsedValueObjectInput<TVo, TValue>(string normalized, out TVo converted, out string rejection)
+    protected static QuickER.Runtime.EditModelBase.BindingConversion ConvertValueObjectInput<TVo>(string normalized, out TVo converted, out string rejection)
+    protected static bool TryConvertBase64Input(string normalized, out byte[] bytes)
+    protected static bool TryParseInput<TValue>(string normalized, out TValue parsed)
     protected static string CombineErrorPath(string path, string segment)
     protected string NormalizeInput(string propertyName, string value)
     protected virtual bool SetProperty<T>(ref T field, T value, string propertyName)
@@ -50,6 +56,7 @@ public abstract class QuickER.Runtime.EditModelBase : System.ComponentModel.IEdi
     protected virtual void ValidateSelf()
     protected void AddChild(string name, System.Func<QuickER.Runtime.EditModelBase> accessor)
     protected void AddChildren<T>(string name, System.Func<QuickER.Runtime.EditModelCollection<T>> accessor)
+    protected void AfterConfirmedValueSet(string propertyName)
     protected void ClearErrors(string propertyName)
     protected void ClearRequiredError(string propertyName)
     protected void ExecuteRevert(System.Action action)

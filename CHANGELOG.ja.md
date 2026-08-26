@@ -16,7 +16,7 @@ QuickER の利用者に影響する変更を記録します。形式は [Keep a 
 
 ### Changed
 
-- **生成コードが挙動同一のまま大幅に縮小**: 同期ジャーナルデコレータ・直結差分ソース・Mapper の生成メソッド・EditModel の兄弟ナビゲーションヘルパーの型ごとの定型を汎用基底へ移した（`QuickER.Runtime.Sync` の `JournalingRepositoryBase` / `DirectSyncSourceBase` と版あり/なしサブクラス・`MapperBase` の `CreateEntityCore` / `CreateEditModelCore`・`QuickER.Runtime` の自己型層 `EditModelBase<TSelf>`）。生成クラスが持つのは自身の同一性（テーブル名・キーの扱い・SQL・フック）だけになった。`IValueObject<TSelf, TValue>` には既定実装付きの `DisplayName` が増えた（非破壊＝生成済みの static プロパティがそのまま実装になる）。`MapperBase` を手書きで派生している場合のみ、型引数の `new()` 制約と `ApplyToEditModel` の実装が新たに要る
+- **生成コードが挙動同一のまま大幅に縮小**: 同期ジャーナルデコレータ・直結差分ソース・Mapper の生成メソッド・EditModel の兄弟ナビゲーションヘルパーの型ごとの定型を汎用基底へ移した（`QuickER.Runtime.Sync` の `JournalingRepositoryBase` / `DirectSyncSourceBase` と版あり/なしサブクラス・`MapperBase` の `CreateEntityCore` / `CreateEditModelCore`・`QuickER.Runtime` の自己型層 `EditModelBase<TSelf>`・EditModel の列ごと 2 setter の機械部分〔正規化・表示戻し・解析・VO 変換〕＝`EditModelBase` の `AcceptBindingInput` / `AfterConfirmedValueSet` と変換ヘルパー族）。生成クラスが持つのは自身の同一性（テーブル名・キーの扱い・SQL・代入・文言・フック）だけになった。`IValueObject<TSelf, TValue>` には既定実装付きの `DisplayName` が増えた（非破壊＝生成済みの static プロパティがそのまま実装になる）。`MapperBase` を手書きで派生している場合のみ、型引数の `new()` 制約と `ApplyToEditModel` の実装が新たに要る
 - インメモリ Repository のサンプルデータが利用者定義の検証規則（手書きの `OnValidate`・手書きの値オブジェクト）に拒否されたとき——これは生成サンプル値には知りようのない規則——`AddGeneratedInMemoryRepositories()` から出る例外が、エンティティ名・プロパティ名・入れようとした値・元の検証メッセージを名指しし、対処（`seedSampleData: false` にして自前でデータを入れる）を案内するようになった。元の `ValueObjectValidationException` は inner として保全される。そのような規則を書いていない場合の挙動は変わらない
 
 ### Fixed

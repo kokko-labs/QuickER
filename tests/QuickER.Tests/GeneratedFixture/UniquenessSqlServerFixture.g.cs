@@ -1670,6 +1670,210 @@ public abstract partial class EditModelBase
         ref string normalizedValue
     ) { }
 
+    /// <summary>Runs the shared tail of a confirmed-value setter: raises the change notification, and outside a load retires the stale database verdicts and promotes the row to an update target.</summary>
+    /// <remarks>
+    /// The generated setter keeps only what is its own - the equality cut, the four <c>On{Property}Changing/Changed</c>
+    /// hook calls, and the field write - and ends here. The order (notify, then the not-loading block) is the order the
+    /// setters always had.
+    /// </remarks>
+    /// <param name="propertyName">The confirmed-value property that changed.</param>
+    protected void AfterConfirmedValueSet(string propertyName)
+    {
+        OnPropertyChanged(propertyName);
+
+        // Promote to update target when the confirmed value changes (not during load, where the state stays a mirror of the source entity).
+        if (!IsLoading)
+        {
+            // The database check compared the values this model held a moment ago, so editing one makes its verdict stale.
+            ClearDuplicateErrors(DuplicateErrorSource.Database);
+            OnConfirmedValueChanged(propertyName);
+
+            if (ShouldMarkUpdated(propertyName))
+            {
+                MarkUpdated();
+            }
+        }
+    }
+
+    /// <summary>Accepts a write to a binding string: normalizes input (outside load/revert), stores it, and resets the display when trimming collapsed the change into equality. Returns true when the write is a real change outside a revert, i.e. when the confirmed value should be re-derived from <paramref name="normalized"/>.</summary>
+    /// <param name="field">The backing field of the binding property.</param>
+    /// <param name="value">The raw value written by the binding.</param>
+    /// <param name="bindingPropertyName">The binding property's name (for notification and normalization hooks).</param>
+    /// <param name="normalized">The stored, normalized input string.</param>
+    protected bool AcceptBindingInput(
+        ref string field,
+        string value,
+        string bindingPropertyName,
+        out string normalized
+    )
+    {
+        // Normalize only values that come from input (pass through during load/revert to keep a mirror of the source entity).
+        normalized = IsLoading || IsReverting ? value : NormalizeInput(bindingPropertyName, value);
+
+        if (!SetProperty(ref field, normalized, bindingPropertyName))
+        {
+            // When trimming makes the value equal to the existing one, only the on-screen display keeps the whitespace-padded string, so reset the display to the normalized value.
+            if (!string.Equals(value, normalized, StringComparison.Ordinal))
+            {
+                OnPropertyChanged(bindingPropertyName);
+            }
+
+            return false;
+        }
+
+        return !IsReverting;
+    }
+
+    /// <summary>Outcome of converting a normalized input string toward a confirmed value.</summary>
+    /// <remarks>
+    /// The conversion helpers return state instead of acting so that the generated setter keeps ownership of what
+    /// happens next - the typed assignment, the error write, and the parse-failure message, whose resolution runs
+    /// through per-type partial hooks a base class cannot call.
+    /// </remarks>
+    protected enum BindingConversion
+    {
+        /// <summary>The input converted; assign the value and clear the input error.</summary>
+        Converted,
+
+        /// <summary>A value object rejected the value; the rejection text carries its validation errors.</summary>
+        Rejected,
+
+        /// <summary>The input could not be parsed as the underlying type; the caller resolves the message.</summary>
+        Unparsable,
+    }
+
+    /// <summary>Parses a normalized input string as <typeparamref name="TValue"/> (the same semantics as the type's own TryParse with the current culture).</summary>
+    /// <param name="normalized">The normalized input string.</param>
+    /// <param name="parsed">The parsed value.</param>
+    protected static bool TryParseInput<TValue>(string normalized, out TValue parsed)
+        where TValue : IParsable<TValue> => TValue.TryParse(normalized, null, out parsed!);
+
+    /// <summary>Converts a normalized input string to binary (empty becomes an empty array; Base64 otherwise).</summary>
+    /// <param name="normalized">The normalized input string.</param>
+    /// <param name="bytes">The converted bytes (empty when the conversion failed).</param>
+    protected static bool TryConvertBase64Input(string normalized, out byte[] bytes)
+    {
+        if (string.IsNullOrEmpty(normalized))
+        {
+            bytes = Array.Empty<byte>();
+            return true;
+        }
+
+        try
+        {
+            bytes = Convert.FromBase64String(normalized);
+            return true;
+        }
+        catch (FormatException)
+        {
+            bytes = Array.Empty<byte>();
+            return false;
+        }
+    }
+
+    /// <summary>Converts a normalized input string to a string-valued value object (empty converts to null; a rejection carries the joined validation errors).</summary>
+    /// <param name="normalized">The normalized input string.</param>
+    /// <param name="converted">The value object, or null for empty input or on failure.</param>
+    /// <param name="rejection">The joined validation errors when the value object rejected the value.</param>
+    protected static BindingConversion ConvertValueObjectInput<TVo>(
+        string normalized,
+        out TVo? converted,
+        out string? rejection
+    )
+        where TVo : class, IValueObject<TVo, string>
+    {
+        rejection = null;
+
+        if (string.IsNullOrEmpty(normalized))
+        {
+            converted = null;
+            return BindingConversion.Converted;
+        }
+
+        if (TVo.TryCreate(normalized, out converted, out var voErrors))
+        {
+            return BindingConversion.Converted;
+        }
+
+        rejection = EditModelMessages.JoinValueObjectErrors(voErrors);
+        return BindingConversion.Rejected;
+    }
+
+    /// <summary>Converts a normalized input string to a value object over a parsable underlying type (empty converts to null; an unparsable input leaves the message to the caller).</summary>
+    /// <param name="normalized">The normalized input string.</param>
+    /// <param name="converted">The value object, or null for empty input or on failure.</param>
+    /// <param name="rejection">The joined validation errors when the value object rejected the parsed value.</param>
+    protected static BindingConversion ConvertParsedValueObjectInput<TVo, TValue>(
+        string normalized,
+        out TVo? converted,
+        out string? rejection
+    )
+        where TVo : class, IValueObject<TVo, TValue>
+        where TValue : IParsable<TValue>
+    {
+        rejection = null;
+
+        if (string.IsNullOrEmpty(normalized))
+        {
+            converted = null;
+            return BindingConversion.Converted;
+        }
+
+        if (!TryParseInput<TValue>(normalized, out var parsed))
+        {
+            converted = null;
+            return BindingConversion.Unparsable;
+        }
+
+        if (TVo.TryCreate(parsed, out converted, out var voErrors))
+        {
+            return BindingConversion.Converted;
+        }
+
+        rejection = EditModelMessages.JoinValueObjectErrors(voErrors);
+        return BindingConversion.Rejected;
+    }
+
+    /// <summary>Converts a normalized input string to a binary value object (empty converts to null; a non-Base64 input leaves the message to the caller).</summary>
+    /// <param name="normalized">The normalized input string.</param>
+    /// <param name="converted">The value object, or null for empty input or on failure.</param>
+    /// <param name="rejection">The joined validation errors when the value object rejected the bytes.</param>
+    protected static BindingConversion ConvertBinaryValueObjectInput<TVo>(
+        string normalized,
+        out TVo? converted,
+        out string? rejection
+    )
+        where TVo : class, IValueObject<TVo, byte[]>
+    {
+        rejection = null;
+
+        if (string.IsNullOrEmpty(normalized))
+        {
+            converted = null;
+            return BindingConversion.Converted;
+        }
+
+        byte[] bytes;
+
+        try
+        {
+            bytes = Convert.FromBase64String(normalized);
+        }
+        catch (FormatException)
+        {
+            converted = null;
+            return BindingConversion.Unparsable;
+        }
+
+        if (TVo.TryCreate(bytes, out converted, out var voErrors))
+        {
+            return BindingConversion.Converted;
+        }
+
+        rejection = EditModelMessages.JoinValueObjectErrors(voErrors);
+        return BindingConversion.Rejected;
+    }
+
     /// <summary>Gets or sets the collection this edit model belongs to (for sibling navigation; set by <see cref="EditModelCollection{T}"/>).</summary>
     internal IList? Owner { get; set; }
 
@@ -3063,20 +3267,7 @@ public partial class CustomerEditModel : EditModelBase<CustomerEditModel>
             _customerId = value;
             OnCustomerIdChanged(value);
             OnCustomerIdChanged(oldValue, value);
-            OnPropertyChanged(nameof(CustomerId));
-
-            // Promote to update target when the confirmed value changes (not during load, where the state stays a mirror of the source entity).
-            if (!IsLoading)
-            {
-                // The database check compared the values this model held a moment ago, so editing one makes its verdict stale.
-                ClearDuplicateErrors(DuplicateErrorSource.Database);
-                OnConfirmedValueChanged(nameof(CustomerId));
-
-                if (ShouldMarkUpdated(nameof(CustomerId)))
-                {
-                    MarkUpdated();
-                }
-            }
+            AfterConfirmedValueSet(nameof(CustomerId));
         }
     }
 
@@ -3098,49 +3289,28 @@ public partial class CustomerEditModel : EditModelBase<CustomerEditModel>
         get => _bindingCustomerId;
         set
         {
-            // Normalize only values that come from input (pass through during load/revert to keep a mirror of the source entity).
-            var normalized =
-                IsLoading || IsReverting
-                    ? value
-                    : NormalizeInput(nameof(BindingCustomerId), value);
-
-            if (!SetProperty(ref _bindingCustomerId, normalized, nameof(BindingCustomerId)))
+            if (!AcceptBindingInput(ref _bindingCustomerId, value, nameof(BindingCustomerId), out var normalized))
             {
-                // When trimming makes the value equal to the existing one, only the on-screen display keeps the whitespace-padded string, so reset the display to the normalized value.
-                if (!string.Equals(value, normalized, StringComparison.Ordinal))
-                {
-                    OnPropertyChanged(nameof(BindingCustomerId));
-                }
-
                 return;
             }
 
-            if (!IsReverting)
+            switch (ConvertParsedValueObjectInput<CustomerIdValue, int>(normalized, out var converted, out var rejection))
             {
-                if (string.IsNullOrEmpty(normalized))
-                {
-                    CustomerId = null;
+                case BindingConversion.Converted:
+                    CustomerId = converted;
                     SetError(nameof(BindingCustomerId), null);
-                }
-                else if (int.TryParse(normalized, out var parsed))
-                {
-                    if (CustomerIdValue.TryCreate(parsed, out var converted, out var voErrors))
-                    {
-                        CustomerId = converted;
-                        SetError(nameof(BindingCustomerId), null);
-                    }
-                    else
-                    {
-                        SetError(nameof(BindingCustomerId), EditModelMessages.JoinValueObjectErrors(voErrors));
-                    }
-                }
-                else
-                {
+                    break;
+
+                case BindingConversion.Rejected:
+                    SetError(nameof(BindingCustomerId), rejection);
+                    break;
+
+                default:
                     SetError(
                         nameof(BindingCustomerId),
                         ResolveParseErrorMessage(nameof(CustomerId), CustomerIdValue.DisplayName, normalized, "int")
                     );
-                }
+                    break;
             }
         }
     }
@@ -3168,20 +3338,7 @@ public partial class CustomerEditModel : EditModelBase<CustomerEditModel>
             _name = value;
             OnNameChanged(value);
             OnNameChanged(oldValue, value);
-            OnPropertyChanged(nameof(Name));
-
-            // Promote to update target when the confirmed value changes (not during load, where the state stays a mirror of the source entity).
-            if (!IsLoading)
-            {
-                // The database check compared the values this model held a moment ago, so editing one makes its verdict stale.
-                ClearDuplicateErrors(DuplicateErrorSource.Database);
-                OnConfirmedValueChanged(nameof(Name));
-
-                if (ShouldMarkUpdated(nameof(Name)))
-                {
-                    MarkUpdated();
-                }
-            }
+            AfterConfirmedValueSet(nameof(Name));
         }
     }
 
@@ -3203,39 +3360,19 @@ public partial class CustomerEditModel : EditModelBase<CustomerEditModel>
         get => _bindingName;
         set
         {
-            // Normalize only values that come from input (pass through during load/revert to keep a mirror of the source entity).
-            var normalized =
-                IsLoading || IsReverting
-                    ? value
-                    : NormalizeInput(nameof(BindingName), value);
-
-            if (!SetProperty(ref _bindingName, normalized, nameof(BindingName)))
+            if (!AcceptBindingInput(ref _bindingName, value, nameof(BindingName), out var normalized))
             {
-                // When trimming makes the value equal to the existing one, only the on-screen display keeps the whitespace-padded string, so reset the display to the normalized value.
-                if (!string.Equals(value, normalized, StringComparison.Ordinal))
-                {
-                    OnPropertyChanged(nameof(BindingName));
-                }
-
                 return;
             }
 
-            if (!IsReverting)
+            if (ConvertValueObjectInput<NameValue>(normalized, out var converted, out var rejection) == BindingConversion.Converted)
             {
-                if (string.IsNullOrEmpty(normalized))
-                {
-                    Name = null;
-                    SetError(nameof(BindingName), null);
-                }
-                else if (NameValue.TryCreate(normalized, out var converted, out var voErrors))
-                {
-                    Name = converted;
-                    SetError(nameof(BindingName), null);
-                }
-                else
-                {
-                    SetError(nameof(BindingName), EditModelMessages.JoinValueObjectErrors(voErrors));
-                }
+                Name = converted;
+                SetError(nameof(BindingName), null);
+            }
+            else
+            {
+                SetError(nameof(BindingName), rejection);
             }
         }
     }
@@ -3263,20 +3400,7 @@ public partial class CustomerEditModel : EditModelBase<CustomerEditModel>
             _balance = value;
             OnBalanceChanged(value);
             OnBalanceChanged(oldValue, value);
-            OnPropertyChanged(nameof(Balance));
-
-            // Promote to update target when the confirmed value changes (not during load, where the state stays a mirror of the source entity).
-            if (!IsLoading)
-            {
-                // The database check compared the values this model held a moment ago, so editing one makes its verdict stale.
-                ClearDuplicateErrors(DuplicateErrorSource.Database);
-                OnConfirmedValueChanged(nameof(Balance));
-
-                if (ShouldMarkUpdated(nameof(Balance)))
-                {
-                    MarkUpdated();
-                }
-            }
+            AfterConfirmedValueSet(nameof(Balance));
         }
     }
 
@@ -3298,49 +3422,28 @@ public partial class CustomerEditModel : EditModelBase<CustomerEditModel>
         get => _bindingBalance;
         set
         {
-            // Normalize only values that come from input (pass through during load/revert to keep a mirror of the source entity).
-            var normalized =
-                IsLoading || IsReverting
-                    ? value
-                    : NormalizeInput(nameof(BindingBalance), value);
-
-            if (!SetProperty(ref _bindingBalance, normalized, nameof(BindingBalance)))
+            if (!AcceptBindingInput(ref _bindingBalance, value, nameof(BindingBalance), out var normalized))
             {
-                // When trimming makes the value equal to the existing one, only the on-screen display keeps the whitespace-padded string, so reset the display to the normalized value.
-                if (!string.Equals(value, normalized, StringComparison.Ordinal))
-                {
-                    OnPropertyChanged(nameof(BindingBalance));
-                }
-
                 return;
             }
 
-            if (!IsReverting)
+            switch (ConvertParsedValueObjectInput<BalanceValue, decimal>(normalized, out var converted, out var rejection))
             {
-                if (string.IsNullOrEmpty(normalized))
-                {
-                    Balance = null;
+                case BindingConversion.Converted:
+                    Balance = converted;
                     SetError(nameof(BindingBalance), null);
-                }
-                else if (decimal.TryParse(normalized, out var parsed))
-                {
-                    if (BalanceValue.TryCreate(parsed, out var converted, out var voErrors))
-                    {
-                        Balance = converted;
-                        SetError(nameof(BindingBalance), null);
-                    }
-                    else
-                    {
-                        SetError(nameof(BindingBalance), EditModelMessages.JoinValueObjectErrors(voErrors));
-                    }
-                }
-                else
-                {
+                    break;
+
+                case BindingConversion.Rejected:
+                    SetError(nameof(BindingBalance), rejection);
+                    break;
+
+                default:
                     SetError(
                         nameof(BindingBalance),
                         ResolveParseErrorMessage(nameof(Balance), BalanceValue.DisplayName, normalized, "decimal")
                     );
-                }
+                    break;
             }
         }
     }
@@ -3690,20 +3793,7 @@ public partial class OrderEditModel : EditModelBase<OrderEditModel>
             _orderId = value;
             OnOrderIdChanged(value);
             OnOrderIdChanged(oldValue, value);
-            OnPropertyChanged(nameof(OrderId));
-
-            // Promote to update target when the confirmed value changes (not during load, where the state stays a mirror of the source entity).
-            if (!IsLoading)
-            {
-                // The database check compared the values this model held a moment ago, so editing one makes its verdict stale.
-                ClearDuplicateErrors(DuplicateErrorSource.Database);
-                OnConfirmedValueChanged(nameof(OrderId));
-
-                if (ShouldMarkUpdated(nameof(OrderId)))
-                {
-                    MarkUpdated();
-                }
-            }
+            AfterConfirmedValueSet(nameof(OrderId));
         }
     }
 
@@ -3725,49 +3815,28 @@ public partial class OrderEditModel : EditModelBase<OrderEditModel>
         get => _bindingOrderId;
         set
         {
-            // Normalize only values that come from input (pass through during load/revert to keep a mirror of the source entity).
-            var normalized =
-                IsLoading || IsReverting
-                    ? value
-                    : NormalizeInput(nameof(BindingOrderId), value);
-
-            if (!SetProperty(ref _bindingOrderId, normalized, nameof(BindingOrderId)))
+            if (!AcceptBindingInput(ref _bindingOrderId, value, nameof(BindingOrderId), out var normalized))
             {
-                // When trimming makes the value equal to the existing one, only the on-screen display keeps the whitespace-padded string, so reset the display to the normalized value.
-                if (!string.Equals(value, normalized, StringComparison.Ordinal))
-                {
-                    OnPropertyChanged(nameof(BindingOrderId));
-                }
-
                 return;
             }
 
-            if (!IsReverting)
+            switch (ConvertParsedValueObjectInput<OrderIdValue, int>(normalized, out var converted, out var rejection))
             {
-                if (string.IsNullOrEmpty(normalized))
-                {
-                    OrderId = null;
+                case BindingConversion.Converted:
+                    OrderId = converted;
                     SetError(nameof(BindingOrderId), null);
-                }
-                else if (int.TryParse(normalized, out var parsed))
-                {
-                    if (OrderIdValue.TryCreate(parsed, out var converted, out var voErrors))
-                    {
-                        OrderId = converted;
-                        SetError(nameof(BindingOrderId), null);
-                    }
-                    else
-                    {
-                        SetError(nameof(BindingOrderId), EditModelMessages.JoinValueObjectErrors(voErrors));
-                    }
-                }
-                else
-                {
+                    break;
+
+                case BindingConversion.Rejected:
+                    SetError(nameof(BindingOrderId), rejection);
+                    break;
+
+                default:
                     SetError(
                         nameof(BindingOrderId),
                         ResolveParseErrorMessage(nameof(OrderId), OrderIdValue.DisplayName, normalized, "int")
                     );
-                }
+                    break;
             }
         }
     }
@@ -3795,20 +3864,7 @@ public partial class OrderEditModel : EditModelBase<OrderEditModel>
             _customerId = value;
             OnCustomerIdChanged(value);
             OnCustomerIdChanged(oldValue, value);
-            OnPropertyChanged(nameof(CustomerId));
-
-            // Promote to update target when the confirmed value changes (not during load, where the state stays a mirror of the source entity).
-            if (!IsLoading)
-            {
-                // The database check compared the values this model held a moment ago, so editing one makes its verdict stale.
-                ClearDuplicateErrors(DuplicateErrorSource.Database);
-                OnConfirmedValueChanged(nameof(CustomerId));
-
-                if (ShouldMarkUpdated(nameof(CustomerId)))
-                {
-                    MarkUpdated();
-                }
-            }
+            AfterConfirmedValueSet(nameof(CustomerId));
         }
     }
 
@@ -3830,49 +3886,28 @@ public partial class OrderEditModel : EditModelBase<OrderEditModel>
         get => _bindingCustomerId;
         set
         {
-            // Normalize only values that come from input (pass through during load/revert to keep a mirror of the source entity).
-            var normalized =
-                IsLoading || IsReverting
-                    ? value
-                    : NormalizeInput(nameof(BindingCustomerId), value);
-
-            if (!SetProperty(ref _bindingCustomerId, normalized, nameof(BindingCustomerId)))
+            if (!AcceptBindingInput(ref _bindingCustomerId, value, nameof(BindingCustomerId), out var normalized))
             {
-                // When trimming makes the value equal to the existing one, only the on-screen display keeps the whitespace-padded string, so reset the display to the normalized value.
-                if (!string.Equals(value, normalized, StringComparison.Ordinal))
-                {
-                    OnPropertyChanged(nameof(BindingCustomerId));
-                }
-
                 return;
             }
 
-            if (!IsReverting)
+            switch (ConvertParsedValueObjectInput<CustomerIdValue, int>(normalized, out var converted, out var rejection))
             {
-                if (string.IsNullOrEmpty(normalized))
-                {
-                    CustomerId = null;
+                case BindingConversion.Converted:
+                    CustomerId = converted;
                     SetError(nameof(BindingCustomerId), null);
-                }
-                else if (int.TryParse(normalized, out var parsed))
-                {
-                    if (CustomerIdValue.TryCreate(parsed, out var converted, out var voErrors))
-                    {
-                        CustomerId = converted;
-                        SetError(nameof(BindingCustomerId), null);
-                    }
-                    else
-                    {
-                        SetError(nameof(BindingCustomerId), EditModelMessages.JoinValueObjectErrors(voErrors));
-                    }
-                }
-                else
-                {
+                    break;
+
+                case BindingConversion.Rejected:
+                    SetError(nameof(BindingCustomerId), rejection);
+                    break;
+
+                default:
                     SetError(
                         nameof(BindingCustomerId),
                         ResolveParseErrorMessage(nameof(CustomerId), CustomerIdValue.DisplayName, normalized, "int")
                     );
-                }
+                    break;
             }
         }
     }
@@ -3900,20 +3935,7 @@ public partial class OrderEditModel : EditModelBase<OrderEditModel>
             _memo = value;
             OnMemoChanged(value);
             OnMemoChanged(oldValue, value);
-            OnPropertyChanged(nameof(Memo));
-
-            // Promote to update target when the confirmed value changes (not during load, where the state stays a mirror of the source entity).
-            if (!IsLoading)
-            {
-                // The database check compared the values this model held a moment ago, so editing one makes its verdict stale.
-                ClearDuplicateErrors(DuplicateErrorSource.Database);
-                OnConfirmedValueChanged(nameof(Memo));
-
-                if (ShouldMarkUpdated(nameof(Memo)))
-                {
-                    MarkUpdated();
-                }
-            }
+            AfterConfirmedValueSet(nameof(Memo));
         }
     }
 
@@ -3935,39 +3957,19 @@ public partial class OrderEditModel : EditModelBase<OrderEditModel>
         get => _bindingMemo;
         set
         {
-            // Normalize only values that come from input (pass through during load/revert to keep a mirror of the source entity).
-            var normalized =
-                IsLoading || IsReverting
-                    ? value
-                    : NormalizeInput(nameof(BindingMemo), value);
-
-            if (!SetProperty(ref _bindingMemo, normalized, nameof(BindingMemo)))
+            if (!AcceptBindingInput(ref _bindingMemo, value, nameof(BindingMemo), out var normalized))
             {
-                // When trimming makes the value equal to the existing one, only the on-screen display keeps the whitespace-padded string, so reset the display to the normalized value.
-                if (!string.Equals(value, normalized, StringComparison.Ordinal))
-                {
-                    OnPropertyChanged(nameof(BindingMemo));
-                }
-
                 return;
             }
 
-            if (!IsReverting)
+            if (ConvertValueObjectInput<MemoValue>(normalized, out var converted, out var rejection) == BindingConversion.Converted)
             {
-                if (string.IsNullOrEmpty(normalized))
-                {
-                    Memo = null;
-                    SetError(nameof(BindingMemo), null);
-                }
-                else if (MemoValue.TryCreate(normalized, out var converted, out var voErrors))
-                {
-                    Memo = converted;
-                    SetError(nameof(BindingMemo), null);
-                }
-                else
-                {
-                    SetError(nameof(BindingMemo), EditModelMessages.JoinValueObjectErrors(voErrors));
-                }
+                Memo = converted;
+                SetError(nameof(BindingMemo), null);
+            }
+            else
+            {
+                SetError(nameof(BindingMemo), rejection);
             }
         }
     }
@@ -3995,20 +3997,7 @@ public partial class OrderEditModel : EditModelBase<OrderEditModel>
             _amount = value;
             OnAmountChanged(value);
             OnAmountChanged(oldValue, value);
-            OnPropertyChanged(nameof(Amount));
-
-            // Promote to update target when the confirmed value changes (not during load, where the state stays a mirror of the source entity).
-            if (!IsLoading)
-            {
-                // The database check compared the values this model held a moment ago, so editing one makes its verdict stale.
-                ClearDuplicateErrors(DuplicateErrorSource.Database);
-                OnConfirmedValueChanged(nameof(Amount));
-
-                if (ShouldMarkUpdated(nameof(Amount)))
-                {
-                    MarkUpdated();
-                }
-            }
+            AfterConfirmedValueSet(nameof(Amount));
         }
     }
 
@@ -4030,49 +4019,28 @@ public partial class OrderEditModel : EditModelBase<OrderEditModel>
         get => _bindingAmount;
         set
         {
-            // Normalize only values that come from input (pass through during load/revert to keep a mirror of the source entity).
-            var normalized =
-                IsLoading || IsReverting
-                    ? value
-                    : NormalizeInput(nameof(BindingAmount), value);
-
-            if (!SetProperty(ref _bindingAmount, normalized, nameof(BindingAmount)))
+            if (!AcceptBindingInput(ref _bindingAmount, value, nameof(BindingAmount), out var normalized))
             {
-                // When trimming makes the value equal to the existing one, only the on-screen display keeps the whitespace-padded string, so reset the display to the normalized value.
-                if (!string.Equals(value, normalized, StringComparison.Ordinal))
-                {
-                    OnPropertyChanged(nameof(BindingAmount));
-                }
-
                 return;
             }
 
-            if (!IsReverting)
+            switch (ConvertParsedValueObjectInput<AmountValue, decimal>(normalized, out var converted, out var rejection))
             {
-                if (string.IsNullOrEmpty(normalized))
-                {
-                    Amount = null;
+                case BindingConversion.Converted:
+                    Amount = converted;
                     SetError(nameof(BindingAmount), null);
-                }
-                else if (decimal.TryParse(normalized, out var parsed))
-                {
-                    if (AmountValue.TryCreate(parsed, out var converted, out var voErrors))
-                    {
-                        Amount = converted;
-                        SetError(nameof(BindingAmount), null);
-                    }
-                    else
-                    {
-                        SetError(nameof(BindingAmount), EditModelMessages.JoinValueObjectErrors(voErrors));
-                    }
-                }
-                else
-                {
+                    break;
+
+                case BindingConversion.Rejected:
+                    SetError(nameof(BindingAmount), rejection);
+                    break;
+
+                default:
                     SetError(
                         nameof(BindingAmount),
                         ResolveParseErrorMessage(nameof(Amount), AmountValue.DisplayName, normalized, "decimal")
                     );
-                }
+                    break;
             }
         }
     }

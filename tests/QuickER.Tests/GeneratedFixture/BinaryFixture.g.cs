@@ -809,6 +809,107 @@ public abstract partial class EditModelBase
         ref string normalizedValue
     ) { }
 
+    /// <summary>Runs the shared tail of a confirmed-value setter: raises the change notification, and outside a load retires the stale database verdicts and promotes the row to an update target.</summary>
+    /// <remarks>
+    /// The generated setter keeps only what is its own - the equality cut, the four <c>On{Property}Changing/Changed</c>
+    /// hook calls, and the field write - and ends here. The order (notify, then the not-loading block) is the order the
+    /// setters always had.
+    /// </remarks>
+    /// <param name="propertyName">The confirmed-value property that changed.</param>
+    protected void AfterConfirmedValueSet(string propertyName)
+    {
+        OnPropertyChanged(propertyName);
+
+        // Promote to update target when the confirmed value changes (not during load, where the state stays a mirror of the source entity).
+        if (!IsLoading)
+        {
+            // The database check compared the values this model held a moment ago, so editing one makes its verdict stale.
+            ClearDuplicateErrors(DuplicateErrorSource.Database);
+            OnConfirmedValueChanged(propertyName);
+
+            if (ShouldMarkUpdated(propertyName))
+            {
+                MarkUpdated();
+            }
+        }
+    }
+
+    /// <summary>Accepts a write to a binding string: normalizes input (outside load/revert), stores it, and resets the display when trimming collapsed the change into equality. Returns true when the write is a real change outside a revert, i.e. when the confirmed value should be re-derived from <paramref name="normalized"/>.</summary>
+    /// <param name="field">The backing field of the binding property.</param>
+    /// <param name="value">The raw value written by the binding.</param>
+    /// <param name="bindingPropertyName">The binding property's name (for notification and normalization hooks).</param>
+    /// <param name="normalized">The stored, normalized input string.</param>
+    protected bool AcceptBindingInput(
+        ref string field,
+        string value,
+        string bindingPropertyName,
+        out string normalized
+    )
+    {
+        // Normalize only values that come from input (pass through during load/revert to keep a mirror of the source entity).
+        normalized = IsLoading || IsReverting ? value : NormalizeInput(bindingPropertyName, value);
+
+        if (!SetProperty(ref field, normalized, bindingPropertyName))
+        {
+            // When trimming makes the value equal to the existing one, only the on-screen display keeps the whitespace-padded string, so reset the display to the normalized value.
+            if (!string.Equals(value, normalized, StringComparison.Ordinal))
+            {
+                OnPropertyChanged(bindingPropertyName);
+            }
+
+            return false;
+        }
+
+        return !IsReverting;
+    }
+
+    /// <summary>Outcome of converting a normalized input string toward a confirmed value.</summary>
+    /// <remarks>
+    /// The conversion helpers return state instead of acting so that the generated setter keeps ownership of what
+    /// happens next - the typed assignment, the error write, and the parse-failure message, whose resolution runs
+    /// through per-type partial hooks a base class cannot call.
+    /// </remarks>
+    protected enum BindingConversion
+    {
+        /// <summary>The input converted; assign the value and clear the input error.</summary>
+        Converted,
+
+        /// <summary>A value object rejected the value; the rejection text carries its validation errors.</summary>
+        Rejected,
+
+        /// <summary>The input could not be parsed as the underlying type; the caller resolves the message.</summary>
+        Unparsable,
+    }
+
+    /// <summary>Parses a normalized input string as <typeparamref name="TValue"/> (the same semantics as the type's own TryParse with the current culture).</summary>
+    /// <param name="normalized">The normalized input string.</param>
+    /// <param name="parsed">The parsed value.</param>
+    protected static bool TryParseInput<TValue>(string normalized, out TValue parsed)
+        where TValue : IParsable<TValue> => TValue.TryParse(normalized, null, out parsed!);
+
+    /// <summary>Converts a normalized input string to binary (empty becomes an empty array; Base64 otherwise).</summary>
+    /// <param name="normalized">The normalized input string.</param>
+    /// <param name="bytes">The converted bytes (empty when the conversion failed).</param>
+    protected static bool TryConvertBase64Input(string normalized, out byte[] bytes)
+    {
+        if (string.IsNullOrEmpty(normalized))
+        {
+            bytes = Array.Empty<byte>();
+            return true;
+        }
+
+        try
+        {
+            bytes = Convert.FromBase64String(normalized);
+            return true;
+        }
+        catch (FormatException)
+        {
+            bytes = Array.Empty<byte>();
+            return false;
+        }
+    }
+
     /// <summary>Gets or sets the collection this edit model belongs to (for sibling navigation; set by <see cref="EditModelCollection{T}"/>).</summary>
     internal IList? Owner { get; set; }
 
@@ -2203,20 +2304,7 @@ public partial class DocumentEditModel : EditModelBase<DocumentEditModel>
             _documentId = value;
             OnDocumentIdChanged(value);
             OnDocumentIdChanged(oldValue, value);
-            OnPropertyChanged(nameof(DocumentId));
-
-            // Promote to update target when the confirmed value changes (not during load, where the state stays a mirror of the source entity).
-            if (!IsLoading)
-            {
-                // The database check compared the values this model held a moment ago, so editing one makes its verdict stale.
-                ClearDuplicateErrors(DuplicateErrorSource.Database);
-                OnConfirmedValueChanged(nameof(DocumentId));
-
-                if (ShouldMarkUpdated(nameof(DocumentId)))
-                {
-                    MarkUpdated();
-                }
-            }
+            AfterConfirmedValueSet(nameof(DocumentId));
         }
     }
 
@@ -2238,37 +2326,22 @@ public partial class DocumentEditModel : EditModelBase<DocumentEditModel>
         get => _bindingDocumentId;
         set
         {
-            // Normalize only values that come from input (pass through during load/revert to keep a mirror of the source entity).
-            var normalized =
-                IsLoading || IsReverting
-                    ? value
-                    : NormalizeInput(nameof(BindingDocumentId), value);
-
-            if (!SetProperty(ref _bindingDocumentId, normalized, nameof(BindingDocumentId)))
+            if (!AcceptBindingInput(ref _bindingDocumentId, value, nameof(BindingDocumentId), out var normalized))
             {
-                // When trimming makes the value equal to the existing one, only the on-screen display keeps the whitespace-padded string, so reset the display to the normalized value.
-                if (!string.Equals(value, normalized, StringComparison.Ordinal))
-                {
-                    OnPropertyChanged(nameof(BindingDocumentId));
-                }
-
                 return;
             }
 
-            if (!IsReverting)
+            if (TryParseInput<int>(normalized, out var parsed))
             {
-                if (int.TryParse(normalized, out var parsed))
-                {
-                    DocumentId = parsed;
-                    SetError(nameof(BindingDocumentId), null);
-                }
-                else
-                {
-                    SetError(
-                        nameof(BindingDocumentId),
-                        ResolveParseErrorMessage(nameof(DocumentId), GetDisplayName(nameof(DocumentId), null), normalized, "int")
-                    );
-                }
+                DocumentId = parsed;
+                SetError(nameof(BindingDocumentId), null);
+            }
+            else
+            {
+                SetError(
+                    nameof(BindingDocumentId),
+                    ResolveParseErrorMessage(nameof(DocumentId), GetDisplayName(nameof(DocumentId), null), normalized, "int")
+                );
             }
         }
     }
@@ -2296,20 +2369,7 @@ public partial class DocumentEditModel : EditModelBase<DocumentEditModel>
             _title = value;
             OnTitleChanged(value);
             OnTitleChanged(oldValue, value);
-            OnPropertyChanged(nameof(Title));
-
-            // Promote to update target when the confirmed value changes (not during load, where the state stays a mirror of the source entity).
-            if (!IsLoading)
-            {
-                // The database check compared the values this model held a moment ago, so editing one makes its verdict stale.
-                ClearDuplicateErrors(DuplicateErrorSource.Database);
-                OnConfirmedValueChanged(nameof(Title));
-
-                if (ShouldMarkUpdated(nameof(Title)))
-                {
-                    MarkUpdated();
-                }
-            }
+            AfterConfirmedValueSet(nameof(Title));
         }
     }
 
@@ -2331,36 +2391,13 @@ public partial class DocumentEditModel : EditModelBase<DocumentEditModel>
         get => _bindingTitle;
         set
         {
-            // Normalize only values that come from input (pass through during load/revert to keep a mirror of the source entity).
-            var normalized =
-                IsLoading || IsReverting
-                    ? value
-                    : NormalizeInput(nameof(BindingTitle), value);
-
-            if (!SetProperty(ref _bindingTitle, normalized, nameof(BindingTitle)))
+            if (!AcceptBindingInput(ref _bindingTitle, value, nameof(BindingTitle), out var normalized))
             {
-                // When trimming makes the value equal to the existing one, only the on-screen display keeps the whitespace-padded string, so reset the display to the normalized value.
-                if (!string.Equals(value, normalized, StringComparison.Ordinal))
-                {
-                    OnPropertyChanged(nameof(BindingTitle));
-                }
-
                 return;
             }
 
-            if (!IsReverting)
-            {
-                if (string.IsNullOrEmpty(normalized))
-                {
-                    Title = null;
-                    SetError(nameof(BindingTitle), null);
-                }
-                else
-                {
-                    Title = normalized;
-                    SetError(nameof(BindingTitle), null);
-                }
-            }
+            Title = string.IsNullOrEmpty(normalized) ? null : normalized;
+            SetError(nameof(BindingTitle), null);
         }
     }
 
@@ -2387,20 +2424,7 @@ public partial class DocumentEditModel : EditModelBase<DocumentEditModel>
             _isPublished = value;
             OnIsPublishedChanged(value);
             OnIsPublishedChanged(oldValue, value);
-            OnPropertyChanged(nameof(IsPublished));
-
-            // Promote to update target when the confirmed value changes (not during load, where the state stays a mirror of the source entity).
-            if (!IsLoading)
-            {
-                // The database check compared the values this model held a moment ago, so editing one makes its verdict stale.
-                ClearDuplicateErrors(DuplicateErrorSource.Database);
-                OnConfirmedValueChanged(nameof(IsPublished));
-
-                if (ShouldMarkUpdated(nameof(IsPublished)))
-                {
-                    MarkUpdated();
-                }
-            }
+            AfterConfirmedValueSet(nameof(IsPublished));
         }
     }
 
@@ -2422,37 +2446,22 @@ public partial class DocumentEditModel : EditModelBase<DocumentEditModel>
         get => _bindingIsPublished;
         set
         {
-            // Normalize only values that come from input (pass through during load/revert to keep a mirror of the source entity).
-            var normalized =
-                IsLoading || IsReverting
-                    ? value
-                    : NormalizeInput(nameof(BindingIsPublished), value);
-
-            if (!SetProperty(ref _bindingIsPublished, normalized, nameof(BindingIsPublished)))
+            if (!AcceptBindingInput(ref _bindingIsPublished, value, nameof(BindingIsPublished), out var normalized))
             {
-                // When trimming makes the value equal to the existing one, only the on-screen display keeps the whitespace-padded string, so reset the display to the normalized value.
-                if (!string.Equals(value, normalized, StringComparison.Ordinal))
-                {
-                    OnPropertyChanged(nameof(BindingIsPublished));
-                }
-
                 return;
             }
 
-            if (!IsReverting)
+            if (TryParseInput<bool>(normalized, out var parsed))
             {
-                if (bool.TryParse(normalized, out var parsed))
-                {
-                    IsPublished = parsed;
-                    SetError(nameof(BindingIsPublished), null);
-                }
-                else
-                {
-                    SetError(
-                        nameof(BindingIsPublished),
-                        ResolveParseErrorMessage(nameof(IsPublished), GetDisplayName(nameof(IsPublished), null), normalized, "bool")
-                    );
-                }
+                IsPublished = parsed;
+                SetError(nameof(BindingIsPublished), null);
+            }
+            else
+            {
+                SetError(
+                    nameof(BindingIsPublished),
+                    ResolveParseErrorMessage(nameof(IsPublished), GetDisplayName(nameof(IsPublished), null), normalized, "bool")
+                );
             }
         }
     }
@@ -2480,20 +2489,7 @@ public partial class DocumentEditModel : EditModelBase<DocumentEditModel>
             _payload = value;
             OnPayloadChanged(value);
             OnPayloadChanged(oldValue, value);
-            OnPropertyChanged(nameof(Payload));
-
-            // Promote to update target when the confirmed value changes (not during load, where the state stays a mirror of the source entity).
-            if (!IsLoading)
-            {
-                // The database check compared the values this model held a moment ago, so editing one makes its verdict stale.
-                ClearDuplicateErrors(DuplicateErrorSource.Database);
-                OnConfirmedValueChanged(nameof(Payload));
-
-                if (ShouldMarkUpdated(nameof(Payload)))
-                {
-                    MarkUpdated();
-                }
-            }
+            AfterConfirmedValueSet(nameof(Payload));
         }
     }
 
@@ -2515,45 +2511,22 @@ public partial class DocumentEditModel : EditModelBase<DocumentEditModel>
         get => _bindingPayload;
         set
         {
-            // Normalize only values that come from input (pass through during load/revert to keep a mirror of the source entity).
-            var normalized =
-                IsLoading || IsReverting
-                    ? value
-                    : NormalizeInput(nameof(BindingPayload), value);
-
-            if (!SetProperty(ref _bindingPayload, normalized, nameof(BindingPayload)))
+            if (!AcceptBindingInput(ref _bindingPayload, value, nameof(BindingPayload), out var normalized))
             {
-                // When trimming makes the value equal to the existing one, only the on-screen display keeps the whitespace-padded string, so reset the display to the normalized value.
-                if (!string.Equals(value, normalized, StringComparison.Ordinal))
-                {
-                    OnPropertyChanged(nameof(BindingPayload));
-                }
-
                 return;
             }
 
-            if (!IsReverting)
+            if (TryConvertBase64Input(normalized, out var bytes))
             {
-                if (string.IsNullOrEmpty(normalized))
-                {
-                    Payload = Array.Empty<byte>();
-                    SetError(nameof(BindingPayload), null);
-                }
-                else
-                {
-                    try
-                    {
-                        Payload = Convert.FromBase64String(normalized);
-                        SetError(nameof(BindingPayload), null);
-                    }
-                    catch (FormatException)
-                    {
-                        SetError(
-                            nameof(BindingPayload),
-                            ResolveParseErrorMessage(nameof(Payload), GetDisplayName(nameof(Payload), null), normalized, "byte[]")
-                        );
-                    }
-                }
+                Payload = bytes;
+                SetError(nameof(BindingPayload), null);
+            }
+            else
+            {
+                SetError(
+                    nameof(BindingPayload),
+                    ResolveParseErrorMessage(nameof(Payload), GetDisplayName(nameof(Payload), null), normalized, "byte[]")
+                );
             }
         }
     }
@@ -2581,20 +2554,7 @@ public partial class DocumentEditModel : EditModelBase<DocumentEditModel>
             _thumb = value;
             OnThumbChanged(value);
             OnThumbChanged(oldValue, value);
-            OnPropertyChanged(nameof(Thumb));
-
-            // Promote to update target when the confirmed value changes (not during load, where the state stays a mirror of the source entity).
-            if (!IsLoading)
-            {
-                // The database check compared the values this model held a moment ago, so editing one makes its verdict stale.
-                ClearDuplicateErrors(DuplicateErrorSource.Database);
-                OnConfirmedValueChanged(nameof(Thumb));
-
-                if (ShouldMarkUpdated(nameof(Thumb)))
-                {
-                    MarkUpdated();
-                }
-            }
+            AfterConfirmedValueSet(nameof(Thumb));
         }
     }
 
@@ -2616,45 +2576,22 @@ public partial class DocumentEditModel : EditModelBase<DocumentEditModel>
         get => _bindingThumb;
         set
         {
-            // Normalize only values that come from input (pass through during load/revert to keep a mirror of the source entity).
-            var normalized =
-                IsLoading || IsReverting
-                    ? value
-                    : NormalizeInput(nameof(BindingThumb), value);
-
-            if (!SetProperty(ref _bindingThumb, normalized, nameof(BindingThumb)))
+            if (!AcceptBindingInput(ref _bindingThumb, value, nameof(BindingThumb), out var normalized))
             {
-                // When trimming makes the value equal to the existing one, only the on-screen display keeps the whitespace-padded string, so reset the display to the normalized value.
-                if (!string.Equals(value, normalized, StringComparison.Ordinal))
-                {
-                    OnPropertyChanged(nameof(BindingThumb));
-                }
-
                 return;
             }
 
-            if (!IsReverting)
+            if (TryConvertBase64Input(normalized, out var bytes))
             {
-                if (string.IsNullOrEmpty(normalized))
-                {
-                    Thumb = Array.Empty<byte>();
-                    SetError(nameof(BindingThumb), null);
-                }
-                else
-                {
-                    try
-                    {
-                        Thumb = Convert.FromBase64String(normalized);
-                        SetError(nameof(BindingThumb), null);
-                    }
-                    catch (FormatException)
-                    {
-                        SetError(
-                            nameof(BindingThumb),
-                            ResolveParseErrorMessage(nameof(Thumb), GetDisplayName(nameof(Thumb), null), normalized, "byte[]")
-                        );
-                    }
-                }
+                Thumb = bytes;
+                SetError(nameof(BindingThumb), null);
+            }
+            else
+            {
+                SetError(
+                    nameof(BindingThumb),
+                    ResolveParseErrorMessage(nameof(Thumb), GetDisplayName(nameof(Thumb), null), normalized, "byte[]")
+                );
             }
         }
     }
@@ -2682,20 +2619,7 @@ public partial class DocumentEditModel : EditModelBase<DocumentEditModel>
             _checksum = value;
             OnChecksumChanged(value);
             OnChecksumChanged(oldValue, value);
-            OnPropertyChanged(nameof(Checksum));
-
-            // Promote to update target when the confirmed value changes (not during load, where the state stays a mirror of the source entity).
-            if (!IsLoading)
-            {
-                // The database check compared the values this model held a moment ago, so editing one makes its verdict stale.
-                ClearDuplicateErrors(DuplicateErrorSource.Database);
-                OnConfirmedValueChanged(nameof(Checksum));
-
-                if (ShouldMarkUpdated(nameof(Checksum)))
-                {
-                    MarkUpdated();
-                }
-            }
+            AfterConfirmedValueSet(nameof(Checksum));
         }
     }
 
@@ -2717,45 +2641,22 @@ public partial class DocumentEditModel : EditModelBase<DocumentEditModel>
         get => _bindingChecksum;
         set
         {
-            // Normalize only values that come from input (pass through during load/revert to keep a mirror of the source entity).
-            var normalized =
-                IsLoading || IsReverting
-                    ? value
-                    : NormalizeInput(nameof(BindingChecksum), value);
-
-            if (!SetProperty(ref _bindingChecksum, normalized, nameof(BindingChecksum)))
+            if (!AcceptBindingInput(ref _bindingChecksum, value, nameof(BindingChecksum), out var normalized))
             {
-                // When trimming makes the value equal to the existing one, only the on-screen display keeps the whitespace-padded string, so reset the display to the normalized value.
-                if (!string.Equals(value, normalized, StringComparison.Ordinal))
-                {
-                    OnPropertyChanged(nameof(BindingChecksum));
-                }
-
                 return;
             }
 
-            if (!IsReverting)
+            if (TryConvertBase64Input(normalized, out var bytes))
             {
-                if (string.IsNullOrEmpty(normalized))
-                {
-                    Checksum = Array.Empty<byte>();
-                    SetError(nameof(BindingChecksum), null);
-                }
-                else
-                {
-                    try
-                    {
-                        Checksum = Convert.FromBase64String(normalized);
-                        SetError(nameof(BindingChecksum), null);
-                    }
-                    catch (FormatException)
-                    {
-                        SetError(
-                            nameof(BindingChecksum),
-                            ResolveParseErrorMessage(nameof(Checksum), GetDisplayName(nameof(Checksum), null), normalized, "byte[]")
-                        );
-                    }
-                }
+                Checksum = bytes;
+                SetError(nameof(BindingChecksum), null);
+            }
+            else
+            {
+                SetError(
+                    nameof(BindingChecksum),
+                    ResolveParseErrorMessage(nameof(Checksum), GetDisplayName(nameof(Checksum), null), normalized, "byte[]")
+                );
             }
         }
     }
@@ -2783,20 +2684,7 @@ public partial class DocumentEditModel : EditModelBase<DocumentEditModel>
             _rowVer = value;
             OnRowVerChanged(value);
             OnRowVerChanged(oldValue, value);
-            OnPropertyChanged(nameof(RowVer));
-
-            // Promote to update target when the confirmed value changes (not during load, where the state stays a mirror of the source entity).
-            if (!IsLoading)
-            {
-                // The database check compared the values this model held a moment ago, so editing one makes its verdict stale.
-                ClearDuplicateErrors(DuplicateErrorSource.Database);
-                OnConfirmedValueChanged(nameof(RowVer));
-
-                if (ShouldMarkUpdated(nameof(RowVer)))
-                {
-                    MarkUpdated();
-                }
-            }
+            AfterConfirmedValueSet(nameof(RowVer));
         }
     }
 
@@ -2818,45 +2706,22 @@ public partial class DocumentEditModel : EditModelBase<DocumentEditModel>
         get => _bindingRowVer;
         set
         {
-            // Normalize only values that come from input (pass through during load/revert to keep a mirror of the source entity).
-            var normalized =
-                IsLoading || IsReverting
-                    ? value
-                    : NormalizeInput(nameof(BindingRowVer), value);
-
-            if (!SetProperty(ref _bindingRowVer, normalized, nameof(BindingRowVer)))
+            if (!AcceptBindingInput(ref _bindingRowVer, value, nameof(BindingRowVer), out var normalized))
             {
-                // When trimming makes the value equal to the existing one, only the on-screen display keeps the whitespace-padded string, so reset the display to the normalized value.
-                if (!string.Equals(value, normalized, StringComparison.Ordinal))
-                {
-                    OnPropertyChanged(nameof(BindingRowVer));
-                }
-
                 return;
             }
 
-            if (!IsReverting)
+            if (TryConvertBase64Input(normalized, out var bytes))
             {
-                if (string.IsNullOrEmpty(normalized))
-                {
-                    RowVer = Array.Empty<byte>();
-                    SetError(nameof(BindingRowVer), null);
-                }
-                else
-                {
-                    try
-                    {
-                        RowVer = Convert.FromBase64String(normalized);
-                        SetError(nameof(BindingRowVer), null);
-                    }
-                    catch (FormatException)
-                    {
-                        SetError(
-                            nameof(BindingRowVer),
-                            ResolveParseErrorMessage(nameof(RowVer), GetDisplayName(nameof(RowVer), null), normalized, "byte[]")
-                        );
-                    }
-                }
+                RowVer = bytes;
+                SetError(nameof(BindingRowVer), null);
+            }
+            else
+            {
+                SetError(
+                    nameof(BindingRowVer),
+                    ResolveParseErrorMessage(nameof(RowVer), GetDisplayName(nameof(RowVer), null), normalized, "byte[]")
+                );
             }
         }
     }
@@ -3282,20 +3147,7 @@ public partial class DocumentNoteEditModel : EditModelBase<DocumentNoteEditModel
             _noteId = value;
             OnNoteIdChanged(value);
             OnNoteIdChanged(oldValue, value);
-            OnPropertyChanged(nameof(NoteId));
-
-            // Promote to update target when the confirmed value changes (not during load, where the state stays a mirror of the source entity).
-            if (!IsLoading)
-            {
-                // The database check compared the values this model held a moment ago, so editing one makes its verdict stale.
-                ClearDuplicateErrors(DuplicateErrorSource.Database);
-                OnConfirmedValueChanged(nameof(NoteId));
-
-                if (ShouldMarkUpdated(nameof(NoteId)))
-                {
-                    MarkUpdated();
-                }
-            }
+            AfterConfirmedValueSet(nameof(NoteId));
         }
     }
 
@@ -3317,37 +3169,22 @@ public partial class DocumentNoteEditModel : EditModelBase<DocumentNoteEditModel
         get => _bindingNoteId;
         set
         {
-            // Normalize only values that come from input (pass through during load/revert to keep a mirror of the source entity).
-            var normalized =
-                IsLoading || IsReverting
-                    ? value
-                    : NormalizeInput(nameof(BindingNoteId), value);
-
-            if (!SetProperty(ref _bindingNoteId, normalized, nameof(BindingNoteId)))
+            if (!AcceptBindingInput(ref _bindingNoteId, value, nameof(BindingNoteId), out var normalized))
             {
-                // When trimming makes the value equal to the existing one, only the on-screen display keeps the whitespace-padded string, so reset the display to the normalized value.
-                if (!string.Equals(value, normalized, StringComparison.Ordinal))
-                {
-                    OnPropertyChanged(nameof(BindingNoteId));
-                }
-
                 return;
             }
 
-            if (!IsReverting)
+            if (TryParseInput<int>(normalized, out var parsed))
             {
-                if (int.TryParse(normalized, out var parsed))
-                {
-                    NoteId = parsed;
-                    SetError(nameof(BindingNoteId), null);
-                }
-                else
-                {
-                    SetError(
-                        nameof(BindingNoteId),
-                        ResolveParseErrorMessage(nameof(NoteId), GetDisplayName(nameof(NoteId), null), normalized, "int")
-                    );
-                }
+                NoteId = parsed;
+                SetError(nameof(BindingNoteId), null);
+            }
+            else
+            {
+                SetError(
+                    nameof(BindingNoteId),
+                    ResolveParseErrorMessage(nameof(NoteId), GetDisplayName(nameof(NoteId), null), normalized, "int")
+                );
             }
         }
     }
@@ -3375,20 +3212,7 @@ public partial class DocumentNoteEditModel : EditModelBase<DocumentNoteEditModel
             _documentId = value;
             OnDocumentIdChanged(value);
             OnDocumentIdChanged(oldValue, value);
-            OnPropertyChanged(nameof(DocumentId));
-
-            // Promote to update target when the confirmed value changes (not during load, where the state stays a mirror of the source entity).
-            if (!IsLoading)
-            {
-                // The database check compared the values this model held a moment ago, so editing one makes its verdict stale.
-                ClearDuplicateErrors(DuplicateErrorSource.Database);
-                OnConfirmedValueChanged(nameof(DocumentId));
-
-                if (ShouldMarkUpdated(nameof(DocumentId)))
-                {
-                    MarkUpdated();
-                }
-            }
+            AfterConfirmedValueSet(nameof(DocumentId));
         }
     }
 
@@ -3410,37 +3234,22 @@ public partial class DocumentNoteEditModel : EditModelBase<DocumentNoteEditModel
         get => _bindingDocumentId;
         set
         {
-            // Normalize only values that come from input (pass through during load/revert to keep a mirror of the source entity).
-            var normalized =
-                IsLoading || IsReverting
-                    ? value
-                    : NormalizeInput(nameof(BindingDocumentId), value);
-
-            if (!SetProperty(ref _bindingDocumentId, normalized, nameof(BindingDocumentId)))
+            if (!AcceptBindingInput(ref _bindingDocumentId, value, nameof(BindingDocumentId), out var normalized))
             {
-                // When trimming makes the value equal to the existing one, only the on-screen display keeps the whitespace-padded string, so reset the display to the normalized value.
-                if (!string.Equals(value, normalized, StringComparison.Ordinal))
-                {
-                    OnPropertyChanged(nameof(BindingDocumentId));
-                }
-
                 return;
             }
 
-            if (!IsReverting)
+            if (TryParseInput<int>(normalized, out var parsed))
             {
-                if (int.TryParse(normalized, out var parsed))
-                {
-                    DocumentId = parsed;
-                    SetError(nameof(BindingDocumentId), null);
-                }
-                else
-                {
-                    SetError(
-                        nameof(BindingDocumentId),
-                        ResolveParseErrorMessage(nameof(DocumentId), GetDisplayName(nameof(DocumentId), null), normalized, "int")
-                    );
-                }
+                DocumentId = parsed;
+                SetError(nameof(BindingDocumentId), null);
+            }
+            else
+            {
+                SetError(
+                    nameof(BindingDocumentId),
+                    ResolveParseErrorMessage(nameof(DocumentId), GetDisplayName(nameof(DocumentId), null), normalized, "int")
+                );
             }
         }
     }
@@ -3468,20 +3277,7 @@ public partial class DocumentNoteEditModel : EditModelBase<DocumentNoteEditModel
             _note = value;
             OnNoteChanged(value);
             OnNoteChanged(oldValue, value);
-            OnPropertyChanged(nameof(Note));
-
-            // Promote to update target when the confirmed value changes (not during load, where the state stays a mirror of the source entity).
-            if (!IsLoading)
-            {
-                // The database check compared the values this model held a moment ago, so editing one makes its verdict stale.
-                ClearDuplicateErrors(DuplicateErrorSource.Database);
-                OnConfirmedValueChanged(nameof(Note));
-
-                if (ShouldMarkUpdated(nameof(Note)))
-                {
-                    MarkUpdated();
-                }
-            }
+            AfterConfirmedValueSet(nameof(Note));
         }
     }
 
@@ -3503,36 +3299,13 @@ public partial class DocumentNoteEditModel : EditModelBase<DocumentNoteEditModel
         get => _bindingNote;
         set
         {
-            // Normalize only values that come from input (pass through during load/revert to keep a mirror of the source entity).
-            var normalized =
-                IsLoading || IsReverting
-                    ? value
-                    : NormalizeInput(nameof(BindingNote), value);
-
-            if (!SetProperty(ref _bindingNote, normalized, nameof(BindingNote)))
+            if (!AcceptBindingInput(ref _bindingNote, value, nameof(BindingNote), out var normalized))
             {
-                // When trimming makes the value equal to the existing one, only the on-screen display keeps the whitespace-padded string, so reset the display to the normalized value.
-                if (!string.Equals(value, normalized, StringComparison.Ordinal))
-                {
-                    OnPropertyChanged(nameof(BindingNote));
-                }
-
                 return;
             }
 
-            if (!IsReverting)
-            {
-                if (string.IsNullOrEmpty(normalized))
-                {
-                    Note = null;
-                    SetError(nameof(BindingNote), null);
-                }
-                else
-                {
-                    Note = normalized;
-                    SetError(nameof(BindingNote), null);
-                }
-            }
+            Note = string.IsNullOrEmpty(normalized) ? null : normalized;
+            SetError(nameof(BindingNote), null);
         }
     }
 
