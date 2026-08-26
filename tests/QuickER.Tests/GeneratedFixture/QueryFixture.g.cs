@@ -12446,9 +12446,9 @@ public static class InMemorySampleData
         {
             var entity = new CustomerEntity
             {
-                CustomerId = CustomerIdValue.Create(index),
-                Name = NameValue.Create(($"name {index}").Length > 50 ? ($"name {index}")[..50] : ($"name {index}")),
-                Balance = index == 3 ? null : BalanceValue.Create(index * 100.50m),
+                CustomerId = CreateSampleValue<CustomerIdValue, int>("CustomerEntity.CustomerId", index),
+                Name = CreateSampleValue<NameValue, string>("CustomerEntity.Name", ($"name {index}").Length > 50 ? ($"name {index}")[..50] : ($"name {index}")),
+                Balance = index == 3 ? null : CreateSampleValue<BalanceValue, decimal>("CustomerEntity.Balance", index * 100.05m),
             };
             entity.MarkAdded();
             store.Put(entity);
@@ -12463,14 +12463,42 @@ public static class InMemorySampleData
         {
             var entity = new OrderEntity
             {
-                OrderId = OrderIdValue.Create(index),
-                CustomerId = CustomerIdValue.Create(index),
-                Memo = index == 3 ? null : MemoValue.Create(($"memo {index}").Length > 50 ? ($"memo {index}")[..50] : ($"memo {index}")),
-                Amount = AmountValue.Create(index * 100.50m),
+                OrderId = CreateSampleValue<OrderIdValue, int>("OrderEntity.OrderId", index),
+                CustomerId = CreateSampleValue<CustomerIdValue, int>("OrderEntity.CustomerId", index),
+                Memo = index == 3 ? null : CreateSampleValue<MemoValue, string>("OrderEntity.Memo", ($"memo {index}").Length > 50 ? ($"memo {index}")[..50] : ($"memo {index}")),
+                Amount = CreateSampleValue<AmountValue, decimal>("OrderEntity.Amount", index * 100.05m),
             };
             entity.MarkAdded();
             store.Put(entity);
             entity.MarkUnchanged();
+        }
+    }
+
+    /// <summary>Creates a value object for seeding, so a rejected sample value reports what was assigned where and how to proceed.</summary>
+    /// <remarks>
+    /// The generated sample values satisfy the constraints declared in the diagram (maximum length, decimal
+    /// precision/scale), but they cannot know the rules a hand-written OnValidate - or a hand-written value object -
+    /// adds. Such a rejection is not something better sample values could avoid; what matters is that the failure,
+    /// surfacing from inside AddGeneratedInMemoryRepositories, immediately names the property, the value, and the way
+    /// out (seedSampleData: false). The original validation failure travels as the inner exception.
+    /// </remarks>
+    private static TVo CreateSampleValue<TVo, TValue>(string target, TValue value)
+        where TVo : IValueObject<TVo, TValue>
+    {
+        try
+        {
+            return TVo.Create(value);
+        }
+        catch (ValueObjectValidationException error)
+        {
+            throw new InvalidOperationException(
+                FormattableString.Invariant(
+                    $"Seeding sample data failed: cannot assign \"{value}\" to {target} ({error.Message}). "
+                )
+                    + "A user-defined validation rule rejects the generated sample value, and sample values cannot know such rules. "
+                    + "Register with AddGeneratedInMemoryRepositories(seedSampleData: false) and insert your own data instead.",
+                error
+            );
         }
     }
 }

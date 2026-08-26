@@ -14,8 +14,13 @@ QuickER の利用者に影響する変更を記録します。形式は [Keep a 
 
 - **破壊的変更**: `IValueObject<TSelf, TValue>` に必須メンバ `New`（と既定実装付き `ValidateCore`）が増え、値オブジェクトの基底クラス群は `TSelf` に `IValueObject<TSelf, TValue>` の実装を要求するようになった。インターフェイスを手で実装している型は 1 行（`static T IValueObject<T, V>.New(V v) => new(v);`）、基底から派生だけしてインターフェイスを宣言していなかった型は宣言への追加で移行できる。再生成したコードは影響なし
 
+### Changed
+
+- インメモリ Repository のサンプルデータが利用者定義の検証規則（手書きの `OnValidate`・手書きの値オブジェクト）に拒否されたとき——これは生成サンプル値には知りようのない規則——`AddGeneratedInMemoryRepositories()` から出る例外が、エンティティ名・プロパティ名・入れようとした値・元の検証メッセージを名指しし、対処（`seedSampleData: false` にして自前でデータを入れる）を案内するようになった。元の `ValueObjectValidationException` は inner として保全される。そのような規則を書いていない場合の挙動は変わらない
+
 ### Fixed
 
+- インメモリ Repository のサンプルデータシーダーが、decimal 列ごとの宣言 precision / scale に収まる値を組み立てるようになった。従来は全 decimal 列に同じリテラルを使っていたため、値オブジェクト有効時に scale 1・scale 0・整数部の余裕が 3 桁未満のいずれかの decimal 列があると、既定設定の `AddGeneratedInMemoryRepositories()` が登録時に `ValueObjectValidationException` で失敗していた
 - 値オブジェクトの `Create` ファクトリのリフレクション解決（SQL パラメータの再ラップ・行 materializer の高速経路）が、基底クラスから継承したファクトリを見つけるようになった（`BindingFlags.FlattenHierarchy`）。従来はそのような値オブジェクトが静かに遅い読み取りへフォールバックし、生 SQL のスカラー・射影変換は失敗していた
 - リモートクライアントが、結果が null になり得ない操作への「2xx＋JSON リテラル `null`」応答を `RemoteRepositoryException` として分類するようになった（従来は離れた場所の不明瞭な `NullReferenceException` になっていた）。`GetById`・単一戻り形・null 許容スカラーのクエリは従来どおり null を「該当行なし」として返す。あわせて生成 Mapper の `ApplyToEntity` の全パラメータが文書化され、`GenerateDocumentationFile` 有効のビルドで CS1573 が出なくなった
 

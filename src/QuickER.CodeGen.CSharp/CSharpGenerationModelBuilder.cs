@@ -119,7 +119,8 @@ internal sealed partial class CSharpGenerationModelBuilder
     )
     {
         var className = _nameConverter.ToEntityClassName(entity.TableName);
-        var properties = entity.Columns.Select(BuildProperty).ToList();
+        // エンティティ経路のプロパティはシーダー用サンプル式の文脈（"{クラス}.{プロパティ}"）にクラス名が要る
+        var properties = entity.Columns.Select(column => BuildProperty(column, className)).ToList();
 
         // 列由来プロパティ名が生成する静的メンバー（DisplayName / CustomizeDisplayName）と衝突する場合は、
         // そのエンティティのみ両メンバーを省略する（生成は完走・警告診断を出す）。
@@ -430,7 +431,12 @@ internal sealed partial class CSharpGenerationModelBuilder
     }
 
     /// <summary>カラム定義からエンティティのスカラープロパティ生成モデルを構築する</summary>
-    private CSharpPropertyModel BuildProperty(Column column)
+    /// <param name="column">対象のカラム定義</param>
+    /// <param name="entityClassName">
+    /// エンティティクラス名（シーダー用サンプル式の失敗文脈 <c>"{クラス}.{プロパティ}"</c> に使う）。
+    /// エンティティ本体の構築経路だけが渡し、キー型解決など SampleValueExpression を使わない経路は省略でよい
+    /// </param>
+    private CSharpPropertyModel BuildProperty(Column column, string? entityClassName = null)
     {
         var typeInfo = _columnTypes[column.Id];
         var valueObject = ResolveValueObject(column);
@@ -479,7 +485,12 @@ internal sealed partial class CSharpGenerationModelBuilder
                 ? (column.IsNullable ? string.Empty : " = null!;")
                 : BuildEntityInitializer(typeName, column.IsNullable),
             // インメモリ Repository のシーダー用の決定的サンプル値式
-            SampleValueExpression = BuildSampleValueExpression(column, typeInfo, valueObject),
+            SampleValueExpression = BuildSampleValueExpression(
+                column,
+                typeInfo,
+                valueObject,
+                entityClassName
+            ),
         };
     }
 
@@ -490,11 +501,17 @@ internal sealed partial class CSharpGenerationModelBuilder
     /// シーダーは各エンティティ 3 件（ループ変数 <c>index</c> = 1..3）を親→子の順で投入する。
     /// 主キー（int/long 等）は <c>index</c>、string 主キーは <c>"{TABLE}-00n"</c>、FK は親キーの実在値（<c>index</c>）を指す。
     /// NULL 可列は 3 件中 1 件（<c>index == 3</c>）を null にする。値オブジェクトは <c>Create</c> で包む。型ベースの固定値で決定的。
+    /// サンプル値は列の宣言制約（string の MaxLength・decimal の precision/scale）を満たす形で組み立てる＝
+    /// VO 有効時はシードが <c>Create</c> の検証を通るため、制約を見ない固定値は DI 登録（既定シード）を起動時例外にする。
+    /// ただし利用者が書く検証（OnValidate・手書き VO の規則）は生成器には知りようがなく満たせないため、
+    /// VO の Create はシーダー内のガード（CreateSampleValue）経由で呼び、拒否されたときに
+    /// 「どのプロパティへ何を入れようとしたか」と対処（seedSampleData: false）が例外メッセージに載るようにする。
     /// </remarks>
     private string BuildSampleValueExpression(
         Column column,
         CSharpTypeInfo typeInfo,
-        CSharpValueObjectModel? valueObject
+        CSharpValueObjectModel? valueObject,
+        string? entityClassName
     )
     {
         // 値オブジェクトは内包値を作ってから Create で包む（GuidKey は無引数生成の代わりに決定的 GUID を渡す）
@@ -505,23 +522,44 @@ internal sealed partial class CSharpGenerationModelBuilder
                 : BuildSampleScalarExpression(
                     column,
                     valueObject.ValueTypeName,
-                    valueObject.MaxLength
+                    valueObject.MaxLength,
+                    valueObject.Precision,
+                    valueObject.Scale
                 );
-            var created = $"{valueObject.ClassName}.Create({innerExpr})";
+
+            // 失敗文脈（"{クラス}.{プロパティ}"）を添えたガード経由で Create する
+            var propertyName = _nameConverter.ToPropertyName(column.Name);
+            var target = entityClassName is null
+                ? propertyName
+                : $"{entityClassName}.{propertyName}";
+            var created =
+                $"CreateSampleValue<{valueObject.ClassName}, {valueObject.ValueTypeName}>(\"{target}\", {innerExpr})";
 
             // NULL 可 VO 列は 3 件中 1 件を null にする（確定値型は VoClass?）
             return column.IsNullable ? $"index == 3 ? null : {created}" : created;
         }
 
         var baseType = typeInfo.TypeName.TrimEnd('?');
-        var scalar = BuildSampleScalarExpression(column, baseType, typeInfo.MaxLength);
+        var scalar = BuildSampleScalarExpression(
+            column,
+            baseType,
+            typeInfo.MaxLength,
+            typeInfo.Precision,
+            typeInfo.Scale
+        );
 
         // NULL 可列は 3 件中 1 件（index == 3）を null にする（プロパティ型は T?・target-typed conditional で解決）
         return column.IsNullable ? $"index == 3 ? null : {scalar}" : scalar;
     }
 
     /// <summary>型・主キー/外部キー・列名から、非 NULL のスカラーサンプル値式を構築する</summary>
-    private string BuildSampleScalarExpression(Column column, string baseType, int? maxLength)
+    private string BuildSampleScalarExpression(
+        Column column,
+        string baseType,
+        int? maxLength,
+        int? precision,
+        int? scale
+    )
     {
         // 主キー・外部キーは決定的な行番号（index）で表現し、親子の FK 整合を保つ
         var isKey = column.IsPrimaryKey || column.IsForeignKey;
@@ -541,7 +579,7 @@ internal sealed partial class CSharpGenerationModelBuilder
                 return "(byte)index";
 
             case "decimal":
-                return "index * 100.50m";
+                return BuildSampleDecimalExpression(precision, scale);
 
             case "double":
                 return "index * 100.5d";
@@ -578,6 +616,35 @@ internal sealed partial class CSharpGenerationModelBuilder
                 // enum など未知の値型は既定値へフォールバックする（決定的・コンパイル可能）
                 return $"default({baseType})";
         }
+    }
+
+    /// <summary>decimal 列のサンプル値式を構築する（precision / scale が既知なら、その桁で表現できる決定的な値にする）</summary>
+    /// <remarks>
+    /// decimal は値だけでなく桁の持ち方（<c>decimal.Scale</c>）も保持し、整数 <c>index</c> を掛けても
+    /// リテラル由来の Scale は減らない。生成される検証（ValidateDecimal）は precision があるときだけ出るため、
+    /// 桁を合わせる必要があるのも既知のときだけで、未知（自由記述の decimal 等）は従来の固定値のままにする。
+    /// 組み立ての不変条件は「小数部の桁数＝宣言 scale（宣言の全桁を実際に使う）・index=1..3 を掛けても
+    /// 整数部が precision - scale 桁に収まる（整数部は最大 3 桁に抑え、繰り上がり分も 1 桁目に収まる 5 を使う）」。
+    /// </remarks>
+    private static string BuildSampleDecimalExpression(int? precision, int? scale)
+    {
+        if (precision is not int p || p <= 0)
+        {
+            return "index * 100.50m";
+        }
+
+        // ValidateDecimal と同じ解釈（scale 省略は 0）。範囲外の宣言は防御的に 0..precision へ丸める
+        var s = Math.Clamp(scale ?? 0, 0, p);
+        var integralDigits = p - s;
+
+        // 整数部が使えない列（precision == scale）は最小桁の刻み＝index * 10^-s（index=3 でも 1 未満）
+        if (integralDigits == 0)
+        {
+            return $"index * 0.{new string('0', s - 1)}1m";
+        }
+
+        var integral = "1" + new string('0', Math.Min(integralDigits, 3) - 1);
+        return s == 0 ? $"index * {integral}m" : $"index * {integral}.{new string('0', s - 1)}5m";
     }
 
     /// <summary>string 列のサンプル値式を構築する（主キーは "{TABLE}-00n"・それ以外は "{列名} n"。MaxLength で切り詰め）</summary>

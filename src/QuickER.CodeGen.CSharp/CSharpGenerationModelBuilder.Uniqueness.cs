@@ -92,7 +92,10 @@ internal sealed partial class CSharpGenerationModelBuilder
                 : constraint.Name;
 
             resolved.Add(
-                new ResolvedUniqueConstraint(name, columns.Select(BuildProperty).ToList())
+                new ResolvedUniqueConstraint(
+                    name,
+                    columns.Select(column => BuildProperty(column)).ToList()
+                )
             );
         }
 

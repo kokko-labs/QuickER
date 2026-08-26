@@ -13500,9 +13500,9 @@ public static class InMemorySampleData
         {
             var entity = new GadgetEntity
             {
-                GadgetId = GadgetIdValue.Create(index),
-                Name = NameValue.Create(($"name {index}").Length > 50 ? ($"name {index}")[..50] : ($"name {index}")),
-                RowVer = RowVerValue.Create(new byte[] { (byte)index, (byte)(index + 1), (byte)(index + 2) }),
+                GadgetId = CreateSampleValue<GadgetIdValue, int>("GadgetEntity.GadgetId", index),
+                Name = CreateSampleValue<NameValue, string>("GadgetEntity.Name", ($"name {index}").Length > 50 ? ($"name {index}")[..50] : ($"name {index}")),
+                RowVer = CreateSampleValue<RowVerValue, byte[]>("GadgetEntity.RowVer", new byte[] { (byte)index, (byte)(index + 1), (byte)(index + 2) }),
             };
             entity.MarkAdded();
             store.Put(entity);
@@ -13517,14 +13517,42 @@ public static class InMemorySampleData
         {
             var entity = new GadgetNoteEntity
             {
-                NoteId = NoteIdValue.Create(index),
-                GadgetId = GadgetIdValue.Create(index),
-                Note = NoteValue.Create(($"note {index}").Length > 100 ? ($"note {index}")[..100] : ($"note {index}")),
-                RowVer = RowVerValue.Create(new byte[] { (byte)index, (byte)(index + 1), (byte)(index + 2) }),
+                NoteId = CreateSampleValue<NoteIdValue, int>("GadgetNoteEntity.NoteId", index),
+                GadgetId = CreateSampleValue<GadgetIdValue, int>("GadgetNoteEntity.GadgetId", index),
+                Note = CreateSampleValue<NoteValue, string>("GadgetNoteEntity.Note", ($"note {index}").Length > 100 ? ($"note {index}")[..100] : ($"note {index}")),
+                RowVer = CreateSampleValue<RowVerValue, byte[]>("GadgetNoteEntity.RowVer", new byte[] { (byte)index, (byte)(index + 1), (byte)(index + 2) }),
             };
             entity.MarkAdded();
             store.Put(entity);
             entity.MarkUnchanged();
+        }
+    }
+
+    /// <summary>Creates a value object for seeding, so a rejected sample value reports what was assigned where and how to proceed.</summary>
+    /// <remarks>
+    /// The generated sample values satisfy the constraints declared in the diagram (maximum length, decimal
+    /// precision/scale), but they cannot know the rules a hand-written OnValidate - or a hand-written value object -
+    /// adds. Such a rejection is not something better sample values could avoid; what matters is that the failure,
+    /// surfacing from inside AddGeneratedInMemoryRepositories, immediately names the property, the value, and the way
+    /// out (seedSampleData: false). The original validation failure travels as the inner exception.
+    /// </remarks>
+    private static TVo CreateSampleValue<TVo, TValue>(string target, TValue value)
+        where TVo : IValueObject<TVo, TValue>
+    {
+        try
+        {
+            return TVo.Create(value);
+        }
+        catch (ValueObjectValidationException error)
+        {
+            throw new InvalidOperationException(
+                FormattableString.Invariant(
+                    $"Seeding sample data failed: cannot assign \"{value}\" to {target} ({error.Message}). "
+                )
+                    + "A user-defined validation rule rejects the generated sample value, and sample values cannot know such rules. "
+                    + "Register with AddGeneratedInMemoryRepositories(seedSampleData: false) and insert your own data instead.",
+                error
+            );
         }
     }
 }
