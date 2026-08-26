@@ -329,6 +329,22 @@ public interface IValueObject
 public interface IValueObject<TSelf, TValue> : IValueObject
     where TSelf : IValueObject<TSelf, TValue>
 {
+    /// <summary>Creates the instance from an already-validated value. Write it as an explicit implementation that calls the private constructor.</summary>
+    /// <remarks>
+    /// This member exists so that <see cref="ValueObjectBase{TSelf, TValue}"/> can implement Create / TryCreate once for
+    /// every value object; validating is their job, so calling New through a type parameter skips validation. An explicit
+    /// implementation keeps it off the type's own public surface, where Create is the front door.
+    /// </remarks>
+    static abstract TSelf New(TValue value);
+
+    /// <summary>Validation body shared by Create / TryCreate / Validate; fills the error list, creating it only once something is actually wrong. Leave it unimplemented for a value object with no rules.</summary>
+    /// <remarks>
+    /// Creating a value object succeeds far more often than it fails, and a list allocated on every successful call is pure
+    /// garbage: value objects are created per column per row. The list is therefore passed by reference and allocated on
+    /// first use (<c>(errors ??= new List&lt;string&gt;()).Add(...)</c>), so a run with no violations allocates nothing at all.
+    /// </remarks>
+    static virtual void ValidateCore(TValue value, ref List<string>? errors) { }
+
     /// <summary>Validates and creates the value object (throws ValueObjectValidationException on violation).</summary>
     static abstract TSelf Create(TValue value);
 
@@ -361,15 +377,68 @@ public sealed class ValueObjectValidationException : Exception
     }
 }
 
-/// <summary>Common base for value objects. Provides value storage, equality, ToString, and extraction of the raw value (ordered comparison is added by derived types).</summary>
+/// <summary>Common base for value objects. Provides the Create / TryCreate / Validate factories, value storage, equality, ToString, and extraction of the raw value (ordered comparison is added by derived types).</summary>
 public abstract partial class ValueObjectBase<TSelf, TValue> : IValueObject, IEquatable<TSelf>
-    where TSelf : ValueObjectBase<TSelf, TValue>
+    where TSelf : ValueObjectBase<TSelf, TValue>, IValueObject<TSelf, TValue>
 {
     /// <summary>Gets the underlying value (never reassigned; reference-typed values such as byte[] are not defensively copied — see <see cref="ValueObjectBinaryBase{TSelf}"/>).</summary>
     public TValue Value { get; }
 
-    /// <summary>Initializes with an already-validated value (the concrete Create/TryCreate performs validation beforehand).</summary>
+    /// <summary>Initializes with an already-validated value (Create/TryCreate performs validation beforehand).</summary>
     protected ValueObjectBase(TValue value) => Value = value;
+
+    /// <summary>Validates and creates the value object (throws ValueObjectValidationException on violation).</summary>
+    /// <remarks>
+    /// An inherited static member satisfies a static abstract interface member, so this single implementation is what
+    /// every derived value object exposes as <c>IValueObject&lt;TSelf, TValue&gt;.Create</c> — the type itself only
+    /// supplies <c>New</c> (the constructor call) and <c>ValidateCore</c> (the rules).
+    /// </remarks>
+    public static TSelf Create(TValue value)
+    {
+        List<string>? errors = null;
+        TSelf.ValidateCore(value, ref errors);
+        if (errors is { Count: > 0 })
+        {
+            throw new ValueObjectValidationException(typeof(TSelf), errors);
+        }
+        return TSelf.New(value);
+    }
+
+    /// <summary>Returns true plus the value object when creation succeeds, or false plus the error details when it fails.</summary>
+    public static bool TryCreate(
+        TValue value,
+        out TSelf? result,
+        out IReadOnlyList<string> errors
+    )
+    {
+        List<string>? list = null;
+        TSelf.ValidateCore(value, ref list);
+        if (list is { Count: > 0 })
+        {
+            result = null;
+            errors = list;
+            return false;
+        }
+        result = TSelf.New(value);
+        errors = Array.Empty<string>();
+        return true;
+    }
+
+    /// <summary>Runs the validation rules (ValidateCore, including the OnValidate extension where one is written) without creating the value object, adding any violations to the given collection.</summary>
+    public static void Validate(TValue value, ICollection<string> errors)
+    {
+        List<string>? collected = null;
+        TSelf.ValidateCore(value, ref collected);
+        if (collected is null)
+        {
+            return;
+        }
+
+        foreach (var error in collected)
+        {
+            errors.Add(error);
+        }
+    }
 
     /// <summary>Gets the underlying value as an object (opens the raw value for SQL binding and similar).</summary>
     object? IValueObject.UnderlyingValue => Value;
@@ -416,7 +485,7 @@ public abstract partial class ValueObjectOrderedBase<TSelf, TValue>
     : ValueObjectBase<TSelf, TValue>,
         IComparable<TSelf>,
         IComparable
-    where TSelf : ValueObjectOrderedBase<TSelf, TValue>
+    where TSelf : ValueObjectOrderedBase<TSelf, TValue>, IValueObject<TSelf, TValue>
     where TValue : IComparable<TValue>
 {
     /// <summary>Initializes with an already-validated value.</summary>
@@ -473,7 +542,7 @@ public abstract partial class ValueObjectStringBase<TSelf>
     : ValueObjectBase<TSelf, string>,
         IComparable<TSelf>,
         IComparable
-    where TSelf : ValueObjectStringBase<TSelf>
+    where TSelf : ValueObjectStringBase<TSelf>, IValueObject<TSelf, string>
 {
     /// <summary>Initializes with an already-validated value.</summary>
     protected ValueObjectStringBase(string value)
@@ -740,63 +809,13 @@ public sealed partial class AmountValue
     private AmountValue(decimal value)
         : base(value) { }
 
-    /// <summary>Validates and creates the value object (throws ValueObjectValidationException on violation).</summary>
-    public static AmountValue Create(decimal value)
-    {
-        List<string>? errors = null;
-        ValidateCore(value, ref errors);
-        if (errors is { Count: > 0 })
-        {
-            throw new ValueObjectValidationException(typeof(AmountValue), errors);
-        }
-        return new AmountValue(value);
-    }
+    /// <summary>Creates the instance from an already-validated value (the public factories live in the base class; see <see cref="ValueObjectBase{TSelf, TValue}.Create"/>).</summary>
+    static AmountValue IValueObject<AmountValue, decimal>.New(decimal value) =>
+        new(value);
 
-    /// <summary>Returns true plus the value object when creation succeeds, or false plus the error details when it fails.</summary>
-    public static bool TryCreate(
-        decimal value,
-        out AmountValue? result,
-        out IReadOnlyList<string> errors
-    )
-    {
-        List<string>? list = null;
-        ValidateCore(value, ref list);
-        if (list is { Count: > 0 })
-        {
-            result = null;
-            errors = list;
-            return false;
-        }
-        result = new AmountValue(value);
-        errors = Array.Empty<string>();
-        return true;
-    }
-
-    /// <summary>Auto-generated validation plus the user extension (OnValidate). Also callable from partial and custom code.</summary>
-    internal static void Validate(decimal value, ICollection<string> errors)
-    {
-        List<string>? collected = null;
-        ValidateCore(value, ref collected);
-        if (collected is null)
-        {
-            return;
-        }
-
-        foreach (var error in collected)
-        {
-            errors.Add(error);
-        }
-    }
-
-    /// <summary>Validation core shared by Create / TryCreate / Validate; fills the error list, creating it only once something is actually wrong.</summary>
-    /// <remarks>
-    /// Creating a value object succeeds far more often than it fails, and a list allocated on every successful call is pure
-    /// garbage: value objects are created per column per row. The list is therefore allocated on first use, so a run with no
-    /// violations allocates nothing at all. OnValidate needs a collection to hand over, but an unimplemented partial method
-    /// takes its arguments with it when the compiler removes the call, so that allocation only happens where the hook is
-    /// actually written.
-    /// </remarks>
-    private static void ValidateCore(decimal value, ref List<string>? errors)
+    /// <summary>Auto-generated validation rules plus the user extension (OnValidate), called by the base class's Create / TryCreate / Validate.</summary>
+    /// <remarks>An unimplemented OnValidate partial method takes its arguments with it when the compiler removes the call, so the list it would need is only allocated where the hook is actually written.</remarks>
+    static void IValueObject<AmountValue, decimal>.ValidateCore(decimal value, ref List<string>? errors)
     {
         ValidateDecimal(value, 10, 2, ref errors);
         OnValidate(value, errors ??= new List<string>());
@@ -870,63 +889,13 @@ public sealed partial class BalanceValue
     private BalanceValue(decimal value)
         : base(value) { }
 
-    /// <summary>Validates and creates the value object (throws ValueObjectValidationException on violation).</summary>
-    public static BalanceValue Create(decimal value)
-    {
-        List<string>? errors = null;
-        ValidateCore(value, ref errors);
-        if (errors is { Count: > 0 })
-        {
-            throw new ValueObjectValidationException(typeof(BalanceValue), errors);
-        }
-        return new BalanceValue(value);
-    }
+    /// <summary>Creates the instance from an already-validated value (the public factories live in the base class; see <see cref="ValueObjectBase{TSelf, TValue}.Create"/>).</summary>
+    static BalanceValue IValueObject<BalanceValue, decimal>.New(decimal value) =>
+        new(value);
 
-    /// <summary>Returns true plus the value object when creation succeeds, or false plus the error details when it fails.</summary>
-    public static bool TryCreate(
-        decimal value,
-        out BalanceValue? result,
-        out IReadOnlyList<string> errors
-    )
-    {
-        List<string>? list = null;
-        ValidateCore(value, ref list);
-        if (list is { Count: > 0 })
-        {
-            result = null;
-            errors = list;
-            return false;
-        }
-        result = new BalanceValue(value);
-        errors = Array.Empty<string>();
-        return true;
-    }
-
-    /// <summary>Auto-generated validation plus the user extension (OnValidate). Also callable from partial and custom code.</summary>
-    internal static void Validate(decimal value, ICollection<string> errors)
-    {
-        List<string>? collected = null;
-        ValidateCore(value, ref collected);
-        if (collected is null)
-        {
-            return;
-        }
-
-        foreach (var error in collected)
-        {
-            errors.Add(error);
-        }
-    }
-
-    /// <summary>Validation core shared by Create / TryCreate / Validate; fills the error list, creating it only once something is actually wrong.</summary>
-    /// <remarks>
-    /// Creating a value object succeeds far more often than it fails, and a list allocated on every successful call is pure
-    /// garbage: value objects are created per column per row. The list is therefore allocated on first use, so a run with no
-    /// violations allocates nothing at all. OnValidate needs a collection to hand over, but an unimplemented partial method
-    /// takes its arguments with it when the compiler removes the call, so that allocation only happens where the hook is
-    /// actually written.
-    /// </remarks>
-    private static void ValidateCore(decimal value, ref List<string>? errors)
+    /// <summary>Auto-generated validation rules plus the user extension (OnValidate), called by the base class's Create / TryCreate / Validate.</summary>
+    /// <remarks>An unimplemented OnValidate partial method takes its arguments with it when the compiler removes the call, so the list it would need is only allocated where the hook is actually written.</remarks>
+    static void IValueObject<BalanceValue, decimal>.ValidateCore(decimal value, ref List<string>? errors)
     {
         ValidateDecimal(value, 10, 2, ref errors);
         OnValidate(value, errors ??= new List<string>());
@@ -1000,63 +969,13 @@ public sealed partial class BioValue
     private BioValue(string value)
         : base(value) { }
 
-    /// <summary>Validates and creates the value object (throws ValueObjectValidationException on violation).</summary>
-    public static BioValue Create(string value)
-    {
-        List<string>? errors = null;
-        ValidateCore(value, ref errors);
-        if (errors is { Count: > 0 })
-        {
-            throw new ValueObjectValidationException(typeof(BioValue), errors);
-        }
-        return new BioValue(value);
-    }
+    /// <summary>Creates the instance from an already-validated value (the public factories live in the base class; see <see cref="ValueObjectBase{TSelf, TValue}.Create"/>).</summary>
+    static BioValue IValueObject<BioValue, string>.New(string value) =>
+        new(value);
 
-    /// <summary>Returns true plus the value object when creation succeeds, or false plus the error details when it fails.</summary>
-    public static bool TryCreate(
-        string value,
-        out BioValue? result,
-        out IReadOnlyList<string> errors
-    )
-    {
-        List<string>? list = null;
-        ValidateCore(value, ref list);
-        if (list is { Count: > 0 })
-        {
-            result = null;
-            errors = list;
-            return false;
-        }
-        result = new BioValue(value);
-        errors = Array.Empty<string>();
-        return true;
-    }
-
-    /// <summary>Auto-generated validation plus the user extension (OnValidate). Also callable from partial and custom code.</summary>
-    internal static void Validate(string value, ICollection<string> errors)
-    {
-        List<string>? collected = null;
-        ValidateCore(value, ref collected);
-        if (collected is null)
-        {
-            return;
-        }
-
-        foreach (var error in collected)
-        {
-            errors.Add(error);
-        }
-    }
-
-    /// <summary>Validation core shared by Create / TryCreate / Validate; fills the error list, creating it only once something is actually wrong.</summary>
-    /// <remarks>
-    /// Creating a value object succeeds far more often than it fails, and a list allocated on every successful call is pure
-    /// garbage: value objects are created per column per row. The list is therefore allocated on first use, so a run with no
-    /// violations allocates nothing at all. OnValidate needs a collection to hand over, but an unimplemented partial method
-    /// takes its arguments with it when the compiler removes the call, so that allocation only happens where the hook is
-    /// actually written.
-    /// </remarks>
-    private static void ValidateCore(string value, ref List<string>? errors)
+    /// <summary>Auto-generated validation rules plus the user extension (OnValidate), called by the base class's Create / TryCreate / Validate.</summary>
+    /// <remarks>An unimplemented OnValidate partial method takes its arguments with it when the compiler removes the call, so the list it would need is only allocated where the hook is actually written.</remarks>
+    static void IValueObject<BioValue, string>.ValidateCore(string value, ref List<string>? errors)
     {
         // A value object never wraps null (a nullable column keeps the property itself null),
         // so a null input is reported as a validation error instead of throwing from the checks below.
@@ -1113,63 +1032,13 @@ public sealed partial class CustomerIdValue
     private CustomerIdValue(int value)
         : base(value) { }
 
-    /// <summary>Validates and creates the value object (throws ValueObjectValidationException on violation).</summary>
-    public static CustomerIdValue Create(int value)
-    {
-        List<string>? errors = null;
-        ValidateCore(value, ref errors);
-        if (errors is { Count: > 0 })
-        {
-            throw new ValueObjectValidationException(typeof(CustomerIdValue), errors);
-        }
-        return new CustomerIdValue(value);
-    }
+    /// <summary>Creates the instance from an already-validated value (the public factories live in the base class; see <see cref="ValueObjectBase{TSelf, TValue}.Create"/>).</summary>
+    static CustomerIdValue IValueObject<CustomerIdValue, int>.New(int value) =>
+        new(value);
 
-    /// <summary>Returns true plus the value object when creation succeeds, or false plus the error details when it fails.</summary>
-    public static bool TryCreate(
-        int value,
-        out CustomerIdValue? result,
-        out IReadOnlyList<string> errors
-    )
-    {
-        List<string>? list = null;
-        ValidateCore(value, ref list);
-        if (list is { Count: > 0 })
-        {
-            result = null;
-            errors = list;
-            return false;
-        }
-        result = new CustomerIdValue(value);
-        errors = Array.Empty<string>();
-        return true;
-    }
-
-    /// <summary>Auto-generated validation plus the user extension (OnValidate). Also callable from partial and custom code.</summary>
-    internal static void Validate(int value, ICollection<string> errors)
-    {
-        List<string>? collected = null;
-        ValidateCore(value, ref collected);
-        if (collected is null)
-        {
-            return;
-        }
-
-        foreach (var error in collected)
-        {
-            errors.Add(error);
-        }
-    }
-
-    /// <summary>Validation core shared by Create / TryCreate / Validate; fills the error list, creating it only once something is actually wrong.</summary>
-    /// <remarks>
-    /// Creating a value object succeeds far more often than it fails, and a list allocated on every successful call is pure
-    /// garbage: value objects are created per column per row. The list is therefore allocated on first use, so a run with no
-    /// violations allocates nothing at all. OnValidate needs a collection to hand over, but an unimplemented partial method
-    /// takes its arguments with it when the compiler removes the call, so that allocation only happens where the hook is
-    /// actually written.
-    /// </remarks>
-    private static void ValidateCore(int value, ref List<string>? errors)
+    /// <summary>Auto-generated validation rules plus the user extension (OnValidate), called by the base class's Create / TryCreate / Validate.</summary>
+    /// <remarks>An unimplemented OnValidate partial method takes its arguments with it when the compiler removes the call, so the list it would need is only allocated where the hook is actually written.</remarks>
+    static void IValueObject<CustomerIdValue, int>.ValidateCore(int value, ref List<string>? errors)
     {
         OnValidate(value, errors ??= new List<string>());
     }
@@ -1200,63 +1069,13 @@ public sealed partial class DeliveryDateValue
     private DeliveryDateValue(DateTime value)
         : base(value) { }
 
-    /// <summary>Validates and creates the value object (throws ValueObjectValidationException on violation).</summary>
-    public static DeliveryDateValue Create(DateTime value)
-    {
-        List<string>? errors = null;
-        ValidateCore(value, ref errors);
-        if (errors is { Count: > 0 })
-        {
-            throw new ValueObjectValidationException(typeof(DeliveryDateValue), errors);
-        }
-        return new DeliveryDateValue(value);
-    }
+    /// <summary>Creates the instance from an already-validated value (the public factories live in the base class; see <see cref="ValueObjectBase{TSelf, TValue}.Create"/>).</summary>
+    static DeliveryDateValue IValueObject<DeliveryDateValue, DateTime>.New(DateTime value) =>
+        new(value);
 
-    /// <summary>Returns true plus the value object when creation succeeds, or false plus the error details when it fails.</summary>
-    public static bool TryCreate(
-        DateTime value,
-        out DeliveryDateValue? result,
-        out IReadOnlyList<string> errors
-    )
-    {
-        List<string>? list = null;
-        ValidateCore(value, ref list);
-        if (list is { Count: > 0 })
-        {
-            result = null;
-            errors = list;
-            return false;
-        }
-        result = new DeliveryDateValue(value);
-        errors = Array.Empty<string>();
-        return true;
-    }
-
-    /// <summary>Auto-generated validation plus the user extension (OnValidate). Also callable from partial and custom code.</summary>
-    internal static void Validate(DateTime value, ICollection<string> errors)
-    {
-        List<string>? collected = null;
-        ValidateCore(value, ref collected);
-        if (collected is null)
-        {
-            return;
-        }
-
-        foreach (var error in collected)
-        {
-            errors.Add(error);
-        }
-    }
-
-    /// <summary>Validation core shared by Create / TryCreate / Validate; fills the error list, creating it only once something is actually wrong.</summary>
-    /// <remarks>
-    /// Creating a value object succeeds far more often than it fails, and a list allocated on every successful call is pure
-    /// garbage: value objects are created per column per row. The list is therefore allocated on first use, so a run with no
-    /// violations allocates nothing at all. OnValidate needs a collection to hand over, but an unimplemented partial method
-    /// takes its arguments with it when the compiler removes the call, so that allocation only happens where the hook is
-    /// actually written.
-    /// </remarks>
-    private static void ValidateCore(DateTime value, ref List<string>? errors)
+    /// <summary>Auto-generated validation rules plus the user extension (OnValidate), called by the base class's Create / TryCreate / Validate.</summary>
+    /// <remarks>An unimplemented OnValidate partial method takes its arguments with it when the compiler removes the call, so the list it would need is only allocated where the hook is actually written.</remarks>
+    static void IValueObject<DeliveryDateValue, DateTime>.ValidateCore(DateTime value, ref List<string>? errors)
     {
         OnValidate(value, errors ??= new List<string>());
     }
@@ -1287,63 +1106,13 @@ public sealed partial class IsActiveValue
     private IsActiveValue(bool value)
         : base(value) { }
 
-    /// <summary>Validates and creates the value object (throws ValueObjectValidationException on violation).</summary>
-    public static IsActiveValue Create(bool value)
-    {
-        List<string>? errors = null;
-        ValidateCore(value, ref errors);
-        if (errors is { Count: > 0 })
-        {
-            throw new ValueObjectValidationException(typeof(IsActiveValue), errors);
-        }
-        return new IsActiveValue(value);
-    }
+    /// <summary>Creates the instance from an already-validated value (the public factories live in the base class; see <see cref="ValueObjectBase{TSelf, TValue}.Create"/>).</summary>
+    static IsActiveValue IValueObject<IsActiveValue, bool>.New(bool value) =>
+        new(value);
 
-    /// <summary>Returns true plus the value object when creation succeeds, or false plus the error details when it fails.</summary>
-    public static bool TryCreate(
-        bool value,
-        out IsActiveValue? result,
-        out IReadOnlyList<string> errors
-    )
-    {
-        List<string>? list = null;
-        ValidateCore(value, ref list);
-        if (list is { Count: > 0 })
-        {
-            result = null;
-            errors = list;
-            return false;
-        }
-        result = new IsActiveValue(value);
-        errors = Array.Empty<string>();
-        return true;
-    }
-
-    /// <summary>Auto-generated validation plus the user extension (OnValidate). Also callable from partial and custom code.</summary>
-    internal static void Validate(bool value, ICollection<string> errors)
-    {
-        List<string>? collected = null;
-        ValidateCore(value, ref collected);
-        if (collected is null)
-        {
-            return;
-        }
-
-        foreach (var error in collected)
-        {
-            errors.Add(error);
-        }
-    }
-
-    /// <summary>Validation core shared by Create / TryCreate / Validate; fills the error list, creating it only once something is actually wrong.</summary>
-    /// <remarks>
-    /// Creating a value object succeeds far more often than it fails, and a list allocated on every successful call is pure
-    /// garbage: value objects are created per column per row. The list is therefore allocated on first use, so a run with no
-    /// violations allocates nothing at all. OnValidate needs a collection to hand over, but an unimplemented partial method
-    /// takes its arguments with it when the compiler removes the call, so that allocation only happens where the hook is
-    /// actually written.
-    /// </remarks>
-    private static void ValidateCore(bool value, ref List<string>? errors)
+    /// <summary>Auto-generated validation rules plus the user extension (OnValidate), called by the base class's Create / TryCreate / Validate.</summary>
+    /// <remarks>An unimplemented OnValidate partial method takes its arguments with it when the compiler removes the call, so the list it would need is only allocated where the hook is actually written.</remarks>
+    static void IValueObject<IsActiveValue, bool>.ValidateCore(bool value, ref List<string>? errors)
     {
         OnValidate(value, errors ??= new List<string>());
     }
@@ -1374,63 +1143,13 @@ public sealed partial class MemoValue
     private MemoValue(string value)
         : base(value) { }
 
-    /// <summary>Validates and creates the value object (throws ValueObjectValidationException on violation).</summary>
-    public static MemoValue Create(string value)
-    {
-        List<string>? errors = null;
-        ValidateCore(value, ref errors);
-        if (errors is { Count: > 0 })
-        {
-            throw new ValueObjectValidationException(typeof(MemoValue), errors);
-        }
-        return new MemoValue(value);
-    }
+    /// <summary>Creates the instance from an already-validated value (the public factories live in the base class; see <see cref="ValueObjectBase{TSelf, TValue}.Create"/>).</summary>
+    static MemoValue IValueObject<MemoValue, string>.New(string value) =>
+        new(value);
 
-    /// <summary>Returns true plus the value object when creation succeeds, or false plus the error details when it fails.</summary>
-    public static bool TryCreate(
-        string value,
-        out MemoValue? result,
-        out IReadOnlyList<string> errors
-    )
-    {
-        List<string>? list = null;
-        ValidateCore(value, ref list);
-        if (list is { Count: > 0 })
-        {
-            result = null;
-            errors = list;
-            return false;
-        }
-        result = new MemoValue(value);
-        errors = Array.Empty<string>();
-        return true;
-    }
-
-    /// <summary>Auto-generated validation plus the user extension (OnValidate). Also callable from partial and custom code.</summary>
-    internal static void Validate(string value, ICollection<string> errors)
-    {
-        List<string>? collected = null;
-        ValidateCore(value, ref collected);
-        if (collected is null)
-        {
-            return;
-        }
-
-        foreach (var error in collected)
-        {
-            errors.Add(error);
-        }
-    }
-
-    /// <summary>Validation core shared by Create / TryCreate / Validate; fills the error list, creating it only once something is actually wrong.</summary>
-    /// <remarks>
-    /// Creating a value object succeeds far more often than it fails, and a list allocated on every successful call is pure
-    /// garbage: value objects are created per column per row. The list is therefore allocated on first use, so a run with no
-    /// violations allocates nothing at all. OnValidate needs a collection to hand over, but an unimplemented partial method
-    /// takes its arguments with it when the compiler removes the call, so that allocation only happens where the hook is
-    /// actually written.
-    /// </remarks>
-    private static void ValidateCore(string value, ref List<string>? errors)
+    /// <summary>Auto-generated validation rules plus the user extension (OnValidate), called by the base class's Create / TryCreate / Validate.</summary>
+    /// <remarks>An unimplemented OnValidate partial method takes its arguments with it when the compiler removes the call, so the list it would need is only allocated where the hook is actually written.</remarks>
+    static void IValueObject<MemoValue, string>.ValidateCore(string value, ref List<string>? errors)
     {
         // A value object never wraps null (a nullable column keeps the property itself null),
         // so a null input is reported as a validation error instead of throwing from the checks below.
@@ -1487,63 +1206,13 @@ public sealed partial class NameValue
     private NameValue(string value)
         : base(value) { }
 
-    /// <summary>Validates and creates the value object (throws ValueObjectValidationException on violation).</summary>
-    public static NameValue Create(string value)
-    {
-        List<string>? errors = null;
-        ValidateCore(value, ref errors);
-        if (errors is { Count: > 0 })
-        {
-            throw new ValueObjectValidationException(typeof(NameValue), errors);
-        }
-        return new NameValue(value);
-    }
+    /// <summary>Creates the instance from an already-validated value (the public factories live in the base class; see <see cref="ValueObjectBase{TSelf, TValue}.Create"/>).</summary>
+    static NameValue IValueObject<NameValue, string>.New(string value) =>
+        new(value);
 
-    /// <summary>Returns true plus the value object when creation succeeds, or false plus the error details when it fails.</summary>
-    public static bool TryCreate(
-        string value,
-        out NameValue? result,
-        out IReadOnlyList<string> errors
-    )
-    {
-        List<string>? list = null;
-        ValidateCore(value, ref list);
-        if (list is { Count: > 0 })
-        {
-            result = null;
-            errors = list;
-            return false;
-        }
-        result = new NameValue(value);
-        errors = Array.Empty<string>();
-        return true;
-    }
-
-    /// <summary>Auto-generated validation plus the user extension (OnValidate). Also callable from partial and custom code.</summary>
-    internal static void Validate(string value, ICollection<string> errors)
-    {
-        List<string>? collected = null;
-        ValidateCore(value, ref collected);
-        if (collected is null)
-        {
-            return;
-        }
-
-        foreach (var error in collected)
-        {
-            errors.Add(error);
-        }
-    }
-
-    /// <summary>Validation core shared by Create / TryCreate / Validate; fills the error list, creating it only once something is actually wrong.</summary>
-    /// <remarks>
-    /// Creating a value object succeeds far more often than it fails, and a list allocated on every successful call is pure
-    /// garbage: value objects are created per column per row. The list is therefore allocated on first use, so a run with no
-    /// violations allocates nothing at all. OnValidate needs a collection to hand over, but an unimplemented partial method
-    /// takes its arguments with it when the compiler removes the call, so that allocation only happens where the hook is
-    /// actually written.
-    /// </remarks>
-    private static void ValidateCore(string value, ref List<string>? errors)
+    /// <summary>Auto-generated validation rules plus the user extension (OnValidate), called by the base class's Create / TryCreate / Validate.</summary>
+    /// <remarks>An unimplemented OnValidate partial method takes its arguments with it when the compiler removes the call, so the list it would need is only allocated where the hook is actually written.</remarks>
+    static void IValueObject<NameValue, string>.ValidateCore(string value, ref List<string>? errors)
     {
         // A value object never wraps null (a nullable column keeps the property itself null),
         // so a null input is reported as a validation error instead of throwing from the checks below.
@@ -1600,63 +1269,13 @@ public sealed partial class OrderIdValue
     private OrderIdValue(int value)
         : base(value) { }
 
-    /// <summary>Validates and creates the value object (throws ValueObjectValidationException on violation).</summary>
-    public static OrderIdValue Create(int value)
-    {
-        List<string>? errors = null;
-        ValidateCore(value, ref errors);
-        if (errors is { Count: > 0 })
-        {
-            throw new ValueObjectValidationException(typeof(OrderIdValue), errors);
-        }
-        return new OrderIdValue(value);
-    }
+    /// <summary>Creates the instance from an already-validated value (the public factories live in the base class; see <see cref="ValueObjectBase{TSelf, TValue}.Create"/>).</summary>
+    static OrderIdValue IValueObject<OrderIdValue, int>.New(int value) =>
+        new(value);
 
-    /// <summary>Returns true plus the value object when creation succeeds, or false plus the error details when it fails.</summary>
-    public static bool TryCreate(
-        int value,
-        out OrderIdValue? result,
-        out IReadOnlyList<string> errors
-    )
-    {
-        List<string>? list = null;
-        ValidateCore(value, ref list);
-        if (list is { Count: > 0 })
-        {
-            result = null;
-            errors = list;
-            return false;
-        }
-        result = new OrderIdValue(value);
-        errors = Array.Empty<string>();
-        return true;
-    }
-
-    /// <summary>Auto-generated validation plus the user extension (OnValidate). Also callable from partial and custom code.</summary>
-    internal static void Validate(int value, ICollection<string> errors)
-    {
-        List<string>? collected = null;
-        ValidateCore(value, ref collected);
-        if (collected is null)
-        {
-            return;
-        }
-
-        foreach (var error in collected)
-        {
-            errors.Add(error);
-        }
-    }
-
-    /// <summary>Validation core shared by Create / TryCreate / Validate; fills the error list, creating it only once something is actually wrong.</summary>
-    /// <remarks>
-    /// Creating a value object succeeds far more often than it fails, and a list allocated on every successful call is pure
-    /// garbage: value objects are created per column per row. The list is therefore allocated on first use, so a run with no
-    /// violations allocates nothing at all. OnValidate needs a collection to hand over, but an unimplemented partial method
-    /// takes its arguments with it when the compiler removes the call, so that allocation only happens where the hook is
-    /// actually written.
-    /// </remarks>
-    private static void ValidateCore(int value, ref List<string>? errors)
+    /// <summary>Auto-generated validation rules plus the user extension (OnValidate), called by the base class's Create / TryCreate / Validate.</summary>
+    /// <remarks>An unimplemented OnValidate partial method takes its arguments with it when the compiler removes the call, so the list it would need is only allocated where the hook is actually written.</remarks>
+    static void IValueObject<OrderIdValue, int>.ValidateCore(int value, ref List<string>? errors)
     {
         OnValidate(value, errors ??= new List<string>());
     }
@@ -1687,63 +1306,13 @@ public sealed partial class OrderedAtValue
     private OrderedAtValue(DateTime value)
         : base(value) { }
 
-    /// <summary>Validates and creates the value object (throws ValueObjectValidationException on violation).</summary>
-    public static OrderedAtValue Create(DateTime value)
-    {
-        List<string>? errors = null;
-        ValidateCore(value, ref errors);
-        if (errors is { Count: > 0 })
-        {
-            throw new ValueObjectValidationException(typeof(OrderedAtValue), errors);
-        }
-        return new OrderedAtValue(value);
-    }
+    /// <summary>Creates the instance from an already-validated value (the public factories live in the base class; see <see cref="ValueObjectBase{TSelf, TValue}.Create"/>).</summary>
+    static OrderedAtValue IValueObject<OrderedAtValue, DateTime>.New(DateTime value) =>
+        new(value);
 
-    /// <summary>Returns true plus the value object when creation succeeds, or false plus the error details when it fails.</summary>
-    public static bool TryCreate(
-        DateTime value,
-        out OrderedAtValue? result,
-        out IReadOnlyList<string> errors
-    )
-    {
-        List<string>? list = null;
-        ValidateCore(value, ref list);
-        if (list is { Count: > 0 })
-        {
-            result = null;
-            errors = list;
-            return false;
-        }
-        result = new OrderedAtValue(value);
-        errors = Array.Empty<string>();
-        return true;
-    }
-
-    /// <summary>Auto-generated validation plus the user extension (OnValidate). Also callable from partial and custom code.</summary>
-    internal static void Validate(DateTime value, ICollection<string> errors)
-    {
-        List<string>? collected = null;
-        ValidateCore(value, ref collected);
-        if (collected is null)
-        {
-            return;
-        }
-
-        foreach (var error in collected)
-        {
-            errors.Add(error);
-        }
-    }
-
-    /// <summary>Validation core shared by Create / TryCreate / Validate; fills the error list, creating it only once something is actually wrong.</summary>
-    /// <remarks>
-    /// Creating a value object succeeds far more often than it fails, and a list allocated on every successful call is pure
-    /// garbage: value objects are created per column per row. The list is therefore allocated on first use, so a run with no
-    /// violations allocates nothing at all. OnValidate needs a collection to hand over, but an unimplemented partial method
-    /// takes its arguments with it when the compiler removes the call, so that allocation only happens where the hook is
-    /// actually written.
-    /// </remarks>
-    private static void ValidateCore(DateTime value, ref List<string>? errors)
+    /// <summary>Auto-generated validation rules plus the user extension (OnValidate), called by the base class's Create / TryCreate / Validate.</summary>
+    /// <remarks>An unimplemented OnValidate partial method takes its arguments with it when the compiler removes the call, so the list it would need is only allocated where the hook is actually written.</remarks>
+    static void IValueObject<OrderedAtValue, DateTime>.ValidateCore(DateTime value, ref List<string>? errors)
     {
         OnValidate(value, errors ??= new List<string>());
     }
@@ -1774,63 +1343,13 @@ public sealed partial class ProfileIdValue
     private ProfileIdValue(int value)
         : base(value) { }
 
-    /// <summary>Validates and creates the value object (throws ValueObjectValidationException on violation).</summary>
-    public static ProfileIdValue Create(int value)
-    {
-        List<string>? errors = null;
-        ValidateCore(value, ref errors);
-        if (errors is { Count: > 0 })
-        {
-            throw new ValueObjectValidationException(typeof(ProfileIdValue), errors);
-        }
-        return new ProfileIdValue(value);
-    }
+    /// <summary>Creates the instance from an already-validated value (the public factories live in the base class; see <see cref="ValueObjectBase{TSelf, TValue}.Create"/>).</summary>
+    static ProfileIdValue IValueObject<ProfileIdValue, int>.New(int value) =>
+        new(value);
 
-    /// <summary>Returns true plus the value object when creation succeeds, or false plus the error details when it fails.</summary>
-    public static bool TryCreate(
-        int value,
-        out ProfileIdValue? result,
-        out IReadOnlyList<string> errors
-    )
-    {
-        List<string>? list = null;
-        ValidateCore(value, ref list);
-        if (list is { Count: > 0 })
-        {
-            result = null;
-            errors = list;
-            return false;
-        }
-        result = new ProfileIdValue(value);
-        errors = Array.Empty<string>();
-        return true;
-    }
-
-    /// <summary>Auto-generated validation plus the user extension (OnValidate). Also callable from partial and custom code.</summary>
-    internal static void Validate(int value, ICollection<string> errors)
-    {
-        List<string>? collected = null;
-        ValidateCore(value, ref collected);
-        if (collected is null)
-        {
-            return;
-        }
-
-        foreach (var error in collected)
-        {
-            errors.Add(error);
-        }
-    }
-
-    /// <summary>Validation core shared by Create / TryCreate / Validate; fills the error list, creating it only once something is actually wrong.</summary>
-    /// <remarks>
-    /// Creating a value object succeeds far more often than it fails, and a list allocated on every successful call is pure
-    /// garbage: value objects are created per column per row. The list is therefore allocated on first use, so a run with no
-    /// violations allocates nothing at all. OnValidate needs a collection to hand over, but an unimplemented partial method
-    /// takes its arguments with it when the compiler removes the call, so that allocation only happens where the hook is
-    /// actually written.
-    /// </remarks>
-    private static void ValidateCore(int value, ref List<string>? errors)
+    /// <summary>Auto-generated validation rules plus the user extension (OnValidate), called by the base class's Create / TryCreate / Validate.</summary>
+    /// <remarks>An unimplemented OnValidate partial method takes its arguments with it when the compiler removes the call, so the list it would need is only allocated where the hook is actually written.</remarks>
+    static void IValueObject<ProfileIdValue, int>.ValidateCore(int value, ref List<string>? errors)
     {
         OnValidate(value, errors ??= new List<string>());
     }
@@ -7260,9 +6779,13 @@ internal static class SqlValueObjectActivator
         }
 
         var valueType = iface.GetGenericArguments()[1];
+
+        // FlattenHierarchy: without it reflection never returns a static member declared on a base class, and Create
+        // lives on ValueObjectBase (a hand-written value object inheriting it included). A same-signature Create declared
+        // on the type itself still wins (hide-by-signature), with no AmbiguousMatchException.
         var createMethod = targetType.GetMethod(
             "Create",
-            BindingFlags.Public | BindingFlags.Static,
+            BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy,
             binder: null,
             new[] { valueType },
             modifiers: null
@@ -10579,9 +10102,12 @@ internal sealed class EntitySaveMetadata
             return null;
         }
 
+        // FlattenHierarchy: Create is declared on ValueObjectBase, and without the flag reflection never returns a
+        // static member declared on a base class - the resolution would quietly fail and every value object column
+        // would take the SetColumnValue fallback instead of the fast path.
         var create = propertyType.GetMethod(
             "Create",
-            BindingFlags.Public | BindingFlags.Static,
+            BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy,
             binder: null,
             new[] { getter.ReturnType },
             modifiers: null

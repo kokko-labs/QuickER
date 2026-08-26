@@ -230,7 +230,9 @@ public interface QuickER.Runtime.IValueObject
 
 public interface QuickER.Runtime.IValueObject<TSelf, TValue> : QuickER.Runtime.IValueObject
     public static TSelf Create(TValue value)
+    public static TSelf New(TValue value)
     public static bool TryCreate(TValue value, out TSelf result, out System.Collections.Generic.IReadOnlyList<string> errors)
+    public static void ValidateCore(TValue value, ref System.Collections.Generic.List<string> errors)
     public virtual TValue Value { get; }
 
 public sealed class QuickER.Runtime.IncludableSqlQuery<TEntity, TProperty>
@@ -535,8 +537,11 @@ public abstract class QuickER.Runtime.ValueObjectBase<TSelf, TValue> : QuickER.R
     public override bool Equals(object obj)
     public override int GetHashCode()
     public override string ToString()
+    public static TSelf Create(TValue value)
+    public static bool TryCreate(TValue value, out TSelf result, out System.Collections.Generic.IReadOnlyList<string> errors)
     public static bool op_Equality(QuickER.Runtime.ValueObjectBase<TSelf, TValue> left, QuickER.Runtime.ValueObjectBase<TSelf, TValue> right)
     public static bool op_Inequality(QuickER.Runtime.ValueObjectBase<TSelf, TValue> left, QuickER.Runtime.ValueObjectBase<TSelf, TValue> right)
+    public static void Validate(TValue value, System.Collections.Generic.ICollection<string> errors)
     public virtual bool Equals(TSelf other)
     public virtual string DisplayValue { get; }
 

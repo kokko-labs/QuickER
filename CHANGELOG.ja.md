@@ -4,6 +4,21 @@
 
 QuickER の利用者に影響する変更を記録します。形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/)、バージョンは [Semantic Versioning](https://semver.org/lang/ja/) に従います（0.x の間の版上げルールとリリース手順は [CONTRIBUTING.ja.md](CONTRIBUTING.ja.md) を参照）。
 
+## [Unreleased]
+
+### Added
+
+- **手書きの値オブジェクトが 3 メンバで書けるように** — `Create` / `TryCreate` / `Validate` の本体を `ValueObjectBase<TSelf, TValue>` へ 1 回だけ置く形にし、図の列に対応しない値オブジェクトを「private コンストラクタ＋`New`／`ValidateCore` の明示的実装」で書けるようにした（docs/code-generation.ja.md の「手書きの値オブジェクト」節を参照）。生成される値オブジェクトも同じ形に縮む（挙動は同一）
+
+### Changed
+
+- **破壊的変更**: `IValueObject<TSelf, TValue>` に必須メンバ `New`（と既定実装付き `ValidateCore`）が増え、値オブジェクトの基底クラス群は `TSelf` に `IValueObject<TSelf, TValue>` の実装を要求するようになった。インターフェイスを手で実装している型は 1 行（`static T IValueObject<T, V>.New(V v) => new(v);`）、基底から派生だけしてインターフェイスを宣言していなかった型は宣言への追加で移行できる。再生成したコードは影響なし
+
+### Fixed
+
+- 値オブジェクトの `Create` ファクトリのリフレクション解決（SQL パラメータの再ラップ・行 materializer の高速経路）が、基底クラスから継承したファクトリを見つけるようになった（`BindingFlags.FlattenHierarchy`）。従来はそのような値オブジェクトが静かに遅い読み取りへフォールバックし、生 SQL のスカラー・射影変換は失敗していた
+- リモートクライアントが、結果が null になり得ない操作への「2xx＋JSON リテラル `null`」応答を `RemoteRepositoryException` として分類するようになった（従来は離れた場所の不明瞭な `NullReferenceException` になっていた）。`GetById`・単一戻り形・null 許容スカラーのクエリは従来どおり null を「該当行なし」として返す。あわせて生成 Mapper の `ApplyToEntity` の全パラメータが文書化され、`GenerateDocumentationFile` 有効のビルドで CS1573 が出なくなった
+
 ## [0.1.0] - 2026-08-02
 
 初回公開リリース。

@@ -53,6 +53,37 @@ if (NameValue.TryCreate(input, out var vo, out var errors))   // 例外なしで
 
 基底クラスは値の型に応じて選ばれ、値ベースの等価（`==` / `Equals`）に加えて、数値・日時系は比較演算子（`<` / `>=` など）、文字列は `Contains` / `StartsWith` / `EndsWith` を備えます。
 
+### 手書きの値オブジェクト
+
+`Create` / `TryCreate` / `Validate` の本体は `ValueObjectBase<TSelf, TValue>` に 1 回だけ置かれています（基底クラスから継承した静的メソッドは `static abstract` インターフェイスメンバを満たします）。そのため、図の列に対応しない概念（メールアドレス・期間・単位など）の値オブジェクトは **3 メンバ**＝private コンストラクタ＋`New`＋`ValidateCore` で書けます:
+
+```csharp
+public sealed class ContactMailValue
+    : ValueObjectStringBase<ContactMailValue>,
+        IValueObject<ContactMailValue, string>
+{
+    private ContactMailValue(string value) : base(value) { }
+
+    static ContactMailValue IValueObject<ContactMailValue, string>.New(string value) => new(value);
+
+    static void IValueObject<ContactMailValue, string>.ValidateCore(
+        string value, ref List<string>? errors)
+    {
+        if (!value.Contains('@'))
+        {
+            (errors ??= new List<string>()).Add("メールアドレスには @ が必要です。");
+        }
+    }
+}
+```
+
+- 形は生成物とまったく同じです。`ContactMailValue.Create(...)` / `TryCreate` / `Validate` が従来どおり使え、JSON 変換・SQL パラメータバインド・行の組み立ても生成された値オブジェクトと同じ扱いを受けます
+- 検証規則を持たない値オブジェクトは `ValidateCore` ごと省略できます（インターフェイスの既定実装＝検証なし）＝2 メンバで成立します
+- `ValidateCore` はエラーリストを**参照渡し・未確保**で受け取ります。最初の違反を足すときだけ確保する形（`(errors ??= new List<string>()).Add(...)`）にすると、正常な値の生成は何も確保しません
+- 参照型の値（`string` / `byte[]`）で入力を信頼できない場合は、`ValidateCore` で `null` を弾いてください。値オブジェクトは null を包みません（NULL 許容列はプロパティ自体を null に保ちます）。生成された値オブジェクトは null 入力を検証エラーとして報告します
+- `New` / `ValidateCore` は明示的実装なので型の公開面には出ません。型引数経由の `TVo.New` は検証を迂回するため、`New` を自分で呼ばないでください（検証は `Create` / `TryCreate` の仕事です）
+- 基底は値の型で選びます: `ValueObjectStringBase`（文字列）・`ValueObjectOrderedBase<TSelf, TValue>`（数値・日時）・`ValueObjectBooleanBase`・`ValueObjectBinaryBase`・`ValueObjectGuidKeyBase`（GUID 文字列キー）・それ以外は `ValueObjectBase<TSelf, TValue>` を直接
+
 ### partial 拡張点
 
 生成されるクラスはメッセージ・表示名の差し替えに 2 つの方法を持ち、静的クラス・生成モード（インライン／パッケージ参照）を問わず共通の規則です:

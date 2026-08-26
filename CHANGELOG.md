@@ -4,6 +4,21 @@
 
 This file records changes that affect QuickER users. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/) (see [CONTRIBUTING.md](CONTRIBUTING.md) for the versioning rules during 0.x and the release procedure).
 
+## [Unreleased]
+
+### Added
+
+- **Hand-written value objects in three members** — the bodies of `Create` / `TryCreate` / `Validate` now live once on `ValueObjectBase<TSelf, TValue>`, so a value object with no diagram column behind it is written as a private constructor plus explicit `New` / `ValidateCore` implementations (see "Hand-written value objects" in docs/code-generation.md). Generated value objects shrink accordingly (identical behavior).
+
+### Changed
+
+- **Breaking**: `IValueObject<TSelf, TValue>` gained a required member `New` (and a `ValidateCore` default member), and the value-object base classes now constrain `TSelf` to implement `IValueObject<TSelf, TValue>`. A value object that implements the interface by hand adds one line (`static T IValueObject<T, V>.New(V v) => new(v);`); one that derives from a base class without declaring the interface adds the interface to its declaration. Regenerated code is unaffected.
+
+### Fixed
+
+- Reflection-based resolution of a value object's `Create` factory (SQL parameter rewrapping and the row-materializer fast path) now finds a factory inherited from a base class (`BindingFlags.FlattenHierarchy`); previously such a value object silently fell back to slower row reads and failed raw-SQL scalar/projection conversion.
+- A remote client now classifies a 2xx response whose body is the JSON literal `null` as `RemoteRepositoryException` on operations whose result is never null (previously it surfaced later as an unclear `NullReferenceException`); `GetById` and single-row/nullable-scalar queries still return null as "no such row". Generated mappers also document all `ApplyToEntity` parameters, so builds with `GenerateDocumentationFile` no longer emit CS1573.
+
 ## [0.1.0] - 2026-08-02
 
 Initial public release.

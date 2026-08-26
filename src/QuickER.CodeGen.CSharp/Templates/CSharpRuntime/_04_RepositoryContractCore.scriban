@@ -948,9 +948,13 @@ public static class SqlServerSchemaBootstrap
         }
 
         var valueType = iface.GetGenericArguments()[1];
+
+        // FlattenHierarchy: without it reflection never returns a static member declared on a base class, and Create
+        // lives on ValueObjectBase (a hand-written value object inheriting it included). A same-signature Create declared
+        // on the type itself still wins (hide-by-signature), with no AmbiguousMatchException.
         var createMethod = targetType.GetMethod(
             "Create",
-            BindingFlags.Public | BindingFlags.Static,
+            BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy,
             binder: null,
             new[] { valueType },
             modifiers: null
