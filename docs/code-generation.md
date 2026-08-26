@@ -53,6 +53,37 @@ if (NameValue.TryCreate(input, out var vo, out var errors))   // Validate withou
 
 The base class is chosen according to the value type. In addition to value-based equality (`==` / `Equals`), numeric and date/time types get comparison operators (`<` / `>=`, etc.), and strings get `Contains` / `StartsWith` / `EndsWith`.
 
+### Hand-written value objects
+
+The bodies of `Create` / `TryCreate` / `Validate` live once on `ValueObjectBase<TSelf, TValue>` (an inherited static method satisfies a `static abstract` interface member), so a value object with no diagram column behind it — a mail address, a period, a unit — is written with **three members**: a private constructor, `New`, and `ValidateCore`:
+
+```csharp
+public sealed class ContactMailValue
+    : ValueObjectStringBase<ContactMailValue>,
+        IValueObject<ContactMailValue, string>
+{
+    private ContactMailValue(string value) : base(value) { }
+
+    static ContactMailValue IValueObject<ContactMailValue, string>.New(string value) => new(value);
+
+    static void IValueObject<ContactMailValue, string>.ValidateCore(
+        string value, ref List<string>? errors)
+    {
+        if (!value.Contains('@'))
+        {
+            (errors ??= new List<string>()).Add("Mail address must contain '@'.");
+        }
+    }
+}
+```
+
+- The shape is exactly what the generator emits, so `ContactMailValue.Create(...)` / `TryCreate` / `Validate` work as usual, and JSON conversion, SQL parameter binding, and row materialization treat the type like any generated value object.
+- A value object without rules can omit `ValidateCore` entirely (the interface's default implementation validates nothing) — two members are enough.
+- `ValidateCore` receives the error list **by reference and unallocated**; allocate it only when adding the first violation (`(errors ??= new List<string>()).Add(...)`), so creating a valid value allocates nothing.
+- For a reference-typed value (`string` / `byte[]`), reject `null` in `ValidateCore` when the input is not trusted: a value object never wraps null (a nullable column keeps the property itself null), and the generated ones report a null input as a validation error.
+- `New` and `ValidateCore` are explicit implementations, so they stay off the type's public surface. Calling `TVo.New` through a generic type parameter would skip validation — validation belongs to `Create` / `TryCreate`, so never call `New` yourself.
+- Pick the base by value type: `ValueObjectStringBase` (string), `ValueObjectOrderedBase<TSelf, TValue>` (numbers and date/time), `ValueObjectBooleanBase`, `ValueObjectBinaryBase`, `ValueObjectGuidKeyBase` (GUID-as-string keys), or `ValueObjectBase<TSelf, TValue>` directly for anything else.
+
 ### partial extension points
 
 Every generated class offers two ways to customize messages and display names — the rule is the same across every static class and every generation mode (inline / package-reference):

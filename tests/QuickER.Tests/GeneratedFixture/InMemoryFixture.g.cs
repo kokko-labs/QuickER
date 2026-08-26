@@ -8598,7 +8598,7 @@ public static class InMemorySampleData
             {
                 CustomerId = index,
                 Name = ($"name {index}").Length > 50 ? ($"name {index}")[..50] : ($"name {index}"),
-                Balance = index == 3 ? null : index * 100.50m,
+                Balance = index == 3 ? null : index * 100.05m,
             };
             entity.MarkAdded();
             store.Put(entity);
@@ -8616,7 +8616,7 @@ public static class InMemorySampleData
                 OrderId = index,
                 CustomerId = index,
                 Memo = index == 3 ? null : ($"memo {index}").Length > 50 ? ($"memo {index}")[..50] : ($"memo {index}"),
-                Amount = index * 100.50m,
+                Amount = index * 100.05m,
             };
             entity.MarkAdded();
             store.Put(entity);

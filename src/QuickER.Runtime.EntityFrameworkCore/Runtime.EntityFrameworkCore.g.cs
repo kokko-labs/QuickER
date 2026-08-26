@@ -275,9 +275,12 @@ public sealed class EntitySaveMetadata
             return null;
         }
 
+        // FlattenHierarchy: Create is declared on ValueObjectBase, and without the flag reflection never returns a
+        // static member declared on a base class - the resolution would quietly fail and every value object column
+        // would take the SetColumnValue fallback instead of the fast path.
         var create = propertyType.GetMethod(
             "Create",
-            BindingFlags.Public | BindingFlags.Static,
+            BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy,
             binder: null,
             new[] { getter.ReturnType },
             modifiers: null

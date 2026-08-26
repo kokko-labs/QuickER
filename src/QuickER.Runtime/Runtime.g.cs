@@ -351,6 +351,22 @@ public interface IValueObject
 public interface IValueObject<TSelf, TValue> : IValueObject
     where TSelf : IValueObject<TSelf, TValue>
 {
+    /// <summary>Creates the instance from an already-validated value. Write it as an explicit implementation that calls the private constructor.</summary>
+    /// <remarks>
+    /// This member exists so that <see cref="ValueObjectBase{TSelf, TValue}"/> can implement Create / TryCreate once for
+    /// every value object; validating is their job, so calling New through a type parameter skips validation. An explicit
+    /// implementation keeps it off the type's own public surface, where Create is the front door.
+    /// </remarks>
+    static abstract TSelf New(TValue value);
+
+    /// <summary>Validation body shared by Create / TryCreate / Validate; fills the error list, creating it only once something is actually wrong. Leave it unimplemented for a value object with no rules.</summary>
+    /// <remarks>
+    /// Creating a value object succeeds far more often than it fails, and a list allocated on every successful call is pure
+    /// garbage: value objects are created per column per row. The list is therefore passed by reference and allocated on
+    /// first use (<c>(errors ??= new List&lt;string&gt;()).Add(...)</c>), so a run with no violations allocates nothing at all.
+    /// </remarks>
+    static virtual void ValidateCore(TValue value, ref List<string>? errors) { }
+
     /// <summary>Validates and creates the value object (throws ValueObjectValidationException on violation).</summary>
     static abstract TSelf Create(TValue value);
 
@@ -383,15 +399,68 @@ public sealed class ValueObjectValidationException : Exception
     }
 }
 
-/// <summary>Common base for value objects. Provides value storage, equality, ToString, and extraction of the raw value (ordered comparison is added by derived types).</summary>
+/// <summary>Common base for value objects. Provides the Create / TryCreate / Validate factories, value storage, equality, ToString, and extraction of the raw value (ordered comparison is added by derived types).</summary>
 public abstract partial class ValueObjectBase<TSelf, TValue> : IValueObject, IEquatable<TSelf>
-    where TSelf : ValueObjectBase<TSelf, TValue>
+    where TSelf : ValueObjectBase<TSelf, TValue>, IValueObject<TSelf, TValue>
 {
     /// <summary>Gets the underlying value (never reassigned; reference-typed values such as byte[] are not defensively copied — see <see cref="ValueObjectBinaryBase{TSelf}"/>).</summary>
     public TValue Value { get; }
 
-    /// <summary>Initializes with an already-validated value (the concrete Create/TryCreate performs validation beforehand).</summary>
+    /// <summary>Initializes with an already-validated value (Create/TryCreate performs validation beforehand).</summary>
     protected ValueObjectBase(TValue value) => Value = value;
+
+    /// <summary>Validates and creates the value object (throws ValueObjectValidationException on violation).</summary>
+    /// <remarks>
+    /// An inherited static member satisfies a static abstract interface member, so this single implementation is what
+    /// every derived value object exposes as <c>IValueObject&lt;TSelf, TValue&gt;.Create</c> — the type itself only
+    /// supplies <c>New</c> (the constructor call) and <c>ValidateCore</c> (the rules).
+    /// </remarks>
+    public static TSelf Create(TValue value)
+    {
+        List<string>? errors = null;
+        TSelf.ValidateCore(value, ref errors);
+        if (errors is { Count: > 0 })
+        {
+            throw new ValueObjectValidationException(typeof(TSelf), errors);
+        }
+        return TSelf.New(value);
+    }
+
+    /// <summary>Returns true plus the value object when creation succeeds, or false plus the error details when it fails.</summary>
+    public static bool TryCreate(
+        TValue value,
+        out TSelf? result,
+        out IReadOnlyList<string> errors
+    )
+    {
+        List<string>? list = null;
+        TSelf.ValidateCore(value, ref list);
+        if (list is { Count: > 0 })
+        {
+            result = null;
+            errors = list;
+            return false;
+        }
+        result = TSelf.New(value);
+        errors = Array.Empty<string>();
+        return true;
+    }
+
+    /// <summary>Runs the validation rules (ValidateCore, including the OnValidate extension where one is written) without creating the value object, adding any violations to the given collection.</summary>
+    public static void Validate(TValue value, ICollection<string> errors)
+    {
+        List<string>? collected = null;
+        TSelf.ValidateCore(value, ref collected);
+        if (collected is null)
+        {
+            return;
+        }
+
+        foreach (var error in collected)
+        {
+            errors.Add(error);
+        }
+    }
 
     /// <summary>Gets the underlying value as an object (opens the raw value for SQL binding and similar).</summary>
     object? IValueObject.UnderlyingValue => Value;
@@ -438,7 +507,7 @@ public abstract partial class ValueObjectOrderedBase<TSelf, TValue>
     : ValueObjectBase<TSelf, TValue>,
         IComparable<TSelf>,
         IComparable
-    where TSelf : ValueObjectOrderedBase<TSelf, TValue>
+    where TSelf : ValueObjectOrderedBase<TSelf, TValue>, IValueObject<TSelf, TValue>
     where TValue : IComparable<TValue>
 {
     /// <summary>Initializes with an already-validated value.</summary>
@@ -495,7 +564,7 @@ public abstract partial class ValueObjectStringBase<TSelf>
     : ValueObjectBase<TSelf, string>,
         IComparable<TSelf>,
         IComparable
-    where TSelf : ValueObjectStringBase<TSelf>
+    where TSelf : ValueObjectStringBase<TSelf>, IValueObject<TSelf, string>
 {
     /// <summary>Initializes with an already-validated value.</summary>
     protected ValueObjectStringBase(string value)
@@ -3278,9 +3347,13 @@ public static class SqlValueObjectActivator
         }
 
         var valueType = iface.GetGenericArguments()[1];
+
+        // FlattenHierarchy: without it reflection never returns a static member declared on a base class, and Create
+        // lives on ValueObjectBase (a hand-written value object inheriting it included). A same-signature Create declared
+        // on the type itself still wins (hide-by-signature), with no AmbiguousMatchException.
         var createMethod = targetType.GetMethod(
             "Create",
-            BindingFlags.Public | BindingFlags.Static,
+            BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy,
             binder: null,
             new[] { valueType },
             modifiers: null

@@ -2168,6 +2168,36 @@ public static class InMemorySampleData
         }
     }
 {{~ end ~}}
+{{~ if generate_value_objects ~}}
+
+    /// <summary>Creates a value object for seeding, so a rejected sample value reports what was assigned where and how to proceed.</summary>
+    /// <remarks>
+    /// The generated sample values satisfy the constraints declared in the diagram (maximum length, decimal
+    /// precision/scale), but they cannot know the rules a hand-written OnValidate - or a hand-written value object -
+    /// adds. Such a rejection is not something better sample values could avoid; what matters is that the failure,
+    /// surfacing from inside AddGeneratedInMemoryRepositories, immediately names the property, the value, and the way
+    /// out (seedSampleData: false). The original validation failure travels as the inner exception.
+    /// </remarks>
+    private static TVo CreateSampleValue<TVo, TValue>(string target, TValue value)
+        where TVo : IValueObject<TVo, TValue>
+    {
+        try
+        {
+            return TVo.Create(value);
+        }
+        catch (ValueObjectValidationException error)
+        {
+            throw new InvalidOperationException(
+                FormattableString.Invariant(
+                    $"Seeding sample data failed: cannot assign \"{value}\" to {target} ({error.Message}). "
+                )
+                    + "A user-defined validation rule rejects the generated sample value, and sample values cannot know such rules. "
+                    + "Register with AddGeneratedInMemoryRepositories(seedSampleData: false) and insert your own data instead.",
+                error
+            );
+        }
+    }
+{{~ end ~}}
 }
 
 /// <summary>Extensions that register the in-memory repositories with the DI container.</summary>

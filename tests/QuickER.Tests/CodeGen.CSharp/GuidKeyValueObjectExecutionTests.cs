@@ -130,9 +130,16 @@ public sealed class GuidKeyValueObjectExecutionTests
 
     private static object InvokeCreateString(string value)
     {
+        // Create(string) は ValueObjectBase の宣言を継承する形になったため、静的メンバの
+        // 基底探索（FlattenHierarchy）が要る（利用コードの型名経由の呼び出しと同じ解決）
         var method =
-            Vo.GetMethod("Create", new[] { typeof(string) })
-            ?? throw new InvalidOperationException("Create(string) が見つからない");
+            Vo.GetMethod(
+                "Create",
+                BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy,
+                binder: null,
+                types: new[] { typeof(string) },
+                modifiers: null
+            ) ?? throw new InvalidOperationException("Create(string) が見つからない");
         return method.Invoke(null, new object[] { value })!;
     }
 
@@ -140,9 +147,12 @@ public sealed class GuidKeyValueObjectExecutionTests
         string value
     )
     {
+        // TryCreate も同様に基底（ValueObjectBase）宣言＝FlattenHierarchy で引く
         var method =
-            Vo.GetMethod("TryCreate")
-            ?? throw new InvalidOperationException("TryCreate が見つからない");
+            Vo.GetMethod(
+                "TryCreate",
+                BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy
+            ) ?? throw new InvalidOperationException("TryCreate が見つからない");
         var args = new object?[] { value, null, null };
         var ok = (bool)method.Invoke(null, args)!;
         return (ok, args[1], (IEnumerable<string>)args[2]!);
