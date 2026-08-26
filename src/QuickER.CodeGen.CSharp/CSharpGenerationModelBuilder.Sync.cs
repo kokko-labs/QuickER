@@ -219,6 +219,10 @@ internal sealed partial class CSharpGenerationModelBuilder
             RemoteRouteName = repositoryName,
             TableClassName = $"{repositoryName}SyncTable",
             DecoratorClassName = $"Journaling{repositoryName}Repository",
+            // デコレータの汎用基底も SyncTable と同じく版の有無でサブクラス階層を選ぶ（削除記録の形だけが違う）
+            DecoratorBaseClassName = isVersionless
+                ? "VersionlessJournalingRepository"
+                : "JournalingRepository",
             KeyPropertyName = keyPropertyName,
             // 昇順・上限つきの差分走査（版ありのみ）。2 点が効いている:
             //  (1) @anchor / @ceiling は NULL を取り得るため、素の比較では 3 値論理で全行が UNKNOWN になる
@@ -260,14 +264,6 @@ internal sealed partial class CSharpGenerationModelBuilder
                 ? "null"
                 : BuildRowVersionRead(
                     "entity",
-                    rowVersionPropertyName,
-                    rowVersionColumn,
-                    rowVersionValueObject
-                ),
-            RowVersionReadExistingExpression = rowVersionColumn is null
-                ? string.Empty
-                : BuildRowVersionRead(
-                    "existing",
                     rowVersionPropertyName,
                     rowVersionColumn,
                     rowVersionValueObject
@@ -433,7 +429,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             + $"        {keyTypeName} id,\n"
             + "        Stream destination,\n"
             + "        CancellationToken cancellationToken = default\n"
-            + $"    ) => inner.Read{column}Async(id, destination, cancellationToken);\n\n"
+            + $"    ) => _inner.Read{column}Async(id, destination, cancellationToken);\n\n"
             + "    /// <inheritdoc />\n"
             + "    /// <remarks>\n"
             + "    /// A blob written on its own changes no ordinary column, so no other entry point records it. The\n"
@@ -446,10 +442,10 @@ internal sealed partial class CSharpGenerationModelBuilder
             + "        long? length = null,\n"
             + "        CancellationToken cancellationToken = default\n"
             + "    )\n    {\n"
-            + $"        await journal.RecordAsync(\n            \"{tableName}\",\n            {formatKeyIdExpression},\n"
+            + $"        await Journal.RecordAsync(\n            \"{tableName}\",\n            {formatKeyIdExpression},\n"
             + "            SyncJournalOperation.Upsert,\n            null,\n            cancellationToken\n        )\n"
             + "            .ConfigureAwait(false);\n\n"
-            + $"        return await inner.Write{column}Async(id, source, length, cancellationToken)\n"
+            + $"        return await _inner.Write{column}Async(id, source, length, cancellationToken)\n"
             + "            .ConfigureAwait(false);\n    }"
         );
 
@@ -474,7 +470,7 @@ internal sealed partial class CSharpGenerationModelBuilder
                 + "    public Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(\n"
                 + $"        {repository.EntityClassName} entity,\n"
                 + "        CancellationToken cancellationToken = default\n"
-                + "    ) => inner.CheckUniquenessAsync(entity, cancellationToken);",
+                + "    ) => _inner.CheckUniquenessAsync(entity, cancellationToken);",
         };
 
         var queryBlocks = BuildQueryBlocks(

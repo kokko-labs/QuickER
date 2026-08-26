@@ -2469,6 +2469,275 @@ public sealed class SyncEngine
     }
 }
 
+/// <summary>
+/// Generic core of the journaling repository decorator: every write entry point on the repository contract records
+/// its intent to the journal before the write is performed, and everything else is forwarded untouched.
+/// </summary>
+/// <remarks>
+/// <para>
+/// It wraps the repository rather than hooking into the save pipeline because a save hook only fires for a graph save -
+/// a direct Insert, Update, Delete, or BulkInsert passes it by. Offline editing has to be caught at every write, so
+/// every write entry point on the contract records here. What stays with the generated derived class is only what the
+/// generic core cannot know: the table's name and key handling, and the graph-save recording, which walks the
+/// generated cascade closure (plus the members the concrete interface adds - named queries, the uniqueness pre-check,
+/// and the binary column accessors - which the derived class forwards itself).
+/// </para>
+/// <para>
+/// Raw SQL (<c>ExecuteSqlAsync</c>) is forwarded untouched and is <b>not</b> recorded: the statement's shape is opaque
+/// to the decorator, so there is no key to journal. The same holds for the bulk delete behind
+/// <c>Query().ExecuteDeleteAsync</c>, whose rows are chosen by a predicate the decorator never sees. Rows changed
+/// either way reach the server only if something else records them.
+/// </para>
+/// </remarks>
+/// <typeparam name="TEntity">The entity type.</typeparam>
+/// <typeparam name="TKey">The primary key type.</typeparam>
+public abstract class JournalingRepositoryBase<TEntity, TKey> : IRepository<TEntity, TKey>
+    where TEntity : EntityBase, new()
+{
+    /// <summary>Creates the decorator over the repository it wraps and the journal it records to.</summary>
+    protected JournalingRepositoryBase(IRepository<TEntity, TKey> inner, SyncJournal journal)
+    {
+        Inner = inner;
+        Journal = journal;
+    }
+
+    /// <summary>Gets the wrapped repository every call is forwarded to.</summary>
+    protected IRepository<TEntity, TKey> Inner { get; }
+
+    /// <summary>Gets the journal the write intents are recorded to.</summary>
+    protected SyncJournal Journal { get; }
+
+    /// <summary>Gets the server-side table name the journal entries are recorded under.</summary>
+    protected abstract string TableName { get; }
+
+    /// <summary>Reads the primary key of the given entity.</summary>
+    protected abstract TKey ReadKey(TEntity entity);
+
+    /// <summary>Formats a key into the journal's key text (the same serialization the sync engine reads back).</summary>
+    protected abstract string FormatKey(TKey key);
+
+    /// <summary>Records a delete intent for the given key (the versioned and versionless subclasses differ here).</summary>
+    protected abstract Task RecordDeleteAsync(TKey id, CancellationToken cancellationToken);
+
+    /// <summary>Records a graph save via the generated cascade recorder (the closure is schema knowledge the core cannot have).</summary>
+    protected abstract Task RecordGraphSaveAsync(
+        TEntity entity,
+        bool cascadeSave,
+        bool cascadeDelete,
+        CancellationToken cancellationToken
+    );
+
+    /// <summary>Records the intent to write the given row, unless the sync engine is the one writing.</summary>
+    protected Task RecordUpsertAsync(TEntity entity, CancellationToken cancellationToken) =>
+        Journal.RecordAsync(
+            TableName,
+            FormatKey(ReadKey(entity)),
+            SyncJournalOperation.Upsert,
+            null,
+            cancellationToken
+        );
+
+    /// <inheritdoc />
+    public Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default) =>
+        Inner.GetByIdAsync(id, cancellationToken);
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<TEntity>> GetAllAsync(CancellationToken cancellationToken = default) =>
+        Inner.GetAllAsync(cancellationToken);
+
+    /// <inheritdoc />
+    public async Task InsertAsync(TEntity entity, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+        await RecordUpsertAsync(entity, cancellationToken).ConfigureAwait(false);
+        await Inner.InsertAsync(entity, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> UpdateAsync(
+        TEntity entity,
+        ConcurrencyMode mode = ConcurrencyMode.Optimistic,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+        await RecordUpsertAsync(entity, cancellationToken).ConfigureAwait(false);
+
+        return await Inner.UpdateAsync(entity, mode, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default)
+    {
+        await RecordDeleteAsync(id, cancellationToken).ConfigureAwait(false);
+
+        return await Inner.DeleteAsync(id, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<int> BulkInsertAsync(
+        IEnumerable<TEntity> entities,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(entities);
+        var materialized = entities.ToList();
+
+        foreach (var entity in materialized)
+        {
+            if (entity is not null)
+            {
+                await RecordUpsertAsync(entity, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        return await Inner.BulkInsertAsync(materialized, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<int> SaveAsync(
+        TEntity entity,
+        bool cascadeSave = true,
+        bool cascadeDelete = true,
+        bool insertWhenUpdateMissing = false,
+        ConcurrencyMode mode = ConcurrencyMode.Optimistic,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+        await RecordGraphSaveAsync(entity, cascadeSave, cascadeDelete, cancellationToken)
+            .ConfigureAwait(false);
+
+        return await Inner.SaveAsync(
+            entity,
+            cascadeSave,
+            cascadeDelete,
+            insertWhenUpdateMissing,
+            mode,
+            cancellationToken
+        )
+            .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<int> SaveAsync(
+        IEnumerable<TEntity> entities,
+        bool cascadeSave = true,
+        bool cascadeDelete = true,
+        bool insertWhenUpdateMissing = false,
+        ConcurrencyMode mode = ConcurrencyMode.Optimistic,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(entities);
+        var materialized = entities.ToList();
+
+        foreach (var entity in materialized)
+        {
+            if (entity is not null)
+            {
+                await RecordGraphSaveAsync(entity, cascadeSave, cascadeDelete, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+        }
+
+        return await Inner.SaveAsync(
+            materialized,
+            cascadeSave,
+            cascadeDelete,
+            insertWhenUpdateMissing,
+            mode,
+            cancellationToken
+        )
+            .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public SqlQuery<TEntity> Query() => Inner.Query();
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<TEntity>> QueryBySqlAsync(
+        string sql,
+        object? parameters = null,
+        CancellationToken cancellationToken = default
+    ) => Inner.QueryBySqlAsync(sql, parameters, cancellationToken);
+
+    /// <inheritdoc />
+    public Task<int> ExecuteSqlAsync(
+        string sql,
+        object? parameters = null,
+        CancellationToken cancellationToken = default
+    ) => Inner.ExecuteSqlAsync(sql, parameters, cancellationToken);
+
+    /// <inheritdoc />
+    public Task<TResult?> ExecuteScalarSqlAsync<TResult>(
+        string sql,
+        object? parameters = null,
+        CancellationToken cancellationToken = default
+    ) => Inner.ExecuteScalarSqlAsync<TResult>(sql, parameters, cancellationToken);
+}
+
+/// <summary>Journaling decorator core for a table with a row-version column (a delete intent carries the mirrored version).</summary>
+/// <typeparam name="TEntity">The entity type.</typeparam>
+/// <typeparam name="TKey">The primary key type.</typeparam>
+public abstract class JournalingRepository<TEntity, TKey> : JournalingRepositoryBase<TEntity, TKey>
+    where TEntity : EntityBase, new()
+{
+    /// <summary>Creates the decorator over the repository it wraps and the journal it records to.</summary>
+    protected JournalingRepository(IRepository<TEntity, TKey> inner, SyncJournal journal)
+        : base(inner, journal) { }
+
+    /// <summary>Reads the mirrored row version of the given entity.</summary>
+    protected abstract byte[]? ReadRowVersion(TEntity entity);
+
+    /// <inheritdoc />
+    protected sealed override async Task RecordDeleteAsync(
+        TKey id,
+        CancellationToken cancellationToken
+    )
+    {
+        // The row has to be read before it goes: its mirrored version is the only thing that lets the delete be
+        // replayed under a version guard, and once the row is gone there is nowhere left to read it from.
+        if (!SyncSession.IsSuppressed)
+        {
+            var existing = await Inner.GetByIdAsync(id, cancellationToken).ConfigureAwait(false);
+            await Journal.RecordAsync(
+                TableName,
+                FormatKey(id),
+                SyncJournalOperation.Delete,
+                existing is null ? null : ReadRowVersion(existing),
+                cancellationToken
+            )
+                .ConfigureAwait(false);
+        }
+    }
+}
+
+/// <summary>Journaling decorator core for a table without a row-version column (a delete intent carries no version and replays unguarded).</summary>
+/// <typeparam name="TEntity">The entity type.</typeparam>
+/// <typeparam name="TKey">The primary key type.</typeparam>
+public abstract class VersionlessJournalingRepository<TEntity, TKey>
+    : JournalingRepositoryBase<TEntity, TKey>
+    where TEntity : EntityBase, new()
+{
+    /// <summary>Creates the decorator over the repository it wraps and the journal it records to.</summary>
+    protected VersionlessJournalingRepository(IRepository<TEntity, TKey> inner, SyncJournal journal)
+        : base(inner, journal) { }
+
+    /// <inheritdoc />
+    protected sealed override Task RecordDeleteAsync(TKey id, CancellationToken cancellationToken) =>
+        // No version column means there is no mirrored version to capture before the row goes; the delete replays
+        // without a guard, which is all a last-write-wins table can promise anyway.
+        Journal.RecordAsync(
+            TableName,
+            FormatKey(id),
+            SyncJournalOperation.Delete,
+            null,
+            cancellationToken
+        );
+}
+
 /// <summary>The operation names of the sync-only endpoints (<c>POST {prefix}/{entity}/{operation}</c>).</summary>
 /// <remarks>
 /// The server maps them and the client posts to them, so both sides read the route from here and cannot drift apart.
