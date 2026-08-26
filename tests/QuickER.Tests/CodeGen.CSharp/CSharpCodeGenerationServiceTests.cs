@@ -221,11 +221,14 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("public RowState RowState");
         content.Should().Contain("public void MarkAdded() => RowState = RowState.Added;");
         content.Should().Contain("public void MarkRemoved() => RowState = RowState.Removed;");
-        // 確定値（非バインド）setter は、ロード中以外のみ横断フック＋昇格条件を経て MarkUpdated で昇格する
+        // 確定値（非バインド）setter の共通後段（通知→ロード中以外のみ横断フック＋昇格条件→MarkUpdated）は
+        // 基底 AfterConfirmedValueSet が 1 回だけ持ち、per-type はプロパティ名を渡して呼ぶ
+        content.Should().Contain("protected void AfterConfirmedValueSet(string propertyName)");
         content.Should().Contain("if (!IsLoading)");
-        content.Should().Contain("OnConfirmedValueChanged(nameof(CustomerId));");
-        content.Should().Contain("if (ShouldMarkUpdated(nameof(CustomerId)))");
+        content.Should().Contain("OnConfirmedValueChanged(propertyName);");
+        content.Should().Contain("if (ShouldMarkUpdated(propertyName))");
         content.Should().Contain("MarkUpdated();");
+        content.Should().Contain("AfterConfirmedValueSet(nameof(CustomerId));");
         // 拡張ポイント：確定値変更の横断フックと昇格条件、SetProperty は override 可能
         content
             .Should()
@@ -832,9 +835,9 @@ public class CSharpCodeGenerationServiceTests
         // バインディング用プロパティ (string)
         content.Should().Contain("public string BindingOrderId");
         content.Should().Contain("public string BindingAmount");
-        // TryParse 検証
-        content.Should().Contain("int.TryParse(normalized, out var parsed)");
-        content.Should().Contain("decimal.TryParse(normalized, out var parsed)");
+        // TryParse 検証（基底の IParsable 総称ヘルパー経由＝型は型引数で運ぶ・意味は型自身の TryParse と同じ）
+        content.Should().Contain("TryParseInput<int>(normalized, out var parsed)");
+        content.Should().Contain("TryParseInput<decimal>(normalized, out var parsed)");
         // エラーメッセージは ResolveParseErrorMessage 経由で生成され、安定キー（nameof）と表示名を渡す
         // （Description 無指定は null を渡し、ヘルパ側でプロパティ名へフォールバックする）
         content
@@ -2026,13 +2029,14 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("public int? FileId");
         content.Should().Contain("public bool? IsActive");
         content.Should().Contain("public byte[] Filedata { get; set; } = Array.Empty<byte>();");
-        content.Should().Contain("Filedata = Convert.FromBase64String(normalized);");
+        // Base64 変換は基底ヘルパー（空＝空配列・失敗＝false）経由で、成功時に確定値へ代入する
+        content.Should().Contain("if (TryConvertBase64Input(normalized, out var bytes))");
+        content.Should().Contain("Filedata = bytes;");
         content
             .Should()
             .Contain(
                 "BindingFiledata = Filedata is null ? string.Empty : Convert.ToBase64String(Filedata);"
             );
-        content.Should().Contain("Filedata = Array.Empty<byte>();");
         content.Should().Contain("BindingFileId = FileId?.ToString() ?? string.Empty;");
         // Mapper のロードは確定値の直接代入（byte[] も Base64 を経由しない＝無損失）。
         // ただしバイナリ列だけは防御的コピーを挟む（配列を共有すると EditModel の編集が Entity へ波及する）
@@ -3914,11 +3918,14 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("[SqlColumnType(SqlDbType.Decimal, Precision = 10, Scale = 2)]");
         // Entity の型が VO（非 NULL PK は null! 初期化）
         content.Should().Contain("public CustomerIdValue CustomerId { get; set; } = null!;");
-        // EditModel 確定値は常に VO?（バインド setter は TryCreate）
+        // EditModel 確定値は常に VO?（バインド setter は基底の解析＋TryCreate ヘルパー経由で、
+        // 代入と失敗文言だけを per-type が持つ）
         content.Should().Contain("public CustomerIdValue? CustomerId");
         content
             .Should()
-            .Contain("CustomerIdValue.TryCreate(parsed, out var converted, out var voErrors)");
+            .Contain(
+                "ConvertParsedValueObjectInput<CustomerIdValue, int>(normalized, out var converted, out var rejection)"
+            );
         // EntityBase / Repository の JSON オプションに VO 変換器が登録される
         content.Should().Contain("Converters = { new ValueObjectJsonConverterFactory() },");
         // Mapper のロードは VO 列でも VO インスタンスをそのまま代入する（ToString/TryCreate の往復なし）
