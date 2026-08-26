@@ -22,6 +22,13 @@ internal sealed partial class CSharpGenerationModelBuilder
         var innerType = StripTaskType(shape.ReturnTypeName);
         var operation = TrimAsyncSuffix(shape.MethodName);
 
+        // null が正当な結果である操作（単一戻り形・スカラー戻り形＝内側の型が nullable）は InvokeNullableAsync へ、
+        // それ以外は「JSON リテラル null の本文」を転送失敗として分類する InvokeAsync へ振り分ける
+        // （契約は C# シグネチャの nullability そのもの）
+        var invokeMethod = innerType.EndsWith("?", StringComparison.Ordinal)
+            ? "InvokeNullableAsync"
+            : "InvokeAsync";
+
         // ペイロード: パラメータ名そのままの匿名型（VO はエンベロープの JSON 化時に VO コンバータで内包値になる）。
         // パラメータなしは null（本文 "null"。サーバー側もリクエストを読まない）
         var payload =
@@ -37,7 +44,9 @@ internal sealed partial class CSharpGenerationModelBuilder
                 shape.MethodName,
                 shape.ParameterList
             )
-            .Append(" =>\n        InvokeAsync<")
+            .Append(" =>\n        ")
+            .Append(invokeMethod)
+            .Append('<')
             .Append(innerType)
             .Append(">(\"")
             .Append(operation)

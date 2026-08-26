@@ -3879,6 +3879,8 @@ public sealed partial class DocumentMapper
     partial void OnEditModelCreated(DocumentEditModel editModel);
 
     /// <summary>Applies the DocumentEditModel's confirmed values to an existing DocumentEntity (destructive update).</summary>
+    /// <param name="editModel">The edit model whose confirmed values are applied.</param>
+    /// <param name="entity">The existing entity to apply the values to.</param>
     /// <param name="includeRemoved">Whether to also restore and apply deletion-tracked (Removed) items (true for saving, false for report display and similar).</param>
     public override void ApplyToEntity(
         DocumentEditModel editModel,
@@ -3980,6 +3982,8 @@ public sealed partial class DocumentNoteMapper
     partial void OnEditModelCreated(DocumentNoteEditModel editModel);
 
     /// <summary>Applies the DocumentNoteEditModel's confirmed values to an existing DocumentNoteEntity (destructive update).</summary>
+    /// <param name="editModel">The edit model whose confirmed values are applied.</param>
+    /// <param name="entity">The existing entity to apply the values to.</param>
     /// <param name="includeRemoved">Whether to also restore and apply deletion-tracked (Removed) items (true for saving, false for report display and similar).</param>
     public override void ApplyToEntity(
         DocumentNoteEditModel editModel,

@@ -199,7 +199,10 @@ public class RemoteServiceGenerationTests
             .Contain(
                 "InvokeAsync<IReadOnlyList<OrderEntity>>(\"GetByCustomer\", new { customerId, take, skip }, cancellationToken);"
             );
-        main.Should().Contain("InvokeAsync<OrderEntity?>(\"FindTop\", null, cancellationToken);");
+        // 単一戻り形（内側の型が nullable）は「null 本文＝正当な結果」の InvokeNullableAsync へ、
+        // 一覧などの非 nullable は「null 本文＝転送失敗として分類」の InvokeAsync へ振り分ける
+        main.Should()
+            .Contain("InvokeNullableAsync<OrderEntity?>(\"FindTop\", null, cancellationToken);");
 
         // サーバー: リクエストレコード（PascalCase プロパティ）＋リモート面への委譲ハンドラ
         server

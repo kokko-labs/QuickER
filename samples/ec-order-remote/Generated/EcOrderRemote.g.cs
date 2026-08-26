@@ -5031,6 +5031,8 @@ public sealed partial class CustomerMapper
     partial void OnEditModelCreated(CustomerEditModel editModel);
 
     /// <summary>Applies the CustomerEditModel's confirmed values to an existing CustomerEntity (destructive update).</summary>
+    /// <param name="editModel">The edit model whose confirmed values are applied.</param>
+    /// <param name="entity">The existing entity to apply the values to.</param>
     /// <param name="includeRemoved">Whether to also restore and apply deletion-tracked (Removed) items (true for saving, false for report display and similar).</param>
     public override void ApplyToEntity(
         CustomerEditModel editModel,
@@ -5116,6 +5118,8 @@ public sealed partial class ProductMapper
     partial void OnEditModelCreated(ProductEditModel editModel);
 
     /// <summary>Applies the ProductEditModel's confirmed values to an existing ProductEntity (destructive update).</summary>
+    /// <param name="editModel">The edit model whose confirmed values are applied.</param>
+    /// <param name="entity">The existing entity to apply the values to.</param>
     /// <param name="includeRemoved">Whether to also restore and apply deletion-tracked (Removed) items (true for saving, false for report display and similar).</param>
     public override void ApplyToEntity(
         ProductEditModel editModel,
@@ -5202,6 +5206,8 @@ public sealed partial class OrderMapper
     partial void OnEditModelCreated(OrderEditModel editModel);
 
     /// <summary>Applies the OrderEditModel's confirmed values to an existing OrderEntity (destructive update).</summary>
+    /// <param name="editModel">The edit model whose confirmed values are applied.</param>
+    /// <param name="entity">The existing entity to apply the values to.</param>
     /// <param name="includeRemoved">Whether to also restore and apply deletion-tracked (Removed) items (true for saving, false for report display and similar).</param>
     public override void ApplyToEntity(
         OrderEditModel editModel,
@@ -5290,6 +5296,8 @@ public sealed partial class OrderLineMapper
     partial void OnEditModelCreated(OrderLineEditModel editModel);
 
     /// <summary>Applies the OrderLineEditModel's confirmed values to an existing OrderLineEntity (destructive update).</summary>
+    /// <param name="editModel">The edit model whose confirmed values are applied.</param>
+    /// <param name="entity">The existing entity to apply the values to.</param>
     /// <param name="includeRemoved">Whether to also restore and apply deletion-tracked (Removed) items (true for saving, false for report display and similar).</param>
     public override void ApplyToEntity(
         OrderLineEditModel editModel,
@@ -9617,7 +9625,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         }
     }
 
-    /// <summary>Posts an operation and deserializes the result JSON into <typeparamref name="TResult"/> (the shared path for generated transport methods).</summary>
+    /// <summary>Posts an operation and deserializes the result JSON into <typeparamref name="TResult"/> (the shared path for generated transport methods whose result is never null).</summary>
     /// <remarks>
     /// On a failure response, reads the <see cref="RemoteError"/>; 409 with SaveConflict throws <see cref="SaveConflictException"/>,
     /// anything else throws <see cref="RemoteRepositoryException"/>. A success response whose body is not the expected JSON throws
@@ -9627,10 +9635,41 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     /// when it cannot be read into <typeparamref name="TResult"/> at all; a shape that only gained or lost a field is read without
     /// complaint and leaves the missing part at its default, so this is not a version check. The parse failure itself is kept as the
     /// inner exception, since the reason the body could not be read is exactly what tells the two apart.
+    /// A body that is the JSON literal <c>null</c> deserializes without an exception, so it is checked for explicitly and
+    /// classified the same way: the operations routed through here declare non-nullable results, and a null body can only
+    /// come from something other than the generated endpoint. Operations whose result is legitimately null - a get-by-id
+    /// that finds no row, a single-row query that matches nothing - go through <see cref="InvokeNullableAsync{TResult}"/>,
+    /// which is this same path with that check turned off.
     /// </remarks>
     protected async Task<TResult> InvokeAsync<TResult>(
         string operation,
         object? payload,
+        CancellationToken cancellationToken
+    )
+    {
+        var result = await InvokeCoreAsync<TResult>(
+            operation,
+            payload,
+            allowNullResult: false,
+            cancellationToken
+        ).ConfigureAwait(false);
+
+        return result!;
+    }
+
+    /// <summary>Posts an operation and deserializes the result JSON into <typeparamref name="TResult"/>, where the JSON literal <c>null</c> is a legal result (a get-by-id that finds no row, a single-row query that matches nothing).</summary>
+    /// <remarks>Everything else - the failure classification and the treatment of a success body that cannot be read - is exactly what <see cref="InvokeAsync{TResult}"/> describes.</remarks>
+    protected Task<TResult?> InvokeNullableAsync<TResult>(
+        string operation,
+        object? payload,
+        CancellationToken cancellationToken
+    ) => InvokeCoreAsync<TResult>(operation, payload, allowNullResult: true, cancellationToken);
+
+    /// <summary>The single transport path behind <see cref="InvokeAsync{TResult}"/> and <see cref="InvokeNullableAsync{TResult}"/>: posts the operation, classifies failures, and reads the result body.</summary>
+    private async Task<TResult?> InvokeCoreAsync<TResult>(
+        string operation,
+        object? payload,
+        bool allowNullResult,
         CancellationToken cancellationToken
     )
     {
@@ -9649,7 +9688,18 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
                 RemoteJson.Options,
                 cancellationToken
             ).ConfigureAwait(false);
-            return result!;
+
+            if (result is null && !allowNullResult)
+            {
+                // The JSON literal null deserializes without an exception, so the catch below never sees it; for an
+                // operation whose result is non-nullable it is the same kind of transport failure as an unreadable body
+                throw new RemoteRepositoryException(
+                    (int)response.StatusCode,
+                    $"The remote call succeeded (HTTP {(int)response.StatusCode}) but its response body was the JSON literal null, which this operation's result cannot be."
+                );
+            }
+
+            return result;
         }
         catch (Exception parseError)
             when (parseError is JsonException or NotSupportedException)
@@ -9757,7 +9807,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
 
     /// <summary>Gets a single entity by primary key (null when not found).</summary>
     public Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default) =>
-        InvokeAsync<TEntity?>("GetById", new RemoteIdRequest<TKey>(id), cancellationToken);
+        InvokeNullableAsync<TEntity?>("GetById", new RemoteIdRequest<TKey>(id), cancellationToken);
 
     /// <summary>Gets all entities.</summary>
     public Task<IReadOnlyList<TEntity>> GetAllAsync(CancellationToken cancellationToken = default) =>

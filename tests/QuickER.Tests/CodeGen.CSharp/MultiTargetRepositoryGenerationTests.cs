@@ -569,7 +569,9 @@ using Sample.Domain.Repositories.Sqlite;
 
 namespace Sample.Domain.Usage;
 
-public static class MultiTargetUsage
+// internal: 公開型だと XmlDoc 診断（DocumentationMode.Diagnose）の CS1591 が
+// このテスト自作の利用例に出る（生成コードの XmlDoc 検証とは無関係のノイズ）
+internal static class MultiTargetUsage
 {
     public static ICustomerRepository Wire(IServiceCollection services)
     {

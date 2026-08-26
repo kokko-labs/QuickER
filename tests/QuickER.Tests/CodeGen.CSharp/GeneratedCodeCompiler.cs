@@ -52,11 +52,14 @@ internal static class GeneratedCodeCompiler
         out MetadataReference? emittedReference
     )
     {
+        // DocumentationMode.Diagnose: XmlDoc の整合診断（CS1573=param 欠落・CS1574=cref 解決不能・
+        // CS1591=公開メンバーの XmlDoc 欠落など）を警告として拾う＝GenerateDocumentationFile=true の
+        // 利用者ビルドで初めて出る警告を、ここで先に検出する（テストが合成する利用例ソースは internal にして対象外へ）
         var syntaxTrees = files
             .Select(file =>
                 CSharpSyntaxTree.ParseText(
                     file.Content,
-                    new CSharpParseOptions(LanguageVersion.Latest),
+                    new CSharpParseOptions(LanguageVersion.Latest, DocumentationMode.Diagnose),
                     path: file.FileName
                 )
             )

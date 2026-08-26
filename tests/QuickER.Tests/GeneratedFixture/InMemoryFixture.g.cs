@@ -4192,6 +4192,8 @@ public sealed partial class CustomerMapper
     partial void OnEditModelCreated(CustomerEditModel editModel);
 
     /// <summary>Applies the CustomerEditModel's confirmed values to an existing CustomerEntity (destructive update).</summary>
+    /// <param name="editModel">The edit model whose confirmed values are applied.</param>
+    /// <param name="entity">The existing entity to apply the values to.</param>
     /// <param name="includeRemoved">Whether to also restore and apply deletion-tracked (Removed) items (true for saving, false for report display and similar).</param>
     public override void ApplyToEntity(
         CustomerEditModel editModel,
@@ -4279,6 +4281,8 @@ public sealed partial class OrderMapper
     partial void OnEditModelCreated(OrderEditModel editModel);
 
     /// <summary>Applies the OrderEditModel's confirmed values to an existing OrderEntity (destructive update).</summary>
+    /// <param name="editModel">The edit model whose confirmed values are applied.</param>
+    /// <param name="entity">The existing entity to apply the values to.</param>
     /// <param name="includeRemoved">Whether to also restore and apply deletion-tracked (Removed) items (true for saving, false for report display and similar).</param>
     public override void ApplyToEntity(
         OrderEditModel editModel,
@@ -4365,6 +4369,8 @@ public sealed partial class CustomerProfileMapper
     partial void OnEditModelCreated(CustomerProfileEditModel editModel);
 
     /// <summary>Applies the CustomerProfileEditModel's confirmed values to an existing CustomerProfileEntity (destructive update).</summary>
+    /// <param name="editModel">The edit model whose confirmed values are applied.</param>
+    /// <param name="entity">The existing entity to apply the values to.</param>
     /// <param name="includeRemoved">Whether to also restore and apply deletion-tracked (Removed) items (true for saving, false for report display and similar).</param>
     public override void ApplyToEntity(
         CustomerProfileEditModel editModel,

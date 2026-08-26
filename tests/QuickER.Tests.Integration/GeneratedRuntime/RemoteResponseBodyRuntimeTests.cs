@@ -35,6 +35,9 @@ public sealed class RemoteResponseBodyRuntimeTests
     /// <summary>生成クライアントが GetAll で叩くルート（POST {prefix}/{エンティティ}/{操作}）</summary>
     private const string GetAllRoute = "/quicker/Document/GetAll";
 
+    /// <summary>生成クライアントが GetById で叩くルート（null が正当な結果である操作の代表）</summary>
+    private const string GetByIdRoute = "/quicker/Document/GetById";
+
     /// <summary>指定した本文・Content-Type・ステータスを返すだけのサーバーを立て、生成クライアントを繋ぐ</summary>
     private static async Task<(
         InProcessRemoteServer Server,
@@ -44,15 +47,19 @@ public sealed class RemoteResponseBodyRuntimeTests
         var server = await InProcessRemoteServer.StartAsync(
             _ => { },
             app =>
-                app.MapPost(
-                    GetAllRoute,
-                    async (HttpContext context) =>
-                    {
-                        context.Response.StatusCode = statusCode;
-                        context.Response.ContentType = contentType;
-                        await context.Response.WriteAsync(body, context.RequestAborted);
-                    }
-                ),
+            {
+                // GetAll（非 nullable 戻り）と GetById（nullable 戻り）の両ルートへ同じ応答を返す＝
+                // 同じ本文が、操作の nullability だけで「転送失敗の分類」と「正当な null」に分かれることを検証できる
+                async Task RespondAsync(HttpContext context)
+                {
+                    context.Response.StatusCode = statusCode;
+                    context.Response.ContentType = contentType;
+                    await context.Response.WriteAsync(body, context.RequestAborted);
+                }
+
+                app.MapPost(GetAllRoute, RespondAsync);
+                app.MapPost(GetByIdRoute, RespondAsync);
+            },
             Ct
         );
 
@@ -106,6 +113,50 @@ public sealed class RemoteResponseBodyRuntimeTests
 
             var thrown = (await act.Should().ThrowAsync<RemoteRepositoryException>()).Which;
             thrown.InnerException.Should().BeOfType<System.Text.Json.JsonException>();
+        }
+    }
+
+    [Fact(
+        DisplayName = "[Remote/応答本文] 2xx の JSON リテラル null は非 nullable 操作では RemoteRepositoryException になる"
+    )]
+    public async Task SuccessWithJsonNullBody_OnNonNullableOperation_ThrowsRemoteRepositoryException()
+    {
+        // リテラル null は正当な JSON なので JsonException では拾えず、明示チェックだけが検出できる
+        var (server, clients) = await StartFakeAsync("null", "application/json");
+
+        await using (server)
+        using (clients)
+        {
+            var documents = clients.GetRequiredService<IDocumentRemoteRepository>();
+
+            var act = async () => await documents.GetAllAsync(Ct);
+
+            var thrown = (await act.Should().ThrowAsync<RemoteRepositoryException>()).Which;
+            thrown.StatusCode.Should().Be(200, "分類には応答のステータスをそのまま添える");
+            thrown
+                .Message.Should()
+                .Contain(
+                    "JSON literal null",
+                    "壊れた JSON と区別できる文言＝呼び出し側が原因（宛先違い）へ辿れる"
+                );
+        }
+    }
+
+    [Fact(
+        DisplayName = "[Remote/応答本文] 対照: null が正当な結果の GetById は JSON リテラル null を null として返す"
+    )]
+    public async Task SuccessWithJsonNullBody_OnNullableOperation_ReturnsNull()
+    {
+        var (server, clients) = await StartFakeAsync("null", "application/json");
+
+        await using (server)
+        using (clients)
+        {
+            var documents = clients.GetRequiredService<IDocumentRemoteRepository>();
+
+            var document = await documents.GetByIdAsync(7, Ct);
+
+            document.Should().BeNull("GetById の「行なし」は null が契約どおりの答え");
         }
     }
 

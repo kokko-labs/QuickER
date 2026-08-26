@@ -165,6 +165,7 @@ public static class QuickER.Runtime.GeneratedDisplayNames
 public abstract class QuickER.Runtime.HttpRemoteRepository<TEntity, TKey> : QuickER.Runtime.IRemoteRepository<TEntity, TKey>
     protected .ctor(System.Net.Http.HttpClient httpClient, string entityRoute)
     protected System.Threading.Tasks.Task<TResult> InvokeAsync<TResult>(string operation, object payload, System.Threading.CancellationToken cancellationToken)
+    protected System.Threading.Tasks.Task<TResult> InvokeNullableAsync<TResult>(string operation, object payload, System.Threading.CancellationToken cancellationToken)
     protected System.Threading.Tasks.Task<bool> DownloadUnboundedBinaryColumnAsync(string columnRoute, TKey id, System.IO.Stream destination, System.Threading.CancellationToken cancellationToken)
     protected System.Threading.Tasks.Task<bool> UploadUnboundedBinaryColumnAsync(string columnRoute, TKey id, System.IO.Stream source, long? length, System.Threading.CancellationToken cancellationToken)
     protected string FormatKeyForQuery(TKey id)

@@ -2027,6 +2027,8 @@ public sealed partial class {{ mapper.class_name }}
     partial void OnEditModelCreated({{ mapper.edit_model_class_name }} editModel);
 
     /// <summary>Applies the {{ mapper.edit_model_class_name }}'s confirmed values to an existing {{ mapper.entity_class_name }} (destructive update).</summary>
+    /// <param name="editModel">The edit model whose confirmed values are applied.</param>
+    /// <param name="entity">The existing entity to apply the values to.</param>
     /// <param name="includeRemoved">Whether to also restore and apply deletion-tracked (Removed) items (true for saving, false for report display and similar).</param>
     public override void ApplyToEntity(
         {{ mapper.edit_model_class_name }} editModel,

@@ -5029,6 +5029,8 @@ public sealed partial class CustomerMapper
     partial void OnEditModelCreated(CustomerEditModel editModel);
 
     /// <summary>Applies the CustomerEditModel's confirmed values to an existing CustomerEntity (destructive update).</summary>
+    /// <param name="editModel">The edit model whose confirmed values are applied.</param>
+    /// <param name="entity">The existing entity to apply the values to.</param>
     /// <param name="includeRemoved">Whether to also restore and apply deletion-tracked (Removed) items (true for saving, false for report display and similar).</param>
     public override void ApplyToEntity(
         CustomerEditModel editModel,
@@ -5114,6 +5116,8 @@ public sealed partial class ProductMapper
     partial void OnEditModelCreated(ProductEditModel editModel);
 
     /// <summary>Applies the ProductEditModel's confirmed values to an existing ProductEntity (destructive update).</summary>
+    /// <param name="editModel">The edit model whose confirmed values are applied.</param>
+    /// <param name="entity">The existing entity to apply the values to.</param>
     /// <param name="includeRemoved">Whether to also restore and apply deletion-tracked (Removed) items (true for saving, false for report display and similar).</param>
     public override void ApplyToEntity(
         ProductEditModel editModel,
@@ -5200,6 +5204,8 @@ public sealed partial class OrderMapper
     partial void OnEditModelCreated(OrderEditModel editModel);
 
     /// <summary>Applies the OrderEditModel's confirmed values to an existing OrderEntity (destructive update).</summary>
+    /// <param name="editModel">The edit model whose confirmed values are applied.</param>
+    /// <param name="entity">The existing entity to apply the values to.</param>
     /// <param name="includeRemoved">Whether to also restore and apply deletion-tracked (Removed) items (true for saving, false for report display and similar).</param>
     public override void ApplyToEntity(
         OrderEditModel editModel,
@@ -5288,6 +5294,8 @@ public sealed partial class OrderLineMapper
     partial void OnEditModelCreated(OrderLineEditModel editModel);
 
     /// <summary>Applies the OrderLineEditModel's confirmed values to an existing OrderLineEntity (destructive update).</summary>
+    /// <param name="editModel">The edit model whose confirmed values are applied.</param>
+    /// <param name="entity">The existing entity to apply the values to.</param>
     /// <param name="includeRemoved">Whether to also restore and apply deletion-tracked (Removed) items (true for saving, false for report display and similar).</param>
     public override void ApplyToEntity(
         OrderLineEditModel editModel,
