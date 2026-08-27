@@ -1,6 +1,6 @@
 # QuickER.Cli
 
-The command-line tool for [QuickER](https://github.com/kokko-labs/QuickER), an ER diagram designer for .NET. It generates C# code from an ER diagram, scaffolds code straight from a live database, turns generated C# back into a diagram, and hosts a stdio Model Context Protocol (MCP) server that exposes the same operations to AI agents. Requires .NET 10.
+The command-line tool for [QuickER](https://github.com/kokko-labs/QuickER), an ER diagram designer for .NET. It generates C# code from an ER diagram, scaffolds code straight from a live database, turns generated C# back into a diagram, and hosts a stdio Model Context Protocol (MCP) server that lets AI agents edit diagrams and generate code. Requires .NET 10.
 
 ## Install
 
@@ -10,23 +10,23 @@ dotnet tool install --global QuickER.Cli
 
 ## Usage
 
-Supported databases are SQL Server, PostgreSQL, MySQL, Oracle, and SQLite.
+Supported databases are SQL Server, PostgreSQL, MySQL, Oracle, and SQLite. The QuickER Repository targets SQL Server and SQLite, and the EF Core Repository works with all five.
 
 ```sh
 # ER diagram JSON -> C# code (Entity / EditModel / Mapper / ValueObject / Repository)
-quicker generate --schema diagram.json --out ./Generated --provider sqlserver
+quicker generate --schema diagram.json --out ./Generated --provider sqlserver --generate-repositories --generate-value-objects
 
 # Live database -> C# code, with no diagram file in between
 quicker scaffold --connection "Server=.;Database=Shop;Integrated Security=true;TrustServerCertificate=true" --out ./Generated --provider sqlserver
 
 # Generated C# -> ER diagram JSON (schema only, no layout)
-quicker reverse --source ./Generated/Model.g.cs --out diagram.json --provider sqlserver
+quicker reverse --source ./Generated/QuickEREntities.g.cs --out diagram.json --provider sqlserver
 
 # Stdio MCP server for AI agents such as Claude Code and Codex
 quicker mcp
 ```
 
-Every generation setting has a kebab-case flag of the same name, and flags override the settings file passed with `--config`.
+You can also set generation settings as command-line flags, which override the settings file passed with `--config`.
 
 ## Documentation and feedback
 
