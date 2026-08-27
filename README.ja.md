@@ -348,7 +348,7 @@ quicker scaffold `
 
 ```powershell
 quicker reverse `
-  --source ./Generated/Model.g.cs `
+  --source ./Generated/QuickEREntities.g.cs `
   --out diagram.json `
   --provider sqlserver
 ```

@@ -2,7 +2,7 @@
 
 QuickER-specific terms version 1.0 (2026-07-31). This file is self-contained: the covered scope, the definitions, and the additional grants below are the complete QuickER-specific terms, followed by the unmodified license text.
 
-The license in this file (the PolyForm Noncommercial License 1.0.0) applies **only to the following projects (directories)** in this repository. All other parts are covered by [LICENSE](LICENSE) (the MIT License).
+The license in this file (the PolyForm Noncommercial License 1.0.0) applies **only to the following projects (directories)** in this repository. All other parts are covered by [LICENSE](https://github.com/kokko-labs/QuickER/blob/main/LICENSE) (the MIT License).
 
 - `src/QuickER.AI`
 - `src/QuickER.AI.UI`
@@ -34,7 +34,7 @@ In addition to the PolyForm Noncommercial License 1.0.0 below, the licensor gran
 
 These additional grants cover **use** of the software. Distribution of, and changes and new works based on, the software beyond noncommercial purposes remain governed by the PolyForm Noncommercial License 1.0.0 below.
 
-For a plain-language explanation of this structure, see [LICENSING.md](LICENSING.md). If that explanation and this file conflict, this file controls.
+For a plain-language explanation of this structure, see [LICENSING.md](https://github.com/kokko-labs/QuickER/blob/main/LICENSING.md). If that explanation and this file conflict, this file controls.
 
 The following is the original license text (English, authoritative).
 

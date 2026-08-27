@@ -54,7 +54,7 @@ quicker scaffold --connection "Server=.;Database=Shop;Integrated Security=true;T
 QuickER が生成した C# コードから ER 図を復元し、スキーマのみの図 JSON として書き出します。入力は `IncludeDataAnnotations` を有効にして生成した本体 `.g.cs` である必要があります（DB 定義メタ属性 `[DbTableMeta]` / `[DbColumnMeta]` がスキーマ情報を担うため）。手書きの POCO は対象外です。
 
 ```powershell
-quicker reverse --source ./Generated/Model.g.cs --out diagram.json --provider sqlserver
+quicker reverse --source ./Generated/QuickEREntities.g.cs --out diagram.json --provider sqlserver
 ```
 
 | オプション | 必須 | 説明 |

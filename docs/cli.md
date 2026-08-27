@@ -54,7 +54,7 @@ The other options (`--out` / `--config` / `--provider`, and the kebab-case flags
 Recovers an ER diagram from C# code that QuickER generated, and writes it out as a schema-only diagram JSON. The input must be a main `.g.cs` generated with `IncludeDataAnnotations` enabled, because the DB-definition meta attributes (`[DbTableMeta]` / `[DbColumnMeta]`) are what carry the schema information; hand-written POCOs are out of scope.
 
 ```powershell
-quicker reverse --source ./Generated/Model.g.cs --out diagram.json --provider sqlserver
+quicker reverse --source ./Generated/QuickEREntities.g.cs --out diagram.json --provider sqlserver
 ```
 
 | Option | Required | Description |
