@@ -28,7 +28,7 @@ Second, artifacts derived from the model must be generated mechanically rather t
 When the model changes, its generated artifacts can always be rebuilt from it.
 Changes made outside the model can be brought back into it through QuickER's import features.
 
-QuickER's goal is to provide this model-centered development workflow so that teams can minimize manual effort and build higher-quality business applications faster and at lower cost.
+QuickER's goal is to provide this model-centered development workflow so that teams stop writing the same schema information by hand in place after place, and build higher-quality business applications faster and at lower cost.
 
 ## Round-tripping ER models, databases, and text
 
