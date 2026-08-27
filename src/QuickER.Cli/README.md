@@ -13,7 +13,7 @@ dotnet tool install --global QuickER.Cli
 Supported databases are SQL Server, PostgreSQL, MySQL, Oracle, and SQLite.
 
 ```sh
-# ER diagram JSON -> C# code (Entity / EditModel / Mapper / Repository / EF Core)
+# ER diagram JSON -> C# code (Entity / EditModel / Mapper / ValueObject / Repository)
 quicker generate --schema diagram.json --out ./Generated --provider sqlserver
 
 # Live database -> C# code, with no diagram file in between
