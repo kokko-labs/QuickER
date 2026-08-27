@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using AwesomeAssertions;
 using QuickER.CodeGen.CSharp;
+using QuickER.CodeGen.CSharp.Resources;
 using QuickER.Model;
 using QuickER.Sqlite;
 using QuickER.SqlServer;
@@ -584,6 +585,45 @@ public class SyncSupportGenerationTests
     [Fact(DisplayName = "同期可能なテーブルが 1 つも無ければ同期支援は生成時エラー")]
     public void SyncSupport_RequiresAtLeastOneEligibleTable()
     {
+        var (_, diagnostics) = Generate(NoEligibleTableDiagram(), SyncOptions());
+
+        // 「何らかのエラー」ではなく当該ガードの文言そのものを名指しする
+        // （別の理由で落ちても緑にならないようにする）
+        diagnostics
+            .Should()
+            .ContainSingle(d =>
+                d.Severity == GenerationDiagnosticSeverity.Error
+                && d.Message == Strings.CodeGen_Error_SyncSupportRequiresEligibleTables
+            );
+    }
+
+    /// <summary>
+    /// 同期可能なテーブルが 0 件でも、同期支援 OFF なら当該ガードは発動しない（ゲートの成功側）。
+    /// </summary>
+    /// <remarks>
+    /// 「同期可能テーブル 0 件」は同期支援を要求したときだけの問題で、要求していない構成では
+    /// 複合主キーだけの図が正当な入力。ガードが <see cref="CodeGenerationOptions.GenerateSyncSupport"/> の
+    /// 内側にあることを、発動側テストと対で固定する。
+    /// </remarks>
+    [Fact(DisplayName = "同期支援 OFF なら同期可能テーブル 0 件でもエラーにならない")]
+    public void SyncSupportOff_AllowsDiagramWithoutEligibleTables()
+    {
+        var (_, diagnostics) = Generate(
+            NoEligibleTableDiagram(),
+            SyncOptions() with
+            {
+                GenerateSyncSupport = false,
+            }
+        );
+
+        diagnostics
+            .Should()
+            .NotContain(d => d.Message == Strings.CodeGen_Error_SyncSupportRequiresEligibleTables);
+    }
+
+    /// <summary>同期可能テーブル（単一主キー）が 1 つも無い図を作る（全テーブルを複合主キー化する）</summary>
+    private static ErDiagram NoEligibleTableDiagram()
+    {
         var diagram = Diagram();
 
         // 全テーブルを複合主キー化して Repository 契約の生成対象から外す＝同期可能テーブル 0 件の図を作る
@@ -595,9 +635,7 @@ public class SyncSupportGenerationTests
             }
         }
 
-        var (_, diagnostics) = Generate(diagram, SyncOptions());
-
-        diagnostics.Should().Contain(d => d.Severity == GenerationDiagnosticSeverity.Error);
+        return diagram;
     }
 
     /// <summary>

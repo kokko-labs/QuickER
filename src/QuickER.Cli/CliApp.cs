@@ -172,12 +172,48 @@ public static class CliApp
     }
 
     /// <summary>保存形式の ER 図 JSON を読み込み、意味モデル（<see cref="ErDiagram"/>）を返す</summary>
-    /// <remarks>新しいフォーマットの文書は未知のプロパティを黙って無視するため、警告してから続行する</remarks>
-    private static ErDiagram LoadSchemaDiagram(FileInfo schemaFile, TextWriter stderr)
+    /// <remarks>
+    /// 読込は形式検証込みの <see cref="JsonStorageService.TryLoad"/> を通す。無関係な JSON を「空図」として
+    /// 読むと「ER 図にエンティティがありません」という原因と噛み合わない診断で落ちるため、
+    /// 失敗種別ごとの文言を出して <c>null</c>（＝呼び出し側で終了コード 1）を返す。
+    /// 新しいフォーマットの文書は未知のプロパティを黙って無視するため、警告してから続行する。
+    /// </remarks>
+    private static ErDiagram? LoadSchemaDiagram(FileInfo schemaFile, TextWriter stderr)
     {
-        var document = JsonStorageService.Load(schemaFile.FullName);
+        if (
+            !JsonStorageService.TryLoad(
+                schemaFile.FullName,
+                out var document,
+                out var error,
+                out var exception
+            )
+        )
+        {
+            stderr.WriteLine(
+                error switch
+                {
+                    DocumentLoadError.ReadFailed => string.Format(
+                        Strings.Cli_SchemaReadFailed,
+                        schemaFile.FullName,
+                        exception!.Message
+                    ),
+                    DocumentLoadError.InvalidJson => string.Format(
+                        Strings.Cli_SchemaInvalidJson,
+                        schemaFile.FullName,
+                        exception!.Message
+                    ),
+                    DocumentLoadError.NotDiagramDocument => string.Format(
+                        Strings.Cli_SchemaNotDiagramDocument,
+                        schemaFile.FullName
+                    ),
+                    _ => throw new ArgumentOutOfRangeException(nameof(error), error, null),
+                }
+            );
 
-        if (document.IsNewerFormat)
+            return null;
+        }
+
+        if (document!.IsNewerFormat)
         {
             stderr.WriteLine(
                 string.Format(

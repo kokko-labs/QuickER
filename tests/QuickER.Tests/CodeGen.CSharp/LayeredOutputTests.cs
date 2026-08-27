@@ -406,6 +406,38 @@ public sealed class LayeredOutputTests
         messages.Should().Contain(message => message.Contains("InfrastructureLayerDirectory"));
     }
 
+    /// <summary>
+    /// 層別出力 OFF なら、層フォルダの値が不正でも検証されないことを検証する（ゲートの成功側）。
+    /// </summary>
+    /// <remarks>
+    /// 層フォルダオプションは層別出力 ON のときしか読まれないため、検証は早期 return で丸ごとゲートされている。
+    /// ゲートが外れると、層別出力を使っていない構成が「設定しただけで一度も使われない値」で落ちるようになる。
+    /// </remarks>
+    [Fact(DisplayName = "診断: 層別出力 OFF なら不正な層フォルダでも検証しない")]
+    public void Generate_InvalidLayerDirectory_WithoutLayeredOutput_ReportsNoError()
+    {
+        var result = Generate(
+            CreateDiagram(),
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Acme.App",
+                LayeredOutput = false,
+                GenerateRepositories = true,
+                DomainLayerDirectory = @"..\evil",
+                InfrastructureLayerDirectory = @"C:\abs",
+            }
+        );
+
+        result
+            .HasErrors.Should()
+            .BeFalse(
+                string.Join(" / ", result.Diagnostics.Select(diagnostic => diagnostic.Message))
+            );
+        var messages = result.Diagnostics.Select(diagnostic => diagnostic.Message).ToList();
+        messages.Should().NotContain(message => message.Contains("DomainLayerDirectory"));
+        messages.Should().NotContain(message => message.Contains("InfrastructureLayerDirectory"));
+    }
+
     [Fact(DisplayName = "診断: 使われない層（リモートなしのサーバー層）は不正値でも検証しない")]
     public void Generate_UnusedServerLayerDirectory_IsNotValidated()
     {

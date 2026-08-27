@@ -265,9 +265,8 @@ public partial class MainViewModel : IDiagramTransferHost
     /// 呼び出し側は「原因を持つ失敗」だけ他の失敗通知と同じく例外メッセージを連結して見せる。
     /// </param>
     /// <remarks>
-    /// <see cref="JsonStorageService.Load"/> は無関係な JSON も「空図」として読めてしまうため、
-    /// ルートが JSON オブジェクトで <c>Version</c>・<c>Schema</c> キーを持つことを検証してから読み込む
-    /// （<see cref="JsonStorageService"/> の読込仕様に合わせ大文字小文字を区別する）。
+    /// 形式検証は <see cref="JsonStorageService.TryLoad"/> に委ね、ここは失敗種別を
+    /// 「原因を持つ失敗（例外あり）」と「形式検証で弾いた失敗（例外なし）」の 2 値へ畳むだけを担う。
     /// </remarks>
     private static bool TryLoadDiagramDocument(
         string path,
@@ -275,29 +274,23 @@ public partial class MainViewModel : IDiagramTransferHost
         out Exception? error
     )
     {
-        document = null;
         error = null;
 
         try
         {
-            var text = File.ReadAllText(path);
-            var root = System.Text.Json.Nodes.JsonNode.Parse(text);
-
-            if (
-                root is not System.Text.Json.Nodes.JsonObject obj
-                || obj["Version"] is null
-                || obj["Schema"] is not System.Text.Json.Nodes.JsonObject
-            )
+            if (JsonStorageService.TryLoad(path, out document, out _, out var exception))
             {
-                return false;
+                return true;
             }
 
-            document = JsonStorageService.Load(path);
-            return true;
+            // IO エラー・不正 JSON は原因を持ち帰る（形式検証で弾いた場合は exception が null）
+            error = exception;
+            return false;
         }
         catch (Exception ex)
         {
-            // IO エラー・不正 JSON は現状維持（呼び出し側が原因付きで通知する）
+            // 形式検証を通ったあとの逆直列化失敗（プロパティの型不一致など）も現状維持で扱う
+            document = null;
             error = ex;
             return false;
         }

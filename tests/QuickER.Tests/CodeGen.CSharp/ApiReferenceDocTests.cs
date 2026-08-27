@@ -527,6 +527,28 @@ public sealed class ApiReferenceDocTests
             .Contain(message => message.Contains("ApiDocsDirectory"));
     }
 
+    /// <summary>
+    /// API リファレンスを出力しない構成では、<c>ApiDocsDirectory</c> が不正でも検証されないことを検証する（ゲートの成功側）。
+    /// </summary>
+    /// <remarks>
+    /// 出力先サブフォルダは <see cref="CodeGenerationOptions.GenerateApiDocs"/> が立って初めて使われる値。
+    /// ゲートが外れると、API リファレンスを出さない構成が一度も使われない設定値で落ちるようになる。
+    /// </remarks>
+    [Fact(DisplayName = "ApiDocs OFF なら不正な ApiDocsDirectory でも検証しない")]
+    public void ApiDocsDirectory_Invalid_WithApiDocsOff_ReportsNoError()
+    {
+        var result = Generate(
+            BuildDiagram(),
+            new CodeGenerationOptions { GenerateApiDocs = false, ApiDocsDirectory = @"..\docs" }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        result
+            .Diagnostics.Select(diagnostic => diagnostic.Message)
+            .Should()
+            .NotContain(message => message.Contains("ApiDocsDirectory"));
+    }
+
     [Theory(
         DisplayName = "ApiDocsFileName 指定でファイル名が決まり、拡張子は .g.md へ正規化される"
     )]
@@ -614,6 +636,32 @@ public sealed class ApiReferenceDocTests
             .Diagnostics.Select(diagnostic => diagnostic.Message)
             .Should()
             .Contain(message => message.Contains("ApiDocsFileName"));
+    }
+
+    /// <summary>
+    /// API リファレンスを出力しない構成では、<c>ApiDocsFileName</c> が不正でも検証されないことを検証する（ゲートの成功側）。
+    /// </summary>
+    /// <remarks>
+    /// <c>ApiDocsDirectory</c> と同じくファイル名も <see cref="CodeGenerationOptions.GenerateApiDocs"/> の
+    /// 内側でしか使われない。2 つのゲートは別メソッドの別条件なので、片方だけ壊れる形の回帰を対で塞ぐ。
+    /// </remarks>
+    [Fact(DisplayName = "ApiDocs OFF なら不正な ApiDocsFileName でも検証しない")]
+    public void ApiDocsFileName_Invalid_WithApiDocsOff_ReportsNoError()
+    {
+        var result = Generate(
+            BuildDiagram(),
+            new CodeGenerationOptions
+            {
+                GenerateApiDocs = false,
+                ApiDocsFileName = @"docs\Api.g.md",
+            }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        result
+            .Diagnostics.Select(diagnostic => diagnostic.Message)
+            .Should()
+            .NotContain(message => message.Contains("ApiDocsFileName"));
     }
 
     [Fact(DisplayName = "ApiDocsFileName 未指定（既定）は OutputFileName のベース名から導出する")]

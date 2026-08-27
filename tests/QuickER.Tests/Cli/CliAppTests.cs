@@ -4,6 +4,7 @@ using AwesomeAssertions;
 using QuickER.Cli;
 using QuickER.Documents;
 using QuickER.Model;
+using CodeGenStrings = QuickER.CodeGen.CSharp.Resources.Strings;
 
 namespace QuickER.Tests.Cli;
 
@@ -168,6 +169,117 @@ public class CliAppTests
             var warning = stderr.ToString();
             warning.Should().Contain($"v{DiagramDocument.CurrentVersion + 1}");
             warning.Should().Contain($"v{DiagramDocument.CurrentVersion}");
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// <c>--schema</c> に ER 図と無関係な妥当 JSON（例 <c>package.json</c>）を渡すと、「空図」として
+    /// 読み込まず、形式が違う旨のメッセージ付きで終了コード 1 になることを検証する
+    /// </summary>
+    /// <remarks>
+    /// 形式検証なしで <see cref="JsonStorageService.Load"/> を通すと、欠落キーが既定値で補われて
+    /// エンティティ 0 件の図になり、原因と噛み合わない「ER 図にエンティティがありません」で落ちていた。
+    /// 誤誘導が戻らないよう、その診断が出ないことも併せて固定する。
+    /// </remarks>
+    [Fact(DisplayName = "--schema が非 ER 図の JSON は終了コード 1（形式違いのメッセージ）")]
+    public async Task Generate_SchemaNotDiagramDocument_ReturnsError()
+    {
+        var root = Path.Combine(
+            Path.GetTempPath(),
+            "QuickERCliTests",
+            Guid.NewGuid().ToString("N")
+        );
+        Directory.CreateDirectory(root);
+        var schemaPath = Path.Combine(root, "package.json");
+        var outDir = Path.Combine(root, "out");
+        File.WriteAllText(schemaPath, """{ "name": "my-app", "version": "1.0.0" }""");
+        var stdout = new StringWriter();
+        var stderr = new StringWriter();
+
+        try
+        {
+            var exit = await CliApp.InvokeAsync(
+                ["generate", "--schema", schemaPath, "--out", outDir],
+                stdout,
+                stderr
+            );
+
+            exit.Should().Be(1);
+            Directory
+                .Exists(outDir)
+                .Should()
+                .BeFalse("図の読込に失敗した時点で中止するため出力は作られない");
+
+            var error = stderr.ToString();
+            // 文言はロケール依存のため、埋め込まれるスキーマのパスで検証する
+            error.Should().Contain(schemaPath);
+            error
+                .Should()
+                .NotContain(
+                    CodeGenStrings.CodeGen_Error_NoEntities,
+                    "無関係な JSON を空図として読み込んだ結果の誤誘導エラーへ戻さない"
+                );
+            error.Should().NotContain("   at ", "整形メッセージのみでスタックトレースは出さない");
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// <c>--schema</c> の JSON が壊れている場合は、トップレベルの例外ハンドラへ抜けず、
+    /// 図の読込失敗として整形メッセージ（パス入り）＋終了コード 1 になることを検証する
+    /// </summary>
+    [Fact(DisplayName = "--schema が不正 JSON は終了コード 1（整形メッセージ）")]
+    public async Task Generate_SchemaInvalidJson_ReturnsError()
+    {
+        var root = Path.Combine(
+            Path.GetTempPath(),
+            "QuickERCliTests",
+            Guid.NewGuid().ToString("N")
+        );
+        Directory.CreateDirectory(root);
+        var schemaPath = Path.Combine(root, "schema.json");
+        var outDir = Path.Combine(root, "out");
+        // 閉じ括弧が欠けた不正 JSON
+        File.WriteAllText(schemaPath, """{ "Version": 1, "Schema": { """);
+        var stdout = new StringWriter();
+        var stderr = new StringWriter();
+
+        try
+        {
+            var exit = await CliApp.InvokeAsync(
+                ["generate", "--schema", schemaPath, "--out", outDir],
+                stdout,
+                stderr
+            );
+
+            exit.Should().Be(1);
+            Directory
+                .Exists(outDir)
+                .Should()
+                .BeFalse("図の読込に失敗した時点で中止するため出力は作られない");
+
+            var error = stderr.ToString();
+            error.Should().Contain(schemaPath);
+            error
+                .Should()
+                .NotContain(
+                    CodeGenStrings.CodeGen_Error_NoEntities,
+                    "破損 JSON を空図として読み込んだ結果の誤誘導エラーへ戻さない"
+                );
+            error.Should().NotContain("   at ", "整形メッセージのみでスタックトレースは出さない");
         }
         finally
         {

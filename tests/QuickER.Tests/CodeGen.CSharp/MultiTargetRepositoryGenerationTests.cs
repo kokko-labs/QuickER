@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using AwesomeAssertions;
 using QuickER.CodeGen.CSharp;
+using QuickER.CodeGen.CSharp.Resources;
 using QuickER.Model;
 using QuickER.Sqlite;
 using QuickER.SqlServer;
@@ -573,11 +574,56 @@ public sealed class MultiTargetRepositoryGenerationTests
         );
 
         result.HasErrors.Should().BeTrue();
+        // 「EF Core」を含む何らかのエラーではなく当該ガードの文言そのものを名指しする
         result
             .Diagnostics.Should()
-            .Contain(d =>
-                d.Severity == GenerationDiagnosticSeverity.Error && d.Message.Contains("EF Core")
+            .ContainSingle(d =>
+                d.Severity == GenerationDiagnosticSeverity.Error
+                && d.Message == Strings.CodeGen_Error_MultiTargetEfCoreExclusive
             );
+    }
+
+    /// <summary>
+    /// QuickER 版 Repository を生成しない構成なら、複数方言を指定していても EF Core と併用できる（排他ガードの成功側）。
+    /// </summary>
+    /// <remarks>
+    /// 排他の理由は「マルチ方言レイアウトでは契約 namespace に EntitySaveMetadata 等が置かれず EF Core が
+    /// 解決不能になる」こと。そのレイアウトは <see cref="CodeGenerationOptions.GenerateRepositories"/> が
+    /// 立って初めて出るため、ガードは 3 条件の AND になっている。条件が緩むと EF Core 単独構成が
+    /// 使われない方言指定だけで生成できなくなる（CLI は図の方言名を焼き込むため実際に踏み得る）。
+    /// </remarks>
+    [Fact(DisplayName = "Repository 非生成なら複数方言指定＋EF Core は排他ガードに掛からない")]
+    public void MultiDialect_WithEfCore_WithoutRepositories_ReturnsNoExclusiveError()
+    {
+        var diagram = BuildDiagram();
+        var primary = SqlServerCSharpTypeMapper.ResolveColumnTypes(diagram);
+        var byDialect = new Dictionary<string, IReadOnlyDictionary<Guid, CSharpTypeInfo>>(
+            StringComparer.OrdinalIgnoreCase
+        )
+        {
+            ["sqlserver"] = primary,
+            ["sqlite"] = SqliteCSharpTypeMapper.ResolveColumnTypes(diagram),
+        };
+        var options = new CodeGenerationOptions
+        {
+            RootNamespace = "Sample.Domain",
+            GenerateRepositories = false,
+            RepositoryDialects = ["sqlserver", "sqlite"],
+            GenerateEfCore = true,
+        };
+
+        var result = new CSharpCodeGenerationService().Generate(
+            diagram,
+            primary,
+            byDialect,
+            options
+        );
+
+        result.HasErrors.Should().BeFalse();
+        result.Files.Should().NotBeEmpty();
+        result
+            .Diagnostics.Should()
+            .NotContain(d => d.Message == Strings.CodeGen_Error_MultiTargetEfCoreExclusive);
     }
 
     [Theory(

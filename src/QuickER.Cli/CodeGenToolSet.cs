@@ -325,8 +325,8 @@ public static class CodeGenToolSet
     /// 読み込んで続行し、警告は結果テキストへ付す（<see cref="AppendNewerFormatWarning"/>）。
     /// </summary>
     /// <remarks>
-    /// <see cref="QuickER.Mcp.Tools.DocumentErDiagramToolHost"/> のガードと同水準だが、あちらは internal で
-    /// 再利用できないため CLI 側に最小限を重複実装する（DiagramDocument 検証の 2 箇所目）。
+    /// 形式検証は <see cref="JsonStorageService.TryLoad"/> に委ね、失敗種別を MCP ツールの応答文言
+    /// （英語正本）へ翻訳するだけを担う。不在だけはツール固有の案内文にするため先に判定する。
     /// </remarks>
     private static (DiagramDocument? Document, string? Error) LoadDiagram(string file)
     {
@@ -335,39 +335,24 @@ public static class CodeGenToolSet
             return (null, $"Diagram file not found: {file}.");
         }
 
-        string text;
-
-        try
+        if (JsonStorageService.TryLoad(file, out var document, out var error, out var exception))
         {
-            text = File.ReadAllText(file);
-        }
-        catch (Exception ex)
-        {
-            return (null, $"Failed to read diagram file '{file}': {ex.Message}");
+            return (document, null);
         }
 
-        JsonNode? root;
-
-        try
-        {
-            root = JsonNode.Parse(text);
-        }
-        catch (JsonException ex)
-        {
-            return (null, $"Diagram file '{file}' is not valid JSON: {ex.Message}");
-        }
-
-        // JsonStorageService.Load は既定値を補うため、無関係な JSON も空図として読めてしまう。
-        // ルートが Version・Schema を持つオブジェクトであることを確認してから読み込む。
-        if (root is not JsonObject obj || obj["Version"] is null || obj["Schema"] is not JsonObject)
-        {
-            return (
-                null,
-                $"Diagram file '{file}' is not a DiagramDocument (expected an object with 'Version' and 'Schema'). Refusing to treat unrelated JSON as a diagram."
-            );
-        }
-
-        return (JsonStorageService.Load(file), null);
+        return (
+            null,
+            error switch
+            {
+                DocumentLoadError.ReadFailed =>
+                    $"Failed to read diagram file '{file}': {exception!.Message}",
+                DocumentLoadError.InvalidJson =>
+                    $"Diagram file '{file}' is not valid JSON: {exception!.Message}",
+                DocumentLoadError.NotDiagramDocument =>
+                    $"Diagram file '{file}' is not a DiagramDocument (expected an object with 'Version' and 'Schema'). Refusing to treat unrelated JSON as a diagram.",
+                _ => throw new ArgumentOutOfRangeException(nameof(error), error, null),
+            }
+        );
     }
 
     /// <summary>新フォーマット文書のときのみ、警告行を結果テキストの先頭へ付す（読み取り系は続行する）</summary>
