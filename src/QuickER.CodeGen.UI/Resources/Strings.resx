@@ -82,6 +82,12 @@
   <data name="CodeGen_LayerDirectories" xml:space="preserve">
     <value>Layer folders (relative to the output folder)</value>
   </data>
+  <data name="CodeGen_CodeSubdirectory" xml:space="preserve">
+    <value>Subfolder</value>
+  </data>
+  <data name="CodeGen_CodeSubdirectoryToolTip" xml:space="preserve">
+    <value>Subfolder for the generated code (*.g.cs): one level below the layer folder with layered output, otherwise below the output folder (e.g. Generated). Blank = no subfolder.&#xD;&#xA;Works in every output mode. It never affects namespaces, so hand-written partial classes can live in the parent folder under the same namespace. The API reference Markdown does not follow it. Absolute paths and ".." are rejected.</value>
+  </data>
   <data name="CodeGen_LayerLabel_Domain" xml:space="preserve">
     <value>Domain</value>
   </data>
@@ -148,10 +154,10 @@
   <data name="CodeGen_IncludeJapaneseApiDocs" xml:space="preserve">
     <value>Also output a Japanese version</value>
   </data>
-  <data name="CodeGen_ApiDocsDirectory" xml:space="preserve">
+  <data name="CodeGen_ApiDocsSubdirectory" xml:space="preserve">
     <value>Output subfolder</value>
   </data>
-  <data name="CodeGen_ApiDocsDirectoryToolTip" xml:space="preserve">
+  <data name="CodeGen_ApiDocsSubdirectoryToolTip" xml:space="preserve">
     <value>Subfolder for the API reference Markdown, relative to the output folder (e.g. docs). Blank = the output folder itself. Absolute paths and ".." are rejected.</value>
   </data>
   <data name="CodeGen_ApiDocsFileName" xml:space="preserve">

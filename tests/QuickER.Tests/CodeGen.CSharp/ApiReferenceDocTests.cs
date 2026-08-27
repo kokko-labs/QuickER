@@ -472,9 +472,9 @@ public sealed class ApiReferenceDocTests
     }
 
     [Fact(
-        DisplayName = "ApiDocsDirectory 指定で .g.md / .ja.g.md がサブフォルダ配置になる（.g.cs は不変）"
+        DisplayName = "ApiDocsSubdirectory 指定で .g.md / .ja.g.md がサブフォルダ配置になる（.g.cs は不変）"
     )]
-    public void ApiDocsDirectory_PlacesMarkdownIntoSubfolder()
+    public void ApiDocsSubdirectory_PlacesMarkdownIntoSubfolder()
     {
         var result = Generate(
             BuildDiagram(),
@@ -482,7 +482,7 @@ public sealed class ApiReferenceDocTests
             {
                 GenerateApiDocs = true,
                 IncludeJapaneseApiDocs = true,
-                ApiDocsDirectory = "docs",
+                ApiDocsSubdirectory = "docs",
             }
         );
 
@@ -503,8 +503,8 @@ public sealed class ApiReferenceDocTests
             .OnlyContain(file => file.RelativeDirectory == null);
     }
 
-    [Fact(DisplayName = "ApiDocsDirectory 未指定（既定）は出力ディレクトリ直下")]
-    public void ApiDocsDirectory_Default_KeepsRootPlacement()
+    [Fact(DisplayName = "ApiDocsSubdirectory 未指定（既定）は出力ディレクトリ直下")]
+    public void ApiDocsSubdirectory_Default_KeepsRootPlacement()
     {
         var result = Generate(BuildDiagram(), new CodeGenerationOptions { GenerateApiDocs = true });
 
@@ -512,41 +512,41 @@ public sealed class ApiReferenceDocTests
         MarkdownFile(result)!.RelativeDirectory.Should().BeNull();
     }
 
-    [Fact(DisplayName = "ApiDocsDirectory の不正パス（.. / 絶対パス）は生成時エラーになる")]
-    public void ApiDocsDirectory_Invalid_ReportsError()
+    [Fact(DisplayName = "ApiDocsSubdirectory の不正パス（.. / 絶対パス）は生成時エラーになる")]
+    public void ApiDocsSubdirectory_Invalid_ReportsError()
     {
         var result = Generate(
             BuildDiagram(),
-            new CodeGenerationOptions { GenerateApiDocs = true, ApiDocsDirectory = @"..\docs" }
+            new CodeGenerationOptions { GenerateApiDocs = true, ApiDocsSubdirectory = @"..\docs" }
         );
 
         result.HasErrors.Should().BeTrue();
         result
             .Diagnostics.Select(diagnostic => diagnostic.Message)
             .Should()
-            .Contain(message => message.Contains("ApiDocsDirectory"));
+            .Contain(message => message.Contains("ApiDocsSubdirectory"));
     }
 
     /// <summary>
-    /// API リファレンスを出力しない構成では、<c>ApiDocsDirectory</c> が不正でも検証されないことを検証する（ゲートの成功側）。
+    /// API リファレンスを出力しない構成では、<c>ApiDocsSubdirectory</c> が不正でも検証されないことを検証する（ゲートの成功側）。
     /// </summary>
     /// <remarks>
     /// 出力先サブフォルダは <see cref="CodeGenerationOptions.GenerateApiDocs"/> が立って初めて使われる値。
     /// ゲートが外れると、API リファレンスを出さない構成が一度も使われない設定値で落ちるようになる。
     /// </remarks>
-    [Fact(DisplayName = "ApiDocs OFF なら不正な ApiDocsDirectory でも検証しない")]
-    public void ApiDocsDirectory_Invalid_WithApiDocsOff_ReportsNoError()
+    [Fact(DisplayName = "ApiDocs OFF なら不正な ApiDocsSubdirectory でも検証しない")]
+    public void ApiDocsSubdirectory_Invalid_WithApiDocsOff_ReportsNoError()
     {
         var result = Generate(
             BuildDiagram(),
-            new CodeGenerationOptions { GenerateApiDocs = false, ApiDocsDirectory = @"..\docs" }
+            new CodeGenerationOptions { GenerateApiDocs = false, ApiDocsSubdirectory = @"..\docs" }
         );
 
         result.HasErrors.Should().BeFalse();
         result
             .Diagnostics.Select(diagnostic => diagnostic.Message)
             .Should()
-            .NotContain(message => message.Contains("ApiDocsDirectory"));
+            .NotContain(message => message.Contains("ApiDocsSubdirectory"));
     }
 
     [Theory(
@@ -599,7 +599,7 @@ public sealed class ApiReferenceDocTests
         JapaneseMarkdownFile(result)!.FileName.Should().Be("Reference.ja.g.md");
     }
 
-    [Fact(DisplayName = "ApiDocsFileName は出力先サブフォルダ（ApiDocsDirectory）と併用できる")]
+    [Fact(DisplayName = "ApiDocsFileName は出力先サブフォルダ（ApiDocsSubdirectory）と併用できる")]
     public void ApiDocsFileName_CombinesWithDirectory()
     {
         var result = Generate(
@@ -607,7 +607,7 @@ public sealed class ApiReferenceDocTests
             new CodeGenerationOptions
             {
                 GenerateApiDocs = true,
-                ApiDocsDirectory = "docs",
+                ApiDocsSubdirectory = "docs",
                 ApiDocsFileName = "Reference",
             }
         );
@@ -642,7 +642,7 @@ public sealed class ApiReferenceDocTests
     /// API リファレンスを出力しない構成では、<c>ApiDocsFileName</c> が不正でも検証されないことを検証する（ゲートの成功側）。
     /// </summary>
     /// <remarks>
-    /// <c>ApiDocsDirectory</c> と同じくファイル名も <see cref="CodeGenerationOptions.GenerateApiDocs"/> の
+    /// <c>ApiDocsSubdirectory</c> と同じくファイル名も <see cref="CodeGenerationOptions.GenerateApiDocs"/> の
     /// 内側でしか使われない。2 つのゲートは別メソッドの別条件なので、片方だけ壊れる形の回帰を対で塞ぐ。
     /// </remarks>
     [Fact(DisplayName = "ApiDocs OFF なら不正な ApiDocsFileName でも検証しない")]

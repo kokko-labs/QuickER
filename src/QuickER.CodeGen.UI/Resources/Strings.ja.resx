@@ -82,6 +82,12 @@
   <data name="CodeGen_LayerDirectories" xml:space="preserve">
     <value>層フォルダ（出力フォルダからの相対パス）</value>
   </data>
+  <data name="CodeGen_CodeSubdirectory" xml:space="preserve">
+    <value>サブフォルダ</value>
+  </data>
+  <data name="CodeGen_CodeSubdirectoryToolTip" xml:space="preserve">
+    <value>生成コード（*.g.cs）の出力先サブフォルダ（層別出力では層フォルダの下・そうでなければ出力フォルダの下へ 1 段。例: Generated）。空ならサブフォルダを作りません。&#xD;&#xA;出力モードに依らず有効です。名前空間には影響しないため、手書きの partial クラスを同じ名前空間のまま親フォルダへ置けます。API リファレンス Markdown は追随しません。絶対パス・".." は使えません。</value>
+  </data>
   <data name="CodeGen_LayerLabel_Domain" xml:space="preserve">
     <value>ドメイン層</value>
   </data>
@@ -148,10 +154,10 @@
   <data name="CodeGen_IncludeJapaneseApiDocs" xml:space="preserve">
     <value>日本語版を出力する</value>
   </data>
-  <data name="CodeGen_ApiDocsDirectory" xml:space="preserve">
+  <data name="CodeGen_ApiDocsSubdirectory" xml:space="preserve">
     <value>出力先サブフォルダ</value>
   </data>
-  <data name="CodeGen_ApiDocsDirectoryToolTip" xml:space="preserve">
+  <data name="CodeGen_ApiDocsSubdirectoryToolTip" xml:space="preserve">
     <value>API リファレンス Markdown の出力先サブフォルダ（出力フォルダからの相対パス。例: docs）。空なら出力フォルダ直下。絶対パス・".." は使えません。</value>
   </data>
   <data name="CodeGen_ApiDocsFileName" xml:space="preserve">

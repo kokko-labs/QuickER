@@ -102,6 +102,18 @@ namespace QuickER.CodeGen.UI.Resources {
             }
         }
 
+        public static string CodeGen_CodeSubdirectory {
+            get {
+                return ResourceManager.GetString("CodeGen_CodeSubdirectory", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_CodeSubdirectoryToolTip {
+            get {
+                return ResourceManager.GetString("CodeGen_CodeSubdirectoryToolTip", resourceCulture);
+            }
+        }
+
         public static string CodeGen_LayerLabel_Domain {
             get {
                 return ResourceManager.GetString("CodeGen_LayerLabel_Domain", resourceCulture);
@@ -234,15 +246,15 @@ namespace QuickER.CodeGen.UI.Resources {
             }
         }
 
-        public static string CodeGen_ApiDocsDirectory {
+        public static string CodeGen_ApiDocsSubdirectory {
             get {
-                return ResourceManager.GetString("CodeGen_ApiDocsDirectory", resourceCulture);
+                return ResourceManager.GetString("CodeGen_ApiDocsSubdirectory", resourceCulture);
             }
         }
 
-        public static string CodeGen_ApiDocsDirectoryToolTip {
+        public static string CodeGen_ApiDocsSubdirectoryToolTip {
             get {
-                return ResourceManager.GetString("CodeGen_ApiDocsDirectoryToolTip", resourceCulture);
+                return ResourceManager.GetString("CodeGen_ApiDocsSubdirectoryToolTip", resourceCulture);
             }
         }
 

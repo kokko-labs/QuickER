@@ -299,16 +299,16 @@ public sealed class CSharpCodeGenerationService
         // ここは検証エラーで早期 return した後の経路のため、Files が空になる場合は Markdown も出ない（自然に乗る）。
         if (options.GenerateApiDocs)
         {
-            // 出力先サブフォルダ（ApiDocsDirectory）。空白は既定＝出力ディレクトリ直下（null）
-            var apiDocsDirectory = string.IsNullOrWhiteSpace(options.ApiDocsDirectory)
+            // 出力先サブフォルダ（ApiDocsSubdirectory）。空白は既定＝出力ディレクトリ直下（null）
+            var apiDocsSubdirectory = string.IsNullOrWhiteSpace(options.ApiDocsSubdirectory)
                 ? null
-                : options.ApiDocsDirectory.Trim();
+                : options.ApiDocsSubdirectory.Trim();
 
             files.Add(
                 new GeneratedFile
                 {
                     FileName = ApiDocsFileName(options),
-                    RelativeDirectory = apiDocsDirectory,
+                    RelativeDirectory = apiDocsSubdirectory,
                     Content = _apiDocRenderer.Render(model, options, ApiDocLanguage.English),
                 }
             );
@@ -320,7 +320,7 @@ public sealed class CSharpCodeGenerationService
                     new GeneratedFile
                     {
                         FileName = JapaneseApiDocsFileName(options),
-                        RelativeDirectory = apiDocsDirectory,
+                        RelativeDirectory = apiDocsSubdirectory,
                         Content = _apiDocRenderer.Render(model, options, ApiDocLanguage.Japanese),
                     }
                 );
@@ -661,7 +661,8 @@ public sealed class CSharpCodeGenerationService
 
         ValidateNamespaces(options, diagnostics);
         ValidateLayerDirectories(options, diagnostics);
-        ValidateApiDocsDirectory(options, diagnostics);
+        ValidateCodeSubdirectory(options, diagnostics);
+        ValidateApiDocsSubdirectory(options, diagnostics);
         ValidateApiDocsFileName(options, diagnostics);
 
         if (diagram.Entities.Count == 0)
@@ -1137,7 +1138,7 @@ public sealed class CSharpCodeGenerationService
                 diagnostics.Add(
                     GenerationDiagnostic.Error(
                         string.Format(
-                            Strings.CodeGen_Error_InvalidLayerDirectory,
+                            Strings.CodeGen_Error_InvalidOutputSubdirectory,
                             target.Name,
                             target.Value.Trim()
                         )
@@ -1172,34 +1173,71 @@ public sealed class CSharpCodeGenerationService
     }
 
     /// <summary>
-    /// API リファレンスの出力先サブフォルダ（<see cref="CodeGenerationOptions.ApiDocsDirectory"/>）を検証する
+    /// 生成コードの出力先サブフォルダ（<see cref="CodeGenerationOptions.CodeSubdirectory"/>）を検証する
+    /// </summary>
+    /// <remarks>
+    /// 判定は層フォルダ・書き出し防御と同じ <see cref="LayerDirectoryValidator"/>（単一正本）で、
+    /// 出力モードに依らず指定があるときだけ効く（空白は既定＝サブフォルダなしのため対象外）。
+    /// 名前空間の導出に入らない値なので、層フォルダと違い C# 識別子としての検証はない
+    /// （<c>generated-code</c> のような名前も許す＝<see cref="CodeGenerationOptions.CodeSubdirectory"/> の設計）。
+    /// </remarks>
+    private static void ValidateCodeSubdirectory(
+        CodeGenerationOptions options,
+        ICollection<GenerationDiagnostic> diagnostics
+    ) =>
+        ValidateOutputSubdirectory(
+            options.CodeSubdirectory,
+            nameof(CodeGenerationOptions.CodeSubdirectory),
+            diagnostics
+        );
+
+    /// <summary>
+    /// API リファレンスの出力先サブフォルダ（<see cref="CodeGenerationOptions.ApiDocsSubdirectory"/>）を検証する
     /// </summary>
     /// <remarks>
     /// 判定は層フォルダ・書き出し防御と同じ <see cref="LayerDirectoryValidator"/>（単一正本）。
     /// 層別出力に依らず、API リファレンスを出力する構成でのみ検証する（空白は既定＝直下のため対象外）。
     /// ドキュメントは C# コードでないため名前空間導出の検証はない（パスの妥当性だけ）。
     /// </remarks>
-    private static void ValidateApiDocsDirectory(
+    private static void ValidateApiDocsSubdirectory(
         CodeGenerationOptions options,
         ICollection<GenerationDiagnostic> diagnostics
     )
     {
-        if (
-            options.GenerateApiDocs
-            && !string.IsNullOrWhiteSpace(options.ApiDocsDirectory)
-            && !LayerDirectoryValidator.IsValid(options.ApiDocsDirectory)
-        )
+        if (!options.GenerateApiDocs)
         {
-            diagnostics.Add(
-                GenerationDiagnostic.Error(
-                    string.Format(
-                        Strings.CodeGen_Error_InvalidLayerDirectory,
-                        nameof(CodeGenerationOptions.ApiDocsDirectory),
-                        options.ApiDocsDirectory.Trim()
-                    )
-                )
-            );
+            return;
         }
+
+        ValidateOutputSubdirectory(
+            options.ApiDocsSubdirectory,
+            nameof(CodeGenerationOptions.ApiDocsSubdirectory),
+            diagnostics
+        );
+    }
+
+    /// <summary>出力先サブフォルダ（出力ディレクトリからの相対パス）の妥当性を検証する共通処理</summary>
+    /// <remarks>空白は「未指定＝既定」を意味するため対象外。判定の正本は <see cref="LayerDirectoryValidator"/>。</remarks>
+    private static void ValidateOutputSubdirectory(
+        string? value,
+        string optionName,
+        ICollection<GenerationDiagnostic> diagnostics
+    )
+    {
+        if (string.IsNullOrWhiteSpace(value) || LayerDirectoryValidator.IsValid(value))
+        {
+            return;
+        }
+
+        diagnostics.Add(
+            GenerationDiagnostic.Error(
+                string.Format(
+                    Strings.CodeGen_Error_InvalidOutputSubdirectory,
+                    optionName,
+                    value.Trim()
+                )
+            )
+        );
     }
 
     /// <summary>
@@ -1207,7 +1245,7 @@ public sealed class CSharpCodeGenerationService
     /// </summary>
     /// <remarks>
     /// 許すのは「ディレクトリ要素を含まない単一のファイル名」だけ（置き場を決めるのは
-    /// <see cref="CodeGenerationOptions.ApiDocsDirectory"/> の役割）。<see cref="GeneratedFileWriter"/> は
+    /// <see cref="CodeGenerationOptions.ApiDocsSubdirectory"/> の役割）。<see cref="GeneratedFileWriter"/> は
     /// <c>Path.GetFileName</c> でディレクトリ要素を落とすため、診断がないとパス付きの指定が黙って別の場所へ
     /// 落ちるのでなく黙って無視される＝指定と結果が食い違う。空白は既定（導出）のため対象外。
     /// </remarks>

@@ -196,6 +196,108 @@ public class CSharpGenerationDialogViewTests
         });
     }
 
+    /// <summary>
+    /// 出力先の欄（フォルダ／ファイル）とサブフォルダ欄が、左端・幅ともに揃っていることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 2 つは同じグリッドの上下 2 行で、サブフォルダ欄は参照ボタンの列（Column 2）へ広げず上の欄と同じ
+    /// Column 1 に収めることで右端まで揃う。列や行の指定を取り違えると見た目だけがずれるため、
+    /// ビルドでも型検査でも出ない回帰として実レイアウトを測って固定する。
+    /// </remarks>
+    [Fact(DisplayName = "出力先の欄とサブフォルダ欄は左端・幅が揃う")]
+    public void OutputPathAndSubdirectoryInputs_AreAligned()
+    {
+        WpfApplicationTestSupport.RunSta(() =>
+        {
+            var viewModel = CreateViewModel(out var folder);
+
+            try
+            {
+                // BAML ロードは並列テストと競合しないよう直列化する
+                var dialog = WpfApplicationTestSupport.LoadXamlComponent(() =>
+                    new CSharpGenerationDialog(viewModel)
+                );
+
+                PumpBindings();
+
+                // Window は表示しないと Arrange できないため、コンテンツのルートを直接レイアウトする
+                var content = (FrameworkElement)dialog.Content;
+                content.Measure(new Size(900, 4000));
+                content.Arrange(new Rect(0, 0, 900, 4000));
+                content.UpdateLayout();
+
+                var outputPathBox = FindByTextBinding(
+                    content,
+                    nameof(CSharpGenerationDialogViewModel.OutputPath)
+                );
+                var subdirectoryBox = FindByTextBinding(
+                    content,
+                    nameof(CSharpGenerationDialogViewModel.CodeSubdirectory)
+                );
+
+                outputPathBox.Should().NotBeNull("出力先の欄が XAML に存在する前提");
+                subdirectoryBox.Should().NotBeNull("サブフォルダ欄が XAML に存在する前提");
+
+                var outputLeft = outputPathBox!.TranslatePoint(new Point(0, 0), content).X;
+                var subdirectoryTopLeft = subdirectoryBox!.TranslatePoint(new Point(0, 0), content);
+
+                subdirectoryTopLeft
+                    .X.Should()
+                    .BeApproximately(outputLeft, 0.5, "入力欄の左端が揃っている");
+                subdirectoryBox
+                    .ActualWidth.Should()
+                    .BeApproximately(
+                        outputPathBox.ActualWidth,
+                        0.5,
+                        "参照ボタンの列へ広げず右端も揃える"
+                    );
+                subdirectoryTopLeft
+                    .Y.Should()
+                    .BeGreaterThan(
+                        outputPathBox.TranslatePoint(new Point(0, 0), content).Y,
+                        "サブフォルダ欄は出力先の欄の直下に並ぶ"
+                    );
+                subdirectoryBox.ActualWidth.Should().BeGreaterThan(0, "レイアウトが成立している");
+            }
+            finally
+            {
+                DeleteFolder(folder);
+            }
+        });
+    }
+
+    /// <summary>Text を指定パスへバインドしている TextBox を論理ツリーから探す</summary>
+    private static System.Windows.Controls.TextBox? FindByTextBinding(
+        DependencyObject root,
+        string path
+    )
+    {
+        foreach (var child in LogicalTreeHelper.GetChildren(root))
+        {
+            if (child is not DependencyObject dependency)
+            {
+                continue;
+            }
+
+            if (
+                dependency is System.Windows.Controls.TextBox box
+                && BindingOperations.GetBinding(box, System.Windows.Controls.TextBox.TextProperty)
+                    is { } binding
+                && binding.Path?.Path == path
+            )
+            {
+                return box;
+            }
+
+            if (FindByTextBinding(dependency, path) is { } found)
+            {
+                return found;
+            }
+        }
+
+        return null;
+    }
+
     /// <summary>ItemsSource を指定パスへバインドしている ItemsControl を論理ツリーから探す</summary>
     private static System.Windows.Controls.ItemsControl? FindByItemsSourceBinding(
         DependencyObject root,

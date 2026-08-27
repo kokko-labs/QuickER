@@ -1069,7 +1069,7 @@ DB なしでユニットテストするためのインメモリ実装を追加�
 | プレゼンテーション（`Presentation/`） | `EditModels.g.cs`・`Mappers.g.cs` |
 | インフラストラクチャ（`Infrastructure/`） | `Repositories.SqlServer.g.cs` / `.Sqlite` / `.EntityFrameworkCore` / `.InMemory` / `.Sync` / `.Http` と対応する固定 infra の `Runtime.{...}.g.cs` |
 | サーバー（`Server/`） | `RemoteServer.g.cs`・`Runtime.AspNetCore.g.cs`（ASP.NET Core の `FrameworkReference` を要するため通常のクラスライブラリには置けません） |
-| 出力ディレクトリ直下 | API リファレンス（`*.g.md`）＝どの csproj にも属さないため。`--api-docs-dir` で `docs` などのサブフォルダへ移せます（層とは独立） |
+| 出力ディレクトリ直下 | API リファレンス（`*.g.md`）＝どの csproj にも属さないため。`--api-docs-subdir` で `docs` などのサブフォルダへ移せます（層とは独立） |
 
 各層のフォルダは `--domain-layer-dir` / `--presentation-layer-dir` / `--infrastructure-layer-dir` / `--server-layer-dir`（設定キー `DomainLayerDirectory`・`PresentationLayerDirectory`・`InfrastructureLayerDirectory`・`ServerLayerDirectory`）で上書きできます。値は出力ディレクトリからの相対パスで、複数階層（`MyApp.Domain/Generated`）も指定できるため、出力ディレクトリをソリューションのソースフォルダへ向ければ層プロジェクトの中へ直接生成できます。絶対パス・ドライブ指定・`..` は生成時エラーとして拒否され、空の値は既定フォルダ名へフォールバックします。
 
@@ -1084,12 +1084,38 @@ DB なしでユニットテストするためのインメモリ実装を追加�
 
 明示の名前空間オプション（`EntityNamespace`・`RepositoryNamespace` 等）は従来どおり導出より優先されます。名前空間として成立しないフォルダ名（ハイフン等）は生成時エラーになります（その層の名前空間をすべて明示指定している場合を除く）。通常分割で方言実装が契約名前空間の下（`{契約}.SqlServer`）にぶら下がっていたねじれ（別プロジェクト在住なのにドメインの名前空間）も、層別出力ではインフラ層ルートの下へ移って解消されます。`RootNamespace` は導出既定には現れなくなります（層フォルダが代わりを務めます）。
 
+### 生成コードのサブフォルダ（--code-subdir）
+
+`--code-subdir`（設定キー `CodeSubdirectory`・**既定は指定なし**）は、生成コード（`.g.cs`）をもう 1 段下のサブフォルダへ出します。層別出力では層フォルダの下、そうでなければ出力ディレクトリの下です。**全出力モード（非分割・分割・層別）で有効**で、生成コードと手書きコードを同じプロジェクトの中で分けるために使います。
+
+**名前空間には一切影響しません。** 層フォルダと違い、この値は名前空間の導出に入りません。だから手書きの partial クラスを「生成物と同じ名前空間・親フォルダ」に置けます：
+
+```
+MyApp.Domain/                        ← --domain-layer-dir
+  Generated/                         ← --code-subdir
+    Entities.g.cs                    namespace MyApp.Domain.Entities
+    Repositories.g.cs                namespace MyApp.Domain.Repositories
+  OrderEntity.Rules.cs               namespace MyApp.Domain.Entities（手書きの partial）
+  Services/                          ← 手書き
+MyApp.Infrastructure/
+  Generated/
+    Repositories.SqlServer.g.cs      namespace MyApp.Infrastructure.SqlServer
+    Runtime.SqlServer.g.cs
+EcOrder.g.md                         ← サブフォルダに追随しない（下記）
+```
+
+SDK 形式のプロジェクトは `**/*.cs` を暗黙に取り込むため、サブフォルダを掘っても csproj に手を入れる必要はありません。フォルダ単位で「まとめて消して再生成する」「アナライザの対象から外す」といった扱いができるようになります。
+
+値は複数階層（`Generated/QuickER`）も指定できます。絶対パス・ドライブ指定・`..` は生成時エラーですが、**名前空間に現れないため C# 識別子である必要はありません**（`generated-code` のような名前も使えます）。API リファレンス（`.g.md`）はこのサブフォルダに追随しません——ドキュメントの置き場を決めるのは `--api-docs-subdir` だけです。
+
+GUI では生成ダイアログの「出力先」欄で、出力先パスのすぐ下に「サブフォルダ」として並びます（出力モード・層別出力のチェックとは独立に、常に指定できます）。
+
 押さえておくべき点：
 
 - **変わるのは名前空間・ファイル配置・固定ランタイムの可視性だけです。** `namespace` 宣言と `using` 行を除けば、スキーマ依存の生成コードは通常の分割出力と一致し、API リファレンス（`.g.md`）には実際の（導出後の）名前空間が載ります。固定ランタイム（`Runtime*.g.cs`）は **public** で出力されます：各層は別アセンブリであり、同じ理由で同じ型を public として配布している NuGet パッケージと同一の規則です。そのため生成プロジェクトは素のプロジェクト参照だけでビルドでき、**`InternalsVisibleTo` の手書きは不要**です。
 - リポジトリ契約は DDD のポートとしてドメイン層に置かれます：プレゼンテーションプロジェクト（EditModel の DB 照合は `I{Entity}Repository` 経由）はドメインプロジェクトへの参照だけで成立し、インフラストラクチャは「ドメインの契約を実装する側」になります。プロジェクト参照は `プレゼンテーション → ドメイン ← インフラストラクチャ ← サーバー` です（サーバープロジェクトは DI 組み立てのためインフラストラクチャも参照します）。
 - インラインランタイム（`Runtime.g.cs`）はドメイン層に入ります。これはパッケージ参照モードと対称です：`--use-runtime-packages` ならドメインプロジェクトが代わりに `QuickER.Runtime` を参照し、いずれの場合も他の層にはドメイン参照経由で推移的に届きます。
-- モードの切替（や層フォルダ名の変更）をしても、以前の場所に書かれたファイルは削除されません——手動で削除してください。
+- モードの切替（や層フォルダ名・サブフォルダ名の変更）をしても、以前の場所に書かれたファイルは削除されません——手動で削除してください。
 
 ## API リファレンス（.g.md）
 
@@ -1104,9 +1130,9 @@ DB なしでユニットテストするためのインメモリ実装を追加�
 
 **英語が正本です。** 日本語版も併産したい場合は、GUI の下位チェック「日本語版を出力する」、または CLI の `--api-docs-ja` フラグ（設定キー `IncludeJapaneseApiDocs`）を有効化します（**既定 OFF**・`--generate-api-docs` が前提）。有効化すると、英語正本の `.g.md` に加えて `.ja.g.md` が併産されます（例: `EcOrder.g.cs` → `EcOrder.ja.g.md`）。
 
-Markdown は既定で出力ディレクトリ直下に出ます。`--api-docs-dir`（設定キー `ApiDocsDirectory`）で出力ディレクトリからの相対パスのサブフォルダへ移せます（例: `docs`・複数階層可・絶対パスと `..` は拒否）。全出力モードで有効で、層別出力ではドキュメントを層プロジェクトの外へ寄せる用途に使えます。
+Markdown は既定で出力ディレクトリ直下に出ます。`--api-docs-subdir`（設定キー `ApiDocsSubdirectory`）で出力ディレクトリからの相対パスのサブフォルダへ移せます（例: `docs`・複数階層可・絶対パスと `..` は拒否）。全出力モードで有効で、層別出力ではドキュメントを層プロジェクトの外へ寄せる用途に使えます。
 
-ファイル名は `--api-docs-file`（設定キー `ApiDocsFileName`）で変えられます（例: `--api-docs-file Api.md` → `Api.g.md`／日本語版は `Api.ja.g.md`）。拡張子は `.g.md` へ正規化されるため、`Api` / `Api.md` / `Api.g.md` のどれを渡しても結果は同じです（生成物の上書きは `.g.md` / `.g.cs` だけに限っているため、拡張子は指定に委ねません）。指定は出力モードに依らず優先され、未指定なら従来どおりの導出名（非分割＝出力ファイル名のベース名／分割＝`ApiDocs.g.md`）になります。指定できるのはファイル名だけで、パス区切りを含む指定は生成時エラーです（置き場を決めるのは `--api-docs-dir` の役割）。GUI では「出力先サブフォルダ」の下の「出力ファイル名」欄で指定し、**空欄のときは実際に使われる名前がグレーで表示されます**（出力ファイル名・出力モードの変更に追従します）。
+ファイル名は `--api-docs-file`（設定キー `ApiDocsFileName`）で変えられます（例: `--api-docs-file Api.md` → `Api.g.md`／日本語版は `Api.ja.g.md`）。拡張子は `.g.md` へ正規化されるため、`Api` / `Api.md` / `Api.g.md` のどれを渡しても結果は同じです（生成物の上書きは `.g.md` / `.g.cs` だけに限っているため、拡張子は指定に委ねません）。指定は出力モードに依らず優先され、未指定なら従来どおりの導出名（非分割＝出力ファイル名のベース名／分割＝`ApiDocs.g.md`）になります。指定できるのはファイル名だけで、パス区切りを含む指定は生成時エラーです（置き場を決めるのは `--api-docs-subdir` の役割）。GUI では「出力先サブフォルダ」の下の「出力ファイル名」欄で指定し、**空欄のときは実際に使われる名前がグレーで表示されます**（出力ファイル名・出力モードの変更に追従します）。
 
 `.g.md` / `.ja.g.md` は自動生成ファイルです。再生成で上書きされるため、直接編集しないでください。
 

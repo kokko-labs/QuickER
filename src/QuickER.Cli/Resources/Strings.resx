@@ -106,6 +106,9 @@
   <data name="Cli_Opt_ServerLayerDirectory" xml:space="preserve">
     <value>Server layer folder for layered output, relative to --out; only used with remote services (default: Server; overrides the settings file)</value>
   </data>
+  <data name="Cli_Opt_CodeSubdirectory" xml:space="preserve">
+    <value>Output subfolder for the generated code, one level below the layer folder (or below --out without layered output); blank = no subfolder; never affects namespaces (overrides the settings file)</value>
+  </data>
   <data name="Cli_Opt_RootNamespace" xml:space="preserve">
     <value>Root namespace of the generated code (overrides the settings file)</value>
   </data>
@@ -172,7 +175,7 @@
   <data name="Cli_Opt_IncludeJapaneseApiDocs" xml:space="preserve">
     <value>Also output the Japanese API reference Markdown ({base}.ja.g.md; requires --generate-api-docs) (overrides the settings file)</value>
   </data>
-  <data name="Cli_Opt_ApiDocsDirectory" xml:space="preserve">
+  <data name="Cli_Opt_ApiDocsSubdirectory" xml:space="preserve">
     <value>Output subfolder for the API reference Markdown, relative to the output directory (e.g. docs; blank = the output directory itself; requires --generate-api-docs) (overrides the settings file)</value>
   </data>
   <data name="Cli_Opt_ApiDocsFileName" xml:space="preserve">

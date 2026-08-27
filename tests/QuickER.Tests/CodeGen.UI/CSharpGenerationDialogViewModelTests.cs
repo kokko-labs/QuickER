@@ -1983,9 +1983,62 @@ public class CSharpGenerationDialogViewModelTests
         }
     }
 
+    /// <summary>
+    /// 生成コードのサブフォルダが生成オプションへ渡り、保存・復元されること、
+    /// および名前空間の既定を一切動かさないことを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 層フォルダ欄は名前空間の既定を追従させる（<c>ApplyLayerDirectoryChange</c>）が、サブフォルダ欄は
+    /// 配置しか変えないため追従させない。ここを取り違えると、サブフォルダを入力しただけで名前空間欄が
+    /// 書き換わる（画面上は静かに起きる）。
+    /// </remarks>
+    [Fact(
+        DisplayName = "CodeSubdirectory が生成オプションへ渡り保存・復元される（名前空間は不動）"
+    )]
+    public void CodeSubdirectory_MapsToOptions_AndDoesNotMoveNamespaces()
+    {
+        var vm = CreateViewModel(out var folder);
+
+        try
+        {
+            vm.RootNamespace = "Acme.App";
+            vm.OutputPath = @"C:	emp\Entities.g.cs";
+            vm.LayeredOutput = true;
+            var namespacesBefore = (vm.EntityNamespace, vm.RepositoryNamespace, vm.MapperNamespace);
+
+            vm.CodeSubdirectory = " Generated ";
+            vm.CloseAction = _ => { };
+
+            // 前後空白は除去して明示指定として渡る
+            vm.ToOptions().CodeSubdirectory.Should().Be("Generated");
+
+            // 名前空間の既定は層フォルダ由来のまま動かない
+            (vm.EntityNamespace, vm.RepositoryNamespace, vm.MapperNamespace)
+                .Should()
+                .Be(namespacesBefore);
+
+            vm.OkCommand.Execute(null);
+            var restored = new CSharpGenerationDialogViewModel(
+                new CSharpGenerationSettingsStore(folder)
+            );
+            restored.CodeSubdirectory.Should().Be("Generated");
+
+            // 空欄は null（既定＝サブフォルダなし）として生成へ渡る
+            vm.CodeSubdirectory = string.Empty;
+            vm.ToOptions().CodeSubdirectory.Should().BeNull();
+        }
+        finally
+        {
+            if (Directory.Exists(folder))
+            {
+                Directory.Delete(folder, recursive: true);
+            }
+        }
+    }
+
     /// <summary>API リファレンスの出力先サブフォルダが生成オプションへ渡り、保存・復元されることを検証する</summary>
-    [Fact(DisplayName = "ApiDocsDirectory が生成オプションへ渡り保存・復元される")]
-    public void ApiDocsDirectory_MapsToOptions_AndPersists()
+    [Fact(DisplayName = "ApiDocsSubdirectory が生成オプションへ渡り保存・復元される")]
+    public void ApiDocsSubdirectory_MapsToOptions_AndPersists()
     {
         var vm = CreateViewModel(out var folder);
 
@@ -1994,22 +2047,22 @@ public class CSharpGenerationDialogViewModelTests
             vm.RootNamespace = "Acme.App";
             vm.OutputPath = @"C:\temp\Entities.g.cs";
             vm.GenerateApiDocs = true;
-            vm.ApiDocsDirectory = " docs ";
+            vm.ApiDocsSubdirectory = " docs ";
             vm.CloseAction = _ => { };
 
             // 前後空白は除去して明示指定として渡る
-            vm.ToOptions().ApiDocsDirectory.Should().Be("docs");
+            vm.ToOptions().ApiDocsSubdirectory.Should().Be("docs");
 
             vm.OkCommand.Execute(null);
             var restored = new CSharpGenerationDialogViewModel(
                 new CSharpGenerationSettingsStore(folder)
             );
             restored.GenerateApiDocs.Should().BeTrue();
-            restored.ApiDocsDirectory.Should().Be("docs");
+            restored.ApiDocsSubdirectory.Should().Be("docs");
 
             // 空欄は null（既定＝出力フォルダ直下）として生成へ渡る
-            vm.ApiDocsDirectory = string.Empty;
-            vm.ToOptions().ApiDocsDirectory.Should().BeNull();
+            vm.ApiDocsSubdirectory = string.Empty;
+            vm.ToOptions().ApiDocsSubdirectory.Should().BeNull();
         }
         finally
         {

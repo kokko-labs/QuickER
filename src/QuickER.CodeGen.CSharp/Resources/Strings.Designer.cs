@@ -180,9 +180,9 @@ namespace QuickER.CodeGen.CSharp.Resources {
             }
         }
 
-        public static string CodeGen_Error_InvalidLayerDirectory {
+        public static string CodeGen_Error_InvalidOutputSubdirectory {
             get {
-                return ResourceManager.GetString("CodeGen_Error_InvalidLayerDirectory", resourceCulture);
+                return ResourceManager.GetString("CodeGen_Error_InvalidOutputSubdirectory", resourceCulture);
             }
         }
 

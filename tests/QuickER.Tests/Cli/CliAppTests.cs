@@ -1705,10 +1705,10 @@ public class CliAppTests
     }
 
     /// <summary>
-    /// --api-docs-dir で API リファレンス Markdown がサブフォルダへ出力され、生成コードの配置は
+    /// --api-docs-subdir で API リファレンス Markdown がサブフォルダへ出力され、生成コードの配置は
     /// 影響を受けないことを検証する（CLI の end-to-end）
     /// </summary>
-    [Fact(DisplayName = "--api-docs-dir で API リファレンスがサブフォルダへ出力される")]
+    [Fact(DisplayName = "--api-docs-subdir で API リファレンスがサブフォルダへ出力される")]
     public async Task Generate_ApiDocsDirFlag_PlacesMarkdownUnderSubfolder()
     {
         var (schemaPath, outDir, root) = CreateSampleSchema();
@@ -1725,7 +1725,7 @@ public class CliAppTests
                 "Test.ApiDocsDir",
                 "--split-files-by-category",
                 "--generate-api-docs",
-                "--api-docs-dir",
+                "--api-docs-subdir",
                 "docs",
             ]);
 
