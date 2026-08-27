@@ -21,8 +21,9 @@ namespace QuickER.CodeGen.CSharp;
 ///     <see cref="RuntimePackages.SqlServer"/> / <see cref="RuntimePackages.Sqlite"/>（マルチターゲットなら両方）</item>
 ///   <item><see cref="CodeGenerationOptions.GenerateEfCore"/> 時: <see cref="RuntimePackages.EntityFrameworkCore"/></item>
 ///   <item><see cref="CodeGenerationOptions.GenerateInMemoryRepositories"/> 時: <see cref="RuntimePackages.InMemory"/></item>
-///   <item><see cref="CodeGenerationOptions.GenerateRemoteServices"/> 時: <see cref="RuntimePackages.AspNetCore"/>
-///     （サーバー実装ファイルの固定部。参照するのはサーバー側プロジェクトのみだが、案内は生成単位で出す）</item>
+///   <item><see cref="CodeGenerationOptions.GenerateRemoteServices"/> かつ Repository 契約ありのとき:
+///     <see cref="RuntimePackages.AspNetCore"/>（サーバー実装ファイルの固定部。参照するのはサーバー側
+///     プロジェクトのみだが、案内は生成単位で出す）</item>
 ///   <item><see cref="CodeGenerationOptions.GenerateSyncSupport"/> 時: <see cref="RuntimePackages.Sync"/></item>
 /// </list>
 /// バージョンは呼び出し側から受け取る（版の実配線は後続タスク）。
@@ -43,20 +44,7 @@ public static class RuntimePackageReferenceGuidance
 
         if (options.GenerateRepositories)
         {
-            // 実効方言の解決は未対応方言で例外を投げるが、案内はプレビュー等でも呼ばれ得るため非例外にする
-            // （未対応方言は sqlserver 相当へフォールバック。実効方言の検証・診断は生成本体が担う）。
-            IReadOnlyList<string> dialects;
-
-            try
-            {
-                dialects = options.EffectiveRepositoryDialects;
-            }
-            catch (ArgumentException)
-            {
-                dialects = ["sqlserver"];
-            }
-
-            foreach (var dialect in dialects)
+            foreach (var dialect in options.EffectiveRepositoryDialects)
             {
                 var package = IsSqlite(dialect)
                     ? RuntimePackages.Sqlite
@@ -81,8 +69,13 @@ public static class RuntimePackageReferenceGuidance
 
         // サーバー実装ファイルの固定部（RemoteServerEngine ほか）は ASP.NET Core 前提のため専用パッケージが持つ。
         // 参照が要るのはサーバーを載せるプロジェクトだけだが、案内は「この生成物が必要とするパッケージ」の列挙なので
-        // 他と同じく生成オプションから決める（安定順の末尾へ足す）。
-        if (options.GenerateRemoteServices && !packages.Contains(RuntimePackages.AspNetCore))
+        // 他と同じく生成オプションから決める（安定順の末尾へ足す）。条件はサーバー実装の実際の出力条件
+        // （GeneratedFilePlanner の RemoteServer スペック）と同じく Repository 契約の有無まで見る。
+        if (
+            options.GenerateRemoteServices
+            && options.GeneratesRepositoryContract
+            && !packages.Contains(RuntimePackages.AspNetCore)
+        )
         {
             packages.Add(RuntimePackages.AspNetCore);
         }

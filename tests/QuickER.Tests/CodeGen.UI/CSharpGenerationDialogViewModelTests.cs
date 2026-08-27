@@ -73,6 +73,34 @@ public class CSharpGenerationDialogViewModelTests
         vm.Result.Options.GenerateRepositories.Should().BeFalse();
     }
 
+    /// <summary>
+    /// DB アクセス「なし」でリモート対応の行が隠れているとき、保持されたチェック値は結果オプションへ渡さない
+    /// ことを検証する（隠れた保存値のせいで生成が「リモート面には Repository 契約が必要」エラーで止まらない）
+    /// </summary>
+    [Fact(DisplayName = "リモート対応は非表示構成では結果オプションへ渡さない（値自体は保持する）")]
+    public void RemoteOptions_AreDroppedWhenHidden_ButKeptInViewModel()
+    {
+        var vm = CreateViewModel(out _);
+        vm.RootNamespace = "Sample.Domain";
+        vm.OutputPath = @"C:\temp\Entities.g.cs";
+
+        // いったん Repository を選んでリモート対応を ON にしてから、DB アクセスを「なし」へ戻す
+        vm.DbAccessRepository = true;
+        vm.GenerateRemoteServices = true;
+        vm.GenerateRemoteContracts.Should().BeTrue("HTTP 実装 ON はリモート面を含意する");
+
+        vm.DbAccessNone = true;
+        vm.ShowRemoteContracts.Should().BeFalse("DB アクセス「なし」ではリモート対応の行を隠す");
+
+        vm.OkCommand.Execute(null);
+
+        vm.Result.Should().NotBeNull();
+        vm.Result!.Options.GenerateRemoteContracts.Should().BeFalse();
+        vm.Result.Options.GenerateRemoteServices.Should().BeFalse();
+        vm.GenerateRemoteContracts.Should().BeTrue("DB アクセスを選び直せば元の選択が見える");
+        vm.GenerateRemoteServices.Should().BeTrue();
+    }
+
     /// <summary>未対応方言のプロバイダでもQuickER 版 Repository ラジオは常時選択可であり、対象 DB チェックは両方 OFF から始まることを検証する</summary>
     [Theory(
         DisplayName = "未対応方言でもQuickER 版 Repository ラジオは選択可・対象 DB チェックは両方 OFF から始まる"

@@ -73,6 +73,9 @@
   <data name="CodeGen_Error_RepositoryRequiresDataAnnotations" xml:space="preserve">
     <value>Repository / EF Core / in-memory Repository use the [Table] / [Key] / [Column] attributes, so data annotations must be applied. Enable data annotations.</value>
   </data>
+  <data name="CodeGen_Error_RemoteRequiresContract" xml:space="preserve">
+    <value>Remote support (GenerateRemoteContracts / GenerateRemoteServices) extends the repository contract, so no remote code is produced without one. Enable GenerateRepositories, GenerateEfCore, or GenerateInMemoryRepositories, or turn the remote options off.</value>
+  </data>
   <data name="CodeGen_Error_NoEntities" xml:space="preserve">
     <value>The ER diagram has no entities.</value>
   </data>

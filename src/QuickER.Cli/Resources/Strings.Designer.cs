@@ -372,12 +372,6 @@ namespace QuickER.Cli.Resources {
             }
         }
 
-        public static string Cli_RepositoryDialectUnsupported {
-            get {
-                return ResourceManager.GetString("Cli_RepositoryDialectUnsupported", resourceCulture);
-            }
-        }
-
         public static string Cli_GenerationAborted {
             get {
                 return ResourceManager.GetString("Cli_GenerationAborted", resourceCulture);

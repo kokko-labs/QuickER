@@ -153,6 +153,22 @@ internal sealed class GenerationOptionSet
         AddString("OutputPath", "--output-path", Strings.Cli_Opt_OutputPath);
     }
 
+    /// <summary>
+    /// このオプション束が扱う「設定キー ↔ CLI フラグ」の全対応（文字列 → bool → RepositoryDialects の順）。
+    /// </summary>
+    /// <remarks>
+    /// 表そのものを 1 箇所から見せるための読み出し口（正本はコンストラクタが組み立てる <see cref="_stringFlags"/> /
+    /// <see cref="_boolFlags"/> ＋ <see cref="RepositoryDialects"/>）。設定キーを綴り間違えると
+    /// <see cref="ApplyOverrides"/> が書いた値をデシリアライズが未知メンバーとして捨て、未知キー警告も
+    /// （ユーザーが書いたキーだけを見るため）出ないまま、そのフラグだけが静かに無効化される。
+    /// <c>GenerationOptionSetParityTests</c> がここを <c>CodeGenerationOptions</c> と照合してそれを防ぐ。
+    /// </remarks>
+    public IEnumerable<(string Key, string Flag)> ConfigKeyFlags =>
+        _stringFlags
+            .Select(entry => (entry.Key, entry.Option.Name))
+            .Concat(_boolFlags.Select(entry => (entry.Key, entry.Option.Name)))
+            .Append(("RepositoryDialects", RepositoryDialects.Name));
+
     /// <summary>コマンドへ登録すべき全 Option を列挙する（文字列 → bool → RepositoryDialects の順）</summary>
     public IEnumerable<Option> Options
     {

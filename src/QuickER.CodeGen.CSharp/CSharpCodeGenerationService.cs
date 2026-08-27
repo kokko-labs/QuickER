@@ -612,7 +612,8 @@ public sealed class CSharpCodeGenerationService
     /// </summary>
     /// <remarks>
     /// エラー: エンティティが存在しない、テーブル名が空、生成対象間の依存違反
-    /// （Mapper は EditModel が必要、Repository / EF Core / インメモリは DataAnnotations が必要）、
+    /// （Mapper は EditModel が必要、Repository / EF Core / インメモリは DataAnnotations が必要、
+    /// リモート対応は Repository 契約が必要）、
     /// 名前空間オプションの形式不正、エンティティクラス名の衝突、列由来プロパティ名の衝突。
     /// Entity は常時生成されるため「生成対象なし」「Repository は Entity 必須」は起こらない。
     /// 警告: 複合主キー（[Key] 属性の生成が最小限になる）
@@ -641,6 +642,20 @@ public sealed class CSharpCodeGenerationService
         {
             diagnostics.Add(
                 GenerationDiagnostic.Error(Strings.CodeGen_Error_RepositoryRequiresDataAnnotations)
+            );
+        }
+
+        // リモート面（インターフェイス・HTTP クライアント／サーバー）は Repository 契約を拡張する形で出力される。
+        // 契約が無い構成では計画（GeneratedFilePlanner）が該当バケットを丸ごと落とすため、指定しても診断ゼロで
+        // 何も生成されない＝「ON にしたのに出ない」が黙って通る。GUI はチェック欄ごと隠すので、実際に踏むのは
+        // CLI / MCP / 手書き config だが、指定が無視される事実は生成前に伝える
+        if (
+            (options.GenerateRemoteContracts || options.GenerateRemoteServices)
+            && !options.GeneratesRepositoryContract
+        )
+        {
+            diagnostics.Add(
+                GenerationDiagnostic.Error(Strings.CodeGen_Error_RemoteRequiresContract)
             );
         }
 
