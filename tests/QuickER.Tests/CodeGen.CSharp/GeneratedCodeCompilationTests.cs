@@ -257,6 +257,7 @@ public class GeneratedCodeCompilationTests
                     RootNamespace = "Sample.Domain",
                     SplitFilesByCategory = split,
                     GenerateValueObjects = vo,
+                    GenerateRepositories = true,
                     GenerateRemoteContracts = true,
                 }
             );
@@ -305,6 +306,7 @@ public class GeneratedCodeCompilationTests
             {
                 RootNamespace = "Sample.Domain",
                 RepositoryDialects = ["sqlserver", "sqlite"],
+                GenerateRepositories = true,
                 GenerateRemoteContracts = true,
             }
         );
@@ -494,6 +496,7 @@ public class GeneratedCodeCompilationTests
                         RootNamespace = "Sample.Domain",
                         SplitFilesByCategory = split,
                         GenerateValueObjects = vo,
+                        GenerateRepositories = true,
                         GenerateRemoteServices = true,
                     }
                 );

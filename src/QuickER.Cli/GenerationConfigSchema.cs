@@ -199,7 +199,7 @@ public static class GenerationConfigSchema
             "boolean",
             false,
             "Data access",
-            "Generate the bidirectional sync support (engine, per-table descriptors, journaling decorators, direct differential sources, DI) for a server (SQL Server) plus local (SQLite) setup. Requires exactly those two RepositoryDialects and at least one table with a rowversion column."
+            "Generate the bidirectional sync support (engine, per-table descriptors, journaling decorators, direct differential sources, DI) for a server (SQL Server) plus local (SQLite) setup. Requires GenerateRepositories, exactly those two RepositoryDialects, and at least one table with a single primary-key column (a rowversion column makes that table incremental; tables without one sync last-write-wins)."
         ),
         // リモート対応
         new(
@@ -278,13 +278,20 @@ public static class GenerationConfigSchema
     ];
 
     /// <summary>キーをまたぐ相関・排他ルール（型検査では表せない制約）</summary>
+    /// <remarks>
+    /// 実装側の硬いエラー（<c>CSharpCodeGenerationService</c> の検証群）と双方向で対応させる。
+    /// ここに書いたのに実装が黙って通す／実装が止めるのにここに無い、のどちらも外部エージェントを誤らせる。
+    /// </remarks>
     public static IReadOnlyList<string> Rules { get; } =
     [
         "Entity classes are always generated; there is no key to toggle them.",
-        "Generating DB-access code requires GenerateRepositories: true or GenerateEfCore: true (both default to false).",
+        "A repository contract is generated when any of GenerateRepositories, GenerateEfCore, or GenerateInMemoryRepositories is true (all default to false); with none of them no data-access code is produced.",
+        "GenerateMappers requires GenerateEditModels, because a Mapper converts between an Entity and its EditModel.",
+        "GenerateRepositories / GenerateEfCore / GenerateInMemoryRepositories require IncludeDataAnnotations, because the runtime reads [Table] / [Key] / [Column] by reflection.",
         "Multi-target RepositoryDialects (two or more effective dialects) cannot be combined with GenerateEfCore.",
         "GenerateRemoteServices implies GenerateRemoteContracts.",
-        "GenerateRemoteContracts / GenerateRemoteServices require a repository or EF Core contract (GenerateRepositories, GenerateEfCore, or GenerateInMemoryRepositories).",
+        "GenerateRemoteContracts / GenerateRemoteServices require a repository contract (GenerateRepositories, GenerateEfCore, or GenerateInMemoryRepositories); asking for them without one is a generation error.",
+        "GenerateSyncSupport requires GenerateRepositories, exactly the two RepositoryDialects \"sqlserver\" and \"sqlite\", and at least one table with a single primary-key column.",
         "UseGuidKeyForStringPrimaryKey applies only when GenerateValueObjects is true and the primary key is a string.",
         "RepositoryDialects supports only \"sqlserver\" and \"sqlite\"; when null or empty, a single dialect is derived from the provider / diagram target DBMS.",
         "The namespace keys (RuntimeNamespace, EntityNamespace, EditModelNamespace, MapperNamespace, RepositoryNamespace, ValueObjectNamespace) apply only when SplitFilesByCategory is true.",

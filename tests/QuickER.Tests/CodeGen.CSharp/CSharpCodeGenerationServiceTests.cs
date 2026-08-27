@@ -2164,6 +2164,78 @@ public class CSharpCodeGenerationServiceTests
     }
 
     /// <summary>
+    /// Repository 契約が 1 つも生成されない構成でリモート面を要求するとエラーになることを検証する
+    /// （計画が該当バケットを落とすため、止めないと診断ゼロで何も生成されないまま成功に見える）
+    /// </summary>
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public void Generate_RemoteWithoutRepositoryContract_ShouldFailWithError(
+        bool remoteContracts,
+        bool remoteServices
+    )
+    {
+        var diagram = SingleEntityDiagram();
+        var options = new CodeGenerationOptions
+        {
+            RootNamespace = "Sample.Domain",
+            GenerateRemoteContracts = remoteContracts,
+            GenerateRemoteServices = remoteServices,
+        };
+
+        var result = new CSharpCodeGenerationService().Generate(diagram, options);
+
+        result.HasErrors.Should().BeTrue();
+        result.Files.Should().BeEmpty();
+        result
+            .Diagnostics.Should()
+            .Contain(diagnostic =>
+                diagnostic.Severity == GenerationDiagnosticSeverity.Error
+                && diagnostic.Message == Strings.CodeGen_Error_RemoteRequiresContract
+            );
+    }
+
+    /// <summary>
+    /// Repository 契約を生成する 3 構成（QuickER 版 Repository / EF Core / インメモリ）のどれと組んでも
+    /// リモート面は生成できることを検証する（新しい検証が正当な構成まで巻き込んでいないことの対照）
+    /// </summary>
+    [Theory]
+    [InlineData(nameof(CodeGenerationOptions.GenerateRepositories))]
+    [InlineData(nameof(CodeGenerationOptions.GenerateEfCore))]
+    [InlineData(nameof(CodeGenerationOptions.GenerateInMemoryRepositories))]
+    public void Generate_RemoteWithRepositoryContract_ShouldSucceed(string contractOption)
+    {
+        var diagram = SingleEntityDiagram();
+        var options = new CodeGenerationOptions
+        {
+            RootNamespace = "Sample.Domain",
+            GenerateRepositories =
+                contractOption == nameof(CodeGenerationOptions.GenerateRepositories),
+            GenerateEfCore = contractOption == nameof(CodeGenerationOptions.GenerateEfCore),
+            GenerateInMemoryRepositories =
+                contractOption == nameof(CodeGenerationOptions.GenerateInMemoryRepositories),
+            GenerateRemoteContracts = true,
+            GenerateRemoteServices = true,
+        };
+
+        var result = new CSharpCodeGenerationService().Generate(diagram, options);
+
+        result
+            .Diagnostics.Should()
+            .NotContain(diagnostic =>
+                diagnostic.Message == Strings.CodeGen_Error_RemoteRequiresContract
+            );
+        result.HasErrors.Should().BeFalse();
+        // リモートサービス生成はサーバー実装を別ファイルへ出す（契約があれば構成に依らず出力される）
+        result
+            .Files.Should()
+            .Contain(file =>
+                file.FileName.EndsWith(".RemoteServer.g.cs", StringComparison.Ordinal)
+            );
+    }
+
+    /// <summary>
     /// 同一エンティティに rowversion 列が 2 本以上ある図は生成時にエラーになることを検証する
     /// （版の読み書きは「1 型につき 1 本」前提で先頭だけを見るため、黙って生成すると DDL 適用で初めて落ちる）
     /// </summary>

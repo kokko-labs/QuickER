@@ -84,6 +84,12 @@ namespace QuickER.CodeGen.CSharp.Resources {
             }
         }
 
+        public static string CodeGen_Error_RemoteRequiresContract {
+            get {
+                return ResourceManager.GetString("CodeGen_Error_RemoteRequiresContract", resourceCulture);
+            }
+        }
+
         public static string CodeGen_Error_NoEntities {
             get {
                 return ResourceManager.GetString("CodeGen_Error_NoEntities", resourceCulture);

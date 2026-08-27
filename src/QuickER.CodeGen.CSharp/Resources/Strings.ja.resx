@@ -73,6 +73,9 @@
   <data name="CodeGen_Error_RepositoryRequiresDataAnnotations" xml:space="preserve">
     <value>Repository / EF Core / インメモリ Repository は [Table] / [Key] / [Column] 属性を利用するため、データアノテーションの付与が必要です。データアノテーションを有効にしてください。</value>
   </data>
+  <data name="CodeGen_Error_RemoteRequiresContract" xml:space="preserve">
+    <value>リモート対応（GenerateRemoteContracts / GenerateRemoteServices）は Repository 契約を拡張するものなので、契約が無い構成ではリモートのコードが一切生成されません。GenerateRepositories / GenerateEfCore / GenerateInMemoryRepositories のいずれかを有効にするか、リモート対応を無効にしてください。</value>
+  </data>
   <data name="CodeGen_Error_NoEntities" xml:space="preserve">
     <value>ER 図にエンティティがありません。</value>
   </data>

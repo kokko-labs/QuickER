@@ -1923,4 +1923,47 @@ public class CliAppTests
             }
         }
     }
+
+    /// <summary>
+    /// DB アクセスを 1 つも有効にせずリモート面だけを指定すると、診断ゼロで空振りせず
+    /// 終了コード 1（生成エラー）になることを検証する
+    /// </summary>
+    /// <remarks>
+    /// リモート面は Repository 契約を拡張する形でしか出力されないため、契約なしの指定は「ON にしたのに
+    /// 何も出ない」で終わる。GUI はチェック欄ごと隠すので、この構成を作れるのは CLI / MCP / 手書き config だけ。
+    /// </remarks>
+    [Fact(DisplayName = "--generate-remote-contracts を契約なしで指定すると終了コード 1")]
+    public async Task Generate_RemoteContractsWithoutRepositoryContract_ReturnsError()
+    {
+        var (schemaPath, outDir, root) = CreateSampleSchema();
+        var stdout = new StringWriter();
+        var stderr = new StringWriter();
+
+        try
+        {
+            var exit = await CliApp.InvokeAsync(
+                [
+                    "generate",
+                    "--schema",
+                    schemaPath,
+                    "--out",
+                    outDir,
+                    "--generate-remote-contracts",
+                ],
+                stdout,
+                stderr
+            );
+
+            exit.Should().Be(1);
+            Directory.Exists(outDir).Should().BeFalse("生成エラーで中止するため出力は作られない");
+            stderr.ToString().Should().Contain(CodeGenStrings.CodeGen_Error_RemoteRequiresContract);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
 }

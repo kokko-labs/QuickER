@@ -996,8 +996,9 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             // 選択できない構成（片方言）では保存値をそのまま持ち越さず落とす（隠れた欄の値で生成が止まらないように）
             GenerateSyncSupport = ShowSyncSupport && GenerateSyncSupport,
             UseRuntimePackages = UseRuntimePackages,
-            GenerateRemoteContracts = GenerateRemoteContracts,
-            GenerateRemoteServices = GenerateRemoteServices,
+            // 同上（DB アクセス「なし」ではリモート対応の行を隠すため、隠れた保存値が生成時エラーを踏まないよう落とす）
+            GenerateRemoteContracts = ShowRemoteContracts && GenerateRemoteContracts,
+            GenerateRemoteServices = ShowRemoteContracts && GenerateRemoteServices,
             GenerateApiDocs = GenerateApiDocs,
             IncludeJapaneseApiDocs = IncludeJapaneseApiDocs,
             ApiDocsDirectory = ApiDocsDirectory.Trim(),
