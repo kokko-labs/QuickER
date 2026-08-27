@@ -15,6 +15,12 @@
     <RepositoryUrl>https://github.com/kokko-labs/QuickER</RepositoryUrl>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <!-- シンボルは .snupkg として別パッケージで公開する（nuget.org のシンボルサーバが配信し、
+         必要な利用者だけがデバッガ経由で取得する）。dll へ埋め込む方式は本体サイズと restore 時間を
+         増やすため、ライブラリ設計ガイドの第一推奨に従ってこちらを採る。dotnet nuget push は
+         対応する .snupkg を自動で同時に push する -->
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
     <PackageIcon>quicker-icon-128.png</PackageIcon>
   </PropertyGroup>
 
