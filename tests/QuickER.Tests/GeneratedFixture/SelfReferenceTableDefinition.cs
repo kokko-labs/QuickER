@@ -13,11 +13,12 @@ namespace QuickER.Tests.GeneratedFixture;
 /// 空のまま返る」は実行器を通さないと分からない。その 1 点のためだけの最小テーブル（親キー＋ラベル）である。
 /// </para>
 /// <para>
-/// <b>置き場が 2 フィクスチャに分かれている理由</b>: 値オブジェクト有効の図では自己参照 FK の CLR 型
-/// （<c>ParentNodeIdValue</c>）が参照先の主キー型（<c>NodeIdValue</c>）と一致せず、EF Core のモデル検証が
-/// <c>DbContext</c> ごと落ちる（EF Core は FK プロパティの型が主キーの型と互換であることを要求する）。
-/// そのため EF Core を生成しないフィクスチャ——<c>MultiTargetPortableFixture</c>（QuickER 版 Repository の
-/// sqlserver / sqlite）と <c>InMemoryFixture</c>（インメモリ・値オブジェクト無効）——にだけ置く。
+/// 置き場は 3 フィクスチャ——<c>MultiTargetPortableFixture</c>（QuickER 版 Repository の sqlserver / sqlite）・
+/// <c>InMemoryFixture</c>（インメモリ・値オブジェクト無効）・<c>QueryFixture</c>（QuickER 版 sqlite ＋ EF Core ＋
+/// インメモリ・値オブジェクト有効）。<c>QueryFixture</c> へ置けるのは、値オブジェクトの型解決が
+/// 「子側の列は参照先の列の型を共有する」に統一されて、自己参照 FK（<c>parent_node_id</c>）が主キーと同じ
+/// <c>NodeIdValue</c> になったため（それ以前は FK プロパティの型が主キーの型と一致せず、EF Core のモデル検証が
+/// <c>DbContext</c> ごと落ちていた）。
 /// </para>
 /// <para>
 /// 図の要素 ID は決定的でなければ再生成時に差分が出るため固定 GUID を用いる（両フィクスチャの既存 ID とは

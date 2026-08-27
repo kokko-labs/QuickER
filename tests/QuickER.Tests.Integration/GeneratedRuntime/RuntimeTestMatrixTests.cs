@@ -181,11 +181,7 @@ public class RuntimeTestMatrixTests
             Row(
                 Covered(),
                 Covered(),
-                NotApplicable(
-                    "値オブジェクト有効の図では自己参照 FK の CLR 型が参照先の主キー型と一致せず、"
-                        + "生成された DbContext が EF Core のモデル検証で落ちる（FK プロパティの型は主キーの型と"
-                        + "互換である必要がある）。そのため自己参照は EF Core を生成しないフィクスチャにだけ置いている"
-                ),
+                Covered(),
                 Covered(),
                 NotApplicable("Query() はリモート面に無く、Include ツリーは転送されない")
             )
@@ -433,6 +429,11 @@ public class RuntimeTestMatrixTests
             "IncludeGraphSelfReferenceAdoRuntimeTests",
             "IncludeGraphSelfReference",
             Backend.AdoSqlite
+        ),
+        new(
+            "IncludeGraphSelfReferenceEfCoreRuntimeTests",
+            "IncludeGraphSelfReference",
+            Backend.EfCore
         ),
         new(
             "IncludeGraphSelfReferenceInMemoryRuntimeTests",

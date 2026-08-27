@@ -7,9 +7,15 @@ namespace QuickER.CodeGen.CSharp;
 /// <summary>ER 図定義からテンプレート用の C# コード生成モデルを構築するビルダー</summary>
 internal sealed partial class CSharpGenerationModelBuilder
 {
-    /// <summary>列名（正規化キー）→ 値オブジェクト生成モデルの対応。GenerateValueObjects が OFF のときは空で、VO 化しない</summary>
+    /// <summary>VO キー → 値オブジェクト生成モデルの対応。GenerateValueObjects が OFF のときは空で、VO 化しない</summary>
     private IReadOnlyDictionary<string, CSharpValueObjectModel> _valueObjects =
         new Dictionary<string, CSharpValueObjectModel>();
+
+    /// <summary>
+    /// 列 ID → その列が使う VO キーの対応（リレーションの子側は親側のキーを共有する）。
+    /// GenerateValueObjects が OFF のときは空
+    /// </summary>
+    private IReadOnlyDictionary<Guid, string> _valueObjectKeys = new Dictionary<Guid, string>();
 
     /// <summary>テーブル名・カラム名を C# 識別子へ変換するコンバーター</summary>
     private readonly CSharpNameConverter _nameConverter = new();

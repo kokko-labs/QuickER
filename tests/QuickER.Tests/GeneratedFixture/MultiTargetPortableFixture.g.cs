@@ -1236,43 +1236,6 @@ public sealed partial class OrderIdValue
     static partial void CustomizeDisplayName(ref string displayName);
 }
 
-/// <summary>Value object for the parent_node_id column</summary>
-public sealed partial class ParentNodeIdValue
-    : ValueObjectOrderedBase<ParentNodeIdValue, int>,
-        IValueObject<ParentNodeIdValue, int>
-{
-    private ParentNodeIdValue(int value)
-        : base(value) { }
-
-    /// <summary>Creates the instance from an already-validated value (the public factories live in the base class; see <see cref="ValueObjectBase{TSelf, TValue}.Create"/>).</summary>
-    static ParentNodeIdValue IValueObject<ParentNodeIdValue, int>.New(int value) =>
-        new(value);
-
-    /// <summary>Auto-generated validation rules plus the user extension (OnValidate), called by the base class's Create / TryCreate / Validate.</summary>
-    /// <remarks>An unimplemented OnValidate partial method takes its arguments with it when the compiler removes the call, so the list it would need is only allocated where the hook is actually written.</remarks>
-    static void IValueObject<ParentNodeIdValue, int>.ValidateCore(int value, ref List<string>? errors)
-    {
-        OnValidate(value, errors ??= new List<string>());
-    }
-
-    /// <summary>User-defined additional validation (partial; zero cost when not implemented).</summary>
-    static partial void OnValidate(int value, ICollection<string> errors);
-
-    /// <summary>Gets the display name of this value object (used in error messages and similar). Defaults to the column description, or the property name when unset. Can be replaced through GeneratedDisplayNames.Resolve (all display names at once) or CustomizeDisplayName (this value object only).</summary>
-    public static string DisplayName
-    {
-        get
-        {
-            var displayName = GeneratedDisplayNames.Resolve("ParentNodeId", null);
-            CustomizeDisplayName(ref displayName);
-            return displayName;
-        }
-    }
-
-    /// <summary>Extension point for replacing the display name (partial; the default display name applies when not implemented).</summary>
-    static partial void CustomizeDisplayName(ref string displayName);
-}
-
 /// <summary>Change state of an entity or EditModel.</summary>
 public enum RowState
 {
@@ -1620,7 +1583,7 @@ public partial class NodeEntity : EntityBase
     [Column("parent_node_id")]
     [SqlColumnType(SqlDbType.Int)]
     [DbColumnMeta("int32")]
-    public ParentNodeIdValue? ParentNodeId { get; set; }
+    public NodeIdValue? ParentNodeId { get; set; }
 
     /// <summary>Property for the label column</summary>
     [Column("label")]
@@ -4584,18 +4547,18 @@ public partial class NodeEditModel : EditModelBase<NodeEditModel>
     }
 
     /// <summary>Confirmed value of ParentNodeId.</summary>
-    private ParentNodeIdValue? _parentNodeId;
+    private NodeIdValue? _parentNodeId;
 
     /// <summary>On-screen input string for ParentNodeId.</summary>
     private string _bindingParentNodeId = string.Empty;
 
     /// <summary>Confirmed value of ParentNodeId (written by the input conversion and by the mapper when loading; treat it as read-only elsewhere).</summary>
-    public ParentNodeIdValue? ParentNodeId
+    public NodeIdValue? ParentNodeId
     {
         get => _parentNodeId;
         internal set
         {
-            if (EqualityComparer<ParentNodeIdValue?>.Default.Equals(_parentNodeId, value))
+            if (EqualityComparer<NodeIdValue?>.Default.Equals(_parentNodeId, value))
             {
                 return;
             }
@@ -4611,16 +4574,16 @@ public partial class NodeEditModel : EditModelBase<NodeEditModel>
     }
 
     /// <summary>Called just before the confirmed value of ParentNodeId changes (new value only; add processing via a partial implementation).</summary>
-    partial void OnParentNodeIdChanging(ParentNodeIdValue? value);
+    partial void OnParentNodeIdChanging(NodeIdValue? value);
 
     /// <summary>Called just before the confirmed value of ParentNodeId changes (old and new values; add processing via a partial implementation).</summary>
-    partial void OnParentNodeIdChanging(ParentNodeIdValue? oldValue, ParentNodeIdValue? newValue);
+    partial void OnParentNodeIdChanging(NodeIdValue? oldValue, NodeIdValue? newValue);
 
     /// <summary>Called just after the confirmed value of ParentNodeId changes (new value only; add processing via a partial implementation).</summary>
-    partial void OnParentNodeIdChanged(ParentNodeIdValue? value);
+    partial void OnParentNodeIdChanged(NodeIdValue? value);
 
     /// <summary>Called just after the confirmed value of ParentNodeId changes (old and new values; add processing via a partial implementation).</summary>
-    partial void OnParentNodeIdChanged(ParentNodeIdValue? oldValue, ParentNodeIdValue? newValue);
+    partial void OnParentNodeIdChanged(NodeIdValue? oldValue, NodeIdValue? newValue);
 
     /// <summary>On-screen input binding string for ParentNodeId (converted to the confirmed value when set).</summary>
     public string BindingParentNodeId
@@ -4633,7 +4596,7 @@ public partial class NodeEditModel : EditModelBase<NodeEditModel>
                 return;
             }
 
-            switch (ConvertParsedValueObjectInput<ParentNodeIdValue, int>(normalized, out var converted, out var rejection))
+            switch (ConvertParsedValueObjectInput<NodeIdValue, int>(normalized, out var converted, out var rejection))
             {
                 case BindingConversion.Converted:
                     ParentNodeId = converted;
@@ -4647,7 +4610,7 @@ public partial class NodeEditModel : EditModelBase<NodeEditModel>
                 default:
                     SetError(
                         nameof(BindingParentNodeId),
-                        ResolveParseErrorMessage(nameof(ParentNodeId), ParentNodeIdValue.DisplayName, normalized, "int")
+                        ResolveParseErrorMessage(nameof(ParentNodeId), NodeIdValue.DisplayName, normalized, "int")
                     );
                     break;
             }
@@ -4838,7 +4801,7 @@ public partial class NodeEditModel : EditModelBase<NodeEditModel>
                     break;
 
                 case nameof(ParentNodeId):
-                    displayNames.Add(ParentNodeIdValue.DisplayName);
+                    displayNames.Add(NodeIdValue.DisplayName);
                     targets.Add(nameof(BindingParentNodeId));
                     break;
 
@@ -4942,7 +4905,7 @@ public partial class NodeEditModel : EditModelBase<NodeEditModel>
     private NodeIdValue? _nodeIdSnapshot;
 
     /// <summary>Pre-edit snapshot of the confirmed value of ParentNodeId.</summary>
-    private ParentNodeIdValue? _parentNodeIdSnapshot;
+    private NodeIdValue? _parentNodeIdSnapshot;
 
     /// <summary>Pre-edit snapshot of the confirmed value of Label.</summary>
     private LabelValue? _labelSnapshot;

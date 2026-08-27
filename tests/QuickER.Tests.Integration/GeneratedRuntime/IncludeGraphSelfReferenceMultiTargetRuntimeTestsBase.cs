@@ -26,14 +26,12 @@ public abstract class IncludeGraphSelfReferenceMultiTargetRuntimeTestsBase
         await Nodes().InsertAsync(NewNode(2, 1, "child"), Ct);
     }
 
-    /// <summary>自己参照エンティティを組み立てる（値オブジェクト有効の図）</summary>
+    /// <summary>自己参照エンティティを組み立てる（値オブジェクト有効の図。親キーも主キーと同じ VO 型）</summary>
     private static NodeEntity NewNode(int nodeId, int? parentNodeId, string label) =>
         new()
         {
             NodeId = NodeIdValue.Create(nodeId),
-            ParentNodeId = parentNodeId is null
-                ? null
-                : ParentNodeIdValue.Create(parentNodeId.Value),
+            ParentNodeId = parentNodeId is null ? null : NodeIdValue.Create(parentNodeId.Value),
             Label = LabelValue.Create(label),
         };
 

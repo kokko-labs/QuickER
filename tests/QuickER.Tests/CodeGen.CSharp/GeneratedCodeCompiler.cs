@@ -1,4 +1,5 @@
 using System.IO;
+using System.Reflection;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using QuickER.CodeGen.CSharp;
@@ -106,6 +107,59 @@ internal static class GeneratedCodeCompiler
             Errors = errors,
             Warnings = warnings,
         };
+    }
+
+    /// <summary>
+    /// 生成結果をコンパイルし、成功時にロード済みアセンブリを返す（生成コードを実際に動かす検証用）
+    /// </summary>
+    /// <param name="result">検証対象の生成結果</param>
+    /// <param name="assemblyName">コンパイル対象アセンブリ名（テストごとに一意にする）</param>
+    /// <remarks>
+    /// 参照集合は <see cref="Compile"/> と同一（TPA＋明示追加）。ロードしたアセンブリはテストホストに
+    /// 既にロード済みの同一 ID のアセンブリ（EF Core 等）へ束縛されるため、生成コードをそのまま実行できる。
+    /// </remarks>
+    public static Assembly CompileAndLoad(CodeGenerationResult result, string assemblyName)
+    {
+        var syntaxTrees = result
+            .Files.Select(file =>
+                CSharpSyntaxTree.ParseText(
+                    file.Content,
+                    new CSharpParseOptions(LanguageVersion.Latest),
+                    path: file.FileName
+                )
+            )
+            .ToArray();
+
+        var compilation = CSharpCompilation.Create(
+            assemblyName,
+            syntaxTrees,
+            MetadataReferences.Value,
+            new CSharpCompilationOptions(
+                OutputKind.DynamicallyLinkedLibrary,
+                nullableContextOptions: NullableContextOptions.Enable
+            )
+        );
+
+        using var peStream = new MemoryStream();
+        var emitResult = compilation.Emit(peStream);
+
+        if (!emitResult.Success)
+        {
+            var errors = string.Join(
+                Environment.NewLine,
+                emitResult
+                    .Diagnostics.Where(diagnostic =>
+                        diagnostic.Severity == DiagnosticSeverity.Error
+                    )
+                    .Select(diagnostic => diagnostic.ToString())
+            );
+
+            throw new InvalidOperationException(
+                "生成コードのコンパイルに失敗:" + Environment.NewLine + errors
+            );
+        }
+
+        return Assembly.Load(peStream.ToArray());
     }
 
     private static IReadOnlyList<MetadataReference> BuildMetadataReferences()

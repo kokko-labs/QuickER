@@ -25,6 +25,11 @@ namespace QuickER.Tests.GeneratedQueryFixture;
 /// （SQL Server は同じ図を方言だけ差し替えた
 /// <see cref="Tests.GeneratedUniquenessSqlServerFixture.UniquenessSqlServerFixtureDefinition"/> が担う）。
 /// </para>
+/// <para>
+/// 自己参照テーブル（<c>nodes</c>＝<see cref="Tests.GeneratedFixture.SelfReferenceTableDefinition"/>）も持つ。
+/// 値オブジェクトの型解決が「子側の列は参照先の列の VO 型を共有する」に統一されたことで、自己参照 FK でも
+/// EF Core のモデル検証が通るようになったため、<b>edge-skip の実行時観測を EF Core でも行える</b>唯一の置き場になる。
+/// </para>
 /// </remarks>
 public static class QueryFixtureDefinition
 {
@@ -399,6 +404,10 @@ public static class QueryFixtureDefinition
 
         AddOrderLineTable(diagram, orders, orderPk);
 
+        // 自己参照テーブル（nodes）。値オブジェクト有効かつ EF Core を含むこのフィクスチャに置けるのは、
+        // FK 列が参照先の VO 型（NodeIdValue）を共有するようになり EF Core のモデル検証が通るため
+        Tests.GeneratedFixture.SelfReferenceTableDefinition.AddTo(diagram);
+
         return diagram;
     }
 
@@ -413,10 +422,9 @@ public static class QueryFixtureDefinition
     /// （<c>int</c> / <c>nvarchar(50)</c>）だけを使う。
     /// </para>
     /// <para>
-    /// <b>自己参照テーブルはここへ置かない</b>。値オブジェクト有効の図では自己参照 FK の CLR 型（<c>ParentNodeIdValue</c>）が
-    /// 参照先の主キー型（<c>NodeIdValue</c>）と一致せず、EF Core のモデル検証が
-    /// <c>DbContext</c> ごと（＝このフィクスチャの EF Core テスト全部）落ちる。edge-skip の実行時検証は
-    /// EF Core を生成しないフィクスチャ側（<c>MultiTargetPortableFixture</c> / <c>InMemoryFixture</c>）が担う。
+    /// 自己参照テーブル（<c>nodes</c>）は共有ビルダー
+    /// <see cref="Tests.GeneratedFixture.SelfReferenceTableDefinition"/> が <see cref="Build"/> の末尾で足す
+    /// （このメソッドは <c>customers → orders → order_lines</c> のチェーンだけを担当する）。
     /// </para>
     /// </remarks>
     private static void AddOrderLineTable(ErDiagram diagram, Entity orders, Column orderPk)

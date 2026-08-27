@@ -151,6 +151,12 @@
   <data name="CodeGen_Info_MultiTargetRowVersionColumns" xml:space="preserve">
     <value>Only the '{0}' repository treats the following row version columns as concurrency tokens. The other target dialects share the same byte[] property, but write the column with INSERT / UPDATE like any other binary column (a place to mirror the version '{0}' assigned) and run no version guard:{1}</value>
   </data>
+  <data name="CodeGen_Info_ValueObjectForeignKeyUnified" xml:space="preserve">
+    <value>The value object type of the following foreign key columns is the one of the column they reference, so the same identifier keeps one value type across tables (a column-name derived type would not be assignable to the referenced key, and EF Core rejects such a model outright):{0}</value>
+  </data>
+  <data name="CodeGen_Error_ValueObjectForeignKeyTypeConflict" xml:space="preserve">
+    <value>Column '{0}' is the foreign key of several relationships whose referenced columns resolve to different value object types ({1}), so no single value type can be chosen for it. Make the referenced columns share one value object type, or split the column.</value>
+  </data>
   <data name="CodeGen_Error_SyncSupportRequiresDialects" xml:space="preserve">
     <value>Sync support requires exactly the two repository dialects 'sqlserver' (the server) and 'sqlite' (the local database); the current selection is '{0}'.</value>
   </data>

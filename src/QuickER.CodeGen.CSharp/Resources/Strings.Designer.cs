@@ -240,6 +240,18 @@ namespace QuickER.CodeGen.CSharp.Resources {
             }
         }
 
+        public static string CodeGen_Info_ValueObjectForeignKeyUnified {
+            get {
+                return ResourceManager.GetString("CodeGen_Info_ValueObjectForeignKeyUnified", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Error_ValueObjectForeignKeyTypeConflict {
+            get {
+                return ResourceManager.GetString("CodeGen_Error_ValueObjectForeignKeyTypeConflict", resourceCulture);
+            }
+        }
+
         public static string CodeGen_Error_SyncSupportRequiresDialects {
             get {
                 return ResourceManager.GetString("CodeGen_Error_SyncSupportRequiresDialects", resourceCulture);

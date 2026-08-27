@@ -18,10 +18,10 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// 「そもそも無い」のかを区別できないため、ここでは先に子行の実在を裏取りしてから空であることを表明する。
 /// </para>
 /// <para>
-/// <b>EF Core が居ないのは意図的</b>: 値オブジェクト有効の図では自己参照 FK の CLR 型が参照先の主キー型と一致せず、
-/// 生成された <c>DbContext</c> がモデル検証で落ちる（EF Core は FK プロパティの型が主キーの型と互換であることを
-/// 要求する）。そのため自己参照は EF Core を生成しないフィクスチャ——<c>MultiTargetPortableFixture</c>
-/// （sqlserver / sqlite）と <c>InMemoryFixture</c>（値オブジェクト無効）——にだけ置いている。
+/// 値オブジェクト有効の図でも <b>EF Core を含む</b>: 子側の列が参照先の列の VO 型を共有するようになり
+/// （自己参照 FK <c>parent_node_id</c> の型は主キーと同じ <c>NodeIdValue</c>）、生成された <c>DbContext</c> の
+/// モデル検証が通るようになったため。EF Core は Include ツリーを自前の <c>Include</c>/<c>ThenInclude</c> へ
+/// 組み替える別実装なので、edge-skip がそこでも成り立つことはここでしか表明できない。
 /// </para>
 /// </remarks>
 /// <typeparam name="TNode">自己参照エンティティ型（フィクスチャごとに別型）</typeparam>

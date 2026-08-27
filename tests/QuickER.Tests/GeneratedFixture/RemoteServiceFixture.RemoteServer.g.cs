@@ -681,6 +681,7 @@ public static partial class GeneratedRemoteEndpoints
         MapCustomerEndpoints(group);
         MapOrderEndpoints(group);
         MapOrderLineEndpoints(group);
+        MapNodeEndpoints(group);
 
         return group;
     }
@@ -1010,4 +1011,30 @@ public static partial class GeneratedRemoteEndpoints
 
     /// <summary>Request body for CheckUniqueness (OrderLine).</summary>
     private sealed record OrderLineCheckUniquenessRequest(OrderLineEntity Entity);
+
+    /// <summary>Maps the remote-surface endpoints for NodeEntity.</summary>
+    private static void MapNodeEndpoints(RouteGroupBuilder group)
+    {
+        RemoteServerEngine.MapCrud<NodeEntity, NodeIdValue, INodeRemoteRepository>(
+            group,
+            "Node"
+        );
+
+        group.MapPost(
+            "Node/CheckUniqueness",
+            (HttpContext context) =>
+                RemoteServerEngine.ExecuteAsync(
+                    context,
+                    async () =>
+                    {
+                        var request = await RemoteServerEngine.ReadRequestAsync<NodeCheckUniquenessRequest>(context).ConfigureAwait(false);
+                        var repository = RemoteServerEngine.Repository<INodeRemoteRepository>(context);
+                        return (object?)await repository.CheckUniquenessAsync(RemoteServerEngine.Required(request.Entity, "Entity"), context.RequestAborted).ConfigureAwait(false);
+                    }
+                )
+        );
+    }
+
+    /// <summary>Request body for CheckUniqueness (Node).</summary>
+    private sealed record NodeCheckUniquenessRequest(NodeEntity Entity);
 }
