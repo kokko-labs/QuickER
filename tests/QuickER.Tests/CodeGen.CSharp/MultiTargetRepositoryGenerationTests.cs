@@ -147,15 +147,43 @@ public sealed class MultiTargetRepositoryGenerationTests
         options.EffectiveRepositoryDialects.Should().Equal("sqlserver");
     }
 
-    [Fact(DisplayName = "未対応方言を指定すると ArgumentException になる")]
+    [Fact(DisplayName = "未対応方言＋GenerateRepositories=true は ArgumentException になる")]
     public void EffectiveDialects_UnsupportedThrows()
     {
-        var options = new CodeGenerationOptions { RepositoryDialects = ["sqlserver", "postgres"] };
+        var options = new CodeGenerationOptions
+        {
+            GenerateRepositories = true,
+            RepositoryDialects = ["sqlserver", "postgres"],
+        };
         var act = () => _ = options.EffectiveRepositoryDialects;
         act.Should().Throw<ArgumentException>().WithMessage("*postgres*");
     }
 
-    [Fact(DisplayName = "未対応方言指定は生成時に診断エラーへ変換される（例外を投げない）")]
+    /// <summary>
+    /// QuickER 版 Repository を生成しない構成では方言指定が生成物に影響しないため、未対応方言でも
+    /// 例外にせず既定 sqlserver へ倒すことを検証する（CLI が図の方言名を焼き込む経路の受け皿）
+    /// </summary>
+    [Fact(DisplayName = "未対応方言＋Repository 非生成は sqlserver へフォールバックする")]
+    public void EffectiveDialects_UnsupportedWithoutRepositories_FallsBackToSqlServer()
+    {
+        var options = new CodeGenerationOptions { RepositoryDialects = ["postgresql"] };
+        options.EffectiveRepositoryDialects.Should().Equal("sqlserver");
+    }
+
+    /// <summary>
+    /// 対応方言と未対応方言が混在する場合も、対応分だけを残す部分フィルタではなくリスト丸ごと
+    /// 既定 sqlserver へ倒すことを検証する（GUI の空リスト時と同一の既定へ揃えるため）
+    /// </summary>
+    [Fact(DisplayName = "対応方言と未対応方言の混在もリスト丸ごと sqlserver へ倒れる")]
+    public void EffectiveDialects_MixedUnsupportedWithoutRepositories_FallsBackWholeList()
+    {
+        var options = new CodeGenerationOptions { RepositoryDialects = ["sqlite", "postgresql"] };
+        options.EffectiveRepositoryDialects.Should().Equal("sqlserver");
+    }
+
+    [Fact(
+        DisplayName = "未対応方言＋GenerateRepositories=true は生成時に診断エラーへ変換される（例外を投げない）"
+    )]
     public void Generate_UnsupportedDialect_ReturnsErrorDiagnostic()
     {
         var diagram = BuildDiagram();
@@ -164,7 +192,11 @@ public sealed class MultiTargetRepositoryGenerationTests
         {
             ["sqlserver"] = primary,
         };
-        var options = new CodeGenerationOptions { RepositoryDialects = ["bogus"] };
+        var options = new CodeGenerationOptions
+        {
+            GenerateRepositories = true,
+            RepositoryDialects = ["bogus"],
+        };
 
         var result = new CSharpCodeGenerationService().Generate(
             diagram,

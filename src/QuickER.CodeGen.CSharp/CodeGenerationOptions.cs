@@ -53,7 +53,12 @@ public sealed record CodeGenerationOptions
     ///   <item><see cref="RepositoryDialects"/> が非空ならそれを、空/未指定なら既定 <c>"sqlserver"</c> の単一を採る</item>
     ///   <item>各要素を Trim し、空要素は除去する</item>
     ///   <item>大文字小文字を無視して重複を除去する（初出の表記を保持し、指定順を維持する）</item>
-    ///   <item>未対応方言（<see cref="SupportedRepositoryDialects"/> 外）が含まれる場合は <see cref="ArgumentException"/> を投げる</item>
+    ///   <item>
+    ///     未対応方言（<see cref="SupportedRepositoryDialects"/> 外）が含まれる場合、
+    ///     <see cref="GenerateRepositories"/> が <c>true</c> なら <see cref="ArgumentException"/> を投げ、
+    ///     <c>false</c> なら既定 <c>"sqlserver"</c> の単一へフォールバックする
+    ///     （方言指定が生成物に影響しない構成のため検証しない）
+    ///   </item>
     ///   <item>結果が空になった場合は既定 <c>"sqlserver"</c> の単一を返す（従来挙動の保険）</item>
     /// </list>
     /// </remarks>
@@ -77,6 +82,14 @@ public sealed record CodeGenerationOptions
 
                 if (!SupportedRepositoryDialects.Contains(value, StringComparer.OrdinalIgnoreCase))
                 {
+                    if (!GenerateRepositories)
+                    {
+                        // QuickER 版 Repository を生成しない構成では方言指定が生成物に影響しないため検証しない。
+                        // CLI は --repository-dialects 未指定時に図の方言名（例 postgresql）を焼き込むため、ここで例外にすると
+                        // Repository 非生成の generate まで落ちる。GUI の空リスト時と同じ既定へ倒し、出力を GUI/CLI で対称に保つ
+                        return ["sqlserver"];
+                    }
+
                     throw new ArgumentException(
                         string.Format(
                             Strings.CodeGen_Error_UnsupportedRepositoryDialect,

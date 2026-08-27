@@ -431,5 +431,11 @@ namespace QuickER.Cli.Resources {
                 return ResourceManager.GetString("Cli_Cmd_Mcp", resourceCulture);
             }
         }
+
+        public static string Cli_UnhandledError {
+            get {
+                return ResourceManager.GetString("Cli_UnhandledError", resourceCulture);
+            }
+        }
     }
 }

@@ -1631,4 +1631,184 @@ public class CliAppTests
             }
         }
     }
+
+    /// <summary>
+    /// QuickER 版 Repository を生成しない既定構成では、未対応方言のプロバイダ（PostgreSQL / MySQL / Oracle）でも
+    /// generate が成功することを検証する（CLI は --repository-dialects 未指定時に図の方言名を焼き込むため、
+    /// 実効方言の解決が例外にならないことがこの経路の前提になる）
+    /// </summary>
+    [Theory(DisplayName = "未対応方言プロバイダでも Repository 非生成の generate は成功する")]
+    [InlineData("postgresql")]
+    [InlineData("mysql")]
+    [InlineData("oracle")]
+    public async Task Generate_UnsupportedDialectWithoutRepositories_Succeeds(string providerName)
+    {
+        var (schemaPath, outDir, root) = CreateSampleSchema();
+
+        try
+        {
+            var exit = await CliApp.InvokeAsync([
+                "generate",
+                "--schema",
+                schemaPath,
+                "--out",
+                outDir,
+                "--provider",
+                providerName,
+            ]);
+
+            exit.Should().Be(0);
+            Directory.GetFiles(outDir, "*.g.cs").Should().NotBeEmpty();
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// 未対応方言のプロバイダ＋ --generate-ef-core（方言非依存の DB アクセス）でも generate が成功し、
+    /// DbContext が出力されることを検証する
+    /// </summary>
+    [Theory(DisplayName = "未対応方言プロバイダ＋EF Core 生成は成功する")]
+    [InlineData("postgresql")]
+    [InlineData("mysql")]
+    [InlineData("oracle")]
+    public async Task Generate_UnsupportedDialectWithEfCore_Succeeds(string providerName)
+    {
+        var (schemaPath, outDir, root) = CreateSampleSchema();
+
+        try
+        {
+            var exit = await CliApp.InvokeAsync([
+                "generate",
+                "--schema",
+                schemaPath,
+                "--out",
+                outDir,
+                "--provider",
+                providerName,
+                "--generate-ef-core",
+            ]);
+
+            exit.Should().Be(0);
+            var files = Directory.GetFiles(outDir, "*.g.cs");
+            var code = string.Join("\n", files.Select(File.ReadAllText));
+            code.Should().Contain("QuickErDbContext");
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// 未対応方言でのフォールバック出力が、回避策（--repository-dialects sqlserver の明示指定）の出力と
+    /// バイト単位で一致することを検証する（フォールバック＝既定 sqlserver への丸ごと置換であることの固定）
+    /// </summary>
+    [Fact(DisplayName = "未対応方言のフォールバック出力は sqlserver 明示指定と完全一致する")]
+    public async Task Generate_UnsupportedDialectFallback_MatchesExplicitSqlServerOutput()
+    {
+        var (schemaPath, _, root) = CreateSampleSchema();
+        var fallbackDir = Path.Combine(root, "fallback");
+        var explicitDir = Path.Combine(root, "explicit");
+
+        try
+        {
+            var fallbackExit = await CliApp.InvokeAsync([
+                "generate",
+                "--schema",
+                schemaPath,
+                "--out",
+                fallbackDir,
+                "--provider",
+                "postgresql",
+            ]);
+
+            var explicitExit = await CliApp.InvokeAsync([
+                "generate",
+                "--schema",
+                schemaPath,
+                "--out",
+                explicitDir,
+                "--provider",
+                "postgresql",
+                "--repository-dialects",
+                "sqlserver",
+            ]);
+
+            fallbackExit.Should().Be(0);
+            explicitExit.Should().Be(0);
+
+            var fallbackFiles = Directory
+                .GetFiles(fallbackDir)
+                .Select(Path.GetFileName)
+                .OrderBy(name => name, StringComparer.Ordinal)
+                .ToList();
+            var explicitFiles = Directory
+                .GetFiles(explicitDir)
+                .Select(Path.GetFileName)
+                .OrderBy(name => name, StringComparer.Ordinal)
+                .ToList();
+
+            fallbackFiles.Should().Equal(explicitFiles);
+
+            foreach (var name in fallbackFiles)
+            {
+                File.ReadAllBytes(Path.Combine(fallbackDir, name!))
+                    .Should()
+                    .Equal(File.ReadAllBytes(Path.Combine(explicitDir, name!)));
+            }
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// quicker.json で未対応方言を明示指定していても、GenerateRepositories が無ければ generate が成功することを
+    /// 検証する（設定ファイル経路もフラグ経路と同じ扱いになる）
+    /// </summary>
+    [Fact(DisplayName = "quicker.json の未対応方言指定も Repository 非生成なら成功する")]
+    public async Task Generate_ConfigUnsupportedDialectWithoutRepositories_Succeeds()
+    {
+        var (schemaPath, outDir, root) = CreateSampleSchema();
+        var configPath = Path.Combine(root, "quicker.json");
+        File.WriteAllText(configPath, """{ "RepositoryDialects": ["postgresql"] }""");
+
+        try
+        {
+            var exit = await CliApp.InvokeAsync([
+                "generate",
+                "--schema",
+                schemaPath,
+                "--out",
+                outDir,
+                "--provider",
+                "postgresql",
+                "--config",
+                configPath,
+            ]);
+
+            exit.Should().Be(0);
+            Directory.GetFiles(outDir, "*.g.cs").Should().NotBeEmpty();
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
 }
