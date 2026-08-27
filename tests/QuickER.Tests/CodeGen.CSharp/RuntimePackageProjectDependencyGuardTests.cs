@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using AwesomeAssertions;
 using Xunit;
@@ -10,8 +11,8 @@ using Xunit;
 namespace QuickER.Tests.CodeGen.CSharp;
 
 /// <summary>
-/// ランタイムパッケージ 6 プロジェクト（<c>QuickER.Runtime</c> / <c>.SqlServer</c> / <c>.Sqlite</c> /
-/// <c>.EntityFrameworkCore</c> / <c>.InMemory</c> / <c>.AspNetCore</c>）の csproj が宣言する依存集合
+/// ランタイムパッケージ 7 プロジェクト（<c>QuickER.Runtime</c> / <c>.SqlServer</c> / <c>.Sqlite</c> /
+/// <c>.EntityFrameworkCore</c> / <c>.InMemory</c> / <c>.AspNetCore</c> / <c>.Sync</c>）の csproj が宣言する依存集合
 /// （PackageReference / ProjectReference / FrameworkReference）を検証し、パッケージ境界での依存排他を守る。
 /// </summary>
 /// <remarks>
@@ -227,6 +228,110 @@ public sealed class RuntimePackageProjectDependencyGuardTests
             .BeEmpty(NoFrameworkReferenceReason);
     }
 
+    // ── README の記述と csproj の照合 ──────────────────────────────────────────────
+    //
+    // 上のガードは csproj が宣言する依存だけを見ており、パッケージ README がその依存を
+    // どう説明しているかは見ていない。実際、ProjectReference 由来の QuickER.Runtime 依存を
+    // README が「NuGet 依存ゼロ」と書いていた期間があり、上のガードは緑のままだった。
+    // 公開後の README は差し替えられない（訂正には新しいバージョンの push が要る）ため、
+    // 記述と実体のずれはここで落とす。
+
+    /// <summary>README の依存記述が csproj の宣言と一致することを検証する（7 ランタイムパッケージ）</summary>
+    /// <remarks>
+    /// 期待値は「PackageReference ＋ packable な ProjectReference の PackageId ＋ FrameworkReference」で、
+    /// これは pack 時に nuspec へ出る依存の組み立て規則をそのまま写したもの。ProjectReference は
+    /// PrivateAssets 等で伝播を止めない限りパッケージ依存として現れるため、宣言だけを見る上のガードでは
+    /// 捉えられない差が生じる。
+    /// </remarks>
+    [Theory(DisplayName = "パッケージ README が主張する依存集合は csproj の宣言と一致する")]
+    [InlineData("QuickER.Runtime")]
+    [InlineData("QuickER.Runtime.SqlServer")]
+    [InlineData("QuickER.Runtime.Sqlite")]
+    [InlineData("QuickER.Runtime.EntityFrameworkCore")]
+    [InlineData("QuickER.Runtime.InMemory")]
+    [InlineData("QuickER.Runtime.AspNetCore")]
+    [InlineData("QuickER.Runtime.Sync")]
+    public void ReadmeDependencyClaim_MatchesProjectFile(string packageId)
+    {
+        var sentence = FindDependencySentence($"src/{packageId}/README.md");
+
+        sentence
+            .Should()
+            .NotBeNull(
+                "{0} の README 冒頭に依存を述べる文（\"{1}\" または \"{2}\"）が見つからない。"
+                    + "文言を変えたのなら、変更後の記述が実際の依存と一致することを確かめたうえで"
+                    + "本テストのアンカー句を更新すること（見つからないときに検証を飛ばすと、"
+                    + "文を書き換えた瞬間にこのガードが静かに無効化される）",
+                packageId,
+                DependsOnlyOnPhrase,
+                NoDependencyPhrase
+            );
+
+        ClaimedDependencyIds(sentence!)
+            .Should()
+            .BeEquivalentTo(
+                ExpectedDependencyIds($"src/{packageId}/{packageId}.csproj"),
+                "{0} の README が主張する依存集合は、pack 時に nuspec へ出る依存"
+                    + "（PackageReference ＋ packable な ProjectReference ＋ FrameworkReference）と一致していなければならない。"
+                    + "依存を足し引きしたら README の当該文も直すこと",
+                packageId
+            );
+    }
+
+    /// <summary>README が表明する対象フレームワークが csproj の TargetFramework と一致することを検証する</summary>
+    [Theory(
+        DisplayName = "パッケージ README の対象フレームワーク表記は csproj の TargetFramework と一致する"
+    )]
+    [InlineData("QuickER.Runtime")]
+    [InlineData("QuickER.Runtime.SqlServer")]
+    [InlineData("QuickER.Runtime.Sqlite")]
+    [InlineData("QuickER.Runtime.EntityFrameworkCore")]
+    [InlineData("QuickER.Runtime.InMemory")]
+    [InlineData("QuickER.Runtime.AspNetCore")]
+    [InlineData("QuickER.Runtime.Sync")]
+    [InlineData("QuickER.Cli")]
+    public void ReadmeTargetFrameworkClaim_MatchesProjectFile(string packageId)
+    {
+        var moniker = TargetFramework($"src/{packageId}/{packageId}.csproj");
+        var expected = FrameworkDisplayName(moniker);
+
+        FirstParagraph($"src/{packageId}/README.md")
+            .Should()
+            .Contain(
+                expected,
+                "{0} の csproj は {1} を対象にしているため、README 冒頭も \"{2}\" と述べていなければならない"
+                    + "（対象フレームワークは利用者が参照可否を判断する最重要事実で、"
+                    + "公開後の README は差し替えられない）",
+                packageId,
+                moniker,
+                expected
+            );
+    }
+
+    /// <summary>dotnet tool の CLI パッケージは nuspec の依存がゼロのため、README も依存を主張してはならない</summary>
+    /// <remarks>
+    /// <c>PackAsTool</c> は <c>SuppressDependenciesWhenPacking</c> を強制し、参照は依存として現れず
+    /// tools/ 配下へ同梱される。そのため「depends only on …」と書いた時点で事実と食い違う。
+    /// 書き足されたら落ちるよう、無いことを表明しておく。
+    /// </remarks>
+    [Fact(
+        DisplayName = "QuickER.Cli の README は依存を主張しない（dotnet tool は依存ゼロで同梱される）"
+    )]
+    public void CliReadme_MakesNoDependencyClaim()
+    {
+        BooleanProperty("src/QuickER.Cli/QuickER.Cli.csproj", "PackAsTool")
+            .Should()
+            .BeTrue("本テストは QuickER.Cli が dotnet tool としてパックされることを前提にしている");
+
+        FindDependencySentence("src/QuickER.Cli/README.md")
+            .Should()
+            .BeNull(
+                "dotnet tool は依存を nuspec へ出さず tools/ へ同梱するため、"
+                    + "README が依存を主張すると事実と食い違う（同梱物を伝えたいなら "
+                    + "THIRD-PARTY-NOTICES.md への導線で示すこと）"
+            );
+    }
+
     /// <summary>AspNetCore 以外のパッケージが FrameworkReference を持たないことの理由文（逆表明の共有文言）</summary>
     private const string NoFrameworkReferenceReason =
         "共有フレームワーク参照（FrameworkReference）を持ってよいのは QuickER.Runtime.AspNetCore だけで、"
@@ -284,4 +389,187 @@ public sealed class RuntimePackageProjectDependencyGuardTests
             $"リポジトリ直下（QuickER.slnx）が見つからず {repoRelativePath} を解決できませんでした。"
         );
     }
+
+    /// <summary>依存を列挙する文のアンカー句（この句を含む文だけを照合対象にする）</summary>
+    private const string DependsOnlyOnPhrase = "depends only on";
+
+    /// <summary>依存ゼロを述べる文のアンカー句</summary>
+    private const string NoDependencyPhrase = "has no NuGet package dependencies";
+
+    /// <summary>README 冒頭段落から、依存を述べる文を 1 つ取り出す（見つからなければ null）</summary>
+    /// <remarks>
+    /// 段落全体ではなく文まで絞るのは、冒頭段落の他の文にも <c>IRepository</c> や <c>FOR JSON PATH</c> の
+    /// ようなコードスパンが出てくるため。文を特定しないと、依存でないものまで依存として拾ってしまう。
+    /// </remarks>
+    private static string? FindDependencySentence(string readmeRepoRelativePath)
+    {
+        var sentences = Regex.Split(FirstParagraph(readmeRepoRelativePath), @"(?<=\.)\s+(?=[A-Z])");
+
+        return sentences.FirstOrDefault(sentence =>
+            sentence.Contains(DependsOnlyOnPhrase, StringComparison.Ordinal)
+            || sentence.Contains(NoDependencyPhrase, StringComparison.Ordinal)
+        );
+    }
+
+    /// <summary>README の H1 に続く最初の非空行（冒頭段落）を返す</summary>
+    private static string FirstParagraph(string readmeRepoRelativePath)
+    {
+        var lines = File.ReadAllLines(ResolveRepoRelativePath(readmeRepoRelativePath));
+        var paragraph = lines
+            .SkipWhile(line => !line.StartsWith("# ", StringComparison.Ordinal))
+            .Skip(1)
+            .FirstOrDefault(line => !string.IsNullOrWhiteSpace(line));
+
+        return paragraph
+            ?? throw new InvalidOperationException(
+                $"{readmeRepoRelativePath} に H1 とそれに続く冒頭段落が見つかりませんでした。"
+            );
+    }
+
+    /// <summary>依存を述べる文が名指ししているパッケージ ID（インラインコードスパン）を返す</summary>
+    private static IReadOnlyList<string> ClaimedDependencyIds(string dependencySentence)
+    {
+        if (dependencySentence.Contains(NoDependencyPhrase, StringComparison.Ordinal))
+        {
+            return [];
+        }
+
+        return Regex
+            .Matches(dependencySentence, "`([^`]+)`")
+            .Select(match => match.Groups[1].Value)
+            .ToList();
+    }
+
+    /// <summary>
+    /// pack 時に nuspec へ出る依存の集合を csproj から組み立てる
+    /// （PackageReference ＋ packable な ProjectReference の PackageId ＋ FrameworkReference）。
+    /// </summary>
+    private static IReadOnlyList<string> ExpectedDependencyIds(string csprojRepoRelativePath)
+    {
+        // dotnet tool（PackAsTool）は SuppressDependenciesWhenPacking が効き、依存を 1 つも宣言しない
+        if (
+            BooleanProperty(csprojRepoRelativePath, "PackAsTool")
+            || BooleanProperty(csprojRepoRelativePath, "SuppressDependenciesWhenPacking")
+        )
+        {
+            return [];
+        }
+
+        return
+        [
+            .. PackageReferences(csprojRepoRelativePath),
+            .. PackableProjectReferenceIds(csprojRepoRelativePath),
+            .. FrameworkReferences(csprojRepoRelativePath),
+        ];
+    }
+
+    /// <summary>ProjectReference のうち、パッケージ依存として nuspec に出るものの PackageId を返す</summary>
+    /// <remarks>
+    /// PrivateAssets に all を指定した参照は依存を伝播しないため除外する。参照先が packable でない
+    /// （IsPackable が false）場合も依存にはならない。
+    /// </remarks>
+    private static IReadOnlyList<string> PackableProjectReferenceIds(string csprojRepoRelativePath)
+    {
+        var path = ResolveRepoRelativePath(csprojRepoRelativePath);
+        var directory = Path.GetDirectoryName(path)!;
+        var ids = new List<string>();
+
+        var references = XDocument
+            .Load(path)
+            .Descendants()
+            .Where(e => e.Name.LocalName == "ProjectReference");
+
+        foreach (var element in references)
+        {
+            var include = (string?)element.Attribute("Include");
+
+            if (string.IsNullOrEmpty(include) || SuppressesAssets(element))
+            {
+                continue;
+            }
+
+            var referencedPath = Path.GetFullPath(
+                Path.Combine(directory, include.Replace('\\', Path.DirectorySeparatorChar))
+            );
+
+            if (!File.Exists(referencedPath))
+            {
+                throw new FileNotFoundException(
+                    $"{csprojRepoRelativePath} の ProjectReference の参照先 {include} が見つかりませんでした。"
+                );
+            }
+
+            var referenced = XDocument.Load(referencedPath);
+            var isPackable = PropertyValue(referenced, "IsPackable");
+
+            if (!string.Equals(isPackable, "false", StringComparison.OrdinalIgnoreCase))
+            {
+                ids.Add(
+                    PropertyValue(referenced, "PackageId")
+                        ?? Path.GetFileNameWithoutExtension(referencedPath)
+                );
+            }
+        }
+
+        return ids;
+    }
+
+    /// <summary>PrivateAssets に all を指定（属性・子要素いずれか）して依存の伝播を止めているか</summary>
+    private static bool SuppressesAssets(XElement projectReference)
+    {
+        var value =
+            (string?)projectReference.Attribute("PrivateAssets")
+            ?? projectReference
+                .Elements()
+                .FirstOrDefault(e => e.Name.LocalName == "PrivateAssets")
+                ?.Value;
+
+        return value is not null && value.Contains("all", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>csproj の TargetFramework（単一ターゲット前提）を読む</summary>
+    private static string TargetFramework(string csprojRepoRelativePath)
+    {
+        var document = XDocument.Load(ResolveRepoRelativePath(csprojRepoRelativePath));
+
+        return PropertyValue(document, "TargetFramework")
+            ?? throw new InvalidOperationException(
+                $"{csprojRepoRelativePath} に TargetFramework が見つかりませんでした"
+                    + "（マルチターゲットへ変えたなら本テストの前提を見直すこと）。"
+            );
+    }
+
+    /// <summary>TargetFramework モニカ（net10.0）を README の表記（.NET 10）へ変換する</summary>
+    private static string FrameworkDisplayName(string moniker)
+    {
+        var match = Regex.Match(moniker, @"^net(?<major>\d+)\.(?<minor>\d+)$");
+
+        if (!match.Success)
+        {
+            throw new InvalidOperationException(
+                $"TargetFramework {moniker} を README の表記へ変換できませんでした。"
+            );
+        }
+
+        var major = match.Groups["major"].Value;
+        var minor = match.Groups["minor"].Value;
+
+        return minor == "0" ? $".NET {major}" : $".NET {major}.{minor}";
+    }
+
+    /// <summary>csproj の bool プロパティを読む（未指定は false 扱い）</summary>
+    private static bool BooleanProperty(string csprojRepoRelativePath, string propertyName)
+    {
+        var document = XDocument.Load(ResolveRepoRelativePath(csprojRepoRelativePath));
+
+        return string.Equals(
+            PropertyValue(document, propertyName),
+            "true",
+            StringComparison.OrdinalIgnoreCase
+        );
+    }
+
+    /// <summary>プロジェクト XML から指定プロパティの値を読む（名前空間非依存・最初の 1 つ）</summary>
+    private static string? PropertyValue(XDocument document, string propertyName) =>
+        document.Descendants().FirstOrDefault(e => e.Name.LocalName == propertyName)?.Value.Trim();
 }
