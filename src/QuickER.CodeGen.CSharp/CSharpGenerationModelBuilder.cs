@@ -7,9 +7,15 @@ namespace QuickER.CodeGen.CSharp;
 /// <summary>ER 図定義からテンプレート用の C# コード生成モデルを構築するビルダー</summary>
 internal sealed partial class CSharpGenerationModelBuilder
 {
-    /// <summary>列名（正規化キー）→ 値オブジェクト生成モデルの対応。GenerateValueObjects が OFF のときは空で、VO 化しない</summary>
+    /// <summary>VO キー → 値オブジェクト生成モデルの対応。GenerateValueObjects が OFF のときは空で、VO 化しない</summary>
     private IReadOnlyDictionary<string, CSharpValueObjectModel> _valueObjects =
         new Dictionary<string, CSharpValueObjectModel>();
+
+    /// <summary>
+    /// 列 ID → その列が使う VO キーの対応（リレーションの子側は親側のキーを共有する）。
+    /// GenerateValueObjects が OFF のときは空
+    /// </summary>
+    private IReadOnlyDictionary<Guid, string> _valueObjectKeys = new Dictionary<Guid, string>();
 
     /// <summary>テーブル名・カラム名を C# 識別子へ変換するコンバーター</summary>
     private readonly CSharpNameConverter _nameConverter = new();
@@ -101,6 +107,14 @@ internal sealed partial class CSharpGenerationModelBuilder
             // グラフ保存のジャーナル記録は保存側（EntityGraphSaver）のカスケード走査をミラーする必要があるため、
             // 同期対象と同じナビゲーション解決結果から再帰記録メソッド群を静的に組み立てる
             SyncGraphRecorder = BuildSyncGraphRecorder(diagram, navigationsByEntity, syncTables),
+            // グラフ取得糖衣（IncludeGraph）は保存側と同じカスケード閉包を Include ツリーへ写すため、
+            // 同じナビゲーション解決結果から静的に組み立てる（オプションなし・契約が出る構成で常時生成）
+            IncludeGraphExtensions = BuildIncludeGraphExtensions(
+                diagram,
+                navigationsByEntity,
+                repositoryClasses,
+                diagnostics
+            ),
         };
 
         // 構築直後のモデルに対し、テンプレートが発行する全メンバー名をシンボル表で突き合わせて

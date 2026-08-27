@@ -39,6 +39,24 @@ internal sealed class CSharpGenerationModel
     /// サイレントなデータ損失になるため、図から静的に組み立てた再帰記録メソッド群をテンプレートへ渡す。
     /// </remarks>
     public string SyncGraphRecorder { get; init; } = string.Empty;
+
+    /// <summary>
+    /// クエリ糖衣の静的クラス（<c>SqlQueryExtensions</c>）の整形済み全文。Repository 契約が出ない構成では空文字。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>SaveAsync</c>（グラフ保存）の対となる読み取り側で、保存が辿るのと同じカスケード閉包の Include ツリーを
+    /// エンティティごとに 1 本だけ組み立て、<c>SqlQuery&lt;T&gt;.AddIncludeNodes</c> へ渡す拡張メソッド
+    /// （<c>IncludeGraph</c>）を持つ。あわせて主キー取得の終端糖衣（<c>GetByIdAsync</c>）も同居する
+    /// （<c>Query().IncludeGraph().GetByIdAsync(id)</c>＝キー指定でグラフごと 1 件）。
+    /// </para>
+    /// <para>
+    /// fluent の Include/ThenInclude 連鎖では兄弟分岐のたびに同一ナビの <c>IncludeNode</c> が重複して積まれ、
+    /// SQLite / インメモリの置換バインドと SQL Server の同名 JSON 後勝ちで先行の孫が消える。ツリーを直接
+    /// 組み立てて渡すのはこの構造的な取りこぼしを避けるためで、連鎖へ書き換えると静かに回帰する。
+    /// </para>
+    /// </remarks>
+    public string IncludeGraphExtensions { get; init; } = string.Empty;
 }
 
 /// <summary>1 つの同期対象テーブル（Repository 契約を持つ単一主キーのテーブル）の生成モデル</summary>

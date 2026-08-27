@@ -973,6 +973,169 @@ public sealed partial class CustomerIdValue
     static partial void CustomizeDisplayName(ref string displayName);
 }
 
+/// <summary>Value object for the item_name column</summary>
+public sealed partial class ItemNameValue
+    : ValueObjectStringBase<ItemNameValue>,
+        IValueObject<ItemNameValue, string>
+{
+    private ItemNameValue(string value)
+        : base(value) { }
+
+    /// <summary>Creates the instance from an already-validated value (the public factories live in the base class; see <see cref="ValueObjectBase{TSelf, TValue}.Create"/>).</summary>
+    static ItemNameValue IValueObject<ItemNameValue, string>.New(string value) =>
+        new(value);
+
+    /// <summary>Auto-generated validation rules plus the user extension (OnValidate), called by the base class's Create / TryCreate / Validate.</summary>
+    /// <remarks>An unimplemented OnValidate partial method takes its arguments with it when the compiler removes the call, so the list it would need is only allocated where the hook is actually written.</remarks>
+    static void IValueObject<ItemNameValue, string>.ValidateCore(string value, ref List<string>? errors)
+    {
+        // A value object never wraps null (a nullable column keeps the property itself null),
+        // so a null input is reported as a validation error instead of throwing from the checks below.
+        if (value is null)
+        {
+            var message = ValueObjectValidationMessages.ValueRequired();
+            CustomizeValueRequiredErrorMessage(ref message);
+            (errors ??= new List<string>()).Add(message);
+            return;
+        }
+
+        if (value.Length > 50)
+        {
+            var message = ValueObjectValidationMessages.MaxLengthExceeded(50, value.Length);
+            CustomizeMaxLengthErrorMessage(value, 50, ref message);
+            (errors ??= new List<string>()).Add(message);
+        }
+        OnValidate(value, errors ??= new List<string>());
+    }
+
+    /// <summary>User-defined additional validation (partial; zero cost when not implemented).</summary>
+    static partial void OnValidate(string value, ICollection<string> errors);
+
+    /// <summary>Gets the display name of this value object (used in error messages and similar). Defaults to the column description, or the property name when unset. Can be replaced through GeneratedDisplayNames.Resolve (all display names at once) or CustomizeDisplayName (this value object only).</summary>
+    public static string DisplayName
+    {
+        get
+        {
+            var displayName = GeneratedDisplayNames.Resolve("ItemName", null);
+            CustomizeDisplayName(ref displayName);
+            return displayName;
+        }
+    }
+
+    /// <summary>Extension point for replacing the display name (partial; the default display name applies when not implemented).</summary>
+    static partial void CustomizeDisplayName(ref string displayName);
+
+    /// <summary>Replaces the required-value error message (partial; the default message applies when not implemented).</summary>
+    static partial void CustomizeValueRequiredErrorMessage(ref string message);
+
+    /// <summary>Replaces the maximum-length error message (partial; the default message applies when not implemented).</summary>
+    static partial void CustomizeMaxLengthErrorMessage(
+        string value,
+        int maxLength,
+        ref string message
+    );
+}
+
+/// <summary>Value object for the label column</summary>
+public sealed partial class LabelValue
+    : ValueObjectStringBase<LabelValue>,
+        IValueObject<LabelValue, string>
+{
+    private LabelValue(string value)
+        : base(value) { }
+
+    /// <summary>Creates the instance from an already-validated value (the public factories live in the base class; see <see cref="ValueObjectBase{TSelf, TValue}.Create"/>).</summary>
+    static LabelValue IValueObject<LabelValue, string>.New(string value) =>
+        new(value);
+
+    /// <summary>Auto-generated validation rules plus the user extension (OnValidate), called by the base class's Create / TryCreate / Validate.</summary>
+    /// <remarks>An unimplemented OnValidate partial method takes its arguments with it when the compiler removes the call, so the list it would need is only allocated where the hook is actually written.</remarks>
+    static void IValueObject<LabelValue, string>.ValidateCore(string value, ref List<string>? errors)
+    {
+        // A value object never wraps null (a nullable column keeps the property itself null),
+        // so a null input is reported as a validation error instead of throwing from the checks below.
+        if (value is null)
+        {
+            var message = ValueObjectValidationMessages.ValueRequired();
+            CustomizeValueRequiredErrorMessage(ref message);
+            (errors ??= new List<string>()).Add(message);
+            return;
+        }
+
+        if (value.Length > 50)
+        {
+            var message = ValueObjectValidationMessages.MaxLengthExceeded(50, value.Length);
+            CustomizeMaxLengthErrorMessage(value, 50, ref message);
+            (errors ??= new List<string>()).Add(message);
+        }
+        OnValidate(value, errors ??= new List<string>());
+    }
+
+    /// <summary>User-defined additional validation (partial; zero cost when not implemented).</summary>
+    static partial void OnValidate(string value, ICollection<string> errors);
+
+    /// <summary>Gets the display name of this value object (used in error messages and similar). Defaults to the column description, or the property name when unset. Can be replaced through GeneratedDisplayNames.Resolve (all display names at once) or CustomizeDisplayName (this value object only).</summary>
+    public static string DisplayName
+    {
+        get
+        {
+            var displayName = GeneratedDisplayNames.Resolve("Label", null);
+            CustomizeDisplayName(ref displayName);
+            return displayName;
+        }
+    }
+
+    /// <summary>Extension point for replacing the display name (partial; the default display name applies when not implemented).</summary>
+    static partial void CustomizeDisplayName(ref string displayName);
+
+    /// <summary>Replaces the required-value error message (partial; the default message applies when not implemented).</summary>
+    static partial void CustomizeValueRequiredErrorMessage(ref string message);
+
+    /// <summary>Replaces the maximum-length error message (partial; the default message applies when not implemented).</summary>
+    static partial void CustomizeMaxLengthErrorMessage(
+        string value,
+        int maxLength,
+        ref string message
+    );
+}
+
+/// <summary>Value object for the line_id column</summary>
+public sealed partial class LineIdValue
+    : ValueObjectOrderedBase<LineIdValue, int>,
+        IValueObject<LineIdValue, int>
+{
+    private LineIdValue(int value)
+        : base(value) { }
+
+    /// <summary>Creates the instance from an already-validated value (the public factories live in the base class; see <see cref="ValueObjectBase{TSelf, TValue}.Create"/>).</summary>
+    static LineIdValue IValueObject<LineIdValue, int>.New(int value) =>
+        new(value);
+
+    /// <summary>Auto-generated validation rules plus the user extension (OnValidate), called by the base class's Create / TryCreate / Validate.</summary>
+    /// <remarks>An unimplemented OnValidate partial method takes its arguments with it when the compiler removes the call, so the list it would need is only allocated where the hook is actually written.</remarks>
+    static void IValueObject<LineIdValue, int>.ValidateCore(int value, ref List<string>? errors)
+    {
+        OnValidate(value, errors ??= new List<string>());
+    }
+
+    /// <summary>User-defined additional validation (partial; zero cost when not implemented).</summary>
+    static partial void OnValidate(int value, ICollection<string> errors);
+
+    /// <summary>Gets the display name of this value object (used in error messages and similar). Defaults to the column description, or the property name when unset. Can be replaced through GeneratedDisplayNames.Resolve (all display names at once) or CustomizeDisplayName (this value object only).</summary>
+    public static string DisplayName
+    {
+        get
+        {
+            var displayName = GeneratedDisplayNames.Resolve("LineId", null);
+            CustomizeDisplayName(ref displayName);
+            return displayName;
+        }
+    }
+
+    /// <summary>Extension point for replacing the display name (partial; the default display name applies when not implemented).</summary>
+    static partial void CustomizeDisplayName(ref string displayName);
+}
+
 /// <summary>Value object for the memo column</summary>
 public sealed partial class MemoValue
     : ValueObjectStringBase<MemoValue>,
@@ -1099,6 +1262,43 @@ public sealed partial class NameValue
     );
 }
 
+/// <summary>Value object for the node_id column</summary>
+public sealed partial class NodeIdValue
+    : ValueObjectOrderedBase<NodeIdValue, int>,
+        IValueObject<NodeIdValue, int>
+{
+    private NodeIdValue(int value)
+        : base(value) { }
+
+    /// <summary>Creates the instance from an already-validated value (the public factories live in the base class; see <see cref="ValueObjectBase{TSelf, TValue}.Create"/>).</summary>
+    static NodeIdValue IValueObject<NodeIdValue, int>.New(int value) =>
+        new(value);
+
+    /// <summary>Auto-generated validation rules plus the user extension (OnValidate), called by the base class's Create / TryCreate / Validate.</summary>
+    /// <remarks>An unimplemented OnValidate partial method takes its arguments with it when the compiler removes the call, so the list it would need is only allocated where the hook is actually written.</remarks>
+    static void IValueObject<NodeIdValue, int>.ValidateCore(int value, ref List<string>? errors)
+    {
+        OnValidate(value, errors ??= new List<string>());
+    }
+
+    /// <summary>User-defined additional validation (partial; zero cost when not implemented).</summary>
+    static partial void OnValidate(int value, ICollection<string> errors);
+
+    /// <summary>Gets the display name of this value object (used in error messages and similar). Defaults to the column description, or the property name when unset. Can be replaced through GeneratedDisplayNames.Resolve (all display names at once) or CustomizeDisplayName (this value object only).</summary>
+    public static string DisplayName
+    {
+        get
+        {
+            var displayName = GeneratedDisplayNames.Resolve("NodeId", null);
+            CustomizeDisplayName(ref displayName);
+            return displayName;
+        }
+    }
+
+    /// <summary>Extension point for replacing the display name (partial; the default display name applies when not implemented).</summary>
+    static partial void CustomizeDisplayName(ref string displayName);
+}
+
 /// <summary>Value object for the order_id column</summary>
 public sealed partial class OrderIdValue
     : ValueObjectOrderedBase<OrderIdValue, int>,
@@ -1127,6 +1327,43 @@ public sealed partial class OrderIdValue
         get
         {
             var displayName = GeneratedDisplayNames.Resolve("OrderId", null);
+            CustomizeDisplayName(ref displayName);
+            return displayName;
+        }
+    }
+
+    /// <summary>Extension point for replacing the display name (partial; the default display name applies when not implemented).</summary>
+    static partial void CustomizeDisplayName(ref string displayName);
+}
+
+/// <summary>Value object for the quantity column</summary>
+public sealed partial class QuantityValue
+    : ValueObjectOrderedBase<QuantityValue, int>,
+        IValueObject<QuantityValue, int>
+{
+    private QuantityValue(int value)
+        : base(value) { }
+
+    /// <summary>Creates the instance from an already-validated value (the public factories live in the base class; see <see cref="ValueObjectBase{TSelf, TValue}.Create"/>).</summary>
+    static QuantityValue IValueObject<QuantityValue, int>.New(int value) =>
+        new(value);
+
+    /// <summary>Auto-generated validation rules plus the user extension (OnValidate), called by the base class's Create / TryCreate / Validate.</summary>
+    /// <remarks>An unimplemented OnValidate partial method takes its arguments with it when the compiler removes the call, so the list it would need is only allocated where the hook is actually written.</remarks>
+    static void IValueObject<QuantityValue, int>.ValidateCore(int value, ref List<string>? errors)
+    {
+        OnValidate(value, errors ??= new List<string>());
+    }
+
+    /// <summary>User-defined additional validation (partial; zero cost when not implemented).</summary>
+    static partial void OnValidate(int value, ICollection<string> errors);
+
+    /// <summary>Gets the display name of this value object (used in error messages and similar). Defaults to the column description, or the property name when unset. Can be replaced through GeneratedDisplayNames.Resolve (all display names at once) or CustomizeDisplayName (this value object only).</summary>
+    public static string DisplayName
+    {
+        get
+        {
+            var displayName = GeneratedDisplayNames.Resolve("Quantity", null);
             CustomizeDisplayName(ref displayName);
             return displayName;
         }
@@ -1460,6 +1697,72 @@ public partial class OrderEntity : EntityBase
     [JsonIgnore]
     [NavigationReference("customers", "customer_id", "orders", "customer_id", false, false, true, ConstraintName = "FK_orders_customers", OnDelete = "Cascade")]
     public CustomerEntity Customer { get; set; } = null!;
+
+    /// <summary>OrderLines navigation property</summary>
+    [NavigationReference("orders", "order_id", "order_lines", "order_id", true, true, false, ConstraintName = "FK_order_lines_orders", OnDelete = "Cascade")]
+    public ICollection<OrderLineEntity> OrderLines { get; set; } = new List<OrderLineEntity>();
+}
+
+/// <summary>Entity for the order_lines table</summary>
+[Table("order_lines")]
+public partial class OrderLineEntity : EntityBase
+{
+    /// <summary>Property for the line_id column</summary>
+    [Key]
+    [Column("line_id")]
+    [Required]
+    [DbColumnMeta("int32")]
+    public LineIdValue LineId { get; set; } = null!;
+
+    /// <summary>Property for the order_id column</summary>
+    [Column("order_id")]
+    [Required]
+    [DbColumnMeta("int32")]
+    public OrderIdValue OrderId { get; set; } = null!;
+
+    /// <summary>Property for the item_name column</summary>
+    [Column("item_name")]
+    [Required]
+    [DbColumnMeta("string(50)")]
+    public ItemNameValue ItemName { get; set; } = null!;
+
+    /// <summary>Property for the quantity column</summary>
+    [Column("quantity")]
+    [Required]
+    [DbColumnMeta("int32")]
+    public QuantityValue Quantity { get; set; } = null!;
+
+    /// <summary>Order navigation property</summary>
+    [JsonIgnore]
+    [NavigationReference("orders", "order_id", "order_lines", "order_id", false, false, true, ConstraintName = "FK_order_lines_orders", OnDelete = "Cascade")]
+    public OrderEntity Order { get; set; } = null!;
+}
+
+/// <summary>Entity for the nodes table</summary>
+[Table("nodes")]
+public partial class NodeEntity : EntityBase
+{
+    /// <summary>Property for the node_id column</summary>
+    [Key]
+    [Column("node_id")]
+    [Required]
+    [DbColumnMeta("int32")]
+    public NodeIdValue NodeId { get; set; } = null!;
+
+    /// <summary>Property for the parent_node_id column</summary>
+    [Column("parent_node_id")]
+    [DbColumnMeta("int32")]
+    public NodeIdValue? ParentNodeId { get; set; }
+
+    /// <summary>Property for the label column</summary>
+    [Column("label")]
+    [Required]
+    [DbColumnMeta("string(50)")]
+    public LabelValue Label { get; set; } = null!;
+
+    /// <summary>Nodes navigation property</summary>
+    [NavigationReference("nodes", "node_id", "nodes", "parent_node_id", true, true, false, ConstraintName = "FK_nodes_nodes")]
+    public ICollection<NodeEntity> Nodes { get; set; } = new List<NodeEntity>();
 }
 
 /// <summary>Base class providing change notification, error management, and helper processing common to edit models.</summary>
@@ -4026,6 +4329,31 @@ public partial class OrderEditModel : EditModelBase<OrderEditModel>
     /// </remarks>
     public CustomerEditModel? Customer { get; set; }
 
+    /// <summary>Backing field for the OrderLines child collection.</summary>
+    private EditModelCollection<OrderLineEditModel> _orderLines = new EditModelCollection<OrderLineEditModel>();
+
+    /// <summary>OrderLines navigation property (child collection; this model is set as each element's ParentModel).</summary>
+    public EditModelCollection<OrderLineEditModel> OrderLines
+    {
+        get
+        {
+            _orderLines.OwnerModel ??= this;
+            return _orderLines;
+        }
+        set
+        {
+            if (ReferenceEquals(_orderLines, value))
+            {
+                return;
+            }
+
+            _orderLines.OwnerModel = null;
+            _orderLines = value;
+            _orderLines.OwnerModel = this;
+            OnPropertyChanged(nameof(OrderLines));
+        }
+    }
+
     /// <summary>Writes the confirmed values back to the binding properties and clears the input errors (called from RevertInput; duplicate-value errors belong to the uniqueness checks).</summary>
     protected override void RevertCore()
     {
@@ -4270,6 +4598,12 @@ public partial class OrderEditModel : EditModelBase<OrderEditModel>
         return violations.Count == 0;
     }
 
+    /// <summary>Registers the known cascade children into the registry (they participate in validation, error collection, accepting changes, and dirty checks; children added via partial classes are registered in RegisterExtraChildren).</summary>
+    protected override void RegisterChildren()
+    {
+        AddChildren("OrderLines", () => OrderLines);
+    }
+
     // ---- Snapshots for row editing (IEditableObject) ----
     /// <summary>Pre-edit snapshot of the confirmed value of OrderId.</summary>
     private OrderIdValue? _orderIdSnapshot;
@@ -4363,6 +4697,1142 @@ public partial class OrderEditModel : EditModelBase<OrderEditModel>
     /// <summary>Gets the parent model that holds this element as a child (cascade parent; null when not owned or at the root).</summary>
     public new CustomerEditModel? ParentModel =>
         base.ParentModel as CustomerEditModel;
+}
+
+/// <summary>Edit model for on-screen editing of the order_lines table.</summary>
+public partial class OrderLineEditModel : EditModelBase<OrderLineEditModel>
+{
+    // ===== Extension points (implement only what you need in a partial class; unimplemented partial methods are erased at no cost) =====
+    //   Extra validation        : partial void OnValidate();
+    //   Extra children          : protected override void RegisterExtraChildren();  // register via AddChild/AddChildren inside
+    //   Conversion msg tweak    : partial void CustomizeParseErrorMessage(string propertyName, string inputValue, string typeName, ref string message);
+    //   Required msg tweak      : partial void CustomizeRequiredErrorMessage(string propertyName, ref string message);
+    //   Duplicate msg tweak     : partial void CustomizeDuplicateErrorMessage(IReadOnlyList<string> propertyNames, ref string message);
+    //   Input normalization     : protected override void CustomizeInputNormalization(string propertyName, string rawValue, ref string normalizedValue);
+    //   Row editing             : partial void OnBeginEdit();  partial void OnEndEdit();  partial void OnCancelEdit();
+    //   Value change hooks      : partial void On{Property}Changing(value) / Changed(value) / Changing(old,new) / Changed(old,new);  // provided per property
+    // ====================================================================================================
+
+    // Each column keeps two representations: the confirmed value and the on-screen input string (conversion errors are held by the error dictionary).
+    /// <summary>Confirmed value of LineId.</summary>
+    private LineIdValue? _lineId;
+
+    /// <summary>On-screen input string for LineId.</summary>
+    private string _bindingLineId = string.Empty;
+
+    /// <summary>Confirmed value of LineId (written by the input conversion and by the mapper when loading; treat it as read-only elsewhere).</summary>
+    public LineIdValue? LineId
+    {
+        get => _lineId;
+        internal set
+        {
+            if (EqualityComparer<LineIdValue?>.Default.Equals(_lineId, value))
+            {
+                return;
+            }
+
+            var oldValue = _lineId;
+            OnLineIdChanging(value);
+            OnLineIdChanging(oldValue, value);
+            _lineId = value;
+            OnLineIdChanged(value);
+            OnLineIdChanged(oldValue, value);
+            AfterConfirmedValueSet(nameof(LineId));
+        }
+    }
+
+    /// <summary>Called just before the confirmed value of LineId changes (new value only; add processing via a partial implementation).</summary>
+    partial void OnLineIdChanging(LineIdValue? value);
+
+    /// <summary>Called just before the confirmed value of LineId changes (old and new values; add processing via a partial implementation).</summary>
+    partial void OnLineIdChanging(LineIdValue? oldValue, LineIdValue? newValue);
+
+    /// <summary>Called just after the confirmed value of LineId changes (new value only; add processing via a partial implementation).</summary>
+    partial void OnLineIdChanged(LineIdValue? value);
+
+    /// <summary>Called just after the confirmed value of LineId changes (old and new values; add processing via a partial implementation).</summary>
+    partial void OnLineIdChanged(LineIdValue? oldValue, LineIdValue? newValue);
+
+    /// <summary>On-screen input binding string for LineId (converted to the confirmed value when set).</summary>
+    public string BindingLineId
+    {
+        get => _bindingLineId;
+        set
+        {
+            if (!AcceptBindingInput(ref _bindingLineId, value, nameof(BindingLineId), out var normalized))
+            {
+                return;
+            }
+
+            switch (ConvertParsedValueObjectInput<LineIdValue, int>(normalized, out var converted, out var rejection))
+            {
+                case BindingConversion.Converted:
+                    LineId = converted;
+                    SetError(nameof(BindingLineId), null);
+                    break;
+
+                case BindingConversion.Rejected:
+                    SetError(nameof(BindingLineId), rejection);
+                    break;
+
+                default:
+                    SetError(
+                        nameof(BindingLineId),
+                        ResolveParseErrorMessage(nameof(LineId), LineIdValue.DisplayName, normalized, "int")
+                    );
+                    break;
+            }
+        }
+    }
+
+    /// <summary>Confirmed value of OrderId.</summary>
+    private OrderIdValue? _orderId;
+
+    /// <summary>On-screen input string for OrderId.</summary>
+    private string _bindingOrderId = string.Empty;
+
+    /// <summary>Confirmed value of OrderId (written by the input conversion and by the mapper when loading; treat it as read-only elsewhere).</summary>
+    public OrderIdValue? OrderId
+    {
+        get => _orderId;
+        internal set
+        {
+            if (EqualityComparer<OrderIdValue?>.Default.Equals(_orderId, value))
+            {
+                return;
+            }
+
+            var oldValue = _orderId;
+            OnOrderIdChanging(value);
+            OnOrderIdChanging(oldValue, value);
+            _orderId = value;
+            OnOrderIdChanged(value);
+            OnOrderIdChanged(oldValue, value);
+            AfterConfirmedValueSet(nameof(OrderId));
+        }
+    }
+
+    /// <summary>Called just before the confirmed value of OrderId changes (new value only; add processing via a partial implementation).</summary>
+    partial void OnOrderIdChanging(OrderIdValue? value);
+
+    /// <summary>Called just before the confirmed value of OrderId changes (old and new values; add processing via a partial implementation).</summary>
+    partial void OnOrderIdChanging(OrderIdValue? oldValue, OrderIdValue? newValue);
+
+    /// <summary>Called just after the confirmed value of OrderId changes (new value only; add processing via a partial implementation).</summary>
+    partial void OnOrderIdChanged(OrderIdValue? value);
+
+    /// <summary>Called just after the confirmed value of OrderId changes (old and new values; add processing via a partial implementation).</summary>
+    partial void OnOrderIdChanged(OrderIdValue? oldValue, OrderIdValue? newValue);
+
+    /// <summary>On-screen input binding string for OrderId (converted to the confirmed value when set).</summary>
+    public string BindingOrderId
+    {
+        get => _bindingOrderId;
+        set
+        {
+            if (!AcceptBindingInput(ref _bindingOrderId, value, nameof(BindingOrderId), out var normalized))
+            {
+                return;
+            }
+
+            switch (ConvertParsedValueObjectInput<OrderIdValue, int>(normalized, out var converted, out var rejection))
+            {
+                case BindingConversion.Converted:
+                    OrderId = converted;
+                    SetError(nameof(BindingOrderId), null);
+                    break;
+
+                case BindingConversion.Rejected:
+                    SetError(nameof(BindingOrderId), rejection);
+                    break;
+
+                default:
+                    SetError(
+                        nameof(BindingOrderId),
+                        ResolveParseErrorMessage(nameof(OrderId), OrderIdValue.DisplayName, normalized, "int")
+                    );
+                    break;
+            }
+        }
+    }
+
+    /// <summary>Confirmed value of ItemName.</summary>
+    private ItemNameValue? _itemName;
+
+    /// <summary>On-screen input string for ItemName.</summary>
+    private string _bindingItemName = string.Empty;
+
+    /// <summary>Confirmed value of ItemName (written by the input conversion and by the mapper when loading; treat it as read-only elsewhere).</summary>
+    public ItemNameValue? ItemName
+    {
+        get => _itemName;
+        internal set
+        {
+            if (EqualityComparer<ItemNameValue?>.Default.Equals(_itemName, value))
+            {
+                return;
+            }
+
+            var oldValue = _itemName;
+            OnItemNameChanging(value);
+            OnItemNameChanging(oldValue, value);
+            _itemName = value;
+            OnItemNameChanged(value);
+            OnItemNameChanged(oldValue, value);
+            AfterConfirmedValueSet(nameof(ItemName));
+        }
+    }
+
+    /// <summary>Called just before the confirmed value of ItemName changes (new value only; add processing via a partial implementation).</summary>
+    partial void OnItemNameChanging(ItemNameValue? value);
+
+    /// <summary>Called just before the confirmed value of ItemName changes (old and new values; add processing via a partial implementation).</summary>
+    partial void OnItemNameChanging(ItemNameValue? oldValue, ItemNameValue? newValue);
+
+    /// <summary>Called just after the confirmed value of ItemName changes (new value only; add processing via a partial implementation).</summary>
+    partial void OnItemNameChanged(ItemNameValue? value);
+
+    /// <summary>Called just after the confirmed value of ItemName changes (old and new values; add processing via a partial implementation).</summary>
+    partial void OnItemNameChanged(ItemNameValue? oldValue, ItemNameValue? newValue);
+
+    /// <summary>On-screen input binding string for ItemName (converted to the confirmed value when set).</summary>
+    public string BindingItemName
+    {
+        get => _bindingItemName;
+        set
+        {
+            if (!AcceptBindingInput(ref _bindingItemName, value, nameof(BindingItemName), out var normalized))
+            {
+                return;
+            }
+
+            if (ConvertValueObjectInput<ItemNameValue>(normalized, out var converted, out var rejection) == BindingConversion.Converted)
+            {
+                ItemName = converted;
+                SetError(nameof(BindingItemName), null);
+            }
+            else
+            {
+                SetError(nameof(BindingItemName), rejection);
+            }
+        }
+    }
+
+    /// <summary>Confirmed value of Quantity.</summary>
+    private QuantityValue? _quantity;
+
+    /// <summary>On-screen input string for Quantity.</summary>
+    private string _bindingQuantity = string.Empty;
+
+    /// <summary>Confirmed value of Quantity (written by the input conversion and by the mapper when loading; treat it as read-only elsewhere).</summary>
+    public QuantityValue? Quantity
+    {
+        get => _quantity;
+        internal set
+        {
+            if (EqualityComparer<QuantityValue?>.Default.Equals(_quantity, value))
+            {
+                return;
+            }
+
+            var oldValue = _quantity;
+            OnQuantityChanging(value);
+            OnQuantityChanging(oldValue, value);
+            _quantity = value;
+            OnQuantityChanged(value);
+            OnQuantityChanged(oldValue, value);
+            AfterConfirmedValueSet(nameof(Quantity));
+        }
+    }
+
+    /// <summary>Called just before the confirmed value of Quantity changes (new value only; add processing via a partial implementation).</summary>
+    partial void OnQuantityChanging(QuantityValue? value);
+
+    /// <summary>Called just before the confirmed value of Quantity changes (old and new values; add processing via a partial implementation).</summary>
+    partial void OnQuantityChanging(QuantityValue? oldValue, QuantityValue? newValue);
+
+    /// <summary>Called just after the confirmed value of Quantity changes (new value only; add processing via a partial implementation).</summary>
+    partial void OnQuantityChanged(QuantityValue? value);
+
+    /// <summary>Called just after the confirmed value of Quantity changes (old and new values; add processing via a partial implementation).</summary>
+    partial void OnQuantityChanged(QuantityValue? oldValue, QuantityValue? newValue);
+
+    /// <summary>On-screen input binding string for Quantity (converted to the confirmed value when set).</summary>
+    public string BindingQuantity
+    {
+        get => _bindingQuantity;
+        set
+        {
+            if (!AcceptBindingInput(ref _bindingQuantity, value, nameof(BindingQuantity), out var normalized))
+            {
+                return;
+            }
+
+            switch (ConvertParsedValueObjectInput<QuantityValue, int>(normalized, out var converted, out var rejection))
+            {
+                case BindingConversion.Converted:
+                    Quantity = converted;
+                    SetError(nameof(BindingQuantity), null);
+                    break;
+
+                case BindingConversion.Rejected:
+                    SetError(nameof(BindingQuantity), rejection);
+                    break;
+
+                default:
+                    SetError(
+                        nameof(BindingQuantity),
+                        ResolveParseErrorMessage(nameof(Quantity), QuantityValue.DisplayName, normalized, "int")
+                    );
+                    break;
+            }
+        }
+    }
+
+    // ---- navigation ----
+    /// <summary>Order navigation property (reference to the parent side).</summary>
+    /// <remarks>
+    /// Nothing in the generated code assigns it: loading does not follow a reference back to the parent (that would recurse), so it
+    /// stays null unless application code sets it. The cascade parent is exposed by ParentModel, which the owning collection or
+    /// single reference keeps up to date; this property is kept for application code that wants a navigation of its own.
+    /// </remarks>
+    public OrderEditModel? Order { get; set; }
+
+    /// <summary>Writes the confirmed values back to the binding properties and clears the input errors (called from RevertInput; duplicate-value errors belong to the uniqueness checks).</summary>
+    protected override void RevertCore()
+    {
+        BindingLineId = LineId?.ToString() ?? string.Empty;
+        SetError(nameof(BindingLineId), null);
+        BindingOrderId = OrderId?.ToString() ?? string.Empty;
+        SetError(nameof(BindingOrderId), null);
+        BindingItemName = ItemName?.ToString() ?? string.Empty;
+        SetError(nameof(BindingItemName), null);
+        BindingQuantity = Quantity?.ToString() ?? string.Empty;
+        SetError(nameof(BindingQuantity), null);
+    }
+
+    /// <summary>Validation of this node itself (missing-input checks for required fields plus the extra validation hook). Called from Validate.</summary>
+    /// <remarks>
+    /// The required check owns exactly the errors it registers: a satisfied field clears its own missing-input error, and a field
+    /// that already carries a conversion error keeps that error instead (the conversion failure is the cause the user must fix).
+    /// </remarks>
+    protected override void ValidateSelf()
+    {
+        if (LineId is null)
+        {
+            SetRequiredError(nameof(BindingLineId), ResolveRequiredErrorMessage(nameof(LineId), LineIdValue.DisplayName));
+        }
+        else
+        {
+            ClearRequiredError(nameof(BindingLineId));
+        }
+        if (OrderId is null)
+        {
+            SetRequiredError(nameof(BindingOrderId), ResolveRequiredErrorMessage(nameof(OrderId), OrderIdValue.DisplayName));
+        }
+        else
+        {
+            ClearRequiredError(nameof(BindingOrderId));
+        }
+        if (ItemName is null)
+        {
+            SetRequiredError(nameof(BindingItemName), ResolveRequiredErrorMessage(nameof(ItemName), ItemNameValue.DisplayName));
+        }
+        else
+        {
+            ClearRequiredError(nameof(BindingItemName));
+        }
+        if (Quantity is null)
+        {
+            SetRequiredError(nameof(BindingQuantity), ResolveRequiredErrorMessage(nameof(Quantity), QuantityValue.DisplayName));
+        }
+        else
+        {
+            ClearRequiredError(nameof(BindingQuantity));
+        }
+        OnValidate();
+    }
+
+    /// <summary>Hook for implementing additional validation rules (register errors via SetError in a partial implementation).</summary>
+    /// <remarks>
+    /// Errors registered from here belong to this hook: the generated checks only add and remove the errors they registered
+    /// themselves, so clear a custom error from here (SetError with a null message) once its condition no longer holds.
+    /// </remarks>
+    partial void OnValidate();
+
+    /// <summary>Resolves the required-field error message (EditModelMessages.Required first, then fine-tuned by CustomizeRequiredErrorMessage).</summary>
+    private string ResolveRequiredErrorMessage(string propertyName, string displayName)
+    {
+        var message = EditModelMessages.Required(displayName);
+        CustomizeRequiredErrorMessage(propertyName, ref message);
+        return message;
+    }
+
+    /// <summary>Partial method for fine-tuning the required-field error message per property (replace via a partial implementation in another file).</summary>
+    partial void CustomizeRequiredErrorMessage(string propertyName, ref string message);
+
+    /// <summary>Resolves the conversion error message (EditModelMessages.ParseFailed first, then fine-tuned by CustomizeParseErrorMessage).</summary>
+    private string ResolveParseErrorMessage(
+        string propertyName,
+        string displayName,
+        string inputValue,
+        string typeName
+    )
+    {
+        var message = EditModelMessages.ParseFailed(displayName, inputValue, typeName);
+        CustomizeParseErrorMessage(propertyName, inputValue, typeName, ref message);
+        return message;
+    }
+
+    /// <summary>Partial method for fine-tuning conversion error messages per property (replace via a partial implementation in another file).</summary>
+    partial void CustomizeParseErrorMessage(
+        string propertyName,
+        string inputValue,
+        string typeName,
+        ref string message
+    );
+
+    /// <inheritdoc />
+    public override void RegisterDuplicateError(
+        IReadOnlyList<string> propertyNames,
+        string? message,
+        DuplicateErrorSource source = DuplicateErrorSource.Siblings
+    )
+    {
+        var displayNames = new List<string>(propertyNames.Count);
+        var targets = new List<string>(propertyNames.Count);
+
+        foreach (var propertyName in propertyNames)
+        {
+            switch (propertyName)
+            {
+                case nameof(LineId):
+                    displayNames.Add(LineIdValue.DisplayName);
+                    targets.Add(nameof(BindingLineId));
+                    break;
+
+                case nameof(OrderId):
+                    displayNames.Add(OrderIdValue.DisplayName);
+                    targets.Add(nameof(BindingOrderId));
+                    break;
+
+                case nameof(ItemName):
+                    displayNames.Add(ItemNameValue.DisplayName);
+                    targets.Add(nameof(BindingItemName));
+                    break;
+
+                case nameof(Quantity):
+                    displayNames.Add(QuantityValue.DisplayName);
+                    targets.Add(nameof(BindingQuantity));
+                    break;
+
+                default:
+                    // A name that does not belong to this edit model (a user-defined check may report one) has no binding property to attach the error to.
+                    displayNames.Add(propertyName);
+                    break;
+            }
+        }
+
+        var resolved = message ?? ResolveDuplicateErrorMessage(propertyNames, displayNames);
+
+        // Names that could not be mapped (and an empty list) become a model-level error.
+        if (targets.Count == 0)
+        {
+            SetDuplicateError(string.Empty, resolved, source);
+            return;
+        }
+
+        foreach (var target in targets)
+        {
+            SetDuplicateError(target, resolved, source);
+        }
+    }
+
+    /// <summary>Resolves the duplicate-value error message (EditModelMessages.DuplicateValue first, then fine-tuned by CustomizeDuplicateErrorMessage).</summary>
+    private string ResolveDuplicateErrorMessage(
+        IReadOnlyList<string> propertyNames,
+        IReadOnlyList<string> displayNames
+    )
+    {
+        var message = EditModelMessages.DuplicateValue(displayNames);
+        CustomizeDuplicateErrorMessage(propertyNames, ref message);
+        return message;
+    }
+
+    /// <summary>Partial method for fine-tuning the duplicate-value error message per constraint (replace via a partial implementation in another file).</summary>
+    partial void CustomizeDuplicateErrorMessage(
+        IReadOnlyList<string> propertyNames,
+        ref string message
+    );
+
+    /// <summary>
+    /// Checks this edit model's confirmed values against the database through the repository and registers duplicate-value errors (returns true when there are no violations).
+    /// </summary>
+    /// <remarks>
+    /// The duplicate-value errors registered by the previous call are cleared first, so re-checking never leaves stale errors (only the ones this check registered:
+    /// what the check among the siblings reported stays). Rows that share the primary key are excluded,
+    /// so the same call is correct for both insert and update (a model whose key is not set yet excludes nothing). The result is advisory only: the definitive guarantee is the database's own UNIQUE constraint (TOCTOU).
+    /// The same applies to the model itself: a confirmed value edited while the call is awaiting is not seen by the query that is already in flight, so the violations registered when it returns are about the values the model held when it started.
+    /// (An edit clears the database findings as it happens, but the continuation then registers what it found for the previous values.) Run the check again after the last edit, before saving.
+    /// The errors are registered after the await, which puts them on a thread pool thread rather than the caller's, and ErrorsChanged fires there too.
+    /// A WPF binding marshals that back to the UI thread by itself, so the ordinary case needs nothing; a subscriber that updates UI state directly has to marshal it at the call site.
+    /// </remarks>
+    /// <param name="repository">The repository used for the check.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    public async Task<bool> ValidateUniqueAsync(
+        IOrderLineRepository repository,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(repository);
+        ClearDuplicateErrors(DuplicateErrorSource.Database);
+
+        var entity = new OrderLineEntity();
+
+        if (LineId is { } resolvedLineId)
+        {
+            entity.LineId = resolvedLineId;
+        }
+
+        var violations = await repository
+            .CheckUniquenessAsync(entity, cancellationToken)
+            .ConfigureAwait(false);
+
+        foreach (var violation in violations)
+        {
+            RegisterDuplicateError(
+                violation.PropertyNames,
+                violation.Message,
+                DuplicateErrorSource.Database
+            );
+        }
+
+        return violations.Count == 0;
+    }
+
+    // ---- Snapshots for row editing (IEditableObject) ----
+    /// <summary>Pre-edit snapshot of the confirmed value of LineId.</summary>
+    private LineIdValue? _lineIdSnapshot;
+
+    /// <summary>Pre-edit snapshot of the confirmed value of OrderId.</summary>
+    private OrderIdValue? _orderIdSnapshot;
+
+    /// <summary>Pre-edit snapshot of the confirmed value of ItemName.</summary>
+    private ItemNameValue? _itemNameSnapshot;
+
+    /// <summary>Pre-edit snapshot of the confirmed value of Quantity.</summary>
+    private QuantityValue? _quantitySnapshot;
+
+    /// <summary>Pre-edit snapshot of the RowState.</summary>
+    private RowState _rowStateSnapshot;
+
+    /// <summary>Core logic of BeginEdit. Snapshots each confirmed value and the RowState.</summary>
+    protected override void BeginEditCore()
+    {
+        _lineIdSnapshot = _lineId;
+        _orderIdSnapshot = _orderId;
+        _itemNameSnapshot = _itemName;
+        _quantitySnapshot = _quantity;
+        _rowStateSnapshot = RowState;
+        OnBeginEdit();
+    }
+
+    /// <summary>Hook invoked at BeginEdit. Take backups of fields added in a partial class.</summary>
+    partial void OnBeginEdit();
+
+    /// <summary>Core logic of EndEdit. Calls the commit hook (changes are already applied immediately).</summary>
+    protected override void EndEditCore() => OnEndEdit();
+
+    /// <summary>Hook invoked at EndEdit (commit).</summary>
+    partial void OnEndEdit();
+
+    /// <summary>Core logic of CancelEdit. Restores the confirmed values and the RowState from the snapshot, then derives the input strings from them and clears the errors the canceled input left behind.</summary>
+    /// <remarks>
+    /// <para>
+    /// The confirmed values are the source of truth, so they are put back directly rather than rebuilt by re-parsing
+    /// the input strings: a display format cannot express everything a value holds - <see cref="System.DateTime"/>
+    /// sub-second precision and Kind, for example - so re-parsing would let a canceled edit silently degrade the very
+    /// value it was supposed to leave untouched.
+    /// </para>
+    /// <para>
+    /// Restoring the values also withdraws the duplicate-value findings the database check registered, on the reasoning a
+    /// confirmed-value setter uses: the value they were reached about is no longer the one the model holds. The setter
+    /// cannot do it here, because the restore runs as a load and a load deliberately keeps the setters quiet - so a cancel
+    /// would otherwise leave a finding about the discarded value behind and hold <see cref="EditModelBase.Validate"/>
+    /// false forever. It is done unconditionally, though, where a setter withdraws them only when the value actually
+    /// changes: a cancel does not track whether anything was edited, so a row that was begun and then canceled without a
+    /// single change drops a database finding that was still perfectly valid. Run the database check again before saving -
+    /// a finding of its is only ever as current as its last run. Only that check's findings are withdrawn, whereas the
+    /// findings among the siblings are about the collection as it stands and belong to the next check over it.
+    /// </para>
+    /// <para>
+    /// Leaving them to that check cuts both ways, and nothing here runs it: a cancel that puts back a value which
+    /// duplicates a sibling restores the duplicate without restoring the finding about it, just as a cancel that undoes
+    /// a duplicate leaves the finding standing. Run the collection's <c>Validate</c> again before saving - the sibling
+    /// findings are only ever as current as the last check over the collection.
+    /// </para>
+    /// <para>
+    /// Deriving the input strings clears the input error of every property, so a conversion error that predates the
+    /// <see cref="EditModelBase.BeginEdit"/> of this row is cleared along with the ones the canceled edit produced. The
+    /// unconvertible text goes away in the same step, since the input string is rebuilt from the restored confirmed value,
+    /// and typing it again brings the error back.
+    /// </para>
+    /// </remarks>
+    protected override void CancelEditCore()
+    {
+        ExecuteLoad(() =>
+        {
+            LineId = _lineIdSnapshot;
+            OrderId = _orderIdSnapshot;
+            ItemName = _itemNameSnapshot;
+            Quantity = _quantitySnapshot;
+
+            // Derive the input strings from the restored confirmed values (RevertCore also clears the errors the
+            // canceled input produced).
+            ExecuteRevert(RevertCore);
+            ClearDuplicateErrors(DuplicateErrorSource.Database);
+            OnCancelEdit();
+        });
+
+        RowState = _rowStateSnapshot;
+    }
+
+    /// <summary>Hook invoked at CancelEdit. Restore fields added in a partial class from their backups (called inside ExecuteLoad).</summary>
+    partial void OnCancelEdit();
+
+    /// <summary>Gets the parent model that holds this element as a child (cascade parent; null when not owned or at the root).</summary>
+    public new OrderEditModel? ParentModel =>
+        base.ParentModel as OrderEditModel;
+}
+
+/// <summary>Edit model for on-screen editing of the nodes table.</summary>
+public partial class NodeEditModel : EditModelBase<NodeEditModel>
+{
+    // ===== Extension points (implement only what you need in a partial class; unimplemented partial methods are erased at no cost) =====
+    //   Extra validation        : partial void OnValidate();
+    //   Extra children          : protected override void RegisterExtraChildren();  // register via AddChild/AddChildren inside
+    //   Conversion msg tweak    : partial void CustomizeParseErrorMessage(string propertyName, string inputValue, string typeName, ref string message);
+    //   Required msg tweak      : partial void CustomizeRequiredErrorMessage(string propertyName, ref string message);
+    //   Duplicate msg tweak     : partial void CustomizeDuplicateErrorMessage(IReadOnlyList<string> propertyNames, ref string message);
+    //   Input normalization     : protected override void CustomizeInputNormalization(string propertyName, string rawValue, ref string normalizedValue);
+    //   Row editing             : partial void OnBeginEdit();  partial void OnEndEdit();  partial void OnCancelEdit();
+    //   Value change hooks      : partial void On{Property}Changing(value) / Changed(value) / Changing(old,new) / Changed(old,new);  // provided per property
+    // ====================================================================================================
+
+    // Each column keeps two representations: the confirmed value and the on-screen input string (conversion errors are held by the error dictionary).
+    /// <summary>Confirmed value of NodeId.</summary>
+    private NodeIdValue? _nodeId;
+
+    /// <summary>On-screen input string for NodeId.</summary>
+    private string _bindingNodeId = string.Empty;
+
+    /// <summary>Confirmed value of NodeId (written by the input conversion and by the mapper when loading; treat it as read-only elsewhere).</summary>
+    public NodeIdValue? NodeId
+    {
+        get => _nodeId;
+        internal set
+        {
+            if (EqualityComparer<NodeIdValue?>.Default.Equals(_nodeId, value))
+            {
+                return;
+            }
+
+            var oldValue = _nodeId;
+            OnNodeIdChanging(value);
+            OnNodeIdChanging(oldValue, value);
+            _nodeId = value;
+            OnNodeIdChanged(value);
+            OnNodeIdChanged(oldValue, value);
+            AfterConfirmedValueSet(nameof(NodeId));
+        }
+    }
+
+    /// <summary>Called just before the confirmed value of NodeId changes (new value only; add processing via a partial implementation).</summary>
+    partial void OnNodeIdChanging(NodeIdValue? value);
+
+    /// <summary>Called just before the confirmed value of NodeId changes (old and new values; add processing via a partial implementation).</summary>
+    partial void OnNodeIdChanging(NodeIdValue? oldValue, NodeIdValue? newValue);
+
+    /// <summary>Called just after the confirmed value of NodeId changes (new value only; add processing via a partial implementation).</summary>
+    partial void OnNodeIdChanged(NodeIdValue? value);
+
+    /// <summary>Called just after the confirmed value of NodeId changes (old and new values; add processing via a partial implementation).</summary>
+    partial void OnNodeIdChanged(NodeIdValue? oldValue, NodeIdValue? newValue);
+
+    /// <summary>On-screen input binding string for NodeId (converted to the confirmed value when set).</summary>
+    public string BindingNodeId
+    {
+        get => _bindingNodeId;
+        set
+        {
+            if (!AcceptBindingInput(ref _bindingNodeId, value, nameof(BindingNodeId), out var normalized))
+            {
+                return;
+            }
+
+            switch (ConvertParsedValueObjectInput<NodeIdValue, int>(normalized, out var converted, out var rejection))
+            {
+                case BindingConversion.Converted:
+                    NodeId = converted;
+                    SetError(nameof(BindingNodeId), null);
+                    break;
+
+                case BindingConversion.Rejected:
+                    SetError(nameof(BindingNodeId), rejection);
+                    break;
+
+                default:
+                    SetError(
+                        nameof(BindingNodeId),
+                        ResolveParseErrorMessage(nameof(NodeId), NodeIdValue.DisplayName, normalized, "int")
+                    );
+                    break;
+            }
+        }
+    }
+
+    /// <summary>Confirmed value of ParentNodeId.</summary>
+    private NodeIdValue? _parentNodeId;
+
+    /// <summary>On-screen input string for ParentNodeId.</summary>
+    private string _bindingParentNodeId = string.Empty;
+
+    /// <summary>Confirmed value of ParentNodeId (written by the input conversion and by the mapper when loading; treat it as read-only elsewhere).</summary>
+    public NodeIdValue? ParentNodeId
+    {
+        get => _parentNodeId;
+        internal set
+        {
+            if (EqualityComparer<NodeIdValue?>.Default.Equals(_parentNodeId, value))
+            {
+                return;
+            }
+
+            var oldValue = _parentNodeId;
+            OnParentNodeIdChanging(value);
+            OnParentNodeIdChanging(oldValue, value);
+            _parentNodeId = value;
+            OnParentNodeIdChanged(value);
+            OnParentNodeIdChanged(oldValue, value);
+            AfterConfirmedValueSet(nameof(ParentNodeId));
+        }
+    }
+
+    /// <summary>Called just before the confirmed value of ParentNodeId changes (new value only; add processing via a partial implementation).</summary>
+    partial void OnParentNodeIdChanging(NodeIdValue? value);
+
+    /// <summary>Called just before the confirmed value of ParentNodeId changes (old and new values; add processing via a partial implementation).</summary>
+    partial void OnParentNodeIdChanging(NodeIdValue? oldValue, NodeIdValue? newValue);
+
+    /// <summary>Called just after the confirmed value of ParentNodeId changes (new value only; add processing via a partial implementation).</summary>
+    partial void OnParentNodeIdChanged(NodeIdValue? value);
+
+    /// <summary>Called just after the confirmed value of ParentNodeId changes (old and new values; add processing via a partial implementation).</summary>
+    partial void OnParentNodeIdChanged(NodeIdValue? oldValue, NodeIdValue? newValue);
+
+    /// <summary>On-screen input binding string for ParentNodeId (converted to the confirmed value when set).</summary>
+    public string BindingParentNodeId
+    {
+        get => _bindingParentNodeId;
+        set
+        {
+            if (!AcceptBindingInput(ref _bindingParentNodeId, value, nameof(BindingParentNodeId), out var normalized))
+            {
+                return;
+            }
+
+            switch (ConvertParsedValueObjectInput<NodeIdValue, int>(normalized, out var converted, out var rejection))
+            {
+                case BindingConversion.Converted:
+                    ParentNodeId = converted;
+                    SetError(nameof(BindingParentNodeId), null);
+                    break;
+
+                case BindingConversion.Rejected:
+                    SetError(nameof(BindingParentNodeId), rejection);
+                    break;
+
+                default:
+                    SetError(
+                        nameof(BindingParentNodeId),
+                        ResolveParseErrorMessage(nameof(ParentNodeId), NodeIdValue.DisplayName, normalized, "int")
+                    );
+                    break;
+            }
+        }
+    }
+
+    /// <summary>Confirmed value of Label.</summary>
+    private LabelValue? _label;
+
+    /// <summary>On-screen input string for Label.</summary>
+    private string _bindingLabel = string.Empty;
+
+    /// <summary>Confirmed value of Label (written by the input conversion and by the mapper when loading; treat it as read-only elsewhere).</summary>
+    public LabelValue? Label
+    {
+        get => _label;
+        internal set
+        {
+            if (EqualityComparer<LabelValue?>.Default.Equals(_label, value))
+            {
+                return;
+            }
+
+            var oldValue = _label;
+            OnLabelChanging(value);
+            OnLabelChanging(oldValue, value);
+            _label = value;
+            OnLabelChanged(value);
+            OnLabelChanged(oldValue, value);
+            AfterConfirmedValueSet(nameof(Label));
+        }
+    }
+
+    /// <summary>Called just before the confirmed value of Label changes (new value only; add processing via a partial implementation).</summary>
+    partial void OnLabelChanging(LabelValue? value);
+
+    /// <summary>Called just before the confirmed value of Label changes (old and new values; add processing via a partial implementation).</summary>
+    partial void OnLabelChanging(LabelValue? oldValue, LabelValue? newValue);
+
+    /// <summary>Called just after the confirmed value of Label changes (new value only; add processing via a partial implementation).</summary>
+    partial void OnLabelChanged(LabelValue? value);
+
+    /// <summary>Called just after the confirmed value of Label changes (old and new values; add processing via a partial implementation).</summary>
+    partial void OnLabelChanged(LabelValue? oldValue, LabelValue? newValue);
+
+    /// <summary>On-screen input binding string for Label (converted to the confirmed value when set).</summary>
+    public string BindingLabel
+    {
+        get => _bindingLabel;
+        set
+        {
+            if (!AcceptBindingInput(ref _bindingLabel, value, nameof(BindingLabel), out var normalized))
+            {
+                return;
+            }
+
+            if (ConvertValueObjectInput<LabelValue>(normalized, out var converted, out var rejection) == BindingConversion.Converted)
+            {
+                Label = converted;
+                SetError(nameof(BindingLabel), null);
+            }
+            else
+            {
+                SetError(nameof(BindingLabel), rejection);
+            }
+        }
+    }
+
+    // ---- navigation ----
+    /// <summary>Backing field for the Nodes child collection.</summary>
+    private EditModelCollection<NodeEditModel> _nodes = new EditModelCollection<NodeEditModel>();
+
+    /// <summary>Nodes navigation property (child collection; this model is set as each element's ParentModel).</summary>
+    public EditModelCollection<NodeEditModel> Nodes
+    {
+        get
+        {
+            _nodes.OwnerModel ??= this;
+            return _nodes;
+        }
+        set
+        {
+            if (ReferenceEquals(_nodes, value))
+            {
+                return;
+            }
+
+            _nodes.OwnerModel = null;
+            _nodes = value;
+            _nodes.OwnerModel = this;
+            OnPropertyChanged(nameof(Nodes));
+        }
+    }
+
+    /// <summary>Writes the confirmed values back to the binding properties and clears the input errors (called from RevertInput; duplicate-value errors belong to the uniqueness checks).</summary>
+    protected override void RevertCore()
+    {
+        BindingNodeId = NodeId?.ToString() ?? string.Empty;
+        SetError(nameof(BindingNodeId), null);
+        BindingParentNodeId = ParentNodeId?.ToString() ?? string.Empty;
+        SetError(nameof(BindingParentNodeId), null);
+        BindingLabel = Label?.ToString() ?? string.Empty;
+        SetError(nameof(BindingLabel), null);
+    }
+
+    /// <summary>Validation of this node itself (missing-input checks for required fields plus the extra validation hook). Called from Validate.</summary>
+    /// <remarks>
+    /// The required check owns exactly the errors it registers: a satisfied field clears its own missing-input error, and a field
+    /// that already carries a conversion error keeps that error instead (the conversion failure is the cause the user must fix).
+    /// </remarks>
+    protected override void ValidateSelf()
+    {
+        if (NodeId is null)
+        {
+            SetRequiredError(nameof(BindingNodeId), ResolveRequiredErrorMessage(nameof(NodeId), NodeIdValue.DisplayName));
+        }
+        else
+        {
+            ClearRequiredError(nameof(BindingNodeId));
+        }
+        if (Label is null)
+        {
+            SetRequiredError(nameof(BindingLabel), ResolveRequiredErrorMessage(nameof(Label), LabelValue.DisplayName));
+        }
+        else
+        {
+            ClearRequiredError(nameof(BindingLabel));
+        }
+        OnValidate();
+    }
+
+    /// <summary>Hook for implementing additional validation rules (register errors via SetError in a partial implementation).</summary>
+    /// <remarks>
+    /// Errors registered from here belong to this hook: the generated checks only add and remove the errors they registered
+    /// themselves, so clear a custom error from here (SetError with a null message) once its condition no longer holds.
+    /// </remarks>
+    partial void OnValidate();
+
+    /// <summary>Resolves the required-field error message (EditModelMessages.Required first, then fine-tuned by CustomizeRequiredErrorMessage).</summary>
+    private string ResolveRequiredErrorMessage(string propertyName, string displayName)
+    {
+        var message = EditModelMessages.Required(displayName);
+        CustomizeRequiredErrorMessage(propertyName, ref message);
+        return message;
+    }
+
+    /// <summary>Partial method for fine-tuning the required-field error message per property (replace via a partial implementation in another file).</summary>
+    partial void CustomizeRequiredErrorMessage(string propertyName, ref string message);
+
+    /// <summary>Resolves the conversion error message (EditModelMessages.ParseFailed first, then fine-tuned by CustomizeParseErrorMessage).</summary>
+    private string ResolveParseErrorMessage(
+        string propertyName,
+        string displayName,
+        string inputValue,
+        string typeName
+    )
+    {
+        var message = EditModelMessages.ParseFailed(displayName, inputValue, typeName);
+        CustomizeParseErrorMessage(propertyName, inputValue, typeName, ref message);
+        return message;
+    }
+
+    /// <summary>Partial method for fine-tuning conversion error messages per property (replace via a partial implementation in another file).</summary>
+    partial void CustomizeParseErrorMessage(
+        string propertyName,
+        string inputValue,
+        string typeName,
+        ref string message
+    );
+
+    /// <inheritdoc />
+    public override void RegisterDuplicateError(
+        IReadOnlyList<string> propertyNames,
+        string? message,
+        DuplicateErrorSource source = DuplicateErrorSource.Siblings
+    )
+    {
+        var displayNames = new List<string>(propertyNames.Count);
+        var targets = new List<string>(propertyNames.Count);
+
+        foreach (var propertyName in propertyNames)
+        {
+            switch (propertyName)
+            {
+                case nameof(NodeId):
+                    displayNames.Add(NodeIdValue.DisplayName);
+                    targets.Add(nameof(BindingNodeId));
+                    break;
+
+                case nameof(ParentNodeId):
+                    displayNames.Add(NodeIdValue.DisplayName);
+                    targets.Add(nameof(BindingParentNodeId));
+                    break;
+
+                case nameof(Label):
+                    displayNames.Add(LabelValue.DisplayName);
+                    targets.Add(nameof(BindingLabel));
+                    break;
+
+                default:
+                    // A name that does not belong to this edit model (a user-defined check may report one) has no binding property to attach the error to.
+                    displayNames.Add(propertyName);
+                    break;
+            }
+        }
+
+        var resolved = message ?? ResolveDuplicateErrorMessage(propertyNames, displayNames);
+
+        // Names that could not be mapped (and an empty list) become a model-level error.
+        if (targets.Count == 0)
+        {
+            SetDuplicateError(string.Empty, resolved, source);
+            return;
+        }
+
+        foreach (var target in targets)
+        {
+            SetDuplicateError(target, resolved, source);
+        }
+    }
+
+    /// <summary>Resolves the duplicate-value error message (EditModelMessages.DuplicateValue first, then fine-tuned by CustomizeDuplicateErrorMessage).</summary>
+    private string ResolveDuplicateErrorMessage(
+        IReadOnlyList<string> propertyNames,
+        IReadOnlyList<string> displayNames
+    )
+    {
+        var message = EditModelMessages.DuplicateValue(displayNames);
+        CustomizeDuplicateErrorMessage(propertyNames, ref message);
+        return message;
+    }
+
+    /// <summary>Partial method for fine-tuning the duplicate-value error message per constraint (replace via a partial implementation in another file).</summary>
+    partial void CustomizeDuplicateErrorMessage(
+        IReadOnlyList<string> propertyNames,
+        ref string message
+    );
+
+    /// <summary>
+    /// Checks this edit model's confirmed values against the database through the repository and registers duplicate-value errors (returns true when there are no violations).
+    /// </summary>
+    /// <remarks>
+    /// The duplicate-value errors registered by the previous call are cleared first, so re-checking never leaves stale errors (only the ones this check registered:
+    /// what the check among the siblings reported stays). Rows that share the primary key are excluded,
+    /// so the same call is correct for both insert and update (a model whose key is not set yet excludes nothing). The result is advisory only: the definitive guarantee is the database's own UNIQUE constraint (TOCTOU).
+    /// The same applies to the model itself: a confirmed value edited while the call is awaiting is not seen by the query that is already in flight, so the violations registered when it returns are about the values the model held when it started.
+    /// (An edit clears the database findings as it happens, but the continuation then registers what it found for the previous values.) Run the check again after the last edit, before saving.
+    /// The errors are registered after the await, which puts them on a thread pool thread rather than the caller's, and ErrorsChanged fires there too.
+    /// A WPF binding marshals that back to the UI thread by itself, so the ordinary case needs nothing; a subscriber that updates UI state directly has to marshal it at the call site.
+    /// </remarks>
+    /// <param name="repository">The repository used for the check.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    public async Task<bool> ValidateUniqueAsync(
+        INodeRepository repository,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(repository);
+        ClearDuplicateErrors(DuplicateErrorSource.Database);
+
+        var entity = new NodeEntity();
+
+        if (NodeId is { } resolvedNodeId)
+        {
+            entity.NodeId = resolvedNodeId;
+        }
+
+        var violations = await repository
+            .CheckUniquenessAsync(entity, cancellationToken)
+            .ConfigureAwait(false);
+
+        foreach (var violation in violations)
+        {
+            RegisterDuplicateError(
+                violation.PropertyNames,
+                violation.Message,
+                DuplicateErrorSource.Database
+            );
+        }
+
+        return violations.Count == 0;
+    }
+
+    /// <summary>Registers the known cascade children into the registry (they participate in validation, error collection, accepting changes, and dirty checks; children added via partial classes are registered in RegisterExtraChildren).</summary>
+    protected override void RegisterChildren()
+    {
+        AddChildren("Nodes", () => Nodes);
+    }
+
+    // ---- Snapshots for row editing (IEditableObject) ----
+    /// <summary>Pre-edit snapshot of the confirmed value of NodeId.</summary>
+    private NodeIdValue? _nodeIdSnapshot;
+
+    /// <summary>Pre-edit snapshot of the confirmed value of ParentNodeId.</summary>
+    private NodeIdValue? _parentNodeIdSnapshot;
+
+    /// <summary>Pre-edit snapshot of the confirmed value of Label.</summary>
+    private LabelValue? _labelSnapshot;
+
+    /// <summary>Pre-edit snapshot of the RowState.</summary>
+    private RowState _rowStateSnapshot;
+
+    /// <summary>Core logic of BeginEdit. Snapshots each confirmed value and the RowState.</summary>
+    protected override void BeginEditCore()
+    {
+        _nodeIdSnapshot = _nodeId;
+        _parentNodeIdSnapshot = _parentNodeId;
+        _labelSnapshot = _label;
+        _rowStateSnapshot = RowState;
+        OnBeginEdit();
+    }
+
+    /// <summary>Hook invoked at BeginEdit. Take backups of fields added in a partial class.</summary>
+    partial void OnBeginEdit();
+
+    /// <summary>Core logic of EndEdit. Calls the commit hook (changes are already applied immediately).</summary>
+    protected override void EndEditCore() => OnEndEdit();
+
+    /// <summary>Hook invoked at EndEdit (commit).</summary>
+    partial void OnEndEdit();
+
+    /// <summary>Core logic of CancelEdit. Restores the confirmed values and the RowState from the snapshot, then derives the input strings from them and clears the errors the canceled input left behind.</summary>
+    /// <remarks>
+    /// <para>
+    /// The confirmed values are the source of truth, so they are put back directly rather than rebuilt by re-parsing
+    /// the input strings: a display format cannot express everything a value holds - <see cref="System.DateTime"/>
+    /// sub-second precision and Kind, for example - so re-parsing would let a canceled edit silently degrade the very
+    /// value it was supposed to leave untouched.
+    /// </para>
+    /// <para>
+    /// Restoring the values also withdraws the duplicate-value findings the database check registered, on the reasoning a
+    /// confirmed-value setter uses: the value they were reached about is no longer the one the model holds. The setter
+    /// cannot do it here, because the restore runs as a load and a load deliberately keeps the setters quiet - so a cancel
+    /// would otherwise leave a finding about the discarded value behind and hold <see cref="EditModelBase.Validate"/>
+    /// false forever. It is done unconditionally, though, where a setter withdraws them only when the value actually
+    /// changes: a cancel does not track whether anything was edited, so a row that was begun and then canceled without a
+    /// single change drops a database finding that was still perfectly valid. Run the database check again before saving -
+    /// a finding of its is only ever as current as its last run. Only that check's findings are withdrawn, whereas the
+    /// findings among the siblings are about the collection as it stands and belong to the next check over it.
+    /// </para>
+    /// <para>
+    /// Leaving them to that check cuts both ways, and nothing here runs it: a cancel that puts back a value which
+    /// duplicates a sibling restores the duplicate without restoring the finding about it, just as a cancel that undoes
+    /// a duplicate leaves the finding standing. Run the collection's <c>Validate</c> again before saving - the sibling
+    /// findings are only ever as current as the last check over the collection.
+    /// </para>
+    /// <para>
+    /// Deriving the input strings clears the input error of every property, so a conversion error that predates the
+    /// <see cref="EditModelBase.BeginEdit"/> of this row is cleared along with the ones the canceled edit produced. The
+    /// unconvertible text goes away in the same step, since the input string is rebuilt from the restored confirmed value,
+    /// and typing it again brings the error back.
+    /// </para>
+    /// </remarks>
+    protected override void CancelEditCore()
+    {
+        ExecuteLoad(() =>
+        {
+            NodeId = _nodeIdSnapshot;
+            ParentNodeId = _parentNodeIdSnapshot;
+            Label = _labelSnapshot;
+
+            // Derive the input strings from the restored confirmed values (RevertCore also clears the errors the
+            // canceled input produced).
+            ExecuteRevert(RevertCore);
+            ClearDuplicateErrors(DuplicateErrorSource.Database);
+            OnCancelEdit();
+        });
+
+        RowState = _rowStateSnapshot;
+    }
+
+    /// <summary>Hook invoked at CancelEdit. Restore fields added in a partial class from their backups (called inside ExecuteLoad).</summary>
+    partial void OnCancelEdit();
+
+    /// <summary>Gets the parent model that holds this element as a child (cascade parent; null when not owned or at the root).</summary>
+    public new NodeEditModel? ParentModel =>
+        base.ParentModel as NodeEditModel;
 }
 
 /// <summary>Converts between CustomerEntity and CustomerEditModel.</summary>
@@ -4495,6 +5965,7 @@ public sealed partial class OrderMapper
             editModel.Amount ?? throw new InvalidOperationException("Amount has no input value.");
         // Transfer the RowState raised on the edit model by confirmed-value changes as-is (no state is created here).
         entity.RowState = editModel.RowState;
+        entity.OrderLines = new OrderLineMapper().CreateEntities(editModel.OrderLines, includeRemoved);
         OnEntityApplied(editModel, entity);
     }
 
@@ -4525,6 +5996,7 @@ public sealed partial class OrderMapper
 
             // The values the uniqueness checks looked at are gone, so their findings go too (RevertInput only owns the input errors).
             editModel.ClearDuplicateErrors();
+            editModel.OrderLines = new OrderLineMapper().CreateEditModels(entity.OrderLines);
             OnEditModelLoaded(entity, editModel);
         });
 
@@ -4534,6 +6006,178 @@ public sealed partial class OrderMapper
 
     /// <summary>Called after the default load into the OrderEditModel (load additional properties via a partial implementation).</summary>
     partial void OnEditModelLoaded(OrderEntity entity, OrderEditModel editModel);
+}
+
+/// <summary>Converts between OrderLineEntity and OrderLineEditModel.</summary>
+public sealed partial class OrderLineMapper
+    : MapperBase<OrderLineEntity, OrderLineEditModel>
+{
+    /// <summary>Creates a new OrderLineEntity with initial values set (it will be an insertion target on save).</summary>
+    public override OrderLineEntity CreateEntity()
+    {
+        var entity = CreateEntityCore();
+        OnEntityCreated(entity);
+        return entity;
+    }
+
+    /// <summary>Called just after a new OrderLineEntity is created (set initial values via a partial implementation).</summary>
+    partial void OnEntityCreated(OrderLineEntity entity);
+
+    /// <summary>Creates a new OrderLineEditModel from a OrderLineEntity.</summary>
+    public override OrderLineEditModel CreateEditModel(OrderLineEntity entity)
+    {
+        var editModel = CreateEditModelCore(entity);
+        OnEditModelCreated(editModel);
+        return editModel;
+    }
+
+    /// <summary>Called just after a new OrderLineEditModel is created (after loading) (set initial values via a partial implementation; branch on IsAdded to target new models only).</summary>
+    partial void OnEditModelCreated(OrderLineEditModel editModel);
+
+    /// <summary>Applies the OrderLineEditModel's confirmed values to an existing OrderLineEntity (destructive update).</summary>
+    /// <param name="editModel">The edit model whose confirmed values are applied.</param>
+    /// <param name="entity">The existing entity to apply the values to.</param>
+    /// <param name="includeRemoved">Whether to also restore and apply deletion-tracked (Removed) items (true for saving, false for report display and similar).</param>
+    public override void ApplyToEntity(
+        OrderLineEditModel editModel,
+        OrderLineEntity entity,
+        bool includeRemoved = false
+    )
+    {
+        entity.LineId =
+            editModel.LineId ?? throw new InvalidOperationException("LineId has no input value.");
+        entity.OrderId =
+            editModel.OrderId ?? throw new InvalidOperationException("OrderId has no input value.");
+        entity.ItemName =
+            editModel.ItemName ?? throw new InvalidOperationException("ItemName has no input value.");
+        entity.Quantity =
+            editModel.Quantity ?? throw new InvalidOperationException("Quantity has no input value.");
+        // Transfer the RowState raised on the edit model by confirmed-value changes as-is (no state is created here).
+        entity.RowState = editModel.RowState;
+        OnEntityApplied(editModel, entity);
+    }
+
+    /// <summary>Called after the OrderLineEditModel's confirmed values are applied to the OrderLineEntity (save additional properties via a partial implementation).</summary>
+    partial void OnEntityApplied(OrderLineEditModel editModel, OrderLineEntity entity);
+
+    /// <summary>Applies the OrderLineEntity's values to an existing OrderLineEditModel.</summary>
+    /// <remarks>
+    /// Loading is lossless: the confirmed values are copied straight from the entity instead of being rebuilt by parsing
+    /// the on-screen input strings, so nothing that the display format cannot express (sub-second precision of a
+    /// DateTime, its Kind, and so on) is dropped. The input strings are then derived from the confirmed values.
+    /// Binary columns are copied defensively, so editing the loaded model never reaches into the entity's array. The
+    /// defensive copy belongs to this direction alone: <c>ApplyToEntity</c> assigns the confirmed values across as they
+    /// are, so the array an entity receives on the way to being saved is the edit model's own - saving hands the buffer
+    /// over rather than duplicating it, and writing into it afterwards is writing into both.
+    /// </remarks>
+    public override void ApplyToEditModel(OrderLineEntity entity, OrderLineEditModel editModel)
+    {
+        editModel.ExecuteLoad(() =>
+        {
+            editModel.LineId = entity.LineId;
+            editModel.OrderId = entity.OrderId;
+            editModel.ItemName = entity.ItemName;
+            editModel.Quantity = entity.Quantity;
+
+            // Derive the on-screen input strings from the confirmed values just loaded and clear stale conversion errors.
+            editModel.RevertInput();
+
+            // The values the uniqueness checks looked at are gone, so their findings go too (RevertInput only owns the input errors).
+            editModel.ClearDuplicateErrors();
+            OnEditModelLoaded(entity, editModel);
+        });
+
+        // The edit model's state is based on the source entity (loaded = Unchanged, new = Added).
+        editModel.RowState = entity.RowState;
+    }
+
+    /// <summary>Called after the default load into the OrderLineEditModel (load additional properties via a partial implementation).</summary>
+    partial void OnEditModelLoaded(OrderLineEntity entity, OrderLineEditModel editModel);
+}
+
+/// <summary>Converts between NodeEntity and NodeEditModel.</summary>
+public sealed partial class NodeMapper
+    : MapperBase<NodeEntity, NodeEditModel>
+{
+    /// <summary>Creates a new NodeEntity with initial values set (it will be an insertion target on save).</summary>
+    public override NodeEntity CreateEntity()
+    {
+        var entity = CreateEntityCore();
+        OnEntityCreated(entity);
+        return entity;
+    }
+
+    /// <summary>Called just after a new NodeEntity is created (set initial values via a partial implementation).</summary>
+    partial void OnEntityCreated(NodeEntity entity);
+
+    /// <summary>Creates a new NodeEditModel from a NodeEntity.</summary>
+    public override NodeEditModel CreateEditModel(NodeEntity entity)
+    {
+        var editModel = CreateEditModelCore(entity);
+        OnEditModelCreated(editModel);
+        return editModel;
+    }
+
+    /// <summary>Called just after a new NodeEditModel is created (after loading) (set initial values via a partial implementation; branch on IsAdded to target new models only).</summary>
+    partial void OnEditModelCreated(NodeEditModel editModel);
+
+    /// <summary>Applies the NodeEditModel's confirmed values to an existing NodeEntity (destructive update).</summary>
+    /// <param name="editModel">The edit model whose confirmed values are applied.</param>
+    /// <param name="entity">The existing entity to apply the values to.</param>
+    /// <param name="includeRemoved">Whether to also restore and apply deletion-tracked (Removed) items (true for saving, false for report display and similar).</param>
+    public override void ApplyToEntity(
+        NodeEditModel editModel,
+        NodeEntity entity,
+        bool includeRemoved = false
+    )
+    {
+        entity.NodeId =
+            editModel.NodeId ?? throw new InvalidOperationException("NodeId has no input value.");
+        entity.ParentNodeId = editModel.ParentNodeId;
+        entity.Label =
+            editModel.Label ?? throw new InvalidOperationException("Label has no input value.");
+        // Transfer the RowState raised on the edit model by confirmed-value changes as-is (no state is created here).
+        entity.RowState = editModel.RowState;
+        entity.Nodes = new NodeMapper().CreateEntities(editModel.Nodes, includeRemoved);
+        OnEntityApplied(editModel, entity);
+    }
+
+    /// <summary>Called after the NodeEditModel's confirmed values are applied to the NodeEntity (save additional properties via a partial implementation).</summary>
+    partial void OnEntityApplied(NodeEditModel editModel, NodeEntity entity);
+
+    /// <summary>Applies the NodeEntity's values to an existing NodeEditModel.</summary>
+    /// <remarks>
+    /// Loading is lossless: the confirmed values are copied straight from the entity instead of being rebuilt by parsing
+    /// the on-screen input strings, so nothing that the display format cannot express (sub-second precision of a
+    /// DateTime, its Kind, and so on) is dropped. The input strings are then derived from the confirmed values.
+    /// Binary columns are copied defensively, so editing the loaded model never reaches into the entity's array. The
+    /// defensive copy belongs to this direction alone: <c>ApplyToEntity</c> assigns the confirmed values across as they
+    /// are, so the array an entity receives on the way to being saved is the edit model's own - saving hands the buffer
+    /// over rather than duplicating it, and writing into it afterwards is writing into both.
+    /// </remarks>
+    public override void ApplyToEditModel(NodeEntity entity, NodeEditModel editModel)
+    {
+        editModel.ExecuteLoad(() =>
+        {
+            editModel.NodeId = entity.NodeId;
+            editModel.ParentNodeId = entity.ParentNodeId;
+            editModel.Label = entity.Label;
+
+            // Derive the on-screen input strings from the confirmed values just loaded and clear stale conversion errors.
+            editModel.RevertInput();
+
+            // The values the uniqueness checks looked at are gone, so their findings go too (RevertInput only owns the input errors).
+            editModel.ClearDuplicateErrors();
+            editModel.Nodes = new NodeMapper().CreateEditModels(entity.Nodes);
+            OnEditModelLoaded(entity, editModel);
+        });
+
+        // The edit model's state is based on the source entity (loaded = Unchanged, new = Added).
+        editModel.RowState = entity.RowState;
+    }
+
+    /// <summary>Called after the default load into the NodeEditModel (load additional properties via a partial implementation).</summary>
+    partial void OnEditModelLoaded(NodeEntity entity, NodeEditModel editModel);
 }
 
 /// <summary>A single UNIQUE constraint violation reported by a uniqueness pre-check.</summary>
@@ -6807,24 +8451,75 @@ public sealed class SqlQuery<TEntity>
     }
 
     /// <summary>Eagerly fetches a single-reference navigation (ThenInclude allows specifying multiple levels).</summary>
+    /// <remarks>Including a navigation that is already there returns the node it already has, so Include(A).ThenInclude(B) followed by Include(A).ThenInclude(C) branches one node instead of adding a second one.</remarks>
     public IncludableSqlQuery<TEntity, TProperty> Include<TProperty>(
         Expression<Func<TEntity, TProperty>> navigationSelector
     )
     {
-        var node = new IncludeNode(IncludeNode.GetProperty(navigationSelector));
-        _includes.Add(node);
+        var node = MergeInclude(_includes, IncludeNode.GetProperty(navigationSelector));
         return new IncludableSqlQuery<TEntity, TProperty>(this, node);
     }
 
     /// <summary>Eagerly fetches a collection navigation (ThenInclude allows specifying multiple levels).</summary>
+    /// <remarks>Including a navigation that is already there returns the node it already has, so Include(A).ThenInclude(B) followed by Include(A).ThenInclude(C) branches one node instead of adding a second one.</remarks>
     public IncludableSqlQuery<TEntity, TElement> Include<TElement>(
         Expression<Func<TEntity, ICollection<TElement>>> navigationSelector
     )
     {
-        var node = new IncludeNode(IncludeNode.GetProperty(navigationSelector));
-        _includes.Add(node);
+        var node = MergeInclude(_includes, IncludeNode.GetProperty(navigationSelector));
         return new IncludableSqlQuery<TEntity, TElement>(this, node);
     }
+
+    /// <summary>Adds an already built Include tree (the entry point the generated IncludeGraph extensions use).</summary>
+    /// <remarks>
+    /// The nodes are copied, so the tree handed over here is never modified: the generated extensions build one tree
+    /// per entity type and share it across every query, and a ThenInclude written after IncludeGraph must not reach
+    /// back into that shared tree. A navigation that is already there is merged into the node it already has instead
+    /// of being added twice. Write Include/ThenInclude instead when composing an Include tree by hand.
+    /// </remarks>
+    internal SqlQuery<TEntity> AddIncludeNodes(IReadOnlyList<IncludeNode> nodes)
+    {
+        ArgumentNullException.ThrowIfNull(nodes);
+        CopyIncludeNodes(nodes, _includes);
+        return this;
+    }
+
+    /// <summary>Returns the node for the navigation in the given list, adding a new one only when the navigation is not there yet.</summary>
+    /// <remarks>
+    /// Include / ThenInclude keep one node per navigation because every backend binds a fetched child by replacing the
+    /// navigation's value: a second node for the same navigation would silently overwrite what the first one loaded
+    /// (and on SQL Server the two would collide as identically named JSON properties).
+    /// </remarks>
+    internal static IncludeNode MergeInclude(List<IncludeNode> nodes, PropertyInfo property)
+    {
+        foreach (var existing in nodes)
+        {
+            if (IsSameNavigation(existing.Property, property))
+            {
+                return existing;
+            }
+        }
+
+        var node = new IncludeNode(property);
+        nodes.Add(node);
+        return node;
+    }
+
+    /// <summary>Copies an Include tree into the destination list, merging every navigation into the node it already has.</summary>
+    private static void CopyIncludeNodes(
+        IReadOnlyList<IncludeNode> source,
+        List<IncludeNode> destination
+    )
+    {
+        foreach (var node in source)
+        {
+            CopyIncludeNodes(node.Children, MergeInclude(destination, node.Property).Children);
+        }
+    }
+
+    /// <summary>Whether two properties denote the same navigation (reflection may hand back different PropertyInfo instances for one property).</summary>
+    private static bool IsSameNavigation(PropertyInfo left, PropertyInfo right) =>
+        left == right || (left.Name == right.Name && left.DeclaringType == right.DeclaringType);
 
     /// <summary>Fetches the entities matching the conditions (together with the requested Includes) as a list.</summary>
     public async Task<IReadOnlyList<TEntity>> ToListAsync(
@@ -6946,22 +8641,28 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
     }
 
     /// <summary>Further fetches the descendants of the single-reference navigation Included just before.</summary>
+    /// <remarks>A navigation that is already a child of this node is reused, so repeating an Include / ThenInclude path merges it instead of duplicating it.</remarks>
     public IncludableSqlQuery<TEntity, TNext> ThenInclude<TNext>(
         Expression<Func<TProperty, TNext>> navigationSelector
     )
     {
-        var child = new IncludeNode(IncludeNode.GetProperty(navigationSelector));
-        _node.Children.Add(child);
+        var child = SqlQuery<TEntity>.MergeInclude(
+            _node.Children,
+            IncludeNode.GetProperty(navigationSelector)
+        );
         return new IncludableSqlQuery<TEntity, TNext>(_query, child);
     }
 
     /// <summary>Further fetches the descendants of the collection navigation Included just before.</summary>
+    /// <remarks>A navigation that is already a child of this node is reused, so repeating an Include / ThenInclude path merges it instead of duplicating it.</remarks>
     public IncludableSqlQuery<TEntity, TNext> ThenInclude<TNext>(
         Expression<Func<TProperty, ICollection<TNext>>> navigationSelector
     )
     {
-        var child = new IncludeNode(IncludeNode.GetProperty(navigationSelector));
-        _node.Children.Add(child);
+        var child = SqlQuery<TEntity>.MergeInclude(
+            _node.Children,
+            IncludeNode.GetProperty(navigationSelector)
+        );
         return new IncludableSqlQuery<TEntity, TNext>(_query, child);
     }
 
@@ -10089,6 +11790,16 @@ public static class GeneratedSqliteRepositoryServiceCollectionExtensions
             provider.GetService<ISaveHookRegistry>(),
             provider.GetService<ISqlExecutor>()
         ));
+        services.AddScoped<IOrderLineRepository>(provider => new OrderLineRepository(
+            provider.GetRequiredService<ISqlConnectionFactory>(),
+            provider.GetService<ISaveHookRegistry>(),
+            provider.GetService<ISqlExecutor>()
+        ));
+        services.AddScoped<INodeRepository>(provider => new NodeRepository(
+            provider.GetRequiredService<ISqlConnectionFactory>(),
+            provider.GetService<ISaveHookRegistry>(),
+            provider.GetService<ISqlExecutor>()
+        ));
 
         return services;
     }
@@ -10130,6 +11841,22 @@ public static class GeneratedSqliteRepositoryServiceCollectionExtensions
         services.AddKeyedScoped<IOrderRepository>(
             serviceKey,
             (provider, key) => new OrderRepository(
+                connectionFactory,
+                provider.GetService<ISaveHookRegistry>(),
+                provider.GetKeyedService<ISqlExecutor>(key)
+            )
+        );
+        services.AddKeyedScoped<IOrderLineRepository>(
+            serviceKey,
+            (provider, key) => new OrderLineRepository(
+                connectionFactory,
+                provider.GetService<ISaveHookRegistry>(),
+                provider.GetKeyedService<ISqlExecutor>(key)
+            )
+        );
+        services.AddKeyedScoped<INodeRepository>(
+            serviceKey,
+            (provider, key) => new NodeRepository(
                 connectionFactory,
                 provider.GetService<ISaveHookRegistry>(),
                 provider.GetKeyedService<ISqlExecutor>(key)
@@ -10424,6 +12151,199 @@ public sealed partial class OrderRepository(
     partial void CollectCustomUniquenessChecks(
         ref List<UniquenessCheck<OrderEntity>>? checks
     );
+}
+
+/// <summary>Repository interface for OrderLineEntity.</summary>
+public partial interface IOrderLineRepository : IRepository<OrderLineEntity, LineIdValue>
+{
+    /// <summary>Checks the UNIQUE constraints of order_lines against the database and returns the violations (an empty list when there are none).</summary>
+    /// <remarks>
+    /// Rows that share the entity's primary key are excluded, so the same call is correct for both insert and update (an entity whose key is not set yet excludes nothing). Constraint member values that contain
+    /// a null are skipped (NULL collision semantics differ per dialect). The result is advisory only: the definitive guarantee is the database's own UNIQUE
+    /// constraint, and a concurrent insert between this check and the save can still make the save fail (TOCTOU).
+    /// </remarks>
+    /// <param name="entity">The entity whose constraint member values are checked.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
+        OrderLineEntity entity,
+        CancellationToken cancellationToken = default
+    );
+}
+
+/// <summary>Repository implementation for OrderLineEntity.</summary>
+public sealed partial class OrderLineRepository(
+    ISqlConnectionFactory connectionFactory,
+    ISaveHookRegistry? saveHooks = null,
+    ISqlExecutor? sqlExecutor = null
+) : SqliteRepository<OrderLineEntity, LineIdValue>(connectionFactory, saveHooks, sqlExecutor), IOrderLineRepository
+{
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
+        OrderLineEntity entity,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+        var violations = new List<UniquenessViolation>();
+
+        List<UniquenessCheck<OrderLineEntity>>? customChecks = null;
+        CollectCustomUniquenessChecks(ref customChecks);
+        await UniquenessChecker
+            .RunCustomChecksAsync(entity, customChecks, violations, cancellationToken)
+            .ConfigureAwait(false);
+
+        return violations;
+    }
+
+    /// <summary>Extension point for adding user-defined uniqueness checks (add delegates to the list in a partial implementation; while unimplemented the call is erased at no cost).</summary>
+    partial void CollectCustomUniquenessChecks(
+        ref List<UniquenessCheck<OrderLineEntity>>? checks
+    );
+}
+
+/// <summary>Repository interface for NodeEntity.</summary>
+public partial interface INodeRepository : IRepository<NodeEntity, NodeIdValue>
+{
+    /// <summary>Checks the UNIQUE constraints of nodes against the database and returns the violations (an empty list when there are none).</summary>
+    /// <remarks>
+    /// Rows that share the entity's primary key are excluded, so the same call is correct for both insert and update (an entity whose key is not set yet excludes nothing). Constraint member values that contain
+    /// a null are skipped (NULL collision semantics differ per dialect). The result is advisory only: the definitive guarantee is the database's own UNIQUE
+    /// constraint, and a concurrent insert between this check and the save can still make the save fail (TOCTOU).
+    /// </remarks>
+    /// <param name="entity">The entity whose constraint member values are checked.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
+        NodeEntity entity,
+        CancellationToken cancellationToken = default
+    );
+}
+
+/// <summary>Repository implementation for NodeEntity.</summary>
+public sealed partial class NodeRepository(
+    ISqlConnectionFactory connectionFactory,
+    ISaveHookRegistry? saveHooks = null,
+    ISqlExecutor? sqlExecutor = null
+) : SqliteRepository<NodeEntity, NodeIdValue>(connectionFactory, saveHooks, sqlExecutor), INodeRepository
+{
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
+        NodeEntity entity,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+        var violations = new List<UniquenessViolation>();
+
+        List<UniquenessCheck<NodeEntity>>? customChecks = null;
+        CollectCustomUniquenessChecks(ref customChecks);
+        await UniquenessChecker
+            .RunCustomChecksAsync(entity, customChecks, violations, cancellationToken)
+            .ConfigureAwait(false);
+
+        return violations;
+    }
+
+    /// <summary>Extension point for adding user-defined uniqueness checks (add delegates to the list in a partial implementation; while unimplemented the call is erased at no cost).</summary>
+    partial void CollectCustomUniquenessChecks(
+        ref List<UniquenessCheck<NodeEntity>>? checks
+    );
+}
+
+/// <summary>Query extensions: fetching the whole cascade graph of an entity in one call (the read-side counterpart of the graph save), and fetching a single entity by its key.</summary>
+/// <remarks>
+/// The Include tree of each entity is built once and shared by every query, so it must stay unmodified after construction.
+/// </remarks>
+public static class SqlQueryExtensions
+{
+    /// <summary>The Include tree of CustomerEntity (built once and shared by every query; never modify it).</summary>
+    private static readonly Lazy<IReadOnlyList<IncludeNode>> _customerEntityGraph = new(() =>
+    {
+        var n0 = new IncludeNode(typeof(CustomerEntity).GetProperty(nameof(CustomerEntity.Orders))!);
+        var n1 = new IncludeNode(typeof(OrderEntity).GetProperty(nameof(OrderEntity.OrderLines))!);
+        n0.Children.Add(n1);
+        return new IncludeNode[] { n0 };
+    });
+
+    /// <summary>Includes the cascade graph of CustomerEntity - the same child-direction navigations a graph save walks. A navigation pointing back to a table already on the path from the root is not followed.</summary>
+    public static SqlQuery<CustomerEntity> IncludeGraph(this SqlQuery<CustomerEntity> query) =>
+        query.AddIncludeNodes(_customerEntityGraph.Value);
+
+    /// <summary>Fetches the single entity with the given key - the same key the repository contract's GetByIdAsync takes - and returns null when no row matches.</summary>
+    /// <remarks>Combine it with Include or IncludeGraph to fetch that entity together with its graph in one call.</remarks>
+    public static Task<CustomerEntity?> GetByIdAsync(
+        this SqlQuery<CustomerEntity> query,
+        CustomerIdValue id,
+        CancellationToken cancellationToken = default
+    ) => query.Where(entity => entity.CustomerId == id).FirstOrDefaultAsync(cancellationToken);
+
+    /// <summary>Fetches the single entity with the given key, keeping the Include chain written just before it (returns null when no row matches).</summary>
+    public static Task<CustomerEntity?> GetByIdAsync<TProperty>(
+        this IncludableSqlQuery<CustomerEntity, TProperty> query,
+        CustomerIdValue id,
+        CancellationToken cancellationToken = default
+    ) => query.Where(entity => entity.CustomerId == id).FirstOrDefaultAsync(cancellationToken);
+
+    /// <summary>The Include tree of OrderEntity (built once and shared by every query; never modify it).</summary>
+    private static readonly Lazy<IReadOnlyList<IncludeNode>> _orderEntityGraph = new(() =>
+    {
+        var n0 = new IncludeNode(typeof(OrderEntity).GetProperty(nameof(OrderEntity.OrderLines))!);
+        return new IncludeNode[] { n0 };
+    });
+
+    /// <summary>Includes the cascade graph of OrderEntity - the same child-direction navigations a graph save walks. A navigation pointing back to a table already on the path from the root is not followed.</summary>
+    public static SqlQuery<OrderEntity> IncludeGraph(this SqlQuery<OrderEntity> query) =>
+        query.AddIncludeNodes(_orderEntityGraph.Value);
+
+    /// <summary>Fetches the single entity with the given key - the same key the repository contract's GetByIdAsync takes - and returns null when no row matches.</summary>
+    /// <remarks>Combine it with Include or IncludeGraph to fetch that entity together with its graph in one call.</remarks>
+    public static Task<OrderEntity?> GetByIdAsync(
+        this SqlQuery<OrderEntity> query,
+        OrderIdValue id,
+        CancellationToken cancellationToken = default
+    ) => query.Where(entity => entity.OrderId == id).FirstOrDefaultAsync(cancellationToken);
+
+    /// <summary>Fetches the single entity with the given key, keeping the Include chain written just before it (returns null when no row matches).</summary>
+    public static Task<OrderEntity?> GetByIdAsync<TProperty>(
+        this IncludableSqlQuery<OrderEntity, TProperty> query,
+        OrderIdValue id,
+        CancellationToken cancellationToken = default
+    ) => query.Where(entity => entity.OrderId == id).FirstOrDefaultAsync(cancellationToken);
+
+    /// <summary>Includes the cascade graph of OrderLineEntity (it has no child-direction navigation, so the query is returned unchanged).</summary>
+    public static SqlQuery<OrderLineEntity> IncludeGraph(this SqlQuery<OrderLineEntity> query) => query;
+
+    /// <summary>Fetches the single entity with the given key - the same key the repository contract's GetByIdAsync takes - and returns null when no row matches.</summary>
+    /// <remarks>Combine it with Include or IncludeGraph to fetch that entity together with its graph in one call.</remarks>
+    public static Task<OrderLineEntity?> GetByIdAsync(
+        this SqlQuery<OrderLineEntity> query,
+        LineIdValue id,
+        CancellationToken cancellationToken = default
+    ) => query.Where(entity => entity.LineId == id).FirstOrDefaultAsync(cancellationToken);
+
+    /// <summary>Fetches the single entity with the given key, keeping the Include chain written just before it (returns null when no row matches).</summary>
+    public static Task<OrderLineEntity?> GetByIdAsync<TProperty>(
+        this IncludableSqlQuery<OrderLineEntity, TProperty> query,
+        LineIdValue id,
+        CancellationToken cancellationToken = default
+    ) => query.Where(entity => entity.LineId == id).FirstOrDefaultAsync(cancellationToken);
+
+    /// <summary>Includes the cascade graph of NodeEntity (it has no child-direction navigation, so the query is returned unchanged).</summary>
+    public static SqlQuery<NodeEntity> IncludeGraph(this SqlQuery<NodeEntity> query) => query;
+
+    /// <summary>Fetches the single entity with the given key - the same key the repository contract's GetByIdAsync takes - and returns null when no row matches.</summary>
+    /// <remarks>Combine it with Include or IncludeGraph to fetch that entity together with its graph in one call.</remarks>
+    public static Task<NodeEntity?> GetByIdAsync(
+        this SqlQuery<NodeEntity> query,
+        NodeIdValue id,
+        CancellationToken cancellationToken = default
+    ) => query.Where(entity => entity.NodeId == id).FirstOrDefaultAsync(cancellationToken);
+
+    /// <summary>Fetches the single entity with the given key, keeping the Include chain written just before it (returns null when no row matches).</summary>
+    public static Task<NodeEntity?> GetByIdAsync<TProperty>(
+        this IncludableSqlQuery<NodeEntity, TProperty> query,
+        NodeIdValue id,
+        CancellationToken cancellationToken = default
+    ) => query.Where(entity => entity.NodeId == id).FirstOrDefaultAsync(cancellationToken);
 }
 
 /// <summary>
@@ -12387,6 +14307,66 @@ public sealed partial class InMemoryOrderRepository(
     );
 }
 
+/// <summary>In-memory implementation of the repository for OrderLineEntity.</summary>
+public sealed partial class InMemoryOrderLineRepository(
+    InMemoryDataStore store,
+    ISaveHookRegistry? saveHooks = null
+) : InMemoryRepository<OrderLineEntity, LineIdValue>(store, saveHooks), IOrderLineRepository
+{
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
+        OrderLineEntity entity,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+        var violations = new List<UniquenessViolation>();
+
+        List<UniquenessCheck<OrderLineEntity>>? customChecks = null;
+        CollectCustomUniquenessChecks(ref customChecks);
+        await UniquenessChecker
+            .RunCustomChecksAsync(entity, customChecks, violations, cancellationToken)
+            .ConfigureAwait(false);
+
+        return violations;
+    }
+
+    /// <summary>Extension point for adding user-defined uniqueness checks (add delegates to the list in a partial implementation; while unimplemented the call is erased at no cost).</summary>
+    partial void CollectCustomUniquenessChecks(
+        ref List<UniquenessCheck<OrderLineEntity>>? checks
+    );
+}
+
+/// <summary>In-memory implementation of the repository for NodeEntity.</summary>
+public sealed partial class InMemoryNodeRepository(
+    InMemoryDataStore store,
+    ISaveHookRegistry? saveHooks = null
+) : InMemoryRepository<NodeEntity, NodeIdValue>(store, saveHooks), INodeRepository
+{
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
+        NodeEntity entity,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+        var violations = new List<UniquenessViolation>();
+
+        List<UniquenessCheck<NodeEntity>>? customChecks = null;
+        CollectCustomUniquenessChecks(ref customChecks);
+        await UniquenessChecker
+            .RunCustomChecksAsync(entity, customChecks, violations, cancellationToken)
+            .ConfigureAwait(false);
+
+        return violations;
+    }
+
+    /// <summary>Extension point for adding user-defined uniqueness checks (add delegates to the list in a partial implementation; while unimplemented the call is erased at no cost).</summary>
+    partial void CollectCustomUniquenessChecks(
+        ref List<UniquenessCheck<NodeEntity>>? checks
+    );
+}
+
 /// <summary>Seeder that loads deterministic sample data into the in-memory store (3 rows per entity, in FK dependency order).</summary>
 /// <remarks>
 /// Values are generated deterministically from the column metadata (int keys = 1,2,3; string keys = "{TABLE}-00n";
@@ -12405,6 +14385,8 @@ public static class InMemorySampleData
         ArgumentNullException.ThrowIfNull(store);
         SeedCustomerEntity(store);
         SeedOrderEntity(store);
+        SeedOrderLineEntity(store);
+        SeedNodeEntity(store);
 
     }
 
@@ -12436,6 +14418,41 @@ public static class InMemorySampleData
                 CustomerId = CreateSampleValue<CustomerIdValue, int>("OrderEntity.CustomerId", index),
                 Memo = index == 3 ? null : CreateSampleValue<MemoValue, string>("OrderEntity.Memo", ($"memo {index}").Length > 50 ? ($"memo {index}")[..50] : ($"memo {index}")),
                 Amount = CreateSampleValue<AmountValue, decimal>("OrderEntity.Amount", index * 100.05m),
+            };
+            entity.MarkAdded();
+            store.Put(entity);
+            entity.MarkUnchanged();
+        }
+    }
+
+    /// <summary>Seeds sample data for order_lines.</summary>
+    private static void SeedOrderLineEntity(InMemoryDataStore store)
+    {
+        for (var index = 1; index <= RowsPerEntity; index++)
+        {
+            var entity = new OrderLineEntity
+            {
+                LineId = CreateSampleValue<LineIdValue, int>("OrderLineEntity.LineId", index),
+                OrderId = CreateSampleValue<OrderIdValue, int>("OrderLineEntity.OrderId", index),
+                ItemName = CreateSampleValue<ItemNameValue, string>("OrderLineEntity.ItemName", ($"item_name {index}").Length > 50 ? ($"item_name {index}")[..50] : ($"item_name {index}")),
+                Quantity = CreateSampleValue<QuantityValue, int>("OrderLineEntity.Quantity", index * 10),
+            };
+            entity.MarkAdded();
+            store.Put(entity);
+            entity.MarkUnchanged();
+        }
+    }
+
+    /// <summary>Seeds sample data for nodes.</summary>
+    private static void SeedNodeEntity(InMemoryDataStore store)
+    {
+        for (var index = 1; index <= RowsPerEntity; index++)
+        {
+            var entity = new NodeEntity
+            {
+                NodeId = CreateSampleValue<NodeIdValue, int>("NodeEntity.NodeId", index),
+                ParentNodeId = index == 3 ? null : CreateSampleValue<NodeIdValue, int>("NodeEntity.ParentNodeId", index),
+                Label = CreateSampleValue<LabelValue, string>("NodeEntity.Label", ($"label {index}").Length > 50 ? ($"label {index}")[..50] : ($"label {index}")),
             };
             entity.MarkAdded();
             store.Put(entity);
@@ -12500,6 +14517,8 @@ public static class GeneratedInMemoryRepositoryServiceCollectionExtensions
         ));
         services.AddScoped<ICustomerRepository, InMemoryCustomerRepository>();
         services.AddScoped<IOrderRepository, InMemoryOrderRepository>();
+        services.AddScoped<IOrderLineRepository, InMemoryOrderLineRepository>();
+        services.AddScoped<INodeRepository, InMemoryNodeRepository>();
 
         return services;
     }
@@ -12543,6 +14562,12 @@ public partial class QuickErDbContext : DbContext
     /// <summary>DbSet for OrderEntity.</summary>
     public DbSet<OrderEntity> Orders => Set<OrderEntity>();
 
+    /// <summary>DbSet for OrderLineEntity.</summary>
+    public DbSet<OrderLineEntity> OrderLines => Set<OrderLineEntity>();
+
+    /// <summary>DbSet for NodeEntity.</summary>
+    public DbSet<NodeEntity> Nodes => Set<NodeEntity>();
+
     /// <summary>Configures the table, keys, columns, and relationships for each entity using the Fluent API.</summary>
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -12578,6 +14603,45 @@ public partial class QuickErDbContext : DbContext
             entity.Property(e => e.CustomerId).HasColumnName("customer_id").IsRequired().HasConversion(v => v!.Value, v => CustomerIdValue.Create(v!));
             entity.Property(e => e.Memo).HasColumnName("memo").HasConversion(v => v!.Value, v => MemoValue.Create(v!));
             entity.Property(e => e.Amount).HasColumnName("amount").IsRequired().HasConversion(v => v!.Value, v => AmountValue.Create(v!));
+            entity
+                .HasMany(e => e.OrderLines)
+                .WithOne(e => e.Order)
+                .HasForeignKey(e => e.OrderId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<OrderLineEntity>(entity =>
+        {
+            entity.ToTable("order_lines");
+            entity.HasKey(e => e.LineId);
+            entity.Ignore(e => e.RowState);
+            entity.Ignore(e => e.IsAdded);
+            entity.Ignore(e => e.IsUpdated);
+            entity.Ignore(e => e.IsRemoved);
+            entity.Ignore(e => e.HasChanges);
+            entity.Property(e => e.LineId).HasColumnName("line_id").IsRequired().HasConversion(v => v!.Value, v => LineIdValue.Create(v!));
+            entity.Property(e => e.OrderId).HasColumnName("order_id").IsRequired().HasConversion(v => v!.Value, v => OrderIdValue.Create(v!));
+            entity.Property(e => e.ItemName).HasColumnName("item_name").IsRequired().HasConversion(v => v!.Value, v => ItemNameValue.Create(v!));
+            entity.Property(e => e.Quantity).HasColumnName("quantity").IsRequired().HasConversion(v => v!.Value, v => QuantityValue.Create(v!));
+        });
+
+        modelBuilder.Entity<NodeEntity>(entity =>
+        {
+            entity.ToTable("nodes");
+            entity.HasKey(e => e.NodeId);
+            entity.Ignore(e => e.RowState);
+            entity.Ignore(e => e.IsAdded);
+            entity.Ignore(e => e.IsUpdated);
+            entity.Ignore(e => e.IsRemoved);
+            entity.Ignore(e => e.HasChanges);
+            entity.Property(e => e.NodeId).HasColumnName("node_id").IsRequired().HasConversion(v => v!.Value, v => NodeIdValue.Create(v!));
+            entity.Property(e => e.ParentNodeId).HasColumnName("parent_node_id").HasConversion(v => v!.Value, v => NodeIdValue.Create(v!));
+            entity.Property(e => e.Label).HasColumnName("label").IsRequired().HasConversion(v => v!.Value, v => LabelValue.Create(v!));
+            entity
+                .HasMany(e => e.Nodes)
+                .WithOne()
+                .HasForeignKey(e => e.ParentNodeId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         OnModelCreatingPartial(modelBuilder);
@@ -14234,6 +16298,16 @@ public static class GeneratedEfCoreRepositoryServiceCollectionExtensions
             provider.GetService<ISaveHookRegistry>(),
             provider.GetService<ISqlExecutor>()
         ));
+        services.AddScoped<IOrderLineRepository>(provider => new EfCoreOrderLineRepository(
+            provider.GetRequiredService<IDbContextFactory<QuickErDbContext>>(),
+            provider.GetService<ISaveHookRegistry>(),
+            provider.GetService<ISqlExecutor>()
+        ));
+        services.AddScoped<INodeRepository>(provider => new EfCoreNodeRepository(
+            provider.GetRequiredService<IDbContextFactory<QuickErDbContext>>(),
+            provider.GetService<ISaveHookRegistry>(),
+            provider.GetService<ISqlExecutor>()
+        ));
 
         return services;
     }
@@ -14336,5 +16410,67 @@ public sealed partial class EfCoreOrderRepository(
     /// <summary>Extension point for adding user-defined uniqueness checks (add delegates to the list in a partial implementation; while unimplemented the call is erased at no cost).</summary>
     partial void CollectCustomUniquenessChecks(
         ref List<UniquenessCheck<OrderEntity>>? checks
+    );
+}
+
+/// <summary>EF Core implementation of the repository for OrderLineEntity.</summary>
+public sealed partial class EfCoreOrderLineRepository(
+    IDbContextFactory<QuickErDbContext> contextFactory,
+    ISaveHookRegistry? saveHooks = null,
+    ISqlExecutor? sqlExecutor = null
+) : EfCoreRepository<OrderLineEntity, LineIdValue, QuickErDbContext>(contextFactory, saveHooks, sqlExecutor), IOrderLineRepository
+{
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
+        OrderLineEntity entity,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+        var violations = new List<UniquenessViolation>();
+
+        List<UniquenessCheck<OrderLineEntity>>? customChecks = null;
+        CollectCustomUniquenessChecks(ref customChecks);
+        await UniquenessChecker
+            .RunCustomChecksAsync(entity, customChecks, violations, cancellationToken)
+            .ConfigureAwait(false);
+
+        return violations;
+    }
+
+    /// <summary>Extension point for adding user-defined uniqueness checks (add delegates to the list in a partial implementation; while unimplemented the call is erased at no cost).</summary>
+    partial void CollectCustomUniquenessChecks(
+        ref List<UniquenessCheck<OrderLineEntity>>? checks
+    );
+}
+
+/// <summary>EF Core implementation of the repository for NodeEntity.</summary>
+public sealed partial class EfCoreNodeRepository(
+    IDbContextFactory<QuickErDbContext> contextFactory,
+    ISaveHookRegistry? saveHooks = null,
+    ISqlExecutor? sqlExecutor = null
+) : EfCoreRepository<NodeEntity, NodeIdValue, QuickErDbContext>(contextFactory, saveHooks, sqlExecutor), INodeRepository
+{
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
+        NodeEntity entity,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+        var violations = new List<UniquenessViolation>();
+
+        List<UniquenessCheck<NodeEntity>>? customChecks = null;
+        CollectCustomUniquenessChecks(ref customChecks);
+        await UniquenessChecker
+            .RunCustomChecksAsync(entity, customChecks, violations, cancellationToken)
+            .ConfigureAwait(false);
+
+        return violations;
+    }
+
+    /// <summary>Extension point for adding user-defined uniqueness checks (add delegates to the list in a partial implementation; while unimplemented the call is erased at no cost).</summary>
+    partial void CollectCustomUniquenessChecks(
+        ref List<UniquenessCheck<NodeEntity>>? checks
     );
 }

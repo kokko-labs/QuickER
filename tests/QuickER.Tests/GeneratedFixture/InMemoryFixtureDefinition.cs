@@ -1,5 +1,6 @@
 using QuickER.CodeGen.CSharp;
 using QuickER.Model;
+using QuickER.Tests.GeneratedFixture;
 
 namespace QuickER.Tests.GeneratedInMemoryFixture;
 
@@ -320,6 +321,10 @@ public static class InMemoryFixtureDefinition
                 },
             }
         );
+
+        // グラフ取得糖衣の edge-skip を実行時に観測するための自己参照テーブル
+        // （値オブジェクト無効・EF Core なしの本フィクスチャだから置ける。既存要素には触れない）
+        SelfReferenceTableDefinition.AddTo(diagram);
 
         return diagram;
     }

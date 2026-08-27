@@ -485,6 +485,7 @@ public sealed class QuickER.Runtime.SqlQuery<TEntity>
     public .ctor(QuickER.Runtime.ISqlQueryExecutor<TEntity> executor)
     public QuickER.Runtime.IncludableSqlQuery<TEntity, TElement> Include<TElement>(System.Linq.Expressions.Expression<System.Func<TEntity, System.Collections.Generic.ICollection<TElement>>> navigationSelector)
     public QuickER.Runtime.IncludableSqlQuery<TEntity, TProperty> Include<TProperty>(System.Linq.Expressions.Expression<System.Func<TEntity, TProperty>> navigationSelector)
+    public QuickER.Runtime.SqlQuery<TEntity> AddIncludeNodes(System.Collections.Generic.IReadOnlyList<QuickER.Runtime.IncludeNode> nodes)
     public QuickER.Runtime.SqlQuery<TEntity> OrderBy(System.Linq.Expressions.Expression<System.Func<TEntity, object>> keySelector)
     public QuickER.Runtime.SqlQuery<TEntity> OrderByDescending(System.Linq.Expressions.Expression<System.Func<TEntity, object>> keySelector)
     public QuickER.Runtime.SqlQuery<TEntity> Skip(int count)

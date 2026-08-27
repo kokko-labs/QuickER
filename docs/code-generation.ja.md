@@ -38,6 +38,8 @@ var customer = await customers.GetByIdAsync(CustomerIdValue.Create(1));
 
 同名列の定義（型・長さ・精度）が食い違う場合は Warning 診断を出し、主キーの定義を優先（主キーが無ければ最も広い定義）して 1 つの型に揃えます。
 
+外部キー列は、**列名が参照先と違っていても参照先（親側）列の値オブジェクト型を共有**します（`orders.ship_customer_id` は `ShipCustomerIdValue` でなく `CustomerIdValue` になります）。「同じ識別子は同じ値型」を型で表すための規則で、EF Core が要求する「外部キーと参照先主キーの CLR 型一致」もこれで満たされます（自己参照テーブルの `parent_node_id → node_id` のような列名の違う外部キーは、列名ごとの別型のままだと EF Core のモデル検証が通りません）。外部キーの外部キーは参照をたどった先の型へ揃え、相互参照の循環に入った列は自分の列名由来の型のままです。型を共有した列は生成時に Info 診断で一覧されます（列名由来の型名が変わるため）。同一の列が「異なる型に解決される親」を複数参照している図は生成時エラー、親子で下地の C# 型が食い違う列ペアは共有せず列名由来の型のままです。
+
 ### 生成される型と検証
 
 各値オブジェクトは `sealed partial class` で、コンストラクタは非公開・生成は静的ファクトリ経由のみです。図の列定義から検証コードが自動生成されます（文字列は最大長、`decimal` は精度・スケール＝丸めずに弾く）:
@@ -218,6 +220,8 @@ var result = await customers.Query()
     .ToListAsync();
 ```
 
+同じナビゲーションを重ねて指定した `Include` / `ThenInclude` は 1 本のノードへマージされます。EF Core と同じ分岐イディオム——`Include(c => c.Orders).ThenInclude(o => o.OrderLines)` に続けて `Include(c => c.Orders).ThenInclude(o => o.Customer)`——で、`Orders` の下に複数の枝を書けます。
+
 対応: 等値・比較・`&&`/`||`・`Contains`/`StartsWith`/`EndsWith`（LIKE）・リストの `Contains`（IN）・日付部品（`Year` など）・`string.IsNullOrEmpty`・値オブジェクト比較。**射影（Select）・GroupBy・Join・算術式は未対応**です（実行時例外。生 SQL か EF Core で回避してください）。
 
 **ナビゲーションプロパティは述語にも並び替えキーにも書けません**。`Where(o => o.Customer == null)` は `NotSupportedException` になります。ナビゲーションは自分の列を持たないため、外部キー列で絞ってください（`Where(o => o.CustomerId == null)`）。インメモリと EF Core はこの述語を翻訳できるので、これは QuickER 版 Repository 固有の制限です。
@@ -237,6 +241,28 @@ var result = await customers.Query()
 日付部品（`Year`・`Month` など）へ変換されるのは、読み出し元が `DateTime` / `DateOnly` / `DateTimeOffset`（いずれも nullable を含む）の列である場合だけです。同名のプロパティを別の型に持たせても——値オブジェクトへ partial で足した場合など——日付部品とは見なさず、黙って `YEAR([col])` になる代わりに `NotSupportedException` で失敗します。
 
 リストの `Contains` は要素 1 個につきバインド変数 1 個へ展開され、チャンク分割はしません。そのため巨大なリストは方言のバインド変数・IN リスト上限（Oracle の 1000、SQL Server の 2100 パラメータ、SQLite の歴史的な 999 など）を超えて実行時エラーになります。大量のキーを渡す場合は一時テーブルへ入れて結合するか、生 SQL を使ってください。
+
+### グラフ取得（IncludeGraph）
+
+```csharp
+var fetched = await orders.Query()
+    .Where(o => o.CustomerId == 1)
+    .IncludeGraph()                 // グラフ保存がたどるのと同じカスケードを Include する
+    .ToListAsync();
+
+var one = await orders.Query().IncludeGraph().GetByIdAsync(1000);   // キー指定でグラフごと 1 件
+```
+
+グラフ保存（`SaveAsync`）の取得側の対です。`IncludeGraph()` は、保存がたどるのと同じ子方向のカスケードナビゲーションを末端まで `Include` ツリーへ展開する糖衣で、手で `Include(...).ThenInclude(...)` を並べたのと同じ結果になります。エンティティごとの拡張メソッドとして常に生成され、`Where` / `OrderBy` / ページング / `FirstOrDefaultAsync` と自由に組み合わせられます。図に子テーブルを足して再生成すれば `IncludeGraph()` は自動で追従します——手書きの `Include` 鎖は追従せず、取得した「集約」が静かに不完全になります。これを防ぐのがこのメソッドの主目的です。
+
+クエリ側の `GetByIdAsync` は、主キー述語を焼き込んだ終端糖衣です（`Where(x => x.OrderId == id).FirstOrDefaultAsync()` と等価・該当なしは null）。キーの型は契約の同名メソッドと同一で、`Include` / `IncludeGraph` を付けなければ `repo.GetByIdAsync(id)` と同じ結果を返します。手動の `Include(...)` 連鎖の途中からもそのまま呼べます。
+
+取得したグラフは `RowState = Unchanged` で返るため、編集してからルートを `SaveAsync` へ渡す「取得 → 編集 → 保存」の往復がそのまま成立します。
+
+- **パス上に既出のテーブルへ戻るナビゲーションはたどりません**。自己参照（`Category.Children` など）や相互参照は有限の `Include` ツリーに写せないため、その辺はスキップされ、生成時に Info 診断で名指しされます。スキップされたナビゲーションは空のまま返るので、再帰構造は必要な深さだけ手動の `Include` で取得してください。`IncludeGraph()` の後に追加の `Include` を重ねることもできます（`Query().IncludeGraph().Include(x => x.Customer).GetByIdAsync(id)`）。親参照やスキップされたナビを足すのが典型で、閉包が既に含む子方向ナビゲーションを重ねて指定しても同じノードへマージされるため安全です（`ThenInclude` でその下へ枝を足す用途にも使えます）。保存側はインスタンスグラフ（＝有限）をたどるため任意の深さを保存できます——この取得と保存の非対称は仕様です。
+- カスケード子を 1 つも持たないエンティティにも生成され、その場合はクエリをそのまま返す no-op です。
+- 深い階層・広い図では取得量が相応に大きくなります。SQL Server はグラフ全体を 1 本のネスト JSON クエリで取得するため（SQLite は階層ごとの分割クエリ）、一部の子だけでよい場面では手動の `Include` で絞ってください。
+- `WithUnboundedBinary()` とは併用できません（`Include` と同じ排他）。リモート面（`I{Entity}RemoteRepository`）には `Query()` が無いため、`IncludeGraph` もリモートでは使えません。
 
 ### グラフ保存（親子まとめて 1 回で保存）
 

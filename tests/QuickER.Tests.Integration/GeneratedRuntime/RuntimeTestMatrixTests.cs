@@ -166,6 +166,26 @@ public class RuntimeTestMatrixTests
             "UNIQUE 制約の事前チェック（重複検出・自分自身の除外）",
             Row(Covered(), Covered(), Covered(), Covered(), Covered())
         ),
+        ["IncludeGraph"] = new(
+            "グラフ取得糖衣（IncludeGraph＝カスケード閉包の Include ツリー）",
+            Row(
+                Covered(),
+                Covered(),
+                Covered(),
+                Covered(),
+                NotApplicable("Query() はリモート面に無く、Include ツリーは転送されない")
+            )
+        ),
+        ["IncludeGraphSelfReference"] = new(
+            "IncludeGraph の edge-skip（自己参照ナビを展開しない）",
+            Row(
+                Covered(),
+                Covered(),
+                Covered(),
+                Covered(),
+                NotApplicable("Query() はリモート面に無く、Include ツリーは転送されない")
+            )
+        ),
         ["NamedQuery"] = new(
             "名前付きクエリ（簡易 DSL・射影・手動実装）",
             Row(
@@ -396,6 +416,30 @@ public class RuntimeTestMatrixTests
         new("UniquenessCheckInMemoryRuntimeTests", "UniquenessCheck", Backend.InMemory),
         new("UniquenessCheckRemoteRuntimeTests", "UniquenessCheck", Backend.Remote),
         // --- 名前付きクエリ ---
+        new("IncludeGraphSqlServerRuntimeTests", "IncludeGraph", Backend.AdoSqlServer),
+        new("IncludeGraphAdoRuntimeTests", "IncludeGraph", Backend.AdoSqlite),
+        new("IncludeGraphEfCoreRuntimeTests", "IncludeGraph", Backend.EfCore),
+        new("IncludeGraphInMemoryRuntimeTests", "IncludeGraph", Backend.InMemory),
+        new(
+            "IncludeGraphSelfReferenceSqlServerRuntimeTests",
+            "IncludeGraphSelfReference",
+            Backend.AdoSqlServer
+        ),
+        new(
+            "IncludeGraphSelfReferenceAdoRuntimeTests",
+            "IncludeGraphSelfReference",
+            Backend.AdoSqlite
+        ),
+        new(
+            "IncludeGraphSelfReferenceEfCoreRuntimeTests",
+            "IncludeGraphSelfReference",
+            Backend.EfCore
+        ),
+        new(
+            "IncludeGraphSelfReferenceInMemoryRuntimeTests",
+            "IncludeGraphSelfReference",
+            Backend.InMemory
+        ),
         new("NamedQueryAdoRuntimeTests", "NamedQuery", Backend.AdoSqlite),
         new("NamedQueryAdoRuntimeTests", "NamedQueryRawSql", Backend.AdoSqlite),
         new("SqlitePortableNamedQueryRuntimeTests", "NamedQuery", Backend.AdoSqlite),

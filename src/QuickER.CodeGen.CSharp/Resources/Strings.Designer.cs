@@ -228,9 +228,27 @@ namespace QuickER.CodeGen.CSharp.Resources {
             }
         }
 
+        public static string CodeGen_Info_IncludeGraphSkippedNavigations {
+            get {
+                return ResourceManager.GetString("CodeGen_Info_IncludeGraphSkippedNavigations", resourceCulture);
+            }
+        }
+
         public static string CodeGen_Info_MultiTargetRowVersionColumns {
             get {
                 return ResourceManager.GetString("CodeGen_Info_MultiTargetRowVersionColumns", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Info_ValueObjectForeignKeyUnified {
+            get {
+                return ResourceManager.GetString("CodeGen_Info_ValueObjectForeignKeyUnified", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Error_ValueObjectForeignKeyTypeConflict {
+            get {
+                return ResourceManager.GetString("CodeGen_Error_ValueObjectForeignKeyTypeConflict", resourceCulture);
             }
         }
 

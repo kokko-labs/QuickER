@@ -75,6 +75,11 @@
       Include="..\QuickER.Tests\GeneratedFixture\*FixtureDefinition.cs"
       LinkBase="GeneratedFixture"
     />
+    <!-- 複数のフィクスチャ定義が共有する図の部品（自己参照テーブル）。定義本体と同じアセンブリに要る -->
+    <Compile
+      Include="..\QuickER.Tests\GeneratedFixture\SelfReferenceTableDefinition.cs"
+      LinkBase="GeneratedFixture"
+    />
     <Compile
       Include="..\QuickER.Tests\GeneratedFixture\*ManualImplementations.cs"
       LinkBase="GeneratedFixture"

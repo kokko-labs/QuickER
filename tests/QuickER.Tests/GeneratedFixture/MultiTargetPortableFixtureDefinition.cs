@@ -4,6 +4,7 @@ using QuickER.CodeGen.CSharp;
 using QuickER.Model;
 using QuickER.Sqlite;
 using QuickER.SqlServer;
+using QuickER.Tests.GeneratedFixture;
 
 namespace QuickER.Tests.GeneratedMultiTargetFixture;
 
@@ -59,11 +60,18 @@ public static class MultiTargetPortableFixtureDefinition
     /// <summary>
     /// フィクスチャの ER 図を返す。図の中身は方言可搬フィクスチャと同一（SQL Server 型表記基準）で、
     /// SQL Server / SQLite の型カタログはこの表記を同じ C# 型へ解決する（可搬型のみで構成）。
+    /// これにグラフ取得糖衣の edge-skip 検証用の自己参照テーブルを加える
+    /// （<see cref="SelfReferenceTableDefinition"/>＝EF Core を生成しない本フィクスチャだけが置ける）。
     /// </summary>
-    public static ErDiagram Build() =>
-        Tests.GeneratedPortableFixture.PortableFixtureDefinition.Build(
+    public static ErDiagram Build()
+    {
+        var diagram = Tests.GeneratedPortableFixture.PortableFixtureDefinition.Build(
             Tests.GeneratedPortableFixture.PortableDialect.SqlServer
         );
+        SelfReferenceTableDefinition.AddTo(diagram);
+
+        return diagram;
+    }
 
     /// <summary>
     /// 主辞書（図の方言＝SQL Server）と、実効方言（sqlserver / sqlite）ごとに解決した方言辞書を返す。
