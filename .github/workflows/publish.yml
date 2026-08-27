@@ -63,6 +63,12 @@ jobs:
       - name: 生成物一覧を表示
         run: Get-ChildItem "${{ runner.temp }}/nupkg" -Recurse
 
+      - name: パッケージ検証（README / アイコンの宣言・tools の .pdb 不在・版の一致）
+        # dotnet pack 自身が守らない 3 点だけを見る（重複した検査は置かない）。push の前段に置き、
+        # dry_run=true でも必ず走らせる＝壊れたパッケージが公開経路へ進めない。
+        # 検証本体は scripts/verify-packages.ps1 で、ローカルでも同じものを実行できる。
+        run: ./scripts/verify-packages.ps1 -NupkgDirectory "${{ runner.temp }}/nupkg"
+
       # 一時キーの有効期限は 1 時間のため、push の直前に取得する
       - name: NuGet.org へログイン（Trusted Publishing・dry_run=false のときのみ）
         if: ${{ inputs.dry_run == false }}
