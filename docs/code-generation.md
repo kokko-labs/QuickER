@@ -238,6 +238,24 @@ Date parts (`Year`, `Month`, …) are translated only when the member is read fr
 
 `Contains` on a list expands to one bind variable per element and is not chunked, so a very large list runs into the dialect's bind-variable / IN-list limit (Oracle's 1000, SQL Server's 2100 parameters, SQLite's historical 999, etc.) and fails at runtime. For a large set of keys, stage them in a temporary table and join, or use raw SQL.
 
+### Graph fetch (IncludeGraph)
+
+```csharp
+var fetched = await orders.Query()
+    .Where(o => o.CustomerId == 1)
+    .IncludeGraph()                 // Includes the same cascade the graph save follows
+    .ToListAsync();
+```
+
+The fetch-side counterpart of the graph save (`SaveAsync`). `IncludeGraph()` is sugar that expands the same child-direction cascade navigations the save follows — all the way down — into an `Include` tree, giving the same result as spelling out `Include(...).ThenInclude(...)` by hand. It is always generated as a per-entity extension method and composes freely with `Where` / `OrderBy` / paging / `FirstOrDefaultAsync`. Add a child table to the diagram and regenerate, and `IncludeGraph()` follows automatically — a hand-written `Include` chain does not, and the "aggregate" it fetches silently becomes incomplete. Preventing that is the main point of this method.
+
+The fetched graph comes back with `RowState = Unchanged`, so the fetch → edit → save round trip works as is: edit it, then hand the root to `SaveAsync`.
+
+- **A navigation pointing back to a table already on the path from the root is not followed.** Self references (`Category.Children` and the like) and mutual references cannot be mapped onto a finite `Include` tree, so those edges are skipped and called out in an Info diagnostic at generation time. A skipped navigation comes back empty; fetch recursive structures with manual `Include` to whatever depth you need. The save side walks the instance graph — which is finite — and therefore saves to any depth; this asymmetry between fetch and save is by design.
+- The method is generated for entities without any cascade child too, where it is a no-op that returns the query unchanged.
+- On a deep or wide diagram the fetch is correspondingly large. SQL Server fetches the whole graph as one nested JSON query (SQLite splits it into one query per level), so when only some children are needed, narrow the fetch with manual `Include`.
+- It cannot be combined with `WithUnboundedBinary()` (the same exclusion as `Include`). The remote face (`I{Entity}RemoteRepository`) has no `Query()`, so `IncludeGraph` is not available remotely either.
+
 ### Graph save (save parent and children in one call)
 
 ```csharp

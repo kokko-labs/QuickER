@@ -2065,6 +2065,19 @@ public sealed class SqlQuery<TEntity>
         return new IncludableSqlQuery<TEntity, TElement>(this, node);
     }
 
+    /// <summary>Adds an already built Include tree (the entry point the generated IncludeGraph extensions use).</summary>
+    /// <remarks>
+    /// The nodes are taken as they are - neither copied nor validated - so a node handed over here (and its Children)
+    /// must not be changed afterwards: the generated extensions build one tree per entity type and share it across
+    /// every query. Write Include/ThenInclude instead when composing an Include tree by hand.
+    /// </remarks>
+    internal SqlQuery<TEntity> AddIncludeNodes(IReadOnlyList<IncludeNode> nodes)
+    {
+        ArgumentNullException.ThrowIfNull(nodes);
+        _includes.AddRange(nodes);
+        return this;
+    }
+
     /// <summary>Fetches the entities matching the conditions (together with the requested Includes) as a list.</summary>
     public async Task<IReadOnlyList<TEntity>> ToListAsync(
         CancellationToken cancellationToken = default
@@ -2415,6 +2428,16 @@ public partial interface ISyncItemRepository : IRepository<SyncItemEntity, int>
         SyncItemEntity entity,
         CancellationToken cancellationToken = default
     );
+}
+
+/// <summary>Include extensions that fetch the whole cascade graph of an entity in one call (the read-side counterpart of the graph save).</summary>
+/// <remarks>
+/// The Include tree of each entity is built once and shared by every query, so it must stay unmodified after construction.
+/// </remarks>
+public static class IncludeGraphExtensions
+{
+    /// <summary>Includes the cascade graph of SyncItemEntity (it has no child-direction navigation, so the query is returned unchanged).</summary>
+    public static SqlQuery<SyncItemEntity> IncludeGraph(this SqlQuery<SyncItemEntity> query) => query;
 }
 }
 

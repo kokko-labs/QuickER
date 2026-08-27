@@ -680,6 +680,7 @@ public static partial class GeneratedRemoteEndpoints
         group.MapGet(RemotePaths.HealthRoute, () => Results.Ok());
         MapCustomerEndpoints(group);
         MapOrderEndpoints(group);
+        MapOrderLineEndpoints(group);
 
         return group;
     }
@@ -983,4 +984,30 @@ public static partial class GeneratedRemoteEndpoints
 
     /// <summary>Request body for CheckUniqueness (Order).</summary>
     private sealed record OrderCheckUniquenessRequest(OrderEntity Entity);
+
+    /// <summary>Maps the remote-surface endpoints for OrderLineEntity.</summary>
+    private static void MapOrderLineEndpoints(RouteGroupBuilder group)
+    {
+        RemoteServerEngine.MapCrud<OrderLineEntity, LineIdValue, IOrderLineRemoteRepository>(
+            group,
+            "OrderLine"
+        );
+
+        group.MapPost(
+            "OrderLine/CheckUniqueness",
+            (HttpContext context) =>
+                RemoteServerEngine.ExecuteAsync(
+                    context,
+                    async () =>
+                    {
+                        var request = await RemoteServerEngine.ReadRequestAsync<OrderLineCheckUniquenessRequest>(context).ConfigureAwait(false);
+                        var repository = RemoteServerEngine.Repository<IOrderLineRemoteRepository>(context);
+                        return (object?)await repository.CheckUniquenessAsync(RemoteServerEngine.Required(request.Entity, "Entity"), context.RequestAborted).ConfigureAwait(false);
+                    }
+                )
+        );
+    }
+
+    /// <summary>Request body for CheckUniqueness (OrderLine).</summary>
+    private sealed record OrderLineCheckUniquenessRequest(OrderLineEntity Entity);
 }

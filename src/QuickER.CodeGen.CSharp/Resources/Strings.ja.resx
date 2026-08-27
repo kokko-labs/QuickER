@@ -145,6 +145,9 @@
   <data name="CodeGen_Info_ExcludedUnboundedBinaryColumns" xml:space="preserve">
     <value>無制限バイナリ列を SELECT / UPDATE 対象から除外しました:{0}</value>
   </data>
+  <data name="CodeGen_Info_IncludeGraphSkippedNavigations" xml:space="preserve">
+    <value>次のナビゲーションは、ルートからの経路に既に現れたテーブルへ戻る辺のため IncludeGraph では辿りません（Include ツリーは循環を表せません）。深さを決めて取得したい場合は Include / ThenInclude で明示してください:{0}</value>
+  </data>
   <data name="CodeGen_Info_MultiTargetRowVersionColumns" xml:space="preserve">
     <value>次の行バージョン列を並行性トークンとして扱うのは '{0}' の Repository だけです。他の対象方言は同じ byte[] プロパティを共有しますが、その列を通常のバイナリ列として INSERT / UPDATE で書き込み（'{0}' が採番した版のミラー置き場）、版ガードは行いません:{1}</value>
   </data>

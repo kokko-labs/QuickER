@@ -145,6 +145,9 @@
   <data name="CodeGen_Info_ExcludedUnboundedBinaryColumns" xml:space="preserve">
     <value>Excluded unbounded binary columns from SELECT / UPDATE:{0}</value>
   </data>
+  <data name="CodeGen_Info_IncludeGraphSkippedNavigations" xml:space="preserve">
+    <value>IncludeGraph does not follow the navigations below, because each one points back to a table that is already on the path from the root (an Include tree cannot express a cycle). Include them explicitly with Include / ThenInclude when a bounded depth is needed:{0}</value>
+  </data>
   <data name="CodeGen_Info_MultiTargetRowVersionColumns" xml:space="preserve">
     <value>Only the '{0}' repository treats the following row version columns as concurrency tokens. The other target dialects share the same byte[] property, but write the column with INSERT / UPDATE like any other binary column (a place to mirror the version '{0}' assigned) and run no version guard:{1}</value>
   </data>

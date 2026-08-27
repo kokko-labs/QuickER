@@ -3654,6 +3654,10 @@ public sealed partial class {{ repository.class_name }}(
 }{{ end }}
 {{~ end ~}}
 {{~ end ~}}
+{{~ if render_contract && emit_schema_dependent && include_graph_extensions != "" ~}}
+
+{{ include_graph_extensions }}
+{{~ end ~}}
 {{~ end ~}}
 {{~ if remote_services && render_http_client && emit_schema_dependent ~}}
 {{~ for repository in repository_classes ~}}

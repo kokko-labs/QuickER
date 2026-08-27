@@ -101,6 +101,14 @@ internal sealed partial class CSharpGenerationModelBuilder
             // グラフ保存のジャーナル記録は保存側（EntityGraphSaver）のカスケード走査をミラーする必要があるため、
             // 同期対象と同じナビゲーション解決結果から再帰記録メソッド群を静的に組み立てる
             SyncGraphRecorder = BuildSyncGraphRecorder(diagram, navigationsByEntity, syncTables),
+            // グラフ取得糖衣（IncludeGraph）は保存側と同じカスケード閉包を Include ツリーへ写すため、
+            // 同じナビゲーション解決結果から静的に組み立てる（オプションなし・契約が出る構成で常時生成）
+            IncludeGraphExtensions = BuildIncludeGraphExtensions(
+                diagram,
+                navigationsByEntity,
+                repositoryClasses,
+                diagnostics
+            ),
         };
 
         // 構築直後のモデルに対し、テンプレートが発行する全メンバー名をシンボル表で突き合わせて

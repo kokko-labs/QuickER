@@ -18,6 +18,13 @@ namespace QuickER.Tests.GeneratedQueryFixture;
 /// ページング・自由 SQL の全戻り形（一覧・単一・件数・スカラー・射影。リストパラメータの IN 展開込み）・
 /// manual を網羅する。
 /// </para>
+/// <para>
+/// あわせて<b>グラフ取得糖衣（<c>IncludeGraph()</c>）の実行時検証</b>用に 3 階層チェーンを持つ
+/// （<see cref="AddOrderLineTable"/>）。3 実装先（QuickER 版 SQLite・EF Core・インメモリ）が 1 つの namespace に
+/// 同居するこのフィクスチャは、深い Include ツリーの解決を実行器間でパリティ検証する最小の置き場になる
+/// （SQL Server は同じ図を方言だけ差し替えた
+/// <see cref="Tests.GeneratedUniquenessSqlServerFixture.UniquenessSqlServerFixtureDefinition"/> が担う）。
+/// </para>
 /// </remarks>
 public static class QueryFixtureDefinition
 {
@@ -63,6 +70,22 @@ public static class QueryFixtureDefinition
         "dddddddd-0000-0000-0000-000000000012"
     );
     private static readonly Guid QueryGetMemoRowsRaw = new("dddddddd-0000-0000-0000-000000000013");
+
+    // グラフ取得糖衣（IncludeGraph）の実行時検証用に足したテーブル・列・リレーションの固定 GUID。
+    // 既存要素とプレフィックスを分け、再生成時に差分が出ないよう決定的にする
+    private static readonly Guid OrderLineId = new("f1000000-0000-0000-0000-000000000001");
+    private static readonly Guid OrderLinePkColId = new("f1000000-0000-0000-0000-000000000002");
+    private static readonly Guid OrderLineOrderFkColId = new(
+        "f1000000-0000-0000-0000-000000000003"
+    );
+    private static readonly Guid OrderLineItemNameColId = new(
+        "f1000000-0000-0000-0000-000000000004"
+    );
+    private static readonly Guid OrderLineQuantityColId = new(
+        "f1000000-0000-0000-0000-000000000005"
+    );
+
+    private static readonly Guid RelOrderOrderLines = new("f3000000-0000-0000-0000-000000000001");
 
     // UNIQUE 制約の ID も決定的でなければならないため固定 GUID を用いる
     private static readonly Guid OrderMemoUniqueId = new("eeeeeeee-0000-0000-0000-000000000001");
@@ -374,6 +397,83 @@ public static class QueryFixtureDefinition
             }
         );
 
+        AddOrderLineTable(diagram, orders, orderPk);
+
         return diagram;
+    }
+
+    /// <summary>
+    /// グラフ取得糖衣（<c>IncludeGraph()</c>）の実行時検証用に、注文の子テーブル <c>order_lines</c> を追加する。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 既存の <c>customers</c> → <c>orders</c> と繋がって<b>3 階層チェーン</b>になる。Include ツリーが 2 段しかない
+    /// 図では「孫が落ちても緑」になってしまうため、深いツリーを実行器が解決できることはここでしか表明できない。
+    /// 既存のテーブル・列・名前付きクエリ・UNIQUE 制約には触れない純粋な追加で、列型も既存の可搬型セット
+    /// （<c>int</c> / <c>nvarchar(50)</c>）だけを使う。
+    /// </para>
+    /// <para>
+    /// <b>自己参照テーブルはここへ置かない</b>。値オブジェクト有効の図では自己参照 FK の CLR 型（<c>ParentNodeIdValue</c>）が
+    /// 参照先の主キー型（<c>NodeIdValue</c>）と一致せず、EF Core のモデル検証が
+    /// <c>DbContext</c> ごと（＝このフィクスチャの EF Core テスト全部）落ちる。edge-skip の実行時検証は
+    /// EF Core を生成しないフィクスチャ側（<c>MultiTargetPortableFixture</c> / <c>InMemoryFixture</c>）が担う。
+    /// </para>
+    /// </remarks>
+    private static void AddOrderLineTable(ErDiagram diagram, Entity orders, Column orderPk)
+    {
+        var orderLines = new Entity
+        {
+            Id = OrderLineId,
+            TableName = "order_lines",
+            Columns =
+            {
+                new Column
+                {
+                    Id = OrderLinePkColId,
+                    Name = "line_id",
+                    DataType = "int",
+                    IsPrimaryKey = true,
+                    IsNullable = false,
+                },
+                new Column
+                {
+                    Id = OrderLineOrderFkColId,
+                    Name = "order_id",
+                    DataType = "int",
+                    IsForeignKey = true,
+                    IsNullable = false,
+                },
+                new Column
+                {
+                    Id = OrderLineItemNameColId,
+                    Name = "item_name",
+                    DataType = "nvarchar(50)",
+                    IsNullable = false,
+                },
+                new Column
+                {
+                    Id = OrderLineQuantityColId,
+                    Name = "quantity",
+                    DataType = "int",
+                    IsNullable = false,
+                },
+            },
+        };
+
+        diagram.Entities.Add(orderLines);
+
+        diagram.Relationships.Add(
+            new Relationship
+            {
+                Id = RelOrderOrderLines,
+                Type = RelationshipType.OneToMany,
+                SourceEntityId = orders.Id,
+                TargetEntityId = OrderLineId,
+                ColumnPairs = [new(orderPk.Id, OrderLineOrderFkColId)],
+                ConstraintName = "FK_order_lines_orders",
+                OnDelete = ForeignKeyReferentialAction.Cascade,
+                OnUpdate = ForeignKeyReferentialAction.NoAction,
+            }
+        );
     }
 }

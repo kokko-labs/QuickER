@@ -8027,6 +8027,19 @@ public sealed class SqlQuery<TEntity>
         return new IncludableSqlQuery<TEntity, TElement>(this, node);
     }
 
+    /// <summary>Adds an already built Include tree (the entry point the generated IncludeGraph extensions use).</summary>
+    /// <remarks>
+    /// The nodes are taken as they are - neither copied nor validated - so a node handed over here (and its Children)
+    /// must not be changed afterwards: the generated extensions build one tree per entity type and share it across
+    /// every query. Write Include/ThenInclude instead when composing an Include tree by hand.
+    /// </remarks>
+    internal SqlQuery<TEntity> AddIncludeNodes(IReadOnlyList<IncludeNode> nodes)
+    {
+        ArgumentNullException.ThrowIfNull(nodes);
+        _includes.AddRange(nodes);
+        return this;
+    }
+
     /// <summary>Fetches the entities matching the conditions (together with the requested Includes) as a list.</summary>
     public async Task<IReadOnlyList<TEntity>> ToListAsync(
         CancellationToken cancellationToken = default
@@ -11778,6 +11791,31 @@ public sealed partial class CustomerProfileRepository(
     partial void CollectCustomUniquenessChecks(
         ref List<UniquenessCheck<CustomerProfileEntity>>? checks
     );
+}
+
+/// <summary>Include extensions that fetch the whole cascade graph of an entity in one call (the read-side counterpart of the graph save).</summary>
+/// <remarks>
+/// The Include tree of each entity is built once and shared by every query, so it must stay unmodified after construction.
+/// </remarks>
+public static class IncludeGraphExtensions
+{
+    /// <summary>The Include tree of CustomerEntity (built once and shared by every query; never modify it).</summary>
+    private static readonly Lazy<IReadOnlyList<IncludeNode>> _customerEntityGraph = new(() =>
+    {
+        var n0 = new IncludeNode(typeof(CustomerEntity).GetProperty(nameof(CustomerEntity.Orders))!);
+        var n1 = new IncludeNode(typeof(CustomerEntity).GetProperty(nameof(CustomerEntity.CustomerProfile))!);
+        return new IncludeNode[] { n0, n1 };
+    });
+
+    /// <summary>Includes the cascade graph of CustomerEntity - the same child-direction navigations a graph save walks. A navigation pointing back to a table already on the path from the root is not followed.</summary>
+    public static SqlQuery<CustomerEntity> IncludeGraph(this SqlQuery<CustomerEntity> query) =>
+        query.AddIncludeNodes(_customerEntityGraph.Value);
+
+    /// <summary>Includes the cascade graph of OrderEntity (it has no child-direction navigation, so the query is returned unchanged).</summary>
+    public static SqlQuery<OrderEntity> IncludeGraph(this SqlQuery<OrderEntity> query) => query;
+
+    /// <summary>Includes the cascade graph of CustomerProfileEntity (it has no child-direction navigation, so the query is returned unchanged).</summary>
+    public static SqlQuery<CustomerProfileEntity> IncludeGraph(this SqlQuery<CustomerProfileEntity> query) => query;
 }
 
 /// <summary>
