@@ -1,6 +1,6 @@
 # QuickER.Runtime.AspNetCore
 
-The **fixed server-side engine** for the remote endpoints, part of the runtime for the C# code that QuickER (an ER diagram designer) generates. It provides the engine behind the generated `MapGeneratedRemoteEndpoints` — request reading and Minimal API mapping, classification of failures into 400 / 409 / 500, the error-detail exposure policy with correlation ids, and the binary streaming helpers — implementing the dialect-neutral remote contracts of `QuickER.Runtime` on ASP.NET Core. It has **no NuGet dependencies**; it references the `Microsoft.AspNetCore.App` shared framework instead.
+The **fixed server-side engine** for the remote endpoints, part of the runtime for the C# code that QuickER (an ER diagram designer) generates. It implements the dialect-neutral remote contracts of `QuickER.Runtime` on ASP.NET Core, providing the engine behind the generated `MapGeneratedRemoteEndpoints`. That engine reads requests and maps them onto Minimal API endpoints, classifies failures into 400 / 409 / 500, applies the error-detail exposure policy with correlation ids, and includes the binary streaming helpers. It has **no NuGet dependencies**; it references the `Microsoft.AspNetCore.App` shared framework instead.
 
 ## When you need it
 

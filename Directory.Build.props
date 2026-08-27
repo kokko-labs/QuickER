@@ -2,7 +2,7 @@
   <!--
     QuickER 全プロジェクト共有のバージョン一元化（ロックステップ版管理）。
 
-    ランタイム NuGet パッケージ（QuickER.Runtime / .SqlServer / .Sqlite / .EntityFrameworkCore / .InMemory / .AspNetCore）と、CLI／本体ツールの
+    ランタイム NuGet パッケージ（QuickER.Runtime / .SqlServer / .Sqlite / .EntityFrameworkCore / .InMemory / .AspNetCore / .Sync）と、CLI／本体ツールの
     バージョンをこの VersionPrefix 単一ソースで一元管理する。パッケージ版＝ツール版として発行し、
     同一メジャー内では生成コードとランタイムパッケージが互換であることを SemVer で宣言する運用とする。
     バージョンを上げるときはここ 1 箇所を変更する。
@@ -29,7 +29,7 @@
   </PropertyGroup>
 
   <!--
-    NuGet パッケージ・アセンブリ共通メタデータ（発行 7 パッケージ＝CLI＋ランタイム 6 種が継承。
+    NuGet パッケージ・アセンブリ共通メタデータ（発行 8 パッケージ＝CLI＋ランタイム 7 種が継承。
     パックしないプロジェクトにもアセンブリ情報として適用される）。
     nuget.org に表示される文字列（Description / PackageTags 等）は各 csproj 側で英語に統一する。
   -->

@@ -106,6 +106,77 @@ See [Database round-tripping](docs/database.md) for details.
 
 ![The diff-sync dialog (diff list and generated SQL preview; destructive changes are unselected by default)](docs/images/db-sync.png)
 
+## AI chat
+
+Create and edit ER models in conversation with an AI.
+For example, you can say:
+
+```text
+Design the tables needed for order management on an e-commerce site
+```
+
+The generated ER model can be reviewed and refined with the normal editing operations.
+
+Supported connection methods:
+
+- OpenAI API
+- Anthropic API
+- Local LLMs (OpenAI-compatible APIs: Ollama, LM Studio, vLLM, etc.)
+- Codex
+- Claude Code
+- Copilot (GitHub Copilot CLI)
+
+![Generating a full set of order-management tables through AI chat (Claude Code connection)](docs/images/ai-chat.png)
+
+See [Configuring AI chat](docs/ai-chat.md) for how to set it up.
+
+## AI mock generation
+
+Use AI to generate HTML mockups of business screens from the ER model through conversation.
+The generated files are written to a "mock folder" (mock.json + one HTML per screen + a shared style.css) as the conversation proceeds, and the in-dialog preview lets you follow the transitions between screens.
+
+![Generating 7 order-management screens with AI mock generation (previewing the dashboard)](docs/images/ai-mock.png)
+
+- The conversation proceeds as "propose the screen structure → agree → generate," and you refine the screens with follow-up instructions
+- For sharing with stakeholders, export a single HTML that bundles every screen, and a design document with the screen list, a transition diagram, and a CRUD matrix
+- As a second step, you can generate a WPF / Blazor mock project from the mock folder: QuickER scaffolds the data layer from the ER model, the AI implements the screen UI, and QuickER checks the result by running `dotnet build`. This step is an aid for PoCs and prototyping — build errors may remain, depending on the AI model and the connection mode
+
+The connection methods are shared with the AI chat.
+
+## Import and export
+
+### Import
+
+- Live databases
+- DBML
+- Mermaid
+- Excel table definition documents
+- C# code (a main `.g.cs` generated with `IncludeDataAnnotations` ON)
+
+### Export
+
+- SQL DDL
+- DBML
+- Mermaid
+- Excel table definition documents
+- HTML table definition documents
+- Schema JSON (layout-free, re-importable)
+- PNG
+- SVG
+- Print / PDF
+
+Update the ER model and re-export the definition documents to keep the design and the documentation from drifting apart.
+
+See [Import and export](docs/import-export.md) for what each format covers.
+
+## A save format you can manage with git
+
+A QuickER ER model is saved as a single JSON file.
+Inside the JSON, the semantic model (tables and columns) is separated from the visual information (coordinates and colors).
+
+This lets you keep ER models in the same repository as your source code and review changes through commit history and pull requests.
+Via DBML and Mermaid, it also combines with text-centric workflows.
+
 ## Generate C# code
 
 From the ER model, generate the C# code your application development needs.
@@ -227,77 +298,6 @@ The following code is generated:
 As long as your application code depends on the remote interfaces, you can switch between direct DB access and going through the web service by changing the DI registration.
 
 See [the three-tier sample](samples/ec-order-remote/README.md) for a working example.
-
-## AI chat
-
-Create and edit ER models in conversation with an AI.
-For example, you can say:
-
-```text
-Design the tables needed for order management on an e-commerce site
-```
-
-The generated ER model can be reviewed and refined with the normal editing operations.
-
-Supported connection methods:
-
-- OpenAI API
-- Anthropic API
-- Local LLMs (OpenAI-compatible APIs: Ollama, LM Studio, vLLM, etc.)
-- Codex
-- Claude Code
-- Copilot (GitHub Copilot CLI)
-
-![Generating a full set of order-management tables through AI chat (Claude Code connection)](docs/images/ai-chat.png)
-
-See [Configuring AI chat](docs/ai-chat.md) for how to set it up.
-
-## AI mock generation
-
-Use AI to generate HTML mockups of business screens from the ER model through conversation.
-The generated files are written to a "mock folder" (mock.json + one HTML per screen + a shared style.css) as the conversation proceeds, and the in-dialog preview lets you follow the transitions between screens.
-
-![Generating 7 order-management screens with AI mock generation (previewing the dashboard)](docs/images/ai-mock.png)
-
-- The conversation proceeds as "propose the screen structure → agree → generate," and you refine the screens with follow-up instructions
-- For sharing with stakeholders, export a single HTML that bundles every screen, and a design document with the screen list, a transition diagram, and a CRUD matrix
-- As a second step, you can generate a WPF / Blazor mock project from the mock folder: QuickER scaffolds the data layer from the ER model, the AI implements the screen UI, and QuickER checks the result by running `dotnet build`. This step is an aid for PoCs and prototyping — build errors may remain, depending on the AI model and the connection mode
-
-The connection methods are shared with the AI chat.
-
-## Import and export
-
-### Import
-
-- Live databases
-- DBML
-- Mermaid
-- Excel table definition documents
-- C# code (a main `.g.cs` generated with `IncludeDataAnnotations` ON)
-
-### Export
-
-- SQL DDL
-- DBML
-- Mermaid
-- Excel table definition documents
-- HTML table definition documents
-- Schema JSON (layout-free, re-importable)
-- PNG
-- SVG
-- Print / PDF
-
-Update the ER model and re-export the definition documents to keep the design and the documentation from drifting apart.
-
-See [Import and export](docs/import-export.md) for what each format covers.
-
-## A save format you can manage with git
-
-A QuickER ER model is saved as a single JSON file.
-Inside the JSON, the semantic model (tables and columns) is separated from the visual information (coordinates and colors).
-
-This lets you keep ER models in the same repository as your source code and review changes through commit history and pull requests.
-Via DBML and Mermaid, it also combines with text-centric workflows.
 
 ## Install
 
