@@ -46,7 +46,7 @@ The architecture and the invariants that break silently (not caught by the build
 
 ## Versioning
 
-- We follow [Semantic Versioning](https://semver.org/). All distributables (the GUI, the CLI, and the 6 runtime packages) are versioned in lockstep, managed via `VersionPrefix` in `Directory.Build.props`
+- We follow [Semantic Versioning](https://semver.org/). All distributables (the GUI, the CLI, and the runtime packages) are versioned in lockstep, managed via `VersionPrefix` in `Directory.Build.props`
 - Version bump rules during 0.x:
   - **minor** (0.2.0 → 0.3.0): new features and breaking changes (changes to the Repository API or to the signatures/structure of the generated code, package dependency changes)
   - **patch** (0.2.0 → 0.2.1): bug fixes only. A fix that doesn't break calling code counts as a patch, even if the internals of the generated code change
@@ -54,10 +54,11 @@ The architecture and the invariants that break silently (not caught by the build
 
 ## Release procedure (for maintainers)
 
-Releases always ship **all distributables together** (the 6 NuGet packages, the GUI distributables (Velopack: full / lite × Setup.exe / Portable zip), and the git tag `v{version}`). Timing is discretionary; no cadence is promised.
+Releases always ship **all distributables together** (the NuGet packages, the GUI distributables (Velopack: full / lite × Setup.exe / Portable zip), and the git tag `v{version}`). Timing is discretionary; no cadence is promised.
 
 1. Review the Unreleased section of the changelog and decide the version number (minor / patch per the rules above). Rename that section to the version with a release date (`## [0.2.0] - 2026-09-01`) and open a fresh empty `## [Unreleased]` above it — in **both [CHANGELOG.md](CHANGELOG.md) and [CHANGELOG.ja.md](CHANGELOG.ja.md)**
 2. Update `VersionPrefix` in `Directory.Build.props` and commit it together with the changelog finalization as a single commit
-3. Run publish.yml (the 6 NuGet packages) via workflow_dispatch (confirm with dry_run first, then run for real)
-4. Run release.yml (publishes the GUI distributables and creates the git tag) via workflow_dispatch. Its `dry_run` input also defaults to true, so check the artifacts of the dry run first, then run it for real with `dry_run=false`
-5. Copy the changelog content for the version into the GitHub Release notes (release.yml creates the release with an empty body on purpose, so the curated changelog stays the single source for what shipped)
+3. Push the commit. The workflows below run on GitHub against the pushed ref, so an unpushed commit would publish the previous version
+4. Run publish.yml (the NuGet packages) via workflow_dispatch. `dry_run` defaults to true and goes as far as packing and verifying — that every package declares its README and icon, that no `.pdb` leaks into the tool package, and that all versions match — without pushing to NuGet.org. Check that run, then run it again with `dry_run=false`. Symbol packages (`.snupkg`) are pushed alongside the main packages and are validated separately by NuGet.org, which reports any failure by email
+5. Run release.yml (publishes the GUI distributables and creates the git tag) via workflow_dispatch. Its `dry_run` input also defaults to true, so check the artifacts of the dry run first, then run it for real with `dry_run=false`
+6. Copy the changelog content for the version into the GitHub Release notes (release.yml creates the release with an empty body on purpose, so the curated changelog stays the single source for what shipped)
