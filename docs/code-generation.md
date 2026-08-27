@@ -245,13 +245,17 @@ var fetched = await orders.Query()
     .Where(o => o.CustomerId == 1)
     .IncludeGraph()                 // Includes the same cascade the graph save follows
     .ToListAsync();
+
+var one = await orders.Query().IncludeGraph().GetByIdAsync(1000);   // one row, whole graph, by key
 ```
 
 The fetch-side counterpart of the graph save (`SaveAsync`). `IncludeGraph()` is sugar that expands the same child-direction cascade navigations the save follows — all the way down — into an `Include` tree, giving the same result as spelling out `Include(...).ThenInclude(...)` by hand. It is always generated as a per-entity extension method and composes freely with `Where` / `OrderBy` / paging / `FirstOrDefaultAsync`. Add a child table to the diagram and regenerate, and `IncludeGraph()` follows automatically — a hand-written `Include` chain does not, and the "aggregate" it fetches silently becomes incomplete. Preventing that is the main point of this method.
 
+The query-side `GetByIdAsync` is a terminal sugar with the primary-key predicate baked in (equivalent to `Where(x => x.OrderId == id).FirstOrDefaultAsync()`; null when there is no match). Its key takes the same type as the contract method of the same name, and without `Include` / `IncludeGraph` it returns the same result as `repo.GetByIdAsync(id)`. It can also be called from the middle of a manual `Include(...)` chain.
+
 The fetched graph comes back with `RowState = Unchanged`, so the fetch → edit → save round trip works as is: edit it, then hand the root to `SaveAsync`.
 
-- **A navigation pointing back to a table already on the path from the root is not followed.** Self references (`Category.Children` and the like) and mutual references cannot be mapped onto a finite `Include` tree, so those edges are skipped and called out in an Info diagnostic at generation time. A skipped navigation comes back empty; fetch recursive structures with manual `Include` to whatever depth you need. The save side walks the instance graph — which is finite — and therefore saves to any depth; this asymmetry between fetch and save is by design.
+- **A navigation pointing back to a table already on the path from the root is not followed.** Self references (`Category.Children` and the like) and mutual references cannot be mapped onto a finite `Include` tree, so those edges are skipped and called out in an Info diagnostic at generation time. A skipped navigation comes back empty; fetch recursive structures with manual `Include` to whatever depth you need. Additional `Include` calls can be stacked after `IncludeGraph()` (`Query().IncludeGraph().Include(x => x.Customer).GetByIdAsync(id)`) — adding parent references or skipped navigations is the safe composition; do not re-`Include` a child-direction navigation the closure already covers (that would specify the same navigation twice). The save side walks the instance graph — which is finite — and therefore saves to any depth; this asymmetry between fetch and save is by design.
 - The method is generated for entities without any cascade child too, where it is a no-op that returns the query unchanged.
 - On a deep or wide diagram the fetch is correspondingly large. SQL Server fetches the whole graph as one nested JSON query (SQLite splits it into one query per level), so when only some children are needed, narrow the fetch with manual `Include`.
 - It cannot be combined with `WithUnboundedBinary()` (the same exclusion as `Include`). The remote face (`I{Entity}RemoteRepository`) has no `Query()`, so `IncludeGraph` is not available remotely either.

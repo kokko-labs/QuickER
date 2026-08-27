@@ -3790,11 +3790,11 @@ public partial interface ISyncNoteRepository
     : ISyncNoteRemoteRepository,
         IRepository<SyncNoteEntity, int> { }
 
-/// <summary>Include extensions that fetch the whole cascade graph of an entity in one call (the read-side counterpart of the graph save).</summary>
+/// <summary>Query extensions: fetching the whole cascade graph of an entity in one call (the read-side counterpart of the graph save), and fetching a single entity by its key.</summary>
 /// <remarks>
 /// The Include tree of each entity is built once and shared by every query, so it must stay unmodified after construction.
 /// </remarks>
-public static class IncludeGraphExtensions
+public static class SqlQueryExtensions
 {
     /// <summary>The Include tree of SyncOrderEntity (built once and shared by every query; never modify it).</summary>
     private static readonly Lazy<IReadOnlyList<IncludeNode>> _syncOrderEntityGraph = new(() =>
@@ -3808,11 +3808,56 @@ public static class IncludeGraphExtensions
     public static SqlQuery<SyncOrderEntity> IncludeGraph(this SqlQuery<SyncOrderEntity> query) =>
         query.AddIncludeNodes(_syncOrderEntityGraph.Value);
 
+    /// <summary>Fetches the single entity with the given key - the same key the repository contract's GetByIdAsync takes - and returns null when no row matches.</summary>
+    /// <remarks>Combine it with Include or IncludeGraph to fetch that entity together with its graph in one call.</remarks>
+    public static Task<SyncOrderEntity?> GetByIdAsync(
+        this SqlQuery<SyncOrderEntity> query,
+        int id,
+        CancellationToken cancellationToken = default
+    ) => query.Where(entity => entity.OrderId == id).FirstOrDefaultAsync(cancellationToken);
+
+    /// <summary>Fetches the single entity with the given key, keeping the Include chain written just before it (returns null when no row matches).</summary>
+    public static Task<SyncOrderEntity?> GetByIdAsync<TProperty>(
+        this IncludableSqlQuery<SyncOrderEntity, TProperty> query,
+        int id,
+        CancellationToken cancellationToken = default
+    ) => query.Where(entity => entity.OrderId == id).FirstOrDefaultAsync(cancellationToken);
+
     /// <summary>Includes the cascade graph of SyncOrderLineEntity (it has no child-direction navigation, so the query is returned unchanged).</summary>
     public static SqlQuery<SyncOrderLineEntity> IncludeGraph(this SqlQuery<SyncOrderLineEntity> query) => query;
 
+    /// <summary>Fetches the single entity with the given key - the same key the repository contract's GetByIdAsync takes - and returns null when no row matches.</summary>
+    /// <remarks>Combine it with Include or IncludeGraph to fetch that entity together with its graph in one call.</remarks>
+    public static Task<SyncOrderLineEntity?> GetByIdAsync(
+        this SqlQuery<SyncOrderLineEntity> query,
+        int id,
+        CancellationToken cancellationToken = default
+    ) => query.Where(entity => entity.LineId == id).FirstOrDefaultAsync(cancellationToken);
+
+    /// <summary>Fetches the single entity with the given key, keeping the Include chain written just before it (returns null when no row matches).</summary>
+    public static Task<SyncOrderLineEntity?> GetByIdAsync<TProperty>(
+        this IncludableSqlQuery<SyncOrderLineEntity, TProperty> query,
+        int id,
+        CancellationToken cancellationToken = default
+    ) => query.Where(entity => entity.LineId == id).FirstOrDefaultAsync(cancellationToken);
+
     /// <summary>Includes the cascade graph of SyncNoteEntity (it has no child-direction navigation, so the query is returned unchanged).</summary>
     public static SqlQuery<SyncNoteEntity> IncludeGraph(this SqlQuery<SyncNoteEntity> query) => query;
+
+    /// <summary>Fetches the single entity with the given key - the same key the repository contract's GetByIdAsync takes - and returns null when no row matches.</summary>
+    /// <remarks>Combine it with Include or IncludeGraph to fetch that entity together with its graph in one call.</remarks>
+    public static Task<SyncNoteEntity?> GetByIdAsync(
+        this SqlQuery<SyncNoteEntity> query,
+        int id,
+        CancellationToken cancellationToken = default
+    ) => query.Where(entity => entity.NoteId == id).FirstOrDefaultAsync(cancellationToken);
+
+    /// <summary>Fetches the single entity with the given key, keeping the Include chain written just before it (returns null when no row matches).</summary>
+    public static Task<SyncNoteEntity?> GetByIdAsync<TProperty>(
+        this IncludableSqlQuery<SyncNoteEntity, TProperty> query,
+        int id,
+        CancellationToken cancellationToken = default
+    ) => query.Where(entity => entity.NoteId == id).FirstOrDefaultAsync(cancellationToken);
 }
 
 /// <summary>HTTP client implementation of the remote surface (ISyncOrderRemoteRepository) for SyncOrderEntity.</summary>

@@ -6907,12 +6907,27 @@ public sealed partial class TimeProbeRepository(
     );
 }
 
-/// <summary>Include extensions that fetch the whole cascade graph of an entity in one call (the read-side counterpart of the graph save).</summary>
+/// <summary>Query extensions: fetching the whole cascade graph of an entity in one call (the read-side counterpart of the graph save), and fetching a single entity by its key.</summary>
 /// <remarks>
 /// The Include tree of each entity is built once and shared by every query, so it must stay unmodified after construction.
 /// </remarks>
-public static class IncludeGraphExtensions
+public static class SqlQueryExtensions
 {
     /// <summary>Includes the cascade graph of TimeProbeEntity (it has no child-direction navigation, so the query is returned unchanged).</summary>
     public static SqlQuery<TimeProbeEntity> IncludeGraph(this SqlQuery<TimeProbeEntity> query) => query;
+
+    /// <summary>Fetches the single entity with the given key - the same key the repository contract's GetByIdAsync takes - and returns null when no row matches.</summary>
+    /// <remarks>Combine it with Include or IncludeGraph to fetch that entity together with its graph in one call.</remarks>
+    public static Task<TimeProbeEntity?> GetByIdAsync(
+        this SqlQuery<TimeProbeEntity> query,
+        ProbeIdValue id,
+        CancellationToken cancellationToken = default
+    ) => query.Where(entity => entity.ProbeId == id).FirstOrDefaultAsync(cancellationToken);
+
+    /// <summary>Fetches the single entity with the given key, keeping the Include chain written just before it (returns null when no row matches).</summary>
+    public static Task<TimeProbeEntity?> GetByIdAsync<TProperty>(
+        this IncludableSqlQuery<TimeProbeEntity, TProperty> query,
+        ProbeIdValue id,
+        CancellationToken cancellationToken = default
+    ) => query.Where(entity => entity.ProbeId == id).FirstOrDefaultAsync(cancellationToken);
 }

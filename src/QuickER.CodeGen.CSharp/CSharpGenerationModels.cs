@@ -41,12 +41,14 @@ internal sealed class CSharpGenerationModel
     public string SyncGraphRecorder { get; init; } = string.Empty;
 
     /// <summary>
-    /// グラフ取得糖衣（<c>IncludeGraphExtensions</c>）の整形済み全文。Repository 契約が出ない構成では空文字。
+    /// クエリ糖衣の静的クラス（<c>SqlQueryExtensions</c>）の整形済み全文。Repository 契約が出ない構成では空文字。
     /// </summary>
     /// <remarks>
     /// <para>
     /// <c>SaveAsync</c>（グラフ保存）の対となる読み取り側で、保存が辿るのと同じカスケード閉包の Include ツリーを
-    /// エンティティごとに 1 本だけ組み立て、<c>SqlQuery&lt;T&gt;.AddIncludeNodes</c> へ渡す拡張メソッドを持つ。
+    /// エンティティごとに 1 本だけ組み立て、<c>SqlQuery&lt;T&gt;.AddIncludeNodes</c> へ渡す拡張メソッド
+    /// （<c>IncludeGraph</c>）を持つ。あわせて主キー取得の終端糖衣（<c>GetByIdAsync</c>）も同居する
+    /// （<c>Query().IncludeGraph().GetByIdAsync(id)</c>＝キー指定でグラフごと 1 件）。
     /// </para>
     /// <para>
     /// fluent の Include/ThenInclude 連鎖では兄弟分岐のたびに同一ナビの <c>IncludeNode</c> が重複して積まれ、

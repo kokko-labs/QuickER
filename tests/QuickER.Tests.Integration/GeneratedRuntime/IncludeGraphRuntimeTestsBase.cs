@@ -61,7 +61,14 @@ public sealed record GraphCustomerRow(
 ///   <item>取得したグラフは全ノードが <c>Unchanged</c>（＝そのまま保存しても何も起きない）</item>
 ///   <item>取得 → 孫の追加・変更・削除 → ルートの <c>SaveAsync</c> が往復する</item>
 ///   <item>葉エンティティの <c>IncludeGraph()</c> は no-op で、素の取得と同じ結果を返す</item>
+///   <item>該当キーが無ければ <c>null</c>（＝空グラフや例外ではない）</item>
+///   <item>手動の <c>Include(...)</c> 連鎖の途中からでも <c>GetByIdAsync</c> が呼べる</item>
 /// </list>
+/// <para>
+/// キー指定の 1 件取得はすべて糖衣 <c>GetByIdAsync</c> を通す（＝上の全シナリオが 4 実装先で糖衣を経由する）。
+/// 比較対照の手動 Include 側だけは <c>Where(...).FirstOrDefaultAsync()</c> のまま残し、糖衣と手書き述語の
+/// 結果一致がシナリオ 1 で表明され続けるようにしている。
+/// </para>
 /// <para>
 /// <b>型パラメータで橋を架ける理由</b>: 生成物はフィクスチャごとに別 namespace へ出るため、<c>CustomerEntity</c> も
 /// <c>RowState</c> も共通基底からは名指しできない。エンティティ型だけを型引数で受け、値の読み出しと編集を
@@ -92,11 +99,17 @@ public abstract class IncludeGraphRuntimeTestsBase<TCustomer, TOrder, TOrderLine
     /// </remarks>
     protected abstract Task ResetAndSeedAsync();
 
-    /// <summary><c>Query().IncludeGraph()</c> で顧客 1 件を取得する（行なしは null）</summary>
+    /// <summary><c>Query().IncludeGraph().GetByIdAsync(id)</c> で顧客 1 件を取得する（行なしは null）</summary>
     protected abstract Task<TCustomer?> FetchCustomerWithGraphAsync(int customerId);
 
-    /// <summary>手動の <c>Include(...).ThenInclude(...)</c> で顧客 1 件を取得する（比較対照）</summary>
+    /// <summary>手動の <c>Include(...).ThenInclude(...)</c> ＋ <c>Where</c> で顧客 1 件を取得する（比較対照）</summary>
     protected abstract Task<TCustomer?> FetchCustomerWithManualIncludeAsync(int customerId);
+
+    /// <summary>
+    /// 手動の <c>Include(...)</c> 連鎖（＝<c>IncludableSqlQuery</c>）の途中から <c>GetByIdAsync</c> で顧客 1 件を取得する。
+    /// </summary>
+    /// <remarks>2 階層（顧客 → 注文）で足りる。確かめたいのは連鎖の型のまま糖衣が呼べることそのもの。</remarks>
+    protected abstract Task<TCustomer?> FetchCustomerByIdThroughIncludeChainAsync(int customerId);
 
     /// <summary><c>Query().IncludeGraph()</c> で全顧客を取得する</summary>
     protected abstract Task<IReadOnlyList<TCustomer>> FetchAllCustomersWithGraphAsync();
@@ -127,6 +140,15 @@ public abstract class IncludeGraphRuntimeTestsBase<TCustomer, TOrder, TOrderLine
 
     /// <summary>顧客をルートとしてグラフ保存する（カスケード既定＝子孫まで）</summary>
     protected abstract Task<int> SaveCustomerAsync(TCustomer customer);
+
+    /// <summary>
+    /// <c>Query().IncludeGraph().Include(親参照).GetByIdAsync(key)</c> の合成で注文 1 件を取得する
+    /// （行なしは null）。
+    /// </summary>
+    protected abstract Task<TOrder?> FetchOrderWithGraphAndParentAsync(int orderId);
+
+    /// <summary>注文の親参照（顧客）ナビゲーションから氏名を取り出す（未ロードなら null）</summary>
+    protected abstract string? CustomerNameOf(TOrder order);
 
     // ── 期待値（全実装先で同一） ──
 
@@ -298,5 +320,76 @@ public abstract class IncludeGraphRuntimeTestsBase<TCustomer, TOrder, TOrderLine
         var lines = await FetchAllOrderLinesWithGraphAsync();
 
         lines.Select(LineIdOf).OrderBy(id => id).Should().Equal(100, 101, 102);
+    }
+
+    // ── 6. 該当キーなし ──
+
+    /// <summary>6. 該当する行が無いキーでは null を返す（空グラフのインスタンスや例外ではない）</summary>
+    /// <remarks>
+    /// 糖衣は <c>FirstOrDefaultAsync</c> の上に乗るため「行なし＝null」が契約。ここが実装先ごとに割れる
+    /// （例外・空インスタンス）と、呼び出し側の null チェックが実装先依存になる。
+    /// </remarks>
+    [Fact(DisplayName = "[IncludeGraph] 6: 該当キーが無ければ null を返す")]
+    public async Task GetById_ReturnsNullForMissingKey()
+    {
+        await ResetAndSeedAsync();
+
+        var missing = await FetchCustomerWithGraphAsync(999);
+
+        missing.Should().BeNull();
+    }
+
+    // ── 7. 手動 Include 連鎖からの呼び出し ──
+
+    /// <summary>7. 手動の Include 連鎖（IncludableSqlQuery）の途中からでも GetByIdAsync が呼べる</summary>
+    /// <remarks>
+    /// fluent の <c>Include(...)</c> は <c>IncludableSqlQuery</c> を返すため、<c>SqlQuery</c> 版の糖衣だけでは
+    /// この呼び出しがそもそも解決しない（＝コンパイルエラー）。オーバーロードが消えたことに気づくための表明で、
+    /// 実行結果（Include した子まで載ること）もあわせて確かめる。
+    /// </remarks>
+    [Fact(DisplayName = "[IncludeGraph] 7: 手動 Include 連鎖の途中から GetByIdAsync が呼べる")]
+    public async Task GetById_IsCallableFromIncludeChain()
+    {
+        await ResetAndSeedAsync();
+
+        var customer = await FetchCustomerByIdThroughIncludeChainAsync(1);
+        customer.Should().NotBeNull();
+
+        var row = Project(customer!);
+
+        row.CustomerId.Should().Be(1);
+        row.Name.Should().Be("Alice");
+        row.Orders.Select(order => order.OrderId).Should().Equal(10, 11);
+    }
+
+    // ── 8. IncludeGraph ＋ 追加 Include の合成 ──
+
+    /// <summary>8. IncludeGraph に親参照の Include を重ねて GetByIdAsync できる（両方向が同時に載る）</summary>
+    /// <remarks>
+    /// <c>Query().IncludeGraph().Include(親参照).GetByIdAsync(key)</c> の合成形。IncludeGraph の閉包は
+    /// 子方向のみなので、親参照の Include はツリーに重複ノードを作らず安全に足せる（＝この合成が
+    /// 「グラフ＋親」の推奨レシピ）。閉包が含む子方向ナビを重ねて Include すると既知の重複ノード問題を
+    /// 踏むため、ここでは安全側の合成だけを契約として固定する。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[IncludeGraph] 8: IncludeGraph に親参照 Include を重ねて GetByIdAsync できる"
+    )]
+    public async Task GraphWithParentInclude_LoadsBothDirections()
+    {
+        await ResetAndSeedAsync();
+
+        var order = await FetchOrderWithGraphAndParentAsync(10);
+        order.Should().NotBeNull();
+
+        // IncludeGraph 側: 子方向（明細）が末端まで載る
+        LinesOf(order!).Select(LineIdOf).Should().Equal(100, 101);
+
+        // 追加 Include 側: 閉包に含まれない親参照が載る
+        CustomerNameOf(order!).Should().Be("Alice");
+
+        // 同じ合成経路でも「行なし＝null」の契約は変わらない
+        (await FetchOrderWithGraphAndParentAsync(999))
+            .Should()
+            .BeNull();
     }
 }

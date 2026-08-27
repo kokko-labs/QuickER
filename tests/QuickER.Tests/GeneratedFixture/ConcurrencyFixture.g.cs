@@ -11338,11 +11338,11 @@ public sealed partial class GadgetNoteRepository(
     );
 }
 
-/// <summary>Include extensions that fetch the whole cascade graph of an entity in one call (the read-side counterpart of the graph save).</summary>
+/// <summary>Query extensions: fetching the whole cascade graph of an entity in one call (the read-side counterpart of the graph save), and fetching a single entity by its key.</summary>
 /// <remarks>
 /// The Include tree of each entity is built once and shared by every query, so it must stay unmodified after construction.
 /// </remarks>
-public static class IncludeGraphExtensions
+public static class SqlQueryExtensions
 {
     /// <summary>The Include tree of GadgetEntity (built once and shared by every query; never modify it).</summary>
     private static readonly Lazy<IReadOnlyList<IncludeNode>> _gadgetEntityGraph = new(() =>
@@ -11355,8 +11355,38 @@ public static class IncludeGraphExtensions
     public static SqlQuery<GadgetEntity> IncludeGraph(this SqlQuery<GadgetEntity> query) =>
         query.AddIncludeNodes(_gadgetEntityGraph.Value);
 
+    /// <summary>Fetches the single entity with the given key - the same key the repository contract's GetByIdAsync takes - and returns null when no row matches.</summary>
+    /// <remarks>Combine it with Include or IncludeGraph to fetch that entity together with its graph in one call.</remarks>
+    public static Task<GadgetEntity?> GetByIdAsync(
+        this SqlQuery<GadgetEntity> query,
+        GadgetIdValue id,
+        CancellationToken cancellationToken = default
+    ) => query.Where(entity => entity.GadgetId == id).FirstOrDefaultAsync(cancellationToken);
+
+    /// <summary>Fetches the single entity with the given key, keeping the Include chain written just before it (returns null when no row matches).</summary>
+    public static Task<GadgetEntity?> GetByIdAsync<TProperty>(
+        this IncludableSqlQuery<GadgetEntity, TProperty> query,
+        GadgetIdValue id,
+        CancellationToken cancellationToken = default
+    ) => query.Where(entity => entity.GadgetId == id).FirstOrDefaultAsync(cancellationToken);
+
     /// <summary>Includes the cascade graph of GadgetNoteEntity (it has no child-direction navigation, so the query is returned unchanged).</summary>
     public static SqlQuery<GadgetNoteEntity> IncludeGraph(this SqlQuery<GadgetNoteEntity> query) => query;
+
+    /// <summary>Fetches the single entity with the given key - the same key the repository contract's GetByIdAsync takes - and returns null when no row matches.</summary>
+    /// <remarks>Combine it with Include or IncludeGraph to fetch that entity together with its graph in one call.</remarks>
+    public static Task<GadgetNoteEntity?> GetByIdAsync(
+        this SqlQuery<GadgetNoteEntity> query,
+        NoteIdValue id,
+        CancellationToken cancellationToken = default
+    ) => query.Where(entity => entity.NoteId == id).FirstOrDefaultAsync(cancellationToken);
+
+    /// <summary>Fetches the single entity with the given key, keeping the Include chain written just before it (returns null when no row matches).</summary>
+    public static Task<GadgetNoteEntity?> GetByIdAsync<TProperty>(
+        this IncludableSqlQuery<GadgetNoteEntity, TProperty> query,
+        NoteIdValue id,
+        CancellationToken cancellationToken = default
+    ) => query.Where(entity => entity.NoteId == id).FirstOrDefaultAsync(cancellationToken);
 }
 
 /// <summary>HTTP client implementation of the remote surface (IGadgetRemoteRepository) for GadgetEntity.</summary>

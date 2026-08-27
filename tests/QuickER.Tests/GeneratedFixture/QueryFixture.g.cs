@@ -11402,11 +11402,11 @@ public sealed partial class OrderLineRepository(
     );
 }
 
-/// <summary>Include extensions that fetch the whole cascade graph of an entity in one call (the read-side counterpart of the graph save).</summary>
+/// <summary>Query extensions: fetching the whole cascade graph of an entity in one call (the read-side counterpart of the graph save), and fetching a single entity by its key.</summary>
 /// <remarks>
 /// The Include tree of each entity is built once and shared by every query, so it must stay unmodified after construction.
 /// </remarks>
-public static class IncludeGraphExtensions
+public static class SqlQueryExtensions
 {
     /// <summary>The Include tree of CustomerEntity (built once and shared by every query; never modify it).</summary>
     private static readonly Lazy<IReadOnlyList<IncludeNode>> _customerEntityGraph = new(() =>
@@ -11421,6 +11421,21 @@ public static class IncludeGraphExtensions
     public static SqlQuery<CustomerEntity> IncludeGraph(this SqlQuery<CustomerEntity> query) =>
         query.AddIncludeNodes(_customerEntityGraph.Value);
 
+    /// <summary>Fetches the single entity with the given key - the same key the repository contract's GetByIdAsync takes - and returns null when no row matches.</summary>
+    /// <remarks>Combine it with Include or IncludeGraph to fetch that entity together with its graph in one call.</remarks>
+    public static Task<CustomerEntity?> GetByIdAsync(
+        this SqlQuery<CustomerEntity> query,
+        CustomerIdValue id,
+        CancellationToken cancellationToken = default
+    ) => query.Where(entity => entity.CustomerId == id).FirstOrDefaultAsync(cancellationToken);
+
+    /// <summary>Fetches the single entity with the given key, keeping the Include chain written just before it (returns null when no row matches).</summary>
+    public static Task<CustomerEntity?> GetByIdAsync<TProperty>(
+        this IncludableSqlQuery<CustomerEntity, TProperty> query,
+        CustomerIdValue id,
+        CancellationToken cancellationToken = default
+    ) => query.Where(entity => entity.CustomerId == id).FirstOrDefaultAsync(cancellationToken);
+
     /// <summary>The Include tree of OrderEntity (built once and shared by every query; never modify it).</summary>
     private static readonly Lazy<IReadOnlyList<IncludeNode>> _orderEntityGraph = new(() =>
     {
@@ -11432,8 +11447,38 @@ public static class IncludeGraphExtensions
     public static SqlQuery<OrderEntity> IncludeGraph(this SqlQuery<OrderEntity> query) =>
         query.AddIncludeNodes(_orderEntityGraph.Value);
 
+    /// <summary>Fetches the single entity with the given key - the same key the repository contract's GetByIdAsync takes - and returns null when no row matches.</summary>
+    /// <remarks>Combine it with Include or IncludeGraph to fetch that entity together with its graph in one call.</remarks>
+    public static Task<OrderEntity?> GetByIdAsync(
+        this SqlQuery<OrderEntity> query,
+        OrderIdValue id,
+        CancellationToken cancellationToken = default
+    ) => query.Where(entity => entity.OrderId == id).FirstOrDefaultAsync(cancellationToken);
+
+    /// <summary>Fetches the single entity with the given key, keeping the Include chain written just before it (returns null when no row matches).</summary>
+    public static Task<OrderEntity?> GetByIdAsync<TProperty>(
+        this IncludableSqlQuery<OrderEntity, TProperty> query,
+        OrderIdValue id,
+        CancellationToken cancellationToken = default
+    ) => query.Where(entity => entity.OrderId == id).FirstOrDefaultAsync(cancellationToken);
+
     /// <summary>Includes the cascade graph of OrderLineEntity (it has no child-direction navigation, so the query is returned unchanged).</summary>
     public static SqlQuery<OrderLineEntity> IncludeGraph(this SqlQuery<OrderLineEntity> query) => query;
+
+    /// <summary>Fetches the single entity with the given key - the same key the repository contract's GetByIdAsync takes - and returns null when no row matches.</summary>
+    /// <remarks>Combine it with Include or IncludeGraph to fetch that entity together with its graph in one call.</remarks>
+    public static Task<OrderLineEntity?> GetByIdAsync(
+        this SqlQuery<OrderLineEntity> query,
+        LineIdValue id,
+        CancellationToken cancellationToken = default
+    ) => query.Where(entity => entity.LineId == id).FirstOrDefaultAsync(cancellationToken);
+
+    /// <summary>Fetches the single entity with the given key, keeping the Include chain written just before it (returns null when no row matches).</summary>
+    public static Task<OrderLineEntity?> GetByIdAsync<TProperty>(
+        this IncludableSqlQuery<OrderLineEntity, TProperty> query,
+        LineIdValue id,
+        CancellationToken cancellationToken = default
+    ) => query.Where(entity => entity.LineId == id).FirstOrDefaultAsync(cancellationToken);
 }
 
 /// <summary>

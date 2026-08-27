@@ -83,16 +83,11 @@ public abstract class IncludeGraphQueryFixtureRuntimeTestsBase
             Quantity = QuantityValue.Create(quantity),
         };
 
-    protected override Task<CustomerEntity?> FetchCustomerWithGraphAsync(int customerId)
-    {
-        var key = CustomerIdValue.Create(customerId);
-
-        return CreateCustomerRepository()
+    protected override Task<CustomerEntity?> FetchCustomerWithGraphAsync(int customerId) =>
+        CreateCustomerRepository()
             .Query()
             .IncludeGraph()
-            .Where(customer => customer.CustomerId == key)
-            .FirstOrDefaultAsync(Ct);
-    }
+            .GetByIdAsync(CustomerIdValue.Create(customerId), Ct);
 
     protected override Task<CustomerEntity?> FetchCustomerWithManualIncludeAsync(int customerId)
     {
@@ -105,6 +100,14 @@ public abstract class IncludeGraphQueryFixtureRuntimeTestsBase
             .Where(customer => customer.CustomerId == key)
             .FirstOrDefaultAsync(Ct);
     }
+
+    protected override Task<CustomerEntity?> FetchCustomerByIdThroughIncludeChainAsync(
+        int customerId
+    ) =>
+        CreateCustomerRepository()
+            .Query()
+            .Include(customer => customer.Orders)
+            .GetByIdAsync(CustomerIdValue.Create(customerId), Ct);
 
     protected override async Task<
         IReadOnlyList<CustomerEntity>
@@ -164,4 +167,13 @@ public abstract class IncludeGraphQueryFixtureRuntimeTestsBase
 
     protected override Task<int> SaveCustomerAsync(CustomerEntity customer) =>
         CreateCustomerRepository().SaveAsync(customer, cancellationToken: Ct);
+
+    protected override Task<OrderEntity?> FetchOrderWithGraphAndParentAsync(int orderId) =>
+        CreateOrderRepository()
+            .Query()
+            .IncludeGraph()
+            .Include(order => order.Customer)
+            .GetByIdAsync(OrderIdValue.Create(orderId), Ct);
+
+    protected override string? CustomerNameOf(OrderEntity order) => order.Customer?.Name.Value;
 }

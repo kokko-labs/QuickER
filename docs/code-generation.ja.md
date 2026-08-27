@@ -245,13 +245,17 @@ var fetched = await orders.Query()
     .Where(o => o.CustomerId == 1)
     .IncludeGraph()                 // グラフ保存がたどるのと同じカスケードを Include する
     .ToListAsync();
+
+var one = await orders.Query().IncludeGraph().GetByIdAsync(1000);   // キー指定でグラフごと 1 件
 ```
 
 グラフ保存（`SaveAsync`）の取得側の対です。`IncludeGraph()` は、保存がたどるのと同じ子方向のカスケードナビゲーションを末端まで `Include` ツリーへ展開する糖衣で、手で `Include(...).ThenInclude(...)` を並べたのと同じ結果になります。エンティティごとの拡張メソッドとして常に生成され、`Where` / `OrderBy` / ページング / `FirstOrDefaultAsync` と自由に組み合わせられます。図に子テーブルを足して再生成すれば `IncludeGraph()` は自動で追従します——手書きの `Include` 鎖は追従せず、取得した「集約」が静かに不完全になります。これを防ぐのがこのメソッドの主目的です。
 
+クエリ側の `GetByIdAsync` は、主キー述語を焼き込んだ終端糖衣です（`Where(x => x.OrderId == id).FirstOrDefaultAsync()` と等価・該当なしは null）。キーの型は契約の同名メソッドと同一で、`Include` / `IncludeGraph` を付けなければ `repo.GetByIdAsync(id)` と同じ結果を返します。手動の `Include(...)` 連鎖の途中からもそのまま呼べます。
+
 取得したグラフは `RowState = Unchanged` で返るため、編集してからルートを `SaveAsync` へ渡す「取得 → 編集 → 保存」の往復がそのまま成立します。
 
-- **パス上に既出のテーブルへ戻るナビゲーションはたどりません**。自己参照（`Category.Children` など）や相互参照は有限の `Include` ツリーに写せないため、その辺はスキップされ、生成時に Info 診断で名指しされます。スキップされたナビゲーションは空のまま返るので、再帰構造は必要な深さだけ手動の `Include` で取得してください。保存側はインスタンスグラフ（＝有限）をたどるため任意の深さを保存できます——この取得と保存の非対称は仕様です。
+- **パス上に既出のテーブルへ戻るナビゲーションはたどりません**。自己参照（`Category.Children` など）や相互参照は有限の `Include` ツリーに写せないため、その辺はスキップされ、生成時に Info 診断で名指しされます。スキップされたナビゲーションは空のまま返るので、再帰構造は必要な深さだけ手動の `Include` で取得してください。`IncludeGraph()` の後に追加の `Include` を重ねることもでき（`Query().IncludeGraph().Include(x => x.Customer).GetByIdAsync(id)`）、親参照やスキップされたナビを足すのが安全な合成です——閉包が既に含む子方向ナビゲーションを重ねて `Include` しないでください（同じナビの二重指定になります）。保存側はインスタンスグラフ（＝有限）をたどるため任意の深さを保存できます——この取得と保存の非対称は仕様です。
 - カスケード子を 1 つも持たないエンティティにも生成され、その場合はクエリをそのまま返す no-op です。
 - 深い階層・広い図では取得量が相応に大きくなります。SQL Server はグラフ全体を 1 本のネスト JSON クエリで取得するため（SQLite は階層ごとの分割クエリ）、一部の子だけでよい場面では手動の `Include` で絞ってください。
 - `WithUnboundedBinary()` とは併用できません（`Include` と同じ排他）。リモート面（`I{Entity}RemoteRepository`）には `Query()` が無いため、`IncludeGraph` もリモートでは使えません。

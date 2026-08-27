@@ -119,16 +119,16 @@ public sealed class IncludeGraphSqlServerRuntimeTests(SqlServerContainerFixture 
             Quantity = QuantityValue.Create(quantity),
         };
 
-    protected override Task<CustomerEntity?> FetchCustomerWithGraphAsync(int customerId)
-    {
-        var key = CustomerIdValue.Create(customerId);
+    protected override Task<CustomerEntity?> FetchCustomerWithGraphAsync(int customerId) =>
+        Customers().Query().IncludeGraph().GetByIdAsync(CustomerIdValue.Create(customerId), Ct);
 
-        return Customers()
+    protected override Task<CustomerEntity?> FetchCustomerByIdThroughIncludeChainAsync(
+        int customerId
+    ) =>
+        Customers()
             .Query()
-            .IncludeGraph()
-            .Where(customer => customer.CustomerId == key)
-            .FirstOrDefaultAsync(Ct);
-    }
+            .Include(customer => customer.Orders)
+            .GetByIdAsync(CustomerIdValue.Create(customerId), Ct);
 
     protected override Task<CustomerEntity?> FetchCustomerWithManualIncludeAsync(int customerId)
     {
@@ -199,4 +199,13 @@ public sealed class IncludeGraphSqlServerRuntimeTests(SqlServerContainerFixture 
 
     protected override Task<int> SaveCustomerAsync(CustomerEntity customer) =>
         Customers().SaveAsync(customer, cancellationToken: Ct);
+
+    protected override Task<OrderEntity?> FetchOrderWithGraphAndParentAsync(int orderId) =>
+        Orders()
+            .Query()
+            .IncludeGraph()
+            .Include(order => order.Customer)
+            .GetByIdAsync(OrderIdValue.Create(orderId), Ct);
+
+    protected override string? CustomerNameOf(OrderEntity order) => order.Customer?.Name.Value;
 }

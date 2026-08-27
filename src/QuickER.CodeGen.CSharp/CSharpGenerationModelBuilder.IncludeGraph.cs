@@ -5,14 +5,19 @@ using QuickER.Model;
 namespace QuickER.CodeGen.CSharp;
 
 /// <summary>
-/// グラフ取得糖衣（<c>IncludeGraphExtensions</c>＝<c>SqlQuery&lt;T&gt;.IncludeGraph()</c>）の
-/// テンプレート用ブロックを構築する部分。
+/// クエリ糖衣の静的クラス（<c>SqlQueryExtensions</c>＝<c>SqlQuery&lt;T&gt;.IncludeGraph()</c> と
+/// <c>GetByIdAsync</c>）のテンプレート用ブロックを構築する部分。
 /// </summary>
 /// <remarks>
 /// <para>
 /// グラフ保存（<c>SaveAsync</c>）が辿るのと同じカスケード閉包（子方向ナビゲーション）を Include ツリーへ写し、
 /// エンティティごとに 1 本だけ静的に組み立てて共有する。名前付きクエリ・Stream アクセサと同じく
 /// 「整形済みのメンバーテキスト」をここで組み立て、テンプレートは差し込むだけにする。
+/// </para>
+/// <para>
+/// 同じ静的クラスへ主キー取得の終端糖衣（<c>GetByIdAsync</c>）も同居させる。主目的は
+/// <c>Query().IncludeGraph().GetByIdAsync(id)</c>＝「キー指定でグラフごと 1 件」で、キーの型は契約
+/// （<c>I{Entity}Repository.GetByIdAsync</c>）と同一のものを使う（＝Include なしなら契約版と同じ結果になる同名メソッド）。
 /// </para>
 /// <para>
 /// fluent の <c>Include</c>/<c>ThenInclude</c> 連鎖を出さないのは、兄弟分岐のたびに同一ナビの
@@ -28,8 +33,8 @@ namespace QuickER.CodeGen.CSharp;
 /// </remarks>
 internal sealed partial class CSharpGenerationModelBuilder
 {
-    /// <summary>生成する拡張メソッド静的クラス名</summary>
-    private const string IncludeGraphExtensionsClassName = "IncludeGraphExtensions";
+    /// <summary>生成する拡張メソッド静的クラス名（IncludeGraph と GetByIdAsync が同居するため中立名）</summary>
+    private const string SqlQueryExtensionsClassName = "SqlQueryExtensions";
 
     /// <summary>Include ツリーの 1 ノード（宣言順に採番した平坦表現）</summary>
     /// <param name="OwnerClassName">このナビゲーションを宣言する側の Entity クラス名</param>
@@ -42,7 +47,8 @@ internal sealed partial class CSharpGenerationModelBuilder
     );
 
     /// <summary>
-    /// グラフ取得糖衣（<c>IncludeGraphExtensions</c>）の全文を組み立てる（Repository 契約が出ない構成では空文字）。
+    /// クエリ糖衣（<c>SqlQueryExtensions</c>＝IncludeGraph ＋ GetByIdAsync）の全文を組み立てる
+    /// （Repository 契約が出ない構成では空文字）。
     /// </summary>
     /// <param name="diagram">対象の ER 図</param>
     /// <param name="navigationsByEntity">解決済みナビゲーション（エンティティ ID 単位）</param>
@@ -61,9 +67,16 @@ internal sealed partial class CSharpGenerationModelBuilder
             return string.Empty;
         }
 
-        var contractClassNames = repositoryClasses
-            .Select(repository => repository.EntityClassName)
-            .ToHashSet(StringComparer.Ordinal);
+        // Entity クラス名 → Repository 契約（主キー取得糖衣のキー型は契約が持つものをそのまま使う＝
+        // 契約の GetByIdAsync と引数型が食い違わない）
+        var contractsByClassName = new Dictionary<string, CSharpRepositoryModel>(
+            StringComparer.Ordinal
+        );
+
+        foreach (var repository in repositoryClasses)
+        {
+            contractsByClassName.TryAdd(repository.EntityClassName, repository);
+        }
 
         // 子方向ナビの行き先はテーブル名で引く（同名テーブルは先勝ちで 1 つに畳む＝ナビ解決側と同じ扱い）
         var entitiesByTable = new Dictionary<string, Entity>(StringComparer.Ordinal);
@@ -107,7 +120,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             var className = _nameConverter.ToEntityClassName(entity.TableName);
 
             // Query() を持たないエンティティ（複合主キー等で契約が出ない）へは拡張を生やさない
-            if (!contractClassNames.Contains(className))
+            if (!contractsByClassName.TryGetValue(className, out var repository))
             {
                 continue;
             }
@@ -125,6 +138,17 @@ internal sealed partial class CSharpGenerationModelBuilder
             );
 
             members.Add(BuildIncludeGraphMember(className, nodes));
+
+            // 主キー取得の終端糖衣。契約は単一主キーのエンティティにしか出ないため、キー列は必ず 1 本ある
+            members.Add(
+                BuildGetByIdMembers(
+                    className,
+                    repository.KeyTypeName,
+                    _nameConverter.ToPropertyName(
+                        entity.Columns.First(column => column.IsPrimaryKey).Name
+                    )
+                )
+            );
         }
 
         if (members.Count == 0)
@@ -149,12 +173,12 @@ internal sealed partial class CSharpGenerationModelBuilder
             );
         }
 
-        return "/// <summary>Include extensions that fetch the whole cascade graph of an entity in one call (the read-side counterpart of the graph save).</summary>\n"
+        return "/// <summary>Query extensions: fetching the whole cascade graph of an entity in one call (the read-side counterpart of the graph save), and fetching a single entity by its key.</summary>\n"
             + "/// <remarks>\n"
             + "/// The Include tree of each entity is built once and shared by every query, so it must stay unmodified after construction.\n"
             + "/// </remarks>\n"
             + "public static class "
-            + IncludeGraphExtensionsClassName
+            + SqlQueryExtensionsClassName
             + "\n{\n"
             + string.Join("\n\n", members)
             + "\n}";
@@ -301,6 +325,62 @@ internal sealed partial class CSharpGenerationModelBuilder
             .Append(".Value);");
 
         return builder.ToString();
+    }
+
+    /// <summary>1 エンティティ分の主キー取得糖衣（<c>GetByIdAsync</c> の 2 オーバーロード）を組み立てる</summary>
+    /// <remarks>
+    /// <para>
+    /// 中身は <c>Where(x =&gt; x.{主キー} == id).FirstOrDefaultAsync()</c> の 1 行で、実行器・ランタイムには手を入れない。
+    /// キーの型は Repository 契約（<c>I{Entity}Repository.GetByIdAsync</c>）と同じものを使うため、Include を挟まなければ
+    /// 契約版と同じ結果になる＝同名で正直なメソッドになる。
+    /// </para>
+    /// <para>
+    /// <c>IncludableSqlQuery</c> 版を併せて出すのは、fluent の <c>Include(...)</c> が
+    /// <c>IncludableSqlQuery&lt;TEntity, TProperty&gt;</c> を返すため。これが無いと
+    /// <c>Query().Include(x =&gt; x.Orders).GetByIdAsync(id)</c> が解決しない（<c>IncludeGraph()</c> は
+    /// <c>SqlQuery</c> を返すので 1 つ目のオーバーロードで足りる）。
+    /// </para>
+    /// </remarks>
+    /// <param name="entityClassName">対象の Entity クラス名</param>
+    /// <param name="keyTypeName">契約が受け取る主キーの型名（値オブジェクト有効時は VO 型）</param>
+    /// <param name="keyPropertyName">主キー列のプロパティ名</param>
+    private static string BuildGetByIdMembers(
+        string entityClassName,
+        string keyTypeName,
+        string keyPropertyName
+    )
+    {
+        var body =
+            "    ) => query.Where(entity => entity."
+            + keyPropertyName
+            + " == id).FirstOrDefaultAsync(cancellationToken);";
+
+        return "    /// <summary>Fetches the single entity with the given key - the same key the repository contract's GetByIdAsync takes - and returns null when no row matches.</summary>\n"
+            + "    /// <remarks>Combine it with Include or IncludeGraph to fetch that entity together with its graph in one call.</remarks>\n"
+            + "    public static Task<"
+            + entityClassName
+            + "?> GetByIdAsync(\n"
+            + "        this SqlQuery<"
+            + entityClassName
+            + "> query,\n"
+            + "        "
+            + keyTypeName
+            + " id,\n"
+            + "        CancellationToken cancellationToken = default\n"
+            + body
+            + "\n\n"
+            + "    /// <summary>Fetches the single entity with the given key, keeping the Include chain written just before it (returns null when no row matches).</summary>\n"
+            + "    public static Task<"
+            + entityClassName
+            + "?> GetByIdAsync<TProperty>(\n"
+            + "        this IncludableSqlQuery<"
+            + entityClassName
+            + ", TProperty> query,\n"
+            + "        "
+            + keyTypeName
+            + " id,\n"
+            + "        CancellationToken cancellationToken = default\n"
+            + body;
     }
 
     /// <summary>Entity クラス名から静的ツリーのフィールド名（例 <c>OrderEntity</c> → <c>_orderEntityGraph</c>）を作る</summary>

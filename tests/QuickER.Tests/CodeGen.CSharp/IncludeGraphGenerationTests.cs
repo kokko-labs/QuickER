@@ -7,8 +7,8 @@ using QuickER.SqlServer;
 namespace QuickER.Tests.CodeGen.CSharp;
 
 /// <summary>
-/// グラフ取得糖衣（<c>IncludeGraphExtensions</c>＝<c>SqlQuery&lt;T&gt;.IncludeGraph()</c>）の生成挙動を、
-/// 再生成に依存しない生成テキストと診断で固定するテストクラス。
+/// クエリ糖衣（<c>SqlQueryExtensions</c>＝<c>SqlQuery&lt;T&gt;.IncludeGraph()</c> と <c>GetByIdAsync</c>）の
+/// 生成挙動を、再生成に依存しない生成テキストと診断で固定するテストクラス。
 /// </summary>
 /// <remarks>
 /// <para>
@@ -42,15 +42,19 @@ public class IncludeGraphGenerationTests
     private static string AllContent(CodeGenerationResult result) =>
         string.Join("\n", result.Files.Select(file => file.Content));
 
-    /// <summary>生成物から <c>IncludeGraphExtensions</c> クラスの本文だけを切り出す</summary>
+    /// <summary>生成物から <c>SqlQueryExtensions</c> クラスの本文だけを切り出す（改行は LF へ正規化する）</summary>
+    /// <remarks>
+    /// レンダラは出力を <c>Environment.NewLine</c> へ揃えるため、複数行の表明を素の生成テキストへ当てると
+    /// 実行 OS の改行に依存して落ちる。切り出しの時点で LF へ寄せ、表明側は LF で書く。
+    /// </remarks>
     private static string ExtensionsClass(CodeGenerationResult result)
     {
-        var content = AllContent(result);
+        var content = AllContent(result).ReplaceLineEndings("\n");
         var start = content.IndexOf(
-            "public static class IncludeGraphExtensions",
+            "public static class SqlQueryExtensions",
             StringComparison.Ordinal
         );
-        start.Should().BeGreaterThanOrEqualTo(0, "IncludeGraphExtensions が生成されていない");
+        start.Should().BeGreaterThanOrEqualTo(0, "SqlQueryExtensions が生成されていない");
 
         // クラス宣言から、行頭 "}" で閉じる最初の位置までを本文とみなす（生成物は 1 クラス 1 ブロック）
         var end = content.IndexOf("\n}", start, StringComparison.Ordinal);
@@ -317,7 +321,120 @@ public class IncludeGraphGenerationTests
         );
 
         result.HasErrors.Should().BeFalse();
-        AllContent(result).Should().NotContain("IncludeGraphExtensions");
+        AllContent(result)
+            .Should()
+            .NotContain("SqlQueryExtensions")
+            .And.NotContain("IncludeGraph(")
+            .And.NotContain("GetByIdAsync");
+    }
+
+    // ── 主キー取得糖衣（GetByIdAsync） ──
+
+    /// <summary>
+    /// <c>GetByIdAsync</c> は <c>SqlQuery</c> 版と <c>IncludableSqlQuery</c> 版の 2 オーバーロードで出る。
+    /// </summary>
+    /// <remarks>
+    /// <c>IncludableSqlQuery</c> 版が無いと <c>Query().Include(...).GetByIdAsync(id)</c> が解決しない
+    /// （fluent の Include は <c>IncludableSqlQuery</c> を返すため）。「呼べない糖衣」はコンパイルエラーとしてしか
+    /// 現れず、生成側では気づけないのでここで表明する。
+    /// </remarks>
+    [Fact(DisplayName = "GetByIdAsync は SqlQuery 版と IncludableSqlQuery 版の 2 本が出る")]
+    public void GetById_EmitsBothOverloads()
+    {
+        var extensions = ExtensionsClass(Generate(ChainDiagram(), RepositoryOptions()));
+
+        extensions
+            .Should()
+            .Contain(
+                """
+                    public static Task<RootEntity?> GetByIdAsync(
+                        this SqlQuery<RootEntity> query,
+                        int id,
+                        CancellationToken cancellationToken = default
+                    ) => query.Where(entity => entity.RootId == id).FirstOrDefaultAsync(cancellationToken);
+                """.ReplaceLineEndings("\n")
+            )
+            .And.Contain(
+                """
+                    public static Task<RootEntity?> GetByIdAsync<TProperty>(
+                        this IncludableSqlQuery<RootEntity, TProperty> query,
+                        int id,
+                        CancellationToken cancellationToken = default
+                    ) => query.Where(entity => entity.RootId == id).FirstOrDefaultAsync(cancellationToken);
+                """.ReplaceLineEndings("\n")
+            );
+    }
+
+    /// <summary>キー型は契約（<c>I{Entity}Repository.GetByIdAsync</c>）と同一で、値オブジェクト有効時は VO 型になる</summary>
+    /// <remarks>
+    /// 契約と型がずれると「素の値を渡せる糖衣と VO を要求する契約」という非対称ができ、実装差し替えのたびに
+    /// 呼び出し側が書き換わる。契約の <c>GetByIdAsync</c> の引数型が同じ行に出ることまで確かめる。
+    /// </remarks>
+    [Fact(DisplayName = "キー型は契約と同一（値オブジェクト有効時は VO 型）")]
+    public void GetById_UsesContractKeyType()
+    {
+        var result = Generate(
+            ChainDiagram(),
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Test.Ns",
+                GenerateRepositories = true,
+                GenerateValueObjects = true,
+            }
+        );
+
+        result.HasErrors.Should().BeFalse();
+
+        // 契約側（IRootRepository）が受け取るキー型
+        AllContent(result)
+            .Should()
+            .Contain(
+                "public partial interface IRootRepository : IRepository<RootEntity, RootIdValue>"
+            );
+
+        // 糖衣側も同じ VO 型で受ける
+        ExtensionsClass(result)
+            .Should()
+            .Contain("        this SqlQuery<RootEntity> query,\n        RootIdValue id,\n")
+            .And.Contain(
+                "        this IncludableSqlQuery<RootEntity, TProperty> query,\n        RootIdValue id,\n"
+            )
+            .And.Contain("query.Where(entity => entity.RootId == id)");
+    }
+
+    /// <summary>カスケード子を持たない葉エンティティにも GetByIdAsync は出る（IncludeGraph だけが no-op になる）</summary>
+    [Fact(DisplayName = "葉エンティティにも GetByIdAsync は出る")]
+    public void GetById_IsEmittedForLeafEntity()
+    {
+        var extensions = ExtensionsClass(Generate(ChainDiagram(), RepositoryOptions()));
+
+        extensions
+            .Should()
+            .Contain("public static Task<LeafEntity?> GetByIdAsync(")
+            .And.Contain("query.Where(entity => entity.LeafId == id)");
+    }
+
+    /// <summary>EF Core 単独・インメモリ単独でも Query() は出るため GetByIdAsync も出る（ゲートは IncludeGraph と同一）</summary>
+    [Theory(DisplayName = "EF Core 単独・インメモリ単独でも GetByIdAsync は生成される")]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public void ContractOnlyBackends_EmitGetById(bool efCore, bool inMemory)
+    {
+        var result = Generate(
+            ChainDiagram(),
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Test.Ns",
+                GenerateEfCore = efCore,
+                GenerateInMemoryRepositories = inMemory,
+            }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        ExtensionsClass(result)
+            .Should()
+            .Contain("public static Task<RootEntity?> GetByIdAsync(")
+            .And.Contain("public static Task<RootEntity?> GetByIdAsync<TProperty>(");
     }
 
     /// <summary>EF Core 単独・インメモリ単独でも Query() は出るため IncludeGraph も出る</summary>
