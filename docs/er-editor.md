@@ -1,4 +1,4 @@
-# ER Diagram Editing
+# ER diagram editing
 
 *English | [日本語](er-editor.ja.md)*
 

@@ -24,7 +24,7 @@ GUI や AI チャットで ER モデルを作成・編集し、データベー�
 - SQL Server / PostgreSQL / MySQL / Oracle / SQLite に対応
 - C# コードを生成（Entity / EditModel / Mapper / ValueObject / Repository）
 - AI チャットによる ER モデルの生成・編集と画面モック生成
-- MCP サーバによる AI エージェント連携（Claude Code・Codex 等）
+- MCP（Model Context Protocol）サーバによる AI エージェント連携（Claude Code・Codex 等）
 - DBML / Mermaid / Excel 定義書との入出力
 - git で差分を管理できる JSON 保存形式
 - GUI と CLI の両方から利用可能
