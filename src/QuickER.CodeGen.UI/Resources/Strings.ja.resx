@@ -83,7 +83,7 @@
     <value>層フォルダ（出力フォルダからの相対パス）</value>
   </data>
   <data name="CodeGen_CodeSubdirectory" xml:space="preserve">
-    <value>生成コードのサブフォルダ</value>
+    <value>サブフォルダ</value>
   </data>
   <data name="CodeGen_CodeSubdirectoryToolTip" xml:space="preserve">
     <value>生成コード（*.g.cs）の出力先サブフォルダ（層別出力では層フォルダの下・そうでなければ出力フォルダの下へ 1 段。例: Generated）。空ならサブフォルダを作りません。&#xD;&#xA;出力モードに依らず有効です。名前空間には影響しないため、手書きの partial クラスを同じ名前空間のまま親フォルダへ置けます。API リファレンス Markdown は追随しません。絶対パス・".." は使えません。</value>

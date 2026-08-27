@@ -197,15 +197,15 @@ public class CSharpGenerationDialogViewTests
     }
 
     /// <summary>
-    /// 生成コードのサブフォルダ欄と層フォルダ欄の入力欄が、左端・幅ともに揃っていることを検証する。
+    /// 出力先の欄（フォルダ／ファイル）とサブフォルダ欄が、左端・幅ともに揃っていることを検証する。
     /// </summary>
     /// <remarks>
-    /// 2 つのグリッドはラベル列を <c>SharedSizeGroup</c> で共有している。共有をやめて片方を固定幅へ戻すと
-    /// 入力欄の左端がずれるが、ビルドでも型検査でも出ないため実レイアウトを測って固定する
-    /// （ラベル文言・UI 言語が変わっても成立し続けることが共有サイズにした狙い）。
+    /// 2 つは同じグリッドの上下 2 行で、サブフォルダ欄は参照ボタンの列（Column 2）へ広げず上の欄と同じ
+    /// Column 1 に収めることで右端まで揃う。列や行の指定を取り違えると見た目だけがずれるため、
+    /// ビルドでも型検査でも出ない回帰として実レイアウトを測って固定する。
     /// </remarks>
-    [Fact(DisplayName = "サブフォルダ欄と層フォルダ欄の入力欄は左端・幅が揃う")]
-    public void SubdirectoryAndLayerDirectoryInputs_ShareTheSameColumnWidth()
+    [Fact(DisplayName = "出力先の欄とサブフォルダ欄は左端・幅が揃う")]
+    public void OutputPathAndSubdirectoryInputs_AreAligned()
     {
         WpfApplicationTestSupport.RunSta(() =>
         {
@@ -218,8 +218,6 @@ public class CSharpGenerationDialogViewTests
                     new CSharpGenerationDialog(viewModel)
                 );
 
-                // 層フォルダ欄は層別出力 ON のときだけ現れる（畳まれた要素は測れない）
-                viewModel.LayeredOutput = true;
                 PumpBindings();
 
                 // Window は表示しないと Arrange できないため、コンテンツのルートを直接レイアウトする
@@ -228,27 +226,37 @@ public class CSharpGenerationDialogViewTests
                 content.Arrange(new Rect(0, 0, 900, 4000));
                 content.UpdateLayout();
 
+                var outputPathBox = FindByTextBinding(
+                    content,
+                    nameof(CSharpGenerationDialogViewModel.OutputPath)
+                );
                 var subdirectoryBox = FindByTextBinding(
                     content,
                     nameof(CSharpGenerationDialogViewModel.CodeSubdirectory)
                 );
-                var layerBox = FindByTextBinding(
-                    content,
-                    nameof(CSharpGenerationDialogViewModel.DomainLayerDirectory)
-                );
 
+                outputPathBox.Should().NotBeNull("出力先の欄が XAML に存在する前提");
                 subdirectoryBox.Should().NotBeNull("サブフォルダ欄が XAML に存在する前提");
-                layerBox.Should().NotBeNull("ドメイン層フォルダ欄が XAML に存在する前提");
 
-                var subdirectoryLeft = subdirectoryBox!.TranslatePoint(new Point(0, 0), content).X;
-                var layerLeft = layerBox!.TranslatePoint(new Point(0, 0), content).X;
+                var outputLeft = outputPathBox!.TranslatePoint(new Point(0, 0), content).X;
+                var subdirectoryTopLeft = subdirectoryBox!.TranslatePoint(new Point(0, 0), content);
 
-                layerLeft
-                    .Should()
-                    .BeApproximately(subdirectoryLeft, 0.5, "入力欄の左端が揃っている");
-                layerBox
+                subdirectoryTopLeft
+                    .X.Should()
+                    .BeApproximately(outputLeft, 0.5, "入力欄の左端が揃っている");
+                subdirectoryBox
                     .ActualWidth.Should()
-                    .BeApproximately(subdirectoryBox.ActualWidth, 0.5, "入力欄の幅が揃っている");
+                    .BeApproximately(
+                        outputPathBox.ActualWidth,
+                        0.5,
+                        "参照ボタンの列へ広げず右端も揃える"
+                    );
+                subdirectoryTopLeft
+                    .Y.Should()
+                    .BeGreaterThan(
+                        outputPathBox.TranslatePoint(new Point(0, 0), content).Y,
+                        "サブフォルダ欄は出力先の欄の直下に並ぶ"
+                    );
                 subdirectoryBox.ActualWidth.Should().BeGreaterThan(0, "レイアウトが成立している");
             }
             finally

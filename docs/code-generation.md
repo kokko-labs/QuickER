@@ -1110,7 +1110,7 @@ SDK-style projects glob `**/*.cs`, so digging a subfolder needs no csproj change
 
 The value may have several segments (`Generated/QuickER`). Absolute paths, drive letters, and `..` are a generation error, but **it does not have to be a valid C# identifier** because it never reaches a namespace (`generated-code` works). The API reference (`.g.md`) does not follow it — the only thing that decides where the documentation goes is `--api-docs-subdir`.
 
-In the GUI it appears in the generation dialog's "Output mode" card as "Generated code subfolder", independent of the layered-output checkbox.
+In the GUI it sits in the generation dialog's "Output destination" card, on the row right below the output path, as "Subfolder" — independent of the output mode and the layered-output checkbox.
 
 Points worth knowing:
 

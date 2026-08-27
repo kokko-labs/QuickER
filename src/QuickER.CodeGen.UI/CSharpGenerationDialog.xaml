@@ -96,9 +96,7 @@
       <StackPanel Margin="18,18,18,4">
         <!-- 出力モード -->
         <Border Style="{StaticResource Card}">
-          <!-- サブフォルダ欄と層フォルダ欄のラベル列を SharedSizeGroup で共有し、入力欄の左端を揃える
-               （固定幅だと文言・UI 言語・フォントフォールバックのたびに実測し直しになるため） -->
-          <StackPanel Grid.IsSharedSizeScope="True">
+          <StackPanel>
             <TextBlock
               Style="{StaticResource SectionHeader}"
               Text="{x:Static res:Strings.CodeGen_OutputMode}"
@@ -119,28 +117,6 @@
                 IsEnabled="{Binding CanEditSplitFilesByCategory}"
               />
             </StackPanel>
-
-            <!-- 生成コードの出力先サブフォルダ。層別・分割の ON/OFF に依らず効くため、層別チェックより前に
-                 独立した行として置く（層フォルダ欄と同じ左インデントで、入力欄どうしの見た目を揃える） -->
-            <Grid Margin="18,12,0,0">
-              <Grid.ColumnDefinitions>
-                <ColumnDefinition SharedSizeGroup="OutputModeFieldLabel" Width="Auto" />
-                <ColumnDefinition Width="*" />
-              </Grid.ColumnDefinitions>
-              <TextBlock
-                Margin="0,0,10,0"
-                Style="{StaticResource FieldLabel}"
-                Text="{x:Static res:Strings.CodeGen_CodeSubdirectory}"
-                ToolTip="{Binding CodeSubdirectoryToolTip}"
-                VerticalAlignment="Center"
-              />
-              <TextBox
-                Grid.Column="1"
-                Style="{StaticResource FormInput}"
-                Text="{Binding CodeSubdirectory, UpdateSourceTrigger=PropertyChanged}"
-                ToolTip="{Binding CodeSubdirectoryToolTip}"
-              />
-            </Grid>
 
             <!-- 層別フォルダ出力（ON で分割出力を含意。層フォルダの相対パスは下の欄で調整する） -->
             <CheckBox
@@ -163,11 +139,10 @@
                 Text="{x:Static res:Strings.CodeGen_LayerDirectories}"
               />
               <Grid>
-                <!-- ラベル列はサブフォルダ欄と共有（SharedSizeGroup）し、両方の入力欄の左端を揃える。
-                     幅は最長ラベルの実測から WPF が決めるため、文言・UI 言語が変わっても切れない
-                     （FieldLabel は折返しも省略記号もないため、固定幅では溢れると切れていた） -->
+                <!-- ラベル列の幅は最長ラベルから WPF に決めさせる（FieldLabel は折返しも省略記号もないため、
+                     固定幅では UI 言語・フォントフォールバック次第で溢れて切れる） -->
                 <Grid.ColumnDefinitions>
-                  <ColumnDefinition SharedSizeGroup="OutputModeFieldLabel" Width="Auto" />
+                  <ColumnDefinition Width="Auto" />
                   <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
                 <Grid.RowDefinitions>
@@ -180,7 +155,7 @@
                 <TextBlock
                   Grid.Row="0"
                   Grid.Column="0"
-                  Margin="0,4,10,4"
+                  Margin="0,4,8,4"
                   Style="{StaticResource FieldLabel}"
                   Text="{x:Static res:Strings.CodeGen_LayerLabel_Domain}"
                 />
@@ -195,7 +170,7 @@
                 <TextBlock
                   Grid.Row="1"
                   Grid.Column="0"
-                  Margin="0,4,10,4"
+                  Margin="0,4,8,4"
                   Style="{StaticResource FieldLabel}"
                   Text="{x:Static res:Strings.CodeGen_LayerLabel_Presentation}"
                 />
@@ -210,7 +185,7 @@
                 <TextBlock
                   Grid.Row="2"
                   Grid.Column="0"
-                  Margin="0,4,10,4"
+                  Margin="0,4,8,4"
                   Style="{StaticResource FieldLabel}"
                   Text="{x:Static res:Strings.CodeGen_LayerLabel_Infrastructure}"
                 />
@@ -226,7 +201,7 @@
                 <TextBlock
                   Grid.Row="3"
                   Grid.Column="0"
-                  Margin="0,4,10,4"
+                  Margin="0,4,8,4"
                   Style="{StaticResource FieldLabel}"
                   Text="{x:Static res:Strings.CodeGen_LayerLabel_Server}"
                   Visibility="{Binding ShowServerLayerDirectory, Converter={StaticResource BoolToVisibilityConverter}}"
@@ -241,6 +216,71 @@
                 />
               </Grid>
             </StackPanel>
+          </StackPanel>
+        </Border>
+
+        <!-- 出力先（非分割時はファイル、分割時はフォルダ。ラベルはモードで出し分け。参照ボタンは 1 つ） -->
+        <Border Style="{StaticResource Card}">
+          <StackPanel>
+            <TextBlock
+              Style="{StaticResource SectionHeader}"
+              Text="{x:Static res:Strings.CodeGen_OutputDestination}"
+            />
+            <Grid>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="96" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+              </Grid.ColumnDefinitions>
+              <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+              </Grid.RowDefinitions>
+              <!-- ラベルは 2 つ重ね、Visibility でモードごとに片方だけ表示する（非分割=ファイル / 分割=フォルダ） -->
+              <TextBlock
+                Grid.Column="0"
+                Style="{StaticResource FieldLabel}"
+                Text="{x:Static res:Strings.CodeGen_File}"
+                Visibility="{Binding ShowSingleFileOutput, Converter={StaticResource BoolToVisibilityConverter}}"
+              />
+              <TextBlock
+                Grid.Column="0"
+                Style="{StaticResource FieldLabel}"
+                Text="{x:Static res:Strings.CodeGen_Folder}"
+                Visibility="{Binding ShowSplitOptions, Converter={StaticResource BoolToVisibilityConverter}}"
+              />
+              <TextBox
+                Grid.Column="1"
+                Style="{StaticResource FormInput}"
+                Text="{Binding OutputPath, UpdateSourceTrigger=PropertyChanged}"
+              />
+              <Button
+                Grid.Column="2"
+                Margin="8,0,0,0"
+                Content="{x:Static res:Strings.CodeGen_Browse}"
+                Style="{StaticResource SecondaryButton}"
+                Command="{Binding BrowseOutputCommand}"
+              />
+
+              <!-- 生成コードのサブフォルダ。出力先の 1 段下へ掘るため上の欄の直下へ置く（出力モード・層別の
+                   ON/OFF に依らず効く）。入力欄は上と同じ列だけに置き、参照ボタンの列は空けて右端を揃える -->
+              <TextBlock
+                Grid.Row="1"
+                Grid.Column="0"
+                Margin="0,10,8,0"
+                Style="{StaticResource FieldLabel}"
+                Text="{x:Static res:Strings.CodeGen_CodeSubdirectory}"
+                ToolTip="{Binding CodeSubdirectoryToolTip}"
+              />
+              <TextBox
+                Grid.Row="1"
+                Grid.Column="1"
+                Margin="0,10,0,0"
+                Style="{StaticResource FormInput}"
+                Text="{Binding CodeSubdirectory, UpdateSourceTrigger=PropertyChanged}"
+                ToolTip="{Binding CodeSubdirectoryToolTip}"
+              />
+            </Grid>
           </StackPanel>
         </Border>
 
@@ -548,48 +588,6 @@
                   </Grid>
                 </StackPanel>
               </StackPanel>
-            </Grid>
-          </StackPanel>
-        </Border>
-
-        <!-- 出力先（非分割時はファイル、分割時はフォルダ。ラベルはモードで出し分け。参照ボタンは 1 つ） -->
-        <Border Style="{StaticResource Card}">
-          <StackPanel>
-            <TextBlock
-              Style="{StaticResource SectionHeader}"
-              Text="{x:Static res:Strings.CodeGen_OutputDestination}"
-            />
-            <Grid>
-              <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="96" />
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-              </Grid.ColumnDefinitions>
-              <!-- ラベルは 2 つ重ね、Visibility でモードごとに片方だけ表示する（非分割=ファイル / 分割=フォルダ） -->
-              <TextBlock
-                Grid.Column="0"
-                Style="{StaticResource FieldLabel}"
-                Text="{x:Static res:Strings.CodeGen_File}"
-                Visibility="{Binding ShowSingleFileOutput, Converter={StaticResource BoolToVisibilityConverter}}"
-              />
-              <TextBlock
-                Grid.Column="0"
-                Style="{StaticResource FieldLabel}"
-                Text="{x:Static res:Strings.CodeGen_Folder}"
-                Visibility="{Binding ShowSplitOptions, Converter={StaticResource BoolToVisibilityConverter}}"
-              />
-              <TextBox
-                Grid.Column="1"
-                Style="{StaticResource FormInput}"
-                Text="{Binding OutputPath, UpdateSourceTrigger=PropertyChanged}"
-              />
-              <Button
-                Grid.Column="2"
-                Margin="8,0,0,0"
-                Content="{x:Static res:Strings.CodeGen_Browse}"
-                Style="{StaticResource SecondaryButton}"
-                Command="{Binding BrowseOutputCommand}"
-              />
             </Grid>
           </StackPanel>
         </Border>
