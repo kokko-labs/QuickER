@@ -15,9 +15,11 @@
     <RepositoryUrl>https://github.com/kokko-labs/QuickER</RepositoryUrl>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageIcon>quicker-icon-128.png</PackageIcon>
   </PropertyGroup>
 
   <ItemGroup>
     <None Include="README.md" Pack="true" PackagePath="README.md" />
+    <None Include="../../assets/quicker-icon-128.png" Pack="true" PackagePath="quicker-icon-128.png" Visible="false" />
   </ItemGroup>
 </Project>

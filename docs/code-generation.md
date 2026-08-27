@@ -1023,15 +1023,17 @@ The in-memory store evaluates queries with LINQ-to-Objects rather than SQL, so a
 
 By default, the generated code is self-contained inline output that includes the runtime (the schema-independent fixed code). Specifying `--use-runtime-packages` omits the fixed code and relies instead on references to the following NuGet packages (the required PackageReference is described in the generation header and the CLI output; add it to the csproj by hand):
 
-| Package | Contents | Dependencies |
+| Package | Contents | Third-party dependencies |
 |---|---|---|
 | `QuickER.Runtime` | Shared foundation and dialect-neutral contracts | None |
 | `QuickER.Runtime.SqlServer` | QuickER's SQL Server dialect engine | Microsoft.Data.SqlClient |
-| `QuickER.Runtime.Sqlite` | QuickER's SQLite dialect engine | Microsoft.Data.Sqlite |
+| `QuickER.Runtime.Sqlite` | QuickER's SQLite dialect engine | Microsoft.Data.Sqlite, SQLitePCLRaw.bundle_e_sqlite3 |
 | `QuickER.Runtime.EntityFrameworkCore` | EF Core shared parts | Microsoft.EntityFrameworkCore.Relational |
 | `QuickER.Runtime.InMemory` | The in-memory engine (for tests) | None |
 | `QuickER.Runtime.AspNetCore` | The fixed server-side engine behind the generated remote endpoints | ASP.NET Core (a `FrameworkReference`, not a NuGet dependency) |
 | `QuickER.Runtime.Sync` | The bidirectional sync engine (journal, table descriptors, conflict types) | None |
+
+Every package except `QuickER.Runtime` also declares a dependency on `QuickER.Runtime` itself, so that is what nuget.org shows alongside the third-party packages above.
 
 The package version and the tool version are published in lockstep (the same version), so use the same version for both. While the project is on 0.x, compatibility between minor versions is not promised (see the versioning policy in [CONTRIBUTING](../CONTRIBUTING.md)). Schema-dependent items such as the DI-registration extensions, `QuickErDbContext`, and per-entity implementations are always emitted on the generation side even in this mode.
 

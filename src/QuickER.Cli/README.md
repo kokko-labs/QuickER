@@ -1,58 +1,43 @@
 # QuickER.Cli
 
-The command-line tool for QuickER (a Windows ER diagram designer that connects AI-assisted visual ER design × multi-DB round-tripping × C# code generation end to end). Without the GUI, it can generate C# code from an ER diagram JSON (`generate`), scaffold directly from a database (`scaffold`), reverse a generated C# file back into an ER diagram JSON (`reverse`), and host a stdio MCP server that exposes ER diagram editing and code generation to AI agents (`mcp`).
+The command-line tool for [QuickER](https://github.com/kokko-labs/QuickER), an ER diagram designer for .NET. It generates C# code from an ER diagram, scaffolds code straight from a live database, turns generated C# back into a diagram, and hosts a stdio Model Context Protocol (MCP) server that lets AI agents edit diagrams and generate code. Requires .NET 10.
 
 ## Install
 
-```powershell
+```sh
 dotnet tool install --global QuickER.Cli
 ```
 
 ## Usage
 
-```powershell
-# ER diagram JSON (the GUI save format) → C# code (Entity / EditModel / Mapper / Repository / EF Core)
-quicker generate --schema diagram.json --out ./Generated --provider sqlserver
+Supported databases are SQL Server, PostgreSQL, MySQL, Oracle, and SQLite. The QuickER Repository targets SQL Server and SQLite, and the EF Core Repository works with all five.
 
-# Connect directly to a live DB and import the schema → C# code
+```sh
+# ER diagram JSON -> C# code (Entity / EditModel / Mapper / ValueObject / Repository)
+quicker generate --schema diagram.json --out ./Generated --provider sqlserver --generate-repositories --generate-value-objects
+
+# Live database -> C# code, with no diagram file in between
 quicker scaffold --connection "Server=.;Database=Shop;Integrated Security=true;TrustServerCertificate=true" --out ./Generated --provider sqlserver
 
-# A C# file generated with IncludeDataAnnotations ON → a schema-only ER diagram JSON (no layout key)
-quicker reverse --source ./Generated/Model.g.cs --out diagram.json --provider sqlserver
+# Generated C# -> ER diagram JSON (schema only, no layout)
+quicker reverse --source ./Generated/QuickEREntities.g.cs --out diagram.json --provider sqlserver
 
-# Stdio MCP server for AI agents (Claude Code, Codex, ...) — diagram editing / named queries / code generation
+# Stdio MCP server for AI agents such as Claude Code and Codex
 quicker mcp
 ```
 
-`reverse` parses a main `.g.cs` generated with `IncludeDataAnnotations` ON with Roslyn (syntax only; no compilation) and restores the ER diagram from the `[Table]` / `[Column]` / `[Key]` / `[DbColumnMeta]` / `[DbTableMeta]` / `[NavigationReference]` attributes. Column types are expanded from the dialect-neutral type token into the `--provider` dialect's native type. Many-to-many relationships, `ON DELETE` / `ON UPDATE` actions, and FK constraint names are not present in the code, so a fresh diagram uses the defaults (import into an existing diagram in the GUI preserves them).
+You can also set generation settings as command-line flags, which override the settings file passed with `--config`.
 
-Main options:
+## Documentation and feedback
 
-| Option | Description |
-|---|---|
-| `--provider <name>` | Target DB. `sqlserver` (default) / `postgresql` / `mysql` / `oracle` / `sqlite` |
-| `--config <file>` | Generation option settings file (quicker.json) |
-| `--root-namespace <name>` / `--split-files-by-category` | Set the root namespace / split files by category |
-| `--repository-dialects <list>` | Multi-target generation of the QuickER Repository (e.g. `sqlserver,sqlite`, keyed DI) |
-| `--use-runtime-packages` | Do not emit the fixed runtime code; provide it via `QuickER.Runtime.*` package references instead |
-| `--generate-api-docs` | Additionally output an API reference Markdown (`{base name}.g.md`, English canonical) |
-| `--api-docs-ja` | Also output the Japanese API reference Markdown (`{base name}.ja.g.md`; requires `--generate-api-docs`) |
-
-Every settings-file key is also available as a same-named kebab-case flag that overrides the settings file (priority: CLI flag > settings file > default). Bool flags take three states: `--flag` (true), `--flag false`, and omitted (the settings file or the default applies).
-
-For the detailed CLI reference, how to use the generated code, and a working sample, see the repository documentation:
-
-https://github.com/kokko-labs/QuickER
+- [CLI reference](https://github.com/kokko-labs/QuickER/blob/main/docs/cli.md)
+- [Using the generated code](https://github.com/kokko-labs/QuickER/blob/main/docs/code-generation.md)
+- [Report an issue](https://github.com/kokko-labs/QuickER/issues)
 
 ## License
 
-PolyForm Noncommercial 1.0.0 **plus additional grants** (the LICENSE-NC.md bundled with the package). Thanks to those grants, **current releases are free for everyone, including commercial use.** Future versions may introduce paid licensing for some features; four standing commitments limit what can change:
+**Current releases are free for everyone, including commercial use.**
 
-- Basic generation (Entity / EditModel / Mapper) remains free permanently, including commercial use.
-- Personal and non-commercial use of the existing features remains free.
-- Rights granted for a released version are never withdrawn retroactively.
-- Any move to paid licensing will be announced in advance, with a transition period for existing users.
+The license is PolyForm Noncommercial 1.0.0 plus additional grants, bundled with the package as `LICENSE-NC.md`. These grants cover **use** of the tool, and rights granted for a released version are never withdrawn retroactively. Redistribution of QuickER itself, and new work based on its source, remain under the noncommercial terms. [LICENSING.md](https://github.com/kokko-labs/QuickER/blob/main/LICENSING.md) explains the arrangement in plain language.
 
-For details, see LICENSING.md in the repository.
-
-**Code that the CLI generates (including the inlined runtime portion) is your work product**, and you may use, modify, and distribute it freely with no license restrictions.
+Code generated by this tool, including the inlined runtime, is your own work product and carries no license obligations. This grant appears in [Generated Output](https://github.com/kokko-labs/QuickER/blob/main/LICENSE-NC.md#generated-output).

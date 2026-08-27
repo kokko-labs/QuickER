@@ -348,7 +348,7 @@ Recovering an ER diagram JSON (schema only, no layout key) from generated C# cod
 
 ```powershell
 quicker reverse `
-  --source ./Generated/Model.g.cs `
+  --source ./Generated/QuickEREntities.g.cs `
   --out diagram.json `
   --provider sqlserver
 ```
