@@ -268,6 +268,29 @@ public sealed record CodeGenerationOptions
     /// <summary>層別出力時のサーバー層フォルダ（出力ディレクトリからの相対パス）。空なら <c>Server</c>。リモートサービス生成時のみ使われる</summary>
     public string? ServerLayerDirectory { get; init; }
 
+    /// <summary>
+    /// 生成コード（<c>.g.cs</c>）の出力先サブフォルダ（既定 null＝サブフォルダを作らない）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 層別出力（<see cref="LayeredOutput"/>）のときは層フォルダの下、そうでなければ出力ディレクトリの下へ
+    /// 1 段掘る（例: <c>Generated</c> なら <c>Domain/Generated/Entities.g.cs</c>・<c>Generated/EcOrder.g.cs</c>）。
+    /// 分割・非分割を問わず全出力モードで有効で、生成コードと手書きコードを同じプロジェクト内で分けるために使う。
+    /// </para>
+    /// <para>
+    /// <b>名前空間には一切影響しない</b>（層フォルダと違い <see cref="GeneratedFilePlanner.LayerNamespaceRoot"/> の
+    /// 導出には入らない）。手書きの partial 実装を生成物と同じ名前空間・別フォルダへ置けるようにするための設計で、
+    /// 名前空間に現れない以上 C# 識別子である必要もない（<c>generated-code</c> のような名前も許す）。
+    /// </para>
+    /// <para>
+    /// 複数階層（<c>Generated/QuickER</c>）可で、絶対パス・ドライブ指定・<c>..</c> は生成時診断エラー
+    /// （層フォルダ・<see cref="ApiDocsSubdirectory"/> と同じ規則＝<see cref="LayerDirectoryValidator"/> を共有）。
+    /// API リファレンス Markdown（<c>.g.md</c>）はこのサブフォルダに追随しない＝置き場は
+    /// <see cref="ApiDocsSubdirectory"/> だけが決める。
+    /// </para>
+    /// </remarks>
+    public string? CodeSubdirectory { get; init; }
+
     /// <summary>分割出力が実際に有効か（<see cref="SplitFilesByCategory"/> の明示指定、または <see cref="LayeredOutput"/> による含意）</summary>
     /// <remarks>生成側の分割判定はすべて本プロパティを読む（単一ファイルは層へ割れないため、層別出力は分割を構造的に前提とする）</remarks>
     public bool EffectiveSplitFilesByCategory => SplitFilesByCategory || LayeredOutput;
@@ -355,7 +378,7 @@ public sealed record CodeGenerationOptions
     /// 層別出力（<see cref="LayeredOutput"/>）に依らず全出力モードで有効（既定は出力ディレクトリ直下）。
     /// ドキュメントはどの csproj にも属さないため、層フォルダへの自動振り分け対象にはしない＝置き場は本オプションだけが決める。
     /// </remarks>
-    public string? ApiDocsDirectory { get; init; }
+    public string? ApiDocsSubdirectory { get; init; }
 
     /// <summary>
     /// API リファレンス Markdown の出力ファイル名（既定 null＝<see cref="OutputFileName"/> ／固定名からの導出）。
@@ -371,7 +394,7 @@ public sealed record CodeGenerationOptions
     /// 末尾は <c>.g.md</c> へ正規化する（<c>EcOrder</c> / <c>EcOrder.md</c> / <c>EcOrder.g.cs</c> はいずれも
     /// <c>EcOrder.g.md</c>）。<see cref="GeneratedFileWriter"/> が手書きファイル保護のため <c>.g.md</c> 以外の
     /// 書き出しを拒否するため、拡張子はユーザー入力に委ねない。ディレクトリ要素（<c>/</c> <c>\</c> <c>:</c>）・
-    /// ファイル名に使えない文字は生成時診断エラー（置き場は <see cref="ApiDocsDirectory"/> だけが決める）。
+    /// ファイル名に使えない文字は生成時診断エラー（置き場は <see cref="ApiDocsSubdirectory"/> だけが決める）。
     /// </para>
     /// </remarks>
     public string? ApiDocsFileName { get; init; }

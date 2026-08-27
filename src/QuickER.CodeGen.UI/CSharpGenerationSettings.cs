@@ -38,6 +38,12 @@ public class CSharpGenerationSettings
     /// <summary>層別出力時のサーバー層フォルダ（出力先からの相対パス）。空なら <c>Server</c></summary>
     public string ServerLayerDirectory { get; set; } = string.Empty;
 
+    /// <summary>
+    /// 生成コード（<c>.g.cs</c>）の出力先サブフォルダ（層フォルダ／出力先の 1 段下）。空ならサブフォルダなし（既定）。
+    /// 出力モードに依らず有効で、名前空間には影響しない
+    /// </summary>
+    public string CodeSubdirectory { get; set; } = string.Empty;
+
     // ===== 名前空間 =====
 
     /// <summary>
@@ -151,7 +157,7 @@ public class CSharpGenerationSettings
     /// API リファレンス Markdown の出力先サブフォルダ（出力ディレクトリからの相対パス）。空なら直下（既定）。
     /// <see cref="GenerateApiDocs"/> が true のときのみ実効
     /// </summary>
-    public string ApiDocsDirectory { get; set; } = string.Empty;
+    public string ApiDocsSubdirectory { get; set; } = string.Empty;
 
     /// <summary>
     /// API リファレンス Markdown の出力ファイル名。空なら導出名（既定＝出力ファイル名のベース名／分割時は ApiDocs.g.md）。
@@ -214,6 +220,7 @@ public class CSharpGenerationSettings
             PresentationLayerDirectory = NullIfEmpty(PresentationLayerDirectory),
             InfrastructureLayerDirectory = NullIfEmpty(InfrastructureLayerDirectory),
             ServerLayerDirectory = NullIfEmpty(ServerLayerDirectory),
+            CodeSubdirectory = NullIfEmpty(CodeSubdirectory),
             RuntimeNamespace = NullIfEmpty(RuntimeNamespace),
             EntityNamespace = NullIfEmpty(EntityNamespace),
             EditModelNamespace = NullIfEmpty(EditModelNamespace),
@@ -233,7 +240,7 @@ public class CSharpGenerationSettings
             GenerateApiDocs = GenerateApiDocs,
             IncludeJapaneseApiDocs = IncludeJapaneseApiDocs,
             // 空＝直下は null へ畳む（生成側の既定＝出力ディレクトリ直下に任せる）
-            ApiDocsDirectory = NullIfEmpty(ApiDocsDirectory),
+            ApiDocsSubdirectory = NullIfEmpty(ApiDocsSubdirectory),
             // 空＝導出名も同様に null へ畳む（生成側の導出に任せる）
             ApiDocsFileName = NullIfEmpty(ApiDocsFileName),
             ExcludeUnboundedBinaryColumns = ExcludeUnboundedBinaryColumns,

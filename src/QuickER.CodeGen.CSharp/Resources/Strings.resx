@@ -121,7 +121,7 @@
   <data name="CodeGen_Error_NonGeneratedFileOverwrite" xml:space="preserve">
     <value>Only generated files can be overwritten. The output file name must end with .g.cs or .g.md.</value>
   </data>
-  <data name="CodeGen_Error_InvalidLayerDirectory" xml:space="preserve">
+  <data name="CodeGen_Error_InvalidOutputSubdirectory" xml:space="preserve">
     <value>The '{0}' option has an invalid output subfolder: '{1}'. Specify a relative path inside the output directory (absolute paths, drive letters, '..', and characters not allowed in file names are rejected).</value>
   </data>
   <data name="CodeGen_Error_InvalidApiDocsFileName" xml:space="preserve">

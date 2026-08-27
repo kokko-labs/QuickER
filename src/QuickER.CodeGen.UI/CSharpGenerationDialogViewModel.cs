@@ -126,8 +126,22 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
         GeneratedLayer.Server
     );
 
+    /// <summary>
+    /// 生成コードの出力先サブフォルダ（層フォルダ／出力先の 1 段下。空＝サブフォルダなし）。
+    /// 出力モードに依らず有効で、既定は空のままプリフィルしない（サブフォルダなしが既定であることを空欄で表す）
+    /// </summary>
+    [ObservableProperty]
+    private string _codeSubdirectory = string.Empty;
+
+    // サブフォルダは生成ファイルの配置（プレビュー表示）だけを変える。層フォルダと違い名前空間の既定へは
+    // 一切影響しないため、名前空間の追従（FollowDefaultNamespaces）は呼ばない
+    partial void OnCodeSubdirectoryChanged(string value) => RefreshPreview();
+
     /// <summary>層別出力チェックボックスのツールチップ</summary>
     public string LayeredOutputToolTip => Strings.CodeGen_LayeredOutputToolTip;
+
+    /// <summary>生成コードの出力先サブフォルダ欄のツールチップ</summary>
+    public string CodeSubdirectoryToolTip => Strings.CodeGen_CodeSubdirectoryToolTip;
 
     /// <summary>
     /// 出力モード（1 ファイル／分割）のラジオを操作できるか。層別出力 ON の間は分割固定のため false になる
@@ -289,7 +303,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     /// 層別出力に依らず有効で、既定は空のままプリフィルしない（直下が既定であることを空欄で表す）
     /// </summary>
     [ObservableProperty]
-    private string _apiDocsDirectory = string.Empty;
+    private string _apiDocsSubdirectory = string.Empty;
 
     /// <summary>
     /// API リファレンス Markdown の出力ファイル名（空＝導出名を使う）。
@@ -811,6 +825,8 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
                 settings.ServerLayerDirectory,
                 GeneratedLayer.Server
             );
+            // サブフォルダは既定が「なし」なのでプリフィルせず保存値をそのまま反映する
+            CodeSubdirectory = settings.CodeSubdirectory;
             RootNamespace = settings.RootNamespace;
 
             // 空の子名前空間は現在のモードの既定でプリフィルする（6 バケット分を集約表で回す）。
@@ -860,7 +876,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             // （外部編集された設定ファイルの親 OFF＋子 ON の組み合わせで、無効なのにチェック済みの表示になるのを防ぐ）
             IncludeJapaneseApiDocs = settings.GenerateApiDocs && settings.IncludeJapaneseApiDocs;
             // API リファレンスの出力先サブフォルダは保存値をそのまま復元する（空＝直下が既定・プリフィルなし）
-            ApiDocsDirectory = settings.ApiDocsDirectory;
+            ApiDocsSubdirectory = settings.ApiDocsSubdirectory;
             // 出力ファイル名も同様に保存値をそのまま復元する（空＝導出名。プレースホルダで既定名を見せる）
             ApiDocsFileName = settings.ApiDocsFileName;
             // 無制限バイナリ列の除外はQuickER 版 Repository 選択時のみ効くが、値は保存値のまま復元する（行の表示/非表示は UI 側で連動）
@@ -971,6 +987,8 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
                 ServerLayerDirectory,
                 GeneratedLayer.Server
             ),
+            // サブフォルダは既定（＝空）以外に実体化するプリフィルが無いため、トリムだけして保存する
+            CodeSubdirectory = CodeSubdirectory.Trim(),
             RootNamespace = RootNamespace.Trim(),
             RuntimeNamespace = NamespaceForPersistence(RuntimeNamespace, GenerationBucket.Runtime),
             EntityNamespace = NamespaceForPersistence(EntityNamespace, GenerationBucket.Entity),
@@ -1001,7 +1019,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             GenerateRemoteServices = ShowRemoteContracts && GenerateRemoteServices,
             GenerateApiDocs = GenerateApiDocs,
             IncludeJapaneseApiDocs = IncludeJapaneseApiDocs,
-            ApiDocsDirectory = ApiDocsDirectory.Trim(),
+            ApiDocsSubdirectory = ApiDocsSubdirectory.Trim(),
             ApiDocsFileName = ApiDocsFileName.Trim(),
             ExcludeUnboundedBinaryColumns = ExcludeUnboundedBinaryColumns,
             GenerateValueObjects = GenerateValueObjects,

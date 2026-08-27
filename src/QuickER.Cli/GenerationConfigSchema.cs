@@ -77,6 +77,13 @@ public static class GenerationConfigSchema
             "Output mode",
             "Server layer folder for LayeredOutput, relative to out_dir; only used when remote services are generated. Falls back to \"Server\" when blank. Absolute paths and \"..\" are rejected."
         ),
+        new(
+            "CodeSubdirectory",
+            "string",
+            null,
+            "Output mode",
+            "Output subfolder for the generated code (*.g.cs): one level below the layer folder when LayeredOutput is true, otherwise below out_dir (e.g. \"Generated\"; several segments are allowed). Blank means no subfolder. Works in every output mode and never affects namespaces, so it does not have to be a valid C# identifier. Absolute paths and \"..\" are rejected. The API reference Markdown does not follow it (see ApiDocsSubdirectory)."
+        ),
         // 名前空間
         new(
             "RootNamespace",
@@ -239,7 +246,7 @@ public static class GenerationConfigSchema
             "Also produce the Japanese API reference Markdown ({base name}.ja.g.md); has no effect unless GenerateApiDocs is true."
         ),
         new(
-            "ApiDocsDirectory",
+            "ApiDocsSubdirectory",
             "string",
             null,
             "Runtime & documentation",
@@ -250,7 +257,7 @@ public static class GenerationConfigSchema
             "string",
             null,
             "Runtime & documentation",
-            "File name for the API reference Markdown. The extension is normalized to \".g.md\" and the Japanese version reuses the same base name (\".ja.g.md\"). Blank means the derived name: the output file base name, or the fixed \"ApiDocs.g.md\" when files are split. File names only; path separators are rejected (use ApiDocsDirectory for the folder). Has no effect unless GenerateApiDocs is true."
+            "File name for the API reference Markdown. The extension is normalized to \".g.md\" and the Japanese version reuses the same base name (\".ja.g.md\"). Blank means the derived name: the output file base name, or the fixed \"ApiDocs.g.md\" when files are split. File names only; path separators are rejected (use ApiDocsSubdirectory for the folder). Has no effect unless GenerateApiDocs is true."
         ),
         // 属性
         new(
@@ -296,6 +303,7 @@ public static class GenerationConfigSchema
         "RepositoryDialects supports only \"sqlserver\" and \"sqlite\"; when null or empty, a single dialect is derived from the provider / diagram target DBMS.",
         "The namespace keys (RuntimeNamespace, EntityNamespace, EditModelNamespace, MapperNamespace, RepositoryNamespace, ValueObjectNamespace) apply only when SplitFilesByCategory is true.",
         "The layer directory keys (DomainLayerDirectory, PresentationLayerDirectory, InfrastructureLayerDirectory, ServerLayerDirectory) apply only when LayeredOutput is true; ServerLayerDirectory only matters when remote services are also generated.",
+        "CodeSubdirectory is independent of the output mode and of the namespace keys: it only moves the generated *.g.cs files one level deeper, and the API reference Markdown keeps following ApiDocsSubdirectory alone.",
         "When LayeredOutput is true, blank namespace keys derive their defaults from the layer folders (path separators become dots, e.g. folder \"MyApp.Domain/Generated\" gives namespaces under MyApp.Domain.Generated), so the folders and namespaces stay aligned; explicit namespace keys still win. A layer folder that cannot form a C# namespace (a hyphen and so on) is a generation error unless every namespace in that layer is set explicitly.",
     ];
 

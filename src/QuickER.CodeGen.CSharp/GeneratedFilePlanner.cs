@@ -43,7 +43,7 @@ public enum GenerationBucket
 }
 
 /// <summary>1 つの生成ファイルが「どの名前空間で・どのバケットを含み・どの名前空間を using するか」を表す計画</summary>
-/// <remarks>record なのは層別出力（<see cref="CodeGenerationOptions.LayeredOutput"/>）が計画確定後に
+/// <remarks>record なのは <see cref="GeneratedFilePlanner.Plan"/> が計画確定後に
 /// <c>with</c> で出力先ディレクトリだけを差し替えるため（他プロパティの複製漏れを構造的に防ぐ）</remarks>
 public sealed record GeneratedFileSpec
 {
@@ -52,7 +52,9 @@ public sealed record GeneratedFileSpec
 
     /// <summary>
     /// 出力ディレクトリからの相対サブディレクトリ（null＝出力ディレクトリ直下）。
-    /// 層別出力（<see cref="CodeGenerationOptions.LayeredOutput"/>）のときだけ層フォルダが入る。
+    /// 層別出力（<see cref="CodeGenerationOptions.LayeredOutput"/>）の層フォルダと、
+    /// <see cref="CodeGenerationOptions.CodeSubdirectory"/> のサブフォルダを結合した値が入る
+    /// （どちらか一方だけの指定も可・両方なければ null）。
     /// </summary>
     public string? RelativeDirectory { get; init; }
 
@@ -452,6 +454,15 @@ public static class GeneratedFilePlanner
     public static IReadOnlyList<GeneratedFileSpec> Plan(CodeGenerationOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
+
+        // 出力先ディレクトリの付与は必ずここ 1 箇所を通す（PlanCore は非分割で早期 return するため、
+        // 分割パスの末尾だけで付与すると非分割の計画が素通りする）
+        return ApplyOutputDirectories(PlanCore(options), options);
+    }
+
+    /// <summary>ファイル構成・名前空間・バケット構成を決める本体（出力先ディレクトリは <see cref="Plan"/> が付与する）</summary>
+    private static List<GeneratedFileSpec> PlanCore(CodeGenerationOptions options)
+    {
         var active = ActiveBuckets(options);
         // 実効方言の先頭を各スペックへ持たせる（単一方言＝現行値。方言リテラル参照をスコープ由来に一本化する）。
         // 型解決・診断・[SqlColumnType] 補完はマルチ辞書として M1 で機能する。
@@ -707,8 +718,7 @@ public static class GeneratedFilePlanner
 
         AddRemoteServerSpec(splitSpecs, options, active, primaryDialect);
 
-        // 層別出力ならバケット→層の固定対応で各スペックへ層フォルダを付与する（内容・名前・順序は不変）
-        return ApplyLayerDirectories(splitSpecs, options);
+        return splitSpecs;
     }
 
     /// <summary>クロス using を「自分自身を除外・重複排除・序数昇順」で整える（分割時の唯一の正）</summary>
@@ -1211,20 +1221,34 @@ public static class GeneratedFilePlanner
     }
 
     /// <summary>
-    /// 層別出力時、計画済みスペックへ層フォルダ（<see cref="GeneratedFileSpec.RelativeDirectory"/>）を付与する。
+    /// 計画済みスペックへ出力先ディレクトリ（<see cref="GeneratedFileSpec.RelativeDirectory"/>）を付与する。
     /// </summary>
     /// <remarks>
-    /// 層別出力でなければ何もしない（RelativeDirectory は null のまま＝出力ディレクトリ直下）。
-    /// ファイル名・名前空間・バケット構成には触れない＝本メソッドが変えるのは配置だけ。
+    /// <para>
+    /// 内訳は「層別出力なら層フォルダ」＋「<see cref="CodeGenerationOptions.CodeSubdirectory"/> があれば 1 段下のサブフォルダ」で、
+    /// どちらも無ければ null のまま（＝出力ディレクトリ直下）。ファイル名・名前空間・バケット構成には触れない
+    /// ＝本メソッドが変えるのは配置だけ。
+    /// </para>
+    /// <para>
+    /// <b>サブフォルダを <see cref="ResolveLayerDirectory"/> 側へ混ぜてはならない</b>。層フォルダは
+    /// <see cref="LayerNamespaceRoot"/> が名前空間の導出に読むため、混ぜるとサブフォルダ名が名前空間へ現れて
+    /// 「名前空間は追随しない」という本オプションの要件が静かに壊れる（型検査にも出ない）。
+    /// </para>
+    /// <para>
     /// パスの妥当性検証（絶対パス・<c>..</c> の拒否）は生成本体の診断が担い、ここでは値を素通しする
     /// （Plan はプレビューでも呼ばれるため例外を投げない）。
+    /// </para>
     /// </remarks>
-    private static IReadOnlyList<GeneratedFileSpec> ApplyLayerDirectories(
+    private static IReadOnlyList<GeneratedFileSpec> ApplyOutputDirectories(
         List<GeneratedFileSpec> specs,
         CodeGenerationOptions options
     )
     {
-        if (!options.LayeredOutput)
+        var subdirectory = string.IsNullOrWhiteSpace(options.CodeSubdirectory)
+            ? null
+            : options.CodeSubdirectory.Trim();
+
+        if (!options.LayeredOutput && subdirectory is null)
         {
             return specs;
         }
@@ -1233,9 +1257,31 @@ public static class GeneratedFilePlanner
             .Select(spec =>
                 spec with
                 {
-                    RelativeDirectory = ResolveLayerDirectory(options, LayerOf(spec)),
+                    RelativeDirectory = CombineOutputDirectory(
+                        options.LayeredOutput
+                            ? ResolveLayerDirectory(options, LayerOf(spec))
+                            : null,
+                        subdirectory
+                    ),
                 }
             )
             .ToList();
+    }
+
+    /// <summary>層フォルダとサブフォルダを結合する（どちらか一方だけならその値・両方なければ null）</summary>
+    /// <remarks>
+    /// 区切りは <c>/</c> で揃える（OS の区切りへの正規化は <see cref="LayerDirectoryValidator.Normalize"/> が
+    /// 書き出し時に行う）。層フォルダ側の末尾区切りは結合で二重にならないよう落とす。
+    /// </remarks>
+    private static string? CombineOutputDirectory(string? layerDirectory, string? subdirectory)
+    {
+        if (string.IsNullOrWhiteSpace(layerDirectory))
+        {
+            return subdirectory;
+        }
+
+        return subdirectory is null
+            ? layerDirectory
+            : $"{layerDirectory.TrimEnd('/', '\\')}/{subdirectory}";
     }
 }

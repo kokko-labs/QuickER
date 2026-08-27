@@ -150,6 +150,12 @@ namespace QuickER.Cli.Resources {
             }
         }
 
+        public static string Cli_Opt_CodeSubdirectory {
+            get {
+                return ResourceManager.GetString("Cli_Opt_CodeSubdirectory", resourceCulture);
+            }
+        }
+
         public static string Cli_Opt_RootNamespace {
             get {
                 return ResourceManager.GetString("Cli_Opt_RootNamespace", resourceCulture);
@@ -282,9 +288,9 @@ namespace QuickER.Cli.Resources {
             }
         }
 
-        public static string Cli_Opt_ApiDocsDirectory {
+        public static string Cli_Opt_ApiDocsSubdirectory {
             get {
-                return ResourceManager.GetString("Cli_Opt_ApiDocsDirectory", resourceCulture);
+                return ResourceManager.GetString("Cli_Opt_ApiDocsSubdirectory", resourceCulture);
             }
         }
 

@@ -33,7 +33,7 @@ quicker generate --schema diagram.json --out ./Generated --provider sqlserver --
 | `--provider <name>` | | 対象データベースの種類。`sqlserver`（既定）/ `postgresql` / `mysql` / `oracle` / `sqlite` |
 | `--config <file>` | | 生成オプション設定ファイル（quicker.json）。下記参照 |
 
-これらに加えて、**設定ファイル（quicker.json）の全キーは同名の kebab-case フラグとして指定でき**、設定ファイルより優先されます（優先順位: **CLI フラグ ＞ 設定ファイル ＞ 既定値**）。フラグ名はキーの機械的な kebab-case 変換で、例えば `rootNamespace` → `--root-namespace`、`generateRepositories` → `--generate-repositories`、`splitFilesByCategory` → `--split-files-by-category`、`outputPath` → `--output-path` です。ただし機械的変換の例外があります。API リファレンス関連の 3 キーは短い綴りで、`IncludeJapaneseApiDocs` → `--api-docs-ja`・`ApiDocsDirectory` → `--api-docs-dir`・`ApiDocsFileName` → `--api-docs-file` です。また正準キー `OutputFileName` には専用フラグがなく `--output-path`（そのファイル名部分のみが使われる）を使います。bool キーは**三値**で、`--flag`（値なし）＝ `true`、`--flag false` ＝ `false`、未指定＝設定ファイルの値になります。各キーの意味は下記「設定ファイル」の表を参照してください（`--repository-dialects` はカンマ区切りの方言リストで、未指定時は `--provider` の方言から単一導出します）。
+これらに加えて、**設定ファイル（quicker.json）の全キーは同名の kebab-case フラグとして指定でき**、設定ファイルより優先されます（優先順位: **CLI フラグ ＞ 設定ファイル ＞ 既定値**）。フラグ名はキーの機械的な kebab-case 変換で、例えば `rootNamespace` → `--root-namespace`、`generateRepositories` → `--generate-repositories`、`splitFilesByCategory` → `--split-files-by-category`、`outputPath` → `--output-path` です。ただし機械的変換の例外があります。API リファレンス関連の 3 キーと生成コードのサブフォルダは短い綴りで、`IncludeJapaneseApiDocs` → `--api-docs-ja`・`ApiDocsSubdirectory` → `--api-docs-subdir`・`ApiDocsFileName` → `--api-docs-file`・`CodeSubdirectory` → `--code-subdir` です。また正準キー `OutputFileName` には専用フラグがなく `--output-path`（そのファイル名部分のみが使われる）を使います。bool キーは**三値**で、`--flag`（値なし）＝ `true`、`--flag false` ＝ `false`、未指定＝設定ファイルの値になります。各キーの意味は下記「設定ファイル」の表を参照してください（`--repository-dialects` はカンマ区切りの方言リストで、未指定時は `--provider` の方言から単一導出します）。
 
 ## quicker scaffold
 
@@ -104,6 +104,7 @@ quicker mcp
 | `SplitFilesByCategory`（`false`） | カテゴリごとに別ファイル・別名前空間で出力する。`EntityNamespace` / `RepositoryNamespace` などで名前空間を個別指定できる |
 | `LayeredOutput`（`false`） | 分割ファイルを出力ディレクトリ配下の層別サブフォルダ（ドメイン／プレゼンテーション／インフラ／サーバー）へ振り分け、各層を独立プロジェクトにできるようにする。`SplitFilesByCategory` を自動含意（[生成コードの使い方](code-generation.ja.md#層別フォルダ出力--layered-output) 参照） |
 | `DomainLayerDirectory` / `PresentationLayerDirectory` / `InfrastructureLayerDirectory` / `ServerLayerDirectory`（`Domain` / `Presentation` / `Infrastructure` / `Server`） | `LayeredOutput` の層別フォルダ（出力ディレクトリからの相対パス）。複数階層（`MyApp.Domain/Generated`）も可。`LayeredOutput` では空の名前空間キーの既定もこのフォルダから導出され、フォルダと名前空間が揃う。絶対パス・ドライブ指定・`..` は生成時エラーで拒否され、空の値は既定へフォールバックする。`ServerLayerDirectory` は `GenerateRemoteServices` のときのみ使われる |
+| `CodeSubdirectory`（未指定＝サブフォルダなし） | 生成コード（`*.g.cs`）の出力先サブフォルダ。`LayeredOutput` では層フォルダの下、そうでなければ出力ディレクトリの下へ 1 段（例: `Generated`・複数階層可）。全出力モードで有効で、**名前空間には影響しない**ため C# 識別子である必要もない。絶対パスと `..` は拒否。API リファレンス Markdown は追随しない（CLI の `--code-subdir` に対応） |
 | `RootNamespace`（`Generated`） | 生成コードのルート名前空間 |
 | `GenerateEditModels` / `GenerateMappers`（ともに `true`） | 各カテゴリの生成有無。**Entity クラスは常時生成**され、専用キーはない |
 | `GenerateValueObjects`（`false`） | 列ごとの値オブジェクト型（`CustomerIdValue` など）を生成する（[生成コードの使い方](code-generation.ja.md#値オブジェクトgeneratevalueobjects) 参照） |
@@ -119,8 +120,8 @@ quicker mcp
 | `UseRuntimePackages`（`false`） | ランタイム固定コードを出力せず NuGet パッケージ参照で賄う（[生成コードの使い方](code-generation.ja.md) 参照） |
 | `GenerateApiDocs`（`false`） | API リファレンス Markdown（`{ベース名}.g.md`・英語正本）を追加出力する（CLI の `--generate-api-docs` に対応。[生成コードの使い方](code-generation.ja.md) 参照） |
 | `IncludeJapaneseApiDocs`（`false`） | 日本語版 API リファレンス Markdown（`{ベース名}.ja.g.md`）も併産する（`GenerateApiDocs` が前提。CLI の `--api-docs-ja` に対応） |
-| `ApiDocsDirectory`（未指定＝出力ディレクトリ直下） | API リファレンス Markdown の出力先サブフォルダ（出力ディレクトリからの相対パス。例: `docs`・複数階層可・絶対パスと `..` は拒否）。`GenerateApiDocs` が前提で `LayeredOutput` とは独立（CLI の `--api-docs-dir` に対応） |
-| `ApiDocsFileName`（未指定＝導出名） | API リファレンス Markdown の出力ファイル名（拡張子は `.g.md` へ正規化・日本語版は同じベース名の `.ja.g.md`）。未指定なら従来どおりの導出名（非分割＝出力ファイル名のベース名／分割＝`ApiDocs.g.md`）。指定できるのはファイル名だけでパス区切りは拒否（置き場は `ApiDocsDirectory`）。`GenerateApiDocs` が前提（CLI の `--api-docs-file` に対応） |
+| `ApiDocsSubdirectory`（未指定＝出力ディレクトリ直下） | API リファレンス Markdown の出力先サブフォルダ（出力ディレクトリからの相対パス。例: `docs`・複数階層可・絶対パスと `..` は拒否）。`GenerateApiDocs` が前提で `LayeredOutput` とは独立（CLI の `--api-docs-subdir` に対応） |
+| `ApiDocsFileName`（未指定＝導出名） | API リファレンス Markdown の出力ファイル名（拡張子は `.g.md` へ正規化・日本語版は同じベース名の `.ja.g.md`）。未指定なら従来どおりの導出名（非分割＝出力ファイル名のベース名／分割＝`ApiDocs.g.md`）。指定できるのはファイル名だけでパス区切りは拒否（置き場は `ApiDocsSubdirectory`）。`GenerateApiDocs` が前提（CLI の `--api-docs-file` に対応） |
 | `IncludeDataAnnotations`（`true`） | `[Required]` / `[MaxLength]` 等の DataAnnotations と、DB 定義メタ属性（`[DbTableMeta]` / `[DbColumnMeta]`）を付与する |
 | `IncludeJsonIgnoreOnParentNavigation`（`true`） | 親参照ナビゲーションへ `[JsonIgnore]` を付与する（JSON シリアライズ時の循環参照対策） |
 | `OutputFileName`（`QuickEREntities.g.cs`）— 別名 `OutputPath` も受け付ける | 単一ファイル出力のファイル名（`.g.cs` が無ければ補われる。`SplitFilesByCategory` が真のときは無視）。正準キーは `OutputFileName` で、`get_generation_config_schema` が返すのもこの名前。`OutputPath` はその別名で、ファイル名部分のみが使われる（出力先ディレクトリは常に `--out`）。GUI では `OutputPath` に出力先のフルパス（非分割時はファイル・分割時はフォルダ）が入ることがあるが、CLI は同じ規則で解釈する。**ここだけは「CLI フラグ ＞ 設定ファイル」の例外**で、`--output-path` が効くのは設定ファイルに `OutputFileName` が無い場合のみ。設定ファイルに `OutputFileName` があるときはそちらが優先される |

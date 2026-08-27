@@ -1071,7 +1071,7 @@ The bucket-to-layer mapping is fixed:
 | Presentation (`Presentation/`) | `EditModels.g.cs`, `Mappers.g.cs` |
 | Infrastructure (`Infrastructure/`) | `Repositories.SqlServer.g.cs` / `.Sqlite` / `.EntityFrameworkCore` / `.InMemory` / `.Sync` / `.Http` and the matching `Runtime.{...}.g.cs` fixed-infrastructure files |
 | Server (`Server/`) | `RemoteServer.g.cs`, `Runtime.AspNetCore.g.cs` (they need the ASP.NET Core `FrameworkReference`, so they cannot live in a plain class library) |
-| Output directory root | The API reference (`*.g.md`) — it belongs to no csproj. `--api-docs-dir` can move it into a subfolder such as `docs` (independent of the layers) |
+| Output directory root | The API reference (`*.g.md`) — it belongs to no csproj. `--api-docs-subdir` can move it into a subfolder such as `docs` (independent of the layers) |
 
 Each layer's folder can be overridden with `--domain-layer-dir` / `--presentation-layer-dir` / `--infrastructure-layer-dir` / `--server-layer-dir` (config keys `DomainLayerDirectory`, `PresentationLayerDirectory`, `InfrastructureLayerDirectory`, `ServerLayerDirectory`). A value is a relative path under the output directory and may have several segments (`MyApp.Domain/Generated`), so you can point the output directory at your solution's source folder and generate straight into the layer projects. Absolute paths, drive letters, and `..` are rejected as a generation error; a blank value falls back to the default folder name.
 
@@ -1086,12 +1086,38 @@ Each layer's folder can be overridden with `--domain-layer-dir` / `--presentatio
 
 The explicit namespace options (`EntityNamespace`, `RepositoryNamespace`, and so on) still win over the derivation, exactly as before. A layer folder that cannot form a C# namespace (a hyphen and so on) is a generation error, unless every namespace in that layer is set explicitly. This also untangles the plain-split quirk where the dialect implementations hung under the contract namespace (`{contracts}.SqlServer`) even though they live in another project — with layered output they sit under the infrastructure root instead. `RootNamespace` no longer appears in the derived defaults (the layer folders take its place).
 
+### The generated-code subfolder (--code-subdir)
+
+`--code-subdir` (config key `CodeSubdirectory`, **unset by default**) puts the generated code (`.g.cs`) one level deeper: below the layer folder with layered output, and below the output directory without it. It **works in every output mode** (single file, split, layered) and exists to keep generated and hand-written code apart inside one project.
+
+**It never affects namespaces.** Unlike a layer folder, this value does not feed the namespace derivation, which is what lets a hand-written partial class sit in the parent folder under the same namespace as the generated one:
+
+```
+MyApp.Domain/                        <- --domain-layer-dir
+  Generated/                         <- --code-subdir
+    Entities.g.cs                    namespace MyApp.Domain.Entities
+    Repositories.g.cs                namespace MyApp.Domain.Repositories
+  OrderEntity.Rules.cs               namespace MyApp.Domain.Entities (hand-written partial)
+  Services/                          <- hand-written
+MyApp.Infrastructure/
+  Generated/
+    Repositories.SqlServer.g.cs      namespace MyApp.Infrastructure.SqlServer
+    Runtime.SqlServer.g.cs
+EcOrder.g.md                         <- does not follow the subfolder (see below)
+```
+
+SDK-style projects glob `**/*.cs`, so digging a subfolder needs no csproj change. What you gain is folder-level handling: wiping and regenerating in one go, or excluding the folder from analyzers.
+
+The value may have several segments (`Generated/QuickER`). Absolute paths, drive letters, and `..` are a generation error, but **it does not have to be a valid C# identifier** because it never reaches a namespace (`generated-code` works). The API reference (`.g.md`) does not follow it — the only thing that decides where the documentation goes is `--api-docs-subdir`.
+
+In the GUI it appears in the generation dialog's "Output mode" card as "Generated code subfolder", independent of the layered-output checkbox.
+
 Points worth knowing:
 
 - **Only namespaces, file placement, and the fixed runtime's visibility change.** Apart from the `namespace` declarations and `using` directives, the schema-dependent code is identical to plain split output, and the API reference (`.g.md`) shows the actual (derived) namespaces. The fixed runtime (`Runtime*.g.cs`) is emitted with `public` visibility: the layers are separate assemblies, so the runtime surface follows the same rule as the NuGet packages, which publish the same types as `public` for the same reason. The generated projects therefore build with plain project references and **no `InternalsVisibleTo` is needed**.
 - The repository contracts sit in the domain layer as DDD-style ports: the presentation project (edit models check uniqueness through `I{Entity}Repository`) only needs a reference to the domain project, and infrastructure implements the domain's contracts. The resulting project references are `presentation → domain ← infrastructure ← server` (the server project also references infrastructure to wire up DI).
 - The inline runtime (`Runtime.g.cs`) goes into the domain layer, mirroring package mode: with `--use-runtime-packages` the domain project references `QuickER.Runtime` instead, and the other layers see the runtime transitively either way.
-- Switching the mode (or renaming a layer folder) does not delete files written to the previous location — remove them yourself.
+- Switching the mode (or renaming a layer folder or the subfolder) does not delete files written to the previous location — remove them yourself.
 
 ## API reference (.g.md)
 
@@ -1106,9 +1132,9 @@ When enabled, one `.g.md` with the same base name as the `.g.cs` is output (e.g.
 
 **English is the canonical version.** If you also want a Japanese version, enable the GUI's sub-checkbox "Also output a Japanese version", or the CLI's `--api-docs-ja` flag (config key `IncludeJapaneseApiDocs`) (**default OFF**; requires `--generate-api-docs`). When enabled, a `.ja.g.md` is produced alongside the canonical English `.g.md` (e.g. `EcOrder.g.cs` → `EcOrder.ja.g.md`).
 
-By default the Markdown lands in the output directory itself. `--api-docs-dir` (config key `ApiDocsDirectory`) moves it into a subfolder, as a relative path under the output directory (e.g. `docs`; several segments are allowed, absolute paths and `..` are rejected). This works in every output mode — with layered output it keeps the documentation out of the layer projects.
+By default the Markdown lands in the output directory itself. `--api-docs-subdir` (config key `ApiDocsSubdirectory`) moves it into a subfolder, as a relative path under the output directory (e.g. `docs`; several segments are allowed, absolute paths and `..` are rejected). This works in every output mode — with layered output it keeps the documentation out of the layer projects.
 
-The file name can be changed with `--api-docs-file` (config key `ApiDocsFileName`) — for example `--api-docs-file Api.md` yields `Api.g.md` (and `Api.ja.g.md` for the Japanese version). The extension is normalized to `.g.md`, so `Api`, `Api.md`, and `Api.g.md` all give the same result (overwriting is restricted to `.g.md` / `.g.cs`, so the extension is not left to the input). An explicit name wins in every output mode; when it is blank you get the derived name as before (the output file base name, or `ApiDocs.g.md` when files are split). Only a file name is accepted — a value containing path separators is a generation error (choosing the folder is `--api-docs-dir`'s job). In the GUI it is the "Output file name" box below "Output subfolder"; **when the box is empty, the name that will actually be used is shown in grey** (it follows the output file name and the output mode).
+The file name can be changed with `--api-docs-file` (config key `ApiDocsFileName`) — for example `--api-docs-file Api.md` yields `Api.g.md` (and `Api.ja.g.md` for the Japanese version). The extension is normalized to `.g.md`, so `Api`, `Api.md`, and `Api.g.md` all give the same result (overwriting is restricted to `.g.md` / `.g.cs`, so the extension is not left to the input). An explicit name wins in every output mode; when it is blank you get the derived name as before (the output file base name, or `ApiDocs.g.md` when files are split). Only a file name is accepted — a value containing path separators is a generation error (choosing the folder is `--api-docs-subdir`'s job). In the GUI it is the "Output file name" box below "Output subfolder"; **when the box is empty, the name that will actually be used is shown in grey** (it follows the output file name and the output mode).
 
 `.g.md` / `.ja.g.md` are auto-generated files. They are overwritten on regeneration, so do not edit them directly.
 

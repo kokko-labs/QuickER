@@ -58,6 +58,9 @@ internal sealed class GenerationOptionSet
             Strings.Cli_Opt_ServerLayerDirectory
         );
 
+        // 生成コードの出力先サブフォルダ（層フォルダ／出力ディレクトリの 1 段下。名前空間には影響しない）
+        AddString("CodeSubdirectory", "--code-subdir", Strings.Cli_Opt_CodeSubdirectory);
+
         // 名前空間
         AddString("RootNamespace", "--root-namespace", Strings.Cli_Opt_RootNamespace);
         AddString("RuntimeNamespace", "--runtime-namespace", Strings.Cli_Opt_RuntimeNamespace);
@@ -134,7 +137,7 @@ internal sealed class GenerationOptionSet
         AddBool("UseRuntimePackages", "--use-runtime-packages", Strings.Cli_Opt_UseRuntimePackages);
         AddBool("GenerateApiDocs", "--generate-api-docs", Strings.Cli_Opt_GenerateApiDocs);
         AddBool("IncludeJapaneseApiDocs", "--api-docs-ja", Strings.Cli_Opt_IncludeJapaneseApiDocs);
-        AddString("ApiDocsDirectory", "--api-docs-dir", Strings.Cli_Opt_ApiDocsDirectory);
+        AddString("ApiDocsSubdirectory", "--api-docs-subdir", Strings.Cli_Opt_ApiDocsSubdirectory);
         AddString("ApiDocsFileName", "--api-docs-file", Strings.Cli_Opt_ApiDocsFileName);
 
         // 属性

@@ -96,7 +96,9 @@
       <StackPanel Margin="18,18,18,4">
         <!-- 出力モード -->
         <Border Style="{StaticResource Card}">
-          <StackPanel>
+          <!-- サブフォルダ欄と層フォルダ欄のラベル列を SharedSizeGroup で共有し、入力欄の左端を揃える
+               （固定幅だと文言・UI 言語・フォントフォールバックのたびに実測し直しになるため） -->
+          <StackPanel Grid.IsSharedSizeScope="True">
             <TextBlock
               Style="{StaticResource SectionHeader}"
               Text="{x:Static res:Strings.CodeGen_OutputMode}"
@@ -117,6 +119,28 @@
                 IsEnabled="{Binding CanEditSplitFilesByCategory}"
               />
             </StackPanel>
+
+            <!-- 生成コードの出力先サブフォルダ。層別・分割の ON/OFF に依らず効くため、層別チェックより前に
+                 独立した行として置く（層フォルダ欄と同じ左インデントで、入力欄どうしの見た目を揃える） -->
+            <Grid Margin="18,12,0,0">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition SharedSizeGroup="OutputModeFieldLabel" Width="Auto" />
+                <ColumnDefinition Width="*" />
+              </Grid.ColumnDefinitions>
+              <TextBlock
+                Margin="0,0,10,0"
+                Style="{StaticResource FieldLabel}"
+                Text="{x:Static res:Strings.CodeGen_CodeSubdirectory}"
+                ToolTip="{Binding CodeSubdirectoryToolTip}"
+                VerticalAlignment="Center"
+              />
+              <TextBox
+                Grid.Column="1"
+                Style="{StaticResource FormInput}"
+                Text="{Binding CodeSubdirectory, UpdateSourceTrigger=PropertyChanged}"
+                ToolTip="{Binding CodeSubdirectoryToolTip}"
+              />
+            </Grid>
 
             <!-- 層別フォルダ出力（ON で分割出力を含意。層フォルダの相対パスは下の欄で調整する） -->
             <CheckBox
@@ -139,10 +163,11 @@
                 Text="{x:Static res:Strings.CodeGen_LayerDirectories}"
               />
               <Grid>
-                <!-- ラベル列は最長の「インフラストラクチャ層」が収まる幅にする（FieldLabel は折返しも省略記号もないため
-                     はみ出すと切れる）。右余白込みの実測は Yu Gothic UI 13px で 114px・Meiryo へフォールバックすると 151px -->
+                <!-- ラベル列はサブフォルダ欄と共有（SharedSizeGroup）し、両方の入力欄の左端を揃える。
+                     幅は最長ラベルの実測から WPF が決めるため、文言・UI 言語が変わっても切れない
+                     （FieldLabel は折返しも省略記号もないため、固定幅では溢れると切れていた） -->
                 <Grid.ColumnDefinitions>
-                  <ColumnDefinition Width="160" />
+                  <ColumnDefinition SharedSizeGroup="OutputModeFieldLabel" Width="Auto" />
                   <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
                 <Grid.RowDefinitions>
@@ -155,7 +180,7 @@
                 <TextBlock
                   Grid.Row="0"
                   Grid.Column="0"
-                  Margin="0,4"
+                  Margin="0,4,10,4"
                   Style="{StaticResource FieldLabel}"
                   Text="{x:Static res:Strings.CodeGen_LayerLabel_Domain}"
                 />
@@ -170,7 +195,7 @@
                 <TextBlock
                   Grid.Row="1"
                   Grid.Column="0"
-                  Margin="0,4"
+                  Margin="0,4,10,4"
                   Style="{StaticResource FieldLabel}"
                   Text="{x:Static res:Strings.CodeGen_LayerLabel_Presentation}"
                 />
@@ -185,7 +210,7 @@
                 <TextBlock
                   Grid.Row="2"
                   Grid.Column="0"
-                  Margin="0,4"
+                  Margin="0,4,10,4"
                   Style="{StaticResource FieldLabel}"
                   Text="{x:Static res:Strings.CodeGen_LayerLabel_Infrastructure}"
                 />
@@ -201,7 +226,7 @@
                 <TextBlock
                   Grid.Row="3"
                   Grid.Column="0"
-                  Margin="0,4"
+                  Margin="0,4,10,4"
                   Style="{StaticResource FieldLabel}"
                   Text="{x:Static res:Strings.CodeGen_LayerLabel_Server}"
                   Visibility="{Binding ShowServerLayerDirectory, Converter={StaticResource BoolToVisibilityConverter}}"
@@ -483,14 +508,14 @@
                       Grid.Column="0"
                       VerticalAlignment="Center"
                       Style="{StaticResource FieldLabel}"
-                      Text="{x:Static res:Strings.CodeGen_ApiDocsDirectory}"
+                      Text="{x:Static res:Strings.CodeGen_ApiDocsSubdirectory}"
                     />
                     <TextBox
                       Grid.Row="0"
                       Grid.Column="1"
                       Style="{StaticResource FormInput}"
-                      Text="{Binding ApiDocsDirectory, UpdateSourceTrigger=PropertyChanged}"
-                      ToolTip="{x:Static res:Strings.CodeGen_ApiDocsDirectoryToolTip}"
+                      Text="{Binding ApiDocsSubdirectory, UpdateSourceTrigger=PropertyChanged}"
+                      ToolTip="{x:Static res:Strings.CodeGen_ApiDocsSubdirectoryToolTip}"
                     />
 
                     <TextBlock

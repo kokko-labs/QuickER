@@ -121,7 +121,7 @@
   <data name="CodeGen_Error_NonGeneratedFileOverwrite" xml:space="preserve">
     <value>生成ファイル以外は上書きできません。出力ファイル名は .g.cs または .g.md で終わる必要があります。</value>
   </data>
-  <data name="CodeGen_Error_InvalidLayerDirectory" xml:space="preserve">
+  <data name="CodeGen_Error_InvalidOutputSubdirectory" xml:space="preserve">
     <value>オプション '{0}' の出力サブフォルダが不正です: '{1}'。出力ディレクトリ内に収まる相対パスを指定してください（絶対パス・ドライブ指定・'..'・ファイル名に使えない文字は拒否されます）。</value>
   </data>
   <data name="CodeGen_Error_InvalidApiDocsFileName" xml:space="preserve">
