@@ -208,4 +208,58 @@ public sealed class IncludeGraphSqlServerRuntimeTests(SqlServerContainerFixture 
             .GetByIdAsync(OrderIdValue.Create(orderId), Ct);
 
     protected override string? CustomerNameOf(OrderEntity order) => order.Customer?.Name.Value;
+
+    /// <summary>10. 兄弟分岐の Include（ルートのテーブルへ戻る枝を含む＝EF Core には無い面）</summary>
+    [Fact(
+        DisplayName = "[IncludeGraph] 10: 兄弟分岐の Include で両方の ThenInclude が載る (sqlserver)"
+    )]
+    public Task BranchedInclude_KeepsEveryBranch() => AssertBranchedIncludeKeepsEveryBranchAsync();
+
+    /// <summary>11. IncludeGraph の共有ツリーが後続の ThenInclude で汚れない</summary>
+    [Fact(
+        DisplayName = "[IncludeGraph] 11: IncludeGraph の共有ツリーは後続の ThenInclude で汚れない (sqlserver)"
+    )]
+    public Task IncludeGraph_SharedTreeIsNotMutatedByLaterThenInclude() =>
+        AssertIncludeGraphSharedTreeIsNotMutatedAsync();
+
+    protected override Task<CustomerEntity?> FetchCustomerWithReorderedRedundantIncludeAsync(
+        int customerId
+    ) =>
+        Customers()
+            .Query()
+            .Include(customer => customer.Orders)
+            .Include(customer => customer.Orders)
+                .ThenInclude(order => order.OrderLines)
+            .GetByIdAsync(CustomerIdValue.Create(customerId), Ct);
+
+    protected override Task<CustomerEntity?> FetchCustomerWithBranchedIncludeAsync(
+        int customerId
+    ) =>
+        Customers()
+            .Query()
+            .Include(customer => customer.Orders)
+                .ThenInclude(order => order.OrderLines)
+            .Include(customer => customer.Orders)
+                .ThenInclude(order => order.Customer)
+            .GetByIdAsync(CustomerIdValue.Create(customerId), Ct);
+
+    protected override Task<CustomerEntity?> FetchCustomerWithRedundantIncludeAsync(
+        int customerId
+    ) =>
+        Customers()
+            .Query()
+            .Include(customer => customer.Orders)
+                .ThenInclude(order => order.OrderLines)
+            .Include(customer => customer.Orders)
+            .GetByIdAsync(CustomerIdValue.Create(customerId), Ct);
+
+    protected override Task<CustomerEntity?> FetchCustomerWithGraphAndBranchedParentAsync(
+        int customerId
+    ) =>
+        Customers()
+            .Query()
+            .IncludeGraph()
+            .Include(customer => customer.Orders)
+                .ThenInclude(order => order.Customer)
+            .GetByIdAsync(CustomerIdValue.Create(customerId), Ct);
 }

@@ -176,4 +176,45 @@ public abstract class IncludeGraphQueryFixtureRuntimeTestsBase
             .GetByIdAsync(OrderIdValue.Create(orderId), Ct);
 
     protected override string? CustomerNameOf(OrderEntity order) => order.Customer?.Name.Value;
+
+    protected override Task<CustomerEntity?> FetchCustomerWithReorderedRedundantIncludeAsync(
+        int customerId
+    ) =>
+        CreateCustomerRepository()
+            .Query()
+            .Include(customer => customer.Orders)
+            .Include(customer => customer.Orders)
+                .ThenInclude(order => order.OrderLines)
+            .GetByIdAsync(CustomerIdValue.Create(customerId), Ct);
+
+    protected override Task<CustomerEntity?> FetchCustomerWithBranchedIncludeAsync(
+        int customerId
+    ) =>
+        CreateCustomerRepository()
+            .Query()
+            .Include(customer => customer.Orders)
+                .ThenInclude(order => order.OrderLines)
+            .Include(customer => customer.Orders)
+                .ThenInclude(order => order.Customer)
+            .GetByIdAsync(CustomerIdValue.Create(customerId), Ct);
+
+    protected override Task<CustomerEntity?> FetchCustomerWithRedundantIncludeAsync(
+        int customerId
+    ) =>
+        CreateCustomerRepository()
+            .Query()
+            .Include(customer => customer.Orders)
+                .ThenInclude(order => order.OrderLines)
+            .Include(customer => customer.Orders)
+            .GetByIdAsync(CustomerIdValue.Create(customerId), Ct);
+
+    protected override Task<CustomerEntity?> FetchCustomerWithGraphAndBranchedParentAsync(
+        int customerId
+    ) =>
+        CreateCustomerRepository()
+            .Query()
+            .IncludeGraph()
+            .Include(customer => customer.Orders)
+                .ThenInclude(order => order.Customer)
+            .GetByIdAsync(CustomerIdValue.Create(customerId), Ct);
 }

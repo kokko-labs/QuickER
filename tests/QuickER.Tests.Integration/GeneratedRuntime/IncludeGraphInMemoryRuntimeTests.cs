@@ -1,5 +1,6 @@
 using System.Threading.Tasks;
 using QuickER.Tests.GeneratedQueryFixture;
+using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
 
@@ -32,4 +33,17 @@ public sealed class IncludeGraphInMemoryRuntimeTests : IncludeGraphQueryFixtureR
 
     protected override IOrderLineRepository CreateOrderLineRepository() =>
         new InMemoryOrderLineRepository(_store);
+
+    /// <summary>10. 兄弟分岐の Include（ルートのテーブルへ戻る枝を含む＝EF Core には無い面）</summary>
+    [Fact(
+        DisplayName = "[IncludeGraph] 10: 兄弟分岐の Include で両方の ThenInclude が載る (inmemory)"
+    )]
+    public Task BranchedInclude_KeepsEveryBranch() => AssertBranchedIncludeKeepsEveryBranchAsync();
+
+    /// <summary>11. IncludeGraph の共有ツリーが後続の ThenInclude で汚れない</summary>
+    [Fact(
+        DisplayName = "[IncludeGraph] 11: IncludeGraph の共有ツリーは後続の ThenInclude で汚れない (inmemory)"
+    )]
+    public Task IncludeGraph_SharedTreeIsNotMutatedByLaterThenInclude() =>
+        AssertIncludeGraphSharedTreeIsNotMutatedAsync();
 }

@@ -1,5 +1,7 @@
+using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.GeneratedQueryFixture;
+using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
 
@@ -30,6 +32,17 @@ public sealed class IncludeGraphAdoRuntimeTests : IncludeGraphSqliteFileRuntimeT
 
     protected override IOrderLineRepository CreateOrderLineRepository() =>
         Provider().GetRequiredService<IOrderLineRepository>();
+
+    /// <summary>10. 兄弟分岐の Include（ルートのテーブルへ戻る枝を含む＝EF Core には無い面）</summary>
+    [Fact(DisplayName = "[IncludeGraph] 10: 兄弟分岐の Include で両方の ThenInclude が載る (ado)")]
+    public Task BranchedInclude_KeepsEveryBranch() => AssertBranchedIncludeKeepsEveryBranchAsync();
+
+    /// <summary>11. IncludeGraph の共有ツリーが後続の ThenInclude で汚れない</summary>
+    [Fact(
+        DisplayName = "[IncludeGraph] 11: IncludeGraph の共有ツリーは後続の ThenInclude で汚れない (ado)"
+    )]
+    public Task IncludeGraph_SharedTreeIsNotMutatedByLaterThenInclude() =>
+        AssertIncludeGraphSharedTreeIsNotMutatedAsync();
 
     public override void Dispose()
     {

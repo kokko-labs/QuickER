@@ -63,7 +63,13 @@ public sealed record GraphCustomerRow(
 ///   <item>葉エンティティの <c>IncludeGraph()</c> は no-op で、素の取得と同じ結果を返す</item>
 ///   <item>該当キーが無ければ <c>null</c>（＝空グラフや例外ではない）</item>
 ///   <item>手動の <c>Include(...)</c> 連鎖の途中からでも <c>GetByIdAsync</c> が呼べる</item>
+///   <item>同一ナビを 2 回 Include しても（両順序とも）先行の ThenInclude が消えない</item>
 /// </list>
+/// <para>
+/// これに加えて、<b>ルートのテーブルへ戻る辺</b>を含む 2 つの表明（兄弟分岐・共有ツリーの不変性）を
+/// <c>protected</c> メソッドとして持つ。EF Core はその形を <c>AsNoTracking</c> のクエリで拒むため、
+/// 呼び出す実装先だけが <c>[Fact]</c> を宣言する（条件スキップは使わない）。
+/// </para>
 /// <para>
 /// キー指定の 1 件取得はすべて糖衣 <c>GetByIdAsync</c> を通す（＝上の全シナリオが 4 実装先で糖衣を経由する）。
 /// 比較対照の手動 Include 側だけは <c>Where(...).FirstOrDefaultAsync()</c> のまま残し、糖衣と手書き述語の
@@ -149,6 +155,36 @@ public abstract class IncludeGraphRuntimeTestsBase<TCustomer, TOrder, TOrderLine
 
     /// <summary>注文の親参照（顧客）ナビゲーションから氏名を取り出す（未ロードなら null）</summary>
     protected abstract string? CustomerNameOf(TOrder order);
+
+    /// <summary>
+    /// <c>Include(注文).ThenInclude(明細)</c> の後に、同じ注文ナビを <c>ThenInclude</c> なしで重ねて顧客 1 件を取得する。
+    /// </summary>
+    protected abstract Task<TCustomer?> FetchCustomerWithRedundantIncludeAsync(int customerId);
+
+    /// <summary>
+    /// <c>Include(注文)</c> の後に、同じ注文ナビを <c>ThenInclude(明細)</c> 付きで重ねて顧客 1 件を取得する
+    /// （<see cref="FetchCustomerWithRedundantIncludeAsync"/> の逆順）。
+    /// </summary>
+    protected abstract Task<TCustomer?> FetchCustomerWithReorderedRedundantIncludeAsync(
+        int customerId
+    );
+
+    /// <summary>
+    /// 兄弟分岐の Include（同一ナビを 2 回 Include し、それぞれ別の ThenInclude を重ねる）で顧客 1 件を取得する。
+    /// </summary>
+    /// <remarks>
+    /// <c>Include(注文).ThenInclude(明細)</c> ＋ <c>Include(注文).ThenInclude(顧客)</c>＝EF Core で兄弟分岐を書く公式イディオム。
+    /// 後者はルートのテーブルへ戻る辺のため EF Core（<c>AsNoTracking</c>）では実行できない
+    /// （<see cref="AssertBranchedIncludeKeepsEveryBranchAsync"/> の注記を参照）。
+    /// </remarks>
+    protected abstract Task<TCustomer?> FetchCustomerWithBranchedIncludeAsync(int customerId);
+
+    /// <summary>
+    /// <c>IncludeGraph()</c> の後に閉包が含むナビを重ね、そこへ親参照の <c>ThenInclude</c> を足して顧客 1 件を取得する。
+    /// </summary>
+    protected abstract Task<TCustomer?> FetchCustomerWithGraphAndBranchedParentAsync(
+        int customerId
+    );
 
     // ── 期待値（全実装先で同一） ──
 
@@ -366,10 +402,9 @@ public abstract class IncludeGraphRuntimeTestsBase<TCustomer, TOrder, TOrderLine
 
     /// <summary>8. IncludeGraph に親参照の Include を重ねて GetByIdAsync できる（両方向が同時に載る）</summary>
     /// <remarks>
-    /// <c>Query().IncludeGraph().Include(親参照).GetByIdAsync(key)</c> の合成形。IncludeGraph の閉包は
-    /// 子方向のみなので、親参照の Include はツリーに重複ノードを作らず安全に足せる（＝この合成が
-    /// 「グラフ＋親」の推奨レシピ）。閉包が含む子方向ナビを重ねて Include すると既知の重複ノード問題を
-    /// 踏むため、ここでは安全側の合成だけを契約として固定する。
+    /// <c>Query().IncludeGraph().Include(親参照).GetByIdAsync(key)</c> の合成形（＝「グラフ＋親」の推奨レシピ）。
+    /// IncludeGraph の閉包は子方向のみなので、親参照の Include はツリーの別枝として足される。閉包が含む
+    /// 子方向ナビを重ねた場合も同一ナビのノードへマージされるため安全で、そちらはシナリオ 11 が固定する。
     /// </remarks>
     [Fact(
         DisplayName = "[IncludeGraph] 8: IncludeGraph に親参照 Include を重ねて GetByIdAsync できる"
@@ -391,5 +426,124 @@ public abstract class IncludeGraphRuntimeTestsBase<TCustomer, TOrder, TOrderLine
         (await FetchOrderWithGraphAndParentAsync(999))
             .Should()
             .BeNull();
+    }
+
+    // ── 9. 重複 Include のマージ ──
+
+    /// <summary>9. 同じナビをもう一度 Include しても、先に指定した ThenInclude は消えない（両順序）</summary>
+    /// <remarks>
+    /// <para>
+    /// <c>ThenInclude</c> は直前の <c>Include</c> にしか続けられないため、同じナビへ別の枝を足すには
+    /// <c>Include</c> を書き直す——EF Core でも同じ書き方になる。このとき同一ナビのノードを 2 本作ると、
+    /// 実行器は<b>例外を出さずに</b>結果を壊す: SQLite の <c>IncludeLoader</c> とインメモリの <c>IncludeAttacher</c> は
+    /// 子コレクションを新しいインスタンスで<b>置換</b>するため先に読んだ枝が消え、SQL Server の FOR JSON は
+    /// 同名 JSON プロパティが衝突してクエリごと失敗する（EF Core だけは Include パスの重複を自前で畳むため通る）。
+    /// </para>
+    /// <para>
+    /// 両順序を確かめるのは、壊れ方が順序で変わるため。「広い方が先」は後続の空の枝に上書きされて明細が消え、
+    /// 「狭い方が先」は置換の結果として偶然通ってしまう（SQL Server だけが落ちる）。
+    /// </para>
+    /// </remarks>
+    [Fact(DisplayName = "[IncludeGraph] 9: 同じナビの重複 Include で ThenInclude が消えない")]
+    public async Task RedundantInclude_IsMergedIntoTheSameNode()
+    {
+        await ResetAndSeedAsync();
+
+        var expected = SeededCustomer1();
+
+        // ThenInclude 付き → 素の Include（先行の枝が空の枝に潰されない）
+        var wideFirst = await FetchCustomerWithRedundantIncludeAsync(1);
+        wideFirst.Should().NotBeNull();
+        Project(wideFirst!)
+            .Should()
+            .BeEquivalentTo(expected, options => options.WithStrictOrdering());
+
+        // 素の Include → ThenInclude 付き（後から足した枝が同じノードへマージされる）
+        var narrowFirst = await FetchCustomerWithReorderedRedundantIncludeAsync(1);
+        narrowFirst.Should().NotBeNull();
+        Project(narrowFirst!)
+            .Should()
+            .BeEquivalentTo(expected, options => options.WithStrictOrdering());
+    }
+
+    // ── 10-11. ルートのテーブルへ戻る辺を含む形（EF Core には面が無い） ──
+
+    /// <summary>
+    /// 10. 同一ナビを 2 回 Include する兄弟分岐で、両方の <c>ThenInclude</c> が同時に載ることを表明する。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>Include(注文).ThenInclude(明細)</c> ＋ <c>Include(注文).ThenInclude(顧客)</c>＝EF Core で兄弟分岐を書く
+    /// 公式イディオムそのもの。シナリオ 9 と違い、2 本の枝が<b>どちらも中身を持つ</b>ため
+    /// 「先に読んだ枝が消える」ことが直接見える。
+    /// </para>
+    /// <para>
+    /// <b>[Fact] でなく protected なのは EF Core を外すため</b>: 後続の枝はルートのテーブル（顧客）へ戻るので、
+    /// EF Core は <c>AsNoTracking</c> のクエリで <c>The Include path 'Orders-&gt;Customer' results in a cycle</c> と
+    /// 実行を拒む。これは EF Core の制約であって QuickER の欠陥ではない（＝EF Core にはこの面が無い）ため、
+    /// 条件スキップではなく<b>この表明を呼ぶ実装先だけが <c>[Fact]</c> を持つ</b>形で分けている（CLAUDE.md の
+    /// 「スキップ 0 の原則」）。マージ自体は実行器に依らない <c>SqlQuery</c> 側の振る舞いなので、
+    /// 3 実装先で十分に固定できる。
+    /// </para>
+    /// </remarks>
+    protected async Task AssertBranchedIncludeKeepsEveryBranchAsync()
+    {
+        await ResetAndSeedAsync();
+
+        var customer = await FetchCustomerWithBranchedIncludeAsync(1);
+        customer.Should().NotBeNull();
+
+        // 先行分岐（明細）が後続分岐に潰されていない
+        Project(customer!)
+            .Should()
+            .BeEquivalentTo(SeededCustomer1(), options => options.WithStrictOrdering());
+
+        // 後続分岐（親参照）も同時に載る
+        OrdersOf(customer!)
+            .Select(CustomerNameOf)
+            .Should()
+            .AllSatisfy(name => name.Should().Be("Alice"));
+    }
+
+    /// <summary>
+    /// 11. <c>IncludeGraph()</c> の後に <c>ThenInclude</c> を重ねても、次のクエリの <c>IncludeGraph()</c> は
+    /// 素の閉包を返すことを表明する。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>IncludeGraph()</c> が積むノードは<b>生成拡張が型ごとに 1 本だけ組んで全クエリで共有する static ツリー</b>
+    /// である。取り込み時にコピーしないと、後続の <c>Include(閉包内のナビ).ThenInclude(...)</c> がその共有ツリーを
+    /// 直接書き換え、<b>以後そのプロセスの全クエリ</b>が余計なナビを引き連れる。「余計に載る」方向の壊れ方なので
+    /// 既存の表明では気づけず、しかも汚染はテスト間にも残る。
+    /// </para>
+    /// <para>
+    /// 重ねる枝がルートのテーブルへ戻る辺になるのは構造上の必然（閉包に含まれないナビ＝既に通ったテーブルへの辺）
+    /// で、そのため EF Core を外している。理由は <see cref="AssertBranchedIncludeKeepsEveryBranchAsync"/> と同じ。
+    /// </para>
+    /// </remarks>
+    protected async Task AssertIncludeGraphSharedTreeIsNotMutatedAsync()
+    {
+        await ResetAndSeedAsync();
+
+        // IncludeGraph の閉包が含むナビ（注文）へ、さらに親参照の ThenInclude を重ねる
+        var composed = await FetchCustomerWithGraphAndBranchedParentAsync(1);
+        composed.Should().NotBeNull();
+
+        Project(composed!)
+            .Should()
+            .BeEquivalentTo(SeededCustomer1(), options => options.WithStrictOrdering());
+        OrdersOf(composed!)
+            .Select(CustomerNameOf)
+            .Should()
+            .AllSatisfy(name => name.Should().Be("Alice"));
+
+        // 直後の素の IncludeGraph は閉包そのもの（＝親参照は載らない）を返す
+        var plain = await FetchCustomerWithGraphAsync(1);
+        plain.Should().NotBeNull();
+
+        Project(plain!)
+            .Should()
+            .BeEquivalentTo(SeededCustomer1(), options => options.WithStrictOrdering());
+        OrdersOf(plain!).Select(CustomerNameOf).Should().AllSatisfy(name => name.Should().BeNull());
     }
 }

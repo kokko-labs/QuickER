@@ -6882,37 +6882,75 @@ public sealed class SqlQuery<TEntity>
     }
 
     /// <summary>Eagerly fetches a single-reference navigation (ThenInclude allows specifying multiple levels).</summary>
+    /// <remarks>Including a navigation that is already there returns the node it already has, so Include(A).ThenInclude(B) followed by Include(A).ThenInclude(C) branches one node instead of adding a second one.</remarks>
     public IncludableSqlQuery<TEntity, TProperty> Include<TProperty>(
         Expression<Func<TEntity, TProperty>> navigationSelector
     )
     {
-        var node = new IncludeNode(IncludeNode.GetProperty(navigationSelector));
-        _includes.Add(node);
+        var node = MergeInclude(_includes, IncludeNode.GetProperty(navigationSelector));
         return new IncludableSqlQuery<TEntity, TProperty>(this, node);
     }
 
     /// <summary>Eagerly fetches a collection navigation (ThenInclude allows specifying multiple levels).</summary>
+    /// <remarks>Including a navigation that is already there returns the node it already has, so Include(A).ThenInclude(B) followed by Include(A).ThenInclude(C) branches one node instead of adding a second one.</remarks>
     public IncludableSqlQuery<TEntity, TElement> Include<TElement>(
         Expression<Func<TEntity, ICollection<TElement>>> navigationSelector
     )
     {
-        var node = new IncludeNode(IncludeNode.GetProperty(navigationSelector));
-        _includes.Add(node);
+        var node = MergeInclude(_includes, IncludeNode.GetProperty(navigationSelector));
         return new IncludableSqlQuery<TEntity, TElement>(this, node);
     }
 
     /// <summary>Adds an already built Include tree (the entry point the generated IncludeGraph extensions use).</summary>
     /// <remarks>
-    /// The nodes are taken as they are - neither copied nor validated - so a node handed over here (and its Children)
-    /// must not be changed afterwards: the generated extensions build one tree per entity type and share it across
-    /// every query. Write Include/ThenInclude instead when composing an Include tree by hand.
+    /// The nodes are copied, so the tree handed over here is never modified: the generated extensions build one tree
+    /// per entity type and share it across every query, and a ThenInclude written after IncludeGraph must not reach
+    /// back into that shared tree. A navigation that is already there is merged into the node it already has instead
+    /// of being added twice. Write Include/ThenInclude instead when composing an Include tree by hand.
     /// </remarks>
     internal SqlQuery<TEntity> AddIncludeNodes(IReadOnlyList<IncludeNode> nodes)
     {
         ArgumentNullException.ThrowIfNull(nodes);
-        _includes.AddRange(nodes);
+        CopyIncludeNodes(nodes, _includes);
         return this;
     }
+
+    /// <summary>Returns the node for the navigation in the given list, adding a new one only when the navigation is not there yet.</summary>
+    /// <remarks>
+    /// Include / ThenInclude keep one node per navigation because every backend binds a fetched child by replacing the
+    /// navigation's value: a second node for the same navigation would silently overwrite what the first one loaded
+    /// (and on SQL Server the two would collide as identically named JSON properties).
+    /// </remarks>
+    internal static IncludeNode MergeInclude(List<IncludeNode> nodes, PropertyInfo property)
+    {
+        foreach (var existing in nodes)
+        {
+            if (IsSameNavigation(existing.Property, property))
+            {
+                return existing;
+            }
+        }
+
+        var node = new IncludeNode(property);
+        nodes.Add(node);
+        return node;
+    }
+
+    /// <summary>Copies an Include tree into the destination list, merging every navigation into the node it already has.</summary>
+    private static void CopyIncludeNodes(
+        IReadOnlyList<IncludeNode> source,
+        List<IncludeNode> destination
+    )
+    {
+        foreach (var node in source)
+        {
+            CopyIncludeNodes(node.Children, MergeInclude(destination, node.Property).Children);
+        }
+    }
+
+    /// <summary>Whether two properties denote the same navigation (reflection may hand back different PropertyInfo instances for one property).</summary>
+    private static bool IsSameNavigation(PropertyInfo left, PropertyInfo right) =>
+        left == right || (left.Name == right.Name && left.DeclaringType == right.DeclaringType);
 
     /// <summary>Fetches the entities matching the conditions (together with the requested Includes) as a list.</summary>
     public async Task<IReadOnlyList<TEntity>> ToListAsync(
@@ -7034,22 +7072,28 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
     }
 
     /// <summary>Further fetches the descendants of the single-reference navigation Included just before.</summary>
+    /// <remarks>A navigation that is already a child of this node is reused, so repeating an Include / ThenInclude path merges it instead of duplicating it.</remarks>
     public IncludableSqlQuery<TEntity, TNext> ThenInclude<TNext>(
         Expression<Func<TProperty, TNext>> navigationSelector
     )
     {
-        var child = new IncludeNode(IncludeNode.GetProperty(navigationSelector));
-        _node.Children.Add(child);
+        var child = SqlQuery<TEntity>.MergeInclude(
+            _node.Children,
+            IncludeNode.GetProperty(navigationSelector)
+        );
         return new IncludableSqlQuery<TEntity, TNext>(_query, child);
     }
 
     /// <summary>Further fetches the descendants of the collection navigation Included just before.</summary>
+    /// <remarks>A navigation that is already a child of this node is reused, so repeating an Include / ThenInclude path merges it instead of duplicating it.</remarks>
     public IncludableSqlQuery<TEntity, TNext> ThenInclude<TNext>(
         Expression<Func<TProperty, ICollection<TNext>>> navigationSelector
     )
     {
-        var child = new IncludeNode(IncludeNode.GetProperty(navigationSelector));
-        _node.Children.Add(child);
+        var child = SqlQuery<TEntity>.MergeInclude(
+            _node.Children,
+            IncludeNode.GetProperty(navigationSelector)
+        );
         return new IncludableSqlQuery<TEntity, TNext>(_query, child);
     }
 

@@ -218,6 +218,8 @@ var result = await customers.Query()
     .ToListAsync();
 ```
 
+同じナビゲーションを重ねて指定した `Include` / `ThenInclude` は 1 本のノードへマージされます。EF Core と同じ分岐イディオム——`Include(c => c.Orders).ThenInclude(o => o.OrderLines)` に続けて `Include(c => c.Orders).ThenInclude(o => o.Customer)`——で、`Orders` の下に複数の枝を書けます。
+
 対応: 等値・比較・`&&`/`||`・`Contains`/`StartsWith`/`EndsWith`（LIKE）・リストの `Contains`（IN）・日付部品（`Year` など）・`string.IsNullOrEmpty`・値オブジェクト比較。**射影（Select）・GroupBy・Join・算術式は未対応**です（実行時例外。生 SQL か EF Core で回避してください）。
 
 **ナビゲーションプロパティは述語にも並び替えキーにも書けません**。`Where(o => o.Customer == null)` は `NotSupportedException` になります。ナビゲーションは自分の列を持たないため、外部キー列で絞ってください（`Where(o => o.CustomerId == null)`）。インメモリと EF Core はこの述語を翻訳できるので、これは QuickER 版 Repository 固有の制限です。
@@ -255,7 +257,7 @@ var one = await orders.Query().IncludeGraph().GetByIdAsync(1000);   // キー指
 
 取得したグラフは `RowState = Unchanged` で返るため、編集してからルートを `SaveAsync` へ渡す「取得 → 編集 → 保存」の往復がそのまま成立します。
 
-- **パス上に既出のテーブルへ戻るナビゲーションはたどりません**。自己参照（`Category.Children` など）や相互参照は有限の `Include` ツリーに写せないため、その辺はスキップされ、生成時に Info 診断で名指しされます。スキップされたナビゲーションは空のまま返るので、再帰構造は必要な深さだけ手動の `Include` で取得してください。`IncludeGraph()` の後に追加の `Include` を重ねることもでき（`Query().IncludeGraph().Include(x => x.Customer).GetByIdAsync(id)`）、親参照やスキップされたナビを足すのが安全な合成です——閉包が既に含む子方向ナビゲーションを重ねて `Include` しないでください（同じナビの二重指定になります）。保存側はインスタンスグラフ（＝有限）をたどるため任意の深さを保存できます——この取得と保存の非対称は仕様です。
+- **パス上に既出のテーブルへ戻るナビゲーションはたどりません**。自己参照（`Category.Children` など）や相互参照は有限の `Include` ツリーに写せないため、その辺はスキップされ、生成時に Info 診断で名指しされます。スキップされたナビゲーションは空のまま返るので、再帰構造は必要な深さだけ手動の `Include` で取得してください。`IncludeGraph()` の後に追加の `Include` を重ねることもできます（`Query().IncludeGraph().Include(x => x.Customer).GetByIdAsync(id)`）。親参照やスキップされたナビを足すのが典型で、閉包が既に含む子方向ナビゲーションを重ねて指定しても同じノードへマージされるため安全です（`ThenInclude` でその下へ枝を足す用途にも使えます）。保存側はインスタンスグラフ（＝有限）をたどるため任意の深さを保存できます——この取得と保存の非対称は仕様です。
 - カスケード子を 1 つも持たないエンティティにも生成され、その場合はクエリをそのまま返す no-op です。
 - 深い階層・広い図では取得量が相応に大きくなります。SQL Server はグラフ全体を 1 本のネスト JSON クエリで取得するため（SQLite は階層ごとの分割クエリ）、一部の子だけでよい場面では手動の `Include` で絞ってください。
 - `WithUnboundedBinary()` とは併用できません（`Include` と同じ排他）。リモート面（`I{Entity}RemoteRepository`）には `Query()` が無いため、`IncludeGraph` もリモートでは使えません。
