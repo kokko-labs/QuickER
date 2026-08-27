@@ -46,7 +46,7 @@ QuickER は個人開発の OSS です。Issue・Pull Request を歓迎します�
 
 ## バージョニング
 
-- [Semantic Versioning](https://semver.org/lang/ja/) に従います。全配布物（GUI・CLI・ランタイムパッケージ 6 種）はロックステップ＝`Directory.Build.props` の `VersionPrefix` で共通管理です
+- [Semantic Versioning](https://semver.org/lang/ja/) に従います。全配布物（GUI・CLI・ランタイムパッケージ）はロックステップ＝`Directory.Build.props` の `VersionPrefix` で共通管理です
 - 0.x の間の版上げルール:
   - **minor**（0.2.0 → 0.3.0）: 新機能、非互換変更（Repository API や生成コードのシグネチャ・構造の変化、パッケージの依存変更）
   - **patch**（0.2.0 → 0.2.1）: バグ修正のみ。利用側の呼び出しコードが壊れない修正は、生成コードの内部実装が変わっても patch とします
@@ -54,10 +54,11 @@ QuickER は個人開発の OSS です。Issue・Pull Request を歓迎します�
 
 ## リリース手順（メンテナ向け）
 
-リリースは**常に全配布物同時**（NuGet 6 パッケージ＋GUI 配布物（Velopack: full / lite × Setup.exe / Portable zip）＋git タグ `v{版}`）。時期は任意で、頻度は約束しません。
+リリースは**常に全配布物同時**（NuGet パッケージ＋GUI 配布物（Velopack: full / lite × Setup.exe / Portable zip）＋git タグ `v{版}`）。時期は任意で、頻度は約束しません。
 
 1. CHANGELOG の Unreleased 欄を確認し、版番号（上記ルールで minor / patch を判断）を決める。欄の見出しを版番号＋リリース日（`## [0.2.0] - 2026-09-01`）へ書き換え、その上に空の `## [Unreleased]` を新設する——**[CHANGELOG.md](CHANGELOG.md) と [CHANGELOG.ja.md](CHANGELOG.ja.md) の両方**
 2. `Directory.Build.props` の `VersionPrefix` を更新し、CHANGELOG の確定と合わせて 1 コミットにする
-3. publish.yml（NuGet 6 パッケージ）を workflow_dispatch で実行する（まず dry_run で確認してから本番実行）
-4. release.yml（GUI 配布物の発行と git タグ作成）を workflow_dispatch で実行する（`dry_run` の既定は true。まず dry_run で成果物を確認してから `dry_run=false` で本番実行する）
-5. GitHub Release のノートへ CHANGELOG の該当版の内容を転記する（release.yml は意図的に本文を空で作成する。何がリリースされたかの正本は、整理された CHANGELOG に一本化するため）
+3. コミットを push する。以降のワークフローは GitHub 上で push 済みの ref に対して動くため、push していないと 1 つ前の版が公開される
+4. publish.yml（NuGet パッケージ）を workflow_dispatch で実行する。`dry_run` の既定は true で、pack と検証（各パッケージが README とアイコンを宣言しているか・ツールパッケージへ `.pdb` が混入していないか・全パッケージの版が一致しているか）まで行い NuGet.org への push はしない。その実行を確認してから `dry_run=false` で本番実行する。シンボルパッケージ（`.snupkg`）は本体と同時に push され、NuGet.org 側で別途検証される（失敗はメールで通知される）
+5. release.yml（GUI 配布物の発行と git タグ作成）を workflow_dispatch で実行する（`dry_run` の既定は true。まず dry_run で成果物を確認してから `dry_run=false` で本番実行する）
+6. GitHub Release のノートへ CHANGELOG の該当版の内容を転記する（release.yml は意図的に本文を空で作成する。何がリリースされたかの正本は、整理された CHANGELOG に一本化するため）
