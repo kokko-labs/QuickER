@@ -496,18 +496,7 @@ public class RuntimePackageModeCompilationTests
         var sqlServer = SqlServerCSharpTypeMapper.ResolveColumnTypes(diagram);
         var sqlite = SqliteCSharpTypeMapper.ResolveColumnTypes(diagram);
 
-        IReadOnlyList<string> dialects;
-
-        try
-        {
-            dialects = options.EffectiveRepositoryDialects;
-        }
-        catch (ArgumentException)
-        {
-            dialects = ["sqlserver"];
-        }
-
-        var primaryDialect = dialects[0];
+        var primaryDialect = options.EffectiveRepositoryDialects[0];
         var primary = string.Equals(primaryDialect, "sqlite", StringComparison.OrdinalIgnoreCase)
             ? sqlite
             : sqlServer;

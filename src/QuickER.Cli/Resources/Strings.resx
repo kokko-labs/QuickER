@@ -226,9 +226,6 @@
   <data name="Cli_SchemaNotDiagramDocument" xml:space="preserve">
     <value>The schema file is not an ER diagram document: {0}. Pass a diagram saved by QuickER (a JSON object with 'Version' and 'Schema').</value>
   </data>
-  <data name="Cli_RepositoryDialectUnsupported" xml:space="preserve">
-    <value>QuickER Repository (GenerateRepositories) does not support the dialect '{0}'. Supported dialects: {1}</value>
-  </data>
   <data name="Cli_GenerationAborted" xml:space="preserve">
     <value>Aborted due to a generation error.</value>
   </data>

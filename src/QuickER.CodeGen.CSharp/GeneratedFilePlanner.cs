@@ -410,27 +410,6 @@ public static class GeneratedFilePlanner
         return active;
     }
 
-    /// <summary>
-    /// 計画で各スペックへ載せる方言を、例外を投げずに解決する。
-    /// </summary>
-    /// <remarks>
-    /// 実効方言（<see cref="CodeGenerationOptions.EffectiveRepositoryDialects"/>）は未対応方言で例外を投げるが、
-    /// Plan はプレビューなどでも呼ばれ、Repository 非生成時には図の方言名（例 mysql）が <see cref="CodeGenerationOptions.RepositoryDialects"/> に
-    /// 残ることがある。ここで例外にすると生成しない構成のプレビューまで壊れるため、非例外で単一方言（先頭）を採り、
-    /// 未対応方言は <c>sqlserver</c> 相当へフォールバックさせる（実効方言の検証・診断は生成本体が担う）。
-    /// </remarks>
-    private static IReadOnlyList<string> ResolvePlanningDialects(CodeGenerationOptions options)
-    {
-        try
-        {
-            return options.EffectiveRepositoryDialects;
-        }
-        catch (ArgumentException)
-        {
-            return ["sqlserver"];
-        }
-    }
-
     /// <summary>方言別実装の名前空間サフィックス（<c>{RepositoryNamespace}.SqlServer</c> 等）を返す</summary>
     /// <remarks>UI 入力を増やさず、方言名から自動導出する（プロバイダ名 sqlserver / sqlite に一致）</remarks>
     public static string DialectNamespaceSuffix(string dialect) =>
@@ -463,6 +442,12 @@ public static class GeneratedFilePlanner
     /// 1:1 対応）へ集約し、<c>Repositories*.g.cs</c> は per-entity・DI 登録・DbContext だけへ純化する。
     /// パッケージ参照モードでは <c>Runtime*.g.cs</c> を 1 本も計画しない（固定 infra はパッケージが持つ）。
     /// </para>
+    /// <para>
+    /// 前提: <paramref name="options"/> は生成本体（<c>CSharpCodeGenerationService.Generate</c>）が実効方言を検証済みか、
+    /// GUI プレビューのように対応方言だけを選ばせた構成である。未対応方言は
+    /// <see cref="CodeGenerationOptions.EffectiveRepositoryDialects"/> が
+    /// QuickER 版 Repository 非生成時には <c>sqlserver</c> へフォールバックし、生成時には例外にする。
+    /// </para>
     /// </remarks>
     public static IReadOnlyList<GeneratedFileSpec> Plan(CodeGenerationOptions options)
     {
@@ -470,10 +455,7 @@ public static class GeneratedFilePlanner
         var active = ActiveBuckets(options);
         // 実効方言の先頭を各スペックへ持たせる（単一方言＝現行値。方言リテラル参照をスコープ由来に一本化する）。
         // 型解決・診断・[SqlColumnType] 補完はマルチ辞書として M1 で機能する。
-        // Plan はプレビュー等でも呼ばれ、未対応方言指定（Repository 非生成時に残る図の方言名）でも例外にしてはならない。
-        // 実効方言の検証・診断は生成本体（CSharpCodeGenerationService.Generate）が担うため、ここでは非例外で先頭方言を採る
-        // （未対応値は RepositoryDialectVariables 側で sqlserver 相当へフォールバックする）。
-        var dialects = ResolvePlanningDialects(options);
+        var dialects = options.EffectiveRepositoryDialects;
         var primaryDialect = dialects[0];
 
         var repositoryActive = active.Contains(GenerationBucket.Repository);

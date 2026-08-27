@@ -251,16 +251,7 @@ internal sealed class ApiReferenceDocRenderer
 
         if (options.GenerateRepositories)
         {
-            IReadOnlyList<string> dialects;
-
-            try
-            {
-                dialects = options.EffectiveRepositoryDialects;
-            }
-            catch (ArgumentException)
-            {
-                dialects = ["sqlserver"];
-            }
+            var dialects = options.EffectiveRepositoryDialects;
 
             // QuickER 版 Repository の DI 登録はエンジン別（AddGenerated{方言}Repositories）で統一。
             // 単一方言でも方言別名を使い、マルチ方言（実効方言 2 つ以上）では keyed 解決の例も添える。

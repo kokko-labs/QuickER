@@ -43,20 +43,7 @@ public static class RuntimePackageReferenceGuidance
 
         if (options.GenerateRepositories)
         {
-            // 実効方言の解決は未対応方言で例外を投げるが、案内はプレビュー等でも呼ばれ得るため非例外にする
-            // （未対応方言は sqlserver 相当へフォールバック。実効方言の検証・診断は生成本体が担う）。
-            IReadOnlyList<string> dialects;
-
-            try
-            {
-                dialects = options.EffectiveRepositoryDialects;
-            }
-            catch (ArgumentException)
-            {
-                dialects = ["sqlserver"];
-            }
-
-            foreach (var dialect in dialects)
+            foreach (var dialect in options.EffectiveRepositoryDialects)
             {
                 var package = IsSqlite(dialect)
                     ? RuntimePackages.Sqlite

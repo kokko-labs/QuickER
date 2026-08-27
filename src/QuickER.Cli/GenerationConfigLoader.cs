@@ -285,34 +285,14 @@ internal static class GenerationConfigLoader
 
         if (options.GenerateRepositories)
         {
-            IReadOnlyList<string> effectiveDialects;
+            // 実効方言の解決（未対応方言はここで ArgumentException。CLI 用の例外型へ変換して整形表示へ載せる）
             try
             {
-                effectiveDialects = options.EffectiveRepositoryDialects;
+                _ = options.EffectiveRepositoryDialects;
             }
             catch (ArgumentException ex)
             {
                 throw new RepositoryDialectUnsupportedException(ex.Message);
-            }
-
-            var unsupported = effectiveDialects
-                .Where(dialect =>
-                    !CodeGenerationOptions.SupportedRepositoryDialects.Contains(
-                        dialect,
-                        StringComparer.OrdinalIgnoreCase
-                    )
-                )
-                .ToList();
-
-            if (unsupported.Count > 0)
-            {
-                throw new RepositoryDialectUnsupportedException(
-                    string.Format(
-                        Strings.Cli_RepositoryDialectUnsupported,
-                        string.Join(", ", unsupported),
-                        string.Join(", ", CodeGenerationOptions.SupportedRepositoryDialects)
-                    )
-                );
             }
         }
 
