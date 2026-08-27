@@ -13,11 +13,12 @@
     <!-- NuGet パッケージメタデータ。バージョンは Directory.Build.props の VersionPrefix に一元化 -->
     <PackageId>QuickER.Cli</PackageId>
     <Description>The QuickER CLI as a dotnet tool: C# code generation from an ER diagram JSON (generate), database-direct diagram scaffolding (scaffold), C# reverse import (reverse), and a stdio MCP server for AI agents (mcp). QuickER is an ER diagram designer that turns a single reviewed model into DDL, C# data access, and documentation.</Description>
-    <PackageTags>quicker;er-diagram;entity-relationship;code-generation;scaffolding;ddl;database;sql-server;postgresql;mysql;oracle;sqlite;mcp;dotnet-tool</PackageTags>
+    <PackageTags>quicker;er-diagram;entity-relationship;code-generation;scaffolding;ddl;database;sql-server;postgresql;mysql;oracle;sqlite;mcp;dotnet-tool;entity-framework-core;efcore</PackageTags>
     <RepositoryUrl>https://github.com/kokko-labs/QuickER</RepositoryUrl>
     <!-- PolyForm Noncommercial は OSI/FSF 承認外のため license expression が使えず、ライセンスファイル同梱方式にする -->
     <PackageLicenseFile>LICENSE-NC.md</PackageLicenseFile>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageIcon>quicker-icon-128.png</PackageIcon>
   </PropertyGroup>
 
   <ItemGroup>
@@ -30,6 +31,7 @@
       Visible="false"
     />
     <None Include="README.md" Pack="true" PackagePath="README.md" />
+    <None Include="../../assets/quicker-icon-128.png" Pack="true" PackagePath="quicker-icon-128.png" Visible="false" />
   </ItemGroup>
 
   <ItemGroup>

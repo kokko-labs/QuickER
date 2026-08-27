@@ -21,7 +21,7 @@ The generated code header and the QuickER CLI output show the packages and versi
 
 ## Documentation and feedback
 
-- [Using the generated code](https://github.com/kokko-labs/QuickER/blob/main/docs/code-generation.md)
+- [Using the generated code](https://github.com/kokko-labs/QuickER/blob/main/docs/code-generation.md#runtime-package-reference-mode---use-runtime-packages)
 - [Report an issue](https://github.com/kokko-labs/QuickER/issues)
 
 ## License

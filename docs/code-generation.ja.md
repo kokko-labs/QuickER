@@ -1021,15 +1021,17 @@ DB なしでユニットテストするためのインメモリ実装を追加�
 
 既定では、生成コードはランタイム（スキーマ非依存の固定コード）込みのインライン出力で自己完結します。`--use-runtime-packages` を指定すると固定コードを出力せず、次の NuGet パッケージへの参照で賄います（生成ヘッダと CLI 出力に必要な PackageReference が案内されます。csproj には手動で追加してください）:
 
-| パッケージ | 内容 | 依存 |
+| パッケージ | 内容 | サードパーティ依存 |
 |---|---|---|
 | `QuickER.Runtime` | 共通基盤・方言中立の契約 | なし |
 | `QuickER.Runtime.SqlServer` | QuickER の SQL Server 方言エンジン | Microsoft.Data.SqlClient |
-| `QuickER.Runtime.Sqlite` | QuickER の SQLite 方言エンジン | Microsoft.Data.Sqlite |
+| `QuickER.Runtime.Sqlite` | QuickER の SQLite 方言エンジン | Microsoft.Data.Sqlite・SQLitePCLRaw.bundle_e_sqlite3 |
 | `QuickER.Runtime.EntityFrameworkCore` | EF Core 共通部品 | Microsoft.EntityFrameworkCore.Relational |
 | `QuickER.Runtime.InMemory` | インメモリエンジン（テスト用） | なし |
 | `QuickER.Runtime.AspNetCore` | 生成されるリモートエンドポイントのサーバー側固定エンジン | ASP.NET Core（NuGet 依存ではなく `FrameworkReference`） |
 | `QuickER.Runtime.Sync` | 双方向同期エンジン（ジャーナル・テーブル記述子・競合の型） | なし |
+
+`QuickER.Runtime` 以外の 6 本は、上表に加えて `QuickER.Runtime` への依存を宣言します（nuget.org の Dependencies 欄にはそれも並びます）。
 
 パッケージ版とツール版はロックステップ（同一バージョン）で公開されるため、両者には同じバージョンを使ってください。0.x の間は minor 間の互換性を約束していません（[CONTRIBUTING](../CONTRIBUTING.ja.md) のバージョニング方針を参照）。DI 登録拡張・`QuickErDbContext`・エンティティ別実装などのスキーマ依存物は、本モードでも常に生成側に出力されます。
 
