@@ -33,14 +33,47 @@ public static class CliApp
     /// 出力を捕捉するための注入版。既定版（<see cref="InvokeAsync(string[])"/>）は実コンソールへ出力する。
     /// こちらはコンソールの状態（出力エンコーディング）に一切触れない。
     /// </remarks>
-    public static Task<int> InvokeAsync(string[] args, TextWriter stdout, TextWriter stderr)
+    /// <returns>
+    /// プロセス終了コード。想定外の例外は整形した 1 行を標準エラーへ出して 1（環境変数 <c>QUICKER_DEBUG=1</c>
+    /// のときのみスタックトレース込みの全文）、中断（<see cref="OperationCanceledException"/>）は無出力で 130。
+    /// </returns>
+    public static async Task<int> InvokeAsync(string[] args, TextWriter stdout, TextWriter stderr)
     {
         var root = new RootCommand(Strings.Cli_RootDescription);
         root.Subcommands.Add(BuildGenerateCommand(stdout, stderr));
         root.Subcommands.Add(BuildScaffoldCommand(stdout, stderr));
         root.Subcommands.Add(BuildReverseCommand(stdout, stderr));
         root.Subcommands.Add(BuildMcpCommand());
-        return root.Parse(args).InvokeAsync();
+
+        // 既定の例外ハンドラはスタックトレースをそのまま露出するため無効化し、自前で整形する
+        // （ヘルプ・解析エラーの出力先も注入された writer へ揃える）。
+        var configuration = new InvocationConfiguration
+        {
+            EnableDefaultExceptionHandler = false,
+            Output = stdout,
+            Error = stderr,
+        };
+
+        try
+        {
+            return await root.Parse(args).InvokeAsync(configuration).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // Ctrl+C 等による中断。追加の出力はせず、SIGINT の慣例に従った終了コードを返す
+            return 130;
+        }
+        catch (Exception ex)
+        {
+            // 想定外の例外はメッセージ 1 行だけを出す。全文（スタックトレース込み）は QUICKER_DEBUG=1 のときのみ
+            stderr.WriteLine(
+                Environment.GetEnvironmentVariable("QUICKER_DEBUG") == "1"
+                    ? ex.ToString()
+                    : string.Format(Strings.Cli_UnhandledError, ex.Message)
+            );
+
+            return 1;
+        }
     }
 
     /// <summary>日本語メッセージの文字化けを避けるため標準出力を UTF-8 にする（リダイレクト時の失敗は無視）</summary>
@@ -139,12 +172,48 @@ public static class CliApp
     }
 
     /// <summary>保存形式の ER 図 JSON を読み込み、意味モデル（<see cref="ErDiagram"/>）を返す</summary>
-    /// <remarks>新しいフォーマットの文書は未知のプロパティを黙って無視するため、警告してから続行する</remarks>
-    private static ErDiagram LoadSchemaDiagram(FileInfo schemaFile, TextWriter stderr)
+    /// <remarks>
+    /// 読込は形式検証込みの <see cref="JsonStorageService.TryLoad"/> を通す。無関係な JSON を「空図」として
+    /// 読むと「ER 図にエンティティがありません」という原因と噛み合わない診断で落ちるため、
+    /// 失敗種別ごとの文言を出して <c>null</c>（＝呼び出し側で終了コード 1）を返す。
+    /// 新しいフォーマットの文書は未知のプロパティを黙って無視するため、警告してから続行する。
+    /// </remarks>
+    private static ErDiagram? LoadSchemaDiagram(FileInfo schemaFile, TextWriter stderr)
     {
-        var document = JsonStorageService.Load(schemaFile.FullName);
+        if (
+            !JsonStorageService.TryLoad(
+                schemaFile.FullName,
+                out var document,
+                out var error,
+                out var exception
+            )
+        )
+        {
+            stderr.WriteLine(
+                error switch
+                {
+                    DocumentLoadError.ReadFailed => string.Format(
+                        Strings.Cli_SchemaReadFailed,
+                        schemaFile.FullName,
+                        exception!.Message
+                    ),
+                    DocumentLoadError.InvalidJson => string.Format(
+                        Strings.Cli_SchemaInvalidJson,
+                        schemaFile.FullName,
+                        exception!.Message
+                    ),
+                    DocumentLoadError.NotDiagramDocument => string.Format(
+                        Strings.Cli_SchemaNotDiagramDocument,
+                        schemaFile.FullName
+                    ),
+                    _ => throw new ArgumentOutOfRangeException(nameof(error), error, null),
+                }
+            );
 
-        if (document.IsNewerFormat)
+            return null;
+        }
+
+        if (document!.IsNewerFormat)
         {
             stderr.WriteLine(
                 string.Format(

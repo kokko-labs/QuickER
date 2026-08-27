@@ -431,5 +431,29 @@ namespace QuickER.Cli.Resources {
                 return ResourceManager.GetString("Cli_Cmd_Mcp", resourceCulture);
             }
         }
+
+        public static string Cli_UnhandledError {
+            get {
+                return ResourceManager.GetString("Cli_UnhandledError", resourceCulture);
+            }
+        }
+
+        public static string Cli_SchemaReadFailed {
+            get {
+                return ResourceManager.GetString("Cli_SchemaReadFailed", resourceCulture);
+            }
+        }
+
+        public static string Cli_SchemaInvalidJson {
+            get {
+                return ResourceManager.GetString("Cli_SchemaInvalidJson", resourceCulture);
+            }
+        }
+
+        public static string Cli_SchemaNotDiagramDocument {
+            get {
+                return ResourceManager.GetString("Cli_SchemaNotDiagramDocument", resourceCulture);
+            }
+        }
     }
 }

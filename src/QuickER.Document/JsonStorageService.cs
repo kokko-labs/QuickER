@@ -1,10 +1,31 @@
 using System.IO;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using QuickER.Model;
 using QuickER.Settings;
 
 namespace QuickER.Documents;
+
+/// <summary><see cref="JsonStorageService.TryLoad"/> が読込を断念した理由の種別</summary>
+/// <remarks>
+/// 表示文言は持たない。読込経路ごとに要求が異なる（MCP／CLI のツールは英語固定・GUI と CLI 本体は
+/// ローカライズ）ため、種別から文言への変換は呼び出し側の責務とする。
+/// </remarks>
+public enum DocumentLoadError
+{
+    /// <summary>失敗していない（読込に成功した）</summary>
+    None,
+
+    /// <summary>ファイルを読み取れなかった（不在・アクセス不可などの IO エラー）</summary>
+    ReadFailed,
+
+    /// <summary>内容を JSON として解析できなかった</summary>
+    InvalidJson,
+
+    /// <summary>JSON としては妥当だが、ER 図の保存形式（<c>Version</c>・<c>Schema</c>）ではなかった</summary>
+    NotDiagramDocument,
+}
 
 /// <summary>ER 図を JSON ファイルへ保存・読み込みするトップレベルサービス</summary>
 /// <remarks>
@@ -65,17 +86,88 @@ public static class JsonStorageService
     /// <remarks>
     /// <b>図の読込経路（GUI の開く／外部変更の再読込／自動保存の復元・MCP のツール実行・CLI）は
     /// すべてこのメソッドを通るため、null 正規化はここ 1 箇所に集約する。</b>
+    /// <para>
+    /// 本メソッドは欠落キーを既定値で補うため、ER 図と無関係な JSON も「空図」として読める。
+    /// ユーザーが指すファイルを読む経路（＝無関係な JSON を渡され得る経路）は、形式検証込みの
+    /// <see cref="TryLoad"/> を使うこと。素の <see cref="Load"/> は「自分が書いたファイルを読み戻す」
+    /// 用途（自動保存の復元・テストのフィクスチャ）に用いる。
+    /// </para>
     /// </remarks>
     /// <param name="path">読み込むファイルパス</param>
     /// <returns>読み込んだ <see cref="DiagramDocument"/>（内容が空の場合は新規インスタンス）</returns>
-    public static DiagramDocument Load(string path)
-    {
-        var json = File.ReadAllText(path);
-        var document =
-            JsonSerializer.Deserialize<DiagramDocument>(json, Options) ?? new DiagramDocument();
+    public static DiagramDocument Load(string path) => Deserialize(File.ReadAllText(path));
 
-        return Normalize(document);
+    /// <summary>ER 図の保存形式として妥当か検証したうえでファイルから保存文書を読み込む</summary>
+    /// <remarks>
+    /// 検証は「読み取り → JSON 解析 → ルートが <c>Version</c>・<c>Schema</c> を持つ JSON オブジェクトか」の
+    /// 3 段で、<see cref="JsonStorageService"/> の読込仕様に合わせキー名の大文字小文字は区別する。
+    /// 無関係な JSON（例 <c>package.json</c>）を「空図」として読み込み、誤解釈・上書きするのを防ぐ。
+    /// <para>
+    /// フォーマット版の判定（<see cref="DiagramDocument.IsNewerFormat"/>）は含まない。新フォーマットを
+    /// 拒否するか警告して続行するかは経路ごとに異なるため、読み込んだ文書を見て呼び出し側が決める。
+    /// </para>
+    /// </remarks>
+    /// <param name="path">読み込むファイルパス</param>
+    /// <param name="document">読み込んだ文書（失敗時は <c>null</c>）</param>
+    /// <param name="error">失敗の種別（成功時は <see cref="DocumentLoadError.None"/>）</param>
+    /// <param name="exception">
+    /// 失敗の原因となった例外。<see cref="DocumentLoadError.ReadFailed"/>・
+    /// <see cref="DocumentLoadError.InvalidJson"/> のときだけ非 null で、形式検証で弾いた場合と成功時は null。
+    /// </param>
+    /// <returns>読み込めた場合は <c>true</c></returns>
+    public static bool TryLoad(
+        string path,
+        out DiagramDocument? document,
+        out DocumentLoadError error,
+        out Exception? exception
+    )
+    {
+        document = null;
+        error = DocumentLoadError.None;
+        exception = null;
+
+        string json;
+
+        try
+        {
+            json = File.ReadAllText(path);
+        }
+        catch (Exception ex)
+        {
+            error = DocumentLoadError.ReadFailed;
+            exception = ex;
+            return false;
+        }
+
+        JsonNode? root;
+
+        try
+        {
+            root = JsonNode.Parse(json);
+        }
+        catch (JsonException ex)
+        {
+            error = DocumentLoadError.InvalidJson;
+            exception = ex;
+            return false;
+        }
+
+        if (root is not JsonObject obj || obj["Version"] is null || obj["Schema"] is not JsonObject)
+        {
+            error = DocumentLoadError.NotDiagramDocument;
+            return false;
+        }
+
+        document = Deserialize(json);
+        return true;
     }
+
+    /// <summary>JSON 文字列を保存文書へ逆直列化し、非 null 契約を満たすよう正規化する</summary>
+    /// <remarks><see cref="Load"/> と <see cref="TryLoad"/> で読込結果を完全に一致させるための共有ヘルパ</remarks>
+    private static DiagramDocument Deserialize(string json) =>
+        Normalize(
+            JsonSerializer.Deserialize<DiagramDocument>(json, Options) ?? new DiagramDocument()
+        );
 
     /// <summary>読み込んだ保存文書のコレクション・必須値を、モデルの非 null 契約に合わせて修復する</summary>
     /// <remarks>
@@ -87,7 +179,7 @@ public static class JsonStorageService
     /// 方針は「修復であって拒否ではない」。<c>System.Text.Json</c> の
     /// <c>RespectNullableAnnotations</c> による例外化は、キー欠落・古い形式もそのまま読める
     /// という <see cref="Options"/> の互換契約を壊すため採らない。図として妥当かどうか
-    /// （無関係な JSON でないか）の判断は、呼び出し側の事前検証の責務とする。
+    /// （無関係な JSON でないか）の判定は、修復前段の形式検証（<see cref="TryLoad"/>）が担う。
     /// </para>
     /// </remarks>
     private static DiagramDocument Normalize(DiagramDocument document)

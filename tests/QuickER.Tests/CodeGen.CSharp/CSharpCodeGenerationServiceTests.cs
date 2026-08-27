@@ -3356,6 +3356,67 @@ public class CSharpCodeGenerationServiceTests
             );
     }
 
+    /// <summary>
+    /// 非分割でも Repository 名前空間だけは検証されることを検証する（カテゴリ別名前空間の Repository 特例）
+    /// </summary>
+    /// <remarks>
+    /// 他のカテゴリ別名前空間は分割時にしか使われないが、Repository 名前空間は非分割の
+    /// マルチ方言レイアウトでも使われるため、分割の有無に依らず検証される。特例が消えると
+    /// 不正な名前空間が無警告でコンパイル不能な出力になるが、型検査には出ない。
+    /// </remarks>
+    [Fact]
+    public void Generate_InvalidRepositoryNamespace_WithoutSplit_ShouldFailWithError()
+    {
+        var options = new CodeGenerationOptions
+        {
+            RootNamespace = "Sample.Domain",
+            SplitFilesByCategory = false,
+            GenerateRepositories = true,
+            IncludeDataAnnotations = true,
+            RepositoryNamespace = "123 bad",
+        };
+
+        var result = new CSharpCodeGenerationService().Generate(SingleEntityDiagram(), options);
+
+        result.HasErrors.Should().BeTrue();
+        result.Files.Should().BeEmpty();
+        result
+            .Diagnostics.Should()
+            .Contain(diagnostic =>
+                diagnostic.Severity == GenerationDiagnosticSeverity.Error
+                && diagnostic.Message.Contains("RepositoryNamespace")
+                && diagnostic.Message.Contains("123 bad")
+            );
+    }
+
+    /// <summary>
+    /// Repository バケットが非活性なら、非分割で不正な Repository 名前空間を指定しても検証されない（特例の成功側）
+    /// </summary>
+    /// <remarks>
+    /// 検証の条件は「バケットが有効」かつ「分割 or Repository 特例」の 2 段。特例側だけを見て
+    /// バケット条件を落とすと、Repository を 1 行も出さない構成が使われない設定値で落ちるようになる。
+    /// </remarks>
+    [Fact]
+    public void Generate_InvalidRepositoryNamespace_WithoutRepositoryBucket_ShouldSucceed()
+    {
+        var options = new CodeGenerationOptions
+        {
+            RootNamespace = "Sample.Domain",
+            SplitFilesByCategory = false,
+            GenerateRepositories = false,
+            GenerateEfCore = false,
+            RepositoryNamespace = "123 bad",
+        };
+
+        var result = new CSharpCodeGenerationService().Generate(SingleEntityDiagram(), options);
+
+        result.HasErrors.Should().BeFalse();
+        result.Files.Should().NotBeEmpty();
+        result
+            .Diagnostics.Should()
+            .NotContain(diagnostic => diagnostic.Message.Contains("RepositoryNamespace"));
+    }
+
     /// <summary>多対多リレーションの警告がエンティティ数に関係なく 1 回だけ追加されることを検証する（重複解消）</summary>
     [Fact]
     public void Generate_ManyToManyWarning_ShouldNotBeDuplicated()

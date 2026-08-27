@@ -217,6 +217,15 @@
   <data name="Cli_SchemaImportFailed" xml:space="preserve">
     <value>データベースからのスキーマ取得に失敗しました: {0}</value>
   </data>
+  <data name="Cli_SchemaReadFailed" xml:space="preserve">
+    <value>スキーマファイルを読み取れません: {0}（{1}）</value>
+  </data>
+  <data name="Cli_SchemaInvalidJson" xml:space="preserve">
+    <value>スキーマファイルが JSON として不正です: {0}（{1}）</value>
+  </data>
+  <data name="Cli_SchemaNotDiagramDocument" xml:space="preserve">
+    <value>スキーマファイルは ER 図の保存形式ではありません: {0}。QuickER が保存した図（Version・Schema を持つ JSON オブジェクト）を指定してください。</value>
+  </data>
   <data name="Cli_RepositoryDialectUnsupported" xml:space="preserve">
     <value>Repository (QuickER)（GenerateRepositories）は方言 '{0}' に対応していません。対応方言: {1}</value>
   </data>
@@ -246,5 +255,8 @@
   </data>
   <data name="Cli_Cmd_Mcp" xml:space="preserve">
     <value>AI エージェント向けに ER 図編集・コード生成ツールを公開する stdio MCP サーバを起動する（標準入出力で JSON-RPC 通信。各ツールは対象図ファイルを file 引数で受ける）</value>
+  </data>
+  <data name="Cli_UnhandledError" xml:space="preserve">
+    <value>エラー: {0}</value>
   </data>
 </root>

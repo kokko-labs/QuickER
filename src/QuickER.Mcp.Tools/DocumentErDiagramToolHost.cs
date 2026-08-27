@@ -1,7 +1,6 @@
 using System.IO;
 using System.Text;
 using System.Text.Json;
-using System.Text.Json.Nodes;
 using QuickER.Documents;
 using QuickER.Model;
 
@@ -135,44 +134,35 @@ public static partial class DocumentErDiagramToolHost
 
     /// <summary>ファイルを読み、DiagramDocument として妥当か検証したうえで読み込む</summary>
     /// <remarks>
-    /// <see cref="JsonStorageService.Load"/> は既定値を補うため、無関係な JSON も「空図」として
-    /// 読めてしまう。上書き・誤解釈を防ぐため、ルートが JSON オブジェクトで <c>Version</c>・<c>Schema</c>
-    /// キーを持つことを（<see cref="JsonStorageService"/> の読込仕様に合わせ大文字小文字を区別して）検証する。
+    /// 検証は <see cref="JsonStorageService.TryLoad"/> に委ね、失敗種別を MCP ツールの応答文言
+    /// （英語正本）へ翻訳するだけを担う。
     /// </remarks>
     private static (DiagramDocument? Document, string? Error) TryReadDocument(string file)
     {
-        string text;
-
-        try
+        if (JsonStorageService.TryLoad(file, out var document, out var error, out var exception))
         {
-            text = File.ReadAllText(file);
-        }
-        catch (Exception ex)
-        {
-            return (null, $"Failed to read diagram file '{file}': {ex.Message}");
+            return (document, null);
         }
 
-        JsonNode? root;
-
-        try
-        {
-            root = JsonNode.Parse(text);
-        }
-        catch (JsonException ex)
-        {
-            return (null, $"Diagram file '{file}' is not valid JSON: {ex.Message}");
-        }
-
-        if (root is not JsonObject obj || obj["Version"] is null || obj["Schema"] is not JsonObject)
-        {
-            return (
-                null,
-                $"Diagram file '{file}' is not a DiagramDocument (expected an object with 'Version' and 'Schema'). Refusing to treat unrelated JSON as a diagram."
-            );
-        }
-
-        return (JsonStorageService.Load(file), null);
+        return (null, DescribeLoadError(file, error, exception));
     }
+
+    /// <summary>読込失敗の種別を MCP ツールの応答文言へ翻訳する（ユーザー向け文字列は英語正本）</summary>
+    private static string DescribeLoadError(
+        string file,
+        DocumentLoadError error,
+        Exception? exception
+    ) =>
+        error switch
+        {
+            DocumentLoadError.ReadFailed =>
+                $"Failed to read diagram file '{file}': {exception!.Message}",
+            DocumentLoadError.InvalidJson =>
+                $"Diagram file '{file}' is not valid JSON: {exception!.Message}",
+            DocumentLoadError.NotDiagramDocument =>
+                $"Diagram file '{file}' is not a DiagramDocument (expected an object with 'Version' and 'Schema'). Refusing to treat unrelated JSON as a diagram.",
+            _ => throw new ArgumentOutOfRangeException(nameof(error), error, null),
+        };
 
     // ---------------- create_diagram ----------------
 

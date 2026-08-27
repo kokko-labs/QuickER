@@ -217,6 +217,15 @@
   <data name="Cli_SchemaImportFailed" xml:space="preserve">
     <value>Failed to import the schema from the database: {0}</value>
   </data>
+  <data name="Cli_SchemaReadFailed" xml:space="preserve">
+    <value>Failed to read the schema file: {0} ({1})</value>
+  </data>
+  <data name="Cli_SchemaInvalidJson" xml:space="preserve">
+    <value>The schema file is not valid JSON: {0} ({1})</value>
+  </data>
+  <data name="Cli_SchemaNotDiagramDocument" xml:space="preserve">
+    <value>The schema file is not an ER diagram document: {0}. Pass a diagram saved by QuickER (a JSON object with 'Version' and 'Schema').</value>
+  </data>
   <data name="Cli_RepositoryDialectUnsupported" xml:space="preserve">
     <value>QuickER Repository (GenerateRepositories) does not support the dialect '{0}'. Supported dialects: {1}</value>
   </data>
@@ -246,5 +255,8 @@
   </data>
   <data name="Cli_Cmd_Mcp" xml:space="preserve">
     <value>Start a stdio MCP server that exposes ER diagram editing and code generation tools for AI agents (communicates over stdin/stdout using JSON-RPC; each tool takes the target diagram file as its 'file' argument)</value>
+  </data>
+  <data name="Cli_UnhandledError" xml:space="preserve">
+    <value>Error: {0}</value>
   </data>
 </root>

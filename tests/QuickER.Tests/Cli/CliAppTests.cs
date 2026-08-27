@@ -4,6 +4,7 @@ using AwesomeAssertions;
 using QuickER.Cli;
 using QuickER.Documents;
 using QuickER.Model;
+using CodeGenStrings = QuickER.CodeGen.CSharp.Resources.Strings;
 
 namespace QuickER.Tests.Cli;
 
@@ -168,6 +169,117 @@ public class CliAppTests
             var warning = stderr.ToString();
             warning.Should().Contain($"v{DiagramDocument.CurrentVersion + 1}");
             warning.Should().Contain($"v{DiagramDocument.CurrentVersion}");
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// <c>--schema</c> に ER 図と無関係な妥当 JSON（例 <c>package.json</c>）を渡すと、「空図」として
+    /// 読み込まず、形式が違う旨のメッセージ付きで終了コード 1 になることを検証する
+    /// </summary>
+    /// <remarks>
+    /// 形式検証なしで <see cref="JsonStorageService.Load"/> を通すと、欠落キーが既定値で補われて
+    /// エンティティ 0 件の図になり、原因と噛み合わない「ER 図にエンティティがありません」で落ちていた。
+    /// 誤誘導が戻らないよう、その診断が出ないことも併せて固定する。
+    /// </remarks>
+    [Fact(DisplayName = "--schema が非 ER 図の JSON は終了コード 1（形式違いのメッセージ）")]
+    public async Task Generate_SchemaNotDiagramDocument_ReturnsError()
+    {
+        var root = Path.Combine(
+            Path.GetTempPath(),
+            "QuickERCliTests",
+            Guid.NewGuid().ToString("N")
+        );
+        Directory.CreateDirectory(root);
+        var schemaPath = Path.Combine(root, "package.json");
+        var outDir = Path.Combine(root, "out");
+        File.WriteAllText(schemaPath, """{ "name": "my-app", "version": "1.0.0" }""");
+        var stdout = new StringWriter();
+        var stderr = new StringWriter();
+
+        try
+        {
+            var exit = await CliApp.InvokeAsync(
+                ["generate", "--schema", schemaPath, "--out", outDir],
+                stdout,
+                stderr
+            );
+
+            exit.Should().Be(1);
+            Directory
+                .Exists(outDir)
+                .Should()
+                .BeFalse("図の読込に失敗した時点で中止するため出力は作られない");
+
+            var error = stderr.ToString();
+            // 文言はロケール依存のため、埋め込まれるスキーマのパスで検証する
+            error.Should().Contain(schemaPath);
+            error
+                .Should()
+                .NotContain(
+                    CodeGenStrings.CodeGen_Error_NoEntities,
+                    "無関係な JSON を空図として読み込んだ結果の誤誘導エラーへ戻さない"
+                );
+            error.Should().NotContain("   at ", "整形メッセージのみでスタックトレースは出さない");
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// <c>--schema</c> の JSON が壊れている場合は、トップレベルの例外ハンドラへ抜けず、
+    /// 図の読込失敗として整形メッセージ（パス入り）＋終了コード 1 になることを検証する
+    /// </summary>
+    [Fact(DisplayName = "--schema が不正 JSON は終了コード 1（整形メッセージ）")]
+    public async Task Generate_SchemaInvalidJson_ReturnsError()
+    {
+        var root = Path.Combine(
+            Path.GetTempPath(),
+            "QuickERCliTests",
+            Guid.NewGuid().ToString("N")
+        );
+        Directory.CreateDirectory(root);
+        var schemaPath = Path.Combine(root, "schema.json");
+        var outDir = Path.Combine(root, "out");
+        // 閉じ括弧が欠けた不正 JSON
+        File.WriteAllText(schemaPath, """{ "Version": 1, "Schema": { """);
+        var stdout = new StringWriter();
+        var stderr = new StringWriter();
+
+        try
+        {
+            var exit = await CliApp.InvokeAsync(
+                ["generate", "--schema", schemaPath, "--out", outDir],
+                stdout,
+                stderr
+            );
+
+            exit.Should().Be(1);
+            Directory
+                .Exists(outDir)
+                .Should()
+                .BeFalse("図の読込に失敗した時点で中止するため出力は作られない");
+
+            var error = stderr.ToString();
+            error.Should().Contain(schemaPath);
+            error
+                .Should()
+                .NotContain(
+                    CodeGenStrings.CodeGen_Error_NoEntities,
+                    "破損 JSON を空図として読み込んだ結果の誤誘導エラーへ戻さない"
+                );
+            error.Should().NotContain("   at ", "整形メッセージのみでスタックトレースは出さない");
         }
         finally
         {
@@ -1622,6 +1734,186 @@ public class CliAppTests
             File.Exists(Path.Combine(outDir, "ApiDocs.g.md")).Should().BeFalse();
             // 生成コード（.g.cs）は出力ディレクトリ直下のまま
             File.Exists(Path.Combine(outDir, "Entities.g.cs")).Should().BeTrue();
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// QuickER 版 Repository を生成しない既定構成では、未対応方言のプロバイダ（PostgreSQL / MySQL / Oracle）でも
+    /// generate が成功することを検証する（CLI は --repository-dialects 未指定時に図の方言名を焼き込むため、
+    /// 実効方言の解決が例外にならないことがこの経路の前提になる）
+    /// </summary>
+    [Theory(DisplayName = "未対応方言プロバイダでも Repository 非生成の generate は成功する")]
+    [InlineData("postgresql")]
+    [InlineData("mysql")]
+    [InlineData("oracle")]
+    public async Task Generate_UnsupportedDialectWithoutRepositories_Succeeds(string providerName)
+    {
+        var (schemaPath, outDir, root) = CreateSampleSchema();
+
+        try
+        {
+            var exit = await CliApp.InvokeAsync([
+                "generate",
+                "--schema",
+                schemaPath,
+                "--out",
+                outDir,
+                "--provider",
+                providerName,
+            ]);
+
+            exit.Should().Be(0);
+            Directory.GetFiles(outDir, "*.g.cs").Should().NotBeEmpty();
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// 未対応方言のプロバイダ＋ --generate-ef-core（方言非依存の DB アクセス）でも generate が成功し、
+    /// DbContext が出力されることを検証する
+    /// </summary>
+    [Theory(DisplayName = "未対応方言プロバイダ＋EF Core 生成は成功する")]
+    [InlineData("postgresql")]
+    [InlineData("mysql")]
+    [InlineData("oracle")]
+    public async Task Generate_UnsupportedDialectWithEfCore_Succeeds(string providerName)
+    {
+        var (schemaPath, outDir, root) = CreateSampleSchema();
+
+        try
+        {
+            var exit = await CliApp.InvokeAsync([
+                "generate",
+                "--schema",
+                schemaPath,
+                "--out",
+                outDir,
+                "--provider",
+                providerName,
+                "--generate-ef-core",
+            ]);
+
+            exit.Should().Be(0);
+            var files = Directory.GetFiles(outDir, "*.g.cs");
+            var code = string.Join("\n", files.Select(File.ReadAllText));
+            code.Should().Contain("QuickErDbContext");
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// 未対応方言でのフォールバック出力が、回避策（--repository-dialects sqlserver の明示指定）の出力と
+    /// バイト単位で一致することを検証する（フォールバック＝既定 sqlserver への丸ごと置換であることの固定）
+    /// </summary>
+    [Fact(DisplayName = "未対応方言のフォールバック出力は sqlserver 明示指定と完全一致する")]
+    public async Task Generate_UnsupportedDialectFallback_MatchesExplicitSqlServerOutput()
+    {
+        var (schemaPath, _, root) = CreateSampleSchema();
+        var fallbackDir = Path.Combine(root, "fallback");
+        var explicitDir = Path.Combine(root, "explicit");
+
+        try
+        {
+            var fallbackExit = await CliApp.InvokeAsync([
+                "generate",
+                "--schema",
+                schemaPath,
+                "--out",
+                fallbackDir,
+                "--provider",
+                "postgresql",
+            ]);
+
+            var explicitExit = await CliApp.InvokeAsync([
+                "generate",
+                "--schema",
+                schemaPath,
+                "--out",
+                explicitDir,
+                "--provider",
+                "postgresql",
+                "--repository-dialects",
+                "sqlserver",
+            ]);
+
+            fallbackExit.Should().Be(0);
+            explicitExit.Should().Be(0);
+
+            var fallbackFiles = Directory
+                .GetFiles(fallbackDir)
+                .Select(Path.GetFileName)
+                .OrderBy(name => name, StringComparer.Ordinal)
+                .ToList();
+            var explicitFiles = Directory
+                .GetFiles(explicitDir)
+                .Select(Path.GetFileName)
+                .OrderBy(name => name, StringComparer.Ordinal)
+                .ToList();
+
+            fallbackFiles.Should().Equal(explicitFiles);
+
+            foreach (var name in fallbackFiles)
+            {
+                File.ReadAllBytes(Path.Combine(fallbackDir, name!))
+                    .Should()
+                    .Equal(File.ReadAllBytes(Path.Combine(explicitDir, name!)));
+            }
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// quicker.json で未対応方言を明示指定していても、GenerateRepositories が無ければ generate が成功することを
+    /// 検証する（設定ファイル経路もフラグ経路と同じ扱いになる）
+    /// </summary>
+    [Fact(DisplayName = "quicker.json の未対応方言指定も Repository 非生成なら成功する")]
+    public async Task Generate_ConfigUnsupportedDialectWithoutRepositories_Succeeds()
+    {
+        var (schemaPath, outDir, root) = CreateSampleSchema();
+        var configPath = Path.Combine(root, "quicker.json");
+        File.WriteAllText(configPath, """{ "RepositoryDialects": ["postgresql"] }""");
+
+        try
+        {
+            var exit = await CliApp.InvokeAsync([
+                "generate",
+                "--schema",
+                schemaPath,
+                "--out",
+                outDir,
+                "--provider",
+                "postgresql",
+                "--config",
+                configPath,
+            ]);
+
+            exit.Should().Be(0);
+            Directory.GetFiles(outDir, "*.g.cs").Should().NotBeEmpty();
         }
         finally
         {
