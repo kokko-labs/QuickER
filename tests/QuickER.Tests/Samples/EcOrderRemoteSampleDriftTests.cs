@@ -1,14 +1,8 @@
 using System;
-using System.Collections.Generic;
 using System.IO;
-using System.Linq;
-using System.Reflection;
-using System.Text.Json;
-using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
-using QuickER.CodeGen.CSharp;
+using System.Threading.Tasks;
 using QuickER.Documents;
-using QuickER.Provider;
 using QuickER.Sqlite;
 using QuickER.Tests.GeneratedFixture;
 using Xunit;
@@ -21,13 +15,10 @@ namespace QuickER.Tests.Samples;
 /// </summary>
 /// <remarks>
 /// <para>
-/// テスト1（生成コード）は、<c>quicker generate --provider sqlite --config quicker.json</c> と<b>同一の生成経路</b>を
-/// 厳密に模倣する（CLI の <c>LoadOptions</c> / <c>RunGenerate</c> と等価）。図 JSON を
-/// <see cref="JsonStorageService.Load"/> で読み、<c>quicker.json</c> を CLI と同じ流儀で読み（<see cref="JsonNode"/> →
-/// <c>RepositoryDialects=["sqlite"]</c> を補完 → <see cref="CodeGenerationOptions"/> へデシリアライズ。
-/// <c>GenerateRemoteServices=true</c> は quicker.json 由来）、<see cref="DiagramCodeGenerator.Generate"/>
-/// （SQLite プロバイダ）で生成した結果を照合する。リモートサービス生成は本体＋サーバーの 2 ファイル出力のため、
-/// <b>出力ファイル構成（ファイル名一覧・順序込み）そのものもドリフト対象</b>とする
+/// テスト1（生成コード）は <b>実 CLI</b> を呼ぶ（<c>quicker generate --provider sqlite --config quicker.json</c> 相当を
+/// 一時フォルダへ実行し、チェックイン済みファイルとバイト比較する。設定ローダーの挙動を鏡実装で写すと、
+/// ローダーを変えても本テストは緑のままになるため経路そのものを共有する）。リモートサービス生成は本体＋サーバーの
+/// 2 ファイル出力のため、<b>出力ファイル構成（ファイル名一覧・順序込み）そのものもドリフト対象</b>とする
 /// （RemoteServiceFixtureDriftTests と同じ思想。サーバーファイルの出力が意図せず消える回帰を検知する）。
 /// </para>
 /// <para>
@@ -47,7 +38,7 @@ public sealed class EcOrderRemoteSampleDriftTests
     /// <summary>サンプルディレクトリ（リポジトリ相対）</summary>
     private const string SampleDir = "samples/ec-order-remote";
 
-    /// <summary>CLI と同一経路の再生成が出力すべきファイル名一覧（順序込み。構成の乖離もドリフトとして検知する）</summary>
+    /// <summary>実 CLI が出力すべきファイル名一覧（順序込み。構成の乖離もドリフトとして検知する）</summary>
     private static readonly string[] ExpectedFileNames =
     [
         "EcOrderRemote.g.cs",
@@ -64,25 +55,27 @@ public sealed class EcOrderRemoteSampleDriftTests
     );
 
     /// <summary>
-    /// テスト1: チェックイン済み生成コード 2 ファイル（本体＋リモートサーバー）が、CLI と同一経路で
+    /// テスト1: チェックイン済み生成コード 2 ファイル（本体＋リモートサーバー）が、実 CLI で
     /// 再生成した内容とファイル構成・内容ともに完全一致する。
     /// </summary>
     [Fact(
-        DisplayName = "サンプル生成コード（本体＋RemoteServer）が CLI と同一経路の再生成と完全一致する（ドリフト検知）"
+        DisplayName = "サンプル生成コード（本体＋RemoteServer）が実 CLI の再生成と完全一致する（ドリフト検知）"
     )]
-    public void CommittedSampleCode_MatchesRegeneratedOutput()
+    public async Task CommittedSampleCode_MatchesRegeneratedOutput()
     {
-        var result = GenerateSample();
+        var generated = await SampleCliRunner.GenerateAsync(
+            SampleDir,
+            "EcOrderRemote.json",
+            ExpectedFileNames,
+            orderSensitive: true
+        );
 
-        // 出力ファイル構成そのものもドリフト対象（サーバーファイルの出力が意図せず消える回帰を検知する）
-        Assert.Equal(ExpectedFileNames, result.Files.Select(f => f.FileName).ToArray());
-
-        foreach (var file in result.Files)
+        foreach (var file in generated)
         {
             FixtureDriftHarness.VerifyOrRegeneratePackageSource(
                 file.Content,
                 SampleDir + "/Generated/" + file.FileName,
-                $"サンプル生成コード {file.FileName} が現在のテンプレート出力（CLI と同一経路）と乖離しています。"
+                $"サンプル生成コード {file.FileName} が現在の実 CLI 出力と乖離しています。"
                     + "samples/ec-order-remote の図・quicker.json から再生成が必要です。"
             );
         }
@@ -104,9 +97,11 @@ public sealed class EcOrderRemoteSampleDriftTests
     )]
     public void CommittedSampleDdl_MatchesRegeneratedOutput()
     {
-        var document = LoadSampleDocument();
+        var document = JsonStorageService.Load(
+            SampleCliRunner.ResolveRepoRelativePath(SampleDir + "/EcOrderRemote.json")
+        );
         var regenerated = new SqliteDdlGenerator().Build(document.Schema);
-        var ddlPath = ResolveRepoRelativePath(DdlRepoPath);
+        var ddlPath = SampleCliRunner.ResolveRepoRelativePath(DdlRepoPath);
 
         var regenRequested =
             Environment.GetEnvironmentVariable(FixtureDriftHarness.RegenEnvVar) is "1" or "true";
@@ -139,109 +134,7 @@ public sealed class EcOrderRemoteSampleDriftTests
         File.WriteAllText(ddlPath, regenerated);
     }
 
-    /// <summary>
-    /// CLI（<c>quicker generate --provider sqlite --config quicker.json</c>）と同一経路でサンプルを再生成する。
-    /// </summary>
-    private static CodeGenerationResult GenerateSample()
-    {
-        var document = LoadSampleDocument();
-        var provider = new SqliteProvider();
-        var options = LoadSampleOptions(provider);
-
-        // CLI の ResolveDialectTypeMappers 相当（実効方言 → 方言別マッパ。SQLite 単一のため sqlite のみ）
-        var dialectMappers = new Dictionary<string, IColumnTypeMapper>(
-            StringComparer.OrdinalIgnoreCase
-        );
-
-        foreach (var dialect in options.EffectiveRepositoryDialects)
-        {
-            if (string.Equals(dialect, provider.Name, StringComparison.OrdinalIgnoreCase))
-            {
-                dialectMappers[dialect] = provider.TypeMapper;
-            }
-        }
-
-        var result = DiagramCodeGenerator.Generate(
-            provider.TypeMapper,
-            provider.TypeCatalog,
-            dialectMappers,
-            document.Schema,
-            options
-        );
-
-        Assert.False(result.HasErrors, "サンプル図の生成でエラーが出てはならない");
-        return result;
-    }
-
-    /// <summary>
-    /// <c>quicker.json</c> を CLI の <c>LoadOptions</c> と同じ流儀で読み、
-    /// <c>RepositoryDialects</c> をプロバイダ名で補ってオプションを構築する
-    /// （<c>GenerateRemoteServices=true</c> は quicker.json 側の値をそのまま使う）。
-    /// </summary>
-    private static CodeGenerationOptions LoadSampleOptions(SqliteProvider provider)
-    {
-        var configPath = ResolveRepoRelativePath(SampleDir + "/quicker.json");
-        var node = JsonNode.Parse(File.ReadAllText(configPath))?.AsObject() ?? new JsonObject();
-
-        // CLI は --repository-dialects 未指定時、設定ファイルに RepositoryDialects（非空）が無ければ
-        // provider.Name を単一要素の RepositoryDialects として設定する
-        if (node["RepositoryDialects"] is not JsonArray { Count: > 0 })
-        {
-            node["RepositoryDialects"] = new JsonArray(JsonValue.Create(provider.Name));
-        }
-
-        // CLI の LoadOptions と同じく OutputPath（ファイル名）→ OutputFileName を導出する
-        // （quicker.json は OutputPath="EcOrderRemote.g.cs" のみを持ち、OutputFileName は持たない）
-        if (
-            node["OutputFileName"] is null
-            && node["OutputPath"] is JsonValue outputPathValue
-            && outputPathValue.TryGetValue(out string? outputPath)
-            && !string.IsNullOrWhiteSpace(Path.GetFileName(outputPath))
-        )
-        {
-            node["OutputFileName"] = Path.GetFileName(outputPath);
-        }
-
-        var jsonOptions = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-        return node.Deserialize<CodeGenerationOptions>(jsonOptions)
-            ?? throw new InvalidOperationException("quicker.json のデシリアライズに失敗しました。");
-    }
-
-    /// <summary>サンプル図 JSON を読み込む（入力もリポジトリ相対で解決する）</summary>
-    private static DiagramDocument LoadSampleDocument()
-    {
-        var jsonPath = ResolveRepoRelativePath(SampleDir + "/EcOrderRemote.json");
-        return JsonStorageService.Load(jsonPath);
-    }
-
     /// <summary>DDL の非決定的な生成日時行を固定文言へ正規化する（比較から実質除外する）</summary>
     private static string NormalizeGeneratedAt(string ddl) =>
         GeneratedAtCommentLine.Replace(ddl, "-- Generated at: (normalized)");
-
-    /// <summary>
-    /// リポジトリ直下（<c>QuickER.slnx</c> を目印）からの相対パスを絶対パスへ解決する。
-    /// </summary>
-    private static string ResolveRepoRelativePath(string repoRelativePath)
-    {
-        var dir = new DirectoryInfo(
-            Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!
-        );
-
-        while (dir is not null)
-        {
-            if (File.Exists(Path.Combine(dir.FullName, "QuickER.slnx")))
-            {
-                return Path.Combine(
-                    dir.FullName,
-                    repoRelativePath.Replace('/', Path.DirectorySeparatorChar)
-                );
-            }
-
-            dir = dir.Parent;
-        }
-
-        throw new FileNotFoundException(
-            $"リポジトリ直下（QuickER.slnx）が見つからず {repoRelativePath} を解決できませんでした。"
-        );
-    }
 }
