@@ -24,7 +24,7 @@ This reduces the work of copying the same schema into entity classes, UI models,
 - Supports SQL Server / PostgreSQL / MySQL / Oracle / SQLite
 - Generates C# code (Entity / EditModel / Mapper / ValueObject / Repository)
 - Creates and edits ER models through AI chat, plus AI mock-screen generation
-- Integrates with AI agents via an MCP server (Claude Code, Codex, etc.) 
+- Integrates with AI agents via a Model Context Protocol (MCP) server (Claude Code, Codex, etc.)
 - Import/export with DBML / Mermaid / Excel definition documents
 - A git-friendly JSON save format
 - Available from both the GUI and the CLI

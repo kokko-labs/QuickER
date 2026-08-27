@@ -1,4 +1,4 @@
-# Why QuickER Uses the ER Model as the Source of Truth
+# Why QuickER uses the ER model as the source of truth
 
 *English | [日本語](overview.ja.md)*
 

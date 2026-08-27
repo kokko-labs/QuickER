@@ -1,4 +1,4 @@
-# Using the Generated Code
+# Using the generated code
 
 *English | [日本語](code-generation.ja.md)*
 

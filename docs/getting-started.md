@@ -1,4 +1,4 @@
-# Tutorial (from Design to Running Code)
+# Tutorial (from design to running code)
 
 *English | [日本語](getting-started.ja.md)*
 
