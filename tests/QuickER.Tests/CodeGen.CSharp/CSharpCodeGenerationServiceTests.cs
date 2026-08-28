@@ -1292,9 +1292,14 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("columns ({ColumnList})");
         // スカラー・単一値変換は共有変換ヘルパー経由（ChangeType が扱えない TimeSpan / Guid 等も復元できる）
         content.Should().Contain("RawValueConverter.ConvertRaw(raw, targetType)");
+        // DB から来た値はカルチャ非依存＝インバリアント固定で、桁区切りも許さない
+        // （人が書いたテキスト用の ConvertInput とはここが分かれる）
         content
             .Should()
-            .Contain("return Convert.ChangeType(raw, underlying, CultureInfo.InvariantCulture);");
+            .Contain(
+                "ConvertCore(raw, targetType, CultureInfo.InvariantCulture, allowNumericGroupSeparators: false)"
+            );
+        content.Should().Contain("return Convert.ChangeType(raw, underlying, provider);");
         // InvariantCulture 使用のため System.Globalization を using
         content.Should().Contain("using System.Globalization;");
     }

@@ -325,8 +325,47 @@ public interface IValueObject
     string DisplayValue { get; }
 }
 
+/// <summary>Self-typed interface for a value object, without the underlying type. Lets generic code accept any value object with a single type parameter.</summary>
+/// <remarks>
+/// <see cref="IValueObject{TSelf, TValue}"/> names the underlying type, which is what a caller reading a spreadsheet or a CSV
+/// does not know and should not have to name: a constraint of <c>where T : IValueObject&lt;T&gt;</c> accepts every value object
+/// regardless of what it wraps. The members here therefore take the value as <see cref="object"/> and convert it on the way in.
+/// </remarks>
+public interface IValueObject<TSelf> : IValueObject
+    where TSelf : IValueObject<TSelf>
+{
+    /// <summary>Converts a value from outside the model - a spreadsheet cell, a CSV field, a form field - and creates the value object from it, without throwing.</summary>
+    /// <remarks>
+    /// <para>
+    /// An absent value (<c>null</c>, <see cref="DBNull"/>, or an empty string) is not a failure: the result is <c>true</c> with a
+    /// null <paramref name="result"/>, because a blank cell means "not filled in" rather than "invalid". A value that cannot be
+    /// converted to the underlying type, and a value that fails the type's own validation, both return <c>false</c>.
+    /// </para>
+    /// <para>
+    /// This is the single method a value object overrides to accept a shape of its own - a name for an enumeration-like type,
+    /// say. Do that with an explicit implementation that falls back to <c>ValueObjectBase&lt;TSelf, TValue&gt;.TryCreateFrom</c>
+    /// for the shapes it does not handle itself, so the ordinary conversion keeps working.
+    /// </para>
+    /// </remarks>
+    /// <param name="raw">The value read from the source.</param>
+    /// <param name="provider">The culture the text is written in; <c>null</c> uses the invariant culture.</param>
+    /// <param name="result">The value object, or null when the value was absent or could not be created.</param>
+    /// <param name="errors">The violations, empty when the call succeeded.</param>
+    static abstract bool TryCreateFrom(
+        object? raw,
+        IFormatProvider? provider,
+        out TSelf? result,
+        out IReadOnlyList<string> errors
+    );
+
+    /// <summary>Converts a value from outside the model and creates the value object from it (throws ValueObjectValidationException on violation; an absent value returns null).</summary>
+    /// <param name="raw">The value read from the source.</param>
+    /// <param name="provider">The culture the text is written in; <c>null</c> uses the invariant culture.</param>
+    static abstract TSelf? CreateFrom(object? raw, IFormatProvider? provider);
+}
+
 /// <summary>Generic interface for a value object. Lets the static factory be called through a type parameter.</summary>
-public interface IValueObject<TSelf, TValue> : IValueObject
+public interface IValueObject<TSelf, TValue> : IValueObject<TSelf>
     where TSelf : IValueObject<TSelf, TValue>
 {
     /// <summary>Creates the instance from an already-validated value. Write it as an explicit implementation that calls the private constructor.</summary>
@@ -344,6 +383,30 @@ public interface IValueObject<TSelf, TValue> : IValueObject
     /// first use (<c>(errors ??= new List&lt;string&gt;()).Add(...)</c>), so a run with no violations allocates nothing at all.
     /// </remarks>
     static virtual void ValidateCore(TValue value, ref List<string>? errors) { }
+
+    /// <summary>Returns a predefined instance for the value when the type declares a fixed set of them; the default declares none.</summary>
+    /// <remarks>
+    /// <para>
+    /// A type whose values are a closed set - an enumeration-like value object with <c>static readonly</c> members - implements
+    /// this so that <c>Create</c> and <c>TryCreate</c> hand back the declared instance instead of building a new one. Because
+    /// the hook sits in front of <c>New</c> rather than inside it, every path that creates a value object goes through it: a row
+    /// read from the database and a value restored from JSON return the declared instance too, along with whatever extra state
+    /// it carries. A generated value object can implement this from a partial of its own, which <c>New</c> - already emitted -
+    /// does not allow.
+    /// </para>
+    /// <para>
+    /// Implementing this does not by itself reject an undefined value: it only decides what to return for one that passed
+    /// validation. Pair it with a <c>ValidateCore</c> (or <c>OnValidate</c>) that rejects anything outside the set, or values
+    /// outside it will quietly fall through to <c>New</c> and be built as ordinary instances.
+    /// </para>
+    /// </remarks>
+    /// <param name="value">The already-validated value.</param>
+    /// <param name="defined">The declared instance, or null when the type declares none for this value.</param>
+    static virtual bool TryGetDefined(TValue value, out TSelf? defined)
+    {
+        defined = default;
+        return false;
+    }
 
     /// <summary>Gets the display name of the value object type (used in error messages and similar). The generated static DisplayName implicitly implements it; the default is the type name.</summary>
     static virtual string DisplayName => typeof(TSelf).Name;
@@ -404,7 +467,7 @@ public abstract partial class ValueObjectBase<TSelf, TValue> : IValueObject, IEq
         {
             throw new ValueObjectValidationException(typeof(TSelf), errors);
         }
-        return TSelf.New(value);
+        return Materialize(value);
     }
 
     /// <summary>Returns true plus the value object when creation succeeds, or false plus the error details when it fails.</summary>
@@ -422,26 +485,105 @@ public abstract partial class ValueObjectBase<TSelf, TValue> : IValueObject, IEq
             errors = list;
             return false;
         }
-        result = TSelf.New(value);
+        result = Materialize(value);
         errors = Array.Empty<string>();
         return true;
     }
 
     /// <summary>Runs the validation rules (ValidateCore, including the OnValidate extension where one is written) without creating the value object, adding any violations to the given collection.</summary>
-    public static void Validate(TValue value, ICollection<string> errors)
+    /// <returns>True when this value passed, false when at least one violation was added. The verdict covers this call only, so it stays meaningful when the collection is shared across several values.</returns>
+    public static bool Validate(TValue value, ICollection<string> errors)
     {
         List<string>? collected = null;
         TSelf.ValidateCore(value, ref collected);
-        if (collected is null)
+        if (collected is null or { Count: 0 })
         {
-            return;
+            return true;
         }
 
         foreach (var error in collected)
         {
             errors.Add(error);
         }
+
+        return false;
     }
+
+    /// <summary>Builds the instance for an already-validated value: the declared instance when the type has one, otherwise a new one.</summary>
+    /// <remarks>
+    /// The single creation point behind <c>Create</c> and <c>TryCreate</c>, so an enumeration-like value object returns its
+    /// declared instances on every path - the raw-SQL and materializer factories and the JSON converter all come through here.
+    /// </remarks>
+    private static TSelf Materialize(TValue value) =>
+        TSelf.TryGetDefined(value, out var defined) && defined is not null ? defined : TSelf.New(value);
+
+    /// <summary>Converts a value from outside the model and creates the value object from it, without throwing (an absent value succeeds with a null result).</summary>
+    /// <remarks>
+    /// The conversion to the underlying type is <see cref="RawValueConverter.ConvertInput"/>, so text written for a culture is
+    /// read in that culture and numeric text may carry group separators. Everything past the conversion is the ordinary
+    /// <c>TryCreate</c>, so the type's own validation - and its declared instances - apply unchanged.
+    /// </remarks>
+    /// <param name="raw">The value read from the source.</param>
+    /// <param name="provider">The culture the text is written in; <c>null</c> uses the invariant culture.</param>
+    /// <param name="result">The value object, or null when the value was absent or could not be created.</param>
+    /// <param name="errors">The violations, empty when the call succeeded.</param>
+    public static bool TryCreateFrom(
+        object? raw,
+        IFormatProvider? provider,
+        out TSelf? result,
+        out IReadOnlyList<string> errors
+    )
+    {
+        // A blank cell means "not filled in", which is the caller's business rather than a violation: a nullable column keeps
+        // the property null, and a required one is reported by the edit model's own required check.
+        if (raw is null or DBNull || (raw is string empty && empty.Length == 0))
+        {
+            result = null;
+            errors = Array.Empty<string>();
+            return true;
+        }
+
+        object converted;
+
+        try
+        {
+            converted = RawValueConverter.ConvertInput(raw, typeof(TValue), provider);
+        }
+        catch (Exception ex)
+            when (ex is InvalidCastException
+                or FormatException
+                or OverflowException
+                or ArgumentException
+            )
+        {
+            result = null;
+            errors = new[] { ValueObjectValidationMessages.InputNotConvertible(raw, TSelf.DisplayName) };
+            return false;
+        }
+
+        return TSelf.TryCreate((TValue)converted, out result, out errors);
+    }
+
+    /// <summary>Converts a value from outside the model and creates the value object from it, using the invariant culture.</summary>
+    public static bool TryCreateFrom(object? raw, out TSelf? result, out IReadOnlyList<string> errors) =>
+        TSelf.TryCreateFrom(raw, null, out result, out errors);
+
+    /// <summary>Converts a value from outside the model and creates the value object from it (throws ValueObjectValidationException on violation; an absent value returns null).</summary>
+    /// <param name="raw">The value read from the source.</param>
+    /// <param name="provider">The culture the text is written in; <c>null</c> uses the invariant culture.</param>
+    /// <exception cref="ValueObjectValidationException">The value could not be converted, or failed validation.</exception>
+    public static TSelf? CreateFrom(object? raw, IFormatProvider? provider)
+    {
+        if (TSelf.TryCreateFrom(raw, provider, out var result, out var errors))
+        {
+            return result;
+        }
+
+        throw new ValueObjectValidationException(typeof(TSelf), errors);
+    }
+
+    /// <summary>Converts a value from outside the model and creates the value object from it, using the invariant culture.</summary>
+    public static TSelf? CreateFrom(object? raw) => TSelf.CreateFrom(raw, null);
 
     /// <summary>Gets the underlying value as an object (opens the raw value for SQL binding and similar).</summary>
     object? IValueObject.UnderlyingValue => Value;
@@ -802,6 +944,10 @@ public static class ValueObjectValidationMessages
 
     /// <summary>Message for a null value passed to Create/TryCreate (a value object never wraps null; keep the property itself null for nullable columns).</summary>
     public static Func<string> ValueRequired { get; set; } = () => "A value is required.";
+
+    /// <summary>Message for a value from outside the model that could not be converted to the underlying type (arguments: the value as read, the value object's display name).</summary>
+    public static Func<object, string, string> InputNotConvertible { get; set; } =
+        (raw, displayName) => $"'{raw}' is not a valid {displayName}.";
 }
 
 /// <summary>Value object for the amount column</summary>
@@ -1375,6 +1521,147 @@ public sealed partial class ProfileIdValue
     static partial void CustomizeDisplayName(ref string displayName);
 }
 
+/// <summary>Converts a raw value read from the database into a target CLR type, including the types <see cref="Convert.ChangeType(object, Type, IFormatProvider)"/> cannot reach on its own.</summary>
+/// <remarks>
+/// <para>
+/// <c>Convert.ChangeType</c> only converts types that implement <see cref="IConvertible"/>. <see cref="TimeSpan"/>,
+/// <see cref="Guid"/>, <see cref="DateTimeOffset"/>, <see cref="DateOnly"/> and <see cref="TimeOnly"/> do not, so a driver
+/// that hands such a column back as text makes it throw <see cref="InvalidCastException"/> - which is what SQLite does for
+/// every one of them, since it stores them as TEXT. Those types are parsed from the string instead, with the invariant culture.
+/// SQL Server returns them already typed, so they take the pass-through above and never reach the parsing.
+/// </para>
+/// <para>
+/// This is the single conversion shared by value object rewrapping, raw SQL scalars and raw SQL projection properties. The
+/// SQLite engine's own column coercion (<c>EntitySaveMetadata.CoerceScalar</c>) accepts the same stored formats for the same
+/// types, so a value object column and a plain column read the same text the same way.
+/// </para>
+/// <para>
+/// <see cref="ConvertInput"/> is the same conversion for a value that did not come from a database - a spreadsheet cell, a CSV
+/// field, a form field - where the culture belongs to the caller and numeric text carries the group separators a person typed.
+/// Both entry points share one body, so the list of types they can reach cannot drift apart.
+/// </para>
+/// </remarks>
+internal static class RawValueConverter
+{
+    /// <summary>Converts the raw value to the target type (a nullable target is judged by its underlying type); a value already of that type is returned as is.</summary>
+    /// <param name="raw">The value the driver returned (never <c>null</c>: the callers map null and <c>DBNull</c> before this point).</param>
+    /// <param name="targetType">The type to convert to.</param>
+    /// <exception cref="InvalidCastException">No conversion exists between the two types.</exception>
+    /// <exception cref="FormatException">The text does not have the shape the target type requires.</exception>
+    /// <exception cref="OverflowException">The value does not fit the target type.</exception>
+    public static object ConvertRaw(object raw, Type targetType) =>
+        ConvertCore(raw, targetType, CultureInfo.InvariantCulture, allowNumericGroupSeparators: false);
+
+    /// <summary>Converts a value that came from outside the database - a spreadsheet cell, a CSV field, a form field - to the target type.</summary>
+    /// <remarks>
+    /// Two things separate this from <see cref="ConvertRaw"/>. The culture is the one the caller passes, because the text was
+    /// written by a person or by an application that formatted it for one. And numeric text is parsed with group separators
+    /// allowed, because a spreadsheet hands back "1,234" for a column formatted that way while
+    /// <see cref="System.Convert.ChangeType(object, Type, IFormatProvider)"/> rejects it outright. An integral target still
+    /// rejects a decimal point, so "1,234.5" does not quietly become an int.
+    /// </remarks>
+    /// <param name="raw">The value read from the source (never <c>null</c>: the callers map the empty cases before this point).</param>
+    /// <param name="targetType">The type to convert to.</param>
+    /// <param name="provider">The culture the text is written in; <c>null</c> uses the invariant culture.</param>
+    /// <exception cref="InvalidCastException">No conversion exists between the two types.</exception>
+    /// <exception cref="FormatException">The text does not have the shape the target type requires.</exception>
+    /// <exception cref="OverflowException">The value does not fit the target type.</exception>
+    public static object ConvertInput(object raw, Type targetType, IFormatProvider? provider) =>
+        ConvertCore(raw, targetType, provider ?? CultureInfo.InvariantCulture, allowNumericGroupSeparators: true);
+
+    /// <summary>Body shared by <see cref="ConvertRaw"/> and <see cref="ConvertInput"/>; the two differ only in the culture and in whether numeric text may carry group separators.</summary>
+    private static object ConvertCore(
+        object raw,
+        Type targetType,
+        IFormatProvider provider,
+        bool allowNumericGroupSeparators
+    )
+    {
+        var underlying = Nullable.GetUnderlyingType(targetType) ?? targetType;
+
+        if (underlying.IsInstanceOfType(raw))
+        {
+            return raw;
+        }
+
+        // Text is the only shape these types can arrive in, and none of them implements IConvertible,
+        // so leaving them to ChangeType would fail on every value rather than on a malformed one
+        if (raw is string text && !typeof(IConvertible).IsAssignableFrom(underlying))
+        {
+            if (underlying == typeof(Guid))
+            {
+                return Guid.Parse(text);
+            }
+
+            if (underlying == typeof(TimeSpan))
+            {
+                return ParseTimeSpan(text, provider);
+            }
+
+            if (underlying == typeof(DateTimeOffset))
+            {
+                return DateTimeOffset.Parse(text, provider, System.Globalization.DateTimeStyles.RoundtripKind);
+            }
+
+            if (underlying == typeof(DateOnly))
+            {
+                return DateOnly.Parse(text, provider);
+            }
+
+            if (underlying == typeof(TimeOnly))
+            {
+                return TimeOnly.Parse(text, provider);
+            }
+        }
+
+        if (allowNumericGroupSeparators && raw is string number && ParseNumber(number, underlying, provider) is { } parsed)
+        {
+            return parsed;
+        }
+
+        return Convert.ChangeType(raw, underlying, provider);
+    }
+
+    /// <summary>Parses numeric text with group separators allowed, or returns null when the target is not a number.</summary>
+    /// <remarks>
+    /// An integral target takes <see cref="NumberStyles.Integer"/> rather than <see cref="NumberStyles.Number"/> on purpose:
+    /// the latter also allows a decimal point, which would let "1,234.5" through as an int. A fractional target keeps the
+    /// exponent form that <c>ChangeType</c> would have accepted.
+    /// </remarks>
+    private static object? ParseNumber(string text, Type underlying, IFormatProvider provider)
+    {
+        const NumberStyles Integral = NumberStyles.Integer | NumberStyles.AllowThousands;
+        const NumberStyles Fractional = NumberStyles.Float | NumberStyles.AllowThousands;
+
+        return Type.GetTypeCode(underlying) switch
+        {
+            TypeCode.Byte => byte.Parse(text, Integral, provider),
+            TypeCode.SByte => sbyte.Parse(text, Integral, provider),
+            TypeCode.Int16 => short.Parse(text, Integral, provider),
+            TypeCode.UInt16 => ushort.Parse(text, Integral, provider),
+            TypeCode.Int32 => int.Parse(text, Integral, provider),
+            TypeCode.UInt32 => uint.Parse(text, Integral, provider),
+            TypeCode.Int64 => long.Parse(text, Integral, provider),
+            TypeCode.UInt64 => ulong.Parse(text, Integral, provider),
+            TypeCode.Single => float.Parse(text, Fractional, provider),
+            TypeCode.Double => double.Parse(text, Fractional, provider),
+            TypeCode.Decimal => decimal.Parse(text, Fractional, provider),
+            _ => null,
+        };
+    }
+
+    /// <summary>Parses a <see cref="TimeSpan"/> stored as text.</summary>
+    /// <remarks>
+    /// The round-trip format "c" ([-][d.]hh:mm:ss[.fffffff]) is what the SQLite provider writes, and it also accepts the
+    /// forms that round-trip shorter values ("01:00:00", "1.02:03:04", "10:20:30.1234567"). The fallback covers text that
+    /// something other than this library stored (a hand-written INSERT such as "1:2:3"), which is the same set the plain
+    /// column path has always accepted, so both paths read the same rows.
+    /// </remarks>
+    private static TimeSpan ParseTimeSpan(string text, IFormatProvider provider) =>
+        TimeSpan.TryParseExact(text, "c", CultureInfo.InvariantCulture, out var roundTripped)
+            ? roundTripped
+            : TimeSpan.Parse(text, provider);
+}
 /// <summary>Change state of an entity or EditModel.</summary>
 public enum RowState
 {
@@ -6520,84 +6807,6 @@ public static class SqlServerSchemaBootstrap
 
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
-}
-
-/// <summary>Converts a raw value read from the database into a target CLR type, including the types <see cref="Convert.ChangeType(object, Type, IFormatProvider)"/> cannot reach on its own.</summary>
-/// <remarks>
-/// <para>
-/// <c>Convert.ChangeType</c> only converts types that implement <see cref="IConvertible"/>. <see cref="TimeSpan"/>,
-/// <see cref="Guid"/>, <see cref="DateTimeOffset"/>, <see cref="DateOnly"/> and <see cref="TimeOnly"/> do not, so a driver
-/// that hands such a column back as text makes it throw <see cref="InvalidCastException"/> - which is what SQLite does for
-/// every one of them, since it stores them as TEXT. Those types are parsed from the string instead, with the invariant culture.
-/// SQL Server returns them already typed, so they take the pass-through above and never reach the parsing.
-/// </para>
-/// <para>
-/// This is the single conversion shared by value object rewrapping, raw SQL scalars and raw SQL projection properties. The
-/// SQLite engine's own column coercion (<c>EntitySaveMetadata.CoerceScalar</c>) accepts the same stored formats for the same
-/// types, so a value object column and a plain column read the same text the same way.
-/// </para>
-/// </remarks>
-internal static class RawValueConverter
-{
-    /// <summary>Converts the raw value to the target type (a nullable target is judged by its underlying type); a value already of that type is returned as is.</summary>
-    /// <param name="raw">The value the driver returned (never <c>null</c>: the callers map null and <c>DBNull</c> before this point).</param>
-    /// <param name="targetType">The type to convert to.</param>
-    /// <exception cref="InvalidCastException">No conversion exists between the two types.</exception>
-    /// <exception cref="FormatException">The text does not have the shape the target type requires.</exception>
-    /// <exception cref="OverflowException">The value does not fit the target type.</exception>
-    public static object ConvertRaw(object raw, Type targetType)
-    {
-        var underlying = Nullable.GetUnderlyingType(targetType) ?? targetType;
-
-        if (underlying.IsInstanceOfType(raw))
-        {
-            return raw;
-        }
-
-        // Text is the only shape these types can arrive in, and none of them implements IConvertible,
-        // so leaving them to ChangeType would fail on every value rather than on a malformed one
-        if (raw is string text && !typeof(IConvertible).IsAssignableFrom(underlying))
-        {
-            if (underlying == typeof(Guid))
-            {
-                return Guid.Parse(text);
-            }
-
-            if (underlying == typeof(TimeSpan))
-            {
-                return ParseTimeSpan(text);
-            }
-
-            if (underlying == typeof(DateTimeOffset))
-            {
-                return DateTimeOffset.Parse(text, CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind);
-            }
-
-            if (underlying == typeof(DateOnly))
-            {
-                return DateOnly.Parse(text, CultureInfo.InvariantCulture);
-            }
-
-            if (underlying == typeof(TimeOnly))
-            {
-                return TimeOnly.Parse(text, CultureInfo.InvariantCulture);
-            }
-        }
-
-        return Convert.ChangeType(raw, underlying, CultureInfo.InvariantCulture);
-    }
-
-    /// <summary>Parses a <see cref="TimeSpan"/> stored as text.</summary>
-    /// <remarks>
-    /// The round-trip format "c" ([-][d.]hh:mm:ss[.fffffff]) is what the SQLite provider writes, and it also accepts the
-    /// forms that round-trip shorter values ("01:00:00", "1.02:03:04", "10:20:30.1234567"). The fallback covers text that
-    /// something other than this library stored (a hand-written INSERT such as "1:2:3"), which is the same set the plain
-    /// column path has always accepted, so both paths read the same rows.
-    /// </remarks>
-    private static TimeSpan ParseTimeSpan(string text) =>
-        TimeSpan.TryParseExact(text, "c", CultureInfo.InvariantCulture, out var roundTripped)
-            ? roundTripped
-            : TimeSpan.Parse(text, CultureInfo.InvariantCulture);
 }
 
 /// <summary>Helper that unwraps values passed to SQL parameters into raw values (converts value objects to their underlying values, into types SqlClient can handle).</summary>

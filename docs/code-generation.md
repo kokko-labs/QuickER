@@ -51,7 +51,12 @@ if (NameValue.TryCreate(input, out var vo, out var errors))   // Validate withou
 {
     entity.Name = vo!;
 }
+
+var errorList = new List<string>();
+NameValue.Validate(input, errorList);      // Validate without creating the value object
 ```
+
+`Validate` adds any violations to the collection you pass, so it suits collecting the errors of several values in one place. It returns true when *that call* found no violation, which stays meaningful even when the collection already holds errors from earlier values.
 
 The base class is chosen according to the value type. In addition to value-based equality (`==` / `Equals`), numeric and date/time types get comparison operators (`<` / `>=`, etc.), and strings get `Contains` / `StartsWith` / `EndsWith`.
 
@@ -85,6 +90,140 @@ public sealed class ContactMailValue
 - For a reference-typed value (`string` / `byte[]`), reject `null` in `ValidateCore` when the input is not trusted: a value object never wraps null (a nullable column keeps the property itself null), and the generated ones report a null input as a validation error.
 - `New` and `ValidateCore` are explicit implementations, so they stay off the type's public surface. Calling `TVo.New` through a generic type parameter would skip validation — validation belongs to `Create` / `TryCreate`, so never call `New` yourself.
 - Pick the base by value type: `ValueObjectStringBase` (string), `ValueObjectOrderedBase<TSelf, TValue>` (numbers and date/time), `ValueObjectBooleanBase`, `ValueObjectBinaryBase`, `ValueObjectGuidKeyBase` (GUID-as-string keys), or `ValueObjectBase<TSelf, TValue>` directly for anything else.
+
+### Creating from a raw value (CSV and spreadsheet imports)
+
+`TryCreateFrom` and `CreateFrom` build a value object from a value that is **not already the underlying type** - a CSV field, a spreadsheet cell, a form field.
+
+```csharp
+// Read the cell (a string, a double, a DateTime - whatever it holds) in a given culture
+if (QuantityValue.TryCreateFrom(cell, culture, out var quantity, out var errors))
+{
+    entity.Quantity = quantity;      // a blank cell leaves quantity null, and that is not an error
+}
+
+var amount = AmountValue.CreateFrom(cell, culture);   // throwing version; a blank cell returns null
+```
+
+`IValueObject<TSelf>` does not name the underlying type, so **import code needs no branch per value object**:
+
+```csharp
+private static T? ReadCell<T>(IXLTableRow row, int column, IFormatProvider? culture, List<string> errors)
+    where T : class, IValueObject<T>
+{
+    if (T.TryCreateFrom(row.Cell(column).Value, culture, out var value, out var messages))
+    {
+        return value;
+    }
+
+    errors.Add(BuildCellErrorMessage(row, column, messages));
+
+    return null;
+}
+```
+
+- **A blank cell is not a violation.** `null`, `DBNull`, and an empty string mean "not filled in": the call returns `true` with a null result and adds no errors, matching the rule that a nullable column keeps the property itself null. Whether the field is required is the edit model's required check to decide
+- **The culture is the caller's.** `null` means the invariant culture. To read a date a person wrote (`28/08/2026`), pass the culture it was written in
+- **Numeric text may carry group separators.** A spreadsheet hands back `1,234` for a column formatted that way, so numeric targets are parsed with an explicit `NumberStyles`. An integral target still rejects a decimal point, so `1,234.5` does not pass as an `int`
+- Past the conversion this is the ordinary `TryCreate`, so the type's own validation - maximum length, precision, `OnValidate` - applies unchanged
+- The message for a value that could not be converted is `ValueObjectValidationMessages.InputNotConvertible`
+- Overloads without the culture (`TryCreateFrom(raw, out var value, out var errors)` and `CreateFrom(raw)`) use the invariant culture
+
+### Accepting only declared instances (enumeration-like value objects)
+
+A concept whose values are a closed set - a mode, a category, a status - can be a value object that only ever hands back the instances it declares as `static readonly`. Implement `TryGetDefined` and `Create` / `TryCreate` return the declared instance instead of building a new one.
+
+```csharp
+public sealed class DataAccessMode
+    : ValueObjectOrderedBase<DataAccessMode, int>,
+        IValueObject<DataAccessMode, int>
+{
+    public static readonly DataAccessMode Web = new(1, "Web");
+    public static readonly DataAccessMode Database = new(2, "Database");
+    public static readonly DataAccessMode Fake = new(3, "Fake");
+
+    private DataAccessMode(int value, string modeName) : base(value) => ModeName = modeName;
+
+    public string ModeName { get; }
+
+    public static IEnumerable<DataAccessMode> GetList() => [Web, Database, Fake];
+
+    static DataAccessMode IValueObject<DataAccessMode, int>.New(int value) =>
+        GetList().First(x => x.Value == value);
+
+    static bool IValueObject<DataAccessMode, int>.TryGetDefined(int value, out DataAccessMode? defined)
+    {
+        defined = GetList().FirstOrDefault(x => x.Value == value);
+
+        return defined is not null;
+    }
+
+    // TryGetDefined alone does not reject an undefined value - it only falls through to New. Write the pair
+    static void IValueObject<DataAccessMode, int>.ValidateCore(int value, ref List<string>? errors)
+    {
+        if (!GetList().Any(x => x.Value == value))
+        {
+            (errors ??= new List<string>()).Add($"Data access mode {value} is not defined.");
+        }
+    }
+
+    public override string DisplayValue => ModeName;
+}
+```
+
+> **Note**: `TryGetDefined` only decides what to return for a value that already passed validation. Always pair it with a check (`ValidateCore` or `OnValidate`) that rejects anything outside the set. Without one, a value outside the set quietly falls through to `New` and is built as an ordinary instance, and "only declared instances" no longer holds.
+
+**A generated value object takes the same shape from a partial of your own.** Its `New` cannot be replaced, but `TryGetDefined` sits one step outside it, so the extension is self-contained - no generator option involved.
+
+```csharp
+// Extend the generated ModeValue (an int column) into an enumeration
+public sealed partial class ModeValue
+{
+    public static readonly ModeValue List = new(1) { ModeName = "List" };
+    public static readonly ModeValue Edit = new(2) { ModeName = "Edit" };
+
+    public string ModeName { get; private init; } = string.Empty;
+
+    public static IEnumerable<ModeValue> GetList() => [List, Edit];
+
+    static bool IValueObject<ModeValue, int>.TryGetDefined(int value, out ModeValue? defined)
+    {
+        defined = GetList().FirstOrDefault(x => x.Value == value);
+
+        return defined is not null;
+    }
+
+    static partial void OnValidate(int value, ICollection<string> errors)
+    {
+        if (!GetList().Any(x => x.Value == value))
+        {
+            errors.Add($"Screen mode {value} is not defined.");
+        }
+    }
+}
+```
+
+Because the hook sits in front of `New` rather than inside it, **a row read from the database and a value restored from JSON return the declared instance too**, so an instance missing its extra state (`ModeName` here) never gets into circulation.
+
+To create from a name instead of the value, override `TryCreateFrom` on the type and delegate the shapes it does not handle back to the base, which keeps the ordinary conversion working:
+
+```csharp
+static bool IValueObject<ModeValue>.TryCreateFrom(
+    object? raw, IFormatProvider? provider, out ModeValue? result, out IReadOnlyList<string> errors)
+{
+    if (raw is string name && GetList().FirstOrDefault(x => x.ModeName == name) is { } hit)
+    {
+        result = hit;
+        errors = Array.Empty<string>();
+
+        return true;
+    }
+
+    return ValueObjectBase<ModeValue, int>.TryCreateFrom(raw, provider, out result, out errors);
+}
+```
+
+The generic import code from the previous section (`ReadCell<ModeValue>`) now accepts both `"Edit"` and `2`.
 
 ### partial extension points
 

@@ -242,13 +242,18 @@ public interface QuickER.Runtime.IValueObject
     public virtual object UnderlyingValue { get; }
     public virtual string DisplayValue { get; }
 
-public interface QuickER.Runtime.IValueObject<TSelf, TValue> : QuickER.Runtime.IValueObject
+public interface QuickER.Runtime.IValueObject<TSelf, TValue> : QuickER.Runtime.IValueObject, QuickER.Runtime.IValueObject<TSelf>
     public static TSelf Create(TValue value)
     public static TSelf New(TValue value)
     public static bool TryCreate(TValue value, out TSelf result, out System.Collections.Generic.IReadOnlyList<string> errors)
+    public static bool TryGetDefined(TValue value, out TSelf defined)
     public static string DisplayName { get; }
     public static void ValidateCore(TValue value, ref System.Collections.Generic.List<string> errors)
     public virtual TValue Value { get; }
+
+public interface QuickER.Runtime.IValueObject<TSelf> : QuickER.Runtime.IValueObject
+    public static TSelf CreateFrom(object raw, System.IFormatProvider provider)
+    public static bool TryCreateFrom(object raw, System.IFormatProvider provider, out TSelf result, out System.Collections.Generic.IReadOnlyList<string> errors)
 
 public sealed class QuickER.Runtime.IncludableSqlQuery<TEntity, TProperty>
     public QuickER.Runtime.IncludableSqlQuery<TEntity, TNext> Include<TNext>(System.Linq.Expressions.Expression<System.Func<TEntity, System.Collections.Generic.ICollection<TNext>>> navigationSelector)
@@ -338,6 +343,7 @@ public static class QuickER.Runtime.RawSqlMapper
     public static void BindParameters(System.Data.Common.DbCommand command, object parameters)
 
 public static class QuickER.Runtime.RawValueConverter
+    public static object ConvertInput(object raw, System.Type targetType, System.IFormatProvider provider)
     public static object ConvertRaw(object raw, System.Type targetType)
 
 public static class QuickER.Runtime.RemoteEntityGraph
@@ -568,10 +574,14 @@ public abstract class QuickER.Runtime.ValueObjectBase<TSelf, TValue> : QuickER.R
     public override int GetHashCode()
     public override string ToString()
     public static TSelf Create(TValue value)
+    public static TSelf CreateFrom(object raw)
+    public static TSelf CreateFrom(object raw, System.IFormatProvider provider)
     public static bool TryCreate(TValue value, out TSelf result, out System.Collections.Generic.IReadOnlyList<string> errors)
+    public static bool TryCreateFrom(object raw, System.IFormatProvider provider, out TSelf result, out System.Collections.Generic.IReadOnlyList<string> errors)
+    public static bool TryCreateFrom(object raw, out TSelf result, out System.Collections.Generic.IReadOnlyList<string> errors)
+    public static bool Validate(TValue value, System.Collections.Generic.ICollection<string> errors)
     public static bool op_Equality(QuickER.Runtime.ValueObjectBase<TSelf, TValue> left, QuickER.Runtime.ValueObjectBase<TSelf, TValue> right)
     public static bool op_Inequality(QuickER.Runtime.ValueObjectBase<TSelf, TValue> left, QuickER.Runtime.ValueObjectBase<TSelf, TValue> right)
-    public static void Validate(TValue value, System.Collections.Generic.ICollection<string> errors)
     public virtual bool Equals(TSelf other)
     public virtual string DisplayValue { get; }
 
@@ -636,5 +646,6 @@ public static class QuickER.Runtime.ValueObjectValidationMessages
     public static System.Func<int, int, string> MaxLengthExceeded { get; set; }
     public static System.Func<int, string> PrecisionExceeded { get; set; }
     public static System.Func<int, string> ScaleExceeded { get; set; }
+    public static System.Func<object, string, string> InputNotConvertible { get; set; }
     public static System.Func<string> ValueRequired { get; set; }
 

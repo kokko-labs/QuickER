@@ -307,6 +307,147 @@ internal static class UnboundedBinaryColumns
     }
 }
 
+/// <summary>Converts a raw value read from the database into a target CLR type, including the types <see cref="Convert.ChangeType(object, Type, IFormatProvider)"/> cannot reach on its own.</summary>
+/// <remarks>
+/// <para>
+/// <c>Convert.ChangeType</c> only converts types that implement <see cref="IConvertible"/>. <see cref="TimeSpan"/>,
+/// <see cref="Guid"/>, <see cref="DateTimeOffset"/>, <see cref="DateOnly"/> and <see cref="TimeOnly"/> do not, so a driver
+/// that hands such a column back as text makes it throw <see cref="InvalidCastException"/> - which is what SQLite does for
+/// every one of them, since it stores them as TEXT. Those types are parsed from the string instead, with the invariant culture.
+/// SQL Server returns them already typed, so they take the pass-through above and never reach the parsing.
+/// </para>
+/// <para>
+/// This is the single conversion shared by value object rewrapping, raw SQL scalars and raw SQL projection properties. The
+/// SQLite engine's own column coercion (<c>EntitySaveMetadata.CoerceScalar</c>) accepts the same stored formats for the same
+/// types, so a value object column and a plain column read the same text the same way.
+/// </para>
+/// <para>
+/// <see cref="ConvertInput"/> is the same conversion for a value that did not come from a database - a spreadsheet cell, a CSV
+/// field, a form field - where the culture belongs to the caller and numeric text carries the group separators a person typed.
+/// Both entry points share one body, so the list of types they can reach cannot drift apart.
+/// </para>
+/// </remarks>
+internal static class RawValueConverter
+{
+    /// <summary>Converts the raw value to the target type (a nullable target is judged by its underlying type); a value already of that type is returned as is.</summary>
+    /// <param name="raw">The value the driver returned (never <c>null</c>: the callers map null and <c>DBNull</c> before this point).</param>
+    /// <param name="targetType">The type to convert to.</param>
+    /// <exception cref="InvalidCastException">No conversion exists between the two types.</exception>
+    /// <exception cref="FormatException">The text does not have the shape the target type requires.</exception>
+    /// <exception cref="OverflowException">The value does not fit the target type.</exception>
+    public static object ConvertRaw(object raw, Type targetType) =>
+        ConvertCore(raw, targetType, CultureInfo.InvariantCulture, allowNumericGroupSeparators: false);
+
+    /// <summary>Converts a value that came from outside the database - a spreadsheet cell, a CSV field, a form field - to the target type.</summary>
+    /// <remarks>
+    /// Two things separate this from <see cref="ConvertRaw"/>. The culture is the one the caller passes, because the text was
+    /// written by a person or by an application that formatted it for one. And numeric text is parsed with group separators
+    /// allowed, because a spreadsheet hands back "1,234" for a column formatted that way while
+    /// <see cref="System.Convert.ChangeType(object, Type, IFormatProvider)"/> rejects it outright. An integral target still
+    /// rejects a decimal point, so "1,234.5" does not quietly become an int.
+    /// </remarks>
+    /// <param name="raw">The value read from the source (never <c>null</c>: the callers map the empty cases before this point).</param>
+    /// <param name="targetType">The type to convert to.</param>
+    /// <param name="provider">The culture the text is written in; <c>null</c> uses the invariant culture.</param>
+    /// <exception cref="InvalidCastException">No conversion exists between the two types.</exception>
+    /// <exception cref="FormatException">The text does not have the shape the target type requires.</exception>
+    /// <exception cref="OverflowException">The value does not fit the target type.</exception>
+    public static object ConvertInput(object raw, Type targetType, IFormatProvider? provider) =>
+        ConvertCore(raw, targetType, provider ?? CultureInfo.InvariantCulture, allowNumericGroupSeparators: true);
+
+    /// <summary>Body shared by <see cref="ConvertRaw"/> and <see cref="ConvertInput"/>; the two differ only in the culture and in whether numeric text may carry group separators.</summary>
+    private static object ConvertCore(
+        object raw,
+        Type targetType,
+        IFormatProvider provider,
+        bool allowNumericGroupSeparators
+    )
+    {
+        var underlying = Nullable.GetUnderlyingType(targetType) ?? targetType;
+
+        if (underlying.IsInstanceOfType(raw))
+        {
+            return raw;
+        }
+
+        // Text is the only shape these types can arrive in, and none of them implements IConvertible,
+        // so leaving them to ChangeType would fail on every value rather than on a malformed one
+        if (raw is string text && !typeof(IConvertible).IsAssignableFrom(underlying))
+        {
+            if (underlying == typeof(Guid))
+            {
+                return Guid.Parse(text);
+            }
+
+            if (underlying == typeof(TimeSpan))
+            {
+                return ParseTimeSpan(text, provider);
+            }
+
+            if (underlying == typeof(DateTimeOffset))
+            {
+                return DateTimeOffset.Parse(text, provider, System.Globalization.DateTimeStyles.RoundtripKind);
+            }
+
+            if (underlying == typeof(DateOnly))
+            {
+                return DateOnly.Parse(text, provider);
+            }
+
+            if (underlying == typeof(TimeOnly))
+            {
+                return TimeOnly.Parse(text, provider);
+            }
+        }
+
+        if (allowNumericGroupSeparators && raw is string number && ParseNumber(number, underlying, provider) is { } parsed)
+        {
+            return parsed;
+        }
+
+        return Convert.ChangeType(raw, underlying, provider);
+    }
+
+    /// <summary>Parses numeric text with group separators allowed, or returns null when the target is not a number.</summary>
+    /// <remarks>
+    /// An integral target takes <see cref="NumberStyles.Integer"/> rather than <see cref="NumberStyles.Number"/> on purpose:
+    /// the latter also allows a decimal point, which would let "1,234.5" through as an int. A fractional target keeps the
+    /// exponent form that <c>ChangeType</c> would have accepted.
+    /// </remarks>
+    private static object? ParseNumber(string text, Type underlying, IFormatProvider provider)
+    {
+        const NumberStyles Integral = NumberStyles.Integer | NumberStyles.AllowThousands;
+        const NumberStyles Fractional = NumberStyles.Float | NumberStyles.AllowThousands;
+
+        return Type.GetTypeCode(underlying) switch
+        {
+            TypeCode.Byte => byte.Parse(text, Integral, provider),
+            TypeCode.SByte => sbyte.Parse(text, Integral, provider),
+            TypeCode.Int16 => short.Parse(text, Integral, provider),
+            TypeCode.UInt16 => ushort.Parse(text, Integral, provider),
+            TypeCode.Int32 => int.Parse(text, Integral, provider),
+            TypeCode.UInt32 => uint.Parse(text, Integral, provider),
+            TypeCode.Int64 => long.Parse(text, Integral, provider),
+            TypeCode.UInt64 => ulong.Parse(text, Integral, provider),
+            TypeCode.Single => float.Parse(text, Fractional, provider),
+            TypeCode.Double => double.Parse(text, Fractional, provider),
+            TypeCode.Decimal => decimal.Parse(text, Fractional, provider),
+            _ => null,
+        };
+    }
+
+    /// <summary>Parses a <see cref="TimeSpan"/> stored as text.</summary>
+    /// <remarks>
+    /// The round-trip format "c" ([-][d.]hh:mm:ss[.fffffff]) is what the SQLite provider writes, and it also accepts the
+    /// forms that round-trip shorter values ("01:00:00", "1.02:03:04", "10:20:30.1234567"). The fallback covers text that
+    /// something other than this library stored (a hand-written INSERT such as "1:2:3"), which is the same set the plain
+    /// column path has always accepted, so both paths read the same rows.
+    /// </remarks>
+    private static TimeSpan ParseTimeSpan(string text, IFormatProvider provider) =>
+        TimeSpan.TryParseExact(text, "c", CultureInfo.InvariantCulture, out var roundTripped)
+            ? roundTripped
+            : TimeSpan.Parse(text, provider);
+}
 /// <summary>Change state of an entity or EditModel.</summary>
 public enum RowState
 {
@@ -4639,84 +4780,6 @@ public static class SqlServerSchemaBootstrap
 
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
-}
-
-/// <summary>Converts a raw value read from the database into a target CLR type, including the types <see cref="Convert.ChangeType(object, Type, IFormatProvider)"/> cannot reach on its own.</summary>
-/// <remarks>
-/// <para>
-/// <c>Convert.ChangeType</c> only converts types that implement <see cref="IConvertible"/>. <see cref="TimeSpan"/>,
-/// <see cref="Guid"/>, <see cref="DateTimeOffset"/>, <see cref="DateOnly"/> and <see cref="TimeOnly"/> do not, so a driver
-/// that hands such a column back as text makes it throw <see cref="InvalidCastException"/> - which is what SQLite does for
-/// every one of them, since it stores them as TEXT. Those types are parsed from the string instead, with the invariant culture.
-/// SQL Server returns them already typed, so they take the pass-through above and never reach the parsing.
-/// </para>
-/// <para>
-/// This is the single conversion shared by value object rewrapping, raw SQL scalars and raw SQL projection properties. The
-/// SQLite engine's own column coercion (<c>EntitySaveMetadata.CoerceScalar</c>) accepts the same stored formats for the same
-/// types, so a value object column and a plain column read the same text the same way.
-/// </para>
-/// </remarks>
-internal static class RawValueConverter
-{
-    /// <summary>Converts the raw value to the target type (a nullable target is judged by its underlying type); a value already of that type is returned as is.</summary>
-    /// <param name="raw">The value the driver returned (never <c>null</c>: the callers map null and <c>DBNull</c> before this point).</param>
-    /// <param name="targetType">The type to convert to.</param>
-    /// <exception cref="InvalidCastException">No conversion exists between the two types.</exception>
-    /// <exception cref="FormatException">The text does not have the shape the target type requires.</exception>
-    /// <exception cref="OverflowException">The value does not fit the target type.</exception>
-    public static object ConvertRaw(object raw, Type targetType)
-    {
-        var underlying = Nullable.GetUnderlyingType(targetType) ?? targetType;
-
-        if (underlying.IsInstanceOfType(raw))
-        {
-            return raw;
-        }
-
-        // Text is the only shape these types can arrive in, and none of them implements IConvertible,
-        // so leaving them to ChangeType would fail on every value rather than on a malformed one
-        if (raw is string text && !typeof(IConvertible).IsAssignableFrom(underlying))
-        {
-            if (underlying == typeof(Guid))
-            {
-                return Guid.Parse(text);
-            }
-
-            if (underlying == typeof(TimeSpan))
-            {
-                return ParseTimeSpan(text);
-            }
-
-            if (underlying == typeof(DateTimeOffset))
-            {
-                return DateTimeOffset.Parse(text, CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind);
-            }
-
-            if (underlying == typeof(DateOnly))
-            {
-                return DateOnly.Parse(text, CultureInfo.InvariantCulture);
-            }
-
-            if (underlying == typeof(TimeOnly))
-            {
-                return TimeOnly.Parse(text, CultureInfo.InvariantCulture);
-            }
-        }
-
-        return Convert.ChangeType(raw, underlying, CultureInfo.InvariantCulture);
-    }
-
-    /// <summary>Parses a <see cref="TimeSpan"/> stored as text.</summary>
-    /// <remarks>
-    /// The round-trip format "c" ([-][d.]hh:mm:ss[.fffffff]) is what the SQLite provider writes, and it also accepts the
-    /// forms that round-trip shorter values ("01:00:00", "1.02:03:04", "10:20:30.1234567"). The fallback covers text that
-    /// something other than this library stored (a hand-written INSERT such as "1:2:3"), which is the same set the plain
-    /// column path has always accepted, so both paths read the same rows.
-    /// </remarks>
-    private static TimeSpan ParseTimeSpan(string text) =>
-        TimeSpan.TryParseExact(text, "c", CultureInfo.InvariantCulture, out var roundTripped)
-            ? roundTripped
-            : TimeSpan.Parse(text, CultureInfo.InvariantCulture);
 }
 
 /// <summary>
