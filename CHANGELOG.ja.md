@@ -8,10 +8,14 @@ QuickER の利用者に影響する変更を記録します。形式は [Keep a 
 
 ### Added
 
+- **生の値から値オブジェクトを作れるように** — `TryCreateFrom` / `CreateFrom` が、CSV のフィールドや表計算のセルのような下地の型に揃っていない値（`object?`）から値オブジェクトを作る。読み取りカルチャは `IFormatProvider` で指定でき、数値の桁区切りも解釈する。空のセル（`null` / `DBNull` / 空文字）は違反ではなく「未入力」として成功＋`null` を返す。新しい自己型インターフェイス `IValueObject<TSelf>` は下地の型を型引数に取らないため、取り込みコードを `where T : IValueObject<T>` の 1 本で書ける（docs/code-generation.ja.md の「生の値からの生成」節を参照）
+- **定義済みインスタンスだけを受け付ける値オブジェクト** — `TryGetDefined` を実装すると、`Create` / `TryCreate` が新しいインスタンスを作らずに `static readonly` で宣言したインスタンスを返す。区分・モード・ステータスのような閉じた集合を値オブジェクトで表せる。フックは `New` の一段外（`Create` / `TryCreate` 側）に割り込むため、DB から読んだ行も JSON から復元した値も定義済みインスタンスになり、**生成された値オブジェクトも partial を足すだけで列挙型に拡張できる**（生成器のオプションは不要。docs/code-generation.ja.md の「定義済みインスタンスだけを受け付ける」節を参照）
 - **手書きの値オブジェクトが 3 メンバで書けるように** — `Create` / `TryCreate` / `Validate` の本体を `ValueObjectBase<TSelf, TValue>` へ 1 回だけ置く形にし、図の列に対応しない値オブジェクトを「private コンストラクタ＋`New`／`ValidateCore` の明示的実装」で書けるようにした（docs/code-generation.ja.md の「手書きの値オブジェクト」節を参照）。生成される値オブジェクトも同じ形に縮む（挙動は同一）
 
 ### Changed
 
+- **破壊的変更**: `IValueObject<TSelf, TValue>` が新しい自己型インターフェイス `IValueObject<TSelf>` を継承し、`TryCreateFrom` / `CreateFrom`（と既定実装付きの `TryGetDefined`）が加わった。`ValueObjectBase` を継承している型は基底の実装が満たすため影響はない。基底を継承せずインターフェイスだけを手で実装している型は、この 2 つの実装が必要になる
+- **破壊的変更**: 値オブジェクトの `Validate(TValue value, ICollection<string> errors)` が `void` でなく `bool` を返すようになった（`true`＝**その呼び出し**で違反が無かった）。集約先のコレクションを複数の値で共有していると件数からは各値の合否を読めないため、判定を戻り値で受け取れるようにしたもの。エラーの詰め方は従来どおりで、戻り値を使わない呼び出し側のソースはそのまま通る
 - **破壊的変更**: `IValueObject<TSelf, TValue>` に必須メンバ `New`（と既定実装付き `ValidateCore`）が増え、値オブジェクトの基底クラス群は `TSelf` に `IValueObject<TSelf, TValue>` の実装を要求するようになった。インターフェイスを手で実装している型は 1 行（`static T IValueObject<T, V>.New(V v) => new(v);`）、基底から派生だけしてインターフェイスを宣言していなかった型は宣言への追加で移行できる。再生成したコードは影響なし
 
 ### Changed

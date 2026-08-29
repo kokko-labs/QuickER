@@ -51,7 +51,12 @@ if (NameValue.TryCreate(input, out var vo, out var errors))   // 例外なしで
 {
     entity.Name = vo!;
 }
+
+var errorList = new List<string>();
+NameValue.Validate(input, errorList);      // VO を作らずに検証だけ
 ```
+
+`Validate` は渡したコレクションへ違反を足すため、複数の値のエラーを 1 箇所へ集めたいときに向きます。戻り値は**その呼び出し**で違反が無かったかを表すので、コレクションに前の値のエラーが既に入っていても判定として使えます。
 
 基底クラスは値の型に応じて選ばれ、値ベースの等価（`==` / `Equals`）に加えて、数値・日時系は比較演算子（`<` / `>=` など）、文字列は `Contains` / `StartsWith` / `EndsWith` を備えます。
 
@@ -85,6 +90,140 @@ public sealed class ContactMailValue
 - 参照型の値（`string` / `byte[]`）で入力を信頼できない場合は、`ValidateCore` で `null` を弾いてください。値オブジェクトは null を包みません（NULL 許容列はプロパティ自体を null に保ちます）。生成された値オブジェクトは null 入力を検証エラーとして報告します
 - `New` / `ValidateCore` は明示的実装なので型の公開面には出ません。型引数経由の `TVo.New` は検証を迂回するため、`New` を自分で呼ばないでください（検証は `Create` / `TryCreate` の仕事です）
 - 基底は値の型で選びます: `ValueObjectStringBase`（文字列）・`ValueObjectOrderedBase<TSelf, TValue>`（数値・日時）・`ValueObjectBooleanBase`・`ValueObjectBinaryBase`・`ValueObjectGuidKeyBase`（GUID 文字列キー）・それ以外は `ValueObjectBase<TSelf, TValue>` を直接
+
+### 生の値からの生成（CSV / Excel の取り込み）
+
+`TryCreateFrom` / `CreateFrom` は、CSV のフィールドや表計算のセルのように**下地の型に揃っていない値**から値オブジェクトを作ります。
+
+```csharp
+// セルの値（string でも double でも DateTime でも）を、指定カルチャで読む
+if (QuantityValue.TryCreateFrom(cell, culture, out var quantity, out var errors))
+{
+    entity.Quantity = quantity;      // 空セルなら quantity は null（エラーではない）
+}
+
+var amount = AmountValue.CreateFrom(cell, culture);   // 例外版・空セルは null
+```
+
+`IValueObject<TSelf>` は下地の型を型引数に取らないため、**取り込みコードは値オブジェクトごとの分岐を持たずに書けます**。
+
+```csharp
+private static T? ReadCell<T>(IXLTableRow row, int column, IFormatProvider? culture, List<string> errors)
+    where T : class, IValueObject<T>
+{
+    if (T.TryCreateFrom(row.Cell(column).Value, culture, out var value, out var messages))
+    {
+        return value;
+    }
+
+    errors.Add(BuildCellErrorMessage(row, column, messages));
+
+    return null;
+}
+```
+
+- **空のセルは違反ではありません。** `null` / `DBNull` / 空文字は「未入力」として `true` ＋ `null` を返し、エラーを 1 件も積みません（NULL 許容列はプロパティ自体を null に保つ設計に合わせています）。必須かどうかは EditModel の必須チェックの担当です
+- **カルチャは呼び出し側が決めます。** `null` はインバリアントです。人が書いた日付書式（`2026/08/28`）を読むなら、その書式のカルチャを渡してください
+- **数値は桁区切りを許します。** 表計算の書式付き数値を文字列で読むと `1,234` で届くため、数値型は `NumberStyles` を明示して解析します。整数型は小数点を許さないので `1,234.5` は `int` として通りません
+- 変換できたあとは通常の `TryCreate` と同じです。その型の検証（最大長・精度・`OnValidate`）がそのまま効きます
+- 変換自体に失敗したときのメッセージは `ValueObjectValidationMessages.InputNotConvertible` で差し替えられます
+- カルチャを省略するオーバーロード（`TryCreateFrom(raw, out var value, out var errors)` / `CreateFrom(raw)`）もあります
+
+### 定義済みインスタンスだけを受け付ける（列挙型の値オブジェクト）
+
+値が閉じた集合になる概念——区分・モード・ステータス——は、`static readonly` で定義したインスタンスだけを返す値オブジェクトにできます。`TryGetDefined` を実装すると、`Create` / `TryCreate` が新しいインスタンスを作らずに定義済みのものを返します。
+
+```csharp
+public sealed class DataAccessMode
+    : ValueObjectOrderedBase<DataAccessMode, int>,
+        IValueObject<DataAccessMode, int>
+{
+    public static readonly DataAccessMode Web = new(1, "Web");
+    public static readonly DataAccessMode Database = new(2, "Database");
+    public static readonly DataAccessMode Fake = new(3, "Fake");
+
+    private DataAccessMode(int value, string modeName) : base(value) => ModeName = modeName;
+
+    public string ModeName { get; }
+
+    public static IEnumerable<DataAccessMode> GetList() => [Web, Database, Fake];
+
+    static DataAccessMode IValueObject<DataAccessMode, int>.New(int value) =>
+        GetList().First(x => x.Value == value);
+
+    static bool IValueObject<DataAccessMode, int>.TryGetDefined(int value, out DataAccessMode? defined)
+    {
+        defined = GetList().FirstOrDefault(x => x.Value == value);
+
+        return defined is not null;
+    }
+
+    // TryGetDefined だけでは未定義値を拒めません（New へ落ちるだけです）。対で検証を書いてください
+    static void IValueObject<DataAccessMode, int>.ValidateCore(int value, ref List<string>? errors)
+    {
+        if (!GetList().Any(x => x.Value == value))
+        {
+            (errors ??= new List<string>()).Add($"データアクセスモード {value} は定義されていません。");
+        }
+    }
+
+    public override string DisplayValue => ModeName;
+}
+```
+
+> **注意**: `TryGetDefined` が決めるのは「検証を通った値に対して何を返すか」だけです。未定義の値を拒む検証（`ValidateCore` または `OnValidate`）を必ず対で書いてください。書き忘れると、集合の外の値が黙って `New` に落ちて普通のインスタンスとして作られ、「定義済み以外は受け付けない」という前提が破れます。
+
+**生成された値オブジェクトも、partial を足すだけで同じ形にできます。** 生成側の `New` は差し替えられませんが、`TryGetDefined` はその一段外に割り込むため、利用者の partial だけで完結します（生成器のオプションは要りません）。
+
+```csharp
+// 生成された ModeValue（int 列）を列挙型に拡張する
+public sealed partial class ModeValue
+{
+    public static readonly ModeValue List = new(1) { ModeName = "List" };
+    public static readonly ModeValue Edit = new(2) { ModeName = "Edit" };
+
+    public string ModeName { get; private init; } = string.Empty;
+
+    public static IEnumerable<ModeValue> GetList() => [List, Edit];
+
+    static bool IValueObject<ModeValue, int>.TryGetDefined(int value, out ModeValue? defined)
+    {
+        defined = GetList().FirstOrDefault(x => x.Value == value);
+
+        return defined is not null;
+    }
+
+    static partial void OnValidate(int value, ICollection<string> errors)
+    {
+        if (!GetList().Any(x => x.Value == value))
+        {
+            errors.Add($"表示モード {value} は定義されていません。");
+        }
+    }
+}
+```
+
+`TryGetDefined` は `New` ではなく `Create` / `TryCreate` の側に割り込むため、**DB から読んだ行も JSON から復元した値も定義済みインスタンスになります**（`ModeName` のような付随する状態が欠けたインスタンスが出回りません）。
+
+値の代わりに名前で作れるようにしたいときは `TryCreateFrom` を型側で差し替えます。扱わない形は基底へ委譲すれば、通常の変換はそのまま残ります。
+
+```csharp
+static bool IValueObject<ModeValue>.TryCreateFrom(
+    object? raw, IFormatProvider? provider, out ModeValue? result, out IReadOnlyList<string> errors)
+{
+    if (raw is string name && GetList().FirstOrDefault(x => x.ModeName == name) is { } hit)
+    {
+        result = hit;
+        errors = Array.Empty<string>();
+
+        return true;
+    }
+
+    return ValueObjectBase<ModeValue, int>.TryCreateFrom(raw, provider, out result, out errors);
+}
+```
+
+これで、前節のジェネリックな取り込みコード（`ReadCell<ModeValue>`）が `"Edit"` も `2` も受け付けます。
 
 ### partial 拡張点
 

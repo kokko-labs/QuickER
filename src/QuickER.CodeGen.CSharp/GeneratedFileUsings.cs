@@ -211,6 +211,13 @@ internal static class GeneratedFileUsings
                     yield return "System.IO";
                 }
 
+                // 生値変換 RawValueConverter（CultureInfo / NumberStyles）は、リポジトリ契約が無く値オブジェクト
+                // だけを出す構成でも ValueObjectBase.TryCreateFrom の依存として Runtime 側へ出る
+                if (options.GenerateValueObjects)
+                {
+                    yield return "System.Globalization";
+                }
+
                 break;
 
             // 値オブジェクト（具象）: 生成コードは Runtime の VO 基底を継承するだけで、外部型は BCL の基本のみ

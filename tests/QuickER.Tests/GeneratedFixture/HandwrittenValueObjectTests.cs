@@ -96,9 +96,22 @@ public sealed class HandwrittenValueObjectTests
     {
         var errors = new List<string> { "existing" };
 
-        ContactMailValue.Validate("bad", errors);
+        ContactMailValue.Validate("bad", errors).Should().BeFalse();
 
         errors.Should().Equal("existing", "Mail address must contain '@'.");
+    }
+
+    // 集約先を共有する使い方では、コレクションの件数からは「今回の値が失格したか」を読めない。
+    // 戻り値がその 1 回の判定だけを表すことを固定する（既存要素があっても true を返す）。
+    [Fact(DisplayName = "[手書きVO] Validate の戻り値はその呼び出しの判定だけを表す")]
+    public void 手書きVOのValidateの戻り値は呼び出し単位である()
+    {
+        var errors = new List<string>();
+
+        ContactMailValue.Validate("ng", errors).Should().BeFalse();
+        ContactMailValue.Validate("ok@example.com", errors).Should().BeTrue();
+
+        errors.Should().ContainSingle();
     }
 
     [Fact(
