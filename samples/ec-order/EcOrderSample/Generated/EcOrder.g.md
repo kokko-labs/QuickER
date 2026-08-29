@@ -113,6 +113,8 @@ The uniqueness check is advisory: the definitive guarantee is the database's own
 
 For the supported scope and details of `Query()`, see [docs/code-generation.md](https://github.com/kokko-labs/QuickER/blob/main/docs/code-generation.md).
 
+Two generated extensions ride on `Query()`: `IncludeGraph()` includes the same child-direction cascade a graph save walks (combine it with `Where` or `GetByIdAsync` to bound what is fetched), and `GetByIdAsync(id)` fetches a single entity by key at the end of a query chain — `Query().IncludeGraph().GetByIdAsync(id)` reads one aggregate together with its whole graph.
+
 ## Usage
 
 ### DI registration

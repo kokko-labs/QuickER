@@ -1,4 +1,5 @@
 {{~ if (entity_classes.size > 0 || edit_model_classes.size > 0 || runtime_package_export) && render_runtime && emit_shared_infra ~}}
+
 /// <summary>Change state of an entity or EditModel.</summary>
 public enum RowState
 {

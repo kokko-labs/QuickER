@@ -254,6 +254,7 @@ public interface QuickER.Runtime.IValueObject<TSelf, TValue> : QuickER.Runtime.I
 public interface QuickER.Runtime.IValueObject<TSelf> : QuickER.Runtime.IValueObject
     public static TSelf CreateFrom(object raw, System.IFormatProvider provider)
     public static bool TryCreateFrom(object raw, System.IFormatProvider provider, out TSelf result, out System.Collections.Generic.IReadOnlyList<string> errors)
+    public static bool TryCreateFromCustom(object raw, System.IFormatProvider provider, out TSelf result)
 
 public sealed class QuickER.Runtime.IncludableSqlQuery<TEntity, TProperty>
     public QuickER.Runtime.IncludableSqlQuery<TEntity, TNext> Include<TNext>(System.Linq.Expressions.Expression<System.Func<TEntity, System.Collections.Generic.ICollection<TNext>>> navigationSelector)

@@ -64,6 +64,12 @@ The uniqueness check is advisory: the definitive guarantee is the database's own
 
 For the supported scope and details of `Query()`, see [docs/code-generation.md](https://github.com/kokko-labs/QuickER/blob/main/docs/code-generation.md).
 
+Two generated extensions ride on `Query()`: `IncludeGraph()` includes the same child-direction cascade a graph save walks (combine it with `Where` or `GetByIdAsync` to bound what is fetched), and `GetByIdAsync(id)` fetches a single entity by key at the end of a query chain — `Query().IncludeGraph().GetByIdAsync(id)` reads one aggregate together with its whole graph.
+{{~ if generate_value_objects }}
+
+Value objects offer more than `Create` / `TryCreate`: `TryCreateFrom` / `CreateFrom` build one from a value outside the model (a CSV field, a spreadsheet cell), and the partial hooks `GetDefinedInstance` / `CreateFromCustom` turn a type into an enumeration-like value object that hands back declared instances. The recipes are in the document linked above.
+{{~ end }}
+
 ## Usage
 
 ### DI registration

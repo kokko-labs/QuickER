@@ -455,6 +455,7 @@ internal static class RawValueConverter
             ? roundTripped
             : TimeSpan.Parse(text, provider);
 }
+
 /// <summary>Change state of an entity or EditModel.</summary>
 public enum RowState
 {
@@ -3897,7 +3898,7 @@ public partial interface ISyncNoteRepository
     : ISyncNoteRemoteRepository,
         IRepository<SyncNoteEntity, int> { }
 
-/// <summary>Query extensions: fetching the whole cascade graph of an entity in one call (the read-side counterpart of the graph save), and fetching a single entity by its key.</summary>
+/// <summary>Query extensions: including the whole cascade graph of an entity with a single method call (the read-side counterpart of the graph save - combine it with Where or GetByIdAsync to bound what is fetched), and fetching a single entity by its key.</summary>
 /// <remarks>
 /// The Include tree of each entity is built once and shared by every query, so it must stay unmodified after construction.
 /// </remarks>

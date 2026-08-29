@@ -142,26 +142,25 @@ public sealed class DataAccessMode
     public static readonly DataAccessMode Database = new(2, "Database");
     public static readonly DataAccessMode Fake = new(3, "Fake");
 
+    // Built once: the lookups below run on every creation (per column per row when rows are read), so keep them allocation-free
+    private static readonly Dictionary<int, DataAccessMode> Defined =
+        new[] { Web, Database, Fake }.ToDictionary(x => x.Value);
+
     private DataAccessMode(int value, string modeName) : base(value) => ModeName = modeName;
 
     public string ModeName { get; }
 
-    public static IEnumerable<DataAccessMode> GetList() => [Web, Database, Fake];
+    public static IEnumerable<DataAccessMode> GetList() => Defined.Values;
 
-    static DataAccessMode IValueObject<DataAccessMode, int>.New(int value) =>
-        GetList().First(x => x.Value == value);
+    static DataAccessMode IValueObject<DataAccessMode, int>.New(int value) => Defined[value];
 
-    static bool IValueObject<DataAccessMode, int>.TryGetDefined(int value, out DataAccessMode? defined)
-    {
-        defined = GetList().FirstOrDefault(x => x.Value == value);
-
-        return defined is not null;
-    }
+    static bool IValueObject<DataAccessMode, int>.TryGetDefined(int value, out DataAccessMode? defined) =>
+        Defined.TryGetValue(value, out defined);
 
     // TryGetDefined alone does not reject an undefined value - it only falls through to New. Write the pair
     static void IValueObject<DataAccessMode, int>.ValidateCore(int value, ref List<string>? errors)
     {
-        if (!GetList().Any(x => x.Value == value))
+        if (!Defined.ContainsKey(value))
         {
             (errors ??= new List<string>()).Add($"Data access mode {value} is not defined.");
         }
@@ -173,7 +172,9 @@ public sealed class DataAccessMode
 
 > **Note**: `TryGetDefined` only decides what to return for a value that already passed validation. Always pair it with a check (`ValidateCore` or `OnValidate`) that rejects anything outside the set. Without one, a value outside the set quietly falls through to `New` and is built as an ordinary instance, and "only declared instances" no longer holds.
 
-**A generated value object takes the same shape from a partial of your own.** Its `New` cannot be replaced, but `TryGetDefined` sits one step outside it, so the extension is self-contained - no generator option involved.
+> **Note**: the hook runs on every creation, so look the value up in a table built once (the `Defined` dictionary above) rather than scanning with LINQ. And never call `Create` / `TryCreate` / `TryCreateFrom` from inside it: every creation path runs through the hook, so the call recurses with no way to catch the resulting stack overflow.
+
+**A generated value object takes the same shape through a partial hook.** Its `New` cannot be replaced and its `TryGetDefined` is already emitted as a bridge, so the extension goes into `GetDefinedInstance` - the partial method that bridge consults - and stays self-contained, no generator option involved.
 
 ```csharp
 // Extend the generated ModeValue (an int column) into an enumeration
@@ -182,20 +183,19 @@ public sealed partial class ModeValue
     public static readonly ModeValue List = new(1) { ModeName = "List" };
     public static readonly ModeValue Edit = new(2) { ModeName = "Edit" };
 
+    private static readonly Dictionary<int, ModeValue> Defined =
+        new[] { List, Edit }.ToDictionary(x => x.Value);
+
     public string ModeName { get; private init; } = string.Empty;
 
-    public static IEnumerable<ModeValue> GetList() => [List, Edit];
+    public static IEnumerable<ModeValue> GetList() => Defined.Values;
 
-    static bool IValueObject<ModeValue, int>.TryGetDefined(int value, out ModeValue? defined)
-    {
-        defined = GetList().FirstOrDefault(x => x.Value == value);
-
-        return defined is not null;
-    }
+    static partial void GetDefinedInstance(int value, ref ModeValue? defined) =>
+        defined = Defined.GetValueOrDefault(value);
 
     static partial void OnValidate(int value, ICollection<string> errors)
     {
-        if (!GetList().Any(x => x.Value == value))
+        if (!Defined.ContainsKey(value))
         {
             errors.Add($"Screen mode {value} is not defined.");
         }
@@ -205,25 +205,29 @@ public sealed partial class ModeValue
 
 Because the hook sits in front of `New` rather than inside it, **a row read from the database and a value restored from JSON return the declared instance too**, so an instance missing its extra state (`ModeName` here) never gets into circulation.
 
-To create from a name instead of the value, override `TryCreateFrom` on the type and delegate the shapes it does not handle back to the base, which keeps the ordinary conversion working:
+To create from a name instead of the value, implement the `CreateFromCustom` partial hook. `TryCreateFrom` / `CreateFrom` consult it ahead of the ordinary conversion - on every call shape, the generic import path and a call spelled with the concrete type name alike. Set the result to claim the value; anything left null falls through to the ordinary conversion, which keeps `2` working:
 
 ```csharp
-static bool IValueObject<ModeValue>.TryCreateFrom(
-    object? raw, IFormatProvider? provider, out ModeValue? result, out IReadOnlyList<string> errors)
+static partial void CreateFromCustom(object raw, IFormatProvider? provider, ref ModeValue? result)
 {
-    if (raw is string name && GetList().FirstOrDefault(x => x.ModeName == name) is { } hit)
+    if (raw is string name)
     {
-        result = hit;
-        errors = Array.Empty<string>();
-
-        return true;
+        result = GetList().FirstOrDefault(x => x.ModeName == name);
     }
-
-    return ValueObjectBase<ModeValue, int>.TryCreateFrom(raw, provider, out result, out errors);
 }
 ```
 
-The generic import code from the previous section (`ReadCell<ModeValue>`) now accepts both `"Edit"` and `2`.
+The generic import code from the previous section (`ReadCell<ModeValue>`) now accepts both `"Edit"` and `2`. A hand-written value object implements the interface hook `TryCreateFromCustom` directly instead (do not call `TryCreateFrom` / `CreateFrom` from inside either form - they consult the hook, so the call would recurse):
+
+```csharp
+static bool IValueObject<DataAccessMode>.TryCreateFromCustom(
+    object raw, IFormatProvider? provider, out DataAccessMode? result)
+{
+    result = raw is string name ? GetList().FirstOrDefault(x => x.ModeName == name) : null;
+
+    return result is not null;
+}
+```
 
 ### partial extension points
 

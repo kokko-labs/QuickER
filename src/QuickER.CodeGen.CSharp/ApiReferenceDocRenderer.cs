@@ -128,6 +128,8 @@ internal sealed class ApiReferenceDocRenderer
             ["namespace_name"] = model.NamespaceName,
             ["entities"] = entities,
             ["has_contract"] = hasContract,
+            // 値オブジェクトの生値変換・partial フックの案内を出すか（VO 生成時のみ）。
+            ["generate_value_objects"] = options.GenerateValueObjects,
             // 実際の生成モードに追従した DI 登録例（単一方言 / マルチ方言 keyed / EF Core / インメモリ）。
             ["di_registrations"] = hasContract
                 ? BuildDiRegistrations(options, culture)
@@ -356,23 +358,39 @@ internal sealed class ApiReferenceDocRenderer
             // 実装差し替えを避けるためローカル変数名は Repository インターフェイス由来ではなく汎用の "repository"
             ["repository_field"] = "repository",
             ["order_property"] = orderProperty,
-            ["sample_key_literal"] = SampleKeyLiteral(keyTypeName),
+            ["sample_key_literal"] = SampleKeyLiteral(keyTypeName, model.ValueObjectClasses),
         };
     }
 
-    /// <summary>主キー型に応じた例示リテラル（`int` → 1、`string` → "..."、`Guid` → Guid.Empty 等）を返す</summary>
-    private static string SampleKeyLiteral(string keyTypeName)
+    /// <summary>
+    /// 主キー型に応じた例示リテラル（`int` → 1、`string` → "..."、`Guid` → Guid.Empty 等）を返す。
+    /// 値オブジェクト型のキーは内包型のリテラルを `Create` で包む（素のリテラルではコンパイルできない例になるため）。
+    /// </summary>
+    private static string SampleKeyLiteral(
+        string keyTypeName,
+        IReadOnlyList<CSharpValueObjectModel> valueObjects
+    )
     {
         var normalized = keyTypeName.TrimEnd('?');
+        var valueObject = valueObjects.FirstOrDefault(vo => vo.ClassName == normalized);
 
-        return normalized switch
+        if (valueObject is not null)
+        {
+            return $"{normalized}.Create({ScalarSampleLiteral(valueObject.ValueTypeName)})";
+        }
+
+        return ScalarSampleLiteral(normalized);
+    }
+
+    /// <summary>スカラー型名に応じた例示リテラルを返す（未知の型は 1）</summary>
+    private static string ScalarSampleLiteral(string typeName) =>
+        typeName.TrimEnd('?') switch
         {
             "string" => "\"...\"",
             "Guid" => "Guid.Empty",
             "long" => "1L",
             _ => "1",
         };
-    }
 
     /// <summary>生成ファイル構成の表行（ファイル名・名前空間・含むバケット）を組み立てる</summary>
     private static List<ScriptObject> BuildGeneratedFileRows(CodeGenerationOptions options)

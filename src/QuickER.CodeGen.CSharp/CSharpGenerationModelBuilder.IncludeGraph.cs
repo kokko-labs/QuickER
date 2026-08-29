@@ -173,7 +173,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             );
         }
 
-        return "/// <summary>Query extensions: fetching the whole cascade graph of an entity in one call (the read-side counterpart of the graph save), and fetching a single entity by its key.</summary>\n"
+        return "/// <summary>Query extensions: including the whole cascade graph of an entity with a single method call (the read-side counterpart of the graph save - combine it with Where or GetByIdAsync to bound what is fetched), and fetching a single entity by its key.</summary>\n"
             + "/// <remarks>\n"
             + "/// The Include tree of each entity is built once and shared by every query, so it must stay unmodified after construction.\n"
             + "/// </remarks>\n"
