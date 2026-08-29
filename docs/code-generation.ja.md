@@ -142,26 +142,25 @@ public sealed class DataAccessMode
     public static readonly DataAccessMode Database = new(2, "Database");
     public static readonly DataAccessMode Fake = new(3, "Fake");
 
+    // 一度だけ構築します。下のルックアップは生成のたびに（行の読み出しでは行×列で）走るため、割り当てなしに保ちます
+    private static readonly Dictionary<int, DataAccessMode> Defined =
+        new[] { Web, Database, Fake }.ToDictionary(x => x.Value);
+
     private DataAccessMode(int value, string modeName) : base(value) => ModeName = modeName;
 
     public string ModeName { get; }
 
-    public static IEnumerable<DataAccessMode> GetList() => [Web, Database, Fake];
+    public static IEnumerable<DataAccessMode> GetList() => Defined.Values;
 
-    static DataAccessMode IValueObject<DataAccessMode, int>.New(int value) =>
-        GetList().First(x => x.Value == value);
+    static DataAccessMode IValueObject<DataAccessMode, int>.New(int value) => Defined[value];
 
-    static bool IValueObject<DataAccessMode, int>.TryGetDefined(int value, out DataAccessMode? defined)
-    {
-        defined = GetList().FirstOrDefault(x => x.Value == value);
-
-        return defined is not null;
-    }
+    static bool IValueObject<DataAccessMode, int>.TryGetDefined(int value, out DataAccessMode? defined) =>
+        Defined.TryGetValue(value, out defined);
 
     // TryGetDefined だけでは未定義値を拒めません（New へ落ちるだけです）。対で検証を書いてください
     static void IValueObject<DataAccessMode, int>.ValidateCore(int value, ref List<string>? errors)
     {
-        if (!GetList().Any(x => x.Value == value))
+        if (!Defined.ContainsKey(value))
         {
             (errors ??= new List<string>()).Add($"データアクセスモード {value} は定義されていません。");
         }
@@ -173,7 +172,9 @@ public sealed class DataAccessMode
 
 > **注意**: `TryGetDefined` が決めるのは「検証を通った値に対して何を返すか」だけです。未定義の値を拒む検証（`ValidateCore` または `OnValidate`）を必ず対で書いてください。書き忘れると、集合の外の値が黙って `New` に落ちて普通のインスタンスとして作られ、「定義済み以外は受け付けない」という前提が破れます。
 
-**生成された値オブジェクトも、partial を足すだけで同じ形にできます。** 生成側の `New` は差し替えられませんが、`TryGetDefined` はその一段外に割り込むため、利用者の partial だけで完結します（生成器のオプションは要りません）。
+> **注意**: このフックは生成のたびに走るため、一度だけ構築したテーブル（上の `Defined` 辞書）を引く形にし、LINQ での走査は避けてください。また、フックの中から `Create` / `TryCreate` / `TryCreateFrom` を呼んではいけません。生成の全経路がフックを通るため呼び出しが再帰し、結果のスタックオーバーフローは catch できません。
+
+**生成された値オブジェクトも、partial フックで同じ形にできます。** 生成側の `New` は差し替えられず、`TryGetDefined` もブリッジとして出力済みなので、拡張はブリッジが照会する partial メソッド `GetDefinedInstance` に書きます（利用者の partial だけで完結し、生成器のオプションは要りません）。
 
 ```csharp
 // 生成された ModeValue（int 列）を列挙型に拡張する
@@ -182,48 +183,53 @@ public sealed partial class ModeValue
     public static readonly ModeValue List = new(1) { ModeName = "List" };
     public static readonly ModeValue Edit = new(2) { ModeName = "Edit" };
 
+    private static readonly Dictionary<int, ModeValue> Defined =
+        new[] { List, Edit }.ToDictionary(x => x.Value);
+
     public string ModeName { get; private init; } = string.Empty;
 
-    public static IEnumerable<ModeValue> GetList() => [List, Edit];
+    public static IEnumerable<ModeValue> GetList() => Defined.Values;
 
-    static bool IValueObject<ModeValue, int>.TryGetDefined(int value, out ModeValue? defined)
+    static partial void GetDefinedInstance(int value, ref ModeValue? defined) =>
+        defined = Defined.GetValueOrDefault(value);
+
+    static partial void OnValidate(int value, ref List<string>? errors)
     {
-        defined = GetList().FirstOrDefault(x => x.Value == value);
-
-        return defined is not null;
-    }
-
-    static partial void OnValidate(int value, ICollection<string> errors)
-    {
-        if (!GetList().Any(x => x.Value == value))
+        if (!Defined.ContainsKey(value))
         {
-            errors.Add($"表示モード {value} は定義されていません。");
+            (errors ??= new List<string>()).Add($"表示モード {value} は定義されていません。");
         }
     }
 }
 ```
 
-`TryGetDefined` は `New` ではなく `Create` / `TryCreate` の側に割り込むため、**DB から読んだ行も JSON から復元した値も定義済みインスタンスになります**（`ModeName` のような付随する状態が欠けたインスタンスが出回りません）。
+フックは `New` ではなく `Create` / `TryCreate` の側に割り込むため、**DB から読んだ行も JSON から復元した値も定義済みインスタンスになります**（`ModeName` のような付随する状態が欠けたインスタンスが出回りません）。
 
-値の代わりに名前で作れるようにしたいときは `TryCreateFrom` を型側で差し替えます。扱わない形は基底へ委譲すれば、通常の変換はそのまま残ります。
+値の代わりに名前で作れるようにしたいときは partial フック `CreateFromCustom` を実装します。`TryCreateFrom` / `CreateFrom` は通常の変換より先にこのフックを照会します——ジェネリックな取り込み経路でも、具象型名を書いた呼び出しでも同じです。受け付ける値には result を設定し、扱わない形は null のままにすれば通常の変換に落ちるため、`2` はそのまま動きます。
 
 ```csharp
-static bool IValueObject<ModeValue>.TryCreateFrom(
-    object? raw, IFormatProvider? provider, out ModeValue? result, out IReadOnlyList<string> errors)
+static partial void CreateFromCustom(object raw, IFormatProvider? provider, ref ModeValue? result)
 {
-    if (raw is string name && GetList().FirstOrDefault(x => x.ModeName == name) is { } hit)
+    if (raw is string name)
     {
-        result = hit;
-        errors = Array.Empty<string>();
-
-        return true;
+        result = GetList().FirstOrDefault(x => x.ModeName == name);
     }
-
-    return ValueObjectBase<ModeValue, int>.TryCreateFrom(raw, provider, out result, out errors);
 }
 ```
 
-これで、前節のジェネリックな取り込みコード（`ReadCell<ModeValue>`）が `"Edit"` も `2` も受け付けます。
+これで、前節のジェネリックな取り込みコード（`ReadCell<ModeValue>`）が `"Edit"` も `2` も受け付けます。手書きの値オブジェクトは、interface のフック `TryCreateFromCustom` を直接実装します（どちらの形でも、フックの中から `TryCreateFrom` / `CreateFrom` を呼んではいけません。両者はこのフックを照会するため再帰します）。
+
+```csharp
+static bool IValueObject<DataAccessMode>.TryCreateFromCustom(
+    object raw, IFormatProvider? provider, out DataAccessMode? result)
+{
+    result = raw is string name ? GetList().FirstOrDefault(x => x.ModeName == name) : null;
+
+    return result is not null;
+}
+```
+
+実装するのはフックだけにしてください——`TryCreateFrom` 自体は、生成 VO でも手書き型でも実装してはいけません。再実装はコンパイルできますが、具象型名を書いた呼び出しは基底の共有実装へ静的束縛されるため、その呼び形でだけ再実装が黙って飛ばされます——差し替え点をフックにしているのはまさにこのためです。
 
 ### partial 拡張点
 
@@ -242,12 +248,13 @@ GeneratedDisplayNames.Resolve = static (name, _) => name;   // Description を�
 ```csharp
 public sealed partial class NameValue
 {
-    // 追加の検証（自動生成の検証の後に呼ばれる）
-    static partial void OnValidate(string value, ICollection<string> errors)
+    // 追加の検証（自動生成の検証の後に呼ばれる）。リストは未確保のまま渡されるので、
+    // 最初の違反を足すときだけ確保する＝検証を通る値は何も確保しない
+    static partial void OnValidate(string value, ref List<string>? errors)
     {
         if (value.Contains(' '))
         {
-            errors.Add("空白は使えません。");
+            (errors ??= new List<string>()).Add("空白は使えません。");
         }
     }
 

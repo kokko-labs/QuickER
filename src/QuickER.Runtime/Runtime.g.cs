@@ -364,9 +364,11 @@ public interface IValueObject<TSelf> : IValueObject
     /// converted to the underlying type, and a value that fails the type's own validation, both return <c>false</c>.
     /// </para>
     /// <para>
-    /// This is the single method a value object overrides to accept a shape of its own - a name for an enumeration-like type,
-    /// say. Do that with an explicit implementation that falls back to <c>ValueObjectBase&lt;TSelf, TValue&gt;.TryCreateFrom</c>
-    /// for the shapes it does not handle itself, so the ordinary conversion keeps working.
+    /// To accept a shape of the type's own - a name for an enumeration-like type, say - implement
+    /// <see cref="TryCreateFromCustom"/> instead of replacing this method: the shared implementation consults that hook
+    /// first, so the custom shape is honored no matter how this method is called. Never implement this member
+    /// yourself, a hand-written value object included - a call spelled with the concrete type name binds to the
+    /// inherited shared implementation, so a re-implementation is silently skipped on that call shape.
     /// </para>
     /// </remarks>
     /// <param name="raw">The value read from the source.</param>
@@ -384,6 +386,28 @@ public interface IValueObject<TSelf> : IValueObject
     /// <param name="raw">The value read from the source.</param>
     /// <param name="provider">The culture the text is written in; <c>null</c> uses the invariant culture.</param>
     static abstract TSelf? CreateFrom(object? raw, IFormatProvider? provider);
+
+    /// <summary>Accepts an input shape of the type's own - a name for an enumeration-like type, say - ahead of the ordinary conversion; the default accepts none.</summary>
+    /// <remarks>
+    /// <para>
+    /// <see cref="TryCreateFrom"/> consults this hook first on every call, so the custom shape is honored on the
+    /// culture-less overload and on a call spelled with the concrete type name just the same. Return the instance to
+    /// claim the value; return false for anything not handled, and the ordinary conversion runs as if the hook were
+    /// not there.
+    /// </para>
+    /// <para>
+    /// Never call <c>TryCreateFrom</c> / <c>CreateFrom</c> from inside: they consult this hook, so the call recurses
+    /// with no way to catch the resulting stack overflow. Look the value up in a table of declared instances instead.
+    /// </para>
+    /// </remarks>
+    /// <param name="raw">The value read from the source (never null; absent values are handled before the hook).</param>
+    /// <param name="provider">The culture the text is written in; <c>null</c> uses the invariant culture.</param>
+    /// <param name="result">The value object, or null when the hook does not handle this value.</param>
+    static virtual bool TryCreateFromCustom(object raw, IFormatProvider? provider, out TSelf? result)
+    {
+        result = default;
+        return false;
+    }
 }
 
 /// <summary>Generic interface for a value object. Lets the static factory be called through a type parameter.</summary>
@@ -413,13 +437,19 @@ public interface IValueObject<TSelf, TValue> : IValueObject<TSelf>
     /// this so that <c>Create</c> and <c>TryCreate</c> hand back the declared instance instead of building a new one. Because
     /// the hook sits in front of <c>New</c> rather than inside it, every path that creates a value object goes through it: a row
     /// read from the database and a value restored from JSON return the declared instance too, along with whatever extra state
-    /// it carries. A generated value object can implement this from a partial of its own, which <c>New</c> - already emitted -
-    /// does not allow.
+    /// it carries. A generated value object supplies this through its <c>GetDefinedInstance</c> partial hook; a hand-written
+    /// one implements this member directly.
     /// </para>
     /// <para>
     /// Implementing this does not by itself reject an undefined value: it only decides what to return for one that passed
     /// validation. Pair it with a <c>ValidateCore</c> (or <c>OnValidate</c>) that rejects anything outside the set, or values
     /// outside it will quietly fall through to <c>New</c> and be built as ordinary instances.
+    /// </para>
+    /// <para>
+    /// Look the value up in a static table (an array or a dictionary built once) without allocating - this hook runs on
+    /// every creation, per column per row when rows are read. Never call <c>Create</c> / <c>TryCreate</c> /
+    /// <c>TryCreateFrom</c> from inside: every creation path runs through this hook, so the call recurses with no way to
+    /// catch the resulting stack overflow.
     /// </para>
     /// </remarks>
     /// <param name="value">The already-validated value.</param>
@@ -541,9 +571,11 @@ public abstract partial class ValueObjectBase<TSelf, TValue> : IValueObject, IEq
 
     /// <summary>Converts a value from outside the model and creates the value object from it, without throwing (an absent value succeeds with a null result).</summary>
     /// <remarks>
-    /// The conversion to the underlying type is <see cref="RawValueConverter.ConvertInput"/>, so text written for a culture is
-    /// read in that culture and numeric text may carry group separators. Everything past the conversion is the ordinary
-    /// <c>TryCreate</c>, so the type's own validation - and its declared instances - apply unchanged.
+    /// A shape the type accepts of its own is consulted first (<see cref="IValueObject{TSelf}.TryCreateFromCustom"/>), so a
+    /// custom shape is honored no matter how this method is called. The conversion to the underlying type is
+    /// <see cref="RawValueConverter.ConvertInput"/>, so text written for a culture is read in that culture and numeric text
+    /// may carry group separators. Everything past the conversion is the ordinary <c>TryCreate</c>, so the type's own
+    /// validation - and its declared instances - apply unchanged.
     /// </remarks>
     /// <param name="raw">The value read from the source.</param>
     /// <param name="provider">The culture the text is written in; <c>null</c> uses the invariant culture.</param>
@@ -561,6 +593,14 @@ public abstract partial class ValueObjectBase<TSelf, TValue> : IValueObject, IEq
         if (raw is null or DBNull || (raw is string empty && empty.Length == 0))
         {
             result = null;
+            errors = Array.Empty<string>();
+            return true;
+        }
+
+        // A shape the type accepts of its own (a name for an enumeration-like type, say) wins over the ordinary conversion.
+        if (TSelf.TryCreateFromCustom(raw, provider, out var custom) && custom is not null)
+        {
+            result = custom;
             errors = Array.Empty<string>();
             return true;
         }
@@ -1113,6 +1153,7 @@ public static class RawValueConverter
             ? roundTripped
             : TimeSpan.Parse(text, provider);
 }
+
 /// <summary>Change state of an entity or EditModel.</summary>
 public enum RowState
 {

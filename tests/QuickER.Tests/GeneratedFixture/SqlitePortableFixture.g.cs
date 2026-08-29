@@ -291,9 +291,11 @@ public interface IValueObject<TSelf> : IValueObject
     /// converted to the underlying type, and a value that fails the type's own validation, both return <c>false</c>.
     /// </para>
     /// <para>
-    /// This is the single method a value object overrides to accept a shape of its own - a name for an enumeration-like type,
-    /// say. Do that with an explicit implementation that falls back to <c>ValueObjectBase&lt;TSelf, TValue&gt;.TryCreateFrom</c>
-    /// for the shapes it does not handle itself, so the ordinary conversion keeps working.
+    /// To accept a shape of the type's own - a name for an enumeration-like type, say - implement
+    /// <see cref="TryCreateFromCustom"/> instead of replacing this method: the shared implementation consults that hook
+    /// first, so the custom shape is honored no matter how this method is called. Never implement this member
+    /// yourself, a hand-written value object included - a call spelled with the concrete type name binds to the
+    /// inherited shared implementation, so a re-implementation is silently skipped on that call shape.
     /// </para>
     /// </remarks>
     /// <param name="raw">The value read from the source.</param>
@@ -311,6 +313,28 @@ public interface IValueObject<TSelf> : IValueObject
     /// <param name="raw">The value read from the source.</param>
     /// <param name="provider">The culture the text is written in; <c>null</c> uses the invariant culture.</param>
     static abstract TSelf? CreateFrom(object? raw, IFormatProvider? provider);
+
+    /// <summary>Accepts an input shape of the type's own - a name for an enumeration-like type, say - ahead of the ordinary conversion; the default accepts none.</summary>
+    /// <remarks>
+    /// <para>
+    /// <see cref="TryCreateFrom"/> consults this hook first on every call, so the custom shape is honored on the
+    /// culture-less overload and on a call spelled with the concrete type name just the same. Return the instance to
+    /// claim the value; return false for anything not handled, and the ordinary conversion runs as if the hook were
+    /// not there.
+    /// </para>
+    /// <para>
+    /// Never call <c>TryCreateFrom</c> / <c>CreateFrom</c> from inside: they consult this hook, so the call recurses
+    /// with no way to catch the resulting stack overflow. Look the value up in a table of declared instances instead.
+    /// </para>
+    /// </remarks>
+    /// <param name="raw">The value read from the source (never null; absent values are handled before the hook).</param>
+    /// <param name="provider">The culture the text is written in; <c>null</c> uses the invariant culture.</param>
+    /// <param name="result">The value object, or null when the hook does not handle this value.</param>
+    static virtual bool TryCreateFromCustom(object raw, IFormatProvider? provider, out TSelf? result)
+    {
+        result = default;
+        return false;
+    }
 }
 
 /// <summary>Generic interface for a value object. Lets the static factory be called through a type parameter.</summary>
@@ -340,13 +364,19 @@ public interface IValueObject<TSelf, TValue> : IValueObject<TSelf>
     /// this so that <c>Create</c> and <c>TryCreate</c> hand back the declared instance instead of building a new one. Because
     /// the hook sits in front of <c>New</c> rather than inside it, every path that creates a value object goes through it: a row
     /// read from the database and a value restored from JSON return the declared instance too, along with whatever extra state
-    /// it carries. A generated value object can implement this from a partial of its own, which <c>New</c> - already emitted -
-    /// does not allow.
+    /// it carries. A generated value object supplies this through its <c>GetDefinedInstance</c> partial hook; a hand-written
+    /// one implements this member directly.
     /// </para>
     /// <para>
     /// Implementing this does not by itself reject an undefined value: it only decides what to return for one that passed
     /// validation. Pair it with a <c>ValidateCore</c> (or <c>OnValidate</c>) that rejects anything outside the set, or values
     /// outside it will quietly fall through to <c>New</c> and be built as ordinary instances.
+    /// </para>
+    /// <para>
+    /// Look the value up in a static table (an array or a dictionary built once) without allocating - this hook runs on
+    /// every creation, per column per row when rows are read. Never call <c>Create</c> / <c>TryCreate</c> /
+    /// <c>TryCreateFrom</c> from inside: every creation path runs through this hook, so the call recurses with no way to
+    /// catch the resulting stack overflow.
     /// </para>
     /// </remarks>
     /// <param name="value">The already-validated value.</param>
@@ -468,9 +498,11 @@ public abstract partial class ValueObjectBase<TSelf, TValue> : IValueObject, IEq
 
     /// <summary>Converts a value from outside the model and creates the value object from it, without throwing (an absent value succeeds with a null result).</summary>
     /// <remarks>
-    /// The conversion to the underlying type is <see cref="RawValueConverter.ConvertInput"/>, so text written for a culture is
-    /// read in that culture and numeric text may carry group separators. Everything past the conversion is the ordinary
-    /// <c>TryCreate</c>, so the type's own validation - and its declared instances - apply unchanged.
+    /// A shape the type accepts of its own is consulted first (<see cref="IValueObject{TSelf}.TryCreateFromCustom"/>), so a
+    /// custom shape is honored no matter how this method is called. The conversion to the underlying type is
+    /// <see cref="RawValueConverter.ConvertInput"/>, so text written for a culture is read in that culture and numeric text
+    /// may carry group separators. Everything past the conversion is the ordinary <c>TryCreate</c>, so the type's own
+    /// validation - and its declared instances - apply unchanged.
     /// </remarks>
     /// <param name="raw">The value read from the source.</param>
     /// <param name="provider">The culture the text is written in; <c>null</c> uses the invariant culture.</param>
@@ -488,6 +520,14 @@ public abstract partial class ValueObjectBase<TSelf, TValue> : IValueObject, IEq
         if (raw is null or DBNull || (raw is string empty && empty.Length == 0))
         {
             result = null;
+            errors = Array.Empty<string>();
+            return true;
+        }
+
+        // A shape the type accepts of its own (a name for an enumeration-like type, say) wins over the ordinary conversion.
+        if (TSelf.TryCreateFromCustom(raw, provider, out var custom) && custom is not null)
+        {
+            result = custom;
             errors = Array.Empty<string>();
             return true;
         }
@@ -912,15 +952,39 @@ public sealed partial class AmountValue
         new(value);
 
     /// <summary>Auto-generated validation rules plus the user extension (OnValidate), called by the base class's Create / TryCreate / Validate.</summary>
-    /// <remarks>An unimplemented OnValidate partial method takes its arguments with it when the compiler removes the call, so the list it would need is only allocated where the hook is actually written.</remarks>
+    /// <remarks>An unimplemented OnValidate partial method takes its call away entirely, and an implemented one receives the error list by reference and possibly unallocated - so a value that passes every rule allocates nothing either way.</remarks>
     static void IValueObject<AmountValue, decimal>.ValidateCore(decimal value, ref List<string>? errors)
     {
         ValidateDecimal(value, 10, 2, ref errors);
-        OnValidate(value, errors ??= new List<string>());
+        OnValidate(value, ref errors);
     }
 
-    /// <summary>User-defined additional validation (partial; zero cost when not implemented).</summary>
-    static partial void OnValidate(decimal value, ICollection<string> errors);
+    /// <summary>User-defined additional validation (partial; zero cost when not implemented). The list arrives by reference and possibly unallocated - allocate it only when adding the first violation, the same shape ValidateCore itself uses ((errors ??= new List&lt;string&gt;()).Add(...)), so a value that passes adds no allocation.</summary>
+    static partial void OnValidate(decimal value, ref List<string>? errors);
+
+    /// <summary>Hands back the declared instance found by the GetDefinedInstance partial hook (the base class's Create / TryCreate consult this on every creation path).</summary>
+    static bool IValueObject<AmountValue, decimal>.TryGetDefined(decimal value, out AmountValue? defined)
+    {
+        AmountValue? found = null;
+        GetDefinedInstance(value, ref found);
+        defined = found;
+        return found is not null;
+    }
+
+    /// <summary>Declared-instance lookup for an enumeration-like value object (partial; every value is built as a new instance when not implemented). Look the value up in a static table without allocating - this runs on every creation - and never call Create / TryCreate / TryCreateFrom from inside: every creation path runs through this hook and the call would recurse.</summary>
+    static partial void GetDefinedInstance(decimal value, ref AmountValue? defined);
+
+    /// <summary>Hands the input shapes claimed by the CreateFromCustom partial hook to TryCreateFrom / CreateFrom, ahead of the ordinary conversion.</summary>
+    static bool IValueObject<AmountValue>.TryCreateFromCustom(object raw, IFormatProvider? provider, out AmountValue? result)
+    {
+        AmountValue? custom = null;
+        CreateFromCustom(raw, provider, ref custom);
+        result = custom;
+        return custom is not null;
+    }
+
+    /// <summary>Custom input shape for TryCreateFrom / CreateFrom - a name for an enumeration-like value object, say (partial; only the ordinary conversion applies when not implemented). Set result to claim the value; leave it null for anything not handled so the ordinary conversion runs. Never call TryCreateFrom / CreateFrom from inside: they consult this hook and the call would recurse.</summary>
+    static partial void CreateFromCustom(object raw, IFormatProvider? provider, ref AmountValue? result);
 
     /// <summary>Gets the display name of this value object (used in error messages and similar). Defaults to the column description, or the property name when unset. Can be replaced through GeneratedDisplayNames.Resolve (all display names at once) or CustomizeDisplayName (this value object only).</summary>
     public static string DisplayName
@@ -992,15 +1056,39 @@ public sealed partial class BalanceValue
         new(value);
 
     /// <summary>Auto-generated validation rules plus the user extension (OnValidate), called by the base class's Create / TryCreate / Validate.</summary>
-    /// <remarks>An unimplemented OnValidate partial method takes its arguments with it when the compiler removes the call, so the list it would need is only allocated where the hook is actually written.</remarks>
+    /// <remarks>An unimplemented OnValidate partial method takes its call away entirely, and an implemented one receives the error list by reference and possibly unallocated - so a value that passes every rule allocates nothing either way.</remarks>
     static void IValueObject<BalanceValue, decimal>.ValidateCore(decimal value, ref List<string>? errors)
     {
         ValidateDecimal(value, 10, 2, ref errors);
-        OnValidate(value, errors ??= new List<string>());
+        OnValidate(value, ref errors);
     }
 
-    /// <summary>User-defined additional validation (partial; zero cost when not implemented).</summary>
-    static partial void OnValidate(decimal value, ICollection<string> errors);
+    /// <summary>User-defined additional validation (partial; zero cost when not implemented). The list arrives by reference and possibly unallocated - allocate it only when adding the first violation, the same shape ValidateCore itself uses ((errors ??= new List&lt;string&gt;()).Add(...)), so a value that passes adds no allocation.</summary>
+    static partial void OnValidate(decimal value, ref List<string>? errors);
+
+    /// <summary>Hands back the declared instance found by the GetDefinedInstance partial hook (the base class's Create / TryCreate consult this on every creation path).</summary>
+    static bool IValueObject<BalanceValue, decimal>.TryGetDefined(decimal value, out BalanceValue? defined)
+    {
+        BalanceValue? found = null;
+        GetDefinedInstance(value, ref found);
+        defined = found;
+        return found is not null;
+    }
+
+    /// <summary>Declared-instance lookup for an enumeration-like value object (partial; every value is built as a new instance when not implemented). Look the value up in a static table without allocating - this runs on every creation - and never call Create / TryCreate / TryCreateFrom from inside: every creation path runs through this hook and the call would recurse.</summary>
+    static partial void GetDefinedInstance(decimal value, ref BalanceValue? defined);
+
+    /// <summary>Hands the input shapes claimed by the CreateFromCustom partial hook to TryCreateFrom / CreateFrom, ahead of the ordinary conversion.</summary>
+    static bool IValueObject<BalanceValue>.TryCreateFromCustom(object raw, IFormatProvider? provider, out BalanceValue? result)
+    {
+        BalanceValue? custom = null;
+        CreateFromCustom(raw, provider, ref custom);
+        result = custom;
+        return custom is not null;
+    }
+
+    /// <summary>Custom input shape for TryCreateFrom / CreateFrom - a name for an enumeration-like value object, say (partial; only the ordinary conversion applies when not implemented). Set result to claim the value; leave it null for anything not handled so the ordinary conversion runs. Never call TryCreateFrom / CreateFrom from inside: they consult this hook and the call would recurse.</summary>
+    static partial void CreateFromCustom(object raw, IFormatProvider? provider, ref BalanceValue? result);
 
     /// <summary>Gets the display name of this value object (used in error messages and similar). Defaults to the column description, or the property name when unset. Can be replaced through GeneratedDisplayNames.Resolve (all display names at once) or CustomizeDisplayName (this value object only).</summary>
     public static string DisplayName
@@ -1072,14 +1160,38 @@ public sealed partial class CustomerIdValue
         new(value);
 
     /// <summary>Auto-generated validation rules plus the user extension (OnValidate), called by the base class's Create / TryCreate / Validate.</summary>
-    /// <remarks>An unimplemented OnValidate partial method takes its arguments with it when the compiler removes the call, so the list it would need is only allocated where the hook is actually written.</remarks>
+    /// <remarks>An unimplemented OnValidate partial method takes its call away entirely, and an implemented one receives the error list by reference and possibly unallocated - so a value that passes every rule allocates nothing either way.</remarks>
     static void IValueObject<CustomerIdValue, int>.ValidateCore(int value, ref List<string>? errors)
     {
-        OnValidate(value, errors ??= new List<string>());
+        OnValidate(value, ref errors);
     }
 
-    /// <summary>User-defined additional validation (partial; zero cost when not implemented).</summary>
-    static partial void OnValidate(int value, ICollection<string> errors);
+    /// <summary>User-defined additional validation (partial; zero cost when not implemented). The list arrives by reference and possibly unallocated - allocate it only when adding the first violation, the same shape ValidateCore itself uses ((errors ??= new List&lt;string&gt;()).Add(...)), so a value that passes adds no allocation.</summary>
+    static partial void OnValidate(int value, ref List<string>? errors);
+
+    /// <summary>Hands back the declared instance found by the GetDefinedInstance partial hook (the base class's Create / TryCreate consult this on every creation path).</summary>
+    static bool IValueObject<CustomerIdValue, int>.TryGetDefined(int value, out CustomerIdValue? defined)
+    {
+        CustomerIdValue? found = null;
+        GetDefinedInstance(value, ref found);
+        defined = found;
+        return found is not null;
+    }
+
+    /// <summary>Declared-instance lookup for an enumeration-like value object (partial; every value is built as a new instance when not implemented). Look the value up in a static table without allocating - this runs on every creation - and never call Create / TryCreate / TryCreateFrom from inside: every creation path runs through this hook and the call would recurse.</summary>
+    static partial void GetDefinedInstance(int value, ref CustomerIdValue? defined);
+
+    /// <summary>Hands the input shapes claimed by the CreateFromCustom partial hook to TryCreateFrom / CreateFrom, ahead of the ordinary conversion.</summary>
+    static bool IValueObject<CustomerIdValue>.TryCreateFromCustom(object raw, IFormatProvider? provider, out CustomerIdValue? result)
+    {
+        CustomerIdValue? custom = null;
+        CreateFromCustom(raw, provider, ref custom);
+        result = custom;
+        return custom is not null;
+    }
+
+    /// <summary>Custom input shape for TryCreateFrom / CreateFrom - a name for an enumeration-like value object, say (partial; only the ordinary conversion applies when not implemented). Set result to claim the value; leave it null for anything not handled so the ordinary conversion runs. Never call TryCreateFrom / CreateFrom from inside: they consult this hook and the call would recurse.</summary>
+    static partial void CreateFromCustom(object raw, IFormatProvider? provider, ref CustomerIdValue? result);
 
     /// <summary>Gets the display name of this value object (used in error messages and similar). Defaults to the column description, or the property name when unset. Can be replaced through GeneratedDisplayNames.Resolve (all display names at once) or CustomizeDisplayName (this value object only).</summary>
     public static string DisplayName
@@ -1109,7 +1221,7 @@ public sealed partial class MemoValue
         new(value);
 
     /// <summary>Auto-generated validation rules plus the user extension (OnValidate), called by the base class's Create / TryCreate / Validate.</summary>
-    /// <remarks>An unimplemented OnValidate partial method takes its arguments with it when the compiler removes the call, so the list it would need is only allocated where the hook is actually written.</remarks>
+    /// <remarks>An unimplemented OnValidate partial method takes its call away entirely, and an implemented one receives the error list by reference and possibly unallocated - so a value that passes every rule allocates nothing either way.</remarks>
     static void IValueObject<MemoValue, string>.ValidateCore(string value, ref List<string>? errors)
     {
         // A value object never wraps null (a nullable column keeps the property itself null),
@@ -1128,11 +1240,35 @@ public sealed partial class MemoValue
             CustomizeMaxLengthErrorMessage(value, 50, ref message);
             (errors ??= new List<string>()).Add(message);
         }
-        OnValidate(value, errors ??= new List<string>());
+        OnValidate(value, ref errors);
     }
 
-    /// <summary>User-defined additional validation (partial; zero cost when not implemented).</summary>
-    static partial void OnValidate(string value, ICollection<string> errors);
+    /// <summary>User-defined additional validation (partial; zero cost when not implemented). The list arrives by reference and possibly unallocated - allocate it only when adding the first violation, the same shape ValidateCore itself uses ((errors ??= new List&lt;string&gt;()).Add(...)), so a value that passes adds no allocation.</summary>
+    static partial void OnValidate(string value, ref List<string>? errors);
+
+    /// <summary>Hands back the declared instance found by the GetDefinedInstance partial hook (the base class's Create / TryCreate consult this on every creation path).</summary>
+    static bool IValueObject<MemoValue, string>.TryGetDefined(string value, out MemoValue? defined)
+    {
+        MemoValue? found = null;
+        GetDefinedInstance(value, ref found);
+        defined = found;
+        return found is not null;
+    }
+
+    /// <summary>Declared-instance lookup for an enumeration-like value object (partial; every value is built as a new instance when not implemented). Look the value up in a static table without allocating - this runs on every creation - and never call Create / TryCreate / TryCreateFrom from inside: every creation path runs through this hook and the call would recurse.</summary>
+    static partial void GetDefinedInstance(string value, ref MemoValue? defined);
+
+    /// <summary>Hands the input shapes claimed by the CreateFromCustom partial hook to TryCreateFrom / CreateFrom, ahead of the ordinary conversion.</summary>
+    static bool IValueObject<MemoValue>.TryCreateFromCustom(object raw, IFormatProvider? provider, out MemoValue? result)
+    {
+        MemoValue? custom = null;
+        CreateFromCustom(raw, provider, ref custom);
+        result = custom;
+        return custom is not null;
+    }
+
+    /// <summary>Custom input shape for TryCreateFrom / CreateFrom - a name for an enumeration-like value object, say (partial; only the ordinary conversion applies when not implemented). Set result to claim the value; leave it null for anything not handled so the ordinary conversion runs. Never call TryCreateFrom / CreateFrom from inside: they consult this hook and the call would recurse.</summary>
+    static partial void CreateFromCustom(object raw, IFormatProvider? provider, ref MemoValue? result);
 
     /// <summary>Gets the display name of this value object (used in error messages and similar). Defaults to the column description, or the property name when unset. Can be replaced through GeneratedDisplayNames.Resolve (all display names at once) or CustomizeDisplayName (this value object only).</summary>
     public static string DisplayName
@@ -1172,7 +1308,7 @@ public sealed partial class NameValue
         new(value);
 
     /// <summary>Auto-generated validation rules plus the user extension (OnValidate), called by the base class's Create / TryCreate / Validate.</summary>
-    /// <remarks>An unimplemented OnValidate partial method takes its arguments with it when the compiler removes the call, so the list it would need is only allocated where the hook is actually written.</remarks>
+    /// <remarks>An unimplemented OnValidate partial method takes its call away entirely, and an implemented one receives the error list by reference and possibly unallocated - so a value that passes every rule allocates nothing either way.</remarks>
     static void IValueObject<NameValue, string>.ValidateCore(string value, ref List<string>? errors)
     {
         // A value object never wraps null (a nullable column keeps the property itself null),
@@ -1191,11 +1327,35 @@ public sealed partial class NameValue
             CustomizeMaxLengthErrorMessage(value, 50, ref message);
             (errors ??= new List<string>()).Add(message);
         }
-        OnValidate(value, errors ??= new List<string>());
+        OnValidate(value, ref errors);
     }
 
-    /// <summary>User-defined additional validation (partial; zero cost when not implemented).</summary>
-    static partial void OnValidate(string value, ICollection<string> errors);
+    /// <summary>User-defined additional validation (partial; zero cost when not implemented). The list arrives by reference and possibly unallocated - allocate it only when adding the first violation, the same shape ValidateCore itself uses ((errors ??= new List&lt;string&gt;()).Add(...)), so a value that passes adds no allocation.</summary>
+    static partial void OnValidate(string value, ref List<string>? errors);
+
+    /// <summary>Hands back the declared instance found by the GetDefinedInstance partial hook (the base class's Create / TryCreate consult this on every creation path).</summary>
+    static bool IValueObject<NameValue, string>.TryGetDefined(string value, out NameValue? defined)
+    {
+        NameValue? found = null;
+        GetDefinedInstance(value, ref found);
+        defined = found;
+        return found is not null;
+    }
+
+    /// <summary>Declared-instance lookup for an enumeration-like value object (partial; every value is built as a new instance when not implemented). Look the value up in a static table without allocating - this runs on every creation - and never call Create / TryCreate / TryCreateFrom from inside: every creation path runs through this hook and the call would recurse.</summary>
+    static partial void GetDefinedInstance(string value, ref NameValue? defined);
+
+    /// <summary>Hands the input shapes claimed by the CreateFromCustom partial hook to TryCreateFrom / CreateFrom, ahead of the ordinary conversion.</summary>
+    static bool IValueObject<NameValue>.TryCreateFromCustom(object raw, IFormatProvider? provider, out NameValue? result)
+    {
+        NameValue? custom = null;
+        CreateFromCustom(raw, provider, ref custom);
+        result = custom;
+        return custom is not null;
+    }
+
+    /// <summary>Custom input shape for TryCreateFrom / CreateFrom - a name for an enumeration-like value object, say (partial; only the ordinary conversion applies when not implemented). Set result to claim the value; leave it null for anything not handled so the ordinary conversion runs. Never call TryCreateFrom / CreateFrom from inside: they consult this hook and the call would recurse.</summary>
+    static partial void CreateFromCustom(object raw, IFormatProvider? provider, ref NameValue? result);
 
     /// <summary>Gets the display name of this value object (used in error messages and similar). Defaults to the column description, or the property name when unset. Can be replaced through GeneratedDisplayNames.Resolve (all display names at once) or CustomizeDisplayName (this value object only).</summary>
     public static string DisplayName
@@ -1235,14 +1395,38 @@ public sealed partial class OrderIdValue
         new(value);
 
     /// <summary>Auto-generated validation rules plus the user extension (OnValidate), called by the base class's Create / TryCreate / Validate.</summary>
-    /// <remarks>An unimplemented OnValidate partial method takes its arguments with it when the compiler removes the call, so the list it would need is only allocated where the hook is actually written.</remarks>
+    /// <remarks>An unimplemented OnValidate partial method takes its call away entirely, and an implemented one receives the error list by reference and possibly unallocated - so a value that passes every rule allocates nothing either way.</remarks>
     static void IValueObject<OrderIdValue, int>.ValidateCore(int value, ref List<string>? errors)
     {
-        OnValidate(value, errors ??= new List<string>());
+        OnValidate(value, ref errors);
     }
 
-    /// <summary>User-defined additional validation (partial; zero cost when not implemented).</summary>
-    static partial void OnValidate(int value, ICollection<string> errors);
+    /// <summary>User-defined additional validation (partial; zero cost when not implemented). The list arrives by reference and possibly unallocated - allocate it only when adding the first violation, the same shape ValidateCore itself uses ((errors ??= new List&lt;string&gt;()).Add(...)), so a value that passes adds no allocation.</summary>
+    static partial void OnValidate(int value, ref List<string>? errors);
+
+    /// <summary>Hands back the declared instance found by the GetDefinedInstance partial hook (the base class's Create / TryCreate consult this on every creation path).</summary>
+    static bool IValueObject<OrderIdValue, int>.TryGetDefined(int value, out OrderIdValue? defined)
+    {
+        OrderIdValue? found = null;
+        GetDefinedInstance(value, ref found);
+        defined = found;
+        return found is not null;
+    }
+
+    /// <summary>Declared-instance lookup for an enumeration-like value object (partial; every value is built as a new instance when not implemented). Look the value up in a static table without allocating - this runs on every creation - and never call Create / TryCreate / TryCreateFrom from inside: every creation path runs through this hook and the call would recurse.</summary>
+    static partial void GetDefinedInstance(int value, ref OrderIdValue? defined);
+
+    /// <summary>Hands the input shapes claimed by the CreateFromCustom partial hook to TryCreateFrom / CreateFrom, ahead of the ordinary conversion.</summary>
+    static bool IValueObject<OrderIdValue>.TryCreateFromCustom(object raw, IFormatProvider? provider, out OrderIdValue? result)
+    {
+        OrderIdValue? custom = null;
+        CreateFromCustom(raw, provider, ref custom);
+        result = custom;
+        return custom is not null;
+    }
+
+    /// <summary>Custom input shape for TryCreateFrom / CreateFrom - a name for an enumeration-like value object, say (partial; only the ordinary conversion applies when not implemented). Set result to claim the value; leave it null for anything not handled so the ordinary conversion runs. Never call TryCreateFrom / CreateFrom from inside: they consult this hook and the call would recurse.</summary>
+    static partial void CreateFromCustom(object raw, IFormatProvider? provider, ref OrderIdValue? result);
 
     /// <summary>Gets the display name of this value object (used in error messages and similar). Defaults to the column description, or the property name when unset. Can be replaced through GeneratedDisplayNames.Resolve (all display names at once) or CustomizeDisplayName (this value object only).</summary>
     public static string DisplayName
@@ -1400,6 +1584,7 @@ internal static class RawValueConverter
             ? roundTripped
             : TimeSpan.Parse(text, provider);
 }
+
 /// <summary>Change state of an entity or EditModel.</summary>
 public enum RowState
 {
@@ -10458,7 +10643,7 @@ public sealed partial class OrderRepository(
     );
 }
 
-/// <summary>Query extensions: fetching the whole cascade graph of an entity in one call (the read-side counterpart of the graph save), and fetching a single entity by its key.</summary>
+/// <summary>Query extensions: including the whole cascade graph of an entity with a single method call (the read-side counterpart of the graph save - combine it with Where or GetByIdAsync to bound what is fetched), and fetching a single entity by its key.</summary>
 /// <remarks>
 /// The Include tree of each entity is built once and shared by every query, so it must stay unmodified after construction.
 /// </remarks>
