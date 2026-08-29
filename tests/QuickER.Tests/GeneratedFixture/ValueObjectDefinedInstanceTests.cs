@@ -90,10 +90,10 @@ public sealed partial class ScreenMode
 
     static void IValueObject<ScreenMode, int>.ValidateCore(int value, ref List<string>? errors)
     {
-        OnValidate(value, errors ??= new List<string>());
+        OnValidate(value, ref errors);
     }
 
-    static partial void OnValidate(int value, ICollection<string> errors);
+    static partial void OnValidate(int value, ref List<string>? errors);
 
     static bool IValueObject<ScreenMode, int>.TryGetDefined(int value, out ScreenMode? defined)
     {
@@ -141,11 +141,11 @@ public sealed partial class ScreenMode
     static partial void GetDefinedInstance(int value, ref ScreenMode? defined) =>
         defined = Defined.GetValueOrDefault(value);
 
-    static partial void OnValidate(int value, ICollection<string> errors)
+    static partial void OnValidate(int value, ref List<string>? errors)
     {
         if (!Defined.ContainsKey(value))
         {
-            errors.Add($"ScreenMode {value} is not defined.");
+            (errors ??= new List<string>()).Add($"ScreenMode {value} is not defined.");
         }
     }
 
@@ -191,6 +191,15 @@ public sealed partial class BioValue
         if (raw is "@defined")
         {
             result = DefinedBio;
+        }
+    }
+
+    // 割り当てゼロの網用: 実装があるだけで生成 ValidateCore のフック呼び出し経路が生きる（"#reject" 以外は素通し）
+    static partial void OnValidate(string value, ref List<string>? errors)
+    {
+        if (value == "#reject")
+        {
+            (errors ??= new List<string>()).Add("rejected for the allocation test");
         }
     }
 }
@@ -323,6 +332,36 @@ public sealed class ValueObjectDefinedInstanceTests
         // フックが扱わない値は通常の変換・生成のまま（他テストへの不干渉の裏取り）
         BioValue.Create("plain").Should().NotBeSameAs(BioValue.DefinedBio);
         BioValue.CreateFrom("plain")!.Value.Should().Be("plain");
+    }
+
+    // OnValidate の ref 化（遅延確保）の網: 実装した型でも検証を通る生成はリストを確保しない。
+    // 対象は実生成 VO（BioValue＝生成された ValidateCore がフックを呼ぶ）＝テンプレートが旧形
+    // （呼び出し前に errors ??= new List<string>() で必ず確保）へ戻ると 1 回あたり +32 bytes でここが赤くなる。
+    [Fact(DisplayName = "[定義済み] OnValidate を書いた型でも、検証を通る生成は割り当てゼロ")]
+    public void OnValidate実装型の成功パスは割り当てゼロ()
+    {
+        // ウォームアップ（JIT・tier-up 由来の割り当てを測定から追い出す）
+        for (var i = 0; i < 50_000; i++)
+        {
+            BioValue.Create("#defined");
+        }
+
+        long delta = 0;
+
+        // 測定中に tier-up が走った回を拾わないよう 3 ラウンド測り、最後のラウンドで表明する
+        for (var round = 0; round < 3; round++)
+        {
+            var before = GC.GetAllocatedBytesForCurrentThread();
+
+            for (var i = 0; i < 10_000; i++)
+            {
+                BioValue.Create("#defined");
+            }
+
+            delta = GC.GetAllocatedBytesForCurrentThread() - before;
+        }
+
+        delta.Should().Be(0, "定義済みインスタンス＋遅延確保の成功パスは何も確保しない");
     }
 
     // TryGetDefined / フックを書かない型の挙動が変わっていないこと（既定は「定義済みなし・通常変換のみ」）。

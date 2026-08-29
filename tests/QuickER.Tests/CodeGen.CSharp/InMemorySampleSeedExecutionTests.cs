@@ -125,8 +125,11 @@ public sealed class InMemorySampleSeedExecutionTests
             {
                 static partial void OnValidate(
                     decimal value,
-                    System.Collections.Generic.ICollection<string> errors
-                ) => errors.Add("rejected by user rule");
+                    ref System.Collections.Generic.List<string>? errors
+                ) =>
+                    (
+                        errors ??= new System.Collections.Generic.List<string>()
+                    ).Add("rejected by user rule");
             }
             """;
 

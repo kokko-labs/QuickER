@@ -323,7 +323,9 @@ public interface IValueObject<TSelf> : IValueObject
     /// <para>
     /// To accept a shape of the type's own - a name for an enumeration-like type, say - implement
     /// <see cref="TryCreateFromCustom"/> instead of replacing this method: the shared implementation consults that hook
-    /// first, so the custom shape is honored no matter how this method is called.
+    /// first, so the custom shape is honored no matter how this method is called. Never implement this member
+    /// yourself, a hand-written value object included - a call spelled with the concrete type name binds to the
+    /// inherited shared implementation, so a re-implementation is silently skipped on that call shape.
     /// </para>
     /// </remarks>
     /// <param name="raw">The value read from the source.</param>
@@ -980,14 +982,14 @@ public sealed partial class GadgetIdValue
         new(value);
 
     /// <summary>Auto-generated validation rules plus the user extension (OnValidate), called by the base class's Create / TryCreate / Validate.</summary>
-    /// <remarks>An unimplemented OnValidate partial method takes its arguments with it when the compiler removes the call, so the list it would need is only allocated where the hook is actually written.</remarks>
+    /// <remarks>An unimplemented OnValidate partial method takes its call away entirely, and an implemented one receives the error list by reference and possibly unallocated - so a value that passes every rule allocates nothing either way.</remarks>
     static void IValueObject<GadgetIdValue, int>.ValidateCore(int value, ref List<string>? errors)
     {
-        OnValidate(value, errors ??= new List<string>());
+        OnValidate(value, ref errors);
     }
 
-    /// <summary>User-defined additional validation (partial; zero cost when not implemented).</summary>
-    static partial void OnValidate(int value, ICollection<string> errors);
+    /// <summary>User-defined additional validation (partial; zero cost when not implemented). The list arrives by reference and possibly unallocated - allocate it only when adding the first violation, the same shape ValidateCore itself uses ((errors ??= new List&lt;string&gt;()).Add(...)), so a value that passes adds no allocation.</summary>
+    static partial void OnValidate(int value, ref List<string>? errors);
 
     /// <summary>Hands back the declared instance found by the GetDefinedInstance partial hook (the base class's Create / TryCreate consult this on every creation path).</summary>
     static bool IValueObject<GadgetIdValue, int>.TryGetDefined(int value, out GadgetIdValue? defined)
@@ -1041,7 +1043,7 @@ public sealed partial class NameValue
         new(value);
 
     /// <summary>Auto-generated validation rules plus the user extension (OnValidate), called by the base class's Create / TryCreate / Validate.</summary>
-    /// <remarks>An unimplemented OnValidate partial method takes its arguments with it when the compiler removes the call, so the list it would need is only allocated where the hook is actually written.</remarks>
+    /// <remarks>An unimplemented OnValidate partial method takes its call away entirely, and an implemented one receives the error list by reference and possibly unallocated - so a value that passes every rule allocates nothing either way.</remarks>
     static void IValueObject<NameValue, string>.ValidateCore(string value, ref List<string>? errors)
     {
         // A value object never wraps null (a nullable column keeps the property itself null),
@@ -1060,11 +1062,11 @@ public sealed partial class NameValue
             CustomizeMaxLengthErrorMessage(value, 50, ref message);
             (errors ??= new List<string>()).Add(message);
         }
-        OnValidate(value, errors ??= new List<string>());
+        OnValidate(value, ref errors);
     }
 
-    /// <summary>User-defined additional validation (partial; zero cost when not implemented).</summary>
-    static partial void OnValidate(string value, ICollection<string> errors);
+    /// <summary>User-defined additional validation (partial; zero cost when not implemented). The list arrives by reference and possibly unallocated - allocate it only when adding the first violation, the same shape ValidateCore itself uses ((errors ??= new List&lt;string&gt;()).Add(...)), so a value that passes adds no allocation.</summary>
+    static partial void OnValidate(string value, ref List<string>? errors);
 
     /// <summary>Hands back the declared instance found by the GetDefinedInstance partial hook (the base class's Create / TryCreate consult this on every creation path).</summary>
     static bool IValueObject<NameValue, string>.TryGetDefined(string value, out NameValue? defined)
@@ -1128,14 +1130,14 @@ public sealed partial class NoteIdValue
         new(value);
 
     /// <summary>Auto-generated validation rules plus the user extension (OnValidate), called by the base class's Create / TryCreate / Validate.</summary>
-    /// <remarks>An unimplemented OnValidate partial method takes its arguments with it when the compiler removes the call, so the list it would need is only allocated where the hook is actually written.</remarks>
+    /// <remarks>An unimplemented OnValidate partial method takes its call away entirely, and an implemented one receives the error list by reference and possibly unallocated - so a value that passes every rule allocates nothing either way.</remarks>
     static void IValueObject<NoteIdValue, int>.ValidateCore(int value, ref List<string>? errors)
     {
-        OnValidate(value, errors ??= new List<string>());
+        OnValidate(value, ref errors);
     }
 
-    /// <summary>User-defined additional validation (partial; zero cost when not implemented).</summary>
-    static partial void OnValidate(int value, ICollection<string> errors);
+    /// <summary>User-defined additional validation (partial; zero cost when not implemented). The list arrives by reference and possibly unallocated - allocate it only when adding the first violation, the same shape ValidateCore itself uses ((errors ??= new List&lt;string&gt;()).Add(...)), so a value that passes adds no allocation.</summary>
+    static partial void OnValidate(int value, ref List<string>? errors);
 
     /// <summary>Hands back the declared instance found by the GetDefinedInstance partial hook (the base class's Create / TryCreate consult this on every creation path).</summary>
     static bool IValueObject<NoteIdValue, int>.TryGetDefined(int value, out NoteIdValue? defined)
@@ -1189,7 +1191,7 @@ public sealed partial class NoteValue
         new(value);
 
     /// <summary>Auto-generated validation rules plus the user extension (OnValidate), called by the base class's Create / TryCreate / Validate.</summary>
-    /// <remarks>An unimplemented OnValidate partial method takes its arguments with it when the compiler removes the call, so the list it would need is only allocated where the hook is actually written.</remarks>
+    /// <remarks>An unimplemented OnValidate partial method takes its call away entirely, and an implemented one receives the error list by reference and possibly unallocated - so a value that passes every rule allocates nothing either way.</remarks>
     static void IValueObject<NoteValue, string>.ValidateCore(string value, ref List<string>? errors)
     {
         // A value object never wraps null (a nullable column keeps the property itself null),
@@ -1208,11 +1210,11 @@ public sealed partial class NoteValue
             CustomizeMaxLengthErrorMessage(value, 100, ref message);
             (errors ??= new List<string>()).Add(message);
         }
-        OnValidate(value, errors ??= new List<string>());
+        OnValidate(value, ref errors);
     }
 
-    /// <summary>User-defined additional validation (partial; zero cost when not implemented).</summary>
-    static partial void OnValidate(string value, ICollection<string> errors);
+    /// <summary>User-defined additional validation (partial; zero cost when not implemented). The list arrives by reference and possibly unallocated - allocate it only when adding the first violation, the same shape ValidateCore itself uses ((errors ??= new List&lt;string&gt;()).Add(...)), so a value that passes adds no allocation.</summary>
+    static partial void OnValidate(string value, ref List<string>? errors);
 
     /// <summary>Hands back the declared instance found by the GetDefinedInstance partial hook (the base class's Create / TryCreate consult this on every creation path).</summary>
     static bool IValueObject<NoteValue, string>.TryGetDefined(string value, out NoteValue? defined)
@@ -1276,7 +1278,7 @@ public sealed partial class RowVerValue
         new(value);
 
     /// <summary>Auto-generated validation rules plus the user extension (OnValidate), called by the base class's Create / TryCreate / Validate.</summary>
-    /// <remarks>An unimplemented OnValidate partial method takes its arguments with it when the compiler removes the call, so the list it would need is only allocated where the hook is actually written.</remarks>
+    /// <remarks>An unimplemented OnValidate partial method takes its call away entirely, and an implemented one receives the error list by reference and possibly unallocated - so a value that passes every rule allocates nothing either way.</remarks>
     static void IValueObject<RowVerValue, byte[]>.ValidateCore(byte[] value, ref List<string>? errors)
     {
         // A value object never wraps null (a nullable column keeps the property itself null),
@@ -1289,11 +1291,11 @@ public sealed partial class RowVerValue
             return;
         }
 
-        OnValidate(value, errors ??= new List<string>());
+        OnValidate(value, ref errors);
     }
 
-    /// <summary>User-defined additional validation (partial; zero cost when not implemented).</summary>
-    static partial void OnValidate(byte[] value, ICollection<string> errors);
+    /// <summary>User-defined additional validation (partial; zero cost when not implemented). The list arrives by reference and possibly unallocated - allocate it only when adding the first violation, the same shape ValidateCore itself uses ((errors ??= new List&lt;string&gt;()).Add(...)), so a value that passes adds no allocation.</summary>
+    static partial void OnValidate(byte[] value, ref List<string>? errors);
 
     /// <summary>Hands back the declared instance found by the GetDefinedInstance partial hook (the base class's Create / TryCreate consult this on every creation path).</summary>
     static bool IValueObject<RowVerValue, byte[]>.TryGetDefined(byte[] value, out RowVerValue? defined)

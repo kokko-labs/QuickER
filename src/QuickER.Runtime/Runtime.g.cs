@@ -366,7 +366,9 @@ public interface IValueObject<TSelf> : IValueObject
     /// <para>
     /// To accept a shape of the type's own - a name for an enumeration-like type, say - implement
     /// <see cref="TryCreateFromCustom"/> instead of replacing this method: the shared implementation consults that hook
-    /// first, so the custom shape is honored no matter how this method is called.
+    /// first, so the custom shape is honored no matter how this method is called. Never implement this member
+    /// yourself, a hand-written value object included - a call spelled with the concrete type name binds to the
+    /// inherited shared implementation, so a re-implementation is silently skipped on that call shape.
     /// </para>
     /// </remarks>
     /// <param name="raw">The value read from the source.</param>

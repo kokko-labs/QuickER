@@ -193,11 +193,11 @@ public sealed partial class ModeValue
     static partial void GetDefinedInstance(int value, ref ModeValue? defined) =>
         defined = Defined.GetValueOrDefault(value);
 
-    static partial void OnValidate(int value, ICollection<string> errors)
+    static partial void OnValidate(int value, ref List<string>? errors)
     {
         if (!Defined.ContainsKey(value))
         {
-            errors.Add($"表示モード {value} は定義されていません。");
+            (errors ??= new List<string>()).Add($"表示モード {value} は定義されていません。");
         }
     }
 }
@@ -229,6 +229,8 @@ static bool IValueObject<DataAccessMode>.TryCreateFromCustom(
 }
 ```
 
+実装するのはフックだけにしてください——`TryCreateFrom` 自体は、生成 VO でも手書き型でも実装してはいけません。再実装はコンパイルできますが、具象型名を書いた呼び出しは基底の共有実装へ静的束縛されるため、その呼び形でだけ再実装が黙って飛ばされます——差し替え点をフックにしているのはまさにこのためです。
+
 ### partial 拡張点
 
 生成されるクラスはメッセージ・表示名の差し替えに 2 つの方法を持ち、静的クラス・生成モード（インライン／パッケージ参照）を問わず共通の規則です:
@@ -246,12 +248,13 @@ GeneratedDisplayNames.Resolve = static (name, _) => name;   // Description を�
 ```csharp
 public sealed partial class NameValue
 {
-    // 追加の検証（自動生成の検証の後に呼ばれる）
-    static partial void OnValidate(string value, ICollection<string> errors)
+    // 追加の検証（自動生成の検証の後に呼ばれる）。リストは未確保のまま渡されるので、
+    // 最初の違反を足すときだけ確保する＝検証を通る値は何も確保しない
+    static partial void OnValidate(string value, ref List<string>? errors)
     {
         if (value.Contains(' '))
         {
-            errors.Add("空白は使えません。");
+            (errors ??= new List<string>()).Add("空白は使えません。");
         }
     }
 

@@ -193,11 +193,11 @@ public sealed partial class ModeValue
     static partial void GetDefinedInstance(int value, ref ModeValue? defined) =>
         defined = Defined.GetValueOrDefault(value);
 
-    static partial void OnValidate(int value, ICollection<string> errors)
+    static partial void OnValidate(int value, ref List<string>? errors)
     {
         if (!Defined.ContainsKey(value))
         {
-            errors.Add($"Screen mode {value} is not defined.");
+            (errors ??= new List<string>()).Add($"Screen mode {value} is not defined.");
         }
     }
 }
@@ -229,6 +229,8 @@ static bool IValueObject<DataAccessMode>.TryCreateFromCustom(
 }
 ```
 
+Implement the hook only - never `TryCreateFrom` itself, on generated and hand-written types alike. Re-implementing `TryCreateFrom` compiles, but a call spelled with the concrete type name binds to the shared base implementation and silently skips it on that call shape - which is exactly why the extension point is the hook.
+
 ### partial extension points
 
 Every generated class offers two ways to customize messages and display names — the rule is the same across every static class and every generation mode (inline / package-reference):
@@ -246,12 +248,13 @@ GeneratedDisplayNames.Resolve = static (name, _) => name;   // ignore descriptio
 ```csharp
 public sealed partial class NameValue
 {
-    // Additional validation (called after the auto-generated validation)
-    static partial void OnValidate(string value, ICollection<string> errors)
+    // Additional validation (called after the auto-generated validation). The list arrives unallocated;
+    // allocate it only when adding the first violation, so a value that passes allocates nothing.
+    static partial void OnValidate(string value, ref List<string>? errors)
     {
         if (value.Contains(' '))
         {
-            errors.Add("Whitespace is not allowed.");
+            (errors ??= new List<string>()).Add("Whitespace is not allowed.");
         }
     }
 

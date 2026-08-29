@@ -16,6 +16,7 @@ QuickER の利用者に影響する変更を記録します。形式は [Keep a 
 
 - **破壊的変更**: `IValueObject<TSelf, TValue>` が新しい自己型インターフェイス `IValueObject<TSelf>` を継承し、`TryCreateFrom` / `CreateFrom`（と既定実装付きの `TryGetDefined` / `TryCreateFromCustom`）が加わった。`ValueObjectBase` を継承している型は基底の実装が満たすため影響はない。基底を継承せずインターフェイスだけを手で実装している型は、この 2 つの実装が必要になる
 - **破壊的変更**: 値オブジェクトの `Validate(TValue value, ICollection<string> errors)` が `void` でなく `bool` を返すようになった（`true`＝**その呼び出し**で違反が無かった）。集約先のコレクションを複数の値で共有していると件数からは各値の合否を読めないため、判定を戻り値で受け取れるようにしたもの。エラーの詰め方は従来どおりで、戻り値を使わない呼び出し側のソースはそのまま通る
+- **破壊的変更**: 値オブジェクトの partial フック `OnValidate` が、エラーリストを参照渡し・未確保のまま受け取るようになった（`static partial void OnValidate(T value, ref List<string>? errors)`）。最初の違反を足すときだけ確保する形（`(errors ??= new List<string>()).Add(...)`＝`ValidateCore` 自身と同じ書き方）にする。従来は生成された `ValidateCore` が、フックを実装した型の生成 1 回ごとに——検証を通る値でも、読み出しでは行×列で——`List<string>` を必ず確保していた。既存の実装はシグネチャを直すまでコンパイルエラー（CS0759）になる。挙動はそれ以外同一
 - **破壊的変更**: `IValueObject<TSelf, TValue>` に必須メンバ `New`（と既定実装付き `ValidateCore`）が増え、値オブジェクトの基底クラス群は `TSelf` に `IValueObject<TSelf, TValue>` の実装を要求するようになった。インターフェイスを手で実装している型は 1 行（`static T IValueObject<T, V>.New(V v) => new(v);`）、基底から派生だけしてインターフェイスを宣言していなかった型は宣言への追加で移行できる。再生成したコードは影響なし
 
 ### Changed
