@@ -40,6 +40,15 @@
   <PropertyGroup>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <RestoreLockedMode Condition="'$(CI)' == 'true'">true</RestoreLockedMode>
+    <!--
+      release.yml の GUI publish は RID 指定（-r win-x64）で復元するため、ロックファイルには
+      win-x64 のグラフも必要（無いと locked-mode が NU1004 で拒否する＝初回 dry_run で実測）。
+      RuntimeIdentifiers を全プロジェクトへ宣言し、どの restore でも RID グラフ込みで
+      ロックファイルを評価・生成させる（restore のみに作用し、RuntimeIdentifier〔単数〕は
+      設定しないため通常ビルド・pack の出力は不変。これが無いと開発機の再 restore が
+      RID セクションを落とし、次のリリースで再発する）。
+    -->
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
   </PropertyGroup>
 
   <!--
