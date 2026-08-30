@@ -29,6 +29,20 @@
   </PropertyGroup>
 
   <!--
+    NuGet ロックファイルによる依存グラフの固定（全プロジェクト共通）。
+
+    各プロジェクトの packages.lock.json をチェックインし、CI（GitHub Actions は常に環境変数
+    CI=true を設定する）では locked-mode で復元する＝ロックファイルと解決結果の不一致
+    （推移的依存の変動・改竄）を復元エラーとして検出する。配布物（NuGet パッケージ・GUI）の
+    依存グラフをリリースビルドで再現・検証可能にするのが目的。依存を更新したときは
+    dotnet restore がロックファイルを書き換えるので、変更をコミットに含めること。
+  -->
+  <PropertyGroup>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <RestoreLockedMode Condition="'$(CI)' == 'true'">true</RestoreLockedMode>
+  </PropertyGroup>
+
+  <!--
     NuGet パッケージ・アセンブリ共通メタデータ（発行パッケージ＝CLI とランタイム各種が継承。
     パックしないプロジェクトにもアセンブリ情報として適用される）。
     nuget.org に表示される文字列（Description / PackageTags 等）は各 csproj 側で英語に統一する。
