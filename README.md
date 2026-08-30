@@ -16,7 +16,7 @@ QuickER lets you create and edit ER models through its GUI or AI chat, and bidir
 QuickER generates DDL, C# code, screen mockups, and table definition documents from the ER model.
 This reduces the work of copying the same schema into entity classes, UI models, and design documents, helping keep diagrams and implementation in sync.
 
-**No more stale diagrams. No more duplicated definitions.**
+**When requirements change, update the ER model and regenerate the rest.**
 
 ![QuickER main screen (the EC order sample ER model)](docs/images/sample-ec-order.png)
 
