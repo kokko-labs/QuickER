@@ -11,6 +11,9 @@
 # - dry_run=true（既定）では publish と vpk pack までを行い、両チャンネルの出力一式を
 #   ワークフロー成果物としてアップロードする（Release の作成・タグ付けは行わない）
 # - dry_run=false ではタグ v{Version} で GitHub Release を作成し、両チャンネルの出力を全部添付する
+# - 既公開の最新版と同じ VersionPrefix のまま実行すると（dry_run 含め）vpk pack が版ガード
+#   「equal or greater to the current version」で失敗する。これは版の上げ忘れ再リリースを止める
+#   正しい挙動で、検証したいときはリリース手順どおり VersionPrefix を上げてから実行する
 name: Release
 
 on:
