@@ -155,7 +155,7 @@
                 <TextBlock
                   Grid.Row="0"
                   Grid.Column="0"
-                  Margin="0,4,8,4"
+                  Margin="0,4,16,4"
                   Style="{StaticResource FieldLabel}"
                   Text="{x:Static res:Strings.CodeGen_LayerLabel_Domain}"
                 />
@@ -170,7 +170,7 @@
                 <TextBlock
                   Grid.Row="1"
                   Grid.Column="0"
-                  Margin="0,4,8,4"
+                  Margin="0,4,16,4"
                   Style="{StaticResource FieldLabel}"
                   Text="{x:Static res:Strings.CodeGen_LayerLabel_Presentation}"
                 />
@@ -185,7 +185,7 @@
                 <TextBlock
                   Grid.Row="2"
                   Grid.Column="0"
-                  Margin="0,4,8,4"
+                  Margin="0,4,16,4"
                   Style="{StaticResource FieldLabel}"
                   Text="{x:Static res:Strings.CodeGen_LayerLabel_Infrastructure}"
                 />
@@ -201,7 +201,7 @@
                 <TextBlock
                   Grid.Row="3"
                   Grid.Column="0"
-                  Margin="0,4,8,4"
+                  Margin="0,4,16,4"
                   Style="{StaticResource FieldLabel}"
                   Text="{x:Static res:Strings.CodeGen_LayerLabel_Server}"
                   Visibility="{Binding ShowServerLayerDirectory, Converter={StaticResource BoolToVisibilityConverter}}"
