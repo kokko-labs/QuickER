@@ -79,7 +79,7 @@ quicker mcp
 
 `--config` で渡す JSON で、生成オプションをまとめて指定できます。これは GUI の設定保存ファイル（`codegen-settings.json`）と**同一スキーマ**です（GUI は camelCase で書き出しますが、CLI は大文字小文字を区別せず解釈するためそのまま渡せます）。**下表の各キーは同名の kebab-case フラグとして CLI からも指定でき、設定ファイルより優先されます**（優先順位: CLI フラグ ＞ 設定ファイル ＞ 既定値。bool は `--flag` / `--flag false` の三値）。
 
-> **注意**: `GenerateRepositories` の既定が `true` → `false` になりました。以前はキーを省略すると QuickER 版 Repository が生成されましたが、**現在は DB アクセスコードを生成するには `GenerateRepositories: true`（または `GenerateEfCore: true`）の明示指定が必要**です（GUI の DB アクセス「なし」既定と揃えるため）。
+> **注意**: `GenerateRepositories` の既定が `true` → `false` になりました。以前はキーを省略すると QuickER 版 Repository が生成されましたが、**現在は DB アクセスコードを生成するには `GenerateRepositories: true`（または `GenerateEfCoreRepositories: true`）の明示指定が必要**です（GUI の DB アクセス「なし」既定と揃えるため）。
 
 キーはカテゴリ順（出力モード → 名前空間 → 生成対象 → 値オブジェクト → DB アクセス → リモート対応 → ランタイム・ドキュメント → 属性 → 出力先）に並べています。
 
@@ -91,7 +91,7 @@ quicker mcp
   "GenerateMappers": true,
   "GenerateValueObjects": false,
   "GenerateRepositories": true,
-  "GenerateEfCore": false,
+  "GenerateEfCoreRepositories": false,
   "IncludeDataAnnotations": true,
   "OutputPath": "MyAppEntities.g.cs"
 }
@@ -112,9 +112,9 @@ quicker mcp
 | `GenerateRepositories`（`false`） | QuickER 版 Repository（軽量ミニ ORM）を生成する。**既定では DB アクセスコードを生成しない**（GUI と同じ既定） |
 | `RepositoryDialects`（未指定） | QuickER 版 Repository のマルチターゲット方言リスト（例 `["sqlserver", "sqlite"]`）。対応方言は `sqlserver` と `sqlite` のみで、それ以外を `GenerateRepositories` と併用すると生成前にエラーになる。未指定時の実効値は `--repository-dialects` ＞ 設定ファイルの本キー ＞ `--provider` からの単一導出、の順で決まる |
 | `ExcludeUnboundedBinaryColumns`（`false`） | 無制限バイナリ列を QuickER 版 Repository の SELECT / UPDATE から除外する（CLI の `--exclude-unbounded-binary-columns` に対応。[生成コードの使い方](code-generation.ja.md#無制限バイナリ列の除外excludeunboundedbinarycolumns) 参照） |
-| `GenerateEfCore`（`false`） | EF Core 用の `QuickErDbContext` ＋ EF Core 版 Repository 実装を生成する。マルチターゲット（実効方言 2 つ以上）とは併用不可 |
+| `GenerateEfCoreRepositories`（`false`） | EF Core 用の `QuickErDbContext` ＋ EF Core 版 Repository 実装を生成する。マルチターゲット（実効方言 2 つ以上）とは併用不可 |
 | `GenerateInMemoryRepositories`（`false`） | テスト用のインメモリ Repository 実装を生成する |
-| `GenerateRemoteContracts`（`false`） | リモート操作用インターフェイス `I{Entity}RemoteRepository` を追加生成する（CLI の `--generate-remote-contracts` に対応。QuickER 版 Repository・EF Core 版 Repository・インメモリ Repository のいずれか＝`GenerateRepositories` / `GenerateEfCore` / `GenerateInMemoryRepositories` のいずれかが前提。[生成コードの使い方](code-generation.ja.md) 参照） |
+| `GenerateRemoteContracts`（`false`） | リモート操作用インターフェイス `I{Entity}RemoteRepository` を追加生成する（CLI の `--generate-remote-contracts` に対応。QuickER 版 Repository・EF Core 版 Repository・インメモリ Repository のいずれか＝`GenerateRepositories` / `GenerateEfCoreRepositories` / `GenerateInMemoryRepositories` のいずれかが前提。[生成コードの使い方](code-generation.ja.md) 参照） |
 | `GenerateRemoteServices`（`false`） | リモート面の HTTP クライアント／サーバー実装を生成する（`GenerateRemoteContracts` を自動的に含意。CLI の `--generate-remote-services` に対応。[生成コードの使い方](code-generation.ja.md) 参照） |
 | `GenerateSyncSupport`（`false`） | サーバー（SQL Server）＋ローカル（SQLite）構成の双方向同期支援を生成する。`GenerateRepositories` が有効で実効方言が `sqlserver` と `sqlite` のちょうど 2 つ、かつ `rowversion` 列を持つテーブルが 1 つ以上あることが前提（`ExcludeUnboundedBinaryColumns` とは併用可能で、除外列は `SyncOptions.IncludeUnboundedBinary` を指定したときだけ運ばれる）。CLI の `--generate-sync-support` に対応。[生成コードの使い方](code-generation.ja.md#双方向同期の支援--generate-sync-support) 参照 |
 | `UseRuntimePackages`（`false`） | ランタイム固定コードを出力せず NuGet パッケージ参照で賄う（[生成コードの使い方](code-generation.ja.md) 参照） |

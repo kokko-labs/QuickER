@@ -26,10 +26,10 @@ internal sealed partial class CSharpGenerationModelBuilder
         "HasChanges",
     ];
 
-    /// <summary>ER 図定義から EF Core（DbContext・Fluent 構成）の生成モデルを構築する（GenerateEfCore が OFF のときは null）</summary>
+    /// <summary>ER 図定義から EF Core（DbContext・Fluent 構成）の生成モデルを構築する（GenerateEfCoreRepositories が OFF のときは null）</summary>
     private CSharpEfCoreModel? BuildEfCoreModel(ErDiagram diagram, CodeGenerationOptions options)
     {
-        if (!options.GenerateEfCore)
+        if (!options.GenerateEfCoreRepositories)
         {
             return null;
         }

@@ -50,7 +50,7 @@ public static class SqliteValueConversionFixtureDefinition
             GenerateMappers = false,
             GenerateRepositories = true,
             GenerateValueObjects = true,
-            GenerateEfCore = false,
+            GenerateEfCoreRepositories = false,
             RepositoryDialects = ["sqlite"],
             SplitFilesByCategory = false,
         };

@@ -393,7 +393,7 @@ public static class GeneratedFilePlanner
             active.Add(GenerationBucket.InMemory);
         }
 
-        if (options.GenerateEfCore)
+        if (options.GenerateEfCoreRepositories)
         {
             active.Add(GenerationBucket.EfCore);
         }
@@ -435,7 +435,7 @@ public static class GeneratedFilePlanner
     /// 非分割時は同一ファイルへ namespace ブロックとして連結）。
     /// </para>
     /// <para>
-    /// EF Core 実装（<see cref="CodeGenerationOptions.GenerateEfCore"/>）は分割時、方言別実装と同じ流儀で
+    /// EF Core 実装（<see cref="CodeGenerationOptions.GenerateEfCoreRepositories"/>）は分割時、方言別実装と同じ流儀で
     /// <c>Repositories.EntityFrameworkCore.g.cs</c>・<c>{RepositoryNamespace}.EntityFrameworkCore</c>
     /// （契約 namespace のサブ名前空間へ導出専用）へ出す。
     /// </para>

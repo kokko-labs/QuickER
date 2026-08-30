@@ -43,7 +43,7 @@ public class CSharpGenerationDialogViewModelTests
         vm.Result.OutputDirectory.Should().Be(@"C:\temp");
         // DB アクセスの既定は「なし」（QuickER 版 Repository も EF Core も生成しない）
         vm.Result.Options.GenerateRepositories.Should().BeFalse();
-        vm.Result.Options.GenerateEfCore.Should().BeFalse();
+        vm.Result.Options.GenerateEfCoreRepositories.Should().BeFalse();
         closed.Should().BeTrue();
     }
 
@@ -58,18 +58,18 @@ public class CSharpGenerationDialogViewModelTests
         vm.DbAccessNone.Should().BeTrue("既定は「なし」");
 
         vm.DbAccessEfCore = true;
-        vm.GenerateEfCore.Should().BeTrue();
+        vm.GenerateEfCoreRepositories.Should().BeTrue();
         vm.GenerateRepositories.Should().BeFalse();
 
         vm.DbAccessRepository = true;
         vm.GenerateRepositories.Should().BeTrue();
-        vm.GenerateEfCore.Should().BeFalse("排他選択のため EF Core は外れる");
+        vm.GenerateEfCoreRepositories.Should().BeFalse("排他選択のため EF Core は外れる");
 
         vm.DbAccessEfCore = true;
         vm.OkCommand.Execute(null);
 
         vm.Result.Should().NotBeNull();
-        vm.Result!.Options.GenerateEfCore.Should().BeTrue();
+        vm.Result!.Options.GenerateEfCoreRepositories.Should().BeTrue();
         vm.Result.Options.GenerateRepositories.Should().BeFalse();
     }
 
@@ -295,7 +295,7 @@ public class CSharpGenerationDialogViewModelTests
         vm.OkCommand.Execute(null);
 
         vm.Result.Should().NotBeNull();
-        vm.Result!.Options.GenerateEfCore.Should().BeTrue();
+        vm.Result!.Options.GenerateEfCoreRepositories.Should().BeTrue();
         vm.Result.Options.UseRuntimePackages.Should()
             .BeTrue("EF Core とパッケージ参照モードの併用が結果へ反映される");
     }
@@ -1570,7 +1570,7 @@ public class CSharpGenerationDialogViewModelTests
             loaded.Should().NotBeNull();
             loaded!.RootNamespace.Should().Be("Acme.Preset");
             loaded.SplitFilesByCategory.Should().BeTrue();
-            loaded.GenerateEfCore.Should().BeTrue();
+            loaded.GenerateEfCoreRepositories.Should().BeTrue();
             loaded.GenerateValueObjects.Should().BeTrue();
         }
         finally
@@ -1634,7 +1634,7 @@ public class CSharpGenerationDialogViewModelTests
                 RootNamespace = "Contoso.Loaded",
                 RepositoryNamespace = "Contoso.Loaded.Persistence",
                 GenerateRepositories = true,
-                GenerateEfCore = true,
+                GenerateEfCoreRepositories = true,
                 GenerateValueObjects = true,
             }
         );
@@ -1653,7 +1653,7 @@ public class CSharpGenerationDialogViewModelTests
             vm.GenerateValueObjects.Should().BeTrue();
             // 排他規則: 両方 true の保存値は QuickER 版 Repository を優先し EF Core は外れる
             vm.GenerateRepositories.Should().BeTrue();
-            vm.GenerateEfCore.Should().BeFalse();
+            vm.GenerateEfCoreRepositories.Should().BeFalse();
 
             // 読み込み成功は無通知（情報・エラーいずれのダイアログも出さない）
             dialogs.InformationMessages.Should().BeEmpty();

@@ -151,7 +151,7 @@
   <data name="Cli_Opt_ExcludeUnboundedBinaryColumns" xml:space="preserve">
     <value>無制限バイナリ列（varbinary(max)・長さ宣言なし BLOB）を生成 Repository の SELECT/UPDATE から除外する（INSERT は全列のまま。設定ファイルを上書き）</value>
   </data>
-  <data name="Cli_Opt_GenerateEfCore" xml:space="preserve">
+  <data name="Cli_Opt_GenerateEfCoreRepositories" xml:space="preserve">
     <value>EF Core 用コード（QuickErDbContext＋EF Core 版 Repository）を生成する（設定ファイルを上書き）</value>
   </data>
   <data name="Cli_Opt_GenerateInMemoryRepositories" xml:space="preserve">

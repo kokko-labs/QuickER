@@ -107,7 +107,7 @@ public sealed class LayeredOutputTests
             {
                 RootNamespace = "Acme.App",
                 LayeredOutput = true,
-                GenerateEfCore = true,
+                GenerateEfCoreRepositories = true,
             }
         );
 

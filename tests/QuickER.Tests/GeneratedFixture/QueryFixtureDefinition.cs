@@ -49,7 +49,7 @@ public static class QueryFixtureDefinition
             GenerateMappers = true,
             GenerateRepositories = true,
             GenerateValueObjects = true,
-            GenerateEfCore = true,
+            GenerateEfCoreRepositories = true,
             // インメモリ実装も併存させ、名前付きクエリ（DSL）のパリティを 3 実装先（QuickER 版・EF Core・インメモリ）で取る。
             // 生 SQL 実装のクエリはインメモリでは manual 扱い＝契約宣言のみ生成され、実装はテスト側 partial が担う
             GenerateInMemoryRepositories = true,

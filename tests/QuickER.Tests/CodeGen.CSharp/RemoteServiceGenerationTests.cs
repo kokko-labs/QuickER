@@ -418,7 +418,7 @@ public class RemoteServiceGenerationTests
             {
                 RootNamespace = "Test.Ns",
                 GenerateRepositories = false,
-                GenerateEfCore = true,
+                GenerateEfCoreRepositories = true,
                 GenerateRemoteServices = true,
             }
         );

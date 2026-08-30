@@ -151,7 +151,7 @@
   <data name="Cli_Opt_ExcludeUnboundedBinaryColumns" xml:space="preserve">
     <value>Exclude unbounded binary columns (varbinary(max), BLOB without a length) from the generated Repository's SELECT/UPDATE; INSERT keeps all columns (overrides the settings file)</value>
   </data>
-  <data name="Cli_Opt_GenerateEfCore" xml:space="preserve">
+  <data name="Cli_Opt_GenerateEfCoreRepositories" xml:space="preserve">
     <value>Generate EF Core code (QuickErDbContext and EF Core Repositories) (overrides the settings file)</value>
   </data>
   <data name="Cli_Opt_GenerateInMemoryRepositories" xml:space="preserve">

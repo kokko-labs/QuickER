@@ -890,7 +890,7 @@ public class CliAppTests
     }
 
     /// <summary>
-    /// --use-runtime-packages と GenerateEfCore=true の併用は解禁されており、生成が成功（終了コード 0）して
+    /// --use-runtime-packages と GenerateEfCoreRepositories=true の併用は解禁されており、生成が成功（終了コード 0）して
     /// 案内に EF Core パッケージ（QuickER.Runtime.EntityFrameworkCore）が含まれることを検証する
     /// </summary>
     [Fact(
@@ -903,7 +903,7 @@ public class CliAppTests
         // EF Core 単独（QuickER 版 Repository なし）でパッケージ参照モードにする
         File.WriteAllText(
             configPath,
-            """{ "GenerateRepositories": false, "GenerateEfCore": true }"""
+            """{ "GenerateRepositories": false, "GenerateEfCoreRepositories": true }"""
         );
         // 出力は注入版オーバーロードで捕捉する（Console を差し替えるとクラス並列実行で競合するため）
         var outWriter = new StringWriter();
@@ -1246,18 +1246,18 @@ public class CliAppTests
     }
 
     /// <summary>
-    /// マルチ方言（--repository-dialects 2 つ以上）＋ GenerateEfCore=true は生成器側の診断エラーとなり、
+    /// マルチ方言（--repository-dialects 2 つ以上）＋ GenerateEfCoreRepositories=true は生成器側の診断エラーとなり、
     /// CLI が通常のエラー出力経路（終了コード 1・出力なし）でそれを表示できることを検証する
     /// （生成器の排他検証は MultiTargetRepositoryGenerationTests で担保済みで、ここでは CLI 経路の伝播のみ確認する）
     /// </summary>
-    [Fact(DisplayName = "マルチ方言＋GenerateEfCore は CLI でも終了コード 1 になる")]
+    [Fact(DisplayName = "マルチ方言＋GenerateEfCoreRepositories は CLI でも終了コード 1 になる")]
     public async Task Generate_MultiDialectWithEfCore_ReturnsError()
     {
         var (schemaPath, outDir, root) = CreateSampleSchema();
         var configPath = Path.Combine(root, "quicker.json");
         File.WriteAllText(
             configPath,
-            """{ "GenerateRepositories": true, "GenerateEfCore": true }"""
+            """{ "GenerateRepositories": true, "GenerateEfCoreRepositories": true }"""
         );
 
         try
@@ -1782,7 +1782,7 @@ public class CliAppTests
     }
 
     /// <summary>
-    /// 未対応方言のプロバイダ＋ --generate-ef-core（方言非依存の DB アクセス）でも generate が成功し、
+    /// 未対応方言のプロバイダ＋ --generate-ef-core-repositories（方言非依存の DB アクセス）でも generate が成功し、
     /// DbContext が出力されることを検証する
     /// </summary>
     [Theory(DisplayName = "未対応方言プロバイダ＋EF Core 生成は成功する")]
@@ -1803,7 +1803,7 @@ public class CliAppTests
                 outDir,
                 "--provider",
                 providerName,
-                "--generate-ef-core",
+                "--generate-ef-core-repositories",
             ]);
 
             exit.Should().Be(0);

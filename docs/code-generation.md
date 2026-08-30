@@ -508,7 +508,7 @@ Operations the context provides (it does not expose raw handles):
 | Target | Hook firing | Context support |
 |---|---|---|
 | QuickER Repository (SQL Server / SQLite) | Full support (After fires right after each operation) | Both `WriteBinaryColumnAsync` and `ExecuteSqlAsync` are supported |
-| EF Core Repository (`GenerateEfCore`) | Supported (After fires in a batch after `SaveChanges`) | `ExecuteSqlAsync` supported; `WriteBinaryColumnAsync` throws `NotSupportedException` |
+| EF Core Repository (`GenerateEfCoreRepositories`) | Supported (After fires in a batch after `SaveChanges`) | `ExecuteSqlAsync` supported; `WriteBinaryColumnAsync` throws `NotSupportedException` |
 | In-memory (`GenerateInMemoryRepositories`) | Supported (pseudo transaction) | `WriteBinaryColumnAsync` writes to the store; `ExecuteSqlAsync` throws `NotSupportedException`. There is no real transaction, but the save unit is all-or-nothing through copy-on-write: every write is staged and published as one unit only after the last phase succeeds, so **nothing a failed save wrote (including a blob written by After) is ever visible**, and a concurrent writer's changes cannot be trampled by the failure |
 | Remote (`--generate-remote-services`) | **A hook registered in the server-side DI fires** | Follows the server-side real implementation. A row the server skipped in Before travels back in the save response, so the client-side `RowState` is left untouched as well (the row stays pending and is retried on the next save), exactly as on a direct connection |
 
@@ -791,7 +791,7 @@ Semantics:
 - **Length**: automatic when `source` is `CanSeek` (`Length - Position`); otherwise the `length` argument is required (an omission throws `ArgumentException`). This is because SQLite's `zeroblob` requires the length before writing, and the contract is unified to be dialect-neutral.
 - **Optimistic concurrency (rowversion, etc.) is out of scope** (direct column manipulation on par with raw SQL).
 - **There is no INSERT-only method.** Write a new row in two steps: "INSERT (blob is `null` or empty) → stream in the body with `Write{Column}Async`".
-- **Cannot be used in EF Core mode** (`NotSupportedException`). Because EF Core is dialect-independent by design, it cannot have dialect-specific streaming. Use the QuickER Repository, or implement it in a `partial` class (in a configuration that combines `GenerateEfCore` with the QuickER Repository, only the EF Core implementation throws).
+- **Cannot be used in EF Core mode** (`NotSupportedException`). Because EF Core is dialect-independent by design, it cannot have dialect-specific streaming. Use the QuickER Repository, or implement it in a `partial` class (in a configuration that combines `GenerateEfCoreRepositories` with the QuickER Repository, only the EF Core implementation throws).
 - **Placement**: if remote contracts (`--generate-remote-contracts` / `--generate-remote-services`) are disabled, they sit directly on the full-featured repository interface `I{Entity}Repository`. If enabled, they move to the remote surface `I{Entity}RemoteRepository` (the full-featured interface inherits the remote surface, so calling code is the same in either configuration—purely additive). The file convenience methods follow the same target interface. Enabling remote services (`--generate-remote-services`) lets them transfer over HTTP (see "Binary transfer endpoints" below).
 
 Choosing between it and `WithUnboundedBinary()`:
@@ -803,7 +803,7 @@ Choosing between it and `WithUnboundedBinary()`:
 | Use case | You temporarily want an entity including the excluded columns | Transfer a huge blob between the DB and a file/stream |
 | Write | Not possible (fetch only; update with raw SQL) | Can write per column with `Write{Column}Async` |
 
-## EF Core mode (GenerateEfCore)
+## EF Core mode (GenerateEfCoreRepositories)
 
 Generates a dialect-independent `QuickErDbContext` that puts the existing Entity onto EF Core as-is, plus an **EF Core implementation of the same repository interfaces**. Migrations are out of scope, and schema creation remains the responsibility of DDL generation (EF Core connects only to an existing schema).
 
@@ -1223,7 +1223,7 @@ With file splitting, the fixed runtime and the schema-dependent code go into sep
 | `Runtime.Sync.g.cs` (`{Runtime}.Sync`) | `QuickER.Runtime.Sync` | The sync engine (`SyncEngine`, `SyncJournal`, `SyncTable<,>`, the options, results, and conflict types; with remote services, the sync envelopes and the HTTP source base) |
 | `Repositories.g.cs`, `Repositories.SqlServer.g.cs` / `Repositories.Sqlite.g.cs` / `Repositories.EntityFrameworkCore.g.cs` / `Repositories.InMemory.g.cs` / `Repositories.Sync.g.cs` / `Repositories.Http.g.cs`, `RemoteServer.g.cs` | — (no package; always generated) | Schema-dependent code only: per-entity contracts and implementations, DI registration, `QuickErDbContext` and its Fluent configuration, projection DTOs, the per-entity endpoints (`GeneratedRemoteEndpoints`), the per-table sync descriptors and journaling decorators. With remote services, the HTTP client (`Http{Entity}RemoteRepository` and its DI registration) is split into its own `Repositories.Http.g.cs`, keeping the contract file pure interfaces — the namespace stays the contract namespace, so type names do not change |
 
-`Runtime.g.cs` is always there, while the files below it are emitted only for a feature you actually enabled (the dialect files only when the QuickER Repository is generated, the EF Core file only with `GenerateEfCore`, the in-memory file only with `GenerateInMemoryRepositories`, the ASP.NET Core file only with `GenerateRemoteServices`, the sync file only with `GenerateSyncSupport`) — exactly the same set of packages you would have to reference.
+`Runtime.g.cs` is always there, while the files below it are emitted only for a feature you actually enabled (the dialect files only when the QuickER Repository is generated, the EF Core file only with `GenerateEfCoreRepositories`, the in-memory file only with `GenerateInMemoryRepositories`, the ASP.NET Core file only with `GenerateRemoteServices`, the sync file only with `GenerateSyncSupport`) — exactly the same set of packages you would have to reference.
 
 Because of this layout, `--use-runtime-packages` means exactly one thing: **no `Runtime*.g.cs` is emitted at all, and the `using` directives in the generated code point at the fixed package namespaces (`QuickER.Runtime`, `QuickER.Runtime.SqlServer`, …) instead of `{Runtime}…`.** The `Repositories*` files are the same either way — turning the mode on or off does not change their contents.
 

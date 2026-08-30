@@ -107,7 +107,7 @@ public class CSharpGenerationSettings
     public bool ExcludeUnboundedBinaryColumns { get; set; }
 
     /// <summary>EF Core 用コード（DbContext＋EF Core 版 Repository）を生成するか（DB アクセスの排他選択）</summary>
-    public bool GenerateEfCore { get; set; }
+    public bool GenerateEfCoreRepositories { get; set; }
 
     /// <summary>
     /// DB 非依存のインメモリ Repository 群（テスト用）を生成するか（既定 false。パッケージ参照モードとは併用不可）
@@ -231,7 +231,7 @@ public class CSharpGenerationSettings
             GenerateMappers = GenerateMappers,
             GenerateRepositories = GenerateRepositories,
             RepositoryDialects = RepositoryDialects,
-            GenerateEfCore = GenerateEfCore,
+            GenerateEfCoreRepositories = GenerateEfCoreRepositories,
             GenerateInMemoryRepositories = GenerateInMemoryRepositories,
             GenerateSyncSupport = GenerateSyncSupport,
             UseRuntimePackages = UseRuntimePackages,

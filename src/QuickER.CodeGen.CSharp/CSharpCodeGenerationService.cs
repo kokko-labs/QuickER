@@ -129,8 +129,12 @@ public sealed class CSharpCodeGenerationService
         // 各方言 namespace へ複製する（自方言メタデータ・自前キャッシュ）。一方 EF Core（方言非依存・契約 namespace）は
         // これらを参照するため、マルチ方言時は契約 namespace に該当型が存在せず解決不能になる。EF Core は QuickER
         // マルチターゲットと排他（GUI はラジオで排他）で、パリティ用の両 ON は単一方言でのみ意味を持つため、
-        // GenerateRepositories の実効方言が 2 つ以上かつ GenerateEfCore のときは早期に診断エラーとする。
-        if (options.GenerateRepositories && options.GenerateEfCore && effectiveDialects.Count >= 2)
+        // GenerateRepositories の実効方言が 2 つ以上かつ GenerateEfCoreRepositories のときは早期に診断エラーとする。
+        if (
+            options.GenerateRepositories
+            && options.GenerateEfCoreRepositories
+            && effectiveDialects.Count >= 2
+        )
         {
             diagnostics.Add(
                 GenerationDiagnostic.Error(Strings.CodeGen_Error_MultiTargetEfCoreExclusive)

@@ -78,7 +78,7 @@ public class QueryGenerationTests
         {
             RootNamespace = "Test.Ns",
             GenerateRepositories = true,
-            GenerateEfCore = true,
+            GenerateEfCoreRepositories = true,
             IncludeDataAnnotations = true,
         };
 
@@ -653,7 +653,7 @@ public class QueryGenerationTests
         {
             RootNamespace = "Test.Ns",
             GenerateRepositories = true,
-            GenerateEfCore = true,
+            GenerateEfCoreRepositories = true,
             IncludeDataAnnotations = true,
             GenerateValueObjects = true,
         };
@@ -692,7 +692,7 @@ public class QueryGenerationTests
         {
             RootNamespace = "Test.Ns",
             GenerateRepositories = true,
-            GenerateEfCore = true,
+            GenerateEfCoreRepositories = true,
             IncludeDataAnnotations = true,
             GenerateValueObjects = true,
         };

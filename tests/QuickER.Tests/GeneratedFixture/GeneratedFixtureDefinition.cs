@@ -40,7 +40,7 @@ public static class GeneratedFixtureDefinition
             GenerateMappers = true,
             GenerateRepositories = true,
             GenerateValueObjects = true,
-            GenerateEfCore = true,
+            GenerateEfCoreRepositories = true,
             SplitFilesByCategory = false,
         };
 

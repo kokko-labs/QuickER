@@ -107,7 +107,7 @@ internal sealed class ApiReferenceDocRenderer
         // インメモリのいずれかが有効なら契約が出るため、データアクセス節・使い方節を出力する。
         var hasContract =
             options.GenerateRepositories
-            || options.GenerateEfCore
+            || options.GenerateEfCoreRepositories
             || options.GenerateInMemoryRepositories;
 
         // 契約が出るときだけ、Repository モデルを Entity クラスへ突き合わせる索引を作る（インターフェイス名・主キー型）。
@@ -290,7 +290,7 @@ internal sealed class ApiReferenceDocRenderer
             }
         }
 
-        if (options.GenerateEfCore)
+        if (options.GenerateEfCoreRepositories)
         {
             registrations.Add(
                 Registration(

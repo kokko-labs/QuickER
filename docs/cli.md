@@ -79,7 +79,7 @@ The agent launches this as a child process and communicates over stdin/stdout (J
 
 The JSON passed via `--config` lets you specify generation options in bulk. It uses the **same schema** as the GUI's settings save file (`codegen-settings.json`) (the GUI writes it in camelCase, but the CLI interprets it case-insensitively, so you can pass it as is). **Each key in the table below can also be specified from the CLI as a same-named kebab-case flag, which takes precedence over the settings file** (priority: CLI flag > settings file > default; bool keys are three-valued: `--flag` / `--flag false`).
 
-> **Note**: the default of `GenerateRepositories` changed from `true` to `false`. Previously, omitting the key generated a QuickER Repository; **now, generating DB-access code requires explicitly specifying `GenerateRepositories: true` (or `GenerateEfCore: true`)** (to align with the GUI's DB-access "None" default).
+> **Note**: the default of `GenerateRepositories` changed from `true` to `false`. Previously, omitting the key generated a QuickER Repository; **now, generating DB-access code requires explicitly specifying `GenerateRepositories: true` (or `GenerateEfCoreRepositories: true`)** (to align with the GUI's DB-access "None" default).
 
 The keys are ordered by category (output mode → namespaces → generation targets → value objects → DB access → remote support → runtime & documentation → attributes → output path).
 
@@ -91,7 +91,7 @@ The keys are ordered by category (output mode → namespaces → generation targ
   "GenerateMappers": true,
   "GenerateValueObjects": false,
   "GenerateRepositories": true,
-  "GenerateEfCore": false,
+  "GenerateEfCoreRepositories": false,
   "IncludeDataAnnotations": true,
   "OutputPath": "MyAppEntities.g.cs"
 }
@@ -112,9 +112,9 @@ Main keys (the default is in parentheses; category order):
 | `GenerateRepositories` (`false`) | Generate a QuickER Repository (a lightweight mini-ORM). **By default, no DB-access code is generated** (the same default as the GUI) |
 | `RepositoryDialects` (unspecified) | The multi-target dialect list for the QuickER Repository (e.g. `["sqlserver", "sqlite"]`). Only `sqlserver` and `sqlite` are supported; combining any other dialect with `GenerateRepositories` fails before generation. When unspecified, the effective value is resolved in this order: `--repository-dialects` > this key in the settings file > a single dialect derived from `--provider` |
 | `ExcludeUnboundedBinaryColumns` (`false`) | Exclude unbounded binary columns from the QuickER Repository's SELECT / UPDATE (corresponds to the CLI's `--exclude-unbounded-binary-columns`; see [Using the generated code](code-generation.md#excluding-unbounded-binary-columns-excludeunboundedbinarycolumns)) |
-| `GenerateEfCore` (`false`) | Generate the `QuickErDbContext` for EF Core plus EF Core Repository implementations. Cannot be combined with multi-targeting (two or more effective dialects) |
+| `GenerateEfCoreRepositories` (`false`) | Generate the `QuickErDbContext` for EF Core plus EF Core Repository implementations. Cannot be combined with multi-targeting (two or more effective dialects) |
 | `GenerateInMemoryRepositories` (`false`) | Generate an in-memory Repository implementation for testing |
-| `GenerateRemoteContracts` (`false`) | Additionally generate the remote-operation interface `I{Entity}RemoteRepository` (corresponds to the CLI's `--generate-remote-contracts`; requires a QuickER Repository, an EF Core Repository, or an in-memory Repository — that is, `GenerateRepositories`, `GenerateEfCore`, or `GenerateInMemoryRepositories`; see [Using the generated code](code-generation.md)) |
+| `GenerateRemoteContracts` (`false`) | Additionally generate the remote-operation interface `I{Entity}RemoteRepository` (corresponds to the CLI's `--generate-remote-contracts`; requires a QuickER Repository, an EF Core Repository, or an in-memory Repository — that is, `GenerateRepositories`, `GenerateEfCoreRepositories`, or `GenerateInMemoryRepositories`; see [Using the generated code](code-generation.md)) |
 | `GenerateRemoteServices` (`false`) | Generate HTTP client/server implementations for the remote surface (automatically implies `GenerateRemoteContracts`; corresponds to the CLI's `--generate-remote-services`; see [Using the generated code](code-generation.md)) |
 | `GenerateSyncSupport` (`false`) | Generate the bidirectional sync support for a server (SQL Server) plus local (SQLite) build. Requires `GenerateRepositories` with exactly the two dialects `sqlserver` and `sqlite`, and at least one table with a `rowversion` column. Can be combined with `ExcludeUnboundedBinaryColumns`, in which case the excluded columns are carried only when `SyncOptions.IncludeUnboundedBinary` is set (corresponds to the CLI's `--generate-sync-support`; see [Using the generated code](code-generation.md#bidirectional-sync-support---generate-sync-support)) |
 | `UseRuntimePackages` (`false`) | Do not emit the fixed runtime code; provide it via NuGet package references instead (see [Using the generated code](code-generation.md)) |

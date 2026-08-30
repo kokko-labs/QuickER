@@ -50,7 +50,7 @@ public class GeneratedCodeCompilationTests
                     RootNamespace = "Sample.Domain",
                     SplitFilesByCategory = split,
                     GenerateValueObjects = vo,
-                    GenerateEfCore = true,
+                    GenerateEfCoreRepositories = true,
                 }
             );
         }
@@ -61,7 +61,7 @@ public class GeneratedCodeCompilationTests
             new CodeGenerationOptions
             {
                 RootNamespace = "Sample.Domain",
-                GenerateEfCore = true,
+                GenerateEfCoreRepositories = true,
                 ExcludeUnboundedBinaryColumns = true,
             }
         );
@@ -83,7 +83,7 @@ public class GeneratedCodeCompilationTests
                     RootNamespace = "Sample.Domain",
                     SplitFilesByCategory = split,
                     GenerateValueObjects = vo,
-                    GenerateEfCore = true,
+                    GenerateEfCoreRepositories = true,
                     GenerateRepositories = false,
                 }
             );
@@ -160,7 +160,7 @@ public class GeneratedCodeCompilationTests
             {
                 RootNamespace = "Sample.Domain",
                 RepositoryDialects = ["sqlite"],
-                GenerateEfCore = true,
+                GenerateEfCoreRepositories = true,
             }
         );
         return data;
@@ -181,7 +181,7 @@ public class GeneratedCodeCompilationTests
                     SplitFilesByCategory = split,
                     GenerateValueObjects = vo,
                     GenerateRepositories = false,
-                    GenerateEfCore = false,
+                    GenerateEfCoreRepositories = false,
                     GenerateInMemoryRepositories = true,
                 }
             );
@@ -194,7 +194,7 @@ public class GeneratedCodeCompilationTests
             {
                 RootNamespace = "Sample.Domain",
                 GenerateRepositories = false,
-                GenerateEfCore = true,
+                GenerateEfCoreRepositories = true,
                 GenerateInMemoryRepositories = true,
             }
         );
@@ -270,7 +270,7 @@ public class GeneratedCodeCompilationTests
             {
                 RootNamespace = "Sample.Domain",
                 GenerateRepositories = false,
-                GenerateEfCore = true,
+                GenerateEfCoreRepositories = true,
                 GenerateRemoteContracts = true,
             }
         );
@@ -282,7 +282,7 @@ public class GeneratedCodeCompilationTests
             {
                 RootNamespace = "Sample.Domain",
                 RepositoryDialects = ["sqlite"],
-                GenerateEfCore = true,
+                GenerateEfCoreRepositories = true,
                 GenerateRemoteContracts = true,
             }
         );
@@ -509,7 +509,7 @@ public class GeneratedCodeCompilationTests
                     RootNamespace = "Sample.Domain",
                     SplitFilesByCategory = split,
                     RepositoryDialects = ["sqlite"],
-                    GenerateEfCore = true,
+                    GenerateEfCoreRepositories = true,
                     GenerateRemoteServices = true,
                 }
             );
@@ -520,7 +520,7 @@ public class GeneratedCodeCompilationTests
                     RootNamespace = "Sample.Domain",
                     SplitFilesByCategory = split,
                     GenerateRepositories = false,
-                    GenerateEfCore = true,
+                    GenerateEfCoreRepositories = true,
                     GenerateRemoteServices = true,
                 }
             );
@@ -615,7 +615,7 @@ public class GeneratedCodeCompilationTests
                 RootNamespace = "Sample.Domain",
                 LayeredOutput = true,
                 GenerateRepositories = false,
-                GenerateEfCore = true,
+                GenerateEfCoreRepositories = true,
             }
         );
 

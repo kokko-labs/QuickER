@@ -563,7 +563,7 @@ public sealed class MultiTargetRepositoryGenerationTests
             RootNamespace = "Sample.Domain",
             GenerateRepositories = true,
             RepositoryDialects = ["sqlserver", "sqlite"],
-            GenerateEfCore = true,
+            GenerateEfCoreRepositories = true,
         };
 
         var result = new CSharpCodeGenerationService().Generate(
@@ -609,7 +609,7 @@ public sealed class MultiTargetRepositoryGenerationTests
             RootNamespace = "Sample.Domain",
             GenerateRepositories = false,
             RepositoryDialects = ["sqlserver", "sqlite"],
-            GenerateEfCore = true,
+            GenerateEfCoreRepositories = true,
         };
 
         var result = new CSharpCodeGenerationService().Generate(

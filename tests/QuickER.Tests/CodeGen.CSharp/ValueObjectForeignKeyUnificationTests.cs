@@ -154,7 +154,11 @@ public class ValueObjectForeignKeyUnificationTests
     [Fact(DisplayName = "EF Core Fluent の HasConversion も親の VO 型を使う")]
     public void EfCoreFluentも親のVO型を使う()
     {
-        var options = VoOptions() with { GenerateEfCore = true, GenerateRepositories = false };
+        var options = VoOptions() with
+        {
+            GenerateEfCoreRepositories = true,
+            GenerateRepositories = false,
+        };
         var result = Generate(MismatchedNameDiagram(), options);
 
         result.HasErrors.Should().BeFalse();

@@ -320,7 +320,7 @@ public sealed class RuntimePackageSourceRenderer
             GenerateEditModels = true,
             GenerateMappers = true,
             GenerateRepositories = true,
-            GenerateEfCore = true,
+            GenerateEfCoreRepositories = true,
             // リモートサービスのクライアント側固定 infra（RemoteJson・RemoteRepositoryException・HttpRemoteRepository 等）
             // は BCL のみ依存のため Core パッケージへ含める（per-entity クライアント・DI 登録はスキーマ依存物として
             // 常に生成側＝!runtime_package_export ゲートで除外される）
@@ -366,7 +366,7 @@ public sealed class RuntimePackageSourceRenderer
             GenerateEditModels = options.GenerateEditModels,
             GenerateMappers = options.GenerateMappers,
             GenerateRepositories = generateRepositories,
-            GenerateEfCore = options.GenerateEfCore,
+            GenerateEfCoreRepositories = options.GenerateEfCoreRepositories,
             GenerateRemoteServices = includeRemoteServices && options.GenerateRemoteServices,
             GenerateValueObjects = options.GenerateValueObjects,
             IncludeDataAnnotations = options.IncludeDataAnnotations,

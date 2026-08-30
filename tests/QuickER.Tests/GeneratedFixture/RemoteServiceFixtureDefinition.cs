@@ -39,7 +39,7 @@ public static class RemoteServiceFixtureDefinition
             GenerateMappers = true,
             GenerateRepositories = true,
             GenerateValueObjects = true,
-            GenerateEfCore = true,
+            GenerateEfCoreRepositories = true,
             RepositoryDialects = ["sqlite"],
             GenerateRemoteServices = true,
             SplitFilesByCategory = false,

@@ -37,7 +37,7 @@ public static class RemoteContractFixtureDefinition
             GenerateMappers = true,
             GenerateRepositories = true,
             GenerateValueObjects = true,
-            GenerateEfCore = true,
+            GenerateEfCoreRepositories = true,
             RepositoryDialects = ["sqlite"],
             GenerateRemoteContracts = true,
             SplitFilesByCategory = false,

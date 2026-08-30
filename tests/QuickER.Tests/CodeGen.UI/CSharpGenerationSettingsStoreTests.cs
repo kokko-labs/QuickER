@@ -172,7 +172,7 @@ public class CSharpGenerationSettingsStoreTests
                 {
                     SplitFilesByCategory = true,
                     RootNamespace = "Acme.App",
-                    GenerateEfCore = true,
+                    GenerateEfCoreRepositories = true,
                     GenerateValueObjects = true,
                 }
             );
@@ -184,7 +184,7 @@ public class CSharpGenerationSettingsStoreTests
             loaded.Should().NotBeNull();
             loaded!.SplitFilesByCategory.Should().BeTrue();
             loaded.RootNamespace.Should().Be("Acme.App");
-            loaded.GenerateEfCore.Should().BeTrue();
+            loaded.GenerateEfCoreRepositories.Should().BeTrue();
             loaded.GenerateValueObjects.Should().BeTrue();
 
             // 既定保存先（codegen-settings.json）は SaveTo では書かれない
@@ -307,7 +307,7 @@ public class CSharpGenerationSettingsStoreTests
                 {
                     RootNamespace = "Acme.Contracts",
                     SplitFilesByCategory = true,
-                    GenerateEfCore = true,
+                    GenerateEfCoreRepositories = true,
                     GenerateRepositories = true,
                     RepositoryDialects = new() { "sqlserver", "sqlite" },
                     GenerateInMemoryRepositories = true,
@@ -345,7 +345,7 @@ public class CSharpGenerationSettingsStoreTests
 
             options.RootNamespace.Should().Be("Acme.Contracts");
             options.SplitFilesByCategory.Should().BeTrue();
-            options.GenerateEfCore.Should().BeTrue();
+            options.GenerateEfCoreRepositories.Should().BeTrue();
             options.GenerateRepositories.Should().BeTrue();
             options.RepositoryDialects.Should().Equal("sqlserver", "sqlite");
             options.GenerateInMemoryRepositories.Should().BeTrue();

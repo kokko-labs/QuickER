@@ -2207,7 +2207,7 @@ public class CSharpCodeGenerationServiceTests
     /// </summary>
     [Theory]
     [InlineData(nameof(CodeGenerationOptions.GenerateRepositories))]
-    [InlineData(nameof(CodeGenerationOptions.GenerateEfCore))]
+    [InlineData(nameof(CodeGenerationOptions.GenerateEfCoreRepositories))]
     [InlineData(nameof(CodeGenerationOptions.GenerateInMemoryRepositories))]
     public void Generate_RemoteWithRepositoryContract_ShouldSucceed(string contractOption)
     {
@@ -2217,7 +2217,8 @@ public class CSharpCodeGenerationServiceTests
             RootNamespace = "Sample.Domain",
             GenerateRepositories =
                 contractOption == nameof(CodeGenerationOptions.GenerateRepositories),
-            GenerateEfCore = contractOption == nameof(CodeGenerationOptions.GenerateEfCore),
+            GenerateEfCoreRepositories =
+                contractOption == nameof(CodeGenerationOptions.GenerateEfCoreRepositories),
             GenerateInMemoryRepositories =
                 contractOption == nameof(CodeGenerationOptions.GenerateInMemoryRepositories),
             GenerateRemoteContracts = true,
@@ -3481,7 +3482,7 @@ public class CSharpCodeGenerationServiceTests
             RootNamespace = "Sample.Domain",
             SplitFilesByCategory = false,
             GenerateRepositories = false,
-            GenerateEfCore = false,
+            GenerateEfCoreRepositories = false,
             RepositoryNamespace = "123 bad",
         };
 
@@ -3890,7 +3891,11 @@ public class CSharpCodeGenerationServiceTests
 
         var efCoreOnly = service.Generate(
             SingleEntityDiagram(),
-            new CodeGenerationOptions { RootNamespace = "Sample.Domain", GenerateEfCore = true }
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Sample.Domain",
+                GenerateEfCoreRepositories = true,
+            }
         );
 
         efCoreOnly.HasErrors.Should().BeFalse();
@@ -4413,7 +4418,11 @@ public class CSharpCodeGenerationServiceTests
     {
         var result = new CSharpCodeGenerationService().Generate(
             ValueObjectDiagram(),
-            new CodeGenerationOptions { RootNamespace = "Sample.Domain", GenerateEfCore = true }
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Sample.Domain",
+                GenerateEfCoreRepositories = true,
+            }
         );
 
         result.HasErrors.Should().BeFalse();
@@ -4458,7 +4467,11 @@ public class CSharpCodeGenerationServiceTests
     {
         var result = new CSharpCodeGenerationService().Generate(
             ValueObjectDiagram(),
-            new CodeGenerationOptions { RootNamespace = "Sample.Domain", GenerateEfCore = true }
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Sample.Domain",
+                GenerateEfCoreRepositories = true,
+            }
         );
 
         result.HasErrors.Should().BeFalse();
@@ -4474,7 +4487,11 @@ public class CSharpCodeGenerationServiceTests
     {
         var result = new CSharpCodeGenerationService().Generate(
             ValueObjectDiagram(),
-            new CodeGenerationOptions { RootNamespace = "Sample.Domain", GenerateEfCore = true }
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Sample.Domain",
+                GenerateEfCoreRepositories = true,
+            }
         );
 
         result.HasErrors.Should().BeFalse();
@@ -4495,7 +4512,11 @@ public class CSharpCodeGenerationServiceTests
 
         var result = new CSharpCodeGenerationService().Generate(
             diagram,
-            new CodeGenerationOptions { RootNamespace = "Sample.Domain", GenerateEfCore = true }
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Sample.Domain",
+                GenerateEfCoreRepositories = true,
+            }
         );
 
         result.HasErrors.Should().BeFalse();
@@ -4511,7 +4532,7 @@ public class CSharpCodeGenerationServiceTests
             new CodeGenerationOptions
             {
                 RootNamespace = "Sample.Domain",
-                GenerateEfCore = true,
+                GenerateEfCoreRepositories = true,
                 GenerateValueObjects = true,
             }
         );
@@ -4530,7 +4551,11 @@ public class CSharpCodeGenerationServiceTests
     {
         var result = new CSharpCodeGenerationService().Generate(
             RowVersionDiagram(),
-            new CodeGenerationOptions { RootNamespace = "Sample.Domain", GenerateEfCore = true }
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Sample.Domain",
+                GenerateEfCoreRepositories = true,
+            }
         );
 
         result.HasErrors.Should().BeFalse();
@@ -4569,7 +4594,7 @@ public class CSharpCodeGenerationServiceTests
             {
                 RootNamespace = "Sample.Domain",
                 SplitFilesByCategory = true,
-                GenerateEfCore = true,
+                GenerateEfCoreRepositories = true,
             }
         );
 
@@ -4603,7 +4628,7 @@ public class CSharpCodeGenerationServiceTests
     /// <remarks>
     /// 本テストは「using をバケット単位で解決する」設計（<see cref="GeneratedFileUsings"/>）の核心を守る。
     /// 契約のみを持つ Repository ファイル（EF Core 単独時）に SqlClient / DI の using が漏れないことも併せて検証する。
-    /// EF Core 系フラグを両方 ON（GenerateRepositories=true・GenerateEfCore=true）にしてすべての外部 using が
+    /// EF Core 系フラグを両方 ON（GenerateRepositories=true・GenerateEfCoreRepositories=true）にしてすべての外部 using が
     /// 発生し得る最大構成で確認する。
     /// </remarks>
     [Theory]
@@ -4619,7 +4644,7 @@ public class CSharpCodeGenerationServiceTests
                 SplitFilesByCategory = true,
                 GenerateValueObjects = vo,
                 GenerateRepositories = true,
-                GenerateEfCore = true,
+                GenerateEfCoreRepositories = true,
             }
         );
 
@@ -4675,7 +4700,7 @@ public class CSharpCodeGenerationServiceTests
                 SplitFilesByCategory = true,
                 GenerateValueObjects = vo,
                 GenerateRepositories = false,
-                GenerateEfCore = true,
+                GenerateEfCoreRepositories = true,
             }
         );
 
@@ -4707,7 +4732,7 @@ public class CSharpCodeGenerationServiceTests
             {
                 RootNamespace = "Sample.Domain",
                 SplitFilesByCategory = true,
-                GenerateEfCore = true,
+                GenerateEfCoreRepositories = true,
                 // Repository 契約 namespace をカスタム指定 → EfCore はそのサブ名前空間へ導出される
                 RepositoryNamespace = "Acme.Persistence.Repos",
             }
@@ -4719,7 +4744,7 @@ public class CSharpCodeGenerationServiceTests
             .Contain("namespace Acme.Persistence.Repos.EntityFrameworkCore;");
     }
 
-    /// <summary>EF Core 単独出力（GenerateEfCore=true・GenerateRepositories=false）が合法で、エラーなく生成できることを検証する</summary>
+    /// <summary>EF Core 単独出力（GenerateEfCoreRepositories=true・GenerateRepositories=false）が合法で、エラーなく生成できることを検証する</summary>
     [Fact]
     public void Generate_EfCoreOnly_ShouldSucceedWithoutError()
     {
@@ -4728,7 +4753,7 @@ public class CSharpCodeGenerationServiceTests
             new CodeGenerationOptions
             {
                 RootNamespace = "Sample.Domain",
-                GenerateEfCore = true,
+                GenerateEfCoreRepositories = true,
                 GenerateRepositories = false,
             }
         );
@@ -4773,7 +4798,7 @@ public class CSharpCodeGenerationServiceTests
                 RootNamespace = "Sample.Domain",
                 SplitFilesByCategory = split,
                 GenerateValueObjects = vo,
-                GenerateEfCore = true,
+                GenerateEfCoreRepositories = true,
                 GenerateRepositories = false,
             }
         );
@@ -4813,7 +4838,7 @@ public class CSharpCodeGenerationServiceTests
             new CodeGenerationOptions
             {
                 RootNamespace = "Sample.Domain",
-                GenerateEfCore = true,
+                GenerateEfCoreRepositories = true,
                 GenerateRepositories = false,
             }
         );
@@ -4846,7 +4871,11 @@ public class CSharpCodeGenerationServiceTests
     {
         var result = new CSharpCodeGenerationService().Generate(
             ValueObjectDiagram(),
-            new CodeGenerationOptions { RootNamespace = "Sample.Domain", GenerateEfCore = true }
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Sample.Domain",
+                GenerateEfCoreRepositories = true,
+            }
         );
 
         result.HasErrors.Should().BeFalse();
@@ -4882,7 +4911,11 @@ public class CSharpCodeGenerationServiceTests
     {
         var result = new CSharpCodeGenerationService().Generate(
             ValueObjectDiagram(),
-            new CodeGenerationOptions { RootNamespace = "Sample.Domain", GenerateEfCore = true }
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Sample.Domain",
+                GenerateEfCoreRepositories = true,
+            }
         );
 
         result.HasErrors.Should().BeFalse();
@@ -4911,7 +4944,11 @@ public class CSharpCodeGenerationServiceTests
     {
         var result = new CSharpCodeGenerationService().Generate(
             ValueObjectDiagram(),
-            new CodeGenerationOptions { RootNamespace = "Sample.Domain", GenerateEfCore = true }
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Sample.Domain",
+                GenerateEfCoreRepositories = true,
+            }
         );
 
         result.HasErrors.Should().BeFalse();
@@ -4948,7 +4985,11 @@ public class CSharpCodeGenerationServiceTests
     {
         var result = new CSharpCodeGenerationService().Generate(
             ValueObjectDiagram(),
-            new CodeGenerationOptions { RootNamespace = "Sample.Domain", GenerateEfCore = true }
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Sample.Domain",
+                GenerateEfCoreRepositories = true,
+            }
         );
 
         result.HasErrors.Should().BeFalse();
@@ -4981,7 +5022,11 @@ public class CSharpCodeGenerationServiceTests
     {
         var result = new CSharpCodeGenerationService().Generate(
             ValueObjectDiagram(),
-            new CodeGenerationOptions { RootNamespace = "Sample.Domain", GenerateEfCore = true }
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Sample.Domain",
+                GenerateEfCoreRepositories = true,
+            }
         );
 
         result.HasErrors.Should().BeFalse();
@@ -5067,7 +5112,7 @@ public class CSharpCodeGenerationServiceTests
             {
                 RootNamespace = "Sample.Domain",
                 SplitFilesByCategory = true,
-                GenerateEfCore = true,
+                GenerateEfCoreRepositories = true,
             }
         );
 
@@ -5135,7 +5180,7 @@ public class CSharpCodeGenerationServiceTests
             {
                 RootNamespace = "Sample.Domain",
                 GenerateRepositories = false,
-                GenerateEfCore = false,
+                GenerateEfCoreRepositories = false,
                 GenerateInMemoryRepositories = true,
             }
         );
@@ -5171,7 +5216,7 @@ public class CSharpCodeGenerationServiceTests
         {
             RootNamespace = "Sample.Domain",
             GenerateRepositories = false,
-            GenerateEfCore = false,
+            GenerateEfCoreRepositories = false,
             GenerateInMemoryRepositories = true,
             UseRuntimePackages = true,
         };
@@ -5520,7 +5565,7 @@ public class CSharpCodeGenerationServiceTests
     }
 
     /// <summary>
-    /// EF Core 単独生成（GenerateRepositories=false・GenerateEfCore=true）では、除外オプション ON でも
+    /// EF Core 単独生成（GenerateRepositories=false・GenerateEfCoreRepositories=true）では、除外オプション ON でも
     /// Stream アクセサは契約にも現れない（QuickER 版 Repository 前提の機能のため）。
     /// </summary>
     [Fact(DisplayName = "Stream アクセサ: EF Core 単独生成では契約にも出ない")]
@@ -5532,7 +5577,7 @@ public class CSharpCodeGenerationServiceTests
             {
                 RootNamespace = "Sample.Domain",
                 GenerateRepositories = false,
-                GenerateEfCore = true,
+                GenerateEfCoreRepositories = true,
                 ExcludeUnboundedBinaryColumns = true,
             }
         );
