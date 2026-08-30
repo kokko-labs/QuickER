@@ -67,7 +67,7 @@
 `Query()` には生成拡張が 2 つ乗ります。`IncludeGraph()` はグラフ保存がたどるのと同じ子方向カスケードを Include し（取得量を抑えるには `Where` や `GetByIdAsync` と組み合わせてください）、`GetByIdAsync(id)` はクエリチェーンの終端で主キー 1 件を取得します——`Query().IncludeGraph().GetByIdAsync(id)` で 1 つの集約をグラフごと読めます。
 {{~ if generate_value_objects }}
 
-値オブジェクトには `Create` / `TryCreate` 以外の入口もあります。`TryCreateFrom` / `CreateFrom` はモデル外の値（CSV のフィールド・表計算のセル）から生成し、partial フック `GetDefinedInstance` / `ConvertCustomInput` は定義済みインスタンスを返す列挙型の値オブジェクトにできます。書き方は上記リンクのドキュメントを参照してください。
+値オブジェクトには `Create` / `TryCreate` 以外の入口もあります。`TryCreateFrom` / `CreateFrom` はモデル外の値（CSV のフィールド・表計算のセル）から生成します。partial フック `GetDefinedInstance` は、JSON 復元・DB 読み出しを含む生成経路すべてで定義済みインスタンスを返す列挙型の値オブジェクトにします（フック自体は未定義の値を弾きません——弾く `OnValidate` と対で書きます）。`ConvertCustomInput` は `TryCreateFrom` / `CreateFrom` だけが受け付ける入力の形を足します（名前で引く、など）。書き方は上記リンクのドキュメントを参照してください。
 {{~ end }}
 
 ## 使い方
