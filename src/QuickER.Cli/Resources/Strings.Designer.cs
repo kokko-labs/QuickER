@@ -240,9 +240,9 @@ namespace QuickER.Cli.Resources {
             }
         }
 
-        public static string Cli_Opt_GenerateEfCore {
+        public static string Cli_Opt_GenerateEfCoreRepositories {
             get {
-                return ResourceManager.GetString("Cli_Opt_GenerateEfCore", resourceCulture);
+                return ResourceManager.GetString("Cli_Opt_GenerateEfCoreRepositories", resourceCulture);
             }
         }
 

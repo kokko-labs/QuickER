@@ -180,7 +180,7 @@ public sealed class MockProjectScaffoldService
             GenerateInMemoryRepositories = true,
             GenerateRepositories = repositoryDialect is not null,
             RepositoryDialects = repositoryDialect is null ? null : [repositoryDialect],
-            GenerateEfCore = false,
+            GenerateEfCoreRepositories = false,
             IncludeDataAnnotations = true,
             SplitFilesByCategory = true,
         };

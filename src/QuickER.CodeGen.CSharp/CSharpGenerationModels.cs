@@ -21,7 +21,7 @@ internal sealed class CSharpGenerationModel
     /// <summary>値オブジェクト（Value Object）クラスの生成モデル一覧（GenerateValueObjects が OFF のときは空）</summary>
     public required IReadOnlyList<CSharpValueObjectModel> ValueObjectClasses { get; init; }
 
-    /// <summary>EF Core（DbContext・Fluent 構成）の生成モデル。GenerateEfCore が OFF のときは null</summary>
+    /// <summary>EF Core（DbContext・Fluent 構成）の生成モデル。GenerateEfCoreRepositories が OFF のときは null</summary>
     public CSharpEfCoreModel? EfCore { get; init; }
 
     /// <summary>

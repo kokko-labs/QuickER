@@ -19,7 +19,7 @@ namespace QuickER.CodeGen.CSharp;
 ///   <item>常に <see cref="RuntimePackages.Core"/>（Entity のみの構成でも EntityBase・属性・VO 基底で必要）</item>
 ///   <item><see cref="CodeGenerationOptions.GenerateRepositories"/> 時: 実効方言に応じ
 ///     <see cref="RuntimePackages.SqlServer"/> / <see cref="RuntimePackages.Sqlite"/>（マルチターゲットなら両方）</item>
-///   <item><see cref="CodeGenerationOptions.GenerateEfCore"/> 時: <see cref="RuntimePackages.EntityFrameworkCore"/></item>
+///   <item><see cref="CodeGenerationOptions.GenerateEfCoreRepositories"/> 時: <see cref="RuntimePackages.EntityFrameworkCore"/></item>
 ///   <item><see cref="CodeGenerationOptions.GenerateInMemoryRepositories"/> 時: <see cref="RuntimePackages.InMemory"/></item>
 ///   <item><see cref="CodeGenerationOptions.GenerateRemoteServices"/> かつ Repository 契約ありのとき:
 ///     <see cref="RuntimePackages.AspNetCore"/>（サーバー実装ファイルの固定部。参照するのはサーバー側
@@ -57,7 +57,10 @@ public static class RuntimePackageReferenceGuidance
             }
         }
 
-        if (options.GenerateEfCore && !packages.Contains(RuntimePackages.EntityFrameworkCore))
+        if (
+            options.GenerateEfCoreRepositories
+            && !packages.Contains(RuntimePackages.EntityFrameworkCore)
+        )
         {
             packages.Add(RuntimePackages.EntityFrameworkCore);
         }

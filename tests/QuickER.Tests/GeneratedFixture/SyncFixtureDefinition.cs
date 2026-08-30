@@ -69,7 +69,7 @@ public static class SyncFixtureDefinition
             GenerateMappers = false,
             GenerateRepositories = true,
             GenerateValueObjects = false,
-            GenerateEfCore = false,
+            GenerateEfCoreRepositories = false,
             GenerateSyncSupport = true,
             // 同期の 2 経路（直結・HTTP）を 1 つの生成物で覆う。リモートサービスを足すと同期専用エンドポイント
             // （サーバー側）と HTTP 差分ソース（クライアント側）が加わり、実行時テストは同じ型・同じシナリオを

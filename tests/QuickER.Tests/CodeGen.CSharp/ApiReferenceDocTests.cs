@@ -236,7 +236,7 @@ public sealed class ApiReferenceDocTests
         {
             GenerateApiDocs = true,
             GenerateRepositories = false,
-            GenerateEfCore = true,
+            GenerateEfCoreRepositories = true,
         };
 
         var markdown = MarkdownFile(Generate(BuildDiagram(), options))!.Content;
@@ -288,7 +288,7 @@ public sealed class ApiReferenceDocTests
             GenerateEditModels = false,
             GenerateMappers = false,
             GenerateRepositories = false,
-            GenerateEfCore = false,
+            GenerateEfCoreRepositories = false,
             GenerateInMemoryRepositories = false,
         };
 

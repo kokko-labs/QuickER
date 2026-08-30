@@ -216,7 +216,7 @@ public class DialectOrderInvarianceTests
             RootNamespace = "Sample.Domain",
             RepositoryDialects = dialects,
             GenerateRepositories = true,
-            GenerateEfCore = false,
+            GenerateEfCoreRepositories = false,
             GenerateInMemoryRepositories = generateInMemory,
             SplitFilesByCategory = true,
         };

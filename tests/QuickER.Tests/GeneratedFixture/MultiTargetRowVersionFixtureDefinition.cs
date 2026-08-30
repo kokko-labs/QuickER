@@ -52,7 +52,7 @@ public static class MultiTargetRowVersionFixtureDefinition
             GenerateMappers = false,
             GenerateRepositories = true,
             GenerateValueObjects = false,
-            GenerateEfCore = false,
+            GenerateEfCoreRepositories = false,
             RepositoryDialects = ["sqlserver", "sqlite"],
             SplitFilesByCategory = false,
         };

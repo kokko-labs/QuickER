@@ -62,7 +62,7 @@ public static class PortableFixtureDefinition
             GenerateMappers = true,
             GenerateRepositories = false,
             GenerateValueObjects = true,
-            GenerateEfCore = true,
+            GenerateEfCoreRepositories = true,
             SplitFilesByCategory = false,
         };
 

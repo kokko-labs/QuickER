@@ -57,7 +57,7 @@ public static class BinaryFixtureDefinition
             GenerateMappers = true,
             GenerateRepositories = true,
             GenerateValueObjects = false,
-            GenerateEfCore = true,
+            GenerateEfCoreRepositories = true,
             GenerateInMemoryRepositories = true,
             GenerateRemoteServices = true,
             RepositoryDialects = ["sqlite"],

@@ -183,7 +183,7 @@ public class StoreGeneratedCapabilityGenerationTests
                 RootNamespace = "Sample.EfOnly",
                 SplitFilesByCategory = true,
                 GenerateRepositories = false,
-                GenerateEfCore = true,
+                GenerateEfCoreRepositories = true,
             }
         );
 

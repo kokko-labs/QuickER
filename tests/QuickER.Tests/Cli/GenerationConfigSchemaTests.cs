@@ -97,7 +97,7 @@ public sealed class GenerationConfigSchemaTests
             .ToHashSet();
 
         names.Should().Contain("GenerateRepositories");
-        names.Should().Contain("GenerateEfCore");
+        names.Should().Contain("GenerateEfCoreRepositories");
         names.Should().Contain("RootNamespace");
         names.Should().Contain("RepositoryDialects");
 

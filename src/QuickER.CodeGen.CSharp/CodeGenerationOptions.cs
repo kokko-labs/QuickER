@@ -29,7 +29,7 @@ public sealed record CodeGenerationOptions
     /// <remarks>
     /// SqlServerRepository 基底・各エンティティ実装・接続ファクトリ・SqlExecutor・SqlExpressionTranslator・
     /// エンジン別 DI 拡張 <c>AddGenerated{方言}Repositories</c> を生成する。共通契約（インターフェイス・SqlQuery・メタデータ等）は
-    /// <see cref="GenerateEfCore"/> と共有し、どちらか一方が ON なら生成される。
+    /// <see cref="GenerateEfCoreRepositories"/> と共有し、どちらか一方が ON なら生成される。
     /// 既定では DB アクセスコードを生成しない（GUI の DB アクセス「なし」と同じ既定）
     /// </remarks>
     public bool GenerateRepositories { get; init; }
@@ -166,7 +166,7 @@ public sealed record CodeGenerationOptions
     /// EF Core 単独出力時はQuickER の SQL Server 実装（<c>Microsoft.Data.SqlClient</c> 依存）を一切含まない。
     /// 共通契約（インターフェイス・SqlQuery・メタデータ等）は <see cref="GenerateRepositories"/> と共有する
     /// </remarks>
-    public bool GenerateEfCore { get; init; }
+    public bool GenerateEfCoreRepositories { get; init; }
 
     /// <summary>
     /// DB 非依存のインメモリ Repository 群（<c>InMemory{Entity}Repository</c>・<c>InMemoryDataStore</c>・
@@ -177,10 +177,10 @@ public sealed record CodeGenerationOptions
     /// 実 DB を使わず、共通契約（<c>I{Entity}Repository</c> / <c>IRepository</c> / <c>SqlQuery</c> 等）と同じ API を
     /// メモリ上の辞書で満たす。プロトタイピング・UI 検証・単体テスト向けで、生 SQL 系メソッドは
     /// <see cref="NotSupportedException"/> を投げる（実 DB の Repository へ切り替える案内）。共通契約は
-    /// <see cref="GenerateRepositories"/> / <see cref="GenerateEfCore"/> と共有する（どれか一つでも ON なら契約を生成）。
+    /// <see cref="GenerateRepositories"/> / <see cref="GenerateEfCoreRepositories"/> と共有する（どれか一つでも ON なら契約を生成）。
     /// </para>
     /// <para>
-    /// 方言に依存しないため、QuickER 版 Repository のマルチターゲット・<see cref="GenerateEfCore"/>・
+    /// 方言に依存しないため、QuickER 版 Repository のマルチターゲット・<see cref="GenerateEfCoreRepositories"/>・
     /// <see cref="UseRuntimePackages"/> のいずれとも併用できる（パッケージ参照モードではインメモリ基盤の固定 infra を
     /// <c>QuickER.Runtime.InMemory</c> パッケージが担い、per-entity 実装・シーダー・DI 登録だけが生成側に残る）。
     /// </para>
@@ -204,14 +204,14 @@ public sealed record CodeGenerationOptions
     /// </para>
     /// <para>
     /// <see cref="GenerateRepositories"/> が前提（QuickER 版 Repository の実装が同期の読み書き経路になる）。
-    /// <see cref="GenerateEfCore"/> とはマルチターゲットの排他規則により自動的に併用できない。
+    /// <see cref="GenerateEfCoreRepositories"/> とはマルチターゲットの排他規則により自動的に併用できない。
     /// </para>
     /// </remarks>
     public bool GenerateSyncSupport { get; init; }
 
     /// <summary>Repository 契約（共通契約バケット）の生成が必要か（QuickER 版 / EF Core / インメモリのいずれかが有効）</summary>
     public bool GeneratesRepositoryContract =>
-        GenerateRepositories || GenerateEfCore || GenerateInMemoryRepositories;
+        GenerateRepositories || GenerateEfCoreRepositories || GenerateInMemoryRepositories;
 
     /// <summary>[Table] [Key] [Column] [Required] [MaxLength] などのデータアノテーション属性を付与するかどうか</summary>
     public bool IncludeDataAnnotations { get; init; } = true;
@@ -329,7 +329,7 @@ public sealed record CodeGenerationOptions
     /// （固定 infra を出力しないため）。必要なパッケージ参照は <see cref="RuntimePackageReferenceGuidance"/> が案内する。
     /// </para>
     /// <para>
-    /// 本モードは <see cref="GenerateEfCore"/> とは併用できない（EF Core の <c>QuickErDbContext</c> がスキーマ依存で、
+    /// 本モードは <see cref="GenerateEfCoreRepositories"/> とは併用できない（EF Core の <c>QuickErDbContext</c> がスキーマ依存で、
     /// EF Core 固定 infra が同一アセンブリの具象 DbContext を参照するためパッケージ境界を跨げない）。併用指定は生成時に診断エラーになる。
     /// </para>
     /// </remarks>

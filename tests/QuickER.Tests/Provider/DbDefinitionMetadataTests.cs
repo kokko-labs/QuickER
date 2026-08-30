@@ -86,7 +86,7 @@ public class DbDefinitionMetadataTests
         {
             RootNamespace = "Sample.Domain",
             GenerateRepositories = false,
-            GenerateEfCore = false,
+            GenerateEfCoreRepositories = false,
         };
 
     [Fact(DisplayName = "DataAnnotations ON で [DbColumnMeta]/[DbTableMeta] が付与される")]
@@ -113,7 +113,7 @@ public class DbDefinitionMetadataTests
         {
             RootNamespace = "Sample.Domain",
             GenerateRepositories = false,
-            GenerateEfCore = false,
+            GenerateEfCoreRepositories = false,
             IncludeDataAnnotations = false,
         };
 
@@ -336,7 +336,7 @@ public class DbDefinitionMetadataTests
         {
             RootNamespace = "Sample.Domain",
             GenerateRepositories = true,
-            GenerateEfCore = false,
+            GenerateEfCoreRepositories = false,
             RepositoryDialects = dialects,
         };
 

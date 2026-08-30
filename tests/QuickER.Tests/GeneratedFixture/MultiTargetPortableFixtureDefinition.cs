@@ -17,7 +17,7 @@ namespace QuickER.Tests.GeneratedMultiTargetFixture;
 /// 入力の ER 図は既存の方言可搬フィクスチャ（<see cref="Tests.GeneratedPortableFixture.PortableFixtureDefinition"/>）と
 /// <b>同一</b>（rowversion なし・2 エンティティ・1対多カスケード・int/string/decimal のみ）。相違はオプションのみで、
 /// <see cref="CodeGenerationOptions.RepositoryDialects"/> = <c>["sqlserver", "sqlite"]</c>・
-/// <c>GenerateRepositories=true</c>・<c>GenerateEfCore=false</c>（EF Core はマルチターゲットと排他）・VO 有効で生成する。
+/// <c>GenerateRepositories=true</c>・<c>GenerateEfCoreRepositories=false</c>（EF Core はマルチターゲットと排他）・VO 有効で生成する。
 /// これにより「契約 1 回（<c>QuickER.Tests.GeneratedMultiTargetFixture</c>）＋方言別 namespace 実装
 /// （<c>.SqlServer</c> / <c>.Sqlite</c>）＋方言別 DI 拡張（AddGeneratedSqlServerRepositories /
 /// AddGeneratedSqliteRepositories・keyed 版）」を 1 つのアセンブリへ載せ、同一プロセスで両方言を keyed DI 解決する
@@ -52,7 +52,7 @@ public static class MultiTargetPortableFixtureDefinition
             GenerateMappers = true,
             GenerateRepositories = true,
             GenerateValueObjects = true,
-            GenerateEfCore = false,
+            GenerateEfCoreRepositories = false,
             RepositoryDialects = ["sqlserver", "sqlite"],
             SplitFilesByCategory = false,
         };

@@ -370,7 +370,7 @@ public class GeneratedFilePlannerTests
             RootNamespace = "Acme.App",
             SplitFilesByCategory = true,
             GenerateValueObjects = true,
-            GenerateEfCore = true,
+            GenerateEfCoreRepositories = true,
         };
 
         var plan = GeneratedFilePlanner.Plan(options);
@@ -448,7 +448,7 @@ public class GeneratedFilePlannerTests
             RootNamespace = "Acme.App",
             SplitFilesByCategory = true,
             GenerateRepositories = true,
-            GenerateEfCore = true,
+            GenerateEfCoreRepositories = true,
             UseRuntimePackages = true,
         };
 

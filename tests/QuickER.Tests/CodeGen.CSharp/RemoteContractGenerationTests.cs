@@ -175,7 +175,7 @@ public class RemoteContractGenerationTests
             {
                 RootNamespace = "Test.Ns",
                 GenerateRepositories = false,
-                GenerateEfCore = true,
+                GenerateEfCoreRepositories = true,
                 GenerateRemoteContracts = true,
             }
         );

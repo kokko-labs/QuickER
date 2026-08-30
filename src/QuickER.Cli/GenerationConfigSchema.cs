@@ -188,7 +188,7 @@ public static class GenerationConfigSchema
             "Mark unbounded binary columns (varbinary(max) / image / bytea, unbounded BLOB) with [UnboundedBinaryColumn] and exclude them from the QuickER Repository's SELECT / UPDATE (INSERT still writes all columns)."
         ),
         new(
-            "GenerateEfCore",
+            "GenerateEfCoreRepositories",
             "boolean",
             false,
             "Data access",
@@ -292,12 +292,12 @@ public static class GenerationConfigSchema
     public static IReadOnlyList<string> Rules { get; } =
     [
         "Entity classes are always generated; there is no key to toggle them.",
-        "A repository contract is generated when any of GenerateRepositories, GenerateEfCore, or GenerateInMemoryRepositories is true (all default to false); with none of them no data-access code is produced.",
+        "A repository contract is generated when any of GenerateRepositories, GenerateEfCoreRepositories, or GenerateInMemoryRepositories is true (all default to false); with none of them no data-access code is produced.",
         "GenerateMappers requires GenerateEditModels, because a Mapper converts between an Entity and its EditModel.",
-        "GenerateRepositories / GenerateEfCore / GenerateInMemoryRepositories require IncludeDataAnnotations, because the runtime reads [Table] / [Key] / [Column] by reflection.",
-        "Multi-target RepositoryDialects (two or more effective dialects) cannot be combined with GenerateEfCore.",
+        "GenerateRepositories / GenerateEfCoreRepositories / GenerateInMemoryRepositories require IncludeDataAnnotations, because the runtime reads [Table] / [Key] / [Column] by reflection.",
+        "Multi-target RepositoryDialects (two or more effective dialects) cannot be combined with GenerateEfCoreRepositories.",
         "GenerateRemoteServices implies GenerateRemoteContracts.",
-        "GenerateRemoteContracts / GenerateRemoteServices require a repository contract (GenerateRepositories, GenerateEfCore, or GenerateInMemoryRepositories); asking for them without one is a generation error.",
+        "GenerateRemoteContracts / GenerateRemoteServices require a repository contract (GenerateRepositories, GenerateEfCoreRepositories, or GenerateInMemoryRepositories); asking for them without one is a generation error.",
         "GenerateSyncSupport requires GenerateRepositories, exactly the two RepositoryDialects \"sqlserver\" and \"sqlite\", and at least one table with a single primary-key column.",
         "UseGuidKeyForStringPrimaryKey applies only when GenerateValueObjects is true and the primary key is a string.",
         "RepositoryDialects supports only \"sqlserver\" and \"sqlite\"; when null or empty, a single dialect is derived from the provider / diagram target DBMS.",

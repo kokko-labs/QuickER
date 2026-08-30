@@ -59,7 +59,7 @@ public static class ConcurrencyFixtureDefinition
             GenerateMappers = true,
             GenerateRepositories = true,
             GenerateValueObjects = true,
-            GenerateEfCore = true,
+            GenerateEfCoreRepositories = true,
             GenerateInMemoryRepositories = true,
             GenerateRemoteServices = true,
             RepositoryDialects = ["sqlserver"],

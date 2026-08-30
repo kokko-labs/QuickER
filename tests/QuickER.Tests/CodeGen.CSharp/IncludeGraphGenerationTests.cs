@@ -425,7 +425,7 @@ public class IncludeGraphGenerationTests
             new CodeGenerationOptions
             {
                 RootNamespace = "Test.Ns",
-                GenerateEfCore = efCore,
+                GenerateEfCoreRepositories = efCore,
                 GenerateInMemoryRepositories = inMemory,
             }
         );
@@ -448,7 +448,7 @@ public class IncludeGraphGenerationTests
             new CodeGenerationOptions
             {
                 RootNamespace = "Test.Ns",
-                GenerateEfCore = efCore,
+                GenerateEfCoreRepositories = efCore,
                 GenerateInMemoryRepositories = inMemory,
             }
         );

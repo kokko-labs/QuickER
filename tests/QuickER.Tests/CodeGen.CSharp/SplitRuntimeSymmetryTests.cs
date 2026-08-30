@@ -364,7 +364,7 @@ public class SplitRuntimeSymmetryTests
             GenerateEditModels = true,
             GenerateMappers = true,
             GenerateRepositories = false,
-            GenerateEfCore = true,
+            GenerateEfCoreRepositories = true,
             GenerateRemoteServices = true,
             GenerateValueObjects = true,
             IncludeDataAnnotations = true,

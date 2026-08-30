@@ -109,7 +109,11 @@ internal sealed class GenerationOptionSet
             "--exclude-unbounded-binary-columns",
             Strings.Cli_Opt_ExcludeUnboundedBinaryColumns
         );
-        AddBool("GenerateEfCore", "--generate-ef-core", Strings.Cli_Opt_GenerateEfCore);
+        AddBool(
+            "GenerateEfCoreRepositories",
+            "--generate-ef-core-repositories",
+            Strings.Cli_Opt_GenerateEfCoreRepositories
+        );
         AddBool(
             "GenerateInMemoryRepositories",
             "--generate-in-memory-repositories",

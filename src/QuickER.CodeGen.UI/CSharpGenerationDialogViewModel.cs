@@ -249,7 +249,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
 
     /// <summary>EF Core 用コード（DbContext＋EF Core 版 Repository）を生成するかどうか（DB アクセスの排他選択の一角）</summary>
     [ObservableProperty]
-    private bool _generateEfCore;
+    private bool _generateEfCoreRepositories;
 
     /// <summary>
     /// DB 非依存のインメモリ Repository 群（テスト用）を生成するかどうか（既定 OFF）。
@@ -379,7 +379,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     /// ランタイム（固定コード）を生成物に含めず、NuGet パッケージ QuickER.Runtime.* への参照で賄うかどうか
     /// </summary>
     /// <remarks>
-    /// EF Core（<see cref="GenerateEfCore"/>）とも併用できる（EF Core 固定 infra は QuickER.Runtime.EntityFrameworkCore
+    /// EF Core（<see cref="GenerateEfCoreRepositories"/>）とも併用できる（EF Core 固定 infra は QuickER.Runtime.EntityFrameworkCore
     /// パッケージが担い、スキーマ依存の QuickErDbContext・DI 登録は生成側に出力される）。常に操作可能。
     /// </remarks>
     [ObservableProperty]
@@ -415,7 +415,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     /// <summary>
     /// リモート対応の行を表示するかどうか（DB アクセスが「なし」以外＝Repository 契約が生成される場合のみ）
     /// </summary>
-    public bool ShowRemoteContracts => GenerateRepositories || GenerateEfCore;
+    public bool ShowRemoteContracts => GenerateRepositories || GenerateEfCoreRepositories;
 
     /// <summary>リモート対応チェックボックスのツールチップ</summary>
     public string RemoteContractsToolTip => Strings.CodeGen_RemoteContractsToolTip;
@@ -455,13 +455,13 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     /// <summary>DB アクセスコードを生成しない（既定）</summary>
     public bool DbAccessNone
     {
-        get => !GenerateRepositories && !GenerateEfCore;
+        get => !GenerateRepositories && !GenerateEfCoreRepositories;
         set
         {
             if (value)
             {
                 GenerateRepositories = false;
-                GenerateEfCore = false;
+                GenerateEfCoreRepositories = false;
             }
         }
     }
@@ -475,7 +475,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             if (value)
             {
                 GenerateRepositories = true;
-                GenerateEfCore = false;
+                GenerateEfCoreRepositories = false;
             }
         }
     }
@@ -483,12 +483,12 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     /// <summary>EF Core（DbContext＋EF Core 版 Repository）を生成する（方言非依存）</summary>
     public bool DbAccessEfCore
     {
-        get => GenerateEfCore;
+        get => GenerateEfCoreRepositories;
         set
         {
             if (value)
             {
-                GenerateEfCore = true;
+                GenerateEfCoreRepositories = true;
                 GenerateRepositories = false;
             }
         }
@@ -552,7 +552,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     /// </summary>
     public bool ShowRepositoryNamespace =>
         SplitFilesByCategory
-        && (GenerateRepositories || GenerateEfCore || GenerateInMemoryRepositories);
+        && (GenerateRepositories || GenerateEfCoreRepositories || GenerateInMemoryRepositories);
 
     /// <summary>ValueObject 名前空間欄を表示するか</summary>
     public bool ShowValueObjectNamespace => SplitFilesByCategory && GenerateValueObjects;
@@ -575,7 +575,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
         RaiseDerivedChanged();
     }
 
-    partial void OnGenerateEfCoreChanged(bool value)
+    partial void OnGenerateEfCoreRepositoriesChanged(bool value)
     {
         // EF Core はパッケージ参照モードと併用できるため、チェックの強制解除・無効化は行わない。
         // 参照案内（EF Core パッケージの追加）は生成後メッセージ・ヘッダで反映されるためプレビューのみ追従する。
@@ -841,7 +841,8 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             // DB アクセスは排他選択。両方 true の保存値（手編集等）はQuickER 版 Repository を優先する
             // （Repository ラジオは常時選択可のため、方言による無効化は行わない）
             GenerateRepositories = settings.GenerateRepositories;
-            GenerateEfCore = settings.GenerateEfCore && !GenerateRepositories;
+            GenerateEfCoreRepositories =
+                settings.GenerateEfCoreRepositories && !GenerateRepositories;
             // 対象 DB チェック（SQL Server / SQLite）は、保存値のリストが非空ならその内容で復元する。
             // 空リスト（未指定＝旧設定 / クリア）のときは ctor で図の方言から導出した初期値を保つ。
             if (settings.RepositoryDialects.Count > 0)
@@ -1009,7 +1010,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             GenerateMappers = GenerateMappers,
             GenerateRepositories = GenerateRepositories,
             RepositoryDialects = SelectedRepositoryDialects(),
-            GenerateEfCore = GenerateEfCore,
+            GenerateEfCoreRepositories = GenerateEfCoreRepositories,
             GenerateInMemoryRepositories = GenerateInMemoryRepositories,
             // 選択できない構成（片方言）では保存値をそのまま持ち越さず落とす（隠れた欄の値で生成が止まらないように）
             GenerateSyncSupport = ShowSyncSupport && GenerateSyncSupport,

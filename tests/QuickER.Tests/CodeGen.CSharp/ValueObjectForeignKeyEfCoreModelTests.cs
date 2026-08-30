@@ -105,7 +105,7 @@ public class ValueObjectForeignKeyEfCoreModelTests
         {
             RootNamespace = "Test.EfCoreModel",
             GenerateValueObjects = true,
-            GenerateEfCore = true,
+            GenerateEfCoreRepositories = true,
             // EF Core（DbContext・Fluent）だけを対象にし、ADO 実装は生成しない
             GenerateRepositories = false,
             GenerateEditModels = false,

@@ -182,7 +182,7 @@ public class RuntimePackageModeCompilationTests
             {
                 RootNamespace = "Sample.Domain",
                 GenerateRepositories = false,
-                GenerateEfCore = true,
+                GenerateEfCoreRepositories = true,
             }
         );
 
@@ -201,7 +201,7 @@ public class RuntimePackageModeCompilationTests
             {
                 RootNamespace = "Sample.Domain",
                 GenerateRepositories = true,
-                GenerateEfCore = true,
+                GenerateEfCoreRepositories = true,
             }
         );
 
@@ -355,7 +355,7 @@ public class RuntimePackageModeCompilationTests
                     RootNamespace = "Sample.Domain",
                     SplitFilesByCategory = split,
                     GenerateRepositories = false,
-                    GenerateEfCore = true,
+                    GenerateEfCoreRepositories = true,
                 }
             );
             data.Add(
@@ -365,7 +365,7 @@ public class RuntimePackageModeCompilationTests
                     RootNamespace = "Sample.Domain",
                     SplitFilesByCategory = split,
                     GenerateRepositories = true,
-                    GenerateEfCore = true,
+                    GenerateEfCoreRepositories = true,
                 }
             );
             // インメモリ×パッケージ参照モード（併用可能化の実証。インメモリ基盤の固定 infra は
@@ -433,7 +433,7 @@ public class RuntimePackageModeCompilationTests
                 RootNamespace = "Sample.Domain",
                 GenerateRepositories = true,
                 RepositoryDialects = ["sqlite"],
-                GenerateEfCore = true,
+                GenerateEfCoreRepositories = true,
                 GenerateRemoteContracts = true,
             }
         );

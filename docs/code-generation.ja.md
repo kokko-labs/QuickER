@@ -508,7 +508,7 @@ context が提供する操作（生ハンドルは公開しません）:
 | 実装先 | フック発火 | context の対応 |
 |---|---|---|
 | QuickER 版 Repository（SQL Server / SQLite） | 完全対応（After は各操作の直後） | `WriteBinaryColumnAsync` / `ExecuteSqlAsync` とも対応 |
-| EF Core 版 Repository（`GenerateEfCore`） | 対応（After は `SaveChanges` 後に一括） | `ExecuteSqlAsync` は対応・`WriteBinaryColumnAsync` は `NotSupportedException` |
+| EF Core 版 Repository（`GenerateEfCoreRepositories`） | 対応（After は `SaveChanges` 後に一括） | `ExecuteSqlAsync` は対応・`WriteBinaryColumnAsync` は `NotSupportedException` |
 | インメモリ（`GenerateInMemoryRepositories`） | 対応（擬似トランザクション） | `WriteBinaryColumnAsync` はストアへ・`ExecuteSqlAsync` は `NotSupportedException`。実トランザクションはありませんが copy-on-write で保存単位を all-or-nothing にします＝全書き込みをステージングし、最後のフェーズが成功したときだけ一括公開するため、**失敗した保存の書き込み（After が書いた blob を含む）は一度も見えず**、失敗の巻き添えで並行書き込みが消えることもありません |
 | リモート（`--generate-remote-services`） | **サーバー側の DI に登録したフックが発火**します | サーバー側の実体実装に準じます。Before でサーバーがスキップした行は保存応答に載って戻るため、クライアント側の `RowState` も据え置かれます（その行は未保存のまま残り、次回の保存で再試行されます）＝直結と同じ挙動です |
 
@@ -791,7 +791,7 @@ Task<bool> WritePayloadFromFileAsync(int id, string path, CancellationToken ct =
 - **長さ**: `source` が `CanSeek` なら自動（`Length - Position`）、そうでなければ `length` 引数が必須です（欠落は `ArgumentException`）。SQLite の `zeroblob` が書き込み前に長さを要求するためで、契約は方言中立に統一しています。
 - **楽観排他（rowversion 等）はスコープ外**です（生 SQL と同格の直接列操作）。
 - **INSERT 専用メソッドはありません**。新規行は「INSERT（blob は `null` または空）→ `Write{Column}Async` で本体を流し込む」の 2 段で書きます。
-- **EF Core モードでは使用できません**（`NotSupportedException`）。EF Core は方言非依存設計のため方言固有のストリーミングを持てません。QuickER 版 Repository を使うか、`partial` クラスで実装してください（`GenerateEfCore` と QuickER 版 Repository を併用する構成では、EF Core 版実装のみ例外になります）。
+- **EF Core モードでは使用できません**（`NotSupportedException`）。EF Core は方言非依存設計のため方言固有のストリーミングを持てません。QuickER 版 Repository を使うか、`partial` クラスで実装してください（`GenerateEfCoreRepositories` と QuickER 版 Repository を併用する構成では、EF Core 版実装のみ例外になります）。
 - **配置先**: リモート契約（`--generate-remote-contracts` / `--generate-remote-services`）が無効なら全機能面 `I{Entity}Repository` に直接載ります。有効な場合はリモート面 `I{Entity}RemoteRepository` へ移設されます（全機能面はリモート面を継承するので、どちらの構成でも利用コードは同じ・純粋に追加的）。ファイル糖衣もその対象インターフェイスに合わせます。リモートサービス（`--generate-remote-services`）を有効にすると HTTP で転送できます（後述の「バイナリ転送エンドポイント」）。
 
 `WithUnboundedBinary()` との使い分け:
@@ -803,7 +803,7 @@ Task<bool> WritePayloadFromFileAsync(int id, string path, CancellationToken ct =
 | 用途 | 除外列込みのエンティティが一時的に欲しい | 巨大 blob を DB⇔ファイル/ストリームで転送 |
 | 書き込み | 不可（取得のみ・更新は生 SQL） | `Write{Column}Async` で列単位に書ける |
 
-## EF Core モード（GenerateEfCore）
+## EF Core モード（GenerateEfCoreRepositories）
 
 既存 Entity をそのまま EF Core に載せる方言非依存の `QuickErDbContext` と、**同一 Repository インターフェイスの EF Core 版実装**を生成します。マイグレーションは範囲外で、スキーマ作成は DDL 生成の責務です（EF Core は既存スキーマへの接続専用）。
 
@@ -1221,7 +1221,7 @@ DB なしでユニットテストするためのインメモリ実装を追加�
 | `Runtime.Sync.g.cs`（`{Runtime}.Sync`） | `QuickER.Runtime.Sync` | 同期エンジン（`SyncEngine`・`SyncJournal`・`SyncTable<,>`・オプション／結果／競合の型。リモートサービス併用時は同期エンベロープと HTTP ソース基底） |
 | `Repositories.g.cs`・`Repositories.SqlServer.g.cs` / `Repositories.Sqlite.g.cs` / `Repositories.EntityFrameworkCore.g.cs` / `Repositories.InMemory.g.cs` / `Repositories.Sync.g.cs` / `Repositories.Http.g.cs`・`RemoteServer.g.cs` | —（対応パッケージなし＝常に生成） | スキーマ依存物のみ（per-entity の契約と実装・DI 登録・`QuickErDbContext` と Fluent 構成・射影 DTO・per-entity のエンドポイント（`GeneratedRemoteEndpoints`）・per-table の同期記述子とジャーナル記録デコレータ）。リモートサービス併用時、HTTP クライアント（`Http{Entity}RemoteRepository` と DI 登録）は専用の `Repositories.Http.g.cs` へ分かれ、契約ファイルはインターフェイスだけに保たれます（名前空間は契約と同一のため型名は変わりません） |
 
-`Runtime.g.cs` は常に出力され、それ以降のファイルは有効にした機能の分だけ出力されます（方言ファイルは QuickER 版 Repository を生成するとき・EF Core ファイルは `GenerateEfCore`・インメモリファイルは `GenerateInMemoryRepositories`・ASP.NET Core ファイルは `GenerateRemoteServices`・同期ファイルは `GenerateSyncSupport` のときだけ）＝参照すべきパッケージの集合とそのまま一致します。
+`Runtime.g.cs` は常に出力され、それ以降のファイルは有効にした機能の分だけ出力されます（方言ファイルは QuickER 版 Repository を生成するとき・EF Core ファイルは `GenerateEfCoreRepositories`・インメモリファイルは `GenerateInMemoryRepositories`・ASP.NET Core ファイルは `GenerateRemoteServices`・同期ファイルは `GenerateSyncSupport` のときだけ）＝参照すべきパッケージの集合とそのまま一致します。
 
 この構成のため、`--use-runtime-packages` の意味は 1 つに収まります。**`Runtime*.g.cs` を 1 本も出力せず、生成コードの `using` が `{Runtime}…` ではなく固定のパッケージ名前空間（`QuickER.Runtime`・`QuickER.Runtime.SqlServer` …）を指すようになる**、それだけです。`Repositories*` 側はモードの ON / OFF で内容が変わりません。
 
