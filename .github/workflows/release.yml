@@ -77,20 +77,34 @@ jobs:
         # Velopack を更新するときは csproj とここを同時に上げる
         run: dotnet tool install --global vpk --version 1.2.0
 
-      # 差分更新パッケージを生成するため既存リリースの資産を取得する。リポジトリ未公開の間や
-      # 初回リリースでは資産が存在せず失敗するため、ワークフロー全体を止めないよう許容する。
-      # 副作用: 2 回目以降のリリースでこの取得が一時的要因で失敗しても緑のまま進み、その回は
-      # 差分更新パッケージが生成されずフル更新のみになる（利用者のダウンロードが太るだけで動作は正常）
+      # 差分更新パッケージの生成に使う既存リリースの有無を、チャンネルの更新メタ
+      # （releases.win-*.json）が既存リリースの資産に存在するかで明示判定する。
+      # 従来この判定はなく取得ステップを continue-on-error で許容していたが、その形は
+      # 2 回目以降のリリースで取得が一時的要因で失敗しても緑のまま進み、差分更新パッケージの
+      # 無いリリースが静かに出る穴だった（v0.1.0 リリース完了＝「初回は資産が無い」許容の
+      # 存在理由が消えた時点で厳格化）。判定後は、資産があるのに取得に失敗したら
+      # ワークフロー失敗・無ければ取得を明示スキップ（フル更新のみの初回相当）となる
+      - name: 既存リリースの有無を判定（差分更新用）
+        id: existing
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $assets = @(gh api "/repos/${{ github.repository }}/releases" --paginate --jq '.[].assets[].name')
+          $full = $assets -contains 'releases.win-full.json'
+          $lite = $assets -contains 'releases.win-lite.json'
+          "full=$($full.ToString().ToLower())" >> $env:GITHUB_OUTPUT
+          "lite=$($lite.ToString().ToLower())" >> $env:GITHUB_OUTPUT
+          Write-Host "既存リリースの更新メタ: win-full=$full / win-lite=$lite"
+
       - name: 既存リリースを取得（win-full・差分更新用）
-        continue-on-error: true
+        if: ${{ steps.existing.outputs.full == 'true' }}
         run: vpk download github --repoUrl https://github.com/${{ github.repository }} --channel win-full --outputDir ${{ runner.temp }}/releases-full
 
       - name: win-full を vpk pack（Setup.exe + Portable zip）
         run: vpk pack --packId QuickER --packVersion ${{ steps.version.outputs.version }} --packDir ${{ runner.temp }}/publish-full --mainExe QuickER.exe --icon assets/QuickER.ico --channel win-full --outputDir ${{ runner.temp }}/releases-full
 
-      # 失敗許容の理由と副作用は win-full 側のコメントを参照
       - name: 既存リリースを取得（win-lite・差分更新用）
-        continue-on-error: true
+        if: ${{ steps.existing.outputs.lite == 'true' }}
         run: vpk download github --repoUrl https://github.com/${{ github.repository }} --channel win-lite --outputDir ${{ runner.temp }}/releases-lite
 
       - name: win-lite を vpk pack（Setup.exe + Portable zip）
