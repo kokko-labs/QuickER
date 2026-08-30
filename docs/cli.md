@@ -12,7 +12,7 @@ The QuickER CLI provides subcommands for generating code (`generate` / `scaffold
 
 The CLI display language follows the OS language setting (Japanese / English).
 
-Once published to NuGet, you can install it with `dotnet tool install --global QuickER.Cli`. Until then, run it from source:
+Install it with `dotnet tool install --global QuickER.Cli`. To run from source instead:
 
 ```powershell
 dotnet run --project src/QuickER.Cli -- generate --schema diagram.json --out ./Generated

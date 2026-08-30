@@ -65,6 +65,7 @@
   | Claude Code | 作業フォルダを起点にファイル編集（`Edit` / `Write` / `MultiEdit`） | `Bash` に制限なし（任意のコマンドを実行できます） |
 
 - API キー方式は QuickER が制限付きのツールだけを与える設計で、ビルド時も MSBuild の自動 import（`Directory.Build.props` など）を無効化して実行します。エージェント型（Codex / Claude Code / Copilot）は、あなたが導入した CLI をその CLI 自身の権限モデルで動かすため、QuickER 側では制限しません。信頼できないスキーマや不特定の入力からモックを生成する場合は、API キー方式を選ぶか、隔離した環境で実行してください
+
 ## ライセンス注記
 
 AI 機能群（チャット・モック生成＝`QuickER.AI` / `AI.UI` / `AI.Chat` / `AI.Mock`）には [PolyForm Noncommercial 1.0.0＋追加許諾](../LICENSE-NC.md)が適用され、この追加許諾により**現在の配布物は商用利用を含め全員無料**です。平易な解説は [LICENSING.ja.md](../LICENSING.ja.md)、正式な条件は [LICENSE](../LICENSE) と [LICENSE-NC.md](../LICENSE-NC.md) を参照してください。

@@ -12,7 +12,7 @@ QuickER の CLI は、コード生成用のサブコマンド（`generate` / `sc
 
 CLI の表示言語は OS の言語設定に従います（日本語 / 英語）。
 
-NuGet 公開後は `dotnet tool install --global QuickER.Cli` でインストールできます。未公開の間はソースから実行してください:
+`dotnet tool install --global QuickER.Cli` でインストールできます。ソースから実行する場合:
 
 ```powershell
 dotnet run --project src/QuickER.Cli -- generate --schema diagram.json --out ./Generated

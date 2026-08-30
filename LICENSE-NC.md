@@ -1,6 +1,6 @@
 # LICENSE-NC — Scope of the PolyForm Noncommercial License 1.0.0
 
-QuickER-specific terms version 1.0 (2026-07-31). This file is self-contained: the covered scope, the definitions, and the additional grants below are the complete QuickER-specific terms, followed by the unmodified license text.
+Copyright (c) 2026 kokko-labs. QuickER-specific terms version 1.0 (2026-07-31). This file is self-contained: the covered scope, the definitions, and the additional grants below are the complete QuickER-specific terms, followed by the unmodified license text.
 
 The license in this file (the PolyForm Noncommercial License 1.0.0) applies **only to the following projects (directories)** in this repository. All other parts are covered by [LICENSE](https://github.com/kokko-labs/QuickER/blob/main/LICENSE) (the MIT License).
 

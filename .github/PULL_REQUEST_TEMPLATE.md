@@ -1,4 +1,5 @@
 <!-- PR を作る前に、まず Issue で方針の相談をお願いします（typo 等の小修正は不要）。詳細は CONTRIBUTING.md 参照 -->
+<!-- English is welcome — feel free to write in English. -->
 
 ## 関連 Issue
 

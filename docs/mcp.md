@@ -31,7 +31,7 @@ claude mcp add quicker -- quicker mcp
 
 ### Other stdio clients
 
-Any MCP client that supports the stdio transport can use the server. Configure it to launch the command `quicker` with the single argument `mcp` (Codex, for example, takes the same command/args pair in its own MCP-server configuration). This requires the `quicker` command to be on `PATH` — see [installing the CLI](cli.md). Until the CLI is published to NuGet, build the CLI once (`dotnet build QuickER.slnx`) and point the command at the built assembly instead (`command: "dotnet"`, `args: ["<repo>/src/QuickER.Cli/bin/Debug/net10.0/QuickER.Cli.dll", "mcp"]`). Do not use `dotnet run` here: its build output goes to stdout, which is the JSON-RPC protocol channel.
+Any MCP client that supports the stdio transport can use the server. Configure it to launch the command `quicker` with the single argument `mcp` (Codex, for example, takes the same command/args pair in its own MCP-server configuration). This requires the `quicker` command to be on `PATH` — see [installing the CLI](cli.md). To run from source instead, build the CLI once (`dotnet build QuickER.slnx`) and point the command at the built assembly (`command: "dotnet"`, `args: ["<repo>/src/QuickER.Cli/bin/Debug/net10.0/QuickER.Cli.dll", "mcp"]`). Do not use `dotnet run` here: its build output goes to stdout, which is the JSON-RPC protocol channel.
 
 ## Tools
 
