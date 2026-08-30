@@ -30,7 +30,7 @@ Generated Output is your work product. The licensor grants everyone a perpetual,
 In addition to the PolyForm Noncommercial License 1.0.0 below, the licensor grants the following additional permissions for the Covered Projects. Each grant applies per Released Version: once a Released Version has been made available with a grant in effect, that grant remains in force for that version permanently and is never withdrawn retroactively. While a grant is in effect, it also applies to the source repository as made available by the licensor.
 
 1. **Basic Code Generation — permanent.** Everyone is granted, permanently and for commercial purposes as well, a license to use Basic Code Generation.
-2. **All other features — interim.** Everyone is currently granted a license to use the software for commercial purposes as well, including the AI features and the DB-access code generation (Repository (QuickER) / EF Core / multi-target). This interim grant may be withdrawn **only for future versions**; any such change will be announced publicly in advance, and existing users will be given a transition period.
+2. **All other features — interim.** Everyone is currently granted a license to use the software for commercial purposes as well, including the AI features and the DB-access code generation (the QuickER Repository / the EF Core Repository / multi-target output). This interim grant may be withdrawn **only for future versions**; any such change will be announced publicly in advance, and existing users will be given a transition period.
 
 These additional grants cover **use** of the software. Distribution of, and changes and new works based on, the software beyond noncommercial purposes remain governed by the PolyForm Noncommercial License 1.0.0 below.
 
