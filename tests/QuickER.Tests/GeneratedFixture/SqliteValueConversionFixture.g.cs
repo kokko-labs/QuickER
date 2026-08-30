@@ -285,7 +285,7 @@ public interface IValueObject<TSelf> : IValueObject
     /// </para>
     /// <para>
     /// To accept a shape of the type's own - a name for an enumeration-like type, say - implement
-    /// <see cref="TryCreateFromCustom"/> instead of replacing this method: the shared implementation consults that hook
+    /// <see cref="TryConvertCustomInput"/> instead of replacing this method: the shared implementation consults that hook
     /// first, so the custom shape is honored no matter how this method is called. Never implement this member
     /// yourself, a hand-written value object included - a call spelled with the concrete type name binds to the
     /// inherited shared implementation, so a re-implementation is silently skipped on that call shape.
@@ -318,12 +318,14 @@ public interface IValueObject<TSelf> : IValueObject
     /// <para>
     /// Never call <c>TryCreateFrom</c> / <c>CreateFrom</c> from inside: they consult this hook, so the call recurses
     /// with no way to catch the resulting stack overflow. Look the value up in a table of declared instances instead.
+    /// And do not let an exception escape - <c>TryCreateFrom</c> reports every failure through its return value, and
+    /// an exception thrown here rides straight through that contract.
     /// </para>
     /// </remarks>
     /// <param name="raw">The value read from the source (never null; absent values are handled before the hook).</param>
     /// <param name="provider">The culture the text is written in; <c>null</c> uses the invariant culture.</param>
     /// <param name="result">The value object, or null when the hook does not handle this value.</param>
-    static virtual bool TryCreateFromCustom(object raw, IFormatProvider? provider, out TSelf? result)
+    static virtual bool TryConvertCustomInput(object raw, IFormatProvider? provider, out TSelf? result)
     {
         result = default;
         return false;
@@ -491,7 +493,7 @@ public abstract partial class ValueObjectBase<TSelf, TValue> : IValueObject, IEq
 
     /// <summary>Converts a value from outside the model and creates the value object from it, without throwing (an absent value succeeds with a null result).</summary>
     /// <remarks>
-    /// A shape the type accepts of its own is consulted first (<see cref="IValueObject{TSelf}.TryCreateFromCustom"/>), so a
+    /// A shape the type accepts of its own is consulted first (<see cref="IValueObject{TSelf}.TryConvertCustomInput"/>), so a
     /// custom shape is honored no matter how this method is called. The conversion to the underlying type is
     /// <see cref="RawValueConverter.ConvertInput"/>, so text written for a culture is read in that culture and numeric text
     /// may carry group separators. Everything past the conversion is the ordinary <c>TryCreate</c>, so the type's own
@@ -518,7 +520,7 @@ public abstract partial class ValueObjectBase<TSelf, TValue> : IValueObject, IEq
         }
 
         // A shape the type accepts of its own (a name for an enumeration-like type, say) wins over the ordinary conversion.
-        if (TSelf.TryCreateFromCustom(raw, provider, out var custom) && custom is not null)
+        if (TSelf.TryConvertCustomInput(raw, provider, out var custom) && custom is not null)
         {
             result = custom;
             errors = Array.Empty<string>();
@@ -966,17 +968,17 @@ public sealed partial class DurationValue
     /// <summary>Declared-instance lookup for an enumeration-like value object (partial; every value is built as a new instance when not implemented). Look the value up in a static table without allocating - this runs on every creation - and never call Create / TryCreate / TryCreateFrom from inside: every creation path runs through this hook and the call would recurse.</summary>
     static partial void GetDefinedInstance(TimeSpan value, ref DurationValue? defined);
 
-    /// <summary>Hands the input shapes claimed by the CreateFromCustom partial hook to TryCreateFrom / CreateFrom, ahead of the ordinary conversion.</summary>
-    static bool IValueObject<DurationValue>.TryCreateFromCustom(object raw, IFormatProvider? provider, out DurationValue? result)
+    /// <summary>Hands the input shapes claimed by the ConvertCustomInput partial hook to TryCreateFrom / CreateFrom, ahead of the ordinary conversion.</summary>
+    static bool IValueObject<DurationValue>.TryConvertCustomInput(object raw, IFormatProvider? provider, out DurationValue? result)
     {
         DurationValue? custom = null;
-        CreateFromCustom(raw, provider, ref custom);
+        ConvertCustomInput(raw, provider, ref custom);
         result = custom;
         return custom is not null;
     }
 
-    /// <summary>Custom input shape for TryCreateFrom / CreateFrom - a name for an enumeration-like value object, say (partial; only the ordinary conversion applies when not implemented). Set result to claim the value; leave it null for anything not handled so the ordinary conversion runs. Never call TryCreateFrom / CreateFrom from inside: they consult this hook and the call would recurse.</summary>
-    static partial void CreateFromCustom(object raw, IFormatProvider? provider, ref DurationValue? result);
+    /// <summary>Custom input shape for TryCreateFrom / CreateFrom - a name for an enumeration-like value object, say (partial; only the ordinary conversion applies when not implemented). Set result to claim the value; leave it null for anything not handled so the ordinary conversion runs. Never call TryCreateFrom / CreateFrom from inside (they consult this hook and the call would recurse), and do not throw - TryCreateFrom reports failures through its return value, and an exception here rides straight through that contract.</summary>
+    static partial void ConvertCustomInput(object raw, IFormatProvider? provider, ref DurationValue? result);
 
     /// <summary>Gets the display name of this value object (used in error messages and similar). Defaults to the column description, or the property name when unset. Can be replaced through GeneratedDisplayNames.Resolve (all display names at once) or CustomizeDisplayName (this value object only).</summary>
     public static string DisplayName
@@ -1043,17 +1045,17 @@ public sealed partial class LabelValue
     /// <summary>Declared-instance lookup for an enumeration-like value object (partial; every value is built as a new instance when not implemented). Look the value up in a static table without allocating - this runs on every creation - and never call Create / TryCreate / TryCreateFrom from inside: every creation path runs through this hook and the call would recurse.</summary>
     static partial void GetDefinedInstance(string value, ref LabelValue? defined);
 
-    /// <summary>Hands the input shapes claimed by the CreateFromCustom partial hook to TryCreateFrom / CreateFrom, ahead of the ordinary conversion.</summary>
-    static bool IValueObject<LabelValue>.TryCreateFromCustom(object raw, IFormatProvider? provider, out LabelValue? result)
+    /// <summary>Hands the input shapes claimed by the ConvertCustomInput partial hook to TryCreateFrom / CreateFrom, ahead of the ordinary conversion.</summary>
+    static bool IValueObject<LabelValue>.TryConvertCustomInput(object raw, IFormatProvider? provider, out LabelValue? result)
     {
         LabelValue? custom = null;
-        CreateFromCustom(raw, provider, ref custom);
+        ConvertCustomInput(raw, provider, ref custom);
         result = custom;
         return custom is not null;
     }
 
-    /// <summary>Custom input shape for TryCreateFrom / CreateFrom - a name for an enumeration-like value object, say (partial; only the ordinary conversion applies when not implemented). Set result to claim the value; leave it null for anything not handled so the ordinary conversion runs. Never call TryCreateFrom / CreateFrom from inside: they consult this hook and the call would recurse.</summary>
-    static partial void CreateFromCustom(object raw, IFormatProvider? provider, ref LabelValue? result);
+    /// <summary>Custom input shape for TryCreateFrom / CreateFrom - a name for an enumeration-like value object, say (partial; only the ordinary conversion applies when not implemented). Set result to claim the value; leave it null for anything not handled so the ordinary conversion runs. Never call TryCreateFrom / CreateFrom from inside (they consult this hook and the call would recurse), and do not throw - TryCreateFrom reports failures through its return value, and an exception here rides straight through that contract.</summary>
+    static partial void ConvertCustomInput(object raw, IFormatProvider? provider, ref LabelValue? result);
 
     /// <summary>Gets the display name of this value object (used in error messages and similar). Defaults to the column description, or the property name when unset. Can be replaced through GeneratedDisplayNames.Resolve (all display names at once) or CustomizeDisplayName (this value object only).</summary>
     public static string DisplayName
@@ -1114,17 +1116,17 @@ public sealed partial class OccurredAtValue
     /// <summary>Declared-instance lookup for an enumeration-like value object (partial; every value is built as a new instance when not implemented). Look the value up in a static table without allocating - this runs on every creation - and never call Create / TryCreate / TryCreateFrom from inside: every creation path runs through this hook and the call would recurse.</summary>
     static partial void GetDefinedInstance(DateTimeOffset value, ref OccurredAtValue? defined);
 
-    /// <summary>Hands the input shapes claimed by the CreateFromCustom partial hook to TryCreateFrom / CreateFrom, ahead of the ordinary conversion.</summary>
-    static bool IValueObject<OccurredAtValue>.TryCreateFromCustom(object raw, IFormatProvider? provider, out OccurredAtValue? result)
+    /// <summary>Hands the input shapes claimed by the ConvertCustomInput partial hook to TryCreateFrom / CreateFrom, ahead of the ordinary conversion.</summary>
+    static bool IValueObject<OccurredAtValue>.TryConvertCustomInput(object raw, IFormatProvider? provider, out OccurredAtValue? result)
     {
         OccurredAtValue? custom = null;
-        CreateFromCustom(raw, provider, ref custom);
+        ConvertCustomInput(raw, provider, ref custom);
         result = custom;
         return custom is not null;
     }
 
-    /// <summary>Custom input shape for TryCreateFrom / CreateFrom - a name for an enumeration-like value object, say (partial; only the ordinary conversion applies when not implemented). Set result to claim the value; leave it null for anything not handled so the ordinary conversion runs. Never call TryCreateFrom / CreateFrom from inside: they consult this hook and the call would recurse.</summary>
-    static partial void CreateFromCustom(object raw, IFormatProvider? provider, ref OccurredAtValue? result);
+    /// <summary>Custom input shape for TryCreateFrom / CreateFrom - a name for an enumeration-like value object, say (partial; only the ordinary conversion applies when not implemented). Set result to claim the value; leave it null for anything not handled so the ordinary conversion runs. Never call TryCreateFrom / CreateFrom from inside (they consult this hook and the call would recurse), and do not throw - TryCreateFrom reports failures through its return value, and an exception here rides straight through that contract.</summary>
+    static partial void ConvertCustomInput(object raw, IFormatProvider? provider, ref OccurredAtValue? result);
 
     /// <summary>Gets the display name of this value object (used in error messages and similar). Defaults to the column description, or the property name when unset. Can be replaced through GeneratedDisplayNames.Resolve (all display names at once) or CustomizeDisplayName (this value object only).</summary>
     public static string DisplayName
@@ -1175,17 +1177,17 @@ public sealed partial class ProbeIdValue
     /// <summary>Declared-instance lookup for an enumeration-like value object (partial; every value is built as a new instance when not implemented). Look the value up in a static table without allocating - this runs on every creation - and never call Create / TryCreate / TryCreateFrom from inside: every creation path runs through this hook and the call would recurse.</summary>
     static partial void GetDefinedInstance(int value, ref ProbeIdValue? defined);
 
-    /// <summary>Hands the input shapes claimed by the CreateFromCustom partial hook to TryCreateFrom / CreateFrom, ahead of the ordinary conversion.</summary>
-    static bool IValueObject<ProbeIdValue>.TryCreateFromCustom(object raw, IFormatProvider? provider, out ProbeIdValue? result)
+    /// <summary>Hands the input shapes claimed by the ConvertCustomInput partial hook to TryCreateFrom / CreateFrom, ahead of the ordinary conversion.</summary>
+    static bool IValueObject<ProbeIdValue>.TryConvertCustomInput(object raw, IFormatProvider? provider, out ProbeIdValue? result)
     {
         ProbeIdValue? custom = null;
-        CreateFromCustom(raw, provider, ref custom);
+        ConvertCustomInput(raw, provider, ref custom);
         result = custom;
         return custom is not null;
     }
 
-    /// <summary>Custom input shape for TryCreateFrom / CreateFrom - a name for an enumeration-like value object, say (partial; only the ordinary conversion applies when not implemented). Set result to claim the value; leave it null for anything not handled so the ordinary conversion runs. Never call TryCreateFrom / CreateFrom from inside: they consult this hook and the call would recurse.</summary>
-    static partial void CreateFromCustom(object raw, IFormatProvider? provider, ref ProbeIdValue? result);
+    /// <summary>Custom input shape for TryCreateFrom / CreateFrom - a name for an enumeration-like value object, say (partial; only the ordinary conversion applies when not implemented). Set result to claim the value; leave it null for anything not handled so the ordinary conversion runs. Never call TryCreateFrom / CreateFrom from inside (they consult this hook and the call would recurse), and do not throw - TryCreateFrom reports failures through its return value, and an exception here rides straight through that contract.</summary>
+    static partial void ConvertCustomInput(object raw, IFormatProvider? provider, ref ProbeIdValue? result);
 
     /// <summary>Gets the display name of this value object (used in error messages and similar). Defaults to the column description, or the property name when unset. Can be replaced through GeneratedDisplayNames.Resolve (all display names at once) or CustomizeDisplayName (this value object only).</summary>
     public static string DisplayName
@@ -1236,17 +1238,17 @@ public sealed partial class SessionIdValue
     /// <summary>Declared-instance lookup for an enumeration-like value object (partial; every value is built as a new instance when not implemented). Look the value up in a static table without allocating - this runs on every creation - and never call Create / TryCreate / TryCreateFrom from inside: every creation path runs through this hook and the call would recurse.</summary>
     static partial void GetDefinedInstance(Guid value, ref SessionIdValue? defined);
 
-    /// <summary>Hands the input shapes claimed by the CreateFromCustom partial hook to TryCreateFrom / CreateFrom, ahead of the ordinary conversion.</summary>
-    static bool IValueObject<SessionIdValue>.TryCreateFromCustom(object raw, IFormatProvider? provider, out SessionIdValue? result)
+    /// <summary>Hands the input shapes claimed by the ConvertCustomInput partial hook to TryCreateFrom / CreateFrom, ahead of the ordinary conversion.</summary>
+    static bool IValueObject<SessionIdValue>.TryConvertCustomInput(object raw, IFormatProvider? provider, out SessionIdValue? result)
     {
         SessionIdValue? custom = null;
-        CreateFromCustom(raw, provider, ref custom);
+        ConvertCustomInput(raw, provider, ref custom);
         result = custom;
         return custom is not null;
     }
 
-    /// <summary>Custom input shape for TryCreateFrom / CreateFrom - a name for an enumeration-like value object, say (partial; only the ordinary conversion applies when not implemented). Set result to claim the value; leave it null for anything not handled so the ordinary conversion runs. Never call TryCreateFrom / CreateFrom from inside: they consult this hook and the call would recurse.</summary>
-    static partial void CreateFromCustom(object raw, IFormatProvider? provider, ref SessionIdValue? result);
+    /// <summary>Custom input shape for TryCreateFrom / CreateFrom - a name for an enumeration-like value object, say (partial; only the ordinary conversion applies when not implemented). Set result to claim the value; leave it null for anything not handled so the ordinary conversion runs. Never call TryCreateFrom / CreateFrom from inside (they consult this hook and the call would recurse), and do not throw - TryCreateFrom reports failures through its return value, and an exception here rides straight through that contract.</summary>
+    static partial void ConvertCustomInput(object raw, IFormatProvider? provider, ref SessionIdValue? result);
 
     /// <summary>Gets the display name of this value object (used in error messages and similar). Defaults to the column description, or the property name when unset. Can be replaced through GeneratedDisplayNames.Resolve (all display names at once) or CustomizeDisplayName (this value object only).</summary>
     public static string DisplayName

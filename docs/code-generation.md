@@ -205,10 +205,10 @@ public sealed partial class ModeValue
 
 Because the hook sits in front of `New` rather than inside it, **a row read from the database and a value restored from JSON return the declared instance too**, so an instance missing its extra state (`ModeName` here) never gets into circulation.
 
-To create from a name instead of the value, implement the `CreateFromCustom` partial hook. `TryCreateFrom` / `CreateFrom` consult it ahead of the ordinary conversion - on every call shape, the generic import path and a call spelled with the concrete type name alike. Set the result to claim the value; anything left null falls through to the ordinary conversion, which keeps `2` working:
+To create from a name instead of the value, implement the `ConvertCustomInput` partial hook. `TryCreateFrom` / `CreateFrom` consult it ahead of the ordinary conversion - on every call shape, the generic import path and a call spelled with the concrete type name alike. Set the result to claim the value; anything left null falls through to the ordinary conversion, which keeps `2` working:
 
 ```csharp
-static partial void CreateFromCustom(object raw, IFormatProvider? provider, ref ModeValue? result)
+static partial void ConvertCustomInput(object raw, IFormatProvider? provider, ref ModeValue? result)
 {
     if (raw is string name)
     {
@@ -217,10 +217,10 @@ static partial void CreateFromCustom(object raw, IFormatProvider? provider, ref 
 }
 ```
 
-The generic import code from the previous section (`ReadCell<ModeValue>`) now accepts both `"Edit"` and `2`. A hand-written value object implements the interface hook `TryCreateFromCustom` directly instead (do not call `TryCreateFrom` / `CreateFrom` from inside either form - they consult the hook, so the call would recurse):
+The generic import code from the previous section (`ReadCell<ModeValue>`) now accepts both `"Edit"` and `2`. A hand-written value object implements the interface hook `TryConvertCustomInput` directly instead. In either form, do not call `TryCreateFrom` / `CreateFrom` from inside (they consult the hook, so the call would recurse), and do not throw - `TryCreateFrom` reports failures through its return value, so an exception would ride straight through that contract:
 
 ```csharp
-static bool IValueObject<DataAccessMode>.TryCreateFromCustom(
+static bool IValueObject<DataAccessMode>.TryConvertCustomInput(
     object raw, IFormatProvider? provider, out DataAccessMode? result)
 {
     result = raw is string name ? GetList().FirstOrDefault(x => x.ModeName == name) : null;

@@ -365,7 +365,7 @@ public interface IValueObject<TSelf> : IValueObject
     /// </para>
     /// <para>
     /// To accept a shape of the type's own - a name for an enumeration-like type, say - implement
-    /// <see cref="TryCreateFromCustom"/> instead of replacing this method: the shared implementation consults that hook
+    /// <see cref="TryConvertCustomInput"/> instead of replacing this method: the shared implementation consults that hook
     /// first, so the custom shape is honored no matter how this method is called. Never implement this member
     /// yourself, a hand-written value object included - a call spelled with the concrete type name binds to the
     /// inherited shared implementation, so a re-implementation is silently skipped on that call shape.
@@ -398,12 +398,14 @@ public interface IValueObject<TSelf> : IValueObject
     /// <para>
     /// Never call <c>TryCreateFrom</c> / <c>CreateFrom</c> from inside: they consult this hook, so the call recurses
     /// with no way to catch the resulting stack overflow. Look the value up in a table of declared instances instead.
+    /// And do not let an exception escape - <c>TryCreateFrom</c> reports every failure through its return value, and
+    /// an exception thrown here rides straight through that contract.
     /// </para>
     /// </remarks>
     /// <param name="raw">The value read from the source (never null; absent values are handled before the hook).</param>
     /// <param name="provider">The culture the text is written in; <c>null</c> uses the invariant culture.</param>
     /// <param name="result">The value object, or null when the hook does not handle this value.</param>
-    static virtual bool TryCreateFromCustom(object raw, IFormatProvider? provider, out TSelf? result)
+    static virtual bool TryConvertCustomInput(object raw, IFormatProvider? provider, out TSelf? result)
     {
         result = default;
         return false;
@@ -571,7 +573,7 @@ public abstract partial class ValueObjectBase<TSelf, TValue> : IValueObject, IEq
 
     /// <summary>Converts a value from outside the model and creates the value object from it, without throwing (an absent value succeeds with a null result).</summary>
     /// <remarks>
-    /// A shape the type accepts of its own is consulted first (<see cref="IValueObject{TSelf}.TryCreateFromCustom"/>), so a
+    /// A shape the type accepts of its own is consulted first (<see cref="IValueObject{TSelf}.TryConvertCustomInput"/>), so a
     /// custom shape is honored no matter how this method is called. The conversion to the underlying type is
     /// <see cref="RawValueConverter.ConvertInput"/>, so text written for a culture is read in that culture and numeric text
     /// may carry group separators. Everything past the conversion is the ordinary <c>TryCreate</c>, so the type's own
@@ -598,7 +600,7 @@ public abstract partial class ValueObjectBase<TSelf, TValue> : IValueObject, IEq
         }
 
         // A shape the type accepts of its own (a name for an enumeration-like type, say) wins over the ordinary conversion.
-        if (TSelf.TryCreateFromCustom(raw, provider, out var custom) && custom is not null)
+        if (TSelf.TryConvertCustomInput(raw, provider, out var custom) && custom is not null)
         {
             result = custom;
             errors = Array.Empty<string>();
