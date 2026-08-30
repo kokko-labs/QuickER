@@ -36,7 +36,8 @@
             "IsNullable": true,
             "Description": "Contact email address (optional)"
           }
-        ]
+        ],
+        "UniqueConstraints": []
       },
       {
         "Id": "e2222222-0000-0000-0000-000000000001",
@@ -71,7 +72,8 @@
             "IsNullable": false,
             "Description": "Unit sales price in the product master"
           }
-        ]
+        ],
+        "UniqueConstraints": []
       },
       {
         "Id": "e3333333-0000-0000-0000-000000000001",
@@ -115,7 +117,8 @@
             "IsNullable": true,
             "Description": "Memo attached to the order (optional)"
           }
-        ]
+        ],
+        "UniqueConstraints": []
       },
       {
         "Id": "e4444444-0000-0000-0000-000000000001",
@@ -168,7 +171,8 @@
             "IsNullable": false,
             "Description": "Unit price at order time (kept on the order line so product-master price revisions do not affect it)"
           }
-        ]
+        ],
+        "UniqueConstraints": []
       }
     ],
     "Relationships": [
@@ -223,7 +227,7 @@
         "Id": "a5555555-0000-0000-0000-000000000001",
         "EntityId": "e3333333-0000-0000-0000-000000000001",
         "Name": "GetByCustomer",
-        "Description": "Searches a customer's orders, newest first (order ID descending), with paging",
+        "Description": "Searches a customer\u0027s orders, newest first (order ID descending), with paging",
         "Returns": "List",
         "Parameters": [
           {
@@ -248,7 +252,7 @@
         "Id": "a5555555-0000-0000-0000-000000000002",
         "EntityId": "e3333333-0000-0000-0000-000000000001",
         "Name": "GetSummaries",
-        "Description": "Gets a customer's order summaries (order ID, ordered-at, memo), newest first (projection DTO)",
+        "Description": "Gets a customer\u0027s order summaries (order ID, ordered-at, memo), newest first (projection DTO)",
         "Returns": "Projection",
         "Parameters": [
           {
