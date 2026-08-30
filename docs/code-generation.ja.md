@@ -205,10 +205,10 @@ public sealed partial class ModeValue
 
 フックは `New` ではなく `Create` / `TryCreate` の側に割り込むため、**DB から読んだ行も JSON から復元した値も定義済みインスタンスになります**（`ModeName` のような付随する状態が欠けたインスタンスが出回りません）。
 
-値の代わりに名前で作れるようにしたいときは partial フック `CreateFromCustom` を実装します。`TryCreateFrom` / `CreateFrom` は通常の変換より先にこのフックを照会します——ジェネリックな取り込み経路でも、具象型名を書いた呼び出しでも同じです。受け付ける値には result を設定し、扱わない形は null のままにすれば通常の変換に落ちるため、`2` はそのまま動きます。
+値の代わりに名前で作れるようにしたいときは partial フック `ConvertCustomInput` を実装します。`TryCreateFrom` / `CreateFrom` は通常の変換より先にこのフックを照会します——ジェネリックな取り込み経路でも、具象型名を書いた呼び出しでも同じです。受け付ける値には result を設定し、扱わない形は null のままにすれば通常の変換に落ちるため、`2` はそのまま動きます。
 
 ```csharp
-static partial void CreateFromCustom(object raw, IFormatProvider? provider, ref ModeValue? result)
+static partial void ConvertCustomInput(object raw, IFormatProvider? provider, ref ModeValue? result)
 {
     if (raw is string name)
     {
@@ -217,10 +217,10 @@ static partial void CreateFromCustom(object raw, IFormatProvider? provider, ref 
 }
 ```
 
-これで、前節のジェネリックな取り込みコード（`ReadCell<ModeValue>`）が `"Edit"` も `2` も受け付けます。手書きの値オブジェクトは、interface のフック `TryCreateFromCustom` を直接実装します（どちらの形でも、フックの中から `TryCreateFrom` / `CreateFrom` を呼んではいけません。両者はこのフックを照会するため再帰します）。
+これで、前節のジェネリックな取り込みコード（`ReadCell<ModeValue>`）が `"Edit"` も `2` も受け付けます。手書きの値オブジェクトは、interface のフック `TryConvertCustomInput` を直接実装します（どちらの形でも、フックの中から `TryCreateFrom` / `CreateFrom` を呼んではいけません——両者はこのフックを照会するため再帰します。また、フックから例外を投げないでください——`TryCreateFrom` は失敗を戻り値で報告する契約で、例外はそのまま突き抜けます）。
 
 ```csharp
-static bool IValueObject<DataAccessMode>.TryCreateFromCustom(
+static bool IValueObject<DataAccessMode>.TryConvertCustomInput(
     object raw, IFormatProvider? provider, out DataAccessMode? result)
 {
     result = raw is string name ? GetList().FirstOrDefault(x => x.ModeName == name) : null;

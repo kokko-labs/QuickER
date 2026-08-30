@@ -13,7 +13,7 @@ namespace QuickER.Tests.GeneratedFixture;
 /// <remarks>
 /// <c>New</c> をルックアップにするだけでも成立するが、生成 VO では <c>New</c> が既に出力済みで差し替えられない。
 /// 両者を同じ書き方に揃えるため、ここでも <c>TryGetDefined</c> を使う。手書き型は partial フックを持たないため、
-/// <c>TryGetDefined</c> / <c>TryCreateFromCustom</c> を interface メンバとして直接実装する（docs のレシピと同形）。
+/// <c>TryGetDefined</c> / <c>TryConvertCustomInput</c> を interface メンバとして直接実装する（docs のレシピと同形）。
 /// </remarks>
 public sealed class DataAccessMode
     : ValueObjectOrderedBase<DataAccessMode, int>,
@@ -56,7 +56,7 @@ public sealed class DataAccessMode
 
     // 名前からの生成は変換フックで受ける。扱わない形は false のまま返せば通常の変換に落ちる。
     // （フックの中から TryCreateFrom / CreateFrom を呼んではいけない＝両者はこのフックを照会するため再帰する）
-    static bool IValueObject<DataAccessMode>.TryCreateFromCustom(
+    static bool IValueObject<DataAccessMode>.TryConvertCustomInput(
         object raw,
         IFormatProvider? provider,
         out DataAccessMode? result
@@ -72,7 +72,7 @@ public sealed class DataAccessMode
 
 /// <summary>
 /// 生成 VO と同じ形（private コンストラクタ＋明示的実装の <c>New</c>／<c>ValidateCore</c>＋
-/// <c>TryGetDefined</c>／<c>TryCreateFromCustom</c> のブリッジ＋partial フック宣言）で出力された型。
+/// <c>TryGetDefined</c>／<c>TryConvertCustomInput</c> のブリッジ＋partial フック宣言）で出力された型。
 /// </summary>
 /// <remarks>
 /// ここが「生成側の partial」に相当し、テンプレートの per-VO 出力のミラー。<c>New</c> もブリッジも
@@ -105,19 +105,19 @@ public sealed partial class ScreenMode
 
     static partial void GetDefinedInstance(int value, ref ScreenMode? defined);
 
-    static bool IValueObject<ScreenMode>.TryCreateFromCustom(
+    static bool IValueObject<ScreenMode>.TryConvertCustomInput(
         object raw,
         IFormatProvider? provider,
         out ScreenMode? result
     )
     {
         ScreenMode? custom = null;
-        CreateFromCustom(raw, provider, ref custom);
+        ConvertCustomInput(raw, provider, ref custom);
         result = custom;
         return custom is not null;
     }
 
-    static partial void CreateFromCustom(
+    static partial void ConvertCustomInput(
         object raw,
         IFormatProvider? provider,
         ref ScreenMode? result
@@ -149,7 +149,7 @@ public sealed partial class ScreenMode
         }
     }
 
-    static partial void CreateFromCustom(
+    static partial void ConvertCustomInput(
         object raw,
         IFormatProvider? provider,
         ref ScreenMode? result
@@ -182,7 +182,7 @@ public sealed partial class BioValue
         }
     }
 
-    static partial void CreateFromCustom(
+    static partial void ConvertCustomInput(
         object raw,
         IFormatProvider? provider,
         ref BioValue? result
@@ -276,7 +276,7 @@ public sealed class ValueObjectDefinedInstanceTests
     }
 
     // 変換フック導入の眼目＝旧設計では「4 引数の TryCreateFrom を具象型名で呼ぶ」形だけが override を
-    // 静的束縛で迂回した。基底がどの呼び形でも TSelf.TryCreateFromCustom を照会することを 4 形すべてで固定する。
+    // 静的束縛で迂回した。基底がどの呼び形でも TSelf.TryConvertCustomInput を照会することを 4 形すべてで固定する。
     [Fact(DisplayName = "[定義済み] 変換フックはどの呼び形でも効く（4 引数の型名呼びを含む）")]
     public void 変換フックは全呼び形で効く()
     {
@@ -322,7 +322,7 @@ public sealed class ValueObjectDefinedInstanceTests
             .Should()
             .BeSameAs(BioValue.DefinedBio);
 
-        // CreateFromCustom: 4 引数の型名呼び（旧設計の迂回形）でもフックが先に効く
+        // ConvertCustomInput: 4 引数の型名呼び（旧設計の迂回形）でもフックが先に効く
         BioValue
             .TryCreateFrom("@defined", CultureInfo.InvariantCulture, out var custom, out _)
             .Should()
