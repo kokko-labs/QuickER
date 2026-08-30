@@ -77,6 +77,19 @@ jobs:
         with:
           user: kokko-labs
 
+      # dotnet nuget push のワイルドカード（"…/nupkg/*.nupkg"）は Windows ランナーの
+      # 混在セパレータパスで 1 件も解決されず "File does not exist" になる（v0.1.0 の
+      # 本番実行で実測）。PowerShell 側で列挙して 1 本ずつ push する（0 件は明示エラー・
+      # 各パッケージの成否がログで判別できる利点もある）
       - name: NuGet.org へ push（dry_run=false のときのみ）
         if: ${{ inputs.dry_run == false }}
-        run: dotnet nuget push "${{ runner.temp }}/nupkg/*.nupkg" --api-key ${{ steps.nuget-login.outputs.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
+        run: |
+          $packages = Get-ChildItem "${{ runner.temp }}/nupkg" -Filter *.nupkg
+
+          if ($packages.Count -eq 0) { Write-Error "push 対象の .nupkg が 0 件です"; exit 1 }
+
+          foreach ($package in $packages) {
+            dotnet nuget push $package.FullName --api-key ${{ steps.nuget-login.outputs.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
+
+            if ($LASTEXITCODE -ne 0) { exit 1 }
+          }
