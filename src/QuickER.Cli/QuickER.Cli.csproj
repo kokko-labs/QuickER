@@ -7,6 +7,14 @@
     <RootNamespace>QuickER.Cli</RootNamespace>
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>quicker</ToolCommandName>
+    <!--
+      Directory.Build.props の RuntimeIdentifiers=win-x64（release の GUI publish 用に
+      ロックファイルへ RID グラフを含めるための宣言）をこのプロジェクトだけ打ち消す。
+      .NET 10 では RuntimeIdentifiers 付きの tool プロジェクトの pack が RID 別パッケージ
+      （QuickER.Cli.win-x64）を追加生成するが、配布は 8 パッケージ構成（ポータブルな tool 1 本）が正。
+      Cli は RID 付きで publish されないため RID グラフも不要。
+    -->
+    <RuntimeIdentifiers></RuntimeIdentifiers>
     <!-- 中立（既定）リソースのカルチャ＝英語。日本語は Strings.ja.resx サテライト。表示言語は OS カルチャに従う -->
     <NeutralResourcesLanguage>en</NeutralResourcesLanguage>
 
