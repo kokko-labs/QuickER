@@ -4,17 +4,17 @@ namespace QuickER.Services;
 /// 更新フィード URL の解決を担う定数と純粋関数のヘルパ（UI・Velopack に依存しないため単体テスト可能）。
 /// </summary>
 /// <remarks>
-/// 既定のフィードは <see cref="GitHubRepositoryUrl"/>（リポジトリ公開時に差し替える定数）。
+/// 既定のフィードは <see cref="GitHubRepositoryUrl"/>。
 /// 環境変数 <see cref="FeedEnvironmentVariable"/>（ローカルパス or URL）が設定されていれば
 /// そちらを優先する（E2E 検証用）。どちらも空なら更新チェック自体を行わない。
 /// </remarks>
 public static class UpdateFeed
 {
     /// <summary>
-    /// 更新フィードとする GitHub リポジトリ URL。リポジトリ公開時に
-    /// <c>https://github.com/&lt;owner&gt;/&lt;repo&gt;</c> を設定する（現状は未公開のため空文字）。
+    /// 更新フィードとする GitHub リポジトリ URL（このリポジトリの GitHub Releases が配布フィード）。
+    /// 空文字にすると既定の更新チェックを行わない。
     /// </summary>
-    public const string GitHubRepositoryUrl = "";
+    public const string GitHubRepositoryUrl = "https://github.com/kokko-labs/QuickER";
 
     /// <summary>
     /// 更新フィードを上書きする環境変数名（ローカルパス or URL）。設定時は
@@ -38,7 +38,7 @@ public static class UpdateFeed
             return fromEnvironment;
         }
 
-        // 次に定数フィードを採用する（リポジトリ未公開なら空文字＝更新チェックしない）
+        // 次に定数フィードを採用する（空文字なら更新チェックしない）
         var fromConstant = GitHubRepositoryUrl.Trim();
 
         if (!string.IsNullOrEmpty(fromConstant))

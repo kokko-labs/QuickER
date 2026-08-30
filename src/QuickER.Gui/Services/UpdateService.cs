@@ -19,22 +19,22 @@ public sealed class UpdateService
     /// <summary>フィード文字列から <see cref="IAppUpdater"/> を生成するファクトリ</summary>
     private readonly Func<string, IAppUpdater> _updaterFactory;
 
-    /// <summary>環境変数取得関数（フィード解決に用いる。テストで差し替え可能）</summary>
-    private readonly Func<string, string?> _getEnvironmentVariable;
+    /// <summary>フィード解決関数（未設定なら null を返す。テストで差し替え可能）</summary>
+    private readonly Func<string?> _resolveFeed;
 
     /// <summary>依存を注入して <see cref="UpdateService"/> を構築する</summary>
     /// <param name="dialogService">更新の承諾を得る確認ダイアログ</param>
     /// <param name="updaterFactory">フィード文字列から更新実行体を生成するファクトリ</param>
-    /// <param name="getEnvironmentVariable">環境変数取得関数（フィード解決に用いる）</param>
+    /// <param name="resolveFeed">フィード解決関数（未設定なら null を返す）</param>
     public UpdateService(
         IDialogService dialogService,
         Func<string, IAppUpdater> updaterFactory,
-        Func<string, string?> getEnvironmentVariable
+        Func<string?> resolveFeed
     )
     {
         _dialogService = dialogService;
         _updaterFactory = updaterFactory;
-        _getEnvironmentVariable = getEnvironmentVariable;
+        _resolveFeed = resolveFeed;
     }
 
     /// <summary>
@@ -43,8 +43,8 @@ public sealed class UpdateService
     /// </summary>
     public async Task CheckOnStartupAsync()
     {
-        // フィード未設定（リポジトリ未公開かつ環境変数なし）なら何もしない
-        var feed = UpdateFeed.Resolve(_getEnvironmentVariable);
+        // フィード未設定（環境変数・定数がともに空の構成）なら何もしない
+        var feed = _resolveFeed();
 
         if (feed is null)
         {

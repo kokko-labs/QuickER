@@ -31,7 +31,7 @@ claude mcp add quicker -- quicker mcp
 
 ### その他の stdio クライアント
 
-stdio トランスポートに対応した MCP クライアントであれば利用できます。コマンド `quicker` を引数 `mcp` 1 つで起動するよう設定してください（例えば Codex も、独自の MCP サーバ設定で同じコマンド／引数の組を受け取ります）。これには `quicker` コマンドが `PATH` に通っている必要があります（[CLI のインストール](cli.ja.md)を参照）。CLI が NuGet に公開されるまでは、一度ビルドし（`dotnet build QuickER.slnx`）、ビルド済みアセンブリを指すよう設定してください（`command: "dotnet"`、`args: ["<リポジトリ>/src/QuickER.Cli/bin/Debug/net10.0/QuickER.Cli.dll", "mcp"]`）。`dotnet run` は使わないでください（ビルド出力が stdout＝JSON-RPC プロトコルのチャネルへ混入します）。
+stdio トランスポートに対応した MCP クライアントであれば利用できます。コマンド `quicker` を引数 `mcp` 1 つで起動するよう設定してください（例えば Codex も、独自の MCP サーバ設定で同じコマンド／引数の組を受け取ります）。これには `quicker` コマンドが `PATH` に通っている必要があります（[CLI のインストール](cli.ja.md)を参照）。ソースから動かす場合は、一度ビルドし（`dotnet build QuickER.slnx`）、ビルド済みアセンブリを指すよう設定してください（`command: "dotnet"`、`args: ["<リポジトリ>/src/QuickER.Cli/bin/Debug/net10.0/QuickER.Cli.dll", "mcp"]`）。`dotnet run` は使わないでください（ビルド出力が stdout＝JSON-RPC プロトコルのチャネルへ混入します）。
 
 ## ツール
 

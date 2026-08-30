@@ -65,6 +65,7 @@ This second step is an aid for PoCs and prototyping. Depending on the AI model a
   | Claude Code | Edits files from the working folder (`Edit` / `Write` / `MultiEdit`) | `Bash` is unrestricted (it can run any command) |
 
 - The API key method is designed so that QuickER hands the model a restricted tool set, and the build itself runs with MSBuild's automatic imports (`Directory.Build.props` and friends) disabled. The agent backends (Codex / Claude Code / Copilot) run the CLI you installed under that CLI's own permission model, so QuickER does not restrict them. If you generate a mock from an untrusted schema or from input you do not control, choose the API key method or run it in an isolated environment
+
 ## License note
 
 The AI feature set (chat and mock generation = `QuickER.AI` / `AI.UI` / `AI.Chat` / `AI.Mock`) is covered by [PolyForm Noncommercial 1.0.0 plus additional grants](../LICENSE-NC.md), and those grants make the current releases **free for everyone, including commercial use**. For a plain-language guide see [LICENSING.md](../LICENSING.md); the formal terms are [LICENSE](../LICENSE) and [LICENSE-NC.md](../LICENSE-NC.md).

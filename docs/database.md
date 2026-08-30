@@ -37,7 +37,7 @@ Connection settings can be saved under a name and recalled later from "Saved Con
 
 - Tables (views are excluded) and columns (type, length, precision, nullability)
 - Primary keys (preserving the column order of composite keys)
-- Foreign keys (including the constraint name and the ON DELETE / ON UPDATE referential actions). When the FK columns on the referencing side themselves form that table's primary key or a unique constraint, the relationship is classified as one-to-one. A foreign key made up of multiple columns is imported as a relationship, but the column-to-column mapping is not restored (one relationship carries a single column pair). SQLite does not persist FK constraint names, so a constraint name is synthesized on import
+- Foreign keys (including the constraint name and the ON DELETE / ON UPDATE referential actions). When the FK columns on the referencing side themselves form that table's primary key or a unique constraint, the relationship is classified as one-to-one. A foreign key made up of multiple columns is imported with every column pair, in declaration order. SQLite does not persist FK constraint names, so a constraint name is synthesized on import
 - Table and column descriptions (SQL Server's MS_Description extended properties, PostgreSQL's `obj_description` / `col_description`, MySQL's `TABLE_COMMENT` / `COLUMN_COMMENT`, and Oracle's `user_tab_comments` / `user_col_comments`). SQLite has no description mechanism and is out of scope
 
 Nothing else is imported — see [Modeling fidelity](#modeling-fidelity) for the full boundary and what it means for DDL generation.

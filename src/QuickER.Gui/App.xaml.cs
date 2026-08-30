@@ -96,11 +96,11 @@ namespace QuickER
             }
 
             // 起動時更新チェックサービス。本番用ファクトリ（feed => Velopack 実装）と
-            // 環境変数取得（Environment.GetEnvironmentVariable）を注入する。
+            // 実環境変数によるフィード解決（UpdateFeed.Resolve）を注入する。
             services.AddSingleton(serviceProvider => new UpdateService(
                 serviceProvider.GetRequiredService<IDialogService>(),
                 feed => new VelopackAppUpdater(feed),
-                Environment.GetEnvironmentVariable
+                () => UpdateFeed.Resolve(Environment.GetEnvironmentVariable)
             ));
 
             _provider = services.BuildServiceProvider();

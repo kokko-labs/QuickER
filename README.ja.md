@@ -4,6 +4,7 @@
 
 [![CI](https://github.com/kokko-labs/QuickER/actions/workflows/ci.yml/badge.svg)](https://github.com/kokko-labs/QuickER/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/kokko-labs/QuickER)](https://github.com/kokko-labs/QuickER/releases)
+[![NuGet](https://img.shields.io/nuget/v/QuickER.Cli)](https://www.nuget.org/packages/QuickER.Cli)
 [![License](https://img.shields.io/badge/license-MIT%20%2B%20PolyForm%20NC-blue)](#ライセンス)
 
 ## Design once. Generate the rest.
@@ -320,7 +321,7 @@ dotnet run --project src/QuickER.Gui
 
 ### CLI
 
-NuGet 公開後は、dotnet tool としてインストールできます。
+dotnet tool としてインストールできます:
 
 ```powershell
 dotnet tool install --global QuickER.Cli
@@ -353,13 +354,15 @@ quicker reverse `
   --provider sqlserver
 ```
 
-未公開の間は、ソースコードから実行してください。
+ソースコードから実行する場合:
 
 ```powershell
 dotnet run --project src/QuickER.Cli -- generate ...
 ```
 
 詳しくは [CLI リファレンス](docs/cli.ja.md) を参照してください。
+
+生成コードは既定で自己完結ですが、`--use-runtime-packages` を使うと固定ランタイム部分を NuGet パッケージ `QuickER.Runtime` 群の参照で賄えます — [ランタイムパッケージ参照モード](docs/code-generation.ja.md#ランタイムパッケージ参照モード--use-runtime-packages)を参照してください。
 
 ## なぜ ER モデルを正本にするのか
 

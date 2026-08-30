@@ -37,23 +37,23 @@ public class UpdateServiceTests
         UpdateFeed.Resolve(env).Should().Be(@"C:\feed\path");
     }
 
-    /// <summary>環境変数が空白のみなら定数フィードへフォールバックする（定数も空なら null）</summary>
+    /// <summary>環境変数が空白のみなら定数フィードへフォールバックする</summary>
     [Fact(DisplayName = "Resolve: 環境変数が空白のみなら定数へフォールバックする")]
     public void Resolve_EnvironmentVariableWhitespace_FallsBackToConstant()
     {
         var env = EnvFrom((UpdateFeed.FeedEnvironmentVariable, "   "));
 
-        // 定数 GitHubRepositoryUrl は未公開のため空文字 → どちらも空で null になる
-        UpdateFeed.Resolve(env).Should().BeNull();
+        UpdateFeed.Resolve(env).Should().Be(UpdateFeed.GitHubRepositoryUrl);
     }
 
-    /// <summary>環境変数も定数も空なら null</summary>
-    [Fact(DisplayName = "Resolve: 環境変数・定数がともに空なら null")]
-    public void Resolve_BothEmpty_ReturnsNull()
+    /// <summary>環境変数がなければ定数フィード（本リポジトリの GitHub Releases）を採用する</summary>
+    [Fact(DisplayName = "Resolve: 環境変数がなければ定数フィードを採用する")]
+    public void Resolve_NoEnvironmentVariable_UsesConstantFeed()
     {
         var env = EnvFrom();
 
-        UpdateFeed.Resolve(env).Should().BeNull();
+        // リテラルで固定する（フィードが誤ったリポジトリを指す退行を検知するため）
+        UpdateFeed.Resolve(env).Should().Be("https://github.com/kokko-labs/QuickER");
     }
 
     // ---- UpdateService.CheckOnStartupAsync ----
@@ -72,7 +72,7 @@ public class UpdateServiceTests
                 factoryCalled = true;
                 return Mock.Of<IAppUpdater>();
             },
-            EnvFrom() // フィードなし（環境変数なし・定数も空）
+            () => null // フィード未設定（環境変数・定数がともに空の構成）
         );
 
         await service.CheckOnStartupAsync();
@@ -175,13 +175,11 @@ public class UpdateServiceTests
     }
 
     /// <summary>
-    /// フィードが必ず解決されるよう環境変数を与え、指定の <see cref="IAppUpdater"/> を返す
+    /// フィードが必ず解決される固定のフィード解決関数を与え、指定の <see cref="IAppUpdater"/> を返す
     /// ファクトリで <see cref="UpdateService"/> を組み立てるヘルパ。
     /// </summary>
     private static UpdateService CreateService(StubDialogService dialog, IAppUpdater updater)
     {
-        var env = EnvFrom((UpdateFeed.FeedEnvironmentVariable, @"C:\feed\test"));
-
-        return new UpdateService(dialog, _ => updater, env);
+        return new UpdateService(dialog, _ => updater, () => @"C:\feed\test");
     }
 }

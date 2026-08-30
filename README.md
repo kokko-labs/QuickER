@@ -4,6 +4,7 @@
 
 [![CI](https://github.com/kokko-labs/QuickER/actions/workflows/ci.yml/badge.svg)](https://github.com/kokko-labs/QuickER/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/kokko-labs/QuickER)](https://github.com/kokko-labs/QuickER/releases)
+[![NuGet](https://img.shields.io/nuget/v/QuickER.Cli)](https://www.nuget.org/packages/QuickER.Cli)
 [![License](https://img.shields.io/badge/license-MIT%20%2B%20PolyForm%20NC-blue)](#license)
 
 ## Design once. Generate the rest.
@@ -320,7 +321,7 @@ dotnet run --project src/QuickER.Gui
 
 ### CLI
 
-Once published to NuGet, you can install it as a dotnet tool.
+Install it as a dotnet tool:
 
 ```powershell
 dotnet tool install --global QuickER.Cli
@@ -353,13 +354,15 @@ quicker reverse `
   --provider sqlserver
 ```
 
-Until it is published, run it from source.
+To run from source:
 
 ```powershell
 dotnet run --project src/QuickER.Cli -- generate ...
 ```
 
 See the [CLI reference](docs/cli.md) for details.
+
+Generated code is self-contained by default; with `--use-runtime-packages`, its fixed runtime code comes from the `QuickER.Runtime` NuGet packages instead — see [Runtime package reference mode](docs/code-generation.md#runtime-package-reference-mode---use-runtime-packages).
 
 ## Why the ER model is the source of truth
 
