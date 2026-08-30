@@ -36,7 +36,8 @@
             "IsNullable": true,
             "Description": "Contact email address (optional)"
           }
-        ]
+        ],
+        "UniqueConstraints": []
       },
       {
         "Id": "e2222222-0000-0000-0000-000000000001",
@@ -71,7 +72,8 @@
             "IsNullable": false,
             "Description": "Unit sales price in the product master"
           }
-        ]
+        ],
+        "UniqueConstraints": []
       },
       {
         "Id": "e3333333-0000-0000-0000-000000000001",
@@ -115,7 +117,8 @@
             "IsNullable": true,
             "Description": "Memo attached to the order (optional)"
           }
-        ]
+        ],
+        "UniqueConstraints": []
       },
       {
         "Id": "e4444444-0000-0000-0000-000000000001",
@@ -168,7 +171,8 @@
             "IsNullable": false,
             "Description": "Unit price at order time (kept on the order line so product-master price revisions do not affect it)"
           }
-        ]
+        ],
+        "UniqueConstraints": []
       }
     ],
     "Relationships": [
@@ -217,7 +221,8 @@
         "OnDelete": "NoAction",
         "OnUpdate": "NoAction"
       }
-    ]
+    ],
+    "Queries": []
   },
   "Layout": {
     "e1111111-0000-0000-0000-000000000001": {
