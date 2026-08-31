@@ -34,9 +34,13 @@ jobs:
         uses: actions/checkout@v7
 
       - name: .NET SDK をセットアップ
+        # SDK 版の正本は global.json（ci.yml / release.yml と同じ）。dotnet-version: 10.0.x の
+        # ままだと「インストールする版＝最新」「使う版＝global.json の解決」がねじれ、
+        # ランナーのパッチ版次第で配布バイナリが手元の再現ビルドとバイト一致しなくなる
+        # （v0.1.0 の検証で実測＝ハッシュ照合で済む確認が API 面比較の遠回りになった）
         uses: actions/setup-dotnet@v5
         with:
-          dotnet-version: 10.0.x
+          global-json-file: global.json
 
       - name: ビルド
         run: dotnet build QuickER.slnx
