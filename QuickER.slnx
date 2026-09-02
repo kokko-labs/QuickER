@@ -1,8 +1,13 @@
 <Solution>
   <Folder Name="/ソリューション項目/">
+    <File Path=".csharpierignore" />
     <File Path=".editorconfig" />
+    <File Path=".gitattributes" />
+    <File Path=".gitignore" />
     <File Path="CLAUDE.md" />
     <File Path="Directory.Build.props" />
+    <File Path="Directory.Packages.props" />
+    <File Path="global.json" />
     <File Path="LICENSE" />
     <File Path="LICENSE-NC.md" />
     <File Path="LICENSING.md" />
@@ -16,6 +21,24 @@
     <File Path="CONTRIBUTING.ja.md" />
     <File Path="SECURITY.md" />
     <File Path="SECURITY.ja.md" />
+  </Folder>
+  <Folder Name="/.claude/">
+    <File Path=".claude/skills/audit-claude-md/SKILL.md" />
+  </Folder>
+  <Folder Name="/.github/">
+    <File Path=".github/FUNDING.yml" />
+    <File Path=".github/PULL_REQUEST_TEMPLATE.md" />
+    <File Path=".github/copilot-instructions.md" />
+  </Folder>
+  <Folder Name="/.github/ISSUE_TEMPLATE/">
+    <File Path=".github/ISSUE_TEMPLATE/bug_report.yml" />
+    <File Path=".github/ISSUE_TEMPLATE/config.yml" />
+    <File Path=".github/ISSUE_TEMPLATE/feature_request.yml" />
+  </Folder>
+  <Folder Name="/.github/workflows/">
+    <File Path=".github/workflows/ci.yml" />
+    <File Path=".github/workflows/publish.yml" />
+    <File Path=".github/workflows/release.yml" />
   </Folder>
   <Folder Name="/assets/">
     <File Path="assets/QuickER.ico" />
@@ -74,6 +97,7 @@
   <Folder Name="/scripts/">
     <File Path="scripts/pack-velopack.ps1" />
     <File Path="scripts/regen-fixtures.ps1" />
+    <File Path="scripts/verify-packages.ps1" />
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/QuickER.AI.Chat/QuickER.AI.Chat.csproj" />
