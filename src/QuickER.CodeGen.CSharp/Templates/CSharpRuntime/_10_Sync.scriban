@@ -32,7 +32,7 @@ public enum SyncConflictPolicy
     /// <summary>Discards the local change and lets the download make the row match the server's state: overwritten with the server's row when the server has the key, removed by delete propagation when it does not (a local insert the server never received).</summary>
     ServerWins,
 
-    /// <summary>Resends the local change with <see cref="ConcurrencyMode.ForceOverwrite"/>, overwriting the server row.</summary>
+    /// <summary>Resends the local change with <see cref="ConcurrencyMode.ForceOverwrite"/>, overwriting the server row - and inserting it again when the server has no such row, so a row deleted on the server is resurrected by a local edit.</summary>
     LocalWins,
 }
 
@@ -534,6 +534,15 @@ public sealed class SyncJournal
             .ConfigureAwait(false);
     }
 
+    /// <summary>The maximum number of ids removed by one statement.</summary>
+    /// <remarks>
+    /// The collection parameter is expanded into one bind variable per id, so a single statement is bounded by the
+    /// database's parameter limit. One run settles every table's entries together, and a long offline stretch or a
+    /// bulk insert can push that past the limit; chunking keeps the statement within it whatever the journal holds.
+    /// The size matches the one the dialect engines use for their IN clauses.
+    /// </remarks>
+    private const int InClauseChunkSize = 500;
+
     /// <summary>Removes the given entries (called once the change they describe has reached the server).</summary>
     public async Task RemoveAsync(
         IReadOnlyList<long> ids,
@@ -542,18 +551,24 @@ public sealed class SyncJournal
     {
         ArgumentNullException.ThrowIfNull(ids);
 
-        if (ids.Count == 0)
+        for (var offset = 0; offset < ids.Count; offset += InClauseChunkSize)
         {
-            return;
-        }
+            var count = Math.Min(InClauseChunkSize, ids.Count - offset);
+            var chunk = new List<long>(count);
 
-        await _localSqlExecutor
-            .ExecuteSqlAsync(
-                "DELETE FROM quicker_sync_journal WHERE id IN (@ids)",
-                new { ids },
-                cancellationToken
-            )
-            .ConfigureAwait(false);
+            for (var index = 0; index < count; index++)
+            {
+                chunk.Add(ids[offset + index]);
+            }
+
+            await _localSqlExecutor
+                .ExecuteSqlAsync(
+                    "DELETE FROM quicker_sync_journal WHERE id IN (@ids)",
+                    new { ids = chunk },
+                    cancellationToken
+                )
+                .ConfigureAwait(false);
+        }
     }
 
     /// <summary>Removes every entry of one table, discarding the unsent local changes it held.</summary>
@@ -968,8 +983,10 @@ public abstract class SyncTableBase<TEntity, TKey> : ISyncTable
     /// One code path for every table. An upsert re-reads the current local row (nothing to send is a stale intent,
     /// discarded), overwrites the server's row with <see cref="ConcurrencyMode.ForceOverwrite"/>, and inserts it when
     /// the update finds no row - which also means a row deleted on the server is resurrected by a local edit, exactly
-    /// what last-write-wins promises. A delete needs no version and no probe, and a delete of a row the server no
-    /// longer has is a no-op. Nothing can conflict, so nothing is ever collected.
+    /// what last-write-wins promises. A delete needs no version, but it does re-read the local row for the reason an
+    /// upsert does: a row that is still there says the business delete never landed, which makes the entry a stale
+    /// intent rather than something to carry out on the server. A delete of a row the server no longer has is a no-op.
+    /// Nothing can conflict, so nothing is ever collected.
     /// </remarks>
     protected async Task<SyncUploadOutcome> UploadLastWriteWinsAsync(
         SyncJournalRow entry,
@@ -987,6 +1004,11 @@ public abstract class SyncTableBase<TEntity, TKey> : ISyncTable
             )
         )
         {
+            if (await LocalRowSurvivedDeleteAsync(key, cancellationToken).ConfigureAwait(false))
+            {
+                return SyncUploadOutcome.Discarded;
+            }
+
             await _server.Writer.DeleteAsync(key, cancellationToken).ConfigureAwait(false);
 
             return SyncUploadOutcome.Uploaded;
@@ -1000,16 +1022,7 @@ public abstract class SyncTableBase<TEntity, TKey> : ISyncTable
             return SyncUploadOutcome.Discarded;
         }
 
-        local.MarkUpdated();
-        var updated = await _server
-            .Writer.UpdateAsync(local, ConcurrencyMode.ForceOverwrite, cancellationToken)
-            .ConfigureAwait(false);
-
-        if (!updated)
-        {
-            local.MarkAdded();
-            await _server.Writer.InsertAsync(local, cancellationToken).ConfigureAwait(false);
-        }
+        await ForceOverwriteOrInsertAsync(local, cancellationToken).ConfigureAwait(false);
 
         if (includeUnboundedBinary)
         {
@@ -1021,6 +1034,46 @@ public abstract class SyncTableBase<TEntity, TKey> : ISyncTable
 
         return SyncUploadOutcome.Uploaded;
     }
+
+    /// <summary>Overwrites the server's row without a version guard, inserting it when the update finds no row.</summary>
+    /// <remarks>
+    /// The two halves belong together: an update that matches nothing means the server no longer holds the row, and
+    /// putting it back is what "the local change wins" amounts to. Shared by the last-write-wins replay and by the
+    /// <see cref="SyncConflictPolicy.LocalWins"/> resolution of a version-guarded one, so the two say the same thing.
+    /// </remarks>
+    /// <param name="local">The current local row, which becomes the server's.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    private protected async Task ForceOverwriteOrInsertAsync(
+        TEntity local,
+        CancellationToken cancellationToken
+    )
+    {
+        local.MarkUpdated();
+        var updated = await _server
+            .Writer.UpdateAsync(local, ConcurrencyMode.ForceOverwrite, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (!updated)
+        {
+            local.MarkAdded();
+            await _server.Writer.InsertAsync(local, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Whether the local row a delete entry speaks for is still there (the delete never landed).</summary>
+    /// <remarks>
+    /// The journal records the intent before the business delete runs, so an entry can outlive a delete a foreign key
+    /// or a lock refused. Removing the server's row on the strength of such an entry would let a failed local
+    /// operation finish itself on the server - and the delete propagation of the same run would then take the
+    /// surviving local row with it. An upsert is already protected by re-reading the row it sends; this is the same
+    /// guard for the one operation that has nothing to re-read.
+    /// </remarks>
+    /// <param name="key">The key the entry names.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    private protected async Task<bool> LocalRowSurvivedDeleteAsync(
+        TKey key,
+        CancellationToken cancellationToken
+    ) => await _local.GetByIdAsync(key, cancellationToken).ConfigureAwait(false) is not null;
 
     /// <summary>Called after a last-write-wins upsert reached the server (a versioned table mirrors the new version here).</summary>
     protected virtual Task OnLastWriteWinsUploadedAsync(
@@ -1578,7 +1631,7 @@ public abstract class SyncTable<TEntity, TKey> : SyncTableBase<TEntity, TKey>
                 .Writer.GetByIdAsync(key, cancellationToken)
                 .ConfigureAwait(false);
 
-            if (alreadyThere is not null)
+            if (alreadyThere is not null && policy != SyncConflictPolicy.LocalWins)
             {
                 return SyncUploadOutcome.Conflicted(
                     new SyncConflict(
@@ -1592,8 +1645,17 @@ public abstract class SyncTable<TEntity, TKey> : SyncTableBase<TEntity, TKey>
                 );
             }
 
-            local.MarkAdded();
-            await _server.Writer.InsertAsync(local, cancellationToken).ConfigureAwait(false);
+            if (alreadyThere is null)
+            {
+                local.MarkAdded();
+                await _server.Writer.InsertAsync(local, cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                // LocalWins: the offline insert overwrites the row the server already holds under that key. The
+                // insert the overwrite falls back to covers that row disappearing between the probe and the update.
+                await ForceOverwriteOrInsertAsync(local, cancellationToken).ConfigureAwait(false);
+            }
         }
         else
         {
@@ -1613,16 +1675,24 @@ public abstract class SyncTable<TEntity, TKey> : SyncTableBase<TEntity, TKey>
 
                 if (!updated)
                 {
-                    return SyncUploadOutcome.Conflicted(
-                        new SyncConflict(
-                            TableName,
-                            entry.KeyText,
-                            SyncJournalOperation.Upsert,
-                            SyncConflictReason.MissingOnServer,
-                            local,
-                            null
-                        )
-                    );
+                    if (policy != SyncConflictPolicy.LocalWins)
+                    {
+                        return SyncUploadOutcome.Conflicted(
+                            new SyncConflict(
+                                TableName,
+                                entry.KeyText,
+                                SyncJournalOperation.Upsert,
+                                SyncConflictReason.MissingOnServer,
+                                local,
+                                null
+                            )
+                        );
+                    }
+
+                    // LocalWins: the server no longer has the row, so the local edit puts it back - the same
+                    // resurrection last-write-wins performs, here as the resolution of a collected conflict.
+                    local.MarkAdded();
+                    await _server.Writer.InsertAsync(local, cancellationToken).ConfigureAwait(false);
                 }
             }
             catch (SaveConflictException)
@@ -1679,7 +1749,7 @@ public abstract class SyncTable<TEntity, TKey> : SyncTableBase<TEntity, TKey>
     /// The key alone would delete unconditionally, so the delete goes through the graph save instead: a stub carrying
     /// the key, the recorded version, and <c>RowState.Removed</c> is exactly the shape the existing version guard
     /// already covers. A row the server no longer has is a no-op rather than a conflict - the delete's intent is
-    /// already satisfied.
+    /// already satisfied. A row that is still there locally means the opposite, and the entry is discarded unsent.
     /// </remarks>
     private async Task<SyncUploadOutcome> UploadDeleteAsync(
         SyncJournalRow entry,
@@ -1688,6 +1758,11 @@ public abstract class SyncTable<TEntity, TKey> : SyncTableBase<TEntity, TKey>
         CancellationToken cancellationToken
     )
     {
+        if (await LocalRowSurvivedDeleteAsync(key, cancellationToken).ConfigureAwait(false))
+        {
+            return SyncUploadOutcome.Discarded;
+        }
+
         if (policy == SyncConflictPolicy.LocalWins)
         {
             await _server.Writer.DeleteAsync(key, cancellationToken).ConfigureAwait(false);

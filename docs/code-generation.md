@@ -468,6 +468,8 @@ The fetched graph comes back with `RowState = Unchanged`, so the fetch → edit 
 - On a deep or wide diagram the fetch is correspondingly large. SQL Server fetches the whole graph as one nested JSON query (SQLite splits it into one query per level), so when only some children are needed, narrow the fetch with manual `Include`.
 - It cannot be combined with `WithUnboundedBinary()` (the same exclusion as `Include`). The remote face (`I{Entity}RemoteRepository`) has no `Query()`, so `IncludeGraph` is not available remotely either.
 
+> **The cascade is an application-side notion, independent of the database's referential actions.** Every child-direction navigation belongs to the cascade closure, whether the foreign key says `ON DELETE CASCADE`, `NO ACTION`, or nothing at all: the aggregate this fetches and the aggregate `SaveAsync` cascades over are the same one, and the database's action is not consulted for either. So `MarkRemoved()` on a root fetched with `IncludeGraph()` followed by `SaveAsync` deletes every descendant with explicit DELETE statements even where the foreign keys are `NO ACTION` and the delete would otherwise have been refused. On a diagram where a master table is the parent of transaction tables, deleting one master row that way reaches all the data below it. Fetch only what should be saved together (narrow with manual `Include`), or delete through `DeleteAsync(id)`, which is a single-row delete and lets the database's own referential action have the last word.
+
 ### Graph save (save parent and children in one call)
 
 ```csharp
@@ -1010,6 +1012,8 @@ A graph save records **the whole cascade**. The generated `SyncGraphRecorder` wa
 
 The record is written **before** the business write. The generated repositories manage their own connection, so a decorator cannot enlist its INSERT in the transaction of the write it wraps; something has to go first, and recording the intent first is the safe order. If the business write then fails, the journal holds an entry for a row that was never written - and the upload discards it, because it re-reads the current local row and finds nothing. The opposite order would lose changes outright.
 
+The same re-read protects a **delete** whose business write failed: an entry whose local row is still there says the delete never landed - a foreign key refused it, a lock timed out - and the entry is discarded unsent rather than carried out on the server. Without that check a failed local delete would complete itself on the server, and the delete propagation of the same run would take the surviving local row with it.
+
 **Raw SQL is not recorded.** `ExecuteSqlAsync` forwards untouched: the statement's shape is opaque to the decorator, so there is no key to journal. The same holds for the bulk delete behind `Query().ExecuteDeleteAsync`, whose rows are chosen by a predicate the decorator never sees. Rows changed either way reach the server only if something else records them - and a row *created* that way fares worse than that: with no journal entry to spare it and no key on the server, delete propagation removes it on the next run. A row the local database is meant to keep to itself belongs in a table excluded from sync where the engine is put together (the `excludeFromSync` argument of `AddGeneratedSyncEngine`).
 
 **Save hooks are unaffected.** The decorator delegates to the repository it wraps, so `ISaveHook<T>` fires exactly as it did before - including for the rows the engine itself applies during a download, since a sync run suppresses journaling and nothing else. A refresh (below) writes through `BulkInsertAsync`, which is outside the save pipeline and fires no hooks, in keeping with the ordinary contract. One consequence is worth knowing: a write a `BeforeSaveAsync` returned `false` for still leaves a journal entry, because the entry is written first. For an insert that entry is discarded (there is no row to read), and for an update the row is uploaded as it stands - unchanged content, which the server accepts and stamps with a new version.
@@ -1049,7 +1053,7 @@ Nothing is resolved silently. Under the default policy a local change that colli
 |---|---|
 | `Collect` (default) | The entry stays in the journal and is reported; re-run after deciding |
 | `ServerWins` | The run's entries are dropped and the download overwrites the local rows with the server's (entries of tables outside the run's scope - versionless or excluded ones - stay put) |
-| `LocalWins` | The change is resent with `ConcurrencyMode.ForceOverwrite`, overwriting the server row |
+| `LocalWins` | The change is resent with `ConcurrencyMode.ForceOverwrite`, overwriting the server row - and inserted again when the server has no such row, so a row deleted on the server is resurrected by a local edit (the same resolution for a key the server already holds under a local insert) |
 
 ### Versionless tables and last-write-wins (SyncMode.LastWriteWins)
 
