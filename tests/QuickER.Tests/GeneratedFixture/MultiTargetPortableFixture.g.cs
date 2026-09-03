@@ -2256,6 +2256,11 @@ public abstract partial class EditModelBase
     public void MarkAdded() => RowState = RowState.Added;
 
     /// <summary>Marks this model for deletion (it stays in the collection and is deleted on save).</summary>
+    /// <remarks>
+    /// From here on the model is out of scope for <see cref="Validate"/> and <see cref="CollectErrors(bool)"/>: only its key
+    /// takes part in the save. Its own errors stay registered, so a per-row display keeps showing them and putting the row back
+    /// brings them back into the validation.
+    /// </remarks>
     public void MarkRemoved() => RowState = RowState.Removed;
 
     /// <summary>Sets the state to unchanged (saved).</summary>
@@ -2690,8 +2695,19 @@ public abstract partial class EditModelBase
 
     /// <summary>Checks required fields for missing input, runs additional validation, and registers errors (returns true when there are no errors).</summary>
     /// <param name="includeChildren">True to cascade validation to children as well, false to validate only this model.</param>
+    /// <remarks>
+    /// A model marked for deletion (<see cref="IsRemoved"/>) is out of scope, children included: only its key takes part in the
+    /// save, so the input on a row that is about to be deleted has nothing to say about whether the save can go ahead. The error
+    /// stores are left untouched, so putting a removed row back (which restores the state it had before the removal) brings its
+    /// errors back with it.
+    /// </remarks>
     public bool Validate(bool includeChildren = true)
     {
+        if (IsRemoved)
+        {
+            return true;
+        }
+
         ValidateSelf();
 
         var valid = !HasErrors;
@@ -2716,6 +2732,11 @@ public abstract partial class EditModelBase
 
     /// <summary>Collects validation errors with each node's path (call Validate beforehand).</summary>
     /// <param name="includeChildren">True to recursively collect from cascade children as well, false for this model's errors only.</param>
+    /// <remarks>
+    /// A model marked for deletion (<see cref="IsRemoved"/>) is skipped along with its subtree, matching what
+    /// <see cref="Validate"/> leaves out: a row that is about to be deleted contributes nothing that could block the save.
+    /// Its own <see cref="HasErrors"/> and <see cref="GetErrors"/> are untouched, so a per-row display still shows the errors.
+    /// </remarks>
     public IEnumerable<EditModelError> CollectErrors(bool includeChildren = true)
     {
         var errors = new List<EditModelError>();
@@ -2726,6 +2747,11 @@ public abstract partial class EditModelBase
     /// <summary>Internal implementation that collects validation errors with paths into <paramref name="errors"/> (used by recursive child calls).</summary>
     internal void CollectErrors(string path, bool includeChildren, List<EditModelError> errors)
     {
+        if (IsRemoved)
+        {
+            return;
+        }
+
         errors.AddRange(CollectOwnErrors(path));
 
         if (!includeChildren)
@@ -3618,12 +3644,22 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
 
     /// <summary>Validates all elements in the collection (and their cascade children). Validates every element and returns true only if all are valid.</summary>
     /// <param name="includeChildren">True to cascade validation to each element's children as well.</param>
+    /// <remarks>
+    /// Elements marked for deletion (<c>IsRemoved</c>, left in the collection by MarkRemoved) are skipped: only their keys take
+    /// part in the save, so their input cannot block it. The duplicate check among the siblings leaves them out as well.
+    /// </remarks>
     public bool Validate(bool includeChildren = true)
     {
         var valid = true;
 
         foreach (var item in this)
         {
+            // A row that is about to be deleted takes no part in the checks (its input is not saved), so leave its errors as they are.
+            if (item.IsRemoved)
+            {
+                continue;
+            }
+
             // Clear this check's duplicate-value errors from the previous run first: they are re-registered below, and leaving
             // them would make this element look invalid even after the duplication was resolved. Findings of the database check
             // are left alone (they are cleared and re-registered by that check instead).
@@ -3648,6 +3684,7 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
 
     /// <summary>Collects validation errors of all elements in the collection, prefixed with their positions ([i]) (call Validate beforehand).</summary>
     /// <param name="includeChildren">True to recursively collect from each element's cascade children as well.</param>
+    /// <remarks>Elements marked for deletion contribute nothing, matching what <see cref="Validate"/> leaves out.</remarks>
     public IEnumerable<EditModelError> CollectErrors(bool includeChildren = true)
     {
         var errors = new List<EditModelError>();

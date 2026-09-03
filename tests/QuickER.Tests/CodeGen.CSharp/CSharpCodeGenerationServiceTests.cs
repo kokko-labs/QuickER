@@ -5413,6 +5413,129 @@ public class CSharpCodeGenerationServiceTests
     }
 
     /// <summary>
+    /// 値オブジェクト × 無制限バイナリ除外 × 非 NULL の除外列で、EditModel / Mapper が
+    /// 「必須検証の対象外」「入力があるときだけ実体へ代入」になることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 除外列は通常フェッチの SELECT に含まれず未取得状態（VO 非 NULL は初期化子 <c>= null!</c> ＝ null）で届くため、
+    /// 必須検証と <c>?? throw</c> が残っていると「未取得のまま素通しするだけの保存」が成立しない。
+    /// 通常列（label）は従来どおり必須検証と <c>?? throw</c> を保つ＝規則が除外列だけに効くことも同時に固定する。
+    /// </remarks>
+    [Fact(
+        DisplayName = "VO×無制限バイナリ除外 ON: 除外列は必須検証の対象外・Mapper は非 null 代入になる"
+    )]
+    public void Generate_ExcludeUnboundedBinary_On_EditModelAndMapper_TreatUnsetAsCurrentValue()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            BinaryEditModelDiagram(),
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Sample.Domain",
+                GenerateRepositories = true,
+                GenerateValueObjects = true,
+                ExcludeUnboundedBinaryColumns = true,
+            }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files.Single(f => f.FileName.EndsWith(".g.cs")).Content;
+
+        // (a) Mapper: 除外列は「入力があるときだけ代入」＝欠落を例外にしない
+        content
+            .Should()
+            .NotContain(
+                "Seal has no input value.",
+                "非 NULL の除外列を未入力のまま保存できないと、通常フェッチ後の往復が成立しない"
+            );
+        content.Should().NotContain("NoteBlob has no input value.");
+        content.Should().Contain("if (editModel.Seal is not null)");
+        content.Should().Contain("if (editModel.NoteBlob is not null)");
+
+        // (b) EditModel: 除外列は必須チェックを出さない
+        content.Should().NotContain("SetRequiredError(nameof(BindingSeal)");
+        content.Should().NotContain("SetRequiredError(nameof(BindingNoteBlob)");
+
+        // 通常列は従来どおり（規則が除外列だけに効いていることの対照）
+        content.Should().Contain("SetRequiredError(nameof(BindingLabel)");
+        content.Should().Contain("throw new InvalidOperationException(\"Label has no input value.");
+    }
+
+    /// <summary>
+    /// 同じ図でも <c>ExcludeUnboundedBinaryColumns</c> が OFF なら従来形（必須検証あり・<c>?? throw</c>）のままであることを検証する。
+    /// </summary>
+    [Fact(
+        DisplayName = "VO×無制限バイナリ除外 OFF: 同じ図でも必須検証と ?? throw は従来どおり残る"
+    )]
+    public void Generate_ExcludeUnboundedBinary_Off_EditModelAndMapper_KeepRequiredInput()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            BinaryEditModelDiagram(),
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Sample.Domain",
+                GenerateRepositories = true,
+                GenerateValueObjects = true,
+            }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files.Single(f => f.FileName.EndsWith(".g.cs")).Content;
+
+        content.Should().Contain("throw new InvalidOperationException(\"Seal has no input value.");
+        content.Should().Contain("SetRequiredError(nameof(BindingSeal)");
+        content.Should().NotContain("if (editModel.Seal is not null)");
+    }
+
+    /// <summary>
+    /// 非 NULL / NULL 許容の無制限バイナリ列と通常列を持つ単一エンティティ図
+    /// （EditModel / Mapper の除外規則の検証用）。
+    /// </summary>
+    private static ErDiagram BinaryEditModelDiagram() =>
+        new()
+        {
+            Entities =
+            [
+                new Entity
+                {
+                    Id = Guid.NewGuid(),
+                    TableName = "vault_items",
+                    Columns =
+                    [
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "item_id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "label",
+                            DataType = "nvarchar(50)",
+                            IsNullable = false,
+                        },
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "seal",
+                            DataType = "varbinary(max)",
+                            IsNullable = false,
+                        },
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "note_blob",
+                            DataType = "varbinary(max)",
+                            IsNullable = true,
+                        },
+                    ],
+                },
+            ],
+        };
+
+    /// <summary>
     /// rowversion（store-generated）列に <c>[StoreGeneratedColumn]</c> が付与され、EntitySaveMetadata が
     /// 書き込み集合（<c>InsertProperties</c>）から除外することを検証する（付与はオプション非依存で無条件）。
     /// SELECT 系（プロパティ生成）には残るため rowversion は読める。

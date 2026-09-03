@@ -305,6 +305,57 @@ var id = DocumentIdValue.Create();   // A new key wrapping Guid.NewGuid() as a s
 
 This lets you satisfy the "primary keys are application-assigned" prerequisite of repository generation (above) without writing any key-generation logic.
 
+## Edit model save workflow
+
+An edit model is what the screen binds to; the entity is what gets saved. The mapper moves values between them, and the round trip is always the same four steps:
+
+```csharp
+var mapper = new CustomerMapper();
+
+// 1. Fetch, and turn the entity into an edit model (loading is lossless)
+var entity = await customers.GetByIdAsync(1);
+var editModel = mapper.CreateEditModel(entity!);
+
+// 2. The screen writes the BindingXxx strings; each one commits to the typed value
+editModel.BindingName = "Alice";
+editModel.Orders[0].BindingAmount = "1200";
+
+// 3. Validate the whole graph (required inputs, conversion failures, duplicates among siblings)
+if (!editModel.Validate())
+{
+    foreach (var error in editModel.CollectErrors())
+    {
+        Console.WriteLine($"{error.Path}.{error.Property}: {error.Message}");
+    }
+
+    return;
+}
+
+// 4. Write the committed values back and save (pass includeRemoved: true when saving)
+mapper.ApplyToEntity(editModel, entity!, includeRemoved: true);
+await customers.SaveAsync(entity!);
+
+// The save succeeded, so reset the graph to the unchanged state
+editModel.AcceptChanges();
+```
+
+For a brand-new row, build the entity instead of applying to one: `mapper.CreateEntity(editModel, includeRemoved: true)` (or `CreateEntities(collection, includeRemoved: true)` for a whole collection).
+
+**Pass `includeRemoved: true` whenever the result is going to be saved.** The default is `false`, which is meant for display purposes (a report, a preview): it leaves out the rows that are being tracked for deletion, so the resulting entity graph carries no deletions and the save would silently keep the rows the user removed.
+
+### Removing rows: `Remove()` versus `MarkRemoved()`
+
+There are two ways to delete a child row, and they differ only in where the row lives afterwards:
+
+| Call | Where the row goes | Typical use |
+|---|---|---|
+| `collection.Remove(item)` | Out of the collection, into its deletion tracking (`RemovedItems`); the row is marked `Removed` | The row disappears from the screen |
+| `item.MarkRemoved()` | Stays in the collection, marked `Removed` | The row stays on screen, struck through or greyed out, until the save |
+
+Either way the row is deleted on save (as long as you passed `includeRemoved: true`), and either way only its key takes part in the delete. Adding the very same instance back cancels the deletion tracking and restores the state the row had before it was removed.
+
+Because a row that is about to be deleted contributes nothing but its key, **rows marked for deletion are left out of `Validate()` and `CollectErrors()`**, subtree and all: an unfinished or unconvertible value on a row the user has deleted cannot block the save. The errors themselves stay registered on the row, so a per-row display (`HasErrors` / `GetErrors`, i.e. `INotifyDataErrorInfo`) keeps showing them — and putting the row back brings them straight back into the validation.
+
 ## QuickER Repository
 
 A lightweight repository with minimal dependencies (ADO only). The supported dialects are SQL Server (`FOR JSON` based) and SQLite (plain SELECT plus multi-query).
@@ -731,6 +782,7 @@ Key behaviors:
 - **Excluded from SELECT**: in the results of `GetByIdAsync` / `GetAllAsync` / `Query()`, an excluded column is `null` (it is not read from the DB) unless you opt in with `WithUnboundedBinary()` (described below).
 - **Excluded from UPDATE**: an excluded column is not in the SET clause of the update SQL. Running `UpdateAsync` / `SaveAsync` while an excluded column still holds a value throws a **runtime exception** (it does not silently drop data).
 - **INSERT / BulkInsert keep all columns**: the first write can pass values as usual.
+- **Edit models and mappers treat an absent value as "keep what is there"**: an excluded column is left out of the required-input check, and the mapper writes it to the entity only when the edit model actually holds a value. An ordinary fetch leaves the column unfetched, so the usual round trip — fetch, edit the other columns, `ApplyToEntity`, save — passes validation, leaves the column out of the UPDATE, and keeps the stored blob. For a **new** row, either put a value into the edit model (INSERT keeps every column) or insert first and write the blob with the `Read/Write{Column}Async` stream accessors below. Fetching with `WithUnboundedBinary()` and then saving through the mapper still throws: the entity holds a real value, which is exactly what the UPDATE guard is there to catch.
 - **A named-query projection** that references an excluded column does fetch it (a projection is an explicit column selection).
 - It can be fetched by explicitly SELECTing it in **raw SQL** (see the operational example below).
 - **Not applied in EF Core mode** (queries via `DbSet` / `SaveChanges`) (column selection in EF Core is EF Core's responsibility).

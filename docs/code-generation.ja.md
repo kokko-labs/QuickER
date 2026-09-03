@@ -305,6 +305,57 @@ var id = DocumentIdValue.Create();   // Guid.NewGuid() を文字列で内包し�
 
 「主キーはアプリ側採番」という Repository 生成の前提（上記）を、採番ロジックを書かずに満たせます。
 
+## EditModel の保存ワークフロー
+
+画面がバインドするのは EditModel、保存されるのは Entity で、その間を Mapper がつなぎます。往復はいつも同じ 4 ステップです:
+
+```csharp
+var mapper = new CustomerMapper();
+
+// 1. 取得して Entity を EditModel 化する（ロードは無損失）
+var entity = await customers.GetByIdAsync(1);
+var editModel = mapper.CreateEditModel(entity!);
+
+// 2. 画面が BindingXxx 文字列を書き、そのたびに確定値へ変換される
+editModel.BindingName = "Alice";
+editModel.Orders[0].BindingAmount = "1200";
+
+// 3. グラフ全体を検証する（必須入力・変換失敗・兄弟間の重複）
+if (!editModel.Validate())
+{
+    foreach (var error in editModel.CollectErrors())
+    {
+        Console.WriteLine($"{error.Path}.{error.Property}: {error.Message}");
+    }
+
+    return;
+}
+
+// 4. 確定値を Entity へ書き戻して保存する（保存用途では includeRemoved: true を渡す）
+mapper.ApplyToEntity(editModel, entity!, includeRemoved: true);
+await customers.SaveAsync(entity!);
+
+// 保存できたのでグラフを未変更状態へ戻す
+editModel.AcceptChanges();
+```
+
+新規行は既存 Entity へ適用するのではなく組み立てます: `mapper.CreateEntity(editModel, includeRemoved: true)`（コレクションごとなら `CreateEntities(collection, includeRemoved: true)`）。
+
+**保存に使う結果を作るときは必ず `includeRemoved: true` を渡してください。** 既定は `false` で、これは表示用途（帳票・プレビュー）のものです。削除追跡中の行が結果に入らないため、そのまま保存すると削除が乗らず、ユーザーが消したはずの行が黙って残ります。
+
+### 行の削除: `Remove()` と `MarkRemoved()`
+
+子行の削除には 2 つの方法があり、違いは「削除後に行がどこに居るか」だけです:
+
+| 呼び出し | 行の行き先 | 主な用途 |
+|---|---|---|
+| `collection.Remove(item)` | コレクションから外れ、削除追跡（`RemovedItems`）へ入る。行は `Removed` になる | 画面から行が消える |
+| `item.MarkRemoved()` | コレクションに残ったまま `Removed` になる | 取り消し線・グレー表示で保存まで画面に残す |
+
+どちらも（`includeRemoved: true` を渡していれば）保存時に削除され、どちらも削除に使われるのはキーだけです。同一インスタンスを戻すと削除追跡が解除され、削除前の状態へ復元されます。
+
+削除される行が持ち込むのはキーだけなので、**削除マークされた行は `Validate()` / `CollectErrors()` の対象外**になります（子孫も含めて部分木ごと）。ユーザーが消した行の入力途中・変換不能な値が保存全体を止めることはありません。エラー自体は行に登録されたまま残るため、行単位の表示（`HasErrors` / `GetErrors` ＝ `INotifyDataErrorInfo`）には出続け、行を戻せばそのまま検証へ戻ってきます。
+
 ## QuickER 版 Repository
 
 依存最小（ADO のみ）の軽量 Repository です。対象方言は SQL Server（`FOR JSON` ベース）と SQLite（プレーン SELECT ＋ マルチクエリ）。
@@ -731,6 +782,7 @@ catch (SaveConflictException ex) when (ex.Reason == SaveConflictReason.Modified)
 - **SELECT から除外**: `GetByIdAsync` / `GetAllAsync` / `Query()` の結果で除外列は `null`（DB から読み出さない）。ただし後述の `WithUnboundedBinary()` でオプトインした場合を除く
 - **UPDATE から除外**: 更新 SQL の SET 句に除外列は含まれない。除外列に値を設定したまま `UpdateAsync` / `SaveAsync` を実行すると**実行時例外**になる（黙ってデータを取りこぼさない）
 - **INSERT / BulkInsert は全列のまま**: 初回書き込みは通常どおり値を渡せる
+- **EditModel / Mapper は「未入力なら現行値維持」**: 除外列は必須入力チェックの対象外で、Mapper は EditModel が値を持つときだけ Entity へ書きます。通常フェッチでは除外列は未取得のままなので、「取得 → 他の列を編集 → `ApplyToEntity` → 保存」という定番の往復が検証を通り、UPDATE にも乗らず、DB の blob はそのまま残ります。**新規行**は EditModel に値を入れる（INSERT は全列）か、INSERT してから後述の Stream アクセサ（`Read/Write{Column}Async`）で blob を書く 2 段構えにしてください。`WithUnboundedBinary()` で取得した Entity を Mapper 経由で保存する場合は従来どおり例外になります（Entity が実値を持っている＝UPDATE ガードが捕まえるべき状態そのもののため）
 - **名前付きクエリの射影**が除外列を参照する場合は取得される（射影は明示的な列選択のため）
 - **生 SQL** で明示的に SELECT すれば取得できる（下記の運用例）
 - **EF Core モード（`DbSet` 経由のクエリ / `SaveChanges`）には適用されない**（EF Core の列選択は EF Core の責務）

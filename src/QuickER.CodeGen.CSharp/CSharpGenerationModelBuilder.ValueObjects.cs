@@ -427,7 +427,8 @@ internal sealed partial class CSharpGenerationModelBuilder
     /// <summary>VO 化された列の EditModel プロパティ生成モデルを構築する（確定値は常に VO?、バインド setter は TryCreate で検証）</summary>
     private CSharpEditModelPropertyModel BuildValueObjectEditModelProperty(
         Column column,
-        CSharpValueObjectModel valueObject
+        CSharpValueObjectModel valueObject,
+        CodeGenerationOptions options
     )
     {
         var underlying = valueObject.ValueTypeName; // TValue（素の型）
@@ -437,6 +438,11 @@ internal sealed partial class CSharpGenerationModelBuilder
 
         var propertyName = _nameConverter.ToPropertyName(column.Name);
         var bindingPropertyName = "Binding" + propertyName;
+
+        // 除外された無制限バイナリ列（オプション ON かつ無制限バイナリ）は通常フェッチで未取得のまま届くため、
+        // 行バージョン列と同じく「必須にしない・入力があるときだけ実体へ書く」規則を適用する
+        var isExcludedUnboundedBinary =
+            options.ExcludeUnboundedBinaryColumns && _columnTypes[column.Id].IsUnboundedBinary;
 
         return new CSharpEditModelPropertyModel
         {
@@ -458,9 +464,14 @@ internal sealed partial class CSharpGenerationModelBuilder
             IsNullable = true,
             IsReferenceType = true,
             IsBinary = isBinary,
-            // 行バージョン列は DB が採番するため非 NULL でも入力必須にしない（新規行は未入力が正常）
-            IsRequired = !column.IsNullable && !_columnTypes[column.Id].IsRowVersion,
+            // 行バージョン列は DB が採番するため非 NULL でも入力必須にしない（新規行は未入力が正常）。
+            // 除外された無制限バイナリ列も同じく非 NULL でも入力必須にしない（通常フェッチでは未取得が正常）
+            IsRequired =
+                !column.IsNullable
+                && !_columnTypes[column.Id].IsRowVersion
+                && !isExcludedUnboundedBinary,
             IsRowVersion = _columnTypes[column.Id].IsRowVersion,
+            IsExcludedUnboundedBinary = isExcludedUnboundedBinary,
             // 日付のみの列は内包値を短い日付書式で表示する（VO の ToString() は時刻部まで出るため）
             RevertBindingExpression = IsDateOnly(_columnTypes[column.Id])
                 ? $"{propertyName}?.Value.ToString(\"d\") ?? string.Empty"
