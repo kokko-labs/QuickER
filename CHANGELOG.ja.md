@@ -6,6 +6,10 @@ QuickER の利用者に影響する変更を記録します。形式は [Keep a 
 
 ## [Unreleased]
 
+### Changed
+
+- **破壊的変更: 生成 Mapper の `includeRemoved` が必須引数になりました** — `CreateEntity(editModel, includeRemoved)` / `CreateEntities(collection, includeRemoved)` / `ApplyToEntity(editModel, entity, includeRemoved)` の既定値 `false` を撤廃したため、呼び出しごとに「保存用のグラフを作るのか（`true`）表示用なのか（`false`）」を明示します。省略できた頃は削除追跡中の行がグラフから漏れ、保存してもユーザーが消したはずの行が黙って残っていました。移行はコードを再生成し、コンパイルエラーになった呼び出しへ保存経路なら `includeRemoved: true`、表示経路なら `includeRemoved: false` を付けてください
+
 ## [0.1.0] - 2026-08-30
 
 初回公開リリース。

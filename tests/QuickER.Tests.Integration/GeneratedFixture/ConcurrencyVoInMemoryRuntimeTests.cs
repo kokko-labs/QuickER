@@ -191,7 +191,7 @@ public sealed class ConcurrencyVoInMemoryRuntimeTests
         editModel.Validate().Should().BeTrue("DB 採番の rowversion は必須項目に数えない");
         editModel.BindingRowVer.Should().BeEmpty("新規行では版の入力が無いのが正常");
 
-        var entity = new GadgetMapper().CreateEntity(editModel);
+        var entity = new GadgetMapper().CreateEntity(editModel, includeRemoved: true);
 
         entity.RowVer.Should().BeNull("未入力の版は代入されずエンティティの現在値（null）のまま");
         (await Gadgets.SaveAsync(entity, cancellationToken: Ct))
@@ -220,7 +220,7 @@ public sealed class ConcurrencyVoInMemoryRuntimeTests
         editModel.BindingName = "renamed";
         editModel.Validate().Should().BeTrue();
 
-        var entity = mapper.CreateEntity(editModel);
+        var entity = mapper.CreateEntity(editModel, includeRemoved: true);
         entity.RowVer.Should().Be(loaded.RowVer, "入力された版はそのまま反映される");
 
         (await Gadgets.SaveAsync(entity, cancellationToken: Ct))

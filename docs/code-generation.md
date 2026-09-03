@@ -347,7 +347,7 @@ editModel.AcceptChanges();
 
 For a brand-new row, build the entity instead of applying to one: `mapper.CreateEntity(editModel, includeRemoved: true)` (or `CreateEntities(collection, includeRemoved: true)` for a whole collection).
 
-**Pass `includeRemoved: true` whenever the result is going to be saved.** The default is `false`, which is meant for display purposes (a report, a preview): it leaves out the rows that are being tracked for deletion, so the resulting entity graph carries no deletions and the save would silently keep the rows the user removed.
+**Pass `includeRemoved: true` whenever the result is going to be saved.** `includeRemoved` has no default: it is a required argument, so every call site states whether it is building a graph to save (`true`) or to display (`false`). `false` is for display purposes (a report, a preview): it leaves out the rows that are being tracked for deletion, so the resulting entity graph carries no deletions and the save would silently keep the rows the user removed.
 
 ### Removing rows: `Remove()` versus `MarkRemoved()`
 

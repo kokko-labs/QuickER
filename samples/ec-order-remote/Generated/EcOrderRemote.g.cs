@@ -2429,13 +2429,13 @@ public abstract partial class MapperBase<TEntity, TEditModel>
     /// <summary>Applies the TEditModel's confirmed values to an existing TEntity (destructive update). Column copying is implemented by derived classes.</summary>
     /// <param name="editModel">The edit model whose confirmed values are applied.</param>
     /// <param name="entity">The existing entity to apply the values to.</param>
-    /// <param name="includeRemoved">Whether to also restore and apply deletion-tracked (Removed) items (true for saving, false for report display and similar).</param>
+    /// <param name="includeRemoved">Whether to also restore and apply deletion-tracked (Removed) items. This argument is required: pass true for saving, false for report display and similar.</param>
     public abstract void ApplyToEntity(TEditModel editModel, TEntity entity, bool includeRemoved);
 
     /// <summary>Creates a new TEntity with initial values set and the TEditModel's confirmed values applied.</summary>
     /// <param name="editModel">The edit model whose confirmed values are applied.</param>
-    /// <param name="includeRemoved">Whether to also restore and apply deletion-tracked (Removed) items (true for saving, false for report display and similar).</param>
-    public TEntity CreateEntity(TEditModel editModel, bool includeRemoved = false)
+    /// <param name="includeRemoved">Whether to also restore and apply deletion-tracked (Removed) items. This argument is required: pass true for saving, false for report display and similar.</param>
+    public TEntity CreateEntity(TEditModel editModel, bool includeRemoved)
     {
         var entity = CreateEntity();
         ApplyToEntity(editModel, entity, includeRemoved);
@@ -2444,10 +2444,10 @@ public abstract partial class MapperBase<TEntity, TEditModel>
 
     /// <summary>Creates a list of TEntity from an EditModelCollection of TEditModel.</summary>
     /// <param name="editModels">The collection of edit models to create from.</param>
-    /// <param name="includeRemoved">Whether to also restore and include deletion-tracked (Removed) items (true for saving, false for report display and similar).</param>
+    /// <param name="includeRemoved">Whether to also restore and include deletion-tracked (Removed) items. This argument is required: pass true for saving, false for report display and similar.</param>
     public List<TEntity> CreateEntities(
         EditModelCollection<TEditModel> editModels,
-        bool includeRemoved = false
+        bool includeRemoved
     )
     {
         var entities = editModels
@@ -4851,11 +4851,11 @@ public sealed partial class CustomerMapper
     /// <summary>Applies the CustomerEditModel's confirmed values to an existing CustomerEntity (destructive update).</summary>
     /// <param name="editModel">The edit model whose confirmed values are applied.</param>
     /// <param name="entity">The existing entity to apply the values to.</param>
-    /// <param name="includeRemoved">Whether to also restore and apply deletion-tracked (Removed) items (true for saving, false for report display and similar).</param>
+    /// <param name="includeRemoved">Whether to also restore and apply deletion-tracked (Removed) items. This argument is required: pass true for saving, false for report display and similar.</param>
     public override void ApplyToEntity(
         CustomerEditModel editModel,
         CustomerEntity entity,
-        bool includeRemoved = false
+        bool includeRemoved
     )
     {
         entity.CustomerId =
@@ -4936,11 +4936,11 @@ public sealed partial class ProductMapper
     /// <summary>Applies the ProductEditModel's confirmed values to an existing ProductEntity (destructive update).</summary>
     /// <param name="editModel">The edit model whose confirmed values are applied.</param>
     /// <param name="entity">The existing entity to apply the values to.</param>
-    /// <param name="includeRemoved">Whether to also restore and apply deletion-tracked (Removed) items (true for saving, false for report display and similar).</param>
+    /// <param name="includeRemoved">Whether to also restore and apply deletion-tracked (Removed) items. This argument is required: pass true for saving, false for report display and similar.</param>
     public override void ApplyToEntity(
         ProductEditModel editModel,
         ProductEntity entity,
-        bool includeRemoved = false
+        bool includeRemoved
     )
     {
         entity.ProductId =
@@ -5022,11 +5022,11 @@ public sealed partial class OrderMapper
     /// <summary>Applies the OrderEditModel's confirmed values to an existing OrderEntity (destructive update).</summary>
     /// <param name="editModel">The edit model whose confirmed values are applied.</param>
     /// <param name="entity">The existing entity to apply the values to.</param>
-    /// <param name="includeRemoved">Whether to also restore and apply deletion-tracked (Removed) items (true for saving, false for report display and similar).</param>
+    /// <param name="includeRemoved">Whether to also restore and apply deletion-tracked (Removed) items. This argument is required: pass true for saving, false for report display and similar.</param>
     public override void ApplyToEntity(
         OrderEditModel editModel,
         OrderEntity entity,
-        bool includeRemoved = false
+        bool includeRemoved
     )
     {
         entity.OrderId =
@@ -5110,11 +5110,11 @@ public sealed partial class OrderLineMapper
     /// <summary>Applies the OrderLineEditModel's confirmed values to an existing OrderLineEntity (destructive update).</summary>
     /// <param name="editModel">The edit model whose confirmed values are applied.</param>
     /// <param name="entity">The existing entity to apply the values to.</param>
-    /// <param name="includeRemoved">Whether to also restore and apply deletion-tracked (Removed) items (true for saving, false for report display and similar).</param>
+    /// <param name="includeRemoved">Whether to also restore and apply deletion-tracked (Removed) items. This argument is required: pass true for saving, false for report display and similar.</param>
     public override void ApplyToEntity(
         OrderLineEditModel editModel,
         OrderLineEntity entity,
-        bool includeRemoved = false
+        bool includeRemoved
     )
     {
         entity.OrderLineId =
