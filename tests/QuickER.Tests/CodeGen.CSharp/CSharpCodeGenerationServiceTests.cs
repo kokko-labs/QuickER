@@ -1632,9 +1632,26 @@ public class CSharpCodeGenerationServiceTests
             .Should()
             .Contain("is not ConstantExpression { Value: null }", "非 null 比較子は翻訳対象外");
         content.Should().Contain("if (call.Object is not null && call.Arguments.Count == 1)");
-        // 要素をパラメータ化して IN (...) を生成、空コレクションは恒偽条件
-        content.Should().Contain("{column} IN ({string.Join(\", \", placeholders)})");
-        content.Should().Contain("? \"1 = 0\"");
+        // 否定の IN は NOT (...) で包まず、補償形を出せるよう IN 句の組み立て側へ畳み込む
+        content
+            .Should()
+            .Contain(
+                "return BuildInClause(notInColumn, notInCollection, parameters, negate: true);"
+            );
+        // 非 null 要素をパラメータ化して IN (...) を生成、空コレクションは恒偽（否定は恒真）条件
+        content.Should().Contain("(false, false) => $\"{column} IN ({values})\"");
+        content.Should().Contain("(false, false) => \"1 = 0\"");
+        content.Should().Contain("(false, true) => \"1 = 1\"");
+        // null 要素は IS NULL へ畳み、NOT IN は列側の NULL を無条件補償する（C# / EF Core の意味論）
+        content
+            .Should()
+            .Contain("(true, false) => $\"({column} IN ({values}) OR {column} IS NULL)\"");
+        content
+            .Should()
+            .Contain("(true, true) => $\"({column} NOT IN ({values}) AND {column} IS NOT NULL)\"");
+        content
+            .Should()
+            .Contain("(false, true) => $\"({column} NOT IN ({values}) OR {column} IS NULL)\"");
         // 非ジェネリック IEnumerable を使うため System.Collections を using
         content.Should().Contain("using System.Collections;");
     }
