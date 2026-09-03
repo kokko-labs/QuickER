@@ -3,8 +3,11 @@
 
 public abstract class QuickER.Runtime.EntityFrameworkCore.EfCoreRepository<TEntity, TKey, TContext> : QuickER.Runtime.IRemoteRepository<TEntity, TKey>, QuickER.Runtime.IRepository<TEntity, TKey>
     protected .ctor(Microsoft.EntityFrameworkCore.IDbContextFactory<TContext> contextFactory, QuickER.Runtime.ISaveHookRegistry saveHooks = null, QuickER.Runtime.ISqlExecutor sqlExecutor = null)
+    protected virtual QuickER.Runtime.UniquenessConstraintSet<TEntity> UniquenessConstraints { get; }
+    protected virtual void CollectUniquenessChecks(ref System.Collections.Generic.List<QuickER.Runtime.UniquenessCheck<TEntity>> checks)
     public QuickER.Runtime.SqlQuery<TEntity> Query()
     public System.Threading.Tasks.Task InsertAsync(TEntity entity, System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<QuickER.Runtime.UniquenessViolation>> CheckUniquenessAsync(TEntity entity, System.Threading.CancellationToken cancellationToken = default)
     public System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TEntity>> GetAllAsync(System.Threading.CancellationToken cancellationToken = default)
     public System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TEntity>> QueryBySqlAsync(string sql, object parameters = null, System.Threading.CancellationToken cancellationToken = default)
     public System.Threading.Tasks.Task<TEntity> GetByIdAsync(TKey id, System.Threading.CancellationToken cancellationToken = default)

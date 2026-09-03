@@ -1174,10 +1174,11 @@ public class CSharpCodeGenerationServiceTests
             .Contain(
                 "public sealed partial class CustomerRepository(\r\n    ISqlConnectionFactory connectionFactory,\r\n    ISaveHookRegistry? saveHooks = null,\r\n    ISqlExecutor? sqlExecutor = null\r\n)"
             );
-        // DI 登録は登録済み ISqlExecutor を渡すファクトリ形（未登録なら null＝リポジトリ側が既定実装を組む）
+        // DI 登録は 1 エンティティ 1 行（依存はコンテナが解決＝同じ登録が ISqlConnectionFactory / ISaveHookRegistry /
+        // ISqlExecutor を必ず入れるため、従来のファクトリ形と同じ実体が組まれる）
         content
             .Should()
-            .Contain("services.AddScoped<ICustomerRepository>(provider => new CustomerRepository(");
+            .Contain("services.AddScoped<ICustomerRepository, CustomerRepository>();");
         // カラム一覧は columnList へ抽出して SELECT 系で共用する（無制限バイナリ列を除いた SELECT 用列集合）
         content
             .Should()
@@ -5140,12 +5141,8 @@ public class CSharpCodeGenerationServiceTests
         // 既存と同じインターフェイスへ EF Core 版実装を登録する（DI 差し替えだけで切替可能）
         content
             .Should()
-            .Contain(
-                "services.AddScoped<ICustomerRepository>(provider => new EfCoreCustomerRepository("
-            );
-        content
-            .Should()
-            .Contain("services.AddScoped<IOrderRepository>(provider => new EfCoreOrderRepository(");
+            .Contain("services.AddScoped<ICustomerRepository, EfCoreCustomerRepository>();");
+        content.Should().Contain("services.AddScoped<IOrderRepository, EfCoreOrderRepository>();");
     }
 
     /// <summary>EF Core 生成 ON の SqlQuery に実行器差し替えバックエンド（式木捕捉・EF Core 実行）が追加されることを検証する</summary>

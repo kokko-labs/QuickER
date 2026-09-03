@@ -218,6 +218,12 @@ public sealed class SyncVoRuntimeTests : IAsyncLifetime
             CancellationToken cancellationToken = default
         ) => inner.GetAllAsync(cancellationToken);
 
+        /// <summary>重複事前チェックは版採番と無関係なので素通しする</summary>
+        public Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
+            SyncvoOrderEntity entity,
+            CancellationToken cancellationToken = default
+        ) => inner.CheckUniquenessAsync(entity, cancellationToken);
+
         public async Task InsertAsync(
             SyncvoOrderEntity entity,
             CancellationToken cancellationToken = default

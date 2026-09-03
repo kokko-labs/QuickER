@@ -2003,6 +2003,26 @@ public sealed record UniquenessConstraintCheck<TEntity>(
 )
     where TEntity : class;
 
+/// <summary>The UNIQUE constraints of one entity type as a single value: the constraint table and the self-exclusion that belongs with it.</summary>
+/// <remarks>
+/// The generated repository hands this to its base class through a single override, which is what lets one implementation
+/// of the pre-check serve every entity type. An entity type that declares no constraint leaves <see cref="Empty"/> in
+/// place, so the walk finds nothing and only the user-defined checks run.
+/// </remarks>
+/// <typeparam name="TEntity">The entity type being checked.</typeparam>
+/// <param name="Constraints">The constraint checks, in declaration order.</param>
+/// <param name="ExcludeSelf">Excludes the entity's own row from a candidate query (a row that has no primary key yet excludes nothing).</param>
+public sealed record UniquenessConstraintSet<TEntity>(
+    IReadOnlyList<UniquenessConstraintCheck<TEntity>> Constraints,
+    Func<SqlQuery<TEntity>, TEntity, SqlQuery<TEntity>> ExcludeSelf
+)
+    where TEntity : class
+{
+    /// <summary>The set an entity type that declares no UNIQUE constraint uses (nothing to walk, no row to exclude).</summary>
+    public static UniquenessConstraintSet<TEntity> Empty { get; } =
+        new(Array.Empty<UniquenessConstraintCheck<TEntity>>(), static (query, _) => query);
+}
+
 /// <summary>Shared engine of the uniqueness pre-check: walks the constraint table, excludes the entity's own row, asks the store for existence, and runs the user-defined checks.</summary>
 /// <remarks>
 /// Everything type-specific stays with the generated code, either as data (the constraint table and the self-exclusion,
@@ -2160,6 +2180,22 @@ public partial interface IRemoteRepository<TEntity, TKey>
         bool cascadeDelete = true,
         bool insertWhenUpdateMissing = false,
         ConcurrencyMode mode = ConcurrencyMode.Optimistic,
+        CancellationToken cancellationToken = default
+    );
+
+    /// <summary>Checks the entity's declared UNIQUE constraints against the store and returns the violations (an empty list when there are none).</summary>
+    /// <remarks>
+    /// Rows that share the entity's primary key are excluded, so the same call is correct for both insert and update (an
+    /// entity whose key is not set yet excludes nothing). Constraint member values that contain a null are skipped (NULL
+    /// collision semantics differ per dialect). The result is advisory only: the definitive guarantee is the database's
+    /// own UNIQUE constraint, and a concurrent insert between this check and the save can still make the save fail
+    /// (TOCTOU). The checks a repository adds through its <c>CollectCustomUniquenessChecks</c> hook run as part of it,
+    /// and over a remote implementation the whole check, those hooks included, runs in the server-side repository.
+    /// </remarks>
+    /// <param name="entity">The entity whose constraint member values are checked.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
+        TEntity entity,
         CancellationToken cancellationToken = default
     );
 }
@@ -3568,6 +3604,40 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
 
     /// <summary>Starts a query where filters, ordering, and Include can be specified via a fluent chain.</summary>
     public SqlQuery<TEntity> Query() => new(new SqliteSqlQueryExecutor<TEntity>(_connectionFactory));
+
+    /// <summary>Gets the UNIQUE constraints the pre-check walks (the generated repository overrides this with its own table; empty here).</summary>
+    protected virtual UniquenessConstraintSet<TEntity> UniquenessConstraints =>
+        UniquenessConstraintSet<TEntity>.Empty;
+
+    /// <summary>Collects the user-defined uniqueness checks (the generated repository overrides this to reach its own partial hook).</summary>
+    /// <param name="checks">The list to add the checks to (null until the first one is added).</param>
+    protected virtual void CollectUniquenessChecks(ref List<UniquenessCheck<TEntity>>? checks) { }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
+        TEntity entity,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var constraints = UniquenessConstraints;
+        var violations = await UniquenessChecker
+            .CheckAsync(
+                entity,
+                Query,
+                constraints.ExcludeSelf,
+                constraints.Constraints,
+                cancellationToken
+            )
+            .ConfigureAwait(false);
+
+        List<UniquenessCheck<TEntity>>? customChecks = null;
+        CollectUniquenessChecks(ref customChecks);
+        await UniquenessChecker
+            .RunCustomChecksAsync(entity, customChecks, violations, cancellationToken)
+            .ConfigureAwait(false);
+
+        return violations;
+    }
 
     /// <summary>Saves inserts, updates, and deletes in a single transaction according to RowState (children cascade by default).</summary>
     public async Task<int> SaveAsync(
@@ -7538,11 +7608,7 @@ public static class GeneratedSqliteRepositoryServiceCollectionExtensions
         services.TryAddScoped<ISaveHookRegistry>(provider => new ServiceProviderSaveHookRegistry(
             provider
         ));
-        services.AddScoped<ITimeProbeRepository>(provider => new TimeProbeRepository(
-            provider.GetRequiredService<ISqlConnectionFactory>(),
-            provider.GetService<ISaveHookRegistry>(),
-            provider.GetService<ISqlExecutor>()
-        ));
+        services.AddScoped<ITimeProbeRepository, TimeProbeRepository>();
 
         return services;
     }
@@ -7573,13 +7639,26 @@ public static class GeneratedSqliteRepositoryServiceCollectionExtensions
         services.TryAddScoped<ISaveHookRegistry>(provider => new ServiceProviderSaveHookRegistry(
             provider
         ));
-        services.AddKeyedScoped<ITimeProbeRepository>(
-            serviceKey,
-            (provider, key) => new TimeProbeRepository(
-                connectionFactory,
-                provider.GetService<ISaveHookRegistry>(),
-                provider.GetKeyedService<ISqlExecutor>(key)
-            )
+
+        // Every entity is wired the same way, so the local function holds what they share - the captured connection
+        // factory, the key, and the keyed SQL executor - and each entity contributes only its contract and constructor
+        void AddRepository<TContract>(
+            Func<ISqlConnectionFactory, ISaveHookRegistry?, ISqlExecutor?, TContract> create
+        )
+            where TContract : class
+        {
+            services.AddKeyedScoped(
+                serviceKey,
+                (provider, key) => create(
+                    connectionFactory,
+                    provider.GetService<ISaveHookRegistry>(),
+                    provider.GetKeyedService<ISqlExecutor>(key)
+                )
+            );
+        }
+
+        AddRepository<ITimeProbeRepository>(
+            (factory, hooks, executor) => new TimeProbeRepository(factory, hooks, executor)
         );
 
         return services;
@@ -7587,21 +7666,7 @@ public static class GeneratedSqliteRepositoryServiceCollectionExtensions
 }
 
 /// <summary>Repository interface for TimeProbeEntity.</summary>
-public partial interface ITimeProbeRepository : IRepository<TimeProbeEntity, ProbeIdValue>
-{
-    /// <summary>Checks the UNIQUE constraints of time_probes against the database and returns the violations (an empty list when there are none).</summary>
-    /// <remarks>
-    /// Rows that share the entity's primary key are excluded, so the same call is correct for both insert and update (an entity whose key is not set yet excludes nothing). Constraint member values that contain
-    /// a null are skipped (NULL collision semantics differ per dialect). The result is advisory only: the definitive guarantee is the database's own UNIQUE
-    /// constraint, and a concurrent insert between this check and the save can still make the save fail (TOCTOU).
-    /// </remarks>
-    /// <param name="entity">The entity whose constraint member values are checked.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
-    Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
-        TimeProbeEntity entity,
-        CancellationToken cancellationToken = default
-    );
-}
+public partial interface ITimeProbeRepository : IRepository<TimeProbeEntity, ProbeIdValue> { }
 
 /// <summary>Repository implementation for TimeProbeEntity.</summary>
 public sealed partial class TimeProbeRepository(
@@ -7611,22 +7676,9 @@ public sealed partial class TimeProbeRepository(
 ) : SqliteRepository<TimeProbeEntity, ProbeIdValue>(connectionFactory, saveHooks, sqlExecutor), ITimeProbeRepository
 {
     /// <inheritdoc />
-    public async Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
-        TimeProbeEntity entity,
-        CancellationToken cancellationToken = default
-    )
-    {
-        ArgumentNullException.ThrowIfNull(entity);
-        var violations = new List<UniquenessViolation>();
-
-        List<UniquenessCheck<TimeProbeEntity>>? customChecks = null;
-        CollectCustomUniquenessChecks(ref customChecks);
-        await UniquenessChecker
-            .RunCustomChecksAsync(entity, customChecks, violations, cancellationToken)
-            .ConfigureAwait(false);
-
-        return violations;
-    }
+    protected override void CollectUniquenessChecks(
+        ref List<UniquenessCheck<TimeProbeEntity>>? checks
+    ) => CollectCustomUniquenessChecks(ref checks);
 
     /// <summary>Extension point for adding user-defined uniqueness checks (add delegates to the list in a partial implementation; while unimplemented the call is erased at no cost).</summary>
     partial void CollectCustomUniquenessChecks(

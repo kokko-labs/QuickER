@@ -125,7 +125,7 @@ public class RemoteServiceGenerationTests
         main.Should().Contain("AddGeneratedHttpRemoteRepositories(");
         main.Should()
             .Contain(
-                "services.AddScoped<IOrderRemoteRepository>(provider => new HttpOrderRemoteRepository("
+                "AddClient<IOrderRemoteRepository>(client => new HttpOrderRemoteRepository(client));"
             );
 
         // サーバーファイル: 固定エンジン（スキーマ非依存）＋エンドポイントマッピング（スキーマ依存）の 2 層構成
@@ -289,12 +289,17 @@ public class RemoteServiceGenerationTests
         main.Should().Contain("services.AddKeyedSingleton(\n            serviceKey,");
         main.Should()
             .Contain("provider.GetRequiredKeyedService<OwnedHttpClient>(serviceKey).Client");
-        main.Should().Contain("services.AddKeyedScoped<IOrderRemoteRepository>(");
-
-        // 非 keyed 版は従来のまま（キー無しの登録が keyed へ置き換わっていない）
         main.Should()
             .Contain(
-                "services.AddScoped<IOrderRemoteRepository>(provider => new HttpOrderRemoteRepository("
+                "services.AddKeyedScoped(serviceKey, (provider, _) => create(httpClientFactory(provider)));"
+            );
+
+        // 非 keyed 版は従来どおりキー無しで登録する（keyed へ置き換わっていない）
+        main.Should()
+            .Contain("services.AddScoped(provider => create(httpClientFactory(provider)));");
+        main.Should()
+            .Contain(
+                "AddClient<IOrderRemoteRepository>(client => new HttpOrderRemoteRepository(client));"
             );
         main.Should().Contain("services.AddSingleton(_ => new OwnedHttpClient(");
     }

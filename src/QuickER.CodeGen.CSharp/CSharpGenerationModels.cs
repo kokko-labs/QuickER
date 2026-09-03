@@ -706,29 +706,20 @@ internal sealed class CSharpRepositoryModel
     public string BinaryStreamFileExtensionsBlock { get; init; } = string.Empty;
 
     /// <summary>
-    /// UNIQUE 制約の重複事前チェック（<c>CheckUniquenessAsync</c>）の契約メンバー（整形済み）。
-    /// </summary>
-    /// <remarks>
-    /// Repository 契約を生成するエンティティでは制約の有無に依らず常に非空（ユーザー定義フックだけでも動くため）。
-    /// 挿入先はテンプレートがリモート契約の有無で出し分ける（Stream アクセサと同じ規則＝リモート面 ON なら
-    /// <c>I{Entity}RemoteRepository</c>・OFF なら全機能面 <c>I{Entity}Repository</c>）。
-    /// </remarks>
-    public string UniquenessContractBlock { get; init; } = string.Empty;
-
-    /// <summary>
-    /// 制約記述子クラス（<c>{Repository}UniquenessConstraints</c>＝制約テーブルと自己除外）。方言中立のため
-    /// 契約ファイルへ 1 回だけ挿入し、全実装先の <c>CheckUniquenessAsync</c> が共有する（制約なしは空文字）。
+    /// 制約記述子クラス（<c>{Repository}UniquenessConstraints</c>＝制約テーブル・自己除外・両者を 1 つにまとめた
+    /// <c>Set</c>）。方言中立のため契約ファイルへ 1 回だけ挿入し、全実装先の基底実装が <c>Set</c> を共有する
+    /// （制約なしは空文字＝基底の既定の空記述子で足りる）。
     /// </summary>
     public string UniquenessConstraintsClassBlock { get; init; } = string.Empty;
 
     /// <summary>
-    /// 重複事前チェックの実装メンバー（式木クエリ経由・全実装先で同一テキスト）。
-    /// QuickER 版 Repository 2 方言・インメモリ・EF Core の各実装クラスへ同じテキストで挿入する（無ければ空文字）。
+    /// 重複事前チェックを基底クラスの実装へ束縛するメンバー（記述子の override とユーザー定義フックの橋渡し・
+    /// 全実装先で同一テキスト）。QuickER 版 Repository 2 方言・インメモリ・EF Core の各実装クラスへ挿入する。
     /// </summary>
-    public string UniquenessSharedImplBlock { get; init; } = string.Empty;
-
-    /// <summary>重複事前チェックの HTTP クライアント転送メソッド（<c>Http{Entity}RemoteRepository</c> へ挿入・無ければ空文字）</summary>
-    public string UniquenessRemoteClientBlock { get; init; } = string.Empty;
+    /// <remarks>
+    /// Repository 契約を生成するエンティティでは制約の有無に依らず常に非空（フックだけでも独自の重複判定を足せる）。
+    /// </remarks>
+    public string UniquenessBindingBlock { get; init; } = string.Empty;
 
     /// <summary>重複事前チェックのサーバー側エンドポイントマッピング（<c>Map{Entity}Endpoints</c> 内へ挿入・無ければ空文字）</summary>
     public string UniquenessRemoteServerBlock { get; init; } = string.Empty;

@@ -5204,6 +5204,26 @@ public sealed record UniquenessConstraintCheck<TEntity>(
 )
     where TEntity : class;
 
+/// <summary>The UNIQUE constraints of one entity type as a single value: the constraint table and the self-exclusion that belongs with it.</summary>
+/// <remarks>
+/// The generated repository hands this to its base class through a single override, which is what lets one implementation
+/// of the pre-check serve every entity type. An entity type that declares no constraint leaves <see cref="Empty"/> in
+/// place, so the walk finds nothing and only the user-defined checks run.
+/// </remarks>
+/// <typeparam name="TEntity">The entity type being checked.</typeparam>
+/// <param name="Constraints">The constraint checks, in declaration order.</param>
+/// <param name="ExcludeSelf">Excludes the entity's own row from a candidate query (a row that has no primary key yet excludes nothing).</param>
+public sealed record UniquenessConstraintSet<TEntity>(
+    IReadOnlyList<UniquenessConstraintCheck<TEntity>> Constraints,
+    Func<SqlQuery<TEntity>, TEntity, SqlQuery<TEntity>> ExcludeSelf
+)
+    where TEntity : class
+{
+    /// <summary>The set an entity type that declares no UNIQUE constraint uses (nothing to walk, no row to exclude).</summary>
+    public static UniquenessConstraintSet<TEntity> Empty { get; } =
+        new(Array.Empty<UniquenessConstraintCheck<TEntity>>(), static (query, _) => query);
+}
+
 /// <summary>Shared engine of the uniqueness pre-check: walks the constraint table, excludes the entity's own row, asks the store for existence, and runs the user-defined checks.</summary>
 /// <remarks>
 /// Everything type-specific stays with the generated code, either as data (the constraint table and the self-exclusion,
@@ -5361,6 +5381,22 @@ public partial interface IRemoteRepository<TEntity, TKey>
         bool cascadeDelete = true,
         bool insertWhenUpdateMissing = false,
         ConcurrencyMode mode = ConcurrencyMode.Optimistic,
+        CancellationToken cancellationToken = default
+    );
+
+    /// <summary>Checks the entity's declared UNIQUE constraints against the store and returns the violations (an empty list when there are none).</summary>
+    /// <remarks>
+    /// Rows that share the entity's primary key are excluded, so the same call is correct for both insert and update (an
+    /// entity whose key is not set yet excludes nothing). Constraint member values that contain a null are skipped (NULL
+    /// collision semantics differ per dialect). The result is advisory only: the definitive guarantee is the database's
+    /// own UNIQUE constraint, and a concurrent insert between this check and the save can still make the save fail
+    /// (TOCTOU). The checks a repository adds through its <c>CollectCustomUniquenessChecks</c> hook run as part of it,
+    /// and over a remote implementation the whole check, those hooks included, runs in the server-side repository.
+    /// </remarks>
+    /// <param name="entity">The entity whose constraint member values are checked.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
+        TEntity entity,
         CancellationToken cancellationToken = default
     );
 }
@@ -6652,6 +6688,40 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
 
     /// <summary>Starts a query where filters, ordering, and Include can be specified via a fluent chain.</summary>
     public SqlQuery<TEntity> Query() => new(new SqliteSqlQueryExecutor<TEntity>(_connectionFactory));
+
+    /// <summary>Gets the UNIQUE constraints the pre-check walks (the generated repository overrides this with its own table; empty here).</summary>
+    protected virtual UniquenessConstraintSet<TEntity> UniquenessConstraints =>
+        UniquenessConstraintSet<TEntity>.Empty;
+
+    /// <summary>Collects the user-defined uniqueness checks (the generated repository overrides this to reach its own partial hook).</summary>
+    /// <param name="checks">The list to add the checks to (null until the first one is added).</param>
+    protected virtual void CollectUniquenessChecks(ref List<UniquenessCheck<TEntity>>? checks) { }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
+        TEntity entity,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var constraints = UniquenessConstraints;
+        var violations = await UniquenessChecker
+            .CheckAsync(
+                entity,
+                Query,
+                constraints.ExcludeSelf,
+                constraints.Constraints,
+                cancellationToken
+            )
+            .ConfigureAwait(false);
+
+        List<UniquenessCheck<TEntity>>? customChecks = null;
+        CollectUniquenessChecks(ref customChecks);
+        await UniquenessChecker
+            .RunCustomChecksAsync(entity, customChecks, violations, cancellationToken)
+            .ConfigureAwait(false);
+
+        return violations;
+    }
 
     /// <summary>Saves inserts, updates, and deletes in a single transaction according to RowState (children cascade by default).</summary>
     public async Task<int> SaveAsync(
@@ -9510,6 +9580,18 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         _entityRoute = entityRoute;
     }
 
+    /// <inheritdoc />
+    /// <remarks>The check runs in the server-side repository, so the user-defined hooks that repository declares take part in it.</remarks>
+    public Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
+        TEntity entity,
+        CancellationToken cancellationToken = default
+    ) =>
+        InvokeAsync<IReadOnlyList<UniquenessViolation>>(
+            "CheckUniqueness",
+            new { entity },
+            cancellationToken
+        );
+
     /// <summary>Asks the server whether it is up (<c>GET {prefix}/health</c>), returning <c>false</c> instead of throwing when it is not.</summary>
     /// <remarks>
     /// <para>
@@ -11403,38 +11485,22 @@ public static class GeneratedSqliteRepositoryServiceCollectionExtensions
         services.TryAddScoped<ISaveHookRegistry>(provider => new ServiceProviderSaveHookRegistry(
             provider
         ));
-        services.AddScoped<ICustomerRepository>(provider => new CustomerRepository(
-            provider.GetRequiredService<ISqlConnectionFactory>(),
-            provider.GetService<ISaveHookRegistry>(),
-            provider.GetService<ISqlExecutor>()
-        ));
-        services.AddScoped<ICustomerRemoteRepository>(provider =>
-            provider.GetRequiredService<ICustomerRepository>()
-        );
-        services.AddScoped<IProductRepository>(provider => new ProductRepository(
-            provider.GetRequiredService<ISqlConnectionFactory>(),
-            provider.GetService<ISaveHookRegistry>(),
-            provider.GetService<ISqlExecutor>()
-        ));
-        services.AddScoped<IProductRemoteRepository>(provider =>
-            provider.GetRequiredService<IProductRepository>()
-        );
-        services.AddScoped<IOrderRepository>(provider => new OrderRepository(
-            provider.GetRequiredService<ISqlConnectionFactory>(),
-            provider.GetService<ISaveHookRegistry>(),
-            provider.GetService<ISqlExecutor>()
-        ));
-        services.AddScoped<IOrderRemoteRepository>(provider =>
-            provider.GetRequiredService<IOrderRepository>()
-        );
-        services.AddScoped<IOrderLineRepository>(provider => new OrderLineRepository(
-            provider.GetRequiredService<ISqlConnectionFactory>(),
-            provider.GetService<ISaveHookRegistry>(),
-            provider.GetService<ISqlExecutor>()
-        ));
-        services.AddScoped<IOrderLineRemoteRepository>(provider =>
-            provider.GetRequiredService<IOrderLineRepository>()
-        );
+
+        // Both contracts are meant to hand back one repository per scope, so the remote surface forwards to the
+        // full-featured registration instead of being registered on its own
+        void AddRepository<TContract, TRemote, TImplementation>()
+            where TContract : class, TRemote
+            where TRemote : class
+            where TImplementation : class, TContract
+        {
+            services.AddScoped<TContract, TImplementation>();
+            services.AddScoped<TRemote>(provider => provider.GetRequiredService<TContract>());
+        }
+
+        AddRepository<ICustomerRepository, ICustomerRemoteRepository, CustomerRepository>();
+        AddRepository<IProductRepository, IProductRemoteRepository, ProductRepository>();
+        AddRepository<IOrderRepository, IOrderRemoteRepository, OrderRepository>();
+        AddRepository<IOrderLineRepository, IOrderLineRemoteRepository, OrderLineRepository>();
 
         return services;
     }
@@ -11465,53 +11531,40 @@ public static class GeneratedSqliteRepositoryServiceCollectionExtensions
         services.TryAddScoped<ISaveHookRegistry>(provider => new ServiceProviderSaveHookRegistry(
             provider
         ));
-        services.AddKeyedScoped<ICustomerRepository>(
-            serviceKey,
-            (provider, key) => new CustomerRepository(
-                connectionFactory,
-                provider.GetService<ISaveHookRegistry>(),
-                provider.GetKeyedService<ISqlExecutor>(key)
-            )
+
+        // Every entity is wired the same way, so the local function holds what they share - the captured connection
+        // factory, the key, and the keyed SQL executor - and each entity contributes only its contract and constructor
+        void AddRepository<TContract, TRemote>(
+            Func<ISqlConnectionFactory, ISaveHookRegistry?, ISqlExecutor?, TContract> create
+        )
+            where TContract : class, TRemote
+            where TRemote : class
+        {
+            services.AddKeyedScoped(
+                serviceKey,
+                (provider, key) => create(
+                    connectionFactory,
+                    provider.GetService<ISaveHookRegistry>(),
+                    provider.GetKeyedService<ISqlExecutor>(key)
+                )
+            );
+            services.AddKeyedScoped<TRemote>(
+                serviceKey,
+                (provider, key) => provider.GetRequiredKeyedService<TContract>(key)
+            );
+        }
+
+        AddRepository<ICustomerRepository, ICustomerRemoteRepository>(
+            (factory, hooks, executor) => new CustomerRepository(factory, hooks, executor)
         );
-        services.AddKeyedScoped<ICustomerRemoteRepository>(
-            serviceKey,
-            (provider, key) => provider.GetRequiredKeyedService<ICustomerRepository>(key)
+        AddRepository<IProductRepository, IProductRemoteRepository>(
+            (factory, hooks, executor) => new ProductRepository(factory, hooks, executor)
         );
-        services.AddKeyedScoped<IProductRepository>(
-            serviceKey,
-            (provider, key) => new ProductRepository(
-                connectionFactory,
-                provider.GetService<ISaveHookRegistry>(),
-                provider.GetKeyedService<ISqlExecutor>(key)
-            )
+        AddRepository<IOrderRepository, IOrderRemoteRepository>(
+            (factory, hooks, executor) => new OrderRepository(factory, hooks, executor)
         );
-        services.AddKeyedScoped<IProductRemoteRepository>(
-            serviceKey,
-            (provider, key) => provider.GetRequiredKeyedService<IProductRepository>(key)
-        );
-        services.AddKeyedScoped<IOrderRepository>(
-            serviceKey,
-            (provider, key) => new OrderRepository(
-                connectionFactory,
-                provider.GetService<ISaveHookRegistry>(),
-                provider.GetKeyedService<ISqlExecutor>(key)
-            )
-        );
-        services.AddKeyedScoped<IOrderRemoteRepository>(
-            serviceKey,
-            (provider, key) => provider.GetRequiredKeyedService<IOrderRepository>(key)
-        );
-        services.AddKeyedScoped<IOrderLineRepository>(
-            serviceKey,
-            (provider, key) => new OrderLineRepository(
-                connectionFactory,
-                provider.GetService<ISaveHookRegistry>(),
-                provider.GetKeyedService<ISqlExecutor>(key)
-            )
-        );
-        services.AddKeyedScoped<IOrderLineRemoteRepository>(
-            serviceKey,
-            (provider, key) => provider.GetRequiredKeyedService<IOrderLineRepository>(key)
+        AddRepository<IOrderLineRepository, IOrderLineRemoteRepository>(
+            (factory, hooks, executor) => new OrderLineRepository(factory, hooks, executor)
         );
 
         return services;
@@ -11519,21 +11572,7 @@ public static class GeneratedSqliteRepositoryServiceCollectionExtensions
 }
 
 /// <summary>Remote surface of the CustomerEntity repository (only CRUD, save, and named queries that can cross a network boundary; swappable for a remote implementation later).</summary>
-public partial interface ICustomerRemoteRepository : IRemoteRepository<CustomerEntity, int>
-{
-    /// <summary>Checks the UNIQUE constraints of customers against the database and returns the violations (an empty list when there are none).</summary>
-    /// <remarks>
-    /// Rows that share the entity's primary key are excluded, so the same call is correct for both insert and update (an entity whose key is not set yet excludes nothing). Constraint member values that contain
-    /// a null are skipped (NULL collision semantics differ per dialect). The result is advisory only: the definitive guarantee is the database's own UNIQUE
-    /// constraint, and a concurrent insert between this check and the save can still make the save fail (TOCTOU).
-    /// </remarks>
-    /// <param name="entity">The entity whose constraint member values are checked.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
-    Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
-        CustomerEntity entity,
-        CancellationToken cancellationToken = default
-    );
-}
+public partial interface ICustomerRemoteRepository : IRemoteRepository<CustomerEntity, int> { }
 
 /// <summary>Repository interface for CustomerEntity (the full-featured surface = the remote surface plus expression-tree queries, raw SQL, and bulk insert).</summary>
 public partial interface ICustomerRepository
@@ -11548,22 +11587,9 @@ public sealed partial class CustomerRepository(
 ) : SqliteRepository<CustomerEntity, int>(connectionFactory, saveHooks, sqlExecutor), ICustomerRepository
 {
     /// <inheritdoc />
-    public async Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
-        CustomerEntity entity,
-        CancellationToken cancellationToken = default
-    )
-    {
-        ArgumentNullException.ThrowIfNull(entity);
-        var violations = new List<UniquenessViolation>();
-
-        List<UniquenessCheck<CustomerEntity>>? customChecks = null;
-        CollectCustomUniquenessChecks(ref customChecks);
-        await UniquenessChecker
-            .RunCustomChecksAsync(entity, customChecks, violations, cancellationToken)
-            .ConfigureAwait(false);
-
-        return violations;
-    }
+    protected override void CollectUniquenessChecks(
+        ref List<UniquenessCheck<CustomerEntity>>? checks
+    ) => CollectCustomUniquenessChecks(ref checks);
 
     /// <summary>Extension point for adding user-defined uniqueness checks (add delegates to the list in a partial implementation; while unimplemented the call is erased at no cost).</summary>
     partial void CollectCustomUniquenessChecks(
@@ -11572,21 +11598,7 @@ public sealed partial class CustomerRepository(
 }
 
 /// <summary>Remote surface of the ProductEntity repository (only CRUD, save, and named queries that can cross a network boundary; swappable for a remote implementation later).</summary>
-public partial interface IProductRemoteRepository : IRemoteRepository<ProductEntity, int>
-{
-    /// <summary>Checks the UNIQUE constraints of products against the database and returns the violations (an empty list when there are none).</summary>
-    /// <remarks>
-    /// Rows that share the entity's primary key are excluded, so the same call is correct for both insert and update (an entity whose key is not set yet excludes nothing). Constraint member values that contain
-    /// a null are skipped (NULL collision semantics differ per dialect). The result is advisory only: the definitive guarantee is the database's own UNIQUE
-    /// constraint, and a concurrent insert between this check and the save can still make the save fail (TOCTOU).
-    /// </remarks>
-    /// <param name="entity">The entity whose constraint member values are checked.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
-    Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
-        ProductEntity entity,
-        CancellationToken cancellationToken = default
-    );
-}
+public partial interface IProductRemoteRepository : IRemoteRepository<ProductEntity, int> { }
 
 /// <summary>Repository interface for ProductEntity (the full-featured surface = the remote surface plus expression-tree queries, raw SQL, and bulk insert).</summary>
 public partial interface IProductRepository
@@ -11601,22 +11613,9 @@ public sealed partial class ProductRepository(
 ) : SqliteRepository<ProductEntity, int>(connectionFactory, saveHooks, sqlExecutor), IProductRepository
 {
     /// <inheritdoc />
-    public async Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
-        ProductEntity entity,
-        CancellationToken cancellationToken = default
-    )
-    {
-        ArgumentNullException.ThrowIfNull(entity);
-        var violations = new List<UniquenessViolation>();
-
-        List<UniquenessCheck<ProductEntity>>? customChecks = null;
-        CollectCustomUniquenessChecks(ref customChecks);
-        await UniquenessChecker
-            .RunCustomChecksAsync(entity, customChecks, violations, cancellationToken)
-            .ConfigureAwait(false);
-
-        return violations;
-    }
+    protected override void CollectUniquenessChecks(
+        ref List<UniquenessCheck<ProductEntity>>? checks
+    ) => CollectCustomUniquenessChecks(ref checks);
 
     /// <summary>Extension point for adding user-defined uniqueness checks (add delegates to the list in a partial implementation; while unimplemented the call is erased at no cost).</summary>
     partial void CollectCustomUniquenessChecks(
@@ -11632,19 +11631,6 @@ public partial interface IOrderRemoteRepository : IRemoteRepository<OrderEntity,
 
     /// <summary>Gets a customer's order summaries (order ID, ordered-at, memo), newest first (projection DTO)</summary>
     Task<IReadOnlyList<OrderSummaryRow>> GetSummariesAsync(int customerId, CancellationToken cancellationToken = default);
-
-    /// <summary>Checks the UNIQUE constraints of orders against the database and returns the violations (an empty list when there are none).</summary>
-    /// <remarks>
-    /// Rows that share the entity's primary key are excluded, so the same call is correct for both insert and update (an entity whose key is not set yet excludes nothing). Constraint member values that contain
-    /// a null are skipped (NULL collision semantics differ per dialect). The result is advisory only: the definitive guarantee is the database's own UNIQUE
-    /// constraint, and a concurrent insert between this check and the save can still make the save fail (TOCTOU).
-    /// </remarks>
-    /// <param name="entity">The entity whose constraint member values are checked.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
-    Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
-        OrderEntity entity,
-        CancellationToken cancellationToken = default
-    );
 }
 
 /// <summary>Repository interface for OrderEntity (the full-featured surface = the remote surface plus expression-tree queries, raw SQL, and bulk insert).</summary>
@@ -11681,22 +11667,9 @@ public sealed partial class OrderRepository(
         Query().Where(e => e.CustomerId == customerId).OrderByDescending(e => e.OrderId).ToProjectionListAsync(e => new OrderSummaryRow { OrderId = e.OrderId, OrderedAt = e.OrderedAt, Memo = e.Memo }, cancellationToken);
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
-        OrderEntity entity,
-        CancellationToken cancellationToken = default
-    )
-    {
-        ArgumentNullException.ThrowIfNull(entity);
-        var violations = new List<UniquenessViolation>();
-
-        List<UniquenessCheck<OrderEntity>>? customChecks = null;
-        CollectCustomUniquenessChecks(ref customChecks);
-        await UniquenessChecker
-            .RunCustomChecksAsync(entity, customChecks, violations, cancellationToken)
-            .ConfigureAwait(false);
-
-        return violations;
-    }
+    protected override void CollectUniquenessChecks(
+        ref List<UniquenessCheck<OrderEntity>>? checks
+    ) => CollectCustomUniquenessChecks(ref checks);
 
     /// <summary>Extension point for adding user-defined uniqueness checks (add delegates to the list in a partial implementation; while unimplemented the call is erased at no cost).</summary>
     partial void CollectCustomUniquenessChecks(
@@ -11705,21 +11678,7 @@ public sealed partial class OrderRepository(
 }
 
 /// <summary>Remote surface of the OrderLineEntity repository (only CRUD, save, and named queries that can cross a network boundary; swappable for a remote implementation later).</summary>
-public partial interface IOrderLineRemoteRepository : IRemoteRepository<OrderLineEntity, int>
-{
-    /// <summary>Checks the UNIQUE constraints of order_lines against the database and returns the violations (an empty list when there are none).</summary>
-    /// <remarks>
-    /// Rows that share the entity's primary key are excluded, so the same call is correct for both insert and update (an entity whose key is not set yet excludes nothing). Constraint member values that contain
-    /// a null are skipped (NULL collision semantics differ per dialect). The result is advisory only: the definitive guarantee is the database's own UNIQUE
-    /// constraint, and a concurrent insert between this check and the save can still make the save fail (TOCTOU).
-    /// </remarks>
-    /// <param name="entity">The entity whose constraint member values are checked.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
-    Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
-        OrderLineEntity entity,
-        CancellationToken cancellationToken = default
-    );
-}
+public partial interface IOrderLineRemoteRepository : IRemoteRepository<OrderLineEntity, int> { }
 
 /// <summary>Repository interface for OrderLineEntity (the full-featured surface = the remote surface plus expression-tree queries, raw SQL, and bulk insert).</summary>
 public partial interface IOrderLineRepository
@@ -11734,22 +11693,9 @@ public sealed partial class OrderLineRepository(
 ) : SqliteRepository<OrderLineEntity, int>(connectionFactory, saveHooks, sqlExecutor), IOrderLineRepository
 {
     /// <inheritdoc />
-    public async Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
-        OrderLineEntity entity,
-        CancellationToken cancellationToken = default
-    )
-    {
-        ArgumentNullException.ThrowIfNull(entity);
-        var violations = new List<UniquenessViolation>();
-
-        List<UniquenessCheck<OrderLineEntity>>? customChecks = null;
-        CollectCustomUniquenessChecks(ref customChecks);
-        await UniquenessChecker
-            .RunCustomChecksAsync(entity, customChecks, violations, cancellationToken)
-            .ConfigureAwait(false);
-
-        return violations;
-    }
+    protected override void CollectUniquenessChecks(
+        ref List<UniquenessCheck<OrderLineEntity>>? checks
+    ) => CollectCustomUniquenessChecks(ref checks);
 
     /// <summary>Extension point for adding user-defined uniqueness checks (add delegates to the list in a partial implementation; while unimplemented the call is erased at no cost).</summary>
     partial void CollectCustomUniquenessChecks(
@@ -11865,22 +11811,12 @@ public static class SqlQueryExtensions
 /// <summary>HTTP client implementation of the remote surface (ICustomerRemoteRepository) for CustomerEntity.</summary>
 /// <remarks>Calls the server-side <c>MapGeneratedRemoteEndpoints</c> endpoints. The HttpClient's BaseAddress must include the prefix (default /quicker/).</remarks>
 public sealed partial class HttpCustomerRemoteRepository(HttpClient httpClient)
-    : HttpRemoteRepository<CustomerEntity, int>(httpClient, "Customer"), ICustomerRemoteRepository
-{
-    /// <summary>Checks the UNIQUE constraints of customers against the database and returns the violations (an empty list when there are none). The check, including any user-defined hooks, runs in the server-side repository.</summary>
-    public Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(CustomerEntity entity, CancellationToken cancellationToken = default) =>
-        InvokeAsync<IReadOnlyList<UniquenessViolation>>("CheckUniqueness", new { entity }, cancellationToken);
-}
+    : HttpRemoteRepository<CustomerEntity, int>(httpClient, "Customer"), ICustomerRemoteRepository { }
 
 /// <summary>HTTP client implementation of the remote surface (IProductRemoteRepository) for ProductEntity.</summary>
 /// <remarks>Calls the server-side <c>MapGeneratedRemoteEndpoints</c> endpoints. The HttpClient's BaseAddress must include the prefix (default /quicker/).</remarks>
 public sealed partial class HttpProductRemoteRepository(HttpClient httpClient)
-    : HttpRemoteRepository<ProductEntity, int>(httpClient, "Product"), IProductRemoteRepository
-{
-    /// <summary>Checks the UNIQUE constraints of products against the database and returns the violations (an empty list when there are none). The check, including any user-defined hooks, runs in the server-side repository.</summary>
-    public Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(ProductEntity entity, CancellationToken cancellationToken = default) =>
-        InvokeAsync<IReadOnlyList<UniquenessViolation>>("CheckUniqueness", new { entity }, cancellationToken);
-}
+    : HttpRemoteRepository<ProductEntity, int>(httpClient, "Product"), IProductRemoteRepository { }
 
 /// <summary>HTTP client implementation of the remote surface (IOrderRemoteRepository) for OrderEntity.</summary>
 /// <remarks>Calls the server-side <c>MapGeneratedRemoteEndpoints</c> endpoints. The HttpClient's BaseAddress must include the prefix (default /quicker/).</remarks>
@@ -11894,21 +11830,12 @@ public sealed partial class HttpOrderRemoteRepository(HttpClient httpClient)
     /// <summary>Gets a customer's order summaries (order ID, ordered-at, memo), newest first (projection DTO)</summary>
     public Task<IReadOnlyList<OrderSummaryRow>> GetSummariesAsync(int customerId, CancellationToken cancellationToken = default) =>
         InvokeAsync<IReadOnlyList<OrderSummaryRow>>("GetSummaries", new { customerId }, cancellationToken);
-
-    /// <summary>Checks the UNIQUE constraints of orders against the database and returns the violations (an empty list when there are none). The check, including any user-defined hooks, runs in the server-side repository.</summary>
-    public Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(OrderEntity entity, CancellationToken cancellationToken = default) =>
-        InvokeAsync<IReadOnlyList<UniquenessViolation>>("CheckUniqueness", new { entity }, cancellationToken);
 }
 
 /// <summary>HTTP client implementation of the remote surface (IOrderLineRemoteRepository) for OrderLineEntity.</summary>
 /// <remarks>Calls the server-side <c>MapGeneratedRemoteEndpoints</c> endpoints. The HttpClient's BaseAddress must include the prefix (default /quicker/).</remarks>
 public sealed partial class HttpOrderLineRemoteRepository(HttpClient httpClient)
-    : HttpRemoteRepository<OrderLineEntity, int>(httpClient, "OrderLine"), IOrderLineRemoteRepository
-{
-    /// <summary>Checks the UNIQUE constraints of order_lines against the database and returns the violations (an empty list when there are none). The check, including any user-defined hooks, runs in the server-side repository.</summary>
-    public Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(OrderLineEntity entity, CancellationToken cancellationToken = default) =>
-        InvokeAsync<IReadOnlyList<UniquenessViolation>>("CheckUniqueness", new { entity }, cancellationToken);
-}
+    : HttpRemoteRepository<OrderLineEntity, int>(httpClient, "OrderLine"), IOrderLineRemoteRepository { }
 
 /// <summary>Extensions that register the HTTP client implementations of the remote surface (I{Entity}RemoteRepository) with the DI container.</summary>
 /// <remarks>
@@ -12007,18 +11934,15 @@ public static class GeneratedHttpRemoteRepositoryServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(httpClientFactory);
 
-        services.AddScoped<ICustomerRemoteRepository>(provider => new HttpCustomerRemoteRepository(
-            httpClientFactory(provider)
-        ));
-        services.AddScoped<IProductRemoteRepository>(provider => new HttpProductRemoteRepository(
-            httpClientFactory(provider)
-        ));
-        services.AddScoped<IOrderRemoteRepository>(provider => new HttpOrderRemoteRepository(
-            httpClientFactory(provider)
-        ));
-        services.AddScoped<IOrderLineRemoteRepository>(provider => new HttpOrderLineRemoteRepository(
-            httpClientFactory(provider)
-        ));
+        // Every entity is wired the same way: one client per scope over the HttpClient the factory hands back
+        void AddClient<TRemote>(Func<HttpClient, TRemote> create)
+            where TRemote : class =>
+            services.AddScoped(provider => create(httpClientFactory(provider)));
+
+        AddClient<ICustomerRemoteRepository>(client => new HttpCustomerRemoteRepository(client));
+        AddClient<IProductRemoteRepository>(client => new HttpProductRemoteRepository(client));
+        AddClient<IOrderRemoteRepository>(client => new HttpOrderRemoteRepository(client));
+        AddClient<IOrderLineRemoteRepository>(client => new HttpOrderLineRemoteRepository(client));
 
         return services;
     }
@@ -12108,22 +12032,15 @@ public static class GeneratedHttpRemoteRepositoryServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(httpClientFactory);
 
-        services.AddKeyedScoped<ICustomerRemoteRepository>(
-            serviceKey,
-            (provider, _) => new HttpCustomerRemoteRepository(httpClientFactory(provider))
-        );
-        services.AddKeyedScoped<IProductRemoteRepository>(
-            serviceKey,
-            (provider, _) => new HttpProductRemoteRepository(httpClientFactory(provider))
-        );
-        services.AddKeyedScoped<IOrderRemoteRepository>(
-            serviceKey,
-            (provider, _) => new HttpOrderRemoteRepository(httpClientFactory(provider))
-        );
-        services.AddKeyedScoped<IOrderLineRemoteRepository>(
-            serviceKey,
-            (provider, _) => new HttpOrderLineRemoteRepository(httpClientFactory(provider))
-        );
+        // Every entity is wired the same way: one client per scope, under the key this overload registers
+        void AddClient<TRemote>(Func<HttpClient, TRemote> create)
+            where TRemote : class =>
+            services.AddKeyedScoped(serviceKey, (provider, _) => create(httpClientFactory(provider)));
+
+        AddClient<ICustomerRemoteRepository>(client => new HttpCustomerRemoteRepository(client));
+        AddClient<IProductRemoteRepository>(client => new HttpProductRemoteRepository(client));
+        AddClient<IOrderRemoteRepository>(client => new HttpOrderRemoteRepository(client));
+        AddClient<IOrderLineRemoteRepository>(client => new HttpOrderLineRemoteRepository(client));
 
         return services;
     }

@@ -1,4 +1,4 @@
-# 生成コードの使い方
+﻿# 生成コードの使い方
 
 *[English](code-generation.md) | 日本語*
 
@@ -658,7 +658,7 @@ var rows = await customers.QueryBySqlAsync(
 
 テーブルの UNIQUE 制約は、生成される **Entity** クラスへ `[UniqueConstraint("PropA", "PropB", Name = "UQ_...")]` として `[DbTableMeta]` / `[DbColumnMeta]` と並んで刻まれます。これらと同じく「DB 定義の自己記述」のための定義メタで、実行時の振る舞いは持ちません（以下のチェックはいずれも生成コードそのものです）。属性型は、刻む制約が 1 つでもあるときだけ出力されます。C# リバースはこの属性を読み戻すため、UNIQUE 制約は往復します（[インポートとエクスポート](import-export.ja.md)を参照）。
 
-生成される Repository 契約には、図の UNIQUE 制約から組み立てた一括チェックが常に含まれます（テーブルに制約が 1 件も無くても生成されます）:
+Repository 契約には、図の UNIQUE 制約に基づく一括チェックが常に含まれます。宣言は共通面 `IRemoteRepository<TEntity, TKey>` に 1 つだけあり、`I{Entity}Repository`（および `I{Entity}RemoteRepository`）は継承で受け取ります（テーブルに制約が 1 件も無くても同じです）:
 
 ```csharp
 Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
@@ -669,7 +669,7 @@ Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
 
 > 結果は**助言**です。最終的な保証は DB 自身の UNIQUE 制約で、チェックと保存の間に他プロセスが挿入すれば保存はやはり失敗します（TOCTOU）。チェックは親切なメッセージを出すために使い、保存時の例外処理は残してください。
 
-実装は全実装先（各方言の QuickER 版 Repository・EF Core・インメモリ）で同一の式木クエリ 1 本なので、どのバックエンドでも同じ挙動になります。
+実装は各バックエンドの Repository 基底が持ち、同じ式木クエリを走らせます（各方言の QuickER 版 Repository・EF Core・インメモリ）ので、どのバックエンドでも同じ挙動になります。生成される Repository が足すのは、制約テーブルと後述のフックへの橋渡しだけです。
 
 ```csharp
 var violations = await orders.CheckUniquenessAsync(order);

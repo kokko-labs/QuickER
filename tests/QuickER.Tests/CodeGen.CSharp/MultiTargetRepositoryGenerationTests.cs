@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using AwesomeAssertions;
@@ -483,8 +483,9 @@ public sealed class MultiTargetRepositoryGenerationTests
             );
 
         // keyed 版（object? serviceKey 付き）と AddKeyedScoped/AddKeyedSingleton
+        // （keyed の per-entity 登録は共有のローカル関数へ畳まれ、各エンティティは契約とコンストラクタだけを渡す）
         code.Should().Contain("object? serviceKey");
-        code.Should().Contain("AddKeyedScoped<ICustomerRepository>");
+        code.Should().Contain("AddRepository<ICustomerRepository>(");
         code.Should().Contain("AddKeyedSingleton<ISqlExecutor>");
         code.Should().Contain("AddKeyedSingleton<ISqlConnectionFactory>");
     }

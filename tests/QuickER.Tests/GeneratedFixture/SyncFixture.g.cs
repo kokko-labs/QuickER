@@ -859,6 +859,26 @@ public sealed record UniquenessConstraintCheck<TEntity>(
 )
     where TEntity : class;
 
+/// <summary>The UNIQUE constraints of one entity type as a single value: the constraint table and the self-exclusion that belongs with it.</summary>
+/// <remarks>
+/// The generated repository hands this to its base class through a single override, which is what lets one implementation
+/// of the pre-check serve every entity type. An entity type that declares no constraint leaves <see cref="Empty"/> in
+/// place, so the walk finds nothing and only the user-defined checks run.
+/// </remarks>
+/// <typeparam name="TEntity">The entity type being checked.</typeparam>
+/// <param name="Constraints">The constraint checks, in declaration order.</param>
+/// <param name="ExcludeSelf">Excludes the entity's own row from a candidate query (a row that has no primary key yet excludes nothing).</param>
+public sealed record UniquenessConstraintSet<TEntity>(
+    IReadOnlyList<UniquenessConstraintCheck<TEntity>> Constraints,
+    Func<SqlQuery<TEntity>, TEntity, SqlQuery<TEntity>> ExcludeSelf
+)
+    where TEntity : class
+{
+    /// <summary>The set an entity type that declares no UNIQUE constraint uses (nothing to walk, no row to exclude).</summary>
+    public static UniquenessConstraintSet<TEntity> Empty { get; } =
+        new(Array.Empty<UniquenessConstraintCheck<TEntity>>(), static (query, _) => query);
+}
+
 /// <summary>Shared engine of the uniqueness pre-check: walks the constraint table, excludes the entity's own row, asks the store for existence, and runs the user-defined checks.</summary>
 /// <remarks>
 /// Everything type-specific stays with the generated code, either as data (the constraint table and the self-exclusion,
@@ -1016,6 +1036,22 @@ public partial interface IRemoteRepository<TEntity, TKey>
         bool cascadeDelete = true,
         bool insertWhenUpdateMissing = false,
         ConcurrencyMode mode = ConcurrencyMode.Optimistic,
+        CancellationToken cancellationToken = default
+    );
+
+    /// <summary>Checks the entity's declared UNIQUE constraints against the store and returns the violations (an empty list when there are none).</summary>
+    /// <remarks>
+    /// Rows that share the entity's primary key are excluded, so the same call is correct for both insert and update (an
+    /// entity whose key is not set yet excludes nothing). Constraint member values that contain a null are skipped (NULL
+    /// collision semantics differ per dialect). The result is advisory only: the definitive guarantee is the database's
+    /// own UNIQUE constraint, and a concurrent insert between this check and the save can still make the save fail
+    /// (TOCTOU). The checks a repository adds through its <c>CollectCustomUniquenessChecks</c> hook run as part of it,
+    /// and over a remote implementation the whole check, those hooks included, runs in the server-side repository.
+    /// </remarks>
+    /// <param name="entity">The entity whose constraint member values are checked.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
+        TEntity entity,
         CancellationToken cancellationToken = default
     );
 }
@@ -3075,6 +3111,18 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         _entityRoute = entityRoute;
     }
 
+    /// <inheritdoc />
+    /// <remarks>The check runs in the server-side repository, so the user-defined hooks that repository declares take part in it.</remarks>
+    public Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
+        TEntity entity,
+        CancellationToken cancellationToken = default
+    ) =>
+        InvokeAsync<IReadOnlyList<UniquenessViolation>>(
+            "CheckUniqueness",
+            new { entity },
+            cancellationToken
+        );
+
     /// <summary>Asks the server whether it is up (<c>GET {prefix}/health</c>), returning <c>false</c> instead of throwing when it is not.</summary>
     /// <remarks>
     /// <para>
@@ -3799,19 +3847,6 @@ public static class SaveHookServiceCollectionExtensions
 /// <summary>Remote surface of the SyncOrderEntity repository (only CRUD, save, and named queries that can cross a network boundary; swappable for a remote implementation later).</summary>
 public partial interface ISyncOrderRemoteRepository : IRemoteRepository<SyncOrderEntity, int>
 {
-    /// <summary>Checks the UNIQUE constraints of sync_orders against the database and returns the violations (an empty list when there are none).</summary>
-    /// <remarks>
-    /// Rows that share the entity's primary key are excluded, so the same call is correct for both insert and update (an entity whose key is not set yet excludes nothing). Constraint member values that contain
-    /// a null are skipped (NULL collision semantics differ per dialect). The result is advisory only: the definitive guarantee is the database's own UNIQUE
-    /// constraint, and a concurrent insert between this check and the save can still make the save fail (TOCTOU).
-    /// </remarks>
-    /// <param name="entity">The entity whose constraint member values are checked.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
-    Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
-        SyncOrderEntity entity,
-        CancellationToken cancellationToken = default
-    );
-
     /// <summary>Reads the attachment column into the destination stream (unbounded binary column, O(chunk) streaming; true = written, false = no row or NULL).</summary>
     Task<bool> ReadAttachmentAsync(int id, Stream destination, CancellationToken cancellationToken = default);
 
@@ -3855,21 +3890,7 @@ public static class SyncOrderRepositoryBinaryStreamExtensions
 }
 
 /// <summary>Remote surface of the SyncOrderLineEntity repository (only CRUD, save, and named queries that can cross a network boundary; swappable for a remote implementation later).</summary>
-public partial interface ISyncOrderLineRemoteRepository : IRemoteRepository<SyncOrderLineEntity, int>
-{
-    /// <summary>Checks the UNIQUE constraints of sync_order_lines against the database and returns the violations (an empty list when there are none).</summary>
-    /// <remarks>
-    /// Rows that share the entity's primary key are excluded, so the same call is correct for both insert and update (an entity whose key is not set yet excludes nothing). Constraint member values that contain
-    /// a null are skipped (NULL collision semantics differ per dialect). The result is advisory only: the definitive guarantee is the database's own UNIQUE
-    /// constraint, and a concurrent insert between this check and the save can still make the save fail (TOCTOU).
-    /// </remarks>
-    /// <param name="entity">The entity whose constraint member values are checked.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
-    Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
-        SyncOrderLineEntity entity,
-        CancellationToken cancellationToken = default
-    );
-}
+public partial interface ISyncOrderLineRemoteRepository : IRemoteRepository<SyncOrderLineEntity, int> { }
 
 /// <summary>Repository interface for SyncOrderLineEntity (the full-featured surface = the remote surface plus expression-tree queries, raw SQL, and bulk insert).</summary>
 public partial interface ISyncOrderLineRepository
@@ -3877,21 +3898,7 @@ public partial interface ISyncOrderLineRepository
         IRepository<SyncOrderLineEntity, int> { }
 
 /// <summary>Remote surface of the SyncNoteEntity repository (only CRUD, save, and named queries that can cross a network boundary; swappable for a remote implementation later).</summary>
-public partial interface ISyncNoteRemoteRepository : IRemoteRepository<SyncNoteEntity, int>
-{
-    /// <summary>Checks the UNIQUE constraints of sync_notes against the database and returns the violations (an empty list when there are none).</summary>
-    /// <remarks>
-    /// Rows that share the entity's primary key are excluded, so the same call is correct for both insert and update (an entity whose key is not set yet excludes nothing). Constraint member values that contain
-    /// a null are skipped (NULL collision semantics differ per dialect). The result is advisory only: the definitive guarantee is the database's own UNIQUE
-    /// constraint, and a concurrent insert between this check and the save can still make the save fail (TOCTOU).
-    /// </remarks>
-    /// <param name="entity">The entity whose constraint member values are checked.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
-    Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
-        SyncNoteEntity entity,
-        CancellationToken cancellationToken = default
-    );
-}
+public partial interface ISyncNoteRemoteRepository : IRemoteRepository<SyncNoteEntity, int> { }
 
 /// <summary>Repository interface for SyncNoteEntity (the full-featured surface = the remote surface plus expression-tree queries, raw SQL, and bulk insert).</summary>
 public partial interface ISyncNoteRepository
@@ -3973,10 +3980,6 @@ public static class SqlQueryExtensions
 public sealed partial class HttpSyncOrderRemoteRepository(HttpClient httpClient)
     : HttpRemoteRepository<SyncOrderEntity, int>(httpClient, "SyncOrder"), ISyncOrderRemoteRepository
 {
-    /// <summary>Checks the UNIQUE constraints of sync_orders against the database and returns the violations (an empty list when there are none). The check, including any user-defined hooks, runs in the server-side repository.</summary>
-    public Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(SyncOrderEntity entity, CancellationToken cancellationToken = default) =>
-        InvokeAsync<IReadOnlyList<UniquenessViolation>>("CheckUniqueness", new { entity }, cancellationToken);
-
     /// <inheritdoc />
     public Task<bool> ReadAttachmentAsync(int id, Stream destination, CancellationToken cancellationToken = default) =>
         DownloadUnboundedBinaryColumnAsync("Attachment", id, destination, cancellationToken);
@@ -3989,22 +3992,12 @@ public sealed partial class HttpSyncOrderRemoteRepository(HttpClient httpClient)
 /// <summary>HTTP client implementation of the remote surface (ISyncOrderLineRemoteRepository) for SyncOrderLineEntity.</summary>
 /// <remarks>Calls the server-side <c>MapGeneratedRemoteEndpoints</c> endpoints. The HttpClient's BaseAddress must include the prefix (default /quicker/).</remarks>
 public sealed partial class HttpSyncOrderLineRemoteRepository(HttpClient httpClient)
-    : HttpRemoteRepository<SyncOrderLineEntity, int>(httpClient, "SyncOrderLine"), ISyncOrderLineRemoteRepository
-{
-    /// <summary>Checks the UNIQUE constraints of sync_order_lines against the database and returns the violations (an empty list when there are none). The check, including any user-defined hooks, runs in the server-side repository.</summary>
-    public Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(SyncOrderLineEntity entity, CancellationToken cancellationToken = default) =>
-        InvokeAsync<IReadOnlyList<UniquenessViolation>>("CheckUniqueness", new { entity }, cancellationToken);
-}
+    : HttpRemoteRepository<SyncOrderLineEntity, int>(httpClient, "SyncOrderLine"), ISyncOrderLineRemoteRepository { }
 
 /// <summary>HTTP client implementation of the remote surface (ISyncNoteRemoteRepository) for SyncNoteEntity.</summary>
 /// <remarks>Calls the server-side <c>MapGeneratedRemoteEndpoints</c> endpoints. The HttpClient's BaseAddress must include the prefix (default /quicker/).</remarks>
 public sealed partial class HttpSyncNoteRemoteRepository(HttpClient httpClient)
-    : HttpRemoteRepository<SyncNoteEntity, int>(httpClient, "SyncNote"), ISyncNoteRemoteRepository
-{
-    /// <summary>Checks the UNIQUE constraints of sync_notes against the database and returns the violations (an empty list when there are none). The check, including any user-defined hooks, runs in the server-side repository.</summary>
-    public Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(SyncNoteEntity entity, CancellationToken cancellationToken = default) =>
-        InvokeAsync<IReadOnlyList<UniquenessViolation>>("CheckUniqueness", new { entity }, cancellationToken);
-}
+    : HttpRemoteRepository<SyncNoteEntity, int>(httpClient, "SyncNote"), ISyncNoteRemoteRepository { }
 
 /// <summary>Extensions that register the HTTP client implementations of the remote surface (I{Entity}RemoteRepository) with the DI container.</summary>
 /// <remarks>
@@ -4109,15 +4102,14 @@ public static class GeneratedHttpRemoteRepositoryServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(httpClientFactory);
 
-        services.AddScoped<ISyncOrderRemoteRepository>(provider => new HttpSyncOrderRemoteRepository(
-            httpClientFactory(provider)
-        ));
-        services.AddScoped<ISyncOrderLineRemoteRepository>(provider => new HttpSyncOrderLineRemoteRepository(
-            httpClientFactory(provider)
-        ));
-        services.AddScoped<ISyncNoteRemoteRepository>(provider => new HttpSyncNoteRemoteRepository(
-            httpClientFactory(provider)
-        ));
+        // Every entity is wired the same way: one client per scope over the HttpClient the factory hands back
+        void AddClient<TRemote>(Func<HttpClient, TRemote> create)
+            where TRemote : class =>
+            services.AddScoped(provider => create(httpClientFactory(provider)));
+
+        AddClient<ISyncOrderRemoteRepository>(client => new HttpSyncOrderRemoteRepository(client));
+        AddClient<ISyncOrderLineRemoteRepository>(client => new HttpSyncOrderLineRemoteRepository(client));
+        AddClient<ISyncNoteRemoteRepository>(client => new HttpSyncNoteRemoteRepository(client));
 
         return services;
     }
@@ -4213,18 +4205,14 @@ public static class GeneratedHttpRemoteRepositoryServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(httpClientFactory);
 
-        services.AddKeyedScoped<ISyncOrderRemoteRepository>(
-            serviceKey,
-            (provider, _) => new HttpSyncOrderRemoteRepository(httpClientFactory(provider))
-        );
-        services.AddKeyedScoped<ISyncOrderLineRemoteRepository>(
-            serviceKey,
-            (provider, _) => new HttpSyncOrderLineRemoteRepository(httpClientFactory(provider))
-        );
-        services.AddKeyedScoped<ISyncNoteRemoteRepository>(
-            serviceKey,
-            (provider, _) => new HttpSyncNoteRemoteRepository(httpClientFactory(provider))
-        );
+        // Every entity is wired the same way: one client per scope, under the key this overload registers
+        void AddClient<TRemote>(Func<HttpClient, TRemote> create)
+            where TRemote : class =>
+            services.AddKeyedScoped(serviceKey, (provider, _) => create(httpClientFactory(provider)));
+
+        AddClient<ISyncOrderRemoteRepository>(client => new HttpSyncOrderRemoteRepository(client));
+        AddClient<ISyncOrderLineRemoteRepository>(client => new HttpSyncOrderLineRemoteRepository(client));
+        AddClient<ISyncNoteRemoteRepository>(client => new HttpSyncNoteRemoteRepository(client));
 
         return services;
     }
@@ -6851,6 +6839,13 @@ public abstract class JournalingRepositoryBase<TEntity, TKey> : IRepository<TEnt
         Inner.GetAllAsync(cancellationToken);
 
     /// <inheritdoc />
+    /// <remarks>A read-only check: it writes nothing, so there is nothing to journal.</remarks>
+    public Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
+        TEntity entity,
+        CancellationToken cancellationToken = default
+    ) => Inner.CheckUniquenessAsync(entity, cancellationToken);
+
+    /// <inheritdoc />
     public async Task InsertAsync(TEntity entity, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(entity);
@@ -7739,12 +7734,6 @@ public sealed class JournalingSyncOrderRepository
         return await _inner.WriteAttachmentAsync(id, source, length, cancellationToken)
             .ConfigureAwait(false);
     }
-
-    /// <inheritdoc />
-    public Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
-        SyncOrderEntity entity,
-        CancellationToken cancellationToken = default
-    ) => _inner.CheckUniquenessAsync(entity, cancellationToken);
 }
 
 /// <summary>Reads the server side of sync_order_lines over a direct database connection.</summary>
@@ -7883,12 +7872,6 @@ public sealed class JournalingSyncOrderLineRepository
             cascadeDelete,
             cancellationToken
         );
-
-    /// <inheritdoc />
-    public Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
-        SyncOrderLineEntity entity,
-        CancellationToken cancellationToken = default
-    ) => _inner.CheckUniquenessAsync(entity, cancellationToken);
 }
 
 /// <summary>Reads the server side of sync_notes over a direct database connection.</summary>
@@ -8015,12 +7998,6 @@ public sealed class JournalingSyncNoteRepository
             cascadeDelete,
             cancellationToken
         );
-
-    /// <inheritdoc />
-    public Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
-        SyncNoteEntity entity,
-        CancellationToken cancellationToken = default
-    ) => _inner.CheckUniquenessAsync(entity, cancellationToken);
 }
 
 /// <summary>
@@ -9054,6 +9031,40 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
 
     /// <summary>Starts a query where filters, ordering, and Include can be specified via a fluent chain.</summary>
     public SqlQuery<TEntity> Query() => new(new SqlServerSqlQueryExecutor<TEntity>(_connectionFactory));
+
+    /// <summary>Gets the UNIQUE constraints the pre-check walks (the generated repository overrides this with its own table; empty here).</summary>
+    protected virtual UniquenessConstraintSet<TEntity> UniquenessConstraints =>
+        UniquenessConstraintSet<TEntity>.Empty;
+
+    /// <summary>Collects the user-defined uniqueness checks (the generated repository overrides this to reach its own partial hook).</summary>
+    /// <param name="checks">The list to add the checks to (null until the first one is added).</param>
+    protected virtual void CollectUniquenessChecks(ref List<UniquenessCheck<TEntity>>? checks) { }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
+        TEntity entity,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var constraints = UniquenessConstraints;
+        var violations = await UniquenessChecker
+            .CheckAsync(
+                entity,
+                Query,
+                constraints.ExcludeSelf,
+                constraints.Constraints,
+                cancellationToken
+            )
+            .ConfigureAwait(false);
+
+        List<UniquenessCheck<TEntity>>? customChecks = null;
+        CollectUniquenessChecks(ref customChecks);
+        await UniquenessChecker
+            .RunCustomChecksAsync(entity, customChecks, violations, cancellationToken)
+            .ConfigureAwait(false);
+
+        return violations;
+    }
 
     /// <summary>
     /// Reads an unbounded binary (excluded) column, addressed by primary key, into the destination stream (O(chunk)
@@ -12582,30 +12593,21 @@ public static class GeneratedSqlServerRepositoryServiceCollectionExtensions
         services.TryAddScoped<ISaveHookRegistry>(provider => new ServiceProviderSaveHookRegistry(
             provider
         ));
-        services.AddScoped<ISyncOrderRepository>(provider => new SyncOrderRepository(
-            provider.GetRequiredService<ISqlConnectionFactory>(),
-            provider.GetService<ISaveHookRegistry>(),
-            provider.GetService<ISqlExecutor>()
-        ));
-        services.AddScoped<ISyncOrderRemoteRepository>(provider =>
-            provider.GetRequiredService<ISyncOrderRepository>()
-        );
-        services.AddScoped<ISyncOrderLineRepository>(provider => new SyncOrderLineRepository(
-            provider.GetRequiredService<ISqlConnectionFactory>(),
-            provider.GetService<ISaveHookRegistry>(),
-            provider.GetService<ISqlExecutor>()
-        ));
-        services.AddScoped<ISyncOrderLineRemoteRepository>(provider =>
-            provider.GetRequiredService<ISyncOrderLineRepository>()
-        );
-        services.AddScoped<ISyncNoteRepository>(provider => new SyncNoteRepository(
-            provider.GetRequiredService<ISqlConnectionFactory>(),
-            provider.GetService<ISaveHookRegistry>(),
-            provider.GetService<ISqlExecutor>()
-        ));
-        services.AddScoped<ISyncNoteRemoteRepository>(provider =>
-            provider.GetRequiredService<ISyncNoteRepository>()
-        );
+
+        // Both contracts are meant to hand back one repository per scope, so the remote surface forwards to the
+        // full-featured registration instead of being registered on its own
+        void AddRepository<TContract, TRemote, TImplementation>()
+            where TContract : class, TRemote
+            where TRemote : class
+            where TImplementation : class, TContract
+        {
+            services.AddScoped<TContract, TImplementation>();
+            services.AddScoped<TRemote>(provider => provider.GetRequiredService<TContract>());
+        }
+
+        AddRepository<ISyncOrderRepository, ISyncOrderRemoteRepository, SyncOrderRepository>();
+        AddRepository<ISyncOrderLineRepository, ISyncOrderLineRemoteRepository, SyncOrderLineRepository>();
+        AddRepository<ISyncNoteRepository, ISyncNoteRemoteRepository, SyncNoteRepository>();
 
         return services;
     }
@@ -12636,41 +12638,37 @@ public static class GeneratedSqlServerRepositoryServiceCollectionExtensions
         services.TryAddScoped<ISaveHookRegistry>(provider => new ServiceProviderSaveHookRegistry(
             provider
         ));
-        services.AddKeyedScoped<ISyncOrderRepository>(
-            serviceKey,
-            (provider, key) => new SyncOrderRepository(
-                connectionFactory,
-                provider.GetService<ISaveHookRegistry>(),
-                provider.GetKeyedService<ISqlExecutor>(key)
-            )
+
+        // Every entity is wired the same way, so the local function holds what they share - the captured connection
+        // factory, the key, and the keyed SQL executor - and each entity contributes only its contract and constructor
+        void AddRepository<TContract, TRemote>(
+            Func<ISqlConnectionFactory, ISaveHookRegistry?, ISqlExecutor?, TContract> create
+        )
+            where TContract : class, TRemote
+            where TRemote : class
+        {
+            services.AddKeyedScoped(
+                serviceKey,
+                (provider, key) => create(
+                    connectionFactory,
+                    provider.GetService<ISaveHookRegistry>(),
+                    provider.GetKeyedService<ISqlExecutor>(key)
+                )
+            );
+            services.AddKeyedScoped<TRemote>(
+                serviceKey,
+                (provider, key) => provider.GetRequiredKeyedService<TContract>(key)
+            );
+        }
+
+        AddRepository<ISyncOrderRepository, ISyncOrderRemoteRepository>(
+            (factory, hooks, executor) => new SyncOrderRepository(factory, hooks, executor)
         );
-        services.AddKeyedScoped<ISyncOrderRemoteRepository>(
-            serviceKey,
-            (provider, key) => provider.GetRequiredKeyedService<ISyncOrderRepository>(key)
+        AddRepository<ISyncOrderLineRepository, ISyncOrderLineRemoteRepository>(
+            (factory, hooks, executor) => new SyncOrderLineRepository(factory, hooks, executor)
         );
-        services.AddKeyedScoped<ISyncOrderLineRepository>(
-            serviceKey,
-            (provider, key) => new SyncOrderLineRepository(
-                connectionFactory,
-                provider.GetService<ISaveHookRegistry>(),
-                provider.GetKeyedService<ISqlExecutor>(key)
-            )
-        );
-        services.AddKeyedScoped<ISyncOrderLineRemoteRepository>(
-            serviceKey,
-            (provider, key) => provider.GetRequiredKeyedService<ISyncOrderLineRepository>(key)
-        );
-        services.AddKeyedScoped<ISyncNoteRepository>(
-            serviceKey,
-            (provider, key) => new SyncNoteRepository(
-                connectionFactory,
-                provider.GetService<ISaveHookRegistry>(),
-                provider.GetKeyedService<ISqlExecutor>(key)
-            )
-        );
-        services.AddKeyedScoped<ISyncNoteRemoteRepository>(
-            serviceKey,
-            (provider, key) => provider.GetRequiredKeyedService<ISyncNoteRepository>(key)
+        AddRepository<ISyncNoteRepository, ISyncNoteRemoteRepository>(
+            (factory, hooks, executor) => new SyncNoteRepository(factory, hooks, executor)
         );
 
         return services;
@@ -12685,22 +12683,9 @@ public sealed partial class SyncOrderRepository(
 ) : SqlServerRepository<SyncOrderEntity, int>(connectionFactory, saveHooks, sqlExecutor), ISyncOrderRepository
 {
     /// <inheritdoc />
-    public async Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
-        SyncOrderEntity entity,
-        CancellationToken cancellationToken = default
-    )
-    {
-        ArgumentNullException.ThrowIfNull(entity);
-        var violations = new List<UniquenessViolation>();
-
-        List<UniquenessCheck<SyncOrderEntity>>? customChecks = null;
-        CollectCustomUniquenessChecks(ref customChecks);
-        await UniquenessChecker
-            .RunCustomChecksAsync(entity, customChecks, violations, cancellationToken)
-            .ConfigureAwait(false);
-
-        return violations;
-    }
+    protected override void CollectUniquenessChecks(
+        ref List<UniquenessCheck<SyncOrderEntity>>? checks
+    ) => CollectCustomUniquenessChecks(ref checks);
 
     /// <summary>Extension point for adding user-defined uniqueness checks (add delegates to the list in a partial implementation; while unimplemented the call is erased at no cost).</summary>
     partial void CollectCustomUniquenessChecks(
@@ -12724,22 +12709,9 @@ public sealed partial class SyncOrderLineRepository(
 ) : SqlServerRepository<SyncOrderLineEntity, int>(connectionFactory, saveHooks, sqlExecutor), ISyncOrderLineRepository
 {
     /// <inheritdoc />
-    public async Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
-        SyncOrderLineEntity entity,
-        CancellationToken cancellationToken = default
-    )
-    {
-        ArgumentNullException.ThrowIfNull(entity);
-        var violations = new List<UniquenessViolation>();
-
-        List<UniquenessCheck<SyncOrderLineEntity>>? customChecks = null;
-        CollectCustomUniquenessChecks(ref customChecks);
-        await UniquenessChecker
-            .RunCustomChecksAsync(entity, customChecks, violations, cancellationToken)
-            .ConfigureAwait(false);
-
-        return violations;
-    }
+    protected override void CollectUniquenessChecks(
+        ref List<UniquenessCheck<SyncOrderLineEntity>>? checks
+    ) => CollectCustomUniquenessChecks(ref checks);
 
     /// <summary>Extension point for adding user-defined uniqueness checks (add delegates to the list in a partial implementation; while unimplemented the call is erased at no cost).</summary>
     partial void CollectCustomUniquenessChecks(
@@ -12755,22 +12727,9 @@ public sealed partial class SyncNoteRepository(
 ) : SqlServerRepository<SyncNoteEntity, int>(connectionFactory, saveHooks, sqlExecutor), ISyncNoteRepository
 {
     /// <inheritdoc />
-    public async Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
-        SyncNoteEntity entity,
-        CancellationToken cancellationToken = default
-    )
-    {
-        ArgumentNullException.ThrowIfNull(entity);
-        var violations = new List<UniquenessViolation>();
-
-        List<UniquenessCheck<SyncNoteEntity>>? customChecks = null;
-        CollectCustomUniquenessChecks(ref customChecks);
-        await UniquenessChecker
-            .RunCustomChecksAsync(entity, customChecks, violations, cancellationToken)
-            .ConfigureAwait(false);
-
-        return violations;
-    }
+    protected override void CollectUniquenessChecks(
+        ref List<UniquenessCheck<SyncNoteEntity>>? checks
+    ) => CollectCustomUniquenessChecks(ref checks);
 
     /// <summary>Extension point for adding user-defined uniqueness checks (add delegates to the list in a partial implementation; while unimplemented the call is erased at no cost).</summary>
     partial void CollectCustomUniquenessChecks(
@@ -13208,6 +13167,40 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
 
     /// <summary>Starts a query where filters, ordering, and Include can be specified via a fluent chain.</summary>
     public SqlQuery<TEntity> Query() => new(new SqliteSqlQueryExecutor<TEntity>(_connectionFactory));
+
+    /// <summary>Gets the UNIQUE constraints the pre-check walks (the generated repository overrides this with its own table; empty here).</summary>
+    protected virtual UniquenessConstraintSet<TEntity> UniquenessConstraints =>
+        UniquenessConstraintSet<TEntity>.Empty;
+
+    /// <summary>Collects the user-defined uniqueness checks (the generated repository overrides this to reach its own partial hook).</summary>
+    /// <param name="checks">The list to add the checks to (null until the first one is added).</param>
+    protected virtual void CollectUniquenessChecks(ref List<UniquenessCheck<TEntity>>? checks) { }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
+        TEntity entity,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var constraints = UniquenessConstraints;
+        var violations = await UniquenessChecker
+            .CheckAsync(
+                entity,
+                Query,
+                constraints.ExcludeSelf,
+                constraints.Constraints,
+                cancellationToken
+            )
+            .ConfigureAwait(false);
+
+        List<UniquenessCheck<TEntity>>? customChecks = null;
+        CollectUniquenessChecks(ref customChecks);
+        await UniquenessChecker
+            .RunCustomChecksAsync(entity, customChecks, violations, cancellationToken)
+            .ConfigureAwait(false);
+
+        return violations;
+    }
 
     /// <summary>
     /// Reads an unbounded binary (excluded) column, addressed by primary key, into the destination stream (O(chunk)
@@ -16564,30 +16557,21 @@ public static class GeneratedSqliteRepositoryServiceCollectionExtensions
         services.TryAddScoped<ISaveHookRegistry>(provider => new ServiceProviderSaveHookRegistry(
             provider
         ));
-        services.AddScoped<ISyncOrderRepository>(provider => new SyncOrderRepository(
-            provider.GetRequiredService<ISqlConnectionFactory>(),
-            provider.GetService<ISaveHookRegistry>(),
-            provider.GetService<ISqlExecutor>()
-        ));
-        services.AddScoped<ISyncOrderRemoteRepository>(provider =>
-            provider.GetRequiredService<ISyncOrderRepository>()
-        );
-        services.AddScoped<ISyncOrderLineRepository>(provider => new SyncOrderLineRepository(
-            provider.GetRequiredService<ISqlConnectionFactory>(),
-            provider.GetService<ISaveHookRegistry>(),
-            provider.GetService<ISqlExecutor>()
-        ));
-        services.AddScoped<ISyncOrderLineRemoteRepository>(provider =>
-            provider.GetRequiredService<ISyncOrderLineRepository>()
-        );
-        services.AddScoped<ISyncNoteRepository>(provider => new SyncNoteRepository(
-            provider.GetRequiredService<ISqlConnectionFactory>(),
-            provider.GetService<ISaveHookRegistry>(),
-            provider.GetService<ISqlExecutor>()
-        ));
-        services.AddScoped<ISyncNoteRemoteRepository>(provider =>
-            provider.GetRequiredService<ISyncNoteRepository>()
-        );
+
+        // Both contracts are meant to hand back one repository per scope, so the remote surface forwards to the
+        // full-featured registration instead of being registered on its own
+        void AddRepository<TContract, TRemote, TImplementation>()
+            where TContract : class, TRemote
+            where TRemote : class
+            where TImplementation : class, TContract
+        {
+            services.AddScoped<TContract, TImplementation>();
+            services.AddScoped<TRemote>(provider => provider.GetRequiredService<TContract>());
+        }
+
+        AddRepository<ISyncOrderRepository, ISyncOrderRemoteRepository, SyncOrderRepository>();
+        AddRepository<ISyncOrderLineRepository, ISyncOrderLineRemoteRepository, SyncOrderLineRepository>();
+        AddRepository<ISyncNoteRepository, ISyncNoteRemoteRepository, SyncNoteRepository>();
 
         return services;
     }
@@ -16618,41 +16602,37 @@ public static class GeneratedSqliteRepositoryServiceCollectionExtensions
         services.TryAddScoped<ISaveHookRegistry>(provider => new ServiceProviderSaveHookRegistry(
             provider
         ));
-        services.AddKeyedScoped<ISyncOrderRepository>(
-            serviceKey,
-            (provider, key) => new SyncOrderRepository(
-                connectionFactory,
-                provider.GetService<ISaveHookRegistry>(),
-                provider.GetKeyedService<ISqlExecutor>(key)
-            )
+
+        // Every entity is wired the same way, so the local function holds what they share - the captured connection
+        // factory, the key, and the keyed SQL executor - and each entity contributes only its contract and constructor
+        void AddRepository<TContract, TRemote>(
+            Func<ISqlConnectionFactory, ISaveHookRegistry?, ISqlExecutor?, TContract> create
+        )
+            where TContract : class, TRemote
+            where TRemote : class
+        {
+            services.AddKeyedScoped(
+                serviceKey,
+                (provider, key) => create(
+                    connectionFactory,
+                    provider.GetService<ISaveHookRegistry>(),
+                    provider.GetKeyedService<ISqlExecutor>(key)
+                )
+            );
+            services.AddKeyedScoped<TRemote>(
+                serviceKey,
+                (provider, key) => provider.GetRequiredKeyedService<TContract>(key)
+            );
+        }
+
+        AddRepository<ISyncOrderRepository, ISyncOrderRemoteRepository>(
+            (factory, hooks, executor) => new SyncOrderRepository(factory, hooks, executor)
         );
-        services.AddKeyedScoped<ISyncOrderRemoteRepository>(
-            serviceKey,
-            (provider, key) => provider.GetRequiredKeyedService<ISyncOrderRepository>(key)
+        AddRepository<ISyncOrderLineRepository, ISyncOrderLineRemoteRepository>(
+            (factory, hooks, executor) => new SyncOrderLineRepository(factory, hooks, executor)
         );
-        services.AddKeyedScoped<ISyncOrderLineRepository>(
-            serviceKey,
-            (provider, key) => new SyncOrderLineRepository(
-                connectionFactory,
-                provider.GetService<ISaveHookRegistry>(),
-                provider.GetKeyedService<ISqlExecutor>(key)
-            )
-        );
-        services.AddKeyedScoped<ISyncOrderLineRemoteRepository>(
-            serviceKey,
-            (provider, key) => provider.GetRequiredKeyedService<ISyncOrderLineRepository>(key)
-        );
-        services.AddKeyedScoped<ISyncNoteRepository>(
-            serviceKey,
-            (provider, key) => new SyncNoteRepository(
-                connectionFactory,
-                provider.GetService<ISaveHookRegistry>(),
-                provider.GetKeyedService<ISqlExecutor>(key)
-            )
-        );
-        services.AddKeyedScoped<ISyncNoteRemoteRepository>(
-            serviceKey,
-            (provider, key) => provider.GetRequiredKeyedService<ISyncNoteRepository>(key)
+        AddRepository<ISyncNoteRepository, ISyncNoteRemoteRepository>(
+            (factory, hooks, executor) => new SyncNoteRepository(factory, hooks, executor)
         );
 
         return services;
@@ -16667,22 +16647,9 @@ public sealed partial class SyncOrderRepository(
 ) : SqliteRepository<SyncOrderEntity, int>(connectionFactory, saveHooks, sqlExecutor), ISyncOrderRepository
 {
     /// <inheritdoc />
-    public async Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
-        SyncOrderEntity entity,
-        CancellationToken cancellationToken = default
-    )
-    {
-        ArgumentNullException.ThrowIfNull(entity);
-        var violations = new List<UniquenessViolation>();
-
-        List<UniquenessCheck<SyncOrderEntity>>? customChecks = null;
-        CollectCustomUniquenessChecks(ref customChecks);
-        await UniquenessChecker
-            .RunCustomChecksAsync(entity, customChecks, violations, cancellationToken)
-            .ConfigureAwait(false);
-
-        return violations;
-    }
+    protected override void CollectUniquenessChecks(
+        ref List<UniquenessCheck<SyncOrderEntity>>? checks
+    ) => CollectCustomUniquenessChecks(ref checks);
 
     /// <summary>Extension point for adding user-defined uniqueness checks (add delegates to the list in a partial implementation; while unimplemented the call is erased at no cost).</summary>
     partial void CollectCustomUniquenessChecks(
@@ -16706,22 +16673,9 @@ public sealed partial class SyncOrderLineRepository(
 ) : SqliteRepository<SyncOrderLineEntity, int>(connectionFactory, saveHooks, sqlExecutor), ISyncOrderLineRepository
 {
     /// <inheritdoc />
-    public async Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
-        SyncOrderLineEntity entity,
-        CancellationToken cancellationToken = default
-    )
-    {
-        ArgumentNullException.ThrowIfNull(entity);
-        var violations = new List<UniquenessViolation>();
-
-        List<UniquenessCheck<SyncOrderLineEntity>>? customChecks = null;
-        CollectCustomUniquenessChecks(ref customChecks);
-        await UniquenessChecker
-            .RunCustomChecksAsync(entity, customChecks, violations, cancellationToken)
-            .ConfigureAwait(false);
-
-        return violations;
-    }
+    protected override void CollectUniquenessChecks(
+        ref List<UniquenessCheck<SyncOrderLineEntity>>? checks
+    ) => CollectCustomUniquenessChecks(ref checks);
 
     /// <summary>Extension point for adding user-defined uniqueness checks (add delegates to the list in a partial implementation; while unimplemented the call is erased at no cost).</summary>
     partial void CollectCustomUniquenessChecks(
@@ -16737,22 +16691,9 @@ public sealed partial class SyncNoteRepository(
 ) : SqliteRepository<SyncNoteEntity, int>(connectionFactory, saveHooks, sqlExecutor), ISyncNoteRepository
 {
     /// <inheritdoc />
-    public async Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
-        SyncNoteEntity entity,
-        CancellationToken cancellationToken = default
-    )
-    {
-        ArgumentNullException.ThrowIfNull(entity);
-        var violations = new List<UniquenessViolation>();
-
-        List<UniquenessCheck<SyncNoteEntity>>? customChecks = null;
-        CollectCustomUniquenessChecks(ref customChecks);
-        await UniquenessChecker
-            .RunCustomChecksAsync(entity, customChecks, violations, cancellationToken)
-            .ConfigureAwait(false);
-
-        return violations;
-    }
+    protected override void CollectUniquenessChecks(
+        ref List<UniquenessCheck<SyncNoteEntity>>? checks
+    ) => CollectCustomUniquenessChecks(ref checks);
 
     /// <summary>Extension point for adding user-defined uniqueness checks (add delegates to the list in a partial implementation; while unimplemented the call is erased at no cost).</summary>
     partial void CollectCustomUniquenessChecks(

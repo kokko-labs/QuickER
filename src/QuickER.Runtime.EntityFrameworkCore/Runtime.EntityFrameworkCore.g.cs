@@ -1909,6 +1909,40 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
     public SqlQuery<TEntity> Query() =>
         new(new EfCoreSqlQueryExecutor<TEntity, TContext>(_contextFactory));
 
+    /// <summary>Gets the UNIQUE constraints the pre-check walks (the generated repository overrides this with its own table; empty here).</summary>
+    protected virtual UniquenessConstraintSet<TEntity> UniquenessConstraints =>
+        UniquenessConstraintSet<TEntity>.Empty;
+
+    /// <summary>Collects the user-defined uniqueness checks (the generated repository overrides this to reach its own partial hook).</summary>
+    /// <param name="checks">The list to add the checks to (null until the first one is added).</param>
+    protected virtual void CollectUniquenessChecks(ref List<UniquenessCheck<TEntity>>? checks) { }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
+        TEntity entity,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var constraints = UniquenessConstraints;
+        var violations = await UniquenessChecker
+            .CheckAsync(
+                entity,
+                Query,
+                constraints.ExcludeSelf,
+                constraints.Constraints,
+                cancellationToken
+            )
+            .ConfigureAwait(false);
+
+        List<UniquenessCheck<TEntity>>? customChecks = null;
+        CollectUniquenessChecks(ref customChecks);
+        await UniquenessChecker
+            .RunCustomChecksAsync(entity, customChecks, violations, cancellationToken)
+            .ConfigureAwait(false);
+
+        return violations;
+    }
+
     /// <summary>Saves inserts, updates, and deletes according to RowState within a single transaction (children are cascaded by default).</summary>
     /// <remarks>
     /// Entities carrying a concurrency token (a rowversion column) take part in optimistic concurrency: unless

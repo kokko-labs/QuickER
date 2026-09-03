@@ -453,11 +453,12 @@ internal sealed partial class CSharpGenerationModelBuilder
         return string.Join("\n\n", members);
     }
 
-    /// <summary>ジャーナル記録デコレータへ追加する委譲メンバー（重複事前チェック・名前付きクエリ）を組み立てる</summary>
+    /// <summary>ジャーナル記録デコレータへ追加する委譲メンバー（名前付きクエリ）を組み立てる</summary>
     /// <remarks>
     /// デコレータは <c>I{Entity}Repository</c> の全機能面を実装するため、契約へ載る追加メンバーもすべて素通しで
-    /// 実装しなければならない。重複事前チェックは契約が存在する限り必ず 1 本出るので無条件、名前付きクエリは
-    /// クエリブロック側が同じシグネチャで組み立てたものを使う（契約とのずれが構造的に起きない）。
+    /// 実装しなければならない。名前付きクエリはクエリブロック側が同じシグネチャで組み立てたものを使う
+    /// （契約とのずれが構造的に起きない）。重複事前チェックはランタイム共通面へ上がったため、素通しは基底
+    /// <c>JournalingRepositoryBase</c> が 1 回だけ持つ＝ここでは出さない。
     /// </remarks>
     private string BuildSyncDelegationBlock(
         Entity entity,
@@ -465,14 +466,7 @@ internal sealed partial class CSharpGenerationModelBuilder
         CodeGenerationOptions options
     )
     {
-        var members = new List<string>
-        {
-            "    /// <inheritdoc />\n"
-                + "    public Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(\n"
-                + $"        {repository.EntityClassName} entity,\n"
-                + "        CancellationToken cancellationToken = default\n"
-                + "    ) => _inner.CheckUniquenessAsync(entity, cancellationToken);",
-        };
+        var members = new List<string>();
 
         var queryBlocks = BuildQueryBlocks(
             entity,

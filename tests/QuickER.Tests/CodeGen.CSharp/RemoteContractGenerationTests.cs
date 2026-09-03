@@ -1,4 +1,4 @@
-using AwesomeAssertions;
+﻿using AwesomeAssertions;
 using QuickER.CodeGen.CSharp;
 using QuickER.Model;
 using QuickER.Provider;
@@ -123,11 +123,15 @@ public class RemoteContractGenerationTests
         content.Should().Contain("(connectionFactory, saveHooks, sqlExecutor), IOrderRepository");
         content
             .Should()
-            .Contain("services.AddScoped<IOrderRepository>(provider => new OrderRepository(");
+            .Contain("AddRepository<IOrderRepository, IOrderRemoteRepository, OrderRepository>();");
 
-        // リモート面は同一インスタンスへの転送として追加登録される
-        content.Should().Contain("services.AddScoped<IOrderRemoteRepository>(provider =>");
-        content.Should().Contain("provider.GetRequiredService<IOrderRepository>()");
+        // リモート面は同一インスタンスへの転送として追加登録される（共有ローカル関数が両方を登録する）
+        content.Should().Contain("services.AddScoped<TContract, TImplementation>();");
+        content
+            .Should()
+            .Contain(
+                "services.AddScoped<TRemote>(provider => provider.GetRequiredService<TContract>());"
+            );
     }
 
     /// <summary>OFF（既定）: 一体型契約で、リモート面が出ないことを検証する</summary>
@@ -157,10 +161,8 @@ public class RemoteContractGenerationTests
             );
 
         // DI は単一登録
-        content
-            .Should()
-            .Contain("services.AddScoped<IOrderRepository>(provider => new OrderRepository(");
-        content.Should().NotContain("GetRequiredService<IOrderRepository>");
+        content.Should().Contain("services.AddScoped<IOrderRepository, OrderRepository>();");
+        content.Should().NotContain("IOrderRemoteRepository");
     }
 
     /// <summary>ON×EF Core: EF Core の DI にもリモート面の転送登録が増えることを検証する</summary>
@@ -187,10 +189,16 @@ public class RemoteContractGenerationTests
         content.Should().Contain("public sealed partial class EfCoreOrderRepository(");
         content
             .Should()
-            .Contain("services.AddScoped<IOrderRepository>(provider => new EfCoreOrderRepository(");
+            .Contain(
+                "AddRepository<IOrderRepository, IOrderRemoteRepository, EfCoreOrderRepository>();"
+            );
 
         // リモート面の転送登録が追加される
-        content.Should().Contain("services.AddScoped<IOrderRemoteRepository>(provider =>");
+        content
+            .Should()
+            .Contain(
+                "services.AddScoped<TRemote>(provider => provider.GetRequiredService<TContract>());"
+            );
     }
 
     /// <summary>ON×インメモリ: InMemory の DI にもリモート面の転送登録が増えることを検証する</summary>
@@ -213,8 +221,14 @@ public class RemoteContractGenerationTests
 
         content
             .Should()
-            .Contain("services.AddScoped<IOrderRepository, InMemoryOrderRepository>();");
-        content.Should().Contain("services.AddScoped<IOrderRemoteRepository>(provider =>");
+            .Contain(
+                "AddRepository<IOrderRepository, IOrderRemoteRepository, InMemoryOrderRepository>();"
+            );
+        content
+            .Should()
+            .Contain(
+                "services.AddScoped<TRemote>(provider => provider.GetRequiredService<TContract>());"
+            );
     }
 
     /// <summary>ON×マルチターゲット: keyed DI にもリモート面の転送登録が増えることを検証する</summary>
@@ -241,12 +255,12 @@ public class RemoteContractGenerationTests
         // 非 keyed・keyed の双方で全機能面が実装登録され、リモート面が転送登録される
         content
             .Should()
-            .Contain("services.AddScoped<IOrderRepository>(provider => new OrderRepository(");
-        content.Should().Contain("services.AddKeyedScoped<IOrderRepository>(");
-        content.Should().Contain("services.AddKeyedScoped<IOrderRemoteRepository>(");
+            .Contain("AddRepository<IOrderRepository, IOrderRemoteRepository, OrderRepository>();");
+        content.Should().Contain("AddRepository<IOrderRepository, IOrderRemoteRepository>(");
+        content.Should().Contain("services.AddKeyedScoped<TRemote>(");
         content
             .Should()
-            .Contain("(provider, key) => provider.GetRequiredKeyedService<IOrderRepository>(key)");
+            .Contain("(provider, key) => provider.GetRequiredKeyedService<TContract>(key)");
 
         // 契約（リモート面・全機能面）は中立 namespace に 1 回だけ出る
         content
