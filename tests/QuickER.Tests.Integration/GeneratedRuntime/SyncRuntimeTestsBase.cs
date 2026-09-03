@@ -158,9 +158,24 @@ public abstract class SyncRuntimeTestsBase : IAsyncLifetime
         // こと自体が既存シナリオの互換の主張になっている
         Engine = new SyncEngine(
             [
-                new SyncOrderSyncTable(LocalOrders, LocalSql, sources.Orders),
-                new SyncOrderLineSyncTable(LocalLines, LocalSql, sources.Lines),
-                new SyncNoteSyncTable(LocalNotes, LocalSql, sources.Notes),
+                new SyncTable<SyncOrderEntity, int>(
+                    LocalOrders,
+                    LocalSql,
+                    sources.Orders,
+                    GeneratedSyncTables.SyncOrder
+                ),
+                new SyncTable<SyncOrderLineEntity, int>(
+                    LocalLines,
+                    LocalSql,
+                    sources.Lines,
+                    GeneratedSyncTables.SyncOrderLine
+                ),
+                new VersionlessSyncTable<SyncNoteEntity, int>(
+                    LocalNotes,
+                    LocalSql,
+                    sources.Notes,
+                    GeneratedSyncTables.SyncNote
+                ),
             ],
             Journal
         );

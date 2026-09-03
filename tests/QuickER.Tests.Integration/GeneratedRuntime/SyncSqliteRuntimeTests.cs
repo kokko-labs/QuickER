@@ -54,7 +54,12 @@ public sealed class SyncSqliteRuntimeTests : SyncRuntimeTestsBase
 
         // アンカーを無視して常に先頭バッチを返し、「まだ続きがある」と言い続けるソース
         var stalled = new StalledOrderSource(CreateOrderTestSource());
-        var table = new SyncOrderSyncTable(LocalOrders, LocalSql, stalled);
+        var table = new SyncTable<SyncOrderEntity, int>(
+            LocalOrders,
+            LocalSql,
+            stalled,
+            GeneratedSyncTables.SyncOrder
+        );
 
         var act = async () => await table.DownloadAsync(null, 1, false, Ct);
 
@@ -80,7 +85,12 @@ public sealed class SyncSqliteRuntimeTests : SyncRuntimeTestsBase
         await SeedServerAsync(2, "bob", 12, "gadget");
 
         var versionless = new VersionlessOrderSource(CreateOrderTestSource());
-        var table = new SyncOrderSyncTable(LocalOrders, LocalSql, versionless);
+        var table = new SyncTable<SyncOrderEntity, int>(
+            LocalOrders,
+            LocalSql,
+            versionless,
+            GeneratedSyncTables.SyncOrder
+        );
 
         var act = async () => await table.RefreshAsync(null, 1, false, Ct);
 

@@ -31,16 +31,6 @@ internal sealed class CSharpGenerationModel
     public IReadOnlyList<CSharpSyncTableModel> SyncTables { get; init; } = [];
 
     /// <summary>
-    /// グラフ保存のジャーナル記録クラス（<c>SyncGraphRecorder</c>）の整形済み全文。同期支援が無効なら空文字。
-    /// </summary>
-    /// <remarks>
-    /// デコレータの SaveAsync はルートしか見えないが、保存側（EntityGraphSaver）はカスケードナビゲーションを
-    /// 辿って子孫も書く。記録が保存の決定手順をミラーしないと、カスケード子の変更がジャーナルに載らず
-    /// サイレントなデータ損失になるため、図から静的に組み立てた再帰記録メソッド群をテンプレートへ渡す。
-    /// </remarks>
-    public string SyncGraphRecorder { get; init; } = string.Empty;
-
-    /// <summary>
     /// クエリ糖衣の静的クラス（<c>SqlQueryExtensions</c>）の整形済み全文。Repository 契約が出ない構成では空文字。
     /// </summary>
     /// <remarks>
@@ -78,9 +68,6 @@ internal sealed class CSharpSyncTableModel
     /// <summary>rowversion 列を持たないテーブルか（後勝ちモード専用＝キー順全量ダウンロード・版ガードなし）</summary>
     public required bool IsVersionless { get; init; }
 
-    /// <summary>記述子が継承する固定基底のクラス名（<c>SyncTable</c> または <c>VersionlessSyncTable</c>）</summary>
-    public required string TableBaseClassName { get; init; }
-
     /// <summary>版なしテーブルの先頭ページ取得 SQL（C# 文字列リテラル・SQL Server クォート・キー昇順。版ありでは空文字）</summary>
     public required string ServerPageFirstSql { get; init; }
 
@@ -96,12 +83,6 @@ internal sealed class CSharpSyncTableModel
     /// <summary>対象テーブル名（ジャーナルへ記録する識別子でもある）</summary>
     public required string TableName { get; init; }
 
-    /// <summary>直結差分ソースのクラス名（例 <c>SyncItemDirectSyncSource</c>）</summary>
-    public required string SourceClassName { get; init; }
-
-    /// <summary>HTTP 差分ソースのクラス名（例 <c>HttpSyncItemSyncSource</c>・リモートサービス生成時のみ出力）</summary>
-    public required string HttpSourceClassName { get; init; }
-
     /// <summary>
     /// リモートエンドポイントのルート名（例 <c>SyncItem</c>）＝<see cref="CSharpRepositoryModel.RemoteRouteName"/> と同値。
     /// </summary>
@@ -111,17 +92,18 @@ internal sealed class CSharpSyncTableModel
     /// </remarks>
     public required string RemoteRouteName { get; init; }
 
-    /// <summary>同期記述子のクラス名（例 <c>SyncItemSyncTable</c>）</summary>
-    public required string TableClassName { get; init; }
+    /// <summary>記述子（<c>SyncTableDescriptor</c>）を公開する静的プロパティ名（例 <c>SyncItem</c>）</summary>
+    /// <remarks>
+    /// 記述子は <c>GeneratedSyncTables</c> の静的プロパティとして 1 テーブル 1 つ出る。デコレータ・DI 登録・
+    /// グラフ記録レジストリはすべてこの名前で同じ実体を引く（テーブルごとのクラスはもう出ない）。
+    /// </remarks>
+    public required string DescriptorPropertyName { get; init; }
 
     /// <summary>ジャーナル記録デコレータのクラス名（例 <c>JournalingSyncItemRepository</c>）</summary>
     public required string DecoratorClassName { get; init; }
 
     /// <summary>デコレータが継承する汎用基底名（版あり <c>JournalingRepository</c>／版なし <c>VersionlessJournalingRepository</c>）</summary>
     public required string DecoratorBaseClassName { get; init; }
-
-    /// <summary>直結差分ソースが継承する汎用基底名（版あり <c>DirectSyncSource</c>／版なし <c>VersionlessDirectSyncSource</c>）</summary>
-    public required string SourceBaseClassName { get; init; }
 
     /// <summary>主キーのプロパティ名</summary>
     public required string KeyPropertyName { get; init; }
@@ -153,9 +135,6 @@ internal sealed class CSharpSyncTableModel
     /// <summary>キー変数 <c>key</c> をジャーナルのテキスト形へ変換する式</summary>
     public required string FormatKeyExpression { get; init; }
 
-    /// <summary>デコレータで <c>entity</c> の主キーをテキスト形へ変換する式</summary>
-    public required string FormatKeyEntityExpression { get; init; }
-
     /// <summary>デコレータで引数 <c>id</c> をテキスト形へ変換する式</summary>
     public required string FormatKeyIdExpression { get; init; }
 
@@ -174,17 +153,12 @@ internal sealed class CSharpSyncTableModel
     /// </remarks>
     public IReadOnlyList<string> BinaryColumnPropertyNames { get; init; } = [];
 
-    /// <summary>同期記述子へ足す実装インターフェイス宣言（除外列があるとき <c>, ISyncBinaryColumns&lt;キー型&gt;</c>・無ければ空文字）</summary>
-    public string BinaryInterfaceDeclaration { get; init; } = string.Empty;
-
-    /// <summary>直結差分ソースへ挿入する除外列アクセサ実装（整形済み・無ければ空文字）</summary>
-    public string DirectSourceBinaryBlock { get; init; } = string.Empty;
-
-    /// <summary>HTTP 差分ソースへ挿入する除外列アクセサ実装（整形済み・無ければ空文字）</summary>
-    public string HttpSourceBinaryBlock { get; init; } = string.Empty;
-
-    /// <summary>同期記述子へ挿入するローカル側の除外列アクセサ実装（整形済み・無ければ空文字）</summary>
-    public string TableBinaryBlock { get; init; } = string.Empty;
+    /// <summary>記述子の初期化子へ挿入する除外列の宣言（列名一覧＋アクセサ表・整形済み・無ければ空文字）</summary>
+    /// <remarks>
+    /// アクセサは具象契約（<c>I{Entity}Repository</c>）のメンバーで固定側から名指しできないため、
+    /// <c>object</c> を受けて具象へキャストするラムダとして記述子へ載せる。キャストを知るのはこの生成物だけ。
+    /// </remarks>
+    public string BinaryAccessorsBlock { get; init; } = string.Empty;
 
     /// <summary>ジャーナル記録デコレータへ挿入する除外列アクセサ（Read は素通し・Write は journal-first。無ければ空文字）</summary>
     public string DecoratorBinaryBlock { get; init; } = string.Empty;

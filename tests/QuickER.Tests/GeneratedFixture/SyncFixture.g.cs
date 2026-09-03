@@ -551,7 +551,13 @@ public abstract partial class EntityBase
         );
 
     /// <summary>Enumerates the children reachable through cascade navigations (single references and collections alike; nulls are skipped).</summary>
-    private IEnumerable<EntityBase> EnumerateCascadeChildren()
+    /// <remarks>
+    /// This is the one description of "which children a graph operation follows", and everything that has to walk the same
+    /// shape - marking an aggregate, saving it, journaling it for a sync run - reads it from here rather than repeating the
+    /// attribute scan. Cascade navigations point at children only (parent references are excluded), so the traversal is a
+    /// tree and terminates.
+    /// </remarks>
+    public IEnumerable<EntityBase> EnumerateCascadeChildren()
     {
         foreach (var navigation in GetCascadeNavigations(GetType()))
         {
@@ -4927,6 +4933,216 @@ public interface ISyncBinaryColumns<TKey>
     );
 }
 
+/// <summary>How one unbounded binary column is read from and written to a repository that owns it.</summary>
+/// <remarks>
+/// The repository arrives untyped because these accessors are declared on the concrete generated contract
+/// (<c>ISyncOrderRepository</c> and the like), which the fixed engine has no way to name. The generated lambda is the
+/// only place that knows the type, and it casts back to it there.
+/// </remarks>
+/// <param name="Read">Reads the column into the destination stream (false = no row, or the column is NULL).</param>
+/// <param name="Write">Writes the column from a stream, or sets it to NULL when the stream is null (false = no row).</param>
+/// <typeparam name="TKey">The primary key type.</typeparam>
+public sealed record SyncBinaryColumnAccessor<TKey>(
+    Func<object, TKey, Stream, CancellationToken, Task<bool>> Read,
+    Func<object, TKey, Stream?, long?, CancellationToken, Task<bool>> Write
+);
+
+/// <summary>Everything about one synchronised table that the journal recorder needs, with the entity's types erased.</summary>
+/// <remarks>
+/// The recorder walks a graph of <see cref="EntityBase"/> without knowing any entity type, so it looks a node's table up
+/// by its CLR type and asks the descriptor it finds for the two things a journal entry carries.
+/// </remarks>
+public interface ISyncTableDescriptor
+{
+    /// <summary>The table name, as it appears in the journal.</summary>
+    string TableName { get; }
+
+    /// <summary>The CLR entity type the table synchronises.</summary>
+    Type EntityType { get; }
+
+    /// <summary>Renders the entity's primary key into the text form the journal stores.</summary>
+    /// <param name="entity">An entity of <see cref="EntityType"/>.</param>
+    string FormatEntityKey(EntityBase entity);
+
+    /// <summary>Reads the mirrored server version off the entity (null for a table without a version column).</summary>
+    /// <param name="entity">An entity of <see cref="EntityType"/>.</param>
+    byte[]? ReadEntityRowVersion(EntityBase entity);
+}
+
+/// <summary>
+/// Everything about one synchronised table that depends on the diagram: its name, the SQL that carries its identity, and
+/// how the key and the mirrored version are read off an entity and written back.
+/// </summary>
+/// <remarks>
+/// <para>
+/// This is the whole of what the generator emits per table. The behaviour - batching, anchor derivation, delete
+/// propagation, the replay of a journal entry - lives once in the fixed classes that take a descriptor
+/// (<see cref="SyncTable{TEntity, TKey}"/>, <see cref="VersionlessSyncTable{TEntity, TKey}"/>,
+/// <see cref="DirectSyncSource{TEntity, TKey}"/> and its versionless counterpart), so a table contributes data rather
+/// than a class of its own.
+/// </para>
+/// <para>
+/// The SQL is text baked in at generation time rather than assembled at run time: the two dialects a sync setup spans
+/// (SQL Server for the server, SQLite for the local database) quote differently, and the generator is where both are
+/// known.
+/// </para>
+/// </remarks>
+/// <typeparam name="TEntity">The entity type.</typeparam>
+/// <typeparam name="TKey">The primary key type.</typeparam>
+public sealed class SyncTableDescriptor<TEntity, TKey> : ISyncTableDescriptor
+    where TEntity : EntityBase, new()
+{
+    /// <inheritdoc />
+    public required string TableName { get; init; }
+
+    /// <summary>The remote endpoint route of the entity (for example "SyncOrder").</summary>
+    public required string RemoteRouteName { get; init; }
+
+    /// <summary>
+    /// Whether the table has no version column - synchronised only by <see cref="SyncMode.LastWriteWins"/> runs,
+    /// downloaded as a full key-ordered scan, and uploaded without version guards.
+    /// </summary>
+    public required bool IsVersionless { get; init; }
+
+    /// <inheritdoc />
+    public Type EntityType => typeof(TEntity);
+
+    /// <summary>Reads the entity's primary key.</summary>
+    public required Func<TEntity, TKey> ReadKey { get; init; }
+
+    /// <summary>Writes the entity's primary key (used to build the stub a version-guarded delete is sent as).</summary>
+    public required Action<TEntity, TKey> WriteKey { get; init; }
+
+    /// <summary>Renders a primary key into the text form the journal stores.</summary>
+    public required Func<TKey, string> FormatKey { get; init; }
+
+    /// <summary>Parses a primary key back out of the journal's text form.</summary>
+    public required Func<string, TKey> ParseKey { get; init; }
+
+    /// <summary>Reads the mirrored server version off the entity.</summary>
+    /// <remarks>
+    /// The default answers null, which is what a table without a version column has to say: the delete entries it
+    /// records carry no version, and nothing else ever asks.
+    /// </remarks>
+    public Func<TEntity, byte[]?> ReadRowVersion { get; init; } = static _ => null;
+
+    /// <summary>Writes the mirrored server version onto the entity.</summary>
+    /// <remarks>The default does nothing, and is never reached: only a versioned table writes a mirrored version.</remarks>
+    public Action<TEntity, byte[]?> WriteRowVersion { get; init; } = static (_, _) => { };
+
+    /// <summary>SELECT that returns every primary key of the server table (SQL Server quoting).</summary>
+    public required string ServerKeysSql { get; init; }
+
+    /// <summary>SELECT that returns one ascending batch of server rows above the anchor and below the ceiling (versioned tables).</summary>
+    public string ServerChangesSql { get; init; } = string.Empty;
+
+    /// <summary>SELECT that returns the first ascending batch of server rows by primary key (versionless tables).</summary>
+    public string ServerPageFirstSql { get; init; } = string.Empty;
+
+    /// <summary>SELECT that returns the next ascending batch of server rows above a key (versionless tables).</summary>
+    public string ServerPageAfterSql { get; init; } = string.Empty;
+
+    /// <summary>SELECT that returns the highest mirrored version among the local rows (the derived resume point).</summary>
+    public string LocalAnchorSql { get; init; } = string.Empty;
+
+    /// <summary>SELECT that returns every local primary key.</summary>
+    public required string LocalKeysSql { get; init; }
+
+    /// <summary>SELECT that returns the local primary keys within a given set (bound as the collection parameter <c>@keys</c>).</summary>
+    public required string LocalExistingKeysSql { get; init; }
+
+    /// <summary>DELETE that empties the local table (the first half of a refresh).</summary>
+    public required string LocalDeleteAllSql { get; init; }
+
+    /// <summary>The unbounded binary columns the ordinary row transfer leaves out (empty when the table has none).</summary>
+    public IReadOnlyList<string> UnboundedBinaryColumnNames { get; init; } = [];
+
+    /// <summary>The repository accessors for those columns, by column name (empty when the table has none).</summary>
+    public IReadOnlyDictionary<string, SyncBinaryColumnAccessor<TKey>> UnboundedBinaryAccessors
+    {
+        get;
+        init;
+    } = new Dictionary<string, SyncBinaryColumnAccessor<TKey>>(StringComparer.Ordinal);
+
+    /// <inheritdoc />
+    public string FormatEntityKey(EntityBase entity)
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+
+        return FormatKey(ReadKey((TEntity)entity));
+    }
+
+    /// <inheritdoc />
+    public byte[]? ReadEntityRowVersion(EntityBase entity)
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+
+        return ReadRowVersion((TEntity)entity);
+    }
+}
+
+/// <summary>
+/// One side's unbounded binary columns, reached by column name through the repository that owns them.
+/// </summary>
+/// <remarks>
+/// The same class serves the local database and a directly connected server, because both are reached through a
+/// generated repository; only the instance differs. A column outside the descriptor's list is rejected rather than
+/// ignored, for the reason <see cref="ISyncBinaryColumns{TKey}"/> gives.
+/// </remarks>
+/// <typeparam name="TEntity">The entity type.</typeparam>
+/// <typeparam name="TKey">The primary key type.</typeparam>
+public sealed class SyncRepositoryBinaryColumns<TEntity, TKey> : ISyncBinaryColumns<TKey>
+    where TEntity : EntityBase, new()
+{
+    private readonly SyncTableDescriptor<TEntity, TKey> _descriptor;
+    private readonly object _repository;
+
+    /// <summary>Creates the surface over the table's descriptor and the repository the columns are stored in.</summary>
+    /// <param name="descriptor">The table's descriptor, which names the columns and holds their accessors.</param>
+    /// <param name="repository">The generated repository instance the accessors are invoked on.</param>
+    public SyncRepositoryBinaryColumns(
+        SyncTableDescriptor<TEntity, TKey> descriptor,
+        object repository
+    )
+    {
+        ArgumentNullException.ThrowIfNull(descriptor);
+        ArgumentNullException.ThrowIfNull(repository);
+        _descriptor = descriptor;
+        _repository = repository;
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<string> UnboundedBinaryColumnNames =>
+        _descriptor.UnboundedBinaryColumnNames;
+
+    /// <inheritdoc />
+    public Task<bool> ReadUnboundedBinaryAsync(
+        string columnName,
+        TKey id,
+        Stream destination,
+        CancellationToken cancellationToken = default
+    ) => Accessor(columnName).Read(_repository, id, destination, cancellationToken);
+
+    /// <inheritdoc />
+    public Task<bool> WriteUnboundedBinaryAsync(
+        string columnName,
+        TKey id,
+        Stream? source,
+        long? length,
+        CancellationToken cancellationToken = default
+    ) => Accessor(columnName).Write(_repository, id, source, length, cancellationToken);
+
+    /// <summary>Looks the accessors of one column up, refusing a name the table does not have.</summary>
+    private SyncBinaryColumnAccessor<TKey> Accessor(string columnName) =>
+        _descriptor.UnboundedBinaryAccessors.TryGetValue(columnName, out var accessor)
+            ? accessor
+            : throw new ArgumentOutOfRangeException(
+                nameof(columnName),
+                columnName,
+                "The column is not an unbounded binary column of this table."
+            );
+}
+
 /// <summary>
 /// The server side of the differential source for one entity type: where changed rows, the change ceiling, and the key
 /// set come from, and which repository the local changes are replayed against.
@@ -5120,65 +5336,78 @@ public abstract class SyncTableBase<TEntity, TKey> : ISyncTable
     /// <summary>The server side: where changed rows and key sets come from, and where local changes are replayed to.</summary>
     protected readonly ISyncServerSource<TEntity, TKey> _server;
 
-    /// <summary>Creates the table with its local repository, the local raw SQL surface, and the server source.</summary>
+    /// <summary>The table's generated descriptor (its name, its SQL, and how a key and a version are read and written).</summary>
+    protected readonly SyncTableDescriptor<TEntity, TKey> _descriptor;
+
+    /// <summary>The local side's unbounded binary columns, built once because a copy asks for them per row.</summary>
+    private readonly ISyncBinaryColumns<TKey>? _localBinaryColumns;
+
+    /// <summary>Creates the table with its local repository, the local raw SQL surface, the server source, and its descriptor.</summary>
     protected SyncTableBase(
         IRepository<TEntity, TKey> local,
         ISqlExecutor localSqlExecutor,
-        ISyncServerSource<TEntity, TKey> server
+        ISyncServerSource<TEntity, TKey> server,
+        SyncTableDescriptor<TEntity, TKey> descriptor
     )
     {
         ArgumentNullException.ThrowIfNull(local);
         ArgumentNullException.ThrowIfNull(localSqlExecutor);
         ArgumentNullException.ThrowIfNull(server);
+        ArgumentNullException.ThrowIfNull(descriptor);
         _local = local;
         _localSqlExecutor = localSqlExecutor;
         _server = server;
+        _descriptor = descriptor;
+        _localBinaryColumns =
+            descriptor.UnboundedBinaryColumnNames.Count == 0
+                ? null
+                : new SyncRepositoryBinaryColumns<TEntity, TKey>(descriptor, local);
     }
 
     /// <inheritdoc />
-    public abstract string TableName { get; }
+    public string TableName => _descriptor.TableName;
 
     /// <inheritdoc />
     public Type EntityType => typeof(TEntity);
 
     /// <inheritdoc />
-    public abstract bool IsVersionless { get; }
+    public bool IsVersionless => _descriptor.IsVersionless;
 
     /// <summary>The local side's unbounded binary columns, or null when the table has none.</summary>
     /// <remarks>
-    /// Overridden by the generated subclass only when the table has such columns; the two sides are asked separately
-    /// because either one can be absent, and a copy needs both.
+    /// Null exactly when the descriptor names no such column; the two sides are asked separately because either one can
+    /// be absent, and a copy needs both.
     /// </remarks>
-    protected virtual ISyncBinaryColumns<TKey>? LocalBinaryColumns => null;
+    protected ISyncBinaryColumns<TKey>? LocalBinaryColumns => _localBinaryColumns;
 
     /// <inheritdoc />
     /// <remarks>
-    /// Empty unless the generated subclass overrides it, which it does exactly when the table has such columns - and
-    /// that one property then satisfies <see cref="ISyncTable"/> and <see cref="ISyncBinaryColumns{TKey}"/> alike, so
-    /// the names the engine reads and the names the copy iterates cannot come apart.
+    /// The descriptor's own list, which is also what the local copy iterates, so the names the engine reads and the
+    /// names the copy walks cannot come apart.
     /// </remarks>
-    public virtual IReadOnlyList<string> UnboundedBinaryColumnNames => [];
+    public IReadOnlyList<string> UnboundedBinaryColumnNames =>
+        _descriptor.UnboundedBinaryColumnNames;
 
     /// <summary>SELECT that returns every local primary key.</summary>
-    protected abstract string LocalKeysSql { get; }
+    protected string LocalKeysSql => _descriptor.LocalKeysSql;
 
     /// <summary>SELECT that returns the local primary keys within a given set (bound as the collection parameter <c>@keys</c>).</summary>
-    protected abstract string LocalExistingKeysSql { get; }
+    protected string LocalExistingKeysSql => _descriptor.LocalExistingKeysSql;
 
     /// <summary>DELETE that empties the local table (the first half of a refresh).</summary>
-    protected abstract string LocalDeleteAllSql { get; }
+    protected string LocalDeleteAllSql => _descriptor.LocalDeleteAllSql;
 
     /// <summary>Reads the entity's primary key.</summary>
-    protected abstract TKey ReadKey(TEntity entity);
+    protected TKey ReadKey(TEntity entity) => _descriptor.ReadKey(entity);
 
     /// <summary>Writes the entity's primary key (used to build the stub a version-guarded delete is sent as).</summary>
-    protected abstract void WriteKey(TEntity entity, TKey key);
+    protected void WriteKey(TEntity entity, TKey key) => _descriptor.WriteKey(entity, key);
 
     /// <summary>Renders a primary key into the text form the journal stores.</summary>
-    public abstract string FormatKey(TKey key);
+    public string FormatKey(TKey key) => _descriptor.FormatKey(key);
 
     /// <summary>Parses a primary key back out of the journal's text form.</summary>
-    public abstract TKey ParseKey(string keyText);
+    public TKey ParseKey(string keyText) => _descriptor.ParseKey(keyText);
 
     /// <inheritdoc />
     public virtual Task<byte[]?> GetChangeCeilingAsync(
@@ -5573,9 +5802,9 @@ public abstract class SyncTableBase<TEntity, TKey> : ISyncTable
 /// </summary>
 /// <remarks>
 /// <para>
-/// The generated subclass supplies only what depends on the diagram - the table name, the SQL that reads the local
-/// anchor and key set, how to read and write the key and the mirrored version on the entity, and how a key turns into
-/// the journal's text form and back.
+/// The descriptor supplies everything that depends on the diagram - the table name, the SQL that reads the local anchor
+/// and key set, how to read and write the key and the mirrored version on the entity, and how a key turns into the
+/// journal's text form and back.
 /// </para>
 /// <para>
 /// <b>The resume point is derived, never stored.</b> The anchor is the maximum mirrored version among the local rows,
@@ -5588,28 +5817,27 @@ public abstract class SyncTableBase<TEntity, TKey> : ISyncTable
 /// </remarks>
 /// <typeparam name="TEntity">The entity type.</typeparam>
 /// <typeparam name="TKey">The primary key type.</typeparam>
-public abstract class SyncTable<TEntity, TKey> : SyncTableBase<TEntity, TKey>
+public sealed class SyncTable<TEntity, TKey> : SyncTableBase<TEntity, TKey>
     where TEntity : EntityBase, new()
 {
-    /// <summary>Creates the table with its local repository, the local raw SQL surface, and the server source.</summary>
-    protected SyncTable(
+    /// <summary>Creates the table with its local repository, the local raw SQL surface, the server source, and its descriptor.</summary>
+    public SyncTable(
         IRepository<TEntity, TKey> local,
         ISqlExecutor localSqlExecutor,
-        ISyncServerSource<TEntity, TKey> server
+        ISyncServerSource<TEntity, TKey> server,
+        SyncTableDescriptor<TEntity, TKey> descriptor
     )
-        : base(local, localSqlExecutor, server) { }
-
-    /// <inheritdoc />
-    public override bool IsVersionless => false;
+        : base(local, localSqlExecutor, server, descriptor) { }
 
     /// <summary>SELECT that returns the highest mirrored version among the local rows (the derived resume point).</summary>
-    protected abstract string LocalAnchorSql { get; }
+    private string LocalAnchorSql => _descriptor.LocalAnchorSql;
 
     /// <summary>Reads the mirrored server version off the entity (null when the row has never been uploaded).</summary>
-    protected abstract byte[]? ReadRowVersion(TEntity entity);
+    private byte[]? ReadRowVersion(TEntity entity) => _descriptor.ReadRowVersion(entity);
 
     /// <summary>Writes the mirrored server version onto the entity.</summary>
-    protected abstract void WriteRowVersion(TEntity entity, byte[]? rowVersion);
+    private void WriteRowVersion(TEntity entity, byte[]? rowVersion) =>
+        _descriptor.WriteRowVersion(entity, rowVersion);
 
     /// <inheritdoc />
     public override async Task<int> DownloadAsync(
@@ -6065,19 +6293,17 @@ public abstract class SyncTable<TEntity, TKey> : SyncTableBase<TEntity, TKey>
 /// </remarks>
 /// <typeparam name="TEntity">The entity type.</typeparam>
 /// <typeparam name="TKey">The primary key type.</typeparam>
-public abstract class VersionlessSyncTable<TEntity, TKey> : SyncTableBase<TEntity, TKey>
+public sealed class VersionlessSyncTable<TEntity, TKey> : SyncTableBase<TEntity, TKey>
     where TEntity : EntityBase, new()
 {
-    /// <summary>Creates the table with its local repository, the local raw SQL surface, and the server source.</summary>
-    protected VersionlessSyncTable(
+    /// <summary>Creates the table with its local repository, the local raw SQL surface, the server source, and its descriptor.</summary>
+    public VersionlessSyncTable(
         IRepository<TEntity, TKey> local,
         ISqlExecutor localSqlExecutor,
-        ISyncServerSource<TEntity, TKey> server
+        ISyncServerSource<TEntity, TKey> server,
+        SyncTableDescriptor<TEntity, TKey> descriptor
     )
-        : base(local, localSqlExecutor, server) { }
-
-    /// <inheritdoc />
-    public override bool IsVersionless => true;
+        : base(local, localSqlExecutor, server, descriptor) { }
 
     /// <inheritdoc />
     /// <remarks>A key-ordered scan has no version to bound, so the answer is always null and the engine never asks.</remarks>
@@ -6763,6 +6989,136 @@ public sealed class SyncEngine
 }
 
 /// <summary>
+/// Records the journal entries a graph save is about to need, before the save itself runs ("journal-first").
+/// </summary>
+/// <remarks>
+/// <para>
+/// The traversal mirrors the decision procedure of the graph saver: a removed node has its cascade subtree recorded as
+/// deletes (children first, each regardless of its own state) followed by the node itself, an added or updated node is
+/// recorded as an upsert, and an unchanged node contributes nothing of its own - but its children are still visited
+/// while the save cascades, because a changed child under an unchanged root is written all the same.
+/// </para>
+/// <para>
+/// It is one traversal rather than one per entity type: the children come from
+/// <see cref="EntityBase.EnumerateCascadeChildren"/>, the very method the saver's own walk is built on, and a node is
+/// recorded only when its CLR type has a descriptor. A table on the path that is not synchronised is therefore walked
+/// through without an entry of its own, and a subtree holding no synchronised table records nothing.
+/// </para>
+/// <para>
+/// Recording the whole graph first keeps the journal-first safety order for every row the save is going to touch: an
+/// entry whose write then fails or is rolled back describes a row the upload re-reads and settles without a round trip.
+/// </para>
+/// </remarks>
+public sealed class SyncGraphRecorder
+{
+    private readonly Dictionary<Type, ISyncTableDescriptor> _descriptors;
+
+    /// <summary>Creates the recorder over the descriptors of every synchronised table.</summary>
+    /// <remarks>
+    /// Every table the diagram synchronises belongs here, including one a particular engine was built without: the
+    /// journal is shared, and a graph save reaching such a table records it exactly as it did before the exclusion.
+    /// </remarks>
+    /// <param name="descriptors">The descriptors, one per synchronised table.</param>
+    public SyncGraphRecorder(IEnumerable<ISyncTableDescriptor> descriptors)
+    {
+        ArgumentNullException.ThrowIfNull(descriptors);
+        _descriptors = descriptors.ToDictionary(descriptor => descriptor.EntityType);
+    }
+
+    /// <summary>Records the entries for a graph save rooted at the given entity (the cascade children included).</summary>
+    /// <param name="journal">The journal the entries are recorded to.</param>
+    /// <param name="entity">The root of the graph the save was asked for.</param>
+    /// <param name="cascadeSave">Whether the save cascades into the children.</param>
+    /// <param name="cascadeDelete">Whether removing the root removes its subtree.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    public async Task RecordSaveAsync(
+        SyncJournal journal,
+        EntityBase entity,
+        bool cascadeSave,
+        bool cascadeDelete,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(journal);
+        ArgumentNullException.ThrowIfNull(entity);
+
+        if (entity.RowState == RowState.Removed)
+        {
+            if (cascadeDelete)
+            {
+                await RecordDeleteGraphAsync(journal, entity, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            else
+            {
+                await RecordDeleteAsync(journal, entity, cancellationToken).ConfigureAwait(false);
+            }
+
+            return;
+        }
+
+        if (entity.RowState != RowState.Unchanged && Find(entity) is { } descriptor)
+        {
+            await journal
+                .RecordAsync(
+                    descriptor.TableName,
+                    descriptor.FormatEntityKey(entity),
+                    SyncJournalOperation.Upsert,
+                    null,
+                    cancellationToken
+                )
+                .ConfigureAwait(false);
+        }
+
+        if (!cascadeSave)
+        {
+            return;
+        }
+
+        foreach (var child in entity.EnumerateCascadeChildren())
+        {
+            await RecordSaveAsync(journal, child, cascadeSave, cascadeDelete, cancellationToken)
+                .ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Records the whole subtree as deletes, children first (the saver removes them regardless of their own state).</summary>
+    private async Task RecordDeleteGraphAsync(
+        SyncJournal journal,
+        EntityBase entity,
+        CancellationToken cancellationToken
+    )
+    {
+        foreach (var child in entity.EnumerateCascadeChildren())
+        {
+            await RecordDeleteGraphAsync(journal, child, cancellationToken).ConfigureAwait(false);
+        }
+
+        await RecordDeleteAsync(journal, entity, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Records the delete of one node, carrying the mirrored version the row holds (nothing for an unsynchronised table).</summary>
+    private Task RecordDeleteAsync(
+        SyncJournal journal,
+        EntityBase entity,
+        CancellationToken cancellationToken
+    ) =>
+        Find(entity) is { } descriptor
+            ? journal.RecordAsync(
+                descriptor.TableName,
+                descriptor.FormatEntityKey(entity),
+                SyncJournalOperation.Delete,
+                descriptor.ReadEntityRowVersion(entity),
+                cancellationToken
+            )
+            : Task.CompletedTask;
+
+    /// <summary>Finds the descriptor of the node's table, or null when the table is not synchronised.</summary>
+    private ISyncTableDescriptor? Find(EntityBase entity) =>
+        _descriptors.GetValueOrDefault(entity.GetType());
+}
+
+/// <summary>
 /// Generic core of the journaling repository decorator: every write entry point on the repository contract records
 /// its intent to the journal before the write is performed, and everything else is forwarded untouched.
 /// </summary>
@@ -6771,9 +7127,8 @@ public sealed class SyncEngine
 /// It wraps the repository rather than hooking into the save pipeline because a save hook only fires for a graph save -
 /// a direct Insert, Update, Delete, or BulkInsert passes it by. Offline editing has to be caught at every write, so
 /// every write entry point on the contract records here. What stays with the generated derived class is only what the
-/// generic core cannot know: the table's name and key handling, and the graph-save recording, which walks the
-/// generated cascade closure (plus the members the concrete interface adds - named queries, the uniqueness pre-check,
-/// and the binary column accessors - which the derived class forwards itself).
+/// generic core cannot reach: the members the concrete interface adds - named queries and the binary column accessors -
+/// which the derived class forwards itself.
 /// </para>
 /// <para>
 /// Raw SQL (<c>ExecuteSqlAsync</c>) is forwarded untouched and is <b>not</b> recorded: the statement's shape is opaque
@@ -6787,11 +7142,20 @@ public sealed class SyncEngine
 public abstract class JournalingRepositoryBase<TEntity, TKey> : IRepository<TEntity, TKey>
     where TEntity : EntityBase, new()
 {
-    /// <summary>Creates the decorator over the repository it wraps and the journal it records to.</summary>
-    protected JournalingRepositoryBase(IRepository<TEntity, TKey> inner, SyncJournal journal)
+    /// <summary>Creates the decorator over the repository it wraps, the journal, the table's descriptor, and the graph recorder.</summary>
+    protected JournalingRepositoryBase(
+        IRepository<TEntity, TKey> inner,
+        SyncJournal journal,
+        SyncTableDescriptor<TEntity, TKey> descriptor,
+        SyncGraphRecorder graphRecorder
+    )
     {
+        ArgumentNullException.ThrowIfNull(descriptor);
+        ArgumentNullException.ThrowIfNull(graphRecorder);
         Inner = inner;
         Journal = journal;
+        Descriptor = descriptor;
+        GraphRecorder = graphRecorder;
     }
 
     /// <summary>Gets the wrapped repository every call is forwarded to.</summary>
@@ -6800,25 +7164,43 @@ public abstract class JournalingRepositoryBase<TEntity, TKey> : IRepository<TEnt
     /// <summary>Gets the journal the write intents are recorded to.</summary>
     protected SyncJournal Journal { get; }
 
+    /// <summary>Gets the table's descriptor (its journal name, and how its key and mirrored version are read).</summary>
+    protected SyncTableDescriptor<TEntity, TKey> Descriptor { get; }
+
+    /// <summary>Gets the recorder that journals the whole cascade a graph save is about to write.</summary>
+    protected SyncGraphRecorder GraphRecorder { get; }
+
     /// <summary>Gets the server-side table name the journal entries are recorded under.</summary>
-    protected abstract string TableName { get; }
+    protected string TableName => Descriptor.TableName;
 
     /// <summary>Reads the primary key of the given entity.</summary>
-    protected abstract TKey ReadKey(TEntity entity);
+    protected TKey ReadKey(TEntity entity) => Descriptor.ReadKey(entity);
 
     /// <summary>Formats a key into the journal's key text (the same serialization the sync engine reads back).</summary>
-    protected abstract string FormatKey(TKey key);
+    protected string FormatKey(TKey key) => Descriptor.FormatKey(key);
 
     /// <summary>Records a delete intent for the given key (the versioned and versionless subclasses differ here).</summary>
     protected abstract Task RecordDeleteAsync(TKey id, CancellationToken cancellationToken);
 
-    /// <summary>Records a graph save via the generated cascade recorder (the closure is schema knowledge the core cannot have).</summary>
-    protected abstract Task RecordGraphSaveAsync(
+    /// <summary>Records the whole cascade a graph save is about to write, before the save itself runs.</summary>
+    /// <remarks>
+    /// The decorator sees only the root, while the saver walks the cascade navigations and writes the descendants too.
+    /// The recorder walks the same navigations, so the children a save writes or deletes are journaled exactly like the
+    /// root - and a table on the path that is not synchronised is walked through without an entry of its own.
+    /// </remarks>
+    protected Task RecordGraphSaveAsync(
         TEntity entity,
         bool cascadeSave,
         bool cascadeDelete,
         CancellationToken cancellationToken
-    );
+    ) =>
+        GraphRecorder.RecordSaveAsync(
+            Journal,
+            entity,
+            cascadeSave,
+            cascadeDelete,
+            cancellationToken
+        );
 
     /// <summary>Records the intent to write the given row, unless the sync engine is the one writing.</summary>
     protected Task RecordUpsertAsync(TEntity entity, CancellationToken cancellationToken) =>
@@ -6984,12 +7366,17 @@ public abstract class JournalingRepositoryBase<TEntity, TKey> : IRepository<TEnt
 public abstract class JournalingRepository<TEntity, TKey> : JournalingRepositoryBase<TEntity, TKey>
     where TEntity : EntityBase, new()
 {
-    /// <summary>Creates the decorator over the repository it wraps and the journal it records to.</summary>
-    protected JournalingRepository(IRepository<TEntity, TKey> inner, SyncJournal journal)
-        : base(inner, journal) { }
+    /// <summary>Creates the decorator over the repository it wraps, the journal, the table's descriptor, and the graph recorder.</summary>
+    protected JournalingRepository(
+        IRepository<TEntity, TKey> inner,
+        SyncJournal journal,
+        SyncTableDescriptor<TEntity, TKey> descriptor,
+        SyncGraphRecorder graphRecorder
+    )
+        : base(inner, journal, descriptor, graphRecorder) { }
 
     /// <summary>Reads the mirrored row version of the given entity.</summary>
-    protected abstract byte[]? ReadRowVersion(TEntity entity);
+    private byte[]? ReadRowVersion(TEntity entity) => Descriptor.ReadRowVersion(entity);
 
     /// <inheritdoc />
     protected sealed override async Task RecordDeleteAsync(
@@ -7021,9 +7408,14 @@ public abstract class VersionlessJournalingRepository<TEntity, TKey>
     : JournalingRepositoryBase<TEntity, TKey>
     where TEntity : EntityBase, new()
 {
-    /// <summary>Creates the decorator over the repository it wraps and the journal it records to.</summary>
-    protected VersionlessJournalingRepository(IRepository<TEntity, TKey> inner, SyncJournal journal)
-        : base(inner, journal) { }
+    /// <summary>Creates the decorator over the repository it wraps, the journal, the table's descriptor, and the graph recorder.</summary>
+    protected VersionlessJournalingRepository(
+        IRepository<TEntity, TKey> inner,
+        SyncJournal journal,
+        SyncTableDescriptor<TEntity, TKey> descriptor,
+        SyncGraphRecorder graphRecorder
+    )
+        : base(inner, journal, descriptor, graphRecorder) { }
 
     /// <inheritdoc />
     protected sealed override Task RecordDeleteAsync(TKey id, CancellationToken cancellationToken) =>
@@ -7044,37 +7436,53 @@ public abstract class VersionlessJournalingRepository<TEntity, TKey>
 /// repository. What stays with the generated derived class is only the SQL text, which carries the table's identity.
 /// </summary>
 /// <remarks>
-/// The paging members and <see cref="BinaryColumns"/> are virtual here rather than left to the interface's default
-/// implementations on purpose: interface mapping is fixed at the class that lists the interface - this one - so a
-/// member a derived class adds later would never be reached through the interface. A virtual with the same default
-/// keeps the dispatch open for the subclasses that do override.
+/// The paging members are virtual here rather than left to the interface's default implementations on purpose:
+/// interface mapping is fixed at the class that lists the interface - this one - so a member a derived class adds later
+/// would never be reached through the interface. A virtual with the same default keeps the dispatch open for the
+/// versionless subclass, which does override them.
 /// </remarks>
 /// <typeparam name="TEntity">The entity type.</typeparam>
 /// <typeparam name="TKey">The primary key type.</typeparam>
 public abstract class DirectSyncSourceBase<TEntity, TKey> : ISyncServerSource<TEntity, TKey>
     where TEntity : EntityBase, new()
 {
-    /// <summary>Creates the source over the server's raw SQL surface and the repository local changes replay against.</summary>
+    /// <summary>Creates the source over the server's raw SQL surface, the repository local changes replay against, and the table's descriptor.</summary>
     protected DirectSyncSourceBase(
         ISqlExecutor serverSqlExecutor,
-        IRemoteRepository<TEntity, TKey> writer
+        IRemoteRepository<TEntity, TKey> writer,
+        SyncTableDescriptor<TEntity, TKey> descriptor
     )
     {
+        ArgumentNullException.ThrowIfNull(serverSqlExecutor);
+        ArgumentNullException.ThrowIfNull(writer);
+        ArgumentNullException.ThrowIfNull(descriptor);
         ServerSqlExecutor = serverSqlExecutor;
         Writer = writer;
+        Descriptor = descriptor;
+        BinaryColumns =
+            descriptor.UnboundedBinaryColumnNames.Count == 0
+                ? null
+                : new SyncRepositoryBinaryColumns<TEntity, TKey>(descriptor, writer);
     }
 
     /// <summary>Gets the server's raw SQL surface the scans read through.</summary>
     protected ISqlExecutor ServerSqlExecutor { get; }
 
+    /// <summary>Gets the table's descriptor (the SQL text that carries the table's identity).</summary>
+    protected SyncTableDescriptor<TEntity, TKey> Descriptor { get; }
+
     /// <inheritdoc />
     public IRemoteRepository<TEntity, TKey> Writer { get; }
 
     /// <inheritdoc />
-    public virtual ISyncBinaryColumns<TKey>? BinaryColumns => null;
+    /// <remarks>
+    /// Null exactly when the descriptor names no unbounded binary column. The accessors are invoked on
+    /// <see cref="Writer"/>, which is the generated server repository the direct registration hands in.
+    /// </remarks>
+    public ISyncBinaryColumns<TKey>? BinaryColumns { get; }
 
     /// <summary>SELECT that returns every primary key of the table (SQL Server quoting).</summary>
-    protected abstract string ServerKeysSql { get; }
+    protected string ServerKeysSql => Descriptor.ServerKeysSql;
 
     /// <inheritdoc />
     public abstract Task<byte[]?> GetChangeCeilingAsync(
@@ -7123,21 +7531,22 @@ public abstract class DirectSyncSourceBase<TEntity, TKey> : ISyncServerSource<TE
 /// <summary>Direct server source for a table with a row-version column (an ascending, anchored change scan).</summary>
 /// <typeparam name="TEntity">The entity type.</typeparam>
 /// <typeparam name="TKey">The primary key type.</typeparam>
-public abstract class DirectSyncSource<TEntity, TKey> : DirectSyncSourceBase<TEntity, TKey>
+public sealed class DirectSyncSource<TEntity, TKey> : DirectSyncSourceBase<TEntity, TKey>
     where TEntity : EntityBase, new()
 {
-    /// <summary>Creates the source over the server's raw SQL surface and the repository local changes replay against.</summary>
-    protected DirectSyncSource(
+    /// <summary>Creates the source over the server's raw SQL surface, the repository local changes replay against, and the table's descriptor.</summary>
+    public DirectSyncSource(
         ISqlExecutor serverSqlExecutor,
-        IRemoteRepository<TEntity, TKey> writer
+        IRemoteRepository<TEntity, TKey> writer,
+        SyncTableDescriptor<TEntity, TKey> descriptor
     )
-        : base(serverSqlExecutor, writer) { }
+        : base(serverSqlExecutor, writer, descriptor) { }
 
     /// <summary>SELECT that returns one ascending batch of rows above the anchor and below the ceiling (SQL Server quoting).</summary>
-    protected abstract string ServerChangesSql { get; }
+    private string ServerChangesSql => Descriptor.ServerChangesSql;
 
     /// <inheritdoc />
-    public sealed override async Task<byte[]?> GetChangeCeilingAsync(
+    public override async Task<byte[]?> GetChangeCeilingAsync(
         CancellationToken cancellationToken = default
     ) =>
         await ServerSqlExecutor.ExecuteScalarSqlAsync<byte[]>(
@@ -7153,7 +7562,7 @@ public abstract class DirectSyncSource<TEntity, TKey> : DirectSyncSourceBase<TEn
     /// back empty when the batch happened to end exactly on the boundary. The extra round trip in that case is the
     /// price of not fetching a row beyond the batch to peek with, and it costs one empty query per drained table.
     /// </remarks>
-    public sealed override async Task<SyncChangeBatch<TEntity>> GetChangesAsync(
+    public override async Task<SyncChangeBatch<TEntity>> GetChangesAsync(
         byte[]? anchor,
         byte[]? ceiling,
         int batchSize,
@@ -7179,32 +7588,33 @@ public abstract class DirectSyncSource<TEntity, TKey> : DirectSyncSourceBase<TEn
 /// <summary>Direct server source for a table without a row-version column (a key-ordered full scan, paged by primary key).</summary>
 /// <typeparam name="TEntity">The entity type.</typeparam>
 /// <typeparam name="TKey">The primary key type.</typeparam>
-public abstract class VersionlessDirectSyncSource<TEntity, TKey>
+public sealed class VersionlessDirectSyncSource<TEntity, TKey>
     : DirectSyncSourceBase<TEntity, TKey>
     where TEntity : EntityBase, new()
 {
-    /// <summary>Creates the source over the server's raw SQL surface and the repository local changes replay against.</summary>
-    protected VersionlessDirectSyncSource(
+    /// <summary>Creates the source over the server's raw SQL surface, the repository local changes replay against, and the table's descriptor.</summary>
+    public VersionlessDirectSyncSource(
         ISqlExecutor serverSqlExecutor,
-        IRemoteRepository<TEntity, TKey> writer
+        IRemoteRepository<TEntity, TKey> writer,
+        SyncTableDescriptor<TEntity, TKey> descriptor
     )
-        : base(serverSqlExecutor, writer) { }
+        : base(serverSqlExecutor, writer, descriptor) { }
 
     /// <summary>SELECT that returns the first ascending batch of rows by primary key (SQL Server quoting).</summary>
-    protected abstract string ServerPageFirstSql { get; }
+    private string ServerPageFirstSql => Descriptor.ServerPageFirstSql;
 
     /// <summary>SELECT that returns the next ascending batch of rows above a key (SQL Server quoting).</summary>
-    protected abstract string ServerPageAfterSql { get; }
+    private string ServerPageAfterSql => Descriptor.ServerPageAfterSql;
 
     /// <inheritdoc />
     /// <remarks>A key-ordered scan has no version to bound, so there is no ceiling to read.</remarks>
-    public sealed override Task<byte[]?> GetChangeCeilingAsync(
+    public override Task<byte[]?> GetChangeCeilingAsync(
         CancellationToken cancellationToken = default
     ) => Task.FromResult<byte[]?>(null);
 
     /// <inheritdoc />
     /// <remarks>Never called for a table without a version column; the download pages by key instead.</remarks>
-    public sealed override Task<SyncChangeBatch<TEntity>> GetChangesAsync(
+    public override Task<SyncChangeBatch<TEntity>> GetChangesAsync(
         byte[]? anchor,
         byte[]? ceiling,
         int batchSize,
@@ -7220,7 +7630,7 @@ public abstract class VersionlessDirectSyncSource<TEntity, TKey>
     /// back empty when the batch happened to end exactly on the boundary - the same trade the versioned change scan
     /// makes.
     /// </remarks>
-    public sealed override async Task<SyncChangeBatch<TEntity>> GetFirstPageAsync(
+    public override async Task<SyncChangeBatch<TEntity>> GetFirstPageAsync(
         int batchSize,
         CancellationToken cancellationToken = default
     )
@@ -7236,7 +7646,7 @@ public abstract class VersionlessDirectSyncSource<TEntity, TKey>
     }
 
     /// <inheritdoc />
-    public sealed override async Task<SyncChangeBatch<TEntity>> GetPageAfterAsync(
+    public override async Task<SyncChangeBatch<TEntity>> GetPageAfterAsync(
         TKey afterKey,
         int batchSize,
         CancellationToken cancellationToken = default
@@ -7340,13 +7750,31 @@ public sealed record RemoteSyncPageRequest<TKey>(bool HasAfterKey, TKey? AfterKe
 /// </remarks>
 /// <typeparam name="TEntity">The entity type.</typeparam>
 /// <typeparam name="TKey">The primary key type.</typeparam>
-public abstract class HttpSyncServerSource<TEntity, TKey>
-    : HttpRemoteRepository<TEntity, TKey>, ISyncServerSource<TEntity, TKey>
+public sealed class HttpSyncServerSource<TEntity, TKey>
+    : HttpRemoteRepository<TEntity, TKey>,
+        ISyncServerSource<TEntity, TKey>,
+        ISyncBinaryColumns<TKey>
     where TEntity : EntityBase, new()
 {
-    /// <summary>Initializes a new instance with the HTTP client and the entity route (for example "Order").</summary>
-    protected HttpSyncServerSource(HttpClient httpClient, string entityRoute)
-        : base(httpClient, entityRoute) { }
+    private readonly SyncTableDescriptor<TEntity, TKey> _descriptor;
+
+    /// <summary>Initializes a new instance with the HTTP client and the table's descriptor (which names the route).</summary>
+    public HttpSyncServerSource(
+        HttpClient httpClient,
+        SyncTableDescriptor<TEntity, TKey> descriptor
+    )
+        : base(httpClient, RouteOf(descriptor))
+    {
+        _descriptor = descriptor;
+    }
+
+    /// <summary>Reads the route off the descriptor before the base constructor runs (which is why it is static).</summary>
+    private static string RouteOf(SyncTableDescriptor<TEntity, TKey> descriptor)
+    {
+        ArgumentNullException.ThrowIfNull(descriptor);
+
+        return descriptor.RemoteRouteName;
+    }
 
     /// <inheritdoc />
     /// <remarks>The client itself: the same connection, the same configuration, and the same failure classification.</remarks>
@@ -7354,10 +7782,55 @@ public abstract class HttpSyncServerSource<TEntity, TKey>
 
     /// <inheritdoc />
     /// <remarks>
-    /// Virtual rather than the interface's default, because the generated subclass is where the column names live and a
-    /// class member is what it can override. It streams over the same binary endpoints the remote repository uses.
+    /// The client itself again, when the table has such columns: they stream over the same binary endpoints the remote
+    /// repository uses, so no second connection or configuration is involved.
     /// </remarks>
-    public virtual ISyncBinaryColumns<TKey>? BinaryColumns => null;
+    public ISyncBinaryColumns<TKey>? BinaryColumns =>
+        _descriptor.UnboundedBinaryColumnNames.Count == 0 ? null : this;
+
+    /// <inheritdoc />
+    public IReadOnlyList<string> UnboundedBinaryColumnNames =>
+        _descriptor.UnboundedBinaryColumnNames;
+
+    /// <inheritdoc />
+    public Task<bool> ReadUnboundedBinaryAsync(
+        string columnName,
+        TKey id,
+        Stream destination,
+        CancellationToken cancellationToken = default
+    ) =>
+        DownloadUnboundedBinaryColumnAsync(
+            KnownColumn(columnName),
+            id,
+            destination,
+            cancellationToken
+        );
+
+    /// <inheritdoc />
+    public Task<bool> WriteUnboundedBinaryAsync(
+        string columnName,
+        TKey id,
+        Stream? source,
+        long? length,
+        CancellationToken cancellationToken = default
+    ) =>
+        UploadUnboundedBinaryColumnAsync(
+            KnownColumn(columnName),
+            id,
+            source,
+            length,
+            cancellationToken
+        );
+
+    /// <summary>Refuses a column name the table does not have, rather than asking the server for a route that has none.</summary>
+    private string KnownColumn(string columnName) =>
+        _descriptor.UnboundedBinaryColumnNames.Contains(columnName)
+            ? columnName
+            : throw new ArgumentOutOfRangeException(
+                nameof(columnName),
+                columnName,
+                "The column is not an unbounded binary column of this table."
+            );
 
     /// <inheritdoc />
     public async Task<byte[]?> GetChangeCeilingAsync(CancellationToken cancellationToken = default)
@@ -7435,218 +7908,108 @@ public abstract class HttpSyncServerSource<TEntity, TKey>
     }
 }
 
-/// <summary>Reads the server side of sync_orders over a direct database connection.</summary>
+/// <summary>The descriptors of the synchronised tables, and the graph recorder that reads them.</summary>
 /// <remarks>
-/// Nothing here is new database code: the scans and the replay live on the generic core (see
-/// <see cref="DirectSyncSourceBase{TEntity, TKey}"/>); this class supplies the SQL text that carries the table's
-/// identity and forwards the binary column accessors.
+/// <para>
+/// This is the whole of what a table contributes to the sync support: its name, the SQL that carries its identity, and
+/// the accessors that read a key, a mirrored version, and an unbounded binary column off it. The behaviour lives once in
+/// the fixed engine, which takes a descriptor rather than being subclassed per table.
+/// </para>
+/// <para>
+/// <see cref="All"/> holds every synchronised table, in foreign-key order (parents first), whatever a particular engine
+/// was built to exclude: the journal is shared, and the recorder has to be able to name any table a graph save reaches.
+/// </para>
 /// </remarks>
-public sealed class SyncOrderDirectSyncSource
-    : DirectSyncSource<SyncOrderEntity, int>, ISyncBinaryColumns<int>
+public static class GeneratedSyncTables
 {
-    // The binary accessors need the concrete interface (Read{Column}Async), which the base's writer-typed
-    // reference cannot provide
-    private readonly ISyncOrderRepository _serverRepository;
-
-    /// <summary>Creates the source over the server's raw SQL surface and its ordinary repository.</summary>
-    public SyncOrderDirectSyncSource(
-        ISqlExecutor serverSqlExecutor,
-        ISyncOrderRepository serverRepository
-    )
-        : base(serverSqlExecutor, serverRepository)
-    {
-        _serverRepository = serverRepository;
-    }
-
-    /// <inheritdoc />
-    protected override string ServerKeysSql => "SELECT [order_id] FROM [sync_orders]";
-
-    /// <inheritdoc />
-    protected override string ServerChangesSql => "SELECT TOP (@batchSize) [order_id], [customer_name], [row_ver] FROM [sync_orders] WHERE (@anchor IS NULL OR [row_ver] > CAST(@anchor AS binary(8))) AND (@ceiling IS NULL OR [row_ver] < CAST(@ceiling AS binary(8))) ORDER BY [row_ver]";
-
-    /// <inheritdoc />
-    public override ISyncBinaryColumns<int>? BinaryColumns => this;
-
-    /// <inheritdoc />
-    public IReadOnlyList<string> UnboundedBinaryColumnNames => ["Attachment"];
-
-    /// <inheritdoc />
-    public Task<bool> ReadUnboundedBinaryAsync(
-        string columnName,
-        int id,
-        Stream destination,
-        CancellationToken cancellationToken = default
-    ) =>
-        columnName switch
+    /// <summary>The descriptor of sync_orders.</summary>
+    public static SyncTableDescriptor<SyncOrderEntity, int> SyncOrder { get; } =
+        new()
         {
-            "Attachment" => _serverRepository.ReadAttachmentAsync(id, destination, cancellationToken),
-            _ => throw new ArgumentOutOfRangeException(
-                nameof(columnName),
-                columnName,
-                "The column is not an unbounded binary column of this table."
-            ),
+            TableName = "sync_orders",
+            RemoteRouteName = "SyncOrder",
+            IsVersionless = false,
+            ReadKey = entity => entity.OrderId,
+            WriteKey = (entity, key) => entity.OrderId = key,
+            FormatKey = key => key.ToString(CultureInfo.InvariantCulture),
+            ParseKey = keyText => int.Parse(keyText, CultureInfo.InvariantCulture),
+            ReadRowVersion = entity => entity.RowVer,
+            WriteRowVersion = (entity, rowVersion) => entity.RowVer = rowVersion,
+            ServerKeysSql = "SELECT [order_id] FROM [sync_orders]",
+            ServerChangesSql = "SELECT TOP (@batchSize) [order_id], [customer_name], [row_ver] FROM [sync_orders] WHERE (@anchor IS NULL OR [row_ver] > CAST(@anchor AS binary(8))) AND (@ceiling IS NULL OR [row_ver] < CAST(@ceiling AS binary(8))) ORDER BY [row_ver]",
+            LocalAnchorSql = "SELECT MAX(\"row_ver\") FROM \"sync_orders\"",
+            LocalKeysSql = "SELECT \"order_id\" FROM \"sync_orders\"",
+            LocalExistingKeysSql = "SELECT \"order_id\" FROM \"sync_orders\" WHERE \"order_id\" IN (@keys)",
+            LocalDeleteAllSql = "DELETE FROM \"sync_orders\"",
+            UnboundedBinaryColumnNames = ["Attachment"],
+            UnboundedBinaryAccessors = new Dictionary<
+                string,
+                SyncBinaryColumnAccessor<int>
+            >(StringComparer.Ordinal)
+            {
+                ["Attachment"] = new SyncBinaryColumnAccessor<int>(
+                    (repository, id, destination, cancellationToken) =>
+                        ((ISyncOrderRepository)repository).ReadAttachmentAsync(id, destination, cancellationToken),
+                    (repository, id, source, length, cancellationToken) =>
+                        ((ISyncOrderRepository)repository).WriteAttachmentAsync(id, source, length, cancellationToken)
+                ),
+            },
         };
 
-    /// <inheritdoc />
-    public Task<bool> WriteUnboundedBinaryAsync(
-        string columnName,
-        int id,
-        Stream? source,
-        long? length,
-        CancellationToken cancellationToken = default
-    ) =>
-        columnName switch
+    /// <summary>The descriptor of sync_order_lines.</summary>
+    public static SyncTableDescriptor<SyncOrderLineEntity, int> SyncOrderLine { get; } =
+        new()
         {
-            "Attachment" => _serverRepository.WriteAttachmentAsync(id, source, length, cancellationToken),
-            _ => throw new ArgumentOutOfRangeException(
-                nameof(columnName),
-                columnName,
-                "The column is not an unbounded binary column of this table."
-            ),
-        };
-}
-
-/// <summary>Reads the server side of sync_orders over HTTP, and replays the local changes over HTTP as well.</summary>
-/// <remarks>
-/// The counterpart of <see cref="SyncOrderDirectSyncSource"/> for a server that is reached across the network: it
-/// carries no logic of its own beyond binding the entity type and the route, because the transport, the failure
-/// classification, and the write surface all come from <see cref="HttpSyncServerSource{TEntity, TKey}"/>. Swapping the
-/// two is a matter of which one is registered.
-/// </remarks>
-public sealed class HttpSyncOrderSyncSource(HttpClient httpClient)
-    : HttpSyncServerSource<SyncOrderEntity, int>(httpClient, "SyncOrder"),
-        ISyncBinaryColumns<int>
-{
-    /// <inheritdoc />
-    public override ISyncBinaryColumns<int>? BinaryColumns => this;
-
-    /// <inheritdoc />
-    public IReadOnlyList<string> UnboundedBinaryColumnNames => ["Attachment"];
-
-    /// <inheritdoc />
-    public Task<bool> ReadUnboundedBinaryAsync(
-        string columnName,
-        int id,
-        Stream destination,
-        CancellationToken cancellationToken = default
-    ) =>
-        columnName switch
-        {
-            "Attachment" => DownloadUnboundedBinaryColumnAsync("Attachment", id, destination, cancellationToken),
-            _ => throw new ArgumentOutOfRangeException(
-                nameof(columnName),
-                columnName,
-                "The column is not an unbounded binary column of this table."
-            ),
+            TableName = "sync_order_lines",
+            RemoteRouteName = "SyncOrderLine",
+            IsVersionless = false,
+            ReadKey = entity => entity.LineId,
+            WriteKey = (entity, key) => entity.LineId = key,
+            FormatKey = key => key.ToString(CultureInfo.InvariantCulture),
+            ParseKey = keyText => int.Parse(keyText, CultureInfo.InvariantCulture),
+            ReadRowVersion = entity => entity.RowVer,
+            WriteRowVersion = (entity, rowVersion) => entity.RowVer = rowVersion,
+            ServerKeysSql = "SELECT [line_id] FROM [sync_order_lines]",
+            ServerChangesSql = "SELECT TOP (@batchSize) * FROM [sync_order_lines] WHERE (@anchor IS NULL OR [row_ver] > CAST(@anchor AS binary(8))) AND (@ceiling IS NULL OR [row_ver] < CAST(@ceiling AS binary(8))) ORDER BY [row_ver]",
+            LocalAnchorSql = "SELECT MAX(\"row_ver\") FROM \"sync_order_lines\"",
+            LocalKeysSql = "SELECT \"line_id\" FROM \"sync_order_lines\"",
+            LocalExistingKeysSql = "SELECT \"line_id\" FROM \"sync_order_lines\" WHERE \"line_id\" IN (@keys)",
+            LocalDeleteAllSql = "DELETE FROM \"sync_order_lines\"",
         };
 
-    /// <inheritdoc />
-    public Task<bool> WriteUnboundedBinaryAsync(
-        string columnName,
-        int id,
-        Stream? source,
-        long? length,
-        CancellationToken cancellationToken = default
-    ) =>
-        columnName switch
+    /// <summary>The descriptor of sync_notes.</summary>
+    public static SyncTableDescriptor<SyncNoteEntity, int> SyncNote { get; } =
+        new()
         {
-            "Attachment" => UploadUnboundedBinaryColumnAsync("Attachment", id, source, length, cancellationToken),
-            _ => throw new ArgumentOutOfRangeException(
-                nameof(columnName),
-                columnName,
-                "The column is not an unbounded binary column of this table."
-            ),
-        };
-}
-
-/// <summary>The synchronised table descriptor for sync_orders.</summary>
-public sealed class SyncOrderSyncTable(
-    ISyncOrderRepository localRepository,
-    ISqlExecutor localSqlExecutor,
-    ISyncServerSource<SyncOrderEntity, int> server
-) : SyncTable<SyncOrderEntity, int>(
-    localRepository,
-    localSqlExecutor,
-    server
-), ISyncBinaryColumns<int>
-{
-    /// <inheritdoc />
-    public override string TableName => "sync_orders";
-
-    /// <inheritdoc />
-    protected override string LocalAnchorSql => "SELECT MAX(\"row_ver\") FROM \"sync_orders\"";
-
-    /// <inheritdoc />
-    protected override string LocalKeysSql => "SELECT \"order_id\" FROM \"sync_orders\"";
-
-    /// <inheritdoc />
-    protected override string LocalExistingKeysSql => "SELECT \"order_id\" FROM \"sync_orders\" WHERE \"order_id\" IN (@keys)";
-
-    /// <inheritdoc />
-    protected override string LocalDeleteAllSql => "DELETE FROM \"sync_orders\"";
-
-    /// <inheritdoc />
-    protected override int ReadKey(SyncOrderEntity entity) =>
-        entity.OrderId;
-
-    /// <inheritdoc />
-    protected override void WriteKey(SyncOrderEntity entity, int key) =>
-        entity.OrderId = key;
-
-    /// <inheritdoc />
-    protected override byte[]? ReadRowVersion(SyncOrderEntity entity) =>
-        entity.RowVer;
-
-    /// <inheritdoc />
-    protected override void WriteRowVersion(SyncOrderEntity entity, byte[]? rowVersion) =>
-        entity.RowVer = rowVersion;
-
-    /// <inheritdoc />
-    public override string FormatKey(int key) => key.ToString(CultureInfo.InvariantCulture);
-
-    /// <inheritdoc />
-    public override int ParseKey(string keyText) => int.Parse(keyText, CultureInfo.InvariantCulture);
-
-    /// <inheritdoc />
-    protected override ISyncBinaryColumns<int>? LocalBinaryColumns => this;
-
-    /// <inheritdoc />
-    public override IReadOnlyList<string> UnboundedBinaryColumnNames => ["Attachment"];
-
-    /// <inheritdoc />
-    public Task<bool> ReadUnboundedBinaryAsync(
-        string columnName,
-        int id,
-        Stream destination,
-        CancellationToken cancellationToken = default
-    ) =>
-        columnName switch
-        {
-            "Attachment" => localRepository.ReadAttachmentAsync(id, destination, cancellationToken),
-            _ => throw new ArgumentOutOfRangeException(
-                nameof(columnName),
-                columnName,
-                "The column is not an unbounded binary column of this table."
-            ),
+            TableName = "sync_notes",
+            RemoteRouteName = "SyncNote",
+            IsVersionless = true,
+            ReadKey = entity => entity.NoteId,
+            WriteKey = (entity, key) => entity.NoteId = key,
+            FormatKey = key => key.ToString(CultureInfo.InvariantCulture),
+            ParseKey = keyText => int.Parse(keyText, CultureInfo.InvariantCulture),
+            ServerKeysSql = "SELECT [note_id] FROM [sync_notes]",
+            ServerPageFirstSql = "SELECT TOP (@batchSize) * FROM [sync_notes] ORDER BY [note_id]",
+            ServerPageAfterSql = "SELECT TOP (@batchSize) * FROM [sync_notes] WHERE [note_id] > @afterKey ORDER BY [note_id]",
+            LocalKeysSql = "SELECT \"note_id\" FROM \"sync_notes\"",
+            LocalExistingKeysSql = "SELECT \"note_id\" FROM \"sync_notes\" WHERE \"note_id\" IN (@keys)",
+            LocalDeleteAllSql = "DELETE FROM \"sync_notes\"",
         };
 
-    /// <inheritdoc />
-    public Task<bool> WriteUnboundedBinaryAsync(
-        string columnName,
-        int id,
-        Stream? source,
-        long? length,
-        CancellationToken cancellationToken = default
-    ) =>
-        columnName switch
-        {
-            "Attachment" => localRepository.WriteAttachmentAsync(id, source, length, cancellationToken),
-            _ => throw new ArgumentOutOfRangeException(
-                nameof(columnName),
-                columnName,
-                "The column is not an unbounded binary column of this table."
-            ),
-        };
+    /// <summary>Every synchronised table's descriptor, in foreign-key order (parents first).</summary>
+    public static IReadOnlyList<ISyncTableDescriptor> All { get; } =
+    [
+        SyncOrder,
+        SyncOrderLine,
+        SyncNote,
+    ];
+
+    /// <summary>The recorder the journaling decorators journal a graph save through.</summary>
+    /// <remarks>
+    /// One instance for the whole application: it holds nothing but the lookup from entity type to descriptor, and the
+    /// journal it writes to is handed to it per call.
+    /// </remarks>
+    public static SyncGraphRecorder GraphRecorder { get; } = new(All);
 }
 
 /// <summary>
@@ -7654,53 +8017,26 @@ public sealed class SyncOrderSyncTable(
 /// </summary>
 /// <remarks>
 /// The recording and forwarding semantics live on the generic core (see
-/// <see cref="JournalingRepositoryBase{TEntity, TKey}"/>); this class supplies the table's identity and key handling,
-/// records a graph save through <see cref="SyncGraphRecorder"/> (which walks the same cascade navigations the saver
-/// walks, so the children the save writes or deletes are journaled exactly like the root), and forwards the members
-/// the concrete contract adds.
+/// <see cref="JournalingRepositoryBase{TEntity, TKey}"/>), which reads the table's identity and key handling off the
+/// descriptor and journals a graph save through <see cref="SyncGraphRecorder"/> (which walks the same cascade
+/// navigations the saver walks, so the children the save writes or deletes are journaled exactly like the root). What
+/// remains here is forwarding the members the concrete contract adds.
 /// </remarks>
 public sealed class JournalingSyncOrderRepository
     : JournalingRepository<SyncOrderEntity, int>, ISyncOrderRepository
 {
-    // The concrete contract's own members (named queries, the uniqueness pre-check, binary accessors) need the
-    // concrete interface, which the base's IRepository-typed reference cannot provide
+    // The concrete contract's own members (named queries, binary accessors) need the concrete interface, which the
+    // base's IRepository-typed reference cannot provide
     private readonly ISyncOrderRepository _inner;
 
     /// <summary>Creates the decorator over the repository it wraps and the journal it records to.</summary>
     public JournalingSyncOrderRepository(ISyncOrderRepository inner, SyncJournal journal)
-        : base(inner, journal)
-    {
-        _inner = inner;
-    }
-
-    /// <inheritdoc />
-    protected override string TableName => "sync_orders";
-
-    /// <inheritdoc />
-    protected override int ReadKey(SyncOrderEntity entity) =>
-        entity.OrderId;
-
-    /// <inheritdoc />
-    protected override string FormatKey(int key) => key.ToString(CultureInfo.InvariantCulture);
-
-    /// <inheritdoc />
-    protected override byte[]? ReadRowVersion(SyncOrderEntity entity) =>
-        entity.RowVer;
-
-    /// <inheritdoc />
-    protected override Task RecordGraphSaveAsync(
-        SyncOrderEntity entity,
-        bool cascadeSave,
-        bool cascadeDelete,
-        CancellationToken cancellationToken
-    ) =>
-        SyncGraphRecorder.RecordSaveAsync(
-            Journal,
-            entity,
-            cascadeSave,
-            cascadeDelete,
-            cancellationToken
-        );
+        : base(
+            inner,
+            journal,
+            GeneratedSyncTables.SyncOrder,
+            GeneratedSyncTables.GraphRecorder
+        ) => _inner = inner;
 
     /// <inheritdoc />
     public Task<bool> ReadAttachmentAsync(
@@ -7736,218 +8072,27 @@ public sealed class JournalingSyncOrderRepository
     }
 }
 
-/// <summary>Reads the server side of sync_order_lines over a direct database connection.</summary>
-/// <remarks>
-/// Nothing here is new database code: the scans and the replay live on the generic core (see
-/// <see cref="DirectSyncSourceBase{TEntity, TKey}"/>); this class supplies the SQL text that carries the table's
-/// identity.
-/// </remarks>
-public sealed class SyncOrderLineDirectSyncSource
-    : DirectSyncSource<SyncOrderLineEntity, int>
-{
-    /// <summary>Creates the source over the server's raw SQL surface and its ordinary repository.</summary>
-    public SyncOrderLineDirectSyncSource(
-        ISqlExecutor serverSqlExecutor,
-        ISyncOrderLineRepository serverRepository
-    )
-        : base(serverSqlExecutor, serverRepository)
-    {
-    }
-
-    /// <inheritdoc />
-    protected override string ServerKeysSql => "SELECT [line_id] FROM [sync_order_lines]";
-
-    /// <inheritdoc />
-    protected override string ServerChangesSql => "SELECT TOP (@batchSize) * FROM [sync_order_lines] WHERE (@anchor IS NULL OR [row_ver] > CAST(@anchor AS binary(8))) AND (@ceiling IS NULL OR [row_ver] < CAST(@ceiling AS binary(8))) ORDER BY [row_ver]";
-}
-
-/// <summary>Reads the server side of sync_order_lines over HTTP, and replays the local changes over HTTP as well.</summary>
-/// <remarks>
-/// The counterpart of <see cref="SyncOrderLineDirectSyncSource"/> for a server that is reached across the network: it
-/// carries no logic of its own beyond binding the entity type and the route, because the transport, the failure
-/// classification, and the write surface all come from <see cref="HttpSyncServerSource{TEntity, TKey}"/>. Swapping the
-/// two is a matter of which one is registered.
-/// </remarks>
-public sealed class HttpSyncOrderLineSyncSource(HttpClient httpClient)
-    : HttpSyncServerSource<SyncOrderLineEntity, int>(httpClient, "SyncOrderLine") { }
-
-/// <summary>The synchronised table descriptor for sync_order_lines.</summary>
-public sealed class SyncOrderLineSyncTable(
-    ISyncOrderLineRepository localRepository,
-    ISqlExecutor localSqlExecutor,
-    ISyncServerSource<SyncOrderLineEntity, int> server
-) : SyncTable<SyncOrderLineEntity, int>(
-    localRepository,
-    localSqlExecutor,
-    server
-)
-{
-    /// <inheritdoc />
-    public override string TableName => "sync_order_lines";
-
-    /// <inheritdoc />
-    protected override string LocalAnchorSql => "SELECT MAX(\"row_ver\") FROM \"sync_order_lines\"";
-
-    /// <inheritdoc />
-    protected override string LocalKeysSql => "SELECT \"line_id\" FROM \"sync_order_lines\"";
-
-    /// <inheritdoc />
-    protected override string LocalExistingKeysSql => "SELECT \"line_id\" FROM \"sync_order_lines\" WHERE \"line_id\" IN (@keys)";
-
-    /// <inheritdoc />
-    protected override string LocalDeleteAllSql => "DELETE FROM \"sync_order_lines\"";
-
-    /// <inheritdoc />
-    protected override int ReadKey(SyncOrderLineEntity entity) =>
-        entity.LineId;
-
-    /// <inheritdoc />
-    protected override void WriteKey(SyncOrderLineEntity entity, int key) =>
-        entity.LineId = key;
-
-    /// <inheritdoc />
-    protected override byte[]? ReadRowVersion(SyncOrderLineEntity entity) =>
-        entity.RowVer;
-
-    /// <inheritdoc />
-    protected override void WriteRowVersion(SyncOrderLineEntity entity, byte[]? rowVersion) =>
-        entity.RowVer = rowVersion;
-
-    /// <inheritdoc />
-    public override string FormatKey(int key) => key.ToString(CultureInfo.InvariantCulture);
-
-    /// <inheritdoc />
-    public override int ParseKey(string keyText) => int.Parse(keyText, CultureInfo.InvariantCulture);
-}
-
 /// <summary>
 /// The local SyncOrderLineEntity repository with journaling: every write is recorded before it is performed.
 /// </summary>
 /// <remarks>
 /// The recording and forwarding semantics live on the generic core (see
-/// <see cref="JournalingRepositoryBase{TEntity, TKey}"/>); this class supplies the table's identity and key handling,
-/// records a graph save through <see cref="SyncGraphRecorder"/> (which walks the same cascade navigations the saver
-/// walks, so the children the save writes or deletes are journaled exactly like the root), and forwards the members
-/// the concrete contract adds.
+/// <see cref="JournalingRepositoryBase{TEntity, TKey}"/>), which reads the table's identity and key handling off the
+/// descriptor and journals a graph save through <see cref="SyncGraphRecorder"/> (which walks the same cascade
+/// navigations the saver walks, so the children the save writes or deletes are journaled exactly like the root). What
+/// remains here is forwarding the members the concrete contract adds.
 /// </remarks>
 public sealed class JournalingSyncOrderLineRepository
     : JournalingRepository<SyncOrderLineEntity, int>, ISyncOrderLineRepository
 {
-    // The concrete contract's own members (named queries, the uniqueness pre-check, binary accessors) need the
-    // concrete interface, which the base's IRepository-typed reference cannot provide
-    private readonly ISyncOrderLineRepository _inner;
-
     /// <summary>Creates the decorator over the repository it wraps and the journal it records to.</summary>
     public JournalingSyncOrderLineRepository(ISyncOrderLineRepository inner, SyncJournal journal)
-        : base(inner, journal)
-    {
-        _inner = inner;
-    }
-
-    /// <inheritdoc />
-    protected override string TableName => "sync_order_lines";
-
-    /// <inheritdoc />
-    protected override int ReadKey(SyncOrderLineEntity entity) =>
-        entity.LineId;
-
-    /// <inheritdoc />
-    protected override string FormatKey(int key) => key.ToString(CultureInfo.InvariantCulture);
-
-    /// <inheritdoc />
-    protected override byte[]? ReadRowVersion(SyncOrderLineEntity entity) =>
-        entity.RowVer;
-
-    /// <inheritdoc />
-    protected override Task RecordGraphSaveAsync(
-        SyncOrderLineEntity entity,
-        bool cascadeSave,
-        bool cascadeDelete,
-        CancellationToken cancellationToken
-    ) =>
-        SyncGraphRecorder.RecordSaveAsync(
-            Journal,
-            entity,
-            cascadeSave,
-            cascadeDelete,
-            cancellationToken
-        );
-}
-
-/// <summary>Reads the server side of sync_notes over a direct database connection.</summary>
-/// <remarks>
-/// Nothing here is new database code: the scans and the replay live on the generic core (see
-/// <see cref="DirectSyncSourceBase{TEntity, TKey}"/>); this class supplies the SQL text that carries the table's
-/// identity.
-/// </remarks>
-public sealed class SyncNoteDirectSyncSource
-    : VersionlessDirectSyncSource<SyncNoteEntity, int>
-{
-    /// <summary>Creates the source over the server's raw SQL surface and its ordinary repository.</summary>
-    public SyncNoteDirectSyncSource(
-        ISqlExecutor serverSqlExecutor,
-        ISyncNoteRepository serverRepository
-    )
-        : base(serverSqlExecutor, serverRepository)
-    {
-    }
-
-    /// <inheritdoc />
-    protected override string ServerKeysSql => "SELECT [note_id] FROM [sync_notes]";
-
-    /// <inheritdoc />
-    protected override string ServerPageFirstSql => "SELECT TOP (@batchSize) * FROM [sync_notes] ORDER BY [note_id]";
-
-    /// <inheritdoc />
-    protected override string ServerPageAfterSql => "SELECT TOP (@batchSize) * FROM [sync_notes] WHERE [note_id] > @afterKey ORDER BY [note_id]";
-}
-
-/// <summary>Reads the server side of sync_notes over HTTP, and replays the local changes over HTTP as well.</summary>
-/// <remarks>
-/// The counterpart of <see cref="SyncNoteDirectSyncSource"/> for a server that is reached across the network: it
-/// carries no logic of its own beyond binding the entity type and the route, because the transport, the failure
-/// classification, and the write surface all come from <see cref="HttpSyncServerSource{TEntity, TKey}"/>. Swapping the
-/// two is a matter of which one is registered.
-/// </remarks>
-public sealed class HttpSyncNoteSyncSource(HttpClient httpClient)
-    : HttpSyncServerSource<SyncNoteEntity, int>(httpClient, "SyncNote") { }
-
-/// <summary>The synchronised table descriptor for sync_notes.</summary>
-public sealed class SyncNoteSyncTable(
-    ISyncNoteRepository localRepository,
-    ISqlExecutor localSqlExecutor,
-    ISyncServerSource<SyncNoteEntity, int> server
-) : VersionlessSyncTable<SyncNoteEntity, int>(
-    localRepository,
-    localSqlExecutor,
-    server
-)
-{
-    /// <inheritdoc />
-    public override string TableName => "sync_notes";
-
-    /// <inheritdoc />
-    protected override string LocalKeysSql => "SELECT \"note_id\" FROM \"sync_notes\"";
-
-    /// <inheritdoc />
-    protected override string LocalExistingKeysSql => "SELECT \"note_id\" FROM \"sync_notes\" WHERE \"note_id\" IN (@keys)";
-
-    /// <inheritdoc />
-    protected override string LocalDeleteAllSql => "DELETE FROM \"sync_notes\"";
-
-    /// <inheritdoc />
-    protected override int ReadKey(SyncNoteEntity entity) =>
-        entity.NoteId;
-
-    /// <inheritdoc />
-    protected override void WriteKey(SyncNoteEntity entity, int key) =>
-        entity.NoteId = key;
-
-    /// <inheritdoc />
-    public override string FormatKey(int key) => key.ToString(CultureInfo.InvariantCulture);
-
-    /// <inheritdoc />
-    public override int ParseKey(string keyText) => int.Parse(keyText, CultureInfo.InvariantCulture);
+        : base(
+            inner,
+            journal,
+            GeneratedSyncTables.SyncOrderLine,
+            GeneratedSyncTables.GraphRecorder
+        ) { }
 }
 
 /// <summary>
@@ -7955,263 +8100,22 @@ public sealed class SyncNoteSyncTable(
 /// </summary>
 /// <remarks>
 /// The recording and forwarding semantics live on the generic core (see
-/// <see cref="JournalingRepositoryBase{TEntity, TKey}"/>); this class supplies the table's identity and key handling,
-/// records a graph save through <see cref="SyncGraphRecorder"/> (which walks the same cascade navigations the saver
-/// walks, so the children the save writes or deletes are journaled exactly like the root), and forwards the members
-/// the concrete contract adds.
+/// <see cref="JournalingRepositoryBase{TEntity, TKey}"/>), which reads the table's identity and key handling off the
+/// descriptor and journals a graph save through <see cref="SyncGraphRecorder"/> (which walks the same cascade
+/// navigations the saver walks, so the children the save writes or deletes are journaled exactly like the root). What
+/// remains here is forwarding the members the concrete contract adds.
 /// </remarks>
 public sealed class JournalingSyncNoteRepository
     : VersionlessJournalingRepository<SyncNoteEntity, int>, ISyncNoteRepository
 {
-    // The concrete contract's own members (named queries, the uniqueness pre-check, binary accessors) need the
-    // concrete interface, which the base's IRepository-typed reference cannot provide
-    private readonly ISyncNoteRepository _inner;
-
     /// <summary>Creates the decorator over the repository it wraps and the journal it records to.</summary>
     public JournalingSyncNoteRepository(ISyncNoteRepository inner, SyncJournal journal)
-        : base(inner, journal)
-    {
-        _inner = inner;
-    }
-
-    /// <inheritdoc />
-    protected override string TableName => "sync_notes";
-
-    /// <inheritdoc />
-    protected override int ReadKey(SyncNoteEntity entity) =>
-        entity.NoteId;
-
-    /// <inheritdoc />
-    protected override string FormatKey(int key) => key.ToString(CultureInfo.InvariantCulture);
-
-    /// <inheritdoc />
-    protected override Task RecordGraphSaveAsync(
-        SyncNoteEntity entity,
-        bool cascadeSave,
-        bool cascadeDelete,
-        CancellationToken cancellationToken
-    ) =>
-        SyncGraphRecorder.RecordSaveAsync(
-            Journal,
-            entity,
-            cascadeSave,
-            cascadeDelete,
-            cancellationToken
-        );
-}
-
-/// <summary>
-/// Records the journal entries a graph save is about to need, before the save itself runs ("journal-first").
-/// </summary>
-/// <remarks>
-/// <para>
-/// The traversal mirrors the decision procedure of the graph saver: a removed node has its cascade subtree
-/// recorded as deletes (children first, each regardless of its own state) followed by the node itself, an added
-/// or updated node is recorded as an upsert, and an unchanged node contributes nothing of its own - but its
-/// children are still visited while the save cascades, because a changed child under an unchanged root is
-/// written all the same. Only synchronised tables are recorded; a table on the path that is not synchronised
-/// is walked through without an entry of its own.
-/// </para>
-/// <para>
-/// Recording the whole graph first keeps the journal-first safety order for every row the save is going to
-/// touch: an entry whose write then fails or is rolled back describes a row the upload re-reads and settles
-/// without a round trip.
-/// </para>
-/// </remarks>
-public static class SyncGraphRecorder
-{
-    /// <summary>Records the entries for a graph save rooted at this SyncOrderEntity (the cascade children included).</summary>
-    public static async Task RecordSaveAsync(
-        SyncJournal journal,
-        SyncOrderEntity entity,
-        bool cascadeSave,
-        bool cascadeDelete,
-        CancellationToken cancellationToken = default
-    )
-    {
-        ArgumentNullException.ThrowIfNull(journal);
-        ArgumentNullException.ThrowIfNull(entity);
-
-        if (entity.RowState == RowState.Removed)
-        {
-            if (cascadeDelete)
-            {
-                await RecordDeleteGraphAsync(journal, entity, cancellationToken)
-                    .ConfigureAwait(false);
-            }
-            else
-            {
-                await RecordDeleteAsync(journal, entity, cancellationToken).ConfigureAwait(false);
-            }
-
-            return;
-        }
-
-        if (entity.RowState != RowState.Unchanged)
-        {
-            await journal.RecordAsync(
-                "sync_orders",
-                entity.OrderId.ToString(CultureInfo.InvariantCulture),
-                SyncJournalOperation.Upsert,
-                null,
-                cancellationToken
-            )
-                .ConfigureAwait(false);
-        }
-
-        if (cascadeSave)
-        {
-            foreach (var child in entity.SyncOrderLines)
-            {
-                if (child is not null)
-                {
-                    await RecordSaveAsync(journal, child, cascadeSave, cascadeDelete, cancellationToken)
-                        .ConfigureAwait(false);
-                }
-            }
-
-            foreach (var child in entity.SyncNotes)
-            {
-                if (child is not null)
-                {
-                    await RecordSaveAsync(journal, child, cascadeSave, cascadeDelete, cancellationToken)
-                        .ConfigureAwait(false);
-                }
-            }
-        }
-    }
-
-    /// <summary>Records the whole subtree of this SyncOrderEntity as deletes, children first (the saver removes them regardless of their own state).</summary>
-    private static async Task RecordDeleteGraphAsync(
-        SyncJournal journal,
-        SyncOrderEntity entity,
-        CancellationToken cancellationToken
-    )
-    {
-        foreach (var child in entity.SyncOrderLines)
-        {
-            if (child is not null)
-            {
-                await RecordDeleteGraphAsync(journal, child, cancellationToken).ConfigureAwait(false);
-            }
-        }
-
-        foreach (var child in entity.SyncNotes)
-        {
-            if (child is not null)
-            {
-                await RecordDeleteGraphAsync(journal, child, cancellationToken).ConfigureAwait(false);
-            }
-        }
-
-        await RecordDeleteAsync(journal, entity, cancellationToken).ConfigureAwait(false);
-    }
-
-    /// <summary>Records the delete of this SyncOrderEntity, carrying the mirrored version the row holds.</summary>
-    private static Task RecordDeleteAsync(
-        SyncJournal journal,
-        SyncOrderEntity entity,
-        CancellationToken cancellationToken
-    ) =>
-        journal.RecordAsync(
-            "sync_orders",
-            entity.OrderId.ToString(CultureInfo.InvariantCulture),
-            SyncJournalOperation.Delete,
-            entity.RowVer,
-            cancellationToken
-        );
-
-    /// <summary>Records the entries for a graph save rooted at this SyncOrderLineEntity (the cascade children included).</summary>
-    public static async Task RecordSaveAsync(
-        SyncJournal journal,
-        SyncOrderLineEntity entity,
-        bool cascadeSave,
-        bool cascadeDelete,
-        CancellationToken cancellationToken = default
-    )
-    {
-        ArgumentNullException.ThrowIfNull(journal);
-        ArgumentNullException.ThrowIfNull(entity);
-
-        if (entity.RowState == RowState.Removed)
-        {
-            await RecordDeleteGraphAsync(journal, entity, cancellationToken).ConfigureAwait(false);
-
-            return;
-        }
-
-        if (entity.RowState != RowState.Unchanged)
-        {
-            await journal.RecordAsync(
-                "sync_order_lines",
-                entity.LineId.ToString(CultureInfo.InvariantCulture),
-                SyncJournalOperation.Upsert,
-                null,
-                cancellationToken
-            )
-                .ConfigureAwait(false);
-        }
-    }
-
-    /// <summary>Records the delete of this SyncOrderLineEntity, carrying the mirrored version the row holds.</summary>
-    private static Task RecordDeleteGraphAsync(
-        SyncJournal journal,
-        SyncOrderLineEntity entity,
-        CancellationToken cancellationToken
-    ) =>
-        journal.RecordAsync(
-            "sync_order_lines",
-            entity.LineId.ToString(CultureInfo.InvariantCulture),
-            SyncJournalOperation.Delete,
-            entity.RowVer,
-            cancellationToken
-        );
-
-    /// <summary>Records the entries for a graph save rooted at this SyncNoteEntity (the cascade children included).</summary>
-    public static async Task RecordSaveAsync(
-        SyncJournal journal,
-        SyncNoteEntity entity,
-        bool cascadeSave,
-        bool cascadeDelete,
-        CancellationToken cancellationToken = default
-    )
-    {
-        ArgumentNullException.ThrowIfNull(journal);
-        ArgumentNullException.ThrowIfNull(entity);
-
-        if (entity.RowState == RowState.Removed)
-        {
-            await RecordDeleteGraphAsync(journal, entity, cancellationToken).ConfigureAwait(false);
-
-            return;
-        }
-
-        if (entity.RowState != RowState.Unchanged)
-        {
-            await journal.RecordAsync(
-                "sync_notes",
-                entity.NoteId.ToString(CultureInfo.InvariantCulture),
-                SyncJournalOperation.Upsert,
-                null,
-                cancellationToken
-            )
-                .ConfigureAwait(false);
-        }
-    }
-
-    /// <summary>Records the delete of this SyncNoteEntity, carrying the mirrored version the row holds.</summary>
-    private static Task RecordDeleteGraphAsync(
-        SyncJournal journal,
-        SyncNoteEntity entity,
-        CancellationToken cancellationToken
-    ) =>
-        journal.RecordAsync(
-            "sync_notes",
-            entity.NoteId.ToString(CultureInfo.InvariantCulture),
-            SyncJournalOperation.Delete,
-            null,
-            cancellationToken
-        );
+        : base(
+            inner,
+            journal,
+            GeneratedSyncTables.SyncNote,
+            GeneratedSyncTables.GraphRecorder
+        ) { }
 }
 
 /// <summary>DI registration for the bidirectional sync support.</summary>
@@ -8274,29 +8178,65 @@ public static class GeneratedSyncServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
 
-        services.AddScoped<ISyncServerSource<SyncOrderEntity, int>>(
-            provider => new SyncOrderDirectSyncSource(
-                Resolve<ISqlExecutor>(provider, serverServiceKey),
-                Resolve<ISyncOrderRepository>(provider, serverServiceKey)
-            )
+        AddDirectSource<SyncOrderEntity, int, ISyncOrderRepository>(
+            services,
+            serverServiceKey,
+            GeneratedSyncTables.SyncOrder
         );
 
-        services.AddScoped<ISyncServerSource<SyncOrderLineEntity, int>>(
-            provider => new SyncOrderLineDirectSyncSource(
-                Resolve<ISqlExecutor>(provider, serverServiceKey),
-                Resolve<ISyncOrderLineRepository>(provider, serverServiceKey)
-            )
+        AddDirectSource<SyncOrderLineEntity, int, ISyncOrderLineRepository>(
+            services,
+            serverServiceKey,
+            GeneratedSyncTables.SyncOrderLine
         );
 
-        services.AddScoped<ISyncServerSource<SyncNoteEntity, int>>(
-            provider => new SyncNoteDirectSyncSource(
-                Resolve<ISqlExecutor>(provider, serverServiceKey),
-                Resolve<ISyncNoteRepository>(provider, serverServiceKey)
-            )
+        AddDirectSource<SyncNoteEntity, int, ISyncNoteRepository>(
+            services,
+            serverServiceKey,
+            GeneratedSyncTables.SyncNote
         );
 
         return services;
     }
+
+    /// <summary>Registers one table's differential source over a direct database connection.</summary>
+    /// <remarks>
+    /// The server repository stands in two places at once: it is the writer local changes are replayed against, and -
+    /// for a table with unbounded binary columns - the surface those columns are copied through.
+    /// </remarks>
+    /// <typeparam name="TEntity">The entity type.</typeparam>
+    /// <typeparam name="TKey">The primary key type.</typeparam>
+    /// <typeparam name="TRepository">The generated repository contract of the entity.</typeparam>
+    /// <param name="services">The service collection.</param>
+    /// <param name="serverServiceKey">The key the server repositories were registered under (null for the non-keyed registration).</param>
+    /// <param name="descriptor">The table's descriptor.</param>
+    private static void AddDirectSource<TEntity, TKey, TRepository>(
+        IServiceCollection services,
+        object? serverServiceKey,
+        SyncTableDescriptor<TEntity, TKey> descriptor
+    )
+        where TEntity : EntityBase, new()
+        where TRepository : class, IRepository<TEntity, TKey> =>
+        services.AddScoped<ISyncServerSource<TEntity, TKey>>(provider =>
+        {
+            var serverSqlExecutor = Resolve<ISqlExecutor>(provider, serverServiceKey);
+            var serverRepository = Resolve<TRepository>(provider, serverServiceKey);
+
+            if (descriptor.IsVersionless)
+            {
+                return new VersionlessDirectSyncSource<TEntity, TKey>(
+                    serverSqlExecutor,
+                    serverRepository,
+                    descriptor
+                );
+            }
+
+            return new DirectSyncSource<TEntity, TKey>(
+                serverSqlExecutor,
+                serverRepository,
+                descriptor
+            );
+        });
 
     /// <summary>Registers the differential sources that read - and write - the server over HTTP.</summary>
     /// <remarks>
@@ -8361,20 +8301,46 @@ public static class GeneratedSyncServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(httpClientFactory);
 
-        services.AddScoped<ISyncServerSource<SyncOrderEntity, int>>(
-            provider => new HttpSyncOrderSyncSource(httpClientFactory(provider))
+        AddHttpSource<SyncOrderEntity, int>(
+            services,
+            httpClientFactory,
+            GeneratedSyncTables.SyncOrder
         );
 
-        services.AddScoped<ISyncServerSource<SyncOrderLineEntity, int>>(
-            provider => new HttpSyncOrderLineSyncSource(httpClientFactory(provider))
+        AddHttpSource<SyncOrderLineEntity, int>(
+            services,
+            httpClientFactory,
+            GeneratedSyncTables.SyncOrderLine
         );
 
-        services.AddScoped<ISyncServerSource<SyncNoteEntity, int>>(
-            provider => new HttpSyncNoteSyncSource(httpClientFactory(provider))
+        AddHttpSource<SyncNoteEntity, int>(
+            services,
+            httpClientFactory,
+            GeneratedSyncTables.SyncNote
         );
 
         return services;
     }
+
+    /// <summary>Registers one table's differential source over HTTP.</summary>
+    /// <remarks>
+    /// One class serves both shapes of table here, because the wire format already distinguishes them: the versionless
+    /// scan asks the page endpoint, which the server maps only for the tables that have one.
+    /// </remarks>
+    /// <typeparam name="TEntity">The entity type.</typeparam>
+    /// <typeparam name="TKey">The primary key type.</typeparam>
+    /// <param name="services">The service collection.</param>
+    /// <param name="httpClientFactory">A factory returning the HttpClient the source talks through.</param>
+    /// <param name="descriptor">The table's descriptor.</param>
+    private static void AddHttpSource<TEntity, TKey>(
+        IServiceCollection services,
+        Func<IServiceProvider, HttpClient> httpClientFactory,
+        SyncTableDescriptor<TEntity, TKey> descriptor
+    )
+        where TEntity : EntityBase, new() =>
+        services.AddScoped<ISyncServerSource<TEntity, TKey>>(provider =>
+            new HttpSyncServerSource<TEntity, TKey>(httpClientFactory(provider), descriptor)
+        );
 
     /// <summary>Registers the local half: the journal, the journaling decorators, the table descriptors, and the engine.</summary>
     /// <remarks>
@@ -8419,13 +8385,11 @@ public static class GeneratedSyncServiceCollectionExtensions
                     provider.GetRequiredService<SyncJournal>()
                 )
             );
-            services.AddScoped<ISyncTable>(provider => new SyncOrderSyncTable(
-                Resolve<ISyncOrderRepository>(provider, localServiceKey),
-                Resolve<ISqlExecutor>(provider, localServiceKey),
-                provider.GetRequiredService<
-                    ISyncServerSource<SyncOrderEntity, int>
-                >()
-            ));
+            AddSyncTable<SyncOrderEntity, int, ISyncOrderRepository>(
+                services,
+                localServiceKey,
+                GeneratedSyncTables.SyncOrder
+            );
         }
 
         if (!excluded.Contains(typeof(SyncOrderLineEntity)))
@@ -8438,13 +8402,11 @@ public static class GeneratedSyncServiceCollectionExtensions
                     provider.GetRequiredService<SyncJournal>()
                 )
             );
-            services.AddScoped<ISyncTable>(provider => new SyncOrderLineSyncTable(
-                Resolve<ISyncOrderLineRepository>(provider, localServiceKey),
-                Resolve<ISqlExecutor>(provider, localServiceKey),
-                provider.GetRequiredService<
-                    ISyncServerSource<SyncOrderLineEntity, int>
-                >()
-            ));
+            AddSyncTable<SyncOrderLineEntity, int, ISyncOrderLineRepository>(
+                services,
+                localServiceKey,
+                GeneratedSyncTables.SyncOrderLine
+            );
         }
 
         if (!excluded.Contains(typeof(SyncNoteEntity)))
@@ -8457,13 +8419,11 @@ public static class GeneratedSyncServiceCollectionExtensions
                     provider.GetRequiredService<SyncJournal>()
                 )
             );
-            services.AddScoped<ISyncTable>(provider => new SyncNoteSyncTable(
-                Resolve<ISyncNoteRepository>(provider, localServiceKey),
-                Resolve<ISqlExecutor>(provider, localServiceKey),
-                provider.GetRequiredService<
-                    ISyncServerSource<SyncNoteEntity, int>
-                >()
-            ));
+            AddSyncTable<SyncNoteEntity, int, ISyncNoteRepository>(
+                services,
+                localServiceKey,
+                GeneratedSyncTables.SyncNote
+            );
         }
 
         services.AddScoped(provider => new SyncEngine(
@@ -8473,6 +8433,43 @@ public static class GeneratedSyncServiceCollectionExtensions
 
         return services;
     }
+
+    /// <summary>Registers one table with the engine, over the local repository the journaling decorator now wraps.</summary>
+    /// <remarks>
+    /// The local repository stands in two places here as well: the engine writes rows through it, and - for a table with
+    /// unbounded binary columns - the copy reaches those columns through the same instance.
+    /// </remarks>
+    /// <typeparam name="TEntity">The entity type.</typeparam>
+    /// <typeparam name="TKey">The primary key type.</typeparam>
+    /// <typeparam name="TRepository">The generated repository contract of the entity.</typeparam>
+    /// <param name="services">The service collection.</param>
+    /// <param name="localServiceKey">The key the local repositories were registered under (null for the non-keyed registration).</param>
+    /// <param name="descriptor">The table's descriptor.</param>
+    private static void AddSyncTable<TEntity, TKey, TRepository>(
+        IServiceCollection services,
+        object? localServiceKey,
+        SyncTableDescriptor<TEntity, TKey> descriptor
+    )
+        where TEntity : EntityBase, new()
+        where TRepository : class, IRepository<TEntity, TKey> =>
+        services.AddScoped<ISyncTable>(provider =>
+        {
+            var local = Resolve<TRepository>(provider, localServiceKey);
+            var localSqlExecutor = Resolve<ISqlExecutor>(provider, localServiceKey);
+            var server = provider.GetRequiredService<ISyncServerSource<TEntity, TKey>>();
+
+            if (descriptor.IsVersionless)
+            {
+                return new VersionlessSyncTable<TEntity, TKey>(
+                    local,
+                    localSqlExecutor,
+                    server,
+                    descriptor
+                );
+            }
+
+            return new SyncTable<TEntity, TKey>(local, localSqlExecutor, server, descriptor);
+        });
 
     /// <summary>Validates the construction-time exclusions: every named type must be synchronised, and at least one table must remain.</summary>
     /// <remarks>
@@ -8486,9 +8483,7 @@ public static class GeneratedSyncServiceCollectionExtensions
     {
         Type[] synchronised =
         [
-            typeof(SyncOrderEntity),
-            typeof(SyncOrderLineEntity),
-            typeof(SyncNoteEntity),
+            .. GeneratedSyncTables.All.Select(descriptor => descriptor.EntityType),
         ];
         var excluded = new HashSet<Type>(excludeFromSync ?? []);
         var unknown = excluded.Where(type => !synchronised.Contains(type)).ToList();

@@ -1060,7 +1060,7 @@ app.MapGeneratedRemoteEndpoints(RemoteAccess.RequireAuthorization);
 
 生成される `Journaling{Entity}Repository` がローカルのリポジトリを包み、**全書き込み入口**（`InsertAsync` / `UpdateAsync` / `DeleteAsync` / `BulkInsertAsync` / `SaveAsync` 2 種）で記録します。保存フックでは足りません——グラフ保存でしか発火せず、直接の挿入や削除が素通りしてしまいます。
 
-`SaveAsync` のグラフ保存は**カスケード全体**を記録します。生成される `SyncGraphRecorder` が、保存側（グラフセーバー）と同じカスケードナビゲーションを同じ規則で辿り、保存が書く・消す子孫の行をルートと同じように記録します——Unchanged のルート配下で子だけを編集した保存も、カスケード削除で一緒に消える子も漏れません。記録は保存の前にグラフ全体ぶん行われるため、途中で保存が失敗しても余分なエントリは（単独の書き込みと同じく）アップロード時に無害化されます。
+`SaveAsync` のグラフ保存は**カスケード全体**を記録します。`SyncGraphRecorder` が、保存側（グラフセーバー）と同じカスケードナビゲーションを——文字どおり同じ列挙（`EntityBase.EnumerateCascadeChildren`）で——同じ規則で辿り、保存が書く・消す子孫の行をルートと同じように記録します。Unchanged のルート配下で子だけを編集した保存も、カスケード削除で一緒に消える子も漏れません（経路上にある同期対象外のテーブルは、自分の記録を残さずに通過するだけです）。記録は保存の前にグラフ全体ぶん行われるため、途中で保存が失敗しても余分なエントリは（単独の書き込みと同じく）アップロード時に無害化されます。
 
 記録は業務書き込みの**前**に行います。生成 Repository は接続を自分で管理するため、デコレータの INSERT を包んだ書き込みのトランザクションへ乗せられません。どちらかを先にせざるを得ず、意図を先に記録する方が安全です。業務書き込みが失敗した場合、ジャーナルには書かれなかった行のエントリが残りますが、アップロードはローカルの現在行を読み直して送るため「送るものが無い」として破棄されます。逆順にすると変更がそのまま失われます。
 
@@ -1334,7 +1334,7 @@ DB なしでユニットテストするためのインメモリ実装を追加�
 | `Runtime.EntityFrameworkCore.g.cs`（`{Runtime}.EntityFrameworkCore`） | `QuickER.Runtime.EntityFrameworkCore` | EF Core 共通部品（`TContext : DbContext` ジェネリックの Repository 基底・VO 翻訳プラグイン） |
 | `Runtime.InMemory.g.cs`（`{Runtime}.InMemory`） | `QuickER.Runtime.InMemory` | インメモリ基盤（ストア・Repository 基底・保存ステージング） |
 | `Runtime.AspNetCore.g.cs`（`{Runtime}.AspNetCore`） | `QuickER.Runtime.AspNetCore` | サーバー側固定エンジン（`RemoteServerEngine`＝リクエスト読み取り・エラー分類・詳細公開ポリシー・バイナリ転送の補助） |
-| `Runtime.Sync.g.cs`（`{Runtime}.Sync`） | `QuickER.Runtime.Sync` | 同期エンジン（`SyncEngine`・`SyncJournal`・`SyncTable<,>`・オプション／結果／競合の型。リモートサービス併用時は同期エンベロープと HTTP ソース基底） |
+| `Runtime.Sync.g.cs`（`{Runtime}.Sync`） | `QuickER.Runtime.Sync` | 同期エンジン（`SyncEngine`・`SyncJournal`・`SyncTable<,>`・`SyncTableDescriptor<,>`・`SyncGraphRecorder`・オプション／結果／競合の型。リモートサービス併用時は同期エンベロープと HTTP ソース） |
 | `Repositories.g.cs`・`Repositories.SqlServer.g.cs` / `Repositories.Sqlite.g.cs` / `Repositories.EntityFrameworkCore.g.cs` / `Repositories.InMemory.g.cs` / `Repositories.Sync.g.cs` / `Repositories.Http.g.cs`・`RemoteServer.g.cs` | —（対応パッケージなし＝常に生成） | スキーマ依存物のみ（per-entity の契約と実装・DI 登録・`QuickErDbContext` と Fluent 構成・射影 DTO・per-entity のエンドポイント（`GeneratedRemoteEndpoints`）・per-table の同期記述子とジャーナル記録デコレータ）。リモートサービス併用時、HTTP クライアント（`Http{Entity}RemoteRepository` と DI 登録）は専用の `Repositories.Http.g.cs` へ分かれ、契約ファイルはインターフェイスだけに保たれます（名前空間は契約と同一のため型名は変わりません） |
 
 `Runtime.g.cs` は常に出力され、それ以降のファイルは有効にした機能の分だけ出力されます（方言ファイルは QuickER 版 Repository を生成するとき・EF Core ファイルは `GenerateEfCoreRepositories`・インメモリファイルは `GenerateInMemoryRepositories`・ASP.NET Core ファイルは `GenerateRemoteServices`・同期ファイルは `GenerateSyncSupport` のときだけ）＝参照すべきパッケージの集合とそのまま一致します。

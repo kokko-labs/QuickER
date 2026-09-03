@@ -1,4 +1,4 @@
-using System.Text.RegularExpressions;
+﻿using System.Text.RegularExpressions;
 using QuickER.CodeGen.CSharp.Resources;
 using QuickER.Model;
 
@@ -104,9 +104,6 @@ internal sealed partial class CSharpGenerationModelBuilder
             // 同期対象テーブルは「行バージョン列を持ち Repository 契約が生成されるテーブル」で、FK トポロジカル順に並べる
             // （ダウンロードの適用は親→子・削除は子→親でなければ FK 制約に触れるため、順序そのものが生成物の一部）
             SyncTables = syncTables,
-            // グラフ保存のジャーナル記録は保存側（EntityGraphSaver）のカスケード走査をミラーする必要があるため、
-            // 同期対象と同じナビゲーション解決結果から再帰記録メソッド群を静的に組み立てる
-            SyncGraphRecorder = BuildSyncGraphRecorder(diagram, navigationsByEntity, syncTables),
             // グラフ取得糖衣（IncludeGraph）は保存側と同じカスケード閉包を Include ツリーへ写すため、
             // 同じナビゲーション解決結果から静的に組み立てる（オプションなし・契約が出る構成で常時生成）
             IncludeGraphExtensions = BuildIncludeGraphExtensions(

@@ -238,8 +238,18 @@ public sealed class SyncRefreshBenchmarkRuntimeTests(ITestOutputHelper output) :
         );
         var engine = new SyncEngine(
             [
-                new SyncOrderSyncTable(orders, localSql, _orderSource),
-                new SyncOrderLineSyncTable(lines, localSql, _lineSource),
+                new SyncTable<SyncOrderEntity, int>(
+                    orders,
+                    localSql,
+                    _orderSource,
+                    GeneratedSyncTables.SyncOrder
+                ),
+                new SyncTable<SyncOrderLineEntity, int>(
+                    lines,
+                    localSql,
+                    _lineSource,
+                    GeneratedSyncTables.SyncOrderLine
+                ),
             ],
             journal
         );
