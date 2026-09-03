@@ -4144,6 +4144,119 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain(": ValueObjectStringBase<TitleValue>,");
     }
 
+    /// <summary>GuidKey VO でも宣言幅の長さ検証が string VO と同じ形で生成されることを検証する</summary>
+    /// <remarks>
+    /// 生成器の内部契約は「長さ検証は VO が担うから Entity へ <c>[MaxLength]</c> を出さない」であり、
+    /// GuidKey で幅を落とすと検証がスタック全体から消える（宣言幅超過が INSERT の切り詰めエラーで初めて露見する）。
+    /// </remarks>
+    [Fact]
+    public void Generate_ValueObjects_GuidKey_ShouldEmitMaxLengthValidation()
+    {
+        var result = GenerateGuidKeyDiagram("nvarchar(50)");
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files[0].Content;
+        content.Should().Contain(": ValueObjectGuidKeyBase<DocumentIdValue>,");
+        // string VO と同じ長さ検証（value.Length > N → MaxLengthExceeded）が GuidKey VO にも出る
+        content.Should().Contain("if (value.Length > 50)");
+        content
+            .Should()
+            .Contain("ValueObjectValidationMessages.MaxLengthExceeded(50, value.Length)");
+        // 幅 36 以上なので警告は出ない
+        result
+            .Diagnostics.Should()
+            .NotContain(diagnostic =>
+                diagnostic.Severity == GenerationDiagnosticSeverity.Warning
+                && diagnostic.Message.Contains("documents.document_id")
+            );
+    }
+
+    /// <summary>幅 36 未満の GuidKey 列は Warning 診断を 1 件出し、生成は続行して宣言幅どおりの検証を出すことを検証する</summary>
+    [Fact]
+    public void Generate_ValueObjects_GuidKey_ShortColumn_ShouldWarnButGenerate()
+    {
+        var result = GenerateGuidKeyDiagram("nvarchar(20)");
+
+        // Warning であって Error ではない（オプションが図全体へ効くため生成ごと止めない）
+        result.HasErrors.Should().BeFalse();
+        var warnings = result
+            .Diagnostics.Where(diagnostic =>
+                diagnostic.Severity == GenerationDiagnosticSeverity.Warning
+                && diagnostic.Message.Contains("documents.document_id")
+            )
+            .ToList();
+        warnings.Should().ContainSingle();
+        warnings[0].Message.Should().Contain("20").And.Contain("36");
+
+        // 生成は続行し、宣言幅どおり（20）の長さ検証が出る
+        var content = result.Files[0].Content;
+        content.Should().Contain(": ValueObjectGuidKeyBase<DocumentIdValue>,");
+        content.Should().Contain("if (value.Length > 20)");
+    }
+
+    /// <summary>幅 36 ちょうど／幅 max（長さ不明）では警告を出さないことを検証する（境界の固定）</summary>
+    [Theory]
+    // 36 文字ちょうど＝GUID 採番が収まる下限
+    [InlineData("nvarchar(36)")]
+    // max は長さ不明（MaxLength なし）＝長さ検証そのものが出ない
+    [InlineData("nvarchar(max)")]
+    public void Generate_ValueObjects_GuidKey_WideEnoughColumn_ShouldNotWarn(string dataType)
+    {
+        var result = GenerateGuidKeyDiagram(dataType);
+
+        result.HasErrors.Should().BeFalse();
+        result
+            .Diagnostics.Should()
+            .NotContain(diagnostic =>
+                diagnostic.Severity == GenerationDiagnosticSeverity.Warning
+                && diagnostic.Message.Contains("documents.document_id")
+            );
+    }
+
+    /// <summary>GuidKey 検証用の最小図（string PK 1 本＋非 PK string 1 本）を指定の PK 型で生成する</summary>
+    private static CodeGenerationResult GenerateGuidKeyDiagram(string primaryKeyDataType)
+    {
+        var diagram = new ErDiagram
+        {
+            Entities =
+            [
+                new Entity
+                {
+                    Id = Guid.NewGuid(),
+                    TableName = "documents",
+                    Columns =
+                    [
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "document_id",
+                            DataType = primaryKeyDataType,
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "title",
+                            DataType = "nvarchar(100)",
+                            IsNullable = false,
+                        },
+                    ],
+                },
+            ],
+        };
+
+        return new CSharpCodeGenerationService().Generate(
+            diagram,
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Sample.Domain",
+                GenerateValueObjects = true,
+                UseGuidKeyForStringPrimaryKey = true,
+            }
+        );
+    }
+
     /// <summary>同名列の定義が食い違う場合は Warning 診断を出すが、生成自体は成功する（PK 優先/最大定義で解決）ことを検証する</summary>
     [Fact]
     public void Generate_ValueObjects_ConflictingSameNameColumns_ShouldWarnButGenerate()

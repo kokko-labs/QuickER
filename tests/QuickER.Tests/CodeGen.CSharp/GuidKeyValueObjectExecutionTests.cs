@@ -29,6 +29,12 @@ namespace QuickER.Tests.CodeGen.CSharp;
 /// </remarks>
 public sealed class GuidKeyValueObjectExecutionTests
 {
+    /// <summary>
+    /// 検証用の図が宣言する主キー列の幅。引数なし <c>Create()</c> の GUID 採番（36 文字）が収まり、かつ
+    /// 「宣言幅ちょうど」「宣言幅超過」を 36 と区別して検証できるよう 36 より広い値を採る。
+    /// </summary>
+    private const int DeclaredMaxLength = 50;
+
     /// <summary>生成→コンパイル→ロード済みの GuidKey VO 型（プロセス内で一度だけ構築してキャッシュ）。</summary>
     private static readonly Lazy<Type> GuidKeyValueObjectType = new(BuildGuidKeyValueObjectType);
 
@@ -36,7 +42,9 @@ public sealed class GuidKeyValueObjectExecutionTests
 
     // ===== 実行検証 =====
 
-    [Fact(DisplayName = "引数なし Create(): 新しい GUID を採番し、呼び出しごとに一意な値を返す")]
+    [Fact(
+        DisplayName = "引数なし Create(): 幅 36 以上の列で新しい GUID を採番し、呼び出しごとに一意な値を返す"
+    )]
     public void 引数なしCreateはGUIDを採番する()
     {
         var first = InvokeCreateParameterless();
@@ -63,14 +71,45 @@ public sealed class GuidKeyValueObjectExecutionTests
         values.Distinct().Should().HaveCount(100);
     }
 
-    [Fact(
-        DisplayName = "値あり Create(string): 与えた文字列をそのまま保持する（GuidKey は追加検証なし）"
-    )]
+    [Fact(DisplayName = "値あり Create(string): 宣言幅以内の文字列をそのまま保持する")]
     public void 値ありCreate()
     {
         var vo = InvokeCreateString("my-key-123");
 
         GetValue(vo).Should().Be("my-key-123");
+    }
+
+    [Fact(
+        DisplayName = "値あり Create(string): 宣言幅ちょうど（50 文字）は通り、GUID 文字列（36 文字）も通る"
+    )]
+    public void 値ありCreateは宣言幅ちょうどまで通る()
+    {
+        var exact = new string('x', DeclaredMaxLength);
+        GetValue(InvokeCreateString(exact)).Should().Be(exact);
+
+        var guid = Guid.NewGuid().ToString();
+        guid.Should().HaveLength(36);
+        GetValue(InvokeCreateString(guid)).Should().Be(guid);
+    }
+
+    [Fact(
+        DisplayName = "値あり Create(string): 宣言幅超過は ValueObjectValidationException（string VO と同じ文言）"
+    )]
+    public void 値ありCreateは宣言幅超過で例外()
+    {
+        var tooLong = new string('x', DeclaredMaxLength + 1);
+
+        var act = () => InvokeCreateString(tooLong);
+
+        var exception = act.Should().Throw<Exception>().Which;
+        // リフレクション呼び出しのため TargetInvocationException で包まれる
+        var actual = exception is TargetInvocationException invocation
+            ? invocation.InnerException!
+            : exception;
+        actual.GetType().Name.Should().Be("ValueObjectValidationException");
+        actual
+            .Message.Should()
+            .Contain($"Enter at most {DeclaredMaxLength} characters. (currently {tooLong.Length}");
     }
 
     [Fact(DisplayName = "TryCreate(string): 正常入力で true・結果あり・エラー空")]
@@ -82,6 +121,22 @@ public sealed class GuidKeyValueObjectExecutionTests
         result.Should().NotBeNull();
         GetValue(result!).Should().Be("abc");
         errors.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "TryCreate(string): 宣言幅超過で false・結果 null・長さ超過エラーを返す")]
+    public void TryCreateは宣言幅超過でfalse()
+    {
+        var tooLong = new string('x', DeclaredMaxLength + 1);
+
+        var (ok, result, errors) = InvokeTryCreate(tooLong);
+
+        ok.Should().BeFalse();
+        result.Should().BeNull();
+        errors
+            .Should()
+            .ContainSingle()
+            .Which.Should()
+            .Contain($"Enter at most {DeclaredMaxLength} characters.");
     }
 
     [Fact(
@@ -179,7 +234,7 @@ public sealed class GuidKeyValueObjectExecutionTests
                         {
                             Id = Guid.NewGuid(),
                             Name = "widget_id",
-                            DataType = "nvarchar(36)",
+                            DataType = $"nvarchar({DeclaredMaxLength})",
                             IsPrimaryKey = true,
                             IsNullable = false,
                         },

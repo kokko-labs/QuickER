@@ -190,6 +190,9 @@
   <data name="CodeGen_Warning_ValueObjectDefinitionMismatch" xml:space="preserve">
     <value>The definitions of the same-named columns aggregated into value object '{0}' do not match. Generation proceeds with the PK definition preferred (otherwise the largest definition), but unifying the definitions in the ER diagram is recommended: {1}</value>
   </data>
+  <data name="CodeGen_Warning_GuidKeyColumnShorterThanGuid" xml:space="preserve">
+    <value>The GUID key primary key column '{0}' is declared as {1} characters, which is shorter than the {2} characters produced by the parameterless Create(). Auto-numbering always fails length validation at run time; widen the column, or supply a shorter key explicitly instead of auto-numbering.</value>
+  </data>
   <data name="CodeGen_Query_UnexpectedCharacter" xml:space="preserve">
     <value>Unexpected character '{0}' in the condition.</value>
   </data>

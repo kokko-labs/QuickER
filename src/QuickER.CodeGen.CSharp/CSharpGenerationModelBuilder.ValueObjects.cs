@@ -23,6 +23,12 @@ namespace QuickER.CodeGen.CSharp;
 /// </remarks>
 internal sealed partial class CSharpGenerationModelBuilder
 {
+    /// <summary>
+    /// GuidKey 値オブジェクトの引数なし <c>Create()</c> が採番する値の文字数
+    /// （<c>Guid.NewGuid().ToString()</c>＝ハイフン付き "D" 書式の 36 文字）。
+    /// </summary>
+    private const int GuidKeyValueLength = 36;
+
     /// <summary>1 つの値オブジェクトへ集約される列のメンバー（所属テーブル・列・解決済み C# 型）</summary>
     private readonly record struct ValueObjectMember(
         Entity Entity,
@@ -372,9 +378,32 @@ internal sealed partial class CSharpGenerationModelBuilder
             && primaryKeyMember.TypeInfo.TypeName == "string";
 
         var valueType = isGuidKey ? "string" : authoritative.TypeInfo.TypeName;
-        var maxLength = isGuidKey ? null : authoritative.TypeInfo.MaxLength;
+        // GuidKey でも宣言幅（MaxLength）はそのまま素通しする。生成器の内部契約は「長さ検証は VO が担うから
+        // Entity 側へ [MaxLength] を出さない」（BuildPropertyModel の VO 分岐）なので、ここで落とすと検証が
+        // スタック全体から消え、宣言幅超過の値が DB へ届いて切り詰めエラーで初めて露見する。
+        // UseGuidKeyForStringPrimaryKey は図の全 string PK に効くグローバルオプションのため、GUID 採番（36 文字）が
+        // 入りきらない狭い列も GuidKey になり得るが、それは下の幅チェックが警告で知らせる（生成は続行する）
+        var maxLength = authoritative.TypeInfo.MaxLength;
         var precision = isGuidKey ? null : authoritative.TypeInfo.Precision;
         var scale = isGuidKey ? null : authoritative.TypeInfo.Scale;
+
+        // 引数なし Create() が採番する GUID（ハイフン付き "D" 書式）は必ず 36 文字。宣言幅がこれを下回る列では
+        // 自動採番が長さ検証に必ず失敗するため、生成時に名指しで警告する。Error にはしない
+        // ——オプションが図全体へ効くため、短い string PK が 1 本混ざるだけで機能ごと使えなくなるうえ、
+        // 手動で短いキーを与える運用（採番を使わない）は引き続き成立するため
+        if (isGuidKey && maxLength is > 0 and < GuidKeyValueLength)
+        {
+            diagnostics.Add(
+                GenerationDiagnostic.Warning(
+                    string.Format(
+                        Strings.CodeGen_Warning_GuidKeyColumnShorterThanGuid,
+                        $"{authoritative.Entity.TableName}.{authoritative.Column.Name}",
+                        maxLength.Value,
+                        GuidKeyValueLength
+                    )
+                )
+            );
+        }
 
         // 同一グループの定義が食い違う場合は競合として警告（NULL 可否は競合に含めない）
         var signatures = members.Select(Signature).Distinct().ToList();

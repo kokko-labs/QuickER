@@ -318,6 +318,12 @@ namespace QuickER.CodeGen.CSharp.Resources {
             }
         }
 
+        public static string CodeGen_Warning_GuidKeyColumnShorterThanGuid {
+            get {
+                return ResourceManager.GetString("CodeGen_Warning_GuidKeyColumnShorterThanGuid", resourceCulture);
+            }
+        }
+
         public static string CodeGen_Query_UnexpectedCharacter {
             get {
                 return ResourceManager.GetString("CodeGen_Query_UnexpectedCharacter", resourceCulture);
