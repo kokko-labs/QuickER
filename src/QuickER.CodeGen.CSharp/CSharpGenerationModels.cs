@@ -567,6 +567,18 @@ internal sealed class CSharpMappingPropertyPair
     /// DB 採番のため新規行では未入力が正常であり、未入力を欠落として例外にすると新規保存が成立しない。
     /// </remarks>
     public required bool IsRowVersion { get; init; }
+
+    /// <summary>
+    /// 除外された無制限バイナリ列（<see cref="CodeGenerationOptions.ExcludeUnboundedBinaryColumns"/> が
+    /// ON かつ無制限バイナリ）かどうか。
+    /// </summary>
+    /// <remarks>
+    /// true のとき Mapper の Entity へのコピーは「入力があるときだけ代入」に切り替える。
+    /// 除外列は通常フェッチの SELECT に含まれず未取得状態のまま届くため、未入力を欠落として例外にすると
+    /// 「取得 → 通常列だけ編集 → 保存」の往復が成立しない（未入力なら実体の未取得状態を保ち、
+    /// UPDATE 対象からも外れて DB の blob が温存される）。
+    /// </remarks>
+    public required bool IsExcludedUnboundedBinary { get; init; }
 }
 
 /// <summary>Mapper が扱うナビゲーションプロパティの生成モデル</summary>
@@ -839,7 +851,10 @@ internal sealed record CSharpEditModelPropertyModel
     public required bool IsNullable { get; init; }
 
     /// <summary>必須項目（Entity 側が非 NULL）かどうか</summary>
-    /// <remarks>行バージョン列（<see cref="IsRowVersion"/>）は DB 採番のため非 NULL でも必須にしない。</remarks>
+    /// <remarks>
+    /// 行バージョン列（<see cref="IsRowVersion"/>）は DB 採番のため非 NULL でも必須にしない。
+    /// 除外された無制限バイナリ列（<see cref="IsExcludedUnboundedBinary"/>）も通常フェッチでは未取得のため必須にしない。
+    /// </remarks>
     public required bool IsRequired { get; init; }
 
     /// <summary>
@@ -847,6 +862,13 @@ internal sealed record CSharpEditModelPropertyModel
     /// </summary>
     /// <remarks>必須検証の除外と、Mapper の「入力があるときだけ代入」への切り替えに使う。</remarks>
     public bool IsRowVersion { get; init; }
+
+    /// <summary>
+    /// 除外された無制限バイナリ列（<see cref="CodeGenerationOptions.ExcludeUnboundedBinaryColumns"/> が
+    /// ON かつ無制限バイナリ）かどうか。
+    /// </summary>
+    /// <remarks>必須検証の除外と、Mapper の「入力があるときだけ代入」への切り替えに使う。</remarks>
+    public bool IsExcludedUnboundedBinary { get; init; }
 
     /// <summary>参照型かどうか</summary>
     public required bool IsReferenceType { get; init; }

@@ -162,6 +162,24 @@ public class RuntimeTestMatrixTests
             "無制限バイナリ列の除外・WithUnboundedBinary・Stream アクセサ",
             Row(Covered(), Covered(), Covered(), Covered(), Covered())
         ),
+        ["BinaryColumnEditModel"] = new(
+            "無制限バイナリ除外 × 値オブジェクト × EditModel / Mapper の往復（未取得の除外列を素通しする保存）",
+            Row(
+                Gap(
+                    "EditModel / Mapper は方言に依らない生成物で、除外の意味論は SQLite で代表させている"
+                        + "（SQL Server 側の除外の実 DB 検証は BinaryColumn 行が持つ）"
+                ),
+                Covered(),
+                NotApplicable(
+                    "EF Core は列選択を自身が行うため除外が非適用＝除外列が未取得になる状況が発生しない"
+                ),
+                Gap(
+                    "インメモリも除外の意味論を持つが、往復の主題は「実 DB の UPDATE が除外列に触れない」ことなので"
+                        + "実 DB 側を先に押さえている"
+                ),
+                NotApplicable("EditModel / Mapper はクライアント側の型でリモート面を経由しない")
+            )
+        ),
         ["UniquenessCheck"] = new(
             "UNIQUE 制約の事前チェック（重複検出・自分自身の除外）",
             Row(Covered(), Covered(), Covered(), Covered(), Covered())
@@ -409,6 +427,7 @@ public class RuntimeTestMatrixTests
         new("BinaryColumnEfCoreRuntimeTests", "BinaryColumn", Backend.EfCore),
         new("BinaryInMemoryFixtureRuntimeTests", "BinaryColumn", Backend.InMemory),
         new("BinaryColumnRemoteRuntimeTests", "BinaryColumn", Backend.Remote),
+        new("BinaryVoEditModelRuntimeTests", "BinaryColumnEditModel", Backend.AdoSqlite),
         // --- 一意性の事前チェック ---
         new("UniquenessCheckSqlServerRuntimeTests", "UniquenessCheck", Backend.AdoSqlServer),
         new("UniquenessCheckAdoRuntimeTests", "UniquenessCheck", Backend.AdoSqlite),

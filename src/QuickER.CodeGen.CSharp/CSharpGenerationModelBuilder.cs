@@ -88,7 +88,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             MapperClasses = options.GenerateMappers
                 ? diagram
                     .Entities.Select(entity =>
-                        BuildMapperClass(entity, navigationsByEntity[entity.Id])
+                        BuildMapperClass(entity, navigationsByEntity[entity.Id], options)
                     )
                     .ToList()
                 : [],
@@ -183,7 +183,9 @@ internal sealed partial class CSharpGenerationModelBuilder
     )
     {
         var className = _nameConverter.ToEditModelClassName(entity.TableName);
-        var properties = entity.Columns.Select(BuildEditModelProperty).ToList();
+        var properties = entity
+            .Columns.Select(column => BuildEditModelProperty(column, options))
+            .ToList();
         var navigationModels = navigations.Select(BuildEditModelNavigation).ToList();
 
         // 列由来プロパティ名（確定値・バインディング両方）が表示名解決ヘルパ（GetDisplayName /
@@ -305,7 +307,8 @@ internal sealed partial class CSharpGenerationModelBuilder
     /// <summary>エンティティ定義と解決済みナビゲーションから Entity ↔ EditModel 変換 Mapper の生成モデルを構築する</summary>
     private CSharpMapperModel BuildMapperClass(
         Entity entity,
-        IReadOnlyList<NavigationInfo> navigations
+        IReadOnlyList<NavigationInfo> navigations,
+        CodeGenerationOptions options
     )
     {
         var entityClassName = _nameConverter.ToEntityClassName(entity.TableName);
@@ -316,7 +319,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             .Columns.Select(column =>
             {
                 var property = BuildProperty(column);
-                var editModelProperty = BuildEditModelProperty(column);
+                var editModelProperty = BuildEditModelProperty(column, options);
                 // ロードは Entity の確定値を EditModel の確定値へ直接代入する（文字列往復なし＝無損失）。
                 // EditModel 側の確定値は常に NULL 許容なので、Entity 側が非 NULL でもそのまま代入できる
                 return new CSharpMappingPropertyPair
@@ -332,6 +335,10 @@ internal sealed partial class CSharpGenerationModelBuilder
                     ),
                     // DB 採番の行バージョン列は「入力があるときだけ代入」へ倒す（未入力を欠落として例外にしない）
                     IsRowVersion = editModelProperty.IsRowVersion,
+                    // 除外された無制限バイナリ列も同じく「入力があるときだけ代入」へ倒す。
+                    // 通常フェッチでは SELECT されず未取得状態のままなので、未入力を欠落として例外にすると
+                    // 「取得 → 通常列だけ編集 → 保存」の往復が成立しない
+                    IsExcludedUnboundedBinary = editModelProperty.IsExcludedUnboundedBinary,
                 };
             })
             .ToList();
@@ -697,13 +704,16 @@ internal sealed partial class CSharpGenerationModelBuilder
     /// EditModel は入力途中の不正値も保持するため、値型・文字列・バイナリは原則 NULL 許容とし、
     /// 確定値プロパティと UI バインディング用文字列プロパティの両方の情報を組み立てる
     /// </remarks>
-    private CSharpEditModelPropertyModel BuildEditModelProperty(Column column)
+    private CSharpEditModelPropertyModel BuildEditModelProperty(
+        Column column,
+        CodeGenerationOptions options
+    )
     {
         var typeInfo = _columnTypes[column.Id];
         var valueObject = ResolveValueObject(column);
         if (valueObject is not null)
         {
-            return BuildValueObjectEditModelProperty(column, valueObject);
+            return BuildValueObjectEditModelProperty(column, valueObject, options);
         }
 
         var typeName = typeInfo.TypeName;
@@ -733,6 +743,11 @@ internal sealed partial class CSharpGenerationModelBuilder
 
         var bindingFieldInitializer = "string.Empty";
 
+        // 除外された無制限バイナリ列（オプション ON かつ無制限バイナリ）は通常フェッチで未取得のまま届くため、
+        // 行バージョン列と同じく「必須にしない・入力があるときだけ実体へ書く」規則を適用する
+        var isExcludedUnboundedBinary =
+            options.ExcludeUnboundedBinaryColumns && typeInfo.IsUnboundedBinary;
+
         return new CSharpEditModelPropertyModel
         {
             PropertyName = propertyName,
@@ -754,9 +769,15 @@ internal sealed partial class CSharpGenerationModelBuilder
             IsReferenceType = typeInfo.IsReferenceType,
             IsBinary = isBytes,
             // Entity 側が非 NULL（必須）で EditModel 側は入力途中を許容して NULL 許容にした項目を必須とみなす。
-            // ただし行バージョン列は DB が採番するため非 NULL でも入力必須にしない（新規行は未入力が正常）
-            IsRequired = editModelIsNullable && !column.IsNullable && !typeInfo.IsRowVersion,
+            // ただし行バージョン列は DB が採番するため非 NULL でも入力必須にしない（新規行は未入力が正常）。
+            // 除外された無制限バイナリ列も同じく非 NULL でも入力必須にしない（通常フェッチでは未取得が正常）
+            IsRequired =
+                editModelIsNullable
+                && !column.IsNullable
+                && !typeInfo.IsRowVersion
+                && !isExcludedUnboundedBinary,
             IsRowVersion = typeInfo.IsRowVersion,
+            IsExcludedUnboundedBinary = isExcludedUnboundedBinary,
             RevertBindingExpression = BuildBindingExpression(
                 propertyName,
                 isBytes,
