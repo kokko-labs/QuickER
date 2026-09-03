@@ -190,6 +190,9 @@
   <data name="CodeGen_Warning_ValueObjectDefinitionMismatch" xml:space="preserve">
     <value>値オブジェクト '{0}' に集約される同名列の定義が一致しません。PK 定義優先（無ければ最大定義）で生成しますが、ER 図の定義統一を推奨します: {1}</value>
   </data>
+  <data name="CodeGen_Warning_GuidKeyColumnShorterThanGuid" xml:space="preserve">
+    <value>GUID キーの主キー列 '{0}' は宣言幅が {1} 文字で、引数なし Create() が採番する {2} 文字より短いため、自動採番は実行時に必ず長さ検証で失敗します。列幅を広げるか、自動採番を使わずに短いキーを明示的に与えてください。</value>
+  </data>
   <data name="CodeGen_Query_UnexpectedCharacter" xml:space="preserve">
     <value>条件式に想定外の文字 '{0}' があります。</value>
   </data>

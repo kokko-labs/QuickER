@@ -305,6 +305,12 @@ var id = DocumentIdValue.Create();   // A new key wrapping Guid.NewGuid() as a s
 
 This lets you satisfy the "primary keys are application-assigned" prerequisite of repository generation (above) without writing any key-generation logic.
 
+Length validation still applies, exactly as it does for any other string value object. The value object carries the column's declared width, so `Create` and `TryCreate` reject a value longer than it — the generator leaves `[MaxLength]` off the entity property precisely because the value object owns that check.
+
+The parameterless `Create()` always mints 36 characters (`Guid.NewGuid().ToString()`). The option applies to every string primary key in the diagram, so it also turns a deliberately short key — a five-character code column, say — into a GUID key. Generation warns by name for any such column narrower than 36 characters and then continues: auto-numbering on that column always fails length validation at run time, while assigning a short key explicitly keeps working.
+
+Keys compare ordinally, so the comparison is case-sensitive. QuickER never generates a `DEFAULT` clause, but if you add `DEFAULT NEWID()` to the column outside QuickER, SQL Server stores uppercase GUIDs while the application mints lowercase ones. Mixing the two breaks key matching.
+
 ## Edit model save workflow
 
 An edit model is what the screen binds to; the entity is what gets saved. The mapper moves values between them, and the round trip is always the same four steps:
