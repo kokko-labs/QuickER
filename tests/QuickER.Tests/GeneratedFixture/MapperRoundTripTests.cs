@@ -141,7 +141,7 @@ public sealed class MapperRoundTripTests
         var em = new CustomerMapper().CreateEditModel(BuildFullCustomer());
         var target = new CustomerEntity();
 
-        new CustomerMapper().ApplyToEntity(em, target);
+        new CustomerMapper().ApplyToEntity(em, target, includeRemoved: false);
 
         target.CustomerId!.Value.Should().Be(1);
         target.Name!.Value.Should().Be("Alice");
@@ -183,7 +183,7 @@ public sealed class MapperRoundTripTests
         var original = BuildFullCustomer(balance: null);
         var mapper = new CustomerMapper();
 
-        var rebuilt = mapper.CreateEntity(mapper.CreateEditModel(original));
+        var rebuilt = mapper.CreateEntity(mapper.CreateEditModel(original), includeRemoved: false);
 
         rebuilt.Balance.Should().BeNull();
     }
@@ -211,11 +211,18 @@ public sealed class MapperRoundTripTests
     public void ApplyToEntity_子無し再適用で子がnullへ戻る()
     {
         var mapper = new CustomerMapper();
-        var entity = mapper.CreateEntity(mapper.CreateEditModel(BuildFullCustomer()));
+        var entity = mapper.CreateEntity(
+            mapper.CreateEditModel(BuildFullCustomer()),
+            includeRemoved: false
+        );
         entity.CustomerProfile.Should().NotBeNull();
 
         // 同じエンティティを使い回して、子を持たない EditModel を適用し直す
-        mapper.ApplyToEntity(mapper.CreateEditModel(BuildFullCustomer(withProfile: false)), entity);
+        mapper.ApplyToEntity(
+            mapper.CreateEditModel(BuildFullCustomer(withProfile: false)),
+            entity,
+            includeRemoved: false
+        );
 
         entity.CustomerProfile.Should().BeNull();
     }
@@ -293,7 +300,7 @@ public sealed class MapperRoundTripTests
         em.CustomerId!.Value.Should().Be(2);
         em.Bio!.Value.Should().Be("about me");
 
-        var rebuilt = mapper.CreateEntity(em);
+        var rebuilt = mapper.CreateEntity(em, includeRemoved: false);
         rebuilt.ProfileId.Should().Be(entity.ProfileId);
         rebuilt.CustomerId.Should().Be(entity.CustomerId);
         rebuilt.Bio.Should().Be(entity.Bio);
@@ -305,7 +312,10 @@ public sealed class MapperRoundTripTests
             CustomerId = CustomerIdValue.Create(2),
             Bio = null,
         };
-        var rebuiltNull = mapper.CreateEntity(mapper.CreateEditModel(nullBio));
+        var rebuiltNull = mapper.CreateEntity(
+            mapper.CreateEditModel(nullBio),
+            includeRemoved: false
+        );
         rebuiltNull.Bio.Should().BeNull();
     }
 
@@ -325,7 +335,7 @@ public sealed class MapperRoundTripTests
         var mapper = new OrderMapper();
 
         // 一切編集せずに EditModel を経由させる
-        var rebuilt = mapper.CreateEntity(mapper.CreateEditModel(entity));
+        var rebuilt = mapper.CreateEntity(mapper.CreateEditModel(entity), includeRemoved: false);
 
         rebuilt.OrderedAt.Should().NotBeNull();
         rebuilt.OrderedAt!.Value.Ticks.Should().Be(orderedAt.Ticks);
@@ -417,7 +427,10 @@ public sealed class MapperRoundTripTests
 
         em.HasErrors.Should().BeFalse();
         em.DeliveryDate!.Value.Should().Be(deliveryDate);
-        mapper.CreateEntity(em).DeliveryDate!.Value.Should().Be(deliveryDate);
+        mapper
+            .CreateEntity(em, includeRemoved: false)
+            .DeliveryDate!.Value.Should()
+            .Be(deliveryDate);
     }
 
     [Fact(DisplayName = "ロード: NULL の date 列は null のまま往復し、表示文字列は空になる")]
@@ -429,7 +442,7 @@ public sealed class MapperRoundTripTests
 
         em.DeliveryDate.Should().BeNull();
         em.BindingDeliveryDate.Should().BeEmpty();
-        mapper.CreateEntity(em).DeliveryDate.Should().BeNull();
+        mapper.CreateEntity(em, includeRemoved: false).DeliveryDate.Should().BeNull();
     }
 
     [Fact(DisplayName = "ロード: NULL の DateTime 列は null のまま往復し、表示文字列は空になる")]
@@ -441,7 +454,7 @@ public sealed class MapperRoundTripTests
 
         em.OrderedAt.Should().BeNull();
         em.BindingOrderedAt.Should().BeEmpty();
-        mapper.CreateEntity(em).OrderedAt.Should().BeNull();
+        mapper.CreateEntity(em, includeRemoved: false).OrderedAt.Should().BeNull();
     }
 
     [Fact(
@@ -522,7 +535,7 @@ public sealed class MapperRoundTripTests
         var entity = BuildOrder(42);
         var mapper = new OrderMapper();
 
-        var rebuilt = mapper.CreateEntity(mapper.CreateEditModel(entity));
+        var rebuilt = mapper.CreateEntity(mapper.CreateEditModel(entity), includeRemoved: false);
 
         rebuilt.OrderId.Should().Be(entity.OrderId);
         rebuilt.CustomerId.Should().Be(entity.CustomerId);

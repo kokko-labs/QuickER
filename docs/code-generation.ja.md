@@ -347,7 +347,7 @@ editModel.AcceptChanges();
 
 新規行は既存 Entity へ適用するのではなく組み立てます: `mapper.CreateEntity(editModel, includeRemoved: true)`（コレクションごとなら `CreateEntities(collection, includeRemoved: true)`）。
 
-**保存に使う結果を作るときは必ず `includeRemoved: true` を渡してください。** 既定は `false` で、これは表示用途（帳票・プレビュー）のものです。削除追跡中の行が結果に入らないため、そのまま保存すると削除が乗らず、ユーザーが消したはずの行が黙って残ります。
+**保存に使う結果を作るときは必ず `includeRemoved: true` を渡してください。** `includeRemoved` に既定値はなく必須引数です（呼び出しごとに、保存用のグラフを作るのか〔`true`〕表示用なのか〔`false`〕を明示します）。`false` は表示用途（帳票・プレビュー）のものです。削除追跡中の行が結果に入らないため、そのまま保存すると削除が乗らず、ユーザーが消したはずの行が黙って残ります。
 
 ### 行の削除: `Remove()` と `MarkRemoved()`
 

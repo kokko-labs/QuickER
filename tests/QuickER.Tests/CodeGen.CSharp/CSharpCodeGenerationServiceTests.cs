@@ -738,9 +738,7 @@ public class CSharpCodeGenerationServiceTests
         result
             .Files[0]
             .Content.Should()
-            .Contain(
-                "public TEntity CreateEntity(TEditModel editModel, bool includeRemoved = false)"
-            );
+            .Contain("public TEntity CreateEntity(TEditModel editModel, bool includeRemoved)");
         result
             .Files[0]
             .Content.Should()

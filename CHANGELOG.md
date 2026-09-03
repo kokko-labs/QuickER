@@ -6,6 +6,10 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking: the generated mapper's `includeRemoved` is now a required argument** — `CreateEntity(editModel, includeRemoved)`, `CreateEntities(collection, includeRemoved)` and `ApplyToEntity(editModel, entity, includeRemoved)` no longer default to `false`, so every call site has to state whether it is building an entity graph to save (`true`) or to display (`false`). Omitting the argument used to leave the deletion-tracked rows out of the graph, and the save then silently kept the rows the user had removed. To migrate, regenerate the code and add `includeRemoved: true` on save paths and `includeRemoved: false` on display paths at the call sites the compiler now flags
+
 ## [0.1.0] - 2026-08-30
 
 Initial public release.

@@ -203,7 +203,8 @@ Check(editModel.UnitPrice, 1650m, "confirmed value after input");
 Check(editModel.HasChanges, true, "promoted to update target by the confirmed-value change");
 
 // Apply the edit model back to the entity and save it with the repository.
-productMapper.ApplyToEntity(editModel, productEntity!);
+// includeRemoved is required: pass true on save paths so deletion-tracked child rows still reach the repository.
+productMapper.ApplyToEntity(editModel, productEntity!, includeRemoved: true);
 await products.UpdateAsync(productEntity!);
 
 var reloadedProduct = await products.GetByIdAsync(101);
