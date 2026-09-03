@@ -16,10 +16,6 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Linq.Expressions;
-using System.Net;
-using System.Net.Http;
-using System.Net.Http.Headers;
-using System.Net.Http.Json;
 using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -32,7 +28,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
-namespace QuickER.Tests.GeneratedSyncFixture
+namespace QuickER.Tests.GeneratedSyncVoFixture
 {
 
 /// <summary>Custom attribute that annotates an entity navigation with the referenced table and column information.</summary>
@@ -254,9 +250,14 @@ internal static class UnboundedBinaryColumns
         }
     }
 
-    /// <summary>Gets a value indicating whether the value is equivalent to the "not-fetched" state (null / empty byte[]).</summary>
+    /// <summary>Gets a value indicating whether the value is equivalent to the "not-fetched" state (null / empty byte[] / a value object with an empty wrapped value).</summary>
     private static bool IsUnset(object? value)
     {
+        // Value objects are unwrapped to their underlying value before evaluation.
+        if (value is IValueObject valueObject)
+        {
+            value = valueObject.UnderlyingValue;
+        }
         return value switch
         {
             null => true,
@@ -285,33 +286,1027 @@ internal static class UnboundedBinaryColumns
             }
         }
     }
+}
 
-    /// <summary>Default buffer size for the chunked copy used by the streaming accessors (O(chunk); never loads the whole blob into memory).</summary>
-    public const int StreamCopyBufferSize = 81920;
+/// <summary>Non-generic marker for a value object. Used to extract the underlying value and to test the type.</summary>
+public interface IValueObject
+{
+    /// <summary>Gets the underlying value as an object (used to open the raw value for SQL parameter binding and similar).</summary>
+    object? UnderlyingValue { get; }
 
-    /// <summary>
-    /// Determines the length of the write stream (a shared check that keeps the contract uniform across dialects).
-    /// If <paramref name="source"/> is <c>CanSeek</c>, <c>Length - Position</c> is used; otherwise <paramref name="length"/>
-    /// is required (a missing value throws <see cref="ArgumentException"/>). SQLite's zeroblob requires the length to be
-    /// known before writing.
-    /// </summary>
-    public static long ResolveWriteLength(Stream source, long? length)
+    /// <summary>Gets the string used for display (defaults to ToString(); a concrete value object can override to change the format).</summary>
+    string DisplayValue { get; }
+}
+
+/// <summary>Self-typed interface for a value object, without the underlying type. Lets generic code accept any value object with a single type parameter.</summary>
+/// <remarks>
+/// <see cref="IValueObject{TSelf, TValue}"/> names the underlying type, which is what a caller reading a spreadsheet or a CSV
+/// does not know and should not have to name: a constraint of <c>where T : IValueObject&lt;T&gt;</c> accepts every value object
+/// regardless of what it wraps. The members here therefore take the value as <see cref="object"/> and convert it on the way in.
+/// </remarks>
+public interface IValueObject<TSelf> : IValueObject
+    where TSelf : IValueObject<TSelf>
+{
+    /// <summary>Converts a value from outside the model - a spreadsheet cell, a CSV field, a form field - and creates the value object from it, without throwing.</summary>
+    /// <remarks>
+    /// <para>
+    /// An absent value (<c>null</c>, <see cref="DBNull"/>, or an empty string) is not a failure: the result is <c>true</c> with a
+    /// null <paramref name="result"/>, because a blank cell means "not filled in" rather than "invalid". A value that cannot be
+    /// converted to the underlying type, and a value that fails the type's own validation, both return <c>false</c>.
+    /// </para>
+    /// <para>
+    /// To accept a shape of the type's own - a name for an enumeration-like type, say - implement
+    /// <see cref="TryConvertCustomInput"/> instead of replacing this method: the shared implementation consults that hook
+    /// first, so the custom shape is honored no matter how this method is called. Never implement this member
+    /// yourself, a hand-written value object included - a call spelled with the concrete type name binds to the
+    /// inherited shared implementation, so a re-implementation is silently skipped on that call shape.
+    /// </para>
+    /// </remarks>
+    /// <param name="raw">The value read from the source.</param>
+    /// <param name="provider">The culture the text is written in; <c>null</c> uses the invariant culture.</param>
+    /// <param name="result">The value object, or null when the value was absent or could not be created.</param>
+    /// <param name="errors">The violations, empty when the call succeeded.</param>
+    static abstract bool TryCreateFrom(
+        object? raw,
+        IFormatProvider? provider,
+        out TSelf? result,
+        out IReadOnlyList<string> errors
+    );
+
+    /// <summary>Converts a value from outside the model and creates the value object from it (throws ValueObjectValidationException on violation; an absent value returns null).</summary>
+    /// <param name="raw">The value read from the source.</param>
+    /// <param name="provider">The culture the text is written in; <c>null</c> uses the invariant culture.</param>
+    static abstract TSelf? CreateFrom(object? raw, IFormatProvider? provider);
+
+    /// <summary>Accepts an input shape of the type's own - a name for an enumeration-like type, say - ahead of the ordinary conversion; the default accepts none.</summary>
+    /// <remarks>
+    /// <para>
+    /// <see cref="TryCreateFrom"/> consults this hook first on every call, so the custom shape is honored on the
+    /// culture-less overload and on a call spelled with the concrete type name just the same. Return the instance to
+    /// claim the value; return false for anything not handled, and the ordinary conversion runs as if the hook were
+    /// not there.
+    /// </para>
+    /// <para>
+    /// Never call <c>TryCreateFrom</c> / <c>CreateFrom</c> from inside: they consult this hook, so the call recurses
+    /// with no way to catch the resulting stack overflow. Look the value up in a table of declared instances instead.
+    /// And do not let an exception escape - <c>TryCreateFrom</c> reports every failure through its return value, and
+    /// an exception thrown here rides straight through that contract.
+    /// </para>
+    /// </remarks>
+    /// <param name="raw">The value read from the source (never null; absent values are handled before the hook).</param>
+    /// <param name="provider">The culture the text is written in; <c>null</c> uses the invariant culture.</param>
+    /// <param name="result">The value object, or null when the hook does not handle this value.</param>
+    static virtual bool TryConvertCustomInput(object raw, IFormatProvider? provider, out TSelf? result)
     {
-        if (source.CanSeek)
-        {
-            return source.Length - source.Position;
-        }
-
-        if (length is null)
-        {
-            throw new ArgumentException(
-                "A non-seekable stream requires an explicit length.",
-                nameof(length)
-            );
-        }
-
-        return length.Value;
+        result = default;
+        return false;
     }
+}
+
+/// <summary>Generic interface for a value object. Lets the static factory be called through a type parameter.</summary>
+public interface IValueObject<TSelf, TValue> : IValueObject<TSelf>
+    where TSelf : IValueObject<TSelf, TValue>
+{
+    /// <summary>Creates the instance from an already-validated value. Write it as an explicit implementation that calls the private constructor.</summary>
+    /// <remarks>
+    /// This member exists so that <see cref="ValueObjectBase{TSelf, TValue}"/> can implement Create / TryCreate once for
+    /// every value object; validating is their job, so calling New through a type parameter skips validation. An explicit
+    /// implementation keeps it off the type's own public surface, where Create is the front door.
+    /// </remarks>
+    static abstract TSelf New(TValue value);
+
+    /// <summary>Validation body shared by Create / TryCreate / Validate; fills the error list, creating it only once something is actually wrong. Leave it unimplemented for a value object with no rules.</summary>
+    /// <remarks>
+    /// Creating a value object succeeds far more often than it fails, and a list allocated on every successful call is pure
+    /// garbage: value objects are created per column per row. The list is therefore passed by reference and allocated on
+    /// first use (<c>(errors ??= new List&lt;string&gt;()).Add(...)</c>), so a run with no violations allocates nothing at all.
+    /// </remarks>
+    static virtual void ValidateCore(TValue value, ref List<string>? errors) { }
+
+    /// <summary>Returns a predefined instance for the value when the type declares a fixed set of them; the default declares none.</summary>
+    /// <remarks>
+    /// <para>
+    /// A type whose values are a closed set - an enumeration-like value object with <c>static readonly</c> members - implements
+    /// this so that <c>Create</c> and <c>TryCreate</c> hand back the declared instance instead of building a new one. Because
+    /// the hook sits in front of <c>New</c> rather than inside it, every path that creates a value object goes through it: a row
+    /// read from the database and a value restored from JSON return the declared instance too, along with whatever extra state
+    /// it carries. A generated value object supplies this through its <c>GetDefinedInstance</c> partial hook; a hand-written
+    /// one implements this member directly.
+    /// </para>
+    /// <para>
+    /// Implementing this does not by itself reject an undefined value: it only decides what to return for one that passed
+    /// validation. Pair it with a <c>ValidateCore</c> (or <c>OnValidate</c>) that rejects anything outside the set, or values
+    /// outside it will quietly fall through to <c>New</c> and be built as ordinary instances.
+    /// </para>
+    /// <para>
+    /// Look the value up in a static table (an array or a dictionary built once) without allocating - this hook runs on
+    /// every creation, per column per row when rows are read. Never call <c>Create</c> / <c>TryCreate</c> /
+    /// <c>TryCreateFrom</c> from inside: every creation path runs through this hook, so the call recurses with no way to
+    /// catch the resulting stack overflow.
+    /// </para>
+    /// </remarks>
+    /// <param name="value">The already-validated value.</param>
+    /// <param name="defined">The declared instance, or null when the type declares none for this value.</param>
+    static virtual bool TryGetDefined(TValue value, out TSelf? defined)
+    {
+        defined = default;
+        return false;
+    }
+
+    /// <summary>Gets the display name of the value object type (used in error messages and similar). The generated static DisplayName implicitly implements it; the default is the type name.</summary>
+    static virtual string DisplayName => typeof(TSelf).Name;
+
+    /// <summary>Validates and creates the value object (throws ValueObjectValidationException on violation).</summary>
+    static abstract TSelf Create(TValue value);
+
+    /// <summary>Returns true plus the value object when creation succeeds, or false plus the error details when it fails.</summary>
+    static abstract bool TryCreate(
+        TValue value,
+        out TSelf? result,
+        out IReadOnlyList<string> errors
+    );
+
+    /// <summary>Gets the underlying value.</summary>
+    TValue Value { get; }
+}
+
+/// <summary>Exception raised when a value object fails validation.</summary>
+public sealed class ValueObjectValidationException : Exception
+{
+    /// <summary>Gets the type of the value object that failed validation.</summary>
+    public Type ValueObjectType { get; }
+
+    /// <summary>Gets the list of validation errors.</summary>
+    public IReadOnlyList<string> Errors { get; }
+
+    /// <summary>Initializes the exception with the target type and the list of validation errors.</summary>
+    public ValueObjectValidationException(Type valueObjectType, IReadOnlyList<string> errors)
+        : base($"The value of {valueObjectType.Name} is invalid: {string.Join(" / ", errors)}")
+    {
+        ValueObjectType = valueObjectType;
+        Errors = errors;
+    }
+}
+
+/// <summary>Common base for value objects. Provides the Create / TryCreate / Validate factories, value storage, equality, ToString, and extraction of the raw value (ordered comparison is added by derived types).</summary>
+public abstract partial class ValueObjectBase<TSelf, TValue> : IValueObject, IEquatable<TSelf>
+    where TSelf : ValueObjectBase<TSelf, TValue>, IValueObject<TSelf, TValue>
+{
+    /// <summary>Gets the underlying value (never reassigned; reference-typed values such as byte[] are not defensively copied — see <see cref="ValueObjectBinaryBase{TSelf}"/>).</summary>
+    public TValue Value { get; }
+
+    /// <summary>Initializes with an already-validated value (Create/TryCreate performs validation beforehand).</summary>
+    protected ValueObjectBase(TValue value) => Value = value;
+
+    /// <summary>Validates and creates the value object (throws ValueObjectValidationException on violation).</summary>
+    /// <remarks>
+    /// An inherited static member satisfies a static abstract interface member, so this single implementation is what
+    /// every derived value object exposes as <c>IValueObject&lt;TSelf, TValue&gt;.Create</c> — the type itself only
+    /// supplies <c>New</c> (the constructor call) and <c>ValidateCore</c> (the rules).
+    /// </remarks>
+    public static TSelf Create(TValue value)
+    {
+        List<string>? errors = null;
+        TSelf.ValidateCore(value, ref errors);
+        if (errors is { Count: > 0 })
+        {
+            throw new ValueObjectValidationException(typeof(TSelf), errors);
+        }
+        return Materialize(value);
+    }
+
+    /// <summary>Returns true plus the value object when creation succeeds, or false plus the error details when it fails.</summary>
+    public static bool TryCreate(
+        TValue value,
+        out TSelf? result,
+        out IReadOnlyList<string> errors
+    )
+    {
+        List<string>? list = null;
+        TSelf.ValidateCore(value, ref list);
+        if (list is { Count: > 0 })
+        {
+            result = null;
+            errors = list;
+            return false;
+        }
+        result = Materialize(value);
+        errors = Array.Empty<string>();
+        return true;
+    }
+
+    /// <summary>Runs the validation rules (ValidateCore, including the OnValidate extension where one is written) without creating the value object, adding any violations to the given collection.</summary>
+    /// <returns>True when this value passed, false when at least one violation was added. The verdict covers this call only, so it stays meaningful when the collection is shared across several values.</returns>
+    public static bool Validate(TValue value, ICollection<string> errors)
+    {
+        List<string>? collected = null;
+        TSelf.ValidateCore(value, ref collected);
+        if (collected is null or { Count: 0 })
+        {
+            return true;
+        }
+
+        foreach (var error in collected)
+        {
+            errors.Add(error);
+        }
+
+        return false;
+    }
+
+    /// <summary>Builds the instance for an already-validated value: the declared instance when the type has one, otherwise a new one.</summary>
+    /// <remarks>
+    /// The single creation point behind <c>Create</c> and <c>TryCreate</c>, so an enumeration-like value object returns its
+    /// declared instances on every path - the raw-SQL and materializer factories and the JSON converter all come through here.
+    /// </remarks>
+    private static TSelf Materialize(TValue value) =>
+        TSelf.TryGetDefined(value, out var defined) && defined is not null ? defined : TSelf.New(value);
+
+    /// <summary>Converts a value from outside the model and creates the value object from it, without throwing (an absent value succeeds with a null result).</summary>
+    /// <remarks>
+    /// A shape the type accepts of its own is consulted first (<see cref="IValueObject{TSelf}.TryConvertCustomInput"/>), so a
+    /// custom shape is honored no matter how this method is called. The conversion to the underlying type is
+    /// <see cref="RawValueConverter.ConvertInput"/>, so text written for a culture is read in that culture and numeric text
+    /// may carry group separators. Everything past the conversion is the ordinary <c>TryCreate</c>, so the type's own
+    /// validation - and its declared instances - apply unchanged.
+    /// </remarks>
+    /// <param name="raw">The value read from the source.</param>
+    /// <param name="provider">The culture the text is written in; <c>null</c> uses the invariant culture.</param>
+    /// <param name="result">The value object, or null when the value was absent or could not be created.</param>
+    /// <param name="errors">The violations, empty when the call succeeded.</param>
+    public static bool TryCreateFrom(
+        object? raw,
+        IFormatProvider? provider,
+        out TSelf? result,
+        out IReadOnlyList<string> errors
+    )
+    {
+        // A blank cell means "not filled in", which is the caller's business rather than a violation: a nullable column keeps
+        // the property null, and a required one is reported by the edit model's own required check.
+        if (raw is null or DBNull || (raw is string empty && empty.Length == 0))
+        {
+            result = null;
+            errors = Array.Empty<string>();
+            return true;
+        }
+
+        // A shape the type accepts of its own (a name for an enumeration-like type, say) wins over the ordinary conversion.
+        if (TSelf.TryConvertCustomInput(raw, provider, out var custom) && custom is not null)
+        {
+            result = custom;
+            errors = Array.Empty<string>();
+            return true;
+        }
+
+        object converted;
+
+        try
+        {
+            converted = RawValueConverter.ConvertInput(raw, typeof(TValue), provider);
+        }
+        catch (Exception ex)
+            when (ex is InvalidCastException
+                or FormatException
+                or OverflowException
+                or ArgumentException
+            )
+        {
+            result = null;
+            errors = new[] { ValueObjectValidationMessages.InputNotConvertible(raw, TSelf.DisplayName) };
+            return false;
+        }
+
+        return TSelf.TryCreate((TValue)converted, out result, out errors);
+    }
+
+    /// <summary>Converts a value from outside the model and creates the value object from it, using the invariant culture.</summary>
+    public static bool TryCreateFrom(object? raw, out TSelf? result, out IReadOnlyList<string> errors) =>
+        TSelf.TryCreateFrom(raw, null, out result, out errors);
+
+    /// <summary>Converts a value from outside the model and creates the value object from it (throws ValueObjectValidationException on violation; an absent value returns null).</summary>
+    /// <param name="raw">The value read from the source.</param>
+    /// <param name="provider">The culture the text is written in; <c>null</c> uses the invariant culture.</param>
+    /// <exception cref="ValueObjectValidationException">The value could not be converted, or failed validation.</exception>
+    public static TSelf? CreateFrom(object? raw, IFormatProvider? provider)
+    {
+        if (TSelf.TryCreateFrom(raw, provider, out var result, out var errors))
+        {
+            return result;
+        }
+
+        throw new ValueObjectValidationException(typeof(TSelf), errors);
+    }
+
+    /// <summary>Converts a value from outside the model and creates the value object from it, using the invariant culture.</summary>
+    public static TSelf? CreateFrom(object? raw) => TSelf.CreateFrom(raw, null);
+
+    /// <summary>Gets the underlying value as an object (opens the raw value for SQL binding and similar).</summary>
+    object? IValueObject.UnderlyingValue => Value;
+
+    /// <summary>Gets the string used for display (defaults to ToString()). A concrete value object's partial class can override it to change the format.</summary>
+    public virtual string DisplayValue => ToString();
+
+    /// <summary>Value-based equality with another instance of the same value object type (compared through <see cref="EqualityComparer{T}.Default"/>, so a struct value is not boxed).</summary>
+    /// <remarks>
+    /// Implementing <see cref="IEquatable{T}"/> is what lets <see cref="EqualityComparer{T}.Default"/> compare value objects
+    /// by value directly. Without it the default comparer falls back to the object-based one, which reaches equality only
+    /// through <see cref="Equals(object?)"/> and boxes a struct-valued argument on the way; every dictionary and hash-set
+    /// lookup keyed by a value object goes through that comparer. A value object whose value is an array needs
+    /// element-by-element comparison and overrides this — see <see cref="ValueObjectBinaryBase{TSelf}"/>.
+    /// </remarks>
+    public virtual bool Equals(TSelf? other) =>
+        other is not null && EqualityComparer<TValue>.Default.Equals(Value, other.Value);
+
+    /// <summary>Value-based equality (delegates to the typed overload; anything that is not this value object type is unequal).</summary>
+    public override bool Equals(object? obj) => obj is TSelf other && Equals(other);
+
+    /// <summary>Value-based hash code (computed through <see cref="EqualityComparer{T}.Default"/>, so a struct value is not boxed).</summary>
+    public override int GetHashCode() =>
+        Value is null ? 0 : EqualityComparer<TValue>.Default.GetHashCode(Value);
+
+    /// <summary>Value-based equality operator.</summary>
+    public static bool operator ==(
+        ValueObjectBase<TSelf, TValue>? left,
+        ValueObjectBase<TSelf, TValue>? right
+    ) => left is null ? right is null : left.Equals(right);
+
+    /// <summary>Value-based inequality operator.</summary>
+    public static bool operator !=(
+        ValueObjectBase<TSelf, TValue>? left,
+        ValueObjectBase<TSelf, TValue>? right
+    ) => !(left == right);
+
+    /// <summary>Returns the string representation of the underlying value.</summary>
+    public override string ToString() => Value?.ToString() ?? string.Empty;
+}
+
+/// <summary>Base for orderable value objects (numeric and date/time types). Provides comparison operators and CompareTo.</summary>
+public abstract partial class ValueObjectOrderedBase<TSelf, TValue>
+    : ValueObjectBase<TSelf, TValue>,
+        IComparable<TSelf>,
+        IComparable
+    where TSelf : ValueObjectOrderedBase<TSelf, TValue>, IValueObject<TSelf, TValue>
+    where TValue : IComparable<TValue>
+{
+    /// <summary>Initializes with an already-validated value.</summary>
+    protected ValueObjectOrderedBase(TValue value)
+        : base(value) { }
+
+    /// <summary>Compares the underlying values.</summary>
+    public int CompareTo(TSelf? other) => other is null ? 1 : Value.CompareTo(other.Value);
+
+    /// <summary>Non-generic comparison (a type mismatch throws).</summary>
+    int IComparable.CompareTo(object? obj) =>
+        obj is null ? 1
+        : obj is TSelf other ? CompareTo(other)
+        : throw new ArgumentException(
+            $"{obj.GetType().Name} cannot be compared with {typeof(TSelf).Name}.",
+            nameof(obj)
+        );
+
+    /// <summary>Less-than.</summary>
+    public static bool operator <(
+        ValueObjectOrderedBase<TSelf, TValue>? left,
+        ValueObjectOrderedBase<TSelf, TValue>? right
+    ) => Compare(left, right) < 0;
+
+    /// <summary>Greater-than.</summary>
+    public static bool operator >(
+        ValueObjectOrderedBase<TSelf, TValue>? left,
+        ValueObjectOrderedBase<TSelf, TValue>? right
+    ) => Compare(left, right) > 0;
+
+    /// <summary>Less-than-or-equal.</summary>
+    public static bool operator <=(
+        ValueObjectOrderedBase<TSelf, TValue>? left,
+        ValueObjectOrderedBase<TSelf, TValue>? right
+    ) => Compare(left, right) <= 0;
+
+    /// <summary>Greater-than-or-equal.</summary>
+    public static bool operator >=(
+        ValueObjectOrderedBase<TSelf, TValue>? left,
+        ValueObjectOrderedBase<TSelf, TValue>? right
+    ) => Compare(left, right) >= 0;
+
+    private static int Compare(
+        ValueObjectOrderedBase<TSelf, TValue>? left,
+        ValueObjectOrderedBase<TSelf, TValue>? right
+    ) =>
+        left is null ? (right is null ? 0 : -1)
+        : right is null ? 1
+        : left.Value.CompareTo(right.Value);
+}
+
+/// <summary>Base for string value objects. Provides substring-match methods and ordinal comparison (does not add ordering operators).</summary>
+public abstract partial class ValueObjectStringBase<TSelf>
+    : ValueObjectBase<TSelf, string>,
+        IComparable<TSelf>,
+        IComparable
+    where TSelf : ValueObjectStringBase<TSelf>, IValueObject<TSelf, string>
+{
+    /// <summary>Initializes with an already-validated value.</summary>
+    protected ValueObjectStringBase(string value)
+        : base(value) { }
+
+    /// <summary>Returns whether the value contains the specified string.</summary>
+    /// <remarks>Throws <see cref="ArgumentNullException"/> when value is null (the same contract as <c>string.Contains</c>).</remarks>
+    public bool Contains(string value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        return Value.Contains(value, StringComparison.Ordinal);
+    }
+
+    /// <summary>Returns whether the value starts with the specified string.</summary>
+    /// <remarks>Throws <see cref="ArgumentNullException"/> when value is null (the same contract as <c>string.StartsWith</c>).</remarks>
+    public bool StartsWith(string value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        return Value.StartsWith(value, StringComparison.Ordinal);
+    }
+
+    /// <summary>Returns whether the value ends with the specified string.</summary>
+    /// <remarks>Throws <see cref="ArgumentNullException"/> when value is null (the same contract as <c>string.EndsWith</c>).</remarks>
+    public bool EndsWith(string value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        return Value.EndsWith(value, StringComparison.Ordinal);
+    }
+
+    /// <summary>Returns whether the value contains another value object's value.</summary>
+    /// <remarks>Throws <see cref="ArgumentNullException"/> when value is null (the same contract as the string overload).</remarks>
+    public bool Contains(TSelf value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        return Contains(value.Value);
+    }
+
+    /// <summary>Returns whether the value starts with another value object's value.</summary>
+    /// <remarks>Throws <see cref="ArgumentNullException"/> when value is null (the same contract as the string overload).</remarks>
+    public bool StartsWith(TSelf value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        return StartsWith(value.Value);
+    }
+
+    /// <summary>Returns whether the value ends with another value object's value.</summary>
+    /// <remarks>Throws <see cref="ArgumentNullException"/> when value is null (the same contract as the string overload).</remarks>
+    public bool EndsWith(TSelf value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        return EndsWith(value.Value);
+    }
+
+    /// <summary>Compares ordinally.</summary>
+    public int CompareTo(TSelf? other) =>
+        other is null ? 1 : string.CompareOrdinal(Value, other.Value);
+
+    /// <summary>Non-generic comparison (a type mismatch throws).</summary>
+    int IComparable.CompareTo(object? obj) =>
+        obj is null ? 1
+        : obj is TSelf other ? CompareTo(other)
+        : throw new ArgumentException(
+            $"{obj.GetType().Name} cannot be compared with {typeof(TSelf).Name}.",
+            nameof(obj)
+        );
+}
+
+/// <summary>Base for bool value objects. Provides True/False factories and truth checks (has no ordered comparison).</summary>
+public abstract partial class ValueObjectBooleanBase<TSelf> : ValueObjectBase<TSelf, bool>
+    where TSelf : ValueObjectBooleanBase<TSelf>, IValueObject<TSelf, bool>
+{
+    /// <summary>Initializes with an already-validated value.</summary>
+    protected ValueObjectBooleanBase(bool value)
+        : base(value) { }
+
+    /// <summary>Creates the value object from the true value.</summary>
+    public static TSelf True => TSelf.Create(true);
+
+    /// <summary>Creates the value object from the false value.</summary>
+    public static TSelf False => TSelf.Create(false);
+
+    /// <summary>Gets whether the value is true.</summary>
+    public bool IsTrue => Value;
+
+    /// <summary>Gets whether the value is false.</summary>
+    public bool IsFalse => !Value;
+}
+
+/// <summary>Base for DateTime value objects. Provides Now/Today factories.</summary>
+public abstract partial class ValueObjectDateTimeBase<TSelf>
+    : ValueObjectOrderedBase<TSelf, DateTime>
+    where TSelf : ValueObjectDateTimeBase<TSelf>, IValueObject<TSelf, DateTime>
+{
+    /// <summary>Initializes with an already-validated value.</summary>
+    protected ValueObjectDateTimeBase(DateTime value)
+        : base(value) { }
+
+    /// <summary>Creates the value object from the current date and time.</summary>
+    public static TSelf Now => TSelf.Create(DateTime.Now);
+
+    /// <summary>Creates the value object from today (time 0:00).</summary>
+    public static TSelf Today => TSelf.Create(DateTime.Today);
+}
+
+/// <summary>Base for byte[] value objects. ToString returns Base64, and equality compares the arrays element by element.</summary>
+/// <remarks>
+/// The wrapped array is NOT defensively copied: the value object holds (and exposes through Value) the very array it was
+/// created with, because copying would double the allocation of every binary column read from the database. Treat the array
+/// as frozen after Create — mutating it afterwards silently changes the value object's equality, hash code, and ToString.
+/// </remarks>
+public abstract partial class ValueObjectBinaryBase<TSelf> : ValueObjectBase<TSelf, byte[]>
+    where TSelf : ValueObjectBinaryBase<TSelf>, IValueObject<TSelf, byte[]>
+{
+    /// <summary>Initializes with an already-validated value.</summary>
+    protected ValueObjectBinaryBase(byte[] value)
+        : base(value) { }
+
+    /// <summary>Returns an equal value object built over a copy of the array (the copy the "not defensively copied" contract leaves to the caller).</summary>
+    /// <remarks>
+    /// Use it where two holders must not share one array — loading an entity into an edit model, for instance, where editing the
+    /// model would otherwise write straight into the entity that was loaded from.
+    /// </remarks>
+    public TSelf CopyValue() => TSelf.Create((byte[])Value.Clone());
+
+    /// <summary>Value-based equality (arrays are compared element by element; reference equality would make two equal blobs differ).</summary>
+    /// <remarks>The comparison runs over spans, which compares whole machine words at a time instead of one element at a time — worth having on values that are blob-sized by definition.</remarks>
+    public override bool Equals(TSelf? other)
+    {
+        if (other is null)
+        {
+            return false;
+        }
+
+        if (Value is null || other.Value is null)
+        {
+            return Value is null && other.Value is null;
+        }
+
+        return Value.AsSpan().SequenceEqual(other.Value);
+    }
+
+    /// <summary>Value-based hash code computed from every byte, matching <see cref="Equals(TSelf)"/>.</summary>
+    /// <remarks>
+    /// <see cref="HashCode.AddBytes(ReadOnlySpan{byte})"/> mixes in the whole array. The structural comparer used before it
+    /// hashes only the last eight elements, so two blobs sharing a tail landed in the same bucket however much of their
+    /// content differed — exactly the shape a binary value object tends to have when it wraps a versioned or padded payload.
+    /// </remarks>
+    public override int GetHashCode()
+    {
+        if (Value is null)
+        {
+            return 0;
+        }
+
+        var hash = new HashCode();
+        hash.AddBytes(Value);
+        return hash.ToHashCode();
+    }
+
+    /// <summary>Returns the value as a Base64 string.</summary>
+    public override string ToString() =>
+        Value is null ? string.Empty : Convert.ToBase64String(Value);
+}
+
+/// <summary>Base for a primary-key value object that holds a GUID as a string. The parameterless factory auto-generates a new GUID.</summary>
+public abstract partial class ValueObjectGuidKeyBase<TSelf>
+    : ValueObjectBase<TSelf, string>,
+        IComparable<TSelf>,
+        IComparable
+    where TSelf : ValueObjectGuidKeyBase<TSelf>, IValueObject<TSelf, string>
+{
+    /// <summary>Initializes with an already-validated value.</summary>
+    protected ValueObjectGuidKeyBase(string value)
+        : base(value) { }
+
+    /// <summary>Generates a new GUID and creates the value object.</summary>
+    public static TSelf Create() => TSelf.Create(Guid.NewGuid().ToString());
+
+    /// <summary>Compares ordinally.</summary>
+    public int CompareTo(TSelf? other) =>
+        other is null ? 1 : string.CompareOrdinal(Value, other.Value);
+
+    /// <summary>Non-generic comparison (a type mismatch throws).</summary>
+    int IComparable.CompareTo(object? obj) =>
+        obj is null ? 1
+        : obj is TSelf other ? CompareTo(other)
+        : throw new ArgumentException(
+            $"{obj.GetType().Name} cannot be compared with {typeof(TSelf).Name}.",
+            nameof(obj)
+        );
+}
+
+/// <summary>Converter that reads and writes a value object as its underlying (raw) value in JSON.</summary>
+public sealed class ValueObjectJsonConverter<TVo, TValue> : JsonConverter<TVo>
+    where TVo : class, IValueObject<TVo, TValue>
+{
+    /// <summary>Reads the raw value and restores the value object via Create.</summary>
+    public override TVo? Read(
+        ref Utf8JsonReader reader,
+        Type typeToConvert,
+        JsonSerializerOptions options
+    )
+    {
+        var value = JsonSerializer.Deserialize<TValue>(ref reader, options);
+        return value is null ? null : TVo.Create(value);
+    }
+
+    /// <summary>Writes the underlying (raw) value.</summary>
+    public override void Write(Utf8JsonWriter writer, TVo value, JsonSerializerOptions options) =>
+        JsonSerializer.Serialize(writer, value.Value, options);
+}
+
+/// <summary>Factory that applies the generic converter to types implementing IValueObject&lt;,&gt;.</summary>
+public sealed class ValueObjectJsonConverterFactory : JsonConverterFactory
+{
+    /// <summary>Returns whether the type is a value object type.</summary>
+    public override bool CanConvert(Type typeToConvert) =>
+        Array.Exists(
+            typeToConvert.GetInterfaces(),
+            i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IValueObject<,>)
+        );
+
+    /// <summary>Resolves the target type's TValue and creates a closed converter.</summary>
+    public override JsonConverter CreateConverter(Type typeToConvert, JsonSerializerOptions options)
+    {
+        var iface = Array.Find(
+            typeToConvert.GetInterfaces(),
+            i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IValueObject<,>)
+        )!;
+        var valueType = iface.GetGenericArguments()[1];
+        var converterType = typeof(ValueObjectJsonConverter<,>).MakeGenericType(
+            typeToConvert,
+            valueType
+        );
+        return (JsonConverter)Activator.CreateInstance(converterType)!;
+    }
+}
+
+/// <summary>Automatic validation messages for value objects (defaults shared by all VOs). Replacing them at app startup applies to every VO.</summary>
+public static class ValueObjectValidationMessages
+{
+    /// <summary>Message for exceeding the maximum length (arguments: maximum length, current character count).</summary>
+    public static Func<int, int, string> MaxLengthExceeded { get; set; } =
+        (maxLength, actualLength) =>
+            $"Enter at most {maxLength} characters. (currently {actualLength} characters)";
+
+    /// <summary>Message for exceeding the number of decimal places (argument: allowed scale).</summary>
+    public static Func<int, string> ScaleExceeded { get; set; } =
+        scale => $"Enter at most {scale} digits after the decimal point.";
+
+    /// <summary>Message for exceeding the number of integer digits (argument: allowed integer digits).</summary>
+    public static Func<int, string> PrecisionExceeded { get; set; } =
+        maxIntegralDigits => $"Enter at most {maxIntegralDigits} digits in the integer part.";
+
+    /// <summary>Message for a null value passed to Create/TryCreate (a value object never wraps null; keep the property itself null for nullable columns).</summary>
+    public static Func<string> ValueRequired { get; set; } = () => "A value is required.";
+
+    /// <summary>Message for a value from outside the model that could not be converted to the underlying type (arguments: the value as read, the value object's display name).</summary>
+    public static Func<object, string, string> InputNotConvertible { get; set; } =
+        (raw, displayName) => $"'{raw}' is not a valid {displayName}.";
+}
+
+/// <summary>Value object for the line_id column</summary>
+public sealed partial class LineIdValue
+    : ValueObjectOrderedBase<LineIdValue, int>,
+        IValueObject<LineIdValue, int>
+{
+    private LineIdValue(int value)
+        : base(value) { }
+
+    /// <summary>Creates the instance from an already-validated value (the public factories live in the base class; see <see cref="ValueObjectBase{TSelf, TValue}.Create"/>).</summary>
+    static LineIdValue IValueObject<LineIdValue, int>.New(int value) =>
+        new(value);
+
+    /// <summary>Auto-generated validation rules plus the user extension (OnValidate), called by the base class's Create / TryCreate / Validate.</summary>
+    /// <remarks>An unimplemented OnValidate partial method takes its call away entirely, and an implemented one receives the error list by reference and possibly unallocated - so a value that passes every rule allocates nothing either way.</remarks>
+    static void IValueObject<LineIdValue, int>.ValidateCore(int value, ref List<string>? errors)
+    {
+        OnValidate(value, ref errors);
+    }
+
+    /// <summary>User-defined additional validation (partial; zero cost when not implemented). The list arrives by reference and possibly unallocated - allocate it only when adding the first violation, the same shape ValidateCore itself uses ((errors ??= new List&lt;string&gt;()).Add(...)), so a value that passes adds no allocation.</summary>
+    static partial void OnValidate(int value, ref List<string>? errors);
+
+    /// <summary>Hands back the declared instance found by the GetDefinedInstance partial hook (the base class's Create / TryCreate consult this on every creation path).</summary>
+    static bool IValueObject<LineIdValue, int>.TryGetDefined(int value, out LineIdValue? defined)
+    {
+        LineIdValue? found = null;
+        GetDefinedInstance(value, ref found);
+        defined = found;
+        return found is not null;
+    }
+
+    /// <summary>Declared-instance lookup for an enumeration-like value object (partial; every value is built as a new instance when not implemented). Look the value up in a static table without allocating - this runs on every creation - and never call Create / TryCreate / TryCreateFrom from inside: every creation path runs through this hook and the call would recurse.</summary>
+    static partial void GetDefinedInstance(int value, ref LineIdValue? defined);
+
+    /// <summary>Hands the input shapes claimed by the ConvertCustomInput partial hook to TryCreateFrom / CreateFrom, ahead of the ordinary conversion.</summary>
+    static bool IValueObject<LineIdValue>.TryConvertCustomInput(object raw, IFormatProvider? provider, out LineIdValue? result)
+    {
+        LineIdValue? custom = null;
+        ConvertCustomInput(raw, provider, ref custom);
+        result = custom;
+        return custom is not null;
+    }
+
+    /// <summary>Custom input shape for TryCreateFrom / CreateFrom - a name for an enumeration-like value object, say (partial; only the ordinary conversion applies when not implemented). Set result to claim the value; leave it null for anything not handled so the ordinary conversion runs. Never call TryCreateFrom / CreateFrom from inside (they consult this hook and the call would recurse), and do not throw - TryCreateFrom reports failures through its return value, and an exception here rides straight through that contract.</summary>
+    static partial void ConvertCustomInput(object raw, IFormatProvider? provider, ref LineIdValue? result);
+
+    /// <summary>Gets the display name of this value object (used in error messages and similar). Defaults to the column description, or the property name when unset. Can be replaced through GeneratedDisplayNames.Resolve (all display names at once) or CustomizeDisplayName (this value object only).</summary>
+    public static string DisplayName
+    {
+        get
+        {
+            var displayName = GeneratedDisplayNames.Resolve("LineId", null);
+            CustomizeDisplayName(ref displayName);
+            return displayName;
+        }
+    }
+
+    /// <summary>Extension point for replacing the display name (partial; the default display name applies when not implemented).</summary>
+    static partial void CustomizeDisplayName(ref string displayName);
+}
+
+/// <summary>Value object for the order_id column</summary>
+public sealed partial class OrderIdValue
+    : ValueObjectOrderedBase<OrderIdValue, int>,
+        IValueObject<OrderIdValue, int>
+{
+    private OrderIdValue(int value)
+        : base(value) { }
+
+    /// <summary>Creates the instance from an already-validated value (the public factories live in the base class; see <see cref="ValueObjectBase{TSelf, TValue}.Create"/>).</summary>
+    static OrderIdValue IValueObject<OrderIdValue, int>.New(int value) =>
+        new(value);
+
+    /// <summary>Auto-generated validation rules plus the user extension (OnValidate), called by the base class's Create / TryCreate / Validate.</summary>
+    /// <remarks>An unimplemented OnValidate partial method takes its call away entirely, and an implemented one receives the error list by reference and possibly unallocated - so a value that passes every rule allocates nothing either way.</remarks>
+    static void IValueObject<OrderIdValue, int>.ValidateCore(int value, ref List<string>? errors)
+    {
+        OnValidate(value, ref errors);
+    }
+
+    /// <summary>User-defined additional validation (partial; zero cost when not implemented). The list arrives by reference and possibly unallocated - allocate it only when adding the first violation, the same shape ValidateCore itself uses ((errors ??= new List&lt;string&gt;()).Add(...)), so a value that passes adds no allocation.</summary>
+    static partial void OnValidate(int value, ref List<string>? errors);
+
+    /// <summary>Hands back the declared instance found by the GetDefinedInstance partial hook (the base class's Create / TryCreate consult this on every creation path).</summary>
+    static bool IValueObject<OrderIdValue, int>.TryGetDefined(int value, out OrderIdValue? defined)
+    {
+        OrderIdValue? found = null;
+        GetDefinedInstance(value, ref found);
+        defined = found;
+        return found is not null;
+    }
+
+    /// <summary>Declared-instance lookup for an enumeration-like value object (partial; every value is built as a new instance when not implemented). Look the value up in a static table without allocating - this runs on every creation - and never call Create / TryCreate / TryCreateFrom from inside: every creation path runs through this hook and the call would recurse.</summary>
+    static partial void GetDefinedInstance(int value, ref OrderIdValue? defined);
+
+    /// <summary>Hands the input shapes claimed by the ConvertCustomInput partial hook to TryCreateFrom / CreateFrom, ahead of the ordinary conversion.</summary>
+    static bool IValueObject<OrderIdValue>.TryConvertCustomInput(object raw, IFormatProvider? provider, out OrderIdValue? result)
+    {
+        OrderIdValue? custom = null;
+        ConvertCustomInput(raw, provider, ref custom);
+        result = custom;
+        return custom is not null;
+    }
+
+    /// <summary>Custom input shape for TryCreateFrom / CreateFrom - a name for an enumeration-like value object, say (partial; only the ordinary conversion applies when not implemented). Set result to claim the value; leave it null for anything not handled so the ordinary conversion runs. Never call TryCreateFrom / CreateFrom from inside (they consult this hook and the call would recurse), and do not throw - TryCreateFrom reports failures through its return value, and an exception here rides straight through that contract.</summary>
+    static partial void ConvertCustomInput(object raw, IFormatProvider? provider, ref OrderIdValue? result);
+
+    /// <summary>Gets the display name of this value object (used in error messages and similar). Defaults to the column description, or the property name when unset. Can be replaced through GeneratedDisplayNames.Resolve (all display names at once) or CustomizeDisplayName (this value object only).</summary>
+    public static string DisplayName
+    {
+        get
+        {
+            var displayName = GeneratedDisplayNames.Resolve("OrderId", null);
+            CustomizeDisplayName(ref displayName);
+            return displayName;
+        }
+    }
+
+    /// <summary>Extension point for replacing the display name (partial; the default display name applies when not implemented).</summary>
+    static partial void CustomizeDisplayName(ref string displayName);
+}
+
+/// <summary>Value object for the qty column</summary>
+public sealed partial class QtyValue
+    : ValueObjectOrderedBase<QtyValue, int>,
+        IValueObject<QtyValue, int>
+{
+    private QtyValue(int value)
+        : base(value) { }
+
+    /// <summary>Creates the instance from an already-validated value (the public factories live in the base class; see <see cref="ValueObjectBase{TSelf, TValue}.Create"/>).</summary>
+    static QtyValue IValueObject<QtyValue, int>.New(int value) =>
+        new(value);
+
+    /// <summary>Auto-generated validation rules plus the user extension (OnValidate), called by the base class's Create / TryCreate / Validate.</summary>
+    /// <remarks>An unimplemented OnValidate partial method takes its call away entirely, and an implemented one receives the error list by reference and possibly unallocated - so a value that passes every rule allocates nothing either way.</remarks>
+    static void IValueObject<QtyValue, int>.ValidateCore(int value, ref List<string>? errors)
+    {
+        OnValidate(value, ref errors);
+    }
+
+    /// <summary>User-defined additional validation (partial; zero cost when not implemented). The list arrives by reference and possibly unallocated - allocate it only when adding the first violation, the same shape ValidateCore itself uses ((errors ??= new List&lt;string&gt;()).Add(...)), so a value that passes adds no allocation.</summary>
+    static partial void OnValidate(int value, ref List<string>? errors);
+
+    /// <summary>Hands back the declared instance found by the GetDefinedInstance partial hook (the base class's Create / TryCreate consult this on every creation path).</summary>
+    static bool IValueObject<QtyValue, int>.TryGetDefined(int value, out QtyValue? defined)
+    {
+        QtyValue? found = null;
+        GetDefinedInstance(value, ref found);
+        defined = found;
+        return found is not null;
+    }
+
+    /// <summary>Declared-instance lookup for an enumeration-like value object (partial; every value is built as a new instance when not implemented). Look the value up in a static table without allocating - this runs on every creation - and never call Create / TryCreate / TryCreateFrom from inside: every creation path runs through this hook and the call would recurse.</summary>
+    static partial void GetDefinedInstance(int value, ref QtyValue? defined);
+
+    /// <summary>Hands the input shapes claimed by the ConvertCustomInput partial hook to TryCreateFrom / CreateFrom, ahead of the ordinary conversion.</summary>
+    static bool IValueObject<QtyValue>.TryConvertCustomInput(object raw, IFormatProvider? provider, out QtyValue? result)
+    {
+        QtyValue? custom = null;
+        ConvertCustomInput(raw, provider, ref custom);
+        result = custom;
+        return custom is not null;
+    }
+
+    /// <summary>Custom input shape for TryCreateFrom / CreateFrom - a name for an enumeration-like value object, say (partial; only the ordinary conversion applies when not implemented). Set result to claim the value; leave it null for anything not handled so the ordinary conversion runs. Never call TryCreateFrom / CreateFrom from inside (they consult this hook and the call would recurse), and do not throw - TryCreateFrom reports failures through its return value, and an exception here rides straight through that contract.</summary>
+    static partial void ConvertCustomInput(object raw, IFormatProvider? provider, ref QtyValue? result);
+
+    /// <summary>Gets the display name of this value object (used in error messages and similar). Defaults to the column description, or the property name when unset. Can be replaced through GeneratedDisplayNames.Resolve (all display names at once) or CustomizeDisplayName (this value object only).</summary>
+    public static string DisplayName
+    {
+        get
+        {
+            var displayName = GeneratedDisplayNames.Resolve("Qty", null);
+            CustomizeDisplayName(ref displayName);
+            return displayName;
+        }
+    }
+
+    /// <summary>Extension point for replacing the display name (partial; the default display name applies when not implemented).</summary>
+    static partial void CustomizeDisplayName(ref string displayName);
+}
+
+/// <summary>Value object for the row_ver column</summary>
+public sealed partial class RowVerValue
+    : ValueObjectBinaryBase<RowVerValue>,
+        IValueObject<RowVerValue, byte[]>
+{
+    private RowVerValue(byte[] value)
+        : base(value) { }
+
+    /// <summary>Creates the instance from an already-validated value (the public factories live in the base class; see <see cref="ValueObjectBase{TSelf, TValue}.Create"/>).</summary>
+    static RowVerValue IValueObject<RowVerValue, byte[]>.New(byte[] value) =>
+        new(value);
+
+    /// <summary>Auto-generated validation rules plus the user extension (OnValidate), called by the base class's Create / TryCreate / Validate.</summary>
+    /// <remarks>An unimplemented OnValidate partial method takes its call away entirely, and an implemented one receives the error list by reference and possibly unallocated - so a value that passes every rule allocates nothing either way.</remarks>
+    static void IValueObject<RowVerValue, byte[]>.ValidateCore(byte[] value, ref List<string>? errors)
+    {
+        // A value object never wraps null (a nullable column keeps the property itself null),
+        // so a null input is reported as a validation error instead of throwing from the checks below.
+        if (value is null)
+        {
+            var message = ValueObjectValidationMessages.ValueRequired();
+            CustomizeValueRequiredErrorMessage(ref message);
+            (errors ??= new List<string>()).Add(message);
+            return;
+        }
+
+        OnValidate(value, ref errors);
+    }
+
+    /// <summary>User-defined additional validation (partial; zero cost when not implemented). The list arrives by reference and possibly unallocated - allocate it only when adding the first violation, the same shape ValidateCore itself uses ((errors ??= new List&lt;string&gt;()).Add(...)), so a value that passes adds no allocation.</summary>
+    static partial void OnValidate(byte[] value, ref List<string>? errors);
+
+    /// <summary>Hands back the declared instance found by the GetDefinedInstance partial hook (the base class's Create / TryCreate consult this on every creation path).</summary>
+    static bool IValueObject<RowVerValue, byte[]>.TryGetDefined(byte[] value, out RowVerValue? defined)
+    {
+        RowVerValue? found = null;
+        GetDefinedInstance(value, ref found);
+        defined = found;
+        return found is not null;
+    }
+
+    /// <summary>Declared-instance lookup for an enumeration-like value object (partial; every value is built as a new instance when not implemented). Look the value up in a static table without allocating - this runs on every creation - and never call Create / TryCreate / TryCreateFrom from inside: every creation path runs through this hook and the call would recurse.</summary>
+    static partial void GetDefinedInstance(byte[] value, ref RowVerValue? defined);
+
+    /// <summary>Hands the input shapes claimed by the ConvertCustomInput partial hook to TryCreateFrom / CreateFrom, ahead of the ordinary conversion.</summary>
+    static bool IValueObject<RowVerValue>.TryConvertCustomInput(object raw, IFormatProvider? provider, out RowVerValue? result)
+    {
+        RowVerValue? custom = null;
+        ConvertCustomInput(raw, provider, ref custom);
+        result = custom;
+        return custom is not null;
+    }
+
+    /// <summary>Custom input shape for TryCreateFrom / CreateFrom - a name for an enumeration-like value object, say (partial; only the ordinary conversion applies when not implemented). Set result to claim the value; leave it null for anything not handled so the ordinary conversion runs. Never call TryCreateFrom / CreateFrom from inside (they consult this hook and the call would recurse), and do not throw - TryCreateFrom reports failures through its return value, and an exception here rides straight through that contract.</summary>
+    static partial void ConvertCustomInput(object raw, IFormatProvider? provider, ref RowVerValue? result);
+
+    /// <summary>Gets the display name of this value object (used in error messages and similar). Defaults to the column description, or the property name when unset. Can be replaced through GeneratedDisplayNames.Resolve (all display names at once) or CustomizeDisplayName (this value object only).</summary>
+    public static string DisplayName
+    {
+        get
+        {
+            var displayName = GeneratedDisplayNames.Resolve("RowVer", null);
+            CustomizeDisplayName(ref displayName);
+            return displayName;
+        }
+    }
+
+    /// <summary>Extension point for replacing the display name (partial; the default display name applies when not implemented).</summary>
+    static partial void CustomizeDisplayName(ref string displayName);
+
+    /// <summary>Replaces the required-value error message (partial; the default message applies when not implemented).</summary>
+    static partial void CustomizeValueRequiredErrorMessage(ref string message);
+}
+
+/// <summary>Value object for the title column</summary>
+public sealed partial class TitleValue
+    : ValueObjectStringBase<TitleValue>,
+        IValueObject<TitleValue, string>
+{
+    private TitleValue(string value)
+        : base(value) { }
+
+    /// <summary>Creates the instance from an already-validated value (the public factories live in the base class; see <see cref="ValueObjectBase{TSelf, TValue}.Create"/>).</summary>
+    static TitleValue IValueObject<TitleValue, string>.New(string value) =>
+        new(value);
+
+    /// <summary>Auto-generated validation rules plus the user extension (OnValidate), called by the base class's Create / TryCreate / Validate.</summary>
+    /// <remarks>An unimplemented OnValidate partial method takes its call away entirely, and an implemented one receives the error list by reference and possibly unallocated - so a value that passes every rule allocates nothing either way.</remarks>
+    static void IValueObject<TitleValue, string>.ValidateCore(string value, ref List<string>? errors)
+    {
+        // A value object never wraps null (a nullable column keeps the property itself null),
+        // so a null input is reported as a validation error instead of throwing from the checks below.
+        if (value is null)
+        {
+            var message = ValueObjectValidationMessages.ValueRequired();
+            CustomizeValueRequiredErrorMessage(ref message);
+            (errors ??= new List<string>()).Add(message);
+            return;
+        }
+
+        if (value.Length > 50)
+        {
+            var message = ValueObjectValidationMessages.MaxLengthExceeded(50, value.Length);
+            CustomizeMaxLengthErrorMessage(value, 50, ref message);
+            (errors ??= new List<string>()).Add(message);
+        }
+        OnValidate(value, ref errors);
+    }
+
+    /// <summary>User-defined additional validation (partial; zero cost when not implemented). The list arrives by reference and possibly unallocated - allocate it only when adding the first violation, the same shape ValidateCore itself uses ((errors ??= new List&lt;string&gt;()).Add(...)), so a value that passes adds no allocation.</summary>
+    static partial void OnValidate(string value, ref List<string>? errors);
+
+    /// <summary>Hands back the declared instance found by the GetDefinedInstance partial hook (the base class's Create / TryCreate consult this on every creation path).</summary>
+    static bool IValueObject<TitleValue, string>.TryGetDefined(string value, out TitleValue? defined)
+    {
+        TitleValue? found = null;
+        GetDefinedInstance(value, ref found);
+        defined = found;
+        return found is not null;
+    }
+
+    /// <summary>Declared-instance lookup for an enumeration-like value object (partial; every value is built as a new instance when not implemented). Look the value up in a static table without allocating - this runs on every creation - and never call Create / TryCreate / TryCreateFrom from inside: every creation path runs through this hook and the call would recurse.</summary>
+    static partial void GetDefinedInstance(string value, ref TitleValue? defined);
+
+    /// <summary>Hands the input shapes claimed by the ConvertCustomInput partial hook to TryCreateFrom / CreateFrom, ahead of the ordinary conversion.</summary>
+    static bool IValueObject<TitleValue>.TryConvertCustomInput(object raw, IFormatProvider? provider, out TitleValue? result)
+    {
+        TitleValue? custom = null;
+        ConvertCustomInput(raw, provider, ref custom);
+        result = custom;
+        return custom is not null;
+    }
+
+    /// <summary>Custom input shape for TryCreateFrom / CreateFrom - a name for an enumeration-like value object, say (partial; only the ordinary conversion applies when not implemented). Set result to claim the value; leave it null for anything not handled so the ordinary conversion runs. Never call TryCreateFrom / CreateFrom from inside (they consult this hook and the call would recurse), and do not throw - TryCreateFrom reports failures through its return value, and an exception here rides straight through that contract.</summary>
+    static partial void ConvertCustomInput(object raw, IFormatProvider? provider, ref TitleValue? result);
+
+    /// <summary>Gets the display name of this value object (used in error messages and similar). Defaults to the column description, or the property name when unset. Can be replaced through GeneratedDisplayNames.Resolve (all display names at once) or CustomizeDisplayName (this value object only).</summary>
+    public static string DisplayName
+    {
+        get
+        {
+            var displayName = GeneratedDisplayNames.Resolve("Title", null);
+            CustomizeDisplayName(ref displayName);
+            return displayName;
+        }
+    }
+
+    /// <summary>Extension point for replacing the display name (partial; the default display name applies when not implemented).</summary>
+    static partial void CustomizeDisplayName(ref string displayName);
+
+    /// <summary>Replaces the required-value error message (partial; the default message applies when not implemented).</summary>
+    static partial void CustomizeValueRequiredErrorMessage(ref string message);
+
+    /// <summary>Replaces the maximum-length error message (partial; the default message applies when not implemented).</summary>
+    static partial void CustomizeMaxLengthErrorMessage(
+        string value,
+        int maxLength,
+        ref string message
+    );
 }
 
 /// <summary>Converts a raw value read from the database into a target CLR type, including the types <see cref="Convert.ChangeType(object, Type, IFormatProvider)"/> cannot reach on its own.</summary>
@@ -674,6 +1669,7 @@ public abstract partial class EntityBase
     {
         IgnoreReadOnlyProperties = true,
         ReferenceHandler = ReferenceHandler.IgnoreCycles,
+        Converters = { new ValueObjectJsonConverterFactory() },
     };
 
     /// <summary>Options for indented output (writeIndented=true). Kept as a separate instance because WriteIndented cannot be changed after first use.</summary>
@@ -682,6 +1678,7 @@ public abstract partial class EntityBase
         IgnoreReadOnlyProperties = true,
         ReferenceHandler = ReferenceHandler.IgnoreCycles,
         WriteIndented = true,
+        Converters = { new ValueObjectJsonConverterFactory() },
     };
 
     /// <summary>Serializes this entity to a JSON string (used for passing data to a web API and so on).</summary>
@@ -717,113 +1714,74 @@ public static class GeneratedDisplayNames
         static (memberName, description) => description ?? memberName;
 }
 
-/// <summary>Entity for the sync_orders table</summary>
-[Table("sync_orders")]
-public partial class SyncOrderEntity : EntityBase
+/// <summary>Entity for the syncvo_orders table</summary>
+[Table("syncvo_orders")]
+public partial class SyncvoOrderEntity : EntityBase
 {
     /// <summary>Property for the order_id column</summary>
     [Key]
     [Column("order_id")]
+    [Required]
     [SqlColumnType(SqlDbType.Int)]
     [DbColumnMeta("int32")]
-    public int OrderId { get; set; }
+    public OrderIdValue OrderId { get; set; } = null!;
 
-    /// <summary>Property for the customer_name column</summary>
-    [Column("customer_name")]
+    /// <summary>Property for the title column</summary>
+    [Column("title")]
     [Required]
-    [MaxLength(50)]
     [SqlColumnType(SqlDbType.NVarChar, Size = 50)]
     [DbColumnMeta("string(50)")]
-    public string CustomerName { get; set; } = string.Empty;
-
-    /// <summary>Property for the attachment column</summary>
-    [Column("attachment")]
-    [SqlColumnType(SqlDbType.VarBinary, Size = -1)]
-    [DbColumnMeta("binary(max)")]
-    [UnboundedBinaryColumn]
-    public byte[]? Attachment { get; set; }
+    public TitleValue Title { get; set; } = null!;
 
     /// <summary>Property for the row_ver column</summary>
     [Column("row_ver")]
+    [Required]
     [SqlColumnType(SqlDbType.Timestamp)]
     [StoreGeneratedColumn]
-    public byte[]? RowVer { get; set; }
+    public RowVerValue RowVer { get; set; } = null!;
 
-    /// <summary>SyncOrderLines navigation property</summary>
-    [NavigationReference("sync_orders", "order_id", "sync_order_lines", "order_id", true, true, false, ConstraintName = "FK_sync_order_lines_sync_orders")]
-    public ICollection<SyncOrderLineEntity> SyncOrderLines { get; set; } = new List<SyncOrderLineEntity>();
-
-    /// <summary>SyncNotes navigation property</summary>
-    [NavigationReference("sync_orders", "order_id", "sync_notes", "order_id", true, true, false, ConstraintName = "FK_sync_notes_sync_orders")]
-    public ICollection<SyncNoteEntity> SyncNotes { get; set; } = new List<SyncNoteEntity>();
+    /// <summary>SyncvoLines navigation property</summary>
+    [NavigationReference("syncvo_orders", "order_id", "syncvo_lines", "order_id", true, true, false, ConstraintName = "FK_syncvo_lines_syncvo_orders")]
+    public ICollection<SyncvoLineEntity> SyncvoLines { get; set; } = new List<SyncvoLineEntity>();
 }
 
-/// <summary>Entity for the sync_order_lines table</summary>
-[Table("sync_order_lines")]
-public partial class SyncOrderLineEntity : EntityBase
+/// <summary>Entity for the syncvo_lines table</summary>
+[Table("syncvo_lines")]
+public partial class SyncvoLineEntity : EntityBase
 {
     /// <summary>Property for the line_id column</summary>
     [Key]
     [Column("line_id")]
+    [Required]
     [SqlColumnType(SqlDbType.Int)]
     [DbColumnMeta("int32")]
-    public int LineId { get; set; }
+    public LineIdValue LineId { get; set; } = null!;
 
     /// <summary>Property for the order_id column</summary>
     [Column("order_id")]
+    [Required]
     [SqlColumnType(SqlDbType.Int)]
     [DbColumnMeta("int32")]
-    public int OrderId { get; set; }
+    public OrderIdValue OrderId { get; set; } = null!;
 
-    /// <summary>Property for the product column</summary>
-    [Column("product")]
+    /// <summary>Property for the qty column</summary>
+    [Column("qty")]
     [Required]
-    [MaxLength(50)]
-    [SqlColumnType(SqlDbType.NVarChar, Size = 50)]
-    [DbColumnMeta("string(50)")]
-    public string Product { get; set; } = string.Empty;
+    [SqlColumnType(SqlDbType.Int)]
+    [DbColumnMeta("int32")]
+    public QtyValue Qty { get; set; } = null!;
 
     /// <summary>Property for the row_ver column</summary>
     [Column("row_ver")]
+    [Required]
     [SqlColumnType(SqlDbType.Timestamp)]
     [StoreGeneratedColumn]
-    public byte[]? RowVer { get; set; }
+    public RowVerValue RowVer { get; set; } = null!;
 
-    /// <summary>SyncOrder navigation property</summary>
+    /// <summary>SyncvoOrder navigation property</summary>
     [JsonIgnore]
-    [NavigationReference("sync_orders", "order_id", "sync_order_lines", "order_id", false, false, true, ConstraintName = "FK_sync_order_lines_sync_orders")]
-    public SyncOrderEntity SyncOrder { get; set; } = null!;
-}
-
-/// <summary>Entity for the sync_notes table</summary>
-[Table("sync_notes")]
-public partial class SyncNoteEntity : EntityBase
-{
-    /// <summary>Property for the note_id column</summary>
-    [Key]
-    [Column("note_id")]
-    [SqlColumnType(SqlDbType.Int)]
-    [DbColumnMeta("int32")]
-    public int NoteId { get; set; }
-
-    /// <summary>Property for the order_id column</summary>
-    [Column("order_id")]
-    [SqlColumnType(SqlDbType.Int)]
-    [DbColumnMeta("int32")]
-    public int OrderId { get; set; }
-
-    /// <summary>Property for the body column</summary>
-    [Column("body")]
-    [Required]
-    [MaxLength(100)]
-    [SqlColumnType(SqlDbType.NVarChar, Size = 100)]
-    [DbColumnMeta("string(100)")]
-    public string Body { get; set; } = string.Empty;
-
-    /// <summary>SyncOrder navigation property</summary>
-    [JsonIgnore]
-    [NavigationReference("sync_orders", "order_id", "sync_notes", "order_id", false, false, true, ConstraintName = "FK_sync_notes_sync_orders")]
-    public SyncOrderEntity SyncOrder { get; set; } = null!;
+    [NavigationReference("syncvo_orders", "order_id", "syncvo_lines", "order_id", false, false, true, ConstraintName = "FK_syncvo_lines_syncvo_orders")]
+    public SyncvoOrderEntity SyncvoOrder { get; set; } = null!;
 }
 
 /// <summary>A single UNIQUE constraint violation reported by a uniqueness pre-check.</summary>
@@ -1153,7 +2111,7 @@ public partial interface ISqlExecutor
     /// <remarks>
     /// <para>
     /// <b>Single-value mode</b>: when <typeparamref name="TResult"/> (Nullable is judged by its underlying type) is primitive / enum /
-    /// string / decimal / DateTime / DateTimeOffset / TimeSpan / Guid / byte[],
+    /// string / decimal / DateTime / DateTimeOffset / TimeSpan / Guid / byte[] / a value object (IValueObject implementation),
     /// the <b>first column</b> of each row is converted and returned (DBNull becomes <c>default</c>). Conversion uses the same
     /// Nullable-aware <see cref="System.Convert.ChangeType(object, System.Type, System.IFormatProvider)"/> as the scalar methods.
     /// </para>
@@ -1578,6 +2536,88 @@ internal sealed class SaveHookInvoker<TEntity>(IEnumerable<ISaveHook<TEntity>> h
     }
 }
 
+/// <summary>Helper that unwraps values passed to SQL parameters into raw values (converts value objects to their underlying values, into types SqlClient can handle).</summary>
+internal static class SqlParameterValue
+{
+    /// <summary>Returns the underlying value for a value object; returns anything else as is.</summary>
+    public static object? Unwrap(object? value) =>
+        value is IValueObject valueObject ? valueObject.UnderlyingValue : value;
+}
+
+/// <summary>Reverse-conversion helper that rewraps raw values read from the DB via Create when the target property is a value object type (the counterpart of Unwrap).</summary>
+internal static class SqlValueObjectActivator
+{
+    /// <summary>Caches the raw-value-to-value-object converter resolved per property type (null for non-VO types).</summary>
+    private static readonly ConcurrentDictionary<Type, Func<object, object>?> _factoryCache = new();
+
+    /// <summary>Wraps the raw value via Create when the target type is a value object; returns anything else as is.</summary>
+    public static object? Wrap(object? value, Type targetType)
+    {
+        if (value is null)
+        {
+            return null;
+        }
+
+        var factory = _factoryCache.GetOrAdd(targetType, ResolveFactory);
+        return factory is null ? value : factory(value);
+    }
+
+    /// <summary>Resolves TValue and Create(TValue) from the target type's IValueObject&lt;,&gt; and builds the converter (null when not a VO).</summary>
+    private static Func<object, object>? ResolveFactory(Type targetType)
+    {
+        var iface = Array.Find(
+            targetType.GetInterfaces(),
+            i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IValueObject<,>)
+        );
+        if (iface is null)
+        {
+            return null;
+        }
+
+        var valueType = iface.GetGenericArguments()[1];
+
+        // FlattenHierarchy: without it reflection never returns a static member declared on a base class, and Create
+        // lives on ValueObjectBase (a hand-written value object inheriting it included). A same-signature Create declared
+        // on the type itself still wins (hide-by-signature), with no AmbiguousMatchException.
+        var createMethod = targetType.GetMethod(
+            "Create",
+            BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy,
+            binder: null,
+            new[] { valueType },
+            modifiers: null
+        );
+        if (createMethod is null)
+        {
+            return null;
+        }
+
+        // Compile the call to Create once per target type. Invoking it reflectively instead would re-dispatch and allocate a
+        // one-element object[] for every value read out of every row; the compiled delegate does neither. A validation
+        // failure inside Create surfaces as itself here as well - an expression-tree call never wraps anything in a
+        // TargetInvocationException - so the caller can still add the column context and keep the original as the inner one.
+        var rawParameter = Expression.Parameter(typeof(object), "raw");
+        var invoker = Expression
+            .Lambda<Func<object, object>>(
+                Expression.Convert(
+                    Expression.Call(createMethod, Expression.Convert(rawParameter, valueType)),
+                    typeof(object)
+                ),
+                rawParameter
+            )
+            .Compile();
+
+        return raw =>
+        {
+            // Convert only when the raw type returned by the DB differs from TValue. The shared converter also covers the
+            // underlying types Convert.ChangeType cannot reach (TimeSpan/Guid/DateTimeOffset and friends), which a driver
+            // that returns them as text - SQLite - would otherwise fail on for every row
+            var converted = RawValueConverter.ConvertRaw(raw, valueType);
+
+            return invoker(converted);
+        };
+    }
+}
+
 /// <summary>
 /// Shared helper responsible for raw SQL binding, scalar conversion, and projection mapping (a single implementation shared
 /// by QuickER's SQL Server implementation and the EF Core executor).
@@ -1617,7 +2657,7 @@ internal static class RawSqlMapper
         foreach (var property in GetBindableProperties(parameters.GetType()))
         {
             var value =
-                property.GetValue(parameters);
+                SqlParameterValue.Unwrap(property.GetValue(parameters));
 
             // Collection values (for IN) are expanded and bound as @name0, @name1, ... (the @name in the SQL is rewritten too)
             if (IsCollectionParameter(value))
@@ -1664,7 +2704,7 @@ internal static class RawSqlMapper
 
         foreach (var item in values)
         {
-            var value = item;
+            var value = SqlParameterValue.Unwrap(item);
             var parameter = command.CreateParameter();
             parameter.ParameterName = $"@{name}{names.Count}";
             parameter.Value = value ?? DBNull.Value;
@@ -1694,7 +2734,7 @@ internal static class RawSqlMapper
         var resultType = typeof(TResult);
         var items = new List<TResult>();
 
-        // Single-value mode (primitive/enum/string/decimal/date-time/Guid/byte[]) converts and returns the first column of each row
+        // Single-value mode (primitive/enum/string/decimal/date-time/Guid/byte[]/value object) converts and returns the first column of each row
         if (IsSingleValueType(resultType))
         {
             while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
@@ -1772,8 +2812,23 @@ internal static class RawSqlMapper
             return typed;
         }
 
-        // When TResult is Nullable<T>, convert to the underlying type (ChangeType cannot handle Nullable directly)
+        // Wrap the raw value via Create for value objects. When TResult is Nullable<T>, convert to the underlying type (ChangeType cannot handle Nullable directly)
         var targetType = Nullable.GetUnderlyingType(typeof(TResult)) ?? typeof(TResult);
+        if (typeof(IValueObject).IsAssignableFrom(targetType))
+        {
+            try
+            {
+                return (TResult?)SqlValueObjectActivator.Wrap(raw, targetType);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // Name the target value object: without it the failure only says the value was rejected, not what it was being read into
+                throw new InvalidOperationException(
+                    $"The raw SQL result value (of type {raw.GetType().Name}) could not be converted to the value object {targetType.Name}: {ex.Message}",
+                    ex
+                );
+            }
+        }
 
         try
         {
@@ -1789,10 +2844,14 @@ internal static class RawSqlMapper
         }
     }
 
-    /// <summary>Whether the type is handled in single-value mode (primitive/enum/string/decimal/date-time/Guid/byte[]; Nullable is judged by its underlying type).</summary>
+    /// <summary>Whether the type is handled in single-value mode (primitive/enum/string/decimal/date-time/Guid/byte[]/value object; Nullable is judged by its underlying type).</summary>
     private static bool IsSingleValueType(Type type)
     {
         var actual = Nullable.GetUnderlyingType(type) ?? type;
+        if (typeof(IValueObject).IsAssignableFrom(actual))
+        {
+            return true;
+        }
 
         return actual.IsPrimitive
             || actual.IsEnum
@@ -1870,6 +2929,22 @@ internal static class RawSqlMapper
         string propertyName
     )
     {
+        // Wrap the raw value via Create for value objects
+        if (typeof(IValueObject).IsAssignableFrom(underlyingType))
+        {
+            try
+            {
+                return SqlValueObjectActivator.Wrap(raw, underlyingType)!;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                throw new InvalidOperationException(
+                    $"The raw SQL projection value for '{propertyName}' (of type {raw.GetType().Name}) could not be converted to the value object {underlyingType.Name}: {ex.Message}",
+                    ex
+                );
+            }
+        }
+
         try
         {
             return RawValueConverter.ConvertRaw(raw, underlyingType);
@@ -2060,12 +3135,18 @@ internal static class QueryStringMatchGuard
         }
     }
 
-    /// <summary>Determines whether the call is a single-argument string match on string.</summary>
+    /// <summary>Determines whether the call is a single-argument string match on string or on a string value object.</summary>
     private static bool IsStringMatch(MethodCallExpression call) =>
         call.Object is not null
         && call.Arguments.Count == 1
         && call.Method.Name is "Contains" or "StartsWith" or "EndsWith"
-        && call.Method.DeclaringType == typeof(string);
+        && (
+            call.Method.DeclaringType == typeof(string)
+            || (
+                call.Method.DeclaringType is { IsGenericType: true } declaring
+                && declaring.GetGenericTypeDefinition() == typeof(ValueObjectStringBase<>)
+            )
+        );
 
     /// <summary>Walks the expression tree to determine whether it references a lambda parameter (i.e. an entity column).</summary>
     private static bool ReferencesParameter(Expression expression)
@@ -2591,1167 +3672,6 @@ internal sealed record CascadeNavigation(
     string DependentColumn
 );
 
-/// <summary>The routes the generated remote server and its clients agree on.</summary>
-/// <remarks>
-/// Both sides read the values from here so the prefix is written down once: the server's
-/// <c>MapGeneratedRemoteEndpoints</c> defaults to <see cref="DefaultPrefix"/>, and a client's base address has to
-/// include whichever prefix the server was mapped under.
-/// </remarks>
-public static class RemotePaths
-{
-    /// <summary>The route prefix the generated endpoints are mapped under unless another one is passed to <c>MapGeneratedRemoteEndpoints</c>.</summary>
-    public const string DefaultPrefix = "/quicker";
-
-    /// <summary>The liveness endpoint's route, relative to the prefix (<c>GET {prefix}/health</c>).</summary>
-    public const string HealthRoute = "health";
-}
-
-/// <summary>Shared serialization settings used for remote transport (HTTP + JSON).</summary>
-/// <remarks>
-/// Uses the same semantics as entity JSON round-trips (<see cref="EntityBase.ToJson"/> / <see cref="EntityBase.Clone"/>)
-/// (get/set properties only, RowState included, no cycles because parent-reference navigations are [JsonIgnore]),
-/// plus case-insensitive reading for transport. Client and server both use these settings so the wire representation matches.
-/// </remarks>
-public static class RemoteJson
-{
-    /// <summary>Transport JSON settings shared by client and server.</summary>
-    /// <remarks>
-    /// IgnoreReadOnlyProperties is intentionally not set (the anonymous types used as query-transport envelopes have
-    /// get-only properties, so setting it would serialize an empty JSON body). Derived entity flags (get-only bools
-    /// such as IsAdded) are serialized redundantly, but they have no setter and are ignored on read, so the
-    /// round-trip semantics (RowState included) are unchanged.
-    /// </remarks>
-    public static JsonSerializerOptions Options { get; } =
-        new()
-        {
-            ReferenceHandler = ReferenceHandler.IgnoreCycles,
-            PropertyNameCaseInsensitive = true,
-        };
-}
-
-/// <summary>Represents a remote call that failed with a server-side error (carries the HTTP status and the server's message).</summary>
-/// <remarks>
-/// <para>
-/// An optimistic conflict (HTTP 409) is restored as <see cref="SaveConflictException"/> rather than this exception, so the same catch blocks work as with a direct connection.
-/// </para>
-/// <para>
-/// It also reports a call that failed after a <b>successful</b> status: a 2xx whose body cannot be read as what the operation
-/// expects means something other than the generated endpoint answered - a proxy's or a portal's success page, or a server
-/// generated from a different diagram - which is a transport failure however cheerful the status line was.
-/// <see cref="StatusCode"/> therefore holds a success code in that case, and the parse failure is kept as the inner exception.
-/// Treat it as "the call did not go through", not as "the server reported an error with this code".
-/// </para>
-/// </remarks>
-public sealed class RemoteRepositoryException : Exception
-{
-    /// <summary>Initializes a new instance with the specified HTTP status code, message, and correlation id.</summary>
-    public RemoteRepositoryException(int statusCode, string message, string? correlationId = null)
-        : base(message)
-    {
-        StatusCode = statusCode;
-        CorrelationId = correlationId;
-    }
-
-    /// <summary>Initializes a new instance with the specified HTTP status code, message, correlation id, and the failure it was classified from.</summary>
-    /// <param name="statusCode">The HTTP status code returned by the server.</param>
-    /// <param name="message">The message describing the failure.</param>
-    /// <param name="correlationId">The id identifying the failed request in the server log, or <c>null</c> when there is none.</param>
-    /// <param name="innerException">The failure this exception was classified from, kept so that the original error is still available for diagnosis.</param>
-    public RemoteRepositoryException(
-        int statusCode,
-        string message,
-        string? correlationId,
-        Exception? innerException
-    )
-        : base(message, innerException)
-    {
-        StatusCode = statusCode;
-        CorrelationId = correlationId;
-    }
-
-    /// <summary>Gets the HTTP status code returned by the server.</summary>
-    public int StatusCode { get; }
-
-    /// <summary>Gets the id that identifies the failed request in the server log (<c>null</c> when the server did not send one).</summary>
-    /// <remarks>
-    /// A server that hides its error details (the default of <c>MapGeneratedRemoteEndpoints</c>) replaces the message with
-    /// a fixed generic one and sends this id instead, and it writes the same id next to the full exception in its own log.
-    /// Reporting it therefore lets the failure be looked up on the server without the message having crossed the trust
-    /// boundary. A 500 with its details withheld is the only response the server puts an id on, so this is <c>null</c>
-    /// everywhere else: on a 500 whose details are exposed (the message itself crossed over), and on every failure the
-    /// server classified and answered with a message of its own - a 400 for a request it could not interpret, the status
-    /// a host-level rejection carries (413 for a body over the size limit, 411 for a chunked binary upload), and the 404
-    /// the binary endpoints answer with when the addressed row or column value does not exist. It is <c>null</c> as well
-    /// for a response from a server built before the id existed, and for the failures this client classifies on its own:
-    /// a success status whose body could not be read is raised here rather than reported by the server, and a failure
-    /// response whose body could not be read as a <see cref="RemoteError"/> at all carries nothing to read an id out of -
-    /// a proxy's HTML error page has none however the server was configured.
-    /// </remarks>
-    public string? CorrelationId { get; }
-}
-
-/// <summary>Structured payload for transport errors (server to client; the type restores the exception type on the client side).</summary>
-/// <remarks>
-/// The conflict detail fields (<see cref="Reason"/>, <see cref="EntityType"/>, <see cref="Key"/>) are written only for a
-/// "SaveConflict" error and are optional on the wire: a body from a server built before they existed simply leaves them
-/// null, and the restored <see cref="SaveConflictException"/> then reports <see cref="SaveConflictReason.Unknown"/>.
-/// <see cref="CorrelationId"/> is optional in the same way and degrades to null.
-/// </remarks>
-public sealed class RemoteError
-{
-    /// <summary>Gets or sets the error kind ("SaveConflict" = optimistic conflict / "BadRequest" = the request could not be interpreted / "NotFound" = the binary endpoint's addressed row or column value does not exist / "Error" = anything else).</summary>
-    public string Type { get; set; } = string.Empty;
-
-    /// <summary>Gets or sets the server-side exception message.</summary>
-    public string Message { get; set; } = string.Empty;
-
-    /// <summary>Gets or sets the name of the <see cref="SaveConflictReason"/> behind a conflict (<c>null</c> for every other kind).</summary>
-    public string? Reason { get; set; }
-
-    /// <summary>Gets or sets the CLR type name of the entity whose save was rejected (<c>null</c> for every other kind).</summary>
-    public string? EntityType { get; set; }
-
-    /// <summary>Gets or sets the primary key the rejected save targeted, formatted for display (<c>null</c> for every other kind).</summary>
-    public string? Key { get; set; }
-
-    /// <summary>Gets or sets the id that identifies the failed request in the server log (written only for a 500 whose details are hidden).</summary>
-    /// <remarks>
-    /// The server writes it in place of the exception message it withheld, and records the same id next to the full
-    /// exception in its own log, so the two can be matched up. A 500 with its details withheld is the only response it is
-    /// written on: it stays null on a 500 whose details are exposed, and on every classified failure - 400, 409, the
-    /// status a host-level rejection carries (413 for a body over the size limit, 411 for a chunked binary upload), and
-    /// the 404 the binary endpoints answer with when the addressed row or column value does not exist - because each of
-    /// those carries a message of its own rather than a withheld one.
-    /// </remarks>
-    public string? CorrelationId { get; set; }
-}
-
-/// <summary>Request body carrying a single primary key (GetById / Delete).</summary>
-public sealed record RemoteIdRequest<TKey>(TKey Id);
-
-/// <summary>Request body carrying a single entity (Insert).</summary>
-public sealed record RemoteEntityRequest<TEntity>(TEntity Entity);
-
-/// <summary>Request body for a single update (carries the concurrency policy alongside the entity).</summary>
-/// <remarks>The policy defaults to <see cref="ConcurrencyMode.Optimistic"/>, so a body that omits it - one sent by a client built before the policy was carried - is read as the default.</remarks>
-public sealed record RemoteUpdateRequest<TEntity>(
-    TEntity Entity,
-    ConcurrencyMode Mode = ConcurrencyMode.Optimistic
-);
-
-/// <summary>Request body for a graph save (single root).</summary>
-public sealed record RemoteSaveRequest<TEntity>(
-    TEntity Entity,
-    bool CascadeSave,
-    bool CascadeDelete,
-    bool InsertWhenUpdateMissing,
-    ConcurrencyMode Mode = ConcurrencyMode.Optimistic
-);
-
-/// <summary>Request body for a graph save (multiple roots).</summary>
-public sealed record RemoteSaveManyRequest<TEntity>(
-    List<TEntity> Entities,
-    bool CascadeSave,
-    bool CascadeDelete,
-    bool InsertWhenUpdateMissing,
-    ConcurrencyMode Mode = ConcurrencyMode.Optimistic
-);
-
-/// <summary>One row version a save assigned, identified by the entity's CLR type name and its primary key.</summary>
-/// <remarks>
-/// <paramref name="Key"/> is the primary key serialized with the transport settings (<see cref="RemoteJson.Options"/>),
-/// which both sides produce the same way, so value-object keys and dialect differences round-trip unchanged.
-/// </remarks>
-/// <param name="EntityType">The CLR type name of the entity the version belongs to.</param>
-/// <param name="Key">The entity's primary key, serialized with the transport settings.</param>
-/// <param name="RowVersion">The row version the database assigned during the save.</param>
-public sealed record RemoteRowVersionEntry(string EntityType, string Key, byte[] RowVersion);
-
-/// <summary>One entity referenced across the transport, identified the same way as <see cref="RemoteRowVersionEntry"/> (CLR type name plus the serialized primary key).</summary>
-/// <param name="EntityType">The CLR type name of the entity.</param>
-/// <param name="Key">The entity's primary key, serialized with the transport settings.</param>
-public sealed record RemoteEntityRef(string EntityType, string Key);
-
-/// <summary>Response body of a single insert (the row version the database assigned, or <c>null</c> when the table carries no rowversion column).</summary>
-public sealed record RemoteInsertResult(byte[]? RowVersion);
-
-/// <summary>Response body of a single update (the result, plus the row version the database assigned when the table carries one).</summary>
-public sealed record RemoteUpdateResult(bool Updated, byte[]? RowVersion);
-
-/// <summary>Response body of a graph save (the affected row count, the row versions assigned across the saved graph, and the rows a save hook skipped).</summary>
-/// <remarks>
-/// The version list is empty for tables with no rowversion column, so backends that do not carry versions simply return
-/// nothing to write back. <paramref name="Skipped"/> names the rows whose save was declined by a hook's Before, so that the
-/// client can leave their RowState untouched exactly as a direct connection does; it defaults to <c>null</c> so that a
-/// response produced before it was carried - one from a server built earlier - is read as "nothing was skipped".
-/// </remarks>
-public sealed record RemoteSaveResult(
-    int Affected,
-    List<RemoteRowVersionEntry> RowVersions,
-    List<RemoteEntityRef>? Skipped = null
-);
-
-/// <summary>
-/// Shared reflection over an entity graph for remote transport: the cascade navigations to walk, and the tables the server
-/// collects after a save for the client to act on - the row versions (<see cref="RemoteRowVersionEntry"/>) to write back and
-/// the rows (<see cref="RemoteEntityRef"/>) a save hook skipped.
-/// </summary>
-/// <remarks>
-/// <para>
-/// Both sides identify an entity the same way - CLR type name plus the primary key serialized with
-/// <see cref="RemoteJson.Options"/> - so this single place defines the correspondence between the two.
-/// The traversal is attribute-driven ([NavigationReference(Cascade=true)]) and therefore matches the child direction the
-/// direct-connection graph saver walks.
-/// </para>
-/// <para>
-/// It is public like the other transport types, because the server implementation is generated into a separate file that
-/// may be compiled into a project of its own.
-/// </para>
-/// </remarks>
-public static class RemoteEntityGraph
-{
-    private static readonly ConcurrentDictionary<Type, PropertyInfo[]> _cascadeNavigations = new();
-    private static readonly ConcurrentDictionary<Type, PropertyInfo?> _rowVersionProperties = new();
-    private static readonly ConcurrentDictionary<Type, PropertyInfo> _keyProperties = new();
-
-    /// <summary>Enumerates the cascade-target (child-direction) navigation properties.</summary>
-    public static PropertyInfo[] CascadeNavigations(Type entityType) =>
-        _cascadeNavigations.GetOrAdd(
-            entityType,
-            static type =>
-                type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
-                    .Where(property =>
-                        property.GetCustomAttribute<NavigationReferenceAttribute>()
-                            is { Cascade: true }
-                    )
-                    .ToArray()
-        );
-
-    /// <summary>Gets the rowversion (concurrency token) property, or <c>null</c> when the type has no such column.</summary>
-    public static PropertyInfo? RowVersionProperty(Type entityType) =>
-        _rowVersionProperties.GetOrAdd(
-            entityType,
-            static type =>
-                type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
-                    .FirstOrDefault(property =>
-                        property.GetCustomAttribute<StoreGeneratedColumnAttribute>() is not null
-                    )
-        );
-
-    /// <summary>Reads the row version the entity currently carries (<c>null</c> when the type has no rowversion column or the value is unset).</summary>
-    public static byte[]? ReadRowVersion(EntityBase entity) =>
-        RowVersionProperty(entity.GetType())?.GetValue(entity) as byte[];
-
-    /// <summary>Writes a row version back to the entity (a no-op for a type without a rowversion column).</summary>
-    public static void WriteRowVersion(EntityBase entity, byte[] rowVersion) =>
-        RowVersionProperty(entity.GetType())?.SetValue(entity, rowVersion);
-
-    /// <summary>Serializes the entity's primary key the way the row version table identifies it.</summary>
-    public static string KeyText(EntityBase entity) =>
-        JsonSerializer.Serialize(
-            KeyProperty(entity.GetType()).GetValue(entity),
-            RemoteJson.Options
-        );
-
-    /// <summary>Collects the row versions a save assigned across the graph (server side; deleted entities are skipped because there is no row left to version).</summary>
-    public static void CollectRowVersions(
-        EntityBase entity,
-        bool cascade,
-        List<RemoteRowVersionEntry> into
-    )
-    {
-        if (entity.IsRemoved)
-        {
-            return;
-        }
-
-        if (ReadRowVersion(entity) is byte[] rowVersion)
-        {
-            into.Add(
-                new RemoteRowVersionEntry(entity.GetType().Name, KeyText(entity), rowVersion)
-            );
-        }
-
-        if (!cascade)
-        {
-            return;
-        }
-
-        foreach (var property in CascadeNavigations(entity.GetType()))
-        {
-            var value = property.GetValue(entity);
-
-            if (value is EntityBase child)
-            {
-                CollectRowVersions(child, true, into);
-            }
-            else if (value is IEnumerable<EntityBase> children)
-            {
-                foreach (var item in children)
-                {
-                    if (item is not null)
-                    {
-                        CollectRowVersions(item, true, into);
-                    }
-                }
-            }
-        }
-    }
-
-    /// <summary>Collects the rows a completed save left unsaved because a hook's Before declined them (server side; deleted entities are skipped because the client leaves them untouched either way).</summary>
-    /// <remarks>
-    /// A completed save has finalized every row it operated on to Unchanged and left the skipped ones as they were, so a row
-    /// that still carries changes is exactly a row the hook skipped. The traversal matches <see cref="CollectRowVersions"/>.
-    /// </remarks>
-    public static void CollectSkipped(EntityBase entity, bool cascade, List<RemoteEntityRef> into)
-    {
-        if (entity.IsRemoved)
-        {
-            return;
-        }
-
-        if (entity.HasChanges)
-        {
-            into.Add(new RemoteEntityRef(entity.GetType().Name, KeyText(entity)));
-        }
-
-        if (!cascade)
-        {
-            return;
-        }
-
-        foreach (var property in CascadeNavigations(entity.GetType()))
-        {
-            var value = property.GetValue(entity);
-
-            if (value is EntityBase child)
-            {
-                CollectSkipped(child, true, into);
-            }
-            else if (value is IEnumerable<EntityBase> children)
-            {
-                foreach (var item in children)
-                {
-                    if (item is not null)
-                    {
-                        CollectSkipped(item, true, into);
-                    }
-                }
-            }
-        }
-    }
-
-    /// <summary>Indexes the skipped rows a save response carried, or returns <c>null</c> when nothing was skipped.</summary>
-    public static HashSet<(string EntityType, string Key)>? SkippedLookup(
-        List<RemoteEntityRef>? entries
-    )
-    {
-        if (entries is null || entries.Count == 0)
-        {
-            return null;
-        }
-
-        var lookup = new HashSet<(string EntityType, string Key)>();
-
-        foreach (var entry in entries)
-        {
-            lookup.Add((entry.EntityType, entry.Key));
-        }
-
-        return lookup;
-    }
-
-    /// <summary>Determines whether the response named this entity as skipped by a save hook (client side).</summary>
-    public static bool IsSkipped(
-        EntityBase entity,
-        HashSet<(string EntityType, string Key)>? lookup
-    ) => lookup is not null && lookup.Contains((entity.GetType().Name, KeyText(entity)));
-
-    /// <summary>Indexes the row versions a save response carried, or returns <c>null</c> when there is nothing to write back.</summary>
-    public static Dictionary<(string EntityType, string Key), byte[]>? RowVersionLookup(
-        List<RemoteRowVersionEntry>? entries
-    )
-    {
-        if (entries is null || entries.Count == 0)
-        {
-            return null;
-        }
-
-        var lookup = new Dictionary<(string EntityType, string Key), byte[]>();
-
-        foreach (var entry in entries)
-        {
-            lookup[(entry.EntityType, entry.Key)] = entry.RowVersion;
-        }
-
-        return lookup;
-    }
-
-    /// <summary>Writes back the row version the response carried for this entity, if any (client side).</summary>
-    public static void ApplyRowVersion(
-        EntityBase entity,
-        Dictionary<(string EntityType, string Key), byte[]>? lookup
-    )
-    {
-        if (lookup is null || RowVersionProperty(entity.GetType()) is null)
-        {
-            return;
-        }
-
-        if (lookup.TryGetValue((entity.GetType().Name, KeyText(entity)), out var rowVersion))
-        {
-            WriteRowVersion(entity, rowVersion);
-        }
-    }
-
-    /// <summary>Gets the primary key property ([Key]) of the entity type.</summary>
-    private static PropertyInfo KeyProperty(Type entityType) =>
-        _keyProperties.GetOrAdd(
-            entityType,
-            static type =>
-                type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
-                    .FirstOrDefault(property =>
-                        property.GetCustomAttribute<KeyAttribute>() is not null
-                    )
-                ?? throw new InvalidOperationException(
-                    $"{type.Name} requires a property with a [Key] attribute."
-                )
-        );
-}
-
-/// <summary>
-/// Common base class for client implementations that call the remote surface (<see cref="IRemoteRepository{TEntity, TKey}"/>) over HTTP + JSON.
-/// </summary>
-/// <remarks>
-/// <para>
-/// Each operation sends a JSON body to <c>POST {BaseAddress}{entity route}/{operation name}</c> and deserializes the result JSON.
-/// <see cref="HttpClient.BaseAddress"/> must include the server-side <c>MapGeneratedRemoteEndpoints</c> prefix (default <c>/quicker</c>)
-/// and end with a trailing <c>/</c> (for example <c>https://server:5001/quicker/</c>). Authentication, TLS, and similar concerns are
-/// delegated to the HttpClient configuration (DelegatingHandler, default headers).
-/// </para>
-/// <para>
-/// After a successful graph save (Save), the local entities' RowState is finalized with the same semantics as a direct
-/// connection (<c>EntityGraphSaver.AcceptChanges</c>), so swapping direct and remote implementations does not change
-/// the post-save state transitions. A row whose save a server-side hook declined (<c>ISaveHook</c>'s Before returning
-/// <c>false</c>) travels back in the response and keeps its state, so it is still pending on the next save just as it
-/// would be on a direct connection.
-/// </para>
-/// <para>
-/// The concurrency policy (<see cref="ConcurrencyMode"/>) travels with the request, and Update / Save responses carry the
-/// row versions the save assigned, which are written back to the local entities. A remote client therefore ends up holding
-/// the same versions a direct connection would leave behind, and can keep saving the same graph without re-reading it.
-/// </para>
-/// <para>
-/// The wire format is not promised to stay compatible across QuickER versions while the tool is at 0.x, so
-/// regenerate the client and the server together and deploy them together. A server that moves ahead on its own
-/// does not announce the mismatch: a request the newer endpoints no longer recognize surfaces as an ordinary transport
-/// failure - a 404 or a 400 - rather than as a version error, and a successful response whose payload changed shape is
-/// reported as <see cref="RemoteRepositoryException"/> only when it cannot be read into the expected type at all. A shape
-/// that merely gained or lost a field deserializes quietly, leaving the missing part at its default, which is why keeping
-/// the two sides in step is the actual safeguard rather than anything the client can detect.
-/// </para>
-/// <para>
-/// <b>Do not put an automatic retry policy (Polly and the like) in front of the mutating operations</b> - Insert, Update,
-/// Delete, and both forms of Save. None of them carries an idempotency key, so the server cannot tell a retry from a new
-/// request: a call that in fact succeeded but whose response was lost is applied a second time, inserting a duplicate row
-/// or replaying a graph save. Retrying is safe only for the read-only operations - GetById, GetAll, the named queries, and
-/// the health probe - so scope any handler-level policy to those. A conflict reported by the server
-/// (<see cref="SaveConflictException"/>) is retried by re-reading the entity and saving again, not by resending the same
-/// body.
-/// </para>
-/// </remarks>
-public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepository<TEntity, TKey>
-    where TEntity : EntityBase, new()
-{
-    private readonly HttpClient _httpClient;
-    private readonly string _entityRoute;
-
-    /// <summary>Initializes a new instance with the HTTP client and the entity route (for example "Order").</summary>
-    protected HttpRemoteRepository(HttpClient httpClient, string entityRoute)
-    {
-        ArgumentNullException.ThrowIfNull(httpClient);
-        ArgumentException.ThrowIfNullOrWhiteSpace(entityRoute);
-        _httpClient = httpClient;
-        _entityRoute = entityRoute;
-    }
-
-    /// <summary>Asks the server whether it is up (<c>GET {prefix}/health</c>), returning <c>false</c> instead of throwing when it is not.</summary>
-    /// <remarks>
-    /// <para>
-    /// A liveness check, not a health check: a 200 means the process is listening and the endpoints are mapped. It says
-    /// nothing about the database behind them.
-    /// </para>
-    /// <para>
-    /// Every way of "not reachable" - connection refused, DNS failure, TLS failure, the HttpClient's own timeout, or any
-    /// status other than success - comes back as <c>false</c>, which is what makes this usable as the condition of a
-    /// wait-for-startup loop. Cancelling <paramref name="cancellationToken"/> is not one of those ways: it still throws
-    /// <see cref="OperationCanceledException"/>, so a caller's own timeout stays distinguishable from a server that is down.
-    /// </para>
-    /// <para>
-    /// The endpoint lives on the group, so authorization applied to the group
-    /// (<c>RemoteAccess.RequireAuthorization</c> at mapping time, or a policy added afterwards) covers it too, and an
-    /// unauthenticated client then reads a protected server as <c>false</c>.
-    /// </para>
-    /// </remarks>
-    /// <param name="cancellationToken">A token that cancels the check.</param>
-    /// <returns><c>true</c> when the server answered with a success status; otherwise <c>false</c>.</returns>
-    public async Task<bool> PingAsync(CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            using var response = await _httpClient.GetAsync(
-                RemotePaths.HealthRoute,
-                HttpCompletionOption.ResponseHeadersRead,
-                cancellationToken
-            ).ConfigureAwait(false);
-
-            return response.IsSuccessStatusCode;
-        }
-        catch (HttpRequestException)
-        {
-            // The server is not listening yet (or not reachable at all): that is the answer, not a failure
-            return false;
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            // The HttpClient's own timeout elapsed. The caller did not cancel, so this is still "not ready"
-            return false;
-        }
-    }
-
-    /// <summary>Posts an operation and deserializes the result JSON into <typeparamref name="TResult"/> (the shared path for generated transport methods whose result is never null).</summary>
-    /// <remarks>
-    /// On a failure response, reads the <see cref="RemoteError"/>; 409 with SaveConflict throws <see cref="SaveConflictException"/>,
-    /// anything else throws <see cref="RemoteRepositoryException"/>. A success response whose body is not the expected JSON throws
-    /// <see cref="RemoteRepositoryException"/> as well: something other than the generated endpoint answered - a proxy's or a portal's
-    /// success page, most often - and letting the raw <c>JsonException</c> out would hide that behind a parsing detail. A body that is
-    /// JSON but of another shape than this call expects (an endpoint from a differently generated server, say) is reported the same way
-    /// when it cannot be read into <typeparamref name="TResult"/> at all; a shape that only gained or lost a field is read without
-    /// complaint and leaves the missing part at its default, so this is not a version check. The parse failure itself is kept as the
-    /// inner exception, since the reason the body could not be read is exactly what tells the two apart.
-    /// A body that is the JSON literal <c>null</c> deserializes without an exception, so it is checked for explicitly and
-    /// classified the same way: the operations routed through here declare non-nullable results, and a null body can only
-    /// come from something other than the generated endpoint. Operations whose result is legitimately null - a get-by-id
-    /// that finds no row, a single-row query that matches nothing - go through <see cref="InvokeNullableAsync{TResult}"/>,
-    /// which is this same path with that check turned off.
-    /// </remarks>
-    protected async Task<TResult> InvokeAsync<TResult>(
-        string operation,
-        object? payload,
-        CancellationToken cancellationToken
-    )
-    {
-        var result = await InvokeCoreAsync<TResult>(
-            operation,
-            payload,
-            allowNullResult: false,
-            cancellationToken
-        ).ConfigureAwait(false);
-
-        return result!;
-    }
-
-    /// <summary>Posts an operation and deserializes the result JSON into <typeparamref name="TResult"/>, where the JSON literal <c>null</c> is a legal result (a get-by-id that finds no row, a single-row query that matches nothing).</summary>
-    /// <remarks>Everything else - the failure classification and the treatment of a success body that cannot be read - is exactly what <see cref="InvokeAsync{TResult}"/> describes.</remarks>
-    protected Task<TResult?> InvokeNullableAsync<TResult>(
-        string operation,
-        object? payload,
-        CancellationToken cancellationToken
-    ) => InvokeCoreAsync<TResult>(operation, payload, allowNullResult: true, cancellationToken);
-
-    /// <summary>The single transport path behind <see cref="InvokeAsync{TResult}"/> and <see cref="InvokeNullableAsync{TResult}"/>: posts the operation, classifies failures, and reads the result body.</summary>
-    private async Task<TResult?> InvokeCoreAsync<TResult>(
-        string operation,
-        object? payload,
-        bool allowNullResult,
-        CancellationToken cancellationToken
-    )
-    {
-        using var response = await _httpClient.PostAsJsonAsync(
-            $"{_entityRoute}/{operation}",
-            payload,
-            RemoteJson.Options,
-            cancellationToken
-        ).ConfigureAwait(false);
-
-        await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
-
-        try
-        {
-            var result = await response.Content.ReadFromJsonAsync<TResult>(
-                RemoteJson.Options,
-                cancellationToken
-            ).ConfigureAwait(false);
-
-            if (result is null && !allowNullResult)
-            {
-                // The JSON literal null deserializes without an exception, so the catch below never sees it; for an
-                // operation whose result is non-nullable it is the same kind of transport failure as an unreadable body
-                throw new RemoteRepositoryException(
-                    (int)response.StatusCode,
-                    $"The remote call succeeded (HTTP {(int)response.StatusCode}) but its response body was the JSON literal null, which this operation's result cannot be."
-                );
-            }
-
-            return result;
-        }
-        catch (Exception parseError)
-            when (parseError is JsonException or NotSupportedException)
-        {
-            // Malformed JSON surfaces as JsonException, a non-JSON content type as NotSupportedException - the same kinds the error path folds away,
-            // classified here as the transport failure they are
-            throw new RemoteRepositoryException(
-                (int)response.StatusCode,
-                $"The remote call succeeded (HTTP {(int)response.StatusCode}) but its response body could not be interpreted: {parseError.Message}",
-                correlationId: null,
-                innerException: parseError
-            );
-        }
-    }
-
-    /// <summary>Converts a failure response into an exception (known kinds restore the original exception type).</summary>
-    private static async Task EnsureSuccessAsync(
-        HttpResponseMessage response,
-        CancellationToken cancellationToken
-    )
-    {
-        if (response.IsSuccessStatusCode)
-        {
-            return;
-        }
-
-        var (error, parseError) = await ReadErrorAsync(response, cancellationToken)
-            .ConfigureAwait(false);
-
-        throw ToException(response, error, parseError);
-    }
-
-    /// <summary>Reads the <see cref="RemoteError"/> body of a failure response, together with the failure that stopped the read when the body is not one.</summary>
-    /// <remarks>
-    /// The body of a response can be read only once, so every caller that needs both the error and a decision based on it
-    /// goes through this one read and then passes the result on to <see cref="ToException"/>. The failure travels with it
-    /// so that the exception can carry it as its inner exception: without it, "the body was not a RemoteError at all" and
-    /// "the body was a RemoteError that carried no message" reach the caller as the same exception, and the two point at
-    /// entirely different things - something else answering on this route, or the generated endpoint itself. The line it
-    /// draws is between a body that could not be read and one that was, not between a real error payload and something
-    /// else: a JSON object of another shape - as long as no member of it collides with a property of this type - is read
-    /// without complaint into a <see cref="RemoteError"/> left at its defaults, so it arrives on the same side as a genuine
-    /// one that carried no message.
-    /// </remarks>
-    private static async Task<(RemoteError? Error, Exception? ParseError)> ReadErrorAsync(
-        HttpResponseMessage response,
-        CancellationToken cancellationToken
-    )
-    {
-        try
-        {
-            var error = await response.Content.ReadFromJsonAsync<RemoteError>(
-                RemoteJson.Options,
-                cancellationToken
-            ).ConfigureAwait(false);
-            return (error, null);
-        }
-        catch (Exception parseError)
-            when (parseError is JsonException or NotSupportedException)
-        {
-            // If the error payload is not JSON, report the status only. Malformed JSON surfaces as JsonException, while a
-            // non-JSON content type (text/html or text/plain from a proxy or a developer exception page, or no
-            // Content-Type at all on an empty body) surfaces as NotSupportedException from ReadFromJsonAsync
-            return (null, parseError);
-        }
-    }
-
-    /// <summary>Builds the exception a failure response maps to (known kinds restore the original exception type).</summary>
-    /// <param name="response">The failure response being classified.</param>
-    /// <param name="error">The error body that was read, or <c>null</c> when the body was not one.</param>
-    /// <param name="parseError">The failure that stopped the body from being read, kept as the inner exception (<c>null</c> when the body was read).</param>
-    private static Exception ToException(
-        HttpResponseMessage response,
-        RemoteError? error,
-        Exception? parseError
-    )
-    {
-        var statusCode = (int)response.StatusCode;
-
-        // RemoteError.Message defaults to the empty string, so a body that carried no message has to fall back the same
-        // way a body that was not a RemoteError at all does (a null check alone would hand back an empty message)
-        var message = string.IsNullOrEmpty(error?.Message)
-            ? $"The remote call failed (HTTP {statusCode})."
-            : error!.Message;
-
-        if (statusCode == 409 && error?.Type == "SaveConflict")
-        {
-            // Restore the conflict details the server reported so that a reload-and-retry loop reads the same properties as
-            // with a direct call. A body without them (an older server) degrades to Unknown rather than failing
-            return new SaveConflictException(
-                message,
-                Enum.TryParse(error.Reason, out SaveConflictReason reason)
-                    ? reason
-                    : SaveConflictReason.Unknown,
-                error.EntityType,
-                error.Key
-            );
-        }
-
-        // A server that withheld its error detail sends the correlation id instead, so carry it onto the exception rather
-        // than leaving the caller to dig it out of the message (there is none to dig out). A body that could not be read
-        // leaves its own failure as the inner exception, which is what distinguishes it from a body that was read
-        return new RemoteRepositoryException(statusCode, message, error?.CorrelationId, parseError);
-    }
-
-    /// <summary>Gets a single entity by primary key (null when not found).</summary>
-    public Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default) =>
-        InvokeNullableAsync<TEntity?>("GetById", new RemoteIdRequest<TKey>(id), cancellationToken);
-
-    /// <summary>Gets all entities.</summary>
-    public Task<IReadOnlyList<TEntity>> GetAllAsync(CancellationToken cancellationToken = default) =>
-        InvokeAsync<IReadOnlyList<TEntity>>("GetAll", null, cancellationToken);
-
-    /// <summary>Inserts an entity.</summary>
-    /// <remarks>As on a direct connection, the row version the database assigned is written back to <paramref name="entity"/> when the table carries a rowversion column, so the inserted entity can be updated straight away without re-reading it. Being a mutating call it carries no idempotency key, so it must not be resent by an automatic retry policy - a resend after a lost response inserts the row twice.</remarks>
-    public async Task InsertAsync(TEntity entity, CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(entity);
-
-        var result = await InvokeAsync<RemoteInsertResult>(
-            "Insert",
-            new RemoteEntityRequest<TEntity>(entity),
-            cancellationToken
-        ).ConfigureAwait(false);
-
-        if (result.RowVersion is byte[] rowVersion)
-        {
-            RemoteEntityGraph.WriteRowVersion(entity, rowVersion);
-        }
-    }
-
-    /// <summary>Updates an entity (returns true when a matching row was updated).</summary>
-    /// <remarks>The policy travels with the request, so a table with a rowversion column behaves exactly as it does on a direct connection: an optimistic conflict surfaces as <see cref="SaveConflictException"/> (HTTP 409) and a successful update writes the new version back to <paramref name="entity"/>. Being a mutating call it carries no idempotency key, so it must not be resent by an automatic retry policy - a conflict is retried by re-reading the entity, not by resending the same body.</remarks>
-    /// <param name="entity">The entity to update.</param>
-    /// <param name="mode">The concurrency policy applied on the server for tables that have a rowversion column (no effect otherwise). An undefined value throws <see cref="ArgumentOutOfRangeException"/> before anything is sent.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
-    public async Task<bool> UpdateAsync(
-        TEntity entity,
-        ConcurrencyMode mode = ConcurrencyMode.Optimistic,
-        CancellationToken cancellationToken = default
-    )
-    {
-        ArgumentNullException.ThrowIfNull(entity);
-        mode = ConcurrencyModes.Validated(mode);
-
-        // Reject updates that still carry values in unbounded binary columns before sending
-        // (they are excluded from the server-side UPDATE and would be lost silently)
-        UnboundedBinaryColumns.ThrowIfExcludedAssigned(entity);
-
-        var result = await InvokeAsync<RemoteUpdateResult>(
-            "Update",
-            new RemoteUpdateRequest<TEntity>(entity, mode),
-            cancellationToken
-        ).ConfigureAwait(false);
-
-        if (result.RowVersion is byte[] rowVersion)
-        {
-            RemoteEntityGraph.WriteRowVersion(entity, rowVersion);
-        }
-
-        return result.Updated;
-    }
-
-    /// <inheritdoc />
-    public Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default) =>
-        InvokeAsync<bool>("Delete", new RemoteIdRequest<TKey>(id), cancellationToken);
-
-    /// <summary>Saves inserts, updates, and deletes according to RowState in a single transaction (cascades to children by default).</summary>
-    /// <remarks><paramref name="mode"/> travels with the request, and the response carries the row versions the save assigned so that the local graph ends up with the same versions a direct connection would leave behind. Being a mutating call it carries no idempotency key, so it must not be resent by an automatic retry policy - a resend after a lost response replays the whole graph.</remarks>
-    public async Task<int> SaveAsync(
-        TEntity entity,
-        bool cascadeSave = true,
-        bool cascadeDelete = true,
-        bool insertWhenUpdateMissing = false,
-        ConcurrencyMode mode = ConcurrencyMode.Optimistic,
-        CancellationToken cancellationToken = default
-    )
-    {
-        ArgumentNullException.ThrowIfNull(entity);
-        mode = ConcurrencyModes.Validated(mode);
-
-        // Reject before sending if any entity to update (RowState==Updated) still carries values
-        // in unbounded binary columns (cascade targets are traversed as well)
-        GuardUnboundedBinaryOnSave(entity, cascadeSave);
-
-        var result = await InvokeAsync<RemoteSaveResult>(
-            "Save",
-            new RemoteSaveRequest<TEntity>(entity, cascadeSave, cascadeDelete, insertWhenUpdateMissing, mode),
-            cancellationToken
-        ).ConfigureAwait(false);
-
-        // As with a direct connection (EntityGraphSaver), finalize the local RowState after a successful save,
-        // writing back the row versions the response carried and leaving the rows it reported as skipped alone
-        AcceptChanges(
-            entity,
-            cascadeSave,
-            RemoteEntityGraph.RowVersionLookup(result.RowVersions),
-            RemoteEntityGraph.SkippedLookup(result.Skipped)
-        );
-        return result.Affected;
-    }
-
-    /// <summary>Saves multiple aggregate roots together in a single transaction (atomic: all succeed or all roll back).</summary>
-    /// <remarks><paramref name="mode"/> travels with the request, and the response carries the row versions the save assigned so that the local graphs end up with the same versions a direct connection would leave behind. Being a mutating call it carries no idempotency key, so it must not be resent by an automatic retry policy - a resend after a lost response replays every graph in the list.</remarks>
-    public async Task<int> SaveAsync(
-        IEnumerable<TEntity> entities,
-        bool cascadeSave = true,
-        bool cascadeDelete = true,
-        bool insertWhenUpdateMissing = false,
-        ConcurrencyMode mode = ConcurrencyMode.Optimistic,
-        CancellationToken cancellationToken = default
-    )
-    {
-        ArgumentNullException.ThrowIfNull(entities);
-        mode = ConcurrencyModes.Validated(mode);
-
-        var list = entities.ToList();
-
-        // Reject before sending if any updated entity in each aggregate root (including cascade targets)
-        // still carries values in unbounded binary columns
-        foreach (var entity in list)
-        {
-            GuardUnboundedBinaryOnSave(entity, cascadeSave);
-        }
-
-        var result = await InvokeAsync<RemoteSaveResult>(
-            "SaveMany",
-            new RemoteSaveManyRequest<TEntity>(list, cascadeSave, cascadeDelete, insertWhenUpdateMissing, mode),
-            cancellationToken
-        ).ConfigureAwait(false);
-
-        var rowVersions = RemoteEntityGraph.RowVersionLookup(result.RowVersions);
-        var skipped = RemoteEntityGraph.SkippedLookup(result.Skipped);
-
-        foreach (var entity in list)
-        {
-            AcceptChanges(entity, cascadeSave, rowVersions, skipped);
-        }
-
-        return result.Affected;
-    }
-
-    /// <summary>Verifies that no updated (Updated) entity in the graph to save still carries values in unbounded binary columns (same child-direction traversal as AcceptChanges).</summary>
-    private static void GuardUnboundedBinaryOnSave(EntityBase entity, bool cascade)
-    {
-        if (entity.IsUpdated)
-        {
-            UnboundedBinaryColumns.ThrowIfExcludedAssigned(entity);
-        }
-
-        if (!cascade)
-        {
-            return;
-        }
-
-        foreach (var property in RemoteEntityGraph.CascadeNavigations(entity.GetType()))
-        {
-            var value = property.GetValue(entity);
-
-            if (value is EntityBase child)
-            {
-                GuardUnboundedBinaryOnSave(child, true);
-            }
-            else if (value is IEnumerable<EntityBase> children)
-            {
-                foreach (var item in children)
-                {
-                    if (item is not null)
-                    {
-                        GuardUnboundedBinaryOnSave(item, true);
-                    }
-                }
-            }
-        }
-    }
-
-    /// <summary>Finalizes saved entities to Unchanged after commit (same semantics as the direct-connection EntityGraphSaver.AcceptChanges), writing back the row versions the response carried.</summary>
-    /// <remarks>
-    /// Deleted (Removed) entities keep their state. Rows the response reported as skipped - a save hook's Before declined
-    /// them on the server, so no INSERT or UPDATE was performed - keep their state as well, exactly as they do on a direct
-    /// connection. When cascading, the child-direction [NavigationReference] navigations are finalized recursively. Both the
-    /// row version write-back and the skip check ride along this traversal because it visits exactly the entities the server
-    /// reported on.
-    /// </remarks>
-    private static void AcceptChanges(
-        EntityBase entity,
-        bool cascade,
-        Dictionary<(string EntityType, string Key), byte[]>? rowVersions,
-        HashSet<(string EntityType, string Key)>? skipped
-    )
-    {
-        if (entity.IsRemoved)
-        {
-            return;
-        }
-
-        // A skipped row had no INSERT / UPDATE performed on the server, so its RowState is left untouched
-        if (!RemoteEntityGraph.IsSkipped(entity, skipped))
-        {
-            entity.MarkUnchanged();
-        }
-
-        RemoteEntityGraph.ApplyRowVersion(entity, rowVersions);
-
-        if (!cascade)
-        {
-            return;
-        }
-
-        foreach (var property in RemoteEntityGraph.CascadeNavigations(entity.GetType()))
-        {
-            var value = property.GetValue(entity);
-
-            if (value is EntityBase child)
-            {
-                AcceptChanges(child, true, rowVersions, skipped);
-            }
-            else if (value is IEnumerable<EntityBase> children)
-            {
-                foreach (var item in children)
-                {
-                    if (item is not null)
-                    {
-                        AcceptChanges(item, true, rowVersions, skipped);
-                    }
-                }
-            }
-        }
-    }
-
-    /// <summary>Serializes the primary key into a string for the URL query (<c>?id=</c>) using the same JSON rules as the envelopes (value objects use their wrapped value, numbers as-is, strings/Guids quoted).</summary>
-    /// <remarks>Carries the URL-encoded JSON representation of the key value. The server restores it with the same settings (<c>RemoteJson.Options</c>), so it round-trips regardless of dialect or value objects.</remarks>
-    protected string FormatKeyForQuery(TKey id) =>
-        Uri.EscapeDataString(JsonSerializer.Serialize(id, RemoteJson.Options));
-
-    /// <summary>
-    /// Streams an unbounded binary column (excluded column) down from the server (<c>GET {entity}/{column}?id=</c>).
-    /// Reads only the response headers up front (<see cref="HttpCompletionOption.ResponseHeadersRead"/>) and copies the body
-    /// to the destination in O(chunk) (the whole blob is never loaded into memory; no Base64). 200 = data was written
-    /// (<c>true</c>; an empty blob is also true) / 404 marked by the endpoint = no row or NULL (<c>false</c>; nothing is
-    /// written to the destination). Any other failure - a 404 the endpoint did not produce included - restores exceptions
-    /// per the existing rules.
-    /// </summary>
-    protected async Task<bool> DownloadUnboundedBinaryColumnAsync(
-        string columnRoute,
-        TKey id,
-        Stream destination,
-        CancellationToken cancellationToken
-    )
-    {
-        ArgumentNullException.ThrowIfNull(destination);
-
-        var requestUri = $"{_entityRoute}/{columnRoute}?id={FormatKeyForQuery(id)}";
-        using var response = await _httpClient.GetAsync(
-            requestUri,
-            HttpCompletionOption.ResponseHeadersRead,
-            cancellationToken
-        ).ConfigureAwait(false);
-
-        if (response.StatusCode == HttpStatusCode.NotFound)
-        {
-            return await MissingBinaryValueAsync(response, cancellationToken).ConfigureAwait(false);
-        }
-
-        await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
-
-        await using var source = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-        await source.CopyToAsync(destination, cancellationToken).ConfigureAwait(false);
-        return true;
-    }
-
-    /// <summary>
-    /// Streams an unbounded binary column (excluded column) up to the server. When <paramref name="source"/> is <c>null</c>,
-    /// sends <c>DELETE</c> (sets the column to NULL); when non-<c>null</c>, sends <c>PUT</c> (<see cref="StreamContent"/> with
-    /// Content-Length). A zero-byte PUT (empty body) and setting NULL (DELETE) are structurally distinct. The length contract
-    /// is validated before sending (a non-<c>CanSeek</c> Stream requires <paramref name="length"/>). 204 = success (<c>true</c>) /
-    /// 404 marked by the endpoint = no row (<c>false</c>). Anything else restores exceptions.
-    /// </summary>
-    /// <remarks>
-    /// <paramref name="source"/> stays owned by the caller: it is neither closed nor disposed here, exactly as with a
-    /// direct connection, so swapping the two implementations does not change what happens to the stream that was passed
-    /// in. (The HTTP layer disposes the request content once the request has been sent, so the stream is handed to
-    /// <see cref="StreamContent"/> through a non-closing wrapper.)
-    /// </remarks>
-    protected async Task<bool> UploadUnboundedBinaryColumnAsync(
-        string columnRoute,
-        TKey id,
-        Stream? source,
-        long? length,
-        CancellationToken cancellationToken
-    )
-    {
-        var requestUri = $"{_entityRoute}/{columnRoute}?id={FormatKeyForQuery(id)}";
-
-        // source=null sets the column to NULL (DELETE); this differs in meaning from a zero-byte PUT (empty body)
-        if (source is null)
-        {
-            using var deleteResponse = await _httpClient.DeleteAsync(requestUri, cancellationToken).ConfigureAwait(false);
-
-            if (deleteResponse.StatusCode == HttpStatusCode.NotFound)
-            {
-                return await MissingBinaryValueAsync(deleteResponse, cancellationToken).ConfigureAwait(false);
-            }
-
-            await EnsureSuccessAsync(deleteResponse, cancellationToken).ConfigureAwait(false);
-            return true;
-        }
-
-        // Determine the length before sending (a non-CanSeek Stream requires length, which naturally
-        // aligns with Content-Length; a missing length throws before sending)
-        var payloadLength = UnboundedBinaryColumns.ResolveWriteLength(source, length);
-
-        // The wrapper is what keeps the caller's stream open: HttpClient disposes the request content after sending,
-        // and StreamContent's disposal reaches through to the stream it was built on
-        using var content = new StreamContent(new NonClosingStream(source));
-        content.Headers.ContentLength = payloadLength;
-        content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
-
-        using var request = new HttpRequestMessage(HttpMethod.Put, requestUri) { Content = content };
-        using var response = await _httpClient.SendAsync(
-            request,
-            HttpCompletionOption.ResponseHeadersRead,
-            cancellationToken
-        ).ConfigureAwait(false);
-
-        if (response.StatusCode == HttpStatusCode.NotFound)
-        {
-            return await MissingBinaryValueAsync(response, cancellationToken).ConfigureAwait(false);
-        }
-
-        await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
-        return true;
-    }
-
-    /// <summary>Decides what a 404 from a binary endpoint means, returning <c>false</c> for the contractual "no row / NULL" and throwing otherwise.</summary>
-    /// <remarks>
-    /// The endpoints mark the 404 they produce themselves with a <see cref="RemoteError"/> body of type "NotFound". A 404
-    /// without that marker never reached them - a base address or prefix that does not match the server's, a route that no
-    /// longer exists, a proxy answering on its own, or a server regenerated from a newer version than this client - and
-    /// reading it as "no data" would turn a misconfiguration into
-    /// silently empty results, so it is reported as <see cref="RemoteRepositoryException"/> like any other failure. The
-    /// return type is <c>bool</c> only so that callers can <c>return</c> the result directly; it is never <c>true</c>.
-    /// </remarks>
-    private static async Task<bool> MissingBinaryValueAsync(
-        HttpResponseMessage response,
-        CancellationToken cancellationToken
-    )
-    {
-        var (error, parseError) = await ReadErrorAsync(response, cancellationToken)
-            .ConfigureAwait(false);
-
-        if (error?.Type == "NotFound")
-        {
-            return false;
-        }
-
-        throw ToException(response, error, parseError);
-    }
-}
-
-/// <summary>Read-only pass-through wrapper that keeps the wrapped stream open when the HTTP layer disposes the request content.</summary>
-/// <remarks>
-/// <see cref="HttpClient"/> disposes the request content once a request has been sent, and disposing
-/// <see cref="StreamContent"/> reaches through to the stream it was built on. A direct-connection write leaves the
-/// stream the caller passed in untouched, so without this wrapper the same call would close it on a remote client
-/// and not on a direct one. Every member forwards to the wrapped stream except disposal, which does nothing:
-/// the stream stays owned by the caller.
-/// </remarks>
-internal sealed class NonClosingStream(Stream inner) : Stream
-{
-    /// <inheritdoc />
-    public override bool CanRead => inner.CanRead;
-
-    /// <inheritdoc />
-    public override bool CanSeek => inner.CanSeek;
-
-    /// <inheritdoc />
-    public override bool CanWrite => inner.CanWrite;
-
-    /// <inheritdoc />
-    public override long Length => inner.Length;
-
-    /// <inheritdoc />
-    public override long Position
-    {
-        get => inner.Position;
-        set => inner.Position = value;
-    }
-
-    /// <inheritdoc />
-    public override void Flush() => inner.Flush();
-
-    /// <inheritdoc />
-    public override Task FlushAsync(CancellationToken cancellationToken) =>
-        inner.FlushAsync(cancellationToken);
-
-    /// <inheritdoc />
-    public override int Read(byte[] buffer, int offset, int count) =>
-        inner.Read(buffer, offset, count);
-
-    /// <inheritdoc />
-    public override int Read(Span<byte> buffer) => inner.Read(buffer);
-
-    /// <inheritdoc />
-    public override Task<int> ReadAsync(
-        byte[] buffer,
-        int offset,
-        int count,
-        CancellationToken cancellationToken
-    ) => inner.ReadAsync(buffer, offset, count, cancellationToken);
-
-    /// <inheritdoc />
-    public override ValueTask<int> ReadAsync(
-        Memory<byte> buffer,
-        CancellationToken cancellationToken = default
-    ) => inner.ReadAsync(buffer, cancellationToken);
-
-    /// <inheritdoc />
-    public override long Seek(long offset, SeekOrigin origin) => inner.Seek(offset, origin);
-
-    /// <inheritdoc />
-    public override void SetLength(long value) => inner.SetLength(value);
-
-    /// <inheritdoc />
-    public override void Write(byte[] buffer, int offset, int count) =>
-        inner.Write(buffer, offset, count);
-
-    /// <inheritdoc />
-    public override void Write(ReadOnlySpan<byte> buffer) => inner.Write(buffer);
-
-    /// <inheritdoc />
-    public override Task WriteAsync(
-        byte[] buffer,
-        int offset,
-        int count,
-        CancellationToken cancellationToken
-    ) => inner.WriteAsync(buffer, offset, count, cancellationToken);
-
-    /// <inheritdoc />
-    public override ValueTask WriteAsync(
-        ReadOnlyMemory<byte> buffer,
-        CancellationToken cancellationToken = default
-    ) => inner.WriteAsync(buffer, cancellationToken);
-
-    /// <inheritdoc />
-    public override Task CopyToAsync(
-        Stream destination,
-        int bufferSize,
-        CancellationToken cancellationToken
-    ) => inner.CopyToAsync(destination, bufferSize, cancellationToken);
-
-    /// <summary>Does nothing: the wrapped stream is owned by the caller, not by this wrapper.</summary>
-    protected override void Dispose(bool disposing) { }
-
-    /// <inheritdoc />
-    public override ValueTask DisposeAsync() => ValueTask.CompletedTask;
-}
-
 /// <summary>Extensions that register save hooks (<c>ISaveHook&lt;TEntity&gt;</c>) with the DI container.</summary>
 /// <remarks>
 /// The default registry (<c>ServiceProviderSaveHookRegistry</c>, registered by every <c>AddGenerated*Repositories</c>
@@ -3796,10 +3716,10 @@ public static class SaveHookServiceCollectionExtensions
     }
 }
 
-/// <summary>Remote surface of the SyncOrderEntity repository (only CRUD, save, and named queries that can cross a network boundary; swappable for a remote implementation later).</summary>
-public partial interface ISyncOrderRemoteRepository : IRemoteRepository<SyncOrderEntity, int>
+/// <summary>Repository interface for SyncvoOrderEntity.</summary>
+public partial interface ISyncvoOrderRepository : IRepository<SyncvoOrderEntity, OrderIdValue>
 {
-    /// <summary>Checks the UNIQUE constraints of sync_orders against the database and returns the violations (an empty list when there are none).</summary>
+    /// <summary>Checks the UNIQUE constraints of syncvo_orders against the database and returns the violations (an empty list when there are none).</summary>
     /// <remarks>
     /// Rows that share the entity's primary key are excluded, so the same call is correct for both insert and update (an entity whose key is not set yet excludes nothing). Constraint member values that contain
     /// a null are skipped (NULL collision semantics differ per dialect). The result is advisory only: the definitive guarantee is the database's own UNIQUE
@@ -3808,56 +3728,15 @@ public partial interface ISyncOrderRemoteRepository : IRemoteRepository<SyncOrde
     /// <param name="entity">The entity whose constraint member values are checked.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
-        SyncOrderEntity entity,
+        SyncvoOrderEntity entity,
         CancellationToken cancellationToken = default
     );
-
-    /// <summary>Reads the attachment column into the destination stream (unbounded binary column, O(chunk) streaming; true = written, false = no row or NULL).</summary>
-    Task<bool> ReadAttachmentAsync(int id, Stream destination, CancellationToken cancellationToken = default);
-
-    /// <summary>Writes the attachment column from a stream (unbounded binary column, O(chunk) streaming; source = null sets NULL, non-seekable streams require an explicit length; true = updated, false = no row).</summary>
-    Task<bool> WriteAttachmentAsync(int id, Stream? source, long? length = null, CancellationToken cancellationToken = default);
 }
 
-/// <summary>Repository interface for SyncOrderEntity (the full-featured surface = the remote surface plus expression-tree queries, raw SQL, and bulk insert).</summary>
-public partial interface ISyncOrderRepository
-    : ISyncOrderRemoteRepository,
-        IRepository<SyncOrderEntity, int> { }
-
-/// <summary>File convenience methods for the unbounded binary column accessors of SyncOrderEntity (transfer blobs between the database and files in a single call; delegates to the Stream overloads).</summary>
-public static class SyncOrderRepositoryBinaryStreamExtensions
+/// <summary>Repository interface for SyncvoLineEntity.</summary>
+public partial interface ISyncvoLineRepository : IRepository<SyncvoLineEntity, LineIdValue>
 {
-    /// <summary>Reads the attachment column into a file (delegates to the Stream overload; true = written, false = no row or NULL).</summary>
-    public static async Task<bool> ReadAttachmentToFileAsync(
-        this ISyncOrderRemoteRepository repository,
-        int id,
-        string path,
-        CancellationToken cancellationToken = default
-    )
-    {
-        ArgumentNullException.ThrowIfNull(repository);
-        await using var destination = File.Create(path);
-        return await repository.ReadAttachmentAsync(id, destination, cancellationToken).ConfigureAwait(false);
-    }
-
-    /// <summary>Writes the attachment column from a file (delegates to the Stream overload; true = updated, false = no row).</summary>
-    public static async Task<bool> WriteAttachmentFromFileAsync(
-        this ISyncOrderRemoteRepository repository,
-        int id,
-        string path,
-        CancellationToken cancellationToken = default
-    )
-    {
-        ArgumentNullException.ThrowIfNull(repository);
-        await using var source = File.OpenRead(path);
-        return await repository.WriteAttachmentAsync(id, source, source.Length, cancellationToken).ConfigureAwait(false);
-    }
-}
-
-/// <summary>Remote surface of the SyncOrderLineEntity repository (only CRUD, save, and named queries that can cross a network boundary; swappable for a remote implementation later).</summary>
-public partial interface ISyncOrderLineRemoteRepository : IRemoteRepository<SyncOrderLineEntity, int>
-{
-    /// <summary>Checks the UNIQUE constraints of sync_order_lines against the database and returns the violations (an empty list when there are none).</summary>
+    /// <summary>Checks the UNIQUE constraints of syncvo_lines against the database and returns the violations (an empty list when there are none).</summary>
     /// <remarks>
     /// Rows that share the entity's primary key are excluded, so the same call is correct for both insert and update (an entity whose key is not set yet excludes nothing). Constraint member values that contain
     /// a null are skipped (NULL collision semantics differ per dialect). The result is advisory only: the definitive guarantee is the database's own UNIQUE
@@ -3866,37 +3745,10 @@ public partial interface ISyncOrderLineRemoteRepository : IRemoteRepository<Sync
     /// <param name="entity">The entity whose constraint member values are checked.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
-        SyncOrderLineEntity entity,
+        SyncvoLineEntity entity,
         CancellationToken cancellationToken = default
     );
 }
-
-/// <summary>Repository interface for SyncOrderLineEntity (the full-featured surface = the remote surface plus expression-tree queries, raw SQL, and bulk insert).</summary>
-public partial interface ISyncOrderLineRepository
-    : ISyncOrderLineRemoteRepository,
-        IRepository<SyncOrderLineEntity, int> { }
-
-/// <summary>Remote surface of the SyncNoteEntity repository (only CRUD, save, and named queries that can cross a network boundary; swappable for a remote implementation later).</summary>
-public partial interface ISyncNoteRemoteRepository : IRemoteRepository<SyncNoteEntity, int>
-{
-    /// <summary>Checks the UNIQUE constraints of sync_notes against the database and returns the violations (an empty list when there are none).</summary>
-    /// <remarks>
-    /// Rows that share the entity's primary key are excluded, so the same call is correct for both insert and update (an entity whose key is not set yet excludes nothing). Constraint member values that contain
-    /// a null are skipped (NULL collision semantics differ per dialect). The result is advisory only: the definitive guarantee is the database's own UNIQUE
-    /// constraint, and a concurrent insert between this check and the save can still make the save fail (TOCTOU).
-    /// </remarks>
-    /// <param name="entity">The entity whose constraint member values are checked.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
-    Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
-        SyncNoteEntity entity,
-        CancellationToken cancellationToken = default
-    );
-}
-
-/// <summary>Repository interface for SyncNoteEntity (the full-featured surface = the remote surface plus expression-tree queries, raw SQL, and bulk insert).</summary>
-public partial interface ISyncNoteRepository
-    : ISyncNoteRemoteRepository,
-        IRepository<SyncNoteEntity, int> { }
 
 /// <summary>Query extensions: including the whole cascade graph of an entity with a single method call (the read-side counterpart of the graph save - combine it with Where or GetByIdAsync to bound what is fetched), and fetching a single entity by its key.</summary>
 /// <remarks>
@@ -3904,346 +3756,49 @@ public partial interface ISyncNoteRepository
 /// </remarks>
 public static class SqlQueryExtensions
 {
-    /// <summary>The Include tree of SyncOrderEntity (built once and shared by every query; never modify it).</summary>
-    private static readonly Lazy<IReadOnlyList<IncludeNode>> _syncOrderEntityGraph = new(() =>
+    /// <summary>The Include tree of SyncvoOrderEntity (built once and shared by every query; never modify it).</summary>
+    private static readonly Lazy<IReadOnlyList<IncludeNode>> _syncvoOrderEntityGraph = new(() =>
     {
-        var n0 = new IncludeNode(typeof(SyncOrderEntity).GetProperty(nameof(SyncOrderEntity.SyncOrderLines))!);
-        var n1 = new IncludeNode(typeof(SyncOrderEntity).GetProperty(nameof(SyncOrderEntity.SyncNotes))!);
-        return new IncludeNode[] { n0, n1 };
+        var n0 = new IncludeNode(typeof(SyncvoOrderEntity).GetProperty(nameof(SyncvoOrderEntity.SyncvoLines))!);
+        return new IncludeNode[] { n0 };
     });
 
-    /// <summary>Includes the cascade graph of SyncOrderEntity - the same child-direction navigations a graph save walks. A navigation pointing back to a table already on the path from the root is not followed.</summary>
-    public static SqlQuery<SyncOrderEntity> IncludeGraph(this SqlQuery<SyncOrderEntity> query) =>
-        query.AddIncludeNodes(_syncOrderEntityGraph.Value);
+    /// <summary>Includes the cascade graph of SyncvoOrderEntity - the same child-direction navigations a graph save walks. A navigation pointing back to a table already on the path from the root is not followed.</summary>
+    public static SqlQuery<SyncvoOrderEntity> IncludeGraph(this SqlQuery<SyncvoOrderEntity> query) =>
+        query.AddIncludeNodes(_syncvoOrderEntityGraph.Value);
 
     /// <summary>Fetches the single entity with the given key - the same key the repository contract's GetByIdAsync takes - and returns null when no row matches.</summary>
     /// <remarks>Combine it with Include or IncludeGraph to fetch that entity together with its graph in one call.</remarks>
-    public static Task<SyncOrderEntity?> GetByIdAsync(
-        this SqlQuery<SyncOrderEntity> query,
-        int id,
+    public static Task<SyncvoOrderEntity?> GetByIdAsync(
+        this SqlQuery<SyncvoOrderEntity> query,
+        OrderIdValue id,
         CancellationToken cancellationToken = default
     ) => query.Where(entity => entity.OrderId == id).FirstOrDefaultAsync(cancellationToken);
 
     /// <summary>Fetches the single entity with the given key, keeping the Include chain written just before it (returns null when no row matches).</summary>
-    public static Task<SyncOrderEntity?> GetByIdAsync<TProperty>(
-        this IncludableSqlQuery<SyncOrderEntity, TProperty> query,
-        int id,
+    public static Task<SyncvoOrderEntity?> GetByIdAsync<TProperty>(
+        this IncludableSqlQuery<SyncvoOrderEntity, TProperty> query,
+        OrderIdValue id,
         CancellationToken cancellationToken = default
     ) => query.Where(entity => entity.OrderId == id).FirstOrDefaultAsync(cancellationToken);
 
-    /// <summary>Includes the cascade graph of SyncOrderLineEntity (it has no child-direction navigation, so the query is returned unchanged).</summary>
-    public static SqlQuery<SyncOrderLineEntity> IncludeGraph(this SqlQuery<SyncOrderLineEntity> query) => query;
+    /// <summary>Includes the cascade graph of SyncvoLineEntity (it has no child-direction navigation, so the query is returned unchanged).</summary>
+    public static SqlQuery<SyncvoLineEntity> IncludeGraph(this SqlQuery<SyncvoLineEntity> query) => query;
 
     /// <summary>Fetches the single entity with the given key - the same key the repository contract's GetByIdAsync takes - and returns null when no row matches.</summary>
     /// <remarks>Combine it with Include or IncludeGraph to fetch that entity together with its graph in one call.</remarks>
-    public static Task<SyncOrderLineEntity?> GetByIdAsync(
-        this SqlQuery<SyncOrderLineEntity> query,
-        int id,
+    public static Task<SyncvoLineEntity?> GetByIdAsync(
+        this SqlQuery<SyncvoLineEntity> query,
+        LineIdValue id,
         CancellationToken cancellationToken = default
     ) => query.Where(entity => entity.LineId == id).FirstOrDefaultAsync(cancellationToken);
 
     /// <summary>Fetches the single entity with the given key, keeping the Include chain written just before it (returns null when no row matches).</summary>
-    public static Task<SyncOrderLineEntity?> GetByIdAsync<TProperty>(
-        this IncludableSqlQuery<SyncOrderLineEntity, TProperty> query,
-        int id,
+    public static Task<SyncvoLineEntity?> GetByIdAsync<TProperty>(
+        this IncludableSqlQuery<SyncvoLineEntity, TProperty> query,
+        LineIdValue id,
         CancellationToken cancellationToken = default
     ) => query.Where(entity => entity.LineId == id).FirstOrDefaultAsync(cancellationToken);
-
-    /// <summary>Includes the cascade graph of SyncNoteEntity (it has no child-direction navigation, so the query is returned unchanged).</summary>
-    public static SqlQuery<SyncNoteEntity> IncludeGraph(this SqlQuery<SyncNoteEntity> query) => query;
-
-    /// <summary>Fetches the single entity with the given key - the same key the repository contract's GetByIdAsync takes - and returns null when no row matches.</summary>
-    /// <remarks>Combine it with Include or IncludeGraph to fetch that entity together with its graph in one call.</remarks>
-    public static Task<SyncNoteEntity?> GetByIdAsync(
-        this SqlQuery<SyncNoteEntity> query,
-        int id,
-        CancellationToken cancellationToken = default
-    ) => query.Where(entity => entity.NoteId == id).FirstOrDefaultAsync(cancellationToken);
-
-    /// <summary>Fetches the single entity with the given key, keeping the Include chain written just before it (returns null when no row matches).</summary>
-    public static Task<SyncNoteEntity?> GetByIdAsync<TProperty>(
-        this IncludableSqlQuery<SyncNoteEntity, TProperty> query,
-        int id,
-        CancellationToken cancellationToken = default
-    ) => query.Where(entity => entity.NoteId == id).FirstOrDefaultAsync(cancellationToken);
-}
-
-/// <summary>HTTP client implementation of the remote surface (ISyncOrderRemoteRepository) for SyncOrderEntity.</summary>
-/// <remarks>Calls the server-side <c>MapGeneratedRemoteEndpoints</c> endpoints. The HttpClient's BaseAddress must include the prefix (default /quicker/).</remarks>
-public sealed partial class HttpSyncOrderRemoteRepository(HttpClient httpClient)
-    : HttpRemoteRepository<SyncOrderEntity, int>(httpClient, "SyncOrder"), ISyncOrderRemoteRepository
-{
-    /// <summary>Checks the UNIQUE constraints of sync_orders against the database and returns the violations (an empty list when there are none). The check, including any user-defined hooks, runs in the server-side repository.</summary>
-    public Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(SyncOrderEntity entity, CancellationToken cancellationToken = default) =>
-        InvokeAsync<IReadOnlyList<UniquenessViolation>>("CheckUniqueness", new { entity }, cancellationToken);
-
-    /// <inheritdoc />
-    public Task<bool> ReadAttachmentAsync(int id, Stream destination, CancellationToken cancellationToken = default) =>
-        DownloadUnboundedBinaryColumnAsync("Attachment", id, destination, cancellationToken);
-
-    /// <inheritdoc />
-    public Task<bool> WriteAttachmentAsync(int id, Stream? source, long? length = null, CancellationToken cancellationToken = default) =>
-        UploadUnboundedBinaryColumnAsync("Attachment", id, source, length, cancellationToken);
-}
-
-/// <summary>HTTP client implementation of the remote surface (ISyncOrderLineRemoteRepository) for SyncOrderLineEntity.</summary>
-/// <remarks>Calls the server-side <c>MapGeneratedRemoteEndpoints</c> endpoints. The HttpClient's BaseAddress must include the prefix (default /quicker/).</remarks>
-public sealed partial class HttpSyncOrderLineRemoteRepository(HttpClient httpClient)
-    : HttpRemoteRepository<SyncOrderLineEntity, int>(httpClient, "SyncOrderLine"), ISyncOrderLineRemoteRepository
-{
-    /// <summary>Checks the UNIQUE constraints of sync_order_lines against the database and returns the violations (an empty list when there are none). The check, including any user-defined hooks, runs in the server-side repository.</summary>
-    public Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(SyncOrderLineEntity entity, CancellationToken cancellationToken = default) =>
-        InvokeAsync<IReadOnlyList<UniquenessViolation>>("CheckUniqueness", new { entity }, cancellationToken);
-}
-
-/// <summary>HTTP client implementation of the remote surface (ISyncNoteRemoteRepository) for SyncNoteEntity.</summary>
-/// <remarks>Calls the server-side <c>MapGeneratedRemoteEndpoints</c> endpoints. The HttpClient's BaseAddress must include the prefix (default /quicker/).</remarks>
-public sealed partial class HttpSyncNoteRemoteRepository(HttpClient httpClient)
-    : HttpRemoteRepository<SyncNoteEntity, int>(httpClient, "SyncNote"), ISyncNoteRemoteRepository
-{
-    /// <summary>Checks the UNIQUE constraints of sync_notes against the database and returns the violations (an empty list when there are none). The check, including any user-defined hooks, runs in the server-side repository.</summary>
-    public Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(SyncNoteEntity entity, CancellationToken cancellationToken = default) =>
-        InvokeAsync<IReadOnlyList<UniquenessViolation>>("CheckUniqueness", new { entity }, cancellationToken);
-}
-
-/// <summary>Extensions that register the HTTP client implementations of the remote surface (I{Entity}RemoteRepository) with the DI container.</summary>
-/// <remarks>
-/// Each overload comes in a plain and a keyed form. Use the keyed one (<c>object? serviceKey</c>) to hold more than one
-/// back end at a time - a remote server under one key and a local engine registered by
-/// <c>AddGenerated{Dialect}Repositories(serviceKey, ...)</c> under another - and resolve them with
-/// <c>[FromKeyedServices("...")]</c>.
-/// </remarks>
-public static class GeneratedHttpRemoteRepositoryServiceCollectionExtensions
-{
-    /// <summary>Registers the HTTP client implementations using a base address (for simple setups; the HttpClient is a shared singleton owned by the container).</summary>
-    /// <remarks>
-    /// <para>
-    /// The shared HttpClient is owned by the DI container: it is created lazily, when a repository is first resolved,
-    /// and disposed together with the <see cref="IServiceProvider"/>.
-    /// </para>
-    /// <para>
-    /// Because its lifetime is bound to the container, a repository that was resolved from an already disposed provider
-    /// throws <see cref="ObjectDisposedException"/> on use (the standard semantics for container-owned resources).
-    /// To control the lifetime yourself, use the factory overload instead.
-    /// </para>
-    /// <para>
-    /// The client it builds recycles pooled connections every five minutes
-    /// (<see cref="SocketsHttpHandler.PooledConnectionLifetime"/>), so a long-lived singleton still follows DNS changes
-    /// rather than pinning the address it first resolved.
-    /// </para>
-    /// <para>
-    /// <b>It has no timeout of its own</b> (<see cref="Timeout.InfiniteTimeSpan"/>): the default of 100 seconds applies
-    /// to a whole request including the body, which would cut off a large blob transfer part-way through. Bound each
-    /// call with the <see cref="CancellationToken"/> you already pass to it - that is the timeout - or use the factory
-    /// overload and hand in an HttpClient with whatever finite <see cref="HttpClient.Timeout"/> you want.
-    /// </para>
-    /// <para>
-    /// Do not wrap this client in an HTTP-level retry policy that also retries the mutating operations
-    /// (Insert / Update / Save / SaveMany / Delete); see the remarks on the factory overload.
-    /// </para>
-    /// <para>
-    /// The client is this registration's own, and passing the same base address to
-    /// <c>AddGeneratedHttpSyncSources</c> does not join the two: each base-address overload builds a client of its own.
-    /// To have the remote repositories and the sync sources talk through one HttpClient, hand the same factory to the
-    /// factory overload of both.
-    /// </para>
-    /// </remarks>
-    /// <param name="services">The service collection to register into</param>
-    /// <param name="baseAddress">The base address including the server prefix - the one <c>MapGeneratedRemoteEndpoints</c> was mapped under, <see cref="RemotePaths.DefaultPrefix"/> unless it was passed another (for example <c>https://server:5001/quicker</c>; a trailing / is appended automatically)</param>
-    public static IServiceCollection AddGeneratedHttpRemoteRepositories(
-        this IServiceCollection services,
-        string baseAddress
-    )
-    {
-        ArgumentNullException.ThrowIfNull(services);
-        ArgumentException.ThrowIfNullOrWhiteSpace(baseAddress);
-
-        // A trailing / is required to resolve relative paths ("Order/GetById" etc.), so append it
-        var normalized = baseAddress.EndsWith('/') ? baseAddress : baseAddress + "/";
-
-        // Register a factory rather than a ready-made instance: the container disposes only the singletons it created
-        // itself, so AddSingleton(instance) would leave the shared HttpClient undisposed when the provider is disposed
-        services.AddSingleton(_ => new OwnedHttpClient(
-            new HttpClient(
-                new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(5) },
-                disposeHandler: true
-            )
-            {
-                BaseAddress = new Uri(normalized),
-                // No client-wide deadline: the 100-second default covers the entire request, body included, and would
-                // abort a large blob upload or download. The per-call CancellationToken is the timeout instead
-                Timeout = Timeout.InfiniteTimeSpan,
-            }
-        ));
-
-        return AddGeneratedHttpRemoteRepositories(
-            services,
-            provider => provider.GetRequiredService<OwnedHttpClient>().Client
-        );
-    }
-
-    /// <summary>Registers the HTTP client implementations using an HttpClient factory (when configuring authentication handlers etc.).</summary>
-    /// <remarks>
-    /// <para>
-    /// The HttpClient returned by the factory must have a BaseAddress that includes the prefix and ends with a trailing /.
-    /// </para>
-    /// <para>
-    /// Ownership contract: the factory is invoked every time a repository is resolved (once per scope and per entity),
-    /// and the returned HttpClient is disposed by neither the generated code nor the DI container. Return a shared
-    /// instance, or one managed by <c>IHttpClientFactory</c>; creating a new HttpClient on every call exhausts sockets.
-    /// </para>
-    /// <para>
-    /// Do not attach an HTTP-level retry policy (Polly and the like) that resends the mutating operations - Insert,
-    /// Update, Save, SaveMany, Delete. They carry no idempotency key, so a request that in fact succeeded and lost its
-    /// response would be applied a second time. Retrying the read-only operations (GetById, GetAll, the named queries)
-    /// and the health endpoint is safe.
-    /// </para>
-    /// </remarks>
-    /// <param name="services">The service collection to register into</param>
-    /// <param name="httpClientFactory">A factory returning the HttpClient to use when creating a repository</param>
-    public static IServiceCollection AddGeneratedHttpRemoteRepositories(
-        this IServiceCollection services,
-        Func<IServiceProvider, HttpClient> httpClientFactory
-    )
-    {
-        ArgumentNullException.ThrowIfNull(services);
-        ArgumentNullException.ThrowIfNull(httpClientFactory);
-
-        services.AddScoped<ISyncOrderRemoteRepository>(provider => new HttpSyncOrderRemoteRepository(
-            httpClientFactory(provider)
-        ));
-        services.AddScoped<ISyncOrderLineRemoteRepository>(provider => new HttpSyncOrderLineRemoteRepository(
-            httpClientFactory(provider)
-        ));
-        services.AddScoped<ISyncNoteRemoteRepository>(provider => new HttpSyncNoteRemoteRepository(
-            httpClientFactory(provider)
-        ));
-
-        return services;
-    }
-
-    /// <summary>Registers the HTTP client implementations under a service key using a base address (keyed DI, for talking to more than one back end at a time).</summary>
-    /// <remarks>
-    /// <para>
-    /// Registers I{Entity}RemoteRepository keyed by <paramref name="serviceKey"/>. Consumers resolve the one they want
-    /// like <c>[FromKeyedServices(serviceKey)] ICustomerRemoteRepository</c>. This is what a hybrid setup is built from:
-    /// register the HTTP client under one key and a local engine (<c>AddGeneratedSqliteRepositories(key, ...)</c>) under
-    /// another, and the same contract resolves to whichever side the caller asks for.
-    /// </para>
-    /// <para>
-    /// The shared HttpClient is registered under the same key, so it collides with neither the non-keyed overload's client
-    /// nor another key's, and stays owned by the DI container exactly as in the non-keyed overload: created lazily on the
-    /// first resolve and disposed with the <see cref="IServiceProvider"/>. Registering the same key twice registers the
-    /// repositories twice and the last one wins, which is how <c>AddKeyedScoped</c> behaves.
-    /// </para>
-    /// <para>
-    /// The client is configured exactly as the non-keyed base-address overload configures it - connections recycled every
-    /// five minutes, no client-wide timeout - and the same warning applies: do not put an HTTP-level retry policy in front
-    /// of the mutating operations. See the remarks on the factory overload.
-    /// </para>
-    /// <para>
-    /// The key keeps this client apart from the one <c>AddGeneratedHttpSyncSources</c> builds as well, and the same base
-    /// address does not join them: each base-address overload builds a client of its own. To have the remote
-    /// repositories and the sync sources talk through one HttpClient, hand the same factory to the factory overload of
-    /// both.
-    /// </para>
-    /// </remarks>
-    /// <param name="services">The service collection to register into</param>
-    /// <param name="serviceKey">The key the repositories (and the shared HttpClient) are registered under</param>
-    /// <param name="baseAddress">The base address including the server prefix - the one <c>MapGeneratedRemoteEndpoints</c> was mapped under, <see cref="RemotePaths.DefaultPrefix"/> unless it was passed another (for example <c>https://server:5001/quicker</c>; a trailing / is appended automatically)</param>
-    public static IServiceCollection AddGeneratedHttpRemoteRepositories(
-        this IServiceCollection services,
-        object? serviceKey,
-        string baseAddress
-    )
-    {
-        ArgumentNullException.ThrowIfNull(services);
-        ArgumentException.ThrowIfNullOrWhiteSpace(baseAddress);
-
-        // A trailing / is required to resolve relative paths ("Order/GetById" etc.), so append it
-        var normalized = baseAddress.EndsWith('/') ? baseAddress : baseAddress + "/";
-
-        // Keyed, and produced by a factory for the same reason the non-keyed overload uses one: the container disposes
-        // only the singletons it created itself, and the key keeps this client apart from any other registration's
-        services.AddKeyedSingleton(
-            serviceKey,
-            (_, _) => new OwnedHttpClient(
-                new HttpClient(
-                    new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(5) },
-                    disposeHandler: true
-                )
-                {
-                    BaseAddress = new Uri(normalized),
-                    // No client-wide deadline: the 100-second default covers the entire request, body included, and would
-                    // abort a large blob upload or download. The per-call CancellationToken is the timeout instead
-                    Timeout = Timeout.InfiniteTimeSpan,
-                }
-            )
-        );
-
-        return AddGeneratedHttpRemoteRepositories(
-            services,
-            serviceKey,
-            provider => provider.GetRequiredKeyedService<OwnedHttpClient>(serviceKey).Client
-        );
-    }
-
-    /// <summary>Registers the HTTP client implementations under a service key using an HttpClient factory (keyed DI, when configuring authentication handlers etc.).</summary>
-    /// <remarks>
-    /// <para>
-    /// The keyed counterpart of the factory overload: the same ownership contract holds (the factory runs on every
-    /// resolve and the HttpClient it returns is disposed by neither the generated code nor the container), and the same
-    /// warning about retrying the mutating operations applies. Only the registration is keyed.
-    /// </para>
-    /// <para>
-    /// Registering the same key twice registers the repositories twice and the last one wins. Keyed and non-keyed
-    /// registrations do not see each other: a keyed registration answers only <c>GetRequiredKeyedService</c> with that
-    /// key, and a plain <c>GetRequiredService</c> still needs a non-keyed one.
-    /// </para>
-    /// </remarks>
-    /// <param name="services">The service collection to register into</param>
-    /// <param name="serviceKey">The key the repositories are registered under</param>
-    /// <param name="httpClientFactory">A factory returning the HttpClient to use when creating a repository</param>
-    public static IServiceCollection AddGeneratedHttpRemoteRepositories(
-        this IServiceCollection services,
-        object? serviceKey,
-        Func<IServiceProvider, HttpClient> httpClientFactory
-    )
-    {
-        ArgumentNullException.ThrowIfNull(services);
-        ArgumentNullException.ThrowIfNull(httpClientFactory);
-
-        services.AddKeyedScoped<ISyncOrderRemoteRepository>(
-            serviceKey,
-            (provider, _) => new HttpSyncOrderRemoteRepository(httpClientFactory(provider))
-        );
-        services.AddKeyedScoped<ISyncOrderLineRemoteRepository>(
-            serviceKey,
-            (provider, _) => new HttpSyncOrderLineRemoteRepository(httpClientFactory(provider))
-        );
-        services.AddKeyedScoped<ISyncNoteRemoteRepository>(
-            serviceKey,
-            (provider, _) => new HttpSyncNoteRemoteRepository(httpClientFactory(provider))
-        );
-
-        return services;
-    }
-
-    /// <summary>Container-owned holder for the shared HttpClient created by a base-address overload.</summary>
-    /// <remarks>
-    /// Registering the holder as a singleton produced by a factory is what makes the DI container the owner:
-    /// the container disposes the singletons it creates itself, so the wrapped HttpClient is disposed together
-    /// with the <see cref="IServiceProvider"/>. The keyed overload registers the same holder under its key, so
-    /// each key owns its own client and none of them collides with the non-keyed registration.
-    /// </remarks>
-    private sealed class OwnedHttpClient(HttpClient client) : IDisposable
-    {
-        /// <summary>Gets the shared client handed to the generated repositories.</summary>
-        public HttpClient Client { get; } = client;
-
-        /// <summary>Disposes the shared client (called by the DI container when the provider is disposed).</summary>
-        public void Dispose() => Client.Dispose();
-    }
 }
 
 /// <summary>The kind of local change recorded in the sync journal.</summary>
@@ -7258,404 +6813,82 @@ public abstract class VersionlessDirectSyncSource<TEntity, TKey>
     }
 }
 
-/// <summary>The operation names of the sync-only endpoints (<c>POST {prefix}/{entity}/{operation}</c>).</summary>
-/// <remarks>
-/// The server maps them and the client posts to them, so both sides read the route from here and cannot drift apart.
-/// They are additions to the same endpoint group as the CRUD operations, which is what makes authorization applied to
-/// the group (<c>RemoteAccess.RequireAuthorization</c> at mapping time) cover them as well - and it has to: the
-/// changed-rows endpoint hands out whole rows and the key endpoint hands out the entire key set of a table.
-/// </remarks>
-public static class RemoteSyncOperations
-{
-    /// <summary>Reads the exclusive upper bound for a sync pass (<c>MIN_ACTIVE_ROWVERSION()</c> on SQL Server).</summary>
-    public const string Ceiling = "SyncCeiling";
-
-    /// <summary>Reads one ascending batch of rows above an anchor and below a ceiling.</summary>
-    public const string Changes = "SyncChanges";
-
-    /// <summary>Reads every primary key the server holds for a table.</summary>
-    public const string Keys = "SyncKeys";
-
-    /// <summary>Reads one ascending batch of rows above a primary key (the versionless full scan; mapped only for tables without a version column).</summary>
-    public const string Page = "SyncPage";
-}
-
-/// <summary>The response of <see cref="RemoteSyncOperations.Ceiling"/>.</summary>
-/// <param name="Ceiling">The exclusive upper bound, or null when the server applies none.</param>
-public sealed record RemoteSyncCeilingResult(byte[]? Ceiling);
-
-/// <summary>The request of <see cref="RemoteSyncOperations.Changes"/>.</summary>
-/// <param name="Anchor">The resume point (null takes everything below the ceiling).</param>
-/// <param name="Ceiling">The exclusive upper bound the caller obtained for this pass (null applies none).</param>
-/// <param name="BatchSize">The maximum number of rows to return (must be greater than zero).</param>
-/// <remarks>
-/// The ceiling travels from the client rather than being read again per request, because one pass has to use a single
-/// bound: a bound re-read between two tables would let a row committed in between fall into the gap between them. The
-/// consequence is that the guarantee behind the derived anchor only holds while the client sends the value
-/// <see cref="RemoteSyncOperations.Ceiling"/> returned for the same pass. A ceiling above the server's own lowest
-/// active version skips the rows still in flight beneath it permanently - the anchor moves past them and no later pass
-/// looks below it again - so the value is not something a caller should invent.
-/// </remarks>
-public sealed record RemoteSyncChangesRequest(byte[]? Anchor, byte[]? Ceiling, int BatchSize);
-
-/// <summary>The response of <see cref="RemoteSyncOperations.Changes"/>.</summary>
-/// <param name="Rows">The changed rows, in ascending version order.</param>
-/// <param name="HasMore">Whether asking again from the last row's version can still return something.</param>
-/// <typeparam name="TEntity">The entity type.</typeparam>
-public sealed record RemoteSyncChangesResult<TEntity>(IReadOnlyList<TEntity> Rows, bool HasMore)
-    where TEntity : EntityBase, new();
-
-/// <summary>The response of <see cref="RemoteSyncOperations.Keys"/>.</summary>
-/// <param name="Keys">Every primary key the server holds for the table.</param>
-/// <typeparam name="TKey">The primary key type.</typeparam>
-public sealed record RemoteSyncKeysResult<TKey>(IReadOnlyList<TKey> Keys);
-
-/// <summary>The request of <see cref="RemoteSyncOperations.Page"/> (the response is a <see cref="RemoteSyncChangesResult{TEntity}"/>).</summary>
-/// <param name="HasAfterKey">Whether <paramref name="AfterKey"/> carries a cursor (false asks for the first page).</param>
-/// <param name="AfterKey">The last key of the previous batch (the exclusive lower bound), meaningful only when <paramref name="HasAfterKey"/> is true.</param>
-/// <param name="BatchSize">The maximum number of rows to return (must be greater than zero).</param>
-/// <remarks>
-/// The cursor travels beside a flag rather than as a nullable value, because the key type is generic: a value-typed
-/// key has no null to stand for "from the beginning", and a default value (zero, say) is a legitimate key.
-/// </remarks>
-/// <typeparam name="TKey">The primary key type.</typeparam>
-public sealed record RemoteSyncPageRequest<TKey>(bool HasAfterKey, TKey? AfterKey, int BatchSize);
-
-/// <summary>
-/// The differential source for one entity type over HTTP: the sync-only endpoints for reading, and the ordinary remote
-/// endpoints for replaying the local changes.
-/// </summary>
-/// <remarks>
-/// <para>
-/// It is an <see cref="HttpRemoteRepository{TEntity, TKey}"/> as well as a source, so <see cref="Writer"/> is the very
-/// same client: the reads and the writes of one pass travel over one connection with one configuration, and every
-/// failure - a conflict restored as <see cref="SaveConflictException"/>, a body that could not be read, a withheld
-/// server message and its correlation id - is classified exactly as it is for any other remote call.
-/// </para>
-/// <para>
-/// Nothing here is stateful. The resume point travels as the anchor in each request and the bound as the ceiling, so a
-/// run interrupted at any point resumes by asking again with the anchor the local data now yields; the server keeps no
-/// per-client bookkeeping and two clients on the same table do not interfere.
-/// </para>
-/// <para>
-/// The wire format these endpoints speak is not promised to stay compatible across QuickER versions while the tool is
-/// at 0.x, and nothing on the wire announces a mismatch, so regenerate the client and the server from the same diagram
-/// and deploy them together.
-/// </para>
-/// </remarks>
-/// <typeparam name="TEntity">The entity type.</typeparam>
-/// <typeparam name="TKey">The primary key type.</typeparam>
-public abstract class HttpSyncServerSource<TEntity, TKey>
-    : HttpRemoteRepository<TEntity, TKey>, ISyncServerSource<TEntity, TKey>
-    where TEntity : EntityBase, new()
-{
-    /// <summary>Initializes a new instance with the HTTP client and the entity route (for example "Order").</summary>
-    protected HttpSyncServerSource(HttpClient httpClient, string entityRoute)
-        : base(httpClient, entityRoute) { }
-
-    /// <inheritdoc />
-    /// <remarks>The client itself: the same connection, the same configuration, and the same failure classification.</remarks>
-    public IRemoteRepository<TEntity, TKey> Writer => this;
-
-    /// <inheritdoc />
-    /// <remarks>
-    /// Virtual rather than the interface's default, because the generated subclass is where the column names live and a
-    /// class member is what it can override. It streams over the same binary endpoints the remote repository uses.
-    /// </remarks>
-    public virtual ISyncBinaryColumns<TKey>? BinaryColumns => null;
-
-    /// <inheritdoc />
-    public async Task<byte[]?> GetChangeCeilingAsync(CancellationToken cancellationToken = default)
-    {
-        var result = await InvokeAsync<RemoteSyncCeilingResult>(
-            RemoteSyncOperations.Ceiling,
-            null,
-            cancellationToken
-        ).ConfigureAwait(false);
-
-        return result.Ceiling;
-    }
-
-    /// <inheritdoc />
-    public async Task<SyncChangeBatch<TEntity>> GetChangesAsync(
-        byte[]? anchor,
-        byte[]? ceiling,
-        int batchSize,
-        CancellationToken cancellationToken = default
-    )
-    {
-        var result = await InvokeAsync<RemoteSyncChangesResult<TEntity>>(
-            RemoteSyncOperations.Changes,
-            new RemoteSyncChangesRequest(anchor, ceiling, batchSize),
-            cancellationToken
-        ).ConfigureAwait(false);
-
-        return new SyncChangeBatch<TEntity>(result.Rows, result.HasMore);
-    }
-
-    /// <inheritdoc />
-    public async Task<IReadOnlyList<TKey>> GetAllKeysAsync(
-        CancellationToken cancellationToken = default
-    )
-    {
-        var result = await InvokeAsync<RemoteSyncKeysResult<TKey>>(
-            RemoteSyncOperations.Keys,
-            null,
-            cancellationToken
-        ).ConfigureAwait(false);
-
-        return result.Keys;
-    }
-
-    /// <inheritdoc />
-    /// <remarks>The server maps the page endpoint only for tables without a version column; nothing asks a versioned table for it.</remarks>
-    public async Task<SyncChangeBatch<TEntity>> GetFirstPageAsync(
-        int batchSize,
-        CancellationToken cancellationToken = default
-    )
-    {
-        var result = await InvokeAsync<RemoteSyncChangesResult<TEntity>>(
-            RemoteSyncOperations.Page,
-            new RemoteSyncPageRequest<TKey>(false, default, batchSize),
-            cancellationToken
-        ).ConfigureAwait(false);
-
-        return new SyncChangeBatch<TEntity>(result.Rows, result.HasMore);
-    }
-
-    /// <inheritdoc />
-    public async Task<SyncChangeBatch<TEntity>> GetPageAfterAsync(
-        TKey afterKey,
-        int batchSize,
-        CancellationToken cancellationToken = default
-    )
-    {
-        var result = await InvokeAsync<RemoteSyncChangesResult<TEntity>>(
-            RemoteSyncOperations.Page,
-            new RemoteSyncPageRequest<TKey>(true, afterKey, batchSize),
-            cancellationToken
-        ).ConfigureAwait(false);
-
-        return new SyncChangeBatch<TEntity>(result.Rows, result.HasMore);
-    }
-}
-
-/// <summary>Reads the server side of sync_orders over a direct database connection.</summary>
+/// <summary>Reads the server side of syncvo_orders over a direct database connection.</summary>
 /// <remarks>
 /// Nothing here is new database code: the scans and the replay live on the generic core (see
 /// <see cref="DirectSyncSourceBase{TEntity, TKey}"/>); this class supplies the SQL text that carries the table's
-/// identity and forwards the binary column accessors.
+/// identity.
 /// </remarks>
-public sealed class SyncOrderDirectSyncSource
-    : DirectSyncSource<SyncOrderEntity, int>, ISyncBinaryColumns<int>
+public sealed class SyncvoOrderDirectSyncSource
+    : DirectSyncSource<SyncvoOrderEntity, OrderIdValue>
 {
-    // The binary accessors need the concrete interface (Read{Column}Async), which the base's writer-typed
-    // reference cannot provide
-    private readonly ISyncOrderRepository _serverRepository;
-
     /// <summary>Creates the source over the server's raw SQL surface and its ordinary repository.</summary>
-    public SyncOrderDirectSyncSource(
+    public SyncvoOrderDirectSyncSource(
         ISqlExecutor serverSqlExecutor,
-        ISyncOrderRepository serverRepository
+        ISyncvoOrderRepository serverRepository
     )
         : base(serverSqlExecutor, serverRepository)
     {
-        _serverRepository = serverRepository;
     }
 
     /// <inheritdoc />
-    protected override string ServerKeysSql => "SELECT [order_id] FROM [sync_orders]";
+    protected override string ServerKeysSql => "SELECT [order_id] FROM [syncvo_orders]";
 
     /// <inheritdoc />
-    protected override string ServerChangesSql => "SELECT TOP (@batchSize) [order_id], [customer_name], [row_ver] FROM [sync_orders] WHERE (@anchor IS NULL OR [row_ver] > CAST(@anchor AS binary(8))) AND (@ceiling IS NULL OR [row_ver] < CAST(@ceiling AS binary(8))) ORDER BY [row_ver]";
-
-    /// <inheritdoc />
-    public override ISyncBinaryColumns<int>? BinaryColumns => this;
-
-    /// <inheritdoc />
-    public IReadOnlyList<string> UnboundedBinaryColumnNames => ["Attachment"];
-
-    /// <inheritdoc />
-    public Task<bool> ReadUnboundedBinaryAsync(
-        string columnName,
-        int id,
-        Stream destination,
-        CancellationToken cancellationToken = default
-    ) =>
-        columnName switch
-        {
-            "Attachment" => _serverRepository.ReadAttachmentAsync(id, destination, cancellationToken),
-            _ => throw new ArgumentOutOfRangeException(
-                nameof(columnName),
-                columnName,
-                "The column is not an unbounded binary column of this table."
-            ),
-        };
-
-    /// <inheritdoc />
-    public Task<bool> WriteUnboundedBinaryAsync(
-        string columnName,
-        int id,
-        Stream? source,
-        long? length,
-        CancellationToken cancellationToken = default
-    ) =>
-        columnName switch
-        {
-            "Attachment" => _serverRepository.WriteAttachmentAsync(id, source, length, cancellationToken),
-            _ => throw new ArgumentOutOfRangeException(
-                nameof(columnName),
-                columnName,
-                "The column is not an unbounded binary column of this table."
-            ),
-        };
+    protected override string ServerChangesSql => "SELECT TOP (@batchSize) * FROM [syncvo_orders] WHERE (@anchor IS NULL OR [row_ver] > CAST(@anchor AS binary(8))) AND (@ceiling IS NULL OR [row_ver] < CAST(@ceiling AS binary(8))) ORDER BY [row_ver]";
 }
 
-/// <summary>Reads the server side of sync_orders over HTTP, and replays the local changes over HTTP as well.</summary>
-/// <remarks>
-/// The counterpart of <see cref="SyncOrderDirectSyncSource"/> for a server that is reached across the network: it
-/// carries no logic of its own beyond binding the entity type and the route, because the transport, the failure
-/// classification, and the write surface all come from <see cref="HttpSyncServerSource{TEntity, TKey}"/>. Swapping the
-/// two is a matter of which one is registered.
-/// </remarks>
-public sealed class HttpSyncOrderSyncSource(HttpClient httpClient)
-    : HttpSyncServerSource<SyncOrderEntity, int>(httpClient, "SyncOrder"),
-        ISyncBinaryColumns<int>
-{
-    /// <inheritdoc />
-    public override ISyncBinaryColumns<int>? BinaryColumns => this;
-
-    /// <inheritdoc />
-    public IReadOnlyList<string> UnboundedBinaryColumnNames => ["Attachment"];
-
-    /// <inheritdoc />
-    public Task<bool> ReadUnboundedBinaryAsync(
-        string columnName,
-        int id,
-        Stream destination,
-        CancellationToken cancellationToken = default
-    ) =>
-        columnName switch
-        {
-            "Attachment" => DownloadUnboundedBinaryColumnAsync("Attachment", id, destination, cancellationToken),
-            _ => throw new ArgumentOutOfRangeException(
-                nameof(columnName),
-                columnName,
-                "The column is not an unbounded binary column of this table."
-            ),
-        };
-
-    /// <inheritdoc />
-    public Task<bool> WriteUnboundedBinaryAsync(
-        string columnName,
-        int id,
-        Stream? source,
-        long? length,
-        CancellationToken cancellationToken = default
-    ) =>
-        columnName switch
-        {
-            "Attachment" => UploadUnboundedBinaryColumnAsync("Attachment", id, source, length, cancellationToken),
-            _ => throw new ArgumentOutOfRangeException(
-                nameof(columnName),
-                columnName,
-                "The column is not an unbounded binary column of this table."
-            ),
-        };
-}
-
-/// <summary>The synchronised table descriptor for sync_orders.</summary>
-public sealed class SyncOrderSyncTable(
-    ISyncOrderRepository localRepository,
+/// <summary>The synchronised table descriptor for syncvo_orders.</summary>
+public sealed class SyncvoOrderSyncTable(
+    ISyncvoOrderRepository localRepository,
     ISqlExecutor localSqlExecutor,
-    ISyncServerSource<SyncOrderEntity, int> server
-) : SyncTable<SyncOrderEntity, int>(
+    ISyncServerSource<SyncvoOrderEntity, OrderIdValue> server
+) : SyncTable<SyncvoOrderEntity, OrderIdValue>(
     localRepository,
     localSqlExecutor,
     server
-), ISyncBinaryColumns<int>
+)
 {
     /// <inheritdoc />
-    public override string TableName => "sync_orders";
+    public override string TableName => "syncvo_orders";
 
     /// <inheritdoc />
-    protected override string LocalAnchorSql => "SELECT MAX(\"row_ver\") FROM \"sync_orders\"";
+    protected override string LocalAnchorSql => "SELECT MAX(\"row_ver\") FROM \"syncvo_orders\"";
 
     /// <inheritdoc />
-    protected override string LocalKeysSql => "SELECT \"order_id\" FROM \"sync_orders\"";
+    protected override string LocalKeysSql => "SELECT \"order_id\" FROM \"syncvo_orders\"";
 
     /// <inheritdoc />
-    protected override string LocalExistingKeysSql => "SELECT \"order_id\" FROM \"sync_orders\" WHERE \"order_id\" IN (@keys)";
+    protected override string LocalExistingKeysSql => "SELECT \"order_id\" FROM \"syncvo_orders\" WHERE \"order_id\" IN (@keys)";
 
     /// <inheritdoc />
-    protected override string LocalDeleteAllSql => "DELETE FROM \"sync_orders\"";
+    protected override string LocalDeleteAllSql => "DELETE FROM \"syncvo_orders\"";
 
     /// <inheritdoc />
-    protected override int ReadKey(SyncOrderEntity entity) =>
+    protected override OrderIdValue ReadKey(SyncvoOrderEntity entity) =>
         entity.OrderId;
 
     /// <inheritdoc />
-    protected override void WriteKey(SyncOrderEntity entity, int key) =>
+    protected override void WriteKey(SyncvoOrderEntity entity, OrderIdValue key) =>
         entity.OrderId = key;
 
     /// <inheritdoc />
-    protected override byte[]? ReadRowVersion(SyncOrderEntity entity) =>
-        entity.RowVer;
+    protected override byte[]? ReadRowVersion(SyncvoOrderEntity entity) =>
+        entity.RowVer?.Value;
 
     /// <inheritdoc />
-    protected override void WriteRowVersion(SyncOrderEntity entity, byte[]? rowVersion) =>
-        entity.RowVer = rowVersion;
+    protected override void WriteRowVersion(SyncvoOrderEntity entity, byte[]? rowVersion) =>
+        entity.RowVer = RowVerValue.Create(rowVersion ?? []);
 
     /// <inheritdoc />
-    public override string FormatKey(int key) => key.ToString(CultureInfo.InvariantCulture);
+    public override string FormatKey(OrderIdValue key) => key.Value.ToString(CultureInfo.InvariantCulture);
 
     /// <inheritdoc />
-    public override int ParseKey(string keyText) => int.Parse(keyText, CultureInfo.InvariantCulture);
-
-    /// <inheritdoc />
-    protected override ISyncBinaryColumns<int>? LocalBinaryColumns => this;
-
-    /// <inheritdoc />
-    public override IReadOnlyList<string> UnboundedBinaryColumnNames => ["Attachment"];
-
-    /// <inheritdoc />
-    public Task<bool> ReadUnboundedBinaryAsync(
-        string columnName,
-        int id,
-        Stream destination,
-        CancellationToken cancellationToken = default
-    ) =>
-        columnName switch
-        {
-            "Attachment" => localRepository.ReadAttachmentAsync(id, destination, cancellationToken),
-            _ => throw new ArgumentOutOfRangeException(
-                nameof(columnName),
-                columnName,
-                "The column is not an unbounded binary column of this table."
-            ),
-        };
-
-    /// <inheritdoc />
-    public Task<bool> WriteUnboundedBinaryAsync(
-        string columnName,
-        int id,
-        Stream? source,
-        long? length,
-        CancellationToken cancellationToken = default
-    ) =>
-        columnName switch
-        {
-            "Attachment" => localRepository.WriteAttachmentAsync(id, source, length, cancellationToken),
-            _ => throw new ArgumentOutOfRangeException(
-                nameof(columnName),
-                columnName,
-                "The column is not an unbounded binary column of this table."
-            ),
-        };
+    public override OrderIdValue ParseKey(string keyText) => OrderIdValue.Create(int.Parse(keyText, CultureInfo.InvariantCulture));
 }
 
 /// <summary>
-/// The local SyncOrderEntity repository with journaling: every write is recorded before it is performed.
+/// The local SyncvoOrderEntity repository with journaling: every write is recorded before it is performed.
 /// </summary>
 /// <remarks>
 /// The recording and forwarding semantics live on the generic core (see
@@ -7664,37 +6897,37 @@ public sealed class SyncOrderSyncTable(
 /// walks, so the children the save writes or deletes are journaled exactly like the root), and forwards the members
 /// the concrete contract adds.
 /// </remarks>
-public sealed class JournalingSyncOrderRepository
-    : JournalingRepository<SyncOrderEntity, int>, ISyncOrderRepository
+public sealed class JournalingSyncvoOrderRepository
+    : JournalingRepository<SyncvoOrderEntity, OrderIdValue>, ISyncvoOrderRepository
 {
     // The concrete contract's own members (named queries, the uniqueness pre-check, binary accessors) need the
     // concrete interface, which the base's IRepository-typed reference cannot provide
-    private readonly ISyncOrderRepository _inner;
+    private readonly ISyncvoOrderRepository _inner;
 
     /// <summary>Creates the decorator over the repository it wraps and the journal it records to.</summary>
-    public JournalingSyncOrderRepository(ISyncOrderRepository inner, SyncJournal journal)
+    public JournalingSyncvoOrderRepository(ISyncvoOrderRepository inner, SyncJournal journal)
         : base(inner, journal)
     {
         _inner = inner;
     }
 
     /// <inheritdoc />
-    protected override string TableName => "sync_orders";
+    protected override string TableName => "syncvo_orders";
 
     /// <inheritdoc />
-    protected override int ReadKey(SyncOrderEntity entity) =>
+    protected override OrderIdValue ReadKey(SyncvoOrderEntity entity) =>
         entity.OrderId;
 
     /// <inheritdoc />
-    protected override string FormatKey(int key) => key.ToString(CultureInfo.InvariantCulture);
+    protected override string FormatKey(OrderIdValue key) => key.Value.ToString(CultureInfo.InvariantCulture);
 
     /// <inheritdoc />
-    protected override byte[]? ReadRowVersion(SyncOrderEntity entity) =>
-        entity.RowVer;
+    protected override byte[]? ReadRowVersion(SyncvoOrderEntity entity) =>
+        entity.RowVer?.Value;
 
     /// <inheritdoc />
     protected override Task RecordGraphSaveAsync(
-        SyncOrderEntity entity,
+        SyncvoOrderEntity entity,
         bool cascadeSave,
         bool cascadeDelete,
         CancellationToken cancellationToken
@@ -7708,131 +6941,88 @@ public sealed class JournalingSyncOrderRepository
         );
 
     /// <inheritdoc />
-    public Task<bool> ReadAttachmentAsync(
-        int id,
-        Stream destination,
-        CancellationToken cancellationToken = default
-    ) => _inner.ReadAttachmentAsync(id, destination, cancellationToken);
-
-    /// <inheritdoc />
-    /// <remarks>
-    /// A blob written on its own changes no ordinary column, so no other entry point records it. The
-    /// intent is journaled first, exactly as every other write is, and the upload sends the row's
-    /// current content (blob included) when it is asked to carry the excluded columns.
-    /// </remarks>
-    public async Task<bool> WriteAttachmentAsync(
-        int id,
-        Stream? source,
-        long? length = null,
-        CancellationToken cancellationToken = default
-    )
-    {
-        await Journal.RecordAsync(
-            "sync_orders",
-            id.ToString(CultureInfo.InvariantCulture),
-            SyncJournalOperation.Upsert,
-            null,
-            cancellationToken
-        )
-            .ConfigureAwait(false);
-
-        return await _inner.WriteAttachmentAsync(id, source, length, cancellationToken)
-            .ConfigureAwait(false);
-    }
-
-    /// <inheritdoc />
     public Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
-        SyncOrderEntity entity,
+        SyncvoOrderEntity entity,
         CancellationToken cancellationToken = default
     ) => _inner.CheckUniquenessAsync(entity, cancellationToken);
 }
 
-/// <summary>Reads the server side of sync_order_lines over a direct database connection.</summary>
+/// <summary>Reads the server side of syncvo_lines over a direct database connection.</summary>
 /// <remarks>
 /// Nothing here is new database code: the scans and the replay live on the generic core (see
 /// <see cref="DirectSyncSourceBase{TEntity, TKey}"/>); this class supplies the SQL text that carries the table's
 /// identity.
 /// </remarks>
-public sealed class SyncOrderLineDirectSyncSource
-    : DirectSyncSource<SyncOrderLineEntity, int>
+public sealed class SyncvoLineDirectSyncSource
+    : DirectSyncSource<SyncvoLineEntity, LineIdValue>
 {
     /// <summary>Creates the source over the server's raw SQL surface and its ordinary repository.</summary>
-    public SyncOrderLineDirectSyncSource(
+    public SyncvoLineDirectSyncSource(
         ISqlExecutor serverSqlExecutor,
-        ISyncOrderLineRepository serverRepository
+        ISyncvoLineRepository serverRepository
     )
         : base(serverSqlExecutor, serverRepository)
     {
     }
 
     /// <inheritdoc />
-    protected override string ServerKeysSql => "SELECT [line_id] FROM [sync_order_lines]";
+    protected override string ServerKeysSql => "SELECT [line_id] FROM [syncvo_lines]";
 
     /// <inheritdoc />
-    protected override string ServerChangesSql => "SELECT TOP (@batchSize) * FROM [sync_order_lines] WHERE (@anchor IS NULL OR [row_ver] > CAST(@anchor AS binary(8))) AND (@ceiling IS NULL OR [row_ver] < CAST(@ceiling AS binary(8))) ORDER BY [row_ver]";
+    protected override string ServerChangesSql => "SELECT TOP (@batchSize) * FROM [syncvo_lines] WHERE (@anchor IS NULL OR [row_ver] > CAST(@anchor AS binary(8))) AND (@ceiling IS NULL OR [row_ver] < CAST(@ceiling AS binary(8))) ORDER BY [row_ver]";
 }
 
-/// <summary>Reads the server side of sync_order_lines over HTTP, and replays the local changes over HTTP as well.</summary>
-/// <remarks>
-/// The counterpart of <see cref="SyncOrderLineDirectSyncSource"/> for a server that is reached across the network: it
-/// carries no logic of its own beyond binding the entity type and the route, because the transport, the failure
-/// classification, and the write surface all come from <see cref="HttpSyncServerSource{TEntity, TKey}"/>. Swapping the
-/// two is a matter of which one is registered.
-/// </remarks>
-public sealed class HttpSyncOrderLineSyncSource(HttpClient httpClient)
-    : HttpSyncServerSource<SyncOrderLineEntity, int>(httpClient, "SyncOrderLine") { }
-
-/// <summary>The synchronised table descriptor for sync_order_lines.</summary>
-public sealed class SyncOrderLineSyncTable(
-    ISyncOrderLineRepository localRepository,
+/// <summary>The synchronised table descriptor for syncvo_lines.</summary>
+public sealed class SyncvoLineSyncTable(
+    ISyncvoLineRepository localRepository,
     ISqlExecutor localSqlExecutor,
-    ISyncServerSource<SyncOrderLineEntity, int> server
-) : SyncTable<SyncOrderLineEntity, int>(
+    ISyncServerSource<SyncvoLineEntity, LineIdValue> server
+) : SyncTable<SyncvoLineEntity, LineIdValue>(
     localRepository,
     localSqlExecutor,
     server
 )
 {
     /// <inheritdoc />
-    public override string TableName => "sync_order_lines";
+    public override string TableName => "syncvo_lines";
 
     /// <inheritdoc />
-    protected override string LocalAnchorSql => "SELECT MAX(\"row_ver\") FROM \"sync_order_lines\"";
+    protected override string LocalAnchorSql => "SELECT MAX(\"row_ver\") FROM \"syncvo_lines\"";
 
     /// <inheritdoc />
-    protected override string LocalKeysSql => "SELECT \"line_id\" FROM \"sync_order_lines\"";
+    protected override string LocalKeysSql => "SELECT \"line_id\" FROM \"syncvo_lines\"";
 
     /// <inheritdoc />
-    protected override string LocalExistingKeysSql => "SELECT \"line_id\" FROM \"sync_order_lines\" WHERE \"line_id\" IN (@keys)";
+    protected override string LocalExistingKeysSql => "SELECT \"line_id\" FROM \"syncvo_lines\" WHERE \"line_id\" IN (@keys)";
 
     /// <inheritdoc />
-    protected override string LocalDeleteAllSql => "DELETE FROM \"sync_order_lines\"";
+    protected override string LocalDeleteAllSql => "DELETE FROM \"syncvo_lines\"";
 
     /// <inheritdoc />
-    protected override int ReadKey(SyncOrderLineEntity entity) =>
+    protected override LineIdValue ReadKey(SyncvoLineEntity entity) =>
         entity.LineId;
 
     /// <inheritdoc />
-    protected override void WriteKey(SyncOrderLineEntity entity, int key) =>
+    protected override void WriteKey(SyncvoLineEntity entity, LineIdValue key) =>
         entity.LineId = key;
 
     /// <inheritdoc />
-    protected override byte[]? ReadRowVersion(SyncOrderLineEntity entity) =>
-        entity.RowVer;
+    protected override byte[]? ReadRowVersion(SyncvoLineEntity entity) =>
+        entity.RowVer?.Value;
 
     /// <inheritdoc />
-    protected override void WriteRowVersion(SyncOrderLineEntity entity, byte[]? rowVersion) =>
-        entity.RowVer = rowVersion;
+    protected override void WriteRowVersion(SyncvoLineEntity entity, byte[]? rowVersion) =>
+        entity.RowVer = RowVerValue.Create(rowVersion ?? []);
 
     /// <inheritdoc />
-    public override string FormatKey(int key) => key.ToString(CultureInfo.InvariantCulture);
+    public override string FormatKey(LineIdValue key) => key.Value.ToString(CultureInfo.InvariantCulture);
 
     /// <inheritdoc />
-    public override int ParseKey(string keyText) => int.Parse(keyText, CultureInfo.InvariantCulture);
+    public override LineIdValue ParseKey(string keyText) => LineIdValue.Create(int.Parse(keyText, CultureInfo.InvariantCulture));
 }
 
 /// <summary>
-/// The local SyncOrderLineEntity repository with journaling: every write is recorded before it is performed.
+/// The local SyncvoLineEntity repository with journaling: every write is recorded before it is performed.
 /// </summary>
 /// <remarks>
 /// The recording and forwarding semantics live on the generic core (see
@@ -7841,37 +7031,37 @@ public sealed class SyncOrderLineSyncTable(
 /// walks, so the children the save writes or deletes are journaled exactly like the root), and forwards the members
 /// the concrete contract adds.
 /// </remarks>
-public sealed class JournalingSyncOrderLineRepository
-    : JournalingRepository<SyncOrderLineEntity, int>, ISyncOrderLineRepository
+public sealed class JournalingSyncvoLineRepository
+    : JournalingRepository<SyncvoLineEntity, LineIdValue>, ISyncvoLineRepository
 {
     // The concrete contract's own members (named queries, the uniqueness pre-check, binary accessors) need the
     // concrete interface, which the base's IRepository-typed reference cannot provide
-    private readonly ISyncOrderLineRepository _inner;
+    private readonly ISyncvoLineRepository _inner;
 
     /// <summary>Creates the decorator over the repository it wraps and the journal it records to.</summary>
-    public JournalingSyncOrderLineRepository(ISyncOrderLineRepository inner, SyncJournal journal)
+    public JournalingSyncvoLineRepository(ISyncvoLineRepository inner, SyncJournal journal)
         : base(inner, journal)
     {
         _inner = inner;
     }
 
     /// <inheritdoc />
-    protected override string TableName => "sync_order_lines";
+    protected override string TableName => "syncvo_lines";
 
     /// <inheritdoc />
-    protected override int ReadKey(SyncOrderLineEntity entity) =>
+    protected override LineIdValue ReadKey(SyncvoLineEntity entity) =>
         entity.LineId;
 
     /// <inheritdoc />
-    protected override string FormatKey(int key) => key.ToString(CultureInfo.InvariantCulture);
+    protected override string FormatKey(LineIdValue key) => key.Value.ToString(CultureInfo.InvariantCulture);
 
     /// <inheritdoc />
-    protected override byte[]? ReadRowVersion(SyncOrderLineEntity entity) =>
-        entity.RowVer;
+    protected override byte[]? ReadRowVersion(SyncvoLineEntity entity) =>
+        entity.RowVer?.Value;
 
     /// <inheritdoc />
     protected override Task RecordGraphSaveAsync(
-        SyncOrderLineEntity entity,
+        SyncvoLineEntity entity,
         bool cascadeSave,
         bool cascadeDelete,
         CancellationToken cancellationToken
@@ -7886,139 +7076,7 @@ public sealed class JournalingSyncOrderLineRepository
 
     /// <inheritdoc />
     public Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
-        SyncOrderLineEntity entity,
-        CancellationToken cancellationToken = default
-    ) => _inner.CheckUniquenessAsync(entity, cancellationToken);
-}
-
-/// <summary>Reads the server side of sync_notes over a direct database connection.</summary>
-/// <remarks>
-/// Nothing here is new database code: the scans and the replay live on the generic core (see
-/// <see cref="DirectSyncSourceBase{TEntity, TKey}"/>); this class supplies the SQL text that carries the table's
-/// identity.
-/// </remarks>
-public sealed class SyncNoteDirectSyncSource
-    : VersionlessDirectSyncSource<SyncNoteEntity, int>
-{
-    /// <summary>Creates the source over the server's raw SQL surface and its ordinary repository.</summary>
-    public SyncNoteDirectSyncSource(
-        ISqlExecutor serverSqlExecutor,
-        ISyncNoteRepository serverRepository
-    )
-        : base(serverSqlExecutor, serverRepository)
-    {
-    }
-
-    /// <inheritdoc />
-    protected override string ServerKeysSql => "SELECT [note_id] FROM [sync_notes]";
-
-    /// <inheritdoc />
-    protected override string ServerPageFirstSql => "SELECT TOP (@batchSize) * FROM [sync_notes] ORDER BY [note_id]";
-
-    /// <inheritdoc />
-    protected override string ServerPageAfterSql => "SELECT TOP (@batchSize) * FROM [sync_notes] WHERE [note_id] > @afterKey ORDER BY [note_id]";
-}
-
-/// <summary>Reads the server side of sync_notes over HTTP, and replays the local changes over HTTP as well.</summary>
-/// <remarks>
-/// The counterpart of <see cref="SyncNoteDirectSyncSource"/> for a server that is reached across the network: it
-/// carries no logic of its own beyond binding the entity type and the route, because the transport, the failure
-/// classification, and the write surface all come from <see cref="HttpSyncServerSource{TEntity, TKey}"/>. Swapping the
-/// two is a matter of which one is registered.
-/// </remarks>
-public sealed class HttpSyncNoteSyncSource(HttpClient httpClient)
-    : HttpSyncServerSource<SyncNoteEntity, int>(httpClient, "SyncNote") { }
-
-/// <summary>The synchronised table descriptor for sync_notes.</summary>
-public sealed class SyncNoteSyncTable(
-    ISyncNoteRepository localRepository,
-    ISqlExecutor localSqlExecutor,
-    ISyncServerSource<SyncNoteEntity, int> server
-) : VersionlessSyncTable<SyncNoteEntity, int>(
-    localRepository,
-    localSqlExecutor,
-    server
-)
-{
-    /// <inheritdoc />
-    public override string TableName => "sync_notes";
-
-    /// <inheritdoc />
-    protected override string LocalKeysSql => "SELECT \"note_id\" FROM \"sync_notes\"";
-
-    /// <inheritdoc />
-    protected override string LocalExistingKeysSql => "SELECT \"note_id\" FROM \"sync_notes\" WHERE \"note_id\" IN (@keys)";
-
-    /// <inheritdoc />
-    protected override string LocalDeleteAllSql => "DELETE FROM \"sync_notes\"";
-
-    /// <inheritdoc />
-    protected override int ReadKey(SyncNoteEntity entity) =>
-        entity.NoteId;
-
-    /// <inheritdoc />
-    protected override void WriteKey(SyncNoteEntity entity, int key) =>
-        entity.NoteId = key;
-
-    /// <inheritdoc />
-    public override string FormatKey(int key) => key.ToString(CultureInfo.InvariantCulture);
-
-    /// <inheritdoc />
-    public override int ParseKey(string keyText) => int.Parse(keyText, CultureInfo.InvariantCulture);
-}
-
-/// <summary>
-/// The local SyncNoteEntity repository with journaling: every write is recorded before it is performed.
-/// </summary>
-/// <remarks>
-/// The recording and forwarding semantics live on the generic core (see
-/// <see cref="JournalingRepositoryBase{TEntity, TKey}"/>); this class supplies the table's identity and key handling,
-/// records a graph save through <see cref="SyncGraphRecorder"/> (which walks the same cascade navigations the saver
-/// walks, so the children the save writes or deletes are journaled exactly like the root), and forwards the members
-/// the concrete contract adds.
-/// </remarks>
-public sealed class JournalingSyncNoteRepository
-    : VersionlessJournalingRepository<SyncNoteEntity, int>, ISyncNoteRepository
-{
-    // The concrete contract's own members (named queries, the uniqueness pre-check, binary accessors) need the
-    // concrete interface, which the base's IRepository-typed reference cannot provide
-    private readonly ISyncNoteRepository _inner;
-
-    /// <summary>Creates the decorator over the repository it wraps and the journal it records to.</summary>
-    public JournalingSyncNoteRepository(ISyncNoteRepository inner, SyncJournal journal)
-        : base(inner, journal)
-    {
-        _inner = inner;
-    }
-
-    /// <inheritdoc />
-    protected override string TableName => "sync_notes";
-
-    /// <inheritdoc />
-    protected override int ReadKey(SyncNoteEntity entity) =>
-        entity.NoteId;
-
-    /// <inheritdoc />
-    protected override string FormatKey(int key) => key.ToString(CultureInfo.InvariantCulture);
-
-    /// <inheritdoc />
-    protected override Task RecordGraphSaveAsync(
-        SyncNoteEntity entity,
-        bool cascadeSave,
-        bool cascadeDelete,
-        CancellationToken cancellationToken
-    ) =>
-        SyncGraphRecorder.RecordSaveAsync(
-            Journal,
-            entity,
-            cascadeSave,
-            cascadeDelete,
-            cancellationToken
-        );
-
-    /// <inheritdoc />
-    public Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
-        SyncNoteEntity entity,
+        SyncvoLineEntity entity,
         CancellationToken cancellationToken = default
     ) => _inner.CheckUniquenessAsync(entity, cancellationToken);
 }
@@ -8043,10 +7101,10 @@ public sealed class JournalingSyncNoteRepository
 /// </remarks>
 public static class SyncGraphRecorder
 {
-    /// <summary>Records the entries for a graph save rooted at this SyncOrderEntity (the cascade children included).</summary>
+    /// <summary>Records the entries for a graph save rooted at this SyncvoOrderEntity (the cascade children included).</summary>
     public static async Task RecordSaveAsync(
         SyncJournal journal,
-        SyncOrderEntity entity,
+        SyncvoOrderEntity entity,
         bool cascadeSave,
         bool cascadeDelete,
         CancellationToken cancellationToken = default
@@ -8073,8 +7131,8 @@ public static class SyncGraphRecorder
         if (entity.RowState != RowState.Unchanged)
         {
             await journal.RecordAsync(
-                "sync_orders",
-                entity.OrderId.ToString(CultureInfo.InvariantCulture),
+                "syncvo_orders",
+                entity.OrderId.Value.ToString(CultureInfo.InvariantCulture),
                 SyncJournalOperation.Upsert,
                 null,
                 cancellationToken
@@ -8084,16 +7142,7 @@ public static class SyncGraphRecorder
 
         if (cascadeSave)
         {
-            foreach (var child in entity.SyncOrderLines)
-            {
-                if (child is not null)
-                {
-                    await RecordSaveAsync(journal, child, cascadeSave, cascadeDelete, cancellationToken)
-                        .ConfigureAwait(false);
-                }
-            }
-
-            foreach (var child in entity.SyncNotes)
+            foreach (var child in entity.SyncvoLines)
             {
                 if (child is not null)
                 {
@@ -8104,22 +7153,14 @@ public static class SyncGraphRecorder
         }
     }
 
-    /// <summary>Records the whole subtree of this SyncOrderEntity as deletes, children first (the saver removes them regardless of their own state).</summary>
+    /// <summary>Records the whole subtree of this SyncvoOrderEntity as deletes, children first (the saver removes them regardless of their own state).</summary>
     private static async Task RecordDeleteGraphAsync(
         SyncJournal journal,
-        SyncOrderEntity entity,
+        SyncvoOrderEntity entity,
         CancellationToken cancellationToken
     )
     {
-        foreach (var child in entity.SyncOrderLines)
-        {
-            if (child is not null)
-            {
-                await RecordDeleteGraphAsync(journal, child, cancellationToken).ConfigureAwait(false);
-            }
-        }
-
-        foreach (var child in entity.SyncNotes)
+        foreach (var child in entity.SyncvoLines)
         {
             if (child is not null)
             {
@@ -8130,24 +7171,24 @@ public static class SyncGraphRecorder
         await RecordDeleteAsync(journal, entity, cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>Records the delete of this SyncOrderEntity, carrying the mirrored version the row holds.</summary>
+    /// <summary>Records the delete of this SyncvoOrderEntity, carrying the mirrored version the row holds.</summary>
     private static Task RecordDeleteAsync(
         SyncJournal journal,
-        SyncOrderEntity entity,
+        SyncvoOrderEntity entity,
         CancellationToken cancellationToken
     ) =>
         journal.RecordAsync(
-            "sync_orders",
-            entity.OrderId.ToString(CultureInfo.InvariantCulture),
+            "syncvo_orders",
+            entity.OrderId.Value.ToString(CultureInfo.InvariantCulture),
             SyncJournalOperation.Delete,
-            entity.RowVer,
+            entity.RowVer?.Value,
             cancellationToken
         );
 
-    /// <summary>Records the entries for a graph save rooted at this SyncOrderLineEntity (the cascade children included).</summary>
+    /// <summary>Records the entries for a graph save rooted at this SyncvoLineEntity (the cascade children included).</summary>
     public static async Task RecordSaveAsync(
         SyncJournal journal,
-        SyncOrderLineEntity entity,
+        SyncvoLineEntity entity,
         bool cascadeSave,
         bool cascadeDelete,
         CancellationToken cancellationToken = default
@@ -8166,8 +7207,8 @@ public static class SyncGraphRecorder
         if (entity.RowState != RowState.Unchanged)
         {
             await journal.RecordAsync(
-                "sync_order_lines",
-                entity.LineId.ToString(CultureInfo.InvariantCulture),
+                "syncvo_lines",
+                entity.LineId.Value.ToString(CultureInfo.InvariantCulture),
                 SyncJournalOperation.Upsert,
                 null,
                 cancellationToken
@@ -8176,63 +7217,17 @@ public static class SyncGraphRecorder
         }
     }
 
-    /// <summary>Records the delete of this SyncOrderLineEntity, carrying the mirrored version the row holds.</summary>
+    /// <summary>Records the delete of this SyncvoLineEntity, carrying the mirrored version the row holds.</summary>
     private static Task RecordDeleteGraphAsync(
         SyncJournal journal,
-        SyncOrderLineEntity entity,
+        SyncvoLineEntity entity,
         CancellationToken cancellationToken
     ) =>
         journal.RecordAsync(
-            "sync_order_lines",
-            entity.LineId.ToString(CultureInfo.InvariantCulture),
+            "syncvo_lines",
+            entity.LineId.Value.ToString(CultureInfo.InvariantCulture),
             SyncJournalOperation.Delete,
-            entity.RowVer,
-            cancellationToken
-        );
-
-    /// <summary>Records the entries for a graph save rooted at this SyncNoteEntity (the cascade children included).</summary>
-    public static async Task RecordSaveAsync(
-        SyncJournal journal,
-        SyncNoteEntity entity,
-        bool cascadeSave,
-        bool cascadeDelete,
-        CancellationToken cancellationToken = default
-    )
-    {
-        ArgumentNullException.ThrowIfNull(journal);
-        ArgumentNullException.ThrowIfNull(entity);
-
-        if (entity.RowState == RowState.Removed)
-        {
-            await RecordDeleteGraphAsync(journal, entity, cancellationToken).ConfigureAwait(false);
-
-            return;
-        }
-
-        if (entity.RowState != RowState.Unchanged)
-        {
-            await journal.RecordAsync(
-                "sync_notes",
-                entity.NoteId.ToString(CultureInfo.InvariantCulture),
-                SyncJournalOperation.Upsert,
-                null,
-                cancellationToken
-            )
-                .ConfigureAwait(false);
-        }
-    }
-
-    /// <summary>Records the delete of this SyncNoteEntity, carrying the mirrored version the row holds.</summary>
-    private static Task RecordDeleteGraphAsync(
-        SyncJournal journal,
-        SyncNoteEntity entity,
-        CancellationToken cancellationToken
-    ) =>
-        journal.RecordAsync(
-            "sync_notes",
-            entity.NoteId.ToString(CultureInfo.InvariantCulture),
-            SyncJournalOperation.Delete,
-            null,
+            entity.RowVer?.Value,
             cancellationToken
         );
 }
@@ -8244,8 +7239,7 @@ public static class SyncGraphRecorder
 /// server is reached. The local half - <c>AddGeneratedSyncEngine</c> - registers the journal, the per-table descriptors,
 /// and the engine, and wraps the local repositories with their journaling decorators so every local write is recorded no
 /// matter which entry point the application uses. The server half registers the differential sources, either
-/// <c>AddGeneratedDirectSyncSources</c> (a database connection this process holds) or
-/// <c>AddGeneratedHttpSyncSources</c> (a server reached over HTTP). Swapping direct for remote is a change of that
+/// <c>AddGeneratedDirectSyncSources</c> (a database connection this process holds). Swapping direct for remote is a change of that
 /// one line and of nothing else: the engine resolves <c>ISyncServerSource&lt;,&gt;</c> either way.
 /// </para>
 /// <para>
@@ -8297,103 +7291,18 @@ public static class GeneratedSyncServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
 
-        services.AddScoped<ISyncServerSource<SyncOrderEntity, int>>(
-            provider => new SyncOrderDirectSyncSource(
+        services.AddScoped<ISyncServerSource<SyncvoOrderEntity, OrderIdValue>>(
+            provider => new SyncvoOrderDirectSyncSource(
                 Resolve<ISqlExecutor>(provider, serverServiceKey),
-                Resolve<ISyncOrderRepository>(provider, serverServiceKey)
+                Resolve<ISyncvoOrderRepository>(provider, serverServiceKey)
             )
         );
 
-        services.AddScoped<ISyncServerSource<SyncOrderLineEntity, int>>(
-            provider => new SyncOrderLineDirectSyncSource(
+        services.AddScoped<ISyncServerSource<SyncvoLineEntity, LineIdValue>>(
+            provider => new SyncvoLineDirectSyncSource(
                 Resolve<ISqlExecutor>(provider, serverServiceKey),
-                Resolve<ISyncOrderLineRepository>(provider, serverServiceKey)
+                Resolve<ISyncvoLineRepository>(provider, serverServiceKey)
             )
-        );
-
-        services.AddScoped<ISyncServerSource<SyncNoteEntity, int>>(
-            provider => new SyncNoteDirectSyncSource(
-                Resolve<ISqlExecutor>(provider, serverServiceKey),
-                Resolve<ISyncNoteRepository>(provider, serverServiceKey)
-            )
-        );
-
-        return services;
-    }
-
-    /// <summary>Registers the differential sources that read - and write - the server over HTTP.</summary>
-    /// <remarks>
-    /// <para>
-    /// The client it builds recycles pooled connections every five minutes and carries no deadline of its own, exactly as
-    /// the base-address overload of <c>AddGeneratedHttpRemoteRepositories</c> does, and the container owns it. Pass the
-    /// same base address the remote repositories were given: both talk to the endpoints of one group.
-    /// </para>
-    /// <para>
-    /// A server that needs authentication headers, a handler chain, or a shared <c>IHttpClientFactory</c> client is served
-    /// by the factory overload instead - hand it the same factory the remote repositories were registered with, and the
-    /// sync traffic inherits that configuration rather than bypassing it.
-    /// </para>
-    /// </remarks>
-    /// <param name="services">The service collection.</param>
-    /// <param name="baseAddress">The base address including the server prefix - the one <c>MapGeneratedRemoteEndpoints</c> was mapped under, <see cref="RemotePaths.DefaultPrefix"/> unless it was passed another (a trailing / is appended automatically)</param>
-    public static IServiceCollection AddGeneratedHttpSyncSources(
-        this IServiceCollection services,
-        string baseAddress
-    )
-    {
-        ArgumentNullException.ThrowIfNull(services);
-        ArgumentException.ThrowIfNullOrWhiteSpace(baseAddress);
-
-        // A trailing / is required to resolve relative paths ("Order/SyncChanges" etc.), so append it
-        var normalized = baseAddress.EndsWith('/') ? baseAddress : baseAddress + "/";
-
-        // Registered as a factory-produced singleton so the container owns it: it disposes only the singletons it
-        // created itself, which is what makes the shared client go away with the provider
-        services.AddSingleton(_ => new OwnedSyncHttpClient(
-            new HttpClient(
-                new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(5) },
-                disposeHandler: true
-            )
-            {
-                BaseAddress = new Uri(normalized),
-                // No client-wide deadline: the 100-second default covers a whole request including its body, and a
-                // download batch of a large table can outlast it. The per-call CancellationToken is the timeout instead
-                Timeout = Timeout.InfiniteTimeSpan,
-            }
-        ));
-
-        return AddGeneratedHttpSyncSources(
-            services,
-            provider => provider.GetRequiredService<OwnedSyncHttpClient>().Client
-        );
-    }
-
-    /// <summary>Registers the differential sources over HTTP using an HttpClient factory (authentication handlers and the like).</summary>
-    /// <remarks>
-    /// The factory runs every time a source is resolved, and the HttpClient it returns is disposed by neither the
-    /// generated code nor the container. Return a shared instance or one managed by <c>IHttpClientFactory</c>; a new
-    /// HttpClient per call exhausts sockets. Its BaseAddress must include the prefix and end with a trailing /.
-    /// </remarks>
-    /// <param name="services">The service collection.</param>
-    /// <param name="httpClientFactory">A factory returning the HttpClient the sources talk through</param>
-    public static IServiceCollection AddGeneratedHttpSyncSources(
-        this IServiceCollection services,
-        Func<IServiceProvider, HttpClient> httpClientFactory
-    )
-    {
-        ArgumentNullException.ThrowIfNull(services);
-        ArgumentNullException.ThrowIfNull(httpClientFactory);
-
-        services.AddScoped<ISyncServerSource<SyncOrderEntity, int>>(
-            provider => new HttpSyncOrderSyncSource(httpClientFactory(provider))
-        );
-
-        services.AddScoped<ISyncServerSource<SyncOrderLineEntity, int>>(
-            provider => new HttpSyncOrderLineSyncSource(httpClientFactory(provider))
-        );
-
-        services.AddScoped<ISyncServerSource<SyncNoteEntity, int>>(
-            provider => new HttpSyncNoteSyncSource(httpClientFactory(provider))
         );
 
         return services;
@@ -8403,7 +7312,7 @@ public static class GeneratedSyncServiceCollectionExtensions
     /// <remarks>
     /// <para>
     /// The differential sources are resolved rather than registered here, so exactly one of
-    /// <c>AddGeneratedDirectSyncSources</c> / <c>AddGeneratedHttpSyncSources</c> has to be
+    /// <c>AddGeneratedDirectSyncSources</c> has to be
     /// called as well. Leaving that out is not a silent failure: resolving the engine then fails on the missing source.
     /// </para>
     /// <para>
@@ -8432,59 +7341,40 @@ public static class GeneratedSyncServiceCollectionExtensions
             Resolve<ISqlExecutor>(provider, localServiceKey)
         ));
 
-        if (!excluded.Contains(typeof(SyncOrderEntity)))
+        if (!excluded.Contains(typeof(SyncvoOrderEntity)))
         {
-            Decorate<ISyncOrderRepository>(
+            Decorate<ISyncvoOrderRepository>(
                 services,
                 localServiceKey,
-                (inner, provider) => new JournalingSyncOrderRepository(
+                (inner, provider) => new JournalingSyncvoOrderRepository(
                     inner,
                     provider.GetRequiredService<SyncJournal>()
                 )
             );
-            services.AddScoped<ISyncTable>(provider => new SyncOrderSyncTable(
-                Resolve<ISyncOrderRepository>(provider, localServiceKey),
+            services.AddScoped<ISyncTable>(provider => new SyncvoOrderSyncTable(
+                Resolve<ISyncvoOrderRepository>(provider, localServiceKey),
                 Resolve<ISqlExecutor>(provider, localServiceKey),
                 provider.GetRequiredService<
-                    ISyncServerSource<SyncOrderEntity, int>
+                    ISyncServerSource<SyncvoOrderEntity, OrderIdValue>
                 >()
             ));
         }
 
-        if (!excluded.Contains(typeof(SyncOrderLineEntity)))
+        if (!excluded.Contains(typeof(SyncvoLineEntity)))
         {
-            Decorate<ISyncOrderLineRepository>(
+            Decorate<ISyncvoLineRepository>(
                 services,
                 localServiceKey,
-                (inner, provider) => new JournalingSyncOrderLineRepository(
+                (inner, provider) => new JournalingSyncvoLineRepository(
                     inner,
                     provider.GetRequiredService<SyncJournal>()
                 )
             );
-            services.AddScoped<ISyncTable>(provider => new SyncOrderLineSyncTable(
-                Resolve<ISyncOrderLineRepository>(provider, localServiceKey),
+            services.AddScoped<ISyncTable>(provider => new SyncvoLineSyncTable(
+                Resolve<ISyncvoLineRepository>(provider, localServiceKey),
                 Resolve<ISqlExecutor>(provider, localServiceKey),
                 provider.GetRequiredService<
-                    ISyncServerSource<SyncOrderLineEntity, int>
-                >()
-            ));
-        }
-
-        if (!excluded.Contains(typeof(SyncNoteEntity)))
-        {
-            Decorate<ISyncNoteRepository>(
-                services,
-                localServiceKey,
-                (inner, provider) => new JournalingSyncNoteRepository(
-                    inner,
-                    provider.GetRequiredService<SyncJournal>()
-                )
-            );
-            services.AddScoped<ISyncTable>(provider => new SyncNoteSyncTable(
-                Resolve<ISyncNoteRepository>(provider, localServiceKey),
-                Resolve<ISqlExecutor>(provider, localServiceKey),
-                provider.GetRequiredService<
-                    ISyncServerSource<SyncNoteEntity, int>
+                    ISyncServerSource<SyncvoLineEntity, LineIdValue>
                 >()
             ));
         }
@@ -8509,9 +7399,8 @@ public static class GeneratedSyncServiceCollectionExtensions
     {
         Type[] synchronised =
         [
-            typeof(SyncOrderEntity),
-            typeof(SyncOrderLineEntity),
-            typeof(SyncNoteEntity),
+            typeof(SyncvoOrderEntity),
+            typeof(SyncvoLineEntity),
         ];
         var excluded = new HashSet<Type>(excludeFromSync ?? []);
         var unknown = excluded.Where(type => !synchronised.Contains(type)).ToList();
@@ -8609,27 +7498,10 @@ public static class GeneratedSyncServiceCollectionExtensions
             $"The registration of {typeof(TService).Name} for the service key '{serviceKey}' is not a "
                 + "factory registration, so the journaling decorator cannot build the instance it wraps."
         );
-
-    /// <summary>Container-owned holder for the shared HttpClient created by the base-address overload.</summary>
-    /// <remarks>
-    /// Registering the holder as a singleton produced by a factory is what makes the DI container the owner: the
-    /// container disposes the singletons it creates itself, so the wrapped HttpClient goes away with the
-    /// <see cref="IServiceProvider"/>. It is a holder of its own rather than the one the remote repositories use,
-    /// because the two registrations are independent - either can be present without the other, and a setup that wants
-    /// one shared client for both passes the same factory to both factory overloads.
-    /// </remarks>
-    private sealed class OwnedSyncHttpClient(HttpClient client) : IDisposable
-    {
-        /// <summary>Gets the shared client handed to the generated sync sources.</summary>
-        public HttpClient Client { get; } = client;
-
-        /// <summary>Disposes the shared client (called by the DI container when the provider is disposed).</summary>
-        public void Dispose() => Client.Dispose();
-    }
 }
 }
 
-namespace QuickER.Tests.GeneratedSyncFixture.Repositories.SqlServer
+namespace QuickER.Tests.GeneratedSyncVoFixture.Repositories.SqlServer
 {
 
 /// <summary>A factory that creates SQL Server connections.</summary>
@@ -8811,7 +7683,7 @@ public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory)
         foreach (var property in RawSqlMapper.GetBindableProperties(parameters.GetType()))
         {
             var value =
-                property.GetValue(parameters);
+                SqlParameterValue.Unwrap(property.GetValue(parameters));
 
             // Collection values (for IN) are expanded via the shared helper into @name0, @name1, ... (the @name in the SQL is rewritten too)
             if (RawSqlMapper.IsCollectionParameter(value))
@@ -8915,7 +7787,10 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
 
             if (await returningCommand.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) is byte[] version)
             {
-                _metadata.RowVersionProperty.SetValue(entity, version);
+                _metadata.RowVersionProperty.SetValue(
+                    entity,
+                    SqlValueObjectActivator.Wrap(version, _metadata.RowVersionProperty.PropertyType)
+                );
             }
 
             return;
@@ -9010,7 +7885,10 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
 
             if (await guardedCommand.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) is byte[] version)
             {
-                _metadata.RowVersionProperty.SetValue(entity, version);
+                _metadata.RowVersionProperty.SetValue(
+                    entity,
+                    SqlValueObjectActivator.Wrap(version, _metadata.RowVersionProperty.PropertyType)
+                );
                 return true;
             }
 
@@ -9054,69 +7932,6 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
 
     /// <summary>Starts a query where filters, ordering, and Include can be specified via a fluent chain.</summary>
     public SqlQuery<TEntity> Query() => new(new SqlServerSqlQueryExecutor<TEntity>(_connectionFactory));
-
-    /// <summary>
-    /// Reads an unbounded binary (excluded) column, addressed by primary key, into the destination stream (O(chunk)
-    /// streaming — the full blob is never loaded into memory). <paramref name="propertyName"/> is the C# property name of
-    /// the target column. Returns <c>false</c> when the row is missing or the column is NULL (nothing is written to the
-    /// destination), <c>true</c> when data was written (an empty blob is also true).
-    /// Optimistic concurrency (rowversion) is out of scope — this is a direct column operation on par with raw SQL.
-    /// </summary>
-    protected async Task<bool> ReadUnboundedBinaryColumnAsync(
-        string propertyName,
-        TKey id,
-        Stream destination,
-        CancellationToken cancellationToken = default
-    )
-    {
-        ArgumentNullException.ThrowIfNull(destination);
-
-        await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-
-        // Delegate to the streaming engine in standalone mode (own connection, no transaction)
-        return await UnboundedBinaryColumnEngine.ReadAsync(
-            _metadata,
-            propertyName,
-            id!,
-            destination,
-            connection,
-            transaction: null,
-            cancellationToken
-        ).ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// Writes an unbounded binary (excluded) column from a stream, addressed by primary key (O(chunk) streaming).
-    /// When <paramref name="source"/> is <c>null</c>, sets the column to NULL. A Stream that is not <c>CanSeek</c> requires
-    /// <paramref name="length"/> (omitting it throws <see cref="ArgumentException"/>). Returns <c>true</c> when a row was
-    /// updated, <c>false</c> when no row matched.
-    /// Optimistic concurrency (rowversion) is out of scope — this is a direct column operation on par with raw SQL.
-    /// </summary>
-    protected async Task<bool> WriteUnboundedBinaryColumnAsync(
-        string propertyName,
-        TKey id,
-        Stream? source,
-        long? length = null,
-        CancellationToken cancellationToken = default
-    )
-    {
-        await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-
-        // Delegate to the streaming engine in standalone mode (own connection; the write is one UPDATE, so the statement's
-        // implicit transaction is the only one involved)
-        return await UnboundedBinaryColumnEngine.WriteAsync(
-            _metadata,
-            propertyName,
-            id!,
-            source,
-            length,
-            connection,
-            transaction: null,
-            cancellationToken
-        ).ConfigureAwait(false);
-    }
 
     /// <summary>Saves inserts, updates, and deletes in a single transaction according to RowState (children cascade by default).</summary>
     /// <remarks>
@@ -9381,133 +8196,10 @@ internal sealed class SqlSaveHookContext(
         long? length = null,
         CancellationToken cancellationToken = default
     ) =>
-        UnboundedBinaryColumnEngine.WriteAsync(
-            _metadata,
-            propertyName,
-            key,
-            source,
-            length,
-            _connection,
-            _transaction,
-            cancellationToken
+        throw new NotSupportedException(
+            "Writing an unbounded binary column requires code generated with ExcludeUnboundedBinaryColumns enabled. "
+                + "Enable the option, or update the column with raw SQL (ExecuteSqlAsync)."
         );
-}
-
-/// <summary>
-/// Engine that performs streaming reads and writes of unbounded binary (excluded) columns against an in-progress connection
-/// (plus, optionally, a transaction).
-/// </summary>
-/// <remarks>
-/// <para>
-/// Shared by the repository's streaming accessors (standalone mode — no <c>transaction</c>) and the save hook's
-/// <see cref="ISaveHookContext.WriteBinaryColumnAsync"/> (enlisted mode — participating in the in-progress transaction).
-/// </para>
-/// <para>
-/// A write is a single UPDATE that streams the payload straight into its parameter, so standalone mode opens no transaction
-/// of its own — the statement's implicit one is all there is — and enlisted mode just runs on the transaction it was handed,
-/// leaving the commit to the outer Save.
-/// </para>
-/// </remarks>
-internal static class UnboundedBinaryColumnEngine
-{
-    /// <summary>Creates a command on the given connection (plus an optional transaction).</summary>
-    private static SqlCommand CreateCommand(
-        string sql,
-        SqlConnection connection,
-        SqlTransaction? transaction
-    ) => transaction is null ? new(sql, connection) : new(sql, connection, transaction);
-
-    /// <summary>Reads an unbounded binary column into the destination stream (<c>false</c> when the row is missing or the column is NULL).</summary>
-    public static async Task<bool> ReadAsync(
-        EntitySaveMetadata metadata,
-        string propertyName,
-        object key,
-        Stream destination,
-        SqlConnection connection,
-        SqlTransaction? transaction,
-        CancellationToken cancellationToken
-    )
-    {
-        var column = metadata.ColumnByPropertyName(propertyName);
-        var quotedColumn = metadata.QuotedColumnName(column);
-
-        await using var command = CreateCommand(
-            $"SELECT {quotedColumn} FROM {metadata.TableName} WHERE [{metadata.KeyColumnName}] = @id;",
-            connection,
-            transaction
-        );
-        metadata.BindKeyParameter(command, key);
-
-        // Read the column sequentially as a stream with SequentialAccess (avoids buffering a huge blob at once)
-        await using var reader = await command.ExecuteReaderAsync(
-            CommandBehavior.SequentialAccess,
-            cancellationToken
-        ).ConfigureAwait(false);
-
-        if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
-        {
-            return false;
-        }
-
-        if (await reader.IsDBNullAsync(0, cancellationToken).ConfigureAwait(false))
-        {
-            return false;
-        }
-
-        await using var source = reader.GetStream(0);
-        await source.CopyToAsync(
-            destination,
-            UnboundedBinaryColumns.StreamCopyBufferSize,
-            cancellationToken
-        ).ConfigureAwait(false);
-        return true;
-    }
-
-    /// <summary>Writes an unbounded binary column from a stream (<paramref name="source"/>=null means SET NULL; <c>false</c> when no row matched).</summary>
-    public static async Task<bool> WriteAsync(
-        EntitySaveMetadata metadata,
-        string propertyName,
-        object key,
-        Stream? source,
-        long? length,
-        SqlConnection connection,
-        SqlTransaction? transaction,
-        CancellationToken cancellationToken
-    )
-    {
-        var column = metadata.ColumnByPropertyName(propertyName);
-        var quotedColumn = metadata.QuotedColumnName(column);
-
-        // source=null sets the column to NULL (the way to reset an excluded column to "unset")
-        if (source is null)
-        {
-            await using var nullCommand = CreateCommand(
-                $"UPDATE {metadata.TableName} SET {quotedColumn} = NULL WHERE [{metadata.KeyColumnName}] = @id;",
-                connection,
-                transaction
-            );
-            metadata.BindKeyParameter(nullCommand, key);
-            return await nullCommand.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) > 0;
-        }
-
-        // The CanSeek/length contract is validated uniformly across dialects (SQLite's zeroblob requires a fixed length)
-        var payloadLength = UnboundedBinaryColumns.ResolveWriteLength(source, length);
-        // SqlClient streams the upload when a Stream is passed as Value with SqlDbType.VarBinary and Size=-1 (max)
-        _ = payloadLength;
-
-        await using var command = CreateCommand(
-            $"UPDATE {metadata.TableName} SET {quotedColumn} = @data WHERE [{metadata.KeyColumnName}] = @id;",
-            connection,
-            transaction
-        );
-        var parameter = new SqlParameter("@data", SqlDbType.VarBinary, -1)
-        {
-            Value = source,
-        };
-        command.Parameters.Add(parameter);
-        metadata.BindKeyParameter(command, key);
-        return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) > 0;
-    }
 }
 
 /// <summary>A query WHERE clause parameter (name, value, target column name). The column name is set only when known and is used for explicit typing.</summary>
@@ -9543,6 +8235,7 @@ internal sealed class SqlServerSqlQueryExecutor<TEntity>(ISqlConnectionFactory c
         {
             Modifiers = { IncludeNavigationProperties },
         },
+        Converters = { new ValueObjectJsonConverterFactory() },
     };
 
     /// <summary>Re-registers navigation properties dropped from the contract by [JsonIgnore] and the like as deserialization targets.</summary>
@@ -9968,7 +8661,7 @@ internal sealed class SqlServerSqlQueryExecutor<TEntity>(ISqlConnectionFactory c
         foreach (var parameter in parameters)
         {
             var value =
-                parameter.Value;
+                SqlParameterValue.Unwrap(parameter.Value);
             metadata.AddQueryParameter(command, parameter.Name, parameter.ColumnName, value);
         }
     }
@@ -10169,7 +8862,7 @@ internal static class SqlExpressionTranslator
                 // The argument may be a string or a value object (the TSelf overload). Value objects are unwrapped to the raw value (string)
                 // A null pattern is unreachable when the query was built through SqlQuery.Where (the guard rejects it up front); kept as defense in depth
                 var raw =
-                    Evaluate(call.Arguments[0]) as string
+                    SqlParameterValue.Unwrap(Evaluate(call.Arguments[0])) as string
                     ?? throw new ArgumentNullException(
                         "value",
                         "The pattern argument of Contains/StartsWith/EndsWith in a query predicate must not be null."
@@ -10355,8 +9048,8 @@ internal static class SqlExpressionTranslator
         : TryGetDatePart(expression, out var datePart) ? datePart
         : null;
 
-    /// <summary>Whether an evaluated value operand is null.</summary>
-    private static bool IsNullValue(object? value) => value is null;
+    /// <summary>Whether an evaluated value operand is null (a value object is unwrapped first, so one wrapping a null underlying value counts as null too).</summary>
+    private static bool IsNullValue(object? value) => SqlParameterValue.Unwrap(value) is null;
 
     private enum LikeKind
     {
@@ -10375,6 +9068,7 @@ internal static class SqlExpressionTranslator
             || call.Arguments.Count != 1
             || (
                 call.Method.DeclaringType != typeof(string)
+                && !IsValueObjectStringMethod(call.Method)
             )
         )
         {
@@ -10615,6 +9309,11 @@ internal static class SqlExpressionTranslator
         return true;
     }
 
+    /// <summary>Whether the method is Contains/StartsWith/EndsWith of a string value object (derived from ValueObjectStringBase).</summary>
+    private static bool IsValueObjectStringMethod(MethodInfo method) =>
+        method.DeclaringType is { IsGenericType: true } declaring
+        && declaring.GetGenericTypeDefinition() == typeof(ValueObjectStringBase<>);
+
     /// <summary>Removes Convert nodes such as boxing to object.</summary>
     private static Expression Unwrap(Expression expression)
     {
@@ -10687,6 +9386,18 @@ internal static class SqlExpressionTranslator
         if (IsColumn(member))
         {
             return ColumnName(member.Member);
+        }
+
+        // Strip the value object's .Value and resolve to the inner column ([col]) (x.Col.Value -> [col])
+        if (
+            member.Member.Name == "Value"
+            && typeof(IValueObject).IsAssignableFrom(member.Member.DeclaringType)
+            && member.Expression is { } inner
+            && Unwrap(inner) is MemberExpression valueObjectColumn
+            && IsColumn(valueObjectColumn)
+        )
+        {
+            return ColumnName(valueObjectColumn.Member);
         }
 
         return null;
@@ -10855,9 +9566,6 @@ internal sealed class EntitySaveMetadata
 
     /// <summary>Gets the table name wrapped in quoting brackets.</summary>
     public required string TableName { get; init; }
-
-    /// <summary>Gets the raw, unquoted table name (required by SqliteBlob and friends in the unbounded binary column Stream accessors).</summary>
-    public required string RawTableName { get; init; }
 
     /// <summary>Gets the property that corresponds to the primary key.</summary>
     public required PropertyInfo KeyProperty { get; init; }
@@ -11045,7 +9753,6 @@ internal sealed class EntitySaveMetadata
         return new EntitySaveMetadata
         {
             TableName = tableName,
-            RawTableName = tableAttribute.Name,
             KeyProperty = keyProperty,
             KeyColumnName = keyColumnName,
             AllProperties = columns,
@@ -11152,6 +9859,59 @@ internal sealed class EntitySaveMetadata
         };
     }
 
+    /// <summary>Caches the type-specialized pair resolved per value object property type (<c>null</c> when the type has no fast path).</summary>
+    private static readonly ConcurrentDictionary<
+        Type,
+        (MethodInfo Getter, MethodInfo Create)?
+    > _valueObjectReaderCache = new();
+
+    /// <summary>
+    /// Resolves the type-specialized pair for a value object property: the reader accessor for its underlying value and
+    /// the static <c>Create</c> factory that wraps it.
+    /// </summary>
+    /// <remarks>
+    /// Returns <c>null</c> when the property is not a value object, when its underlying type has no type-specialized
+    /// accessor (<c>byte[]</c> and friends), or when no matching factory exists; those columns take the fallback.
+    /// </remarks>
+    private static (MethodInfo Getter, MethodInfo Create)? ResolveValueObjectReader(
+        Type propertyType
+    ) => _valueObjectReaderCache.GetOrAdd(propertyType, ResolveValueObjectReaderCore);
+
+    /// <summary>Performs the uncached resolution behind <see cref="ResolveValueObjectReader"/>.</summary>
+    private static (MethodInfo Getter, MethodInfo Create)? ResolveValueObjectReaderCore(
+        Type propertyType
+    )
+    {
+        var iface = Array.Find(
+            propertyType.GetInterfaces(),
+            i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IValueObject<,>)
+        );
+
+        if (iface is null)
+        {
+            return null;
+        }
+
+        // The underlying value type is the second type argument of IValueObject<TSelf, TValue>
+        if (!_typedReaders.TryGetValue(iface.GetGenericArguments()[1], out var getter))
+        {
+            return null;
+        }
+
+        // FlattenHierarchy: Create is declared on ValueObjectBase, and without the flag reflection never returns a
+        // static member declared on a base class - the resolution would quietly fail and every value object column
+        // would take the SetColumnValue fallback instead of the fast path.
+        var create = propertyType.GetMethod(
+            "Create",
+            BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy,
+            binder: null,
+            new[] { getter.ReturnType },
+            modifiers: null
+        );
+
+        return create is null ? null : (getter, create);
+    }
+
     /// <summary>
     /// Builds the expression-tree-compiled delegate that materializes one row of SelectColumns (the fixed SELECT set)
     /// into an entity using a pre-resolved ordinal array (once per type).
@@ -11159,6 +9919,8 @@ internal sealed class EntitySaveMetadata
     /// <remarks>
     /// Columns with a type-specialized accessor are read directly without boxing (<c>DBNull</c> becomes the default value,
     /// equivalent to the previous <c>SetValue(null)</c>);
+    /// a value object column whose underlying value has such an accessor reads it the same way and calls the value object's
+    /// static <c>Create</c> factory directly;
     /// all other columns fall back to the previous
     /// <see cref="SetColumnValue"/> (dialect-specific conversion / value object re-wrapping).
     /// The resulting final state (<c>RowState = Unchanged</c>) matches the previous row mapping.
@@ -11226,6 +9988,29 @@ internal sealed class EntitySaveMetadata
                 read
             );
             return Expression.Assign(Expression.Property(entityExpr, property), value);
+        }
+
+        // A value object whose underlying value has a type-specialized accessor reads that value without boxing and
+        // calls the static Create factory straight from the expression tree (no reflection Invoke, no Convert.ChangeType,
+        // and DBNull becomes null, equivalent to the previous SetValue(null))
+        if (ResolveValueObjectReader(propertyType) is (var voGetter, var voCreate))
+        {
+            Expression created = Expression.Call(
+                voCreate,
+                Expression.Call(readerParam, voGetter, ordinal)
+            );
+
+            if (created.Type != propertyType)
+            {
+                created = Expression.Convert(created, propertyType);
+            }
+
+            var wrapped = Expression.Condition(
+                Expression.Call(readerParam, _isDbNullMethod, ordinal),
+                Expression.Default(propertyType),
+                created
+            );
+            return Expression.Assign(Expression.Property(entityExpr, property), wrapped);
         }
 
         // Fallback: call the previous SetColumnValue (DBNull to null / dialect-specific conversion / value object re-wrapping) via the ordinal
@@ -11365,8 +10150,20 @@ internal sealed class EntitySaveMetadata
         }
         else
         {
-            // SQL Server ADO returns the exact CLR type for the column, so assign it as-is
-            property.SetValue(entity, value);
+            // Value objects are converted to the wrapped type and re-wrapped (Wrap already applies Convert.ChangeType).
+            // A stored value the value object rejects surfaces as a validation failure with no hint of where it came from,
+            // so the column is named here and the original exception is kept as the inner one
+            try
+            {
+                property.SetValue(entity, SqlValueObjectActivator.Wrap(value, property.PropertyType));
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                throw new InvalidOperationException(
+                    $"The stored value of column '{GetColumnName(property)}' could not be mapped to {entity.GetType().Name}.{property.Name} ({property.PropertyType.Name}): {ex.Message}",
+                    ex
+                );
+            }
         }
     }
 
@@ -11561,7 +10358,7 @@ internal sealed class EntitySaveMetadata
                 command,
                 $"@{property.Name}",
                 property,
-                property.GetValue(entity)
+                SqlParameterValue.Unwrap(property.GetValue(entity))
             );
         }
     }
@@ -11580,7 +10377,7 @@ internal sealed class EntitySaveMetadata
                 command,
                 $"@{property.Name}",
                 property,
-                property.GetValue(entity)
+                SqlParameterValue.Unwrap(property.GetValue(entity))
             );
         }
 
@@ -11588,7 +10385,7 @@ internal sealed class EntitySaveMetadata
             command,
             "@id",
             KeyProperty,
-            KeyProperty.GetValue(entity)
+            SqlParameterValue.Unwrap(KeyProperty.GetValue(entity))
         );
     }
 
@@ -11599,7 +10396,7 @@ internal sealed class EntitySaveMetadata
             command,
             "@id",
             KeyProperty,
-            KeyProperty.GetValue(entity)
+            SqlParameterValue.Unwrap(KeyProperty.GetValue(entity))
         );
     }
 
@@ -11615,7 +10412,7 @@ internal sealed class EntitySaveMetadata
             command,
             "@originalRowVersion",
             property,
-            property.GetValue(entity)
+            SqlParameterValue.Unwrap(property.GetValue(entity))
         );
     }
 
@@ -11623,7 +10420,7 @@ internal sealed class EntitySaveMetadata
     public void BindKeyParameter(SqlCommand command, object? id)
     {
         var value =
-            id
+            SqlParameterValue.Unwrap(id)
             ?? throw new InvalidOperationException("id cannot be null.");
         AddColumnParameter(command, "@id", KeyProperty, value);
     }
@@ -11740,7 +10537,7 @@ internal sealed class EntitySaveMetadata
         public bool Read() => _enumerator.MoveNext();
 
         public object GetValue(int i) =>
-            _properties[i].GetValue(_enumerator.Current) ?? DBNull.Value;
+            SqlParameterValue.Unwrap(_properties[i].GetValue(_enumerator.Current)) ?? DBNull.Value;
 
         public string GetName(int i) => _columnNames[i];
 
@@ -11835,20 +10632,6 @@ internal sealed class EntitySaveMetadata
 
     private static string GetColumnName(PropertyInfo property) =>
         property.GetCustomAttribute<ColumnAttribute>()?.Name ?? property.Name;
-
-    /// <summary>Looks up the column property for a C# property name (searched across all columns, including unbounded binary = excluded columns). Used by the Stream accessors in both the repository and the in-memory implementation.</summary>
-    public PropertyInfo ColumnByPropertyName(string propertyName) =>
-        AllProperties.FirstOrDefault(property => property.Name == propertyName)
-        ?? throw new InvalidOperationException(
-            $"Property {propertyName} was not found as a column."
-        );
-
-    /// <summary>Returns the quoted column name of the specified column property (for example: [payload]) (for building SQL in the Stream accessors).</summary>
-    public string QuotedColumnName(PropertyInfo property) =>
-        $"[{GetColumnName(property)}]";
-
-    /// <summary>Returns the raw, unquoted column name of the specified column property (required by SqliteBlob and friends).</summary>
-    public string RawColumnName(PropertyInfo property) => GetColumnName(property);
 }
 
 /// <summary>Planner that builds the cascade-delete DELETE statements from FK metadata (database-independent, pure).</summary>
@@ -11984,7 +10767,24 @@ internal sealed class RowVersionCollector
     {
         foreach (var (entity, version) in _versions)
         {
-            EntitySaveMetadata.For(entity.GetType()).RowVersionProperty!.SetValue(entity, version);
+            var property = EntitySaveMetadata.For(entity.GetType()).RowVersionProperty!;
+
+            // The raw bytes are wrapped here when the property is a value object type. A value object that rejects the
+            // bytes the database assigned would otherwise fail with no indication of which property was being written
+            try
+            {
+                property.SetValue(
+                    entity,
+                    SqlValueObjectActivator.Wrap(version, property.PropertyType)
+                );
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                throw new InvalidOperationException(
+                    $"The row version the database assigned could not be written back to {entity.GetType().Name}.{property.Name} ({property.PropertyType.Name}): {ex.Message}",
+                    ex
+                );
+            }
         }
     }
 }
@@ -12582,30 +11382,16 @@ public static class GeneratedSqlServerRepositoryServiceCollectionExtensions
         services.TryAddScoped<ISaveHookRegistry>(provider => new ServiceProviderSaveHookRegistry(
             provider
         ));
-        services.AddScoped<ISyncOrderRepository>(provider => new SyncOrderRepository(
+        services.AddScoped<ISyncvoOrderRepository>(provider => new SyncvoOrderRepository(
             provider.GetRequiredService<ISqlConnectionFactory>(),
             provider.GetService<ISaveHookRegistry>(),
             provider.GetService<ISqlExecutor>()
         ));
-        services.AddScoped<ISyncOrderRemoteRepository>(provider =>
-            provider.GetRequiredService<ISyncOrderRepository>()
-        );
-        services.AddScoped<ISyncOrderLineRepository>(provider => new SyncOrderLineRepository(
+        services.AddScoped<ISyncvoLineRepository>(provider => new SyncvoLineRepository(
             provider.GetRequiredService<ISqlConnectionFactory>(),
             provider.GetService<ISaveHookRegistry>(),
             provider.GetService<ISqlExecutor>()
         ));
-        services.AddScoped<ISyncOrderLineRemoteRepository>(provider =>
-            provider.GetRequiredService<ISyncOrderLineRepository>()
-        );
-        services.AddScoped<ISyncNoteRepository>(provider => new SyncNoteRepository(
-            provider.GetRequiredService<ISqlConnectionFactory>(),
-            provider.GetService<ISaveHookRegistry>(),
-            provider.GetService<ISqlExecutor>()
-        ));
-        services.AddScoped<ISyncNoteRemoteRepository>(provider =>
-            provider.GetRequiredService<ISyncNoteRepository>()
-        );
 
         return services;
     }
@@ -12636,64 +11422,44 @@ public static class GeneratedSqlServerRepositoryServiceCollectionExtensions
         services.TryAddScoped<ISaveHookRegistry>(provider => new ServiceProviderSaveHookRegistry(
             provider
         ));
-        services.AddKeyedScoped<ISyncOrderRepository>(
+        services.AddKeyedScoped<ISyncvoOrderRepository>(
             serviceKey,
-            (provider, key) => new SyncOrderRepository(
+            (provider, key) => new SyncvoOrderRepository(
                 connectionFactory,
                 provider.GetService<ISaveHookRegistry>(),
                 provider.GetKeyedService<ISqlExecutor>(key)
             )
         );
-        services.AddKeyedScoped<ISyncOrderRemoteRepository>(
+        services.AddKeyedScoped<ISyncvoLineRepository>(
             serviceKey,
-            (provider, key) => provider.GetRequiredKeyedService<ISyncOrderRepository>(key)
-        );
-        services.AddKeyedScoped<ISyncOrderLineRepository>(
-            serviceKey,
-            (provider, key) => new SyncOrderLineRepository(
+            (provider, key) => new SyncvoLineRepository(
                 connectionFactory,
                 provider.GetService<ISaveHookRegistry>(),
                 provider.GetKeyedService<ISqlExecutor>(key)
             )
-        );
-        services.AddKeyedScoped<ISyncOrderLineRemoteRepository>(
-            serviceKey,
-            (provider, key) => provider.GetRequiredKeyedService<ISyncOrderLineRepository>(key)
-        );
-        services.AddKeyedScoped<ISyncNoteRepository>(
-            serviceKey,
-            (provider, key) => new SyncNoteRepository(
-                connectionFactory,
-                provider.GetService<ISaveHookRegistry>(),
-                provider.GetKeyedService<ISqlExecutor>(key)
-            )
-        );
-        services.AddKeyedScoped<ISyncNoteRemoteRepository>(
-            serviceKey,
-            (provider, key) => provider.GetRequiredKeyedService<ISyncNoteRepository>(key)
         );
 
         return services;
     }
 }
 
-/// <summary>Repository implementation for SyncOrderEntity.</summary>
-public sealed partial class SyncOrderRepository(
+/// <summary>Repository implementation for SyncvoOrderEntity.</summary>
+public sealed partial class SyncvoOrderRepository(
     ISqlConnectionFactory connectionFactory,
     ISaveHookRegistry? saveHooks = null,
     ISqlExecutor? sqlExecutor = null
-) : SqlServerRepository<SyncOrderEntity, int>(connectionFactory, saveHooks, sqlExecutor), ISyncOrderRepository
+) : SqlServerRepository<SyncvoOrderEntity, OrderIdValue>(connectionFactory, saveHooks, sqlExecutor), ISyncvoOrderRepository
 {
     /// <inheritdoc />
     public async Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
-        SyncOrderEntity entity,
+        SyncvoOrderEntity entity,
         CancellationToken cancellationToken = default
     )
     {
         ArgumentNullException.ThrowIfNull(entity);
         var violations = new List<UniquenessViolation>();
 
-        List<UniquenessCheck<SyncOrderEntity>>? customChecks = null;
+        List<UniquenessCheck<SyncvoOrderEntity>>? customChecks = null;
         CollectCustomUniquenessChecks(ref customChecks);
         await UniquenessChecker
             .RunCustomChecksAsync(entity, customChecks, violations, cancellationToken)
@@ -12704,35 +11470,27 @@ public sealed partial class SyncOrderRepository(
 
     /// <summary>Extension point for adding user-defined uniqueness checks (add delegates to the list in a partial implementation; while unimplemented the call is erased at no cost).</summary>
     partial void CollectCustomUniquenessChecks(
-        ref List<UniquenessCheck<SyncOrderEntity>>? checks
+        ref List<UniquenessCheck<SyncvoOrderEntity>>? checks
     );
-
-    /// <inheritdoc />
-    public Task<bool> ReadAttachmentAsync(int id, Stream destination, CancellationToken cancellationToken = default) =>
-        ReadUnboundedBinaryColumnAsync(nameof(SyncOrderEntity.Attachment), id, destination, cancellationToken);
-
-    /// <inheritdoc />
-    public Task<bool> WriteAttachmentAsync(int id, Stream? source, long? length = null, CancellationToken cancellationToken = default) =>
-        WriteUnboundedBinaryColumnAsync(nameof(SyncOrderEntity.Attachment), id, source, length, cancellationToken);
 }
 
-/// <summary>Repository implementation for SyncOrderLineEntity.</summary>
-public sealed partial class SyncOrderLineRepository(
+/// <summary>Repository implementation for SyncvoLineEntity.</summary>
+public sealed partial class SyncvoLineRepository(
     ISqlConnectionFactory connectionFactory,
     ISaveHookRegistry? saveHooks = null,
     ISqlExecutor? sqlExecutor = null
-) : SqlServerRepository<SyncOrderLineEntity, int>(connectionFactory, saveHooks, sqlExecutor), ISyncOrderLineRepository
+) : SqlServerRepository<SyncvoLineEntity, LineIdValue>(connectionFactory, saveHooks, sqlExecutor), ISyncvoLineRepository
 {
     /// <inheritdoc />
     public async Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
-        SyncOrderLineEntity entity,
+        SyncvoLineEntity entity,
         CancellationToken cancellationToken = default
     )
     {
         ArgumentNullException.ThrowIfNull(entity);
         var violations = new List<UniquenessViolation>();
 
-        List<UniquenessCheck<SyncOrderLineEntity>>? customChecks = null;
+        List<UniquenessCheck<SyncvoLineEntity>>? customChecks = null;
         CollectCustomUniquenessChecks(ref customChecks);
         await UniquenessChecker
             .RunCustomChecksAsync(entity, customChecks, violations, cancellationToken)
@@ -12743,43 +11501,12 @@ public sealed partial class SyncOrderLineRepository(
 
     /// <summary>Extension point for adding user-defined uniqueness checks (add delegates to the list in a partial implementation; while unimplemented the call is erased at no cost).</summary>
     partial void CollectCustomUniquenessChecks(
-        ref List<UniquenessCheck<SyncOrderLineEntity>>? checks
-    );
-}
-
-/// <summary>Repository implementation for SyncNoteEntity.</summary>
-public sealed partial class SyncNoteRepository(
-    ISqlConnectionFactory connectionFactory,
-    ISaveHookRegistry? saveHooks = null,
-    ISqlExecutor? sqlExecutor = null
-) : SqlServerRepository<SyncNoteEntity, int>(connectionFactory, saveHooks, sqlExecutor), ISyncNoteRepository
-{
-    /// <inheritdoc />
-    public async Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
-        SyncNoteEntity entity,
-        CancellationToken cancellationToken = default
-    )
-    {
-        ArgumentNullException.ThrowIfNull(entity);
-        var violations = new List<UniquenessViolation>();
-
-        List<UniquenessCheck<SyncNoteEntity>>? customChecks = null;
-        CollectCustomUniquenessChecks(ref customChecks);
-        await UniquenessChecker
-            .RunCustomChecksAsync(entity, customChecks, violations, cancellationToken)
-            .ConfigureAwait(false);
-
-        return violations;
-    }
-
-    /// <summary>Extension point for adding user-defined uniqueness checks (add delegates to the list in a partial implementation; while unimplemented the call is erased at no cost).</summary>
-    partial void CollectCustomUniquenessChecks(
-        ref List<UniquenessCheck<SyncNoteEntity>>? checks
+        ref List<UniquenessCheck<SyncvoLineEntity>>? checks
     );
 }
 }
 
-namespace QuickER.Tests.GeneratedSyncFixture.Repositories.Sqlite
+namespace QuickER.Tests.GeneratedSyncVoFixture.Repositories.Sqlite
 {
 
 /// <summary>A factory that creates SQLite connections.</summary>
@@ -12999,7 +11726,7 @@ public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory)
         foreach (var property in RawSqlMapper.GetBindableProperties(parameters.GetType()))
         {
             var value =
-                property.GetValue(parameters);
+                SqlParameterValue.Unwrap(property.GetValue(parameters));
 
             // Collection values (for IN) are expanded via the shared helper into @name0, @name1, ... (the @name in the SQL is rewritten too)
             if (RawSqlMapper.IsCollectionParameter(value))
@@ -13208,69 +11935,6 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
 
     /// <summary>Starts a query where filters, ordering, and Include can be specified via a fluent chain.</summary>
     public SqlQuery<TEntity> Query() => new(new SqliteSqlQueryExecutor<TEntity>(_connectionFactory));
-
-    /// <summary>
-    /// Reads an unbounded binary (excluded) column, addressed by primary key, into the destination stream (O(chunk)
-    /// streaming — the full blob is never loaded into memory). <paramref name="propertyName"/> is the C# property name of
-    /// the target column. Returns <c>false</c> when the row is missing or the column is NULL (nothing is written to the
-    /// destination), <c>true</c> when data was written (an empty blob is also true).
-    /// Optimistic concurrency (rowversion) is out of scope — this is a direct column operation on par with raw SQL.
-    /// </summary>
-    protected async Task<bool> ReadUnboundedBinaryColumnAsync(
-        string propertyName,
-        TKey id,
-        Stream destination,
-        CancellationToken cancellationToken = default
-    )
-    {
-        ArgumentNullException.ThrowIfNull(destination);
-
-        await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-
-        // Delegate to the streaming engine in standalone mode (own connection, no transaction)
-        return await UnboundedBinaryColumnEngine.ReadAsync(
-            _metadata,
-            propertyName,
-            id!,
-            destination,
-            connection,
-            transaction: null,
-            cancellationToken
-        ).ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// Writes an unbounded binary (excluded) column from a stream, addressed by primary key (O(chunk) streaming).
-    /// When <paramref name="source"/> is <c>null</c>, sets the column to NULL. A Stream that is not <c>CanSeek</c> requires
-    /// <paramref name="length"/> (omitting it throws <see cref="ArgumentException"/>). Returns <c>true</c> when a row was
-    /// updated, <c>false</c> when no row matched.
-    /// Optimistic concurrency (rowversion) is out of scope — this is a direct column operation on par with raw SQL.
-    /// </summary>
-    protected async Task<bool> WriteUnboundedBinaryColumnAsync(
-        string propertyName,
-        TKey id,
-        Stream? source,
-        long? length = null,
-        CancellationToken cancellationToken = default
-    )
-    {
-        await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-
-        // Delegate to the streaming engine in standalone mode (own connection, and the engine opens a transaction of its own
-        // because the write takes several statements)
-        return await UnboundedBinaryColumnEngine.WriteAsync(
-            _metadata,
-            propertyName,
-            id!,
-            source,
-            length,
-            connection,
-            transaction: null,
-            cancellationToken
-        ).ConfigureAwait(false);
-    }
 
     /// <summary>Saves inserts, updates, and deletes in a single transaction according to RowState (children cascade by default).</summary>
     public async Task<int> SaveAsync(
@@ -13509,218 +12173,10 @@ internal sealed class SqlSaveHookContext(
         long? length = null,
         CancellationToken cancellationToken = default
     ) =>
-        UnboundedBinaryColumnEngine.WriteAsync(
-            _metadata,
-            propertyName,
-            key,
-            source,
-            length,
-            _connection,
-            _transaction,
-            cancellationToken
+        throw new NotSupportedException(
+            "Writing an unbounded binary column requires code generated with ExcludeUnboundedBinaryColumns enabled. "
+                + "Enable the option, or update the column with raw SQL (ExecuteSqlAsync)."
         );
-}
-
-/// <summary>
-/// Engine that performs streaming reads and writes of unbounded binary (excluded) columns against an in-progress connection
-/// (plus, optionally, a transaction).
-/// </summary>
-/// <remarks>
-/// <para>
-/// Shared by the repository's streaming accessors (standalone mode — no <c>transaction</c>) and the save hook's
-/// <see cref="ISaveHookContext.WriteBinaryColumnAsync"/> (enlisted mode — participating in the in-progress transaction).
-/// </para>
-/// <para>
-/// <b>Beware the enlisted/standalone split</b>: a write allocates a zeroblob, resolves the rowid, and copies via
-/// SqliteBlob within one transaction. Standalone mode opens its own transaction and commits it, whereas enlisted mode uses
-/// the in-progress transaction as is and does not commit (the outer Save commits). Mixing these up loses the blob.
-/// </para>
-/// </remarks>
-internal static class UnboundedBinaryColumnEngine
-{
-    /// <summary>Creates a command on the given connection (plus an optional transaction).</summary>
-    private static SqliteCommand CreateCommand(
-        string sql,
-        SqliteConnection connection,
-        SqliteTransaction? transaction
-    ) => transaction is null ? new(sql, connection) : new(sql, connection, transaction);
-
-    /// <summary>Reads an unbounded binary column into the destination stream (<c>false</c> when the row is missing or the column is NULL).</summary>
-    public static async Task<bool> ReadAsync(
-        EntitySaveMetadata metadata,
-        string propertyName,
-        object key,
-        Stream destination,
-        SqliteConnection connection,
-        SqliteTransaction? transaction,
-        CancellationToken cancellationToken
-    )
-    {
-        var column = metadata.ColumnByPropertyName(propertyName);
-        var quotedColumn = metadata.QuotedColumnName(column);
-
-        // Resolve the rowid and test for NULL in a single SELECT (SqliteBlob requires a rowid table; safe because QuickER's
-        // SQLite DDL never generates WITHOUT ROWID). IS NULL yields 1 (true)
-        long rowid;
-
-        await using (
-            var probe = CreateCommand(
-                $"SELECT rowid, {quotedColumn} IS NULL FROM {metadata.TableName} WHERE \"{metadata.KeyColumnName}\" = @id;",
-                connection,
-                transaction
-            )
-        )
-        {
-            metadata.BindKeyParameter(probe, key);
-            await using var reader = await probe.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-
-            if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
-            {
-                return false;
-            }
-
-            if (reader.GetInt64(1) != 0)
-            {
-                return false;
-            }
-
-            rowid = reader.GetInt64(0);
-        }
-
-        await using var blob = new SqliteBlob(
-            connection,
-            metadata.RawTableName,
-            metadata.RawColumnName(column),
-            rowid,
-            readOnly: true
-        );
-        await blob.CopyToAsync(
-            destination,
-            UnboundedBinaryColumns.StreamCopyBufferSize,
-            cancellationToken
-        ).ConfigureAwait(false);
-        return true;
-    }
-
-    /// <summary>Writes an unbounded binary column from a stream (<paramref name="source"/>=null means SET NULL; <c>false</c> when no row matched).</summary>
-    public static async Task<bool> WriteAsync(
-        EntitySaveMetadata metadata,
-        string propertyName,
-        object key,
-        Stream? source,
-        long? length,
-        SqliteConnection connection,
-        SqliteTransaction? transaction,
-        CancellationToken cancellationToken
-    )
-    {
-        var column = metadata.ColumnByPropertyName(propertyName);
-        var quotedColumn = metadata.QuotedColumnName(column);
-
-        // source=null sets the column to NULL (the way to reset an excluded column to "unset")
-        if (source is null)
-        {
-            await using var nullCommand = CreateCommand(
-                $"UPDATE {metadata.TableName} SET {quotedColumn} = NULL WHERE \"{metadata.KeyColumnName}\" = @id;",
-                connection,
-                transaction
-            );
-            metadata.BindKeyParameter(nullCommand, key);
-            return await nullCommand.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) > 0;
-        }
-
-        // The CanSeek/length contract is validated uniformly across dialects (SQLite's zeroblob requires a fixed length)
-        var payloadLength = UnboundedBinaryColumns.ResolveWriteLength(source, length);
-
-        // Enlisted mode (transaction given) uses the outer transaction and does not commit.
-        // Standalone mode (no transaction) opens its own transaction and commits on success
-        var ownsTransaction = transaction is null;
-        var activeTransaction =
-            transaction
-            ?? (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
-
-        try
-        {
-            await using (
-                var allocate = new SqliteCommand(
-                    $"UPDATE {metadata.TableName} SET {quotedColumn} = zeroblob(@len) WHERE \"{metadata.KeyColumnName}\" = @id;",
-                    connection,
-                    activeTransaction
-                )
-            )
-            {
-                allocate.Parameters.AddWithValue("@len", payloadLength);
-                metadata.BindKeyParameter(allocate, key);
-
-                if (await allocate.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) == 0)
-                {
-                    // No matching row (the zeroblob could not be allocated). Roll back only in standalone mode (enlisted mode defers to the outer transaction).
-                    // CancellationToken.None, as everywhere else: a canceled token must not be able to interrupt a rollback.
-                    if (ownsTransaction)
-                    {
-                        await activeTransaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
-                    }
-
-                    return false;
-                }
-            }
-
-            long rowid;
-
-            await using (
-                var rowidCommand = new SqliteCommand(
-                    $"SELECT rowid FROM {metadata.TableName} WHERE \"{metadata.KeyColumnName}\" = @id;",
-                    connection,
-                    activeTransaction
-                )
-            )
-            {
-                metadata.BindKeyParameter(rowidCommand, key);
-                rowid = (long)(await rowidCommand.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false))!;
-            }
-
-            await using (
-                var blob = new SqliteBlob(
-                    connection,
-                    metadata.RawTableName,
-                    metadata.RawColumnName(column),
-                    rowid,
-                    readOnly: false
-                )
-            )
-            {
-                await source.CopyToAsync(
-                    blob,
-                    UnboundedBinaryColumns.StreamCopyBufferSize,
-                    cancellationToken
-                ).ConfigureAwait(false);
-            }
-
-            // Commit only in standalone mode (in enlisted mode the outer Save commits — do not close it here)
-            if (ownsTransaction)
-            {
-                await activeTransaction.CommitAsync(cancellationToken).ConfigureAwait(false);
-            }
-
-            return true;
-        }
-        catch
-        {
-            if (ownsTransaction)
-            {
-                await SqlTransactions.RollbackQuietlyAsync(activeTransaction).ConfigureAwait(false);
-            }
-
-            throw;
-        }
-        finally
-        {
-            if (ownsTransaction)
-            {
-                await activeTransaction.DisposeAsync().ConfigureAwait(false);
-            }
-        }
-    }
 }
 
 /// <summary>A query WHERE clause parameter (name, value, target column name). The column name is set only when known and is used for explicit typing.</summary>
@@ -14142,7 +12598,7 @@ internal sealed class SqliteSqlQueryExecutor<TEntity>(ISqlConnectionFactory conn
         foreach (var parameter in parameters)
         {
             var value =
-                parameter.Value;
+                SqlParameterValue.Unwrap(parameter.Value);
             metadata.AddQueryParameter(command, parameter.Name, parameter.ColumnName, value);
         }
     }
@@ -14468,7 +12924,7 @@ internal static class SqlExpressionTranslator
                 // The argument may be a string or a value object (the TSelf overload). Value objects are unwrapped to the raw value (string)
                 // A null pattern is unreachable when the query was built through SqlQuery.Where (the guard rejects it up front); kept as defense in depth
                 var raw =
-                    Evaluate(call.Arguments[0]) as string
+                    SqlParameterValue.Unwrap(Evaluate(call.Arguments[0])) as string
                     ?? throw new ArgumentNullException(
                         "value",
                         "The pattern argument of Contains/StartsWith/EndsWith in a query predicate must not be null."
@@ -14654,8 +13110,8 @@ internal static class SqlExpressionTranslator
         : TryGetDatePart(expression, out var datePart) ? datePart
         : null;
 
-    /// <summary>Whether an evaluated value operand is null.</summary>
-    private static bool IsNullValue(object? value) => value is null;
+    /// <summary>Whether an evaluated value operand is null (a value object is unwrapped first, so one wrapping a null underlying value counts as null too).</summary>
+    private static bool IsNullValue(object? value) => SqlParameterValue.Unwrap(value) is null;
 
     private enum LikeKind
     {
@@ -14674,6 +13130,7 @@ internal static class SqlExpressionTranslator
             || call.Arguments.Count != 1
             || (
                 call.Method.DeclaringType != typeof(string)
+                && !IsValueObjectStringMethod(call.Method)
             )
         )
         {
@@ -14914,6 +13371,11 @@ internal static class SqlExpressionTranslator
         return true;
     }
 
+    /// <summary>Whether the method is Contains/StartsWith/EndsWith of a string value object (derived from ValueObjectStringBase).</summary>
+    private static bool IsValueObjectStringMethod(MethodInfo method) =>
+        method.DeclaringType is { IsGenericType: true } declaring
+        && declaring.GetGenericTypeDefinition() == typeof(ValueObjectStringBase<>);
+
     /// <summary>Removes Convert nodes such as boxing to object.</summary>
     private static Expression Unwrap(Expression expression)
     {
@@ -14986,6 +13448,18 @@ internal static class SqlExpressionTranslator
         if (IsColumn(member))
         {
             return ColumnName(member.Member);
+        }
+
+        // Strip the value object's .Value and resolve to the inner column ([col]) (x.Col.Value -> [col])
+        if (
+            member.Member.Name == "Value"
+            && typeof(IValueObject).IsAssignableFrom(member.Member.DeclaringType)
+            && member.Expression is { } inner
+            && Unwrap(inner) is MemberExpression valueObjectColumn
+            && IsColumn(valueObjectColumn)
+        )
+        {
+            return ColumnName(valueObjectColumn.Member);
         }
 
         return null;
@@ -15159,9 +13633,6 @@ internal sealed class EntitySaveMetadata
     /// <summary>Gets the table name wrapped in quoting brackets.</summary>
     public required string TableName { get; init; }
 
-    /// <summary>Gets the raw, unquoted table name (required by SqliteBlob and friends in the unbounded binary column Stream accessors).</summary>
-    public required string RawTableName { get; init; }
-
     /// <summary>Gets the property that corresponds to the primary key.</summary>
     public required PropertyInfo KeyProperty { get; init; }
 
@@ -15331,7 +13802,6 @@ internal sealed class EntitySaveMetadata
         {
             EntityType = entityType,
             TableName = tableName,
-            RawTableName = tableAttribute.Name,
             KeyProperty = keyProperty,
             KeyColumnName = keyColumnName,
             AllProperties = columns,
@@ -15422,6 +13892,59 @@ internal sealed class EntitySaveMetadata
         };
     }
 
+    /// <summary>Caches the type-specialized pair resolved per value object property type (<c>null</c> when the type has no fast path).</summary>
+    private static readonly ConcurrentDictionary<
+        Type,
+        (MethodInfo Getter, MethodInfo Create)?
+    > _valueObjectReaderCache = new();
+
+    /// <summary>
+    /// Resolves the type-specialized pair for a value object property: the reader accessor for its underlying value and
+    /// the static <c>Create</c> factory that wraps it.
+    /// </summary>
+    /// <remarks>
+    /// Returns <c>null</c> when the property is not a value object, when its underlying type has no type-specialized
+    /// accessor (<c>byte[]</c> and friends), or when no matching factory exists; those columns take the fallback.
+    /// </remarks>
+    private static (MethodInfo Getter, MethodInfo Create)? ResolveValueObjectReader(
+        Type propertyType
+    ) => _valueObjectReaderCache.GetOrAdd(propertyType, ResolveValueObjectReaderCore);
+
+    /// <summary>Performs the uncached resolution behind <see cref="ResolveValueObjectReader"/>.</summary>
+    private static (MethodInfo Getter, MethodInfo Create)? ResolveValueObjectReaderCore(
+        Type propertyType
+    )
+    {
+        var iface = Array.Find(
+            propertyType.GetInterfaces(),
+            i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IValueObject<,>)
+        );
+
+        if (iface is null)
+        {
+            return null;
+        }
+
+        // The underlying value type is the second type argument of IValueObject<TSelf, TValue>
+        if (!_typedReaders.TryGetValue(iface.GetGenericArguments()[1], out var getter))
+        {
+            return null;
+        }
+
+        // FlattenHierarchy: Create is declared on ValueObjectBase, and without the flag reflection never returns a
+        // static member declared on a base class - the resolution would quietly fail and every value object column
+        // would take the SetColumnValue fallback instead of the fast path.
+        var create = propertyType.GetMethod(
+            "Create",
+            BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy,
+            binder: null,
+            new[] { getter.ReturnType },
+            modifiers: null
+        );
+
+        return create is null ? null : (getter, create);
+    }
+
     /// <summary>
     /// Builds the expression-tree-compiled delegate that materializes one row of SelectColumns (the fixed SELECT set)
     /// into an entity using a pre-resolved ordinal array (once per type).
@@ -15429,6 +13952,8 @@ internal sealed class EntitySaveMetadata
     /// <remarks>
     /// Columns with a type-specialized accessor are read directly without boxing (<c>DBNull</c> becomes the default value,
     /// equivalent to the previous <c>SetValue(null)</c>);
+    /// a value object column whose underlying value has such an accessor reads it the same way and calls the value object's
+    /// static <c>Create</c> factory directly;
     /// all other columns fall back to the previous
     /// <see cref="SetColumnValue"/> (dialect-specific conversion / value object re-wrapping).
     /// The resulting final state (<c>RowState = Unchanged</c>) matches the previous row mapping.
@@ -15496,6 +14021,29 @@ internal sealed class EntitySaveMetadata
                 read
             );
             return Expression.Assign(Expression.Property(entityExpr, property), value);
+        }
+
+        // A value object whose underlying value has a type-specialized accessor reads that value without boxing and
+        // calls the static Create factory straight from the expression tree (no reflection Invoke, no Convert.ChangeType,
+        // and DBNull becomes null, equivalent to the previous SetValue(null))
+        if (ResolveValueObjectReader(propertyType) is (var voGetter, var voCreate))
+        {
+            Expression created = Expression.Call(
+                voCreate,
+                Expression.Call(readerParam, voGetter, ordinal)
+            );
+
+            if (created.Type != propertyType)
+            {
+                created = Expression.Convert(created, propertyType);
+            }
+
+            var wrapped = Expression.Condition(
+                Expression.Call(readerParam, _isDbNullMethod, ordinal),
+                Expression.Default(propertyType),
+                created
+            );
+            return Expression.Assign(Expression.Property(entityExpr, property), wrapped);
         }
 
         // Fallback: call the previous SetColumnValue (DBNull to null / dialect-specific conversion / value object re-wrapping) via the ordinal
@@ -15635,8 +14183,29 @@ internal sealed class EntitySaveMetadata
         }
         else
         {
-            // Plain columns are coerced from the SQLite storage type (int stored as long, decimal/Guid/DateTime as TEXT, etc.) to the property type
-            property.SetValue(entity, CoerceScalar(value, property.PropertyType));
+            // Value objects are re-wrapped through Create; every other property is a plain column and is coerced from the
+            // SQLite storage type (int stored as long, decimal/Guid/DateTime as TEXT, etc.) - the same split MapEntityObject
+            // makes. Wrapping unconditionally would hand a plain column its raw storage value, because Wrap returns anything
+            // that is not a value object untouched and the setter then rejects the type.
+            // A stored value the value object rejects surfaces as a validation failure with no hint of where it came from,
+            // so the column is named here and the original exception is kept as the inner one
+            try
+            {
+                var propertyType = property.PropertyType;
+                property.SetValue(
+                    entity,
+                    typeof(IValueObject).IsAssignableFrom(propertyType)
+                        ? SqlValueObjectActivator.Wrap(value, propertyType)
+                        : CoerceScalar(value, propertyType)
+                );
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                throw new InvalidOperationException(
+                    $"The stored value of column '{GetColumnName(property)}' could not be mapped to {entity.GetType().Name}.{property.Name} ({property.PropertyType.Name}): {ex.Message}",
+                    ex
+                );
+            }
         }
     }
 
@@ -15827,9 +14396,39 @@ internal sealed class EntitySaveMetadata
     /// Same column-to-property binding as <c>MapEntity</c>, but created without a generic constraint because the Include
     /// loader works with runtime <see cref="Type"/> values. <paramref name="ordinals"/> is resolved once before the row loop via <see cref="SelectOrdinals"/>.
     /// </remarks>
-    // Without value objects, plain columns are bound by the expression-tree materializer, equivalent to SetColumnValue (= CoerceScalar) (type-specialized, no reflection)
-    public EntityBase MapEntityObject(DbDataReader reader, int[] ordinals) =>
-        SelectMaterializer(reader, ordinals);
+    public EntityBase MapEntityObject(DbDataReader reader, int[] ordinals)
+    {
+        var entity = (EntityBase)Activator.CreateInstance(EntityType)!;
+
+        // Unbounded binary columns are excluded from SELECT by default, so only SelectColumns
+        // (the pre-resolved pairs of SelectProperties) are mapped
+        for (var i = 0; i < SelectColumns.Count; i++)
+        {
+            var property = SelectColumns[i].Property;
+            var value = reader.GetValue(ordinals[i]);
+
+            if (value is DBNull)
+            {
+                property.SetValue(entity, null);
+            }
+            else
+            {
+                // Value objects are converted to the wrapped type and re-wrapped (Wrap already applies Convert.ChangeType).
+                // Plain columns are coerced from the SQLite storage type (int stored as long, decimal/Guid/DateTime as TEXT, etc.) to the property type
+                var propertyType = property.PropertyType;
+                property.SetValue(
+                    entity,
+                    typeof(IValueObject).IsAssignableFrom(propertyType)
+                        ? SqlValueObjectActivator.Wrap(value, propertyType)
+                        : CoerceScalar(value, propertyType)
+                );
+            }
+        }
+
+        // Rows read from the database are treated as unchanged (later edits transition them to Updated)
+        entity.RowState = RowState.Unchanged;
+        return entity;
+    }
 
     /// <summary>Maps one data reader row to an entity (without a type argument) (single-row variant that resolves the SelectColumns ordinals on each call).</summary>
     public EntityBase MapEntityObject(DbDataReader reader) =>
@@ -15918,7 +14517,7 @@ internal sealed class EntitySaveMetadata
         }
 
         var value = property.GetValue(entity);
-        return value;
+        return SqlParameterValue.Unwrap(value);
     }
     /// <summary>Binds the INSERT parameters (the insert-target columns excluding store-generated columns) (shared by insert and graph insert).</summary>
     public void BindInsertParameters(SqliteCommand command, EntityBase entity)
@@ -15929,7 +14528,7 @@ internal sealed class EntitySaveMetadata
                 command,
                 $"@{property.Name}",
                 property,
-                property.GetValue(entity)
+                SqlParameterValue.Unwrap(property.GetValue(entity))
             );
         }
     }
@@ -15946,7 +14545,7 @@ internal sealed class EntitySaveMetadata
     {
         for (var index = 0; index < InsertProperties.Count; index++)
         {
-            var value = InsertProperties[index].GetValue(entity);
+            var value = SqlParameterValue.Unwrap(InsertProperties[index].GetValue(entity));
             command.Parameters[index].Value = value ?? DBNull.Value;
         }
     }
@@ -15965,7 +14564,7 @@ internal sealed class EntitySaveMetadata
                 command,
                 $"@{property.Name}",
                 property,
-                property.GetValue(entity)
+                SqlParameterValue.Unwrap(property.GetValue(entity))
             );
         }
 
@@ -15973,7 +14572,7 @@ internal sealed class EntitySaveMetadata
             command,
             "@id",
             KeyProperty,
-            KeyProperty.GetValue(entity)
+            SqlParameterValue.Unwrap(KeyProperty.GetValue(entity))
         );
     }
 
@@ -15984,7 +14583,7 @@ internal sealed class EntitySaveMetadata
             command,
             "@id",
             KeyProperty,
-            KeyProperty.GetValue(entity)
+            SqlParameterValue.Unwrap(KeyProperty.GetValue(entity))
         );
     }
 
@@ -15992,7 +14591,7 @@ internal sealed class EntitySaveMetadata
     public void BindKeyParameter(SqliteCommand command, object? id)
     {
         var value =
-            id
+            SqlParameterValue.Unwrap(id)
             ?? throw new InvalidOperationException("id cannot be null.");
         AddColumnParameter(command, "@id", KeyProperty, value);
     }
@@ -16035,20 +14634,6 @@ internal sealed class EntitySaveMetadata
 
     private static string GetColumnName(PropertyInfo property) =>
         property.GetCustomAttribute<ColumnAttribute>()?.Name ?? property.Name;
-
-    /// <summary>Looks up the column property for a C# property name (searched across all columns, including unbounded binary = excluded columns). Used by the Stream accessors in both the repository and the in-memory implementation.</summary>
-    public PropertyInfo ColumnByPropertyName(string propertyName) =>
-        AllProperties.FirstOrDefault(property => property.Name == propertyName)
-        ?? throw new InvalidOperationException(
-            $"Property {propertyName} was not found as a column."
-        );
-
-    /// <summary>Returns the quoted column name of the specified column property (for example: \"payload\") (for building SQL in the Stream accessors).</summary>
-    public string QuotedColumnName(PropertyInfo property) =>
-        $"\"{GetColumnName(property)}\"";
-
-    /// <summary>Returns the raw, unquoted column name of the specified column property (required by SqliteBlob and friends).</summary>
-    public string RawColumnName(PropertyInfo property) => GetColumnName(property);
 }
 
 /// <summary>Planner that builds the cascade-delete DELETE statements from FK metadata (database-independent, pure).</summary>
@@ -16564,30 +15149,16 @@ public static class GeneratedSqliteRepositoryServiceCollectionExtensions
         services.TryAddScoped<ISaveHookRegistry>(provider => new ServiceProviderSaveHookRegistry(
             provider
         ));
-        services.AddScoped<ISyncOrderRepository>(provider => new SyncOrderRepository(
+        services.AddScoped<ISyncvoOrderRepository>(provider => new SyncvoOrderRepository(
             provider.GetRequiredService<ISqlConnectionFactory>(),
             provider.GetService<ISaveHookRegistry>(),
             provider.GetService<ISqlExecutor>()
         ));
-        services.AddScoped<ISyncOrderRemoteRepository>(provider =>
-            provider.GetRequiredService<ISyncOrderRepository>()
-        );
-        services.AddScoped<ISyncOrderLineRepository>(provider => new SyncOrderLineRepository(
+        services.AddScoped<ISyncvoLineRepository>(provider => new SyncvoLineRepository(
             provider.GetRequiredService<ISqlConnectionFactory>(),
             provider.GetService<ISaveHookRegistry>(),
             provider.GetService<ISqlExecutor>()
         ));
-        services.AddScoped<ISyncOrderLineRemoteRepository>(provider =>
-            provider.GetRequiredService<ISyncOrderLineRepository>()
-        );
-        services.AddScoped<ISyncNoteRepository>(provider => new SyncNoteRepository(
-            provider.GetRequiredService<ISqlConnectionFactory>(),
-            provider.GetService<ISaveHookRegistry>(),
-            provider.GetService<ISqlExecutor>()
-        ));
-        services.AddScoped<ISyncNoteRemoteRepository>(provider =>
-            provider.GetRequiredService<ISyncNoteRepository>()
-        );
 
         return services;
     }
@@ -16618,64 +15189,44 @@ public static class GeneratedSqliteRepositoryServiceCollectionExtensions
         services.TryAddScoped<ISaveHookRegistry>(provider => new ServiceProviderSaveHookRegistry(
             provider
         ));
-        services.AddKeyedScoped<ISyncOrderRepository>(
+        services.AddKeyedScoped<ISyncvoOrderRepository>(
             serviceKey,
-            (provider, key) => new SyncOrderRepository(
+            (provider, key) => new SyncvoOrderRepository(
                 connectionFactory,
                 provider.GetService<ISaveHookRegistry>(),
                 provider.GetKeyedService<ISqlExecutor>(key)
             )
         );
-        services.AddKeyedScoped<ISyncOrderRemoteRepository>(
+        services.AddKeyedScoped<ISyncvoLineRepository>(
             serviceKey,
-            (provider, key) => provider.GetRequiredKeyedService<ISyncOrderRepository>(key)
-        );
-        services.AddKeyedScoped<ISyncOrderLineRepository>(
-            serviceKey,
-            (provider, key) => new SyncOrderLineRepository(
+            (provider, key) => new SyncvoLineRepository(
                 connectionFactory,
                 provider.GetService<ISaveHookRegistry>(),
                 provider.GetKeyedService<ISqlExecutor>(key)
             )
-        );
-        services.AddKeyedScoped<ISyncOrderLineRemoteRepository>(
-            serviceKey,
-            (provider, key) => provider.GetRequiredKeyedService<ISyncOrderLineRepository>(key)
-        );
-        services.AddKeyedScoped<ISyncNoteRepository>(
-            serviceKey,
-            (provider, key) => new SyncNoteRepository(
-                connectionFactory,
-                provider.GetService<ISaveHookRegistry>(),
-                provider.GetKeyedService<ISqlExecutor>(key)
-            )
-        );
-        services.AddKeyedScoped<ISyncNoteRemoteRepository>(
-            serviceKey,
-            (provider, key) => provider.GetRequiredKeyedService<ISyncNoteRepository>(key)
         );
 
         return services;
     }
 }
 
-/// <summary>Repository implementation for SyncOrderEntity.</summary>
-public sealed partial class SyncOrderRepository(
+/// <summary>Repository implementation for SyncvoOrderEntity.</summary>
+public sealed partial class SyncvoOrderRepository(
     ISqlConnectionFactory connectionFactory,
     ISaveHookRegistry? saveHooks = null,
     ISqlExecutor? sqlExecutor = null
-) : SqliteRepository<SyncOrderEntity, int>(connectionFactory, saveHooks, sqlExecutor), ISyncOrderRepository
+) : SqliteRepository<SyncvoOrderEntity, OrderIdValue>(connectionFactory, saveHooks, sqlExecutor), ISyncvoOrderRepository
 {
     /// <inheritdoc />
     public async Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
-        SyncOrderEntity entity,
+        SyncvoOrderEntity entity,
         CancellationToken cancellationToken = default
     )
     {
         ArgumentNullException.ThrowIfNull(entity);
         var violations = new List<UniquenessViolation>();
 
-        List<UniquenessCheck<SyncOrderEntity>>? customChecks = null;
+        List<UniquenessCheck<SyncvoOrderEntity>>? customChecks = null;
         CollectCustomUniquenessChecks(ref customChecks);
         await UniquenessChecker
             .RunCustomChecksAsync(entity, customChecks, violations, cancellationToken)
@@ -16686,66 +15237,27 @@ public sealed partial class SyncOrderRepository(
 
     /// <summary>Extension point for adding user-defined uniqueness checks (add delegates to the list in a partial implementation; while unimplemented the call is erased at no cost).</summary>
     partial void CollectCustomUniquenessChecks(
-        ref List<UniquenessCheck<SyncOrderEntity>>? checks
-    );
-
-    /// <inheritdoc />
-    public Task<bool> ReadAttachmentAsync(int id, Stream destination, CancellationToken cancellationToken = default) =>
-        ReadUnboundedBinaryColumnAsync(nameof(SyncOrderEntity.Attachment), id, destination, cancellationToken);
-
-    /// <inheritdoc />
-    public Task<bool> WriteAttachmentAsync(int id, Stream? source, long? length = null, CancellationToken cancellationToken = default) =>
-        WriteUnboundedBinaryColumnAsync(nameof(SyncOrderEntity.Attachment), id, source, length, cancellationToken);
-}
-
-/// <summary>Repository implementation for SyncOrderLineEntity.</summary>
-public sealed partial class SyncOrderLineRepository(
-    ISqlConnectionFactory connectionFactory,
-    ISaveHookRegistry? saveHooks = null,
-    ISqlExecutor? sqlExecutor = null
-) : SqliteRepository<SyncOrderLineEntity, int>(connectionFactory, saveHooks, sqlExecutor), ISyncOrderLineRepository
-{
-    /// <inheritdoc />
-    public async Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
-        SyncOrderLineEntity entity,
-        CancellationToken cancellationToken = default
-    )
-    {
-        ArgumentNullException.ThrowIfNull(entity);
-        var violations = new List<UniquenessViolation>();
-
-        List<UniquenessCheck<SyncOrderLineEntity>>? customChecks = null;
-        CollectCustomUniquenessChecks(ref customChecks);
-        await UniquenessChecker
-            .RunCustomChecksAsync(entity, customChecks, violations, cancellationToken)
-            .ConfigureAwait(false);
-
-        return violations;
-    }
-
-    /// <summary>Extension point for adding user-defined uniqueness checks (add delegates to the list in a partial implementation; while unimplemented the call is erased at no cost).</summary>
-    partial void CollectCustomUniquenessChecks(
-        ref List<UniquenessCheck<SyncOrderLineEntity>>? checks
+        ref List<UniquenessCheck<SyncvoOrderEntity>>? checks
     );
 }
 
-/// <summary>Repository implementation for SyncNoteEntity.</summary>
-public sealed partial class SyncNoteRepository(
+/// <summary>Repository implementation for SyncvoLineEntity.</summary>
+public sealed partial class SyncvoLineRepository(
     ISqlConnectionFactory connectionFactory,
     ISaveHookRegistry? saveHooks = null,
     ISqlExecutor? sqlExecutor = null
-) : SqliteRepository<SyncNoteEntity, int>(connectionFactory, saveHooks, sqlExecutor), ISyncNoteRepository
+) : SqliteRepository<SyncvoLineEntity, LineIdValue>(connectionFactory, saveHooks, sqlExecutor), ISyncvoLineRepository
 {
     /// <inheritdoc />
     public async Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
-        SyncNoteEntity entity,
+        SyncvoLineEntity entity,
         CancellationToken cancellationToken = default
     )
     {
         ArgumentNullException.ThrowIfNull(entity);
         var violations = new List<UniquenessViolation>();
 
-        List<UniquenessCheck<SyncNoteEntity>>? customChecks = null;
+        List<UniquenessCheck<SyncvoLineEntity>>? customChecks = null;
         CollectCustomUniquenessChecks(ref customChecks);
         await UniquenessChecker
             .RunCustomChecksAsync(entity, customChecks, violations, cancellationToken)
@@ -16756,7 +15268,7 @@ public sealed partial class SyncNoteRepository(
 
     /// <summary>Extension point for adding user-defined uniqueness checks (add delegates to the list in a partial implementation; while unimplemented the call is erased at no cost).</summary>
     partial void CollectCustomUniquenessChecks(
-        ref List<UniquenessCheck<SyncNoteEntity>>? checks
+        ref List<UniquenessCheck<SyncvoLineEntity>>? checks
     );
 }
 }

@@ -266,12 +266,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             // 版なしテーブルのミラー版は存在しない＝記録（SyncGraphRecorder の Delete）は常に null を添える
             RowVersionReadExpression = rowVersionColumn is null
                 ? "null"
-                : BuildRowVersionRead(
-                    "entity",
-                    rowVersionPropertyName,
-                    rowVersionColumn,
-                    rowVersionValueObject
-                ),
+                : BuildRowVersionRead("entity", rowVersionPropertyName, rowVersionValueObject),
             RowVersionWriteExpression = rowVersionColumn is null
                 ? string.Empty
                 : BuildRowVersionWrite(
@@ -503,22 +498,18 @@ internal sealed partial class CSharpGenerationModelBuilder
         "\"" + value.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
 
     /// <summary>エンティティ変数からミラー版（byte[]）を読む式を組み立てる</summary>
+    /// <remarks>
+    /// VO 経路は列の NULL 許容宣言に依らず <c>?.Value</c>（＝実行時 null を素通しする）。「NOT NULL 宣言なら
+    /// 実体も非 null」は同期の文脈では成り立たない: マルチターゲットの方言変換はローカル側の rowversion 列を
+    /// 意図的に NULL 許容へ落とす（未同期行の版は空）し、削除の記録はキーだけのスタブから読むため列宣言と
+    /// 無関係に版プロパティが未設定になる。<c>.Value</c> を出すとその両方が NullReferenceException になる。
+    /// 実体が非 null のときの結果は変わらない。
+    /// </remarks>
     private static string BuildRowVersionRead(
         string variable,
         string propertyName,
-        Column column,
         CSharpValueObjectModel? valueObject
-    )
-    {
-        if (valueObject is null)
-        {
-            return $"{variable}.{propertyName}";
-        }
-
-        return column.IsNullable
-            ? $"{variable}.{propertyName}?.Value"
-            : $"{variable}.{propertyName}.Value";
-    }
+    ) => valueObject is null ? $"{variable}.{propertyName}" : $"{variable}.{propertyName}?.Value";
 
     /// <summary>エンティティへミラー版（byte[]）を書く式を組み立てる</summary>
     /// <remarks>

@@ -1232,6 +1232,157 @@ public abstract class SyncRuntimeTestsBase : IAsyncLifetime
         (await ServerOrders.GetByIdAsync(1, Ct))!.CustomerName.Should().Be("local-wins");
     }
 
+    /// <summary>
+    /// LocalWins はサーバーに同じキーの行が既にあっても、ローカルのオフライン新規行で上書きする。
+    /// </summary>
+    /// <remarks>
+    /// 重複（<see cref="SyncConflictReason.DuplicateOnServer"/>）も版ガード競合と同じ「サーバーと衝突した
+    /// ローカル変更」で、ポリシーが LocalWins なら宣言どおりローカルが勝たなければならない。ここを
+    /// 無条件の競合にしていると、LocalWins を選んでいるのに競合として保留され続ける。
+    /// </remarks>
+    [Fact(DisplayName = "[Sync] LocalWins はサーバーに同キー行があるローカル新規行でも上書きする")]
+    public async Task LocalWins_OverwritesDuplicateKeyOnServer()
+    {
+        await ServerOrders.InsertAsync(
+            new SyncOrderEntity { OrderId = 7, CustomerName = "server-side" },
+            Ct
+        );
+
+        // ローカルでも同じキーの行を作る（ミラー版なし＝未アップロード扱い）
+        await LocalOrders.InsertAsync(
+            new SyncOrderEntity { OrderId = 7, CustomerName = "local-side" },
+            Ct
+        );
+
+        var result = await Engine.SyncAsync(
+            new SyncOptions { ConflictPolicy = SyncConflictPolicy.LocalWins },
+            Ct
+        );
+
+        result.Conflicts.Should().BeEmpty();
+        result.Uploaded.Should().Be(1);
+        (await ServerOrders.GetByIdAsync(7, Ct))!
+            .CustomerName.Should()
+            .Be("local-side", "LocalWins はサーバーの行をローカルの内容で置き換える");
+        (await Journal.CountPendingAsync(Ct)).Should().Be(0, "決着したエントリは掃除される");
+    }
+
+    /// <summary>
+    /// LocalWins はサーバーで削除された行を、ローカルの編集で復活させる（後勝ちと同じ意味論）。
+    /// </summary>
+    /// <remarks>
+    /// これを競合のまま残すと、LocalWins のランは何度回しても決着しない＝エントリがジャーナルに残り続け、
+    /// そのキーは削除伝搬からも守られ続ける（恒久的に settle しない状態になる）。
+    /// </remarks>
+    [Fact(DisplayName = "[Sync] LocalWins はサーバーで削除された行をローカルの編集で復活させる")]
+    public async Task LocalWins_ResurrectsRowMissingOnServer()
+    {
+        await SeedServerAsync(1, "alice", 11, "widget");
+        await Engine.SyncAsync(cancellationToken: Ct);
+
+        // サーバー側から行が消えたあとにローカルが同じ行を編集する（＝既定なら MissingOnServer 競合）
+        await ServerLines.DeleteAsync(11, Ct);
+        await ServerOrders.DeleteAsync(1, Ct);
+
+        var local = await LocalOrders.GetByIdAsync(1, Ct);
+        local!.CustomerName = "alice-local";
+        await LocalOrders.UpdateAsync(local, cancellationToken: Ct);
+
+        var localWins = new SyncOptions { ConflictPolicy = SyncConflictPolicy.LocalWins };
+        var result = await Engine.SyncAsync(localWins, Ct);
+
+        result.Conflicts.Should().BeEmpty();
+        result.Uploaded.Should().Be(1);
+        (await ServerOrders.GetByIdAsync(1, Ct))!
+            .CustomerName.Should()
+            .Be("alice-local", "サーバーに行が無ければ挿入し直す（復活）");
+        (await LocalOrdersRaw.GetByIdAsync(1, Ct)).Should().NotBeNull();
+        (await Journal.CountPendingAsync(Ct)).Should().Be(0, "決着したエントリは掃除される");
+        result
+            .DeletedLocally.Should()
+            .Be(1, "ジャーナルに載っていない明細行はサーバーに無いので消える");
+
+        // 決着しているので以降のランは定常（同じ変更を送り返しも取り戻しもしない）
+        var second = await Engine.SyncAsync(localWins, Ct);
+
+        second.Uploaded.Should().Be(0);
+        second.Downloaded.Should().Be(0);
+        second.DeletedLocally.Should().Be(0);
+        second.Conflicts.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// 業務削除が失敗して残ったジャーナルエントリは、サーバーへ送られず破棄される（journal-first の無害化）。
+    /// </summary>
+    /// <remarks>
+    /// 削除は「送る内容」を持たないため、upsert のようにローカルの現在行を読み直すだけでは無害化されない。
+    /// ローカル行がまだ在る＝業務削除が着地しなかったということなので、そのままサーバーを消すと
+    /// 「失敗した操作が全体としては完遂される」うえ、続く削除伝搬がローカル行まで道連れにする。
+    /// 失敗は FK 違反で作る（子が残っている親を直接削除する＝記録の後に業務削除だけが落ちる）。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Sync] 業務削除が失敗して残った削除エントリは送られず破棄される（journal-first の無害化）"
+    )]
+    public async Task FailedLocalDelete_LeavesEntryThatIsDiscarded()
+    {
+        await SeedServerAsync(1, "alice", 11, "widget");
+        await Engine.SyncAsync(cancellationToken: Ct);
+
+        // 子（明細）が残っている親を直接削除する＝ジャーナルへ記録された後に FK 違反で業務削除が失敗する
+        var deleting = async () => await LocalOrders.DeleteAsync(1, Ct);
+        await deleting.Should().ThrowAsync<Exception>();
+
+        (await LocalOrdersRaw.GetByIdAsync(1, Ct)).Should().NotBeNull("業務削除は着地していない");
+        var entry = (await Journal.ReadAllAsync(Ct)).Should().ContainSingle().Subject;
+        entry.TableName.Should().Be("sync_orders");
+        entry.Operation.Should().Be(nameof(SyncJournalOperation.Delete));
+
+        var result = await Engine.SyncAsync(cancellationToken: Ct);
+
+        result.Conflicts.Should().BeEmpty("着地しなかった意図は競合ではない");
+        result.Uploaded.Should().Be(0);
+        result.Discarded.Should().Be(1);
+        (await ServerOrders.GetByIdAsync(1, Ct))
+            .Should()
+            .NotBeNull("失敗した削除をサーバーが完遂してはならない");
+        (await LocalOrdersRaw.GetByIdAsync(1, Ct))
+            .Should()
+            .NotBeNull("同じランの削除伝搬がローカル行を道連れにしてもならない");
+        (await Journal.CountPendingAsync(Ct)).Should().Be(0, "破棄されたエントリは掃除される");
+    }
+
+    /// <summary>
+    /// 決着したエントリが 1 回の IN 展開の上限を超える件数でも、1 回の同期で掃除される。
+    /// </summary>
+    /// <remarks>
+    /// ジャーナルの掃除はランの全テーブル分をまとめて 1 回で行うため、大量の一括追加や長期オフラインでは
+    /// 件数がバインド変数の上限へ届き得る。掃除はチャンク分割されており、境界（500 件）を跨いでも
+    /// 取りこぼしが出ない。
+    /// </remarks>
+    [Fact(DisplayName = "[Sync] 決着したエントリが 500 件を超えても 1 回の同期で掃除される")]
+    public async Task JournalSettle_HandlesMoreEntriesThanOneInClause()
+    {
+        const int Count = 600;
+
+        await LocalOrders.BulkInsertAsync(
+            Enumerable
+                .Range(1, Count)
+                .Select(id => new SyncOrderEntity { OrderId = id, CustomerName = $"customer-{id}" })
+                .ToList(),
+            Ct
+        );
+        (await Journal.CountPendingAsync(Ct)).Should().Be(Count);
+
+        var result = await Engine.SyncAsync(cancellationToken: Ct);
+
+        result.Conflicts.Should().BeEmpty();
+        result.Uploaded.Should().Be(Count);
+        (await Journal.CountPendingAsync(Ct))
+            .Should()
+            .Be(0, "チャンク分割しても掃除の取りこぼしは出ない");
+        (await ServerOrders.GetAllAsync(Ct)).Should().HaveCount(Count);
+    }
+
     /// <summary>削除の競合（削除しようとした行がサーバーで更新されていた）も収集される</summary>
     [Fact(DisplayName = "[Sync] 削除しようとした行がサーバーで更新されていれば競合になる")]
     public async Task DeleteConflict_IsCollected()

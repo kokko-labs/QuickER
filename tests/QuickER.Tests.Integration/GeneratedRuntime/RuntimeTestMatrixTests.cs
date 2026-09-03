@@ -487,6 +487,8 @@ public class RuntimeTestMatrixTests
         new("MultiTargetRowVersionRuntimeTests", "MultiTargetRowVersion", Backend.AdoSqlite),
         new("MultiTargetRowVersionSqliteRuntimeTests", "MultiTargetRowVersion", Backend.AdoSqlite),
         new("SyncSqliteRuntimeTests", "SyncSupport", Backend.AdoSqlite),
+        // 同期支援 × 値オブジェクト（ミラー版・キーが VO 型になる経路）
+        new("SyncVoRuntimeTests", "SyncSupport", Backend.AdoSqlite),
         new("SyncSqlServerRuntimeTests", "SyncSupport", Backend.AdoSqlServer),
         new("SyncHttpRuntimeTests", "SyncSupport", Backend.Remote),
         new("SyncSqlServerHttpRuntimeTests", "SyncSupport", Backend.Remote),
