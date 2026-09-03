@@ -10063,11 +10063,22 @@ internal static class SqlExpressionTranslator
                     return VisitComparison(equality, parameters, negate: true);
                 }
 
+                // A negated IN gets the same treatment: NOT ([col] IN (...)) is UNKNOWN - and therefore excluded - for
+                // every row whose column is NULL, while C# and EF Core include such rows (null is not contained in a
+                // list of non-null values). Folding the negation into the clause lets it emit the compensated form.
+                if (
+                    operand is MethodCallExpression inCall
+                    && TryGetIn(inCall, out var notInColumn, out var notInCollection)
+                )
+                {
+                    return BuildInClause(notInColumn, notInCollection, parameters, negate: true);
+                }
+
                 // Anything else keeps the NOT wrapper, and a negated composite condition - !(a == b && c) - lands here: the
-                // negation is not pushed inward, so the equalities inside are compensated but then read through NOT, and
+                // negation is not pushed inward, so the comparisons inside are compensated but then read through NOT, and
                 // NOT (UNKNOWN) is still UNKNOWN. A row a NULL made UNKNOWN inside therefore stays excluded where C# and
                 // EF Core would have kept it. Writing the negation on the comparison itself (a != b || !c) goes through the
-                // flip above and matches them (documented as a known limitation)
+                // flips above and matches them (documented as a known limitation)
                 return $"NOT ({Visit(unary.Operand, parameters)})";
             }
 
@@ -10398,11 +10409,22 @@ internal static class SqlExpressionTranslator
         }
     }
 
-    /// <summary>Builds an IN clause by parameterizing each element of the collection. Empty or null collections become a no-match (always-false condition).</summary>
+    /// <summary>Builds an IN clause - or, when <paramref name="negate"/> is set, a NOT IN clause - from the elements of a collection, with the null semantics C# and EF Core give to Contains.</summary>
+    /// <remarks>
+    /// <para>Null elements are not parameterized. IN never matches a value against NULL in SQL, so they are folded into an IS NULL test on the column instead:
+    /// a row whose column is NULL is a match for a list that contains null, and only for such a list.</para>
+    /// <para>NOT IN compensates the column side unconditionally, for the same reason <c>!=</c> does: <c>[col] NOT IN (...)</c> is UNKNOWN - and the row therefore
+    /// excluded - whenever the column is NULL, while C# and EF Core keep that row (null is not contained in a list of non-null values). Whether the column is
+    /// nullable cannot be decided from the expression tree, and on a NOT NULL column the added clause simply never holds, so the meaning is unchanged.</para>
+    /// <para>An empty collection - or one that holds nothing but nulls, once the nulls are folded out - has no values left to compare against, so the clause
+    /// reduces to the null test alone, or to a constant condition when there was no null either: IN () is invalid SQL, so an empty IN means "no match"
+    /// (always false) and an empty NOT IN means "every row" (always true).</para>
+    /// </remarks>
     private static string BuildInClause(
         string column,
         Expression collection,
-        List<SqlQueryParameter> parameters
+        List<SqlQueryParameter> parameters,
+        bool negate = false
     )
     {
         // Strings are IEnumerable themselves but are not treated as enumerable collections here
@@ -10415,15 +10437,39 @@ internal static class SqlExpressionTranslator
 
         var placeholders = new List<string>();
         var rawColumn = RawColumnName(column);
+        var hasNull = false;
         foreach (var item in enumerable)
         {
+            // Null elements carry no parameter of their own; they are represented by the IS NULL branch below
+            if (IsNullValue(item))
+            {
+                hasNull = true;
+                continue;
+            }
+
             placeholders.Add(AddParameter(item, parameters, rawColumn));
         }
 
-        // IN () is invalid SQL, so an empty collection becomes an always-false condition meaning "no match"
-        return placeholders.Count == 0
-            ? "1 = 0"
-            : $"{column} IN ({string.Join(", ", placeholders)})";
+        if (placeholders.Count == 0)
+        {
+            return (hasNull, negate) switch
+            {
+                (true, false) => $"{column} IS NULL",
+                (true, true) => $"{column} IS NOT NULL",
+                (false, false) => "1 = 0",
+                (false, true) => "1 = 1",
+            };
+        }
+
+        var values = string.Join(", ", placeholders);
+
+        return (hasNull, negate) switch
+        {
+            (true, false) => $"({column} IN ({values}) OR {column} IS NULL)",
+            (true, true) => $"({column} NOT IN ({values}) AND {column} IS NOT NULL)",
+            (false, false) => $"{column} IN ({values})",
+            (false, true) => $"({column} NOT IN ({values}) OR {column} IS NULL)",
+        };
     }
 
     /// <summary>Determines whether x.Col.Equals(value) is a target for equality translation. When the second argument is a *IgnoreCase StringComparison, case is ignored.</summary>
@@ -14316,11 +14362,22 @@ internal static class SqlExpressionTranslator
                     return VisitComparison(equality, parameters, negate: true);
                 }
 
+                // A negated IN gets the same treatment: NOT ([col] IN (...)) is UNKNOWN - and therefore excluded - for
+                // every row whose column is NULL, while C# and EF Core include such rows (null is not contained in a
+                // list of non-null values). Folding the negation into the clause lets it emit the compensated form.
+                if (
+                    operand is MethodCallExpression inCall
+                    && TryGetIn(inCall, out var notInColumn, out var notInCollection)
+                )
+                {
+                    return BuildInClause(notInColumn, notInCollection, parameters, negate: true);
+                }
+
                 // Anything else keeps the NOT wrapper, and a negated composite condition - !(a == b && c) - lands here: the
-                // negation is not pushed inward, so the equalities inside are compensated but then read through NOT, and
+                // negation is not pushed inward, so the comparisons inside are compensated but then read through NOT, and
                 // NOT (UNKNOWN) is still UNKNOWN. A row a NULL made UNKNOWN inside therefore stays excluded where C# and
                 // EF Core would have kept it. Writing the negation on the comparison itself (a != b || !c) goes through the
-                // flip above and matches them (documented as a known limitation)
+                // flips above and matches them (documented as a known limitation)
                 return $"NOT ({Visit(unary.Operand, parameters)})";
             }
 
@@ -14651,11 +14708,22 @@ internal static class SqlExpressionTranslator
         }
     }
 
-    /// <summary>Builds an IN clause by parameterizing each element of the collection. Empty or null collections become a no-match (always-false condition).</summary>
+    /// <summary>Builds an IN clause - or, when <paramref name="negate"/> is set, a NOT IN clause - from the elements of a collection, with the null semantics C# and EF Core give to Contains.</summary>
+    /// <remarks>
+    /// <para>Null elements are not parameterized. IN never matches a value against NULL in SQL, so they are folded into an IS NULL test on the column instead:
+    /// a row whose column is NULL is a match for a list that contains null, and only for such a list.</para>
+    /// <para>NOT IN compensates the column side unconditionally, for the same reason <c>!=</c> does: <c>[col] NOT IN (...)</c> is UNKNOWN - and the row therefore
+    /// excluded - whenever the column is NULL, while C# and EF Core keep that row (null is not contained in a list of non-null values). Whether the column is
+    /// nullable cannot be decided from the expression tree, and on a NOT NULL column the added clause simply never holds, so the meaning is unchanged.</para>
+    /// <para>An empty collection - or one that holds nothing but nulls, once the nulls are folded out - has no values left to compare against, so the clause
+    /// reduces to the null test alone, or to a constant condition when there was no null either: IN () is invalid SQL, so an empty IN means "no match"
+    /// (always false) and an empty NOT IN means "every row" (always true).</para>
+    /// </remarks>
     private static string BuildInClause(
         string column,
         Expression collection,
-        List<SqlQueryParameter> parameters
+        List<SqlQueryParameter> parameters,
+        bool negate = false
     )
     {
         // Strings are IEnumerable themselves but are not treated as enumerable collections here
@@ -14668,15 +14736,39 @@ internal static class SqlExpressionTranslator
 
         var placeholders = new List<string>();
         var rawColumn = RawColumnName(column);
+        var hasNull = false;
         foreach (var item in enumerable)
         {
+            // Null elements carry no parameter of their own; they are represented by the IS NULL branch below
+            if (IsNullValue(item))
+            {
+                hasNull = true;
+                continue;
+            }
+
             placeholders.Add(AddParameter(item, parameters, rawColumn));
         }
 
-        // IN () is invalid SQL, so an empty collection becomes an always-false condition meaning "no match"
-        return placeholders.Count == 0
-            ? "1 = 0"
-            : $"{column} IN ({string.Join(", ", placeholders)})";
+        if (placeholders.Count == 0)
+        {
+            return (hasNull, negate) switch
+            {
+                (true, false) => $"{column} IS NULL",
+                (true, true) => $"{column} IS NOT NULL",
+                (false, false) => "1 = 0",
+                (false, true) => "1 = 1",
+            };
+        }
+
+        var values = string.Join(", ", placeholders);
+
+        return (hasNull, negate) switch
+        {
+            (true, false) => $"({column} IN ({values}) OR {column} IS NULL)",
+            (true, true) => $"({column} NOT IN ({values}) AND {column} IS NOT NULL)",
+            (false, false) => $"{column} IN ({values})",
+            (false, true) => $"({column} NOT IN ({values}) OR {column} IS NULL)",
+        };
     }
 
     /// <summary>Determines whether x.Col.Equals(value) is a target for equality translation. When the second argument is a *IgnoreCase StringComparison, case is ignored.</summary>

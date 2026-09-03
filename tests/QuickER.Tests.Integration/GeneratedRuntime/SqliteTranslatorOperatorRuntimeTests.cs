@@ -264,6 +264,128 @@ public sealed class SqliteTranslatorOperatorRuntimeTests : IDisposable
     }
 
     /// <summary>
+    /// IN / NOT IN の NULL 意味論が C#（インメモリ実行器の式木コンパイル）・EF Core と一致することを実 SQLite で確認する。
+    /// </summary>
+    /// <remarks>
+    /// 素の翻訳（全要素をパラメータ化した <c>IN</c> と、それを <c>NOT (...)</c> で包んだ形）だと 2 点で割れる。
+    /// (1) リストに混ざった null はどの値とも一致しないため、列が NULL の行が <c>IN</c> に当たらない。
+    /// (2) 列が NULL の行は <c>NOT IN</c> が三値論理で unknown になり落ちるが、C# の
+    /// <c>!list.Contains(null)</c> は真なので本来は含まれる。前者は null 要素を <c>IS NULL</c> へ畳むことで、
+    /// 後者は列側を無条件補償することで揃う。
+    /// </remarks>
+    [Fact(DisplayName = "[SQLite演算子] IN / NOT IN の NULL 意味論が C# と一致する")]
+    public async Task InClause_NullSemantics_MatchCSharpSemantics()
+    {
+        await ResetAndCreateSchemaAsync();
+
+        var customers = CreateCustomerRepository();
+        await customers.InsertAsync(NewCustomer(1, "Alice"), Ct);
+
+        var orders = CreateOrderRepository();
+        await orders.InsertAsync(NewOrder(10, 1, 10m, memo: "shipped"), Ct);
+        await orders.InsertAsync(NewOrder(11, 1, 20m, memo: "pending"), Ct);
+        await orders.InsertAsync(NewOrder(12, 1, 30m, memo: null), Ct); // NULL 列の行
+
+        // (a) null 要素を含まないリスト
+        var withoutNull = new List<MemoValue?>
+        {
+            MemoValue.Create("shipped"),
+            MemoValue.Create("pending"),
+        };
+
+        // IN: 値が一致する行だけ（NULL の memo はどの値とも一致しない）
+        (await orders.Query().Where(o => withoutNull.Contains(o.Memo)).ToListAsync(Ct))
+            .Select(o => o.OrderId.Value)
+            .Should()
+            .BeEquivalentTo([10, 11]);
+
+        // NOT IN: NULL の memo は「リストに含まれない」ので C# では真＝列側補償により含まれる
+        (await orders.Query().Where(o => !withoutNull.Contains(o.Memo)).ToListAsync(Ct))
+            .Select(o => o.OrderId.Value)
+            .Should()
+            .BeEquivalentTo([12]);
+
+        // (b) null 要素を含むリスト
+        var withNull = new List<MemoValue?> { MemoValue.Create("shipped"), null };
+
+        // IN: null 要素は IS NULL へ畳まれるので NULL の memo も一致する
+        (await orders.Query().Where(o => withNull.Contains(o.Memo)).ToListAsync(Ct))
+            .Select(o => o.OrderId.Value)
+            .Should()
+            .BeEquivalentTo([10, 12]);
+
+        // NOT IN: null が一致する側へ回ったので、否定では NULL の memo を落とす
+        (await orders.Query().Where(o => !withNull.Contains(o.Memo)).ToListAsync(Ct))
+            .Select(o => o.OrderId.Value)
+            .Should()
+            .BeEquivalentTo([11]);
+
+        // 上の 4 つの期待集合は、同じ述語を C# 側で評価した結果（＝インメモリ実行器の観測）と一致する
+        var rows = await orders.Query().ToListAsync(Ct);
+        rows.Where(o => withoutNull.Contains(o.Memo))
+            .Select(o => o.OrderId.Value)
+            .Should()
+            .BeEquivalentTo([10, 11]);
+        rows.Where(o => !withoutNull.Contains(o.Memo))
+            .Select(o => o.OrderId.Value)
+            .Should()
+            .BeEquivalentTo([12]);
+        rows.Where(o => withNull.Contains(o.Memo))
+            .Select(o => o.OrderId.Value)
+            .Should()
+            .BeEquivalentTo([10, 12]);
+        rows.Where(o => !withNull.Contains(o.Memo))
+            .Select(o => o.OrderId.Value)
+            .Should()
+            .BeEquivalentTo([11]);
+    }
+
+    /// <summary>
+    /// 全要素が null のリストは、null を畳んだ結果として比較する値が残らないため <c>IS NULL</c>／
+    /// <c>IS NOT NULL</c> 単独になる（C# の <c>Contains</c> と同じ結論）。
+    /// </summary>
+    [Fact(
+        DisplayName = "[SQLite演算子] 全要素が null のリストの IN / NOT IN が NULL 行だけを二分する"
+    )]
+    public async Task InClause_AllNullElements_PartitionsByNullness()
+    {
+        await ResetAndCreateSchemaAsync();
+
+        var customers = CreateCustomerRepository();
+        await customers.InsertAsync(NewCustomer(1, "Alice"), Ct);
+
+        var orders = CreateOrderRepository();
+        await orders.InsertAsync(NewOrder(10, 1, 10m, memo: "shipped"), Ct);
+        await orders.InsertAsync(NewOrder(12, 1, 30m, memo: null), Ct);
+
+        var onlyNull = new List<MemoValue?> { null };
+
+        (await orders.Query().Where(o => onlyNull.Contains(o.Memo)).ToListAsync(Ct))
+            .Select(o => o.OrderId.Value)
+            .Should()
+            .BeEquivalentTo([12]);
+
+        (await orders.Query().Where(o => !onlyNull.Contains(o.Memo)).ToListAsync(Ct))
+            .Select(o => o.OrderId.Value)
+            .Should()
+            .BeEquivalentTo([10]);
+    }
+
+    /// <summary>
+    /// 空コレクションの NOT IN は <c>1 = 1</c>（全行一致）になる（C# の <c>!list.Contains(x)</c> と同じ）。
+    /// </summary>
+    [Fact(DisplayName = "[SQLite演算子] 空コレクションの NOT IN が 1=1（常真）で全行を返す")]
+    public async Task EmptyCollection_NotIn_ReturnsAllRows()
+    {
+        await ResetAndCreateSchemaAsync();
+        var repo = await SeedCustomersAsync();
+
+        var empty = Array.Empty<CustomerIdValue>();
+        var all = await repo.Query().Where(c => !empty.Contains(c.CustomerId)).ToListAsync(Ct);
+        all.Select(c => c.CustomerId.Value).Should().BeEquivalentTo([1, 2, 3, 4]);
+    }
+
+    /// <summary>
     /// NOT: 否定は条件の補集合を返す。等値の否定は演算子を反転して <c>!=</c> と同じ経路へ落ち（NULL 補償の
     /// 内側に入る）、それ以外は一般 <c>NOT (...)</c> 分岐になる。bool 列短縮分岐（<c>"col"=0</c>）は本
     /// フィクスチャに bool 列が無く到達しない（クラス doc 参照）。
