@@ -4033,41 +4033,40 @@ public class CSharpCodeGenerationServiceTests
             .Contain(
                 "public abstract partial class ValueObjectBooleanBase<TSelf> : ValueObjectBase<TSelf, bool>"
             );
-        // string MaxLength・decimal precision/scale の自動検証
-        content.Should().Contain("if (value.Length > 50)");
-        // 検証の内部経路はエラーリストを遅延確保する（成功パスで List を作らない）ため ref 渡し
-        content.Should().Contain("ValidateDecimal(value, 10, 2, ref errors);");
-        // 既定メッセージは全 VO 共通の静的プロバイダから取得し、1 か所で差し替えできる
+        // string MaxLength・decimal precision/scale の自動検証は共有ルールクラスへの 1 行委譲になる
+        // （検証の内部経路はエラーリストを遅延確保する＝成功パスで List を作らないため ref 渡し）
+        content
+            .Should()
+            .Contain(
+                "ValueObjectStringRules.ValidateMaxLength(value, 50, DisplayName, ref errors);"
+            );
+        content
+            .Should()
+            .Contain("ValueObjectDecimalRules.Validate(value, 10, 2, DisplayName, ref errors);");
+        // null 値（必須）チェックも共有ルール（false＝以降の規則は値を触れないので打ち切り）
+        content
+            .Should()
+            .Contain("if (!ValueObjectRules.ValidateRequired(value, DisplayName, ref errors))");
+        // 既定メッセージは全 VO 共通の静的プロバイダから取得し、1 か所で差し替えできる（表示名が第 1 引数）
         content.Should().Contain("public static class ValueObjectValidationMessages");
         content
             .Should()
             .Contain(
-                "var message = ValueObjectValidationMessages.MaxLengthExceeded(50, value.Length);"
+                "public static Func<string, int, int, string> MaxLengthExceeded { get; set; }"
             );
-        content.Should().Contain("ValueObjectValidationMessages.ScaleExceeded(scale)");
-        content
-            .Should()
-            .Contain("ValueObjectValidationMessages.PrecisionExceeded(precision - scale)");
-        // null 値（必須）のメッセージも同じ 2 段チェーン（共通既定＋VO ごとの partial）に載る
-        content.Should().Contain("var message = ValueObjectValidationMessages.ValueRequired();");
-        content.Should().Contain("CustomizeValueRequiredErrorMessage(ref message);");
-        content
-            .Should()
-            .Contain("static partial void CustomizeValueRequiredErrorMessage(ref string message);");
+        // 検証規則そのものも固定 infra の公開クラスへ集約されている（利用者が OnValidate から呼べる）
+        content.Should().Contain("public static class ValueObjectRules");
+        content.Should().Contain("public static class ValueObjectStringRules");
+        content.Should().Contain("public static class ValueObjectNumberRules");
+        content.Should().Contain("public static class ValueObjectDecimalRules");
         // 表示名の既定値は全生成メンバー共通の静的リゾルバ経由（一括差し替え点）
         content.Should().Contain("public static class GeneratedDisplayNames");
-        // 自動ルールのエラーメッセージはさらに VO ごとの partial で個別調整も可能（ref string message フック）
-        content.Should().Contain("CustomizeMaxLengthErrorMessage(value, 50, ref message);");
-        content.Should().Contain("static partial void CustomizeMaxLengthErrorMessage(");
-        content.Should().Contain("CustomizeScaleErrorMessage(value, scale, ref message);");
-        content
-            .Should()
-            .Contain("CustomizePrecisionErrorMessage(value, precision - scale, ref message);");
-        content
-            .Should()
-            .Contain(
-                "static partial void CustomizeScaleErrorMessage(decimal value, int scale, ref string message);"
-            );
+        // VO ごとの文言・表示名 partial フックは廃止済み（差し替え点はリゾルバ 1 本）
+        content.Should().NotContain("CustomizeMaxLengthErrorMessage");
+        content.Should().NotContain("CustomizeScaleErrorMessage");
+        content.Should().NotContain("CustomizePrecisionErrorMessage");
+        content.Should().NotContain("CustomizeValueRequiredErrorMessage");
+        content.Should().NotContain("private static void ValidateDecimal(");
         // PK と同名 FK は同一 VO 型を共有（CustomerIdValue は 1 定義のみ）
         content.Split("public sealed partial class CustomerIdValue").Length.Should().Be(2);
         // Entity プロパティに DB カラムのメタ情報属性が付く（VO 型でも付与）。ColumnFacets は SqlColumnType へ統合済み
@@ -4155,11 +4154,12 @@ public class CSharpCodeGenerationServiceTests
         result.HasErrors.Should().BeFalse();
         var content = result.Files[0].Content;
         content.Should().Contain(": ValueObjectGuidKeyBase<DocumentIdValue>,");
-        // string VO と同じ長さ検証（value.Length > N → MaxLengthExceeded）が GuidKey VO にも出る
-        content.Should().Contain("if (value.Length > 50)");
+        // string VO と同じ長さ検証（共有ルールへの委譲）が GuidKey VO にも出る
         content
             .Should()
-            .Contain("ValueObjectValidationMessages.MaxLengthExceeded(50, value.Length)");
+            .Contain(
+                "ValueObjectStringRules.ValidateMaxLength(value, 50, DisplayName, ref errors);"
+            );
         // 幅 36 以上なので警告は出ない
         result
             .Diagnostics.Should()
@@ -4189,7 +4189,11 @@ public class CSharpCodeGenerationServiceTests
         // 生成は続行し、宣言幅どおり（20）の長さ検証が出る
         var content = result.Files[0].Content;
         content.Should().Contain(": ValueObjectGuidKeyBase<DocumentIdValue>,");
-        content.Should().Contain("if (value.Length > 20)");
+        content
+            .Should()
+            .Contain(
+                "ValueObjectStringRules.ValidateMaxLength(value, 20, DisplayName, ref errors);"
+            );
     }
 
     /// <summary>幅 36 ちょうど／幅 max（長さ不明）では警告を出さないことを検証する（境界の固定）</summary>

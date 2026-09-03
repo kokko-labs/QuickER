@@ -136,7 +136,7 @@ public sealed class ValueObjectInputConversionTests
             .Should()
             .ContainSingle()
             .Which.Should()
-            .Be(ValueObjectValidationMessages.MaxLengthExceeded(50, 51));
+            .Be(ValueObjectValidationMessages.MaxLengthExceeded(NameValue.DisplayName, 50, 51));
     }
 
     [Fact(DisplayName = "[生値変換] 変換できない値は差し替え可能なメッセージで報告される")]
@@ -146,7 +146,7 @@ public sealed class ValueObjectInputConversionTests
 
         try
         {
-            ValueObjectValidationMessages.InputNotConvertible = (raw, displayName) =>
+            ValueObjectValidationMessages.InputNotConvertible = (displayName, raw) =>
                 $"[{displayName}] cannot read '{raw}'.";
 
             CustomerIdValue

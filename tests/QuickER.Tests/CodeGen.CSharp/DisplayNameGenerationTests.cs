@@ -81,17 +81,14 @@ public class DisplayNameGenerationTests
         // 既定値の解決は共通の GeneratedDisplayNames.Resolve（一括差し替え点）へ通す
         content.Should().Contain("public static class GeneratedDisplayNames");
         // Description あり: 解決へ Description を渡す（既定ポリシーでは Description が採用される）
-        content
-            .Should()
-            .Contain("var displayName = GeneratedDisplayNames.Resolve(\"Name\", \"顧客名\");");
+        content.Should().Contain("GeneratedDisplayNames.Resolve(\"Name\", \"顧客名\");");
         // Description なし: 説明は null を渡し、プロパティ名（クラス名 CustomerIdValue ではなく CustomerId）へフォールバックする
+        content.Should().Contain("GeneratedDisplayNames.Resolve(\"CustomerId\", null);");
+        // VO 個別の表示名フックは廃止済み（差し替え点は Resolve 1 本＝型ごとの分岐も memberName で書く。
+        // Entity 側の override 方式 CustomizeDisplayName は別機構なので、VO の partial 宣言形だけを見る）
         content
             .Should()
-            .Contain("var displayName = GeneratedDisplayNames.Resolve(\"CustomerId\", null);");
-        // 全 VO に上書きフックが出る
-        content
-            .Should()
-            .Contain("static partial void CustomizeDisplayName(ref string displayName);");
+            .NotContain("static partial void CustomizeDisplayName(ref string displayName);");
     }
 
     // ===== Entity の DisplayName 既定値 =====
@@ -327,9 +324,7 @@ public class DisplayNameGenerationTests
         // VO.DisplayName 既定値（列 Description）も同様にエスケープされる
         content
             .Should()
-            .Contain(
-                "var displayName = GeneratedDisplayNames.Resolve(\"Name\", \"列\\\"名\\\"\\\\end\");"
-            );
+            .Contain("GeneratedDisplayNames.Resolve(\"Name\", \"列\\\"名\\\"\\\\end\");");
 
         // [DbTableMeta] / [DbColumnMeta] の Description も同じヘルパでエスケープされる（前タスクの潜在バグ修正）
         content.Should().Contain("[DbTableMeta(Description = \"行1 \\\"引用\\\"\\\\パス\")]");

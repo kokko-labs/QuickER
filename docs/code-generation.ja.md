@@ -87,7 +87,7 @@ public sealed class ContactMailValue
 - 形は生成物とまったく同じです。`ContactMailValue.Create(...)` / `TryCreate` / `Validate` が従来どおり使え、JSON 変換・SQL パラメータバインド・行の組み立ても生成された値オブジェクトと同じ扱いを受けます
 - 検証規則を持たない値オブジェクトは `ValidateCore` ごと省略できます（インターフェイスの既定実装＝検証なし）＝2 メンバで成立します
 - `ValidateCore` はエラーリストを**参照渡し・未確保**で受け取ります。最初の違反を足すときだけ確保する形（`(errors ??= new List<string>()).Add(...)`）にすると、正常な値の生成は何も確保しません
-- 参照型の値（`string` / `byte[]`）で入力を信頼できない場合は、`ValidateCore` で `null` を弾いてください。値オブジェクトは null を包みません（NULL 許容列はプロパティ自体を null に保ちます）。生成された値オブジェクトは null 入力を検証エラーとして報告します
+- 参照型の値（`string` / `byte[]`）で入力を信頼できない場合は、`ValidateCore` で `null` を弾いてください。値オブジェクトは null を包みません（NULL 許容列はプロパティ自体を null に保ちます）。生成された値オブジェクトが呼ぶ `ValueObjectRules.ValidateRequired(value, DisplayName, ref errors)` をそのまま使えます（false なら以降の規則を打ち切る）
 - `New` / `ValidateCore` は明示的実装なので型の公開面には出ません。型引数経由の `TVo.New` は検証を迂回するため、`New` を自分で呼ばないでください（検証は `Create` / `TryCreate` の仕事です）
 - 基底は値の型で選びます: `ValueObjectStringBase`（文字列）・`ValueObjectOrderedBase<TSelf, TValue>`（数値・日時）・`ValueObjectBooleanBase`・`ValueObjectBinaryBase`・`ValueObjectGuidKeyBase`（GUID 文字列キー）・それ以外は `ValueObjectBase<TSelf, TValue>` を直接
 
@@ -236,13 +236,26 @@ static bool IValueObject<DataAccessMode>.TryConvertCustomInput(
 生成されるクラスはメッセージ・表示名の差し替えに 2 つの方法を持ち、静的クラス・生成モード（インライン／パッケージ参照）を問わず共通の規則です:
 
 - **一括** — 固定 infra の static settable な `Func` をアプリ起動時に差し替える。全インスタンスに効く
-- **個別** — 生成側の具象クラスに `Customize*`（ref 引数）の partial を実装する。その型・プロパティだけに効く
+- **個別** — 差し替えた関数の中で分岐する。値オブジェクトの各メッセージは**第 1 引数にその値オブジェクトの表示名**を、`GeneratedDisplayNames.Resolve` はメンバー名を受け取るので、1 つの差し替えが「全域」と「この型だけ」を兼ねる（EditModel 側は従来どおり `Customize*`（ref 引数）の partial で、プロパティ名を受け取る）
 
 ```csharp
 // 一括（起動時）: メッセージの日本語化、表示名から Description を使わない切替
-ValueObjectValidationMessages.ValueRequired = static () => "値を入力してください。";
+ValueObjectValidationMessages.ValueRequired = static _ => "値を入力してください。";
 EditModelMessages.Required = static name => $"{name}は必須です。";
 GeneratedDisplayNames.Resolve = static (name, _) => name;   // Description を無視しメンバー名を使う
+```
+
+```csharp
+// 型ごとの表示名: リゾルバが受け取るメンバー名で分岐する。
+// nameof で書くと分岐が生成コードに対してコンパイルされる＝列がリネームされればビルドエラーになる
+GeneratedDisplayNames.Resolve = static (memberName, description) =>
+    memberName == nameof(CustomerEntity.Name) ? "氏名" : description ?? memberName;
+
+// 型ごとの文言: その型自身の DisplayName（上のリゾルバに追従する）と照合して分岐する
+ValueObjectValidationMessages.MaxLengthExceeded = static (displayName, maxLength, actualLength) =>
+    displayName == NameValue.DisplayName
+        ? $"氏名は {maxLength} 文字以内です（現在 {actualLength} 文字）。"
+        : $"{maxLength} 文字以内で入力してください。（現在 {actualLength} 文字）";
 ```
 
 ```csharp
@@ -257,9 +270,6 @@ public sealed partial class NameValue
             (errors ??= new List<string>()).Add("空白は使えません。");
         }
     }
-
-    // 検証メッセージ等で使う表示名の差し替え（既定は列の説明・無指定はプロパティ名）
-    static partial void CustomizeDisplayName(ref string displayName) => displayName = "氏名";
 }
 
 public partial class CustomerEditModel
@@ -275,9 +285,51 @@ public partial class CustomerEditModel
 }
 ```
 
-static クラス: `ValueObjectValidationMessages`（`MaxLengthExceeded` / `ScaleExceeded` / `PrecisionExceeded` / `ValueRequired`）、`EditModelMessages`（`Required` / `ParseFailed` / `JoinValueObjectErrors`）、`GeneratedDisplayNames`（`Resolve`＝Entity・EditModel プロパティ・値オブジェクトすべての表示名解決に使われる）。パッケージ参照モードでは、この 3 つは `QuickER.Runtime` パッケージに収載されます。
+static クラス: `ValueObjectValidationMessages`（`MaxLengthExceeded` / `ScaleExceeded` / `PrecisionExceeded` / `ValueRequired` / `DigitsExceeded` / `OutOfRange` / `InvalidCharacters` / `InvalidEmailAddress` / `InputNotConvertible`＝いずれも表示名が第 1 引数）、`EditModelMessages`（`Required` / `ParseFailed` / `JoinValueObjectErrors`）、`GeneratedDisplayNames`（`Resolve`＝Entity・EditModel プロパティ・値オブジェクトすべての表示名解決に使われる）。パッケージ参照モードでは、この 3 つは `QuickER.Runtime` パッケージに収載されます。
 
-個別 partial: 値オブジェクト側は `CustomizeDisplayName` / `CustomizeMaxLengthErrorMessage` / `CustomizeScaleErrorMessage` / `CustomizePrecisionErrorMessage` / `CustomizeValueRequiredErrorMessage`（string / byte[] のみ）/ `OnValidate`、EditModel 側は `CustomizeRequiredErrorMessage` / `CustomizeParseErrorMessage` / `CustomizePropertyDisplayName`、Entity 側は `CustomizeDisplayName`（従来どおり partial でなく override 方式）。値オブジェクトの画面表示用文字列 `DisplayValue`（virtual）の override も引き続き使えます。
+個別 partial: 値オブジェクト側は `OnValidate`（ほかに前述の `GetDefinedInstance` / `ConvertCustomInput`）、EditModel 側は `CustomizeRequiredErrorMessage` / `CustomizeParseErrorMessage` / `CustomizePropertyDisplayName`、Entity 側は `CustomizeDisplayName`（従来どおり partial でなく override 方式）。値オブジェクトの画面表示用文字列 `DisplayValue`（virtual）の override も引き続き使えます。
+
+> **値オブジェクトの文言フックからの移行**: `CustomizeDisplayName` / `CustomizeMaxLengthErrorMessage` / `CustomizeScaleErrorMessage` / `CustomizePrecisionErrorMessage` / `CustomizeValueRequiredErrorMessage` は生成されなくなり、実装が残っているとコンパイルエラーになります。表示名は `GeneratedDisplayNames.Resolve` へ、文言は対応する `ValueObjectValidationMessages` のエントリへ移し、上の例のように分岐してください。移した結果、文言が「型ごとに 1 か所」でなく「メッセージごとに 1 か所」へまとまり、生成側の型名が変わっても再実装が要らない（＝再生成で黙って無効化されない）形になります。
+
+### 自分で呼べる検証ルール
+
+生成された `ValidateCore` が呼ぶ規則は固定 infra の public static メソッドで、列の宣言では表せない 4 種も同じ場所にあります。`OnValidate` から呼んでください。いずれもエラーリストを参照渡し・未確保で受け取るので、検証を通る値は何も確保しません:
+
+```csharp
+public sealed partial class ContactMailValue
+{
+    static partial void OnValidate(string value, ref List<string>? errors) =>
+        ValueObjectStringRules.ValidateEmailAddress(value, DisplayName, ref errors);
+}
+
+public sealed partial class ProductCodeValue
+{
+    static partial void OnValidate(string value, ref List<string>? errors)
+    {
+        // ASCII 英数字＋この型が許す記号 2 種
+        ValueObjectStringRules.ValidateAsciiAlphanumeric(value, "-_", DisplayName, ref errors);
+    }
+}
+
+public sealed partial class QuantityValue
+{
+    static partial void OnValidate(int value, ref List<string>? errors)
+    {
+        ValueObjectNumberRules.ValidateRange(value, 1, 999, DisplayName, ref errors);   // 閉区間
+        ValueObjectNumberRules.ValidateMaxDigits(value, 3, DisplayName, ref errors);    // 符号は数えず 0 は 1 桁
+    }
+}
+```
+
+| ルール | 弾くもの |
+|---|---|
+| `ValueObjectRules.ValidateRequired(value, displayName, ref errors)` | `null`。false を返すので呼び出し側は打ち切れる（以降の規則はすべて値を触るため） |
+| `ValueObjectStringRules.ValidateMaxLength(value, maxLength, displayName, ref errors)` | 文字数が上限を超える値 |
+| `ValueObjectStringRules.ValidateAsciiAlphanumeric(value, allowedSymbols, displayName, ref errors)` | ASCII の英字・数字と `allowedSymbols` の文字以外（記号を一切許さないなら `""`）。全角の英数字は弾く |
+| `ValueObjectStringRules.ValidateEmailAddress(value, displayName, ref errors)` | メールアドレスの形をしていない文字列（`@` がちょうど 1 つ・前後が非空・空白なし）。RFC 5322 の完全検証は意図的にしない。`MailAddress` を使わないのは、それが `Name <a@b>` 形式も解釈してしまうため |
+| `ValueObjectNumberRules.ValidateMaxDigits(value, maxDigits, displayName, ref errors)` | 桁数が上限を超える整数（符号は数えない・0 は 1 桁） |
+| `ValueObjectNumberRules.ValidateRange(value, minimum, maximum, displayName, ref errors)` | 閉区間の外の値。`IComparable<T>` なら何でも通るので日時にも使える |
+| `ValueObjectDecimalRules.Validate(value, precision, scale, displayName, ref errors)` | 小数部が `scale` を、整数部が `precision - scale` を超える decimal。丸めず、末尾ゼロは scale に数える |
 
 ### 各機能との統合（透過対応）
 
