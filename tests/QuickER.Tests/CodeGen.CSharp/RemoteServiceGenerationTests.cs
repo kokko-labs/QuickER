@@ -222,6 +222,48 @@ public class RemoteServiceGenerationTests
         server.Should().NotContain("OrderFindTopRequest");
     }
 
+    /// <summary>
+    /// 重複事前チェックのエンドポイントが固定エンジンの汎用マッピング側で張られ、per-entity には
+    /// ハンドラもリクエストレコードも残らないことを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 契約がランタイム共通面（<c>IRemoteRepository</c>）へ上がった以上、ハンドラは型引数だけで立つ。
+    /// リクエストは Insert と完全に同型なので、per-entity の <c>{Entity}CheckUniquenessRequest</c> は
+    /// 廃止して <c>RemoteEntityRequest&lt;TEntity&gt;</c> を共有する（ワイヤ上は同じ 1 フィールドの JSON）。
+    /// </remarks>
+    [Fact(DisplayName = "重複事前チェックは MapCrud が張り per-entity のレコードは残らない")]
+    public void Generate_RemoteServices_MapsUniquenessCheckFromTheGenericCrudMapping()
+    {
+        var result = Generate(
+            CreateDiagram(),
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Test.Ns",
+                GenerateRepositories = true,
+                GenerateRemoteServices = true,
+            }
+        );
+
+        result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
+        var server = result.Files[1].Content.ReplaceLineEndings("\n");
+
+        // ルートは不変（ワイヤ互換）で、Insert と同じエンベロープを読む
+        server.Should().Contain("$\"{entityRoute}/CheckUniqueness\"");
+        server
+            .Should()
+            .Contain(
+                "var request = await ReadRequestAsync<RemoteEntityRequest<TEntity>>(context).ConfigureAwait(false);\n"
+                    + "                        return (object?)\n"
+                    + "                            await Repository<TRepository>(context)\n"
+                    + "                                .CheckUniquenessAsync(\n"
+                    + "                                    Required(request.Entity, \"Entity\"),"
+            );
+
+        // per-entity 側には痕跡が残らない
+        server.Should().NotContain("OrderCheckUniquenessRequest");
+        server.Should().NotContain("\"Order/CheckUniqueness\"");
+    }
+
     /// <summary>OFF（既定）: 出力が 1 ファイルのままで、リモートサービス関連の型が一切出ないことを検証する</summary>
     [Fact(DisplayName = "OFF（既定）: 1 ファイルのまま・HTTP クライアント/サーバー関連は出ない")]
     public void Generate_Default_DoesNotEmitRemoteServices()

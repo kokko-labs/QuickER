@@ -486,7 +486,67 @@ public static class RemoteServerEngine
         }
     }
 
-    /// <summary>Maps the common CRUD operations (GetById / GetAll / Insert / Update / Delete / Save / SaveMany).</summary>
+    /// <summary>Maps the three verbs of one unbounded binary column (<c>GET</c> / <c>PUT</c> / <c>DELETE {prefix}/{entity}/{column}?id=</c>).</summary>
+    /// <remarks>
+    /// <para>
+    /// The column's accessors are the only per-entity part, so they arrive as delegates and everything around them is
+    /// shared: the key restored from the query string, the deferred 404 marker of a download, the length an upload
+    /// requires, and the opt-in that lifts the request size limit.
+    /// </para>
+    /// <para>
+    /// The key is restored inside each handler rather than before it, which keeps a malformed <c>?id=</c> inside the try
+    /// of the wrapper that classifies it as 400. A DELETE is a write of a null source, so NULLing the column stays
+    /// structurally distinct from uploading an empty body.
+    /// </para>
+    /// </remarks>
+    public static void MapBinaryColumn<TKey>(
+        RouteGroupBuilder group,
+        string columnRoute,
+        bool allowUnboundedUploads,
+        Func<HttpContext, TKey, Stream, Task<bool>> read,
+        Func<HttpContext, TKey, Stream?, long?, Task<bool>> write
+    )
+    {
+        group.MapGet(
+            columnRoute,
+            (HttpContext context) =>
+                ExecuteDownloadAsync(
+                    context,
+                    destination => read(context, ParseKeyFromQuery<TKey>(context), destination)
+                )
+        );
+
+        var upload = group.MapPut(
+            columnRoute,
+            (HttpContext context) =>
+                ExecuteUploadAsync(
+                    context,
+                    (body, length) =>
+                        write(context, ParseKeyFromQuery<TKey>(context), body, length)
+                )
+        );
+
+        if (allowUnboundedUploads)
+        {
+            upload.WithMetadata(DisableRequestBodySizeLimit.Instance);
+        }
+
+        group.MapDelete(
+            columnRoute,
+            (HttpContext context) =>
+                ExecuteDeleteAsync(
+                    context,
+                    () => write(context, ParseKeyFromQuery<TKey>(context), null, null)
+                )
+        );
+    }
+
+    /// <summary>Maps the operations every entity has: CRUD (GetById / GetAll / Insert / Update / Delete), the graph saves (Save / SaveMany), and the uniqueness pre-check.</summary>
+    /// <remarks>
+    /// The uniqueness pre-check travels in the envelope Insert already uses
+    /// (<see cref="RemoteEntityRequest{TEntity}"/>): both carry one entity and nothing else, so it needs no request
+    /// record of its own.
+    /// </remarks>
     public static void MapCrud<TEntity, TKey, TRepository>(
         RouteGroupBuilder group,
         string entityRoute
@@ -633,6 +693,23 @@ public static class RemoteServerEngine
                                 CollectRowVersions(entities, request.CascadeSave),
                                 CollectSkipped(entities, request.CascadeSave)
                             );
+                    }
+                )
+        );
+        group.MapPost(
+            $"{entityRoute}/CheckUniqueness",
+            (HttpContext context) =>
+                ExecuteAsync(
+                    context,
+                    async () =>
+                    {
+                        var request = await ReadRequestAsync<RemoteEntityRequest<TEntity>>(context).ConfigureAwait(false);
+                        return (object?)
+                            await Repository<TRepository>(context)
+                                .CheckUniquenessAsync(
+                                    Required(request.Entity, "Entity"),
+                                    context.RequestAborted
+                                ).ConfigureAwait(false);
                     }
                 )
         );

@@ -51,5 +51,6 @@ public static class QuickER.Runtime.AspNetCore.RemoteServerEngine
     public static TKey ParseKeyFromQuery<TKey>(Microsoft.AspNetCore.Http.HttpContext context)
     public static TRepository Repository<TRepository>(Microsoft.AspNetCore.Http.HttpContext context)
     public static void LogServerError(Microsoft.AspNetCore.Http.HttpContext context, System.Exception ex)
+    public static void MapBinaryColumn<TKey>(Microsoft.AspNetCore.Routing.RouteGroupBuilder group, string columnRoute, bool allowUnboundedUploads, System.Func<Microsoft.AspNetCore.Http.HttpContext, TKey, System.IO.Stream, System.Threading.Tasks.Task<bool>> read, System.Func<Microsoft.AspNetCore.Http.HttpContext, TKey, System.IO.Stream, long?, System.Threading.Tasks.Task<bool>> write)
     public static void MapCrud<TEntity, TKey, TRepository>(Microsoft.AspNetCore.Routing.RouteGroupBuilder group, string entityRoute)
 

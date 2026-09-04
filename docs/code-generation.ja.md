@@ -1333,7 +1333,7 @@ DB なしでユニットテストするためのインメモリ実装を追加�
 | `Runtime.SqlServer.g.cs` / `Runtime.Sqlite.g.cs`（`{Runtime}.{方言}`） | `QuickER.Runtime.SqlServer` / `QuickER.Runtime.Sqlite` | 方言エンジン（方言 Repository 基底・式木翻訳・実行器・接続ファクトリ） |
 | `Runtime.EntityFrameworkCore.g.cs`（`{Runtime}.EntityFrameworkCore`） | `QuickER.Runtime.EntityFrameworkCore` | EF Core 共通部品（`TContext : DbContext` ジェネリックの Repository 基底・VO 翻訳プラグイン） |
 | `Runtime.InMemory.g.cs`（`{Runtime}.InMemory`） | `QuickER.Runtime.InMemory` | インメモリ基盤（ストア・Repository 基底・保存ステージング） |
-| `Runtime.AspNetCore.g.cs`（`{Runtime}.AspNetCore`） | `QuickER.Runtime.AspNetCore` | サーバー側固定エンジン（`RemoteServerEngine`＝リクエスト読み取り・エラー分類・詳細公開ポリシー・バイナリ転送の補助） |
+| `Runtime.AspNetCore.g.cs`（`{Runtime}.AspNetCore`） | `QuickER.Runtime.AspNetCore` | サーバー側固定エンジン（`RemoteServerEngine`＝リクエスト読み取り・エラー分類・詳細公開ポリシー・バイナリ転送の補助・ CRUD／グラフ保存／重複事前チェック／バイナリ列の汎用エンドポイントマッピング） |
 | `Runtime.Sync.g.cs`（`{Runtime}.Sync`） | `QuickER.Runtime.Sync` | 同期エンジン（`SyncEngine`・`SyncJournal`・`SyncTable<,>`・`SyncTableDescriptor<,>`・`SyncGraphRecorder`・オプション／結果／競合の型。リモートサービス併用時は同期エンベロープと HTTP ソース） |
 | `Repositories.g.cs`・`Repositories.SqlServer.g.cs` / `Repositories.Sqlite.g.cs` / `Repositories.EntityFrameworkCore.g.cs` / `Repositories.InMemory.g.cs` / `Repositories.Sync.g.cs` / `Repositories.Http.g.cs`・`RemoteServer.g.cs` | —（対応パッケージなし＝常に生成） | スキーマ依存物のみ（per-entity の契約と実装・DI 登録・`QuickErDbContext` と Fluent 構成・射影 DTO・per-entity のエンドポイント（`GeneratedRemoteEndpoints`）・per-table の同期記述子とジャーナル記録デコレータ）。リモートサービス併用時、HTTP クライアント（`Http{Entity}RemoteRepository` と DI 登録）は専用の `Repositories.Http.g.cs` へ分かれ、契約ファイルはインターフェイスだけに保たれます（名前空間は契約と同一のため型名は変わりません） |
 

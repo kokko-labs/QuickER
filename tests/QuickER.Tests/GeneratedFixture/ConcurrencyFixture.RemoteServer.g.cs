@@ -254,7 +254,12 @@ internal static class RemoteServerEngine
         );
     }
 
-    /// <summary>Maps the common CRUD operations (GetById / GetAll / Insert / Update / Delete / Save / SaveMany).</summary>
+    /// <summary>Maps the operations every entity has: CRUD (GetById / GetAll / Insert / Update / Delete), the graph saves (Save / SaveMany), and the uniqueness pre-check.</summary>
+    /// <remarks>
+    /// The uniqueness pre-check travels in the envelope Insert already uses
+    /// (<see cref="RemoteEntityRequest{TEntity}"/>): both carry one entity and nothing else, so it needs no request
+    /// record of its own.
+    /// </remarks>
     public static void MapCrud<TEntity, TKey, TRepository>(
         RouteGroupBuilder group,
         string entityRoute
@@ -401,6 +406,23 @@ internal static class RemoteServerEngine
                                 CollectRowVersions(entities, request.CascadeSave),
                                 CollectSkipped(entities, request.CascadeSave)
                             );
+                    }
+                )
+        );
+        group.MapPost(
+            $"{entityRoute}/CheckUniqueness",
+            (HttpContext context) =>
+                ExecuteAsync(
+                    context,
+                    async () =>
+                    {
+                        var request = await ReadRequestAsync<RemoteEntityRequest<TEntity>>(context).ConfigureAwait(false);
+                        return (object?)
+                            await Repository<TRepository>(context)
+                                .CheckUniquenessAsync(
+                                    Required(request.Entity, "Entity"),
+                                    context.RequestAborted
+                                ).ConfigureAwait(false);
                     }
                 )
         );
@@ -726,24 +748,7 @@ public static partial class GeneratedRemoteEndpoints
             group,
             "Gadget"
         );
-
-        group.MapPost(
-            "Gadget/CheckUniqueness",
-            (HttpContext context) =>
-                RemoteServerEngine.ExecuteAsync(
-                    context,
-                    async () =>
-                    {
-                        var request = await RemoteServerEngine.ReadRequestAsync<GadgetCheckUniquenessRequest>(context).ConfigureAwait(false);
-                        var repository = RemoteServerEngine.Repository<IGadgetRemoteRepository>(context);
-                        return (object?)await repository.CheckUniquenessAsync(RemoteServerEngine.Required(request.Entity, "Entity"), context.RequestAborted).ConfigureAwait(false);
-                    }
-                )
-        );
     }
-
-    /// <summary>Request body for CheckUniqueness (Gadget).</summary>
-    private sealed record GadgetCheckUniquenessRequest(GadgetEntity Entity);
 
     /// <summary>Maps the remote-surface endpoints for GadgetNoteEntity.</summary>
     private static void MapGadgetNoteEndpoints(RouteGroupBuilder group)
@@ -752,22 +757,5 @@ public static partial class GeneratedRemoteEndpoints
             group,
             "GadgetNote"
         );
-
-        group.MapPost(
-            "GadgetNote/CheckUniqueness",
-            (HttpContext context) =>
-                RemoteServerEngine.ExecuteAsync(
-                    context,
-                    async () =>
-                    {
-                        var request = await RemoteServerEngine.ReadRequestAsync<GadgetNoteCheckUniquenessRequest>(context).ConfigureAwait(false);
-                        var repository = RemoteServerEngine.Repository<IGadgetNoteRemoteRepository>(context);
-                        return (object?)await repository.CheckUniquenessAsync(RemoteServerEngine.Required(request.Entity, "Entity"), context.RequestAborted).ConfigureAwait(false);
-                    }
-                )
-        );
     }
-
-    /// <summary>Request body for CheckUniqueness (GadgetNote).</summary>
-    private sealed record GadgetNoteCheckUniquenessRequest(GadgetNoteEntity Entity);
 }
