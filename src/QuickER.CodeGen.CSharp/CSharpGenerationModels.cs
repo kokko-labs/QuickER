@@ -694,12 +694,6 @@ internal sealed class CSharpRepositoryModel
     /// Repository 契約を生成するエンティティでは制約の有無に依らず常に非空（フックだけでも独自の重複判定を足せる）。
     /// </remarks>
     public string UniquenessBindingBlock { get; init; } = string.Empty;
-
-    /// <summary>重複事前チェックのサーバー側エンドポイントマッピング（<c>Map{Entity}Endpoints</c> 内へ挿入・無ければ空文字）</summary>
-    public string UniquenessRemoteServerBlock { get; init; } = string.Empty;
-
-    /// <summary>重複事前チェックのサーバー側リクエストレコード（クラスレベルへ挿入・無ければ空文字）</summary>
-    public string UniquenessRemoteServerRecordsBlock { get; init; } = string.Empty;
 }
 
 // ---- EditModel 専用モデル ----

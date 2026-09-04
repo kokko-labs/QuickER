@@ -203,14 +203,23 @@ public class SyncSupportGenerationTests
             .Should()
             .Contain("services.GetService<IServiceProviderIsService>() is not { } registrations");
 
-        // 同期対象テーブルごとに 1 件（漏れたテーブルは検査から静かに抜ける）
-        server
-            .Should()
-            .Contain("!registrations.IsService(typeof(ISyncServerSource<SyncOrderEntity, int>))");
+        // 検査そのものは表を 1 周するだけ（per-entity に増えるのは表の行だけ）
+        server.Should().Contain("foreach (var (service, name) in SyncSourceServices)");
+        server.Should().Contain("if (!registrations.IsService(service))");
+
+        // 同期対象テーブルごとに 1 行（漏れたテーブルは検査から静かに抜ける）。
+        // 報告名は型から導かず書き下ろす＝メッセージがコードと同じ綴り（Int32 ではなく int）になる
         server
             .Should()
             .Contain(
-                "!registrations.IsService(typeof(ISyncServerSource<SyncOrderLineEntity, int>))"
+                "(typeof(ISyncServerSource<SyncOrderEntity, int>), "
+                    + "\"ISyncServerSource<SyncOrderEntity, int>\"),"
+            );
+        server
+            .Should()
+            .Contain(
+                "(typeof(ISyncServerSource<SyncOrderLineEntity, int>), "
+                    + "\"ISyncServerSource<SyncOrderLineEntity, int>\"),"
             );
 
         // 例外は「何をすべきか」まで書く（クライアント側 fail-fast と同水準）

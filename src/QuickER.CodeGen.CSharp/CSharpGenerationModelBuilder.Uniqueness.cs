@@ -20,7 +20,9 @@ namespace QuickER.CodeGen.CSharp;
 /// 契約が共通面へ上がったため、リモート契約生成（<c>GenerateRemoteContracts</c> / <c>GenerateRemoteServices</c>）の
 /// 有無で挿入先を出し分ける必要は無くなった（<c>I{Entity}Repository</c> は <c>I{Entity}RemoteRepository</c> 経由で、
 /// 単独構成でも <c>IRepository</c> 経由で同じ宣言を継承する）。HTTP クライアントの転送実装も基底
-/// <c>HttpRemoteRepository</c> が 1 回だけ持つ。
+/// <c>HttpRemoteRepository</c> が 1 回だけ持ち、サーバー側のエンドポイントも固定エンジンの
+/// <c>RemoteServerEngine.MapCrud</c> が CRUD と一緒に張る（リクエストは Insert と同型のため
+/// <c>RemoteEntityRequest&lt;TEntity&gt;</c> を共有し、per-entity のリクエストレコードは持たない）。
 /// </para>
 /// <para>
 /// 制約が 1 件も無いエンティティでもメソッドとユーザー定義フック（<c>CollectCustomUniquenessChecks</c>）は生成する
@@ -31,12 +33,7 @@ namespace QuickER.CodeGen.CSharp;
 internal sealed partial class CSharpGenerationModelBuilder
 {
     /// <summary>1 エンティティ分の重複事前チェックブロック（テンプレートへ渡す整形済みテキスト群）</summary>
-    private sealed record UniquenessBlocks(
-        string ConstraintsClassBlock,
-        string BindingBlock,
-        string RemoteServerBlock,
-        string RemoteServerRecordsBlock
-    );
+    private sealed record UniquenessBlocks(string ConstraintsClassBlock, string BindingBlock);
 
     /// <summary>解決済みの UNIQUE 制約 1 件（構成列を生成コード上の姿へ解決したもの）</summary>
     /// <param name="ConstraintName">DDL 上の制約名（未設定なら合成名）</param>
@@ -119,15 +116,6 @@ internal sealed partial class CSharpGenerationModelBuilder
         var constraints = ResolveUniqueConstraints(entity);
         var keyProperty = BuildProperty(entity.Columns.First(column => column.IsPrimaryKey));
 
-        var shape = new QueryMethodShape(
-            "CheckUniquenessAsync",
-            $"{entityClassName} entity, CancellationToken cancellationToken = default",
-            "Task<IReadOnlyList<UniquenessViolation>>",
-            $"Checks the UNIQUE constraints of {EscapeForXmlDocSummary(entity.TableName)} against the database and returns the violations (an empty list when there are none).",
-            [new QueryPayloadParameter(entityClassName, "entity", true)],
-            ["entity", "cancellationToken"]
-        );
-
         return new UniquenessBlocks(
             constraints.Count > 0
                 ? BuildUniquenessConstraintsClass(
@@ -139,13 +127,7 @@ internal sealed partial class CSharpGenerationModelBuilder
                     options
                 )
                 : string.Empty,
-            BuildUniquenessBindingMember(entityClassName, repositoryName, constraints),
-            options.GenerateRemoteServices
-                ? BuildRemoteServerMap(shape, repositoryName)
-                : string.Empty,
-            options.GenerateRemoteServices
-                ? BuildRemoteServerRecord(shape, repositoryName) ?? string.Empty
-                : string.Empty
+            BuildUniquenessBindingMember(entityClassName, repositoryName, constraints)
         );
     }
 

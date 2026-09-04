@@ -442,8 +442,6 @@ internal sealed partial class CSharpGenerationModelBuilder
             BinaryStreamRemoteServerBlock = binaryStreamBlocks.RemoteServerBlock,
             UniquenessConstraintsClassBlock = uniquenessBlocks.ConstraintsClassBlock,
             UniquenessBindingBlock = uniquenessBlocks.BindingBlock,
-            UniquenessRemoteServerBlock = uniquenessBlocks.RemoteServerBlock,
-            UniquenessRemoteServerRecordsBlock = uniquenessBlocks.RemoteServerRecordsBlock,
         };
     }
 

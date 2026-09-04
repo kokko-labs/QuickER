@@ -254,7 +254,12 @@ internal static class RemoteServerEngine
         );
     }
 
-    /// <summary>Maps the common CRUD operations (GetById / GetAll / Insert / Update / Delete / Save / SaveMany).</summary>
+    /// <summary>Maps the operations every entity has: CRUD (GetById / GetAll / Insert / Update / Delete), the graph saves (Save / SaveMany), and the uniqueness pre-check.</summary>
+    /// <remarks>
+    /// The uniqueness pre-check travels in the envelope Insert already uses
+    /// (<see cref="RemoteEntityRequest{TEntity}"/>): both carry one entity and nothing else, so it needs no request
+    /// record of its own.
+    /// </remarks>
     public static void MapCrud<TEntity, TKey, TRepository>(
         RouteGroupBuilder group,
         string entityRoute
@@ -401,6 +406,23 @@ internal static class RemoteServerEngine
                                 CollectRowVersions(entities, request.CascadeSave),
                                 CollectSkipped(entities, request.CascadeSave)
                             );
+                    }
+                )
+        );
+        group.MapPost(
+            $"{entityRoute}/CheckUniqueness",
+            (HttpContext context) =>
+                ExecuteAsync(
+                    context,
+                    async () =>
+                    {
+                        var request = await ReadRequestAsync<RemoteEntityRequest<TEntity>>(context).ConfigureAwait(false);
+                        return (object?)
+                            await Repository<TRepository>(context)
+                                .CheckUniquenessAsync(
+                                    Required(request.Entity, "Entity"),
+                                    context.RequestAborted
+                                ).ConfigureAwait(false);
                     }
                 )
         );
@@ -728,24 +750,7 @@ public static partial class GeneratedRemoteEndpoints
             group,
             "Customer"
         );
-
-        group.MapPost(
-            "Customer/CheckUniqueness",
-            (HttpContext context) =>
-                RemoteServerEngine.ExecuteAsync(
-                    context,
-                    async () =>
-                    {
-                        var request = await RemoteServerEngine.ReadRequestAsync<CustomerCheckUniquenessRequest>(context).ConfigureAwait(false);
-                        var repository = RemoteServerEngine.Repository<ICustomerRemoteRepository>(context);
-                        return (object?)await repository.CheckUniquenessAsync(RemoteServerEngine.Required(request.Entity, "Entity"), context.RequestAborted).ConfigureAwait(false);
-                    }
-                )
-        );
     }
-
-    /// <summary>Request body for CheckUniqueness (Customer).</summary>
-    private sealed record CustomerCheckUniquenessRequest(CustomerEntity Entity);
 
     /// <summary>Maps the remote-surface endpoints for OrderEntity.</summary>
     private static void MapOrderEndpoints(RouteGroupBuilder group)
@@ -934,20 +939,6 @@ public static partial class GeneratedRemoteEndpoints
                     }
                 )
         );
-
-        group.MapPost(
-            "Order/CheckUniqueness",
-            (HttpContext context) =>
-                RemoteServerEngine.ExecuteAsync(
-                    context,
-                    async () =>
-                    {
-                        var request = await RemoteServerEngine.ReadRequestAsync<OrderCheckUniquenessRequest>(context).ConfigureAwait(false);
-                        var repository = RemoteServerEngine.Repository<IOrderRemoteRepository>(context);
-                        return (object?)await repository.CheckUniquenessAsync(RemoteServerEngine.Required(request.Entity, "Entity"), context.RequestAborted).ConfigureAwait(false);
-                    }
-                )
-        );
     }
 
     /// <summary>Request body for GetByCustomer (Order).</summary>
@@ -983,9 +974,6 @@ public static partial class GeneratedRemoteEndpoints
     /// <summary>Request body for SpecialLookup (Order).</summary>
     private sealed record OrderSpecialLookupRequest(int CustomerId);
 
-    /// <summary>Request body for CheckUniqueness (Order).</summary>
-    private sealed record OrderCheckUniquenessRequest(OrderEntity Entity);
-
     /// <summary>Maps the remote-surface endpoints for OrderLineEntity.</summary>
     private static void MapOrderLineEndpoints(RouteGroupBuilder group)
     {
@@ -993,24 +981,7 @@ public static partial class GeneratedRemoteEndpoints
             group,
             "OrderLine"
         );
-
-        group.MapPost(
-            "OrderLine/CheckUniqueness",
-            (HttpContext context) =>
-                RemoteServerEngine.ExecuteAsync(
-                    context,
-                    async () =>
-                    {
-                        var request = await RemoteServerEngine.ReadRequestAsync<OrderLineCheckUniquenessRequest>(context).ConfigureAwait(false);
-                        var repository = RemoteServerEngine.Repository<IOrderLineRemoteRepository>(context);
-                        return (object?)await repository.CheckUniquenessAsync(RemoteServerEngine.Required(request.Entity, "Entity"), context.RequestAborted).ConfigureAwait(false);
-                    }
-                )
-        );
     }
-
-    /// <summary>Request body for CheckUniqueness (OrderLine).</summary>
-    private sealed record OrderLineCheckUniquenessRequest(OrderLineEntity Entity);
 
     /// <summary>Maps the remote-surface endpoints for NodeEntity.</summary>
     private static void MapNodeEndpoints(RouteGroupBuilder group)
@@ -1019,22 +990,5 @@ public static partial class GeneratedRemoteEndpoints
             group,
             "Node"
         );
-
-        group.MapPost(
-            "Node/CheckUniqueness",
-            (HttpContext context) =>
-                RemoteServerEngine.ExecuteAsync(
-                    context,
-                    async () =>
-                    {
-                        var request = await RemoteServerEngine.ReadRequestAsync<NodeCheckUniquenessRequest>(context).ConfigureAwait(false);
-                        var repository = RemoteServerEngine.Repository<INodeRemoteRepository>(context);
-                        return (object?)await repository.CheckUniquenessAsync(RemoteServerEngine.Required(request.Entity, "Entity"), context.RequestAborted).ConfigureAwait(false);
-                    }
-                )
-        );
     }
-
-    /// <summary>Request body for CheckUniqueness (Node).</summary>
-    private sealed record NodeCheckUniquenessRequest(NodeEntity Entity);
 }

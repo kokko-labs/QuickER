@@ -25,7 +25,8 @@ namespace QuickER.CodeGen.CSharp;
 /// <para>
 /// リモートサービス生成時は HTTP + JSON の専用エンドポイント（<c>GET/PUT/DELETE {prefix}/{エンティティ}/{列名}?id=</c>）で
 /// ストリーミング転送する。クライアント（<c>Http{Entity}RemoteRepository</c>）は固定 infra の共通ヘルパーへ委譲し、
-/// サーバー（<c>Map{Entity}Endpoints</c>）は除外列ごとに 3 動詞を出力する。
+/// サーバー（<c>Map{Entity}Endpoints</c>）は除外列ごとに固定エンジンの <c>MapBinaryColumn</c> を 1 回呼ぶ
+/// （3 動詞の中身は列アクセサのデリゲートだけが per-entity）。
 /// </para>
 /// </remarks>
 internal sealed partial class CSharpGenerationModelBuilder
@@ -325,8 +326,13 @@ internal sealed partial class CSharpGenerationModelBuilder
         return builder.ToString();
     }
 
-    /// <summary>Stream アクセサのサーバー側バイナリエンドポイント 3 動詞（GET/PUT/DELETE）を構築する</summary>
-    /// <remarks>インデントはサーバーテンプレートのメソッド本体（8 スペース起点）に合わせる。ルートは <c>{エンティティ}/{列名}</c></remarks>
+    /// <summary>Stream アクセサのサーバー側バイナリエンドポイント（固定エンジンの <c>MapBinaryColumn</c> 呼び出し 1 つ＝GET/PUT/DELETE の 3 動詞）を構築する</summary>
+    /// <remarks>
+    /// インデントはサーバーテンプレートのメソッド本体（8 スペース起点）に合わせる。ルートは <c>{エンティティ}/{列名}</c>。
+    /// per-entity なのは列アクセサ（<c>Read{列}Async</c> / <c>Write{列}Async</c>）の名前だけなので、それをデリゲートで渡し、
+    /// キー復元・404 marker・411・サイズ制限解除のメタデータ付与は固定エンジンが 1 回だけ持つ。
+    /// DELETE は「source=null の書き込み」としてアップロードと同じデリゲートを使う。
+    /// </remarks>
     private static string BuildBinaryStreamRemoteServerMember(
         string propertyName,
         string remoteInterfaceName,
@@ -334,84 +340,27 @@ internal sealed partial class CSharpGenerationModelBuilder
         string keyTypeName
     )
     {
-        var route = $"{repositoryName}/{propertyName}";
-        var resolve =
-            $"var repository = RemoteServerEngine.Repository<{remoteInterfaceName}>(context);";
-        var parseKey = $"RemoteServerEngine.ParseKeyFromQuery<{keyTypeName}>(context)";
+        var resolve = $"RemoteServerEngine.Repository<{remoteInterfaceName}>(context)";
 
         var builder = new StringBuilder();
-
-        // GET: ダウンロード。読み取り関数が false（行なし/NULL）のときは本文未送信のまま marker 付き 404 になる
         builder
-            .Append("        group.MapGet(\n            \"")
-            .Append(route)
-            .Append("\",\n            (HttpContext context) =>\n")
-            .Append(
-                "                RemoteServerEngine.ExecuteDownloadAsync(\n                    context,\n"
-            )
-            .Append("                    destination =>\n                    {\n")
-            .Append("                        ")
-            .Append(resolve)
-            .Append("\n                        return repository.Read")
+            .Append("        RemoteServerEngine.MapBinaryColumn<")
+            .Append(keyTypeName)
+            .Append(">(\n            group,\n            \"")
+            .Append(repositoryName)
+            .Append('/')
             .Append(propertyName)
-            .Append("Async(\n                            ")
-            .Append(parseKey)
-            .Append(",\n                            destination,\n")
-            .Append(
-                "                            context.RequestAborted\n                        );\n"
-            )
-            .Append("                    }\n                )\n        );\n\n");
-
-        // PUT: アップロード。リクエストサイズ制限の解除は allowUnboundedUploads によるオプトイン
-        // （既定は false ＝ホストの制限をそのまま適用。true のときだけこのエンドポイントへメタデータを付与する）
-        var uploadLocal = $"upload{propertyName}";
-        builder
-            .Append("        var ")
-            .Append(uploadLocal)
-            .Append(" = group.MapPut(\n            \"")
-            .Append(route)
-            .Append("\",\n            (HttpContext context) =>\n")
-            .Append(
-                "                RemoteServerEngine.ExecuteUploadAsync(\n                    context,\n"
-            )
-            .Append("                    (body, length) =>\n                    {\n")
-            .Append("                        ")
+            .Append("\",\n            allowUnboundedUploads,\n")
+            .Append("            static (context, id, destination) =>\n                ")
             .Append(resolve)
-            .Append("\n                        return repository.Write")
+            .Append("\n                    .Read")
             .Append(propertyName)
-            .Append("Async(\n                            ")
-            .Append(parseKey)
-            .Append(",\n                            body,\n                            length,\n")
-            .Append(
-                "                            context.RequestAborted\n                        );\n"
-            )
-            .Append("                    }\n                )\n        );\n\n")
-            .Append("        if (allowUnboundedUploads)\n        {\n")
-            .Append("            ")
-            .Append(uploadLocal)
-            .Append(".WithMetadata(DisableRequestBodySizeLimit.Instance);\n        }\n\n");
-
-        // DELETE: 列を NULL 化（source=null 相当）
-        builder
-            .Append("        group.MapDelete(\n            \"")
-            .Append(route)
-            .Append("\",\n            (HttpContext context) =>\n")
-            .Append(
-                "                RemoteServerEngine.ExecuteDeleteAsync(\n                    context,\n"
-            )
-            .Append("                    () =>\n                    {\n")
-            .Append("                        ")
+            .Append("Async(id, destination, context.RequestAborted),\n")
+            .Append("            static (context, id, source, length) =>\n                ")
             .Append(resolve)
-            .Append("\n                        return repository.Write")
+            .Append("\n                    .Write")
             .Append(propertyName)
-            .Append("Async(\n                            ")
-            .Append(parseKey)
-            .Append(",\n                            null,\n                            null,\n")
-            .Append(
-                "                            context.RequestAborted\n                        );\n"
-            )
-            .Append("                    }\n                )\n        );");
-
+            .Append("Async(id, source, length, context.RequestAborted)\n        );");
         return builder.ToString();
     }
 
