@@ -835,8 +835,11 @@ internal sealed record CSharpEditModelPropertyModel
     /// <summary>byte[] 系プロパティかどうか</summary>
     public required bool IsBinary { get; init; }
 
-    /// <summary>確定値からバインディング文字列へ戻す式</summary>
-    public required string RevertBindingExpression { get; init; }
+    /// <summary>
+    /// 確定値からバインディング文字列を導出する式。列テーブル（<c>EditModelColumn</c>）の文字列化デリゲートの本体で、
+    /// ラムダ引数 <c>model</c> を通してプロパティを読む（例: <c>model.Amount?.ToString() ?? string.Empty</c>）。
+    /// </summary>
+    public required string ToInputExpression { get; init; }
 
     /// <summary>
     /// 検証メッセージ（必須・入力変換）へ渡す表示名の C# 式。

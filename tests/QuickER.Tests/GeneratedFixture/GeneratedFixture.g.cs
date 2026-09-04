@@ -2448,6 +2448,24 @@ public partial class CustomerProfileEntity : EntityBase
 }
 
 /// <summary>Base class providing change notification, error management, and helper processing common to edit models.</summary>
+/// <remarks>
+/// <para>
+/// Extension points of a generated edit model (implement only what you need in a partial class of the concrete type;
+/// an unimplemented partial method is erased at no cost):
+/// </para>
+/// <list type="bullet">
+/// <item><description>Extra validation: <c>partial void OnValidate();</c></description></item>
+/// <item><description>Extra children: <c>protected override void RegisterExtraChildren();</c> (register with AddChild / AddChildren inside)</description></item>
+/// <item><description>Input normalization: <c>protected override void CustomizeInputNormalization(string propertyName, string rawValue, ref string normalizedValue);</c></description></item>
+/// <item><description>Row editing: <c>partial void OnBeginEdit();</c> / <c>OnEndEdit();</c> / <c>OnCancelEdit();</c></description></item>
+/// <item><description>Value change hooks: <c>partial void On{Property}Changing(value) / Changed(value) / Changing(old, new) / Changed(old, new);</c> (one set per column)</description></item>
+/// </list>
+/// <para>
+/// Validation messages and display names are not per-class hooks: replace <see cref="EditModelMessages"/> and
+/// <c>GeneratedDisplayNames.Resolve</c>, both of which receive the stable property name so a replacement can switch on
+/// <c>nameof</c> and stay compile-safe.
+/// </para>
+/// </remarks>
 public abstract partial class EditModelBase
     : INotifyPropertyChanged,
         INotifyDataErrorInfo,
@@ -2979,6 +2997,37 @@ public abstract partial class EditModelBase
         return true;
     }
 
+    /// <summary>Returns a child collection, adopting it as this model's child the first time it is read (the getter of a generated child collection property).</summary>
+    /// <param name="field">The backing field of the child collection property.</param>
+    protected EditModelCollection<T> GetChildren<T>(EditModelCollection<T> field)
+        where T : EditModelBase
+    {
+        field.OwnerModel ??= this;
+        return field;
+    }
+
+    /// <summary>Replaces a child collection: the outgoing one is released, the incoming one is adopted, and the change notification is raised (the setter of a generated child collection property).</summary>
+    /// <param name="field">The backing field of the child collection property.</param>
+    /// <param name="value">The collection to put in its place.</param>
+    /// <param name="propertyName">The child collection property's name (for the change notification).</param>
+    protected void SetChildren<T>(
+        ref EditModelCollection<T> field,
+        EditModelCollection<T> value,
+        string propertyName
+    )
+        where T : EditModelBase
+    {
+        if (ReferenceEquals(field, value))
+        {
+            return;
+        }
+
+        field.OwnerModel = null;
+        field = value;
+        field.OwnerModel = this;
+        OnPropertyChanged(propertyName);
+    }
+
     /// <summary>Returns the errors for the specified property (all errors when null). Input errors come first, then duplicate-value errors.</summary>
     /// <remarks>
     /// The result is a finished list, never a deferred view over the error stores. A binding layer holds on to what this
@@ -3442,9 +3491,9 @@ public abstract partial class EditModelBase
     }
 
     /// <summary>
-    /// Registers a duplicate-value error for the given confirmed-value property names. Generated edit models override this to map the
-    /// names to their binding properties, resolve display names, and build the message; names that cannot be mapped (and an empty list)
-    /// produce a model-level error.
+    /// Registers a duplicate-value error for the given confirmed-value property names. <see cref="EditModelBase{TSelf}"/> maps the
+    /// names to their binding properties through the column table and resolves the display names; names that cannot be mapped
+    /// (and an empty list) produce a model-level error, which is all this fallback does.
     /// </summary>
     /// <param name="propertyNames">Confirmed-value property names that make up the violated constraint.</param>
     /// <param name="message">Message that replaces the default one (null to build the default from <see cref="EditModelMessages.DuplicateValue"/>).</param>
@@ -3456,7 +3505,7 @@ public abstract partial class EditModelBase
     ) =>
         SetDuplicateError(
             string.Empty,
-            message ?? EditModelMessages.DuplicateValue(propertyNames),
+            message ?? EditModelMessages.DuplicateValue(propertyNames, propertyNames),
             source
         );
 
@@ -3470,6 +3519,42 @@ public abstract partial class EditModelBase
     /// </remarks>
     public virtual IReadOnlyList<EditModelUniquenessConstraint> UniquenessConstraints =>
         Array.Empty<EditModelUniquenessConstraint>();
+
+    /// <summary>Asks the repository which UNIQUE constraints the given entity violates and registers the findings as duplicate-value errors (returns true when there are none).</summary>
+    /// <remarks>
+    /// The body of the generated <c>ValidateUniqueAsync</c>: everything except building the entity from the confirmed values,
+    /// which is the only part that needs the concrete types. The findings of the previous run are withdrawn before the query
+    /// goes out, so re-checking never leaves stale errors, and only this check's slot is touched - what the check among the
+    /// siblings reported stays.
+    /// </remarks>
+    /// <param name="repository">The repository used for the check.</param>
+    /// <param name="entity">The entity carrying the values to check.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    protected async Task<bool> CheckDatabaseUniquenessAsync<TEntity, TKey>(
+        IRemoteRepository<TEntity, TKey> repository,
+        TEntity entity,
+        CancellationToken cancellationToken
+    )
+        where TEntity : EntityBase, new()
+    {
+        ArgumentNullException.ThrowIfNull(repository);
+        ClearDuplicateErrors(DuplicateErrorSource.Database);
+
+        var violations = await repository
+            .CheckUniquenessAsync(entity, cancellationToken)
+            .ConfigureAwait(false);
+
+        foreach (var violation in violations)
+        {
+            RegisterDuplicateError(
+                violation.PropertyNames,
+                violation.Message,
+                DuplicateErrorSource.Database
+            );
+        }
+
+        return violations.Count == 0;
+    }
 
     /// <summary>Writes the confirmed values back to the binding properties and clears the input errors (conversion and missing-required-input).</summary>
     /// <remarks>
@@ -3500,7 +3585,7 @@ public abstract partial class EditModelBase
     /// <summary>Executes an action with the loading flag set (called from mapper loads; confirmed-value changes during load do not promote the state to Updated). Nesting is counted, so a load started from a hook does not clear the flag for the outer one.</summary>
     public void ExecuteLoad(Action action)
     {
-        _loadDepth++;
+        BeginLoad();
 
         try
         {
@@ -3508,9 +3593,19 @@ public abstract partial class EditModelBase
         }
         finally
         {
-            _loadDepth--;
+            EndLoad();
         }
     }
+
+    /// <summary>Enters the loading state (the same counter <see cref="ExecuteLoad"/> uses). Every call must be paired with <see cref="EndLoad"/> from a <c>finally</c>.</summary>
+    /// <remarks>
+    /// It exists so a caller that already has a <c>try</c>/<c>finally</c> of its own - the generated mapper's load, for one -
+    /// can mark the load without handing a closure to <see cref="ExecuteLoad"/>.
+    /// </remarks>
+    internal void BeginLoad() => _loadDepth++;
+
+    /// <summary>Leaves the loading state entered by <see cref="BeginLoad"/>.</summary>
+    internal void EndLoad() => _loadDepth--;
 
     /// <summary>Whether a row edit is in progress (IEditableObject; true between BeginEdit and EndEdit/CancelEdit).</summary>
     private bool _editing;
@@ -3569,37 +3664,57 @@ public abstract partial class EditModelBase
         CancelEditCore();
     }
 
-    /// <summary>Core logic of BeginEdit (concrete classes implement snapshotting the confirmed values).</summary>
+    /// <summary>Core logic of BeginEdit (<see cref="EditModelBase{TSelf}"/> snapshots the confirmed values from the column table; a generated class adds its OnBeginEdit hook).</summary>
     protected virtual void BeginEditCore() { }
 
     /// <summary>Core logic of EndEdit (does nothing by default; override in a concrete class if needed).</summary>
     protected virtual void EndEditCore() { }
 
-    /// <summary>Core logic of CancelEdit (concrete classes implement restoring from the snapshot).</summary>
+    /// <summary>Core logic of CancelEdit (<see cref="EditModelBase{TSelf}"/> restores the confirmed values from the snapshot it took).</summary>
     protected virtual void CancelEditCore() { }
+
+    /// <summary>
+    /// Runs at the end of the restoring load of <see cref="CancelEditCore"/>, before the row state goes back to its snapshot
+    /// (only generated code overrides this, to reach its OnCancelEdit partial hook; do not implement manually).
+    /// </summary>
+    /// <remarks>
+    /// The cancel hook is the one hook that has to run in the middle of the sequence - inside the load, so the restored values
+    /// do not promote the row to an update target - which is why it is reached through a step of its own where the begin and
+    /// commit hooks are simply appended by the generated override.
+    /// </remarks>
+    protected virtual void OnCancelEditCore() { }
 }
 
 /// <summary>Automatic messages for edit models (defaults shared by all edit models). Replacing them at app startup applies to every edit model.</summary>
+/// <remarks>
+/// Every entry receives the confirmed-value property name (or the list of them) first, so a replacement can single out one
+/// column with <c>nameof</c> - <c>propertyName == nameof(CustomerEditModel.CustomerId)</c> - and stop compiling the day that
+/// property is renamed or removed. The defaults do not use it: it is material for the replacement, not part of the wording.
+/// </remarks>
 public static class EditModelMessages
 {
-    /// <summary>Message for a missing required field (argument: display name).</summary>
+    /// <summary>Message for a missing required field (arguments: confirmed-value property name, display name).</summary>
     /// <remarks>The display name is quoted with single quotes, matching the conversion error style ('input value') and the .NET identifier-quoting convention.</remarks>
-    public static Func<string, string> Required { get; set; } =
-        static propertyName => $"'{propertyName}' is required.";
+    public static Func<string, string, string> Required { get; set; } =
+        static (propertyName, displayName) => $"'{displayName}' is required.";
 
-    /// <summary>Message for a binding value that cannot be converted (arguments: display name, input value, target type name). The default does not include the display name, matching the historical format.</summary>
-    public static Func<string, string, string, string> ParseFailed { get; set; } =
-        static (propertyName, inputValue, typeName) =>
+    /// <summary>Message for a binding value that cannot be converted (arguments: confirmed-value property name, display name, input value, target type name). The default does not include the display name, matching the historical format.</summary>
+    public static Func<string, string, string, string, string> ParseFailed { get; set; } =
+        static (propertyName, displayName, inputValue, typeName) =>
             $"'{inputValue}' cannot be converted to {typeName}.";
 
     /// <summary>Combines value object validation errors into a single edit model error message.</summary>
     public static Func<IReadOnlyList<string>, string> JoinValueObjectErrors { get; set; } =
         static errors => string.Join(" / ", errors);
 
-    /// <summary>Message for a value that duplicates another element or another row in the database (argument: the display names of the constraint's member properties, in declaration order).</summary>
+    /// <summary>Message for a value that duplicates another element or another row in the database (arguments: the constraint's member property names and their display names, both in declaration order).</summary>
     /// <remarks>The display names are quoted with single quotes, matching the required-field and conversion error styles.</remarks>
-    public static Func<IReadOnlyList<string>, string> DuplicateValue { get; set; } =
-        static displayNames => $"'{string.Join(", ", displayNames)}' is already used.";
+    public static Func<IReadOnlyList<string>, IReadOnlyList<string>, string> DuplicateValue
+    {
+        get;
+        set;
+    } = static (propertyNames, displayNames) =>
+        $"'{string.Join(", ", displayNames)}' is already used.";
 }
 
 /// <summary>Identifies the uniqueness check that found a duplicate-value error, so each check clears only what it registered.</summary>
@@ -3802,6 +3917,41 @@ public static class EditModelUniquenessValidator
 /// <param name="Message">The error message.</param>
 public sealed record EditModelError(string Path, string Property, string Message);
 
+/// <summary>One column of an edit model as data: the two names it is known by, whether input is required, and the accessors the shared checks drive.</summary>
+/// <remarks>
+/// <para>
+/// A generated edit model publishes one of these per column through <see cref="EditModelBase{TSelf}.EditModelColumns"/>, and
+/// the required-field check, the input revert, the row-edit snapshot, and the duplicate-error mapping are then written once in
+/// the base class instead of once per column in every class. The accessors are compiled lambdas over the real properties, so
+/// nothing here is read by reflection and the storage of a column - its confirmed-value field, its input string field - is
+/// exactly what it was.
+/// </para>
+/// <para>
+/// The display name is a delegate rather than a string because it is resolved through <c>GeneratedDisplayNames.Resolve</c>,
+/// which the application may replace after the table has been built.
+/// </para>
+/// </remarks>
+/// <typeparam name="TModel">The concrete edit model type the accessors read and write.</typeparam>
+/// <param name="PropertyName">The confirmed-value property's name (the stable key uniqueness checks and message resolvers switch on).</param>
+/// <param name="BindingPropertyName">The input binding property's name (the name errors are registered under).</param>
+/// <param name="IsRequired">Whether the missing-required-input check applies to this column.</param>
+/// <param name="DisplayName">Resolves the display name used in validation messages.</param>
+/// <param name="GetValue">Reads the confirmed value.</param>
+/// <param name="SetValue">Writes the confirmed value through its internal setter.</param>
+/// <param name="ToInput">Derives the on-screen input string from the confirmed value.</param>
+/// <param name="SetInput">Writes the derived input string to the binding property.</param>
+public sealed record EditModelColumn<TModel>(
+    string PropertyName,
+    string BindingPropertyName,
+    bool IsRequired,
+    Func<string> DisplayName,
+    Func<TModel, object?> GetValue,
+    Action<TModel, object?> SetValue,
+    Func<TModel, string> ToInput,
+    Action<TModel, string> SetInput
+)
+    where TModel : EditModelBase;
+
 /// <summary>Self-typed layer over <see cref="EditModelBase"/>: the sibling navigation and the owning collection surface in the concrete type, written once.</summary>
 /// <remarks>
 /// The non-generic <see cref="EditModelBase"/> stays as the type the ownership plumbing references
@@ -3826,6 +3976,207 @@ public abstract partial class EditModelBase<TSelf> : EditModelBase
     /// <summary>Core reorder logic for the owning collection. Calls Move on the typed collection (used by the MoveTo* methods).</summary>
     protected override void MoveCore(int oldIndex, int newIndex) =>
         ParentCollection?.Move(oldIndex, newIndex);
+
+    /// <summary>Gets this edit model's columns as data (empty by default; a generated edit model overrides it with its static column table).</summary>
+    /// <remarks>
+    /// It is what makes the required-field check, the input revert, the row-edit snapshot, and the duplicate-error mapping
+    /// below shared code: each of them walks this table instead of naming the columns. A handwritten edit model that leaves
+    /// it empty simply gets none of those four behaviours, exactly as if it declared no columns.
+    /// </remarks>
+    protected virtual IReadOnlyList<EditModelColumn<TSelf>> EditModelColumns =>
+        Array.Empty<EditModelColumn<TSelf>>();
+
+    /// <summary>This instance seen as the concrete edit model type (the column accessors are typed to it).</summary>
+    private TSelf Self => (TSelf)this;
+
+    /// <summary>Checks the columns declared required for missing input, registering and withdrawing only the errors this check owns. Called from Validate; a generated class appends its OnValidate hook.</summary>
+    /// <remarks>
+    /// A field that already carries another input error keeps it (<see cref="EditModelBase.SetRequiredError"/> declines to
+    /// overwrite), because a value that cannot be converted is the more upstream cause and the one the user has to act on.
+    /// </remarks>
+    protected override void ValidateSelf()
+    {
+        var model = Self;
+
+        foreach (var column in EditModelColumns)
+        {
+            if (!column.IsRequired)
+            {
+                continue;
+            }
+
+            if (column.GetValue(model) is null)
+            {
+                SetRequiredError(
+                    column.BindingPropertyName,
+                    EditModelMessages.Required(column.PropertyName, column.DisplayName())
+                );
+            }
+            else
+            {
+                ClearRequiredError(column.BindingPropertyName);
+            }
+        }
+    }
+
+    /// <summary>Writes the confirmed values back to the binding properties and clears the input errors (called from RevertInput; duplicate-value errors belong to the uniqueness checks).</summary>
+    protected override void RevertCore()
+    {
+        var model = Self;
+
+        foreach (var column in EditModelColumns)
+        {
+            column.SetInput(model, column.ToInput(model));
+            SetError(column.BindingPropertyName, null);
+        }
+    }
+
+    /// <summary>Pre-edit snapshot of the confirmed values, in column order (the array is reused across edits).</summary>
+    private object?[]? _valueSnapshot;
+
+    /// <summary>Pre-edit snapshot of the RowState.</summary>
+    private RowState _rowStateSnapshot;
+
+    /// <summary>Core logic of BeginEdit. Snapshots each confirmed value and the RowState.</summary>
+    protected override void BeginEditCore()
+    {
+        var model = Self;
+        var columns = EditModelColumns;
+
+        if (_valueSnapshot is null || _valueSnapshot.Length != columns.Count)
+        {
+            _valueSnapshot = new object?[columns.Count];
+        }
+
+        for (var i = 0; i < columns.Count; i++)
+        {
+            _valueSnapshot[i] = columns[i].GetValue(model);
+        }
+
+        _rowStateSnapshot = RowState;
+    }
+
+    /// <summary>Core logic of CancelEdit. Restores the confirmed values and the RowState from the snapshot, then derives the input strings from them and clears the errors the canceled input left behind.</summary>
+    /// <remarks>
+    /// <para>
+    /// The confirmed values are the source of truth, so they are put back directly rather than rebuilt by re-parsing
+    /// the input strings: a display format cannot express everything a value holds - <see cref="System.DateTime"/>
+    /// sub-second precision and Kind, for example - so re-parsing would let a canceled edit silently degrade the very
+    /// value it was supposed to leave untouched.
+    /// </para>
+    /// <para>
+    /// Restoring the values also withdraws the duplicate-value findings the database check registered, on the reasoning a
+    /// confirmed-value setter uses: the value they were reached about is no longer the one the model holds. The setter
+    /// cannot do it here, because the restore runs as a load and a load deliberately keeps the setters quiet - so a cancel
+    /// would otherwise leave a finding about the discarded value behind and hold <see cref="EditModelBase.Validate"/>
+    /// false forever. It is done unconditionally, though, where a setter withdraws them only when the value actually
+    /// changes: a cancel does not track whether anything was edited, so a row that was begun and then canceled without a
+    /// single change drops a database finding that was still perfectly valid. Run the database check again before saving -
+    /// a finding of its is only ever as current as its last run. Only that check's findings are withdrawn, whereas the
+    /// findings among the siblings are about the collection as it stands and belong to the next check over it.
+    /// </para>
+    /// <para>
+    /// Leaving them to that check cuts both ways, and nothing here runs it: a cancel that puts back a value which
+    /// duplicates a sibling restores the duplicate without restoring the finding about it, just as a cancel that undoes
+    /// a duplicate leaves the finding standing. Run the collection's <c>Validate</c> again before saving - the sibling
+    /// findings are only ever as current as the last check over the collection.
+    /// </para>
+    /// <para>
+    /// Deriving the input strings clears the input error of every property, so a conversion error that predates the
+    /// <see cref="EditModelBase.BeginEdit"/> of this row is cleared along with the ones the canceled edit produced. The
+    /// unconvertible text goes away in the same step, since the input string is rebuilt from the restored confirmed value,
+    /// and typing it again brings the error back.
+    /// </para>
+    /// </remarks>
+    protected override void CancelEditCore()
+    {
+        BeginLoad();
+
+        try
+        {
+            var model = Self;
+            var columns = EditModelColumns;
+            var snapshot = _valueSnapshot;
+
+            if (snapshot is not null)
+            {
+                for (var i = 0; i < columns.Count; i++)
+                {
+                    columns[i].SetValue(model, snapshot[i]);
+                }
+            }
+
+            // Derive the input strings from the restored confirmed values (RevertCore also clears the errors the
+            // canceled input produced).
+            ExecuteRevert(RevertCore);
+            ClearDuplicateErrors(DuplicateErrorSource.Database);
+            OnCancelEditCore();
+        }
+        finally
+        {
+            EndLoad();
+        }
+
+        RowState = _rowStateSnapshot;
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// The names are mapped to their binding properties through the column table, so a duplicate is reported on every
+    /// property that makes up the constraint. A name the table does not know (a user-defined check may report one) still
+    /// contributes its display name to the message, but has no binding property to attach the error to; when none of the
+    /// names can be mapped - an empty list included - the error is registered on the model itself.
+    /// </remarks>
+    public override void RegisterDuplicateError(
+        IReadOnlyList<string> propertyNames,
+        string? message,
+        DuplicateErrorSource source = DuplicateErrorSource.Siblings
+    )
+    {
+        var displayNames = new List<string>(propertyNames.Count);
+        var targets = new List<string>(propertyNames.Count);
+
+        foreach (var propertyName in propertyNames)
+        {
+            var column = FindColumn(propertyName);
+
+            if (column is null)
+            {
+                displayNames.Add(propertyName);
+                continue;
+            }
+
+            displayNames.Add(column.DisplayName());
+            targets.Add(column.BindingPropertyName);
+        }
+
+        var resolved = message ?? EditModelMessages.DuplicateValue(propertyNames, displayNames);
+
+        if (targets.Count == 0)
+        {
+            SetDuplicateError(string.Empty, resolved, source);
+            return;
+        }
+
+        foreach (var target in targets)
+        {
+            SetDuplicateError(target, resolved, source);
+        }
+    }
+
+    /// <summary>Finds the column with the specified confirmed-value property name (null when this edit model has no such column).</summary>
+    private EditModelColumn<TSelf>? FindColumn(string propertyName)
+    {
+        foreach (var column in EditModelColumns)
+        {
+            if (string.Equals(column.PropertyName, propertyName, StringComparison.Ordinal))
+            {
+                return column;
+            }
+        }
+
+        return null;
+    }
 }
 
 /// <summary>Collection of edit models. Tracks existing elements removed via Remove as deletion targets.</summary>
@@ -4133,43 +4484,115 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
     }
 }
 
-/// <summary>Base class providing the skeleton common to converting between entities and edit models (creation chaining and collection conversion).</summary>
+/// <summary>Base class providing the skeleton common to converting between entities and edit models (creation, the load sequence, and collection conversion).</summary>
 /// <remarks>
-/// Derived classes implement the entity-specific column copying (<see cref="ApplyToEntity"/>) and single-object creation
-/// including the post-creation hooks (<see cref="CreateEntity()"/> / <see cref="CreateEditModel(TEntity)"/>); only the
-/// boilerplate that composes them (creation from an edit model, collection conversion) is centralized here.
+/// Derived classes implement only what needs the concrete types: the column copying in each direction
+/// (<see cref="ApplyToEntity"/>, <see cref="LoadColumns"/>), the cascade children and the post-load hook
+/// (<see cref="CompleteLoad"/>), and the two post-creation hooks. Everything that composes them - the order of the load,
+/// the loading state it runs under, creation from an edit model, collection conversion - is written once here.
 /// </remarks>
 public abstract partial class MapperBase<TEntity, TEditModel>
     where TEntity : EntityBase, new()
     where TEditModel : EditModelBase, new()
 {
     /// <summary>Creates a new TEntity with initial values set (it will be an insertion target on save).</summary>
-    public abstract TEntity CreateEntity();
-
-    /// <summary>Creates a new TEditModel from a TEntity.</summary>
-    public abstract TEditModel CreateEditModel(TEntity entity);
-
-    /// <summary>Applies a TEntity's values to an existing TEditModel (lossless load). Column copying is implemented by derived classes.</summary>
-    /// <param name="entity">The entity whose values are loaded.</param>
-    /// <param name="editModel">The edit model to load the values into.</param>
-    public abstract void ApplyToEditModel(TEntity entity, TEditModel editModel);
-
-    /// <summary>Creates the insertion-target entity (construction plus MarkAdded); the derived class's <see cref="CreateEntity()"/> adds its post-creation hook.</summary>
-    protected static TEntity CreateEntityCore()
+    public TEntity CreateEntity()
     {
         var entity = new TEntity();
         entity.MarkAdded();
+        AfterEntityCreated(entity);
         return entity;
     }
 
-    /// <summary>Creates the edit model for an entity and loads it (construction plus <see cref="ApplyToEditModel"/>); the derived class's <see cref="CreateEditModel(TEntity)"/> adds its post-creation hook.</summary>
+    /// <summary>Called just after a new TEntity is created (only generated code overrides this, to reach its OnEntityCreated partial hook; do not implement manually).</summary>
+    /// <param name="entity">The entity that was created.</param>
+    protected virtual void AfterEntityCreated(TEntity entity) { }
+
+    /// <summary>Creates a new TEditModel from a TEntity.</summary>
     /// <param name="entity">The entity whose values are loaded.</param>
-    protected TEditModel CreateEditModelCore(TEntity entity)
+    public TEditModel CreateEditModel(TEntity entity)
     {
         var editModel = new TEditModel();
         ApplyToEditModel(entity, editModel);
+        AfterEditModelCreated(editModel);
         return editModel;
     }
+
+    /// <summary>Called just after a new TEditModel is created and loaded (only generated code overrides this, to reach its OnEditModelCreated partial hook; do not implement manually).</summary>
+    /// <param name="editModel">The edit model that was created.</param>
+    protected virtual void AfterEditModelCreated(TEditModel editModel) { }
+
+    /// <summary>Applies a TEntity's values to an existing TEditModel (lossless load).</summary>
+    /// <remarks>
+    /// <para>
+    /// Loading is lossless: the confirmed values are copied straight from the entity instead of being rebuilt by parsing
+    /// the on-screen input strings, so nothing that the display format cannot express (sub-second precision of a
+    /// DateTime, its Kind, and so on) is dropped. The input strings are then derived from the confirmed values.
+    /// Binary columns are copied defensively, so editing the loaded model never reaches into the entity's array. The
+    /// defensive copy belongs to this direction alone: <see cref="ApplyToEntity"/> assigns the confirmed values across as
+    /// they are, so the array an entity receives on the way to being saved is the edit model's own - saving hands the
+    /// buffer over rather than duplicating it, and writing into it afterwards is writing into both.
+    /// </para>
+    /// <para>
+    /// The whole sequence runs in the edit model's loading state, where a confirmed-value change does not promote the row
+    /// to an update target; the row state is taken from the source entity once the load is over (loaded = Unchanged,
+    /// new = Added).
+    /// </para>
+    /// </remarks>
+    /// <param name="entity">The entity whose values are loaded.</param>
+    /// <param name="editModel">The edit model to load the values into.</param>
+    public void ApplyToEditModel(TEntity entity, TEditModel editModel)
+    {
+        editModel.BeginLoad();
+
+        try
+        {
+            LoadColumns(entity, editModel);
+
+            // Derive the on-screen input strings from the confirmed values just loaded and clear stale conversion errors.
+            editModel.RevertInput();
+
+            // The values the uniqueness checks looked at are gone, so their findings go too (RevertInput only owns the input errors).
+            editModel.ClearDuplicateErrors();
+            CompleteLoad(entity, editModel);
+        }
+        finally
+        {
+            editModel.EndLoad();
+        }
+
+        // The edit model's state is based on the source entity (loaded = Unchanged, new = Added).
+        editModel.RowState = entity.RowState;
+    }
+
+    /// <summary>Copies the entity's column values into the edit model's confirmed values (the first half of the load, before the input strings are derived).</summary>
+    /// <param name="entity">The entity whose values are loaded.</param>
+    /// <param name="editModel">The edit model to load the values into.</param>
+    protected abstract void LoadColumns(TEntity entity, TEditModel editModel);
+
+    /// <summary>Finishes the load once the input strings have been derived: builds the cascade children and runs the post-load hook.</summary>
+    /// <param name="entity">The entity whose values are loaded.</param>
+    /// <param name="editModel">The edit model being loaded.</param>
+    protected abstract void CompleteLoad(TEntity entity, TEditModel editModel);
+
+    /// <summary>Returns the edit model's confirmed value, or throws when the column holds no input.</summary>
+    /// <remarks>
+    /// A confirmed value is nullable on the edit model even where the entity's column is not, because the model has to hold
+    /// input that is still incomplete. Applying it to an entity is where that has to be resolved, and an absent value is an
+    /// error rather than something to write as null.
+    /// </remarks>
+    /// <param name="value">The confirmed value.</param>
+    /// <param name="propertyName">The property's name, used in the exception message.</param>
+    protected static T Required<T>(T? value, string propertyName)
+        where T : class =>
+        value ?? throw new InvalidOperationException($"{propertyName} has no input value.");
+
+    /// <summary>Returns the edit model's confirmed value, or throws when the column holds no input.</summary>
+    /// <param name="value">The confirmed value.</param>
+    /// <param name="propertyName">The property's name, used in the exception message.</param>
+    protected static T Required<T>(T? value, string propertyName)
+        where T : struct =>
+        value ?? throw new InvalidOperationException($"{propertyName} has no input value.");
 
     /// <summary>Applies the TEditModel's confirmed values to an existing TEntity (destructive update). Column copying is implemented by derived classes.</summary>
     /// <param name="editModel">The edit model whose confirmed values are applied.</param>
@@ -4226,17 +4649,6 @@ public abstract partial class MapperBase<TEntity, TEditModel>
 /// <summary>Edit model for on-screen editing of the customers table.</summary>
 public partial class CustomerEditModel : EditModelBase<CustomerEditModel>
 {
-    // ===== Extension points (implement only what you need in a partial class; unimplemented partial methods are erased at no cost) =====
-    //   Extra validation        : partial void OnValidate();
-    //   Extra children          : protected override void RegisterExtraChildren();  // register via AddChild/AddChildren inside
-    //   Conversion msg tweak    : partial void CustomizeParseErrorMessage(string propertyName, string inputValue, string typeName, ref string message);
-    //   Required msg tweak      : partial void CustomizeRequiredErrorMessage(string propertyName, ref string message);
-    //   Duplicate msg tweak     : partial void CustomizeDuplicateErrorMessage(IReadOnlyList<string> propertyNames, ref string message);
-    //   Input normalization     : protected override void CustomizeInputNormalization(string propertyName, string rawValue, ref string normalizedValue);
-    //   Row editing             : partial void OnBeginEdit();  partial void OnEndEdit();  partial void OnCancelEdit();
-    //   Value change hooks      : partial void On{Property}Changing(value) / Changed(value) / Changing(old,new) / Changed(old,new);  // provided per property
-    // ====================================================================================================
-
     // Each column keeps two representations: the confirmed value and the on-screen input string (conversion errors are held by the error dictionary).
     /// <summary>Confirmed value of CustomerId.</summary>
     private CustomerIdValue? _customerId;
@@ -4302,7 +4714,7 @@ public partial class CustomerEditModel : EditModelBase<CustomerEditModel>
                 default:
                     SetError(
                         nameof(BindingCustomerId),
-                        ResolveParseErrorMessage(nameof(CustomerId), CustomerIdValue.DisplayName, normalized, "int")
+                        EditModelMessages.ParseFailed(nameof(CustomerId), CustomerIdValue.DisplayName, normalized, "int")
                     );
                     break;
             }
@@ -4435,7 +4847,7 @@ public partial class CustomerEditModel : EditModelBase<CustomerEditModel>
                 default:
                     SetError(
                         nameof(BindingBalance),
-                        ResolveParseErrorMessage(nameof(Balance), BalanceValue.DisplayName, normalized, "decimal")
+                        EditModelMessages.ParseFailed(nameof(Balance), BalanceValue.DisplayName, normalized, "decimal")
                     );
                     break;
             }
@@ -4506,7 +4918,7 @@ public partial class CustomerEditModel : EditModelBase<CustomerEditModel>
                 default:
                     SetError(
                         nameof(BindingIsActive),
-                        ResolveParseErrorMessage(nameof(IsActive), IsActiveValue.DisplayName, normalized, "bool")
+                        EditModelMessages.ParseFailed(nameof(IsActive), IsActiveValue.DisplayName, normalized, "bool")
                     );
                     break;
             }
@@ -4520,23 +4932,8 @@ public partial class CustomerEditModel : EditModelBase<CustomerEditModel>
     /// <summary>Orders navigation property (child collection; this model is set as each element's ParentModel).</summary>
     public EditModelCollection<OrderEditModel> Orders
     {
-        get
-        {
-            _orders.OwnerModel ??= this;
-            return _orders;
-        }
-        set
-        {
-            if (ReferenceEquals(_orders, value))
-            {
-                return;
-            }
-
-            _orders.OwnerModel = null;
-            _orders = value;
-            _orders.OwnerModel = this;
-            OnPropertyChanged(nameof(Orders));
-        }
+        get => GetChildren(_orders);
+        set => SetChildren(ref _orders, value, nameof(Orders));
     }
 
     /// <summary>Backing field for the single CustomerProfile child.</summary>
@@ -4560,50 +4957,60 @@ public partial class CustomerEditModel : EditModelBase<CustomerEditModel>
         }
     }
 
-    /// <summary>Writes the confirmed values back to the binding properties and clears the input errors (called from RevertInput; duplicate-value errors belong to the uniqueness checks).</summary>
-    protected override void RevertCore()
-    {
-        BindingCustomerId = CustomerId?.ToString() ?? string.Empty;
-        SetError(nameof(BindingCustomerId), null);
-        BindingName = Name?.ToString() ?? string.Empty;
-        SetError(nameof(BindingName), null);
-        BindingBalance = Balance?.ToString() ?? string.Empty;
-        SetError(nameof(BindingBalance), null);
-        BindingIsActive = IsActive?.ToString() ?? string.Empty;
-        SetError(nameof(BindingIsActive), null);
-    }
+    /// <summary>The columns of this edit model as data (input of the shared required check, input revert, row-edit snapshot, and duplicate-error mapping).</summary>
+    private static readonly IReadOnlyList<EditModelColumn<CustomerEditModel>> _editModelColumns =
+        new EditModelColumn<CustomerEditModel>[]
+        {
+            new(
+                nameof(CustomerId),
+                nameof(BindingCustomerId),
+                true,
+                static () => CustomerIdValue.DisplayName,
+                static model => model.CustomerId,
+                static (model, value) => model.CustomerId = (CustomerIdValue?)value,
+                static model => model.CustomerId?.ToString() ?? string.Empty,
+                static (model, input) => model.BindingCustomerId = input
+            ),
+            new(
+                nameof(Name),
+                nameof(BindingName),
+                true,
+                static () => NameValue.DisplayName,
+                static model => model.Name,
+                static (model, value) => model.Name = (NameValue?)value,
+                static model => model.Name?.ToString() ?? string.Empty,
+                static (model, input) => model.BindingName = input
+            ),
+            new(
+                nameof(Balance),
+                nameof(BindingBalance),
+                false,
+                static () => BalanceValue.DisplayName,
+                static model => model.Balance,
+                static (model, value) => model.Balance = (BalanceValue?)value,
+                static model => model.Balance?.ToString() ?? string.Empty,
+                static (model, input) => model.BindingBalance = input
+            ),
+            new(
+                nameof(IsActive),
+                nameof(BindingIsActive),
+                true,
+                static () => IsActiveValue.DisplayName,
+                static model => model.IsActive,
+                static (model, value) => model.IsActive = (IsActiveValue?)value,
+                static model => model.IsActive?.ToString() ?? string.Empty,
+                static (model, input) => model.BindingIsActive = input
+            ),
+        };
 
-    /// <summary>Validation of this node itself (missing-input checks for required fields plus the extra validation hook). Called from Validate.</summary>
-    /// <remarks>
-    /// The required check owns exactly the errors it registers: a satisfied field clears its own missing-input error, and a field
-    /// that already carries a conversion error keeps that error instead (the conversion failure is the cause the user must fix).
-    /// </remarks>
+    /// <inheritdoc />
+    protected override IReadOnlyList<EditModelColumn<CustomerEditModel>> EditModelColumns =>
+        _editModelColumns;
+
+    /// <summary>Validation of this node itself: the base class runs the missing-input checks over the column table, then the extra validation hook runs. Called from Validate.</summary>
     protected override void ValidateSelf()
     {
-        if (CustomerId is null)
-        {
-            SetRequiredError(nameof(BindingCustomerId), ResolveRequiredErrorMessage(nameof(CustomerId), CustomerIdValue.DisplayName));
-        }
-        else
-        {
-            ClearRequiredError(nameof(BindingCustomerId));
-        }
-        if (Name is null)
-        {
-            SetRequiredError(nameof(BindingName), ResolveRequiredErrorMessage(nameof(Name), NameValue.DisplayName));
-        }
-        else
-        {
-            ClearRequiredError(nameof(BindingName));
-        }
-        if (IsActive is null)
-        {
-            SetRequiredError(nameof(BindingIsActive), ResolveRequiredErrorMessage(nameof(IsActive), IsActiveValue.DisplayName));
-        }
-        else
-        {
-            ClearRequiredError(nameof(BindingIsActive));
-        }
+        base.ValidateSelf();
         OnValidate();
     }
 
@@ -4613,111 +5020,6 @@ public partial class CustomerEditModel : EditModelBase<CustomerEditModel>
     /// themselves, so clear a custom error from here (SetError with a null message) once its condition no longer holds.
     /// </remarks>
     partial void OnValidate();
-
-    /// <summary>Resolves the required-field error message (EditModelMessages.Required first, then fine-tuned by CustomizeRequiredErrorMessage).</summary>
-    private string ResolveRequiredErrorMessage(string propertyName, string displayName)
-    {
-        var message = EditModelMessages.Required(displayName);
-        CustomizeRequiredErrorMessage(propertyName, ref message);
-        return message;
-    }
-
-    /// <summary>Partial method for fine-tuning the required-field error message per property (replace via a partial implementation in another file).</summary>
-    partial void CustomizeRequiredErrorMessage(string propertyName, ref string message);
-
-    /// <summary>Resolves the conversion error message (EditModelMessages.ParseFailed first, then fine-tuned by CustomizeParseErrorMessage).</summary>
-    private string ResolveParseErrorMessage(
-        string propertyName,
-        string displayName,
-        string inputValue,
-        string typeName
-    )
-    {
-        var message = EditModelMessages.ParseFailed(displayName, inputValue, typeName);
-        CustomizeParseErrorMessage(propertyName, inputValue, typeName, ref message);
-        return message;
-    }
-
-    /// <summary>Partial method for fine-tuning conversion error messages per property (replace via a partial implementation in another file).</summary>
-    partial void CustomizeParseErrorMessage(
-        string propertyName,
-        string inputValue,
-        string typeName,
-        ref string message
-    );
-
-    /// <inheritdoc />
-    public override void RegisterDuplicateError(
-        IReadOnlyList<string> propertyNames,
-        string? message,
-        DuplicateErrorSource source = DuplicateErrorSource.Siblings
-    )
-    {
-        var displayNames = new List<string>(propertyNames.Count);
-        var targets = new List<string>(propertyNames.Count);
-
-        foreach (var propertyName in propertyNames)
-        {
-            switch (propertyName)
-            {
-                case nameof(CustomerId):
-                    displayNames.Add(CustomerIdValue.DisplayName);
-                    targets.Add(nameof(BindingCustomerId));
-                    break;
-
-                case nameof(Name):
-                    displayNames.Add(NameValue.DisplayName);
-                    targets.Add(nameof(BindingName));
-                    break;
-
-                case nameof(Balance):
-                    displayNames.Add(BalanceValue.DisplayName);
-                    targets.Add(nameof(BindingBalance));
-                    break;
-
-                case nameof(IsActive):
-                    displayNames.Add(IsActiveValue.DisplayName);
-                    targets.Add(nameof(BindingIsActive));
-                    break;
-
-                default:
-                    // A name that does not belong to this edit model (a user-defined check may report one) has no binding property to attach the error to.
-                    displayNames.Add(propertyName);
-                    break;
-            }
-        }
-
-        var resolved = message ?? ResolveDuplicateErrorMessage(propertyNames, displayNames);
-
-        // Names that could not be mapped (and an empty list) become a model-level error.
-        if (targets.Count == 0)
-        {
-            SetDuplicateError(string.Empty, resolved, source);
-            return;
-        }
-
-        foreach (var target in targets)
-        {
-            SetDuplicateError(target, resolved, source);
-        }
-    }
-
-    /// <summary>Resolves the duplicate-value error message (EditModelMessages.DuplicateValue first, then fine-tuned by CustomizeDuplicateErrorMessage).</summary>
-    private string ResolveDuplicateErrorMessage(
-        IReadOnlyList<string> propertyNames,
-        IReadOnlyList<string> displayNames
-    )
-    {
-        var message = EditModelMessages.DuplicateValue(displayNames);
-        CustomizeDuplicateErrorMessage(propertyNames, ref message);
-        return message;
-    }
-
-    /// <summary>Partial method for fine-tuning the duplicate-value error message per constraint (replace via a partial implementation in another file).</summary>
-    partial void CustomizeDuplicateErrorMessage(
-        IReadOnlyList<string> propertyNames,
-        ref string message
-    );
 
     /// <summary>
     /// Checks this edit model's confirmed values against the database through the repository and registers duplicate-value errors (returns true when there are no violations).
@@ -4733,14 +5035,12 @@ public partial class CustomerEditModel : EditModelBase<CustomerEditModel>
     /// </remarks>
     /// <param name="repository">The repository used for the check.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
-    public async Task<bool> ValidateUniqueAsync(
+    public Task<bool> ValidateUniqueAsync(
         ICustomerRepository repository,
         CancellationToken cancellationToken = default
     )
     {
-        ArgumentNullException.ThrowIfNull(repository);
-        ClearDuplicateErrors(DuplicateErrorSource.Database);
-
+        // Only the columns the check reads are copied: the primary key (to exclude this row) and the constraint members.
         var entity = new CustomerEntity();
 
         if (CustomerId is { } resolvedCustomerId)
@@ -4748,20 +5048,7 @@ public partial class CustomerEditModel : EditModelBase<CustomerEditModel>
             entity.CustomerId = resolvedCustomerId;
         }
 
-        var violations = await repository
-            .CheckUniquenessAsync(entity, cancellationToken)
-            .ConfigureAwait(false);
-
-        foreach (var violation in violations)
-        {
-            RegisterDuplicateError(
-                violation.PropertyNames,
-                violation.Message,
-                DuplicateErrorSource.Database
-            );
-        }
-
-        return violations.Count == 0;
+        return CheckDatabaseUniquenessAsync(repository, entity, cancellationToken);
     }
 
     /// <summary>Registers the known cascade children into the registry (they participate in validation, error collection, accepting changes, and dirty checks; children added via partial classes are registered in RegisterExtraChildren).</summary>
@@ -4771,30 +5058,11 @@ public partial class CustomerEditModel : EditModelBase<CustomerEditModel>
         AddChild("CustomerProfile", () => CustomerProfile);
     }
 
-    // ---- Snapshots for row editing (IEditableObject) ----
-    /// <summary>Pre-edit snapshot of the confirmed value of CustomerId.</summary>
-    private CustomerIdValue? _customerIdSnapshot;
-
-    /// <summary>Pre-edit snapshot of the confirmed value of Name.</summary>
-    private NameValue? _nameSnapshot;
-
-    /// <summary>Pre-edit snapshot of the confirmed value of Balance.</summary>
-    private BalanceValue? _balanceSnapshot;
-
-    /// <summary>Pre-edit snapshot of the confirmed value of IsActive.</summary>
-    private IsActiveValue? _isActiveSnapshot;
-
-    /// <summary>Pre-edit snapshot of the RowState.</summary>
-    private RowState _rowStateSnapshot;
-
-    /// <summary>Core logic of BeginEdit. Snapshots each confirmed value and the RowState.</summary>
+    // ---- Row editing (IEditableObject); the base class snapshots and restores the confirmed values through the column table ----
+    /// <summary>Core logic of BeginEdit. Takes the base class's snapshot, then runs the hook.</summary>
     protected override void BeginEditCore()
     {
-        _customerIdSnapshot = _customerId;
-        _nameSnapshot = _name;
-        _balanceSnapshot = _balance;
-        _isActiveSnapshot = _isActive;
-        _rowStateSnapshot = RowState;
+        base.BeginEditCore();
         OnBeginEdit();
     }
 
@@ -4807,75 +5075,16 @@ public partial class CustomerEditModel : EditModelBase<CustomerEditModel>
     /// <summary>Hook invoked at EndEdit (commit).</summary>
     partial void OnEndEdit();
 
-    /// <summary>Core logic of CancelEdit. Restores the confirmed values and the RowState from the snapshot, then derives the input strings from them and clears the errors the canceled input left behind.</summary>
-    /// <remarks>
-    /// <para>
-    /// The confirmed values are the source of truth, so they are put back directly rather than rebuilt by re-parsing
-    /// the input strings: a display format cannot express everything a value holds - <see cref="System.DateTime"/>
-    /// sub-second precision and Kind, for example - so re-parsing would let a canceled edit silently degrade the very
-    /// value it was supposed to leave untouched.
-    /// </para>
-    /// <para>
-    /// Restoring the values also withdraws the duplicate-value findings the database check registered, on the reasoning a
-    /// confirmed-value setter uses: the value they were reached about is no longer the one the model holds. The setter
-    /// cannot do it here, because the restore runs as a load and a load deliberately keeps the setters quiet - so a cancel
-    /// would otherwise leave a finding about the discarded value behind and hold <see cref="EditModelBase.Validate"/>
-    /// false forever. It is done unconditionally, though, where a setter withdraws them only when the value actually
-    /// changes: a cancel does not track whether anything was edited, so a row that was begun and then canceled without a
-    /// single change drops a database finding that was still perfectly valid. Run the database check again before saving -
-    /// a finding of its is only ever as current as its last run. Only that check's findings are withdrawn, whereas the
-    /// findings among the siblings are about the collection as it stands and belong to the next check over it.
-    /// </para>
-    /// <para>
-    /// Leaving them to that check cuts both ways, and nothing here runs it: a cancel that puts back a value which
-    /// duplicates a sibling restores the duplicate without restoring the finding about it, just as a cancel that undoes
-    /// a duplicate leaves the finding standing. Run the collection's <c>Validate</c> again before saving - the sibling
-    /// findings are only ever as current as the last check over the collection.
-    /// </para>
-    /// <para>
-    /// Deriving the input strings clears the input error of every property, so a conversion error that predates the
-    /// <see cref="EditModelBase.BeginEdit"/> of this row is cleared along with the ones the canceled edit produced. The
-    /// unconvertible text goes away in the same step, since the input string is rebuilt from the restored confirmed value,
-    /// and typing it again brings the error back.
-    /// </para>
-    /// </remarks>
-    protected override void CancelEditCore()
-    {
-        ExecuteLoad(() =>
-        {
-            CustomerId = _customerIdSnapshot;
-            Name = _nameSnapshot;
-            Balance = _balanceSnapshot;
-            IsActive = _isActiveSnapshot;
+    /// <inheritdoc />
+    protected override void OnCancelEditCore() => OnCancelEdit();
 
-            // Derive the input strings from the restored confirmed values (RevertCore also clears the errors the
-            // canceled input produced).
-            ExecuteRevert(RevertCore);
-            ClearDuplicateErrors(DuplicateErrorSource.Database);
-            OnCancelEdit();
-        });
-
-        RowState = _rowStateSnapshot;
-    }
-
-    /// <summary>Hook invoked at CancelEdit. Restore fields added in a partial class from their backups (called inside ExecuteLoad).</summary>
+    /// <summary>Hook invoked at CancelEdit. Restore fields added in a partial class from their backups (called inside the restoring load).</summary>
     partial void OnCancelEdit();
 }
 
 /// <summary>Edit model for on-screen editing of the orders table.</summary>
 public partial class OrderEditModel : EditModelBase<OrderEditModel>
 {
-    // ===== Extension points (implement only what you need in a partial class; unimplemented partial methods are erased at no cost) =====
-    //   Extra validation        : partial void OnValidate();
-    //   Extra children          : protected override void RegisterExtraChildren();  // register via AddChild/AddChildren inside
-    //   Conversion msg tweak    : partial void CustomizeParseErrorMessage(string propertyName, string inputValue, string typeName, ref string message);
-    //   Required msg tweak      : partial void CustomizeRequiredErrorMessage(string propertyName, ref string message);
-    //   Duplicate msg tweak     : partial void CustomizeDuplicateErrorMessage(IReadOnlyList<string> propertyNames, ref string message);
-    //   Input normalization     : protected override void CustomizeInputNormalization(string propertyName, string rawValue, ref string normalizedValue);
-    //   Row editing             : partial void OnBeginEdit();  partial void OnEndEdit();  partial void OnCancelEdit();
-    //   Value change hooks      : partial void On{Property}Changing(value) / Changed(value) / Changing(old,new) / Changed(old,new);  // provided per property
-    // ====================================================================================================
-
     // Each column keeps two representations: the confirmed value and the on-screen input string (conversion errors are held by the error dictionary).
     /// <summary>Confirmed value of OrderId.</summary>
     private OrderIdValue? _orderId;
@@ -4941,7 +5150,7 @@ public partial class OrderEditModel : EditModelBase<OrderEditModel>
                 default:
                     SetError(
                         nameof(BindingOrderId),
-                        ResolveParseErrorMessage(nameof(OrderId), OrderIdValue.DisplayName, normalized, "int")
+                        EditModelMessages.ParseFailed(nameof(OrderId), OrderIdValue.DisplayName, normalized, "int")
                     );
                     break;
             }
@@ -5012,7 +5221,7 @@ public partial class OrderEditModel : EditModelBase<OrderEditModel>
                 default:
                     SetError(
                         nameof(BindingCustomerId),
-                        ResolveParseErrorMessage(nameof(CustomerId), CustomerIdValue.DisplayName, normalized, "int")
+                        EditModelMessages.ParseFailed(nameof(CustomerId), CustomerIdValue.DisplayName, normalized, "int")
                     );
                     break;
             }
@@ -5145,7 +5354,7 @@ public partial class OrderEditModel : EditModelBase<OrderEditModel>
                 default:
                     SetError(
                         nameof(BindingAmount),
-                        ResolveParseErrorMessage(nameof(Amount), AmountValue.DisplayName, normalized, "decimal")
+                        EditModelMessages.ParseFailed(nameof(Amount), AmountValue.DisplayName, normalized, "decimal")
                     );
                     break;
             }
@@ -5216,7 +5425,7 @@ public partial class OrderEditModel : EditModelBase<OrderEditModel>
                 default:
                     SetError(
                         nameof(BindingOrderedAt),
-                        ResolveParseErrorMessage(nameof(OrderedAt), OrderedAtValue.DisplayName, normalized, "DateTime")
+                        EditModelMessages.ParseFailed(nameof(OrderedAt), OrderedAtValue.DisplayName, normalized, "DateTime")
                     );
                     break;
             }
@@ -5287,7 +5496,7 @@ public partial class OrderEditModel : EditModelBase<OrderEditModel>
                 default:
                     SetError(
                         nameof(BindingDeliveryDate),
-                        ResolveParseErrorMessage(nameof(DeliveryDate), DeliveryDateValue.DisplayName, normalized, "DateTime")
+                        EditModelMessages.ParseFailed(nameof(DeliveryDate), DeliveryDateValue.DisplayName, normalized, "DateTime")
                     );
                     break;
             }
@@ -5303,54 +5512,80 @@ public partial class OrderEditModel : EditModelBase<OrderEditModel>
     /// </remarks>
     public CustomerEditModel? Customer { get; set; }
 
-    /// <summary>Writes the confirmed values back to the binding properties and clears the input errors (called from RevertInput; duplicate-value errors belong to the uniqueness checks).</summary>
-    protected override void RevertCore()
-    {
-        BindingOrderId = OrderId?.ToString() ?? string.Empty;
-        SetError(nameof(BindingOrderId), null);
-        BindingCustomerId = CustomerId?.ToString() ?? string.Empty;
-        SetError(nameof(BindingCustomerId), null);
-        BindingMemo = Memo?.ToString() ?? string.Empty;
-        SetError(nameof(BindingMemo), null);
-        BindingAmount = Amount?.ToString() ?? string.Empty;
-        SetError(nameof(BindingAmount), null);
-        BindingOrderedAt = OrderedAt?.ToString() ?? string.Empty;
-        SetError(nameof(BindingOrderedAt), null);
-        BindingDeliveryDate = DeliveryDate?.Value.ToString("d") ?? string.Empty;
-        SetError(nameof(BindingDeliveryDate), null);
-    }
+    /// <summary>The columns of this edit model as data (input of the shared required check, input revert, row-edit snapshot, and duplicate-error mapping).</summary>
+    private static readonly IReadOnlyList<EditModelColumn<OrderEditModel>> _editModelColumns =
+        new EditModelColumn<OrderEditModel>[]
+        {
+            new(
+                nameof(OrderId),
+                nameof(BindingOrderId),
+                true,
+                static () => OrderIdValue.DisplayName,
+                static model => model.OrderId,
+                static (model, value) => model.OrderId = (OrderIdValue?)value,
+                static model => model.OrderId?.ToString() ?? string.Empty,
+                static (model, input) => model.BindingOrderId = input
+            ),
+            new(
+                nameof(CustomerId),
+                nameof(BindingCustomerId),
+                true,
+                static () => CustomerIdValue.DisplayName,
+                static model => model.CustomerId,
+                static (model, value) => model.CustomerId = (CustomerIdValue?)value,
+                static model => model.CustomerId?.ToString() ?? string.Empty,
+                static (model, input) => model.BindingCustomerId = input
+            ),
+            new(
+                nameof(Memo),
+                nameof(BindingMemo),
+                false,
+                static () => MemoValue.DisplayName,
+                static model => model.Memo,
+                static (model, value) => model.Memo = (MemoValue?)value,
+                static model => model.Memo?.ToString() ?? string.Empty,
+                static (model, input) => model.BindingMemo = input
+            ),
+            new(
+                nameof(Amount),
+                nameof(BindingAmount),
+                true,
+                static () => AmountValue.DisplayName,
+                static model => model.Amount,
+                static (model, value) => model.Amount = (AmountValue?)value,
+                static model => model.Amount?.ToString() ?? string.Empty,
+                static (model, input) => model.BindingAmount = input
+            ),
+            new(
+                nameof(OrderedAt),
+                nameof(BindingOrderedAt),
+                false,
+                static () => OrderedAtValue.DisplayName,
+                static model => model.OrderedAt,
+                static (model, value) => model.OrderedAt = (OrderedAtValue?)value,
+                static model => model.OrderedAt?.ToString() ?? string.Empty,
+                static (model, input) => model.BindingOrderedAt = input
+            ),
+            new(
+                nameof(DeliveryDate),
+                nameof(BindingDeliveryDate),
+                false,
+                static () => DeliveryDateValue.DisplayName,
+                static model => model.DeliveryDate,
+                static (model, value) => model.DeliveryDate = (DeliveryDateValue?)value,
+                static model => model.DeliveryDate?.Value.ToString("d") ?? string.Empty,
+                static (model, input) => model.BindingDeliveryDate = input
+            ),
+        };
 
-    /// <summary>Validation of this node itself (missing-input checks for required fields plus the extra validation hook). Called from Validate.</summary>
-    /// <remarks>
-    /// The required check owns exactly the errors it registers: a satisfied field clears its own missing-input error, and a field
-    /// that already carries a conversion error keeps that error instead (the conversion failure is the cause the user must fix).
-    /// </remarks>
+    /// <inheritdoc />
+    protected override IReadOnlyList<EditModelColumn<OrderEditModel>> EditModelColumns =>
+        _editModelColumns;
+
+    /// <summary>Validation of this node itself: the base class runs the missing-input checks over the column table, then the extra validation hook runs. Called from Validate.</summary>
     protected override void ValidateSelf()
     {
-        if (OrderId is null)
-        {
-            SetRequiredError(nameof(BindingOrderId), ResolveRequiredErrorMessage(nameof(OrderId), OrderIdValue.DisplayName));
-        }
-        else
-        {
-            ClearRequiredError(nameof(BindingOrderId));
-        }
-        if (CustomerId is null)
-        {
-            SetRequiredError(nameof(BindingCustomerId), ResolveRequiredErrorMessage(nameof(CustomerId), CustomerIdValue.DisplayName));
-        }
-        else
-        {
-            ClearRequiredError(nameof(BindingCustomerId));
-        }
-        if (Amount is null)
-        {
-            SetRequiredError(nameof(BindingAmount), ResolveRequiredErrorMessage(nameof(Amount), AmountValue.DisplayName));
-        }
-        else
-        {
-            ClearRequiredError(nameof(BindingAmount));
-        }
+        base.ValidateSelf();
         OnValidate();
     }
 
@@ -5360,121 +5595,6 @@ public partial class OrderEditModel : EditModelBase<OrderEditModel>
     /// themselves, so clear a custom error from here (SetError with a null message) once its condition no longer holds.
     /// </remarks>
     partial void OnValidate();
-
-    /// <summary>Resolves the required-field error message (EditModelMessages.Required first, then fine-tuned by CustomizeRequiredErrorMessage).</summary>
-    private string ResolveRequiredErrorMessage(string propertyName, string displayName)
-    {
-        var message = EditModelMessages.Required(displayName);
-        CustomizeRequiredErrorMessage(propertyName, ref message);
-        return message;
-    }
-
-    /// <summary>Partial method for fine-tuning the required-field error message per property (replace via a partial implementation in another file).</summary>
-    partial void CustomizeRequiredErrorMessage(string propertyName, ref string message);
-
-    /// <summary>Resolves the conversion error message (EditModelMessages.ParseFailed first, then fine-tuned by CustomizeParseErrorMessage).</summary>
-    private string ResolveParseErrorMessage(
-        string propertyName,
-        string displayName,
-        string inputValue,
-        string typeName
-    )
-    {
-        var message = EditModelMessages.ParseFailed(displayName, inputValue, typeName);
-        CustomizeParseErrorMessage(propertyName, inputValue, typeName, ref message);
-        return message;
-    }
-
-    /// <summary>Partial method for fine-tuning conversion error messages per property (replace via a partial implementation in another file).</summary>
-    partial void CustomizeParseErrorMessage(
-        string propertyName,
-        string inputValue,
-        string typeName,
-        ref string message
-    );
-
-    /// <inheritdoc />
-    public override void RegisterDuplicateError(
-        IReadOnlyList<string> propertyNames,
-        string? message,
-        DuplicateErrorSource source = DuplicateErrorSource.Siblings
-    )
-    {
-        var displayNames = new List<string>(propertyNames.Count);
-        var targets = new List<string>(propertyNames.Count);
-
-        foreach (var propertyName in propertyNames)
-        {
-            switch (propertyName)
-            {
-                case nameof(OrderId):
-                    displayNames.Add(OrderIdValue.DisplayName);
-                    targets.Add(nameof(BindingOrderId));
-                    break;
-
-                case nameof(CustomerId):
-                    displayNames.Add(CustomerIdValue.DisplayName);
-                    targets.Add(nameof(BindingCustomerId));
-                    break;
-
-                case nameof(Memo):
-                    displayNames.Add(MemoValue.DisplayName);
-                    targets.Add(nameof(BindingMemo));
-                    break;
-
-                case nameof(Amount):
-                    displayNames.Add(AmountValue.DisplayName);
-                    targets.Add(nameof(BindingAmount));
-                    break;
-
-                case nameof(OrderedAt):
-                    displayNames.Add(OrderedAtValue.DisplayName);
-                    targets.Add(nameof(BindingOrderedAt));
-                    break;
-
-                case nameof(DeliveryDate):
-                    displayNames.Add(DeliveryDateValue.DisplayName);
-                    targets.Add(nameof(BindingDeliveryDate));
-                    break;
-
-                default:
-                    // A name that does not belong to this edit model (a user-defined check may report one) has no binding property to attach the error to.
-                    displayNames.Add(propertyName);
-                    break;
-            }
-        }
-
-        var resolved = message ?? ResolveDuplicateErrorMessage(propertyNames, displayNames);
-
-        // Names that could not be mapped (and an empty list) become a model-level error.
-        if (targets.Count == 0)
-        {
-            SetDuplicateError(string.Empty, resolved, source);
-            return;
-        }
-
-        foreach (var target in targets)
-        {
-            SetDuplicateError(target, resolved, source);
-        }
-    }
-
-    /// <summary>Resolves the duplicate-value error message (EditModelMessages.DuplicateValue first, then fine-tuned by CustomizeDuplicateErrorMessage).</summary>
-    private string ResolveDuplicateErrorMessage(
-        IReadOnlyList<string> propertyNames,
-        IReadOnlyList<string> displayNames
-    )
-    {
-        var message = EditModelMessages.DuplicateValue(displayNames);
-        CustomizeDuplicateErrorMessage(propertyNames, ref message);
-        return message;
-    }
-
-    /// <summary>Partial method for fine-tuning the duplicate-value error message per constraint (replace via a partial implementation in another file).</summary>
-    partial void CustomizeDuplicateErrorMessage(
-        IReadOnlyList<string> propertyNames,
-        ref string message
-    );
 
     /// <summary>
     /// Checks this edit model's confirmed values against the database through the repository and registers duplicate-value errors (returns true when there are no violations).
@@ -5490,14 +5610,12 @@ public partial class OrderEditModel : EditModelBase<OrderEditModel>
     /// </remarks>
     /// <param name="repository">The repository used for the check.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
-    public async Task<bool> ValidateUniqueAsync(
+    public Task<bool> ValidateUniqueAsync(
         IOrderRepository repository,
         CancellationToken cancellationToken = default
     )
     {
-        ArgumentNullException.ThrowIfNull(repository);
-        ClearDuplicateErrors(DuplicateErrorSource.Database);
-
+        // Only the columns the check reads are copied: the primary key (to exclude this row) and the constraint members.
         var entity = new OrderEntity();
 
         if (OrderId is { } resolvedOrderId)
@@ -5505,54 +5623,14 @@ public partial class OrderEditModel : EditModelBase<OrderEditModel>
             entity.OrderId = resolvedOrderId;
         }
 
-        var violations = await repository
-            .CheckUniquenessAsync(entity, cancellationToken)
-            .ConfigureAwait(false);
-
-        foreach (var violation in violations)
-        {
-            RegisterDuplicateError(
-                violation.PropertyNames,
-                violation.Message,
-                DuplicateErrorSource.Database
-            );
-        }
-
-        return violations.Count == 0;
+        return CheckDatabaseUniquenessAsync(repository, entity, cancellationToken);
     }
 
-    // ---- Snapshots for row editing (IEditableObject) ----
-    /// <summary>Pre-edit snapshot of the confirmed value of OrderId.</summary>
-    private OrderIdValue? _orderIdSnapshot;
-
-    /// <summary>Pre-edit snapshot of the confirmed value of CustomerId.</summary>
-    private CustomerIdValue? _customerIdSnapshot;
-
-    /// <summary>Pre-edit snapshot of the confirmed value of Memo.</summary>
-    private MemoValue? _memoSnapshot;
-
-    /// <summary>Pre-edit snapshot of the confirmed value of Amount.</summary>
-    private AmountValue? _amountSnapshot;
-
-    /// <summary>Pre-edit snapshot of the confirmed value of OrderedAt.</summary>
-    private OrderedAtValue? _orderedAtSnapshot;
-
-    /// <summary>Pre-edit snapshot of the confirmed value of DeliveryDate.</summary>
-    private DeliveryDateValue? _deliveryDateSnapshot;
-
-    /// <summary>Pre-edit snapshot of the RowState.</summary>
-    private RowState _rowStateSnapshot;
-
-    /// <summary>Core logic of BeginEdit. Snapshots each confirmed value and the RowState.</summary>
+    // ---- Row editing (IEditableObject); the base class snapshots and restores the confirmed values through the column table ----
+    /// <summary>Core logic of BeginEdit. Takes the base class's snapshot, then runs the hook.</summary>
     protected override void BeginEditCore()
     {
-        _orderIdSnapshot = _orderId;
-        _customerIdSnapshot = _customerId;
-        _memoSnapshot = _memo;
-        _amountSnapshot = _amount;
-        _orderedAtSnapshot = _orderedAt;
-        _deliveryDateSnapshot = _deliveryDate;
-        _rowStateSnapshot = RowState;
+        base.BeginEditCore();
         OnBeginEdit();
     }
 
@@ -5565,60 +5643,10 @@ public partial class OrderEditModel : EditModelBase<OrderEditModel>
     /// <summary>Hook invoked at EndEdit (commit).</summary>
     partial void OnEndEdit();
 
-    /// <summary>Core logic of CancelEdit. Restores the confirmed values and the RowState from the snapshot, then derives the input strings from them and clears the errors the canceled input left behind.</summary>
-    /// <remarks>
-    /// <para>
-    /// The confirmed values are the source of truth, so they are put back directly rather than rebuilt by re-parsing
-    /// the input strings: a display format cannot express everything a value holds - <see cref="System.DateTime"/>
-    /// sub-second precision and Kind, for example - so re-parsing would let a canceled edit silently degrade the very
-    /// value it was supposed to leave untouched.
-    /// </para>
-    /// <para>
-    /// Restoring the values also withdraws the duplicate-value findings the database check registered, on the reasoning a
-    /// confirmed-value setter uses: the value they were reached about is no longer the one the model holds. The setter
-    /// cannot do it here, because the restore runs as a load and a load deliberately keeps the setters quiet - so a cancel
-    /// would otherwise leave a finding about the discarded value behind and hold <see cref="EditModelBase.Validate"/>
-    /// false forever. It is done unconditionally, though, where a setter withdraws them only when the value actually
-    /// changes: a cancel does not track whether anything was edited, so a row that was begun and then canceled without a
-    /// single change drops a database finding that was still perfectly valid. Run the database check again before saving -
-    /// a finding of its is only ever as current as its last run. Only that check's findings are withdrawn, whereas the
-    /// findings among the siblings are about the collection as it stands and belong to the next check over it.
-    /// </para>
-    /// <para>
-    /// Leaving them to that check cuts both ways, and nothing here runs it: a cancel that puts back a value which
-    /// duplicates a sibling restores the duplicate without restoring the finding about it, just as a cancel that undoes
-    /// a duplicate leaves the finding standing. Run the collection's <c>Validate</c> again before saving - the sibling
-    /// findings are only ever as current as the last check over the collection.
-    /// </para>
-    /// <para>
-    /// Deriving the input strings clears the input error of every property, so a conversion error that predates the
-    /// <see cref="EditModelBase.BeginEdit"/> of this row is cleared along with the ones the canceled edit produced. The
-    /// unconvertible text goes away in the same step, since the input string is rebuilt from the restored confirmed value,
-    /// and typing it again brings the error back.
-    /// </para>
-    /// </remarks>
-    protected override void CancelEditCore()
-    {
-        ExecuteLoad(() =>
-        {
-            OrderId = _orderIdSnapshot;
-            CustomerId = _customerIdSnapshot;
-            Memo = _memoSnapshot;
-            Amount = _amountSnapshot;
-            OrderedAt = _orderedAtSnapshot;
-            DeliveryDate = _deliveryDateSnapshot;
+    /// <inheritdoc />
+    protected override void OnCancelEditCore() => OnCancelEdit();
 
-            // Derive the input strings from the restored confirmed values (RevertCore also clears the errors the
-            // canceled input produced).
-            ExecuteRevert(RevertCore);
-            ClearDuplicateErrors(DuplicateErrorSource.Database);
-            OnCancelEdit();
-        });
-
-        RowState = _rowStateSnapshot;
-    }
-
-    /// <summary>Hook invoked at CancelEdit. Restore fields added in a partial class from their backups (called inside ExecuteLoad).</summary>
+    /// <summary>Hook invoked at CancelEdit. Restore fields added in a partial class from their backups (called inside the restoring load).</summary>
     partial void OnCancelEdit();
 
     /// <summary>Gets the parent model that holds this element as a child (cascade parent; null when not owned or at the root).</summary>
@@ -5629,17 +5657,6 @@ public partial class OrderEditModel : EditModelBase<OrderEditModel>
 /// <summary>Edit model for on-screen editing of the customer_profiles table.</summary>
 public partial class CustomerProfileEditModel : EditModelBase<CustomerProfileEditModel>
 {
-    // ===== Extension points (implement only what you need in a partial class; unimplemented partial methods are erased at no cost) =====
-    //   Extra validation        : partial void OnValidate();
-    //   Extra children          : protected override void RegisterExtraChildren();  // register via AddChild/AddChildren inside
-    //   Conversion msg tweak    : partial void CustomizeParseErrorMessage(string propertyName, string inputValue, string typeName, ref string message);
-    //   Required msg tweak      : partial void CustomizeRequiredErrorMessage(string propertyName, ref string message);
-    //   Duplicate msg tweak     : partial void CustomizeDuplicateErrorMessage(IReadOnlyList<string> propertyNames, ref string message);
-    //   Input normalization     : protected override void CustomizeInputNormalization(string propertyName, string rawValue, ref string normalizedValue);
-    //   Row editing             : partial void OnBeginEdit();  partial void OnEndEdit();  partial void OnCancelEdit();
-    //   Value change hooks      : partial void On{Property}Changing(value) / Changed(value) / Changing(old,new) / Changed(old,new);  // provided per property
-    // ====================================================================================================
-
     // Each column keeps two representations: the confirmed value and the on-screen input string (conversion errors are held by the error dictionary).
     /// <summary>Confirmed value of ProfileId.</summary>
     private ProfileIdValue? _profileId;
@@ -5705,7 +5722,7 @@ public partial class CustomerProfileEditModel : EditModelBase<CustomerProfileEdi
                 default:
                     SetError(
                         nameof(BindingProfileId),
-                        ResolveParseErrorMessage(nameof(ProfileId), ProfileIdValue.DisplayName, normalized, "int")
+                        EditModelMessages.ParseFailed(nameof(ProfileId), ProfileIdValue.DisplayName, normalized, "int")
                     );
                     break;
             }
@@ -5776,7 +5793,7 @@ public partial class CustomerProfileEditModel : EditModelBase<CustomerProfileEdi
                 default:
                     SetError(
                         nameof(BindingCustomerId),
-                        ResolveParseErrorMessage(nameof(CustomerId), CustomerIdValue.DisplayName, normalized, "int")
+                        EditModelMessages.ParseFailed(nameof(CustomerId), CustomerIdValue.DisplayName, normalized, "int")
                     );
                     break;
             }
@@ -5854,40 +5871,50 @@ public partial class CustomerProfileEditModel : EditModelBase<CustomerProfileEdi
     /// </remarks>
     public CustomerEditModel? Customer { get; set; }
 
-    /// <summary>Writes the confirmed values back to the binding properties and clears the input errors (called from RevertInput; duplicate-value errors belong to the uniqueness checks).</summary>
-    protected override void RevertCore()
-    {
-        BindingProfileId = ProfileId?.ToString() ?? string.Empty;
-        SetError(nameof(BindingProfileId), null);
-        BindingCustomerId = CustomerId?.ToString() ?? string.Empty;
-        SetError(nameof(BindingCustomerId), null);
-        BindingBio = Bio?.ToString() ?? string.Empty;
-        SetError(nameof(BindingBio), null);
-    }
+    /// <summary>The columns of this edit model as data (input of the shared required check, input revert, row-edit snapshot, and duplicate-error mapping).</summary>
+    private static readonly IReadOnlyList<EditModelColumn<CustomerProfileEditModel>> _editModelColumns =
+        new EditModelColumn<CustomerProfileEditModel>[]
+        {
+            new(
+                nameof(ProfileId),
+                nameof(BindingProfileId),
+                true,
+                static () => ProfileIdValue.DisplayName,
+                static model => model.ProfileId,
+                static (model, value) => model.ProfileId = (ProfileIdValue?)value,
+                static model => model.ProfileId?.ToString() ?? string.Empty,
+                static (model, input) => model.BindingProfileId = input
+            ),
+            new(
+                nameof(CustomerId),
+                nameof(BindingCustomerId),
+                true,
+                static () => CustomerIdValue.DisplayName,
+                static model => model.CustomerId,
+                static (model, value) => model.CustomerId = (CustomerIdValue?)value,
+                static model => model.CustomerId?.ToString() ?? string.Empty,
+                static (model, input) => model.BindingCustomerId = input
+            ),
+            new(
+                nameof(Bio),
+                nameof(BindingBio),
+                false,
+                static () => BioValue.DisplayName,
+                static model => model.Bio,
+                static (model, value) => model.Bio = (BioValue?)value,
+                static model => model.Bio?.ToString() ?? string.Empty,
+                static (model, input) => model.BindingBio = input
+            ),
+        };
 
-    /// <summary>Validation of this node itself (missing-input checks for required fields plus the extra validation hook). Called from Validate.</summary>
-    /// <remarks>
-    /// The required check owns exactly the errors it registers: a satisfied field clears its own missing-input error, and a field
-    /// that already carries a conversion error keeps that error instead (the conversion failure is the cause the user must fix).
-    /// </remarks>
+    /// <inheritdoc />
+    protected override IReadOnlyList<EditModelColumn<CustomerProfileEditModel>> EditModelColumns =>
+        _editModelColumns;
+
+    /// <summary>Validation of this node itself: the base class runs the missing-input checks over the column table, then the extra validation hook runs. Called from Validate.</summary>
     protected override void ValidateSelf()
     {
-        if (ProfileId is null)
-        {
-            SetRequiredError(nameof(BindingProfileId), ResolveRequiredErrorMessage(nameof(ProfileId), ProfileIdValue.DisplayName));
-        }
-        else
-        {
-            ClearRequiredError(nameof(BindingProfileId));
-        }
-        if (CustomerId is null)
-        {
-            SetRequiredError(nameof(BindingCustomerId), ResolveRequiredErrorMessage(nameof(CustomerId), CustomerIdValue.DisplayName));
-        }
-        else
-        {
-            ClearRequiredError(nameof(BindingCustomerId));
-        }
+        base.ValidateSelf();
         OnValidate();
     }
 
@@ -5897,106 +5924,6 @@ public partial class CustomerProfileEditModel : EditModelBase<CustomerProfileEdi
     /// themselves, so clear a custom error from here (SetError with a null message) once its condition no longer holds.
     /// </remarks>
     partial void OnValidate();
-
-    /// <summary>Resolves the required-field error message (EditModelMessages.Required first, then fine-tuned by CustomizeRequiredErrorMessage).</summary>
-    private string ResolveRequiredErrorMessage(string propertyName, string displayName)
-    {
-        var message = EditModelMessages.Required(displayName);
-        CustomizeRequiredErrorMessage(propertyName, ref message);
-        return message;
-    }
-
-    /// <summary>Partial method for fine-tuning the required-field error message per property (replace via a partial implementation in another file).</summary>
-    partial void CustomizeRequiredErrorMessage(string propertyName, ref string message);
-
-    /// <summary>Resolves the conversion error message (EditModelMessages.ParseFailed first, then fine-tuned by CustomizeParseErrorMessage).</summary>
-    private string ResolveParseErrorMessage(
-        string propertyName,
-        string displayName,
-        string inputValue,
-        string typeName
-    )
-    {
-        var message = EditModelMessages.ParseFailed(displayName, inputValue, typeName);
-        CustomizeParseErrorMessage(propertyName, inputValue, typeName, ref message);
-        return message;
-    }
-
-    /// <summary>Partial method for fine-tuning conversion error messages per property (replace via a partial implementation in another file).</summary>
-    partial void CustomizeParseErrorMessage(
-        string propertyName,
-        string inputValue,
-        string typeName,
-        ref string message
-    );
-
-    /// <inheritdoc />
-    public override void RegisterDuplicateError(
-        IReadOnlyList<string> propertyNames,
-        string? message,
-        DuplicateErrorSource source = DuplicateErrorSource.Siblings
-    )
-    {
-        var displayNames = new List<string>(propertyNames.Count);
-        var targets = new List<string>(propertyNames.Count);
-
-        foreach (var propertyName in propertyNames)
-        {
-            switch (propertyName)
-            {
-                case nameof(ProfileId):
-                    displayNames.Add(ProfileIdValue.DisplayName);
-                    targets.Add(nameof(BindingProfileId));
-                    break;
-
-                case nameof(CustomerId):
-                    displayNames.Add(CustomerIdValue.DisplayName);
-                    targets.Add(nameof(BindingCustomerId));
-                    break;
-
-                case nameof(Bio):
-                    displayNames.Add(BioValue.DisplayName);
-                    targets.Add(nameof(BindingBio));
-                    break;
-
-                default:
-                    // A name that does not belong to this edit model (a user-defined check may report one) has no binding property to attach the error to.
-                    displayNames.Add(propertyName);
-                    break;
-            }
-        }
-
-        var resolved = message ?? ResolveDuplicateErrorMessage(propertyNames, displayNames);
-
-        // Names that could not be mapped (and an empty list) become a model-level error.
-        if (targets.Count == 0)
-        {
-            SetDuplicateError(string.Empty, resolved, source);
-            return;
-        }
-
-        foreach (var target in targets)
-        {
-            SetDuplicateError(target, resolved, source);
-        }
-    }
-
-    /// <summary>Resolves the duplicate-value error message (EditModelMessages.DuplicateValue first, then fine-tuned by CustomizeDuplicateErrorMessage).</summary>
-    private string ResolveDuplicateErrorMessage(
-        IReadOnlyList<string> propertyNames,
-        IReadOnlyList<string> displayNames
-    )
-    {
-        var message = EditModelMessages.DuplicateValue(displayNames);
-        CustomizeDuplicateErrorMessage(propertyNames, ref message);
-        return message;
-    }
-
-    /// <summary>Partial method for fine-tuning the duplicate-value error message per constraint (replace via a partial implementation in another file).</summary>
-    partial void CustomizeDuplicateErrorMessage(
-        IReadOnlyList<string> propertyNames,
-        ref string message
-    );
 
     /// <summary>UNIQUE constraints of the customer_profiles table, with compiled accessors for their member values (input of the duplicate check inside a collection).</summary>
     private static readonly IReadOnlyList<EditModelUniquenessConstraint> _uniquenessConstraints =
@@ -6037,14 +5964,12 @@ public partial class CustomerProfileEditModel : EditModelBase<CustomerProfileEdi
     /// </remarks>
     /// <param name="repository">The repository used for the check.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
-    public async Task<bool> ValidateUniqueAsync(
+    public Task<bool> ValidateUniqueAsync(
         ICustomerProfileRepository repository,
         CancellationToken cancellationToken = default
     )
     {
-        ArgumentNullException.ThrowIfNull(repository);
-        ClearDuplicateErrors(DuplicateErrorSource.Database);
-
+        // Only the columns the check reads are copied: the primary key (to exclude this row) and the constraint members.
         var entity = new CustomerProfileEntity();
 
         if (ProfileId is { } resolvedProfileId)
@@ -6062,42 +5987,14 @@ public partial class CustomerProfileEditModel : EditModelBase<CustomerProfileEdi
             entity.Bio = resolvedBio;
         }
 
-        var violations = await repository
-            .CheckUniquenessAsync(entity, cancellationToken)
-            .ConfigureAwait(false);
-
-        foreach (var violation in violations)
-        {
-            RegisterDuplicateError(
-                violation.PropertyNames,
-                violation.Message,
-                DuplicateErrorSource.Database
-            );
-        }
-
-        return violations.Count == 0;
+        return CheckDatabaseUniquenessAsync(repository, entity, cancellationToken);
     }
 
-    // ---- Snapshots for row editing (IEditableObject) ----
-    /// <summary>Pre-edit snapshot of the confirmed value of ProfileId.</summary>
-    private ProfileIdValue? _profileIdSnapshot;
-
-    /// <summary>Pre-edit snapshot of the confirmed value of CustomerId.</summary>
-    private CustomerIdValue? _customerIdSnapshot;
-
-    /// <summary>Pre-edit snapshot of the confirmed value of Bio.</summary>
-    private BioValue? _bioSnapshot;
-
-    /// <summary>Pre-edit snapshot of the RowState.</summary>
-    private RowState _rowStateSnapshot;
-
-    /// <summary>Core logic of BeginEdit. Snapshots each confirmed value and the RowState.</summary>
+    // ---- Row editing (IEditableObject); the base class snapshots and restores the confirmed values through the column table ----
+    /// <summary>Core logic of BeginEdit. Takes the base class's snapshot, then runs the hook.</summary>
     protected override void BeginEditCore()
     {
-        _profileIdSnapshot = _profileId;
-        _customerIdSnapshot = _customerId;
-        _bioSnapshot = _bio;
-        _rowStateSnapshot = RowState;
+        base.BeginEditCore();
         OnBeginEdit();
     }
 
@@ -6110,57 +6007,10 @@ public partial class CustomerProfileEditModel : EditModelBase<CustomerProfileEdi
     /// <summary>Hook invoked at EndEdit (commit).</summary>
     partial void OnEndEdit();
 
-    /// <summary>Core logic of CancelEdit. Restores the confirmed values and the RowState from the snapshot, then derives the input strings from them and clears the errors the canceled input left behind.</summary>
-    /// <remarks>
-    /// <para>
-    /// The confirmed values are the source of truth, so they are put back directly rather than rebuilt by re-parsing
-    /// the input strings: a display format cannot express everything a value holds - <see cref="System.DateTime"/>
-    /// sub-second precision and Kind, for example - so re-parsing would let a canceled edit silently degrade the very
-    /// value it was supposed to leave untouched.
-    /// </para>
-    /// <para>
-    /// Restoring the values also withdraws the duplicate-value findings the database check registered, on the reasoning a
-    /// confirmed-value setter uses: the value they were reached about is no longer the one the model holds. The setter
-    /// cannot do it here, because the restore runs as a load and a load deliberately keeps the setters quiet - so a cancel
-    /// would otherwise leave a finding about the discarded value behind and hold <see cref="EditModelBase.Validate"/>
-    /// false forever. It is done unconditionally, though, where a setter withdraws them only when the value actually
-    /// changes: a cancel does not track whether anything was edited, so a row that was begun and then canceled without a
-    /// single change drops a database finding that was still perfectly valid. Run the database check again before saving -
-    /// a finding of its is only ever as current as its last run. Only that check's findings are withdrawn, whereas the
-    /// findings among the siblings are about the collection as it stands and belong to the next check over it.
-    /// </para>
-    /// <para>
-    /// Leaving them to that check cuts both ways, and nothing here runs it: a cancel that puts back a value which
-    /// duplicates a sibling restores the duplicate without restoring the finding about it, just as a cancel that undoes
-    /// a duplicate leaves the finding standing. Run the collection's <c>Validate</c> again before saving - the sibling
-    /// findings are only ever as current as the last check over the collection.
-    /// </para>
-    /// <para>
-    /// Deriving the input strings clears the input error of every property, so a conversion error that predates the
-    /// <see cref="EditModelBase.BeginEdit"/> of this row is cleared along with the ones the canceled edit produced. The
-    /// unconvertible text goes away in the same step, since the input string is rebuilt from the restored confirmed value,
-    /// and typing it again brings the error back.
-    /// </para>
-    /// </remarks>
-    protected override void CancelEditCore()
-    {
-        ExecuteLoad(() =>
-        {
-            ProfileId = _profileIdSnapshot;
-            CustomerId = _customerIdSnapshot;
-            Bio = _bioSnapshot;
+    /// <inheritdoc />
+    protected override void OnCancelEditCore() => OnCancelEdit();
 
-            // Derive the input strings from the restored confirmed values (RevertCore also clears the errors the
-            // canceled input produced).
-            ExecuteRevert(RevertCore);
-            ClearDuplicateErrors(DuplicateErrorSource.Database);
-            OnCancelEdit();
-        });
-
-        RowState = _rowStateSnapshot;
-    }
-
-    /// <summary>Hook invoked at CancelEdit. Restore fields added in a partial class from their backups (called inside ExecuteLoad).</summary>
+    /// <summary>Hook invoked at CancelEdit. Restore fields added in a partial class from their backups (called inside the restoring load).</summary>
     partial void OnCancelEdit();
 
     /// <summary>Gets the parent model that holds this element as a child (cascade parent; null when not owned or at the root).</summary>
@@ -6172,45 +6022,31 @@ public partial class CustomerProfileEditModel : EditModelBase<CustomerProfileEdi
 public sealed partial class CustomerMapper
     : MapperBase<CustomerEntity, CustomerEditModel>
 {
-    /// <summary>Creates a new CustomerEntity with initial values set (it will be an insertion target on save).</summary>
-    public override CustomerEntity CreateEntity()
-    {
-        var entity = CreateEntityCore();
+    /// <inheritdoc />
+    protected override void AfterEntityCreated(CustomerEntity entity) =>
         OnEntityCreated(entity);
-        return entity;
-    }
 
     /// <summary>Called just after a new CustomerEntity is created (set initial values via a partial implementation).</summary>
     partial void OnEntityCreated(CustomerEntity entity);
 
-    /// <summary>Creates a new CustomerEditModel from a CustomerEntity.</summary>
-    public override CustomerEditModel CreateEditModel(CustomerEntity entity)
-    {
-        var editModel = CreateEditModelCore(entity);
+    /// <inheritdoc />
+    protected override void AfterEditModelCreated(CustomerEditModel editModel) =>
         OnEditModelCreated(editModel);
-        return editModel;
-    }
 
     /// <summary>Called just after a new CustomerEditModel is created (after loading) (set initial values via a partial implementation; branch on IsAdded to target new models only).</summary>
     partial void OnEditModelCreated(CustomerEditModel editModel);
 
-    /// <summary>Applies the CustomerEditModel's confirmed values to an existing CustomerEntity (destructive update).</summary>
-    /// <param name="editModel">The edit model whose confirmed values are applied.</param>
-    /// <param name="entity">The existing entity to apply the values to.</param>
-    /// <param name="includeRemoved">Whether to also restore and apply deletion-tracked (Removed) items. This argument is required: pass true for saving, false for report display and similar.</param>
+    /// <inheritdoc />
     public override void ApplyToEntity(
         CustomerEditModel editModel,
         CustomerEntity entity,
         bool includeRemoved
     )
     {
-        entity.CustomerId =
-            editModel.CustomerId ?? throw new InvalidOperationException("CustomerId has no input value.");
-        entity.Name =
-            editModel.Name ?? throw new InvalidOperationException("Name has no input value.");
+        entity.CustomerId = Required(editModel.CustomerId, nameof(editModel.CustomerId));
+        entity.Name = Required(editModel.Name, nameof(editModel.Name));
         entity.Balance = editModel.Balance;
-        entity.IsActive =
-            editModel.IsActive ?? throw new InvalidOperationException("IsActive has no input value.");
+        entity.IsActive = Required(editModel.IsActive, nameof(editModel.IsActive));
         // Transfer the RowState raised on the edit model by confirmed-value changes as-is (no state is created here).
         entity.RowState = editModel.RowState;
         entity.Orders = new OrderMapper().CreateEntities(editModel.Orders, includeRemoved);
@@ -6221,37 +6057,21 @@ public sealed partial class CustomerMapper
     /// <summary>Called after the CustomerEditModel's confirmed values are applied to the CustomerEntity (save additional properties via a partial implementation).</summary>
     partial void OnEntityApplied(CustomerEditModel editModel, CustomerEntity entity);
 
-    /// <summary>Applies the CustomerEntity's values to an existing CustomerEditModel.</summary>
-    /// <remarks>
-    /// Loading is lossless: the confirmed values are copied straight from the entity instead of being rebuilt by parsing
-    /// the on-screen input strings, so nothing that the display format cannot express (sub-second precision of a
-    /// DateTime, its Kind, and so on) is dropped. The input strings are then derived from the confirmed values.
-    /// Binary columns are copied defensively, so editing the loaded model never reaches into the entity's array. The
-    /// defensive copy belongs to this direction alone: <c>ApplyToEntity</c> assigns the confirmed values across as they
-    /// are, so the array an entity receives on the way to being saved is the edit model's own - saving hands the buffer
-    /// over rather than duplicating it, and writing into it afterwards is writing into both.
-    /// </remarks>
-    public override void ApplyToEditModel(CustomerEntity entity, CustomerEditModel editModel)
+    /// <inheritdoc />
+    protected override void LoadColumns(CustomerEntity entity, CustomerEditModel editModel)
     {
-        editModel.ExecuteLoad(() =>
-        {
-            editModel.CustomerId = entity.CustomerId;
-            editModel.Name = entity.Name;
-            editModel.Balance = entity.Balance;
-            editModel.IsActive = entity.IsActive;
+        editModel.CustomerId = entity.CustomerId;
+        editModel.Name = entity.Name;
+        editModel.Balance = entity.Balance;
+        editModel.IsActive = entity.IsActive;
+    }
 
-            // Derive the on-screen input strings from the confirmed values just loaded and clear stale conversion errors.
-            editModel.RevertInput();
-
-            // The values the uniqueness checks looked at are gone, so their findings go too (RevertInput only owns the input errors).
-            editModel.ClearDuplicateErrors();
-            editModel.Orders = new OrderMapper().CreateEditModels(entity.Orders);
-            editModel.CustomerProfile = entity.CustomerProfile is null ? null : new CustomerProfileMapper().CreateEditModel(entity.CustomerProfile);
-            OnEditModelLoaded(entity, editModel);
-        });
-
-        // The edit model's state is based on the source entity (loaded = Unchanged, new = Added).
-        editModel.RowState = entity.RowState;
+    /// <inheritdoc />
+    protected override void CompleteLoad(CustomerEntity entity, CustomerEditModel editModel)
+    {
+        editModel.Orders = new OrderMapper().CreateEditModels(entity.Orders);
+        editModel.CustomerProfile = entity.CustomerProfile is null ? null : new CustomerProfileMapper().CreateEditModel(entity.CustomerProfile);
+        OnEditModelLoaded(entity, editModel);
     }
 
     /// <summary>Called after the default load into the CustomerEditModel (load additional properties via a partial implementation).</summary>
@@ -6262,45 +6082,31 @@ public sealed partial class CustomerMapper
 public sealed partial class OrderMapper
     : MapperBase<OrderEntity, OrderEditModel>
 {
-    /// <summary>Creates a new OrderEntity with initial values set (it will be an insertion target on save).</summary>
-    public override OrderEntity CreateEntity()
-    {
-        var entity = CreateEntityCore();
+    /// <inheritdoc />
+    protected override void AfterEntityCreated(OrderEntity entity) =>
         OnEntityCreated(entity);
-        return entity;
-    }
 
     /// <summary>Called just after a new OrderEntity is created (set initial values via a partial implementation).</summary>
     partial void OnEntityCreated(OrderEntity entity);
 
-    /// <summary>Creates a new OrderEditModel from a OrderEntity.</summary>
-    public override OrderEditModel CreateEditModel(OrderEntity entity)
-    {
-        var editModel = CreateEditModelCore(entity);
+    /// <inheritdoc />
+    protected override void AfterEditModelCreated(OrderEditModel editModel) =>
         OnEditModelCreated(editModel);
-        return editModel;
-    }
 
     /// <summary>Called just after a new OrderEditModel is created (after loading) (set initial values via a partial implementation; branch on IsAdded to target new models only).</summary>
     partial void OnEditModelCreated(OrderEditModel editModel);
 
-    /// <summary>Applies the OrderEditModel's confirmed values to an existing OrderEntity (destructive update).</summary>
-    /// <param name="editModel">The edit model whose confirmed values are applied.</param>
-    /// <param name="entity">The existing entity to apply the values to.</param>
-    /// <param name="includeRemoved">Whether to also restore and apply deletion-tracked (Removed) items. This argument is required: pass true for saving, false for report display and similar.</param>
+    /// <inheritdoc />
     public override void ApplyToEntity(
         OrderEditModel editModel,
         OrderEntity entity,
         bool includeRemoved
     )
     {
-        entity.OrderId =
-            editModel.OrderId ?? throw new InvalidOperationException("OrderId has no input value.");
-        entity.CustomerId =
-            editModel.CustomerId ?? throw new InvalidOperationException("CustomerId has no input value.");
+        entity.OrderId = Required(editModel.OrderId, nameof(editModel.OrderId));
+        entity.CustomerId = Required(editModel.CustomerId, nameof(editModel.CustomerId));
         entity.Memo = editModel.Memo;
-        entity.Amount =
-            editModel.Amount ?? throw new InvalidOperationException("Amount has no input value.");
+        entity.Amount = Required(editModel.Amount, nameof(editModel.Amount));
         entity.OrderedAt = editModel.OrderedAt;
         entity.DeliveryDate = editModel.DeliveryDate;
         // Transfer the RowState raised on the edit model by confirmed-value changes as-is (no state is created here).
@@ -6311,37 +6117,21 @@ public sealed partial class OrderMapper
     /// <summary>Called after the OrderEditModel's confirmed values are applied to the OrderEntity (save additional properties via a partial implementation).</summary>
     partial void OnEntityApplied(OrderEditModel editModel, OrderEntity entity);
 
-    /// <summary>Applies the OrderEntity's values to an existing OrderEditModel.</summary>
-    /// <remarks>
-    /// Loading is lossless: the confirmed values are copied straight from the entity instead of being rebuilt by parsing
-    /// the on-screen input strings, so nothing that the display format cannot express (sub-second precision of a
-    /// DateTime, its Kind, and so on) is dropped. The input strings are then derived from the confirmed values.
-    /// Binary columns are copied defensively, so editing the loaded model never reaches into the entity's array. The
-    /// defensive copy belongs to this direction alone: <c>ApplyToEntity</c> assigns the confirmed values across as they
-    /// are, so the array an entity receives on the way to being saved is the edit model's own - saving hands the buffer
-    /// over rather than duplicating it, and writing into it afterwards is writing into both.
-    /// </remarks>
-    public override void ApplyToEditModel(OrderEntity entity, OrderEditModel editModel)
+    /// <inheritdoc />
+    protected override void LoadColumns(OrderEntity entity, OrderEditModel editModel)
     {
-        editModel.ExecuteLoad(() =>
-        {
-            editModel.OrderId = entity.OrderId;
-            editModel.CustomerId = entity.CustomerId;
-            editModel.Memo = entity.Memo;
-            editModel.Amount = entity.Amount;
-            editModel.OrderedAt = entity.OrderedAt;
-            editModel.DeliveryDate = entity.DeliveryDate;
+        editModel.OrderId = entity.OrderId;
+        editModel.CustomerId = entity.CustomerId;
+        editModel.Memo = entity.Memo;
+        editModel.Amount = entity.Amount;
+        editModel.OrderedAt = entity.OrderedAt;
+        editModel.DeliveryDate = entity.DeliveryDate;
+    }
 
-            // Derive the on-screen input strings from the confirmed values just loaded and clear stale conversion errors.
-            editModel.RevertInput();
-
-            // The values the uniqueness checks looked at are gone, so their findings go too (RevertInput only owns the input errors).
-            editModel.ClearDuplicateErrors();
-            OnEditModelLoaded(entity, editModel);
-        });
-
-        // The edit model's state is based on the source entity (loaded = Unchanged, new = Added).
-        editModel.RowState = entity.RowState;
+    /// <inheritdoc />
+    protected override void CompleteLoad(OrderEntity entity, OrderEditModel editModel)
+    {
+        OnEditModelLoaded(entity, editModel);
     }
 
     /// <summary>Called after the default load into the OrderEditModel (load additional properties via a partial implementation).</summary>
@@ -6352,42 +6142,29 @@ public sealed partial class OrderMapper
 public sealed partial class CustomerProfileMapper
     : MapperBase<CustomerProfileEntity, CustomerProfileEditModel>
 {
-    /// <summary>Creates a new CustomerProfileEntity with initial values set (it will be an insertion target on save).</summary>
-    public override CustomerProfileEntity CreateEntity()
-    {
-        var entity = CreateEntityCore();
+    /// <inheritdoc />
+    protected override void AfterEntityCreated(CustomerProfileEntity entity) =>
         OnEntityCreated(entity);
-        return entity;
-    }
 
     /// <summary>Called just after a new CustomerProfileEntity is created (set initial values via a partial implementation).</summary>
     partial void OnEntityCreated(CustomerProfileEntity entity);
 
-    /// <summary>Creates a new CustomerProfileEditModel from a CustomerProfileEntity.</summary>
-    public override CustomerProfileEditModel CreateEditModel(CustomerProfileEntity entity)
-    {
-        var editModel = CreateEditModelCore(entity);
+    /// <inheritdoc />
+    protected override void AfterEditModelCreated(CustomerProfileEditModel editModel) =>
         OnEditModelCreated(editModel);
-        return editModel;
-    }
 
     /// <summary>Called just after a new CustomerProfileEditModel is created (after loading) (set initial values via a partial implementation; branch on IsAdded to target new models only).</summary>
     partial void OnEditModelCreated(CustomerProfileEditModel editModel);
 
-    /// <summary>Applies the CustomerProfileEditModel's confirmed values to an existing CustomerProfileEntity (destructive update).</summary>
-    /// <param name="editModel">The edit model whose confirmed values are applied.</param>
-    /// <param name="entity">The existing entity to apply the values to.</param>
-    /// <param name="includeRemoved">Whether to also restore and apply deletion-tracked (Removed) items. This argument is required: pass true for saving, false for report display and similar.</param>
+    /// <inheritdoc />
     public override void ApplyToEntity(
         CustomerProfileEditModel editModel,
         CustomerProfileEntity entity,
         bool includeRemoved
     )
     {
-        entity.ProfileId =
-            editModel.ProfileId ?? throw new InvalidOperationException("ProfileId has no input value.");
-        entity.CustomerId =
-            editModel.CustomerId ?? throw new InvalidOperationException("CustomerId has no input value.");
+        entity.ProfileId = Required(editModel.ProfileId, nameof(editModel.ProfileId));
+        entity.CustomerId = Required(editModel.CustomerId, nameof(editModel.CustomerId));
         entity.Bio = editModel.Bio;
         // Transfer the RowState raised on the edit model by confirmed-value changes as-is (no state is created here).
         entity.RowState = editModel.RowState;
@@ -6397,34 +6174,18 @@ public sealed partial class CustomerProfileMapper
     /// <summary>Called after the CustomerProfileEditModel's confirmed values are applied to the CustomerProfileEntity (save additional properties via a partial implementation).</summary>
     partial void OnEntityApplied(CustomerProfileEditModel editModel, CustomerProfileEntity entity);
 
-    /// <summary>Applies the CustomerProfileEntity's values to an existing CustomerProfileEditModel.</summary>
-    /// <remarks>
-    /// Loading is lossless: the confirmed values are copied straight from the entity instead of being rebuilt by parsing
-    /// the on-screen input strings, so nothing that the display format cannot express (sub-second precision of a
-    /// DateTime, its Kind, and so on) is dropped. The input strings are then derived from the confirmed values.
-    /// Binary columns are copied defensively, so editing the loaded model never reaches into the entity's array. The
-    /// defensive copy belongs to this direction alone: <c>ApplyToEntity</c> assigns the confirmed values across as they
-    /// are, so the array an entity receives on the way to being saved is the edit model's own - saving hands the buffer
-    /// over rather than duplicating it, and writing into it afterwards is writing into both.
-    /// </remarks>
-    public override void ApplyToEditModel(CustomerProfileEntity entity, CustomerProfileEditModel editModel)
+    /// <inheritdoc />
+    protected override void LoadColumns(CustomerProfileEntity entity, CustomerProfileEditModel editModel)
     {
-        editModel.ExecuteLoad(() =>
-        {
-            editModel.ProfileId = entity.ProfileId;
-            editModel.CustomerId = entity.CustomerId;
-            editModel.Bio = entity.Bio;
+        editModel.ProfileId = entity.ProfileId;
+        editModel.CustomerId = entity.CustomerId;
+        editModel.Bio = entity.Bio;
+    }
 
-            // Derive the on-screen input strings from the confirmed values just loaded and clear stale conversion errors.
-            editModel.RevertInput();
-
-            // The values the uniqueness checks looked at are gone, so their findings go too (RevertInput only owns the input errors).
-            editModel.ClearDuplicateErrors();
-            OnEditModelLoaded(entity, editModel);
-        });
-
-        // The edit model's state is based on the source entity (loaded = Unchanged, new = Added).
-        editModel.RowState = entity.RowState;
+    /// <inheritdoc />
+    protected override void CompleteLoad(CustomerProfileEntity entity, CustomerProfileEditModel editModel)
+    {
+        OnEditModelLoaded(entity, editModel);
     }
 
     /// <summary>Called after the default load into the CustomerProfileEditModel (load additional properties via a partial implementation).</summary>

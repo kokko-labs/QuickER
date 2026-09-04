@@ -466,14 +466,12 @@ internal sealed partial class CSharpGenerationModelBuilder
             "    /// </remarks>",
             "    /// <param name=\"repository\">The repository used for the check.</param>",
             "    /// <param name=\"cancellationToken\">The cancellation token.</param>",
-            "    public async Task<bool> ValidateUniqueAsync(",
+            "    public Task<bool> ValidateUniqueAsync(",
             $"        {faceName} repository,",
             "        CancellationToken cancellationToken = default",
             "    )",
             "    {",
-            "        ArgumentNullException.ThrowIfNull(repository);",
-            "        ClearDuplicateErrors(DuplicateErrorSource.Database);",
-            string.Empty,
+            "        // Only the columns the check reads are copied: the primary key (to exclude this row) and the constraint members.",
             $"        var entity = new {entityClassName}();",
         };
 
@@ -498,20 +496,7 @@ internal sealed partial class CSharpGenerationModelBuilder
 
         lines.AddRange([
             string.Empty,
-            "        var violations = await repository",
-            "            .CheckUniquenessAsync(entity, cancellationToken)",
-            "            .ConfigureAwait(false);",
-            string.Empty,
-            "        foreach (var violation in violations)",
-            "        {",
-            "            RegisterDuplicateError(",
-            "                violation.PropertyNames,",
-            "                violation.Message,",
-            "                DuplicateErrorSource.Database",
-            "            );",
-            "        }",
-            string.Empty,
-            "        return violations.Count == 0;",
+            "        return CheckDatabaseUniquenessAsync(repository, entity, cancellationToken);",
             "    }",
         ]);
 

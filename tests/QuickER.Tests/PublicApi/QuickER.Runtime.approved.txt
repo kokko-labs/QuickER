@@ -31,7 +31,9 @@ public enum QuickER.Runtime.DuplicateErrorSource : int
 
 public abstract class QuickER.Runtime.EditModelBase : System.ComponentModel.IEditableObject, System.ComponentModel.INotifyDataErrorInfo, System.ComponentModel.INotifyPropertyChanged
     protected .ctor()
+    protected QuickER.Runtime.EditModelCollection<T> GetChildren<T>(QuickER.Runtime.EditModelCollection<T> field)
     protected System.Collections.Generic.IEnumerable<QuickER.Runtime.EditModelError> CollectOwnErrors(string path)
+    protected System.Threading.Tasks.Task<bool> CheckDatabaseUniquenessAsync<TEntity, TKey>(QuickER.Runtime.IRemoteRepository<TEntity, TKey> repository, TEntity entity, System.Threading.CancellationToken cancellationToken)
     protected bool AcceptBindingInput(ref string field, string value, string bindingPropertyName, out string normalized)
     protected bool IsLoading { get; }
     protected bool IsReverting { get; }
@@ -49,6 +51,7 @@ public abstract class QuickER.Runtime.EditModelBase : System.ComponentModel.IEdi
     protected virtual void CustomizeInputNormalization(string propertyName, string rawValue, ref string normalizedValue)
     protected virtual void EndEditCore()
     protected virtual void MoveCore(int oldIndex, int newIndex)
+    protected virtual void OnCancelEditCore()
     protected virtual void OnConfirmedValueChanged(string propertyName)
     protected virtual void RegisterChildren()
     protected virtual void RegisterExtraChildren()
@@ -62,6 +65,7 @@ public abstract class QuickER.Runtime.EditModelBase : System.ComponentModel.IEdi
     protected void ExecuteRevert(System.Action action)
     protected void OnErrorsChanged(string propertyName)
     protected void OnPropertyChanged(string propertyName)
+    protected void SetChildren<T>(ref QuickER.Runtime.EditModelCollection<T> field, QuickER.Runtime.EditModelCollection<T> value, string propertyName)
     protected void SetError(string propertyName, string error)
     protected void SetRequiredError(string propertyName, string message)
     public QuickER.Runtime.EditModelBase GetNext()
@@ -92,10 +96,12 @@ public abstract class QuickER.Runtime.EditModelBase : System.ComponentModel.IEdi
     public virtual void RegisterDuplicateError(System.Collections.Generic.IReadOnlyList<string> propertyNames, string message, QuickER.Runtime.DuplicateErrorSource source = 0)
     public void AcceptChanges(bool includeChildren = true)
     public void BeginEdit()
+    public void BeginLoad()
     public void CancelEdit()
     public void ClearDuplicateErrors()
     public void ClearDuplicateErrors(QuickER.Runtime.DuplicateErrorSource source)
     public void EndEdit()
+    public void EndLoad()
     public void ExecuteLoad(System.Action action)
     public void MarkAdded()
     public void MarkRemoved()
@@ -107,10 +113,16 @@ public abstract class QuickER.Runtime.EditModelBase : System.ComponentModel.IEdi
 
 public abstract class QuickER.Runtime.EditModelBase<TSelf> : QuickER.Runtime.EditModelBase, System.ComponentModel.IEditableObject, System.ComponentModel.INotifyDataErrorInfo, System.ComponentModel.INotifyPropertyChanged
     protected .ctor()
+    protected override void BeginEditCore()
+    protected override void CancelEditCore()
     protected override void MoveCore(int oldIndex, int newIndex)
+    protected override void RevertCore()
+    protected override void ValidateSelf()
+    protected virtual System.Collections.Generic.IReadOnlyList<QuickER.Runtime.EditModelColumn<TSelf>> EditModelColumns { get; }
     public QuickER.Runtime.EditModelCollection<TSelf> ParentCollection { get; }
     public TSelf GetNext()
     public TSelf GetPrevious()
+    public override void RegisterDuplicateError(System.Collections.Generic.IReadOnlyList<string> propertyNames, string message, QuickER.Runtime.DuplicateErrorSource source = 0)
 
 public sealed class QuickER.Runtime.EditModelCollection<T> : System.Collections.ObjectModel.ObservableCollection<T>, System.Collections.Generic.ICollection<T>, System.Collections.Generic.IEnumerable<T>, System.Collections.Generic.IList<T>, System.Collections.Generic.IReadOnlyCollection<T>, System.Collections.Generic.IReadOnlyList<T>, System.Collections.ICollection, System.Collections.IEnumerable, System.Collections.IList, System.Collections.Specialized.INotifyCollectionChanged, System.ComponentModel.INotifyPropertyChanged
     protected override void ClearItems()
@@ -133,6 +145,17 @@ public sealed class QuickER.Runtime.EditModelCollection<T> : System.Collections.
     public void RemoveAll()
     public void RemoveRange(int index, int count)
 
+public sealed class QuickER.Runtime.EditModelColumn<TModel> : System.IEquatable<QuickER.Runtime.EditModelColumn<TModel>>
+    public .ctor(string PropertyName, string BindingPropertyName, bool IsRequired, System.Func<string> DisplayName, System.Func<TModel, object> GetValue, System.Action<TModel, object> SetValue, System.Func<TModel, string> ToInput, System.Action<TModel, string> SetInput)
+    public System.Action<TModel, object> SetValue { get; init; }
+    public System.Action<TModel, string> SetInput { get; init; }
+    public System.Func<TModel, object> GetValue { get; init; }
+    public System.Func<TModel, string> ToInput { get; init; }
+    public System.Func<string> DisplayName { get; init; }
+    public bool IsRequired { get; init; }
+    public string BindingPropertyName { get; init; }
+    public string PropertyName { get; init; }
+
 public sealed class QuickER.Runtime.EditModelError : System.IEquatable<QuickER.Runtime.EditModelError>
     public .ctor(string Path, string Property, string Message)
     public string Message { get; init; }
@@ -140,10 +163,10 @@ public sealed class QuickER.Runtime.EditModelError : System.IEquatable<QuickER.R
     public string Property { get; init; }
 
 public static class QuickER.Runtime.EditModelMessages
-    public static System.Func<System.Collections.Generic.IReadOnlyList<string>, string> DuplicateValue { get; set; }
+    public static System.Func<System.Collections.Generic.IReadOnlyList<string>, System.Collections.Generic.IReadOnlyList<string>, string> DuplicateValue { get; set; }
     public static System.Func<System.Collections.Generic.IReadOnlyList<string>, string> JoinValueObjectErrors { get; set; }
-    public static System.Func<string, string, string, string> ParseFailed { get; set; }
-    public static System.Func<string, string> Required { get; set; }
+    public static System.Func<string, string, string, string, string> ParseFailed { get; set; }
+    public static System.Func<string, string, string> Required { get; set; }
 
 public sealed class QuickER.Runtime.EditModelUniquenessConstraint
     public .ctor(string constraintName, System.Collections.Generic.IReadOnlyList<string> propertyNames, System.Func<QuickER.Runtime.EditModelBase, object[]> getValues)
@@ -283,16 +306,20 @@ public sealed class QuickER.Runtime.IncludeNode
 
 public abstract class QuickER.Runtime.MapperBase<TEntity, TEditModel>
     protected .ctor()
-    protected TEditModel CreateEditModelCore(TEntity entity)
-    protected static TEntity CreateEntityCore()
+    protected abstract void CompleteLoad(TEntity entity, TEditModel editModel)
+    protected abstract void LoadColumns(TEntity entity, TEditModel editModel)
+    protected static T Required<T>(T value, string propertyName)
+    protected static T Required<T>(T? value, string propertyName)
+    protected virtual void AfterEditModelCreated(TEditModel editModel)
+    protected virtual void AfterEntityCreated(TEntity entity)
     public QuickER.Runtime.EditModelCollection<TEditModel> CreateEditModels(System.Collections.Generic.IEnumerable<TEntity> entities)
     public System.Collections.Generic.List<TEntity> CreateEntities(QuickER.Runtime.EditModelCollection<TEditModel> editModels, bool includeRemoved)
     public TEditModel CreateEditModel()
+    public TEditModel CreateEditModel(TEntity entity)
+    public TEntity CreateEntity()
     public TEntity CreateEntity(TEditModel editModel, bool includeRemoved)
-    public abstract TEditModel CreateEditModel(TEntity entity)
-    public abstract TEntity CreateEntity()
-    public abstract void ApplyToEditModel(TEntity entity, TEditModel editModel)
     public abstract void ApplyToEntity(TEditModel editModel, TEntity entity, bool includeRemoved)
+    public void ApplyToEditModel(TEntity entity, TEditModel editModel)
 
 public sealed class QuickER.Runtime.NavigationReferenceAttribute : System.Attribute
     public .ctor(string principalTable, string principalColumn, string dependentTable, string dependentColumn, bool isCollection, bool cascade, bool isParentReference)

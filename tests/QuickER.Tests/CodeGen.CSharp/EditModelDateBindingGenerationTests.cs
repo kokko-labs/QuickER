@@ -91,8 +91,8 @@ public sealed class EditModelDateBindingGenerationTests
 
         content
             .Should()
-            .Contain("BindingDeliveryDate = DeliveryDate?.ToString(\"d\") ?? string.Empty;");
-        content.Should().Contain("BindingOrderedAt = OrderedAt?.ToString() ?? string.Empty;");
+            .Contain("static model => model.DeliveryDate?.ToString(\"d\") ?? string.Empty,");
+        content.Should().Contain("static model => model.OrderedAt?.ToString() ?? string.Empty,");
     }
 
     [Fact(DisplayName = "値オブジェクト有効時も date 列は内包値を日付のみの書式で表示する")]
@@ -102,7 +102,7 @@ public sealed class EditModelDateBindingGenerationTests
 
         content
             .Should()
-            .Contain("BindingDeliveryDate = DeliveryDate?.Value.ToString(\"d\") ?? string.Empty;");
-        content.Should().Contain("BindingOrderedAt = OrderedAt?.ToString() ?? string.Empty;");
+            .Contain("static model => model.DeliveryDate?.Value.ToString(\"d\") ?? string.Empty,");
+        content.Should().Contain("static model => model.OrderedAt?.ToString() ?? string.Empty,");
     }
 }

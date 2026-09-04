@@ -502,9 +502,9 @@ internal sealed partial class CSharpGenerationModelBuilder
             IsRowVersion = _columnTypes[column.Id].IsRowVersion,
             IsExcludedUnboundedBinary = isExcludedUnboundedBinary,
             // 日付のみの列は内包値を短い日付書式で表示する（VO の ToString() は時刻部まで出るため）
-            RevertBindingExpression = IsDateOnly(_columnTypes[column.Id])
-                ? $"{propertyName}?.Value.ToString(\"d\") ?? string.Empty"
-                : $"{propertyName}?.ToString() ?? string.Empty",
+            ToInputExpression = IsDateOnly(_columnTypes[column.Id])
+                ? $"model.{propertyName}?.Value.ToString(\"d\") ?? string.Empty"
+                : $"model.{propertyName}?.ToString() ?? string.Empty",
             IsValueObject = true,
             ValueObjectClassName = valueObject.ClassName,
         };

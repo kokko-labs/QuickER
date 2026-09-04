@@ -236,12 +236,12 @@ static bool IValueObject<DataAccessMode>.TryConvertCustomInput(
 生成されるクラスはメッセージ・表示名の差し替えに 2 つの方法を持ち、静的クラス・生成モード（インライン／パッケージ参照）を問わず共通の規則です:
 
 - **一括** — 固定 infra の static settable な `Func` をアプリ起動時に差し替える。全インスタンスに効く
-- **個別** — 差し替えた関数の中で分岐する。値オブジェクトの各メッセージは**第 1 引数にその値オブジェクトの表示名**を、`GeneratedDisplayNames.Resolve` はメンバー名を受け取るので、1 つの差し替えが「全域」と「この型だけ」を兼ねる（EditModel 側は従来どおり `Customize*`（ref 引数）の partial で、プロパティ名を受け取る）
+- **個別** — 差し替えた関数の中で分岐する。値オブジェクトの各メッセージは**第 1 引数にその値オブジェクトの表示名**を、EditModel の各メッセージは**第 1 引数に確定値プロパティ名**を、`GeneratedDisplayNames.Resolve` はメンバー名を受け取るので、1 つの差し替えが「全域」と「この型だけ」を兼ねる
 
 ```csharp
 // 一括（起動時）: メッセージの日本語化、表示名から Description を使わない切替
 ValueObjectValidationMessages.ValueRequired = static _ => "値を入力してください。";
-EditModelMessages.Required = static name => $"{name}は必須です。";
+EditModelMessages.Required = static (_, displayName) => $"{displayName}は必須です。";
 GeneratedDisplayNames.Resolve = static (name, _) => name;   // Description を無視しメンバー名を使う
 ```
 
@@ -271,23 +271,22 @@ public sealed partial class NameValue
         }
     }
 }
-
-public partial class CustomerEditModel
-{
-    // プロパティ単位の文言差し替え（propertyName で対象列を分岐できる）
-    partial void CustomizeParseErrorMessage(string propertyName, string inputValue, string typeName, ref string message)
-    {
-        if (propertyName == nameof(Age))
-        {
-            message = $"'{inputValue}' は年齢として正しくありません。";
-        }
-    }
-}
 ```
 
-static クラス: `ValueObjectValidationMessages`（`MaxLengthExceeded` / `ScaleExceeded` / `PrecisionExceeded` / `ValueRequired` / `DigitsExceeded` / `OutOfRange` / `InvalidCharacters` / `InvalidEmailAddress` / `InputNotConvertible`＝いずれも表示名が第 1 引数）、`EditModelMessages`（`Required` / `ParseFailed` / `JoinValueObjectErrors`）、`GeneratedDisplayNames`（`Resolve`＝Entity・EditModel プロパティ・値オブジェクトすべての表示名解決に使われる）。パッケージ参照モードでは、この 3 つは `QuickER.Runtime` パッケージに収載されます。
+```csharp
+// プロパティ単位の文言差し替え。リゾルバは確定値プロパティ名を第 1 引数で受け取るので、
+// nameof で分岐でき、そのプロパティが消えればコンパイルエラーになる
+EditModelMessages.ParseFailed = static (propertyName, displayName, inputValue, typeName) =>
+    propertyName == nameof(CustomerEditModel.Age)
+        ? $"'{inputValue}' は年齢として正しくありません。"
+        : $"'{inputValue}' cannot be converted to {typeName}.";
+```
 
-個別 partial: 値オブジェクト側は `OnValidate`（ほかに前述の `GetDefinedInstance` / `ConvertCustomInput`）、EditModel 側は `CustomizeRequiredErrorMessage` / `CustomizeParseErrorMessage` / `CustomizePropertyDisplayName`、Entity 側は `CustomizeDisplayName`（従来どおり partial でなく override 方式）。値オブジェクトの画面表示用文字列 `DisplayValue`（virtual）の override も引き続き使えます。
+static クラス: `ValueObjectValidationMessages`（`MaxLengthExceeded` / `ScaleExceeded` / `PrecisionExceeded` / `ValueRequired` / `DigitsExceeded` / `OutOfRange` / `InvalidCharacters` / `InvalidEmailAddress` / `InputNotConvertible`＝いずれも表示名が第 1 引数）、`EditModelMessages`（`Required` / `ParseFailed` / `DuplicateValue` / `JoinValueObjectErrors`＝前 3 つはいずれも確定値プロパティ名〔複合制約は名前の並び〕が第 1 引数）、`GeneratedDisplayNames`（`Resolve`＝Entity・EditModel プロパティ・値オブジェクトすべての表示名解決に使われる）。パッケージ参照モードでは、この 3 つは `QuickER.Runtime` パッケージに収載されます。
+
+個別 partial: 値オブジェクト側は `OnValidate`（ほかに前述の `GetDefinedInstance` / `ConvertCustomInput`）、EditModel 側は意味系のみ（`OnValidate` / `OnBeginEdit` / `OnEndEdit` / `OnCancelEdit` / `On{Property}Changing` / `Changed`＝文言と表示名は中央リゾルバで解決するため）、Entity 側は `CustomizeDisplayName`（従来どおり partial でなく override 方式）。値オブジェクトの画面表示用文字列 `DisplayValue`（virtual）の override も引き続き使えます。
+
+> **EditModel の文言フックからの移行**: `CustomizeRequiredErrorMessage` / `CustomizeParseErrorMessage` / `CustomizeDuplicateErrorMessage` / `CustomizePropertyDisplayName` は生成されなくなり、実装が残っているとコンパイルエラーになります。文言は対応する `EditModelMessages` のエントリへ、表示名は `GeneratedDisplayNames.Resolve` へ移し、そこで受け取るプロパティ名を上の例のように分岐してください。
 
 > **値オブジェクトの文言フックからの移行**: `CustomizeDisplayName` / `CustomizeMaxLengthErrorMessage` / `CustomizeScaleErrorMessage` / `CustomizePrecisionErrorMessage` / `CustomizeValueRequiredErrorMessage` は生成されなくなり、実装が残っているとコンパイルエラーになります。表示名は `GeneratedDisplayNames.Resolve` へ、文言は対応する `ValueObjectValidationMessages` のエントリへ移し、上の例のように分岐してください。移した結果、文言が「型ごとに 1 か所」でなく「メッセージごとに 1 か所」へまとまり、生成側の型名が変わっても再実装が要らない（＝再生成で黙って無効化されない）形になります。
 
@@ -737,7 +736,7 @@ EditModel の確定値から Entity を組み立てて `CheckUniquenessAsync` �
 
 エラーの登録は `await` の後＝呼び出し元のスレッドではなくスレッドプール上で行われ、`ErrorsChanged` も同じスレッドで発火します。WPF のバインディングエンジンは通知を UI スレッドへ自動でマーシャルするため通常は何もする必要がありませんが、UI の状態を直接更新する購読者は呼び出し側でマーシャルしてください。
 
-メッセージは `EditModelMessages.DuplicateValue`（構成列の表示名列挙を受け取る `static Func`）が既定で、クラスごとの省略可能な `partial void CustomizeDuplicateErrorMessage(IReadOnlyList<string> propertyNames, ref string message)` で微調整できます。ユーザー定義チェックが `UniquenessViolation.Message` を返した場合は、そちらが優先されます。
+メッセージは `EditModelMessages.DuplicateValue`（構成列のプロパティ名と表示名を宣言順で受け取る `static Func`）が既定です。特定の制約だけ差し替えるときはプロパティ名の側で分岐してください。ユーザー定義チェックが `UniquenessViolation.Message` を返した場合は、そちらが優先されます。
 
 #### 既存 API で書ける近隣の事前チェック
 

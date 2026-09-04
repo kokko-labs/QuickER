@@ -27,34 +27,26 @@ public static class GeneratedFixedMemberNames
     /// EditModel クラスが無条件に宣言する固定メンバー名（<c>Templates/CSharpRuntime/_03_EditModelsAndMappers.scriban</c>）。
     /// </summary>
     /// <remarks>
-    /// 出典行（テンプレートを編集したらここも追随すること。並びは発行順）:
-    /// L1205 <c>RevertCore</c>・L1212 <c>ValidateSelf</c>・L1222 <c>OnValidate</c>・
-    /// L1225 <c>ResolveRequiredErrorMessage</c>・L1233 <c>CustomizeRequiredErrorMessage</c>・
-    /// L1236 <c>ResolveParseErrorMessage</c>・L1249 <c>CustomizeParseErrorMessage</c>・
-    /// L1279 <c>_rowStateSnapshot</c>・L1282 <c>BeginEditCore</c>・L1290 <c>OnBeginEdit</c>・
-    /// L1293 <c>EndEditCore</c>・L1296 <c>OnEndEdit</c>・L1299 <c>CancelEditCore</c>・L1311 <c>OnCancelEdit</c>・
-    /// <c>RegisterDuplicateError</c>・<c>ResolveDuplicateErrorMessage</c>・<c>CustomizeDuplicateErrorMessage</c>（重複値エラー）。
+    /// 発行順: 列テーブル <c>_editModelColumns</c> / <c>EditModelColumns</c>・<c>ValidateSelf</c>・<c>OnValidate</c>・
+    /// <c>BeginEditCore</c>・<c>OnBeginEdit</c>・<c>EndEditCore</c>・<c>OnEndEdit</c>・<c>OnCancelEditCore</c>・<c>OnCancelEdit</c>。
     /// 位置ヘルパー（GetNext / GetPrevious / ParentCollection / MoveCore）は第 10 次 A-6 で
-    /// <c>EditModelBase&lt;TSelf&gt;</c>（CRTP 層）へ移設済み＝per-type には出ない。
+    /// <c>EditModelBase&lt;TSelf&gt;</c>（CRTP 層）へ移設済み＝per-type には出ない。第 11 次 P5 では
+    /// <c>RevertCore</c>・<c>RegisterDuplicateError</c>・確定値スナップショット（<c>_rowStateSnapshot</c> と列ごとの
+    /// Snapshot フィールド）・<c>CancelEditCore</c> が列テーブル駆動の共通実装として同じ CRTP 層へ移り、
+    /// 文言フック 3 種（<c>Customize{Required,Parse,Duplicate}ErrorMessage</c>）とその <c>Resolve*</c> ヘルパは
+    /// 中央リゾルバ <c>EditModelMessages</c> へ集約して廃止された。
     /// </remarks>
     public static IReadOnlySet<string> EditModelAlways { get; } =
         Create(
-            "RevertCore",
+            "_editModelColumns",
+            "EditModelColumns",
             "ValidateSelf",
             "OnValidate",
-            "ResolveRequiredErrorMessage",
-            "CustomizeRequiredErrorMessage",
-            "ResolveParseErrorMessage",
-            "CustomizeParseErrorMessage",
-            "RegisterDuplicateError",
-            "ResolveDuplicateErrorMessage",
-            "CustomizeDuplicateErrorMessage",
-            "_rowStateSnapshot",
             "BeginEditCore",
             "OnBeginEdit",
             "EndEditCore",
             "OnEndEdit",
-            "CancelEditCore",
+            "OnCancelEditCore",
             "OnCancelEdit"
         );
 
@@ -105,14 +97,16 @@ public static class GeneratedFixedMemberNames
         Create("_uniquenessConstraints", "UniquenessConstraints");
 
     /// <summary>
-    /// EditModel の表示名解決ヘルパ名（L1256-L1265）。テンプレートは発行するが、シンボル表検証の対象には**しない**。
+    /// EditModel の表示名解決ヘルパ名。テンプレートは発行するが、シンボル表検証の対象には**しない**。
     /// </summary>
     /// <remarks>
     /// 列由来プロパティ名がこれらと一致した場合は、表示名機構そのものを省略して生成を完走させる救済
     /// （<c>CodeGen_Warning_EditModelDisplayNameCollision</c> の Warning）が先に働くため、Error にすると救済済みの図を誤って弾く。
+    /// 差し替えフック <c>CustomizePropertyDisplayName</c> は第 11 次 P5 で廃止（表示名の差し替えは中央リゾルバ
+    /// <c>GeneratedDisplayNames.Resolve</c> が担う）＝予約するのはヘルパ 1 つだけになった。
     /// </remarks>
     public static IReadOnlySet<string> EditModelDisplayNameHelpers { get; } =
-        Create("GetDisplayName", "CustomizePropertyDisplayName");
+        Create("GetDisplayName");
 
     /// <summary>
     /// テーブル説明があり、かつ表示名衝突が無い Entity だけが宣言する固定メンバー名
