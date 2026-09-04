@@ -18,7 +18,7 @@ namespace QuickER.Services;
 /// 完了通知の規則は CLAUDE.md「完了通知の提示先」「出力形式の情報欠落告知」節のとおり:
 /// 外部形式の出力完了はモーダル・欠落があれば形式ごとにセッション 1 回だけ内訳付き
 /// （<see cref="ShowInformationDetails"/> 形式）で提示する。告知済み記録の寿命は本サービスの
-/// 寿命（＝VM と同じ）で、旧実装のフィールドと同じセッション意味論を保つ。
+/// 寿命（＝VM と同じ）＝セッション単位で保持する。
 /// </para>
 /// </remarks>
 internal sealed class DiagramExportService(

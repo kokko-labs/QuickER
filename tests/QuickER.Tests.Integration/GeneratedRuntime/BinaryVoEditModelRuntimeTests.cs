@@ -1,4 +1,6 @@
 using System;
+using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
@@ -210,6 +212,86 @@ public sealed class BinaryVoEditModelRuntimeTests : IDisposable
         (await act.Should().ThrowAsync<InvalidOperationException>())
             .Which.Message.Should()
             .Contain("ExecuteSqlAsync");
+    }
+
+    /// <summary>
+    /// 新規行（<c>RowState.Added</c>）では NOT NULL の除外列が必須入力になる。未入力のままだと検証が落ち、
+    /// 当該バインディングへ列名つきの必須エラーが立つ。
+    /// </summary>
+    /// <remarks>
+    /// この入力は DB 行きが確定しており（INSERT は全列＝<c>seal</c> に NULL を送る）、そのまま流せば
+    /// SQLite の NOT NULL 制約違反で必ず落ちる。画面で止められるのはここだけなので検証で捕まえる。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[BinaryVo] 新規行では NOT NULL の除外列が未入力だと必須エラーで検証が落ちる"
+    )]
+    public async Task NewRow_MissingNonNullableExcludedColumn_FailsValidation()
+    {
+        await ResetAsync();
+
+        // seal（NOT NULL の除外列）だけ未入力の新規行
+        var input = NewInput(10, "delta", seal: null, noteBlob: null);
+        input.RowState.Should().Be(RowState.Added);
+
+        input.Validate().Should().BeFalse("未入力のまま INSERT すると DB の NOT NULL 違反になる");
+
+        input
+            .CollectErrors()
+            .Should()
+            .ContainSingle()
+            .Which.Property.Should()
+            .Be(nameof(VaultItemEditModel.BindingSeal));
+
+        input
+            .GetErrors(nameof(VaultItemEditModel.BindingSeal))
+            .Cast<string>()
+            .Should()
+            .ContainSingle()
+            .Which.Should()
+            .Contain(SealValue.DisplayName, "必須エラーは列名（表示名）つきで出る");
+
+        // NULL 許容の除外列は従来どおり未入力で通る
+        input
+            .GetErrors(nameof(VaultItemEditModel.BindingNoteBlob))
+            .Cast<string>()
+            .Should()
+            .BeEmpty();
+    }
+
+    /// <summary>
+    /// 空の値（VO は <c>Create([])</c>）を入れれば新規行の検証を通り、正当な 2 段方式
+    /// （INSERT → <c>Write{列}Async</c>）が成立する。
+    /// </summary>
+    [Fact(
+        DisplayName = "[BinaryVo] 新規行に空の値を入れれば検証を通り INSERT → Write の 2 段が成立する"
+    )]
+    public async Task NewRow_WithEmptyValue_PassesValidationAndTwoStepInsertWorks()
+    {
+        await ResetAsync();
+        var items = Repository();
+        var mapper = new VaultItemMapper();
+
+        // 空 VO は非 null なので必須検証を素通りする（2 段方式の入口）
+        var input = NewInput(11, "epsilon", seal: null, noteBlob: null);
+        input.Seal = SealValue.Create([]);
+        input.Validate().Should().BeTrue("空の値は非 null なので新規行の必須検証を通る");
+
+        await items.InsertAsync(mapper.CreateEntity(input, includeRemoved: true), Ct);
+        (await ColumnLengthAsync("seal", 11)).Should().Be(0, "空配列で INSERT される");
+
+        // 2 段目: ストリームアクセサで blob を流し込む
+        using (var source = new MemoryStream(Seal, writable: false))
+        {
+            (await items.WriteSealAsync(ItemIdValue.Create(11), source, cancellationToken: Ct))
+                .Should()
+                .BeTrue();
+        }
+
+        (await ColumnLengthAsync("seal", 11)).Should().Be(Seal.Length);
+
+        using var destination = new MemoryStream();
+        (await items.ReadSealAsync(ItemIdValue.Create(11), destination, Ct)).Should().BeTrue();
+        destination.ToArray().Should().Equal(Seal, "書き込んだ blob がそのまま読み戻せる");
     }
 
     /// <summary>使い終えた一時 DB と DI コンテナを破棄する</summary>

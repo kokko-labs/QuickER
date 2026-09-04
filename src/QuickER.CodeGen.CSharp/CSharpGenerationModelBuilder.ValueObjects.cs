@@ -501,6 +501,10 @@ internal sealed partial class CSharpGenerationModelBuilder
                 && !isExcludedUnboundedBinary,
             IsRowVersion = _columnTypes[column.Id].IsRowVersion,
             IsExcludedUnboundedBinary = isExcludedUnboundedBinary,
+            // NOT NULL の除外列だけは新規行（Added）で必須にする。未入力のまま INSERT すると DB の
+            // NOT NULL 違反で必ず落ちるため、行が DB に無い間だけ画面で止める（rowversion 列は
+            // 無制限バイナリ判定が偽なのでここには入らない）
+            IsRequiredWhenAdded = isExcludedUnboundedBinary && !column.IsNullable,
             // 日付のみの列は内包値を短い日付書式で表示する（VO の ToString() は時刻部まで出るため）
             ToInputExpression = IsDateOnly(_columnTypes[column.Id])
                 ? $"model.{propertyName}?.Value.ToString(\"d\") ?? string.Empty"

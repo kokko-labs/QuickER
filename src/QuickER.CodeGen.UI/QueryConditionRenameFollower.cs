@@ -8,7 +8,6 @@ namespace QuickER.CodeGen.UI;
 /// 条件式（ミニ DSL）内の列参照を新名へ追従して書き換えるフォロワー。
 /// </summary>
 /// <remarks>
-/// アプリ本体 <c>MainViewModel</c> の <c>OnColumnRenamed</c> から移設した機能。
 /// 適用はエンティティ単位（<see cref="QueryDefinition.EntityId"/> 一致）なので、他エンティティに
 /// 同名の列があっても巻き込まない。書き換えは <see cref="QueryConditionRenamer"/> が列参照のスパンだけを
 /// 置換するため、パラメータ名や文字列リテラル中の同名文字列には影響しない。

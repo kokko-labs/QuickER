@@ -2238,6 +2238,10 @@ public static class InMemorySampleData
 public static class GeneratedInMemoryRepositoryServiceCollectionExtensions
 {
     /// <summary>Registers the in-memory data store (singleton) and each in-memory repository (scoped).</summary>
+    /// <remarks>
+    /// There is no keyed overload: keyed registration exists so that one process can write to several databases through
+    /// the same contracts, which is a multi-target concern of the dialect-specific extensions.
+    /// </remarks>
     /// <param name="services">The service collection to register into.</param>
     /// <param name="seedSampleData">When true (the default), the store is registered already seeded with the deterministic sample data of <see cref="InMemorySampleData"/>.</param>
     public static IServiceCollection AddGeneratedInMemoryRepositories(

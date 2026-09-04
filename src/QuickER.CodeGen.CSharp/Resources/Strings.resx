@@ -134,10 +134,10 @@
     <value>The '{0}' layer folder '{1}' cannot be used to derive a namespace ('{2}' is not a valid C# namespace). With layered output, the default namespaces follow the layer folders, so either rename the folder to a namespace-compatible name or set the namespace options explicitly.</value>
   </data>
   <data name="CodeGen_Warning_EntityDisplayNameCollision" xml:space="preserve">
-    <value>Entity '{0}' (table '{1}') has a column-derived property name that collides with DisplayName / CustomizeDisplayName, so the static DisplayName property and the CustomizeDisplayName hook were not generated.</value>
+    <value>Entity '{0}' (table '{1}') has a column-derived property name that collides with DisplayName, so the DefaultDisplayName override was not generated and the display name falls back to the class name.</value>
   </data>
   <data name="CodeGen_Warning_EditModelDisplayNameCollision" xml:space="preserve">
-    <value>EditModel '{0}' (table '{1}') has a column-derived property name that collides with the display-name helpers GetDisplayName / CustomizePropertyDisplayName, so the display-name mechanism was not generated and validation messages use property names as before.</value>
+    <value>EditModel '{0}' (table '{1}') has a column-derived property name that collides with the display-name helper GetDisplayName, so the display-name mechanism was not generated and validation messages use property names as before.</value>
   </data>
   <data name="CodeGen_Warning_RepositorySingleKeyOnly" xml:space="preserve">
     <value>The Repository for table '{0}' supports single primary keys only, so its generation was skipped.</value>

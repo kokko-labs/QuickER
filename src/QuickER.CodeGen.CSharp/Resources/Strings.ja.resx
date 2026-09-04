@@ -134,10 +134,10 @@
     <value>オプション '{0}' の層フォルダ '{1}' から名前空間を導出できません（'{2}' は有効な C# 名前空間ではありません）。層別出力では名前空間の既定が層フォルダに追従するため、フォルダ名を名前空間として成立する形へ変更するか、名前空間オプションを明示指定してください。</value>
   </data>
   <data name="CodeGen_Warning_EntityDisplayNameCollision" xml:space="preserve">
-    <value>エンティティ '{0}'（テーブル '{1}'）は列由来プロパティ名が DisplayName / CustomizeDisplayName と衝突するため、静的 DisplayName プロパティと CustomizeDisplayName フックの生成を省略しました。</value>
+    <value>エンティティ '{0}'（テーブル '{1}'）は列由来プロパティ名が DisplayName と衝突するため、DefaultDisplayName の override 生成を省略しました（表示名はクラス名へフォールバックします）。</value>
   </data>
   <data name="CodeGen_Warning_EditModelDisplayNameCollision" xml:space="preserve">
-    <value>EditModel '{0}'（テーブル '{1}'）は列由来プロパティ名が表示名解決ヘルパ GetDisplayName / CustomizePropertyDisplayName と衝突するため、表示名機構の生成を省略し、検証メッセージは従来どおりプロパティ名で構築します。</value>
+    <value>EditModel '{0}'（テーブル '{1}'）は列由来プロパティ名が表示名解決ヘルパ GetDisplayName と衝突するため、表示名機構の生成を省略し、検証メッセージは従来どおりプロパティ名で構築します。</value>
   </data>
   <data name="CodeGen_Warning_RepositorySingleKeyOnly" xml:space="preserve">
     <value>テーブル '{0}' の Repository は単一主キーのみ対応のため生成をスキップしました。</value>

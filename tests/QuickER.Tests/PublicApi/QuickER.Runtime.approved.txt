@@ -146,13 +146,14 @@ public sealed class QuickER.Runtime.EditModelCollection<T> : System.Collections.
     public void RemoveRange(int index, int count)
 
 public sealed class QuickER.Runtime.EditModelColumn<TModel> : System.IEquatable<QuickER.Runtime.EditModelColumn<TModel>>
-    public .ctor(string PropertyName, string BindingPropertyName, bool IsRequired, System.Func<string> DisplayName, System.Func<TModel, object> GetValue, System.Action<TModel, object> SetValue, System.Func<TModel, string> ToInput, System.Action<TModel, string> SetInput)
+    public .ctor(string PropertyName, string BindingPropertyName, bool IsRequired, bool IsRequiredWhenAdded, System.Func<string> DisplayName, System.Func<TModel, object> GetValue, System.Action<TModel, object> SetValue, System.Func<TModel, string> ToInput, System.Action<TModel, string> SetInput)
     public System.Action<TModel, object> SetValue { get; init; }
     public System.Action<TModel, string> SetInput { get; init; }
     public System.Func<TModel, object> GetValue { get; init; }
     public System.Func<TModel, string> ToInput { get; init; }
     public System.Func<string> DisplayName { get; init; }
     public bool IsRequired { get; init; }
+    public bool IsRequiredWhenAdded { get; init; }
     public string BindingPropertyName { get; init; }
     public string PropertyName { get; init; }
 
@@ -180,7 +181,6 @@ public static class QuickER.Runtime.EditModelUniquenessValidator
 public abstract class QuickER.Runtime.EntityBase
     protected .ctor()
     protected virtual string DefaultDisplayName { get; }
-    protected virtual void CustomizeDisplayName(ref string displayName)
     public QuickER.Runtime.EntityBase Clone()
     public QuickER.Runtime.RowState RowState { get; set; }
     public System.Collections.Generic.IEnumerable<QuickER.Runtime.EntityBase> EnumerateCascadeChildren()

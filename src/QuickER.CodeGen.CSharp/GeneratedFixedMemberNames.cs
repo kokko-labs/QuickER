@@ -29,12 +29,10 @@ public static class GeneratedFixedMemberNames
     /// <remarks>
     /// 発行順: 列テーブル <c>_editModelColumns</c> / <c>EditModelColumns</c>・<c>ValidateSelf</c>・<c>OnValidate</c>・
     /// <c>BeginEditCore</c>・<c>OnBeginEdit</c>・<c>EndEditCore</c>・<c>OnEndEdit</c>・<c>OnCancelEditCore</c>・<c>OnCancelEdit</c>。
-    /// 位置ヘルパー（GetNext / GetPrevious / ParentCollection / MoveCore）は第 10 次 A-6 で
-    /// <c>EditModelBase&lt;TSelf&gt;</c>（CRTP 層）へ移設済み＝per-type には出ない。第 11 次 P5 では
-    /// <c>RevertCore</c>・<c>RegisterDuplicateError</c>・確定値スナップショット（<c>_rowStateSnapshot</c> と列ごとの
-    /// Snapshot フィールド）・<c>CancelEditCore</c> が列テーブル駆動の共通実装として同じ CRTP 層へ移り、
-    /// 文言フック 3 種（<c>Customize{Required,Parse,Duplicate}ErrorMessage</c>）とその <c>Resolve*</c> ヘルパは
-    /// 中央リゾルバ <c>EditModelMessages</c> へ集約して廃止された。
+    /// 位置ヘルパー（GetNext / GetPrevious / ParentCollection / MoveCore）と、列テーブル駆動の共通実装
+    /// （<c>RevertCore</c>・<c>RegisterDuplicateError</c>・確定値スナップショット・<c>CancelEditCore</c>）は
+    /// <c>EditModelBase&lt;TSelf&gt;</c>（CRTP 層）側の宣言のため per-type には出ない。文言は中央リゾルバ
+    /// <c>EditModelMessages</c> が解決する（per-type の文言フックは無い）。
     /// </remarks>
     public static IReadOnlySet<string> EditModelAlways { get; } =
         Create(
@@ -54,8 +52,8 @@ public static class GeneratedFixedMemberNames
     /// <c>EditModelBase&lt;TSelf&gt;</c>（CRTP 層）が宣言する位置ヘルパーの予約名。
     /// </summary>
     /// <remarks>
-    /// 第 10 次 A-6 で per-type から基底へ移設したため生成 EditModel には出ないが、列由来プロパティが
-    /// この名前を取ると基底メンバを隠して型付きの面が壊れるため、衝突は従来どおり生成エラーにする
+    /// 基底（<c>EditModelBase&lt;TSelf&gt;</c>）が宣言するため生成 EditModel には出ないが、列由来プロパティが
+    /// この名前を取ると基底メンバを隠して型付きの面が壊れるため、衝突は生成エラーにする
     /// （＝シンボル表への登録は続け、名簿照合〔per-type の実宣言〕からは外す）。
     /// </remarks>
     public static IReadOnlySet<string> EditModelPositionHelpers { get; } =
@@ -102,8 +100,8 @@ public static class GeneratedFixedMemberNames
     /// <remarks>
     /// 列由来プロパティ名がこれらと一致した場合は、表示名機構そのものを省略して生成を完走させる救済
     /// （<c>CodeGen_Warning_EditModelDisplayNameCollision</c> の Warning）が先に働くため、Error にすると救済済みの図を誤って弾く。
-    /// 差し替えフック <c>CustomizePropertyDisplayName</c> は第 11 次 P5 で廃止（表示名の差し替えは中央リゾルバ
-    /// <c>GeneratedDisplayNames.Resolve</c> が担う）＝予約するのはヘルパ 1 つだけになった。
+    /// 表示名の差し替えは中央リゾルバ <c>GeneratedDisplayNames.Resolve</c> が担う
+    /// （per-type の差し替えフックは無い）＝予約するのは解決ヘルパ 1 つだけ。
     /// </remarks>
     public static IReadOnlySet<string> EditModelDisplayNameHelpers { get; } =
         Create("GetDisplayName");
@@ -119,11 +117,14 @@ public static class GeneratedFixedMemberNames
         Create("DefaultDisplayName");
 
     /// <summary>
-    /// Entity の表示名機構が予約する名前。列由来プロパティ名がこれらと一致すると <c>DefaultDisplayName</c> の
+    /// Entity の表示名機構が予約する名前。列由来プロパティ名がこれと一致すると <c>DefaultDisplayName</c> の
     /// override を省略し（基底のクラス名フォールバックへ委ねる）、Warning で通知する。
     /// </summary>
-    public static IReadOnlySet<string> EntityDisplayNameReserved { get; } =
-        Create("DisplayName", "CustomizeDisplayName");
+    /// <remarks>
+    /// 表示名の差し替えは中央リゾルバ <c>GeneratedDisplayNames.Resolve</c> が担う
+    /// （Entity 側に差し替えフックは無い）＝予約するのは <c>DisplayName</c> プロパティ 1 つだけ。
+    /// </remarks>
+    public static IReadOnlySet<string> EntityDisplayNameReserved { get; } = Create("DisplayName");
 
     /// <summary>序数比較の読み取り専用集合を組み立てる（メンバー名は識別子なので大文字小文字を区別する）</summary>
     private static IReadOnlySet<string> Create(params string[] names) =>

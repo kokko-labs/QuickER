@@ -11,7 +11,6 @@ namespace QuickER.Db.UI;
 /// データベースへ接続してスキーマを取得し、確認のうえ現在の図へ反映するコマンドサービス。
 /// </summary>
 /// <remarks>
-/// アプリ本体 <c>MainViewModel</c> の <c>ImportFromDatabaseAsync</c> から移設したフィーチャーモジュール本体。
 /// ER 図の取得・置換・プロバイダ解決はホスト契約（<see cref="IErDiagramHost"/>）越しに行い、
 /// 接続ダイアログ提示は <see cref="IDbConnectionDialogPresenter"/> のシーム越しに行う。
 /// 置換確認ロジック（<see cref="ConfirmDiagramReplacement"/> / <see cref="HasSameStructure"/>）は、

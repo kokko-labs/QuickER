@@ -405,6 +405,58 @@ public abstract class SyncRuntimeTestsBase : IAsyncLifetime
     }
 
     /// <summary>
+    /// 1 バッチが 1 回の IN 展開の上限を超える件数でも、既存／新規の判定を取りこぼさない。
+    /// </summary>
+    /// <remarks>
+    /// バッチサイズは呼び出し側が自由に決めるため、適用前の「ローカルに既にあるキー」照会はキーの数だけ
+    /// バインド変数を積む。照会はチャンク分割されており、境界（500 件）の前後どちらに落ちたキーも既存と
+    /// 判定される（取りこぼすと既存行を挿入扱いして主キー重複で落ちる）。
+    /// </remarks>
+    [Fact(DisplayName = "[Sync] 1 バッチが 500 件を超えても既存/新規の判定を取りこぼさない")]
+    public async Task DownloadBatch_HandlesMoreRowsThanOneInClause()
+    {
+        const int Count = 600;
+
+        for (var id = 1; id <= Count; id++)
+        {
+            await ServerOrders.InsertAsync(
+                new SyncOrderEntity { OrderId = id, CustomerName = $"server-{id}" },
+                Ct
+            );
+        }
+
+        // チャンク境界（500 件）を跨ぐ位置へローカル既存行を仕込む
+        // （素のリポジトリ＝ジャーナルを通らないのでアップロード対象にはならない）
+        int[] preexisting = [1, 499, 500, 501, Count];
+
+        foreach (var id in preexisting)
+        {
+            await LocalOrdersRaw.InsertAsync(
+                new SyncOrderEntity { OrderId = id, CustomerName = "stale" },
+                Ct
+            );
+        }
+
+        var result = await Engine.SyncAsync(
+            new SyncOptions { DownloadBatchSize = Count, PropagateDeletes = false },
+            Ct
+        );
+
+        result.Conflicts.Should().BeEmpty();
+        result.Downloaded.Should().Be(Count);
+        (await LocalOrdersRaw.GetAllAsync(Ct))
+            .Should()
+            .HaveCount(Count, "既存行は更新・残りは挿入＝行が増えも減りもしない");
+
+        foreach (var id in preexisting)
+        {
+            (await LocalOrdersRaw.GetByIdAsync(id, Ct))!
+                .CustomerName.Should()
+                .Be($"server-{id}", "既存と判定された行はサーバーの内容で更新される");
+        }
+    }
+
+    /// <summary>
     /// バッチ途中で中断しても、再開点は「適用済みの最大版」なので取りこぼしも二重取得も起きない。
     /// </summary>
     /// <remarks>

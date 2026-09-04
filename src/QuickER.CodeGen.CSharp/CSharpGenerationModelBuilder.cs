@@ -133,8 +133,8 @@ internal sealed partial class CSharpGenerationModelBuilder
         // エンティティ経路のプロパティはシーダー用サンプル式の文脈（"{クラス}.{プロパティ}"）にクラス名が要る
         var properties = entity.Columns.Select(column => BuildProperty(column, className)).ToList();
 
-        // 列由来プロパティ名が生成する静的メンバー（DisplayName / CustomizeDisplayName）と衝突する場合は、
-        // そのエンティティのみ両メンバーを省略する（生成は完走・警告診断を出す）。
+        // 列由来プロパティ名が基底の表示名メンバー（DisplayName）と衝突する場合は、
+        // そのエンティティのみ DefaultDisplayName の override を省略する（生成は完走・警告診断を出す）。
         var hasDisplayNameCollision = properties.Any(property =>
             GeneratedFixedMemberNames.EntityDisplayNameReserved.Contains(property.PropertyName)
         );
@@ -771,6 +771,10 @@ internal sealed partial class CSharpGenerationModelBuilder
                 && !isExcludedUnboundedBinary,
             IsRowVersion = typeInfo.IsRowVersion,
             IsExcludedUnboundedBinary = isExcludedUnboundedBinary,
+            // NOT NULL の除外列だけは新規行（Added）で必須にする。未入力のまま INSERT すると DB の
+            // NOT NULL 違反で必ず落ちるため、行が DB に無い間だけ画面で止める（rowversion 列は
+            // 無制限バイナリ判定が偽なのでここには入らない）
+            IsRequiredWhenAdded = isExcludedUnboundedBinary && !column.IsNullable,
             ToInputExpression = BuildBindingExpression(
                 "model." + propertyName,
                 isBytes,

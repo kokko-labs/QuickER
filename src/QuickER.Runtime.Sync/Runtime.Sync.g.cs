@@ -417,6 +417,20 @@ public static class SyncSession
     }
 }
 
+/// <summary>The size every IN clause the sync engine builds is chunked to.</summary>
+/// <remarks>
+/// A collection parameter is expanded into one bind variable per value, so a single statement is bounded by the
+/// database's parameter limit: one run settles every table's journal entries together, and a download batch looks up
+/// every key it is about to apply, so a long offline stretch or a large batch size can push either past that limit.
+/// Chunking keeps the statement within it whatever the list holds. The size matches the one the dialect engines use
+/// for their own IN clauses.
+/// </remarks>
+internal static class SyncInClause
+{
+    /// <summary>The maximum number of values one statement binds.</summary>
+    internal const int ChunkSize = 500;
+}
+
 /// <summary>One row of the journal table, as the lenient projection mapper reads it.</summary>
 public sealed class SyncJournalRow
 {
@@ -550,16 +564,8 @@ public sealed class SyncJournal
             .ConfigureAwait(false);
     }
 
-    /// <summary>The maximum number of ids removed by one statement.</summary>
-    /// <remarks>
-    /// The collection parameter is expanded into one bind variable per id, so a single statement is bounded by the
-    /// database's parameter limit. One run settles every table's entries together, and a long offline stretch or a
-    /// bulk insert can push that past the limit; chunking keeps the statement within it whatever the journal holds.
-    /// The size matches the one the dialect engines use for their IN clauses.
-    /// </remarks>
-    private const int InClauseChunkSize = 500;
-
     /// <summary>Removes the given entries (called once the change they describe has reached the server).</summary>
+    /// <remarks>The removal is chunked to <see cref="SyncInClause.ChunkSize"/> ids per statement.</remarks>
     public async Task RemoveAsync(
         IReadOnlyList<long> ids,
         CancellationToken cancellationToken = default
@@ -567,9 +573,9 @@ public sealed class SyncJournal
     {
         ArgumentNullException.ThrowIfNull(ids);
 
-        for (var offset = 0; offset < ids.Count; offset += InClauseChunkSize)
+        for (var offset = 0; offset < ids.Count; offset += SyncInClause.ChunkSize)
         {
-            var count = Math.Min(InClauseChunkSize, ids.Count - offset);
+            var count = Math.Min(SyncInClause.ChunkSize, ids.Count - offset);
             var chunk = new List<long>(count);
 
             for (var index = 0; index < count; index++)
@@ -1463,6 +1469,10 @@ public abstract class SyncTableBase<TEntity, TKey> : ISyncTable
     }
 
     /// <summary>Applies one ordered batch of server rows to the local database inside a single transaction.</summary>
+    /// <remarks>
+    /// The lookup that decides insert from update is chunked to <see cref="SyncInClause.ChunkSize"/> keys per
+    /// statement; the batch size is the caller's to choose, so the list of keys is not bounded on its own.
+    /// </remarks>
     protected async Task ApplyBatchAsync(
         IReadOnlyList<TEntity> rows,
         bool includeUnboundedBinary,
@@ -1470,10 +1480,31 @@ public abstract class SyncTableBase<TEntity, TKey> : ISyncTable
     )
     {
         var keys = rows.Select(ReadKey).ToList();
-        var existing = await _localSqlExecutor
-            .QueryProjectionBySqlAsync<TKey>(LocalExistingKeysSql, new { keys }, cancellationToken)
-            .ConfigureAwait(false);
-        var existingKeys = existing.Select(FormatKey).ToHashSet(StringComparer.Ordinal);
+        var existingKeys = new HashSet<string>(StringComparer.Ordinal);
+
+        for (var offset = 0; offset < keys.Count; offset += SyncInClause.ChunkSize)
+        {
+            var count = Math.Min(SyncInClause.ChunkSize, keys.Count - offset);
+            var chunk = new List<TKey>(count);
+
+            for (var index = 0; index < count; index++)
+            {
+                chunk.Add(keys[offset + index]);
+            }
+
+            var existing = await _localSqlExecutor
+                .QueryProjectionBySqlAsync<TKey>(
+                    LocalExistingKeysSql,
+                    new { keys = chunk },
+                    cancellationToken
+                )
+                .ConfigureAwait(false);
+
+            foreach (var key in existing)
+            {
+                existingKeys.Add(FormatKey(key));
+            }
+        }
 
         foreach (var row in rows)
         {
@@ -2776,9 +2807,10 @@ public sealed class SyncEngine
 /// </para>
 /// <para>
 /// It is one traversal rather than one per entity type: the children come from
-/// <see cref="EntityBase.EnumerateCascadeChildren"/>, the very method the saver's own walk is built on, and a node is
-/// recorded only when its CLR type has a descriptor. A table on the path that is not synchronised is therefore walked
-/// through without an entry of its own, and a subtree holding no synchronised table records nothing.
+/// <see cref="EntityBase.EnumerateCascadeChildren"/>, which yields the same cascade navigations the saver's own walk
+/// enumerates (the saver reads them from its EntitySaveMetadata.CascadeNavigations rather than calling this method), and
+/// a node is recorded only when its CLR type has a descriptor. A table on the path that is not synchronised is therefore
+/// walked through without an entry of its own, and a subtree holding no synchronised table records nothing.
 /// </para>
 /// <para>
 /// Recording the whole graph first keeps the journal-first safety order for every row the save is going to touch: an
