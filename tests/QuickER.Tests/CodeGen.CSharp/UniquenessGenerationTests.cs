@@ -188,7 +188,7 @@ public class UniquenessGenerationTests
         content
             .Should()
             .Contain(
-                "public async Task<bool> ValidateUniqueAsync(\n        IOrderRepository repository,".ReplaceLineEndings()
+                "public Task<bool> ValidateUniqueAsync(\n        IOrderRepository repository,".ReplaceLineEndings()
             );
     }
 
@@ -221,7 +221,7 @@ public class UniquenessGenerationTests
         content
             .Should()
             .Contain(
-                "public async Task<bool> ValidateUniqueAsync(\n        IOrderRemoteRepository repository,".ReplaceLineEndings()
+                "public Task<bool> ValidateUniqueAsync(\n        IOrderRemoteRepository repository,".ReplaceLineEndings()
             );
     }
 

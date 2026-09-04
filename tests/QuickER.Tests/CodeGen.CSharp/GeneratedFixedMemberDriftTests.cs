@@ -378,7 +378,6 @@ public sealed class GeneratedFixedMemberDriftTests
 
             derived.Add(rootName);
             derived.Add(ToFieldName(rootName));
-            derived.Add(ToFieldName(rootName) + "Snapshot");
             derived.Add(bindingName);
             derived.Add(ToFieldName(bindingName));
             derived.Add($"On{rootName}Changing");

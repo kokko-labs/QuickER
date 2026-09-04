@@ -771,8 +771,8 @@ internal sealed partial class CSharpGenerationModelBuilder
                 && !isExcludedUnboundedBinary,
             IsRowVersion = typeInfo.IsRowVersion,
             IsExcludedUnboundedBinary = isExcludedUnboundedBinary,
-            RevertBindingExpression = BuildBindingExpression(
-                propertyName,
+            ToInputExpression = BuildBindingExpression(
+                "model." + propertyName,
                 isBytes,
                 IsDateOnly(typeInfo)
             ),
@@ -785,23 +785,22 @@ internal sealed partial class CSharpGenerationModelBuilder
     /// カルチャ依存の短い日付書式（"d"）で導出する。入力側は無変更で往復する（<c>DateTime.TryParse</c> は
     /// 日付のみの文字列をそのまま受ける）。時刻を持つ列（<c>datetime2</c> 等）は既定書式。
     /// </remarks>
-    private static string BuildBindingExpression(
-        string propertyName,
-        bool isBinary,
-        bool isDateOnly
-    )
+    /// <param name="valueAccess">確定値を読む式（列テーブルのラムダ本体になるため <c>model.{プロパティ}</c> の形で渡す）</param>
+    /// <param name="isBinary">バイナリ列かどうか</param>
+    /// <param name="isDateOnly">日付のみ（時刻部を持たない）列かどうか</param>
+    private static string BuildBindingExpression(string valueAccess, bool isBinary, bool isDateOnly)
     {
         if (isBinary)
         {
-            return $"{propertyName} is null ? string.Empty : Convert.ToBase64String({propertyName})";
+            return $"{valueAccess} is null ? string.Empty : Convert.ToBase64String({valueAccess})";
         }
 
         if (isDateOnly)
         {
-            return $"{propertyName}?.ToString(\"d\") ?? string.Empty";
+            return $"{valueAccess}?.ToString(\"d\") ?? string.Empty";
         }
 
-        return $"{propertyName}?.ToString() ?? string.Empty";
+        return $"{valueAccess}?.ToString() ?? string.Empty";
     }
 
     /// <summary>日付のみ（時刻部を持たない）の列かどうかを判定する</summary>

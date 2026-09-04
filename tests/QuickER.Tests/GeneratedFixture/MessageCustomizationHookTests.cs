@@ -7,8 +7,8 @@ using Xunit;
 namespace QuickER.Tests.GeneratedRemoteContractFixture;
 
 /// <summary>
-/// 生成コードのメッセージ・表示名カスタマイズ機構（一括＝static Func 差し替え／個別＝EditModel の Customize* partial と、
-/// VO は差し替えた Func の中で表示名分岐）を固定フィクスチャ上で検証する。
+/// 生成コードのメッセージ・表示名カスタマイズ機構（一括＝static Func 差し替え／個別＝差し替えた Func の中で
+/// プロパティ名・表示名を見て分岐）を固定フィクスチャ上で検証する。
 /// </summary>
 /// <remarks>
 /// <para>
@@ -29,7 +29,7 @@ public class MessageCustomizationHookTests
     public void RequiredMessage_Replacement_IsReflected()
     {
         var original = EditModelMessages.Required;
-        EditModelMessages.Required = static displayName => $"{displayName} を入力してください";
+        EditModelMessages.Required = static (_, displayName) => $"{displayName} を入力してください";
 
         try
         {
@@ -54,7 +54,7 @@ public class MessageCustomizationHookTests
     public void ParseFailedMessage_Replacement_IsReflected()
     {
         var original = EditModelMessages.ParseFailed;
-        EditModelMessages.ParseFailed = static (displayName, inputValue, typeName) =>
+        EditModelMessages.ParseFailed = static (_, displayName, inputValue, typeName) =>
             $"{displayName}: '{inputValue}' は {typeName} として解釈できません";
 
         try
@@ -167,54 +167,85 @@ public class MessageCustomizationHookTests
         }
     }
 
-    /// <summary>CustomizeRequiredErrorMessage の partial 実装が propertyName で対象列だけを差し替える</summary>
-    [Fact(DisplayName = "CustomizeRequiredErrorMessage は対象列のみ差し替え・他列は既定文言のまま")]
-    public void CustomizeRequiredErrorMessage_Hook_RewritesOnlyTargetProperty()
+    /// <summary>必須メッセージの個別差し替えは、リゾルバが受け取るプロパティ名で分岐して行う（列ごとの partial フックの後継レシピ）</summary>
+    /// <remarks>
+    /// 分岐の照合先を <c>nameof(CustomerEditModel.CustomerId)</c> にすると、そのプロパティが消えた時点でコンパイルエラーになる
+    /// （文字列リテラルで書くと黙って一致しなくなる）。表示名は列の説明で変わり得るので、安定キーはプロパティ名の側にある。
+    /// </remarks>
+    [Fact(DisplayName = "Required はプロパティ名で分岐して対象列のみ差し替えできる")]
+    public void RequiredMessage_CanBranchOnPropertyName()
     {
-        var model = new CustomerEditModel();
+        var original = EditModelMessages.Required;
+        EditModelMessages.Required = static (propertyName, displayName) =>
+            propertyName == nameof(CustomerEditModel.CustomerId)
+                ? MessageCustomizationHookConstants.CustomerIdRequiredMessage
+                : $"'{displayName}' is required.";
 
-        model.Validate(includeChildren: false).Should().BeFalse();
+        try
+        {
+            var model = new CustomerEditModel();
 
-        // partial 実装（本ファイル末尾）は CustomerId のみ差し替える
-        GetErrors(model, nameof(CustomerEditModel.BindingCustomerId))
-            .Should()
-            .ContainSingle()
-            .Which.Should()
-            .Be(MessageCustomizationHookConstants.CustomerIdRequiredMessage);
+            model.Validate(includeChildren: false).Should().BeFalse();
 
-        // 対象外の Name は既定文言のまま
-        GetErrors(model, nameof(CustomerEditModel.BindingName))
-            .Should()
-            .ContainSingle()
-            .Which.Should()
-            .Be("'Name' is required.");
+            GetErrors(model, nameof(CustomerEditModel.BindingCustomerId))
+                .Should()
+                .ContainSingle()
+                .Which.Should()
+                .Be(MessageCustomizationHookConstants.CustomerIdRequiredMessage);
+
+            // 対象外の Name は既定文言のまま（分岐が全域へ漏れていないことの裏取り）
+            GetErrors(model, nameof(CustomerEditModel.BindingName))
+                .Should()
+                .ContainSingle()
+                .Which.Should()
+                .Be("'Name' is required.");
+        }
+        finally
+        {
+            EditModelMessages.Required = original;
+        }
     }
 
-    /// <summary>CustomizeParseErrorMessage の partial 実装が propertyName で対象列だけを微調整する</summary>
-    [Fact(DisplayName = "CustomizeParseErrorMessage は対象列のみ加工・他列は既定文言のまま")]
-    public void CustomizeParseErrorMessage_Hook_RewritesOnlyTargetProperty()
+    /// <summary>変換メッセージの個別差し替えも、リゾルバが受け取るプロパティ名で分岐して行う</summary>
+    [Fact(DisplayName = "ParseFailed はプロパティ名で分岐して対象列のみ加工できる")]
+    public void ParseFailedMessage_CanBranchOnPropertyName()
     {
-        var model = new OrderEditModel();
-
-        // partial 実装（本ファイル末尾）は Amount のみ既定文言へ接尾辞を足す
-        model.BindingAmount = "abc";
-
-        GetErrors(model, nameof(OrderEditModel.BindingAmount))
-            .Should()
-            .ContainSingle()
-            .Which.Should()
-            .Be(
-                $"'abc' cannot be converted to decimal.{MessageCustomizationHookConstants.ParseSuffix}"
+        var original = EditModelMessages.ParseFailed;
+        EditModelMessages.ParseFailed = static (propertyName, _, inputValue, typeName) =>
+            $"'{inputValue}' cannot be converted to {typeName}."
+            + (
+                propertyName == nameof(OrderEditModel.Amount)
+                    ? MessageCustomizationHookConstants.ParseSuffix
+                    : string.Empty
             );
 
-        // 対象外の OrderId は既定文言のまま
-        model.BindingOrderId = "abc";
+        try
+        {
+            var model = new OrderEditModel();
 
-        GetErrors(model, nameof(OrderEditModel.BindingOrderId))
-            .Should()
-            .ContainSingle()
-            .Which.Should()
-            .Be("'abc' cannot be converted to int.");
+            model.BindingAmount = "abc";
+
+            GetErrors(model, nameof(OrderEditModel.BindingAmount))
+                .Should()
+                .ContainSingle()
+                .Which.Should()
+                .Be(
+                    $"'abc' cannot be converted to decimal.{MessageCustomizationHookConstants.ParseSuffix}"
+                );
+
+            // 対象外の OrderId は既定文言のまま
+            model.BindingOrderId = "abc";
+
+            GetErrors(model, nameof(OrderEditModel.BindingOrderId))
+                .Should()
+                .ContainSingle()
+                .Which.Should()
+                .Be("'abc' cannot be converted to int.");
+        }
+        finally
+        {
+            EditModelMessages.ParseFailed = original;
+        }
     }
 
     /// <summary>EditModelMessages.DuplicateValue の一括差し替えが重複エラーへ反映される（表示名列挙を受け取る）</summary>
@@ -222,12 +253,11 @@ public class MessageCustomizationHookTests
     public void DuplicateValueMessage_Replacement_IsReflected()
     {
         var original = EditModelMessages.DuplicateValue;
-        EditModelMessages.DuplicateValue = static displayNames =>
+        EditModelMessages.DuplicateValue = static (_, displayNames) =>
             $"{string.Join("・", displayNames)} が重複しています";
 
         try
         {
-            // 複合制約（CustomerId + Amount）は個別フックの対象外なので、一括差し替えの文言がそのまま出る
             var collection = new EditModelCollection<OrderEditModel>
             {
                 NewOrderEditModel(10, 1, 100m, "apple pie"),
@@ -248,41 +278,52 @@ public class MessageCustomizationHookTests
         }
     }
 
-    /// <summary>CustomizeDuplicateErrorMessage の partial 実装が構成列で対象制約だけを差し替える</summary>
-    [Fact(
-        DisplayName = "CustomizeDuplicateErrorMessage は対象制約のみ差し替え・他制約は既定文言のまま"
-    )]
-    public void CustomizeDuplicateErrorMessage_Hook_RewritesOnlyTargetConstraint()
+    /// <summary>重複メッセージの個別差し替えは、リゾルバが受け取る構成列のプロパティ名で分岐して行う</summary>
+    [Fact(DisplayName = "DuplicateValue は構成列で分岐して対象制約のみ差し替えできる")]
+    public void DuplicateValueMessage_CanBranchOnPropertyNames()
     {
-        // 単一列制約（Memo）の重複＝partial 実装（本ファイル末尾）が固定文言へ差し替える
-        var memoDuplicates = new EditModelCollection<OrderEditModel>
+        var original = EditModelMessages.DuplicateValue;
+        EditModelMessages.DuplicateValue = static (propertyNames, displayNames) =>
+            propertyNames.Count == 1 && propertyNames[0] == nameof(OrderEditModel.Memo)
+                ? MessageCustomizationHookConstants.DuplicateMemoMessage
+                : $"'{string.Join(", ", displayNames)}' is already used.";
+
+        try
         {
-            NewOrderEditModel(10, 1, 100m, "apple pie"),
-            NewOrderEditModel(11, 2, 50m, "apple pie"),
-        };
+            // 単一列制約（Memo）の重複＝分岐が固定文言へ差し替える
+            var memoDuplicates = new EditModelCollection<OrderEditModel>
+            {
+                NewOrderEditModel(10, 1, 100m, "apple pie"),
+                NewOrderEditModel(11, 2, 50m, "apple pie"),
+            };
 
-        memoDuplicates.Validate().Should().BeFalse();
+            memoDuplicates.Validate().Should().BeFalse();
 
-        GetErrors(memoDuplicates[0], nameof(OrderEditModel.BindingMemo))
-            .Should()
-            .ContainSingle()
-            .Which.Should()
-            .Be(MessageCustomizationHookConstants.DuplicateMemoMessage);
+            GetErrors(memoDuplicates[0], nameof(OrderEditModel.BindingMemo))
+                .Should()
+                .ContainSingle()
+                .Which.Should()
+                .Be(MessageCustomizationHookConstants.DuplicateMemoMessage);
 
-        // 対象外の複合制約は既定文言のまま
-        var compositeDuplicates = new EditModelCollection<OrderEditModel>
+            // 対象外の複合制約は既定文言のまま
+            var compositeDuplicates = new EditModelCollection<OrderEditModel>
+            {
+                NewOrderEditModel(10, 1, 100m, "apple pie"),
+                NewOrderEditModel(11, 1, 100m, "banana"),
+            };
+
+            compositeDuplicates.Validate().Should().BeFalse();
+
+            GetErrors(compositeDuplicates[0], nameof(OrderEditModel.BindingAmount))
+                .Should()
+                .ContainSingle()
+                .Which.Should()
+                .Be("'CustomerId, Amount' is already used.");
+        }
+        finally
         {
-            NewOrderEditModel(10, 1, 100m, "apple pie"),
-            NewOrderEditModel(11, 1, 100m, "banana"),
-        };
-
-        compositeDuplicates.Validate().Should().BeFalse();
-
-        GetErrors(compositeDuplicates[0], nameof(OrderEditModel.BindingAmount))
-            .Should()
-            .ContainSingle()
-            .Which.Should()
-            .Be("'CustomerId, Amount' is already used.");
+            EditModelMessages.DuplicateValue = original;
+        }
     }
 
     /// <summary>重複検証用に入力済みの注文 EditModel を組み立てる</summary>
@@ -342,7 +383,7 @@ public class MessageCustomizationHookTests
     ) => ((IEnumerable)model.GetErrors(propertyName)).Cast<string>().ToList();
 }
 
-/// <summary>テストで期待する差し替え文言を 1 か所に定義する（partial 実装とアサートで共有）</summary>
+/// <summary>テストで期待する差し替え文言を 1 か所に定義する（差し替えた Func とアサートで共有）</summary>
 internal static class MessageCustomizationHookConstants
 {
     /// <summary>CustomerEditModel.CustomerId の必須エラーへ差し替える文言</summary>
@@ -356,48 +397,4 @@ internal static class MessageCustomizationHookConstants
 
     /// <summary>OrderEditModel.Memo の重複エラーへ差し替える文言</summary>
     public const string DuplicateMemoMessage = "そのメモは既に使われています";
-}
-
-/// <summary>固定フィクスチャの CustomerEditModel へ必須メッセージの個別フックを注入する partial 実装。</summary>
-/// <remarks>再生成でフィクスチャ本体（.g.cs）が上書きされてもこの partial は残る（拡張ポイントの意図どおり）。</remarks>
-public partial class CustomerEditModel
-{
-    /// <summary>CustomerId の必須エラーのみ固定文言へ差し替える（propertyName 分岐の検証用）</summary>
-    partial void CustomizeRequiredErrorMessage(string propertyName, ref string message)
-    {
-        if (propertyName == nameof(CustomerId))
-        {
-            message = MessageCustomizationHookConstants.CustomerIdRequiredMessage;
-        }
-    }
-}
-
-/// <summary>固定フィクスチャの OrderEditModel へ変換メッセージの個別フックを注入する partial 実装。</summary>
-public partial class OrderEditModel
-{
-    /// <summary>Amount の変換エラーのみ既定文言へ接尾辞を足す（既定 Func → partial の順で通るチェーンの検証用）</summary>
-    partial void CustomizeParseErrorMessage(
-        string propertyName,
-        string inputValue,
-        string typeName,
-        ref string message
-    )
-    {
-        if (propertyName == nameof(Amount))
-        {
-            message += MessageCustomizationHookConstants.ParseSuffix;
-        }
-    }
-
-    /// <summary>単一列制約（Memo のみ）の重複エラーだけ固定文言へ差し替える（構成列分岐の検証用）</summary>
-    partial void CustomizeDuplicateErrorMessage(
-        System.Collections.Generic.IReadOnlyList<string> propertyNames,
-        ref string message
-    )
-    {
-        if (propertyNames.Count == 1 && propertyNames[0] == nameof(Memo))
-        {
-            message = MessageCustomizationHookConstants.DuplicateMemoMessage;
-        }
-    }
 }

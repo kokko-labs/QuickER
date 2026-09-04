@@ -143,9 +143,9 @@ public class DisplayNameGenerationTests
 
     // ===== VO 無効時の GetDisplayName 配線 =====
 
-    /// <summary>VO 無効時は GetDisplayName ヘルパ＋CustomizePropertyDisplayName フックを出し、検証メッセージへ表示名を渡す</summary>
+    /// <summary>VO 無効時は GetDisplayName ヘルパを出し、列テーブルと検証メッセージへ表示名を渡す</summary>
     [Fact]
-    public void Generate_WithoutValueObjects_WiresGetDisplayNameHelperAndHook()
+    public void Generate_WithoutValueObjects_WiresGetDisplayNameHelper()
     {
         var diagram = SingleEntity(
             "customers",
@@ -159,32 +159,23 @@ public class DisplayNameGenerationTests
             .Files[0]
             .Content;
 
-        // ヘルパとフックが 1 回ずつ出る（ヘルパは説明を受け取り GeneratedDisplayNames.Resolve へ委ねる）
+        // ヘルパが 1 回出る（説明を受け取り GeneratedDisplayNames.Resolve へそのまま委ねる）
         content
             .Should()
             .Contain(
-                "private static string GetDisplayName(string propertyName, string? description)"
+                "private static string GetDisplayName(string propertyName, string? description) =>"
             );
-        content
-            .Should()
-            .Contain("var displayName = GeneratedDisplayNames.Resolve(propertyName, description);");
-        content
-            .Should()
-            .Contain(
-                "static partial void CustomizePropertyDisplayName(string propertyName, ref string displayName);"
-            );
+        content.Should().Contain("GeneratedDisplayNames.Resolve(propertyName, description);");
+        // 表示名の差し替えフックは廃止（差し替えは中央リゾルバ 1 か所）
+        content.Should().NotContain("CustomizePropertyDisplayName");
 
-        // 必須メッセージ: Description ありの列は説明（顧客名）を渡す。安定キーとして nameof も併せて渡す
-        content
-            .Should()
-            .Contain(
-                "ResolveRequiredErrorMessage(nameof(Name), GetDisplayName(nameof(Name), \"顧客名\"))"
-            );
+        // 必須メッセージ: 列テーブルの表示名デリゲートが説明（顧客名）を渡す。安定キーとして nameof も併せて持つ
+        content.Should().Contain("static () => GetDisplayName(nameof(Name), \"顧客名\"),");
         // 入力変換メッセージ: PK（int）は安定キー＋表示名を渡す（Description 無指定は null＝プロパティ名フォールバック）
         content
             .Should()
             .Contain(
-                "ResolveParseErrorMessage(nameof(CustomerId), GetDisplayName(nameof(CustomerId), null), normalized, \"int\")"
+                "EditModelMessages.ParseFailed(nameof(CustomerId), GetDisplayName(nameof(CustomerId), null), normalized, \"int\")"
             );
     }
 

@@ -236,12 +236,12 @@ Implement the hook only - never `TryCreateFrom` itself, on generated and hand-wr
 Every generated class offers two ways to customize messages and display names — the rule is the same across every static class and every generation mode (inline / package-reference):
 
 - **Bulk** — replace a static settable `Func` on the fixed infra at app startup; applies everywhere.
-- **Per-type** — branch inside the replacement you installed. Every value object message takes the value object's display name as its first argument, and `GeneratedDisplayNames.Resolve` takes the member name, so one replacement covers both "all types" and "this type only". (Edit models keep their `Customize*` (`ref`) partials, which take the property name.)
+- **Per-type** — branch inside the replacement you installed. Every value object message takes the value object's display name as its first argument, every edit model message takes the confirmed-value property name, and `GeneratedDisplayNames.Resolve` takes the member name, so one replacement covers both "all types" and "this type only".
 
 ```csharp
 // Bulk, at startup: localize messages, and stop using descriptions for display names
 ValueObjectValidationMessages.ValueRequired = static _ => "値を入力してください。";
-EditModelMessages.Required = static name => $"{name}は必須です。";
+EditModelMessages.Required = static (_, displayName) => $"{displayName}は必須です。";
 GeneratedDisplayNames.Resolve = static (name, _) => name;   // ignore descriptions; use the member name
 ```
 
@@ -271,23 +271,22 @@ public sealed partial class NameValue
         }
     }
 }
-
-public partial class CustomerEditModel
-{
-    // Per-property message tweak (propertyName lets you branch by column)
-    partial void CustomizeParseErrorMessage(string propertyName, string inputValue, string typeName, ref string message)
-    {
-        if (propertyName == nameof(Age))
-        {
-            message = $"'{inputValue}' is not a valid age.";
-        }
-    }
-}
 ```
 
-Static classes: `ValueObjectValidationMessages` (`MaxLengthExceeded` / `ScaleExceeded` / `PrecisionExceeded` / `ValueRequired` / `DigitsExceeded` / `OutOfRange` / `InvalidCharacters` / `InvalidEmailAddress` / `InputNotConvertible` — every one of them takes the display name first), `EditModelMessages` (`Required` / `ParseFailed` / `JoinValueObjectErrors`), `GeneratedDisplayNames` (`Resolve` — used to resolve the display name of entities, edit-model properties, and value objects alike). In package-reference mode, all three ship inside the `QuickER.Runtime` package.
+```csharp
+// Per-property message tweak: the resolver receives the confirmed-value property name first,
+// so a branch can be written with nameof and stops compiling if that property is renamed away.
+EditModelMessages.ParseFailed = static (propertyName, displayName, inputValue, typeName) =>
+    propertyName == nameof(CustomerEditModel.Age)
+        ? $"'{inputValue}' is not a valid age."
+        : $"'{inputValue}' cannot be converted to {typeName}.";
+```
 
-Per-type partials: value object — `OnValidate` (plus `GetDefinedInstance` / `ConvertCustomInput`, covered above); edit model — `CustomizeRequiredErrorMessage` / `CustomizeParseErrorMessage` / `CustomizePropertyDisplayName`; entity — `CustomizeDisplayName` (an `override`, not a partial, as before). A value object's display string `DisplayValue` (virtual) can also be overridden.
+Static classes: `ValueObjectValidationMessages` (`MaxLengthExceeded` / `ScaleExceeded` / `PrecisionExceeded` / `ValueRequired` / `DigitsExceeded` / `OutOfRange` / `InvalidCharacters` / `InvalidEmailAddress` / `InputNotConvertible` — every one of them takes the display name first), `EditModelMessages` (`Required` / `ParseFailed` / `DuplicateValue` / `JoinValueObjectErrors` — each of the first three takes the confirmed-value property name, or the list of them, first), `GeneratedDisplayNames` (`Resolve` — used to resolve the display name of entities, edit-model properties, and value objects alike). In package-reference mode, all three ship inside the `QuickER.Runtime` package.
+
+Per-type partials: value object — `OnValidate` (plus `GetDefinedInstance` / `ConvertCustomInput`, covered above); edit model — the semantic hooks only (`OnValidate`, `OnBeginEdit` / `OnEndEdit` / `OnCancelEdit`, `On{Property}Changing` / `Changed`), since wording and display names are resolved centrally; entity — `CustomizeDisplayName` (an `override`, not a partial, as before). A value object's display string `DisplayValue` (virtual) can also be overridden.
+
+> **Migrating from the per-edit-model message hooks**: `CustomizeRequiredErrorMessage`, `CustomizeParseErrorMessage`, `CustomizeDuplicateErrorMessage` and `CustomizePropertyDisplayName` no longer exist on generated edit models, and an implementation of one is now a compile error. Move the wording into the matching `EditModelMessages` entry (or a display name into `GeneratedDisplayNames.Resolve`) and branch on the property name it now receives, as shown above.
 
 > **Migrating from the per-value-object message hooks**: `CustomizeDisplayName`, `CustomizeMaxLengthErrorMessage`, `CustomizeScaleErrorMessage`, `CustomizePrecisionErrorMessage` and `CustomizeValueRequiredErrorMessage` no longer exist on generated value objects, and an implementation of one is now a compile error. Move a display name into `GeneratedDisplayNames.Resolve` and a message into the matching `ValueObjectValidationMessages` entry, branching as shown above. Two things get better in the move: the wording lives in one place per message instead of one place per type, and it survives regeneration under a different name because nothing has to be re-implemented on the generated class.
 
@@ -737,7 +736,7 @@ It builds an entity from the edit model's confirmed values, calls `CheckUniquene
 
 The errors are registered after the `await`, which puts them on a thread pool thread rather than the caller's, and `ErrorsChanged` fires on that same thread. A WPF binding marshals the notification back to the UI thread by itself, so the ordinary case needs nothing from you; a subscriber that updates UI state directly has to marshal it at the call site.
 
-The message comes from `EditModelMessages.DuplicateValue` (a `static Func` taking the display names of the constraint's member properties), refined per class by the optional `partial void CustomizeDuplicateErrorMessage(IReadOnlyList<string> propertyNames, ref string message)`. A `UniquenessViolation.Message` supplied by a user-defined check wins over both.
+The message comes from `EditModelMessages.DuplicateValue` (a `static Func` taking the constraint's member property names and their display names, both in declaration order). Branch on the property names to single out one constraint. A `UniquenessViolation.Message` supplied by a user-defined check wins over it.
 
 #### Related pre-checks with the existing API
 

@@ -242,14 +242,30 @@ public class CSharpCodeGenerationServiceTests
                 "protected virtual bool SetProperty<T>(ref T field, T value, string propertyName)"
             );
         content.Should().Contain("public void ExecuteLoad(Action action)");
-        content.Should().Contain("editModel.ExecuteLoad(() =>");
+        // ロードの外枠（読み込み状態・入力文字列の導出・RowState 転写）は基底が持ち、具象は列コピーと後半だけを override する
+        content.Should().Contain("editModel.BeginLoad();");
+        content.Should().Contain("editModel.EndLoad();");
+        content
+            .Should()
+            .Contain(
+                "protected override void LoadColumns(CustomerEntity entity, CustomerEditModel editModel)"
+            );
+        content
+            .Should()
+            .Contain(
+                "protected override void CompleteLoad(CustomerEntity entity, CustomerEditModel editModel)"
+            );
         // 生成の定型（EditModel 反映・コレクション化）は共通基底 MapperBase が提供し、具象 Mapper はそれを継承する
         content.Should().Contain("public abstract partial class MapperBase<TEntity, TEditModel>");
         content.Should().Contain(": MapperBase<CustomerEntity, CustomerEditModel>");
         content.Should().Contain(": MapperBase<OrderEntity, OrderEditModel>");
-        // 新規入力用ファクトリ（基底が提供）は Entity を基に生成し、具象の生成フックを呼ぶ
+        // 新規入力用ファクトリ（基底が提供）は Entity を基に生成し、具象の生成フックへ橋渡しする
         content.Should().Contain("public TEditModel CreateEditModel()");
-        content.Should().Contain("OnEditModelCreated(editModel);");
+        content
+            .Should()
+            .Contain(
+                "protected override void AfterEditModelCreated(CustomerEditModel editModel) =>"
+            );
         content.Should().Contain("partial void OnEditModelCreated(CustomerEditModel editModel);");
         // ApplyToEntity は MarkUpdated を撤廃し RowState を転写、子コレクションは CreateEntities で代入する
         content.Should().NotContain("entity.MarkUpdated();");
@@ -313,8 +329,11 @@ public class CSharpCodeGenerationServiceTests
                 "private EditModelCollection<OrderEditModel> _orders = new EditModelCollection<OrderEditModel>();"
             );
         content.Should().Contain("public EditModelCollection<OrderEditModel> Orders");
-        content.Should().Contain("_orders.OwnerModel ??= this;");
-        content.Should().Contain("_orders.OwnerModel = this;");
+        // 子コレクションの所有権付け替えは基底ヘルパー 1 か所に集約し、具象は 2 行の委譲だけを持つ
+        content.Should().Contain("get => GetChildren(_orders);");
+        content.Should().Contain("set => SetChildren(ref _orders, value, nameof(Orders));");
+        content.Should().Contain("field.OwnerModel ??= this;");
+        content.Should().Contain("field.OwnerModel = this;");
         content.Should().Contain("public override void ApplyToEntity(");
         // ApplyToEditModel は子コレクションを CreateEditModels で代入し、状態は生成元 Entity を基準にする
         content
@@ -326,20 +345,18 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("public static class EditModelMessages");
         content
             .Should()
-            .Contain(
-                "private string ResolveRequiredErrorMessage(string propertyName, string displayName)"
-            );
-        // 呼び出し口（Validate）は Base 側で定義し、固有処理は具象クラスの override に分離する
+            .Contain("public static Func<string, string, string> Required { get; set; }");
+        // 呼び出し口（Validate）は Base 側で定義し、必須チェック本体は CRTP 層が列テーブルを回して override する
         content.Should().Contain("public bool Validate(bool includeChildren = true)");
         content.Should().Contain("protected virtual void ValidateSelf()");
         content.Should().Contain("protected override void ValidateSelf()");
         // 必須チェックは自分のエラーだけを付け外しする（変換エラーは上書きしない・値が入れば自分の分を消す）
         content
             .Should()
-            .Contain(
-                "SetRequiredError(nameof(BindingCustomerId), ResolveRequiredErrorMessage(nameof(CustomerId), GetDisplayName(nameof(CustomerId), null)));"
-            );
-        content.Should().Contain("ClearRequiredError(nameof(BindingCustomerId));");
+            .Contain("EditModelMessages.Required(column.PropertyName, column.DisplayName())");
+        content.Should().Contain("ClearRequiredError(column.BindingPropertyName);");
+        // 列ごとの必須フラグは列テーブルが持つ（PK は必須）
+        content.Should().MatchRegex(@"nameof\(BindingCustomerId\),\s+true,");
         content.Should().Contain("partial void OnValidate();");
         content.Should().Contain("if (includeChildren)");
         // カスケードは ChildLink レジストリに一本化。子用の仮想メソッドと空オーバーライドは廃止
@@ -722,13 +739,17 @@ public class CSharpCodeGenerationServiceTests
         result
             .Files[0]
             .Content.Should()
-            .Contain("ProductEditModel CreateEditModel(ProductEntity entity)");
+            .Contain("public TEditModel CreateEditModel(TEntity entity)");
         result.Files[0].Content.Should().Contain("void ApplyToEntity(");
         // 旧 Commit 系の名前は残っていないこと
         result.Files[0].Content.Should().NotContain("CommitToEditModel");
         result.Files[0].Content.Should().NotContain("CommitToEntity");
-        // 空生成ファクトリと初期値フックは具象 Mapper が override で提供する
-        result.Files[0].Content.Should().Contain("public override ProductEntity CreateEntity()");
+        // 空生成ファクトリは基底が提供し、具象 Mapper は初期値フックへの橋渡しだけを override する
+        result.Files[0].Content.Should().Contain("public TEntity CreateEntity()");
+        result
+            .Files[0]
+            .Content.Should()
+            .Contain("protected override void AfterEntityCreated(ProductEntity entity) =>");
         // EditModel 反映を含む生成の定型は共通基底 MapperBase が提供し、具象はそれを継承する
         result
             .Files[0]
@@ -748,21 +769,24 @@ public class CSharpCodeGenerationServiceTests
             .Files[0]
             .Content.Should()
             .Contain(
-                "editModel.ProductId ?? throw new InvalidOperationException(\"ProductId has no input value.\");"
+                "entity.ProductId = Required(editModel.ProductId, nameof(editModel.ProductId));"
             );
         result
             .Files[0]
             .Content.Should()
-            .Contain(
-                "editModel.Name ?? throw new InvalidOperationException(\"Name has no input value.\");"
-            );
-        // Entity → EditModel 反映は public な ApplyToEditModel で行い、確定値を直接代入してから
-        // RevertInput でバインディング文字列を導出する（文字列往復なし＝無損失ロード）
+            .Contain("entity.Name = Required(editModel.Name, nameof(editModel.Name));");
+        // Entity → EditModel 反映は基底の public な ApplyToEditModel が順序を持ち、具象は列コピー（LoadColumns）と
+        // 後半（CompleteLoad）だけを override する。確定値を直接代入してから RevertInput でバインディング文字列を
+        // 導出する（文字列往復なし＝無損失ロード）
+        result
+            .Files[0]
+            .Content.Should()
+            .Contain("public void ApplyToEditModel(TEntity entity, TEditModel editModel)");
         result
             .Files[0]
             .Content.Should()
             .Contain(
-                "public override void ApplyToEditModel(ProductEntity entity, ProductEditModel editModel)"
+                "protected override void LoadColumns(ProductEntity entity, ProductEditModel editModel)"
             );
         result.Files[0].Content.Should().Contain("editModel.Name = entity.Name;");
         result.Files[0].Content.Should().Contain("editModel.RevertInput();");
@@ -836,37 +860,37 @@ public class CSharpCodeGenerationServiceTests
         // TryParse 検証（基底の IParsable 総称ヘルパー経由＝型は型引数で運ぶ・意味は型自身の TryParse と同じ）
         content.Should().Contain("TryParseInput<int>(normalized, out var parsed)");
         content.Should().Contain("TryParseInput<decimal>(normalized, out var parsed)");
-        // エラーメッセージは ResolveParseErrorMessage 経由で生成され、安定キー（nameof）と表示名を渡す
+        // エラーメッセージは中央リゾルバを直接呼び、安定キー（nameof）と表示名を渡す
         // （Description 無指定は null を渡し、ヘルパ側でプロパティ名へフォールバックする）
         content
             .Should()
             .Contain(
-                "ResolveParseErrorMessage(nameof(OrderId), GetDisplayName(nameof(OrderId), null), normalized, \"int\")"
+                "EditModelMessages.ParseFailed(nameof(OrderId), GetDisplayName(nameof(OrderId), null), normalized, \"int\")"
             );
         content
             .Should()
             .Contain(
-                "ResolveParseErrorMessage(nameof(Amount), GetDisplayName(nameof(Amount), null), normalized, \"decimal\")"
+                "EditModelMessages.ParseFailed(nameof(Amount), GetDisplayName(nameof(Amount), null), normalized, \"decimal\")"
             );
-        // 既定文言は全 EditModel 共通の静的プロバイダ、個別調整は具象クラスの Resolve*／Customize* が担う
+        // 既定文言は全 EditModel 共通の静的プロバイダ 1 か所で、個別調整もそこで安定キーを見て分岐する
         content
             .Should()
             .Contain(
-                "public static Func<string, string, string, string> ParseFailed { get; set; }"
+                "public static Func<string, string, string, string, string> ParseFailed { get; set; }"
             );
-        content
-            .Should()
-            .Contain(
-                "var message = EditModelMessages.ParseFailed(displayName, inputValue, typeName);"
-            );
-        content.Should().Contain("partial void CustomizeParseErrorMessage(");
+        // クラスごとの文言フックと Resolve* ヘルパは廃止済み
+        content.Should().NotContain("CustomizeParseErrorMessage");
+        content.Should().NotContain("CustomizeRequiredErrorMessage");
+        content.Should().NotContain("CustomizeDuplicateErrorMessage");
+        content.Should().NotContain("ResolveParseErrorMessage");
         // 廃止した EditModelBase の virtual ビルダーは残っていない
         content.Should().NotContain("BuildParseErrorMessage");
         content.Should().NotContain("BuildRequiredErrorMessage");
-        // RevertInput は Base 側に集約し、書き戻し本体は具象クラスの RevertCore で override する
+        // RevertInput は Base 側に集約し、書き戻し本体は CRTP 層が列テーブルを回して override する（per-type には出ない）
         content.Should().Contain("public void RevertInput() => ExecuteRevert(RevertCore);");
         content.Should().Contain("protected virtual void RevertCore()");
         content.Should().Contain("protected override void RevertCore()");
+        content.Should().Contain("column.SetInput(model, column.ToInput(model));");
         // 兄弟ナビゲーション：Base が所属コレクション（IList）経由の GetNext/GetPrevious を提供し、コレクションが所有者を設定、具象クラスが型付き版を生成する
         content.Should().Contain("internal IList? Owner { get; set; }");
         content.Should().Contain("public EditModelBase? GetNext()");
@@ -914,10 +938,15 @@ public class CSharpCodeGenerationServiceTests
         content.Should().NotContain("OnChildHasChanges");
         // カスケードナビを持たないこの EditModel には RegisterChildren の override は生成されない
         content.Should().NotContain("protected override void RegisterChildren()");
-        // ② 発見性：拡張ポイント一覧コメントを生成
+        // ② 発見性：拡張ポイント一覧は基底 EditModelBase の XmlDoc へ集約（per-type のコメントブロックは出さない）
         content
             .Should()
-            .Contain("Extension points (implement only what you need in a partial class");
+            .Contain("Extension points of a generated edit model (implement only what you need");
+        content
+            .Should()
+            .NotContain(
+                "// ===== Extension points (implement only what you need in a partial class"
+            );
         // ④ IEditableObject（DataGrid 行編集の取り消し対応）
         content.Should().Contain("IEditableObject");
         content.Should().Contain("public void BeginEdit()");
@@ -926,10 +955,12 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("protected override void BeginEditCore()");
         content.Should().Contain("protected override void CancelEditCore()");
         content.Should().Contain("protected override void EndEditCore() => OnEndEdit();");
-        // 退避も復元も確定値側で行う（バインディング文字列の再パースを経由しないので日時の秒未満・Kind が落ちない）
-        content.Should().Contain("_orderIdSnapshot = _orderId;");
-        content.Should().Contain("OrderId = _orderIdSnapshot;");
+        // 退避も復元も確定値側で行う（バインディング文字列の再パースを経由しないので日時の秒未満・Kind が落ちない）。
+        // 退避・復元の本体は CRTP 層が列テーブルのアクセサ経由で 1 回だけ持つ（per-type のスナップショットフィールドは出ない）
+        content.Should().Contain("_valueSnapshot[i] = columns[i].GetValue(model);");
+        content.Should().Contain("columns[i].SetValue(model, snapshot[i]);");
         content.Should().Contain("ExecuteRevert(RevertCore);");
+        content.Should().NotContain("_orderIdSnapshot");
         content.Should().NotContain("_bindingOrderIdSnapshot");
         // 行編集ライフサイクルの partial フック（partial クラスで追加したフィールドの控え/復元・副作用用）
         content.Should().Contain("partial void OnBeginEdit();");
@@ -2056,9 +2087,9 @@ public class CSharpCodeGenerationServiceTests
         content
             .Should()
             .Contain(
-                "BindingFiledata = Filedata is null ? string.Empty : Convert.ToBase64String(Filedata);"
+                "static model => model.Filedata is null ? string.Empty : Convert.ToBase64String(model.Filedata),"
             );
-        content.Should().Contain("BindingFileId = FileId?.ToString() ?? string.Empty;");
+        content.Should().Contain("static model => model.FileId?.ToString() ?? string.Empty,");
         // Mapper のロードは確定値の直接代入（byte[] も Base64 を経由しない＝無損失）。
         // ただしバイナリ列だけは防御的コピーを挟む（配列を共有すると EditModel の編集が Entity へ波及する）
         content.Should().Contain("editModel.IsActive = entity.IsActive;");
@@ -3236,12 +3267,12 @@ public class CSharpCodeGenerationServiceTests
     }
 
     /// <summary>
-    /// EditModel の固定フィールド <c>_rowStateSnapshot</c> と衝突する列（row_state_snapshot）はエラーになることを検証する
+    /// EditModel の固定フィールド <c>_editModelColumns</c>（列テーブル）と衝突する列（edit_model_columns）はエラーになることを検証する
     /// </summary>
     [Fact]
-    public void Generate_ColumnCollidingWithEditModelSnapshotField_ShouldFailWithError()
+    public void Generate_ColumnCollidingWithEditModelColumnTable_ShouldFailWithError()
     {
-        var result = GenerateWithColumns("items", null, "row_state_snapshot");
+        var result = GenerateWithColumns("items", null, "edit_model_columns");
 
         result.HasErrors.Should().BeTrue();
         result.Files.Should().BeEmpty();
@@ -3250,8 +3281,8 @@ public class CSharpCodeGenerationServiceTests
             .Contain(diagnostic =>
                 diagnostic.Severity == GenerationDiagnosticSeverity.Error
                 && diagnostic.Message.Contains("ItemEditModel")
-                && diagnostic.Message.Contains("'_rowStateSnapshot'")
-                && diagnostic.Message.Contains("'row_state_snapshot'")
+                && diagnostic.Message.Contains("'_editModelColumns'")
+                && diagnostic.Message.Contains("'edit_model_columns'")
             );
     }
 
@@ -5556,28 +5587,26 @@ public class CSharpCodeGenerationServiceTests
         content
             .Should()
             .NotContain(
-                "Seal has no input value.",
+                "Required(editModel.Seal,",
                 "非 NULL の除外列を未入力のまま保存できないと、通常フェッチ後の往復が成立しない"
             );
-        content.Should().NotContain("NoteBlob has no input value.");
+        content.Should().NotContain("Required(editModel.NoteBlob,");
         content.Should().Contain("if (editModel.Seal is not null)");
         content.Should().Contain("if (editModel.NoteBlob is not null)");
 
-        // (b) EditModel: 除外列は必須チェックを出さない
-        content.Should().NotContain("SetRequiredError(nameof(BindingSeal)");
-        content.Should().NotContain("SetRequiredError(nameof(BindingNoteBlob)");
+        // (b) EditModel: 除外列は列テーブルで必須フラグが落ちる（必須チェックの入力そのもの）
+        content.Should().MatchRegex(@"nameof\(BindingSeal\),\s+false,");
+        content.Should().MatchRegex(@"nameof\(BindingNoteBlob\),\s+false,");
 
         // 通常列は従来どおり（規則が除外列だけに効いていることの対照）
-        content.Should().Contain("SetRequiredError(nameof(BindingLabel)");
-        content.Should().Contain("throw new InvalidOperationException(\"Label has no input value.");
+        content.Should().MatchRegex(@"nameof\(BindingLabel\),\s+true,");
+        content.Should().Contain("Required(editModel.Label, nameof(editModel.Label))");
     }
 
     /// <summary>
-    /// 同じ図でも <c>ExcludeUnboundedBinaryColumns</c> が OFF なら従来形（必須検証あり・<c>?? throw</c>）のままであることを検証する。
+    /// 同じ図でも <c>ExcludeUnboundedBinaryColumns</c> が OFF なら従来形（必須フラグあり・欠落は例外）のままであることを検証する。
     /// </summary>
-    [Fact(
-        DisplayName = "VO×無制限バイナリ除外 OFF: 同じ図でも必須検証と ?? throw は従来どおり残る"
-    )]
+    [Fact(DisplayName = "VO×無制限バイナリ除外 OFF: 同じ図でも必須検証と欠落例外は従来どおり残る")]
     public void Generate_ExcludeUnboundedBinary_Off_EditModelAndMapper_KeepRequiredInput()
     {
         var result = new CSharpCodeGenerationService().Generate(
@@ -5593,8 +5622,8 @@ public class CSharpCodeGenerationServiceTests
         result.HasErrors.Should().BeFalse();
         var content = result.Files.Single(f => f.FileName.EndsWith(".g.cs")).Content;
 
-        content.Should().Contain("throw new InvalidOperationException(\"Seal has no input value.");
-        content.Should().Contain("SetRequiredError(nameof(BindingSeal)");
+        content.Should().Contain("Required(editModel.Seal, nameof(editModel.Seal))");
+        content.Should().MatchRegex(@"nameof\(BindingSeal\),\s+true,");
         content.Should().NotContain("if (editModel.Seal is not null)");
     }
 
