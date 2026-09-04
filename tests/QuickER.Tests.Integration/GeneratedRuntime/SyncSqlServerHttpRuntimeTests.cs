@@ -117,7 +117,7 @@ public sealed class SyncSqlServerHttpRuntimeTests(SqlServerContainerFixture fixt
     )]
     public void Registration_UsesHttpSourceAndJournalingLocalRepositories()
     {
-        OrderSource.Should().BeOfType<HttpSyncOrderSyncSource>();
+        OrderSource.Should().BeOfType<HttpSyncServerSource<SyncOrderEntity, int>>();
         LocalOrders.Should().BeOfType<JournalingSyncOrderRepository>();
     }
 

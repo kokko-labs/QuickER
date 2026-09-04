@@ -119,14 +119,13 @@ public class SyncSupportGenerationTests
 
         // 同期エンジンと直結経路は出る
         content.Should().Contain("public sealed class SyncEngine");
-        content.Should().Contain("public sealed class SyncOrderDirectSyncSource");
+        content.Should().Contain("public sealed class DirectSyncSource<TEntity, TKey>");
         content.Should().Contain("AddGeneratedDirectSyncSources");
 
         // HTTP 経路（転送エンベロープ・固定基底・per-entity クライアント・DI）は 1 つも出ない
         content.Should().NotContain("RemoteSyncOperations");
         content.Should().NotContain("RemoteSyncChangesRequest");
         content.Should().NotContain("HttpSyncServerSource");
-        content.Should().NotContain("HttpSyncOrderSyncSource");
         content.Should().NotContain("AddGeneratedHttpSyncSources");
         content.Should().NotContain("MapSyncEndpoints");
     }
@@ -169,10 +168,9 @@ public class SyncSupportGenerationTests
             );
 
         var main = files[SyncFixtureDefinition.OutputFileName];
-        main.Should().Contain("public abstract class HttpSyncServerSource<TEntity, TKey>");
-        main.Should().Contain("public sealed class HttpSyncOrderSyncSource(HttpClient httpClient)");
-        main.Should()
-            .Contain("public sealed class HttpSyncOrderLineSyncSource(HttpClient httpClient)");
+        main.Should().Contain("public sealed class HttpSyncServerSource<TEntity, TKey>");
+        main.Should().Contain("AddHttpSource<SyncOrderEntity, int>(");
+        main.Should().Contain("AddHttpSource<SyncOrderLineEntity, int>(");
         main.Should().Contain("public static IServiceCollection AddGeneratedHttpSyncSources(");
 
         // 転送経路の選択は DI 1 行の差でしかない（直結の登録も併存する）
@@ -255,14 +253,26 @@ public class SyncSupportGenerationTests
         var content = string.Concat(files.Values);
         content.Should().Contain("public sealed class SyncEngine");
         content.Should().Contain("public sealed class SyncJournal");
-        content.Should().Contain("public abstract class SyncTable<TEntity, TKey>");
-        content.Should().Contain("public sealed class SyncOrderDirectSyncSource");
-        content.Should().Contain("public sealed class SyncOrderSyncTable");
+        content.Should().Contain("public sealed class SyncTable<TEntity, TKey>");
+        content.Should().Contain("public sealed class DirectSyncSource<TEntity, TKey>");
+        content.Should().Contain("public static class GeneratedSyncTables");
+        content
+            .Should()
+            .Contain(
+                "public static SyncTableDescriptor<SyncOrderEntity, int> SyncOrder { get; } ="
+            );
+        content
+            .Should()
+            .Contain(
+                "public static SyncTableDescriptor<SyncOrderLineEntity, int> SyncOrderLine { get; } ="
+            );
         content.Should().Contain("public sealed class JournalingSyncOrderRepository");
-        content.Should().Contain("public sealed class SyncOrderLineDirectSyncSource");
-        content.Should().Contain("public sealed class SyncOrderLineSyncTable");
         content.Should().Contain("public sealed class JournalingSyncOrderLineRepository");
         content.Should().Contain("AddGeneratedSyncSupport");
+
+        // テーブルごとのクラスはもう出ない（記述子 1 つが同じ役目を果たす）
+        content.Should().NotContain("class SyncOrderSyncTable");
+        content.Should().NotContain("class SyncOrderDirectSyncSource");
     }
 
     /// <summary>
@@ -316,8 +326,14 @@ public class SyncSupportGenerationTests
         var (files, _) = Generate(Diagram(), SyncOptions());
         var content = string.Concat(files.Values);
 
-        var parentIndex = content.IndexOf("new SyncOrderSyncTable(", StringComparison.Ordinal);
-        var childIndex = content.IndexOf("new SyncOrderLineSyncTable(", StringComparison.Ordinal);
+        var parentIndex = content.IndexOf(
+            "AddSyncTable<SyncOrderEntity, int, ISyncOrderRepository>(",
+            StringComparison.Ordinal
+        );
+        var childIndex = content.IndexOf(
+            "AddSyncTable<SyncOrderLineEntity, int, ISyncOrderLineRepository>(",
+            StringComparison.Ordinal
+        );
 
         parentIndex.Should().BeGreaterThan(-1);
         childIndex.Should().BeGreaterThan(-1);
@@ -373,12 +389,15 @@ public class SyncSupportGenerationTests
             .Contain("var existing = await Inner.GetByIdAsync(id, cancellationToken)");
         versionedBase.Should().Contain("SyncJournalOperation.Delete");
 
-        // per-type はテーブルの同一性・キーの読み書き・カスケード記録の委譲・契約固有メンバの転送だけを持つ
+        // per-type はテーブルの記述子と共有レコーダを基底へ渡すだけ（契約固有メンバの転送を除く）
         var decorator = ExtractClass(content, "public sealed class JournalingSyncOrderRepository");
         decorator.Should().Contain(": JournalingRepository<SyncOrderEntity, int>");
-        decorator.Should().Contain("protected override string TableName =>");
-        decorator.Should().Contain("SyncGraphRecorder.RecordSaveAsync(");
-        decorator.Should().Contain("cascadeDelete,");
+        decorator.Should().Contain("GeneratedSyncTables.SyncOrder,");
+        decorator.Should().Contain("GeneratedSyncTables.GraphRecorder");
+
+        // テーブル名・キー整形・グラフ記録の委譲は汎用コアが記述子から引く（per-type には出ない）
+        decorator.Should().NotContain("protected override string TableName =>");
+        decorator.Should().NotContain("RecordSaveAsync(");
 
         // 重複事前チェックはランタイム共通面の member なので、素通しは汎用コア側が 1 回だけ持つ
         decorator
@@ -388,15 +407,18 @@ public class SyncSupportGenerationTests
             .Should()
             .Contain("public Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(");
 
-        // RowState の分岐と子の走査は SyncGraphRecorder 側にある（保存側の決定手順のミラー）
+        // RowState の分岐と子の走査は SyncGraphRecorder 側にある（保存側の決定手順のミラー）。
+        // 走査は保存側と同じ 1 つの列挙（EntityBase.EnumerateCascadeChildren）で、テーブルごとに
+        // 生成された再帰メソッドではない＝「同じ走査の 2 実装」がそもそも存在しない
         var recorder = ExtractClass(
             string.Concat(files.Values),
-            "public static class SyncGraphRecorder"
+            "public sealed class SyncGraphRecorder"
         );
         recorder.Should().Contain("if (entity.RowState == RowState.Removed)");
-        recorder.Should().Contain("if (entity.RowState != RowState.Unchanged)");
-        recorder.Should().Contain("foreach (var child in entity.SyncOrderLines)");
+        recorder.Should().Contain("if (entity.RowState != RowState.Unchanged");
+        recorder.Should().Contain("foreach (var child in entity.EnumerateCascadeChildren())");
         recorder.Should().Contain("SyncJournalOperation.Delete");
+        recorder.Should().NotContain("SyncOrderEntity");
     }
 
     /// <summary>ループ防止の抑制フラグを、エンジンの書き込み経路とジャーナル記録の双方が参照する。</summary>
@@ -499,28 +521,31 @@ public class SyncSupportGenerationTests
         diagnostics.Should().NotContain(d => d.Severity == GenerationDiagnosticSeverity.Error);
         var content = string.Concat(files.Values);
 
-        // ① 記述子の基底が版の有無で分かれる
-        content.Should().Contain(": VersionlessSyncTable<SyncNoteEntity, int>(");
-        content.Should().Contain(": SyncTable<SyncOrderEntity, int>(");
+        // ① 記述子が版の有無を宣言し、登録側がその値で固定クラスを選ぶ
+        var noteDescriptor = ExtractDescriptor(content, "SyncNoteEntity", "SyncNote");
+        noteDescriptor.Should().Contain("IsVersionless = true,");
+        var orderDescriptor = ExtractDescriptor(content, "SyncOrderEntity", "SyncOrder");
+        orderDescriptor.Should().Contain("IsVersionless = false,");
+        content.Should().Contain("new VersionlessSyncTable<TEntity, TKey>(");
+        content.Should().Contain("new SyncTable<TEntity, TKey>(local, localSqlExecutor, server");
+        content.Should().Contain("new VersionlessDirectSyncSource<TEntity, TKey>(");
 
-        // ② 直結ソース＝走査の形は基底（版あり＝版の昇順／版なし＝キー順ページング）が持ち、
-        //    per-type は基底の選択と SQL の身元だけを持つ
-        var noteSource = ExtractClass(content, "public sealed class SyncNoteDirectSyncSource");
-        noteSource.Should().Contain(": VersionlessDirectSyncSource<SyncNoteEntity, int>");
-        noteSource.Should().Contain("WHERE [note_id] > @afterKey ORDER BY [note_id]");
-        noteSource.Should().NotContain("ServerChangesSql");
-        var orderSource = ExtractClass(content, "public sealed class SyncOrderDirectSyncSource");
-        orderSource.Should().Contain(": DirectSyncSource<SyncOrderEntity, int>");
-        orderSource.Should().Contain("protected override string ServerChangesSql =>");
-        orderSource.Should().NotContain("ServerPageFirstSql");
+        // ② 走査の形（版あり＝版の昇順／版なし＝キー順ページング）は固定側が持ち、
+        //    記述子はその方言 SQL と版アクセサの有無だけを運ぶ
+        noteDescriptor.Should().Contain("WHERE [note_id] > @afterKey ORDER BY [note_id]");
+        noteDescriptor.Should().NotContain("ServerChangesSql");
+        noteDescriptor.Should().NotContain("ReadRowVersion");
+        orderDescriptor.Should().Contain("ServerChangesSql =");
+        orderDescriptor.Should().Contain("ReadRowVersion = entity => entity.RowVer,");
+        orderDescriptor.Should().NotContain("ServerPageFirstSql");
 
         // 基底側の両アーム: 版ありは MIN_ACTIVE_ROWVERSION の ceiling・版なしはキー順ページングと null ceiling
-        ExtractClass(content, "public abstract class DirectSyncSource<TEntity, TKey>")
+        ExtractClass(content, "public sealed class DirectSyncSource<TEntity, TKey>")
             .Should()
             .Contain("MIN_ACTIVE_ROWVERSION()");
         var versionlessSourceBase = ExtractClass(
             content,
-            "public abstract class VersionlessDirectSyncSource<TEntity, TKey>"
+            "public sealed class VersionlessDirectSyncSource<TEntity, TKey>"
         );
         versionlessSourceBase.Should().Contain("GetFirstPageAsync");
         versionlessSourceBase.Should().Contain("Task.FromResult<byte[]?>(null)");
@@ -538,7 +563,6 @@ public class SyncSupportGenerationTests
             "public sealed class JournalingSyncOrderRepository"
         );
         orderDecorator.Should().Contain(": JournalingRepository<SyncOrderEntity, int>");
-        orderDecorator.Should().Contain("protected override byte[]? ReadRowVersion(");
 
         // ④ サーバー側エンドポイントの選別（版あり＝3 本・版なし＝SyncPage＋SyncKeys）
         var server = files[SyncFixtureDefinition.RemoteServerOutputFileName];
@@ -580,8 +604,10 @@ public class SyncSupportGenerationTests
 
         diagnostics.Should().NotContain(d => d.Severity == GenerationDiagnosticSeverity.Error);
         var content = string.Concat(files.Values);
-        content.Should().Contain(": VersionlessSyncTable<SyncOrderEntity, int>(");
-        content.Should().NotContain(": SyncTable<SyncOrderEntity, int>(");
+        var descriptor = ExtractDescriptor(content, "SyncOrderEntity", "SyncOrder");
+        descriptor.Should().Contain("IsVersionless = true,");
+        descriptor.Should().NotContain("ServerChangesSql");
+        descriptor.Should().NotContain("LocalAnchorSql");
     }
 
     /// <summary>
@@ -740,31 +766,39 @@ public class SyncSupportGenerationTests
         var (files, _) = Generate(Diagram(), SyncOptions());
         var content = string.Concat(files.Values);
 
-        // ローカル（記述子）: 基底の LocalBinaryColumns を差し替え、列名は ISyncTable 側と同じプロパティ
-        content
-            .Should()
-            .Contain("protected override ISyncBinaryColumns<int>? LocalBinaryColumns => this;");
-        content
-            .Should()
-            .Contain("public override IReadOnlyList<string> UnboundedBinaryColumnNames =>");
-        content
-            .Should()
-            .Contain("localRepository.ReadAttachmentAsync(id, destination, cancellationToken)");
-
-        // 直結サーバー: サーバー側リポジトリのアクセサ（基底 DirectSyncSourceBase の null 既定を override）
-        content
+        // 列ごとのアクセサは記述子が 1 度だけ運ぶ（具象契約を知るのはこのラムダだけ）
+        var descriptor = ExtractDescriptor(content, "SyncOrderEntity", "SyncOrder");
+        descriptor.Should().Contain("UnboundedBinaryColumnNames = [\"Attachment\"],");
+        descriptor
             .Should()
             .Contain(
-                "_serverRepository.WriteAttachmentAsync(id, source, length, cancellationToken)"
+                "((ISyncOrderRepository)repository).ReadAttachmentAsync(id, destination, cancellationToken)"
+            );
+        descriptor
+            .Should()
+            .Contain(
+                "((ISyncOrderRepository)repository).WriteAttachmentAsync(id, source, length, cancellationToken)"
             );
 
+        // ローカル（記述子側）: 同じ表をローカルリポジトリの上で開く
+        ExtractClass(content, "public abstract class SyncTableBase<TEntity, TKey>")
+            .Should()
+            .Contain("new SyncRepositoryBinaryColumns<TEntity, TKey>(descriptor, local)");
+
+        // 直結サーバー: 同じ表をサーバーリポジトリ（＝Writer）の上で開く
+        ExtractClass(content, "public abstract class DirectSyncSourceBase<TEntity, TKey>")
+            .Should()
+            .Contain("new SyncRepositoryBinaryColumns<TEntity, TKey>(descriptor, writer)");
+
         // HTTP サーバー: 既存のバイナリエンドポイント（基底のヘルパー）へ委譲
-        content
+        var httpSource = ExtractClass(
+            content,
+            "public sealed class HttpSyncServerSource<TEntity, TKey>"
+        );
+        httpSource
             .Should()
-            .Contain("public override ISyncBinaryColumns<int>? BinaryColumns => this;");
-        content
-            .Should()
-            .Contain("DownloadUnboundedBinaryColumnAsync(\"Attachment\", id, destination,");
+            .Contain("_descriptor.UnboundedBinaryColumnNames.Count == 0 ? null : this;");
+        httpSource.Should().Contain("DownloadUnboundedBinaryColumnAsync(");
     }
 
     /// <summary>
@@ -791,6 +825,24 @@ public class SyncSupportGenerationTests
         content.Should().NotContain("BinaryColumns => this");
         content.Should().NotContain("ReadUnboundedBinaryAsync(\n");
         content.Should().NotContain("WriteAttachmentAsync");
+    }
+
+    /// <summary>1 テーブル分の記述子（<c>GeneratedSyncTables</c> の静的プロパティ初期化子）を切り出す</summary>
+    private static string ExtractDescriptor(
+        string content,
+        string entityClassName,
+        string propertyName
+    )
+    {
+        var declaration =
+            $"public static SyncTableDescriptor<{entityClassName}, int> {propertyName} {{ get; }} =";
+        var start = content.IndexOf(declaration, StringComparison.Ordinal);
+        start.Should().BeGreaterThan(-1, $"'{declaration}' が生成物に含まれていること");
+
+        var end = content.IndexOf("\r\n        };", start, StringComparison.Ordinal);
+        end.Should().BeGreaterThan(-1, "記述子の初期化子が閉じていること");
+
+        return content[start..end];
     }
 
     /// <summary>指定の宣言行から次のトップレベル型宣言までを 1 クラス分のテキストとして切り出す</summary>

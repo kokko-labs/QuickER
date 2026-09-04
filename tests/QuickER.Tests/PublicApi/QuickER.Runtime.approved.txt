@@ -160,6 +160,7 @@ public abstract class QuickER.Runtime.EntityBase
     protected virtual void CustomizeDisplayName(ref string displayName)
     public QuickER.Runtime.EntityBase Clone()
     public QuickER.Runtime.RowState RowState { get; set; }
+    public System.Collections.Generic.IEnumerable<QuickER.Runtime.EntityBase> EnumerateCascadeChildren()
     public bool HasChanges { get; }
     public bool HasSameValues(QuickER.Runtime.EntityBase other)
     public bool IsAdded { get; }

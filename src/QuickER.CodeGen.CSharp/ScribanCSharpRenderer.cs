@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using System.Text.RegularExpressions;
 using Scriban;
 
@@ -394,7 +394,6 @@ internal sealed class ScribanCSharpRenderer
             ["sync_tables"] = model.SyncTables,
             // グラフ保存のジャーナル記録クラス（SyncGraphRecorder）の整形済み全文（同期支援が無効なら空文字）。
             // 分岐の多い再帰メソッド群のためビルダー側で組み立て、テンプレートは埋め込むだけにする（方言 SQL と同じ流儀）。
-            ["sync_graph_recorder"] = model.SyncGraphRecorder,
             // クエリ糖衣の静的クラス（SqlQueryExtensions＝IncludeGraph ＋ GetByIdAsync）の整形済み全文
             // （契約が出ない構成では空文字）。ツリーの組み立ては分岐と採番を伴うためビルダー側で行い、
             // テンプレートは埋め込むだけにする。

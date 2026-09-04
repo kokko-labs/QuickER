@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -69,7 +69,14 @@ public sealed class SyncVoRuntimeTests : IAsyncLifetime
 
         var source = new SyncVoTestServerSource(serverSql, _serverWriter);
         _engine = new SyncEngine(
-            [new SyncvoOrderSyncTable(_localOrders, localSql, source)],
+            [
+                new SyncTable<SyncvoOrderEntity, OrderIdValue>(
+                    _localOrders,
+                    localSql,
+                    source,
+                    GeneratedSyncTables.SyncvoOrder
+                ),
+            ],
             _journal
         );
     }

@@ -627,21 +627,25 @@ public sealed class SyncSqlServerRuntimeTests(
         // 差分ソースは生成された直結実装そのもの（サーバー＝実 SQL Server）
         var engine = new SyncEngine(
             [
-                new SyncOrderSyncTable(
+                new SyncTable<SyncOrderEntity, int>(
                     orders,
                     localSql,
-                    new SyncOrderDirectSyncSource(
+                    new DirectSyncSource<SyncOrderEntity, int>(
                         _provider.GetRequiredKeyedService<ISqlExecutor>(ServerKey),
-                        ServerOrders()
-                    )
+                        ServerOrders(),
+                        GeneratedSyncTables.SyncOrder
+                    ),
+                    GeneratedSyncTables.SyncOrder
                 ),
-                new SyncOrderLineSyncTable(
+                new SyncTable<SyncOrderLineEntity, int>(
                     lines,
                     localSql,
-                    new SyncOrderLineDirectSyncSource(
+                    new DirectSyncSource<SyncOrderLineEntity, int>(
                         _provider.GetRequiredKeyedService<ISqlExecutor>(ServerKey),
-                        _provider.GetRequiredKeyedService<ISyncOrderLineRepository>(ServerKey)
-                    )
+                        _provider.GetRequiredKeyedService<ISyncOrderLineRepository>(ServerKey),
+                        GeneratedSyncTables.SyncOrderLine
+                    ),
+                    GeneratedSyncTables.SyncOrderLine
                 ),
             ],
             journal

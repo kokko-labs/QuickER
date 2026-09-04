@@ -527,7 +527,13 @@ public abstract partial class EntityBase
         );
 
     /// <summary>Enumerates the children reachable through cascade navigations (single references and collections alike; nulls are skipped).</summary>
-    private IEnumerable<EntityBase> EnumerateCascadeChildren()
+    /// <remarks>
+    /// This is the one description of "which children a graph operation follows", and everything that has to walk the same
+    /// shape - marking an aggregate, saving it, journaling it for a sync run - reads it from here rather than repeating the
+    /// attribute scan. Cascade navigations point at children only (parent references are excluded), so the traversal is a
+    /// tree and terminates.
+    /// </remarks>
+    public IEnumerable<EntityBase> EnumerateCascadeChildren()
     {
         foreach (var navigation in GetCascadeNavigations(GetType()))
         {

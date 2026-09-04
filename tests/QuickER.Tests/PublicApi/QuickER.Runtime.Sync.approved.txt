@@ -1,33 +1,36 @@
 // QuickER 公開 API スナップショット: QuickER.Runtime.Sync
 // 手編集しない。更新は QUICKER_REGEN_FIXTURES=1 での再生成（失敗メッセージにコマンドあり）。
 
-public abstract class QuickER.Runtime.Sync.DirectSyncSource<TEntity, TKey> : QuickER.Runtime.Sync.DirectSyncSourceBase<TEntity, TKey>, QuickER.Runtime.Sync.ISyncServerSource<TEntity, TKey>
-    protected .ctor(QuickER.Runtime.ISqlExecutor serverSqlExecutor, QuickER.Runtime.IRemoteRepository<TEntity, TKey> writer)
-    protected abstract string ServerChangesSql { get; }
-    public System.Threading.Tasks.Task<QuickER.Runtime.Sync.SyncChangeBatch<TEntity>> GetChangesAsync(byte[] anchor, byte[] ceiling, int batchSize, System.Threading.CancellationToken cancellationToken = default)
-    public System.Threading.Tasks.Task<byte[]> GetChangeCeilingAsync(System.Threading.CancellationToken cancellationToken = default)
+public sealed class QuickER.Runtime.Sync.DirectSyncSource<TEntity, TKey> : QuickER.Runtime.Sync.DirectSyncSourceBase<TEntity, TKey>, QuickER.Runtime.Sync.ISyncServerSource<TEntity, TKey>
+    public .ctor(QuickER.Runtime.ISqlExecutor serverSqlExecutor, QuickER.Runtime.IRemoteRepository<TEntity, TKey> writer, QuickER.Runtime.Sync.SyncTableDescriptor<TEntity, TKey> descriptor)
+    public override System.Threading.Tasks.Task<QuickER.Runtime.Sync.SyncChangeBatch<TEntity>> GetChangesAsync(byte[] anchor, byte[] ceiling, int batchSize, System.Threading.CancellationToken cancellationToken = default)
+    public override System.Threading.Tasks.Task<byte[]> GetChangeCeilingAsync(System.Threading.CancellationToken cancellationToken = default)
 
 public abstract class QuickER.Runtime.Sync.DirectSyncSourceBase<TEntity, TKey> : QuickER.Runtime.Sync.ISyncServerSource<TEntity, TKey>
-    protected .ctor(QuickER.Runtime.ISqlExecutor serverSqlExecutor, QuickER.Runtime.IRemoteRepository<TEntity, TKey> writer)
+    protected .ctor(QuickER.Runtime.ISqlExecutor serverSqlExecutor, QuickER.Runtime.IRemoteRepository<TEntity, TKey> writer, QuickER.Runtime.Sync.SyncTableDescriptor<TEntity, TKey> descriptor)
     protected QuickER.Runtime.ISqlExecutor ServerSqlExecutor { get; }
-    protected abstract string ServerKeysSql { get; }
+    protected QuickER.Runtime.Sync.SyncTableDescriptor<TEntity, TKey> Descriptor { get; }
+    protected string ServerKeysSql { get; }
     public QuickER.Runtime.IRemoteRepository<TEntity, TKey> Writer { get; }
+    public QuickER.Runtime.Sync.ISyncBinaryColumns<TKey> BinaryColumns { get; }
     public System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TKey>> GetAllKeysAsync(System.Threading.CancellationToken cancellationToken = default)
     public abstract System.Threading.Tasks.Task<QuickER.Runtime.Sync.SyncChangeBatch<TEntity>> GetChangesAsync(byte[] anchor, byte[] ceiling, int batchSize, System.Threading.CancellationToken cancellationToken = default)
     public abstract System.Threading.Tasks.Task<byte[]> GetChangeCeilingAsync(System.Threading.CancellationToken cancellationToken = default)
-    public virtual QuickER.Runtime.Sync.ISyncBinaryColumns<TKey> BinaryColumns { get; }
     public virtual System.Threading.Tasks.Task<QuickER.Runtime.Sync.SyncChangeBatch<TEntity>> GetFirstPageAsync(int batchSize, System.Threading.CancellationToken cancellationToken = default)
     public virtual System.Threading.Tasks.Task<QuickER.Runtime.Sync.SyncChangeBatch<TEntity>> GetPageAfterAsync(TKey afterKey, int batchSize, System.Threading.CancellationToken cancellationToken = default)
 
-public abstract class QuickER.Runtime.Sync.HttpSyncServerSource<TEntity, TKey> : QuickER.Runtime.HttpRemoteRepository<TEntity, TKey>, QuickER.Runtime.IRemoteRepository<TEntity, TKey>, QuickER.Runtime.Sync.ISyncServerSource<TEntity, TKey>
-    protected .ctor(System.Net.Http.HttpClient httpClient, string entityRoute)
+public sealed class QuickER.Runtime.Sync.HttpSyncServerSource<TEntity, TKey> : QuickER.Runtime.HttpRemoteRepository<TEntity, TKey>, QuickER.Runtime.IRemoteRepository<TEntity, TKey>, QuickER.Runtime.Sync.ISyncBinaryColumns<TKey>, QuickER.Runtime.Sync.ISyncServerSource<TEntity, TKey>
+    public .ctor(System.Net.Http.HttpClient httpClient, QuickER.Runtime.Sync.SyncTableDescriptor<TEntity, TKey> descriptor)
     public QuickER.Runtime.IRemoteRepository<TEntity, TKey> Writer { get; }
+    public QuickER.Runtime.Sync.ISyncBinaryColumns<TKey> BinaryColumns { get; }
+    public System.Collections.Generic.IReadOnlyList<string> UnboundedBinaryColumnNames { get; }
     public System.Threading.Tasks.Task<QuickER.Runtime.Sync.SyncChangeBatch<TEntity>> GetChangesAsync(byte[] anchor, byte[] ceiling, int batchSize, System.Threading.CancellationToken cancellationToken = default)
     public System.Threading.Tasks.Task<QuickER.Runtime.Sync.SyncChangeBatch<TEntity>> GetFirstPageAsync(int batchSize, System.Threading.CancellationToken cancellationToken = default)
     public System.Threading.Tasks.Task<QuickER.Runtime.Sync.SyncChangeBatch<TEntity>> GetPageAfterAsync(TKey afterKey, int batchSize, System.Threading.CancellationToken cancellationToken = default)
     public System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TKey>> GetAllKeysAsync(System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<bool> ReadUnboundedBinaryAsync(string columnName, TKey id, System.IO.Stream destination, System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<bool> WriteUnboundedBinaryAsync(string columnName, TKey id, System.IO.Stream source, long? length, System.Threading.CancellationToken cancellationToken = default)
     public System.Threading.Tasks.Task<byte[]> GetChangeCeilingAsync(System.Threading.CancellationToken cancellationToken = default)
-    public virtual QuickER.Runtime.Sync.ISyncBinaryColumns<TKey> BinaryColumns { get; }
 
 public interface QuickER.Runtime.Sync.ISyncBinaryColumns<TKey>
     public virtual System.Collections.Generic.IReadOnlyList<string> UnboundedBinaryColumnNames { get; }
@@ -55,21 +58,28 @@ public interface QuickER.Runtime.Sync.ISyncTable
     public virtual bool IsVersionless { get; }
     public virtual string TableName { get; }
 
+public interface QuickER.Runtime.Sync.ISyncTableDescriptor
+    public virtual System.Type EntityType { get; }
+    public virtual byte[] ReadEntityRowVersion(QuickER.Runtime.EntityBase entity)
+    public virtual string FormatEntityKey(QuickER.Runtime.EntityBase entity)
+    public virtual string TableName { get; }
+
 public abstract class QuickER.Runtime.Sync.JournalingRepository<TEntity, TKey> : QuickER.Runtime.Sync.JournalingRepositoryBase<TEntity, TKey>, QuickER.Runtime.IRemoteRepository<TEntity, TKey>, QuickER.Runtime.IRepository<TEntity, TKey>
-    protected .ctor(QuickER.Runtime.IRepository<TEntity, TKey> inner, QuickER.Runtime.Sync.SyncJournal journal)
+    protected .ctor(QuickER.Runtime.IRepository<TEntity, TKey> inner, QuickER.Runtime.Sync.SyncJournal journal, QuickER.Runtime.Sync.SyncTableDescriptor<TEntity, TKey> descriptor, QuickER.Runtime.Sync.SyncGraphRecorder graphRecorder)
     protected System.Threading.Tasks.Task RecordDeleteAsync(TKey id, System.Threading.CancellationToken cancellationToken)
-    protected abstract byte[] ReadRowVersion(TEntity entity)
 
 public abstract class QuickER.Runtime.Sync.JournalingRepositoryBase<TEntity, TKey> : QuickER.Runtime.IRemoteRepository<TEntity, TKey>, QuickER.Runtime.IRepository<TEntity, TKey>
-    protected .ctor(QuickER.Runtime.IRepository<TEntity, TKey> inner, QuickER.Runtime.Sync.SyncJournal journal)
+    protected .ctor(QuickER.Runtime.IRepository<TEntity, TKey> inner, QuickER.Runtime.Sync.SyncJournal journal, QuickER.Runtime.Sync.SyncTableDescriptor<TEntity, TKey> descriptor, QuickER.Runtime.Sync.SyncGraphRecorder graphRecorder)
     protected QuickER.Runtime.IRepository<TEntity, TKey> Inner { get; }
+    protected QuickER.Runtime.Sync.SyncGraphRecorder GraphRecorder { get; }
     protected QuickER.Runtime.Sync.SyncJournal Journal { get; }
+    protected QuickER.Runtime.Sync.SyncTableDescriptor<TEntity, TKey> Descriptor { get; }
+    protected System.Threading.Tasks.Task RecordGraphSaveAsync(TEntity entity, bool cascadeSave, bool cascadeDelete, System.Threading.CancellationToken cancellationToken)
     protected System.Threading.Tasks.Task RecordUpsertAsync(TEntity entity, System.Threading.CancellationToken cancellationToken)
+    protected TKey ReadKey(TEntity entity)
     protected abstract System.Threading.Tasks.Task RecordDeleteAsync(TKey id, System.Threading.CancellationToken cancellationToken)
-    protected abstract System.Threading.Tasks.Task RecordGraphSaveAsync(TEntity entity, bool cascadeSave, bool cascadeDelete, System.Threading.CancellationToken cancellationToken)
-    protected abstract TKey ReadKey(TEntity entity)
-    protected abstract string FormatKey(TKey key)
-    protected abstract string TableName { get; }
+    protected string FormatKey(TKey key)
+    protected string TableName { get; }
     public QuickER.Runtime.SqlQuery<TEntity> Query()
     public System.Threading.Tasks.Task InsertAsync(TEntity entity, System.Threading.CancellationToken cancellationToken = default)
     public System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<QuickER.Runtime.UniquenessViolation>> CheckUniquenessAsync(TEntity entity, System.Threading.CancellationToken cancellationToken = default)
@@ -115,6 +125,11 @@ public sealed class QuickER.Runtime.Sync.RemoteSyncPageRequest<TKey> : System.IE
     public bool HasAfterKey { get; init; }
     public int BatchSize { get; init; }
 
+public sealed class QuickER.Runtime.Sync.SyncBinaryColumnAccessor<TKey> : System.IEquatable<QuickER.Runtime.Sync.SyncBinaryColumnAccessor<TKey>>
+    public .ctor(System.Func<object, TKey, System.IO.Stream, System.Threading.CancellationToken, System.Threading.Tasks.Task<bool>> Read, System.Func<object, TKey, System.IO.Stream, long?, System.Threading.CancellationToken, System.Threading.Tasks.Task<bool>> Write)
+    public System.Func<object, TKey, System.IO.Stream, System.Threading.CancellationToken, System.Threading.Tasks.Task<bool>> Read { get; init; }
+    public System.Func<object, TKey, System.IO.Stream, long?, System.Threading.CancellationToken, System.Threading.Tasks.Task<bool>> Write { get; init; }
+
 public sealed class QuickER.Runtime.Sync.SyncChangeBatch<TEntity> : System.IEquatable<QuickER.Runtime.Sync.SyncChangeBatch<TEntity>>
     public .ctor(System.Collections.Generic.IReadOnlyList<TEntity> Rows, bool HasMore)
     public System.Collections.Generic.IReadOnlyList<TEntity> Rows { get; init; }
@@ -145,6 +160,10 @@ public sealed class QuickER.Runtime.Sync.SyncEngine
     public System.Threading.Tasks.Task<QuickER.Runtime.Sync.SyncResult> SyncAsync(QuickER.Runtime.Sync.SyncOptions options = null, System.Threading.CancellationToken cancellationToken = default)
     public System.Threading.Tasks.Task<System.ValueTuple<int, int>> DownloadAsync(QuickER.Runtime.Sync.SyncOptions options, System.Threading.CancellationToken cancellationToken = default)
     public System.Threading.Tasks.Task<System.ValueTuple<int, int>> UploadAsync(QuickER.Runtime.Sync.SyncOptions options, System.Collections.Generic.ICollection<QuickER.Runtime.Sync.SyncConflict> conflicts, System.Threading.CancellationToken cancellationToken = default)
+
+public sealed class QuickER.Runtime.Sync.SyncGraphRecorder
+    public .ctor(System.Collections.Generic.IEnumerable<QuickER.Runtime.Sync.ISyncTableDescriptor> descriptors)
+    public System.Threading.Tasks.Task RecordSaveAsync(QuickER.Runtime.Sync.SyncJournal journal, QuickER.Runtime.EntityBase entity, bool cascadeSave, bool cascadeDelete, System.Threading.CancellationToken cancellationToken = default)
 
 public sealed class QuickER.Runtime.Sync.SyncJournal
     public .ctor(QuickER.Runtime.ISqlExecutor localSqlExecutor)
@@ -214,6 +233,12 @@ public sealed class QuickER.Runtime.Sync.SyncRefreshTableResult : System.IEquata
     public int Inserted { get; init; }
     public string TableName { get; init; }
 
+public sealed class QuickER.Runtime.Sync.SyncRepositoryBinaryColumns<TEntity, TKey> : QuickER.Runtime.Sync.ISyncBinaryColumns<TKey>
+    public .ctor(QuickER.Runtime.Sync.SyncTableDescriptor<TEntity, TKey> descriptor, object repository)
+    public System.Collections.Generic.IReadOnlyList<string> UnboundedBinaryColumnNames { get; }
+    public System.Threading.Tasks.Task<bool> ReadUnboundedBinaryAsync(string columnName, TKey id, System.IO.Stream destination, System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<bool> WriteUnboundedBinaryAsync(string columnName, TKey id, System.IO.Stream source, long? length, System.Threading.CancellationToken cancellationToken = default)
+
 public sealed class QuickER.Runtime.Sync.SyncResult : System.IEquatable<QuickER.Runtime.Sync.SyncResult>
     public .ctor(int Uploaded, int Downloaded, int DeletedLocally, int Discarded, System.Collections.Generic.IReadOnlyList<QuickER.Runtime.Sync.SyncConflict> Conflicts)
     public System.Collections.Generic.IReadOnlyList<QuickER.Runtime.Sync.SyncConflict> Conflicts { get; init; }
@@ -227,45 +252,67 @@ public static class QuickER.Runtime.Sync.SyncSession
     public static System.IDisposable Suppress()
     public static bool IsSuppressed { get; }
 
-public abstract class QuickER.Runtime.Sync.SyncTable<TEntity, TKey> : QuickER.Runtime.Sync.SyncTableBase<TEntity, TKey>, QuickER.Runtime.Sync.ISyncTable
-    protected .ctor(QuickER.Runtime.IRepository<TEntity, TKey> local, QuickER.Runtime.ISqlExecutor localSqlExecutor, QuickER.Runtime.Sync.ISyncServerSource<TEntity, TKey> server)
-    protected abstract byte[] ReadRowVersion(TEntity entity)
-    protected abstract string LocalAnchorSql { get; }
-    protected abstract void WriteRowVersion(TEntity entity, byte[] rowVersion)
+public sealed class QuickER.Runtime.Sync.SyncTable<TEntity, TKey> : QuickER.Runtime.Sync.SyncTableBase<TEntity, TKey>, QuickER.Runtime.Sync.ISyncTable
     protected override System.Threading.Tasks.Task OnLastWriteWinsUploadedAsync(TEntity local, bool includeUnboundedBinary, System.Threading.CancellationToken cancellationToken)
+    public .ctor(QuickER.Runtime.IRepository<TEntity, TKey> local, QuickER.Runtime.ISqlExecutor localSqlExecutor, QuickER.Runtime.Sync.ISyncServerSource<TEntity, TKey> server, QuickER.Runtime.Sync.SyncTableDescriptor<TEntity, TKey> descriptor)
     public override System.Threading.Tasks.Task<QuickER.Runtime.Sync.SyncUploadOutcome> UploadAsync(QuickER.Runtime.Sync.SyncJournalRow entry, QuickER.Runtime.Sync.SyncMode mode, QuickER.Runtime.Sync.SyncConflictPolicy policy, bool includeUnboundedBinary, System.Threading.CancellationToken cancellationToken = default)
     public override System.Threading.Tasks.Task<int> DownloadAsync(byte[] ceiling, int batchSize, bool includeUnboundedBinary, System.Threading.CancellationToken cancellationToken = default)
     public override System.Threading.Tasks.Task<int> RefreshAsync(byte[] ceiling, int batchSize, bool includeUnboundedBinary, System.Threading.CancellationToken cancellationToken = default)
-    public override bool IsVersionless { get; }
 
 public abstract class QuickER.Runtime.Sync.SyncTableBase<TEntity, TKey> : QuickER.Runtime.Sync.ISyncTable
-    protected .ctor(QuickER.Runtime.IRepository<TEntity, TKey> local, QuickER.Runtime.ISqlExecutor localSqlExecutor, QuickER.Runtime.Sync.ISyncServerSource<TEntity, TKey> server)
+    protected .ctor(QuickER.Runtime.IRepository<TEntity, TKey> local, QuickER.Runtime.ISqlExecutor localSqlExecutor, QuickER.Runtime.Sync.ISyncServerSource<TEntity, TKey> server, QuickER.Runtime.Sync.SyncTableDescriptor<TEntity, TKey> descriptor)
+    protected QuickER.Runtime.Sync.ISyncBinaryColumns<TKey> LocalBinaryColumns { get; }
     protected System.Threading.Tasks.Task ApplyBatchAsync(System.Collections.Generic.IReadOnlyList<TEntity> rows, bool includeUnboundedBinary, System.Threading.CancellationToken cancellationToken)
     protected System.Threading.Tasks.Task CopyBinaryColumnsDownAsync(System.Collections.Generic.IReadOnlyList<TEntity> rows, System.Threading.CancellationToken cancellationToken)
     protected System.Threading.Tasks.Task CopyBinaryColumnsUpAsync(TKey key, System.Threading.CancellationToken cancellationToken)
     protected System.Threading.Tasks.Task<QuickER.Runtime.Sync.SyncUploadOutcome> UploadLastWriteWinsAsync(QuickER.Runtime.Sync.SyncJournalRow entry, bool includeUnboundedBinary, System.Threading.CancellationToken cancellationToken)
-    protected abstract TKey ReadKey(TEntity entity)
-    protected abstract string LocalDeleteAllSql { get; }
-    protected abstract string LocalExistingKeysSql { get; }
-    protected abstract string LocalKeysSql { get; }
-    protected abstract void WriteKey(TEntity entity, TKey key)
+    protected TKey ReadKey(TEntity entity)
     protected readonly QuickER.Runtime.IRepository<TEntity, TKey> _local
     protected readonly QuickER.Runtime.ISqlExecutor _localSqlExecutor
     protected readonly QuickER.Runtime.Sync.ISyncServerSource<TEntity, TKey> _server
-    protected virtual QuickER.Runtime.Sync.ISyncBinaryColumns<TKey> LocalBinaryColumns { get; }
+    protected readonly QuickER.Runtime.Sync.SyncTableDescriptor<TEntity, TKey> _descriptor
+    protected string LocalDeleteAllSql { get; }
+    protected string LocalExistingKeysSql { get; }
+    protected string LocalKeysSql { get; }
     protected virtual System.Threading.Tasks.Task OnLastWriteWinsUploadedAsync(TEntity local, bool includeUnboundedBinary, System.Threading.CancellationToken cancellationToken)
+    protected void WriteKey(TEntity entity, TKey key)
+    public System.Collections.Generic.IReadOnlyList<string> UnboundedBinaryColumnNames { get; }
     public System.Threading.Tasks.Task<int> DeleteAllLocalAsync(System.Threading.CancellationToken cancellationToken = default)
     public System.Threading.Tasks.Task<int> PropagateDeletesAsync(System.Collections.Generic.IReadOnlySet<string> pendingKeyTexts, System.Threading.CancellationToken cancellationToken = default)
     public System.Type EntityType { get; }
+    public TKey ParseKey(string keyText)
     public abstract System.Threading.Tasks.Task<QuickER.Runtime.Sync.SyncUploadOutcome> UploadAsync(QuickER.Runtime.Sync.SyncJournalRow entry, QuickER.Runtime.Sync.SyncMode mode, QuickER.Runtime.Sync.SyncConflictPolicy policy, bool includeUnboundedBinary, System.Threading.CancellationToken cancellationToken = default)
     public abstract System.Threading.Tasks.Task<int> DownloadAsync(byte[] ceiling, int batchSize, bool includeUnboundedBinary, System.Threading.CancellationToken cancellationToken = default)
     public abstract System.Threading.Tasks.Task<int> RefreshAsync(byte[] ceiling, int batchSize, bool includeUnboundedBinary, System.Threading.CancellationToken cancellationToken = default)
-    public abstract TKey ParseKey(string keyText)
-    public abstract bool IsVersionless { get; }
-    public abstract string FormatKey(TKey key)
-    public abstract string TableName { get; }
-    public virtual System.Collections.Generic.IReadOnlyList<string> UnboundedBinaryColumnNames { get; }
+    public bool IsVersionless { get; }
+    public string FormatKey(TKey key)
+    public string TableName { get; }
     public virtual System.Threading.Tasks.Task<byte[]> GetChangeCeilingAsync(System.Threading.CancellationToken cancellationToken = default)
+
+public sealed class QuickER.Runtime.Sync.SyncTableDescriptor<TEntity, TKey> : QuickER.Runtime.Sync.ISyncTableDescriptor
+    public .ctor()
+    public System.Action<TEntity, TKey> WriteKey { get; init; }
+    public System.Action<TEntity, byte[]> WriteRowVersion { get; init; }
+    public System.Collections.Generic.IReadOnlyDictionary<string, QuickER.Runtime.Sync.SyncBinaryColumnAccessor<TKey>> UnboundedBinaryAccessors { get; init; }
+    public System.Collections.Generic.IReadOnlyList<string> UnboundedBinaryColumnNames { get; init; }
+    public System.Func<TEntity, TKey> ReadKey { get; init; }
+    public System.Func<TEntity, byte[]> ReadRowVersion { get; init; }
+    public System.Func<TKey, string> FormatKey { get; init; }
+    public System.Func<string, TKey> ParseKey { get; init; }
+    public System.Type EntityType { get; }
+    public bool IsVersionless { get; init; }
+    public byte[] ReadEntityRowVersion(QuickER.Runtime.EntityBase entity)
+    public string FormatEntityKey(QuickER.Runtime.EntityBase entity)
+    public string LocalAnchorSql { get; init; }
+    public string LocalDeleteAllSql { get; init; }
+    public string LocalExistingKeysSql { get; init; }
+    public string LocalKeysSql { get; init; }
+    public string RemoteRouteName { get; init; }
+    public string ServerChangesSql { get; init; }
+    public string ServerKeysSql { get; init; }
+    public string ServerPageAfterSql { get; init; }
+    public string ServerPageFirstSql { get; init; }
+    public string TableName { get; init; }
 
 public sealed class QuickER.Runtime.Sync.SyncUnboundedBinaryColumns : System.IEquatable<QuickER.Runtime.Sync.SyncUnboundedBinaryColumns>
     public .ctor(string TableName, System.Collections.Generic.IReadOnlyList<string> ColumnNames)
@@ -284,24 +331,21 @@ public struct QuickER.Runtime.Sync.SyncUploadOutcome : System.IEquatable<QuickER
     public static QuickER.Runtime.Sync.SyncUploadOutcome Discarded { get; }
     public static QuickER.Runtime.Sync.SyncUploadOutcome Uploaded { get; }
 
-public abstract class QuickER.Runtime.Sync.VersionlessDirectSyncSource<TEntity, TKey> : QuickER.Runtime.Sync.DirectSyncSourceBase<TEntity, TKey>, QuickER.Runtime.Sync.ISyncServerSource<TEntity, TKey>
-    protected .ctor(QuickER.Runtime.ISqlExecutor serverSqlExecutor, QuickER.Runtime.IRemoteRepository<TEntity, TKey> writer)
-    protected abstract string ServerPageAfterSql { get; }
-    protected abstract string ServerPageFirstSql { get; }
-    public System.Threading.Tasks.Task<QuickER.Runtime.Sync.SyncChangeBatch<TEntity>> GetChangesAsync(byte[] anchor, byte[] ceiling, int batchSize, System.Threading.CancellationToken cancellationToken = default)
-    public System.Threading.Tasks.Task<QuickER.Runtime.Sync.SyncChangeBatch<TEntity>> GetFirstPageAsync(int batchSize, System.Threading.CancellationToken cancellationToken = default)
-    public System.Threading.Tasks.Task<QuickER.Runtime.Sync.SyncChangeBatch<TEntity>> GetPageAfterAsync(TKey afterKey, int batchSize, System.Threading.CancellationToken cancellationToken = default)
-    public System.Threading.Tasks.Task<byte[]> GetChangeCeilingAsync(System.Threading.CancellationToken cancellationToken = default)
+public sealed class QuickER.Runtime.Sync.VersionlessDirectSyncSource<TEntity, TKey> : QuickER.Runtime.Sync.DirectSyncSourceBase<TEntity, TKey>, QuickER.Runtime.Sync.ISyncServerSource<TEntity, TKey>
+    public .ctor(QuickER.Runtime.ISqlExecutor serverSqlExecutor, QuickER.Runtime.IRemoteRepository<TEntity, TKey> writer, QuickER.Runtime.Sync.SyncTableDescriptor<TEntity, TKey> descriptor)
+    public override System.Threading.Tasks.Task<QuickER.Runtime.Sync.SyncChangeBatch<TEntity>> GetChangesAsync(byte[] anchor, byte[] ceiling, int batchSize, System.Threading.CancellationToken cancellationToken = default)
+    public override System.Threading.Tasks.Task<QuickER.Runtime.Sync.SyncChangeBatch<TEntity>> GetFirstPageAsync(int batchSize, System.Threading.CancellationToken cancellationToken = default)
+    public override System.Threading.Tasks.Task<QuickER.Runtime.Sync.SyncChangeBatch<TEntity>> GetPageAfterAsync(TKey afterKey, int batchSize, System.Threading.CancellationToken cancellationToken = default)
+    public override System.Threading.Tasks.Task<byte[]> GetChangeCeilingAsync(System.Threading.CancellationToken cancellationToken = default)
 
 public abstract class QuickER.Runtime.Sync.VersionlessJournalingRepository<TEntity, TKey> : QuickER.Runtime.Sync.JournalingRepositoryBase<TEntity, TKey>, QuickER.Runtime.IRemoteRepository<TEntity, TKey>, QuickER.Runtime.IRepository<TEntity, TKey>
-    protected .ctor(QuickER.Runtime.IRepository<TEntity, TKey> inner, QuickER.Runtime.Sync.SyncJournal journal)
+    protected .ctor(QuickER.Runtime.IRepository<TEntity, TKey> inner, QuickER.Runtime.Sync.SyncJournal journal, QuickER.Runtime.Sync.SyncTableDescriptor<TEntity, TKey> descriptor, QuickER.Runtime.Sync.SyncGraphRecorder graphRecorder)
     protected System.Threading.Tasks.Task RecordDeleteAsync(TKey id, System.Threading.CancellationToken cancellationToken)
 
-public abstract class QuickER.Runtime.Sync.VersionlessSyncTable<TEntity, TKey> : QuickER.Runtime.Sync.SyncTableBase<TEntity, TKey>, QuickER.Runtime.Sync.ISyncTable
-    protected .ctor(QuickER.Runtime.IRepository<TEntity, TKey> local, QuickER.Runtime.ISqlExecutor localSqlExecutor, QuickER.Runtime.Sync.ISyncServerSource<TEntity, TKey> server)
+public sealed class QuickER.Runtime.Sync.VersionlessSyncTable<TEntity, TKey> : QuickER.Runtime.Sync.SyncTableBase<TEntity, TKey>, QuickER.Runtime.Sync.ISyncTable
+    public .ctor(QuickER.Runtime.IRepository<TEntity, TKey> local, QuickER.Runtime.ISqlExecutor localSqlExecutor, QuickER.Runtime.Sync.ISyncServerSource<TEntity, TKey> server, QuickER.Runtime.Sync.SyncTableDescriptor<TEntity, TKey> descriptor)
     public override System.Threading.Tasks.Task<QuickER.Runtime.Sync.SyncUploadOutcome> UploadAsync(QuickER.Runtime.Sync.SyncJournalRow entry, QuickER.Runtime.Sync.SyncMode mode, QuickER.Runtime.Sync.SyncConflictPolicy policy, bool includeUnboundedBinary, System.Threading.CancellationToken cancellationToken = default)
     public override System.Threading.Tasks.Task<byte[]> GetChangeCeilingAsync(System.Threading.CancellationToken cancellationToken = default)
     public override System.Threading.Tasks.Task<int> DownloadAsync(byte[] ceiling, int batchSize, bool includeUnboundedBinary, System.Threading.CancellationToken cancellationToken = default)
     public override System.Threading.Tasks.Task<int> RefreshAsync(byte[] ceiling, int batchSize, bool includeUnboundedBinary, System.Threading.CancellationToken cancellationToken = default)
-    public override bool IsVersionless { get; }
 
