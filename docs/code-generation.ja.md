@@ -284,11 +284,7 @@ EditModelMessages.ParseFailed = static (propertyName, displayName, inputValue, t
 
 static クラス: `ValueObjectValidationMessages`（`MaxLengthExceeded` / `ScaleExceeded` / `PrecisionExceeded` / `ValueRequired` / `DigitsExceeded` / `OutOfRange` / `InvalidCharacters` / `InvalidEmailAddress` / `InputNotConvertible`＝いずれも表示名が第 1 引数）、`EditModelMessages`（`Required` / `ParseFailed` / `DuplicateValue` / `JoinValueObjectErrors`＝前 3 つはいずれも確定値プロパティ名〔複合制約は名前の並び〕が第 1 引数）、`GeneratedDisplayNames`（`Resolve`＝Entity・EditModel プロパティ・値オブジェクトすべての表示名解決に使われる）。パッケージ参照モードでは、この 3 つは `QuickER.Runtime` パッケージに収載されます。
 
-個別 partial: 値オブジェクト側は `OnValidate`（ほかに前述の `GetDefinedInstance` / `ConvertCustomInput`）、EditModel 側は意味系のみ（`OnValidate` / `OnBeginEdit` / `OnEndEdit` / `OnCancelEdit` / `On{Property}Changing` / `Changed`＝文言と表示名は中央リゾルバで解決するため）、Entity 側は `CustomizeDisplayName`（従来どおり partial でなく override 方式）。値オブジェクトの画面表示用文字列 `DisplayValue`（virtual）の override も引き続き使えます。
-
-> **EditModel の文言フックからの移行**: `CustomizeRequiredErrorMessage` / `CustomizeParseErrorMessage` / `CustomizeDuplicateErrorMessage` / `CustomizePropertyDisplayName` は生成されなくなり、実装が残っているとコンパイルエラーになります。文言は対応する `EditModelMessages` のエントリへ、表示名は `GeneratedDisplayNames.Resolve` へ移し、そこで受け取るプロパティ名を上の例のように分岐してください。
-
-> **値オブジェクトの文言フックからの移行**: `CustomizeDisplayName` / `CustomizeMaxLengthErrorMessage` / `CustomizeScaleErrorMessage` / `CustomizePrecisionErrorMessage` / `CustomizeValueRequiredErrorMessage` は生成されなくなり、実装が残っているとコンパイルエラーになります。表示名は `GeneratedDisplayNames.Resolve` へ、文言は対応する `ValueObjectValidationMessages` のエントリへ移し、上の例のように分岐してください。移した結果、文言が「型ごとに 1 か所」でなく「メッセージごとに 1 か所」へまとまり、生成側の型名が変わっても再実装が要らない（＝再生成で黙って無効化されない）形になります。
+個別 partial: 値オブジェクト側は `OnValidate`（ほかに前述の `GetDefinedInstance` / `ConvertCustomInput`）、EditModel 側は意味系のみ（`OnValidate` / `OnBeginEdit` / `OnEndEdit` / `OnCancelEdit` / `On{Property}Changing` / `Changed`＝文言と表示名は中央リゾルバで解決するため）、Entity 側は同じ理由で無し。Entity の `DisplayName` は `GeneratedDisplayNames.Resolve`（実行時クラス名とテーブル説明を受け取る）が解決するので、差し替えはそこでクラス名を分岐してください（`static (memberName, description) => memberName == nameof(CustomerEntity) ? "顧客" : description ?? memberName;`）。既定のリゾルバはテーブルの説明を優先するので、表示名は図の説明へ書くだけでも足ります。値オブジェクトの画面表示用文字列 `DisplayValue`（virtual）の override も引き続き使えます。
 
 ### 自分で呼べる検証ルール
 
@@ -841,7 +837,8 @@ catch (SaveConflictException ex) when (ex.Reason == SaveConflictReason.Modified)
 - **SELECT から除外**: `GetByIdAsync` / `GetAllAsync` / `Query()` の結果で除外列は `null`（DB から読み出さない）。ただし後述の `WithUnboundedBinary()` でオプトインした場合を除く
 - **UPDATE から除外**: 更新 SQL の SET 句に除外列は含まれない。除外列に値を設定したまま `UpdateAsync` / `SaveAsync` を実行すると**実行時例外**になる（黙ってデータを取りこぼさない）
 - **INSERT / BulkInsert は全列のまま**: 初回書き込みは通常どおり値を渡せる
-- **EditModel / Mapper は「未入力なら現行値維持」**: 除外列は必須入力チェックの対象外で、Mapper は EditModel が値を持つときだけ Entity へ書きます。通常フェッチでは除外列は未取得のままなので、「取得 → 他の列を編集 → `ApplyToEntity` → 保存」という定番の往復が検証を通り、UPDATE にも乗らず、DB の blob はそのまま残ります。**新規行**は EditModel に値を入れる（INSERT は全列）か、INSERT してから後述の Stream アクセサ（`Read/Write{Column}Async`）で blob を書く 2 段構えにしてください。`WithUnboundedBinary()` で取得した Entity を Mapper 経由で保存する場合は従来どおり例外になります（Entity が実値を持っている＝UPDATE ガードが捕まえるべき状態そのもののため）
+- **EditModel / Mapper は「未入力なら現行値維持」**: 除外列は必須入力チェックの対象外で、Mapper は EditModel が値を持つときだけ Entity へ書きます。通常フェッチでは除外列は未取得のままなので、「取得 → 他の列を編集 → `ApplyToEntity` → 保存」という定番の往復が検証を通り、UPDATE にも乗らず、DB の blob はそのまま残ります。`WithUnboundedBinary()` で取得した Entity を Mapper 経由で保存する場合は従来どおり例外になります（Entity が実値を持っている＝UPDATE ガードが捕まえるべき状態そのもののため）
+- **NOT NULL の除外列は新規行のあいだだけ必須入力**: まだ存在しない行には「維持すべき現行値」が無く、INSERT は全列を書くため、未入力のままだと `NULL` が NOT NULL 列へ送られて DB に拒否されます。そこで EditModel が `RowState.Added` のあいだは、その列も通常の必須項目と同じく未入力チェックの対象にし、エラーは列名つきで出ます。行が DB にできれば（UPDATE の対象外へ戻るため）このチェックは自ら取り下がります。**新規行**は EditModel に実データを入れる（INSERT は全列）か、後述の 2 段構え（INSERT してから Stream アクセサで流し込む）を使う場合は**空の値**を入れてください（値オブジェクト有効なら `editModel.Thumb = ThumbValue.Create([])`・無効なら `editModel.Thumb = []`）。空の値は未入力ではないのでチェックを通り、値オブジェクト無効の列では Entity の初期値がそもそも空配列です。確定値のセッターは `internal` なので、この 1 行は生成コードと同じアセンブリに置いてください。別アセンブリからは `mapper.CreateEntity()` で Entity を組み立て、そちらへ空の値を入れて INSERT します
 - **名前付きクエリの射影**が除外列を参照する場合は取得される（射影は明示的な列選択のため）
 - **生 SQL** で明示的に SELECT すれば取得できる（下記の運用例）
 - **EF Core モード（`DbSet` 経由のクエリ / `SaveChanges`）には適用されない**（EF Core の列選択は EF Core の責務）
@@ -902,7 +899,7 @@ Task<bool> WritePayloadFromFileAsync(int id, string path, CancellationToken ct =
 - **`Write(id, null)`** は列を `NULL` に設定します（除外列を「未設定」へ戻す手段）。
 - **長さ**: `source` が `CanSeek` なら自動（`Length - Position`）、そうでなければ `length` 引数が必須です（欠落は `ArgumentException`）。SQLite の `zeroblob` が書き込み前に長さを要求するためで、契約は方言中立に統一しています。
 - **楽観排他（rowversion 等）はスコープ外**です（生 SQL と同格の直接列操作）。
-- **INSERT 専用メソッドはありません**。新規行は「INSERT（blob は `null` または空）→ `Write{Column}Async` で本体を流し込む」の 2 段で書きます。
+- **INSERT 専用メソッドはありません**。新規行は「blob を空にしたまま INSERT → `Write{Column}Async` で本体を流し込む」の 2 段で書きます。NULL 許容列なら「空」は `null` で構いませんが、**NOT NULL** 列では実体のある空の値（値オブジェクト有効なら `ThumbValue.Create([])`・無効なら `[]`）が必要です（`null` の INSERT は DB に拒否されるため）。新規行のあいだ EditModel の必須チェックが求めるのも同じ値です。
 - **EF Core モードでは使用できません**（`NotSupportedException`）。EF Core は方言非依存設計のため方言固有のストリーミングを持てません。QuickER 版 Repository を使うか、`partial` クラスで実装してください（`GenerateEfCoreRepositories` と QuickER 版 Repository を併用する構成では、EF Core 版実装のみ例外になります）。
 - **配置先**: リモート契約（`--generate-remote-contracts` / `--generate-remote-services`）が無効なら全機能面 `I{Entity}Repository` に直接載ります。有効な場合はリモート面 `I{Entity}RemoteRepository` へ移設されます（全機能面はリモート面を継承するので、どちらの構成でも利用コードは同じ・純粋に追加的）。ファイル糖衣もその対象インターフェイスに合わせます。リモートサービス（`--generate-remote-services`）を有効にすると HTTP で転送できます（後述の「バイナリ転送エンドポイント」）。
 

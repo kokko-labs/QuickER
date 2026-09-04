@@ -416,6 +416,10 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
     }
 
     /// <summary>Updates an entity (true when a matching row was updated).</summary>
+    /// <remarks>
+    /// This dialect's database assigns no store-generated values, so this engine performs no version check here:
+    /// <paramref name="mode"/> is ignored and the update is applied unconditionally.
+    /// </remarks>
     public async Task<bool> UpdateAsync(
         TEntity entity,
         ConcurrencyMode mode = ConcurrencyMode.Optimistic,

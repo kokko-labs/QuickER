@@ -50,9 +50,9 @@ public static class ErDesignRules
     /// <remarks>
     /// 応答言語のルールは「UI 言語を既定・ユーザーのメッセージが明らかに別言語のときのみ切替」を
     /// resx（＝UI 言語）で解決し、指示文の最後尾へ付加する。「ユーザーの直近のメッセージと同じ言語で」
-    /// という鏡映し指示は、CLI エージェント接続（Claude Code / Codex）でユーザー環境のメモリファイルが
-    /// ユーザーの声として文脈に混入すると「ユーザーの言語」の推論が引きずられ不安定だったため廃止
-    /// （実 CLI での A/B 検証に基づく。既定言語の明示は 3/3 で安定）。
+    /// という鏡映し指示は使わない——CLI エージェント接続（Claude Code / Codex）ではユーザー環境の
+    /// メモリファイルがユーザーの声として文脈へ混入し、「ユーザーの言語」の推論が引きずられて
+    /// 不安定になるため（実 CLI での A/B 検証で既定言語の明示は 3/3 安定）。
     /// </remarks>
     private static string BuildChatToolInstructions(string toolMechanismLabel) =>
         string.Format(

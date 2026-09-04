@@ -332,8 +332,8 @@ internal sealed class CSharpClassModel
     public string? DisplayNameDescription { get; init; }
 
     /// <summary>
-    /// 列由来プロパティ名が <c>DisplayName</c> / <c>CustomizeDisplayName</c> と衝突するため、
-    /// <c>DisplayName</c> プロパティと <c>CustomizeDisplayName</c> フックの生成を省略するかどうか。
+    /// 列由来プロパティ名が基底の <c>DisplayName</c> プロパティと衝突するため、
+    /// <c>DefaultDisplayName</c> の override 生成を省略するかどうか。
     /// </summary>
     public required bool HasDisplayNameCollision { get; init; }
 
@@ -812,7 +812,8 @@ internal sealed record CSharpEditModelPropertyModel
     /// <summary>必須項目（Entity 側が非 NULL）かどうか</summary>
     /// <remarks>
     /// 行バージョン列（<see cref="IsRowVersion"/>）は DB 採番のため非 NULL でも必須にしない。
-    /// 除外された無制限バイナリ列（<see cref="IsExcludedUnboundedBinary"/>）も通常フェッチでは未取得のため必須にしない。
+    /// 除外された無制限バイナリ列（<see cref="IsExcludedUnboundedBinary"/>）も通常フェッチでは未取得のため必須にしない
+    /// （ただし NOT NULL の除外列は新規行のあいだだけ必須にする＝<see cref="IsRequiredWhenAdded"/>）。
     /// </remarks>
     public required bool IsRequired { get; init; }
 
@@ -828,6 +829,17 @@ internal sealed record CSharpEditModelPropertyModel
     /// </summary>
     /// <remarks>必須検証の除外と、Mapper の「入力があるときだけ代入」への切り替えに使う。</remarks>
     public bool IsExcludedUnboundedBinary { get; init; }
+
+    /// <summary>
+    /// 新規行（<c>RowState.Added</c>）のときだけ必須入力になる列かどうか（NOT NULL の除外無制限バイナリ列）。
+    /// </summary>
+    /// <remarks>
+    /// 除外列は通常フェッチで未取得のまま届くため <see cref="IsRequired"/> は false だが、NOT NULL 宣言の列を
+    /// 未入力のまま INSERT すると DB の NOT NULL 違反で必ず落ちる。行がまだ DB に無い間だけ必須にすることで、
+    /// その入力を画面で列名つきに止める。正当な 2 段方式（INSERT → <c>Write{列}Async</c>）は空の値
+    /// （VO は <c>Create([])</c>・素の <c>byte[]</c> は空配列）を入れれば非 null なのでこの検証を素通りする。
+    /// </remarks>
+    public bool IsRequiredWhenAdded { get; init; }
 
     /// <summary>参照型かどうか</summary>
     public required bool IsReferenceType { get; init; }

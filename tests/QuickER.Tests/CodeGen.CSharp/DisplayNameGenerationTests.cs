@@ -84,11 +84,8 @@ public class DisplayNameGenerationTests
         content.Should().Contain("GeneratedDisplayNames.Resolve(\"Name\", \"顧客名\");");
         // Description なし: 説明は null を渡し、プロパティ名（クラス名 CustomerIdValue ではなく CustomerId）へフォールバックする
         content.Should().Contain("GeneratedDisplayNames.Resolve(\"CustomerId\", null);");
-        // VO 個別の表示名フックは廃止済み（差し替え点は Resolve 1 本＝型ごとの分岐も memberName で書く。
-        // Entity 側の override 方式 CustomizeDisplayName は別機構なので、VO の partial 宣言形だけを見る）
-        content
-            .Should()
-            .NotContain("static partial void CustomizeDisplayName(ref string displayName);");
+        // VO・Entity とも表示名フックは廃止済み（差し替え点は Resolve 1 本＝型ごとの分岐も memberName で書く）
+        content.Should().NotContain("CustomizeDisplayName");
     }
 
     // ===== Entity の DisplayName 既定値 =====
@@ -135,10 +132,9 @@ public class DisplayNameGenerationTests
                 "protected virtual string DefaultDisplayName => GeneratedDisplayNames.Resolve(GetType().Name, null);"
             );
         withoutDescription.Should().NotContain("protected override string DefaultDisplayName");
-        // 表示名の上書き拡張点は基底の virtual メソッドとして提供される
-        withoutDescription
-            .Should()
-            .Contain("protected virtual void CustomizeDisplayName(ref string displayName)");
+        // 表示名の差し替えフックは廃止（差し替えは中央リゾルバ 1 か所）。DisplayName は既定値をそのまま返す
+        withoutDescription.Should().NotContain("CustomizeDisplayName");
+        withoutDescription.Should().Contain("public string DisplayName => DefaultDisplayName;");
     }
 
     // ===== VO 無効時の GetDisplayName 配線 =====
@@ -181,7 +177,7 @@ public class DisplayNameGenerationTests
 
     // ===== Entity 列名衝突 =====
 
-    /// <summary>display_name 列を持つエンティティは DisplayName / CustomizeDisplayName を省略し警告する。他エンティティは正常に出す</summary>
+    /// <summary>display_name 列を持つエンティティは DefaultDisplayName の override を省略し警告する。他エンティティは正常に出す</summary>
     [Fact]
     public void Generate_EntityWithDisplayNameColumn_OmitsMembersWarnsAndKeepsOtherEntities()
     {
@@ -247,10 +243,10 @@ public class DisplayNameGenerationTests
             .Contain(diagnostic =>
                 diagnostic.Severity == GenerationDiagnosticSeverity.Warning
                 && diagnostic.Message.Contains("LabelEntity")
-                && diagnostic.Message.Contains("DisplayName / CustomizeDisplayName")
+                && diagnostic.Message.Contains("DefaultDisplayName")
             );
 
-        // 衝突エンティティは列プロパティ DisplayName を持ち、基底の DisplayName を new で隠す（表示名フックは出さない）
+        // 衝突エンティティは列プロパティ DisplayName を持ち、基底の DisplayName を new で隠す
         content.Should().Contain("public new string DisplayName { get; set; }");
         content.Should().NotContain("protected override string DefaultDisplayName");
 

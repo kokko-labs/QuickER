@@ -35,22 +35,11 @@ public abstract partial class EntityBase
     /// <summary>Gets whether this entity has any change (insert, update, or removal).</summary>
     public bool HasChanges => RowState != RowState.Unchanged;
 
-    /// <summary>Display name of this entity (used for UI labels and so on). Defaults to <see cref="DefaultDisplayName"/> and can be overridden via CustomizeDisplayName.</summary>
-    public string DisplayName
-    {
-        get
-        {
-            var displayName = DefaultDisplayName;
-            CustomizeDisplayName(ref displayName);
-            return displayName;
-        }
-    }
+    /// <summary>Display name of this entity (used for UI labels and so on). Returns <see cref="DefaultDisplayName"/>; substitute display names by replacing GeneratedDisplayNames.Resolve and branching on the class name it receives.</summary>
+    public string DisplayName => DefaultDisplayName;
 
     /// <summary>Default display name. Resolved from the runtime class name through GeneratedDisplayNames.Resolve (no description); entities that carry a table description override this in the derived class.</summary>
     protected virtual string DefaultDisplayName => GeneratedDisplayNames.Resolve(GetType().Name, null);
-
-    /// <summary>Extension point for substituting the display name (override in a derived class; when not overridden the default display name is used).</summary>
-    protected virtual void CustomizeDisplayName(ref string displayName) { }
 
     /// <summary>Marks this entity for insert (use when a directly constructed entity should be saved).</summary>
     /// <param name="includeChildren">
@@ -293,7 +282,7 @@ public static class GeneratedDisplayNames
 {{ end }}{{ if emit_db_meta_attr && property.canonical_type_token }}    [DbColumnMeta("{{ property.canonical_type_token }}"{{ if property.description != "" }}, Description = "{{ property.description }}"{{ end }})]
 {{ end }}{{ if exclude_unbounded_binary && property.is_unbounded_binary }}    [UnboundedBinaryColumn]
 {{ end }}{{ if property.is_row_version }}    [StoreGeneratedColumn]
-{{ end }}    public {{ if property.property_name == "DisplayName" || property.property_name == "CustomizeDisplayName" }}new {{ end }}{{ property.type_name }} {{ property.property_name }} { get; set; }{{ property.initializer }}
+{{ end }}    public {{ if property.property_name == "DisplayName" }}new {{ end }}{{ property.type_name }} {{ property.property_name }} { get; set; }{{ property.initializer }}
 {{ end }}{{ for navigation in item.navigations }}
     /// <summary>{{ navigation.property_name }} navigation property</summary>
 {{ if include_json_ignore_on_parent_navigation && navigation.is_parent_reference }}    [JsonIgnore]

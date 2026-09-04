@@ -74,7 +74,7 @@ internal sealed partial class CSharpGenerationModelBuilder
     /// 発行条件（<see cref="CSharpClassModel.HasDisplayNameCollision"/> が false かつ
     /// <see cref="CSharpClassModel.DisplayNameDescription"/> が非 null）が成り立つときだけシンボル表へ入れる。
     /// 説明の無いテーブルでは override 自体が出ないため、同名の列があっても診断しない。
-    /// 表示名機構の予約名（<c>DisplayName</c> / <c>CustomizeDisplayName</c>）は衝突しても機構の省略で救えるため、
+    /// 表示名機構の予約名（<c>DisplayName</c>）は衝突しても機構の省略で救えるため、
     /// ここではなく <c>CodeGen_Warning_EntityDisplayNameCollision</c> の警告が担当する。
     /// </remarks>
     private static IEnumerable<GeneratedMemberName> CollectEntityMemberNames(
@@ -124,7 +124,7 @@ internal sealed partial class CSharpGenerationModelBuilder
     ///   <item><description>L1276 <c>private (型) (p.field_name)Snapshot</c> ＝行編集の確定値スナップショットフィールド</description></item>
     ///   <item><description>L1157/L1181 <c>private (型) (navigation.field_name)</c> ＝カスケード子のバッキングフィールド（親参照ナビは field_name が空で発行されない）</description></item>
     ///   <item><description>L1160/L1184/L1201 <c>public (型) (navigation.property_name)</c> ＝ナビゲーションプロパティ</description></item>
-    ///   <item><description>固定メンバー ＝ <see cref="GeneratedFixedMemberNames.EditModelAlways"/>（無条件。位置ヘルパー 4 名は EditModelBase&lt;TSelf&gt; へ移設済みで per-type には出ない）</description></item>
+    ///   <item><description>固定メンバー ＝ <see cref="GeneratedFixedMemberNames.EditModelAlways"/>（無条件。位置ヘルパー 4 名は EditModelBase&lt;TSelf&gt; 側の宣言で per-type には出ない）</description></item>
     ///   <item><description>L1267 <c>RegisterChildren</c> ＝ <see cref="GeneratedFixedMemberNames.EditModelWithCascadeNavigations"/>（カスケード子を持つときのみ）</description></item>
     ///   <item><description>L1322 <c>ParentModel</c> ＝ <see cref="GeneratedFixedMemberNames.EditModelWithTypedParentModel"/>（型付き親モデルがあるときのみ）</description></item>
     ///   <item><description><c>ValidateUniqueAsync</c> ＝ <see cref="GeneratedFixedMemberNames.EditModelWithRepositoryFace"/>（Repository 契約面があるときのみ）</description></item>
@@ -181,8 +181,8 @@ internal sealed partial class CSharpGenerationModelBuilder
             yield return new GeneratedMemberName(name, FormatFixedMemberOrigin(name));
         }
 
-        // EditModelBase<TSelf> へ移設した位置ヘルパーは per-type には出ないが、列由来プロパティが同名を
-        // 取ると基底メンバを隠して型付きの面が壊れるため、予約名として従来どおり衝突を生成エラーにする
+        // EditModelBase<TSelf> が宣言する位置ヘルパーは per-type には出ないが、列由来プロパティが同名を
+        // 取ると基底メンバを隠して型付きの面が壊れるため、予約名として衝突を生成エラーにする
         foreach (var name in GeneratedFixedMemberNames.EditModelPositionHelpers)
         {
             yield return new GeneratedMemberName(name, FormatFixedMemberOrigin(name));

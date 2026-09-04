@@ -11,7 +11,6 @@ namespace QuickER.CodeGen.UI;
 /// 現在の ER 図から C# の Entity / EditModel / Mapper / Repository コードを生成するコマンドサービス。
 /// </summary>
 /// <remarks>
-/// アプリ本体 <c>MainViewModel</c> の <c>GenerateCSharpCode</c> から移設したフィーチャーモジュール本体。
 /// ER 図の取得・プロバイダ解決はホスト契約（<see cref="IErDiagramHost"/>）越しに行い、
 /// ダイアログ提示は <see cref="ICSharpGenerationDialogPresenter"/> のシーム越しに行う。
 /// </remarks>

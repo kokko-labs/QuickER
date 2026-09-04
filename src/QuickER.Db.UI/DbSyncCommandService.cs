@@ -7,8 +7,6 @@ namespace QuickER.Db.UI;
 /// データベースへ接続し、現在の図との差分同期ダイアログを開くコマンドサービス。
 /// </summary>
 /// <remarks>
-/// アプリ本体 <c>MainViewModel</c> の <c>SyncToDatabase</c> / <c>CanSyncToDatabase</c> /
-/// <c>SyncToDatabaseTooltip</c> から移設したフィーチャーモジュール本体。
 /// 現在は全方言が DB 同期に対応する（SQLite はテーブル再構築方式で対応）。
 /// 対象 DBMS 切替に伴うボタン活性・ツールチップの再評価機構は、将来の方言差に備えて
 /// モジュール側が <see cref="IErDiagramHost.TargetDbmsChanged"/> を購読して維持する。

@@ -1254,7 +1254,7 @@ public static class EditModelMessages
     public static Func<string, string, string> Required { get; set; } =
         static (propertyName, displayName) => $"'{displayName}' is required.";
 
-    /// <summary>Message for a binding value that cannot be converted (arguments: confirmed-value property name, display name, input value, target type name). The default does not include the display name, matching the historical format.</summary>
+    /// <summary>Message for a binding value that cannot be converted (arguments: confirmed-value property name, display name, input value, target type name). The default does not include the display name.</summary>
     public static Func<string, string, string, string, string> ParseFailed { get; set; } =
         static (propertyName, displayName, inputValue, typeName) =>
             $"'{inputValue}' cannot be converted to {typeName}.";
@@ -1491,6 +1491,7 @@ public sealed record EditModelError(string Path, string Property, string Message
 /// <param name="PropertyName">The confirmed-value property's name (the stable key uniqueness checks and message resolvers switch on).</param>
 /// <param name="BindingPropertyName">The input binding property's name (the name errors are registered under).</param>
 /// <param name="IsRequired">Whether the missing-required-input check applies to this column.</param>
+/// <param name="IsRequiredWhenAdded">Whether the missing-required-input check applies to this column while the row is still <see cref="RowState.Added"/> - a NOT NULL column the repository leaves out of SELECT and UPDATE, which the database rejects if it is inserted empty.</param>
 /// <param name="DisplayName">Resolves the display name used in validation messages.</param>
 /// <param name="GetValue">Reads the confirmed value.</param>
 /// <param name="SetValue">Writes the confirmed value through its internal setter.</param>
@@ -1500,6 +1501,7 @@ public sealed record EditModelColumn<TModel>(
     string PropertyName,
     string BindingPropertyName,
     bool IsRequired,
+    bool IsRequiredWhenAdded,
     Func<string> DisplayName,
     Func<TModel, object?> GetValue,
     Action<TModel, object?> SetValue,
@@ -1547,8 +1549,16 @@ public abstract partial class EditModelBase<TSelf> : EditModelBase
 
     /// <summary>Checks the columns declared required for missing input, registering and withdrawing only the errors this check owns. Called from Validate; a generated class appends its OnValidate hook.</summary>
     /// <remarks>
+    /// <para>
     /// A field that already carries another input error keeps it (<see cref="EditModelBase.SetRequiredError"/> declines to
     /// overwrite), because a value that cannot be converted is the more upstream cause and the one the user has to act on.
+    /// </para>
+    /// <para>
+    /// A column marked <see cref="EditModelColumn{TModel}.IsRequiredWhenAdded"/> is checked only while the row is still
+    /// <see cref="RowState.Added"/>: the value is on its way into an INSERT, which the database rejects on a NOT NULL column
+    /// that is left empty. Once the row exists, the column is out of scope for UPDATE and an absent value means "keep what is
+    /// stored", so the check withdraws what it registered while the row was new.
+    /// </para>
     /// </remarks>
     protected override void ValidateSelf()
     {
@@ -1556,12 +1566,14 @@ public abstract partial class EditModelBase<TSelf> : EditModelBase
 
         foreach (var column in EditModelColumns)
         {
-            if (!column.IsRequired)
+            if (!column.IsRequired && !column.IsRequiredWhenAdded)
             {
                 continue;
             }
 
-            if (column.GetValue(model) is null)
+            var applies = column.IsRequired || RowState == RowState.Added;
+
+            if (applies && column.GetValue(model) is null)
             {
                 SetRequiredError(
                     column.BindingPropertyName,
@@ -2386,6 +2398,7 @@ public partial class {{ item.class_name }} : EditModelBase<{{ item.class_name }}
                 nameof({{ p.property_name }}),
                 nameof({{ p.binding_property_name }}),
                 {{ p.is_required }},
+                {{ p.is_required_when_added }},
                 static () => {{ p.display_name_expression }},
                 static model => model.{{ p.property_name }},
                 static (model, value) => model.{{ p.property_name }} = ({{ p.type_name }})value,

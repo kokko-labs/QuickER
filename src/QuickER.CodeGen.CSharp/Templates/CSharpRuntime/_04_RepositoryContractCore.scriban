@@ -1776,6 +1776,12 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
     /// version is written back to <paramref name="entity"/>.
     /// </remarks>
 {{~ end ~}}
+{{~ if !dialect_assigns_store_generated ~}}
+    /// <remarks>
+    /// This dialect's database assigns no store-generated values, so this engine performs no version check here:
+    /// <paramref name="mode"/> is ignored and the update is applied unconditionally.
+    /// </remarks>
+{{~ end ~}}
     public async Task<bool> UpdateAsync(
         TEntity entity,
         ConcurrencyMode mode = ConcurrencyMode.Optimistic,

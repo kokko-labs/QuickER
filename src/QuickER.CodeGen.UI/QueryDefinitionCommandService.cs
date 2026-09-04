@@ -6,7 +6,6 @@ namespace QuickER.CodeGen.UI;
 /// 名前付きクエリ定義エディタを開き、確定結果で現在の図のクエリを置き換えるコマンドサービス。
 /// </summary>
 /// <remarks>
-/// アプリ本体 <c>MainViewModel</c> の <c>OpenQueryDefinitions</c> から移設したフィーチャーモジュール本体。
 /// 編集はダイアログ側の複製に対して行われ、OK 確定時のみ結果が返る（キャンセルは無影響）。
 /// 置換後の自動保存は <see cref="IErDiagramHost.ReplaceQueries"/> のホスト実装が担う。
 /// </remarks>
