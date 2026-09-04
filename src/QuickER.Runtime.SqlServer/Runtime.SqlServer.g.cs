@@ -455,6 +455,40 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
     /// <summary>Starts a query where filters, ordering, and Include can be specified via a fluent chain.</summary>
     public SqlQuery<TEntity> Query() => new(new SqlServerSqlQueryExecutor<TEntity>(_connectionFactory));
 
+    /// <summary>Gets the UNIQUE constraints the pre-check walks (the generated repository overrides this with its own table; empty here).</summary>
+    protected virtual UniquenessConstraintSet<TEntity> UniquenessConstraints =>
+        UniquenessConstraintSet<TEntity>.Empty;
+
+    /// <summary>Collects the user-defined uniqueness checks (the generated repository overrides this to reach its own partial hook).</summary>
+    /// <param name="checks">The list to add the checks to (null until the first one is added).</param>
+    protected virtual void CollectUniquenessChecks(ref List<UniquenessCheck<TEntity>>? checks) { }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
+        TEntity entity,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var constraints = UniquenessConstraints;
+        var violations = await UniquenessChecker
+            .CheckAsync(
+                entity,
+                Query,
+                constraints.ExcludeSelf,
+                constraints.Constraints,
+                cancellationToken
+            )
+            .ConfigureAwait(false);
+
+        List<UniquenessCheck<TEntity>>? customChecks = null;
+        CollectUniquenessChecks(ref customChecks);
+        await UniquenessChecker
+            .RunCustomChecksAsync(entity, customChecks, violations, cancellationToken)
+            .ConfigureAwait(false);
+
+        return violations;
+    }
+
     /// <summary>
     /// Reads an unbounded binary (excluded) column, addressed by primary key, into the destination stream (O(chunk)
     /// streaming — the full blob is never loaded into memory). <paramref name="propertyName"/> is the C# property name of

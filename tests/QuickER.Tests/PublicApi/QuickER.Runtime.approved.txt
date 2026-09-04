@@ -184,6 +184,7 @@ public abstract class QuickER.Runtime.HttpRemoteRepository<TEntity, TKey> : Quic
     protected System.Threading.Tasks.Task<bool> UploadUnboundedBinaryColumnAsync(string columnRoute, TKey id, System.IO.Stream source, long? length, System.Threading.CancellationToken cancellationToken)
     protected string FormatKeyForQuery(TKey id)
     public System.Threading.Tasks.Task InsertAsync(TEntity entity, System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<QuickER.Runtime.UniquenessViolation>> CheckUniquenessAsync(TEntity entity, System.Threading.CancellationToken cancellationToken = default)
     public System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TEntity>> GetAllAsync(System.Threading.CancellationToken cancellationToken = default)
     public System.Threading.Tasks.Task<TEntity> GetByIdAsync(TKey id, System.Threading.CancellationToken cancellationToken = default)
     public System.Threading.Tasks.Task<bool> DeleteAsync(TKey id, System.Threading.CancellationToken cancellationToken = default)
@@ -194,6 +195,7 @@ public abstract class QuickER.Runtime.HttpRemoteRepository<TEntity, TKey> : Quic
 
 public interface QuickER.Runtime.IRemoteRepository<TEntity, TKey>
     public virtual System.Threading.Tasks.Task InsertAsync(TEntity entity, System.Threading.CancellationToken cancellationToken = default)
+    public virtual System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<QuickER.Runtime.UniquenessViolation>> CheckUniquenessAsync(TEntity entity, System.Threading.CancellationToken cancellationToken = default)
     public virtual System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TEntity>> GetAllAsync(System.Threading.CancellationToken cancellationToken = default)
     public virtual System.Threading.Tasks.Task<TEntity> GetByIdAsync(TKey id, System.Threading.CancellationToken cancellationToken = default)
     public virtual System.Threading.Tasks.Task<bool> DeleteAsync(TKey id, System.Threading.CancellationToken cancellationToken = default)
@@ -561,6 +563,12 @@ public sealed class QuickER.Runtime.UniquenessConstraintCheck<TEntity> : System.
     public System.Func<QuickER.Runtime.SqlQuery<TEntity>, TEntity, QuickER.Runtime.SqlQuery<TEntity>> ApplyFilter { get; init; }
     public System.Func<TEntity, bool> HasAllValues { get; init; }
     public string ConstraintName { get; init; }
+
+public sealed class QuickER.Runtime.UniquenessConstraintSet<TEntity> : System.IEquatable<QuickER.Runtime.UniquenessConstraintSet<TEntity>>
+    public .ctor(System.Collections.Generic.IReadOnlyList<QuickER.Runtime.UniquenessConstraintCheck<TEntity>> Constraints, System.Func<QuickER.Runtime.SqlQuery<TEntity>, TEntity, QuickER.Runtime.SqlQuery<TEntity>> ExcludeSelf)
+    public System.Collections.Generic.IReadOnlyList<QuickER.Runtime.UniquenessConstraintCheck<TEntity>> Constraints { get; init; }
+    public System.Func<QuickER.Runtime.SqlQuery<TEntity>, TEntity, QuickER.Runtime.SqlQuery<TEntity>> ExcludeSelf { get; init; }
+    public static QuickER.Runtime.UniquenessConstraintSet<TEntity> Empty { get; }
 
 public sealed class QuickER.Runtime.UniquenessViolation : System.IEquatable<QuickER.Runtime.UniquenessViolation>
     public .ctor(string ConstraintName, System.Collections.Generic.IReadOnlyList<string> PropertyNames, string Message = null)

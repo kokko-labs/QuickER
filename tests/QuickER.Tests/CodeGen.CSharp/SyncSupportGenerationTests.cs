@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using AwesomeAssertions;
@@ -379,7 +379,12 @@ public class SyncSupportGenerationTests
         decorator.Should().Contain("protected override string TableName =>");
         decorator.Should().Contain("SyncGraphRecorder.RecordSaveAsync(");
         decorator.Should().Contain("cascadeDelete,");
+
+        // 重複事前チェックはランタイム共通面の member なので、素通しは汎用コア側が 1 回だけ持つ
         decorator
+            .Should()
+            .NotContain("public Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(");
+        ExtractClass(content, "public abstract class JournalingRepositoryBase<TEntity, TKey>")
             .Should()
             .Contain("public Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(");
 

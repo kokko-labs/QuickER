@@ -72,6 +72,7 @@ public abstract class QuickER.Runtime.Sync.JournalingRepositoryBase<TEntity, TKe
     protected abstract string TableName { get; }
     public QuickER.Runtime.SqlQuery<TEntity> Query()
     public System.Threading.Tasks.Task InsertAsync(TEntity entity, System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<QuickER.Runtime.UniquenessViolation>> CheckUniquenessAsync(TEntity entity, System.Threading.CancellationToken cancellationToken = default)
     public System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TEntity>> GetAllAsync(System.Threading.CancellationToken cancellationToken = default)
     public System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TEntity>> QueryBySqlAsync(string sql, object parameters = null, System.Threading.CancellationToken cancellationToken = default)
     public System.Threading.Tasks.Task<TEntity> GetByIdAsync(TKey id, System.Threading.CancellationToken cancellationToken = default)

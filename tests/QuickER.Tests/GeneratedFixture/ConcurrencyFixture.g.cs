@@ -5173,6 +5173,26 @@ public sealed record UniquenessConstraintCheck<TEntity>(
 )
     where TEntity : class;
 
+/// <summary>The UNIQUE constraints of one entity type as a single value: the constraint table and the self-exclusion that belongs with it.</summary>
+/// <remarks>
+/// The generated repository hands this to its base class through a single override, which is what lets one implementation
+/// of the pre-check serve every entity type. An entity type that declares no constraint leaves <see cref="Empty"/> in
+/// place, so the walk finds nothing and only the user-defined checks run.
+/// </remarks>
+/// <typeparam name="TEntity">The entity type being checked.</typeparam>
+/// <param name="Constraints">The constraint checks, in declaration order.</param>
+/// <param name="ExcludeSelf">Excludes the entity's own row from a candidate query (a row that has no primary key yet excludes nothing).</param>
+public sealed record UniquenessConstraintSet<TEntity>(
+    IReadOnlyList<UniquenessConstraintCheck<TEntity>> Constraints,
+    Func<SqlQuery<TEntity>, TEntity, SqlQuery<TEntity>> ExcludeSelf
+)
+    where TEntity : class
+{
+    /// <summary>The set an entity type that declares no UNIQUE constraint uses (nothing to walk, no row to exclude).</summary>
+    public static UniquenessConstraintSet<TEntity> Empty { get; } =
+        new(Array.Empty<UniquenessConstraintCheck<TEntity>>(), static (query, _) => query);
+}
+
 /// <summary>Shared engine of the uniqueness pre-check: walks the constraint table, excludes the entity's own row, asks the store for existence, and runs the user-defined checks.</summary>
 /// <remarks>
 /// Everything type-specific stays with the generated code, either as data (the constraint table and the self-exclusion,
@@ -5330,6 +5350,22 @@ public partial interface IRemoteRepository<TEntity, TKey>
         bool cascadeDelete = true,
         bool insertWhenUpdateMissing = false,
         ConcurrencyMode mode = ConcurrencyMode.Optimistic,
+        CancellationToken cancellationToken = default
+    );
+
+    /// <summary>Checks the entity's declared UNIQUE constraints against the store and returns the violations (an empty list when there are none).</summary>
+    /// <remarks>
+    /// Rows that share the entity's primary key are excluded, so the same call is correct for both insert and update (an
+    /// entity whose key is not set yet excludes nothing). Constraint member values that contain a null are skipped (NULL
+    /// collision semantics differ per dialect). The result is advisory only: the definitive guarantee is the database's
+    /// own UNIQUE constraint, and a concurrent insert between this check and the save can still make the save fail
+    /// (TOCTOU). The checks a repository adds through its <c>CollectCustomUniquenessChecks</c> hook run as part of it,
+    /// and over a remote implementation the whole check, those hooks included, runs in the server-side repository.
+    /// </remarks>
+    /// <param name="entity">The entity whose constraint member values are checked.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
+        TEntity entity,
         CancellationToken cancellationToken = default
     );
 }
@@ -6740,6 +6776,40 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
 
     /// <summary>Starts a query where filters, ordering, and Include can be specified via a fluent chain.</summary>
     public SqlQuery<TEntity> Query() => new(new SqlServerSqlQueryExecutor<TEntity>(_connectionFactory));
+
+    /// <summary>Gets the UNIQUE constraints the pre-check walks (the generated repository overrides this with its own table; empty here).</summary>
+    protected virtual UniquenessConstraintSet<TEntity> UniquenessConstraints =>
+        UniquenessConstraintSet<TEntity>.Empty;
+
+    /// <summary>Collects the user-defined uniqueness checks (the generated repository overrides this to reach its own partial hook).</summary>
+    /// <param name="checks">The list to add the checks to (null until the first one is added).</param>
+    protected virtual void CollectUniquenessChecks(ref List<UniquenessCheck<TEntity>>? checks) { }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
+        TEntity entity,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var constraints = UniquenessConstraints;
+        var violations = await UniquenessChecker
+            .CheckAsync(
+                entity,
+                Query,
+                constraints.ExcludeSelf,
+                constraints.Constraints,
+                cancellationToken
+            )
+            .ConfigureAwait(false);
+
+        List<UniquenessCheck<TEntity>>? customChecks = null;
+        CollectUniquenessChecks(ref customChecks);
+        await UniquenessChecker
+            .RunCustomChecksAsync(entity, customChecks, violations, cancellationToken)
+            .ConfigureAwait(false);
+
+        return violations;
+    }
 
     /// <summary>Saves inserts, updates, and deletes in a single transaction according to RowState (children cascade by default).</summary>
     /// <remarks>
@@ -9570,6 +9640,18 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         _entityRoute = entityRoute;
     }
 
+    /// <inheritdoc />
+    /// <remarks>The check runs in the server-side repository, so the user-defined hooks that repository declares take part in it.</remarks>
+    public Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
+        TEntity entity,
+        CancellationToken cancellationToken = default
+    ) =>
+        InvokeAsync<IReadOnlyList<UniquenessViolation>>(
+            "CheckUniqueness",
+            new { entity },
+            cancellationToken
+        );
+
     /// <summary>Asks the server whether it is up (<c>GET {prefix}/health</c>), returning <c>false</c> instead of throwing when it is not.</summary>
     /// <remarks>
     /// <para>
@@ -11897,22 +11979,20 @@ public static class GeneratedSqlServerRepositoryServiceCollectionExtensions
         services.TryAddScoped<ISaveHookRegistry>(provider => new ServiceProviderSaveHookRegistry(
             provider
         ));
-        services.AddScoped<IGadgetRepository>(provider => new GadgetRepository(
-            provider.GetRequiredService<ISqlConnectionFactory>(),
-            provider.GetService<ISaveHookRegistry>(),
-            provider.GetService<ISqlExecutor>()
-        ));
-        services.AddScoped<IGadgetRemoteRepository>(provider =>
-            provider.GetRequiredService<IGadgetRepository>()
-        );
-        services.AddScoped<IGadgetNoteRepository>(provider => new GadgetNoteRepository(
-            provider.GetRequiredService<ISqlConnectionFactory>(),
-            provider.GetService<ISaveHookRegistry>(),
-            provider.GetService<ISqlExecutor>()
-        ));
-        services.AddScoped<IGadgetNoteRemoteRepository>(provider =>
-            provider.GetRequiredService<IGadgetNoteRepository>()
-        );
+
+        // Both contracts are meant to hand back one repository per scope, so the remote surface forwards to the
+        // full-featured registration instead of being registered on its own
+        void AddRepository<TContract, TRemote, TImplementation>()
+            where TContract : class, TRemote
+            where TRemote : class
+            where TImplementation : class, TContract
+        {
+            services.AddScoped<TContract, TImplementation>();
+            services.AddScoped<TRemote>(provider => provider.GetRequiredService<TContract>());
+        }
+
+        AddRepository<IGadgetRepository, IGadgetRemoteRepository, GadgetRepository>();
+        AddRepository<IGadgetNoteRepository, IGadgetNoteRemoteRepository, GadgetNoteRepository>();
 
         return services;
     }
@@ -11943,29 +12023,34 @@ public static class GeneratedSqlServerRepositoryServiceCollectionExtensions
         services.TryAddScoped<ISaveHookRegistry>(provider => new ServiceProviderSaveHookRegistry(
             provider
         ));
-        services.AddKeyedScoped<IGadgetRepository>(
-            serviceKey,
-            (provider, key) => new GadgetRepository(
-                connectionFactory,
-                provider.GetService<ISaveHookRegistry>(),
-                provider.GetKeyedService<ISqlExecutor>(key)
-            )
+
+        // Every entity is wired the same way, so the local function holds what they share - the captured connection
+        // factory, the key, and the keyed SQL executor - and each entity contributes only its contract and constructor
+        void AddRepository<TContract, TRemote>(
+            Func<ISqlConnectionFactory, ISaveHookRegistry?, ISqlExecutor?, TContract> create
+        )
+            where TContract : class, TRemote
+            where TRemote : class
+        {
+            services.AddKeyedScoped(
+                serviceKey,
+                (provider, key) => create(
+                    connectionFactory,
+                    provider.GetService<ISaveHookRegistry>(),
+                    provider.GetKeyedService<ISqlExecutor>(key)
+                )
+            );
+            services.AddKeyedScoped<TRemote>(
+                serviceKey,
+                (provider, key) => provider.GetRequiredKeyedService<TContract>(key)
+            );
+        }
+
+        AddRepository<IGadgetRepository, IGadgetRemoteRepository>(
+            (factory, hooks, executor) => new GadgetRepository(factory, hooks, executor)
         );
-        services.AddKeyedScoped<IGadgetRemoteRepository>(
-            serviceKey,
-            (provider, key) => provider.GetRequiredKeyedService<IGadgetRepository>(key)
-        );
-        services.AddKeyedScoped<IGadgetNoteRepository>(
-            serviceKey,
-            (provider, key) => new GadgetNoteRepository(
-                connectionFactory,
-                provider.GetService<ISaveHookRegistry>(),
-                provider.GetKeyedService<ISqlExecutor>(key)
-            )
-        );
-        services.AddKeyedScoped<IGadgetNoteRemoteRepository>(
-            serviceKey,
-            (provider, key) => provider.GetRequiredKeyedService<IGadgetNoteRepository>(key)
+        AddRepository<IGadgetNoteRepository, IGadgetNoteRemoteRepository>(
+            (factory, hooks, executor) => new GadgetNoteRepository(factory, hooks, executor)
         );
 
         return services;
@@ -11973,21 +12058,7 @@ public static class GeneratedSqlServerRepositoryServiceCollectionExtensions
 }
 
 /// <summary>Remote surface of the GadgetEntity repository (only CRUD, save, and named queries that can cross a network boundary; swappable for a remote implementation later).</summary>
-public partial interface IGadgetRemoteRepository : IRemoteRepository<GadgetEntity, GadgetIdValue>
-{
-    /// <summary>Checks the UNIQUE constraints of gadgets against the database and returns the violations (an empty list when there are none).</summary>
-    /// <remarks>
-    /// Rows that share the entity's primary key are excluded, so the same call is correct for both insert and update (an entity whose key is not set yet excludes nothing). Constraint member values that contain
-    /// a null are skipped (NULL collision semantics differ per dialect). The result is advisory only: the definitive guarantee is the database's own UNIQUE
-    /// constraint, and a concurrent insert between this check and the save can still make the save fail (TOCTOU).
-    /// </remarks>
-    /// <param name="entity">The entity whose constraint member values are checked.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
-    Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
-        GadgetEntity entity,
-        CancellationToken cancellationToken = default
-    );
-}
+public partial interface IGadgetRemoteRepository : IRemoteRepository<GadgetEntity, GadgetIdValue> { }
 
 /// <summary>Repository interface for GadgetEntity (the full-featured surface = the remote surface plus expression-tree queries, raw SQL, and bulk insert).</summary>
 public partial interface IGadgetRepository
@@ -12002,22 +12073,9 @@ public sealed partial class GadgetRepository(
 ) : SqlServerRepository<GadgetEntity, GadgetIdValue>(connectionFactory, saveHooks, sqlExecutor), IGadgetRepository
 {
     /// <inheritdoc />
-    public async Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
-        GadgetEntity entity,
-        CancellationToken cancellationToken = default
-    )
-    {
-        ArgumentNullException.ThrowIfNull(entity);
-        var violations = new List<UniquenessViolation>();
-
-        List<UniquenessCheck<GadgetEntity>>? customChecks = null;
-        CollectCustomUniquenessChecks(ref customChecks);
-        await UniquenessChecker
-            .RunCustomChecksAsync(entity, customChecks, violations, cancellationToken)
-            .ConfigureAwait(false);
-
-        return violations;
-    }
+    protected override void CollectUniquenessChecks(
+        ref List<UniquenessCheck<GadgetEntity>>? checks
+    ) => CollectCustomUniquenessChecks(ref checks);
 
     /// <summary>Extension point for adding user-defined uniqueness checks (add delegates to the list in a partial implementation; while unimplemented the call is erased at no cost).</summary>
     partial void CollectCustomUniquenessChecks(
@@ -12026,21 +12084,7 @@ public sealed partial class GadgetRepository(
 }
 
 /// <summary>Remote surface of the GadgetNoteEntity repository (only CRUD, save, and named queries that can cross a network boundary; swappable for a remote implementation later).</summary>
-public partial interface IGadgetNoteRemoteRepository : IRemoteRepository<GadgetNoteEntity, NoteIdValue>
-{
-    /// <summary>Checks the UNIQUE constraints of gadget_notes against the database and returns the violations (an empty list when there are none).</summary>
-    /// <remarks>
-    /// Rows that share the entity's primary key are excluded, so the same call is correct for both insert and update (an entity whose key is not set yet excludes nothing). Constraint member values that contain
-    /// a null are skipped (NULL collision semantics differ per dialect). The result is advisory only: the definitive guarantee is the database's own UNIQUE
-    /// constraint, and a concurrent insert between this check and the save can still make the save fail (TOCTOU).
-    /// </remarks>
-    /// <param name="entity">The entity whose constraint member values are checked.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
-    Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
-        GadgetNoteEntity entity,
-        CancellationToken cancellationToken = default
-    );
-}
+public partial interface IGadgetNoteRemoteRepository : IRemoteRepository<GadgetNoteEntity, NoteIdValue> { }
 
 /// <summary>Repository interface for GadgetNoteEntity (the full-featured surface = the remote surface plus expression-tree queries, raw SQL, and bulk insert).</summary>
 public partial interface IGadgetNoteRepository
@@ -12055,22 +12099,9 @@ public sealed partial class GadgetNoteRepository(
 ) : SqlServerRepository<GadgetNoteEntity, NoteIdValue>(connectionFactory, saveHooks, sqlExecutor), IGadgetNoteRepository
 {
     /// <inheritdoc />
-    public async Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
-        GadgetNoteEntity entity,
-        CancellationToken cancellationToken = default
-    )
-    {
-        ArgumentNullException.ThrowIfNull(entity);
-        var violations = new List<UniquenessViolation>();
-
-        List<UniquenessCheck<GadgetNoteEntity>>? customChecks = null;
-        CollectCustomUniquenessChecks(ref customChecks);
-        await UniquenessChecker
-            .RunCustomChecksAsync(entity, customChecks, violations, cancellationToken)
-            .ConfigureAwait(false);
-
-        return violations;
-    }
+    protected override void CollectUniquenessChecks(
+        ref List<UniquenessCheck<GadgetNoteEntity>>? checks
+    ) => CollectCustomUniquenessChecks(ref checks);
 
     /// <summary>Extension point for adding user-defined uniqueness checks (add delegates to the list in a partial implementation; while unimplemented the call is erased at no cost).</summary>
     partial void CollectCustomUniquenessChecks(
@@ -12132,22 +12163,12 @@ public static class SqlQueryExtensions
 /// <summary>HTTP client implementation of the remote surface (IGadgetRemoteRepository) for GadgetEntity.</summary>
 /// <remarks>Calls the server-side <c>MapGeneratedRemoteEndpoints</c> endpoints. The HttpClient's BaseAddress must include the prefix (default /quicker/).</remarks>
 public sealed partial class HttpGadgetRemoteRepository(HttpClient httpClient)
-    : HttpRemoteRepository<GadgetEntity, GadgetIdValue>(httpClient, "Gadget"), IGadgetRemoteRepository
-{
-    /// <summary>Checks the UNIQUE constraints of gadgets against the database and returns the violations (an empty list when there are none). The check, including any user-defined hooks, runs in the server-side repository.</summary>
-    public Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(GadgetEntity entity, CancellationToken cancellationToken = default) =>
-        InvokeAsync<IReadOnlyList<UniquenessViolation>>("CheckUniqueness", new { entity }, cancellationToken);
-}
+    : HttpRemoteRepository<GadgetEntity, GadgetIdValue>(httpClient, "Gadget"), IGadgetRemoteRepository { }
 
 /// <summary>HTTP client implementation of the remote surface (IGadgetNoteRemoteRepository) for GadgetNoteEntity.</summary>
 /// <remarks>Calls the server-side <c>MapGeneratedRemoteEndpoints</c> endpoints. The HttpClient's BaseAddress must include the prefix (default /quicker/).</remarks>
 public sealed partial class HttpGadgetNoteRemoteRepository(HttpClient httpClient)
-    : HttpRemoteRepository<GadgetNoteEntity, NoteIdValue>(httpClient, "GadgetNote"), IGadgetNoteRemoteRepository
-{
-    /// <summary>Checks the UNIQUE constraints of gadget_notes against the database and returns the violations (an empty list when there are none). The check, including any user-defined hooks, runs in the server-side repository.</summary>
-    public Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(GadgetNoteEntity entity, CancellationToken cancellationToken = default) =>
-        InvokeAsync<IReadOnlyList<UniquenessViolation>>("CheckUniqueness", new { entity }, cancellationToken);
-}
+    : HttpRemoteRepository<GadgetNoteEntity, NoteIdValue>(httpClient, "GadgetNote"), IGadgetNoteRemoteRepository { }
 
 /// <summary>Extensions that register the HTTP client implementations of the remote surface (I{Entity}RemoteRepository) with the DI container.</summary>
 /// <remarks>
@@ -12246,12 +12267,13 @@ public static class GeneratedHttpRemoteRepositoryServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(httpClientFactory);
 
-        services.AddScoped<IGadgetRemoteRepository>(provider => new HttpGadgetRemoteRepository(
-            httpClientFactory(provider)
-        ));
-        services.AddScoped<IGadgetNoteRemoteRepository>(provider => new HttpGadgetNoteRemoteRepository(
-            httpClientFactory(provider)
-        ));
+        // Every entity is wired the same way: one client per scope over the HttpClient the factory hands back
+        void AddClient<TRemote>(Func<HttpClient, TRemote> create)
+            where TRemote : class =>
+            services.AddScoped(provider => create(httpClientFactory(provider)));
+
+        AddClient<IGadgetRemoteRepository>(client => new HttpGadgetRemoteRepository(client));
+        AddClient<IGadgetNoteRemoteRepository>(client => new HttpGadgetNoteRemoteRepository(client));
 
         return services;
     }
@@ -12341,14 +12363,13 @@ public static class GeneratedHttpRemoteRepositoryServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(httpClientFactory);
 
-        services.AddKeyedScoped<IGadgetRemoteRepository>(
-            serviceKey,
-            (provider, _) => new HttpGadgetRemoteRepository(httpClientFactory(provider))
-        );
-        services.AddKeyedScoped<IGadgetNoteRemoteRepository>(
-            serviceKey,
-            (provider, _) => new HttpGadgetNoteRemoteRepository(httpClientFactory(provider))
-        );
+        // Every entity is wired the same way: one client per scope, under the key this overload registers
+        void AddClient<TRemote>(Func<HttpClient, TRemote> create)
+            where TRemote : class =>
+            services.AddKeyedScoped(serviceKey, (provider, _) => create(httpClientFactory(provider)));
+
+        AddClient<IGadgetRemoteRepository>(client => new HttpGadgetRemoteRepository(client));
+        AddClient<IGadgetNoteRemoteRepository>(client => new HttpGadgetNoteRemoteRepository(client));
 
         return services;
     }
@@ -13968,6 +13989,40 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
     /// <summary>Starts a query that fetches entities with chained filter conditions, orderings, and Includes.</summary>
     public SqlQuery<TEntity> Query() => new(new InMemoryQueryExecutor<TEntity>(Store));
 
+    /// <summary>Gets the UNIQUE constraints the pre-check walks (the generated repository overrides this with its own table; empty here).</summary>
+    protected virtual UniquenessConstraintSet<TEntity> UniquenessConstraints =>
+        UniquenessConstraintSet<TEntity>.Empty;
+
+    /// <summary>Collects the user-defined uniqueness checks (the generated repository overrides this to reach its own partial hook).</summary>
+    /// <param name="checks">The list to add the checks to (null until the first one is added).</param>
+    protected virtual void CollectUniquenessChecks(ref List<UniquenessCheck<TEntity>>? checks) { }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
+        TEntity entity,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var constraints = UniquenessConstraints;
+        var violations = await UniquenessChecker
+            .CheckAsync(
+                entity,
+                Query,
+                constraints.ExcludeSelf,
+                constraints.Constraints,
+                cancellationToken
+            )
+            .ConfigureAwait(false);
+
+        List<UniquenessCheck<TEntity>>? customChecks = null;
+        CollectUniquenessChecks(ref customChecks);
+        await UniquenessChecker
+            .RunCustomChecksAsync(entity, customChecks, violations, cancellationToken)
+            .ConfigureAwait(false);
+
+        return violations;
+    }
+
     /// <summary>Saves the graph according to RowState (cascading to children by default).</summary>
     /// <remarks>
     /// When save hooks are registered, this runs in 3 phases: (1) traverse the graph outside the lock, fire Before, and build the
@@ -14240,22 +14295,9 @@ public sealed partial class InMemoryGadgetRepository(
 ) : InMemoryRepository<GadgetEntity, GadgetIdValue>(store, saveHooks), IGadgetRepository
 {
     /// <inheritdoc />
-    public async Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
-        GadgetEntity entity,
-        CancellationToken cancellationToken = default
-    )
-    {
-        ArgumentNullException.ThrowIfNull(entity);
-        var violations = new List<UniquenessViolation>();
-
-        List<UniquenessCheck<GadgetEntity>>? customChecks = null;
-        CollectCustomUniquenessChecks(ref customChecks);
-        await UniquenessChecker
-            .RunCustomChecksAsync(entity, customChecks, violations, cancellationToken)
-            .ConfigureAwait(false);
-
-        return violations;
-    }
+    protected override void CollectUniquenessChecks(
+        ref List<UniquenessCheck<GadgetEntity>>? checks
+    ) => CollectCustomUniquenessChecks(ref checks);
 
     /// <summary>Extension point for adding user-defined uniqueness checks (add delegates to the list in a partial implementation; while unimplemented the call is erased at no cost).</summary>
     partial void CollectCustomUniquenessChecks(
@@ -14270,22 +14312,9 @@ public sealed partial class InMemoryGadgetNoteRepository(
 ) : InMemoryRepository<GadgetNoteEntity, NoteIdValue>(store, saveHooks), IGadgetNoteRepository
 {
     /// <inheritdoc />
-    public async Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
-        GadgetNoteEntity entity,
-        CancellationToken cancellationToken = default
-    )
-    {
-        ArgumentNullException.ThrowIfNull(entity);
-        var violations = new List<UniquenessViolation>();
-
-        List<UniquenessCheck<GadgetNoteEntity>>? customChecks = null;
-        CollectCustomUniquenessChecks(ref customChecks);
-        await UniquenessChecker
-            .RunCustomChecksAsync(entity, customChecks, violations, cancellationToken)
-            .ConfigureAwait(false);
-
-        return violations;
-    }
+    protected override void CollectUniquenessChecks(
+        ref List<UniquenessCheck<GadgetNoteEntity>>? checks
+    ) => CollectCustomUniquenessChecks(ref checks);
 
     /// <summary>Extension point for adding user-defined uniqueness checks (add delegates to the list in a partial implementation; while unimplemented the call is erased at no cost).</summary>
     partial void CollectCustomUniquenessChecks(
@@ -14404,14 +14433,20 @@ public static class GeneratedInMemoryRepositoryServiceCollectionExtensions
         services.TryAddScoped<ISaveHookRegistry>(provider => new ServiceProviderSaveHookRegistry(
             provider
         ));
-        services.AddScoped<IGadgetRepository, InMemoryGadgetRepository>();
-        services.AddScoped<IGadgetRemoteRepository>(provider =>
-            provider.GetRequiredService<IGadgetRepository>()
-        );
-        services.AddScoped<IGadgetNoteRepository, InMemoryGadgetNoteRepository>();
-        services.AddScoped<IGadgetNoteRemoteRepository>(provider =>
-            provider.GetRequiredService<IGadgetNoteRepository>()
-        );
+
+        // Both contracts are meant to hand back one repository per scope, so the remote surface forwards to the
+        // full-featured registration instead of being registered on its own
+        void AddRepository<TContract, TRemote, TImplementation>()
+            where TContract : class, TRemote
+            where TRemote : class
+            where TImplementation : class, TContract
+        {
+            services.AddScoped<TContract, TImplementation>();
+            services.AddScoped<TRemote>(provider => provider.GetRequiredService<TContract>());
+        }
+
+        AddRepository<IGadgetRepository, IGadgetRemoteRepository, InMemoryGadgetRepository>();
+        AddRepository<IGadgetNoteRepository, IGadgetNoteRemoteRepository, InMemoryGadgetNoteRepository>();
 
         return services;
     }
@@ -15636,6 +15671,40 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
     public SqlQuery<TEntity> Query() =>
         new(new EfCoreSqlQueryExecutor<TEntity, TContext>(_contextFactory));
 
+    /// <summary>Gets the UNIQUE constraints the pre-check walks (the generated repository overrides this with its own table; empty here).</summary>
+    protected virtual UniquenessConstraintSet<TEntity> UniquenessConstraints =>
+        UniquenessConstraintSet<TEntity>.Empty;
+
+    /// <summary>Collects the user-defined uniqueness checks (the generated repository overrides this to reach its own partial hook).</summary>
+    /// <param name="checks">The list to add the checks to (null until the first one is added).</param>
+    protected virtual void CollectUniquenessChecks(ref List<UniquenessCheck<TEntity>>? checks) { }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
+        TEntity entity,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var constraints = UniquenessConstraints;
+        var violations = await UniquenessChecker
+            .CheckAsync(
+                entity,
+                Query,
+                constraints.ExcludeSelf,
+                constraints.Constraints,
+                cancellationToken
+            )
+            .ConfigureAwait(false);
+
+        List<UniquenessCheck<TEntity>>? customChecks = null;
+        CollectUniquenessChecks(ref customChecks);
+        await UniquenessChecker
+            .RunCustomChecksAsync(entity, customChecks, violations, cancellationToken)
+            .ConfigureAwait(false);
+
+        return violations;
+    }
+
     /// <summary>Saves inserts, updates, and deletes according to RowState within a single transaction (children are cascaded by default).</summary>
     /// <remarks>
     /// Entities carrying a concurrency token (a rowversion column) take part in optimistic concurrency: unless
@@ -16136,22 +16205,20 @@ public static class GeneratedEfCoreRepositoryServiceCollectionExtensions
         services.TryAddScoped<ISaveHookRegistry>(provider => new ServiceProviderSaveHookRegistry(
             provider
         ));
-        services.AddScoped<IGadgetRepository>(provider => new EfCoreGadgetRepository(
-            provider.GetRequiredService<IDbContextFactory<QuickErDbContext>>(),
-            provider.GetService<ISaveHookRegistry>(),
-            provider.GetService<ISqlExecutor>()
-        ));
-        services.AddScoped<IGadgetRemoteRepository>(provider =>
-            provider.GetRequiredService<IGadgetRepository>()
-        );
-        services.AddScoped<IGadgetNoteRepository>(provider => new EfCoreGadgetNoteRepository(
-            provider.GetRequiredService<IDbContextFactory<QuickErDbContext>>(),
-            provider.GetService<ISaveHookRegistry>(),
-            provider.GetService<ISqlExecutor>()
-        ));
-        services.AddScoped<IGadgetNoteRemoteRepository>(provider =>
-            provider.GetRequiredService<IGadgetNoteRepository>()
-        );
+
+        // Both contracts are meant to hand back one repository per scope, so the remote surface forwards to the
+        // full-featured registration instead of being registered on its own
+        void AddRepository<TContract, TRemote, TImplementation>()
+            where TContract : class, TRemote
+            where TRemote : class
+            where TImplementation : class, TContract
+        {
+            services.AddScoped<TContract, TImplementation>();
+            services.AddScoped<TRemote>(provider => provider.GetRequiredService<TContract>());
+        }
+
+        AddRepository<IGadgetRepository, IGadgetRemoteRepository, EfCoreGadgetRepository>();
+        AddRepository<IGadgetNoteRepository, IGadgetNoteRemoteRepository, EfCoreGadgetNoteRepository>();
 
         return services;
     }
@@ -16165,22 +16232,9 @@ public sealed partial class EfCoreGadgetRepository(
 ) : EfCoreRepository<GadgetEntity, GadgetIdValue, QuickErDbContext>(contextFactory, saveHooks, sqlExecutor), IGadgetRepository
 {
     /// <inheritdoc />
-    public async Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
-        GadgetEntity entity,
-        CancellationToken cancellationToken = default
-    )
-    {
-        ArgumentNullException.ThrowIfNull(entity);
-        var violations = new List<UniquenessViolation>();
-
-        List<UniquenessCheck<GadgetEntity>>? customChecks = null;
-        CollectCustomUniquenessChecks(ref customChecks);
-        await UniquenessChecker
-            .RunCustomChecksAsync(entity, customChecks, violations, cancellationToken)
-            .ConfigureAwait(false);
-
-        return violations;
-    }
+    protected override void CollectUniquenessChecks(
+        ref List<UniquenessCheck<GadgetEntity>>? checks
+    ) => CollectCustomUniquenessChecks(ref checks);
 
     /// <summary>Extension point for adding user-defined uniqueness checks (add delegates to the list in a partial implementation; while unimplemented the call is erased at no cost).</summary>
     partial void CollectCustomUniquenessChecks(
@@ -16196,22 +16250,9 @@ public sealed partial class EfCoreGadgetNoteRepository(
 ) : EfCoreRepository<GadgetNoteEntity, NoteIdValue, QuickErDbContext>(contextFactory, saveHooks, sqlExecutor), IGadgetNoteRepository
 {
     /// <inheritdoc />
-    public async Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
-        GadgetNoteEntity entity,
-        CancellationToken cancellationToken = default
-    )
-    {
-        ArgumentNullException.ThrowIfNull(entity);
-        var violations = new List<UniquenessViolation>();
-
-        List<UniquenessCheck<GadgetNoteEntity>>? customChecks = null;
-        CollectCustomUniquenessChecks(ref customChecks);
-        await UniquenessChecker
-            .RunCustomChecksAsync(entity, customChecks, violations, cancellationToken)
-            .ConfigureAwait(false);
-
-        return violations;
-    }
+    protected override void CollectUniquenessChecks(
+        ref List<UniquenessCheck<GadgetNoteEntity>>? checks
+    ) => CollectCustomUniquenessChecks(ref checks);
 
     /// <summary>Extension point for adding user-defined uniqueness checks (add delegates to the list in a partial implementation; while unimplemented the call is erased at no cost).</summary>
     partial void CollectCustomUniquenessChecks(

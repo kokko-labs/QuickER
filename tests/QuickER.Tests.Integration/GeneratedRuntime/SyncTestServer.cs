@@ -91,6 +91,12 @@ internal sealed class SyncTestServerRepository<TEntity, TKey>(
         CancellationToken cancellationToken = default
     ) => inner.GetAllAsync(cancellationToken);
 
+    /// <summary>重複事前チェックは版採番と無関係なので素通しする</summary>
+    public Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
+        TEntity entity,
+        CancellationToken cancellationToken = default
+    ) => inner.CheckUniquenessAsync(entity, cancellationToken);
+
     public async Task InsertAsync(TEntity entity, CancellationToken cancellationToken = default)
     {
         Stamp(entity);
@@ -362,6 +368,11 @@ internal abstract class SyncTestRemoteServerRepository<TEntity, TKey>(
         CancellationToken cancellationToken = default
     ) => inner.GetAllAsync(cancellationToken);
 
+    public Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
+        TEntity entity,
+        CancellationToken cancellationToken = default
+    ) => inner.CheckUniquenessAsync(entity, cancellationToken);
+
     public Task InsertAsync(TEntity entity, CancellationToken cancellationToken = default) =>
         inner.InsertAsync(entity, cancellationToken);
 
@@ -553,7 +564,7 @@ internal sealed class SyncTestOrderBinaryColumns(
     }
 }
 
-/// <summary>注文テーブルのリモート面アダプタ（一意制約は図に無いため常に違反なしを返す）</summary>
+/// <summary>注文テーブルのリモート面アダプタ</summary>
 /// <remarks>
 /// 除外列のストリーミングエンドポイント（<c>GET/PUT/DELETE {prefix}/SyncOrder/Attachment</c>）はこの面を解決して
 /// 呼ぶため、blob の読み書きも版採番つきのアクセサ（<see cref="SyncTestOrderBinaryColumns"/>）へ通す。
@@ -563,11 +574,6 @@ internal sealed class SyncTestOrderRemoteRepository(
     ISyncBinaryColumns<int> binaryColumns
 ) : SyncTestRemoteServerRepository<SyncOrderEntity, int>(inner), ISyncOrderRemoteRepository
 {
-    public Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
-        SyncOrderEntity entity,
-        CancellationToken cancellationToken = default
-    ) => Task.FromResult<IReadOnlyList<UniquenessViolation>>([]);
-
     public Task<bool> ReadAttachmentAsync(
         int id,
         Stream destination,
@@ -592,21 +598,9 @@ internal sealed class SyncTestOrderRemoteRepository(
 /// <summary>明細テーブルのリモート面アダプタ</summary>
 internal sealed class SyncTestOrderLineRemoteRepository(IRepository<SyncOrderLineEntity, int> inner)
     : SyncTestRemoteServerRepository<SyncOrderLineEntity, int>(inner),
-        ISyncOrderLineRemoteRepository
-{
-    public Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
-        SyncOrderLineEntity entity,
-        CancellationToken cancellationToken = default
-    ) => Task.FromResult<IReadOnlyList<UniquenessViolation>>([]);
-}
+        ISyncOrderLineRemoteRepository { }
 
 /// <summary>メモ（版なし）テーブルのリモート面アダプタ（版採番なし＝素のリポジトリへ委譲するだけ）</summary>
 internal sealed class SyncTestNoteRemoteRepository(IRepository<SyncNoteEntity, int> inner)
     : SyncTestRemoteServerRepository<SyncNoteEntity, int>(inner),
-        ISyncNoteRemoteRepository
-{
-    public Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
-        SyncNoteEntity entity,
-        CancellationToken cancellationToken = default
-    ) => Task.FromResult<IReadOnlyList<UniquenessViolation>>([]);
-}
+        ISyncNoteRemoteRepository { }

@@ -658,7 +658,7 @@ Two things to know about the expansion:
 
 A table's UNIQUE constraints are stamped on its generated **Entity** class as `[UniqueConstraint("PropA", "PropB", Name = "UQ_...")]`, next to `[DbTableMeta]` / `[DbColumnMeta]`. Like those, it is definition metadata that makes the entity a self-describing document of the DB definition; it drives no runtime behaviour (the checks below are plain generated code). The attribute type itself is emitted only when at least one table has a constraint to declare. C# reverse reads the attribute back, so the constraints round-trip (see [Import and export](import-export.md)).
 
-Every generated repository contract carries a bulk check built from the diagram's UNIQUE constraints (it is always generated, whether or not the table has any constraint):
+Every repository contract carries a bulk check driven by the diagram's UNIQUE constraints. It is declared once on the common surface `IRemoteRepository<TEntity, TKey>`, so every `I{Entity}Repository` (and `I{Entity}RemoteRepository`) provides it through inheritance, whether or not the table has any constraint:
 
 ```csharp
 Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
@@ -669,7 +669,7 @@ For each UNIQUE constraint of the table it asks "does a row with the same value 
 
 > The result is **advisory**. The definitive guarantee is the database's own UNIQUE constraint: a concurrent insert between the check and the save can still make the save fail (TOCTOU). Use the check to give a friendly message, and keep handling the save exception.
 
-The implementation is a single expression-tree query shared by every backend (QuickER Repository for each dialect, EF Core, and in-memory), so all of them behave the same.
+The implementation lives on each back end's repository base class and runs the same expression-tree query (QuickER Repository for each dialect, EF Core, and in-memory), so all of them behave the same. What a generated repository adds is its constraint table and the bridge to the hook below.
 
 ```csharp
 var violations = await orders.CheckUniquenessAsync(order);

@@ -1,4 +1,4 @@
-{{~ if ef_core && render_ef_core && emit_schema_dependent ~}}
+﻿{{~ if ef_core && render_ef_core && emit_schema_dependent ~}}
 
 /// <summary>
 /// EF Core DbContext that connects to an existing schema.
@@ -1224,6 +1224,40 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
     public SqlQuery<TEntity> Query() =>
         new(new EfCoreSqlQueryExecutor<TEntity, TContext>(_contextFactory));
 
+    /// <summary>Gets the UNIQUE constraints the pre-check walks (the generated repository overrides this with its own table; empty here).</summary>
+    protected virtual UniquenessConstraintSet<TEntity> UniquenessConstraints =>
+        UniquenessConstraintSet<TEntity>.Empty;
+
+    /// <summary>Collects the user-defined uniqueness checks (the generated repository overrides this to reach its own partial hook).</summary>
+    /// <param name="checks">The list to add the checks to (null until the first one is added).</param>
+    protected virtual void CollectUniquenessChecks(ref List<UniquenessCheck<TEntity>>? checks) { }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
+        TEntity entity,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var constraints = UniquenessConstraints;
+        var violations = await UniquenessChecker
+            .CheckAsync(
+                entity,
+                Query,
+                constraints.ExcludeSelf,
+                constraints.Constraints,
+                cancellationToken
+            )
+            .ConfigureAwait(false);
+
+        List<UniquenessCheck<TEntity>>? customChecks = null;
+        CollectUniquenessChecks(ref customChecks);
+        await UniquenessChecker
+            .RunCustomChecksAsync(entity, customChecks, violations, cancellationToken)
+            .ConfigureAwait(false);
+
+        return violations;
+    }
+
     /// <summary>Saves inserts, updates, and deletes according to RowState within a single transaction (children are cascaded by default).</summary>
     /// <remarks>
     /// Entities carrying a concurrency token (a rowversion column) take part in optimistic concurrency: unless
@@ -1726,20 +1760,31 @@ public static class GeneratedEfCoreRepositoryServiceCollectionExtensions
         services.TryAddScoped<ISaveHookRegistry>(provider => new ServiceProviderSaveHookRegistry(
             provider
         ));
-{{ for repository in repository_classes }}        services.AddScoped<{{ repository.interface_name }}>(provider => new EfCore{{ repository.class_name }}(
-            provider.GetRequiredService<IDbContextFactory<QuickErDbContext>>(),
-            provider.GetService<ISaveHookRegistry>(),
-            provider.GetService<ISqlExecutor>()
-        ));
-{{ if remote_contracts }}        services.AddScoped<{{ repository.remote_interface_name }}>(provider =>
-            provider.GetRequiredService<{{ repository.interface_name }}>()
-        );
-{{ end }}{{ end }}
+{{~ if remote_contracts ~}}
+
+        // Both contracts are meant to hand back one repository per scope, so the remote surface forwards to the
+        // full-featured registration instead of being registered on its own
+        void AddRepository<TContract, TRemote, TImplementation>()
+            where TContract : class, TRemote
+            where TRemote : class
+            where TImplementation : class, TContract
+        {
+            services.AddScoped<TContract, TImplementation>();
+            services.AddScoped<TRemote>(provider => provider.GetRequiredService<TContract>());
+        }
+
+{{ for repository in repository_classes }}        AddRepository<{{ repository.interface_name }}, {{ repository.remote_interface_name }}, EfCore{{ repository.class_name }}>();
+{{ end ~}}
+{{~ else ~}}
+{{ for repository in repository_classes }}        services.AddScoped<{{ repository.interface_name }}, EfCore{{ repository.class_name }}>();
+{{ end ~}}
+{{~ end ~}}
+
         return services;
     }
 }
 {{~ for repository in repository_classes ~}}
-{{~ efcore_impl_members = join_members repository.query_shared_impl_block repository.uniqueness_shared_impl_block ~}}
+{{~ efcore_impl_members = join_members repository.query_shared_impl_block repository.uniqueness_binding_block ~}}
 {{~ efcore_impl_members = join_members efcore_impl_members repository.binary_stream_ef_impl_block ~}}
 
 /// <summary>EF Core implementation of the repository for {{ repository.entity_class_name }}.</summary>

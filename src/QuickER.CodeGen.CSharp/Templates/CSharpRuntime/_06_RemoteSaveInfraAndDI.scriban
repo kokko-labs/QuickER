@@ -611,6 +611,18 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         _entityRoute = entityRoute;
     }
 
+    /// <inheritdoc />
+    /// <remarks>The check runs in the server-side repository, so the user-defined hooks that repository declares take part in it.</remarks>
+    public Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
+        TEntity entity,
+        CancellationToken cancellationToken = default
+    ) =>
+        InvokeAsync<IReadOnlyList<UniquenessViolation>>(
+            "CheckUniqueness",
+            new { entity },
+            cancellationToken
+        );
+
     /// <summary>Asks the server whether it is up (<c>GET {prefix}/health</c>), returning <c>false</c> instead of throwing when it is not.</summary>
     /// <remarks>
     /// <para>
@@ -3543,15 +3555,26 @@ public static class Generated{{ dialect_di_suffix }}RepositoryServiceCollectionE
         services.TryAddScoped<ISaveHookRegistry>(provider => new ServiceProviderSaveHookRegistry(
             provider
         ));
-{{ for repository in repository_classes }}        services.AddScoped<{{ repository.interface_name }}>(provider => new {{ repository.class_name }}(
-            provider.GetRequiredService<ISqlConnectionFactory>(),
-            provider.GetService<ISaveHookRegistry>(),
-            provider.GetService<ISqlExecutor>()
-        ));
-{{ if remote_contracts }}        services.AddScoped<{{ repository.remote_interface_name }}>(provider =>
-            provider.GetRequiredService<{{ repository.interface_name }}>()
-        );
-{{ end }}{{ end }}
+{{~ if remote_contracts ~}}
+
+        // Both contracts are meant to hand back one repository per scope, so the remote surface forwards to the
+        // full-featured registration instead of being registered on its own
+        void AddRepository<TContract, TRemote, TImplementation>()
+            where TContract : class, TRemote
+            where TRemote : class
+            where TImplementation : class, TContract
+        {
+            services.AddScoped<TContract, TImplementation>();
+            services.AddScoped<TRemote>(provider => provider.GetRequiredService<TContract>());
+        }
+
+{{ for repository in repository_classes }}        AddRepository<{{ repository.interface_name }}, {{ repository.remote_interface_name }}, {{ repository.class_name }}>();
+{{ end ~}}
+{{~ else ~}}
+{{ for repository in repository_classes }}        services.AddScoped<{{ repository.interface_name }}, {{ repository.class_name }}>();
+{{ end ~}}
+{{~ end ~}}
+
         return services;
     }
 
@@ -3581,19 +3604,47 @@ public static class Generated{{ dialect_di_suffix }}RepositoryServiceCollectionE
         services.TryAddScoped<ISaveHookRegistry>(provider => new ServiceProviderSaveHookRegistry(
             provider
         ));
-{{ for repository in repository_classes }}        services.AddKeyedScoped<{{ repository.interface_name }}>(
-            serviceKey,
-            (provider, key) => new {{ repository.class_name }}(
-                connectionFactory,
-                provider.GetService<ISaveHookRegistry>(),
-                provider.GetKeyedService<ISqlExecutor>(key)
-            )
+
+        // Every entity is wired the same way, so the local function holds what they share - the captured connection
+        // factory, the key, and the keyed SQL executor - and each entity contributes only its contract and constructor
+        void AddRepository<TContract{{ if remote_contracts }}, TRemote{{ end }}>(
+            Func<ISqlConnectionFactory, ISaveHookRegistry?, ISqlExecutor?, TContract> create
+        )
+{{~ if remote_contracts ~}}
+            where TContract : class, TRemote
+            where TRemote : class
+{{~ else ~}}
+            where TContract : class
+{{~ end ~}}
+        {
+            services.AddKeyedScoped(
+                serviceKey,
+                (provider, key) => create(
+                    connectionFactory,
+                    provider.GetService<ISaveHookRegistry>(),
+                    provider.GetKeyedService<ISqlExecutor>(key)
+                )
+            );
+{{~ if remote_contracts ~}}
+            services.AddKeyedScoped<TRemote>(
+                serviceKey,
+                (provider, key) => provider.GetRequiredKeyedService<TContract>(key)
+            );
+{{~ end ~}}
+        }
+
+{{~ if remote_contracts ~}}
+{{ for repository in repository_classes }}        AddRepository<{{ repository.interface_name }}, {{ repository.remote_interface_name }}>(
+            (factory, hooks, executor) => new {{ repository.class_name }}(factory, hooks, executor)
         );
-{{ if remote_contracts }}        services.AddKeyedScoped<{{ repository.remote_interface_name }}>(
-            serviceKey,
-            (provider, key) => provider.GetRequiredKeyedService<{{ repository.interface_name }}>(key)
+{{ end ~}}
+{{~ else ~}}
+{{ for repository in repository_classes }}        AddRepository<{{ repository.interface_name }}>(
+            (factory, hooks, executor) => new {{ repository.class_name }}(factory, hooks, executor)
         );
-{{ end }}{{ end }}
+{{ end ~}}
+{{~ end ~}}
+
         return services;
     }
 }
@@ -3602,8 +3653,7 @@ public static class Generated{{ dialect_di_suffix }}RepositoryServiceCollectionE
 {{~ for repository in repository_classes ~}}
 {{~ if render_contract && emit_schema_dependent ~}}
 {{~ if remote_contracts ~}}
-{{~ remote_interface_members = join_members repository.query_interface_block repository.uniqueness_contract_block ~}}
-{{~ remote_interface_members = join_members remote_interface_members repository.binary_stream_contract_block ~}}
+{{~ remote_interface_members = join_members repository.query_interface_block repository.binary_stream_contract_block ~}}
 {{ if !for.first }}
 {{ end }}/// <summary>Remote surface of the {{ repository.entity_class_name }} repository (only CRUD, save, and named queries that can cross a network boundary; swappable for a remote implementation later).</summary>
 public partial interface {{ repository.remote_interface_name }} : IRemoteRepository<{{ repository.entity_class_name }}, {{ repository.key_type_name }}>{{ if remote_interface_members == "" }} { }{{ else }}
@@ -3616,8 +3666,7 @@ public partial interface {{ repository.interface_name }}
     : {{ repository.remote_interface_name }},
         IRepository<{{ repository.entity_class_name }}, {{ repository.key_type_name }}> { }
 {{~ else ~}}
-{{~ non_remote_interface_members = join_members repository.query_interface_block repository.uniqueness_contract_block ~}}
-{{~ non_remote_interface_members = join_members non_remote_interface_members repository.binary_stream_contract_block ~}}
+{{~ non_remote_interface_members = join_members repository.query_interface_block repository.binary_stream_contract_block ~}}
 {{ if !for.first }}
 {{ end }}/// <summary>Repository interface for {{ repository.entity_class_name }}.</summary>
 public partial interface {{ repository.interface_name }} : IRepository<{{ repository.entity_class_name }}, {{ repository.key_type_name }}>{{ if non_remote_interface_members == "" }} { }{{ else }}
@@ -3640,7 +3689,7 @@ public partial interface {{ repository.interface_name }} : IRepository<{{ reposi
 {{~ end ~}}
 {{~ if repositories && emit_schema_dependent ~}}
 {{~ ado_query_impl_block = repository.query_impl_blocks_by_dialect[repository_dialect] ~}}
-{{~ ado_impl_members = join_members ado_query_impl_block repository.uniqueness_shared_impl_block ~}}
+{{~ ado_impl_members = join_members ado_query_impl_block repository.uniqueness_binding_block ~}}
 {{~ ado_impl_members = join_members ado_impl_members repository.binary_stream_thin_impl_block ~}}
 
 /// <summary>Repository implementation for {{ repository.entity_class_name }}.</summary>
@@ -3664,8 +3713,7 @@ public sealed partial class {{ repository.class_name }}(
 
 /// <summary>HTTP client implementation of the remote surface ({{ repository.remote_interface_name }}) for {{ repository.entity_class_name }}.</summary>
 /// <remarks>Calls the server-side <c>MapGeneratedRemoteEndpoints</c> endpoints. The HttpClient's BaseAddress must include the prefix (default /quicker/).</remarks>
-{{~ remote_client_members = join_members repository.query_remote_client_block repository.uniqueness_remote_client_block ~}}
-{{~ remote_client_members = join_members remote_client_members repository.binary_stream_remote_client_block ~}}
+{{~ remote_client_members = join_members repository.query_remote_client_block repository.binary_stream_remote_client_block ~}}
 public sealed partial class {{ repository.remote_client_class_name }}(HttpClient httpClient)
     : HttpRemoteRepository<{{ repository.entity_class_name }}, {{ repository.key_type_name }}>(httpClient, "{{ repository.remote_route_name }}"), {{ repository.remote_interface_name }}{{ if remote_client_members == "" }} { }{{ else }}
 {
@@ -3778,10 +3826,14 @@ public static class GeneratedHttpRemoteRepositoryServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(httpClientFactory);
 
-{{ for repository in repository_classes }}        services.AddScoped<{{ repository.remote_interface_name }}>(provider => new {{ repository.remote_client_class_name }}(
-            httpClientFactory(provider)
-        ));
-{{ end }}
+        // Every entity is wired the same way: one client per scope over the HttpClient the factory hands back
+        void AddClient<TRemote>(Func<HttpClient, TRemote> create)
+            where TRemote : class =>
+            services.AddScoped(provider => create(httpClientFactory(provider)));
+
+{{ for repository in repository_classes }}        AddClient<{{ repository.remote_interface_name }}>(client => new {{ repository.remote_client_class_name }}(client));
+{{ end ~}}
+
         return services;
     }
 
@@ -3878,11 +3930,14 @@ public static class GeneratedHttpRemoteRepositoryServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(httpClientFactory);
 
-{{ for repository in repository_classes }}        services.AddKeyedScoped<{{ repository.remote_interface_name }}>(
-            serviceKey,
-            (provider, _) => new {{ repository.remote_client_class_name }}(httpClientFactory(provider))
-        );
-{{ end }}
+        // Every entity is wired the same way: one client per scope, under the key this overload registers
+        void AddClient<TRemote>(Func<HttpClient, TRemote> create)
+            where TRemote : class =>
+            services.AddKeyedScoped(serviceKey, (provider, _) => create(httpClientFactory(provider)));
+
+{{ for repository in repository_classes }}        AddClient<{{ repository.remote_interface_name }}>(client => new {{ repository.remote_client_class_name }}(client));
+{{ end ~}}
+
         return services;
     }
 

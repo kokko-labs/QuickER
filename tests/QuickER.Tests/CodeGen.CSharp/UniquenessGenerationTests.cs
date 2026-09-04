@@ -166,18 +166,22 @@ public class UniquenessGenerationTests
         content.Should().Contain("nameof(OrderEntity.Memo)");
     }
 
-    /// <summary>リモート契約が無い構成では契約が全機能面（I{Entity}Repository）に載る</summary>
-    [Fact(DisplayName = "リモート契約なしでは全機能面に契約が載る")]
-    public void Generate_WithoutRemoteContracts_PlacesContractOnFullFace()
+    /// <summary>リモート契約が無い構成でも、契約はランタイム共通面から継承される（per-entity の面は宣言しない）</summary>
+    [Fact(DisplayName = "リモート契約なしでも契約は共通面 1 箇所の宣言から継承される")]
+    public void Generate_WithoutRemoteContracts_InheritsContractFromCommonFace()
     {
         var content = AllContent(Generate(CreateDiagram(), CreateOptions()));
 
-        var fullFace = ExtractDeclarationBody(
-            content,
-            "public partial interface IOrderRepository : IRepository<OrderEntity, int>"
-        );
-
-        fullFace.Should().Contain("CheckUniquenessAsync(");
+        // 宣言はランタイム共通面に 1 回だけ（I{Entity}Repository は IRepository 経由で継承する）
+        ExtractDeclarationBody(content, "public partial interface IRemoteRepository<TEntity, TKey>")
+            .Should()
+            .Contain("Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(");
+        ExtractDeclarationBody(
+                content,
+                "public partial interface IOrderRepository : IRepository<OrderEntity, int>"
+            )
+            .Should()
+            .NotContain("CheckUniquenessAsync(");
         content.Should().NotContain("IOrderRemoteRepository");
 
         // EditModel の DB 照合糖衣も全機能面を受け取る
@@ -188,20 +192,23 @@ public class UniquenessGenerationTests
             );
     }
 
-    /// <summary>リモート契約がある構成では契約がリモート面（I{Entity}RemoteRepository）へ移設される</summary>
-    [Fact(DisplayName = "リモート契約ありでは契約がリモート面へ移設される")]
-    public void Generate_WithRemoteContracts_MovesContractToRemoteFace()
+    /// <summary>リモート契約がある構成でも、宣言は共通面 1 箇所のまま（リモート面は継承するだけ）</summary>
+    [Fact(DisplayName = "リモート契約ありでもリモート面は宣言を持たず継承する")]
+    public void Generate_WithRemoteContracts_KeepsContractOnCommonFace()
     {
         var options = CreateOptions() with { GenerateRemoteContracts = true };
 
         var content = AllContent(Generate(CreateDiagram(), options));
 
-        var remoteFace = ExtractDeclarationBody(
-            content,
-            "public partial interface IOrderRemoteRepository : IRemoteRepository<OrderEntity, int>"
-        );
-
-        remoteFace.Should().Contain("CheckUniquenessAsync(");
+        ExtractDeclarationBody(content, "public partial interface IRemoteRepository<TEntity, TKey>")
+            .Should()
+            .Contain("Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(");
+        ExtractDeclarationBody(
+                content,
+                "public partial interface IOrderRemoteRepository : IRemoteRepository<OrderEntity, int>"
+            )
+            .Should()
+            .NotContain("CheckUniquenessAsync(");
 
         // 全機能面はリモート面を継承するだけで、自分では宣言しない（純粋に追加的）
         content

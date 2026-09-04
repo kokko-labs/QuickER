@@ -2621,6 +2621,13 @@ public abstract class JournalingRepositoryBase<TEntity, TKey> : IRepository<TEnt
         Inner.GetAllAsync(cancellationToken);
 
     /// <inheritdoc />
+    /// <remarks>A read-only check: it writes nothing, so there is nothing to journal.</remarks>
+    public Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
+        TEntity entity,
+        CancellationToken cancellationToken = default
+    ) => Inner.CheckUniquenessAsync(entity, cancellationToken);
+
+    /// <inheritdoc />
     public async Task InsertAsync(TEntity entity, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(entity);

@@ -8,17 +8,19 @@ namespace QuickER.CodeGen.CSharp;
 /// <remarks>
 /// <para>
 /// 生成物は 3 系統ある。(1) Repository 側の一括チェック <c>CheckUniquenessAsync</c>＝各制約について
-/// 「同一主キーの行を除外して同じ値の組を持つ行が DB に存在するか」を式木クエリで照合する。実装は名前付きクエリの
-/// ミニ DSL と同じく「全実装先で同一テキストの共有本体」で、QuickER 版 Repository 2 方言・インメモリ・EF Core の
-/// どれでも <c>Query()</c> パイプラインを通る。(2) Entity 側＝クラスへ <c>[UniqueConstraint(...)]</c> 属性を刻む
+/// 「同一主キーの行を除外して同じ値の組を持つ行が DB に存在するか」を式木クエリで照合する。宣言は
+/// ランタイム共通面 <c>IRemoteRepository&lt;TEntity, TKey&gt;</c>・実装は各バックエンドの Repository 基底が 1 回だけ持ち、
+/// ここが per-entity に出すのは記述子の束縛（<c>UniquenessConstraints</c> の override）とフックの橋渡しだけ。
+/// (2) Entity 側＝クラスへ <c>[UniqueConstraint(...)]</c> 属性を刻む
 /// （<c>[DbTableMeta]</c> / <c>[DbColumnMeta]</c> と同じ「DB 定義の自己記述」で、実行時の振る舞いは持たない）。
 /// (3) EditModel 側＝制約テーブル（<c>UniquenessConstraints</c> の override）でコレクション内重複検証の入力を宣言し、
 /// DB 照合糖衣 <c>ValidateUniqueAsync</c> を生成する。
 /// </para>
 /// <para>
-/// 契約はリモート契約生成（<c>GenerateRemoteContracts</c> または <c>GenerateRemoteServices</c>）の有無で挿入先が変わる
-/// （Stream アクセサと同じ規則＝リモート面 ON なら <c>I{Entity}RemoteRepository</c>・OFF なら全機能面
-/// <c>I{Entity}Repository</c>）。テンプレート側が出し分けるため、ここで組み立てるブロックは 1 本で足りる。
+/// 契約が共通面へ上がったため、リモート契約生成（<c>GenerateRemoteContracts</c> / <c>GenerateRemoteServices</c>）の
+/// 有無で挿入先を出し分ける必要は無くなった（<c>I{Entity}Repository</c> は <c>I{Entity}RemoteRepository</c> 経由で、
+/// 単独構成でも <c>IRepository</c> 経由で同じ宣言を継承する）。HTTP クライアントの転送実装も基底
+/// <c>HttpRemoteRepository</c> が 1 回だけ持つ。
 /// </para>
 /// <para>
 /// 制約が 1 件も無いエンティティでもメソッドとユーザー定義フック（<c>CollectCustomUniquenessChecks</c>）は生成する
@@ -30,10 +32,8 @@ internal sealed partial class CSharpGenerationModelBuilder
 {
     /// <summary>1 エンティティ分の重複事前チェックブロック（テンプレートへ渡す整形済みテキスト群）</summary>
     private sealed record UniquenessBlocks(
-        string ContractBlock,
         string ConstraintsClassBlock,
-        string SharedImplBlock,
-        string RemoteClientBlock,
+        string BindingBlock,
         string RemoteServerBlock,
         string RemoteServerRecordsBlock
     );
@@ -119,22 +119,16 @@ internal sealed partial class CSharpGenerationModelBuilder
         var constraints = ResolveUniqueConstraints(entity);
         var keyProperty = BuildProperty(entity.Columns.First(column => column.IsPrimaryKey));
 
-        var summary =
-            $"Checks the UNIQUE constraints of {EscapeForXmlDocSummary(entity.TableName)} against the database and returns the violations (an empty list when there are none).";
-
         var shape = new QueryMethodShape(
             "CheckUniquenessAsync",
             $"{entityClassName} entity, CancellationToken cancellationToken = default",
             "Task<IReadOnlyList<UniquenessViolation>>",
-            // クライアントの転送メソッドは「実体はサーバー側」であることを summary へ明示する（フックはサーバー側にしか無い）
-            summary
-                + " The check, including any user-defined hooks, runs in the server-side repository.",
+            $"Checks the UNIQUE constraints of {EscapeForXmlDocSummary(entity.TableName)} against the database and returns the violations (an empty list when there are none).",
             [new QueryPayloadParameter(entityClassName, "entity", true)],
             ["entity", "cancellationToken"]
         );
 
         return new UniquenessBlocks(
-            BuildUniquenessContractMember(entityClassName, summary),
             constraints.Count > 0
                 ? BuildUniquenessConstraintsClass(
                     entity,
@@ -145,8 +139,7 @@ internal sealed partial class CSharpGenerationModelBuilder
                     options
                 )
                 : string.Empty,
-            BuildUniquenessImplMember(entityClassName, repositoryName, constraints),
-            options.GenerateRemoteServices ? BuildRemoteClientMember(shape) : string.Empty,
+            BuildUniquenessBindingMember(entityClassName, repositoryName, constraints),
             options.GenerateRemoteServices
                 ? BuildRemoteServerMap(shape, repositoryName)
                 : string.Empty,
@@ -156,82 +149,40 @@ internal sealed partial class CSharpGenerationModelBuilder
         );
     }
 
-    /// <summary>重複事前チェックの契約メンバー（インターフェイス宣言）を構築する</summary>
-    private static string BuildUniquenessContractMember(string entityClassName, string summary) =>
-        string.Join(
-            "\n",
-            $"    /// <summary>{summary}</summary>",
-            "    /// <remarks>",
-            "    /// Rows that share the entity's primary key are excluded, so the same call is correct for both insert and update (an entity whose key is not set yet excludes nothing). Constraint member values that contain",
-            "    /// a null are skipped (NULL collision semantics differ per dialect). The result is advisory only: the definitive guarantee is the database's own UNIQUE",
-            "    /// constraint, and a concurrent insert between this check and the save can still make the save fail (TOCTOU).",
-            "    /// </remarks>",
-            "    /// <param name=\"entity\">The entity whose constraint member values are checked.</param>",
-            "    /// <param name=\"cancellationToken\">The cancellation token.</param>",
-            "    Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(",
-            $"        {entityClassName} entity,",
-            "        CancellationToken cancellationToken = default",
-            "    );"
-        );
-
     /// <summary>
-    /// 重複事前チェックの実装メンバー（共有エンジン <c>UniquenessChecker</c> への委譲・全実装先共通）と、
-    /// ユーザー定義フックの partial 宣言を構築する。
+    /// 重複事前チェックを基底クラスの実装へ束縛するメンバー（制約記述子の override とユーザー定義フックの橋渡し）と、
+    /// フックの partial 宣言を構築する。
     /// </summary>
     /// <remarks>
-    /// 制約の照合そのもの（NULL 組のスキップ・自己除外・存在確認・違反の収集）は固定ランタイムのエンジンが持ち、
-    /// ここが出すのは「記述子テーブルを渡してエンジンを呼び、フックを収集して渡す」定型だけになった（第 10 次 A-3）。
-    /// フック呼び出しは前提 1（partial は基底から呼べない・未実装ゼロコスト維持）により per-type に残る。
+    /// 照合そのもの（NULL 組のスキップ・自己除外・存在確認・違反の収集・フックの実行）は固定ランタイムのエンジンと
+    /// 各バックエンドの Repository 基底が持つ（第 11 次 P2）。ここが出すのは「この型の制約テーブルはこれ」と
+    /// 「フックはここにある」の 2 点だけで、フックの呼び出しは partial が基底から呼べない以上 per-type に残る
+    /// （未実装ならフック呼び出しごと消滅する＝ゼロコストも維持される）。制約が 1 件も無いエンティティは
+    /// 基底の既定（空の記述子）で足りるため override を出さず、フックの橋渡しだけを出す。
     /// </remarks>
-    private static string BuildUniquenessImplMember(
+    private static string BuildUniquenessBindingMember(
         string entityClassName,
         string repositoryName,
         IReadOnlyList<ResolvedUniqueConstraint> constraints
     )
     {
-        var lines = new List<string>
-        {
-            "    /// <inheritdoc />",
-            "    public async Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(",
-            $"        {entityClassName} entity,",
-            "        CancellationToken cancellationToken = default",
-            "    )",
-            "    {",
-        };
+        var lines = new List<string>();
 
         if (constraints.Count > 0)
         {
             lines.AddRange([
-                "        var violations = await UniquenessChecker",
-                "            .CheckAsync(",
-                "                entity,",
-                "                Query,",
-                $"                {repositoryName}UniquenessConstraints.ExcludeSelf,",
-                $"                {repositoryName}UniquenessConstraints.Checks,",
-                "                cancellationToken",
-                "            )",
-                "            .ConfigureAwait(false);",
-            ]);
-        }
-        else
-        {
-            lines.AddRange([
-                "        ArgumentNullException.ThrowIfNull(entity);",
-                "        var violations = new List<UniquenessViolation>();",
+                "    /// <inheritdoc />",
+                $"    protected override UniquenessConstraintSet<{entityClassName}> UniquenessConstraints =>",
+                $"        {repositoryName}UniquenessConstraints.Set;",
+                string.Empty,
             ]);
         }
 
-        // ユーザー定義チェック: 収集は partial フック（未実装なら呼び出しごと消滅）・実行はエンジンのループ
         lines.AddRange([
-            string.Empty,
-            $"        List<UniquenessCheck<{entityClassName}>>? customChecks = null;",
-            "        CollectCustomUniquenessChecks(ref customChecks);",
-            "        await UniquenessChecker",
-            "            .RunCustomChecksAsync(entity, customChecks, violations, cancellationToken)",
-            "            .ConfigureAwait(false);",
-            string.Empty,
-            "        return violations;",
-            "    }",
+            "    /// <inheritdoc />",
+            "    protected override void CollectUniquenessChecks(",
+            $"        ref List<UniquenessCheck<{entityClassName}>>? checks",
+            "    ) => CollectCustomUniquenessChecks(ref checks);",
             string.Empty,
             "    /// <summary>Extension point for adding user-defined uniqueness checks (add delegates to the list in a partial implementation; while unimplemented the call is erased at no cost).</summary>",
             "    partial void CollectCustomUniquenessChecks(",
@@ -349,6 +300,14 @@ internal sealed partial class CSharpGenerationModelBuilder
                 $"        query.Where(candidate => candidate.{keyPropertyName} != entity.{keyPropertyName});",
             ]);
         }
+
+        // 記述子は 1 つの値として基底へ渡す（各実装先の override が 1 行で済む）
+        lines.AddRange([
+            string.Empty,
+            "    /// <summary>The constraint table and the self-exclusion as one value (what each repository hands to its base class).</summary>",
+            $"    public static readonly UniquenessConstraintSet<{entityClassName}> Set =",
+            "        new(Checks, ExcludeSelf);",
+        ]);
 
         lines.Add("}");
         return string.Join("\n", lines);
