@@ -87,7 +87,7 @@ public sealed class ContactMailValue
 - The shape is exactly what the generator emits, so `ContactMailValue.Create(...)` / `TryCreate` / `Validate` work as usual, and JSON conversion, SQL parameter binding, and row materialization treat the type like any generated value object.
 - A value object without rules can omit `ValidateCore` entirely (the interface's default implementation validates nothing) — two members are enough.
 - `ValidateCore` receives the error list **by reference and unallocated**; allocate it only when adding the first violation (`(errors ??= new List<string>()).Add(...)`), so creating a valid value allocates nothing.
-- For a reference-typed value (`string` / `byte[]`), reject `null` in `ValidateCore` when the input is not trusted: a value object never wraps null (a nullable column keeps the property itself null), and the generated ones report a null input as a validation error.
+- For a reference-typed value (`string` / `byte[]`), reject `null` in `ValidateCore` when the input is not trusted: a value object never wraps null (a nullable column keeps the property itself null), and the generated ones report a null input as a validation error. `ValueObjectRules.ValidateRequired(value, DisplayName, ref errors)` — the very call the generated ones make — does it for you, and returns false when the rules that follow must be skipped.
 - `New` and `ValidateCore` are explicit implementations, so they stay off the type's public surface. Calling `TVo.New` through a generic type parameter would skip validation — validation belongs to `Create` / `TryCreate`, so never call `New` yourself.
 - Pick the base by value type: `ValueObjectStringBase` (string), `ValueObjectOrderedBase<TSelf, TValue>` (numbers and date/time), `ValueObjectBooleanBase`, `ValueObjectBinaryBase`, `ValueObjectGuidKeyBase` (GUID-as-string keys), or `ValueObjectBase<TSelf, TValue>` directly for anything else.
 
@@ -236,13 +236,26 @@ Implement the hook only - never `TryCreateFrom` itself, on generated and hand-wr
 Every generated class offers two ways to customize messages and display names — the rule is the same across every static class and every generation mode (inline / package-reference):
 
 - **Bulk** — replace a static settable `Func` on the fixed infra at app startup; applies everywhere.
-- **Per-type** — implement a `Customize*` (`ref`) partial on the generated concrete class; applies to that type/property only.
+- **Per-type** — branch inside the replacement you installed. Every value object message takes the value object's display name as its first argument, and `GeneratedDisplayNames.Resolve` takes the member name, so one replacement covers both "all types" and "this type only". (Edit models keep their `Customize*` (`ref`) partials, which take the property name.)
 
 ```csharp
 // Bulk, at startup: localize messages, and stop using descriptions for display names
-ValueObjectValidationMessages.ValueRequired = static () => "値を入力してください。";
+ValueObjectValidationMessages.ValueRequired = static _ => "値を入力してください。";
 EditModelMessages.Required = static name => $"{name}は必須です。";
 GeneratedDisplayNames.Resolve = static (name, _) => name;   // ignore descriptions; use the member name
+```
+
+```csharp
+// Per-type display name: branch on the member name the resolver is given.
+// nameof keeps the branch compiling against the generated code, so a renamed column is a build error.
+GeneratedDisplayNames.Resolve = static (memberName, description) =>
+    memberName == nameof(CustomerEntity.Name) ? "Full name" : description ?? memberName;
+
+// Per-type message: branch on that type's own DisplayName, which follows the resolver above.
+ValueObjectValidationMessages.MaxLengthExceeded = static (displayName, maxLength, actualLength) =>
+    displayName == NameValue.DisplayName
+        ? $"A name is at most {maxLength} characters ({actualLength} given)."
+        : $"Enter at most {maxLength} characters. (currently {actualLength} characters)";
 ```
 
 ```csharp
@@ -257,9 +270,6 @@ public sealed partial class NameValue
             (errors ??= new List<string>()).Add("Whitespace is not allowed.");
         }
     }
-
-    // Replace the display name used in validation messages, etc. (default is the column description; if unspecified, the property name)
-    static partial void CustomizeDisplayName(ref string displayName) => displayName = "Full name";
 }
 
 public partial class CustomerEditModel
@@ -275,9 +285,51 @@ public partial class CustomerEditModel
 }
 ```
 
-Static classes: `ValueObjectValidationMessages` (`MaxLengthExceeded` / `ScaleExceeded` / `PrecisionExceeded` / `ValueRequired`), `EditModelMessages` (`Required` / `ParseFailed` / `JoinValueObjectErrors`), `GeneratedDisplayNames` (`Resolve` — used to resolve the display name of entities, edit-model properties, and value objects alike). In package-reference mode, all three ship inside the `QuickER.Runtime` package.
+Static classes: `ValueObjectValidationMessages` (`MaxLengthExceeded` / `ScaleExceeded` / `PrecisionExceeded` / `ValueRequired` / `DigitsExceeded` / `OutOfRange` / `InvalidCharacters` / `InvalidEmailAddress` / `InputNotConvertible` — every one of them takes the display name first), `EditModelMessages` (`Required` / `ParseFailed` / `JoinValueObjectErrors`), `GeneratedDisplayNames` (`Resolve` — used to resolve the display name of entities, edit-model properties, and value objects alike). In package-reference mode, all three ship inside the `QuickER.Runtime` package.
 
-Per-type partials: value object — `CustomizeDisplayName` / `CustomizeMaxLengthErrorMessage` / `CustomizeScaleErrorMessage` / `CustomizePrecisionErrorMessage` / `CustomizeValueRequiredErrorMessage` (string / byte[] only) / `OnValidate`; edit model — `CustomizeRequiredErrorMessage` / `CustomizeParseErrorMessage` / `CustomizePropertyDisplayName`; entity — `CustomizeDisplayName` (an `override`, not a partial, as before). A value object's display string `DisplayValue` (virtual) can also be overridden.
+Per-type partials: value object — `OnValidate` (plus `GetDefinedInstance` / `ConvertCustomInput`, covered above); edit model — `CustomizeRequiredErrorMessage` / `CustomizeParseErrorMessage` / `CustomizePropertyDisplayName`; entity — `CustomizeDisplayName` (an `override`, not a partial, as before). A value object's display string `DisplayValue` (virtual) can also be overridden.
+
+> **Migrating from the per-value-object message hooks**: `CustomizeDisplayName`, `CustomizeMaxLengthErrorMessage`, `CustomizeScaleErrorMessage`, `CustomizePrecisionErrorMessage` and `CustomizeValueRequiredErrorMessage` no longer exist on generated value objects, and an implementation of one is now a compile error. Move a display name into `GeneratedDisplayNames.Resolve` and a message into the matching `ValueObjectValidationMessages` entry, branching as shown above. Two things get better in the move: the wording lives in one place per message instead of one place per type, and it survives regeneration under a different name because nothing has to be re-implemented on the generated class.
+
+### Validation rules you can call yourself
+
+The rules the generated `ValidateCore` runs are public static methods on the fixed infra, and so are four more that no column declaration can express. Call them from `OnValidate` — each one takes the error list by reference and possibly unallocated, so a value that passes still allocates nothing:
+
+```csharp
+public sealed partial class ContactMailValue
+{
+    static partial void OnValidate(string value, ref List<string>? errors) =>
+        ValueObjectStringRules.ValidateEmailAddress(value, DisplayName, ref errors);
+}
+
+public sealed partial class ProductCodeValue
+{
+    static partial void OnValidate(string value, ref List<string>? errors)
+    {
+        // ASCII letters and digits, plus the two symbols this code allows
+        ValueObjectStringRules.ValidateAsciiAlphanumeric(value, "-_", DisplayName, ref errors);
+    }
+}
+
+public sealed partial class QuantityValue
+{
+    static partial void OnValidate(int value, ref List<string>? errors)
+    {
+        ValueObjectNumberRules.ValidateRange(value, 1, 999, DisplayName, ref errors);   // closed interval
+        ValueObjectNumberRules.ValidateMaxDigits(value, 3, DisplayName, ref errors);    // sign not counted; 0 is one digit
+    }
+}
+```
+
+| Rule | What it rejects |
+|---|---|
+| `ValueObjectRules.ValidateRequired(value, displayName, ref errors)` | `null`. Returns false so the caller can stop — every rule after it dereferences the value |
+| `ValueObjectStringRules.ValidateMaxLength(value, maxLength, displayName, ref errors)` | More characters than the limit |
+| `ValueObjectStringRules.ValidateAsciiAlphanumeric(value, allowedSymbols, displayName, ref errors)` | Anything but ASCII letters and digits, plus the characters in `allowedSymbols` (pass `""` for none). A full-width letter or digit is rejected |
+| `ValueObjectStringRules.ValidateEmailAddress(value, displayName, ref errors)` | Text that is not shaped like an address: exactly one `@`, a non-empty part on each side, no whitespace. Deliberately not RFC 5322 — and `MailAddress` is not used, because it also parses the `Name <a@b>` form |
+| `ValueObjectNumberRules.ValidateMaxDigits(value, maxDigits, displayName, ref errors)` | An integer written with more digits than the limit (the sign does not count; zero is one digit) |
+| `ValueObjectNumberRules.ValidateRange(value, minimum, maximum, displayName, ref errors)` | A value outside the closed interval; any `IComparable<T>`, so dates work too |
+| `ValueObjectDecimalRules.Validate(value, precision, scale, displayName, ref errors)` | More decimal places than `scale`, or more integer digits than `precision - scale`. Never rounds; trailing zeros count toward the scale |
 
 ### Integration with each feature (transparent support)
 

@@ -541,7 +541,7 @@ public abstract partial class ValueObjectBase<TSelf, TValue> : IValueObject, IEq
             )
         {
             result = null;
-            errors = new[] { ValueObjectValidationMessages.InputNotConvertible(raw, TSelf.DisplayName) };
+            errors = new[] { ValueObjectValidationMessages.InputNotConvertible(TSelf.DisplayName, raw) };
             return false;
         }
 
@@ -911,27 +911,360 @@ public sealed class ValueObjectJsonConverterFactory : JsonConverterFactory
 }
 
 /// <summary>Automatic validation messages for value objects (defaults shared by all VOs). Replacing them at app startup applies to every VO.</summary>
+/// <remarks>
+/// <para>
+/// Every message takes the value object's display name as its first argument, so one replacement covers both the wording
+/// for every type and the wording for one type in particular - compare against that type's own <c>DisplayName</c> and let
+/// the rest fall through:
+/// <c>ValueObjectValidationMessages.ValueRequired = name =&gt; name == NameValue.DisplayName ? "..." : "...";</c>.
+/// Naming the type keeps the comparison compiling against the generated code, so a column that is renamed away shows up as
+/// a build error rather than as a message that quietly stops matching.
+/// </para>
+/// <para>
+/// The default wording does not spell the display name out, because a value object's violation is normally shown next to
+/// the field it belongs to; a replacement that needs the name has it in hand.
+/// </para>
+/// </remarks>
 public static class ValueObjectValidationMessages
 {
-    /// <summary>Message for exceeding the maximum length (arguments: maximum length, current character count).</summary>
-    public static Func<int, int, string> MaxLengthExceeded { get; set; } =
-        (maxLength, actualLength) =>
+    /// <summary>Message for exceeding the maximum length (arguments: display name, maximum length, current character count).</summary>
+    public static Func<string, int, int, string> MaxLengthExceeded { get; set; } =
+        (_, maxLength, actualLength) =>
             $"Enter at most {maxLength} characters. (currently {actualLength} characters)";
 
-    /// <summary>Message for exceeding the number of decimal places (argument: allowed scale).</summary>
-    public static Func<int, string> ScaleExceeded { get; set; } =
-        scale => $"Enter at most {scale} digits after the decimal point.";
+    /// <summary>Message for exceeding the number of decimal places (arguments: display name, allowed scale).</summary>
+    public static Func<string, int, string> ScaleExceeded { get; set; } =
+        (_, scale) => $"Enter at most {scale} digits after the decimal point.";
 
-    /// <summary>Message for exceeding the number of integer digits (argument: allowed integer digits).</summary>
-    public static Func<int, string> PrecisionExceeded { get; set; } =
-        maxIntegralDigits => $"Enter at most {maxIntegralDigits} digits in the integer part.";
+    /// <summary>Message for exceeding the number of integer digits (arguments: display name, allowed integer digits).</summary>
+    public static Func<string, int, string> PrecisionExceeded { get; set; } =
+        (_, maxIntegralDigits) => $"Enter at most {maxIntegralDigits} digits in the integer part.";
 
-    /// <summary>Message for a null value passed to Create/TryCreate (a value object never wraps null; keep the property itself null for nullable columns).</summary>
-    public static Func<string> ValueRequired { get; set; } = () => "A value is required.";
+    /// <summary>Message for a null value passed to Create/TryCreate (argument: display name). A value object never wraps null; keep the property itself null for nullable columns.</summary>
+    public static Func<string, string> ValueRequired { get; set; } = _ => "A value is required.";
 
-    /// <summary>Message for a value from outside the model that could not be converted to the underlying type (arguments: the value as read, the value object's display name).</summary>
-    public static Func<object, string, string> InputNotConvertible { get; set; } =
-        (raw, displayName) => $"'{raw}' is not a valid {displayName}.";
+    /// <summary>Message for exceeding the number of digits of an integer (arguments: display name, allowed digit count).</summary>
+    public static Func<string, int, string> DigitsExceeded { get; set; } =
+        (_, maxDigits) => $"Enter at most {maxDigits} digits.";
+
+    /// <summary>Message for a value outside the allowed range (arguments: display name, minimum, maximum; both bounds are allowed).</summary>
+    public static Func<string, object, object, string> OutOfRange { get; set; } =
+        (_, minimum, maximum) => $"Enter a value between {minimum} and {maximum}.";
+
+    /// <summary>Message for a character outside the allowed set (arguments: display name, the extra symbols allowed, empty when none are).</summary>
+    public static Func<string, string, string> InvalidCharacters { get; set; } =
+        (_, allowedSymbols) =>
+            allowedSymbols.Length == 0
+                ? "Enter ASCII letters and digits only."
+                : $"Enter ASCII letters, digits, and any of \"{allowedSymbols}\" only.";
+
+    /// <summary>Message for a value that is not shaped like an email address (argument: display name).</summary>
+    public static Func<string, string> InvalidEmailAddress { get; set; } =
+        _ => "Enter a valid email address.";
+
+    /// <summary>Message for a value from outside the model that could not be converted to the underlying type (arguments: display name, the value as read).</summary>
+    public static Func<string, object, string> InputNotConvertible { get; set; } =
+        (displayName, raw) => $"'{raw}' is not a valid {displayName}.";
+}
+
+/// <summary>The rule every value object over a reference-typed value runs before the rest.</summary>
+public static class ValueObjectRules
+{
+    /// <summary>Reports a null value as a violation, and tells the caller whether the rules that follow can run at all.</summary>
+    /// <remarks>
+    /// A value object never wraps null - a nullable column keeps the property itself null - so a null input is reported as
+    /// a validation error rather than as an exception thrown out of the next rule. A false result means "stop here":
+    /// every rule after this one dereferences the value.
+    /// </remarks>
+    /// <param name="value">The value being validated.</param>
+    /// <param name="displayName">The value object's display name, handed to the message resolver.</param>
+    /// <param name="errors">The violations so far, allocated on the first one.</param>
+    /// <returns>True when the value is present; false when it was null and the violation was added.</returns>
+    public static bool ValidateRequired<TValue>(
+        TValue? value,
+        string displayName,
+        ref List<string>? errors
+    )
+        where TValue : class
+    {
+        if (value is not null)
+        {
+            return true;
+        }
+
+        (errors ??= new List<string>()).Add(
+            ValueObjectValidationMessages.ValueRequired(displayName)
+        );
+        return false;
+    }
+}
+
+/// <summary>Validation rules for string values: the maximum length a generated value object enforces, plus rules to call from <c>OnValidate</c>.</summary>
+/// <remarks>
+/// Each rule takes the error list by reference and possibly unallocated, and allocates it only when it has a violation to
+/// add, so a value that passes every rule allocates nothing at all.
+/// </remarks>
+public static class ValueObjectStringRules
+{
+    /// <summary>Rejects a value longer than <paramref name="maxLength"/> characters.</summary>
+    /// <param name="value">The value being validated.</param>
+    /// <param name="maxLength">The greatest number of characters allowed.</param>
+    /// <param name="displayName">The value object's display name, handed to the message resolver.</param>
+    /// <param name="errors">The violations so far, allocated on the first one.</param>
+    public static void ValidateMaxLength(
+        string value,
+        int maxLength,
+        string displayName,
+        ref List<string>? errors
+    )
+    {
+        if (value.Length > maxLength)
+        {
+            (errors ??= new List<string>()).Add(
+                ValueObjectValidationMessages.MaxLengthExceeded(
+                    displayName,
+                    maxLength,
+                    value.Length
+                )
+            );
+        }
+    }
+
+    /// <summary>Rejects any character that is neither an ASCII letter or digit nor one of <paramref name="allowedSymbols"/>.</summary>
+    /// <remarks>
+    /// The set is ASCII on purpose: a full-width letter or digit is rejected, which is what a code or an identifier column
+    /// normally wants. At most one violation is added however many characters offend, because the message names the rule
+    /// rather than the character.
+    /// </remarks>
+    /// <param name="value">The value being validated.</param>
+    /// <param name="allowedSymbols">Extra characters to allow; an empty string allows no symbols at all.</param>
+    /// <param name="displayName">The value object's display name, handed to the message resolver.</param>
+    /// <param name="errors">The violations so far, allocated on the first one.</param>
+    public static void ValidateAsciiAlphanumeric(
+        string value,
+        string allowedSymbols,
+        string displayName,
+        ref List<string>? errors
+    )
+    {
+        foreach (var character in value)
+        {
+            if (char.IsAsciiLetterOrDigit(character) || allowedSymbols.Contains(character))
+            {
+                continue;
+            }
+
+            (errors ??= new List<string>()).Add(
+                ValueObjectValidationMessages.InvalidCharacters(displayName, allowedSymbols)
+            );
+            return;
+        }
+    }
+
+    /// <summary>Rejects a value that is not shaped like an email address: exactly one '@', a non-empty part on each side of it, and no whitespace anywhere.</summary>
+    /// <remarks>
+    /// This is a practical minimum rather than RFC 5322. The full grammar accepts quoted local parts, comments and address
+    /// literals that no application wants stored in a column, and turning an address away is worse than letting an odd one
+    /// through - deliverability is settled by sending mail, not by a pattern. <see cref="System.Net.Mail.MailAddress"/> is
+    /// not used for the same reason it looks tempting: it also parses the display-name form ("Name &lt;a@b&gt;"), so a
+    /// whole header line would pass as an address.
+    /// </remarks>
+    /// <param name="value">The value being validated.</param>
+    /// <param name="displayName">The value object's display name, handed to the message resolver.</param>
+    /// <param name="errors">The violations so far, allocated on the first one.</param>
+    public static void ValidateEmailAddress(
+        string value,
+        string displayName,
+        ref List<string>? errors
+    )
+    {
+        if (!IsEmailAddress(value))
+        {
+            (errors ??= new List<string>()).Add(
+                ValueObjectValidationMessages.InvalidEmailAddress(displayName)
+            );
+        }
+    }
+
+    /// <summary>Returns whether the text has the shape <see cref="ValidateEmailAddress"/> accepts.</summary>
+    private static bool IsEmailAddress(string value)
+    {
+        var at = value.IndexOf('@');
+
+        if (at <= 0 || at == value.Length - 1 || at != value.LastIndexOf('@'))
+        {
+            return false;
+        }
+
+        foreach (var character in value)
+        {
+            if (char.IsWhiteSpace(character))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+}
+
+/// <summary>Validation rules for numeric values, to call from a value object's <c>OnValidate</c>.</summary>
+/// <remarks>
+/// Each rule takes the error list by reference and possibly unallocated, and allocates it only when it has a violation to
+/// add, so a value that passes every rule allocates nothing at all.
+/// </remarks>
+public static class ValueObjectNumberRules
+{
+    /// <summary>Rejects an integer written with more than <paramref name="maxDigits"/> digits.</summary>
+    /// <remarks>The sign does not count, and neither do leading zeros, which an integer does not carry; zero is one digit.</remarks>
+    /// <param name="value">The value being validated (a narrower integer type widens to it).</param>
+    /// <param name="maxDigits">The greatest number of digits allowed.</param>
+    /// <param name="displayName">The value object's display name, handed to the message resolver.</param>
+    /// <param name="errors">The violations so far, allocated on the first one.</param>
+    public static void ValidateMaxDigits(
+        long value,
+        int maxDigits,
+        string displayName,
+        ref List<string>? errors
+    )
+    {
+        if (CountDigits(value) > maxDigits)
+        {
+            (errors ??= new List<string>()).Add(
+                ValueObjectValidationMessages.DigitsExceeded(displayName, maxDigits)
+            );
+        }
+    }
+
+    /// <summary>Rejects a value outside the closed interval from <paramref name="minimum"/> to <paramref name="maximum"/> (both bounds are allowed).</summary>
+    /// <param name="value">The value being validated.</param>
+    /// <param name="minimum">The smallest value allowed.</param>
+    /// <param name="maximum">The greatest value allowed.</param>
+    /// <param name="displayName">The value object's display name, handed to the message resolver.</param>
+    /// <param name="errors">The violations so far, allocated on the first one.</param>
+    public static void ValidateRange<T>(
+        T value,
+        T minimum,
+        T maximum,
+        string displayName,
+        ref List<string>? errors
+    )
+        where T : IComparable<T>
+    {
+        if (value.CompareTo(minimum) < 0 || value.CompareTo(maximum) > 0)
+        {
+            (errors ??= new List<string>()).Add(
+                ValueObjectValidationMessages.OutOfRange(displayName, minimum, maximum)
+            );
+        }
+    }
+
+    /// <summary>Counts the digits an integer is written with, ignoring the sign.</summary>
+    private static int CountDigits(long value)
+    {
+        // long.MinValue has no positive counterpart, so negating it would overflow; its digit count is a constant.
+        if (value == long.MinValue)
+        {
+            return 19;
+        }
+
+        var remaining = value < 0 ? -value : value;
+        var digits = 1;
+
+        while (remaining >= 10)
+        {
+            remaining /= 10;
+            digits++;
+        }
+
+        return digits;
+    }
+}
+
+/// <summary>Validation rules for decimal values: the digit counts a generated value object enforces from the column's precision and scale.</summary>
+/// <remarks>
+/// Each rule takes the error list by reference and possibly unallocated, and allocates it only when it has a violation to
+/// add, so a value that passes every rule allocates nothing at all.
+/// </remarks>
+public static class ValueObjectDecimalRules
+{
+    /// <summary>Powers of ten, so the integer part is checked with one comparison instead of a division per digit.</summary>
+    /// <remarks>
+    /// A decimal holds at most 29 significant digits, so the table ends at 10^28 and a limit at least that wide can never
+    /// be exceeded.
+    /// </remarks>
+    private static readonly decimal[] PowersOfTen =
+    {
+        1m,
+        1e1m,
+        1e2m,
+        1e3m,
+        1e4m,
+        1e5m,
+        1e6m,
+        1e7m,
+        1e8m,
+        1e9m,
+        1e10m,
+        1e11m,
+        1e12m,
+        1e13m,
+        1e14m,
+        1e15m,
+        1e16m,
+        1e17m,
+        1e18m,
+        1e19m,
+        1e20m,
+        1e21m,
+        1e22m,
+        1e23m,
+        1e24m,
+        1e25m,
+        1e26m,
+        1e27m,
+        1e28m,
+    };
+
+    /// <summary>Validates the digit counts of a decimal (does not round; rejects overflow). Trailing zeros count toward the scale.</summary>
+    /// <param name="value">The value being validated.</param>
+    /// <param name="precision">The column's total number of digits.</param>
+    /// <param name="scale">The column's number of decimal places; the integer part may hold <c>precision - scale</c> digits.</param>
+    /// <param name="displayName">The value object's display name, handed to the message resolver.</param>
+    /// <param name="errors">The violations so far, allocated on the first one.</param>
+    public static void Validate(
+        decimal value,
+        int precision,
+        int scale,
+        string displayName,
+        ref List<string>? errors
+    )
+    {
+        // decimal.Scale states the number of decimal places directly; reading it out of decimal.GetBits meant
+        // allocating a four-element int array on every single validation just to shift one of the words.
+        if (value.Scale > scale)
+        {
+            (errors ??= new List<string>()).Add(
+                ValueObjectValidationMessages.ScaleExceeded(displayName, scale)
+            );
+        }
+
+        var maxIntegralDigits = precision - scale;
+        var integral = Math.Truncate(Math.Abs(value));
+
+        if (
+            maxIntegralDigits < 0
+            || (
+                maxIntegralDigits < PowersOfTen.Length
+                && integral >= PowersOfTen[maxIntegralDigits]
+            )
+        )
+        {
+            (errors ??= new List<string>()).Add(
+                ValueObjectValidationMessages.PrecisionExceeded(displayName, maxIntegralDigits)
+            );
+        }
+    }
 }
 
 /// <summary>Value object for the duration column</summary>
@@ -980,19 +1313,9 @@ public sealed partial class DurationValue
     /// <summary>Custom input shape for TryCreateFrom / CreateFrom - a name for an enumeration-like value object, say (partial; only the ordinary conversion applies when not implemented). Set result to claim the value; leave it null for anything not handled so the ordinary conversion runs. Never call TryCreateFrom / CreateFrom from inside (they consult this hook and the call would recurse), and do not throw - TryCreateFrom reports failures through its return value, and an exception here rides straight through that contract.</summary>
     static partial void ConvertCustomInput(object raw, IFormatProvider? provider, ref DurationValue? result);
 
-    /// <summary>Gets the display name of this value object (used in error messages and similar). Defaults to the column description, or the property name when unset. Can be replaced through GeneratedDisplayNames.Resolve (all display names at once) or CustomizeDisplayName (this value object only).</summary>
-    public static string DisplayName
-    {
-        get
-        {
-            var displayName = GeneratedDisplayNames.Resolve("Duration", null);
-            CustomizeDisplayName(ref displayName);
-            return displayName;
-        }
-    }
-
-    /// <summary>Extension point for replacing the display name (partial; the default display name applies when not implemented).</summary>
-    static partial void CustomizeDisplayName(ref string displayName);
+    /// <summary>Gets the display name of this value object (used in error messages and similar). Defaults to the column description, or the property name when unset. Replace it through GeneratedDisplayNames.Resolve, which resolves every generated display name and can switch on the member name.</summary>
+    public static string DisplayName =>
+        GeneratedDisplayNames.Resolve("Duration", null);
 }
 
 /// <summary>Value object for the label column</summary>
@@ -1013,20 +1336,12 @@ public sealed partial class LabelValue
     {
         // A value object never wraps null (a nullable column keeps the property itself null),
         // so a null input is reported as a validation error instead of throwing from the checks below.
-        if (value is null)
+        if (!ValueObjectRules.ValidateRequired(value, DisplayName, ref errors))
         {
-            var message = ValueObjectValidationMessages.ValueRequired();
-            CustomizeValueRequiredErrorMessage(ref message);
-            (errors ??= new List<string>()).Add(message);
             return;
         }
 
-        if (value.Length > 50)
-        {
-            var message = ValueObjectValidationMessages.MaxLengthExceeded(50, value.Length);
-            CustomizeMaxLengthErrorMessage(value, 50, ref message);
-            (errors ??= new List<string>()).Add(message);
-        }
+        ValueObjectStringRules.ValidateMaxLength(value, 50, DisplayName, ref errors);
         OnValidate(value, ref errors);
     }
 
@@ -1057,29 +1372,9 @@ public sealed partial class LabelValue
     /// <summary>Custom input shape for TryCreateFrom / CreateFrom - a name for an enumeration-like value object, say (partial; only the ordinary conversion applies when not implemented). Set result to claim the value; leave it null for anything not handled so the ordinary conversion runs. Never call TryCreateFrom / CreateFrom from inside (they consult this hook and the call would recurse), and do not throw - TryCreateFrom reports failures through its return value, and an exception here rides straight through that contract.</summary>
     static partial void ConvertCustomInput(object raw, IFormatProvider? provider, ref LabelValue? result);
 
-    /// <summary>Gets the display name of this value object (used in error messages and similar). Defaults to the column description, or the property name when unset. Can be replaced through GeneratedDisplayNames.Resolve (all display names at once) or CustomizeDisplayName (this value object only).</summary>
-    public static string DisplayName
-    {
-        get
-        {
-            var displayName = GeneratedDisplayNames.Resolve("Label", null);
-            CustomizeDisplayName(ref displayName);
-            return displayName;
-        }
-    }
-
-    /// <summary>Extension point for replacing the display name (partial; the default display name applies when not implemented).</summary>
-    static partial void CustomizeDisplayName(ref string displayName);
-
-    /// <summary>Replaces the required-value error message (partial; the default message applies when not implemented).</summary>
-    static partial void CustomizeValueRequiredErrorMessage(ref string message);
-
-    /// <summary>Replaces the maximum-length error message (partial; the default message applies when not implemented).</summary>
-    static partial void CustomizeMaxLengthErrorMessage(
-        string value,
-        int maxLength,
-        ref string message
-    );
+    /// <summary>Gets the display name of this value object (used in error messages and similar). Defaults to the column description, or the property name when unset. Replace it through GeneratedDisplayNames.Resolve, which resolves every generated display name and can switch on the member name.</summary>
+    public static string DisplayName =>
+        GeneratedDisplayNames.Resolve("Label", null);
 }
 
 /// <summary>Value object for the occurred_at column</summary>
@@ -1128,19 +1423,9 @@ public sealed partial class OccurredAtValue
     /// <summary>Custom input shape for TryCreateFrom / CreateFrom - a name for an enumeration-like value object, say (partial; only the ordinary conversion applies when not implemented). Set result to claim the value; leave it null for anything not handled so the ordinary conversion runs. Never call TryCreateFrom / CreateFrom from inside (they consult this hook and the call would recurse), and do not throw - TryCreateFrom reports failures through its return value, and an exception here rides straight through that contract.</summary>
     static partial void ConvertCustomInput(object raw, IFormatProvider? provider, ref OccurredAtValue? result);
 
-    /// <summary>Gets the display name of this value object (used in error messages and similar). Defaults to the column description, or the property name when unset. Can be replaced through GeneratedDisplayNames.Resolve (all display names at once) or CustomizeDisplayName (this value object only).</summary>
-    public static string DisplayName
-    {
-        get
-        {
-            var displayName = GeneratedDisplayNames.Resolve("OccurredAt", null);
-            CustomizeDisplayName(ref displayName);
-            return displayName;
-        }
-    }
-
-    /// <summary>Extension point for replacing the display name (partial; the default display name applies when not implemented).</summary>
-    static partial void CustomizeDisplayName(ref string displayName);
+    /// <summary>Gets the display name of this value object (used in error messages and similar). Defaults to the column description, or the property name when unset. Replace it through GeneratedDisplayNames.Resolve, which resolves every generated display name and can switch on the member name.</summary>
+    public static string DisplayName =>
+        GeneratedDisplayNames.Resolve("OccurredAt", null);
 }
 
 /// <summary>Value object for the probe_id column</summary>
@@ -1189,19 +1474,9 @@ public sealed partial class ProbeIdValue
     /// <summary>Custom input shape for TryCreateFrom / CreateFrom - a name for an enumeration-like value object, say (partial; only the ordinary conversion applies when not implemented). Set result to claim the value; leave it null for anything not handled so the ordinary conversion runs. Never call TryCreateFrom / CreateFrom from inside (they consult this hook and the call would recurse), and do not throw - TryCreateFrom reports failures through its return value, and an exception here rides straight through that contract.</summary>
     static partial void ConvertCustomInput(object raw, IFormatProvider? provider, ref ProbeIdValue? result);
 
-    /// <summary>Gets the display name of this value object (used in error messages and similar). Defaults to the column description, or the property name when unset. Can be replaced through GeneratedDisplayNames.Resolve (all display names at once) or CustomizeDisplayName (this value object only).</summary>
-    public static string DisplayName
-    {
-        get
-        {
-            var displayName = GeneratedDisplayNames.Resolve("ProbeId", null);
-            CustomizeDisplayName(ref displayName);
-            return displayName;
-        }
-    }
-
-    /// <summary>Extension point for replacing the display name (partial; the default display name applies when not implemented).</summary>
-    static partial void CustomizeDisplayName(ref string displayName);
+    /// <summary>Gets the display name of this value object (used in error messages and similar). Defaults to the column description, or the property name when unset. Replace it through GeneratedDisplayNames.Resolve, which resolves every generated display name and can switch on the member name.</summary>
+    public static string DisplayName =>
+        GeneratedDisplayNames.Resolve("ProbeId", null);
 }
 
 /// <summary>Value object for the session_id column</summary>
@@ -1250,19 +1525,9 @@ public sealed partial class SessionIdValue
     /// <summary>Custom input shape for TryCreateFrom / CreateFrom - a name for an enumeration-like value object, say (partial; only the ordinary conversion applies when not implemented). Set result to claim the value; leave it null for anything not handled so the ordinary conversion runs. Never call TryCreateFrom / CreateFrom from inside (they consult this hook and the call would recurse), and do not throw - TryCreateFrom reports failures through its return value, and an exception here rides straight through that contract.</summary>
     static partial void ConvertCustomInput(object raw, IFormatProvider? provider, ref SessionIdValue? result);
 
-    /// <summary>Gets the display name of this value object (used in error messages and similar). Defaults to the column description, or the property name when unset. Can be replaced through GeneratedDisplayNames.Resolve (all display names at once) or CustomizeDisplayName (this value object only).</summary>
-    public static string DisplayName
-    {
-        get
-        {
-            var displayName = GeneratedDisplayNames.Resolve("SessionId", null);
-            CustomizeDisplayName(ref displayName);
-            return displayName;
-        }
-    }
-
-    /// <summary>Extension point for replacing the display name (partial; the default display name applies when not implemented).</summary>
-    static partial void CustomizeDisplayName(ref string displayName);
+    /// <summary>Gets the display name of this value object (used in error messages and similar). Defaults to the column description, or the property name when unset. Replace it through GeneratedDisplayNames.Resolve, which resolves every generated display name and can switch on the member name.</summary>
+    public static string DisplayName =>
+        GeneratedDisplayNames.Resolve("SessionId", null);
 }
 
 /// <summary>Converts a raw value read from the database into a target CLR type, including the types <see cref="Convert.ChangeType(object, Type, IFormatProvider)"/> cannot reach on its own.</summary>

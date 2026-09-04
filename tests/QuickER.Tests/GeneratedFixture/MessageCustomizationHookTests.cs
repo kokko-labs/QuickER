@@ -7,8 +7,8 @@ using Xunit;
 namespace QuickER.Tests.GeneratedRemoteContractFixture;
 
 /// <summary>
-/// 生成コードのメッセージ・表示名カスタマイズ機構（一括＝static Func 差し替え／個別＝Customize* partial）を
-/// 固定フィクスチャ上で検証する。
+/// 生成コードのメッセージ・表示名カスタマイズ機構（一括＝static Func 差し替え／個別＝EditModel の Customize* partial と、
+/// VO は差し替えた Func の中で表示名分岐）を固定フィクスチャ上で検証する。
 /// </summary>
 /// <remarks>
 /// <para>
@@ -148,7 +148,7 @@ public class MessageCustomizationHookTests
     public void ValueObjectMessage_Replacement_IsReflected()
     {
         var original = ValueObjectValidationMessages.MaxLengthExceeded;
-        ValueObjectValidationMessages.MaxLengthExceeded = static (maxLength, actualLength) =>
+        ValueObjectValidationMessages.MaxLengthExceeded = static (_, maxLength, actualLength) =>
             $"{maxLength} 文字以内で入力してください（現在 {actualLength} 文字）";
 
         try
@@ -300,17 +300,39 @@ public class MessageCustomizationHookTests
             BindingMemo = memo,
         };
 
-    /// <summary>CustomizeValueRequiredErrorMessage の partial 実装が null 入力エラーを差し替える</summary>
-    [Fact(DisplayName = "CustomizeValueRequiredErrorMessage が VO の null エラーを差し替える")]
-    public void CustomizeValueRequiredErrorMessage_Hook_RewritesNullError()
+    /// <summary>VO 個別の文言は、リゾルバが受け取る表示名で分岐して差し替える（VO ごとの partial フックの後継レシピ）</summary>
+    /// <remarks>
+    /// 分岐の照合先を <c>MemoValue.DisplayName</c> にすると、列がリネームされて表示名が変わっても分岐は追従し、
+    /// VO 型ごと消えればコンパイルエラーになる（文字列リテラルで書くと黙って一致しなくなる）。
+    /// </remarks>
+    [Fact(DisplayName = "ValueRequired は表示名で分岐して対象 VO のみ差し替えできる")]
+    public void ValueRequiredMessage_CanBranchOnDisplayName()
     {
-        MemoValue.TryCreate(null!, out _, out var errors).Should().BeFalse();
+        var original = ValueObjectValidationMessages.ValueRequired;
+        ValueObjectValidationMessages.ValueRequired = static displayName =>
+            displayName == MemoValue.DisplayName
+                ? MessageCustomizationHookConstants.MemoRequiredMessage
+                : "A value is required.";
 
-        errors
-            .Should()
-            .ContainSingle()
-            .Which.Should()
-            .Be(MessageCustomizationHookConstants.MemoRequiredMessage);
+        try
+        {
+            MemoValue.TryCreate(null!, out _, out var errors).Should().BeFalse();
+
+            errors
+                .Should()
+                .ContainSingle()
+                .Which.Should()
+                .Be(MessageCustomizationHookConstants.MemoRequiredMessage);
+
+            // 対象外の VO は既定文言のまま（分岐が全域へ漏れていないことの裏取り）
+            NameValue.TryCreate(null!, out _, out var otherErrors).Should().BeFalse();
+
+            otherErrors.Should().ContainSingle().Which.Should().Be("A value is required.");
+        }
+        finally
+        {
+            ValueObjectValidationMessages.ValueRequired = original;
+        }
     }
 
     /// <summary>エラーメッセージ一覧を文字列で取得する</summary>
@@ -378,12 +400,4 @@ public partial class OrderEditModel
             message = MessageCustomizationHookConstants.DuplicateMemoMessage;
         }
     }
-}
-
-/// <summary>固定フィクスチャの MemoValue へ null エラーの個別フックを注入する partial 実装。</summary>
-public sealed partial class MemoValue
-{
-    /// <summary>null 入力の検証エラーを固定文言へ差し替える</summary>
-    static partial void CustomizeValueRequiredErrorMessage(ref string message) =>
-        message = MessageCustomizationHookConstants.MemoRequiredMessage;
 }

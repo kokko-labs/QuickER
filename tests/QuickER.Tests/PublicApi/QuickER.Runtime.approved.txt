@@ -605,6 +605,9 @@ public abstract class QuickER.Runtime.ValueObjectDateTimeBase<TSelf> : QuickER.R
     public static TSelf Now { get; }
     public static TSelf Today { get; }
 
+public static class QuickER.Runtime.ValueObjectDecimalRules
+    public static void Validate(decimal value, int precision, int scale, string displayName, ref System.Collections.Generic.List<string> errors)
+
 public abstract class QuickER.Runtime.ValueObjectGuidKeyBase<TSelf> : QuickER.Runtime.ValueObjectBase<TSelf, string>, QuickER.Runtime.IValueObject, System.IComparable, System.IComparable<TSelf>, System.IEquatable<TSelf>
     protected .ctor(string value)
     public int CompareTo(TSelf other)
@@ -620,6 +623,10 @@ public sealed class QuickER.Runtime.ValueObjectJsonConverterFactory : System.Tex
     public override System.Text.Json.Serialization.JsonConverter CreateConverter(System.Type typeToConvert, System.Text.Json.JsonSerializerOptions options)
     public override bool CanConvert(System.Type typeToConvert)
 
+public static class QuickER.Runtime.ValueObjectNumberRules
+    public static void ValidateMaxDigits(long value, int maxDigits, string displayName, ref System.Collections.Generic.List<string> errors)
+    public static void ValidateRange<T>(T value, T minimum, T maximum, string displayName, ref System.Collections.Generic.List<string> errors)
+
 public abstract class QuickER.Runtime.ValueObjectOrderedBase<TSelf, TValue> : QuickER.Runtime.ValueObjectBase<TSelf, TValue>, QuickER.Runtime.IValueObject, System.IComparable, System.IComparable<TSelf>, System.IEquatable<TSelf>
     protected .ctor(TValue value)
     public int CompareTo(TSelf other)
@@ -627,6 +634,9 @@ public abstract class QuickER.Runtime.ValueObjectOrderedBase<TSelf, TValue> : Qu
     public static bool op_GreaterThanOrEqual(QuickER.Runtime.ValueObjectOrderedBase<TSelf, TValue> left, QuickER.Runtime.ValueObjectOrderedBase<TSelf, TValue> right)
     public static bool op_LessThan(QuickER.Runtime.ValueObjectOrderedBase<TSelf, TValue> left, QuickER.Runtime.ValueObjectOrderedBase<TSelf, TValue> right)
     public static bool op_LessThanOrEqual(QuickER.Runtime.ValueObjectOrderedBase<TSelf, TValue> left, QuickER.Runtime.ValueObjectOrderedBase<TSelf, TValue> right)
+
+public static class QuickER.Runtime.ValueObjectRules
+    public static bool ValidateRequired<TValue>(TValue value, string displayName, ref System.Collections.Generic.List<string> errors)
 
 public abstract class QuickER.Runtime.ValueObjectStringBase<TSelf> : QuickER.Runtime.ValueObjectBase<TSelf, string>, QuickER.Runtime.IValueObject, System.IComparable, System.IComparable<TSelf>, System.IEquatable<TSelf>
     protected .ctor(string value)
@@ -638,15 +648,24 @@ public abstract class QuickER.Runtime.ValueObjectStringBase<TSelf> : QuickER.Run
     public bool StartsWith(string value)
     public int CompareTo(TSelf other)
 
+public static class QuickER.Runtime.ValueObjectStringRules
+    public static void ValidateAsciiAlphanumeric(string value, string allowedSymbols, string displayName, ref System.Collections.Generic.List<string> errors)
+    public static void ValidateEmailAddress(string value, string displayName, ref System.Collections.Generic.List<string> errors)
+    public static void ValidateMaxLength(string value, int maxLength, string displayName, ref System.Collections.Generic.List<string> errors)
+
 public sealed class QuickER.Runtime.ValueObjectValidationException : System.Exception, System.Runtime.Serialization.ISerializable
     public .ctor(System.Type valueObjectType, System.Collections.Generic.IReadOnlyList<string> errors)
     public System.Collections.Generic.IReadOnlyList<string> Errors { get; }
     public System.Type ValueObjectType { get; }
 
 public static class QuickER.Runtime.ValueObjectValidationMessages
-    public static System.Func<int, int, string> MaxLengthExceeded { get; set; }
-    public static System.Func<int, string> PrecisionExceeded { get; set; }
-    public static System.Func<int, string> ScaleExceeded { get; set; }
-    public static System.Func<object, string, string> InputNotConvertible { get; set; }
-    public static System.Func<string> ValueRequired { get; set; }
+    public static System.Func<string, int, int, string> MaxLengthExceeded { get; set; }
+    public static System.Func<string, int, string> DigitsExceeded { get; set; }
+    public static System.Func<string, int, string> PrecisionExceeded { get; set; }
+    public static System.Func<string, int, string> ScaleExceeded { get; set; }
+    public static System.Func<string, object, object, string> OutOfRange { get; set; }
+    public static System.Func<string, object, string> InputNotConvertible { get; set; }
+    public static System.Func<string, string, string> InvalidCharacters { get; set; }
+    public static System.Func<string, string> InvalidEmailAddress { get; set; }
+    public static System.Func<string, string> ValueRequired { get; set; }
 

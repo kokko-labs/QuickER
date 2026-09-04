@@ -6,8 +6,15 @@ QuickER の利用者に影響する変更を記録します。形式は [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- **生成された値オブジェクトが走らせる検証ルールを公開し、再利用できるようにしました** — `ValueObjectRules.ValidateRequired` / `ValueObjectStringRules.ValidateMaxLength` / `ValueObjectDecimalRules.Validate` を値オブジェクトごとの展開から固定 infra（パッケージ参照モードでは `QuickER.Runtime`）へ移しました。生成される `ValidateCore` は規則 1 つにつき 1 行の委譲になり、手書きの値オブジェクトからも同じ規則を呼べます
+- **`OnValidate` から呼べる汎用の検証ルールを 4 種追加しました** — `ValueObjectNumberRules.ValidateMaxDigits`（整数の桁数）・`ValueObjectNumberRules.ValidateRange`（閉区間。`IComparable<T>` なら何でも）・`ValueObjectStringRules.ValidateAsciiAlphanumeric`（ASCII 英数字＋許可した記号）・`ValueObjectStringRules.ValidateEmailAddress`（実用最小。RFC 5322 の完全検証は意図的にしない）。文言は `ValueObjectValidationMessages` の新エントリ（`DigitsExceeded` / `OutOfRange` / `InvalidCharacters` / `InvalidEmailAddress`）です
+
 ### Changed
 
+- **破壊的変更: 値オブジェクトごとの文言・表示名フックを廃止しました** — 生成される値オブジェクトは `CustomizeDisplayName` / `CustomizeMaxLengthErrorMessage` / `CustomizeScaleErrorMessage` / `CustomizePrecisionErrorMessage` / `CustomizeValueRequiredErrorMessage` を宣言しなくなったため、既存の実装はコンパイルできなくなります。表示名は `GeneratedDisplayNames.Resolve`、文言は対応する `ValueObjectValidationMessages` のエントリで差し替え、型を絞りたいときは名前で分岐してください（`memberName == nameof(CustomerEntity.Name)` / `displayName == NameValue.DisplayName`）。文言が「型ごとに 1 か所」でなく「メッセージごとに 1 か所」へまとまり、再生成後に生成側クラスへ実装し直す必要もなくなります。`OnValidate` / `GetDefinedInstance` / `ConvertCustomInput` は変わりません
+- **破壊的変更: `ValueObjectValidationMessages` の各エントリが第 1 引数に表示名を取るようになりました** — `MaxLengthExceeded` は `(displayName, maxLength, actualLength)`、`ScaleExceeded` / `PrecisionExceeded` は `(displayName, …)`、`ValueRequired` は `(displayName)`、`InputNotConvertible` は引数順を `(displayName, raw)` へ入れ替えました。1 つの差し替えで型ごとに文言を変えられるのはこの引数のおかげです。既定の文面は変えていないため、差し替えていないアプリの見た目は変わりません
 - **破壊的変更: 生成 Mapper の `includeRemoved` が必須引数になりました** — `CreateEntity(editModel, includeRemoved)` / `CreateEntities(collection, includeRemoved)` / `ApplyToEntity(editModel, entity, includeRemoved)` の既定値 `false` を撤廃したため、呼び出しごとに「保存用のグラフを作るのか（`true`）表示用なのか（`false`）」を明示します。省略できた頃は削除追跡中の行がグラフから漏れ、保存してもユーザーが消したはずの行が黙って残っていました。移行はコードを再生成し、コンパイルエラーになった呼び出しへ保存経路なら `includeRemoved: true`、表示経路なら `includeRemoved: false` を付けてください
 
 ## [0.1.0] - 2026-08-30
