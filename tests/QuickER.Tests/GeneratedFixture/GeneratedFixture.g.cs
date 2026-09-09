@@ -181,9 +181,10 @@ public sealed class StoreGeneratedColumnAttribute : Attribute
 /// It turns the generated entity into a self-describing document of the DB definition, allowing the constraint to be recovered via reflection.
 /// </summary>
 /// <remarks>
-/// It is applied once per UNIQUE constraint of the table. Like <c>[DbColumnMeta]</c> / <c>[DbTableMeta]</c> it carries definition
-/// metadata only and drives no runtime behaviour: the uniqueness pre-checks are plain generated code (the repository's
+/// It is applied once per UNIQUE constraint of the table. Like <c>[DbColumnMeta]</c> / <c>[DbTableMeta]</c> it is definition
+/// metadata, and the uniqueness pre-checks read none of it: those are plain generated code (the repository's
 /// <c>CheckUniquenessAsync</c> against the database, and the constraints an edit model declares for the duplicate check inside a collection).
+/// The in-memory store is the one part that does read it: having no database behind it, this declaration is what it enforces the constraint from.
 /// </remarks>
 [AttributeUsage(AttributeTargets.Class, AllowMultiple = true)]
 public sealed class UniqueConstraintAttribute : Attribute
@@ -478,7 +479,10 @@ public sealed class ValueObjectValidationException : Exception
 }
 
 /// <summary>Common base for value objects. Provides the Create / TryCreate / Validate factories, value storage, equality, ToString, and extraction of the raw value (ordered comparison is added by derived types).</summary>
-public abstract partial class ValueObjectBase<TSelf, TValue> : IValueObject, IEquatable<TSelf>
+public abstract partial class ValueObjectBase<TSelf, TValue>
+    : IValueObject,
+        IEquatable<TSelf>,
+        IFormattable
     where TSelf : ValueObjectBase<TSelf, TValue>, IValueObject<TSelf, TValue>
 {
     /// <summary>Gets the underlying value (never reassigned; reference-typed values such as byte[] are not defensively copied — see <see cref="ValueObjectBinaryBase{TSelf}"/>).</summary>
@@ -667,6 +671,25 @@ public abstract partial class ValueObjectBase<TSelf, TValue> : IValueObject, IEq
 
     /// <summary>Returns the string representation of the underlying value.</summary>
     public override string ToString() => Value?.ToString() ?? string.Empty;
+
+    /// <summary>Formats the underlying value with the given format string, using the current culture.</summary>
+    /// <param name="format">The format string for the underlying value (for example "N2" on a decimal, "yyyy/MM/dd" on a date).</param>
+    public string ToString(string? format) => ToString(format, null);
+
+    /// <summary>Formats the underlying value with the given format string and culture.</summary>
+    /// <remarks>
+    /// Because the value object implements <see cref="IFormattable"/>, a format specifier in string interpolation,
+    /// <see cref="string.Format(string, object?)"/>, or a WPF binding's StringFormat reaches the underlying value through
+    /// this method. An underlying value that is not <see cref="IFormattable"/> (a string, a byte array, a bool) renders as
+    /// its plain string representation and the format is ignored, which is what composite formatting does for any such value.
+    /// <see cref="DisplayValue"/> is the type's own display form; this method renders the format the caller asks for.
+    /// </remarks>
+    /// <param name="format">The format string for the underlying value.</param>
+    /// <param name="formatProvider">The culture to format with; null uses the current culture.</param>
+    public string ToString(string? format, IFormatProvider? formatProvider) =>
+        Value is IFormattable formattable
+            ? formattable.ToString(format, formatProvider)
+            : Value?.ToString() ?? string.Empty;
 }
 
 /// <summary>Base for orderable value objects (numeric and date/time types). Provides comparison operators and CompareTo.</summary>
@@ -3357,15 +3380,30 @@ public abstract partial class EditModelBase
 
     /// <summary>Registers a missing-required-input error on the specified property, unless it already carries another input error (called by the generated required-field check).</summary>
     /// <remarks>
+    /// <para>
     /// A conversion error means the field does hold input that simply cannot be converted, which is the more upstream cause and the
     /// message the user has to act on. Replacing it with "is required" would hide the real problem behind a wrong one, and the
     /// conversion error can only ever be produced again by the binding setter.
+    /// </para>
+    /// <para>
+    /// Registering the very same message this check already registered changes nothing about the property, so
+    /// <see cref="ErrorsChanged"/> is not raised for it: validation is run repeatedly over a model that is still incomplete,
+    /// and announcing a change that did not happen makes every one of those runs redraw the bound field.
+    /// </para>
     /// </remarks>
     protected void SetRequiredError(string propertyName, string message)
     {
-        if (_errors.TryGetValue(propertyName, out var existing) && !existing.FromRequiredCheck)
+        if (_errors.TryGetValue(propertyName, out var existing))
         {
-            return;
+            if (!existing.FromRequiredCheck)
+            {
+                return;
+            }
+
+            if (string.Equals(existing.Message, message, StringComparison.Ordinal))
+            {
+                return;
+            }
         }
 
         _errors[propertyName] = new InputError(message, FromRequiredCheck: true);
@@ -3907,6 +3945,136 @@ public static class EditModelUniquenessValidator
 /// <param name="Property">Name of the binding property the error is attached to (e.g. BindingTitle).</param>
 /// <param name="Message">The error message.</param>
 public sealed record EditModelError(string Path, string Property, string Message);
+
+/// <summary>Renders a date or time confirmed value as the input string shown on screen, keeping a sub-second part that the culture's own format would drop.</summary>
+/// <remarks>
+/// <para>
+/// A value whose sub-second part is zero is rendered by its own <c>ToString()</c>, character for character - the culture's
+/// format is what the screen has always shown and there is nothing extra to carry. Only a value that does hold a sub-second
+/// part is rendered through a pattern that appends it, because otherwise the input string would not describe the value it was
+/// derived from: editing any other column of the row would commit the truncated instant back over the stored one, since the
+/// binding setter rebuilds the confirmed value from the text.
+/// </para>
+/// <para>
+/// The fraction is written with a literal <c>.</c> and no trailing zeros, whatever the culture's decimal separator is. It has
+/// to survive the return trip through the binding setter, which parses with the current culture, and the '.' is what the date
+/// and time parsers accept as the fraction mark across cultures.
+/// </para>
+/// </remarks>
+public static class EditModelInputFormat
+{
+    /// <summary>Time patterns that carry a sub-second part, resolved once per culture from its long time pattern.</summary>
+    private static readonly ConcurrentDictionary<CultureInfo, string> _fractionalTimePatterns =
+        new();
+
+    /// <summary>Renders a <see cref="DateTime"/> confirmed value (null becomes an empty string).</summary>
+    public static string Format(DateTime? value) =>
+        value is not { } resolved ? string.Empty
+        : !HasFraction(resolved.Ticks) ? resolved.ToString()
+        : resolved.ToString(
+            CultureInfo.CurrentCulture.DateTimeFormat.ShortDatePattern
+                + " "
+                + FractionalTimePattern(CultureInfo.CurrentCulture),
+            CultureInfo.CurrentCulture
+        );
+
+    /// <summary>Renders a <see cref="DateTimeOffset"/> confirmed value (null becomes an empty string).</summary>
+    public static string Format(DateTimeOffset? value) =>
+        value is not { } resolved ? string.Empty
+        : !HasFraction(resolved.Ticks) ? resolved.ToString()
+        : resolved.ToString(
+            CultureInfo.CurrentCulture.DateTimeFormat.ShortDatePattern
+                + " "
+                + FractionalTimePattern(CultureInfo.CurrentCulture)
+                + " zzz",
+            CultureInfo.CurrentCulture
+        );
+
+    /// <summary>Renders a <see cref="TimeSpan"/> confirmed value (null becomes an empty string).</summary>
+    /// <remarks>
+    /// Nothing is appended: the default format of a <see cref="TimeSpan"/> already writes the sub-second part when there is
+    /// one, so the value is lossless as it stands. The overload exists so that every sub-second-capable type is rendered
+    /// through the same call.
+    /// </remarks>
+    public static string Format(TimeSpan? value) => value?.ToString() ?? string.Empty;
+
+    /// <summary>Renders a <see cref="TimeOnly"/> confirmed value (null becomes an empty string).</summary>
+    /// <remarks>
+    /// A value with no sub-second part keeps the short time its own <c>ToString()</c> writes, seconds and all left out as
+    /// before. Only a value that holds one switches to the long time pattern, which is the shortest form that can show it.
+    /// </remarks>
+    public static string Format(TimeOnly? value) =>
+        value is not { } resolved ? string.Empty
+        : !HasFraction(resolved.Ticks) ? resolved.ToString()
+        : resolved.ToString(
+            FractionalTimePattern(CultureInfo.CurrentCulture),
+            CultureInfo.CurrentCulture
+        );
+
+    /// <summary>Whether the tick count carries a part smaller than a second.</summary>
+    private static bool HasFraction(long ticks) => ticks % TimeSpan.TicksPerSecond != 0;
+
+    /// <summary>The culture's long time pattern with a sub-second part attached to its seconds.</summary>
+    private static string FractionalTimePattern(CultureInfo culture) =>
+        _fractionalTimePatterns.GetOrAdd(
+            culture,
+            static resolved => AttachFraction(resolved.DateTimeFormat.LongTimePattern)
+        );
+
+    /// <summary>Inserts a literal-dot, trailing-zero-free sub-second token right after the seconds of a time pattern.</summary>
+    /// <remarks>
+    /// The scan skips quoted literals and escaped characters, so an 's' that a culture spells out as text is not mistaken
+    /// for the seconds token. A pattern that shows no seconds at all is returned unchanged - there is nothing for a fraction
+    /// to hang off - and the value is then shown exactly as it was before.
+    /// </remarks>
+    private static string AttachFraction(string timePattern)
+    {
+        var quote = '\0';
+
+        for (var index = 0; index < timePattern.Length; index++)
+        {
+            var character = timePattern[index];
+
+            if (quote != '\0')
+            {
+                if (character == quote)
+                {
+                    quote = '\0';
+                }
+
+                continue;
+            }
+
+            if (character is '\'' or '"')
+            {
+                quote = character;
+                continue;
+            }
+
+            if (character == '\\')
+            {
+                index++;
+                continue;
+            }
+
+            if (character != 's')
+            {
+                continue;
+            }
+
+            var end = index;
+
+            while (end + 1 < timePattern.Length && timePattern[end + 1] == 's')
+            {
+                end++;
+            }
+
+            return timePattern[..(end + 1)] + "\\.FFFFFFF" + timePattern[(end + 1)..];
+        }
+
+        return timePattern;
+    }
+}
 
 /// <summary>One column of an edit model as data: the two names it is known by, whether input is required, and the accessors the shared checks drive.</summary>
 /// <remarks>
@@ -4540,6 +4708,12 @@ public abstract partial class MapperBase<TEntity, TEditModel>
     /// The whole sequence runs in the edit model's loading state, where a confirmed-value change does not promote the row
     /// to an update target; the row state is taken from the source entity once the load is over (loaded = Unchanged,
     /// new = Added).
+    /// </para>
+    /// <para>
+    /// Child collections are rebuilt rather than merged: the previous collection instances are replaced by new ones, so
+    /// anything held against them is dropped along with them - a selected item, a scroll position or any other view state
+    /// bound to the old instance, and the removals the old collection was tracking for the next save. Load into an edit
+    /// model that has pending child edits only when discarding them is what is meant.
     /// </para>
     /// </remarks>
     /// <param name="entity">The entity whose values are loaded.</param>
@@ -5575,7 +5749,7 @@ public partial class OrderEditModel : EditModelBase<OrderEditModel>
                 static () => OrderedAtValue.DisplayName,
                 static model => model.OrderedAt,
                 static (model, value) => model.OrderedAt = (OrderedAtValue?)value,
-                static model => model.OrderedAt?.ToString() ?? string.Empty,
+                static model => EditModelInputFormat.Format(model.OrderedAt?.Value),
                 static (model, input) => model.BindingOrderedAt = input
             ),
             new(

@@ -505,13 +505,34 @@ internal sealed partial class CSharpGenerationModelBuilder
             // NOT NULL 違反で必ず落ちるため、行が DB に無い間だけ画面で止める（rowversion 列は
             // 無制限バイナリ判定が偽なのでここには入らない）
             IsRequiredWhenAdded = isExcludedUnboundedBinary && !column.IsNullable,
-            // 日付のみの列は内包値を短い日付書式で表示する（VO の ToString() は時刻部まで出るため）
-            ToInputExpression = IsDateOnly(_columnTypes[column.Id])
-                ? $"model.{propertyName}?.Value.ToString(\"d\") ?? string.Empty"
-                : $"model.{propertyName}?.ToString() ?? string.Empty",
+            // 日付のみの列は内包値を短い日付書式で表示する（VO の ToString() は時刻部まで出るため）。
+            // 秒未満を持ち得る型は内包値を固定 infra の書式ヘルパーへ渡す（非 VO 列と同じ経路・同じ表示）
+            ToInputExpression = BuildValueObjectBindingExpression(propertyName, column),
             IsValueObject = true,
             ValueObjectClassName = valueObject.ClassName,
         };
+    }
+
+    /// <summary>VO 化された列の確定値から UI バインディング文字列へ戻す式を生成する</summary>
+    /// <remarks>
+    /// 日付のみ・秒未満を持ち得る型は内包値（<c>?.Value</c>）を読む。VO の <c>ToString()</c> は既定書式で、
+    /// 日付のみ列では時刻部が付き、秒未満を持つ値では端数が落ちるため、いずれも非 VO 列と同じ表示にならない。
+    /// </remarks>
+    private string BuildValueObjectBindingExpression(string propertyName, Column column)
+    {
+        var typeInfo = _columnTypes[column.Id];
+
+        if (IsDateOnly(typeInfo))
+        {
+            return $"model.{propertyName}?.Value.ToString(\"d\") ?? string.Empty";
+        }
+
+        if (HasSubSecondPart(typeInfo))
+        {
+            return $"EditModelInputFormat.Format(model.{propertyName}?.Value)";
+        }
+
+        return $"model.{propertyName}?.ToString() ?? string.Empty";
     }
 
     /// <summary>競合判定用の定義シグネチャ（型・長さ・精度・スケール。NULL 可否は含めない）</summary>

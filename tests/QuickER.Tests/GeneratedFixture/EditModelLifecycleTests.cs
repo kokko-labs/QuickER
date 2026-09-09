@@ -375,6 +375,42 @@ public sealed class EditModelLifecycleTests
         m.HasErrors.Should().BeFalse();
     }
 
+    [Fact(DisplayName = "必須検証: 同じ必須エラーの再登録では ErrorsChanged を上げない")]
+    public void 必須検証は同値の再登録を通知しない()
+    {
+        var m = new OrderEditModel();
+        var raised = 0;
+        m.ErrorsChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(OrderEditModel.BindingAmount))
+            {
+                raised++;
+            }
+        };
+
+        m.Validate(includeChildren: false).Should().BeFalse();
+        raised.Should().Be(1, "最初の登録だけが変化");
+
+        // 未入力のまま何度検証しても、欄の状態は変わっていない＝通知も増えない
+        m.Validate(includeChildren: false);
+        m.Validate(includeChildren: false);
+        raised.Should().Be(1);
+
+        // 文言が変われば欄の見え方が変わるので、そのときは通知する
+        var previous = EditModelMessages.Required;
+
+        try
+        {
+            EditModelMessages.Required = static (_, displayName) => $"{displayName} is missing.";
+            m.Validate(includeChildren: false);
+            raised.Should().Be(2);
+        }
+        finally
+        {
+            EditModelMessages.Required = previous;
+        }
+    }
+
     [Fact(
         DisplayName = "ロード中フラグ: 入れ子の ExecuteLoad を抜けても外側のロードは継続中と扱う"
     )]

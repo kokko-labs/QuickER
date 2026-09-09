@@ -592,6 +592,44 @@ public class SyncSupportGenerationTests
     }
 
     /// <summary>
+    /// 版なし専用のエンドポイントマップ（<c>MapVersionlessSyncEndpoints</c>）は、呼び出し側になる版なしテーブルが
+    /// 1 つでもあるときだけ出力される（版ありだけの図ではメソッドごと消える＝死蔵コードを残さない）。
+    /// </summary>
+    [Fact(DisplayName = "版なし専用エンドポイントのマップは版なしテーブルが在るときだけ出力される")]
+    public void VersionlessEndpointMap_EmittedOnlyWhenAVersionlessTableExists()
+    {
+        // 版あり＋版なしの混在図: メソッドと呼び出しの両方が出る
+        var (mixedFiles, _) = Generate(Diagram(), SyncOptions());
+        var mixedServer = mixedFiles[SyncFixtureDefinition.RemoteServerOutputFileName];
+        mixedServer
+            .Should()
+            .Contain("private static void MapVersionlessSyncEndpoints<TEntity, TKey>(");
+        mixedServer
+            .Should()
+            .Contain("MapVersionlessSyncEndpoints<SyncNoteEntity, int>(group, \"SyncNote\");");
+
+        // 版なしテーブルを外した図: 呼び出しが無いのでメソッドも出ない（版ありのマップは従来どおり）
+        var versionedOnly = Diagram();
+        var removed = versionedOnly.Entities.Where(e => e.TableName == "sync_notes").ToList();
+        versionedOnly.Relationships.RemoveAll(r =>
+            removed.Any(e => e.Id == r.SourceEntityId || e.Id == r.TargetEntityId)
+        );
+        versionedOnly.Entities.RemoveAll(e => e.TableName == "sync_notes");
+
+        var (versionedFiles, versionedDiagnostics) = Generate(versionedOnly, SyncOptions());
+        versionedDiagnostics
+            .Should()
+            .NotContain(d => d.Severity == GenerationDiagnosticSeverity.Error);
+
+        var versionedServer = versionedFiles[SyncFixtureDefinition.RemoteServerOutputFileName];
+        versionedServer.Should().NotContain("MapVersionlessSyncEndpoints");
+        versionedServer
+            .Should()
+            .Contain("MapSyncEndpoints<SyncOrderEntity, int>(group, \"SyncOrder\");");
+        versionedServer.Should().Contain("RemoteSyncOperations.Ceiling");
+    }
+
+    /// <summary>
     /// rowversion 列を 1 つも持たない図でも生成は成立する（全テーブルが後勝ち専用の版なしテーブルになる）。
     /// </summary>
     /// <remarks>

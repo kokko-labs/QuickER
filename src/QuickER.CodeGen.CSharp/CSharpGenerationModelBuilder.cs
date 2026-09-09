@@ -775,37 +775,58 @@ internal sealed partial class CSharpGenerationModelBuilder
             // NOT NULL 違反で必ず落ちるため、行が DB に無い間だけ画面で止める（rowversion 列は
             // 無制限バイナリ判定が偽なのでここには入らない）
             IsRequiredWhenAdded = isExcludedUnboundedBinary && !column.IsNullable,
-            ToInputExpression = BuildBindingExpression(
-                "model." + propertyName,
-                isBytes,
-                IsDateOnly(typeInfo)
-            ),
+            ToInputExpression = BuildBindingExpression("model." + propertyName, isBytes, typeInfo),
         };
     }
 
     /// <summary>確定値から UI バインディング文字列へ戻す式を生成する（バイナリは Base64 化・日付のみ列は短い日付書式）</summary>
     /// <remarks>
+    /// <para>
     /// 日付のみの列（SQL の <c>date</c>）は既定の <c>ToString()</c> だと時刻部 "0:00:00" が常に付いて画面に出るため、
     /// カルチャ依存の短い日付書式（"d"）で導出する。入力側は無変更で往復する（<c>DateTime.TryParse</c> は
-    /// 日付のみの文字列をそのまま受ける）。時刻を持つ列（<c>datetime2</c> 等）は既定書式。
+    /// 日付のみの文字列をそのまま受ける）。
+    /// </para>
+    /// <para>
+    /// 秒未満を持ち得る型（<c>DateTime</c> / <c>DateTimeOffset</c> / <c>TimeSpan</c> / <c>TimeOnly</c>）は固定 infra の
+    /// <c>EditModelInputFormat.Format</c> へ委ねる。カルチャ既定の書式は秒未満を落とすため、そのまま表示すると
+    /// 「同じ行の別の列を編集しただけで切り捨てた値が確定値へ戻る」（バインド setter は入力文字列から確定値を作り直す）。
+    /// 秒未満がゼロの値は従来と同一文字列を返すため、既存の画面表示は変わらない。
+    /// </para>
     /// </remarks>
     /// <param name="valueAccess">確定値を読む式（列テーブルのラムダ本体になるため <c>model.{プロパティ}</c> の形で渡す）</param>
     /// <param name="isBinary">バイナリ列かどうか</param>
-    /// <param name="isDateOnly">日付のみ（時刻部を持たない）列かどうか</param>
-    private static string BuildBindingExpression(string valueAccess, bool isBinary, bool isDateOnly)
+    /// <param name="typeInfo">列の解決済み C# 型情報（日付のみ判定・秒未満を持ち得る型の判定に使う）</param>
+    private static string BuildBindingExpression(
+        string valueAccess,
+        bool isBinary,
+        CSharpTypeInfo typeInfo
+    )
     {
         if (isBinary)
         {
             return $"{valueAccess} is null ? string.Empty : Convert.ToBase64String({valueAccess})";
         }
 
-        if (isDateOnly)
+        if (IsDateOnly(typeInfo))
         {
             return $"{valueAccess}?.ToString(\"d\") ?? string.Empty";
         }
 
+        if (HasSubSecondPart(typeInfo))
+        {
+            return $"EditModelInputFormat.Format({valueAccess})";
+        }
+
         return $"{valueAccess}?.ToString() ?? string.Empty";
     }
+
+    /// <summary>秒未満（1 秒より細かい端数）を持ち得る C# 型かどうかを判定する</summary>
+    /// <remarks>
+    /// 判定は解決済みの C# 型名だけで行う（方言の型表記は見ない＝生成器の DB 非依存を保つ）。日付のみの列は
+    /// <see cref="IsDateOnly"/> が先に引き当てるため、ここへは落ちてこない。
+    /// </remarks>
+    private static bool HasSubSecondPart(CSharpTypeInfo typeInfo) =>
+        typeInfo.TypeName is "DateTime" or "DateTimeOffset" or "TimeSpan" or "TimeOnly";
 
     /// <summary>日付のみ（時刻部を持たない）の列かどうかを判定する</summary>
     /// <remarks>

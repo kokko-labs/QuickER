@@ -212,8 +212,9 @@ internal static class GeneratedFileUsings
                 }
 
                 // 生値変換 RawValueConverter（CultureInfo / NumberStyles）は、リポジトリ契約が無く値オブジェクト
-                // だけを出す構成でも ValueObjectBase.TryCreateFrom の依存として Runtime 側へ出る
-                if (options.GenerateValueObjects)
+                // だけを出す構成でも ValueObjectBase.TryCreateFrom の依存として Runtime 側へ出る。
+                // EditModel の固定 infra（EditModelInputFormat＝秒未満を持つ日時の表示書式）も CultureInfo を使う
+                if (options.GenerateValueObjects || options.GenerateEditModels)
                 {
                     yield return "System.Globalization";
                 }

@@ -180,9 +180,10 @@ public sealed class StoreGeneratedColumnAttribute : Attribute
 /// It turns the generated entity into a self-describing document of the DB definition, allowing the constraint to be recovered via reflection.
 /// </summary>
 /// <remarks>
-/// It is applied once per UNIQUE constraint of the table. Like <c>[DbColumnMeta]</c> / <c>[DbTableMeta]</c> it carries definition
-/// metadata only and drives no runtime behaviour: the uniqueness pre-checks are plain generated code (the repository's
+/// It is applied once per UNIQUE constraint of the table. Like <c>[DbColumnMeta]</c> / <c>[DbTableMeta]</c> it is definition
+/// metadata, and the uniqueness pre-checks read none of it: those are plain generated code (the repository's
 /// <c>CheckUniquenessAsync</c> against the database, and the constraints an edit model declares for the duplicate check inside a collection).
+/// The in-memory store is the one part that does read it: having no database behind it, this declaration is what it enforces the constraint from.
 /// </remarks>
 [AttributeUsage(AttributeTargets.Class, AllowMultiple = true)]
 public sealed class UniqueConstraintAttribute : Attribute

@@ -152,6 +152,30 @@ public sealed class StoreGeneratedColumnAttribute : Attribute
 }
 
 /// <summary>
+/// Custom attribute that declares one UNIQUE constraint of the table on an entity class (a dialect-neutral definition metadata).
+/// The arguments are the entity property names that make up the constraint, in declaration order.
+/// It turns the generated entity into a self-describing document of the DB definition, allowing the constraint to be recovered via reflection.
+/// </summary>
+/// <remarks>
+/// It is applied once per UNIQUE constraint of the table. Like <c>[DbColumnMeta]</c> / <c>[DbTableMeta]</c> it is definition
+/// metadata, and the uniqueness pre-checks read none of it: those are plain generated code (the repository's
+/// <c>CheckUniquenessAsync</c> against the database, and the constraints an edit model declares for the duplicate check inside a collection).
+/// The in-memory store is the one part that does read it: having no database behind it, this declaration is what it enforces the constraint from.
+/// </remarks>
+[AttributeUsage(AttributeTargets.Class, AllowMultiple = true)]
+public sealed class UniqueConstraintAttribute : Attribute
+{
+    /// <summary>Gets the entity property names that make up the constraint (declaration order).</summary>
+    public string[] PropertyNames { get; }
+
+    /// <summary>Gets or sets the constraint name (the synthesized name when the diagram does not set one).</summary>
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>Initializes a new instance with the properties that make up the constraint.</summary>
+    public UniqueConstraintAttribute(params string[] propertyNames) => PropertyNames = propertyNames;
+}
+
+/// <summary>
 /// Marker attribute that excludes an unbounded binary column (such as <c>varbinary(max)</c> or a BLOB with no declared length) from SELECT / UPDATE.
 /// INSERT / BulkInsert still handle all columns. Updating while a value remains assigned throws at runtime (perform such updates with raw SQL via <c>ExecuteSqlAsync</c>).
 /// </summary>
@@ -1584,15 +1608,30 @@ public abstract partial class EditModelBase
 
     /// <summary>Registers a missing-required-input error on the specified property, unless it already carries another input error (called by the generated required-field check).</summary>
     /// <remarks>
+    /// <para>
     /// A conversion error means the field does hold input that simply cannot be converted, which is the more upstream cause and the
     /// message the user has to act on. Replacing it with "is required" would hide the real problem behind a wrong one, and the
     /// conversion error can only ever be produced again by the binding setter.
+    /// </para>
+    /// <para>
+    /// Registering the very same message this check already registered changes nothing about the property, so
+    /// <see cref="ErrorsChanged"/> is not raised for it: validation is run repeatedly over a model that is still incomplete,
+    /// and announcing a change that did not happen makes every one of those runs redraw the bound field.
+    /// </para>
     /// </remarks>
     protected void SetRequiredError(string propertyName, string message)
     {
-        if (_errors.TryGetValue(propertyName, out var existing) && !existing.FromRequiredCheck)
+        if (_errors.TryGetValue(propertyName, out var existing))
         {
-            return;
+            if (!existing.FromRequiredCheck)
+            {
+                return;
+            }
+
+            if (string.Equals(existing.Message, message, StringComparison.Ordinal))
+            {
+                return;
+            }
         }
 
         _errors[propertyName] = new InputError(message, FromRequiredCheck: true);
@@ -2134,6 +2173,136 @@ public static class EditModelUniquenessValidator
 /// <param name="Property">Name of the binding property the error is attached to (e.g. BindingTitle).</param>
 /// <param name="Message">The error message.</param>
 public sealed record EditModelError(string Path, string Property, string Message);
+
+/// <summary>Renders a date or time confirmed value as the input string shown on screen, keeping a sub-second part that the culture's own format would drop.</summary>
+/// <remarks>
+/// <para>
+/// A value whose sub-second part is zero is rendered by its own <c>ToString()</c>, character for character - the culture's
+/// format is what the screen has always shown and there is nothing extra to carry. Only a value that does hold a sub-second
+/// part is rendered through a pattern that appends it, because otherwise the input string would not describe the value it was
+/// derived from: editing any other column of the row would commit the truncated instant back over the stored one, since the
+/// binding setter rebuilds the confirmed value from the text.
+/// </para>
+/// <para>
+/// The fraction is written with a literal <c>.</c> and no trailing zeros, whatever the culture's decimal separator is. It has
+/// to survive the return trip through the binding setter, which parses with the current culture, and the '.' is what the date
+/// and time parsers accept as the fraction mark across cultures.
+/// </para>
+/// </remarks>
+public static class EditModelInputFormat
+{
+    /// <summary>Time patterns that carry a sub-second part, resolved once per culture from its long time pattern.</summary>
+    private static readonly ConcurrentDictionary<CultureInfo, string> _fractionalTimePatterns =
+        new();
+
+    /// <summary>Renders a <see cref="DateTime"/> confirmed value (null becomes an empty string).</summary>
+    public static string Format(DateTime? value) =>
+        value is not { } resolved ? string.Empty
+        : !HasFraction(resolved.Ticks) ? resolved.ToString()
+        : resolved.ToString(
+            CultureInfo.CurrentCulture.DateTimeFormat.ShortDatePattern
+                + " "
+                + FractionalTimePattern(CultureInfo.CurrentCulture),
+            CultureInfo.CurrentCulture
+        );
+
+    /// <summary>Renders a <see cref="DateTimeOffset"/> confirmed value (null becomes an empty string).</summary>
+    public static string Format(DateTimeOffset? value) =>
+        value is not { } resolved ? string.Empty
+        : !HasFraction(resolved.Ticks) ? resolved.ToString()
+        : resolved.ToString(
+            CultureInfo.CurrentCulture.DateTimeFormat.ShortDatePattern
+                + " "
+                + FractionalTimePattern(CultureInfo.CurrentCulture)
+                + " zzz",
+            CultureInfo.CurrentCulture
+        );
+
+    /// <summary>Renders a <see cref="TimeSpan"/> confirmed value (null becomes an empty string).</summary>
+    /// <remarks>
+    /// Nothing is appended: the default format of a <see cref="TimeSpan"/> already writes the sub-second part when there is
+    /// one, so the value is lossless as it stands. The overload exists so that every sub-second-capable type is rendered
+    /// through the same call.
+    /// </remarks>
+    public static string Format(TimeSpan? value) => value?.ToString() ?? string.Empty;
+
+    /// <summary>Renders a <see cref="TimeOnly"/> confirmed value (null becomes an empty string).</summary>
+    /// <remarks>
+    /// A value with no sub-second part keeps the short time its own <c>ToString()</c> writes, seconds and all left out as
+    /// before. Only a value that holds one switches to the long time pattern, which is the shortest form that can show it.
+    /// </remarks>
+    public static string Format(TimeOnly? value) =>
+        value is not { } resolved ? string.Empty
+        : !HasFraction(resolved.Ticks) ? resolved.ToString()
+        : resolved.ToString(
+            FractionalTimePattern(CultureInfo.CurrentCulture),
+            CultureInfo.CurrentCulture
+        );
+
+    /// <summary>Whether the tick count carries a part smaller than a second.</summary>
+    private static bool HasFraction(long ticks) => ticks % TimeSpan.TicksPerSecond != 0;
+
+    /// <summary>The culture's long time pattern with a sub-second part attached to its seconds.</summary>
+    private static string FractionalTimePattern(CultureInfo culture) =>
+        _fractionalTimePatterns.GetOrAdd(
+            culture,
+            static resolved => AttachFraction(resolved.DateTimeFormat.LongTimePattern)
+        );
+
+    /// <summary>Inserts a literal-dot, trailing-zero-free sub-second token right after the seconds of a time pattern.</summary>
+    /// <remarks>
+    /// The scan skips quoted literals and escaped characters, so an 's' that a culture spells out as text is not mistaken
+    /// for the seconds token. A pattern that shows no seconds at all is returned unchanged - there is nothing for a fraction
+    /// to hang off - and the value is then shown exactly as it was before.
+    /// </remarks>
+    private static string AttachFraction(string timePattern)
+    {
+        var quote = '\0';
+
+        for (var index = 0; index < timePattern.Length; index++)
+        {
+            var character = timePattern[index];
+
+            if (quote != '\0')
+            {
+                if (character == quote)
+                {
+                    quote = '\0';
+                }
+
+                continue;
+            }
+
+            if (character is '\'' or '"')
+            {
+                quote = character;
+                continue;
+            }
+
+            if (character == '\\')
+            {
+                index++;
+                continue;
+            }
+
+            if (character != 's')
+            {
+                continue;
+            }
+
+            var end = index;
+
+            while (end + 1 < timePattern.Length && timePattern[end + 1] == 's')
+            {
+                end++;
+            }
+
+            return timePattern[..(end + 1)] + "\\.FFFFFFF" + timePattern[(end + 1)..];
+        }
+
+        return timePattern;
+    }
+}
 
 /// <summary>One column of an edit model as data: the two names it is known by, whether input is required, and the accessors the shared checks drive.</summary>
 /// <remarks>
@@ -2767,6 +2936,12 @@ public abstract partial class MapperBase<TEntity, TEditModel>
     /// The whole sequence runs in the edit model's loading state, where a confirmed-value change does not promote the row
     /// to an update target; the row state is taken from the source entity once the load is over (loaded = Unchanged,
     /// new = Added).
+    /// </para>
+    /// <para>
+    /// Child collections are rebuilt rather than merged: the previous collection instances are replaced by new ones, so
+    /// anything held against them is dropped along with them - a selected item, a scroll position or any other view state
+    /// bound to the old instance, and the removals the old collection was tracking for the next save. Load into an edit
+    /// model that has pending child edits only when discarding them is what is meant.
     /// </para>
     /// </remarks>
     /// <param name="entity">The entity whose values are loaded.</param>
@@ -11346,6 +11521,178 @@ public static class GeneratedHttpRemoteRepositoryServiceCollectionExtensions
     }
 }
 
+/// <summary>One UNIQUE constraint of an entity type, resolved to the properties the in-memory store compares.</summary>
+/// <param name="Name">The constraint's name (the synthesized name when the diagram does not set one).</param>
+/// <param name="Properties">The entity properties that make up the constraint, in declaration order.</param>
+internal sealed record InMemoryUniqueConstraint(
+    string Name,
+    IReadOnlyList<PropertyInfo> Properties
+);
+
+/// <summary>Enforcement of the UNIQUE constraints an entity type declares, standing in for the constraint a real database would hold.</summary>
+/// <remarks>
+/// <para>
+/// The constraints are read once per type from the <see cref="UniqueConstraintAttribute"/> stamped on the entity class - the
+/// same declaration the DDL creates and the repository's uniqueness pre-check walks - so the store rejects exactly the writes
+/// the database would. The comparison rules are the pre-check's too: a tuple containing a null is not compared at all (what
+/// NULL collides with differs per dialect), and the row being written is excluded by its primary key, so re-saving a row never
+/// collides with itself. The user-defined checks (<c>CollectCustomUniquenessChecks</c>) are not enforced here; they are rules
+/// of the application rather than constraints the database holds.
+/// </para>
+/// <para>
+/// A violation is an <see cref="InvalidOperationException"/>, which is what a duplicate primary key already raises here. A real
+/// database reports it through its own provider's exception instead - <c>SqlException</c> with error 2627, for one - and no
+/// in-memory type can be that exception, so code that catches a provider exception has to be exercised against the database.
+/// </para>
+/// </remarks>
+internal static class InMemoryUniqueness
+{
+    private static readonly ConcurrentDictionary<
+        Type,
+        IReadOnlyList<InMemoryUniqueConstraint>
+    > _cache = new();
+
+    /// <summary>The UNIQUE constraints declared on the entity type (empty when it declares none). Built once per type and cached.</summary>
+    public static IReadOnlyList<InMemoryUniqueConstraint> For(Type entityType) =>
+        _cache.GetOrAdd(entityType, Build);
+
+    /// <summary>Throws when the row about to be written holds the same values as one of <paramref name="existing"/> on a declared UNIQUE constraint.</summary>
+    /// <param name="entityType">The entity type being written.</param>
+    /// <param name="row">The row about to be written.</param>
+    /// <param name="key">The primary key of that row (the row carrying it is skipped, so an update never collides with itself).</param>
+    /// <param name="existing">The rows to compare against, keyed by primary key.</param>
+    public static void Verify(
+        Type entityType,
+        EntityBase row,
+        object key,
+        IEnumerable<KeyValuePair<object, EntityBase>> existing
+    )
+    {
+        var constraints = For(entityType);
+
+        if (constraints.Count == 0)
+        {
+            return;
+        }
+
+        // The written row's own tuples are read once rather than per row compared against
+        object[]?[] tuples = new object[constraints.Count][];
+        var comparable = false;
+
+        for (var index = 0; index < constraints.Count; index++)
+        {
+            tuples[index] = ValuesOf(row, constraints[index]);
+            comparable |= tuples[index] is not null;
+        }
+
+        if (!comparable)
+        {
+            return;
+        }
+
+        foreach (var (otherKey, other) in existing)
+        {
+            if (Equals(otherKey, key))
+            {
+                continue;
+            }
+
+            for (var index = 0; index < constraints.Count; index++)
+            {
+                if (
+                    tuples[index] is { } values
+                    && ValuesOf(other, constraints[index]) is { } otherValues
+                    && TupleEquals(values, otherValues)
+                )
+                {
+                    throw DuplicateValueError(entityType, constraints[index], values);
+                }
+            }
+        }
+    }
+
+    /// <summary>Creates the exception for a write that duplicates another row's values on a UNIQUE constraint.</summary>
+    internal static InvalidOperationException DuplicateValueError(
+        Type entityType,
+        InMemoryUniqueConstraint constraint,
+        object[] values
+    ) =>
+        new(
+            $"Cannot write {entityType.Name} with {Describe(constraint, values)}: another row already holds these values, which violates the UNIQUE constraint '{constraint.Name}' (a real database would raise a unique-constraint violation)."
+        );
+
+    /// <summary>The constraint members and the values that collided, for the exception message.</summary>
+    private static string Describe(InMemoryUniqueConstraint constraint, object[] values) =>
+        string.Join(
+            ", ",
+            constraint.Properties.Select((property, index) => $"{property.Name} = '{values[index]}'")
+        );
+
+    /// <summary>The constraint's member values read off a row, or <c>null</c> when any of them is null (which takes the tuple out of the comparison).</summary>
+    private static object[]? ValuesOf(EntityBase row, InMemoryUniqueConstraint constraint)
+    {
+        var values = new object[constraint.Properties.Count];
+
+        for (var index = 0; index < values.Length; index++)
+        {
+            if (constraint.Properties[index].GetValue(row) is not { } value)
+            {
+                return null;
+            }
+
+            values[index] = value;
+        }
+
+        return values;
+    }
+
+    /// <summary>Compares two member-value tuples element by element (a binary column by its content, a value object by its own equality).</summary>
+    private static bool TupleEquals(object[] left, object[] right)
+    {
+        for (var index = 0; index < left.Length; index++)
+        {
+            if (!StructuralComparisons.StructuralEqualityComparer.Equals(left[index], right[index]))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>Resolves the constraints declared on an entity type (a constraint naming a property the type does not have is dropped, as one whose columns cannot all be resolved is never generated).</summary>
+    private static IReadOnlyList<InMemoryUniqueConstraint> Build(Type entityType)
+    {
+        var constraints = new List<InMemoryUniqueConstraint>();
+
+        foreach (var attribute in entityType.GetCustomAttributes<UniqueConstraintAttribute>())
+        {
+            var properties = new List<PropertyInfo>(attribute.PropertyNames.Length);
+
+            foreach (var propertyName in attribute.PropertyNames)
+            {
+                if (
+                    entityType.GetProperty(
+                        propertyName,
+                        BindingFlags.Public | BindingFlags.Instance
+                    )
+                        is { } property
+                )
+                {
+                    properties.Add(property);
+                }
+            }
+
+            if (properties.Count > 0 && properties.Count == attribute.PropertyNames.Length)
+            {
+                constraints.Add(new InMemoryUniqueConstraint(attribute.Name, properties));
+            }
+        }
+
+        return constraints;
+    }
+}
+
 /// <summary>
 /// In-memory data store that holds entities in memory without a database (shared as a DI singleton).
 /// </summary>
@@ -11576,12 +11923,15 @@ public sealed class InMemoryDataStore
         );
 
     /// <summary>Stores a snapshot (clone) for an insert only. An existing primary key is rejected with an <see cref="InvalidOperationException"/> instead of being silently overwritten.</summary>
+    /// <remarks>The declared UNIQUE constraints are checked as well, before anything is written, so a rejected insert leaves the store untouched.</remarks>
     internal void Insert(EntityBase entity)
     {
         lock (_gate)
         {
+            var entityType = entity.GetType();
             var key = KeyOf(entity);
             var snapshot = PrepareSnapshot(entity, previous: null);
+            InMemoryUniqueness.Verify(entityType, snapshot, key, Table(entityType));
 
             if (!Table(entity.GetType()).TryAdd(key, snapshot))
             {
@@ -11749,6 +12099,12 @@ public sealed class InMemoryDataStore
     /// rather than something an overwrite policy can excuse.
     /// </para>
     /// <para>
+    /// Once every row has been verified, the declared UNIQUE constraints are verified as well, over the state publishing is
+    /// about to leave the store in (see <see cref="VerifyStagedUniqueness"/>). That check comes last because it is about the
+    /// values the save is writing rather than about who else has written meanwhile, and it comes before anything is applied,
+    /// so a violation drops the save whole.
+    /// </para>
+    /// <para>
     /// Once the writes are in, the row versions they assigned are read back out of the published snapshots and handed to the
     /// caller's entities. Reading them back (rather than remembering them when they were assigned) is what keeps a later
     /// write to the same row - a hook writing a blob, for instance - from leaving the caller holding a superseded version.
@@ -11801,6 +12157,8 @@ public sealed class InMemoryDataStore
                 }
             }
 
+            VerifyStagedUniqueness(staging);
+
             foreach (var ((entityType, key), snapshot) in staging.Overlay)
             {
                 if (snapshot is null)
@@ -11821,6 +12179,66 @@ public sealed class InMemoryDataStore
                 }
             }
         }
+    }
+
+    /// <summary>Verifies the declared UNIQUE constraints of every row a save staged, against the state publishing is about to leave the store in.</summary>
+    /// <remarks>
+    /// The comparison runs over the composed view - the store's rows with the save's own inserts, updates and deletes applied -
+    /// so a save sees its own writes: two rows it adds with the same values collide with each other, and a value it frees by
+    /// deleting a row is available to a row it adds in the same save. Judging the outcome rather than the order the graph
+    /// walker happened to reach the rows in is what makes the verdict independent of that order. It runs before anything is
+    /// applied, so a violation leaves the save all-or-nothing exactly as a version conflict does.
+    /// </remarks>
+    private void VerifyStagedUniqueness(InMemorySaveStaging staging)
+    {
+        Dictionary<Type, Dictionary<object, EntityBase>>? views = null;
+
+        foreach (var ((entityType, key), snapshot) in staging.Overlay)
+        {
+            // A staged delete removes a row rather than adding values, and a type without constraints has nothing to compare
+            if (snapshot is null || InMemoryUniqueness.For(entityType).Count == 0)
+            {
+                continue;
+            }
+
+            views ??= new Dictionary<Type, Dictionary<object, EntityBase>>();
+
+            if (!views.TryGetValue(entityType, out var view))
+            {
+                view = ComposeView(entityType, staging);
+                views.Add(entityType, view);
+            }
+
+            InMemoryUniqueness.Verify(entityType, snapshot, key, view);
+        }
+    }
+
+    /// <summary>The rows of one type as publishing will leave them: the store's rows with the save's staged writes applied.</summary>
+    private Dictionary<object, EntityBase> ComposeView(
+        Type entityType,
+        InMemorySaveStaging staging
+    )
+    {
+        var view = new Dictionary<object, EntityBase>(Table(entityType));
+
+        foreach (var ((stagedType, key), snapshot) in staging.Overlay)
+        {
+            if (stagedType != entityType)
+            {
+                continue;
+            }
+
+            if (snapshot is null)
+            {
+                view.Remove(key);
+            }
+            else
+            {
+                view[key] = snapshot;
+            }
+        }
+
+        return view;
     }
 
     /// <summary>Clears all tables (for resetting in tests).</summary>
@@ -11921,6 +12339,30 @@ public sealed class InMemoryDataStore
 
         /// <summary>Whether a snapshot exists for the given type and primary key.</summary>
         public bool Exists(Type entityType, object key) => Current(entityType, key) is not null;
+
+        /// <summary>Verifies the declared UNIQUE constraints of a row about to be written, against the store's rows and any the caller is holding in a batch of its own.</summary>
+        /// <remarks>
+        /// This is the direct writes' check, made before the write so that a rejection leaves nothing behind. A graph save's
+        /// rows are not checked here but as a whole when the save publishes, so that a save which frees a value on one row and
+        /// takes it on another is judged by the state it leaves behind rather than by the order its writes happened in.
+        /// </remarks>
+        /// <param name="entity">The row about to be written.</param>
+        /// <param name="key">The primary key of that row (the row carrying it is skipped, so an update never collides with itself).</param>
+        /// <param name="pending">Rows the caller has accepted but not written yet, keyed by primary key (a bulk insert's preceding elements).</param>
+        public void VerifyUnique(
+            EntityBase entity,
+            object key,
+            IReadOnlyDictionary<object, EntityBase>? pending = null
+        )
+        {
+            var entityType = entity.GetType();
+            InMemoryUniqueness.Verify(entityType, entity, key, store.Table(entityType));
+
+            if (pending is not null)
+            {
+                InMemoryUniqueness.Verify(entityType, entity, key, pending);
+            }
+        }
 
         /// <summary>
         /// Whether <paramref name="entity"/> may overwrite the stored row under the given concurrency policy: <c>true</c> when
@@ -12900,7 +13342,7 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
     public Task<IReadOnlyList<TEntity>> GetAllAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult(Store.Snapshot<TEntity>());
 
-    /// <summary>Inserts an entity (an existing primary key is rejected, as a real database would).</summary>
+    /// <summary>Inserts an entity (an existing primary key, or a value another row already holds on a UNIQUE constraint, is rejected as a real database would).</summary>
     /// <remarks>
     /// Like every other backend, the direct CRUD operations leave the argument's <c>RowState</c> alone: settling it is
     /// what <c>SaveAsync</c> does after a successful graph save. Doing it here as well would make an entity marked
@@ -12915,9 +13357,9 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
 
     /// <summary>Bulk-inserts a collection of entities.</summary>
     /// <remarks>
-    /// Unlike the other backends, the whole batch is checked for duplicate primary keys (against the store and within the
-    /// batch itself) before any of it is applied, so a duplicate rejects the batch without leaving part of it inserted -
-    /// which is what a real database's single transaction gives.
+    /// Unlike the other backends, the whole batch is checked for duplicate primary keys and for the declared UNIQUE
+    /// constraints (against the store and within the batch itself) before any of it is applied, so a duplicate rejects the
+    /// batch without leaving part of it inserted - which is what a real database's single transaction gives.
     /// </remarks>
     public Task<int> BulkInsertAsync(
         IEnumerable<TEntity> entities,
@@ -12938,8 +13380,9 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
         var count = Store.Write(scope =>
         {
             var batchKeys = new HashSet<object>();
+            var accepted = new Dictionary<object, EntityBase>();
 
-            // Pre-validate all keys, then apply: a duplicate must not leave a partially inserted batch behind.
+            // Pre-validate all keys and constraint values, then apply: a duplicate must not leave a partially inserted batch behind.
             foreach (var entity in targets)
             {
                 var key = InMemoryDataStore.KeyOf(entity);
@@ -12948,6 +13391,9 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
                 {
                     throw InMemoryDataStore.DuplicateKeyError(entity.GetType(), key);
                 }
+
+                scope.VerifyUnique(entity, key, accepted);
+                accepted[key] = entity;
             }
 
             foreach (var entity in targets)
@@ -12966,7 +13412,8 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
     /// When the type has a rowversion column, <paramref name="mode"/> decides whether the update is guarded by the version
     /// the entity was read with. A guarded update against a row someone else changed first throws a
     /// <see cref="SaveConflictException"/>; a row that no longer exists still returns <c>false</c>. On success the entity
-    /// receives the newly assigned version.
+    /// receives the newly assigned version. A value another row already holds on a declared UNIQUE constraint is rejected
+    /// before the write, as a real database's constraint would reject the statement.
     /// </remarks>
     /// <param name="entity">The entity to update.</param>
     /// <param name="mode">How a concurrent modification is handled when the type has a rowversion column (no effect otherwise). An undefined value throws <see cref="ArgumentOutOfRangeException"/>.</param>
@@ -12998,6 +13445,8 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
                 throw SaveConflictException.Modified(typeof(TEntity), key, "update");
             }
 
+            // Rejected before the write, as a real database's UNIQUE constraint would reject the statement
+            scope.VerifyUnique(entity, key);
             scope.Put(entity);
             return true;
         });
