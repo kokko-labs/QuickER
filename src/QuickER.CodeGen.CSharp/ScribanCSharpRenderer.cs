@@ -283,12 +283,16 @@ internal sealed class ScribanCSharpRenderer
             );
 
         // UNIQUE 制約の宣言属性 [UniqueConstraint] は、生成 Entity を「DB 定義の自己記述ドキュメント」にするための
-        // 定義メタ（[DbTableMeta] / [DbColumnMeta] と同列）で、実行時に読む機構は持たない（重複事前チェックは生成コード）。
-        // 付与は生成オプションに依らず「UNIQUE 制約を持つテーブル」へ無条件だが、刻む中身が 1 つでもあるときだけ
-        // 属性型の定義を出力する（実体のない属性クラスは出さない＝emit_db_meta_attr と同じ方針）。
-        var emitUniqueConstraintAttr = model.EntityClasses.Any(c =>
-            !string.IsNullOrEmpty(c.UniqueConstraintAttributesBlock)
-        );
+        // 定義メタ（[DbTableMeta] / [DbColumnMeta] と同列）。付与は生成オプションに依らず「UNIQUE 制約を持つテーブル」
+        // へ無条件で、刻む中身が 1 つでもあるときだけ属性型の定義を出力する（実体のない属性クラスは出さない
+        // ＝emit_db_meta_attr と同じ方針）。加えてインメモリ Repository を出すときは制約の有無に依らず定義を出す
+        // ＝インメモリのストアは実 DB の UNIQUE 制約の代役としてこの属性をリフレクションで読むため、
+        // 制約ゼロの図でも固定 infra（InMemoryUniqueness）が参照する属性型が要る（emit_unbounded_binary_attr と同型）。
+        var emitUniqueConstraintAttr =
+            options.GenerateInMemoryRepositories
+            || model.EntityClasses.Any(c =>
+                !string.IsNullOrEmpty(c.UniqueConstraintAttributesBlock)
+            );
 
         // 無制限バイナリ列のマーカー属性 [UnboundedBinaryColumn] は (1) オプション ON 時に Entity プロパティへ付与し、
         // (2) 共通契約の EntitySaveMetadata が SELECT / UPDATE から除外する列の識別にリフレクションで参照する。
@@ -392,6 +396,10 @@ internal sealed class ScribanCSharpRenderer
             ["render_sync_endpoints"] = scope.RemoteServer && options.GenerateSyncSupport,
             // 同期対象テーブル（rowversion 列を持つテーブル）の per-entity 生成素材。FK トポロジカル順（親→子）。
             ["sync_tables"] = model.SyncTables,
+            // 版なし（rowversion 列なし）の同期対象テーブルが 1 つでもあるか。版なし専用のエンドポイント
+            // マップ（MapVersionlessSyncEndpoints）は呼び出し側が 1 つも無ければ死蔵コードになるため、
+            // このフラグで出し分ける（版ありだけの図の生成物からはメソッドごと消える）。
+            ["has_versionless_sync_tables"] = model.SyncTables.Any(table => table.IsVersionless),
             // グラフ保存のジャーナル記録クラス（SyncGraphRecorder）の整形済み全文（同期支援が無効なら空文字）。
             // 分岐の多い再帰メソッド群のためビルダー側で組み立て、テンプレートは埋め込むだけにする（方言 SQL と同じ流儀）。
             // クエリ糖衣の静的クラス（SqlQueryExtensions＝IncludeGraph ＋ GetByIdAsync）の整形済み全文

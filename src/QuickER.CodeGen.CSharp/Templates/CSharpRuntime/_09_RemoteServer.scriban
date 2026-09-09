@@ -1239,6 +1239,7 @@ public static partial class GeneratedRemoteEndpoints
                 )
         );
     }
+{{~ if has_versionless_sync_tables ~}}
 
     /// <summary>Maps the sync-only endpoints of one synchronised table without a version column onto the group.</summary>
     /// <remarks>
@@ -1300,6 +1301,7 @@ public static partial class GeneratedRemoteEndpoints
                 )
         );
     }
+{{~ end ~}}
 
     /// <summary>Resolves the differential source the sync endpoints answer from.</summary>
     private static ISyncServerSource<TEntity, TKey> SyncSource<TEntity, TKey>(HttpContext context)

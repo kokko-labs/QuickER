@@ -163,6 +163,12 @@ public sealed class QuickER.Runtime.EditModelError : System.IEquatable<QuickER.R
     public string Path { get; init; }
     public string Property { get; init; }
 
+public static class QuickER.Runtime.EditModelInputFormat
+    public static string Format(System.DateTime? value)
+    public static string Format(System.DateTimeOffset? value)
+    public static string Format(System.TimeOnly? value)
+    public static string Format(System.TimeSpan? value)
+
 public static class QuickER.Runtime.EditModelMessages
     public static System.Func<System.Collections.Generic.IReadOnlyList<string>, System.Collections.Generic.IReadOnlyList<string>, string> DuplicateValue { get; set; }
     public static System.Func<System.Collections.Generic.IReadOnlyList<string>, string> JoinValueObjectErrors { get; set; }
@@ -604,7 +610,7 @@ public sealed class QuickER.Runtime.UniquenessViolation : System.IEquatable<Quic
     public string ConstraintName { get; init; }
     public string Message { get; init; }
 
-public abstract class QuickER.Runtime.ValueObjectBase<TSelf, TValue> : QuickER.Runtime.IValueObject, System.IEquatable<TSelf>
+public abstract class QuickER.Runtime.ValueObjectBase<TSelf, TValue> : QuickER.Runtime.IValueObject, System.IEquatable<TSelf>, System.IFormattable
     protected .ctor(TValue value)
     public TValue Value { get; }
     public override bool Equals(object obj)
@@ -619,24 +625,26 @@ public abstract class QuickER.Runtime.ValueObjectBase<TSelf, TValue> : QuickER.R
     public static bool Validate(TValue value, System.Collections.Generic.ICollection<string> errors)
     public static bool op_Equality(QuickER.Runtime.ValueObjectBase<TSelf, TValue> left, QuickER.Runtime.ValueObjectBase<TSelf, TValue> right)
     public static bool op_Inequality(QuickER.Runtime.ValueObjectBase<TSelf, TValue> left, QuickER.Runtime.ValueObjectBase<TSelf, TValue> right)
+    public string ToString(string format)
+    public string ToString(string format, System.IFormatProvider formatProvider)
     public virtual bool Equals(TSelf other)
     public virtual string DisplayValue { get; }
 
-public abstract class QuickER.Runtime.ValueObjectBinaryBase<TSelf> : QuickER.Runtime.ValueObjectBase<TSelf, byte[]>, QuickER.Runtime.IValueObject, System.IEquatable<TSelf>
+public abstract class QuickER.Runtime.ValueObjectBinaryBase<TSelf> : QuickER.Runtime.ValueObjectBase<TSelf, byte[]>, QuickER.Runtime.IValueObject, System.IEquatable<TSelf>, System.IFormattable
     protected .ctor(byte[] value)
     public TSelf CopyValue()
     public override bool Equals(TSelf other)
     public override int GetHashCode()
     public override string ToString()
 
-public abstract class QuickER.Runtime.ValueObjectBooleanBase<TSelf> : QuickER.Runtime.ValueObjectBase<TSelf, bool>, QuickER.Runtime.IValueObject, System.IEquatable<TSelf>
+public abstract class QuickER.Runtime.ValueObjectBooleanBase<TSelf> : QuickER.Runtime.ValueObjectBase<TSelf, bool>, QuickER.Runtime.IValueObject, System.IEquatable<TSelf>, System.IFormattable
     protected .ctor(bool value)
     public bool IsFalse { get; }
     public bool IsTrue { get; }
     public static TSelf False { get; }
     public static TSelf True { get; }
 
-public abstract class QuickER.Runtime.ValueObjectDateTimeBase<TSelf> : QuickER.Runtime.ValueObjectOrderedBase<TSelf, System.DateTime>, QuickER.Runtime.IValueObject, System.IComparable, System.IComparable<TSelf>, System.IEquatable<TSelf>
+public abstract class QuickER.Runtime.ValueObjectDateTimeBase<TSelf> : QuickER.Runtime.ValueObjectOrderedBase<TSelf, System.DateTime>, QuickER.Runtime.IValueObject, System.IComparable, System.IComparable<TSelf>, System.IEquatable<TSelf>, System.IFormattable
     protected .ctor(System.DateTime value)
     public static TSelf Now { get; }
     public static TSelf Today { get; }
@@ -644,7 +652,7 @@ public abstract class QuickER.Runtime.ValueObjectDateTimeBase<TSelf> : QuickER.R
 public static class QuickER.Runtime.ValueObjectDecimalRules
     public static void Validate(decimal value, int precision, int scale, string displayName, ref System.Collections.Generic.List<string> errors)
 
-public abstract class QuickER.Runtime.ValueObjectGuidKeyBase<TSelf> : QuickER.Runtime.ValueObjectBase<TSelf, string>, QuickER.Runtime.IValueObject, System.IComparable, System.IComparable<TSelf>, System.IEquatable<TSelf>
+public abstract class QuickER.Runtime.ValueObjectGuidKeyBase<TSelf> : QuickER.Runtime.ValueObjectBase<TSelf, string>, QuickER.Runtime.IValueObject, System.IComparable, System.IComparable<TSelf>, System.IEquatable<TSelf>, System.IFormattable
     protected .ctor(string value)
     public int CompareTo(TSelf other)
     public static TSelf Create()
@@ -663,7 +671,7 @@ public static class QuickER.Runtime.ValueObjectNumberRules
     public static void ValidateMaxDigits(long value, int maxDigits, string displayName, ref System.Collections.Generic.List<string> errors)
     public static void ValidateRange<T>(T value, T minimum, T maximum, string displayName, ref System.Collections.Generic.List<string> errors)
 
-public abstract class QuickER.Runtime.ValueObjectOrderedBase<TSelf, TValue> : QuickER.Runtime.ValueObjectBase<TSelf, TValue>, QuickER.Runtime.IValueObject, System.IComparable, System.IComparable<TSelf>, System.IEquatable<TSelf>
+public abstract class QuickER.Runtime.ValueObjectOrderedBase<TSelf, TValue> : QuickER.Runtime.ValueObjectBase<TSelf, TValue>, QuickER.Runtime.IValueObject, System.IComparable, System.IComparable<TSelf>, System.IEquatable<TSelf>, System.IFormattable
     protected .ctor(TValue value)
     public int CompareTo(TSelf other)
     public static bool op_GreaterThan(QuickER.Runtime.ValueObjectOrderedBase<TSelf, TValue> left, QuickER.Runtime.ValueObjectOrderedBase<TSelf, TValue> right)
@@ -674,7 +682,7 @@ public abstract class QuickER.Runtime.ValueObjectOrderedBase<TSelf, TValue> : Qu
 public static class QuickER.Runtime.ValueObjectRules
     public static bool ValidateRequired<TValue>(TValue value, string displayName, ref System.Collections.Generic.List<string> errors)
 
-public abstract class QuickER.Runtime.ValueObjectStringBase<TSelf> : QuickER.Runtime.ValueObjectBase<TSelf, string>, QuickER.Runtime.IValueObject, System.IComparable, System.IComparable<TSelf>, System.IEquatable<TSelf>
+public abstract class QuickER.Runtime.ValueObjectStringBase<TSelf> : QuickER.Runtime.ValueObjectBase<TSelf, string>, QuickER.Runtime.IValueObject, System.IComparable, System.IComparable<TSelf>, System.IEquatable<TSelf>, System.IFormattable
     protected .ctor(string value)
     public bool Contains(TSelf value)
     public bool Contains(string value)

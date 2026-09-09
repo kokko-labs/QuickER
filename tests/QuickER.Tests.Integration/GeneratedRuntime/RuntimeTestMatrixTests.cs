@@ -184,6 +184,20 @@ public class RuntimeTestMatrixTests
             "UNIQUE 制約の事前チェック（重複検出・自分自身の除外）",
             Row(Covered(), Covered(), Covered(), Covered(), Covered())
         ),
+        ["UniquenessEnforcement"] = new(
+            "書き込み時の UNIQUE 制約強制（インメモリが実 DB の制約の代役を務める）",
+            Row(
+                NotApplicable(
+                    "実 DB では制約が DDL の実体として存在し、拒否するのは DB 自身＝生成コードの挙動ではない"
+                ),
+                NotApplicable("同上"),
+                NotApplicable("同上"),
+                Covered(),
+                NotApplicable(
+                    "サーバーの背後に居る実装（実 DB かインメモリ）が拒否し、転送層は例外を運ぶだけ"
+                )
+            )
+        ),
         ["IncludeGraph"] = new(
             "グラフ取得糖衣（IncludeGraph＝カスケード閉包の Include ツリー）",
             Row(
@@ -434,6 +448,7 @@ public class RuntimeTestMatrixTests
         new("UniquenessCheckEfCoreRuntimeTests", "UniquenessCheck", Backend.EfCore),
         new("UniquenessCheckInMemoryRuntimeTests", "UniquenessCheck", Backend.InMemory),
         new("UniquenessCheckRemoteRuntimeTests", "UniquenessCheck", Backend.Remote),
+        new("InMemoryUniquenessRuntimeTests", "UniquenessEnforcement", Backend.InMemory),
         // --- 名前付きクエリ ---
         new("IncludeGraphSqlServerRuntimeTests", "IncludeGraph", Backend.AdoSqlServer),
         new("IncludeGraphAdoRuntimeTests", "IncludeGraph", Backend.AdoSqlite),

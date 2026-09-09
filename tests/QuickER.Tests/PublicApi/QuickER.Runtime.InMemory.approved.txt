@@ -46,6 +46,7 @@ public struct QuickER.Runtime.InMemory.InMemoryDataStore.InMemoryWriteScope
     public bool Remove(System.Type entityType, object key)
     public void Insert(QuickER.Runtime.EntityBase entity)
     public void Put(QuickER.Runtime.EntityBase entity)
+    public void VerifyUnique(QuickER.Runtime.EntityBase entity, object key, System.Collections.Generic.IReadOnlyDictionary<object, QuickER.Runtime.EntityBase> pending = null)
 
 public sealed class QuickER.Runtime.InMemory.InMemoryOrderingComparer : System.Collections.Generic.IComparer<object>
     public int Compare(object x, object y)
@@ -96,6 +97,15 @@ public sealed class QuickER.Runtime.InMemory.InMemorySaveStaging
     public void CaptureBase(System.Type entityType, object key, QuickER.Runtime.EntityBase baseRow)
     public void RecordStamp(QuickER.Runtime.EntityBase source, System.Reflection.PropertyInfo property, System.Type entityType, object key)
     public void Stage(System.Type entityType, object key, QuickER.Runtime.EntityBase snapshot)
+
+public sealed class QuickER.Runtime.InMemory.InMemoryUniqueConstraint : System.IEquatable<QuickER.Runtime.InMemory.InMemoryUniqueConstraint>
+    public .ctor(string Name, System.Collections.Generic.IReadOnlyList<System.Reflection.PropertyInfo> Properties)
+    public System.Collections.Generic.IReadOnlyList<System.Reflection.PropertyInfo> Properties { get; init; }
+    public string Name { get; init; }
+
+public static class QuickER.Runtime.InMemory.InMemoryUniqueness
+    public static System.Collections.Generic.IReadOnlyList<QuickER.Runtime.InMemory.InMemoryUniqueConstraint> For(System.Type entityType)
+    public static void Verify(System.Type entityType, QuickER.Runtime.EntityBase row, object key, System.Collections.Generic.IEnumerable<System.Collections.Generic.KeyValuePair<object, QuickER.Runtime.EntityBase>> existing)
 
 public static class QuickER.Runtime.InMemory.IncludeAttacher
     public static void Attach(QuickER.Runtime.EntityBase entity, System.Collections.Generic.IReadOnlyList<QuickER.Runtime.IncludeNode> includes, QuickER.Runtime.InMemory.InMemoryDataStore.InMemoryReadScope scope)

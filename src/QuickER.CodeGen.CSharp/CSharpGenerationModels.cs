@@ -347,9 +347,10 @@ internal sealed class CSharpClassModel
     /// テーブルの UNIQUE 制約をクラスへ宣言する <c>[UniqueConstraint(...)]</c> 属性行（整形済み・制約なしは空文字）。
     /// </summary>
     /// <remarks>
-    /// <c>[DbTableMeta]</c> / <c>[DbColumnMeta]</c> と同じ「DB 定義の自己記述」メタで、実行時の振る舞いは持たない
-    /// （重複事前チェックは生成コードが担う）。属性型そのものの出力可否は
-    /// <c>emit_unique_constraint_attr</c>（刻む中身が 1 つでもあるか）が決める。
+    /// <c>[DbTableMeta]</c> / <c>[DbColumnMeta]</c> と同じ「DB 定義の自己記述」メタ（重複事前チェックは生成コードが担い、
+    /// この属性は読まない）。唯一の実行時読者はインメモリのストアで、実 DB の UNIQUE 制約の代役としてこの宣言から
+    /// 制約を強制する。属性型そのものの出力可否は <c>emit_unique_constraint_attr</c>
+    /// （刻む中身が 1 つでもあるか、またはインメモリ Repository を出すか）が決める。
     /// </remarks>
     public string UniqueConstraintAttributesBlock { get; init; } = string.Empty;
 }

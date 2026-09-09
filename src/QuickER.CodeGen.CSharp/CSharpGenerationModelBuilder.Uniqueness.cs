@@ -12,7 +12,8 @@ namespace QuickER.CodeGen.CSharp;
 /// ランタイム共通面 <c>IRemoteRepository&lt;TEntity, TKey&gt;</c>・実装は各バックエンドの Repository 基底が 1 回だけ持ち、
 /// ここが per-entity に出すのは記述子の束縛（<c>UniquenessConstraints</c> の override）とフックの橋渡しだけ。
 /// (2) Entity 側＝クラスへ <c>[UniqueConstraint(...)]</c> 属性を刻む
-/// （<c>[DbTableMeta]</c> / <c>[DbColumnMeta]</c> と同じ「DB 定義の自己記述」で、実行時の振る舞いは持たない）。
+/// （<c>[DbTableMeta]</c> / <c>[DbColumnMeta]</c> と同じ「DB 定義の自己記述」。事前チェックはこの属性を読まないが、
+/// インメモリのストアだけは実 DB の UNIQUE 制約の代役としてこの宣言から制約を強制する）。
 /// (3) EditModel 側＝制約テーブル（<c>UniquenessConstraints</c> の override）でコレクション内重複検証の入力を宣言し、
 /// DB 照合糖衣 <c>ValidateUniqueAsync</c> を生成する。
 /// </para>

@@ -127,7 +127,7 @@ private static T? ReadCell<T>(IXLTableRow row, int column, IFormatProvider? cult
 - **数値は桁区切りを許します。** 表計算の書式付き数値を文字列で読むと `1,234` で届くため、数値型は `NumberStyles` を明示して解析します。整数型は小数点を許さないので `1,234.5` は `int` として通りません
 - 変換できたあとは通常の `TryCreate` と同じです。その型の検証（最大長・精度・`OnValidate`）がそのまま効きます
 - 変換自体に失敗したときのメッセージは `ValueObjectValidationMessages.InputNotConvertible` で差し替えられます
-- カルチャを省略するオーバーロード（`TryCreateFrom(raw, out var value, out var errors)` / `CreateFrom(raw)`）もあります
+- カルチャを省略するオーバーロード（`TryCreateFrom(raw, out var value, out var errors)` / `CreateFrom(raw)`）はインバリアントで解析します。機械が書いたデータ（直列化されたペイロード・書式が固定されたエクスポート）向けです。人が入力したテキストや表計算が書式付けた値はカルチャに属するので、`CreateFrom(raw, provider)` / `TryCreateFrom(raw, provider, …)` でカルチャを渡してください
 
 ### 定義済みインスタンスだけを受け付ける（列挙型の値オブジェクト）
 
@@ -284,7 +284,7 @@ EditModelMessages.ParseFailed = static (propertyName, displayName, inputValue, t
 
 static クラス: `ValueObjectValidationMessages`（`MaxLengthExceeded` / `ScaleExceeded` / `PrecisionExceeded` / `ValueRequired` / `DigitsExceeded` / `OutOfRange` / `InvalidCharacters` / `InvalidEmailAddress` / `InputNotConvertible`＝いずれも表示名が第 1 引数）、`EditModelMessages`（`Required` / `ParseFailed` / `DuplicateValue` / `JoinValueObjectErrors`＝前 3 つはいずれも確定値プロパティ名〔複合制約は名前の並び〕が第 1 引数）、`GeneratedDisplayNames`（`Resolve`＝Entity・EditModel プロパティ・値オブジェクトすべての表示名解決に使われる）。パッケージ参照モードでは、この 3 つは `QuickER.Runtime` パッケージに収載されます。
 
-個別 partial: 値オブジェクト側は `OnValidate`（ほかに前述の `GetDefinedInstance` / `ConvertCustomInput`）、EditModel 側は意味系のみ（`OnValidate` / `OnBeginEdit` / `OnEndEdit` / `OnCancelEdit` / `On{Property}Changing` / `Changed`＝文言と表示名は中央リゾルバで解決するため）、Entity 側は同じ理由で無し。Entity の `DisplayName` は `GeneratedDisplayNames.Resolve`（実行時クラス名とテーブル説明を受け取る）が解決するので、差し替えはそこでクラス名を分岐してください（`static (memberName, description) => memberName == nameof(CustomerEntity) ? "顧客" : description ?? memberName;`）。既定のリゾルバはテーブルの説明を優先するので、表示名は図の説明へ書くだけでも足ります。値オブジェクトの画面表示用文字列 `DisplayValue`（virtual）の override も引き続き使えます。
+個別 partial: 値オブジェクト側は `OnValidate`（ほかに前述の `GetDefinedInstance` / `ConvertCustomInput`）、EditModel 側は意味系のみ（`OnValidate` / `OnBeginEdit` / `OnEndEdit` / `OnCancelEdit` / `On{Property}Changing` / `Changed`＝文言と表示名は中央リゾルバで解決するため）、Entity 側は同じ理由で無し。Entity の `DisplayName` は `GeneratedDisplayNames.Resolve`（実行時クラス名とテーブル説明を受け取る）が解決するので、差し替えはそこでクラス名を分岐してください（`static (memberName, description) => memberName == nameof(CustomerEntity) ? "顧客" : description ?? memberName;`）。既定のリゾルバはテーブルの説明を優先するので、表示名は図の説明へ書くだけでも足ります。値オブジェクトの画面表示用文字列 `DisplayValue`（virtual）の override も引き続き使えます。値オブジェクトは `IFormattable` も実装しており、`price.ToString("N2")`（culture 指定のオーバーロードあり）が内包値を書式化するほか、文字列補間・`string.Format`・WPF バインディングの StringFormat の書式指定子も同じ経路で内包値に届きます（内包値が書式化できない型〔string・byte[]・bool〕は書式を無視して素の文字列になります）。`DisplayValue` は「型が決めた表示」・`ToString(書式)` は「呼び出し側がその場で指定する書式」という使い分けです。
 
 ### 自分で呼べる検証ルール
 
@@ -393,6 +393,8 @@ editModel.AcceptChanges();
 ```
 
 新規行は既存 Entity へ適用するのではなく組み立てます: `mapper.CreateEntity(editModel, includeRemoved: true)`（コレクションごとなら `CreateEntities(collection, includeRemoved: true)`）。
+
+**EditModel へのロードは子コレクションを作り直します。** `mapper.ApplyToEditModel(entity, editModel)`（`CreateEditModel` が行うロードであり、画面が手元の EditModel を再読込するときの経路でもあります）は、それまでの子コレクションのインスタンスを新しいものへ差し替えます。したがって古いインスタンスに紐づいたビューの状態（選択中の行など）も、そのコレクションが次の保存のために追跡していた削除も一緒に失われます。再読込は「子の編集内容を破棄してよい」ときにだけ行ってください。
 
 **保存に使う結果を作るときは必ず `includeRemoved: true` を渡してください。** `includeRemoved` に既定値はなく必須引数です（呼び出しごとに、保存用のグラフを作るのか〔`true`〕表示用なのか〔`false`〕を明示します）。`false` は表示用途（帳票・プレビュー）のものです。削除追跡中の行が結果に入らないため、そのまま保存すると削除が乗らず、ユーザーが消したはずの行が黙って残ります。
 
@@ -651,7 +653,7 @@ var rows = await customers.QueryBySqlAsync(
 
 ### 重複の事前チェック（CheckUniquenessAsync）
 
-テーブルの UNIQUE 制約は、生成される **Entity** クラスへ `[UniqueConstraint("PropA", "PropB", Name = "UQ_...")]` として `[DbTableMeta]` / `[DbColumnMeta]` と並んで刻まれます。これらと同じく「DB 定義の自己記述」のための定義メタで、実行時の振る舞いは持ちません（以下のチェックはいずれも生成コードそのものです）。属性型は、刻む制約が 1 つでもあるときだけ出力されます。C# リバースはこの属性を読み戻すため、UNIQUE 制約は往復します（[インポートとエクスポート](import-export.ja.md)を参照）。
+テーブルの UNIQUE 制約は、生成される **Entity** クラスへ `[UniqueConstraint("PropA", "PropB", Name = "UQ_...")]` として `[DbTableMeta]` / `[DbColumnMeta]` と並んで刻まれます。これらと同じく「DB 定義の自己記述」のための定義メタで、以下のチェックはいずれも生成コードそのもの＝この属性を読みません。唯一の実行時読者は、後ろに DB を持たないインメモリのストアで、この宣言から UNIQUE 制約を強制します。属性型は、刻む制約が 1 つでもあるとき、およびインメモリ Repository を生成するときに出力されます。C# リバースはこの属性を読み戻すため、UNIQUE 制約は往復します（[インポートとエクスポート](import-export.ja.md)を参照）。
 
 Repository 契約には、図の UNIQUE 制約に基づく一括チェックが常に含まれます。宣言は共通面 `IRemoteRepository<TEntity, TKey>` に 1 つだけあり、`I{Entity}Repository`（および `I{Entity}RemoteRepository`）は継承で受け取ります（テーブルに制約が 1 件も無くても同じです）:
 
@@ -1295,7 +1297,7 @@ DB なしでユニットテストするためのインメモリ実装を追加�
 インメモリストアはクエリを SQL でなく LINQ-to-Objects で評価するため、いくつかの意味論は DB のものではなくインメモリ固有です。「インメモリでは通るのに実 DB では落ちる」を避けるために把握しておいてください。
 
 - **文字列の比較と並び順は序数（Ordinal）です。** 絞り込み（`Where`）も `OrderBy` も序数比較なので、`"B"` は `"a"` より前に並びます。SQL Server の既定照合は大文字小文字を区別せず、並び順も照合順序に従うため、大文字小文字やアクセントの扱いに依存するテストは実 DB の裏付けにはなりません。
-- **UNIQUE 制約は書き込み時に強制されません。** 強制されるのは主キーだけです（重複主キーは実 DB の INSERT と同じく拒否されます）。UNIQUE 制約の重複値は黙って格納されるため、チェックが要るテストでは `CheckUniquenessAsync` を使ってください。
+- **UNIQUE 制約は強制されますが、例外の型は実 DB のものではありません。** 直接の Insert / Update / BulkInsert とグラフ保存は、図が宣言した制約について「同じ値の組を持つ行が 2 つ残る」書き込みを拒否します。照合規則は `CheckUniquenessAsync` と同じで、値に `null` を含む組は判定対象外・書き込む行自身は主キーで除外します。BulkInsert はバッチ全体を事前検証してから適用し、グラフ保存は「保存が残していく状態」で判定するため、同じ保存単位で削除する行の値を別の行が引き継げます（違反時は保存単位ごと拒否されます）。違反は主キー重複と同じ `InvalidOperationException` ですが、実 DB はプロバイダ固有の例外（SQL Server ならエラー 2627 の `SqlException`）を投げるため、例外型で分岐するテストは実 DB の裏付けにはなりません。`CollectCustomUniquenessChecks` で足すユーザー定義チェックは強制の対象外（アプリ側の規則であって DB が持つ制約ではないため）で、`InMemoryDataStore.Put` / `InMemorySampleData.Seed` によるシードも対象外です。
 - **Before フックで RowState を書き換えると、インメモリでだけ操作が変わります。** このバックエンドは操作を実行する時点で RowState を読み直すため、`BeforeSaveAsync` が `Modified` を `Added` へ変えると実際の操作も変わります。QuickER 版 Repository と EF Core はその時点で発行する文を決め終えているため、書き換えは無視されます。フック契約はどちらの挙動も保証していないので、**フックから RowState を書き換えないでください**（その行だけ飛ばしたい場合は `false` を返します）。
 - **After フックの実行後に `SaveConflictException` が出ることがあります。** 書き込みはステージングされて一括公開され、公開時に保存の起点となった行を再検証します。フックはストアのロック外で走るため、この再検証は `AfterSaveAsync` より後です。実 DB はその時点よりずっと前にロックを取っているため、「After フックが走った＝保存は確定」と仮定するテストは実 DB では成立してもここでは成立しません。
 - **rowversion 列を持たない型の並行保存は後勝ち（last-write-wins）です。** 公開時の再検証は並行性トークンを持つ型だけが対象のため、版のない同一行を 2 つの保存が奪い合うと後から公開した側の値が残ります。ただし後勝ちは「行の復活」までは含みません。他者が先にその行を削除していた場合、更新しようとしていた保存は古いスナップショットを書き戻さず `SaveConflictException`（`SaveConflictReason.NotFound`）で失敗します（実 DB の UPDATE は対象行が無ければ 0 行更新であり、黙って捨てると「保存できた」と報告しながら行が無い状態になるためです）。staged 側が削除の場合は競合になりません（既に無い行の削除は実 DB でも no-op のためです）。この 2 つの規則は版を持つ型にも同じように適用されます（存否は版の比較より先に決まります）。

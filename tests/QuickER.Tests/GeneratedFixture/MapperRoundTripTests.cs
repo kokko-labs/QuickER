@@ -77,6 +77,17 @@ public sealed class MapperRoundTripTests
     private static DateTime PreciseOrderedAt() =>
         new DateTime(2026, 8, 10, 14, 30, 15, DateTimeKind.Utc).AddTicks(1_234_567);
 
+    /// <summary>表示文字列が確定値の鏡像であることを、現在カルチャでのパース往復（tick 一致）で確かめる</summary>
+    /// <remarks>
+    /// 秒未満を持つ値の表示にはカルチャ既定の書式へ端数が足されるため、期待値を書式で綴ると検証が
+    /// 実装の写しになる。表示から確定値へ戻せること（＝欄を触っても値が劣化しないこと）が本題。
+    /// </remarks>
+    private static void ShouldMirror(string display, DateTime expected)
+    {
+        DateTime.TryParse(display, out var parsed).Should().BeTrue();
+        parsed.Ticks.Should().Be(expected.Ticks);
+    }
+
     // ===== CreateEntity() 新規 =====
 
     [Fact(DisplayName = "CreateEntity(): 挿入対象（RowState=Added）の新規エンティティを返す")]
@@ -343,16 +354,31 @@ public sealed class MapperRoundTripTests
     }
 
     [Fact(
-        DisplayName = "ロード: DateTime 列の表示文字列は ToString() の既定書式（\"O\" 化しない）"
+        DisplayName = "ロード: DateTime 列の表示文字列はカルチャ既定の書式＋秒未満（\"O\" 化しない）"
     )]
-    public void ロード_DateTimeの表示書式は既定書式()
+    public void ロード_DateTimeの表示書式は既定書式に端数を足した形()
     {
         var orderedAt = PreciseOrderedAt();
 
         var em = new OrderMapper().CreateEditModel(BuildOrder(1, orderedAt));
 
-        em.BindingOrderedAt.Should().Be(orderedAt.ToString());
+        // カルチャ既定の書式が土台（往復可能な機械書式 "O" へは化けない）
         em.BindingOrderedAt.Should().NotBe(orderedAt.ToString("O"));
+        // 既定書式は秒未満を落とすため、その分だけ足した形になる（不変カルチャの '.' 区切り・末尾ゼロなし）
+        em.BindingOrderedAt.Should().Contain(".1234567");
+        ShouldMirror(em.BindingOrderedAt, orderedAt);
+    }
+
+    [Fact(
+        DisplayName = "ロード: 秒未満を持たない DateTime 列の表示文字列は ToString() の既定書式そのまま"
+    )]
+    public void ロード_秒未満なしのDateTimeは既定書式そのまま()
+    {
+        var orderedAt = new DateTime(2026, 8, 10, 14, 30, 15, DateTimeKind.Utc);
+
+        var em = new OrderMapper().CreateEditModel(BuildOrder(1, orderedAt));
+
+        em.BindingOrderedAt.Should().Be(orderedAt.ToString());
     }
 
     [Fact(
@@ -395,7 +421,7 @@ public sealed class MapperRoundTripTests
 
         em.HasErrors.Should().BeFalse();
         em.OrderedAt!.Value.Ticks.Should().Be(orderedAt.Ticks);
-        em.BindingOrderedAt.Should().Be(orderedAt.ToString());
+        ShouldMirror(em.BindingOrderedAt, orderedAt);
     }
 
     // ===== 日付のみ（date）列の表示書式 =====
@@ -493,7 +519,7 @@ public sealed class MapperRoundTripTests
         em.OrderedAt.Should().NotBeNull();
         em.OrderedAt!.Value.Ticks.Should().Be(orderedAt.Ticks, "確定値は編集前の精度のまま戻る");
         em.OrderedAt.Value.Kind.Should().Be(DateTimeKind.Utc);
-        em.BindingOrderedAt.Should().Be(orderedAt.ToString(), "表示は確定値から導出し直される");
+        ShouldMirror(em.BindingOrderedAt, orderedAt);
         em.RowState.Should().Be(RowState.Unchanged, "RowState も編集前のものへ戻る");
     }
 
@@ -510,7 +536,7 @@ public sealed class MapperRoundTripTests
 
         em.HasErrors.Should().BeFalse("キャンセルは入力ごとエラーも取り消す");
         em.OrderedAt!.Value.Ticks.Should().Be(orderedAt.Ticks);
-        em.BindingOrderedAt.Should().Be(orderedAt.ToString());
+        ShouldMirror(em.BindingOrderedAt, orderedAt);
     }
 
     [Fact(DisplayName = "キャンセル: 他の列（文字列 VO）も編集前の確定値へ戻る")]
