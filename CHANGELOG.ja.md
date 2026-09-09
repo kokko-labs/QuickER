@@ -8,7 +8,7 @@ QuickER の利用者に影響する変更を記録します。形式は [Keep a 
 
 ### Added
 
-- **値オブジェクトが `IFormattable` を実装** — `price.ToString("N2")`（culture 指定のオーバーロードあり）が内包値を書式化するほか、文字列補間・`string.Format`・WPF バインディングの StringFormat の書式指定子が内包値へ届くようになります。内包値が書式化できない型（string・byte[]・bool）は書式を無視して素の文字列になります（合成書式の一般規約と同じ）
+- **値オブジェクトが `IFormattable` を実装** — `price.ToString("N2")`（culture 指定のオーバーロードあり）が内包値を書式化するほか、文字列補間・`string.Format`・WPF バインディングの StringFormat の書式指定子が内包値へ届くようになります。書式指定子が無いときの結果は常に `ToString()` と同じ（`ToString()` の override が書式なしの表示を従来どおり支配）で、内包値が書式化できない型（string・byte[]・bool）も同様に書式を無視します（合成書式の一般規約と同じ）
 
 - **EditModel の定型を「列テーブル」駆動にしました** — 生成される EditModel は列ごとに `EditModelColumn<TSelf>`（2 つの名前・必須かどうか・確定値と入力文字列のコンパイル済みアクセサ）を新設の `EditModelBase<TSelf>.EditModelColumns` で公開し、必須入力チェック・入力の書き戻し・行編集のスナップショット・重複エラーの割り当ては基底クラスに 1 回だけ書かれるようになりました（従来はクラスごと・列ごとに展開）。生成コードが委譲する新しい基底メンバーはほかに `EditModelBase.BeginLoad` / `EndLoad`・`GetChildren` / `SetChildren`・`CheckDatabaseUniquenessAsync` です。格納の仕方（確定値フィールド・入力文字列フィールド・バインディング setter）は一切変えておらず、観測できる意味論もすべて同じで、EditModel と Mapper の生成量が 30〜36% 減ります（EditModel クラス 1 つあたり約 190 行、Mapper 1 つあたり約 28 行）
 - **生成された値オブジェクトが走らせる検証ルールを公開し、再利用できるようにしました** — `ValueObjectRules.ValidateRequired` / `ValueObjectStringRules.ValidateMaxLength` / `ValueObjectDecimalRules.Validate` を値オブジェクトごとの展開から固定 infra（パッケージ参照モードでは `QuickER.Runtime`）へ移しました。生成される `ValidateCore` は規則 1 つにつき 1 行の委譲になり、手書きの値オブジェクトからも同じ規則を呼べます

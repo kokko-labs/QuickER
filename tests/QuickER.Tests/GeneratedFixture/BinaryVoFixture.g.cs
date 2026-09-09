@@ -648,16 +648,18 @@ public abstract partial class ValueObjectBase<TSelf, TValue>
     /// <remarks>
     /// Because the value object implements <see cref="IFormattable"/>, a format specifier in string interpolation,
     /// <see cref="string.Format(string, object?)"/>, or a WPF binding's StringFormat reaches the underlying value through
-    /// this method. An underlying value that is not <see cref="IFormattable"/> (a string, a byte array, a bool) renders as
-    /// its plain string representation and the format is ignored, which is what composite formatting does for any such value.
+    /// this method. Without a format string the result is always <see cref="ToString()"/> (so an override of
+    /// <see cref="ToString()"/> also governs unformatted interpolation and composite formatting, and the format provider
+    /// is not consulted). The same applies when the underlying value does not implement <see cref="IFormattable"/>
+    /// (a string, a byte array, a bool): the format is ignored, which is what composite formatting does for any such value.
     /// <see cref="DisplayValue"/> is the type's own display form; this method renders the format the caller asks for.
     /// </remarks>
     /// <param name="format">The format string for the underlying value.</param>
     /// <param name="formatProvider">The culture to format with; null uses the current culture.</param>
     public string ToString(string? format, IFormatProvider? formatProvider) =>
-        Value is IFormattable formattable
+        !string.IsNullOrEmpty(format) && Value is IFormattable formattable
             ? formattable.ToString(format, formatProvider)
-            : Value?.ToString() ?? string.Empty;
+            : ToString();
 }
 
 /// <summary>Base for orderable value objects (numeric and date/time types). Provides comparison operators and CompareTo.</summary>
