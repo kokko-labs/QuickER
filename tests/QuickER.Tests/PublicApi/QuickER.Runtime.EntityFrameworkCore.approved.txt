@@ -41,9 +41,9 @@ public sealed class QuickER.Runtime.EntityFrameworkCore.EfCoreSqlQueryExecutor<T
     public System.Threading.Tasks.Task<int> ExecuteDeleteAsync(QuickER.Runtime.SqlQueryPlan<TEntity> plan, bool cascadeDelete, System.Threading.CancellationToken cancellationToken)
 
 public static class QuickER.Runtime.EntityFrameworkCore.EntityGraphSaver
-    public static bool HasChanges(QuickER.Runtime.EntityBase entity, bool cascade)
-    public static void AcceptChanges(QuickER.Runtime.EntityBase entity, bool cascade)
-    public static void AcceptChanges(QuickER.Runtime.EntityBase entity, bool cascade, System.Collections.Generic.IReadOnlySet<QuickER.Runtime.EntityBase> skip)
+    public static bool HasChanges(QuickER.Runtime.EntityBaseCore entity, bool cascade)
+    public static void AcceptChanges(QuickER.Runtime.EntityBaseCore entity, bool cascade)
+    public static void AcceptChanges(QuickER.Runtime.EntityBaseCore entity, bool cascade, System.Collections.Generic.IReadOnlySet<QuickER.Runtime.EntityBaseCore> skip)
 
 public sealed class QuickER.Runtime.EntityFrameworkCore.EntitySaveMetadata
     public .ctor()
@@ -56,7 +56,7 @@ public sealed class QuickER.Runtime.EntityFrameworkCore.EntitySaveMetadata
     public System.Collections.Generic.IReadOnlyList<System.Reflection.PropertyInfo> ResolveProjectionColumns(System.Collections.Generic.IReadOnlyCollection<string> propertyNames)
     public System.Collections.Generic.IReadOnlyList<System.Reflection.PropertyInfo> SelectProperties { get; init; }
     public System.Collections.Generic.IReadOnlyList<System.ValueTuple<System.Reflection.PropertyInfo, string>> SelectColumns { get; init; }
-    public System.Func<System.Data.Common.DbDataReader, int[], QuickER.Runtime.EntityBase> SelectMaterializer { get; init; }
+    public System.Func<System.Data.Common.DbDataReader, int[], QuickER.Runtime.EntityBaseCore> SelectMaterializer { get; init; }
     public System.Reflection.PropertyInfo ColumnByPropertyName(string propertyName)
     public System.Reflection.PropertyInfo KeyProperty { get; init; }
     public System.Reflection.PropertyInfo RowVersionProperty { get; init; }
@@ -82,11 +82,11 @@ public struct QuickER.Runtime.EntityFrameworkCore.LikeEscapeBehavior : System.IE
     public string EscapeChar { get; init; }
 
 public sealed class QuickER.Runtime.EntityFrameworkCore.SaveHookSession
-    public .ctor(QuickER.Runtime.ISaveHookRegistry registry, System.Func<QuickER.Runtime.EntityBase, QuickER.Runtime.ISaveHookContext> contextFactory)
-    public System.Collections.Generic.IReadOnlySet<QuickER.Runtime.EntityBase> Skipped { get; }
-    public System.Threading.Tasks.Task InvokeAfterAsync(QuickER.Runtime.EntityBase entity, QuickER.Runtime.SaveOperation operation, System.Threading.CancellationToken cancellationToken)
-    public System.Threading.Tasks.Task<bool> InvokeBeforeAsync(QuickER.Runtime.EntityBase entity, QuickER.Runtime.SaveOperation operation, System.Threading.CancellationToken cancellationToken)
-    public void Skip(QuickER.Runtime.EntityBase entity)
+    public .ctor(QuickER.Runtime.ISaveHookRegistry registry, System.Func<QuickER.Runtime.EntityBaseCore, QuickER.Runtime.ISaveHookContext> contextFactory)
+    public System.Collections.Generic.IReadOnlySet<QuickER.Runtime.EntityBaseCore> Skipped { get; }
+    public System.Threading.Tasks.Task InvokeAfterAsync(QuickER.Runtime.EntityBaseCore entity, QuickER.Runtime.SaveOperation operation, System.Threading.CancellationToken cancellationToken)
+    public System.Threading.Tasks.Task<bool> InvokeBeforeAsync(QuickER.Runtime.EntityBaseCore entity, QuickER.Runtime.SaveOperation operation, System.Threading.CancellationToken cancellationToken)
+    public void Skip(QuickER.Runtime.EntityBaseCore entity)
 
 public sealed class QuickER.Runtime.EntityFrameworkCore.ValueObjectStringMethodTranslator : Microsoft.EntityFrameworkCore.Query.IMethodCallTranslator
     public .ctor(Microsoft.EntityFrameworkCore.Query.ISqlExpressionFactory sqlExpressionFactory, Microsoft.EntityFrameworkCore.Storage.RelationalTypeMapping stringTypeMapping, QuickER.Runtime.EntityFrameworkCore.LikeEscapeBehavior escapeBehavior)

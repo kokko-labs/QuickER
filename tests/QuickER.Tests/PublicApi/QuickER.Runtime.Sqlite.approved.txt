@@ -5,15 +5,15 @@ public static class QuickER.Runtime.Sqlite.CascadeDeletePlanner
     public static System.Collections.Generic.IReadOnlyList<string> BuildDeleteStatements(System.Type rootType, string rootTable, string whereClause)
 
 public static class QuickER.Runtime.Sqlite.EntityGraphSaver
-    public static System.Threading.Tasks.Task<int> SaveAsync(QuickER.Runtime.EntityBase entity, Microsoft.Data.Sqlite.SqliteConnection connection, Microsoft.Data.Sqlite.SqliteTransaction transaction, bool cascadeSave, bool cascadeDelete, bool insertWhenUpdateMissing, System.Threading.CancellationToken cancellationToken, QuickER.Runtime.Sqlite.SaveHookSession hooks = null, bool changesAlreadyVerified = false)
-    public static bool HasChanges(QuickER.Runtime.EntityBase entity, bool cascade)
-    public static void AcceptChanges(QuickER.Runtime.EntityBase entity, bool cascade)
-    public static void AcceptChanges(QuickER.Runtime.EntityBase entity, bool cascade, System.Collections.Generic.IReadOnlySet<QuickER.Runtime.EntityBase> skip)
+    public static System.Threading.Tasks.Task<int> SaveAsync(QuickER.Runtime.EntityBaseCore entity, Microsoft.Data.Sqlite.SqliteConnection connection, Microsoft.Data.Sqlite.SqliteTransaction transaction, bool cascadeSave, bool cascadeDelete, bool insertWhenUpdateMissing, System.Threading.CancellationToken cancellationToken, QuickER.Runtime.Sqlite.SaveHookSession hooks = null, bool changesAlreadyVerified = false)
+    public static bool HasChanges(QuickER.Runtime.EntityBaseCore entity, bool cascade)
+    public static void AcceptChanges(QuickER.Runtime.EntityBaseCore entity, bool cascade)
+    public static void AcceptChanges(QuickER.Runtime.EntityBaseCore entity, bool cascade, System.Collections.Generic.IReadOnlySet<QuickER.Runtime.EntityBaseCore> skip)
 
 public sealed class QuickER.Runtime.Sqlite.EntitySaveMetadata
     public .ctor()
-    public QuickER.Runtime.EntityBase MapEntityObject(System.Data.Common.DbDataReader reader)
-    public QuickER.Runtime.EntityBase MapEntityObject(System.Data.Common.DbDataReader reader, int[] ordinals)
+    public QuickER.Runtime.EntityBaseCore MapEntityObject(System.Data.Common.DbDataReader reader)
+    public QuickER.Runtime.EntityBaseCore MapEntityObject(System.Data.Common.DbDataReader reader, int[] ordinals)
     public QuickER.Runtime.Sqlite.EntitySaveMetadata.RawSqlRowPlan CreateRawSqlRowPlan(Microsoft.Data.Sqlite.SqliteDataReader reader)
     public System.Collections.Generic.IReadOnlyDictionary<System.Reflection.PropertyInfo, string> ColumnNameByProperty { get; init; }
     public System.Collections.Generic.IReadOnlyDictionary<string, System.Reflection.PropertyInfo> PropertyByColumn { get; init; }
@@ -26,7 +26,7 @@ public sealed class QuickER.Runtime.Sqlite.EntitySaveMetadata
     public System.Collections.Generic.IReadOnlyList<System.Reflection.PropertyInfo> SelectProperties { get; init; }
     public System.Collections.Generic.IReadOnlyList<System.ValueTuple<System.Reflection.PropertyInfo, string>> SelectColumns { get; init; }
     public System.Collections.Generic.IReadOnlyList<System.ValueTuple<string, string>> Columns { get; init; }
-    public System.Func<System.Data.Common.DbDataReader, int[], QuickER.Runtime.EntityBase> SelectMaterializer { get; init; }
+    public System.Func<System.Data.Common.DbDataReader, int[], QuickER.Runtime.EntityBaseCore> SelectMaterializer { get; init; }
     public System.Reflection.PropertyInfo ColumnByPropertyName(string propertyName)
     public System.Reflection.PropertyInfo KeyProperty { get; init; }
     public System.Reflection.PropertyInfo RowVersionProperty { get; init; }
@@ -38,7 +38,7 @@ public sealed class QuickER.Runtime.Sqlite.EntitySaveMetadata
     public TEntity MapEntityFromRawSql<TEntity>(Microsoft.Data.Sqlite.SqliteDataReader reader, QuickER.Runtime.Sqlite.EntitySaveMetadata.RawSqlRowPlan plan)
     public int[] ColumnOrdinals(System.Data.Common.DbDataReader reader, System.Collections.Generic.IReadOnlyList<System.Reflection.PropertyInfo> properties)
     public int[] SelectOrdinals(System.Data.Common.DbDataReader reader)
-    public object GetColumnValue(QuickER.Runtime.EntityBase entity, string columnName)
+    public object GetColumnValue(QuickER.Runtime.EntityBaseCore entity, string columnName)
     public static QuickER.Runtime.NavigationReferenceAttribute NavigationAttribute(System.Reflection.PropertyInfo property)
     public static QuickER.Runtime.Sqlite.EntitySaveMetadata For(System.Type entityType)
     public string BuildColumnList(System.Collections.Generic.IReadOnlyList<System.Reflection.PropertyInfo> properties)
@@ -55,11 +55,11 @@ public sealed class QuickER.Runtime.Sqlite.EntitySaveMetadata
     public string TableName { get; init; }
     public string UpdateSql { get; init; }
     public void AddQueryParameter(Microsoft.Data.Sqlite.SqliteCommand command, string name, string columnName, object rawValue)
-    public void BindEntityKeyParameter(Microsoft.Data.Sqlite.SqliteCommand command, QuickER.Runtime.EntityBase entity)
-    public void BindInsertParameters(Microsoft.Data.Sqlite.SqliteCommand command, QuickER.Runtime.EntityBase entity)
+    public void BindEntityKeyParameter(Microsoft.Data.Sqlite.SqliteCommand command, QuickER.Runtime.EntityBaseCore entity)
+    public void BindInsertParameters(Microsoft.Data.Sqlite.SqliteCommand command, QuickER.Runtime.EntityBaseCore entity)
     public void BindKeyParameter(Microsoft.Data.Sqlite.SqliteCommand command, object id)
-    public void BindUpdateParameters(Microsoft.Data.Sqlite.SqliteCommand command, QuickER.Runtime.EntityBase entity)
-    public void RebindInsertParameters(Microsoft.Data.Sqlite.SqliteCommand command, QuickER.Runtime.EntityBase entity)
+    public void BindUpdateParameters(Microsoft.Data.Sqlite.SqliteCommand command, QuickER.Runtime.EntityBaseCore entity)
+    public void RebindInsertParameters(Microsoft.Data.Sqlite.SqliteCommand command, QuickER.Runtime.EntityBaseCore entity)
 
 public sealed class QuickER.Runtime.Sqlite.EntitySaveMetadata.RawSqlRowPlan
     public .ctor()
@@ -74,11 +74,11 @@ public sealed class QuickER.Runtime.Sqlite.IncludeLoader
     public static QuickER.Runtime.Sqlite.IncludeLoader For(System.Type entityType)
 
 public sealed class QuickER.Runtime.Sqlite.SaveHookSession
-    public .ctor(QuickER.Runtime.ISaveHookRegistry registry, System.Func<QuickER.Runtime.EntityBase, QuickER.Runtime.ISaveHookContext> contextFactory)
-    public System.Collections.Generic.IReadOnlySet<QuickER.Runtime.EntityBase> Skipped { get; }
-    public System.Threading.Tasks.Task InvokeAfterAsync(QuickER.Runtime.EntityBase entity, QuickER.Runtime.SaveOperation operation, System.Threading.CancellationToken cancellationToken)
-    public System.Threading.Tasks.Task<bool> InvokeBeforeAsync(QuickER.Runtime.EntityBase entity, QuickER.Runtime.SaveOperation operation, System.Threading.CancellationToken cancellationToken)
-    public void Skip(QuickER.Runtime.EntityBase entity)
+    public .ctor(QuickER.Runtime.ISaveHookRegistry registry, System.Func<QuickER.Runtime.EntityBaseCore, QuickER.Runtime.ISaveHookContext> contextFactory)
+    public System.Collections.Generic.IReadOnlySet<QuickER.Runtime.EntityBaseCore> Skipped { get; }
+    public System.Threading.Tasks.Task InvokeAfterAsync(QuickER.Runtime.EntityBaseCore entity, QuickER.Runtime.SaveOperation operation, System.Threading.CancellationToken cancellationToken)
+    public System.Threading.Tasks.Task<bool> InvokeBeforeAsync(QuickER.Runtime.EntityBaseCore entity, QuickER.Runtime.SaveOperation operation, System.Threading.CancellationToken cancellationToken)
+    public void Skip(QuickER.Runtime.EntityBaseCore entity)
 
 public sealed class QuickER.Runtime.Sqlite.SqlConnectionFactory : QuickER.Runtime.Sqlite.ISqlConnectionFactory
     public .ctor(string connectionString)

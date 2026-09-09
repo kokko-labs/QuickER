@@ -5,10 +5,10 @@ public static class QuickER.Runtime.SqlServer.CascadeDeletePlanner
     public static System.Collections.Generic.IReadOnlyList<string> BuildDeleteStatements(System.Type rootType, string rootTable, string whereClause)
 
 public static class QuickER.Runtime.SqlServer.EntityGraphSaver
-    public static System.Threading.Tasks.Task<int> SaveAsync(QuickER.Runtime.EntityBase entity, Microsoft.Data.SqlClient.SqlConnection connection, Microsoft.Data.SqlClient.SqlTransaction transaction, bool cascadeSave, bool cascadeDelete, bool insertWhenUpdateMissing, System.Threading.CancellationToken cancellationToken, QuickER.Runtime.SqlServer.SaveHookSession hooks = null, bool changesAlreadyVerified = false, QuickER.Runtime.ConcurrencyMode mode = 0, QuickER.Runtime.SqlServer.RowVersionCollector versions = null)
-    public static bool HasChanges(QuickER.Runtime.EntityBase entity, bool cascade)
-    public static void AcceptChanges(QuickER.Runtime.EntityBase entity, bool cascade)
-    public static void AcceptChanges(QuickER.Runtime.EntityBase entity, bool cascade, System.Collections.Generic.IReadOnlySet<QuickER.Runtime.EntityBase> skip)
+    public static System.Threading.Tasks.Task<int> SaveAsync(QuickER.Runtime.EntityBaseCore entity, Microsoft.Data.SqlClient.SqlConnection connection, Microsoft.Data.SqlClient.SqlTransaction transaction, bool cascadeSave, bool cascadeDelete, bool insertWhenUpdateMissing, System.Threading.CancellationToken cancellationToken, QuickER.Runtime.SqlServer.SaveHookSession hooks = null, bool changesAlreadyVerified = false, QuickER.Runtime.ConcurrencyMode mode = 0, QuickER.Runtime.SqlServer.RowVersionCollector versions = null)
+    public static bool HasChanges(QuickER.Runtime.EntityBaseCore entity, bool cascade)
+    public static void AcceptChanges(QuickER.Runtime.EntityBaseCore entity, bool cascade)
+    public static void AcceptChanges(QuickER.Runtime.EntityBaseCore entity, bool cascade, System.Collections.Generic.IReadOnlySet<QuickER.Runtime.EntityBaseCore> skip)
 
 public sealed class QuickER.Runtime.SqlServer.EntitySaveMetadata
     public .ctor()
@@ -24,8 +24,8 @@ public sealed class QuickER.Runtime.SqlServer.EntitySaveMetadata
     public System.Collections.Generic.IReadOnlyList<System.Reflection.PropertyInfo> SelectProperties { get; init; }
     public System.Collections.Generic.IReadOnlyList<System.ValueTuple<System.Reflection.PropertyInfo, string>> SelectColumns { get; init; }
     public System.Collections.Generic.IReadOnlyList<System.ValueTuple<string, string>> Columns { get; init; }
-    public System.Data.IDataReader CreateDataReader(System.Collections.Generic.IEnumerable<QuickER.Runtime.EntityBase> entities)
-    public System.Func<System.Data.Common.DbDataReader, int[], QuickER.Runtime.EntityBase> SelectMaterializer { get; init; }
+    public System.Data.IDataReader CreateDataReader(System.Collections.Generic.IEnumerable<QuickER.Runtime.EntityBaseCore> entities)
+    public System.Func<System.Data.Common.DbDataReader, int[], QuickER.Runtime.EntityBaseCore> SelectMaterializer { get; init; }
     public System.Reflection.PropertyInfo ColumnByPropertyName(string propertyName)
     public System.Reflection.PropertyInfo KeyProperty { get; init; }
     public System.Reflection.PropertyInfo RowVersionProperty { get; init; }
@@ -56,11 +56,11 @@ public sealed class QuickER.Runtime.SqlServer.EntitySaveMetadata
     public string UpdateSql { get; init; }
     public string UpdateVersionedSql { get; init; }
     public void AddQueryParameter(Microsoft.Data.SqlClient.SqlCommand command, string name, string columnName, object rawValue)
-    public void BindEntityKeyParameter(Microsoft.Data.SqlClient.SqlCommand command, QuickER.Runtime.EntityBase entity)
-    public void BindInsertParameters(Microsoft.Data.SqlClient.SqlCommand command, QuickER.Runtime.EntityBase entity)
+    public void BindEntityKeyParameter(Microsoft.Data.SqlClient.SqlCommand command, QuickER.Runtime.EntityBaseCore entity)
+    public void BindInsertParameters(Microsoft.Data.SqlClient.SqlCommand command, QuickER.Runtime.EntityBaseCore entity)
     public void BindKeyParameter(Microsoft.Data.SqlClient.SqlCommand command, object id)
-    public void BindRowVersionParameter(Microsoft.Data.SqlClient.SqlCommand command, QuickER.Runtime.EntityBase entity)
-    public void BindUpdateParameters(Microsoft.Data.SqlClient.SqlCommand command, QuickER.Runtime.EntityBase entity)
+    public void BindRowVersionParameter(Microsoft.Data.SqlClient.SqlCommand command, QuickER.Runtime.EntityBaseCore entity)
+    public void BindUpdateParameters(Microsoft.Data.SqlClient.SqlCommand command, QuickER.Runtime.EntityBaseCore entity)
 
 public sealed class QuickER.Runtime.SqlServer.EntitySaveMetadata.RawSqlRowPlan
     public .ctor()
@@ -76,20 +76,20 @@ public static class QuickER.Runtime.SqlServer.JsonQueryPlanner
 public sealed class QuickER.Runtime.SqlServer.RowVersionCollector
     public .ctor()
     public void Apply()
-    public void Record(QuickER.Runtime.EntityBase entity, byte[] version)
+    public void Record(QuickER.Runtime.EntityBaseCore entity, byte[] version)
 
 public static class QuickER.Runtime.SqlServer.RowVersionConcurrency
-    public static QuickER.Runtime.SaveConflictException Conflict(QuickER.Runtime.SqlServer.EntitySaveMetadata metadata, QuickER.Runtime.EntityBase entity, string operation)
-    public static System.Threading.Tasks.Task<bool> RowExistsAsync(QuickER.Runtime.SqlServer.EntitySaveMetadata metadata, QuickER.Runtime.EntityBase entity, Microsoft.Data.SqlClient.SqlConnection connection, Microsoft.Data.SqlClient.SqlTransaction transaction, System.Threading.CancellationToken cancellationToken)
+    public static QuickER.Runtime.SaveConflictException Conflict(QuickER.Runtime.SqlServer.EntitySaveMetadata metadata, QuickER.Runtime.EntityBaseCore entity, string operation)
+    public static System.Threading.Tasks.Task<bool> RowExistsAsync(QuickER.Runtime.SqlServer.EntitySaveMetadata metadata, QuickER.Runtime.EntityBaseCore entity, Microsoft.Data.SqlClient.SqlConnection connection, Microsoft.Data.SqlClient.SqlTransaction transaction, System.Threading.CancellationToken cancellationToken)
     public static string UpdateSql(QuickER.Runtime.SqlServer.EntitySaveMetadata metadata, QuickER.Runtime.ConcurrencyMode mode)
-    public static void BindUpdate(QuickER.Runtime.SqlServer.EntitySaveMetadata metadata, Microsoft.Data.SqlClient.SqlCommand command, QuickER.Runtime.EntityBase entity, QuickER.Runtime.ConcurrencyMode mode)
+    public static void BindUpdate(QuickER.Runtime.SqlServer.EntitySaveMetadata metadata, Microsoft.Data.SqlClient.SqlCommand command, QuickER.Runtime.EntityBaseCore entity, QuickER.Runtime.ConcurrencyMode mode)
 
 public sealed class QuickER.Runtime.SqlServer.SaveHookSession
-    public .ctor(QuickER.Runtime.ISaveHookRegistry registry, System.Func<QuickER.Runtime.EntityBase, QuickER.Runtime.ISaveHookContext> contextFactory)
-    public System.Collections.Generic.IReadOnlySet<QuickER.Runtime.EntityBase> Skipped { get; }
-    public System.Threading.Tasks.Task InvokeAfterAsync(QuickER.Runtime.EntityBase entity, QuickER.Runtime.SaveOperation operation, System.Threading.CancellationToken cancellationToken)
-    public System.Threading.Tasks.Task<bool> InvokeBeforeAsync(QuickER.Runtime.EntityBase entity, QuickER.Runtime.SaveOperation operation, System.Threading.CancellationToken cancellationToken)
-    public void Skip(QuickER.Runtime.EntityBase entity)
+    public .ctor(QuickER.Runtime.ISaveHookRegistry registry, System.Func<QuickER.Runtime.EntityBaseCore, QuickER.Runtime.ISaveHookContext> contextFactory)
+    public System.Collections.Generic.IReadOnlySet<QuickER.Runtime.EntityBaseCore> Skipped { get; }
+    public System.Threading.Tasks.Task InvokeAfterAsync(QuickER.Runtime.EntityBaseCore entity, QuickER.Runtime.SaveOperation operation, System.Threading.CancellationToken cancellationToken)
+    public System.Threading.Tasks.Task<bool> InvokeBeforeAsync(QuickER.Runtime.EntityBaseCore entity, QuickER.Runtime.SaveOperation operation, System.Threading.CancellationToken cancellationToken)
+    public void Skip(QuickER.Runtime.EntityBaseCore entity)
 
 public sealed class QuickER.Runtime.SqlServer.SqlConnectionFactory : QuickER.Runtime.SqlServer.ISqlConnectionFactory
     public .ctor(string connectionString)

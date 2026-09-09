@@ -12,7 +12,7 @@ namespace QuickER.Tests.GeneratedFixture;
 /// <remarks>
 /// <para>
 /// 削除される行の入力は保存に使われない（キーだけが使われる）。にもかかわらず
-/// <see cref="EditModelCollection{T}.Validate"/> と <c>EditModelBase.Validate</c> には削除行の除外が無く、
+/// <see cref="EditModelCollection{T}.Validate"/> と <c>EditModelBaseCore.Validate</c> には削除行の除外が無く、
 /// コレクション内重複の検証（<see cref="EditModelUniquenessValidator"/>）だけが <c>IsRemoved</c> を除外していた
 /// ＝同じコレクションの中で「重複は見逃すが変換エラーは保存全体を止める」という非対称になっていた。
 /// ここはその線引き（読み側でのフィルタ・エラーストアは不変）を固定する。
@@ -53,7 +53,7 @@ public sealed class EditModelRemovedValidationTests
     }
 
     /// <summary>指定プロパティのエラー一覧を取り出す</summary>
-    private static string[] GetErrors(EditModelBase model, string propertyName) =>
+    private static string[] GetErrors(EditModelBaseCore model, string propertyName) =>
         ((IEnumerable)model.GetErrors(propertyName)).Cast<string>().ToArray();
 
     /// <summary>削除マークした行の変換エラーはコレクションの検証を止めず、収集にも現れない</summary>

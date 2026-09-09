@@ -81,7 +81,7 @@ public sealed class EditModelValidateUniqueRuntimeTests : IAsyncLifetime
         };
 
     /// <summary>指定プロパティのエラー一覧を取り出す</summary>
-    private static string[] GetErrors(EditModelBase model, string propertyName) =>
+    private static string[] GetErrors(EditModelBaseCore model, string propertyName) =>
         ((IEnumerable)model.GetErrors(propertyName)).Cast<string>().ToArray();
 
     /// <summary>1. DB に同じ値の行があると false を返し、構成列のバインディングプロパティへエラーが載る</summary>

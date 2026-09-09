@@ -236,7 +236,7 @@ public static class UnboundedBinaryColumns
     /// Throws if an update is attempted while an excluded column still holds a value that is not in the "not-fetched" state (a blob that is neither null nor empty).
     /// Because unbounded binary columns are excluded from the Repository UPDATE, updating while such a value is retained would silently lose it.
     /// </summary>
-    public static void ThrowIfExcludedAssigned(EntityBase entity)
+    public static void ThrowIfExcludedAssigned(EntityBaseCore entity)
     {
         foreach (var property in For(entity.GetType()))
         {
@@ -254,7 +254,7 @@ public static class UnboundedBinaryColumns
     /// Resets the excluded columns of a read replica to the "not-fetched" state (the initial values of a default instance). This matches the not-fetched state on
     /// the real DB side (MapEntity does not call SetValue, so the constructor initializer stands: a non-null byte[] is an empty array, and nullable is null).
     /// </summary>
-    public static void StripExcluded(EntityBase entity)
+    public static void StripExcluded(EntityBaseCore entity)
     {
         var excluded = For(entity.GetType());
 
@@ -279,7 +279,7 @@ public static class UnboundedBinaryColumns
     private static bool IsUnset(object? value)
     {
         // Value objects are unwrapped to their underlying value before evaluation.
-        if (value is IValueObject valueObject)
+        if (value is IValueObjectCore valueObject)
         {
             value = valueObject.UnderlyingValue;
         }
@@ -301,7 +301,7 @@ public static class UnboundedBinaryColumns
     /// the blob (the update guard cannot catch it: the entity holds exactly the "not-fetched" value the guard permits). A column
     /// that does carry a value is left alone, because that value is the caller's own data, as it is on an insert.
     /// </remarks>
-    public static void PreserveUnset(EntityBase entity, EntityBase stored)
+    public static void PreserveUnset(EntityBaseCore entity, EntityBaseCore stored)
     {
         foreach (var property in For(entity.GetType()))
         {
@@ -341,7 +341,7 @@ public static class UnboundedBinaryColumns
 }
 
 /// <summary>Non-generic marker for a value object. Used to extract the underlying value and to test the type.</summary>
-public interface IValueObject
+public interface IValueObjectCore
 {
     /// <summary>Gets the underlying value as an object (used to open the raw value for SQL parameter binding and similar).</summary>
     object? UnderlyingValue { get; }
@@ -356,7 +356,7 @@ public interface IValueObject
 /// does not know and should not have to name: a constraint of <c>where T : IValueObject&lt;T&gt;</c> accepts every value object
 /// regardless of what it wraps. The members here therefore take the value as <see cref="object"/> and convert it on the way in.
 /// </remarks>
-public interface IValueObject<TSelf> : IValueObject
+public interface IValueObject<TSelf> : IValueObjectCore
     where TSelf : IValueObject<TSelf>
 {
     /// <summary>Converts a value from outside the model - a spreadsheet cell, a CSV field, a form field - and creates the value object from it, without throwing.</summary>
@@ -421,7 +421,7 @@ public interface IValueObject<TSelf, TValue> : IValueObject<TSelf>
 {
     /// <summary>Creates the instance from an already-validated value. Write it as an explicit implementation that calls the private constructor.</summary>
     /// <remarks>
-    /// This member exists so that <see cref="ValueObjectBase{TSelf, TValue}"/> can implement Create / TryCreate once for
+    /// This member exists so that <see cref="ValueObjectBaseCore{TSelf, TValue}"/> can implement Create / TryCreate once for
     /// every value object; validating is their job, so calling New through a type parameter skips validation. An explicit
     /// implementation keeps it off the type's own public surface, where Create is the front door.
     /// </remarks>
@@ -501,17 +501,17 @@ public sealed class ValueObjectValidationException : Exception
 }
 
 /// <summary>Common base for value objects. Provides the Create / TryCreate / Validate factories, value storage, equality, ToString, and extraction of the raw value (ordered comparison is added by derived types).</summary>
-public abstract partial class ValueObjectBase<TSelf, TValue>
-    : IValueObject,
+public abstract partial class ValueObjectBaseCore<TSelf, TValue>
+    : IValueObjectCore,
         IEquatable<TSelf>,
         IFormattable
-    where TSelf : ValueObjectBase<TSelf, TValue>, IValueObject<TSelf, TValue>
+    where TSelf : ValueObjectBaseCore<TSelf, TValue>, IValueObject<TSelf, TValue>
 {
-    /// <summary>Gets the underlying value (never reassigned; reference-typed values such as byte[] are not defensively copied — see <see cref="ValueObjectBinaryBase{TSelf}"/>).</summary>
+    /// <summary>Gets the underlying value (never reassigned; reference-typed values such as byte[] are not defensively copied — see <see cref="ValueObjectBinaryBaseCore{TSelf}"/>).</summary>
     public TValue Value { get; }
 
     /// <summary>Initializes with an already-validated value (Create/TryCreate performs validation beforehand).</summary>
-    protected ValueObjectBase(TValue value) => Value = value;
+    protected ValueObjectBaseCore(TValue value) => Value = value;
 
     /// <summary>Validates and creates the value object (throws ValueObjectValidationException on violation).</summary>
     /// <remarks>
@@ -656,7 +656,7 @@ public abstract partial class ValueObjectBase<TSelf, TValue>
     public static TSelf? CreateFrom(object? raw) => TSelf.CreateFrom(raw, null);
 
     /// <summary>Gets the underlying value as an object (opens the raw value for SQL binding and similar).</summary>
-    object? IValueObject.UnderlyingValue => Value;
+    object? IValueObjectCore.UnderlyingValue => Value;
 
     /// <summary>Gets the string used for display (defaults to ToString()). A concrete value object's partial class can override it to change the format.</summary>
     public virtual string DisplayValue => ToString();
@@ -667,7 +667,7 @@ public abstract partial class ValueObjectBase<TSelf, TValue>
     /// by value directly. Without it the default comparer falls back to the object-based one, which reaches equality only
     /// through <see cref="Equals(object?)"/> and boxes a struct-valued argument on the way; every dictionary and hash-set
     /// lookup keyed by a value object goes through that comparer. A value object whose value is an array needs
-    /// element-by-element comparison and overrides this — see <see cref="ValueObjectBinaryBase{TSelf}"/>.
+    /// element-by-element comparison and overrides this — see <see cref="ValueObjectBinaryBaseCore{TSelf}"/>.
     /// </remarks>
     public virtual bool Equals(TSelf? other) =>
         other is not null && EqualityComparer<TValue>.Default.Equals(Value, other.Value);
@@ -681,14 +681,14 @@ public abstract partial class ValueObjectBase<TSelf, TValue>
 
     /// <summary>Value-based equality operator.</summary>
     public static bool operator ==(
-        ValueObjectBase<TSelf, TValue>? left,
-        ValueObjectBase<TSelf, TValue>? right
+        ValueObjectBaseCore<TSelf, TValue>? left,
+        ValueObjectBaseCore<TSelf, TValue>? right
     ) => left is null ? right is null : left.Equals(right);
 
     /// <summary>Value-based inequality operator.</summary>
     public static bool operator !=(
-        ValueObjectBase<TSelf, TValue>? left,
-        ValueObjectBase<TSelf, TValue>? right
+        ValueObjectBaseCore<TSelf, TValue>? left,
+        ValueObjectBaseCore<TSelf, TValue>? right
     ) => !(left == right);
 
     /// <summary>Returns the string representation of the underlying value.</summary>
@@ -717,15 +717,15 @@ public abstract partial class ValueObjectBase<TSelf, TValue>
 }
 
 /// <summary>Base for orderable value objects (numeric and date/time types). Provides comparison operators and CompareTo.</summary>
-public abstract partial class ValueObjectOrderedBase<TSelf, TValue>
-    : ValueObjectBase<TSelf, TValue>,
+public abstract partial class ValueObjectOrderedBaseCore<TSelf, TValue>
+    : ValueObjectBaseCore<TSelf, TValue>,
         IComparable<TSelf>,
         IComparable
-    where TSelf : ValueObjectOrderedBase<TSelf, TValue>, IValueObject<TSelf, TValue>
+    where TSelf : ValueObjectOrderedBaseCore<TSelf, TValue>, IValueObject<TSelf, TValue>
     where TValue : IComparable<TValue>
 {
     /// <summary>Initializes with an already-validated value.</summary>
-    protected ValueObjectOrderedBase(TValue value)
+    protected ValueObjectOrderedBaseCore(TValue value)
         : base(value) { }
 
     /// <summary>Compares the underlying values.</summary>
@@ -742,31 +742,31 @@ public abstract partial class ValueObjectOrderedBase<TSelf, TValue>
 
     /// <summary>Less-than.</summary>
     public static bool operator <(
-        ValueObjectOrderedBase<TSelf, TValue>? left,
-        ValueObjectOrderedBase<TSelf, TValue>? right
+        ValueObjectOrderedBaseCore<TSelf, TValue>? left,
+        ValueObjectOrderedBaseCore<TSelf, TValue>? right
     ) => Compare(left, right) < 0;
 
     /// <summary>Greater-than.</summary>
     public static bool operator >(
-        ValueObjectOrderedBase<TSelf, TValue>? left,
-        ValueObjectOrderedBase<TSelf, TValue>? right
+        ValueObjectOrderedBaseCore<TSelf, TValue>? left,
+        ValueObjectOrderedBaseCore<TSelf, TValue>? right
     ) => Compare(left, right) > 0;
 
     /// <summary>Less-than-or-equal.</summary>
     public static bool operator <=(
-        ValueObjectOrderedBase<TSelf, TValue>? left,
-        ValueObjectOrderedBase<TSelf, TValue>? right
+        ValueObjectOrderedBaseCore<TSelf, TValue>? left,
+        ValueObjectOrderedBaseCore<TSelf, TValue>? right
     ) => Compare(left, right) <= 0;
 
     /// <summary>Greater-than-or-equal.</summary>
     public static bool operator >=(
-        ValueObjectOrderedBase<TSelf, TValue>? left,
-        ValueObjectOrderedBase<TSelf, TValue>? right
+        ValueObjectOrderedBaseCore<TSelf, TValue>? left,
+        ValueObjectOrderedBaseCore<TSelf, TValue>? right
     ) => Compare(left, right) >= 0;
 
     private static int Compare(
-        ValueObjectOrderedBase<TSelf, TValue>? left,
-        ValueObjectOrderedBase<TSelf, TValue>? right
+        ValueObjectOrderedBaseCore<TSelf, TValue>? left,
+        ValueObjectOrderedBaseCore<TSelf, TValue>? right
     ) =>
         left is null ? (right is null ? 0 : -1)
         : right is null ? 1
@@ -774,14 +774,14 @@ public abstract partial class ValueObjectOrderedBase<TSelf, TValue>
 }
 
 /// <summary>Base for string value objects. Provides substring-match methods and ordinal comparison (does not add ordering operators).</summary>
-public abstract partial class ValueObjectStringBase<TSelf>
-    : ValueObjectBase<TSelf, string>,
+public abstract partial class ValueObjectStringBaseCore<TSelf>
+    : ValueObjectBaseCore<TSelf, string>,
         IComparable<TSelf>,
         IComparable
-    where TSelf : ValueObjectStringBase<TSelf>, IValueObject<TSelf, string>
+    where TSelf : ValueObjectStringBaseCore<TSelf>, IValueObject<TSelf, string>
 {
     /// <summary>Initializes with an already-validated value.</summary>
-    protected ValueObjectStringBase(string value)
+    protected ValueObjectStringBaseCore(string value)
         : base(value) { }
 
     /// <summary>Returns whether the value contains the specified string.</summary>
@@ -847,11 +847,11 @@ public abstract partial class ValueObjectStringBase<TSelf>
 }
 
 /// <summary>Base for bool value objects. Provides True/False factories and truth checks (has no ordered comparison).</summary>
-public abstract partial class ValueObjectBooleanBase<TSelf> : ValueObjectBase<TSelf, bool>
-    where TSelf : ValueObjectBooleanBase<TSelf>, IValueObject<TSelf, bool>
+public abstract partial class ValueObjectBooleanBaseCore<TSelf> : ValueObjectBaseCore<TSelf, bool>
+    where TSelf : ValueObjectBooleanBaseCore<TSelf>, IValueObject<TSelf, bool>
 {
     /// <summary>Initializes with an already-validated value.</summary>
-    protected ValueObjectBooleanBase(bool value)
+    protected ValueObjectBooleanBaseCore(bool value)
         : base(value) { }
 
     /// <summary>Creates the value object from the true value.</summary>
@@ -868,12 +868,12 @@ public abstract partial class ValueObjectBooleanBase<TSelf> : ValueObjectBase<TS
 }
 
 /// <summary>Base for DateTime value objects. Provides Now/Today factories.</summary>
-public abstract partial class ValueObjectDateTimeBase<TSelf>
-    : ValueObjectOrderedBase<TSelf, DateTime>
-    where TSelf : ValueObjectDateTimeBase<TSelf>, IValueObject<TSelf, DateTime>
+public abstract partial class ValueObjectDateTimeBaseCore<TSelf>
+    : ValueObjectOrderedBaseCore<TSelf, DateTime>
+    where TSelf : ValueObjectDateTimeBaseCore<TSelf>, IValueObject<TSelf, DateTime>
 {
     /// <summary>Initializes with an already-validated value.</summary>
-    protected ValueObjectDateTimeBase(DateTime value)
+    protected ValueObjectDateTimeBaseCore(DateTime value)
         : base(value) { }
 
     /// <summary>Creates the value object from the current date and time.</summary>
@@ -889,11 +889,11 @@ public abstract partial class ValueObjectDateTimeBase<TSelf>
 /// created with, because copying would double the allocation of every binary column read from the database. Treat the array
 /// as frozen after Create — mutating it afterwards silently changes the value object's equality, hash code, and ToString.
 /// </remarks>
-public abstract partial class ValueObjectBinaryBase<TSelf> : ValueObjectBase<TSelf, byte[]>
-    where TSelf : ValueObjectBinaryBase<TSelf>, IValueObject<TSelf, byte[]>
+public abstract partial class ValueObjectBinaryBaseCore<TSelf> : ValueObjectBaseCore<TSelf, byte[]>
+    where TSelf : ValueObjectBinaryBaseCore<TSelf>, IValueObject<TSelf, byte[]>
 {
     /// <summary>Initializes with an already-validated value.</summary>
-    protected ValueObjectBinaryBase(byte[] value)
+    protected ValueObjectBinaryBaseCore(byte[] value)
         : base(value) { }
 
     /// <summary>Returns an equal value object built over a copy of the array (the copy the "not defensively copied" contract leaves to the caller).</summary>
@@ -944,14 +944,14 @@ public abstract partial class ValueObjectBinaryBase<TSelf> : ValueObjectBase<TSe
 }
 
 /// <summary>Base for a primary-key value object that holds a GUID as a string. The parameterless factory auto-generates a new GUID.</summary>
-public abstract partial class ValueObjectGuidKeyBase<TSelf>
-    : ValueObjectBase<TSelf, string>,
+public abstract partial class ValueObjectGuidKeyBaseCore<TSelf>
+    : ValueObjectBaseCore<TSelf, string>,
         IComparable<TSelf>,
         IComparable
-    where TSelf : ValueObjectGuidKeyBase<TSelf>, IValueObject<TSelf, string>
+    where TSelf : ValueObjectGuidKeyBaseCore<TSelf>, IValueObject<TSelf, string>
 {
     /// <summary>Initializes with an already-validated value.</summary>
-    protected ValueObjectGuidKeyBase(string value)
+    protected ValueObjectGuidKeyBaseCore(string value)
         : base(value) { }
 
     /// <summary>Generates a new GUID and creates the value object.</summary>
@@ -1533,7 +1533,7 @@ public enum RowState
 }
 
 /// <summary>Base class that holds the change tracking state (RowState) of an entity.</summary>
-public abstract partial class EntityBase
+public abstract partial class EntityBaseCore
 {
     /// <summary>Change tracking state of this entity. Defaults to Unchanged; restoring from the database or JSON keeps it Unchanged.</summary>
     public RowState RowState { get; set; } = RowState.Unchanged;
@@ -1606,17 +1606,17 @@ public abstract partial class EntityBase
     /// attribute scan. Cascade navigations point at children only (parent references are excluded), so the traversal is a
     /// tree and terminates.
     /// </remarks>
-    public IEnumerable<EntityBase> EnumerateCascadeChildren()
+    public IEnumerable<EntityBaseCore> EnumerateCascadeChildren()
     {
         foreach (var navigation in GetCascadeNavigations(GetType()))
         {
             var value = navigation.GetValue(this);
 
-            if (value is EntityBase child)
+            if (value is EntityBaseCore child)
             {
                 yield return child;
             }
-            else if (value is IEnumerable<EntityBase> children)
+            else if (value is IEnumerable<EntityBaseCore> children)
             {
                 foreach (var item in children)
                 {
@@ -1659,7 +1659,7 @@ public abstract partial class EntityBase
                     .Where(property =>
                         property.CanRead
                         && property.CanWrite
-                        && property.DeclaringType != typeof(EntityBase)
+                        && property.DeclaringType != typeof(EntityBaseCore)
                         && !Attribute.IsDefined(property, typeof(NavigationReferenceAttribute))
                     )
                     .ToArray()
@@ -1667,7 +1667,7 @@ public abstract partial class EntityBase
 
     /// <summary>Determines whether all column values match those of another entity (RowState and navigations are excluded from the comparison).</summary>
     /// <remarks>The comparison reads each column through reflection (the property list itself is cached per type). That is meant for change detection and assertions, not for a hot path — write the comparison out by hand where one is called for.</remarks>
-    public bool HasSameValues(EntityBase? other)
+    public bool HasSameValues(EntityBaseCore? other)
     {
         if (other is null)
         {
@@ -1758,11 +1758,11 @@ public abstract partial class EntityBase
     /// Values, RowState, and child navigations are copied. Parent-reference navigations are not restored because of [JsonIgnore] (the clone does not point to a parent).
     /// To insert it as a separate record, reassign the primary key or call MarkAdded() after cloning. The returned instance has the same concrete type as the original.
     /// </remarks>
-    public EntityBase Clone()
+    public EntityBaseCore Clone()
     {
         var type = GetType();
         var json = JsonSerializer.Serialize(this, type, _jsonOptions);
-        return (EntityBase)JsonSerializer.Deserialize(json, type, _jsonOptions)!;
+        return (EntityBaseCore)JsonSerializer.Deserialize(json, type, _jsonOptions)!;
     }
 }
 
@@ -1793,7 +1793,7 @@ public static class GeneratedDisplayNames
 /// <c>nameof</c> and stay compile-safe.
 /// </para>
 /// </remarks>
-public abstract partial class EditModelBase
+public abstract partial class EditModelBaseCore
     : INotifyPropertyChanged,
         INotifyDataErrorInfo,
         IEditableObject
@@ -2185,7 +2185,7 @@ public abstract partial class EditModelBase
     public IList? Owner { get; set; }
 
     /// <summary>Returns the next element after this one in its owning collection (null if not owned or at the end).</summary>
-    public EditModelBase? GetNext()
+    public EditModelBaseCore? GetNext()
     {
         if (Owner is null)
         {
@@ -2193,11 +2193,11 @@ public abstract partial class EditModelBase
         }
 
         var index = Owner.IndexOf(this);
-        return index >= 0 && index + 1 < Owner.Count ? (EditModelBase?)Owner[index + 1] : null;
+        return index >= 0 && index + 1 < Owner.Count ? (EditModelBaseCore?)Owner[index + 1] : null;
     }
 
     /// <summary>Returns the previous element before this one in its owning collection (null if not owned or at the start).</summary>
-    public EditModelBase? GetPrevious()
+    public EditModelBaseCore? GetPrevious()
     {
         if (Owner is null)
         {
@@ -2205,7 +2205,7 @@ public abstract partial class EditModelBase
         }
 
         var index = Owner.IndexOf(this);
-        return index > 0 ? (EditModelBase?)Owner[index - 1] : null;
+        return index > 0 ? (EditModelBaseCore?)Owner[index - 1] : null;
     }
 
     /// <summary>Gets the position of this element within its owning collection (-1 if not owned).</summary>
@@ -2285,18 +2285,18 @@ public abstract partial class EditModelBase
         OnPropertyChanged(nameof(IsLastInParent));
     }
 
-    /// <summary>Raises the change notification for the owning collection reference (ParentCollection), called when the element enters or leaves a collection (the property lives on <see cref="EditModelBase{TSelf}"/> under exactly this name).</summary>
+    /// <summary>Raises the change notification for the owning collection reference (ParentCollection), called when the element enters or leaves a collection (the property lives on <see cref="EditModelBaseCore{TSelf}"/> under exactly this name).</summary>
     internal void RaiseParentCollectionChanged() => OnPropertyChanged("ParentCollection");
 
     /// <summary>The parent model that holds this element as a child (cascade parent). Set by the owning collection or single reference; null when not owned or at the root.</summary>
-    private EditModelBase? _parentModel;
+    private EditModelBaseCore? _parentModel;
 
     /// <summary>Gets the parent edit model that holds this element as a child (set via either a collection or a single reference; null when not owned or at the root).</summary>
     /// <remarks>In concrete classes where the parent type is unambiguous, a typed ParentModel with the same name is generated and hides this property.</remarks>
-    public EditModelBase? ParentModel => _parentModel;
+    public EditModelBaseCore? ParentModel => _parentModel;
 
     /// <summary>Sets the parent model reference and raises the <see cref="ParentModel"/> change notification only when it changes (called by the owning setter or collection).</summary>
-    public void SetParentModel(EditModelBase? parentModel)
+    public void SetParentModel(EditModelBaseCore? parentModel)
     {
         if (ReferenceEquals(_parentModel, parentModel))
         {
@@ -2327,7 +2327,7 @@ public abstract partial class EditModelBase
     /// <summary>Returns a child collection, adopting it as this model's child the first time it is read (the getter of a generated child collection property).</summary>
     /// <param name="field">The backing field of the child collection property.</param>
     protected EditModelCollection<T> GetChildren<T>(EditModelCollection<T> field)
-        where T : EditModelBase
+        where T : EditModelBaseCore
     {
         field.OwnerModel ??= this;
         return field;
@@ -2342,7 +2342,7 @@ public abstract partial class EditModelBase
         EditModelCollection<T> value,
         string propertyName
     )
-        where T : EditModelBase
+        where T : EditModelBaseCore
     {
         if (ReferenceEquals(field, value))
         {
@@ -2565,12 +2565,12 @@ public abstract partial class EditModelBase
     protected virtual void RegisterExtraChildren() { }
 
     /// <summary>Registers a single child reference into the cascade (the reference is resolved lazily so the latest value is used).</summary>
-    protected void AddChild(string name, Func<EditModelBase?> accessor) =>
+    protected void AddChild(string name, Func<EditModelBaseCore?> accessor) =>
         (_childLinks ??= new()).Add(ChildLink.ForSingle(name, accessor));
 
     /// <summary>Registers a child collection into the cascade (the collection is resolved lazily so the latest instance is used, even after a mapper load replaces it).</summary>
     protected void AddChildren<T>(string name, Func<EditModelCollection<T>> accessor)
-        where T : EditModelBase =>
+        where T : EditModelBaseCore =>
         (_childLinks ??= new()).Add(ChildLink.ForCollection(name, accessor));
 
     /// <summary>Link to a registered child (cascade participant). Treats single references and child collections uniformly.</summary>
@@ -2583,7 +2583,7 @@ public abstract partial class EditModelBase
     {
         private readonly string _name;
         private readonly bool _isCollection;
-        private readonly Func<IEnumerable<EditModelBase>> _items;
+        private readonly Func<IEnumerable<EditModelBaseCore>> _items;
         private readonly Func<bool, bool> _validate;
         private readonly Func<bool, bool> _hasChanges;
         private readonly Action _acceptRemoved;
@@ -2591,7 +2591,7 @@ public abstract partial class EditModelBase
         private ChildLink(
             string name,
             bool isCollection,
-            Func<IEnumerable<EditModelBase>> items,
+            Func<IEnumerable<EditModelBaseCore>> items,
             Func<bool, bool> validate,
             Func<bool, bool> hasChanges,
             Action acceptRemoved
@@ -2606,11 +2606,11 @@ public abstract partial class EditModelBase
         }
 
         /// <summary>Creates a link that registers a single child reference.</summary>
-        public static ChildLink ForSingle(string name, Func<EditModelBase?> accessor) =>
+        public static ChildLink ForSingle(string name, Func<EditModelBaseCore?> accessor) =>
             new(
                 name,
                 false,
-                () => accessor() is { } child ? new[] { child } : Enumerable.Empty<EditModelBase>(),
+                () => accessor() is { } child ? new[] { child } : Enumerable.Empty<EditModelBaseCore>(),
                 includeChildren => accessor() is not { } child || child.Validate(includeChildren),
                 includeChildren =>
                     accessor() is { } child && child.HasGraphChanges(includeChildren),
@@ -2623,7 +2623,7 @@ public abstract partial class EditModelBase
         /// so validating the parent also runs the duplicate check among the siblings.
         /// </remarks>
         public static ChildLink ForCollection<T>(string name, Func<EditModelCollection<T>> accessor)
-            where T : EditModelBase =>
+            where T : EditModelBaseCore =>
             new(
                 name,
                 true,
@@ -2833,7 +2833,7 @@ public abstract partial class EditModelBase
     }
 
     /// <summary>
-    /// Registers a duplicate-value error for the given confirmed-value property names. <see cref="EditModelBase{TSelf}"/> maps the
+    /// Registers a duplicate-value error for the given confirmed-value property names. <see cref="EditModelBaseCore{TSelf}"/> maps the
     /// names to their binding properties through the column table and resolves the display names; names that cannot be mapped
     /// (and an empty list) produce a model-level error, which is all this fallback does.
     /// </summary>
@@ -2877,7 +2877,7 @@ public abstract partial class EditModelBase
         TEntity entity,
         CancellationToken cancellationToken
     )
-        where TEntity : EntityBase, new()
+        where TEntity : EntityBaseCore, new()
     {
         ArgumentNullException.ThrowIfNull(repository);
         ClearDuplicateErrors(DuplicateErrorSource.Database);
@@ -3006,13 +3006,13 @@ public abstract partial class EditModelBase
         CancelEditCore();
     }
 
-    /// <summary>Core logic of BeginEdit (<see cref="EditModelBase{TSelf}"/> snapshots the confirmed values from the column table; a generated class adds its OnBeginEdit hook).</summary>
+    /// <summary>Core logic of BeginEdit (<see cref="EditModelBaseCore{TSelf}"/> snapshots the confirmed values from the column table; a generated class adds its OnBeginEdit hook).</summary>
     protected virtual void BeginEditCore() { }
 
     /// <summary>Core logic of EndEdit (does nothing by default; override in a concrete class if needed).</summary>
     protected virtual void EndEditCore() { }
 
-    /// <summary>Core logic of CancelEdit (<see cref="EditModelBase{TSelf}"/> restores the confirmed values from the snapshot it took).</summary>
+    /// <summary>Core logic of CancelEdit (<see cref="EditModelBaseCore{TSelf}"/> restores the confirmed values from the snapshot it took).</summary>
     protected virtual void CancelEditCore() { }
 
     /// <summary>
@@ -3076,7 +3076,7 @@ public enum DuplicateErrorSource
 
 /// <summary>One UNIQUE constraint declared by an edit model (its name, the properties that make it up, and a compiled accessor for their values).</summary>
 /// <remarks>
-/// Generated edit models publish their constraints through <see cref="EditModelBase.UniquenessConstraints"/> and
+/// Generated edit models publish their constraints through <see cref="EditModelBaseCore.UniquenessConstraints"/> and
 /// <see cref="EditModelUniquenessValidator"/> consumes them. The accessor is generated code, so the check reads no property by reflection.
 /// The DB definition itself is described separately by the <c>[UniqueConstraint]</c> attribute on the entity class.
 /// </remarks>
@@ -3089,13 +3089,13 @@ public sealed class EditModelUniquenessConstraint
     public IReadOnlyList<string> PropertyNames { get; }
 
     /// <summary>Gets the accessor that reads the constraint member values of an edit model in a single call (declaration order, matching <see cref="PropertyNames"/>).</summary>
-    public Func<EditModelBase, object?[]> GetValues { get; }
+    public Func<EditModelBaseCore, object?[]> GetValues { get; }
 
     /// <summary>Initializes a new instance with the constraint name, its member property names, and the value accessor.</summary>
     public EditModelUniquenessConstraint(
         string constraintName,
         IReadOnlyList<string> propertyNames,
-        Func<EditModelBase, object?[]> getValues
+        Func<EditModelBaseCore, object?[]> getValues
     )
     {
         ConstraintName = constraintName;
@@ -3105,7 +3105,7 @@ public sealed class EditModelUniquenessConstraint
 }
 
 /// <summary>
-/// Shared helper that detects values duplicated among edit models by reading the UNIQUE constraints they declare (<see cref="EditModelBase.UniquenessConstraints"/>).
+/// Shared helper that detects values duplicated among edit models by reading the UNIQUE constraints they declare (<see cref="EditModelBaseCore.UniquenessConstraints"/>).
 /// </summary>
 /// <remarks>
 /// It is schema-independent and does not bake in property names (each edit model declares its own constraints). It is called at the
@@ -3126,7 +3126,7 @@ public static class EditModelUniquenessValidator
     /// </remarks>
     /// <param name="models">The edit models to compare with each other.</param>
     public static bool Validate<T>(IEnumerable<T> models)
-        where T : EditModelBase
+        where T : EditModelBaseCore
     {
         ArgumentNullException.ThrowIfNull(models);
 
@@ -3191,7 +3191,7 @@ public static class EditModelUniquenessValidator
 
     /// <summary>Builds the comparison tuple of the constraint's member values through its accessor (null when any value is null = out of scope).</summary>
     private static object[]? BuildKey(
-        EditModelBase model,
+        EditModelBaseCore model,
         EditModelUniquenessConstraint constraint
     )
     {
@@ -3392,7 +3392,7 @@ public static class EditModelInputFormat
 /// <summary>One column of an edit model as data: the two names it is known by, whether input is required, and the accessors the shared checks drive.</summary>
 /// <remarks>
 /// <para>
-/// A generated edit model publishes one of these per column through <see cref="EditModelBase{TSelf}.EditModelColumns"/>, and
+/// A generated edit model publishes one of these per column through <see cref="EditModelBaseCore{TSelf}.EditModelColumns"/>, and
 /// the required-field check, the input revert, the row-edit snapshot, and the duplicate-error mapping are then written once in
 /// the base class instead of once per column in every class. The accessors are compiled lambdas over the real properties, so
 /// nothing here is read by reflection and the storage of a column - its confirmed-value field, its input string field - is
@@ -3424,19 +3424,19 @@ public sealed record EditModelColumn<TModel>(
     Func<TModel, string> ToInput,
     Action<TModel, string> SetInput
 )
-    where TModel : EditModelBase;
+    where TModel : EditModelBaseCore;
 
-/// <summary>Self-typed layer over <see cref="EditModelBase"/>: the sibling navigation and the owning collection surface in the concrete type, written once.</summary>
+/// <summary>Self-typed layer over <see cref="EditModelBaseCore"/>: the sibling navigation and the owning collection surface in the concrete type, written once.</summary>
 /// <remarks>
-/// The non-generic <see cref="EditModelBase"/> stays as the type the ownership plumbing references
-/// (<see cref="EditModelCollection{T}"/>'s constraint, <see cref="EditModelBase.Owner"/>,
-/// <see cref="EditModelBase.ParentModel"/>), so this layer adds only what needs the concrete type. Generated edit
+/// The non-generic <see cref="EditModelBaseCore"/> stays as the type the ownership plumbing references
+/// (<see cref="EditModelCollection{T}"/>'s constraint, <see cref="EditModelBaseCore.Owner"/>,
+/// <see cref="EditModelBaseCore.ParentModel"/>), so this layer adds only what needs the concrete type. Generated edit
 /// models derive from it; the typed parent-model surface stays with them, because the parent is a second type this
 /// single type parameter cannot name.
 /// </remarks>
 /// <typeparam name="TSelf">The concrete edit model type deriving from this class.</typeparam>
-public abstract partial class EditModelBase<TSelf> : EditModelBase
-    where TSelf : EditModelBase<TSelf>
+public abstract partial class EditModelBaseCore<TSelf> : EditModelBaseCore
+    where TSelf : EditModelBaseCore<TSelf>
 {
     /// <summary>Returns the next element after this one in its owning collection (null if not owned or at the end).</summary>
     public new TSelf? GetNext() => (TSelf?)base.GetNext();
@@ -3466,7 +3466,7 @@ public abstract partial class EditModelBase<TSelf> : EditModelBase
     /// <summary>Checks the columns declared required for missing input, registering and withdrawing only the errors this check owns. Called from Validate; a generated class appends its OnValidate hook.</summary>
     /// <remarks>
     /// <para>
-    /// A field that already carries another input error keeps it (<see cref="EditModelBase.SetRequiredError"/> declines to
+    /// A field that already carries another input error keeps it (<see cref="EditModelBaseCore.SetRequiredError"/> declines to
     /// overwrite), because a value that cannot be converted is the more upstream cause and the one the user has to act on.
     /// </para>
     /// <para>
@@ -3552,7 +3552,7 @@ public abstract partial class EditModelBase<TSelf> : EditModelBase
     /// Restoring the values also withdraws the duplicate-value findings the database check registered, on the reasoning a
     /// confirmed-value setter uses: the value they were reached about is no longer the one the model holds. The setter
     /// cannot do it here, because the restore runs as a load and a load deliberately keeps the setters quiet - so a cancel
-    /// would otherwise leave a finding about the discarded value behind and hold <see cref="EditModelBase.Validate"/>
+    /// would otherwise leave a finding about the discarded value behind and hold <see cref="EditModelBaseCore.Validate"/>
     /// false forever. It is done unconditionally, though, where a setter withdraws them only when the value actually
     /// changes: a cancel does not track whether anything was edited, so a row that was begun and then canceled without a
     /// single change drops a database finding that was still perfectly valid. Run the database check again before saving -
@@ -3567,7 +3567,7 @@ public abstract partial class EditModelBase<TSelf> : EditModelBase
     /// </para>
     /// <para>
     /// Deriving the input strings clears the input error of every property, so a conversion error that predates the
-    /// <see cref="EditModelBase.BeginEdit"/> of this row is cleared along with the ones the canceled edit produced. The
+    /// <see cref="EditModelBaseCore.BeginEdit"/> of this row is cleared along with the ones the canceled edit produced. The
     /// unconvertible text goes away in the same step, since the input string is rebuilt from the restored confirmed value,
     /// and typing it again brings the error back.
     /// </para>
@@ -3669,7 +3669,7 @@ public abstract partial class EditModelBase<TSelf> : EditModelBase
 /// Clear is a full on-screen wipe with no deletion tracking (it also resets the set-aside items). Use Remove when the deletion should be saved.
 /// </remarks>
 public sealed partial class EditModelCollection<T> : ObservableCollection<T>
-    where T : EditModelBase
+    where T : EditModelBaseCore
 {
     /// <summary>Holding list for deletion targets (Removed) removed via Remove, each with the state it had before the removal.</summary>
     private readonly List<RemovedItem> _removed = new();
@@ -3678,10 +3678,10 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
     private readonly record struct RemovedItem(T Item, RowState PriorState);
 
     /// <summary>Backing field for the parent model that holds this collection as a child.</summary>
-    private EditModelBase? _ownerModel;
+    private EditModelBaseCore? _ownerModel;
 
     /// <summary>Gets or sets the parent model that holds this collection as a child (set by the owning edit model). Propagates to every element's ParentModel when set.</summary>
-    public EditModelBase? OwnerModel
+    public EditModelBaseCore? OwnerModel
     {
         get => _ownerModel;
         set
@@ -3976,8 +3976,8 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
 /// the loading state it runs under, creation from an edit model, collection conversion - is written once here.
 /// </remarks>
 public abstract partial class MapperBase<TEntity, TEditModel>
-    where TEntity : EntityBase, new()
-    where TEditModel : EditModelBase, new()
+    where TEntity : EntityBaseCore, new()
+    where TEditModel : EditModelBaseCore, new()
 {
     /// <summary>Creates a new TEntity with initial values set (it will be an insertion target on save).</summary>
     public TEntity CreateEntity()
@@ -4284,7 +4284,7 @@ public static class UniquenessChecker
 /// </para>
 /// </remarks>
 public partial interface IRemoteRepository<TEntity, TKey>
-    where TEntity : EntityBase, new()
+    where TEntity : EntityBaseCore, new()
 {
     /// <summary>Gets a single entity by primary key (null when not found).</summary>
     Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default);
@@ -4374,7 +4374,7 @@ public partial interface IRemoteRepository<TEntity, TKey>
 /// I{Entity}Repository always provides this full-featured surface.
 /// </remarks>
 public partial interface IRepository<TEntity, TKey> : IRemoteRepository<TEntity, TKey>
-    where TEntity : EntityBase, new()
+    where TEntity : EntityBaseCore, new()
 {
     /// <summary>Bulk inserts a collection of entities.</summary>
     /// <remarks>
@@ -4494,13 +4494,13 @@ public partial interface ISqlExecutor
         object? parameters = null,
         CancellationToken cancellationToken = default
     )
-        where TEntity : EntityBase, new();
+        where TEntity : EntityBaseCore, new();
 
     /// <summary>Executes a raw SQL SELECT and leniently projects the result rows onto an arbitrary <typeparamref name="TResult"/>.</summary>
     /// <remarks>
     /// <para>
     /// <b>Single-value mode</b>: when <typeparamref name="TResult"/> (Nullable is judged by its underlying type) is primitive / enum /
-    /// string / decimal / DateTime / DateTimeOffset / TimeSpan / Guid / byte[] / a value object (IValueObject implementation),
+    /// string / decimal / DateTime / DateTimeOffset / TimeSpan / Guid / byte[] / a value object (IValueObjectCore implementation),
     /// the <b>first column</b> of each row is converted and returned (DBNull becomes <c>default</c>). Conversion uses the same
     /// Nullable-aware <see cref="System.Convert.ChangeType(object, System.Type, System.IFormatProvider)"/> as the scalar methods.
     /// </para>
@@ -4649,7 +4649,7 @@ public static class SqlTransactions
 /// </remarks>
 /// <typeparam name="TEntity">The entity type the hook targets.</typeparam>
 public interface ISaveHook<TEntity>
-    where TEntity : EntityBase
+    where TEntity : EntityBaseCore
 {
     /// <summary>Called immediately before the operation (<c>false</c> skips that single operation; the default does not skip).</summary>
     /// <param name="entity">The entity being saved.</param>
@@ -4767,14 +4767,14 @@ public interface ISaveHookInvoker
 {
     /// <summary>Calls Before in registration order, short-circuiting on the first <c>false</c> (returns false when any hook returns false).</summary>
     Task<bool> InvokeBeforeAsync(
-        EntityBase entity,
+        EntityBaseCore entity,
         SaveOperation operation,
         CancellationToken cancellationToken
     );
 
     /// <summary>Calls After sequentially in registration order.</summary>
     Task InvokeAfterAsync(
-        EntityBase entity,
+        EntityBaseCore entity,
         SaveOperation operation,
         ISaveHookContext context,
         CancellationToken cancellationToken
@@ -4852,7 +4852,7 @@ public sealed class SaveHookRegistry : ISaveHookRegistry
     /// <typeparam name="TEntity">The entity type the hook targets.</typeparam>
     /// <param name="hook">The hook to add (hooks for the same type fire in the order they were added).</param>
     public SaveHookRegistry Add<TEntity>(ISaveHook<TEntity> hook)
-        where TEntity : EntityBase
+        where TEntity : EntityBaseCore
     {
         ArgumentNullException.ThrowIfNull(hook);
 
@@ -4879,14 +4879,14 @@ public sealed class SaveHookRegistry : ISaveHookRegistry
 /// <typeparam name="TEntity">The entity type the hooks target.</typeparam>
 public sealed class SaveHookInvoker<TEntity>(IEnumerable<ISaveHook<TEntity>> hooks)
     : ISaveHookInvoker
-    where TEntity : EntityBase
+    where TEntity : EntityBaseCore
 {
     private readonly IReadOnlyList<ISaveHook<TEntity>> _hooks =
         hooks as IReadOnlyList<ISaveHook<TEntity>> ?? hooks.ToList();
 
     /// <summary>Calls Before in registration order, short-circuiting on the first <c>false</c>.</summary>
     public async Task<bool> InvokeBeforeAsync(
-        EntityBase entity,
+        EntityBaseCore entity,
         SaveOperation operation,
         CancellationToken cancellationToken
     )
@@ -4906,7 +4906,7 @@ public sealed class SaveHookInvoker<TEntity>(IEnumerable<ISaveHook<TEntity>> hoo
 
     /// <summary>Calls After sequentially in registration order.</summary>
     public async Task InvokeAfterAsync(
-        EntityBase entity,
+        EntityBaseCore entity,
         SaveOperation operation,
         ISaveHookContext context,
         CancellationToken cancellationToken
@@ -4926,7 +4926,7 @@ public static class SqlParameterValue
 {
     /// <summary>Returns the underlying value for a value object; returns anything else as is.</summary>
     public static object? Unwrap(object? value) =>
-        value is IValueObject valueObject ? valueObject.UnderlyingValue : value;
+        value is IValueObjectCore valueObject ? valueObject.UnderlyingValue : value;
 }
 
 /// <summary>Reverse-conversion helper that rewraps raw values read from the DB via Create when the target property is a value object type (the counterpart of Unwrap).</summary>
@@ -4962,7 +4962,7 @@ public static class SqlValueObjectActivator
         var valueType = iface.GetGenericArguments()[1];
 
         // FlattenHierarchy: without it reflection never returns a static member declared on a base class, and Create
-        // lives on ValueObjectBase (a hand-written value object inheriting it included). A same-signature Create declared
+        // lives on ValueObjectBaseCore (a hand-written value object inheriting it included). A same-signature Create declared
         // on the type itself still wins (hide-by-signature), with no AmbiguousMatchException.
         var createMethod = targetType.GetMethod(
             "Create",
@@ -5199,7 +5199,7 @@ public static class RawSqlMapper
 
         // Wrap the raw value via Create for value objects. When TResult is Nullable<T>, convert to the underlying type (ChangeType cannot handle Nullable directly)
         var targetType = Nullable.GetUnderlyingType(typeof(TResult)) ?? typeof(TResult);
-        if (typeof(IValueObject).IsAssignableFrom(targetType))
+        if (typeof(IValueObjectCore).IsAssignableFrom(targetType))
         {
             try
             {
@@ -5233,7 +5233,7 @@ public static class RawSqlMapper
     private static bool IsSingleValueType(Type type)
     {
         var actual = Nullable.GetUnderlyingType(type) ?? type;
-        if (typeof(IValueObject).IsAssignableFrom(actual))
+        if (typeof(IValueObjectCore).IsAssignableFrom(actual))
         {
             return true;
         }
@@ -5315,7 +5315,7 @@ public static class RawSqlMapper
     )
     {
         // Wrap the raw value via Create for value objects
-        if (typeof(IValueObject).IsAssignableFrom(underlyingType))
+        if (typeof(IValueObjectCore).IsAssignableFrom(underlyingType))
         {
             try
             {
@@ -5529,7 +5529,7 @@ public static class QueryStringMatchGuard
             call.Method.DeclaringType == typeof(string)
             || (
                 call.Method.DeclaringType is { IsGenericType: true } declaring
-                && declaring.GetGenericTypeDefinition() == typeof(ValueObjectStringBase<>)
+                && declaring.GetGenericTypeDefinition() == typeof(ValueObjectStringBaseCore<>)
             )
         );
 
@@ -6074,7 +6074,7 @@ public static class RemotePaths
 
 /// <summary>Shared serialization settings used for remote transport (HTTP + JSON).</summary>
 /// <remarks>
-/// Uses the same semantics as entity JSON round-trips (<see cref="EntityBase.ToJson"/> / <see cref="EntityBase.Clone"/>)
+/// Uses the same semantics as entity JSON round-trips (<see cref="EntityBaseCore.ToJson"/> / <see cref="EntityBaseCore.Clone"/>)
 /// (get/set properties only, RowState included, no cycles because parent-reference navigations are [JsonIgnore]),
 /// plus case-insensitive reading for transport. Client and server both use these settings so the wire representation matches.
 /// </remarks>
@@ -6307,19 +6307,19 @@ public static class RemoteEntityGraph
 
     /// <summary>Reads the row version the entity currently carries (<c>null</c> when the type has no rowversion column or the value is unset).</summary>
     /// <remarks>The value is unwrapped when the property is a value object, because the transport always carries the raw bytes.</remarks>
-    public static byte[]? ReadRowVersion(EntityBase entity) =>
+    public static byte[]? ReadRowVersion(EntityBaseCore entity) =>
         SqlParameterValue.Unwrap(RowVersionProperty(entity.GetType())?.GetValue(entity)) as byte[];
 
     /// <summary>Writes a row version back to the entity (a no-op for a type without a rowversion column).</summary>
     /// <remarks>The raw bytes are wrapped when the property is a value object, the counterpart of <see cref="ReadRowVersion"/>.</remarks>
-    public static void WriteRowVersion(EntityBase entity, byte[] rowVersion)
+    public static void WriteRowVersion(EntityBaseCore entity, byte[] rowVersion)
     {
         var property = RowVersionProperty(entity.GetType());
         property?.SetValue(entity, SqlValueObjectActivator.Wrap(rowVersion, property.PropertyType));
     }
 
     /// <summary>Serializes the entity's primary key the way the row version table identifies it.</summary>
-    public static string KeyText(EntityBase entity) =>
+    public static string KeyText(EntityBaseCore entity) =>
         JsonSerializer.Serialize(
             KeyProperty(entity.GetType()).GetValue(entity),
             RemoteJson.Options
@@ -6327,7 +6327,7 @@ public static class RemoteEntityGraph
 
     /// <summary>Collects the row versions a save assigned across the graph (server side; deleted entities are skipped because there is no row left to version).</summary>
     public static void CollectRowVersions(
-        EntityBase entity,
+        EntityBaseCore entity,
         bool cascade,
         List<RemoteRowVersionEntry> into
     )
@@ -6353,11 +6353,11 @@ public static class RemoteEntityGraph
         {
             var value = property.GetValue(entity);
 
-            if (value is EntityBase child)
+            if (value is EntityBaseCore child)
             {
                 CollectRowVersions(child, true, into);
             }
-            else if (value is IEnumerable<EntityBase> children)
+            else if (value is IEnumerable<EntityBaseCore> children)
             {
                 foreach (var item in children)
                 {
@@ -6375,7 +6375,7 @@ public static class RemoteEntityGraph
     /// A completed save has finalized every row it operated on to Unchanged and left the skipped ones as they were, so a row
     /// that still carries changes is exactly a row the hook skipped. The traversal matches <see cref="CollectRowVersions"/>.
     /// </remarks>
-    public static void CollectSkipped(EntityBase entity, bool cascade, List<RemoteEntityRef> into)
+    public static void CollectSkipped(EntityBaseCore entity, bool cascade, List<RemoteEntityRef> into)
     {
         if (entity.IsRemoved)
         {
@@ -6396,11 +6396,11 @@ public static class RemoteEntityGraph
         {
             var value = property.GetValue(entity);
 
-            if (value is EntityBase child)
+            if (value is EntityBaseCore child)
             {
                 CollectSkipped(child, true, into);
             }
-            else if (value is IEnumerable<EntityBase> children)
+            else if (value is IEnumerable<EntityBaseCore> children)
             {
                 foreach (var item in children)
                 {
@@ -6435,7 +6435,7 @@ public static class RemoteEntityGraph
 
     /// <summary>Determines whether the response named this entity as skipped by a save hook (client side).</summary>
     public static bool IsSkipped(
-        EntityBase entity,
+        EntityBaseCore entity,
         HashSet<(string EntityType, string Key)>? lookup
     ) => lookup is not null && lookup.Contains((entity.GetType().Name, KeyText(entity)));
 
@@ -6461,7 +6461,7 @@ public static class RemoteEntityGraph
 
     /// <summary>Writes back the row version the response carried for this entity, if any (client side).</summary>
     public static void ApplyRowVersion(
-        EntityBase entity,
+        EntityBaseCore entity,
         Dictionary<(string EntityType, string Key), byte[]>? lookup
     )
     {
@@ -6535,7 +6535,7 @@ public static class RemoteEntityGraph
 /// </para>
 /// </remarks>
 public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepository<TEntity, TKey>
-    where TEntity : EntityBase, new()
+    where TEntity : EntityBaseCore, new()
 {
     private readonly HttpClient _httpClient;
     private readonly string _entityRoute;
@@ -6932,7 +6932,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     }
 
     /// <summary>Verifies that no updated (Updated) entity in the graph to save still carries values in unbounded binary columns (same child-direction traversal as AcceptChanges).</summary>
-    private static void GuardUnboundedBinaryOnSave(EntityBase entity, bool cascade)
+    private static void GuardUnboundedBinaryOnSave(EntityBaseCore entity, bool cascade)
     {
         if (entity.IsUpdated)
         {
@@ -6948,11 +6948,11 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         {
             var value = property.GetValue(entity);
 
-            if (value is EntityBase child)
+            if (value is EntityBaseCore child)
             {
                 GuardUnboundedBinaryOnSave(child, true);
             }
-            else if (value is IEnumerable<EntityBase> children)
+            else if (value is IEnumerable<EntityBaseCore> children)
             {
                 foreach (var item in children)
                 {
@@ -6974,7 +6974,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     /// reported on.
     /// </remarks>
     private static void AcceptChanges(
-        EntityBase entity,
+        EntityBaseCore entity,
         bool cascade,
         Dictionary<(string EntityType, string Key), byte[]>? rowVersions,
         HashSet<(string EntityType, string Key)>? skipped
@@ -7002,11 +7002,11 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         {
             var value = property.GetValue(entity);
 
-            if (value is EntityBase child)
+            if (value is EntityBaseCore child)
             {
                 AcceptChanges(child, true, rowVersions, skipped);
             }
-            else if (value is IEnumerable<EntityBase> children)
+            else if (value is IEnumerable<EntityBaseCore> children)
             {
                 foreach (var item in children)
                 {

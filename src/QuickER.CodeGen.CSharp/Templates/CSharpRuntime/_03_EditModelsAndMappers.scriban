@@ -18,7 +18,7 @@
 /// <c>nameof</c> and stay compile-safe.
 /// </para>
 /// </remarks>
-public abstract partial class EditModelBase
+public abstract partial class EditModelBaseCore
     : INotifyPropertyChanged,
         INotifyDataErrorInfo,
         IEditableObject
@@ -412,7 +412,7 @@ public abstract partial class EditModelBase
     {{ infra_visibility }} IList? Owner { get; set; }
 
     /// <summary>Returns the next element after this one in its owning collection (null if not owned or at the end).</summary>
-    public EditModelBase? GetNext()
+    public EditModelBaseCore? GetNext()
     {
         if (Owner is null)
         {
@@ -420,11 +420,11 @@ public abstract partial class EditModelBase
         }
 
         var index = Owner.IndexOf(this);
-        return index >= 0 && index + 1 < Owner.Count ? (EditModelBase?)Owner[index + 1] : null;
+        return index >= 0 && index + 1 < Owner.Count ? (EditModelBaseCore?)Owner[index + 1] : null;
     }
 
     /// <summary>Returns the previous element before this one in its owning collection (null if not owned or at the start).</summary>
-    public EditModelBase? GetPrevious()
+    public EditModelBaseCore? GetPrevious()
     {
         if (Owner is null)
         {
@@ -432,7 +432,7 @@ public abstract partial class EditModelBase
         }
 
         var index = Owner.IndexOf(this);
-        return index > 0 ? (EditModelBase?)Owner[index - 1] : null;
+        return index > 0 ? (EditModelBaseCore?)Owner[index - 1] : null;
     }
 
     /// <summary>Gets the position of this element within its owning collection (-1 if not owned).</summary>
@@ -512,18 +512,18 @@ public abstract partial class EditModelBase
         OnPropertyChanged(nameof(IsLastInParent));
     }
 
-    /// <summary>Raises the change notification for the owning collection reference (ParentCollection), called when the element enters or leaves a collection (the property lives on <see cref="EditModelBase{TSelf}"/> under exactly this name).</summary>
+    /// <summary>Raises the change notification for the owning collection reference (ParentCollection), called when the element enters or leaves a collection (the property lives on <see cref="EditModelBaseCore{TSelf}"/> under exactly this name).</summary>
     internal void RaiseParentCollectionChanged() => OnPropertyChanged("ParentCollection");
 
     /// <summary>The parent model that holds this element as a child (cascade parent). Set by the owning collection or single reference; null when not owned or at the root.</summary>
-    private EditModelBase? _parentModel;
+    private EditModelBaseCore? _parentModel;
 
     /// <summary>Gets the parent edit model that holds this element as a child (set via either a collection or a single reference; null when not owned or at the root).</summary>
     /// <remarks>In concrete classes where the parent type is unambiguous, a typed ParentModel with the same name is generated and hides this property.</remarks>
-    public EditModelBase? ParentModel => _parentModel;
+    public EditModelBaseCore? ParentModel => _parentModel;
 
     /// <summary>Sets the parent model reference and raises the <see cref="ParentModel"/> change notification only when it changes (called by the owning setter or collection).</summary>
-    {{ infra_visibility }} void SetParentModel(EditModelBase? parentModel)
+    {{ infra_visibility }} void SetParentModel(EditModelBaseCore? parentModel)
     {
         if (ReferenceEquals(_parentModel, parentModel))
         {
@@ -554,7 +554,7 @@ public abstract partial class EditModelBase
     /// <summary>Returns a child collection, adopting it as this model's child the first time it is read (the getter of a generated child collection property).</summary>
     /// <param name="field">The backing field of the child collection property.</param>
     protected EditModelCollection<T> GetChildren<T>(EditModelCollection<T> field)
-        where T : EditModelBase
+        where T : EditModelBaseCore
     {
         field.OwnerModel ??= this;
         return field;
@@ -569,7 +569,7 @@ public abstract partial class EditModelBase
         EditModelCollection<T> value,
         string propertyName
     )
-        where T : EditModelBase
+        where T : EditModelBaseCore
     {
         if (ReferenceEquals(field, value))
         {
@@ -792,12 +792,12 @@ public abstract partial class EditModelBase
     protected virtual void RegisterExtraChildren() { }
 
     /// <summary>Registers a single child reference into the cascade (the reference is resolved lazily so the latest value is used).</summary>
-    protected void AddChild(string name, Func<EditModelBase?> accessor) =>
+    protected void AddChild(string name, Func<EditModelBaseCore?> accessor) =>
         (_childLinks ??= new()).Add(ChildLink.ForSingle(name, accessor));
 
     /// <summary>Registers a child collection into the cascade (the collection is resolved lazily so the latest instance is used, even after a mapper load replaces it).</summary>
     protected void AddChildren<T>(string name, Func<EditModelCollection<T>> accessor)
-        where T : EditModelBase =>
+        where T : EditModelBaseCore =>
         (_childLinks ??= new()).Add(ChildLink.ForCollection(name, accessor));
 
     /// <summary>Link to a registered child (cascade participant). Treats single references and child collections uniformly.</summary>
@@ -810,7 +810,7 @@ public abstract partial class EditModelBase
     {
         private readonly string _name;
         private readonly bool _isCollection;
-        private readonly Func<IEnumerable<EditModelBase>> _items;
+        private readonly Func<IEnumerable<EditModelBaseCore>> _items;
         private readonly Func<bool, bool> _validate;
         private readonly Func<bool, bool> _hasChanges;
         private readonly Action _acceptRemoved;
@@ -818,7 +818,7 @@ public abstract partial class EditModelBase
         private ChildLink(
             string name,
             bool isCollection,
-            Func<IEnumerable<EditModelBase>> items,
+            Func<IEnumerable<EditModelBaseCore>> items,
             Func<bool, bool> validate,
             Func<bool, bool> hasChanges,
             Action acceptRemoved
@@ -833,11 +833,11 @@ public abstract partial class EditModelBase
         }
 
         /// <summary>Creates a link that registers a single child reference.</summary>
-        public static ChildLink ForSingle(string name, Func<EditModelBase?> accessor) =>
+        public static ChildLink ForSingle(string name, Func<EditModelBaseCore?> accessor) =>
             new(
                 name,
                 false,
-                () => accessor() is { } child ? new[] { child } : Enumerable.Empty<EditModelBase>(),
+                () => accessor() is { } child ? new[] { child } : Enumerable.Empty<EditModelBaseCore>(),
                 includeChildren => accessor() is not { } child || child.Validate(includeChildren),
                 includeChildren =>
                     accessor() is { } child && child.HasGraphChanges(includeChildren),
@@ -850,7 +850,7 @@ public abstract partial class EditModelBase
         /// so validating the parent also runs the duplicate check among the siblings.
         /// </remarks>
         public static ChildLink ForCollection<T>(string name, Func<EditModelCollection<T>> accessor)
-            where T : EditModelBase =>
+            where T : EditModelBaseCore =>
             new(
                 name,
                 true,
@@ -1060,7 +1060,7 @@ public abstract partial class EditModelBase
     }
 
     /// <summary>
-    /// Registers a duplicate-value error for the given confirmed-value property names. <see cref="EditModelBase{TSelf}"/> maps the
+    /// Registers a duplicate-value error for the given confirmed-value property names. <see cref="EditModelBaseCore{TSelf}"/> maps the
     /// names to their binding properties through the column table and resolves the display names; names that cannot be mapped
     /// (and an empty list) produce a model-level error, which is all this fallback does.
     /// </summary>
@@ -1105,7 +1105,7 @@ public abstract partial class EditModelBase
         TEntity entity,
         CancellationToken cancellationToken
     )
-        where TEntity : EntityBase, new()
+        where TEntity : EntityBaseCore, new()
     {
         ArgumentNullException.ThrowIfNull(repository);
         ClearDuplicateErrors(DuplicateErrorSource.Database);
@@ -1235,13 +1235,13 @@ public abstract partial class EditModelBase
         CancelEditCore();
     }
 
-    /// <summary>Core logic of BeginEdit (<see cref="EditModelBase{TSelf}"/> snapshots the confirmed values from the column table; a generated class adds its OnBeginEdit hook).</summary>
+    /// <summary>Core logic of BeginEdit (<see cref="EditModelBaseCore{TSelf}"/> snapshots the confirmed values from the column table; a generated class adds its OnBeginEdit hook).</summary>
     protected virtual void BeginEditCore() { }
 
     /// <summary>Core logic of EndEdit (does nothing by default; override in a concrete class if needed).</summary>
     protected virtual void EndEditCore() { }
 
-    /// <summary>Core logic of CancelEdit (<see cref="EditModelBase{TSelf}"/> restores the confirmed values from the snapshot it took).</summary>
+    /// <summary>Core logic of CancelEdit (<see cref="EditModelBaseCore{TSelf}"/> restores the confirmed values from the snapshot it took).</summary>
     protected virtual void CancelEditCore() { }
 
     /// <summary>
@@ -1305,7 +1305,7 @@ public enum DuplicateErrorSource
 
 /// <summary>One UNIQUE constraint declared by an edit model (its name, the properties that make it up, and a compiled accessor for their values).</summary>
 /// <remarks>
-/// Generated edit models publish their constraints through <see cref="EditModelBase.UniquenessConstraints"/> and
+/// Generated edit models publish their constraints through <see cref="EditModelBaseCore.UniquenessConstraints"/> and
 /// <see cref="EditModelUniquenessValidator"/> consumes them. The accessor is generated code, so the check reads no property by reflection.
 /// The DB definition itself is described separately by the <c>[UniqueConstraint]</c> attribute on the entity class.
 /// </remarks>
@@ -1318,13 +1318,13 @@ public sealed class EditModelUniquenessConstraint
     public IReadOnlyList<string> PropertyNames { get; }
 
     /// <summary>Gets the accessor that reads the constraint member values of an edit model in a single call (declaration order, matching <see cref="PropertyNames"/>).</summary>
-    public Func<EditModelBase, object?[]> GetValues { get; }
+    public Func<EditModelBaseCore, object?[]> GetValues { get; }
 
     /// <summary>Initializes a new instance with the constraint name, its member property names, and the value accessor.</summary>
     public EditModelUniquenessConstraint(
         string constraintName,
         IReadOnlyList<string> propertyNames,
-        Func<EditModelBase, object?[]> getValues
+        Func<EditModelBaseCore, object?[]> getValues
     )
     {
         ConstraintName = constraintName;
@@ -1334,7 +1334,7 @@ public sealed class EditModelUniquenessConstraint
 }
 
 /// <summary>
-/// Shared helper that detects values duplicated among edit models by reading the UNIQUE constraints they declare (<see cref="EditModelBase.UniquenessConstraints"/>).
+/// Shared helper that detects values duplicated among edit models by reading the UNIQUE constraints they declare (<see cref="EditModelBaseCore.UniquenessConstraints"/>).
 /// </summary>
 /// <remarks>
 /// It is schema-independent and does not bake in property names (each edit model declares its own constraints). It is called at the
@@ -1355,7 +1355,7 @@ public static class EditModelUniquenessValidator
     /// </remarks>
     /// <param name="models">The edit models to compare with each other.</param>
     public static bool Validate<T>(IEnumerable<T> models)
-        where T : EditModelBase
+        where T : EditModelBaseCore
     {
         ArgumentNullException.ThrowIfNull(models);
 
@@ -1420,7 +1420,7 @@ public static class EditModelUniquenessValidator
 
     /// <summary>Builds the comparison tuple of the constraint's member values through its accessor (null when any value is null = out of scope).</summary>
     private static object[]? BuildKey(
-        EditModelBase model,
+        EditModelBaseCore model,
         EditModelUniquenessConstraint constraint
     )
     {
@@ -1621,7 +1621,7 @@ public static class EditModelInputFormat
 /// <summary>One column of an edit model as data: the two names it is known by, whether input is required, and the accessors the shared checks drive.</summary>
 /// <remarks>
 /// <para>
-/// A generated edit model publishes one of these per column through <see cref="EditModelBase{TSelf}.EditModelColumns"/>, and
+/// A generated edit model publishes one of these per column through <see cref="EditModelBaseCore{TSelf}.EditModelColumns"/>, and
 /// the required-field check, the input revert, the row-edit snapshot, and the duplicate-error mapping are then written once in
 /// the base class instead of once per column in every class. The accessors are compiled lambdas over the real properties, so
 /// nothing here is read by reflection and the storage of a column - its confirmed-value field, its input string field - is
@@ -1653,19 +1653,19 @@ public sealed record EditModelColumn<TModel>(
     Func<TModel, string> ToInput,
     Action<TModel, string> SetInput
 )
-    where TModel : EditModelBase;
+    where TModel : EditModelBaseCore;
 
-/// <summary>Self-typed layer over <see cref="EditModelBase"/>: the sibling navigation and the owning collection surface in the concrete type, written once.</summary>
+/// <summary>Self-typed layer over <see cref="EditModelBaseCore"/>: the sibling navigation and the owning collection surface in the concrete type, written once.</summary>
 /// <remarks>
-/// The non-generic <see cref="EditModelBase"/> stays as the type the ownership plumbing references
-/// (<see cref="EditModelCollection{T}"/>'s constraint, <see cref="EditModelBase.Owner"/>,
-/// <see cref="EditModelBase.ParentModel"/>), so this layer adds only what needs the concrete type. Generated edit
+/// The non-generic <see cref="EditModelBaseCore"/> stays as the type the ownership plumbing references
+/// (<see cref="EditModelCollection{T}"/>'s constraint, <see cref="EditModelBaseCore.Owner"/>,
+/// <see cref="EditModelBaseCore.ParentModel"/>), so this layer adds only what needs the concrete type. Generated edit
 /// models derive from it; the typed parent-model surface stays with them, because the parent is a second type this
 /// single type parameter cannot name.
 /// </remarks>
 /// <typeparam name="TSelf">The concrete edit model type deriving from this class.</typeparam>
-public abstract partial class EditModelBase<TSelf> : EditModelBase
-    where TSelf : EditModelBase<TSelf>
+public abstract partial class EditModelBaseCore<TSelf> : EditModelBaseCore
+    where TSelf : EditModelBaseCore<TSelf>
 {
     /// <summary>Returns the next element after this one in its owning collection (null if not owned or at the end).</summary>
     public new TSelf? GetNext() => (TSelf?)base.GetNext();
@@ -1695,7 +1695,7 @@ public abstract partial class EditModelBase<TSelf> : EditModelBase
     /// <summary>Checks the columns declared required for missing input, registering and withdrawing only the errors this check owns. Called from Validate; a generated class appends its OnValidate hook.</summary>
     /// <remarks>
     /// <para>
-    /// A field that already carries another input error keeps it (<see cref="EditModelBase.SetRequiredError"/> declines to
+    /// A field that already carries another input error keeps it (<see cref="EditModelBaseCore.SetRequiredError"/> declines to
     /// overwrite), because a value that cannot be converted is the more upstream cause and the one the user has to act on.
     /// </para>
     /// <para>
@@ -1781,7 +1781,7 @@ public abstract partial class EditModelBase<TSelf> : EditModelBase
     /// Restoring the values also withdraws the duplicate-value findings the database check registered, on the reasoning a
     /// confirmed-value setter uses: the value they were reached about is no longer the one the model holds. The setter
     /// cannot do it here, because the restore runs as a load and a load deliberately keeps the setters quiet - so a cancel
-    /// would otherwise leave a finding about the discarded value behind and hold <see cref="EditModelBase.Validate"/>
+    /// would otherwise leave a finding about the discarded value behind and hold <see cref="EditModelBaseCore.Validate"/>
     /// false forever. It is done unconditionally, though, where a setter withdraws them only when the value actually
     /// changes: a cancel does not track whether anything was edited, so a row that was begun and then canceled without a
     /// single change drops a database finding that was still perfectly valid. Run the database check again before saving -
@@ -1796,7 +1796,7 @@ public abstract partial class EditModelBase<TSelf> : EditModelBase
     /// </para>
     /// <para>
     /// Deriving the input strings clears the input error of every property, so a conversion error that predates the
-    /// <see cref="EditModelBase.BeginEdit"/> of this row is cleared along with the ones the canceled edit produced. The
+    /// <see cref="EditModelBaseCore.BeginEdit"/> of this row is cleared along with the ones the canceled edit produced. The
     /// unconvertible text goes away in the same step, since the input string is rebuilt from the restored confirmed value,
     /// and typing it again brings the error back.
     /// </para>
@@ -1898,7 +1898,7 @@ public abstract partial class EditModelBase<TSelf> : EditModelBase
 /// Clear is a full on-screen wipe with no deletion tracking (it also resets the set-aside items). Use Remove when the deletion should be saved.
 /// </remarks>
 public sealed partial class EditModelCollection<T> : ObservableCollection<T>
-    where T : EditModelBase
+    where T : EditModelBaseCore
 {
     /// <summary>Holding list for deletion targets (Removed) removed via Remove, each with the state it had before the removal.</summary>
     private readonly List<RemovedItem> _removed = new();
@@ -1907,10 +1907,10 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
     private readonly record struct RemovedItem(T Item, RowState PriorState);
 
     /// <summary>Backing field for the parent model that holds this collection as a child.</summary>
-    private EditModelBase? _ownerModel;
+    private EditModelBaseCore? _ownerModel;
 
     /// <summary>Gets or sets the parent model that holds this collection as a child (set by the owning edit model). Propagates to every element's ParentModel when set.</summary>
-    {{ infra_visibility }} EditModelBase? OwnerModel
+    {{ infra_visibility }} EditModelBaseCore? OwnerModel
     {
         get => _ownerModel;
         set
@@ -2206,8 +2206,8 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
 /// the loading state it runs under, creation from an edit model, collection conversion - is written once here.
 /// </remarks>
 public abstract partial class MapperBase<TEntity, TEditModel>
-    where TEntity : EntityBase, new()
-    where TEditModel : EditModelBase, new()
+    where TEntity : EntityBaseCore, new()
+    where TEditModel : EditModelBaseCore, new()
 {
     /// <summary>Creates a new TEntity with initial values set (it will be an insertion target on save).</summary>
     public TEntity CreateEntity()
@@ -2367,6 +2367,13 @@ public abstract partial class MapperBase<TEntity, TEditModel>
     }
 }
 {{~ end ~}}
+{{~ if render_edit_models ~}}
+
+/// <summary>Base of every generated edit model, and the extension point for them. Members added to a partial declaration of this type reach all of them at once.</summary>
+/// <typeparam name="TSelf">The concrete edit model type deriving from this class.</typeparam>
+public abstract partial class EditModelBase<TSelf> : EditModelBaseCore<TSelf>
+    where TSelf : EditModelBase<TSelf> { }
+{{ end }}
 {{~ if render_edit_models ~}}
 {{~ for item in edit_model_classes ~}}
 {{ if !for.first }}

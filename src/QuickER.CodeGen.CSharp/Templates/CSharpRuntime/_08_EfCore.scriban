@@ -18,7 +18,7 @@ public partial class QuickErDbContext : DbContext
     /// <summary>Adds an extension that translates value object string methods (Contains/StartsWith/EndsWith and .Value) into SQL.</summary>
     /// <remarks>
     /// Value objects are projected onto string columns by a converter (v =&gt; v.Value), but by default EF Core
-    /// cannot translate <c>ValueObjectStringBase&lt;T&gt;.Contains</c> and similar members, so the query fails.
+    /// cannot translate <c>ValueObjectStringBaseCore&lt;T&gt;.Contains</c> and similar members, so the query fails.
     /// <see cref="ValueObjectTranslationDbContextOptionsExtension"/> is plugged in to translate these into LIKE / plain string columns.
     /// </remarks>
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
@@ -88,7 +88,7 @@ public partial class QuickErDbContext : DbContext
 
 /// <summary>
 /// EF Core method call translator that translates Contains/StartsWith/EndsWith of string value objects
-/// (derived from <see cref="ValueObjectStringBase{TSelf}"/>) into SQL LIKE.
+/// (derived from <see cref="ValueObjectStringBaseCore{TSelf}"/>) into SQL LIKE.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -147,7 +147,7 @@ public partial class QuickErDbContext : DbContext
             || arguments.Count != 1
             || method.Name is not ("Contains" or "StartsWith" or "EndsWith")
             || method.DeclaringType is not { IsGenericType: true } declaring
-            || declaring.GetGenericTypeDefinition() != typeof(ValueObjectStringBase<>)
+            || declaring.GetGenericTypeDefinition() != typeof(ValueObjectStringBaseCore<>)
         )
         {
             return null;
@@ -256,7 +256,7 @@ public partial class QuickErDbContext : DbContext
 
 /// <summary>
 /// EF Core member translator that translates a <c>.Value</c> member access of a value object
-/// (derived from <see cref="ValueObjectBase{TSelf, TValue}"/>) as a column of the raw value.
+/// (derived from <see cref="ValueObjectBaseCore{TSelf, TValue}"/>) as a column of the raw value.
 /// </summary>
 /// <remarks>
 /// This lets EF Core translate predicates that unwrap the raw value, such as <c>string.IsNullOrEmpty(x.Col.Value)</c>
@@ -284,7 +284,7 @@ public partial class QuickErDbContext : DbContext
             instance is null
             || member.Name != "Value"
             || member.DeclaringType is not { IsGenericType: true } declaring
-            || declaring.GetGenericTypeDefinition() != typeof(ValueObjectBase<,>)
+            || declaring.GetGenericTypeDefinition() != typeof(ValueObjectBaseCore<,>)
         )
         {
             return null;
@@ -474,7 +474,7 @@ public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TConte
         object? parameters = null,
         CancellationToken cancellationToken = default
     )
-        where TEntity : EntityBase, new()
+        where TEntity : EntityBaseCore, new()
     {
         ArgumentNullException.ThrowIfNull(sql);
 
@@ -604,7 +604,7 @@ public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TConte
 {{ infra_visibility }} sealed class EfCoreSqlQueryExecutor<TEntity, TContext>(
     IDbContextFactory<TContext> contextFactory
 ) : ISqlQueryExecutor<TEntity>
-    where TEntity : EntityBase
+    where TEntity : EntityBaseCore
     where TContext : DbContext
 {
     /// <summary>The source that creates the DbContext.</summary>
@@ -979,7 +979,7 @@ public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TConte
     }
 
     /// <summary>Normalizes the retrieved graph (root plus what was read via Include) to RowState=Unchanged (the same post-mapping state as the existing version).</summary>
-    private static void MarkGraphUnchanged(EntityBase entity, IReadOnlyList<IncludeNode> includes)
+    private static void MarkGraphUnchanged(EntityBaseCore entity, IReadOnlyList<IncludeNode> includes)
     {
         entity.MarkUnchanged();
 
@@ -992,7 +992,7 @@ public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TConte
                 continue;
             }
 
-            if (value is IEnumerable<EntityBase> children)
+            if (value is IEnumerable<EntityBaseCore> children)
             {
                 foreach (var child in children)
                 {
@@ -1002,7 +1002,7 @@ public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TConte
                     }
                 }
             }
-            else if (value is EntityBase child)
+            else if (value is EntityBaseCore child)
             {
                 MarkGraphUnchanged(child, node.Children);
             }
@@ -1031,7 +1031,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
     ISaveHookRegistry? saveHooks = null,
     ISqlExecutor? sqlExecutor = null
 ) : IRepository<TEntity, TKey>
-    where TEntity : EntityBase, new()
+    where TEntity : EntityBaseCore, new()
     where TContext : DbContext
 {
     /// <summary>Metadata built once per entity type (reused via a static field).</summary>
@@ -1053,13 +1053,13 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
 
     /// <summary>One record of "entity to save, EF Core entry, operation to perform" recorded by TrackGraph (the operation is updated when switched by a retry).</summary>
     private sealed class TrackedOperation(
-        EntityBase entity,
+        EntityBaseCore entity,
         EntityEntry entry,
         SaveOperation operation
     )
     {
         /// <summary>The entity to save.</summary>
-        public EntityBase Entity { get; } = entity;
+        public EntityBaseCore Entity { get; } = entity;
 
         /// <summary>The corresponding EF Core tracking entry (used for applying State and for type checks on retry).</summary>
         public EntityEntry Entry { get; } = entry;
@@ -1414,7 +1414,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
         // SaveChanges writes the row version the database assigned straight onto the entity, but this transaction has not
         // committed yet. The versions the entities were read with are kept so that they can be put back for the duration of
         // the After pass (see below).
-        var readVersions = new List<(EntityBase Entity, PropertyInfo Property, object? Version)>();
+        var readVersions = new List<(EntityBaseCore Entity, PropertyInfo Property, object? Version)>();
 
         foreach (var op in survivors)
         {
@@ -1438,7 +1438,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
         // path's RowVersionCollector expressed for EF Core; no value-object wrapping is needed here because the values never
         // leave their property (the ADO collector wraps because the database hands it a raw byte[]).
         var assignedVersions =
-            new List<(EntityBase Entity, PropertyInfo Property, object? Version)>();
+            new List<(EntityBaseCore Entity, PropertyInfo Property, object? Version)>();
 
         foreach (var (entity, property, readVersion) in readVersions)
         {
@@ -1538,7 +1538,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
             entity,
             node =>
             {
-                var current = (EntityBase)node.Entry.Entity;
+                var current = (EntityBaseCore)node.Entry.Entity;
 
                 // When the parent is to be deleted, handling of descendants follows cascadeDelete (same as the existing version's descendants-first DELETE).
                 if (node.SourceEntry is { State: EntityState.Deleted })
@@ -1564,7 +1564,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
     /// <summary>Adds a record for hook firing when the EntityState is a save target (Added/Modified/Deleted); Unchanged is ignored.</summary>
     private static void RecordOperation(
         List<TrackedOperation> tracked,
-        EntityBase entity,
+        EntityBaseCore entity,
         EntityEntry entry
     )
     {

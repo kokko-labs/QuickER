@@ -2,9 +2,9 @@
 // 手編集しない。更新は QUICKER_REGEN_FIXTURES=1 での再生成（失敗メッセージにコマンドあり）。
 
 public static class QuickER.Runtime.InMemory.EntityGraphSaver
-    public static bool HasChanges(QuickER.Runtime.EntityBase entity, bool cascade)
-    public static void AcceptChanges(QuickER.Runtime.EntityBase entity, bool cascade)
-    public static void AcceptChanges(QuickER.Runtime.EntityBase entity, bool cascade, System.Collections.Generic.IReadOnlySet<QuickER.Runtime.EntityBase> skip)
+    public static bool HasChanges(QuickER.Runtime.EntityBaseCore entity, bool cascade)
+    public static void AcceptChanges(QuickER.Runtime.EntityBaseCore entity, bool cascade)
+    public static void AcceptChanges(QuickER.Runtime.EntityBaseCore entity, bool cascade, System.Collections.Generic.IReadOnlySet<QuickER.Runtime.EntityBaseCore> skip)
 
 public sealed class QuickER.Runtime.InMemory.EntitySaveMetadata
     public .ctor()
@@ -21,32 +21,32 @@ public sealed class QuickER.Runtime.InMemory.EntitySaveMetadata
     public static QuickER.Runtime.NavigationReferenceAttribute NavigationAttribute(System.Reflection.PropertyInfo property)
 
 public static class QuickER.Runtime.InMemory.InMemoryCascade
-    public static System.Collections.Generic.IEnumerable<QuickER.Runtime.EntityBase> EnumerateChildren(QuickER.Runtime.EntityBase entity)
-    public static System.Threading.Tasks.Task InvokeBeforeGraphAsync(QuickER.Runtime.EntityBase entity, QuickER.Runtime.InMemory.SaveHookSession hooks, bool cascadeSave, bool cascadeDelete, System.Threading.CancellationToken cancellationToken, bool changesAlreadyVerified = false)
-    public static int DeleteDescendants(QuickER.Runtime.EntityBase root, QuickER.Runtime.InMemory.InMemoryDataStore.InMemoryWriteScope scope)
-    public static int Save(QuickER.Runtime.EntityBase entity, QuickER.Runtime.InMemory.InMemoryDataStore.InMemoryWriteScope scope, bool cascadeSave, bool cascadeDelete, bool insertWhenUpdateMissing, QuickER.Runtime.ConcurrencyMode mode, QuickER.Runtime.InMemory.SaveHookSession hooks = null, System.Collections.Generic.List<System.ValueTuple<QuickER.Runtime.EntityBase, QuickER.Runtime.SaveOperation>> records = null, bool changesAlreadyVerified = false)
+    public static System.Collections.Generic.IEnumerable<QuickER.Runtime.EntityBaseCore> EnumerateChildren(QuickER.Runtime.EntityBaseCore entity)
+    public static System.Threading.Tasks.Task InvokeBeforeGraphAsync(QuickER.Runtime.EntityBaseCore entity, QuickER.Runtime.InMemory.SaveHookSession hooks, bool cascadeSave, bool cascadeDelete, System.Threading.CancellationToken cancellationToken, bool changesAlreadyVerified = false)
+    public static int DeleteDescendants(QuickER.Runtime.EntityBaseCore root, QuickER.Runtime.InMemory.InMemoryDataStore.InMemoryWriteScope scope)
+    public static int Save(QuickER.Runtime.EntityBaseCore entity, QuickER.Runtime.InMemory.InMemoryDataStore.InMemoryWriteScope scope, bool cascadeSave, bool cascadeDelete, bool insertWhenUpdateMissing, QuickER.Runtime.ConcurrencyMode mode, QuickER.Runtime.InMemory.SaveHookSession hooks = null, System.Collections.Generic.List<System.ValueTuple<QuickER.Runtime.EntityBaseCore, QuickER.Runtime.SaveOperation>> records = null, bool changesAlreadyVerified = false)
 
 public sealed class QuickER.Runtime.InMemory.InMemoryDataStore
     public .ctor()
     public System.Collections.Generic.IReadOnlyList<TEntity> Snapshot<TEntity>()
     public TEntity Find<TEntity>(object key)
     public void Clear()
-    public void Put(QuickER.Runtime.EntityBase entity)
+    public void Put(QuickER.Runtime.EntityBaseCore entity)
 
 public struct QuickER.Runtime.InMemory.InMemoryDataStore.InMemoryReadScope
     public .ctor(QuickER.Runtime.InMemory.InMemoryDataStore store)
-    public QuickER.Runtime.EntityBase Find(System.Type entityType, object key)
-    public System.Collections.Generic.IReadOnlyList<QuickER.Runtime.EntityBase> All(System.Type entityType)
+    public QuickER.Runtime.EntityBaseCore Find(System.Type entityType, object key)
+    public System.Collections.Generic.IReadOnlyList<QuickER.Runtime.EntityBaseCore> All(System.Type entityType)
 
 public struct QuickER.Runtime.InMemory.InMemoryDataStore.InMemoryWriteScope
     public .ctor(QuickER.Runtime.InMemory.InMemoryDataStore store, QuickER.Runtime.InMemory.InMemorySaveStaging staging)
-    public System.Collections.Generic.IReadOnlyList<QuickER.Runtime.EntityBase> All(System.Type entityType)
+    public System.Collections.Generic.IReadOnlyList<QuickER.Runtime.EntityBaseCore> All(System.Type entityType)
     public bool Exists(System.Type entityType, object key)
-    public bool IsCurrent(QuickER.Runtime.EntityBase entity, QuickER.Runtime.ConcurrencyMode mode)
+    public bool IsCurrent(QuickER.Runtime.EntityBaseCore entity, QuickER.Runtime.ConcurrencyMode mode)
     public bool Remove(System.Type entityType, object key)
-    public void Insert(QuickER.Runtime.EntityBase entity)
-    public void Put(QuickER.Runtime.EntityBase entity)
-    public void VerifyUnique(QuickER.Runtime.EntityBase entity, object key, System.Collections.Generic.IReadOnlyDictionary<object, QuickER.Runtime.EntityBase> pending = null)
+    public void Insert(QuickER.Runtime.EntityBaseCore entity)
+    public void Put(QuickER.Runtime.EntityBaseCore entity)
+    public void VerifyUnique(QuickER.Runtime.EntityBaseCore entity, object key, System.Collections.Generic.IReadOnlyDictionary<object, QuickER.Runtime.EntityBaseCore> pending = null)
 
 public sealed class QuickER.Runtime.InMemory.InMemoryOrderingComparer : System.Collections.Generic.IComparer<object>
     public int Compare(object x, object y)
@@ -89,14 +89,14 @@ public sealed class QuickER.Runtime.InMemory.InMemorySaveHookContext : QuickER.R
 
 public sealed class QuickER.Runtime.InMemory.InMemorySaveStaging
     public .ctor()
-    public QuickER.Runtime.EntityBase Staged(System.Type entityType, object key)
-    public System.Collections.Generic.IReadOnlyDictionary<System.ValueTuple<System.Type, object>, QuickER.Runtime.EntityBase> Overlay { get; }
-    public System.Collections.Generic.IReadOnlyList<System.ValueTuple<QuickER.Runtime.EntityBase, System.Reflection.PropertyInfo, System.Type, object>> Stamps { get; }
-    public System.Collections.Generic.IReadOnlyList<System.ValueTuple<System.Type, object, QuickER.Runtime.EntityBase>> Baseline { get; }
-    public bool TryGetStaged(System.Type entityType, object key, out QuickER.Runtime.EntityBase snapshot)
-    public void CaptureBase(System.Type entityType, object key, QuickER.Runtime.EntityBase baseRow)
-    public void RecordStamp(QuickER.Runtime.EntityBase source, System.Reflection.PropertyInfo property, System.Type entityType, object key)
-    public void Stage(System.Type entityType, object key, QuickER.Runtime.EntityBase snapshot)
+    public QuickER.Runtime.EntityBaseCore Staged(System.Type entityType, object key)
+    public System.Collections.Generic.IReadOnlyDictionary<System.ValueTuple<System.Type, object>, QuickER.Runtime.EntityBaseCore> Overlay { get; }
+    public System.Collections.Generic.IReadOnlyList<System.ValueTuple<QuickER.Runtime.EntityBaseCore, System.Reflection.PropertyInfo, System.Type, object>> Stamps { get; }
+    public System.Collections.Generic.IReadOnlyList<System.ValueTuple<System.Type, object, QuickER.Runtime.EntityBaseCore>> Baseline { get; }
+    public bool TryGetStaged(System.Type entityType, object key, out QuickER.Runtime.EntityBaseCore snapshot)
+    public void CaptureBase(System.Type entityType, object key, QuickER.Runtime.EntityBaseCore baseRow)
+    public void RecordStamp(QuickER.Runtime.EntityBaseCore source, System.Reflection.PropertyInfo property, System.Type entityType, object key)
+    public void Stage(System.Type entityType, object key, QuickER.Runtime.EntityBaseCore snapshot)
 
 public sealed class QuickER.Runtime.InMemory.InMemoryUniqueConstraint : System.IEquatable<QuickER.Runtime.InMemory.InMemoryUniqueConstraint>
     public .ctor(string Name, System.Collections.Generic.IReadOnlyList<System.Reflection.PropertyInfo> Properties)
@@ -105,15 +105,15 @@ public sealed class QuickER.Runtime.InMemory.InMemoryUniqueConstraint : System.I
 
 public static class QuickER.Runtime.InMemory.InMemoryUniqueness
     public static System.Collections.Generic.IReadOnlyList<QuickER.Runtime.InMemory.InMemoryUniqueConstraint> For(System.Type entityType)
-    public static void Verify(System.Type entityType, QuickER.Runtime.EntityBase row, object key, System.Collections.Generic.IEnumerable<System.Collections.Generic.KeyValuePair<object, QuickER.Runtime.EntityBase>> existing)
+    public static void Verify(System.Type entityType, QuickER.Runtime.EntityBaseCore row, object key, System.Collections.Generic.IEnumerable<System.Collections.Generic.KeyValuePair<object, QuickER.Runtime.EntityBaseCore>> existing)
 
 public static class QuickER.Runtime.InMemory.IncludeAttacher
-    public static void Attach(QuickER.Runtime.EntityBase entity, System.Collections.Generic.IReadOnlyList<QuickER.Runtime.IncludeNode> includes, QuickER.Runtime.InMemory.InMemoryDataStore.InMemoryReadScope scope)
+    public static void Attach(QuickER.Runtime.EntityBaseCore entity, System.Collections.Generic.IReadOnlyList<QuickER.Runtime.IncludeNode> includes, QuickER.Runtime.InMemory.InMemoryDataStore.InMemoryReadScope scope)
 
 public sealed class QuickER.Runtime.InMemory.SaveHookSession
-    public .ctor(QuickER.Runtime.ISaveHookRegistry registry, System.Func<QuickER.Runtime.EntityBase, QuickER.Runtime.ISaveHookContext> contextFactory)
-    public System.Collections.Generic.IReadOnlySet<QuickER.Runtime.EntityBase> Skipped { get; }
-    public System.Threading.Tasks.Task InvokeAfterAsync(QuickER.Runtime.EntityBase entity, QuickER.Runtime.SaveOperation operation, System.Threading.CancellationToken cancellationToken)
-    public System.Threading.Tasks.Task<bool> InvokeBeforeAsync(QuickER.Runtime.EntityBase entity, QuickER.Runtime.SaveOperation operation, System.Threading.CancellationToken cancellationToken)
-    public void Skip(QuickER.Runtime.EntityBase entity)
+    public .ctor(QuickER.Runtime.ISaveHookRegistry registry, System.Func<QuickER.Runtime.EntityBaseCore, QuickER.Runtime.ISaveHookContext> contextFactory)
+    public System.Collections.Generic.IReadOnlySet<QuickER.Runtime.EntityBaseCore> Skipped { get; }
+    public System.Threading.Tasks.Task InvokeAfterAsync(QuickER.Runtime.EntityBaseCore entity, QuickER.Runtime.SaveOperation operation, System.Threading.CancellationToken cancellationToken)
+    public System.Threading.Tasks.Task<bool> InvokeBeforeAsync(QuickER.Runtime.EntityBaseCore entity, QuickER.Runtime.SaveOperation operation, System.Threading.CancellationToken cancellationToken)
+    public void Skip(QuickER.Runtime.EntityBaseCore entity)
 

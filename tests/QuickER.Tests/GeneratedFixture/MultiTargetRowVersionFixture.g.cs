@@ -212,7 +212,7 @@ internal static class UnboundedBinaryColumns
     /// Throws if an update is attempted while an excluded column still holds a value that is not in the "not-fetched" state (a blob that is neither null nor empty).
     /// Because unbounded binary columns are excluded from the Repository UPDATE, updating while such a value is retained would silently lose it.
     /// </summary>
-    public static void ThrowIfExcludedAssigned(EntityBase entity)
+    public static void ThrowIfExcludedAssigned(EntityBaseCore entity)
     {
         foreach (var property in For(entity.GetType()))
         {
@@ -230,7 +230,7 @@ internal static class UnboundedBinaryColumns
     /// Resets the excluded columns of a read replica to the "not-fetched" state (the initial values of a default instance). This matches the not-fetched state on
     /// the real DB side (MapEntity does not call SetValue, so the constructor initializer stands: a non-null byte[] is an empty array, and nullable is null).
     /// </summary>
-    public static void StripExcluded(EntityBase entity)
+    public static void StripExcluded(EntityBaseCore entity)
     {
         var excluded = For(entity.GetType());
 
@@ -272,7 +272,7 @@ internal static class UnboundedBinaryColumns
     /// the blob (the update guard cannot catch it: the entity holds exactly the "not-fetched" value the guard permits). A column
     /// that does carry a value is left alone, because that value is the caller's own data, as it is on an insert.
     /// </remarks>
-    public static void PreserveUnset(EntityBase entity, EntityBase stored)
+    public static void PreserveUnset(EntityBaseCore entity, EntityBaseCore stored)
     {
         foreach (var property in For(entity.GetType()))
         {
@@ -443,7 +443,7 @@ public enum RowState
 }
 
 /// <summary>Base class that holds the change tracking state (RowState) of an entity.</summary>
-public abstract partial class EntityBase
+public abstract partial class EntityBaseCore
 {
     /// <summary>Change tracking state of this entity. Defaults to Unchanged; restoring from the database or JSON keeps it Unchanged.</summary>
     public RowState RowState { get; set; } = RowState.Unchanged;
@@ -516,17 +516,17 @@ public abstract partial class EntityBase
     /// attribute scan. Cascade navigations point at children only (parent references are excluded), so the traversal is a
     /// tree and terminates.
     /// </remarks>
-    public IEnumerable<EntityBase> EnumerateCascadeChildren()
+    public IEnumerable<EntityBaseCore> EnumerateCascadeChildren()
     {
         foreach (var navigation in GetCascadeNavigations(GetType()))
         {
             var value = navigation.GetValue(this);
 
-            if (value is EntityBase child)
+            if (value is EntityBaseCore child)
             {
                 yield return child;
             }
-            else if (value is IEnumerable<EntityBase> children)
+            else if (value is IEnumerable<EntityBaseCore> children)
             {
                 foreach (var item in children)
                 {
@@ -569,7 +569,7 @@ public abstract partial class EntityBase
                     .Where(property =>
                         property.CanRead
                         && property.CanWrite
-                        && property.DeclaringType != typeof(EntityBase)
+                        && property.DeclaringType != typeof(EntityBaseCore)
                         && !Attribute.IsDefined(property, typeof(NavigationReferenceAttribute))
                     )
                     .ToArray()
@@ -577,7 +577,7 @@ public abstract partial class EntityBase
 
     /// <summary>Determines whether all column values match those of another entity (RowState and navigations are excluded from the comparison).</summary>
     /// <remarks>The comparison reads each column through reflection (the property list itself is cached per type). That is meant for change detection and assertions, not for a hot path — write the comparison out by hand where one is called for.</remarks>
-    public bool HasSameValues(EntityBase? other)
+    public bool HasSameValues(EntityBaseCore? other)
     {
         if (other is null)
         {
@@ -666,11 +666,11 @@ public abstract partial class EntityBase
     /// Values, RowState, and child navigations are copied. Parent-reference navigations are not restored because of [JsonIgnore] (the clone does not point to a parent).
     /// To insert it as a separate record, reassign the primary key or call MarkAdded() after cloning. The returned instance has the same concrete type as the original.
     /// </remarks>
-    public EntityBase Clone()
+    public EntityBaseCore Clone()
     {
         var type = GetType();
         var json = JsonSerializer.Serialize(this, type, _jsonOptions);
-        return (EntityBase)JsonSerializer.Deserialize(json, type, _jsonOptions)!;
+        return (EntityBaseCore)JsonSerializer.Deserialize(json, type, _jsonOptions)!;
     }
 }
 
@@ -681,6 +681,9 @@ public static class GeneratedDisplayNames
     public static Func<string, string?, string> Resolve { get; set; } =
         static (memberName, description) => description ?? memberName;
 }
+
+/// <summary>Base of every generated entity, and the extension point for them. Members added to a partial declaration of this type reach all of them at once.</summary>
+public abstract partial class EntityBase : EntityBaseCore { }
 
 /// <summary>Entity for the sync_items table</summary>
 [Table("sync_items")]
@@ -856,7 +859,7 @@ public static class UniquenessChecker
 /// </para>
 /// </remarks>
 public partial interface IRemoteRepository<TEntity, TKey>
-    where TEntity : EntityBase, new()
+    where TEntity : EntityBaseCore, new()
 {
     /// <summary>Gets a single entity by primary key (null when not found).</summary>
     Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default);
@@ -946,7 +949,7 @@ public partial interface IRemoteRepository<TEntity, TKey>
 /// I{Entity}Repository always provides this full-featured surface.
 /// </remarks>
 public partial interface IRepository<TEntity, TKey> : IRemoteRepository<TEntity, TKey>
-    where TEntity : EntityBase, new()
+    where TEntity : EntityBaseCore, new()
 {
     /// <summary>Bulk inserts a collection of entities.</summary>
     /// <remarks>
@@ -1066,7 +1069,7 @@ public partial interface ISqlExecutor
         object? parameters = null,
         CancellationToken cancellationToken = default
     )
-        where TEntity : EntityBase, new();
+        where TEntity : EntityBaseCore, new();
 
     /// <summary>Executes a raw SQL SELECT and leniently projects the result rows onto an arbitrary <typeparamref name="TResult"/>.</summary>
     /// <remarks>
@@ -1225,7 +1228,7 @@ internal static class SqlTransactions
 /// </remarks>
 /// <typeparam name="TEntity">The entity type the hook targets.</typeparam>
 public interface ISaveHook<TEntity>
-    where TEntity : EntityBase
+    where TEntity : EntityBaseCore
 {
     /// <summary>Called immediately before the operation (<c>false</c> skips that single operation; the default does not skip).</summary>
     /// <param name="entity">The entity being saved.</param>
@@ -1343,14 +1346,14 @@ public interface ISaveHookInvoker
 {
     /// <summary>Calls Before in registration order, short-circuiting on the first <c>false</c> (returns false when any hook returns false).</summary>
     Task<bool> InvokeBeforeAsync(
-        EntityBase entity,
+        EntityBaseCore entity,
         SaveOperation operation,
         CancellationToken cancellationToken
     );
 
     /// <summary>Calls After sequentially in registration order.</summary>
     Task InvokeAfterAsync(
-        EntityBase entity,
+        EntityBaseCore entity,
         SaveOperation operation,
         ISaveHookContext context,
         CancellationToken cancellationToken
@@ -1428,7 +1431,7 @@ internal sealed class SaveHookRegistry : ISaveHookRegistry
     /// <typeparam name="TEntity">The entity type the hook targets.</typeparam>
     /// <param name="hook">The hook to add (hooks for the same type fire in the order they were added).</param>
     public SaveHookRegistry Add<TEntity>(ISaveHook<TEntity> hook)
-        where TEntity : EntityBase
+        where TEntity : EntityBaseCore
     {
         ArgumentNullException.ThrowIfNull(hook);
 
@@ -1455,14 +1458,14 @@ internal sealed class SaveHookRegistry : ISaveHookRegistry
 /// <typeparam name="TEntity">The entity type the hooks target.</typeparam>
 internal sealed class SaveHookInvoker<TEntity>(IEnumerable<ISaveHook<TEntity>> hooks)
     : ISaveHookInvoker
-    where TEntity : EntityBase
+    where TEntity : EntityBaseCore
 {
     private readonly IReadOnlyList<ISaveHook<TEntity>> _hooks =
         hooks as IReadOnlyList<ISaveHook<TEntity>> ?? hooks.ToList();
 
     /// <summary>Calls Before in registration order, short-circuiting on the first <c>false</c>.</summary>
     public async Task<bool> InvokeBeforeAsync(
-        EntityBase entity,
+        EntityBaseCore entity,
         SaveOperation operation,
         CancellationToken cancellationToken
     )
@@ -1482,7 +1485,7 @@ internal sealed class SaveHookInvoker<TEntity>(IEnumerable<ISaveHook<TEntity>> h
 
     /// <summary>Calls After sequentially in registration order.</summary>
     public async Task InvokeAfterAsync(
-        EntityBase entity,
+        EntityBaseCore entity,
         SaveOperation operation,
         ISaveHookContext context,
         CancellationToken cancellationToken
@@ -2664,7 +2667,7 @@ public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory)
         object? parameters = null,
         CancellationToken cancellationToken = default
     )
-        where TEntity : EntityBase, new()
+        where TEntity : EntityBaseCore, new()
     {
         ArgumentNullException.ThrowIfNull(sql);
 
@@ -2789,7 +2792,7 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
     ISaveHookRegistry? saveHooks = null,
     ISqlExecutor? sqlExecutor = null
 ) : IRepository<TEntity, TKey>
-    where TEntity : EntityBase, new()
+    where TEntity : EntityBaseCore, new()
 {
     /// <summary>Metadata built exactly once per entity type (reused via a static field).</summary>
     private static readonly EntitySaveMetadata _metadata = EntitySaveMetadata.For(typeof(TEntity));
@@ -3329,7 +3332,7 @@ internal readonly record struct SqlQueryParameter(string Name, object? Value, st
 /// </remarks>
 internal sealed class SqlServerSqlQueryExecutor<TEntity>(ISqlConnectionFactory connectionFactory)
     : ISqlQueryExecutor<TEntity>
-    where TEntity : EntityBase
+    where TEntity : EntityBaseCore
 {
     /// <summary>The source that creates SQL connections.</summary>
     private readonly ISqlConnectionFactory _connectionFactory = connectionFactory;
@@ -4761,7 +4764,7 @@ internal sealed class EntitySaveMetadata
             .Where(property =>
                 property.CanRead
                 && property.CanWrite
-                && property.DeclaringType != typeof(EntityBase)
+                && property.DeclaringType != typeof(EntityBaseCore)
                 && property.GetCustomAttribute<NavigationReferenceAttribute>() is null
             )
             .ToList();
@@ -4915,14 +4918,14 @@ internal sealed class EntitySaveMetadata
         BindingFlags.NonPublic | BindingFlags.Static
     )!;
 
-    /// <summary>Resolved <see cref="PropertyInfo"/> of <see cref="EntityBase.RowState"/>.</summary>
-    private static readonly PropertyInfo _rowStateProperty = typeof(EntityBase).GetProperty(
-        nameof(EntityBase.RowState)
+    /// <summary>Resolved <see cref="PropertyInfo"/> of <see cref="EntityBaseCore.RowState"/>.</summary>
+    private static readonly PropertyInfo _rowStateProperty = typeof(EntityBaseCore).GetProperty(
+        nameof(EntityBaseCore.RowState)
     )!;
 
     /// <summary>Gets the expression-tree-compiled delegate that materializes one row of SelectColumns (the fixed SELECT set) (built once per type and cached).</summary>
     /// <remarks>The arguments are <c>(reader, ordinals)</c>. <c>ordinals</c> holds the column ordinals in SelectColumns order, resolved once before the row loop.</remarks>
-    public required Func<DbDataReader, int[], EntityBase> SelectMaterializer { get; init; }
+    public required Func<DbDataReader, int[], EntityBaseCore> SelectMaterializer { get; init; }
 
     /// <summary>Builds the type-specialized reader accessor table (each value is a <see cref="DbDataReader"/> method taking an <c>int</c> and returning the corresponding CLR type).</summary>
     private static IReadOnlyDictionary<Type, MethodInfo> BuildTypedReaders()
@@ -4961,7 +4964,7 @@ internal sealed class EntitySaveMetadata
     /// <see cref="SetColumnValue"/> (dialect-specific conversion / value object re-wrapping).
     /// The resulting final state (<c>RowState = Unchanged</c>) matches the previous row mapping.
     /// </remarks>
-    private static Func<DbDataReader, int[], EntityBase> BuildSelectMaterializer(
+    private static Func<DbDataReader, int[], EntityBaseCore> BuildSelectMaterializer(
         Type entityType,
         IReadOnlyList<PropertyInfo> properties
     )
@@ -4988,11 +4991,11 @@ internal sealed class EntitySaveMetadata
                 Expression.Constant(RowState.Unchanged)
             )
         );
-        body.Add(Expression.Convert(entityVar, typeof(EntityBase)));
+        body.Add(Expression.Convert(entityVar, typeof(EntityBaseCore)));
 
-        var block = Expression.Block(typeof(EntityBase), new[] { entityVar }, body);
+        var block = Expression.Block(typeof(EntityBaseCore), new[] { entityVar }, body);
         return Expression
-            .Lambda<Func<DbDataReader, int[], EntityBase>>(block, readerParam, ordinalsParam)
+            .Lambda<Func<DbDataReader, int[], EntityBaseCore>>(block, readerParam, ordinalsParam)
             .Compile();
     }
 
@@ -5029,7 +5032,7 @@ internal sealed class EntitySaveMetadata
         // Fallback: call the previous SetColumnValue (DBNull to null / dialect-specific conversion / value object re-wrapping) via the ordinal
         return Expression.Call(
             _setColumnValueMethod,
-            Expression.Convert(entityExpr, typeof(EntityBase)),
+            Expression.Convert(entityExpr, typeof(EntityBaseCore)),
             Expression.Constant(property, typeof(PropertyInfo)),
             Expression.Call(readerParam, _getValueMethod, ordinal)
         );
@@ -5053,11 +5056,11 @@ internal sealed class EntitySaveMetadata
         SqlDataReader reader,
         int[] ordinals
     )
-        where TEntity : EntityBase => (TEntity)SelectMaterializer(reader, ordinals);
+        where TEntity : EntityBaseCore => (TEntity)SelectMaterializer(reader, ordinals);
 
     /// <summary>Maps one data reader row to an entity (single-row variant that resolves the SelectColumns ordinals on each call).</summary>
     public TEntity MapEntity<TEntity>(SqlDataReader reader)
-        where TEntity : EntityBase, new() => (TEntity)SelectMaterializer(reader, SelectOrdinals(reader));
+        where TEntity : EntityBaseCore, new() => (TEntity)SelectMaterializer(reader, SelectOrdinals(reader));
 
     /// <summary>
     /// The column resolution of one raw SQL result set: the ordinal of every SELECT column, plus the ordinals of the
@@ -5134,7 +5137,7 @@ internal sealed class EntitySaveMetadata
         SqlDataReader reader,
         RawSqlRowPlan plan
     )
-        where TEntity : EntityBase, new()
+        where TEntity : EntityBaseCore, new()
     {
         var entity = new TEntity();
 
@@ -5155,7 +5158,7 @@ internal sealed class EntitySaveMetadata
     /// assigns <c>null</c>; otherwise the value is re-wrapped for value objects, coerced from the SQLite storage type,
     /// or passed through for SQL Server, depending on the dialect.
     /// </summary>
-    private static void SetColumnValue(EntityBase entity, PropertyInfo property, object value)
+    private static void SetColumnValue(EntityBaseCore entity, PropertyInfo property, object value)
     {
         if (value is DBNull)
         {
@@ -5178,7 +5181,7 @@ internal sealed class EntitySaveMetadata
         SqlDataReader reader,
         RawSqlRowPlan plan
     )
-        where TEntity : EntityBase, new()
+        where TEntity : EntityBaseCore, new()
     {
         var entity = MapEntityStrict<TEntity>(reader, plan);
 
@@ -5201,7 +5204,7 @@ internal sealed class EntitySaveMetadata
     /// <summary>Maps a single raw SQL result row, resolving the column plan on this call (convenience for one-row reads).</summary>
     /// <remarks>Resolve the plan yourself with <see cref="CreateRawSqlRowPlan"/> when reading many rows, so the ordinals are resolved once for the whole result set.</remarks>
     public TEntity MapEntityFromRawSql<TEntity>(SqlDataReader reader)
-        where TEntity : EntityBase, new() =>
+        where TEntity : EntityBaseCore, new() =>
         MapEntityFromRawSql<TEntity>(reader, CreateRawSqlRowPlan(reader));
 
     /// <summary>Enumerates the data reader's column name to ordinal map once, case-insensitively (used to detect excluded columns in raw SQL results).</summary>
@@ -5267,21 +5270,21 @@ internal sealed class EntitySaveMetadata
     /// <summary>Per-column-property "reader+ordinal, set onto entity" binders (expression-tree compiled, cached per property).</summary>
     private static readonly ConcurrentDictionary<
         PropertyInfo,
-        Action<EntityBase, DbDataReader, int>
+        Action<EntityBaseCore, DbDataReader, int>
     > _columnBinderCache = new();
 
     /// <summary>Gets the type-specialized binder for one column (so the variable column sets of projections and full-column fetches bind without per-row reflection).</summary>
-    private static Action<EntityBase, DbDataReader, int> ColumnBinder(PropertyInfo property) =>
+    private static Action<EntityBaseCore, DbDataReader, int> ColumnBinder(PropertyInfo property) =>
         _columnBinderCache.GetOrAdd(property, BuildColumnBinder);
 
-    /// <summary>Compiles the single-column expression tree (<see cref="BuildColumnAssign"/>) into an <c>Action&lt;EntityBase, DbDataReader, int&gt;</c>.</summary>
-    private static Action<EntityBase, DbDataReader, int> BuildColumnBinder(PropertyInfo property)
+    /// <summary>Compiles the single-column expression tree (<see cref="BuildColumnAssign"/>) into an <c>Action&lt;EntityBaseCore, DbDataReader, int&gt;</c>.</summary>
+    private static Action<EntityBaseCore, DbDataReader, int> BuildColumnBinder(PropertyInfo property)
     {
-        var entityParam = Expression.Parameter(typeof(EntityBase), "entity");
+        var entityParam = Expression.Parameter(typeof(EntityBaseCore), "entity");
         var readerParam = Expression.Parameter(typeof(DbDataReader), "reader");
         var ordinalParam = Expression.Parameter(typeof(int), "ordinal");
 
-        // Properties are declared on the derived entity type, so downcast EntityBase to the declaring type before accessing
+        // Properties are declared on the derived entity type, so downcast EntityBaseCore to the declaring type before accessing
         var assign = BuildColumnAssign(
             Expression.Convert(entityParam, property.DeclaringType!),
             readerParam,
@@ -5290,7 +5293,7 @@ internal sealed class EntitySaveMetadata
         );
 
         return Expression
-            .Lambda<Action<EntityBase, DbDataReader, int>>(
+            .Lambda<Action<EntityBaseCore, DbDataReader, int>>(
                 assign,
                 entityParam,
                 readerParam,
@@ -5327,11 +5330,11 @@ internal sealed class EntitySaveMetadata
         int[] ordinals,
         bool markUnchanged = false
     )
-        where TEntity : EntityBase
+        where TEntity : EntityBaseCore
     {
         // The query executor's TEntity has no new() constraint of its own, so the instance is created through Activator. The
         // parameterless constructor it needs is guaranteed by the contract types the entity has to satisfy to get here
-        // (IRepository<TEntity, TKey> and IRemoteRepository<TEntity, TKey> both require "where TEntity : EntityBase, new()"),
+        // (IRepository<TEntity, TKey> and IRemoteRepository<TEntity, TKey> both require "where TEntity : EntityBaseCore, new()"),
         // so a partial declaration that removed the default constructor would fail the build with CS0310 rather than reach
         // this line
         var entity = (TEntity)Activator.CreateInstance(typeof(TEntity))!;
@@ -5351,7 +5354,7 @@ internal sealed class EntitySaveMetadata
     }
 
     /// <summary>Binds the INSERT parameters (the insert-target columns excluding store-generated columns) (shared by insert and graph insert).</summary>
-    public void BindInsertParameters(SqlCommand command, EntityBase entity)
+    public void BindInsertParameters(SqlCommand command, EntityBaseCore entity)
     {
         foreach (var property in InsertProperties)
         {
@@ -5365,7 +5368,7 @@ internal sealed class EntitySaveMetadata
     }
 
     /// <summary>Binds the UPDATE parameters (non-key columns plus the primary key) (shared by update and graph update).</summary>
-    public void BindUpdateParameters(SqlCommand command, EntityBase entity)
+    public void BindUpdateParameters(SqlCommand command, EntityBaseCore entity)
     {
         // Updates that still carry values in unbounded binary columns (excluded from UPDATE) would lose them silently,
         // so reject them up front. Both direct UpdateAsync and cascading graph updates pass through here,
@@ -5391,7 +5394,7 @@ internal sealed class EntitySaveMetadata
     }
 
     /// <summary>Binds the entity's primary key value to the @id parameter (used by graph delete).</summary>
-    public void BindEntityKeyParameter(SqlCommand command, EntityBase entity)
+    public void BindEntityKeyParameter(SqlCommand command, EntityBaseCore entity)
     {
         AddColumnParameter(
             command,
@@ -5406,7 +5409,7 @@ internal sealed class EntitySaveMetadata
     /// Only called for tables that have a rowversion column. A <c>null</c> value (an entity that was never read from the
     /// database) binds as DBNull and matches no row, so the save is reported as a conflict rather than silently overwriting.
     /// </remarks>
-    public void BindRowVersionParameter(SqlCommand command, EntityBase entity)
+    public void BindRowVersionParameter(SqlCommand command, EntityBaseCore entity)
     {
         var property = RowVersionProperty!;
         AddColumnParameter(
@@ -5512,7 +5515,7 @@ internal sealed class EntitySaveMetadata
     }
 
     /// <summary>Creates an IDataReader for SqlBulkCopy that reads an entity collection one row at a time (store-generated columns are excluded from insertion).</summary>
-    public IDataReader CreateDataReader(IEnumerable<EntityBase> entities) =>
+    public IDataReader CreateDataReader(IEnumerable<EntityBaseCore> entities) =>
         new EntityDataReader(InsertProperties, entities);
 
     /// <summary>An IDataReader that reads entity columns one row at a time and feeds them to SqlBulkCopy (memory-efficient, no intermediate DataTable).</summary>
@@ -5521,11 +5524,11 @@ internal sealed class EntitySaveMetadata
     {
         private readonly IReadOnlyList<PropertyInfo> _properties;
         private readonly string[] _columnNames;
-        private readonly IEnumerator<EntityBase> _enumerator;
+        private readonly IEnumerator<EntityBaseCore> _enumerator;
 
         public EntityDataReader(
             IReadOnlyList<PropertyInfo> properties,
-            IEnumerable<EntityBase> entities
+            IEnumerable<EntityBaseCore> entities
         )
         {
             _properties = properties;
@@ -5705,22 +5708,22 @@ internal static class CascadeDeletePlanner
 /// </remarks>
 internal sealed class SaveHookSession(
     ISaveHookRegistry registry,
-    Func<EntityBase, ISaveHookContext> contextFactory
+    Func<EntityBaseCore, ISaveHookContext> contextFactory
 )
 {
     private readonly ISaveHookRegistry _registry = registry;
-    private readonly Func<EntityBase, ISaveHookContext> _contextFactory = contextFactory;
-    private readonly HashSet<EntityBase> _skipped = new(ReferenceEqualityComparer.Instance);
+    private readonly Func<EntityBaseCore, ISaveHookContext> _contextFactory = contextFactory;
+    private readonly HashSet<EntityBaseCore> _skipped = new(ReferenceEqualityComparer.Instance);
 
     /// <summary>Gets the set of entities skipped by a Before returning <c>false</c> (reference equality). Used by AcceptChanges to leave states untouched.</summary>
-    public IReadOnlySet<EntityBase> Skipped => _skipped;
+    public IReadOnlySet<EntityBaseCore> Skipped => _skipped;
 
     /// <summary>Adds an entity to the skip set.</summary>
-    public void Skip(EntityBase entity) => _skipped.Add(entity);
+    public void Skip(EntityBaseCore entity) => _skipped.Add(entity);
 
     /// <summary>Calls Before in registration order and short-circuits at the first <c>false</c> (types with no hooks yield <c>true</c>).</summary>
     public Task<bool> InvokeBeforeAsync(
-        EntityBase entity,
+        EntityBaseCore entity,
         SaveOperation operation,
         CancellationToken cancellationToken
     )
@@ -5733,7 +5736,7 @@ internal sealed class SaveHookSession(
 
     /// <summary>Calls After in registration order (types with no hooks do nothing). The context is created bound to the entity type.</summary>
     public Task InvokeAfterAsync(
-        EntityBase entity,
+        EntityBaseCore entity,
         SaveOperation operation,
         CancellationToken cancellationToken
     )
@@ -5758,10 +5761,10 @@ internal sealed class SaveHookSession(
 /// </remarks>
 internal sealed class RowVersionCollector
 {
-    private readonly List<(EntityBase Entity, byte[] Version)> _versions = new();
+    private readonly List<(EntityBaseCore Entity, byte[] Version)> _versions = new();
 
     /// <summary>Records the raw row version bytes the database assigned to an entity (converting them to the property type is left to <see cref="Apply"/>).</summary>
-    public void Record(EntityBase entity, byte[] version) => _versions.Add((entity, version));
+    public void Record(EntityBaseCore entity, byte[] version) => _versions.Add((entity, version));
 
     /// <summary>Writes every recorded row version back to its entity (call only after the save transaction has committed).</summary>
     public void Apply()
@@ -5786,7 +5789,7 @@ internal static class RowVersionConcurrency
     public static void BindUpdate(
         EntitySaveMetadata metadata,
         SqlCommand command,
-        EntityBase entity,
+        EntityBaseCore entity,
         ConcurrencyMode mode
     )
     {
@@ -5805,7 +5808,7 @@ internal static class RowVersionConcurrency
     /// <remarks>The question is existence only, so it runs the EXISTS statement rather than selecting every column of a row that is then discarded.</remarks>
     public static async Task<bool> RowExistsAsync(
         EntitySaveMetadata metadata,
-        EntityBase entity,
+        EntityBaseCore entity,
         SqlConnection connection,
         SqlTransaction? transaction,
         CancellationToken cancellationToken
@@ -5826,7 +5829,7 @@ internal static class RowVersionConcurrency
     /// <param name="operation">The lowercase verb of the rejected operation ("update" or "delete").</param>
     public static SaveConflictException Conflict(
         EntitySaveMetadata metadata,
-        EntityBase entity,
+        EntityBaseCore entity,
         string operation
     ) =>
         SaveConflictException.Modified(
@@ -5840,7 +5843,7 @@ internal static class RowVersionConcurrency
 internal static class EntityGraphSaver
 {
     /// <summary>Returns whether the entity itself, or (when cascading) any child, has changes.</summary>
-    public static bool HasChanges(EntityBase entity, bool cascade) =>
+    public static bool HasChanges(EntityBaseCore entity, bool cascade) =>
         entity.HasChanges
         || (cascade && EnumerateCascadeChildren(entity).Any(child => HasChanges(child, true)));
 
@@ -5852,7 +5855,7 @@ internal static class EntityGraphSaver
     /// performed.
     /// </remarks>
     public static async Task<int> SaveAsync(
-        EntityBase entity,
+        EntityBaseCore entity,
         SqlConnection connection,
         SqlTransaction transaction,
         bool cascadeSave,
@@ -6002,7 +6005,7 @@ internal static class EntityGraphSaver
     }
 
     /// <summary>Finalizes saved entities to Unchanged after commit.</summary>
-    public static void AcceptChanges(EntityBase entity, bool cascade) =>
+    public static void AcceptChanges(EntityBaseCore entity, bool cascade) =>
         AcceptChanges(entity, cascade, null);
 
     /// <summary>
@@ -6010,9 +6013,9 @@ internal static class EntityGraphSaver
     /// because a save hook's Before returned <c>false</c>) were not operated on, so their state is left untouched.
     /// </summary>
     public static void AcceptChanges(
-        EntityBase entity,
+        EntityBaseCore entity,
         bool cascade,
-        IReadOnlySet<EntityBase>? skip
+        IReadOnlySet<EntityBaseCore>? skip
     )
     {
         if (entity.IsRemoved)
@@ -6037,7 +6040,7 @@ internal static class EntityGraphSaver
 
     /// <summary>Deletes the subtree starting from the children (deleted regardless of state; when <paramref name="hooks"/> is provided, fires Before/After(Delete) per child).</summary>
     private static async Task<int> DeleteGraphAsync(
-        EntityBase entity,
+        EntityBaseCore entity,
         SqlConnection connection,
         SqlTransaction transaction,
         CancellationToken cancellationToken,
@@ -6087,7 +6090,7 @@ internal static class EntityGraphSaver
 
     /// <summary>Inserts a single row, capturing the row version the database assigned when the table carries one.</summary>
     private static async Task<int> InsertEntityAsync(
-        EntityBase entity,
+        EntityBaseCore entity,
         SqlConnection connection,
         SqlTransaction transaction,
         CancellationToken cancellationToken,
@@ -6128,7 +6131,7 @@ internal static class EntityGraphSaver
 
     /// <summary>Deletes a single row, guarded by the row version the entity was read with when the table carries one.</summary>
     private static async Task<int> DeleteEntityAsync(
-        EntityBase entity,
+        EntityBaseCore entity,
         SqlConnection connection,
         SqlTransaction transaction,
         CancellationToken cancellationToken,
@@ -6183,7 +6186,7 @@ internal static class EntityGraphSaver
 
     /// <summary>Executes the update and returns the affected row count and the operation actually performed (Insert when switched).</summary>
     private static async Task<(int Rows, SaveOperation Performed)> UpdateAsync(
-        EntityBase entity,
+        EntityBaseCore entity,
         SqlConnection connection,
         SqlTransaction transaction,
         bool insertWhenUpdateMissing,
@@ -6269,9 +6272,9 @@ internal static class EntityGraphSaver
 
     /// <summary>Executes a statement whose OUTPUT clause returns a single value, yielding <c>null</c> when it matched no row.</summary>
     private static async Task<object?> ExecuteReturningAsync(
-        EntityBase entity,
+        EntityBaseCore entity,
         Func<EntitySaveMetadata, string> sqlSelector,
-        Action<EntitySaveMetadata, SqlCommand, EntityBase> bind,
+        Action<EntitySaveMetadata, SqlCommand, EntityBaseCore> bind,
         SqlConnection connection,
         SqlTransaction transaction,
         CancellationToken cancellationToken
@@ -6285,9 +6288,9 @@ internal static class EntityGraphSaver
     }
 
     private static async Task<int> ExecuteAsync(
-        EntityBase entity,
+        EntityBaseCore entity,
         Func<EntitySaveMetadata, string> sqlSelector,
-        Action<EntitySaveMetadata, SqlCommand, EntityBase> bind,
+        Action<EntitySaveMetadata, SqlCommand, EntityBaseCore> bind,
         SqlConnection connection,
         SqlTransaction transaction,
         CancellationToken cancellationToken
@@ -6301,7 +6304,7 @@ internal static class EntityGraphSaver
     }
 
     /// <summary>Enumerates the cascade-target child entities (nulls are excluded).</summary>
-    private static IEnumerable<EntityBase> EnumerateCascadeChildren(EntityBase entity)
+    private static IEnumerable<EntityBaseCore> EnumerateCascadeChildren(EntityBaseCore entity)
     {
         foreach (var navigation in EntitySaveMetadata.For(entity.GetType()).CascadeNavigations)
         {
@@ -6314,7 +6317,7 @@ internal static class EntityGraphSaver
 
             if (navigation.IsCollection)
             {
-                if (value is IEnumerable<EntityBase> children)
+                if (value is IEnumerable<EntityBaseCore> children)
                 {
                     foreach (var child in children)
                     {
@@ -6325,7 +6328,7 @@ internal static class EntityGraphSaver
                     }
                 }
             }
-            else if (value is EntityBase child)
+            else if (value is EntityBaseCore child)
             {
                 yield return child;
             }
@@ -6561,7 +6564,7 @@ public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory)
         object? parameters = null,
         CancellationToken cancellationToken = default
     )
-        where TEntity : EntityBase, new()
+        where TEntity : EntityBaseCore, new()
     {
         ArgumentNullException.ThrowIfNull(sql);
 
@@ -6686,7 +6689,7 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
     ISaveHookRegistry? saveHooks = null,
     ISqlExecutor? sqlExecutor = null
 ) : IRepository<TEntity, TKey>
-    where TEntity : EntityBase, new()
+    where TEntity : EntityBaseCore, new()
 {
     /// <summary>Metadata built exactly once per entity type (reused via a static field).</summary>
     private static readonly EntitySaveMetadata _metadata = EntitySaveMetadata.For(typeof(TEntity));
@@ -7170,7 +7173,7 @@ internal readonly record struct SqlQueryParameter(string Name, object? Value, st
 /// </remarks>
 internal sealed class SqliteSqlQueryExecutor<TEntity>(ISqlConnectionFactory connectionFactory)
     : ISqlQueryExecutor<TEntity>
-    where TEntity : EntityBase
+    where TEntity : EntityBaseCore
 {
     /// <summary>The source that creates SQL connections.</summary>
     private readonly ISqlConnectionFactory _connectionFactory = connectionFactory;
@@ -7651,7 +7654,7 @@ internal sealed class IncludeLoader
         var parentKeys = new List<object>();
         foreach (var parent in parents)
         {
-            var key = _metadata.GetColumnValue((EntityBase)parent, parentKeyColumn);
+            var key = _metadata.GetColumnValue((EntityBaseCore)parent, parentKeyColumn);
             if (key is not null)
             {
                 parentKeys.Add(key);
@@ -7673,7 +7676,7 @@ internal sealed class IncludeLoader
         ).ConfigureAwait(false);
 
         // Group the children by FK value and bind them to their parents
-        var childrenByKey = new Dictionary<object, List<EntityBase>>();
+        var childrenByKey = new Dictionary<object, List<EntityBaseCore>>();
         foreach (var child in children)
         {
             var fk = childMetadata.GetColumnValue(child, childKeyColumn);
@@ -7684,7 +7687,7 @@ internal sealed class IncludeLoader
 
             if (!childrenByKey.TryGetValue(fk, out var bucket))
             {
-                bucket = new List<EntityBase>();
+                bucket = new List<EntityBaseCore>();
                 childrenByKey[fk] = bucket;
             }
 
@@ -7709,7 +7712,7 @@ internal sealed class IncludeLoader
     private const int InClauseChunkSize = 500;
 
     /// <summary>Pulls the child table with <c>WHERE fk IN (@i0..@in)</c> and materializes the rows (keys are chunked to stay within limits).</summary>
-    private static async Task<List<EntityBase>> QueryChildrenAsync(
+    private static async Task<List<EntityBaseCore>> QueryChildrenAsync(
         EntitySaveMetadata childMetadata,
         string childKeyColumn,
         IReadOnlyList<object> keys,
@@ -7717,7 +7720,7 @@ internal sealed class IncludeLoader
         CancellationToken cancellationToken
     )
     {
-        var children = new List<EntityBase>();
+        var children = new List<EntityBaseCore>();
 
         for (var offset = 0; offset < keys.Count; offset += InClauseChunkSize)
         {
@@ -7758,17 +7761,17 @@ internal sealed class IncludeLoader
         PropertyInfo navigation,
         NavigationReferenceAttribute attribute,
         Type childType,
-        Dictionary<object, List<EntityBase>> childrenByKey,
+        Dictionary<object, List<EntityBaseCore>> childrenByKey,
         string parentKeyColumn
     )
     {
         foreach (var parent in parents)
         {
-            var key = _metadata.GetColumnValue((EntityBase)parent, parentKeyColumn);
+            var key = _metadata.GetColumnValue((EntityBaseCore)parent, parentKeyColumn);
             var matched =
                 key is not null && childrenByKey.TryGetValue(key, out var bucket)
                     ? bucket
-                    : new List<EntityBase>();
+                    : new List<EntityBaseCore>();
 
             if (attribute.IsCollection)
             {
@@ -8684,7 +8687,7 @@ internal sealed class EntitySaveMetadata
             .Where(property =>
                 property.CanRead
                 && property.CanWrite
-                && property.DeclaringType != typeof(EntityBase)
+                && property.DeclaringType != typeof(EntityBaseCore)
                 && property.GetCustomAttribute<NavigationReferenceAttribute>() is null
             )
             .ToList();
@@ -8813,14 +8816,14 @@ internal sealed class EntitySaveMetadata
         BindingFlags.NonPublic | BindingFlags.Static
     )!;
 
-    /// <summary>Resolved <see cref="PropertyInfo"/> of <see cref="EntityBase.RowState"/>.</summary>
-    private static readonly PropertyInfo _rowStateProperty = typeof(EntityBase).GetProperty(
-        nameof(EntityBase.RowState)
+    /// <summary>Resolved <see cref="PropertyInfo"/> of <see cref="EntityBaseCore.RowState"/>.</summary>
+    private static readonly PropertyInfo _rowStateProperty = typeof(EntityBaseCore).GetProperty(
+        nameof(EntityBaseCore.RowState)
     )!;
 
     /// <summary>Gets the expression-tree-compiled delegate that materializes one row of SelectColumns (the fixed SELECT set) (built once per type and cached).</summary>
     /// <remarks>The arguments are <c>(reader, ordinals)</c>. <c>ordinals</c> holds the column ordinals in SelectColumns order, resolved once before the row loop.</remarks>
-    public required Func<DbDataReader, int[], EntityBase> SelectMaterializer { get; init; }
+    public required Func<DbDataReader, int[], EntityBaseCore> SelectMaterializer { get; init; }
 
     /// <summary>Builds the type-specialized reader accessor table (each value is a <see cref="DbDataReader"/> method taking an <c>int</c> and returning the corresponding CLR type).</summary>
     private static IReadOnlyDictionary<Type, MethodInfo> BuildTypedReaders()
@@ -8859,7 +8862,7 @@ internal sealed class EntitySaveMetadata
     /// <see cref="SetColumnValue"/> (dialect-specific conversion / value object re-wrapping).
     /// The resulting final state (<c>RowState = Unchanged</c>) matches the previous row mapping.
     /// </remarks>
-    private static Func<DbDataReader, int[], EntityBase> BuildSelectMaterializer(
+    private static Func<DbDataReader, int[], EntityBaseCore> BuildSelectMaterializer(
         Type entityType,
         IReadOnlyList<PropertyInfo> properties
     )
@@ -8886,11 +8889,11 @@ internal sealed class EntitySaveMetadata
                 Expression.Constant(RowState.Unchanged)
             )
         );
-        body.Add(Expression.Convert(entityVar, typeof(EntityBase)));
+        body.Add(Expression.Convert(entityVar, typeof(EntityBaseCore)));
 
-        var block = Expression.Block(typeof(EntityBase), new[] { entityVar }, body);
+        var block = Expression.Block(typeof(EntityBaseCore), new[] { entityVar }, body);
         return Expression
-            .Lambda<Func<DbDataReader, int[], EntityBase>>(block, readerParam, ordinalsParam)
+            .Lambda<Func<DbDataReader, int[], EntityBaseCore>>(block, readerParam, ordinalsParam)
             .Compile();
     }
 
@@ -8927,7 +8930,7 @@ internal sealed class EntitySaveMetadata
         // Fallback: call the previous SetColumnValue (DBNull to null / dialect-specific conversion / value object re-wrapping) via the ordinal
         return Expression.Call(
             _setColumnValueMethod,
-            Expression.Convert(entityExpr, typeof(EntityBase)),
+            Expression.Convert(entityExpr, typeof(EntityBaseCore)),
             Expression.Constant(property, typeof(PropertyInfo)),
             Expression.Call(readerParam, _getValueMethod, ordinal)
         );
@@ -8951,11 +8954,11 @@ internal sealed class EntitySaveMetadata
         SqliteDataReader reader,
         int[] ordinals
     )
-        where TEntity : EntityBase => (TEntity)SelectMaterializer(reader, ordinals);
+        where TEntity : EntityBaseCore => (TEntity)SelectMaterializer(reader, ordinals);
 
     /// <summary>Maps one data reader row to an entity (single-row variant that resolves the SelectColumns ordinals on each call).</summary>
     public TEntity MapEntity<TEntity>(SqliteDataReader reader)
-        where TEntity : EntityBase, new() => (TEntity)SelectMaterializer(reader, SelectOrdinals(reader));
+        where TEntity : EntityBaseCore, new() => (TEntity)SelectMaterializer(reader, SelectOrdinals(reader));
 
     /// <summary>
     /// The column resolution of one raw SQL result set: the ordinal of every SELECT column, plus the ordinals of the
@@ -9032,7 +9035,7 @@ internal sealed class EntitySaveMetadata
         SqliteDataReader reader,
         RawSqlRowPlan plan
     )
-        where TEntity : EntityBase, new()
+        where TEntity : EntityBaseCore, new()
     {
         var entity = new TEntity();
 
@@ -9053,7 +9056,7 @@ internal sealed class EntitySaveMetadata
     /// assigns <c>null</c>; otherwise the value is re-wrapped for value objects, coerced from the SQLite storage type,
     /// or passed through for SQL Server, depending on the dialect.
     /// </summary>
-    private static void SetColumnValue(EntityBase entity, PropertyInfo property, object value)
+    private static void SetColumnValue(EntityBaseCore entity, PropertyInfo property, object value)
     {
         if (value is DBNull)
         {
@@ -9076,7 +9079,7 @@ internal sealed class EntitySaveMetadata
         SqliteDataReader reader,
         RawSqlRowPlan plan
     )
-        where TEntity : EntityBase, new()
+        where TEntity : EntityBaseCore, new()
     {
         var entity = MapEntityStrict<TEntity>(reader, plan);
 
@@ -9099,7 +9102,7 @@ internal sealed class EntitySaveMetadata
     /// <summary>Maps a single raw SQL result row, resolving the column plan on this call (convenience for one-row reads).</summary>
     /// <remarks>Resolve the plan yourself with <see cref="CreateRawSqlRowPlan"/> when reading many rows, so the ordinals are resolved once for the whole result set.</remarks>
     public TEntity MapEntityFromRawSql<TEntity>(SqliteDataReader reader)
-        where TEntity : EntityBase, new() =>
+        where TEntity : EntityBaseCore, new() =>
         MapEntityFromRawSql<TEntity>(reader, CreateRawSqlRowPlan(reader));
 
     /// <summary>Enumerates the data reader's column name to ordinal map once, case-insensitively (used to detect excluded columns in raw SQL results).</summary>
@@ -9165,21 +9168,21 @@ internal sealed class EntitySaveMetadata
     /// <summary>Per-column-property "reader+ordinal, set onto entity" binders (expression-tree compiled, cached per property).</summary>
     private static readonly ConcurrentDictionary<
         PropertyInfo,
-        Action<EntityBase, DbDataReader, int>
+        Action<EntityBaseCore, DbDataReader, int>
     > _columnBinderCache = new();
 
     /// <summary>Gets the type-specialized binder for one column (so the variable column sets of projections and full-column fetches bind without per-row reflection).</summary>
-    private static Action<EntityBase, DbDataReader, int> ColumnBinder(PropertyInfo property) =>
+    private static Action<EntityBaseCore, DbDataReader, int> ColumnBinder(PropertyInfo property) =>
         _columnBinderCache.GetOrAdd(property, BuildColumnBinder);
 
-    /// <summary>Compiles the single-column expression tree (<see cref="BuildColumnAssign"/>) into an <c>Action&lt;EntityBase, DbDataReader, int&gt;</c>.</summary>
-    private static Action<EntityBase, DbDataReader, int> BuildColumnBinder(PropertyInfo property)
+    /// <summary>Compiles the single-column expression tree (<see cref="BuildColumnAssign"/>) into an <c>Action&lt;EntityBaseCore, DbDataReader, int&gt;</c>.</summary>
+    private static Action<EntityBaseCore, DbDataReader, int> BuildColumnBinder(PropertyInfo property)
     {
-        var entityParam = Expression.Parameter(typeof(EntityBase), "entity");
+        var entityParam = Expression.Parameter(typeof(EntityBaseCore), "entity");
         var readerParam = Expression.Parameter(typeof(DbDataReader), "reader");
         var ordinalParam = Expression.Parameter(typeof(int), "ordinal");
 
-        // Properties are declared on the derived entity type, so downcast EntityBase to the declaring type before accessing
+        // Properties are declared on the derived entity type, so downcast EntityBaseCore to the declaring type before accessing
         var assign = BuildColumnAssign(
             Expression.Convert(entityParam, property.DeclaringType!),
             readerParam,
@@ -9188,7 +9191,7 @@ internal sealed class EntitySaveMetadata
         );
 
         return Expression
-            .Lambda<Action<EntityBase, DbDataReader, int>>(
+            .Lambda<Action<EntityBaseCore, DbDataReader, int>>(
                 assign,
                 entityParam,
                 readerParam,
@@ -9225,11 +9228,11 @@ internal sealed class EntitySaveMetadata
         int[] ordinals,
         bool markUnchanged = false
     )
-        where TEntity : EntityBase
+        where TEntity : EntityBaseCore
     {
         // The query executor's TEntity has no new() constraint of its own, so the instance is created through Activator. The
         // parameterless constructor it needs is guaranteed by the contract types the entity has to satisfy to get here
-        // (IRepository<TEntity, TKey> and IRemoteRepository<TEntity, TKey> both require "where TEntity : EntityBase, new()"),
+        // (IRepository<TEntity, TKey> and IRemoteRepository<TEntity, TKey> both require "where TEntity : EntityBaseCore, new()"),
         // so a partial declaration that removed the default constructor would fail the build with CS0310 rather than reach
         // this line
         var entity = (TEntity)Activator.CreateInstance(typeof(TEntity))!;
@@ -9254,11 +9257,11 @@ internal sealed class EntitySaveMetadata
     /// loader works with runtime <see cref="Type"/> values. <paramref name="ordinals"/> is resolved once before the row loop via <see cref="SelectOrdinals"/>.
     /// </remarks>
     // Without value objects, plain columns are bound by the expression-tree materializer, equivalent to SetColumnValue (= CoerceScalar) (type-specialized, no reflection)
-    public EntityBase MapEntityObject(DbDataReader reader, int[] ordinals) =>
+    public EntityBaseCore MapEntityObject(DbDataReader reader, int[] ordinals) =>
         SelectMaterializer(reader, ordinals);
 
     /// <summary>Maps one data reader row to an entity (without a type argument) (single-row variant that resolves the SelectColumns ordinals on each call).</summary>
-    public EntityBase MapEntityObject(DbDataReader reader) =>
+    public EntityBaseCore MapEntityObject(DbDataReader reader) =>
         MapEntityObject(reader, SelectOrdinals(reader));
 
     /// <summary>
@@ -9334,7 +9337,7 @@ internal sealed class EntitySaveMetadata
     }
 
     /// <summary>Extracts the value of the specified column from an entity (value objects are unwrapped to their raw value). Used for parent/child key matching in Include.</summary>
-    public object? GetColumnValue(EntityBase entity, string columnName)
+    public object? GetColumnValue(EntityBaseCore entity, string columnName)
     {
         if (!PropertyByColumn.TryGetValue(columnName, out var property))
         {
@@ -9347,7 +9350,7 @@ internal sealed class EntitySaveMetadata
         return value;
     }
     /// <summary>Binds the INSERT parameters (the insert-target columns excluding store-generated columns) (shared by insert and graph insert).</summary>
-    public void BindInsertParameters(SqliteCommand command, EntityBase entity)
+    public void BindInsertParameters(SqliteCommand command, EntityBaseCore entity)
     {
         foreach (var property in InsertProperties)
         {
@@ -9368,7 +9371,7 @@ internal sealed class EntitySaveMetadata
     /// position belongs to the property at that position - which holds because the only caller declares and rebinds on
     /// one command it owns for the length of the batch.
     /// </remarks>
-    public void RebindInsertParameters(SqliteCommand command, EntityBase entity)
+    public void RebindInsertParameters(SqliteCommand command, EntityBaseCore entity)
     {
         for (var index = 0; index < InsertProperties.Count; index++)
         {
@@ -9378,7 +9381,7 @@ internal sealed class EntitySaveMetadata
     }
 
     /// <summary>Binds the UPDATE parameters (non-key columns plus the primary key) (shared by update and graph update).</summary>
-    public void BindUpdateParameters(SqliteCommand command, EntityBase entity)
+    public void BindUpdateParameters(SqliteCommand command, EntityBaseCore entity)
     {
         // Updates that still carry values in unbounded binary columns (excluded from UPDATE) would lose them silently,
         // so reject them up front. Both direct UpdateAsync and cascading graph updates pass through here,
@@ -9404,7 +9407,7 @@ internal sealed class EntitySaveMetadata
     }
 
     /// <summary>Binds the entity's primary key value to the @id parameter (used by graph delete).</summary>
-    public void BindEntityKeyParameter(SqliteCommand command, EntityBase entity)
+    public void BindEntityKeyParameter(SqliteCommand command, EntityBaseCore entity)
     {
         AddColumnParameter(
             command,
@@ -9533,22 +9536,22 @@ internal static class CascadeDeletePlanner
 /// </remarks>
 internal sealed class SaveHookSession(
     ISaveHookRegistry registry,
-    Func<EntityBase, ISaveHookContext> contextFactory
+    Func<EntityBaseCore, ISaveHookContext> contextFactory
 )
 {
     private readonly ISaveHookRegistry _registry = registry;
-    private readonly Func<EntityBase, ISaveHookContext> _contextFactory = contextFactory;
-    private readonly HashSet<EntityBase> _skipped = new(ReferenceEqualityComparer.Instance);
+    private readonly Func<EntityBaseCore, ISaveHookContext> _contextFactory = contextFactory;
+    private readonly HashSet<EntityBaseCore> _skipped = new(ReferenceEqualityComparer.Instance);
 
     /// <summary>Gets the set of entities skipped by a Before returning <c>false</c> (reference equality). Used by AcceptChanges to leave states untouched.</summary>
-    public IReadOnlySet<EntityBase> Skipped => _skipped;
+    public IReadOnlySet<EntityBaseCore> Skipped => _skipped;
 
     /// <summary>Adds an entity to the skip set.</summary>
-    public void Skip(EntityBase entity) => _skipped.Add(entity);
+    public void Skip(EntityBaseCore entity) => _skipped.Add(entity);
 
     /// <summary>Calls Before in registration order and short-circuits at the first <c>false</c> (types with no hooks yield <c>true</c>).</summary>
     public Task<bool> InvokeBeforeAsync(
-        EntityBase entity,
+        EntityBaseCore entity,
         SaveOperation operation,
         CancellationToken cancellationToken
     )
@@ -9561,7 +9564,7 @@ internal sealed class SaveHookSession(
 
     /// <summary>Calls After in registration order (types with no hooks do nothing). The context is created bound to the entity type.</summary>
     public Task InvokeAfterAsync(
-        EntityBase entity,
+        EntityBaseCore entity,
         SaveOperation operation,
         CancellationToken cancellationToken
     )
@@ -9582,7 +9585,7 @@ internal sealed class SaveHookSession(
 internal static class EntityGraphSaver
 {
     /// <summary>Returns whether the entity itself, or (when cascading) any child, has changes.</summary>
-    public static bool HasChanges(EntityBase entity, bool cascade) =>
+    public static bool HasChanges(EntityBaseCore entity, bool cascade) =>
         entity.HasChanges
         || (cascade && EnumerateCascadeChildren(entity).Any(child => HasChanges(child, true)));
 
@@ -9594,7 +9597,7 @@ internal static class EntityGraphSaver
     /// performed.
     /// </remarks>
     public static async Task<int> SaveAsync(
-        EntityBase entity,
+        EntityBaseCore entity,
         SqliteConnection connection,
         SqliteTransaction transaction,
         bool cascadeSave,
@@ -9734,7 +9737,7 @@ internal static class EntityGraphSaver
     }
 
     /// <summary>Finalizes saved entities to Unchanged after commit.</summary>
-    public static void AcceptChanges(EntityBase entity, bool cascade) =>
+    public static void AcceptChanges(EntityBaseCore entity, bool cascade) =>
         AcceptChanges(entity, cascade, null);
 
     /// <summary>
@@ -9742,9 +9745,9 @@ internal static class EntityGraphSaver
     /// because a save hook's Before returned <c>false</c>) were not operated on, so their state is left untouched.
     /// </summary>
     public static void AcceptChanges(
-        EntityBase entity,
+        EntityBaseCore entity,
         bool cascade,
-        IReadOnlySet<EntityBase>? skip
+        IReadOnlySet<EntityBaseCore>? skip
     )
     {
         if (entity.IsRemoved)
@@ -9769,7 +9772,7 @@ internal static class EntityGraphSaver
 
     /// <summary>Deletes the subtree starting from the children (deleted regardless of state; when <paramref name="hooks"/> is provided, fires Before/After(Delete) per child).</summary>
     private static async Task<int> DeleteGraphAsync(
-        EntityBase entity,
+        EntityBaseCore entity,
         SqliteConnection connection,
         SqliteTransaction transaction,
         CancellationToken cancellationToken,
@@ -9816,7 +9819,7 @@ internal static class EntityGraphSaver
 
     /// <summary>Inserts a single row.</summary>
     private static Task<int> InsertEntityAsync(
-        EntityBase entity,
+        EntityBaseCore entity,
         SqliteConnection connection,
         SqliteTransaction transaction,
         CancellationToken cancellationToken
@@ -9834,7 +9837,7 @@ internal static class EntityGraphSaver
 
     /// <summary>Deletes a single row.</summary>
     private static Task<int> DeleteEntityAsync(
-        EntityBase entity,
+        EntityBaseCore entity,
         SqliteConnection connection,
         SqliteTransaction transaction,
         CancellationToken cancellationToken
@@ -9852,7 +9855,7 @@ internal static class EntityGraphSaver
 
     /// <summary>Executes the update and returns the affected row count and the operation actually performed (Insert when switched).</summary>
     private static async Task<(int Rows, SaveOperation Performed)> UpdateAsync(
-        EntityBase entity,
+        EntityBaseCore entity,
         SqliteConnection connection,
         SqliteTransaction transaction,
         bool insertWhenUpdateMissing,
@@ -9895,9 +9898,9 @@ internal static class EntityGraphSaver
     }
 
     private static async Task<int> ExecuteAsync(
-        EntityBase entity,
+        EntityBaseCore entity,
         Func<EntitySaveMetadata, string> sqlSelector,
-        Action<EntitySaveMetadata, SqliteCommand, EntityBase> bind,
+        Action<EntitySaveMetadata, SqliteCommand, EntityBaseCore> bind,
         SqliteConnection connection,
         SqliteTransaction transaction,
         CancellationToken cancellationToken
@@ -9911,7 +9914,7 @@ internal static class EntityGraphSaver
     }
 
     /// <summary>Enumerates the cascade-target child entities (nulls are excluded).</summary>
-    private static IEnumerable<EntityBase> EnumerateCascadeChildren(EntityBase entity)
+    private static IEnumerable<EntityBaseCore> EnumerateCascadeChildren(EntityBaseCore entity)
     {
         foreach (var navigation in EntitySaveMetadata.For(entity.GetType()).CascadeNavigations)
         {
@@ -9924,7 +9927,7 @@ internal static class EntityGraphSaver
 
             if (navigation.IsCollection)
             {
-                if (value is IEnumerable<EntityBase> children)
+                if (value is IEnumerable<EntityBaseCore> children)
                 {
                     foreach (var child in children)
                     {
@@ -9935,7 +9938,7 @@ internal static class EntityGraphSaver
                     }
                 }
             }
-            else if (value is EntityBase child)
+            else if (value is EntityBaseCore child)
             {
                 yield return child;
             }

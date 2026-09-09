@@ -187,7 +187,7 @@
             call.Method.DeclaringType == typeof(string)
             || (
                 call.Method.DeclaringType is { IsGenericType: true } declaring
-                && declaring.GetGenericTypeDefinition() == typeof(ValueObjectStringBase<>)
+                && declaring.GetGenericTypeDefinition() == typeof(ValueObjectStringBaseCore<>)
             )
         );
 {{~ else ~}}
@@ -632,7 +632,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
 /// </remarks>
 {{ infra_visibility }} sealed class {{ sql_query_executor_class }}<TEntity>(ISqlConnectionFactory connectionFactory)
     : ISqlQueryExecutor<TEntity>
-    where TEntity : EntityBase
+    where TEntity : EntityBaseCore
 {
     /// <summary>The source that creates SQL connections.</summary>
     private readonly ISqlConnectionFactory _connectionFactory = connectionFactory;
@@ -1355,7 +1355,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
         var parentKeys = new List<object>();
         foreach (var parent in parents)
         {
-            var key = _metadata.GetColumnValue((EntityBase)parent, parentKeyColumn);
+            var key = _metadata.GetColumnValue((EntityBaseCore)parent, parentKeyColumn);
             if (key is not null)
             {
                 parentKeys.Add(key);
@@ -1377,7 +1377,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
         ).ConfigureAwait(false);
 
         // Group the children by FK value and bind them to their parents
-        var childrenByKey = new Dictionary<object, List<EntityBase>>();
+        var childrenByKey = new Dictionary<object, List<EntityBaseCore>>();
         foreach (var child in children)
         {
             var fk = childMetadata.GetColumnValue(child, childKeyColumn);
@@ -1388,7 +1388,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
 
             if (!childrenByKey.TryGetValue(fk, out var bucket))
             {
-                bucket = new List<EntityBase>();
+                bucket = new List<EntityBaseCore>();
                 childrenByKey[fk] = bucket;
             }
 
@@ -1413,7 +1413,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
     private const int InClauseChunkSize = 500;
 
     /// <summary>Pulls the child table with <c>WHERE fk IN (@i0..@in)</c> and materializes the rows (keys are chunked to stay within limits).</summary>
-    private static async Task<List<EntityBase>> QueryChildrenAsync(
+    private static async Task<List<EntityBaseCore>> QueryChildrenAsync(
         EntitySaveMetadata childMetadata,
         string childKeyColumn,
         IReadOnlyList<object> keys,
@@ -1421,7 +1421,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
         CancellationToken cancellationToken
     )
     {
-        var children = new List<EntityBase>();
+        var children = new List<EntityBaseCore>();
 
         for (var offset = 0; offset < keys.Count; offset += InClauseChunkSize)
         {
@@ -1462,17 +1462,17 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
         PropertyInfo navigation,
         NavigationReferenceAttribute attribute,
         Type childType,
-        Dictionary<object, List<EntityBase>> childrenByKey,
+        Dictionary<object, List<EntityBaseCore>> childrenByKey,
         string parentKeyColumn
     )
     {
         foreach (var parent in parents)
         {
-            var key = _metadata.GetColumnValue((EntityBase)parent, parentKeyColumn);
+            var key = _metadata.GetColumnValue((EntityBaseCore)parent, parentKeyColumn);
             var matched =
                 key is not null && childrenByKey.TryGetValue(key, out var bucket)
                     ? bucket
-                    : new List<EntityBase>();
+                    : new List<EntityBaseCore>();
 
             if (attribute.IsCollection)
             {
@@ -2051,10 +2051,10 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
     }
     {{~ if generate_value_objects ~}}
 
-    /// <summary>Whether the method is Contains/StartsWith/EndsWith of a string value object (derived from ValueObjectStringBase).</summary>
+    /// <summary>Whether the method is Contains/StartsWith/EndsWith of a string value object (derived from ValueObjectStringBaseCore).</summary>
     private static bool IsValueObjectStringMethod(MethodInfo method) =>
         method.DeclaringType is { IsGenericType: true } declaring
-        && declaring.GetGenericTypeDefinition() == typeof(ValueObjectStringBase<>);
+        && declaring.GetGenericTypeDefinition() == typeof(ValueObjectStringBaseCore<>);
     {{~ end ~}}
 
     /// <summary>Removes Convert nodes such as boxing to object.</summary>
@@ -2135,7 +2135,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
         // Strip the value object's .Value and resolve to the inner column ([col]) (x.Col.Value -> [col])
         if (
             member.Member.Name == "Value"
-            && typeof(IValueObject).IsAssignableFrom(member.Member.DeclaringType)
+            && typeof(IValueObjectCore).IsAssignableFrom(member.Member.DeclaringType)
             && member.Expression is { } inner
             && Unwrap(inner) is MemberExpression valueObjectColumn
             && IsColumn(valueObjectColumn)

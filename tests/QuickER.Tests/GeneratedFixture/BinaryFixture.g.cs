@@ -217,7 +217,7 @@ internal static class UnboundedBinaryColumns
     /// Throws if an update is attempted while an excluded column still holds a value that is not in the "not-fetched" state (a blob that is neither null nor empty).
     /// Because unbounded binary columns are excluded from the Repository UPDATE, updating while such a value is retained would silently lose it.
     /// </summary>
-    public static void ThrowIfExcludedAssigned(EntityBase entity)
+    public static void ThrowIfExcludedAssigned(EntityBaseCore entity)
     {
         foreach (var property in For(entity.GetType()))
         {
@@ -235,7 +235,7 @@ internal static class UnboundedBinaryColumns
     /// Resets the excluded columns of a read replica to the "not-fetched" state (the initial values of a default instance). This matches the not-fetched state on
     /// the real DB side (MapEntity does not call SetValue, so the constructor initializer stands: a non-null byte[] is an empty array, and nullable is null).
     /// </summary>
-    public static void StripExcluded(EntityBase entity)
+    public static void StripExcluded(EntityBaseCore entity)
     {
         var excluded = For(entity.GetType());
 
@@ -277,7 +277,7 @@ internal static class UnboundedBinaryColumns
     /// the blob (the update guard cannot catch it: the entity holds exactly the "not-fetched" value the guard permits). A column
     /// that does carry a value is left alone, because that value is the caller's own data, as it is on an insert.
     /// </remarks>
-    public static void PreserveUnset(EntityBase entity, EntityBase stored)
+    public static void PreserveUnset(EntityBaseCore entity, EntityBaseCore stored)
     {
         foreach (var property in For(entity.GetType()))
         {
@@ -475,7 +475,7 @@ public enum RowState
 }
 
 /// <summary>Base class that holds the change tracking state (RowState) of an entity.</summary>
-public abstract partial class EntityBase
+public abstract partial class EntityBaseCore
 {
     /// <summary>Change tracking state of this entity. Defaults to Unchanged; restoring from the database or JSON keeps it Unchanged.</summary>
     public RowState RowState { get; set; } = RowState.Unchanged;
@@ -548,17 +548,17 @@ public abstract partial class EntityBase
     /// attribute scan. Cascade navigations point at children only (parent references are excluded), so the traversal is a
     /// tree and terminates.
     /// </remarks>
-    public IEnumerable<EntityBase> EnumerateCascadeChildren()
+    public IEnumerable<EntityBaseCore> EnumerateCascadeChildren()
     {
         foreach (var navigation in GetCascadeNavigations(GetType()))
         {
             var value = navigation.GetValue(this);
 
-            if (value is EntityBase child)
+            if (value is EntityBaseCore child)
             {
                 yield return child;
             }
-            else if (value is IEnumerable<EntityBase> children)
+            else if (value is IEnumerable<EntityBaseCore> children)
             {
                 foreach (var item in children)
                 {
@@ -601,7 +601,7 @@ public abstract partial class EntityBase
                     .Where(property =>
                         property.CanRead
                         && property.CanWrite
-                        && property.DeclaringType != typeof(EntityBase)
+                        && property.DeclaringType != typeof(EntityBaseCore)
                         && !Attribute.IsDefined(property, typeof(NavigationReferenceAttribute))
                     )
                     .ToArray()
@@ -609,7 +609,7 @@ public abstract partial class EntityBase
 
     /// <summary>Determines whether all column values match those of another entity (RowState and navigations are excluded from the comparison).</summary>
     /// <remarks>The comparison reads each column through reflection (the property list itself is cached per type). That is meant for change detection and assertions, not for a hot path — write the comparison out by hand where one is called for.</remarks>
-    public bool HasSameValues(EntityBase? other)
+    public bool HasSameValues(EntityBaseCore? other)
     {
         if (other is null)
         {
@@ -698,11 +698,11 @@ public abstract partial class EntityBase
     /// Values, RowState, and child navigations are copied. Parent-reference navigations are not restored because of [JsonIgnore] (the clone does not point to a parent).
     /// To insert it as a separate record, reassign the primary key or call MarkAdded() after cloning. The returned instance has the same concrete type as the original.
     /// </remarks>
-    public EntityBase Clone()
+    public EntityBaseCore Clone()
     {
         var type = GetType();
         var json = JsonSerializer.Serialize(this, type, _jsonOptions);
-        return (EntityBase)JsonSerializer.Deserialize(json, type, _jsonOptions)!;
+        return (EntityBaseCore)JsonSerializer.Deserialize(json, type, _jsonOptions)!;
     }
 }
 
@@ -713,6 +713,9 @@ public static class GeneratedDisplayNames
     public static Func<string, string?, string> Resolve { get; set; } =
         static (memberName, description) => description ?? memberName;
 }
+
+/// <summary>Base of every generated entity, and the extension point for them. Members added to a partial declaration of this type reach all of them at once.</summary>
+public abstract partial class EntityBase : EntityBaseCore { }
 
 /// <summary>Entity for the documents table</summary>
 [Table("documents")]
@@ -811,7 +814,7 @@ public partial class DocumentNoteEntity : EntityBase
 /// <c>nameof</c> and stay compile-safe.
 /// </para>
 /// </remarks>
-public abstract partial class EditModelBase
+public abstract partial class EditModelBaseCore
     : INotifyPropertyChanged,
         INotifyDataErrorInfo,
         IEditableObject
@@ -1100,7 +1103,7 @@ public abstract partial class EditModelBase
     internal IList? Owner { get; set; }
 
     /// <summary>Returns the next element after this one in its owning collection (null if not owned or at the end).</summary>
-    public EditModelBase? GetNext()
+    public EditModelBaseCore? GetNext()
     {
         if (Owner is null)
         {
@@ -1108,11 +1111,11 @@ public abstract partial class EditModelBase
         }
 
         var index = Owner.IndexOf(this);
-        return index >= 0 && index + 1 < Owner.Count ? (EditModelBase?)Owner[index + 1] : null;
+        return index >= 0 && index + 1 < Owner.Count ? (EditModelBaseCore?)Owner[index + 1] : null;
     }
 
     /// <summary>Returns the previous element before this one in its owning collection (null if not owned or at the start).</summary>
-    public EditModelBase? GetPrevious()
+    public EditModelBaseCore? GetPrevious()
     {
         if (Owner is null)
         {
@@ -1120,7 +1123,7 @@ public abstract partial class EditModelBase
         }
 
         var index = Owner.IndexOf(this);
-        return index > 0 ? (EditModelBase?)Owner[index - 1] : null;
+        return index > 0 ? (EditModelBaseCore?)Owner[index - 1] : null;
     }
 
     /// <summary>Gets the position of this element within its owning collection (-1 if not owned).</summary>
@@ -1200,18 +1203,18 @@ public abstract partial class EditModelBase
         OnPropertyChanged(nameof(IsLastInParent));
     }
 
-    /// <summary>Raises the change notification for the owning collection reference (ParentCollection), called when the element enters or leaves a collection (the property lives on <see cref="EditModelBase{TSelf}"/> under exactly this name).</summary>
+    /// <summary>Raises the change notification for the owning collection reference (ParentCollection), called when the element enters or leaves a collection (the property lives on <see cref="EditModelBaseCore{TSelf}"/> under exactly this name).</summary>
     internal void RaiseParentCollectionChanged() => OnPropertyChanged("ParentCollection");
 
     /// <summary>The parent model that holds this element as a child (cascade parent). Set by the owning collection or single reference; null when not owned or at the root.</summary>
-    private EditModelBase? _parentModel;
+    private EditModelBaseCore? _parentModel;
 
     /// <summary>Gets the parent edit model that holds this element as a child (set via either a collection or a single reference; null when not owned or at the root).</summary>
     /// <remarks>In concrete classes where the parent type is unambiguous, a typed ParentModel with the same name is generated and hides this property.</remarks>
-    public EditModelBase? ParentModel => _parentModel;
+    public EditModelBaseCore? ParentModel => _parentModel;
 
     /// <summary>Sets the parent model reference and raises the <see cref="ParentModel"/> change notification only when it changes (called by the owning setter or collection).</summary>
-    internal void SetParentModel(EditModelBase? parentModel)
+    internal void SetParentModel(EditModelBaseCore? parentModel)
     {
         if (ReferenceEquals(_parentModel, parentModel))
         {
@@ -1242,7 +1245,7 @@ public abstract partial class EditModelBase
     /// <summary>Returns a child collection, adopting it as this model's child the first time it is read (the getter of a generated child collection property).</summary>
     /// <param name="field">The backing field of the child collection property.</param>
     protected EditModelCollection<T> GetChildren<T>(EditModelCollection<T> field)
-        where T : EditModelBase
+        where T : EditModelBaseCore
     {
         field.OwnerModel ??= this;
         return field;
@@ -1257,7 +1260,7 @@ public abstract partial class EditModelBase
         EditModelCollection<T> value,
         string propertyName
     )
-        where T : EditModelBase
+        where T : EditModelBaseCore
     {
         if (ReferenceEquals(field, value))
         {
@@ -1480,12 +1483,12 @@ public abstract partial class EditModelBase
     protected virtual void RegisterExtraChildren() { }
 
     /// <summary>Registers a single child reference into the cascade (the reference is resolved lazily so the latest value is used).</summary>
-    protected void AddChild(string name, Func<EditModelBase?> accessor) =>
+    protected void AddChild(string name, Func<EditModelBaseCore?> accessor) =>
         (_childLinks ??= new()).Add(ChildLink.ForSingle(name, accessor));
 
     /// <summary>Registers a child collection into the cascade (the collection is resolved lazily so the latest instance is used, even after a mapper load replaces it).</summary>
     protected void AddChildren<T>(string name, Func<EditModelCollection<T>> accessor)
-        where T : EditModelBase =>
+        where T : EditModelBaseCore =>
         (_childLinks ??= new()).Add(ChildLink.ForCollection(name, accessor));
 
     /// <summary>Link to a registered child (cascade participant). Treats single references and child collections uniformly.</summary>
@@ -1498,7 +1501,7 @@ public abstract partial class EditModelBase
     {
         private readonly string _name;
         private readonly bool _isCollection;
-        private readonly Func<IEnumerable<EditModelBase>> _items;
+        private readonly Func<IEnumerable<EditModelBaseCore>> _items;
         private readonly Func<bool, bool> _validate;
         private readonly Func<bool, bool> _hasChanges;
         private readonly Action _acceptRemoved;
@@ -1506,7 +1509,7 @@ public abstract partial class EditModelBase
         private ChildLink(
             string name,
             bool isCollection,
-            Func<IEnumerable<EditModelBase>> items,
+            Func<IEnumerable<EditModelBaseCore>> items,
             Func<bool, bool> validate,
             Func<bool, bool> hasChanges,
             Action acceptRemoved
@@ -1521,11 +1524,11 @@ public abstract partial class EditModelBase
         }
 
         /// <summary>Creates a link that registers a single child reference.</summary>
-        public static ChildLink ForSingle(string name, Func<EditModelBase?> accessor) =>
+        public static ChildLink ForSingle(string name, Func<EditModelBaseCore?> accessor) =>
             new(
                 name,
                 false,
-                () => accessor() is { } child ? new[] { child } : Enumerable.Empty<EditModelBase>(),
+                () => accessor() is { } child ? new[] { child } : Enumerable.Empty<EditModelBaseCore>(),
                 includeChildren => accessor() is not { } child || child.Validate(includeChildren),
                 includeChildren =>
                     accessor() is { } child && child.HasGraphChanges(includeChildren),
@@ -1538,7 +1541,7 @@ public abstract partial class EditModelBase
         /// so validating the parent also runs the duplicate check among the siblings.
         /// </remarks>
         public static ChildLink ForCollection<T>(string name, Func<EditModelCollection<T>> accessor)
-            where T : EditModelBase =>
+            where T : EditModelBaseCore =>
             new(
                 name,
                 true,
@@ -1748,7 +1751,7 @@ public abstract partial class EditModelBase
     }
 
     /// <summary>
-    /// Registers a duplicate-value error for the given confirmed-value property names. <see cref="EditModelBase{TSelf}"/> maps the
+    /// Registers a duplicate-value error for the given confirmed-value property names. <see cref="EditModelBaseCore{TSelf}"/> maps the
     /// names to their binding properties through the column table and resolves the display names; names that cannot be mapped
     /// (and an empty list) produce a model-level error, which is all this fallback does.
     /// </summary>
@@ -1792,7 +1795,7 @@ public abstract partial class EditModelBase
         TEntity entity,
         CancellationToken cancellationToken
     )
-        where TEntity : EntityBase, new()
+        where TEntity : EntityBaseCore, new()
     {
         ArgumentNullException.ThrowIfNull(repository);
         ClearDuplicateErrors(DuplicateErrorSource.Database);
@@ -1921,13 +1924,13 @@ public abstract partial class EditModelBase
         CancelEditCore();
     }
 
-    /// <summary>Core logic of BeginEdit (<see cref="EditModelBase{TSelf}"/> snapshots the confirmed values from the column table; a generated class adds its OnBeginEdit hook).</summary>
+    /// <summary>Core logic of BeginEdit (<see cref="EditModelBaseCore{TSelf}"/> snapshots the confirmed values from the column table; a generated class adds its OnBeginEdit hook).</summary>
     protected virtual void BeginEditCore() { }
 
     /// <summary>Core logic of EndEdit (does nothing by default; override in a concrete class if needed).</summary>
     protected virtual void EndEditCore() { }
 
-    /// <summary>Core logic of CancelEdit (<see cref="EditModelBase{TSelf}"/> restores the confirmed values from the snapshot it took).</summary>
+    /// <summary>Core logic of CancelEdit (<see cref="EditModelBaseCore{TSelf}"/> restores the confirmed values from the snapshot it took).</summary>
     protected virtual void CancelEditCore() { }
 
     /// <summary>
@@ -1991,7 +1994,7 @@ public enum DuplicateErrorSource
 
 /// <summary>One UNIQUE constraint declared by an edit model (its name, the properties that make it up, and a compiled accessor for their values).</summary>
 /// <remarks>
-/// Generated edit models publish their constraints through <see cref="EditModelBase.UniquenessConstraints"/> and
+/// Generated edit models publish their constraints through <see cref="EditModelBaseCore.UniquenessConstraints"/> and
 /// <see cref="EditModelUniquenessValidator"/> consumes them. The accessor is generated code, so the check reads no property by reflection.
 /// The DB definition itself is described separately by the <c>[UniqueConstraint]</c> attribute on the entity class.
 /// </remarks>
@@ -2004,13 +2007,13 @@ public sealed class EditModelUniquenessConstraint
     public IReadOnlyList<string> PropertyNames { get; }
 
     /// <summary>Gets the accessor that reads the constraint member values of an edit model in a single call (declaration order, matching <see cref="PropertyNames"/>).</summary>
-    public Func<EditModelBase, object?[]> GetValues { get; }
+    public Func<EditModelBaseCore, object?[]> GetValues { get; }
 
     /// <summary>Initializes a new instance with the constraint name, its member property names, and the value accessor.</summary>
     public EditModelUniquenessConstraint(
         string constraintName,
         IReadOnlyList<string> propertyNames,
-        Func<EditModelBase, object?[]> getValues
+        Func<EditModelBaseCore, object?[]> getValues
     )
     {
         ConstraintName = constraintName;
@@ -2020,7 +2023,7 @@ public sealed class EditModelUniquenessConstraint
 }
 
 /// <summary>
-/// Shared helper that detects values duplicated among edit models by reading the UNIQUE constraints they declare (<see cref="EditModelBase.UniquenessConstraints"/>).
+/// Shared helper that detects values duplicated among edit models by reading the UNIQUE constraints they declare (<see cref="EditModelBaseCore.UniquenessConstraints"/>).
 /// </summary>
 /// <remarks>
 /// It is schema-independent and does not bake in property names (each edit model declares its own constraints). It is called at the
@@ -2041,7 +2044,7 @@ public static class EditModelUniquenessValidator
     /// </remarks>
     /// <param name="models">The edit models to compare with each other.</param>
     public static bool Validate<T>(IEnumerable<T> models)
-        where T : EditModelBase
+        where T : EditModelBaseCore
     {
         ArgumentNullException.ThrowIfNull(models);
 
@@ -2106,7 +2109,7 @@ public static class EditModelUniquenessValidator
 
     /// <summary>Builds the comparison tuple of the constraint's member values through its accessor (null when any value is null = out of scope).</summary>
     private static object[]? BuildKey(
-        EditModelBase model,
+        EditModelBaseCore model,
         EditModelUniquenessConstraint constraint
     )
     {
@@ -2307,7 +2310,7 @@ public static class EditModelInputFormat
 /// <summary>One column of an edit model as data: the two names it is known by, whether input is required, and the accessors the shared checks drive.</summary>
 /// <remarks>
 /// <para>
-/// A generated edit model publishes one of these per column through <see cref="EditModelBase{TSelf}.EditModelColumns"/>, and
+/// A generated edit model publishes one of these per column through <see cref="EditModelBaseCore{TSelf}.EditModelColumns"/>, and
 /// the required-field check, the input revert, the row-edit snapshot, and the duplicate-error mapping are then written once in
 /// the base class instead of once per column in every class. The accessors are compiled lambdas over the real properties, so
 /// nothing here is read by reflection and the storage of a column - its confirmed-value field, its input string field - is
@@ -2339,19 +2342,19 @@ public sealed record EditModelColumn<TModel>(
     Func<TModel, string> ToInput,
     Action<TModel, string> SetInput
 )
-    where TModel : EditModelBase;
+    where TModel : EditModelBaseCore;
 
-/// <summary>Self-typed layer over <see cref="EditModelBase"/>: the sibling navigation and the owning collection surface in the concrete type, written once.</summary>
+/// <summary>Self-typed layer over <see cref="EditModelBaseCore"/>: the sibling navigation and the owning collection surface in the concrete type, written once.</summary>
 /// <remarks>
-/// The non-generic <see cref="EditModelBase"/> stays as the type the ownership plumbing references
-/// (<see cref="EditModelCollection{T}"/>'s constraint, <see cref="EditModelBase.Owner"/>,
-/// <see cref="EditModelBase.ParentModel"/>), so this layer adds only what needs the concrete type. Generated edit
+/// The non-generic <see cref="EditModelBaseCore"/> stays as the type the ownership plumbing references
+/// (<see cref="EditModelCollection{T}"/>'s constraint, <see cref="EditModelBaseCore.Owner"/>,
+/// <see cref="EditModelBaseCore.ParentModel"/>), so this layer adds only what needs the concrete type. Generated edit
 /// models derive from it; the typed parent-model surface stays with them, because the parent is a second type this
 /// single type parameter cannot name.
 /// </remarks>
 /// <typeparam name="TSelf">The concrete edit model type deriving from this class.</typeparam>
-public abstract partial class EditModelBase<TSelf> : EditModelBase
-    where TSelf : EditModelBase<TSelf>
+public abstract partial class EditModelBaseCore<TSelf> : EditModelBaseCore
+    where TSelf : EditModelBaseCore<TSelf>
 {
     /// <summary>Returns the next element after this one in its owning collection (null if not owned or at the end).</summary>
     public new TSelf? GetNext() => (TSelf?)base.GetNext();
@@ -2381,7 +2384,7 @@ public abstract partial class EditModelBase<TSelf> : EditModelBase
     /// <summary>Checks the columns declared required for missing input, registering and withdrawing only the errors this check owns. Called from Validate; a generated class appends its OnValidate hook.</summary>
     /// <remarks>
     /// <para>
-    /// A field that already carries another input error keeps it (<see cref="EditModelBase.SetRequiredError"/> declines to
+    /// A field that already carries another input error keeps it (<see cref="EditModelBaseCore.SetRequiredError"/> declines to
     /// overwrite), because a value that cannot be converted is the more upstream cause and the one the user has to act on.
     /// </para>
     /// <para>
@@ -2467,7 +2470,7 @@ public abstract partial class EditModelBase<TSelf> : EditModelBase
     /// Restoring the values also withdraws the duplicate-value findings the database check registered, on the reasoning a
     /// confirmed-value setter uses: the value they were reached about is no longer the one the model holds. The setter
     /// cannot do it here, because the restore runs as a load and a load deliberately keeps the setters quiet - so a cancel
-    /// would otherwise leave a finding about the discarded value behind and hold <see cref="EditModelBase.Validate"/>
+    /// would otherwise leave a finding about the discarded value behind and hold <see cref="EditModelBaseCore.Validate"/>
     /// false forever. It is done unconditionally, though, where a setter withdraws them only when the value actually
     /// changes: a cancel does not track whether anything was edited, so a row that was begun and then canceled without a
     /// single change drops a database finding that was still perfectly valid. Run the database check again before saving -
@@ -2482,7 +2485,7 @@ public abstract partial class EditModelBase<TSelf> : EditModelBase
     /// </para>
     /// <para>
     /// Deriving the input strings clears the input error of every property, so a conversion error that predates the
-    /// <see cref="EditModelBase.BeginEdit"/> of this row is cleared along with the ones the canceled edit produced. The
+    /// <see cref="EditModelBaseCore.BeginEdit"/> of this row is cleared along with the ones the canceled edit produced. The
     /// unconvertible text goes away in the same step, since the input string is rebuilt from the restored confirmed value,
     /// and typing it again brings the error back.
     /// </para>
@@ -2584,7 +2587,7 @@ public abstract partial class EditModelBase<TSelf> : EditModelBase
 /// Clear is a full on-screen wipe with no deletion tracking (it also resets the set-aside items). Use Remove when the deletion should be saved.
 /// </remarks>
 public sealed partial class EditModelCollection<T> : ObservableCollection<T>
-    where T : EditModelBase
+    where T : EditModelBaseCore
 {
     /// <summary>Holding list for deletion targets (Removed) removed via Remove, each with the state it had before the removal.</summary>
     private readonly List<RemovedItem> _removed = new();
@@ -2593,10 +2596,10 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
     private readonly record struct RemovedItem(T Item, RowState PriorState);
 
     /// <summary>Backing field for the parent model that holds this collection as a child.</summary>
-    private EditModelBase? _ownerModel;
+    private EditModelBaseCore? _ownerModel;
 
     /// <summary>Gets or sets the parent model that holds this collection as a child (set by the owning edit model). Propagates to every element's ParentModel when set.</summary>
-    internal EditModelBase? OwnerModel
+    internal EditModelBaseCore? OwnerModel
     {
         get => _ownerModel;
         set
@@ -2891,8 +2894,8 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
 /// the loading state it runs under, creation from an edit model, collection conversion - is written once here.
 /// </remarks>
 public abstract partial class MapperBase<TEntity, TEditModel>
-    where TEntity : EntityBase, new()
-    where TEditModel : EditModelBase, new()
+    where TEntity : EntityBaseCore, new()
+    where TEditModel : EditModelBaseCore, new()
 {
     /// <summary>Creates a new TEntity with initial values set (it will be an insertion target on save).</summary>
     public TEntity CreateEntity()
@@ -3051,6 +3054,12 @@ public abstract partial class MapperBase<TEntity, TEditModel>
         return new EditModelCollection<TEditModel>(entities.Select(entity => CreateEditModel(entity)));
     }
 }
+
+/// <summary>Base of every generated edit model, and the extension point for them. Members added to a partial declaration of this type reach all of them at once.</summary>
+/// <typeparam name="TSelf">The concrete edit model type deriving from this class.</typeparam>
+public abstract partial class EditModelBase<TSelf> : EditModelBaseCore<TSelf>
+    where TSelf : EditModelBase<TSelf> { }
+
 /// <summary>Edit model for on-screen editing of the documents table.</summary>
 public partial class DocumentEditModel : EditModelBase<DocumentEditModel>
 {
@@ -4277,7 +4286,7 @@ public static class UniquenessChecker
 /// </para>
 /// </remarks>
 public partial interface IRemoteRepository<TEntity, TKey>
-    where TEntity : EntityBase, new()
+    where TEntity : EntityBaseCore, new()
 {
     /// <summary>Gets a single entity by primary key (null when not found).</summary>
     Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default);
@@ -4367,7 +4376,7 @@ public partial interface IRemoteRepository<TEntity, TKey>
 /// I{Entity}Repository always provides this full-featured surface.
 /// </remarks>
 public partial interface IRepository<TEntity, TKey> : IRemoteRepository<TEntity, TKey>
-    where TEntity : EntityBase, new()
+    where TEntity : EntityBaseCore, new()
 {
     /// <summary>Bulk inserts a collection of entities.</summary>
     /// <remarks>
@@ -4487,7 +4496,7 @@ public partial interface ISqlExecutor
         object? parameters = null,
         CancellationToken cancellationToken = default
     )
-        where TEntity : EntityBase, new();
+        where TEntity : EntityBaseCore, new();
 
     /// <summary>Executes a raw SQL SELECT and leniently projects the result rows onto an arbitrary <typeparamref name="TResult"/>.</summary>
     /// <remarks>
@@ -4642,7 +4651,7 @@ internal static class SqlTransactions
 /// </remarks>
 /// <typeparam name="TEntity">The entity type the hook targets.</typeparam>
 public interface ISaveHook<TEntity>
-    where TEntity : EntityBase
+    where TEntity : EntityBaseCore
 {
     /// <summary>Called immediately before the operation (<c>false</c> skips that single operation; the default does not skip).</summary>
     /// <param name="entity">The entity being saved.</param>
@@ -4760,14 +4769,14 @@ public interface ISaveHookInvoker
 {
     /// <summary>Calls Before in registration order, short-circuiting on the first <c>false</c> (returns false when any hook returns false).</summary>
     Task<bool> InvokeBeforeAsync(
-        EntityBase entity,
+        EntityBaseCore entity,
         SaveOperation operation,
         CancellationToken cancellationToken
     );
 
     /// <summary>Calls After sequentially in registration order.</summary>
     Task InvokeAfterAsync(
-        EntityBase entity,
+        EntityBaseCore entity,
         SaveOperation operation,
         ISaveHookContext context,
         CancellationToken cancellationToken
@@ -4845,7 +4854,7 @@ internal sealed class SaveHookRegistry : ISaveHookRegistry
     /// <typeparam name="TEntity">The entity type the hook targets.</typeparam>
     /// <param name="hook">The hook to add (hooks for the same type fire in the order they were added).</param>
     public SaveHookRegistry Add<TEntity>(ISaveHook<TEntity> hook)
-        where TEntity : EntityBase
+        where TEntity : EntityBaseCore
     {
         ArgumentNullException.ThrowIfNull(hook);
 
@@ -4872,14 +4881,14 @@ internal sealed class SaveHookRegistry : ISaveHookRegistry
 /// <typeparam name="TEntity">The entity type the hooks target.</typeparam>
 internal sealed class SaveHookInvoker<TEntity>(IEnumerable<ISaveHook<TEntity>> hooks)
     : ISaveHookInvoker
-    where TEntity : EntityBase
+    where TEntity : EntityBaseCore
 {
     private readonly IReadOnlyList<ISaveHook<TEntity>> _hooks =
         hooks as IReadOnlyList<ISaveHook<TEntity>> ?? hooks.ToList();
 
     /// <summary>Calls Before in registration order, short-circuiting on the first <c>false</c>.</summary>
     public async Task<bool> InvokeBeforeAsync(
-        EntityBase entity,
+        EntityBaseCore entity,
         SaveOperation operation,
         CancellationToken cancellationToken
     )
@@ -4899,7 +4908,7 @@ internal sealed class SaveHookInvoker<TEntity>(IEnumerable<ISaveHook<TEntity>> h
 
     /// <summary>Calls After sequentially in registration order.</summary>
     public async Task InvokeAfterAsync(
-        EntityBase entity,
+        EntityBaseCore entity,
         SaveOperation operation,
         ISaveHookContext context,
         CancellationToken cancellationToken
@@ -5337,7 +5346,7 @@ public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory)
         object? parameters = null,
         CancellationToken cancellationToken = default
     )
-        where TEntity : EntityBase, new()
+        where TEntity : EntityBaseCore, new()
     {
         ArgumentNullException.ThrowIfNull(sql);
 
@@ -5462,7 +5471,7 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
     ISaveHookRegistry? saveHooks = null,
     ISqlExecutor? sqlExecutor = null
 ) : IRepository<TEntity, TKey>
-    where TEntity : EntityBase, new()
+    where TEntity : EntityBaseCore, new()
 {
     /// <summary>Metadata built exactly once per entity type (reused via a static field).</summary>
     private static readonly EntitySaveMetadata _metadata = EntitySaveMetadata.For(typeof(TEntity));
@@ -6820,7 +6829,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
 /// </remarks>
 internal sealed class SqliteSqlQueryExecutor<TEntity>(ISqlConnectionFactory connectionFactory)
     : ISqlQueryExecutor<TEntity>
-    where TEntity : EntityBase
+    where TEntity : EntityBaseCore
 {
     /// <summary>The source that creates SQL connections.</summary>
     private readonly ISqlConnectionFactory _connectionFactory = connectionFactory;
@@ -7301,7 +7310,7 @@ internal sealed class IncludeLoader
         var parentKeys = new List<object>();
         foreach (var parent in parents)
         {
-            var key = _metadata.GetColumnValue((EntityBase)parent, parentKeyColumn);
+            var key = _metadata.GetColumnValue((EntityBaseCore)parent, parentKeyColumn);
             if (key is not null)
             {
                 parentKeys.Add(key);
@@ -7323,7 +7332,7 @@ internal sealed class IncludeLoader
         ).ConfigureAwait(false);
 
         // Group the children by FK value and bind them to their parents
-        var childrenByKey = new Dictionary<object, List<EntityBase>>();
+        var childrenByKey = new Dictionary<object, List<EntityBaseCore>>();
         foreach (var child in children)
         {
             var fk = childMetadata.GetColumnValue(child, childKeyColumn);
@@ -7334,7 +7343,7 @@ internal sealed class IncludeLoader
 
             if (!childrenByKey.TryGetValue(fk, out var bucket))
             {
-                bucket = new List<EntityBase>();
+                bucket = new List<EntityBaseCore>();
                 childrenByKey[fk] = bucket;
             }
 
@@ -7359,7 +7368,7 @@ internal sealed class IncludeLoader
     private const int InClauseChunkSize = 500;
 
     /// <summary>Pulls the child table with <c>WHERE fk IN (@i0..@in)</c> and materializes the rows (keys are chunked to stay within limits).</summary>
-    private static async Task<List<EntityBase>> QueryChildrenAsync(
+    private static async Task<List<EntityBaseCore>> QueryChildrenAsync(
         EntitySaveMetadata childMetadata,
         string childKeyColumn,
         IReadOnlyList<object> keys,
@@ -7367,7 +7376,7 @@ internal sealed class IncludeLoader
         CancellationToken cancellationToken
     )
     {
-        var children = new List<EntityBase>();
+        var children = new List<EntityBaseCore>();
 
         for (var offset = 0; offset < keys.Count; offset += InClauseChunkSize)
         {
@@ -7408,17 +7417,17 @@ internal sealed class IncludeLoader
         PropertyInfo navigation,
         NavigationReferenceAttribute attribute,
         Type childType,
-        Dictionary<object, List<EntityBase>> childrenByKey,
+        Dictionary<object, List<EntityBaseCore>> childrenByKey,
         string parentKeyColumn
     )
     {
         foreach (var parent in parents)
         {
-            var key = _metadata.GetColumnValue((EntityBase)parent, parentKeyColumn);
+            var key = _metadata.GetColumnValue((EntityBaseCore)parent, parentKeyColumn);
             var matched =
                 key is not null && childrenByKey.TryGetValue(key, out var bucket)
                     ? bucket
-                    : new List<EntityBase>();
+                    : new List<EntityBaseCore>();
 
             if (attribute.IsCollection)
             {
@@ -8347,7 +8356,7 @@ public static class RemotePaths
 
 /// <summary>Shared serialization settings used for remote transport (HTTP + JSON).</summary>
 /// <remarks>
-/// Uses the same semantics as entity JSON round-trips (<see cref="EntityBase.ToJson"/> / <see cref="EntityBase.Clone"/>)
+/// Uses the same semantics as entity JSON round-trips (<see cref="EntityBaseCore.ToJson"/> / <see cref="EntityBaseCore.Clone"/>)
 /// (get/set properties only, RowState included, no cycles because parent-reference navigations are [JsonIgnore]),
 /// plus case-insensitive reading for transport. Client and server both use these settings so the wire representation matches.
 /// </remarks>
@@ -8578,15 +8587,15 @@ public static class RemoteEntityGraph
         );
 
     /// <summary>Reads the row version the entity currently carries (<c>null</c> when the type has no rowversion column or the value is unset).</summary>
-    public static byte[]? ReadRowVersion(EntityBase entity) =>
+    public static byte[]? ReadRowVersion(EntityBaseCore entity) =>
         RowVersionProperty(entity.GetType())?.GetValue(entity) as byte[];
 
     /// <summary>Writes a row version back to the entity (a no-op for a type without a rowversion column).</summary>
-    public static void WriteRowVersion(EntityBase entity, byte[] rowVersion) =>
+    public static void WriteRowVersion(EntityBaseCore entity, byte[] rowVersion) =>
         RowVersionProperty(entity.GetType())?.SetValue(entity, rowVersion);
 
     /// <summary>Serializes the entity's primary key the way the row version table identifies it.</summary>
-    public static string KeyText(EntityBase entity) =>
+    public static string KeyText(EntityBaseCore entity) =>
         JsonSerializer.Serialize(
             KeyProperty(entity.GetType()).GetValue(entity),
             RemoteJson.Options
@@ -8594,7 +8603,7 @@ public static class RemoteEntityGraph
 
     /// <summary>Collects the row versions a save assigned across the graph (server side; deleted entities are skipped because there is no row left to version).</summary>
     public static void CollectRowVersions(
-        EntityBase entity,
+        EntityBaseCore entity,
         bool cascade,
         List<RemoteRowVersionEntry> into
     )
@@ -8620,11 +8629,11 @@ public static class RemoteEntityGraph
         {
             var value = property.GetValue(entity);
 
-            if (value is EntityBase child)
+            if (value is EntityBaseCore child)
             {
                 CollectRowVersions(child, true, into);
             }
-            else if (value is IEnumerable<EntityBase> children)
+            else if (value is IEnumerable<EntityBaseCore> children)
             {
                 foreach (var item in children)
                 {
@@ -8642,7 +8651,7 @@ public static class RemoteEntityGraph
     /// A completed save has finalized every row it operated on to Unchanged and left the skipped ones as they were, so a row
     /// that still carries changes is exactly a row the hook skipped. The traversal matches <see cref="CollectRowVersions"/>.
     /// </remarks>
-    public static void CollectSkipped(EntityBase entity, bool cascade, List<RemoteEntityRef> into)
+    public static void CollectSkipped(EntityBaseCore entity, bool cascade, List<RemoteEntityRef> into)
     {
         if (entity.IsRemoved)
         {
@@ -8663,11 +8672,11 @@ public static class RemoteEntityGraph
         {
             var value = property.GetValue(entity);
 
-            if (value is EntityBase child)
+            if (value is EntityBaseCore child)
             {
                 CollectSkipped(child, true, into);
             }
-            else if (value is IEnumerable<EntityBase> children)
+            else if (value is IEnumerable<EntityBaseCore> children)
             {
                 foreach (var item in children)
                 {
@@ -8702,7 +8711,7 @@ public static class RemoteEntityGraph
 
     /// <summary>Determines whether the response named this entity as skipped by a save hook (client side).</summary>
     public static bool IsSkipped(
-        EntityBase entity,
+        EntityBaseCore entity,
         HashSet<(string EntityType, string Key)>? lookup
     ) => lookup is not null && lookup.Contains((entity.GetType().Name, KeyText(entity)));
 
@@ -8728,7 +8737,7 @@ public static class RemoteEntityGraph
 
     /// <summary>Writes back the row version the response carried for this entity, if any (client side).</summary>
     public static void ApplyRowVersion(
-        EntityBase entity,
+        EntityBaseCore entity,
         Dictionary<(string EntityType, string Key), byte[]>? lookup
     )
     {
@@ -8800,7 +8809,7 @@ public static class RemoteEntityGraph
 /// </para>
 /// </remarks>
 public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepository<TEntity, TKey>
-    where TEntity : EntityBase, new()
+    where TEntity : EntityBaseCore, new()
 {
     private readonly HttpClient _httpClient;
     private readonly string _entityRoute;
@@ -9188,7 +9197,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     }
 
     /// <summary>Verifies that no updated (Updated) entity in the graph to save still carries values in unbounded binary columns (same child-direction traversal as AcceptChanges).</summary>
-    private static void GuardUnboundedBinaryOnSave(EntityBase entity, bool cascade)
+    private static void GuardUnboundedBinaryOnSave(EntityBaseCore entity, bool cascade)
     {
         if (entity.IsUpdated)
         {
@@ -9204,11 +9213,11 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         {
             var value = property.GetValue(entity);
 
-            if (value is EntityBase child)
+            if (value is EntityBaseCore child)
             {
                 GuardUnboundedBinaryOnSave(child, true);
             }
-            else if (value is IEnumerable<EntityBase> children)
+            else if (value is IEnumerable<EntityBaseCore> children)
             {
                 foreach (var item in children)
                 {
@@ -9230,7 +9239,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     /// reported on.
     /// </remarks>
     private static void AcceptChanges(
-        EntityBase entity,
+        EntityBaseCore entity,
         bool cascade,
         Dictionary<(string EntityType, string Key), byte[]>? rowVersions,
         HashSet<(string EntityType, string Key)>? skipped
@@ -9258,11 +9267,11 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         {
             var value = property.GetValue(entity);
 
-            if (value is EntityBase child)
+            if (value is EntityBaseCore child)
             {
                 AcceptChanges(child, true, rowVersions, skipped);
             }
-            else if (value is IEnumerable<EntityBase> children)
+            else if (value is IEnumerable<EntityBaseCore> children)
             {
                 foreach (var item in children)
                 {
@@ -9613,7 +9622,7 @@ internal sealed class EntitySaveMetadata
             .Where(property =>
                 property.CanRead
                 && property.CanWrite
-                && property.DeclaringType != typeof(EntityBase)
+                && property.DeclaringType != typeof(EntityBaseCore)
                 && property.GetCustomAttribute<NavigationReferenceAttribute>() is null
             )
             .ToList();
@@ -9743,14 +9752,14 @@ internal sealed class EntitySaveMetadata
         BindingFlags.NonPublic | BindingFlags.Static
     )!;
 
-    /// <summary>Resolved <see cref="PropertyInfo"/> of <see cref="EntityBase.RowState"/>.</summary>
-    private static readonly PropertyInfo _rowStateProperty = typeof(EntityBase).GetProperty(
-        nameof(EntityBase.RowState)
+    /// <summary>Resolved <see cref="PropertyInfo"/> of <see cref="EntityBaseCore.RowState"/>.</summary>
+    private static readonly PropertyInfo _rowStateProperty = typeof(EntityBaseCore).GetProperty(
+        nameof(EntityBaseCore.RowState)
     )!;
 
     /// <summary>Gets the expression-tree-compiled delegate that materializes one row of SelectColumns (the fixed SELECT set) (built once per type and cached).</summary>
     /// <remarks>The arguments are <c>(reader, ordinals)</c>. <c>ordinals</c> holds the column ordinals in SelectColumns order, resolved once before the row loop.</remarks>
-    public required Func<DbDataReader, int[], EntityBase> SelectMaterializer { get; init; }
+    public required Func<DbDataReader, int[], EntityBaseCore> SelectMaterializer { get; init; }
 
     /// <summary>Builds the type-specialized reader accessor table (each value is a <see cref="DbDataReader"/> method taking an <c>int</c> and returning the corresponding CLR type).</summary>
     private static IReadOnlyDictionary<Type, MethodInfo> BuildTypedReaders()
@@ -9789,7 +9798,7 @@ internal sealed class EntitySaveMetadata
     /// <see cref="SetColumnValue"/> (dialect-specific conversion / value object re-wrapping).
     /// The resulting final state (<c>RowState = Unchanged</c>) matches the previous row mapping.
     /// </remarks>
-    private static Func<DbDataReader, int[], EntityBase> BuildSelectMaterializer(
+    private static Func<DbDataReader, int[], EntityBaseCore> BuildSelectMaterializer(
         Type entityType,
         IReadOnlyList<PropertyInfo> properties
     )
@@ -9816,11 +9825,11 @@ internal sealed class EntitySaveMetadata
                 Expression.Constant(RowState.Unchanged)
             )
         );
-        body.Add(Expression.Convert(entityVar, typeof(EntityBase)));
+        body.Add(Expression.Convert(entityVar, typeof(EntityBaseCore)));
 
-        var block = Expression.Block(typeof(EntityBase), new[] { entityVar }, body);
+        var block = Expression.Block(typeof(EntityBaseCore), new[] { entityVar }, body);
         return Expression
-            .Lambda<Func<DbDataReader, int[], EntityBase>>(block, readerParam, ordinalsParam)
+            .Lambda<Func<DbDataReader, int[], EntityBaseCore>>(block, readerParam, ordinalsParam)
             .Compile();
     }
 
@@ -9857,7 +9866,7 @@ internal sealed class EntitySaveMetadata
         // Fallback: call the previous SetColumnValue (DBNull to null / dialect-specific conversion / value object re-wrapping) via the ordinal
         return Expression.Call(
             _setColumnValueMethod,
-            Expression.Convert(entityExpr, typeof(EntityBase)),
+            Expression.Convert(entityExpr, typeof(EntityBaseCore)),
             Expression.Constant(property, typeof(PropertyInfo)),
             Expression.Call(readerParam, _getValueMethod, ordinal)
         );
@@ -9881,11 +9890,11 @@ internal sealed class EntitySaveMetadata
         DbDataReader reader,
         int[] ordinals
     )
-        where TEntity : EntityBase => (TEntity)SelectMaterializer(reader, ordinals);
+        where TEntity : EntityBaseCore => (TEntity)SelectMaterializer(reader, ordinals);
 
     /// <summary>Maps one data reader row to an entity (single-row variant that resolves the SelectColumns ordinals on each call).</summary>
     public TEntity MapEntity<TEntity>(DbDataReader reader)
-        where TEntity : EntityBase, new() => (TEntity)SelectMaterializer(reader, SelectOrdinals(reader));
+        where TEntity : EntityBaseCore, new() => (TEntity)SelectMaterializer(reader, SelectOrdinals(reader));
 
     /// <summary>
     /// The column resolution of one raw SQL result set: the ordinal of every SELECT column, plus the ordinals of the
@@ -9962,7 +9971,7 @@ internal sealed class EntitySaveMetadata
         DbDataReader reader,
         RawSqlRowPlan plan
     )
-        where TEntity : EntityBase, new()
+        where TEntity : EntityBaseCore, new()
     {
         var entity = new TEntity();
 
@@ -9983,7 +9992,7 @@ internal sealed class EntitySaveMetadata
     /// assigns <c>null</c>; otherwise the value is re-wrapped for value objects, coerced from the SQLite storage type,
     /// or passed through for SQL Server, depending on the dialect.
     /// </summary>
-    private static void SetColumnValue(EntityBase entity, PropertyInfo property, object value)
+    private static void SetColumnValue(EntityBaseCore entity, PropertyInfo property, object value)
     {
         if (value is DBNull)
         {
@@ -10006,7 +10015,7 @@ internal sealed class EntitySaveMetadata
         DbDataReader reader,
         RawSqlRowPlan plan
     )
-        where TEntity : EntityBase, new()
+        where TEntity : EntityBaseCore, new()
     {
         var entity = MapEntityStrict<TEntity>(reader, plan);
 
@@ -10029,7 +10038,7 @@ internal sealed class EntitySaveMetadata
     /// <summary>Maps a single raw SQL result row, resolving the column plan on this call (convenience for one-row reads).</summary>
     /// <remarks>Resolve the plan yourself with <see cref="CreateRawSqlRowPlan"/> when reading many rows, so the ordinals are resolved once for the whole result set.</remarks>
     public TEntity MapEntityFromRawSql<TEntity>(DbDataReader reader)
-        where TEntity : EntityBase, new() =>
+        where TEntity : EntityBaseCore, new() =>
         MapEntityFromRawSql<TEntity>(reader, CreateRawSqlRowPlan(reader));
 
     /// <summary>Enumerates the data reader's column name to ordinal map once, case-insensitively (used to detect excluded columns in raw SQL results).</summary>
@@ -10095,21 +10104,21 @@ internal sealed class EntitySaveMetadata
     /// <summary>Per-column-property "reader+ordinal, set onto entity" binders (expression-tree compiled, cached per property).</summary>
     private static readonly ConcurrentDictionary<
         PropertyInfo,
-        Action<EntityBase, DbDataReader, int>
+        Action<EntityBaseCore, DbDataReader, int>
     > _columnBinderCache = new();
 
     /// <summary>Gets the type-specialized binder for one column (so the variable column sets of projections and full-column fetches bind without per-row reflection).</summary>
-    private static Action<EntityBase, DbDataReader, int> ColumnBinder(PropertyInfo property) =>
+    private static Action<EntityBaseCore, DbDataReader, int> ColumnBinder(PropertyInfo property) =>
         _columnBinderCache.GetOrAdd(property, BuildColumnBinder);
 
-    /// <summary>Compiles the single-column expression tree (<see cref="BuildColumnAssign"/>) into an <c>Action&lt;EntityBase, DbDataReader, int&gt;</c>.</summary>
-    private static Action<EntityBase, DbDataReader, int> BuildColumnBinder(PropertyInfo property)
+    /// <summary>Compiles the single-column expression tree (<see cref="BuildColumnAssign"/>) into an <c>Action&lt;EntityBaseCore, DbDataReader, int&gt;</c>.</summary>
+    private static Action<EntityBaseCore, DbDataReader, int> BuildColumnBinder(PropertyInfo property)
     {
-        var entityParam = Expression.Parameter(typeof(EntityBase), "entity");
+        var entityParam = Expression.Parameter(typeof(EntityBaseCore), "entity");
         var readerParam = Expression.Parameter(typeof(DbDataReader), "reader");
         var ordinalParam = Expression.Parameter(typeof(int), "ordinal");
 
-        // Properties are declared on the derived entity type, so downcast EntityBase to the declaring type before accessing
+        // Properties are declared on the derived entity type, so downcast EntityBaseCore to the declaring type before accessing
         var assign = BuildColumnAssign(
             Expression.Convert(entityParam, property.DeclaringType!),
             readerParam,
@@ -10118,7 +10127,7 @@ internal sealed class EntitySaveMetadata
         );
 
         return Expression
-            .Lambda<Action<EntityBase, DbDataReader, int>>(
+            .Lambda<Action<EntityBaseCore, DbDataReader, int>>(
                 assign,
                 entityParam,
                 readerParam,
@@ -10155,11 +10164,11 @@ internal sealed class EntitySaveMetadata
         int[] ordinals,
         bool markUnchanged = false
     )
-        where TEntity : EntityBase
+        where TEntity : EntityBaseCore
     {
         // The query executor's TEntity has no new() constraint of its own, so the instance is created through Activator. The
         // parameterless constructor it needs is guaranteed by the contract types the entity has to satisfy to get here
-        // (IRepository<TEntity, TKey> and IRemoteRepository<TEntity, TKey> both require "where TEntity : EntityBase, new()"),
+        // (IRepository<TEntity, TKey> and IRemoteRepository<TEntity, TKey> both require "where TEntity : EntityBaseCore, new()"),
         // so a partial declaration that removed the default constructor would fail the build with CS0310 rather than reach
         // this line
         var entity = (TEntity)Activator.CreateInstance(typeof(TEntity))!;
@@ -10184,11 +10193,11 @@ internal sealed class EntitySaveMetadata
     /// loader works with runtime <see cref="Type"/> values. <paramref name="ordinals"/> is resolved once before the row loop via <see cref="SelectOrdinals"/>.
     /// </remarks>
     // Without value objects, plain columns are bound by the expression-tree materializer, equivalent to SetColumnValue (= CoerceScalar) (type-specialized, no reflection)
-    public EntityBase MapEntityObject(DbDataReader reader, int[] ordinals) =>
+    public EntityBaseCore MapEntityObject(DbDataReader reader, int[] ordinals) =>
         SelectMaterializer(reader, ordinals);
 
     /// <summary>Maps one data reader row to an entity (without a type argument) (single-row variant that resolves the SelectColumns ordinals on each call).</summary>
-    public EntityBase MapEntityObject(DbDataReader reader) =>
+    public EntityBaseCore MapEntityObject(DbDataReader reader) =>
         MapEntityObject(reader, SelectOrdinals(reader));
 
     /// <summary>
@@ -10264,7 +10273,7 @@ internal sealed class EntitySaveMetadata
     }
 
     /// <summary>Extracts the value of the specified column from an entity (value objects are unwrapped to their raw value). Used for parent/child key matching in Include.</summary>
-    public object? GetColumnValue(EntityBase entity, string columnName)
+    public object? GetColumnValue(EntityBaseCore entity, string columnName)
     {
         if (!PropertyByColumn.TryGetValue(columnName, out var property))
         {
@@ -10277,7 +10286,7 @@ internal sealed class EntitySaveMetadata
         return value;
     }
     /// <summary>Binds the INSERT parameters (the insert-target columns excluding store-generated columns) (shared by insert and graph insert).</summary>
-    public void BindInsertParameters(SqliteCommand command, EntityBase entity)
+    public void BindInsertParameters(SqliteCommand command, EntityBaseCore entity)
     {
         foreach (var property in InsertProperties)
         {
@@ -10298,7 +10307,7 @@ internal sealed class EntitySaveMetadata
     /// position belongs to the property at that position - which holds because the only caller declares and rebinds on
     /// one command it owns for the length of the batch.
     /// </remarks>
-    public void RebindInsertParameters(SqliteCommand command, EntityBase entity)
+    public void RebindInsertParameters(SqliteCommand command, EntityBaseCore entity)
     {
         for (var index = 0; index < InsertProperties.Count; index++)
         {
@@ -10308,7 +10317,7 @@ internal sealed class EntitySaveMetadata
     }
 
     /// <summary>Binds the UPDATE parameters (non-key columns plus the primary key) (shared by update and graph update).</summary>
-    public void BindUpdateParameters(SqliteCommand command, EntityBase entity)
+    public void BindUpdateParameters(SqliteCommand command, EntityBaseCore entity)
     {
         // Updates that still carry values in unbounded binary columns (excluded from UPDATE) would lose them silently,
         // so reject them up front. Both direct UpdateAsync and cascading graph updates pass through here,
@@ -10334,7 +10343,7 @@ internal sealed class EntitySaveMetadata
     }
 
     /// <summary>Binds the entity's primary key value to the @id parameter (used by graph delete).</summary>
-    public void BindEntityKeyParameter(SqliteCommand command, EntityBase entity)
+    public void BindEntityKeyParameter(SqliteCommand command, EntityBaseCore entity)
     {
         AddColumnParameter(
             command,
@@ -10477,22 +10486,22 @@ internal static class CascadeDeletePlanner
 /// </remarks>
 internal sealed class SaveHookSession(
     ISaveHookRegistry registry,
-    Func<EntityBase, ISaveHookContext> contextFactory
+    Func<EntityBaseCore, ISaveHookContext> contextFactory
 )
 {
     private readonly ISaveHookRegistry _registry = registry;
-    private readonly Func<EntityBase, ISaveHookContext> _contextFactory = contextFactory;
-    private readonly HashSet<EntityBase> _skipped = new(ReferenceEqualityComparer.Instance);
+    private readonly Func<EntityBaseCore, ISaveHookContext> _contextFactory = contextFactory;
+    private readonly HashSet<EntityBaseCore> _skipped = new(ReferenceEqualityComparer.Instance);
 
     /// <summary>Gets the set of entities skipped by a Before returning <c>false</c> (reference equality). Used by AcceptChanges to leave states untouched.</summary>
-    public IReadOnlySet<EntityBase> Skipped => _skipped;
+    public IReadOnlySet<EntityBaseCore> Skipped => _skipped;
 
     /// <summary>Adds an entity to the skip set.</summary>
-    public void Skip(EntityBase entity) => _skipped.Add(entity);
+    public void Skip(EntityBaseCore entity) => _skipped.Add(entity);
 
     /// <summary>Calls Before in registration order and short-circuits at the first <c>false</c> (types with no hooks yield <c>true</c>).</summary>
     public Task<bool> InvokeBeforeAsync(
-        EntityBase entity,
+        EntityBaseCore entity,
         SaveOperation operation,
         CancellationToken cancellationToken
     )
@@ -10505,7 +10514,7 @@ internal sealed class SaveHookSession(
 
     /// <summary>Calls After in registration order (types with no hooks do nothing). The context is created bound to the entity type.</summary>
     public Task InvokeAfterAsync(
-        EntityBase entity,
+        EntityBaseCore entity,
         SaveOperation operation,
         CancellationToken cancellationToken
     )
@@ -10526,7 +10535,7 @@ internal sealed class SaveHookSession(
 internal static class EntityGraphSaver
 {
     /// <summary>Returns whether the entity itself, or (when cascading) any child, has changes.</summary>
-    public static bool HasChanges(EntityBase entity, bool cascade) =>
+    public static bool HasChanges(EntityBaseCore entity, bool cascade) =>
         entity.HasChanges
         || (cascade && EnumerateCascadeChildren(entity).Any(child => HasChanges(child, true)));
 
@@ -10538,7 +10547,7 @@ internal static class EntityGraphSaver
     /// performed.
     /// </remarks>
     public static async Task<int> SaveAsync(
-        EntityBase entity,
+        EntityBaseCore entity,
         SqliteConnection connection,
         SqliteTransaction transaction,
         bool cascadeSave,
@@ -10678,7 +10687,7 @@ internal static class EntityGraphSaver
     }
 
     /// <summary>Finalizes saved entities to Unchanged after commit.</summary>
-    public static void AcceptChanges(EntityBase entity, bool cascade) =>
+    public static void AcceptChanges(EntityBaseCore entity, bool cascade) =>
         AcceptChanges(entity, cascade, null);
 
     /// <summary>
@@ -10686,9 +10695,9 @@ internal static class EntityGraphSaver
     /// because a save hook's Before returned <c>false</c>) were not operated on, so their state is left untouched.
     /// </summary>
     public static void AcceptChanges(
-        EntityBase entity,
+        EntityBaseCore entity,
         bool cascade,
-        IReadOnlySet<EntityBase>? skip
+        IReadOnlySet<EntityBaseCore>? skip
     )
     {
         if (entity.IsRemoved)
@@ -10713,7 +10722,7 @@ internal static class EntityGraphSaver
 
     /// <summary>Deletes the subtree starting from the children (deleted regardless of state; when <paramref name="hooks"/> is provided, fires Before/After(Delete) per child).</summary>
     private static async Task<int> DeleteGraphAsync(
-        EntityBase entity,
+        EntityBaseCore entity,
         SqliteConnection connection,
         SqliteTransaction transaction,
         CancellationToken cancellationToken,
@@ -10760,7 +10769,7 @@ internal static class EntityGraphSaver
 
     /// <summary>Inserts a single row.</summary>
     private static Task<int> InsertEntityAsync(
-        EntityBase entity,
+        EntityBaseCore entity,
         SqliteConnection connection,
         SqliteTransaction transaction,
         CancellationToken cancellationToken
@@ -10778,7 +10787,7 @@ internal static class EntityGraphSaver
 
     /// <summary>Deletes a single row.</summary>
     private static Task<int> DeleteEntityAsync(
-        EntityBase entity,
+        EntityBaseCore entity,
         SqliteConnection connection,
         SqliteTransaction transaction,
         CancellationToken cancellationToken
@@ -10796,7 +10805,7 @@ internal static class EntityGraphSaver
 
     /// <summary>Executes the update and returns the affected row count and the operation actually performed (Insert when switched).</summary>
     private static async Task<(int Rows, SaveOperation Performed)> UpdateAsync(
-        EntityBase entity,
+        EntityBaseCore entity,
         SqliteConnection connection,
         SqliteTransaction transaction,
         bool insertWhenUpdateMissing,
@@ -10839,9 +10848,9 @@ internal static class EntityGraphSaver
     }
 
     private static async Task<int> ExecuteAsync(
-        EntityBase entity,
+        EntityBaseCore entity,
         Func<EntitySaveMetadata, string> sqlSelector,
-        Action<EntitySaveMetadata, SqliteCommand, EntityBase> bind,
+        Action<EntitySaveMetadata, SqliteCommand, EntityBaseCore> bind,
         SqliteConnection connection,
         SqliteTransaction transaction,
         CancellationToken cancellationToken
@@ -10855,7 +10864,7 @@ internal static class EntityGraphSaver
     }
 
     /// <summary>Enumerates the cascade-target child entities (nulls are excluded).</summary>
-    private static IEnumerable<EntityBase> EnumerateCascadeChildren(EntityBase entity)
+    private static IEnumerable<EntityBaseCore> EnumerateCascadeChildren(EntityBaseCore entity)
     {
         foreach (var navigation in EntitySaveMetadata.For(entity.GetType()).CascadeNavigations)
         {
@@ -10868,7 +10877,7 @@ internal static class EntityGraphSaver
 
             if (navigation.IsCollection)
             {
-                if (value is IEnumerable<EntityBase> children)
+                if (value is IEnumerable<EntityBaseCore> children)
                 {
                     foreach (var child in children)
                     {
@@ -10879,7 +10888,7 @@ internal static class EntityGraphSaver
                     }
                 }
             }
-            else if (value is EntityBase child)
+            else if (value is EntityBaseCore child)
             {
                 yield return child;
             }
@@ -11563,9 +11572,9 @@ internal static class InMemoryUniqueness
     /// <param name="existing">The rows to compare against, keyed by primary key.</param>
     public static void Verify(
         Type entityType,
-        EntityBase row,
+        EntityBaseCore row,
         object key,
-        IEnumerable<KeyValuePair<object, EntityBase>> existing
+        IEnumerable<KeyValuePair<object, EntityBaseCore>> existing
     )
     {
         var constraints = For(entityType);
@@ -11629,7 +11638,7 @@ internal static class InMemoryUniqueness
         );
 
     /// <summary>The constraint's member values read off a row, or <c>null</c> when any of them is null (which takes the tuple out of the comparison).</summary>
-    private static object[]? ValuesOf(EntityBase row, InMemoryUniqueConstraint constraint)
+    private static object[]? ValuesOf(EntityBaseCore row, InMemoryUniqueConstraint constraint)
     {
         var values = new object[constraint.Properties.Count];
 
@@ -11699,7 +11708,7 @@ internal static class InMemoryUniqueness
 /// <remarks>
 /// <para>
 /// Keeps a "primary key -> snapshot" dictionary per entity type. A write files away a copy of the entity's columns and a
-/// read hands out a clone produced by <see cref="EntityBase.Clone"/>, so mutating a returned entity on the caller
+/// read hands out a clone produced by <see cref="EntityBaseCore.Clone"/>, so mutating a returned entity on the caller
 /// side never changes the store contents (matching the by-value semantics of a real database). All operations are
 /// serialized with a <c>lock</c> to be thread-safe.
 /// </para>
@@ -11711,15 +11720,15 @@ internal static class InMemoryUniqueness
 public sealed class InMemoryDataStore
 {
     private readonly object _gate = new();
-    private readonly Dictionary<Type, Dictionary<object, EntityBase>> _tables = new();
+    private readonly Dictionary<Type, Dictionary<object, EntityBaseCore>> _tables = new();
     private long _rowVersion;
 
     /// <summary>Gets the table (primary key -> snapshot) for the given type, creating it if absent. The caller must already hold the lock.</summary>
-    private Dictionary<object, EntityBase> Table(Type entityType)
+    private Dictionary<object, EntityBaseCore> Table(Type entityType)
     {
         if (!_tables.TryGetValue(entityType, out var table))
         {
-            table = new Dictionary<object, EntityBase>();
+            table = new Dictionary<object, EntityBaseCore>();
             _tables[entityType] = table;
         }
 
@@ -11727,7 +11736,7 @@ public sealed class InMemoryDataStore
     }
 
     /// <summary>Normalizes an entity's primary key value into a dictionary key (value objects are opened to their underlying value; null is not allowed).</summary>
-    internal static object KeyOf(EntityBase entity)
+    internal static object KeyOf(EntityBaseCore entity)
     {
         var metadata = EntitySaveMetadata.For(entity.GetType());
         var raw = metadata.KeyProperty.GetValue(entity);
@@ -11741,7 +11750,7 @@ public sealed class InMemoryDataStore
     /// <summary>Gets all snapshots of the given type (as clones).</summary>
     /// <remarks>The returned clones drop unbounded binary columns to their "not fetched" state (matching the real database's SELECT exclusion; the store's actual data is preserved).</remarks>
     public IReadOnlyList<TEntity> Snapshot<TEntity>()
-        where TEntity : EntityBase, new()
+        where TEntity : EntityBaseCore, new()
     {
         lock (_gate)
         {
@@ -11759,7 +11768,7 @@ public sealed class InMemoryDataStore
     /// <summary>Gets the snapshot for the given type and primary key (as a clone; null if not found).</summary>
     /// <remarks>The returned clone drops unbounded binary columns to their "not fetched" state (matching the real database's SELECT exclusion; the store's actual data is preserved).</remarks>
     public TEntity? Find<TEntity>(object key)
-        where TEntity : EntityBase, new()
+        where TEntity : EntityBaseCore, new()
     {
         lock (_gate)
         {
@@ -11783,7 +11792,7 @@ public sealed class InMemoryDataStore
     /// and update moves it on, so an entity holding a stale version can be told apart from a current one. The counter is
     /// advanced atomically because a save hook's After writes a column outside the store lock.
     /// </remarks>
-    private PropertyInfo? StampRowVersion(EntityBase snapshot)
+    private PropertyInfo? StampRowVersion(EntityBaseCore snapshot)
     {
         var property = EntitySaveMetadata.For(snapshot.GetType()).RowVersionProperty;
 
@@ -11805,7 +11814,7 @@ public sealed class InMemoryDataStore
     }
 
     /// <summary>Stamps <paramref name="snapshot"/> and hands the newly assigned version straight to <paramref name="source"/> (used by the writes that apply to the store immediately).</summary>
-    private void StampRowVersionDirect(EntityBase snapshot, EntityBase? source)
+    private void StampRowVersionDirect(EntityBaseCore snapshot, EntityBaseCore? source)
     {
         var property = StampRowVersion(snapshot);
 
@@ -11820,9 +11829,9 @@ public sealed class InMemoryDataStore
     /// <summary>Copies the row version a stored snapshot holds onto the caller's entity, mirroring how a real database hands the newly assigned version back.</summary>
     /// <remarks>The caller's entity gets its own array so that mutating one side cannot reach into the store's snapshot.</remarks>
     private static void ApplyRowVersion(
-        EntityBase source,
+        EntityBaseCore source,
         PropertyInfo property,
-        EntityBase snapshot
+        EntityBaseCore snapshot
     )
     {
         var stored = property.GetValue(snapshot);
@@ -11842,7 +11851,7 @@ public sealed class InMemoryDataStore
     /// is lost on the read side, where Include rebuilds the navigations from the child rows whenever a query asks for them.
     /// </para>
     /// <para>
-    /// Copying the columns alone is also what keeps a save linear. <see cref="EntityBase.Clone"/> deep-copies the whole
+    /// Copying the columns alone is also what keeps a save linear. <see cref="EntityBaseCore.Clone"/> deep-copies the whole
     /// subtree (a JSON round trip) only for the children to be dropped again straight afterwards, so saving a graph of n
     /// nodes copied the subtree of every one of them.
     /// </para>
@@ -11851,10 +11860,10 @@ public sealed class InMemoryDataStore
     /// keeps the by-value semantics cloning gave, where writing through the caller's array cannot reach the store's row.
     /// </para>
     /// </remarks>
-    private static EntityBase CopyColumns(EntityBase entity)
+    private static EntityBaseCore CopyColumns(EntityBaseCore entity)
     {
         var entityType = entity.GetType();
-        var copy = (EntityBase)Activator.CreateInstance(entityType)!;
+        var copy = (EntityBaseCore)Activator.CreateInstance(entityType)!;
 
         foreach (var property in EntitySaveMetadata.For(entityType).AllProperties)
         {
@@ -11871,7 +11880,7 @@ public sealed class InMemoryDataStore
     /// <paramref name="previous"/> is the row this write replaces (<c>null</c> for an insert, which writes every column just
     /// as a real INSERT does).
     /// </remarks>
-    private static EntityBase PrepareSnapshot(EntityBase entity, EntityBase? previous)
+    private static EntityBaseCore PrepareSnapshot(EntityBaseCore entity, EntityBaseCore? previous)
     {
         var snapshot = CopyColumns(entity);
 
@@ -11885,14 +11894,14 @@ public sealed class InMemoryDataStore
     }
 
     /// <summary>Gets the raw snapshot (no clone) for the given type and primary key. Used by internal traversals such as Include key matching. The caller must already hold the lock.</summary>
-    private EntityBase? FindRaw(Type entityType, object key) =>
+    private EntityBaseCore? FindRaw(Type entityType, object key) =>
         Table(entityType).TryGetValue(key, out var entity) ? entity : null;
 
     /// <summary>Gets the list of raw snapshots (no clones) for the given type. Used by the query executor's internal traversals. The caller must already hold the lock.</summary>
-    private IReadOnlyList<EntityBase> RawAll(Type entityType) => Table(entityType).Values.ToList();
+    private IReadOnlyList<EntityBaseCore> RawAll(Type entityType) => Table(entityType).Values.ToList();
 
     /// <summary>Gets the list of raw snapshots (no clones) for the given type. Used inside the lock to hand pre-clone snapshots to the executor.</summary>
-    internal IReadOnlyList<EntityBase> RawSnapshotUnlocked(Type entityType) => RawAll(entityType);
+    internal IReadOnlyList<EntityBaseCore> RawSnapshotUnlocked(Type entityType) => RawAll(entityType);
 
     /// <summary>Runs an arbitrary read traversal over the whole store under the lock (so Include key matching can span multiple tables).</summary>
     internal TResult Read<TResult>(Func<InMemoryReadScope, TResult> reader)
@@ -11904,7 +11913,7 @@ public sealed class InMemoryDataStore
     }
 
     /// <summary>Stores a snapshot (clone) for updates and seeding (an existing key is overwritten). Use <see cref="Insert"/> for inserts, which reject an existing key.</summary>
-    internal void Put(EntityBase entity)
+    internal void Put(EntityBaseCore entity)
     {
         lock (_gate)
         {
@@ -11924,7 +11933,7 @@ public sealed class InMemoryDataStore
 
     /// <summary>Stores a snapshot (clone) for an insert only. An existing primary key is rejected with an <see cref="InvalidOperationException"/> instead of being silently overwritten.</summary>
     /// <remarks>The declared UNIQUE constraints are checked as well, before anything is written, so a rejected insert leaves the store untouched.</remarks>
-    internal void Insert(EntityBase entity)
+    internal void Insert(EntityBaseCore entity)
     {
         lock (_gate)
         {
@@ -12010,7 +12019,7 @@ public sealed class InMemoryDataStore
             }
         }
 
-        EntityBase? baseRow;
+        EntityBaseCore? baseRow;
 
         lock (_gate)
         {
@@ -12191,7 +12200,7 @@ public sealed class InMemoryDataStore
     /// </remarks>
     private void VerifyStagedUniqueness(InMemorySaveStaging staging)
     {
-        Dictionary<Type, Dictionary<object, EntityBase>>? views = null;
+        Dictionary<Type, Dictionary<object, EntityBaseCore>>? views = null;
 
         foreach (var ((entityType, key), snapshot) in staging.Overlay)
         {
@@ -12201,7 +12210,7 @@ public sealed class InMemoryDataStore
                 continue;
             }
 
-            views ??= new Dictionary<Type, Dictionary<object, EntityBase>>();
+            views ??= new Dictionary<Type, Dictionary<object, EntityBaseCore>>();
 
             if (!views.TryGetValue(entityType, out var view))
             {
@@ -12214,12 +12223,12 @@ public sealed class InMemoryDataStore
     }
 
     /// <summary>The rows of one type as publishing will leave them: the store's rows with the save's staged writes applied.</summary>
-    private Dictionary<object, EntityBase> ComposeView(
+    private Dictionary<object, EntityBaseCore> ComposeView(
         Type entityType,
         InMemorySaveStaging staging
     )
     {
-        var view = new Dictionary<object, EntityBase>(Table(entityType));
+        var view = new Dictionary<object, EntityBaseCore>(Table(entityType));
 
         foreach (var ((stagedType, key), snapshot) in staging.Overlay)
         {
@@ -12254,10 +12263,10 @@ public sealed class InMemoryDataStore
     internal readonly struct InMemoryReadScope(InMemoryDataStore store)
     {
         /// <summary>The list of raw snapshots (no clones) for the given type.</summary>
-        public IReadOnlyList<EntityBase> All(Type entityType) => store.RawAll(entityType);
+        public IReadOnlyList<EntityBaseCore> All(Type entityType) => store.RawAll(entityType);
 
         /// <summary>The raw snapshot (no clone) for the given type and primary key (null if not found).</summary>
-        public EntityBase? Find(Type entityType, object key) => store.FindRaw(entityType, key);
+        public EntityBaseCore? Find(Type entityType, object key) => store.FindRaw(entityType, key);
     }
 
     /// <summary>
@@ -12271,13 +12280,13 @@ public sealed class InMemoryDataStore
     )
     {
         /// <summary>The row as this scope sees it: what the save has staged for it, or else the store's own row (null when there is none).</summary>
-        private EntityBase? Current(Type entityType, object key) =>
+        private EntityBaseCore? Current(Type entityType, object key) =>
             staging is not null && staging.TryGetStaged(entityType, key, out var staged)
                 ? staged
                 : store.FindRaw(entityType, key);
 
         /// <summary>Applies or stages a prepared snapshot and arranges for the newly assigned row version to reach <paramref name="entity"/>.</summary>
-        private void Write(EntityBase entity, Type entityType, object key, EntityBase snapshot)
+        private void Write(EntityBaseCore entity, Type entityType, object key, EntityBaseCore snapshot)
         {
             if (staging is null)
             {
@@ -12299,7 +12308,7 @@ public sealed class InMemoryDataStore
         }
 
         /// <summary>Stores a snapshot for updates and seeding (an existing key is overwritten). Assumes the lock is held, so it writes directly to the internal dictionary.</summary>
-        public void Put(EntityBase entity)
+        public void Put(EntityBaseCore entity)
         {
             var entityType = entity.GetType();
             var key = KeyOf(entity);
@@ -12308,7 +12317,7 @@ public sealed class InMemoryDataStore
         }
 
         /// <summary>Stores a snapshot for an insert only (an existing primary key throws instead of being overwritten). Assumes the lock is held, so it writes directly to the internal dictionary.</summary>
-        public void Insert(EntityBase entity)
+        public void Insert(EntityBaseCore entity)
         {
             var entityType = entity.GetType();
             var key = KeyOf(entity);
@@ -12350,9 +12359,9 @@ public sealed class InMemoryDataStore
         /// <param name="key">The primary key of that row (the row carrying it is skipped, so an update never collides with itself).</param>
         /// <param name="pending">Rows the caller has accepted but not written yet, keyed by primary key (a bulk insert's preceding elements).</param>
         public void VerifyUnique(
-            EntityBase entity,
+            EntityBaseCore entity,
             object key,
-            IReadOnlyDictionary<object, EntityBase>? pending = null
+            IReadOnlyDictionary<object, EntityBaseCore>? pending = null
         )
         {
             var entityType = entity.GetType();
@@ -12374,7 +12383,7 @@ public sealed class InMemoryDataStore
         /// The comparison is strict: an entity whose version is null (never read back from the store) never matches a stored
         /// row, which is what a real database does with <c>WHERE ... AND row_ver = @originalRowVersion</c>.
         /// </remarks>
-        public bool IsCurrent(EntityBase entity, ConcurrencyMode mode)
+        public bool IsCurrent(EntityBaseCore entity, ConcurrencyMode mode)
         {
             var property = EntitySaveMetadata.For(entity.GetType()).RowVersionProperty;
 
@@ -12396,7 +12405,7 @@ public sealed class InMemoryDataStore
         }
 
         /// <summary>The list of raw snapshots (no clones) for the given type. Used by the descendant traversal for cascade delete.</summary>
-        public IReadOnlyList<EntityBase> All(Type entityType) => store.RawAll(entityType);
+        public IReadOnlyList<EntityBaseCore> All(Type entityType) => store.RawAll(entityType);
     }
 }
 
@@ -12432,32 +12441,32 @@ public sealed class InMemoryDataStore
 /// </remarks>
 internal sealed class InMemorySaveStaging
 {
-    private readonly Dictionary<(Type EntityType, object Key), EntityBase?> _overlay = new();
-    private readonly List<(Type EntityType, object Key, EntityBase? Base)> _baseline = new();
+    private readonly Dictionary<(Type EntityType, object Key), EntityBaseCore?> _overlay = new();
+    private readonly List<(Type EntityType, object Key, EntityBaseCore? Base)> _baseline = new();
     private readonly HashSet<(Type EntityType, object Key)> _touched = new();
     private readonly List<(
-        EntityBase Source,
+        EntityBaseCore Source,
         PropertyInfo Property,
         Type EntityType,
         object Key
     )> _stamps = new();
 
     /// <summary>The rows the save started from, in the order it first touched them (a null base means the row did not exist yet).</summary>
-    public IReadOnlyList<(Type EntityType, object Key, EntityBase? Base)> Baseline => _baseline;
+    public IReadOnlyList<(Type EntityType, object Key, EntityBaseCore? Base)> Baseline => _baseline;
 
     /// <summary>The staged writes (a null value marks a delete).</summary>
-    public IReadOnlyDictionary<(Type EntityType, object Key), EntityBase?> Overlay => _overlay;
+    public IReadOnlyDictionary<(Type EntityType, object Key), EntityBaseCore?> Overlay => _overlay;
 
     /// <summary>The caller entities awaiting the row version of the row they were written to.</summary>
     public IReadOnlyList<(
-        EntityBase Source,
+        EntityBaseCore Source,
         PropertyInfo Property,
         Type EntityType,
         object Key
     )> Stamps => _stamps;
 
     /// <summary>Records the snapshot the store held for a row when the save first touched it (later touches are ignored).</summary>
-    public void CaptureBase(Type entityType, object key, EntityBase? baseRow)
+    public void CaptureBase(Type entityType, object key, EntityBaseCore? baseRow)
     {
         if (_touched.Add((entityType, key)))
         {
@@ -12466,20 +12475,20 @@ internal sealed class InMemorySaveStaging
     }
 
     /// <summary>Stages a write for a row (a null snapshot marks a delete), replacing whatever the save staged for it before.</summary>
-    public void Stage(Type entityType, object key, EntityBase? snapshot) =>
+    public void Stage(Type entityType, object key, EntityBaseCore? snapshot) =>
         _overlay[(entityType, key)] = snapshot;
 
     /// <summary>Gets the write the save has staged for a row (true when it staged one at all, including a delete).</summary>
-    public bool TryGetStaged(Type entityType, object key, out EntityBase? snapshot) =>
+    public bool TryGetStaged(Type entityType, object key, out EntityBaseCore? snapshot) =>
         _overlay.TryGetValue((entityType, key), out snapshot);
 
     /// <summary>The snapshot staged for a row (null for a delete as well as for a row the save never staged).</summary>
-    public EntityBase? Staged(Type entityType, object key) =>
+    public EntityBaseCore? Staged(Type entityType, object key) =>
         _overlay.GetValueOrDefault((entityType, key));
 
     /// <summary>Records that a caller entity is waiting for the row version the given row ends up published with.</summary>
     public void RecordStamp(
-        EntityBase source,
+        EntityBaseCore source,
         PropertyInfo property,
         Type entityType,
         object key
@@ -12498,7 +12507,7 @@ internal sealed class InMemorySaveStaging
 /// </remarks>
 internal sealed class InMemoryQueryExecutor<TEntity>(InMemoryDataStore store)
     : ISqlQueryExecutor<TEntity>
-    where TEntity : EntityBase, new()
+    where TEntity : EntityBaseCore, new()
 {
     private readonly InMemoryDataStore _store = store;
 
@@ -12710,7 +12719,7 @@ internal sealed class InMemoryQueryExecutor<TEntity>(InMemoryDataStore store)
             .ToArray();
 
     /// <summary>Filters the store's raw snapshots by applying the predicates (AND-combined) (pre-clone, enumeration only).</summary>
-    private IEnumerable<EntityBase> FilterRaw(Func<TEntity, bool>[] predicates)
+    private IEnumerable<EntityBaseCore> FilterRaw(Func<TEntity, bool>[] predicates)
     {
         IEnumerable<TEntity> query = _store.RawSnapshotUnlocked(typeof(TEntity)).Cast<TEntity>();
 
@@ -12723,8 +12732,8 @@ internal sealed class InMemoryQueryExecutor<TEntity>(InMemoryDataStore store)
     }
 
     /// <summary>Applies the orderings (stable sort in the specified order) and Skip/Take.</summary>
-    private static IReadOnlyList<EntityBase> ApplyOrderingAndPaging(
-        IEnumerable<EntityBase> source,
+    private static IReadOnlyList<EntityBaseCore> ApplyOrderingAndPaging(
+        IEnumerable<EntityBaseCore> source,
         SqlQueryPlan<TEntity> plan,
         (Func<TEntity, object?> KeySelector, bool Descending)[] orderings
     )
@@ -12762,7 +12771,7 @@ internal sealed class InMemoryQueryExecutor<TEntity>(InMemoryDataStore store)
             result = result.Take(take);
         }
 
-        return result.Cast<EntityBase>().ToList();
+        return result.Cast<EntityBaseCore>().ToList();
     }
 }
 
@@ -12814,7 +12823,7 @@ internal static class IncludeAttacher
 {
     /// <summary>Recursively attaches the navigations for the Include tree onto the given (cloned) entity.</summary>
     public static void Attach(
-        EntityBase entity,
+        EntityBaseCore entity,
         IReadOnlyList<IncludeNode> includes,
         InMemoryDataStore.InMemoryReadScope scope
     )
@@ -12842,7 +12851,7 @@ internal static class IncludeAttacher
 
     /// <summary>Fills a collection or child-direction single-reference navigation with the children whose FK matches the parent key.</summary>
     private static void AttachChildren(
-        EntityBase parent,
+        EntityBaseCore parent,
         IncludeNode node,
         NavigationReferenceAttribute attribute,
         EntitySaveMetadata parentMetadata,
@@ -12855,7 +12864,7 @@ internal static class IncludeAttacher
         var childMetadata = EntitySaveMetadata.For(childType);
 
         var parentKey = ColumnValue(parent, attribute.PrincipalColumn, parentMetadata);
-        var matched = new List<EntityBase>();
+        var matched = new List<EntityBaseCore>();
 
         foreach (var child in scope.All(childType))
         {
@@ -12891,7 +12900,7 @@ internal static class IncludeAttacher
 
     /// <summary>Fills a parent-reference navigation with the parent that its own FK points to.</summary>
     private static void AttachParent(
-        EntityBase dependent,
+        EntityBaseCore dependent,
         IncludeNode node,
         NavigationReferenceAttribute attribute,
         EntitySaveMetadata dependentMetadata,
@@ -12928,7 +12937,7 @@ internal static class IncludeAttacher
 
     /// <summary>Reads the value of the given column from an entity (value objects are opened to their underlying value).</summary>
     private static object? ColumnValue(
-        EntityBase entity,
+        EntityBaseCore entity,
         string columnName,
         EntitySaveMetadata metadata
     )
@@ -12949,7 +12958,7 @@ internal static class IncludeAttacher
 internal static class InMemoryCascade
 {
     /// <summary>Enumerates the child entities subject to cascade (null is excluded).</summary>
-    public static IEnumerable<EntityBase> EnumerateChildren(EntityBase entity)
+    public static IEnumerable<EntityBaseCore> EnumerateChildren(EntityBaseCore entity)
     {
         foreach (var navigation in EntitySaveMetadata.For(entity.GetType()).CascadeNavigations)
         {
@@ -12962,7 +12971,7 @@ internal static class InMemoryCascade
 
             if (navigation.IsCollection)
             {
-                if (value is IEnumerable<EntityBase> children)
+                if (value is IEnumerable<EntityBaseCore> children)
                 {
                     foreach (var child in children)
                     {
@@ -12973,7 +12982,7 @@ internal static class InMemoryCascade
                     }
                 }
             }
-            else if (value is EntityBase child)
+            else if (value is EntityBaseCore child)
             {
                 yield return child;
             }
@@ -12992,14 +13001,14 @@ internal static class InMemoryCascade
     /// when the caller gave the write scope a staging, none of them ever reached the store to begin with.
     /// </remarks>
     public static int Save(
-        EntityBase entity,
+        EntityBaseCore entity,
         InMemoryDataStore.InMemoryWriteScope scope,
         bool cascadeSave,
         bool cascadeDelete,
         bool insertWhenUpdateMissing,
         ConcurrencyMode mode,
         SaveHookSession? hooks = null,
-        List<(EntityBase Entity, SaveOperation Operation)>? records = null,
+        List<(EntityBaseCore Entity, SaveOperation Operation)>? records = null,
         bool changesAlreadyVerified = false
     )
     {
@@ -13111,7 +13120,7 @@ internal static class InMemoryCascade
     /// <summary>Phase 1: traverses the graph in the same order as <see cref="Save"/>, fires the pre-operation hooks (Before), and builds the skip set (outside the lock, async).</summary>
     /// <remarks>Before fires with the RowState-derived operation (even when <c>insertWhenUpdateMissing</c> switches to Insert, it fires once as Update). The actual operation is determined by the save phase.</remarks>
     public static async Task InvokeBeforeGraphAsync(
-        EntityBase entity,
+        EntityBaseCore entity,
         SaveHookSession hooks,
         bool cascadeSave,
         bool cascadeDelete,
@@ -13176,7 +13185,7 @@ internal static class InMemoryCascade
 
     /// <summary>Fires Before for a subtree delete starting from the children (same order as <see cref="DeleteGraph"/>).</summary>
     private static async Task InvokeBeforeDeleteGraphAsync(
-        EntityBase entity,
+        EntityBaseCore entity,
         SaveHookSession hooks,
         CancellationToken cancellationToken
     )
@@ -13194,11 +13203,11 @@ internal static class InMemoryCascade
 
     /// <summary>Deletes a subtree starting from the children (deletes regardless of state; when <paramref name="hooks"/> is provided, skipped rows are left in place and the deletes actually performed are recorded into <paramref name="records"/>).</summary>
     private static int DeleteGraph(
-        EntityBase entity,
+        EntityBaseCore entity,
         InMemoryDataStore.InMemoryWriteScope scope,
         ConcurrencyMode mode,
         SaveHookSession? hooks = null,
-        List<(EntityBase Entity, SaveOperation Operation)>? records = null
+        List<(EntityBaseCore Entity, SaveOperation Operation)>? records = null
     )
     {
         var rows = 0;
@@ -13238,12 +13247,12 @@ internal static class InMemoryCascade
     /// and are therefore unsupported.
     /// </remarks>
     public static int DeleteDescendants(
-        EntityBase root,
+        EntityBaseCore root,
         InMemoryDataStore.InMemoryWriteScope scope
     ) => DeleteDescendants(root, scope, new HashSet<Type> { root.GetType() });
 
     private static int DeleteDescendants(
-        EntityBase parent,
+        EntityBaseCore parent,
         InMemoryDataStore.InMemoryWriteScope scope,
         HashSet<Type> visited
     )
@@ -13294,7 +13303,7 @@ internal static class InMemoryCascade
 
     /// <summary>Reads the value of the given column from an entity (value objects are opened to their underlying value).</summary>
     private static object? ColumnValue(
-        EntityBase entity,
+        EntityBaseCore entity,
         string columnName,
         EntitySaveMetadata metadata
     )
@@ -13323,7 +13332,7 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
     InMemoryDataStore store,
     ISaveHookRegistry? saveHooks = null
 ) : IRepository<TEntity, TKey>
-    where TEntity : EntityBase, new()
+    where TEntity : EntityBaseCore, new()
 {
     /// <summary>The data store holding the snapshots (shared via DI).</summary>
     protected InMemoryDataStore Store { get; } = store;
@@ -13380,7 +13389,7 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
         var count = Store.Write(scope =>
         {
             var batchKeys = new HashSet<object>();
-            var accepted = new Dictionary<object, EntityBase>();
+            var accepted = new Dictionary<object, EntityBaseCore>();
 
             // Pre-validate all keys and constraint values, then apply: a duplicate must not leave a partially inserted batch behind.
             foreach (var entity in targets)
@@ -13626,7 +13635,7 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
 
         // Phase 2 (inside the lock): stage the save applying the skip set and record the (entity, operation) pairs performed.
         var records =
-            hooks is null ? null : new List<(EntityBase Entity, SaveOperation Operation)>();
+            hooks is null ? null : new List<(EntityBaseCore Entity, SaveOperation Operation)>();
         var rows = Store.Write(
             scope =>
                 InMemoryCascade.Save(
@@ -13718,7 +13727,7 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
 
         // Phase 2 (inside the lock): stage all roots applying the skips and record the (entity, operation) pairs performed.
         var records =
-            hooks is null ? null : new List<(EntityBase Entity, SaveOperation Operation)>();
+            hooks is null ? null : new List<(EntityBaseCore Entity, SaveOperation Operation)>();
         var rows = Store.Write(
             scope =>
             {
@@ -14133,7 +14142,7 @@ public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TConte
         object? parameters = null,
         CancellationToken cancellationToken = default
     )
-        where TEntity : EntityBase, new()
+        where TEntity : EntityBaseCore, new()
     {
         ArgumentNullException.ThrowIfNull(sql);
 
@@ -14263,7 +14272,7 @@ public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TConte
 internal sealed class EfCoreSqlQueryExecutor<TEntity, TContext>(
     IDbContextFactory<TContext> contextFactory
 ) : ISqlQueryExecutor<TEntity>
-    where TEntity : EntityBase
+    where TEntity : EntityBaseCore
     where TContext : DbContext
 {
     /// <summary>The source that creates the DbContext.</summary>
@@ -14638,7 +14647,7 @@ internal sealed class EfCoreSqlQueryExecutor<TEntity, TContext>(
     }
 
     /// <summary>Normalizes the retrieved graph (root plus what was read via Include) to RowState=Unchanged (the same post-mapping state as the existing version).</summary>
-    private static void MarkGraphUnchanged(EntityBase entity, IReadOnlyList<IncludeNode> includes)
+    private static void MarkGraphUnchanged(EntityBaseCore entity, IReadOnlyList<IncludeNode> includes)
     {
         entity.MarkUnchanged();
 
@@ -14651,7 +14660,7 @@ internal sealed class EfCoreSqlQueryExecutor<TEntity, TContext>(
                 continue;
             }
 
-            if (value is IEnumerable<EntityBase> children)
+            if (value is IEnumerable<EntityBaseCore> children)
             {
                 foreach (var child in children)
                 {
@@ -14661,7 +14670,7 @@ internal sealed class EfCoreSqlQueryExecutor<TEntity, TContext>(
                     }
                 }
             }
-            else if (value is EntityBase child)
+            else if (value is EntityBaseCore child)
             {
                 MarkGraphUnchanged(child, node.Children);
             }
@@ -14690,7 +14699,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
     ISaveHookRegistry? saveHooks = null,
     ISqlExecutor? sqlExecutor = null
 ) : IRepository<TEntity, TKey>
-    where TEntity : EntityBase, new()
+    where TEntity : EntityBaseCore, new()
     where TContext : DbContext
 {
     /// <summary>Metadata built once per entity type (reused via a static field).</summary>
@@ -14712,13 +14721,13 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
 
     /// <summary>One record of "entity to save, EF Core entry, operation to perform" recorded by TrackGraph (the operation is updated when switched by a retry).</summary>
     private sealed class TrackedOperation(
-        EntityBase entity,
+        EntityBaseCore entity,
         EntityEntry entry,
         SaveOperation operation
     )
     {
         /// <summary>The entity to save.</summary>
-        public EntityBase Entity { get; } = entity;
+        public EntityBaseCore Entity { get; } = entity;
 
         /// <summary>The corresponding EF Core tracking entry (used for applying State and for type checks on retry).</summary>
         public EntityEntry Entry { get; } = entry;
@@ -15073,7 +15082,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
         // SaveChanges writes the row version the database assigned straight onto the entity, but this transaction has not
         // committed yet. The versions the entities were read with are kept so that they can be put back for the duration of
         // the After pass (see below).
-        var readVersions = new List<(EntityBase Entity, PropertyInfo Property, object? Version)>();
+        var readVersions = new List<(EntityBaseCore Entity, PropertyInfo Property, object? Version)>();
 
         foreach (var op in survivors)
         {
@@ -15097,7 +15106,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
         // path's RowVersionCollector expressed for EF Core; no value-object wrapping is needed here because the values never
         // leave their property (the ADO collector wraps because the database hands it a raw byte[]).
         var assignedVersions =
-            new List<(EntityBase Entity, PropertyInfo Property, object? Version)>();
+            new List<(EntityBaseCore Entity, PropertyInfo Property, object? Version)>();
 
         foreach (var (entity, property, readVersion) in readVersions)
         {
@@ -15197,7 +15206,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
             entity,
             node =>
             {
-                var current = (EntityBase)node.Entry.Entity;
+                var current = (EntityBaseCore)node.Entry.Entity;
 
                 // When the parent is to be deleted, handling of descendants follows cascadeDelete (same as the existing version's descendants-first DELETE).
                 if (node.SourceEntry is { State: EntityState.Deleted })
@@ -15223,7 +15232,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
     /// <summary>Adds a record for hook firing when the EntityState is a save target (Added/Modified/Deleted); Unchanged is ignored.</summary>
     private static void RecordOperation(
         List<TrackedOperation> tracked,
-        EntityBase entity,
+        EntityBaseCore entity,
         EntityEntry entry
     )
     {

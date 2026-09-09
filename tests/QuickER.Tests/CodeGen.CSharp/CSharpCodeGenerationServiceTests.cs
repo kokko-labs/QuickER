@@ -68,7 +68,7 @@ public class CSharpCodeGenerationServiceTests
             .Be(2);
         result.Files[0].Content.Should().Contain("public partial class CustomerEntity");
         result.Files[0].Content.Should().Contain("public partial class CustomerEditModel");
-        result.Files[0].Content.Should().Contain("public abstract partial class EditModelBase");
+        result.Files[0].Content.Should().Contain("public abstract partial class EditModelBaseCore");
         result.Files[0].Content.Should().Contain("[Table(\"customers\")]");
         result.Files[0].Content.Should().Contain("[Key]");
         result.Files[0].Content.Should().Contain("[MaxLength(100)]");
@@ -186,9 +186,12 @@ public class CSharpCodeGenerationServiceTests
             .Files[0]
             .Content.Should()
             .Contain("public partial class CustomerEntity : EntityBase");
-        result.Files[0].Content.Should().Contain("public abstract partial class EntityBase");
+        result.Files[0].Content.Should().Contain("public abstract partial class EntityBaseCore");
         // EntityBase は値比較・値ハッシュ・JSON 出力を提供する（値系はメタデータではなく自己完結の列プロパティ走査）
-        result.Files[0].Content.Should().Contain("public bool HasSameValues(EntityBase? other)");
+        result
+            .Files[0]
+            .Content.Should()
+            .Contain("public bool HasSameValues(EntityBaseCore? other)");
         result.Files[0].Content.Should().Contain("public int GetValueHashCode()");
         result
             .Files[0]
@@ -196,7 +199,7 @@ public class CSharpCodeGenerationServiceTests
             .Contain("public string ToJson(bool writeIndented = false)");
         result.Files[0].Content.Should().Contain("IgnoreReadOnlyProperties = true,");
         // ToJson を使ったディープコピー（JSON ラウンドトリップ）。戻り値は EntityBase
-        result.Files[0].Content.Should().Contain("public EntityBase Clone()");
+        result.Files[0].Content.Should().Contain("public EntityBaseCore Clone()");
         // EntityBase が使う namespace は using に含め、テンプレートでは完全修飾しない
         result.Files[0].Content.Should().Contain("using System.Text.Json;");
         result.Files[0].Content.Should().Contain("using System.Text.Json.Serialization;");
@@ -217,7 +220,7 @@ public class CSharpCodeGenerationServiceTests
 
         var content = result.Files[0].Content;
         // EditModel も RowState を保持し、確定値変更時に Updated へ昇格する
-        content.Should().Contain("public abstract partial class EditModelBase");
+        content.Should().Contain("public abstract partial class EditModelBaseCore");
         content.Should().Contain("public RowState RowState");
         content.Should().Contain("public void MarkAdded() => RowState = RowState.Added;");
         content.Should().Contain("public void MarkRemoved() => RowState = RowState.Removed;");
@@ -295,17 +298,17 @@ public class CSharpCodeGenerationServiceTests
             );
         content.Should().Contain("public void AcceptChanges(bool includeChildren = true)");
         // 親モデル取得（ParentModel）: 基底に保持＋通知、コレクションは OwnerModel を全要素へ伝播する
-        content.Should().Contain("public EditModelBase? ParentModel => _parentModel;");
+        content.Should().Contain("public EditModelBaseCore? ParentModel => _parentModel;");
         // 親が一意（Order の親は Customer のみ）なので OrderEditModel は型付き ParentModel を生成する
         content.Should().Contain("public new CustomerEditModel? ParentModel =>");
         content.Should().Contain("base.ParentModel as CustomerEditModel;");
-        content.Should().Contain("internal void SetParentModel(EditModelBase? parentModel)");
+        content.Should().Contain("internal void SetParentModel(EditModelBaseCore? parentModel)");
         content
             .Should()
             .Contain(
                 "internal void RaiseParentCollectionChanged() => OnPropertyChanged(\"ParentCollection\");"
             );
-        content.Should().Contain("internal EditModelBase? OwnerModel");
+        content.Should().Contain("internal EditModelBaseCore? OwnerModel");
         content.Should().Contain("item.SetParentModel(value);");
         // EditModelCollection の一括操作・検証・並び替え API
         content
@@ -366,7 +369,7 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("protected virtual void RegisterExtraChildren()");
         content
             .Should()
-            .Contain("protected void AddChild(string name, Func<EditModelBase?> accessor)");
+            .Contain("protected void AddChild(string name, Func<EditModelBaseCore?> accessor)");
         content
             .Should()
             .Contain(
@@ -893,14 +896,14 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("column.SetInput(model, column.ToInput(model));");
         // 兄弟ナビゲーション：Base が所属コレクション（IList）経由の GetNext/GetPrevious を提供し、コレクションが所有者を設定、具象クラスが型付き版を生成する
         content.Should().Contain("internal IList? Owner { get; set; }");
-        content.Should().Contain("public EditModelBase? GetNext()");
-        content.Should().Contain("public EditModelBase? GetPrevious()");
+        content.Should().Contain("public EditModelBaseCore? GetNext()");
+        content.Should().Contain("public EditModelBaseCore? GetPrevious()");
         content.Should().Contain("var index = Owner.IndexOf(this);");
         content.Should().Contain("item.Owner = this;");
         // 型付き版は per-type でなく CRTP 層（EditModelBase<TSelf>）が 1 回だけ提供し、具象は TSelf を束縛して継承する
         content
             .Should()
-            .Contain("public abstract partial class EditModelBase<TSelf> : EditModelBase");
+            .Contain("public abstract partial class EditModelBaseCore<TSelf> : EditModelBaseCore");
         content.Should().Contain("public new TSelf? GetNext() => (TSelf?)base.GetNext();");
         content.Should().Contain("public new TSelf? GetPrevious() => (TSelf?)base.GetPrevious();");
         content.Should().Contain(": EditModelBase<OrderEditModel>");
@@ -922,7 +925,7 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("public EditModelCollection<TSelf>? ParentCollection =>");
         content.Should().NotContain("EditModelCollection<OrderEditModel>? Parent =>");
         // 親（親参照ナビ）を持たない単独エンティティでは型付き ParentModel は生成されず、基底の EditModelBase? のみ
-        content.Should().Contain("public EditModelBase? ParentModel => _parentModel;");
+        content.Should().Contain("public EditModelBaseCore? ParentModel => _parentModel;");
         content.Should().NotContain("base.ParentModel as");
         content.Should().Contain("protected override void MoveCore(int oldIndex, int newIndex) =>");
         // ② RowState 変更時に派生フラグの変更通知も発行する
@@ -1717,7 +1720,7 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("private static string? TryColumnName(");
         content
             .Should()
-            .Contain("typeof(IValueObject).IsAssignableFrom(member.Member.DeclaringType)");
+            .Contain("typeof(IValueObjectCore).IsAssignableFrom(member.Member.DeclaringType)");
     }
 
     /// <summary>
@@ -1806,7 +1809,7 @@ public class CSharpCodeGenerationServiceTests
         var content = result.Files[0].Content;
         // 状態管理
         content.Should().Contain("public enum RowState");
-        content.Should().Contain("public abstract partial class EntityBase");
+        content.Should().Contain("public abstract partial class EntityBaseCore");
         content.Should().Contain("public RowState RowState { get; set; } = RowState.Unchanged;");
         content.Should().Contain("public void MarkAdded() => RowState = RowState.Added;");
         content.Should().Contain("public void MarkRemoved() => RowState = RowState.Removed;");
@@ -4035,7 +4038,9 @@ public class CSharpCodeGenerationServiceTests
         result.HasErrors.Should().BeFalse();
         var content = result.Files[0].Content;
         // 基底・インターフェース・例外・JSON 変換器
-        content.Should().Contain("public abstract partial class ValueObjectBase<TSelf, TValue>");
+        content
+            .Should()
+            .Contain("public abstract partial class ValueObjectBaseCore<TSelf, TValue>");
         content
             .Should()
             .Contain("public abstract partial class ValueObjectOrderedBase<TSelf, TValue>");
@@ -4063,7 +4068,7 @@ public class CSharpCodeGenerationServiceTests
         content
             .Should()
             .Contain(
-                "public abstract partial class ValueObjectBooleanBase<TSelf> : ValueObjectBase<TSelf, bool>"
+                "public abstract partial class ValueObjectBooleanBaseCore<TSelf> : ValueObjectBaseCore<TSelf, bool>"
             );
         // string MaxLength・decimal precision/scale の自動検証は共有ルールクラスへの 1 行委譲になる
         // （検証の内部経路はエラーリストを遅延確保する＝成功パスで List を作らないため ref 渡し）
@@ -4516,14 +4521,14 @@ public class CSharpCodeGenerationServiceTests
         // 共有基盤は Runtime ファイルに集約され、Entity ファイルには基底定義が出ない
         Content(result, "Runtime.g.cs")
             .Should()
-            .Contain("public abstract partial class EntityBase");
+            .Contain("public abstract partial class EntityBaseCore");
         Content(result, "Runtime.g.cs")
             .Should()
-            .Contain("public abstract partial class EditModelBase");
+            .Contain("public abstract partial class EditModelBaseCore");
         Content(result, "Entities.g.cs").Should().Contain("public partial class CustomerEntity");
         Content(result, "Entities.g.cs")
             .Should()
-            .NotContain("public abstract partial class EntityBase");
+            .NotContain("public abstract partial class EntityBaseCore");
 
         // クロス参照 using が付与される（Entity→Runtime、Mapper→Entity/EditModel）
         Content(result, "Entities.g.cs").Should().Contain("using Sample.Domain.Runtime;");
@@ -5390,7 +5395,7 @@ public class CSharpCodeGenerationServiceTests
 
         // 固定 infra はパッケージが持つ（生成側には出ない）
         content.Should().NotContain("class InMemoryDataStore");
-        content.Should().NotContain("abstract partial class EntityBase");
+        content.Should().NotContain("abstract partial class EntityBaseCore");
         // スキーマ依存物（per-entity 実装・DI 登録）は生成側に残り、パッケージを using で参照する
         content.Should().Contain($"using {RuntimePackages.InMemory};");
         content.Should().Contain("AddGeneratedInMemoryRepositories");

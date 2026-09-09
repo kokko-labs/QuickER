@@ -30,7 +30,7 @@ public class EditModelUniquenessTests
     }
 
     /// <summary>指定プロパティのエラー一覧を取り出す</summary>
-    private static string[] GetErrors(EditModelBase model, string propertyName) =>
+    private static string[] GetErrors(EditModelBaseCore model, string propertyName) =>
         ((IEnumerable)model.GetErrors(propertyName)).Cast<string>().ToArray();
 
     /// <summary>クラスが図の UNIQUE 制約を制約テーブルとして宣言する（構成列は確定値プロパティ名・宣言順）</summary>

@@ -171,11 +171,13 @@ public sealed class GuidKeyValueObjectExecutionTests
 
     private static object InvokeCreateParameterless()
     {
-        // 引数なし Create() は基底 ValueObjectGuidKeyBase<TSelf> に定義される（閉じたジェネリック基底経由で解決）。
+        // 引数なし Create() は固定ランタイムの ValueObjectGuidKeyBaseCore<TSelf> の宣言で、生成 VO からは
+        // 拡張シム ValueObjectGuidKeyBase<TSelf> を挟んで継承される＝静的メンバの基底探索（FlattenHierarchy）で引く
+        // （利用コードの型名経由の呼び出しと同じ解決）
         var method =
-            Vo.BaseType!.GetMethod(
+            Vo.GetMethod(
                 "Create",
-                BindingFlags.Public | BindingFlags.Static,
+                BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy,
                 binder: null,
                 types: Type.EmptyTypes,
                 modifiers: null
@@ -185,7 +187,7 @@ public sealed class GuidKeyValueObjectExecutionTests
 
     private static object InvokeCreateString(string value)
     {
-        // Create(string) は ValueObjectBase の宣言を継承する形になったため、静的メンバの
+        // Create(string) は ValueObjectBaseCore の宣言を継承する形のため、静的メンバの
         // 基底探索（FlattenHierarchy）が要る（利用コードの型名経由の呼び出しと同じ解決）
         var method =
             Vo.GetMethod(
@@ -202,7 +204,7 @@ public sealed class GuidKeyValueObjectExecutionTests
         string value
     )
     {
-        // TryCreate も同様に基底（ValueObjectBase）宣言＝FlattenHierarchy で引く
+        // TryCreate も同様に基底（ValueObjectBaseCore）宣言＝FlattenHierarchy で引く
         var method =
             Vo.GetMethod(
                 "TryCreate",

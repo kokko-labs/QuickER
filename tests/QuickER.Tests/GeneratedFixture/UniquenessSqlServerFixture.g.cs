@@ -234,7 +234,7 @@ internal static class UnboundedBinaryColumns
     /// Throws if an update is attempted while an excluded column still holds a value that is not in the "not-fetched" state (a blob that is neither null nor empty).
     /// Because unbounded binary columns are excluded from the Repository UPDATE, updating while such a value is retained would silently lose it.
     /// </summary>
-    public static void ThrowIfExcludedAssigned(EntityBase entity)
+    public static void ThrowIfExcludedAssigned(EntityBaseCore entity)
     {
         foreach (var property in For(entity.GetType()))
         {
@@ -252,7 +252,7 @@ internal static class UnboundedBinaryColumns
     /// Resets the excluded columns of a read replica to the "not-fetched" state (the initial values of a default instance). This matches the not-fetched state on
     /// the real DB side (MapEntity does not call SetValue, so the constructor initializer stands: a non-null byte[] is an empty array, and nullable is null).
     /// </summary>
-    public static void StripExcluded(EntityBase entity)
+    public static void StripExcluded(EntityBaseCore entity)
     {
         var excluded = For(entity.GetType());
 
@@ -277,7 +277,7 @@ internal static class UnboundedBinaryColumns
     private static bool IsUnset(object? value)
     {
         // Value objects are unwrapped to their underlying value before evaluation.
-        if (value is IValueObject valueObject)
+        if (value is IValueObjectCore valueObject)
         {
             value = valueObject.UnderlyingValue;
         }
@@ -299,7 +299,7 @@ internal static class UnboundedBinaryColumns
     /// the blob (the update guard cannot catch it: the entity holds exactly the "not-fetched" value the guard permits). A column
     /// that does carry a value is left alone, because that value is the caller's own data, as it is on an insert.
     /// </remarks>
-    public static void PreserveUnset(EntityBase entity, EntityBase stored)
+    public static void PreserveUnset(EntityBaseCore entity, EntityBaseCore stored)
     {
         foreach (var property in For(entity.GetType()))
         {
@@ -312,7 +312,7 @@ internal static class UnboundedBinaryColumns
 }
 
 /// <summary>Non-generic marker for a value object. Used to extract the underlying value and to test the type.</summary>
-public interface IValueObject
+public interface IValueObjectCore
 {
     /// <summary>Gets the underlying value as an object (used to open the raw value for SQL parameter binding and similar).</summary>
     object? UnderlyingValue { get; }
@@ -327,7 +327,7 @@ public interface IValueObject
 /// does not know and should not have to name: a constraint of <c>where T : IValueObject&lt;T&gt;</c> accepts every value object
 /// regardless of what it wraps. The members here therefore take the value as <see cref="object"/> and convert it on the way in.
 /// </remarks>
-public interface IValueObject<TSelf> : IValueObject
+public interface IValueObject<TSelf> : IValueObjectCore
     where TSelf : IValueObject<TSelf>
 {
     /// <summary>Converts a value from outside the model - a spreadsheet cell, a CSV field, a form field - and creates the value object from it, without throwing.</summary>
@@ -392,7 +392,7 @@ public interface IValueObject<TSelf, TValue> : IValueObject<TSelf>
 {
     /// <summary>Creates the instance from an already-validated value. Write it as an explicit implementation that calls the private constructor.</summary>
     /// <remarks>
-    /// This member exists so that <see cref="ValueObjectBase{TSelf, TValue}"/> can implement Create / TryCreate once for
+    /// This member exists so that <see cref="ValueObjectBaseCore{TSelf, TValue}"/> can implement Create / TryCreate once for
     /// every value object; validating is their job, so calling New through a type parameter skips validation. An explicit
     /// implementation keeps it off the type's own public surface, where Create is the front door.
     /// </remarks>
@@ -472,17 +472,17 @@ public sealed class ValueObjectValidationException : Exception
 }
 
 /// <summary>Common base for value objects. Provides the Create / TryCreate / Validate factories, value storage, equality, ToString, and extraction of the raw value (ordered comparison is added by derived types).</summary>
-public abstract partial class ValueObjectBase<TSelf, TValue>
-    : IValueObject,
+public abstract partial class ValueObjectBaseCore<TSelf, TValue>
+    : IValueObjectCore,
         IEquatable<TSelf>,
         IFormattable
-    where TSelf : ValueObjectBase<TSelf, TValue>, IValueObject<TSelf, TValue>
+    where TSelf : ValueObjectBaseCore<TSelf, TValue>, IValueObject<TSelf, TValue>
 {
-    /// <summary>Gets the underlying value (never reassigned; reference-typed values such as byte[] are not defensively copied — see <see cref="ValueObjectBinaryBase{TSelf}"/>).</summary>
+    /// <summary>Gets the underlying value (never reassigned; reference-typed values such as byte[] are not defensively copied — see <see cref="ValueObjectBinaryBaseCore{TSelf}"/>).</summary>
     public TValue Value { get; }
 
     /// <summary>Initializes with an already-validated value (Create/TryCreate performs validation beforehand).</summary>
-    protected ValueObjectBase(TValue value) => Value = value;
+    protected ValueObjectBaseCore(TValue value) => Value = value;
 
     /// <summary>Validates and creates the value object (throws ValueObjectValidationException on violation).</summary>
     /// <remarks>
@@ -627,7 +627,7 @@ public abstract partial class ValueObjectBase<TSelf, TValue>
     public static TSelf? CreateFrom(object? raw) => TSelf.CreateFrom(raw, null);
 
     /// <summary>Gets the underlying value as an object (opens the raw value for SQL binding and similar).</summary>
-    object? IValueObject.UnderlyingValue => Value;
+    object? IValueObjectCore.UnderlyingValue => Value;
 
     /// <summary>Gets the string used for display (defaults to ToString()). A concrete value object's partial class can override it to change the format.</summary>
     public virtual string DisplayValue => ToString();
@@ -638,7 +638,7 @@ public abstract partial class ValueObjectBase<TSelf, TValue>
     /// by value directly. Without it the default comparer falls back to the object-based one, which reaches equality only
     /// through <see cref="Equals(object?)"/> and boxes a struct-valued argument on the way; every dictionary and hash-set
     /// lookup keyed by a value object goes through that comparer. A value object whose value is an array needs
-    /// element-by-element comparison and overrides this — see <see cref="ValueObjectBinaryBase{TSelf}"/>.
+    /// element-by-element comparison and overrides this — see <see cref="ValueObjectBinaryBaseCore{TSelf}"/>.
     /// </remarks>
     public virtual bool Equals(TSelf? other) =>
         other is not null && EqualityComparer<TValue>.Default.Equals(Value, other.Value);
@@ -652,14 +652,14 @@ public abstract partial class ValueObjectBase<TSelf, TValue>
 
     /// <summary>Value-based equality operator.</summary>
     public static bool operator ==(
-        ValueObjectBase<TSelf, TValue>? left,
-        ValueObjectBase<TSelf, TValue>? right
+        ValueObjectBaseCore<TSelf, TValue>? left,
+        ValueObjectBaseCore<TSelf, TValue>? right
     ) => left is null ? right is null : left.Equals(right);
 
     /// <summary>Value-based inequality operator.</summary>
     public static bool operator !=(
-        ValueObjectBase<TSelf, TValue>? left,
-        ValueObjectBase<TSelf, TValue>? right
+        ValueObjectBaseCore<TSelf, TValue>? left,
+        ValueObjectBaseCore<TSelf, TValue>? right
     ) => !(left == right);
 
     /// <summary>Returns the string representation of the underlying value.</summary>
@@ -688,15 +688,15 @@ public abstract partial class ValueObjectBase<TSelf, TValue>
 }
 
 /// <summary>Base for orderable value objects (numeric and date/time types). Provides comparison operators and CompareTo.</summary>
-public abstract partial class ValueObjectOrderedBase<TSelf, TValue>
-    : ValueObjectBase<TSelf, TValue>,
+public abstract partial class ValueObjectOrderedBaseCore<TSelf, TValue>
+    : ValueObjectBaseCore<TSelf, TValue>,
         IComparable<TSelf>,
         IComparable
-    where TSelf : ValueObjectOrderedBase<TSelf, TValue>, IValueObject<TSelf, TValue>
+    where TSelf : ValueObjectOrderedBaseCore<TSelf, TValue>, IValueObject<TSelf, TValue>
     where TValue : IComparable<TValue>
 {
     /// <summary>Initializes with an already-validated value.</summary>
-    protected ValueObjectOrderedBase(TValue value)
+    protected ValueObjectOrderedBaseCore(TValue value)
         : base(value) { }
 
     /// <summary>Compares the underlying values.</summary>
@@ -713,31 +713,31 @@ public abstract partial class ValueObjectOrderedBase<TSelf, TValue>
 
     /// <summary>Less-than.</summary>
     public static bool operator <(
-        ValueObjectOrderedBase<TSelf, TValue>? left,
-        ValueObjectOrderedBase<TSelf, TValue>? right
+        ValueObjectOrderedBaseCore<TSelf, TValue>? left,
+        ValueObjectOrderedBaseCore<TSelf, TValue>? right
     ) => Compare(left, right) < 0;
 
     /// <summary>Greater-than.</summary>
     public static bool operator >(
-        ValueObjectOrderedBase<TSelf, TValue>? left,
-        ValueObjectOrderedBase<TSelf, TValue>? right
+        ValueObjectOrderedBaseCore<TSelf, TValue>? left,
+        ValueObjectOrderedBaseCore<TSelf, TValue>? right
     ) => Compare(left, right) > 0;
 
     /// <summary>Less-than-or-equal.</summary>
     public static bool operator <=(
-        ValueObjectOrderedBase<TSelf, TValue>? left,
-        ValueObjectOrderedBase<TSelf, TValue>? right
+        ValueObjectOrderedBaseCore<TSelf, TValue>? left,
+        ValueObjectOrderedBaseCore<TSelf, TValue>? right
     ) => Compare(left, right) <= 0;
 
     /// <summary>Greater-than-or-equal.</summary>
     public static bool operator >=(
-        ValueObjectOrderedBase<TSelf, TValue>? left,
-        ValueObjectOrderedBase<TSelf, TValue>? right
+        ValueObjectOrderedBaseCore<TSelf, TValue>? left,
+        ValueObjectOrderedBaseCore<TSelf, TValue>? right
     ) => Compare(left, right) >= 0;
 
     private static int Compare(
-        ValueObjectOrderedBase<TSelf, TValue>? left,
-        ValueObjectOrderedBase<TSelf, TValue>? right
+        ValueObjectOrderedBaseCore<TSelf, TValue>? left,
+        ValueObjectOrderedBaseCore<TSelf, TValue>? right
     ) =>
         left is null ? (right is null ? 0 : -1)
         : right is null ? 1
@@ -745,14 +745,14 @@ public abstract partial class ValueObjectOrderedBase<TSelf, TValue>
 }
 
 /// <summary>Base for string value objects. Provides substring-match methods and ordinal comparison (does not add ordering operators).</summary>
-public abstract partial class ValueObjectStringBase<TSelf>
-    : ValueObjectBase<TSelf, string>,
+public abstract partial class ValueObjectStringBaseCore<TSelf>
+    : ValueObjectBaseCore<TSelf, string>,
         IComparable<TSelf>,
         IComparable
-    where TSelf : ValueObjectStringBase<TSelf>, IValueObject<TSelf, string>
+    where TSelf : ValueObjectStringBaseCore<TSelf>, IValueObject<TSelf, string>
 {
     /// <summary>Initializes with an already-validated value.</summary>
-    protected ValueObjectStringBase(string value)
+    protected ValueObjectStringBaseCore(string value)
         : base(value) { }
 
     /// <summary>Returns whether the value contains the specified string.</summary>
@@ -818,11 +818,11 @@ public abstract partial class ValueObjectStringBase<TSelf>
 }
 
 /// <summary>Base for bool value objects. Provides True/False factories and truth checks (has no ordered comparison).</summary>
-public abstract partial class ValueObjectBooleanBase<TSelf> : ValueObjectBase<TSelf, bool>
-    where TSelf : ValueObjectBooleanBase<TSelf>, IValueObject<TSelf, bool>
+public abstract partial class ValueObjectBooleanBaseCore<TSelf> : ValueObjectBaseCore<TSelf, bool>
+    where TSelf : ValueObjectBooleanBaseCore<TSelf>, IValueObject<TSelf, bool>
 {
     /// <summary>Initializes with an already-validated value.</summary>
-    protected ValueObjectBooleanBase(bool value)
+    protected ValueObjectBooleanBaseCore(bool value)
         : base(value) { }
 
     /// <summary>Creates the value object from the true value.</summary>
@@ -839,12 +839,12 @@ public abstract partial class ValueObjectBooleanBase<TSelf> : ValueObjectBase<TS
 }
 
 /// <summary>Base for DateTime value objects. Provides Now/Today factories.</summary>
-public abstract partial class ValueObjectDateTimeBase<TSelf>
-    : ValueObjectOrderedBase<TSelf, DateTime>
-    where TSelf : ValueObjectDateTimeBase<TSelf>, IValueObject<TSelf, DateTime>
+public abstract partial class ValueObjectDateTimeBaseCore<TSelf>
+    : ValueObjectOrderedBaseCore<TSelf, DateTime>
+    where TSelf : ValueObjectDateTimeBaseCore<TSelf>, IValueObject<TSelf, DateTime>
 {
     /// <summary>Initializes with an already-validated value.</summary>
-    protected ValueObjectDateTimeBase(DateTime value)
+    protected ValueObjectDateTimeBaseCore(DateTime value)
         : base(value) { }
 
     /// <summary>Creates the value object from the current date and time.</summary>
@@ -860,11 +860,11 @@ public abstract partial class ValueObjectDateTimeBase<TSelf>
 /// created with, because copying would double the allocation of every binary column read from the database. Treat the array
 /// as frozen after Create — mutating it afterwards silently changes the value object's equality, hash code, and ToString.
 /// </remarks>
-public abstract partial class ValueObjectBinaryBase<TSelf> : ValueObjectBase<TSelf, byte[]>
-    where TSelf : ValueObjectBinaryBase<TSelf>, IValueObject<TSelf, byte[]>
+public abstract partial class ValueObjectBinaryBaseCore<TSelf> : ValueObjectBaseCore<TSelf, byte[]>
+    where TSelf : ValueObjectBinaryBaseCore<TSelf>, IValueObject<TSelf, byte[]>
 {
     /// <summary>Initializes with an already-validated value.</summary>
-    protected ValueObjectBinaryBase(byte[] value)
+    protected ValueObjectBinaryBaseCore(byte[] value)
         : base(value) { }
 
     /// <summary>Returns an equal value object built over a copy of the array (the copy the "not defensively copied" contract leaves to the caller).</summary>
@@ -915,14 +915,14 @@ public abstract partial class ValueObjectBinaryBase<TSelf> : ValueObjectBase<TSe
 }
 
 /// <summary>Base for a primary-key value object that holds a GUID as a string. The parameterless factory auto-generates a new GUID.</summary>
-public abstract partial class ValueObjectGuidKeyBase<TSelf>
-    : ValueObjectBase<TSelf, string>,
+public abstract partial class ValueObjectGuidKeyBaseCore<TSelf>
+    : ValueObjectBaseCore<TSelf, string>,
         IComparable<TSelf>,
         IComparable
-    where TSelf : ValueObjectGuidKeyBase<TSelf>, IValueObject<TSelf, string>
+    where TSelf : ValueObjectGuidKeyBaseCore<TSelf>, IValueObject<TSelf, string>
 {
     /// <summary>Initializes with an already-validated value.</summary>
-    protected ValueObjectGuidKeyBase(string value)
+    protected ValueObjectGuidKeyBaseCore(string value)
         : base(value) { }
 
     /// <summary>Generates a new GUID and creates the value object.</summary>
@@ -1345,6 +1345,96 @@ public static class ValueObjectDecimalRules
     }
 }
 
+/// <summary>Marker implemented by every value object. Adding an interface or a member to a partial declaration of this type reaches all of them at once.</summary>
+public partial interface IValueObject : IValueObjectCore { }
+
+/// <summary>Base of a value object whose underlying type has no shaped base of its own (a Guid or an sbyte, say), of a hand-written value object derived straight on the root, and the extension point for those. The shaped bases below are siblings of it, so a value object built on a shaped base does not pass through this type.</summary>
+/// <typeparam name="TSelf">The concrete value object type deriving from this class.</typeparam>
+/// <typeparam name="TValue">The underlying value type.</typeparam>
+public abstract partial class ValueObjectBase<TSelf, TValue>
+    : ValueObjectBaseCore<TSelf, TValue>,
+        IValueObject
+    where TSelf : ValueObjectBase<TSelf, TValue>, IValueObject<TSelf, TValue>
+{
+    /// <summary>Initializes with an already-validated value.</summary>
+    protected ValueObjectBase(TValue value)
+        : base(value) { }
+}
+
+/// <summary>Base of every orderable value object, and the extension point for them.</summary>
+/// <typeparam name="TSelf">The concrete value object type deriving from this class.</typeparam>
+/// <typeparam name="TValue">The underlying value type.</typeparam>
+public abstract partial class ValueObjectOrderedBase<TSelf, TValue>
+    : ValueObjectOrderedBaseCore<TSelf, TValue>,
+        IValueObject
+    where TSelf : ValueObjectOrderedBase<TSelf, TValue>, IValueObject<TSelf, TValue>
+    where TValue : IComparable<TValue>
+{
+    /// <summary>Initializes with an already-validated value.</summary>
+    protected ValueObjectOrderedBase(TValue value)
+        : base(value) { }
+}
+
+/// <summary>Base of every string value object, and the extension point for them.</summary>
+/// <typeparam name="TSelf">The concrete value object type deriving from this class.</typeparam>
+public abstract partial class ValueObjectStringBase<TSelf>
+    : ValueObjectStringBaseCore<TSelf>,
+        IValueObject
+    where TSelf : ValueObjectStringBase<TSelf>, IValueObject<TSelf, string>
+{
+    /// <summary>Initializes with an already-validated value.</summary>
+    protected ValueObjectStringBase(string value)
+        : base(value) { }
+}
+
+/// <summary>Base of every bool value object, and the extension point for them.</summary>
+/// <typeparam name="TSelf">The concrete value object type deriving from this class.</typeparam>
+public abstract partial class ValueObjectBooleanBase<TSelf>
+    : ValueObjectBooleanBaseCore<TSelf>,
+        IValueObject
+    where TSelf : ValueObjectBooleanBase<TSelf>, IValueObject<TSelf, bool>
+{
+    /// <summary>Initializes with an already-validated value.</summary>
+    protected ValueObjectBooleanBase(bool value)
+        : base(value) { }
+}
+
+/// <summary>Base of every DateTime value object, and the extension point for them.</summary>
+/// <typeparam name="TSelf">The concrete value object type deriving from this class.</typeparam>
+public abstract partial class ValueObjectDateTimeBase<TSelf>
+    : ValueObjectDateTimeBaseCore<TSelf>,
+        IValueObject
+    where TSelf : ValueObjectDateTimeBase<TSelf>, IValueObject<TSelf, DateTime>
+{
+    /// <summary>Initializes with an already-validated value.</summary>
+    protected ValueObjectDateTimeBase(DateTime value)
+        : base(value) { }
+}
+
+/// <summary>Base of every byte[] value object, and the extension point for them.</summary>
+/// <typeparam name="TSelf">The concrete value object type deriving from this class.</typeparam>
+public abstract partial class ValueObjectBinaryBase<TSelf>
+    : ValueObjectBinaryBaseCore<TSelf>,
+        IValueObject
+    where TSelf : ValueObjectBinaryBase<TSelf>, IValueObject<TSelf, byte[]>
+{
+    /// <summary>Initializes with an already-validated value.</summary>
+    protected ValueObjectBinaryBase(byte[] value)
+        : base(value) { }
+}
+
+/// <summary>Base of every GUID-keyed value object, and the extension point for them.</summary>
+/// <typeparam name="TSelf">The concrete value object type deriving from this class.</typeparam>
+public abstract partial class ValueObjectGuidKeyBase<TSelf>
+    : ValueObjectGuidKeyBaseCore<TSelf>,
+        IValueObject
+    where TSelf : ValueObjectGuidKeyBase<TSelf>, IValueObject<TSelf, string>
+{
+    /// <summary>Initializes with an already-validated value.</summary>
+    protected ValueObjectGuidKeyBase(string value)
+        : base(value) { }
+}
+
 /// <summary>Value object for the amount column</summary>
 public sealed partial class AmountValue
     : ValueObjectOrderedBase<AmountValue, decimal>,
@@ -1353,7 +1443,7 @@ public sealed partial class AmountValue
     private AmountValue(decimal value)
         : base(value) { }
 
-    /// <summary>Creates the instance from an already-validated value (the public factories live in the base class; see <see cref="ValueObjectBase{TSelf, TValue}.Create"/>).</summary>
+    /// <summary>Creates the instance from an already-validated value (the public factories live in the base class; see <see cref="ValueObjectBaseCore{TSelf, TValue}.Create"/>).</summary>
     static AmountValue IValueObject<AmountValue, decimal>.New(decimal value) =>
         new(value);
 
@@ -1405,7 +1495,7 @@ public sealed partial class BalanceValue
     private BalanceValue(decimal value)
         : base(value) { }
 
-    /// <summary>Creates the instance from an already-validated value (the public factories live in the base class; see <see cref="ValueObjectBase{TSelf, TValue}.Create"/>).</summary>
+    /// <summary>Creates the instance from an already-validated value (the public factories live in the base class; see <see cref="ValueObjectBaseCore{TSelf, TValue}.Create"/>).</summary>
     static BalanceValue IValueObject<BalanceValue, decimal>.New(decimal value) =>
         new(value);
 
@@ -1457,7 +1547,7 @@ public sealed partial class CustomerIdValue
     private CustomerIdValue(int value)
         : base(value) { }
 
-    /// <summary>Creates the instance from an already-validated value (the public factories live in the base class; see <see cref="ValueObjectBase{TSelf, TValue}.Create"/>).</summary>
+    /// <summary>Creates the instance from an already-validated value (the public factories live in the base class; see <see cref="ValueObjectBaseCore{TSelf, TValue}.Create"/>).</summary>
     static CustomerIdValue IValueObject<CustomerIdValue, int>.New(int value) =>
         new(value);
 
@@ -1508,7 +1598,7 @@ public sealed partial class ItemNameValue
     private ItemNameValue(string value)
         : base(value) { }
 
-    /// <summary>Creates the instance from an already-validated value (the public factories live in the base class; see <see cref="ValueObjectBase{TSelf, TValue}.Create"/>).</summary>
+    /// <summary>Creates the instance from an already-validated value (the public factories live in the base class; see <see cref="ValueObjectBaseCore{TSelf, TValue}.Create"/>).</summary>
     static ItemNameValue IValueObject<ItemNameValue, string>.New(string value) =>
         new(value);
 
@@ -1567,7 +1657,7 @@ public sealed partial class LabelValue
     private LabelValue(string value)
         : base(value) { }
 
-    /// <summary>Creates the instance from an already-validated value (the public factories live in the base class; see <see cref="ValueObjectBase{TSelf, TValue}.Create"/>).</summary>
+    /// <summary>Creates the instance from an already-validated value (the public factories live in the base class; see <see cref="ValueObjectBaseCore{TSelf, TValue}.Create"/>).</summary>
     static LabelValue IValueObject<LabelValue, string>.New(string value) =>
         new(value);
 
@@ -1626,7 +1716,7 @@ public sealed partial class LineIdValue
     private LineIdValue(int value)
         : base(value) { }
 
-    /// <summary>Creates the instance from an already-validated value (the public factories live in the base class; see <see cref="ValueObjectBase{TSelf, TValue}.Create"/>).</summary>
+    /// <summary>Creates the instance from an already-validated value (the public factories live in the base class; see <see cref="ValueObjectBaseCore{TSelf, TValue}.Create"/>).</summary>
     static LineIdValue IValueObject<LineIdValue, int>.New(int value) =>
         new(value);
 
@@ -1677,7 +1767,7 @@ public sealed partial class MemoValue
     private MemoValue(string value)
         : base(value) { }
 
-    /// <summary>Creates the instance from an already-validated value (the public factories live in the base class; see <see cref="ValueObjectBase{TSelf, TValue}.Create"/>).</summary>
+    /// <summary>Creates the instance from an already-validated value (the public factories live in the base class; see <see cref="ValueObjectBaseCore{TSelf, TValue}.Create"/>).</summary>
     static MemoValue IValueObject<MemoValue, string>.New(string value) =>
         new(value);
 
@@ -1736,7 +1826,7 @@ public sealed partial class NameValue
     private NameValue(string value)
         : base(value) { }
 
-    /// <summary>Creates the instance from an already-validated value (the public factories live in the base class; see <see cref="ValueObjectBase{TSelf, TValue}.Create"/>).</summary>
+    /// <summary>Creates the instance from an already-validated value (the public factories live in the base class; see <see cref="ValueObjectBaseCore{TSelf, TValue}.Create"/>).</summary>
     static NameValue IValueObject<NameValue, string>.New(string value) =>
         new(value);
 
@@ -1795,7 +1885,7 @@ public sealed partial class NodeIdValue
     private NodeIdValue(int value)
         : base(value) { }
 
-    /// <summary>Creates the instance from an already-validated value (the public factories live in the base class; see <see cref="ValueObjectBase{TSelf, TValue}.Create"/>).</summary>
+    /// <summary>Creates the instance from an already-validated value (the public factories live in the base class; see <see cref="ValueObjectBaseCore{TSelf, TValue}.Create"/>).</summary>
     static NodeIdValue IValueObject<NodeIdValue, int>.New(int value) =>
         new(value);
 
@@ -1846,7 +1936,7 @@ public sealed partial class OrderIdValue
     private OrderIdValue(int value)
         : base(value) { }
 
-    /// <summary>Creates the instance from an already-validated value (the public factories live in the base class; see <see cref="ValueObjectBase{TSelf, TValue}.Create"/>).</summary>
+    /// <summary>Creates the instance from an already-validated value (the public factories live in the base class; see <see cref="ValueObjectBaseCore{TSelf, TValue}.Create"/>).</summary>
     static OrderIdValue IValueObject<OrderIdValue, int>.New(int value) =>
         new(value);
 
@@ -1897,7 +1987,7 @@ public sealed partial class QuantityValue
     private QuantityValue(int value)
         : base(value) { }
 
-    /// <summary>Creates the instance from an already-validated value (the public factories live in the base class; see <see cref="ValueObjectBase{TSelf, TValue}.Create"/>).</summary>
+    /// <summary>Creates the instance from an already-validated value (the public factories live in the base class; see <see cref="ValueObjectBaseCore{TSelf, TValue}.Create"/>).</summary>
     static QuantityValue IValueObject<QuantityValue, int>.New(int value) =>
         new(value);
 
@@ -2099,7 +2189,7 @@ public enum RowState
 }
 
 /// <summary>Base class that holds the change tracking state (RowState) of an entity.</summary>
-public abstract partial class EntityBase
+public abstract partial class EntityBaseCore
 {
     /// <summary>Change tracking state of this entity. Defaults to Unchanged; restoring from the database or JSON keeps it Unchanged.</summary>
     public RowState RowState { get; set; } = RowState.Unchanged;
@@ -2172,17 +2262,17 @@ public abstract partial class EntityBase
     /// attribute scan. Cascade navigations point at children only (parent references are excluded), so the traversal is a
     /// tree and terminates.
     /// </remarks>
-    public IEnumerable<EntityBase> EnumerateCascadeChildren()
+    public IEnumerable<EntityBaseCore> EnumerateCascadeChildren()
     {
         foreach (var navigation in GetCascadeNavigations(GetType()))
         {
             var value = navigation.GetValue(this);
 
-            if (value is EntityBase child)
+            if (value is EntityBaseCore child)
             {
                 yield return child;
             }
-            else if (value is IEnumerable<EntityBase> children)
+            else if (value is IEnumerable<EntityBaseCore> children)
             {
                 foreach (var item in children)
                 {
@@ -2225,7 +2315,7 @@ public abstract partial class EntityBase
                     .Where(property =>
                         property.CanRead
                         && property.CanWrite
-                        && property.DeclaringType != typeof(EntityBase)
+                        && property.DeclaringType != typeof(EntityBaseCore)
                         && !Attribute.IsDefined(property, typeof(NavigationReferenceAttribute))
                     )
                     .ToArray()
@@ -2233,7 +2323,7 @@ public abstract partial class EntityBase
 
     /// <summary>Determines whether all column values match those of another entity (RowState and navigations are excluded from the comparison).</summary>
     /// <remarks>The comparison reads each column through reflection (the property list itself is cached per type). That is meant for change detection and assertions, not for a hot path — write the comparison out by hand where one is called for.</remarks>
-    public bool HasSameValues(EntityBase? other)
+    public bool HasSameValues(EntityBaseCore? other)
     {
         if (other is null)
         {
@@ -2324,11 +2414,11 @@ public abstract partial class EntityBase
     /// Values, RowState, and child navigations are copied. Parent-reference navigations are not restored because of [JsonIgnore] (the clone does not point to a parent).
     /// To insert it as a separate record, reassign the primary key or call MarkAdded() after cloning. The returned instance has the same concrete type as the original.
     /// </remarks>
-    public EntityBase Clone()
+    public EntityBaseCore Clone()
     {
         var type = GetType();
         var json = JsonSerializer.Serialize(this, type, _jsonOptions);
-        return (EntityBase)JsonSerializer.Deserialize(json, type, _jsonOptions)!;
+        return (EntityBaseCore)JsonSerializer.Deserialize(json, type, _jsonOptions)!;
     }
 }
 
@@ -2339,6 +2429,9 @@ public static class GeneratedDisplayNames
     public static Func<string, string?, string> Resolve { get; set; } =
         static (memberName, description) => description ?? memberName;
 }
+
+/// <summary>Base of every generated entity, and the extension point for them. Members added to a partial declaration of this type reach all of them at once.</summary>
+public abstract partial class EntityBase : EntityBaseCore { }
 
 /// <summary>Entity for the customers table</summary>
 [Table("customers")]
@@ -2502,7 +2595,7 @@ public partial class NodeEntity : EntityBase
 /// <c>nameof</c> and stay compile-safe.
 /// </para>
 /// </remarks>
-public abstract partial class EditModelBase
+public abstract partial class EditModelBaseCore
     : INotifyPropertyChanged,
         INotifyDataErrorInfo,
         IEditableObject
@@ -2894,7 +2987,7 @@ public abstract partial class EditModelBase
     internal IList? Owner { get; set; }
 
     /// <summary>Returns the next element after this one in its owning collection (null if not owned or at the end).</summary>
-    public EditModelBase? GetNext()
+    public EditModelBaseCore? GetNext()
     {
         if (Owner is null)
         {
@@ -2902,11 +2995,11 @@ public abstract partial class EditModelBase
         }
 
         var index = Owner.IndexOf(this);
-        return index >= 0 && index + 1 < Owner.Count ? (EditModelBase?)Owner[index + 1] : null;
+        return index >= 0 && index + 1 < Owner.Count ? (EditModelBaseCore?)Owner[index + 1] : null;
     }
 
     /// <summary>Returns the previous element before this one in its owning collection (null if not owned or at the start).</summary>
-    public EditModelBase? GetPrevious()
+    public EditModelBaseCore? GetPrevious()
     {
         if (Owner is null)
         {
@@ -2914,7 +3007,7 @@ public abstract partial class EditModelBase
         }
 
         var index = Owner.IndexOf(this);
-        return index > 0 ? (EditModelBase?)Owner[index - 1] : null;
+        return index > 0 ? (EditModelBaseCore?)Owner[index - 1] : null;
     }
 
     /// <summary>Gets the position of this element within its owning collection (-1 if not owned).</summary>
@@ -2994,18 +3087,18 @@ public abstract partial class EditModelBase
         OnPropertyChanged(nameof(IsLastInParent));
     }
 
-    /// <summary>Raises the change notification for the owning collection reference (ParentCollection), called when the element enters or leaves a collection (the property lives on <see cref="EditModelBase{TSelf}"/> under exactly this name).</summary>
+    /// <summary>Raises the change notification for the owning collection reference (ParentCollection), called when the element enters or leaves a collection (the property lives on <see cref="EditModelBaseCore{TSelf}"/> under exactly this name).</summary>
     internal void RaiseParentCollectionChanged() => OnPropertyChanged("ParentCollection");
 
     /// <summary>The parent model that holds this element as a child (cascade parent). Set by the owning collection or single reference; null when not owned or at the root.</summary>
-    private EditModelBase? _parentModel;
+    private EditModelBaseCore? _parentModel;
 
     /// <summary>Gets the parent edit model that holds this element as a child (set via either a collection or a single reference; null when not owned or at the root).</summary>
     /// <remarks>In concrete classes where the parent type is unambiguous, a typed ParentModel with the same name is generated and hides this property.</remarks>
-    public EditModelBase? ParentModel => _parentModel;
+    public EditModelBaseCore? ParentModel => _parentModel;
 
     /// <summary>Sets the parent model reference and raises the <see cref="ParentModel"/> change notification only when it changes (called by the owning setter or collection).</summary>
-    internal void SetParentModel(EditModelBase? parentModel)
+    internal void SetParentModel(EditModelBaseCore? parentModel)
     {
         if (ReferenceEquals(_parentModel, parentModel))
         {
@@ -3036,7 +3129,7 @@ public abstract partial class EditModelBase
     /// <summary>Returns a child collection, adopting it as this model's child the first time it is read (the getter of a generated child collection property).</summary>
     /// <param name="field">The backing field of the child collection property.</param>
     protected EditModelCollection<T> GetChildren<T>(EditModelCollection<T> field)
-        where T : EditModelBase
+        where T : EditModelBaseCore
     {
         field.OwnerModel ??= this;
         return field;
@@ -3051,7 +3144,7 @@ public abstract partial class EditModelBase
         EditModelCollection<T> value,
         string propertyName
     )
-        where T : EditModelBase
+        where T : EditModelBaseCore
     {
         if (ReferenceEquals(field, value))
         {
@@ -3274,12 +3367,12 @@ public abstract partial class EditModelBase
     protected virtual void RegisterExtraChildren() { }
 
     /// <summary>Registers a single child reference into the cascade (the reference is resolved lazily so the latest value is used).</summary>
-    protected void AddChild(string name, Func<EditModelBase?> accessor) =>
+    protected void AddChild(string name, Func<EditModelBaseCore?> accessor) =>
         (_childLinks ??= new()).Add(ChildLink.ForSingle(name, accessor));
 
     /// <summary>Registers a child collection into the cascade (the collection is resolved lazily so the latest instance is used, even after a mapper load replaces it).</summary>
     protected void AddChildren<T>(string name, Func<EditModelCollection<T>> accessor)
-        where T : EditModelBase =>
+        where T : EditModelBaseCore =>
         (_childLinks ??= new()).Add(ChildLink.ForCollection(name, accessor));
 
     /// <summary>Link to a registered child (cascade participant). Treats single references and child collections uniformly.</summary>
@@ -3292,7 +3385,7 @@ public abstract partial class EditModelBase
     {
         private readonly string _name;
         private readonly bool _isCollection;
-        private readonly Func<IEnumerable<EditModelBase>> _items;
+        private readonly Func<IEnumerable<EditModelBaseCore>> _items;
         private readonly Func<bool, bool> _validate;
         private readonly Func<bool, bool> _hasChanges;
         private readonly Action _acceptRemoved;
@@ -3300,7 +3393,7 @@ public abstract partial class EditModelBase
         private ChildLink(
             string name,
             bool isCollection,
-            Func<IEnumerable<EditModelBase>> items,
+            Func<IEnumerable<EditModelBaseCore>> items,
             Func<bool, bool> validate,
             Func<bool, bool> hasChanges,
             Action acceptRemoved
@@ -3315,11 +3408,11 @@ public abstract partial class EditModelBase
         }
 
         /// <summary>Creates a link that registers a single child reference.</summary>
-        public static ChildLink ForSingle(string name, Func<EditModelBase?> accessor) =>
+        public static ChildLink ForSingle(string name, Func<EditModelBaseCore?> accessor) =>
             new(
                 name,
                 false,
-                () => accessor() is { } child ? new[] { child } : Enumerable.Empty<EditModelBase>(),
+                () => accessor() is { } child ? new[] { child } : Enumerable.Empty<EditModelBaseCore>(),
                 includeChildren => accessor() is not { } child || child.Validate(includeChildren),
                 includeChildren =>
                     accessor() is { } child && child.HasGraphChanges(includeChildren),
@@ -3332,7 +3425,7 @@ public abstract partial class EditModelBase
         /// so validating the parent also runs the duplicate check among the siblings.
         /// </remarks>
         public static ChildLink ForCollection<T>(string name, Func<EditModelCollection<T>> accessor)
-            where T : EditModelBase =>
+            where T : EditModelBaseCore =>
             new(
                 name,
                 true,
@@ -3542,7 +3635,7 @@ public abstract partial class EditModelBase
     }
 
     /// <summary>
-    /// Registers a duplicate-value error for the given confirmed-value property names. <see cref="EditModelBase{TSelf}"/> maps the
+    /// Registers a duplicate-value error for the given confirmed-value property names. <see cref="EditModelBaseCore{TSelf}"/> maps the
     /// names to their binding properties through the column table and resolves the display names; names that cannot be mapped
     /// (and an empty list) produce a model-level error, which is all this fallback does.
     /// </summary>
@@ -3586,7 +3679,7 @@ public abstract partial class EditModelBase
         TEntity entity,
         CancellationToken cancellationToken
     )
-        where TEntity : EntityBase, new()
+        where TEntity : EntityBaseCore, new()
     {
         ArgumentNullException.ThrowIfNull(repository);
         ClearDuplicateErrors(DuplicateErrorSource.Database);
@@ -3715,13 +3808,13 @@ public abstract partial class EditModelBase
         CancelEditCore();
     }
 
-    /// <summary>Core logic of BeginEdit (<see cref="EditModelBase{TSelf}"/> snapshots the confirmed values from the column table; a generated class adds its OnBeginEdit hook).</summary>
+    /// <summary>Core logic of BeginEdit (<see cref="EditModelBaseCore{TSelf}"/> snapshots the confirmed values from the column table; a generated class adds its OnBeginEdit hook).</summary>
     protected virtual void BeginEditCore() { }
 
     /// <summary>Core logic of EndEdit (does nothing by default; override in a concrete class if needed).</summary>
     protected virtual void EndEditCore() { }
 
-    /// <summary>Core logic of CancelEdit (<see cref="EditModelBase{TSelf}"/> restores the confirmed values from the snapshot it took).</summary>
+    /// <summary>Core logic of CancelEdit (<see cref="EditModelBaseCore{TSelf}"/> restores the confirmed values from the snapshot it took).</summary>
     protected virtual void CancelEditCore() { }
 
     /// <summary>
@@ -3785,7 +3878,7 @@ public enum DuplicateErrorSource
 
 /// <summary>One UNIQUE constraint declared by an edit model (its name, the properties that make it up, and a compiled accessor for their values).</summary>
 /// <remarks>
-/// Generated edit models publish their constraints through <see cref="EditModelBase.UniquenessConstraints"/> and
+/// Generated edit models publish their constraints through <see cref="EditModelBaseCore.UniquenessConstraints"/> and
 /// <see cref="EditModelUniquenessValidator"/> consumes them. The accessor is generated code, so the check reads no property by reflection.
 /// The DB definition itself is described separately by the <c>[UniqueConstraint]</c> attribute on the entity class.
 /// </remarks>
@@ -3798,13 +3891,13 @@ public sealed class EditModelUniquenessConstraint
     public IReadOnlyList<string> PropertyNames { get; }
 
     /// <summary>Gets the accessor that reads the constraint member values of an edit model in a single call (declaration order, matching <see cref="PropertyNames"/>).</summary>
-    public Func<EditModelBase, object?[]> GetValues { get; }
+    public Func<EditModelBaseCore, object?[]> GetValues { get; }
 
     /// <summary>Initializes a new instance with the constraint name, its member property names, and the value accessor.</summary>
     public EditModelUniquenessConstraint(
         string constraintName,
         IReadOnlyList<string> propertyNames,
-        Func<EditModelBase, object?[]> getValues
+        Func<EditModelBaseCore, object?[]> getValues
     )
     {
         ConstraintName = constraintName;
@@ -3814,7 +3907,7 @@ public sealed class EditModelUniquenessConstraint
 }
 
 /// <summary>
-/// Shared helper that detects values duplicated among edit models by reading the UNIQUE constraints they declare (<see cref="EditModelBase.UniquenessConstraints"/>).
+/// Shared helper that detects values duplicated among edit models by reading the UNIQUE constraints they declare (<see cref="EditModelBaseCore.UniquenessConstraints"/>).
 /// </summary>
 /// <remarks>
 /// It is schema-independent and does not bake in property names (each edit model declares its own constraints). It is called at the
@@ -3835,7 +3928,7 @@ public static class EditModelUniquenessValidator
     /// </remarks>
     /// <param name="models">The edit models to compare with each other.</param>
     public static bool Validate<T>(IEnumerable<T> models)
-        where T : EditModelBase
+        where T : EditModelBaseCore
     {
         ArgumentNullException.ThrowIfNull(models);
 
@@ -3900,7 +3993,7 @@ public static class EditModelUniquenessValidator
 
     /// <summary>Builds the comparison tuple of the constraint's member values through its accessor (null when any value is null = out of scope).</summary>
     private static object[]? BuildKey(
-        EditModelBase model,
+        EditModelBaseCore model,
         EditModelUniquenessConstraint constraint
     )
     {
@@ -4101,7 +4194,7 @@ public static class EditModelInputFormat
 /// <summary>One column of an edit model as data: the two names it is known by, whether input is required, and the accessors the shared checks drive.</summary>
 /// <remarks>
 /// <para>
-/// A generated edit model publishes one of these per column through <see cref="EditModelBase{TSelf}.EditModelColumns"/>, and
+/// A generated edit model publishes one of these per column through <see cref="EditModelBaseCore{TSelf}.EditModelColumns"/>, and
 /// the required-field check, the input revert, the row-edit snapshot, and the duplicate-error mapping are then written once in
 /// the base class instead of once per column in every class. The accessors are compiled lambdas over the real properties, so
 /// nothing here is read by reflection and the storage of a column - its confirmed-value field, its input string field - is
@@ -4133,19 +4226,19 @@ public sealed record EditModelColumn<TModel>(
     Func<TModel, string> ToInput,
     Action<TModel, string> SetInput
 )
-    where TModel : EditModelBase;
+    where TModel : EditModelBaseCore;
 
-/// <summary>Self-typed layer over <see cref="EditModelBase"/>: the sibling navigation and the owning collection surface in the concrete type, written once.</summary>
+/// <summary>Self-typed layer over <see cref="EditModelBaseCore"/>: the sibling navigation and the owning collection surface in the concrete type, written once.</summary>
 /// <remarks>
-/// The non-generic <see cref="EditModelBase"/> stays as the type the ownership plumbing references
-/// (<see cref="EditModelCollection{T}"/>'s constraint, <see cref="EditModelBase.Owner"/>,
-/// <see cref="EditModelBase.ParentModel"/>), so this layer adds only what needs the concrete type. Generated edit
+/// The non-generic <see cref="EditModelBaseCore"/> stays as the type the ownership plumbing references
+/// (<see cref="EditModelCollection{T}"/>'s constraint, <see cref="EditModelBaseCore.Owner"/>,
+/// <see cref="EditModelBaseCore.ParentModel"/>), so this layer adds only what needs the concrete type. Generated edit
 /// models derive from it; the typed parent-model surface stays with them, because the parent is a second type this
 /// single type parameter cannot name.
 /// </remarks>
 /// <typeparam name="TSelf">The concrete edit model type deriving from this class.</typeparam>
-public abstract partial class EditModelBase<TSelf> : EditModelBase
-    where TSelf : EditModelBase<TSelf>
+public abstract partial class EditModelBaseCore<TSelf> : EditModelBaseCore
+    where TSelf : EditModelBaseCore<TSelf>
 {
     /// <summary>Returns the next element after this one in its owning collection (null if not owned or at the end).</summary>
     public new TSelf? GetNext() => (TSelf?)base.GetNext();
@@ -4175,7 +4268,7 @@ public abstract partial class EditModelBase<TSelf> : EditModelBase
     /// <summary>Checks the columns declared required for missing input, registering and withdrawing only the errors this check owns. Called from Validate; a generated class appends its OnValidate hook.</summary>
     /// <remarks>
     /// <para>
-    /// A field that already carries another input error keeps it (<see cref="EditModelBase.SetRequiredError"/> declines to
+    /// A field that already carries another input error keeps it (<see cref="EditModelBaseCore.SetRequiredError"/> declines to
     /// overwrite), because a value that cannot be converted is the more upstream cause and the one the user has to act on.
     /// </para>
     /// <para>
@@ -4261,7 +4354,7 @@ public abstract partial class EditModelBase<TSelf> : EditModelBase
     /// Restoring the values also withdraws the duplicate-value findings the database check registered, on the reasoning a
     /// confirmed-value setter uses: the value they were reached about is no longer the one the model holds. The setter
     /// cannot do it here, because the restore runs as a load and a load deliberately keeps the setters quiet - so a cancel
-    /// would otherwise leave a finding about the discarded value behind and hold <see cref="EditModelBase.Validate"/>
+    /// would otherwise leave a finding about the discarded value behind and hold <see cref="EditModelBaseCore.Validate"/>
     /// false forever. It is done unconditionally, though, where a setter withdraws them only when the value actually
     /// changes: a cancel does not track whether anything was edited, so a row that was begun and then canceled without a
     /// single change drops a database finding that was still perfectly valid. Run the database check again before saving -
@@ -4276,7 +4369,7 @@ public abstract partial class EditModelBase<TSelf> : EditModelBase
     /// </para>
     /// <para>
     /// Deriving the input strings clears the input error of every property, so a conversion error that predates the
-    /// <see cref="EditModelBase.BeginEdit"/> of this row is cleared along with the ones the canceled edit produced. The
+    /// <see cref="EditModelBaseCore.BeginEdit"/> of this row is cleared along with the ones the canceled edit produced. The
     /// unconvertible text goes away in the same step, since the input string is rebuilt from the restored confirmed value,
     /// and typing it again brings the error back.
     /// </para>
@@ -4378,7 +4471,7 @@ public abstract partial class EditModelBase<TSelf> : EditModelBase
 /// Clear is a full on-screen wipe with no deletion tracking (it also resets the set-aside items). Use Remove when the deletion should be saved.
 /// </remarks>
 public sealed partial class EditModelCollection<T> : ObservableCollection<T>
-    where T : EditModelBase
+    where T : EditModelBaseCore
 {
     /// <summary>Holding list for deletion targets (Removed) removed via Remove, each with the state it had before the removal.</summary>
     private readonly List<RemovedItem> _removed = new();
@@ -4387,10 +4480,10 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
     private readonly record struct RemovedItem(T Item, RowState PriorState);
 
     /// <summary>Backing field for the parent model that holds this collection as a child.</summary>
-    private EditModelBase? _ownerModel;
+    private EditModelBaseCore? _ownerModel;
 
     /// <summary>Gets or sets the parent model that holds this collection as a child (set by the owning edit model). Propagates to every element's ParentModel when set.</summary>
-    internal EditModelBase? OwnerModel
+    internal EditModelBaseCore? OwnerModel
     {
         get => _ownerModel;
         set
@@ -4685,8 +4778,8 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
 /// the loading state it runs under, creation from an edit model, collection conversion - is written once here.
 /// </remarks>
 public abstract partial class MapperBase<TEntity, TEditModel>
-    where TEntity : EntityBase, new()
-    where TEditModel : EditModelBase, new()
+    where TEntity : EntityBaseCore, new()
+    where TEditModel : EditModelBaseCore, new()
 {
     /// <summary>Creates a new TEntity with initial values set (it will be an insertion target on save).</summary>
     public TEntity CreateEntity()
@@ -4845,6 +4938,12 @@ public abstract partial class MapperBase<TEntity, TEditModel>
         return new EditModelCollection<TEditModel>(entities.Select(entity => CreateEditModel(entity)));
     }
 }
+
+/// <summary>Base of every generated edit model, and the extension point for them. Members added to a partial declaration of this type reach all of them at once.</summary>
+/// <typeparam name="TSelf">The concrete edit model type deriving from this class.</typeparam>
+public abstract partial class EditModelBase<TSelf> : EditModelBaseCore<TSelf>
+    where TSelf : EditModelBase<TSelf> { }
+
 /// <summary>Edit model for on-screen editing of the customers table.</summary>
 public partial class CustomerEditModel : EditModelBase<CustomerEditModel>
 {
@@ -6778,7 +6877,7 @@ public static class UniquenessChecker
 /// </para>
 /// </remarks>
 public partial interface IRemoteRepository<TEntity, TKey>
-    where TEntity : EntityBase, new()
+    where TEntity : EntityBaseCore, new()
 {
     /// <summary>Gets a single entity by primary key (null when not found).</summary>
     Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default);
@@ -6868,7 +6967,7 @@ public partial interface IRemoteRepository<TEntity, TKey>
 /// I{Entity}Repository always provides this full-featured surface.
 /// </remarks>
 public partial interface IRepository<TEntity, TKey> : IRemoteRepository<TEntity, TKey>
-    where TEntity : EntityBase, new()
+    where TEntity : EntityBaseCore, new()
 {
     /// <summary>Bulk inserts a collection of entities.</summary>
     /// <remarks>
@@ -6988,13 +7087,13 @@ public partial interface ISqlExecutor
         object? parameters = null,
         CancellationToken cancellationToken = default
     )
-        where TEntity : EntityBase, new();
+        where TEntity : EntityBaseCore, new();
 
     /// <summary>Executes a raw SQL SELECT and leniently projects the result rows onto an arbitrary <typeparamref name="TResult"/>.</summary>
     /// <remarks>
     /// <para>
     /// <b>Single-value mode</b>: when <typeparamref name="TResult"/> (Nullable is judged by its underlying type) is primitive / enum /
-    /// string / decimal / DateTime / DateTimeOffset / TimeSpan / Guid / byte[] / a value object (IValueObject implementation),
+    /// string / decimal / DateTime / DateTimeOffset / TimeSpan / Guid / byte[] / a value object (IValueObjectCore implementation),
     /// the <b>first column</b> of each row is converted and returned (DBNull becomes <c>default</c>). Conversion uses the same
     /// Nullable-aware <see cref="System.Convert.ChangeType(object, System.Type, System.IFormatProvider)"/> as the scalar methods.
     /// </para>
@@ -7143,7 +7242,7 @@ internal static class SqlTransactions
 /// </remarks>
 /// <typeparam name="TEntity">The entity type the hook targets.</typeparam>
 public interface ISaveHook<TEntity>
-    where TEntity : EntityBase
+    where TEntity : EntityBaseCore
 {
     /// <summary>Called immediately before the operation (<c>false</c> skips that single operation; the default does not skip).</summary>
     /// <param name="entity">The entity being saved.</param>
@@ -7261,14 +7360,14 @@ public interface ISaveHookInvoker
 {
     /// <summary>Calls Before in registration order, short-circuiting on the first <c>false</c> (returns false when any hook returns false).</summary>
     Task<bool> InvokeBeforeAsync(
-        EntityBase entity,
+        EntityBaseCore entity,
         SaveOperation operation,
         CancellationToken cancellationToken
     );
 
     /// <summary>Calls After sequentially in registration order.</summary>
     Task InvokeAfterAsync(
-        EntityBase entity,
+        EntityBaseCore entity,
         SaveOperation operation,
         ISaveHookContext context,
         CancellationToken cancellationToken
@@ -7346,7 +7445,7 @@ internal sealed class SaveHookRegistry : ISaveHookRegistry
     /// <typeparam name="TEntity">The entity type the hook targets.</typeparam>
     /// <param name="hook">The hook to add (hooks for the same type fire in the order they were added).</param>
     public SaveHookRegistry Add<TEntity>(ISaveHook<TEntity> hook)
-        where TEntity : EntityBase
+        where TEntity : EntityBaseCore
     {
         ArgumentNullException.ThrowIfNull(hook);
 
@@ -7373,14 +7472,14 @@ internal sealed class SaveHookRegistry : ISaveHookRegistry
 /// <typeparam name="TEntity">The entity type the hooks target.</typeparam>
 internal sealed class SaveHookInvoker<TEntity>(IEnumerable<ISaveHook<TEntity>> hooks)
     : ISaveHookInvoker
-    where TEntity : EntityBase
+    where TEntity : EntityBaseCore
 {
     private readonly IReadOnlyList<ISaveHook<TEntity>> _hooks =
         hooks as IReadOnlyList<ISaveHook<TEntity>> ?? hooks.ToList();
 
     /// <summary>Calls Before in registration order, short-circuiting on the first <c>false</c>.</summary>
     public async Task<bool> InvokeBeforeAsync(
-        EntityBase entity,
+        EntityBaseCore entity,
         SaveOperation operation,
         CancellationToken cancellationToken
     )
@@ -7400,7 +7499,7 @@ internal sealed class SaveHookInvoker<TEntity>(IEnumerable<ISaveHook<TEntity>> h
 
     /// <summary>Calls After sequentially in registration order.</summary>
     public async Task InvokeAfterAsync(
-        EntityBase entity,
+        EntityBaseCore entity,
         SaveOperation operation,
         ISaveHookContext context,
         CancellationToken cancellationToken
@@ -7485,7 +7584,7 @@ internal static class SqlParameterValue
 {
     /// <summary>Returns the underlying value for a value object; returns anything else as is.</summary>
     public static object? Unwrap(object? value) =>
-        value is IValueObject valueObject ? valueObject.UnderlyingValue : value;
+        value is IValueObjectCore valueObject ? valueObject.UnderlyingValue : value;
 }
 
 /// <summary>Reverse-conversion helper that rewraps raw values read from the DB via Create when the target property is a value object type (the counterpart of Unwrap).</summary>
@@ -7521,7 +7620,7 @@ internal static class SqlValueObjectActivator
         var valueType = iface.GetGenericArguments()[1];
 
         // FlattenHierarchy: without it reflection never returns a static member declared on a base class, and Create
-        // lives on ValueObjectBase (a hand-written value object inheriting it included). A same-signature Create declared
+        // lives on ValueObjectBaseCore (a hand-written value object inheriting it included). A same-signature Create declared
         // on the type itself still wins (hide-by-signature), with no AmbiguousMatchException.
         var createMethod = targetType.GetMethod(
             "Create",
@@ -7758,7 +7857,7 @@ internal static class RawSqlMapper
 
         // Wrap the raw value via Create for value objects. When TResult is Nullable<T>, convert to the underlying type (ChangeType cannot handle Nullable directly)
         var targetType = Nullable.GetUnderlyingType(typeof(TResult)) ?? typeof(TResult);
-        if (typeof(IValueObject).IsAssignableFrom(targetType))
+        if (typeof(IValueObjectCore).IsAssignableFrom(targetType))
         {
             try
             {
@@ -7792,7 +7891,7 @@ internal static class RawSqlMapper
     private static bool IsSingleValueType(Type type)
     {
         var actual = Nullable.GetUnderlyingType(type) ?? type;
-        if (typeof(IValueObject).IsAssignableFrom(actual))
+        if (typeof(IValueObjectCore).IsAssignableFrom(actual))
         {
             return true;
         }
@@ -7874,7 +7973,7 @@ internal static class RawSqlMapper
     )
     {
         // Wrap the raw value via Create for value objects
-        if (typeof(IValueObject).IsAssignableFrom(underlyingType))
+        if (typeof(IValueObjectCore).IsAssignableFrom(underlyingType))
         {
             try
             {
@@ -7917,7 +8016,7 @@ public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory)
         object? parameters = null,
         CancellationToken cancellationToken = default
     )
-        where TEntity : EntityBase, new()
+        where TEntity : EntityBaseCore, new()
     {
         ArgumentNullException.ThrowIfNull(sql);
 
@@ -8042,7 +8141,7 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
     ISaveHookRegistry? saveHooks = null,
     ISqlExecutor? sqlExecutor = null
 ) : IRepository<TEntity, TKey>
-    where TEntity : EntityBase, new()
+    where TEntity : EntityBaseCore, new()
 {
     /// <summary>Metadata built exactly once per entity type (reused via a static field).</summary>
     private static readonly EntitySaveMetadata _metadata = EntitySaveMetadata.For(typeof(TEntity));
@@ -8761,7 +8860,7 @@ internal static class QueryStringMatchGuard
             call.Method.DeclaringType == typeof(string)
             || (
                 call.Method.DeclaringType is { IsGenericType: true } declaring
-                && declaring.GetGenericTypeDefinition() == typeof(ValueObjectStringBase<>)
+                && declaring.GetGenericTypeDefinition() == typeof(ValueObjectStringBaseCore<>)
             )
         );
 
@@ -9197,7 +9296,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
 /// </remarks>
 internal sealed class SqlServerSqlQueryExecutor<TEntity>(ISqlConnectionFactory connectionFactory)
     : ISqlQueryExecutor<TEntity>
-    where TEntity : EntityBase
+    where TEntity : EntityBaseCore
 {
     /// <summary>The source that creates SQL connections.</summary>
     private readonly ISqlConnectionFactory _connectionFactory = connectionFactory;
@@ -10287,10 +10386,10 @@ internal static class SqlExpressionTranslator
         return true;
     }
 
-    /// <summary>Whether the method is Contains/StartsWith/EndsWith of a string value object (derived from ValueObjectStringBase).</summary>
+    /// <summary>Whether the method is Contains/StartsWith/EndsWith of a string value object (derived from ValueObjectStringBaseCore).</summary>
     private static bool IsValueObjectStringMethod(MethodInfo method) =>
         method.DeclaringType is { IsGenericType: true } declaring
-        && declaring.GetGenericTypeDefinition() == typeof(ValueObjectStringBase<>);
+        && declaring.GetGenericTypeDefinition() == typeof(ValueObjectStringBaseCore<>);
 
     /// <summary>Removes Convert nodes such as boxing to object.</summary>
     private static Expression Unwrap(Expression expression)
@@ -10369,7 +10468,7 @@ internal static class SqlExpressionTranslator
         // Strip the value object's .Value and resolve to the inner column ([col]) (x.Col.Value -> [col])
         if (
             member.Member.Name == "Value"
-            && typeof(IValueObject).IsAssignableFrom(member.Member.DeclaringType)
+            && typeof(IValueObjectCore).IsAssignableFrom(member.Member.DeclaringType)
             && member.Expression is { } inner
             && Unwrap(inner) is MemberExpression valueObjectColumn
             && IsColumn(valueObjectColumn)
@@ -10751,7 +10850,7 @@ internal sealed class EntitySaveMetadata
             .Where(property =>
                 property.CanRead
                 && property.CanWrite
-                && property.DeclaringType != typeof(EntityBase)
+                && property.DeclaringType != typeof(EntityBaseCore)
                 && property.GetCustomAttribute<NavigationReferenceAttribute>() is null
             )
             .ToList();
@@ -10905,14 +11004,14 @@ internal sealed class EntitySaveMetadata
         BindingFlags.NonPublic | BindingFlags.Static
     )!;
 
-    /// <summary>Resolved <see cref="PropertyInfo"/> of <see cref="EntityBase.RowState"/>.</summary>
-    private static readonly PropertyInfo _rowStateProperty = typeof(EntityBase).GetProperty(
-        nameof(EntityBase.RowState)
+    /// <summary>Resolved <see cref="PropertyInfo"/> of <see cref="EntityBaseCore.RowState"/>.</summary>
+    private static readonly PropertyInfo _rowStateProperty = typeof(EntityBaseCore).GetProperty(
+        nameof(EntityBaseCore.RowState)
     )!;
 
     /// <summary>Gets the expression-tree-compiled delegate that materializes one row of SelectColumns (the fixed SELECT set) (built once per type and cached).</summary>
     /// <remarks>The arguments are <c>(reader, ordinals)</c>. <c>ordinals</c> holds the column ordinals in SelectColumns order, resolved once before the row loop.</remarks>
-    public required Func<DbDataReader, int[], EntityBase> SelectMaterializer { get; init; }
+    public required Func<DbDataReader, int[], EntityBaseCore> SelectMaterializer { get; init; }
 
     /// <summary>Builds the type-specialized reader accessor table (each value is a <see cref="DbDataReader"/> method taking an <c>int</c> and returning the corresponding CLR type).</summary>
     private static IReadOnlyDictionary<Type, MethodInfo> BuildTypedReaders()
@@ -10979,7 +11078,7 @@ internal sealed class EntitySaveMetadata
             return null;
         }
 
-        // FlattenHierarchy: Create is declared on ValueObjectBase, and without the flag reflection never returns a
+        // FlattenHierarchy: Create is declared on ValueObjectBaseCore, and without the flag reflection never returns a
         // static member declared on a base class - the resolution would quietly fail and every value object column
         // would take the SetColumnValue fallback instead of the fast path.
         var create = propertyType.GetMethod(
@@ -11006,7 +11105,7 @@ internal sealed class EntitySaveMetadata
     /// <see cref="SetColumnValue"/> (dialect-specific conversion / value object re-wrapping).
     /// The resulting final state (<c>RowState = Unchanged</c>) matches the previous row mapping.
     /// </remarks>
-    private static Func<DbDataReader, int[], EntityBase> BuildSelectMaterializer(
+    private static Func<DbDataReader, int[], EntityBaseCore> BuildSelectMaterializer(
         Type entityType,
         IReadOnlyList<PropertyInfo> properties
     )
@@ -11033,11 +11132,11 @@ internal sealed class EntitySaveMetadata
                 Expression.Constant(RowState.Unchanged)
             )
         );
-        body.Add(Expression.Convert(entityVar, typeof(EntityBase)));
+        body.Add(Expression.Convert(entityVar, typeof(EntityBaseCore)));
 
-        var block = Expression.Block(typeof(EntityBase), new[] { entityVar }, body);
+        var block = Expression.Block(typeof(EntityBaseCore), new[] { entityVar }, body);
         return Expression
-            .Lambda<Func<DbDataReader, int[], EntityBase>>(block, readerParam, ordinalsParam)
+            .Lambda<Func<DbDataReader, int[], EntityBaseCore>>(block, readerParam, ordinalsParam)
             .Compile();
     }
 
@@ -11097,7 +11196,7 @@ internal sealed class EntitySaveMetadata
         // Fallback: call the previous SetColumnValue (DBNull to null / dialect-specific conversion / value object re-wrapping) via the ordinal
         return Expression.Call(
             _setColumnValueMethod,
-            Expression.Convert(entityExpr, typeof(EntityBase)),
+            Expression.Convert(entityExpr, typeof(EntityBaseCore)),
             Expression.Constant(property, typeof(PropertyInfo)),
             Expression.Call(readerParam, _getValueMethod, ordinal)
         );
@@ -11121,11 +11220,11 @@ internal sealed class EntitySaveMetadata
         SqlDataReader reader,
         int[] ordinals
     )
-        where TEntity : EntityBase => (TEntity)SelectMaterializer(reader, ordinals);
+        where TEntity : EntityBaseCore => (TEntity)SelectMaterializer(reader, ordinals);
 
     /// <summary>Maps one data reader row to an entity (single-row variant that resolves the SelectColumns ordinals on each call).</summary>
     public TEntity MapEntity<TEntity>(SqlDataReader reader)
-        where TEntity : EntityBase, new() => (TEntity)SelectMaterializer(reader, SelectOrdinals(reader));
+        where TEntity : EntityBaseCore, new() => (TEntity)SelectMaterializer(reader, SelectOrdinals(reader));
 
     /// <summary>
     /// The column resolution of one raw SQL result set: the ordinal of every SELECT column, plus the ordinals of the
@@ -11202,7 +11301,7 @@ internal sealed class EntitySaveMetadata
         SqlDataReader reader,
         RawSqlRowPlan plan
     )
-        where TEntity : EntityBase, new()
+        where TEntity : EntityBaseCore, new()
     {
         var entity = new TEntity();
 
@@ -11223,7 +11322,7 @@ internal sealed class EntitySaveMetadata
     /// assigns <c>null</c>; otherwise the value is re-wrapped for value objects, coerced from the SQLite storage type,
     /// or passed through for SQL Server, depending on the dialect.
     /// </summary>
-    private static void SetColumnValue(EntityBase entity, PropertyInfo property, object value)
+    private static void SetColumnValue(EntityBaseCore entity, PropertyInfo property, object value)
     {
         if (value is DBNull)
         {
@@ -11258,7 +11357,7 @@ internal sealed class EntitySaveMetadata
         SqlDataReader reader,
         RawSqlRowPlan plan
     )
-        where TEntity : EntityBase, new()
+        where TEntity : EntityBaseCore, new()
     {
         var entity = MapEntityStrict<TEntity>(reader, plan);
 
@@ -11281,7 +11380,7 @@ internal sealed class EntitySaveMetadata
     /// <summary>Maps a single raw SQL result row, resolving the column plan on this call (convenience for one-row reads).</summary>
     /// <remarks>Resolve the plan yourself with <see cref="CreateRawSqlRowPlan"/> when reading many rows, so the ordinals are resolved once for the whole result set.</remarks>
     public TEntity MapEntityFromRawSql<TEntity>(SqlDataReader reader)
-        where TEntity : EntityBase, new() =>
+        where TEntity : EntityBaseCore, new() =>
         MapEntityFromRawSql<TEntity>(reader, CreateRawSqlRowPlan(reader));
 
     /// <summary>Enumerates the data reader's column name to ordinal map once, case-insensitively (used to detect excluded columns in raw SQL results).</summary>
@@ -11347,21 +11446,21 @@ internal sealed class EntitySaveMetadata
     /// <summary>Per-column-property "reader+ordinal, set onto entity" binders (expression-tree compiled, cached per property).</summary>
     private static readonly ConcurrentDictionary<
         PropertyInfo,
-        Action<EntityBase, DbDataReader, int>
+        Action<EntityBaseCore, DbDataReader, int>
     > _columnBinderCache = new();
 
     /// <summary>Gets the type-specialized binder for one column (so the variable column sets of projections and full-column fetches bind without per-row reflection).</summary>
-    private static Action<EntityBase, DbDataReader, int> ColumnBinder(PropertyInfo property) =>
+    private static Action<EntityBaseCore, DbDataReader, int> ColumnBinder(PropertyInfo property) =>
         _columnBinderCache.GetOrAdd(property, BuildColumnBinder);
 
-    /// <summary>Compiles the single-column expression tree (<see cref="BuildColumnAssign"/>) into an <c>Action&lt;EntityBase, DbDataReader, int&gt;</c>.</summary>
-    private static Action<EntityBase, DbDataReader, int> BuildColumnBinder(PropertyInfo property)
+    /// <summary>Compiles the single-column expression tree (<see cref="BuildColumnAssign"/>) into an <c>Action&lt;EntityBaseCore, DbDataReader, int&gt;</c>.</summary>
+    private static Action<EntityBaseCore, DbDataReader, int> BuildColumnBinder(PropertyInfo property)
     {
-        var entityParam = Expression.Parameter(typeof(EntityBase), "entity");
+        var entityParam = Expression.Parameter(typeof(EntityBaseCore), "entity");
         var readerParam = Expression.Parameter(typeof(DbDataReader), "reader");
         var ordinalParam = Expression.Parameter(typeof(int), "ordinal");
 
-        // Properties are declared on the derived entity type, so downcast EntityBase to the declaring type before accessing
+        // Properties are declared on the derived entity type, so downcast EntityBaseCore to the declaring type before accessing
         var assign = BuildColumnAssign(
             Expression.Convert(entityParam, property.DeclaringType!),
             readerParam,
@@ -11370,7 +11469,7 @@ internal sealed class EntitySaveMetadata
         );
 
         return Expression
-            .Lambda<Action<EntityBase, DbDataReader, int>>(
+            .Lambda<Action<EntityBaseCore, DbDataReader, int>>(
                 assign,
                 entityParam,
                 readerParam,
@@ -11407,11 +11506,11 @@ internal sealed class EntitySaveMetadata
         int[] ordinals,
         bool markUnchanged = false
     )
-        where TEntity : EntityBase
+        where TEntity : EntityBaseCore
     {
         // The query executor's TEntity has no new() constraint of its own, so the instance is created through Activator. The
         // parameterless constructor it needs is guaranteed by the contract types the entity has to satisfy to get here
-        // (IRepository<TEntity, TKey> and IRemoteRepository<TEntity, TKey> both require "where TEntity : EntityBase, new()"),
+        // (IRepository<TEntity, TKey> and IRemoteRepository<TEntity, TKey> both require "where TEntity : EntityBaseCore, new()"),
         // so a partial declaration that removed the default constructor would fail the build with CS0310 rather than reach
         // this line
         var entity = (TEntity)Activator.CreateInstance(typeof(TEntity))!;
@@ -11431,7 +11530,7 @@ internal sealed class EntitySaveMetadata
     }
 
     /// <summary>Binds the INSERT parameters (the insert-target columns excluding store-generated columns) (shared by insert and graph insert).</summary>
-    public void BindInsertParameters(SqlCommand command, EntityBase entity)
+    public void BindInsertParameters(SqlCommand command, EntityBaseCore entity)
     {
         foreach (var property in InsertProperties)
         {
@@ -11445,7 +11544,7 @@ internal sealed class EntitySaveMetadata
     }
 
     /// <summary>Binds the UPDATE parameters (non-key columns plus the primary key) (shared by update and graph update).</summary>
-    public void BindUpdateParameters(SqlCommand command, EntityBase entity)
+    public void BindUpdateParameters(SqlCommand command, EntityBaseCore entity)
     {
         // Updates that still carry values in unbounded binary columns (excluded from UPDATE) would lose them silently,
         // so reject them up front. Both direct UpdateAsync and cascading graph updates pass through here,
@@ -11471,7 +11570,7 @@ internal sealed class EntitySaveMetadata
     }
 
     /// <summary>Binds the entity's primary key value to the @id parameter (used by graph delete).</summary>
-    public void BindEntityKeyParameter(SqlCommand command, EntityBase entity)
+    public void BindEntityKeyParameter(SqlCommand command, EntityBaseCore entity)
     {
         AddColumnParameter(
             command,
@@ -11486,7 +11585,7 @@ internal sealed class EntitySaveMetadata
     /// Only called for tables that have a rowversion column. A <c>null</c> value (an entity that was never read from the
     /// database) binds as DBNull and matches no row, so the save is reported as a conflict rather than silently overwriting.
     /// </remarks>
-    public void BindRowVersionParameter(SqlCommand command, EntityBase entity)
+    public void BindRowVersionParameter(SqlCommand command, EntityBaseCore entity)
     {
         var property = RowVersionProperty!;
         AddColumnParameter(
@@ -11592,7 +11691,7 @@ internal sealed class EntitySaveMetadata
     }
 
     /// <summary>Creates an IDataReader for SqlBulkCopy that reads an entity collection one row at a time (store-generated columns are excluded from insertion).</summary>
-    public IDataReader CreateDataReader(IEnumerable<EntityBase> entities) =>
+    public IDataReader CreateDataReader(IEnumerable<EntityBaseCore> entities) =>
         new EntityDataReader(InsertProperties, entities);
 
     /// <summary>An IDataReader that reads entity columns one row at a time and feeds them to SqlBulkCopy (memory-efficient, no intermediate DataTable).</summary>
@@ -11601,11 +11700,11 @@ internal sealed class EntitySaveMetadata
     {
         private readonly IReadOnlyList<PropertyInfo> _properties;
         private readonly string[] _columnNames;
-        private readonly IEnumerator<EntityBase> _enumerator;
+        private readonly IEnumerator<EntityBaseCore> _enumerator;
 
         public EntityDataReader(
             IReadOnlyList<PropertyInfo> properties,
-            IEnumerable<EntityBase> entities
+            IEnumerable<EntityBaseCore> entities
         )
         {
             _properties = properties;
@@ -11785,22 +11884,22 @@ internal static class CascadeDeletePlanner
 /// </remarks>
 internal sealed class SaveHookSession(
     ISaveHookRegistry registry,
-    Func<EntityBase, ISaveHookContext> contextFactory
+    Func<EntityBaseCore, ISaveHookContext> contextFactory
 )
 {
     private readonly ISaveHookRegistry _registry = registry;
-    private readonly Func<EntityBase, ISaveHookContext> _contextFactory = contextFactory;
-    private readonly HashSet<EntityBase> _skipped = new(ReferenceEqualityComparer.Instance);
+    private readonly Func<EntityBaseCore, ISaveHookContext> _contextFactory = contextFactory;
+    private readonly HashSet<EntityBaseCore> _skipped = new(ReferenceEqualityComparer.Instance);
 
     /// <summary>Gets the set of entities skipped by a Before returning <c>false</c> (reference equality). Used by AcceptChanges to leave states untouched.</summary>
-    public IReadOnlySet<EntityBase> Skipped => _skipped;
+    public IReadOnlySet<EntityBaseCore> Skipped => _skipped;
 
     /// <summary>Adds an entity to the skip set.</summary>
-    public void Skip(EntityBase entity) => _skipped.Add(entity);
+    public void Skip(EntityBaseCore entity) => _skipped.Add(entity);
 
     /// <summary>Calls Before in registration order and short-circuits at the first <c>false</c> (types with no hooks yield <c>true</c>).</summary>
     public Task<bool> InvokeBeforeAsync(
-        EntityBase entity,
+        EntityBaseCore entity,
         SaveOperation operation,
         CancellationToken cancellationToken
     )
@@ -11813,7 +11912,7 @@ internal sealed class SaveHookSession(
 
     /// <summary>Calls After in registration order (types with no hooks do nothing). The context is created bound to the entity type.</summary>
     public Task InvokeAfterAsync(
-        EntityBase entity,
+        EntityBaseCore entity,
         SaveOperation operation,
         CancellationToken cancellationToken
     )
@@ -11838,10 +11937,10 @@ internal sealed class SaveHookSession(
 /// </remarks>
 internal sealed class RowVersionCollector
 {
-    private readonly List<(EntityBase Entity, byte[] Version)> _versions = new();
+    private readonly List<(EntityBaseCore Entity, byte[] Version)> _versions = new();
 
     /// <summary>Records the raw row version bytes the database assigned to an entity (converting them to the property type is left to <see cref="Apply"/>).</summary>
-    public void Record(EntityBase entity, byte[] version) => _versions.Add((entity, version));
+    public void Record(EntityBaseCore entity, byte[] version) => _versions.Add((entity, version));
 
     /// <summary>Writes every recorded row version back to its entity (call only after the save transaction has committed).</summary>
     public void Apply()
@@ -11883,7 +11982,7 @@ internal static class RowVersionConcurrency
     public static void BindUpdate(
         EntitySaveMetadata metadata,
         SqlCommand command,
-        EntityBase entity,
+        EntityBaseCore entity,
         ConcurrencyMode mode
     )
     {
@@ -11902,7 +12001,7 @@ internal static class RowVersionConcurrency
     /// <remarks>The question is existence only, so it runs the EXISTS statement rather than selecting every column of a row that is then discarded.</remarks>
     public static async Task<bool> RowExistsAsync(
         EntitySaveMetadata metadata,
-        EntityBase entity,
+        EntityBaseCore entity,
         SqlConnection connection,
         SqlTransaction? transaction,
         CancellationToken cancellationToken
@@ -11923,7 +12022,7 @@ internal static class RowVersionConcurrency
     /// <param name="operation">The lowercase verb of the rejected operation ("update" or "delete").</param>
     public static SaveConflictException Conflict(
         EntitySaveMetadata metadata,
-        EntityBase entity,
+        EntityBaseCore entity,
         string operation
     ) =>
         SaveConflictException.Modified(
@@ -11937,7 +12036,7 @@ internal static class RowVersionConcurrency
 internal static class EntityGraphSaver
 {
     /// <summary>Returns whether the entity itself, or (when cascading) any child, has changes.</summary>
-    public static bool HasChanges(EntityBase entity, bool cascade) =>
+    public static bool HasChanges(EntityBaseCore entity, bool cascade) =>
         entity.HasChanges
         || (cascade && EnumerateCascadeChildren(entity).Any(child => HasChanges(child, true)));
 
@@ -11949,7 +12048,7 @@ internal static class EntityGraphSaver
     /// performed.
     /// </remarks>
     public static async Task<int> SaveAsync(
-        EntityBase entity,
+        EntityBaseCore entity,
         SqlConnection connection,
         SqlTransaction transaction,
         bool cascadeSave,
@@ -12099,7 +12198,7 @@ internal static class EntityGraphSaver
     }
 
     /// <summary>Finalizes saved entities to Unchanged after commit.</summary>
-    public static void AcceptChanges(EntityBase entity, bool cascade) =>
+    public static void AcceptChanges(EntityBaseCore entity, bool cascade) =>
         AcceptChanges(entity, cascade, null);
 
     /// <summary>
@@ -12107,9 +12206,9 @@ internal static class EntityGraphSaver
     /// because a save hook's Before returned <c>false</c>) were not operated on, so their state is left untouched.
     /// </summary>
     public static void AcceptChanges(
-        EntityBase entity,
+        EntityBaseCore entity,
         bool cascade,
-        IReadOnlySet<EntityBase>? skip
+        IReadOnlySet<EntityBaseCore>? skip
     )
     {
         if (entity.IsRemoved)
@@ -12134,7 +12233,7 @@ internal static class EntityGraphSaver
 
     /// <summary>Deletes the subtree starting from the children (deleted regardless of state; when <paramref name="hooks"/> is provided, fires Before/After(Delete) per child).</summary>
     private static async Task<int> DeleteGraphAsync(
-        EntityBase entity,
+        EntityBaseCore entity,
         SqlConnection connection,
         SqlTransaction transaction,
         CancellationToken cancellationToken,
@@ -12184,7 +12283,7 @@ internal static class EntityGraphSaver
 
     /// <summary>Inserts a single row, capturing the row version the database assigned when the table carries one.</summary>
     private static async Task<int> InsertEntityAsync(
-        EntityBase entity,
+        EntityBaseCore entity,
         SqlConnection connection,
         SqlTransaction transaction,
         CancellationToken cancellationToken,
@@ -12225,7 +12324,7 @@ internal static class EntityGraphSaver
 
     /// <summary>Deletes a single row, guarded by the row version the entity was read with when the table carries one.</summary>
     private static async Task<int> DeleteEntityAsync(
-        EntityBase entity,
+        EntityBaseCore entity,
         SqlConnection connection,
         SqlTransaction transaction,
         CancellationToken cancellationToken,
@@ -12280,7 +12379,7 @@ internal static class EntityGraphSaver
 
     /// <summary>Executes the update and returns the affected row count and the operation actually performed (Insert when switched).</summary>
     private static async Task<(int Rows, SaveOperation Performed)> UpdateAsync(
-        EntityBase entity,
+        EntityBaseCore entity,
         SqlConnection connection,
         SqlTransaction transaction,
         bool insertWhenUpdateMissing,
@@ -12366,9 +12465,9 @@ internal static class EntityGraphSaver
 
     /// <summary>Executes a statement whose OUTPUT clause returns a single value, yielding <c>null</c> when it matched no row.</summary>
     private static async Task<object?> ExecuteReturningAsync(
-        EntityBase entity,
+        EntityBaseCore entity,
         Func<EntitySaveMetadata, string> sqlSelector,
-        Action<EntitySaveMetadata, SqlCommand, EntityBase> bind,
+        Action<EntitySaveMetadata, SqlCommand, EntityBaseCore> bind,
         SqlConnection connection,
         SqlTransaction transaction,
         CancellationToken cancellationToken
@@ -12382,9 +12481,9 @@ internal static class EntityGraphSaver
     }
 
     private static async Task<int> ExecuteAsync(
-        EntityBase entity,
+        EntityBaseCore entity,
         Func<EntitySaveMetadata, string> sqlSelector,
-        Action<EntitySaveMetadata, SqlCommand, EntityBase> bind,
+        Action<EntitySaveMetadata, SqlCommand, EntityBaseCore> bind,
         SqlConnection connection,
         SqlTransaction transaction,
         CancellationToken cancellationToken
@@ -12398,7 +12497,7 @@ internal static class EntityGraphSaver
     }
 
     /// <summary>Enumerates the cascade-target child entities (nulls are excluded).</summary>
-    private static IEnumerable<EntityBase> EnumerateCascadeChildren(EntityBase entity)
+    private static IEnumerable<EntityBaseCore> EnumerateCascadeChildren(EntityBaseCore entity)
     {
         foreach (var navigation in EntitySaveMetadata.For(entity.GetType()).CascadeNavigations)
         {
@@ -12411,7 +12510,7 @@ internal static class EntityGraphSaver
 
             if (navigation.IsCollection)
             {
-                if (value is IEnumerable<EntityBase> children)
+                if (value is IEnumerable<EntityBaseCore> children)
                 {
                     foreach (var child in children)
                     {
@@ -12422,7 +12521,7 @@ internal static class EntityGraphSaver
                     }
                 }
             }
-            else if (value is EntityBase child)
+            else if (value is EntityBaseCore child)
             {
                 yield return child;
             }

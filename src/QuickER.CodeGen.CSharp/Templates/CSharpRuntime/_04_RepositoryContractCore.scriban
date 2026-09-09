@@ -147,7 +147,7 @@ public static class UniquenessChecker
 /// </para>
 /// </remarks>
 public partial interface IRemoteRepository<TEntity, TKey>
-    where TEntity : EntityBase, new()
+    where TEntity : EntityBaseCore, new()
 {
     /// <summary>Gets a single entity by primary key (null when not found).</summary>
     Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default);
@@ -237,7 +237,7 @@ public partial interface IRemoteRepository<TEntity, TKey>
 /// I{Entity}Repository always provides this full-featured surface.
 /// </remarks>
 public partial interface IRepository<TEntity, TKey> : IRemoteRepository<TEntity, TKey>
-    where TEntity : EntityBase, new()
+    where TEntity : EntityBaseCore, new()
 {
     /// <summary>Bulk inserts a collection of entities.</summary>
     /// <remarks>
@@ -357,13 +357,13 @@ public partial interface ISqlExecutor
         object? parameters = null,
         CancellationToken cancellationToken = default
     )
-        where TEntity : EntityBase, new();
+        where TEntity : EntityBaseCore, new();
 
     /// <summary>Executes a raw SQL SELECT and leniently projects the result rows onto an arbitrary <typeparamref name="TResult"/>.</summary>
     /// <remarks>
     /// <para>
     /// <b>Single-value mode</b>: when <typeparamref name="TResult"/> (Nullable is judged by its underlying type) is primitive / enum /
-    /// string / decimal / DateTime / DateTimeOffset / TimeSpan / Guid / byte[]{{ if generate_value_objects }} / a value object (IValueObject implementation){{ end }},
+    /// string / decimal / DateTime / DateTimeOffset / TimeSpan / Guid / byte[]{{ if generate_value_objects }} / a value object (IValueObjectCore implementation){{ end }},
     /// the <b>first column</b> of each row is converted and returned (DBNull becomes <c>default</c>). Conversion uses the same
     /// Nullable-aware <see cref="System.Convert.ChangeType(object, System.Type, System.IFormatProvider)"/> as the scalar methods.
     /// </para>
@@ -518,7 +518,7 @@ public enum ConcurrencyMode
 /// </remarks>
 /// <typeparam name="TEntity">The entity type the hook targets.</typeparam>
 public interface ISaveHook<TEntity>
-    where TEntity : EntityBase
+    where TEntity : EntityBaseCore
 {
     /// <summary>Called immediately before the operation (<c>false</c> skips that single operation; the default does not skip).</summary>
     /// <param name="entity">The entity being saved.</param>
@@ -636,14 +636,14 @@ public interface ISaveHookInvoker
 {
     /// <summary>Calls Before in registration order, short-circuiting on the first <c>false</c> (returns false when any hook returns false).</summary>
     Task<bool> InvokeBeforeAsync(
-        EntityBase entity,
+        EntityBaseCore entity,
         SaveOperation operation,
         CancellationToken cancellationToken
     );
 
     /// <summary>Calls After sequentially in registration order.</summary>
     Task InvokeAfterAsync(
-        EntityBase entity,
+        EntityBaseCore entity,
         SaveOperation operation,
         ISaveHookContext context,
         CancellationToken cancellationToken
@@ -721,7 +721,7 @@ public interface ISaveHookRegistry
     /// <typeparam name="TEntity">The entity type the hook targets.</typeparam>
     /// <param name="hook">The hook to add (hooks for the same type fire in the order they were added).</param>
     public SaveHookRegistry Add<TEntity>(ISaveHook<TEntity> hook)
-        where TEntity : EntityBase
+        where TEntity : EntityBaseCore
     {
         ArgumentNullException.ThrowIfNull(hook);
 
@@ -748,14 +748,14 @@ public interface ISaveHookRegistry
 /// <typeparam name="TEntity">The entity type the hooks target.</typeparam>
 {{ infra_visibility }} sealed class SaveHookInvoker<TEntity>(IEnumerable<ISaveHook<TEntity>> hooks)
     : ISaveHookInvoker
-    where TEntity : EntityBase
+    where TEntity : EntityBaseCore
 {
     private readonly IReadOnlyList<ISaveHook<TEntity>> _hooks =
         hooks as IReadOnlyList<ISaveHook<TEntity>> ?? hooks.ToList();
 
     /// <summary>Calls Before in registration order, short-circuiting on the first <c>false</c>.</summary>
     public async Task<bool> InvokeBeforeAsync(
-        EntityBase entity,
+        EntityBaseCore entity,
         SaveOperation operation,
         CancellationToken cancellationToken
     )
@@ -775,7 +775,7 @@ public interface ISaveHookRegistry
 
     /// <summary>Calls After sequentially in registration order.</summary>
     public async Task InvokeAfterAsync(
-        EntityBase entity,
+        EntityBaseCore entity,
         SaveOperation operation,
         ISaveHookContext context,
         CancellationToken cancellationToken
@@ -964,7 +964,7 @@ public static class SqlServerSchemaBootstrap
 {
     /// <summary>Returns the underlying value for a value object; returns anything else as is.</summary>
     public static object? Unwrap(object? value) =>
-        value is IValueObject valueObject ? valueObject.UnderlyingValue : value;
+        value is IValueObjectCore valueObject ? valueObject.UnderlyingValue : value;
 }
 
 /// <summary>Reverse-conversion helper that rewraps raw values read from the DB via Create when the target property is a value object type (the counterpart of Unwrap).</summary>
@@ -1000,7 +1000,7 @@ public static class SqlServerSchemaBootstrap
         var valueType = iface.GetGenericArguments()[1];
 
         // FlattenHierarchy: without it reflection never returns a static member declared on a base class, and Create
-        // lives on ValueObjectBase (a hand-written value object inheriting it included). A same-signature Create declared
+        // lives on ValueObjectBaseCore (a hand-written value object inheriting it included). A same-signature Create declared
         // on the type itself still wins (hide-by-signature), with no AmbiguousMatchException.
         var createMethod = targetType.GetMethod(
             "Create",
@@ -1239,7 +1239,7 @@ public static class SqlServerSchemaBootstrap
         // {{ if generate_value_objects }}Wrap the raw value via Create for value objects. {{ end }}When TResult is Nullable<T>, convert to the underlying type (ChangeType cannot handle Nullable directly)
         var targetType = Nullable.GetUnderlyingType(typeof(TResult)) ?? typeof(TResult);
         {{~ if generate_value_objects ~}}
-        if (typeof(IValueObject).IsAssignableFrom(targetType))
+        if (typeof(IValueObjectCore).IsAssignableFrom(targetType))
         {
             try
             {
@@ -1275,7 +1275,7 @@ public static class SqlServerSchemaBootstrap
     {
         var actual = Nullable.GetUnderlyingType(type) ?? type;
         {{~ if generate_value_objects ~}}
-        if (typeof(IValueObject).IsAssignableFrom(actual))
+        if (typeof(IValueObjectCore).IsAssignableFrom(actual))
         {
             return true;
         }
@@ -1359,7 +1359,7 @@ public static class SqlServerSchemaBootstrap
     {
         {{~ if generate_value_objects ~}}
         // Wrap the raw value via Create for value objects
-        if (typeof(IValueObject).IsAssignableFrom(underlyingType))
+        if (typeof(IValueObjectCore).IsAssignableFrom(underlyingType))
         {
             try
             {
@@ -1405,7 +1405,7 @@ public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory)
         object? parameters = null,
         CancellationToken cancellationToken = default
     )
-        where TEntity : EntityBase, new()
+        where TEntity : EntityBaseCore, new()
     {
         ArgumentNullException.ThrowIfNull(sql);
 
@@ -1532,7 +1532,7 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
     ISaveHookRegistry? saveHooks = null,
     ISqlExecutor? sqlExecutor = null
 ) : IRepository<TEntity, TKey>
-    where TEntity : EntityBase, new()
+    where TEntity : EntityBaseCore, new()
 {
     /// <summary>Metadata built exactly once per entity type (reused via a static field).</summary>
     private static readonly EntitySaveMetadata _metadata = EntitySaveMetadata.For(typeof(TEntity));
