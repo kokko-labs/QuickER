@@ -596,7 +596,7 @@ public static class RemoteEntityGraph
 /// body.
 /// </para>
 /// </remarks>
-public abstract partial class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositoryCore<TEntity, TKey>
+public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositoryCore<TEntity, TKey>
     where TEntity : EntityBaseCore, new()
 {
     private readonly HttpClient _httpClient;
@@ -1477,12 +1477,15 @@ public abstract partial class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteR
         var allProperties = entityType
             .GetProperties(BindingFlags.Public | BindingFlags.Instance)
             .ToList();
+        // A property is a column only when it carries [Column], which the generator puts on every column property.
+        // Anything else a partial declaration adds - navigations, RowState, and members added to the extension surface -
+        // is therefore never part of a SQL statement. A handwritten property opts in by carrying [Column] with the name
+        // of a real column
         var columns = allProperties
             .Where(property =>
                 property.CanRead
                 && property.CanWrite
-                && property.DeclaringType != typeof(EntityBaseCore)
-                && property.GetCustomAttribute<NavigationReferenceAttribute>() is null
+                && property.GetCustomAttribute<ColumnAttribute>() is not null
             )
             .ToList();
         var keyProperties = columns
@@ -3739,6 +3742,7 @@ public sealed partial class {{ repository.class_name }}(
 {{~ if remote_services && render_http_client && emit_schema_dependent ~}}
 
 /// <summary>Base of every generated HTTP client repository, and the extension point for them. Members added to a partial declaration of this class are available to every entity client.</summary>
+/// <remarks>The HTTP change source the sync engine uses is not one of them: it lives in the fixed runtime, which cannot name a generated type, so it derives from <see cref="HttpRemoteRepositoryCore{TEntity, TKey}"/> directly and members added here do not reach it.</remarks>
 /// <typeparam name="TEntity">The entity type.</typeparam>
 /// <typeparam name="TKey">The primary key type.</typeparam>
 public abstract partial class HttpRemoteRepository<TEntity, TKey>

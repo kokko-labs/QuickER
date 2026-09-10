@@ -260,7 +260,7 @@ public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory)
 }
 
 /// <summary>Repository base class for SQLite that implements CRUD using metadata.</summary>
-public abstract partial class SqliteRepositoryCore<TEntity, TKey>(
+public abstract class SqliteRepositoryCore<TEntity, TKey>(
     ISqlConnectionFactory connectionFactory,
     ISaveHookRegistry? saveHooks = null,
     ISqlExecutor? sqlExecutor = null
@@ -2244,16 +2244,26 @@ public static class SqlExpressionTranslator
         return expression;
     }
 
-    /// <summary>Whether the member is a property reference on the lambda parameter (i.e. a column). A navigation property is not a column and is rejected outright.</summary>
+    /// <summary>Whether the member is a property reference on the lambda parameter (i.e. a column). A navigation property, and a property without a [Column] mapping, are not columns and are rejected outright.</summary>
     /// <remarks>
     /// A navigation carries no column of its own, so treating one as a column would emit its property name as a column
     /// name and produce SQL the database rejects (<c>x.Parent == null</c> became <c>[Parent] IS NULL</c>). The in-memory
     /// store and EF Core both translate such a predicate happily, which made this the one place where the three backends
     /// disagreed. Failing here states the limitation instead, and the fix is always the same: filter on the foreign-key column.
+    /// On a type that uses <c>[Column]</c> mapping (a generated entity), a property without the mapping — one added
+    /// through an extension partial, or base-class state such as RowState — is refused for the same reason: it has no
+    /// column behind it, so the only translations available are wrong ones. A type with no <c>[Column]</c> at all
+    /// (a hand-written query type) keeps the name-as-column-name convention the raw-SQL mapping uses.
     /// </remarks>
     private static bool IsColumn(MemberExpression member)
     {
-        if (member is not { Expression: ParameterExpression, Member: PropertyInfo property })
+        if (
+            member is not
+            {
+                Expression: ParameterExpression parameter,
+                Member: PropertyInfo property
+            }
+        )
         {
             return false;
         }
@@ -2263,6 +2273,14 @@ public static class SqlExpressionTranslator
             throw new NotSupportedException(
                 $"'{property.DeclaringType?.Name}.{property.Name}' is a navigation property and cannot be translated to SQL; "
                     + "filter on the foreign-key column instead."
+            );
+        }
+
+        if (!IsMappedColumn(property) && TypeUsesColumnMapping(parameter.Type))
+        {
+            throw new NotSupportedException(
+                $"'{property.DeclaringType?.Name}.{property.Name}' has no [Column] mapping and cannot be translated to SQL; "
+                    + "map it with [Column(\"...\")] or evaluate it outside the query."
             );
         }
 
@@ -2277,6 +2295,30 @@ public static class SqlExpressionTranslator
         _navigationCache.GetOrAdd(
             property,
             static p => p.GetCustomAttribute<NavigationReferenceAttribute>() is not null
+        );
+
+    /// <summary>Caches the [Column] lookup per property (the same allow-list the save metadata uses: a property is a column exactly when it carries the mapping).</summary>
+    private static readonly ConcurrentDictionary<PropertyInfo, bool> _mappedColumnCache = new();
+
+    /// <summary>Whether the property carries the <c>[Column]</c> mapping that makes it a translatable column.</summary>
+    private static bool IsMappedColumn(PropertyInfo property) =>
+        _mappedColumnCache.GetOrAdd(
+            property,
+            static p => p.GetCustomAttribute<ColumnAttribute>() is not null
+        );
+
+    /// <summary>Caches, per queried type, whether it participates in [Column] mapping at all. A type with no mapped property keeps the name-as-column-name convention for hand-written query types.</summary>
+    private static readonly ConcurrentDictionary<Type, bool> _columnMappedTypeCache = new();
+
+    /// <summary>Whether the queried type declares at least one <c>[Column]</c>-mapped property (making unmapped properties non-columns on it).</summary>
+    private static bool TypeUsesColumnMapping(Type type) =>
+        _columnMappedTypeCache.GetOrAdd(
+            type,
+            static t =>
+                Array.Exists(
+                    t.GetProperties(BindingFlags.Public | BindingFlags.Instance),
+                    property => property.GetCustomAttribute<ColumnAttribute>() is not null
+                )
         );
 
     /// <summary>Caches member-to-bracketed-column-name resolution per type member (avoiding [Column] reflection for every column reference).</summary>
@@ -2578,12 +2620,15 @@ public sealed class EntitySaveMetadata
         var allProperties = entityType
             .GetProperties(BindingFlags.Public | BindingFlags.Instance)
             .ToList();
+        // A property is a column only when it carries [Column], which the generator puts on every column property.
+        // Anything else a partial declaration adds - navigations, RowState, and members added to the extension surface -
+        // is therefore never part of a SQL statement. A handwritten property opts in by carrying [Column] with the name
+        // of a real column
         var columns = allProperties
             .Where(property =>
                 property.CanRead
                 && property.CanWrite
-                && property.DeclaringType != typeof(EntityBaseCore)
-                && property.GetCustomAttribute<NavigationReferenceAttribute>() is null
+                && property.GetCustomAttribute<ColumnAttribute>() is not null
             )
             .ToList();
         var keyProperties = columns

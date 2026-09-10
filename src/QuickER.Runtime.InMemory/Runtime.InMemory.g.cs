@@ -80,12 +80,15 @@ public sealed class EntitySaveMetadata
         var allProperties = entityType
             .GetProperties(BindingFlags.Public | BindingFlags.Instance)
             .ToList();
+        // A property is a column only when it carries [Column], which the generator puts on every column property.
+        // Anything else a partial declaration adds - navigations, RowState, and members added to the extension surface -
+        // is therefore never part of a SQL statement. A handwritten property opts in by carrying [Column] with the name
+        // of a real column
         var columns = allProperties
             .Where(property =>
                 property.CanRead
                 && property.CanWrite
-                && property.DeclaringType != typeof(EntityBaseCore)
-                && property.GetCustomAttribute<NavigationReferenceAttribute>() is null
+                && property.GetCustomAttribute<ColumnAttribute>() is not null
             )
             .ToList();
         var keyProperties = columns
@@ -2142,7 +2145,7 @@ public static class InMemoryCascade
 /// Raw SQL operations (QueryBySql/ExecuteSql/ExecuteScalarSql) cannot run in memory and throw <see cref="NotSupportedException"/>.
 /// </para>
 /// </remarks>
-public abstract partial class InMemoryRepositoryCore<TEntity, TKey>(
+public abstract class InMemoryRepositoryCore<TEntity, TKey>(
     InMemoryDataStore store,
     ISaveHookRegistry? saveHooks = null
 ) : IRepositoryCore<TEntity, TKey>

@@ -273,6 +273,7 @@ public sealed class CascadeRootEntity : EntityBase
 {
     /// <summary>主キー</summary>
     [Key]
+    [Column("Id")]
     public int Id { get; set; }
 
     /// <summary>葉の子コレクション（カスケード削除の対象・先に走査される）</summary>
@@ -284,6 +285,7 @@ public sealed class CascadeRootEntity : EntityBase
     public ICollection<CascadeRootEntity> Children { get; set; } = new List<CascadeRootEntity>();
 
     /// <summary>自己参照 FK 列</summary>
+    [Column("ParentId")]
     public int? ParentId { get; set; }
 }
 
@@ -300,12 +302,15 @@ public sealed class VersionedRowEntity : EntityBase
 {
     /// <summary>主キー</summary>
     [Key]
+    [Column("Id")]
     public int Id { get; set; }
 
     /// <summary>任意の値列（更新の有無を観測するために使う）</summary>
+    [Column("Name")]
     public string Name { get; set; } = string.Empty;
 
     /// <summary>版列（DB 採番相当＝ストアが単調増加の擬似版を書き込む）</summary>
+    [Column("RowVer")]
     [StoreGeneratedColumn]
     public byte[]? RowVer { get; set; }
 }
@@ -316,8 +321,10 @@ public sealed class CascadeLeafEntity : EntityBase
 {
     /// <summary>主キー</summary>
     [Key]
+    [Column("Id")]
     public int Id { get; set; }
 
     /// <summary>親への FK 列</summary>
+    [Column("RootId")]
     public int RootId { get; set; }
 }

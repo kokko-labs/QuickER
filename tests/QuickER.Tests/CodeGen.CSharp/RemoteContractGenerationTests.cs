@@ -153,11 +153,11 @@ public class RemoteContractGenerationTests
         content.Should().NotContain("IOrderRemoteRepository");
 
         // 基底分割（IRemoteRepositoryCore ← IRepositoryCore）はオプションに依らず常時出力される（非破壊）
-        content.Should().Contain("public partial interface IRemoteRepositoryCore<TEntity, TKey>");
+        content.Should().Contain("public interface IRemoteRepositoryCore<TEntity, TKey>");
         content
             .Should()
             .Contain(
-                "public partial interface IRepositoryCore<TEntity, TKey> : IRemoteRepositoryCore<TEntity, TKey>"
+                "public interface IRepositoryCore<TEntity, TKey> : IRemoteRepositoryCore<TEntity, TKey>"
             );
 
         // 現行名は拡張シムが名乗り、per-entity 契約はそこへ着地する

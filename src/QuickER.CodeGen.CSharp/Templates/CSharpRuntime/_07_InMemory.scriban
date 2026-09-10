@@ -1828,7 +1828,7 @@ public sealed class InMemoryDataStore
 /// Raw SQL operations (QueryBySql/ExecuteSql/ExecuteScalarSql) cannot run in memory and throw <see cref="NotSupportedException"/>.
 /// </para>
 /// </remarks>
-public abstract partial class InMemoryRepositoryCore<TEntity, TKey>(
+public abstract class InMemoryRepositoryCore<TEntity, TKey>(
     InMemoryDataStore store,
     ISaveHookRegistry? saveHooks = null
 ) : IRepositoryCore<TEntity, TKey>

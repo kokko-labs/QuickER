@@ -263,7 +263,7 @@ public sealed class ValueObjectValidationException : Exception
 }
 
 /// <summary>Common base for value objects. Provides the Create / TryCreate / Validate factories, value storage, equality, ToString, and extraction of the raw value (ordered comparison is added by derived types).</summary>
-public abstract partial class ValueObjectBaseCore<TSelf, TValue>
+public abstract class ValueObjectBaseCore<TSelf, TValue>
     : IValueObjectCore,
         IEquatable<TSelf>,
         IFormattable

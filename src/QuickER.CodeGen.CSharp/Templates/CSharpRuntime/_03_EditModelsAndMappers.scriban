@@ -18,7 +18,7 @@
 /// <c>nameof</c> and stay compile-safe.
 /// </para>
 /// </remarks>
-public abstract partial class EditModelBaseCore
+public abstract class EditModelBaseCore
     : INotifyPropertyChanged,
         INotifyDataErrorInfo,
         IEditableObject
@@ -1092,10 +1092,18 @@ public abstract partial class EditModelBaseCore
 
     /// <summary>Asks the repository which UNIQUE constraints the given entity violates and registers the findings as duplicate-value errors (returns true when there are none).</summary>
     /// <remarks>
+    /// <para>
     /// The body of the generated <c>ValidateUniqueAsync</c>: everything except building the entity from the confirmed values,
     /// which is the only part that needs the concrete types. The findings of the previous run are withdrawn before the query
     /// goes out, so re-checking never leaves stale errors, and only this check's slot is touched - what the check among the
     /// siblings reported stays.
+    /// </para>
+    /// <para>
+    /// A model marked for removal passes without a query, the same as every other read of the validation state
+    /// (<see cref="Validate"/>, the error collection, and the check among the siblings all skip it): only its key reaches the
+    /// save, so a duplicate in a value that is about to be deleted must not block one. The error store is left untouched, so a
+    /// row whose removal is undone is judged again by the next check.
+    /// </para>
     /// </remarks>
     /// <param name="repository">The repository used for the check.</param>
     /// <param name="entity">The entity carrying the values to check.</param>
@@ -1108,6 +1116,12 @@ public abstract partial class EditModelBaseCore
         where TEntity : EntityBaseCore, new()
     {
         ArgumentNullException.ThrowIfNull(repository);
+
+        if (IsRemoved)
+        {
+            return true;
+        }
+
         ClearDuplicateErrors(DuplicateErrorSource.Database);
 
         var violations = await repository
@@ -1664,7 +1678,7 @@ public sealed record EditModelColumn<TModel>(
 /// single type parameter cannot name.
 /// </remarks>
 /// <typeparam name="TSelf">The concrete edit model type deriving from this class.</typeparam>
-public abstract partial class EditModelBaseCore<TSelf> : EditModelBaseCore
+public abstract class EditModelBaseCore<TSelf> : EditModelBaseCore
     where TSelf : EditModelBaseCore<TSelf>
 {
     /// <summary>Returns the next element after this one in its owning collection (null if not owned or at the end).</summary>
@@ -2108,10 +2122,10 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
     {
         var changed = false;
 
+        _rangeOperationDepth++;
+
         try
         {
-            _rangeOperationDepth++;
-
             foreach (var item in items)
             {
                 Add(item);
@@ -2135,10 +2149,10 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
     {
         var changed = false;
 
+        _rangeOperationDepth++;
+
         try
         {
-            _rangeOperationDepth++;
-
             foreach (var item in items)
             {
                 Insert(index++, item);
@@ -2162,10 +2176,10 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
     {
         var changed = Count > 0;
 
+        _rangeOperationDepth++;
+
         try
         {
-            _rangeOperationDepth++;
-
             while (Count > 0)
             {
                 RemoveAt(0);
@@ -2204,10 +2218,10 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
 
         var changed = count > 0;
 
+        _rangeOperationDepth++;
+
         try
         {
-            _rangeOperationDepth++;
-
             for (var i = 0; i < count; i++)
             {
                 RemoveAt(index);
@@ -2282,7 +2296,7 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
 /// (<see cref="CompleteLoad"/>), and the two post-creation hooks. Everything that composes them - the order of the load,
 /// the loading state it runs under, creation from an edit model, collection conversion - is written once here.
 /// </remarks>
-public abstract partial class MapperBaseCore<TEntity, TEditModel>
+public abstract class MapperBaseCore<TEntity, TEditModel>
     where TEntity : EntityBaseCore, new()
     where TEditModel : EditModelBaseCore, new()
 {

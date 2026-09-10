@@ -69,7 +69,7 @@ public class RuntimePackageModeCompilationTests
         // 拡張シム（EntityBase / EditModelBase<TSelf> / VO シム・Repository 契約シム・バックエンド基底シム）は
         // スキーマ依存側の生成物としてパッケージ参照モードでも出るため、固定 infra 側の型名（*Core）で判定する
         var allContent = string.Join(Environment.NewLine, result.Files.Select(f => f.Content));
-        allContent.Should().NotContain("abstract partial class EntityBaseCore");
+        allContent.Should().NotContain("abstract class EntityBaseCore");
         allContent.Should().NotContain("interface IRepositoryCore<TEntity");
         allContent.Should().NotContain("class SqlServerRepositoryCore<");
         allContent.Should().NotContain("class SqliteRepositoryCore<");

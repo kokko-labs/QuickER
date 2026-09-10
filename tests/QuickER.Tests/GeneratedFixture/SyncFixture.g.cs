@@ -475,7 +475,7 @@ public enum RowState
 }
 
 /// <summary>Base class that holds the change tracking state (RowState) of an entity.</summary>
-public abstract partial class EntityBaseCore
+public abstract class EntityBaseCore
 {
     /// <summary>Change tracking state of this entity. Defaults to Unchanged; restoring from the database or JSON keeps it Unchanged.</summary>
     public RowState RowState { get; set; } = RowState.Unchanged;
@@ -588,10 +588,11 @@ public abstract partial class EntityBaseCore
 
     // ---- Value comparison, hashing, and JSON output ----
 
-    /// <summary>Caches the "value properties" per type (public get/set properties that map to columns, excluding navigations and base properties such as RowState).</summary>
+    /// <summary>Caches the "value properties" per type (the public get/set properties carrying a <see cref="ColumnAttribute"/>).</summary>
     private static readonly ConcurrentDictionary<Type, PropertyInfo[]> _valuePropertyCache = new();
 
-    /// <summary>Returns the value properties of the given type (navigations and base properties excluded; scanned once per type and cached).</summary>
+    /// <summary>Returns the value properties of the given type (scanned once per type and cached).</summary>
+    /// <remarks>A property is a column only when it carries <see cref="ColumnAttribute"/>, which the generator puts on every column property. Anything else a partial declaration adds - navigations, RowState, and members added to the extension surface - is therefore not a column. Add <see cref="ColumnAttribute"/> with the name of a real column to opt a handwritten property in.</remarks>
     private static PropertyInfo[] GetValueProperties(Type type) =>
         _valuePropertyCache.GetOrAdd(
             type,
@@ -601,8 +602,7 @@ public abstract partial class EntityBaseCore
                     .Where(property =>
                         property.CanRead
                         && property.CanWrite
-                        && property.DeclaringType != typeof(EntityBaseCore)
-                        && !Attribute.IsDefined(property, typeof(NavigationReferenceAttribute))
+                        && Attribute.IsDefined(property, typeof(ColumnAttribute))
                     )
                     .ToArray()
         );
@@ -972,7 +972,7 @@ public static class UniquenessChecker
 /// this surface (plus the named queries) is additionally generated, and I{Entity}Repository inherits it.
 /// </para>
 /// </remarks>
-public partial interface IRemoteRepositoryCore<TEntity, TKey>
+public interface IRemoteRepositoryCore<TEntity, TKey>
     where TEntity : EntityBaseCore, new()
 {
     /// <summary>Gets a single entity by primary key (null when not found).</summary>
@@ -1062,7 +1062,7 @@ public partial interface IRemoteRepositoryCore<TEntity, TKey>
 /// members that assume local execution (a direct DB connection): expression-tree queries, raw SQL, and bulk insert.
 /// I{Entity}Repository always provides this full-featured surface.
 /// </remarks>
-public partial interface IRepositoryCore<TEntity, TKey> : IRemoteRepositoryCore<TEntity, TKey>
+public interface IRepositoryCore<TEntity, TKey> : IRemoteRepositoryCore<TEntity, TKey>
     where TEntity : EntityBaseCore, new()
 {
     /// <summary>Bulk inserts a collection of entities.</summary>
@@ -3096,7 +3096,7 @@ public static class RemoteEntityGraph
 /// body.
 /// </para>
 /// </remarks>
-public abstract partial class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositoryCore<TEntity, TKey>
+public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositoryCore<TEntity, TKey>
     where TEntity : EntityBaseCore, new()
 {
     private readonly HttpClient _httpClient;
@@ -3990,6 +3990,7 @@ public static class SqlQueryExtensions
 }
 
 /// <summary>Base of every generated HTTP client repository, and the extension point for them. Members added to a partial declaration of this class are available to every entity client.</summary>
+/// <remarks>The HTTP change source the sync engine uses is not one of them: it lives in the fixed runtime, which cannot name a generated type, so it derives from <see cref="HttpRemoteRepositoryCore{TEntity, TKey}"/> directly and members added here do not reach it.</remarks>
 /// <typeparam name="TEntity">The entity type.</typeparam>
 /// <typeparam name="TKey">The primary key type.</typeparam>
 public abstract partial class HttpRemoteRepository<TEntity, TKey>
@@ -8854,7 +8855,7 @@ public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory)
 }
 
 /// <summary>Repository base class for SQL Server that implements CRUD using metadata.</summary>
-public abstract partial class SqlServerRepositoryCore<TEntity, TKey>(
+public abstract class SqlServerRepositoryCore<TEntity, TKey>(
     ISqlConnectionFactory connectionFactory,
     ISaveHookRegistry? saveHooks = null,
     ISqlExecutor? sqlExecutor = null
@@ -10690,16 +10691,26 @@ internal static class SqlExpressionTranslator
         return expression;
     }
 
-    /// <summary>Whether the member is a property reference on the lambda parameter (i.e. a column). A navigation property is not a column and is rejected outright.</summary>
+    /// <summary>Whether the member is a property reference on the lambda parameter (i.e. a column). A navigation property, and a property without a [Column] mapping, are not columns and are rejected outright.</summary>
     /// <remarks>
     /// A navigation carries no column of its own, so treating one as a column would emit its property name as a column
     /// name and produce SQL the database rejects (<c>x.Parent == null</c> became <c>[Parent] IS NULL</c>). The in-memory
     /// store and EF Core both translate such a predicate happily, which made this the one place where the three backends
     /// disagreed. Failing here states the limitation instead, and the fix is always the same: filter on the foreign-key column.
+    /// On a type that uses <c>[Column]</c> mapping (a generated entity), a property without the mapping — one added
+    /// through an extension partial, or base-class state such as RowState — is refused for the same reason: it has no
+    /// column behind it, so the only translations available are wrong ones. A type with no <c>[Column]</c> at all
+    /// (a hand-written query type) keeps the name-as-column-name convention the raw-SQL mapping uses.
     /// </remarks>
     private static bool IsColumn(MemberExpression member)
     {
-        if (member is not { Expression: ParameterExpression, Member: PropertyInfo property })
+        if (
+            member is not
+            {
+                Expression: ParameterExpression parameter,
+                Member: PropertyInfo property
+            }
+        )
         {
             return false;
         }
@@ -10709,6 +10720,14 @@ internal static class SqlExpressionTranslator
             throw new NotSupportedException(
                 $"'{property.DeclaringType?.Name}.{property.Name}' is a navigation property and cannot be translated to SQL; "
                     + "filter on the foreign-key column instead."
+            );
+        }
+
+        if (!IsMappedColumn(property) && TypeUsesColumnMapping(parameter.Type))
+        {
+            throw new NotSupportedException(
+                $"'{property.DeclaringType?.Name}.{property.Name}' has no [Column] mapping and cannot be translated to SQL; "
+                    + "map it with [Column(\"...\")] or evaluate it outside the query."
             );
         }
 
@@ -10723,6 +10742,30 @@ internal static class SqlExpressionTranslator
         _navigationCache.GetOrAdd(
             property,
             static p => p.GetCustomAttribute<NavigationReferenceAttribute>() is not null
+        );
+
+    /// <summary>Caches the [Column] lookup per property (the same allow-list the save metadata uses: a property is a column exactly when it carries the mapping).</summary>
+    private static readonly ConcurrentDictionary<PropertyInfo, bool> _mappedColumnCache = new();
+
+    /// <summary>Whether the property carries the <c>[Column]</c> mapping that makes it a translatable column.</summary>
+    private static bool IsMappedColumn(PropertyInfo property) =>
+        _mappedColumnCache.GetOrAdd(
+            property,
+            static p => p.GetCustomAttribute<ColumnAttribute>() is not null
+        );
+
+    /// <summary>Caches, per queried type, whether it participates in [Column] mapping at all. A type with no mapped property keeps the name-as-column-name convention for hand-written query types.</summary>
+    private static readonly ConcurrentDictionary<Type, bool> _columnMappedTypeCache = new();
+
+    /// <summary>Whether the queried type declares at least one <c>[Column]</c>-mapped property (making unmapped properties non-columns on it).</summary>
+    private static bool TypeUsesColumnMapping(Type type) =>
+        _columnMappedTypeCache.GetOrAdd(
+            type,
+            static t =>
+                Array.Exists(
+                    t.GetProperties(BindingFlags.Public | BindingFlags.Instance),
+                    property => property.GetCustomAttribute<ColumnAttribute>() is not null
+                )
         );
 
     /// <summary>Caches member-to-bracketed-column-name resolution per type member (avoiding [Column] reflection for every column reference).</summary>
@@ -11016,12 +11059,15 @@ internal sealed class EntitySaveMetadata
         var allProperties = entityType
             .GetProperties(BindingFlags.Public | BindingFlags.Instance)
             .ToList();
+        // A property is a column only when it carries [Column], which the generator puts on every column property.
+        // Anything else a partial declaration adds - navigations, RowState, and members added to the extension surface -
+        // is therefore never part of a SQL statement. A handwritten property opts in by carrying [Column] with the name
+        // of a real column
         var columns = allProperties
             .Where(property =>
                 property.CanRead
                 && property.CanWrite
-                && property.DeclaringType != typeof(EntityBaseCore)
-                && property.GetCustomAttribute<NavigationReferenceAttribute>() is null
+                && property.GetCustomAttribute<ColumnAttribute>() is not null
             )
             .ToList();
         var keyProperties = columns
@@ -13034,7 +13080,7 @@ public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory)
 }
 
 /// <summary>Repository base class for SQLite that implements CRUD using metadata.</summary>
-public abstract partial class SqliteRepositoryCore<TEntity, TKey>(
+public abstract class SqliteRepositoryCore<TEntity, TKey>(
     ISqlConnectionFactory connectionFactory,
     ISaveHookRegistry? saveHooks = null,
     ISqlExecutor? sqlExecutor = null
@@ -14985,16 +15031,26 @@ internal static class SqlExpressionTranslator
         return expression;
     }
 
-    /// <summary>Whether the member is a property reference on the lambda parameter (i.e. a column). A navigation property is not a column and is rejected outright.</summary>
+    /// <summary>Whether the member is a property reference on the lambda parameter (i.e. a column). A navigation property, and a property without a [Column] mapping, are not columns and are rejected outright.</summary>
     /// <remarks>
     /// A navigation carries no column of its own, so treating one as a column would emit its property name as a column
     /// name and produce SQL the database rejects (<c>x.Parent == null</c> became <c>[Parent] IS NULL</c>). The in-memory
     /// store and EF Core both translate such a predicate happily, which made this the one place where the three backends
     /// disagreed. Failing here states the limitation instead, and the fix is always the same: filter on the foreign-key column.
+    /// On a type that uses <c>[Column]</c> mapping (a generated entity), a property without the mapping — one added
+    /// through an extension partial, or base-class state such as RowState — is refused for the same reason: it has no
+    /// column behind it, so the only translations available are wrong ones. A type with no <c>[Column]</c> at all
+    /// (a hand-written query type) keeps the name-as-column-name convention the raw-SQL mapping uses.
     /// </remarks>
     private static bool IsColumn(MemberExpression member)
     {
-        if (member is not { Expression: ParameterExpression, Member: PropertyInfo property })
+        if (
+            member is not
+            {
+                Expression: ParameterExpression parameter,
+                Member: PropertyInfo property
+            }
+        )
         {
             return false;
         }
@@ -15004,6 +15060,14 @@ internal static class SqlExpressionTranslator
             throw new NotSupportedException(
                 $"'{property.DeclaringType?.Name}.{property.Name}' is a navigation property and cannot be translated to SQL; "
                     + "filter on the foreign-key column instead."
+            );
+        }
+
+        if (!IsMappedColumn(property) && TypeUsesColumnMapping(parameter.Type))
+        {
+            throw new NotSupportedException(
+                $"'{property.DeclaringType?.Name}.{property.Name}' has no [Column] mapping and cannot be translated to SQL; "
+                    + "map it with [Column(\"...\")] or evaluate it outside the query."
             );
         }
 
@@ -15018,6 +15082,30 @@ internal static class SqlExpressionTranslator
         _navigationCache.GetOrAdd(
             property,
             static p => p.GetCustomAttribute<NavigationReferenceAttribute>() is not null
+        );
+
+    /// <summary>Caches the [Column] lookup per property (the same allow-list the save metadata uses: a property is a column exactly when it carries the mapping).</summary>
+    private static readonly ConcurrentDictionary<PropertyInfo, bool> _mappedColumnCache = new();
+
+    /// <summary>Whether the property carries the <c>[Column]</c> mapping that makes it a translatable column.</summary>
+    private static bool IsMappedColumn(PropertyInfo property) =>
+        _mappedColumnCache.GetOrAdd(
+            property,
+            static p => p.GetCustomAttribute<ColumnAttribute>() is not null
+        );
+
+    /// <summary>Caches, per queried type, whether it participates in [Column] mapping at all. A type with no mapped property keeps the name-as-column-name convention for hand-written query types.</summary>
+    private static readonly ConcurrentDictionary<Type, bool> _columnMappedTypeCache = new();
+
+    /// <summary>Whether the queried type declares at least one <c>[Column]</c>-mapped property (making unmapped properties non-columns on it).</summary>
+    private static bool TypeUsesColumnMapping(Type type) =>
+        _columnMappedTypeCache.GetOrAdd(
+            type,
+            static t =>
+                Array.Exists(
+                    t.GetProperties(BindingFlags.Public | BindingFlags.Instance),
+                    property => property.GetCustomAttribute<ColumnAttribute>() is not null
+                )
         );
 
     /// <summary>Caches member-to-bracketed-column-name resolution per type member (avoiding [Column] reflection for every column reference).</summary>
@@ -15307,12 +15395,15 @@ internal sealed class EntitySaveMetadata
         var allProperties = entityType
             .GetProperties(BindingFlags.Public | BindingFlags.Instance)
             .ToList();
+        // A property is a column only when it carries [Column], which the generator puts on every column property.
+        // Anything else a partial declaration adds - navigations, RowState, and members added to the extension surface -
+        // is therefore never part of a SQL statement. A handwritten property opts in by carrying [Column] with the name
+        // of a real column
         var columns = allProperties
             .Where(property =>
                 property.CanRead
                 && property.CanWrite
-                && property.DeclaringType != typeof(EntityBaseCore)
-                && property.GetCustomAttribute<NavigationReferenceAttribute>() is null
+                && property.GetCustomAttribute<ColumnAttribute>() is not null
             )
             .ToList();
         var keyProperties = columns

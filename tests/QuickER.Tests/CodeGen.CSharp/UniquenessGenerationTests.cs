@@ -173,10 +173,7 @@ public class UniquenessGenerationTests
         var content = AllContent(Generate(CreateDiagram(), CreateOptions()));
 
         // 宣言はランタイム共通面に 1 回だけ（I{Entity}Repository は IRepository シム経由で継承する）
-        ExtractDeclarationBody(
-                content,
-                "public partial interface IRemoteRepositoryCore<TEntity, TKey>"
-            )
+        ExtractDeclarationBody(content, "public interface IRemoteRepositoryCore<TEntity, TKey>")
             .Should()
             .Contain("Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(");
         ExtractDeclarationBody(
@@ -203,10 +200,7 @@ public class UniquenessGenerationTests
 
         var content = AllContent(Generate(CreateDiagram(), options));
 
-        ExtractDeclarationBody(
-                content,
-                "public partial interface IRemoteRepositoryCore<TEntity, TKey>"
-            )
+        ExtractDeclarationBody(content, "public interface IRemoteRepositoryCore<TEntity, TKey>")
             .Should()
             .Contain("Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(");
         ExtractDeclarationBody(
