@@ -1,7 +1,7 @@
 // QuickER 公開 API スナップショット: QuickER.Runtime.EntityFrameworkCore
 // 手編集しない。更新は QUICKER_REGEN_FIXTURES=1 での再生成（失敗メッセージにコマンドあり）。
 
-public abstract class QuickER.Runtime.EntityFrameworkCore.EfCoreRepository<TEntity, TKey, TContext> : QuickER.Runtime.IRemoteRepository<TEntity, TKey>, QuickER.Runtime.IRepository<TEntity, TKey>
+public abstract class QuickER.Runtime.EntityFrameworkCore.EfCoreRepositoryCore<TEntity, TKey, TContext> : QuickER.Runtime.IRemoteRepositoryCore<TEntity, TKey>, QuickER.Runtime.IRepositoryCore<TEntity, TKey>
     protected .ctor(Microsoft.EntityFrameworkCore.IDbContextFactory<TContext> contextFactory, QuickER.Runtime.ISaveHookRegistry saveHooks = null, QuickER.Runtime.ISqlExecutor sqlExecutor = null)
     protected virtual QuickER.Runtime.UniquenessConstraintSet<TEntity> UniquenessConstraints { get; }
     protected virtual void CollectUniquenessChecks(ref System.Collections.Generic.List<QuickER.Runtime.UniquenessCheck<TEntity>> checks)

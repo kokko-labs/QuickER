@@ -9,7 +9,7 @@ namespace QuickER.CodeGen.CSharp;
 /// <para>
 /// 生成物は 3 系統ある。(1) Repository 側の一括チェック <c>CheckUniquenessAsync</c>＝各制約について
 /// 「同一主キーの行を除外して同じ値の組を持つ行が DB に存在するか」を式木クエリで照合する。宣言は
-/// ランタイム共通面 <c>IRemoteRepository&lt;TEntity, TKey&gt;</c>・実装は各バックエンドの Repository 基底が 1 回だけ持ち、
+/// ランタイム共通面 <c>IRemoteRepositoryCore&lt;TEntity, TKey&gt;</c>・実装は各バックエンドの Repository 基底が 1 回だけ持ち、
 /// ここが per-entity に出すのは記述子の束縛（<c>UniquenessConstraints</c> の override）とフックの橋渡しだけ。
 /// (2) Entity 側＝クラスへ <c>[UniqueConstraint(...)]</c> 属性を刻む
 /// （<c>[DbTableMeta]</c> / <c>[DbColumnMeta]</c> と同じ「DB 定義の自己記述」。事前チェックはこの属性を読まないが、
@@ -21,7 +21,7 @@ namespace QuickER.CodeGen.CSharp;
 /// 契約が共通面へ上がったため、リモート契約生成（<c>GenerateRemoteContracts</c> / <c>GenerateRemoteServices</c>）の
 /// 有無で挿入先を出し分ける必要は無くなった（<c>I{Entity}Repository</c> は <c>I{Entity}RemoteRepository</c> 経由で、
 /// 単独構成でも <c>IRepository</c> 経由で同じ宣言を継承する）。HTTP クライアントの転送実装も基底
-/// <c>HttpRemoteRepository</c> が 1 回だけ持ち、サーバー側のエンドポイントも固定エンジンの
+/// <c>HttpRemoteRepositoryCore</c> が 1 回だけ持ち、サーバー側のエンドポイントも固定エンジンの
 /// <c>RemoteServerEngine.MapCrud</c> が CRUD と一緒に張る（リクエストは Insert と同型のため
 /// <c>RemoteEntityRequest&lt;TEntity&gt;</c> を共有し、per-entity のリクエストレコードは持たない）。
 /// </para>

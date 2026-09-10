@@ -2142,10 +2142,10 @@ public static class InMemoryCascade
 /// Raw SQL operations (QueryBySql/ExecuteSql/ExecuteScalarSql) cannot run in memory and throw <see cref="NotSupportedException"/>.
 /// </para>
 /// </remarks>
-public abstract partial class InMemoryRepository<TEntity, TKey>(
+public abstract partial class InMemoryRepositoryCore<TEntity, TKey>(
     InMemoryDataStore store,
     ISaveHookRegistry? saveHooks = null
-) : IRepository<TEntity, TKey>
+) : IRepositoryCore<TEntity, TKey>
     where TEntity : EntityBaseCore, new()
 {
     /// <summary>The data store holding the snapshots (shared via DI).</summary>

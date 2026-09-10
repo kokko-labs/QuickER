@@ -95,7 +95,7 @@ internal static class GeneratedFileUsings
     /// </summary>
     /// <remarks>
     /// <list type="bullet">
-    ///   <item>共有基盤・方言中立契約（EntityBaseCore・属性・VO 基底 Core・IRepository・SqlQuery・ISqlExecutor 等）→ <see cref="RuntimePackages.Core"/>。
+    ///   <item>共有基盤・方言中立契約（EntityBaseCore・属性・VO 基底 Core・IRepositoryCore・SqlQuery・ISqlExecutor 等）→ <see cref="RuntimePackages.Core"/>。
     ///     いずれかのバケットを含むファイルに常に必要（Entity のみでも EntityBaseCore／属性を参照するため）</item>
     ///   <item>Repository バケットを含みQuickER 版 Repository 実装を出す（<c>GenerateRepositories</c>）ファイル → その方言の
     ///     方言エンジン（<see cref="RuntimePackages.SqlServer"/> / <see cref="RuntimePackages.Sqlite"/>）。
@@ -344,7 +344,7 @@ internal static class GeneratedFileUsings
                 }
 
                 // リモートサービス（クライアント側の固定 infra）: RemoteJson・RemoteRepositoryException・
-                // HttpRemoteRepository 基底は「契約を出すスペックのうち固定 infra も出すもの」にのみ出力される
+                // HttpRemoteRepositoryCore 基底は「契約を出すスペックのうち固定 infra も出すもの」にのみ出力される
                 // （非分割の本体スペック・分割の Runtime.g.cs・パッケージソースのコア）。per-entity クライアント・
                 // AddGeneratedHttpRemoteRepositories は Http バケットへ分離済みで、その using は Http ケースが持つ
                 // （分割の契約ファイル Repositories.g.cs は EmitSharedInfra=false のためここでは何も足さない＝
@@ -421,7 +421,7 @@ internal static class GeneratedFileUsings
             // InMemory: DB 非依存のインメモリ Repository 群（InMemoryDataStore・InMemory{Entity}Repository・シーダー・
             //   AddGeneratedInMemoryRepositories）。自ファイルへ EntitySaveMetadata / SaveHookSession / EntityGraphSaver を
             //   （in_memory ガードで）出力するため、契約バケットと同水準の共有 infra 用 using を要する。ADO・EF Core・
-            //   リモート依存は一切出さない（方言非依存）。中立契約（IRepository・SqlQuery・CascadeNavigation・
+            //   リモート依存は一切出さない（方言非依存）。中立契約（IRepositoryCore・SqlQuery・CascadeNavigation・
             //   ISaveHookContext）は Repository 契約 namespace のクロス using で解決する。
             case GenerationBucket.InMemory:
                 yield return "System";
@@ -452,7 +452,7 @@ internal static class GeneratedFileUsings
             //   OwnedHttpClient）。HttpClient / SocketsHttpHandler（System.Net.Http）・PostAsJsonAsync（System.Net.Http.Json）・
             //   JSON 設定（System.Text.Json(.Serialization)）・DI 登録（Microsoft.Extensions.DependencyInjection）・
             //   Task / CancellationToken・Timeout.InfiniteTimeSpan（System.Threading(.Tasks)）を使う（すべて BCL＋共有フレームワーク）。
-            //   固定 infra（HttpRemoteRepository 基底・RemoteJson）は Runtime コア側＝クロス using / Core パッケージで解決する。
+            //   固定 infra（HttpRemoteRepositoryCore 基底・RemoteJson）は Runtime コア側＝クロス using / Core パッケージで解決する。
             case GenerationBucket.Http:
                 yield return "System";
                 yield return "System.Collections.Generic";
@@ -510,7 +510,7 @@ internal static class GeneratedFileUsings
             //     ジャーナルの記録時刻と主キーの往復書式（System / System.Globalization）・
             //     洗い替えの所要時間計測（Stopwatch＝System.Diagnostics）。
             //   per-entity: DI 登録拡張（Microsoft.Extensions.DependencyInjection）＝キー付き解決とデコレーション。
-            //   ADO・EF Core・ASP.NET Core への依存は一切持たない（中立契約 ISqlExecutor / IRepository のみを使う）。
+            //   ADO・EF Core・ASP.NET Core への依存は一切持たない（中立契約 ISqlExecutor / IRepositoryCore のみを使う）。
             //   リモートサービス併用時: HTTP 差分ソース（HttpSyncServerSource 基底・per-entity クライアント・
             //     ベースアドレス版 DI の HttpClient / SocketsHttpHandler）が System.Net.Http を使う。
             case GenerationBucket.Sync:

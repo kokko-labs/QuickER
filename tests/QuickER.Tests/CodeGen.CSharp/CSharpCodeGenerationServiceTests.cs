@@ -4782,7 +4782,7 @@ public class CSharpCodeGenerationServiceTests
         Content(result, "Runtime.EntityFrameworkCore.g.cs")
             .Should()
             .Contain("namespace Sample.Domain.Runtime.EntityFrameworkCore;")
-            .And.Contain("EfCoreRepository<TEntity, TKey, TContext>");
+            .And.Contain("EfCoreRepositoryCore<TEntity, TKey, TContext>");
 
         // EF Core の using は EF Core 系ファイルにのみ現れ、Entity ファイルには漏れない
         Content(result, "Entities.g.cs")
@@ -4942,7 +4942,7 @@ public class CSharpCodeGenerationServiceTests
             .Contain("public static IServiceCollection AddGeneratedEfCoreRepositories(");
         // QuickER の SQL Server 実装は出力されない
         content.Should().NotContain("public sealed partial class SqlExecutor(");
-        content.Should().NotContain("public abstract partial class SqlServerRepository<");
+        content.Should().NotContain("public abstract partial class SqlServerRepositoryCore<");
         content
             .Should()
             .NotContain("public static IServiceCollection AddGeneratedSqlServerRepositories(");
@@ -5050,13 +5050,26 @@ public class CSharpCodeGenerationServiceTests
         result.HasErrors.Should().BeFalse();
         var content = result.Files[0].Content;
 
-        // 基底クラス: 具象 DbContext 非依存で TContext ジェネリック化し、IDbContextFactory<TContext> を受け取る
+        // 基底クラス（実装＝固定ランタイム側）: 具象 DbContext 非依存で TContext ジェネリック化し、
+        // IDbContextFactory<TContext> を受け取る
+        content
+            .Should()
+            .Contain(
+                "public abstract partial class EfCoreRepositoryCore<TEntity, TKey, TContext>("
+            );
+        content.Should().Contain("IDbContextFactory<TContext> contextFactory");
+        content.Should().Contain(") : IRepositoryCore<TEntity, TKey>");
+        content.Should().Contain("where TContext : DbContext");
+
+        // 拡張シム（現行名）: 実装を Core へ委ね、コンストラクタ引数をそのまま転送する
         content
             .Should()
             .Contain("public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(");
-        content.Should().Contain("IDbContextFactory<TContext> contextFactory");
-        content.Should().Contain(") : IRepository<TEntity, TKey>");
-        content.Should().Contain("where TContext : DbContext");
+        content
+            .Should()
+            .Contain(
+                ") : EfCoreRepositoryCore<TEntity, TKey, TContext>(contextFactory, saveHooks, sqlExecutor)"
+            );
 
         // エンティティ別実装: 生成側で TContext=QuickErDbContext を閉じ、既存の I{Entity}Repository を実装する
         content.Should().Contain("public sealed partial class EfCoreCustomerRepository(");
@@ -5298,7 +5311,7 @@ public class CSharpCodeGenerationServiceTests
         Content(result, "Runtime.EntityFrameworkCore.g.cs")
             .Should()
             .Contain("EfCoreSqlExecutor")
-            .And.Contain("EfCoreRepository<TEntity, TKey, TContext>");
+            .And.Contain("EfCoreRepositoryCore<TEntity, TKey, TContext>");
     }
 
     /// <summary>rowversion 列と単一主キーを持つ最小ダイアグラム（IsRowVersion 構成の検証用）</summary>

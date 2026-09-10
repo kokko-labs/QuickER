@@ -1801,7 +1801,7 @@ public abstract partial class EditModelBaseCore
     /// <param name="entity">The entity carrying the values to check.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     protected async Task<bool> CheckDatabaseUniquenessAsync<TEntity, TKey>(
-        IRemoteRepository<TEntity, TKey> repository,
+        IRemoteRepositoryCore<TEntity, TKey> repository,
         TEntity entity,
         CancellationToken cancellationToken
     )
@@ -2903,7 +2903,7 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
 /// (<see cref="CompleteLoad"/>), and the two post-creation hooks. Everything that composes them - the order of the load,
 /// the loading state it runs under, creation from an edit model, collection conversion - is written once here.
 /// </remarks>
-public abstract partial class MapperBase<TEntity, TEditModel>
+public abstract partial class MapperBaseCore<TEntity, TEditModel>
     where TEntity : EntityBaseCore, new()
     where TEditModel : EditModelBaseCore, new()
 {
@@ -4594,6 +4594,13 @@ public partial class OrderLineEditModel : EditModelBase<OrderLineEditModel>
     partial void OnCancelEdit();
 }
 
+/// <summary>Base of every generated mapper, and the extension point for them. Members added to a partial declaration of this type reach all of them at once.</summary>
+/// <typeparam name="TEntity">The entity type.</typeparam>
+/// <typeparam name="TEditModel">The edit model type.</typeparam>
+public abstract partial class MapperBase<TEntity, TEditModel> : MapperBaseCore<TEntity, TEditModel>
+    where TEntity : EntityBaseCore, new()
+    where TEditModel : EditModelBaseCore, new() { }
+
 /// <summary>Converts between CustomerEntity and CustomerEditModel.</summary>
 public sealed partial class CustomerMapper
     : MapperBase<CustomerEntity, CustomerEditModel>
@@ -4957,18 +4964,18 @@ public static class UniquenessChecker
 /// <remarks>
 /// <para>
 /// Holds only CRUD and save operations for single entities and entity graphs; it excludes members that take arguments
-/// that cannot be carried out of process, such as expression trees (<see cref="IRepository{TEntity, TKey}.Query"/>) or
+/// that cannot be carried out of process, such as expression trees (<see cref="IRepositoryCore{TEntity, TKey}.Query"/>) or
 /// raw SQL. Because every member's arguments and return values are pure data (entities, primary keys, counts), code that
 /// depends only on this surface stays compile-time safe even if the implementation is later swapped for a remote
 /// implementation (over a web service).
 /// </para>
 /// <para>
-/// <see cref="IRepository{TEntity, TKey}"/> inherits this interface and provides all of its methods, so existing consuming
+/// <see cref="IRepositoryCore{TEntity, TKey}"/> inherits this interface and provides all of its methods, so existing consuming
 /// code is unchanged. With remote contract generation (GenerateRemoteContracts), an I{Entity}RemoteRepository that has only
 /// this surface (plus the named queries) is additionally generated, and I{Entity}Repository inherits it.
 /// </para>
 /// </remarks>
-public partial interface IRemoteRepository<TEntity, TKey>
+public partial interface IRemoteRepositoryCore<TEntity, TKey>
     where TEntity : EntityBaseCore, new()
 {
     /// <summary>Gets a single entity by primary key (null when not found).</summary>
@@ -5054,11 +5061,11 @@ public partial interface IRemoteRepository<TEntity, TKey>
 
 /// <summary>Common repository interface that provides CRUD operations for entities.</summary>
 /// <remarks>
-/// The full-featured surface that, in addition to the remote surface (<see cref="IRemoteRepository{TEntity, TKey}"/>), adds
+/// The full-featured surface that, in addition to the remote surface (<see cref="IRemoteRepositoryCore{TEntity, TKey}"/>), adds
 /// members that assume local execution (a direct DB connection): expression-tree queries, raw SQL, and bulk insert.
 /// I{Entity}Repository always provides this full-featured surface.
 /// </remarks>
-public partial interface IRepository<TEntity, TKey> : IRemoteRepository<TEntity, TKey>
+public partial interface IRepositoryCore<TEntity, TKey> : IRemoteRepositoryCore<TEntity, TKey>
     where TEntity : EntityBaseCore, new()
 {
     /// <summary>Bulk inserts a collection of entities.</summary>
@@ -5153,7 +5160,7 @@ public partial interface IRepository<TEntity, TKey> : IRemoteRepository<TEntity,
 /// <summary>A raw SQL executor not bound to a specific entity (executes arbitrary SQL and maps to entities, projection DTOs, or single values).</summary>
 /// <remarks>
 /// <para>
-/// Unlike the raw SQL methods on <see cref="IRepository{TEntity, TKey}"/>, the caller specifies the type via a type argument,
+/// Unlike the raw SQL methods on <see cref="IRepositoryCore{TEntity, TKey}"/>, the caller specifies the type via a type argument,
 /// so cross-entity JOIN and aggregate queries can be projected onto any DTO. The repository's raw SQL methods delegate to
 /// this executor internally.
 /// </para>
@@ -5169,7 +5176,7 @@ public partial interface ISqlExecutor
     /// <remarks>
     /// The SELECT must return all columns of {TEntity} (<c>SELECT *</c> or all columns listed); if any column is missing, a
     /// descriptive exception is thrown. Mapping and the RowState=Unchanged treatment are identical to
-    /// <see cref="IRepository{TEntity, TKey}.QueryBySqlAsync"/>.
+    /// <see cref="IRepositoryCore{TEntity, TKey}.QueryBySqlAsync"/>.
     /// </remarks>
     /// <param name="sql">A SELECT statement that returns all columns.</param>
     /// <param name="parameters">An anonymous object bound to @name parameters (null for no parameters).</param>
@@ -6149,11 +6156,11 @@ public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory)
 }
 
 /// <summary>Repository base class for SQLite that implements CRUD using metadata.</summary>
-public abstract partial class SqliteRepository<TEntity, TKey>(
+public abstract partial class SqliteRepositoryCore<TEntity, TKey>(
     ISqlConnectionFactory connectionFactory,
     ISaveHookRegistry? saveHooks = null,
     ISqlExecutor? sqlExecutor = null
-) : IRepository<TEntity, TKey>
+) : IRepositoryCore<TEntity, TKey>
     where TEntity : EntityBaseCore, new()
 {
     /// <summary>Metadata built exactly once per entity type (reused via a static field).</summary>
@@ -9180,7 +9187,7 @@ public static class RemoteEntityGraph
 }
 
 /// <summary>
-/// Common base class for client implementations that call the remote surface (<see cref="IRemoteRepository{TEntity, TKey}"/>) over HTTP + JSON.
+/// Common base class for client implementations that call the remote surface (<see cref="IRemoteRepositoryCore{TEntity, TKey}"/>) over HTTP + JSON.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -9220,14 +9227,14 @@ public static class RemoteEntityGraph
 /// body.
 /// </para>
 /// </remarks>
-public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepository<TEntity, TKey>
+public abstract partial class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositoryCore<TEntity, TKey>
     where TEntity : EntityBaseCore, new()
 {
     private readonly HttpClient _httpClient;
     private readonly string _entityRoute;
 
     /// <summary>Initializes a new instance with the HTTP client and the entity route (for example "Order").</summary>
-    protected HttpRemoteRepository(HttpClient httpClient, string entityRoute)
+    protected HttpRemoteRepositoryCore(HttpClient httpClient, string entityRoute)
     {
         ArgumentNullException.ThrowIfNull(httpClient);
         ArgumentException.ThrowIfNullOrWhiteSpace(entityRoute);
@@ -10349,7 +10356,7 @@ internal sealed class EntitySaveMetadata
     {
         // The query executor's TEntity has no new() constraint of its own, so the instance is created through Activator. The
         // parameterless constructor it needs is guaranteed by the contract types the entity has to satisfy to get here
-        // (IRepository<TEntity, TKey> and IRemoteRepository<TEntity, TKey> both require "where TEntity : EntityBaseCore, new()"),
+        // (IRepositoryCore<TEntity, TKey> and IRemoteRepositoryCore<TEntity, TKey> both require "where TEntity : EntityBaseCore, new()"),
         // so a partial declaration that removed the default constructor would fail the build with CS0310 rather than reach
         // this line
         var entity = (TEntity)Activator.CreateInstance(typeof(TEntity))!;
@@ -11226,6 +11233,30 @@ public static class GeneratedSqliteRepositoryServiceCollectionExtensions
     }
 }
 
+/// <summary>Remote surface every generated repository contract inherits, and the extension point for it. A member with a default implementation added to a partial declaration of this interface is callable through any repository reference, whatever the entity or the backend behind it.</summary>
+/// <typeparam name="TEntity">The entity type.</typeparam>
+/// <typeparam name="TKey">The primary key type.</typeparam>
+public partial interface IRemoteRepository<TEntity, TKey> : IRemoteRepositoryCore<TEntity, TKey>
+    where TEntity : EntityBaseCore, new() { }
+
+/// <summary>Full-featured surface every generated repository contract inherits, and the extension point for it. It inherits the remote surface as well, so a member added there is reachable through this one too.</summary>
+/// <typeparam name="TEntity">The entity type.</typeparam>
+/// <typeparam name="TKey">The primary key type.</typeparam>
+public partial interface IRepository<TEntity, TKey>
+    : IRepositoryCore<TEntity, TKey>,
+        IRemoteRepository<TEntity, TKey>
+    where TEntity : EntityBaseCore, new() { }
+
+/// <summary>Base of every generated SQLite repository implementation, and the extension point for them. Members added to a partial declaration of this class are available to every entity repository built on this engine.</summary>
+/// <typeparam name="TEntity">The entity type.</typeparam>
+/// <typeparam name="TKey">The primary key type.</typeparam>
+public abstract partial class SqliteRepository<TEntity, TKey>(
+    ISqlConnectionFactory connectionFactory,
+    ISaveHookRegistry? saveHooks = null,
+    ISqlExecutor? sqlExecutor = null
+) : SqliteRepositoryCore<TEntity, TKey>(connectionFactory, saveHooks, sqlExecutor)
+    where TEntity : EntityBaseCore, new() { }
+
 /// <summary>Remote surface of the CustomerEntity repository (only CRUD, save, and named queries that can cross a network boundary; swappable for a remote implementation later).</summary>
 public partial interface ICustomerRemoteRepository : IRemoteRepository<CustomerEntity, int> { }
 
@@ -11461,6 +11492,18 @@ public static class SqlQueryExtensions
         int id,
         CancellationToken cancellationToken = default
     ) => query.Where(entity => entity.OrderLineId == id).FirstOrDefaultAsync(cancellationToken);
+}
+
+/// <summary>Base of every generated HTTP client repository, and the extension point for them. Members added to a partial declaration of this class are available to every entity client.</summary>
+/// <typeparam name="TEntity">The entity type.</typeparam>
+/// <typeparam name="TKey">The primary key type.</typeparam>
+public abstract partial class HttpRemoteRepository<TEntity, TKey>
+    : HttpRemoteRepositoryCore<TEntity, TKey>
+    where TEntity : EntityBaseCore, new()
+{
+    /// <summary>Initializes a new instance with the HTTP client and the entity route (for example "Order").</summary>
+    protected HttpRemoteRepository(HttpClient httpClient, string entityRoute)
+        : base(httpClient, entityRoute) { }
 }
 
 /// <summary>HTTP client implementation of the remote surface (ICustomerRemoteRepository) for CustomerEntity.</summary>

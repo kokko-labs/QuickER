@@ -3302,7 +3302,7 @@ public abstract partial class EditModelBaseCore
     /// <param name="entity">The entity carrying the values to check.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     protected async Task<bool> CheckDatabaseUniquenessAsync<TEntity, TKey>(
-        IRemoteRepository<TEntity, TKey> repository,
+        IRemoteRepositoryCore<TEntity, TKey> repository,
         TEntity entity,
         CancellationToken cancellationToken
     )
@@ -4404,7 +4404,7 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
 /// (<see cref="CompleteLoad"/>), and the two post-creation hooks. Everything that composes them - the order of the load,
 /// the loading state it runs under, creation from an edit model, collection conversion - is written once here.
 /// </remarks>
-public abstract partial class MapperBase<TEntity, TEditModel>
+public abstract partial class MapperBaseCore<TEntity, TEditModel>
     where TEntity : EntityBaseCore, new()
     where TEditModel : EditModelBaseCore, new()
 {
@@ -5321,6 +5321,13 @@ public partial class OrderEditModel : EditModelBase<OrderEditModel>
         base.ParentModel as CustomerEditModel;
 }
 
+/// <summary>Base of every generated mapper, and the extension point for them. Members added to a partial declaration of this type reach all of them at once.</summary>
+/// <typeparam name="TEntity">The entity type.</typeparam>
+/// <typeparam name="TEditModel">The edit model type.</typeparam>
+public abstract partial class MapperBase<TEntity, TEditModel> : MapperBaseCore<TEntity, TEditModel>
+    where TEntity : EntityBaseCore, new()
+    where TEditModel : EditModelBaseCore, new() { }
+
 /// <summary>Converts between CustomerEntity and CustomerEditModel.</summary>
 public sealed partial class CustomerMapper
     : MapperBase<CustomerEntity, CustomerEditModel>
@@ -5568,18 +5575,18 @@ public static class UniquenessChecker
 /// <remarks>
 /// <para>
 /// Holds only CRUD and save operations for single entities and entity graphs; it excludes members that take arguments
-/// that cannot be carried out of process, such as expression trees (<see cref="IRepository{TEntity, TKey}.Query"/>) or
+/// that cannot be carried out of process, such as expression trees (<see cref="IRepositoryCore{TEntity, TKey}.Query"/>) or
 /// raw SQL. Because every member's arguments and return values are pure data (entities, primary keys, counts), code that
 /// depends only on this surface stays compile-time safe even if the implementation is later swapped for a remote
 /// implementation (over a web service).
 /// </para>
 /// <para>
-/// <see cref="IRepository{TEntity, TKey}"/> inherits this interface and provides all of its methods, so existing consuming
+/// <see cref="IRepositoryCore{TEntity, TKey}"/> inherits this interface and provides all of its methods, so existing consuming
 /// code is unchanged. With remote contract generation (GenerateRemoteContracts), an I{Entity}RemoteRepository that has only
 /// this surface (plus the named queries) is additionally generated, and I{Entity}Repository inherits it.
 /// </para>
 /// </remarks>
-public partial interface IRemoteRepository<TEntity, TKey>
+public partial interface IRemoteRepositoryCore<TEntity, TKey>
     where TEntity : EntityBaseCore, new()
 {
     /// <summary>Gets a single entity by primary key (null when not found).</summary>
@@ -5665,11 +5672,11 @@ public partial interface IRemoteRepository<TEntity, TKey>
 
 /// <summary>Common repository interface that provides CRUD operations for entities.</summary>
 /// <remarks>
-/// The full-featured surface that, in addition to the remote surface (<see cref="IRemoteRepository{TEntity, TKey}"/>), adds
+/// The full-featured surface that, in addition to the remote surface (<see cref="IRemoteRepositoryCore{TEntity, TKey}"/>), adds
 /// members that assume local execution (a direct DB connection): expression-tree queries, raw SQL, and bulk insert.
 /// I{Entity}Repository always provides this full-featured surface.
 /// </remarks>
-public partial interface IRepository<TEntity, TKey> : IRemoteRepository<TEntity, TKey>
+public partial interface IRepositoryCore<TEntity, TKey> : IRemoteRepositoryCore<TEntity, TKey>
     where TEntity : EntityBaseCore, new()
 {
     /// <summary>Bulk inserts a collection of entities.</summary>
@@ -5764,7 +5771,7 @@ public partial interface IRepository<TEntity, TKey> : IRemoteRepository<TEntity,
 /// <summary>A raw SQL executor not bound to a specific entity (executes arbitrary SQL and maps to entities, projection DTOs, or single values).</summary>
 /// <remarks>
 /// <para>
-/// Unlike the raw SQL methods on <see cref="IRepository{TEntity, TKey}"/>, the caller specifies the type via a type argument,
+/// Unlike the raw SQL methods on <see cref="IRepositoryCore{TEntity, TKey}"/>, the caller specifies the type via a type argument,
 /// so cross-entity JOIN and aggregate queries can be projected onto any DTO. The repository's raw SQL methods delegate to
 /// this executor internally.
 /// </para>
@@ -5780,7 +5787,7 @@ public partial interface ISqlExecutor
     /// <remarks>
     /// The SELECT must return all columns of {TEntity} (<c>SELECT *</c> or all columns listed); if any column is missing, a
     /// descriptive exception is thrown. Mapping and the RowState=Unchanged treatment are identical to
-    /// <see cref="IRepository{TEntity, TKey}.QueryBySqlAsync"/>.
+    /// <see cref="IRepositoryCore{TEntity, TKey}.QueryBySqlAsync"/>.
     /// </remarks>
     /// <param name="sql">A SELECT statement that returns all columns.</param>
     /// <param name="parameters">An anonymous object bound to @name parameters (null for no parameters).</param>
@@ -8161,6 +8168,20 @@ public static class SaveHookServiceCollectionExtensions
     }
 }
 
+/// <summary>Remote surface every generated repository contract inherits, and the extension point for it. A member with a default implementation added to a partial declaration of this interface is callable through any repository reference, whatever the entity or the backend behind it.</summary>
+/// <typeparam name="TEntity">The entity type.</typeparam>
+/// <typeparam name="TKey">The primary key type.</typeparam>
+public partial interface IRemoteRepository<TEntity, TKey> : IRemoteRepositoryCore<TEntity, TKey>
+    where TEntity : EntityBaseCore, new() { }
+
+/// <summary>Full-featured surface every generated repository contract inherits, and the extension point for it. It inherits the remote surface as well, so a member added there is reachable through this one too.</summary>
+/// <typeparam name="TEntity">The entity type.</typeparam>
+/// <typeparam name="TKey">The primary key type.</typeparam>
+public partial interface IRepository<TEntity, TKey>
+    : IRepositoryCore<TEntity, TKey>,
+        IRemoteRepository<TEntity, TKey>
+    where TEntity : EntityBaseCore, new() { }
+
 /// <summary>Repository interface for CustomerEntity.</summary>
 public partial interface ICustomerRepository : IRepository<CustomerEntity, CustomerIdValue> { }
 
@@ -9273,11 +9294,11 @@ internal sealed class EfCoreSqlQueryExecutor<TEntity, TContext>(
 /// <typeparam name="TEntity">The target entity type.</typeparam>
 /// <typeparam name="TKey">The primary key type.</typeparam>
 /// <typeparam name="TContext">The concrete type of the DbContext that performs CRUD.</typeparam>
-public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
+public abstract partial class EfCoreRepositoryCore<TEntity, TKey, TContext>(
     IDbContextFactory<TContext> contextFactory,
     ISaveHookRegistry? saveHooks = null,
     ISqlExecutor? sqlExecutor = null
-) : IRepository<TEntity, TKey>
+) : IRepositoryCore<TEntity, TKey>
     where TEntity : EntityBaseCore, new()
     where TContext : DbContext
 {
@@ -9978,6 +9999,18 @@ internal sealed class EfCoreSaveHookContext(DbContext context) : ISaveHookContex
                 + "Update the column with raw SQL (ExecuteSqlAsync) or use the QuickER Repository."
         );
 }
+
+/// <summary>Base of every generated EF Core repository, and the extension point for them. Members added to a partial declaration of this class are available to every entity repository on the EF Core engine.</summary>
+/// <typeparam name="TEntity">The entity type.</typeparam>
+/// <typeparam name="TKey">The primary key type.</typeparam>
+/// <typeparam name="TContext">The concrete type of the DbContext that performs CRUD.</typeparam>
+public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
+    IDbContextFactory<TContext> contextFactory,
+    ISaveHookRegistry? saveHooks = null,
+    ISqlExecutor? sqlExecutor = null
+) : EfCoreRepositoryCore<TEntity, TKey, TContext>(contextFactory, saveHooks, sqlExecutor)
+    where TEntity : EntityBaseCore, new()
+    where TContext : DbContext { }
 
 /// <summary>Extensions that register the generated EF Core repositories into the DI container.</summary>
 public static class GeneratedEfCoreRepositoryServiceCollectionExtensions

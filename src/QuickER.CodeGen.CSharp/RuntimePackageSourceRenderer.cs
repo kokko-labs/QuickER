@@ -14,12 +14,12 @@ namespace QuickER.CodeGen.CSharp;
 /// 分割規則:
 /// <list type="bullet">
 ///   <item><b>Core</b>（<see cref="RuntimePackages.Core"/>）: 共通基盤（属性・EntityBase・EditModelBase・VO 基底・
-///     JSON コンバータ）＋方言中立の Repository 共通契約（IRepository・ISqlExecutor・SqlQuery・RawSqlMapper 等）</item>
+///     JSON コンバータ）＋方言中立の Repository 共通契約（IRepositoryCore・ISqlExecutor・SqlQuery・RawSqlMapper 等）</item>
 ///   <item><b>SqlServer / Sqlite</b>: 方言エンジンの固定コード（方言 Repository 基底・式木翻訳・実行器・接続ファクトリ・
 ///     方言別メタデータ）。<c>using QuickER.Runtime;</c> でコアの契約を参照する</item>
 ///   <item><b>EfCore</b>: EF Core 共通部品（EF Core 版 Repository 基底・VO 翻訳プラグイン・SaveConflict 変換・DbContext 基盤）。
 ///     同じく <c>using QuickER.Runtime;</c> 付き</item>
-///   <item><b>InMemory</b>: DB 非依存のインメモリエンジン（InMemoryDataStore・InMemoryRepository 基底・保存ステージング・
+///   <item><b>InMemory</b>: DB 非依存のインメモリエンジン（InMemoryDataStore・InMemoryRepositoryCore 基底・保存ステージング・
 ///     式木評価）。ADO も EF Core も参照せず、同じく <c>using QuickER.Runtime;</c> 付き</item>
 ///   <item><b>AspNetCore</b>: リモートサーバーの固定エンジン（RemoteServerEngine・エラー分類・詳細公開ポリシー・
 ///     バイナリ転送の補助型）。ASP.NET Core の FrameworkReference のみに依存し、同じく <c>using QuickER.Runtime;</c> 付き</item>
@@ -48,7 +48,7 @@ public sealed class RuntimePackageSourceRenderer
 
         // Runtime（共通基盤）＋ Repository 契約（ContractOnly）の using を、通常生成と同じ解決器から得る。
         // 契約のみのため ADO（SqlClient / Sqlite）・DI は付かない。
-        // リモートクライアントの固定 infra（HttpRemoteRepository 等）を含めるため includeRemoteServices を立てるが、
+        // リモートクライアントの固定 infra（HttpRemoteRepositoryCore 等）を含めるため includeRemoteServices を立てるが、
         // DI 登録拡張（AddGeneratedHttpRemoteRepositories）はスキーマ依存物でパッケージに入れないため、
         // その using（Microsoft.Extensions.DependencyInjection(.Extensions)）は除外して Core の依存ゼロを保つ
         // （方言エンジンパッケージの除外と同じ理由）。
@@ -128,7 +128,7 @@ public sealed class RuntimePackageSourceRenderer
     /// <remarks>
     /// EF Core 版 Repository 基底・VO 翻訳プラグイン・SaveConflict 変換・DbContext 基盤と、EF Core が使うメタデータ
     /// （EntitySaveMetadata / EntityGraphSaver）を、名前空間 <c>QuickER.Runtime.EntityFrameworkCore</c> で 1 ファイルへ出力する。
-    /// 共通契約（IRepository・SqlQuery 等）はコアを <c>using QuickER.Runtime;</c> で参照する（重複定義しない）。
+    /// 共通契約（IRepositoryCore・SqlQuery 等）はコアを <c>using QuickER.Runtime;</c> で参照する（重複定義しない）。
     /// </remarks>
     public string RenderEfCore()
     {
@@ -184,9 +184,9 @@ public sealed class RuntimePackageSourceRenderer
     /// インメモリ基盤パッケージ（<see cref="RuntimePackages.InMemory"/>）のソースをレンダリングする。
     /// </summary>
     /// <remarks>
-    /// インメモリエンジンの固定コード（InMemoryDataStore・InMemoryRepository 基底・保存ステージング・読み書きスコープ・
+    /// インメモリエンジンの固定コード（InMemoryDataStore・InMemoryRepositoryCore 基底・保存ステージング・読み書きスコープ・
     /// 式木評価）と、それが使うバックエンド共通メタデータ（EntitySaveMetadata / SaveHookSession / EntityGraphSaver）を、
-    /// 名前空間 <c>QuickER.Runtime.InMemory</c> で 1 ファイルへ出力する。共通契約（IRepository・SqlQuery・
+    /// 名前空間 <c>QuickER.Runtime.InMemory</c> で 1 ファイルへ出力する。共通契約（IRepositoryCore・SqlQuery・
     /// ISaveHookContext 等）はコアを <c>using QuickER.Runtime;</c> で参照する（重複定義しない）。
     /// 方言 ADO・EF Core・DI いずれにも依存しない（BCL のみ）。
     /// </remarks>
@@ -272,7 +272,7 @@ public sealed class RuntimePackageSourceRenderer
     /// <remarks>
     /// 同期の固定エンジン（<c>SyncEngine</c>・<c>SyncJournal</c>・<c>SyncTable</c> 基底・<c>SyncSession</c>・
     /// 結果／競合レコード）を、名前空間 <c>QuickER.Runtime.Sync</c> で 1 ファイルへ出力する。共通契約
-    /// （<c>IRepository</c>・<c>ISqlExecutor</c>・<c>ConcurrencyMode</c>・<c>SaveConflictException</c>・<c>EntityBase</c>）は
+    /// （<c>IRepositoryCore</c>・<c>ISqlExecutor</c>・<c>ConcurrencyMode</c>・<c>SaveConflictException</c>・<c>EntityBaseCore</c>）は
     /// コアを <c>using QuickER.Runtime;</c> で参照する。per-entity の記述子・デコレータ・直結差分ソース・DI 登録は
     /// スキーマ依存物として生成側に残るため、DI への依存も持たない（BCL のみ）。
     /// </remarks>
@@ -281,7 +281,7 @@ public sealed class RuntimePackageSourceRenderer
         var options = BuildAllFeaturesOptions();
         var model = BuildEmptyModel();
 
-        // HTTP 差分ソースの固定基底（HttpSyncServerSource＝コアの HttpRemoteRepository 派生）を含めるため
+        // HTTP 差分ソースの固定基底（HttpSyncServerSource＝コアの HttpRemoteRepositoryCore 派生）を含めるため
         // includeRemoteServices を立てる（HttpClient の using が要る）。DI 登録拡張と per-entity クライアントは
         // スキーマ依存物のため入らない（emitSchemaDependent: false）。
         var usings = ResolveUsings(
@@ -321,7 +321,7 @@ public sealed class RuntimePackageSourceRenderer
             GenerateMappers = true,
             GenerateRepositories = true,
             GenerateEfCoreRepositories = true,
-            // リモートサービスのクライアント側固定 infra（RemoteJson・RemoteRepositoryException・HttpRemoteRepository 等）
+            // リモートサービスのクライアント側固定 infra（RemoteJson・RemoteRepositoryException・HttpRemoteRepositoryCore 等）
             // は BCL のみ依存のため Core パッケージへ含める（per-entity クライアント・DI 登録はスキーマ依存物として
             // 常に生成側＝!runtime_package_export ゲートで除外される）
             GenerateRemoteServices = true,

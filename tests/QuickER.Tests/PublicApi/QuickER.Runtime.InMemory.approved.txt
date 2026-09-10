@@ -61,7 +61,7 @@ public sealed class QuickER.Runtime.InMemory.InMemoryQueryExecutor<TEntity> : Qu
     public System.Threading.Tasks.Task<int> CountAsync(QuickER.Runtime.SqlQueryPlan<TEntity> plan, System.Threading.CancellationToken cancellationToken)
     public System.Threading.Tasks.Task<int> ExecuteDeleteAsync(QuickER.Runtime.SqlQueryPlan<TEntity> plan, bool cascadeDelete, System.Threading.CancellationToken cancellationToken)
 
-public abstract class QuickER.Runtime.InMemory.InMemoryRepository<TEntity, TKey> : QuickER.Runtime.IRemoteRepository<TEntity, TKey>, QuickER.Runtime.IRepository<TEntity, TKey>
+public abstract class QuickER.Runtime.InMemory.InMemoryRepositoryCore<TEntity, TKey> : QuickER.Runtime.IRemoteRepositoryCore<TEntity, TKey>, QuickER.Runtime.IRepositoryCore<TEntity, TKey>
     protected .ctor(QuickER.Runtime.InMemory.InMemoryDataStore store, QuickER.Runtime.ISaveHookRegistry saveHooks = null)
     protected QuickER.Runtime.InMemory.InMemoryDataStore Store { get; }
     protected System.Threading.Tasks.Task<bool> ReadUnboundedBinaryColumnAsync(string propertyName, TKey id, System.IO.Stream destination, System.Threading.CancellationToken cancellationToken = default)

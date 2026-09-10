@@ -33,7 +33,7 @@ public abstract class QuickER.Runtime.EditModelBaseCore : System.ComponentModel.
     protected .ctor()
     protected QuickER.Runtime.EditModelCollection<T> GetChildren<T>(QuickER.Runtime.EditModelCollection<T> field)
     protected System.Collections.Generic.IEnumerable<QuickER.Runtime.EditModelError> CollectOwnErrors(string path)
-    protected System.Threading.Tasks.Task<bool> CheckDatabaseUniquenessAsync<TEntity, TKey>(QuickER.Runtime.IRemoteRepository<TEntity, TKey> repository, TEntity entity, System.Threading.CancellationToken cancellationToken)
+    protected System.Threading.Tasks.Task<bool> CheckDatabaseUniquenessAsync<TEntity, TKey>(QuickER.Runtime.IRemoteRepositoryCore<TEntity, TKey> repository, TEntity entity, System.Threading.CancellationToken cancellationToken)
     protected bool AcceptBindingInput(ref string field, string value, string bindingPropertyName, out string normalized)
     protected bool IsLoading { get; }
     protected bool IsReverting { get; }
@@ -206,7 +206,7 @@ public abstract class QuickER.Runtime.EntityBaseCore
 public static class QuickER.Runtime.GeneratedDisplayNames
     public static System.Func<string, string, string> Resolve { get; set; }
 
-public abstract class QuickER.Runtime.HttpRemoteRepository<TEntity, TKey> : QuickER.Runtime.IRemoteRepository<TEntity, TKey>
+public abstract class QuickER.Runtime.HttpRemoteRepositoryCore<TEntity, TKey> : QuickER.Runtime.IRemoteRepositoryCore<TEntity, TKey>
     protected .ctor(System.Net.Http.HttpClient httpClient, string entityRoute)
     protected System.Threading.Tasks.Task<TResult> InvokeAsync<TResult>(string operation, object payload, System.Threading.CancellationToken cancellationToken)
     protected System.Threading.Tasks.Task<TResult> InvokeNullableAsync<TResult>(string operation, object payload, System.Threading.CancellationToken cancellationToken)
@@ -223,7 +223,7 @@ public abstract class QuickER.Runtime.HttpRemoteRepository<TEntity, TKey> : Quic
     public System.Threading.Tasks.Task<int> SaveAsync(System.Collections.Generic.IEnumerable<TEntity> entities, bool cascadeSave = true, bool cascadeDelete = true, bool insertWhenUpdateMissing = false, QuickER.Runtime.ConcurrencyMode mode = 0, System.Threading.CancellationToken cancellationToken = default)
     public System.Threading.Tasks.Task<int> SaveAsync(TEntity entity, bool cascadeSave = true, bool cascadeDelete = true, bool insertWhenUpdateMissing = false, QuickER.Runtime.ConcurrencyMode mode = 0, System.Threading.CancellationToken cancellationToken = default)
 
-public interface QuickER.Runtime.IRemoteRepository<TEntity, TKey>
+public interface QuickER.Runtime.IRemoteRepositoryCore<TEntity, TKey>
     public virtual System.Threading.Tasks.Task InsertAsync(TEntity entity, System.Threading.CancellationToken cancellationToken = default)
     public virtual System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<QuickER.Runtime.UniquenessViolation>> CheckUniquenessAsync(TEntity entity, System.Threading.CancellationToken cancellationToken = default)
     public virtual System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TEntity>> GetAllAsync(System.Threading.CancellationToken cancellationToken = default)
@@ -233,7 +233,7 @@ public interface QuickER.Runtime.IRemoteRepository<TEntity, TKey>
     public virtual System.Threading.Tasks.Task<int> SaveAsync(System.Collections.Generic.IEnumerable<TEntity> entities, bool cascadeSave = true, bool cascadeDelete = true, bool insertWhenUpdateMissing = false, QuickER.Runtime.ConcurrencyMode mode = 0, System.Threading.CancellationToken cancellationToken = default)
     public virtual System.Threading.Tasks.Task<int> SaveAsync(TEntity entity, bool cascadeSave = true, bool cascadeDelete = true, bool insertWhenUpdateMissing = false, QuickER.Runtime.ConcurrencyMode mode = 0, System.Threading.CancellationToken cancellationToken = default)
 
-public interface QuickER.Runtime.IRepository<TEntity, TKey> : QuickER.Runtime.IRemoteRepository<TEntity, TKey>
+public interface QuickER.Runtime.IRepositoryCore<TEntity, TKey> : QuickER.Runtime.IRemoteRepositoryCore<TEntity, TKey>
     public virtual QuickER.Runtime.SqlQuery<TEntity> Query()
     public virtual System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TEntity>> QueryBySqlAsync(string sql, object parameters = null, System.Threading.CancellationToken cancellationToken = default)
     public virtual System.Threading.Tasks.Task<TResult> ExecuteScalarSqlAsync<TResult>(string sql, object parameters = null, System.Threading.CancellationToken cancellationToken = default)
@@ -318,7 +318,7 @@ public sealed class QuickER.Runtime.IncludeNode
     public System.Reflection.PropertyInfo Property { get; }
     public static System.Reflection.PropertyInfo GetProperty(System.Linq.Expressions.LambdaExpression selector)
 
-public abstract class QuickER.Runtime.MapperBase<TEntity, TEditModel>
+public abstract class QuickER.Runtime.MapperBaseCore<TEntity, TEditModel>
     protected .ctor()
     protected abstract void CompleteLoad(TEntity entity, TEditModel editModel)
     protected abstract void LoadColumns(TEntity entity, TEditModel editModel)

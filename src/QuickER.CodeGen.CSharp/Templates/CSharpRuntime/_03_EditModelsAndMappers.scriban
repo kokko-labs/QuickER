@@ -1101,7 +1101,7 @@ public abstract partial class EditModelBaseCore
     /// <param name="entity">The entity carrying the values to check.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     protected async Task<bool> CheckDatabaseUniquenessAsync<TEntity, TKey>(
-        IRemoteRepository<TEntity, TKey> repository,
+        IRemoteRepositoryCore<TEntity, TKey> repository,
         TEntity entity,
         CancellationToken cancellationToken
     )
@@ -2205,7 +2205,7 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
 /// (<see cref="CompleteLoad"/>), and the two post-creation hooks. Everything that composes them - the order of the load,
 /// the loading state it runs under, creation from an edit model, collection conversion - is written once here.
 /// </remarks>
-public abstract partial class MapperBase<TEntity, TEditModel>
+public abstract partial class MapperBaseCore<TEntity, TEditModel>
     where TEntity : EntityBaseCore, new()
     where TEditModel : EditModelBaseCore, new()
 {
@@ -2634,6 +2634,15 @@ public partial class {{ item.class_name }} : EditModelBase<{{ item.class_name }}
 {{~ end ~}}
 {{~ end ~}}
 
+{{~ if render_mappers ~}}
+
+/// <summary>Base of every generated mapper, and the extension point for them. Members added to a partial declaration of this type reach all of them at once.</summary>
+/// <typeparam name="TEntity">The entity type.</typeparam>
+/// <typeparam name="TEditModel">The edit model type.</typeparam>
+public abstract partial class MapperBase<TEntity, TEditModel> : MapperBaseCore<TEntity, TEditModel>
+    where TEntity : EntityBaseCore, new()
+    where TEditModel : EditModelBaseCore, new() { }
+{{ end }}
 {{~ if render_mappers ~}}
 {{~ for mapper in mapper_classes ~}}
 {{ if !for.first }}

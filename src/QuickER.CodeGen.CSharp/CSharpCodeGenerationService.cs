@@ -142,12 +142,12 @@ public sealed class CSharpCodeGenerationService
         }
 
         // インメモリ Repository とランタイムのパッケージ参照モードは併用できる（インメモリ基盤の固定 infra
-        // ＝InMemoryDataStore・InMemoryRepository 基底・保存ステージングをパッケージ QuickER.Runtime.InMemory へ
+        // ＝InMemoryDataStore・InMemoryRepositoryCore 基底・保存ステージングをパッケージ QuickER.Runtime.InMemory へ
         // 切り出したため、参照先を失わない）。per-entity のインメモリ実装・シーダー・DI 登録はスキーマ依存物として
         // パッケージモードでも常に生成側へ出力する。
 
         // ランタイムのパッケージ参照モードと EF Core 生成は併用できる（EF Core 固定 infra を TContext ジェネリック化した
-        // ことで、EF Core エンジン（EfCoreRepository / EfCoreSqlExecutor 等）は具象 QuickErDbContext を参照しなくなった）。
+        // ことで、EF Core エンジン（EfCoreRepositoryCore / EfCoreSqlExecutor 等）は具象 QuickErDbContext を参照しなくなった）。
         // スキーマ依存物（QuickErDbContext・Fluent 構成・EfCore{Entity}Repository・AddGeneratedEfCoreRepositories）は
         // パッケージモードでも常に生成側に出力し、EF Core 固定 infra はパッケージ QuickER.Runtime.EntityFrameworkCore が担う。
         // なお EF Core と QuickER 版 Repository のマルチターゲット（実効方言 2 つ以上）の排他は別理由（契約の型同一性）で上に残す。

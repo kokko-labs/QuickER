@@ -265,7 +265,7 @@ internal static class RemoteServerEngine
         string entityRoute
     )
         where TEntity : EntityBaseCore, new()
-        where TRepository : notnull, IRemoteRepository<TEntity, TKey>
+        where TRepository : notnull, IRemoteRepositoryCore<TEntity, TKey>
     {
         group.MapPost(
             $"{entityRoute}/GetById",

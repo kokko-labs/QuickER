@@ -339,7 +339,7 @@ public sealed class SyncVoRuntimeTests : IAsyncLifetime
 
         private const string KeysSql = "SELECT \"order_id\" FROM \"syncvo_orders\"";
 
-        public IRemoteRepository<SyncvoOrderEntity, OrderIdValue> Writer => writer;
+        public IRemoteRepositoryCore<SyncvoOrderEntity, OrderIdValue> Writer => writer;
 
         public ISyncBinaryColumns<OrderIdValue>? BinaryColumns => null;
 

@@ -1,4 +1,5 @@
 using System.Linq;
+using System.Threading.Tasks;
 using AwesomeAssertions;
 
 namespace QuickER.Tests.GeneratedFixture;
@@ -7,9 +8,10 @@ namespace QuickER.Tests.GeneratedFixture;
 /// 拡張シム層へ利用者が書く partial の受け入れ条件を、実フィクスチャ（<c>GeneratedFixture.g.cs</c>）の上で検証する。
 /// </summary>
 /// <remarks>
-/// このファイル自身が「利用者が書く拡張」の実物で、下の partial 宣言 2 つ（<see cref="EntityBase"/> と
-/// <see cref="IValueObject"/>）が拡張面である。生成コードに一切手を入れず、シムの partial だけで
-/// 全 Entity・全 VO へ横断的にメンバーとインターフェイスを足せることがこの機能の受け入れ条件そのもの。
+/// このファイル自身が「利用者が書く拡張」の実物で、下の partial 宣言群（<see cref="EntityBase"/> /
+/// <see cref="IValueObject"/> / <see cref="ValueObjectBase{TSelf, TValue}"/> / <see cref="SqlServerRepository{TEntity, TKey}"/>）が
+/// 拡張面である。生成コードに一切手を入れず、シムの partial だけで全 Entity・全 VO へ横断的に
+/// メンバーとインターフェイスを足せることがこの機能の受け入れ条件そのもの。
 /// </remarks>
 public sealed class ExtensionShimAcceptanceTests
 {
@@ -174,4 +176,17 @@ public partial class ValueObjectBase<TSelf, TValue>
 {
     /// <summary>型名と表示値を 1 行で表す（全 VO 共通で使える）</summary>
     public string DescribeValue() => $"{GetType().Name}:{DisplayValue}";
+}
+
+/// <summary>
+/// 実装側（方言）拡張シムの利用者 partial。docs「生成される基底クラスの拡張」節のレシピと同形＝
+/// manual 実装のクエリが共通で使う protected ヘルパをバックエンド単位で 1 箇所に足せることの
+/// コンパイル実証（呼び出しは実 DB が要るため ExtensionShimGenerationTests 側の存在検証と合わせて固定）。
+/// </summary>
+/// <remarks>型引数リストは繰り返すが、制約は生成側の part が宣言済みなので省略する。</remarks>
+public abstract partial class SqlServerRepository<TEntity, TKey>
+{
+    /// <summary>手動実装のクエリが共通で使う定型（各 {Entity}Repository の partial から呼ぶ）。</summary>
+    protected Task<int?> CountBySqlAsync(string sql, object? parameters = null) =>
+        ExecuteScalarSqlAsync<int?>(sql, parameters);
 }

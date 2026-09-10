@@ -1000,7 +1000,7 @@ public interface ISyncServerSource<TEntity, TKey>
     /// no more than that is what lets an HTTP client stand here beside a direct repository, which satisfies the narrower
     /// contract as well.
     /// </remarks>
-    IRemoteRepository<TEntity, TKey> Writer { get; }
+    IRemoteRepositoryCore<TEntity, TKey> Writer { get; }
 
     /// <summary>The server's unbounded binary columns, or null when the table has none to copy.</summary>
     /// <remarks>
@@ -1110,7 +1110,7 @@ public abstract class SyncTableBase<TEntity, TKey> : ISyncTable
     where TEntity : EntityBaseCore, new()
 {
     /// <summary>The local repository, reached through the journaling decorator (engine writes suppress the recording).</summary>
-    protected readonly IRepository<TEntity, TKey> _local;
+    protected readonly IRepositoryCore<TEntity, TKey> _local;
 
     /// <summary>The local raw SQL surface (key sets, the derived anchor, the wipe of a refresh).</summary>
     protected readonly ISqlExecutor _localSqlExecutor;
@@ -1126,7 +1126,7 @@ public abstract class SyncTableBase<TEntity, TKey> : ISyncTable
 
     /// <summary>Creates the table with its local repository, the local raw SQL surface, the server source, and its descriptor.</summary>
     protected SyncTableBase(
-        IRepository<TEntity, TKey> local,
+        IRepositoryCore<TEntity, TKey> local,
         ISqlExecutor localSqlExecutor,
         ISyncServerSource<TEntity, TKey> server,
         SyncTableDescriptor<TEntity, TKey> descriptor
@@ -1629,7 +1629,7 @@ public sealed class SyncTable<TEntity, TKey> : SyncTableBase<TEntity, TKey>
 {
     /// <summary>Creates the table with its local repository, the local raw SQL surface, the server source, and its descriptor.</summary>
     public SyncTable(
-        IRepository<TEntity, TKey> local,
+        IRepositoryCore<TEntity, TKey> local,
         ISqlExecutor localSqlExecutor,
         ISyncServerSource<TEntity, TKey> server,
         SyncTableDescriptor<TEntity, TKey> descriptor
@@ -2105,7 +2105,7 @@ public sealed class VersionlessSyncTable<TEntity, TKey> : SyncTableBase<TEntity,
 {
     /// <summary>Creates the table with its local repository, the local raw SQL surface, the server source, and its descriptor.</summary>
     public VersionlessSyncTable(
-        IRepository<TEntity, TKey> local,
+        IRepositoryCore<TEntity, TKey> local,
         ISqlExecutor localSqlExecutor,
         ISyncServerSource<TEntity, TKey> server,
         SyncTableDescriptor<TEntity, TKey> descriptor
@@ -2947,12 +2947,12 @@ public sealed class SyncGraphRecorder
 /// </remarks>
 /// <typeparam name="TEntity">The entity type.</typeparam>
 /// <typeparam name="TKey">The primary key type.</typeparam>
-public abstract class JournalingRepositoryBase<TEntity, TKey> : IRepository<TEntity, TKey>
+public abstract class JournalingRepositoryBase<TEntity, TKey> : IRepositoryCore<TEntity, TKey>
     where TEntity : EntityBaseCore, new()
 {
     /// <summary>Creates the decorator over the repository it wraps, the journal, the table's descriptor, and the graph recorder.</summary>
     protected JournalingRepositoryBase(
-        IRepository<TEntity, TKey> inner,
+        IRepositoryCore<TEntity, TKey> inner,
         SyncJournal journal,
         SyncTableDescriptor<TEntity, TKey> descriptor,
         SyncGraphRecorder graphRecorder
@@ -2967,7 +2967,7 @@ public abstract class JournalingRepositoryBase<TEntity, TKey> : IRepository<TEnt
     }
 
     /// <summary>Gets the wrapped repository every call is forwarded to.</summary>
-    protected IRepository<TEntity, TKey> Inner { get; }
+    protected IRepositoryCore<TEntity, TKey> Inner { get; }
 
     /// <summary>Gets the journal the write intents are recorded to.</summary>
     protected SyncJournal Journal { get; }
@@ -3176,7 +3176,7 @@ public abstract class JournalingRepository<TEntity, TKey> : JournalingRepository
 {
     /// <summary>Creates the decorator over the repository it wraps, the journal, the table's descriptor, and the graph recorder.</summary>
     protected JournalingRepository(
-        IRepository<TEntity, TKey> inner,
+        IRepositoryCore<TEntity, TKey> inner,
         SyncJournal journal,
         SyncTableDescriptor<TEntity, TKey> descriptor,
         SyncGraphRecorder graphRecorder
@@ -3218,7 +3218,7 @@ public abstract class VersionlessJournalingRepository<TEntity, TKey>
 {
     /// <summary>Creates the decorator over the repository it wraps, the journal, the table's descriptor, and the graph recorder.</summary>
     protected VersionlessJournalingRepository(
-        IRepository<TEntity, TKey> inner,
+        IRepositoryCore<TEntity, TKey> inner,
         SyncJournal journal,
         SyncTableDescriptor<TEntity, TKey> descriptor,
         SyncGraphRecorder graphRecorder
@@ -3257,7 +3257,7 @@ public abstract class DirectSyncSourceBase<TEntity, TKey> : ISyncServerSource<TE
     /// <summary>Creates the source over the server's raw SQL surface, the repository local changes replay against, and the table's descriptor.</summary>
     protected DirectSyncSourceBase(
         ISqlExecutor serverSqlExecutor,
-        IRemoteRepository<TEntity, TKey> writer,
+        IRemoteRepositoryCore<TEntity, TKey> writer,
         SyncTableDescriptor<TEntity, TKey> descriptor
     )
     {
@@ -3280,7 +3280,7 @@ public abstract class DirectSyncSourceBase<TEntity, TKey> : ISyncServerSource<TE
     protected SyncTableDescriptor<TEntity, TKey> Descriptor { get; }
 
     /// <inheritdoc />
-    public IRemoteRepository<TEntity, TKey> Writer { get; }
+    public IRemoteRepositoryCore<TEntity, TKey> Writer { get; }
 
     /// <inheritdoc />
     /// <remarks>
@@ -3345,7 +3345,7 @@ public sealed class DirectSyncSource<TEntity, TKey> : DirectSyncSourceBase<TEnti
     /// <summary>Creates the source over the server's raw SQL surface, the repository local changes replay against, and the table's descriptor.</summary>
     public DirectSyncSource(
         ISqlExecutor serverSqlExecutor,
-        IRemoteRepository<TEntity, TKey> writer,
+        IRemoteRepositoryCore<TEntity, TKey> writer,
         SyncTableDescriptor<TEntity, TKey> descriptor
     )
         : base(serverSqlExecutor, writer, descriptor) { }
@@ -3403,7 +3403,7 @@ public sealed class VersionlessDirectSyncSource<TEntity, TKey>
     /// <summary>Creates the source over the server's raw SQL surface, the repository local changes replay against, and the table's descriptor.</summary>
     public VersionlessDirectSyncSource(
         ISqlExecutor serverSqlExecutor,
-        IRemoteRepository<TEntity, TKey> writer,
+        IRemoteRepositoryCore<TEntity, TKey> writer,
         SyncTableDescriptor<TEntity, TKey> descriptor
     )
         : base(serverSqlExecutor, writer, descriptor) { }
@@ -3540,7 +3540,7 @@ public sealed record RemoteSyncPageRequest<TKey>(bool HasAfterKey, TKey? AfterKe
 /// </summary>
 /// <remarks>
 /// <para>
-/// It is an <see cref="HttpRemoteRepository{TEntity, TKey}"/> as well as a source, so <see cref="Writer"/> is the very
+/// It is an <see cref="HttpRemoteRepositoryCore{TEntity, TKey}"/> as well as a source, so <see cref="Writer"/> is the very
 /// same client: the reads and the writes of one pass travel over one connection with one configuration, and every
 /// failure - a conflict restored as <see cref="SaveConflictException"/>, a body that could not be read, a withheld
 /// server message and its correlation id - is classified exactly as it is for any other remote call.
@@ -3559,7 +3559,7 @@ public sealed record RemoteSyncPageRequest<TKey>(bool HasAfterKey, TKey? AfterKe
 /// <typeparam name="TEntity">The entity type.</typeparam>
 /// <typeparam name="TKey">The primary key type.</typeparam>
 public sealed class HttpSyncServerSource<TEntity, TKey>
-    : HttpRemoteRepository<TEntity, TKey>,
+    : HttpRemoteRepositoryCore<TEntity, TKey>,
         ISyncServerSource<TEntity, TKey>,
         ISyncBinaryColumns<TKey>
     where TEntity : EntityBaseCore, new()
@@ -3586,7 +3586,7 @@ public sealed class HttpSyncServerSource<TEntity, TKey>
 
     /// <inheritdoc />
     /// <remarks>The client itself: the same connection, the same configuration, and the same failure classification.</remarks>
-    public IRemoteRepository<TEntity, TKey> Writer => this;
+    public IRemoteRepositoryCore<TEntity, TKey> Writer => this;
 
     /// <inheritdoc />
     /// <remarks>
