@@ -4287,34 +4287,87 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
     }
 
     /// <summary>Appends the specified elements to the end.</summary>
+    /// <remarks>Each element raises its own CollectionChanged as usual; the position property notifications for the whole collection are raised once at the end instead of once per insertion (per-insertion broadcasts grow quadratically with the element count). When the operation throws partway (a faulting enumerator, say), the elements already inserted keep their CollectionChanged events but the final broadcast is not raised - the position properties still read correctly, and the next collection change refreshes their bindings.</remarks>
     public void AddRange(IEnumerable<T> items)
     {
-        foreach (var item in items)
+        var changed = false;
+
+        try
         {
-            Add(item);
+            _rangeOperationDepth++;
+
+            foreach (var item in items)
+            {
+                Add(item);
+                changed = true;
+            }
+        }
+        finally
+        {
+            _rangeOperationDepth--;
+        }
+
+        if (changed)
+        {
+            NotifyPositionsChanged();
         }
     }
 
     /// <summary>Inserts the specified elements at the specified position.</summary>
+    /// <remarks>Each element raises its own CollectionChanged as usual; the position property notifications for the whole collection are raised once at the end instead of once per insertion (per-insertion broadcasts grow quadratically with the element count). When the operation throws partway (a faulting enumerator, say), the elements already inserted keep their CollectionChanged events but the final broadcast is not raised - the position properties still read correctly, and the next collection change refreshes their bindings.</remarks>
     public void InsertRange(int index, IEnumerable<T> items)
     {
-        foreach (var item in items)
+        var changed = false;
+
+        try
         {
-            Insert(index++, item);
+            _rangeOperationDepth++;
+
+            foreach (var item in items)
+            {
+                Insert(index++, item);
+                changed = true;
+            }
+        }
+        finally
+        {
+            _rangeOperationDepth--;
+        }
+
+        if (changed)
+        {
+            NotifyPositionsChanged();
         }
     }
 
     /// <summary>Removes all elements (existing elements are tracked as Removed). Use Clear for an untracked on-screen wipe.</summary>
-    /// <remarks>Elements are removed from the front, so <see cref="RemovedItems"/> keeps the order they had in the collection.</remarks>
+    /// <remarks>Elements are removed from the front, so <see cref="RemovedItems"/> keeps the order they had in the collection. Each element raises its own CollectionChanged (and its own position notification) as usual; the position property notifications for the remaining elements are raised once at the end instead of once per removal. When the operation throws partway, the removals already made keep their events but the final broadcast is not raised - the position properties still read correctly, and the next collection change refreshes their bindings.</remarks>
     public void RemoveAll()
     {
-        while (Count > 0)
+        var changed = Count > 0;
+
+        try
         {
-            RemoveAt(0);
+            _rangeOperationDepth++;
+
+            while (Count > 0)
+            {
+                RemoveAt(0);
+            }
+        }
+        finally
+        {
+            _rangeOperationDepth--;
+        }
+
+        if (changed)
+        {
+            NotifyPositionsChanged();
         }
     }
 
     /// <summary>Removes the elements in the specified range (existing elements are tracked as Removed).</summary>
+    /// <remarks>Each element raises its own CollectionChanged (and its own position notification) as usual; the position property notifications for the remaining elements are raised once at the end instead of once per removal. When the operation throws partway, the removals already made keep their events but the final broadcast is not raised - the position properties still read correctly, and the next collection change refreshes their bindings.</remarks>
     public void RemoveRange(int index, int count)
     {
         if (index < 0 || index > Count)
@@ -4333,15 +4386,39 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
             );
         }
 
-        for (var i = 0; i < count; i++)
+        var changed = count > 0;
+
+        try
         {
-            RemoveAt(index);
+            _rangeOperationDepth++;
+
+            for (var i = 0; i < count; i++)
+            {
+                RemoveAt(index);
+            }
+        }
+        finally
+        {
+            _rangeOperationDepth--;
+        }
+
+        if (changed)
+        {
+            NotifyPositionsChanged();
         }
     }
 
-    /// <summary>Notifies all elements of position property changes (IndexInParent / IsFirstInParent / IsLastInParent).</summary>
+    /// <summary>Depth of range operations in progress. While positive, the whole-collection position broadcasts are suppressed and the outermost operation raises one broadcast at the end (a nested range operation started from a CollectionChanged handler coalesces into it). Position property values stay correct throughout, because they are computed from the collection on read.</summary>
+    private int _rangeOperationDepth;
+
+    /// <summary>Notifies all elements of position property changes (IndexInParent / IsFirstInParent / IsLastInParent). Range operations suppress the per-mutation broadcast and raise it once when they finish.</summary>
     private void NotifyPositionsChanged()
     {
+        if (_rangeOperationDepth > 0)
+        {
+            return;
+        }
+
         foreach (var item in this)
         {
             item.RaisePositionChanged();
