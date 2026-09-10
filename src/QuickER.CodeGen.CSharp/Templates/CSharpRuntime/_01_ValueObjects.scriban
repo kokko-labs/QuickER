@@ -207,6 +207,43 @@ public interface IValueObject<TSelf, TValue> : IValueObject<TSelf>
     TValue Value { get; }
 }
 
+/// <summary>The substring matches a string value object offers, and the contract the query translators recognize them by.</summary>
+/// <remarks>
+/// <para>
+/// This is a mechanism contract rather than an extension surface. Every engine's expression translator has to decide
+/// whether a <c>Contains</c> / <c>StartsWith</c> / <c>EndsWith</c> call is a column-side string match, and it decides it
+/// by asking whether the call binds to one of the members declared here - through the interface map, so that only the
+/// type actually implementing them qualifies. Matching on the method name alone would sweep in a <c>Contains</c> that a
+/// concrete value object declares for itself, since that type inherits this interface as well.
+/// </para>
+/// <para>
+/// Every member compares ordinally and throws <see cref="ArgumentNullException"/> for a null argument, which is the
+/// contract <c>string.Contains</c> and its siblings hold.
+/// </para>
+/// </remarks>
+/// <typeparam name="TSelf">The concrete value object type.</typeparam>
+public interface IStringMatchValueObject<TSelf>
+    where TSelf : class
+{
+    /// <summary>Returns whether the value contains the specified string.</summary>
+    bool Contains(string value);
+
+    /// <summary>Returns whether the value starts with the specified string.</summary>
+    bool StartsWith(string value);
+
+    /// <summary>Returns whether the value ends with the specified string.</summary>
+    bool EndsWith(string value);
+
+    /// <summary>Returns whether the value contains another value object's value.</summary>
+    bool Contains(TSelf value);
+
+    /// <summary>Returns whether the value starts with another value object's value.</summary>
+    bool StartsWith(TSelf value);
+
+    /// <summary>Returns whether the value ends with another value object's value.</summary>
+    bool EndsWith(TSelf value);
+}
+
 /// <summary>Exception raised when a value object fails validation.</summary>
 public sealed class ValueObjectValidationException : Exception
 {
@@ -232,7 +269,7 @@ public abstract partial class ValueObjectBaseCore<TSelf, TValue>
         IFormattable
     where TSelf : ValueObjectBaseCore<TSelf, TValue>, IValueObject<TSelf, TValue>
 {
-    /// <summary>Gets the underlying value (never reassigned; reference-typed values such as byte[] are not defensively copied — see <see cref="ValueObjectBinaryBaseCore{TSelf}"/>).</summary>
+    /// <summary>Gets the underlying value (never reassigned; reference-typed values such as byte[] are not defensively copied — the binary value object base states that contract).</summary>
     public TValue Value { get; }
 
     /// <summary>Initializes with an already-validated value (Create/TryCreate performs validation beforehand).</summary>
@@ -392,7 +429,8 @@ public abstract partial class ValueObjectBaseCore<TSelf, TValue>
     /// by value directly. Without it the default comparer falls back to the object-based one, which reaches equality only
     /// through <see cref="Equals(object?)"/> and boxes a struct-valued argument on the way; every dictionary and hash-set
     /// lookup keyed by a value object goes through that comparer. A value object whose value is an array needs
-    /// element-by-element comparison and overrides this — see <see cref="ValueObjectBinaryBaseCore{TSelf}"/>.
+    /// element-by-element comparison and overrides this — the binary value object base does, through
+    /// <see cref="ValueObjectBinaryOperations"/>.
     /// </remarks>
     public virtual bool Equals(TSelf? other) =>
         other is not null && EqualityComparer<TValue>.Default.Equals(Value, other.Value);
@@ -441,259 +479,75 @@ public abstract partial class ValueObjectBaseCore<TSelf, TValue>
             : ToString();
 }
 
-/// <summary>Base for orderable value objects (numeric and date/time types). Provides comparison operators and CompareTo.</summary>
-public abstract partial class ValueObjectOrderedBaseCore<TSelf, TValue>
-    : ValueObjectBaseCore<TSelf, TValue>,
-        IComparable<TSelf>,
-        IComparable
-    where TSelf : ValueObjectOrderedBaseCore<TSelf, TValue>, IValueObject<TSelf, TValue>
-    where TValue : IComparable<TValue>
+/// <summary>Comparison bodies shared by the ordered, string and GUID-key value object bases.</summary>
+public static class ValueObjectComparisons
 {
-    /// <summary>Initializes with an already-validated value.</summary>
-    protected ValueObjectOrderedBaseCore(TValue value)
-        : base(value) { }
-
-    /// <summary>Compares the underlying values.</summary>
-    public int CompareTo(TSelf? other) => other is null ? 1 : Value.CompareTo(other.Value);
-
-    /// <summary>Non-generic comparison (a type mismatch throws).</summary>
-    int IComparable.CompareTo(object? obj) =>
+    /// <summary>Compares a value object with an arbitrary object, for the non-generic <see cref="IComparable"/> surface.</summary>
+    /// <remarks>
+    /// A null object sorts first, an object of the same value object type is handed to the typed comparison, and anything
+    /// else is a programming error rather than an ordering: sorting a list that mixes value object types would otherwise
+    /// produce an arbitrary order instead of failing.
+    /// </remarks>
+    /// <param name="self">The value object the comparison starts from.</param>
+    /// <param name="obj">The object to compare with.</param>
+    /// <exception cref="ArgumentException"><paramref name="obj"/> is not of type <typeparamref name="TSelf"/>.</exception>
+    public static int CompareToObject<TSelf>(IComparable<TSelf> self, object? obj)
+        where TSelf : class =>
         obj is null ? 1
-        : obj is TSelf other ? CompareTo(other)
+        : obj is TSelf other ? self.CompareTo(other)
         : throw new ArgumentException(
             $"{obj.GetType().Name} cannot be compared with {typeof(TSelf).Name}.",
             nameof(obj)
         );
 
-    /// <summary>Less-than.</summary>
-    public static bool operator <(
-        ValueObjectOrderedBaseCore<TSelf, TValue>? left,
-        ValueObjectOrderedBaseCore<TSelf, TValue>? right
-    ) => Compare(left, right) < 0;
-
-    /// <summary>Greater-than.</summary>
-    public static bool operator >(
-        ValueObjectOrderedBaseCore<TSelf, TValue>? left,
-        ValueObjectOrderedBaseCore<TSelf, TValue>? right
-    ) => Compare(left, right) > 0;
-
-    /// <summary>Less-than-or-equal.</summary>
-    public static bool operator <=(
-        ValueObjectOrderedBaseCore<TSelf, TValue>? left,
-        ValueObjectOrderedBaseCore<TSelf, TValue>? right
-    ) => Compare(left, right) <= 0;
-
-    /// <summary>Greater-than-or-equal.</summary>
-    public static bool operator >=(
-        ValueObjectOrderedBaseCore<TSelf, TValue>? left,
-        ValueObjectOrderedBaseCore<TSelf, TValue>? right
-    ) => Compare(left, right) >= 0;
-
-    private static int Compare(
-        ValueObjectOrderedBaseCore<TSelf, TValue>? left,
-        ValueObjectOrderedBaseCore<TSelf, TValue>? right
-    ) =>
+    /// <summary>Orders two operands by their underlying values, treating null as the smallest value (two nulls are equal).</summary>
+    /// <remarks>
+    /// This is the body behind the ordering operators, which - unlike <see cref="IComparable{T}.CompareTo"/> - can be
+    /// handed a null on either side.
+    /// </remarks>
+    public static int CompareOrdered<TSelf, TValue>(
+        ValueObjectBaseCore<TSelf, TValue>? left,
+        ValueObjectBaseCore<TSelf, TValue>? right
+    )
+        where TSelf : ValueObjectBaseCore<TSelf, TValue>, IValueObject<TSelf, TValue>
+        where TValue : IComparable<TValue> =>
         left is null ? (right is null ? 0 : -1)
         : right is null ? 1
         : left.Value.CompareTo(right.Value);
 }
 
-/// <summary>Base for string value objects. Provides substring-match methods and ordinal comparison (does not add ordering operators).</summary>
-public abstract partial class ValueObjectStringBaseCore<TSelf>
-    : ValueObjectBaseCore<TSelf, string>,
-        IComparable<TSelf>,
-        IComparable
-    where TSelf : ValueObjectStringBaseCore<TSelf>, IValueObject<TSelf, string>
+/// <summary>Equality and hashing over a byte array, as a binary value object defines them.</summary>
+public static class ValueObjectBinaryOperations
 {
-    /// <summary>Initializes with an already-validated value.</summary>
-    protected ValueObjectStringBaseCore(string value)
-        : base(value) { }
-
-    /// <summary>Returns whether the value contains the specified string.</summary>
-    /// <remarks>Throws <see cref="ArgumentNullException"/> when value is null (the same contract as <c>string.Contains</c>).</remarks>
-    public bool Contains(string value)
-    {
-        ArgumentNullException.ThrowIfNull(value);
-        return Value.Contains(value, StringComparison.Ordinal);
-    }
-
-    /// <summary>Returns whether the value starts with the specified string.</summary>
-    /// <remarks>Throws <see cref="ArgumentNullException"/> when value is null (the same contract as <c>string.StartsWith</c>).</remarks>
-    public bool StartsWith(string value)
-    {
-        ArgumentNullException.ThrowIfNull(value);
-        return Value.StartsWith(value, StringComparison.Ordinal);
-    }
-
-    /// <summary>Returns whether the value ends with the specified string.</summary>
-    /// <remarks>Throws <see cref="ArgumentNullException"/> when value is null (the same contract as <c>string.EndsWith</c>).</remarks>
-    public bool EndsWith(string value)
-    {
-        ArgumentNullException.ThrowIfNull(value);
-        return Value.EndsWith(value, StringComparison.Ordinal);
-    }
-
-    /// <summary>Returns whether the value contains another value object's value.</summary>
-    /// <remarks>Throws <see cref="ArgumentNullException"/> when value is null (the same contract as the string overload).</remarks>
-    public bool Contains(TSelf value)
-    {
-        ArgumentNullException.ThrowIfNull(value);
-        return Contains(value.Value);
-    }
-
-    /// <summary>Returns whether the value starts with another value object's value.</summary>
-    /// <remarks>Throws <see cref="ArgumentNullException"/> when value is null (the same contract as the string overload).</remarks>
-    public bool StartsWith(TSelf value)
-    {
-        ArgumentNullException.ThrowIfNull(value);
-        return StartsWith(value.Value);
-    }
-
-    /// <summary>Returns whether the value ends with another value object's value.</summary>
-    /// <remarks>Throws <see cref="ArgumentNullException"/> when value is null (the same contract as the string overload).</remarks>
-    public bool EndsWith(TSelf value)
-    {
-        ArgumentNullException.ThrowIfNull(value);
-        return EndsWith(value.Value);
-    }
-
-    /// <summary>Compares ordinally.</summary>
-    public int CompareTo(TSelf? other) =>
-        other is null ? 1 : string.CompareOrdinal(Value, other.Value);
-
-    /// <summary>Non-generic comparison (a type mismatch throws).</summary>
-    int IComparable.CompareTo(object? obj) =>
-        obj is null ? 1
-        : obj is TSelf other ? CompareTo(other)
-        : throw new ArgumentException(
-            $"{obj.GetType().Name} cannot be compared with {typeof(TSelf).Name}.",
-            nameof(obj)
-        );
-}
-
-/// <summary>Base for bool value objects. Provides True/False factories and truth checks (has no ordered comparison).</summary>
-public abstract partial class ValueObjectBooleanBaseCore<TSelf> : ValueObjectBaseCore<TSelf, bool>
-    where TSelf : ValueObjectBooleanBaseCore<TSelf>, IValueObject<TSelf, bool>
-{
-    /// <summary>Initializes with an already-validated value.</summary>
-    protected ValueObjectBooleanBaseCore(bool value)
-        : base(value) { }
-
-    /// <summary>Creates the value object from the true value.</summary>
-    public static TSelf True => TSelf.Create(true);
-
-    /// <summary>Creates the value object from the false value.</summary>
-    public static TSelf False => TSelf.Create(false);
-
-    /// <summary>Gets whether the value is true.</summary>
-    public bool IsTrue => Value;
-
-    /// <summary>Gets whether the value is false.</summary>
-    public bool IsFalse => !Value;
-}
-
-/// <summary>Base for DateTime value objects. Provides Now/Today factories.</summary>
-public abstract partial class ValueObjectDateTimeBaseCore<TSelf>
-    : ValueObjectOrderedBaseCore<TSelf, DateTime>
-    where TSelf : ValueObjectDateTimeBaseCore<TSelf>, IValueObject<TSelf, DateTime>
-{
-    /// <summary>Initializes with an already-validated value.</summary>
-    protected ValueObjectDateTimeBaseCore(DateTime value)
-        : base(value) { }
-
-    /// <summary>Creates the value object from the current date and time.</summary>
-    public static TSelf Now => TSelf.Create(DateTime.Now);
-
-    /// <summary>Creates the value object from today (time 0:00).</summary>
-    public static TSelf Today => TSelf.Create(DateTime.Today);
-}
-
-/// <summary>Base for byte[] value objects. ToString returns Base64, and equality compares the arrays element by element.</summary>
-/// <remarks>
-/// The wrapped array is NOT defensively copied: the value object holds (and exposes through Value) the very array it was
-/// created with, because copying would double the allocation of every binary column read from the database. Treat the array
-/// as frozen after Create — mutating it afterwards silently changes the value object's equality, hash code, and ToString.
-/// </remarks>
-public abstract partial class ValueObjectBinaryBaseCore<TSelf> : ValueObjectBaseCore<TSelf, byte[]>
-    where TSelf : ValueObjectBinaryBaseCore<TSelf>, IValueObject<TSelf, byte[]>
-{
-    /// <summary>Initializes with an already-validated value.</summary>
-    protected ValueObjectBinaryBaseCore(byte[] value)
-        : base(value) { }
-
-    /// <summary>Returns an equal value object built over a copy of the array (the copy the "not defensively copied" contract leaves to the caller).</summary>
-    /// <remarks>
-    /// Use it where two holders must not share one array — loading an entity into an edit model, for instance, where editing the
-    /// model would otherwise write straight into the entity that was loaded from.
-    /// </remarks>
-    public TSelf CopyValue() => TSelf.Create((byte[])Value.Clone());
-
-    /// <summary>Value-based equality (arrays are compared element by element; reference equality would make two equal blobs differ).</summary>
+    /// <summary>Compares two arrays element by element (reference equality would make two equal blobs differ); two nulls are equal.</summary>
     /// <remarks>The comparison runs over spans, which compares whole machine words at a time instead of one element at a time — worth having on values that are blob-sized by definition.</remarks>
-    public override bool Equals(TSelf? other)
+    public static bool AreEqual(byte[]? left, byte[]? right)
     {
-        if (other is null)
+        if (left is null || right is null)
         {
-            return false;
+            return left is null && right is null;
         }
 
-        if (Value is null || other.Value is null)
-        {
-            return Value is null && other.Value is null;
-        }
-
-        return Value.AsSpan().SequenceEqual(other.Value);
+        return left.AsSpan().SequenceEqual(right);
     }
 
-    /// <summary>Value-based hash code computed from every byte, matching <see cref="Equals(TSelf)"/>.</summary>
+    /// <summary>Computes a hash code from every byte, matching <see cref="AreEqual"/>.</summary>
     /// <remarks>
     /// <see cref="HashCode.AddBytes(ReadOnlySpan{byte})"/> mixes in the whole array. The structural comparer used before it
     /// hashes only the last eight elements, so two blobs sharing a tail landed in the same bucket however much of their
     /// content differed — exactly the shape a binary value object tends to have when it wraps a versioned or padded payload.
     /// </remarks>
-    public override int GetHashCode()
+    public static int ComputeHashCode(byte[]? value)
     {
-        if (Value is null)
+        if (value is null)
         {
             return 0;
         }
 
         var hash = new HashCode();
-        hash.AddBytes(Value);
+        hash.AddBytes(value);
         return hash.ToHashCode();
     }
-
-    /// <summary>Returns the value as a Base64 string.</summary>
-    public override string ToString() =>
-        Value is null ? string.Empty : Convert.ToBase64String(Value);
-}
-
-/// <summary>Base for a primary-key value object that holds a GUID as a string. The parameterless factory auto-generates a new GUID.</summary>
-public abstract partial class ValueObjectGuidKeyBaseCore<TSelf>
-    : ValueObjectBaseCore<TSelf, string>,
-        IComparable<TSelf>,
-        IComparable
-    where TSelf : ValueObjectGuidKeyBaseCore<TSelf>, IValueObject<TSelf, string>
-{
-    /// <summary>Initializes with an already-validated value.</summary>
-    protected ValueObjectGuidKeyBaseCore(string value)
-        : base(value) { }
-
-    /// <summary>Generates a new GUID and creates the value object.</summary>
-    public static TSelf Create() => TSelf.Create(Guid.NewGuid().ToString());
-
-    /// <summary>Compares ordinally.</summary>
-    public int CompareTo(TSelf? other) =>
-        other is null ? 1 : string.CompareOrdinal(Value, other.Value);
-
-    /// <summary>Non-generic comparison (a type mismatch throws).</summary>
-    int IComparable.CompareTo(object? obj) =>
-        obj is null ? 1
-        : obj is TSelf other ? CompareTo(other)
-        : throw new ArgumentException(
-            $"{obj.GetType().Name} cannot be compared with {typeof(TSelf).Name}.",
-            nameof(obj)
-        );
 }
 
 /// <summary>Converter that reads and writes a value object as its underlying (raw) value in JSON.</summary>
@@ -1104,7 +958,7 @@ public static class ValueObjectDecimalRules
 /// <summary>Marker implemented by every value object. Adding an interface or a member to a partial declaration of this type reaches all of them at once.</summary>
 public partial interface IValueObject : IValueObjectCore { }
 
-/// <summary>Base of a value object whose underlying type has no shaped base of its own (a Guid or an sbyte, say), of a hand-written value object derived straight on the root, and the extension point for those. The shaped bases below are siblings of it, so a value object built on a shaped base does not pass through this type.</summary>
+/// <summary>Base of every value object, and the extension point that reaches all of them: a member added to a partial declaration of this class is available on every value object whatever its value shape. The shaped bases below all derive from it, and a value object whose underlying type has no shaped base of its own (a Guid or an sbyte, say) derives from it directly.</summary>
 /// <typeparam name="TSelf">The concrete value object type deriving from this class.</typeparam>
 /// <typeparam name="TValue">The underlying value type.</typeparam>
 public abstract partial class ValueObjectBase<TSelf, TValue>
@@ -1117,78 +971,216 @@ public abstract partial class ValueObjectBase<TSelf, TValue>
         : base(value) { }
 }
 
-/// <summary>Base of every orderable value object, and the extension point for them.</summary>
+/// <summary>Base of every orderable value object (numeric and date/time types), and the extension point for them. Provides comparison operators and CompareTo.</summary>
 /// <typeparam name="TSelf">The concrete value object type deriving from this class.</typeparam>
 /// <typeparam name="TValue">The underlying value type.</typeparam>
 public abstract partial class ValueObjectOrderedBase<TSelf, TValue>
-    : ValueObjectOrderedBaseCore<TSelf, TValue>,
-        IValueObject
+    : ValueObjectBase<TSelf, TValue>,
+        IComparable<TSelf>,
+        IComparable
     where TSelf : ValueObjectOrderedBase<TSelf, TValue>, IValueObject<TSelf, TValue>
     where TValue : IComparable<TValue>
 {
     /// <summary>Initializes with an already-validated value.</summary>
     protected ValueObjectOrderedBase(TValue value)
         : base(value) { }
+
+    /// <summary>Compares the underlying values.</summary>
+    public int CompareTo(TSelf? other) => other is null ? 1 : Value.CompareTo(other.Value);
+
+    /// <summary>Non-generic comparison (a type mismatch throws).</summary>
+    int IComparable.CompareTo(object? obj) =>
+        ValueObjectComparisons.CompareToObject<TSelf>(this, obj);
+
+    /// <summary>Less-than.</summary>
+    public static bool operator <(
+        ValueObjectOrderedBase<TSelf, TValue>? left,
+        ValueObjectOrderedBase<TSelf, TValue>? right
+    ) => ValueObjectComparisons.CompareOrdered(left, right) < 0;
+
+    /// <summary>Greater-than.</summary>
+    public static bool operator >(
+        ValueObjectOrderedBase<TSelf, TValue>? left,
+        ValueObjectOrderedBase<TSelf, TValue>? right
+    ) => ValueObjectComparisons.CompareOrdered(left, right) > 0;
+
+    /// <summary>Less-than-or-equal.</summary>
+    public static bool operator <=(
+        ValueObjectOrderedBase<TSelf, TValue>? left,
+        ValueObjectOrderedBase<TSelf, TValue>? right
+    ) => ValueObjectComparisons.CompareOrdered(left, right) <= 0;
+
+    /// <summary>Greater-than-or-equal.</summary>
+    public static bool operator >=(
+        ValueObjectOrderedBase<TSelf, TValue>? left,
+        ValueObjectOrderedBase<TSelf, TValue>? right
+    ) => ValueObjectComparisons.CompareOrdered(left, right) >= 0;
 }
 
-/// <summary>Base of every string value object, and the extension point for them.</summary>
+/// <summary>Base of every string value object, and the extension point for them. Provides substring-match methods and ordinal comparison (does not add ordering operators).</summary>
 /// <typeparam name="TSelf">The concrete value object type deriving from this class.</typeparam>
 public abstract partial class ValueObjectStringBase<TSelf>
-    : ValueObjectStringBaseCore<TSelf>,
-        IValueObject
+    : ValueObjectBase<TSelf, string>,
+        IStringMatchValueObject<TSelf>,
+        IComparable<TSelf>,
+        IComparable
     where TSelf : ValueObjectStringBase<TSelf>, IValueObject<TSelf, string>
 {
     /// <summary>Initializes with an already-validated value.</summary>
     protected ValueObjectStringBase(string value)
         : base(value) { }
+
+    /// <summary>Returns whether the value contains the specified string.</summary>
+    /// <remarks>Throws <see cref="ArgumentNullException"/> when value is null (the same contract as <c>string.Contains</c>).</remarks>
+    public bool Contains(string value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        return Value.Contains(value, StringComparison.Ordinal);
+    }
+
+    /// <summary>Returns whether the value starts with the specified string.</summary>
+    /// <remarks>Throws <see cref="ArgumentNullException"/> when value is null (the same contract as <c>string.StartsWith</c>).</remarks>
+    public bool StartsWith(string value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        return Value.StartsWith(value, StringComparison.Ordinal);
+    }
+
+    /// <summary>Returns whether the value ends with the specified string.</summary>
+    /// <remarks>Throws <see cref="ArgumentNullException"/> when value is null (the same contract as <c>string.EndsWith</c>).</remarks>
+    public bool EndsWith(string value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        return Value.EndsWith(value, StringComparison.Ordinal);
+    }
+
+    /// <summary>Returns whether the value contains another value object's value.</summary>
+    /// <remarks>Throws <see cref="ArgumentNullException"/> when value is null (the same contract as the string overload).</remarks>
+    public bool Contains(TSelf value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        return Contains(value.Value);
+    }
+
+    /// <summary>Returns whether the value starts with another value object's value.</summary>
+    /// <remarks>Throws <see cref="ArgumentNullException"/> when value is null (the same contract as the string overload).</remarks>
+    public bool StartsWith(TSelf value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        return StartsWith(value.Value);
+    }
+
+    /// <summary>Returns whether the value ends with another value object's value.</summary>
+    /// <remarks>Throws <see cref="ArgumentNullException"/> when value is null (the same contract as the string overload).</remarks>
+    public bool EndsWith(TSelf value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        return EndsWith(value.Value);
+    }
+
+    /// <summary>Compares ordinally.</summary>
+    public int CompareTo(TSelf? other) =>
+        other is null ? 1 : string.CompareOrdinal(Value, other.Value);
+
+    /// <summary>Non-generic comparison (a type mismatch throws).</summary>
+    int IComparable.CompareTo(object? obj) =>
+        ValueObjectComparisons.CompareToObject<TSelf>(this, obj);
 }
 
-/// <summary>Base of every bool value object, and the extension point for them.</summary>
+/// <summary>Base of every bool value object, and the extension point for them. Provides True/False factories and truth checks (has no ordered comparison).</summary>
 /// <typeparam name="TSelf">The concrete value object type deriving from this class.</typeparam>
-public abstract partial class ValueObjectBooleanBase<TSelf>
-    : ValueObjectBooleanBaseCore<TSelf>,
-        IValueObject
+public abstract partial class ValueObjectBooleanBase<TSelf> : ValueObjectBase<TSelf, bool>
     where TSelf : ValueObjectBooleanBase<TSelf>, IValueObject<TSelf, bool>
 {
     /// <summary>Initializes with an already-validated value.</summary>
     protected ValueObjectBooleanBase(bool value)
         : base(value) { }
+
+    /// <summary>Creates the value object from the true value.</summary>
+    public static TSelf True => TSelf.Create(true);
+
+    /// <summary>Creates the value object from the false value.</summary>
+    public static TSelf False => TSelf.Create(false);
+
+    /// <summary>Gets whether the value is true.</summary>
+    public bool IsTrue => Value;
+
+    /// <summary>Gets whether the value is false.</summary>
+    public bool IsFalse => !Value;
 }
 
-/// <summary>Base of every DateTime value object, and the extension point for them.</summary>
+/// <summary>Base of every DateTime value object, and the extension point for them. Provides Now/Today factories.</summary>
 /// <typeparam name="TSelf">The concrete value object type deriving from this class.</typeparam>
 public abstract partial class ValueObjectDateTimeBase<TSelf>
-    : ValueObjectDateTimeBaseCore<TSelf>,
-        IValueObject
+    : ValueObjectOrderedBase<TSelf, DateTime>
     where TSelf : ValueObjectDateTimeBase<TSelf>, IValueObject<TSelf, DateTime>
 {
     /// <summary>Initializes with an already-validated value.</summary>
     protected ValueObjectDateTimeBase(DateTime value)
         : base(value) { }
+
+    /// <summary>Creates the value object from the current date and time.</summary>
+    public static TSelf Now => TSelf.Create(DateTime.Now);
+
+    /// <summary>Creates the value object from today (time 0:00).</summary>
+    public static TSelf Today => TSelf.Create(DateTime.Today);
 }
 
-/// <summary>Base of every byte[] value object, and the extension point for them.</summary>
+/// <summary>Base of every byte[] value object, and the extension point for them. ToString returns Base64, and equality compares the arrays element by element.</summary>
+/// <remarks>
+/// The wrapped array is NOT defensively copied: the value object holds (and exposes through Value) the very array it was
+/// created with, because copying would double the allocation of every binary column read from the database. Treat the array
+/// as frozen after Create — mutating it afterwards silently changes the value object's equality, hash code, and ToString.
+/// </remarks>
 /// <typeparam name="TSelf">The concrete value object type deriving from this class.</typeparam>
-public abstract partial class ValueObjectBinaryBase<TSelf>
-    : ValueObjectBinaryBaseCore<TSelf>,
-        IValueObject
+public abstract partial class ValueObjectBinaryBase<TSelf> : ValueObjectBase<TSelf, byte[]>
     where TSelf : ValueObjectBinaryBase<TSelf>, IValueObject<TSelf, byte[]>
 {
     /// <summary>Initializes with an already-validated value.</summary>
     protected ValueObjectBinaryBase(byte[] value)
         : base(value) { }
+
+    /// <summary>Returns an equal value object built over a copy of the array (the copy the "not defensively copied" contract leaves to the caller).</summary>
+    /// <remarks>
+    /// Use it where two holders must not share one array — loading an entity into an edit model, for instance, where editing the
+    /// model would otherwise write straight into the entity that was loaded from.
+    /// </remarks>
+    public TSelf CopyValue() => TSelf.Create((byte[])Value.Clone());
+
+    /// <summary>Value-based equality (arrays are compared element by element; reference equality would make two equal blobs differ).</summary>
+    public override bool Equals(TSelf? other) =>
+        other is not null && ValueObjectBinaryOperations.AreEqual(Value, other.Value);
+
+    /// <summary>Value-based hash code computed from every byte, matching <see cref="Equals(TSelf)"/>.</summary>
+    public override int GetHashCode() => ValueObjectBinaryOperations.ComputeHashCode(Value);
+
+    /// <summary>Returns the value as a Base64 string.</summary>
+    public override string ToString() =>
+        Value is null ? string.Empty : Convert.ToBase64String(Value);
 }
 
-/// <summary>Base of every GUID-keyed value object, and the extension point for them.</summary>
+/// <summary>Base of every GUID-keyed value object (a primary key that holds a GUID as a string), and the extension point for them. The parameterless factory auto-generates a new GUID.</summary>
 /// <typeparam name="TSelf">The concrete value object type deriving from this class.</typeparam>
 public abstract partial class ValueObjectGuidKeyBase<TSelf>
-    : ValueObjectGuidKeyBaseCore<TSelf>,
-        IValueObject
+    : ValueObjectBase<TSelf, string>,
+        IComparable<TSelf>,
+        IComparable
     where TSelf : ValueObjectGuidKeyBase<TSelf>, IValueObject<TSelf, string>
 {
     /// <summary>Initializes with an already-validated value.</summary>
     protected ValueObjectGuidKeyBase(string value)
         : base(value) { }
+
+    /// <summary>Generates a new GUID and creates the value object.</summary>
+    public static TSelf Create() => TSelf.Create(Guid.NewGuid().ToString());
+
+    /// <summary>Compares ordinally.</summary>
+    public int CompareTo(TSelf? other) =>
+        other is null ? 1 : string.CompareOrdinal(Value, other.Value);
+
+    /// <summary>Non-generic comparison (a type mismatch throws).</summary>
+    int IComparable.CompareTo(object? obj) =>
+        ValueObjectComparisons.CompareToObject<TSelf>(this, obj);
 }
 {{ end }}
 {{~ if generate_value_objects && render_value_objects ~}}

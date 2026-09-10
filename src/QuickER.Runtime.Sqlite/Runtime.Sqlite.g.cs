@@ -2195,10 +2195,37 @@ public static class SqlExpressionTranslator
         return true;
     }
 
-    /// <summary>Whether the method is Contains/StartsWith/EndsWith of a string value object (derived from ValueObjectStringBaseCore).</summary>
+    /// <summary>Whether the method is one of the substring matches a string value object declares.</summary>
+    /// <remarks>
+    /// The judgement goes through the interface map of <see cref="IStringMatchValueObject{TSelf}"/>, so only the type that
+    /// actually implements those members qualifies. Testing the name against a type that merely implements the interface
+    /// would also claim a <c>Contains</c> a concrete value object declares for itself, which is an ordinary method call
+    /// rather than a column-side match.
+    /// </remarks>
     private static bool IsValueObjectStringMethod(MethodInfo method) =>
-        method.DeclaringType is { IsGenericType: true } declaring
-        && declaring.GetGenericTypeDefinition() == typeof(ValueObjectStringBaseCore<>);
+        StringMatchMethodCache.GetOrAdd(
+            method,
+            static m =>
+            {
+                if (m.DeclaringType is not { IsInterface: false } declaring)
+                {
+                    return false;
+                }
+
+                var contract = Array.Find(
+                    declaring.GetInterfaces(),
+                    i =>
+                        i.IsGenericType
+                        && i.GetGenericTypeDefinition() == typeof(IStringMatchValueObject<>)
+                );
+
+                return contract is not null
+                    && Array.IndexOf(declaring.GetInterfaceMap(contract).TargetMethods, m) >= 0;
+            }
+        );
+
+    /// <summary>Cache of the judgement per method: the interface probe allocates, and expression translation asks for the same methods repeatedly.</summary>
+    private static readonly ConcurrentDictionary<MethodInfo, bool> StringMatchMethodCache = new();
 
     /// <summary>Removes Convert nodes such as boxing to object.</summary>
     private static Expression Unwrap(Expression expression)

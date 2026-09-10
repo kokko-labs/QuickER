@@ -774,7 +774,7 @@ public static class EntityGraphSaver
 
 /// <summary>
 /// EF Core method call translator that translates Contains/StartsWith/EndsWith of string value objects
-/// (derived from <see cref="ValueObjectStringBaseCore{TSelf}"/>) into SQL LIKE.
+/// (the members of <see cref="IStringMatchValueObject{TSelf}"/>) into SQL LIKE.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -832,8 +832,7 @@ public sealed class ValueObjectStringMethodTranslator(
             instance is null
             || arguments.Count != 1
             || method.Name is not ("Contains" or "StartsWith" or "EndsWith")
-            || method.DeclaringType is not { IsGenericType: true } declaring
-            || declaring.GetGenericTypeDefinition() != typeof(ValueObjectStringBaseCore<>)
+            || StringMatchContract(method) is not { } contract
         )
         {
             return null;
@@ -848,7 +847,7 @@ public sealed class ValueObjectStringMethodTranslator(
         {
             argument = _sqlExpressionFactory.ApplyTypeMapping(arguments[0], _stringTypeMapping);
         }
-        else if (parameterType == declaring.GetGenericArguments()[0])
+        else if (parameterType == contract.GetGenericArguments()[0])
         {
             argument = _sqlExpressionFactory.ApplyTypeMapping(arguments[0], instance.TypeMapping);
         }
@@ -870,6 +869,41 @@ public sealed class ValueObjectStringMethodTranslator(
 
         return _sqlExpressionFactory.Like(column, pattern, escapeChar);
     }
+
+    /// <summary>Returns the closed <see cref="IStringMatchValueObject{TSelf}"/> the method implements, or null when it is not one of those substring matches.</summary>
+    /// <remarks>
+    /// The judgement goes through the interface map, so only the type that actually implements those members qualifies:
+    /// testing the name against a type that merely implements the interface would also claim a <c>Contains</c> a concrete
+    /// value object declares for itself. The contract is returned rather than a bool because its type argument is the
+    /// value object type the TSelf overload takes.
+    /// </remarks>
+    private static Type? StringMatchContract(MethodInfo method) =>
+        StringMatchContractCache.GetOrAdd(
+            method,
+            static m =>
+            {
+                if (m.DeclaringType is not { IsInterface: false } declaring)
+                {
+                    return null;
+                }
+
+                var contract = Array.Find(
+                    declaring.GetInterfaces(),
+                    i =>
+                        i.IsGenericType
+                        && i.GetGenericTypeDefinition() == typeof(IStringMatchValueObject<>)
+                );
+
+                return contract is not null
+                    && Array.IndexOf(declaring.GetInterfaceMap(contract).TargetMethods, m) >= 0
+                    ? contract
+                    : null;
+            }
+        );
+
+    /// <summary>Cache of the judgement per method: the interface probe allocates, and query translation asks for the same methods repeatedly.</summary>
+    private static readonly ConcurrentDictionary<MethodInfo, Type?> StringMatchContractCache =
+        new();
 
     /// <summary>Builds the LIKE pattern expression for the given method name (e.g. '%' + escaped argument + '%').</summary>
     private SqlExpression BuildLikePattern(string methodName, SqlExpression argument)

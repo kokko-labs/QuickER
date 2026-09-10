@@ -221,7 +221,8 @@ internal static class GeneratedFileUsings
 
                 break;
 
-            // 値オブジェクト（具象）: 生成コードは Runtime の VO 基底を継承するだけで、外部型は BCL の基本のみ
+            // 値オブジェクト（共通ルート・値の形ごとの基底・具象）: 外部型は BCL の基本のみ
+            //   （比較・バイナリ等値の本体は Runtime の共有ヘルパーが持ち、こちらは 1 行転送）
             case GenerationBucket.ValueObject:
                 yield return "System";
                 yield return "System.Collections.Generic";

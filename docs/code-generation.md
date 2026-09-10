@@ -363,7 +363,7 @@ Keys compare ordinally, so the comparison is case-sensitive. QuickER never gener
 The base of every generated entity, edit model, and value object comes in **two layers**:
 
 - **`*Core`** — the fixed runtime, which holds the implementation. It is emitted inline by default and ships inside the `QuickER.Runtime*` packages under `--use-runtime-packages`.
-- **the plainly named type** (`EntityBase`, `EditModelBase<TSelf>`, `ValueObjectStringBase<TSelf>`, `IValueObject`, …) — an empty `partial` that QuickER emits **as source, alongside the per-type code**, in every output mode. This is the surface you extend.
+- **the plainly named type** (`EntityBase`, `EditModelBase<TSelf>`, `ValueObjectBase<TSelf, TValue>`, `ValueObjectStringBase<TSelf>`, `IValueObject`, …) — a `partial` that QuickER emits **as source, alongside the per-type code**, in every output mode. This is the surface you extend.
 
 ```text
 EntityBaseCore                        runtime
@@ -376,9 +376,8 @@ EditModelBaseCore                     runtime
       └─ CustomerEditModel            generated
 
 ValueObjectBaseCore<TSelf, TValue>    runtime
-├─ ValueObjectBase<TSelf, TValue>     generated   ← extend here (value objects without a shaped base — a Guid or an sbyte, say — and root-derived hand-written ones)
-└─ ValueObjectStringBaseCore<TSelf>   runtime     (one *Core per value shape)
-   └─ ValueObjectStringBase<TSelf>    generated   ← extend here
+└─ ValueObjectBase<TSelf, TValue>     generated   ← extend here (reaches every value object)
+   └─ ValueObjectStringBase<TSelf>    generated   ← extend here (one class per value shape)
       └─ NameValue                    generated
 
 IValueObjectCore                      runtime
@@ -389,7 +388,7 @@ Because the extension surface is always source, the same `partial` compiles whet
 
 ### Adding members to every entity or edit model
 
-Put the file in the same namespace as the generated types (`{RootNamespace}.Entities` in split output; the entity shim lands in the domain layer and the edit model shim in the presentation layer under `--layered-output`):
+Put the file in the same namespace as the generated types (`{RootNamespace}.Entities` in split output; the entity extension surface lands in the domain layer and the edit model one in the presentation layer under `--layered-output`):
 
 ```csharp
 public interface IAuditable
@@ -428,9 +427,11 @@ public static class ValueObjectExtensions
 }
 ```
 
-To reach one shape only — every string value object, say — put the member on that shim instead (`public abstract partial class ValueObjectStringBase<TSelf> { … }`).
+`ValueObjectBase<TSelf, TValue>` is the class-side counterpart. Every value object derives from it whatever its value shape, so a member added there reaches all of them — and unlike the marker it can see `Value` and `TSelf`. Repeat the type parameter list on your part (`public partial class ValueObjectBase<TSelf, TValue>`); constraints may be omitted, because the generated part already declares them.
 
-**The generic contracts `IValueObject<TSelf>` and `IValueObject<TSelf, TValue>` are not extension surfaces.** They are the static-factory contract, and they live in the runtime: a `partial` written against them is a `partial` against a package type in package-reference mode. Extend the non-generic `IValueObject` marker or the class shims instead.
+To reach one shape only — every string value object, say — put the member on that shape's class instead (`public abstract partial class ValueObjectStringBase<TSelf> { … }`). Those classes are generated as well, and each of them is a `partial` you may extend.
+
+**The generic contracts `IValueObject<TSelf>` and `IValueObject<TSelf, TValue>` are not extension surfaces**, and neither is `IStringMatchValueObject<TSelf>`. The first two are the static-factory contract; the third is how each engine's query translator recognises the substring match of a string value object. All three live in the runtime: a `partial` written against them is a `partial` against a package type in package-reference mode. Extend the non-generic `IValueObject` marker or the generated classes instead.
 
 ## Edit model save workflow
 

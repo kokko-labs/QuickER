@@ -270,6 +270,14 @@ public interface QuickER.Runtime.ISqlQueryExecutor<TEntity>
     public virtual System.Threading.Tasks.Task<int> CountAsync(QuickER.Runtime.SqlQueryPlan<TEntity> plan, System.Threading.CancellationToken cancellationToken)
     public virtual System.Threading.Tasks.Task<int> ExecuteDeleteAsync(QuickER.Runtime.SqlQueryPlan<TEntity> plan, bool cascadeDelete, System.Threading.CancellationToken cancellationToken)
 
+public interface QuickER.Runtime.IStringMatchValueObject<TSelf>
+    public virtual bool Contains(TSelf value)
+    public virtual bool Contains(string value)
+    public virtual bool EndsWith(TSelf value)
+    public virtual bool EndsWith(string value)
+    public virtual bool StartsWith(TSelf value)
+    public virtual bool StartsWith(string value)
+
 public interface QuickER.Runtime.IValueObject<TSelf, TValue> : QuickER.Runtime.IValueObject<TSelf>, QuickER.Runtime.IValueObjectCore
     public static TSelf Create(TValue value)
     public static TSelf New(TValue value)
@@ -630,32 +638,16 @@ public abstract class QuickER.Runtime.ValueObjectBaseCore<TSelf, TValue> : Quick
     public virtual bool Equals(TSelf other)
     public virtual string DisplayValue { get; }
 
-public abstract class QuickER.Runtime.ValueObjectBinaryBaseCore<TSelf> : QuickER.Runtime.ValueObjectBaseCore<TSelf, byte[]>, QuickER.Runtime.IValueObjectCore, System.IEquatable<TSelf>, System.IFormattable
-    protected .ctor(byte[] value)
-    public TSelf CopyValue()
-    public override bool Equals(TSelf other)
-    public override int GetHashCode()
-    public override string ToString()
+public static class QuickER.Runtime.ValueObjectBinaryOperations
+    public static bool AreEqual(byte[] left, byte[] right)
+    public static int ComputeHashCode(byte[] value)
 
-public abstract class QuickER.Runtime.ValueObjectBooleanBaseCore<TSelf> : QuickER.Runtime.ValueObjectBaseCore<TSelf, bool>, QuickER.Runtime.IValueObjectCore, System.IEquatable<TSelf>, System.IFormattable
-    protected .ctor(bool value)
-    public bool IsFalse { get; }
-    public bool IsTrue { get; }
-    public static TSelf False { get; }
-    public static TSelf True { get; }
-
-public abstract class QuickER.Runtime.ValueObjectDateTimeBaseCore<TSelf> : QuickER.Runtime.ValueObjectOrderedBaseCore<TSelf, System.DateTime>, QuickER.Runtime.IValueObjectCore, System.IComparable, System.IComparable<TSelf>, System.IEquatable<TSelf>, System.IFormattable
-    protected .ctor(System.DateTime value)
-    public static TSelf Now { get; }
-    public static TSelf Today { get; }
+public static class QuickER.Runtime.ValueObjectComparisons
+    public static int CompareOrdered<TSelf, TValue>(QuickER.Runtime.ValueObjectBaseCore<TSelf, TValue> left, QuickER.Runtime.ValueObjectBaseCore<TSelf, TValue> right)
+    public static int CompareToObject<TSelf>(System.IComparable<TSelf> self, object obj)
 
 public static class QuickER.Runtime.ValueObjectDecimalRules
     public static void Validate(decimal value, int precision, int scale, string displayName, ref System.Collections.Generic.List<string> errors)
-
-public abstract class QuickER.Runtime.ValueObjectGuidKeyBaseCore<TSelf> : QuickER.Runtime.ValueObjectBaseCore<TSelf, string>, QuickER.Runtime.IValueObjectCore, System.IComparable, System.IComparable<TSelf>, System.IEquatable<TSelf>, System.IFormattable
-    protected .ctor(string value)
-    public int CompareTo(TSelf other)
-    public static TSelf Create()
 
 public sealed class QuickER.Runtime.ValueObjectJsonConverter<TVo, TValue> : System.Text.Json.Serialization.JsonConverter<TVo>
     public .ctor()
@@ -671,26 +663,8 @@ public static class QuickER.Runtime.ValueObjectNumberRules
     public static void ValidateMaxDigits(long value, int maxDigits, string displayName, ref System.Collections.Generic.List<string> errors)
     public static void ValidateRange<T>(T value, T minimum, T maximum, string displayName, ref System.Collections.Generic.List<string> errors)
 
-public abstract class QuickER.Runtime.ValueObjectOrderedBaseCore<TSelf, TValue> : QuickER.Runtime.ValueObjectBaseCore<TSelf, TValue>, QuickER.Runtime.IValueObjectCore, System.IComparable, System.IComparable<TSelf>, System.IEquatable<TSelf>, System.IFormattable
-    protected .ctor(TValue value)
-    public int CompareTo(TSelf other)
-    public static bool op_GreaterThan(QuickER.Runtime.ValueObjectOrderedBaseCore<TSelf, TValue> left, QuickER.Runtime.ValueObjectOrderedBaseCore<TSelf, TValue> right)
-    public static bool op_GreaterThanOrEqual(QuickER.Runtime.ValueObjectOrderedBaseCore<TSelf, TValue> left, QuickER.Runtime.ValueObjectOrderedBaseCore<TSelf, TValue> right)
-    public static bool op_LessThan(QuickER.Runtime.ValueObjectOrderedBaseCore<TSelf, TValue> left, QuickER.Runtime.ValueObjectOrderedBaseCore<TSelf, TValue> right)
-    public static bool op_LessThanOrEqual(QuickER.Runtime.ValueObjectOrderedBaseCore<TSelf, TValue> left, QuickER.Runtime.ValueObjectOrderedBaseCore<TSelf, TValue> right)
-
 public static class QuickER.Runtime.ValueObjectRules
     public static bool ValidateRequired<TValue>(TValue value, string displayName, ref System.Collections.Generic.List<string> errors)
-
-public abstract class QuickER.Runtime.ValueObjectStringBaseCore<TSelf> : QuickER.Runtime.ValueObjectBaseCore<TSelf, string>, QuickER.Runtime.IValueObjectCore, System.IComparable, System.IComparable<TSelf>, System.IEquatable<TSelf>, System.IFormattable
-    protected .ctor(string value)
-    public bool Contains(TSelf value)
-    public bool Contains(string value)
-    public bool EndsWith(TSelf value)
-    public bool EndsWith(string value)
-    public bool StartsWith(TSelf value)
-    public bool StartsWith(string value)
-    public int CompareTo(TSelf other)
 
 public static class QuickER.Runtime.ValueObjectStringRules
     public static void ValidateAsciiAlphanumeric(string value, string allowedSymbols, string displayName, ref System.Collections.Generic.List<string> errors)

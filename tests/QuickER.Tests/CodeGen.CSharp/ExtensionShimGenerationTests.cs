@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using AwesomeAssertions;
 using QuickER.CodeGen.CSharp;
 using QuickER.Model;
@@ -10,16 +11,23 @@ namespace QuickER.Tests.CodeGen.CSharp;
 /// </summary>
 /// <remarks>
 /// <para>
-/// 生成コードの基底は 2 層構造で、実装の置き場が固定ランタイムの <c>*Core</c>、利用者が拡張する面が
-/// 「現行名を名乗る生成 partial（シム）」になる。シムはスキーマ依存物なので、パッケージ参照モードでも
-/// per-型コードと同じファイル（＝同じ層）へ必ず出る。これがこの層の存在理由そのもの
-/// （コンパイル済みパッケージのクラスへは partial を書けない）。
+/// 生成コードの基底は「実装の置き場＝固定ランタイムの <c>*Core</c>」と「利用者が拡張する面＝現行名を名乗る
+/// 生成 partial」の 2 層で、後者はスキーマ依存物なのでパッケージ参照モードでも per-型コードと同じファイル
+/// （＝同じ層）へ必ず出る。これがこの層の存在理由そのもの（コンパイル済みパッケージのクラスへは partial を
+/// 書けない）。
 /// </para>
 /// <para>
-/// 検証対象: (1) インライン・分割・パッケージ参照モードのいずれでもシムが出ること、(2) per-型の基底句が
-/// 現行名（＝シム）のままで、シムを経由して固定ランタイムへ着地すること、(3) VO シム 7 本すべてがマーカー
-/// <c>IValueObject</c> を実装し、そのマーカーが <c>IValueObjectCore</c> を継承すること、(4) 層別出力で
-/// Entity/VO シムがドメイン層・EditModel シムがプレゼンテーション層へ配置されること。
+/// 値オブジェクトでは <c>ValueObjectBase&lt;TSelf, TValue&gt;</c> が全 VO の共通ルートで、系統別基底
+/// （Ordered / String / Boolean / DateTime / Binary / GuidKey）はその派生として生成側に出る＝ルートへ足した
+/// メンバーが系統に依らず全 VO へ届く。マーカー <c>IValueObject</c> はルートだけが実装し、系統別へは継承で
+/// 波及する。
+/// </para>
+/// <para>
+/// 検証対象: (1) インライン・分割・パッケージ参照モードのいずれでも拡張面が出ること、(2) per-型の基底句が
+/// 現行名のままで、共通ルートを経由して固定ランタイムへ着地すること、(3) マーカーを実装するのはルート 1 本
+/// だけで、系統別 6 本はルート（または Ordered）から派生すること、(4) 文字列 VO の基底が翻訳判定契約
+/// <c>IStringMatchValueObject&lt;TSelf&gt;</c> を実装すること、(5) 層別出力で Entity/VO がドメイン層・
+/// EditModel がプレゼンテーション層へ配置されること。
 /// </para>
 /// </remarks>
 public sealed class ExtensionShimGenerationTests
@@ -36,31 +44,47 @@ public sealed class ExtensionShimGenerationTests
     private const string ValueObjectMarkerShim =
         "public partial interface IValueObject : IValueObjectCore { }";
 
-    /// <summary>VO シム 7 本の「シム名 → 継承する Core 名」対応（すべてマーカー <c>IValueObject</c> を実装する）</summary>
-    private static readonly (string Shim, string Core)[] ValueObjectShims =
+    /// <summary>全 VO の共通ルート（固定ランタイムの Core を継承し、マーカーを実装する唯一の宣言）</summary>
+    private static readonly string ValueObjectRoot = string.Join(
+        Environment.NewLine,
+        "public abstract partial class ValueObjectBase<TSelf, TValue>",
+        "    : ValueObjectBaseCore<TSelf, TValue>,",
+        "        IValueObject",
+        ""
+    );
+
+    /// <summary>文字列 VO の基底宣言（共通ルート派生＋翻訳判定契約の実装）</summary>
+    private static readonly string ValueObjectStringBase = string.Join(
+        Environment.NewLine,
+        "public abstract partial class ValueObjectStringBase<TSelf>",
+        "    : ValueObjectBase<TSelf, string>,",
+        "        IStringMatchValueObject<TSelf>,",
+        ""
+    );
+
+    /// <summary>系統別基底 6 本の「クラス名 → 直接の基底」対応（すべて共通ルートへ着地する）</summary>
+    private static readonly (string Class, string BaseType)[] ValueObjectFamilyBases =
     [
-        ("ValueObjectBase<TSelf, TValue>", "ValueObjectBaseCore<TSelf, TValue>"),
-        ("ValueObjectOrderedBase<TSelf, TValue>", "ValueObjectOrderedBaseCore<TSelf, TValue>"),
-        ("ValueObjectStringBase<TSelf>", "ValueObjectStringBaseCore<TSelf>"),
-        ("ValueObjectBooleanBase<TSelf>", "ValueObjectBooleanBaseCore<TSelf>"),
-        ("ValueObjectDateTimeBase<TSelf>", "ValueObjectDateTimeBaseCore<TSelf>"),
-        ("ValueObjectBinaryBase<TSelf>", "ValueObjectBinaryBaseCore<TSelf>"),
-        ("ValueObjectGuidKeyBase<TSelf>", "ValueObjectGuidKeyBaseCore<TSelf>"),
+        ("ValueObjectOrderedBase<TSelf, TValue>", "ValueObjectBase<TSelf, TValue>"),
+        ("ValueObjectStringBase<TSelf>", "ValueObjectBase<TSelf, string>"),
+        ("ValueObjectBooleanBase<TSelf>", "ValueObjectBase<TSelf, bool>"),
+        ("ValueObjectDateTimeBase<TSelf>", "ValueObjectOrderedBase<TSelf, DateTime>"),
+        ("ValueObjectBinaryBase<TSelf>", "ValueObjectBase<TSelf, byte[]>"),
+        ("ValueObjectGuidKeyBase<TSelf>", "ValueObjectBase<TSelf, string>"),
     ];
 
-    [Fact(DisplayName = "非分割: シムが出力され、per-型の基底句は現行名のままシムへ着地する")]
-    public void Inline_ShouldEmitShimsAndKeepPerTypeBaseClauses()
+    [Fact(DisplayName = "非分割: 拡張面が出力され、per-型の基底句は現行名のまま着地する")]
+    public void Inline_ShouldEmitExtensionSurfacesAndKeepPerTypeBaseClauses()
     {
         var content = Single(Generate(Options()));
 
-        // シム 9 本（Entity / EditModel / VO マーカー ＋ VO 7 本）
         content.Should().Contain(EntityShim);
         content.Should().Contain(EditModelShim);
         content.Should().Contain("    where TSelf : EditModelBase<TSelf> { }");
         content.Should().Contain(ValueObjectMarkerShim);
-        AssertValueObjectShims(content);
+        AssertValueObjectBases(content);
 
-        // per-型の基底句は現行名（シム）のまま
+        // per-型の基底句は現行名のまま
         content
             .Should()
             .Contain($"public partial class CustomerEntity : EntityBase{Environment.NewLine}");
@@ -70,12 +94,19 @@ public sealed class ExtensionShimGenerationTests
         content.Should().Contain(": ValueObjectStringBase<NameValue>,");
         content.Should().Contain(": ValueObjectBooleanBase<IsActiveValue>,");
 
-        // 実装の置き場は固定ランタイム側（*Core）で、シムとは別の宣言として同居する
+        // 実装の置き場は固定ランタイム側（*Core）で、拡張面とは別の宣言として同居する
         content.Should().Contain("public abstract partial class EntityBaseCore");
         content
             .Should()
             .Contain("public abstract partial class EditModelBaseCore<TSelf> : EditModelBaseCore");
         content.Should().Contain("public interface IValueObjectCore");
+        content
+            .Should()
+            .Contain("public abstract partial class ValueObjectBaseCore<TSelf, TValue>");
+
+        // 系統別基底が使う共有ヘルパーも固定ランタイム側にある
+        content.Should().Contain("public static class ValueObjectComparisons");
+        content.Should().Contain("public static class ValueObjectBinaryOperations");
 
         // ジェネリック契約は拡張面ではない＝名前も継承元も現行のまま（アリティ 1 は Core を継承する）
         content.Should().Contain("public interface IValueObject<TSelf> : IValueObjectCore");
@@ -84,27 +115,29 @@ public sealed class ExtensionShimGenerationTests
             .Contain("public interface IValueObject<TSelf, TValue> : IValueObject<TSelf>");
     }
 
-    [Fact(DisplayName = "分割: シムは per-型ファイル側へ出て Runtime ファイルには出ない")]
-    public void Split_ShouldPlaceShimsWithPerTypeCode()
+    [Fact(DisplayName = "分割: 拡張面は per-型ファイル側へ出て Runtime ファイルには出ない")]
+    public void Split_ShouldPlaceExtensionSurfacesWithPerTypeCode()
     {
         var files = ByName(Generate(Options() with { SplitFilesByCategory = true }));
 
         files["Entities.g.cs"].Should().Contain(EntityShim);
         files["EditModels.g.cs"].Should().Contain(EditModelShim);
         files["ValueObjects.g.cs"].Should().Contain(ValueObjectMarkerShim);
-        AssertValueObjectShims(files["ValueObjects.g.cs"]);
+        AssertValueObjectBases(files["ValueObjects.g.cs"]);
 
-        // 固定 infra は Runtime ファイルに集約され、シムはそこには出ない
+        // 固定 infra は Runtime ファイルに集約され、拡張面はそこには出ない
         files["Runtime.g.cs"].Should().Contain("public abstract partial class EntityBaseCore");
+        files["Runtime.g.cs"].Should().Contain("public static class ValueObjectComparisons");
         files["Runtime.g.cs"].Should().NotContain(EntityShim);
         files["Runtime.g.cs"].Should().NotContain(EditModelShim);
         files["Runtime.g.cs"].Should().NotContain(ValueObjectMarkerShim);
+        files["Runtime.g.cs"].Should().NotContain("class ValueObjectStringBase<TSelf>");
     }
 
     [Fact(
-        DisplayName = "パッケージ参照モード: 固定 infra は出ないがシムは出る（この層の存在理由）"
+        DisplayName = "パッケージ参照モード: 固定 infra は出ないが拡張面は出る（この層の存在理由）"
     )]
-    public void PackageMode_ShouldStillEmitShims()
+    public void PackageMode_ShouldStillEmitExtensionSurfaces()
     {
         var files = ByName(
             Generate(Options() with { SplitFilesByCategory = true, UseRuntimePackages = true })
@@ -115,7 +148,7 @@ public sealed class ExtensionShimGenerationTests
         files["Entities.g.cs"].Should().Contain(EntityShim);
         files["EditModels.g.cs"].Should().Contain(EditModelShim);
         files["ValueObjects.g.cs"].Should().Contain(ValueObjectMarkerShim);
-        AssertValueObjectShims(files["ValueObjects.g.cs"]);
+        AssertValueObjectBases(files["ValueObjects.g.cs"]);
 
         // 固定 infra の宣言は 1 つも出ない（パッケージが提供する）
         var allContent = string.Join(Environment.NewLine, files.Values);
@@ -123,12 +156,13 @@ public sealed class ExtensionShimGenerationTests
         allContent.Should().NotContain("abstract partial class EditModelBaseCore");
         allContent.Should().NotContain("public interface IValueObjectCore");
         allContent.Should().NotContain("abstract partial class ValueObjectBaseCore");
+        allContent.Should().NotContain("static class ValueObjectComparisons");
+        allContent.Should().NotContain("static class ValueObjectBinaryOperations");
+        allContent.Should().NotContain("interface IStringMatchValueObject<TSelf>");
     }
 
-    [Fact(
-        DisplayName = "層別出力: Entity/VO シムはドメイン層・EditModel シムはプレゼンテーション層へ出る"
-    )]
-    public void Layered_ShouldPlaceShimsInDomainAndPresentation()
+    [Fact(DisplayName = "層別出力: Entity/VO はドメイン層・EditModel はプレゼンテーション層へ出る")]
+    public void Layered_ShouldPlaceExtensionSurfacesInDomainAndPresentation()
     {
         var result = Generate(Options() with { LayeredOutput = true });
 
@@ -141,20 +175,35 @@ public sealed class ExtensionShimGenerationTests
         Content(result, "EditModels.g.cs").Should().Contain(EditModelShim);
     }
 
-    /// <summary>VO シム 7 本が「対応する Core を継承し、マーカー <c>IValueObject</c> を実装する」ことを検証する</summary>
-    private static void AssertValueObjectShims(string content)
+    /// <summary>
+    /// VO の基底が「共通ルート 1 本＋その派生の系統別 6 本」で、マーカー <c>IValueObject</c> の実装が
+    /// ルートだけであることを検証する（系統別は継承でマーカーを得るので、ルートを外れた系統は
+    /// 拡張が届かない枝になる）。文字列基底が翻訳判定契約を実装することも併せて確認する。
+    /// </summary>
+    private static void AssertValueObjectBases(string content)
     {
-        foreach (var (shim, core) in ValueObjectShims)
+        content
+            .Should()
+            .Contain(ValueObjectRoot, "全 VO の共通ルートだけがマーカー IValueObject を実装する");
+
+        foreach (var (className, baseType) in ValueObjectFamilyBases)
         {
             content
                 .Should()
-                .Contain(
-                    $"public abstract partial class {shim}{Environment.NewLine}"
-                        + $"    : {core},{Environment.NewLine}"
-                        + $"        IValueObject{Environment.NewLine}",
-                    $"VO シム {shim} は {core} を継承しマーカー IValueObject を実装する"
+                .MatchRegex(
+                    $@"public abstract partial class {Regex.Escape(className)}\s*: {Regex.Escape(baseType)}",
+                    $"系統別基底 {className} は {baseType} を継承して共通ルートへ着地する"
                 );
         }
+
+        // マーカーを名乗る宣言はルート 1 本だけ（系統別は継承で得る）
+        Regex
+            .Matches(content, @"^[ \t]+IValueObject\r?$", RegexOptions.Multiline)
+            .Should()
+            .HaveCount(1, "マーカー IValueObject を実装するのは共通ルートだけ");
+
+        // 文字列 VO の基底は翻訳判定の契約を実装する（式木翻訳がインターフェイスマップで引く）
+        content.Should().Contain(ValueObjectStringBase);
     }
 
     /// <summary>Entity・EditModel・Mapper・VO がすべて出る最小構成</summary>

@@ -363,7 +363,7 @@ var id = DocumentIdValue.Create();   // Guid.NewGuid() を文字列で内包し�
 生成される Entity・EditModel・値オブジェクトの基底は **2 層**になっています。
 
 - **`*Core`**: 実装の置き場である固定ランタイム。既定ではインラインで出力され、`--use-runtime-packages` では `QuickER.Runtime*` パッケージが持ちます。
-- **素の名前の型**（`EntityBase` / `EditModelBase<TSelf>` / `ValueObjectStringBase<TSelf>` / `IValueObject` など）: QuickER が**どの出力モードでも per-型コードと同じ場所へソースとして出力する**空の `partial`。拡張するのはこちらです。
+- **素の名前の型**（`EntityBase` / `EditModelBase<TSelf>` / `ValueObjectBase<TSelf, TValue>` / `ValueObjectStringBase<TSelf>` / `IValueObject` など）: QuickER が**どの出力モードでも per-型コードと同じ場所へソースとして出力する** `partial`。拡張するのはこちらです。
 
 ```text
 EntityBaseCore                        ランタイム
@@ -376,9 +376,8 @@ EditModelBaseCore                     ランタイム
       └─ CustomerEditModel            生成コード
 
 ValueObjectBaseCore<TSelf, TValue>    ランタイム
-├─ ValueObjectBase<TSelf, TValue>     生成コード   ← ここを拡張する（系統別基底を持たない内包型〔Guid・sbyte など〕の値オブジェクトと、ルート直付けの手書き型が継承する）
-└─ ValueObjectStringBaseCore<TSelf>   ランタイム   （値の形ごとに 1 つ）
-   └─ ValueObjectStringBase<TSelf>    生成コード   ← ここを拡張する
+└─ ValueObjectBase<TSelf, TValue>     生成コード   ← ここを拡張する（全値オブジェクトへ届く）
+   └─ ValueObjectStringBase<TSelf>    生成コード   ← ここを拡張する（値の形ごとに 1 クラス）
       └─ NameValue                    生成コード
 
 IValueObjectCore                      ランタイム
@@ -389,7 +388,7 @@ IValueObjectCore                      ランタイム
 
 ### 全 Entity・全 EditModel にメンバーを足す
 
-ファイルは生成型と同じ名前空間へ置きます（分割出力なら `{RootNamespace}.Entities`。`--layered-output` では Entity のシムはドメイン層・EditModel のシムはプレゼンテーション層へ出ます）。
+ファイルは生成型と同じ名前空間へ置きます（分割出力なら `{RootNamespace}.Entities`。`--layered-output` では Entity の拡張面はドメイン層・EditModel の拡張面はプレゼンテーション層へ出ます）。
 
 ```csharp
 public interface IAuditable
@@ -428,9 +427,11 @@ public static class ValueObjectExtensions
 }
 ```
 
-「文字列の値オブジェクトだけ」のように 1 つの形だけを狙うなら、そのシムへ足します（`public abstract partial class ValueObjectStringBase<TSelf> { … }`）。
+クラス側で同じ役目を持つのが `ValueObjectBase<TSelf, TValue>` です。値の形に依らず全値オブジェクトがこの型から派生するため、ここへ足したメンバーは全部へ届き、マーカーと違って `Value` と `TSelf` を参照できます。自分の part には型引数リストを書きます（`public partial class ValueObjectBase<TSelf, TValue>`）。制約は生成側の part が宣言済みのため省略できます。
 
-**ジェネリック契約の `IValueObject<TSelf>` / `IValueObject<TSelf, TValue>` は拡張面ではありません。** これらは静的ファクトリの契約でランタイム側に在るため、そこへ書いた `partial` はパッケージ参照モードではパッケージの型に対する `partial` になります。非ジェネリックの `IValueObject` マーカーか、クラスのシムを拡張してください。
+「文字列の値オブジェクトだけ」のように 1 つの形だけを狙うなら、その形のクラスへ足します（`public abstract partial class ValueObjectStringBase<TSelf> { … }`）。値の形ごとのクラスも生成コードで、いずれも拡張してよい `partial` です。
+
+**ジェネリック契約の `IValueObject<TSelf>` / `IValueObject<TSelf, TValue>` は拡張面ではありません。** `IStringMatchValueObject<TSelf>` も同様です。前 2 つは静的ファクトリの契約、3 つ目は各エンジンのクエリ翻訳が「文字列値オブジェクトの部分一致」を識別するための契約で、いずれもランタイム側に在るため、そこへ書いた `partial` はパッケージ参照モードではパッケージの型に対する `partial` になります。非ジェネリックの `IValueObject` マーカーか、生成されるクラスを拡張してください。
 
 ## EditModel の保存ワークフロー
 

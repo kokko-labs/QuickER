@@ -4068,7 +4068,7 @@ public class CSharpCodeGenerationServiceTests
         content
             .Should()
             .Contain(
-                "public abstract partial class ValueObjectBooleanBaseCore<TSelf> : ValueObjectBaseCore<TSelf, bool>"
+                "public abstract partial class ValueObjectBooleanBase<TSelf> : ValueObjectBase<TSelf, bool>"
             );
         // string MaxLength・decimal precision/scale の自動検証は共有ルールクラスへの 1 行委譲になる
         // （検証の内部経路はエラーリストを遅延確保する＝成功パスで List を作らないため ref 渡し）

@@ -64,6 +64,67 @@ public sealed class ExtensionShimAcceptanceTests
         valueObjectTypes.Should().OnlyContain(type => typeof(IShimAudited).IsAssignableFrom(type));
     }
 
+    [Fact(
+        DisplayName = "ValueObjectBase の partial へ足したメンバーが値の形に依らず全 VO で呼べる"
+    )]
+    public void ValueObjectRootShim_AddedMember_ReachesEveryValueShape()
+    {
+        // 共通ルートは全 VO が通る唯一の拡張点なので、系統別基底の別なく同じメンバーが生える
+        NameValue.Create("Ada").DescribeValue().Should().Be("NameValue:Ada"); // string
+        IsActiveValue.Create(true).DescribeValue().Should().Be("IsActiveValue:True"); // bool
+        AmountValue.Create(12.5m).DescribeValue().Should().Be("AmountValue:12.5"); // decimal（Ordered）
+        CustomerIdValue.Create(7).DescribeValue().Should().Be("CustomerIdValue:7"); // int（Ordered）
+        DeliveryDateValue
+            .Create(new DateTime(2026, 9, 10))
+            .DescribeValue()
+            .Should()
+            .StartWith("DeliveryDateValue:"); // DateTime
+
+        // この図に具象 VO を持たない系統（binary / GuidKey）も含め、系統別基底 6 本すべてが共通ルートへ着地する
+        // （着地しない系統はルートへ足した拡張が届かない枝になるため、型の形で固定する）
+        foreach (var familyBaseName in ValueObjectFamilyBaseNames)
+        {
+            var familyBase = typeof(NameValue).Assembly.GetType(
+                $"{typeof(NameValue).Namespace}.{familyBaseName}"
+            );
+
+            familyBase.Should().NotBeNull($"系統別基底 {familyBaseName} が生成されている");
+            DerivesFromValueObjectRoot(familyBase!)
+                .Should()
+                .BeTrue(
+                    $"系統別基底 {familyBaseName} は共通ルート ValueObjectBase<,> から派生する"
+                );
+        }
+    }
+
+    /// <summary>系統別基底 6 本のリフレクション名（型引数の個数付き）</summary>
+    private static readonly string[] ValueObjectFamilyBaseNames =
+    [
+        "ValueObjectOrderedBase`2",
+        "ValueObjectStringBase`1",
+        "ValueObjectBooleanBase`1",
+        "ValueObjectDateTimeBase`1",
+        "ValueObjectBinaryBase`1",
+        "ValueObjectGuidKeyBase`1",
+    ];
+
+    /// <summary>基底の連鎖をたどって共通ルート <c>ValueObjectBase&lt;,&gt;</c> に着くかを判定する</summary>
+    private static bool DerivesFromValueObjectRoot(Type type)
+    {
+        for (var current = type.BaseType; current is not null; current = current.BaseType)
+        {
+            if (
+                current.IsGenericType
+                && current.GetGenericTypeDefinition() == typeof(ValueObjectBase<,>)
+            )
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /// <summary>フィクスチャの名前空間に生成された具象型を列挙する</summary>
     private static IReadOnlyList<Type> FixtureTypes() =>
         typeof(CustomerEntity)
@@ -102,4 +163,15 @@ public partial interface IValueObject : IShimAudited
 {
     /// <summary>注入インターフェイスの既定実装（マーカーが持つ DisplayValue から組み立てる）</summary>
     string IShimAudited.AuditLabel => $"ValueObject:{DisplayValue}";
+}
+
+/// <summary>
+/// 値オブジェクトの共通ルートの利用者 partial。系統別基底はすべてこの型から派生するため、ここへ足した
+/// メンバーは値の形（string / bool / 日時 / 数値 / バイナリ / GUID キー）に依らず全 VO で使える。
+/// </summary>
+/// <remarks>型引数リストは繰り返すが、制約は生成側の part が宣言済みなので省略する。</remarks>
+public partial class ValueObjectBase<TSelf, TValue>
+{
+    /// <summary>型名と表示値を 1 行で表す（全 VO 共通で使える）</summary>
+    public string DescribeValue() => $"{GetType().Name}:{DisplayValue}";
 }

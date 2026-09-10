@@ -171,9 +171,8 @@ public sealed class GuidKeyValueObjectExecutionTests
 
     private static object InvokeCreateParameterless()
     {
-        // 引数なし Create() は固定ランタイムの ValueObjectGuidKeyBaseCore<TSelf> の宣言で、生成 VO からは
-        // 拡張シム ValueObjectGuidKeyBase<TSelf> を挟んで継承される＝静的メンバの基底探索（FlattenHierarchy）で引く
-        // （利用コードの型名経由の呼び出しと同じ解決）
+        // 引数なし Create() は生成される ValueObjectGuidKeyBase<TSelf> の宣言で、生成 VO からは継承される
+        // ＝静的メンバの基底探索（FlattenHierarchy）で引く（利用コードの型名経由の呼び出しと同じ解決）
         var method =
             Vo.GetMethod(
                 "Create",
