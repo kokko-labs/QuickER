@@ -534,7 +534,7 @@ editModel.AcceptChanges();
 
 For a brand-new row, build the entity instead of applying to one: `mapper.CreateEntity(editModel, includeRemoved: true)` (or `CreateEntities(collection, includeRemoved: true)` for a whole collection).
 
-**Loading into an edit model rebuilds its child collections.** `mapper.ApplyToEditModel(entity, editModel)` — the load `CreateEditModel` performs, and the way a screen refreshes a model it already holds — replaces the previous collection instances with new ones, so view state tied to the old instance (the selected item, for one) and the removals it was tracking for the next save go with them. Reload only when discarding pending child edits is what is meant.
+**Loading into an edit model rebuilds its child collections.** `mapper.ApplyToEditModel(entity, editModel)` — the load `CreateEditModel` performs, and the way a screen refreshes a model it already holds — replaces the previous collection instances with new ones, so view state tied to the old instance (the selected item, for one), event subscriptions on the old collection (CollectionChanged and the like — re-subscribe on the new instance), and the removals it was tracking for the next save go with them. Reload only when discarding pending child edits is what is meant.
 
 **Pass `includeRemoved: true` whenever the result is going to be saved.** `includeRemoved` has no default: it is a required argument, so every call site states whether it is building a graph to save (`true`) or to display (`false`). `false` is for display purposes (a report, a preview): it leaves out the rows that are being tracked for deletion, so the resulting entity graph carries no deletions and the save would silently keep the rows the user removed.
 

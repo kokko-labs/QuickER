@@ -535,7 +535,7 @@ editModel.AcceptChanges();
 
 新規行は既存 Entity へ適用するのではなく組み立てます: `mapper.CreateEntity(editModel, includeRemoved: true)`（コレクションごとなら `CreateEntities(collection, includeRemoved: true)`）。
 
-**EditModel へのロードは子コレクションを作り直します。** `mapper.ApplyToEditModel(entity, editModel)`（`CreateEditModel` が行うロードであり、画面が手元の EditModel を再読込するときの経路でもあります）は、それまでの子コレクションのインスタンスを新しいものへ差し替えます。したがって古いインスタンスに紐づいたビューの状態（選択中の行など）も、そのコレクションが次の保存のために追跡していた削除も一緒に失われます。再読込は「子の編集内容を破棄してよい」ときにだけ行ってください。
+**EditModel へのロードは子コレクションを作り直します。** `mapper.ApplyToEditModel(entity, editModel)`（`CreateEditModel` が行うロードであり、画面が手元の EditModel を再読込するときの経路でもあります）は、それまでの子コレクションのインスタンスを新しいものへ差し替えます。したがって古いインスタンスに紐づいたビューの状態（選択中の行など）も、旧コレクションへのイベント購読（CollectionChanged など＝新しいインスタンスへ張り直しが必要）も、そのコレクションが次の保存のために追跡していた削除も一緒に失われます。再読込は「子の編集内容を破棄してよい」ときにだけ行ってください。
 
 **保存に使う結果を作るときは必ず `includeRemoved: true` を渡してください。** `includeRemoved` に既定値はなく必須引数です（呼び出しごとに、保存用のグラフを作るのか〔`true`〕表示用なのか〔`false`〕を明示します）。`false` は表示用途（帳票・プレビュー）のものです。削除追跡中の行が結果に入らないため、そのまま保存すると削除が乗らず、ユーザーが消したはずの行が黙って残ります。
 

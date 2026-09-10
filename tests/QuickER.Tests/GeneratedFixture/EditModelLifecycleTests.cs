@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.Linq;
 using AwesomeAssertions;
 using Xunit;
@@ -606,6 +607,176 @@ public sealed class EditModelLifecycleTests
         col[4].Should().BeSameAs(o3);
         // 挿入要素も所有者が設定される
         i1.IndexInParent.Should().Be(1);
+    }
+
+    // ===== EditModelCollection: 範囲操作の位置通知は末尾 1 回 =====
+
+    [Fact(
+        DisplayName = "AddRange/InsertRange: 位置通知は要素ごとでなく操作末尾の 1 回だけ撃たれる"
+    )]
+    public void 範囲追加の位置通知は一括()
+    {
+        var col = new EditModelCollection<OrderEditModel>();
+        var first = new OrderEditModel();
+        col.Add(first);
+
+        // 既存要素 1 件へ、AddRange(n) 中に届く IndexInParent 通知を数える
+        var indexNotifications = 0;
+        first.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(OrderEditModel.IndexInParent))
+            {
+                indexNotifications++;
+            }
+        };
+
+        var collectionEvents = 0;
+        col.CollectionChanged += (_, _) => collectionEvents++;
+
+        col.AddRange(Enumerable.Range(0, 10).Select(_ => new OrderEditModel()).ToArray());
+
+        // CollectionChanged は従来どおり 1 要素 1 回（意味論不変）・位置通知の全体ブロードキャストは末尾 1 回
+        collectionEvents.Should().Be(10);
+        indexNotifications
+            .Should()
+            .Be(1, "挿入ごとの全要素ブロードキャストは要素数の二乗で膨らむため末尾 1 回へ畳む");
+
+        indexNotifications = 0;
+        col.InsertRange(0, [new OrderEditModel(), new OrderEditModel()]);
+        indexNotifications.Should().Be(1);
+
+        // 通知が畳まれても最終状態の位置は正しい（値は読み取り時に実算される）
+        first.IndexInParent.Should().Be(2);
+        col[^1].IsLastInParent.Should().BeTrue();
+    }
+
+    [Fact(
+        DisplayName = "RemoveAll/RemoveRange: 残存要素への位置通知は末尾 1 回・外された要素自身への個別通知は維持"
+    )]
+    public void 範囲削除の位置通知は一括()
+    {
+        var col = new EditModelCollection<OrderEditModel>();
+        col.AddRange(Enumerable.Range(0, 5).Select(_ => new OrderEditModel()).ToArray());
+        var survivor = col[4];
+        var removedFirst = col[0];
+
+        var survivorNotifications = 0;
+        survivor.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(OrderEditModel.IndexInParent))
+            {
+                survivorNotifications++;
+            }
+        };
+
+        var removedNotified = false;
+        removedFirst.PropertyChanged += (_, e) =>
+            removedNotified |= e.PropertyName == nameof(OrderEditModel.IndexInParent);
+
+        col.RemoveRange(0, 2);
+
+        survivorNotifications
+            .Should()
+            .Be(1, "残存要素への全体ブロードキャストは操作末尾の 1 回だけ");
+        removedNotified
+            .Should()
+            .BeTrue("外された要素自身は従来どおり個別に位置通知（-1）を受け取る");
+        survivor.IndexInParent.Should().Be(2);
+
+        // RemoveAll も同じ畳み方で、削除追跡（RemovedItems）の意味論は不変
+        var tracked = col.Count;
+        col.RemoveAll();
+        col.Should().BeEmpty();
+        col.RemovedItems.Should().HaveCount(tracked + 2);
+
+        // 空コレクションへの空 AddRange はブロードキャスト自体を撃たない
+        var silent = new EditModelCollection<OrderEditModel>();
+        var probe = new OrderEditModel();
+        silent.Add(probe);
+        var probeNotifications = 0;
+        probe.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(OrderEditModel.IndexInParent))
+            {
+                probeNotifications++;
+            }
+        };
+        silent.AddRange([]);
+        probeNotifications.Should().Be(0);
+    }
+
+    [Fact(DisplayName = "範囲操作の例外中断は末尾ブロードキャストを撃たず、抑止深度は復帰する")]
+    public void 範囲操作の例外契約()
+    {
+        var col = new EditModelCollection<OrderEditModel>();
+        var first = new OrderEditModel();
+        col.Add(first);
+
+        var notifications = 0;
+        first.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(OrderEditModel.IndexInParent))
+            {
+                notifications++;
+            }
+        };
+
+        static IEnumerable<OrderEditModel> Faulting()
+        {
+            yield return new OrderEditModel();
+            yield return new OrderEditModel();
+            throw new InvalidOperationException("boom");
+        }
+
+        Assert.Throws<InvalidOperationException>(() => col.AddRange(Faulting()));
+
+        // 成立済みの挿入は残るが、末尾ブロードキャストは撃たない（unwind 経路で購読者コードを
+        // 走らせると元例外がハンドラ例外で置換され得るため＝XmlDoc に明記した契約）
+        col.Should().HaveCount(3);
+        notifications.Should().Be(0);
+        first
+            .IsFirstInParent.Should()
+            .BeTrue("位置プロパティは読み取り時に実算されるため通知に依らず正しい");
+
+        // 抑止深度は finally で復帰済み＝次の単発 Add は従来どおりブロードキャストされる
+        col.Add(new OrderEditModel());
+        notifications.Should().Be(1);
+    }
+
+    [Fact(
+        DisplayName = "CollectionChanged ハンドラからの入れ子範囲操作は最外の末尾 1 回に合流する"
+    )]
+    public void 入れ子範囲操作の通知合流()
+    {
+        var col = new EditModelCollection<OrderEditModel>();
+        var first = new OrderEditModel();
+        col.Add(first);
+
+        var notifications = 0;
+        first.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(OrderEditModel.IndexInParent))
+            {
+                notifications++;
+            }
+        };
+
+        var nested = false;
+        col.CollectionChanged += (_, _) =>
+        {
+            if (!nested)
+            {
+                nested = true;
+                col.AddRange([new OrderEditModel(), new OrderEditModel()]);
+            }
+        };
+
+        col.AddRange([new OrderEditModel()]);
+
+        // 抑止はカウンタなので、内側の範囲操作が外側の抑止を解除しない（bool だと内側の finally で
+        // 解除され、以降の挿入が要素ごとのブロードキャストへ退化する）
+        col.Should().HaveCount(4);
+        notifications.Should().Be(1, "入れ子の範囲操作の位置通知は最外の操作末尾 1 回に合流する");
     }
 
     // ===== EditModelCollection: 削除追跡・AcceptRemoved =====
