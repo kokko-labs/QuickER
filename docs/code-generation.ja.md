@@ -17,7 +17,7 @@ QuickER が生成する C# コードの構成と、データアクセス層（Qu
 | EF Core 版 Repository | `QuickErDbContext`（Fluent 構成込み）＋ EF Core 版 Repository ＋ DI 登録拡張 |
 | ランタイム | 上記が使う固定コード（既定でインライン出力。パッケージ参照モードあり） |
 
-Entity には既定で DataAnnotations と **DB 定義メタ属性**（`[DbTableMeta]` / `[DbColumnMeta]`）が付き、方言中立の型トークン（`string(50)` / `decimal(10,2)` など）と説明が刻まれます。生成コードは DB 定義の自己記述ドキュメントとしても機能します。この付与は `IncludeDataAnnotations`（既定 ON）で制御しますが、QuickER 版 Repository・EF Core 版 Repository・インメモリ Repository のいずれかの契約を生成する構成では OFF にできません（診断エラー）。ランタイムが `[Table]` / `[Key]` / `[Column]` をリフレクションで参照するためです。
+Entity には既定で DataAnnotations と **DB 定義メタ属性**（`[DbTableMeta]` / `[DbColumnMeta]`）が付き、方言中立の型トークン（`string(50)` / `decimal(10,2)` など）と説明が刻まれます。生成コードは DB 定義の自己記述ドキュメントとしても機能します。この付与は `IncludeDataAnnotations`（既定 ON）で制御しますが、QuickER 版 Repository・EF Core 版 Repository・インメモリ Repository のいずれかの契約を生成する構成では OFF にできません（診断エラー）。ランタイムが `[Table]` / `[Key]` をリフレクションで参照するためです。`[Column]` はこのオプションの対象外で常時付与されます（永続化の構造マッピングであり、生成ランタイムはこの属性を持たないプロパティを列として扱いません）。
 
 > **前提**: Repository の生成は単一主キー・アプリ側採番が対象です（複合キー・DB 自動採番のテーブルは Entity / EditModel のみ利用できます）。
 
@@ -423,7 +423,9 @@ public partial class EntityBase : IAuditable
 
 `EditModelBase<TSelf>` も同様で、さらに `TSelf` から具象型を参照できます。自分の part には型引数リストを書きます（`public abstract partial class EditModelBase<TSelf>`）。制約は生成側の part が宣言済みのため省略できます。
 
-`EntityBase` の partial へ足した読み書き可能なインスタンスプロパティは、全エンティティの値集合の一部になります——`HasSameValues` が比較し `Clone` が複製する、各エンティティが自分で宣言したのと同じ扱いです。それを意図しない場合は、メソッド・取得専用プロパティ・インターフェイス実装の形で足してください。
+EditModel の拡張面はこのジェネリック層だけです。その下の非ジェネリックな配管はランタイムの基底型で型付けされているため、そこから受け取った参照（型の付かない `ParentModel` など）からは、足したメンバーが直接は見えず具象 EditModel へのキャストが要ります。具象 EditModel は、親の型が一意なところでは型付きの `ParentModel` を生成して型の付かない方を隠すので、この非対称が出るのは主に基底型に向けて書いたコードです。
+
+`EntityBase` の partial へ足した読み書き可能なインスタンスプロパティは、QuickER 版 Repository・インメモリストア・値比較にとって**列ではありません**。列として扱われるのは `[Column]` を持つプロパティだけで、この属性は生成列には必ず付きます。そのため足したプロパティは SQL 文（`Query()` の述語で参照すると、SQL 方言バックエンドでは実在しない列を出す代わりに `NotSupportedException` で明示的に失敗します。インメモリバックエンドは述語を通常の C# として評価します）・`HasSameValues`・インメモリストアの列コピーのいずれからも外れます。公開プロパティ自体を見る経路は 2 つあり、それぞれにオプトアウトが要ります: JSON 経路（`ToJson` / `Clone`・リモート転送）は `[JsonIgnore]` で外せます。**EF Core** は規約が継承分も含む公開の読み書きプロパティを写像するため、`GenerateEfCoreRepositories` 構成では足したプロパティに `[NotMapped]` を付けてください。逆に列として扱いたければ、標準の `[Column("実在する列名")]` を付けます（これがオプトインです。名前は「テーブルに実在し、**かつ生成プロパティがまだ写像していない**列」でなければなりません——生成プロパティが写像済みの列名を指定すると、同じ列が SQL 文に 2 回載って DB で失敗します）。
 
 ### 全値オブジェクトにメンバー・インターフェイスを足す
 
@@ -550,7 +552,7 @@ editModel.AcceptChanges();
 
 どちらも（`includeRemoved: true` を渡していれば）保存時に削除され、どちらも削除に使われるのはキーだけです。同一インスタンスを戻すと削除追跡が解除され、削除前の状態へ復元されます。
 
-削除される行が持ち込むのはキーだけなので、**削除マークされた行は `Validate()` / `CollectErrors()` の対象外**になります（子孫も含めて部分木ごと）。ユーザーが消した行の入力途中・変換不能な値が保存全体を止めることはありません。エラー自体は行に登録されたまま残るため、行単位の表示（`HasErrors` / `GetErrors` ＝ `INotifyDataErrorInfo`）には出続け、行を戻せばそのまま検証へ戻ってきます。
+削除される行が持ち込むのはキーだけなので、**削除マークされた行は `Validate()` / `CollectErrors()` と重複検証（兄弟間・DB 照合の両方）の対象外**になります（子孫も含めて部分木ごと）。ユーザーが消した行の入力途中・変換不能な値・重複した値が保存全体を止めることはありません。エラー自体は行に登録されたまま残るため、行単位の表示（`HasErrors` / `GetErrors` ＝ `INotifyDataErrorInfo`）には出続け、行を戻せばそのまま検証へ戻ってきます。
 
 ## QuickER 版 Repository
 
@@ -871,7 +873,7 @@ if (!await editModel.ValidateUniqueAsync(repository))
 }
 ```
 
-EditModel の確定値から Entity を組み立てて `CheckUniquenessAsync` を呼び、各違反の `PropertyNames` をバインディングプロパティ名へ写します。構成列を持たない違反（および EditModel に無いプロパティ名の違反）は、空のプロパティ名で登録されるモデルレベルエラーになり、`GetErrors(null)` で取得できます。呼び出しの先頭で前回の重複エラーを消すため、再検証で古いエラーが残ることはありません（消すのは自分が付けた分だけなので、要素どうしの検証が報告したエラーは残ります）。
+EditModel の確定値から Entity を組み立てて `CheckUniquenessAsync` を呼び、各違反の `PropertyNames` をバインディングプロパティ名へ写します。構成列を持たない違反（および EditModel に無いプロパティ名の違反）は、空のプロパティ名で登録されるモデルレベルエラーになり、`GetErrors(null)` で取得できます。呼び出しの先頭で前回の重複エラーを消すため、再検証で古いエラーが残ることはありません（消すのは自分が付けた分だけなので、要素どうしの検証が報告したエラーは残ります）。削除マークされた EditModel は、他の検証と同じく照会せずに `true` を返します。
 
 エラーの登録は `await` の後＝呼び出し元のスレッドではなくスレッドプール上で行われ、`ErrorsChanged` も同じスレッドで発火します。WPF のバインディングエンジンは通知を UI スレッドへ自動でマーシャルするため通常は何もする必要がありませんが、UI の状態を直接更新する購読者は呼び出し側でマーシャルしてください。
 

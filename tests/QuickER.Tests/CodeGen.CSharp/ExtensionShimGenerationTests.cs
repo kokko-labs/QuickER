@@ -95,14 +95,12 @@ public sealed class ExtensionShimGenerationTests
         content.Should().Contain(": ValueObjectBooleanBase<IsActiveValue>,");
 
         // 実装の置き場は固定ランタイム側（*Core）で、拡張面とは別の宣言として同居する
-        content.Should().Contain("public abstract partial class EntityBaseCore");
+        content.Should().Contain("public abstract class EntityBaseCore");
         content
             .Should()
-            .Contain("public abstract partial class EditModelBaseCore<TSelf> : EditModelBaseCore");
+            .Contain("public abstract class EditModelBaseCore<TSelf> : EditModelBaseCore");
         content.Should().Contain("public interface IValueObjectCore");
-        content
-            .Should()
-            .Contain("public abstract partial class ValueObjectBaseCore<TSelf, TValue>");
+        content.Should().Contain("public abstract class ValueObjectBaseCore<TSelf, TValue>");
 
         // 系統別基底が使う共有ヘルパーも固定ランタイム側にある
         content.Should().Contain("public static class ValueObjectComparisons");
@@ -126,7 +124,7 @@ public sealed class ExtensionShimGenerationTests
         AssertValueObjectBases(files["ValueObjects.g.cs"]);
 
         // 固定 infra は Runtime ファイルに集約され、拡張面はそこには出ない
-        files["Runtime.g.cs"].Should().Contain("public abstract partial class EntityBaseCore");
+        files["Runtime.g.cs"].Should().Contain("public abstract class EntityBaseCore");
         files["Runtime.g.cs"].Should().Contain("public static class ValueObjectComparisons");
         files["Runtime.g.cs"].Should().NotContain(EntityShim);
         files["Runtime.g.cs"].Should().NotContain(EditModelShim);
@@ -152,10 +150,10 @@ public sealed class ExtensionShimGenerationTests
 
         // 固定 infra の宣言は 1 つも出ない（パッケージが提供する）
         var allContent = string.Join(Environment.NewLine, files.Values);
-        allContent.Should().NotContain("abstract partial class EntityBaseCore");
-        allContent.Should().NotContain("abstract partial class EditModelBaseCore");
+        allContent.Should().NotContain("abstract class EntityBaseCore");
+        allContent.Should().NotContain("abstract class EditModelBaseCore");
         allContent.Should().NotContain("public interface IValueObjectCore");
-        allContent.Should().NotContain("abstract partial class ValueObjectBaseCore");
+        allContent.Should().NotContain("abstract class ValueObjectBaseCore");
         allContent.Should().NotContain("static class ValueObjectComparisons");
         allContent.Should().NotContain("static class ValueObjectBinaryOperations");
         allContent.Should().NotContain("interface IStringMatchValueObject<TSelf>");
@@ -276,15 +274,13 @@ public sealed class ExtensionShimGenerationTests
         }
 
         // 実装の置き場は固定ランタイム側（*Core）で、拡張面とは別の宣言として同居する
-        content.Should().Contain("public partial interface IRemoteRepositoryCore<TEntity, TKey>");
+        content.Should().Contain("public interface IRemoteRepositoryCore<TEntity, TKey>");
         content
             .Should()
             .Contain(
-                "public partial interface IRepositoryCore<TEntity, TKey> : IRemoteRepositoryCore<TEntity, TKey>"
+                "public interface IRepositoryCore<TEntity, TKey> : IRemoteRepositoryCore<TEntity, TKey>"
             );
-        content
-            .Should()
-            .Contain("public abstract partial class MapperBaseCore<TEntity, TEditModel>");
+        content.Should().Contain("public abstract class MapperBaseCore<TEntity, TEditModel>");
 
         AssertPerTypeRepositoryClauses(content);
     }
@@ -312,8 +308,8 @@ public sealed class ExtensionShimGenerationTests
         // 固定 infra 側の Runtime ファイルには拡張面が 1 本も出ない（宣言は *Core だけ）
         files["Runtime.g.cs"]
             .Should()
-            .Contain("public partial interface IRepositoryCore<TEntity, TKey>")
-            .And.Contain("public abstract partial class MapperBaseCore<TEntity, TEditModel>")
+            .Contain("public interface IRepositoryCore<TEntity, TKey>")
+            .And.Contain("public abstract class MapperBaseCore<TEntity, TEditModel>")
             .And.NotContain("public partial interface IRepository<TEntity, TKey>")
             .And.NotContain(MapperShim);
         files["Runtime.SqlServer.g.cs"].Should().NotContain(BackendShims[0].Declaration);

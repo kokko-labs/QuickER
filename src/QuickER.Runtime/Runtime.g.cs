@@ -538,7 +538,7 @@ public sealed class ValueObjectValidationException : Exception
 }
 
 /// <summary>Common base for value objects. Provides the Create / TryCreate / Validate factories, value storage, equality, ToString, and extraction of the raw value (ordered comparison is added by derived types).</summary>
-public abstract partial class ValueObjectBaseCore<TSelf, TValue>
+public abstract class ValueObjectBaseCore<TSelf, TValue>
     : IValueObjectCore,
         IEquatable<TSelf>,
         IFormattable
@@ -1387,7 +1387,7 @@ public enum RowState
 }
 
 /// <summary>Base class that holds the change tracking state (RowState) of an entity.</summary>
-public abstract partial class EntityBaseCore
+public abstract class EntityBaseCore
 {
     /// <summary>Change tracking state of this entity. Defaults to Unchanged; restoring from the database or JSON keeps it Unchanged.</summary>
     public RowState RowState { get; set; } = RowState.Unchanged;
@@ -1500,10 +1500,11 @@ public abstract partial class EntityBaseCore
 
     // ---- Value comparison, hashing, and JSON output ----
 
-    /// <summary>Caches the "value properties" per type (public get/set properties that map to columns, excluding navigations and base properties such as RowState).</summary>
+    /// <summary>Caches the "value properties" per type (the public get/set properties carrying a <see cref="ColumnAttribute"/>).</summary>
     private static readonly ConcurrentDictionary<Type, PropertyInfo[]> _valuePropertyCache = new();
 
-    /// <summary>Returns the value properties of the given type (navigations and base properties excluded; scanned once per type and cached).</summary>
+    /// <summary>Returns the value properties of the given type (scanned once per type and cached).</summary>
+    /// <remarks>A property is a column only when it carries <see cref="ColumnAttribute"/>, which the generator puts on every column property. Anything else a partial declaration adds - navigations, RowState, and members added to the extension surface - is therefore not a column. Add <see cref="ColumnAttribute"/> with the name of a real column to opt a handwritten property in.</remarks>
     private static PropertyInfo[] GetValueProperties(Type type) =>
         _valuePropertyCache.GetOrAdd(
             type,
@@ -1513,8 +1514,7 @@ public abstract partial class EntityBaseCore
                     .Where(property =>
                         property.CanRead
                         && property.CanWrite
-                        && property.DeclaringType != typeof(EntityBaseCore)
-                        && !Attribute.IsDefined(property, typeof(NavigationReferenceAttribute))
+                        && Attribute.IsDefined(property, typeof(ColumnAttribute))
                     )
                     .ToArray()
         );
@@ -1647,7 +1647,7 @@ public static class GeneratedDisplayNames
 /// <c>nameof</c> and stay compile-safe.
 /// </para>
 /// </remarks>
-public abstract partial class EditModelBaseCore
+public abstract class EditModelBaseCore
     : INotifyPropertyChanged,
         INotifyDataErrorInfo,
         IEditableObject
@@ -2718,10 +2718,18 @@ public abstract partial class EditModelBaseCore
 
     /// <summary>Asks the repository which UNIQUE constraints the given entity violates and registers the findings as duplicate-value errors (returns true when there are none).</summary>
     /// <remarks>
+    /// <para>
     /// The body of the generated <c>ValidateUniqueAsync</c>: everything except building the entity from the confirmed values,
     /// which is the only part that needs the concrete types. The findings of the previous run are withdrawn before the query
     /// goes out, so re-checking never leaves stale errors, and only this check's slot is touched - what the check among the
     /// siblings reported stays.
+    /// </para>
+    /// <para>
+    /// A model marked for removal passes without a query, the same as every other read of the validation state
+    /// (<see cref="Validate"/>, the error collection, and the check among the siblings all skip it): only its key reaches the
+    /// save, so a duplicate in a value that is about to be deleted must not block one. The error store is left untouched, so a
+    /// row whose removal is undone is judged again by the next check.
+    /// </para>
     /// </remarks>
     /// <param name="repository">The repository used for the check.</param>
     /// <param name="entity">The entity carrying the values to check.</param>
@@ -2734,6 +2742,12 @@ public abstract partial class EditModelBaseCore
         where TEntity : EntityBaseCore, new()
     {
         ArgumentNullException.ThrowIfNull(repository);
+
+        if (IsRemoved)
+        {
+            return true;
+        }
+
         ClearDuplicateErrors(DuplicateErrorSource.Database);
 
         var violations = await repository
@@ -3289,7 +3303,7 @@ public sealed record EditModelColumn<TModel>(
 /// single type parameter cannot name.
 /// </remarks>
 /// <typeparam name="TSelf">The concrete edit model type deriving from this class.</typeparam>
-public abstract partial class EditModelBaseCore<TSelf> : EditModelBaseCore
+public abstract class EditModelBaseCore<TSelf> : EditModelBaseCore
     where TSelf : EditModelBaseCore<TSelf>
 {
     /// <summary>Returns the next element after this one in its owning collection (null if not owned or at the end).</summary>
@@ -3733,10 +3747,10 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
     {
         var changed = false;
 
+        _rangeOperationDepth++;
+
         try
         {
-            _rangeOperationDepth++;
-
             foreach (var item in items)
             {
                 Add(item);
@@ -3760,10 +3774,10 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
     {
         var changed = false;
 
+        _rangeOperationDepth++;
+
         try
         {
-            _rangeOperationDepth++;
-
             foreach (var item in items)
             {
                 Insert(index++, item);
@@ -3787,10 +3801,10 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
     {
         var changed = Count > 0;
 
+        _rangeOperationDepth++;
+
         try
         {
-            _rangeOperationDepth++;
-
             while (Count > 0)
             {
                 RemoveAt(0);
@@ -3829,10 +3843,10 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
 
         var changed = count > 0;
 
+        _rangeOperationDepth++;
+
         try
         {
-            _rangeOperationDepth++;
-
             for (var i = 0; i < count; i++)
             {
                 RemoveAt(index);
@@ -3906,7 +3920,7 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
 /// (<see cref="CompleteLoad"/>), and the two post-creation hooks. Everything that composes them - the order of the load,
 /// the loading state it runs under, creation from an edit model, collection conversion - is written once here.
 /// </remarks>
-public abstract partial class MapperBaseCore<TEntity, TEditModel>
+public abstract class MapperBaseCore<TEntity, TEditModel>
     where TEntity : EntityBaseCore, new()
     where TEditModel : EditModelBaseCore, new()
 {
@@ -4214,7 +4228,7 @@ public static class UniquenessChecker
 /// this surface (plus the named queries) is additionally generated, and I{Entity}Repository inherits it.
 /// </para>
 /// </remarks>
-public partial interface IRemoteRepositoryCore<TEntity, TKey>
+public interface IRemoteRepositoryCore<TEntity, TKey>
     where TEntity : EntityBaseCore, new()
 {
     /// <summary>Gets a single entity by primary key (null when not found).</summary>
@@ -4304,7 +4318,7 @@ public partial interface IRemoteRepositoryCore<TEntity, TKey>
 /// members that assume local execution (a direct DB connection): expression-tree queries, raw SQL, and bulk insert.
 /// I{Entity}Repository always provides this full-featured surface.
 /// </remarks>
-public partial interface IRepositoryCore<TEntity, TKey> : IRemoteRepositoryCore<TEntity, TKey>
+public interface IRepositoryCore<TEntity, TKey> : IRemoteRepositoryCore<TEntity, TKey>
     where TEntity : EntityBaseCore, new()
 {
     /// <summary>Bulk inserts a collection of entities.</summary>
@@ -6494,7 +6508,7 @@ public static class RemoteEntityGraph
 /// body.
 /// </para>
 /// </remarks>
-public abstract partial class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositoryCore<TEntity, TKey>
+public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositoryCore<TEntity, TKey>
     where TEntity : EntityBaseCore, new()
 {
     private readonly HttpClient _httpClient;

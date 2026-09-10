@@ -97,12 +97,15 @@ public sealed class EntitySaveMetadata
         var allProperties = entityType
             .GetProperties(BindingFlags.Public | BindingFlags.Instance)
             .ToList();
+        // A property is a column only when it carries [Column], which the generator puts on every column property.
+        // Anything else a partial declaration adds - navigations, RowState, and members added to the extension surface -
+        // is therefore never part of a SQL statement. A handwritten property opts in by carrying [Column] with the name
+        // of a real column
         var columns = allProperties
             .Where(property =>
                 property.CanRead
                 && property.CanWrite
-                && property.DeclaringType != typeof(EntityBaseCore)
-                && property.GetCustomAttribute<NavigationReferenceAttribute>() is null
+                && property.GetCustomAttribute<ColumnAttribute>() is not null
             )
             .ToList();
         var keyProperties = columns
@@ -1745,7 +1748,7 @@ public sealed class EfCoreSqlQueryExecutor<TEntity, TContext>(
 /// <typeparam name="TEntity">The target entity type.</typeparam>
 /// <typeparam name="TKey">The primary key type.</typeparam>
 /// <typeparam name="TContext">The concrete type of the DbContext that performs CRUD.</typeparam>
-public abstract partial class EfCoreRepositoryCore<TEntity, TKey, TContext>(
+public abstract class EfCoreRepositoryCore<TEntity, TKey, TContext>(
     IDbContextFactory<TContext> contextFactory,
     ISaveHookRegistry? saveHooks = null,
     ISqlExecutor? sqlExecutor = null

@@ -213,7 +213,12 @@ public sealed record CodeGenerationOptions
     public bool GeneratesRepositoryContract =>
         GenerateRepositories || GenerateEfCoreRepositories || GenerateInMemoryRepositories;
 
-    /// <summary>[Table] [Key] [Column] [Required] [MaxLength] などのデータアノテーション属性を付与するかどうか</summary>
+    /// <summary>[Table] [Key] [Required] [MaxLength] などの文書・検証系の属性（DB 定義メタ属性を含む）を付与するかどうか</summary>
+    /// <remarks>
+    /// <c>[Column]</c> はこのオプションの対象外で、永続化の構造マッピングとして常時付与する
+    /// （生成ランタイムの列判定＝<c>EntityBaseCore</c> の値プロパティと <c>EntitySaveMetadata</c> の列集合が
+    /// <c>[Column]</c> を許可リストとして読むため。付いていないプロパティは列ではない）。
+    /// </remarks>
     public bool IncludeDataAnnotations { get; init; } = true;
 
     /// <summary>親参照ナビゲーションへ [JsonIgnore] を付与するかどうか（JSON シリアライズ時の循環参照対策）</summary>

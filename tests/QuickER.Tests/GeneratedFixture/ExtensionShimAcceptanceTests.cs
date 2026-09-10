@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 using System.Linq;
 using System.Threading.Tasks;
 using AwesomeAssertions;
@@ -127,6 +129,78 @@ public sealed class ExtensionShimAcceptanceTests
         return false;
     }
 
+    [Fact(
+        DisplayName = "拡張面へ足した setter プロパティは列にならない（SQL・値比較・列集合から外れる）"
+    )]
+    public void EntityShim_AddedProperty_IsNotAColumn()
+    {
+        var metadata = EntitySaveMetadata.For(typeof(CustomerEntity));
+
+        // 列集合は [Column] を持つプロパティだけ＝拡張面のプロパティは 1 つも入らない
+        metadata
+            .AllProperties.Select(property => property.Name)
+            .Should()
+            .NotContain(nameof(EntityBase.ShimNote));
+
+        // 実在しない列名が SQL に混ざらない（混ざると実 DB でだけ "Invalid column name" になる）
+        metadata.InsertSql.Should().NotContain(nameof(EntityBase.ShimNote));
+        metadata.SelectAllSql.Should().NotContain(nameof(EntityBase.ShimNote));
+
+        // 値比較の対象からも外れる＝拡張面のプロパティ差は「行の値が違う」ことを意味しない
+        var left = new CustomerEntity
+        {
+            CustomerId = CustomerIdValue.Create(1),
+            Name = NameValue.Create("Ada"),
+            ShimNote = "left",
+        };
+        var right = new CustomerEntity
+        {
+            CustomerId = CustomerIdValue.Create(1),
+            Name = NameValue.Create("Ada"),
+            ShimNote = "right",
+        };
+
+        left.HasSameValues(right).Should().BeTrue();
+        left.GetValueHashCode().Should().Be(right.GetValueHashCode());
+    }
+
+    [Fact(
+        DisplayName = "[Column] を付けた利用者プロパティは列として扱われる（オプトインが成立する）"
+    )]
+    public void HandwrittenProperty_WithColumnAttribute_IsAColumn()
+    {
+        var metadata = EntitySaveMetadata.For(typeof(ShimOptInEntity));
+        var columnNames = metadata.AllProperties.Select(property => property.Name).ToList();
+
+        // [Column] 付き＝列。付いていない利用者プロパティと拡張面のプロパティは列ではない
+        columnNames.Should().Contain(nameof(ShimOptInEntity.RowId));
+        columnNames.Should().Contain(nameof(ShimOptInEntity.OptedIn));
+        columnNames.Should().NotContain(nameof(ShimOptInEntity.NotAColumn));
+        columnNames.Should().NotContain(nameof(EntityBase.ShimNote));
+
+        metadata.InsertSql.Should().Contain("opted_in");
+        metadata.InsertSql.Should().NotContain(nameof(ShimOptInEntity.NotAColumn));
+
+        // 値比較も [Column] 基準＝オプトインした列だけが「行の値」に入る
+        var left = new ShimOptInEntity
+        {
+            RowId = 1,
+            OptedIn = "same",
+            NotAColumn = "left",
+        };
+        var right = new ShimOptInEntity
+        {
+            RowId = 1,
+            OptedIn = "same",
+            NotAColumn = "right",
+        };
+
+        left.HasSameValues(right).Should().BeTrue();
+
+        right.OptedIn = "different";
+        left.HasSameValues(right).Should().BeFalse();
+    }
+
     /// <summary>フィクスチャの名前空間に生成された具象型を列挙する</summary>
     private static IReadOnlyList<Type> FixtureTypes() =>
         typeof(CustomerEntity)
@@ -136,6 +210,30 @@ public sealed class ExtensionShimAcceptanceTests
                 && type is { IsClass: true, IsAbstract: false }
             )
             .ToList();
+}
+
+/// <summary>
+/// 利用者が <c>[Column]</c> でオプトインした列を持つ手書きエンティティ（受け入れ検証用）。
+/// </summary>
+/// <remarks>
+/// ランタイムの列判定はリフレクションなので、生成 part と利用者 part の別は見えない
+/// ＝手書きエンティティは「生成エンティティの partial へ利用者がプロパティを足した形」の忠実な代役になる。
+/// 図のテーブルを 1 つも汚さずにオプトインの両向き（付けた／付けない）を並べられるため、こちらで固定する。
+/// </remarks>
+[Table("shim_opt_in_rows")]
+public sealed class ShimOptInEntity : EntityBase
+{
+    /// <summary>主キー</summary>
+    [Key]
+    [Column("row_id")]
+    public int RowId { get; set; }
+
+    /// <summary><c>[Column]</c> を付けた利用者プロパティ＝列として扱われる</summary>
+    [Column("opted_in")]
+    public string? OptedIn { get; set; }
+
+    /// <summary><c>[Column]</c> の無い利用者プロパティ＝列ではない</summary>
+    public string? NotAColumn { get; set; }
 }
 
 /// <summary>拡張シムへ注入する利用者側のインターフェイス（受け入れ検証用）</summary>
@@ -150,6 +248,12 @@ public interface IShimAudited
 /// </summary>
 public partial class EntityBase : IShimAudited
 {
+    /// <summary>
+    /// 拡張面へ足した読み書き可能なプロパティ（実在しない列）。<c>[Column]</c> を持たないため列ではなく、
+    /// SQL・値比較・列コピーのいずれからも外れる。
+    /// </summary>
+    public string? ShimNote { get; set; }
+
     /// <summary>行の型名と変更状態を 1 行で表す（全 Entity 共通で使える）</summary>
     public string DescribeRow() => $"{GetType().Name}/{RowState}";
 

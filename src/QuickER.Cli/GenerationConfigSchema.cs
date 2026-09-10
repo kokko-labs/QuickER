@@ -265,7 +265,7 @@ public static class GenerationConfigSchema
             "boolean",
             true,
             "Attributes",
-            "Apply DataAnnotations ([Required] / [MaxLength], etc.) and the DB-definition meta attributes ([DbTableMeta] / [DbColumnMeta])."
+            "Apply the documentation and validation attributes ([Table] / [Key] / [Required] / [MaxLength]) and the DB-definition meta attributes ([DbTableMeta] / [DbColumnMeta]). [Column] is not part of this key: it is the persistence mapping and is always applied, and the generated runtime treats a property without it as not being a column."
         ),
         new(
             "IncludeJsonIgnoreOnParentNavigation",
@@ -294,7 +294,7 @@ public static class GenerationConfigSchema
         "Entity classes are always generated; there is no key to toggle them.",
         "A repository contract is generated when any of GenerateRepositories, GenerateEfCoreRepositories, or GenerateInMemoryRepositories is true (all default to false); with none of them no data-access code is produced.",
         "GenerateMappers requires GenerateEditModels, because a Mapper converts between an Entity and its EditModel.",
-        "GenerateRepositories / GenerateEfCoreRepositories / GenerateInMemoryRepositories require IncludeDataAnnotations, because the runtime reads [Table] / [Key] / [Column] by reflection.",
+        "GenerateRepositories / GenerateEfCoreRepositories / GenerateInMemoryRepositories require IncludeDataAnnotations, because the runtime reads [Table] and [Key] by reflection.",
         "Multi-target RepositoryDialects (two or more effective dialects) cannot be combined with GenerateEfCoreRepositories.",
         "GenerateRemoteServices implies GenerateRemoteContracts.",
         "GenerateRemoteContracts / GenerateRemoteServices require a repository contract (GenerateRepositories, GenerateEfCoreRepositories, or GenerateInMemoryRepositories); asking for them without one is a generation error.",

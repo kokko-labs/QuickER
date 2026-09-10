@@ -17,7 +17,7 @@ This document describes the structure of the C# code QuickER generates and how t
 | EF Core Repository | `QuickErDbContext` (including the Fluent configuration) plus the EF Core Repository plus DI-registration extensions. |
 | Runtime | The fixed code the above relies on (inlined into the output by default; a package-reference mode is also available). |
 
-By default, an Entity is decorated with DataAnnotations and **DB-definition metadata attributes** (`[DbTableMeta]` / `[DbColumnMeta]`) that record a dialect-neutral type token (`string(50)` / `decimal(10,2)`, etc.) and a description. The generated code therefore doubles as a self-describing document of the DB definition. This is controlled by `IncludeDataAnnotations` (default ON), but it cannot be turned off in a configuration that generates the QuickER Repository, EF Core Repository, or in-memory Repository contracts (a diagnostic error), because the runtime reads `[Table]` / `[Key]` / `[Column]` through reflection.
+By default, an Entity is decorated with DataAnnotations and **DB-definition metadata attributes** (`[DbTableMeta]` / `[DbColumnMeta]`) that record a dialect-neutral type token (`string(50)` / `decimal(10,2)`, etc.) and a description. The generated code therefore doubles as a self-describing document of the DB definition. This is controlled by `IncludeDataAnnotations` (default ON), but it cannot be turned off in a configuration that generates the QuickER Repository, EF Core Repository, or in-memory Repository contracts (a diagnostic error), because the runtime reads `[Table]` and `[Key]` through reflection. `[Column]` is outside that option and is always applied: it is the persistence mapping, and the generated runtime treats a property without it as not being a column.
 
 > **Prerequisite**: Repository generation targets a single primary key with application-assigned keys (tables with a composite key or DB auto-numbering can only use the Entity / EditModel).
 
@@ -422,7 +422,9 @@ public partial class EntityBase : IAuditable
 
 `EditModelBase<TSelf>` works the same way and additionally sees the concrete type through `TSelf`. Repeat the type parameter list on your part (`public abstract partial class EditModelBase<TSelf>`); constraints may be omitted, because the generated part already declares them.
 
-A read-write instance property added to the `EntityBase` partial becomes part of every entity's value set — `HasSameValues` compares it and `Clone` copies it, exactly as if each entity declared it itself. When that is not what you want, add a method, a get-only property, or an interface implementation instead.
+The edit model surface is the generic layer alone. The non-generic plumbing underneath it is typed as the runtime base, so a reference it hands back — the untyped `ParentModel`, for one — does not see a member you added, and reaching it needs a cast to the concrete edit model. Concrete edit models generate a typed `ParentModel` that hides the untyped one wherever the parent type is unambiguous, so this comes up mainly in code written against the base.
+
+A read-write instance property added to the `EntityBase` partial is **not a column** for the QuickER repositories, the in-memory store, and the value comparisons. A property is a column only when it carries `[Column]`, which the generator puts on every generated column property, so an added property stays out of the SQL statements (a `Query()` predicate that references one fails on the SQL dialect backends with `NotSupportedException` rather than emitting a column that does not exist; the in-memory backend evaluates the predicate as ordinary C#), out of `HasSameValues`, and out of the column copy the in-memory store makes. Two paths look at the public properties themselves and need their own opt-out: the JSON path — `ToJson`, `Clone`, and the remote transfer — which `[JsonIgnore]` keeps out, and **EF Core**, whose conventions map every public read-write property including inherited ones, so under `GenerateEfCoreRepositories` an added property needs `[NotMapped]`. To make an added property a column, give it the standard `[Column("<an existing column>")]`: that is the opt-in, and the name has to be a column the table really has **but no generated property already maps** — naming a column a generated property covers puts the same column into the statements twice and fails at the database.
 
 ### Adding a member or an interface to every value object
 
@@ -549,7 +551,7 @@ There are two ways to delete a child row, and they differ only in where the row 
 
 Either way the row is deleted on save (as long as you passed `includeRemoved: true`), and either way only its key takes part in the delete. Adding the very same instance back cancels the deletion tracking and restores the state the row had before it was removed.
 
-Because a row that is about to be deleted contributes nothing but its key, **rows marked for deletion are left out of `Validate()` and `CollectErrors()`**, subtree and all: an unfinished or unconvertible value on a row the user has deleted cannot block the save. The errors themselves stay registered on the row, so a per-row display (`HasErrors` / `GetErrors`, i.e. `INotifyDataErrorInfo`) keeps showing them — and putting the row back brings them straight back into the validation.
+Because a row that is about to be deleted contributes nothing but its key, **rows marked for deletion are left out of `Validate()`, `CollectErrors()`, and the uniqueness checks (both among the siblings and against the database)**, subtree and all: an unfinished, unconvertible, or duplicate value on a row the user has deleted cannot block the save. The errors themselves stay registered on the row, so a per-row display (`HasErrors` / `GetErrors`, i.e. `INotifyDataErrorInfo`) keeps showing them — and putting the row back brings them straight back into the validation.
 
 ## QuickER Repository
 
@@ -870,7 +872,7 @@ if (!await editModel.ValidateUniqueAsync(repository))
 }
 ```
 
-It builds an entity from the edit model's confirmed values, calls `CheckUniquenessAsync`, and maps each violation's `PropertyNames` back to the binding properties. A violation with no property names (or with names that do not belong to the edit model) becomes a model-level error registered under the empty property name, which `GetErrors(null)` returns. The duplicate-value errors registered by the previous call are cleared first, so re-checking never leaves stale errors — its own findings only, so what the check among the siblings reported stays.
+It builds an entity from the edit model's confirmed values, calls `CheckUniquenessAsync`, and maps each violation's `PropertyNames` back to the binding properties. A violation with no property names (or with names that do not belong to the edit model) becomes a model-level error registered under the empty property name, which `GetErrors(null)` returns. The duplicate-value errors registered by the previous call are cleared first, so re-checking never leaves stale errors — its own findings only, so what the check among the siblings reported stays. A model marked for removal returns `true` without querying at all, in line with every other read of the validation state.
 
 The errors are registered after the `await`, which puts them on a thread pool thread rather than the caller's, and `ErrorsChanged` fires on that same thread. A WPF binding marshals the notification back to the UI thread by itself, so the ordinary case needs nothing from you; a subscriber that updates UI state directly has to marshal it at the call site.
 

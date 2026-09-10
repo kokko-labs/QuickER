@@ -475,7 +475,7 @@ public enum RowState
 }
 
 /// <summary>Base class that holds the change tracking state (RowState) of an entity.</summary>
-public abstract partial class EntityBaseCore
+public abstract class EntityBaseCore
 {
     /// <summary>Change tracking state of this entity. Defaults to Unchanged; restoring from the database or JSON keeps it Unchanged.</summary>
     public RowState RowState { get; set; } = RowState.Unchanged;
@@ -588,10 +588,11 @@ public abstract partial class EntityBaseCore
 
     // ---- Value comparison, hashing, and JSON output ----
 
-    /// <summary>Caches the "value properties" per type (public get/set properties that map to columns, excluding navigations and base properties such as RowState).</summary>
+    /// <summary>Caches the "value properties" per type (the public get/set properties carrying a <see cref="ColumnAttribute"/>).</summary>
     private static readonly ConcurrentDictionary<Type, PropertyInfo[]> _valuePropertyCache = new();
 
-    /// <summary>Returns the value properties of the given type (navigations and base properties excluded; scanned once per type and cached).</summary>
+    /// <summary>Returns the value properties of the given type (scanned once per type and cached).</summary>
+    /// <remarks>A property is a column only when it carries <see cref="ColumnAttribute"/>, which the generator puts on every column property. Anything else a partial declaration adds - navigations, RowState, and members added to the extension surface - is therefore not a column. Add <see cref="ColumnAttribute"/> with the name of a real column to opt a handwritten property in.</remarks>
     private static PropertyInfo[] GetValueProperties(Type type) =>
         _valuePropertyCache.GetOrAdd(
             type,
@@ -601,8 +602,7 @@ public abstract partial class EntityBaseCore
                     .Where(property =>
                         property.CanRead
                         && property.CanWrite
-                        && property.DeclaringType != typeof(EntityBaseCore)
-                        && !Attribute.IsDefined(property, typeof(NavigationReferenceAttribute))
+                        && Attribute.IsDefined(property, typeof(ColumnAttribute))
                     )
                     .ToArray()
         );
@@ -814,7 +814,7 @@ public partial class DocumentNoteEntity : EntityBase
 /// <c>nameof</c> and stay compile-safe.
 /// </para>
 /// </remarks>
-public abstract partial class EditModelBaseCore
+public abstract class EditModelBaseCore
     : INotifyPropertyChanged,
         INotifyDataErrorInfo,
         IEditableObject
@@ -1782,10 +1782,18 @@ public abstract partial class EditModelBaseCore
 
     /// <summary>Asks the repository which UNIQUE constraints the given entity violates and registers the findings as duplicate-value errors (returns true when there are none).</summary>
     /// <remarks>
+    /// <para>
     /// The body of the generated <c>ValidateUniqueAsync</c>: everything except building the entity from the confirmed values,
     /// which is the only part that needs the concrete types. The findings of the previous run are withdrawn before the query
     /// goes out, so re-checking never leaves stale errors, and only this check's slot is touched - what the check among the
     /// siblings reported stays.
+    /// </para>
+    /// <para>
+    /// A model marked for removal passes without a query, the same as every other read of the validation state
+    /// (<see cref="Validate"/>, the error collection, and the check among the siblings all skip it): only its key reaches the
+    /// save, so a duplicate in a value that is about to be deleted must not block one. The error store is left untouched, so a
+    /// row whose removal is undone is judged again by the next check.
+    /// </para>
     /// </remarks>
     /// <param name="repository">The repository used for the check.</param>
     /// <param name="entity">The entity carrying the values to check.</param>
@@ -1798,6 +1806,12 @@ public abstract partial class EditModelBaseCore
         where TEntity : EntityBaseCore, new()
     {
         ArgumentNullException.ThrowIfNull(repository);
+
+        if (IsRemoved)
+        {
+            return true;
+        }
+
         ClearDuplicateErrors(DuplicateErrorSource.Database);
 
         var violations = await repository
@@ -2353,7 +2367,7 @@ public sealed record EditModelColumn<TModel>(
 /// single type parameter cannot name.
 /// </remarks>
 /// <typeparam name="TSelf">The concrete edit model type deriving from this class.</typeparam>
-public abstract partial class EditModelBaseCore<TSelf> : EditModelBaseCore
+public abstract class EditModelBaseCore<TSelf> : EditModelBaseCore
     where TSelf : EditModelBaseCore<TSelf>
 {
     /// <summary>Returns the next element after this one in its owning collection (null if not owned or at the end).</summary>
@@ -2797,10 +2811,10 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
     {
         var changed = false;
 
+        _rangeOperationDepth++;
+
         try
         {
-            _rangeOperationDepth++;
-
             foreach (var item in items)
             {
                 Add(item);
@@ -2824,10 +2838,10 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
     {
         var changed = false;
 
+        _rangeOperationDepth++;
+
         try
         {
-            _rangeOperationDepth++;
-
             foreach (var item in items)
             {
                 Insert(index++, item);
@@ -2851,10 +2865,10 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
     {
         var changed = Count > 0;
 
+        _rangeOperationDepth++;
+
         try
         {
-            _rangeOperationDepth++;
-
             while (Count > 0)
             {
                 RemoveAt(0);
@@ -2893,10 +2907,10 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
 
         var changed = count > 0;
 
+        _rangeOperationDepth++;
+
         try
         {
-            _rangeOperationDepth++;
-
             for (var i = 0; i < count; i++)
             {
                 RemoveAt(index);
@@ -2970,7 +2984,7 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
 /// (<see cref="CompleteLoad"/>), and the two post-creation hooks. Everything that composes them - the order of the load,
 /// the loading state it runs under, creation from an edit model, collection conversion - is written once here.
 /// </remarks>
-public abstract partial class MapperBaseCore<TEntity, TEditModel>
+public abstract class MapperBaseCore<TEntity, TEditModel>
     where TEntity : EntityBaseCore, new()
     where TEditModel : EditModelBaseCore, new()
 {
@@ -4369,7 +4383,7 @@ public static class UniquenessChecker
 /// this surface (plus the named queries) is additionally generated, and I{Entity}Repository inherits it.
 /// </para>
 /// </remarks>
-public partial interface IRemoteRepositoryCore<TEntity, TKey>
+public interface IRemoteRepositoryCore<TEntity, TKey>
     where TEntity : EntityBaseCore, new()
 {
     /// <summary>Gets a single entity by primary key (null when not found).</summary>
@@ -4459,7 +4473,7 @@ public partial interface IRemoteRepositoryCore<TEntity, TKey>
 /// members that assume local execution (a direct DB connection): expression-tree queries, raw SQL, and bulk insert.
 /// I{Entity}Repository always provides this full-featured surface.
 /// </remarks>
-public partial interface IRepositoryCore<TEntity, TKey> : IRemoteRepositoryCore<TEntity, TKey>
+public interface IRepositoryCore<TEntity, TKey> : IRemoteRepositoryCore<TEntity, TKey>
     where TEntity : EntityBaseCore, new()
 {
     /// <summary>Bulk inserts a collection of entities.</summary>
@@ -5550,7 +5564,7 @@ public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory)
 }
 
 /// <summary>Repository base class for SQLite that implements CRUD using metadata.</summary>
-public abstract partial class SqliteRepositoryCore<TEntity, TKey>(
+public abstract class SqliteRepositoryCore<TEntity, TKey>(
     ISqlConnectionFactory connectionFactory,
     ISaveHookRegistry? saveHooks = null,
     ISqlExecutor? sqlExecutor = null
@@ -8104,16 +8118,26 @@ internal static class SqlExpressionTranslator
         return expression;
     }
 
-    /// <summary>Whether the member is a property reference on the lambda parameter (i.e. a column). A navigation property is not a column and is rejected outright.</summary>
+    /// <summary>Whether the member is a property reference on the lambda parameter (i.e. a column). A navigation property, and a property without a [Column] mapping, are not columns and are rejected outright.</summary>
     /// <remarks>
     /// A navigation carries no column of its own, so treating one as a column would emit its property name as a column
     /// name and produce SQL the database rejects (<c>x.Parent == null</c> became <c>[Parent] IS NULL</c>). The in-memory
     /// store and EF Core both translate such a predicate happily, which made this the one place where the three backends
     /// disagreed. Failing here states the limitation instead, and the fix is always the same: filter on the foreign-key column.
+    /// On a type that uses <c>[Column]</c> mapping (a generated entity), a property without the mapping — one added
+    /// through an extension partial, or base-class state such as RowState — is refused for the same reason: it has no
+    /// column behind it, so the only translations available are wrong ones. A type with no <c>[Column]</c> at all
+    /// (a hand-written query type) keeps the name-as-column-name convention the raw-SQL mapping uses.
     /// </remarks>
     private static bool IsColumn(MemberExpression member)
     {
-        if (member is not { Expression: ParameterExpression, Member: PropertyInfo property })
+        if (
+            member is not
+            {
+                Expression: ParameterExpression parameter,
+                Member: PropertyInfo property
+            }
+        )
         {
             return false;
         }
@@ -8123,6 +8147,14 @@ internal static class SqlExpressionTranslator
             throw new NotSupportedException(
                 $"'{property.DeclaringType?.Name}.{property.Name}' is a navigation property and cannot be translated to SQL; "
                     + "filter on the foreign-key column instead."
+            );
+        }
+
+        if (!IsMappedColumn(property) && TypeUsesColumnMapping(parameter.Type))
+        {
+            throw new NotSupportedException(
+                $"'{property.DeclaringType?.Name}.{property.Name}' has no [Column] mapping and cannot be translated to SQL; "
+                    + "map it with [Column(\"...\")] or evaluate it outside the query."
             );
         }
 
@@ -8137,6 +8169,30 @@ internal static class SqlExpressionTranslator
         _navigationCache.GetOrAdd(
             property,
             static p => p.GetCustomAttribute<NavigationReferenceAttribute>() is not null
+        );
+
+    /// <summary>Caches the [Column] lookup per property (the same allow-list the save metadata uses: a property is a column exactly when it carries the mapping).</summary>
+    private static readonly ConcurrentDictionary<PropertyInfo, bool> _mappedColumnCache = new();
+
+    /// <summary>Whether the property carries the <c>[Column]</c> mapping that makes it a translatable column.</summary>
+    private static bool IsMappedColumn(PropertyInfo property) =>
+        _mappedColumnCache.GetOrAdd(
+            property,
+            static p => p.GetCustomAttribute<ColumnAttribute>() is not null
+        );
+
+    /// <summary>Caches, per queried type, whether it participates in [Column] mapping at all. A type with no mapped property keeps the name-as-column-name convention for hand-written query types.</summary>
+    private static readonly ConcurrentDictionary<Type, bool> _columnMappedTypeCache = new();
+
+    /// <summary>Whether the queried type declares at least one <c>[Column]</c>-mapped property (making unmapped properties non-columns on it).</summary>
+    private static bool TypeUsesColumnMapping(Type type) =>
+        _columnMappedTypeCache.GetOrAdd(
+            type,
+            static t =>
+                Array.Exists(
+                    t.GetProperties(BindingFlags.Public | BindingFlags.Instance),
+                    property => property.GetCustomAttribute<ColumnAttribute>() is not null
+                )
         );
 
     /// <summary>Caches member-to-bracketed-column-name resolution per type member (avoiding [Column] reflection for every column reference).</summary>
@@ -8892,7 +8948,7 @@ public static class RemoteEntityGraph
 /// body.
 /// </para>
 /// </remarks>
-public abstract partial class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositoryCore<TEntity, TKey>
+public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositoryCore<TEntity, TKey>
     where TEntity : EntityBaseCore, new()
 {
     private readonly HttpClient _httpClient;
@@ -9702,12 +9758,15 @@ internal sealed class EntitySaveMetadata
         var allProperties = entityType
             .GetProperties(BindingFlags.Public | BindingFlags.Instance)
             .ToList();
+        // A property is a column only when it carries [Column], which the generator puts on every column property.
+        // Anything else a partial declaration adds - navigations, RowState, and members added to the extension surface -
+        // is therefore never part of a SQL statement. A handwritten property opts in by carrying [Column] with the name
+        // of a real column
         var columns = allProperties
             .Where(property =>
                 property.CanRead
                 && property.CanWrite
-                && property.DeclaringType != typeof(EntityBaseCore)
-                && property.GetCustomAttribute<NavigationReferenceAttribute>() is null
+                && property.GetCustomAttribute<ColumnAttribute>() is not null
             )
             .ToList();
         var keyProperties = columns
@@ -11379,6 +11438,7 @@ public static class SqlQueryExtensions
 }
 
 /// <summary>Base of every generated HTTP client repository, and the extension point for them. Members added to a partial declaration of this class are available to every entity client.</summary>
+/// <remarks>The HTTP change source the sync engine uses is not one of them: it lives in the fixed runtime, which cannot name a generated type, so it derives from <see cref="HttpRemoteRepositoryCore{TEntity, TKey}"/> directly and members added here do not reach it.</remarks>
 /// <typeparam name="TEntity">The entity type.</typeparam>
 /// <typeparam name="TKey">The primary key type.</typeparam>
 public abstract partial class HttpRemoteRepository<TEntity, TKey>
@@ -13448,7 +13508,7 @@ internal static class InMemoryCascade
 /// Raw SQL operations (QueryBySql/ExecuteSql/ExecuteScalarSql) cannot run in memory and throw <see cref="NotSupportedException"/>.
 /// </para>
 /// </remarks>
-public abstract partial class InMemoryRepositoryCore<TEntity, TKey>(
+public abstract class InMemoryRepositoryCore<TEntity, TKey>(
     InMemoryDataStore store,
     ISaveHookRegistry? saveHooks = null
 ) : IRepositoryCore<TEntity, TKey>
@@ -14823,7 +14883,7 @@ internal sealed class EfCoreSqlQueryExecutor<TEntity, TContext>(
 /// <typeparam name="TEntity">The target entity type.</typeparam>
 /// <typeparam name="TKey">The primary key type.</typeparam>
 /// <typeparam name="TContext">The concrete type of the DbContext that performs CRUD.</typeparam>
-public abstract partial class EfCoreRepositoryCore<TEntity, TKey, TContext>(
+public abstract class EfCoreRepositoryCore<TEntity, TKey, TContext>(
     IDbContextFactory<TContext> contextFactory,
     ISaveHookRegistry? saveHooks = null,
     ISqlExecutor? sqlExecutor = null

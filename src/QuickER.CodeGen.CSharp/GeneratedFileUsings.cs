@@ -192,6 +192,8 @@ internal static class GeneratedFileUsings
             //   EditModelBaseCore: INotifyPropertyChanged/INotifyDataErrorInfo（System.ComponentModel）、
             //     EditModelCollection の ObservableCollection（System.Collections.ObjectModel）、GetErrors（System.Collections）
             //   SqlColumnType 属性: SqlDbType（System.Data）
+            //   EntityBaseCore の列判定は [Column]（DataAnnotations.Schema）を許可リストとして読むため、
+            //     DataAnnotations の出し分けに依らず .Schema を常時要求する
             case GenerationBucket.Runtime:
                 yield return "System";
                 yield return "System.Collections";
@@ -199,6 +201,7 @@ internal static class GeneratedFileUsings
                 yield return "System.Collections.Generic";
                 yield return "System.Collections.ObjectModel";
                 yield return "System.ComponentModel";
+                yield return "System.ComponentModel.DataAnnotations.Schema";
                 yield return "System.Data";
                 yield return "System.Linq";
                 yield return "System.Reflection";
@@ -228,19 +231,21 @@ internal static class GeneratedFileUsings
                 yield return "System.Collections.Generic";
                 break;
 
-            // Entity: [Table]/[Key]/[Column]/[Required]/[MaxLength]（DataAnnotations(.Schema)）、
+            // Entity: [Column]（DataAnnotations.Schema）は永続化の構造マッピングとして常時出力するため無条件。
+            //   [Table] も .Schema だが IncludeDataAnnotations 側にあり、[Key]/[Required]/[MaxLength]（DataAnnotations）と
+            //   ともに文書・検証系として出し分ける。
             //   [SqlColumnType] の SqlDbType（System.Data）、親参照ナビの [JsonIgnore]（System.Text.Json.Serialization）、
             //   ICollection<T>（System.Collections.Generic）
             case GenerationBucket.Entity:
                 yield return "System";
                 yield return "System.Collections.Generic";
+                yield return "System.ComponentModel.DataAnnotations.Schema";
                 yield return "System.Data";
                 yield return "System.Text.Json.Serialization";
 
                 if (options.IncludeDataAnnotations)
                 {
                     yield return "System.ComponentModel.DataAnnotations";
-                    yield return "System.ComponentModel.DataAnnotations.Schema";
                 }
 
                 break;
@@ -302,10 +307,12 @@ internal static class GeneratedFileUsings
                     yield return "Microsoft.Extensions.DependencyInjection";
                 }
 
+                // EntitySaveMetadata の列判定は [Column]（DataAnnotations.Schema）を許可リストとして読むため常時要求する
+                yield return "System.ComponentModel.DataAnnotations.Schema";
+
                 if (options.IncludeDataAnnotations)
                 {
                     yield return "System.ComponentModel.DataAnnotations";
-                    yield return "System.ComponentModel.DataAnnotations.Schema";
                 }
 
                 // QuickER 版 Repository 実装（SqlExecutor / 方言別 Repository 基底 / 接続ファクトリ / AddGenerated{方言}Repositories）:
@@ -410,10 +417,12 @@ internal static class GeneratedFileUsings
                 yield return "Microsoft.Extensions.DependencyInjection";
                 yield return "Microsoft.Extensions.DependencyInjection.Extensions";
 
+                // EntitySaveMetadata の列判定は [Column]（DataAnnotations.Schema）を許可リストとして読むため常時要求する
+                yield return "System.ComponentModel.DataAnnotations.Schema";
+
                 if (options.IncludeDataAnnotations)
                 {
                     yield return "System.ComponentModel.DataAnnotations";
-                    yield return "System.ComponentModel.DataAnnotations.Schema";
                 }
 
                 break;
@@ -440,10 +449,12 @@ internal static class GeneratedFileUsings
                 // AddGeneratedInMemoryRepositories の Save フックレジストリ既定登録（TryAddScoped）が Extensions 名前空間を使う
                 yield return "Microsoft.Extensions.DependencyInjection.Extensions";
 
+                // EntitySaveMetadata の列判定は [Column]（DataAnnotations.Schema）を許可リストとして読むため常時要求する
+                yield return "System.ComponentModel.DataAnnotations.Schema";
+
                 if (options.IncludeDataAnnotations)
                 {
                     yield return "System.ComponentModel.DataAnnotations";
-                    yield return "System.ComponentModel.DataAnnotations.Schema";
                 }
 
                 break;

@@ -68,7 +68,7 @@ public class CSharpCodeGenerationServiceTests
             .Be(2);
         result.Files[0].Content.Should().Contain("public partial class CustomerEntity");
         result.Files[0].Content.Should().Contain("public partial class CustomerEditModel");
-        result.Files[0].Content.Should().Contain("public abstract partial class EditModelBaseCore");
+        result.Files[0].Content.Should().Contain("public abstract class EditModelBaseCore");
         result.Files[0].Content.Should().Contain("[Table(\"customers\")]");
         result.Files[0].Content.Should().Contain("[Key]");
         result.Files[0].Content.Should().Contain("[MaxLength(100)]");
@@ -186,7 +186,7 @@ public class CSharpCodeGenerationServiceTests
             .Files[0]
             .Content.Should()
             .Contain("public partial class CustomerEntity : EntityBase");
-        result.Files[0].Content.Should().Contain("public abstract partial class EntityBaseCore");
+        result.Files[0].Content.Should().Contain("public abstract class EntityBaseCore");
         // EntityBase は値比較・値ハッシュ・JSON 出力を提供する（値系はメタデータではなく自己完結の列プロパティ走査）
         result
             .Files[0]
@@ -220,7 +220,7 @@ public class CSharpCodeGenerationServiceTests
 
         var content = result.Files[0].Content;
         // EditModel も RowState を保持し、確定値変更時に Updated へ昇格する
-        content.Should().Contain("public abstract partial class EditModelBaseCore");
+        content.Should().Contain("public abstract class EditModelBaseCore");
         content.Should().Contain("public RowState RowState");
         content.Should().Contain("public void MarkAdded() => RowState = RowState.Added;");
         content.Should().Contain("public void MarkRemoved() => RowState = RowState.Removed;");
@@ -903,7 +903,7 @@ public class CSharpCodeGenerationServiceTests
         // 型付き版は per-type でなく CRTP 層（EditModelBase<TSelf>）が 1 回だけ提供し、具象は TSelf を束縛して継承する
         content
             .Should()
-            .Contain("public abstract partial class EditModelBaseCore<TSelf> : EditModelBaseCore");
+            .Contain("public abstract class EditModelBaseCore<TSelf> : EditModelBaseCore");
         content.Should().Contain("public new TSelf? GetNext() => (TSelf?)base.GetNext();");
         content.Should().Contain("public new TSelf? GetPrevious() => (TSelf?)base.GetPrevious();");
         content.Should().Contain(": EditModelBase<OrderEditModel>");
@@ -1809,7 +1809,7 @@ public class CSharpCodeGenerationServiceTests
         var content = result.Files[0].Content;
         // 状態管理
         content.Should().Contain("public enum RowState");
-        content.Should().Contain("public abstract partial class EntityBaseCore");
+        content.Should().Contain("public abstract class EntityBaseCore");
         content.Should().Contain("public RowState RowState { get; set; } = RowState.Unchanged;");
         content.Should().Contain("public void MarkAdded() => RowState = RowState.Added;");
         content.Should().Contain("public void MarkRemoved() => RowState = RowState.Removed;");
@@ -4004,6 +4004,43 @@ public class CSharpCodeGenerationServiceTests
             ],
         };
 
+    /// <summary>
+    /// <c>[Column]</c> は永続化の構造マッピングとして <c>IncludeDataAnnotations</c> に依らず全列へ出力し、
+    /// 文書・検証系（<c>[Table]</c> / <c>[Key]</c> / <c>[Required]</c> / <c>[MaxLength]</c>）だけがオプションで出し分けられることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 生成ランタイムの列判定（<c>EntityBaseCore</c> の値プロパティと <c>EntitySaveMetadata</c> の列集合）は
+    /// <c>[Column]</c> を許可リストとして読む。付与をオプションに委ねると、拡張面や具象 partial へ足した
+    /// プロパティと生成列を区別する手段が無くなる。
+    /// </remarks>
+    [Fact]
+    public void Generate_NoAnnotations_ShouldStillEmitColumnAttributeOnEveryColumn()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            ValueObjectDiagram(),
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Sample.Domain",
+                GenerateRepositories = false,
+                IncludeDataAnnotations = false,
+            }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files[0].Content;
+
+        // 列は 1 つ残らず [Column] を伴う
+        content.Should().Contain("[Column(\"customer_id\")]");
+        content.Should().Contain("[Column(\"name\")]");
+        content.Should().Contain("System.ComponentModel.DataAnnotations.Schema");
+
+        // 文書・検証系はオプションどおり消える
+        content.Should().NotContain("[Table(");
+        content.Should().NotContain("[Key]");
+        content.Should().NotContain("[Required]");
+        content.Should().NotContain("[MaxLength(");
+    }
+
     /// <summary>VO 生成 OFF（既定）では値オブジェクトの基底・インターフェースが一切出力されないことを検証する</summary>
     [Fact]
     public void Generate_ValueObjects_Disabled_ShouldNotEmitValueObjectTypes()
@@ -4038,9 +4075,7 @@ public class CSharpCodeGenerationServiceTests
         result.HasErrors.Should().BeFalse();
         var content = result.Files[0].Content;
         // 基底・インターフェース・例外・JSON 変換器
-        content
-            .Should()
-            .Contain("public abstract partial class ValueObjectBaseCore<TSelf, TValue>");
+        content.Should().Contain("public abstract class ValueObjectBaseCore<TSelf, TValue>");
         content
             .Should()
             .Contain("public abstract partial class ValueObjectOrderedBase<TSelf, TValue>");
@@ -4519,16 +4554,12 @@ public class CSharpCodeGenerationServiceTests
             .Contain("namespace Sample.Domain.ValueObjects;");
 
         // 共有基盤は Runtime ファイルに集約され、Entity ファイルには基底定義が出ない
-        Content(result, "Runtime.g.cs")
-            .Should()
-            .Contain("public abstract partial class EntityBaseCore");
-        Content(result, "Runtime.g.cs")
-            .Should()
-            .Contain("public abstract partial class EditModelBaseCore");
+        Content(result, "Runtime.g.cs").Should().Contain("public abstract class EntityBaseCore");
+        Content(result, "Runtime.g.cs").Should().Contain("public abstract class EditModelBaseCore");
         Content(result, "Entities.g.cs").Should().Contain("public partial class CustomerEntity");
         Content(result, "Entities.g.cs")
             .Should()
-            .NotContain("public abstract partial class EntityBaseCore");
+            .NotContain("public abstract class EntityBaseCore");
 
         // クロス参照 using が付与される（Entity→Runtime、Mapper→Entity/EditModel）
         Content(result, "Entities.g.cs").Should().Contain("using Sample.Domain.Runtime;");
@@ -4942,7 +4973,7 @@ public class CSharpCodeGenerationServiceTests
             .Contain("public static IServiceCollection AddGeneratedEfCoreRepositories(");
         // QuickER の SQL Server 実装は出力されない
         content.Should().NotContain("public sealed partial class SqlExecutor(");
-        content.Should().NotContain("public abstract partial class SqlServerRepositoryCore<");
+        content.Should().NotContain("public abstract class SqlServerRepositoryCore<");
         content
             .Should()
             .NotContain("public static IServiceCollection AddGeneratedSqlServerRepositories(");
@@ -5054,9 +5085,7 @@ public class CSharpCodeGenerationServiceTests
         // IDbContextFactory<TContext> を受け取る
         content
             .Should()
-            .Contain(
-                "public abstract partial class EfCoreRepositoryCore<TEntity, TKey, TContext>("
-            );
+            .Contain("public abstract class EfCoreRepositoryCore<TEntity, TKey, TContext>(");
         content.Should().Contain("IDbContextFactory<TContext> contextFactory");
         content.Should().Contain(") : IRepositoryCore<TEntity, TKey>");
         content.Should().Contain("where TContext : DbContext");
@@ -5408,7 +5437,7 @@ public class CSharpCodeGenerationServiceTests
 
         // 固定 infra はパッケージが持つ（生成側には出ない）
         content.Should().NotContain("class InMemoryDataStore");
-        content.Should().NotContain("abstract partial class EntityBaseCore");
+        content.Should().NotContain("abstract class EntityBaseCore");
         // スキーマ依存物（per-entity 実装・DI 登録）は生成側に残り、パッケージを using で参照する
         content.Should().Contain($"using {RuntimePackages.InMemory};");
         content.Should().Contain("AddGeneratedInMemoryRepositories");

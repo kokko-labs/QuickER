@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations.Schema;
 using System.Linq.Expressions;
 using AwesomeAssertions;
 using Xunit;
@@ -25,12 +26,16 @@ namespace QuickER.Tests.GeneratedFixture;
 /// </remarks>
 public sealed class SqlExpressionTranslatorStringMatchTests
 {
-    /// <summary>列判定用のプローブ。プロパティ名がそのまま列名として使われる（[Column] 属性なし）。</summary>
+    /// <summary>列判定用のプローブ。列は [Column] を持つプロパティだけ（許可リスト）で、Extra は列でない側のアーム。</summary>
     private sealed class Probe
     {
+        [Column("Name")]
         public NameValue? Name { get; set; }
 
+        [Column("Code")]
         public ProbeCodeValue? Code { get; set; }
+
+        public string? Extra { get; set; }
     }
 
     [Fact(
@@ -55,6 +60,18 @@ public sealed class SqlExpressionTranslatorStringMatchTests
         var act = () => Run(p => p.Code!.Contains("Ali"));
 
         act.Should().Throw<NotSupportedException>();
+    }
+
+    [Fact(
+        DisplayName = "[Column] を持たないプロパティは列として翻訳せず NotSupportedException で明示失敗する"
+    )]
+    public void PropertyWithoutColumnMapping_IsRefused()
+    {
+        // 拡張 partial で足したプロパティや基底の状態（RowState 等）は実在する列を持たない。
+        // 黙って実在しない列名を SQL へ出す（InMemory 緑・実 DB 赤の非対称）代わりに、翻訳段階で名指しで失敗する
+        var act = () => Run(p => p.Extra == "x");
+
+        act.Should().Throw<NotSupportedException>().WithMessage("*[Column]*");
     }
 
     /// <summary>SQL Server 方言のトランスレータで述語本体を条件へ変換する</summary>
