@@ -961,18 +961,18 @@ public static class UniquenessChecker
 /// <remarks>
 /// <para>
 /// Holds only CRUD and save operations for single entities and entity graphs; it excludes members that take arguments
-/// that cannot be carried out of process, such as expression trees (<see cref="IRepository{TEntity, TKey}.Query"/>) or
+/// that cannot be carried out of process, such as expression trees (<see cref="IRepositoryCore{TEntity, TKey}.Query"/>) or
 /// raw SQL. Because every member's arguments and return values are pure data (entities, primary keys, counts), code that
 /// depends only on this surface stays compile-time safe even if the implementation is later swapped for a remote
 /// implementation (over a web service).
 /// </para>
 /// <para>
-/// <see cref="IRepository{TEntity, TKey}"/> inherits this interface and provides all of its methods, so existing consuming
+/// <see cref="IRepositoryCore{TEntity, TKey}"/> inherits this interface and provides all of its methods, so existing consuming
 /// code is unchanged. With remote contract generation (GenerateRemoteContracts), an I{Entity}RemoteRepository that has only
 /// this surface (plus the named queries) is additionally generated, and I{Entity}Repository inherits it.
 /// </para>
 /// </remarks>
-public partial interface IRemoteRepository<TEntity, TKey>
+public partial interface IRemoteRepositoryCore<TEntity, TKey>
     where TEntity : EntityBaseCore, new()
 {
     /// <summary>Gets a single entity by primary key (null when not found).</summary>
@@ -1058,11 +1058,11 @@ public partial interface IRemoteRepository<TEntity, TKey>
 
 /// <summary>Common repository interface that provides CRUD operations for entities.</summary>
 /// <remarks>
-/// The full-featured surface that, in addition to the remote surface (<see cref="IRemoteRepository{TEntity, TKey}"/>), adds
+/// The full-featured surface that, in addition to the remote surface (<see cref="IRemoteRepositoryCore{TEntity, TKey}"/>), adds
 /// members that assume local execution (a direct DB connection): expression-tree queries, raw SQL, and bulk insert.
 /// I{Entity}Repository always provides this full-featured surface.
 /// </remarks>
-public partial interface IRepository<TEntity, TKey> : IRemoteRepository<TEntity, TKey>
+public partial interface IRepositoryCore<TEntity, TKey> : IRemoteRepositoryCore<TEntity, TKey>
     where TEntity : EntityBaseCore, new()
 {
     /// <summary>Bulk inserts a collection of entities.</summary>
@@ -1157,7 +1157,7 @@ public partial interface IRepository<TEntity, TKey> : IRemoteRepository<TEntity,
 /// <summary>A raw SQL executor not bound to a specific entity (executes arbitrary SQL and maps to entities, projection DTOs, or single values).</summary>
 /// <remarks>
 /// <para>
-/// Unlike the raw SQL methods on <see cref="IRepository{TEntity, TKey}"/>, the caller specifies the type via a type argument,
+/// Unlike the raw SQL methods on <see cref="IRepositoryCore{TEntity, TKey}"/>, the caller specifies the type via a type argument,
 /// so cross-entity JOIN and aggregate queries can be projected onto any DTO. The repository's raw SQL methods delegate to
 /// this executor internally.
 /// </para>
@@ -1173,7 +1173,7 @@ public partial interface ISqlExecutor
     /// <remarks>
     /// The SELECT must return all columns of {TEntity} (<c>SELECT *</c> or all columns listed); if any column is missing, a
     /// descriptive exception is thrown. Mapping and the RowState=Unchanged treatment are identical to
-    /// <see cref="IRepository{TEntity, TKey}.QueryBySqlAsync"/>.
+    /// <see cref="IRepositoryCore{TEntity, TKey}.QueryBySqlAsync"/>.
     /// </remarks>
     /// <param name="sql">A SELECT statement that returns all columns.</param>
     /// <param name="parameters">An anonymous object bound to @name parameters (null for no parameters).</param>
@@ -3056,7 +3056,7 @@ public static class RemoteEntityGraph
 }
 
 /// <summary>
-/// Common base class for client implementations that call the remote surface (<see cref="IRemoteRepository{TEntity, TKey}"/>) over HTTP + JSON.
+/// Common base class for client implementations that call the remote surface (<see cref="IRemoteRepositoryCore{TEntity, TKey}"/>) over HTTP + JSON.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -3096,14 +3096,14 @@ public static class RemoteEntityGraph
 /// body.
 /// </para>
 /// </remarks>
-public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepository<TEntity, TKey>
+public abstract partial class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositoryCore<TEntity, TKey>
     where TEntity : EntityBaseCore, new()
 {
     private readonly HttpClient _httpClient;
     private readonly string _entityRoute;
 
     /// <summary>Initializes a new instance with the HTTP client and the entity route (for example "Order").</summary>
-    protected HttpRemoteRepository(HttpClient httpClient, string entityRoute)
+    protected HttpRemoteRepositoryCore(HttpClient httpClient, string entityRoute)
     {
         ArgumentNullException.ThrowIfNull(httpClient);
         ArgumentException.ThrowIfNullOrWhiteSpace(entityRoute);
@@ -3844,6 +3844,20 @@ public static class SaveHookServiceCollectionExtensions
     }
 }
 
+/// <summary>Remote surface every generated repository contract inherits, and the extension point for it. A member with a default implementation added to a partial declaration of this interface is callable through any repository reference, whatever the entity or the backend behind it.</summary>
+/// <typeparam name="TEntity">The entity type.</typeparam>
+/// <typeparam name="TKey">The primary key type.</typeparam>
+public partial interface IRemoteRepository<TEntity, TKey> : IRemoteRepositoryCore<TEntity, TKey>
+    where TEntity : EntityBaseCore, new() { }
+
+/// <summary>Full-featured surface every generated repository contract inherits, and the extension point for it. It inherits the remote surface as well, so a member added there is reachable through this one too.</summary>
+/// <typeparam name="TEntity">The entity type.</typeparam>
+/// <typeparam name="TKey">The primary key type.</typeparam>
+public partial interface IRepository<TEntity, TKey>
+    : IRepositoryCore<TEntity, TKey>,
+        IRemoteRepository<TEntity, TKey>
+    where TEntity : EntityBaseCore, new() { }
+
 /// <summary>Remote surface of the SyncOrderEntity repository (only CRUD, save, and named queries that can cross a network boundary; swappable for a remote implementation later).</summary>
 public partial interface ISyncOrderRemoteRepository : IRemoteRepository<SyncOrderEntity, int>
 {
@@ -3973,6 +3987,18 @@ public static class SqlQueryExtensions
         int id,
         CancellationToken cancellationToken = default
     ) => query.Where(entity => entity.NoteId == id).FirstOrDefaultAsync(cancellationToken);
+}
+
+/// <summary>Base of every generated HTTP client repository, and the extension point for them. Members added to a partial declaration of this class are available to every entity client.</summary>
+/// <typeparam name="TEntity">The entity type.</typeparam>
+/// <typeparam name="TKey">The primary key type.</typeparam>
+public abstract partial class HttpRemoteRepository<TEntity, TKey>
+    : HttpRemoteRepositoryCore<TEntity, TKey>
+    where TEntity : EntityBaseCore, new()
+{
+    /// <summary>Initializes a new instance with the HTTP client and the entity route (for example "Order").</summary>
+    protected HttpRemoteRepository(HttpClient httpClient, string entityRoute)
+        : base(httpClient, entityRoute) { }
 }
 
 /// <summary>HTTP client implementation of the remote surface (ISyncOrderRemoteRepository) for SyncOrderEntity.</summary>
@@ -5218,7 +5244,7 @@ public interface ISyncServerSource<TEntity, TKey>
     /// no more than that is what lets an HTTP client stand here beside a direct repository, which satisfies the narrower
     /// contract as well.
     /// </remarks>
-    IRemoteRepository<TEntity, TKey> Writer { get; }
+    IRemoteRepositoryCore<TEntity, TKey> Writer { get; }
 
     /// <summary>The server's unbounded binary columns, or null when the table has none to copy.</summary>
     /// <remarks>
@@ -5328,7 +5354,7 @@ public abstract class SyncTableBase<TEntity, TKey> : ISyncTable
     where TEntity : EntityBaseCore, new()
 {
     /// <summary>The local repository, reached through the journaling decorator (engine writes suppress the recording).</summary>
-    protected readonly IRepository<TEntity, TKey> _local;
+    protected readonly IRepositoryCore<TEntity, TKey> _local;
 
     /// <summary>The local raw SQL surface (key sets, the derived anchor, the wipe of a refresh).</summary>
     protected readonly ISqlExecutor _localSqlExecutor;
@@ -5344,7 +5370,7 @@ public abstract class SyncTableBase<TEntity, TKey> : ISyncTable
 
     /// <summary>Creates the table with its local repository, the local raw SQL surface, the server source, and its descriptor.</summary>
     protected SyncTableBase(
-        IRepository<TEntity, TKey> local,
+        IRepositoryCore<TEntity, TKey> local,
         ISqlExecutor localSqlExecutor,
         ISyncServerSource<TEntity, TKey> server,
         SyncTableDescriptor<TEntity, TKey> descriptor
@@ -5847,7 +5873,7 @@ public sealed class SyncTable<TEntity, TKey> : SyncTableBase<TEntity, TKey>
 {
     /// <summary>Creates the table with its local repository, the local raw SQL surface, the server source, and its descriptor.</summary>
     public SyncTable(
-        IRepository<TEntity, TKey> local,
+        IRepositoryCore<TEntity, TKey> local,
         ISqlExecutor localSqlExecutor,
         ISyncServerSource<TEntity, TKey> server,
         SyncTableDescriptor<TEntity, TKey> descriptor
@@ -6323,7 +6349,7 @@ public sealed class VersionlessSyncTable<TEntity, TKey> : SyncTableBase<TEntity,
 {
     /// <summary>Creates the table with its local repository, the local raw SQL surface, the server source, and its descriptor.</summary>
     public VersionlessSyncTable(
-        IRepository<TEntity, TKey> local,
+        IRepositoryCore<TEntity, TKey> local,
         ISqlExecutor localSqlExecutor,
         ISyncServerSource<TEntity, TKey> server,
         SyncTableDescriptor<TEntity, TKey> descriptor
@@ -7165,12 +7191,12 @@ public sealed class SyncGraphRecorder
 /// </remarks>
 /// <typeparam name="TEntity">The entity type.</typeparam>
 /// <typeparam name="TKey">The primary key type.</typeparam>
-public abstract class JournalingRepositoryBase<TEntity, TKey> : IRepository<TEntity, TKey>
+public abstract class JournalingRepositoryBase<TEntity, TKey> : IRepositoryCore<TEntity, TKey>
     where TEntity : EntityBaseCore, new()
 {
     /// <summary>Creates the decorator over the repository it wraps, the journal, the table's descriptor, and the graph recorder.</summary>
     protected JournalingRepositoryBase(
-        IRepository<TEntity, TKey> inner,
+        IRepositoryCore<TEntity, TKey> inner,
         SyncJournal journal,
         SyncTableDescriptor<TEntity, TKey> descriptor,
         SyncGraphRecorder graphRecorder
@@ -7185,7 +7211,7 @@ public abstract class JournalingRepositoryBase<TEntity, TKey> : IRepository<TEnt
     }
 
     /// <summary>Gets the wrapped repository every call is forwarded to.</summary>
-    protected IRepository<TEntity, TKey> Inner { get; }
+    protected IRepositoryCore<TEntity, TKey> Inner { get; }
 
     /// <summary>Gets the journal the write intents are recorded to.</summary>
     protected SyncJournal Journal { get; }
@@ -7394,7 +7420,7 @@ public abstract class JournalingRepository<TEntity, TKey> : JournalingRepository
 {
     /// <summary>Creates the decorator over the repository it wraps, the journal, the table's descriptor, and the graph recorder.</summary>
     protected JournalingRepository(
-        IRepository<TEntity, TKey> inner,
+        IRepositoryCore<TEntity, TKey> inner,
         SyncJournal journal,
         SyncTableDescriptor<TEntity, TKey> descriptor,
         SyncGraphRecorder graphRecorder
@@ -7436,7 +7462,7 @@ public abstract class VersionlessJournalingRepository<TEntity, TKey>
 {
     /// <summary>Creates the decorator over the repository it wraps, the journal, the table's descriptor, and the graph recorder.</summary>
     protected VersionlessJournalingRepository(
-        IRepository<TEntity, TKey> inner,
+        IRepositoryCore<TEntity, TKey> inner,
         SyncJournal journal,
         SyncTableDescriptor<TEntity, TKey> descriptor,
         SyncGraphRecorder graphRecorder
@@ -7475,7 +7501,7 @@ public abstract class DirectSyncSourceBase<TEntity, TKey> : ISyncServerSource<TE
     /// <summary>Creates the source over the server's raw SQL surface, the repository local changes replay against, and the table's descriptor.</summary>
     protected DirectSyncSourceBase(
         ISqlExecutor serverSqlExecutor,
-        IRemoteRepository<TEntity, TKey> writer,
+        IRemoteRepositoryCore<TEntity, TKey> writer,
         SyncTableDescriptor<TEntity, TKey> descriptor
     )
     {
@@ -7498,7 +7524,7 @@ public abstract class DirectSyncSourceBase<TEntity, TKey> : ISyncServerSource<TE
     protected SyncTableDescriptor<TEntity, TKey> Descriptor { get; }
 
     /// <inheritdoc />
-    public IRemoteRepository<TEntity, TKey> Writer { get; }
+    public IRemoteRepositoryCore<TEntity, TKey> Writer { get; }
 
     /// <inheritdoc />
     /// <remarks>
@@ -7563,7 +7589,7 @@ public sealed class DirectSyncSource<TEntity, TKey> : DirectSyncSourceBase<TEnti
     /// <summary>Creates the source over the server's raw SQL surface, the repository local changes replay against, and the table's descriptor.</summary>
     public DirectSyncSource(
         ISqlExecutor serverSqlExecutor,
-        IRemoteRepository<TEntity, TKey> writer,
+        IRemoteRepositoryCore<TEntity, TKey> writer,
         SyncTableDescriptor<TEntity, TKey> descriptor
     )
         : base(serverSqlExecutor, writer, descriptor) { }
@@ -7621,7 +7647,7 @@ public sealed class VersionlessDirectSyncSource<TEntity, TKey>
     /// <summary>Creates the source over the server's raw SQL surface, the repository local changes replay against, and the table's descriptor.</summary>
     public VersionlessDirectSyncSource(
         ISqlExecutor serverSqlExecutor,
-        IRemoteRepository<TEntity, TKey> writer,
+        IRemoteRepositoryCore<TEntity, TKey> writer,
         SyncTableDescriptor<TEntity, TKey> descriptor
     )
         : base(serverSqlExecutor, writer, descriptor) { }
@@ -7758,7 +7784,7 @@ public sealed record RemoteSyncPageRequest<TKey>(bool HasAfterKey, TKey? AfterKe
 /// </summary>
 /// <remarks>
 /// <para>
-/// It is an <see cref="HttpRemoteRepository{TEntity, TKey}"/> as well as a source, so <see cref="Writer"/> is the very
+/// It is an <see cref="HttpRemoteRepositoryCore{TEntity, TKey}"/> as well as a source, so <see cref="Writer"/> is the very
 /// same client: the reads and the writes of one pass travel over one connection with one configuration, and every
 /// failure - a conflict restored as <see cref="SaveConflictException"/>, a body that could not be read, a withheld
 /// server message and its correlation id - is classified exactly as it is for any other remote call.
@@ -7777,7 +7803,7 @@ public sealed record RemoteSyncPageRequest<TKey>(bool HasAfterKey, TKey? AfterKe
 /// <typeparam name="TEntity">The entity type.</typeparam>
 /// <typeparam name="TKey">The primary key type.</typeparam>
 public sealed class HttpSyncServerSource<TEntity, TKey>
-    : HttpRemoteRepository<TEntity, TKey>,
+    : HttpRemoteRepositoryCore<TEntity, TKey>,
         ISyncServerSource<TEntity, TKey>,
         ISyncBinaryColumns<TKey>
     where TEntity : EntityBaseCore, new()
@@ -7804,7 +7830,7 @@ public sealed class HttpSyncServerSource<TEntity, TKey>
 
     /// <inheritdoc />
     /// <remarks>The client itself: the same connection, the same configuration, and the same failure classification.</remarks>
-    public IRemoteRepository<TEntity, TKey> Writer => this;
+    public IRemoteRepositoryCore<TEntity, TKey> Writer => this;
 
     /// <inheritdoc />
     /// <remarks>
@@ -8052,7 +8078,7 @@ public sealed class JournalingSyncOrderRepository
     : JournalingRepository<SyncOrderEntity, int>, ISyncOrderRepository
 {
     // The concrete contract's own members (named queries, binary accessors) need the concrete interface, which the
-    // base's IRepository-typed reference cannot provide
+    // base's IRepositoryCore-typed reference cannot provide
     private readonly ISyncOrderRepository _inner;
 
     /// <summary>Creates the decorator over the repository it wraps and the journal it records to.</summary>
@@ -8828,11 +8854,11 @@ public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory)
 }
 
 /// <summary>Repository base class for SQL Server that implements CRUD using metadata.</summary>
-public abstract partial class SqlServerRepository<TEntity, TKey>(
+public abstract partial class SqlServerRepositoryCore<TEntity, TKey>(
     ISqlConnectionFactory connectionFactory,
     ISaveHookRegistry? saveHooks = null,
     ISqlExecutor? sqlExecutor = null
-) : IRepository<TEntity, TKey>
+) : IRepositoryCore<TEntity, TKey>
     where TEntity : EntityBaseCore, new()
 {
     /// <summary>Metadata built exactly once per entity type (reused via a static field).</summary>
@@ -11565,7 +11591,7 @@ internal sealed class EntitySaveMetadata
     {
         // The query executor's TEntity has no new() constraint of its own, so the instance is created through Activator. The
         // parameterless constructor it needs is guaranteed by the contract types the entity has to satisfy to get here
-        // (IRepository<TEntity, TKey> and IRemoteRepository<TEntity, TKey> both require "where TEntity : EntityBaseCore, new()"),
+        // (IRepositoryCore<TEntity, TKey> and IRemoteRepositoryCore<TEntity, TKey> both require "where TEntity : EntityBaseCore, new()"),
         // so a partial declaration that removed the default constructor would fail the build with CS0310 rather than reach
         // this line
         var entity = (TEntity)Activator.CreateInstance(typeof(TEntity))!;
@@ -12696,6 +12722,16 @@ public static class GeneratedSqlServerRepositoryServiceCollectionExtensions
     }
 }
 
+/// <summary>Base of every generated SQL Server repository implementation, and the extension point for them. Members added to a partial declaration of this class are available to every entity repository built on this engine.</summary>
+/// <typeparam name="TEntity">The entity type.</typeparam>
+/// <typeparam name="TKey">The primary key type.</typeparam>
+public abstract partial class SqlServerRepository<TEntity, TKey>(
+    ISqlConnectionFactory connectionFactory,
+    ISaveHookRegistry? saveHooks = null,
+    ISqlExecutor? sqlExecutor = null
+) : SqlServerRepositoryCore<TEntity, TKey>(connectionFactory, saveHooks, sqlExecutor)
+    where TEntity : EntityBaseCore, new() { }
+
 /// <summary>Repository implementation for SyncOrderEntity.</summary>
 public sealed partial class SyncOrderRepository(
     ISqlConnectionFactory connectionFactory,
@@ -12998,11 +13034,11 @@ public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory)
 }
 
 /// <summary>Repository base class for SQLite that implements CRUD using metadata.</summary>
-public abstract partial class SqliteRepository<TEntity, TKey>(
+public abstract partial class SqliteRepositoryCore<TEntity, TKey>(
     ISqlConnectionFactory connectionFactory,
     ISaveHookRegistry? saveHooks = null,
     ISqlExecutor? sqlExecutor = null
-) : IRepository<TEntity, TKey>
+) : IRepositoryCore<TEntity, TKey>
     where TEntity : EntityBaseCore, new()
 {
     /// <summary>Metadata built exactly once per entity type (reused via a static field).</summary>
@@ -15821,7 +15857,7 @@ internal sealed class EntitySaveMetadata
     {
         // The query executor's TEntity has no new() constraint of its own, so the instance is created through Activator. The
         // parameterless constructor it needs is guaranteed by the contract types the entity has to satisfy to get here
-        // (IRepository<TEntity, TKey> and IRemoteRepository<TEntity, TKey> both require "where TEntity : EntityBaseCore, new()"),
+        // (IRepositoryCore<TEntity, TKey> and IRemoteRepositoryCore<TEntity, TKey> both require "where TEntity : EntityBaseCore, new()"),
         // so a partial declaration that removed the default constructor would fail the build with CS0310 rather than reach
         // this line
         var entity = (TEntity)Activator.CreateInstance(typeof(TEntity))!;
@@ -16663,6 +16699,16 @@ public static class GeneratedSqliteRepositoryServiceCollectionExtensions
         return services;
     }
 }
+
+/// <summary>Base of every generated SQLite repository implementation, and the extension point for them. Members added to a partial declaration of this class are available to every entity repository built on this engine.</summary>
+/// <typeparam name="TEntity">The entity type.</typeparam>
+/// <typeparam name="TKey">The primary key type.</typeparam>
+public abstract partial class SqliteRepository<TEntity, TKey>(
+    ISqlConnectionFactory connectionFactory,
+    ISaveHookRegistry? saveHooks = null,
+    ISqlExecutor? sqlExecutor = null
+) : SqliteRepositoryCore<TEntity, TKey>(connectionFactory, saveHooks, sqlExecutor)
+    where TEntity : EntityBaseCore, new() { }
 
 /// <summary>Repository implementation for SyncOrderEntity.</summary>
 public sealed partial class SyncOrderRepository(

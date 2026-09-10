@@ -1745,11 +1745,11 @@ public sealed class EfCoreSqlQueryExecutor<TEntity, TContext>(
 /// <typeparam name="TEntity">The target entity type.</typeparam>
 /// <typeparam name="TKey">The primary key type.</typeparam>
 /// <typeparam name="TContext">The concrete type of the DbContext that performs CRUD.</typeparam>
-public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
+public abstract partial class EfCoreRepositoryCore<TEntity, TKey, TContext>(
     IDbContextFactory<TContext> contextFactory,
     ISaveHookRegistry? saveHooks = null,
     ISqlExecutor? sqlExecutor = null
-) : IRepository<TEntity, TKey>
+) : IRepositoryCore<TEntity, TKey>
     where TEntity : EntityBaseCore, new()
     where TContext : DbContext
 {

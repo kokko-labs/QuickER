@@ -241,7 +241,7 @@ internal sealed class SyncTestServerSource<TEntity, TKey>(
 ) : ISyncServerSource<TEntity, TKey>
     where TEntity : EntityBase, new()
 {
-    public IRemoteRepository<TEntity, TKey> Writer => writer;
+    public IRemoteRepositoryCore<TEntity, TKey> Writer => writer;
 
     /// <summary>サーバー役の除外列アクセサ（除外列を持たないテーブルでは null＝生成された直結実装と同じ形）</summary>
     public ISyncBinaryColumns<TKey>? BinaryColumns => binaryColumns;
@@ -296,7 +296,7 @@ internal sealed class SyncTestVersionlessServerSource<TEntity, TKey>(
 ) : ISyncServerSource<TEntity, TKey>
     where TEntity : EntityBase, new()
 {
-    public IRemoteRepository<TEntity, TKey> Writer => writer;
+    public IRemoteRepositoryCore<TEntity, TKey> Writer => writer;
 
     public Task<byte[]?> GetChangeCeilingAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult<byte[]?>(null);

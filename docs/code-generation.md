@@ -360,10 +360,10 @@ Keys compare ordinally, so the comparison is case-sensitive. QuickER never gener
 
 ## Extending the generated base classes
 
-The base of every generated entity, edit model, and value object comes in **two layers**:
+Every base the generated code inherits or implements — entity, edit model, value object, repository contract, backend implementation, and mapper — comes in **two layers**:
 
 - **`*Core`** — the fixed runtime, which holds the implementation. It is emitted inline by default and ships inside the `QuickER.Runtime*` packages under `--use-runtime-packages`.
-- **the plainly named type** (`EntityBase`, `EditModelBase<TSelf>`, `ValueObjectBase<TSelf, TValue>`, `ValueObjectStringBase<TSelf>`, `IValueObject`, …) — a `partial` that QuickER emits **as source, alongside the per-type code**, in every output mode. This is the surface you extend.
+- **the plainly named type** (`EntityBase`, `EditModelBase<TSelf>`, `ValueObjectBase<TSelf, TValue>`, `ValueObjectStringBase<TSelf>`, `IValueObject`, `IRepository<TEntity, TKey>`, `SqlServerRepository<TEntity, TKey>`, `MapperBase<TEntity, TEditModel>`, …) — a `partial` that QuickER emits **as source, alongside the per-type code**, in every output mode. This is the surface you extend.
 
 ```text
 EntityBaseCore                        runtime
@@ -382,6 +382,21 @@ ValueObjectBaseCore<TSelf, TValue>    runtime
 
 IValueObjectCore                      runtime
 └─ IValueObject                       generated   ← marker every value object implements
+
+IRemoteRepositoryCore<TEntity, TKey>  runtime
+└─ IRemoteRepository<TEntity, TKey>   generated   ← extend here (default implementations only)
+   └─ ICustomerRemoteRepository       generated
+IRepositoryCore<TEntity, TKey>        runtime
+└─ IRepository<TEntity, TKey>         generated   ← extend here (default implementations only)
+   └─ ICustomerRepository             generated
+
+SqlServerRepositoryCore<TEntity, TKey>  runtime
+└─ SqlServerRepository<TEntity, TKey>   generated   ← extend here (one branch per engine)
+   └─ CustomerRepository                generated
+
+MapperBaseCore<TEntity, TEditModel>   runtime
+└─ MapperBase<TEntity, TEditModel>    generated   ← extend here
+   └─ CustomerMapper                  generated
 ```
 
 Because the extension surface is always source, the same `partial` compiles whether the runtime is inlined or referenced as a package: **turning `--use-runtime-packages` on or off never makes you rewrite an extension**. Writing a `partial` against a `*Core` type is the one thing that does not carry over, since those are compiled assembly types in package-reference mode.
@@ -431,7 +446,57 @@ public static class ValueObjectExtensions
 
 To reach one shape only — every string value object, say — put the member on that shape's class instead (`public abstract partial class ValueObjectStringBase<TSelf> { … }`). Those classes are generated as well, and each of them is a `partial` you may extend.
 
+The two surfaces play different roles. **The class root `ValueObjectBase<TSelf, TValue>` is where members normally go**: it is typed, and a variable of a concrete type such as `NameValue` sees it directly. **The `IValueObject` partial suits two things** — a default implementation that individual value objects may override with an explicit implementation, for code that handles value objects through the `IValueObject` type (the `IAuditable` example above is exactly that shape), and making every value object implement an interface you use in a constraint or a DI registration. A default interface implementation is **only callable through a variable of the interface type** (a `NameValue` variable does not see it), so put anything you want to call from the concrete type on the class root.
+
 **The generic contracts `IValueObject<TSelf>` and `IValueObject<TSelf, TValue>` are not extension surfaces**, and neither is `IStringMatchValueObject<TSelf>`. The first two are the static-factory contract; the third is how each engine's query translator recognises the substring match of a string value object. All three live in the runtime: a `partial` written against them is a `partial` against a package type in package-reference mode. Extend the non-generic `IValueObject` marker or the generated classes instead.
+
+### Adding a member to every repository (the contract side)
+
+`IRepository<TEntity, TKey>` is the full-featured surface every generated `I{Entity}Repository` inherits; `IRemoteRepository<TEntity, TKey>` is the remote surface, limited to operations that cross a network boundary. Both are extension surfaces, so a member **with a default implementation** added there is callable through any repository reference you resolve from DI — whatever the entity, and whatever the backend behind it (the QuickER engines, EF Core, in-memory, or the HTTP client).
+
+```csharp
+// Reaches every repository in the diagram.
+public partial interface IRepository<TEntity, TKey>
+{
+    async Task<TEntity> GetRequiredAsync(TKey id, CancellationToken cancellationToken = default) =>
+        await GetByIdAsync(id, cancellationToken).ConfigureAwait(false)
+        ?? throw new InvalidOperationException($"{typeof(TEntity).Name} '{id}' was not found.");
+}
+```
+
+```csharp
+ICustomerRepository customers = provider.GetRequiredService<ICustomerRepository>();
+var customer = await customers.GetRequiredAsync(1);
+```
+
+**Only members that carry a default implementation may be added.** A member without a body breaks every generated repository implementing that interface, because QuickER does not generate an implementation for it.
+
+Default implementations dispatch virtually, so they keep working when a repository is wrapped in a decorator: the `GetByIdAsync` call inside `GetRequiredAsync` above is an interface call on `this` and lands on whatever the decorator supplies.
+
+`IRepository<TEntity, TKey>` also inherits the remote surface `IRemoteRepository<TEntity, TKey>`. A member added to the remote surface is visible through the full-featured one as well, and additionally through code that depends on `I{Entity}RemoteRepository` alone (the HTTP client implementations included). Put members that need expression-tree queries or raw SQL on the full-featured surface, and members that only need CRUD and save on the remote one.
+
+### Adding a member to a backend repository base (the implementation side)
+
+The per-backend repository bases are extension surfaces too: `SqlServerRepository<TEntity, TKey>`, `SqliteRepository<TEntity, TKey>`, `EfCoreRepository<TEntity, TKey, TContext>`, `InMemoryRepository<TEntity, TKey>`, and `HttpRemoteRepository<TEntity, TKey>`. They are **five independent branches with no shared parent**, since their implementations differ all the way down. A member added to one therefore reaches only that engine's repositories, and a solution using several engines adds it once per engine it uses.
+
+What fits here is a `protected` helper shared by the handwritten `partial` of each `{Entity}Repository` — the manual implementations of named queries, say. It removes the duplication without widening the surface callers see.
+
+```csharp
+public abstract partial class SqlServerRepository<TEntity, TKey>
+{
+    /// <summary>Boilerplate the manual query implementations share (called from each {Entity}Repository partial).</summary>
+    protected Task<int?> CountBySqlAsync(string sql, object? parameters = null) =>
+        ExecuteScalarSqlAsync<int?>(sql, parameters);
+}
+```
+
+### Adding a member to every mapper
+
+`MapperBase<TEntity, TEditModel>` is the base of every generated `{Entity}Mapper`, and an extension surface as well. Repeat the type parameter list on your part (`public partial class MapperBase<TEntity, TEditModel>`); constraints may be omitted, because the generated part already declares them.
+
+### Which surfaces have an interface, and which do not
+
+Among the extension surfaces, only the repository contracts (`IRepository` / `IRemoteRepository`) and the value object marker (`IValueObject`) are interfaces. Repositories are reached through an interface to begin with, and value objects need one non-generic type to gather an open generic root (`ValueObjectBase<TSelf, TValue>`) under. Entities, edit models, and mappers are single implementations held as concrete classes, so QuickER declares no interface for them — extend the class `partial` instead.
 
 ## Edit model save workflow
 

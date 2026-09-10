@@ -552,7 +552,7 @@ public static class RemoteEntityGraph
 }
 
 /// <summary>
-/// Common base class for client implementations that call the remote surface (<see cref="IRemoteRepository{TEntity, TKey}"/>) over HTTP + JSON.
+/// Common base class for client implementations that call the remote surface (<see cref="IRemoteRepositoryCore{TEntity, TKey}"/>) over HTTP + JSON.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -596,14 +596,14 @@ public static class RemoteEntityGraph
 /// body.
 /// </para>
 /// </remarks>
-public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepository<TEntity, TKey>
+public abstract partial class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositoryCore<TEntity, TKey>
     where TEntity : EntityBaseCore, new()
 {
     private readonly HttpClient _httpClient;
     private readonly string _entityRoute;
 
     /// <summary>Initializes a new instance with the HTTP client and the entity route (for example "Order").</summary>
-    protected HttpRemoteRepository(HttpClient httpClient, string entityRoute)
+    protected HttpRemoteRepositoryCore(HttpClient httpClient, string entityRoute)
     {
         ArgumentNullException.ThrowIfNull(httpClient);
         ArgumentException.ThrowIfNullOrWhiteSpace(entityRoute);
@@ -2228,7 +2228,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     {
         // The query executor's TEntity has no new() constraint of its own, so the instance is created through Activator. The
         // parameterless constructor it needs is guaranteed by the contract types the entity has to satisfy to get here
-        // (IRepository<TEntity, TKey> and IRemoteRepository<TEntity, TKey> both require "where TEntity : EntityBaseCore, new()"),
+        // (IRepositoryCore<TEntity, TKey> and IRemoteRepositoryCore<TEntity, TKey> both require "where TEntity : EntityBaseCore, new()"),
         // so a partial declaration that removed the default constructor would fail the build with CS0310 rather than reach
         // this line
         var entity = (TEntity)Activator.CreateInstance(typeof(TEntity))!;
@@ -3650,6 +3650,34 @@ public static class Generated{{ dialect_di_suffix }}RepositoryServiceCollectionE
 }
 {{~ end ~}}
 
+{{~ if repository_classes.size > 0 && render_contract && emit_schema_dependent ~}}
+
+/// <summary>Remote surface every generated repository contract inherits, and the extension point for it. A member with a default implementation added to a partial declaration of this interface is callable through any repository reference, whatever the entity or the backend behind it.</summary>
+/// <typeparam name="TEntity">The entity type.</typeparam>
+/// <typeparam name="TKey">The primary key type.</typeparam>
+public partial interface IRemoteRepository<TEntity, TKey> : IRemoteRepositoryCore<TEntity, TKey>
+    where TEntity : EntityBaseCore, new() { }
+
+/// <summary>Full-featured surface every generated repository contract inherits, and the extension point for it. It inherits the remote surface as well, so a member added there is reachable through this one too.</summary>
+/// <typeparam name="TEntity">The entity type.</typeparam>
+/// <typeparam name="TKey">The primary key type.</typeparam>
+public partial interface IRepository<TEntity, TKey>
+    : IRepositoryCore<TEntity, TKey>,
+        IRemoteRepository<TEntity, TKey>
+    where TEntity : EntityBaseCore, new() { }
+{{ end }}
+{{~ if repository_classes.size > 0 && repositories && emit_schema_dependent ~}}
+
+/// <summary>Base of every generated {{ dialect_display_name }} repository implementation, and the extension point for them. Members added to a partial declaration of this class are available to every entity repository built on this engine.</summary>
+/// <typeparam name="TEntity">The entity type.</typeparam>
+/// <typeparam name="TKey">The primary key type.</typeparam>
+public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
+    ISqlConnectionFactory connectionFactory,
+    ISaveHookRegistry? saveHooks = null,
+    ISqlExecutor? sqlExecutor = null
+) : {{ repository_base_class }}Core<TEntity, TKey>(connectionFactory, saveHooks, sqlExecutor)
+    where TEntity : EntityBaseCore, new() { }
+{{ end }}
 {{~ for repository in repository_classes ~}}
 {{~ if render_contract && emit_schema_dependent ~}}
 {{~ if remote_contracts ~}}
@@ -3709,6 +3737,18 @@ public sealed partial class {{ repository.class_name }}(
 {{~ end ~}}
 {{~ end ~}}
 {{~ if remote_services && render_http_client && emit_schema_dependent ~}}
+
+/// <summary>Base of every generated HTTP client repository, and the extension point for them. Members added to a partial declaration of this class are available to every entity client.</summary>
+/// <typeparam name="TEntity">The entity type.</typeparam>
+/// <typeparam name="TKey">The primary key type.</typeparam>
+public abstract partial class HttpRemoteRepository<TEntity, TKey>
+    : HttpRemoteRepositoryCore<TEntity, TKey>
+    where TEntity : EntityBaseCore, new()
+{
+    /// <summary>Initializes a new instance with the HTTP client and the entity route (for example "Order").</summary>
+    protected HttpRemoteRepository(HttpClient httpClient, string entityRoute)
+        : base(httpClient, entityRoute) { }
+}
 {{~ for repository in repository_classes ~}}
 
 /// <summary>HTTP client implementation of the remote surface ({{ repository.remote_interface_name }}) for {{ repository.entity_class_name }}.</summary>

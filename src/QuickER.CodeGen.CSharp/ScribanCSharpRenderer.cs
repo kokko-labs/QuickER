@@ -56,7 +56,7 @@ internal sealed class RenderScope
     /// <remarks>
     /// Http バケットを含むスペックだけが true（非分割は本体スペックに Http バケットが同居し従来位置へ描画・
     /// 分割は Repositories.Http.g.cs のみ）。契約（render_contract）とは別軸＝契約ファイルには HTTP 実装を出さない。
-    /// クライアント固定 infra（HttpRemoteRepository 基底・RemoteJson）は render_contract && emit_shared_infra 側のまま。
+    /// クライアント固定 infra（HttpRemoteRepositoryCore 基底・RemoteJson）は render_contract && emit_shared_infra 側のまま。
     /// </remarks>
     public bool RenderHttpClient { get; init; }
 
@@ -375,12 +375,12 @@ internal sealed class ScribanCSharpRenderer
             ["repositories"] = scope.RepositoryImpl,
             // リモート操作用インターフェイス（I{Entity}RemoteRepository）を追加生成するか。OFF（既定）では
             // per-entity 契約・DI の出力は従来と同一。ON は純粋に追加的で、リモート面と転送 DI 登録が増えるだけ
-            // （I{Entity}Repository は全機能面のまま）。固定 infra の基底分割（IRemoteRepository）は常時出力する（非破壊）。
+            // （I{Entity}Repository は全機能面のまま）。固定 infra の基底分割（IRemoteRepositoryCore）は常時出力する（非破壊）。
             // リモートサービス生成（remote_services）はリモート面を前提とするため自動的に含意する。
             ["remote_contracts"] =
                 options.GenerateRemoteContracts || options.GenerateRemoteServices,
             // リモート面の HTTP クライアント／サーバー実装を生成するか。クライアント固定 infra（RemoteJson・
-            // RemoteRepositoryException・HttpRemoteRepository 等）と per-entity クライアント・DI 登録の出力を制御する。
+            // RemoteRepositoryException・HttpRemoteRepositoryCore 等）と per-entity クライアント・DI 登録の出力を制御する。
             ["remote_services"] = options.GenerateRemoteServices,
             // このスペックがサーバー実装ファイル（{ベース名}.RemoteServer.g.cs）かどうか。
             ["render_remote_server"] = scope.RemoteServer,
@@ -580,7 +580,11 @@ internal sealed class RepositoryDialectVariables
     /// <summary>接続ファクトリ実装クラス名（SQL Server: <c>SqlConnectionFactory</c>）</summary>
     public string ConnectionFactoryImplType { get; }
 
-    /// <summary>Repository 基底クラス名（SQL Server: <c>SqlServerRepository</c>、SQLite: <c>SqliteRepository</c>）</summary>
+    /// <summary>
+    /// Repository 基底クラス名（SQL Server: <c>SqlServerRepository</c>、SQLite: <c>SqliteRepository</c>）。
+    /// 拡張シム層の現行名（＝利用者が partial を書く面）で、実装の置き場である固定ランタイム側の型名は
+    /// テンプレートがこの値へ <c>Core</c> を連結して組み立てる
+    /// </summary>
     public string RepositoryBaseClass { get; }
 
     /// <summary>SqlQuery の ADO 実行器クラス名（SQL Server: <c>SqlServerSqlQueryExecutor</c>、SQLite: <c>SqliteSqlQueryExecutor</c>）</summary>

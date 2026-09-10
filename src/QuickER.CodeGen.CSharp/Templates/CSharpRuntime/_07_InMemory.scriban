@@ -1828,10 +1828,10 @@ public sealed class InMemoryDataStore
 /// Raw SQL operations (QueryBySql/ExecuteSql/ExecuteScalarSql) cannot run in memory and throw <see cref="NotSupportedException"/>.
 /// </para>
 /// </remarks>
-public abstract partial class InMemoryRepository<TEntity, TKey>(
+public abstract partial class InMemoryRepositoryCore<TEntity, TKey>(
     InMemoryDataStore store,
     ISaveHookRegistry? saveHooks = null
-) : IRepository<TEntity, TKey>
+) : IRepositoryCore<TEntity, TKey>
     where TEntity : EntityBaseCore, new()
 {
     /// <summary>The data store holding the snapshots (shared via DI).</summary>
@@ -2424,6 +2424,15 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
 {{~ end ~}}
 {{~ if in_memory && emit_schema_dependent ~}}
 
+
+/// <summary>Base of every generated in-memory repository, and the extension point for them. Members added to a partial declaration of this class are available to every entity repository on the in-memory engine.</summary>
+/// <typeparam name="TEntity">The entity type.</typeparam>
+/// <typeparam name="TKey">The primary key type.</typeparam>
+public abstract partial class InMemoryRepository<TEntity, TKey>(
+    InMemoryDataStore store,
+    ISaveHookRegistry? saveHooks = null
+) : InMemoryRepositoryCore<TEntity, TKey>(store, saveHooks)
+    where TEntity : EntityBaseCore, new() { }
 {{~ for repository in repository_classes ~}}
 {{~ inmemory_impl_members = join_members repository.query_shared_impl_block repository.uniqueness_binding_block ~}}
 {{~ inmemory_impl_members = join_members inmemory_impl_members repository.binary_stream_thin_impl_block ~}}

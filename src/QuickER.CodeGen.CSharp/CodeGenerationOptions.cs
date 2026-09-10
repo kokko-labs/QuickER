@@ -27,7 +27,7 @@ public sealed record CodeGenerationOptions
 
     /// <summary>QuickER の SQL Server 実装（<c>Microsoft.Data.SqlClient</c> 依存）の Repository クラス群を生成するかどうか（既定 false）</summary>
     /// <remarks>
-    /// SqlServerRepository 基底・各エンティティ実装・接続ファクトリ・SqlExecutor・SqlExpressionTranslator・
+    /// SqlServerRepositoryCore 基底・各エンティティ実装・接続ファクトリ・SqlExecutor・SqlExpressionTranslator・
     /// エンジン別 DI 拡張 <c>AddGenerated{方言}Repositories</c> を生成する。共通契約（インターフェイス・SqlQuery・メタデータ等）は
     /// <see cref="GenerateEfCoreRepositories"/> と共有し、どちらか一方が ON なら生成される。
     /// 既定では DB アクセスコードを生成しない（GUI の DB アクセス「なし」と同じ既定）
@@ -126,7 +126,7 @@ public sealed record CodeGenerationOptions
     /// <remarks>
     /// <para>
     /// <c>true</c> のとき、ネットワーク境界を越えられる操作（CRUD・保存・名前付きクエリ）だけを持つ
-    /// <c>I{Entity}RemoteRepository</c>（<see cref="IRemoteRepository{TEntity, TKey}"/> 相当の基底を継承）を追加生成し、
+    /// <c>I{Entity}RemoteRepository</c>（<c>IRemoteRepository&lt;TEntity, TKey&gt;</c> 相当の基底を継承）を追加生成し、
     /// 既存の <c>I{Entity}Repository</c> はそれを継承する全機能面（<c>Query()</c>・生 SQL・一括追加も持つ）になる。
     /// 純粋に追加的な変更のため、ON にしても既存の利用コードは一切壊れない。
     /// </para>

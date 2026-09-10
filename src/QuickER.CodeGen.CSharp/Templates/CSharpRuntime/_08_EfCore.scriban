@@ -1047,7 +1047,7 @@ public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TConte
 /// <summary>Repository base class that implements CRUD with metadata and EF Core (<typeparamref name="TContext"/>).</summary>
 /// <remarks>
 /// <para>
-/// Implements the same contract as QuickER's SQL Server implementation{{ if repositories }} (<see cref="{{ repository_base_class }}{TEntity, TKey}"/>){{ end }} on top of a DbContext.
+/// Implements the same contract as QuickER's SQL Server implementation{{ if repositories }} (<see cref="{{ repository_base_class }}Core{TEntity, TKey}"/>){{ end }} on top of a DbContext.
 /// The DbContext is created short-lived per call (the same unit as opening a connection per call);
 /// reads use AsNoTracking, and saves use a RowState → EntityState conversion via <c>ChangeTracker.TrackGraph</c>.
 /// </para>
@@ -1060,11 +1060,11 @@ public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TConte
 /// <typeparam name="TEntity">The target entity type.</typeparam>
 /// <typeparam name="TKey">The primary key type.</typeparam>
 /// <typeparam name="TContext">The concrete type of the DbContext that performs CRUD.</typeparam>
-public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
+public abstract partial class EfCoreRepositoryCore<TEntity, TKey, TContext>(
     IDbContextFactory<TContext> contextFactory,
     ISaveHookRegistry? saveHooks = null,
     ISqlExecutor? sqlExecutor = null
-) : IRepository<TEntity, TKey>
+) : IRepositoryCore<TEntity, TKey>
     where TEntity : EntityBaseCore, new()
     where TContext : DbContext
 {
@@ -1767,6 +1767,18 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
 }
 {{~ end ~}}
 {{~ if ef_core && render_ef_core && emit_schema_dependent ~}}
+
+/// <summary>Base of every generated EF Core repository, and the extension point for them. Members added to a partial declaration of this class are available to every entity repository on the EF Core engine.</summary>
+/// <typeparam name="TEntity">The entity type.</typeparam>
+/// <typeparam name="TKey">The primary key type.</typeparam>
+/// <typeparam name="TContext">The concrete type of the DbContext that performs CRUD.</typeparam>
+public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
+    IDbContextFactory<TContext> contextFactory,
+    ISaveHookRegistry? saveHooks = null,
+    ISqlExecutor? sqlExecutor = null
+) : EfCoreRepositoryCore<TEntity, TKey, TContext>(contextFactory, saveHooks, sqlExecutor)
+    where TEntity : EntityBaseCore, new()
+    where TContext : DbContext { }
 
 /// <summary>Extensions that register the generated EF Core repositories into the DI container.</summary>
 public static class GeneratedEfCoreRepositoryServiceCollectionExtensions

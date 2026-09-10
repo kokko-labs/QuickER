@@ -206,6 +206,260 @@ public sealed class ExtensionShimGenerationTests
         content.Should().Contain(ValueObjectStringBase);
     }
 
+    /// <summary>Repository 契約シム 2 本（リモート面・全機能面）の宣言</summary>
+    private static readonly string[] RepositoryContractShims =
+    [
+        "public partial interface IRemoteRepository<TEntity, TKey> : IRemoteRepositoryCore<TEntity, TKey>",
+        string.Join(
+            Environment.NewLine,
+            "public partial interface IRepository<TEntity, TKey>",
+            "    : IRepositoryCore<TEntity, TKey>,",
+            "        IRemoteRepository<TEntity, TKey>",
+            ""
+        ),
+    ];
+
+    /// <summary>Mapper シムの宣言（固定ランタイム <c>MapperBaseCore</c> を継承する空の partial）</summary>
+    private const string MapperShim =
+        "public abstract partial class MapperBase<TEntity, TEditModel> : MapperBaseCore<TEntity, TEditModel>";
+
+    /// <summary>SQLite 方言の実装シム（マルチターゲット構成でのみ出る枝）</summary>
+    private const string SqliteBackendShim =
+        "public abstract partial class SqliteRepository<TEntity, TKey>(";
+
+    /// <summary>
+    /// 実装側 4 枝のシム（クラス宣言 → コンストラクタ引数をそのまま <c>*Core</c> へ転送する基底句）。
+    /// 転送があるので手動 new の書き味は変わらない（空ボディ原則に対する VO シムと同じ扱い）。
+    /// </summary>
+    private static readonly (string File, string Declaration, string BaseClause)[] BackendShims =
+    [
+        (
+            "Repositories.SqlServer.g.cs",
+            "public abstract partial class SqlServerRepository<TEntity, TKey>(",
+            ") : SqlServerRepositoryCore<TEntity, TKey>(connectionFactory, saveHooks, sqlExecutor)"
+        ),
+        (
+            "Repositories.EntityFrameworkCore.g.cs",
+            "public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(",
+            ") : EfCoreRepositoryCore<TEntity, TKey, TContext>(contextFactory, saveHooks, sqlExecutor)"
+        ),
+        (
+            "Repositories.InMemory.g.cs",
+            "public abstract partial class InMemoryRepository<TEntity, TKey>(",
+            ") : InMemoryRepositoryCore<TEntity, TKey>(store, saveHooks)"
+        ),
+        (
+            "Repositories.Http.g.cs",
+            "public abstract partial class HttpRemoteRepository<TEntity, TKey>",
+            "    : HttpRemoteRepositoryCore<TEntity, TKey>"
+        ),
+    ];
+
+    [Fact(
+        DisplayName = "非分割: Repository / Mapper の拡張面が出て per-型の宣言句は現行名のまま着地する"
+    )]
+    public void Inline_ShouldEmitRepositoryAndMapperExtensionSurfaces()
+    {
+        var content = MainFile(Generate(BackendOptions()));
+
+        foreach (var shim in RepositoryContractShims)
+        {
+            content.Should().Contain(shim);
+        }
+
+        content.Should().Contain(MapperShim);
+
+        foreach (var (_, declaration, baseClause) in BackendShims)
+        {
+            content.Should().Contain(declaration);
+            content.Should().Contain(baseClause);
+        }
+
+        // 実装の置き場は固定ランタイム側（*Core）で、拡張面とは別の宣言として同居する
+        content.Should().Contain("public partial interface IRemoteRepositoryCore<TEntity, TKey>");
+        content
+            .Should()
+            .Contain(
+                "public partial interface IRepositoryCore<TEntity, TKey> : IRemoteRepositoryCore<TEntity, TKey>"
+            );
+        content
+            .Should()
+            .Contain("public abstract partial class MapperBaseCore<TEntity, TEditModel>");
+
+        AssertPerTypeRepositoryClauses(content);
+    }
+
+    [Fact(
+        DisplayName = "分割: Repository / Mapper の拡張面はスキーマ依存ファイル側で Runtime には出ない"
+    )]
+    public void Split_ShouldPlaceRepositoryAndMapperShimsWithPerTypeCode()
+    {
+        var files = ByName(Generate(BackendOptions() with { SplitFilesByCategory = true }));
+
+        // 契約シムは per-entity 契約と同居し、実装シムはそれぞれのバックエンド実装ファイルへ
+        foreach (var shim in RepositoryContractShims)
+        {
+            files["Repositories.g.cs"].Should().Contain(shim);
+        }
+
+        foreach (var (fileName, declaration, baseClause) in BackendShims)
+        {
+            files[fileName].Should().Contain(declaration).And.Contain(baseClause);
+        }
+
+        files["Mappers.g.cs"].Should().Contain(MapperShim);
+
+        // 固定 infra 側の Runtime ファイルには拡張面が 1 本も出ない（宣言は *Core だけ）
+        files["Runtime.g.cs"]
+            .Should()
+            .Contain("public partial interface IRepositoryCore<TEntity, TKey>")
+            .And.Contain("public abstract partial class MapperBaseCore<TEntity, TEditModel>")
+            .And.NotContain("public partial interface IRepository<TEntity, TKey>")
+            .And.NotContain(MapperShim);
+        files["Runtime.SqlServer.g.cs"].Should().NotContain(BackendShims[0].Declaration);
+        files["Runtime.EntityFrameworkCore.g.cs"].Should().NotContain(BackendShims[1].Declaration);
+        files["Runtime.InMemory.g.cs"].Should().NotContain(BackendShims[2].Declaration);
+    }
+
+    [Fact(
+        DisplayName = "パッケージ参照モード: Repository / Mapper の拡張面も出る（固定 infra は出ない）"
+    )]
+    public void PackageMode_ShouldStillEmitRepositoryAndMapperShims()
+    {
+        var files = ByName(
+            Generate(
+                BackendOptions() with
+                {
+                    SplitFilesByCategory = true,
+                    UseRuntimePackages = true,
+                }
+            )
+        );
+
+        files.Keys.Should().NotContain("Runtime.g.cs");
+
+        foreach (var shim in RepositoryContractShims)
+        {
+            files["Repositories.g.cs"].Should().Contain(shim);
+        }
+
+        foreach (var (fileName, declaration, baseClause) in BackendShims)
+        {
+            files[fileName].Should().Contain(declaration).And.Contain(baseClause);
+        }
+
+        files["Mappers.g.cs"].Should().Contain(MapperShim);
+
+        // 固定 infra の宣言（*Core）は 1 つも出ない（パッケージが提供する）
+        var allContent = string.Join(Environment.NewLine, files.Values);
+        allContent.Should().NotContain("interface IRepositoryCore<TEntity, TKey>");
+        allContent.Should().NotContain("interface IRemoteRepositoryCore<TEntity, TKey>");
+        allContent.Should().NotContain("class MapperBaseCore<TEntity, TEditModel>");
+        allContent.Should().NotContain("class SqlServerRepositoryCore<TEntity, TKey>(");
+        allContent.Should().NotContain("class EfCoreRepositoryCore<TEntity, TKey, TContext>(");
+        allContent.Should().NotContain("class InMemoryRepositoryCore<TEntity, TKey>(");
+        allContent
+            .Should()
+            .NotContain("class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositoryCore");
+
+        AssertPerTypeRepositoryClauses(allContent);
+    }
+
+    [Fact(DisplayName = "マルチターゲット: 方言実装シムは方言ごとのファイルへ 1 本ずつ出る")]
+    public void MultiDialect_ShouldEmitOneDialectShimPerEngine()
+    {
+        var files = ByName(
+            Generate(
+                Options() with
+                {
+                    GenerateValueObjects = false,
+                    GenerateRepositories = true,
+                    RepositoryDialects = ["sqlserver", "sqlite"],
+                    SplitFilesByCategory = true,
+                }
+            )
+        );
+
+        files["Repositories.SqlServer.g.cs"]
+            .Should()
+            .Contain(BackendShims[0].Declaration)
+            .And.NotContain(SqliteBackendShim);
+        files["Repositories.Sqlite.g.cs"]
+            .Should()
+            .Contain(SqliteBackendShim)
+            .And.Contain(
+                ") : SqliteRepositoryCore<TEntity, TKey>(connectionFactory, saveHooks, sqlExecutor)"
+            )
+            .And.NotContain(BackendShims[0].Declaration);
+
+        // 契約シムは方言に依らず契約ファイルに 1 組だけ
+        files["Repositories.g.cs"].Should().Contain(RepositoryContractShims[0]);
+        files["Repositories.SqlServer.g.cs"].Should().NotContain(RepositoryContractShims[0]);
+        files["Repositories.Sqlite.g.cs"].Should().NotContain(RepositoryContractShims[0]);
+    }
+
+    [Fact(
+        DisplayName = "層別出力: 契約シムはドメイン層・実装シムはインフラ層・Mapper シムはプレゼンテーション層"
+    )]
+    public void Layered_ShouldPlaceRepositoryAndMapperShimsByLayer()
+    {
+        var result = Generate(BackendOptions() with { LayeredOutput = true });
+
+        Layer(result, "Repositories.g.cs").Should().Be("Domain");
+        Layer(result, "Repositories.SqlServer.g.cs").Should().Be("Infrastructure");
+        Layer(result, "Repositories.Http.g.cs").Should().Be("Infrastructure");
+        Layer(result, "Mappers.g.cs").Should().Be("Presentation");
+
+        Content(result, "Repositories.g.cs").Should().Contain(RepositoryContractShims[0]);
+        Content(result, "Repositories.SqlServer.g.cs")
+            .Should()
+            .Contain(BackendShims[0].Declaration);
+        Content(result, "Mappers.g.cs").Should().Contain(MapperShim);
+    }
+
+    /// <summary>
+    /// per-型の宣言句が現行名のままであることを検証する（拡張面を経由して固定ランタイムへ着地する）。
+    /// ここが <c>*Core</c> 直付けへ落ちると、利用者が拡張面へ足したメンバーがその型にだけ届かなくなる。
+    /// </summary>
+    private static void AssertPerTypeRepositoryClauses(string content)
+    {
+        content
+            .Should()
+            .Contain(
+                "public partial interface ICustomerRemoteRepository : IRemoteRepository<CustomerEntity, int>"
+            );
+        content
+            .Should()
+            .Contain(
+                string.Join(
+                    Environment.NewLine,
+                    "public partial interface ICustomerRepository",
+                    "    : ICustomerRemoteRepository,",
+                    "        IRepository<CustomerEntity, int> { }"
+                )
+            );
+        content.Should().Contain(": SqlServerRepository<CustomerEntity, int>(");
+        content.Should().Contain(": EfCoreRepository<CustomerEntity, int, QuickErDbContext>(");
+        content.Should().Contain(": InMemoryRepository<CustomerEntity, int>(");
+        content.Should().Contain(": HttpRemoteRepository<CustomerEntity, int>(");
+        content.Should().Contain(": MapperBase<CustomerEntity, CustomerEditModel>");
+    }
+
+    /// <summary>
+    /// バックエンド 4 枝（QuickER 版 SQL Server・EF Core・インメモリ・HTTP クライアント）と Mapper が
+    /// すべて出る構成（マルチターゲットと EF Core は排他のため方言は 1 つ）
+    /// </summary>
+    private static CodeGenerationOptions BackendOptions() =>
+        Options() with
+        {
+            GenerateValueObjects = false,
+            GenerateRepositories = true,
+            RepositoryDialects = ["sqlserver"],
+            GenerateEfCoreRepositories = true,
+            GenerateInMemoryRepositories = true,
+            GenerateRemoteServices = true,
+        };
+
     /// <summary>Entity・EditModel・Mapper・VO がすべて出る最小構成</summary>
     private static CodeGenerationOptions Options() =>
         new()
@@ -264,6 +518,21 @@ public sealed class ExtensionShimGenerationTests
         result.HasErrors.Should().BeFalse();
         return result
             .Files.Single(file => file.FileName.EndsWith(".g.cs", StringComparison.Ordinal))
+            .Content;
+    }
+
+    /// <summary>
+    /// 非分割出力の本体ファイル（リモートサービス生成では ASP.NET Core 依存のサーバーファイルが
+    /// 別ファイルへ分かれるため、それを除いた 1 本を取る）
+    /// </summary>
+    private static string MainFile(CodeGenerationResult result)
+    {
+        result.HasErrors.Should().BeFalse();
+        return result
+            .Files.Single(file =>
+                file.FileName.EndsWith(".g.cs", StringComparison.Ordinal)
+                && !file.FileName.EndsWith("RemoteServer.g.cs", StringComparison.Ordinal)
+            )
             .Content;
     }
 

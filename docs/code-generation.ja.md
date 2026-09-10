@@ -360,10 +360,10 @@ var id = DocumentIdValue.Create();   // Guid.NewGuid() を文字列で内包し�
 
 ## 生成される基底クラスの拡張
 
-生成される Entity・EditModel・値オブジェクトの基底は **2 層**になっています。
+生成コードが継承・実装する基底は、Entity・EditModel・値オブジェクト・リポジトリ契約・バックエンド実装・Mapper のすべてで **2 層**になっています。
 
 - **`*Core`**: 実装の置き場である固定ランタイム。既定ではインラインで出力され、`--use-runtime-packages` では `QuickER.Runtime*` パッケージが持ちます。
-- **素の名前の型**（`EntityBase` / `EditModelBase<TSelf>` / `ValueObjectBase<TSelf, TValue>` / `ValueObjectStringBase<TSelf>` / `IValueObject` など）: QuickER が**どの出力モードでも per-型コードと同じ場所へソースとして出力する** `partial`。拡張するのはこちらです。
+- **素の名前の型**（`EntityBase` / `EditModelBase<TSelf>` / `ValueObjectBase<TSelf, TValue>` / `ValueObjectStringBase<TSelf>` / `IValueObject` / `IRepository<TEntity, TKey>` / `SqlServerRepository<TEntity, TKey>` / `MapperBase<TEntity, TEditModel>` など）: QuickER が**どの出力モードでも per-型コードと同じ場所へソースとして出力する** `partial`。拡張するのはこちらです。
 
 ```text
 EntityBaseCore                        ランタイム
@@ -375,6 +375,10 @@ EditModelBaseCore                     ランタイム
    └─ EditModelBase<TSelf>            生成コード   ← ここを拡張する
       └─ CustomerEditModel            生成コード
 
+MapperBaseCore<TEntity, TEditModel>   ランタイム
+└─ MapperBase<TEntity, TEditModel>    生成コード   ← ここを拡張する
+   └─ CustomerMapper                  生成コード
+
 ValueObjectBaseCore<TSelf, TValue>    ランタイム
 └─ ValueObjectBase<TSelf, TValue>     生成コード   ← ここを拡張する（全値オブジェクトへ届く）
    └─ ValueObjectStringBase<TSelf>    生成コード   ← ここを拡張する（値の形ごとに 1 クラス）
@@ -382,6 +386,18 @@ ValueObjectBaseCore<TSelf, TValue>    ランタイム
 
 IValueObjectCore                      ランタイム
 └─ IValueObject                       生成コード   ← 全値オブジェクトが実装するマーカー
+
+IRepositoryCore<TEntity, TKey>        ランタイム
+└─ IRepository<TEntity, TKey>         生成コード   ← ここを拡張する（既定実装付きのみ）
+   └─ ICustomerRepository             生成コード
+
+IRemoteRepositoryCore<TEntity, TKey>  ランタイム
+└─ IRemoteRepository<TEntity, TKey>   生成コード   ← ここを拡張する（既定実装付きのみ）
+   └─ ICustomerRemoteRepository       生成コード
+
+SqlServerRepositoryCore<TEntity, TKey>  ランタイム
+└─ SqlServerRepository<TEntity, TKey>   生成コード   ← ここを拡張する（エンジンごとに 1 本）
+   └─ CustomerRepository                生成コード
 ```
 
 拡張面は常にソースとして出るため、ランタイムをインラインで同梱していてもパッケージ参照にしていても同じ `partial` がそのままコンパイルできます＝**`--use-runtime-packages` を切り替えても拡張コードを書き換える必要はありません**。移植できないのは `*Core` 型に対して `partial` を書いた場合だけです（パッケージ参照モードではコンパイル済みアセンブリの型になるため）。
@@ -431,7 +447,57 @@ public static class ValueObjectExtensions
 
 「文字列の値オブジェクトだけ」のように 1 つの形だけを狙うなら、その形のクラスへ足します（`public abstract partial class ValueObjectStringBase<TSelf> { … }`）。値の形ごとのクラスも生成コードで、いずれも拡張してよい `partial` です。
 
+2 つの拡張面には役割の違いがあります。**メンバーを足す主流はクラスルートの `ValueObjectBase<TSelf, TValue>`** です。こちらは型付きで、`NameValue` のような具象型の変数からそのまま呼べます。**マーカー `IValueObject` の `partial` が向くのは 2 つの用途**——値オブジェクトを `IValueObject` 型で受けて種類混在で扱う場面向けに、型ごとに明示実装で上書きできる既定実装を置くこと（上の `IAuditable` がその形です）と、制約や DI 登録に使うインターフェイスを 1 箇所で全値オブジェクトへ実装させることです。インターフェイスの既定実装は**インターフェイス型の変数からしか呼べない**ため（`NameValue` 型の変数からは見えません）、具象型から呼びたいメンバーはクラスルートへ置いてください。
+
 **ジェネリック契約の `IValueObject<TSelf>` / `IValueObject<TSelf, TValue>` は拡張面ではありません。** `IStringMatchValueObject<TSelf>` も同様です。前 2 つは静的ファクトリの契約、3 つ目は各エンジンのクエリ翻訳が「文字列値オブジェクトの部分一致」を識別するための契約で、いずれもランタイム側に在るため、そこへ書いた `partial` はパッケージ参照モードではパッケージの型に対する `partial` になります。非ジェネリックの `IValueObject` マーカーか、生成されるクラスを拡張してください。
+
+### 全リポジトリにメンバーを足す（契約側）
+
+`IRepository<TEntity, TKey>` は生成される `I{Entity}Repository` すべてが継承する全機能面、`IRemoteRepository<TEntity, TKey>` はネットワーク境界を越えられる操作だけのリモート面です。どちらも拡張面なので、ここへ**既定実装付きの**メンバーを足すと、DI で受け取ったリポジトリ参照から——エンティティにもバックエンド（QuickER 版 / EF Core / インメモリ / HTTP クライアント）にも依らず——そのまま呼べます。
+
+```csharp
+// 図のすべてのリポジトリへ届く
+public partial interface IRepository<TEntity, TKey>
+{
+    async Task<TEntity> GetRequiredAsync(TKey id, CancellationToken cancellationToken = default) =>
+        await GetByIdAsync(id, cancellationToken).ConfigureAwait(false)
+        ?? throw new InvalidOperationException($"{typeof(TEntity).Name} '{id}' was not found.");
+}
+```
+
+```csharp
+ICustomerRepository customers = provider.GetRequiredService<ICustomerRepository>();
+var customer = await customers.GetRequiredAsync(1);
+```
+
+**足せるのは既定実装を持つメンバーだけです。** 本体のないメンバーを足すと、そのインターフェイスを実装している生成リポジトリがすべてコンパイルエラーになります（QuickER はその実装を生成しません）。
+
+既定実装は仮想ディスパッチなので、リポジトリをデコレータで包んでいても正しく動きます。上の `GetRequiredAsync` が呼ぶ `GetByIdAsync` は `this` に対するインターフェイス呼び出しで、デコレータが被せた実装へ落ちます。
+
+`IRepository<TEntity, TKey>` はリモート面 `IRemoteRepository<TEntity, TKey>` も継承します。リモート面へ足したメンバーは全機能面の参照からも見え、加えて `I{Entity}RemoteRepository` だけに依存したコード（HTTP クライアント実装を含む）からも呼べます。式木クエリや生 SQL を使うメンバーは全機能面へ、CRUD と保存だけで書けるメンバーはリモート面へ置いてください。
+
+### バックエンドの実装基底へメンバーを足す（実装側）
+
+バックエンドごとの Repository 基底も拡張面です。`SqlServerRepository<TEntity, TKey>` / `SqliteRepository<TEntity, TKey>` / `EfCoreRepository<TEntity, TKey, TContext>` / `InMemoryRepository<TEntity, TKey>` / `HttpRemoteRepository<TEntity, TKey>` の 5 本で、**共通の親を持たない独立した枝**です（実装が根本から違うため）。したがって、ここへ足したメンバーが届くのはそのエンジンのリポジトリだけで、複数エンジンを併用しているなら使うエンジンの分だけ足すことになります。
+
+置き場として向いているのは、`{Entity}Repository` の手書き `partial`（名前付きクエリの手動実装など）から使う `protected` の共有ヘルパーです。呼び出し側から見える面を増やさずに、実装の重複だけを 1 箇所へまとめられます。
+
+```csharp
+public abstract partial class SqlServerRepository<TEntity, TKey>
+{
+    /// <summary>手動実装のクエリが共通で使う定型（各 {Entity}Repository の partial から呼ぶ）。</summary>
+    protected Task<int?> CountBySqlAsync(string sql, object? parameters = null) =>
+        ExecuteScalarSqlAsync<int?>(sql, parameters);
+}
+```
+
+### 全 Mapper にメンバーを足す
+
+`MapperBase<TEntity, TEditModel>` は生成される `{Entity}Mapper` すべての基底で、これも拡張面です。自分の part には型引数リストを書きます（`public partial class MapperBase<TEntity, TEditModel>`）。制約は生成側の part が宣言済みのため省略できます。
+
+### インターフェイスがある面・ない面
+
+拡張面のうちインターフェイスとして用意されているのは、リポジトリ契約（`IRepository` / `IRemoteRepository`）と値オブジェクトのマーカー（`IValueObject`）だけです。リポジトリは利用側から見たアクセス経路がそもそもインターフェイスであり、値オブジェクトは開ジェネリックの共通ルート（`ValueObjectBase<TSelf, TValue>`）を非ジェネリックの 1 つの型で束ねる必要があるためです。Entity・EditModel・Mapper は具象クラスを直接持つ単一実装なので、対応するインターフェイスは設けていません。これらはクラスの `partial` を拡張してください。
 
 ## EditModel の保存ワークフロー
 

@@ -328,7 +328,7 @@ public static class GeneratedFilePlanner
                 GenerationBucket.ValueObject,
             ],
             // HTTP クライアントはエンティティ・リモート契約（Repository バケット＝I{Entity}RemoteRepository。
-            // 通常は同一名前空間のため using からは自然に落ちる）・共有基盤（HttpRemoteRepository 基底 /
+            // 通常は同一名前空間のため using からは自然に落ちる）・共有基盤（HttpRemoteRepositoryCore 基底 /
             // RemoteJson / RemotePaths）・VO（主キー型）を参照する
             GenerationBucket.Http =>
             [
@@ -524,7 +524,7 @@ public static class GeneratedFilePlanner
             );
 
             // 方言別実装スペック（Repository バケットのみ・{RepositoryNamespace}.Suffix）。同一 OutputFileName で
-            // 連結する。方言側は契約 namespace の型（I{Entity}Repository・IRepository・SqlQuery 等）を using する。
+            // 連結する。方言側は契約 namespace の型（I{Entity}Repository・IRepository シム・SqlQuery 等）を using する。
             foreach (var dialect in dialects)
             {
                 specs.Add(
@@ -842,7 +842,7 @@ public static class GeneratedFilePlanner
             );
         }
 
-        // インメモリ基盤の固定部（InMemoryDataStore・InMemoryRepository 基底・ステージング・共通メタデータ）
+        // インメモリ基盤の固定部（InMemoryDataStore・InMemoryRepositoryCore 基底・ステージング・共通メタデータ）
         if (activeSet.Contains(GenerationBucket.InMemory))
         {
             AddFixedRuntimeSubSpec(
@@ -1090,7 +1090,7 @@ public static class GeneratedFilePlanner
     {
         var dialectNamespace = $"{repositoryNamespace}.{DialectNamespaceSuffix(dialect)}";
 
-        // 方言実装は契約 namespace（I{Entity}Repository / IRepository / SqlQuery / SqlQueryPlan / CascadeNavigation 等）を using する。
+        // 方言実装は契約 namespace（I{Entity}Repository / IRepository シム / SqlQuery / SqlQueryPlan / CascadeNavigation 等）を using する。
         // 分割時は Entity 等の他バケット namespace も引き継ぐ（extraCrossUsings）。自 namespace は using しない。
         var crossUsings = new List<string> { contractNamespace };
 
@@ -1099,7 +1099,7 @@ public static class GeneratedFilePlanner
             crossUsings.AddRange(extraCrossUsings);
         }
 
-        // 分割時は方言エンジン（SqlServerRepository / ISqlConnectionFactory 等）が別ファイルへ分かれるため、その namespace も using する
+        // 分割時は方言エンジン（SqlServerRepositoryCore / ISqlConnectionFactory 等）が別ファイルへ分かれるため、その namespace も using する
         if (fixedRuntimeNamespace is not null)
         {
             crossUsings.Add(fixedRuntimeNamespace);

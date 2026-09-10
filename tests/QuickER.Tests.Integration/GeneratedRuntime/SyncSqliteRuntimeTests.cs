@@ -103,7 +103,7 @@ public sealed class SyncSqliteRuntimeTests : SyncRuntimeTestsBase
     private sealed class StalledOrderSource(ISyncServerSource<SyncOrderEntity, int> inner)
         : ISyncServerSource<SyncOrderEntity, int>
     {
-        public IRemoteRepository<SyncOrderEntity, int> Writer => inner.Writer;
+        public IRemoteRepositoryCore<SyncOrderEntity, int> Writer => inner.Writer;
 
         public ISyncBinaryColumns<int>? BinaryColumns => inner.BinaryColumns;
 
@@ -131,7 +131,7 @@ public sealed class SyncSqliteRuntimeTests : SyncRuntimeTestsBase
     private sealed class VersionlessOrderSource(ISyncServerSource<SyncOrderEntity, int> inner)
         : ISyncServerSource<SyncOrderEntity, int>
     {
-        public IRemoteRepository<SyncOrderEntity, int> Writer => inner.Writer;
+        public IRemoteRepositoryCore<SyncOrderEntity, int> Writer => inner.Writer;
 
         public ISyncBinaryColumns<int>? BinaryColumns => inner.BinaryColumns;
 

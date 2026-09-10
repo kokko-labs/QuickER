@@ -117,7 +117,7 @@ public sealed class QuickER.Runtime.SqlServer.SqlSaveHookContext : QuickER.Runti
     public System.Threading.Tasks.Task<bool> WriteBinaryColumnAsync(string propertyName, object key, System.IO.Stream source, long? length = default, System.Threading.CancellationToken cancellationToken = default)
     public System.Threading.Tasks.Task<int> ExecuteSqlAsync(string sql, object parameters = null, System.Threading.CancellationToken cancellationToken = default)
 
-public abstract class QuickER.Runtime.SqlServer.SqlServerRepository<TEntity, TKey> : QuickER.Runtime.IRemoteRepository<TEntity, TKey>, QuickER.Runtime.IRepository<TEntity, TKey>
+public abstract class QuickER.Runtime.SqlServer.SqlServerRepositoryCore<TEntity, TKey> : QuickER.Runtime.IRemoteRepositoryCore<TEntity, TKey>, QuickER.Runtime.IRepositoryCore<TEntity, TKey>
     protected .ctor(QuickER.Runtime.SqlServer.ISqlConnectionFactory connectionFactory, QuickER.Runtime.ISaveHookRegistry saveHooks = null, QuickER.Runtime.ISqlExecutor sqlExecutor = null)
     protected System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TResult>> QueryProjectionBySqlAsync<TResult>(string sql, object parameters = null, System.Threading.CancellationToken cancellationToken = default)
     protected System.Threading.Tasks.Task<bool> ReadUnboundedBinaryColumnAsync(string propertyName, TKey id, System.IO.Stream destination, System.Threading.CancellationToken cancellationToken = default)

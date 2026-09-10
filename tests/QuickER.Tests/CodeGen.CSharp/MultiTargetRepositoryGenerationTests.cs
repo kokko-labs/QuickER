@@ -519,8 +519,11 @@ public sealed class MultiTargetRepositoryGenerationTests
         runtime.Should().NotContain("Microsoft.Data.SqlClient");
         runtime.Should().NotContain("Microsoft.Data.Sqlite");
         // 方言中立契約の固定 infra は Runtime.g.cs（＝コアパッケージ相当）にのみ出る
-        runtime.Should().Contain("public partial interface IRepository<TEntity, TKey>");
-        contract.Should().NotContain("public partial interface IRepository<TEntity, TKey>");
+        runtime.Should().Contain("public partial interface IRepositoryCore<TEntity, TKey>");
+        contract.Should().NotContain("public partial interface IRepositoryCore<TEntity, TKey>");
+        // 現行名を名乗る拡張シムは逆に契約ファイル側（＝スキーマ依存物と同居）へ出る
+        contract.Should().Contain("public partial interface IRepository<TEntity, TKey>");
+        runtime.Should().NotContain("public partial interface IRepository<TEntity, TKey>\r\n");
 
         // sqlserver ファイルには SqlClient のみ（Sqlite ゼロ）
         sqlServer.Should().Contain("using Microsoft.Data.SqlClient;");

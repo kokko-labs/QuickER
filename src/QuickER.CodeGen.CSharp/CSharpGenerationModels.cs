@@ -648,7 +648,7 @@ internal sealed class CSharpRepositoryModel
     /// 無制限バイナリ列の Stream アクセサの契約メンバー群（整形済み）。
     /// <c>GenerateRepositories &amp;&amp; ExcludeUnboundedBinaryColumns</c> かつ除外列があるときのみ非空。
     /// 挿入先はテンプレートがリモート契約の有無で出し分ける（リモート面 ON なら <c>I{Entity}RemoteRepository</c>・
-    /// OFF なら全機能面 <c>I{Entity}Repository</c>。ランタイム共通の基底 <c>IRemoteRepository</c> には載せない）。
+    /// OFF なら全機能面 <c>I{Entity}Repository</c>。ランタイム共通の基底 <c>IRemoteRepositoryCore</c> には載せない）。
     /// </summary>
     public string BinaryStreamContractBlock { get; init; } = string.Empty;
 
