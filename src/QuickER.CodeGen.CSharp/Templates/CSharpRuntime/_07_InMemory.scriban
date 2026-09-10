@@ -42,9 +42,9 @@
     /// <param name="existing">The rows to compare against, keyed by primary key.</param>
     public static void Verify(
         Type entityType,
-        EntityBase row,
+        EntityBaseCore row,
         object key,
-        IEnumerable<KeyValuePair<object, EntityBase>> existing
+        IEnumerable<KeyValuePair<object, EntityBaseCore>> existing
     )
     {
         var constraints = For(entityType);
@@ -108,7 +108,7 @@
         );
 
     /// <summary>The constraint's member values read off a row, or <c>null</c> when any of them is null (which takes the tuple out of the comparison).</summary>
-    private static object[]? ValuesOf(EntityBase row, InMemoryUniqueConstraint constraint)
+    private static object[]? ValuesOf(EntityBaseCore row, InMemoryUniqueConstraint constraint)
     {
         var values = new object[constraint.Properties.Count];
 
@@ -178,7 +178,7 @@
 /// <remarks>
 /// <para>
 /// Keeps a "primary key -> snapshot" dictionary per entity type. A write files away a copy of the entity's columns and a
-/// read hands out a clone produced by <see cref="EntityBase.Clone"/>, so mutating a returned entity on the caller
+/// read hands out a clone produced by <see cref="EntityBaseCore.Clone"/>, so mutating a returned entity on the caller
 /// side never changes the store contents (matching the by-value semantics of a real database). All operations are
 /// serialized with a <c>lock</c> to be thread-safe.
 /// </para>
@@ -190,15 +190,15 @@
 public sealed class InMemoryDataStore
 {
     private readonly object _gate = new();
-    private readonly Dictionary<Type, Dictionary<object, EntityBase>> _tables = new();
+    private readonly Dictionary<Type, Dictionary<object, EntityBaseCore>> _tables = new();
     private long _rowVersion;
 
     /// <summary>Gets the table (primary key -> snapshot) for the given type, creating it if absent. The caller must already hold the lock.</summary>
-    private Dictionary<object, EntityBase> Table(Type entityType)
+    private Dictionary<object, EntityBaseCore> Table(Type entityType)
     {
         if (!_tables.TryGetValue(entityType, out var table))
         {
-            table = new Dictionary<object, EntityBase>();
+            table = new Dictionary<object, EntityBaseCore>();
             _tables[entityType] = table;
         }
 
@@ -206,12 +206,12 @@ public sealed class InMemoryDataStore
     }
 
     /// <summary>Normalizes an entity's primary key value into a dictionary key (value objects are opened to their underlying value; null is not allowed).</summary>
-    internal static object KeyOf(EntityBase entity)
+    internal static object KeyOf(EntityBaseCore entity)
     {
         var metadata = EntitySaveMetadata.For(entity.GetType());
         var raw = metadata.KeyProperty.GetValue(entity);
 {{~ if generate_value_objects ~}}
-        raw = raw is IValueObject vo ? vo.UnderlyingValue : raw;
+        raw = raw is IValueObjectCore vo ? vo.UnderlyingValue : raw;
 {{~ end ~}}
 
         return raw
@@ -223,7 +223,7 @@ public sealed class InMemoryDataStore
     /// <summary>Gets all snapshots of the given type (as clones).</summary>
     /// <remarks>The returned clones drop unbounded binary columns to their "not fetched" state (matching the real database's SELECT exclusion; the store's actual data is preserved).</remarks>
     public IReadOnlyList<TEntity> Snapshot<TEntity>()
-        where TEntity : EntityBase, new()
+        where TEntity : EntityBaseCore, new()
     {
         lock (_gate)
         {
@@ -241,7 +241,7 @@ public sealed class InMemoryDataStore
     /// <summary>Gets the snapshot for the given type and primary key (as a clone; null if not found).</summary>
     /// <remarks>The returned clone drops unbounded binary columns to their "not fetched" state (matching the real database's SELECT exclusion; the store's actual data is preserved).</remarks>
     public TEntity? Find<TEntity>(object key)
-        where TEntity : EntityBase, new()
+        where TEntity : EntityBaseCore, new()
     {
         lock (_gate)
         {
@@ -265,7 +265,7 @@ public sealed class InMemoryDataStore
     /// and update moves it on, so an entity holding a stale version can be told apart from a current one. The counter is
     /// advanced atomically because a save hook's After writes a column outside the store lock.
     /// </remarks>
-    private PropertyInfo? StampRowVersion(EntityBase snapshot)
+    private PropertyInfo? StampRowVersion(EntityBaseCore snapshot)
     {
         var property = EntitySaveMetadata.For(snapshot.GetType()).RowVersionProperty;
 
@@ -287,7 +287,7 @@ public sealed class InMemoryDataStore
     }
 
     /// <summary>Stamps <paramref name="snapshot"/> and hands the newly assigned version straight to <paramref name="source"/> (used by the writes that apply to the store immediately).</summary>
-    private void StampRowVersionDirect(EntityBase snapshot, EntityBase? source)
+    private void StampRowVersionDirect(EntityBaseCore snapshot, EntityBaseCore? source)
     {
         var property = StampRowVersion(snapshot);
 
@@ -302,9 +302,9 @@ public sealed class InMemoryDataStore
     /// <summary>Copies the row version a stored snapshot holds onto the caller's entity, mirroring how a real database hands the newly assigned version back.</summary>
     /// <remarks>The caller's entity gets its own array so that mutating one side cannot reach into the store's snapshot.</remarks>
     private static void ApplyRowVersion(
-        EntityBase source,
+        EntityBaseCore source,
         PropertyInfo property,
-        EntityBase snapshot
+        EntityBaseCore snapshot
     )
     {
         var stored = {{ if generate_value_objects }}SqlParameterValue.Unwrap(property.GetValue(snapshot)){{ else }}property.GetValue(snapshot){{ end }};
@@ -324,7 +324,7 @@ public sealed class InMemoryDataStore
     /// is lost on the read side, where Include rebuilds the navigations from the child rows whenever a query asks for them.
     /// </para>
     /// <para>
-    /// Copying the columns alone is also what keeps a save linear. <see cref="EntityBase.Clone"/> deep-copies the whole
+    /// Copying the columns alone is also what keeps a save linear. <see cref="EntityBaseCore.Clone"/> deep-copies the whole
     /// subtree (a JSON round trip) only for the children to be dropped again straight afterwards, so saving a graph of n
     /// nodes copied the subtree of every one of them.
     /// </para>
@@ -333,10 +333,10 @@ public sealed class InMemoryDataStore
     /// keeps the by-value semantics cloning gave, where writing through the caller's array cannot reach the store's row.
     /// </para>
     /// </remarks>
-    private static EntityBase CopyColumns(EntityBase entity)
+    private static EntityBaseCore CopyColumns(EntityBaseCore entity)
     {
         var entityType = entity.GetType();
-        var copy = (EntityBase)Activator.CreateInstance(entityType)!;
+        var copy = (EntityBaseCore)Activator.CreateInstance(entityType)!;
 
         foreach (var property in EntitySaveMetadata.For(entityType).AllProperties)
         {
@@ -344,7 +344,7 @@ public sealed class InMemoryDataStore
 {{~ if generate_value_objects ~}}
 
             // A binary value object hands out the very array it was created with, so the copy has to reach inside it
-            if (value is IValueObject valueObject && valueObject.UnderlyingValue is byte[] wrapped)
+            if (value is IValueObjectCore valueObject && valueObject.UnderlyingValue is byte[] wrapped)
             {
                 value = SqlValueObjectActivator.Wrap(
                     (byte[])wrapped.Clone(),
@@ -364,7 +364,7 @@ public sealed class InMemoryDataStore
     /// <paramref name="previous"/> is the row this write replaces (<c>null</c> for an insert, which writes every column just
     /// as a real INSERT does).
     /// </remarks>
-    private static EntityBase PrepareSnapshot(EntityBase entity, EntityBase? previous)
+    private static EntityBaseCore PrepareSnapshot(EntityBaseCore entity, EntityBaseCore? previous)
     {
         var snapshot = CopyColumns(entity);
 
@@ -378,14 +378,14 @@ public sealed class InMemoryDataStore
     }
 
     /// <summary>Gets the raw snapshot (no clone) for the given type and primary key. Used by internal traversals such as Include key matching. The caller must already hold the lock.</summary>
-    private EntityBase? FindRaw(Type entityType, object key) =>
+    private EntityBaseCore? FindRaw(Type entityType, object key) =>
         Table(entityType).TryGetValue(key, out var entity) ? entity : null;
 
     /// <summary>Gets the list of raw snapshots (no clones) for the given type. Used by the query executor's internal traversals. The caller must already hold the lock.</summary>
-    private IReadOnlyList<EntityBase> RawAll(Type entityType) => Table(entityType).Values.ToList();
+    private IReadOnlyList<EntityBaseCore> RawAll(Type entityType) => Table(entityType).Values.ToList();
 
     /// <summary>Gets the list of raw snapshots (no clones) for the given type. Used inside the lock to hand pre-clone snapshots to the executor.</summary>
-    internal IReadOnlyList<EntityBase> RawSnapshotUnlocked(Type entityType) => RawAll(entityType);
+    internal IReadOnlyList<EntityBaseCore> RawSnapshotUnlocked(Type entityType) => RawAll(entityType);
 
     /// <summary>Runs an arbitrary read traversal over the whole store under the lock (so Include key matching can span multiple tables).</summary>
     internal TResult Read<TResult>(Func<InMemoryReadScope, TResult> reader)
@@ -397,7 +397,7 @@ public sealed class InMemoryDataStore
     }
 
     /// <summary>Stores a snapshot (clone) for updates and seeding (an existing key is overwritten). Use <see cref="Insert"/> for inserts, which reject an existing key.</summary>
-    {{ infra_visibility }} void Put(EntityBase entity)
+    {{ infra_visibility }} void Put(EntityBaseCore entity)
     {
         lock (_gate)
         {
@@ -417,7 +417,7 @@ public sealed class InMemoryDataStore
 
     /// <summary>Stores a snapshot (clone) for an insert only. An existing primary key is rejected with an <see cref="InvalidOperationException"/> instead of being silently overwritten.</summary>
     /// <remarks>The declared UNIQUE constraints are checked as well, before anything is written, so a rejected insert leaves the store untouched.</remarks>
-    internal void Insert(EntityBase entity)
+    internal void Insert(EntityBaseCore entity)
     {
         lock (_gate)
         {
@@ -504,7 +504,7 @@ public sealed class InMemoryDataStore
             }
         }
 
-        EntityBase? baseRow;
+        EntityBaseCore? baseRow;
 
         lock (_gate)
         {
@@ -686,7 +686,7 @@ public sealed class InMemoryDataStore
     /// </remarks>
     private void VerifyStagedUniqueness(InMemorySaveStaging staging)
     {
-        Dictionary<Type, Dictionary<object, EntityBase>>? views = null;
+        Dictionary<Type, Dictionary<object, EntityBaseCore>>? views = null;
 
         foreach (var ((entityType, key), snapshot) in staging.Overlay)
         {
@@ -696,7 +696,7 @@ public sealed class InMemoryDataStore
                 continue;
             }
 
-            views ??= new Dictionary<Type, Dictionary<object, EntityBase>>();
+            views ??= new Dictionary<Type, Dictionary<object, EntityBaseCore>>();
 
             if (!views.TryGetValue(entityType, out var view))
             {
@@ -709,12 +709,12 @@ public sealed class InMemoryDataStore
     }
 
     /// <summary>The rows of one type as publishing will leave them: the store's rows with the save's staged writes applied.</summary>
-    private Dictionary<object, EntityBase> ComposeView(
+    private Dictionary<object, EntityBaseCore> ComposeView(
         Type entityType,
         InMemorySaveStaging staging
     )
     {
-        var view = new Dictionary<object, EntityBase>(Table(entityType));
+        var view = new Dictionary<object, EntityBaseCore>(Table(entityType));
 
         foreach (var ((stagedType, key), snapshot) in staging.Overlay)
         {
@@ -749,10 +749,10 @@ public sealed class InMemoryDataStore
     {{ infra_visibility }} readonly struct InMemoryReadScope(InMemoryDataStore store)
     {
         /// <summary>The list of raw snapshots (no clones) for the given type.</summary>
-        public IReadOnlyList<EntityBase> All(Type entityType) => store.RawAll(entityType);
+        public IReadOnlyList<EntityBaseCore> All(Type entityType) => store.RawAll(entityType);
 
         /// <summary>The raw snapshot (no clone) for the given type and primary key (null if not found).</summary>
-        public EntityBase? Find(Type entityType, object key) => store.FindRaw(entityType, key);
+        public EntityBaseCore? Find(Type entityType, object key) => store.FindRaw(entityType, key);
     }
 
     /// <summary>
@@ -766,13 +766,13 @@ public sealed class InMemoryDataStore
     )
     {
         /// <summary>The row as this scope sees it: what the save has staged for it, or else the store's own row (null when there is none).</summary>
-        private EntityBase? Current(Type entityType, object key) =>
+        private EntityBaseCore? Current(Type entityType, object key) =>
             staging is not null && staging.TryGetStaged(entityType, key, out var staged)
                 ? staged
                 : store.FindRaw(entityType, key);
 
         /// <summary>Applies or stages a prepared snapshot and arranges for the newly assigned row version to reach <paramref name="entity"/>.</summary>
-        private void Write(EntityBase entity, Type entityType, object key, EntityBase snapshot)
+        private void Write(EntityBaseCore entity, Type entityType, object key, EntityBaseCore snapshot)
         {
             if (staging is null)
             {
@@ -794,7 +794,7 @@ public sealed class InMemoryDataStore
         }
 
         /// <summary>Stores a snapshot for updates and seeding (an existing key is overwritten). Assumes the lock is held, so it writes directly to the internal dictionary.</summary>
-        public void Put(EntityBase entity)
+        public void Put(EntityBaseCore entity)
         {
             var entityType = entity.GetType();
             var key = KeyOf(entity);
@@ -803,7 +803,7 @@ public sealed class InMemoryDataStore
         }
 
         /// <summary>Stores a snapshot for an insert only (an existing primary key throws instead of being overwritten). Assumes the lock is held, so it writes directly to the internal dictionary.</summary>
-        public void Insert(EntityBase entity)
+        public void Insert(EntityBaseCore entity)
         {
             var entityType = entity.GetType();
             var key = KeyOf(entity);
@@ -845,9 +845,9 @@ public sealed class InMemoryDataStore
         /// <param name="key">The primary key of that row (the row carrying it is skipped, so an update never collides with itself).</param>
         /// <param name="pending">Rows the caller has accepted but not written yet, keyed by primary key (a bulk insert's preceding elements).</param>
         public void VerifyUnique(
-            EntityBase entity,
+            EntityBaseCore entity,
             object key,
-            IReadOnlyDictionary<object, EntityBase>? pending = null
+            IReadOnlyDictionary<object, EntityBaseCore>? pending = null
         )
         {
             var entityType = entity.GetType();
@@ -869,7 +869,7 @@ public sealed class InMemoryDataStore
         /// The comparison is strict: an entity whose version is null (never read back from the store) never matches a stored
         /// row, which is what a real database does with <c>WHERE ... AND row_ver = @originalRowVersion</c>.
         /// </remarks>
-        public bool IsCurrent(EntityBase entity, ConcurrencyMode mode)
+        public bool IsCurrent(EntityBaseCore entity, ConcurrencyMode mode)
         {
             var property = EntitySaveMetadata.For(entity.GetType()).RowVersionProperty;
 
@@ -891,7 +891,7 @@ public sealed class InMemoryDataStore
         }
 
         /// <summary>The list of raw snapshots (no clones) for the given type. Used by the descendant traversal for cascade delete.</summary>
-        public IReadOnlyList<EntityBase> All(Type entityType) => store.RawAll(entityType);
+        public IReadOnlyList<EntityBaseCore> All(Type entityType) => store.RawAll(entityType);
     }
 }
 
@@ -927,32 +927,32 @@ public sealed class InMemoryDataStore
 /// </remarks>
 {{ infra_visibility }} sealed class InMemorySaveStaging
 {
-    private readonly Dictionary<(Type EntityType, object Key), EntityBase?> _overlay = new();
-    private readonly List<(Type EntityType, object Key, EntityBase? Base)> _baseline = new();
+    private readonly Dictionary<(Type EntityType, object Key), EntityBaseCore?> _overlay = new();
+    private readonly List<(Type EntityType, object Key, EntityBaseCore? Base)> _baseline = new();
     private readonly HashSet<(Type EntityType, object Key)> _touched = new();
     private readonly List<(
-        EntityBase Source,
+        EntityBaseCore Source,
         PropertyInfo Property,
         Type EntityType,
         object Key
     )> _stamps = new();
 
     /// <summary>The rows the save started from, in the order it first touched them (a null base means the row did not exist yet).</summary>
-    public IReadOnlyList<(Type EntityType, object Key, EntityBase? Base)> Baseline => _baseline;
+    public IReadOnlyList<(Type EntityType, object Key, EntityBaseCore? Base)> Baseline => _baseline;
 
     /// <summary>The staged writes (a null value marks a delete).</summary>
-    public IReadOnlyDictionary<(Type EntityType, object Key), EntityBase?> Overlay => _overlay;
+    public IReadOnlyDictionary<(Type EntityType, object Key), EntityBaseCore?> Overlay => _overlay;
 
     /// <summary>The caller entities awaiting the row version of the row they were written to.</summary>
     public IReadOnlyList<(
-        EntityBase Source,
+        EntityBaseCore Source,
         PropertyInfo Property,
         Type EntityType,
         object Key
     )> Stamps => _stamps;
 
     /// <summary>Records the snapshot the store held for a row when the save first touched it (later touches are ignored).</summary>
-    public void CaptureBase(Type entityType, object key, EntityBase? baseRow)
+    public void CaptureBase(Type entityType, object key, EntityBaseCore? baseRow)
     {
         if (_touched.Add((entityType, key)))
         {
@@ -961,20 +961,20 @@ public sealed class InMemoryDataStore
     }
 
     /// <summary>Stages a write for a row (a null snapshot marks a delete), replacing whatever the save staged for it before.</summary>
-    public void Stage(Type entityType, object key, EntityBase? snapshot) =>
+    public void Stage(Type entityType, object key, EntityBaseCore? snapshot) =>
         _overlay[(entityType, key)] = snapshot;
 
     /// <summary>Gets the write the save has staged for a row (true when it staged one at all, including a delete).</summary>
-    public bool TryGetStaged(Type entityType, object key, out EntityBase? snapshot) =>
+    public bool TryGetStaged(Type entityType, object key, out EntityBaseCore? snapshot) =>
         _overlay.TryGetValue((entityType, key), out snapshot);
 
     /// <summary>The snapshot staged for a row (null for a delete as well as for a row the save never staged).</summary>
-    public EntityBase? Staged(Type entityType, object key) =>
+    public EntityBaseCore? Staged(Type entityType, object key) =>
         _overlay.GetValueOrDefault((entityType, key));
 
     /// <summary>Records that a caller entity is waiting for the row version the given row ends up published with.</summary>
     public void RecordStamp(
-        EntityBase source,
+        EntityBaseCore source,
         PropertyInfo property,
         Type entityType,
         object key
@@ -993,7 +993,7 @@ public sealed class InMemoryDataStore
 /// </remarks>
 {{ infra_visibility }} sealed class InMemoryQueryExecutor<TEntity>(InMemoryDataStore store)
     : ISqlQueryExecutor<TEntity>
-    where TEntity : EntityBase, new()
+    where TEntity : EntityBaseCore, new()
 {
     private readonly InMemoryDataStore _store = store;
 
@@ -1205,7 +1205,7 @@ public sealed class InMemoryDataStore
             .ToArray();
 
     /// <summary>Filters the store's raw snapshots by applying the predicates (AND-combined) (pre-clone, enumeration only).</summary>
-    private IEnumerable<EntityBase> FilterRaw(Func<TEntity, bool>[] predicates)
+    private IEnumerable<EntityBaseCore> FilterRaw(Func<TEntity, bool>[] predicates)
     {
         IEnumerable<TEntity> query = _store.RawSnapshotUnlocked(typeof(TEntity)).Cast<TEntity>();
 
@@ -1218,8 +1218,8 @@ public sealed class InMemoryDataStore
     }
 
     /// <summary>Applies the orderings (stable sort in the specified order) and Skip/Take.</summary>
-    private static IReadOnlyList<EntityBase> ApplyOrderingAndPaging(
-        IEnumerable<EntityBase> source,
+    private static IReadOnlyList<EntityBaseCore> ApplyOrderingAndPaging(
+        IEnumerable<EntityBaseCore> source,
         SqlQueryPlan<TEntity> plan,
         (Func<TEntity, object?> KeySelector, bool Descending)[] orderings
     )
@@ -1257,7 +1257,7 @@ public sealed class InMemoryDataStore
             result = result.Take(take);
         }
 
-        return result.Cast<EntityBase>().ToList();
+        return result.Cast<EntityBaseCore>().ToList();
     }
 }
 
@@ -1315,7 +1315,7 @@ public sealed class InMemoryDataStore
 {
     /// <summary>Recursively attaches the navigations for the Include tree onto the given (cloned) entity.</summary>
     public static void Attach(
-        EntityBase entity,
+        EntityBaseCore entity,
         IReadOnlyList<IncludeNode> includes,
         InMemoryDataStore.InMemoryReadScope scope
     )
@@ -1343,7 +1343,7 @@ public sealed class InMemoryDataStore
 
     /// <summary>Fills a collection or child-direction single-reference navigation with the children whose FK matches the parent key.</summary>
     private static void AttachChildren(
-        EntityBase parent,
+        EntityBaseCore parent,
         IncludeNode node,
         NavigationReferenceAttribute attribute,
         EntitySaveMetadata parentMetadata,
@@ -1356,7 +1356,7 @@ public sealed class InMemoryDataStore
         var childMetadata = EntitySaveMetadata.For(childType);
 
         var parentKey = ColumnValue(parent, attribute.PrincipalColumn, parentMetadata);
-        var matched = new List<EntityBase>();
+        var matched = new List<EntityBaseCore>();
 
         foreach (var child in scope.All(childType))
         {
@@ -1392,7 +1392,7 @@ public sealed class InMemoryDataStore
 
     /// <summary>Fills a parent-reference navigation with the parent that its own FK points to.</summary>
     private static void AttachParent(
-        EntityBase dependent,
+        EntityBaseCore dependent,
         IncludeNode node,
         NavigationReferenceAttribute attribute,
         EntitySaveMetadata dependentMetadata,
@@ -1429,7 +1429,7 @@ public sealed class InMemoryDataStore
 
     /// <summary>Reads the value of the given column from an entity (value objects are opened to their underlying value).</summary>
     private static object? ColumnValue(
-        EntityBase entity,
+        EntityBaseCore entity,
         string columnName,
         EntitySaveMetadata metadata
     )
@@ -1443,7 +1443,7 @@ public sealed class InMemoryDataStore
 
         var value = property.GetValue(entity);
 {{~ if generate_value_objects ~}}
-        return value is IValueObject vo ? vo.UnderlyingValue : value;
+        return value is IValueObjectCore vo ? vo.UnderlyingValue : value;
 {{~ else ~}}
         return value;
 {{~ end ~}}
@@ -1454,7 +1454,7 @@ public sealed class InMemoryDataStore
 {{ infra_visibility }} static class InMemoryCascade
 {
     /// <summary>Enumerates the child entities subject to cascade (null is excluded).</summary>
-    public static IEnumerable<EntityBase> EnumerateChildren(EntityBase entity)
+    public static IEnumerable<EntityBaseCore> EnumerateChildren(EntityBaseCore entity)
     {
         foreach (var navigation in EntitySaveMetadata.For(entity.GetType()).CascadeNavigations)
         {
@@ -1467,7 +1467,7 @@ public sealed class InMemoryDataStore
 
             if (navigation.IsCollection)
             {
-                if (value is IEnumerable<EntityBase> children)
+                if (value is IEnumerable<EntityBaseCore> children)
                 {
                     foreach (var child in children)
                     {
@@ -1478,7 +1478,7 @@ public sealed class InMemoryDataStore
                     }
                 }
             }
-            else if (value is EntityBase child)
+            else if (value is EntityBaseCore child)
             {
                 yield return child;
             }
@@ -1497,14 +1497,14 @@ public sealed class InMemoryDataStore
     /// when the caller gave the write scope a staging, none of them ever reached the store to begin with.
     /// </remarks>
     public static int Save(
-        EntityBase entity,
+        EntityBaseCore entity,
         InMemoryDataStore.InMemoryWriteScope scope,
         bool cascadeSave,
         bool cascadeDelete,
         bool insertWhenUpdateMissing,
         ConcurrencyMode mode,
         SaveHookSession? hooks = null,
-        List<(EntityBase Entity, SaveOperation Operation)>? records = null,
+        List<(EntityBaseCore Entity, SaveOperation Operation)>? records = null,
         bool changesAlreadyVerified = false
     )
     {
@@ -1616,7 +1616,7 @@ public sealed class InMemoryDataStore
     /// <summary>Phase 1: traverses the graph in the same order as <see cref="Save"/>, fires the pre-operation hooks (Before), and builds the skip set (outside the lock, async).</summary>
     /// <remarks>Before fires with the RowState-derived operation (even when <c>insertWhenUpdateMissing</c> switches to Insert, it fires once as Update). The actual operation is determined by the save phase.</remarks>
     public static async Task InvokeBeforeGraphAsync(
-        EntityBase entity,
+        EntityBaseCore entity,
         SaveHookSession hooks,
         bool cascadeSave,
         bool cascadeDelete,
@@ -1681,7 +1681,7 @@ public sealed class InMemoryDataStore
 
     /// <summary>Fires Before for a subtree delete starting from the children (same order as <see cref="DeleteGraph"/>).</summary>
     private static async Task InvokeBeforeDeleteGraphAsync(
-        EntityBase entity,
+        EntityBaseCore entity,
         SaveHookSession hooks,
         CancellationToken cancellationToken
     )
@@ -1699,11 +1699,11 @@ public sealed class InMemoryDataStore
 
     /// <summary>Deletes a subtree starting from the children (deletes regardless of state; when <paramref name="hooks"/> is provided, skipped rows are left in place and the deletes actually performed are recorded into <paramref name="records"/>).</summary>
     private static int DeleteGraph(
-        EntityBase entity,
+        EntityBaseCore entity,
         InMemoryDataStore.InMemoryWriteScope scope,
         ConcurrencyMode mode,
         SaveHookSession? hooks = null,
-        List<(EntityBase Entity, SaveOperation Operation)>? records = null
+        List<(EntityBaseCore Entity, SaveOperation Operation)>? records = null
     )
     {
         var rows = 0;
@@ -1743,12 +1743,12 @@ public sealed class InMemoryDataStore
     /// and are therefore unsupported.
     /// </remarks>
     public static int DeleteDescendants(
-        EntityBase root,
+        EntityBaseCore root,
         InMemoryDataStore.InMemoryWriteScope scope
     ) => DeleteDescendants(root, scope, new HashSet<Type> { root.GetType() });
 
     private static int DeleteDescendants(
-        EntityBase parent,
+        EntityBaseCore parent,
         InMemoryDataStore.InMemoryWriteScope scope,
         HashSet<Type> visited
     )
@@ -1799,7 +1799,7 @@ public sealed class InMemoryDataStore
 
     /// <summary>Reads the value of the given column from an entity (value objects are opened to their underlying value).</summary>
     private static object? ColumnValue(
-        EntityBase entity,
+        EntityBaseCore entity,
         string columnName,
         EntitySaveMetadata metadata
     )
@@ -1813,7 +1813,7 @@ public sealed class InMemoryDataStore
 
         var value = property.GetValue(entity);
 {{~ if generate_value_objects ~}}
-        return value is IValueObject vo ? vo.UnderlyingValue : value;
+        return value is IValueObjectCore vo ? vo.UnderlyingValue : value;
 {{~ else ~}}
         return value;
 {{~ end ~}}
@@ -1832,7 +1832,7 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
     InMemoryDataStore store,
     ISaveHookRegistry? saveHooks = null
 ) : IRepository<TEntity, TKey>
-    where TEntity : EntityBase, new()
+    where TEntity : EntityBaseCore, new()
 {
     /// <summary>The data store holding the snapshots (shared via DI).</summary>
     protected InMemoryDataStore Store { get; } = store;
@@ -1889,7 +1889,7 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
         var count = Store.Write(scope =>
         {
             var batchKeys = new HashSet<object>();
-            var accepted = new Dictionary<object, EntityBase>();
+            var accepted = new Dictionary<object, EntityBaseCore>();
 
             // Pre-validate all keys and constraint values, then apply: a duplicate must not leave a partially inserted batch behind.
             foreach (var entity in targets)
@@ -2028,7 +2028,7 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
         }
 {{~ if generate_value_objects ~}}
         // Open value objects to their underlying value (when the excluded column is a VO).
-        value = value is IValueObject vo ? vo.UnderlyingValue : value;
+        value = value is IValueObjectCore vo ? vo.UnderlyingValue : value;
 {{~ end ~}}
 
         if (value is not byte[] bytes)
@@ -2145,7 +2145,7 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
 
         // Phase 2 (inside the lock): stage the save applying the skip set and record the (entity, operation) pairs performed.
         var records =
-            hooks is null ? null : new List<(EntityBase Entity, SaveOperation Operation)>();
+            hooks is null ? null : new List<(EntityBaseCore Entity, SaveOperation Operation)>();
         var rows = Store.Write(
             scope =>
                 InMemoryCascade.Save(
@@ -2237,7 +2237,7 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
 
         // Phase 2 (inside the lock): stage all roots applying the skips and record the (entity, operation) pairs performed.
         var records =
-            hooks is null ? null : new List<(EntityBase Entity, SaveOperation Operation)>();
+            hooks is null ? null : new List<(EntityBaseCore Entity, SaveOperation Operation)>();
         var rows = Store.Write(
             scope =>
             {
@@ -2308,7 +2308,7 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
     private static object NormalizeKey(TKey id)
     {
 {{~ if generate_value_objects ~}}
-        object? raw = id is IValueObject vo ? vo.UnderlyingValue : id;
+        object? raw = id is IValueObjectCore vo ? vo.UnderlyingValue : id;
 {{~ else ~}}
         object? raw = id;
 {{~ end ~}}
@@ -2397,7 +2397,7 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
     private static object NormalizeKey(object key)
     {
 {{~ if generate_value_objects ~}}
-        object? raw = key is IValueObject vo ? vo.UnderlyingValue : key;
+        object? raw = key is IValueObjectCore vo ? vo.UnderlyingValue : key;
 {{~ else ~}}
         object? raw = key;
 {{~ end ~}}

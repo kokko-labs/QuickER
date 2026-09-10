@@ -62,7 +62,7 @@ The base class is chosen according to the value type. In addition to value-based
 
 ### Hand-written value objects
 
-The bodies of `Create` / `TryCreate` / `Validate` live once on `ValueObjectBase<TSelf, TValue>` (an inherited static method satisfies a `static abstract` interface member), so a value object with no diagram column behind it — a mail address, a period, a unit — is written with **three members**: a private constructor, `New`, and `ValidateCore`:
+The bodies of `Create` / `TryCreate` / `Validate` live once on `ValueObjectBaseCore<TSelf, TValue>` (an inherited static method satisfies a `static abstract` interface member), so a value object with no diagram column behind it — a mail address, a period, a unit — is written with **three members**: a private constructor, `New`, and `ValidateCore`:
 
 ```csharp
 public sealed class ContactMailValue
@@ -357,6 +357,81 @@ Length validation still applies, exactly as it does for any other string value o
 The parameterless `Create()` always mints 36 characters (`Guid.NewGuid().ToString()`). The option applies to every string primary key in the diagram, so it also turns a deliberately short key — a five-character code column, say — into a GUID key. Generation warns by name for any such column narrower than 36 characters and then continues: auto-numbering on that column always fails length validation at run time, while assigning a short key explicitly keeps working.
 
 Keys compare ordinally, so the comparison is case-sensitive. QuickER never generates a `DEFAULT` clause, but if you add `DEFAULT NEWID()` to the column outside QuickER, SQL Server stores uppercase GUIDs while the application mints lowercase ones. Mixing the two breaks key matching.
+
+## Extending the generated base classes
+
+The base of every generated entity, edit model, and value object comes in **two layers**:
+
+- **`*Core`** — the fixed runtime, which holds the implementation. It is emitted inline by default and ships inside the `QuickER.Runtime*` packages under `--use-runtime-packages`.
+- **the plainly named type** (`EntityBase`, `EditModelBase<TSelf>`, `ValueObjectBase<TSelf, TValue>`, `ValueObjectStringBase<TSelf>`, `IValueObject`, …) — a `partial` that QuickER emits **as source, alongside the per-type code**, in every output mode. This is the surface you extend.
+
+```text
+EntityBaseCore                        runtime
+└─ EntityBase                         generated   ← extend here
+   └─ CustomerEntity                  generated
+
+EditModelBaseCore                     runtime
+└─ EditModelBaseCore<TSelf>           runtime
+   └─ EditModelBase<TSelf>            generated   ← extend here
+      └─ CustomerEditModel            generated
+
+ValueObjectBaseCore<TSelf, TValue>    runtime
+└─ ValueObjectBase<TSelf, TValue>     generated   ← extend here (reaches every value object)
+   └─ ValueObjectStringBase<TSelf>    generated   ← extend here (one class per value shape)
+      └─ NameValue                    generated
+
+IValueObjectCore                      runtime
+└─ IValueObject                       generated   ← marker every value object implements
+```
+
+Because the extension surface is always source, the same `partial` compiles whether the runtime is inlined or referenced as a package: **turning `--use-runtime-packages` on or off never makes you rewrite an extension**. Writing a `partial` against a `*Core` type is the one thing that does not carry over, since those are compiled assembly types in package-reference mode.
+
+### Adding members to every entity or edit model
+
+Put the file in the same namespace as the generated types (`{RootNamespace}.Entities` in split output; the entity extension surface lands in the domain layer and the edit model one in the presentation layer under `--layered-output`):
+
+```csharp
+public interface IAuditable
+{
+    string AuditLabel { get; }
+}
+
+// Reaches every generated entity in the diagram.
+public partial class EntityBase : IAuditable
+{
+    public string DescribeRow() => $"{GetType().Name}/{RowState}";
+
+    string IAuditable.AuditLabel => $"{DisplayName} ({RowState})";
+}
+```
+
+`EditModelBase<TSelf>` works the same way and additionally sees the concrete type through `TSelf`. Repeat the type parameter list on your part (`public abstract partial class EditModelBase<TSelf>`); constraints may be omitted, because the generated part already declares them.
+
+A read-write instance property added to the `EntityBase` partial becomes part of every entity's value set — `HasSameValues` compares it and `Clone` copies it, exactly as if each entity declared it itself. When that is not what you want, add a method, a get-only property, or an interface implementation instead.
+
+### Adding a member or an interface to every value object
+
+`IValueObject` is the marker **every** value object implements, so it is the single place that reaches all of them regardless of value shape:
+
+```csharp
+// Injecting an interface with a default implementation means no value object writes anything itself.
+public partial interface IValueObject : IAuditable
+{
+    string IAuditable.AuditLabel => $"{DisplayValue}";
+}
+
+// Extension methods on the marker reach all of them for the same reason.
+public static class ValueObjectExtensions
+{
+    public static bool IsBlank(this IValueObject value) => value.UnderlyingValue is null or "";
+}
+```
+
+`ValueObjectBase<TSelf, TValue>` is the class-side counterpart. Every value object derives from it whatever its value shape, so a member added there reaches all of them — and unlike the marker it can see `Value` and `TSelf`. Repeat the type parameter list on your part (`public partial class ValueObjectBase<TSelf, TValue>`); constraints may be omitted, because the generated part already declares them.
+
+To reach one shape only — every string value object, say — put the member on that shape's class instead (`public abstract partial class ValueObjectStringBase<TSelf> { … }`). Those classes are generated as well, and each of them is a `partial` you may extend.
+
+**The generic contracts `IValueObject<TSelf>` and `IValueObject<TSelf, TValue>` are not extension surfaces**, and neither is `IStringMatchValueObject<TSelf>`. The first two are the static-factory contract; the third is how each engine's query translator recognises the substring match of a string value object. All three live in the runtime: a `partial` written against them is a `partial` against a package type in package-reference mode. Extend the non-generic `IValueObject` marker or the generated classes instead.
 
 ## Edit model save workflow
 
@@ -1058,7 +1133,7 @@ The server keeps **no per-client state**: the resume point travels as the reques
 
 The generated `Journaling{Entity}Repository` wraps the local repository and records **every write entry point**: `InsertAsync`, `UpdateAsync`, `DeleteAsync`, `BulkInsertAsync`, and both `SaveAsync` overloads. A save hook would not do: it only fires for a graph save, and a direct insert or delete would pass it by.
 
-A graph save records **the whole cascade**. `SyncGraphRecorder` walks the same cascade navigations the graph saver walks - literally the same enumeration, `EntityBase.EnumerateCascadeChildren` - under the same rules, so the descendant rows the save writes or deletes are journaled exactly like the root: a save that edits only a child under an unchanged root is not missed, and neither are the children a cascade delete takes along. A table on the path that is not synchronized is walked through without an entry of its own. The whole graph is recorded before the save runs, so entries left behind by a failed save are settled harmlessly at upload, just as they are for a single write.
+A graph save records **the whole cascade**. `SyncGraphRecorder` walks the same cascade navigations the graph saver walks - literally the same enumeration, `EntityBaseCore.EnumerateCascadeChildren` - under the same rules, so the descendant rows the save writes or deletes are journaled exactly like the root: a save that edits only a child under an unchanged root is not missed, and neither are the children a cascade delete takes along. A table on the path that is not synchronized is walked through without an entry of its own. The whole graph is recorded before the save runs, so entries left behind by a failed save are settled harmlessly at upload, just as they are for a single write.
 
 The record is written **before** the business write. The generated repositories manage their own connection, so a decorator cannot enlist its INSERT in the transaction of the write it wraps; something has to go first, and recording the intent first is the safe order. If the business write then fails, the journal holds an entry for a row that was never written - and the upload discards it, because it re-reads the current local row and finds nothing. The opposite order would lose changes outright.
 

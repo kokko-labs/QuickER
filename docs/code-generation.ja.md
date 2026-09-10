@@ -62,7 +62,7 @@ NameValue.Validate(input, errorList);      // VO を作らずに検証だけ
 
 ### 手書きの値オブジェクト
 
-`Create` / `TryCreate` / `Validate` の本体は `ValueObjectBase<TSelf, TValue>` に 1 回だけ置かれています（基底クラスから継承した静的メソッドは `static abstract` インターフェイスメンバを満たします）。そのため、図の列に対応しない概念（メールアドレス・期間・単位など）の値オブジェクトは **3 メンバ**＝private コンストラクタ＋`New`＋`ValidateCore` で書けます:
+`Create` / `TryCreate` / `Validate` の本体は `ValueObjectBaseCore<TSelf, TValue>` に 1 回だけ置かれています（基底クラスから継承した静的メソッドは `static abstract` インターフェイスメンバを満たします）。そのため、図の列に対応しない概念（メールアドレス・期間・単位など）の値オブジェクトは **3 メンバ**＝private コンストラクタ＋`New`＋`ValidateCore` で書けます:
 
 ```csharp
 public sealed class ContactMailValue
@@ -357,6 +357,81 @@ var id = DocumentIdValue.Create();   // Guid.NewGuid() を文字列で内包し�
 引数なしの `Create()` が採番する値は常に 36 文字（`Guid.NewGuid().ToString()`）です。このオプションは図の string 主キーすべてに効くため、意図的に短いキー（たとえば 5 文字のコード列）も GuidKey になります。宣言幅が 36 文字未満の列は生成時に列名を名指しした警告が出たうえで生成は続行します。その列では自動採番が実行時に必ず長さ検証で失敗しますが、短いキーを明示的に与える運用はそのまま使えます。
 
 キーの比較は序数（大文字小文字を区別）です。QuickER は DDL に `DEFAULT` を生成しませんが、QuickER の外で列に `DEFAULT NEWID()` を付けると SQL Server は大文字の GUID を格納し、アプリ側の採番は小文字になります。両者が混在するとキー照合が外れます。
+
+## 生成される基底クラスの拡張
+
+生成される Entity・EditModel・値オブジェクトの基底は **2 層**になっています。
+
+- **`*Core`**: 実装の置き場である固定ランタイム。既定ではインラインで出力され、`--use-runtime-packages` では `QuickER.Runtime*` パッケージが持ちます。
+- **素の名前の型**（`EntityBase` / `EditModelBase<TSelf>` / `ValueObjectBase<TSelf, TValue>` / `ValueObjectStringBase<TSelf>` / `IValueObject` など）: QuickER が**どの出力モードでも per-型コードと同じ場所へソースとして出力する** `partial`。拡張するのはこちらです。
+
+```text
+EntityBaseCore                        ランタイム
+└─ EntityBase                         生成コード   ← ここを拡張する
+   └─ CustomerEntity                  生成コード
+
+EditModelBaseCore                     ランタイム
+└─ EditModelBaseCore<TSelf>           ランタイム
+   └─ EditModelBase<TSelf>            生成コード   ← ここを拡張する
+      └─ CustomerEditModel            生成コード
+
+ValueObjectBaseCore<TSelf, TValue>    ランタイム
+└─ ValueObjectBase<TSelf, TValue>     生成コード   ← ここを拡張する（全値オブジェクトへ届く）
+   └─ ValueObjectStringBase<TSelf>    生成コード   ← ここを拡張する（値の形ごとに 1 クラス）
+      └─ NameValue                    生成コード
+
+IValueObjectCore                      ランタイム
+└─ IValueObject                       生成コード   ← 全値オブジェクトが実装するマーカー
+```
+
+拡張面は常にソースとして出るため、ランタイムをインラインで同梱していてもパッケージ参照にしていても同じ `partial` がそのままコンパイルできます＝**`--use-runtime-packages` を切り替えても拡張コードを書き換える必要はありません**。移植できないのは `*Core` 型に対して `partial` を書いた場合だけです（パッケージ参照モードではコンパイル済みアセンブリの型になるため）。
+
+### 全 Entity・全 EditModel にメンバーを足す
+
+ファイルは生成型と同じ名前空間へ置きます（分割出力なら `{RootNamespace}.Entities`。`--layered-output` では Entity の拡張面はドメイン層・EditModel の拡張面はプレゼンテーション層へ出ます）。
+
+```csharp
+public interface IAuditable
+{
+    string AuditLabel { get; }
+}
+
+// 図のすべての Entity へ届く
+public partial class EntityBase : IAuditable
+{
+    public string DescribeRow() => $"{GetType().Name}/{RowState}";
+
+    string IAuditable.AuditLabel => $"{DisplayName} ({RowState})";
+}
+```
+
+`EditModelBase<TSelf>` も同様で、さらに `TSelf` から具象型を参照できます。自分の part には型引数リストを書きます（`public abstract partial class EditModelBase<TSelf>`）。制約は生成側の part が宣言済みのため省略できます。
+
+`EntityBase` の partial へ足した読み書き可能なインスタンスプロパティは、全エンティティの値集合の一部になります——`HasSameValues` が比較し `Clone` が複製する、各エンティティが自分で宣言したのと同じ扱いです。それを意図しない場合は、メソッド・取得専用プロパティ・インターフェイス実装の形で足してください。
+
+### 全値オブジェクトにメンバー・インターフェイスを足す
+
+`IValueObject` は**すべての**値オブジェクトが実装するマーカーで、値の形に依らず全部へ届く唯一の場所です。
+
+```csharp
+// 既定実装込みでインターフェイスを注入すれば、値オブジェクト側は 1 行も書かなくてよい
+public partial interface IValueObject : IAuditable
+{
+    string IAuditable.AuditLabel => $"{DisplayValue}";
+}
+
+// 同じ理由で、マーカーに対する拡張メソッドも全部へ届く
+public static class ValueObjectExtensions
+{
+    public static bool IsBlank(this IValueObject value) => value.UnderlyingValue is null or "";
+}
+```
+
+クラス側で同じ役目を持つのが `ValueObjectBase<TSelf, TValue>` です。値の形に依らず全値オブジェクトがこの型から派生するため、ここへ足したメンバーは全部へ届き、マーカーと違って `Value` と `TSelf` を参照できます。自分の part には型引数リストを書きます（`public partial class ValueObjectBase<TSelf, TValue>`）。制約は生成側の part が宣言済みのため省略できます。
+
+「文字列の値オブジェクトだけ」のように 1 つの形だけを狙うなら、その形のクラスへ足します（`public abstract partial class ValueObjectStringBase<TSelf> { … }`）。値の形ごとのクラスも生成コードで、いずれも拡張してよい `partial` です。
+
+**ジェネリック契約の `IValueObject<TSelf>` / `IValueObject<TSelf, TValue>` は拡張面ではありません。** `IStringMatchValueObject<TSelf>` も同様です。前 2 つは静的ファクトリの契約、3 つ目は各エンジンのクエリ翻訳が「文字列値オブジェクトの部分一致」を識別するための契約で、いずれもランタイム側に在るため、そこへ書いた `partial` はパッケージ参照モードではパッケージの型に対する `partial` になります。非ジェネリックの `IValueObject` マーカーか、生成されるクラスを拡張してください。
 
 ## EditModel の保存ワークフロー
 
@@ -1058,7 +1133,7 @@ app.MapGeneratedRemoteEndpoints(RemoteAccess.RequireAuthorization);
 
 生成される `Journaling{Entity}Repository` がローカルのリポジトリを包み、**全書き込み入口**（`InsertAsync` / `UpdateAsync` / `DeleteAsync` / `BulkInsertAsync` / `SaveAsync` 2 種）で記録します。保存フックでは足りません——グラフ保存でしか発火せず、直接の挿入や削除が素通りしてしまいます。
 
-`SaveAsync` のグラフ保存は**カスケード全体**を記録します。`SyncGraphRecorder` が、保存側（グラフセーバー）と同じカスケードナビゲーションを——文字どおり同じ列挙（`EntityBase.EnumerateCascadeChildren`）で——同じ規則で辿り、保存が書く・消す子孫の行をルートと同じように記録します。Unchanged のルート配下で子だけを編集した保存も、カスケード削除で一緒に消える子も漏れません（経路上にある同期対象外のテーブルは、自分の記録を残さずに通過するだけです）。記録は保存の前にグラフ全体ぶん行われるため、途中で保存が失敗しても余分なエントリは（単独の書き込みと同じく）アップロード時に無害化されます。
+`SaveAsync` のグラフ保存は**カスケード全体**を記録します。`SyncGraphRecorder` が、保存側（グラフセーバー）と同じカスケードナビゲーションを——文字どおり同じ列挙（`EntityBaseCore.EnumerateCascadeChildren`）で——同じ規則で辿り、保存が書く・消す子孫の行をルートと同じように記録します。Unchanged のルート配下で子だけを編集した保存も、カスケード削除で一緒に消える子も漏れません（経路上にある同期対象外のテーブルは、自分の記録を残さずに通過するだけです）。記録は保存の前にグラフ全体ぶん行われるため、途中で保存が失敗しても余分なエントリは（単独の書き込みと同じく）アップロード時に無害化されます。
 
 記録は業務書き込みの**前**に行います。生成 Repository は接続を自分で管理するため、デコレータの INSERT を包んだ書き込みのトランザクションへ乗せられません。どちらかを先にせざるを得ず、意図を先に記録する方が安全です。業務書き込みが失敗した場合、ジャーナルには書かれなかった行のエントリが残りますが、アップロードはローカルの現在行を読み直して送るため「送るものが無い」として破棄されます。逆順にすると変更がそのまま失われます。
 

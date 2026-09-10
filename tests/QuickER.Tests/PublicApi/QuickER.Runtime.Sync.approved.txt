@@ -60,8 +60,8 @@ public interface QuickER.Runtime.Sync.ISyncTable
 
 public interface QuickER.Runtime.Sync.ISyncTableDescriptor
     public virtual System.Type EntityType { get; }
-    public virtual byte[] ReadEntityRowVersion(QuickER.Runtime.EntityBase entity)
-    public virtual string FormatEntityKey(QuickER.Runtime.EntityBase entity)
+    public virtual byte[] ReadEntityRowVersion(QuickER.Runtime.EntityBaseCore entity)
+    public virtual string FormatEntityKey(QuickER.Runtime.EntityBaseCore entity)
     public virtual string TableName { get; }
 
 public abstract class QuickER.Runtime.Sync.JournalingRepository<TEntity, TKey> : QuickER.Runtime.Sync.JournalingRepositoryBase<TEntity, TKey>, QuickER.Runtime.IRemoteRepository<TEntity, TKey>, QuickER.Runtime.IRepository<TEntity, TKey>
@@ -163,7 +163,7 @@ public sealed class QuickER.Runtime.Sync.SyncEngine
 
 public sealed class QuickER.Runtime.Sync.SyncGraphRecorder
     public .ctor(System.Collections.Generic.IEnumerable<QuickER.Runtime.Sync.ISyncTableDescriptor> descriptors)
-    public System.Threading.Tasks.Task RecordSaveAsync(QuickER.Runtime.Sync.SyncJournal journal, QuickER.Runtime.EntityBase entity, bool cascadeSave, bool cascadeDelete, System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task RecordSaveAsync(QuickER.Runtime.Sync.SyncJournal journal, QuickER.Runtime.EntityBaseCore entity, bool cascadeSave, bool cascadeDelete, System.Threading.CancellationToken cancellationToken = default)
 
 public sealed class QuickER.Runtime.Sync.SyncJournal
     public .ctor(QuickER.Runtime.ISqlExecutor localSqlExecutor)
@@ -301,8 +301,8 @@ public sealed class QuickER.Runtime.Sync.SyncTableDescriptor<TEntity, TKey> : Qu
     public System.Func<string, TKey> ParseKey { get; init; }
     public System.Type EntityType { get; }
     public bool IsVersionless { get; init; }
-    public byte[] ReadEntityRowVersion(QuickER.Runtime.EntityBase entity)
-    public string FormatEntityKey(QuickER.Runtime.EntityBase entity)
+    public byte[] ReadEntityRowVersion(QuickER.Runtime.EntityBaseCore entity)
+    public string FormatEntityKey(QuickER.Runtime.EntityBaseCore entity)
     public string LocalAnchorSql { get; init; }
     public string LocalDeleteAllSql { get; init; }
     public string LocalExistingKeysSql { get; init; }

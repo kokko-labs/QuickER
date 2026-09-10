@@ -807,7 +807,7 @@ public class CliAppTests
     }
 
     /// <summary>
-    /// --use-runtime-packages 指定時は生成コードにランタイム（固定コード）の EntityBase が含まれず、
+    /// --use-runtime-packages 指定時は生成コードにランタイム（固定コード）の EntityBaseCore が含まれず（拡張シムの EntityBase はスキーマ依存側の生成物として出る）、
     /// QuickER.Runtime への using 参照に切り替わり、PackageReference 案内が標準出力へ表示されることを検証する
     /// </summary>
     [Fact(DisplayName = "--use-runtime-packages 指定でランタイム非同梱＋案内が出力される")]
@@ -838,7 +838,7 @@ public class CliAppTests
             exit.Should().Be(0);
             var files = Directory.GetFiles(outDir, "*.g.cs");
             var code = string.Join("\n", files.Select(File.ReadAllText));
-            code.Should().NotContain("class EntityBase");
+            code.Should().NotContain("class EntityBaseCore");
             code.Should().Contain("using QuickER.Runtime;");
 
             var stdout = writer.ToString();
@@ -878,7 +878,7 @@ public class CliAppTests
             exit.Should().Be(0);
             var files = Directory.GetFiles(outDir, "*.g.cs");
             var code = string.Join("\n", files.Select(File.ReadAllText));
-            code.Should().Contain("class EntityBase");
+            code.Should().Contain("class EntityBaseCore");
         }
         finally
         {

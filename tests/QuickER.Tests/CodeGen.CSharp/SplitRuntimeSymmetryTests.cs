@@ -275,15 +275,35 @@ public class SplitRuntimeSymmetryTests
 
         return TypeDeclarationRegex
             .Matches(normalized)
-            .Select(match => match.Groups["name"].Value)
+            .Select(FormatTypeName)
             .Distinct(StringComparer.Ordinal)
             .OrderBy(name => name, StringComparer.Ordinal)
             .ToList();
     }
 
+    /// <summary>型宣言 1 件を「名前＋型引数の個数」（例 <c>IValueObject`1</c>）へ正規化する</summary>
+    /// <remarks>
+    /// アリティまで含めるのは、同名でアリティだけが違う型が別々のファイルへ宣言されるため
+    /// （拡張シムの <c>IValueObject</c> は per-型ファイル・固定 infra の <c>IValueObject&lt;TSelf&gt;</c> /
+    /// <c>IValueObject&lt;TSelf, TValue&gt;</c> は Runtime ファイル）。名前だけで突き合わせると別物どうしが
+    /// 同一視され、「固定 infra とスキーマ依存の型集合は排他」の判定が誤検知する。
+    /// </remarks>
+    private static string FormatTypeName(Match match)
+    {
+        var generics = match.Groups["generics"].Value;
+
+        if (string.IsNullOrEmpty(generics))
+        {
+            return match.Groups["name"].Value;
+        }
+
+        var arity = generics.Count(character => character == ',') + 1;
+        return $"{match.Groups["name"].Value}`{arity}";
+    }
+
     /// <summary>トップレベル型宣言（列 0・public / internal）を拾う正規表現</summary>
     private static readonly Regex TypeDeclarationRegex = new(
-        @"^(?:public|internal)(?:\s+(?:sealed|abstract|static|partial|readonly|ref))*\s+(?:class|interface|struct|enum|record)\s+(?<name>\w+)",
+        @"^(?:public|internal)(?:\s+(?:sealed|abstract|static|partial|readonly|ref))*\s+(?:class|interface|struct|enum|record)\s+(?<name>\w+)(?<generics><[^>]*>)?",
         RegexOptions.Multiline | RegexOptions.Compiled
     );
 

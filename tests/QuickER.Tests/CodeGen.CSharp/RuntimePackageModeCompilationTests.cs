@@ -65,9 +65,11 @@ public class RuntimePackageModeCompilationTests
             );
         result.Files.Should().NotBeEmpty();
 
-        // 生成コードには固定 infra の定義が一切出ない（パッケージが提供する）
+        // 生成コードには固定 infra の定義が一切出ない（パッケージが提供する）。
+        // 拡張シム（EntityBase / EditModelBase<TSelf> / VO シム）はスキーマ依存側の生成物として
+        // パッケージ参照モードでも出るため、固定 infra 側の型名（*Core）で判定する
         var allContent = string.Join(Environment.NewLine, result.Files.Select(f => f.Content));
-        allContent.Should().NotContain("abstract partial class EntityBase");
+        allContent.Should().NotContain("abstract partial class EntityBaseCore");
         allContent.Should().NotContain("interface IRepository<TEntity");
         allContent.Should().NotContain("class SqlServerRepository<");
         allContent.Should().NotContain("class SqliteRepository<");

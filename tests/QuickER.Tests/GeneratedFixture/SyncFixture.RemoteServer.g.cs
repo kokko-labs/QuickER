@@ -548,7 +548,7 @@ internal static class RemoteServerEngine
         RouteGroupBuilder group,
         string entityRoute
     )
-        where TEntity : EntityBase, new()
+        where TEntity : EntityBaseCore, new()
         where TRepository : notnull, IRemoteRepository<TEntity, TKey>
     {
         group.MapPost(
@@ -726,7 +726,7 @@ internal static class RemoteServerEngine
         IEnumerable<TEntity> entities,
         bool cascade
     )
-        where TEntity : EntityBase
+        where TEntity : EntityBaseCore
     {
         var rowVersions = new List<RemoteRowVersionEntry>();
 
@@ -768,7 +768,7 @@ internal static class RemoteServerEngine
         IEnumerable<TEntity> entities,
         bool cascade
     )
-        where TEntity : EntityBase
+        where TEntity : EntityBaseCore
     {
         var skipped = new List<RemoteEntityRef>();
 
@@ -1198,7 +1198,7 @@ public static partial class GeneratedRemoteEndpoints
     /// </para>
     /// </remarks>
     private static void MapSyncEndpoints<TEntity, TKey>(RouteGroupBuilder group, string entityRoute)
-        where TEntity : EntityBase, new()
+        where TEntity : EntityBaseCore, new()
     {
         group.MapPost(
             $"{entityRoute}/{RemoteSyncOperations.Ceiling}",
@@ -1260,7 +1260,7 @@ public static partial class GeneratedRemoteEndpoints
         RouteGroupBuilder group,
         string entityRoute
     )
-        where TEntity : EntityBase, new()
+        where TEntity : EntityBaseCore, new()
     {
         group.MapPost(
             $"{entityRoute}/{RemoteSyncOperations.Page}",
@@ -1313,7 +1313,7 @@ public static partial class GeneratedRemoteEndpoints
 
     /// <summary>Resolves the differential source the sync endpoints answer from.</summary>
     private static ISyncServerSource<TEntity, TKey> SyncSource<TEntity, TKey>(HttpContext context)
-        where TEntity : EntityBase, new() =>
+        where TEntity : EntityBaseCore, new() =>
         context.RequestServices.GetRequiredService<ISyncServerSource<TEntity, TKey>>();
 
     /// <summary>Validates the batch size carried by a request body (a non-positive value is reported to the client as HTTP 400).</summary>

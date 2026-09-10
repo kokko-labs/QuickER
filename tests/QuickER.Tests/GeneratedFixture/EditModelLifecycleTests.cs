@@ -279,7 +279,7 @@ public sealed class EditModelLifecycleTests
     // ===== 必須検証が触るエラーの範囲 =====
 
     /// <summary>指定プロパティのエラー一覧を取り出す</summary>
-    private static string[] GetErrors(EditModelBase model, string propertyName) =>
+    private static string[] GetErrors(EditModelBaseCore model, string propertyName) =>
         ((IEnumerable)model.GetErrors(propertyName)).Cast<string>().ToArray();
 
     [Fact(

@@ -264,7 +264,7 @@ internal static class RemoteServerEngine
         RouteGroupBuilder group,
         string entityRoute
     )
-        where TEntity : EntityBase, new()
+        where TEntity : EntityBaseCore, new()
         where TRepository : notnull, IRemoteRepository<TEntity, TKey>
     {
         group.MapPost(
@@ -442,7 +442,7 @@ internal static class RemoteServerEngine
         IEnumerable<TEntity> entities,
         bool cascade
     )
-        where TEntity : EntityBase
+        where TEntity : EntityBaseCore
     {
         var rowVersions = new List<RemoteRowVersionEntry>();
 
@@ -484,7 +484,7 @@ internal static class RemoteServerEngine
         IEnumerable<TEntity> entities,
         bool cascade
     )
-        where TEntity : EntityBase
+        where TEntity : EntityBaseCore
     {
         var skipped = new List<RemoteEntityRef>();
 

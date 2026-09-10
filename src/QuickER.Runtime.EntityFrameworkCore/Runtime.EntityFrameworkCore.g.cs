@@ -101,7 +101,7 @@ public sealed class EntitySaveMetadata
             .Where(property =>
                 property.CanRead
                 && property.CanWrite
-                && property.DeclaringType != typeof(EntityBase)
+                && property.DeclaringType != typeof(EntityBaseCore)
                 && property.GetCustomAttribute<NavigationReferenceAttribute>() is null
             )
             .ToList();
@@ -201,14 +201,14 @@ public sealed class EntitySaveMetadata
         BindingFlags.NonPublic | BindingFlags.Static
     )!;
 
-    /// <summary>Resolved <see cref="PropertyInfo"/> of <see cref="EntityBase.RowState"/>.</summary>
-    private static readonly PropertyInfo _rowStateProperty = typeof(EntityBase).GetProperty(
-        nameof(EntityBase.RowState)
+    /// <summary>Resolved <see cref="PropertyInfo"/> of <see cref="EntityBaseCore.RowState"/>.</summary>
+    private static readonly PropertyInfo _rowStateProperty = typeof(EntityBaseCore).GetProperty(
+        nameof(EntityBaseCore.RowState)
     )!;
 
     /// <summary>Gets the expression-tree-compiled delegate that materializes one row of SelectColumns (the fixed SELECT set) (built once per type and cached).</summary>
     /// <remarks>The arguments are <c>(reader, ordinals)</c>. <c>ordinals</c> holds the column ordinals in SelectColumns order, resolved once before the row loop.</remarks>
-    public required Func<DbDataReader, int[], EntityBase> SelectMaterializer { get; init; }
+    public required Func<DbDataReader, int[], EntityBaseCore> SelectMaterializer { get; init; }
 
     /// <summary>Builds the type-specialized reader accessor table (each value is a <see cref="DbDataReader"/> method taking an <c>int</c> and returning the corresponding CLR type).</summary>
     private static IReadOnlyDictionary<Type, MethodInfo> BuildTypedReaders()
@@ -275,7 +275,7 @@ public sealed class EntitySaveMetadata
             return null;
         }
 
-        // FlattenHierarchy: Create is declared on ValueObjectBase, and without the flag reflection never returns a
+        // FlattenHierarchy: Create is declared on ValueObjectBaseCore, and without the flag reflection never returns a
         // static member declared on a base class - the resolution would quietly fail and every value object column
         // would take the SetColumnValue fallback instead of the fast path.
         var create = propertyType.GetMethod(
@@ -302,7 +302,7 @@ public sealed class EntitySaveMetadata
     /// <see cref="SetColumnValue"/> (dialect-specific conversion / value object re-wrapping).
     /// The resulting final state (<c>RowState = Unchanged</c>) matches the previous row mapping.
     /// </remarks>
-    private static Func<DbDataReader, int[], EntityBase> BuildSelectMaterializer(
+    private static Func<DbDataReader, int[], EntityBaseCore> BuildSelectMaterializer(
         Type entityType,
         IReadOnlyList<PropertyInfo> properties
     )
@@ -329,11 +329,11 @@ public sealed class EntitySaveMetadata
                 Expression.Constant(RowState.Unchanged)
             )
         );
-        body.Add(Expression.Convert(entityVar, typeof(EntityBase)));
+        body.Add(Expression.Convert(entityVar, typeof(EntityBaseCore)));
 
-        var block = Expression.Block(typeof(EntityBase), new[] { entityVar }, body);
+        var block = Expression.Block(typeof(EntityBaseCore), new[] { entityVar }, body);
         return Expression
-            .Lambda<Func<DbDataReader, int[], EntityBase>>(block, readerParam, ordinalsParam)
+            .Lambda<Func<DbDataReader, int[], EntityBaseCore>>(block, readerParam, ordinalsParam)
             .Compile();
     }
 
@@ -393,7 +393,7 @@ public sealed class EntitySaveMetadata
         // Fallback: call the previous SetColumnValue (DBNull to null / dialect-specific conversion / value object re-wrapping) via the ordinal
         return Expression.Call(
             _setColumnValueMethod,
-            Expression.Convert(entityExpr, typeof(EntityBase)),
+            Expression.Convert(entityExpr, typeof(EntityBaseCore)),
             Expression.Constant(property, typeof(PropertyInfo)),
             Expression.Call(readerParam, _getValueMethod, ordinal)
         );
@@ -417,11 +417,11 @@ public sealed class EntitySaveMetadata
         DbDataReader reader,
         int[] ordinals
     )
-        where TEntity : EntityBase => (TEntity)SelectMaterializer(reader, ordinals);
+        where TEntity : EntityBaseCore => (TEntity)SelectMaterializer(reader, ordinals);
 
     /// <summary>Maps one data reader row to an entity (single-row variant that resolves the SelectColumns ordinals on each call).</summary>
     public TEntity MapEntity<TEntity>(DbDataReader reader)
-        where TEntity : EntityBase, new() => (TEntity)SelectMaterializer(reader, SelectOrdinals(reader));
+        where TEntity : EntityBaseCore, new() => (TEntity)SelectMaterializer(reader, SelectOrdinals(reader));
 
     /// <summary>
     /// The column resolution of one raw SQL result set: the ordinal of every SELECT column, plus the ordinals of the
@@ -498,7 +498,7 @@ public sealed class EntitySaveMetadata
         DbDataReader reader,
         RawSqlRowPlan plan
     )
-        where TEntity : EntityBase, new()
+        where TEntity : EntityBaseCore, new()
     {
         var entity = new TEntity();
 
@@ -519,7 +519,7 @@ public sealed class EntitySaveMetadata
     /// assigns <c>null</c>; otherwise the value is re-wrapped for value objects, coerced from the SQLite storage type,
     /// or passed through for SQL Server, depending on the dialect.
     /// </summary>
-    private static void SetColumnValue(EntityBase entity, PropertyInfo property, object value)
+    private static void SetColumnValue(EntityBaseCore entity, PropertyInfo property, object value)
     {
         if (value is DBNull)
         {
@@ -554,7 +554,7 @@ public sealed class EntitySaveMetadata
         DbDataReader reader,
         RawSqlRowPlan plan
     )
-        where TEntity : EntityBase, new()
+        where TEntity : EntityBaseCore, new()
     {
         var entity = MapEntityStrict<TEntity>(reader, plan);
 
@@ -577,7 +577,7 @@ public sealed class EntitySaveMetadata
     /// <summary>Maps a single raw SQL result row, resolving the column plan on this call (convenience for one-row reads).</summary>
     /// <remarks>Resolve the plan yourself with <see cref="CreateRawSqlRowPlan"/> when reading many rows, so the ordinals are resolved once for the whole result set.</remarks>
     public TEntity MapEntityFromRawSql<TEntity>(DbDataReader reader)
-        where TEntity : EntityBase, new() =>
+        where TEntity : EntityBaseCore, new() =>
         MapEntityFromRawSql<TEntity>(reader, CreateRawSqlRowPlan(reader));
 
     /// <summary>Enumerates the data reader's column name to ordinal map once, case-insensitively (used to detect excluded columns in raw SQL results).</summary>
@@ -652,22 +652,22 @@ public sealed class EntitySaveMetadata
 /// </remarks>
 public sealed class SaveHookSession(
     ISaveHookRegistry registry,
-    Func<EntityBase, ISaveHookContext> contextFactory
+    Func<EntityBaseCore, ISaveHookContext> contextFactory
 )
 {
     private readonly ISaveHookRegistry _registry = registry;
-    private readonly Func<EntityBase, ISaveHookContext> _contextFactory = contextFactory;
-    private readonly HashSet<EntityBase> _skipped = new(ReferenceEqualityComparer.Instance);
+    private readonly Func<EntityBaseCore, ISaveHookContext> _contextFactory = contextFactory;
+    private readonly HashSet<EntityBaseCore> _skipped = new(ReferenceEqualityComparer.Instance);
 
     /// <summary>Gets the set of entities skipped by a Before returning <c>false</c> (reference equality). Used by AcceptChanges to leave states untouched.</summary>
-    public IReadOnlySet<EntityBase> Skipped => _skipped;
+    public IReadOnlySet<EntityBaseCore> Skipped => _skipped;
 
     /// <summary>Adds an entity to the skip set.</summary>
-    public void Skip(EntityBase entity) => _skipped.Add(entity);
+    public void Skip(EntityBaseCore entity) => _skipped.Add(entity);
 
     /// <summary>Calls Before in registration order and short-circuits at the first <c>false</c> (types with no hooks yield <c>true</c>).</summary>
     public Task<bool> InvokeBeforeAsync(
-        EntityBase entity,
+        EntityBaseCore entity,
         SaveOperation operation,
         CancellationToken cancellationToken
     )
@@ -680,7 +680,7 @@ public sealed class SaveHookSession(
 
     /// <summary>Calls After in registration order (types with no hooks do nothing). The context is created bound to the entity type.</summary>
     public Task InvokeAfterAsync(
-        EntityBase entity,
+        EntityBaseCore entity,
         SaveOperation operation,
         CancellationToken cancellationToken
     )
@@ -701,12 +701,12 @@ public sealed class SaveHookSession(
 public static class EntityGraphSaver
 {
     /// <summary>Returns whether the entity itself, or (when cascading) any child, has changes.</summary>
-    public static bool HasChanges(EntityBase entity, bool cascade) =>
+    public static bool HasChanges(EntityBaseCore entity, bool cascade) =>
         entity.HasChanges
         || (cascade && EnumerateCascadeChildren(entity).Any(child => HasChanges(child, true)));
 
     /// <summary>Finalizes saved entities to Unchanged after commit.</summary>
-    public static void AcceptChanges(EntityBase entity, bool cascade) =>
+    public static void AcceptChanges(EntityBaseCore entity, bool cascade) =>
         AcceptChanges(entity, cascade, null);
 
     /// <summary>
@@ -714,9 +714,9 @@ public static class EntityGraphSaver
     /// because a save hook's Before returned <c>false</c>) were not operated on, so their state is left untouched.
     /// </summary>
     public static void AcceptChanges(
-        EntityBase entity,
+        EntityBaseCore entity,
         bool cascade,
-        IReadOnlySet<EntityBase>? skip
+        IReadOnlySet<EntityBaseCore>? skip
     )
     {
         if (entity.IsRemoved)
@@ -740,7 +740,7 @@ public static class EntityGraphSaver
     }
 
     /// <summary>Enumerates the cascade-target child entities (nulls are excluded).</summary>
-    private static IEnumerable<EntityBase> EnumerateCascadeChildren(EntityBase entity)
+    private static IEnumerable<EntityBaseCore> EnumerateCascadeChildren(EntityBaseCore entity)
     {
         foreach (var navigation in EntitySaveMetadata.For(entity.GetType()).CascadeNavigations)
         {
@@ -753,7 +753,7 @@ public static class EntityGraphSaver
 
             if (navigation.IsCollection)
             {
-                if (value is IEnumerable<EntityBase> children)
+                if (value is IEnumerable<EntityBaseCore> children)
                 {
                     foreach (var child in children)
                     {
@@ -764,7 +764,7 @@ public static class EntityGraphSaver
                     }
                 }
             }
-            else if (value is EntityBase child)
+            else if (value is EntityBaseCore child)
             {
                 yield return child;
             }
@@ -774,7 +774,7 @@ public static class EntityGraphSaver
 
 /// <summary>
 /// EF Core method call translator that translates Contains/StartsWith/EndsWith of string value objects
-/// (derived from <see cref="ValueObjectStringBase{TSelf}"/>) into SQL LIKE.
+/// (the members of <see cref="IStringMatchValueObject{TSelf}"/>) into SQL LIKE.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -832,8 +832,7 @@ public sealed class ValueObjectStringMethodTranslator(
             instance is null
             || arguments.Count != 1
             || method.Name is not ("Contains" or "StartsWith" or "EndsWith")
-            || method.DeclaringType is not { IsGenericType: true } declaring
-            || declaring.GetGenericTypeDefinition() != typeof(ValueObjectStringBase<>)
+            || StringMatchContract(method) is not { } contract
         )
         {
             return null;
@@ -848,7 +847,7 @@ public sealed class ValueObjectStringMethodTranslator(
         {
             argument = _sqlExpressionFactory.ApplyTypeMapping(arguments[0], _stringTypeMapping);
         }
-        else if (parameterType == declaring.GetGenericArguments()[0])
+        else if (parameterType == contract.GetGenericArguments()[0])
         {
             argument = _sqlExpressionFactory.ApplyTypeMapping(arguments[0], instance.TypeMapping);
         }
@@ -870,6 +869,41 @@ public sealed class ValueObjectStringMethodTranslator(
 
         return _sqlExpressionFactory.Like(column, pattern, escapeChar);
     }
+
+    /// <summary>Returns the closed <see cref="IStringMatchValueObject{TSelf}"/> the method implements, or null when it is not one of those substring matches.</summary>
+    /// <remarks>
+    /// The judgement goes through the interface map, so only the type that actually implements those members qualifies:
+    /// testing the name against a type that merely implements the interface would also claim a <c>Contains</c> a concrete
+    /// value object declares for itself. The contract is returned rather than a bool because its type argument is the
+    /// value object type the TSelf overload takes.
+    /// </remarks>
+    private static Type? StringMatchContract(MethodInfo method) =>
+        StringMatchContractCache.GetOrAdd(
+            method,
+            static m =>
+            {
+                if (m.DeclaringType is not { IsInterface: false } declaring)
+                {
+                    return null;
+                }
+
+                var contract = Array.Find(
+                    declaring.GetInterfaces(),
+                    i =>
+                        i.IsGenericType
+                        && i.GetGenericTypeDefinition() == typeof(IStringMatchValueObject<>)
+                );
+
+                return contract is not null
+                    && Array.IndexOf(declaring.GetInterfaceMap(contract).TargetMethods, m) >= 0
+                    ? contract
+                    : null;
+            }
+        );
+
+    /// <summary>Cache of the judgement per method: the interface probe allocates, and query translation asks for the same methods repeatedly.</summary>
+    private static readonly ConcurrentDictionary<MethodInfo, Type?> StringMatchContractCache =
+        new();
 
     /// <summary>Builds the LIKE pattern expression for the given method name (e.g. '%' + escaped argument + '%').</summary>
     private SqlExpression BuildLikePattern(string methodName, SqlExpression argument)
@@ -942,7 +976,7 @@ public sealed class ValueObjectStringMethodTranslator(
 
 /// <summary>
 /// EF Core member translator that translates a <c>.Value</c> member access of a value object
-/// (derived from <see cref="ValueObjectBase{TSelf, TValue}"/>) as a column of the raw value.
+/// (derived from <see cref="ValueObjectBaseCore{TSelf, TValue}"/>) as a column of the raw value.
 /// </summary>
 /// <remarks>
 /// This lets EF Core translate predicates that unwrap the raw value, such as <c>string.IsNullOrEmpty(x.Col.Value)</c>
@@ -970,7 +1004,7 @@ public sealed class ValueObjectValueMemberTranslator(
             instance is null
             || member.Name != "Value"
             || member.DeclaringType is not { IsGenericType: true } declaring
-            || declaring.GetGenericTypeDefinition() != typeof(ValueObjectBase<,>)
+            || declaring.GetGenericTypeDefinition() != typeof(ValueObjectBaseCore<,>)
         )
         {
             return null;
@@ -1159,7 +1193,7 @@ public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TConte
         object? parameters = null,
         CancellationToken cancellationToken = default
     )
-        where TEntity : EntityBase, new()
+        where TEntity : EntityBaseCore, new()
     {
         ArgumentNullException.ThrowIfNull(sql);
 
@@ -1289,7 +1323,7 @@ public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TConte
 public sealed class EfCoreSqlQueryExecutor<TEntity, TContext>(
     IDbContextFactory<TContext> contextFactory
 ) : ISqlQueryExecutor<TEntity>
-    where TEntity : EntityBase
+    where TEntity : EntityBaseCore
     where TContext : DbContext
 {
     /// <summary>The source that creates the DbContext.</summary>
@@ -1664,7 +1698,7 @@ public sealed class EfCoreSqlQueryExecutor<TEntity, TContext>(
     }
 
     /// <summary>Normalizes the retrieved graph (root plus what was read via Include) to RowState=Unchanged (the same post-mapping state as the existing version).</summary>
-    private static void MarkGraphUnchanged(EntityBase entity, IReadOnlyList<IncludeNode> includes)
+    private static void MarkGraphUnchanged(EntityBaseCore entity, IReadOnlyList<IncludeNode> includes)
     {
         entity.MarkUnchanged();
 
@@ -1677,7 +1711,7 @@ public sealed class EfCoreSqlQueryExecutor<TEntity, TContext>(
                 continue;
             }
 
-            if (value is IEnumerable<EntityBase> children)
+            if (value is IEnumerable<EntityBaseCore> children)
             {
                 foreach (var child in children)
                 {
@@ -1687,7 +1721,7 @@ public sealed class EfCoreSqlQueryExecutor<TEntity, TContext>(
                     }
                 }
             }
-            else if (value is EntityBase child)
+            else if (value is EntityBaseCore child)
             {
                 MarkGraphUnchanged(child, node.Children);
             }
@@ -1716,7 +1750,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
     ISaveHookRegistry? saveHooks = null,
     ISqlExecutor? sqlExecutor = null
 ) : IRepository<TEntity, TKey>
-    where TEntity : EntityBase, new()
+    where TEntity : EntityBaseCore, new()
     where TContext : DbContext
 {
     /// <summary>Metadata built once per entity type (reused via a static field).</summary>
@@ -1738,13 +1772,13 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
 
     /// <summary>One record of "entity to save, EF Core entry, operation to perform" recorded by TrackGraph (the operation is updated when switched by a retry).</summary>
     private sealed class TrackedOperation(
-        EntityBase entity,
+        EntityBaseCore entity,
         EntityEntry entry,
         SaveOperation operation
     )
     {
         /// <summary>The entity to save.</summary>
-        public EntityBase Entity { get; } = entity;
+        public EntityBaseCore Entity { get; } = entity;
 
         /// <summary>The corresponding EF Core tracking entry (used for applying State and for type checks on retry).</summary>
         public EntityEntry Entry { get; } = entry;
@@ -2099,7 +2133,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
         // SaveChanges writes the row version the database assigned straight onto the entity, but this transaction has not
         // committed yet. The versions the entities were read with are kept so that they can be put back for the duration of
         // the After pass (see below).
-        var readVersions = new List<(EntityBase Entity, PropertyInfo Property, object? Version)>();
+        var readVersions = new List<(EntityBaseCore Entity, PropertyInfo Property, object? Version)>();
 
         foreach (var op in survivors)
         {
@@ -2123,7 +2157,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
         // path's RowVersionCollector expressed for EF Core; no value-object wrapping is needed here because the values never
         // leave their property (the ADO collector wraps because the database hands it a raw byte[]).
         var assignedVersions =
-            new List<(EntityBase Entity, PropertyInfo Property, object? Version)>();
+            new List<(EntityBaseCore Entity, PropertyInfo Property, object? Version)>();
 
         foreach (var (entity, property, readVersion) in readVersions)
         {
@@ -2223,7 +2257,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
             entity,
             node =>
             {
-                var current = (EntityBase)node.Entry.Entity;
+                var current = (EntityBaseCore)node.Entry.Entity;
 
                 // When the parent is to be deleted, handling of descendants follows cascadeDelete (same as the existing version's descendants-first DELETE).
                 if (node.SourceEntry is { State: EntityState.Deleted })
@@ -2249,7 +2283,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
     /// <summary>Adds a record for hook firing when the EntityState is a save target (Added/Modified/Deleted); Unchanged is ignored.</summary>
     private static void RecordOperation(
         List<TrackedOperation> tracked,
-        EntityBase entity,
+        EntityBaseCore entity,
         EntityEntry entry
     )
     {

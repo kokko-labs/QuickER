@@ -44,7 +44,7 @@ public sealed class SqlExecutorInjectionRuntimeTests : IDisposable
             object? parameters = null,
             CancellationToken cancellationToken = default
         )
-            where TEntity : EntityBase, new()
+            where TEntity : EntityBaseCore, new()
         {
             Calls.Add(sql);
             return inner.QueryBySqlAsync<TEntity>(sql, parameters, cancellationToken);

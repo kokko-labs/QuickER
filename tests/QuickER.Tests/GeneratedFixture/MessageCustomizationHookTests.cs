@@ -378,7 +378,7 @@ public class MessageCustomizationHookTests
 
     /// <summary>エラーメッセージ一覧を文字列で取得する</summary>
     private static System.Collections.Generic.List<string> GetErrors(
-        EditModelBase model,
+        EditModelBaseCore model,
         string propertyName
     ) => ((IEnumerable)model.GetErrors(propertyName)).Cast<string>().ToList();
 }

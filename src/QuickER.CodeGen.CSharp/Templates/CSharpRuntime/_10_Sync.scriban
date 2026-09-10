@@ -649,7 +649,7 @@ public sealed class SyncJournal
 /// </remarks>
 /// <typeparam name="TEntity">The entity type.</typeparam>
 public sealed record SyncChangeBatch<TEntity>(IReadOnlyList<TEntity> Rows, bool HasMore)
-    where TEntity : EntityBase, new();
+    where TEntity : EntityBaseCore, new();
 
 /// <summary>
 /// One side's unbounded binary columns, reachable by column name so the engine can copy them without knowing the entity.
@@ -715,7 +715,7 @@ public sealed record SyncBinaryColumnAccessor<TKey>(
 
 /// <summary>Everything about one synchronised table that the journal recorder needs, with the entity's types erased.</summary>
 /// <remarks>
-/// The recorder walks a graph of <see cref="EntityBase"/> without knowing any entity type, so it looks a node's table up
+/// The recorder walks a graph of <see cref="EntityBaseCore"/> without knowing any entity type, so it looks a node's table up
 /// by its CLR type and asks the descriptor it finds for the two things a journal entry carries.
 /// </remarks>
 public interface ISyncTableDescriptor
@@ -728,11 +728,11 @@ public interface ISyncTableDescriptor
 
     /// <summary>Renders the entity's primary key into the text form the journal stores.</summary>
     /// <param name="entity">An entity of <see cref="EntityType"/>.</param>
-    string FormatEntityKey(EntityBase entity);
+    string FormatEntityKey(EntityBaseCore entity);
 
     /// <summary>Reads the mirrored server version off the entity (null for a table without a version column).</summary>
     /// <param name="entity">An entity of <see cref="EntityType"/>.</param>
-    byte[]? ReadEntityRowVersion(EntityBase entity);
+    byte[]? ReadEntityRowVersion(EntityBaseCore entity);
 }
 
 /// <summary>
@@ -756,7 +756,7 @@ public interface ISyncTableDescriptor
 /// <typeparam name="TEntity">The entity type.</typeparam>
 /// <typeparam name="TKey">The primary key type.</typeparam>
 public sealed class SyncTableDescriptor<TEntity, TKey> : ISyncTableDescriptor
-    where TEntity : EntityBase, new()
+    where TEntity : EntityBaseCore, new()
 {
     /// <inheritdoc />
     public required string TableName { get; init; }
@@ -831,7 +831,7 @@ public sealed class SyncTableDescriptor<TEntity, TKey> : ISyncTableDescriptor
     } = new Dictionary<string, SyncBinaryColumnAccessor<TKey>>(StringComparer.Ordinal);
 
     /// <inheritdoc />
-    public string FormatEntityKey(EntityBase entity)
+    public string FormatEntityKey(EntityBaseCore entity)
     {
         ArgumentNullException.ThrowIfNull(entity);
 
@@ -839,7 +839,7 @@ public sealed class SyncTableDescriptor<TEntity, TKey> : ISyncTableDescriptor
     }
 
     /// <inheritdoc />
-    public byte[]? ReadEntityRowVersion(EntityBase entity)
+    public byte[]? ReadEntityRowVersion(EntityBaseCore entity)
     {
         ArgumentNullException.ThrowIfNull(entity);
 
@@ -858,7 +858,7 @@ public sealed class SyncTableDescriptor<TEntity, TKey> : ISyncTableDescriptor
 /// <typeparam name="TEntity">The entity type.</typeparam>
 /// <typeparam name="TKey">The primary key type.</typeparam>
 public sealed class SyncRepositoryBinaryColumns<TEntity, TKey> : ISyncBinaryColumns<TKey>
-    where TEntity : EntityBase, new()
+    where TEntity : EntityBaseCore, new()
 {
     private readonly SyncTableDescriptor<TEntity, TKey> _descriptor;
     private readonly object _repository;
@@ -921,7 +921,7 @@ public sealed class SyncRepositoryBinaryColumns<TEntity, TKey> : ISyncBinaryColu
 /// <typeparam name="TEntity">The entity type.</typeparam>
 /// <typeparam name="TKey">The primary key type.</typeparam>
 public interface ISyncServerSource<TEntity, TKey>
-    where TEntity : EntityBase, new()
+    where TEntity : EntityBaseCore, new()
 {
     /// <summary>
     /// Gets the exclusive upper bound for this pass: the lowest version of any transaction still in flight.
@@ -1091,7 +1091,7 @@ public interface ISyncTable
 /// <typeparam name="TEntity">The entity type.</typeparam>
 /// <typeparam name="TKey">The primary key type.</typeparam>
 public abstract class SyncTableBase<TEntity, TKey> : ISyncTable
-    where TEntity : EntityBase, new()
+    where TEntity : EntityBaseCore, new()
 {
     /// <summary>The local repository, reached through the journaling decorator (engine writes suppress the recording).</summary>
     protected readonly IRepository<TEntity, TKey> _local;
@@ -1609,7 +1609,7 @@ public abstract class SyncTableBase<TEntity, TKey> : ISyncTable
 /// <typeparam name="TEntity">The entity type.</typeparam>
 /// <typeparam name="TKey">The primary key type.</typeparam>
 public sealed class SyncTable<TEntity, TKey> : SyncTableBase<TEntity, TKey>
-    where TEntity : EntityBase, new()
+    where TEntity : EntityBaseCore, new()
 {
     /// <summary>Creates the table with its local repository, the local raw SQL surface, the server source, and its descriptor.</summary>
     public SyncTable(
@@ -2085,7 +2085,7 @@ public sealed class SyncTable<TEntity, TKey> : SyncTableBase<TEntity, TKey>
 /// <typeparam name="TEntity">The entity type.</typeparam>
 /// <typeparam name="TKey">The primary key type.</typeparam>
 public sealed class VersionlessSyncTable<TEntity, TKey> : SyncTableBase<TEntity, TKey>
-    where TEntity : EntityBase, new()
+    where TEntity : EntityBaseCore, new()
 {
     /// <summary>Creates the table with its local repository, the local raw SQL surface, the server source, and its descriptor.</summary>
     public VersionlessSyncTable(
@@ -2791,7 +2791,7 @@ public sealed class SyncEngine
 /// </para>
 /// <para>
 /// It is one traversal rather than one per entity type: the children come from
-/// <see cref="EntityBase.EnumerateCascadeChildren"/>, which yields the same cascade navigations the saver's own walk
+/// <see cref="EntityBaseCore.EnumerateCascadeChildren"/>, which yields the same cascade navigations the saver's own walk
 /// enumerates (the saver reads them from its EntitySaveMetadata.CascadeNavigations rather than calling this method), and
 /// a node is recorded only when its CLR type has a descriptor. A table on the path that is not synchronised is therefore
 /// walked through without an entry of its own, and a subtree holding no synchronised table records nothing.
@@ -2825,7 +2825,7 @@ public sealed class SyncGraphRecorder
     /// <param name="cancellationToken">The cancellation token.</param>
     public async Task RecordSaveAsync(
         SyncJournal journal,
-        EntityBase entity,
+        EntityBaseCore entity,
         bool cascadeSave,
         bool cascadeDelete,
         CancellationToken cancellationToken = default
@@ -2877,7 +2877,7 @@ public sealed class SyncGraphRecorder
     /// <summary>Records the whole subtree as deletes, children first (the saver removes them regardless of their own state).</summary>
     private async Task RecordDeleteGraphAsync(
         SyncJournal journal,
-        EntityBase entity,
+        EntityBaseCore entity,
         CancellationToken cancellationToken
     )
     {
@@ -2892,7 +2892,7 @@ public sealed class SyncGraphRecorder
     /// <summary>Records the delete of one node, carrying the mirrored version the row holds (nothing for an unsynchronised table).</summary>
     private Task RecordDeleteAsync(
         SyncJournal journal,
-        EntityBase entity,
+        EntityBaseCore entity,
         CancellationToken cancellationToken
     ) =>
         Find(entity) is { } descriptor
@@ -2906,7 +2906,7 @@ public sealed class SyncGraphRecorder
             : Task.CompletedTask;
 
     /// <summary>Finds the descriptor of the node's table, or null when the table is not synchronised.</summary>
-    private ISyncTableDescriptor? Find(EntityBase entity) =>
+    private ISyncTableDescriptor? Find(EntityBaseCore entity) =>
         _descriptors.GetValueOrDefault(entity.GetType());
 }
 
@@ -2932,7 +2932,7 @@ public sealed class SyncGraphRecorder
 /// <typeparam name="TEntity">The entity type.</typeparam>
 /// <typeparam name="TKey">The primary key type.</typeparam>
 public abstract class JournalingRepositoryBase<TEntity, TKey> : IRepository<TEntity, TKey>
-    where TEntity : EntityBase, new()
+    where TEntity : EntityBaseCore, new()
 {
     /// <summary>Creates the decorator over the repository it wraps, the journal, the table's descriptor, and the graph recorder.</summary>
     protected JournalingRepositoryBase(
@@ -3156,7 +3156,7 @@ public abstract class JournalingRepositoryBase<TEntity, TKey> : IRepository<TEnt
 /// <typeparam name="TEntity">The entity type.</typeparam>
 /// <typeparam name="TKey">The primary key type.</typeparam>
 public abstract class JournalingRepository<TEntity, TKey> : JournalingRepositoryBase<TEntity, TKey>
-    where TEntity : EntityBase, new()
+    where TEntity : EntityBaseCore, new()
 {
     /// <summary>Creates the decorator over the repository it wraps, the journal, the table's descriptor, and the graph recorder.</summary>
     protected JournalingRepository(
@@ -3198,7 +3198,7 @@ public abstract class JournalingRepository<TEntity, TKey> : JournalingRepository
 /// <typeparam name="TKey">The primary key type.</typeparam>
 public abstract class VersionlessJournalingRepository<TEntity, TKey>
     : JournalingRepositoryBase<TEntity, TKey>
-    where TEntity : EntityBase, new()
+    where TEntity : EntityBaseCore, new()
 {
     /// <summary>Creates the decorator over the repository it wraps, the journal, the table's descriptor, and the graph recorder.</summary>
     protected VersionlessJournalingRepository(
@@ -3236,7 +3236,7 @@ public abstract class VersionlessJournalingRepository<TEntity, TKey>
 /// <typeparam name="TEntity">The entity type.</typeparam>
 /// <typeparam name="TKey">The primary key type.</typeparam>
 public abstract class DirectSyncSourceBase<TEntity, TKey> : ISyncServerSource<TEntity, TKey>
-    where TEntity : EntityBase, new()
+    where TEntity : EntityBaseCore, new()
 {
     /// <summary>Creates the source over the server's raw SQL surface, the repository local changes replay against, and the table's descriptor.</summary>
     protected DirectSyncSourceBase(
@@ -3324,7 +3324,7 @@ public abstract class DirectSyncSourceBase<TEntity, TKey> : ISyncServerSource<TE
 /// <typeparam name="TEntity">The entity type.</typeparam>
 /// <typeparam name="TKey">The primary key type.</typeparam>
 public sealed class DirectSyncSource<TEntity, TKey> : DirectSyncSourceBase<TEntity, TKey>
-    where TEntity : EntityBase, new()
+    where TEntity : EntityBaseCore, new()
 {
     /// <summary>Creates the source over the server's raw SQL surface, the repository local changes replay against, and the table's descriptor.</summary>
     public DirectSyncSource(
@@ -3382,7 +3382,7 @@ public sealed class DirectSyncSource<TEntity, TKey> : DirectSyncSourceBase<TEnti
 /// <typeparam name="TKey">The primary key type.</typeparam>
 public sealed class VersionlessDirectSyncSource<TEntity, TKey>
     : DirectSyncSourceBase<TEntity, TKey>
-    where TEntity : EntityBase, new()
+    where TEntity : EntityBaseCore, new()
 {
     /// <summary>Creates the source over the server's raw SQL surface, the repository local changes replay against, and the table's descriptor.</summary>
     public VersionlessDirectSyncSource(
@@ -3501,7 +3501,7 @@ public sealed record RemoteSyncChangesRequest(byte[]? Anchor, byte[]? Ceiling, i
 /// <param name="HasMore">Whether asking again from the last row's version can still return something.</param>
 /// <typeparam name="TEntity">The entity type.</typeparam>
 public sealed record RemoteSyncChangesResult<TEntity>(IReadOnlyList<TEntity> Rows, bool HasMore)
-    where TEntity : EntityBase, new();
+    where TEntity : EntityBaseCore, new();
 
 /// <summary>The response of <see cref="RemoteSyncOperations.Keys"/>.</summary>
 /// <param name="Keys">Every primary key the server holds for the table.</param>
@@ -3548,12 +3548,12 @@ public sealed class HttpSyncServerSource<TEntity, TKey>
     : HttpRemoteRepository<TEntity, TKey>,
         ISyncServerSource<TEntity, TKey>,
         ISyncBinaryColumns<TKey>
-    where TEntity : EntityBase, new()
+    where TEntity : EntityBaseCore, new()
 {
 {{~ else ~}}
 public sealed class HttpSyncServerSource<TEntity, TKey>
     : HttpRemoteRepository<TEntity, TKey>, ISyncServerSource<TEntity, TKey>
-    where TEntity : EntityBase, new()
+    where TEntity : EntityBaseCore, new()
 {
 {{~ end ~}}
 {{~ if exclude_unbounded_binary || runtime_package_export ~}}
@@ -3920,7 +3920,7 @@ public static class GeneratedSyncServiceCollectionExtensions
         object? serverServiceKey,
         SyncTableDescriptor<TEntity, TKey> descriptor
     )
-        where TEntity : EntityBase, new()
+        where TEntity : EntityBaseCore, new()
         where TRepository : class, IRepository<TEntity, TKey> =>
         services.AddScoped<ISyncServerSource<TEntity, TKey>>(provider =>
         {
@@ -4033,7 +4033,7 @@ public static class GeneratedSyncServiceCollectionExtensions
         Func<IServiceProvider, HttpClient> httpClientFactory,
         SyncTableDescriptor<TEntity, TKey> descriptor
     )
-        where TEntity : EntityBase, new() =>
+        where TEntity : EntityBaseCore, new() =>
         services.AddScoped<ISyncServerSource<TEntity, TKey>>(provider =>
             new HttpSyncServerSource<TEntity, TKey>(httpClientFactory(provider), descriptor)
         );
@@ -4115,7 +4115,7 @@ public static class GeneratedSyncServiceCollectionExtensions
         object? localServiceKey,
         SyncTableDescriptor<TEntity, TKey> descriptor
     )
-        where TEntity : EntityBase, new()
+        where TEntity : EntityBaseCore, new()
         where TRepository : class, IRepository<TEntity, TKey> =>
         services.AddScoped<ISyncTable>(provider =>
         {

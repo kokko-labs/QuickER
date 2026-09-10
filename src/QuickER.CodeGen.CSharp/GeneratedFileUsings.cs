@@ -95,8 +95,8 @@ internal static class GeneratedFileUsings
     /// </summary>
     /// <remarks>
     /// <list type="bullet">
-    ///   <item>共有基盤・方言中立契約（EntityBase・属性・VO 基底・IRepository・SqlQuery・ISqlExecutor 等）→ <see cref="RuntimePackages.Core"/>。
-    ///     いずれかのバケットを含むファイルに常に必要（Entity のみでも EntityBase／属性を参照するため）</item>
+    ///   <item>共有基盤・方言中立契約（EntityBaseCore・属性・VO 基底 Core・IRepository・SqlQuery・ISqlExecutor 等）→ <see cref="RuntimePackages.Core"/>。
+    ///     いずれかのバケットを含むファイルに常に必要（Entity のみでも EntityBaseCore／属性を参照するため）</item>
     ///   <item>Repository バケットを含みQuickER 版 Repository 実装を出す（<c>GenerateRepositories</c>）ファイル → その方言の
     ///     方言エンジン（<see cref="RuntimePackages.SqlServer"/> / <see cref="RuntimePackages.Sqlite"/>）。
     ///     エンティティ別実装が方言 Repository 基底・接続ファクトリ・実行器を参照する</item>
@@ -186,10 +186,10 @@ internal static class GeneratedFileUsings
     {
         switch (bucket)
         {
-            // Runtime（共有基盤）: 属性・EntityBase・EditModelBase・VO 基底・RowState・各種 JSON コンバータ。
-            //   EntityBase: 値比較 StructuralComparisons（System.Collections）、値プロパティのキャッシュ
+            // Runtime（共有基盤）: 属性・EntityBaseCore・EditModelBaseCore・VO 基底 Core・RowState・各種 JSON コンバータ。
+            //   EntityBaseCore: 値比較 StructuralComparisons（System.Collections）、値プロパティのキャッシュ
             //     （System.Collections.Concurrent / System.Reflection）、ToJson/Clone（System.Text.Json(.Serialization)）
-            //   EditModelBase: INotifyPropertyChanged/INotifyDataErrorInfo（System.ComponentModel）、
+            //   EditModelBaseCore: INotifyPropertyChanged/INotifyDataErrorInfo（System.ComponentModel）、
             //     EditModelCollection の ObservableCollection（System.Collections.ObjectModel）、GetErrors（System.Collections）
             //   SqlColumnType 属性: SqlDbType（System.Data）
             case GenerationBucket.Runtime:
@@ -212,7 +212,7 @@ internal static class GeneratedFileUsings
                 }
 
                 // 生値変換 RawValueConverter（CultureInfo / NumberStyles）は、リポジトリ契約が無く値オブジェクト
-                // だけを出す構成でも ValueObjectBase.TryCreateFrom の依存として Runtime 側へ出る。
+                // だけを出す構成でも ValueObjectBaseCore.TryCreateFrom の依存として Runtime 側へ出る。
                 // EditModel の固定 infra（EditModelInputFormat＝秒未満を持つ日時の表示書式）も CultureInfo を使う
                 if (options.GenerateValueObjects || options.GenerateEditModels)
                 {
@@ -221,7 +221,8 @@ internal static class GeneratedFileUsings
 
                 break;
 
-            // 値オブジェクト（具象）: 生成コードは Runtime の VO 基底を継承するだけで、外部型は BCL の基本のみ
+            // 値オブジェクト（共通ルート・値の形ごとの基底・具象）: 外部型は BCL の基本のみ
+            //   （比較・バイナリ等値の本体は Runtime の共有ヘルパーが持ち、こちらは 1 行転送）
             case GenerationBucket.ValueObject:
                 yield return "System";
                 yield return "System.Collections.Generic";
@@ -244,7 +245,7 @@ internal static class GeneratedFileUsings
 
                 break;
 
-            // EditModel: 生成コードは Runtime の EditModelBase / EditModelCollection を使うだけで、
+            // EditModel: 生成コードは Runtime の EditModelBaseCore / EditModelCollection を使うだけで、
             //   自ファイルの外部参照は BCL の基本のみ（コレクション型は Runtime 側の名前空間で解決）。
             //   Repository 契約があるときだけ DB 照合糖衣（ValidateUniqueAsync）が非同期メソッドになるため、
             //   CancellationToken / Task の名前空間を追加する
