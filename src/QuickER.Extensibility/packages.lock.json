@@ -4,15 +4,15 @@
     "net10.0": {
       "Microsoft.Extensions.DependencyInjection.Abstractions": {
         "type": "Direct",
-        "requested": "[10.0.11, )",
-        "resolved": "10.0.11",
-        "contentHash": "/a1aJz4m7ylhEDf25ugQChLQoN5XwoGjWw/BoR/ZWWKsO1v4DdJElS1uyngahz4B/eOzjFk1KNTkarRLE5wsIg=="
+        "requested": "[10.0.12, )",
+        "resolved": "10.0.12",
+        "contentHash": "9/qymSh7hVDMGTGwrLz8MRp5zRyXy9adGDOs4HwRdnLil3oZGYuWeZjbmHgCQ9BL1qBroVfgUK3U/nb61617Cw=="
       },
       "quicker.codegen.csharp": {
         "type": "Project",
         "dependencies": {
           "QuickER.Model": "[0.1.0, )",
-          "Scriban": "[7.2.6, )"
+          "Scriban": "[7.4.0, )"
         }
       },
       "quicker.model": {
@@ -27,9 +27,9 @@
       },
       "Scriban": {
         "type": "CentralTransitive",
-        "requested": "[7.2.6, )",
-        "resolved": "7.2.6",
-        "contentHash": "k6DvaRY83jtigNudMoYlN5Zg42JEDDOCSeKrnpHiE5Gthkd9Fr+6VnYFnL3DqtkZTtPezJJdoX3ZfOTTFpQEMg=="
+        "requested": "[7.4.0, )",
+        "resolved": "7.4.0",
+        "contentHash": "h5QYOAKw7F4ajVNxeScBsq0c7en6YWyKDSC4ZnZIlrkeJrl0ekHk1PlpqP5C4peqkt6NoXl9dlwK3pI4oDC5oA=="
       }
     },
     "net10.0/win-x64": {}

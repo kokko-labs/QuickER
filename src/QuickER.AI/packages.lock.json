@@ -4,18 +4,18 @@
     "net10.0": {
       "Anthropic": {
         "type": "Direct",
-        "requested": "[12.44.0, )",
-        "resolved": "12.44.0",
-        "contentHash": "E725PzE/UOWAxHgwq5VHmP4BZ6I7mAjMskLJztv3zuiWk+kchMey0neowoW4TRBM1+x8saG/phzV8qPEKuifuQ==",
+        "requested": "[12.47.0, )",
+        "resolved": "12.47.0",
+        "contentHash": "v1tVxkx2C2Ejf/2YU2Gtb1NPa/YwKDpGOmN2l4ASIf3zYSECokTm/CP7Uyn/Wa+LC1QiHKmxWtifoxbsUIeEEg==",
         "dependencies": {
           "Microsoft.Extensions.AI.Abstractions": "10.5.1"
         }
       },
       "GitHub.Copilot.SDK": {
         "type": "Direct",
-        "requested": "[1.0.11, )",
-        "resolved": "1.0.11",
-        "contentHash": "92CcbAoPQ60Lr7ho7uO5uNYkkxlVux6AhsoZv2WbZz6DcXfvUihHaX8rxNdxM5xv1bIa/WrBE4EadZgJakp3Lw==",
+        "requested": "[1.0.13, )",
+        "resolved": "1.0.13",
+        "contentHash": "FkMlMloT9MiDPKSEpul/7TXy+bLwx+ck5H91vyLYNTLePre5smc/1DkoKtBzRdx/EbgT1zqeZ3FSFt9/2w3Syw==",
         "dependencies": {
           "Microsoft.Extensions.AI.Abstractions": "10.2.0"
         }
