@@ -4322,6 +4322,14 @@ public sealed record SyncConflict(
 /// </remarks>
 public readonly record struct SyncUploadOutcome(bool Sent, SyncConflict? Conflict)
 {
+    /// <summary>The version the server stamped the row with, or null when there is none to report.</summary>
+    /// <remarks>
+    /// The run remembers this stamp for the download that follows, which recognises a row carrying it as the echo of
+    /// what this very run sent. Null for a delete, for a discard, for a conflict, and for a table without a version
+    /// column.
+    /// </remarks>
+    public byte[]? ServerRowVersion { get; init; }
+
     /// <summary>The change reached the server; the journal entry is settled.</summary>
     public static SyncUploadOutcome Uploaded { get; } = new(true, null);
 
@@ -4330,6 +4338,11 @@ public readonly record struct SyncUploadOutcome(bool Sent, SyncConflict? Conflic
 
     /// <summary>The server disagreed; the journal entry stays put.</summary>
     public static SyncUploadOutcome Conflicted(SyncConflict conflict) => new(false, conflict);
+
+    /// <summary>The change reached the server, which stamped the row with the given version.</summary>
+    /// <param name="serverRowVersion">The version the server now holds for the row, or null when it holds none.</param>
+    public static SyncUploadOutcome UploadedWith(byte[]? serverRowVersion) =>
+        new(true, null) { ServerRowVersion = serverRowVersion };
 }
 
 /// <summary>How one run treats versions and conflicts.</summary>
@@ -4416,6 +4429,21 @@ public sealed class SyncOptions
     public bool IncludeUnboundedBinary { get; init; }
 }
 
+/// <summary>One table whose download stopped before the end of the server's changes.</summary>
+/// <remarks>
+/// Exactly one of the two reasons is given. A table stops at its own unsent local change, and every table after it in
+/// foreign-key order stops with it - a child row whose parent was not downloaded would violate a foreign key, and the
+/// engine cannot tell which children of the parents it skipped are in the batches it did not read.
+/// </remarks>
+/// <param name="TableName">The table whose download stopped early.</param>
+/// <param name="PendingKeyText">The key of the unsent local change the download stopped at, or null when another table's truncation stopped this one.</param>
+/// <param name="TruncatedByTableName">The table whose truncation stopped this one, or null when this table stopped at its own key.</param>
+public sealed record SyncDownloadTruncation(
+    string TableName,
+    string? PendingKeyText,
+    string? TruncatedByTableName
+);
+
 /// <summary>What one sync run did.</summary>
 /// <param name="Uploaded">The number of local changes replayed against the server.</param>
 /// <param name="Downloaded">The number of server rows applied locally.</param>
@@ -4430,8 +4458,19 @@ public sealed record SyncResult(
     IReadOnlyList<SyncConflict> Conflicts
 )
 {
+    /// <summary>The tables whose download stopped early, empty when every table was drained.</summary>
+    /// <remarks>
+    /// A run that reports a conflict usually reports a truncation as well: the conflicted row's own table stops at it,
+    /// and the tables after it stop with it. The rows behind the stopping point are still on the server and come down
+    /// once the entry that stopped them is settled, which is the caller's to decide and re-run.
+    /// </remarks>
+    public IReadOnlyList<SyncDownloadTruncation> Truncations { get; init; } = [];
+
     /// <summary>Whether any local change was left unsent.</summary>
     public bool HasConflicts => Conflicts.Count > 0;
+
+    /// <summary>Whether any table's download stopped early.</summary>
+    public bool HasTruncations => Truncations.Count > 0;
 }
 
 /// <summary>Knobs for one refresh run.</summary>
@@ -4695,13 +4734,31 @@ public sealed class SyncJournalRow
     public byte[]? OriginalRowVersion { get; set; }
 }
 
+/// <summary>One row of the acknowledgement table, as the lenient projection mapper reads it.</summary>
+public sealed class SyncAckRow
+{
+    /// <summary>The primary key in text form.</summary>
+    public string KeyText { get; set; } = string.Empty;
+
+    /// <summary>The version the server stamped on the row when it took this device's upload.</summary>
+    public byte[] ServerRowVersion { get; set; } = [];
+}
+
 /// <summary>
-/// The local record of offline edits, kept in a single shared table (<c>quicker_sync_journal</c>) in the local database.
+/// The local record of offline edits (<c>quicker_sync_journal</c>) and of the uploads the server has taken
+/// (<c>quicker_sync_ack</c>), kept in two shared tables in the local database.
 /// </summary>
 /// <remarks>
 /// <para>
-/// The server gets no extra schema at all; only the local database - which the application owns - gets this one table,
-/// created on first use with <c>CREATE TABLE IF NOT EXISTS</c>.
+/// The server gets no extra schema at all; only the local database - which the application owns - gets these two
+/// tables, created on first use with <c>CREATE TABLE IF NOT EXISTS</c>.
+/// </para>
+/// <para>
+/// <b>The acknowledgement table is a per-row receipt, not a resume point.</b> It holds, for a row this device has
+/// uploaded, the version the server stamped on it - which the upload may not write into the mirror, because the
+/// mirrored version is what the download derives its resume point from and only the download may move it. Until the
+/// row comes back down and the mirror catches up, the receipt is the only record that the local row has already been
+/// accepted at a newer version, and the replay of a further edit needs it to guard against the right original.
 /// </para>
 /// <para>
 /// <b>Recording happens before the business write ("journal-first").</b> The generated repositories manage their own
@@ -4726,10 +4783,23 @@ public sealed class SyncJournal
         + "original_row_version BLOB NULL, "
         + "recorded_at TEXT NOT NULL)";
 
+    /// <summary>The statement that creates the acknowledgement table when it is missing.</summary>
+    private const string CreateAckTableSql =
+        "CREATE TABLE IF NOT EXISTS quicker_sync_ack ("
+        + "table_name TEXT NOT NULL, "
+        + "key_text TEXT NOT NULL, "
+        + "server_row_version BLOB NOT NULL, "
+        + "PRIMARY KEY (table_name, key_text))";
+
     /// <summary>Reads every pending entry in replay order, aliasing the columns onto the DTO's property names.</summary>
     private const string SelectAllSql =
         "SELECT id AS Id, table_name AS TableName, key_text AS KeyText, operation AS Operation, "
         + "original_row_version AS OriginalRowVersion FROM quicker_sync_journal ORDER BY id";
+
+    /// <summary>Reads one table's acknowledgements, aliasing the columns onto the DTO's property names.</summary>
+    private const string SelectAcksSql =
+        "SELECT key_text AS KeyText, server_row_version AS ServerRowVersion FROM quicker_sync_ack "
+        + "WHERE table_name = @tableName";
 
     private readonly ISqlExecutor _localSqlExecutor;
     private volatile bool _ensured;
@@ -4742,7 +4812,7 @@ public sealed class SyncJournal
         _localSqlExecutor = localSqlExecutor;
     }
 
-    /// <summary>Creates the journal table when it does not exist yet (idempotent, and only issued once per instance).</summary>
+    /// <summary>Creates the two tables when they do not exist yet (idempotent, and only issued once per instance).</summary>
     public async Task EnsureCreatedAsync(CancellationToken cancellationToken = default)
     {
         if (_ensured)
@@ -4752,6 +4822,9 @@ public sealed class SyncJournal
 
         await _localSqlExecutor
             .ExecuteSqlAsync(CreateTableSql, null, cancellationToken)
+            .ConfigureAwait(false);
+        await _localSqlExecutor
+            .ExecuteSqlAsync(CreateAckTableSql, null, cancellationToken)
             .ConfigureAwait(false);
         _ensured = true;
     }
@@ -4881,6 +4954,132 @@ public sealed class SyncJournal
         await EnsureCreatedAsync(cancellationToken).ConfigureAwait(false);
         await _localSqlExecutor
             .ExecuteSqlAsync("DELETE FROM quicker_sync_journal", null, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>Records the version the server stamped on a row this device uploaded (one receipt per key, replaced on repeat).</summary>
+    /// <remarks>
+    /// <para>
+    /// Written <i>before</i> the journal entry it settles is removed. Both surviving a crash costs nothing: the next
+    /// run replays the same local content with the acknowledged version as its original, and the server takes it
+    /// again. The opposite order leaves the row with a mirrored version behind the server's and nothing left to say
+    /// so, which is the very state the receipt exists to prevent.
+    /// </para>
+    /// <para>
+    /// The one window nothing can close is between the server accepting the upload and this write: a crash in
+    /// between leaves an entry whose change the server already holds, and the next run's version-guarded replay
+    /// reports it as a conflict against a row this device itself wrote.
+    /// </para>
+    /// </remarks>
+    /// <param name="tableName">The table the row belongs to.</param>
+    /// <param name="keyText">The primary key in the text form the table's descriptor produces.</param>
+    /// <param name="serverRowVersion">The version the server stamped on the row it accepted.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    public async Task RecordAckAsync(
+        string tableName,
+        string keyText,
+        byte[] serverRowVersion,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(tableName);
+        ArgumentNullException.ThrowIfNull(keyText);
+        ArgumentNullException.ThrowIfNull(serverRowVersion);
+        await EnsureCreatedAsync(cancellationToken).ConfigureAwait(false);
+        await _localSqlExecutor
+            .ExecuteSqlAsync(
+                "INSERT OR REPLACE INTO quicker_sync_ack "
+                    + "(table_name, key_text, server_row_version) "
+                    + "VALUES (@tableName, @keyText, @serverRowVersion)",
+                new
+                {
+                    tableName,
+                    keyText,
+                    serverRowVersion,
+                },
+                cancellationToken
+            )
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>Reads every acknowledgement of one table, by the key's journal text form.</summary>
+    /// <param name="tableName">The table whose receipts are read.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    public async Task<IReadOnlyDictionary<string, byte[]>> ReadAcksAsync(
+        string tableName,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(tableName);
+        await EnsureCreatedAsync(cancellationToken).ConfigureAwait(false);
+        var rows = await _localSqlExecutor
+            .QueryProjectionBySqlAsync<SyncAckRow>(
+                SelectAcksSql,
+                new { tableName },
+                cancellationToken
+            )
+            .ConfigureAwait(false);
+        var byKeyText = new Dictionary<string, byte[]>(StringComparer.Ordinal);
+
+        foreach (var row in rows)
+        {
+            byKeyText[row.KeyText] = row.ServerRowVersion;
+        }
+
+        return byKeyText;
+    }
+
+    /// <summary>Removes the acknowledgements of the given keys (the receipt has served its purpose, or has gone stale).</summary>
+    /// <remarks>The removal is chunked to <see cref="SyncInClause.ChunkSize"/> keys per statement.</remarks>
+    /// <param name="tableName">The table the keys belong to.</param>
+    /// <param name="keyTexts">The keys whose receipts go.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    public async Task RemoveAcksAsync(
+        string tableName,
+        IReadOnlyList<string> keyTexts,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(tableName);
+        ArgumentNullException.ThrowIfNull(keyTexts);
+
+        for (var offset = 0; offset < keyTexts.Count; offset += SyncInClause.ChunkSize)
+        {
+            var count = Math.Min(SyncInClause.ChunkSize, keyTexts.Count - offset);
+            var chunk = new List<string>(count);
+
+            for (var index = 0; index < count; index++)
+            {
+                chunk.Add(keyTexts[offset + index]);
+            }
+
+            await _localSqlExecutor
+                .ExecuteSqlAsync(
+                    "DELETE FROM quicker_sync_ack WHERE table_name = @tableName "
+                        + "AND key_text IN (@keyTexts)",
+                    new { tableName, keyTexts = chunk },
+                    cancellationToken
+                )
+                .ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Removes every acknowledgement of one table (what a refresh does, having rebuilt its rows outright).</summary>
+    /// <param name="tableName">The table whose receipts go.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    public async Task RemoveTableAcksAsync(
+        string tableName,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(tableName);
+        await EnsureCreatedAsync(cancellationToken).ConfigureAwait(false);
+        await _localSqlExecutor
+            .ExecuteSqlAsync(
+                "DELETE FROM quicker_sync_ack WHERE table_name = @tableName",
+                new { tableName },
+                cancellationToken
+            )
             .ConfigureAwait(false);
     }
 
@@ -5256,6 +5455,61 @@ public interface ISyncServerSource<TEntity, TKey>
     ISyncBinaryColumns<TKey>? BinaryColumns => null;
 }
 
+/// <summary>What one table's download knows about the local changes of the run it belongs to.</summary>
+/// <remarks>
+/// <para>
+/// Both halves are about the same thing: a download must not undo what the run's own upload has just done, and must not
+/// undo what the upload could not do either.
+/// </para>
+/// <para>
+/// <see cref="PendingKeyTexts"/> holds the keys whose local change is still in the journal - a collected conflict, or an
+/// entry a failure left behind. The row behind such a key carries local content nobody has agreed to give up, so the
+/// download stops there rather than overwriting it.
+/// </para>
+/// <para>
+/// <see cref="AcknowledgedRowVersions"/> holds the version the server stamped on each row this device has uploaded and
+/// not yet seen come back. Such a row comes back down as a change like any other, and applying it would be writing the
+/// row's own content over itself; only the version is worth keeping, and that is all the download writes for it.
+/// </para>
+/// </remarks>
+public sealed record SyncDownloadContext
+{
+    /// <summary>A download that knows of no unsent local change and of no outstanding acknowledgement.</summary>
+    public static SyncDownloadContext Empty { get; } = new();
+
+    /// <summary>The keys of this table that still hold an unsent journal entry.</summary>
+    public IReadOnlySet<string> PendingKeyTexts { get; init; } =
+        new HashSet<string>(StringComparer.Ordinal);
+
+    /// <summary>The acknowledged server version of each uploaded row awaiting its echo, by the key's journal text form.</summary>
+    public IReadOnlyDictionary<string, byte[]> AcknowledgedRowVersions { get; init; } =
+        new Dictionary<string, byte[]>(StringComparer.Ordinal);
+}
+
+/// <summary>What one table's download did.</summary>
+/// <param name="Applied">The number of server rows applied locally (a row recognised as this device's own echo is not one of them).</param>
+/// <param name="TruncatedAtKeyText">The key the download stopped at because its local change is still unsent, or null when the table was drained.</param>
+/// <param name="SettledAckKeyTexts">The acknowledged keys whose mirrored version this download has brought up to date, so their receipts can go.</param>
+/// <remarks>
+/// The settled keys are handed back rather than cleared here because the clearing has to follow the local commit that
+/// wrote the versions: a receipt dropped before the commit that replaces it, and a commit that then fails, is the
+/// "no receipt, stale mirror" state all over again. The opposite order leaves a receipt behind for a row that no longer
+/// needs one, which the next run recognises as an echo, writes the same version for, and clears - a state that repairs
+/// itself.
+/// </remarks>
+public readonly record struct SyncDownloadOutcome(
+    int Applied,
+    string? TruncatedAtKeyText,
+    IReadOnlyList<string> SettledAckKeyTexts
+)
+{
+    /// <summary>An outcome with no receipt to settle (what a table that carries no acknowledgements returns).</summary>
+    /// <param name="applied">The number of server rows applied locally.</param>
+    /// <param name="truncatedAtKeyText">The key the download stopped at, or null when the table was drained.</param>
+    public SyncDownloadOutcome(int applied, string? truncatedAtKeyText)
+        : this(applied, truncatedAtKeyText, []) { }
+}
+
 /// <summary>The engine's view of one synchronised table, with the entity's own types erased.</summary>
 public interface ISyncTable
 {
@@ -5282,6 +5536,10 @@ public interface ISyncTable
     Task<byte[]?> GetChangeCeilingAsync(CancellationToken cancellationToken = default);
 
     /// <summary>Pulls every server change below the ceiling into the local database and returns the number of rows applied.</summary>
+    /// <remarks>
+    /// A download that knows nothing of the run's local changes: it applies every row it is given. Inside a run the
+    /// engine calls the overload that takes a <see cref="SyncDownloadContext"/> instead.
+    /// </remarks>
     Task<int> DownloadAsync(
         byte[]? ceiling,
         int batchSize,
@@ -5289,7 +5547,30 @@ public interface ISyncTable
         CancellationToken cancellationToken = default
     );
 
-    /// <summary>Deletes the local rows whose key the server no longer has, and returns how many went.</summary>
+    /// <summary>Pulls the server's changes down under what the run knows about its own local changes.</summary>
+    /// <param name="ceiling">The exclusive upper bound of the pass.</param>
+    /// <param name="batchSize">How many rows one batch fetches and applies in a single local transaction.</param>
+    /// <param name="includeUnboundedBinary">Whether the excluded unbounded binary columns are carried as well.</param>
+    /// <param name="context">The table's unsent local changes and its outstanding acknowledgements.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <remarks>
+    /// The default answers as the context-free overload does, applying every row and never stopping early - the only
+    /// sound answer for an implementation that has no way to tell a row with an unsent local change from any other.
+    /// </remarks>
+    async Task<SyncDownloadOutcome> DownloadAsync(
+        byte[]? ceiling,
+        int batchSize,
+        bool includeUnboundedBinary,
+        SyncDownloadContext context,
+        CancellationToken cancellationToken = default
+    ) =>
+        new(
+            await DownloadAsync(ceiling, batchSize, includeUnboundedBinary, cancellationToken)
+                .ConfigureAwait(false),
+            null
+        );
+
+    /// <summary>Deletes the local rows whose key the server no longer has, and returns the keys that went.</summary>
     /// <param name="pendingKeyTexts">The keys of this table that still hold an unsent journal entry; they are left alone.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <remarks>
@@ -5306,8 +5587,13 @@ public interface ISyncTable
     /// repositories - raw SQL, most of all - has no entry to hold it back and is deleted like any other row the server
     /// does not have (see <see cref="SyncOptions.PropagateDeletes"/>).
     /// </para>
+    /// <para>
+    /// The keys are returned rather than counted because a row the server has dropped invalidates whatever else was
+    /// recorded about it - its acknowledgement most of all, which would otherwise send the next replay of that key
+    /// against a version of a row that is gone.
+    /// </para>
     /// </remarks>
-    Task<int> PropagateDeletesAsync(
+    Task<IReadOnlyList<string>> PropagateDeletesAsync(
         IReadOnlySet<string> pendingKeyTexts,
         CancellationToken cancellationToken = default
     );
@@ -5328,12 +5614,20 @@ public interface ISyncTable
     /// <param name="mode">The run's mode; <see cref="SyncMode.LastWriteWins"/> replays without version guards and ignores <paramref name="policy"/>.</param>
     /// <param name="policy">How a collision with the server is treated (versioned mode only).</param>
     /// <param name="includeUnboundedBinary">Whether the excluded unbounded binary columns are carried as well.</param>
+    /// <param name="acknowledgedRowVersion">The version the server last acknowledged for this key, or null when there is no receipt.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
+    /// <remarks>
+    /// A version-guarded replay guards against the later of the mirrored version and the acknowledged one. The mirror
+    /// is the row's version as of the last download that reached it, the receipt is its version as of the last upload
+    /// the server took, and either can be the more recent - the mirror when the receipt has already been cleared, the
+    /// receipt when the echo has not come down yet.
+    /// </remarks>
     Task<SyncUploadOutcome> UploadAsync(
         SyncJournalRow entry,
         SyncMode mode,
         SyncConflictPolicy policy,
         bool includeUnboundedBinary,
+        byte[]? acknowledgedRowVersion,
         CancellationToken cancellationToken = default
     );
 }
@@ -5450,6 +5744,15 @@ public abstract class SyncTableBase<TEntity, TKey> : ISyncTable
     );
 
     /// <inheritdoc />
+    public abstract Task<SyncDownloadOutcome> DownloadAsync(
+        byte[]? ceiling,
+        int batchSize,
+        bool includeUnboundedBinary,
+        SyncDownloadContext context,
+        CancellationToken cancellationToken = default
+    );
+
+    /// <inheritdoc />
     public abstract Task<int> RefreshAsync(
         byte[]? ceiling,
         int batchSize,
@@ -5463,8 +5766,72 @@ public abstract class SyncTableBase<TEntity, TKey> : ISyncTable
         SyncMode mode,
         SyncConflictPolicy policy,
         bool includeUnboundedBinary,
+        byte[]? acknowledgedRowVersion,
         CancellationToken cancellationToken = default
     );
+
+    /// <summary>The later of two server versions (null and empty both mean "no version at all").</summary>
+    /// <remarks>
+    /// A version is an unsigned big-endian integer, so the comparison is the lexicographic one over the significant
+    /// bytes, with a longer significant run standing for the larger number. Taking the maximum rather than preferring
+    /// one side is what keeps the choice safe in both directions: a receipt already cleared leaves the mirror ahead,
+    /// and an echo that has not come down leaves the receipt ahead.
+    /// </remarks>
+    /// <param name="left">One version, or null.</param>
+    /// <param name="right">The other version, or null.</param>
+    private protected static byte[]? MaxRowVersion(byte[]? left, byte[]? right)
+    {
+        if (left is not { Length: > 0 })
+        {
+            return right is { Length: > 0 } ? right : null;
+        }
+
+        if (right is not { Length: > 0 })
+        {
+            return left;
+        }
+
+        return CompareRowVersions(left, right) >= 0 ? left : right;
+    }
+
+    /// <summary>Compares two non-empty versions as unsigned big-endian integers.</summary>
+    private static int CompareRowVersions(byte[] left, byte[] right)
+    {
+        var leftStart = FirstSignificantByte(left);
+        var rightStart = FirstSignificantByte(right);
+        var leftLength = left.Length - leftStart;
+        var rightLength = right.Length - rightStart;
+
+        if (leftLength != rightLength)
+        {
+            return leftLength < rightLength ? -1 : 1;
+        }
+
+        for (var index = 0; index < leftLength; index++)
+        {
+            var difference = left[leftStart + index].CompareTo(right[rightStart + index]);
+
+            if (difference != 0)
+            {
+                return difference;
+            }
+        }
+
+        return 0;
+    }
+
+    /// <summary>The offset of the first non-zero byte (the length itself when every byte is zero).</summary>
+    private static int FirstSignificantByte(byte[] value)
+    {
+        var index = 0;
+
+        while (index < value.Length && value[index] == 0)
+        {
+            index++;
+        }
+
+        return index;
+    }
 
     /// <summary>
     /// Replays one journal entry without version guards: the local change overwrites whatever the server holds.
@@ -5519,10 +5886,45 @@ public abstract class SyncTableBase<TEntity, TKey> : ISyncTable
             await CopyBinaryColumnsUpAsync(key, cancellationToken).ConfigureAwait(false);
         }
 
-        await OnLastWriteWinsUploadedAsync(local, includeUnboundedBinary, cancellationToken)
-            .ConfigureAwait(false);
+        return SyncUploadOutcome.UploadedWith(
+            await ReadServerRowVersionAsync(local, includeUnboundedBinary, cancellationToken)
+                .ConfigureAwait(false)
+        );
+    }
 
-        return SyncUploadOutcome.Uploaded;
+    /// <summary>Reads the version the server now holds for a row an upsert has just sent.</summary>
+    /// <remarks>
+    /// The writer stamps the row it accepted, so the entity in hand already carries the new version. Writing a blob is
+    /// another write to the same row, so where the excluded columns were carried the stamp in hand is behind by one and
+    /// the server row is read once more. A table without a version column has nothing to report.
+    /// </remarks>
+    /// <param name="local">The row that was sent, as the writer left it.</param>
+    /// <param name="includeUnboundedBinary">Whether the excluded unbounded binary columns were carried as well.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    private protected async Task<byte[]?> ReadServerRowVersionAsync(
+        TEntity local,
+        bool includeUnboundedBinary,
+        CancellationToken cancellationToken
+    )
+    {
+        if (IsVersionless)
+        {
+            return null;
+        }
+
+        if (includeUnboundedBinary && UnboundedBinaryColumnNames.Count > 0)
+        {
+            var refreshed = await _server
+                .Writer.GetByIdAsync(ReadKey(local), cancellationToken)
+                .ConfigureAwait(false);
+
+            if (refreshed is not null)
+            {
+                return _descriptor.ReadRowVersion(refreshed);
+            }
+        }
+
+        return _descriptor.ReadRowVersion(local);
     }
 
     /// <summary>Overwrites the server's row without a version guard, inserting it when the update finds no row.</summary>
@@ -5564,13 +5966,6 @@ public abstract class SyncTableBase<TEntity, TKey> : ISyncTable
         TKey key,
         CancellationToken cancellationToken
     ) => await _local.GetByIdAsync(key, cancellationToken).ConfigureAwait(false) is not null;
-
-    /// <summary>Called after a last-write-wins upsert reached the server (a versioned table mirrors the new version here).</summary>
-    protected virtual Task OnLastWriteWinsUploadedAsync(
-        TEntity local,
-        bool includeUnboundedBinary,
-        CancellationToken cancellationToken
-    ) => Task.CompletedTask;
 
     /// <summary>Copies every unbounded binary column of the given rows from the server down to the local database.</summary>
     /// <remarks>
@@ -5788,7 +6183,7 @@ public abstract class SyncTableBase<TEntity, TKey> : ISyncTable
     }
 
     /// <inheritdoc />
-    public async Task<int> PropagateDeletesAsync(
+    public async Task<IReadOnlyList<string>> PropagateDeletesAsync(
         IReadOnlySet<string> pendingKeyTexts,
         CancellationToken cancellationToken = default
     )
@@ -5801,7 +6196,7 @@ public abstract class SyncTableBase<TEntity, TKey> : ISyncTable
             .QueryProjectionBySqlAsync<TKey>(LocalKeysSql, null, cancellationToken)
             .ConfigureAwait(false);
 
-        var removed = 0;
+        var removed = new List<string>();
 
         using (SyncSession.Suppress())
         {
@@ -5823,7 +6218,7 @@ public abstract class SyncTableBase<TEntity, TKey> : ISyncTable
 
                 if (await _local.DeleteAsync(key, cancellationToken).ConfigureAwait(false))
                 {
-                    removed++;
+                    removed.Add(keyText);
                 }
             }
         }
@@ -5860,11 +6255,19 @@ public abstract class SyncTableBase<TEntity, TKey> : ISyncTable
 /// </para>
 /// <para>
 /// <b>The resume point is derived, never stored.</b> The anchor is the maximum mirrored version among the local rows,
-/// so it is a fact about the data rather than a separate bookkeeping row that could disagree with it. Two things make
-/// that derivation correct, and both are load-bearing: rows are fetched in ascending version order, and each batch is
-/// applied in a single local transaction. A run interrupted anywhere leaves the local database holding a prefix of the
-/// ordered stream, and the maximum of that prefix is exactly where the next run must start. Rows created locally and
-/// not yet uploaded have no mirrored version, so they drop out of the maximum on their own.
+/// so it is a fact about the data rather than a separate bookkeeping row that could disagree with it. Three things make
+/// that derivation correct, and all three are load-bearing: rows are fetched in ascending version order, each batch is
+/// applied in a single local transaction, and <b>the download is the only thing that writes a mirrored version</b>. A
+/// run interrupted anywhere leaves the local database holding a prefix of the ordered stream, and the maximum of that
+/// prefix is exactly where the next run must start. Rows created locally and not yet uploaded have no mirrored version,
+/// so they drop out of the maximum on their own.
+/// </para>
+/// <para>
+/// The third point is what keeps the first two worth anything. A version written from anywhere but the ordered stream -
+/// an upload mirroring the stamp the server just gave its row, say - can stand above rows of that stream the local
+/// database has not seen, and every one of them then sits below the anchor for good: no later run asks for them again.
+/// The version an upload earns is therefore reported to the run rather than mirrored, and the download writes it when
+/// the row reaches it in order.
 /// </para>
 /// </remarks>
 /// <typeparam name="TEntity">The entity type.</typeparam>
@@ -5897,8 +6300,40 @@ public sealed class SyncTable<TEntity, TKey> : SyncTableBase<TEntity, TKey>
         int batchSize,
         bool includeUnboundedBinary,
         CancellationToken cancellationToken = default
+    ) =>
+        (
+            await DownloadAsync(
+                ceiling,
+                batchSize,
+                includeUnboundedBinary,
+                SyncDownloadContext.Empty,
+                cancellationToken
+            )
+                .ConfigureAwait(false)
+        ).Applied;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// <para>
+    /// The rows of a batch arrive in ascending version order and are dealt with in that order, so whatever the run
+    /// commits is a prefix of the stream and the anchor derived from it is where the next pass must resume.
+    /// </para>
+    /// <para>
+    /// A row whose key still holds an unsent local change ends the table's download at that row. The rows behind it are
+    /// left on the server rather than applied out of order: applying them would move the anchor past the stopping point,
+    /// and the change that stopped it would then never be seen again.
+    /// </para>
+    /// </remarks>
+    public override async Task<SyncDownloadOutcome> DownloadAsync(
+        byte[]? ceiling,
+        int batchSize,
+        bool includeUnboundedBinary,
+        SyncDownloadContext context,
+        CancellationToken cancellationToken = default
     )
     {
+        ArgumentNullException.ThrowIfNull(context);
+
         if (batchSize <= 0)
         {
             throw new ArgumentOutOfRangeException(
@@ -5910,6 +6345,11 @@ public sealed class SyncTable<TEntity, TKey> : SyncTableBase<TEntity, TKey>
         var applied = 0;
         byte[]? previousAnchor = null;
         var appliedAnyBatch = false;
+
+        // The receipts this download makes redundant. Collected rather than cleared as they are met, because the
+        // clearing has to follow the local commit that wrote the version - and the caller clears them once this
+        // returns, by which time every batch has committed.
+        var settledAcks = new List<string>();
 
         while (true)
         {
@@ -5941,59 +6381,192 @@ public sealed class SyncTable<TEntity, TKey> : SyncTableBase<TEntity, TKey>
 
             if (batch.Rows.Count == 0)
             {
-                return applied;
+                return new SyncDownloadOutcome(applied, null, settledAcks);
             }
 
-            await ApplyBatchAsync(batch.Rows, includeUnboundedBinary, cancellationToken)
-                .ConfigureAwait(false);
-            applied += batch.Rows.Count;
-            appliedAnyBatch = true;
+            var stopAt = FindPendingRow(batch.Rows, context.PendingKeyTexts);
+            var rows = stopAt < 0 ? batch.Rows : batch.Rows.Take(stopAt).ToList();
+
+            if (rows.Count > 0)
+            {
+                applied += await ApplyDownloadedRowsAsync(
+                        rows,
+                        context,
+                        settledAcks,
+                        includeUnboundedBinary,
+                        cancellationToken
+                    )
+                    .ConfigureAwait(false);
+
+                // Set even when every row of the batch was this device's own echo: those write a version too, so the
+                // resume point did move and the progress guard has nothing to report.
+                appliedAnyBatch = true;
+            }
+
+            if (stopAt >= 0)
+            {
+                // Stopping is a normal end of this table's download, not a stall: the caller settles the change that
+                // stopped it and the next run carries on from the prefix this one left.
+                return new SyncDownloadOutcome(
+                    applied,
+                    FormatKey(ReadKey(batch.Rows[stopAt])),
+                    settledAcks
+                );
+            }
 
             // The source itself says whether the stream is drained; what is left over is above the ceiling either way
             // and waits for the next run. Asking again is safe but pointless, so the flag is what ends the loop.
             if (!batch.HasMore)
             {
-                return applied;
+                return new SyncDownloadOutcome(applied, null, settledAcks);
             }
+        }
+    }
+
+    /// <summary>Finds the first row whose key still holds an unsent local change, or -1 when none does.</summary>
+    private int FindPendingRow(IReadOnlyList<TEntity> rows, IReadOnlySet<string> pendingKeyTexts)
+    {
+        if (pendingKeyTexts.Count == 0)
+        {
+            return -1;
+        }
+
+        for (var index = 0; index < rows.Count; index++)
+        {
+            if (pendingKeyTexts.Contains(FormatKey(ReadKey(rows[index]))))
+            {
+                return index;
+            }
+        }
+
+        return -1;
+    }
+
+    /// <summary>Applies the rows of one batch in order and returns how many of them were applied as content.</summary>
+    /// <remarks>
+    /// <para>
+    /// A row this device uploaded comes back carrying the version the server stamped on it, which is the version the
+    /// receipt holds. Such a row holds the local content it was made from, so writing it back would be writing the
+    /// row over itself - and, where the excluded columns are carried, copying a blob down that was just copied up. Only
+    /// the version is worth taking, and it is taken on its own.
+    /// </para>
+    /// <para>
+    /// Every row that gets this far has its mirrored version written, one way or the other, so a row whose key holds a
+    /// receipt leaves that receipt with nothing left to say: the mirror now carries at least what the receipt did. Both
+    /// paths therefore add to <paramref name="settledAcks"/> - including a row someone else changed after this device
+    /// uploaded it, whose receipt is not merely redundant but stale.
+    /// </para>
+    /// </remarks>
+    /// <param name="rows">The batch's rows, in ascending version order.</param>
+    /// <param name="context">The table's unsent local changes and its outstanding acknowledgements.</param>
+    /// <param name="settledAcks">The keys whose receipt this download has made redundant; added to as rows are applied.</param>
+    /// <param name="includeUnboundedBinary">Whether the excluded unbounded binary columns are carried as well.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    private async Task<int> ApplyDownloadedRowsAsync(
+        IReadOnlyList<TEntity> rows,
+        SyncDownloadContext context,
+        List<string> settledAcks,
+        bool includeUnboundedBinary,
+        CancellationToken cancellationToken
+    )
+    {
+        var applied = 0;
+        var content = new List<TEntity>();
+
+        foreach (var row in rows)
+        {
+            var keyText = FormatKey(ReadKey(row));
+
+            if (context.AcknowledgedRowVersions.ContainsKey(keyText))
+            {
+                settledAcks.Add(keyText);
+            }
+
+            if (!IsEchoOfThisDevicesUpload(row, context))
+            {
+                content.Add(row);
+
+                continue;
+            }
+
+            // Flushed before the version-only write so the rows are committed in the order they arrived: every commit
+            // boundary then leaves the local database holding a prefix of the ordered stream.
+            applied += await FlushContentAsync(content, includeUnboundedBinary, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (!await MirrorRowVersionAsync(row, cancellationToken).ConfigureAwait(false))
+            {
+                // The local row is gone - removed outside the generated repositories since the upload read it - so
+                // there is no version to write onto it and the server's row is applied like any other.
+                content.Add(row);
+            }
+        }
+
+        return applied
+            + await FlushContentAsync(content, includeUnboundedBinary, cancellationToken)
+                .ConfigureAwait(false);
+    }
+
+    /// <summary>Applies the rows accumulated so far, empties the buffer, and returns how many went.</summary>
+    private async Task<int> FlushContentAsync(
+        List<TEntity> content,
+        bool includeUnboundedBinary,
+        CancellationToken cancellationToken
+    )
+    {
+        if (content.Count == 0)
+        {
+            return 0;
+        }
+
+        await ApplyBatchAsync(content, includeUnboundedBinary, cancellationToken)
+            .ConfigureAwait(false);
+        var applied = content.Count;
+        content.Clear();
+
+        return applied;
+    }
+
+    /// <summary>Whether the downloaded row is the row this device uploaded, still carrying the version the server gave it.</summary>
+    /// <remarks>
+    /// The version has to match, not just the key: a row someone else changed after this device uploaded it carries a
+    /// different version, and that change is a server-side change like any other and has to be applied.
+    /// </remarks>
+    private bool IsEchoOfThisDevicesUpload(TEntity row, SyncDownloadContext context) =>
+        context.AcknowledgedRowVersions.TryGetValue(FormatKey(ReadKey(row)), out var acknowledged)
+        && ReadRowVersion(row) is { } current
+        && acknowledged.SequenceEqual(current);
+
+    /// <summary>Writes one downloaded row's version onto the local row without touching its content (false = no local row).</summary>
+    private async Task<bool> MirrorRowVersionAsync(
+        TEntity row,
+        CancellationToken cancellationToken
+    )
+    {
+        using (SyncSession.Suppress())
+        {
+            var local = await _local
+                .GetByIdAsync(ReadKey(row), cancellationToken)
+                .ConfigureAwait(false);
+
+            if (local is null)
+            {
+                return false;
+            }
+
+            WriteRowVersion(local, ReadRowVersion(row));
+            local.MarkUpdated();
+            await _local
+                .UpdateAsync(local, ConcurrencyMode.ForceOverwrite, cancellationToken)
+                .ConfigureAwait(false);
+
+            return true;
         }
     }
 
     /// <summary>Compares two derived anchors (null means "no local row carries a version yet").</summary>
     private static bool SameAnchor(byte[]? left, byte[]? right) =>
         left is null || right is null ? left is null && right is null : left.SequenceEqual(right);
-
-    /// <inheritdoc />
-    /// <remarks>
-    /// The server assigned a new version during the overwrite and wrote it back onto the entity; mirroring it locally
-    /// is what moves the anchor past this row, so the next download does not hand the change straight back. A blob
-    /// copy moves the version once more, so with the columns carried the server row is re-read first.
-    /// </remarks>
-    protected override async Task OnLastWriteWinsUploadedAsync(
-        TEntity local,
-        bool includeUnboundedBinary,
-        CancellationToken cancellationToken
-    )
-    {
-        if (includeUnboundedBinary)
-        {
-            var refreshed = await _server
-                .Writer.GetByIdAsync(ReadKey(local), cancellationToken)
-                .ConfigureAwait(false);
-
-            if (refreshed is not null)
-            {
-                WriteRowVersion(local, ReadRowVersion(refreshed));
-            }
-        }
-
-        using (SyncSession.Suppress())
-        {
-            local.MarkUpdated();
-            await _local
-                .UpdateAsync(local, ConcurrencyMode.ForceOverwrite, cancellationToken)
-                .ConfigureAwait(false);
-        }
-    }
 
     /// <inheritdoc />
     /// <remarks>
@@ -6087,6 +6660,7 @@ public sealed class SyncTable<TEntity, TKey> : SyncTableBase<TEntity, TKey>
         SyncMode mode,
         SyncConflictPolicy policy,
         bool includeUnboundedBinary,
+        byte[]? acknowledgedRowVersion,
         CancellationToken cancellationToken = default
     )
     {
@@ -6094,8 +6668,8 @@ public sealed class SyncTable<TEntity, TKey> : SyncTableBase<TEntity, TKey>
 
         if (mode == SyncMode.LastWriteWins)
         {
-            // The run asked for overwrites, so the version guards - and the policy that decides what happens when
-            // they fire - have nothing to do. The mirrored version is still refreshed afterwards (the hook above).
+            // The run asked for overwrites, so the version guards - and the receipt they would be read against, and
+            // the policy that decides what happens when they fire - have nothing to do.
             return await UploadLastWriteWinsAsync(entry, includeUnboundedBinary, cancellationToken)
                 .ConfigureAwait(false);
         }
@@ -6108,23 +6682,39 @@ public sealed class SyncTable<TEntity, TKey> : SyncTableBase<TEntity, TKey>
             nameof(SyncJournalOperation.Delete),
             StringComparison.Ordinal
         )
-            ? await UploadDeleteAsync(entry, key, policy, cancellationToken).ConfigureAwait(false)
+            ? await UploadDeleteAsync(
+                entry,
+                key,
+                policy,
+                acknowledgedRowVersion,
+                cancellationToken
+            )
+                .ConfigureAwait(false)
             : await UploadUpsertAsync(
                 entry,
                 key,
                 policy,
                 includeUnboundedBinary,
+                acknowledgedRowVersion,
                 cancellationToken
             )
                 .ConfigureAwait(false);
     }
 
     /// <summary>Replays an insert or an update by sending the row's <i>current</i> local content.</summary>
+    /// <remarks>
+    /// The original the update guards against is the later of the mirrored version and the acknowledged one. Reading
+    /// the mirror alone makes a row whose echo has not come down look older than the server's copy of itself, and the
+    /// guard then fires against a version this very device wrote - a conflict with nobody. It is also what tells an
+    /// offline insert apart from a row already accepted but not yet echoed: both have an empty mirror, and only the
+    /// second has a receipt.
+    /// </remarks>
     private async Task<SyncUploadOutcome> UploadUpsertAsync(
         SyncJournalRow entry,
         TKey key,
         SyncConflictPolicy policy,
         bool includeUnboundedBinary,
+        byte[]? acknowledgedRowVersion,
         CancellationToken cancellationToken
     )
     {
@@ -6136,11 +6726,12 @@ public sealed class SyncTable<TEntity, TKey> : SyncTableBase<TEntity, TKey>
             return SyncUploadOutcome.Discarded;
         }
 
-        var mirror = ReadRowVersion(local);
+        var mirror = MaxRowVersion(ReadRowVersion(local), acknowledgedRowVersion);
 
-        if (mirror is null || mirror.Length == 0)
+        if (mirror is null)
         {
-            // No mirrored version means the row was created locally and has never been on the server.
+            // Neither a mirrored version nor a receipt means the row was created locally and has never been on the
+            // server.
             var alreadyThere = await _server
                 .Writer.GetByIdAsync(key, cancellationToken)
                 .ConfigureAwait(false);
@@ -6173,6 +6764,9 @@ public sealed class SyncTable<TEntity, TKey> : SyncTableBase<TEntity, TKey>
         }
         else
         {
+            // The guard reads the version off the entity, so the one that is actually going to be guarded against is
+            // written onto it first - which matters exactly when the receipt is the later of the two.
+            WriteRowVersion(local, mirror);
             local.MarkUpdated();
 
             try
@@ -6231,31 +6825,14 @@ public sealed class SyncTable<TEntity, TKey> : SyncTableBase<TEntity, TKey>
         if (includeUnboundedBinary)
         {
             await CopyBinaryColumnsUpAsync(key, cancellationToken).ConfigureAwait(false);
-
-            // Writing a blob is a write to the row, so the server has moved the version on again and the one the
-            // insert or update handed back is already behind. Mirroring that stale value would leave the anchor below
-            // the row's current version, and the next download would hand this very row back as a server-side change.
-            var refreshed = await _server
-                .Writer.GetByIdAsync(key, cancellationToken)
-                .ConfigureAwait(false);
-
-            if (refreshed is not null)
-            {
-                WriteRowVersion(local, ReadRowVersion(refreshed));
-            }
         }
 
-        // The server assigned a new version and wrote it back onto the entity; mirroring it locally is what moves the
-        // anchor past this row, so the next download does not fetch this row back as if it were a server-side change.
-        using (SyncSession.Suppress())
-        {
-            local.MarkUpdated();
-            await _local
-                .UpdateAsync(local, ConcurrencyMode.ForceOverwrite, cancellationToken)
-                .ConfigureAwait(false);
-        }
-
-        return SyncUploadOutcome.Uploaded;
+        // The server stamped the row with a new version. It is reported to the run rather than written onto the local
+        // row: the mirrored version is the resume point of the download, and only the download may move it.
+        return SyncUploadOutcome.UploadedWith(
+            await ReadServerRowVersionAsync(local, includeUnboundedBinary, cancellationToken)
+                .ConfigureAwait(false)
+        );
     }
 
     /// <summary>Replays a delete under the protection of the version the row carried when it was deleted.</summary>
@@ -6264,11 +6841,17 @@ public sealed class SyncTable<TEntity, TKey> : SyncTableBase<TEntity, TKey>
     /// the key, the recorded version, and <c>RowState.Removed</c> is exactly the shape the existing version guard
     /// already covers. A row the server no longer has is a no-op rather than a conflict - the delete's intent is
     /// already satisfied. A row that is still there locally means the opposite, and the entry is discarded unsent.
+    /// <para>
+    /// The recorded version is the mirror as the row carried it when it was deleted, so it is behind the server's
+    /// whenever the row's echo had not come down - and the stub is guarded against the later of it and the receipt for
+    /// the same reason an update is.
+    /// </para>
     /// </remarks>
     private async Task<SyncUploadOutcome> UploadDeleteAsync(
         SyncJournalRow entry,
         TKey key,
         SyncConflictPolicy policy,
+        byte[]? acknowledgedRowVersion,
         CancellationToken cancellationToken
     )
     {
@@ -6286,7 +6869,7 @@ public sealed class SyncTable<TEntity, TKey> : SyncTableBase<TEntity, TKey>
 
         var stub = new TEntity();
         WriteKey(stub, key);
-        WriteRowVersion(stub, entry.OriginalRowVersion);
+        WriteRowVersion(stub, MaxRowVersion(entry.OriginalRowVersion, acknowledgedRowVersion));
         stub.MarkRemoved();
 
         try
@@ -6376,8 +6959,34 @@ public sealed class VersionlessSyncTable<TEntity, TKey> : SyncTableBase<TEntity,
         int batchSize,
         bool includeUnboundedBinary,
         CancellationToken cancellationToken = default
+    ) =>
+        (
+            await DownloadAsync(
+                ceiling,
+                batchSize,
+                includeUnboundedBinary,
+                SyncDownloadContext.Empty,
+                cancellationToken
+            )
+                .ConfigureAwait(false)
+        ).Applied;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// A row whose key still holds an unsent local change is skipped and the scan carries on. There is no resume point
+    /// to protect here - every run reads the whole table - so leaving one row alone costs nothing, and this table never
+    /// stops a download of its own accord.
+    /// </remarks>
+    public override async Task<SyncDownloadOutcome> DownloadAsync(
+        byte[]? ceiling,
+        int batchSize,
+        bool includeUnboundedBinary,
+        SyncDownloadContext context,
+        CancellationToken cancellationToken = default
     )
     {
+        ArgumentNullException.ThrowIfNull(context);
+
         if (batchSize <= 0)
         {
             throw new ArgumentOutOfRangeException(
@@ -6398,16 +7007,21 @@ public sealed class VersionlessSyncTable<TEntity, TKey> : SyncTableBase<TEntity,
 
             if (batch.Rows.Count == 0)
             {
-                return applied;
+                return new SyncDownloadOutcome(applied, null);
             }
 
-            await ApplyBatchAsync(batch.Rows, includeUnboundedBinary, cancellationToken)
-                .ConfigureAwait(false);
-            applied += batch.Rows.Count;
+            var rows = WithoutPendingRows(batch.Rows, context.PendingKeyTexts);
+
+            if (rows.Count > 0)
+            {
+                await ApplyBatchAsync(rows, includeUnboundedBinary, cancellationToken)
+                    .ConfigureAwait(false);
+                applied += rows.Count;
+            }
 
             if (!batch.HasMore)
             {
-                return applied;
+                return new SyncDownloadOutcome(applied, null);
             }
 
             var lastKey = ReadKey(batch.Rows[^1]);
@@ -6428,6 +7042,15 @@ public sealed class VersionlessSyncTable<TEntity, TKey> : SyncTableBase<TEntity,
                 .ConfigureAwait(false);
         }
     }
+
+    /// <summary>Drops the rows whose key still holds an unsent local change (the batch itself when there are none).</summary>
+    private IReadOnlyList<TEntity> WithoutPendingRows(
+        IReadOnlyList<TEntity> rows,
+        IReadOnlySet<string> pendingKeyTexts
+    ) =>
+        pendingKeyTexts.Count == 0
+            ? rows
+            : rows.Where(row => !pendingKeyTexts.Contains(FormatKey(ReadKey(row)))).ToList();
 
     /// <inheritdoc />
     /// <remarks>
@@ -6505,13 +7128,15 @@ public sealed class VersionlessSyncTable<TEntity, TKey> : SyncTableBase<TEntity,
     /// <inheritdoc />
     /// <remarks>
     /// Only <see cref="SyncMode.LastWriteWins"/> runs include this table, and without a version the replay can only
-    /// overwrite, so neither the mode nor the policy has anything left to choose.
+    /// overwrite, so neither the mode nor the policy nor an acknowledged version has anything left to choose. Nothing
+    /// ever records a receipt for such a table either: an upload with no version to report leaves none behind.
     /// </remarks>
     public override async Task<SyncUploadOutcome> UploadAsync(
         SyncJournalRow entry,
         SyncMode mode,
         SyncConflictPolicy policy,
         bool includeUnboundedBinary,
+        byte[]? acknowledgedRowVersion,
         CancellationToken cancellationToken = default
     )
     {
@@ -6541,8 +7166,14 @@ public sealed class VersionlessSyncTable<TEntity, TKey> : SyncTableBase<TEntity,
 /// <para>
 /// Nothing here resolves a conflict silently. Under the default policy a local change that collides with the server stays
 /// in the journal and comes back in <see cref="SyncResult.Conflicts"/> with both sides of the disagreement attached - and
-/// the row it describes stays where it is, because the delete propagation that ends the download spares every key the
-/// journal still holds an entry for.
+/// the row it describes stays where it is, because both halves of the download leave every key the journal still holds an
+/// entry for alone: the row itself is not overwritten, and the delete propagation does not remove it.
+/// </para>
+/// <para>
+/// Leaving such a row alone has a price, and the run says so rather than paying it quietly. A table's download stops at
+/// the first row whose local change is still unsent, and the tables after it in foreign-key order stop with it; what was
+/// left unread is reported in <see cref="SyncResult.Truncations"/> and comes down once the change that stopped it has
+/// been settled - which is the caller's to decide and re-run.
 /// </para>
 /// </remarks>
 public sealed class SyncEngine
@@ -6567,6 +7198,13 @@ public sealed class SyncEngine
     }
 
     /// <summary>Runs one full sync: replays the local journal, then pulls the server's changes down.</summary>
+    /// <remarks>
+    /// What the upload learns is carried into the download through the acknowledgement table rather than through the
+    /// run: the version the server stamped on each row that went up is written down as it goes, so the download can
+    /// tell an echo from a change worth applying. Calling <see cref="UploadAsync"/> and <see cref="DownloadAsync"/>
+    /// separately is therefore not a lesser arrangement - the receipts outlive the call that wrote them, and a
+    /// download run on its own recognises the echoes of every upload whose row has yet to come back down.
+    /// </remarks>
     /// <param name="options">The knobs for this run (null takes the defaults).</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     public async Task<SyncResult> SyncAsync(
@@ -6578,12 +7216,20 @@ public sealed class SyncEngine
         await _journal.EnsureCreatedAsync(cancellationToken).ConfigureAwait(false);
 
         var conflicts = new List<SyncConflict>();
-        var (uploaded, discarded) = await UploadAsync(options, conflicts, cancellationToken)
+        var upload = await UploadAsync(options, conflicts, cancellationToken)
             .ConfigureAwait(false);
-        var (downloaded, deleted) = await DownloadAsync(options, cancellationToken)
-            .ConfigureAwait(false);
+        var download = await DownloadCoreAsync(options, cancellationToken).ConfigureAwait(false);
 
-        return new SyncResult(uploaded, downloaded, deleted, discarded, conflicts);
+        return new SyncResult(
+            upload.Uploaded,
+            download.Downloaded,
+            download.DeletedLocally,
+            upload.Discarded,
+            conflicts
+        )
+        {
+            Truncations = download.Truncations,
+        };
     }
 
     /// <summary>Rebuilds the local database from the server's rows: every synchronised table is emptied and reloaded.</summary>
@@ -6712,6 +7358,16 @@ public sealed class SyncEngine
             return new SyncRefreshResult([], pending.Count, Stopwatch.GetElapsedTime(startedAt));
         }
 
+        // The receipts go with the entries, and for the same reason: a refresh replaces every row of these tables
+        // along with its mirrored version, so a per-row record of what the server once acknowledged has nothing left
+        // to be about. Dropped before anything is deleted, so an interrupted run leaves none behind either.
+        foreach (var table in scope)
+        {
+            await _journal
+                .RemoveTableAcksAsync(table.TableName, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
         // One ceiling for the whole run, for the same reason an ordinary run uses one (and from a versioned table,
         // for the same reason as well).
         var ceilingTable = scope.FirstOrDefault(table => !table.IsVersionless);
@@ -6749,6 +7405,16 @@ public sealed class SyncEngine
     }
 
     /// <summary>Replays the journal against the server and returns how many entries went and how many were dropped.</summary>
+    /// <remarks>
+    /// Each entry is settled - its receipt written, then the entry removed - the moment the server has taken it,
+    /// rather than all of them at the end of the run. An upload interrupted part way then leaves behind entries for
+    /// exactly the changes that did not reach the server; the whole-run alternative leaves entries for changes that
+    /// did, and the next run resends them, reports a conflict against the row it wrote itself, or overwrites a newer
+    /// server row with a stale local one.
+    /// </remarks>
+    /// <param name="options">The knobs for this run.</param>
+    /// <param name="conflicts">The collection the collected conflicts are added to.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
     public async Task<(int Uploaded, int Discarded)> UploadAsync(
         SyncOptions options,
         ICollection<SyncConflict> conflicts,
@@ -6807,7 +7473,6 @@ public sealed class SyncEngine
 
         var uploaded = 0;
         var discarded = 0;
-        var settledIds = new List<long>();
 
         // Upserts run parents first so a child never reaches the server before the row it points at.
         foreach (var table in scope)
@@ -6816,7 +7481,6 @@ public sealed class SyncEngine
                     table,
                     latestByRow,
                     idsByRow,
-                    settledIds,
                     conflicts,
                     options.Mode,
                     options.ConflictPolicy,
@@ -6836,7 +7500,6 @@ public sealed class SyncEngine
                     scope[index],
                     latestByRow,
                     idsByRow,
-                    settledIds,
                     conflicts,
                     options.Mode,
                     options.ConflictPolicy,
@@ -6849,17 +7512,27 @@ public sealed class SyncEngine
             discarded += dropped;
         }
 
-        await RemoveAsync(settledIds, cancellationToken).ConfigureAwait(false);
-
         return (uploaded, discarded);
     }
 
     /// <summary>Replays every entry of one operation kind for one table.</summary>
-    private static async Task<(int Uploaded, int Discarded)> ReplayAsync(
+    /// <remarks>
+    /// <para>
+    /// The receipt is written <i>before</i> the entry is removed, which is what a crash between the two is measured
+    /// against: both records survive, the next run replays the same local content with the acknowledged version as its
+    /// original, and the server takes it again. The other order leaves the row with a stale mirror and no receipt to
+    /// correct it, and the next version-guarded replay of that key reports a conflict with nobody.
+    /// </para>
+    /// <para>
+    /// A delete that reached the server goes the other way: the row is gone, so its receipt is dropped rather than
+    /// written, and dropping it first means a crash in between leaves an entry whose replay deletes a row the server
+    /// no longer has - a no-op.
+    /// </para>
+    /// </remarks>
+    private async Task<(int Uploaded, int Discarded)> ReplayAsync(
         ISyncTable table,
         Dictionary<(string TableName, string KeyText), SyncJournalRow> latestByRow,
         Dictionary<(string TableName, string KeyText), List<long>> idsByRow,
-        List<long> settledIds,
         ICollection<SyncConflict> conflicts,
         SyncMode mode,
         SyncConflictPolicy policy,
@@ -6868,24 +7541,41 @@ public sealed class SyncEngine
         CancellationToken cancellationToken
     )
     {
+        var operationName = operation.ToString();
+        var entries = latestByRow
+            .Values.Where(entry =>
+                string.Equals(entry.TableName, table.TableName, StringComparison.Ordinal)
+                && string.Equals(entry.Operation, operationName, StringComparison.Ordinal)
+            )
+            .OrderBy(entry => entry.Id)
+            .ToList();
+
+        if (entries.Count == 0)
+        {
+            return (0, 0);
+        }
+
+        // Read once for this table's pass: the receipts of the keys about to be replayed are what their version
+        // guards are read against.
+        var acknowledged = await _journal
+            .ReadAcksAsync(table.TableName, cancellationToken)
+            .ConfigureAwait(false);
         var uploaded = 0;
         var discarded = 0;
-        var operationName = operation.ToString();
 
-        foreach (var pair in latestByRow.OrderBy(pair => pair.Value.Id))
+        foreach (var entry in entries)
         {
-            var entry = pair.Value;
-
-            if (
-                !string.Equals(entry.TableName, table.TableName, StringComparison.Ordinal)
-                || !string.Equals(entry.Operation, operationName, StringComparison.Ordinal)
-            )
-            {
-                continue;
-            }
-
             var outcome = await table
-                .UploadAsync(entry, mode, policy, includeUnboundedBinary, cancellationToken)
+                .UploadAsync(
+                    entry,
+                    mode,
+                    policy,
+                    includeUnboundedBinary,
+                    acknowledged.TryGetValue(entry.KeyText, out var acknowledgedRowVersion)
+                        ? acknowledgedRowVersion
+                        : null,
+                    cancellationToken
+                )
                 .ConfigureAwait(false);
 
             if (outcome.Conflict is { } conflict)
@@ -6895,7 +7585,32 @@ public sealed class SyncEngine
                 continue;
             }
 
-            settledIds.AddRange(idsByRow[pair.Key]);
+            if (operation == SyncJournalOperation.Delete)
+            {
+                if (outcome.Sent)
+                {
+                    await _journal
+                        .RemoveAcksAsync(table.TableName, [entry.KeyText], cancellationToken)
+                        .ConfigureAwait(false);
+                }
+            }
+            else if (outcome.ServerRowVersion is { Length: > 0 } serverRowVersion)
+            {
+                await _journal
+                    .RecordAckAsync(
+                        table.TableName,
+                        entry.KeyText,
+                        serverRowVersion,
+                        cancellationToken
+                    )
+                    .ConfigureAwait(false);
+            }
+
+            await RemoveAsync(
+                    idsByRow[(entry.TableName, entry.KeyText)],
+                    cancellationToken
+                )
+                .ConfigureAwait(false);
 
             // A settled entry that never reached the server (a stale intent) is a discard, not an upload:
             // counting it as one would report a change as delivered when nothing was sent.
@@ -6922,18 +7637,40 @@ public sealed class SyncEngine
     }
 
     /// <summary>Pulls the server's changes down and, unless it is turned off, removes the local rows the server dropped.</summary>
+    /// <remarks>
+    /// A table whose journal still holds an unsent change stops at the row that change belongs to, and the tables
+    /// after it stop with it. <see cref="SyncAsync"/> reports where that happened in
+    /// <see cref="SyncResult.Truncations"/>; called on its own, this returns only what it applied.
+    /// </remarks>
+    /// <param name="options">The knobs for this run.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
     public async Task<(int Downloaded, int DeletedLocally)> DownloadAsync(
         SyncOptions options,
         CancellationToken cancellationToken = default
     )
     {
+        var download = await DownloadCoreAsync(options, cancellationToken).ConfigureAwait(false);
+
+        return (download.Downloaded, download.DeletedLocally);
+    }
+
+    /// <summary>Pulls the server's changes down, knowing what is still unsent and what the server has acknowledged.</summary>
+    /// <param name="options">The knobs for this run.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    private async Task<(
+        int Downloaded,
+        int DeletedLocally,
+        IReadOnlyList<SyncDownloadTruncation> Truncations
+    )> DownloadCoreAsync(SyncOptions options, CancellationToken cancellationToken)
+    {
         ArgumentNullException.ThrowIfNull(options);
 
         var scope = ResolveScope(options.Mode, options.ExcludedEntityTypes);
+        var truncations = new List<SyncDownloadTruncation>();
 
         if (scope.Count == 0)
         {
-            return (0, 0);
+            return (0, 0, truncations);
         }
 
         // One ceiling for the whole pass: asking per table would let a row committed between two tables slip through
@@ -6943,35 +7680,81 @@ public sealed class SyncEngine
         var ceiling = ceilingTable is null
             ? null
             : await ceilingTable.GetChangeCeilingAsync(cancellationToken).ConfigureAwait(false);
+
+        // Read once for the whole pass, after the upload has settled what it could: what is left is genuinely unsent.
+        // The same set answers both questions asked of it - which rows a download must not overwrite, and which rows
+        // the delete propagation must not remove - so the two cannot disagree about what is still pending.
+        var pendingKeyTexts = await ReadPendingKeyTextsAsync(cancellationToken)
+            .ConfigureAwait(false);
         var downloaded = 0;
+        string? truncatedBy = null;
 
         foreach (var table in scope)
         {
-            downloaded += await table
+            if (truncatedBy is not null)
+            {
+                // A table earlier in foreign-key order stopped part way, so rows this table would bring down may point
+                // at parents that were not downloaded. Which ones cannot be known without reading the batches that
+                // were left unread, so the whole table waits for the run that gets past the change that stopped it.
+                truncations.Add(new SyncDownloadTruncation(table.TableName, null, truncatedBy));
+
+                continue;
+            }
+
+            // Read per table alongside the pending keys: the receipts say which of the rows about to come down are
+            // this device's own echoes, and - once they have come down - which receipts have served their purpose.
+            var acknowledged = await _journal
+                .ReadAcksAsync(table.TableName, cancellationToken)
+                .ConfigureAwait(false);
+            var outcome = await table
                 .DownloadAsync(
                     ceiling,
                     options.DownloadBatchSize,
                     options.IncludeUnboundedBinary,
+                    new SyncDownloadContext
+                    {
+                        PendingKeyTexts = pendingKeyTexts.TryGetValue(
+                            table.TableName,
+                            out var keyTexts
+                        )
+                            ? keyTexts
+                            : NoPendingKeyTexts,
+                        AcknowledgedRowVersions = acknowledged,
+                    },
                     cancellationToken
                 )
                 .ConfigureAwait(false);
+            downloaded += outcome.Applied;
+
+            // After the download, so every batch that wrote one of these versions has committed: a receipt dropped
+            // ahead of the commit that replaces it would be gone for a commit that then failed.
+            if (outcome.SettledAckKeyTexts is { Count: > 0 } settledAcks)
+            {
+                await _journal
+                    .RemoveAcksAsync(table.TableName, settledAcks, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            if (outcome.TruncatedAtKeyText is { } stoppedAt)
+            {
+                truncations.Add(
+                    new SyncDownloadTruncation(table.TableName, stoppedAt, null)
+                );
+                truncatedBy = table.TableName;
+            }
         }
 
         if (!options.PropagateDeletes)
         {
-            return (downloaded, 0);
+            return (downloaded, 0, truncations);
         }
 
-        // Read once for the whole pass, after the upload has settled what it could: what is left is genuinely unsent,
-        // and those rows are not the propagation's to remove.
-        var pendingKeyTexts = await ReadPendingKeyTextsAsync(cancellationToken)
-            .ConfigureAwait(false);
         var deleted = 0;
 
         for (var index = scope.Count - 1; index >= 0; index--)
         {
             var table = scope[index];
-            deleted += await table
+            var removedKeyTexts = await table
                 .PropagateDeletesAsync(
                     pendingKeyTexts.TryGetValue(table.TableName, out var keyTexts)
                         ? keyTexts
@@ -6979,9 +7762,20 @@ public sealed class SyncEngine
                     cancellationToken
                 )
                 .ConfigureAwait(false);
+            deleted += removedKeyTexts.Count;
+
+            // A key the server has dropped takes its receipt with it. Left behind, it would be the original of the
+            // next replay of that key - a version-guarded update against a row that is gone, reported as a conflict
+            // with a row nobody can produce - which is exactly what a local row recreated under the same key runs into.
+            if (removedKeyTexts.Count > 0)
+            {
+                await _journal
+                    .RemoveAcksAsync(table.TableName, removedKeyTexts, cancellationToken)
+                    .ConfigureAwait(false);
+            }
         }
 
-        return (downloaded, deleted);
+        return (downloaded, deleted, truncations);
     }
 
     /// <summary>Resolves which tables one run covers: the mode keeps the versionless ones out of a versioned run, and the exclusions take named types away.</summary>
@@ -7017,7 +7811,7 @@ public sealed class SyncEngine
             .ToList();
     }
 
-    /// <summary>Groups the keys of the still-unsent journal entries by table, for the delete propagation to spare.</summary>
+    /// <summary>Groups the keys of the still-unsent journal entries by table: the rows a download and a delete propagation both leave alone.</summary>
     private async Task<Dictionary<string, HashSet<string>>> ReadPendingKeyTextsAsync(
         CancellationToken cancellationToken
     )

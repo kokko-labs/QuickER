@@ -1113,9 +1113,20 @@ It requires exactly the two dialects `sqlserver` (the server) and `sqlite` (the 
 
 ### What it puts where
 
-The server gets **no extra schema at all**. The local database gets one shared table, `quicker_sync_journal`, created on first use with `CREATE TABLE IF NOT EXISTS`; it records offline edits (table, key, operation, and for a delete the version the row carried).
+The server gets **no extra schema at all**. The local database gets two shared tables, created on first use with `CREATE TABLE IF NOT EXISTS`: `quicker_sync_journal` records offline edits (table, key, operation, and for a delete the version the row carried), and `quicker_sync_ack` records, per row, the version the server stamped on an upload it took.
 
-The resume point is **derived, not stored**: it is the highest mirrored version among the local rows, so there is no bookkeeping row that can drift out of step with the data. Two properties make that derivation correct, and both are load-bearing: server changes are fetched in ascending version order, and each batch is applied in a single local transaction. A run interrupted anywhere leaves the local database holding a prefix of the ordered stream, and the maximum of that prefix is exactly where the next run resumes. Rows created locally and not yet uploaded have no mirrored version, so they drop out of the maximum on their own.
+The resume point is **derived, not stored**: it is the highest mirrored version among the local rows, so there is no bookkeeping row that can drift out of step with the data. Three properties make that derivation correct, and all three are load-bearing: server changes are fetched in ascending version order, each batch is applied in a single local transaction, and **the download is the only thing that writes a mirrored version**. A run interrupted anywhere leaves the local database holding a prefix of the ordered stream, and the maximum of that prefix is exactly where the next run resumes. Rows created locally and not yet uploaded have no mirrored version, so they drop out of the maximum on their own.
+
+The third property is what keeps the first two worth anything. A version written from anywhere but the ordered stream can stand above rows of that stream the local database has not seen yet, and each of those rows then sits below the resume point for good. So an upload does **not** mirror the version the server stamps on the row it sends.
+
+It writes that version to `quicker_sync_ack` instead. **The receipt is about one row; it is not a resume point**, and nothing derives one from it - which is why it can be written where a mirrored version cannot. It answers the question the mirror cannot answer between an upload and the echo that follows it: what version the server actually holds for a row this device has already sent. Two things read it:
+
+- **The replay of a further local edit** guards against the later of the mirrored version and the acknowledged one. Reading the mirror alone makes a row whose echo has not come down look older than the server's copy of *itself*, and the version guard then fires against a version this very device wrote - a conflict with nobody. It is also what tells an offline insert apart from a row already accepted but not yet echoed: both have an empty mirror, and only the second has a receipt. The same applies to a delete, whose journal entry carries the mirror as of the moment the row was deleted.
+- **The download** recognizes a row carrying exactly the acknowledged version as this device's own echo, and takes only the version from it - the content is the row's own. A row someone else has changed since carries a different version and is applied like any other change.
+
+A receipt is written *before* the journal entry it settles is removed, and it goes once the mirror has caught up with it: after the local commit that wrote the version, and when delete propagation removes the row, and wholesale when `RefreshAsync` rebuilds the table. `SyncJournal.RemoveTableAsync` and `RemoveAllAsync` deal with journal entries only - dropping unsent local changes says nothing about what the server has already taken.
+
+An echo that has not come down is no longer a state that has to be cleared up before the next edit, so calling `UploadAsync` and `DownloadAsync` separately is as sound as calling `SyncAsync`: the receipts outlive the call that wrote them.
 
 The upper bound of a pass is `MIN_ACTIVE_ROWVERSION()`, taken once per run: a row committed later can carry a lower version than one committed earlier, so reading up to "the current maximum" would step over rows that are still uncommitted and never come back for them.
 
@@ -1171,6 +1182,9 @@ A run uploads first and downloads second, and visits tables in foreign-key order
 | `DeletedLocally` | Local rows removed because the server no longer has that key |
 | `Discarded` | Changes settled without being sent - a stale intent whose row is no longer there, or everything the journal held under `ServerWins` |
 | `Conflicts` / `HasConflicts` | The local changes that could not be replayed; they stay in the journal |
+| `Truncations` / `HasTruncations` | The tables whose download stopped before the end of the server's changes (see [Conflicts](#conflicts)) |
+
+**A journal entry is settled the moment the server takes it** - its receipt written, then the entry removed - one entry at a time, rather than all of them at the end of the run. An upload interrupted part way therefore leaves entries for exactly the changes that did not reach the server. Settling them together at the end would leave entries for changes that did, and the next run would resend them - reporting a conflict against the row this run wrote itself, or putting a stale local row over a newer server one.
 
 **Delete propagation spares the rows the journal still speaks for.** Before it removes anything it reads the journal, and a key with an unsent entry is left alone - including one this same run has just reported as a conflict, which is what keeps `Collect` from resolving a "the server no longer has this row" conflict in the server's favour by deleting the row. Once the entry is settled - uploaded, discarded as a stale intent, or dropped by `ServerWins` - a later run propagates the deletion as usual. The protection reaches exactly as far as the journal does: a row written into a synchronized table by some other route has no entry, and while propagation is on it is deleted (see [Known limitations](#known-limitations)).
 
@@ -1231,7 +1245,7 @@ The copy streams through a temporary file, so neither side holds the blob in mem
 Two details follow from copying columns separately:
 
 - **A NULL source clears the destination.** The point of carrying these columns is that both sides end up alike, so a row whose server copy has no blob loses the local one rather than keeping a stale copy.
-- **After an upload the server's version is read again.** Writing a blob is a write to the row, so the server moves the version on past the one the insert or update handed back. Mirroring the stale value would leave the local anchor below the row's current version, and the very next download would hand the row back as if the server had changed it.
+- **After an upload the server's version is read again.** Writing a blob is a write to the row, so the server moves the version on past the one the insert or update handed back. Reporting the stale value to the run would leave the download unable to recognize the row as its own echo, and it would be applied - blob copied back down - as if the server had changed it.
 
 **A blob written on its own is tracked.** `Write{Column}Async` (and the file convenience method) goes through the journaling decorator like every other write and records its intent first, so an offline edit that changes nothing but a blob still reaches the server. The recording does not depend on `IncludeUnboundedBinary` - what to send is decided when sending, not when generating - so a run left at the default uploads the row (without the blob) and settles the entry.
 
@@ -1239,7 +1253,20 @@ The cost is one round trip per column per changed row, which is why it is off by
 
 ### Conflicts
 
-Nothing is resolved silently. Under the default policy a local change that collides with the server stays in the journal and comes back in `SyncResult.Conflicts` with the table, the key, the operation, the reason, and both sides' rows attached - and the local row stays where it is, including when the reason is `MissingOnServer`, because delete propagation spares every key the journal still holds an entry for.
+Nothing is resolved silently. Under the default policy a local change that collides with the server stays in the journal and comes back in `SyncResult.Conflicts` with the table, the key, the operation, the reason, and both sides' rows attached - and the local row stays where it is, including when the reason is `MissingOnServer`, because both halves of the download leave every key the journal still holds an entry for alone: the row is not overwritten by the server's copy, and delete propagation does not remove it.
+
+**Leaving such a row alone stops that table's download there, and the tables after it with it.** The download applies a table's rows in ascending version order, so skipping one row and carrying on would move the resume point past it and the change that was being protected would never be seen again. It stops at that row instead - and every table after it in foreign-key order is left for the next run too, because the rows it would bring down can point at parents that were behind the stopping point. What was left unread is reported:
+
+```csharp
+foreach (var stop in result.Truncations)
+{
+    // stop.TableName, and exactly one of:
+    //   stop.PendingKeyText        - the unsent local change this table stopped at
+    //   stop.TruncatedByTableName  - the table whose stop this one waited for
+}
+```
+
+The rows behind the stopping point are still on the server and come down as soon as the entry that stopped them is settled - decided and re-run, or dropped with `SyncJournal.RemoveTableAsync`. What a run stops for is an unsent journal entry, which is usually a conflict it has just collected but is equally an entry an interrupted upload left behind; a run that settles every entry reports no truncations.
 
 | `SyncConflictPolicy` | What happens |
 |---|---|
@@ -1259,7 +1286,7 @@ var result = await engine.SyncAsync(new SyncOptions { Mode = SyncMode.LastWriteW
 
 A `LastWriteWins` run covers **every table** and gives the whole run one semantics:
 
-- **Uploads are uniform across all tables**: update with `ForceOverwrite`, insert when the update finds no row, delete unconditionally. No version is read, no existence is probed, and **nothing is ever reported as a conflict** (`Conflicts` stays empty; `ConflictPolicy` is ignored). Versioned tables overwrite without their guards too - their mirrored versions are still written back afterwards, so the next run does not hand your own change back.
+- **Uploads are uniform across all tables**: update with `ForceOverwrite`, insert when the update finds no row, delete unconditionally. No version is read, no existence is probed, and **nothing is ever reported as a conflict** (`Conflicts` stays empty; `ConflictPolicy` is ignored). Versioned tables overwrite without their guards too - the version the server stamps is still reported to the run, so the same run's download recognizes the row as its own echo and takes nothing but the version from it.
 - **The winner is whoever uploads last, not whoever edited last.** An update lost to the crossing is neither detected nor reported - that is the trade this mode names.
 - **A delete crossed with an edit resurrects the row.** A row deleted on the server while it was being edited offline comes back when the upload's update finds nothing and inserts; a local delete likewise removes whatever the server did to the row meanwhile. Consistent, as last-write-wins goes.
 - **A versionless table downloads as a full key-ordered scan on every run** (`SELECT TOP … WHERE key > @afterKey ORDER BY key` paging, plus the ordinary delete propagation). The cost is O(table) per run - which is why this mode is meant for small, rarely changing tables, and why **a large or busy table is better served by adding a rowversion column** and riding the incremental side. Versioned tables still download incrementally in this mode; the result is the same, the transfer just smaller.
@@ -1318,6 +1345,8 @@ The run is **not one transaction**. The generated repositories manage their own 
 - **Cannot be combined with the EF Core Repository**, since the sync support requires a multi-target build and that combination is already exclusive.
 - **The HTTP transport requires `--generate-remote-services`.** Without it the direct sources are generated and the engine still works, but there is no client or endpoint to reach the server with.
 - **The local side has no version guard**, as under [Row version columns in a multi-target build](#row-version-columns-in-a-multi-target-build): two local writers still overwrite each other, and the engine's conflict detection is about the server's version, not theirs.
+- **There is one window a crash can still fall into**: between the server accepting an upload and the receipt being written for it. The journal entry survives, and the next run replays it as a version-guarded update against a mirrored version the server has already moved past - reported as a conflict, with the row this device itself wrote on the other side of it. Resolving it with `LocalWins` sends the same local content again.
+- **A row deleted on the server and recreated under the same key can conflict when `PropagateDeletes` is off.** The receipt of such a row is dropped when delete propagation removes the local row; with propagation off nothing removes it, and a local row recreated under that key is replayed as an update against a version of a row that is gone, reported as `MissingOnServer`. The same applies when the local row is removed by a route the generated repositories do not see.
 - The runtime package for this is `QuickER.Runtime.Sync`.
 
 ## Remote-capable interfaces (--generate-remote-contracts)
