@@ -23,7 +23,7 @@
         "type": "Project",
         "dependencies": {
           "QuickER.Model": "[0.1.0, )",
-          "Scriban": "[7.2.6, )"
+          "Scriban": "[7.4.0, )"
         }
       },
       "quicker.model": {
@@ -38,15 +38,15 @@
       },
       "Microsoft.Extensions.DependencyInjection.Abstractions": {
         "type": "CentralTransitive",
-        "requested": "[10.0.11, )",
+        "requested": "[10.0.12, )",
         "resolved": "10.0.0",
         "contentHash": "L3AdmZ1WOK4XXT5YFPEwyt0ep6l8lGIPs7F5OOBZc77Zqeo01Of7XXICy47628sdVl0v/owxYJTe86DTgFwKCA=="
       },
       "Scriban": {
         "type": "CentralTransitive",
-        "requested": "[7.2.6, )",
-        "resolved": "7.2.6",
-        "contentHash": "k6DvaRY83jtigNudMoYlN5Zg42JEDDOCSeKrnpHiE5Gthkd9Fr+6VnYFnL3DqtkZTtPezJJdoX3ZfOTTFpQEMg=="
+        "requested": "[7.4.0, )",
+        "resolved": "7.4.0",
+        "contentHash": "h5QYOAKw7F4ajVNxeScBsq0c7en6YWyKDSC4ZnZIlrkeJrl0ekHk1PlpqP5C4peqkt6NoXl9dlwK3pI4oDC5oA=="
       }
     },
     "net10.0/win-x64": {}
