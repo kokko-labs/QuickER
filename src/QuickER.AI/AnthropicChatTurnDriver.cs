@@ -8,7 +8,7 @@ namespace QuickER.AI;
 
 /// <summary>Anthropic (Claude) チャット接続設定（API キー・モデル）</summary>
 /// <param name="ApiKey">Anthropic API キー</param>
-/// <param name="Model">モデル名（例: <c>claude-opus-4-8</c>）</param>
+/// <param name="Model">モデル名（例: <c>claude-opus-5</c>）</param>
 public sealed record AnthropicChatConnection(string ApiKey, string Model);
 
 /// <summary>
