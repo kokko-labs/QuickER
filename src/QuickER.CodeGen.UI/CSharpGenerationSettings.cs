@@ -1,4 +1,4 @@
-using QuickER.CodeGen.CSharp;
+﻿using QuickER.CodeGen.CSharp;
 using QuickER.Settings;
 
 namespace QuickER.CodeGen.UI;
@@ -261,7 +261,7 @@ public class CSharpGenerationSettingsStore : JsonSettingsStore<CSharpGenerationS
     /// <summary>既定の保存ファイル名（ダイアログの「設定保存」の既定ファイル名と同名に揃えている）</summary>
     public const string DefaultFileName = "codegen-settings.json";
 
-    /// <summary>既定の保存先（%APPDATA%\QuickER）で設定ストアを生成する</summary>
+    /// <summary>既定の保存先（%LOCALAPPDATA%\QuickER）で設定ストアを生成する</summary>
     public CSharpGenerationSettingsStore()
         : base(DefaultFileName) { }
 

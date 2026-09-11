@@ -359,9 +359,13 @@ public partial class MainViewModel : IDiagramTransferHost
             ? "QuickER"
             : $"{LastDocumentFileName}{(IsDirty ? "*" : string.Empty)} - QuickER";
 
-    /// <summary>ダイアグラム自動保存ファイルの既定パス（%APPDATA%\QuickER\last_diagram.json）</summary>
+    /// <summary>ダイアグラム自動保存ファイルの既定パス（%LOCALAPPDATA%\QuickER\last_diagram.json）</summary>
+    /// <remarks>
+    /// 保存先がローミング（<c>%APPDATA%</c>）ではなくローカルなのは、この PC に固有の作業状態だから
+    /// （理由の正本は <c>JsonSettingsStore</c> の既定コンストラクタ）。
+    /// </remarks>
     private static readonly string DefaultAutoSavePath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "QuickER",
         "last_diagram.json"
     );

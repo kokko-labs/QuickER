@@ -20,7 +20,7 @@ namespace QuickER.Services;
 /// </remarks>
 public static class CrashHandlingService
 {
-    /// <summary>クラッシュログの保存先フォルダ名（<c>%APPDATA%\QuickER</c>＝設定ストアと同じ規約）</summary>
+    /// <summary>クラッシュログの保存先フォルダ名（<c>%LOCALAPPDATA%\QuickER</c>＝設定ストアと同じ規約）</summary>
     private const string LogFolderName = "QuickER";
 
     /// <summary>バージョンを解決できなかった場合に記録する代替表記</summary>
@@ -92,7 +92,7 @@ public static class CrashHandlingService
         return builder.ToString();
     }
 
-    /// <summary>クラッシュログを <c>%APPDATA%\QuickER\crash-yyyyMMdd-HHmmss-fff.log</c> へ書き出す</summary>
+    /// <summary>クラッシュログを <c>%LOCALAPPDATA%\QuickER\crash-yyyyMMdd-HHmmss-fff.log</c> へ書き出す</summary>
     /// <remarks>
     /// <para>
     /// クラッシュ処理の途中で失敗しても後続（ダイアログ表示・終了）を止めないよう、
@@ -107,7 +107,7 @@ public static class CrashHandlingService
     /// </remarks>
     /// <param name="ex">記録する例外</param>
     /// <param name="version">アプリのバージョン文字列</param>
-    /// <param name="baseDirOverride">保存先フォルダ（テスト隔離用。null なら <c>%APPDATA%\QuickER</c>）</param>
+    /// <param name="baseDirOverride">保存先フォルダ（テスト隔離用。null なら <c>%LOCALAPPDATA%\QuickER</c>）</param>
     /// <returns>書き出したログのフルパス。失敗した場合は null</returns>
     public static string? WriteCrashLog(
         Exception ex,
@@ -202,10 +202,10 @@ public static class CrashHandlingService
         }
     }
 
-    /// <summary>クラッシュログの既定保存先（<c>%APPDATA%\QuickER</c>）を返す</summary>
+    /// <summary>クラッシュログの既定保存先（<c>%LOCALAPPDATA%\QuickER</c>）を返す</summary>
     private static string DefaultLogFolder() =>
         Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             LogFolderName
         );
 

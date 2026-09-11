@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
 using AwesomeAssertions;
@@ -159,14 +159,14 @@ public class MockGenerationDialogViewModelTests
         );
         var mockFolder = Path.Combine(baseFolder, "mock");
         var engineBox = new FakeChatEngine[1];
-        // API キーは実 %APPDATA% の ApiKeyStore ではなくメモリ上のストアへ隔離する（並列テストの IO 競合を避ける）
+        // API キーは実 %LOCALAPPDATA% の ApiKeyStore ではなくメモリ上のストアへ隔離する（並列テストの IO 競合を避ける）
         var keyStore = new InMemoryApiKeyStore();
 
         var vm = new MockGenerationDialogViewModel(
             new StubDiagramSource(diagram),
             new SyncUiDispatcher(),
             files: null,
-            // 設定・UI 状態・モデル履歴を集約した 1 ファイルを一時フォルダへ隔離する（実 %APPDATA% を保護）
+            // 設定・UI 状態・モデル履歴を集約した 1 ファイルを一時フォルダへ隔離する（実 %LOCALAPPDATA% を保護）
             settingsStore: new AiSettingsStore(Path.Combine(baseFolder, "settings")),
             apiKeyEngineFactory: (_, toolHost) => engineBox[0] = new FakeChatEngine(toolHost),
             codexEngineFactory: null,

@@ -1373,7 +1373,9 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
     /// <summary>プロセス起動に使う実行ファイル名と引数を決定する</summary>
     /// <remarks>
     /// codex コマンドの実体が .cmd / .bat（npm のシム等）の場合、<c>UseShellExecute = false</c> では直接起動できないため
-    /// cmd.exe /c でラップして stdin/stdout のリダイレクトを機能させる
+    /// cmd.exe /c でラップして stdin/stdout のリダイレクトを機能させる。ラップと入力の検証は
+    /// <see cref="BatchShimProcessGuard"/>（3 バックエンド共有）が担い、ここは PATH からの実体解決だけを行う
+    /// （拡張子で起動方法が決まるため、相対指定のままではシムかどうかを判定できない）。
     /// </remarks>
     internal static (string fileName, string arguments) ResolveStartInfo(
         string executablePath,
@@ -1409,40 +1411,19 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
             }
         }
 
-        var extension = Path.GetExtension(resolvedPath).ToLowerInvariant();
-
-        if (extension == ".cmd" || extension == ".bat")
+        if (!BatchShimProcessGuard.IsBatchShim(resolvedPath))
         {
-            // 引用符を含むパス（正規の Windows パスには現れない）は引用の切断＝コマンド挿入につながるため起動前に拒否する
-            if (resolvedPath.Contains('"'))
-            {
-                throw new InvalidOperationException(
-                    string.Format(Strings.Codex_PathHasQuote, resolvedPath)
-                );
-            }
-
-            // 引数側は cmd のメタ文字（引用符・連結・リダイレクト・エスケープ・環境変数展開）が
-            // 引用の外で解釈されコマンド挿入につながるため、含まれていたら起動前に拒否する
-            var metaIndex = appServerArguments.IndexOfAny(['"', '&', '|', '<', '>', '^', '%']);
-
-            if (metaIndex >= 0)
-            {
-                throw new InvalidOperationException(
-                    string.Format(
-                        Strings.Codex_ArgHasCmdMeta,
-                        appServerArguments[metaIndex],
-                        appServerArguments
-                    )
-                );
-            }
-
-            // バッチファイルは cmd.exe /c 経由で起動しないとリダイレクトが機能しない。
-            // /d は AutoRun レジストリコマンドの実行を抑止し、/s は外側の引用符で囲んだ全体を
-            // 1 つのコマンド行として扱わせて引用符の解釈を決定的にする
-            return ("cmd.exe", $"/d /s /c \"\"{resolvedPath}\" {appServerArguments}\"");
+            // シムでなければ（.exe 等）解決前の指定をそのまま渡す＝ProcessStartInfo が安全に扱う
+            return (executablePath, appServerArguments);
         }
 
-        return (executablePath, appServerArguments);
+        return BatchShimProcessGuard.WrapCommandLine(
+            resolvedPath,
+            appServerArguments,
+            Strings.Codex_PathHasQuote,
+            Strings.Codex_ArgHasCmdMeta,
+            Strings.Codex_ArgHasNewline
+        );
     }
 
     /// <summary>JSON-RPC エラーレスポンスの error 要素からユーザー向けエラーメッセージを組み立てる</summary>

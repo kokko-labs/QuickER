@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
@@ -25,7 +25,7 @@ public class ArrangeGroupPopupTests
     {
         Exception? captured = null;
 
-        // MainWindow ctor の Initialize() が実 %APPDATA% の自動保存を復元し、Close の AutoSave が
+        // MainWindow ctor の Initialize() が実 %LOCALAPPDATA% の自動保存を復元し、Close の AutoSave が
         // 書き戻すため、永続化先を一時フォルダへ隔離する（実ユーザーデータの読み書きを断つ）
         var folder = Path.Combine(
             Path.GetTempPath(),

@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.IO;
 using AwesomeAssertions;
 using QuickER.Extensibility;
@@ -48,7 +48,7 @@ public class MainViewModelErDiagramHostTests : IDisposable
     }
 
     /// <summary>
-    /// 実 %APPDATA% を汚さないよう、永続化先を一時フォルダへ隔離した VM を生成する
+    /// 実 %LOCALAPPDATA% を汚さないよう、永続化先を一時フォルダへ隔離した VM を生成する
     /// （<see cref="MainViewModel.ReplaceQueries"/> が AutoSave を呼ぶため隔離が必須）。
     /// </summary>
     private MainViewModel CreateViewModel(DatabaseProviderRegistry? providers = null)

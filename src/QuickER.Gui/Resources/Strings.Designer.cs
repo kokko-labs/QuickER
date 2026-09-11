@@ -128,6 +128,33 @@ namespace QuickER.Resources {
         }
 
         /// <summary>
+        ///   Settings に類似しているローカライズされた文字列を検索します。
+        /// </summary>
+        public static string Settings_Caption {
+            get {
+                return ResourceManager.GetString("Settings_Caption", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Application settings (display language, update check) に類似しているローカライズされた文字列を検索します。
+        /// </summary>
+        public static string Settings_Tooltip {
+            get {
+                return ResourceManager.GetString("Settings_Tooltip", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Check for updates on startup に類似しているローカライズされた文字列を検索します。
+        /// </summary>
+        public static string Settings_CheckUpdatesOnStartup {
+            get {
+                return ResourceManager.GetString("Settings_CheckUpdatesOnStartup", resourceCulture);
+            }
+        }
+
+        /// <summary>
         ///   表示言語を切り替え（再起動後に反映） に類似しているローカライズされた文字列を検索します。
         /// </summary>
         public static string Language_Tooltip {

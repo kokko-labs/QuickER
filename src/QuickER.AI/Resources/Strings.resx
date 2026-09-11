@@ -178,6 +178,15 @@
   <data name="ClaudeCode_CliNotFound" xml:space="preserve">
     <value>The claude CLI was not found. Install Claude Code.</value>
   </data>
+  <data name="ClaudeCode_PathHasQuote" xml:space="preserve">
+    <value>Cannot launch because the claude command path contains a quotation mark: {0}</value>
+  </data>
+  <data name="ClaudeCode_ArgHasEnvExpansion" xml:space="preserve">
+    <value>Cannot launch because a claude command argument contains '%', which cmd expands: {0}</value>
+  </data>
+  <data name="ClaudeCode_ArgHasNewline" xml:space="preserve">
+    <value>Cannot launch because a claude command argument or path contains a line break, which cmd truncates at the first newline: {0}</value>
+  </data>
   <data name="ClaudeCode_LaunchFailed" xml:space="preserve">
     <value>Failed to launch claude.</value>
   </data>
@@ -322,6 +331,9 @@
   <data name="Codex_ArgHasCmdMeta" xml:space="preserve">
     <value>Cannot launch because the codex command arguments contain the character '{0}' interpreted by cmd: {1}</value>
   </data>
+  <data name="Codex_ArgHasNewline" xml:space="preserve">
+    <value>Cannot launch because a codex command argument or path contains a line break, which cmd truncates at the first newline: {0}</value>
+  </data>
   <data name="Codex_ServerErrorFallback" xml:space="preserve">
     <value>Codex App Server error</value>
   </data>
@@ -366,6 +378,9 @@
   </data>
   <data name="Copilot_CliNotFound" xml:space="preserve">
     <value>The copilot CLI was not found. Install the GitHub Copilot CLI.</value>
+  </data>
+  <data name="Copilot_PathHasQuote" xml:space="preserve">
+    <value>Cannot launch because the copilot command path contains a quotation mark: {0}</value>
   </data>
   <data name="Copilot_NotConnected" xml:space="preserve">
     <value>The GitHub Copilot runtime has not started yet.</value>

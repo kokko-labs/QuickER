@@ -178,6 +178,15 @@
   <data name="ClaudeCode_CliNotFound" xml:space="preserve">
     <value>claude CLI が見つかりません。Claude Code をインストールしてください。</value>
   </data>
+  <data name="ClaudeCode_PathHasQuote" xml:space="preserve">
+    <value>claude コマンドのパスに引用符が含まれるため起動できません: {0}</value>
+  </data>
+  <data name="ClaudeCode_ArgHasEnvExpansion" xml:space="preserve">
+    <value>claude コマンドの引数に cmd が展開する '%' が含まれるため起動できません: {0}</value>
+  </data>
+  <data name="ClaudeCode_ArgHasNewline" xml:space="preserve">
+    <value>claude コマンドの引数またはパスに改行が含まれるため起動できません（cmd は最初の改行で以降を切り捨てます）: {0}</value>
+  </data>
   <data name="ClaudeCode_LaunchFailed" xml:space="preserve">
     <value>claude の起動に失敗しました。</value>
   </data>
@@ -322,6 +331,9 @@
   <data name="Codex_ArgHasCmdMeta" xml:space="preserve">
     <value>codex コマンドの引数に cmd で解釈される文字 '{0}' が含まれるため起動できません: {1}</value>
   </data>
+  <data name="Codex_ArgHasNewline" xml:space="preserve">
+    <value>codex コマンドの引数またはパスに改行が含まれるため起動できません（cmd は最初の改行で以降を切り捨てます）: {0}</value>
+  </data>
   <data name="Codex_ServerErrorFallback" xml:space="preserve">
     <value>Codex App Server エラー</value>
   </data>
@@ -366,6 +378,9 @@
   </data>
   <data name="Copilot_CliNotFound" xml:space="preserve">
     <value>copilot CLI が見つかりません。GitHub Copilot CLI をインストールしてください。</value>
+  </data>
+  <data name="Copilot_PathHasQuote" xml:space="preserve">
+    <value>copilot コマンドのパスに引用符が含まれるため起動できません: {0}</value>
   </data>
   <data name="Copilot_NotConnected" xml:space="preserve">
     <value>GitHub Copilot ランタイムはまだ起動していません。</value>

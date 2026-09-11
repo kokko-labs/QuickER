@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using AwesomeAssertions;
 using QuickER.Documents;
 using QuickER.Model;
@@ -850,7 +850,7 @@ public class MainViewModelTests
         vm.WindowTitle.Should().Be("QuickER");
     }
 
-    /// <summary>実 %APPDATA% を汚さないよう、永続化先を一時フォルダへ隔離した VM を生成する</summary>
+    /// <summary>実 %LOCALAPPDATA% を汚さないよう、永続化先を一時フォルダへ隔離した VM を生成する</summary>
     private static MainViewModel CreateIsolatedPersistenceViewModel(string folder)
     {
         var vm = new MainViewModel();

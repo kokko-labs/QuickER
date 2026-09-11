@@ -6,7 +6,7 @@ namespace QuickER.Tests.AI.UI;
 
 /// <summary><see cref="ApiKeyStore"/> の保存・復元動作を検証するテストクラス</summary>
 /// <remarks>
-/// 実 %APPDATA% を汚さず（並列テストの IO 競合も避けて）検証するため、
+/// 実 %LOCALAPPDATA% を汚さず（並列テストの IO 競合も避けて）検証するため、
 /// 保存先フォルダ指定オーバーロードでテストごとの一時フォルダへ隔離する。
 /// </remarks>
 public class ApiKeyStoreTests

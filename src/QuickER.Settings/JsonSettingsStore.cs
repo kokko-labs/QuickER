@@ -24,13 +24,19 @@ public class JsonSettingsStore<TSettings>
     /// <summary>設定ファイル名</summary>
     private readonly string _fileName;
 
-    /// <summary>既定の保存先（%APPDATA%\QuickER）で設定ストアを生成する</summary>
+    /// <summary>既定の保存先（%LOCALAPPDATA%\QuickER）で設定ストアを生成する</summary>
+    /// <remarks>
+    /// ローミング（<c>%APPDATA%</c>）ではなくローカル（<c>%LOCALAPPDATA%</c>）を使う。ここに置くのは
+    /// この PC に固有の作業状態（ウィンドウ状態・直近ファイル・DPAPI で保護した秘密）であり、
+    /// ローミングプロファイルでドメイン内の他端末へ複製されると、復号できない秘密や別端末のパスを
+    /// 運ぶことになるため（Windows のローミング指針どおり、機械固有のものはローカルへ置く）。
+    /// </remarks>
     /// <param name="fileName">設定ファイル名（例: <c>ai-settings.json</c>）</param>
     public JsonSettingsStore(string fileName)
         : this(
             fileName,
             Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "QuickER"
             )
         ) { }

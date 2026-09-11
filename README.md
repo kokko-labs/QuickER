@@ -313,6 +313,8 @@ GitHub Releases provides the following packages.
 
 For the Portable edition, extract the ZIP and run `QuickER.exe`.
 
+The installers and update packages are not Authenticode signed, so Windows SmartScreen reports an unknown publisher; choose "More info" and then "Run anyway" to proceed. The installed edition checks GitHub Releases (`api.github.com`) for a newer version at startup and asks before it downloads anything — turn that off under **Settings > Check for updates on startup**. The Portable edition never checks.
+
 To run from source:
 
 ```powershell

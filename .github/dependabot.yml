@@ -1,0 +1,16 @@
+# GitHub Actions の更新監視。
+#
+# ワークフローのアクションは commit SHA で固定しているため（.github/workflows/*.yml）、
+# 上流の更新は自動では入らない。固定を「放置された古い版」に化けさせないよう、
+# Dependabot に SHA とバージョンコメントの両方を書き換える PR を出させる。
+# NuGet パッケージは Directory.Packages.props で中央管理しており、更新はリリース準備の
+# 一括作業として手で行う運用のためここでは監視しない。
+version: 2
+
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "ci"

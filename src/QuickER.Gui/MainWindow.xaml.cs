@@ -83,12 +83,12 @@ public partial class MainWindow : Window
         }
     }
 
-    /// <summary>言語切替ボタン押下で、その場に言語選択の ContextMenu を開く</summary>
+    /// <summary>設定ボタン押下で、その場に設定の ContextMenu（言語・更新確認）を開く</summary>
     /// <remarks>
     /// 左クリックでも開けるよう明示的に開く（ContextMenu は既定では右クリックで開くため）。
     /// PlacementTarget を通じてメニューはボタンの DataContext（MainViewModel）を引き継ぐ。
     /// </remarks>
-    private void LanguageButton_Click(object sender, RoutedEventArgs e)
+    private void SettingsButton_Click(object sender, RoutedEventArgs e)
     {
         if (sender is Button { ContextMenu: { } menu } button)
         {

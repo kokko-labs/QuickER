@@ -1,3 +1,4 @@
+using System.IO;
 using System.Text.Json;
 using QuickER.AI.Resources;
 
@@ -32,6 +33,14 @@ public sealed class CodexChatEngine : IErChatEngine
     private const string ClientVersion = "1.0.0";
     private const string ApprovalPolicyNever = "never";
 
+    /// <summary>チャットのスレッドへ与えるサンドボックス（読み取り専用＝作業フォルダへも書かせない）</summary>
+    /// <remarks>
+    /// 内蔵チャットの仕事は ER 図の編集（dynamicTools 経由）だけで、ファイルを書く必要が無い。
+    /// モック生成側（<c>CodexMockProjectAgent</c>）は出力フォルダへ書くのが目的なので
+    /// <c>workspace-write</c> のままで、ここだけが read-only になる。
+    /// </remarks>
+    private const string SandboxReadOnly = "read-only";
+
     /// <summary>commandExecution / fileChange 承認への拒否決定（ターンは継続する。cancel はターン中断）</summary>
     private const string ApprovalDecisionDecline = "decline";
 
@@ -49,6 +58,9 @@ public sealed class CodexChatEngine : IErChatEngine
     private string? _currentThreadId;
     private string? _currentTurnId;
     private bool _turnInProgress;
+
+    /// <summary>スレッドの作業フォルダ（初回のスレッド開始時に作る一時フォルダ。破棄時に消す）</summary>
+    private string _workingDirectory = string.Empty;
 
     /// <summary>使用するモデルプロバイダー（例: openai, ollama-launch）</summary>
     public string ModelProvider { get; set; } = OpenAiProviderName;
@@ -420,11 +432,24 @@ public sealed class CodexChatEngine : IErChatEngine
     }
 
     /// <summary>スレッド開始オプションを組み立てる（ツールホストがある場合のみツールと設計ルールを登録）</summary>
-    private CodexThreadStartOptions BuildThreadStartOptions() =>
-        new()
+    /// <remarks>
+    /// 作業フォルダはアプリのカレントディレクトリではなく無害な一時フォルダに閉じ込め、あわせて
+    /// サンドボックスを読み取り専用で明示する（<see cref="ClaudeCodeChatEngine"/> /
+    /// <c>CopilotRuntimeClient</c> と同じ扱い。承認ポリシーが never なので、既定サンドボックスの
+    /// まま cwd をアプリの実行フォルダに向けると、チャットが承認なしにその配下を読める）。
+    /// </remarks>
+    internal CodexThreadStartOptions BuildThreadStartOptions()
+    {
+        if (_workingDirectory.Length == 0)
         {
-            Cwd = Environment.CurrentDirectory,
+            _workingDirectory = CreateWorkingDirectory();
+        }
+
+        return new()
+        {
+            Cwd = _workingDirectory,
             ApprovalPolicy = ApprovalPolicyNever,
+            Sandbox = SandboxReadOnly,
             ModelProvider = NormalizeOptionalText(ModelProvider),
             Model = NormalizeOptionalText(Model),
             DynamicTools = _toolHost is not null ? _profile.Tools : null,
@@ -432,6 +457,45 @@ public sealed class CodexChatEngine : IErChatEngine
                 ? _profile.BuildCodexDeveloperInstructions()
                 : null,
         };
+    }
+
+    /// <summary>一時作業ディレクトリを作成する（codex の cwd を無害な場所に限定する）</summary>
+    private static string CreateWorkingDirectory()
+    {
+        var path = Path.Combine(
+            Path.GetTempPath(),
+            "QuickER",
+            "codex",
+            Guid.NewGuid().ToString("N")
+        );
+        Directory.CreateDirectory(path);
+        return path;
+    }
+
+    /// <summary>一時作業ディレクトリを削除する（ベストエフォート）</summary>
+    private void TryDeleteWorkingDirectory()
+    {
+        if (_workingDirectory.Length == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            if (Directory.Exists(_workingDirectory))
+            {
+                Directory.Delete(_workingDirectory, recursive: true);
+            }
+        }
+        catch (IOException)
+        {
+            // 使用中などで削除できない場合は無視する
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // 権限不足は無視する
+        }
+    }
 
     /// <summary>現在のプロバイダー・モデルから保存用設定を組み立てる</summary>
     private CodexAppServerSettings BuildSettings() =>
@@ -707,7 +771,7 @@ public sealed class CodexChatEngine : IErChatEngine
     }
 
     /// <inheritdoc />
-    public ValueTask DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
         _client.AgentMessageDeltaReceived -= OnAgentMessageDelta;
         _client.TurnCompleted -= OnTurnCompleted;
@@ -716,6 +780,9 @@ public sealed class CodexChatEngine : IErChatEngine
         _client.AccountUpdated -= OnAccountUpdated;
         _client.LoginCompleted -= OnLoginCompleted;
         _client.NotificationReceived -= OnNotificationReceived;
-        return _client.DisposeAsync();
+        await _client.DisposeAsync().ConfigureAwait(false);
+
+        // 子プロセスを止めてから作業フォルダを消す（掴まれたままだと削除できない）
+        TryDeleteWorkingDirectory();
     }
 }

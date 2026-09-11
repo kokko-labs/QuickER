@@ -28,8 +28,9 @@ public class UpdateServiceTests
 
     // ---- UpdateFeed.Resolve ----
 
-    /// <summary>環境変数が非空ならそれを最優先する</summary>
-    [Fact(DisplayName = "Resolve: 環境変数が非空なら環境変数を優先する")]
+#if DEBUG
+    /// <summary>Debug ビルドでは環境変数が非空ならそれを最優先する（E2E 検証用の上書き）</summary>
+    [Fact(DisplayName = "Resolve: Debug では環境変数が非空なら環境変数を優先する")]
     public void Resolve_EnvironmentVariableNonEmpty_TakesPrecedence()
     {
         var env = EnvFrom((UpdateFeed.FeedEnvironmentVariable, @"C:\feed\path"));
@@ -45,6 +46,18 @@ public class UpdateServiceTests
 
         UpdateFeed.Resolve(env).Should().Be(UpdateFeed.GitHubRepositoryUrl);
     }
+#else
+    /// <summary>
+    /// Release ビルドでは環境変数による上書きを受け付けない（配布物の更新元は定数フィードに固定）。
+    /// </summary>
+    [Fact(DisplayName = "Resolve: Release では環境変数を無視して定数フィードを使う")]
+    public void Resolve_EnvironmentVariableNonEmpty_IsIgnoredInRelease()
+    {
+        var env = EnvFrom((UpdateFeed.FeedEnvironmentVariable, @"C:\feed\path"));
+
+        UpdateFeed.Resolve(env).Should().Be(UpdateFeed.GitHubRepositoryUrl);
+    }
+#endif
 
     /// <summary>環境変数がなければ定数フィード（本リポジトリの GitHub Releases）を採用する</summary>
     [Fact(DisplayName = "Resolve: 環境変数がなければ定数フィードを採用する")]
@@ -57,6 +70,59 @@ public class UpdateServiceTests
     }
 
     // ---- UpdateService.CheckOnStartupAsync ----
+
+    /// <summary>設定でオプトアウトされていれば、フィード解決もファクトリもダイアログも呼ばれない</summary>
+    [Fact(DisplayName = "CheckOnStartup: 設定でオフなら何もしない")]
+    public async Task CheckOnStartup_DisabledBySetting_DoesNothing()
+    {
+        var dialog = new StubDialogService();
+        var feedResolved = false;
+        var factoryCalled = false;
+
+        var service = new UpdateService(
+            dialog,
+            _ =>
+            {
+                factoryCalled = true;
+                return Mock.Of<IAppUpdater>();
+            },
+            () =>
+            {
+                feedResolved = true;
+                return @"C:\feed\test";
+            },
+            () => false
+        );
+
+        await service.CheckOnStartupAsync();
+
+        // フィードの解決すら行わない＝更新元へ一切接続しないことを、解決関数の未呼び出しで示す
+        feedResolved.Should().BeFalse();
+        factoryCalled.Should().BeFalse();
+        dialog.ConfirmMessages.Should().BeEmpty();
+    }
+
+    /// <summary>設定が有効なら従来どおり更新チェックへ進む（オプトアウトの既定が挙動を変えない）</summary>
+    [Fact(DisplayName = "CheckOnStartup: 設定でオンなら従来どおり確認する")]
+    public async Task CheckOnStartup_EnabledBySetting_ChecksForUpdate()
+    {
+        var dialog = new StubDialogService { ConfirmResult = false };
+        var updater = new Mock<IAppUpdater>();
+        updater.SetupGet(u => u.IsInstalled).Returns(true);
+        updater.Setup(u => u.CheckForUpdateAsync()).ReturnsAsync("1.2.3");
+
+        var service = new UpdateService(
+            dialog,
+            _ => updater.Object,
+            () => @"C:\feed\test",
+            () => true
+        );
+
+        await service.CheckOnStartupAsync();
+
+        updater.Verify(u => u.CheckForUpdateAsync(), Times.Once);
+        dialog.ConfirmMessages.Should().ContainSingle();
+    }
 
     /// <summary>フィード未設定ならファクトリもダイアログも呼ばれない</summary>
     [Fact(DisplayName = "CheckOnStartup: フィード未設定なら何もしない")]

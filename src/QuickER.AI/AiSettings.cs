@@ -1,4 +1,4 @@
-using QuickER.Settings;
+﻿using QuickER.Settings;
 
 namespace QuickER.AI;
 
@@ -52,7 +52,7 @@ public class AiSettings
 }
 
 /// <summary>
-/// <see cref="AiSettings"/> を JSON ファイル（%APPDATA%\QuickER\ai-settings.json）へ保存・読込するストア。
+/// <see cref="AiSettings"/> を JSON ファイル（%LOCALAPPDATA%\QuickER\ai-settings.json）へ保存・読込するストア。
 /// AI チャット／AI モックの両ダイアログが同一ファイルを共有し、各自のセクションだけを読み書きする。
 /// </summary>
 public class AiSettingsStore : JsonSettingsStore<AiSettings>
@@ -60,7 +60,7 @@ public class AiSettingsStore : JsonSettingsStore<AiSettings>
     /// <summary>既定の保存ファイル名（両ダイアログ共有）</summary>
     public const string DefaultFileName = "ai-settings.json";
 
-    /// <summary>既定の保存先（%APPDATA%\QuickER）で設定ストアを生成する</summary>
+    /// <summary>既定の保存先（%LOCALAPPDATA%\QuickER）で設定ストアを生成する</summary>
     public AiSettingsStore()
         : base(DefaultFileName) { }
 

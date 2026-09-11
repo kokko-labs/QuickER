@@ -879,38 +879,51 @@
           </Rectangle.Style>
         </Rectangle>
         <!--
-          言語切替: クリックで ContextMenu（日本語 / English）を開く。選択で設定を保存し、
-          再起動反映方式のため「再起動後に反映」を通知する。キャプション・ツールチップは resx 参照。
+          設定: クリックで ContextMenu を開く。言語切替（サブメニュー）は選択で設定を保存し、
+          再起動反映方式のため「再起動後に反映」を通知する。更新確認トグルは次回起動から効く。
+          キャプション・ツールチップは resx 参照。
           ContextMenu は配置対象の DataContext（MainViewModel）を引き継いでチェック状態を束縛する。
         -->
         <Button
-          x:Name="LanguageButton"
+          x:Name="SettingsButton"
           Style="{StaticResource ToolBarLabelButton}"
-          Click="LanguageButton_Click"
-          ToolTip="{x:Static resources:Strings.Language_Tooltip}"
+          Click="SettingsButton_Click"
+          ToolTip="{x:Static resources:Strings.Settings_Tooltip}"
         >
           <StackPanel>
-            <TextBlock Style="{StaticResource ToolBarIcon}" Text="🌐" />
+            <TextBlock Style="{StaticResource ToolBarIcon}" Text="⚙" />
             <TextBlock
               Style="{StaticResource ToolBarCaption}"
-              Text="{x:Static resources:Strings.Language_Caption}"
+              Text="{x:Static resources:Strings.Settings_Caption}"
             />
           </StackPanel>
           <Button.ContextMenu>
             <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
               <MenuItem
-                Header="{x:Static resources:Strings.Language_English}"
-                IsCheckable="True"
-                IsChecked="{Binding LanguageSwitch.IsEnglishChecked, Mode=OneWay}"
-                Command="{Binding LanguageSwitch.SelectLanguageCommand}"
-                CommandParameter="en"
-              />
+                Header="{x:Static resources:Strings.Language_Caption}"
+                ToolTip="{x:Static resources:Strings.Language_Tooltip}"
+              >
+                <MenuItem
+                  Header="{x:Static resources:Strings.Language_English}"
+                  IsCheckable="True"
+                  IsChecked="{Binding LanguageSwitch.IsEnglishChecked, Mode=OneWay}"
+                  Command="{Binding LanguageSwitch.SelectLanguageCommand}"
+                  CommandParameter="en"
+                />
+                <MenuItem
+                  Header="{x:Static resources:Strings.Language_Japanese}"
+                  IsCheckable="True"
+                  IsChecked="{Binding LanguageSwitch.IsJapaneseChecked, Mode=OneWay}"
+                  Command="{Binding LanguageSwitch.SelectLanguageCommand}"
+                  CommandParameter="ja"
+                />
+              </MenuItem>
+              <Separator />
+              <!-- 起動時の更新確認（GitHub Releases への接続）。切り替えは即座に設定へ保存され、次回起動から効く -->
               <MenuItem
-                Header="{x:Static resources:Strings.Language_Japanese}"
+                Header="{x:Static resources:Strings.Settings_CheckUpdatesOnStartup}"
                 IsCheckable="True"
-                IsChecked="{Binding LanguageSwitch.IsJapaneseChecked, Mode=OneWay}"
-                Command="{Binding LanguageSwitch.SelectLanguageCommand}"
-                CommandParameter="ja"
+                IsChecked="{Binding UpdateSettings.IsCheckOnStartupEnabled, Mode=TwoWay}"
               />
             </ContextMenu>
           </Button.ContextMenu>

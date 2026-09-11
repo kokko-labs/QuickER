@@ -65,6 +65,8 @@ This second step is an aid for PoCs and prototyping. Depending on the AI model a
   | Claude Code | Edits files from the working folder (`Edit` / `Write` / `MultiEdit`) | `Bash` is unrestricted (it can run any command) |
 
 - The API key method is designed so that QuickER hands the model a restricted tool set, and the build itself runs with MSBuild's automatic imports (`Directory.Build.props` and friends) disabled. The agent backends (Codex / Claude Code / Copilot) run the CLI you installed under that CLI's own permission model, so QuickER does not restrict them. If you generate a mock from an untrusted schema or from input you do not control, choose the API key method or run it in an isolated environment
+- **Chat** is a different matter from the second step: it edits the diagram and never needs to touch your files, so each backend is given a throwaway working folder under `%TEMP%\QuickER` rather than the folder QuickER was started from, and the Codex thread additionally declares the `read-only` sandbox
+- On Windows, a CLI installed through npm arrives as a `.cmd` shim, which Windows launches through `cmd.exe`. QuickER builds the command line for `codex` and `claude` itself so that arguments cannot escape the quoting, and refuses to launch when an argument carries something `cmd` would still interpret. Arguments containing a line break are refused as well, because `cmd` truncates at the first newline and quoting cannot prevent it; multi-line content is passed through a temporary file instead of an argument. `copilot` is started from inside the GitHub Copilot SDK, so QuickER does not compose its command line; only the resolved path is checked. Install the CLIs from a location you trust
 
 ## License note
 

@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.IO;
 using AwesomeAssertions;
 using QuickER.AI;
@@ -25,10 +25,10 @@ public class AiChatDialogViewModelTests
     ) CreateVm(IDialogService? dialogService = null)
     {
         var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
-        // 設定・UI 状態・モデル履歴を集約した 1 ファイルを一時フォルダへ隔離する（実 %APPDATA% を保護）
+        // 設定・UI 状態・モデル履歴を集約した 1 ファイルを一時フォルダへ隔離する（実 %LOCALAPPDATA% を保護）
         var settingsStore = new AiSettingsStore(folder);
         var client = new FakeCodexAppServerClient();
-        // API キーは実 %APPDATA% の ApiKeyStore ではなくメモリ上のストアへ隔離する（並列テストの IO 競合を避ける）
+        // API キーは実 %LOCALAPPDATA% の ApiKeyStore ではなくメモリ上のストアへ隔離する（並列テストの IO 競合を避ける）
         var keyStore = new InMemoryApiKeyStore();
         var vm = new AiChatDialogViewModel(
             host: null,

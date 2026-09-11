@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using AwesomeAssertions;
 using QuickER.Model;
 using QuickER.Services;
@@ -12,7 +12,7 @@ namespace QuickER.Tests.Gui.ViewModels;
 /// 検証するテストクラス。
 /// </summary>
 /// <remarks>
-/// 永続化先は一時フォルダへ隔離し（<c>UsePersistenceForTests</c>）、実 %APPDATA% へは触れない。
+/// 永続化先は一時フォルダへ隔離し（<c>UsePersistenceForTests</c>）、実 %LOCALAPPDATA% へは触れない。
 /// 列削除は「巻き添えの制約ごと削除して 1 回の Undo で両方戻る」ことも併せて固定する。
 /// </remarks>
 public class MainViewModelUniqueConstraintTests : IDisposable

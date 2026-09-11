@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -45,7 +45,7 @@ public class CodexProviderComboBoxTests
 
             try
             {
-                // API キーは実 %APPDATA% の ApiKeyStore ではなくメモリ上のストアへ隔離する
+                // API キーは実 %LOCALAPPDATA% の ApiKeyStore ではなくメモリ上のストアへ隔離する
                 var keyStore = new InMemoryApiKeyStore();
                 var vm = new AiChatDialogViewModel(
                     host: null,

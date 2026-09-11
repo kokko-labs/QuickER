@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.IO;
 using AwesomeAssertions;
 using QuickER.Services;
@@ -10,7 +10,7 @@ namespace QuickER.Tests.Gui.Services;
 /// </summary>
 /// <remarks>
 /// 実ファイル書き込みは一時フォルダへ隔離し（<c>baseDirOverride</c>）、ユーザーの
-/// <c>%APPDATA%\QuickER</c> を汚さない。再入ガードは静的状態のため各ケース冒頭で初期化する。
+/// <c>%LOCALAPPDATA%\QuickER</c> を汚さない。再入ガードは静的状態のため各ケース冒頭で初期化する。
 /// </remarks>
 public class CrashHandlingServiceTests
 {
