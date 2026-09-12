@@ -101,20 +101,18 @@
               Style="{StaticResource SectionHeader}"
               Text="{x:Static res:Strings.CodeGen_OutputMode}"
             />
-            <!-- 層別出力 ON の間は分割固定のため、ラジオは操作不可にする（含意の可視化） -->
+            <!-- ラジオは常に操作できる。1 ファイルにまとめるを選ぶと層別出力のチェックが外れる（含意の逆向き） -->
             <StackPanel Orientation="Horizontal">
               <RadioButton
                 Margin="0,0,28,0"
                 Content="{x:Static res:Strings.CodeGen_MergeSingleFile}"
                 GroupName="OutputMode"
                 IsChecked="{Binding MergeIntoSingleFile}"
-                IsEnabled="{Binding CanEditSplitFilesByCategory}"
               />
               <RadioButton
                 Content="{x:Static res:Strings.CodeGen_SplitByLayer}"
                 GroupName="OutputMode"
                 IsChecked="{Binding SplitFilesByCategory}"
-                IsEnabled="{Binding CanEditSplitFilesByCategory}"
               />
             </StackPanel>
 

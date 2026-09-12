@@ -94,8 +94,8 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     /// </summary>
     /// <remarks>
     /// ON は分割出力（<see cref="SplitFilesByCategory"/>）を自動的に含意する（単一ファイルは層へ割れないため）。
-    /// UI では含意を可視化するため、ON の間だけ出力モードのラジオを分割固定＋操作不可にする
-    /// （<see cref="OnLayeredOutputChanged"/> / <see cref="CanEditSplitFilesByCategory"/>）。
+    /// 含意は両方向で、出力モードのラジオは常に操作でき、1 ファイルにまとめるを選ぶと層別出力が OFF になる
+    /// （<see cref="OnLayeredOutputChanged"/> / <see cref="OnSplitFilesByCategoryChanged"/>）。
     /// 生成オプションへは <see cref="LayeredOutput"/> と <see cref="SplitFilesByCategory"/> の両方をそのまま渡し、
     /// 含意の解釈はコア側（<c>CodeGenerationOptions.EffectiveSplitFilesByCategory</c>）へ委ねる
     /// </remarks>
@@ -143,11 +143,6 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     /// <summary>生成コードの出力先サブフォルダ欄のツールチップ</summary>
     public string CodeSubdirectoryToolTip => Strings.CodeGen_CodeSubdirectoryToolTip;
 
-    /// <summary>
-    /// 出力モード（1 ファイル／分割）のラジオを操作できるか。層別出力 ON の間は分割固定のため false になる
-    /// </summary>
-    public bool CanEditSplitFilesByCategory => !LayeredOutput;
-
     /// <summary>層フォルダの入力欄を表示するか（層別出力 ON のときのみ）</summary>
     public bool ShowLayerDirectories => LayeredOutput;
 
@@ -169,7 +164,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
         if (value)
         {
             // 層別出力は分割出力を構造的に前提とする（単一ファイルは層へ割れない）。
-            // OFF に戻したときは分割の値はそのままにし、ラジオの操作可能状態だけを戻す
+            // OFF に戻したときは分割の値をそのまま残す（分割出力そのものは層別出力を要さない）
             SplitFilesByCategory = true;
         }
 
@@ -179,7 +174,6 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             FollowDefaultNamespaces(NamespaceDefaultContext(layeredOutput: !value));
         }
 
-        OnPropertyChanged(nameof(CanEditSplitFilesByCategory));
         RaiseDerivedChanged();
     }
 
@@ -561,6 +555,13 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
 
     partial void OnSplitFilesByCategoryChanged(bool value)
     {
+        if (!value)
+        {
+            // 含意の逆向き＝1 ファイルにまとめるなら層へ割れないため層別出力を落とす
+            // （層別出力側のフックが名前空間の既定をルート由来へ戻す）
+            LayeredOutput = false;
+        }
+
         OnPropertyChanged(nameof(MergeIntoSingleFile));
         RaiseDerivedChanged();
     }

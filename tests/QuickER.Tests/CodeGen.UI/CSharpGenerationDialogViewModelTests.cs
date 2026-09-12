@@ -702,31 +702,51 @@ public class CSharpGenerationDialogViewModelTests
     }
 
     /// <summary>
-    /// 層別出力を ON にすると分割出力が強制 ON になり、出力モードのラジオが操作不可になること、
-    /// OFF に戻すと（分割の値はそのままに）操作可能へ戻ることを検証する（含意の可視化）
+    /// 層別出力を ON にすると分割出力が強制 ON になること、OFF に戻しても分割の値は維持されることを検証する
     /// </summary>
-    [Fact(DisplayName = "層別出力 ON で分割出力が強制 ON＋出力モードが操作不可になる")]
-    public void LayeredOutput_On_ForcesSplit_AndLocksOutputMode()
+    [Fact(DisplayName = "層別出力 ON で分割出力が強制 ON になる")]
+    public void LayeredOutput_On_ForcesSplit()
     {
         var vm = CreateViewModel(out _);
         vm.RootNamespace = "Acme.App";
 
         vm.LayeredOutput.Should().BeFalse("既定は OFF");
         vm.SplitFilesByCategory.Should().BeFalse("既定は 1 ファイルにまとめる");
-        vm.CanEditSplitFilesByCategory.Should().BeTrue("層別出力 OFF では出力モードを選べる");
 
         vm.LayeredOutput = true;
 
         vm.SplitFilesByCategory.Should().BeTrue("層別出力は分割出力を含意する");
         vm.MergeIntoSingleFile.Should().BeFalse();
-        vm.CanEditSplitFilesByCategory.Should().BeFalse("含意の可視化として操作不可にする");
         vm.ShowLayerDirectories.Should().BeTrue("層フォルダの入力欄が現れる");
 
         vm.LayeredOutput = false;
 
-        vm.CanEditSplitFilesByCategory.Should().BeTrue("OFF に戻すと出力モードを再び選べる");
         vm.SplitFilesByCategory.Should().BeTrue("分割出力の値そのものは維持する");
         vm.ShowLayerDirectories.Should().BeFalse("層フォルダの入力欄は隠れる");
+    }
+
+    /// <summary>
+    /// 層別出力 ON の状態で「1 ファイルにまとめる」を選べること、選ぶと層別出力のチェックが外れ、
+    /// 層フォルダ由来だった名前空間の既定がルート由来へ戻ることを検証する（含意の逆向き）
+    /// </summary>
+    [Fact(DisplayName = "1 ファイルにまとめるを選ぶと層別出力が OFF になる")]
+    public void MergeIntoSingleFile_TurnsOffLayeredOutput()
+    {
+        var vm = CreateViewModel(out _);
+        vm.RootNamespace = "Acme.App";
+        vm.LayeredOutput = true;
+
+        vm.EntityNamespace.Should()
+            .Be("Domain.Entities", "層別出力 ON の間は層フォルダ由来の既定になる");
+
+        // ラジオは層別出力 ON でも操作できる（XAML の IsEnabled バインドを撤去した経路）
+        vm.MergeIntoSingleFile = true;
+
+        vm.SplitFilesByCategory.Should().BeFalse("1 ファイルにまとめるが選べる");
+        vm.LayeredOutput.Should().BeFalse("単一ファイルは層へ割れないためチェックが外れる");
+        vm.ShowLayerDirectories.Should().BeFalse("層フォルダの入力欄は隠れる");
+        vm.ShowSingleFileOutput.Should().BeTrue("単一ファイルの出力ファイル欄が現れる");
+        vm.EntityNamespace.Should().Be("Acme.App.Entities", "名前空間の既定はルート由来へ戻る");
     }
 
     /// <summary>層フォルダの入力欄が planner の既定フォルダ名でプリフィルされることを検証する</summary>
@@ -889,7 +909,6 @@ public class CSharpGenerationDialogViewModelTests
             restored
                 .SplitFilesByCategory.Should()
                 .BeTrue("含意により分割出力も ON のまま復元される");
-            restored.CanEditSplitFilesByCategory.Should().BeFalse();
             restored.DomainLayerDirectory.Should().Be("Acme.Domain");
             restored.InfrastructureLayerDirectory.Should().Be("Acme.Infrastructure");
             restored.PresentationLayerDirectory.Should().Be("Acme.App");
@@ -1113,7 +1132,6 @@ public class CSharpGenerationDialogViewModelTests
         vm.ClearCommand.Execute(null);
 
         vm.LayeredOutput.Should().BeFalse();
-        vm.CanEditSplitFilesByCategory.Should().BeTrue();
         vm.DomainLayerDirectory.Should()
             .Be(GeneratedFilePlanner.DefaultLayerDirectory(GeneratedLayer.Domain));
     }
