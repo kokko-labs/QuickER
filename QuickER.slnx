@@ -63,6 +63,8 @@
     <File Path="docs/mcp.md" />
     <File Path="docs/overview.ja.md" />
     <File Path="docs/overview.md" />
+    <File Path="docs/README.ja.md" />
+    <File Path="docs/README.md" />
   </Folder>
   <Folder Name="/docs/images/">
     <File Path="docs/images/ai-chat.ja.png" />

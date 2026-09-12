@@ -371,6 +371,7 @@ QuickER は、ER モデルをデータベース、コード、ドキュメント
 
 ## ドキュメント
 
+- [索引](docs/README.ja.md)
 - [QuickER が ER モデルを正本にする理由](docs/overview.ja.md)
 - [チュートリアル（設計から実行まで）](docs/getting-started.ja.md)
 - [ER 図の編集](docs/er-editor.ja.md)

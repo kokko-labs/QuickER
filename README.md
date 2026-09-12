@@ -371,6 +371,7 @@ For the background, how this differs from code-first, and the division of labor 
 
 ## Documentation
 
+- [Index](docs/README.md)
 - [Why QuickER uses the ER model as the source of truth](docs/overview.md)
 - [Tutorial (from design to running code)](docs/getting-started.md)
 - [ER diagram editing](docs/er-editor.md)
