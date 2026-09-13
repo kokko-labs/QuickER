@@ -15,8 +15,16 @@ namespace QuickER.Settings;
 /// <para>
 /// 素の <see cref="File.WriteAllText(string, string?)"/> は既存ファイルを切り詰めてから書くため、
 /// 途中でプロセスが落ちる・ディスクが満杯になると保存先が中途半端な内容（壊れた JSON）で残る。
-/// 本クラスは一時ファイルへ全量を書き切ってから本体へ差し替えるため、どこで中断しても保存先は
-/// 「書き込み前の内容そのまま」か「書き込み後の内容」のどちらかにしかならない。
+/// 本クラスは一時ファイルへ全量を書き切り、<b>ディスクへフラッシュしてから</b>本体へ差し替えるため、
+/// 保存先の内容は「書き込み前の内容そのまま」か「書き込み後の内容」のどちらかにしかならない
+/// （＝中途半端な内容が残らない）。フラッシュを挟むのは、書き込みが OS のキャッシュに留まったまま
+/// 差し替えだけが永続化されると、電源断後に「空または途中までの新ファイル」が残り得るため。
+/// </para>
+/// <para>
+/// <b>耐久性の範囲:</b> 主張するのは<b>内容が中途半端な状態で残らない</b>ことまで。差し替え自体
+/// （<see cref="File.Replace(string, string, string?)"/> / <see cref="File.Move(string, string, bool)"/> の
+/// メタデータ更新）がいつ永続化されるかは OS の裁量なので、電源断の直後に残るのが新旧どちらの内容かは
+/// 保証しない（どちらであっても完全な内容である、が保証の中身）。
 /// </para>
 /// <para>
 /// <b>防げないもの:</b> 同一ファイルへの同時保存そのものは防がない。後から差し替えた側が勝つ
@@ -39,11 +47,20 @@ public static class AtomicFile
     /// <summary>差し替えリトライの待ち時間（ミリ秒・試行ごとに 10ms ずつ延ばす）</summary>
     private const int ReplaceRetryDelayStepMilliseconds = 10;
 
+    /// <summary>
+    /// 文字コード未指定時の既定。<see cref="File.WriteAllText(string, string?)"/> の既定と同一
+    /// （BOM なし UTF-8・不正なサロゲートは置換せず例外）にして、書き出し方の変更で挙動が変わらないようにする。
+    /// </summary>
+    private static readonly Encoding DefaultEncoding = new UTF8Encoding(
+        encoderShouldEmitUTF8Identifier: false,
+        throwOnInvalidBytes: true
+    );
+
     /// <summary>文字列を原子的にファイルへ書き出す（全量を書き切ってから保存先へ差し替える）</summary>
     /// <remarks>
     /// 保存先フォルダの作成は行わない（呼び出し側の責務）。差し替えに失敗した場合は一時ファイルを
     /// 掃除したうえで例外をそのまま呼び出し側へ伝える（このとき保存先は書き込み前のまま無傷）。
-    /// 文字コードは <see cref="File.WriteAllText(string, string?)"/> の既定（BOM なし UTF-8）。
+    /// 文字コードは <see cref="File.WriteAllText(string, string?)"/> の既定と同じ BOM なし UTF-8。
     /// </remarks>
     /// <param name="path">書き込み先のファイルパス</param>
     /// <param name="contents">書き込む内容</param>
@@ -74,14 +91,7 @@ public static class AtomicFile
 
         try
         {
-            if (encoding is null)
-            {
-                File.WriteAllText(temporaryPath, contents);
-            }
-            else
-            {
-                File.WriteAllText(temporaryPath, contents, encoding);
-            }
+            WriteAndFlushToDisk(temporaryPath, contents, encoding);
 
             // 保存先への差し替え。別プロセス（GUI と MCP サーバ）が同じファイルを同時に保存すると
             // 一過性の失敗（相手が保存先を開いている・保存先の有無が入れ替わる）が起きるため、
@@ -106,6 +116,33 @@ public static class AtomicFile
                 // 元の例外を握り潰してまで対処はしない。
             }
         }
+    }
+
+    /// <summary>一時ファイルへ全量を書き出し、ディスクへ確定させてから戻る</summary>
+    /// <remarks>
+    /// <para>
+    /// <see cref="File.WriteAllText(string, string?)"/> は OS のファイルキャッシュへ書いた時点で戻るため、
+    /// 差し替えだけが先に永続化され「中身が空（または途中まで）の新ファイル」が残り得る。
+    /// <see cref="FileStream.Flush(bool)"/> でディスクへ確定させてから差し替えることで、
+    /// 保存先に現れる内容が常に「書き切った 1 回分」になる。
+    /// </para>
+    /// <para>
+    /// 文字コードの既定（<paramref name="encoding"/> が null）は
+    /// <see cref="File.WriteAllText(string, string?)"/> と同一の「BOM なし UTF-8・不正なサロゲートは例外」。
+    /// BOM（プリアンブル）は新規作成した一時ファイルの先頭へ書かれるため、明示指定時の出力も変わらない。
+    /// </para>
+    /// </remarks>
+    private static void WriteAndFlushToDisk(string path, string contents, Encoding? encoding)
+    {
+        using var stream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.Read);
+
+        using (var writer = new StreamWriter(stream, encoding ?? DefaultEncoding, leaveOpen: true))
+        {
+            writer.Write(contents);
+        }
+
+        // StreamWriter の破棄でエンコード済みバイトはストリームへ出ている。ここでディスクへ確定させる
+        stream.Flush(flushToDisk: true);
     }
 
     /// <summary>一時ファイルを保存先へ差し替える（同時保存による一過性の失敗は短いバックオフでリトライする）</summary>

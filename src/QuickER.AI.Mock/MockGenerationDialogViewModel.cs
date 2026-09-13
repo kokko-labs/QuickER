@@ -88,10 +88,6 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     /// <summary>プレビュー要求の再入抑止（プレビュー内リンク遷移→選択同期→再ナビゲートのループを断つ）</summary>
     private bool _suppressPreviewRequest;
 
-    /// <summary>ブラウザで URL を開く処理（テスト時に差し替え可能）</summary>
-    internal Action<string> OpenBrowser { get; set; } =
-        url => Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
-
     /// <summary>フォルダをエクスプローラで開く処理（テスト時に差し替え可能）</summary>
     internal Action<string> OpenFolder { get; set; } =
         path => Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });

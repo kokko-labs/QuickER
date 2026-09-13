@@ -442,18 +442,33 @@ public partial class AiChatDialogViewModel : ObservableObject
 
         var url = await _codexEngine.StartChatGptLoginAsync().ConfigureAwait(true);
 
-        if (!string.IsNullOrWhiteSpace(url))
+        if (string.IsNullOrWhiteSpace(url))
         {
-            try
-            {
-                OpenBrowser(url);
-            }
-            catch (Exception ex)
-            {
-                StatusMessage = string.Format(Strings.Chat_BrowserOpenFailedFormat, ex.Message);
-            }
+            return;
+        }
+
+        // 外部プロセス（codex app-server）が返した値をそのままシェル起動しない。UseShellExecute は
+        // scheme に紐づく既定アプリを起動するため、http/https 以外ではブラウザ以外が動き得る
+        if (!IsBrowsableUrl(url))
+        {
+            StatusMessage = string.Format(Strings.Chat_BrowserOpenUnsupportedUrlFormat, url);
+            return;
+        }
+
+        try
+        {
+            OpenBrowser(url);
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = string.Format(Strings.Chat_BrowserOpenFailedFormat, ex.Message);
         }
     }
+
+    /// <summary>ブラウザで開いてよい URL か（絶対 URI かつ scheme が http / https）を判定する</summary>
+    internal static bool IsBrowsableUrl(string url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var uri)
+        && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
 
     /// <summary>Codex からログアウトする</summary>
     [RelayCommand]

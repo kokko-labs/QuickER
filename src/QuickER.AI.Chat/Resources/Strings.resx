@@ -157,6 +157,9 @@
   <data name="Chat_BrowserOpenFailedFormat" xml:space="preserve">
     <value>Could not open the browser: {0}</value>
   </data>
+  <data name="Chat_BrowserOpenUnsupportedUrlFormat" xml:space="preserve">
+    <value>Could not open the sign-in URL because it is not an http/https address: {0}</value>
+  </data>
   <data name="Chat_ResponseCompleted" xml:space="preserve">
     <value>Response completed.</value>
   </data>

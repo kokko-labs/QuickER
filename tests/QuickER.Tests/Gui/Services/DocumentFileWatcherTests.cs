@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.IO;
+using System.Reflection;
 using System.Security.Cryptography;
 using AwesomeAssertions;
 using QuickER.Services;
@@ -205,5 +206,83 @@ public sealed class DocumentFileWatcherTests : IDisposable
         watcher.Resume();
         File.WriteAllText(path, "written-after-resume");
         WaitUntil(() => EventCount() >= 1).Should().BeTrue("再開後は通常どおり検知する");
+    }
+
+    /// <summary>
+    /// 内部の <see cref="FileSystemWatcher"/> へ Error イベントを発生させる
+    /// （内部バッファ溢れ等で OS 側の監視が落ちたときの実挙動の代役）。
+    /// </summary>
+    /// <remarks>
+    /// <see cref="FileSystemWatcher"/> は Error を外部から発生させる公開 API を持たないため、
+    /// protected な <c>OnError</c> をリフレクションで呼ぶ。これにより「Error を購読しているか」まで
+    /// 含めて実経路で検証できる（復帰メソッドを直接呼ぶ形では購読漏れを検知できない）。
+    /// </remarks>
+    private static void RaiseInternalError(FileSystemWatcher inner)
+    {
+        var onError = typeof(FileSystemWatcher).GetMethod(
+            "OnError",
+            BindingFlags.NonPublic | BindingFlags.Instance
+        );
+
+        onError.Should().NotBeNull("FileSystemWatcher.OnError は protected メソッドとして存在する");
+        onError!.Invoke(
+            inner,
+            new object[] { new ErrorEventArgs(new IOException("simulated buffer overflow")) }
+        );
+    }
+
+    /// <summary>Error 後に監視を張り直し、停止していた間に起きた変更を拾うことを検証する</summary>
+    [Fact(DisplayName = "Error 復帰: 停止中に起きた変更を張り直し直後に拾う")]
+    public void WatcherError_RestartsAndDetectsChangeMadeWhileStopped()
+    {
+        var path = Path.Combine(_folder, "doc.json");
+        File.WriteAllText(path, "A");
+        var expected = HashOf(path);
+
+        using var watcher = CreateWatcher(() => expected);
+        watcher.Watch(path);
+
+        var inner = watcher.CurrentWatcher;
+        inner.Should().NotBeNull("監視開始後は内部監視器が存在する");
+
+        // バッファ溢れ後の実挙動（以後の通知が届かない）を再現してから Error を発生させる
+        inner!.EnableRaisingEvents = false;
+        File.WriteAllText(path, "changed-while-stopped");
+        var changedHash = HashOf(path);
+
+        RaiseInternalError(inner);
+
+        WaitUntil(() => EventCount() >= 1)
+            .Should()
+            .BeTrue("張り直し直後のハッシュ比較で、停止中に起きた変更を拾うはず");
+        Snapshot()[^1].ContentHash.Should().Be(changedHash);
+    }
+
+    /// <summary>Error 後に監視器が作り直され、以後の外部変更も通常どおり検知することを検証する</summary>
+    [Fact(DisplayName = "Error 復帰: 張り直し後も通常の変更検知が続く")]
+    public void WatcherError_ResumesNormalDetectionAfterRestart()
+    {
+        var path = Path.Combine(_folder, "doc.json");
+        File.WriteAllText(path, "A");
+        var expected = HashOf(path);
+
+        using var watcher = CreateWatcher(() => expected);
+        watcher.Watch(path);
+
+        var inner = watcher.CurrentWatcher;
+        inner.Should().NotBeNull();
+
+        // 内容は最終既知ハッシュのまま Error を起こす（張り直し直後の比較では通知が出ない状況）
+        RaiseInternalError(inner!);
+
+        WaitUntil(() => !ReferenceEquals(watcher.CurrentWatcher, inner))
+            .Should()
+            .BeTrue("Error 後は監視器が作り直されるはず");
+        watcher.CurrentWatcher.Should().NotBeNull("張り直しに成功していること");
+        EventCount().Should().Be(0, "内容が変わっていなければ張り直し直後の比較でも通知しない");
+
+        // 張り直した監視器で以後の外部変更を検知する
+        File.WriteAllText(path, "written-after-restart");
+        WaitUntil(() => EventCount() >= 1).Should().BeTrue("張り直し後も通常どおり検知する");
     }
 }

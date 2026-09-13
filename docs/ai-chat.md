@@ -55,6 +55,7 @@ This second step is an aid for PoCs and prototyping. Depending on the AI model a
 
 - With the API key method, Codex, Claude Code, and Copilot alike, the diagram contents (table definitions, etc.) are sent to the AI provider you selected. When handling sensitive schemas, follow your organization's policy
 - If you do not use the AI features, no API key or other configuration is required (the ER diagram designer and code generation work without connecting to the network)
+- **What you attach, and the mock folder you resume from, reach the model as untrusted input.** An attached text file is inlined into the prompt as it is, an attached image is passed through as it is, and resuming a mock folder feeds the manifest's text — screen names, descriptions, revision notes, transitions — into the prompt, with each screen's HTML coming back as the model reads it. None of that is inspected for instructions aimed at the AI, so material written by someone else can steer what the model does, up to and including the tools it calls. Treat a mock folder or a design document you received from a third party the way you would treat any other file from that source, and look at it before you open it here
 - The second step (mock project generation) **builds AI-written code on your machine with your own privileges**. What the AI is allowed to do differs by backend
 
   | Backend | File writes | Command execution |

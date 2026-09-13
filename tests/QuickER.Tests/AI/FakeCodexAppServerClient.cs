@@ -104,15 +104,14 @@ internal sealed class FakeCodexAppServerClient : ICodexAppServerClient
         return Task.FromResult(new CodexLoginStartResult { Type = CodexLoginType.ApiKey });
     }
 
+    /// <summary>StartChatGptLoginAsync が返す認証 URL（scheme 検証の検証用に差し替えられる）</summary>
+    public string ChatGptAuthUrl { get; set; } = "https://chatgpt.example/login";
+
     public Task<CodexLoginStartResult> StartChatGptLoginAsync(
         CancellationToken cancellationToken = default
     ) =>
         Task.FromResult(
-            new CodexLoginStartResult
-            {
-                Type = CodexLoginType.ChatGpt,
-                AuthUrl = "https://chatgpt.example/login",
-            }
+            new CodexLoginStartResult { Type = CodexLoginType.ChatGpt, AuthUrl = ChatGptAuthUrl }
         );
 
     public Task LogoutAsync(CancellationToken cancellationToken = default)

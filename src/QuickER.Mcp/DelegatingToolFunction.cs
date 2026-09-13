@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.Extensions.AI;
+using ModelContextProtocol.Protocol;
 
 namespace QuickER.Mcp;
 
@@ -39,13 +40,31 @@ public sealed class DelegatingToolFunction : AIFunction
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// 失敗は <see cref="CallToolResult.IsError"/> を立てた結果として返す（本文は従来どおりエラーテキスト）。
+    /// MCP はツール実行の失敗をこのフラグで表す規約で、テキストへ書くだけでは外部エージェントが
+    /// 応答本文を解釈しない限り成否を判定できない。成功時は結果テキストをそのまま返す
+    /// （SDK が <see cref="CallToolResult"/> へ包む＝従来の応答の形を変えない）。
+    /// </remarks>
     protected override ValueTask<object?> InvokeCoreAsync(
         AIFunctionArguments arguments,
         CancellationToken cancellationToken
     )
     {
         var argumentsJson = JsonSerializer.Serialize(arguments);
-        var (result, _) = _execute(Name, argumentsJson);
-        return ValueTask.FromResult<object?>(result);
+        var (result, success) = _execute(Name, argumentsJson);
+
+        if (success)
+        {
+            return ValueTask.FromResult<object?>(result);
+        }
+
+        return ValueTask.FromResult<object?>(
+            new CallToolResult
+            {
+                IsError = true,
+                Content = [new TextContentBlock { Text = result }],
+            }
+        );
     }
 }

@@ -4622,8 +4622,11 @@ public sealed record SyncRefreshResult(
 /// uploaded back on the next run - the same row would bounce between the two databases forever.
 /// </para>
 /// <para>
-/// The flag is <see cref="AsyncLocal{T}"/>, so it follows the async control flow of the sync run and does not leak into
-/// concurrent work on other tasks. It is a counter rather than a bool so nested scopes restore the outer state.
+/// The flag is <see cref="AsyncLocal{T}"/>, so it follows the async control flow of the sync run - including work the
+/// run itself starts, such as a <see cref="System.Threading.Tasks.Task.Run(System.Action)"/> begun inside the scope. It
+/// does not reach work posted to a flow that began outside the scope (a worker loop, a channel consumer, a timer), and
+/// a fire-and-forget task started inside the scope stays suppressed for as long as it runs. It is a counter rather
+/// than a bool so nested scopes restore the outer state.
 /// </para>
 /// </remarks>
 public static class SyncSession

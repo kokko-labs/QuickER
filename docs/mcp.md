@@ -6,6 +6,8 @@
 
 The server is **stateless**: it takes no options and keeps no in-memory diagram. Nearly every tool takes the target diagram file as its `file` argument, and what a call does with that file depends on the kind of tool: an editing tool completes a whole "load → modify → save" cycle in the single call, a read-only tool (`get_diagram_summary` / `list_queries`) loads the file without saving it, a generation tool (`generate_csharp` / `generate_ddl`) leaves the diagram untouched and writes its output to a separate destination, and `create_diagram` writes a new file without reading an existing one. Only `get_generation_config_schema` takes no `file` at all. Concurrent agents (or a single agent working on several diagrams) simply pass different `file` paths.
 
+Statelessness has a price on the other side of that: **two writers on the same file are last-write-wins.** Each call reads the file, changes what it was asked to change, and writes the whole document back; there is no lock and no version check, so a call that loaded the file before someone else's save overwrites that save entirely — the other side's changes are gone, and nothing reports it. Only `create_diagram` refuses to overwrite, and only because the file must not already exist. The same applies between the server and the GUI: the GUI reloads a file changed underneath it, silently when it has no unsaved changes of its own, so a diagram open in the GUI and edited over MCP at the same time can lose whichever side saved first. Have one writer at a time on a given diagram.
+
 ## Setup
 
 ### Claude Code

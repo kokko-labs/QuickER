@@ -54,6 +54,7 @@ public sealed class DocumentFileChangedEventArgs : EventArgs
 /// <item>発火時に内容ハッシュを算出し、<see cref="ExpectedHashProvider"/> と一致すれば通知しない
 /// （自己書き込み・無内容変更の抑制）。読み取りは書き込み途中の共有違反に備え短くリトライする</item>
 /// <item>削除・リネームは種別付きで即時通知する（デバウンスしない）</item>
+/// <item>監視器自身のエラー（内部バッファ溢れ等）では監視を張り直し、停止中の変更を 1 回照合して拾う</item>
 /// </list>
 /// </remarks>
 public sealed class DocumentFileWatcher : IDisposable
@@ -91,6 +92,18 @@ public sealed class DocumentFileWatcher : IDisposable
     /// </summary>
     public Func<string?>? ExpectedHashProvider { get; set; }
 
+    /// <summary>現在の監視器（テストから監視状態・張り直しを観測するための内部シーム）</summary>
+    internal FileSystemWatcher? CurrentWatcher
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _watcher;
+            }
+        }
+    }
+
     /// <summary>デバウンス幅を指定して監視サービスを生成する</summary>
     /// <param name="debounceMilliseconds">内容変更バーストの合流幅（既定 400ms）</param>
     public DocumentFileWatcher(int debounceMilliseconds = 400)
@@ -112,46 +125,53 @@ public sealed class DocumentFileWatcher : IDisposable
                 return;
             }
 
-            var directory = System.IO.Path.GetDirectoryName(path);
-            var fileName = System.IO.Path.GetFileName(path);
+            WatchCore(path);
+        }
+    }
 
-            // 親ディレクトリが無い（未作成のパス）ときは監視を張れない。呼び出し側が後で再設定する
-            if (string.IsNullOrEmpty(directory) || string.IsNullOrEmpty(fileName))
+    /// <summary>監視器を生成して張る（ロック内から・既存の監視は停止済みであること）</summary>
+    private void WatchCore(string path)
+    {
+        var directory = System.IO.Path.GetDirectoryName(path);
+        var fileName = System.IO.Path.GetFileName(path);
+
+        // 親ディレクトリが無い（未作成のパス）ときは監視を張れない。呼び出し側が後で再設定する
+        if (string.IsNullOrEmpty(directory) || string.IsNullOrEmpty(fileName))
+        {
+            return;
+        }
+
+        if (!Directory.Exists(directory))
+        {
+            return;
+        }
+
+        try
+        {
+            var watcher = new FileSystemWatcher(directory, fileName)
             {
-                return;
-            }
+                NotifyFilter =
+                    NotifyFilters.LastWrite
+                    | NotifyFilters.FileName
+                    | NotifyFilters.Size
+                    | NotifyFilters.CreationTime,
+            };
 
-            if (!Directory.Exists(directory))
-            {
-                return;
-            }
+            watcher.Changed += OnChangedOrCreated;
+            watcher.Created += OnChangedOrCreated;
+            watcher.Deleted += OnDeleted;
+            watcher.Renamed += OnRenamed;
+            watcher.Error += OnWatcherError;
+            watcher.EnableRaisingEvents = true;
 
-            try
-            {
-                var watcher = new FileSystemWatcher(directory, fileName)
-                {
-                    NotifyFilter =
-                        NotifyFilters.LastWrite
-                        | NotifyFilters.FileName
-                        | NotifyFilters.Size
-                        | NotifyFilters.CreationTime,
-                };
-
-                watcher.Changed += OnChangedOrCreated;
-                watcher.Created += OnChangedOrCreated;
-                watcher.Deleted += OnDeleted;
-                watcher.Renamed += OnRenamed;
-                watcher.EnableRaisingEvents = true;
-
-                _watcher = watcher;
-                _path = path;
-                _fileName = fileName;
-            }
-            catch
-            {
-                // 監視器の生成失敗（権限・パス不正など）は機能無効化にとどめ、主処理を妨げない
-                StopCore();
-            }
+            _watcher = watcher;
+            _path = path;
+            _fileName = fileName;
+        }
+        catch
+        {
+            // 監視器の生成失敗（権限・パス不正など）は機能無効化にとどめ、主処理を妨げない
+            StopCore();
         }
     }
 
@@ -179,6 +199,7 @@ public sealed class DocumentFileWatcher : IDisposable
             _watcher.Created -= OnChangedOrCreated;
             _watcher.Deleted -= OnDeleted;
             _watcher.Renamed -= OnRenamed;
+            _watcher.Error -= OnWatcherError;
             _watcher.EnableRaisingEvents = false;
             _watcher.Dispose();
             _watcher = null;
@@ -244,6 +265,60 @@ public sealed class DocumentFileWatcher : IDisposable
             CancelPendingDebounce();
             RaiseImmediate(DocumentFileChangeKind.Renamed);
         }
+    }
+
+    /// <summary>
+    /// 監視器自身のエラー（内部バッファ溢れ・監視対象ボリュームの一時的な喪失など）。監視を張り直す。
+    /// </summary>
+    /// <remarks>
+    /// Error は「以後この監視器は通知を出さない」ことを意味するため、購読しないと外部変更検知が
+    /// 無言のまま恒久的に止まる。張り直しは <see cref="FileSystemWatcher"/> 自身のイベントスレッドから
+    /// 行うと停止待ちで固まり得るので、別スレッドへ逃がす。
+    /// </remarks>
+    private void OnWatcherError(object sender, ErrorEventArgs e)
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        ThreadPool.QueueUserWorkItem(_ => RestartAfterError());
+    }
+
+    /// <summary>エラーで停止した監視を同じパス・同じ設定で張り直し、停止中に起きた変更を 1 回だけ拾う</summary>
+    /// <remarks>
+    /// 張り直しに失敗した場合（監視対象ディレクトリの消失・権限喪失など）は <see cref="Watch"/> と
+    /// 同じく監視なしの停止状態にとどめる（主処理を妨げない）。
+    /// 一時停止中でも張り直しは行う（張り直さないと <see cref="Resume"/> 後も監視が死んだままになる）。
+    /// 停止中の変更の拾い上げは <see cref="OnDebounceElapsed"/> に委ね、通常の検知と同じ規則
+    /// （一時停止の尊重・最終既知ハッシュとの比較）を通す。
+    /// </remarks>
+    internal void RestartAfterError()
+    {
+        bool restarted;
+
+        // 現在パスの読み取りから張り直しまでをロック内で完結させる（この間に呼び出し側が
+        // 別のパスへ張り替えていたら、その結果を古いパスで上書きしてしまうため）
+        lock (_gate)
+        {
+            if (_disposed || _path is null)
+            {
+                return;
+            }
+
+            var path = _path;
+            StopCore();
+            WatchCore(path);
+            restarted = _watcher is not null;
+        }
+
+        if (!restarted)
+        {
+            return;
+        }
+
+        // 監視が止まっていた間に起きた変更は通知されていないため、張り直し直後に 1 回だけ照合する
+        OnDebounceElapsed();
     }
 
     /// <summary>内容変更のデバウンスタイマを（再）起動する</summary>

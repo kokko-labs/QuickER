@@ -943,6 +943,60 @@ public class AiChatDialogViewModelTests
         }
     }
 
+    /// <summary>Codex の認証 URL が https のときはブラウザで開くことを検証する</summary>
+    [Fact(DisplayName = "Codex 認証: https の認証 URL はブラウザで開く")]
+    public async Task CodexChatGptLogin_HttpsUrl_OpensBrowser()
+    {
+        var (vm, client, folder) = CreateVm();
+
+        try
+        {
+            client.ChatGptAuthUrl = "https://auth.example/login?code=abc";
+            var opened = new List<string>();
+            vm.OpenBrowser = opened.Add;
+
+            await vm.CodexStartChatGptLoginCommand.ExecuteAsync(null);
+
+            opened.Should().Equal("https://auth.example/login?code=abc");
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>
+    /// Codex app-server が返した認証 URL が http/https 以外なら、シェル起動せずメッセージだけを出すことを検証する。
+    /// </summary>
+    /// <remarks>
+    /// <c>UseShellExecute</c> での起動は scheme に紐づく任意のハンドラ（既定アプリ）を動かすため、
+    /// ブラウザ以外が起動し得る。外部プロセスが返した値をそのまま渡さないことをここで固定する。
+    /// </remarks>
+    [Theory(DisplayName = "Codex 認証: http/https 以外の認証 URL は開かない")]
+    [InlineData("file:///C:/Windows/System32/calc.exe")]
+    [InlineData("javascript:alert(1)")]
+    [InlineData("not a url at all")]
+    public async Task CodexChatGptLogin_NonHttpUrl_DoesNotOpenBrowser(string url)
+    {
+        var (vm, client, folder) = CreateVm();
+
+        try
+        {
+            client.ChatGptAuthUrl = url;
+            var opened = new List<string>();
+            vm.OpenBrowser = opened.Add;
+
+            await vm.CodexStartChatGptLoginCommand.ExecuteAsync(null);
+
+            opened.Should().BeEmpty("http/https 以外の URL はシェル起動しない");
+            vm.StatusMessage.Should().Contain(url, "開けない URL をユーザーへ提示する");
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
     /// <summary>Copilot タブの選択が保存され、次回構築時の InitialBackend として復元されることを検証する</summary>
     [Fact(DisplayName = "Copilot タブの選択が保存・復元される")]
     public void SaveSettings_PersistsCopilotBackend()

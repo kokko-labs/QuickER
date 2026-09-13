@@ -166,6 +166,23 @@ public class McpServerE2ETests
             schema.text.Should().Contain("\"keys\"");
             schema.text.Should().Contain("GenerateRepositories");
 
+            // --- 失敗したツール呼び出しは isError で返る（図ファイル不在の変更系ツール） ---
+            // 外部エージェントが応答本文を解釈せずに成否を判定できることの実証
+            var missing = await CallAsync(
+                client,
+                "add_entity",
+                new()
+                {
+                    ["file"] = Path.Combine(workDir, "no-such-diagram.json"),
+                    ["table_name"] = "Customer",
+                },
+                cts.Token
+            );
+            missing
+                .isError.Should()
+                .BeTrue(Diagnostics(stderrLines) + " add_entity(missing file): " + missing.text);
+            missing.text.Should().Contain("not found");
+
             // --- create_diagram ---
             var create = await CallAsync(
                 client,

@@ -40,7 +40,7 @@ Imports the `erDiagram` notation. Like DBML it carries no dialect information, s
 
 ### Excel definition documents (.xlsx)
 
-Definition documents exported by QuickER can be re-imported. In the key column, `UQ{n}` marks unique constraints and the same number means the same constraint, so the columns sharing a number are restored as one constraint (the constraint name is not carried by the document, so it is left unset and synthesized at DDL generation time). Sheet roles are identified by hidden definition tags, so the sheets can be renamed or translated and still import — but **Excel files created by other applications cannot be imported directly** (to migrate definition documents you already have, transcribe them into QuickER's document format once). The target DBMS is embedded in the document and restored, dialect and all, on import. Count mismatches, duplicates, and references to undefined tables are import errors.
+Definition documents exported by QuickER can be re-imported. In the key column, `UQ{n}` marks unique constraints and the same number means the same constraint, so the columns sharing a number are restored as one constraint (the constraint name is not carried by the document, so it is left unset and synthesized at DDL generation time). Sheet roles are identified by hidden definition tags, so the sheets can be renamed or translated and still import — but **Excel files created by other applications cannot be imported directly** (to migrate definition documents you already have, transcribe them into QuickER's document format once). The target DBMS is embedded in the document and restored, dialect and all, on import. Count mismatches, duplicates, and references to undefined tables are import errors. The import has no size limit of its own: every worksheet other than the two role sheets is read as a table-detail sheet, and rows are scanned until the first blank one. It also runs on the UI thread, so a very large workbook leaves the window unresponsive until it finishes, with nothing to cancel it.
 
 ### C# code (.cs)
 
@@ -72,6 +72,8 @@ Information the chosen format cannot represent is listed in the completion dialo
 
 Outputs a definition document consisting of a table list, a relationship list, and per-table detail sheets (column types, required flags, keys, descriptions). Besides `PK` and `FK{n}`, the key column shows unique constraints as `UQ{n}` (combined as in `PK/UQ1` or `FK1/UQ2`). `n` follows the order the constraints appear in, and **the same number means the same constraint**, so a composite constraint — and likewise a composite foreign key — puts the same number on every column it covers. The relationship list keeps one row per relationship: a composite foreign key lists its columns comma-separated in the referencing and referenced column cells, in declaration order (`TenantRef, RegionRef` / `TenantId, RegionCode`), and re-importing splits them back into column pairs (both sides must list the same number of columns). The target DBMS is embedded in the file, so this document can be turned back into a diagram by re-importing it into QuickER.
 
+Every cell is written as a text value — QuickER never writes a formula — so a table or column name that begins with `=` stays literal text in the workbook, and Excel does not evaluate it on open. QuickER has no CSV output at all; if you convert a document to CSV yourself, remember that a spreadsheet opening a CSV *does* read a leading `=`, `+`, `-` or `@` as the start of a formula, so quote such values as you convert.
+
 ### HTML definition documents (.html)
 
 Outputs a self-contained single HTML file with no external references and no JavaScript. It consists of a sidebar navigation, an overview (target DBMS, table count, relationship count), a table list, a relationship list (including ON DELETE / ON UPDATE), and per-table details. It can be viewed with nothing but a browser, which makes it a good handout for non-developer stakeholders.
@@ -85,6 +87,8 @@ Outputs a JSON (`{ "Version": 1, "Schema": { ... } }` — the keys start with an
 ### PNG / SVG (images)
 
 Outputs the whole diagram as an image. Neither format is affected by the on-screen zoom level. SVG is drawn directly from the diagram's model, so it contains no selection frames or grid background; PNG rasterizes the canvas as it is drawn, so the selection state (selection frames and the dimming from relationship highlighting) and the grid background are captured as well. Clearing the selection before exporting a PNG is recommended.
+
+Every name and description the SVG carries is XML-escaped, so nothing written in the diagram can break out of the markup. A control character in a name is the one exception: it is written through as it stands, and XML forbids those in content, so the file is written without complaint and then fails to open in every SVG viewer. Nothing rejects such a name on the way out — the entry check for control characters in names guards DDL and code generation, not the exports — so keep them out of the names themselves.
 
 ### Print / PDF
 

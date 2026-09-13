@@ -252,6 +252,12 @@ namespace QuickER.AI.Chat.Resources {
             }
         }
 
+        public static string Chat_BrowserOpenUnsupportedUrlFormat {
+            get {
+                return ResourceManager.GetString("Chat_BrowserOpenUnsupportedUrlFormat", resourceCulture);
+            }
+        }
+
         public static string Chat_ResponseCompleted {
             get {
                 return ResourceManager.GetString("Chat_ResponseCompleted", resourceCulture);
