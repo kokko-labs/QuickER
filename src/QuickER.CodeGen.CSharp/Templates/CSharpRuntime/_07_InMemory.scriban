@@ -1051,7 +1051,7 @@ public sealed class InMemoryDataStore
         CancellationToken cancellationToken
     )
     {
-        var project = selector.Compile();
+        var project = QuerySelectorCache.GetOrCompile(selector);
         var predicates = CompilePredicates(plan);
         var orderings = CompileOrderings(plan);
 

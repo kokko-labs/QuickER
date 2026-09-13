@@ -1378,7 +1378,7 @@ public sealed class InMemoryQueryExecutor<TEntity>(InMemoryDataStore store)
         CancellationToken cancellationToken
     )
     {
-        var project = selector.Compile();
+        var project = QuerySelectorCache.GetOrCompile(selector);
         var predicates = CompilePredicates(plan);
         var orderings = CompileOrderings(plan);
 

@@ -14,6 +14,7 @@ using System.IO;
 using System.Linq;
 using System.Linq.Expressions;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
@@ -1386,7 +1387,7 @@ public sealed class EfCoreSqlQueryExecutor<TEntity, TContext>(
         {
             // Fallback: fetch all columns (including Includes), then project in memory.
             var entities = await ToListAsync(plan, cancellationToken).ConfigureAwait(false);
-            return entities.Select(selector.Compile()).ToList();
+            return entities.Select(QuerySelectorCache.GetOrCompile(selector)).ToList();
         }
 
         await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);

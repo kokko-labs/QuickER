@@ -1070,6 +1070,13 @@ internal sealed partial class CSharpGenerationModelBuilder
     }
 
     /// <summary>ミニ DSL の共有実装メンバー（Query() パイプライン経由・全実装先共通）を構築する</summary>
+    /// <remarks>
+    /// 射影の選択式はメソッド本体へ直書きせず <c>static readonly</c> フィールドへ巻き上げる。C# は式ツリーを
+    /// キャッシュしないため、メソッド内に書いたラムダは呼び出しのたびに新しい <c>Expression</c> インスタンスになり、
+    /// 実行器側の参照同一性キーの compile-once キャッシュ（<c>QuerySelectorCache</c>）が一度もヒットしない。
+    /// 選択式は「ラムダ変数のプロパティ参照だけ」で組み立てる（<see cref="BuildProjectionSelector"/>）ため
+    /// クロージャを持たず、巻き上げても意味は変わらない。
+    /// </remarks>
     private static string BuildDslImplMember(QueryDefinition query, QueryMethodPlan plan)
     {
         var chain = new StringBuilder("Query()");
@@ -1089,14 +1096,40 @@ internal sealed partial class CSharpGenerationModelBuilder
             chain.Append(".Skip(skip).Take(take)");
         }
 
+        // 射影のときだけ選択式フィールドを立て、終端呼び出しにはフィールド名を渡す（射影以外は書式に {0} が無く未使用）
+        var selectorField = plan.ProjectionSelector is null
+            ? null
+            : ToFieldName(plan.MethodName) + "Selector";
+
         chain.Append(
             string.Format(
                 GetReturnShapeInfo(query.Returns).DslTerminalFormat,
-                plan.ProjectionSelector
+                selectorField ?? plan.ProjectionSelector
             )
         );
 
-        var builder = AppendDocSummary(new StringBuilder(), plan.Summary);
+        var builder = new StringBuilder();
+
+        if (selectorField is not null)
+        {
+            builder
+                .Append("    /// <summary>The projection selector of ")
+                .Append(plan.MethodName)
+                .Append(
+                    ", hoisted into a field so that every call hands the same expression tree instance to the executor (which compiles it once).</summary>\n"
+                )
+                .Append("    private static readonly Expression<Func<")
+                .Append(plan.EntityClassName)
+                .Append(", ")
+                .Append(plan.ResultTypeName)
+                .Append(">> ")
+                .Append(selectorField)
+                .Append(" = ")
+                .Append(plan.ProjectionSelector)
+                .Append(";\n\n");
+        }
+
+        AppendDocSummary(builder, plan.Summary);
 
         if (plan.Condition is { PreludeLines.Count: > 0 })
         {

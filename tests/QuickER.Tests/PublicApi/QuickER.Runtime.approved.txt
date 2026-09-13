@@ -376,8 +376,14 @@ public sealed class QuickER.Runtime.ProjectionColumnCollector : System.Linq.Expr
     protected override System.Linq.Expressions.Expression VisitParameter(System.Linq.Expressions.ParameterExpression node)
     public static bool TryCollect<TEntity, TResult>(System.Linq.Expressions.Expression<System.Func<TEntity, TResult>> selector, out System.Collections.Generic.IReadOnlyCollection<string> referencedProperties)
 
+public static class QuickER.Runtime.QuerySelectorCache
+    public static System.Func<TEntity, TResult> GetOrCompile<TEntity, TResult>(System.Linq.Expressions.Expression<System.Func<TEntity, TResult>> selector)
+
 public static class QuickER.Runtime.QueryStringMatchGuard
     public static void Validate(System.Linq.Expressions.Expression predicateBody)
+
+public static class QuickER.Runtime.QueryValueEvaluator
+    public static object Evaluate(System.Linq.Expressions.Expression expression)
 
 public static class QuickER.Runtime.RawSqlMapper
     public static System.Reflection.PropertyInfo[] GetBindableProperties(System.Type type)

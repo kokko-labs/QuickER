@@ -18,6 +18,7 @@ using System.Linq.Expressions;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
@@ -7623,6 +7624,182 @@ internal sealed class ProjectionColumnCollector : ExpressionVisitor
     }
 }
 
+/// <summary>Hands out the compiled delegate for a projection selector, compiling each expression-tree instance only once.</summary>
+/// <remarks>
+/// A generated projection query keeps its selector in a static field, so every call passes the same expression-tree instance
+/// and the lookup replaces a <c>Compile()</c> that would otherwise emit a fresh dynamic method per call. The table keys on
+/// reference identity and holds its keys weakly, so a selector a caller builds ad hoc is collected as usual - it simply
+/// misses the cache and is compiled every time, exactly as before.
+/// </remarks>
+internal static class QuerySelectorCache
+{
+    /// <summary>The compiled delegates, keyed by selector instance (reference identity, weakly held).</summary>
+    private static readonly ConditionalWeakTable<Expression, Delegate> _compiledSelectors = new();
+
+    /// <summary>Gets the compiled projection delegate for the selector, compiling it the first time this instance is seen.</summary>
+    public static Func<TEntity, TResult> GetOrCompile<TEntity, TResult>(
+        Expression<Func<TEntity, TResult>> selector
+    ) =>
+        (Func<TEntity, TResult>)
+            _compiledSelectors.GetValue(
+                selector,
+                static expression => ((Expression<Func<TEntity, TResult>>)expression).Compile()
+            );
+}
+
+/// <summary>Evaluates the value side of a query predicate (the part that does not reference the lambda parameter) into an actual value.</summary>
+/// <remarks>
+/// <para>
+/// Constants, field / property reads, method calls, value-preserving conversions, and inline array initializers are
+/// interpreted directly. Only shapes outside that set fall back to compiling the expression tree, which emits a dynamic
+/// method and costs orders of magnitude more than reading the value. The method-call shape is the one that matters in
+/// practice: on a diagram with value objects every generated query puts <c>XxxValue.Create(arg)</c> in value position, so
+/// the fallback used to run on every single call.
+/// </para>
+/// <para>
+/// Every interpreted path must stay observationally identical to the compiled one, exceptions included - see
+/// <see cref="InvokeMethod"/> for the exception parity the reflective call has to preserve, and note that an instance call
+/// on a null receiver is handed back to the fallback so that it fails as a NullReferenceException rather than the
+/// TargetException reflection would raise.
+/// </para>
+/// </remarks>
+internal static class QueryValueEvaluator
+{
+    /// <summary>
+    /// How many times the compiling fallback ran on the current thread. Test-only observability; nothing in the runtime
+    /// reads it. Thread-local on purpose: the question it answers - "did this particular evaluation have to compile?" -
+    /// is about one call, and a process-wide counter could not be read reliably while other work runs in parallel.
+    /// </summary>
+    [ThreadStatic]
+    internal static long FallbackCompileCount;
+
+    /// <summary>Evaluates a value-side expression to the actual value it denotes.</summary>
+    public static object? Evaluate(Expression expression)
+    {
+        switch (expression)
+        {
+            // Constants return their value as-is
+            case ConstantExpression constant:
+                return constant.Value;
+
+            // For field/property references, recursively evaluate the target instance (null for static members), then read via reflection
+            case MemberExpression member:
+                var instance = member.Expression is null ? null : Evaluate(member.Expression);
+
+                // An instance member on a null receiver goes to the fallback, the same rule the method-call branch
+                // follows: reflection would raise TargetException where the compiled path raises NullReferenceException
+                // (or, on a null Nullable<T>'s HasValue, no exception at all), so the compiled path is the answer
+                if (member.Expression is not null && instance is null)
+                {
+                    return CompileAndInvoke(expression);
+                }
+
+                return member.Member switch
+                {
+                    FieldInfo field => field.GetValue(instance),
+                    PropertyInfo property => property.GetValue(instance),
+                    _ => CompileAndInvoke(expression),
+                };
+
+            // Method calls - the value object factory a generated query puts in value position above all - are dispatched
+            // reflectively over recursively evaluated operands
+            case MethodCallExpression call:
+                return InvokeMethod(call);
+
+            // A conversion that the runtime performs without changing the value carries no work of its own, so the operand
+            // is already the result
+            case UnaryExpression { NodeType: ExpressionType.Convert, Method: null } convert
+                when IsValuePreservingConvert(convert):
+                return Evaluate(convert.Operand);
+
+            // An inline array (new[] { ... }, reachable as the collection of an IN search) is rebuilt from its evaluated elements
+            case NewArrayExpression { NodeType: ExpressionType.NewArrayInit } newArray:
+                return CreateArray(newArray);
+
+            // Everything else (arithmetic, conditionals, constructor calls, etc.) is evaluated by compiling the expression tree (compatibility-first fallback)
+            default:
+                return CompileAndInvoke(expression);
+        }
+    }
+
+    /// <summary>Calls the method reflectively over recursively evaluated receiver and arguments.</summary>
+    /// <remarks>
+    /// <c>DoNotWrapExceptions</c> is what keeps a failure inside the method observationally identical to the compiled path:
+    /// without it reflection wraps whatever the method threw in a <see cref="System.Reflection.TargetInvocationException"/>,
+    /// and a value object's validation failure - the very shape this path exists for - would stop matching what callers catch.
+    /// </remarks>
+    private static object? InvokeMethod(MethodCallExpression call)
+    {
+        var instance = call.Object is null ? null : Evaluate(call.Object);
+
+        if (call.Object is not null && instance is null)
+        {
+            // An instance call on a null receiver has to fail the way the compiled path fails (a NullReferenceException),
+            // not with the TargetException reflection raises, so the fallback - which is the definition of the behaviour - takes it
+            return CompileAndInvoke(call);
+        }
+
+        var arguments = new object?[call.Arguments.Count];
+
+        for (var i = 0; i < arguments.Length; i++)
+        {
+            arguments[i] = Evaluate(call.Arguments[i]);
+        }
+
+        return call.Method.Invoke(
+            instance,
+            BindingFlags.DoNotWrapExceptions,
+            binder: null,
+            parameters: arguments,
+            culture: null
+        );
+    }
+
+    /// <summary>Whether the conversion leaves the value untouched (a reference upcast, or boxing into object).</summary>
+    /// <remarks>
+    /// Judged from the static types alone so that the operand is never evaluated twice. Anything else - a numeric
+    /// conversion, an unboxing cast, nullable lifting, a checked conversion, a user-defined operator - changes or can fail
+    /// on the value and is left to the compiling fallback.
+    /// </remarks>
+    private static bool IsValuePreservingConvert(UnaryExpression convert) =>
+        convert.Type == typeof(object)
+        || (
+            !convert.Operand.Type.IsValueType
+            && convert.Type.IsAssignableFrom(convert.Operand.Type)
+        );
+
+    /// <summary>Builds the array an inline initializer denotes from its evaluated elements.</summary>
+    private static object CreateArray(NewArrayExpression newArray)
+    {
+        var array = Array.CreateInstance(
+            newArray.Type.GetElementType()!,
+            newArray.Expressions.Count
+        );
+
+        for (var i = 0; i < newArray.Expressions.Count; i++)
+        {
+            array.SetValue(Evaluate(newArray.Expressions[i]), i);
+        }
+
+        return array;
+    }
+
+    /// <summary>Wraps an arbitrary expression tree in a lambda, compiles and invokes it to obtain the actual value (fallback for expressions that cannot be read directly).</summary>
+    /// <remarks>
+    /// The lambda is typed as <c>Func&lt;object&gt;</c> (boxing the result with a Convert node) so that it can be invoked
+    /// directly. The untyped <c>Compile().DynamicInvoke()</c> pair goes through reflection on every call and wraps any
+    /// exception the expression throws in a <see cref="System.Reflection.TargetInvocationException"/>.
+    /// </remarks>
+    private static object? CompileAndInvoke(Expression expression)
+    {
+        FallbackCompileCount++;
+
+        return Expression
+            .Lambda<Func<object?>>(Expression.Convert(expression, typeof(object)))
+            .Compile()();
+    }
+}
+
 /// <summary>Validates the string-matching calls (Contains / StartsWith / EndsWith) inside a query predicate and rejects a null pattern argument up front.</summary>
 /// <remarks>
 /// Dialects and backends disagreed on what a null pattern means (match-all, no-match, or an exception), so the guard unifies
@@ -7646,7 +7823,7 @@ internal static class QueryStringMatchGuard
                 // The receiver must be the column side (it references the lambda parameter) and the argument the value side (it does not)
                 && ReferencesParameter(node.Object!)
                 && !ReferencesParameter(node.Arguments[0])
-                && Evaluate(node.Arguments[0]) is null
+                && QueryValueEvaluator.Evaluate(node.Arguments[0]) is null
             )
             {
                 throw new ArgumentNullException(
@@ -7708,37 +7885,6 @@ internal static class QueryStringMatchGuard
         finder.Visit(expression);
         return finder.Found;
     }
-
-    /// <summary>
-    /// Evaluates a value-side argument (a constant or a captured variable) to obtain the actual value. Constants and closure
-    /// field / property references are read directly, avoiding (expensive) expression-tree compilation; anything else falls back to compiling.
-    /// </summary>
-    private static object? Evaluate(Expression expression)
-    {
-        switch (expression)
-        {
-            case ConstantExpression constant:
-                return constant.Value;
-
-            case MemberExpression member:
-                var instance = member.Expression is null ? null : Evaluate(member.Expression);
-
-                return member.Member switch
-                {
-                    FieldInfo field => field.GetValue(instance),
-                    PropertyInfo property => property.GetValue(instance),
-                    _ => CompileAndInvoke(expression),
-                };
-
-            default:
-                return CompileAndInvoke(expression);
-        }
-    }
-
-    /// <summary>Compiles an expression as a <c>Func&lt;object&gt;</c> and invokes it (avoiding the reflection-based DynamicInvoke and its exception wrapping).</summary>
-    private static object? CompileAndInvoke(Expression expression) =>
-        Expression.Lambda<Func<object?>>(Expression.Convert(expression, typeof(object)))
-            .Compile()();
 
     /// <summary>A lightweight visitor that merely raises a flag when it finds a lambda-parameter reference.</summary>
     private sealed class ParameterFinder : ExpressionVisitor
@@ -8250,7 +8396,7 @@ internal sealed class SqlServerSqlQueryExecutor<TEntity>(ISqlConnectionFactory c
                 ? metadata.ResolveProjectionColumns(referenced)
                 : null;
 
-        var project = selector.Compile();
+        var project = QuerySelectorCache.GetOrCompile(selector);
 
         if (projectionColumns is null)
         {
@@ -9433,11 +9579,14 @@ internal static class SqlExpressionTranslator
     }
 
     /// <summary>
-    /// Evaluates constants, closure variables, and the like to obtain the actual value. Most cases are constants or
-    /// field/property references on a closure capturing local variables, so they are read directly via reflection,
-    /// avoiding (expensive) expression-tree compilation. Only other expressions such as method calls are evaluated
-    /// with <see cref="Expression.Lambda(Expression, ParameterExpression[])"/>.
+    /// Evaluates constants, closure variables, and the like to obtain the actual value (the shared
+    /// <see cref="QueryValueEvaluator"/> does the work).
     /// </summary>
+    /// <remarks>
+    /// Only the rejection of column references belongs to the translator: the lambda parameter stands for a column, which has
+    /// no value outside a row. The check runs once at the top because an expression that does not reference the parameter
+    /// cannot contain a sub-expression that does.
+    /// </remarks>
     private static object? Evaluate(Expression expression)
     {
         // Entity column references (the lambda parameter) cannot be evaluated as values. Reject explicitly before expression-tree compilation fails with an internal error
@@ -9448,38 +9597,8 @@ internal static class SqlExpressionTranslator
             );
         }
 
-        switch (expression)
-        {
-            // Constants return their value as-is
-            case ConstantExpression constant:
-                return constant.Value;
-
-            // For field/property references, recursively evaluate the target instance (null for static members), then read via reflection
-            case MemberExpression member:
-                var instance = member.Expression is null ? null : Evaluate(member.Expression);
-
-                return member.Member switch
-                {
-                    FieldInfo field => field.GetValue(instance),
-                    PropertyInfo property => property.GetValue(instance),
-                    _ => CompileAndInvoke(expression),
-                };
-
-            // Everything else (method calls, arithmetic, etc.) is evaluated by compiling the expression tree (compatibility-first fallback)
-            default:
-                return CompileAndInvoke(expression);
-        }
+        return QueryValueEvaluator.Evaluate(expression);
     }
-
-    /// <summary>Wraps an arbitrary expression tree in a lambda, compiles and invokes it to obtain the actual value (fallback for expressions that cannot be read directly via reflection).</summary>
-    /// <remarks>
-    /// The lambda is typed as <c>Func&lt;object&gt;</c> (boxing the result with a Convert node) so that it can be invoked
-    /// directly. The untyped <c>Compile().DynamicInvoke()</c> pair goes through reflection on every call and wraps any
-    /// exception the expression throws in a <see cref="System.Reflection.TargetInvocationException"/>.
-    /// </remarks>
-    private static object? CompileAndInvoke(Expression expression) =>
-        Expression.Lambda<Func<object?>>(Expression.Convert(expression, typeof(object)))
-            .Compile()();
 
     /// <param name="value">The actual value to parameterize (may be null).</param>
     /// <param name="parameters">The list that receives the generated parameter.</param>
@@ -13911,7 +14030,7 @@ internal sealed class InMemoryQueryExecutor<TEntity>(InMemoryDataStore store)
         CancellationToken cancellationToken
     )
     {
-        var project = selector.Compile();
+        var project = QuerySelectorCache.GetOrCompile(selector);
         var predicates = CompilePredicates(plan);
         var orderings = CompileOrderings(plan);
 
@@ -15980,7 +16099,7 @@ internal sealed class EfCoreSqlQueryExecutor<TEntity, TContext>(
         {
             // Fallback: fetch all columns (including Includes), then project in memory.
             var entities = await ToListAsync(plan, cancellationToken).ConfigureAwait(false);
-            return entities.Select(selector.Compile()).ToList();
+            return entities.Select(QuerySelectorCache.GetOrCompile(selector)).ToList();
         }
 
         await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);

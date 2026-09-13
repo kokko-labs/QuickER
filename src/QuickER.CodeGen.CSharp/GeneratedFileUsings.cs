@@ -307,6 +307,13 @@ internal static class GeneratedFileUsings
                     yield return "Microsoft.Extensions.DependencyInjection";
                 }
 
+                // 射影セレクタの compile-once キャッシュ（QuerySelectorCache）が ConditionalWeakTable を使う。
+                // 宣言は契約かつ固定 infra を出すスペックだけが持つ（テンプレートの render_contract && emit_shared_infra と同条件）
+                if ((spec.ContractOnly || !spec.MultiDialect) && spec.EmitSharedInfra)
+                {
+                    yield return "System.Runtime.CompilerServices";
+                }
+
                 // EntitySaveMetadata の列判定は [Column]（DataAnnotations.Schema）を許可リストとして読むため常時要求する
                 yield return "System.ComponentModel.DataAnnotations.Schema";
 

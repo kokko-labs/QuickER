@@ -16,6 +16,7 @@ using System.IO;
 using System.Linq;
 using System.Linq.Expressions;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
 using System.Text.RegularExpressions;
@@ -1078,7 +1079,7 @@ public sealed class SqlServerSqlQueryExecutor<TEntity>(ISqlConnectionFactory con
                 ? metadata.ResolveProjectionColumns(referenced)
                 : null;
 
-        var project = selector.Compile();
+        var project = QuerySelectorCache.GetOrCompile(selector);
 
         if (projectionColumns is null)
         {
@@ -2261,11 +2262,14 @@ public static class SqlExpressionTranslator
     }
 
     /// <summary>
-    /// Evaluates constants, closure variables, and the like to obtain the actual value. Most cases are constants or
-    /// field/property references on a closure capturing local variables, so they are read directly via reflection,
-    /// avoiding (expensive) expression-tree compilation. Only other expressions such as method calls are evaluated
-    /// with <see cref="Expression.Lambda(Expression, ParameterExpression[])"/>.
+    /// Evaluates constants, closure variables, and the like to obtain the actual value (the shared
+    /// <see cref="QueryValueEvaluator"/> does the work).
     /// </summary>
+    /// <remarks>
+    /// Only the rejection of column references belongs to the translator: the lambda parameter stands for a column, which has
+    /// no value outside a row. The check runs once at the top because an expression that does not reference the parameter
+    /// cannot contain a sub-expression that does.
+    /// </remarks>
     private static object? Evaluate(Expression expression)
     {
         // Entity column references (the lambda parameter) cannot be evaluated as values. Reject explicitly before expression-tree compilation fails with an internal error
@@ -2276,38 +2280,8 @@ public static class SqlExpressionTranslator
             );
         }
 
-        switch (expression)
-        {
-            // Constants return their value as-is
-            case ConstantExpression constant:
-                return constant.Value;
-
-            // For field/property references, recursively evaluate the target instance (null for static members), then read via reflection
-            case MemberExpression member:
-                var instance = member.Expression is null ? null : Evaluate(member.Expression);
-
-                return member.Member switch
-                {
-                    FieldInfo field => field.GetValue(instance),
-                    PropertyInfo property => property.GetValue(instance),
-                    _ => CompileAndInvoke(expression),
-                };
-
-            // Everything else (method calls, arithmetic, etc.) is evaluated by compiling the expression tree (compatibility-first fallback)
-            default:
-                return CompileAndInvoke(expression);
-        }
+        return QueryValueEvaluator.Evaluate(expression);
     }
-
-    /// <summary>Wraps an arbitrary expression tree in a lambda, compiles and invokes it to obtain the actual value (fallback for expressions that cannot be read directly via reflection).</summary>
-    /// <remarks>
-    /// The lambda is typed as <c>Func&lt;object&gt;</c> (boxing the result with a Convert node) so that it can be invoked
-    /// directly. The untyped <c>Compile().DynamicInvoke()</c> pair goes through reflection on every call and wraps any
-    /// exception the expression throws in a <see cref="System.Reflection.TargetInvocationException"/>.
-    /// </remarks>
-    private static object? CompileAndInvoke(Expression expression) =>
-        Expression.Lambda<Func<object?>>(Expression.Convert(expression, typeof(object)))
-            .Compile()();
 
     /// <param name="value">The actual value to parameterize (may be null).</param>
     /// <param name="parameters">The list that receives the generated parameter.</param>

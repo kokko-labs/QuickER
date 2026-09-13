@@ -271,11 +271,25 @@ public class QueryGenerationTests
         content.Should().Contain("public int CustomerId { get; set; }");
         content.Should().Contain("public decimal Amount { get; set; }");
 
-        // 本体（選択式つき射影終端）
+        // 選択式は static readonly フィールドへ巻き上げる（メソッド内のラムダは呼び出しのたびに新しい式ツリー
+        // インスタンスになり、実行器の参照同一性キーの compile-once キャッシュが一度もヒットしないため）
         content
             .Should()
             .Contain(
-                ".ToProjectionListAsync(e => new OrderSummaryRow { CustomerId = e.CustomerId, Amount = e.Amount }, cancellationToken)"
+                "private static readonly Expression<Func<OrderEntity, OrderSummaryRow>> _getSummariesAsyncSelector = e => new OrderSummaryRow { CustomerId = e.CustomerId, Amount = e.Amount };"
+            );
+
+        // 本体（射影終端は巻き上げたフィールドを渡す）
+        content
+            .Should()
+            .Contain(".ToProjectionListAsync(_getSummariesAsyncSelector, cancellationToken)");
+
+        // 巻き上げた以上、選択式がメソッド本体へ直書きされて残っていてはならない
+        content
+            .Should()
+            .NotContain(
+                ".ToProjectionListAsync(e => new OrderSummaryRow",
+                "選択式の直書きが残ると呼び出しごとに新しい式ツリーになり、compile-once キャッシュが効かない"
             );
     }
 
