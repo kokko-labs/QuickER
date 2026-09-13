@@ -2711,7 +2711,12 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
         NotifyPositionsChanged();
     }
 
-    /// <summary>Full on-screen wipe. No deletion tracking; also resets the set-aside deletion targets.</summary>
+    /// <summary>Full on-screen wipe. No deletion tracking; set-aside deletion targets are restored to their pre-removal state and released.</summary>
+    /// <remarks>
+    /// Releasing the tracking list alone would leave the set-aside elements marked Removed with nothing left to undo it:
+    /// adding such an instance back afterwards can no longer be matched by the tracking list, so it would sit in the
+    /// collection as a deletion target and be silently deleted on the next save.
+    /// </remarks>
     protected override void ClearItems()
     {
         var cleared = new List<T>(this);
@@ -2720,6 +2725,12 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
         {
             item.Owner = null;
             item.SetParentModel(null);
+        }
+
+        // Restore before releasing the tracking list, the same way cancelling a single removal does.
+        foreach (var entry in _removed)
+        {
+            entry.Item.RowState = entry.PriorState;
         }
 
         _removed.Clear();
@@ -11680,8 +11691,29 @@ public sealed partial class HttpOrderRemoteRepository(HttpClient httpClient)
     : HttpRemoteRepository<OrderEntity, int>(httpClient, "Order"), IOrderRemoteRepository
 {
     /// <summary>Searches a customer's orders, newest first (order ID descending), with paging</summary>
-    public Task<IReadOnlyList<OrderEntity>> GetByCustomerAsync(int customerId, int take, int skip = 0, CancellationToken cancellationToken = default) =>
-        InvokeAsync<IReadOnlyList<OrderEntity>>("GetByCustomer", new { customerId, take, skip }, cancellationToken);
+    public Task<IReadOnlyList<OrderEntity>> GetByCustomerAsync(int customerId, int take, int skip = 0, CancellationToken cancellationToken = default)
+    {
+        // The paging arguments are rejected here with the exception a direct implementation raises, so that
+        // swapping a direct repository for this client changes nothing a caller catches. Order, parameter name
+        // and wording follow SqlQuery.Skip / Take, which the direct path calls as .Skip(skip).Take(take).
+        if (skip < 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                "count",
+                "The number of rows to skip must not be negative."
+            );
+        }
+
+        if (take <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                "count",
+                "The number of rows to fetch must be greater than zero."
+            );
+        }
+
+        return InvokeAsync<IReadOnlyList<OrderEntity>>("GetByCustomer", new { customerId, take, skip }, cancellationToken);
+    }
 
     /// <summary>Gets a customer's order summaries (order ID, ordered-at, memo), newest first (projection DTO)</summary>
     public Task<IReadOnlyList<OrderSummaryRow>> GetSummariesAsync(int customerId, CancellationToken cancellationToken = default) =>

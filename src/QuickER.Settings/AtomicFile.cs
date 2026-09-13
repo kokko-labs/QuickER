@@ -1,4 +1,5 @@
 using System.IO;
+using System.Text;
 
 namespace QuickER.Settings;
 
@@ -46,7 +47,23 @@ public static class AtomicFile
     /// </remarks>
     /// <param name="path">書き込み先のファイルパス</param>
     /// <param name="contents">書き込む内容</param>
-    public static void WriteAllText(string path, string contents)
+    public static void WriteAllText(string path, string contents) =>
+        WriteAllTextCore(path, contents, encoding: null);
+
+    /// <summary>文字コードを明示して文字列を原子的にファイルへ書き出す</summary>
+    /// <remarks>
+    /// 意味論は <see cref="WriteAllText(string, string)"/> と同一で、違いは書き出しの文字コードだけ。
+    /// BOM 付き UTF-8（<see cref="Encoding.UTF8"/>）のように、素の <see cref="File.WriteAllText(string, string?)"/>
+    /// の既定（BOM なし UTF-8）と食い違う符号化が求められる出力（DDL スクリプト等）向け。
+    /// </remarks>
+    /// <param name="path">書き込み先のファイルパス</param>
+    /// <param name="contents">書き込む内容</param>
+    /// <param name="encoding">書き出しに用いる文字コード</param>
+    public static void WriteAllText(string path, string contents, Encoding encoding) =>
+        WriteAllTextCore(path, contents, encoding);
+
+    /// <summary>原子的書き込みの本体（<paramref name="encoding"/> が null なら既定＝BOM なし UTF-8）</summary>
+    private static void WriteAllTextCore(string path, string contents, Encoding? encoding)
     {
         // 一時ファイルは保存先と同じディレクトリに作る（別ボリュームをまたがないため、
         // 差し替え（File.Replace / File.Move）が同一ボリューム内の操作で完結する）。
@@ -57,7 +74,14 @@ public static class AtomicFile
 
         try
         {
-            File.WriteAllText(temporaryPath, contents);
+            if (encoding is null)
+            {
+                File.WriteAllText(temporaryPath, contents);
+            }
+            else
+            {
+                File.WriteAllText(temporaryPath, contents, encoding);
+            }
 
             // 保存先への差し替え。別プロセス（GUI と MCP サーバ）が同じファイルを同時に保存すると
             // 一過性の失敗（相手が保存先を開いている・保存先の有無が入れ替わる）が起きるため、

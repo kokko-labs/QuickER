@@ -266,9 +266,17 @@ public class MySqlSyncScriptBuilderTests
 
         sql.Should().Contain("information_schema.REFERENTIAL_CONSTRAINTS");
         sql.Should().Contain("INTO @fk");
+        sql.Should().Contain("rc.CONSTRAINT_SCHEMA = DATABASE()");
         sql.Should().Contain("rc.TABLE_NAME = 'order'");
         sql.Should().Contain("rc.REFERENCED_TABLE_NAME = 'customer'");
-        sql.Should().Contain("SET @sql = IF(@fk IS NULL, 'DO 0'");
+        // 同じ親子ペアに FK が 2 本ある構成でも取り出しが揺れないよう名前順で決定化する
+        sql.Should().Contain("ORDER BY rc.CONSTRAINT_NAME LIMIT 1;");
+        // 制約名は実行時の値なので、クォートの終端文字（`）を二重化してから埋める
+        sql.Should()
+            .Contain(
+                "SET @sql = IF(@fk IS NULL, 'DO 0', CONCAT('ALTER TABLE `order` "
+                    + "DROP FOREIGN KEY `', REPLACE(@fk, '`', '``'), '`'));"
+            );
         sql.Should().Contain("PREPARE stmt FROM @sql;");
         sql.Should().Contain("EXECUTE stmt;");
         sql.Should().Contain("DEALLOCATE PREPARE stmt;");
@@ -291,9 +299,179 @@ public class MySqlSyncScriptBuilderTests
         sql.Should().Contain("ALTER TABLE `customer` COMMENT = '顧客マスタ';");
     }
 
-    /// <summary>SetColumnDescription が MODIFY COLUMN による完全再指定で COMMENT を設定することを検証する</summary>
-    [Fact(DisplayName = "SetColumnDescription は MODIFY COLUMN で型・NULL・COMMENT を再指定する")]
-    public void SetColumnDescription_EmitsModifyColumn()
+    /// <summary>列説明の差分項目を組み立てる（Entity は列定義の復元には使われない＝ライブ再構成のため）</summary>
+    private static SchemaDiffItem ColumnDesc(
+        string table,
+        string column,
+        string newDescription,
+        Entity? entity = null
+    ) =>
+        new()
+        {
+            Kind = SchemaDiffKind.SetColumnDescription,
+            TableName = table,
+            ColumnName = column,
+            Entity = entity,
+            NewDescription = newDescription,
+            IsSelected = true,
+        };
+
+    /// <summary>
+    /// SetColumnDescription が information_schema からのライブ再構成＋プリペアド動的 SQL で
+    /// COMMENT を設定することを検証する。
+    /// </summary>
+    /// <remarks>
+    /// MySQL の MODIFY は列定義の完全再指定なので、モデルの型・NULL 制約だけから復元すると
+    /// DEFAULT / AUTO_INCREMENT / 照合順序 / ON UPDATE / INVISIBLE / SRID / 生成列が消える。
+    /// 実行時点の実定義を information_schema から組み立て直し、COMMENT だけを差し替える。
+    /// </remarks>
+    [Fact(
+        DisplayName = "SetColumnDescription はライブ再構成した MODIFY COLUMN を動的 SQL で実行する"
+    )]
+    public void SetColumnDescription_RebuildsDefinitionFromLiveCatalog()
+    {
+        var sql = Build(ColumnDesc("customer", "name", "顧客名"));
+
+        // SELECT ... INTO は該当行が無いとユーザー変数を書き換えないため、事前に初期化する
+        sql.Should().Contain("SET @gen = '';");
+        sql.Should().Contain("SET @dfx = '';");
+        sql.Should().Contain("SET @cmt = '';");
+        sql.Should().Contain("SET @exists = 0;");
+
+        // 実定義の取得元と対象列の特定
+        sql.Should().Contain("FROM information_schema.COLUMNS c");
+        sql.Should()
+            .Contain(
+                "WHERE c.TABLE_SCHEMA = DATABASE() AND c.TABLE_NAME = 'customer' "
+                    + "AND c.COLUMN_NAME = 'name' LIMIT 1;"
+            );
+        sql.Should().Contain("INTO @def");
+
+        // 新しい説明は生成時に確定し、リテラル化は実行時の QUOTE() が担う。
+        // ライブ検索は @cmt へ既存コメントを読み込むので、新値の代入はその後でなければ上書きされて消える
+        sql.Should().Contain("SET @cmt = '顧客名';");
+        sql.IndexOf("SET @cmt = '顧客名';", StringComparison.Ordinal)
+            .Should()
+            .BeGreaterThan(sql.IndexOf("INTO @exists, @gen, @dfx, @cmt", StringComparison.Ordinal));
+        sql.Should()
+            .Contain(
+                "SET @sql = IF(@def IS NOT NULL, CONCAT('ALTER TABLE `customer` "
+                    + "MODIFY COLUMN `name` ', @def, ' COMMENT ', QUOTE(@cmt)), "
+                    + "IF(@exists = 0, 'DO 0', "
+                    + "'QuickER sync: customer.name definition could not be rebuilt'));"
+            );
+        sql.Should().Contain("PREPARE stmt FROM @sql;");
+        sql.Should().Contain("EXECUTE stmt;");
+        sql.Should().Contain("DEALLOCATE PREPARE stmt;");
+    }
+
+    /// <summary>
+    /// 再構成の CONCAT が、列に付き得る属性（照合順序・生成列・NULL 制約・SRID・DEFAULT・
+    /// INVISIBLE・AUTO_INCREMENT・ON UPDATE）をすべて組み込むことを検証する。
+    /// </summary>
+    /// <remarks>いずれか 1 つが欠けると、その属性を持つ実 DB の列が同期のたびに静かに失われる。</remarks>
+    [Fact(DisplayName = "ライブ再構成は列属性の全句を組み立てる")]
+    public void LiveRebuild_IncludesEveryColumnAttributeClause()
+    {
+        var sql = Build(ColumnDesc("customer", "name", "顧客名"));
+
+        // 型・照合順序
+        sql.Should().Contain("c.COLUMN_TYPE,");
+        sql.Should()
+            .Contain("IF(c.COLLATION_NAME IS NULL, '', CONCAT(' COLLATE ', c.COLLATION_NAME)),");
+        // 生成列（式が在るときだけ・VIRTUAL / STORED の別は EXTRA から）
+        sql.Should()
+            .Contain(
+                "IF(@gen = '', '', CONCAT(' GENERATED ALWAYS AS (', @gen, ') ', "
+                    + "IF(INSTR(c.EXTRA, 'STORED GENERATED') > 0, 'STORED', 'VIRTUAL'))),"
+            );
+        // NULL 制約
+        sql.Should().Contain("IF(c.IS_NULLABLE = 'YES', ' NULL', ' NOT NULL'),");
+        // 空間参照系
+        sql.Should().Contain("IF(c.SRS_ID IS NULL, '', CONCAT(' SRID ', c.SRS_ID)),");
+        // EXTRA 由来の属性
+        sql.Should().Contain("IF(INSTR(c.EXTRA, 'INVISIBLE') > 0, ' INVISIBLE', ''),");
+        sql.Should().Contain("IF(INSTR(c.EXTRA, 'auto_increment') > 0, ' AUTO_INCREMENT', ''),");
+        // ON UPDATE は精度込みで EXTRA から取り、続く属性（INVISIBLE）を巻き込まない
+        sql.Should()
+            .Contain(
+                "IF(INSTR(c.EXTRA, 'on update ') > 0, CONCAT(' ON UPDATE ', "
+                    + "SUBSTRING_INDEX(SUBSTRING(c.EXTRA, INSTR(c.EXTRA, 'on update ') + 10), ' ', 1)), '')"
+            );
+    }
+
+    /// <summary>DEFAULT 句の 4 分岐（なし / CURRENT_TIMESTAMP / 式既定 / リテラル）が出ることを検証する</summary>
+    /// <remarks>
+    /// 分岐順は「NULL → CURRENT_TIMESTAMP → DEFAULT_GENERATED → リテラル」。CURRENT_TIMESTAMP の判定を
+    /// DEFAULT_GENERATED より先に置くのは、8.0.13 未満では EXTRA に DEFAULT_GENERATED が付かないため。
+    /// BIT のリテラル既定（<c>b'1'</c>）と BINARY / VARBINARY のリテラル既定（16 進テキスト
+    /// <c>0x6162</c>）は QUOTE すると文字列リテラルに化けるので生出力する。
+    /// </remarks>
+    [Fact(
+        DisplayName = "ライブ再構成の DEFAULT は 4 分岐（なし / CURRENT_TIMESTAMP / 式 / リテラル）"
+    )]
+    public void LiveRebuild_DefaultClauseHasFourBranches()
+    {
+        var sql = Build(ColumnDesc("customer", "name", "顧客名"));
+
+        // (a) 既定なしは句を出さない（NOT NULL 列へ DEFAULT NULL を出すと構文エラーになる）
+        sql.Should().Contain("IF(c.COLUMN_DEFAULT IS NULL, '',");
+        // (b) CURRENT_TIMESTAMP / CURRENT_TIMESTAMP(n) は括弧で包まず生出力する
+        sql.Should()
+            .Contain(
+                "IF(c.DATA_TYPE IN ('timestamp', 'datetime') "
+                    + "AND (UPPER(c.COLUMN_DEFAULT) = 'CURRENT_TIMESTAMP' "
+                    + @"OR UPPER(c.COLUMN_DEFAULT) LIKE 'CURRENT\_TIMESTAMP(%)'), "
+                    + "CONCAT(' DEFAULT ', c.COLUMN_DEFAULT),"
+            );
+        // (c) 式既定は括弧付きで、リテラル用にエスケープされた値をパーサで復元した @dfx を使う
+        sql.Should()
+            .Contain(
+                "IF(INSTR(c.EXTRA, 'DEFAULT_GENERATED') > 0, CONCAT(' DEFAULT (', @dfx, ')'),"
+            );
+        // (d) BIT / BINARY / VARBINARY は生出力・それ以外は QUOTE で安全に再引用する
+        sql.Should()
+            .Contain(
+                "IF(c.DATA_TYPE IN ('bit', 'binary', 'varbinary'), "
+                    + "CONCAT(' DEFAULT ', c.COLUMN_DEFAULT),"
+            );
+        sql.Should().Contain("CONCAT(' DEFAULT ', QUOTE(c.COLUMN_DEFAULT))");
+    }
+
+    /// <summary>
+    /// 生成列の式と式既定を、サーバー自身のパーサへ通して復元する 1 段目の動的 SQL が出ることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// <c>information_schema</c> の <c>GENERATION_EXPRESSION</c> / 式既定の <c>COLUMN_DEFAULT</c> は
+    /// 「文字列リテラル用にエスケープした形」で格納されており（<c>'</c> → <c>\'</c>・<c>\</c> → <c>\\</c>）、
+    /// そのまま SQL へ埋めると構文エラーになる。REPLACE の逐次適用では復元できないため、
+    /// リテラルとして 1 度パースさせて元へ戻す。
+    /// </remarks>
+    [Fact(DisplayName = "ライブ再構成は生成列の式と式既定をパーサ経由で復元する")]
+    public void LiveRebuild_DecodesEscapedExpressionsThroughParser()
+    {
+        var sql = Build(ColumnDesc("customer", "name", "顧客名"));
+
+        sql.Should()
+            .Contain(
+                "SELECT 1, c.GENERATION_EXPRESSION, "
+                    + "IF(INSTR(c.EXTRA, 'DEFAULT_GENERATED') > 0, IFNULL(c.COLUMN_DEFAULT, ''), ''), "
+                    + "c.COLUMN_COMMENT"
+            );
+        sql.Should().Contain("INTO @exists, @gen, @dfx, @cmt");
+        sql.Should()
+            .Contain(
+                "SET @sql = CONCAT('SELECT ''', IFNULL(@gen, ''), ''', ''', "
+                    + "IFNULL(@dfx, ''), ''' INTO @gen, @dfx');"
+            );
+    }
+
+    /// <summary>説明同期がモデルの型・NULL 制約を一切 SQL へ出さないことを検証する</summary>
+    /// <remarks>
+    /// 出していると、未選択の AlterColumn（モデル側の型変更）が説明同期に相乗りして黙って適用される。
+    /// </remarks>
+    [Fact(DisplayName = "SetColumnDescription はモデルの型・NULL 制約を出力しない")]
+    public void SetColumnDescription_DoesNotEmitModelTypeOrNullability()
     {
         var e = new Entity { TableName = "customer" };
         e.Columns.Add(
@@ -305,22 +483,81 @@ public class MySqlSyncScriptBuilderTests
             }
         );
 
-        var sql = Build(
-            new SchemaDiffItem
-            {
-                Kind = SchemaDiffKind.SetColumnDescription,
-                TableName = "customer",
-                ColumnName = "name",
-                Entity = e,
-                NewDescription = "顧客名",
-                IsSelected = true,
-            }
-        );
+        var sql = Build(ColumnDesc("customer", "name", "顧客名", e));
 
+        sql.Should().NotContain("varchar(50)");
+        sql.Should().NotContain("MODIFY COLUMN `name` varchar");
+    }
+
+    /// <summary>列が実 DB に無い場合へ備え、無害な <c>DO 0</c> へ分岐することを検証する</summary>
+    /// <remarks>生成時の静的なスキップコメントでは「実行時点で列が在るか」を語れないため実行時判定にする。</remarks>
+    [Fact(DisplayName = "SetColumnDescription は列不在時に DO 0 へ分岐する")]
+    public void SetColumnDescription_FallsBackToNoOpWhenColumnMissing()
+    {
+        var sql = Build(ColumnDesc("customer", "gone", "説明"));
+
+        sql.Should().Contain("IF(@exists = 0, 'DO 0'");
+        sql.Should().NotContain("-- Skipped");
+    }
+
+    /// <summary>
+    /// 「列が無い（no-op）」と「列は在るのに定義を再構成できなかった（失敗）」が別の分岐へ落ちることを
+    /// 検証する。
+    /// </summary>
+    /// <remarks>
+    /// <c>@def</c> の <c>NULL</c> だけで判断すると、列順同期で移動列の 1 本が畳まれても
+    /// 中途半端な列順のまま「成功」になる。存在は <c>@exists</c> が別に持ち、在るのに再構成できない
+    /// ときは実行できない文を組み立てて必ず失敗させる（<c>SIGNAL</c> はプリペアド文で使えない）。
+    /// </remarks>
+    [Theory(DisplayName = "ライブ再構成の失敗は no-op と区別して必ず失敗する文へ倒す")]
+    [InlineData(SchemaDiffKind.SetColumnDescription)]
+    [InlineData(SchemaDiffKind.ReorderColumns)]
+    public void LiveRebuild_DistinguishesMissingColumnFromRebuildFailure(SchemaDiffKind kind)
+    {
+        var sql =
+            kind == SchemaDiffKind.SetColumnDescription
+                ? Build(ColumnDesc("t", "c", "説明"))
+                : BuildReorder(
+                    (ReorderTable("t", "id", "a", "b", "c"), ReorderTable("t", "id", "c", "a", "b"))
+                );
+
+        // 存在フラグは検索のたびに初期化され、行が引けたときだけ 1 が入る
+        sql.Should().Contain("SET @exists = 0;");
+        sql.Should().Contain("INTO @exists, @gen, @dfx, @cmt");
+
+        // 分岐の形: 定義が組めた → ALTER ／ 列が無い → DO 0 ／ 在るのに組めない → 失敗する文
+        sql.Should().Contain("SET @sql = IF(@def IS NOT NULL, CONCAT('ALTER TABLE `t` ");
         sql.Should()
             .Contain(
-                "ALTER TABLE `customer` MODIFY COLUMN `name` varchar(50) NOT NULL COMMENT '顧客名';"
+                "IF(@exists = 0, 'DO 0', 'QuickER sync: t.c definition could not be rebuilt'));"
             );
+        // 旧実装（両者を DO 0 に畳む形）へ戻っていないこと
+        sql.Should().NotContain("IF(@def IS NULL, 'DO 0'");
+    }
+
+    /// <summary>説明の <c>'</c> / <c>\</c> / 改行が SET 文のリテラルとしてエスケープされることを検証する</summary>
+    /// <remarks>
+    /// 実行時の動的 SQL へは <c>QUOTE(@cmt)</c> が安全に再引用するため、生成時のエスケープは
+    /// <c>SET @cmt = '…'</c> の 1 段だけでよい。
+    /// </remarks>
+    [Fact(DisplayName = "SetColumnDescription は説明の ' と \\ を 1 段エスケープする")]
+    public void SetColumnDescription_EscapesQuoteAndBackslashOnce()
+    {
+        var sql = Build(ColumnDesc("customer", "name", "O'Brien\\path\nsecond"));
+
+        sql.Should().Contain("SET @cmt = 'O''Brien\\\\path\nsecond';");
+    }
+
+    /// <summary>テーブル名・列名の <c>'</c> が動的 SQL のリテラルとしてもエスケープされることを検証する</summary>
+    [Fact(DisplayName = "SetColumnDescription の動的 SQL は名前の ' を二重化する")]
+    public void SetColumnDescription_NameWithQuote_IsEscapedInDynamicSql()
+    {
+        var sql = Build(ColumnDesc("o'rders", "na'me", "説明"));
+
+        // カタログ検索の WHERE 句（素の名前をリテラルとして渡す）
+        sql.Should().Contain("c.TABLE_NAME = 'o''rders' AND c.COLUMN_NAME = 'na''me' LIMIT 1;");
+        // 組み立てる ALTER 文（クォート済みの名前をさらにリテラルとしてエスケープする）
+        sql.Should().Contain("CONCAT('ALTER TABLE `o''rders` MODIFY COLUMN `na''me` ', @def, ");
     }
 
     /// <summary>テーブル説明が空の場合に空文字 COMMENT（削除）が生成されることを検証する</summary>
@@ -494,8 +731,9 @@ public class MySqlSyncScriptBuilderTests
         return new MySqlSyncScriptBuilder().Build(plan);
     }
 
-    /// <summary>列順変更が見出しと MODIFY COLUMN ... AFTER を生成することを検証する</summary>
-    [Fact(DisplayName = "ReorderColumns は MODIFY COLUMN ... AFTER と見出しを生成する")]
+    /// <summary>列順変更が見出しとライブ再構成の MODIFY COLUMN ... AFTER を生成することを検証する</summary>
+    /// <remarks>位置しか変えない操作なので、列定義は実 DB から再構成し COMMENT もライブの値を温存する。</remarks>
+    [Fact(DisplayName = "ReorderColumns はライブ再構成した MODIFY COLUMN ... AFTER を生成する")]
     public void Reorder_GeneratesModifyAfterWithHeading()
     {
         // live: id,a,b,c → target: id,c,a,b（c を id の直後へ）
@@ -504,7 +742,43 @@ public class MySqlSyncScriptBuilderTests
         );
 
         sql.Should().Contain("-- ===== ReorderColumns: t =====");
-        sql.Should().Contain("ALTER TABLE `t` MODIFY COLUMN `c` int NULL AFTER `id`;");
+        sql.Should()
+            .Contain(
+                "WHERE c.TABLE_SCHEMA = DATABASE() AND c.TABLE_NAME = 't' "
+                    + "AND c.COLUMN_NAME = 'c' LIMIT 1;"
+            );
+        sql.Should()
+            .Contain(
+                "SET @sql = IF(@def IS NOT NULL, CONCAT('ALTER TABLE `t` "
+                    + "MODIFY COLUMN `c` ', @def, ' COMMENT ', QUOTE(@cmt), ' AFTER `id`'), "
+                    + "IF(@exists = 0, 'DO 0', "
+                    + "'QuickER sync: t.c definition could not be rebuilt'));"
+            );
+        sql.Should().Contain("DEALLOCATE PREPARE stmt;");
+    }
+
+    /// <summary>列順変更がモデルの型・NULL 制約・説明を出力しないことを検証する</summary>
+    /// <remarks>
+    /// 位置変更でモデル再指定すると、実 DB の DEFAULT / AUTO_INCREMENT / 照合順序などを落とす。
+    /// COMMENT もライブの値（<c>@cmt</c>）を温存し、生成時に値を焼き込まない。
+    /// </remarks>
+    [Fact(DisplayName = "ReorderColumns はモデルの列定義・説明を出力しない")]
+    public void Reorder_DoesNotEmitModelDefinition()
+    {
+        var sql = BuildReorder(
+            (ReorderTable("t", "id", "a", "b", "c"), ReorderTable("t", "id", "c", "a", "b"))
+        );
+
+        sql.Should().NotContain("MODIFY COLUMN `c` int");
+        sql.Should().Contain("QUOTE(@cmt)");
+
+        // 説明はライブの COLUMN_COMMENT を QUOTE して使う＝生成時に値を焼き込まない
+        // （@cmt へ現れる代入は、カタログ検索前の空初期化だけであること）
+        sql.Replace("\r\n", "\n")
+            .Split('\n')
+            .Where(line => line.StartsWith("SET @cmt", StringComparison.Ordinal))
+            .Should()
+            .AllBe("SET @cmt = '';");
     }
 
     /// <summary>先頭へ動かす列が FIRST を生成することを検証する</summary>
@@ -516,7 +790,13 @@ public class MySqlSyncScriptBuilderTests
             (ReorderTable("t", "a", "b", "c"), ReorderTable("t", "c", "a", "b"))
         );
 
-        sql.Should().Contain("ALTER TABLE `t` MODIFY COLUMN `c` int NULL FIRST;");
+        sql.Should()
+            .Contain(
+                "SET @sql = IF(@def IS NOT NULL, CONCAT('ALTER TABLE `t` "
+                    + "MODIFY COLUMN `c` ', @def, ' COMMENT ', QUOTE(@cmt), ' FIRST'), "
+                    + "IF(@exists = 0, 'DO 0', "
+                    + "'QuickER sync: t.c definition could not be rebuilt'));"
+            );
         sql.Should().NotContain("AFTER");
     }
 
@@ -531,8 +811,16 @@ public class MySqlSyncScriptBuilderTests
 
         sql.Should().Contain("-- ===== ReorderColumns: t1 =====");
         sql.Should().Contain("-- ===== ReorderColumns: t2 =====");
-        sql.Should().Contain("ALTER TABLE `t1` MODIFY COLUMN `c` int NULL AFTER `id`;");
-        sql.Should().Contain("ALTER TABLE `t2` MODIFY COLUMN `z` int NULL FIRST;");
+        sql.Should()
+            .Contain(
+                "CONCAT('ALTER TABLE `t1` MODIFY COLUMN `c` ', @def, "
+                    + "' COMMENT ', QUOTE(@cmt), ' AFTER `id`')"
+            );
+        sql.Should()
+            .Contain(
+                "CONCAT('ALTER TABLE `t2` MODIFY COLUMN `z` ', @def, "
+                    + "' COMMENT ', QUOTE(@cmt), ' FIRST')"
+            );
     }
 
     // ---------------- 主キー変更（AlterPrimaryKey） ----------------
@@ -728,7 +1016,259 @@ public class MySqlSyncScriptBuilderTests
 
         var sql = Build(item);
 
-        sql.Should().Contain("CONCAT('ALTER TABLE `o''rders` DROP FOREIGN KEY `', @fk, '`')");
+        sql.Should()
+            .Contain(
+                "CONCAT('ALTER TABLE `o''rders` DROP FOREIGN KEY `', REPLACE(@fk, '`', '``'), '`')"
+            );
         sql.Should().NotContain("CONCAT('ALTER TABLE `o'rders`");
+    }
+
+    /// <summary>制約名不明の外部キー削除が、逆引きの前に @fk を NULL 初期化することを検証する</summary>
+    [Fact(DisplayName = "DropForeignKey は逆引きの前に @fk を NULL 初期化する")]
+    public void DropForeignKey_InitializesVariableBeforeLookup()
+    {
+        var sql = Build(
+            new SchemaDiffItem
+            {
+                Kind = SchemaDiffKind.DropForeignKey,
+                TableName = "order",
+                ParentEntity = new Entity { TableName = "customer" },
+                ChildEntity = new Entity { TableName = "order" },
+                IsSelected = true,
+            }
+        );
+
+        // SELECT ... INTO は該当行が無いとユーザー変数を書き換えないため、直前に NULL で初期化する
+        // （初期化しないと 2 件目以降が直前の FK 名で誤って DROP する）
+        sql.Should().Contain("SET @fk = NULL;");
+        sql.IndexOf("SET @fk = NULL;", StringComparison.Ordinal)
+            .Should()
+            .BeLessThan(
+                sql.IndexOf("SELECT rc.CONSTRAINT_NAME INTO @fk", StringComparison.Ordinal)
+            );
+    }
+
+    // ---------------- AddTable の UNIQUE 制約（DDL 生成との同形性） ----------------
+
+    /// <summary>一意制約の検証用エンティティ（id / code / region の 3 列・id が主キー）を作る</summary>
+    private static Entity BuildUniqueEntity()
+    {
+        var entity = new Entity { TableName = "shops" };
+        entity.Columns.Add(
+            new Column
+            {
+                Name = "id",
+                DataType = "int",
+                IsPrimaryKey = true,
+                IsNullable = false,
+            }
+        );
+        entity.Columns.Add(
+            new Column
+            {
+                Name = "code",
+                DataType = "varchar(20)",
+                IsNullable = false,
+            }
+        );
+        entity.Columns.Add(
+            new Column
+            {
+                Name = "region",
+                DataType = "varchar(10)",
+                IsNullable = false,
+            }
+        );
+        return entity;
+    }
+
+    /// <summary>エンティティ 1 件の AddTable 差分から同期スクリプトを生成する</summary>
+    private static string BuildAddTable(Entity entity) =>
+        Build(
+            new SchemaDiffItem
+            {
+                Kind = SchemaDiffKind.AddTable,
+                TableName = entity.TableName,
+                Entity = entity,
+                IsSelected = true,
+            }
+        );
+
+    /// <summary>SQL から UNIQUE 制約行（前後空白・末尾の区切りカンマを除く）を抜き出す</summary>
+    private static List<string> UniqueConstraintLines(string sql) =>
+        sql.Replace("\r\n", "\n")
+            .Split('\n')
+            .Select(line => line.Trim().TrimEnd(','))
+            .Where(line => line.Contains("UNIQUE (", StringComparison.Ordinal))
+            .ToList();
+
+    /// <summary>名前付き単一列の一意制約が CREATE TABLE へインライン出力されることを検証する</summary>
+    [Fact(DisplayName = "AddTable は名前付き単一列 UNIQUE を CREATE TABLE に含む")]
+    public void AddTable_NamedSingleColumnUnique_EmitsConstraint()
+    {
+        var entity = BuildUniqueEntity();
+        entity.UniqueConstraints.Add(
+            new UniqueConstraint { Name = "UQ_shops_code", ColumnIds = [entity.Columns[1].Id] }
+        );
+
+        var sql = BuildAddTable(entity);
+
+        // PK 行には後続の UNIQUE 行が続くため区切りカンマが付く
+        sql.Should().Contain("CONSTRAINT `PK_shops` PRIMARY KEY (`id`),");
+        sql.Should().Contain("CONSTRAINT `UQ_shops_code` UNIQUE (`code`)");
+        // 最後の制約行に余分なカンマは付かない
+        sql.Should().NotContain("UNIQUE (`code`),");
+    }
+
+    /// <summary>制約名なしの複合一意制約が合成名・宣言順で出力されることを検証する</summary>
+    [Fact(DisplayName = "AddTable は名前なし複合 UNIQUE を合成名で出力する")]
+    public void AddTable_UnnamedCompositeUnique_SynthesizesName()
+    {
+        var entity = BuildUniqueEntity();
+        // 宣言順は region → code（列定義順とは逆）
+        entity.UniqueConstraints.Add(
+            new UniqueConstraint { ColumnIds = [entity.Columns[2].Id, entity.Columns[1].Id] }
+        );
+
+        BuildAddTable(entity)
+            .Should()
+            .Contain("CONSTRAINT `UQ_shops_region_code` UNIQUE (`region`, `code`)");
+    }
+
+    /// <summary>同期の CREATE TABLE と DDL 生成の UNIQUE 句が同形（名前・列並び・位置）であることを検証する</summary>
+    [Fact(DisplayName = "AddTable の UNIQUE 句は DDL 生成と同形")]
+    public void AddTable_UniqueConstraints_MatchDdlGenerator()
+    {
+        var entity = BuildUniqueEntity();
+        entity.UniqueConstraints.Add(
+            new UniqueConstraint { Name = "UQ_shops_code", ColumnIds = [entity.Columns[1].Id] }
+        );
+        entity.UniqueConstraints.Add(
+            new UniqueConstraint { ColumnIds = [entity.Columns[2].Id, entity.Columns[1].Id] }
+        );
+
+        var ddl = new MySqlDdlGenerator().Build(new ErDiagram { Entities = { entity } });
+        var sync = BuildAddTable(entity);
+
+        UniqueConstraintLines(sync).Should().HaveCount(2);
+        UniqueConstraintLines(sync).Should().Equal(UniqueConstraintLines(ddl));
+
+        // 位置も同形＝PK 制約行より後、CREATE TABLE の閉じ括弧より前
+        var pk = sync.IndexOf("PRIMARY KEY (", StringComparison.Ordinal);
+        var unique = sync.IndexOf("UNIQUE (", StringComparison.Ordinal);
+        var close = sync.IndexOf(");", StringComparison.Ordinal);
+        pk.Should().BeLessThan(unique);
+        unique.Should().BeLessThan(close);
+    }
+
+    /// <summary>一意制約を持たないテーブルでは UNIQUE 行を 1 行も出力しないことを検証する</summary>
+    [Fact(DisplayName = "AddTable は一意制約が無ければ UNIQUE を出力しない")]
+    public void AddTable_WithoutUniqueConstraints_EmitsNoUnique()
+    {
+        BuildAddTable(BuildUniqueEntity()).Should().NotContain("UNIQUE");
+    }
+
+    // ---------------- カタログ検索のスキーマスコープ ----------------
+
+    /// <summary>
+    /// スキーマ修飾名を操作する文が、カタログ検索も同じスキーマへ絞ることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// <c>DATABASE()</c> 固定だと、<c>other.t</c> を操作する文がカレント DB の同名テーブルの
+    /// 定義を引き当て、それを <c>other.t</c> へ焼き付ける（同名が無ければ引き当て失敗＝黙って成功報告）。
+    /// </remarks>
+    [Fact(DisplayName = "修飾名のライブ再構成はカタログ検索もそのスキーマへ絞る")]
+    public void LiveRebuild_QualifiedTable_ScopesCatalogLookupToThatSchema()
+    {
+        var sql = Build(ColumnDesc("other.t", "memo", "説明"));
+
+        sql.Should()
+            .Contain(
+                "WHERE c.TABLE_SCHEMA = 'other' AND c.TABLE_NAME = 't' "
+                    + "AND c.COLUMN_NAME = 'memo' LIMIT 1;"
+            );
+        sql.Should().NotContain("c.TABLE_SCHEMA = DATABASE()");
+        // 操作対象は従来どおり分割クォートした修飾名
+        sql.Should().Contain("CONCAT('ALTER TABLE `other`.`t` MODIFY COLUMN `memo` ', @def, ");
+    }
+
+    /// <summary>無修飾名のカタログ検索は従来どおりカレント DB を指すことを検証する</summary>
+    [Fact(DisplayName = "無修飾名のライブ再構成は DATABASE() を指す")]
+    public void LiveRebuild_UnqualifiedTable_ScopesCatalogLookupToCurrentDatabase()
+    {
+        Build(ColumnDesc("t", "memo", "説明"))
+            .Should()
+            .Contain("WHERE c.TABLE_SCHEMA = DATABASE() AND c.TABLE_NAME = 't' ");
+    }
+
+    /// <summary>スキーマ名の <c>'</c> がリテラルとしてエスケープされることを検証する</summary>
+    [Fact(DisplayName = "スキーマ名の ' はカタログ検索のリテラルとして二重化される")]
+    public void LiveRebuild_SchemaNameWithQuote_IsEscaped()
+    {
+        Build(ColumnDesc("o'ther.t", "memo", "説明"))
+            .Should()
+            .Contain("WHERE c.TABLE_SCHEMA = 'o''ther' AND c.TABLE_NAME = 't' ");
+    }
+
+    /// <summary>主キー逆引きも修飾名のスキーマへ絞ることを検証する</summary>
+    [Fact(DisplayName = "修飾名の主キー逆引きはそのスキーマへ絞る")]
+    public void DropPrimaryKey_QualifiedTable_ScopesLookupToThatSchema()
+    {
+        var sql = Build(AlterPk("other.orders", PkTarget("other.orders", "id")));
+
+        sql.Should()
+            .Contain(
+                "WHERE tc.CONSTRAINT_SCHEMA = 'other' AND tc.TABLE_NAME = 'orders' "
+                    + "AND tc.CONSTRAINT_TYPE = 'PRIMARY KEY' LIMIT 1;"
+            );
+        sql.Should().NotContain("tc.CONSTRAINT_SCHEMA = DATABASE()");
+    }
+
+    /// <summary>外部キー逆引きが子・親それぞれのスキーマへ絞ることを検証する</summary>
+    [Fact(DisplayName = "修飾名の外部キー逆引きは子・親のスキーマへ絞る")]
+    public void DropForeignKey_QualifiedTables_ScopeLookupToTheirSchemas()
+    {
+        var parent = new Entity { TableName = "sales.customer" };
+        var child = new Entity { TableName = "other.order" };
+
+        var sql = Build(
+            new SchemaDiffItem
+            {
+                Kind = SchemaDiffKind.DropForeignKey,
+                TableName = "other.order",
+                ParentEntity = parent,
+                ChildEntity = child,
+                IsSelected = true,
+            }
+        );
+
+        sql.Should()
+            .Contain(
+                "WHERE rc.CONSTRAINT_SCHEMA = 'other' AND rc.TABLE_NAME = 'order' "
+                    + "AND rc.REFERENCED_TABLE_NAME = 'customer' "
+                    + "AND rc.UNIQUE_CONSTRAINT_SCHEMA = 'sales' "
+                    + "ORDER BY rc.CONSTRAINT_NAME LIMIT 1;"
+            );
+    }
+
+    /// <summary>親が無修飾なら参照先スキーマの絞り込みを足さない（従来出力のまま）ことを検証する</summary>
+    [Fact(DisplayName = "親が無修飾なら外部キー逆引きに参照先スキーマ条件を足さない")]
+    public void DropForeignKey_UnqualifiedParent_OmitsReferencedSchemaPredicate()
+    {
+        var parent = new Entity { TableName = "customer" };
+        var child = new Entity { TableName = "order" };
+
+        var sql = Build(
+            new SchemaDiffItem
+            {
+                Kind = SchemaDiffKind.DropForeignKey,
+                TableName = "order",
+                ParentEntity = parent,
+                ChildEntity = child,
+                IsSelected = true,
+            }
+        );
+
+        sql.Should().NotContain("rc.UNIQUE_CONSTRAINT_SCHEMA");
     }
 }

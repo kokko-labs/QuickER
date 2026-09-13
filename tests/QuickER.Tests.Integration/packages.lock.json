@@ -592,6 +592,7 @@
           "QuickER.Oracle": "[0.1.0, )",
           "QuickER.PostgreSql": "[0.1.0, )",
           "QuickER.Provider": "[0.1.0, )",
+          "QuickER.Settings": "[0.1.0, )",
           "QuickER.SqlServer": "[0.1.0, )",
           "QuickER.Sqlite": "[0.1.0, )",
           "System.CommandLine": "[2.0.12, )"

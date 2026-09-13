@@ -73,7 +73,17 @@ internal sealed partial class CSharpGenerationModelBuilder
     /// 参照型か（＝リクエストボディが省略したときに null のまま奥へ渡る型か）。サーバー側ハンドラが
     /// <c>RemoteServerEngine.Required</c> で包むかどうかの判定に使う（値型は省略形を持たないため素通し）。
     /// </param>
-    private sealed record QueryPayloadParameter(string TypeName, string Name, bool IsReferenceType);
+    /// <param name="IsPaging">
+    /// ページング引数（<c>take</c> / <c>skip</c>）か。サーバー側ハンドラはこの 2 つを
+    /// <c>RemoteServerEngine.ValidatedPaging</c> へ通してからリポジトリへ渡す
+    /// （クエリパイプラインが拒否する値＝クライアント側の不備を 500 でなく 400 として分類するため）。
+    /// </param>
+    private sealed record QueryPayloadParameter(
+        string TypeName,
+        string Name,
+        bool IsReferenceType,
+        bool IsPaging = false
+    );
 
     /// <summary>1 クエリ分のメソッド形状（リモート転送メソッド・サーバーハンドラの生成素材）</summary>
     private sealed record QueryMethodShape(
@@ -583,8 +593,8 @@ internal sealed partial class CSharpGenerationModelBuilder
         {
             parameterDecls.Add("int take");
             parameterDecls.Add("int skip = 0");
-            payloadParameters.Add(new QueryPayloadParameter("int", "take", false));
-            payloadParameters.Add(new QueryPayloadParameter("int", "skip", false));
+            payloadParameters.Add(new QueryPayloadParameter("int", "take", false, IsPaging: true));
+            payloadParameters.Add(new QueryPayloadParameter("int", "skip", false, IsPaging: true));
         }
 
         parameterDecls.Add("CancellationToken cancellationToken = default");

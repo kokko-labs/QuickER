@@ -36,15 +36,7 @@ internal sealed partial class CSharpGenerationModelBuilder
                 ? "null"
                 : $"new {{ {string.Join(", ", shape.PayloadParameters.Select(p => p.Name))} }}";
 
-        var builder = AppendDocSummary(new StringBuilder(), shape.Summary);
-        AppendMethodHeader(
-                builder,
-                "public ",
-                shape.ReturnTypeName,
-                shape.MethodName,
-                shape.ParameterList
-            )
-            .Append(" =>\n        ")
+        var call = new StringBuilder()
             .Append(invokeMethod)
             .Append('<')
             .Append(innerType)
@@ -52,9 +44,69 @@ internal sealed partial class CSharpGenerationModelBuilder
             .Append(operation)
             .Append("\", ")
             .Append(payload)
-            .Append(", cancellationToken);");
+            .Append(", cancellationToken)")
+            .ToString();
+
+        var builder = AppendDocSummary(new StringBuilder(), shape.Summary);
+        AppendMethodHeader(
+            builder,
+            "public ",
+            shape.ReturnTypeName,
+            shape.MethodName,
+            shape.ParameterList
+        );
+
+        // ページング引数を持つクエリは、直結実装と同じ例外で入口から弾く（HTTP を投げない）。
+        // 素通しするとサーバーが 400 を返し、クライアントでは RemoteRepositoryException になる＝
+        // 実装を差し替えると catch の型が変わってしまう（null 引数の ThrowIfNull と同じ規則）
+        if (shape.PayloadParameters.Any(p => p.IsPaging))
+        {
+            builder
+                .Append("\n    {\n")
+                .Append(PagingGuardBlock)
+                .Append("        return ")
+                .Append(call)
+                .Append(";\n    }");
+        }
+        else
+        {
+            builder.Append(" =>\n        ").Append(call).Append(';');
+        }
+
         return builder.ToString();
     }
+
+    /// <summary>
+    /// ページング引数の入口検証ブロック（HTTP クライアント転送メソッドの先頭）。
+    /// </summary>
+    /// <remarks>
+    /// 検証の順序・例外型・パラメータ名・文言は、直結実装が通る <c>SqlQuery.Skip</c> / <c>Take</c> と完全に一致させる
+    /// （直結は <c>.Skip(skip).Take(take)</c> の順に呼ぶため skip が先。パラメータ名が <c>count</c> なのは
+    /// <c>Skip(int count)</c> / <c>Take(int count)</c> の引数名そのもので、呼び出し側の catch フィルタが
+    /// 実装の差し替えで挙動を変えないための写し）。文言の一致は実 HTTP のパリティテストが固定する。
+    /// </remarks>
+    private const string PagingGuardBlock = """
+                // The paging arguments are rejected here with the exception a direct implementation raises, so that
+                // swapping a direct repository for this client changes nothing a caller catches. Order, parameter name
+                // and wording follow SqlQuery.Skip / Take, which the direct path calls as .Skip(skip).Take(take).
+                if (skip < 0)
+                {
+                    throw new ArgumentOutOfRangeException(
+                        "count",
+                        "The number of rows to skip must not be negative."
+                    );
+                }
+
+                if (take <= 0)
+                {
+                    throw new ArgumentOutOfRangeException(
+                        "count",
+                        "The number of rows to fetch must be greater than zero."
+                    );
+                }
+
+
+        """;
 
     /// <summary>クエリ 1 件分のサーバー側エンドポイントマッピング（Map{Entity}Endpoints 内の MapPost 呼び出し）を構築する</summary>
     /// <remarks>インデントはサーバーテンプレートのメソッド本体（8 スペース起点）に合わせる</remarks>
@@ -86,15 +138,33 @@ internal sealed partial class CSharpGenerationModelBuilder
                 )
                 .Append(RequestRecordName(shape, repositoryName))
                 .Append(">(context).ConfigureAwait(false);\n");
+
+            // ページング引数（take / skip）は ValidatedPaging を通してから渡す: クエリパイプラインが拒否する値
+            // （take <= 0 / skip < 0）を素通しすると、クライアントが送った値の不備がサーバー側の未処理例外＝
+            // 500（ログ＋OnServerError フック）に化ける。2 つは常に対で出るためまとめて 1 回検証する
+            if (shape.PayloadParameters.Any(p => p.IsPaging))
+            {
+                builder.Append(
+                    "                        var paging = RemoteServerEngine.ValidatedPaging(request.Take, request.Skip);\n"
+                );
+            }
+
             // 参照型のフィールドは Required で包む: エンベロープは positional record なので "{}" のような
             // 欠落ボディが既定の null のまま通り、リポジトリ奥の null 引数例外＝500 に化ける（クライアント起因の
             // 誤りは 400 が正）。値型は省略形を持たないためそのまま渡す（CRUD 側のエンベロープと同じ規則）
             arguments.AddRange(
                 shape.PayloadParameters.Select(p =>
                 {
-                    var member = $"request.{ToPascalCase(p.Name)}";
+                    var name = ToPascalCase(p.Name);
+
+                    if (p.IsPaging)
+                    {
+                        return $"paging.{name}";
+                    }
+
+                    var member = $"request.{name}";
                     return p.IsReferenceType
-                        ? $"RemoteServerEngine.Required({member}, \"{ToPascalCase(p.Name)}\")"
+                        ? $"RemoteServerEngine.Required({member}, \"{name}\")"
                         : member;
                 })
             );

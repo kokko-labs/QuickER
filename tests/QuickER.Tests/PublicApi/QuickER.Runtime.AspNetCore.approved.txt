@@ -47,6 +47,7 @@ public static class QuickER.Runtime.AspNetCore.RemoteServerEngine
     public static System.Threading.Tasks.Task WriteErrorAsync(Microsoft.AspNetCore.Http.HttpContext context, int statusCode, string type, string message, QuickER.Runtime.SaveConflictException conflict = null, string correlationId = null)
     public static System.Threading.Tasks.Task WriteServerErrorAsync(Microsoft.AspNetCore.Http.HttpContext context, System.Exception ex)
     public static System.Threading.Tasks.Task<TRequest> ReadRequestAsync<TRequest>(Microsoft.AspNetCore.Http.HttpContext context)
+    public static System.ValueTuple<int, int> ValidatedPaging(int take, int skip)
     public static T Required<T>(T value, string name)
     public static TKey ParseKeyFromQuery<TKey>(Microsoft.AspNetCore.Http.HttpContext context)
     public static TRepository Repository<TRepository>(Microsoft.AspNetCore.Http.HttpContext context)

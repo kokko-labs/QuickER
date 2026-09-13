@@ -84,7 +84,7 @@ Validation is strict about anything that would fail at runtime and lenient about
 | `generate_ddl` | `out_file` ✅, `provider` | Generate a DDL (CREATE TABLE / foreign key) SQL script and write it to a `.sql` file |
 | `get_generation_config_schema` | *(none)* | Return a machine-readable JSON catalog of every key valid in the settings JSON (`quicker.json`) that `generate_csharp`'s `config` accepts: each key's name, type, default, category, allowed values, and description, plus cross-key rules and an example. Lets an agent write a config without external docs. This is the only tool that takes no `file` argument |
 
-For the two file-based generation tools (`generate_csharp` / `generate_ddl`), `provider` is optional: when omitted it defaults to the diagram's target DBMS (or `sqlserver` if the diagram has none). Its accepted values are the same five dialects as `create_diagram`'s `target_dbms`.
+For the two file-based generation tools (`generate_csharp` / `generate_ddl`), `provider` is optional: when omitted it defaults to the diagram's target DBMS (or `sqlserver` if the diagram has none). Its accepted values are the same five dialects as `create_diagram`'s `target_dbms`. `generate_ddl` enforces its destination: `out_file` must end in `.sql` and its parent directory must already exist (the tool does not create directories), and the script is written atomically. `generate_csharp` is deliberately not symmetric here: its `out_dir` is still created if it does not exist, and its files are not written atomically.
 
 ## Typical flow
 

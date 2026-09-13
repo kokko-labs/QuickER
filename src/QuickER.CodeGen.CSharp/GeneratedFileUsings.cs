@@ -505,12 +505,14 @@ internal static class GeneratedFileUsings
 
                 // 無制限バイナリ列のバイナリエンドポイント: 応答遅延ストリーム（Stream＝System.IO）・
                 // キー復元（JsonSerializer＝System.Text.Json）・CancellationToken（System.Threading）・
-                // サイズ制限解除メタデータ（IRequestSizeLimitMetadata＝Microsoft.AspNetCore.Http.Metadata）を使う
+                // サイズ制限解除メタデータ（IRequestSizeLimitMetadata＝Microsoft.AspNetCore.Http.Metadata）・
+                // 宣言長の上限照合（IHttpMaxRequestBodySizeFeature＝Microsoft.AspNetCore.Http.Features）を使う
                 if (options.ExcludeUnboundedBinaryColumns)
                 {
                     yield return "System.IO";
                     yield return "System.Text.Json";
                     yield return "System.Threading";
+                    yield return "Microsoft.AspNetCore.Http.Features";
                     yield return "Microsoft.AspNetCore.Http.Metadata";
                 }
                 break;

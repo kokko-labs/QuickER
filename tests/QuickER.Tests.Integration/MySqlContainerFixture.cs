@@ -36,6 +36,21 @@ public sealed class MySqlContainerFixture : IAsyncLifetime
     /// <summary>コンテナへの ADO.NET 接続文字列（<see cref="IsAvailable"/> が <c>true</c> のときのみ有効）</summary>
     public string ConnectionString { get; private set; } = string.Empty;
 
+    /// <summary>root で接続する接続文字列（データベース作成・グローバル変数の変更が要るテスト用）</summary>
+    /// <remarks>
+    /// <para>
+    /// Testcontainers が作る通常ユーザーは対象データベースにしか権限が無く
+    /// （<c>GRANT ALL ON `test`.*</c> のみ）、<c>CREATE DATABASE</c> も <c>SET GLOBAL</c> も実行できない。
+    /// スキーマ修飾名の検証（別データベースを作る）と <c>sql_mode</c> の検証（新しいセッションの既定を
+    /// 変える）は root を要する。
+    /// </para>
+    /// <para>
+    /// Testcontainers の MySQL モジュールは <c>MYSQL_ROOT_PASSWORD</c> に通常ユーザーと同じパスワードを
+    /// 設定するため、ユーザー名だけを <c>root</c> へ差し替えれば root 接続になる。
+    /// </para>
+    /// </remarks>
+    public string RootConnectionString { get; private set; } = string.Empty;
+
     /// <summary>コンテナを起動する。Docker 不在・起動失敗は握りつぶし <see cref="IsAvailable"/> を <c>false</c> にする</summary>
     public async ValueTask InitializeAsync()
     {
@@ -47,6 +62,10 @@ public sealed class MySqlContainerFixture : IAsyncLifetime
             var baseCs = _container.GetConnectionString();
             var b = new MySqlConnectionStringBuilder(baseCs) { AllowUserVariables = true };
             ConnectionString = b.ConnectionString;
+            RootConnectionString = new MySqlConnectionStringBuilder(ConnectionString)
+            {
+                UserID = "root",
+            }.ConnectionString;
             IsAvailable = true;
         }
         catch (Exception ex) when (!DockerRequirement.IsStrict)
@@ -119,6 +138,19 @@ public sealed class MySqlContainerFixture : IAsyncLifetime
     public async Task ExecuteAsync(string sql, CancellationToken ct = default)
     {
         await using var conn = new MySqlConnection(ConnectionString);
+        await conn.OpenAsync(ct).ConfigureAwait(false);
+        await using var cmd = new MySqlCommand(sql, conn);
+        await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <summary>root 権限で任意の SQL を実行するヘルパー</summary>
+    /// <remarks>
+    /// <see cref="RootConnectionString"/> を参照。<c>CREATE DATABASE</c> / <c>SET GLOBAL</c> など、
+    /// 通常ユーザーの権限では実行できないセットアップにだけ使う。
+    /// </remarks>
+    public async Task ExecuteAsRootAsync(string sql, CancellationToken ct = default)
+    {
+        await using var conn = new MySqlConnection(RootConnectionString);
         await conn.OpenAsync(ct).ConfigureAwait(false);
         await using var cmd = new MySqlCommand(sql, conn);
         await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);

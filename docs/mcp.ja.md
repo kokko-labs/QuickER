@@ -84,7 +84,7 @@ stdio トランスポートに対応した MCP クライアントであれば利
 | `generate_ddl` | `out_file` ✅, `provider` | DDL（CREATE TABLE / 外部キー）の SQL スクリプトを生成し、`.sql` ファイルへ書き出す |
 | `get_generation_config_schema` | *(なし)* | 設定 JSON（`quicker.json`。`generate_csharp` の `config` はこのファイルへのパスを渡す）で有効な全キーを機械可読 JSON で返す。各キーの名前・型・既定値・分類・取り得る値・説明に加え、キー間のルールと例を含む。docs を参照せずに config を書けるようにするためのツール。`file` 引数を取らない唯一のツール |
 
-ファイルを対象にする 2 つの生成ツール（`generate_csharp` / `generate_ddl`）では `provider` は省略可能です。省略時は図の対象 DBMS（図に無ければ `sqlserver`）を使用します。指定できる値は `create_diagram` の `target_dbms` と同じ 5 方言です。
+ファイルを対象にする 2 つの生成ツール（`generate_csharp` / `generate_ddl`）では `provider` は省略可能です。省略時は図の対象 DBMS（図に無ければ `sqlserver`）を使用します。指定できる値は `create_diagram` の `target_dbms` と同じ 5 方言です。`generate_ddl` は出力先を検証します。`out_file` は拡張子 `.sql` が必須で、親ディレクトリは実在している必要があり（ツールはディレクトリを作りません）、スクリプトは原子的に書き出されます。`generate_csharp` は意図的に非対称で、`out_dir` は従来どおり存在しなければ作成し、書き込みも原子的ではありません。
 
 ## 典型フロー
 

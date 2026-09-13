@@ -843,6 +843,81 @@ public sealed class EditModelLifecycleTests
         col.Should().ContainSingle().Which.Should().BeSameAs(order);
     }
 
+    // ===== EditModelCollection: Clear と削除追跡 =====
+
+    [Fact(
+        DisplayName = "Remove→Clear→Add: Clear は退避中の削除対象を削除前の状態へ戻してから追跡を捨てる"
+    )]
+    public void ClearはRemove退避中の要素を復元する()
+    {
+        var unchanged = LoadedOrder(1);
+        var updated = LoadedOrder(2);
+        updated.BindingMemo = "edited"; // Unchanged → Updated（削除前の状態）
+        var col = new EditModelCollection<OrderEditModel> { unchanged, updated };
+
+        col.Remove(unchanged);
+        col.Remove(updated);
+        unchanged.RowState.Should().Be(RowState.Removed);
+        updated.RowState.Should().Be(RowState.Removed);
+
+        col.Clear();
+
+        // Clear は追跡を捨てる＝以後 UntrackRemoval が引き当てられないため、捨てる前に状態を戻す
+        unchanged.RowState.Should().Be(RowState.Unchanged);
+        updated.RowState.Should().Be(RowState.Updated);
+        col.RemovedItems.Should().BeEmpty();
+
+        // 復元済みなので、同じインスタンスを戻しても Removed のまま居座らない（＝保存で消えない）
+        col.Add(unchanged);
+        col.Add(updated);
+        col.Should().HaveCount(2);
+        unchanged.RowState.Should().Be(RowState.Unchanged);
+        updated.RowState.Should().Be(RowState.Updated);
+    }
+
+    [Fact(
+        DisplayName = "Remove→Clear→Add: 戻した要素は保存対象（includeRemoved）の削除分に現れない"
+    )]
+    public void ClearをはさんだRemove後のAddは削除分に出ない()
+    {
+        var customer = LoadedCustomer(orderCount: 2);
+        var order = customer.Orders[0];
+
+        customer.Orders.Remove(order);
+        customer.Orders.Clear();
+        customer.Orders.Add(order);
+
+        var entity = new CustomerMapper().CreateEntity(customer, includeRemoved: true);
+
+        entity.Orders.Should().ContainSingle();
+        entity.Orders.Should().NotContain(o => o.RowState == RowState.Removed);
+    }
+
+    [Fact(DisplayName = "Clear: 追跡リセット・所有解除・位置通知は従来どおり")]
+    public void Clearの既存挙動()
+    {
+        var customer = LoadedCustomer(orderCount: 2);
+        var col = customer.Orders;
+        var a = col[0];
+        var b = col[1];
+        var positionNotified = new List<string?>();
+
+        col.Remove(a); // 退避中の要素も Clear で追跡ごと捨てられる
+        col.RemovedItems.Should().ContainSingle();
+        b.PropertyChanged += (_, e) => positionNotified.Add(e.PropertyName);
+
+        col.Clear();
+
+        col.Should().BeEmpty();
+        col.RemovedItems.Should().BeEmpty();
+        col.HasChanges.Should().BeFalse();
+        // Clear された要素は所有・親参照とも解除される（退避中に外れた a は Remove 時点で解除済み）
+        b.Owner.Should().BeNull();
+        b.ParentModel.Should().BeNull();
+        // 外された要素自身への位置通知は維持される
+        positionNotified.Should().Contain(nameof(OrderEditModel.IndexInParent));
+    }
+
     [Fact(DisplayName = "Remove→Add: 戻した要素は保存対象（includeRemoved）の削除分に現れない")]
     public void 削除の取り消し後は削除分に出ない()
     {

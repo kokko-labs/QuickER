@@ -1319,6 +1319,168 @@ public abstract class SyncRuntimeTestsBase : IAsyncLifetime
         (await Journal.CountPendingAsync(Ct)).Should().Be(0);
     }
 
+    /// <summary>ServerWins はサーバーが変えていない行でも、ローカル編集をサーバー内容へ戻す</summary>
+    /// <remarks>
+    /// ダウンロードが降ろすのは「前回ミラーしてから版が進んだ行」だけなので、サーバー側が未変更の行は
+    /// ジャーナルを捨てるだけでは<b>ローカル編集が残ったまま</b>になる（エントリも消えているので以後どの
+    /// ランも直さない）。ServerWins が字義どおりであることを固定する。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Sync] ServerWins はサーバー未変更の行でもローカル編集をサーバー内容へ戻す"
+    )]
+    public async Task ServerWins_RestoresRowTheServerHasNotChanged()
+    {
+        await SeedServerAsync(1, "alice", 11, "widget");
+        await Engine.SyncAsync(cancellationToken: Ct);
+
+        var local = await LocalOrders.GetByIdAsync(1, Ct);
+        local!.CustomerName = "local-edit";
+        await LocalOrders.UpdateAsync(local, cancellationToken: Ct);
+
+        var result = await Engine.SyncAsync(
+            new SyncOptions { ConflictPolicy = SyncConflictPolicy.ServerWins },
+            Ct
+        );
+
+        result.Conflicts.Should().BeEmpty();
+        result.Discarded.Should().Be(1);
+        (await LocalOrdersRaw.GetByIdAsync(1, Ct))!
+            .CustomerName.Should()
+            .Be("alice", "サーバーが変えていない行はダウンロードが降ろさない＝読み直して適用する");
+        (await ServerOrders.GetByIdAsync(1, Ct))!
+            .CustomerName.Should()
+            .Be("alice", "ServerWins は何も送らない");
+        (await Journal.CountPendingAsync(Ct)).Should().Be(0);
+    }
+
+    /// <summary>ServerWins はローカルで削除した行をサーバーから読み直して復活させる</summary>
+    /// <remarks>
+    /// 削除した行の版がアンカーの下に潜る形（2 本目の明細が後から入って版を進めている）を作る。こうしないと
+    /// 消えた行の分だけアンカーが下がってダウンロードが勝手に取り戻してしまい、読み直し適用を見たことに
+    /// ならない。
+    /// </remarks>
+    [Fact(DisplayName = "[Sync] ServerWins はローカルで削除した行をサーバーから復活させる")]
+    public async Task ServerWins_RestoresRowDeletedLocally()
+    {
+        await SeedServerAsync(1, "alice", 11, "widget");
+        await ServerLines.InsertAsync(
+            new SyncOrderLineEntity
+            {
+                LineId = 12,
+                OrderId = 1,
+                Product = "gadget",
+            },
+            Ct
+        );
+        await Engine.SyncAsync(cancellationToken: Ct);
+
+        (await LocalLines.DeleteAsync(11, Ct)).Should().BeTrue();
+
+        var result = await Engine.SyncAsync(
+            new SyncOptions { ConflictPolicy = SyncConflictPolicy.ServerWins },
+            Ct
+        );
+
+        result.Conflicts.Should().BeEmpty();
+        var restored = await LocalLinesRaw.GetByIdAsync(11, Ct);
+        restored.Should().NotBeNull("サーバーがまだ持っている行は戻る＝削除もサーバーが勝つ");
+        restored!.Product.Should().Be("widget");
+        (await ServerLines.GetByIdAsync(11, Ct)).Should().NotBeNull("削除は送られない");
+        (await Journal.CountPendingAsync(Ct)).Should().Be(0);
+    }
+
+    /// <summary>ServerWins でサーバーが消していた行は、読み直せないので削除伝搬が決着させる</summary>
+    [Fact(DisplayName = "[Sync] ServerWins でサーバーが消した行はローカルからも消える")]
+    public async Task ServerWins_RemovesRowDeletedOnServer()
+    {
+        await SeedServerAsync(1, "alice", 11, "widget");
+        await Engine.SyncAsync(cancellationToken: Ct);
+
+        var local = await LocalLines.GetByIdAsync(11, Ct);
+        local!.Product = "local-edit";
+        await LocalLines.UpdateAsync(local, cancellationToken: Ct);
+
+        (await ServerLines.DeleteAsync(11, Ct)).Should().BeTrue();
+
+        var result = await Engine.SyncAsync(
+            new SyncOptions { ConflictPolicy = SyncConflictPolicy.ServerWins },
+            Ct
+        );
+
+        result.Conflicts.Should().BeEmpty();
+        (await LocalLinesRaw.GetByIdAsync(11, Ct))
+            .Should()
+            .BeNull("読み直せる行が無い＝削除伝搬が決着させる");
+        (await Journal.CountPendingAsync(Ct)).Should().Be(0);
+    }
+
+    /// <summary>ServerWins の読み直し適用はミラー版を進めない＝未取得の他者更新を追い越さない</summary>
+    /// <remarks>
+    /// サーバーから読んだ行はサーバーの版を連れてくる。それをそのままミラーへ書くと導出アンカーがそこまで
+    /// 跳び、あいだの版を持つ<b>未取得の行が恒久的に読み飛ばされる</b>（Phase 1 で潰した B1 と同型）。
+    /// アップロードとダウンロードを別々に呼び、適用直後のミラー版と、その後のダウンロードが取りこぼさない
+    /// ことの両方を見る。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Sync] ServerWins の読み直し適用はアンカーを進めず他者更新を取りこぼさない"
+    )]
+    public async Task ServerWins_RestoreDoesNotAdvanceAnchor()
+    {
+        await SeedServerAsync(1, "alice", 11, "widget");
+        await SeedServerAsync(2, "bob", 12, "gadget");
+        await Engine.SyncAsync(cancellationToken: Ct);
+
+        // 他者がサーバーの 2 行を更新する（版は P → X の順に進む）
+        var serverP = await ServerOrders.GetByIdAsync(1, Ct);
+        serverP!.CustomerName = "server-p";
+        await ServerOrders.UpdateAsync(serverP, cancellationToken: Ct);
+
+        var serverX = await ServerOrders.GetByIdAsync(2, Ct);
+        serverX!.CustomerName = "server-x";
+        await ServerOrders.UpdateAsync(serverX, cancellationToken: Ct);
+
+        // ローカルは X だけを編集する（P には触らない＝降りてくるのを待っている行）
+        var local = await LocalOrders.GetByIdAsync(2, Ct);
+        local!.CustomerName = "local-x";
+        await LocalOrders.UpdateAsync(local, cancellationToken: Ct);
+
+        var mirrorBefore = (await LocalOrdersRaw.GetByIdAsync(2, Ct))!.RowVer;
+
+        var options = new SyncOptions { ConflictPolicy = SyncConflictPolicy.ServerWins };
+        var conflicts = new List<SyncConflict>();
+        var (uploaded, discarded) = await Engine.UploadAsync(options, conflicts, Ct);
+
+        uploaded.Should().Be(0);
+        discarded.Should().Be(1);
+        conflicts.Should().BeEmpty();
+
+        var restored = await LocalOrdersRaw.GetByIdAsync(2, Ct);
+        restored!.CustomerName.Should().Be("server-x", "サーバー内容が適用される");
+        restored
+            .RowVer.Should()
+            .Equal(mirrorBefore, "ミラー版は据え置き＝アンカーが未取得の行を追い越さない");
+
+        // 追い越していなければ、P も X も正規の経路（版昇順のダウンロード）で降りてくる
+        var (downloaded, _) = await Engine.DownloadAsync(options, Ct);
+
+        downloaded
+            .Should()
+            .Be(
+                1,
+                "P（中間の版）を取りこぼさない。X は適用時の受理記録と版が一致する＝内容は既にサーバーのもの"
+                    + "なので、エコーとして版だけ書かれる（アンカーを進めていれば P ごと 0 件になる）"
+            );
+        (await LocalOrdersRaw.GetByIdAsync(1, Ct))!.CustomerName.Should().Be("server-p");
+        var localX = await LocalOrdersRaw.GetByIdAsync(2, Ct);
+        localX!.CustomerName.Should().Be("server-x");
+        localX
+            .RowVer.Should()
+            .Equal(
+                (await ServerOrders.GetByIdAsync(2, Ct))!.RowVer,
+                "ダウンロードが X まで届いてミラー版を追いつかせる"
+            );
+    }
+
     /// <summary>LocalWins は版比較を免除して再送し、サーバー行を上書きする</summary>
     [Fact(DisplayName = "[Sync] LocalWins は版比較を免除してサーバー行を上書きする")]
     public async Task LocalWins_OverwritesServerRow()
@@ -2071,6 +2233,101 @@ public abstract class SyncRuntimeTestsBase : IAsyncLifetime
         result.Uploaded.Should().Be(1);
         result.Conflicts.Should().BeEmpty("死んだ受理記録が残っていなければ普通の INSERT になる");
         (await ServerOrders.GetByIdAsync(2, Ct))!.CustomerName.Should().Be("bob-again");
+    }
+
+    /// <summary>
+    /// ServerWins が復活させた行を再編集しても、偽の重複競合にならない。
+    /// </summary>
+    /// <remarks>
+    /// 読み直し適用はミラー版を据え置く（＝接頭辞不変条件）。復活した行にはミラー版が無く、その行のサーバー版が
+    /// すでにアンカーの下にあれば<b>ダウンロードは二度とその行へ届かない</b>＝ミラーは空のまま残る。受理記録が
+    /// 無いと、次の編集の再生が「サーバーに出たことがない行」と読んでオフライン挿入へ倒れ、サーバーに同じキーが
+    /// ある＝ DuplicateOnServer を報告する（既定の Collect ではサーバーがその行を変えるまで毎ラン続く）。
+    /// 適用した行の受理記録がこの穴を塞ぐ。
+    /// </remarks>
+    [Fact(DisplayName = "[Sync/ack] ServerWins が復活させた行の再編集は偽の重複競合にならない")]
+    public async Task ServerWinsRestoredRow_ThenLocalEdit_DoesNotReportFalseDuplicate()
+    {
+        // 削除する行（11）の版がアンカーの下に潜る形を作る（12 が後から入って版を進める）＝
+        // こうしないとダウンロードが勝手に取り戻してミラー版が入り、穴が塞がって見えてしまう
+        await SeedServerAsync(1, "alice", 11, "widget");
+        await ServerLines.InsertAsync(
+            new SyncOrderLineEntity
+            {
+                LineId = 12,
+                OrderId = 1,
+                Product = "gadget",
+            },
+            Ct
+        );
+        await Engine.SyncAsync(cancellationToken: Ct);
+
+        (await LocalLines.DeleteAsync(11, Ct)).Should().BeTrue();
+        await Engine.SyncAsync(
+            new SyncOptions { ConflictPolicy = SyncConflictPolicy.ServerWins },
+            Ct
+        );
+
+        var restored = await LocalLinesRaw.GetByIdAsync(11, Ct);
+        restored.Should().NotBeNull("ServerWins は削除した行をサーバーから読み直して戻す");
+        restored!.RowVer.Should().BeNull("復活行にミラー版は入らない＝据え置きの帰結");
+
+        // 復活した行を編集する（ミラー版なし＝ここが偽の重複競合の入口）
+        var edited = await LocalLines.GetByIdAsync(11, Ct);
+        edited!.Product = "widget-2";
+        await LocalLines.UpdateAsync(edited, cancellationToken: Ct);
+
+        var result = await Engine.SyncAsync(cancellationToken: Ct);
+
+        result
+            .Conflicts.Should()
+            .BeEmpty("適用時のサーバー版が受理記録に残っている＝普通の更新として送られる");
+        result.Uploaded.Should().Be(1);
+        (await ServerLines.GetByIdAsync(11, Ct))!.Product.Should().Be("widget-2");
+    }
+
+    /// <summary>
+    /// ServerWins の適用後にダウンロードが落ちたランの続きでも、再編集が偽の更新競合にならない。
+    /// </summary>
+    /// <remarks>
+    /// 適用はサーバーの内容だけを書いてミラー版を据え置くため、ダウンロードがその行へ届く前に落ちると
+    /// ミラーは旧版のまま残る。受理記録が無ければ次の再生は旧版を original に採り、誰とも競合していないのに
+    /// ModifiedOnServer になる（打ち切り経路と同型の穴が ServerWins 側にも開く）。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Sync/ack] ServerWins の適用後にダウンロードが落ちても再編集は偽競合にならない"
+    )]
+    public async Task ServerWinsApplied_ThenFailedDownload_ThenLocalEdit_DoesNotReportFalseModifiedConflict()
+    {
+        await SeedServerAsync(1, "alice", 11, "widget");
+        await Engine.SyncAsync(cancellationToken: Ct);
+
+        // ローカルの編集と、他者によるサーバー側の更新（＝サーバー版がミラーより進む）
+        await EditLocalOrderAsync(1, "alice-local");
+        var server = await ServerOrders.GetByIdAsync(1, Ct);
+        server!.CustomerName = "alice-server";
+        await ServerOrders.UpdateAsync(server, cancellationToken: Ct);
+
+        // ServerWins の適用は通し、そのあとのダウンロードだけを 1 回落とす
+        var failing = new FailOnFirstFetchOrderSource(_sources.Orders);
+        var act = async () =>
+            await CreateEngineWithOrderSource(failing)
+                .SyncAsync(new SyncOptions { ConflictPolicy = SyncConflictPolicy.ServerWins }, Ct);
+        await act.Should().ThrowAsync<InvalidOperationException>();
+        (await LocalOrdersRaw.GetByIdAsync(1, Ct))!
+            .CustomerName.Should()
+            .Be("alice-server", "落ちたのはダウンロード側＝適用は済んでいる");
+
+        // 適用された行を編集する（ミラーは旧版のまま＝ここが偽の更新競合の入口）
+        await EditLocalOrderAsync(1, "alice-2");
+
+        var result = await Engine.SyncAsync(cancellationToken: Ct);
+
+        result
+            .Conflicts.Should()
+            .BeEmpty("受理記録が適用時のサーバー版を覚えている＝誰とも競合していない");
+        result.Uploaded.Should().Be(1);
+        (await ServerOrders.GetByIdAsync(1, Ct))!.CustomerName.Should().Be("alice-2");
     }
 
     /// <summary>行 1 に未解決の更新競合を作る（以降のランはこの行でダウンロードを打ち切る）</summary>

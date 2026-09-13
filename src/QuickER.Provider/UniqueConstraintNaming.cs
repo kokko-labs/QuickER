@@ -50,6 +50,22 @@ public static class UniqueConstraintNaming
     public static List<ResolvedUniqueConstraint> ResolveAll(
         Entity entity,
         Func<string, string> safeName
+    ) => ResolveAll(entity, entity.TableName, safeName);
+
+    /// <summary>エンティティの一意制約を、指定したテーブル名を合成名の基として展開する</summary>
+    /// <param name="entity">対象エンティティ</param>
+    /// <param name="tableName">合成名 <c>UQ_{テーブル}_{列…}</c> の基にするテーブル名</param>
+    /// <param name="safeName">方言別の識別子安全化関数</param>
+    /// <returns>DDL へ出力可能な一意制約の一覧（モデルの並び順を保つ）</returns>
+    /// <remarks>
+    /// 差分同期はエンティティではなく差分項目の正規化済みテーブル名（<see cref="SchemaDiffService.NormalizeTable"/>）を
+    /// 制約名の基にするため、テーブル名を明示できる形を用意する。除外規則（構成列が空・解決できない制約は
+    /// 黙って除外）は <see cref="ResolveAll(Entity, Func{string, string})"/> と同じ。
+    /// </remarks>
+    public static List<ResolvedUniqueConstraint> ResolveAll(
+        Entity entity,
+        string tableName,
+        Func<string, string> safeName
     )
     {
         var resolved = new List<ResolvedUniqueConstraint>();
@@ -63,7 +79,7 @@ public static class UniqueConstraintNaming
 
             resolved.Add(
                 new ResolvedUniqueConstraint(
-                    Resolve(constraint.Name, entity.TableName, columnNames, safeName),
+                    Resolve(constraint.Name, tableName, columnNames, safeName),
                     columnNames
                 )
             );

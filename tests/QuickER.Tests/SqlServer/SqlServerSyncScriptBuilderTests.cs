@@ -624,4 +624,128 @@ public class SqlServerSyncScriptBuilderTests
         sql.Should().Contain("EXEC('ALTER TABLE [o''rders] DROP CONSTRAINT [' + @fk + ']')");
         sql.Should().NotContain("EXEC('ALTER TABLE [o'rders]");
     }
+
+    // ---------------- AddTable の UNIQUE 制約（DDL 生成との同形性） ----------------
+
+    /// <summary>一意制約の検証用エンティティ（id / code / region の 3 列・id が主キー）を作る</summary>
+    private static Entity BuildUniqueEntity()
+    {
+        var entity = new Entity { TableName = "shops" };
+        entity.Columns.Add(
+            new Column
+            {
+                Name = "id",
+                DataType = "int",
+                IsPrimaryKey = true,
+                IsNullable = false,
+            }
+        );
+        entity.Columns.Add(
+            new Column
+            {
+                Name = "code",
+                DataType = "nvarchar(20)",
+                IsNullable = false,
+            }
+        );
+        entity.Columns.Add(
+            new Column
+            {
+                Name = "region",
+                DataType = "nvarchar(10)",
+                IsNullable = false,
+            }
+        );
+        return entity;
+    }
+
+    /// <summary>エンティティ 1 件の AddTable 差分から同期スクリプトを生成する</summary>
+    private static string BuildAddTable(Entity entity) =>
+        BuildScript(
+            new SqlServerSyncScriptBuilder(),
+            new[]
+            {
+                new SchemaDiffItem
+                {
+                    Kind = SchemaDiffKind.AddTable,
+                    TableName = entity.TableName,
+                    Entity = entity,
+                    IsSelected = true,
+                },
+            }
+        );
+
+    /// <summary>SQL から UNIQUE 制約行（前後空白・末尾の区切りカンマを除く）を抜き出す</summary>
+    private static List<string> UniqueConstraintLines(string sql) =>
+        sql.Replace("\r\n", "\n")
+            .Split('\n')
+            .Select(line => line.Trim().TrimEnd(','))
+            .Where(line => line.Contains("UNIQUE (", StringComparison.Ordinal))
+            .ToList();
+
+    /// <summary>名前付き単一列の一意制約が CREATE TABLE へインライン出力されることを検証する</summary>
+    [Fact(DisplayName = "AddTable は名前付き単一列 UNIQUE を CREATE TABLE に含む")]
+    public void AddTable_NamedSingleColumnUnique_EmitsConstraint()
+    {
+        var entity = BuildUniqueEntity();
+        entity.UniqueConstraints.Add(
+            new UniqueConstraint { Name = "UQ_shops_code", ColumnIds = [entity.Columns[1].Id] }
+        );
+
+        var sql = BuildAddTable(entity);
+
+        // PK 行には後続の UNIQUE 行が続くため区切りカンマが付く
+        sql.Should().Contain("CONSTRAINT [PK_shops] PRIMARY KEY ([id]),");
+        sql.Should().Contain("CONSTRAINT [UQ_shops_code] UNIQUE ([code])");
+        // 最後の制約行に余分なカンマは付かない
+        sql.Should().NotContain("UNIQUE ([code]),");
+    }
+
+    /// <summary>制約名なしの複合一意制約が合成名・宣言順で出力されることを検証する</summary>
+    [Fact(DisplayName = "AddTable は名前なし複合 UNIQUE を合成名で出力する")]
+    public void AddTable_UnnamedCompositeUnique_SynthesizesName()
+    {
+        var entity = BuildUniqueEntity();
+        // 宣言順は region → code（列定義順とは逆）
+        entity.UniqueConstraints.Add(
+            new UniqueConstraint { ColumnIds = [entity.Columns[2].Id, entity.Columns[1].Id] }
+        );
+
+        BuildAddTable(entity)
+            .Should()
+            .Contain("CONSTRAINT [UQ_shops_region_code] UNIQUE ([region], [code])");
+    }
+
+    /// <summary>同期の CREATE TABLE と DDL 生成の UNIQUE 句が同形（名前・列並び・位置）であることを検証する</summary>
+    [Fact(DisplayName = "AddTable の UNIQUE 句は DDL 生成と同形")]
+    public void AddTable_UniqueConstraints_MatchDdlGenerator()
+    {
+        var entity = BuildUniqueEntity();
+        entity.UniqueConstraints.Add(
+            new UniqueConstraint { Name = "UQ_shops_code", ColumnIds = [entity.Columns[1].Id] }
+        );
+        entity.UniqueConstraints.Add(
+            new UniqueConstraint { ColumnIds = [entity.Columns[2].Id, entity.Columns[1].Id] }
+        );
+
+        var ddl = new SqlServerDdlGenerator().Build(new ErDiagram { Entities = { entity } });
+        var sync = BuildAddTable(entity);
+
+        UniqueConstraintLines(sync).Should().HaveCount(2);
+        UniqueConstraintLines(sync).Should().Equal(UniqueConstraintLines(ddl));
+
+        // 位置も同形＝PK 制約行より後、CREATE TABLE の閉じ括弧より前
+        var pk = sync.IndexOf("PRIMARY KEY (", StringComparison.Ordinal);
+        var unique = sync.IndexOf("UNIQUE (", StringComparison.Ordinal);
+        var close = sync.IndexOf(");", StringComparison.Ordinal);
+        pk.Should().BeLessThan(unique);
+        unique.Should().BeLessThan(close);
+    }
+
+    /// <summary>一意制約を持たないテーブルでは UNIQUE 行を 1 行も出力しないことを検証する</summary>
+    [Fact(DisplayName = "AddTable は一意制約が無ければ UNIQUE を出力しない")]
+    public void AddTable_WithoutUniqueConstraints_EmitsNoUnique()
+    {
+        BuildAddTable(BuildUniqueEntity()).Should().NotContain("UNIQUE");
+    }
 }

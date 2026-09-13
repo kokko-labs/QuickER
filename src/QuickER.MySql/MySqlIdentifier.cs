@@ -43,6 +43,19 @@ public static class MySqlIdentifier
         : fullName.Contains('.') ? fullName.Split('.', 2)[1]
         : fullName;
 
+    /// <summary><c>schema.table</c> 形式から <c>schema</c> 部分を抽出する（無修飾なら <c>null</c>）</summary>
+    /// <remarks>
+    /// <see cref="TableNameOnly"/> と対で使う。分割規則（最初の <c>.</c> で 2 分割）は
+    /// <see cref="Quote"/> / <see cref="TableNameOnly"/> と同一で、両者を合わせると元の名前に戻る。
+    /// <c>information_schema</c> を引く側は、この戻り値が <c>null</c> ならカレント DB
+    /// （<c>DATABASE()</c>）を、非 <c>null</c> ならその名前を検索スコープにする
+    /// （さもないと修飾名の操作対象と検索スコープが食い違い、別スキーマの同名テーブルを引き当てる）。
+    /// </remarks>
+    public static string? SchemaNameOnly(string fullName) =>
+        !string.IsNullOrEmpty(fullName) && fullName.Contains('.')
+            ? fullName.Split('.', 2)[0]
+            : null;
+
     /// <summary>
     /// SQL 文字列リテラル用にエスケープする。
     /// MySQL は既定でバックスラッシュもエスケープ文字として解釈するため、
@@ -59,6 +72,16 @@ public static class MySqlIdentifier
     /// （4 方言で同名・同意味のヘルパーを持つ）。
     /// </remarks>
     public static string QuoteForDynamicSql(string name) => EscapeStringLiteral(Quote(name));
+
+    /// <summary>
+    /// 動的 SQL の文字列リテラル内へ埋め込む単一識別子（列名など）を、クォート＋リテラルエスケープして返す。
+    /// </summary>
+    /// <remarks>
+    /// <see cref="QuoteForDynamicSql"/> の単一識別子版。列名はドットを含み得るが、テーブル名と違って
+    /// スキーマ修飾ではないため <see cref="QuoteSimple"/>（分割しないクォート）を土台にする。
+    /// </remarks>
+    public static string QuoteSimpleForDynamicSql(string name) =>
+        EscapeStringLiteral(QuoteSimple(name));
 
     /// <summary>
     /// 列定義に付与するインライン <c>COMMENT</c> 句（前置スペース込み）を組み立てる。

@@ -221,6 +221,30 @@ internal static class RemoteServerEngine
             ? throw new RemoteBadRequestException($"The '{name}' field is required.")
             : value;
 
+    /// <summary>Returns the paging arguments of a named query unchanged, rejecting values the query pipeline cannot use (reported to the client as HTTP 400).</summary>
+    /// <remarks>
+    /// <c>Take</c> requires a count greater than zero and <c>Skip</c> a count that is not negative - dialects disagree on
+    /// what the other values mean, so the query pipeline rejects them outright. Passing them on would surface as an
+    /// unhandled server-side error and be reported as a 500, complete with the server-side log entry and the
+    /// <c>OnServerError</c> hook, even though nothing on the server went wrong: the values came from the caller. They are
+    /// therefore classified here as a fault in the payload the client sent. The two travel together because a query that
+    /// pages declares both.
+    /// </remarks>
+    public static (int Take, int Skip) ValidatedPaging(int take, int skip)
+    {
+        if (take <= 0)
+        {
+            throw new RemoteBadRequestException("The 'take' field must be greater than zero.");
+        }
+
+        if (skip < 0)
+        {
+            throw new RemoteBadRequestException("The 'skip' field must not be negative.");
+        }
+
+        return (take, skip);
+    }
+
     /// <summary>Resolves the remote-surface repository from DI.</summary>
     public static TRepository Repository<TRepository>(HttpContext context)
         where TRepository : notnull => context.RequestServices.GetRequiredService<TRepository>();
@@ -768,8 +792,9 @@ public static partial class GeneratedRemoteEndpoints
                     async () =>
                     {
                         var request = await RemoteServerEngine.ReadRequestAsync<OrderGetByCustomerRequest>(context).ConfigureAwait(false);
+                        var paging = RemoteServerEngine.ValidatedPaging(request.Take, request.Skip);
                         var repository = RemoteServerEngine.Repository<IOrderRemoteRepository>(context);
-                        return (object?)await repository.GetByCustomerAsync(request.CustomerId, request.Take, request.Skip, context.RequestAborted).ConfigureAwait(false);
+                        return (object?)await repository.GetByCustomerAsync(request.CustomerId, paging.Take, paging.Skip, context.RequestAborted).ConfigureAwait(false);
                     }
                 )
         );
@@ -837,8 +862,9 @@ public static partial class GeneratedRemoteEndpoints
                     async () =>
                     {
                         var request = await RemoteServerEngine.ReadRequestAsync<OrderGetSummariesRequest>(context).ConfigureAwait(false);
+                        var paging = RemoteServerEngine.ValidatedPaging(request.Take, request.Skip);
                         var repository = RemoteServerEngine.Repository<IOrderRemoteRepository>(context);
-                        return (object?)await repository.GetSummariesAsync(request.CustomerId, request.Take, request.Skip, context.RequestAborted).ConfigureAwait(false);
+                        return (object?)await repository.GetSummariesAsync(request.CustomerId, paging.Take, paging.Skip, context.RequestAborted).ConfigureAwait(false);
                     }
                 )
         );

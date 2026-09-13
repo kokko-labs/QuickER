@@ -22,11 +22,33 @@ namespace QuickER.MySql;
 /// </para>
 /// <para>
 /// プリペアド動的 SQL（<c>PREPARE</c> / <c>SET @fk = ...</c>）を扱うため、接続文字列には
-/// <c>AllowUserVariables=true</c> を付与する。
+/// <c>AllowUserVariables=true</c> を付与する。あわせて、スクリプトのリテラル組み立てが前提とする
+/// エスケープ規則へセッションを揃えるため <see cref="ClearNoBackslashEscapes"/> を先に実行する。
 /// </para>
 /// </remarks>
 public sealed class MySqlSchemaSyncExecutor : ISchemaSyncExecutor
 {
+    /// <summary>
+    /// スクリプト実行前にセッションの <c>sql_mode</c> から <c>NO_BACKSLASH_ESCAPES</c> を外す文。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 同期スクリプトの文字列リテラルは <c>MySqlIdentifier.EscapeStringLiteral</c> が組み立てており、
+    /// MySQL 既定の「バックスラッシュもエスケープ文字」という規則を前提に <c>\</c> を <c>\\</c> へ
+    /// 二重化している。<c>NO_BACKSLASH_ESCAPES</c> が立ったセッションではこの前提が崩れ、
+    /// 説明に含まれる <c>\</c> が二重のまま格納されて無言で化ける（実測: <c>a\b</c> → <c>a\\\\b</c>）。
+    /// <c>'</c> を含む式を持つ生成列では、ライブ再構成した定義が構文エラーになりスクリプトが
+    /// 途中で止まる（DDL は暗黙コミットのため部分適用になる）。
+    /// </para>
+    /// <para>
+    /// 接続は QuickER が開いて閉じるものなので、<b>セッション限定</b>で外す（グローバルには触れない）。
+    /// <c>REPLACE</c> が残す空要素や連続カンマは MySQL 自身が読み飛ばすため整形は不要
+    /// （実測: <c>'A,NO_BACKSLASH_ESCAPES,B'</c> → <c>'A,,B'</c> が <c>'A,B'</c> として受理される）。
+    /// </para>
+    /// </remarks>
+    private const string ClearNoBackslashEscapes =
+        "SET SESSION sql_mode = REPLACE(@@SESSION.sql_mode, 'NO_BACKSLASH_ESCAPES', '');";
+
     /// <summary>スクリプトを文単位で順次実行する（DDL は暗黙コミットのためロールバック不可）</summary>
     public async Task<SchemaSyncResult> ExecuteAsync(
         DbConnectionSettings settings,
@@ -55,6 +77,19 @@ public sealed class MySqlSchemaSyncExecutor : ISchemaSyncExecutor
             MySqlConnectionStringFactory.Build(settings, true)
         );
         await conn.OpenAsync(ct).ConfigureAwait(false);
+
+        // スクリプトのリテラル組み立てが前提にしている規則へセッションを揃える（接続を開くのと同じ扱いで、
+        // ここで失敗したらスクリプトは 1 文も実行していない＝そのまま呼び出し元へ投げる）
+        await using (
+            var sqlMode = DbCommands.Create(
+                conn,
+                ClearNoBackslashEscapes,
+                settings.CommandTimeoutSeconds
+            )
+        )
+        {
+            await sqlMode.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
 
         var index = 0;
 

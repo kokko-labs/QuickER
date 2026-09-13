@@ -90,7 +90,7 @@ The "DB Sync" button on the toolbar opens the "DB Schema Sync (Apply Diff)" dial
 
 Elements with the same name are treated as the same element, so a rename is detected as "drop + add."
 
-Column order is compared as the relative order of the columns common to both sides, excluding additions and deletions. On SQLite and MySQL it can be synced as a selectable diff item (unselected by default): SQLite folds it into the table rebuild, and MySQL uses `ALTER TABLE ... MODIFY ... AFTER`, moving as few columns as possible. On the other three dialects it is shown for information only and is not synced.
+Column order is compared as the relative order of the columns common to both sides, excluding additions and deletions. On SQLite and MySQL it can be synced as a selectable diff item (unselected by default): SQLite folds it into the table rebuild, and MySQL uses `ALTER TABLE ... MODIFY ... AFTER`, moving as few columns as possible. MySQL's `MODIFY` re-specifies the column from the live catalog, so moving a column keeps its attributes and its comment — see [what MySQL's `MODIFY COLUMN` re-specifies](#what-mysqls-modify-column-re-specifies). On the other three dialects it is shown for information only and is not synced.
 
 ### Safety by design
 
@@ -111,6 +111,26 @@ Foreign keys that reference the changed primary key are dropped and re-created a
 ### Description sync
 
 Table and column descriptions sync on the four dialects that have a description mechanism: SQL Server uses MS_Description extended properties, PostgreSQL and Oracle use `COMMENT ON`, and MySQL uses `COMMENT` clauses. Checking for an existing description to choose between add and update applies to SQL Server's extended properties only; PostgreSQL and Oracle simply re-run `COMMENT ON`, and MySQL re-runs the `COMMENT` clause (both idempotent in themselves). Clearing a description in the diagram removes it. SQLite has no description mechanism, so descriptions are neither diffed nor synced there.
+
+#### What MySQL's `MODIFY COLUMN` re-specifies
+
+MySQL has no statement that changes only a column's comment, and none that changes only its position. Both go through `ALTER TABLE ... MODIFY COLUMN`, which re-states the **whole** column definition: whatever the new definition leaves out is dropped from the column. MySQL commits DDL implicitly, so there is no rolling that back.
+
+QuickER therefore takes the definition from two different places, depending on what the change is about.
+
+- **Description sync and column-order sync** rebuild the definition from `information_schema.COLUMNS` at execution time and replace only the trailing clause they exist to change — the comment, or `AFTER` / `FIRST`. Everything the diagram does not model is carried over untouched: `DEFAULT` (literal and expression, `BIT` and binary literals included), `AUTO_INCREMENT`, the collation and with it the character set, `ON UPDATE CURRENT_TIMESTAMP`, `INVISIBLE`, a spatial `SRID`, and generated (`VIRTUAL` / `STORED`) columns. Column-order sync preserves the column's existing comment as well.
+- **Altering a column** — a type or nullability change — re-specifies from the diagram, because the diagram is what that change expresses. It therefore **does** drop the attributes listed above, none of which the diagram can represent. Such diffs are unselected by default.
+
+Two things do not come through the rebuild, both because the catalog does not record them the way they were written:
+
+- `COLUMN_FORMAT` and `STORAGE` (NDB Cluster) have no `information_schema` column to read them from, so they cannot be carried over.
+- A character-set introducer on a string literal inside a generated-column expression (`_latin1'x'`) is re-parsed and written back under the connection's character set (`_utf8mb4'x'`). The expression still means the same thing; only the text the catalog records for it changes.
+
+If the column no longer exists when the script runs, its statement folds into a no-op — and the run is still reported as successful, since nothing failed. If the column does exist but its definition cannot be rebuilt, the statement fails instead, so a half-applied column order is never reported as a success.
+
+Before running the script, the sync clears `NO_BACKSLASH_ESCAPES` from its own session's `sql_mode`; the global setting is not touched. QuickER escapes the literals it writes under MySQL's default rule, and under that mode the same text would be stored with its backslashes doubled.
+
+The live rebuild is one more reason MariaDB is out of scope: it records `COLUMN_DEFAULT` with different semantics, so a definition rebuilt from its catalog cannot be guaranteed to reproduce the column.
 
 ### SQLite diff sync (table rebuilds)
 

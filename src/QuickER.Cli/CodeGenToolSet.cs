@@ -5,6 +5,7 @@ using QuickER.Documents;
 using QuickER.Mcp;
 using QuickER.Model;
 using QuickER.Provider;
+using QuickER.Settings;
 
 namespace QuickER.Cli;
 
@@ -63,7 +64,7 @@ public static class CodeGenToolSet
         {
             Name = "generate_ddl",
             Description =
-                "Generates a DDL (CREATE TABLE / foreign key) SQL script from the given ER diagram file for the target DBMS dialect, and writes it to a .sql file.",
+                "Generates a DDL (CREATE TABLE / foreign key) SQL script from the given ER diagram file for the target DBMS dialect, and writes it to a .sql file. The output path must end in .sql and its parent directory must already exist; any other path is rejected without writing anything.",
             DeferLoading = false,
             InputSchema = new
             {
@@ -73,7 +74,7 @@ public static class CodeGenToolSet
                     out_file = new
                     {
                         type = "string",
-                        description = "Output .sql file path (overwritten if it exists).",
+                        description = "Output file path, which must have a .sql extension (overwritten if it exists). The parent directory is not created.",
                     },
                     provider = new
                     {
@@ -272,6 +273,13 @@ public static class CodeGenToolSet
             return ("out_file is required.", false);
         }
 
+        var outFileError = ValidateDdlOutputPath(outFile);
+
+        if (outFileError is not null)
+        {
+            return (outFileError, false);
+        }
+
         var (provider, providerError) = ResolveProviderArg(args, document!.Schema);
 
         if (provider is null)
@@ -279,15 +287,49 @@ public static class CodeGenToolSet
             return (providerError!, false);
         }
 
-        // 生成器は GUI のエクスポート（MainViewModel）と同一 API。UTF-8 で書き出す
+        // 生成器は GUI のエクスポート（DiagramExportService）と同一 API・同一符号化（BOM 付き UTF-8）。
+        // 書き込みは原子的に行い、途中で落ちても出力先を壊れた SQL で残さない
         var ddl = provider.DdlGenerator.Build(document.Schema);
-        File.WriteAllText(outFile, ddl, Encoding.UTF8);
+        AtomicFile.WriteAllText(outFile, ddl, Encoding.UTF8);
 
         var sb = new StringBuilder();
         AppendNewerFormatWarning(sb, document);
         sb.Append($"Generated {provider.Name} DDL from '{file}' into '{outFile}'.");
 
         return (sb.ToString(), true);
+    }
+
+    /// <summary>DDL 出力先（<c>.sql</c> 限定・親ディレクトリ実在）を検証する。問題なければ null</summary>
+    /// <remarks>
+    /// <para>
+    /// MCP の呼び手は外部 AI エージェントで、出力先は素通しにすると任意パス・任意拡張子のファイルを
+    /// DDL で上書きできる書き込みプリミティブになる。柵は <c>create_diagram</c> と同じ流儀＝
+    /// 「用途に合う拡張子か」と「親ディレクトリが実在するか」の 2 点だけを見る。
+    /// </para>
+    /// <para>
+    /// 絶対パス・<c>..</c> は拒否しない（<c>generate_ddl</c> は元からユーザー指定の出力先へ書くツールで、
+    /// <c>create_diagram</c> / <c>generate_csharp</c> も出力先の位置そのものは制限していない）。
+    /// 防ぐべきは「SQL スクリプト以外の何かに化ける」ことと「置き場を黙って掘る」ことの 2 つで、
+    /// 位置の制限は MCP サーバを起動する側の作業ディレクトリ・権限の担当。
+    /// </para>
+    /// </remarks>
+    private static string? ValidateDdlOutputPath(string outFile)
+    {
+        if (!string.Equals(Path.GetExtension(outFile), ".sql", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"out_file must be a path with a .sql extension: {outFile}. "
+                + "generate_ddl only writes SQL scripts and refuses to overwrite anything else.";
+        }
+
+        // 親ディレクトリを黙って掘らない（create_diagram と同じ規則）
+        var directory = Path.GetDirectoryName(outFile);
+
+        if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
+        {
+            return $"Parent directory does not exist: {directory}. Create the directory first.";
+        }
+
+        return null;
     }
 
     // ---------------- helpers ----------------

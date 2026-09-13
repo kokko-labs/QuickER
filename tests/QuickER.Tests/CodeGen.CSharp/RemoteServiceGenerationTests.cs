@@ -211,10 +211,18 @@ public class RemoteServiceGenerationTests
                 "private sealed record OrderGetByCustomerRequest(int CustomerId, int Take, int Skip);"
             );
         server.Should().Contain("\"Order/GetByCustomer\"");
+
+        // ページング引数はリクエスト解釈の境界で検証してから渡す（take <= 0 / skip < 0 は
+        // クエリパイプラインが拒否する値＝素通しするとクライアント起因の不備が 500 に化ける）
         server
             .Should()
             .Contain(
-                "repository.GetByCustomerAsync(request.CustomerId, request.Take, request.Skip, context.RequestAborted)"
+                "var paging = RemoteServerEngine.ValidatedPaging(request.Take, request.Skip);"
+            );
+        server
+            .Should()
+            .Contain(
+                "repository.GetByCustomerAsync(request.CustomerId, paging.Take, paging.Skip, context.RequestAborted)"
             );
 
         // パラメータなしクエリはリクエストレコードを作らず本文も読まない

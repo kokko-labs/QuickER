@@ -28,12 +28,24 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
 {
     // ---------------- 各種 DDL ----------------
 
-    /// <summary>CREATE TABLE 文（主キー制約を含む）を生成する</summary>
+    /// <summary>CREATE TABLE 文（主キー制約・一意制約を含む）を生成する</summary>
+    /// <remarks>
+    /// 制約行は DDL 生成と同じヘルパーで組み立てる（同期で作ったテーブルにだけ UNIQUE が無い、という
+    /// 食い違いを構造的に防ぐ）。
+    /// </remarks>
     protected override void AppendCreateTable(StringBuilder sb, SchemaDiffItem item)
     {
         var e = item.Entity!;
-        var pks = e.Columns.Where(c => c.IsPrimaryKey).ToList();
         sb.AppendLine($"CREATE TABLE {PgIdentifier.Quote(item.TableName)} (");
+
+        // 列定義の末尾カンマ判定に「後続制約行の有無」が必要なため、制約行を先に組み立てる
+        var constraintLines = TableConstraintLineBuilder.Build(
+            e,
+            item.TableName,
+            PgIdentifier.QuoteSimple,
+            name => $"\"{PgIdentifier.Escape(name)}\"",
+            PgIdentifier.SafeName
+        );
 
         for (var i = 0; i < e.Columns.Count; i++)
         {
@@ -41,8 +53,8 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
             var line =
                 $"    {PgIdentifier.QuoteSimple(col.Name)} {col.DataType} {SyncScriptBuilderHelper.GetNullabilityClause(col)}";
 
-            // 後続のカラム行、または PRIMARY KEY 制約行が続く場合は区切りのカンマを付ける
-            if (i < e.Columns.Count - 1 || pks.Count > 0)
+            // 後続のカラム行、または制約行（PRIMARY KEY / UNIQUE）が続く場合は区切りのカンマを付ける
+            if (i < e.Columns.Count - 1 || constraintLines.Count > 0)
             {
                 line += ",";
             }
@@ -50,13 +62,7 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
             sb.AppendLine(line);
         }
 
-        if (pks.Count > 0)
-        {
-            var pkCols = string.Join(", ", pks.Select(p => PgIdentifier.QuoteSimple(p.Name)));
-            sb.AppendLine(
-                $"    CONSTRAINT \"{PgIdentifier.Escape($"PK_{PgIdentifier.SafeName(item.TableName)}")}\" PRIMARY KEY ({pkCols})"
-            );
-        }
+        TableConstraintLineBuilder.Append(sb, constraintLines);
 
         sb.AppendLine(");");
     }

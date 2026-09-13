@@ -4196,7 +4196,12 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
         NotifyPositionsChanged();
     }
 
-    /// <summary>Full on-screen wipe. No deletion tracking; also resets the set-aside deletion targets.</summary>
+    /// <summary>Full on-screen wipe. No deletion tracking; set-aside deletion targets are restored to their pre-removal state and released.</summary>
+    /// <remarks>
+    /// Releasing the tracking list alone would leave the set-aside elements marked Removed with nothing left to undo it:
+    /// adding such an instance back afterwards can no longer be matched by the tracking list, so it would sit in the
+    /// collection as a deletion target and be silently deleted on the next save.
+    /// </remarks>
     protected override void ClearItems()
     {
         var cleared = new List<T>(this);
@@ -4205,6 +4210,12 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
         {
             item.Owner = null;
             item.SetParentModel(null);
+        }
+
+        // Restore before releasing the tracking list, the same way cancelling a single removal does.
+        foreach (var entry in _removed)
+        {
+            entry.Item.RowState = entry.PriorState;
         }
 
         _removed.Clear();

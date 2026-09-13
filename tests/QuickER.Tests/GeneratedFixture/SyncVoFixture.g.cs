@@ -4246,7 +4246,7 @@ public enum SyncConflictPolicy
     /// <summary>Leaves the entry in the journal and reports it (the default: nothing is resolved silently).</summary>
     Collect,
 
-    /// <summary>Discards the local change and lets the download make the row match the server's state: overwritten with the server's row when the server has the key, removed by delete propagation when it does not (a local insert the server never received).</summary>
+    /// <summary>Discards the local change and makes the row match the server's state: the server's row is read back over the local one when the server has the key, and delete propagation removes the row when it does not (a local insert the server never received).</summary>
     ServerWins,
 
     /// <summary>Resends the local change with <see cref="ConcurrencyMode.ForceOverwrite"/>, overwriting the server row - and inserting it again when the server has no such row, so a row deleted on the server is resurrected by a local edit.</summary>
@@ -4900,9 +4900,10 @@ public sealed class SyncJournal
 
     /// <summary>Removes every entry of every table, discarding all unsent local changes.</summary>
     /// <remarks>
-    /// The whole-journal counterpart of <see cref="RemoveTableAsync"/>, with the same warnings: it is what
-    /// <see cref="SyncConflictPolicy.ServerWins"/> does to the journal at upload time, done without a run. The next
-    /// download simply makes the local rows match the server's.
+    /// The whole-journal counterpart of <see cref="RemoveTableAsync"/>, with the same warnings: it is the journal half
+    /// of what <see cref="SyncConflictPolicy.ServerWins"/> does at upload time, done without a run. What it leaves out
+    /// is the other half - reading the server's rows back over the local ones - so an edit to a row the server has not
+    /// changed since it was mirrored stays where it is, with nothing left to say it is there.
     /// </remarks>
     /// <param name="cancellationToken">The cancellation token.</param>
     public async Task RemoveAllAsync(CancellationToken cancellationToken = default)
@@ -5466,6 +5467,16 @@ public readonly record struct SyncDownloadOutcome(
         : this(applied, truncatedAtKeyText, []) { }
 }
 
+/// <summary>One row a <see cref="SyncConflictPolicy.ServerWins"/> upload wrote the server's copy over.</summary>
+/// <param name="KeyText">The primary key in the text form the table's descriptor produces.</param>
+/// <param name="ServerRowVersion">The version the server's copy carried when it was read, or null when it had none.</param>
+/// <remarks>
+/// The version reported is the server's own, not the one written onto the local row - that one is deliberately left
+/// where it was. So nothing about the row itself says that its local content is the server's content at that version,
+/// and the run records the pair as an acknowledgement instead.
+/// </remarks>
+public readonly record struct SyncAppliedServerRow(string KeyText, byte[]? ServerRowVersion);
+
 /// <summary>The engine's view of one synchronised table, with the entity's own types erased.</summary>
 public interface ISyncTable
 {
@@ -5525,6 +5536,44 @@ public interface ISyncTable
                 .ConfigureAwait(false),
             null
         );
+
+    /// <summary>Overwrites the named local rows with the server's copies.</summary>
+    /// <param name="keyTexts">The keys, in the journal's text form, whose local content is to give way to the server's.</param>
+    /// <param name="includeUnboundedBinary">Whether the excluded unbounded binary columns are carried down as well.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <remarks>
+    /// <para>
+    /// What <see cref="SyncConflictPolicy.ServerWins"/> is made of. Dropping the journal entry only stops the local
+    /// change from being sent; the row keeps the content the entry was about, and the download brings nothing down for
+    /// a row the server has not changed since it was last mirrored. The server's row is therefore read back and
+    /// written over the local one, which is what "the server wins" says. A key the server no longer holds has nothing
+    /// to apply, and is left to the delete propagation - so with propagation turned off that row stays as it is.
+    /// </para>
+    /// <para>
+    /// <b>The mirrored version is left exactly where it was.</b> The row read from the server carries the server's
+    /// current version, and writing that onto the local row would raise the derived resume point to it - past every
+    /// row of the ordered stream this device has not seen, none of which any later run would ask for again. The
+    /// content is applied and the version is not, so the next download reaches the row in its proper order and writes
+    /// the version then; applying the same content a second time costs nothing.
+    /// </para>
+    /// <para>
+    /// <b>Which is why the applied rows are reported back.</b> With the mirrored version left behind, nothing on the
+    /// device records that the row's local content is the server's content at the version just read - and no download
+    /// need ever supply it: a row restored under a server version at or below the derived resume point is one the
+    /// ordered stream has already passed. Replaying a later edit to such a row would then find no version to guard it
+    /// with and take it for a row that has never been on the server, which the server answers by already having it.
+    /// The caller records the pairs as acknowledgements, and the replay reads its original from those too.
+    /// </para>
+    /// <para>
+    /// The default applies nothing, the only sound answer for an implementation with no server of its own to read.
+    /// </para>
+    /// </remarks>
+    /// <returns>The key and the server's version of every row applied, in the order they were applied.</returns>
+    Task<IReadOnlyList<SyncAppliedServerRow>> ApplyServerRowsAsync(
+        IReadOnlyList<string> keyTexts,
+        bool includeUnboundedBinary,
+        CancellationToken cancellationToken = default
+    ) => Task.FromResult<IReadOnlyList<SyncAppliedServerRow>>([]);
 
     /// <summary>Deletes the local rows whose key the server no longer has, and returns the keys that went.</summary>
     /// <param name="pendingKeyTexts">The keys of this table that still hold an unsent journal entry; they are left alone.</param>
@@ -6136,6 +6185,69 @@ public abstract class SyncTableBase<TEntity, TKey> : ISyncTable
         {
             await CopyBinaryColumnsDownAsync(rows, cancellationToken).ConfigureAwait(false);
         }
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// The rows go through the same batch application a download uses, so a key the local database does not have is
+    /// put back rather than skipped - a row deleted locally and still held by the server returns, which is the
+    /// server winning over a delete exactly as it wins over an edit. A restored row carries no mirrored version until
+    /// a download reaches it in order: it may not have one to keep, and the server's own is the one version that must
+    /// not be written here.
+    /// </remarks>
+    public async Task<IReadOnlyList<SyncAppliedServerRow>> ApplyServerRowsAsync(
+        IReadOnlyList<string> keyTexts,
+        bool includeUnboundedBinary,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(keyTexts);
+
+        var rows = new List<TEntity>(keyTexts.Count);
+        var applied = new List<SyncAppliedServerRow>(keyTexts.Count);
+
+        foreach (var keyText in keyTexts)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var key = ParseKey(keyText);
+            var server = await _server
+                .Writer.GetByIdAsync(key, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (server is null)
+            {
+                continue;
+            }
+
+            // Read before it is replaced: this is the version the content about to be applied belongs to, and the
+            // only place it survives the write below.
+            var serverRowVersion = _descriptor.ReadRowVersion(server);
+
+            // The version has to keep saying how far this device's ordered stream reached, so the local row's own is
+            // put back onto the server's copy before it is applied - see the interface for what writing the server's
+            // would cost. A row the local database does not have keeps whatever the descriptor makes of "no version",
+            // which is the same thing a row created locally starts with.
+            var local = await _local.GetByIdAsync(key, cancellationToken).ConfigureAwait(false);
+            _descriptor.WriteRowVersion(
+                server,
+                local is null ? null : _descriptor.ReadRowVersion(local)
+            );
+            rows.Add(server);
+            applied.Add(new SyncAppliedServerRow(keyText, serverRowVersion));
+        }
+
+        if (rows.Count == 0)
+        {
+            return applied;
+        }
+
+        await ApplyBatchAsync(rows, includeUnboundedBinary, cancellationToken)
+            .ConfigureAwait(false);
+
+        // Reported only once the batch is in: a row whose application never committed is not one anything should be
+        // recorded about.
+        return applied;
     }
 
     /// <inheritdoc />
@@ -7109,10 +7221,10 @@ public sealed class VersionlessSyncTable<TEntity, TKey> : SyncTableBase<TEntity,
 /// <remarks>
 /// <para>
 /// A run uploads first and downloads second. Uploading first means a local change reaches the server before the server's
-/// rows come back down, so a change accepted by the server is not immediately overwritten by its own pre-upload state;
-/// it is also what makes <see cref="SyncConflictPolicy.ServerWins"/> a matter of simply dropping the journal entry and
-/// letting the download reconcile the row with the server's state - bringing the server's row in, or removing a row the
-/// server never received.
+/// rows come back down, so a change accepted by the server is not immediately overwritten by its own pre-upload state.
+/// It is also where <see cref="SyncConflictPolicy.ServerWins"/> settles the rows it discards: each one takes the
+/// server's content in place of the local change, and a row the server does not have is left to the delete propagation
+/// that follows the download.
 /// </para>
 /// <para>
 /// Tables are visited in foreign-key order - parents before children when rows are written, children before parents when
@@ -7412,16 +7524,76 @@ public sealed class SyncEngine
 
         if (options.Mode == SyncMode.Versioned && options.ConflictPolicy == SyncConflictPolicy.ServerWins)
         {
-            // Nothing local is worth sending: drop this run's entries and let the download bring the server's rows
-            // in. Scoped to the tables the run covers - an entry of an excluded or out-of-mode table is not this
+            // Nothing local is worth sending, so each row this run holds an entry for takes the server's content
+            // instead. Scoped to the tables the run covers - an entry of an excluded or out-of-mode table is not this
             // run's to decide about, so it stays for the run that does cover it. (In a last-write-wins run the
             // policy has nothing to decide at all, so it is not consulted.)
+            //
+            // The download alone cannot stand in for this: it only carries rows the server has changed since they
+            // were last mirrored, and a local edit to a row nobody else has touched would survive the run that was
+            // told to discard it - with its entry gone, for good.
             var scopeTableNames = scope.Select(table => table.TableName)
                 .ToHashSet(StringComparer.Ordinal);
-            var dropIds = idsByRow
+            var dropRows = idsByRow
                 .Where(pair => scopeTableNames.Contains(pair.Key.TableName))
-                .SelectMany(pair => pair.Value)
+                .OrderBy(pair => pair.Value[0])
                 .ToList();
+
+            // Parents first, for the reason an upsert replay runs that way: a row put back may be the one another
+            // row points at.
+            foreach (var table in scope)
+            {
+                var keyTexts = dropRows
+                    .Where(pair =>
+                        string.Equals(pair.Key.TableName, table.TableName, StringComparison.Ordinal)
+                    )
+                    .Select(pair => pair.Key.KeyText)
+                    .ToList();
+
+                if (keyTexts.Count == 0)
+                {
+                    continue;
+                }
+
+                var applied = await table
+                    .ApplyServerRowsAsync(
+                        keyTexts,
+                        options.IncludeUnboundedBinary,
+                        cancellationToken
+                    )
+                    .ConfigureAwait(false);
+
+                // After the rows are in and before the entries go, for the same reason the replay records its
+                // receipts in that order. The applied row's local content is the server's content at the version
+                // just read, and the mirrored version deliberately does not say so; the receipt is the only thing
+                // that does, and a row restored under a version the ordered stream has already passed will never be
+                // told otherwise by a download. Interrupted either side of this the run is still sound: before it,
+                // the entries stay and the next run applies the same rows and records them then; after it but before
+                // the entries go, the next run applies the same rows again - which changes nothing - and writes the
+                // same receipts over themselves.
+                foreach (var row in applied)
+                {
+                    // A table with no version has nothing to acknowledge (and no versioned run to reach it here).
+                    if (row.ServerRowVersion is not { Length: > 0 } serverRowVersion)
+                    {
+                        continue;
+                    }
+
+                    await _journal
+                        .RecordAckAsync(
+                            table.TableName,
+                            row.KeyText,
+                            serverRowVersion,
+                            cancellationToken
+                        )
+                        .ConfigureAwait(false);
+                }
+            }
+
+            // Dropped afterwards: a run interrupted in the middle leaves the entries behind, and the next one applies
+            // the same server content again and drops them then. The other order would leave a local edit standing
+            // with nothing left to say it is there.
+            var dropIds = dropRows.SelectMany(pair => pair.Value).ToList();
             await RemoveAsync(dropIds, cancellationToken).ConfigureAwait(false);
 
             return (0, dropIds.Count);

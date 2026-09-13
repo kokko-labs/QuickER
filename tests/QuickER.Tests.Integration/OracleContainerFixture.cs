@@ -178,8 +178,8 @@ public sealed class OracleContainerFixture : IAsyncLifetime
     }
 
     /// <summary>
-    /// スクリプトを文単位に分割する。<see cref="OracleSchemaSyncExecutor.SplitStatements"/> と同じ規約
-    /// （「/」のみの行を区切りとし、通常文は末尾 <c>;</c> を除去、PL/SQL ブロックは保持）に加え、
+    /// スクリプトを文単位に分割する。「/」のみの行を含むスクリプト（同期スクリプト）は
+    /// <see cref="OracleSchemaSyncExecutor.SplitStatements"/> をそのまま呼び、
     /// 「/」行が 1 つも含まれないスクリプト（<see cref="QuickER.Oracle.OracleDdlGenerator"/> の生出力等）は
     /// 各行末の <c>;</c> を文の区切りとして扱う（PL/SQL ブロックは含まれない前提）。
     /// </summary>
@@ -190,29 +190,10 @@ public sealed class OracleContainerFixture : IAsyncLifetime
         // 「/」のみの行が 1 つでもあれば、Executor と同じ「/」区切り規約に従う
         var hasSlashSeparator = normalized.Split('\n').Any(line => line.Trim() == "/");
 
-        return hasSlashSeparator ? SplitBySlash(normalized) : SplitBySemicolon(normalized);
-    }
-
-    /// <summary>「/」のみの行で分割する（<see cref="OracleSchemaSyncExecutor.SplitStatements"/> と同じロジック）</summary>
-    private static List<string> SplitBySlash(string normalized)
-    {
-        var statements = new List<string>();
-        var current = new List<string>();
-
-        foreach (var rawLine in normalized.Split('\n'))
-        {
-            if (rawLine.Trim() == "/")
-            {
-                AddIfMeaningful(statements, current);
-                current.Clear();
-                continue;
-            }
-
-            current.Add(rawLine);
-        }
-
-        AddIfMeaningful(statements, current);
-        return statements;
+        // 「/」区切りは実行器そのものを呼ぶ（リテラル・コメント追跡まで含めて同一の分割になる）
+        return hasSlashSeparator
+            ? OracleSchemaSyncExecutor.SplitStatements(normalized)
+            : SplitBySemicolon(normalized);
     }
 
     /// <summary>

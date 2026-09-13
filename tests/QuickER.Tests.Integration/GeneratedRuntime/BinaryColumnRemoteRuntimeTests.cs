@@ -4,9 +4,13 @@ using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.GeneratedBinaryFixture;
 using QuickER.Tests.Integration;
@@ -341,10 +345,11 @@ public sealed class BinaryColumnRemoteRuntimeTests : IAsyncLifetime
     /// </summary>
     /// <remarks>
     /// 共有サーバーは <c>MapGeneratedRemoteEndpoints(RemoteAccess.AllowAnonymous)</c>（既定引数＝解除なし）で起動しているため、そのまま使える。
-    /// 413 は Kestrel の <c>BadHttpRequestException</c> がステータス素通しで分類された結果で、クライアントは
+    /// 413 を出すのは宣言長の事前チェック（<see cref="Stream_Put_DeclaredLengthOverLimit_IsRejectedBeforeWriting"/>）で、
+    /// 31MB の宣言長がホストの実効上限（Kestrel 既定の 30,000,000）を超えるため本文を読む前に確定する。クライアントは
     /// <see cref="RemoteRepositoryException"/> としてその状態コードを保って復元する。応答には他の分類済み拒否と
     /// 同じ <c>RemoteError</c> 本文が載るため、応答を読めた場合は「本文の文言が復元されていること」まで固定する。
-    /// ただし Kestrel は上限超過検知時に本文の受信を打ち切るため、フルスイート並列実行などタイミング次第では
+    /// ただしサーバーは本文を受け取らずに応答するため、フルスイート並列実行などタイミング次第では
     /// クライアントが 413 を読む前に接続リセット（<see cref="HttpRequestException"/>）を観測し得る
     /// （タイミング依存の正常系＝単独実行の実測では 10/10 で 413 だが、負荷並列時に窓が開くことが実測されている）。
     /// どちらの形でも「既定では 31MB の書き込みが拒否される」契約は成立しているため、両方を合格とする。
@@ -389,6 +394,257 @@ public sealed class BinaryColumnRemoteRuntimeTests : IAsyncLifetime
                     "413 が読めない場合は送信中断＝接続リセット（HttpRequestException / IOException）になる"
                 );
         }
+    }
+
+    /// <summary>
+    /// 9c. 宣言された <c>Content-Length</c> がホストのリクエストサイズ上限を超える PUT は、
+    /// <b>書き込みを 1 度も呼ばないまま</b> 413（分類済み <c>RemoteError</c> 本文つき）で拒否される。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ホストのボディサイズ上限は「本文を実際に読んだとき」にしか発火しないのに対し、書き込み側は本文を読む前に
+    /// <b>宣言長ぶんのストレージを確保する</b>（SQLite は <c>zeroblob(宣言長)</c> を先に割り当ててから blob へ
+    /// 流し込む）。宣言長の検証が無いと、実データをほとんど送らない要求だけでその確保を走らせられるため、
+    /// 上限より先に効く入口検証が要る。
+    /// </para>
+    /// <para>
+    /// 観測点は<b>書き込みデリゲートが呼ばれないこと</b>そのものに置く。クライアント側から本文の読み取りを覗く形
+    /// （読み取りを記録するストリーム）では、Kestrel が Content-Length を見て本文の初回読み取り時点で先に 413 を
+    /// 投げるため、確保が済んでいても同じ観測になってしまう（実測で確認済み）。そこでエンジンの接合部
+    /// <c>RemoteServerEngine.MapBinaryColumn</c> を、リポジトリの代わりに記録用デリゲートで直接マップした検証用
+    /// エンドポイントを立てる。<c>allowUnboundedUploads</c> の両アームを同じサーバー上で対照できるのも利点で、
+    /// 解除側では同じ宣言長が素通しして書き込みへ到達することまで固定する
+    /// （生成エンドポイント側の実転送は <see cref="Stream_Put_WithOptIn_ExceedsDefaultRequestSizeLimit"/> が担う）。
+    /// </para>
+    /// <para>
+    /// 上限は Kestrel 既定（30MB）ではなくこのサーバー専用の小さな値へ下げる。既定のままだと本文が 30MB 超になり、
+    /// サーバーが本文を読まずに応答したときの送信中断（接続リセット）が観測へ混ざるため、
+    /// 「小さな本文・さらに小さな上限」で同じ条件を作る。
+    /// </para>
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Binary/Remote] 9c: 上限超過の宣言長 PUT は書き込みを呼ばずに 413 で拒否される"
+    )]
+    public async Task Stream_Put_DeclaredLengthOverLimit_IsRejectedBeforeWriting()
+    {
+        var boundedWriteCalled = false;
+        var unboundedWriteCalled = false;
+
+        await using var server = await InProcessRemoteServer.StartAsync(
+            _ => { },
+            app =>
+            {
+                RemoteServerEngine.MapBinaryColumn<int>(
+                    app.MapGroup("/bounded"),
+                    "Blob",
+                    allowUnboundedUploads: false,
+                    (_, _, _) => Task.FromResult(false),
+                    (_, _, _, _) =>
+                    {
+                        boundedWriteCalled = true;
+                        return Task.FromResult(true);
+                    }
+                );
+                RemoteServerEngine.MapBinaryColumn<int>(
+                    app.MapGroup("/unbounded"),
+                    "Blob",
+                    allowUnboundedUploads: true,
+                    (_, _, _) => Task.FromResult(false),
+                    (_, _, _, _) =>
+                    {
+                        unboundedWriteCalled = true;
+                        return Task.FromResult(true);
+                    }
+                );
+            },
+            Ct,
+            builder =>
+                builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = 64)
+        );
+
+        // 上限（64 バイト）を超える本文。実データも同じ長さなので送信は完結し、観測にリセットが混ざらない
+        var payload = new byte[4096];
+
+        using var raw = new HttpClient();
+
+        using var rejected = await PutBinaryAsync(
+            raw,
+            $"{server.BaseUrl}/bounded/Blob?id=1",
+            payload
+        );
+
+        rejected
+            .StatusCode.Should()
+            .Be(
+                HttpStatusCode.RequestEntityTooLarge,
+                "宣言長が上限を超えていれば書き込みを呼ぶ前に拒否される"
+            );
+        (await rejected.Content.ReadFromJsonAsync<RemoteError>(Ct))!
+            .Type.Should()
+            .Be("BadRequest", "他の分類済み拒否と同じ RemoteError 本文が載る");
+        boundedWriteCalled
+            .Should()
+            .BeFalse("拒否は書き込み（＝宣言長ぶんの領域確保）より前に起きる");
+
+        using var accepted = await PutBinaryAsync(
+            raw,
+            $"{server.BaseUrl}/unbounded/Blob?id=1",
+            payload
+        );
+
+        accepted
+            .StatusCode.Should()
+            .Be(HttpStatusCode.NoContent, "上限を解除した側では同じ宣言長が素通しする");
+        unboundedWriteCalled.Should().BeTrue("解除側では書き込みまで到達する");
+
+        // 上限超過と `?id=` 不正が同時に成立する場合は 413 が先（キーの復元は write 側＝この検査の後段で行われる）
+        using var both = await PutBinaryAsync(
+            raw,
+            $"{server.BaseUrl}/bounded/Blob?id=xyz",
+            payload
+        );
+
+        both.StatusCode.Should()
+            .Be(
+                HttpStatusCode.RequestEntityTooLarge,
+                "宣言長の検査はキーの復元より前にあるため 400 ではなく 413 になる"
+            );
+    }
+
+    /// <summary>
+    /// 9d. ホストが <c>IHttpMaxRequestBodySizeFeature</c> を公開しない配置でも、オプトインしていない
+    /// バイナリ PUT の宣言長は既定上限（Kestrel 既定の 30,000,000）と突き合わせて 413 で拒否される。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 上限が <c>null</c> になる経路は 2 つある——<c>allowUnboundedUploads</c> による意図的な解除と、
+    /// そもそも feature を公開しないホスト（IIS アウトオブプロセス等）——が、後者では
+    /// 「<c>allowUnboundedUploads: false</c> のつもり」でも事前チェックが素通りしてしまう。
+    /// 意図の判別はエンドポイントのメタデータ（<c>IRequestSizeLimitMetadata</c>）で行い、
+    /// メタデータが無いのに上限も取れない場合は既定上限へフォールバックする。
+    /// </para>
+    /// <para>
+    /// 観測は <c>RemoteServerEngine.ExecuteUploadAsync</c> を <see cref="DefaultHttpContext"/> で直接駆動して行う
+    /// （9c の「エンジンの接合部を直接マップする」流儀の延長）。この分岐は<b>本文を 1 バイトも読まないこと</b>が
+    /// 主張の中身なので、実 HTTP で 30MB 超の本文を送ると、サーバーが本文を読まずに応答した際の送信中断
+    /// （<see cref="Stream_Put_WithoutOptIn_IsRejectedByDefaultRequestSizeLimit"/> の remarks にある接続リセット）が
+    /// 観測へ混ざる。<see cref="DefaultHttpContext"/> は feature を 1 つも持たないため
+    /// 「feature が取れないホスト」そのものを再現できる。
+    /// </para>
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Binary/Remote] 9d: サイズ上限 feature が無い配置でも宣言長は既定上限で 413 になる"
+    )]
+    public async Task Stream_Put_WithoutSizeLimitFeature_FallsBackToDefaultLimit()
+    {
+        // (1) メタデータなし（＝解除を頼んでいない）× 既定上限超過 → 書き込みを呼ばずに 413
+        var boundedWriteCalled = false;
+        var bounded = NewUploadContext(30_000_001, metadata: null);
+
+        await RemoteServerEngine.ExecuteUploadAsync(
+            bounded,
+            (_, _) =>
+            {
+                boundedWriteCalled = true;
+                return Task.FromResult(true);
+            }
+        );
+
+        bounded
+            .Response.StatusCode.Should()
+            .Be(
+                StatusCodes.Status413PayloadTooLarge,
+                "上限が取れない配置では Kestrel 既定（30,000,000）をフォールバック上限に使う"
+            );
+        boundedWriteCalled
+            .Should()
+            .BeFalse("拒否は書き込み（＝宣言長ぶんの領域確保）より前に起きる");
+        (await ReadErrorAsync(bounded))!
+            .Type.Should()
+            .Be("BadRequest", "他の分類済み拒否と同じ RemoteError 本文が載る");
+
+        // (2) 同じ配置でも、解除メタデータが付いていれば「解除は意図」＝素通しする
+        var unboundedWriteCalled = false;
+        var unbounded = NewUploadContext(30_000_001, DisableRequestBodySizeLimit.Instance);
+
+        await RemoteServerEngine.ExecuteUploadAsync(
+            unbounded,
+            (_, _) =>
+            {
+                unboundedWriteCalled = true;
+                return Task.FromResult(true);
+            }
+        );
+
+        unbounded.Response.StatusCode.Should().Be(StatusCodes.Status204NoContent);
+        unboundedWriteCalled.Should().BeTrue("解除を明示した側では書き込みまで到達する");
+
+        // (3) 境界: フォールバック上限ちょうどは超過ではない（比較は「上限より大きい」）
+        var atLimitWriteCalled = false;
+        var atLimit = NewUploadContext(30_000_000, metadata: null);
+
+        await RemoteServerEngine.ExecuteUploadAsync(
+            atLimit,
+            (_, _) =>
+            {
+                atLimitWriteCalled = true;
+                return Task.FromResult(true);
+            }
+        );
+
+        atLimit.Response.StatusCode.Should().Be(StatusCodes.Status204NoContent);
+        atLimitWriteCalled.Should().BeTrue("上限ちょうどは拒否しない");
+    }
+
+    /// <summary>
+    /// サイズ上限 feature を持たない PUT の <see cref="HttpContext"/> を組み立てる
+    /// （<paramref name="metadata"/> を渡すとその 1 件を持つエンドポイントを割り当てる）
+    /// </summary>
+    private static DefaultHttpContext NewUploadContext(long contentLength, object? metadata)
+    {
+        var context = new DefaultHttpContext();
+        context.Request.Method = HttpMethods.Put;
+        context.Request.ContentLength = contentLength;
+        context.Request.Body = Stream.Null;
+        context.Response.Body = new MemoryStream();
+
+        if (metadata is not null)
+        {
+            context.SetEndpoint(
+                new Endpoint(
+                    _ => Task.CompletedTask,
+                    new EndpointMetadataCollection(metadata),
+                    "upload"
+                )
+            );
+        }
+
+        return context;
+    }
+
+    /// <summary>組み立てた <see cref="HttpContext"/> の応答本文を <c>RemoteError</c> として読み出す</summary>
+    private static async Task<RemoteError?> ReadErrorAsync(HttpContext context)
+    {
+        context.Response.Body.Position = 0;
+        return await JsonSerializer.DeserializeAsync<RemoteError>(
+            context.Response.Body,
+            RemoteJson.Options,
+            Ct
+        );
+    }
+
+    /// <summary>生バイト列を <c>application/octet-stream</c> の PUT で送る（Content-Length は本文長）</summary>
+    private static Task<HttpResponseMessage> PutBinaryAsync(
+        HttpClient client,
+        string requestUri,
+        byte[] payload
+    )
+    {
+        var content = new ByteArrayContent(payload);
+        content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+
+        var request = new HttpRequestMessage(HttpMethod.Put, requestUri) { Content = content };
+        return client.SendAsync(request, Ct);
     }
 
     /// <summary>

@@ -725,6 +725,122 @@ public abstract class RemoteServiceRuntimeTestsBase : IAsyncLifetime
         }
     }
 
+    /// <summary>
+    /// 21. 名前付きクエリのページング引数（<c>take</c> / <c>skip</c>）が不正な値のリクエストは 400（BadRequest）になる。
+    /// </summary>
+    /// <remarks>
+    /// <c>take &lt;= 0</c> / <c>skip &lt; 0</c> はランタイムの <c>SqlQuery.Take</c> / <c>Skip</c> が
+    /// <see cref="ArgumentOutOfRangeException"/> で拒否する値で、素通しすると「クライアントが送った値の不備」が
+    /// サーバー側の未処理例外＝500（ログ＋<c>OnServerError</c> フック）に化ける。リクエスト解釈の境界で
+    /// 分類する規則（必須フィールド欠落・未定義の <c>ConcurrencyMode</c> と同じ流儀）に揃える。
+    /// 生成クライアントは呼び出し側の値をそのまま載せるため、素の <see cref="HttpClient"/> で直接送って観測する。
+    /// 正常値（<c>take=2, skip=1</c>）が従来どおり通ることも同じ経路で対照する。
+    /// </remarks>
+    [Theory(
+        DisplayName = "[RemoteService] 21: 不正なページング引数（take<=0 / skip<0）は 400 になる"
+    )]
+    [InlineData(0, 0, true)]
+    [InlineData(-1, 0, true)]
+    [InlineData(5, -1, true)]
+    [InlineData(2, 1, false)]
+    public async Task InvalidPagingArguments_ReturnBadRequest(int take, int skip, bool rejected)
+    {
+        await SeedAsync();
+
+        var baseUrl = _server!.BaseUrl;
+
+        using var raw = new HttpClient();
+        using var content = new StringContent(
+            $"{{\"CustomerId\":1,\"Take\":{take},\"Skip\":{skip}}}",
+            System.Text.Encoding.UTF8,
+            "application/json"
+        );
+        using var response = await raw.PostAsync(
+            $"{baseUrl}/quicker/Order/GetByCustomer",
+            content,
+            Ct
+        );
+
+        if (rejected)
+        {
+            response
+                .StatusCode.Should()
+                .Be(HttpStatusCode.BadRequest, "ページング引数の不備はクライアント側の不備＝400");
+            (await response.Content.ReadFromJsonAsync<RemoteError>(Ct))!
+                .Type.Should()
+                .Be("BadRequest");
+        }
+        else
+        {
+            response.StatusCode.Should().Be(HttpStatusCode.OK, "正常値は従来どおり通る");
+        }
+    }
+
+    /// <summary>
+    /// 22. 名前付きクエリの不正なページング引数は、直結とリモートで同型・同じパラメータ名・同じ文言の
+    /// <see cref="ArgumentOutOfRangeException"/> になる（リモートは HTTP を投げる前に弾く）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 直結実装は <c>Query().Skip(skip).Take(take)</c> を通るため <c>SqlQuery.Skip</c> / <c>Take</c> が
+    /// <see cref="ArgumentOutOfRangeException"/> で拒否するのに対し、生成 HTTP クライアントは値をそのまま載せて
+    /// サーバーの 400 へ倒していた＝実装を差し替えると catch の型が変わっていた。null 引数（テスト 20）と同じく
+    /// 「入口で直結と同じ例外」を契約とするため、型・<c>ParamName</c>・メッセージの一致まで表明する。
+    /// </para>
+    /// <para>
+    /// <c>ParamName</c> が <c>take</c> / <c>skip</c> ではなく <c>count</c> なのは、直結が投げる例外がそうだから
+    /// （<c>SqlQuery.Skip(int count)</c> / <c>Take(int count)</c> の引数名）。呼び出し側の catch フィルタが
+    /// 実装の差し替えで挙動を変えないことが契約なので、直結の実際の値を写す。
+    /// </para>
+    /// <para>
+    /// リモート側が <see cref="ArgumentOutOfRangeException"/> で失敗すること自体が「HTTP を投げていない」証拠になる
+    /// （サーバーまで届いていれば 400 ＝ <c>RemoteRepositoryException</c> になる）。サーバー側の 400 分岐は
+    /// 手書きクライアント向けの防御として残っており、テスト 21 が素の <see cref="HttpClient"/> で観測する。
+    /// </para>
+    /// </remarks>
+    [Fact(
+        DisplayName = "[RemoteService] 22: 不正なページング引数は直結・リモートとも ArgumentOutOfRangeException（パリティ）"
+    )]
+    public async Task InvalidPagingArguments_ThrowArgumentOutOfRange_LikeDirectConnection()
+    {
+        var services = new ServiceCollection();
+        ConfigureServerRepositories(services, _db.ReadWriteCreateConnectionString);
+        await using var directProvider = services.BuildServiceProvider();
+
+        var direct = directProvider.GetRequiredService<IOrderRepository>();
+        var remote = Orders;
+
+        // take / skip の各不正値と、両方が不正なとき（直結は Skip→Take の順に検証する）の 3 ケース
+        var cases = new (int Take, int Skip)[] { (0, 0), (5, -1), (0, -1) };
+
+        foreach (var (take, skip) in cases)
+        {
+            var directCall = async () =>
+                await direct.GetByCustomerAsync(1, take: take, skip: skip, Ct);
+            var remoteCall = async () =>
+                await remote.GetByCustomerAsync(1, take: take, skip: skip, Ct);
+
+            var expected = (
+                await directCall.Should().ThrowAsync<ArgumentOutOfRangeException>()
+            ).Which;
+            var actual = (
+                await remoteCall.Should().ThrowAsync<ArgumentOutOfRangeException>()
+            ).Which;
+
+            actual
+                .ParamName.Should()
+                .Be(expected.ParamName, "リモートも直結と同じパラメータ名で弾く");
+            actual
+                .Message.Should()
+                .Be(expected.Message, "文言まで一致する（どちらの検証が先に効くかも含めて同じ）");
+        }
+
+        // 正常値は従来どおり通る（対照）
+        (await remote.GetByCustomerAsync(1, take: 1, skip: 0, Ct))
+            .Should()
+            .BeEmpty();
+    }
+
     /// <summary>使い終えたクライアント DI・サーバー・一時 DB を破棄する</summary>
     public async ValueTask DisposeAsync()
     {

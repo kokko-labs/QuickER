@@ -80,29 +80,116 @@ public sealed class OracleSchemaSyncExecutor : ISchemaSyncExecutor
 
     /// <summary>スクリプトを「/」のみの行で分割し、各文を実行可能な形へ整える</summary>
     /// <remarks>
+    /// <para>
     /// 通常文は末尾の <c>;</c> を除去する。PL/SQL ブロック（<c>DECLARE</c> / <c>BEGIN</c> 開始）は
     /// 末尾の <c>;</c> を保持する。コメントのみ・空の文は実行対象から除外する。
+    /// </para>
+    /// <para>
+    /// 文字列リテラル（<c>'…''…'</c>）・引用識別子（<c>"…"</c>）・ブロックコメント（<c>/* … */</c>）の
+    /// <b>内側</b>にある「/」だけの行は区切りとして扱わない。説明文は改行を含められるため、追跡しないと
+    /// <c>COMMENT ON</c> の値に紛れた「/」行で文が割れ、Oracle は暗黙コミットのため部分適用になる。
+    /// </para>
+    /// <para>
+    /// リテラルとブロックコメントは行をまたぐため、判定は「その行の先頭時点で外側に居るか」で行う
+    /// （「/」だけの行はそれ自体が状態を変えないので、この判定で必要十分）。
+    /// </para>
+    /// <para>
+    /// Oracle の代替引用 <c>q'[…]'</c> は追跡しない（QuickER 自身は出力しないため実害経路はない）。
+    /// </para>
     /// </remarks>
-    internal static List<string> SplitStatements(string script)
+    public static List<string> SplitStatements(string script)
     {
         var statements = new List<string>();
         var current = new List<string>();
+        // 開いているリテラル・引用識別子の終端文字（null＝外側）と、ブロックコメントの内外
+        char? closing = null;
+        var inBlockComment = false;
 
         foreach (var rawLine in script.Replace("\r\n", "\n").Split('\n'))
         {
-            // 「/」のみ（前後空白許容）の行を文の区切りとする
-            if (rawLine.Trim() == "/")
+            // 「/」のみ（前後空白許容）の行を文の区切りとする（リテラル・コメントの外側に限る）
+            if (closing is null && !inBlockComment && rawLine.Trim() == "/")
             {
                 AddIfMeaningful(statements, current);
                 current.Clear();
                 continue;
             }
 
+            ScanLine(rawLine, ref closing, ref inBlockComment);
             current.Add(rawLine);
         }
 
         AddIfMeaningful(statements, current);
         return statements;
+    }
+
+    /// <summary>1 行を走査してリテラル・引用識別子・ブロックコメントの開閉状態を更新する</summary>
+    /// <remarks>
+    /// Oracle のブロックコメントは入れ子にできないため真偽値で持つ。終端文字の二重化（<c>''</c> / <c>""</c>）は
+    /// エスケープなので閉じたとみなさない。行コメント（<c>--</c>）は行末までを読み飛ばす＝そこに現れる引用符で
+    /// リテラルを開かない。
+    /// </remarks>
+    private static void ScanLine(string line, ref char? closing, ref bool inBlockComment)
+    {
+        var i = 0;
+
+        while (i < line.Length)
+        {
+            var c = line[i];
+
+            if (inBlockComment)
+            {
+                if (c == '*' && i + 1 < line.Length && line[i + 1] == '/')
+                {
+                    inBlockComment = false;
+                    i += 2;
+                    continue;
+                }
+
+                i++;
+                continue;
+            }
+
+            if (closing is not null)
+            {
+                // 終端文字の二重化はエスケープ（リテラルは閉じない）
+                if (c == closing && i + 1 < line.Length && line[i + 1] == c)
+                {
+                    i += 2;
+                    continue;
+                }
+
+                if (c == closing)
+                {
+                    closing = null;
+                }
+
+                i++;
+                continue;
+            }
+
+            // 行コメントは行末まで状態を変えない
+            if (c == '-' && i + 1 < line.Length && line[i + 1] == '-')
+            {
+                return;
+            }
+
+            if (c == '/' && i + 1 < line.Length && line[i + 1] == '*')
+            {
+                inBlockComment = true;
+                i += 2;
+                continue;
+            }
+
+            if (c is '\'' or '"')
+            {
+                closing = c;
+                i++;
+                continue;
+            }
+
+            i++;
+        }
     }
 
     /// <summary>蓄積した行を 1 文として整形し、意味がある場合のみ追加する</summary>

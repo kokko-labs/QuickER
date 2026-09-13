@@ -191,6 +191,42 @@ public sealed class SyncVoRuntimeTests : IAsyncLifetime
     }
 
     /// <summary>
+    /// ServerWins の読み直し適用が、VO 型のミラー版を据え置いたまま内容だけをサーバーへ揃える。
+    /// </summary>
+    /// <remarks>
+    /// 適用前に版プロパティをローカルの現在値へ差し替える処理は VO 経路で <c>Create</c> を通る。ここが
+    /// 効いていないと、サーバーの版がミラーへ入ってアンカーが跳ぶ（未取得の行を恒久的に読み飛ばす）。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Sync/VO] ServerWins の読み直し適用が VO 型の版を据え置いたまま内容を戻す"
+    )]
+    public async Task ServerWins_RestoresRowKeepingValueObjectVersion()
+    {
+        await _localOrders.InsertAsync(NewOrder(5, "dave"), Ct);
+        await _engine.SyncAsync(cancellationToken: Ct);
+
+        var key = OrderIdValue.Create(5);
+        var mirrored = await _localOrdersRaw.GetByIdAsync(key, Ct);
+        var mirrorBefore = mirrored!.RowVer!.Value;
+
+        mirrored.Title = TitleValue.Create("local-edit");
+        await _localOrders.UpdateAsync(mirrored, cancellationToken: Ct);
+
+        var result = await _engine.SyncAsync(
+            new SyncOptions { ConflictPolicy = SyncConflictPolicy.ServerWins },
+            Ct
+        );
+
+        result.Conflicts.Should().BeEmpty();
+        result.Uploaded.Should().Be(0);
+
+        var restored = await _localOrdersRaw.GetByIdAsync(key, Ct);
+        restored!.Title.Value.Should().Be("dave", "サーバーが変えていない行でもサーバー内容へ戻る");
+        restored.RowVer!.Value.Should().Equal(mirrorBefore, "VO 型の版も据え置かれる");
+        (await _journal.CountPendingAsync(Ct)).Should().Be(0);
+    }
+
+    /// <summary>
     /// サーバー役の書き込み面。版を採番し、楽観排他を <c>rowversion</c> と同じ意味論で肩代わりする。
     /// </summary>
     /// <remarks>

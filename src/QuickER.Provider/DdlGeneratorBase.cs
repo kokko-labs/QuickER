@@ -45,30 +45,18 @@ public abstract class DdlGeneratorBase : IDdlGenerator
         foreach (var entity in diagram.Entities)
         {
             var table = entity.TableName;
-            var pks = entity.Columns.Where(c => c.IsPrimaryKey).ToList();
             sb.AppendLine($"CREATE TABLE {QuoteQualifiedName(table)} (");
 
             // 列定義の後に続く制約行（PRIMARY KEY → UNIQUE の順）を先に組み立てる。
-            // 列定義の末尾カンマ判定に「後続制約行の有無」が必要なため
-            var constraintLines = new List<string>();
-
-            // PRIMARY KEY 制約（複合 PK 対応のため列定義とは分離して出力）
-            if (pks.Count > 0)
-            {
-                var pkCols = string.Join(", ", pks.Select(p => QuoteSimpleName(p.Name)));
-                constraintLines.Add(
-                    $"    CONSTRAINT {QuoteConstraintName($"PK_{SafeName(table)}")} PRIMARY KEY ({pkCols})"
-                );
-            }
-
-            // UNIQUE 制約（制約名が未設定なら UQ_{テーブル}_{列…} を合成する）
-            foreach (var unique in UniqueConstraintNaming.ResolveAll(entity, SafeName))
-            {
-                var uniqueCols = string.Join(", ", unique.ColumnNames.Select(QuoteSimpleName));
-                constraintLines.Add(
-                    $"    CONSTRAINT {QuoteConstraintName(unique.Name)} UNIQUE ({uniqueCols})"
-                );
-            }
+            // 列定義の末尾カンマ判定に「後続制約行の有無」が必要なため。
+            // 組み立ては差分同期の CREATE TABLE と共有し、同じテーブルが同じ形になることを構造で担保する
+            var constraintLines = TableConstraintLineBuilder.Build(
+                entity,
+                table,
+                QuoteSimpleName,
+                QuoteConstraintName,
+                SafeName
+            );
 
             for (var i = 0; i < entity.Columns.Count; i++)
             {
@@ -87,11 +75,7 @@ public abstract class DdlGeneratorBase : IDdlGenerator
                 sb.AppendLine(line);
             }
 
-            for (var i = 0; i < constraintLines.Count; i++)
-            {
-                var isLast = i == constraintLines.Count - 1;
-                sb.AppendLine(constraintLines[i] + (isLast ? string.Empty : ","));
-            }
+            TableConstraintLineBuilder.Append(sb, constraintLines);
 
             // 閉じ括弧の直後・文末セミコロンの前に方言固有のテーブルオプション（MySQL の COMMENT= 句等）を付ける
             sb.AppendLine($"){BuildTableOptionsSuffix(entity)};");

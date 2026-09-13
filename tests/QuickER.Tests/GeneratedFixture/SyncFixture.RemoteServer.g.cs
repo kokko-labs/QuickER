@@ -9,6 +9,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Http.Metadata;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
@@ -225,6 +226,30 @@ internal static class RemoteServerEngine
             ? throw new RemoteBadRequestException($"The '{name}' field is required.")
             : value;
 
+    /// <summary>Returns the paging arguments of a named query unchanged, rejecting values the query pipeline cannot use (reported to the client as HTTP 400).</summary>
+    /// <remarks>
+    /// <c>Take</c> requires a count greater than zero and <c>Skip</c> a count that is not negative - dialects disagree on
+    /// what the other values mean, so the query pipeline rejects them outright. Passing them on would surface as an
+    /// unhandled server-side error and be reported as a 500, complete with the server-side log entry and the
+    /// <c>OnServerError</c> hook, even though nothing on the server went wrong: the values came from the caller. They are
+    /// therefore classified here as a fault in the payload the client sent. The two travel together because a query that
+    /// pages declares both.
+    /// </remarks>
+    public static (int Take, int Skip) ValidatedPaging(int take, int skip)
+    {
+        if (take <= 0)
+        {
+            throw new RemoteBadRequestException("The 'take' field must be greater than zero.");
+        }
+
+        if (skip < 0)
+        {
+            throw new RemoteBadRequestException("The 'skip' field must not be negative.");
+        }
+
+        return (take, skip);
+    }
+
     /// <summary>Resolves the remote-surface repository from DI.</summary>
     public static TRepository Repository<TRepository>(HttpContext context)
         where TRepository : notnull => context.RequestServices.GetRequiredService<TRepository>();
@@ -366,9 +391,11 @@ internal static class RemoteServerEngine
 
     /// <summary>
     /// Performs an upload (PUT) of an unbounded binary column. A missing Content-Length (chunked transfer) yields 411
-    /// (the transfer contract requires a length), success yields 204, a missing row yields a 404 marked as "NotFound",
-    /// and a key that cannot be interpreted yields 400. The
-    /// <see cref="Microsoft.AspNetCore.Http.HttpRequest.Body"/> (non-seekable) is passed to the write with its length.
+    /// (the transfer contract requires a length), a declared length beyond this endpoint's effective request body size
+    /// limit (see <see cref="EffectiveRequestBodySizeLimit"/>) yields 413,
+    /// success yields 204, a missing row yields a 404 marked as "NotFound", and a key that cannot be interpreted yields
+    /// 400. The <see cref="Microsoft.AspNetCore.Http.HttpRequest.Body"/> (non-seekable) is passed to the write with its
+    /// length.
     /// </summary>
     public static async Task ExecuteUploadAsync(
         HttpContext context,
@@ -388,6 +415,24 @@ internal static class RemoteServerEngine
                     StatusCodes.Status411LengthRequired,
                     "BadRequest",
                     "A binary column upload requires a Content-Length header (chunked transfer is not supported)."
+                ).ConfigureAwait(false);
+                return;
+            }
+
+            // The host's body size limit only fires once the body is actually read, while a write reserves storage for
+            // the declared length before reading anything (SQLite allocates a zeroblob of that length first). An
+            // oversized declaration would therefore reserve that space on a request that never sends the data, so the
+            // declaration is checked against the limit here, ahead of the write. A limit of null means it has been
+            // lifted deliberately, and the declaration passes through.
+            var maxRequestBodySize = EffectiveRequestBodySizeLimit(context);
+
+            if (maxRequestBodySize is not null && length.Value > maxRequestBodySize.Value)
+            {
+                await WriteErrorAsync(
+                    context,
+                    StatusCodes.Status413PayloadTooLarge,
+                    "BadRequest",
+                    "The declared Content-Length exceeds the request body size limit of this endpoint."
                 ).ConfigureAwait(false);
                 return;
             }
@@ -433,6 +478,48 @@ internal static class RemoteServerEngine
             LogServerError(context, ex);
             throw;
         }
+    }
+
+    /// <summary>Kestrel's out-of-the-box request body size limit, used as the fallback when the host publishes none.</summary>
+    /// <remarks>
+    /// 30,000,000 bytes is the value Kestrel applies by default and the one the documentation quotes for these
+    /// endpoints, so a deployment whose host publishes no limit still rejects the same declarations as one that does,
+    /// instead of quietly accepting a declaration of any size.
+    /// </remarks>
+    private const long DefaultMaxRequestBodySize = 30_000_000;
+
+    /// <summary>Returns the limit the declared upload length is measured against (<c>null</c> when the limit was deliberately lifted).</summary>
+    /// <remarks>
+    /// <para>
+    /// A limit of <c>null</c> on the feature has two unrelated causes: the limit was lifted on purpose, or the host
+    /// publishes no <see cref="IHttpMaxRequestBodySizeFeature"/> at all - an out-of-process IIS deployment, for one.
+    /// The feature alone cannot tell them apart, and reading the second as "no limit" would turn the check off on an
+    /// endpoint that never asked for that.
+    /// </para>
+    /// <para>
+    /// The intent is therefore read from the endpoint's own metadata, which is where the opt-in is recorded
+    /// (<see cref="DisableRequestBodySizeLimit"/>, or any <see cref="IRequestSizeLimitMetadata"/> the host attached):
+    /// when it is present its limit is authoritative, <c>null</c> included. Otherwise the feature's limit applies, and
+    /// where even that cannot be read the default above stands in.
+    /// </para>
+    /// <para>
+    /// One consequence is that a host which lifts its limit globally, without mapping these endpoints with
+    /// <c>allowUnboundedUploads</c>, still has their declarations measured against the default. Lifting the limit for
+    /// them is the opt-in: pass <c>allowUnboundedUploads: true</c>, or attach size-limit metadata to the returned
+    /// group.
+    /// </para>
+    /// </remarks>
+    private static long? EffectiveRequestBodySizeLimit(HttpContext context)
+    {
+        var metadata = context.GetEndpoint()?.Metadata.GetMetadata<IRequestSizeLimitMetadata>();
+
+        if (metadata is not null)
+        {
+            return metadata.MaxRequestBodySize;
+        }
+
+        return context.Features.Get<IHttpMaxRequestBodySizeFeature>()?.MaxRequestBodySize
+            ?? DefaultMaxRequestBodySize;
     }
 
     /// <summary>Performs a NULL-out (DELETE) of an unbounded binary column. Success yields 204, a missing row yields a 404 marked as "NotFound", and a key that cannot be interpreted yields 400.</summary>
@@ -853,7 +940,8 @@ public enum RemoteAccess
 /// <summary>Endpoint metadata that lifts the request size limit for the binary PUT (attached only when the group opted in to unbounded uploads).</summary>
 /// <remarks>
 /// It is attached only when the group was mapped with <c>allowUnboundedUploads: true</c>; without it the host's own
-/// limit - 30 MB under Kestrel's defaults - applies and a larger upload is rejected with HTTP 413. Because an endpoint
+/// limit - 30 MB under Kestrel's defaults, and that same figure where the host publishes no limit at all - applies and
+/// a larger upload is rejected with HTTP 413. Because an endpoint
 /// that accepts a body of any size is a denial-of-service surface, combining the opt-in with
 /// <see cref="RemoteAccess.RequireAuthorization"/> is recommended.
 /// To set a limit of a different size, override the whole group via the returned <see cref="RouteGroupBuilder"/>.
