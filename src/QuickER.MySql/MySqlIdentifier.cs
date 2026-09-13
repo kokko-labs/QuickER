@@ -51,6 +51,15 @@ public static class MySqlIdentifier
     public static string EscapeStringLiteral(string s) =>
         (s ?? string.Empty).Replace("\\", "\\\\").Replace("'", "''");
 
+    /// <summary>動的 SQL の文字列リテラル内へ埋め込むテーブル名を、クォート＋リテラルエスケープして返す</summary>
+    /// <remarks>
+    /// <c>SET @sql = IF(…, '…')</c> / <c>CONCAT('…', @fk, '…')</c> のように組み立てた SQL を文字列リテラルとして
+    /// 渡す経路では、クォートだけでは不十分で、名前に含まれる <c>'</c>（および MySQL では <c>\</c>）が
+    /// 外側のリテラルを壊してしまう。クォートの後にリテラルエスケープを掛けたこのメソッドを通すこと
+    /// （4 方言で同名・同意味のヘルパーを持つ）。
+    /// </remarks>
+    public static string QuoteForDynamicSql(string name) => EscapeStringLiteral(Quote(name));
+
     /// <summary>
     /// 列定義に付与するインライン <c>COMMENT</c> 句（前置スペース込み）を組み立てる。
     /// 説明が空・空白のみなら空文字を返す（句を出力しない）。

@@ -690,4 +690,45 @@ public class MySqlSyncScriptBuilderTests
         sql.Should().Contain("ALTER TABLE `customer` DROP INDEX `uq_legacy`;");
         sql.Should().NotContain("DROP CONSTRAINT");
     }
+
+    // ---------------- 動的 SQL のリテラルエスケープ ----------------
+
+    /// <summary>
+    /// 主キー解除のプリペアド動的 SQL で、クォートしたテーブル名が文字列リテラル用にもエスケープされることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// <c>SET @sql = IF(…, '…')</c> の中身は文字列リテラルなので、クォートだけではテーブル名の <c>'</c> が
+    /// リテラルを閉じ、以降が SQL のコードとして解釈される。
+    /// <c>MySqlIdentifier.QuoteForDynamicSql</c> を通していれば <c>''</c> になる。
+    /// </remarks>
+    [Fact(DisplayName = "AlterPrimaryKey の動的 SQL はテーブル名の ' を二重化する")]
+    public void AlterPrimaryKey_TableNameWithQuote_IsEscapedInDynamicSql()
+    {
+        var sql = Build(AlterPk("o'rders", PkTarget("o'rders", "order_id")));
+
+        sql.Should()
+            .Contain(
+                "SET @sql = IF(@pk IS NULL, 'DO 0', 'ALTER TABLE `o''rders` DROP PRIMARY KEY');"
+            );
+        sql.Should().NotContain("'ALTER TABLE `o'rders`");
+    }
+
+    /// <summary>制約名不明の外部キー削除でも、CONCAT のテーブル名がリテラル用にエスケープされることを検証する</summary>
+    [Fact(DisplayName = "DropForeignKey の動的 SQL はテーブル名の ' を二重化する")]
+    public void DropForeignKey_TableNameWithQuote_IsEscapedInDynamicSql()
+    {
+        var item = new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.DropForeignKey,
+            TableName = "o'rders",
+            ParentEntity = new Entity { TableName = "customer" },
+            ChildEntity = new Entity { TableName = "o'rders" },
+            IsSelected = true,
+        };
+
+        var sql = Build(item);
+
+        sql.Should().Contain("CONCAT('ALTER TABLE `o''rders` DROP FOREIGN KEY `', @fk, '`')");
+        sql.Should().NotContain("CONCAT('ALTER TABLE `o'rders`");
+    }
 }

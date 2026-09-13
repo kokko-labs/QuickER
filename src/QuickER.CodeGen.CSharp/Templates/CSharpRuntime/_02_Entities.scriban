@@ -271,14 +271,14 @@ public abstract partial class EntityBase : EntityBaseCore { }
 {{~ if render_entities ~}}
 {{~ for item in entity_classes ~}}
 {{ if !for.first }}
-{{ end }}/// <summary>{{ if item.description_xml_doc != "" }}{{ item.description_xml_doc }}{{ else }}Entity for the {{ item.table_name }} table{{ end }}</summary>
+{{ end }}/// <summary>{{ if item.description_xml_doc != "" }}{{ item.description_xml_doc }}{{ else }}Entity for the {{ item.table_name_xml_doc }} table{{ end }}</summary>
 {{ if include_data_annotations }}[Table("{{ item.table_name }}")]
 {{ end }}{{ if emit_db_meta_attr && item.description != "" }}[DbTableMeta(Description = "{{ item.description }}")]
 {{ end }}{{ if item.unique_constraint_attributes_block != "" }}{{ item.unique_constraint_attributes_block }}
 {{ end }}public partial class {{ item.class_name }} : EntityBase
 {
 {{ for property in item.properties }}{{ if !for.first }}
-{{ end }}    /// <summary>{{ if property.description_xml_doc != "" }}{{ property.description_xml_doc }}{{ else }}Property for the {{ property.column_name }} column{{ end }}</summary>
+{{ end }}    /// <summary>{{ if property.description_xml_doc != "" }}{{ property.description_xml_doc }}{{ else }}Property for the {{ property.column_name_xml_doc }} column{{ end }}</summary>
 {{ if include_data_annotations && property.is_primary_key }}    [Key]
 {{ end }}    [Column("{{ property.column_name }}")]
 {{ if include_data_annotations && !property.is_nullable && property.is_reference_type }}    [Required]

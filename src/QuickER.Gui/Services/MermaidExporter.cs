@@ -20,7 +20,7 @@ public static class MermaidExporter
 
         foreach (var entity in diagram.Entities)
         {
-            builder.AppendLine($"    {entity.TableName} {{");
+            builder.AppendLine($"    {Identifier(entity.TableName)} {{");
 
             var uniqueColumnIds = CollectSingleColumnUniqueMembers(entity);
 
@@ -128,11 +128,23 @@ public static class MermaidExporter
     /// </remarks>
     private static string NormalizeDataType(string dataType)
     {
-        // 記号・空白の連続をまとめて 1 つのアンダースコアへ置換する
-        var result = System.Text.RegularExpressions.Regex.Replace(dataType, @"[\s(),]+", "_");
+        // 記号・空白の連続をまとめて 1 つのアンダースコアへ置換する。
+        // 先に改行・制御文字を空白へ畳んでおく（\s に含まれない制御文字が型トークンへ残ると行が壊れる）
+        var result = System.Text.RegularExpressions.Regex.Replace(
+            Identifier(dataType),
+            @"[\s(),]+",
+            "_"
+        );
 
         return result.TrimEnd('_');
     }
+
+    /// <summary>識別子（テーブル名・カラム名・リレーションのラベル）を Mermaid の行へ載せる形へ整える</summary>
+    /// <remarks>
+    /// Mermaid の <c>erDiagram</c> は 1 行 1 要素の記法で、名前に改行が混じると行が途中で終わり、
+    /// 残りが別の宣言として解釈される（図の名前で出力の構造を壊せてしまう）。改行・制御文字は空白へ畳む
+    /// </remarks>
+    private static string Identifier(string? name) => ExportTextSanitizer.Sanitize(name);
 
     /// <summary>Mermaid の属性行を構築する</summary>
     /// <remarks>
@@ -145,7 +157,7 @@ public static class MermaidExporter
         var builder = new StringBuilder();
         builder.Append(NormalizeDataType(column.DataType));
         builder.Append(' ');
-        builder.Append(column.Name);
+        builder.Append(Identifier(column.Name));
 
         if (column.IsPrimaryKey)
         {
@@ -215,8 +227,8 @@ public static class MermaidExporter
         };
         var label = string.IsNullOrWhiteSpace(relationship.ConstraintName)
             ? "relates"
-            : relationship.ConstraintName;
+            : Identifier(relationship.ConstraintName);
 
-        return $"{source.TableName} {symbol} {target.TableName} : {label}";
+        return $"{Identifier(source.TableName)} {symbol} {Identifier(target.TableName)} : {label}";
     }
 }

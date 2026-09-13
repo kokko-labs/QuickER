@@ -76,7 +76,7 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
         {
             var pkCols = string.Join(", ", pks.Select(p => MySqlIdentifier.QuoteSimple(p.Name)));
             sb.AppendLine(
-                $"    CONSTRAINT `PK_{MySqlIdentifier.SafeName(item.TableName)}` PRIMARY KEY ({pkCols})"
+                $"    CONSTRAINT `{MySqlIdentifier.Escape($"PK_{MySqlIdentifier.SafeName(item.TableName)}")}` PRIMARY KEY ({pkCols})"
             );
         }
 
@@ -115,7 +115,8 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
     /// </remarks>
     protected override void AppendDropPrimaryKey(StringBuilder sb, SchemaDiffItem item)
     {
-        var table = MySqlIdentifier.Quote(item.TableName);
+        // クォートした名前をプリペアド動的 SQL の文字列リテラルへ埋めるため、リテラルエスケープ込みのヘルパーを通す
+        var table = MySqlIdentifier.QuoteForDynamicSql(item.TableName);
         var tableName = MySqlIdentifier.EscapeStringLiteral(
             MySqlIdentifier.TableNameOnly(item.TableName)
         );
@@ -233,11 +234,7 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
         // 構成列が特定できない場合は不正な DDL を出さず、コメントでスキップを明示する
         if (columnPairs.Count == 0)
         {
-            sb.AppendLine(
-                // スキップ理由の識別子は生成 SQL の決定性を保つため方言中立・カルチャ非依存にする
-                // （表示用の item.Description は UI 言語で変わるため使わない）
-                $"-- Skipped: could not resolve the column required to add the foreign key. ({SchemaDiffService.NormalizeTable(item.ChildEntity)} -> {SchemaDiffService.NormalizeTable(item.ParentEntity)})"
-            );
+            sb.AppendLine(SyncScriptBuilderHelper.BuildForeignKeySkipComment(item));
             return;
         }
 
@@ -304,7 +301,8 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
         var parentName = MySqlIdentifier.EscapeStringLiteral(
             MySqlIdentifier.TableNameOnly(parentTbl)
         );
-        var childQuoted = MySqlIdentifier.Quote(childTbl);
+        // クォートした名前を CONCAT の文字列リテラルへ埋めるため、リテラルエスケープ込みのヘルパーを通す
+        var childQuoted = MySqlIdentifier.QuoteForDynamicSql(childTbl);
 
         sb.AppendLine("SELECT rc.CONSTRAINT_NAME INTO @fk");
         sb.AppendLine("FROM information_schema.REFERENTIAL_CONSTRAINTS rc");
@@ -352,7 +350,9 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
         {
             // 列定義が復元できない場合は不正な DDL を出さずスキップを明示する
             sb.AppendLine(
-                $"-- Skipped: could not restore the definition of column {item.ColumnName}; COMMENT was not set."
+                // 列名は自由入力なので改行・制御文字を畳んでコメント行の突き破りを防ぐ
+                $"-- Skipped: could not restore the definition of column {SqlComment.Sanitize(item.ColumnName)}; "
+                    + "COMMENT was not set."
             );
             return;
         }
@@ -383,8 +383,10 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
     {
         foreach (var reorder in plan.Reorders)
         {
-            // 見出し（固定文は英語が正本）
-            sb.AppendLine($"-- ===== ReorderColumns: {reorder.TableName} =====");
+            // 見出し（固定文は英語が正本）。テーブル名は自由入力なので改行・制御文字を畳む
+            sb.AppendLine(
+                $"-- ===== ReorderColumns: {SqlComment.Sanitize(reorder.TableName)} ====="
+            );
 
             foreach (var move in reorder.Moves)
             {

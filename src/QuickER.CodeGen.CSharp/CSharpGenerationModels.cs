@@ -83,6 +83,9 @@ internal sealed class CSharpSyncTableModel
     /// <summary>対象テーブル名（ジャーナルへ記録する識別子でもある）</summary>
     public required string TableName { get; init; }
 
+    /// <summary>XML doc summary の定型文へ埋め込むテーブル名（XML エスケープ・改行畳み込み済み）</summary>
+    public required string TableNameXmlDoc { get; init; }
+
     /// <summary>
     /// リモートエンドポイントのルート名（例 <c>SyncItem</c>）＝<see cref="CSharpRepositoryModel.RemoteRouteName"/> と同値。
     /// </summary>
@@ -282,8 +285,12 @@ internal sealed class CSharpValueObjectModel
     /// <summary>GuidKey（string で GUID 保持・無引数生成で自動採番）かどうか</summary>
     public required bool IsGuidKey { get; init; }
 
-    /// <summary>診断・エラーメッセージ用の代表カラム名</summary>
-    public required string ColumnName { get; init; }
+    /// <summary>XML doc summary の定型文へ埋め込む代表カラム名（XML エスケープ・改行畳み込み済み）</summary>
+    /// <remarks>
+    /// 列名は図由来の任意文字列なので、<c>&lt;</c> を含むと <c>///</c> が不正な XML になり（CS1570）、
+    /// C# の new-line（U+2028 等）を含むとコメント行を抜けて任意のコードになる。エスケープ済みの値を持つ。
+    /// </remarks>
+    public required string ColumnNameXmlDoc { get; init; }
 
     /// <summary>XML doc summary へ埋め込む列の説明（XML エスケープ・改行畳み込み済み）。空なら定型文へフォールバックする</summary>
     public required string DescriptionXmlDoc { get; init; }
@@ -318,6 +325,13 @@ internal sealed class CSharpClassModel
 
     /// <summary>対応するテーブル名</summary>
     public required string TableName { get; init; }
+
+    /// <summary>XML doc summary の定型文へ埋め込むテーブル名（XML エスケープ・改行畳み込み済み）</summary>
+    /// <remarks>
+    /// <see cref="TableName"/> は <c>[Table("…")]</c> 用の C# リテラルエスケープなので XmlDoc には使えない
+    /// （<c>&lt;</c> が生のまま残り CS1570 になる）。XmlDoc へ載せる経路はこちらを使う。
+    /// </remarks>
+    public required string TableNameXmlDoc { get; init; }
 
     /// <summary>テーブルの説明（DB 定義メタ属性 [DbTableMeta] の Description 用）。空なら属性ごと省略する</summary>
     public required string Description { get; init; }
@@ -363,6 +377,13 @@ internal sealed class CSharpPropertyModel
 
     /// <summary>対応するカラム名</summary>
     public required string ColumnName { get; init; }
+
+    /// <summary>XML doc summary の定型文へ埋め込むカラム名（XML エスケープ・改行畳み込み済み）</summary>
+    /// <remarks>
+    /// <see cref="ColumnName"/> は <c>[Column("…")]</c> 用の C# リテラルエスケープなので XmlDoc には使えない
+    /// （<c>&lt;</c> が生のまま残り CS1570 になる）。XmlDoc へ載せる経路はこちらを使う。
+    /// </remarks>
+    public required string ColumnNameXmlDoc { get; init; }
 
     /// <summary>C# 型名</summary>
     public required string TypeName { get; init; }
@@ -705,8 +726,11 @@ internal sealed class CSharpEditModelClassModel
     /// <summary>生成する EditModel クラス名</summary>
     public required string ClassName { get; init; }
 
-    /// <summary>対応するテーブル名</summary>
+    /// <summary>対応するテーブル名（生成前診断のメッセージ用＝エスケープしない）</summary>
     public required string TableName { get; init; }
+
+    /// <summary>XML doc summary の定型文へ埋め込むテーブル名（XML エスケープ・改行畳み込み済み）</summary>
+    public required string TableNameXmlDoc { get; init; }
 
     /// <summary>XML doc summary へ埋め込むテーブルの説明（XML エスケープ・改行畳み込み済み）。空なら定型文へフォールバックする</summary>
     public required string DescriptionXmlDoc { get; init; }

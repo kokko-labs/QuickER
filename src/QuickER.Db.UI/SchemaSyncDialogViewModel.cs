@@ -213,12 +213,24 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
     /// </remarks>
     public void UpdatePreview()
     {
-        _currentPlan = _planner.BuildPlan(
-            DiffItems,
-            _provider.SyncCapabilities,
-            BuildPlanContext()
-        );
-        ScriptPreview = _provider.SyncScriptBuilder.Build(_currentPlan);
+        // 計画組み立て・スクリプト生成は図の内容次第で失敗し得る（型表記・名前の入口検証など）。
+        // このメソッドはチェックボックスの選択変更から直接呼ばれるため、例外を外へ出すと
+        // WPF の未処理例外になりアプリごと落ちる。失敗は既存の流儀どおりステータス行で伝える。
+        try
+        {
+            _currentPlan = _planner.BuildPlan(
+                DiffItems,
+                _provider.SyncCapabilities,
+                BuildPlanContext()
+            );
+            ScriptPreview = _provider.SyncScriptBuilder.Build(_currentPlan);
+        }
+        catch (Exception ex)
+        {
+            _currentPlan = new SyncPlan();
+            ScriptPreview = string.Empty;
+            StatusMessage = string.Format(Strings.SchemaSync_PreviewFailed, ex.Message);
+        }
     }
 
     /// <summary>選択可能なすべての差分を選択する</summary>

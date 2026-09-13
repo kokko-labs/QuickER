@@ -583,4 +583,45 @@ public class SqlServerSyncScriptBuilderTests
         var sql = BuildScript(new SqlServerSyncScriptBuilder(), new[] { item });
         sql.Should().Contain("ALTER TABLE [Customer] DROP CONSTRAINT [UQ_Legacy];");
     }
+
+    // ---------------- 動的 SQL のリテラルエスケープ ----------------
+
+    /// <summary>
+    /// 主キー解除の動的 SQL で、括弧付けしたテーブル名が文字列リテラル用にもエスケープされることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// <c>EXEC('…')</c> の中身は文字列リテラルなので、括弧付けだけではテーブル名の <c>'</c> がリテラルを閉じ、
+    /// 以降が SQL のコードとして解釈される。括弧付け＋リテラルエスケープ（<see cref="SqlIdentifier.QuoteForDynamicSql"/>）
+    /// を通していれば <c>'</c> は <c>''</c> になる。
+    /// </remarks>
+    [Fact(DisplayName = "AlterPrimaryKey の動的 SQL はテーブル名の ' を二重化する")]
+    public void AlterPrimaryKey_TableNameWithQuote_IsEscapedInDynamicSql()
+    {
+        var sql = BuildScript(
+            new SqlServerSyncScriptBuilder(),
+            new[] { AlterPk("o'rders", PkTarget("o'rders", "OrderId")) }
+        );
+
+        sql.Should().Contain("EXEC('ALTER TABLE [o''rders] DROP CONSTRAINT [' + @pk + ']')");
+        sql.Should().NotContain("EXEC('ALTER TABLE [o'rders]");
+    }
+
+    /// <summary>制約名不明の外部キー削除でも、動的 SQL のテーブル名がリテラル用にエスケープされることを検証する</summary>
+    [Fact(DisplayName = "DropForeignKey の動的 SQL はテーブル名の ' を二重化する")]
+    public void DropForeignKey_TableNameWithQuote_IsEscapedInDynamicSql()
+    {
+        var item = new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.DropForeignKey,
+            TableName = "o'rders",
+            ParentEntity = new Entity { TableName = "Customer" },
+            ChildEntity = new Entity { TableName = "o'rders" },
+            IsSelected = true,
+        };
+
+        var sql = BuildScript(new SqlServerSyncScriptBuilder(), new[] { item });
+
+        sql.Should().Contain("EXEC('ALTER TABLE [o''rders] DROP CONSTRAINT [' + @fk + ']')");
+        sql.Should().NotContain("EXEC('ALTER TABLE [o'rders]");
+    }
 }

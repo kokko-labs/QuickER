@@ -102,6 +102,12 @@ namespace QuickER.CodeGen.CSharp.Resources {
             }
         }
 
+        public static string CodeGen_Error_NameContainsControlCharacter {
+            get {
+                return ResourceManager.GetString("CodeGen_Error_NameContainsControlCharacter", resourceCulture);
+            }
+        }
+
         public static string CodeGen_Error_EntityClassNameCollision {
             get {
                 return ResourceManager.GetString("CodeGen_Error_EntityClassNameCollision", resourceCulture);

@@ -35,6 +35,13 @@ public sealed class SqliteSyncScriptBuilder : SyncScriptBuilderBase
     /// <inheritdoc />
     public override string Build(SyncPlan plan)
     {
+        // 列型は識別子でも文字列リテラルでもなく、SQL へ素通しで補間するしか無い
+        // （基底の Build を経由しない再構築方式なので、ここで同じ関門を通す）
+        SqlTypeText.Validate(plan);
+
+        // 名前の改行・制御文字も入口で止める（コメントのサニタイズ・識別子のエスケープとの二重化）
+        SqlNameText.Validate(plan);
+
         // 空の計画は空文字列（実行側は空スクリプトを no-op として COMMIT する）
         if (plan.Sections.Count == 0 && plan.Rebuilds.Count == 0)
         {
@@ -108,8 +115,9 @@ public sealed class SqliteSyncScriptBuilder : SyncScriptBuilderBase
         var tempName = table + RebuildSuffix;
         var quotedTemp = SqliteIdentifier.QuoteSimple(tempName);
 
-        // 見出し（固定文は英語が正本）
-        sb.AppendLine($"-- ===== RebuildTable: {table} =====");
+        // 見出し（固定文は英語が正本）。テーブル名は自由入力なので改行・制御文字を畳んでから載せる
+        // （SQLite の実行器はスクリプト全文を 1 コマンドで送るため、改行が残ると 2 行目が独立した文になる）
+        sb.AppendLine($"-- ===== RebuildTable: {SqlComment.Sanitize(table)} =====");
 
         // 合成後の定義で一時テーブルを作る（制約名は元テーブル名基準＝リネーム後に自然な名前になる）
         AppendCreateTableBody(sb, quotedTemp, table, rebuild.NewDefinition, rebuild.ForeignKeys);
@@ -293,13 +301,15 @@ public sealed class SqliteSyncScriptBuilder : SyncScriptBuilderBase
         string tableName
     ) =>
         sb.AppendLine(
-            $"-- Skipped '{kind}' on {tableName}: the target table is not part of this synchronization "
-                + "(e.g. its creation is unselected) or the reference could not be resolved."
+            // テーブル名は自由入力なので改行・制御文字を畳んでコメント行の突き破りを防ぐ
+            $"-- Skipped '{kind}' on {SqlComment.Sanitize(tableName)}: the target table is not part of this "
+                + "synchronization (e.g. its creation is unselected) or the reference could not be resolved."
         );
 
     /// <summary>説明設定は SQLite にスキーマレベルの機構が無いため出力しない（防御コメント・英語が正本）</summary>
     private static void AppendDescriptionUnsupported(StringBuilder sb, string tableName) =>
         sb.AppendLine(
-            $"-- Skipped: SQLite has no schema-level description mechanism ({tableName})."
+            // テーブル名は自由入力なので改行・制御文字を畳んでコメント行の突き破りを防ぐ
+            $"-- Skipped: SQLite has no schema-level description mechanism ({SqlComment.Sanitize(tableName)})."
         );
 }

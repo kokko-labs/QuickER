@@ -189,29 +189,34 @@ internal sealed partial class CSharpGenerationModelBuilder
                     ", ",
                     entity
                         .Columns.Where(column => !_columnTypes[column.Id].IsUnboundedBinary)
-                        .Select(column => SqlServerQuoteOpen + column.Name + SqlServerQuoteClose)
+                        .Select(column =>
+                            QuoteIdentifier(column.Name, SqlServerQuoteOpen, SqlServerQuoteClose)
+                        )
                 );
 
         var serverTable = QuoteQualified(entity.TableName, SqlServerQuoteOpen, SqlServerQuoteClose);
         var localTable = QuoteQualified(entity.TableName, "\"", "\"");
-        var serverKey = SqlServerQuoteOpen + keyColumn.Name + SqlServerQuoteClose;
-        var localKey = "\"" + keyColumn.Name + "\"";
+        var serverKey = QuoteIdentifier(keyColumn.Name, SqlServerQuoteOpen, SqlServerQuoteClose);
+        var localKey = QuoteIdentifier(keyColumn.Name, "\"", "\"");
         var rowVersionPropertyName = rowVersionColumn is null
             ? string.Empty
             : _nameConverter.ToPropertyName(rowVersionColumn.Name);
         var serverRowVersion = rowVersionColumn is null
             ? string.Empty
-            : SqlServerQuoteOpen + rowVersionColumn.Name + SqlServerQuoteClose;
+            : QuoteIdentifier(rowVersionColumn.Name, SqlServerQuoteOpen, SqlServerQuoteClose);
         var localRowVersion = rowVersionColumn is null
             ? string.Empty
-            : "\"" + rowVersionColumn.Name + "\"";
+            : QuoteIdentifier(rowVersionColumn.Name, "\"", "\"");
 
         return new CSharpSyncTableModel
         {
             EntityClassName = repository.EntityClassName,
             InterfaceName = repository.InterfaceName,
             KeyTypeName = repository.KeyTypeName,
-            TableName = entity.TableName,
+            // SyncTableDescriptor.TableName へ C# リテラルとして埋め込むためエスケープする（[Table] と同じ規則）
+            TableName = EscapeNameForCSharpString(entity.TableName),
+            // 記述子プロパティの XmlDoc へ載せるため、XML としてエスケープした形も持つ
+            TableNameXmlDoc = EscapeForXmlDocSummary(entity.TableName),
             IsVersionless = isVersionless,
             RemoteRouteName = repositoryName,
             DescriptorPropertyName = repositoryName,
@@ -280,7 +285,8 @@ internal sealed partial class CSharpGenerationModelBuilder
             ),
             DecoratorBinaryBlock = BuildSyncDecoratorBinaryBlock(
                 binaryColumns,
-                entity.TableName,
+                // Journal.RecordAsync("…") へ C# リテラルとして埋め込むためエスケープする
+                EscapeNameForCSharpString(entity.TableName),
                 repository.KeyTypeName,
                 BuildFormatKey("id", keyColumn, keyValueObject)
             ),
@@ -420,11 +426,21 @@ internal sealed partial class CSharpGenerationModelBuilder
 
     /// <summary>ドット区切りのテーブル名を方言のクォートで分割クォートする（5 方言共通の規則に合わせる）</summary>
     private static string QuoteQualified(string name, string open, string close) =>
-        string.Join(".", name.Split('.').Select(part => open + part + close));
+        string.Join(".", name.Split('.').Select(part => QuoteIdentifier(part, open, close)));
+
+    /// <summary>SQL 識別子を方言のクォートで包む（終端クォート文字を二重化してクォートの脱出を防ぐ）</summary>
+    /// <remarks>
+    /// 図の名前は自由入力で <c>]</c>（SQL Server）や <c>"</c>（SQLite）を含み得る。二重化しないとクォートが
+    /// そこで閉じ、以降が SQL のコードとして解釈される。DDL 側の <c>SqlIdentifier.Escape</c> /
+    /// <c>SqliteIdentifier.Escape</c> と同じ規則（方言の終端文字を 2 つ重ねる）。
+    /// </remarks>
+    private static string QuoteIdentifier(string name, string open, string close) =>
+        open + name.Replace(close, close + close) + close;
 
     /// <summary>文字列を C# の通常文字列リテラル（前後の <c>"</c> 込み）へ変換する</summary>
+    /// <remarks>改行も空白 1 つへ畳む（畳まないと 1 行前提の通常リテラルが行をまたいで壊れる）</remarks>
     private static string CSharpLiteral(string value) =>
-        "\"" + value.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
+        "\"" + EscapeNameForCSharpString(value) + "\"";
 
     /// <summary>エンティティ変数からミラー版（byte[]）を読む式を組み立てる</summary>
     /// <remarks>

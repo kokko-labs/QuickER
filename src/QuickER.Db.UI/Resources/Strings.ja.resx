@@ -253,6 +253,9 @@
   <data name="SchemaSync_DiffFailed" xml:space="preserve">
     <value>差分計算に失敗しました: {0}</value>
   </data>
+  <data name="SchemaSync_PreviewFailed" xml:space="preserve">
+    <value>スクリプトのプレビュー生成に失敗しました: {0}</value>
+  </data>
   <data name="SchemaSync_NoScript" xml:space="preserve">
     <value>実行するスクリプトがありません。</value>
   </data>

@@ -49,7 +49,8 @@ internal sealed partial class CSharpGenerationModelBuilder
             .Entities.Select(entity => new CSharpEfCoreEntityConfigModel
             {
                 EntityClassName = _nameConverter.ToEntityClassName(entity.TableName),
-                TableName = entity.TableName,
+                // Fluent の ToTable("...") へ C# リテラルとして埋め込むためエスケープする（[Table] と同じ規則）
+                TableName = EscapeNameForCSharpString(entity.TableName),
                 KeyPropertyNames = entity
                     .Columns.Where(column => column.IsPrimaryKey)
                     .Select(column => _nameConverter.ToPropertyName(column.Name))
@@ -81,7 +82,8 @@ internal sealed partial class CSharpGenerationModelBuilder
         return new CSharpEfCorePropertyConfigModel
         {
             PropertyName = _nameConverter.ToPropertyName(column.Name),
-            ColumnName = column.Name,
+            // Fluent の HasColumnName("...") へ C# リテラルとして埋め込むためエスケープする（[Column] と同じ規則）
+            ColumnName = EscapeNameForCSharpString(column.Name),
             IsRequired = !column.IsNullable,
             // VO は最大長・桁数を VO 内部で検証するため Fluent には出さない（Entity の [MaxLength] 抑制と同じ方針）
             MaxLength = valueObject is not null ? null : typeInfo.MaxLength,

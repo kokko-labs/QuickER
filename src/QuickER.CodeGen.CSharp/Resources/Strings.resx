@@ -82,6 +82,9 @@
   <data name="CodeGen_Error_EmptyTableName" xml:space="preserve">
     <value>There is an entity with an empty table name.</value>
   </data>
+  <data name="CodeGen_Error_NameContainsControlCharacter" xml:space="preserve">
+    <value>These names contain a line break or a control character: {0}. Such a character breaks the generated C# string literals and the comment lines the DDL writes, and no database accepts it inside an identifier. Remove it from the names in the diagram.</value>
+  </data>
   <data name="CodeGen_Error_EntityClassNameCollision" xml:space="preserve">
     <value>Tables {1} all map to the same entity class name '{0}'. Entity classes are partial, so they would merge into a single class and fail to compile. Rename the tables so that the generated class names differ (table names are singularized, so 'customer' and 'customers' both become 'CustomerEntity').</value>
   </data>

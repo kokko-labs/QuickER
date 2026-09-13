@@ -1186,7 +1186,7 @@ public abstract partial class ValueObjectGuidKeyBase<TSelf>
 {{~ if generate_value_objects && render_value_objects ~}}
 {{~ for vo in value_object_classes ~}}
 
-/// <summary>{{ if vo.description_xml_doc != "" }}{{ vo.description_xml_doc }}{{ else }}Value object for the {{ vo.column_name }} column{{ end }}</summary>
+/// <summary>{{ if vo.description_xml_doc != "" }}{{ vo.description_xml_doc }}{{ else }}Value object for the {{ vo.column_name_xml_doc }} column{{ end }}</summary>
 public sealed partial class {{ vo.class_name }}
     : {{ vo.base_declaration }},
         {{ vo.interface_declaration }}

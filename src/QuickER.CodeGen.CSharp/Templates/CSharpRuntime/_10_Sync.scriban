@@ -4531,7 +4531,7 @@ public sealed class HttpSyncServerSource<TEntity, TKey>
 public static class GeneratedSyncTables
 {
 {{~ for sync in sync_tables ~}}
-    /// <summary>The descriptor of {{ sync.table_name }}.</summary>
+    /// <summary>The descriptor of {{ sync.table_name_xml_doc }}.</summary>
     public static SyncTableDescriptor<{{ sync.entity_class_name }}, {{ sync.key_type_name }}> {{ sync.descriptor_property_name }} { get; } =
         new()
         {

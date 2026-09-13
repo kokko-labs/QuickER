@@ -1,4 +1,4 @@
-﻿using System.Text.RegularExpressions;
+using System.Text;
 using QuickER.CodeGen.CSharp.Resources;
 using QuickER.Model;
 
@@ -155,7 +155,10 @@ internal sealed partial class CSharpGenerationModelBuilder
         return new CSharpClassModel
         {
             ClassName = className,
-            TableName = entity.TableName,
+            // [Table("...")] へ C# リテラルとして埋め込むためエスケープする（DB 取込では " を含むテーブル名が実在し得る）
+            TableName = EscapeNameForCSharpString(entity.TableName),
+            // 説明が無いときの XmlDoc 定型文へ載せるため、XML としてエスケープした形も持つ
+            TableNameXmlDoc = EscapeForXmlDocSummary(entity.TableName),
             // [DbTableMeta(Description = "...")] へ C# リテラルとして埋め込むためエスケープする（未エスケープだと " や \ でコンパイル不能になる）
             Description = EscapeForCSharpString(entity.Description),
             DescriptionXmlDoc = EscapeForXmlDocSummary(entity.Description),
@@ -227,6 +230,8 @@ internal sealed partial class CSharpGenerationModelBuilder
         {
             ClassName = className,
             TableName = entity.TableName,
+            // 説明が無いときの XmlDoc 定型文へ載せるため、XML としてエスケープした形も持つ
+            TableNameXmlDoc = EscapeForXmlDocSummary(entity.TableName),
             DescriptionXmlDoc = EscapeForXmlDocSummary(entity.Description),
             Properties = properties,
             Navigations = navigationModels,
@@ -470,7 +475,10 @@ internal sealed partial class CSharpGenerationModelBuilder
         return new CSharpPropertyModel
         {
             PropertyName = _nameConverter.ToPropertyName(column.Name),
-            ColumnName = column.Name,
+            // [Column("...")] へ C# リテラルとして埋め込むためエスケープする（DB 取込では " を含む列名が実在し得る）
+            ColumnName = EscapeNameForCSharpString(column.Name),
+            // 説明が無いときの XmlDoc 定型文へ載せるため、XML としてエスケープした形も持つ
+            ColumnNameXmlDoc = EscapeForXmlDocSummary(column.Name),
             TypeName = typeName,
             IsNullable = column.IsNullable,
             IsReferenceType = isReferenceType,
@@ -669,13 +677,13 @@ internal sealed partial class CSharpGenerationModelBuilder
 
         if (column.IsPrimaryKey)
         {
-            // string 主キーは "{TABLE}-001" 形式（テーブル名は大文字化）
-            var prefix = EscapeForCSharpString(column.Name.ToUpperInvariant());
+            // string 主キーは "{TABLE}-001" 形式（テーブル名は大文字化）。出力先が補間文字列なので波括弧も二重化する
+            var prefix = EscapeForCSharpInterpolatedString(column.Name.ToUpperInvariant());
             expression = $"$\"{prefix}-00{{index}}\"";
         }
         else
         {
-            var label = EscapeForCSharpString(column.Name);
+            var label = EscapeForCSharpInterpolatedString(column.Name);
             expression = $"$\"{label} {{index}}\"";
         }
 
@@ -873,10 +881,11 @@ internal sealed partial class CSharpGenerationModelBuilder
             Initializer = nav.IsCollection
                 ? $" = new List<{targetEntityTypeName}>();"
                 : (nav.IsNullable ? string.Empty : " = null!;"),
-            PrincipalTableName = nav.PrincipalTableName,
-            PrincipalColumnName = nav.PrincipalColumnName,
-            DependentTableName = nav.DependentTableName,
-            DependentColumnName = nav.DependentColumnName,
+            // [NavigationReference("親表", "親列", "子表", "子列")] へ C# リテラルとして埋め込むためエスケープする
+            PrincipalTableName = EscapeNameForCSharpString(nav.PrincipalTableName),
+            PrincipalColumnName = EscapeNameForCSharpString(nav.PrincipalColumnName),
+            DependentTableName = EscapeNameForCSharpString(nav.DependentTableName),
+            DependentColumnName = EscapeNameForCSharpString(nav.DependentColumnName),
             ForeignKeyMetadataArguments = BuildForeignKeyMetadataArguments(nav),
         };
     }
@@ -937,10 +946,11 @@ internal sealed partial class CSharpGenerationModelBuilder
             Initializer = nav.IsCollection
                 ? $" = new EditModelCollection<{targetEditModelTypeName}>();"
                 : (declaresNullable ? string.Empty : " = null!;"),
-            PrincipalTableName = nav.PrincipalTableName,
-            PrincipalColumnName = nav.PrincipalColumnName,
-            DependentTableName = nav.DependentTableName,
-            DependentColumnName = nav.DependentColumnName,
+            // EditModel 側も同じ属性へ載るため、Entity 側と同じ規則でエスケープする
+            PrincipalTableName = EscapeNameForCSharpString(nav.PrincipalTableName),
+            PrincipalColumnName = EscapeNameForCSharpString(nav.PrincipalColumnName),
+            DependentTableName = EscapeNameForCSharpString(nav.DependentTableName),
+            DependentColumnName = EscapeNameForCSharpString(nav.DependentColumnName),
         };
     }
 
@@ -1169,26 +1179,75 @@ internal sealed partial class CSharpGenerationModelBuilder
         // & は最初にエスケープする（&lt; 等を二重エスケープしないため）
         var escaped = text.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
 
-        // CRLF/LF/CR いずれの改行も空白 1 つへ畳む（summary は 1 行前提）
-        return Regex.Replace(escaped, "\r\n|\r|\n", " ");
+        // 改行はすべて空白 1 つへ畳む（summary は 1 行前提）
+        return FoldNewLines(escaped);
     }
 
     /// <summary>
     /// 文字列を C# の通常文字列リテラル（<c>"..."</c>）へ安全に埋め込めるようエスケープする。
-    /// バックスラッシュと二重引用符をエスケープし、改行（CRLF/LF/CR）は空白 1 つへ畳む（リテラルは 1 行前提）。
+    /// バックスラッシュと二重引用符をエスケープし、改行は空白 1 つへ畳む（リテラルは 1 行前提）。
     /// 空・空白のみは空文字列を返す。<c>[DbColumnMeta]</c> / <c>[DbTableMeta]</c> の Description や DisplayName 既定値に共用する。
     /// </summary>
-    private static string EscapeForCSharpString(string? text)
+    private static string EscapeForCSharpString(string? text) =>
+        string.IsNullOrWhiteSpace(text) ? string.Empty : EscapeCSharpStringCore(text);
+
+    /// <summary>
+    /// 図の名前（テーブル名・列名・制約名）を C# の通常文字列リテラルへ安全に埋め込めるようエスケープする。
+    /// </summary>
+    /// <remarks>
+    /// 説明用の <see cref="EscapeForCSharpString"/> と違い、<b>空白のみの入力を空文字へ畳まない</b>。
+    /// 名前は「空にしてよい値」ではなく、空へ倒すと <c>[Column("")]</c> のように別の名前を名乗る生成物が出る。
+    /// 図の名前は GUI の自由入力・DB 取込・DBML/Excel 取込・MCP/AI 経由の任意文字列で、<c>"</c> や <c>\</c> を
+    /// 含み得る（DB 取込では実在し得る）。未エスケープだと生成コードがコンパイル不能になる。
+    /// </remarks>
+    private static string EscapeNameForCSharpString(string? name) =>
+        string.IsNullOrEmpty(name) ? string.Empty : EscapeCSharpStringCore(name);
+
+    /// <summary>
+    /// 図の名前を C# の<b>補間</b>文字列（<c>$"..."</c>）のリテラル部へ埋め込めるようエスケープする。
+    /// </summary>
+    /// <remarks>
+    /// 通常のエスケープに加えて <c>{</c> / <c>}</c> を二重化する。補間文字列では波括弧が式の開始・終了を表すため、
+    /// 名前に <c>{</c> が含まれると生成コードが「存在しない識別子の補間」になりコンパイル不能になる。
+    /// </remarks>
+    private static string EscapeForCSharpInterpolatedString(string? name) =>
+        EscapeNameForCSharpString(name).Replace("{", "{{").Replace("}", "}}");
+
+    /// <summary>C# の通常文字列リテラル用のエスケープ本体（バックスラッシュ → 二重引用符 → 改行畳み込みの順）</summary>
+    private static string EscapeCSharpStringCore(string text) =>
+        // バックスラッシュを最初にエスケープする（後続の \" を二重エスケープしないため）
+        FoldNewLines(text.Replace("\\", "\\\\").Replace("\"", "\\\""));
+
+    /// <summary>C# が改行とみなす文字をすべて空白 1 つへ畳む（1 行リテラル・1 行 summary 前提）</summary>
+    /// <remarks>
+    /// CRLF / LF / CR に加えて NEL（U+0085）・LINE SEPARATOR（U+2028）・PARAGRAPH SEPARATOR（U+2029）も畳む。
+    /// これらは C# 言語仕様上の new-line であり、残すと通常リテラルや <c>///</c> コメントが行をまたいで壊れる。
+    /// </remarks>
+    private static string FoldNewLines(string text)
     {
-        if (string.IsNullOrWhiteSpace(text))
+        var builder = new StringBuilder(text.Length);
+
+        for (var i = 0; i < text.Length; i++)
         {
-            return string.Empty;
+            if (!IsNewLine(text[i]))
+            {
+                builder.Append(text[i]);
+                continue;
+            }
+
+            // CRLF は 1 つの改行として空白 1 つへ畳む（2 つの空白にしない）
+            if (text[i] == '\r' && i + 1 < text.Length && text[i + 1] == '\n')
+            {
+                i++;
+            }
+
+            builder.Append(' ');
         }
 
-        // バックスラッシュを最初にエスケープする（後続の \" を二重エスケープしないため）
-        var escaped = text.Replace("\\", "\\\\").Replace("\"", "\\\"");
-
-        // CRLF/LF/CR いずれの改行も空白 1 つへ畳む（1 行リテラル前提）
-        return Regex.Replace(escaped, "\r\n|\r|\n", " ");
+        return builder.ToString();
     }
+
+    /// <summary>C# 言語仕様の new-line 文字か（CR / LF / NEL / LINE SEPARATOR / PARAGRAPH SEPARATOR）</summary>
+    private static bool IsNewLine(char ch) =>
+        ch is '\r' or '\n' or (char)0x85 or (char)0x2028 or (char)0x2029;
 }

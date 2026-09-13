@@ -54,7 +54,7 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
         {
             var pkCols = string.Join(", ", pks.Select(p => PgIdentifier.QuoteSimple(p.Name)));
             sb.AppendLine(
-                $"    CONSTRAINT \"PK_{PgIdentifier.SafeName(item.TableName)}\" PRIMARY KEY ({pkCols})"
+                $"    CONSTRAINT \"{PgIdentifier.Escape($"PK_{PgIdentifier.SafeName(item.TableName)}")}\" PRIMARY KEY ({pkCols})"
             );
         }
 
@@ -96,27 +96,44 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
     /// </remarks>
     protected override void AppendDropPrimaryKey(StringBuilder sb, SchemaDiffItem item)
     {
-        var table = PgIdentifier.Quote(item.TableName);
+        // クォートした名前を EXECUTE の文字列リテラルへ埋めるため、リテラルエスケープ込みのヘルパーを通す
+        var table = PgIdentifier.QuoteForDynamicSql(item.TableName);
         var tableName = PgIdentifier.EscapeStringLiteral(
             PgIdentifier.TableNameOnly(item.TableName)
         );
 
         // 旧主キーの制約名はシステムカタログを逆引きして特定し、見つかったときだけ DROP する
-        sb.AppendLine("DO $$");
-        sb.AppendLine("DECLARE pk_name text;");
-        sb.AppendLine("BEGIN");
-        sb.AppendLine("    SELECT con.conname INTO pk_name");
-        sb.AppendLine("    FROM pg_constraint con");
-        sb.AppendLine("    JOIN pg_class tbl ON con.conrelid = tbl.oid");
-        sb.AppendLine($"    WHERE con.contype = 'p' AND tbl.relname = '{tableName}'");
+        var body = new StringBuilder();
+        body.AppendLine("DECLARE pk_name text;");
+        body.AppendLine("BEGIN");
+        body.AppendLine("    SELECT con.conname INTO pk_name");
+        body.AppendLine("    FROM pg_constraint con");
+        body.AppendLine("    JOIN pg_class tbl ON con.conrelid = tbl.oid");
+        body.AppendLine($"    WHERE con.contype = 'p' AND tbl.relname = '{tableName}'");
         // 別スキーマの同名テーブルを誤って対象にしないよう public に限定する（取込と同じスコープ）
-        sb.AppendLine("        AND tbl.relnamespace = 'public'::regnamespace;");
-        sb.AppendLine("    IF pk_name IS NOT NULL THEN");
-        sb.AppendLine(
+        body.AppendLine("        AND tbl.relnamespace = 'public'::regnamespace;");
+        body.AppendLine("    IF pk_name IS NOT NULL THEN");
+        body.AppendLine(
             $"        EXECUTE 'ALTER TABLE {table} DROP CONSTRAINT \"' || pk_name || '\"';"
         );
-        sb.AppendLine("    END IF;");
-        sb.AppendLine("END $$;");
+        body.AppendLine("    END IF;");
+
+        AppendDoBlock(sb, body.ToString());
+    }
+
+    /// <summary>組み立て済みの本文を <c>DO … END …;</c> のドルクォートブロックとして書き出す</summary>
+    /// <remarks>
+    /// タグは本文と衝突しないものを <see cref="PgIdentifier.DollarQuoteTag"/> が決定的に選ぶ。
+    /// 本文へ埋めた名前に <c>$$</c> が含まれるとブロックがそこで終端し、以降が最上位の SQL 文として
+    /// 解釈されるため、タグの選択は本文が完成してからでなければならない。
+    /// </remarks>
+    private static void AppendDoBlock(StringBuilder sb, string body)
+    {
+        var tag = PgIdentifier.DollarQuoteTag(body);
+
+        sb.AppendLine($"DO {tag}");
+        sb.Append(body);
+        sb.AppendLine($"END {tag};");
     }
 
     /// <summary>主キー変更の付与フェーズ（新主キー制約の ADD）文を生成する</summary>
@@ -137,7 +154,7 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
 
         var pkCols = string.Join(", ", pks.Select(p => PgIdentifier.QuoteSimple(p.Name)));
         sb.AppendLine(
-            $"ALTER TABLE {PgIdentifier.Quote(item.TableName)} ADD CONSTRAINT \"PK_{PgIdentifier.SafeName(item.TableName)}\" "
+            $"ALTER TABLE {PgIdentifier.Quote(item.TableName)} ADD CONSTRAINT \"{PgIdentifier.Escape($"PK_{PgIdentifier.SafeName(item.TableName)}")}\" "
                 + $"PRIMARY KEY ({pkCols});"
         );
     }
@@ -207,11 +224,7 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
         // 構成列が特定できない場合は不正な DDL を出さず、コメントでスキップを明示する
         if (columnPairs.Count == 0)
         {
-            sb.AppendLine(
-                // スキップ理由の識別子は生成 SQL の決定性を保つため方言中立・カルチャ非依存にする
-                // （表示用の item.Description は UI 言語で変わるため使わない）
-                $"-- Skipped: could not resolve the column required to add the foreign key. ({SchemaDiffService.NormalizeTable(item.ChildEntity)} -> {SchemaDiffService.NormalizeTable(item.ParentEntity)})"
-            );
+            sb.AppendLine(SyncScriptBuilderHelper.BuildForeignKeySkipComment(item));
             return;
         }
 
@@ -268,26 +281,28 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
         // 制約名不明時は親子テーブル名からシステムカタログを逆引きして DO ブロックで削除する
         var childName = PgIdentifier.EscapeStringLiteral(PgIdentifier.TableNameOnly(childTbl));
         var parentName = PgIdentifier.EscapeStringLiteral(PgIdentifier.TableNameOnly(parentTbl));
-        sb.AppendLine("DO $$");
-        sb.AppendLine("DECLARE fk_name text;");
-        sb.AppendLine("BEGIN");
-        sb.AppendLine("    SELECT con.conname INTO fk_name");
-        sb.AppendLine("    FROM pg_constraint con");
-        sb.AppendLine("    JOIN pg_class child ON con.conrelid = child.oid");
-        sb.AppendLine("    JOIN pg_class parent ON con.confrelid = parent.oid");
-        sb.AppendLine(
+        var body = new StringBuilder();
+        body.AppendLine("DECLARE fk_name text;");
+        body.AppendLine("BEGIN");
+        body.AppendLine("    SELECT con.conname INTO fk_name");
+        body.AppendLine("    FROM pg_constraint con");
+        body.AppendLine("    JOIN pg_class child ON con.conrelid = child.oid");
+        body.AppendLine("    JOIN pg_class parent ON con.confrelid = parent.oid");
+        body.AppendLine(
             $"    WHERE con.contype = 'f' AND child.relname = '{childName}' AND parent.relname = '{parentName}'"
         );
         // 別スキーマの同名テーブルを誤って対象にしないよう public に限定する（取込と同じスコープ）
-        sb.AppendLine(
+        body.AppendLine(
             "        AND child.relnamespace = 'public'::regnamespace AND parent.relnamespace = 'public'::regnamespace;"
         );
-        sb.AppendLine("    IF fk_name IS NOT NULL THEN");
-        sb.AppendLine(
-            $"        EXECUTE 'ALTER TABLE {PgIdentifier.Quote(childTbl)} DROP CONSTRAINT \"' || fk_name || '\"';"
+        body.AppendLine("    IF fk_name IS NOT NULL THEN");
+        body.AppendLine(
+            // クォートした名前を EXECUTE の文字列リテラルへ埋めるため、リテラルエスケープ込みのヘルパーを通す
+            $"        EXECUTE 'ALTER TABLE {PgIdentifier.QuoteForDynamicSql(childTbl)} DROP CONSTRAINT \"' || fk_name || '\"';"
         );
-        sb.AppendLine("    END IF;");
-        sb.AppendLine("END $$;");
+        body.AppendLine("    END IF;");
+
+        AppendDoBlock(sb, body.ToString());
     }
 
     // ---------------- COMMENT ON (説明) ----------------

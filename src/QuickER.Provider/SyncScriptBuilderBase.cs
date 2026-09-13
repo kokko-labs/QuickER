@@ -25,6 +25,12 @@ public abstract class SyncScriptBuilderBase : ISyncScriptBuilder
     /// </remarks>
     public virtual string Build(SyncPlan plan)
     {
+        // 列型は識別子でも文字列リテラルでもなく、SQL へ素通しで補間するしか無い（DDL 生成と同じ関門）
+        SqlTypeText.Validate(plan);
+
+        // 名前の改行・制御文字も入口で止める（コメントのサニタイズ・識別子のエスケープとの二重化）
+        SqlNameText.Validate(plan);
+
         var sb = new StringBuilder();
 
         foreach (var section in plan.Sections)
@@ -172,7 +178,8 @@ public abstract class SyncScriptBuilderBase : ISyncScriptBuilder
         SchemaDiffItem item
     ) =>
         sb.AppendLine(
-            $"-- Skipped '{SchemaDiffKind.AlterPrimaryKey}' ({phase} phase) on {item.TableName}: "
+            // テーブル名は自由入力なので改行・制御文字を畳んでコメント行の突き破りを防ぐ
+            $"-- Skipped '{SchemaDiffKind.AlterPrimaryKey}' ({phase} phase) on {SqlComment.Sanitize(item.TableName)}: "
                 + "primary key changes are not rendered by this dialect."
         );
 

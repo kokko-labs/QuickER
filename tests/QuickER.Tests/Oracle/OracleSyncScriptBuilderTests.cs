@@ -657,4 +657,48 @@ public class OracleSyncScriptBuilderTests
         var sql = Build(item);
         sql.Should().Contain("ALTER TABLE \"customer\" DROP CONSTRAINT \"uq_legacy\";");
     }
+
+    // ---------------- 動的 SQL のリテラルエスケープ ----------------
+
+    /// <summary>
+    /// 主キー解除の PL/SQL ブロックで、クォートしたテーブル名が文字列リテラル用にもエスケープされることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// <c>EXECUTE IMMEDIATE '…'</c> の中身は文字列リテラルなので、クォートだけではテーブル名の <c>'</c> が
+    /// リテラルを閉じ、以降が SQL のコードとして解釈される。
+    /// <c>OracleIdentifier.QuoteForDynamicSql</c> を通していれば <c>''</c> になる。
+    /// </remarks>
+    [Fact(DisplayName = "AlterPrimaryKey の PL/SQL ブロックはテーブル名の ' を二重化する")]
+    public void AlterPrimaryKey_TableNameWithQuote_IsEscapedInDynamicSql()
+    {
+        var sql = Build(AlterPk("o'rders", PkTarget("o'rders", "order_id")));
+
+        sql.Should()
+            .Contain(
+                "EXECUTE IMMEDIATE 'ALTER TABLE \"o''rders\" DROP CONSTRAINT \"' || v_name || '\"';"
+            );
+        sql.Should().NotContain("EXECUTE IMMEDIATE 'ALTER TABLE \"o'rders\"");
+    }
+
+    /// <summary>制約名不明の外部キー削除でも、PL/SQL ブロックのテーブル名がリテラル用にエスケープされることを検証する</summary>
+    [Fact(DisplayName = "DropForeignKey の PL/SQL ブロックはテーブル名の ' を二重化する")]
+    public void DropForeignKey_TableNameWithQuote_IsEscapedInDynamicSql()
+    {
+        var item = new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.DropForeignKey,
+            TableName = "o'rders",
+            ParentEntity = new Entity { TableName = "customer" },
+            ChildEntity = new Entity { TableName = "o'rders" },
+            IsSelected = true,
+        };
+
+        var sql = Build(item);
+
+        sql.Should()
+            .Contain(
+                "EXECUTE IMMEDIATE 'ALTER TABLE \"o''rders\" DROP CONSTRAINT \"' || v_name || '\"';"
+            );
+        sql.Should().NotContain("EXECUTE IMMEDIATE 'ALTER TABLE \"o'rders\"");
+    }
 }

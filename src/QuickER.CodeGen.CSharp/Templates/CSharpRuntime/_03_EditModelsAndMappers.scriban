@@ -2468,7 +2468,7 @@ public abstract partial class EditModelBase<TSelf> : EditModelBaseCore<TSelf>
 {{~ if render_edit_models ~}}
 {{~ for item in edit_model_classes ~}}
 {{ if !for.first }}
-{{ end }}/// <summary>{{ if item.description_xml_doc != "" }}{{ item.description_xml_doc }}{{ else }}Edit model for on-screen editing of the {{ item.table_name }} table.{{ end }}</summary>
+{{ end }}/// <summary>{{ if item.description_xml_doc != "" }}{{ item.description_xml_doc }}{{ else }}Edit model for on-screen editing of the {{ item.table_name_xml_doc }} table.{{ end }}</summary>
 public partial class {{ item.class_name }} : EditModelBase<{{ item.class_name }}>
 {
     // Each column keeps two representations: the confirmed value and the on-screen input string (conversion errors are held by the error dictionary).

@@ -1463,7 +1463,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
 
             var sql =
                 $"SELECT {childMetadata.ColumnList} FROM {childMetadata.TableName} "
-                + $"WHERE {{ quote_open }}{childKeyColumn}{{ quote_close }} IN ({string.Join(", ", placeholders)});";
+                + $"WHERE {EntitySaveMetadata.QuoteIdentifier(childKeyColumn)} IN ({string.Join(", ", placeholders)});";
 
             await using var command = new {{ sql_command_type }}(sql, connection);
             for (var i = 0; i < count; i++)
@@ -2213,7 +2213,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
     private static string ColumnName(MemberInfo member) =>
         _columnNameCache.GetOrAdd(
             member,
-            static m => $"{{ quote_open }}{m.GetCustomAttribute<ColumnAttribute>()?.Name ?? m.Name}{{ quote_close }}"
+            static m => EntitySaveMetadata.QuoteIdentifier(m.GetCustomAttribute<ColumnAttribute>()?.Name ?? m.Name)
         );
 
     /// <summary>Extracts the bracketed column name from a column reference (a plain column x.Col, or a value object's x.Col.Value). Returns null when it is not a column.</summary>
@@ -2368,9 +2368,10 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
     }
 
     /// <summary>Extracts the raw column name from a bracketed column name "[col]". Returns null when it is not a simple column (null, wrapped in a function, etc.).</summary>
+    /// <remarks>The doubled closing quote that EntitySaveMetadata.QuoteIdentifier writes is folded back, so a name that contains the quote character resolves to the name the diagram actually holds.</remarks>
     private static string? RawColumnName(string? bracketedColumn) =>
         bracketedColumn is { Length: >= 2 } && bracketedColumn[0] == '{{ quote_open_char }}' && bracketedColumn[^1] == '{{ quote_close_char }}'
-            ? bracketedColumn[1..^1]
+            ? bracketedColumn[1..^1].Replace("{{ quote_close }}{{ quote_close }}", "{{ quote_close }}")
             : null;
 
     /// <summary>Escapes the LIKE wildcards (% _ [ \).</summary>

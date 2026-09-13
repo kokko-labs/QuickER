@@ -140,9 +140,9 @@ public static partial class DbmlImporter
 
                     if (tableNote.Success)
                     {
-                        currentEntity.Description = tableNote
-                            .Groups["note"]
-                            .Value.Replace("\\'", "'");
+                        currentEntity.Description = DbmlLiteral.Unescape(
+                            tableNote.Groups["note"].Value
+                        );
                         continue;
                     }
 
@@ -221,7 +221,7 @@ public static partial class DbmlImporter
     /// <remarks>
     /// 型名は空白を含んでもよい（2 番目以降のトークンをすべて型として連結する）。
     /// 設定省略時は NULL 許可を既定とし、<c>pk</c> 指定時は NOT NULL を強制する。
-    /// note 内のエスケープ <c>\'</c> はシングルクォートへ復元する
+    /// note 内のエスケープ（<c>\\</c> と <c>\'</c>）は <see cref="DbmlLiteral.Unescape"/> で復元する
     /// </remarks>
     /// <returns>復元したカラムと、カラム設定 <c>unique</c> が指定されていたか</returns>
     /// <exception cref="InvalidDataException">名前と型の 2 トークンに満たない場合</exception>
@@ -289,7 +289,7 @@ public static partial class DbmlImporter
 
             if (noteMatch.Success)
             {
-                column.Description = noteMatch.Groups["note"].Value.Replace("\\'", "'");
+                column.Description = DbmlLiteral.Unescape(noteMatch.Groups["note"].Value);
             }
         }
 
@@ -345,7 +345,7 @@ public static partial class DbmlImporter
 
             if (nameMatch.Success)
             {
-                name = nameMatch.Groups["name"].Value.Replace("\\'", "'");
+                name = DbmlLiteral.Unescape(nameMatch.Groups["name"].Value);
             }
         }
 
@@ -491,7 +491,7 @@ public static partial class DbmlImporter
 
             if (noteMatch.Success)
             {
-                constraintName = noteMatch.Groups["note"].Value.Replace("\\'", "'");
+                constraintName = DbmlLiteral.Unescape(noteMatch.Groups["note"].Value);
                 continue;
             }
 

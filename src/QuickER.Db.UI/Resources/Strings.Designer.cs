@@ -444,6 +444,12 @@ namespace QuickER.Db.UI.Resources {
             }
         }
 
+        public static string SchemaSync_PreviewFailed {
+            get {
+                return ResourceManager.GetString("SchemaSync_PreviewFailed", resourceCulture);
+            }
+        }
+
         public static string SchemaSync_NoScript {
             get {
                 return ResourceManager.GetString("SchemaSync_NoScript", resourceCulture);

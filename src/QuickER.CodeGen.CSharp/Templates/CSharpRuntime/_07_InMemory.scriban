@@ -2468,7 +2468,7 @@ public static class InMemorySampleData
     }
 {{~ for entity in entity_classes ~}}
 
-    /// <summary>Seeds sample data for {{ entity.table_name }}.</summary>
+    /// <summary>Seeds sample data for {{ entity.table_name_xml_doc }}.</summary>
     private static void Seed{{ entity.class_name }}(InMemoryDataStore store)
     {
         for (var index = 1; index <= RowsPerEntity; index++)

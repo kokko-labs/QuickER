@@ -866,7 +866,7 @@ public static class UnboundedBinaryColumnEngine
         var quotedColumn = metadata.QuotedColumnName(column);
 
         await using var command = CreateCommand(
-            $"SELECT {quotedColumn} FROM {metadata.TableName} WHERE [{metadata.KeyColumnName}] = @id;",
+            $"SELECT {quotedColumn} FROM {metadata.TableName} WHERE {EntitySaveMetadata.QuoteIdentifier(metadata.KeyColumnName)} = @id;",
             connection,
             transaction
         );
@@ -916,7 +916,7 @@ public static class UnboundedBinaryColumnEngine
         if (source is null)
         {
             await using var nullCommand = CreateCommand(
-                $"UPDATE {metadata.TableName} SET {quotedColumn} = NULL WHERE [{metadata.KeyColumnName}] = @id;",
+                $"UPDATE {metadata.TableName} SET {quotedColumn} = NULL WHERE {EntitySaveMetadata.QuoteIdentifier(metadata.KeyColumnName)} = @id;",
                 connection,
                 transaction
             );
@@ -930,7 +930,7 @@ public static class UnboundedBinaryColumnEngine
         _ = payloadLength;
 
         await using var command = CreateCommand(
-            $"UPDATE {metadata.TableName} SET {quotedColumn} = @data WHERE [{metadata.KeyColumnName}] = @id;",
+            $"UPDATE {metadata.TableName} SET {quotedColumn} = @data WHERE {EntitySaveMetadata.QuoteIdentifier(metadata.KeyColumnName)} = @id;",
             connection,
             transaction
         );
@@ -2183,7 +2183,7 @@ public static class SqlExpressionTranslator
     private static string ColumnName(MemberInfo member) =>
         _columnNameCache.GetOrAdd(
             member,
-            static m => $"[{m.GetCustomAttribute<ColumnAttribute>()?.Name ?? m.Name}]"
+            static m => EntitySaveMetadata.QuoteIdentifier(m.GetCustomAttribute<ColumnAttribute>()?.Name ?? m.Name)
         );
 
     /// <summary>Extracts the bracketed column name from a column reference (a plain column x.Col, or a value object's x.Col.Value). Returns null when it is not a column.</summary>
@@ -2324,9 +2324,10 @@ public static class SqlExpressionTranslator
     }
 
     /// <summary>Extracts the raw column name from a bracketed column name "[col]". Returns null when it is not a simple column (null, wrapped in a function, etc.).</summary>
+    /// <remarks>The doubled closing quote that EntitySaveMetadata.QuoteIdentifier writes is folded back, so a name that contains the quote character resolves to the name the diagram actually holds.</remarks>
     private static string? RawColumnName(string? bracketedColumn) =>
         bracketedColumn is { Length: >= 2 } && bracketedColumn[0] == '[' && bracketedColumn[^1] == ']'
-            ? bracketedColumn[1..^1]
+            ? bracketedColumn[1..^1].Replace("]]", "]")
             : null;
 
     /// <summary>Escapes the LIKE wildcards (% _ [ \).</summary>
@@ -2375,8 +2376,28 @@ public sealed class EntitySaveMetadata
 {
     private static readonly ConcurrentDictionary<Type, EntitySaveMetadata> _cache = new();
 
-    /// <summary>Gets the table name wrapped in quoting brackets.</summary>
+    /// <summary>Gets the table name wrapped in quoting brackets (a schema-qualified name is quoted part by part).</summary>
     public required string TableName { get; init; }
+
+    /// <summary>Quotes a table name, splitting a schema-qualified name on its first '.' so that each part is quoted on its own (sales.orders becomes [sales].[orders]).</summary>
+    /// <remarks>Quoting the whole name in one go would name a single table that literally contains a dot, so every statement against a table outside the default schema would fail at run time. The DDL generator splits the same way.</remarks>
+    internal static string QuoteTableName(string name)
+    {
+        var separator = name.IndexOf('.');
+
+        return separator < 0
+            ? QuoteIdentifier(name)
+            : $"{QuoteIdentifier(name[..separator])}.{QuoteIdentifier(name[(separator + 1)..])}";
+    }
+
+    /// <summary>Quotes a single SQL identifier, doubling the closing quote character so that a name containing it cannot escape the quotes.</summary>
+    /// <remarks>Table and column names come from the diagram, which accepts free text, so a name may well contain the quote character itself. This mirrors the escaping the DDL generator applies.</remarks>
+    internal static string QuoteIdentifier(string name)
+    {
+        const string close = "]";
+
+        return "[" + name.Replace(close, close + close) + close;
+    }
 
     /// <summary>Gets the raw, unquoted table name (required by SqliteBlob and friends in the unbounded binary column Stream accessors).</summary>
     public required string RawTableName { get; init; }
@@ -2537,20 +2558,20 @@ public sealed class EntitySaveMetadata
                 property != keyProperty && !storeGeneratedColumns.Contains(property)
             )
             .ToList();
-        var tableName = $"[{tableAttribute.Name}]";
+        var tableName = EntitySaveMetadata.QuoteTableName(tableAttribute.Name);
         var keyColumnName = GetColumnName(keyProperty);
-        var columnList = string.Join(", ", selectProperties.Select(property => $"[{GetColumnName(property)}]"));
+        var columnList = string.Join(", ", selectProperties.Select(property => EntitySaveMetadata.QuoteIdentifier(GetColumnName(property))));
         var updateAssignments = nonKeyProperties.Select(property =>
-            $"[{GetColumnName(property)}] = @{property.Name}"
+            $"{EntitySaveMetadata.QuoteIdentifier(GetColumnName(property))} = @{property.Name}"
         );
-        var insertColumnList = string.Join(", ", insertProperties.Select(property => $"[{GetColumnName(property)}]"));
+        var insertColumnList = string.Join(", ", insertProperties.Select(property => EntitySaveMetadata.QuoteIdentifier(GetColumnName(property))));
         var insertValueList = string.Join(", ", insertProperties.Select(property => $"@{property.Name}"));
         // Quoted rowversion column, non-null only for tables that carry one. The optimistic concurrency statements below
         // are built solely for those tables (every other table keeps exactly the statements it had before)
         var rowVersionColumn =
             rowVersionProperty is null
                 ? null
-                : $"[{GetColumnName(rowVersionProperty)}]";
+                : EntitySaveMetadata.QuoteIdentifier(GetColumnName(rowVersionProperty));
         var cascades = allProperties
             .Select(property =>
                 (property, attribute: property.GetCustomAttribute<NavigationReferenceAttribute>())
@@ -2592,14 +2613,14 @@ public sealed class EntitySaveMetadata
             ),
             ColumnList = columnList,
             SelectAllSql = $"SELECT {columnList} FROM {tableName};",
-            SelectByIdSql = $"SELECT {columnList} FROM {tableName} WHERE [{keyColumnName}] = @id;",
+            SelectByIdSql = $"SELECT {columnList} FROM {tableName} WHERE {EntitySaveMetadata.QuoteIdentifier(keyColumnName)} = @id;",
             ExistsByIdSql =
-                $"SELECT CASE WHEN EXISTS (SELECT 1 FROM {tableName} WHERE [{keyColumnName}] = @id) THEN 1 ELSE 0 END;",
+                $"SELECT CASE WHEN EXISTS (SELECT 1 FROM {tableName} WHERE {EntitySaveMetadata.QuoteIdentifier(keyColumnName)} = @id) THEN 1 ELSE 0 END;",
             InsertSql =
                 $"INSERT INTO {tableName} ({insertColumnList}) VALUES ({insertValueList});",
             UpdateSql =
-                $"UPDATE {tableName} SET {string.Join(", ", updateAssignments)} WHERE [{keyColumnName}] = @id;",
-            DeleteSql = $"DELETE FROM {tableName} WHERE [{keyColumnName}] = @id;",
+                $"UPDATE {tableName} SET {string.Join(", ", updateAssignments)} WHERE {EntitySaveMetadata.QuoteIdentifier(keyColumnName)} = @id;",
+            DeleteSql = $"DELETE FROM {tableName} WHERE {EntitySaveMetadata.QuoteIdentifier(keyColumnName)} = @id;",
             InsertReturningSql =
                 rowVersionColumn is null
                     ? null
@@ -2607,15 +2628,15 @@ public sealed class EntitySaveMetadata
             UpdateVersionedSql =
                 rowVersionColumn is null
                     ? null
-                    : $"UPDATE {tableName} SET {string.Join(", ", updateAssignments)} OUTPUT INSERTED.{rowVersionColumn} WHERE [{keyColumnName}] = @id AND {rowVersionColumn} = @originalRowVersion;",
+                    : $"UPDATE {tableName} SET {string.Join(", ", updateAssignments)} OUTPUT INSERTED.{rowVersionColumn} WHERE {EntitySaveMetadata.QuoteIdentifier(keyColumnName)} = @id AND {rowVersionColumn} = @originalRowVersion;",
             UpdateForcedSql =
                 rowVersionColumn is null
                     ? null
-                    : $"UPDATE {tableName} SET {string.Join(", ", updateAssignments)} OUTPUT INSERTED.{rowVersionColumn} WHERE [{keyColumnName}] = @id;",
+                    : $"UPDATE {tableName} SET {string.Join(", ", updateAssignments)} OUTPUT INSERTED.{rowVersionColumn} WHERE {EntitySaveMetadata.QuoteIdentifier(keyColumnName)} = @id;",
             DeleteVersionedSql =
                 rowVersionColumn is null
                     ? null
-                    : $"DELETE FROM {tableName} WHERE [{keyColumnName}] = @id AND {rowVersionColumn} = @originalRowVersion;",
+                    : $"DELETE FROM {tableName} WHERE {EntitySaveMetadata.QuoteIdentifier(keyColumnName)} = @id AND {rowVersionColumn} = @originalRowVersion;",
             CascadeNavigations = cascades,
         };
     }
@@ -3078,7 +3099,7 @@ public sealed class EntitySaveMetadata
     public string BuildColumnList(IReadOnlyList<PropertyInfo> properties) =>
         string.Join(
             ", ",
-            properties.Select(property => $"[{GetColumnName(property)}]")
+            properties.Select(property => EntitySaveMetadata.QuoteIdentifier(GetColumnName(property)))
         );
 
     /// <summary>Per-column-property "reader+ordinal, set onto entity" binders (expression-tree compiled, cached per property).</summary>
@@ -3460,7 +3481,7 @@ public sealed class EntitySaveMetadata
 
     /// <summary>Returns the quoted column name of the specified column property (for example: [payload]) (for building SQL in the Stream accessors).</summary>
     public string QuotedColumnName(PropertyInfo property) =>
-        $"[{GetColumnName(property)}]";
+        EntitySaveMetadata.QuoteIdentifier(GetColumnName(property));
 
     /// <summary>Returns the raw, unquoted column name of the specified column property (required by SqliteBlob and friends).</summary>
     public string RawColumnName(PropertyInfo property) => GetColumnName(property);
@@ -3511,7 +3532,7 @@ public static class CascadeDeletePlanner
 
             var childTable = EntitySaveMetadata.For(navigation.ChildType).TableName;
             var childScopeWhere =
-                $" WHERE [{navigation.DependentColumn}] IN (SELECT [{navigation.PrincipalColumn}] FROM {parentTable}{parentScopeWhere})";
+                $" WHERE {EntitySaveMetadata.QuoteIdentifier(navigation.DependentColumn)} IN (SELECT {EntitySaveMetadata.QuoteIdentifier(navigation.PrincipalColumn)} FROM {parentTable}{parentScopeWhere})";
 
             // Delete grandchildren and below first, then the children (FK consistency)
             AppendDescendantDeletes(

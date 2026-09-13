@@ -566,4 +566,121 @@ public class PostgreSqlSyncScriptBuilderTests
         var sql = Build(item);
         sql.Should().Contain("ALTER TABLE \"customer\" DROP CONSTRAINT \"uq_legacy\";");
     }
+
+    // ---------------- 動的 SQL のリテラルエスケープ ----------------
+
+    /// <summary>
+    /// 主キー解除の DO ブロックで、クォートしたテーブル名が文字列リテラル用にもエスケープされることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// <c>EXECUTE '…'</c> の中身は文字列リテラルなので、クォートだけではテーブル名の <c>'</c> がリテラルを閉じ、
+    /// 以降が SQL のコードとして解釈される。<c>PgIdentifier.QuoteForDynamicSql</c> を通していれば <c>''</c> になる。
+    /// </remarks>
+    [Fact(DisplayName = "AlterPrimaryKey の DO ブロックはテーブル名の ' を二重化する")]
+    public void AlterPrimaryKey_TableNameWithQuote_IsEscapedInDynamicSql()
+    {
+        var sql = Build(AlterPk("o'rders", PkTarget("o'rders", "order_id")));
+
+        sql.Should()
+            .Contain("EXECUTE 'ALTER TABLE \"o''rders\" DROP CONSTRAINT \"' || pk_name || '\"';");
+        sql.Should().NotContain("EXECUTE 'ALTER TABLE \"o'rders\"");
+    }
+
+    /// <summary>制約名不明の外部キー削除でも、DO ブロックのテーブル名がリテラル用にエスケープされることを検証する</summary>
+    [Fact(DisplayName = "DropForeignKey の DO ブロックはテーブル名の ' を二重化する")]
+    public void DropForeignKey_TableNameWithQuote_IsEscapedInDynamicSql()
+    {
+        var item = new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.DropForeignKey,
+            TableName = "o'rders",
+            ParentEntity = new Entity { TableName = "customer" },
+            ChildEntity = new Entity { TableName = "o'rders" },
+            IsSelected = true,
+        };
+
+        var sql = Build(item);
+
+        sql.Should()
+            .Contain("EXECUTE 'ALTER TABLE \"o''rders\" DROP CONSTRAINT \"' || fk_name || '\"';");
+        sql.Should().NotContain("EXECUTE 'ALTER TABLE \"o'rders\"");
+    }
+
+    // ---------------- DO ブロックのドルクォートタグ ----------------
+
+    /// <summary>
+    /// 主キー解除の DO ブロックが、テーブル名に <c>$$</c> が含まれていても途中で終端しないことを検証する。
+    /// </summary>
+    /// <remarks>
+    /// ドルクォートは<b>タグ文字列そのもの</b>で終端する。タグを <c>$$</c> 固定にすると、本文へ埋めた名前の
+    /// <c>$$</c> がブロックを閉じ、以降が最上位の SQL 文として解釈される（リテラルエスケープでは防げない＝
+    /// <c>'</c> の二重化はドルクォートの終端と無関係）。タグは本文と衝突しないものを決定的に選ぶべき。
+    /// </remarks>
+    [Fact(DisplayName = "AlterPrimaryKey の DO ブロックは $$ 入りテーブル名でも終端されない")]
+    public void AlterPrimaryKey_TableNameWithDollarTag_DoesNotTerminateBlock()
+    {
+        var sql = Build(AlterPk("o$$rders", PkTarget("o$$rders")));
+
+        AssertDollarQuotedBlockIsIntact(sql);
+    }
+
+    /// <summary>制約名不明の外部キー削除でも、DO ブロックが <c>$$</c> 入りテーブル名で終端しないことを検証する</summary>
+    [Fact(DisplayName = "DropForeignKey の DO ブロックは $$ 入りテーブル名でも終端されない")]
+    public void DropForeignKey_TableNameWithDollarTag_DoesNotTerminateBlock()
+    {
+        var sql = Build(
+            new SchemaDiffItem
+            {
+                Kind = SchemaDiffKind.DropForeignKey,
+                TableName = "o$$rders",
+                ParentEntity = new Entity { TableName = "customer" },
+                ChildEntity = new Entity { TableName = "o$$rders" },
+                IsSelected = true,
+            }
+        );
+
+        AssertDollarQuotedBlockIsIntact(sql);
+    }
+
+    /// <summary>衝突しないタグは既定の <c>$$</c> のままであること（通常の図の出力を変えない）</summary>
+    [Fact(DisplayName = "DO ブロックのタグは衝突が無ければ $$ のまま")]
+    public void DoBlock_WithoutCollision_KeepsDefaultTag()
+    {
+        var sql = Build(AlterPk("orders", PkTarget("orders")));
+
+        sql.Should().Contain("DO $$");
+        sql.Should().Contain("END $$;");
+    }
+
+    /// <summary>
+    /// 生成された <c>DO</c> ブロックの本文にドルクォートタグが現れない（＝ブロックが途中で閉じない）ことを検証する。
+    /// </summary>
+    private static void AssertDollarQuotedBlockIsIntact(string sql)
+    {
+        var lines = sql.Replace("\r\n", "\n").Split('\n');
+        var openIndex = Array.FindIndex(
+            lines,
+            line => line.StartsWith("DO $", StringComparison.Ordinal)
+        );
+
+        openIndex.Should().BeGreaterThanOrEqualTo(0, "DO ブロックが生成されること");
+
+        var tag = lines[openIndex]["DO ".Length..].Trim();
+        tag.Should().MatchRegex(@"^\$[A-Za-z0-9_]*\$$", "ドルクォートタグとして妥当な形であること");
+
+        var closeIndex = Array.FindIndex(
+            lines,
+            openIndex + 1,
+            line => line.Trim() == $"END {tag};"
+        );
+
+        closeIndex.Should().BeGreaterThan(openIndex, "同じタグで閉じられていること");
+
+        string.Join("\n", lines[(openIndex + 1)..closeIndex])
+            .Should()
+            .NotContain(
+                tag,
+                "本文にタグが現れるとブロックがそこで終端し、以降が実行される SQL になる"
+            );
+    }
 }

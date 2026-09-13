@@ -36,6 +36,12 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
     /// <summary>実行計画を Oracle DDL へ変換する</summary>
     public string Build(SyncPlan plan)
     {
+        // 列型は識別子でも文字列リテラルでもなく、SQL へ素通しで補間するしか無い（逐次 DDL 方言の基底と同じ関門）
+        SqlTypeText.Validate(plan);
+
+        // 名前の改行・制御文字も入口で止める（コメントのサニタイズ・識別子のエスケープとの二重化）
+        SqlNameText.Validate(plan);
+
         var sb = new StringBuilder();
 
         // 各文（末尾 ; を含む）を蓄積し、最後に「/」のみの行で連結する
@@ -130,7 +136,7 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
         {
             var pkCols = string.Join(", ", pks.Select(p => OracleIdentifier.QuoteSimple(p.Name)));
             sb.AppendLine(
-                $"    CONSTRAINT \"PK_{OracleIdentifier.SafeName(item.TableName)}\" PRIMARY KEY ({pkCols})"
+                $"    CONSTRAINT \"{OracleIdentifier.Escape($"PK_{OracleIdentifier.SafeName(item.TableName)}")}\" PRIMARY KEY ({pkCols})"
             );
         }
 
@@ -201,7 +207,8 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
         var tableName = OracleIdentifier.EscapeStringLiteral(
             OracleIdentifier.TableNameOnly(item.TableName)
         );
-        var tableQuoted = OracleIdentifier.Quote(item.TableName).Replace("'", "''");
+        // クォートした名前を EXECUTE IMMEDIATE の文字列リテラルへ埋めるため、リテラルエスケープ込みのヘルパーを通す
+        var tableQuoted = OracleIdentifier.QuoteForDynamicSql(item.TableName);
 
         var drop = new StringBuilder();
         drop.AppendLine("DECLARE");
@@ -235,7 +242,7 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
         }
 
         var pkCols = string.Join(", ", pks.Select(p => OracleIdentifier.QuoteSimple(p.Name)));
-        return $"ALTER TABLE {OracleIdentifier.Quote(item.TableName)} ADD CONSTRAINT \"PK_{OracleIdentifier.SafeName(item.TableName)}\" "
+        return $"ALTER TABLE {OracleIdentifier.Quote(item.TableName)} ADD CONSTRAINT \"{OracleIdentifier.Escape($"PK_{OracleIdentifier.SafeName(item.TableName)}")}\" "
             + $"PRIMARY KEY ({pkCols});";
     }
 
@@ -301,9 +308,7 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
         // 構成列が特定できない場合は不正な DDL を出さず、コメントでスキップを明示する
         if (columnPairs.Count == 0)
         {
-            // スキップ理由の識別子は生成 SQL の決定性を保つため方言中立・カルチャ非依存にする
-            // （表示用の item.Description は UI 言語で変わるため使わない）
-            return $"-- Skipped: could not resolve the column required to add the foreign key. ({SchemaDiffService.NormalizeTable(item.ChildEntity)} -> {SchemaDiffService.NormalizeTable(item.ParentEntity)})";
+            return SyncScriptBuilderHelper.BuildForeignKeySkipComment(item);
         }
 
         var childTbl = SchemaDiffService.NormalizeTable(item.ChildEntity);
@@ -379,7 +384,8 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
         var parentName = OracleIdentifier.EscapeStringLiteral(
             OracleIdentifier.TableNameOnly(parentTbl)
         );
-        var childQuoted = OracleIdentifier.Quote(childTbl).Replace("'", "''");
+        // クォートした名前を EXECUTE IMMEDIATE の文字列リテラルへ埋めるため、リテラルエスケープ込みのヘルパーを通す
+        var childQuoted = OracleIdentifier.QuoteForDynamicSql(childTbl);
 
         var sb = new StringBuilder();
         sb.AppendLine("DECLARE");

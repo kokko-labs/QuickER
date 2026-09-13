@@ -433,7 +433,8 @@ internal sealed partial class CSharpGenerationModelBuilder
             BaseDeclaration = BuildValueObjectBaseDeclaration(className, valueType, isGuidKey),
             InterfaceDeclaration = $"IValueObject<{className}, {valueType}>",
             IsGuidKey = isGuidKey,
-            ColumnName = authoritative.Column.Name,
+            // 説明が無いときの XmlDoc 定型文へ載せるため、XML としてエスケープしてから渡す
+            ColumnNameXmlDoc = EscapeForXmlDocSummary(authoritative.Column.Name),
             DescriptionXmlDoc = EscapeForXmlDocSummary(authoritative.Column.Description),
             // 表示名解決へ渡すメンバー名（例 "Name"）と代表列の説明。説明が無指定なら null（メンバー名へフォールバックする）
             DisplayNameMemberName = _nameConverter.ToPropertyName(authoritative.Column.Name),

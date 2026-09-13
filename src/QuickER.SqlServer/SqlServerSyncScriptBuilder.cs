@@ -54,7 +54,7 @@ public sealed class SqlServerSyncScriptBuilder : SyncScriptBuilderBase
         {
             var pkCols = string.Join(", ", pks.Select(p => SqlIdentifier.BracketSimple(p.Name)));
             sb.AppendLine(
-                $"    CONSTRAINT [PK_{SqlIdentifier.SafeName(item.TableName)}] PRIMARY KEY ({pkCols})"
+                $"    CONSTRAINT [{SqlIdentifier.Escape($"PK_{SqlIdentifier.SafeName(item.TableName)}")}] PRIMARY KEY ({pkCols})"
             );
         }
 
@@ -91,7 +91,8 @@ public sealed class SqlServerSyncScriptBuilder : SyncScriptBuilderBase
     /// </remarks>
     protected override void AppendDropPrimaryKey(StringBuilder sb, SchemaDiffItem item)
     {
-        var table = SqlIdentifier.Bracket(item.TableName);
+        // 括弧付けした名前を EXEC の文字列リテラルへ埋めるため、リテラルエスケープ込みのヘルパーを通す
+        var table = SqlIdentifier.QuoteForDynamicSql(item.TableName);
 
         // 旧主キーの制約名はカタログビューを逆引きして特定する（主キーが無ければ @pk は NULL のまま）
         sb.AppendLine("DECLARE @pk sysname;");
@@ -124,7 +125,7 @@ public sealed class SqlServerSyncScriptBuilder : SyncScriptBuilderBase
 
         var pkCols = string.Join(", ", pks.Select(p => SqlIdentifier.BracketSimple(p.Name)));
         sb.AppendLine(
-            $"ALTER TABLE {SqlIdentifier.Bracket(item.TableName)} ADD CONSTRAINT [PK_{SqlIdentifier.SafeName(item.TableName)}] "
+            $"ALTER TABLE {SqlIdentifier.Bracket(item.TableName)} ADD CONSTRAINT [{SqlIdentifier.Escape($"PK_{SqlIdentifier.SafeName(item.TableName)}")}] "
                 + $"PRIMARY KEY ({pkCols});"
         );
         sb.AppendLine("GO");
@@ -202,11 +203,7 @@ public sealed class SqlServerSyncScriptBuilder : SyncScriptBuilderBase
         // 構成列が特定できない場合は不正な DDL を出さず、コメントでスキップを明示する
         if (columnPairs.Count == 0)
         {
-            sb.AppendLine(
-                // スキップ理由の識別子は生成 SQL の決定性を保つため方言中立・カルチャ非依存にする
-                // （表示用の item.Description は UI 言語で変わるため使わない）
-                $"-- Skipped: could not resolve the column required to add the foreign key. ({SchemaDiffService.NormalizeTable(item.ChildEntity)} -> {SchemaDiffService.NormalizeTable(item.ParentEntity)})"
-            );
+            sb.AppendLine(SyncScriptBuilderHelper.BuildForeignKeySkipComment(item));
             return;
         }
 
@@ -280,7 +277,8 @@ public sealed class SqlServerSyncScriptBuilder : SyncScriptBuilderBase
             $"  AND tr.name = N'{SqlIdentifier.EscapeStringLiteral(SqlIdentifier.TableNameOnly(parentTbl))}';"
         );
         sb.AppendLine(
-            $"IF @fk IS NOT NULL EXEC('ALTER TABLE {SqlIdentifier.Bracket(childTbl)} DROP CONSTRAINT [' + @fk + ']');"
+            // 括弧付けした名前を EXEC の文字列リテラルへ埋めるため、リテラルエスケープ込みのヘルパーを通す
+            $"IF @fk IS NOT NULL EXEC('ALTER TABLE {SqlIdentifier.QuoteForDynamicSql(childTbl)} DROP CONSTRAINT [' + @fk + ']');"
         );
         sb.AppendLine("GO");
     }

@@ -29,7 +29,7 @@ public static class DbmlExporter
 
         foreach (var entity in diagram.Entities)
         {
-            builder.AppendLine($"Table {entity.TableName} {{");
+            builder.AppendLine($"Table {Identifier(entity.TableName)} {{");
 
             var (inlineUniqueColumnIds, indexConstraints) = ClassifyUniqueConstraints(entity);
 
@@ -137,7 +137,7 @@ public static class DbmlExporter
             settings.Add($"note: '{EscapeNote(column.Description)}'");
         }
 
-        return $"{column.Name} {column.DataType} [{string.Join(", ", settings)}]";
+        return $"{Identifier(column.Name)} {Identifier(column.DataType)} [{string.Join(", ", settings)}]";
     }
 
     /// <summary>
@@ -205,7 +205,9 @@ public static class DbmlExporter
             var settings = string.IsNullOrWhiteSpace(name)
                 ? "unique"
                 : $"unique, name: '{EscapeNote(name!)}'";
-            builder.AppendLine($"    ({string.Join(", ", columnNames)}) [{settings}]");
+            builder.AppendLine(
+                $"    ({string.Join(", ", columnNames.Select(Identifier))}) [{settings}]"
+            );
         }
 
         builder.AppendLine("  }");
@@ -253,7 +255,8 @@ public static class DbmlExporter
         };
         var settings = BuildRelationshipSettings(relationship);
 
-        return $"Ref:{settings} {source.TableName}.{FormatEndpointColumns(sourceColumnNames)} {symbol} {target.TableName}.{FormatEndpointColumns(targetColumnNames)}";
+        return $"Ref:{settings} {Identifier(source.TableName)}.{FormatEndpointColumns(sourceColumnNames)} "
+            + $"{symbol} {Identifier(target.TableName)}.{FormatEndpointColumns(targetColumnNames)}";
     }
 
     /// <summary><c>Ref:</c> 行の設定ブロック（制約名・参照アクション）を組み立てる</summary>
@@ -286,13 +289,22 @@ public static class DbmlExporter
 
     /// <summary><c>Ref:</c> 行のエンドポイント列を表記する（単一列はそのまま・複数列は <c>(a, b)</c>）</summary>
     private static string FormatEndpointColumns(IReadOnlyList<string> columnNames) =>
-        columnNames.Count == 1 ? columnNames[0] : $"({string.Join(", ", columnNames)})";
+        columnNames.Count == 1
+            ? Identifier(columnNames[0])
+            : $"({string.Join(", ", columnNames.Select(Identifier))})";
 
     /// <summary>
-    /// DBML の note リテラル内で使えないシングルクォートを <c>\'</c> へエスケープする
+    /// DBML の note リテラルへ埋め込める形へエスケープする（バックスラッシュ二重化・シングルクォート・改行畳み込み）
     /// </summary>
-    private static string EscapeNote(string text)
-    {
-        return text.Replace("'", "\\'");
-    }
+    /// <remarks>規則と復元は <see cref="DbmlLiteral"/> が対で持つ</remarks>
+    private static string EscapeNote(string text) => DbmlLiteral.Escape(text);
+
+    /// <summary>
+    /// 識別子（テーブル名・カラム名・型）を DBML の行へ載せる形へ整える
+    /// </summary>
+    /// <remarks>
+    /// DBML はクォートなしの識別子を 1 行 1 要素で書くため、改行が混じると行が途中で終わり、
+    /// 残りが別の宣言として解釈される。改行・制御文字は空白へ畳む
+    /// </remarks>
+    private static string Identifier(string? name) => ExportTextSanitizer.Sanitize(name);
 }

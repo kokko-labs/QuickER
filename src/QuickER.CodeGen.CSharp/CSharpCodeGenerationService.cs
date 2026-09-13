@@ -693,7 +693,112 @@ public sealed class CSharpCodeGenerationService
 
         ValidateEntityClassNameUniqueness(diagram, diagnostics);
         ValidateColumnPropertyNameUniqueness(diagram, diagnostics);
+        ValidateNameControlCharacters(diagram, diagnostics);
     }
+
+    /// <summary>図の名前（テーブル・列・制約・クエリ）に改行・制御文字が含まれていないかを検証する</summary>
+    /// <remarks>
+    /// <para>
+    /// 図の名前は GUI の自由入力・DB 取込・DBML/Excel 取込・MCP/AI 経由の任意文字列で、改行を入れられる。
+    /// 改行入りの名前は (1) 生成される C# の 1 行リテラルを行またぎで壊し (2) DDL の <c>--</c> コメント行を
+    /// 突き破って 2 行目以降を実行される SQL に変え (3) そもそもどの DB も識別子として受け付けない。
+    /// 出力側のエスケープ・サニタイズは防壁として残すが、名前に関しては入口で止めるほうが利用者に親切なので
+    /// 生成前診断で Error にする。
+    /// </para>
+    /// <para>
+    /// Error にするのは改行・制御文字だけで、<c>"</c> や <c>'</c> や <c>]</c> は対象にしない。これらは DB 取込で
+    /// 実在し得る名前で、出力側のエスケープ（C# リテラル・方言クォート）で正しく扱えるため止める理由が無い。
+    /// </para>
+    /// <para>
+    /// 場所の表記は SQL の綴りを使って言語中立にする（<c>SyncPlanWarning.Detail</c> と同じ流儀）。
+    /// 名前そのものを文面へ載せるため、表示前に制御文字を空白へ畳む。
+    /// </para>
+    /// </remarks>
+    private static void ValidateNameControlCharacters(
+        ErDiagram diagram,
+        ICollection<GenerationDiagnostic> diagnostics
+    )
+    {
+        var offenders = new List<string>();
+
+        foreach (var entity in diagram.Entities)
+        {
+            AddIfUnsafe(entity.TableName, $"TABLE '{Sanitize(entity.TableName)}'");
+
+            foreach (var column in entity.Columns)
+            {
+                AddIfUnsafe(
+                    column.Name,
+                    $"COLUMN '{Sanitize(entity.TableName)}'.'{Sanitize(column.Name)}'"
+                );
+            }
+
+            foreach (var constraint in entity.UniqueConstraints)
+            {
+                AddIfUnsafe(
+                    constraint.Name,
+                    $"UNIQUE '{Sanitize(entity.TableName)}'.'{Sanitize(constraint.Name)}'"
+                );
+            }
+        }
+
+        foreach (var relationship in diagram.Relationships)
+        {
+            AddIfUnsafe(
+                relationship.ConstraintName,
+                $"FOREIGN KEY '{Sanitize(relationship.ConstraintName)}'"
+            );
+        }
+
+        foreach (var query in diagram.Queries)
+        {
+            AddIfUnsafe(query.Name, $"QUERY '{Sanitize(query.Name)}'");
+        }
+
+        if (offenders.Count > 0)
+        {
+            diagnostics.Add(
+                GenerationDiagnostic.Error(
+                    string.Format(
+                        Strings.CodeGen_Error_NameContainsControlCharacter,
+                        string.Join(", ", offenders)
+                    )
+                )
+            );
+        }
+
+        void AddIfUnsafe(string? name, string location)
+        {
+            if (ContainsControlCharacter(name))
+            {
+                offenders.Add(location);
+            }
+        }
+
+        static string Sanitize(string? name) =>
+            name is null
+                ? string.Empty
+                : new string(name.Select(ch => IsControlCharacter(ch) ? ' ' : ch).ToArray());
+    }
+
+    /// <summary>文字列が改行・制御文字（U+0000〜U+001F・U+007F・U+0085・U+2028・U+2029）を含むか</summary>
+    /// <remarks>
+    /// DDL / 同期スクリプト側の同規則は <c>QuickER.Provider.SqlComment</c> が持つ。CodeGen.CSharp は DB 非依存で
+    /// Provider を参照できない（依存方向は Provider → CodeGen.CSharp）ため、この 2 メソッドだけは意図的に
+    /// 二重に置く。片方だけ変えないこと。
+    /// </remarks>
+    private static bool ContainsControlCharacter(string? text) =>
+        text is not null && text.Any(IsControlCharacter);
+
+    /// <summary>
+    /// C0 制御文字（U+0000〜U+001F）・DEL（U+007F）・Unicode の行区切り（U+0085 / U+2028 / U+2029）か。
+    /// </summary>
+    /// <remarks>
+    /// 行区切り 3 種を含めるのは、これらが C# 言語仕様上の new-line だから（<see cref="FoldNewLines"/> と同じ集合）。
+    /// <c>///</c> コメントや 1 行リテラルの行またぎを許すと、名前 1 つで生成コードへ任意の C# を注入できる。
+    /// </remarks>
+    private static bool IsControlCharacter(char ch) =>
+        ch < ' ' || ch == (char)0x7F || ch == '\u0085' || ch == '\u2028' || ch == '\u2029';
 
     /// <summary>
     /// rowversion 列の置き方を検証する（1 エンティティに 2 本以上ないこと・主キー列が rowversion でないこと）

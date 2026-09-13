@@ -46,4 +46,12 @@ public static class SqlIdentifier
 
     /// <summary>SQL 文字列リテラル用に <c>'</c> を二重化してエスケープする</summary>
     public static string EscapeStringLiteral(string s) => (s ?? string.Empty).Replace("'", "''");
+
+    /// <summary>動的 SQL の文字列リテラル内へ埋め込むテーブル名を、括弧付け＋リテラルエスケープして返す</summary>
+    /// <remarks>
+    /// <c>EXEC('ALTER TABLE … ')</c> のように組み立てた SQL を文字列リテラルとして渡す経路では、括弧付けだけでは
+    /// 不十分で、名前に含まれる <c>'</c> が外側のリテラルを閉じてしまう。括弧付けの後にリテラルエスケープを
+    /// 掛けたこのメソッドを通すこと（4 方言で同名・同意味のヘルパーを持つ）。
+    /// </remarks>
+    public static string QuoteForDynamicSql(string name) => EscapeStringLiteral(Bracket(name));
 }

@@ -1329,8 +1329,30 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
 {{~ end ~}}
 
 {{~ if repositories ~}}
-    /// <summary>Gets the table name wrapped in quoting brackets.</summary>
+    /// <summary>Gets the table name wrapped in quoting brackets (a schema-qualified name is quoted part by part).</summary>
     public required string TableName { get; init; }
+
+    /// <summary>Quotes a table name, splitting a schema-qualified name on its first '.' so that each part is quoted on its own (sales.orders becomes {{ quote_open_char }}sales{{ quote_close_char }}.{{ quote_open_char }}orders{{ quote_close_char }}).</summary>
+    /// <remarks>Quoting the whole name in one go would name a single table that literally contains a dot, so every statement against a table outside the default schema would fail at run time. The DDL generator splits the same way.</remarks>
+    internal static string QuoteTableName(string name)
+    {
+        var separator = name.IndexOf('.');
+
+        return separator < 0
+            ? QuoteIdentifier(name)
+            : $"{QuoteIdentifier(name[..separator])}.{QuoteIdentifier(name[(separator + 1)..])}";
+    }
+{{~ end ~}}
+
+{{~ if repositories || ef_core ~}}
+    /// <summary>Quotes a single SQL identifier, doubling the closing quote character so that a name containing it cannot escape the quotes.</summary>
+    /// <remarks>Table and column names come from the diagram, which accepts free text, so a name may well contain the quote character itself. This mirrors the escaping the DDL generator applies.</remarks>
+    internal static string QuoteIdentifier(string name)
+    {
+        const string close = "{{ quote_close }}";
+
+        return "{{ quote_open }}" + name.Replace(close, close + close) + close;
+    }
 {{~ end ~}}
 
 {{~ if repositories && (exclude_unbounded_binary || runtime_package_export) ~}}
@@ -1553,17 +1575,17 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
             .ToList();
 {{~ end ~}}
 {{~ if repositories ~}}
-        var tableName = $"{{ quote_open }}{tableAttribute.Name}{{ quote_close }}";
+        var tableName = EntitySaveMetadata.QuoteTableName(tableAttribute.Name);
         var keyColumnName = GetColumnName(keyProperty);
 {{~ end ~}}
 {{~ if repositories || ef_core ~}}
-        var columnList = string.Join(", ", selectProperties.Select(property => $"{{ quote_open }}{GetColumnName(property)}{{ quote_close }}"));
+        var columnList = string.Join(", ", selectProperties.Select(property => EntitySaveMetadata.QuoteIdentifier(GetColumnName(property))));
 {{~ end ~}}
 {{~ if repositories ~}}
         var updateAssignments = nonKeyProperties.Select(property =>
-            $"{{ quote_open }}{GetColumnName(property)}{{ quote_close }} = @{property.Name}"
+            $"{EntitySaveMetadata.QuoteIdentifier(GetColumnName(property))} = @{property.Name}"
         );
-        var insertColumnList = string.Join(", ", insertProperties.Select(property => $"{{ quote_open }}{GetColumnName(property)}{{ quote_close }}"));
+        var insertColumnList = string.Join(", ", insertProperties.Select(property => EntitySaveMetadata.QuoteIdentifier(GetColumnName(property))));
         var insertValueList = string.Join(", ", insertProperties.Select(property => $"@{property.Name}"));
 {{~ end ~}}
 {{~ if repositories && dialect_assigns_store_generated ~}}
@@ -1572,7 +1594,7 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
         var rowVersionColumn =
             rowVersionProperty is null
                 ? null
-                : $"{{ quote_open }}{GetColumnName(rowVersionProperty)}{{ quote_close }}";
+                : EntitySaveMetadata.QuoteIdentifier(GetColumnName(rowVersionProperty));
 {{~ end ~}}
         var cascades = allProperties
             .Select(property =>
@@ -1631,14 +1653,14 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
 {{~ end ~}}
 {{~ if repositories ~}}
             SelectAllSql = $"SELECT {columnList} FROM {tableName};",
-            SelectByIdSql = $"SELECT {columnList} FROM {tableName} WHERE {{ quote_open }}{keyColumnName}{{ quote_close }} = @id;",
+            SelectByIdSql = $"SELECT {columnList} FROM {tableName} WHERE {EntitySaveMetadata.QuoteIdentifier(keyColumnName)} = @id;",
             ExistsByIdSql =
-                $"SELECT CASE WHEN EXISTS (SELECT 1 FROM {tableName} WHERE {{ quote_open }}{keyColumnName}{{ quote_close }} = @id) THEN 1 ELSE 0 END;",
+                $"SELECT CASE WHEN EXISTS (SELECT 1 FROM {tableName} WHERE {EntitySaveMetadata.QuoteIdentifier(keyColumnName)} = @id) THEN 1 ELSE 0 END;",
             InsertSql =
                 $"INSERT INTO {tableName} ({insertColumnList}) VALUES ({insertValueList});",
             UpdateSql =
-                $"UPDATE {tableName} SET {string.Join(", ", updateAssignments)} WHERE {{ quote_open }}{keyColumnName}{{ quote_close }} = @id;",
-            DeleteSql = $"DELETE FROM {tableName} WHERE {{ quote_open }}{keyColumnName}{{ quote_close }} = @id;",
+                $"UPDATE {tableName} SET {string.Join(", ", updateAssignments)} WHERE {EntitySaveMetadata.QuoteIdentifier(keyColumnName)} = @id;",
+            DeleteSql = $"DELETE FROM {tableName} WHERE {EntitySaveMetadata.QuoteIdentifier(keyColumnName)} = @id;",
 {{~ end ~}}
 {{~ if repositories && repository_dialect == "sqlserver" ~}}
             InsertReturningSql =
@@ -1648,15 +1670,15 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
             UpdateVersionedSql =
                 rowVersionColumn is null
                     ? null
-                    : $"UPDATE {tableName} SET {string.Join(", ", updateAssignments)} OUTPUT INSERTED.{rowVersionColumn} WHERE {{ quote_open }}{keyColumnName}{{ quote_close }} = @id AND {rowVersionColumn} = @originalRowVersion;",
+                    : $"UPDATE {tableName} SET {string.Join(", ", updateAssignments)} OUTPUT INSERTED.{rowVersionColumn} WHERE {EntitySaveMetadata.QuoteIdentifier(keyColumnName)} = @id AND {rowVersionColumn} = @originalRowVersion;",
             UpdateForcedSql =
                 rowVersionColumn is null
                     ? null
-                    : $"UPDATE {tableName} SET {string.Join(", ", updateAssignments)} OUTPUT INSERTED.{rowVersionColumn} WHERE {{ quote_open }}{keyColumnName}{{ quote_close }} = @id;",
+                    : $"UPDATE {tableName} SET {string.Join(", ", updateAssignments)} OUTPUT INSERTED.{rowVersionColumn} WHERE {EntitySaveMetadata.QuoteIdentifier(keyColumnName)} = @id;",
             DeleteVersionedSql =
                 rowVersionColumn is null
                     ? null
-                    : $"DELETE FROM {tableName} WHERE {{ quote_open }}{keyColumnName}{{ quote_close }} = @id AND {rowVersionColumn} = @originalRowVersion;",
+                    : $"DELETE FROM {tableName} WHERE {EntitySaveMetadata.QuoteIdentifier(keyColumnName)} = @id AND {rowVersionColumn} = @originalRowVersion;",
 {{~ end ~}}
             CascadeNavigations = cascades,
         };
@@ -2161,7 +2183,7 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
     public string BuildColumnList(IReadOnlyList<PropertyInfo> properties) =>
         string.Join(
             ", ",
-            properties.Select(property => $"{{ quote_open }}{GetColumnName(property)}{{ quote_close }}")
+            properties.Select(property => EntitySaveMetadata.QuoteIdentifier(GetColumnName(property)))
         );
 
     /// <summary>Per-column-property "reader+ordinal, set onto entity" binders (expression-tree compiled, cached per property).</summary>
@@ -2723,7 +2745,7 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
 
     /// <summary>Returns the quoted column name of the specified column property (for example: {{ quote_open }}payload{{ quote_close }}) (for building SQL in the Stream accessors).</summary>
     public string QuotedColumnName(PropertyInfo property) =>
-        $"{{ quote_open }}{GetColumnName(property)}{{ quote_close }}";
+        EntitySaveMetadata.QuoteIdentifier(GetColumnName(property));
 
     /// <summary>Returns the raw, unquoted column name of the specified column property (required by SqliteBlob and friends).</summary>
     public string RawColumnName(PropertyInfo property) => GetColumnName(property);
@@ -2777,7 +2799,7 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
 
             var childTable = EntitySaveMetadata.For(navigation.ChildType).TableName;
             var childScopeWhere =
-                $" WHERE {{ quote_open }}{navigation.DependentColumn}{{ quote_close }} IN (SELECT {{ quote_open }}{navigation.PrincipalColumn}{{ quote_close }} FROM {parentTable}{parentScopeWhere})";
+                $" WHERE {EntitySaveMetadata.QuoteIdentifier(navigation.DependentColumn)} IN (SELECT {EntitySaveMetadata.QuoteIdentifier(navigation.PrincipalColumn)} FROM {parentTable}{parentScopeWhere})";
 
             // Delete grandchildren and below first, then the children (FK consistency)
             AppendDescendantDeletes(

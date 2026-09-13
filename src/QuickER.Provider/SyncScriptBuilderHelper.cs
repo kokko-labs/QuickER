@@ -27,9 +27,22 @@ public static class SyncScriptBuilderHelper
     /// <remarks>
     /// 差分計算は構成列を解決できた一意制約しか出さないため通常は現れない防御。生成 SQL の決定性を保つため、
     /// 表示用の <see cref="SchemaDiffItem.Description"/>（UI 言語で変わる）は使わない。
+    /// テーブル名は自由入力なので <see cref="SqlComment.Sanitize"/> でコメント行の突き破りを防ぐ。
     /// </remarks>
     public static string BuildUniqueConstraintSkipComment(SchemaDiffItem item) =>
-        $"-- Skipped '{item.Kind}' on {item.TableName}: the unique constraint has no resolvable columns.";
+        $"-- Skipped '{item.Kind}' on {SqlComment.Sanitize(item.TableName)}: "
+        + "the unique constraint has no resolvable columns.";
+
+    /// <summary>構成列を解決できない外部キーのスキップコメントを組み立てる（固定文は英語が正本・5 方言共通）</summary>
+    /// <remarks>
+    /// スキップ理由の識別子は生成 SQL の決定性を保つため方言中立・カルチャ非依存にする
+    /// （表示用の <see cref="SchemaDiffItem.Description"/> は UI 言語で変わるため使わない）。
+    /// テーブル名は自由入力なので <see cref="SqlComment.Sanitize"/> でコメント行の突き破りを防ぐ。
+    /// </remarks>
+    public static string BuildForeignKeySkipComment(SchemaDiffItem item) =>
+        "-- Skipped: could not resolve the column required to add the foreign key. ("
+        + $"{SqlComment.Sanitize(SchemaDiffService.NormalizeTable(item.ChildEntity!))} -> "
+        + $"{SqlComment.Sanitize(SchemaDiffService.NormalizeTable(item.ParentEntity!))})";
 
     /// <summary>外部キーの ON DELETE / ON UPDATE 参照アクション句を生成する</summary>
     public static string BuildReferentialActionClause(Relationship? relationship) =>

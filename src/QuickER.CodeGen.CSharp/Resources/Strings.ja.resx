@@ -82,6 +82,9 @@
   <data name="CodeGen_Error_EmptyTableName" xml:space="preserve">
     <value>テーブル名が空のエンティティがあります。</value>
   </data>
+  <data name="CodeGen_Error_NameContainsControlCharacter" xml:space="preserve">
+    <value>次の名前に改行または制御文字が含まれています: {0}。これらの文字は生成される C# の文字列リテラルと DDL が書き出すコメント行を壊し、識別子として受け付ける DB もありません。図の名前から取り除いてください。</value>
+  </data>
   <data name="CodeGen_Error_EntityClassNameCollision" xml:space="preserve">
     <value>テーブル {1} のエンティティクラス名がいずれも '{0}' になります。エンティティクラスは partial のため 1 つのクラスへ統合され、コンパイルできません。生成されるクラス名が異なるようテーブル名を変更してください（テーブル名は単数形化されるため、'customer' と 'customers' はどちらも 'CustomerEntity' になります）。</value>
   </data>

@@ -2305,7 +2305,7 @@ public abstract class {{ repository_base_class }}Core<TEntity, TKey>(
 {{~ if repository_dialect == "sqlserver" ~}}
 
         await using var command = CreateCommand(
-            $"SELECT {quotedColumn} FROM {metadata.TableName} WHERE {{ quote_open }}{metadata.KeyColumnName}{{ quote_close }} = @id;",
+            $"SELECT {quotedColumn} FROM {metadata.TableName} WHERE {EntitySaveMetadata.QuoteIdentifier(metadata.KeyColumnName)} = @id;",
             connection,
             transaction
         );
@@ -2342,7 +2342,7 @@ public abstract class {{ repository_base_class }}Core<TEntity, TKey>(
 
         await using (
             var probe = CreateCommand(
-                $"SELECT rowid, {quotedColumn} IS NULL FROM {metadata.TableName} WHERE {{ quote_open }}{metadata.KeyColumnName}{{ quote_close }} = @id;",
+                $"SELECT rowid, {quotedColumn} IS NULL FROM {metadata.TableName} WHERE {EntitySaveMetadata.QuoteIdentifier(metadata.KeyColumnName)} = @id;",
                 connection,
                 transaction
             )
@@ -2399,7 +2399,7 @@ public abstract class {{ repository_base_class }}Core<TEntity, TKey>(
         if (source is null)
         {
             await using var nullCommand = CreateCommand(
-                $"UPDATE {metadata.TableName} SET {quotedColumn} = NULL WHERE {{ quote_open }}{metadata.KeyColumnName}{{ quote_close }} = @id;",
+                $"UPDATE {metadata.TableName} SET {quotedColumn} = NULL WHERE {EntitySaveMetadata.QuoteIdentifier(metadata.KeyColumnName)} = @id;",
                 connection,
                 transaction
             );
@@ -2414,7 +2414,7 @@ public abstract class {{ repository_base_class }}Core<TEntity, TKey>(
         _ = payloadLength;
 
         await using var command = CreateCommand(
-            $"UPDATE {metadata.TableName} SET {quotedColumn} = @data WHERE {{ quote_open }}{metadata.KeyColumnName}{{ quote_close }} = @id;",
+            $"UPDATE {metadata.TableName} SET {quotedColumn} = @data WHERE {EntitySaveMetadata.QuoteIdentifier(metadata.KeyColumnName)} = @id;",
             connection,
             transaction
         );
@@ -2438,7 +2438,7 @@ public abstract class {{ repository_base_class }}Core<TEntity, TKey>(
         {
             await using (
                 var allocate = new {{ sql_command_type }}(
-                    $"UPDATE {metadata.TableName} SET {quotedColumn} = zeroblob(@len) WHERE {{ quote_open }}{metadata.KeyColumnName}{{ quote_close }} = @id;",
+                    $"UPDATE {metadata.TableName} SET {quotedColumn} = zeroblob(@len) WHERE {EntitySaveMetadata.QuoteIdentifier(metadata.KeyColumnName)} = @id;",
                     connection,
                     activeTransaction
                 )
@@ -2464,7 +2464,7 @@ public abstract class {{ repository_base_class }}Core<TEntity, TKey>(
 
             await using (
                 var rowidCommand = new {{ sql_command_type }}(
-                    $"SELECT rowid FROM {metadata.TableName} WHERE {{ quote_open }}{metadata.KeyColumnName}{{ quote_close }} = @id;",
+                    $"SELECT rowid FROM {metadata.TableName} WHERE {EntitySaveMetadata.QuoteIdentifier(metadata.KeyColumnName)} = @id;",
                     connection,
                     activeTransaction
                 )

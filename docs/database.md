@@ -133,6 +133,31 @@ The "Target DB:" combo on the right of the toolbar switches the diagram's target
 
 Choose SQL DDL from "Export" on the toolbar to output the full set of CREATE statements in the diagram's target dialect. Table and column descriptions are included in the DDL as well (sp_addextendedproperty on SQL Server, COMMENT ON for PostgreSQL / Oracle, COMMENT clauses on MySQL, and comment lines on SQLite). For export operations in general, see [Import and export](import-export.md).
 
+### What a data type may contain
+
+A column's data type is written into the SQL exactly as the diagram holds it — a type is neither an identifier nor a string literal, so there is nowhere to quote it. Both DDL generation and diff sync therefore accept only a plain type expression, and refuse the whole output when a column holds anything else, naming the `table.column` and the type text. A type may contain:
+
+- Words separated by single spaces, each made of letters, digits, `_`, and `$` — `int`, `double precision`, `LONG RAW`, `UNSIGNED BIG INT`
+- Parenthesised arguments after any word: `(max)`, `(50)`, `(10,2)`, and Oracle's unit form `(10 BYTE)` — `nvarchar(max)`, `decimal(10,2)`, `TIMESTAMP(6) WITH LOCAL TIME ZONE`, `INTERVAL DAY(2) TO SECOND(6)`, `decimal(10,2) unsigned`
+- A trailing `[]` for a PostgreSQL array — `integer[]`
+- A MySQL value list — `enum('a','b')`, `set('x','y')`
+
+Everything the five dialect catalogues offer, and everything schema import builds from a live database, is inside this. What falls outside it:
+
+- A type carrying `;`, a quote, a backtick, a backslash, a comment marker (`--`, `/*`, and MySQL's `#`, which comments out the rest of the line and would silently swallow the `NOT NULL`, `COMMENT` or `AFTER` that follows a type in `MODIFY COLUMN`), or a line break — none of which any dialect needs, and each of which would change the statement rather than the column
+- A type with leading or trailing whitespace. What is validated has to be exactly what is written out, and trimming first breaks that: `"\nGO\n"` reads as the single word `GO` once trimmed, but written out it can trip SQL Server's batch splitting. An empty or whitespace-only type still means "not set" and passes as before
+- A type whose second or later word is a column clause keyword — `NOT`, `NULL`, `DEFAULT`, `PRIMARY`, `KEY`, `REFERENCES`, `CHECK`, `GENERATED`, `IDENTITY`, `COLLATE`, `UNIQUE`, `ON`. A type is interpolated into the middle of a column definition, so `int NOT NULL` or `varchar(50) COLLATE Latin1_General_BIN` produces perfectly valid DDL whose nullability, default or collation disagrees with what the diagram declares — no syntax error tells you. None of these words appears in any real type notation the catalogues or schema import produce
+
+Two known exclusions are worth naming because a database can produce them: PostgreSQL's one-byte `"char"` type (quoted, which the SQL it would land in cannot carry), and the placeholder `user-defined` that import falls back to when it cannot resolve a type name. Both would fail as DDL anyway; you now find out at generation time with the column named. One more edge comes from SQLite, which accepts any words as a declared type and hands them back verbatim on import: a SQLite database created with SQL Server-flavoured DDL can carry a declaration like `INT IDENTITY(1,1)`, whose second word is on the clause-keyword list above and is refused — again by name, at generation time.
+
+### Line breaks and control characters in names
+
+A table, column or constraint name holding a line break or a control character is refused by DDL generation and by schema-sync script generation, which name the place (`TABLE 'x'`, `COLUMN 'x'.'y'`) and produce nothing. The set is the C0 controls, DEL, and the three Unicode line separators U+0085, U+2028 and U+2029. C# code generation reports the same names as a pre-generation error.
+
+Quote characters are deliberately fine: `"`, `'`, `]` and backticks occur in real databases and are escaped where they are written. Descriptions are not refused either — a line break in one is legitimate, and it is folded to a space where it lands in a `--` comment line.
+
+This is separate from whether QuickER *understands* a type. A type the dialect catalogue cannot parse is still carried as it is — it simply gets no neutral type token and does not convert on a dialect switch.
+
 ## Related pages
 
 - [Tutorial (from design to running code)](getting-started.md)

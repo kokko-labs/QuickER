@@ -1010,6 +1010,48 @@ public class SchemaSyncDialogViewModelTests
         }
     }
 
+    /// <summary>
+    /// スクリプト生成が失敗する差分（改行入りテーブル名＝入口の名前検証で拒否される）でも、
+    /// チェックボックス操作が例外を外へ出さずステータス行で伝えることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// <see cref="SchemaSyncDialogViewModel.UpdatePreview"/> は差分項目の <c>IsSelected</c> 変更から
+    /// 直接呼ばれる。例外がここを抜けると WPF の未処理例外になり、チェックを 1 つ入れただけで
+    /// アプリが落ちる（テストでは例外が呼び出し元まで伝播することとして観測できる）。
+    /// </remarks>
+    [Fact(DisplayName = "プレビュー生成の失敗は例外を出さずステータス行へ出す")]
+    public void UpdatePreview_WhenScriptGenerationFails_ReportsStatusInsteadOfThrowing()
+    {
+        var vm = CreateVm();
+        var item = new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.AddTable,
+            TableName = "a\nDROP TABLE users; --",
+            Entity = new QuickER.Model.Entity
+            {
+                TableName = "a\nDROP TABLE users; --",
+                Columns =
+                {
+                    new QuickER.Model.Column
+                    {
+                        Name = "Id",
+                        DataType = "int",
+                        IsPrimaryKey = true,
+                    },
+                },
+            },
+            IsSelected = true,
+            IsSelectable = true,
+        };
+        vm.DiffItems.Add(item);
+
+        var act = () => vm.UpdatePreview();
+
+        act.Should().NotThrow();
+        vm.ScriptPreview.Should().BeEmpty();
+        vm.StatusMessage.Should().Contain("DROP TABLE users");
+    }
+
     /// <summary>常に成功（COMMIT）を返すフェイク実行器（実 DB へ接続しない）</summary>
     private sealed class FakeSuccessExecutor : ISchemaSyncExecutor
     {

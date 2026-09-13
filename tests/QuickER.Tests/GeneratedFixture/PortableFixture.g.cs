@@ -7486,6 +7486,15 @@ internal sealed class EntitySaveMetadata
 {
     private static readonly ConcurrentDictionary<Type, EntitySaveMetadata> _cache = new();
 
+    /// <summary>Quotes a single SQL identifier, doubling the closing quote character so that a name containing it cannot escape the quotes.</summary>
+    /// <remarks>Table and column names come from the diagram, which accepts free text, so a name may well contain the quote character itself. This mirrors the escaping the DDL generator applies.</remarks>
+    internal static string QuoteIdentifier(string name)
+    {
+        const string close = "]";
+
+        return "[" + name.Replace(close, close + close) + close;
+    }
+
     /// <summary>Gets the property that corresponds to the primary key.</summary>
     public required PropertyInfo KeyProperty { get; init; }
 
@@ -7593,7 +7602,7 @@ internal sealed class EntitySaveMetadata
         // A store-generated column doubles as the table's concurrency token; a table carries at most one of them
         var rowVersionProperty =
             storeGeneratedColumns.Count == 0 ? null : storeGeneratedColumns[0];
-        var columnList = string.Join(", ", selectProperties.Select(property => $"[{GetColumnName(property)}]"));
+        var columnList = string.Join(", ", selectProperties.Select(property => EntitySaveMetadata.QuoteIdentifier(GetColumnName(property))));
         var cascades = allProperties
             .Select(property =>
                 (property, attribute: property.GetCustomAttribute<NavigationReferenceAttribute>())

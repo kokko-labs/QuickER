@@ -1213,22 +1213,26 @@ public class CSharpCodeGenerationServiceTests
         content
             .Should()
             .Contain("services.AddScoped<ICustomerRepository, CustomerRepository>();");
+        // テーブル名・列名のクォートは共有ヘルパー経由（名前に含まれる ] を二重化し、スキーマ修飾名を分割クォートする）
+        content
+            .Should()
+            .Contain("var tableName = EntitySaveMetadata.QuoteTableName(tableAttribute.Name);");
         // カラム一覧は columnList へ抽出して SELECT 系で共用する（無制限バイナリ列を除いた SELECT 用列集合）
         content
             .Should()
             .Contain(
-                "var columnList = string.Join(\", \", selectProperties.Select(property => $\"[{GetColumnName(property)}]\"));"
+                "var columnList = string.Join(\", \", selectProperties.Select(property => EntitySaveMetadata.QuoteIdentifier(GetColumnName(property))));"
             );
         content
             .Should()
             .Contain(
-                "SelectByIdSql = $\"SELECT {columnList} FROM {tableName} WHERE [{keyColumnName}] = @id;\""
+                "SelectByIdSql = $\"SELECT {columnList} FROM {tableName} WHERE {EntitySaveMetadata.QuoteIdentifier(keyColumnName)} = @id;\""
             );
         // 実在確認は全列 SELECT ではなく EXISTS 専用文を持つ（行の中身は要らないため）
         content
             .Should()
             .Contain(
-                "$\"SELECT CASE WHEN EXISTS (SELECT 1 FROM {tableName} WHERE [{keyColumnName}] = @id) THEN 1 ELSE 0 END;\""
+                "$\"SELECT CASE WHEN EXISTS (SELECT 1 FROM {tableName} WHERE {EntitySaveMetadata.QuoteIdentifier(keyColumnName)} = @id) THEN 1 ELSE 0 END;\""
             );
         content
             .Should()
@@ -1238,7 +1242,7 @@ public class CSharpCodeGenerationServiceTests
         content
             .Should()
             .Contain(
-                "var insertColumnList = string.Join(\", \", insertProperties.Select(property => $\"[{GetColumnName(property)}]\"));"
+                "var insertColumnList = string.Join(\", \", insertProperties.Select(property => EntitySaveMetadata.QuoteIdentifier(GetColumnName(property))));"
             )
             .And.Contain(
                 "var insertValueList = string.Join(\", \", insertProperties.Select(property => $\"@{property.Name}\"));"
@@ -1249,11 +1253,13 @@ public class CSharpCodeGenerationServiceTests
         content
             .Should()
             .Contain(
-                "$\"UPDATE {tableName} SET {string.Join(\", \", updateAssignments)} WHERE [{keyColumnName}] = @id;\""
+                "$\"UPDATE {tableName} SET {string.Join(\", \", updateAssignments)} WHERE {EntitySaveMetadata.QuoteIdentifier(keyColumnName)} = @id;\""
             );
         content
             .Should()
-            .Contain("DeleteSql = $\"DELETE FROM {tableName} WHERE [{keyColumnName}] = @id;\"");
+            .Contain(
+                "DeleteSql = $\"DELETE FROM {tableName} WHERE {EntitySaveMetadata.QuoteIdentifier(keyColumnName)} = @id;\""
+            );
     }
 
     /// <summary>
@@ -1920,10 +1926,11 @@ public class CSharpCodeGenerationServiceTests
         // カスケードは FK のネスト IN(SELECT …) で子から削除（DB 非依存の純粋プランナーで SQL 構築）
         content.Should().Contain("internal static class CascadeDeletePlanner");
         content.Should().Contain("public static IReadOnlyList<string> BuildDeleteStatements(");
+        // 列名は名前に含まれる ] を二重化する共有ヘルパー経由でクォートする（素の [{…}] 埋め込みではない）
         content
             .Should()
             .Contain(
-                "IN (SELECT [{navigation.PrincipalColumn}] FROM {parentTable}{parentScopeWhere})"
+                "IN (SELECT {EntitySaveMetadata.QuoteIdentifier(navigation.PrincipalColumn)} FROM {parentTable}{parentScopeWhere})"
             );
         // 循環カスケードは未対応として明示的に例外
         content.Should().Contain("Cyclic cascade");
