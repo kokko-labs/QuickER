@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Threading;
 using AwesomeAssertions;
 using QuickER.AI;
@@ -41,7 +41,7 @@ public class MockGenerationDialogTests
                     "QuickERTests",
                     Guid.NewGuid().ToString("N")
                 );
-                // API キーは実 %APPDATA% の ApiKeyStore ではなくメモリ上のストアへ隔離する
+                // API キーは実 %LOCALAPPDATA% の ApiKeyStore ではなくメモリ上のストアへ隔離する
                 var keyStore = new InMemoryApiKeyStore();
                 var viewModel = new MockGenerationDialogViewModel(
                     new StubDiagramSource(new ErDiagram()),

@@ -9,9 +9,14 @@ namespace QuickER.AI.UI;
 /// </summary>
 public static class ApiKeyStore
 {
-    /// <summary>暗号化ファイルの既定の保存先フォルダ (%APPDATA%\QuickER)</summary>
+    /// <summary>暗号化ファイルの既定の保存先フォルダ (%LOCALAPPDATA%\QuickER)</summary>
+    /// <remarks>
+    /// ローミング (%APPDATA%) ではなくローカルへ置く。DPAPI (CurrentUser) の保護はこの PC に
+    /// 紐づくため、ローミングプロファイルで他端末へ複製されても復号できない (理由の正本は
+    /// <c>JsonSettingsStore</c> の既定コンストラクタ)。
+    /// </remarks>
     private static readonly string DefaultFolder = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "QuickER"
     );
 
@@ -26,7 +31,7 @@ public static class ApiKeyStore
 
     /// <summary>
     /// 保存先フォルダを指定して API キーを暗号化保存する。
-    /// テストが実 %APPDATA% を汚さずに（一時フォルダへ隔離して）保存動作を検証するための版。
+    /// テストが実 %LOCALAPPDATA% を汚さずに（一時フォルダへ隔離して）保存動作を検証するための版。
     /// </summary>
     /// <param name="name">キーの識別名 (保存ファイル名に使用)</param>
     /// <param name="apiKey">保存する API キー</param>
@@ -62,7 +67,7 @@ public static class ApiKeyStore
 
     /// <summary>
     /// 保存先フォルダを指定して、保存された API キーを復号して返す。
-    /// テストが実 %APPDATA% を汚さずに（一時フォルダへ隔離して）復元動作を検証するための版。
+    /// テストが実 %LOCALAPPDATA% を汚さずに（一時フォルダへ隔離して）復元動作を検証するための版。
     /// </summary>
     /// <param name="name">キーの識別名</param>
     /// <param name="folder">保存先フォルダ</param>

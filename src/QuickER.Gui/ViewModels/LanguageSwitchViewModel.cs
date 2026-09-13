@@ -1,4 +1,4 @@
-using CommunityToolkit.Mvvm.ComponentModel;
+﻿using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using QuickER.Gui.Abstractions;
 using QuickER.Resources;
@@ -40,7 +40,7 @@ public partial class LanguageSwitchViewModel : ObservableObject
 
     /// <summary>依存を注入して生成する（ストア・再起動サービス省略時は既定を使う）</summary>
     /// <param name="dialogs">確認ダイアログの表示先</param>
-    /// <param name="store">言語設定ストア（省略時は既定の %APPDATA%\QuickER 保存先）</param>
+    /// <param name="store">言語設定ストア（省略時は既定の %LOCALAPPDATA%\QuickER 保存先）</param>
     /// <param name="restart">アプリ再起動サービス（省略時は WPF 実装。単体テストではスタブを渡す）</param>
     public LanguageSwitchViewModel(
         IDialogService dialogs,

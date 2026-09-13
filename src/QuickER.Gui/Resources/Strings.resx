@@ -86,6 +86,15 @@
   <data name="Update_ConfirmMessage" xml:space="preserve">
     <value>A new version {0} is available. Download it and restart to apply?</value>
   </data>
+  <data name="Settings_Caption" xml:space="preserve">
+    <value>Settings</value>
+  </data>
+  <data name="Settings_Tooltip" xml:space="preserve">
+    <value>Application settings (display language, update check)</value>
+  </data>
+  <data name="Settings_CheckUpdatesOnStartup" xml:space="preserve">
+    <value>Check for updates on startup</value>
+  </data>
   <data name="Common_Cancel" xml:space="preserve">
     <value>Cancel</value>
   </data>

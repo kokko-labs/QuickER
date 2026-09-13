@@ -1,4 +1,4 @@
-using QuickER.Settings;
+﻿using QuickER.Settings;
 
 namespace QuickER.Services;
 
@@ -10,6 +10,16 @@ public class GuiAppSettings
     /// 切替は再起動反映方式のため、この値は起動最初期のカルチャ適用でのみ参照する。
     /// </summary>
     public string? Language { get; set; }
+
+    /// <summary>
+    /// 起動時に更新を確認するか（既定 <c>true</c>）。<c>false</c> にすると
+    /// <see cref="UpdateService.CheckOnStartupAsync"/> は更新フィードへ一切接続しない。
+    /// </summary>
+    /// <remarks>
+    /// 既定値はプロパティ初期化子が担うため、このキーを持たない既存の設定ファイル（および
+    /// 解析失敗時の既定インスタンス）は「確認する」として読み込まれる。
+    /// </remarks>
+    public bool CheckForUpdatesOnStartup { get; set; } = true;
 
     /// <summary>ダイアグラム上の表示トグル（自動保存で書き込まれ、次回起動時に復元する）</summary>
     public DiagramViewSettings DiagramView { get; set; } = new();
@@ -53,7 +63,7 @@ public class DiagramViewSettings
 }
 
 /// <summary>
-/// GUI アプリ設定を JSON ファイル（%APPDATA%\QuickER\gui-settings.json）へ保存・読込するストア。
+/// GUI アプリ設定を JSON ファイル（%LOCALAPPDATA%\QuickER\gui-settings.json）へ保存・読込するストア。
 /// GUI 全体の設定と UI 状態を 1 ファイルへ集約し、書き込みは Load → 該当セクションのみ変更 → Save の
 /// read-modify-write で行う（他のセクションを消さないため）。
 /// </summary>
@@ -62,7 +72,7 @@ public class GuiAppSettingsStore : JsonSettingsStore<GuiAppSettings>
     /// <summary>既定の保存ファイル名</summary>
     public const string DefaultFileName = "gui-settings.json";
 
-    /// <summary>既定の保存先（%APPDATA%\QuickER）で設定ストアを生成する</summary>
+    /// <summary>既定の保存先（%LOCALAPPDATA%\QuickER）で設定ストアを生成する</summary>
     public GuiAppSettingsStore()
         : base(DefaultFileName) { }
 

@@ -22,28 +22,44 @@ public sealed class UpdateService
     /// <summary>フィード解決関数（未設定なら null を返す。テストで差し替え可能）</summary>
     private readonly Func<string?> _resolveFeed;
 
+    /// <summary>起動時の更新確認が有効かを返す関数（設定のオプトアウト。省略時は常に有効）</summary>
+    private readonly Func<bool> _isEnabled;
+
     /// <summary>依存を注入して <see cref="UpdateService"/> を構築する</summary>
     /// <param name="dialogService">更新の承諾を得る確認ダイアログ</param>
     /// <param name="updaterFactory">フィード文字列から更新実行体を生成するファクトリ</param>
     /// <param name="resolveFeed">フィード解決関数（未設定なら null を返す）</param>
+    /// <param name="isEnabled">
+    /// 起動時の更新確認が有効かを返す関数（<c>null</c> なら常に有効）。
+    /// 本番では <see cref="GuiAppSettings.CheckForUpdatesOnStartup"/> を読む
+    /// </param>
     public UpdateService(
         IDialogService dialogService,
         Func<string, IAppUpdater> updaterFactory,
-        Func<string?> resolveFeed
+        Func<string?> resolveFeed,
+        Func<bool>? isEnabled = null
     )
     {
         _dialogService = dialogService;
         _updaterFactory = updaterFactory;
         _resolveFeed = resolveFeed;
+        _isEnabled = isEnabled ?? (static () => true);
     }
 
     /// <summary>
     /// 起動時に更新を確認し、あればユーザーの承諾を得てダウンロード→再起動適用する。
-    /// フィード未設定・非インストール実行・更新なし・拒否・各種例外のいずれでも起動を阻害しない。
+    /// 設定でのオプトアウト・フィード未設定・非インストール実行・更新なし・拒否・各種例外の
+    /// いずれでも起動を阻害しない。
     /// </summary>
     public async Task CheckOnStartupAsync()
     {
-        // フィード未設定（環境変数・定数がともに空の構成）なら何もしない
+        // 設定でオプトアウトされていればフィードの解決すら行わない（＝ネットワークへ一切出ない）
+        if (!_isEnabled())
+        {
+            return;
+        }
+
+        // フィード未設定（配布ビルドで定数が空の構成）なら何もしない
         var feed = _resolveFeed();
 
         if (feed is null)

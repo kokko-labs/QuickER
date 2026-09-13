@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Linq;
 using AwesomeAssertions;
 using QuickER.CodeGen.CSharp;
@@ -12,7 +12,7 @@ namespace QuickER.Tests.CodeGen.UI;
 /// <summary><see cref="CSharpGenerationDialogViewModel" /> の入力確定・検証・参照・分割・永続化を検証するテストクラス</summary>
 public class CSharpGenerationDialogViewModelTests
 {
-    /// <summary>一時フォルダのストアで ViewModel を生成する（実 %APPDATA% を汚さない）</summary>
+    /// <summary>一時フォルダのストアで ViewModel を生成する（実 %LOCALAPPDATA% を汚さない）</summary>
     private static CSharpGenerationDialogViewModel CreateViewModel(
         out string folder,
         QuickER.Provider.IDatabaseProvider? currentProvider = null
@@ -199,7 +199,7 @@ public class CSharpGenerationDialogViewModelTests
     }
 
     /// <summary>
-    /// 対象 DB チェックは %APPDATA% の設定へ永続化され、次回起動時はプロバイダの初期値より
+    /// 対象 DB チェックは %LOCALAPPDATA% の設定へ永続化され、次回起動時はプロバイダの初期値より
     /// 保存値（非空リスト）が優先して復元されることを検証する
     /// </summary>
     [Fact(DisplayName = "対象 DB チェックは保存され、次回は保存値が図の方言より優先して復元される")]

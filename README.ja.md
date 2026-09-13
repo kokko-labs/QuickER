@@ -313,6 +313,8 @@ GitHub Releases では、次の形式を提供します。
 
 Portable 版は ZIP を展開し、`QuickER.exe` を実行してください。
 
+インストーラと更新パッケージには Authenticode 署名を付けていないため、Windows SmartScreen が「発行元不明」として警告します。「詳細情報」→「実行」で進めてください。インストール版は起動時に GitHub Releases（`api.github.com`）へ更新の有無を確認し、ダウンロードの前に必ず確認を出します。**設定 > 起動時に更新を確認する**で無効にできます。Portable 版は確認しません。
+
 ソースコードから起動する場合:
 
 ```powershell

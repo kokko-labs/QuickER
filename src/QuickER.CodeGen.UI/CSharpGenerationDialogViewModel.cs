@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
@@ -1173,7 +1173,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     /// <summary>現在の設定一式を名前を付けて JSON ファイルへ保存する（プロジェクト別プリセットのエクスポート）</summary>
     /// <remarks>
     /// 対象 DB チェックを含む設定一式を、CLI の <c>--config</c> にそのまま渡せるスキーマで書き出す。
-    /// %APPDATA% の codegen-settings.json へは書き込まず、選択された任意ファイルへ書き出す
+    /// %LOCALAPPDATA% の codegen-settings.json へは書き込まず、選択された任意ファイルへ書き出す
     /// （永続化は生成確定時の <see cref="Ok"/> の責務）。成功時は情報ダイアログで通知し、
     /// アクセス拒否・IO 失敗時はエラーダイアログを表示する（いずれも表示状態は変更しない）
     /// </remarks>
@@ -1216,7 +1216,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
 
     /// <summary>保存済みの設定 JSON ファイルを読み込み、ダイアログの表示状態へ反映する（プリセットのインポート）</summary>
     /// <remarks>
-    /// 反映のみ行い %APPDATA% の codegen-settings.json へは書き込まない。成功時は無通知（表示へ反映するのみ）。
+    /// 反映のみ行い %LOCALAPPDATA% の codegen-settings.json へは書き込まない。成功時は無通知（表示へ反映するのみ）。
     /// 解析不能・不正・IO 失敗時はエラーダイアログを表示し、現在の表示状態は変更しない
     /// </remarks>
     [RelayCommand]

@@ -35,8 +35,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// <summary>Undo/Redo 履歴を管理するスタック</summary>
     public UndoRedoManager UndoRedo { get; } = new();
 
-    /// <summary>ツールバーの言語切替ボタン用の子 ViewModel（表示言語の選択・保存）</summary>
+    /// <summary>ツールバーの設定メニュー内、言語切替用の子 ViewModel（表示言語の選択・保存）</summary>
     public LanguageSwitchViewModel LanguageSwitch { get; }
+
+    /// <summary>ツールバーの設定メニュー内、起動時更新チェックのトグル用の子 ViewModel</summary>
+    public UpdateSettingsViewModel UpdateSettings { get; }
 
     /// <summary>フィーチャーモジュールがツールバーへ寄与するボタン群（起動時にホストが設定する）</summary>
     [ObservableProperty]
@@ -320,6 +323,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             OnColumnRenamed
         );
         LanguageSwitch = new LanguageSwitchViewModel(_dialogs);
+        UpdateSettings = new UpdateSettingsViewModel();
         CopySelectedEntityCommand = new RelayCommand(CopySelectedEntity, CanCopySelectedEntity);
         PasteCopiedEntityCommand = new RelayCommand(PasteCopiedEntity, CanPasteCopiedEntity);
         Entities.CollectionChanged += OnEntitiesCollectionChanged;

@@ -44,11 +44,16 @@ public class SqlConnectionProfileStore
     /// <summary>パスワード暗号ファイルの格納フォルダ</summary>
     public string SecretsFolder => Path.Combine(_folder, "connection-secrets");
 
-    /// <summary>既定（<c>%AppData%\QuickER</c>・DPAPI 有効）のストアを生成する</summary>
+    /// <summary>既定（<c>%LOCALAPPDATA%\QuickER</c>・DPAPI 有効）のストアを生成する</summary>
+    /// <remarks>
+    /// 保存先がローミング（<c>%APPDATA%</c>）ではなくローカルである理由は
+    /// <see cref="JsonSettingsStore{TSettings}"/> の既定コンストラクタを参照（DPAPI で保護した
+    /// パスワードは他端末では復号できないため、複製されて困る筆頭がここ）。
+    /// </remarks>
     public SqlConnectionProfileStore()
         : this(
             Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "QuickER"
             ),
             true

@@ -96,6 +96,18 @@
     <value>新しいバージョン {0} が利用可能です。ダウンロードして再起動し、更新を適用しますか？</value>
     <comment>更新確認メッセージ（{0} は新バージョン番号）</comment>
   </data>
+  <data name="Settings_Caption" xml:space="preserve">
+    <value>設定</value>
+    <comment>ツールバーの設定ボタンのキャプション</comment>
+  </data>
+  <data name="Settings_Tooltip" xml:space="preserve">
+    <value>アプリの設定（表示言語・更新確認）</value>
+    <comment>設定ボタンのツールチップ</comment>
+  </data>
+  <data name="Settings_CheckUpdatesOnStartup" xml:space="preserve">
+    <value>起動時に更新を確認する</value>
+    <comment>設定メニューの更新確認トグル</comment>
+  </data>
   <data name="Common_Cancel" xml:space="preserve">
     <value>キャンセル</value>
   </data>

@@ -201,12 +201,8 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
             startInfo.ArgumentList.Add(options.PermissionMode);
         }
 
-        if (!string.IsNullOrWhiteSpace(options.SystemPrompt))
-        {
-            startInfo.ArgumentList.Add("--append-system-prompt");
-            startInfo.ArgumentList.Add(options.SystemPrompt);
-        }
-
+        // --model / --resume はシステムプロンプトより前に積む。ファイル渡し化で改行は引数から
+        // 消えるが、「後ろに積んだ引数が失われる」形の事故に対する順序依存も残さない
         if (!string.IsNullOrWhiteSpace(options.Model))
         {
             startInfo.ArgumentList.Add("--model");
@@ -219,42 +215,63 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
             startInfo.ArgumentList.Add(resumeSessionId);
         }
 
-        using var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
-
-        if (!process.Start())
-        {
-            return new ClaudeCodeTurnOutcome(false, Strings.ClaudeCode_LaunchFailed, null, false);
-        }
-
-        _currentProcess = process;
-
-        // stderr は起動直後から常時ドレインする（読まないままだと数 KB でパイプバッファが満杯になり、
-        // 子プロセスが write でブロックして stdout も進まなくなる＝ReadLineAsync が返らなくなる）
-        var standardError = new StandardErrorDrain(process);
+        // システムプロンプトは引数でなく一時ファイルで渡す（理由は AppendSystemPromptArguments の XmlDoc）
+        var systemPromptPath = string.IsNullOrWhiteSpace(options.SystemPrompt)
+            ? null
+            : AppendSystemPromptArguments(startInfo, options.SystemPrompt);
 
         try
         {
-            await process.StandardInput.WriteAsync(prompt).ConfigureAwait(false);
-            process.StandardInput.Close();
+            // 引数を積み終えてからシムガードを通す（claude が .cmd で入っている場合に cmd.exe 経由へ包み直す）
+            ApplyBatchShimGuard(startInfo);
 
-            var stream = await ReadStreamAsync(process, onAssistantText, cancellationToken)
-                .ConfigureAwait(false);
+            using var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
 
-            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+            if (!process.Start())
+            {
+                return new ClaudeCodeTurnOutcome(
+                    false,
+                    Strings.ClaudeCode_LaunchFailed,
+                    null,
+                    false
+                );
+            }
 
-            // 終了コードと stderr を判定材料に含めるため、読み切りを（上限付きで）待ってから評価する
-            await standardError.WaitForCompletionAsync().ConfigureAwait(false);
+            _currentProcess = process;
 
-            return EvaluateTurnOutcome(stream, process.ExitCode, standardError.RecentLines);
-        }
-        catch (OperationCanceledException)
-        {
-            TryKill(process);
-            return new ClaudeCodeTurnOutcome(false, null, resumeSessionId, false);
+            // stderr は起動直後から常時ドレインする（読まないままだと数 KB でパイプバッファが満杯になり、
+            // 子プロセスが write でブロックして stdout も進まなくなる＝ReadLineAsync が返らなくなる）
+            var standardError = new StandardErrorDrain(process);
+
+            try
+            {
+                await process.StandardInput.WriteAsync(prompt).ConfigureAwait(false);
+                process.StandardInput.Close();
+
+                var stream = await ReadStreamAsync(process, onAssistantText, cancellationToken)
+                    .ConfigureAwait(false);
+
+                await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+
+                // 終了コードと stderr を判定材料に含めるため、読み切りを（上限付きで）待ってから評価する
+                await standardError.WaitForCompletionAsync().ConfigureAwait(false);
+
+                return EvaluateTurnOutcome(stream, process.ExitCode, standardError.RecentLines);
+            }
+            catch (OperationCanceledException)
+            {
+                TryKill(process);
+                return new ClaudeCodeTurnOutcome(false, null, resumeSessionId, false);
+            }
+            finally
+            {
+                _currentProcess = null;
+            }
         }
         finally
         {
-            _currentProcess = null;
+            // プロセス終了後に後片付けする（読み終える前に消すと claude が読めない）
+            TryDeleteSystemPromptFile(systemPromptPath);
         }
     }
 
@@ -273,6 +290,7 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
         startInfo.ArgumentList.Add("-p");
         startInfo.ArgumentList.Add("--output-format");
         startInfo.ArgumentList.Add("json");
+        ApplyBatchShimGuard(startInfo);
 
         using var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
 
@@ -362,6 +380,92 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
 
         return startInfo;
     }
+
+    /// <summary>システムプロンプトの一時ファイルを置くフォルダ（<c>%TEMP%\QuickER\claude-code</c>）</summary>
+    private static string SystemPromptDirectory =>
+        Path.Combine(Path.GetTempPath(), "QuickER", "claude-code");
+
+    /// <summary>
+    /// システムプロンプトを一時ファイルへ書き出し、<c>--append-system-prompt-file</c> の引数として積む。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 本文を <c>--append-system-prompt</c> の引数で直接渡さないのは、npm 導入の claude が
+    /// <c>.cmd</c> シム（<c>"%~dp0bin\claude.exe" %*</c> 形）だと、cmd が <c>%*</c> を展開する段階で
+    /// **最初の改行から後ろを黙って捨てる**ため。捨てられるのはプロンプトの 2 行目以降だけでなく
+    /// 後続の引数もすべてで、<c>--model</c> / <c>--resume</c> が消える＝毎ターン新規セッションになる。
+    /// ER 設計ルールもモック生成プロンプトも複数行なので、この経路は常に踏む。
+    /// </para>
+    /// <para>
+    /// 渡すのがパスなら改行も cmd のメタ文字も含まない（ファイル名は GUID）ため、シム経由でも
+    /// 1 トークンのまま届く。内容は BOM なし UTF-8 で書く（BOM を本文の一部として読ませない）。
+    /// </para>
+    /// </remarks>
+    /// <param name="startInfo">引数を積む起動情報</param>
+    /// <param name="systemPrompt">渡すシステムプロンプト本文</param>
+    /// <returns>書き出した一時ファイルのパス（呼び出し側がプロセス終了後に削除する）</returns>
+    internal static string AppendSystemPromptArguments(
+        ProcessStartInfo startInfo,
+        string systemPrompt
+    )
+    {
+        Directory.CreateDirectory(SystemPromptDirectory);
+
+        var path = Path.Combine(SystemPromptDirectory, $"{Guid.NewGuid():N}.txt");
+        File.WriteAllText(
+            path,
+            systemPrompt,
+            new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false)
+        );
+
+        startInfo.ArgumentList.Add("--append-system-prompt-file");
+        startInfo.ArgumentList.Add(path);
+
+        return path;
+    }
+
+    /// <summary>システムプロンプトの一時ファイルをベストエフォートで削除する</summary>
+    /// <remarks>
+    /// 削除の失敗（ウイルス対策の掴み等）でターンの結果を差し替えないよう握り潰す。残っても
+    /// <c>%TEMP%</c> 配下の小さなテキストで、OS のクリーンアップ対象。
+    /// </remarks>
+    /// <param name="path">削除するパス（null なら何もしない）</param>
+    internal static void TryDeleteSystemPromptFile(string? path)
+    {
+        if (path is null)
+        {
+            return;
+        }
+
+        try
+        {
+            File.Delete(path);
+        }
+        catch (IOException)
+        {
+            // 掴まれている等で消せなくても無視する
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // 権限で消せなくても無視する
+        }
+    }
+
+    /// <summary>
+    /// claude の実体が <c>.cmd</c> / <c>.bat</c> シム（npm 導入）のとき、起動情報を
+    /// <c>cmd.exe</c> 経由へ包み直す。<c>.exe</c> なら何もしない。
+    /// </summary>
+    /// <remarks>
+    /// 引数を積み終えた後に呼ぶこと（<see cref="ProcessStartInfo.ArgumentList"/> の全トークンを
+    /// 引用し直すため）。ポリシーの正本は <see cref="BatchShimProcessGuard"/>。
+    /// </remarks>
+    internal static void ApplyBatchShimGuard(ProcessStartInfo startInfo) =>
+        BatchShimProcessGuard.Apply(
+            startInfo,
+            Strings.ClaudeCode_PathHasQuote,
+            Strings.ClaudeCode_ArgHasEnvExpansion,
+            Strings.ClaudeCode_ArgHasNewline
+        );
 
     /// <summary>stdout の stream-json 行を解析し、テキストを逐次通知しつつ中間結果を組み立てる</summary>
     private static async Task<ClaudeCodeStreamResult> ReadStreamAsync(

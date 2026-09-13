@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.ComponentModel;
 using System.IO;
 using System.Linq;
@@ -36,7 +36,7 @@ public class ChatConnectionSettingsViewModelTests
     ) =>
         new(
             dialogKind,
-            // 設定・UI 状態・モデル履歴を集約した 1 ファイルを一時フォルダへ隔離する（実 %APPDATA% を保護）
+            // 設定・UI 状態・モデル履歴を集約した 1 ファイルを一時フォルダへ隔離する（実 %LOCALAPPDATA% を保護）
             settingsStore: new AiSettingsStore(folder),
             codexConfigReader: codexConfigReader ?? (() => new CodexConfigToml()),
             // 既定ではキーストアに触れないよう loader は空・saver は無操作にする

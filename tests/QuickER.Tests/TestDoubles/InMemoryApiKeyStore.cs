@@ -1,8 +1,8 @@
-namespace QuickER.Tests.TestDoubles;
+﻿namespace QuickER.Tests.TestDoubles;
 
 /// <summary>
 /// API キーの保存・復元をメモリ上で行うテスト用ストア。
-/// 実 <c>ApiKeyStore</c>（%APPDATA% 配下へ DPAPI 暗号化保存）へ触れずに VM の API キー seam を満たすために使う
+/// 実 <c>ApiKeyStore</c>（%LOCALAPPDATA% 配下へ DPAPI 暗号化保存）へ触れずに VM の API キー seam を満たすために使う
 /// （実ファイルを共有すると並列テストが IO 競合を起こすため）。
 /// </summary>
 /// <remarks>

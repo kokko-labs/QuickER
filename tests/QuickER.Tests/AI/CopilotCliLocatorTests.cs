@@ -1,6 +1,7 @@
 using System.IO;
 using AwesomeAssertions;
 using QuickER.AI;
+using AiStrings = QuickER.AI.Resources.Strings;
 
 namespace QuickER.Tests.AI;
 
@@ -126,5 +127,45 @@ public class CopilotCliLocatorTests
 
         PathExecutableResolver.Resolve("copilot", FakeBinDirectory, exists).Should().Be(copilot);
         PathExecutableResolver.Resolve("codex", FakeBinDirectory, exists).Should().BeNull();
+    }
+
+    /// <summary>
+    /// 起動直前の関門が、シムのパスに引用符を含む解決結果を拒否することを検証する。
+    /// copilot は SDK の内側で起動されるため QuickER が引数を引用し直せず、掛けられる防御はここだけ。
+    /// </summary>
+    [Fact(DisplayName = "引用符を含む cmd シムのパスは起動前に拒否する")]
+    public void EnsureSafeToLaunch_QuoteInShimPath_Throws()
+    {
+        const string path = @"C:\tools\evil"" & calc & ""x.cmd";
+
+        var act = () => CopilotCliLocator.EnsureSafeToLaunch(path);
+
+        act.Should()
+            .Throw<InvalidOperationException>()
+            .WithMessage(string.Format(AiStrings.Copilot_PathHasQuote, path));
+    }
+
+    /// <summary>正当なパス（シム・実行ファイルとも）はそのまま通ることを検証する</summary>
+    [Theory]
+    [InlineData(@"C:\npm\copilot.cmd")]
+    [InlineData(@"C:\Program Files\GitHub\copilot.exe")]
+    public void EnsureSafeToLaunch_SafePath_PassesThrough(string path)
+    {
+        CopilotCliLocator.EnsureSafeToLaunch(path).Should().Be(path);
+    }
+
+    /// <summary>
+    /// 解決（<see cref="CopilotCliLocator.IsAvailable"/> が通る経路）は検証を行わず例外も投げないことを検証する。
+    /// 検証を解決側へ置くと、接続タブを開いて検出するだけで例外になる。
+    /// </summary>
+    [Fact(DisplayName = "解決は引用符を含むパスでも例外を投げない")]
+    public void ResolveExecutablePath_DoesNotValidate()
+    {
+        var directory = @"C:\evil"" & calc";
+        var expected = Path.Combine(directory, PrimaryCandidate);
+
+        var resolved = CopilotCliLocator.ResolveExecutablePath(directory, Existing(expected));
+
+        resolved.Should().Be(expected);
     }
 }

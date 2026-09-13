@@ -31,14 +31,15 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: リポジトリを取得
-        uses: actions/checkout@v7
+        # アクションは commit SHA で固定する（理由は ci.yml の同名ステップのコメントを参照）
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: .NET SDK をセットアップ
         # SDK 版の正本は global.json（ci.yml / release.yml と同じ）。dotnet-version: 10.0.x の
         # ままだと「インストールする版＝最新」「使う版＝global.json の解決」がねじれ、
         # ランナーのパッチ版次第で配布バイナリが手元の再現ビルドとバイト一致しなくなる
         # （v0.1.0 の検証で実測＝ハッシュ照合で済む確認が API 面比較の遠回りになった）
-        uses: actions/setup-dotnet@v5
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5.4.0
         with:
           global-json-file: global.json
 
@@ -77,7 +78,7 @@ jobs:
       - name: NuGet.org へログイン（Trusted Publishing・dry_run=false のときのみ）
         if: ${{ inputs.dry_run == false }}
         id: nuget-login
-        uses: NuGet/login@v1
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
         with:
           user: kokko-labs
 

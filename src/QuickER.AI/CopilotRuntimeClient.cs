@@ -88,9 +88,10 @@ public sealed class CopilotRuntimeClient : ICopilotRuntimeClient
             return;
         }
 
-        var executable =
+        var executable = CopilotCliLocator.EnsureSafeToLaunch(
             CopilotCliLocator.ResolveExecutablePath()
-            ?? throw new InvalidOperationException(Strings.Copilot_CliNotFound);
+                ?? throw new InvalidOperationException(Strings.Copilot_CliNotFound)
+        );
 
         _workingDirectory = CreateWorkingDirectory();
 

@@ -71,6 +71,59 @@ public class GuiAppSettingsStoreTests
         }
     }
 
+    /// <summary>更新チェックのオプトアウトが往復することを検証する</summary>
+    [Fact(DisplayName = "保存した更新チェック設定を読み込める")]
+    public void SaveThenLoad_CheckForUpdatesOnStartup_RoundTrips()
+    {
+        var folder = TempFolder();
+
+        try
+        {
+            var store = new GuiAppSettingsStore(folder);
+            store.Save(new GuiAppSettings { CheckForUpdatesOnStartup = false });
+
+            store.Load().CheckForUpdatesOnStartup.Should().BeFalse();
+        }
+        finally
+        {
+            if (Directory.Exists(folder))
+            {
+                Directory.Delete(folder, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// このキーを持たない既存ファイル（＝更新前に書かれた設定）でも「確認する」として読めることを検証する。
+    /// 追加したキーが既存利用者の更新チェックを黙って止めない、が守りたい性質。
+    /// </summary>
+    [Fact(DisplayName = "更新チェックのキーが無い既存ファイルは確認するとして読む")]
+    public void Load_WhenUpdateKeyMissing_DefaultsToEnabled()
+    {
+        var folder = TempFolder();
+
+        try
+        {
+            Directory.CreateDirectory(folder);
+            var store = new GuiAppSettingsStore(folder);
+
+            // 更新チェックのキーを持たない、旧版が書いた形の設定ファイル
+            File.WriteAllText(store.SettingsPath, """{ "language": "ja" }""");
+
+            var loaded = store.Load();
+
+            loaded.Language.Should().Be("ja");
+            loaded.CheckForUpdatesOnStartup.Should().BeTrue();
+        }
+        finally
+        {
+            if (Directory.Exists(folder))
+            {
+                Directory.Delete(folder, recursive: true);
+            }
+        }
+    }
+
     /// <summary>保存した表示トグルが同じ内容で読み込めることを検証する</summary>
     [Fact(DisplayName = "保存した DiagramView 設定を読み込める")]
     public void SaveThenLoad_DiagramView_RoundTrips()

@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
@@ -63,7 +63,7 @@ public class ModelHistoryComboBoxTests
                 seeded.ApiModelHistory.Touch("openai", "custom-model");
                 store.Save(seeded);
 
-                // API キーは実 %APPDATA% の ApiKeyStore ではなくメモリ上のストアへ隔離する
+                // API キーは実 %LOCALAPPDATA% の ApiKeyStore ではなくメモリ上のストアへ隔離する
                 var keyStore = new InMemoryApiKeyStore();
                 var vm = new AiChatDialogViewModel(
                     host: null,

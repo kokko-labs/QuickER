@@ -34,11 +34,12 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: リポジトリを取得
-        uses: actions/checkout@v7
+        # アクションは commit SHA で固定する（理由は ci.yml の同名ステップのコメントを参照）
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: .NET SDK をセットアップ
         # SDK 版の正本は global.json（ci.yml と同じ。理由もそちらのコメントを参照）
-        uses: actions/setup-dotnet@v5
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5.4.0
         with:
           global-json-file: global.json
 
@@ -114,13 +115,13 @@ jobs:
         run: vpk pack --packId QuickER --packVersion ${{ steps.version.outputs.version }} --packDir ${{ runner.temp }}/publish-lite --mainExe QuickER.exe --icon assets/QuickER.ico --channel win-lite --outputDir ${{ runner.temp }}/releases-lite
 
       - name: 成果物をワークフロー成果物としてアップロード（dry_run 検証用・win-full）
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: QuickER-${{ steps.version.outputs.version }}-win-full
           path: ${{ runner.temp }}/releases-full
 
       - name: 成果物をワークフロー成果物としてアップロード（dry_run 検証用・win-lite）
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: QuickER-${{ steps.version.outputs.version }}-win-lite
           path: ${{ runner.temp }}/releases-lite

@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Windows;
 using System.Windows.Data;
 using AwesomeAssertions;
@@ -14,7 +14,7 @@ namespace QuickER.Tests.CodeGen.UI;
 /// </summary>
 public class CSharpGenerationDialogViewTests
 {
-    /// <summary>一時フォルダのストアで ViewModel を生成する（実 %APPDATA% を汚さない）</summary>
+    /// <summary>一時フォルダのストアで ViewModel を生成する（実 %LOCALAPPDATA% を汚さない）</summary>
     private static CSharpGenerationDialogViewModel CreateViewModel(out string folder)
     {
         folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));

@@ -7,7 +7,8 @@ namespace QuickER.AI.Mock;
 /// バックエンド（Claude Code / Codex / Copilot）に依らずプロンプト本文は同一である必要があるため、
 /// <see cref="ClaudeCodeMockProjectAgent"/> ・ <see cref="CodexMockProjectAgent"/> ・
 /// <see cref="CopilotMockProjectAgent"/> のいずれもここを参照する（プロンプト本文の重複コピーを避ける正本）。
-/// 各バックエンドは、ここで得たシステムプロンプトをそれぞれの流儀（Claude Code＝<c>--append-system-prompt</c>／
+/// 各バックエンドは、ここで得たシステムプロンプトをそれぞれの流儀（Claude Code＝一時ファイル＋
+/// <c>--append-system-prompt-file</c>＝本文が複数行のため引数では <c>.cmd</c> シム経由で切れる／
 /// Codex＝developer instructions／Copilot＝システムメッセージへの追記）で渡す。
 /// 本文はすべて英語固定（ヘッドレス実行の機械向け指示は UI 言語に追従させない＝回答言語が意図せず
 /// 引きずられるのを避ける方針。CJK 混入は英語ガードテストが検知する）。
