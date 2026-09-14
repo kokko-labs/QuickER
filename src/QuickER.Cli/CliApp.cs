@@ -433,6 +433,15 @@ public static class CliApp
             TargetDbms = provider.Name,
         };
 
+        // 出力先の親ディレクトリを用意する（generate 系と対称。作らないと原子的書き込みの一時ファイル名を
+        // 含む素の DirectoryNotFoundException が出て、何が足りないのか読み取れない）
+        var outputDirectory = output.Directory;
+
+        if (outputDirectory is not null && !outputDirectory.Exists)
+        {
+            outputDirectory.Create();
+        }
+
         // Layout=null＝スキーマのみ文書（layout キーが JSON へ出力されない）として保存する。
         // 既存ファイルへの上書きになり得るため、書き込み途中の中断で壊さないよう原子的に差し替える
         var document = new DiagramDocument { Schema = diagram, Layout = null };

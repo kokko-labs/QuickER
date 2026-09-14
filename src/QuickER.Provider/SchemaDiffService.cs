@@ -743,8 +743,11 @@ public class SchemaDiffService
         columns.Count == 0 ? Strings.Diff_PrimaryKey_None : string.Join(", ", columns);
 
     /// <summary>データ型を大文字小文字・前後空白を無視して同一とみなせるか判定する</summary>
-    private static bool IsSameType(string a, string b) =>
-        string.Equals((a ?? "").Trim(), (b ?? "").Trim(), StringComparison.OrdinalIgnoreCase);
+    /// <remarks>
+    /// 規則の正本は <see cref="DbTypeText.AreEquivalent"/>（「型表記が実害のある形で変わったか」を
+    /// 語る箇所の共有規則）。ここが <c>ALTER COLUMN</c> を出すかどうかの判定そのものにあたる。
+    /// </remarks>
+    private static bool IsSameType(string a, string b) => DbTypeText.AreEquivalent(a, b);
 
     /// <summary>共通列（双方に存在する列）の相対順序が変更されているかを判定する</summary>
     private static bool HasColumnOrderChanged(Entity live, Entity target)

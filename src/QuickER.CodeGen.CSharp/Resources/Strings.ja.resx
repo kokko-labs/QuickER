@@ -148,6 +148,9 @@
   <data name="CodeGen_Info_ExcludedUnboundedBinaryColumns" xml:space="preserve">
     <value>無制限バイナリ列を SELECT / UPDATE 対象から除外しました:{0}</value>
   </data>
+  <data name="CodeGen_Info_NonCanonicalTypeSpellingColumns" xml:space="preserve">
+    <value>次の列は、方言中立トークンからは同じ綴りの DB 型へ戻りません（トークンを整形し直すと矢印の右の型になります）。そのためコード取込で元の型表記へ戻せるよう、[DbColumnMeta] へ元の表記もそのまま記録しています:{0}</value>
+  </data>
   <data name="CodeGen_Info_IncludeGraphSkippedNavigations" xml:space="preserve">
     <value>次のナビゲーションは、ルートからの経路に既に現れたテーブルへ戻る辺のため IncludeGraph では辿りません（Include ツリーは循環を表せません）。深さを決めて取得したい場合は Include / ThenInclude で明示してください:{0}</value>
   </data>

@@ -59,7 +59,34 @@
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
   <data name="Reverse_NoTargetClasses" xml:space="preserve">
-    <value>リバース対象のクラスが見つかりませんでした。IncludeDataAnnotations ON で生成した本体 .g.cs（[Table] と [DbColumnMeta] 属性を持つクラス）を選んでください。</value>
+    <value>リバース対象のクラスが見つかりませんでした。生成されたエンティティを含む .g.cs（分割出力では Entities.g.cs）を、IncludeDataAnnotations ON で生成したもの（クラスに [Table] 属性が付いたもの）から選んでください。</value>
+  </data>
+  <data name="Reverse_TableWithoutColumns" xml:space="preserve">
+    <value>テーブル '{0}' は列を 1 つも復元できなかったため、列ゼロで取り込みました。</value>
+  </data>
+  <data name="Reverse_PrimaryKeyColumnMissingTypeMeta" xml:space="preserve">
+    <value>主キー列 '{0}.{1}' に DB 型メタ（[DbColumnMeta]）が無いためスキップしました。テーブル '{0}' はこの主キー列を失います。</value>
+  </data>
+  <data name="Reverse_RelationshipColumnUnresolved" xml:space="preserve">
+    <value>リレーション '{2}' → '{3}' の列 '{0}.{1}' を解決できなかったため、列ペアなしで復元しました（DDL 生成・スキーマ差分の対象外になります）。</value>
+  </data>
+  <data name="Reverse_NavigationUnreadable" xml:space="preserve">
+    <value>'{0}.{1}' の [NavigationReference] を読み取れなかった（端点の引数が不足・文字列リテラルでない・名前付き引数で並びが違う）ため、リレーションを無視しました。</value>
+  </data>
+  <data name="Reverse_NavigationTableMissing" xml:space="preserve">
+    <value>テーブル '{2}' がリバース対象に含まれないため、リレーション '{0}' → '{1}' を無視しました。</value>
+  </data>
+  <data name="Reverse_DuplicateTable" xml:space="preserve">
+    <value>テーブル名 '{0}' を複数のクラスが宣言しています。すべて復元したため、同名のテーブルが複数ある図になります。</value>
+  </data>
+  <data name="Reverse_DuplicateColumn" xml:space="preserve">
+    <value>テーブル '{0}' で列名 '{1}' が複数回宣言されています。すべて復元したため、同名の列が複数あるテーブルになります。</value>
+  </data>
+  <data name="Reverse_PartialClassSplit" xml:space="preserve">
+    <value>クラス '{0}' が同一ファイル内で複数の partial 宣言に分かれており、[Table] を持つ部分だけを読むため、他の部分にある列プロパティ {1} 件をスキップしました。[Table] を持つ部分へ移してください。</value>
+  </data>
+  <data name="Reverse_VerbatimTypeMismatch" xml:space="preserve">
+    <value>列 '{1}.{2}' に記録されたネイティブ型 '{0}' は、対象方言では型トークン '{3}' と同じ意味にならないため、トークン側を採用しました。</value>
   </data>
   <data name="Reverse_SyntaxErrors" xml:space="preserve">
     <value>C# ソースに構文エラーが {0} 件あるため、安全にリバースできません（途中で切れたソースからは列が黙って欠落します）。ソースを修正してから再実行してください。先頭のエラー: {1}</value>

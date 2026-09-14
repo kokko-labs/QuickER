@@ -74,4 +74,32 @@ public sealed record CSharpTypeInfo
     /// canonical 由来のため、可搬図では各方言の型表記から同一トークンが得られる（EF Core 単独出力の方言可搬性を保つ）。
     /// </remarks>
     public string? CanonicalTypeToken { get; init; }
+
+    /// <summary>
+    /// DB 定義メタ属性（<c>[DbColumnMeta]</c>）へ追加で刻む、図が持っていた DB 型表記そのもの（例 <c>"datetime"</c>）。
+    /// 「トークン経由で書き戻すと綴りが変わる列」にだけ値が入り、それ以外は <c>null</c>（属性引数ごと省略）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 中立トークンは型の「意味」だけを運ぶため、同義の複数表記（<c>numeric</c> と <c>decimal</c>・
+    /// <c>ntext</c> と <c>nvarchar(max)</c>・<c>datetime</c> と <c>datetime2</c>）は 1 つの代表表記へ畳まれる。
+    /// 畳まれた列を C# リバースで復元すると図の型表記が黙って変わり、次の DB 同期がその列へ
+    /// <c>ALTER COLUMN</c> を出す。これを避けるため元の表記を併記する。
+    /// </para>
+    /// <para>
+    /// 「綴りが変わる」の判定は <c>DbTypeText.AreEquivalent</c>（前後空白・大小を無視）＝同期が
+    /// <c>ALTER COLUMN</c> を出すかどうかの判定と同じ規則で、付加はプロバイダ層（<c>CanonicalTypeTokenAttacher</c>）が行う。
+    /// </para>
+    /// </remarks>
+    public string? VerbatimDbType { get; init; }
+
+    /// <summary>
+    /// <see cref="CanonicalTypeToken"/> を図の方言へ書き戻したときの型表記（例 <c>"datetime2"</c>）。
+    /// <see cref="VerbatimDbType"/> と対で、綴りが変わる列にだけ値が入る。
+    /// </summary>
+    /// <remarks>
+    /// 用途は生成時の Info 診断（「この列は <c>datetime</c> のままでなく <c>datetime2</c> として復元される型だ」を
+    /// 名指しする）のみで、生成コードには出ない。プロバイダ層が <see cref="VerbatimDbType"/> と同時に載せる。
+    /// </remarks>
+    public string? CanonicalRoundTripDbType { get; init; }
 }

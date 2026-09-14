@@ -51,7 +51,7 @@ The other options (`--out` / `--config` / `--provider`, and the kebab-case flags
 
 ## quicker reverse
 
-Recovers an ER diagram from C# code that QuickER generated, and writes it out as a schema-only diagram JSON. The input must be a main `.g.cs` generated with `IncludeDataAnnotations` enabled, because the DB-definition meta attributes (`[DbTableMeta]` / `[DbColumnMeta]`) are what carry the schema information; hand-written POCOs are out of scope.
+Recovers an ER diagram from C# code that QuickER generated, and writes it out as a schema-only diagram JSON. The input must be the `.g.cs` that holds the generated entities (`Entities.g.cs` with split or layered output, the single output file otherwise), generated with `IncludeDataAnnotations` enabled: the entity classes are the ones that carry `[Table]`, and the DB-definition meta attributes (`[DbTableMeta]` / `[DbColumnMeta]`) are what carry the schema information. Hand-written POCOs are out of scope.
 
 ```powershell
 quicker reverse --source ./Generated/QuickEREntities.g.cs --out diagram.json --provider sqlserver
@@ -59,8 +59,8 @@ quicker reverse --source ./Generated/QuickEREntities.g.cs --out diagram.json --p
 
 | Option | Required | Description |
 |---|:-:|---|
-| `--source <file>` | ✅ | The input C# source file (a main `.g.cs` generated with `IncludeDataAnnotations` enabled) |
-| `--out <file>` | ✅ | The output ER diagram JSON file (schema only; no `layout` key) |
+| `--source <file>` | ✅ | The input C# source file (the `.g.cs` holding the entities, generated with `IncludeDataAnnotations` enabled) |
+| `--out <file>` | ✅ | The output ER diagram JSON file (schema only; no `layout` key). Missing parent directories are created |
 | `--provider <name>` | | The dialect used to expand column types, and the `TargetDbms` recorded in the diagram. `sqlserver` (default) / `postgresql` / `mysql` / `oracle` / `sqlite` |
 
 The result is written as a new diagram; it is never merged into an existing one. Non-fatal findings are reported as warnings on standard error, and the command fails when the source contains no eligible class.

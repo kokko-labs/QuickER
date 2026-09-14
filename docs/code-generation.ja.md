@@ -17,7 +17,7 @@ QuickER が生成する C# コードの構成と、データアクセス層（Qu
 | EF Core 版 Repository | `QuickErDbContext`（Fluent 構成込み）＋ EF Core 版 Repository ＋ DI 登録拡張 |
 | ランタイム | 上記が使う固定コード（既定でインライン出力。パッケージ参照モードあり） |
 
-Entity には既定で DataAnnotations と **DB 定義メタ属性**（`[DbTableMeta]` / `[DbColumnMeta]`）が付き、方言中立の型トークン（`string(50)` / `decimal(10,2)` など）と説明が刻まれます。生成コードは DB 定義の自己記述ドキュメントとしても機能します。この付与は `IncludeDataAnnotations`（既定 ON）で制御しますが、QuickER 版 Repository・EF Core 版 Repository・インメモリ Repository のいずれかの契約を生成する構成では OFF にできません（診断エラー）。ランタイムが `[Table]` / `[Key]` をリフレクションで参照するためです。`[Column]` はこのオプションの対象外で常時付与されます（永続化の構造マッピングであり、生成ランタイムはこの属性を持たないプロパティを列として扱いません）。
+Entity には既定で DataAnnotations と **DB 定義メタ属性**（`[DbTableMeta]` / `[DbColumnMeta]`）が付き、方言中立の型トークン（`string(50)` / `decimal(10,2)` など）と説明が刻まれます。トークンでは DB 型の綴りが復元できない列（`numeric` は `decimal` へ、`datetime` は `datetime2` へ畳まれます）については、`[DbColumnMeta]` へ元の表記も `NativeType` として記録し、対象の列を情報診断で名指しします。C# リバースが図どおりの型表記を復元できるのはこの記録によるものです。生成コードは DB 定義の自己記述ドキュメントとしても機能します。この付与は `IncludeDataAnnotations`（既定 ON）で制御しますが、QuickER 版 Repository・EF Core 版 Repository・インメモリ Repository のいずれかの契約を生成する構成では OFF にできません（診断エラー）。ランタイムが `[Table]` / `[Key]` をリフレクションで参照するためです。`[Column]` はこのオプションの対象外で常時付与されます（永続化の構造マッピングであり、生成ランタイムはこの属性を持たないプロパティを列として扱いません）。
 
 > **前提**: Repository の生成は単一主キー・アプリ側採番が対象です（複合キー・DB 自動採番のテーブルは Entity / EditModel のみ利用できます）。
 

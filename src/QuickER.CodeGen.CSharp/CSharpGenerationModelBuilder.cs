@@ -500,6 +500,10 @@ internal sealed partial class CSharpGenerationModelBuilder
             IsRowVersion = typeInfo.IsRowVersion,
             // DB 定義メタ属性（[DbColumnMeta]）用。方言中立トークンと列の説明（型解決とは独立にモデルから引く）
             CanonicalTypeToken = typeInfo.CanonicalTypeToken,
+            // 中立トークンでは綴りが復元できない列だけに載る元の型表記。C# リテラルとして埋め込むためエスケープする
+            VerbatimDbType = typeInfo.VerbatimDbType is { } verbatim
+                ? EscapeForCSharpString(verbatim)
+                : null,
             // [DbColumnMeta(..., Description = "...")] へ C# リテラルとして埋め込むためエスケープする（未エスケープだと " や \ でコンパイル不能になる）
             Description = EscapeForCSharpString(column.Description),
             DescriptionXmlDoc = EscapeForXmlDocSummary(column.Description),

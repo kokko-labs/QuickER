@@ -234,6 +234,12 @@ namespace QuickER.CodeGen.CSharp.Resources {
             }
         }
 
+        public static string CodeGen_Info_NonCanonicalTypeSpellingColumns {
+            get {
+                return ResourceManager.GetString("CodeGen_Info_NonCanonicalTypeSpellingColumns", resourceCulture);
+            }
+        }
+
         public static string CodeGen_Info_IncludeGraphSkippedNavigations {
             get {
                 return ResourceManager.GetString("CodeGen_Info_IncludeGraphSkippedNavigations", resourceCulture);

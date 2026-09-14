@@ -435,6 +435,12 @@ internal sealed class CSharpPropertyModel
     /// </summary>
     public string? CanonicalTypeToken { get; init; }
 
+    /// <summary>
+    /// DB 定義メタ属性（[DbColumnMeta]）の NativeType へ刻む、図が持っていた DB 型表記（例 "datetime"）。
+    /// 中立トークン経由では綴りが変わる列だけに値が入り、それ以外は null で named 引数ごと省略する。
+    /// </summary>
+    public string? VerbatimDbType { get; init; }
+
     /// <summary>カラムの説明（DB 定義メタ属性 [DbColumnMeta] の Description 用）。空なら named 引数ごと省略する</summary>
     public required string Description { get; init; }
 

@@ -218,6 +218,55 @@ public class ReverseMergePostProcessorTests
         result.Should().BeEmpty();
     }
 
+    /// <summary>
+    /// 同じ 2 エンティティ間に多対多があっても、コード由来の 1 対多はその制約名・参照アクションを
+    /// 引き継がない（多対多は列ペアを持たないため端点キーが退化し、通常リレーションと衝突する）
+    /// </summary>
+    [Fact(DisplayName = "同エンティティ間の多対多は通常リレーションの補完元にならない")]
+    public void Apply_DoesNotFillFromManyToMany_WhenEndpointsDegenerate()
+    {
+        // 現在図は「列ペアを持たない多対多」だけを持つ。コード由来の 1 対多には列ペアがあるが、
+        // 退化したリレーション（列ペアなし）と端点キーが一致し得るため、索引に入れてはならない。
+        var current = new ErDiagram
+        {
+            Entities = { Customer(), Order() },
+            Relationships =
+            {
+                new Relationship
+                {
+                    SourceEntityId = CustomerId,
+                    TargetEntityId = OrderId,
+                    Type = RelationshipType.ManyToMany,
+                    ConstraintName = "FK_many_to_many",
+                    OnDelete = ForeignKeyReferentialAction.Cascade,
+                    OnUpdate = ForeignKeyReferentialAction.SetDefault,
+                },
+            },
+        };
+
+        // コード側は列ペアを解決できず退化した 1 対多（型メタ欠落の列を端点に持つ場合に起きる）
+        var degenerated = new Relationship
+        {
+            SourceEntityId = CustomerId,
+            TargetEntityId = OrderId,
+            ColumnPairs = [],
+            Type = RelationshipType.OneToMany,
+        };
+
+        var result = ReverseMergePostProcessor.Apply(
+            current,
+            new[] { Customer(), Order() },
+            new[] { degenerated }
+        );
+
+        // 1 対多（コード由来）＋多対多（温存）の 2 本。1 対多は多対多のメタデータを継承しない
+        result.Should().HaveCount(2);
+        var oneToMany = result.Single(r => r.Type == RelationshipType.OneToMany);
+        oneToMany.ConstraintName.Should().BeNull("多対多の制約名を引き継がない");
+        oneToMany.OnDelete.Should().Be(ForeignKeyReferentialAction.NoAction);
+        oneToMany.OnUpdate.Should().Be(ForeignKeyReferentialAction.NoAction);
+    }
+
     /// <summary>コードで消えた通常（多対多以外）のリレーションは結果へ追加されない</summary>
     [Fact(DisplayName = "コードで消えた 1 対多は結果に含まれない")]
     public void Apply_DoesNotReAddRemovedNormalRelationship()

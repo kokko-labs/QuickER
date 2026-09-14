@@ -246,6 +246,30 @@ public sealed class CSharpCodeGenerationService
             );
         }
 
+        // 型表記が中立トークン経由で復元できない列（[DbColumnMeta] へ元の表記も刻んだ列）を Info 診断で通知する。
+        // 「同義だが綴りの違う型」は生成物を読んでも気づけず、コード取込の往復で図の型表記が変わる／変わらない
+        // の分かれ目になるため、どの列が特別扱いなのかを生成時に一度だけ明示する。属性を出さない構成
+        // （IncludeDataAnnotations=false）では元表記も刻まれないので出さない
+        var nonCanonicalSpellingLines = options.IncludeDataAnnotations
+            ? BuildNonCanonicalSpellingLines(diagram, columnTypes)
+            : [];
+
+        if (nonCanonicalSpellingLines.Count > 0)
+        {
+            diagnostics.Add(
+                GenerationDiagnostic.Info(
+                    string.Format(
+                        Strings.CodeGen_Info_NonCanonicalTypeSpellingColumns,
+                        Environment.NewLine
+                            + string.Join(
+                                Environment.NewLine,
+                                nonCanonicalSpellingLines.Select(line => "  " + line)
+                            )
+                    )
+                )
+            );
+        }
+
         // 同期支援が有効なとき、実際に同期対象になったテーブルを FK 順のまま Info 診断で通知する
         // （対象は「Repository 契約が生成される単一主キーのテーブル」という導出条件なので、どのテーブルが
         //   入ったかは生成物を読むまで分からない）。rowversion 列を持たないテーブルは後勝ち専用として名指しする
@@ -1595,6 +1619,32 @@ public sealed class CSharpCodeGenerationService
     /// 生成 Entity のプロパティのうち <see cref="CSharpPropertyModel.IsUnboundedBinary"/> のものを対象にする
     /// （マーカー属性 <c>[UnboundedBinaryColumn]</c> の付与対象と一致）。Info 診断のメッセージ組み立てに使う。
     /// </remarks>
+    /// <summary>
+    /// 型表記が中立トークン経由では復元できない列を「テーブル.列: 図の表記 -&gt; トークン経由で戻る表記」の
+    /// 1 行ずつへ整形する（Info 診断専用）。
+    /// </summary>
+    /// <remarks>
+    /// 判定材料は生成モデルではなく列型辞書（<see cref="CSharpTypeInfo.VerbatimDbType"/>）で、
+    /// <c>[DbColumnMeta].NativeType</c> を刻むかどうかの判定と同一のデータ。列の並びは図の宣言順にする。
+    /// </remarks>
+    private static IReadOnlyList<string> BuildNonCanonicalSpellingLines(
+        ErDiagram diagram,
+        IReadOnlyDictionary<Guid, CSharpTypeInfo> columnTypes
+    ) =>
+        diagram
+            .Entities.SelectMany(entity =>
+                entity
+                    .Columns.Select(column => (entity, column))
+                    .Where(pair =>
+                        columnTypes.TryGetValue(pair.column.Id, out var typeInfo)
+                        && typeInfo.VerbatimDbType is not null
+                    )
+            )
+            .Select(pair =>
+                $"{pair.entity.TableName}.{pair.column.Name}: {columnTypes[pair.column.Id].VerbatimDbType} -> {columnTypes[pair.column.Id].CanonicalRoundTripDbType}"
+            )
+            .ToList();
+
     private static IReadOnlyList<string> BuildExcludedColumnLines(CSharpGenerationModel model) =>
         model
             .EntityClasses.SelectMany(entity =>

@@ -148,6 +148,9 @@
   <data name="CodeGen_Info_ExcludedUnboundedBinaryColumns" xml:space="preserve">
     <value>Excluded unbounded binary columns from SELECT / UPDATE:{0}</value>
   </data>
+  <data name="CodeGen_Info_NonCanonicalTypeSpellingColumns" xml:space="preserve">
+    <value>The dialect-neutral type token does not reproduce the DB type spelling of the columns below (re-formatting the token yields the type shown after the arrow). The original text is therefore recorded verbatim in [DbColumnMeta] as well, so that reversing the generated code restores the column type as written here:{0}</value>
+  </data>
   <data name="CodeGen_Info_IncludeGraphSkippedNavigations" xml:space="preserve">
     <value>IncludeGraph does not follow the navigations below, because each one points back to a table that is already on the path from the root (an Include tree cannot express a cycle). Include them explicitly with Include / ThenInclude when a bounded depth is needed:{0}</value>
   </data>

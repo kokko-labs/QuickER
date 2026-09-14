@@ -51,7 +51,7 @@ quicker scaffold --connection "Server=.;Database=Shop;Integrated Security=true;T
 
 ## quicker reverse
 
-QuickER が生成した C# コードから ER 図を復元し、スキーマのみの図 JSON として書き出します。入力は `IncludeDataAnnotations` を有効にして生成した本体 `.g.cs` である必要があります（DB 定義メタ属性 `[DbTableMeta]` / `[DbColumnMeta]` がスキーマ情報を担うため）。手書きの POCO は対象外です。
+QuickER が生成した C# コードから ER 図を復元し、スキーマのみの図 JSON として書き出します。入力は、生成されたエンティティを含む `.g.cs`（分割出力・層別出力では `Entities.g.cs`、非分割ではその出力ファイル）を `IncludeDataAnnotations` を有効にして生成したものである必要があります（エンティティクラスだけが `[Table]` を持ち、DB 定義メタ属性 `[DbTableMeta]` / `[DbColumnMeta]` がスキーマ情報を担うため）。手書きの POCO は対象外です。
 
 ```powershell
 quicker reverse --source ./Generated/QuickEREntities.g.cs --out diagram.json --provider sqlserver
@@ -59,8 +59,8 @@ quicker reverse --source ./Generated/QuickEREntities.g.cs --out diagram.json --p
 
 | オプション | 必須 | 説明 |
 |---|:-:|---|
-| `--source <file>` | ✅ | 入力する C# ソースファイル（`IncludeDataAnnotations` 有効で生成した本体 `.g.cs`） |
-| `--out <file>` | ✅ | 出力する ER 図 JSON ファイル（スキーマのみ・`layout` キーなし） |
+| `--source <file>` | ✅ | 入力する C# ソースファイル（`IncludeDataAnnotations` 有効で生成した、エンティティを含む `.g.cs`） |
+| `--out <file>` | ✅ | 出力する ER 図 JSON ファイル（スキーマのみ・`layout` キーなし）。親ディレクトリが無ければ作成します |
 | `--provider <name>` | | 列型の展開に使う方言と、図に記録される `TargetDbms`。`sqlserver`（既定）/ `postgresql` / `mysql` / `oracle` / `sqlite` |
 
 結果は新規の図として書き出し、既存図へのマージは行いません。致命的でない指摘は警告として標準エラーへ出力し、解析対象クラスが 0 件の場合は失敗します。

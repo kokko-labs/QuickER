@@ -13,15 +13,19 @@ namespace QuickER.CodeReverse.CSharp;
 /// </summary>
 /// <remarks>
 /// <para>
-/// 解析対象は <c>[Table]</c> を持ち、かつ列プロパティに <c>[DbColumnMeta]</c> を 1 つ以上持つクラスのみ。
-/// インフラクラス（基底・属性定義・Repository・EditModel・Mapper・DbContext）は <c>[Table]</c> を持たないため無視される。
+/// 解析対象は <c>[Table]</c> を持つクラスのみ。インフラクラス（基底・属性定義・Repository・EditModel・
+/// Mapper・DbContext）は <c>[Table]</c> を持たないため無視される。復元できる列が 1 つも無いテーブルも
+/// 「列ゼロのテーブル」として取り込み、警告で通知する（テーブルごと落とすと、そのテーブルを端点に持つ
+/// リレーションまで無告知で消えるため）。
 /// </para>
 /// <para>
 /// 復元マッピング:
 /// <list type="bullet">
 ///   <item>テーブル名＝<c>[Table("...")]</c>・列名＝<c>[Column("...")]</c></item>
 ///   <item>型＝<c>[DbColumnMeta]</c> の方言中立トークン → <see cref="CanonicalTypeToken.TryParse"/> →
-///     対象方言の <see cref="ITypeCatalog.TryFormat"/> でネイティブ型へ（展開不能なトークンは警告してトークン文字列をそのまま採用）</item>
+///     対象方言の <see cref="ITypeCatalog.TryFormat"/> でネイティブ型へ（展開不能なトークンは警告してトークン文字列をそのまま採用）。
+///     <c>NativeType</c> 名前付き引数（生成側が「トークン経由では綴りが変わる列」にだけ刻む元の型表記）があり、
+///     それを対象方言で解析した正規型がトークンの正規型と一致するときは、そちらを採って綴りごと復元する</item>
 ///   <item>PK＝<c>[Key]</c>・NULL 許容＝プロパティ型が <c>?</c> 付き（<see cref="NullableTypeSyntax"/>）。
 ///     生成コードは <c>#nullable enable</c> のもと NULL 許容列を型の <c>?</c> として必ず表すため、値型・参照型・VO の全ケースで型構文が正</item>
 ///   <item>説明＝<c>[DbColumnMeta].Description</c> / <c>[DbTableMeta].Description</c></item>
@@ -47,6 +51,18 @@ public sealed class CSharpReverseParser
 {
     /// <summary>メッセージへ載せる構文エラーの最大件数（調査の足がかりに足りる先頭数件のみ）</summary>
     private const int MaxReportedSyntaxErrors = 5;
+
+    /// <summary><c>[NavigationReference]</c> のコンストラクタ引数名（宣言順。<c>name:</c> 形式の照合に使う）</summary>
+    private static readonly string[] NavigationParameterNames =
+    [
+        "principalTable",
+        "principalColumn",
+        "dependentTable",
+        "dependentColumn",
+        "isCollection",
+        "cascade",
+        "isParentReference",
+    ];
 
     /// <summary>C# ソース文字列を構文解析し、意味モデルへ復元する</summary>
     /// <param name="sourceText">解析対象の C# ソース（QuickER 生成の本体 .g.cs）</param>
@@ -78,16 +94,16 @@ public sealed class CSharpReverseParser
         var root = tree.GetRoot();
         var warnings = new List<string>();
 
-        // 解析対象クラス（[Table] を持ち、かつ列プロパティに [DbColumnMeta] を 1 つ以上持つ）を抽出する
-        var targetClasses = root.DescendantNodes()
-            .OfType<ClassDeclarationSyntax>()
-            .Where(IsReverseTarget)
-            .ToList();
+        var allClasses = root.DescendantNodes().OfType<ClassDeclarationSyntax>().ToList();
+        // 解析対象クラス（[Table] を持つクラス）を抽出する
+        var targetClasses = allClasses.Where(IsReverseTarget).ToList();
 
         if (targetClasses.Count == 0)
         {
             throw new CodeReverseException(Strings.Reverse_NoTargetClasses);
         }
+
+        WarnAboutSplitPartialDeclarations(allClasses, targetClasses, warnings);
 
         // 先にエンティティ・列を復元し、テーブル名 → (列名 → 列) の索引を作る（リレーション解決に使う）
         var entities = new List<Entity>();
@@ -128,7 +144,19 @@ public sealed class CSharpReverseParser
                 {
                     var nav = TryReadNavigation(property.AttributeLists);
 
-                    if (nav is not null)
+                    if (nav is null)
+                    {
+                        // 端点を読めない属性（引数不足・非リテラル・name: 形式で並べ替え）は、
+                        // リレーションが黙って消えないよう属性の所在を名指しして通知する
+                        warnings.Add(
+                            string.Format(
+                                Strings.Reverse_NavigationUnreadable,
+                                tableName,
+                                property.Identifier.Text
+                            )
+                        );
+                    }
+                    else
                     {
                         navigations.Add(nav);
                     }
@@ -149,6 +177,15 @@ public sealed class CSharpReverseParser
                     continue;
                 }
 
+                // 同名列は受け入れたうえで衝突を通知する（辞書は後勝ち・列リストは両方積む）。
+                // 黙って受け入れると、DDL 生成で初めて落ちる図が無告知で出来上がる
+                if (columnIndex.ContainsKey(column.Name))
+                {
+                    warnings.Add(
+                        string.Format(Strings.Reverse_DuplicateColumn, tableName, column.Name)
+                    );
+                }
+
                 entity.Columns.Add(column);
                 columnIndex[column.Name] = column;
                 columnsByPropertyName[property.Identifier.Text] = column;
@@ -158,6 +195,19 @@ public sealed class CSharpReverseParser
             entity.UniqueConstraints.AddRange(
                 ReadUniqueConstraints(classDecl, tableName, columnsByPropertyName, warnings)
             );
+
+            // 列を 1 つも復元できなかったテーブルも、存在だけは保って取り込む（テーブルごと消すと
+            // そのテーブルを端点に持つリレーションまで道連れになり、消えたことが伝わらない）
+            if (entity.Columns.Count == 0)
+            {
+                warnings.Add(string.Format(Strings.Reverse_TableWithoutColumns, tableName));
+            }
+
+            // 同名テーブルも受け入れたうえで衝突を通知する（索引は後勝ち・エンティティは両方積む）
+            if (entityByTable.ContainsKey(tableName))
+            {
+                warnings.Add(string.Format(Strings.Reverse_DuplicateTable, tableName));
+            }
 
             entities.Add(entity);
             columnsByTable[tableName] = columnIndex;
@@ -286,17 +336,92 @@ public sealed class CSharpReverseParser
         );
     }
 
-    /// <summary>クラスが解析対象か（<c>[Table]</c> を持ち、かつ <c>[DbColumnMeta]</c> 付きの列プロパティを持つ）</summary>
-    private static bool IsReverseTarget(ClassDeclarationSyntax classDecl)
+    /// <summary>クラスが解析対象か（<c>[Table]</c> を持つか）</summary>
+    /// <remarks>
+    /// <c>[Table]</c> は生成物ではエンティティクラスにしか付かない（EditModel / Mapper / Repository /
+    /// DbContext には出ない）ため、これだけで十分に絞れる。かつては「<c>[DbColumnMeta]</c> 付きの列を
+    /// 1 つ以上持つこと」も条件にしていたが、型カタログが解析できない verbatim 型（Oracle の
+    /// <c>SDO_GEOMETRY</c>・PostgreSQL の配列型など）だけで出来た小さなマスタ表がテーブルごと・
+    /// 関連リレーションごと警告 0 件で消えるため、条件から外した（列ゼロは <see cref="Parse"/> が警告する）。
+    /// </remarks>
+    private static bool IsReverseTarget(ClassDeclarationSyntax classDecl) =>
+        HasAttribute(classDecl.AttributeLists, "Table");
+
+    /// <summary>
+    /// 同一ファイル内で partial 宣言が分かれたクラスについて、<c>[Table]</c> を持たない部分に取り残される
+    /// 列プロパティを警告する。
+    /// </summary>
+    /// <remarks>
+    /// 解析は宣言単位（<c>[Table]</c> を持つ宣言のメンバーだけを読む）なので、手書き partial へ
+    /// <c>[Column]</c> 付きプロパティを足す運用（公式に認めた形）を同じファイルで行うと、その列が黙って消える。
+    /// 統合はしない＝どの部分の <c>[Table]</c> / <c>[DbTableMeta]</c> / <c>[UniqueConstraint]</c> を採るかという、
+    /// 生成物には存在しない意味論を発明することになるため、失われる件数を名指しするに留める。
+    /// </remarks>
+    private static void WarnAboutSplitPartialDeclarations(
+        IReadOnlyList<ClassDeclarationSyntax> allClasses,
+        IReadOnlyList<ClassDeclarationSyntax> targetClasses,
+        List<string> warnings
+    )
     {
-        if (!HasAttribute(classDecl.AttributeLists, "Table"))
+        // 構文ノードの同一性は参照で判定する（同じ内容の別宣言を同一視しない）
+        var targets = new HashSet<ClassDeclarationSyntax>(
+            targetClasses,
+            ReferenceEqualityComparer.Instance
+        );
+
+        foreach (var group in allClasses.GroupBy(GetDeclarationKey, StringComparer.Ordinal))
         {
-            return false;
+            // [Table] を持つ部分が無いクラス（インフラクラス）は元から解析対象外
+            if (!group.Any(targets.Contains))
+            {
+                continue;
+            }
+
+            // 読まれない部分にある列プロパティの件数。0 件なら何も失われないので黙る（ノイズにしない）
+            var skippedColumns = group
+                .Where(declaration => !targets.Contains(declaration))
+                .SelectMany(declaration => declaration.Members.OfType<PropertyDeclarationSyntax>())
+                .Count(property => HasAttribute(property.AttributeLists, "Column"));
+
+            if (skippedColumns == 0)
+            {
+                continue;
+            }
+
+            warnings.Add(
+                string.Format(
+                    Strings.Reverse_PartialClassSplit,
+                    group.First().Identifier.Text,
+                    skippedColumns
+                )
+            );
+        }
+    }
+
+    /// <summary>クラス宣言の同一性キー（名前空間・外側の型・クラス名を連結した完全名）</summary>
+    private static string GetDeclarationKey(ClassDeclarationSyntax classDecl)
+    {
+        var parts = new List<string> { classDecl.Identifier.Text };
+
+        foreach (var ancestor in classDecl.Ancestors())
+        {
+            switch (ancestor)
+            {
+                case BaseNamespaceDeclarationSyntax ns:
+                    parts.Add(ns.Name.ToString());
+
+                    break;
+
+                case TypeDeclarationSyntax type:
+                    parts.Add(type.Identifier.Text);
+
+                    break;
+            }
         }
 
-        return classDecl
-            .Members.OfType<PropertyDeclarationSyntax>()
-            .Any(property => HasAttribute(property.AttributeLists, "DbColumnMeta"));
+        parts.Reverse();
+
+        return string.Join('.', parts);
     }
 
     /// <summary>列プロパティ 1 件を復元する（<c>[DbColumnMeta]</c> が無いプロパティは警告して <c>null</c>）</summary>
@@ -315,19 +440,26 @@ public sealed class CSharpReverseParser
         }
 
         var typeToken = GetAttributeStringArgument(property.AttributeLists, "DbColumnMeta", 0);
+        var isPrimaryKey = HasAttribute(property.AttributeLists, "Key");
 
         if (typeToken is null)
         {
             // [Column] はあるが [DbColumnMeta] が無い＝生成時に型トークンを解決できなかった自由記述型。
-            // 型を復元できないため列をスキップし、取りこぼしを警告で通知する。
+            // 型を復元できないため列をスキップし、取りこぼしを警告で通知する。主キー列なら
+            // 「このテーブルは主キーを失う」ことまで伝わるよう専用の文言へ振り分ける
             warnings.Add(
-                string.Format(Strings.Reverse_ColumnMissingTypeMeta, tableName, columnName)
+                string.Format(
+                    isPrimaryKey
+                        ? Strings.Reverse_PrimaryKeyColumnMissingTypeMeta
+                        : Strings.Reverse_ColumnMissingTypeMeta,
+                    tableName,
+                    columnName
+                )
             );
 
             return null;
         }
 
-        var isPrimaryKey = HasAttribute(property.AttributeLists, "Key");
         // NULL 許容はプロパティ型構文で判定する。生成コードは #nullable enable のもと、NULL 許容列を
         // 型の ?（NullableTypeSyntax。例 BalanceValue? / int? / string?）として必ず表すため、値型・参照型・
         // VO の全ケースで型構文が正。[Required]/[Key] は NULL 判定に使わない（[Required] は参照型にしか
@@ -337,7 +469,14 @@ public sealed class CSharpReverseParser
         return new Column
         {
             Name = columnName,
-            DataType = ResolveDataType(typeToken, tableName, columnName, typeCatalog, warnings),
+            DataType = ResolveDataType(
+                typeToken,
+                GetAttributeNamedArgument(property.AttributeLists, "DbColumnMeta", "NativeType"),
+                tableName,
+                columnName,
+                typeCatalog,
+                warnings
+            ),
             IsPrimaryKey = isPrimaryKey,
             IsNullable = isNullable,
             Description =
@@ -347,14 +486,47 @@ public sealed class CSharpReverseParser
     }
 
     /// <summary>型トークンを対象方言のネイティブ型へ展開する（展開不能はトークン文字列をそのまま採用し警告）</summary>
+    /// <param name="typeToken"><c>[DbColumnMeta]</c> の位置引数＝方言中立の型トークン</param>
+    /// <param name="verbatimType">
+    /// <c>[DbColumnMeta].NativeType</c>＝生成元の図が持っていた型表記。生成側は「トークン経由で書き戻すと
+    /// 綴りが変わる列」にだけ刻む（<c>CanonicalTypeTokenAttacher</c>）。未指定は <c>null</c>。
+    /// </param>
+    /// <remarks>
+    /// <paramref name="verbatimType"/> は無条件には信じない。対象方言で解析した正規型がトークンの正規型と
+    /// 一致するときだけ採用し、一致しないとき（手編集で食い違った・別方言でリバースした）はトークン側を採って
+    /// 警告する。トークンが語る意味と違う型の図を、記録された表記の見た目だけで作らないための条件。
+    /// </remarks>
     private static string ResolveDataType(
         string typeToken,
+        string? verbatimType,
         string tableName,
         string columnName,
         ITypeCatalog typeCatalog,
         List<string> warnings
     )
     {
+        if (verbatimType is not null)
+        {
+            if (
+                CanonicalTypeToken.TryParse(typeToken, out var tokenCanonical)
+                && typeCatalog.TryParse(verbatimType, out var verbatimCanonical)
+                && verbatimCanonical == tokenCanonical
+            )
+            {
+                return verbatimType;
+            }
+
+            warnings.Add(
+                string.Format(
+                    Strings.Reverse_VerbatimTypeMismatch,
+                    verbatimType,
+                    tableName,
+                    columnName,
+                    typeToken
+                )
+            );
+        }
+
         if (
             CanonicalTypeToken.TryParse(typeToken, out var canonical)
             && typeCatalog.TryFormat(canonical, out var nativeType)
@@ -428,26 +600,50 @@ public sealed class CSharpReverseParser
         {
             var isCollection = group.IsCollection;
 
-            // 両端テーブルが解析対象に存在しなければスキップ（解決できない参照）
-            if (
-                !entityByTable.TryGetValue(key.PrincipalTable, out var principalEntity)
-                || !entityByTable.TryGetValue(key.DependentTable, out var dependentEntity)
-            )
+            // 両端テーブルが解析対象に存在しなければスキップ（解決できない参照）。
+            // 線ごと消えるためユーザーには何も残らないので、どちらの端が欠けたかを名指しして通知する
+            if (!entityByTable.TryGetValue(key.PrincipalTable, out var principalEntity))
             {
+                warnings.Add(FormatMissingTableWarning(key, key.PrincipalTable));
+
                 continue;
             }
 
+            if (!entityByTable.TryGetValue(key.DependentTable, out var dependentEntity))
+            {
+                warnings.Add(FormatMissingTableWarning(key, key.DependentTable));
+
+                continue;
+            }
+
+            // 列が解決できないと列ペアなし（＝FK として DDL・差分の対象外）へ退化する。線は残るため
+            // 気づきにくく、黙らせると「図にはあるのに DDL に出ない FK」が無告知で生まれる
             var sourceColumnId = ResolveColumnId(
                 columnsByTable,
                 key.PrincipalTable,
                 key.PrincipalColumn
             );
+
+            if (sourceColumnId is null)
+            {
+                warnings.Add(
+                    FormatUnresolvedColumnWarning(key, key.PrincipalTable, key.PrincipalColumn)
+                );
+            }
+
             var targetColumnId = ResolveColumnId(
                 columnsByTable,
                 key.DependentTable,
                 key.DependentColumn,
                 markForeignKey: true
             );
+
+            if (targetColumnId is null)
+            {
+                warnings.Add(
+                    FormatUnresolvedColumnWarning(key, key.DependentTable, key.DependentColumn)
+                );
+            }
 
             // 参照アクションは列挙体名トークン。未知トークンは既定値のまま「未指定」として扱い警告する
             var onDelete = ParseReferentialAction(group.OnDeleteToken, key, warnings);
@@ -485,6 +681,32 @@ public sealed class CSharpReverseParser
         return (relationships, metadata);
     }
 
+    /// <summary>端点テーブルが解析結果に無いことを伝える警告文を組み立てる</summary>
+    private static string FormatMissingTableWarning(
+        NavigationEndpoints endpoints,
+        string missingTable
+    ) =>
+        string.Format(
+            Strings.Reverse_NavigationTableMissing,
+            endpoints.PrincipalTable,
+            endpoints.DependentTable,
+            missingTable
+        );
+
+    /// <summary>リレーションの端点列を解決できなかったことを伝える警告文を組み立てる</summary>
+    private static string FormatUnresolvedColumnWarning(
+        NavigationEndpoints endpoints,
+        string tableName,
+        string columnName
+    ) =>
+        string.Format(
+            Strings.Reverse_RelationshipColumnUnresolved,
+            tableName,
+            columnName,
+            endpoints.PrincipalTable,
+            endpoints.DependentTable
+        );
+
     /// <summary>
     /// 参照アクションのトークン（<see cref="ForeignKeyReferentialAction"/> の列挙体名）を復元する。
     /// </summary>
@@ -503,10 +725,13 @@ public sealed class CSharpReverseParser
             return null;
         }
 
-        // 数値文字列も TryParse は通してしまうため、定義済みの列挙値であることまで確認する
+        // 数値文字列は Enum.TryParse も Enum.IsDefined も通してしまう（"1" は定義済みの Cascade になる）。
+        // コードが刻むのは列挙体「名」なので、解決した値の名前とトークンが一致することまで確認する
+        // （さもないと OnUpdate = "1" が無警告で Cascade へ化ける）
         if (
             Enum.TryParse<ForeignKeyReferentialAction>(token, ignoreCase: true, out var action)
-            && Enum.IsDefined(action)
+            && Enum.GetName(action) is { } name
+            && string.Equals(name, token.Trim(), StringComparison.OrdinalIgnoreCase)
         )
         {
             return action;
@@ -568,6 +793,30 @@ public sealed class CSharpReverseParser
         if (positional.Count < 5)
         {
             return null;
+        }
+
+        // name: 形式（NameColon）は並べ替えを許すため、位置と引数名が食い違っていたら読めないものとして扱う。
+        // 素通しすると principal / dependent が入れ替わった向きのリレーションが無警告で出来る
+        for (var index = 0; index < positional.Count; index++)
+        {
+            var nameColon = positional[index].NameColon?.Name.Identifier.Text;
+
+            if (nameColon is null)
+            {
+                continue;
+            }
+
+            if (
+                index >= NavigationParameterNames.Length
+                || !string.Equals(
+                    nameColon,
+                    NavigationParameterNames[index],
+                    StringComparison.Ordinal
+                )
+            )
+            {
+                return null;
+            }
         }
 
         var principalTable = ReadStringLiteral(positional[0]);

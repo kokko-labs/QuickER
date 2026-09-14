@@ -107,5 +107,59 @@ namespace QuickER.CodeReverse.CSharp.Resources {
                 return ResourceManager.GetString("Reverse_ReferentialActionUnknown", resourceCulture);
             }
         }
+
+        public static string Reverse_TableWithoutColumns {
+            get {
+                return ResourceManager.GetString("Reverse_TableWithoutColumns", resourceCulture);
+            }
+        }
+
+        public static string Reverse_PrimaryKeyColumnMissingTypeMeta {
+            get {
+                return ResourceManager.GetString("Reverse_PrimaryKeyColumnMissingTypeMeta", resourceCulture);
+            }
+        }
+
+        public static string Reverse_RelationshipColumnUnresolved {
+            get {
+                return ResourceManager.GetString("Reverse_RelationshipColumnUnresolved", resourceCulture);
+            }
+        }
+
+        public static string Reverse_NavigationUnreadable {
+            get {
+                return ResourceManager.GetString("Reverse_NavigationUnreadable", resourceCulture);
+            }
+        }
+
+        public static string Reverse_NavigationTableMissing {
+            get {
+                return ResourceManager.GetString("Reverse_NavigationTableMissing", resourceCulture);
+            }
+        }
+
+        public static string Reverse_DuplicateTable {
+            get {
+                return ResourceManager.GetString("Reverse_DuplicateTable", resourceCulture);
+            }
+        }
+
+        public static string Reverse_DuplicateColumn {
+            get {
+                return ResourceManager.GetString("Reverse_DuplicateColumn", resourceCulture);
+            }
+        }
+
+        public static string Reverse_PartialClassSplit {
+            get {
+                return ResourceManager.GetString("Reverse_PartialClassSplit", resourceCulture);
+            }
+        }
+
+        public static string Reverse_VerbatimTypeMismatch {
+            get {
+                return ResourceManager.GetString("Reverse_VerbatimTypeMismatch", resourceCulture);
+            }
+        }
     }
 }

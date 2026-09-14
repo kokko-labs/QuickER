@@ -62,7 +62,34 @@
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
   <data name="Reverse_NoTargetClasses" xml:space="preserve">
-    <value>No classes to reverse were found. Select a main .g.cs generated with IncludeDataAnnotations ON (classes with the [Table] and [DbColumnMeta] attributes).</value>
+    <value>No classes to reverse were found. Select a .g.cs that holds the generated entities (Entities.g.cs with split output) and was generated with IncludeDataAnnotations ON, so that the classes carry the [Table] attribute.</value>
+  </data>
+  <data name="Reverse_TableWithoutColumns" xml:space="preserve">
+    <value>Table '{0}' was reversed with no columns, because none of its properties could be restored as a column.</value>
+  </data>
+  <data name="Reverse_PrimaryKeyColumnMissingTypeMeta" xml:space="preserve">
+    <value>Primary key column '{0}.{1}' has no DB type metadata ([DbColumnMeta]) and was skipped, so table '{0}' is reversed without that primary key column.</value>
+  </data>
+  <data name="Reverse_RelationshipColumnUnresolved" xml:space="preserve">
+    <value>Column '{0}.{1}' of the relationship '{2}' -&gt; '{3}' could not be resolved, so the relationship was restored without a column pair (it takes no part in DDL generation or schema diffs).</value>
+  </data>
+  <data name="Reverse_NavigationUnreadable" xml:space="preserve">
+    <value>The [NavigationReference] on '{0}.{1}' could not be read (its endpoint arguments are missing, are not string literals, or are named arguments in another order), so the relationship was ignored.</value>
+  </data>
+  <data name="Reverse_NavigationTableMissing" xml:space="preserve">
+    <value>The relationship '{0}' -&gt; '{1}' was ignored, because table '{2}' is not among the reversed tables.</value>
+  </data>
+  <data name="Reverse_DuplicateTable" xml:space="preserve">
+    <value>Table name '{0}' is declared by more than one class; every one of them was reversed, so the diagram holds several tables with that name.</value>
+  </data>
+  <data name="Reverse_DuplicateColumn" xml:space="preserve">
+    <value>Column name '{1}' is declared more than once on table '{0}'; every one of them was reversed, so the table holds several columns with that name.</value>
+  </data>
+  <data name="Reverse_PartialClassSplit" xml:space="preserve">
+    <value>Class '{0}' is declared as several partial parts in this file, and only the part carrying [Table] is read; {1} column property(ies) declared in the other parts were skipped. Move them into the part that carries [Table].</value>
+  </data>
+  <data name="Reverse_VerbatimTypeMismatch" xml:space="preserve">
+    <value>The native type '{0}' recorded for column '{1}.{2}' does not mean the same as its type token '{3}' in the target dialect, so the token was used instead.</value>
   </data>
   <data name="Reverse_SyntaxErrors" xml:space="preserve">
     <value>The C# source has {0} syntax error(s), so it cannot be reversed safely (a truncated or partially pasted file would silently lose columns). Fix the source and try again. First errors: {1}</value>

@@ -253,6 +253,38 @@ public class CliReverseCommandTests
         };
     }
 
+    /// <summary>
+    /// <c>--out</c> の親ディレクトリが無ければ作る（generate 系と対称）。
+    /// 作らないと <c>AtomicFile</c> の一時ファイル名を含む素の DirectoryNotFoundException が出る。
+    /// </summary>
+    [Fact(DisplayName = "reverse は --out の親ディレクトリを作る")]
+    public async Task Reverse_CreatesMissingOutputDirectory()
+    {
+        var (sourcePath, _, root) = CreateGeneratedSource();
+        var outPath = Path.Combine(root, "nested", "deeper", "diagram.json");
+
+        try
+        {
+            var exit = await CliApp.InvokeAsync([
+                "reverse",
+                "--source",
+                sourcePath,
+                "--out",
+                outPath,
+            ]);
+
+            exit.Should().Be(0);
+            File.Exists(outPath).Should().BeTrue();
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
     /// <summary>解析対象クラスが無いソースは終了コード 1 で中断し、出力ファイルを作らない</summary>
     [Fact(DisplayName = "対象クラス 0 件のソースは終了コード 1")]
     public async Task Reverse_NoTargetClasses_ReturnsExitCodeOne()

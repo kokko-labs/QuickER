@@ -19,6 +19,7 @@ public static class QuickER.Runtime.ConcurrencyModes
 public sealed class QuickER.Runtime.DbColumnMetaAttribute : System.Attribute
     public .ctor(string typeToken)
     public string Description { get; set; }
+    public string NativeType { get; set; }
     public string TypeToken { get; }
 
 public sealed class QuickER.Runtime.DbTableMetaAttribute : System.Attribute

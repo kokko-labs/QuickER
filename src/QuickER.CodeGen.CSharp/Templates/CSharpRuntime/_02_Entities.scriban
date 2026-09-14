@@ -284,7 +284,7 @@ public abstract partial class EntityBase : EntityBaseCore { }
 {{ if include_data_annotations && !property.is_nullable && property.is_reference_type }}    [Required]
 {{ end }}{{ if include_data_annotations && property.max_length }}    [MaxLength({{ property.max_length }})]
 {{ end }}{{ if emit_sql_column_type_attr && property.sql_db_type_name }}    [SqlColumnType(SqlDbType.{{ property.sql_db_type_name }}{{ if property.sql_declared_length != 0 }}, Size = {{ property.sql_declared_length }}{{ end }}{{ if property.facet_precision }}, Precision = {{ property.facet_precision }}, Scale = {{ property.facet_scale }}{{ end }})]
-{{ end }}{{ if emit_db_meta_attr && property.canonical_type_token }}    [DbColumnMeta("{{ property.canonical_type_token }}"{{ if property.description != "" }}, Description = "{{ property.description }}"{{ end }})]
+{{ end }}{{ if emit_db_meta_attr && property.canonical_type_token }}    [DbColumnMeta("{{ property.canonical_type_token }}"{{ if property.verbatim_db_type }}, NativeType = "{{ property.verbatim_db_type }}"{{ end }}{{ if property.description != "" }}, Description = "{{ property.description }}"{{ end }})]
 {{ end }}{{ if exclude_unbounded_binary && property.is_unbounded_binary }}    [UnboundedBinaryColumn]
 {{ end }}{{ if property.is_row_version }}    [StoreGeneratedColumn]
 {{ end }}    public {{ if property.property_name == "DisplayName" }}new {{ end }}{{ property.type_name }} {{ property.property_name }} { get; set; }{{ property.initializer }}

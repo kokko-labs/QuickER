@@ -54,6 +54,15 @@ public static class ReverseMergePostProcessor
 
         foreach (var relationship in current.Relationships)
         {
+            // 多対多は列ペアを持たないため端点キーが (Source, null, Target, null) へ退化し、同じ 2 エンティティ間の
+            // 通常リレーション（列ペアを解決できず同じく退化したもの）と衝突する。衝突すると退化した 1 対多が
+            // 多対多の制約名・参照アクションを継承し、そのうえで (b) が多対多も追加する＝同じ制約名が 2 本出る。
+            // 多対多は (b) で丸ごと温存するので、補完の供給元としては索引へ入れない。
+            if (relationship.Type == RelationshipType.ManyToMany)
+            {
+                continue;
+            }
+
             var endpoints = ResolveEndpoints(relationship, currentNames);
 
             if (endpoints is { } key)

@@ -285,7 +285,9 @@ public sealed class QueryValueEvaluatorTests
     /// null の受け手に対するインスタンスメンバー参照は、メソッド呼び出し枝と同じ規則でフォールバックへ回り、
     /// コンパイル経路と同じ <see cref="NullReferenceException"/> になる（リフレクション直読みだと TargetException に化ける）
     /// </summary>
-    [Fact(DisplayName = "null 受け手のメンバー参照はコンパイル経路と同じ NullReferenceException になる")]
+    [Fact(
+        DisplayName = "null 受け手のメンバー参照はコンパイル経路と同じ NullReferenceException になる"
+    )]
     public void Evaluate_MemberOnNullReceiver_ThrowsNullReferenceLikeCompiledPath()
     {
         // 捕捉変数が null のときの customer.Name と同じ形（受け手は型付き null 定数で代役）

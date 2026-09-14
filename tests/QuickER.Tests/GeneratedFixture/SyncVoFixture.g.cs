@@ -128,6 +128,14 @@ public sealed class DbColumnMetaAttribute : Attribute
     /// <summary>Gets the dialect-neutral type token (for example <c>string(50)</c>).</summary>
     public string TypeToken { get; }
 
+    /// <summary>Gets or sets the DB type exactly as the source diagram spelled it (for example <c>datetime</c>), or null when the token already reproduces it.</summary>
+    /// <remarks>
+    /// The token carries the meaning of a type only, so several spellings of one meaning (<c>numeric</c> and <c>decimal</c>, <c>ntext</c> and <c>nvarchar(max)</c>, <c>datetime</c> and <c>datetime2</c>)
+    /// collapse onto a single representative. This property holds the original spelling for the columns where that collapse would change it, so that recovering the diagram from this code keeps the column type as written.
+    /// A recovering tool should adopt it only when parsing it in the target dialect yields the same type as <see cref="TypeToken"/>; otherwise the token is what states the meaning.
+    /// </remarks>
+    public string? NativeType { get; set; }
+
     /// <summary>Gets or sets the column description (derived from DB extended properties, etc.). Empty string when unset.</summary>
     public string Description { get; set; } = string.Empty;
 
