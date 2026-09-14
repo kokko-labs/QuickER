@@ -72,9 +72,17 @@ public static class JsonStorageService
     /// </remarks>
     /// <param name="path">保存先のファイルパス</param>
     /// <param name="document">保存対象の文書（意味モデル＋レイアウト）</param>
-    public static void SaveAtomic(string path, DiagramDocument document)
+    /// <returns>
+    /// 実際に書き出した JSON 文字列。保存直後の内容ハッシュを<b>ディスクの読み直しではなく
+    /// 書いた内容そのもの</b>から求めるために返す（GUI の外部変更検知が使う。読み直す方式では、
+    /// 書き込み完了からハッシュ採取までの隙間に外部プロセスが書いた内容を「自分が保存した内容」として
+    /// 記録してしまう）。戻り値は無視してよい。
+    /// </returns>
+    public static string SaveAtomic(string path, DiagramDocument document)
     {
-        AtomicFile.WriteAllText(path, Serialize(document));
+        var contents = Serialize(document);
+        AtomicFile.WriteAllText(path, contents);
+        return contents;
     }
 
     /// <summary>保存文書を図ファイルの正準形（<see cref="Options"/>）で JSON 文字列へ直列化する</summary>

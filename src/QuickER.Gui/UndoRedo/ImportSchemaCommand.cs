@@ -58,15 +58,9 @@ public class ImportSchemaCommand : IUndoableCommand
         _previousEntities = _main.Entities.ToList();
         _previousRelationships = _main.Relationships.ToList();
 
-        // 退避済みリレーションのイベント購読を解除し参照を切り離す
-        // （Clear() は Reset 通知で OldItems を持たず、コレクション側の自動解除が効かないため明示的に行う）
-        foreach (var r in _previousRelationships)
-        {
-            r.Detach();
-        }
-
-        _main.Relationships.Clear();
-        _main.Entities.Clear();
+        // 退避済みエンティティ・リレーションのイベント購読と変更追跡を切り離しつつ空にする
+        // （Clear() は Reset 通知で OldItems を持たず、コレクション側の自動解除が効かないため専用経路を通す）
+        _main.ClearDiagramCollections();
 
         // 取り込み用 ViewModel は初回 Execute 時のみ構築し、Redo では再利用する
         if (ImportedEntities.Count == 0)
@@ -112,16 +106,10 @@ public class ImportSchemaCommand : IUndoableCommand
     /// <inheritdoc />
     public void Undo()
     {
-        // 取り込んだリレーションのイベント購読を解除してから差し替える
-        // （Clear() は Reset 通知で OldItems を持たないため明示的に行う。
-        //   復元する退避済みリレーションは Add 通知で購読が張り直される）
-        foreach (var r in ImportedRelationships)
-        {
-            r.Detach();
-        }
-
-        _main.Relationships.Clear();
-        _main.Entities.Clear();
+        // 取り込んだエンティティ・リレーションの購読と変更追跡を切り離しつつ空にする
+        // （Clear() は Reset 通知で OldItems を持たないため専用経路を通す。
+        //   復元する退避済みの要素は Add 通知で購読・追跡が張り直される）
+        _main.ClearDiagramCollections();
 
         foreach (var e in _previousEntities)
         {

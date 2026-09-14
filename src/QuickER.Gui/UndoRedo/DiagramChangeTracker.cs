@@ -266,6 +266,14 @@ public sealed class DiagramChangeTracker
         _trackedPropertySnapshots.Remove(relationship);
     }
 
+    /// <summary>テスト専用: 指定対象の基準スナップショットを保持している（＝追跡中）かどうか</summary>
+    /// <remarks>
+    /// 図の一括置換で旧要素の追跡が終了することを、辞書の残留という形で直接観測するための内部シーム。
+    /// 残留はリーク（旧 VM のプロパティ変更が生きた Undo スタックへ幽霊コマンドを積む）と同義で、
+    /// ビルドでも型検査でも出ないため観測点を設ける。
+    /// </remarks>
+    internal bool IsTrackedForTests(object target) => _trackedPropertySnapshots.ContainsKey(target);
+
     /// <summary>Undo 追跡を一時停止して <paramref name="action"/> を実行し、終了後にスナップショットを更新する</summary>
     /// <param name="action">追跡を止めて実行する処理</param>
     /// <param name="excludedSnapshotTarget">スナップショット再取得から除外する対象（呼び出し側で別途更新済みの対象）</param>

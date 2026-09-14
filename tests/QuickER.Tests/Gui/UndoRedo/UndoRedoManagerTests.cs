@@ -25,6 +25,98 @@ public class UndoRedoManagerTests
         public void Undo() => UndoCount++;
     }
 
+    /// <summary>指定回数だけ Execute / Undo が例外を投げ、以降は成功するテスト用コマンド</summary>
+    private sealed class ThrowingCommand : IUndoableCommand
+    {
+        /// <summary>残りの Undo 失敗回数</summary>
+        public int UndoFailures { get; set; }
+
+        /// <summary>残りの Execute 失敗回数</summary>
+        public int ExecuteFailures { get; set; }
+
+        /// <summary>Undo が成功した回数</summary>
+        public int UndoSucceeded { get; private set; }
+
+        /// <summary>Execute が成功した回数</summary>
+        public int ExecuteSucceeded { get; private set; }
+
+        /// <inheritdoc />
+        public string Description => "throwing";
+
+        /// <inheritdoc />
+        public void Execute()
+        {
+            if (ExecuteFailures > 0)
+            {
+                ExecuteFailures--;
+                throw new InvalidOperationException("execute failed");
+            }
+
+            ExecuteSucceeded++;
+        }
+
+        /// <inheritdoc />
+        public void Undo()
+        {
+            if (UndoFailures > 0)
+            {
+                UndoFailures--;
+                throw new InvalidOperationException("undo failed");
+            }
+
+            UndoSucceeded++;
+        }
+    }
+
+    /// <summary>Undo が例外を投げてもコマンドが undo スタックに残り、再試行できることを検証する</summary>
+    /// <remarks>
+    /// Pop してから実行する構造のため、戻さないとコマンドが両スタックから消える（＝履歴の握り潰し）。
+    /// 失敗した操作をやり直す手段が無くなるうえ、Redo 側にも現れないので状態を戻す術が消える。
+    /// </remarks>
+    [Fact(DisplayName = "Undo が例外を投げてもコマンドは undo スタックに残り再試行できる")]
+    public void Undo_WhenCommandThrows_KeepsCommandOnUndoStackAndNotifies()
+    {
+        var mgr = new UndoRedoManager();
+        var cmd = new ThrowingCommand { UndoFailures = 1 };
+        mgr.Push(cmd);
+
+        var generationBefore = mgr.ChangeGeneration;
+        var act = () => mgr.Undo();
+
+        act.Should().Throw<InvalidOperationException>("失敗は呼び出し側へ伝える");
+        mgr.CanUndo.Should().BeTrue("失敗したコマンドは元のスタックへ戻す");
+        mgr.CanRedo.Should().BeFalse("実行できていないので Redo 側へは移さない");
+        mgr.ChangeGeneration.Should().NotBe(generationBefore, "状態変更通知を発行する");
+
+        // 2 回目は成功する＝再試行可能であることの実証
+        mgr.Undo();
+        cmd.UndoSucceeded.Should().Be(1);
+        mgr.CanRedo.Should().BeTrue();
+    }
+
+    /// <summary>Redo が例外を投げてもコマンドが redo スタックに残り、再試行できることを検証する</summary>
+    [Fact(DisplayName = "Redo が例外を投げてもコマンドは redo スタックに残り再試行できる")]
+    public void Redo_WhenCommandThrows_KeepsCommandOnRedoStackAndNotifies()
+    {
+        var mgr = new UndoRedoManager();
+        var cmd = new ThrowingCommand();
+        mgr.Push(cmd);
+        mgr.Undo();
+
+        cmd.ExecuteFailures = 1;
+        var generationBefore = mgr.ChangeGeneration;
+        var act = () => mgr.Redo();
+
+        act.Should().Throw<InvalidOperationException>();
+        mgr.CanRedo.Should().BeTrue("失敗したコマンドは元のスタックへ戻す");
+        mgr.CanUndo.Should().BeFalse("実行できていないので Undo 側へは移さない");
+        mgr.ChangeGeneration.Should().NotBe(generationBefore, "状態変更通知を発行する");
+
+        mgr.Redo();
+        cmd.ExecuteSucceeded.Should().Be(1);
+        mgr.CanUndo.Should().BeTrue();
+    }
+
     /// <summary>Execute でコマンドが実行され Undo 可能・Redo 不可になることを検証する</summary>
     [Fact(DisplayName = "Execute するとコマンドが実行され Undo 可能になる")]
     public void Execute_RunsCommandAndEnablesUndo()

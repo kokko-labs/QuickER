@@ -5,6 +5,7 @@ using System.Threading;
 using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using QuickER.Behaviors;
 using QuickER.Documents;
 using QuickER.Gui.Abstractions;
 using QuickER.Model;
@@ -79,6 +80,16 @@ public partial class MainViewModel : IDiagramTransferHost
 
     /// <summary>テスト専用: 実 FileSystemWatcher の起動を止めるフラグ（外部変更は注入で検証するため）</summary>
     private bool _fileWatchingDisabled;
+
+    /// <summary>
+    /// テスト専用: 上書き保存の書き込み完了直後（内容ハッシュの記録より前）に差し込む処理。
+    /// 「保存したファイルを外部プロセスが即座に書き換えた」競合窓を決定的に再現するための入口。
+    /// </summary>
+    /// <remarks>
+    /// この窓は監視の一時停止中にあたるため、外部書き込みの FSW イベントは捨てられる。
+    /// 実プロセスの割り込みはタイミング依存で再現できないので、窓そのものをシームとして開ける。
+    /// </remarks>
+    internal Action? AfterSaveWriteForTests { get; set; }
 
     /// <summary>ステータスバー左端に表示する一時通知のバッキングフィールド（既定は「準備完了」）</summary>
     private string _statusMessage = Strings.Status_Ready;
@@ -181,6 +192,11 @@ public partial class MainViewModel : IDiagramTransferHost
     /// <summary>外部での内容変更を処理する（クリーンなら無確認再読込・ダーティなら確認）</summary>
     private void HandleExternalModification(string? contentHash)
     {
+        // 進行中のマウス操作を、再読込・確認ダイアログのどちらへ進むより前に打ち切る。
+        // 自動再読込では図が置き換わったあとの解放が幽霊 Undo を積み、確認ダイアログは
+        // マウスキャプチャ中に開いて MouseUp を奪う（＝進行中状態が残る）ため、分岐の手前で止める
+        CancelActiveCanvasInteractions();
+
         if (!IsDirty)
         {
             // クリーン（未保存変更なし）＝無確認で再読込し、控えめに通知する
@@ -208,6 +224,26 @@ public partial class MainViewModel : IDiagramTransferHost
             // このバージョン（内容ハッシュ）は無視して編集を続行する
             _ignoredExternalHash = contentHash;
         }
+    }
+
+    /// <summary>進行中のキャンバス操作（移動・リサイズ・グループ移動・範囲選択）を開始時点へ戻して打ち切る</summary>
+    /// <remarks>
+    /// <para>
+    /// 進行中状態はビヘイビアの静的フィールドが持つため（同時に操作できる対象は 1 つという前提）、
+    /// インスタンスを介さずここから直接打ち切る。ビヘイビア側は既に ViewModel を直接参照しており
+    /// （<see cref="ClampGroupDelta"/> / <see cref="OnEntityClicked"/>）、同一アセンブリ内の静的呼び出しに
+    /// とどまるため新たな結線は増やさない。
+    /// </para>
+    /// <para>
+    /// <b>既知の制限:</b> 打ち切るのはマウス操作だけで、機能モジュールが開いているモーダル
+    /// （DB 同期・クエリ定義など）は閉じない。それらのダイアログは開いた時点の図を見ているため、
+    /// 再読込後に確定すると古い内容を前提とした操作になり得る。
+    /// </para>
+    /// </remarks>
+    private static void CancelActiveCanvasInteractions()
+    {
+        DragBehavior.CancelActiveDrag();
+        RubberBandBehavior.CancelActiveSelection();
     }
 
     /// <summary>現在パスのファイルを読み直し、履歴クリアで反映する（ビューポートは維持）</summary>
@@ -302,7 +338,15 @@ public partial class MainViewModel : IDiagramTransferHost
     /// 現ファイルのハッシュ比較で判定する。相違があれば通常の変更検知と同じ規則
     /// （復元がクリーン→自動再読込・ダーティ→確認）を適用する。監視サービス起動前でも一度検査する。
     /// </remarks>
-    private void CheckExternalChangeOnStartup()
+    private void CheckExternalChangeOnStartup() => CheckExternalChangeAgainstDisk();
+
+    /// <summary>現ファイルの内容が最終既知ハッシュと異なれば、通常の外部変更検知と同じ規則で処理する</summary>
+    /// <remarks>
+    /// 監視サービスの通知が届かない（届かなかった）タイミングで、ディスクとの乖離を 1 回だけ拾い直す
+    /// 共有経路。呼び出し元は起動復元の直後（<see cref="CheckExternalChangeOnStartup"/>）と、
+    /// 上書き保存で監視を再開した直後（<see cref="SaveToPath"/>）の 2 箇所。
+    /// </remarks>
+    private void CheckExternalChangeAgainstDisk()
     {
         if (string.IsNullOrEmpty(CurrentFilePath) || !File.Exists(CurrentFilePath))
         {
@@ -437,10 +481,21 @@ public partial class MainViewModel : IDiagramTransferHost
 
     /// <summary>読込／保存の成功時に現在パス・内容ハッシュを更新し、クリーン状態にする共通ヘルパ</summary>
     /// <param name="path">紐付けるファイルのフルパス（読込元／保存先）</param>
-    private void UpdateDocumentIdentity(string path)
+    /// <remarks>内容ハッシュはディスクから読み直して求める（読込経路・再読込経路はこれが正）</remarks>
+    private void UpdateDocumentIdentity(string path) =>
+        UpdateDocumentIdentity(path, TryComputeContentHash(path));
+
+    /// <summary>内容ハッシュを明示して文書アイデンティティを更新する</summary>
+    /// <param name="path">紐付けるファイルのフルパス</param>
+    /// <param name="contentHash">最終既知として記録する内容ハッシュ（算出不能なら null）</param>
+    /// <remarks>
+    /// 保存経路は「書き出した内容そのもの」から求めたハッシュを渡す
+    /// （理由の正本は <see cref="DocumentContentHash.ComputeForText"/>）。
+    /// </remarks>
+    private void UpdateDocumentIdentity(string path, string? contentHash)
     {
         CurrentFilePath = path;
-        _lastKnownFileHash = TryComputeContentHash(path);
+        _lastKnownFileHash = contentHash;
         MarkClean();
     }
 
@@ -680,15 +735,25 @@ public partial class MainViewModel : IDiagramTransferHost
     /// 書き込みは <see cref="JsonStorageService.SaveAtomic"/>（一時ファイル経由の差し替え）で行い、
     /// 途中で落ちてもユーザーのファイルが半端な JSON にならないようにする。失敗時は通知のうえ
     /// 文書アイデンティティ（現在パス・ハッシュ・クリーン状態）を更新せず、ダーティのまま保持する。
+    /// <para>
+    /// 競合窓への対処は 2 段構え。(1) 最終既知ハッシュは<b>書き出した内容そのもの</b>から求める
+    /// （ディスクの読み直しでは、書き込み完了から採取までの隙間に外部プロセスが書いた内容を
+    /// 「自分が保存した内容」として記録してしまい、以後どの検知経路も差分を見つけられなくなる）。
+    /// (2) 監視の再開直後にディスクと 1 回だけ突き合わせる（一時停止中に届いた変更イベントは
+    /// 捨てられ、デバウンスも再スケジュールされないため、拾い直す経路をここに置く）。
+    /// </para>
     /// </remarks>
     private void SaveToPath(string path)
     {
         _fileWatcher.Suspend();
+        var saved = false;
 
         try
         {
-            JsonStorageService.SaveAtomic(path, ToDocument());
-            UpdateDocumentIdentity(path);
+            var contents = JsonStorageService.SaveAtomic(path, ToDocument());
+            AfterSaveWriteForTests?.Invoke();
+            UpdateDocumentIdentity(path, DocumentContentHash.ComputeForText(contents));
+            saved = true;
 
             // ER 図ファイル自身の読み書きは、作業を止めないステータスバーの一時通知で知らせる
             // （外部形式との入出力＝モーダル、との使い分け。ファイル名はタイトルバーに出るため入れない）
@@ -705,6 +770,12 @@ public partial class MainViewModel : IDiagramTransferHost
         finally
         {
             _fileWatcher.Resume();
+        }
+
+        if (saved)
+        {
+            // 監視停止中に外部が書いていれば、ここで初めて検知できる（再開後の防御の二重化）
+            CheckExternalChangeAgainstDisk();
         }
     }
 

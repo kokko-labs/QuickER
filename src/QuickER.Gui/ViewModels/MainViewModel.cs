@@ -225,6 +225,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// <summary>プロパティ変更を監視して Undo/Redo 履歴へ自動登録する追跡器</summary>
     private readonly DiagramChangeTracker _changeTracker;
 
+    /// <summary>テスト専用: 変更追跡器（一括置換で旧要素の追跡が終了することを観測するため）</summary>
+    internal DiagramChangeTracker ChangeTrackerForTests => _changeTracker;
+
     /// <summary>現在の図のターゲット DBMS（プロバイダ識別名。バッキングフィールド）</summary>
     private IDatabaseProvider _currentProvider;
 
@@ -358,7 +361,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// ファイル由来の図に付随する名前付きクエリ定義。<c>null</c>（既定）はファイル由来でない置換
     /// （新規・取込・DB 取込・AI 生成）を意味し、古い図の Guid 参照を持ち越さないようクエリを空にする
     /// </param>
-    /// <remarks>既存リレーションは <see cref="RelationshipViewModel.Detach"/> で購読解除してから破棄し、イベントリークを防ぐ</remarks>
+    /// <remarks>
+    /// 既存のエンティティ・リレーションは <see cref="ClearDiagramCollections"/> で購読解除・追跡終了を
+    /// 伴って破棄し、イベントリークと幽霊 Undo コマンドを防ぐ
+    /// </remarks>
     private void ReplaceDiagram(
         IEnumerable<Entity> entities,
         IEnumerable<Relationship> relationships,
@@ -374,14 +380,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _changeTracker.RunWithoutTracking(() =>
         {
             // Clear() は Reset 通知で OldItems を持たず CollectionChanged 側の自動解除が効かないため、
-            // ここで明示的に購読を解除する
-            foreach (var r in Relationships)
-            {
-                r.Detach();
-            }
-
-            Relationships.Clear();
-            Entities.Clear();
+            // エンティティ・リレーションとも明示的に購読解除・追跡終了を行う専用経路を通す
+            ClearDiagramCollections();
 
             foreach (var entity in entities)
             {
@@ -1912,10 +1912,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             foreach (EntityViewModel entity in e.OldItems)
             {
-                entity.PropertyChanged -= OnEntityPropertyChanged;
-                entity.UniqueConstraintMemberSelectionEdited -=
-                    OnUniqueConstraintMemberSelectionEdited;
-                _changeTracker.DetachEntity(entity);
+                DetachEntityViewModel(entity);
             }
         }
 
@@ -1944,6 +1941,73 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         // エンティティの増減でミニマップの射影・描画データを作り直す
         RecalculateMiniMap();
+    }
+
+    /// <summary>エンティティ 1 件の購読解除と変更追跡の終了を行う</summary>
+    /// <remarks>
+    /// コレクションからの除去（<c>OldItems</c>）と一括置換（<see cref="ClearDiagramCollections"/>）の
+    /// <b>唯一の解除処理</b>。2 箇所へ書き分けると、どちらか一方にだけ購読が足される乖離が静かに起きる
+    /// （残った購読は旧 VM のプロパティ変更を生きた Undo スタックへ流し込む）。
+    /// </remarks>
+    private void DetachEntityViewModel(EntityViewModel entity)
+    {
+        entity.PropertyChanged -= OnEntityPropertyChanged;
+        entity.UniqueConstraintMemberSelectionEdited -= OnUniqueConstraintMemberSelectionEdited;
+        _changeTracker.DetachEntity(entity);
+    }
+
+    /// <summary>リレーション 1 件の購読解除と変更追跡の終了を行う</summary>
+    /// <remarks>
+    /// 端点購読を解除しないと、削除済み VM が生きたエンティティのイベントから参照され続け、
+    /// エンティティ移動のたびに孤児リレーションの幾何再計算・通知が走り続ける。
+    /// 解除処理を 1 箇所に閉じる理由は <see cref="DetachEntityViewModel"/> と同じ。
+    /// </remarks>
+    private void DetachRelationshipViewModel(RelationshipViewModel relationship)
+    {
+        relationship.Detach();
+        relationship.ColumnPairSelectionEdited -= OnRelationshipColumnPairSelectionEdited;
+        _changeTracker.DetachRelationship(relationship);
+    }
+
+    /// <summary>エンティティ・リレーションを空にし、外れた全要素の購読解除・変更追跡の終了を行う</summary>
+    /// <remarks>
+    /// <para>
+    /// <c>ObservableCollection.Clear()</c> は Reset 通知で <c>OldItems</c> を持たないため、
+    /// <c>CollectionChanged</c> 側の自動解除が<b>エンティティ・リレーションとも一切効かない</b>。
+    /// 解除が漏れると <see cref="DiagramChangeTracker"/> のスナップショット辞書へ旧要素が残り続け
+    /// （開く・取込・外部変更の自動再読込のたびに図 1 枚分ずつ単調増加）、生き残った購読経由で
+    /// 旧 VM の変更が現在の Undo スタックへ幽霊コマンドを積む（＝クリーンな文書が無操作でダーティ化する）。
+    /// </para>
+    /// <para>
+    /// <b>解除はクリアの「後」で行う。</b>先に解除すると、<c>Relationships.Clear()</c> が誘発する
+    /// <see cref="ApplyRelationshipColumnRules"/> が <see cref="DiagramChangeTracker.RunWithoutTracking"/>
+    /// を通り、その後始末（全要素のスナップショット再取得）が<b>まだコレクションに残っている旧要素</b>を
+    /// 拾い直してしまう（＝解除したはずの追跡が復活する）。そのため現在の要素を退避してから
+    /// クリアし、空になった後に退避分を解除する。
+    /// </para>
+    /// <para>
+    /// 図を丸ごと入れ替える全経路（新規・開く・取込・DB 取込・AI 生成・外部変更の再読込は
+    /// <c>ReplaceDiagram</c> 経由、取込コマンドの Execute / Undo は <c>ImportSchemaCommand</c>）が
+    /// 自前の <c>Clear()</c> ではなくこれを呼ぶ。
+    /// </para>
+    /// </remarks>
+    internal void ClearDiagramCollections()
+    {
+        var relationships = Relationships.ToList();
+        var entities = Entities.ToList();
+
+        Relationships.Clear();
+        Entities.Clear();
+
+        foreach (var relationship in relationships)
+        {
+            DetachRelationshipViewModel(relationship);
+        }
+
+        foreach (var entity in entities)
+        {
+            DetachEntityViewModel(entity);
+        }
     }
 
     /// <summary>一意制約カードの構成列行で列が選び直されたときに、Undo 可能な差し替えとして確定させる</summary>
@@ -1979,8 +2043,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// <summary>リレーションの増減に応じて端点購読・変更追跡を切り替え、カラムの PK/FK ルールを再適用する</summary>
     /// <remarks>
     /// <c>ObservableCollection.Clear()</c> は Reset 通知で <c>OldItems</c> を持たないため、
-    /// 一括置換の経路（<see cref="ReplaceDiagram"/> / <c>ImportSchemaCommand</c>）は Clear の前に
-    /// 明示的に <see cref="RelationshipViewModel.Detach"/> を呼ぶ（購読解除の取りこぼしを防ぐ）
+    /// 一括置換の経路（<see cref="ReplaceDiagram"/> / <c>ImportSchemaCommand</c>）は素の Clear ではなく
+    /// <see cref="ClearDiagramCollections"/> を呼ぶ（購読解除の取りこぼしを防ぐ）
     /// </remarks>
     private void OnRelationshipsCollectionChanged(
         object? sender,
@@ -1991,12 +2055,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             foreach (RelationshipViewModel relationship in e.OldItems)
             {
-                // 図から外れたリレーションの端点購読を解除する
-                // （解除しないと削除済み VM が生きたエンティティのイベントから参照され続け、
-                //   エンティティ移動のたびに孤児リレーションの幾何再計算・通知が走り続ける）
-                relationship.Detach();
-                relationship.ColumnPairSelectionEdited -= OnRelationshipColumnPairSelectionEdited;
-                _changeTracker.DetachRelationship(relationship);
+                DetachRelationshipViewModel(relationship);
             }
         }
 

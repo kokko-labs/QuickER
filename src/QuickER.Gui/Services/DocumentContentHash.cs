@@ -1,5 +1,6 @@
 using System.IO;
 using System.Security.Cryptography;
+using System.Text;
 
 namespace QuickER.Services;
 
@@ -26,6 +27,31 @@ public static class DocumentContentHash
             return null;
         }
     }
+
+    /// <summary>
+    /// 保存時に書き出した文字列そのものから SHA-256（16 進大文字）を計算する。
+    /// </summary>
+    /// <param name="contents">ファイルへ書き出した内容</param>
+    /// <returns>16 進文字列のハッシュ</returns>
+    /// <remarks>
+    /// 保存直後の「最終既知ハッシュ」はこちらで採る。ディスクを読み直す方式では、書き込み完了から
+    /// 採取までの隙間に外部プロセスが書くと、その内容のハッシュを「自分が保存した内容」として
+    /// 記録してしまい（かつ監視は一時停止中でイベントも捨てられる）、以後どの検知経路も
+    /// メモリの図とディスクの食い違いを見つけられなくなる。
+    /// <para>
+    /// 符号化は <see cref="Settings.AtomicFile.WriteAllText(string, string)"/> の既定（BOM なし UTF-8）と
+    /// 揃える。ここが食い違うと <see cref="TryCompute"/> の値と一致せず、保存直後に毎回
+    /// 「外部変更あり」と判定されて再読込が暴発する。
+    /// </para>
+    /// </remarks>
+    public static string ComputeForText(string contents) =>
+        Convert.ToHexString(SHA256.HashData(WriteEncoding.GetBytes(contents)));
+
+    /// <summary>書き出しに使う符号化（<see cref="Settings.AtomicFile"/> の既定＝BOM なし UTF-8）</summary>
+    private static readonly Encoding WriteEncoding = new UTF8Encoding(
+        encoderShouldEmitUTF8Identifier: false,
+        throwOnInvalidBytes: true
+    );
 
     /// <summary>短いリトライを挟みつつファイル内容の SHA-256 を計算する（書き込み途中の共有違反対策）</summary>
     /// <param name="path">対象ファイルのパス</param>

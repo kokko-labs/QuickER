@@ -421,6 +421,117 @@ public static class DragBehavior
         }
     }
 
+    /// <summary>進行中の移動・リサイズ・グループ移動をドラッグ開始時点へ戻して打ち切る</summary>
+    /// <remarks>
+    /// <para>
+    /// 外部変更による再読込の入口（<see cref="MainViewModel"/>）から、自動再読込・確認ダイアログの
+    /// どちらへ進むより前に呼ぶ。放置すると、図が置き換わったあとの <see cref="EndDrag"/> が
+    /// 破棄済み要素から生きた <see cref="UndoRedoManager"/> を引いて移動コマンドを積み
+    /// （＝再読込直後のクリーンな文書が即ダーティ化し幽霊 Undo が残る）、また確認ダイアログが
+    /// マウスキャプチャ中に開くと <c>MouseLeftButtonUp</c> が届かず進行中状態が残る。
+    /// </para>
+    /// <para>
+    /// <b>座標・幅は開始時点へ戻す。</b>ドラッグ中は ViewModel へ逐次反映されているため、静的状態を
+    /// 落とすだけでは「位置は動いたのに Undo 履歴に無い」変更が図に残る（図が置き換わらない
+    /// 「ダーティ＋続行」の経路では、その位置をユーザーが戻せない）。
+    /// </para>
+    /// <para>
+    /// <b>コミット方式（<see cref="EndDrag"/> を走らせて履歴へ積む）は採らない。</b>クリーンな文書が
+    /// コミットでダーティへ変わり、外部変更の分岐が自動再読込から確認ダイアログへ化けるため。
+    /// </para>
+    /// </remarks>
+    internal static void CancelActiveDrag()
+    {
+        var element = _draggedElement;
+        var vm = _draggedVm;
+        var startX = _startX;
+        var startY = _startY;
+        var startWidth = _startWidth;
+        var wasResizing = _isResizing;
+        var wasGroupDragging = _isGroupDragging;
+        var groupMembers = _groupMembers;
+        var wasActive = _isDragging || _isResizing;
+
+        // 後続の MouseUp / MouseMove / LostMouseCapture を素通りさせるため、
+        // キャプチャ解放より先に静的状態を落とす（EndDrag と同じ順序）
+        _isDragging = false;
+        _isResizing = false;
+        _isGroupDragging = false;
+        _groupMembers = new List<(EntityViewModel, double, double)>();
+        _draggedElement = null;
+        _draggedVm = null;
+
+        if (wasActive && vm is not null)
+        {
+            if (wasResizing)
+            {
+                vm.Width = startWidth;
+            }
+            else if (wasGroupDragging)
+            {
+                foreach (var member in groupMembers)
+                {
+                    member.Entity.X = member.StartX;
+                    member.Entity.Y = member.StartY;
+                }
+            }
+            else
+            {
+                vm.X = startX;
+                vm.Y = startY;
+            }
+        }
+
+        if (element is null)
+        {
+            return;
+        }
+
+        if (element.IsMouseCaptured)
+        {
+            element.ReleaseMouseCapture();
+        }
+
+        element.Cursor = null;
+    }
+
+    /// <summary>テスト専用: 移動・リサイズが進行中として残っているか（後続 MouseUp のガード条件そのもの）</summary>
+    internal static bool IsInteractionActiveForTests => _isDragging || _isResizing;
+
+    /// <summary>テスト専用: 実マウス入力なしに「進行中のドラッグ」の内部状態を組み立てる</summary>
+    /// <param name="target">ドラッグ対象のエンティティ</param>
+    /// <param name="startX">ドラッグ開始時の X 座標</param>
+    /// <param name="startY">ドラッグ開始時の Y 座標</param>
+    /// <param name="startWidth">リサイズ開始時の幅（<paramref name="resizing"/> のときのみ意味を持つ）</param>
+    /// <param name="resizing">true なら右端グリップによるリサイズ中として組み立てる</param>
+    /// <param name="groupMembers">グループ移動中のメンバーと開始座標（null なら単一移動）</param>
+    /// <remarks>
+    /// 押下 → 移動 → 解放の実経路はヘッドレスでは再現できないため、キャンセルの検証だけを
+    /// 静的状態の組み立て経由で行う（<see cref="MarkWidthChanged"/> と同じ切り出しの流儀）。
+    /// <see cref="FrameworkElement"/> を伴わないため、キャプチャ解放は対象外になる。
+    /// </remarks>
+    internal static void BeginInteractionForTests(
+        EntityViewModel target,
+        double startX,
+        double startY,
+        double startWidth = 0,
+        bool resizing = false,
+        IReadOnlyList<(EntityViewModel Entity, double StartX, double StartY)>? groupMembers = null
+    )
+    {
+        _draggedElement = null;
+        _draggedVm = target;
+        _startX = startX;
+        _startY = startY;
+        _startWidth = startWidth;
+        _isResizing = resizing;
+        _isDragging = !resizing;
+        _isGroupDragging = !resizing && groupMembers is not null;
+        _groupMembers = groupMembers is null
+            ? new List<(EntityViewModel, double, double)>()
+            : groupMembers.Select(m => (m.Entity, m.StartX, m.StartY)).ToList();
+    }
+
     /// <summary>リサイズ完了時に、幅が実際に変化していれば変更世代だけを進める（履歴には積まない）</summary>
     /// <param name="manager">対象の <see cref="UndoRedoManager"/>（添付プロパティ未設定なら null）</param>
     /// <param name="oldWidth">リサイズ開始時の幅</param>

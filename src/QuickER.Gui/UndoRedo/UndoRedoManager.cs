@@ -62,6 +62,12 @@ public partial class UndoRedoManager : ObservableObject
     }
 
     /// <summary>直近の操作を元に戻す</summary>
+    /// <remarks>
+    /// コマンドの実行が例外を投げた場合はコマンドを Undo スタックへ戻してから再スローする。
+    /// これは<b>部分適用からの復旧ではなく、履歴の握り潰しを防ぐ</b>ためのもの（＝再試行可能性の保持）。
+    /// Pop してから実行する構造のため、戻さないと失敗したコマンドが両スタックから消え、
+    /// やり直す手段も Redo で進める手段も同時に失われる。
+    /// </remarks>
     public void Undo()
     {
         if (!CanUndo)
@@ -70,12 +76,24 @@ public partial class UndoRedoManager : ObservableObject
         }
 
         var c = _undo.Pop();
-        c.Undo();
+
+        try
+        {
+            c.Undo();
+        }
+        catch
+        {
+            _undo.Push(c);
+            NotifyStateChanged();
+            throw;
+        }
+
         _redo.Push(c);
         NotifyStateChanged();
     }
 
     /// <summary>直前に Undo した操作をやり直す</summary>
+    /// <remarks>失敗時の扱いは <see cref="Undo"/> と同じ（元のスタックへ戻して再スローする）</remarks>
     public void Redo()
     {
         if (!CanRedo)
@@ -84,7 +102,18 @@ public partial class UndoRedoManager : ObservableObject
         }
 
         var c = _redo.Pop();
-        c.Execute();
+
+        try
+        {
+            c.Execute();
+        }
+        catch
+        {
+            _redo.Push(c);
+            NotifyStateChanged();
+            throw;
+        }
+
         _undo.Push(c);
         NotifyStateChanged();
     }

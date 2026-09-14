@@ -250,6 +250,50 @@ public static class RubberBandBehavior
         _surface = null;
     }
 
+    /// <summary>進行中のラバーバンド選択を打ち切る（矩形を消し、交差選択は確定しない）</summary>
+    /// <remarks>
+    /// 外部変更による再読込・確認ダイアログの入口から呼ぶ。選択の確定（<c>ApplyRubberBandSelection</c>）は
+    /// 行わない＝「ドラッグ前の状態」へ戻す意味論を <see cref="DragBehavior.CancelActiveDrag"/> と揃える。
+    /// </remarks>
+    internal static void CancelActiveSelection()
+    {
+        var surface = _surface;
+
+        // 後続の MouseUp / MouseMove を素通りさせるため、キャプチャ解放より先に状態を落とす
+        _pending = false;
+        _active = false;
+        _surface = null;
+
+        if (surface is null)
+        {
+            return;
+        }
+
+        if (surface.DataContext is MainViewModel vm)
+        {
+            vm.IsRubberBandVisible = false;
+        }
+
+        if (surface.IsMouseCaptured)
+        {
+            surface.ReleaseMouseCapture();
+        }
+    }
+
+    /// <summary>テスト専用: ラバーバンドが進行中（押下待ち・矩形表示中）として残っているか</summary>
+    internal static bool IsSelectionActiveForTests => _pending || _active;
+
+    /// <summary>テスト専用: 実マウス入力なしに「矩形表示中」の内部状態を組み立てる</summary>
+    /// <param name="surface">選択面（<c>DataContext</c> に <see cref="MainViewModel"/> を持つ要素）</param>
+    internal static void BeginSelectionForTests(FrameworkElement surface)
+    {
+        _surface = surface;
+        _origin = new Point(0, 0);
+        _pending = false;
+        _active = true;
+        _additive = false;
+    }
+
     /// <summary>起点と現在位置から正規化した矩形を VM へ反映する</summary>
     private static void UpdateRectangle(MainViewModel vm, Point current)
     {
