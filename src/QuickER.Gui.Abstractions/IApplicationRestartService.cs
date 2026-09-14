@@ -1,6 +1,6 @@
 namespace QuickER.Gui.Abstractions;
 
-/// <summary>アプリケーションの再起動を抽象化するインターフェース</summary>
+/// <summary>アプリケーションの再起動を抽象化するインターフェイス</summary>
 /// <remarks>
 /// ViewModel から <c>Application.Current</c> を直接参照しないための抽象。
 /// 実装は現在のプロセスを（自動保存などの終了処理を尊重して）終了させ、新しいインスタンスを起動する。

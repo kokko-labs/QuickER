@@ -735,7 +735,7 @@ public class CSharpCodeGenerationServiceTests
         );
 
         result.HasErrors.Should().BeFalse();
-        // Mapper は具象クラスのみ（インターフェースなし）。フック宣言のため partial
+        // Mapper は具象クラスのみ（インターフェイスなし）。フック宣言のため partial
         result.Files[0].Content.Should().NotContain("public interface IProductMapper");
         result.Files[0].Content.Should().Contain("public sealed partial class ProductMapper");
         result.Files[0].Content.Should().NotContain(": IProductMapper");
@@ -1145,7 +1145,7 @@ public class CSharpCodeGenerationServiceTests
         content.Should().NotContain("base.ParentModel as ProductEditModel;");
     }
 
-    /// <summary>Repository インターフェース・実装・DI 登録などの基盤コードが生成されることを検証する</summary>
+    /// <summary>Repository インターフェイス・実装・DI 登録などの基盤コードが生成されることを検証する</summary>
     [Fact]
     public void Generate_ShouldCreateRepositoryInfrastructure()
     {
@@ -1192,7 +1192,7 @@ public class CSharpCodeGenerationServiceTests
         var content = result.Files[0].Content;
         content.Should().Contain("using Microsoft.Data.SqlClient;");
         content.Should().Contain("using Microsoft.Extensions.DependencyInjection;");
-        // Repository 関連はユーザー拡張用に partial（インターフェース・基底クラス・各実装）
+        // Repository 関連はユーザー拡張用に partial（インターフェイス・基底クラス・各実装）
         content.Should().Contain("public partial interface IRepository<TEntity, TKey>");
         content
             .Should()
@@ -1264,7 +1264,7 @@ public class CSharpCodeGenerationServiceTests
 
     /// <summary>
     /// 生 SQL 実行の 3 メソッド（QueryBySqlAsync / ExecuteSqlAsync / ExecuteScalarSqlAsync）が
-    /// IRepository インターフェースと SqlServerRepository 基底の両方に生成され、
+    /// IRepository インターフェイスと SqlServerRepository 基底の両方に生成され、
     /// パラメータ束縛・厳密マッピングの補助（BindRawSqlParameters / MapEntityFromRawSql）も出力されることを検証する
     /// </summary>
     [Fact]
@@ -1282,7 +1282,7 @@ public class CSharpCodeGenerationServiceTests
         result.HasErrors.Should().BeFalse();
         var content = result.Files[0].Content;
 
-        // インターフェース側のシグネチャ（3 メソッド。abstract メソッド宣言なので本文なし）
+        // インターフェイス側のシグネチャ（3 メソッド。abstract メソッド宣言なので本文なし）
         content.Should().Contain("Task<IReadOnlyList<TEntity>> QueryBySqlAsync(");
         content.Should().Contain("Task<int> ExecuteSqlAsync(");
         content.Should().Contain("Task<TResult?> ExecuteScalarSqlAsync<TResult>(");
@@ -1363,7 +1363,7 @@ public class CSharpCodeGenerationServiceTests
         result.HasErrors.Should().BeFalse();
         var content = result.Files[0].Content;
 
-        // インターフェースと実装（partial・sealed・ステートレス）
+        // インターフェイスと実装（partial・sealed・ステートレス）
         content.Should().Contain("public partial interface ISqlExecutor");
         content
             .Should()
@@ -1371,7 +1371,7 @@ public class CSharpCodeGenerationServiceTests
                 "public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory) : ISqlExecutor"
             );
 
-        // 任意型射影のシグネチャ（インターフェース・実装の両方）
+        // 任意型射影のシグネチャ（インターフェイス・実装の両方）
         content
             .Should()
             .Contain("Task<IReadOnlyList<TResult>> QueryProjectionBySqlAsync<TResult>(");
@@ -1819,7 +1819,7 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("public RowState RowState { get; set; } = RowState.Unchanged;");
         content.Should().Contain("public void MarkAdded() => RowState = RowState.Added;");
         content.Should().Contain("public void MarkRemoved() => RowState = RowState.Removed;");
-        // リポジトリ・インターフェースの Save 入口（既定でカスケード、既定は更新欠落で例外）
+        // リポジトリ・インターフェイスの Save 入口（既定でカスケード、既定は更新欠落で例外）
         content.Should().Contain("bool insertWhenUpdateMissing = false,");
         content.Should().Contain("public async Task<int> SaveAsync(");
         content.Should().Contain("await connection.BeginTransactionAsync(cancellationToken)");
@@ -4048,7 +4048,7 @@ public class CSharpCodeGenerationServiceTests
         content.Should().NotContain("[MaxLength(");
     }
 
-    /// <summary>VO 生成 OFF（既定）では値オブジェクトの基底・インターフェースが一切出力されないことを検証する</summary>
+    /// <summary>VO 生成 OFF（既定）では値オブジェクトの基底・インターフェイスが一切出力されないことを検証する</summary>
     [Fact]
     public void Generate_ValueObjects_Disabled_ShouldNotEmitValueObjectTypes()
     {
@@ -4066,7 +4066,7 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("public int CustomerId { get; set; }");
     }
 
-    /// <summary>VO 生成 ON で基底・インターフェース・具象 VO が出力され、Entity/EditModel の型が VO になることを検証する</summary>
+    /// <summary>VO 生成 ON で基底・インターフェイス・具象 VO が出力され、Entity/EditModel の型が VO になることを検証する</summary>
     [Fact]
     public void Generate_ValueObjects_Enabled_ShouldEmitAndApplyValueObjects()
     {
@@ -4081,7 +4081,7 @@ public class CSharpCodeGenerationServiceTests
 
         result.HasErrors.Should().BeFalse();
         var content = result.Files[0].Content;
-        // 基底・インターフェース・例外・JSON 変換器
+        // 基底・インターフェイス・例外・JSON 変換器
         content.Should().Contain("public abstract class ValueObjectBaseCore<TSelf, TValue>");
         content
             .Should()

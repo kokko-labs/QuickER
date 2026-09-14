@@ -5,7 +5,7 @@ namespace QuickER.Gui.Abstractions;
 /// <param name="FilterIndex">選択されたフィルターの 1 始まりインデックス（拡張子判定に使用）</param>
 public sealed record FileDialogResult(string Path, int FilterIndex);
 
-/// <summary>ファイル / フォルダ選択ダイアログの表示を抽象化するインターフェース</summary>
+/// <summary>ファイル / フォルダ選択ダイアログの表示を抽象化するインターフェイス</summary>
 /// <remarks>ViewModel から <c>Microsoft.Win32</c> への直接依存を除去し、単体テストではスタブへ差し替える</remarks>
 public interface IFileDialogService
 {

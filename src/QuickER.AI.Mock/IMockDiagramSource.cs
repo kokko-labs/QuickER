@@ -4,7 +4,7 @@ using QuickER.Provider;
 namespace QuickER.AI.Mock;
 
 /// <summary>
-/// モック生成 ViewModel が必要とする「現在の ER 図」の供給元を抽象化するインターフェース。
+/// モック生成 ViewModel が必要とする「現在の ER 図」の供給元を抽象化するインターフェイス。
 /// </summary>
 /// <remarks>
 /// <see cref="MockGenerationDialogViewModel"/> をアプリ本体の巨大な MainViewModel 具象から切り離し、

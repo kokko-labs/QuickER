@@ -2,7 +2,7 @@ using QuickER.Extensibility;
 
 namespace QuickER.AI.Mock;
 
-/// <summary>AI モック生成ウィンドウ（モードレス・シングルトン）の生存期間を管理するインターフェース</summary>
+/// <summary>AI モック生成ウィンドウ（モードレス・シングルトン）の生存期間を管理するインターフェイス</summary>
 /// <remarks>
 /// <see cref="AiChatLauncher"/> と同じパターンで、表示しっぱなしで再利用される単一ウィンドウの
 /// ライフサイクルをここに隔離する。現在の ER 図は、コンストラクタ注入された <see cref="IErDiagramHost"/>

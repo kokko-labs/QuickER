@@ -29,7 +29,7 @@ public readonly record struct ErChatTurnResult(bool Success, string? Error);
 
 /// <summary>
 /// AI チャットのエンジン抽象。OpenAI SDK の自前制御と Codex App Server の双方を
-/// 同一インターフェースで扱い、ViewModel をバックエンド実装から切り離す。
+/// 同一インターフェイスで扱い、ViewModel をバックエンド実装から切り離す。
 /// </summary>
 public interface IErChatEngine : IAsyncDisposable
 {

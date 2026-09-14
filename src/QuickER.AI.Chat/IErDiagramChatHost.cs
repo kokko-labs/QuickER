@@ -3,7 +3,7 @@ using QuickER.AI;
 namespace QuickER.AI.Chat;
 
 /// <summary>
-/// AI チャット ViewModel が操作対象のダイアグラムに対して必要とする最小限の能力を抽象化するインターフェース。
+/// AI チャット ViewModel が操作対象のダイアグラムに対して必要とする最小限の能力を抽象化するインターフェイス。
 /// </summary>
 /// <remarks>
 /// <see cref="AiChatDialogViewModel"/> を巨大なアプリ本体の MainViewModel 具象から切り離し、

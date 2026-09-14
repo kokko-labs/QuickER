@@ -9,7 +9,7 @@ namespace QuickER.Services;
 public sealed record PrintOptions(PrintSizeMode SizeMode, string Title, bool IncludeTimestamp);
 
 /// <summary>
-/// アプリ固有のモーダルダイアログ（印刷オプション）の表示を抽象化するインターフェース
+/// アプリ固有のモーダルダイアログ（印刷オプション）の表示を抽象化するインターフェイス
 /// </summary>
 /// <remarks>
 /// メッセージボックスは <see cref="Gui.Abstractions.IDialogService"/>、ファイル選択は

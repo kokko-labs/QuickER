@@ -10,7 +10,7 @@ namespace QuickER.AI.Chat;
 /// 契約 <see cref="IErDiagramHost"/> を、AI チャット ViewModel が要求する <see cref="IErDiagramChatHost"/> へ適合させるアダプタ。
 /// </summary>
 /// <remarks>
-/// フィーチャーモジュール（QuickER.AI.Chat）側に置く「契約 → チャット固有インターフェース」の橋渡し。
+/// フィーチャーモジュール（QuickER.AI.Chat）側に置く「契約 → チャット固有インターフェイス」の橋渡し。
 /// <see cref="IsEmpty"/> / <see cref="AutoArrangeNewDiagram"/> はホストへ委譲し、
 /// AI ツール実行は内包する <see cref="IErDiagramToolHost"/> 実装（<see cref="ToolHostAdapter"/>）が担う。
 /// 名前付きクエリツール（set_query / list_queries / remove_query）だけはアダプタ層で捕捉し、面非依存の

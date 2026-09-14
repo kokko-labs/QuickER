@@ -1367,7 +1367,7 @@ var refreshed = await engine.RefreshAsync(new SyncRefreshOptions { BatchSize = 2
 
 ## リモート対応インターフェイス（--generate-remote-contracts）
 
-`I{Entity}Repository` は CRUD・保存・名前付きクエリに加え、`Query()`（式木クエリ）・生 SQL・一括追加まで全メソッドを持つ全機能面です。`--generate-remote-contracts`（quicker.json の `GenerateRemoteContracts`、GUI「リモート対応」行の「リモート操作用の Repository インターフェースを生成する」チェックボックス）を指定すると、リモート操作用のインターフェイスを**追加生成**します。
+`I{Entity}Repository` は CRUD・保存・名前付きクエリに加え、`Query()`（式木クエリ）・生 SQL・一括追加まで全メソッドを持つ全機能面です。`--generate-remote-contracts`（quicker.json の `GenerateRemoteContracts`、GUI「リモート対応」行の「リモート操作用の Repository インターフェイスを生成する」チェックボックス）を指定すると、リモート操作用のインターフェイスを**追加生成**します。
 
 | 面 | インターフェイス | 含まれる操作 |
 |---|---|---|
