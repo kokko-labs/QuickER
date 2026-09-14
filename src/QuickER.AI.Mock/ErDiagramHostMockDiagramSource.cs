@@ -8,7 +8,7 @@ namespace QuickER.AI.Mock;
 /// 契約 <see cref="IErDiagramHost"/> を、モック生成 ViewModel が要求する <see cref="IMockDiagramSource"/> へ適合させるアダプタ。
 /// </summary>
 /// <remarks>
-/// フィーチャーモジュール（QuickER.AI.Mock）側に置く「契約 → モック固有インターフェース」の橋渡し。
+/// フィーチャーモジュール（QuickER.AI.Mock）側に置く「契約 → モック固有インターフェイス」の橋渡し。
 /// <see cref="IsEmpty"/> / <see cref="GetDiagram"/> / <see cref="Providers"/> をホストへ委譲する。
 /// </remarks>
 public sealed class ErDiagramHostMockDiagramSource : IMockDiagramSource

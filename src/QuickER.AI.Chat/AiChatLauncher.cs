@@ -2,7 +2,7 @@ using QuickER.Extensibility;
 
 namespace QuickER.AI.Chat;
 
-/// <summary>AI チャットウィンドウ（モードレス・シングルトン）の生存期間を管理するインターフェース</summary>
+/// <summary>AI チャットウィンドウ（モードレス・シングルトン）の生存期間を管理するインターフェイス</summary>
 /// <remarks>
 /// モーダルダイアログとは異なり、表示しっぱなしで再利用される単一ウィンドウのライフサイクルをここに隔離する。
 /// 操作対象の ER 図は、コンストラクタ注入された <see cref="IErDiagramHost"/> 契約から得る

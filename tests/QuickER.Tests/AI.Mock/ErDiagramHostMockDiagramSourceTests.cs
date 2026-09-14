@@ -8,7 +8,7 @@ namespace QuickER.Tests.AI.Mock;
 
 /// <summary>
 /// <see cref="ErDiagramHostMockDiagramSource"/> が契約 <see cref="QuickER.Extensibility.IErDiagramHost"/> を
-/// モック固有インターフェースへ正しく委譲することを検証するテストクラス。
+/// モック固有インターフェイスへ正しく委譲することを検証するテストクラス。
 /// </summary>
 public class ErDiagramHostMockDiagramSourceTests
 {

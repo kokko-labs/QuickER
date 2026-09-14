@@ -6,7 +6,7 @@ namespace QuickER.Tests.AI.Chat;
 
 /// <summary>
 /// <see cref="ErDiagramHostChatAdapter"/> が契約 <see cref="QuickER.Extensibility.IErDiagramHost"/> を
-/// チャット固有インターフェースへ正しく委譲することを検証するテストクラス。
+/// チャット固有インターフェイスへ正しく委譲することを検証するテストクラス。
 /// </summary>
 public class ErDiagramHostChatAdapterTests
 {

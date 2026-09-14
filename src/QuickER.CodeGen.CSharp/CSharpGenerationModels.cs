@@ -279,7 +279,7 @@ internal sealed class CSharpValueObjectModel
     /// <summary>継承する基底クラスの宣言（型引数込み。例: ValueObjectOrderedBase&lt;CustomerIdValue, int&gt;）</summary>
     public required string BaseDeclaration { get; init; }
 
-    /// <summary>実装する汎用インターフェース宣言（例: IValueObject&lt;CustomerIdValue, int&gt;）</summary>
+    /// <summary>実装する汎用インターフェイス宣言（例: IValueObject&lt;CustomerIdValue, int&gt;）</summary>
     public required string InterfaceDeclaration { get; init; }
 
     /// <summary>GuidKey（string で GUID 保持・無引数生成で自動採番）かどうか</summary>
@@ -508,7 +508,7 @@ internal sealed class CSharpNavigationModel
     public string ForeignKeyMetadataArguments { get; init; } = string.Empty;
 }
 
-/// <summary>Mapper クラスの生成モデル（インターフェースなし）</summary>
+/// <summary>Mapper クラスの生成モデル（インターフェイスなし）</summary>
 internal sealed class CSharpMapperModel
 {
     /// <summary>生成する Mapper クラス名</summary>
@@ -616,10 +616,10 @@ internal sealed class CSharpRepositoryModel
             StringComparer.Ordinal
         );
 
-    /// <summary>生成する Repository インターフェース名</summary>
+    /// <summary>生成する Repository インターフェイス名</summary>
     public required string InterfaceName { get; init; }
 
-    /// <summary>リモート契約生成時に追加するリモート面のインターフェース名（<c>I{Entity}RemoteRepository</c>）</summary>
+    /// <summary>リモート契約生成時に追加するリモート面のインターフェイス名（<c>I{Entity}RemoteRepository</c>）</summary>
     /// <remarks>GenerateRemoteContracts が OFF のときは参照されない（テンプレートが ON 時のみ出力・使用する）</remarks>
     public required string RemoteInterfaceName { get; init; }
 

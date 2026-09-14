@@ -18,7 +18,7 @@ public enum GenerationBucket
     /// <summary>Mapper クラス</summary>
     Mapper,
 
-    /// <summary>Repository クラス群（インターフェース・基底・DI 拡張を含む）</summary>
+    /// <summary>Repository クラス群（インターフェイス・基底・DI 拡張を含む）</summary>
     Repository,
 
     /// <summary>EF Core 用コード（DbContext と Fluent API 構成）</summary>

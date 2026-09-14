@@ -1,7 +1,7 @@
 namespace QuickER.Services;
 
 /// <summary>
-/// アプリの自動更新（チェック・ダウンロード・適用）を抽象化するインターフェース。
+/// アプリの自動更新（チェック・ダウンロード・適用）を抽象化するインターフェイス。
 /// </summary>
 /// <remarks>
 /// Velopack への直接依存をこの seam の裏に隔離し、<see cref="UpdateService"/> を

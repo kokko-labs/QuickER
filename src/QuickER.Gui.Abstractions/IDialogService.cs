@@ -1,6 +1,6 @@
 namespace QuickER.Gui.Abstractions;
 
-/// <summary>ViewModel からの確認・通知ダイアログ表示を抽象化するインターフェース</summary>
+/// <summary>ViewModel からの確認・通知ダイアログ表示を抽象化するインターフェイス</summary>
 /// <remarks>
 /// <para>
 /// 単体テストではスタブへ差し替え、UI を表示せずユーザー応答の分岐を検証する。

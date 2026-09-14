@@ -1,9 +1,9 @@
 namespace QuickER.UndoRedo;
 
-/// <summary>Undo / Redo 可能な操作を表すコマンドパターンのインターフェース</summary>
+/// <summary>Undo / Redo 可能な操作を表すコマンドパターンのインターフェイス</summary>
 /// <remarks>
 /// エンティティの追加・削除・移動・プロパティ変更、リレーションの追加・削除を
-/// すべて本インターフェースの実装クラスで表現する
+/// すべて本インターフェイスの実装クラスで表現する
 /// </remarks>
 public interface IUndoableCommand
 {
