@@ -34,7 +34,7 @@ QuickER は個人開発の OSS です。Issue・Pull Request を歓迎します�
   $env:QUICKER_REGEN_FIXTURES=1; dotnet test tests/QuickER.Tests/QuickER.Tests.csproj --filter "FullyQualifiedName~Drift"; $env:QUICKER_REGEN_FIXTURES=$null
   ```
 
-- 利用者に影響する変更は CHANGELOG の Unreleased 欄へ追記してください——[CHANGELOG.md](CHANGELOG.md)（英語）と [CHANGELOG.ja.md](CHANGELOG.ja.md)（日本語）の**両方**。粒度は「利用者から見た 1 変更」（おおむね機能ブランチ 1 本）で 1 エントリとし、該当する見出し（`### Added` / `### Changed` / `### Fixed` / `### Removed`）の下へ置きます（見出しが無ければ作成）。内部リファクタリング・テストのみの変更は不要なため、この欄が空のままになることもあります（想定内です）
+- 利用者に影響する変更は CHANGELOG の Unreleased 欄へ追記してください——[CHANGELOG.md](CHANGELOG.md)（英語）と [CHANGELOG.ja.md](CHANGELOG.ja.md)（日本語）の**両方**。粒度は「利用者から見た 1 変更」（おおむね機能ブランチ 1 本）で 1 エントリとし、該当する見出し（`### Added` / `### Changed` / `### Fixed` / `### Removed`）の下へ置きます（見出しが無ければ作成）。太字要約の先頭には変更が届く相手を付けます——アプリ自身の挙動（GUI・CLI・DB 取込/同期・MCP サーバ）なら `アプリ — `、生成コード・ランタイムパッケージの変更（読者側で再生成や追随作業が要り得るもの）なら `生成コード — `、本当に両方へ跨るときだけ `アプリ・生成コード — `（英語ファイルは `App — ` / `Generated code — ` / `App & generated code — `）。内部リファクタリング・テストのみの変更は不要なため、この欄が空のままになることもあります（想定内です）
 
 アーキテクチャと「壊すと静かに回帰する不変条件」は [CLAUDE.md](CLAUDE.md) にまとまっています。
 
