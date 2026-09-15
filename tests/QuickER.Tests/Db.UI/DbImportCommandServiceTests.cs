@@ -1,3 +1,4 @@
+using System;
 using AwesomeAssertions;
 using QuickER.Db.UI;
 using QuickER.Model;
@@ -173,6 +174,118 @@ public class DbImportCommandServiceTests
             .ContainSingle()
             .Which.Should()
             .Be(DbStrings.Db_ImportCompleted);
+    }
+
+    /// <summary>取込警告があるときは、完了文に内訳を添えた ShowInformationDetails で提示される</summary>
+    /// <remarks>
+    /// 単文の完了は ShowInformation、内訳・警告を添えるときは ShowInformationDetails
+    /// （IDialogService の XmlDoc が正本の規則）。警告ゼロなら従来どおり単文になることは
+    /// RunAsync_Success_ReplacesDiagramWithTargetDbms 側が固定する。
+    /// </remarks>
+    [Fact(DisplayName = "取込警告は完了文＋内訳の ShowInformationDetails で提示される")]
+    public async Task RunAsync_WithImportWarnings_ShowsDetails()
+    {
+        var host = new StubErDiagramHost { DiagramToReturn = new ErDiagram() };
+        var dialogs = new StubDialogService();
+        var provider = new FakeImportProvider(
+            ImportedEntities("Imported"),
+            [
+                new SchemaImportWarning(
+                    SchemaImportWarningKind.DomainTypeFlattened,
+                    "person",
+                    "mail",
+                    "email_dom"
+                ),
+                new SchemaImportWarning(
+                    SchemaImportWarningKind.ForeignKeyOutsideScope,
+                    "po",
+                    "FK_po_vendor",
+                    "other_scope.vendor"
+                ),
+                new SchemaImportWarning(
+                    SchemaImportWarningKind.ColumnTypeNotEmittable,
+                    "weird",
+                    "kind",
+                    "\"od;d\""
+                ),
+                new SchemaImportWarning(SchemaImportWarningKind.PartitionDefinitionLost, "sales"),
+                // 名前に改行が混ざっても内訳の 1 行 1 件が崩れないこと
+                new SchemaImportWarning(
+                    SchemaImportWarningKind.TableColumnsUnavailable,
+                    "line\nbreak"
+                ),
+            ]
+        );
+        var service = new DbImportCommandService(
+            host,
+            dialogs,
+            new FakeConnectionPresenter(
+                new DbConnectionDialogResult(new DbConnectionSettings(), provider)
+            )
+        );
+
+        await service.RunAsync();
+
+        dialogs.InformationMessages.Should().BeEmpty("内訳があるときは単文の完了通知にしない");
+
+        var (message, details, title) = dialogs
+            .InformationDetailsMessages.Should()
+            .ContainSingle()
+            .Subject;
+
+        message.Should().StartWith(DbStrings.Db_ImportCompleted);
+        message.Should().Contain(DbStrings.Db_ImportWarningsHeader);
+        title.Should().Be(DbStrings.Common_Complete);
+
+        // 種別ごとの文言化が効いている（対象の名前が詳細へ載る）
+        details.Should().Contain("person");
+        details.Should().Contain("email_dom");
+        details.Should().Contain("FK_po_vendor");
+        details.Should().Contain("other_scope.vendor");
+        details.Should().Contain("kind");
+        details.Should().Contain("sales");
+
+        // 名前に混ざった改行は空白へ畳まれる（畳まないと 1 件が 2 行に割れて内訳が崩れる）
+        details.Should().Contain("line break");
+        details
+            .Should()
+            .NotContain("line" + Environment.NewLine, "名前の改行が行区切りに化けてはいけない");
+
+        // 内訳は「1 行 1 件」を保つ（件数ぶんの行しか無い）
+        details
+            .Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)
+            .Should()
+            .HaveCount(5, "警告 5 件が 1 行 1 件で並ぶこと");
+    }
+
+    /// <summary>警告の整形で落ちても「取込に失敗しました」へは化けない（取込は既に成功している）</summary>
+    /// <remarks>
+    /// 完了通知を取込の try の中に置くと、整形側の不具合（未知の種別など）が catch に拾われ、
+    /// 成功した取込が「失敗」として提示される。通知は try の外で行う。
+    /// </remarks>
+    [Fact(DisplayName = "警告整形の失敗は取込失敗のモーダルに化けない")]
+    public async Task RunAsync_WarningFormattingThrows_DoesNotReportImportFailure()
+    {
+        var host = new StubErDiagramHost { DiagramToReturn = new ErDiagram() };
+        var dialogs = new StubDialogService();
+        var provider = new FakeImportProvider(
+            ImportedEntities("Imported"),
+            // 定義されていない種別＝整形の switch が ArgumentOutOfRangeException を投げる
+            [new SchemaImportWarning((SchemaImportWarningKind)99, "t")]
+        );
+        var service = new DbImportCommandService(
+            host,
+            dialogs,
+            new FakeConnectionPresenter(
+                new DbConnectionDialogResult(new DbConnectionSettings(), provider)
+            )
+        );
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => service.RunAsync());
+
+        // 図の差し替えは済んでいるのに「取込に失敗しました」と言わない
+        host.LastReplacedDiagram.Should().NotBeNull();
+        dialogs.ErrorMessages.Should().BeEmpty();
     }
 
     /// <summary>取込中の例外は、Db_ImportFailed 文言のエラーダイアログで提示される</summary>
@@ -577,6 +690,14 @@ public class DbImportCommandServiceTests
 
         public FakeImportProvider(IReadOnlyList<Entity> entities) =>
             SchemaImporter = new FakeSchemaImporter(new SchemaImportResult { Entities = entities });
+
+        public FakeImportProvider(
+            IReadOnlyList<Entity> entities,
+            IReadOnlyList<SchemaImportWarning> warnings
+        ) =>
+            SchemaImporter = new FakeSchemaImporter(
+                new SchemaImportResult { Entities = entities, Warnings = warnings }
+            );
 
         public FakeImportProvider(Exception toThrow) =>
             SchemaImporter = new FakeSchemaImporter(toThrow);

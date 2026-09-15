@@ -35,12 +35,47 @@ Connection settings can be saved under a name and recalled later from "Saved Con
 
 ### What gets imported
 
-- Tables (views are excluded) and columns (type, length, precision, nullability)
-- Primary keys (preserving the column order of composite keys)
+- Tables (views, temporary tables, and the container tables behind materialized views are excluded) and columns (type, length, precision, nullability)
+- Primary keys. A composite key is modeled as a flag on each column rather than as an ordered list of its own, so generated DDL emits its columns in the order they are declared in the table — which is not necessarily the order the original constraint used
 - Foreign keys (including the constraint name and the ON DELETE / ON UPDATE referential actions). When the FK columns on the referencing side themselves form that table's primary key or a unique constraint, the relationship is classified as one-to-one. A foreign key made up of multiple columns is imported with every column pair, in declaration order. SQLite does not persist FK constraint names, so a constraint name is synthesized on import
 - Table and column descriptions (SQL Server's MS_Description extended properties, PostgreSQL's `obj_description` / `col_description`, MySQL's `TABLE_COMMENT` / `COLUMN_COMMENT`, and Oracle's `user_tab_comments` / `user_col_comments`). SQLite has no description mechanism and is out of scope
 
 Nothing else is imported — see [Modeling fidelity](#modeling-fidelity) for the full boundary and what it means for DDL generation.
+
+#### What the import looks at
+
+Each dialect imports one scope, and objects outside it are not visible to the import at all:
+
+| DBMS | Imported scope |
+|---|---|
+| SQL Server | Every schema of the connected database |
+| PostgreSQL | The `public` schema only |
+| MySQL | The connected database (MySQL's "schema" *is* the database) |
+| Oracle | The connecting user's own schema (the `USER_*` views) |
+| SQLite | The single connected database file |
+
+A foreign key that points outside this scope cannot become a relationship, because its parent table is not in the diagram. Such a key is skipped and reported (see below) rather than dropped silently. On Oracle, constraints that are `DISABLE`d are not imported either: a disabled constraint enforces nothing, so importing it would make the diagram claim a guarantee the database does not provide.
+
+#### Import warnings
+
+The import always succeeds, but some parts of a schema cannot be carried into the diagram exactly as they were declared. When that happens the completion dialog lists what was affected (`quicker scaffold` writes the same list to standard error), so the difference is visible instead of silent:
+
+- A PostgreSQL **domain type** column is imported as its base type — the diagram has no notion of domains, and the domain's `CHECK` constraint is lost
+- A **foreign key that points outside the imported scope** is skipped
+- A table whose **columns could not be read at all** is imported without columns
+- One of two tables whose **names differ only in letter case** is skipped, because the import cannot keep them apart (PostgreSQL and Oracle allow both through quoted identifiers, and so does MySQL when `lower_case_table_names` is 0)
+- A column whose **data type cannot be written into SQL safely** is named, along with the type text. The import keeps it, but DDL generation and schema sync refuse the *whole diagram* until it is corrected — a type is neither an identifier nor a string literal, so there is nowhere to quote it (see [What a data type may contain](#what-a-data-type-may-contain)). SQLite stores whatever type text a table was declared with, and PostgreSQL reports a type name that needs quoting with the quotes attached, so either can produce one
+- A **partitioned table** is imported as its parent, and the partitioning itself is not modelled — generated DDL creates the table unpartitioned
+
+When nothing is affected, the dialog is the usual one-line completion message.
+
+#### How imported type names are spelled
+
+The import reads each column's declared type from the database's own catalog and then writes it in QuickER's shorter vocabulary — `varchar(50)` rather than PostgreSQL's canonical `character varying(50)`, `timestamptz(3)` rather than `timestamp(3) with time zone`. Only the spelling changes; the type does not.
+
+On PostgreSQL this also fixes type names that used to come back wrong, because the previous source of type information could not express certain modifiers. A column declared `numeric(10,-2)` was imported as `numeric(10,2046)` — a spelling PostgreSQL itself rejects, so the diagram could not even generate DDL for it. `bit(8)` and `bit varying(16)` lost their length, `interval day to second(3)` lost its unit, `time(3) with time zone` lost its precision, and an array came back as an internal name such as `_int4` — or, for `varchar(20)[]`, as `_varchar`, dropping the length. These columns now carry their real declared type.
+
+**If you import a PostgreSQL database into a diagram created by an older version, expect a one-time diff.** Any column of the kinds above will show up once as a column change in the diff sync, because the diagram holds the old broken spelling and the database reports the correct one. Healthy columns are unaffected: their spelling is unchanged.
 
 The import result is merged into the current diagram. Tables and columns are matched by name, and matching elements take over the identity of the current diagram's elements, so their layout, width, color, and notes — along with the named queries that reference them — are preserved. Only newly imported tables are placed in free space; the whole diagram is auto-arranged only when nothing in the current diagram matches (a completely new import). A confirmation appears when the current diagram differs structurally, and also when the import would break named queries — in which case the queries to be removed are listed by name.
 
@@ -51,7 +86,7 @@ For how to pair your existing entity assets with the generated code after import
 The diagram is a design model, not a copy of the database. What it models is exactly what round-trips:
 
 - Tables and columns (type, length, precision, nullability)
-- Primary keys, including the column order of a composite key
+- Primary keys, as a flag on each column (a composite key's own column order is not modeled — see [What gets imported](#what-gets-imported))
 - Foreign keys with their column pairs, constraint name, and referential actions
 - UNIQUE constraints
 - Table and column descriptions
@@ -149,6 +184,7 @@ The "Target DB:" combo on the right of the toolbar switches the diagram's target
 - Each column type is converted automatically along the path "source dialect → neutral canonical type → new dialect" where a mapping exists
 - Columns that could not be converted keep their original types and are listed in a warning dialog
 - The switch and the type conversions are undone together with a single Undo
+- A `numeric(10,-2)` / `NUMBER(10,-2)` column — a scale that rounds to hundreds — converts only between PostgreSQL and Oracle. SQL Server and MySQL reject a negative scale outright, and SQLite's `DECIMAL` is an affinity that carries no rounding at all, so such a column is reported as unconvertible on those three rather than written out as DDL that will not run
 - SQL Server's `rowversion` / `timestamp` becomes a plain `BLOB` on SQLite, and its NOT NULL is lifted at the same time (SQLite assigns nothing, so a locally created row has no version until a sync writes one). The conversion is one-way: converting that `BLOB` back to SQL Server yields `varbinary(max)`, not a row version — see [Multi-target repositories](code-generation.md#multi-target-repositories-sqlserver--sqlite) for what the column means on each side, and [Bidirectional sync support](code-generation.md#bidirectional-sync-support---generate-sync-support) for generating the code that keeps the two databases in step. Other dialects have no equivalent at all, so a `rowversion` column is reported as unconvertible there
 
 ## DDL generation
@@ -160,8 +196,8 @@ Choose SQL DDL from "Export" on the toolbar to output the full set of CREATE sta
 A column's data type is written into the SQL exactly as the diagram holds it — a type is neither an identifier nor a string literal, so there is nowhere to quote it. Both DDL generation and diff sync therefore accept only a plain type expression, and refuse the whole output when a column holds anything else, naming the `table.column` and the type text. A type may contain:
 
 - Words separated by single spaces, each made of letters, digits, `_`, and `$` — `int`, `double precision`, `LONG RAW`, `UNSIGNED BIG INT`
-- Parenthesised arguments after any word: `(max)`, `(50)`, `(10,2)`, and Oracle's unit form `(10 BYTE)` — `nvarchar(max)`, `decimal(10,2)`, `TIMESTAMP(6) WITH LOCAL TIME ZONE`, `INTERVAL DAY(2) TO SECOND(6)`, `decimal(10,2) unsigned`
-- A trailing `[]` for a PostgreSQL array — `integer[]`
+- Parenthesised arguments after any word. An argument is a number, a word (letters, digits, `_`), or `*`, one or two of them, optionally followed by Oracle's unit keyword — `nvarchar(max)`, `decimal(10,2)`, `decimal(10,-2)`, `NUMBER(*,2)`, `VARCHAR2(50 CHAR)`, `TIMESTAMP(6) WITH LOCAL TIME ZONE`, `INTERVAL DAY(2) TO SECOND(6)`, `decimal(10,2) unsigned`, and PostGIS's `geometry(Point,4326)` / `geography(MultiPolygon)`
+- A trailing `[]` for a PostgreSQL array, repeatable for more dimensions — `integer[]`, `integer[][]`
 - A MySQL value list — `enum('a','b')`, `set('x','y')`
 
 Everything the five dialect catalogues offer, and everything schema import builds from a live database, is inside this. What falls outside it:

@@ -142,6 +142,45 @@ public class PostgreSqlTypeCatalogTests
         canonical.Scale.Should().Be(2);
     }
 
+    [Fact(DisplayName = "numeric(p,-s)（負のスケール）も Decimal として解析され同じ表記へ戻る")]
+    public void TryParse_NumericWithNegativeScale_RoundTrips()
+    {
+        Catalog.TryParse("numeric(10,-2)", out var canonical).Should().BeTrue();
+
+        canonical.Kind.Should().Be(CanonicalTypeKind.Decimal);
+        canonical.Precision.Should().Be(10);
+        canonical.Scale.Should().Be(-2);
+
+        Catalog.TryFormat(canonical, out var native).Should().BeTrue();
+        native.Should().Be("numeric(10,-2)");
+    }
+
+    [Fact(DisplayName = "符号を許すのはスケールだけ（負の長さ・精度は従来どおり変換不能）")]
+    public void TryParse_NegativeLengthOrPrecision_StillFails()
+    {
+        Catalog.TryParse("varchar(-5)", out _).Should().BeFalse();
+        Catalog.TryParse("numeric(-10,2)", out _).Should().BeFalse();
+        Catalog.TryParse("timestamp(-1)", out _).Should().BeFalse();
+    }
+
+    [Theory(DisplayName = "修飾子が名称の途中へ入る PostgreSQL の正準表記も解析できる")]
+    // 取込は正規化して短縮表記を渡すためここは通らないが、GUI 手入力・他ツール由来の図のための受理形
+    [InlineData("timestamp(3) without time zone", CanonicalTypeKind.DateTime, 3)]
+    [InlineData("timestamp(3) with time zone", CanonicalTypeKind.DateTimeOffset, 3)]
+    [InlineData("time(3) without time zone", CanonicalTypeKind.Time, 3)]
+    [InlineData("time(3) with time zone", CanonicalTypeKind.Time, 3)]
+    public void TryParse_CanonicalNotationWithModifier(
+        string nativeType,
+        CanonicalTypeKind expectedKind,
+        int expectedPrecision
+    )
+    {
+        Catalog.TryParse(nativeType, out var canonical).Should().BeTrue();
+
+        canonical.Kind.Should().Be(expectedKind);
+        canonical.Precision.Should().Be(expectedPrecision);
+    }
+
     [Fact(DisplayName = "numeric（引数省略）は Precision/Scale が null で解析される")]
     public void TryParse_NumericWithoutArgs_ResolvesDecimalWithNullPrecisionScale()
     {

@@ -220,6 +220,18 @@
   <data name="Cli_SchemaImportFailed" xml:space="preserve">
     <value>Failed to import the schema from the database: {0}</value>
   </data>
+  <data name="Cli_ImportWarningDomainTypeFlattened" xml:space="preserve">
+    <value>Warning: {0}.{1} was imported as the base type of the domain type "{2}" (the diagram does not model domain types, so its CHECK constraints are lost).</value>
+  </data>
+  <data name="Cli_ImportWarningTableColumnsUnavailable" xml:space="preserve">
+    <value>Warning: no columns could be read for {0}. The table was imported without columns; check that the connecting user may access it.</value>
+  </data>
+  <data name="Cli_ImportWarningForeignKeyOutsideScope" xml:space="preserve">
+    <value>Warning: the foreign key "{1}" on {0} references "{2}", which is outside the imported scope, so no relationship was created for it.</value>
+  </data>
+  <data name="Cli_ImportWarningTableNameCollision" xml:space="preserve">
+    <value>Warning: "{0}" was not imported because it differs from "{1}" only in letter case, and the import cannot keep both apart.</value>
+  </data>
   <data name="Cli_SchemaReadFailed" xml:space="preserve">
     <value>Failed to read the schema file: {0} ({1})</value>
   </data>
@@ -258,5 +270,11 @@
   </data>
   <data name="Cli_UnhandledError" xml:space="preserve">
     <value>Error: {0}</value>
+  </data>
+  <data name="Cli_ImportWarningColumnTypeNotEmittable" xml:space="preserve">
+    <value>Warning: the data type "{2}" on {0}.{1} cannot be written into SQL safely, so DDL and schema sync will refuse the whole diagram until it is corrected.</value>
+  </data>
+  <data name="Cli_ImportWarningPartitionDefinitionLost" xml:space="preserve">
+    <value>Warning: {0} was imported as an ordinary table. The diagram does not model partitioning, so generated DDL creates it unpartitioned.</value>
   </data>
 </root>

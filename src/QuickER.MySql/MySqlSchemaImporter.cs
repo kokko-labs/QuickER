@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -34,6 +35,7 @@ public class MySqlSchemaImporter : ISchemaImporter
         {
             Entities = result.Entities,
             Relationships = result.Relationships,
+            Warnings = result.Warnings,
         };
     }
 
@@ -45,6 +47,9 @@ public class MySqlSchemaImporter : ISchemaImporter
 
         /// <summary>取得したリレーション一覧</summary>
         public List<Relationship> Relationships { get; init; } = new();
+
+        /// <summary>取込で宣言どおりには写し取れなかった箇所の警告</summary>
+        public List<SchemaImportWarning> Warnings { get; init; } = new();
     }
 
     /// <summary>既に開かれた接続でスキーマを取得する（テストや接続再利用向け）</summary>
@@ -61,19 +66,40 @@ public class MySqlSchemaImporter : ISchemaImporter
         int commandTimeoutSeconds = DbCommands.DefaultTimeoutSeconds
     )
     {
-        var tables = await LoadTablesAsync(conn, commandTimeoutSeconds, ct).ConfigureAwait(false);
+        var warnings = new List<SchemaImportWarning>();
+        var tables = await LoadTablesAsync(conn, commandTimeoutSeconds, warnings, ct)
+            .ConfigureAwait(false);
         await LoadColumnsAsync(conn, tables, commandTimeoutSeconds, ct).ConfigureAwait(false);
         await LoadPrimaryKeysAsync(conn, tables, commandTimeoutSeconds, ct).ConfigureAwait(false);
         // 一意制約は FK の 1 対 1 判定の材料になるため、外部キーより先にモデルへ載せる
         await LoadUniqueConstraintsAsync(conn, tables, commandTimeoutSeconds, ct)
             .ConfigureAwait(false);
-        var rels = await LoadForeignKeysAsync(conn, tables, commandTimeoutSeconds, ct)
+        var rels = await LoadForeignKeysAsync(conn, tables, commandTimeoutSeconds, warnings, ct)
             .ConfigureAwait(false);
+
+        // 列が 1 本も取れなかったテーブルは DDL を生成できないため、黙って通さず名指しで告げる
+        // （information_schema.COLUMNS は MySQL でも権限でフィルタされる）
+        warnings.AddRange(
+            tables
+                .Values.Where(entry => entry.Entity.Columns.Count == 0)
+                .Select(entry => new SchemaImportWarning(
+                    SchemaImportWarningKind.TableColumnsUnavailable,
+                    entry.Entity.TableName
+                ))
+        );
+
+        // DDL へ出せない型表記は、後で DDL / 同期を叩いた瞬間に図全体を止める。取込完了時に名指しする
+        warnings.AddRange(
+            SchemaImportWarnings.DetectUnemittableColumnTypes(
+                tables.Values.Select(entry => entry.Entity)
+            )
+        );
 
         return new SchemaResult
         {
             Entities = tables.Values.Select(t => t.Entity).ToList(),
             Relationships = rels,
+            Warnings = warnings,
         };
     }
 
@@ -86,7 +112,9 @@ public class MySqlSchemaImporter : ISchemaImporter
 SELECT TABLE_NAME, TABLE_COMMENT
 FROM information_schema.TABLES
 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE = 'BASE TABLE'
-ORDER BY TABLE_NAME;";
+-- BINARY で並べるのは、information_schema の既定照合順序が大文字小文字を区別せず
+-- `Dup` と `dup` の順序が環境依存になるため（衝突時にどちらを採るかを決定的にする）
+ORDER BY BINARY TABLE_NAME;";
 
     /// <summary>全テーブルのカラム定義を序数順に取得するクエリ</summary>
     /// <remarks>
@@ -134,8 +162,15 @@ ORDER BY s.TABLE_NAME, s.INDEX_NAME, s.SEQ_IN_INDEX;";
 
     /// <summary>外部キーの親子テーブル・列・参照アクションを取得するクエリ</summary>
     /// <remarks>
+    /// <para>
     /// KEY_COLUMN_USAGE から列対応（複合 FK は POSITION_IN_UNIQUE_CONSTRAINT の順）を、
     /// REFERENTIAL_CONSTRAINTS から DELETE_RULE / UPDATE_RULE を取得する。
+    /// </para>
+    /// <para>
+    /// 参照先のデータベース <c>ref_schema</c> も選ぶ。取込範囲は接続先 DB だけなので、他 DB を参照する FK は
+    /// 参照先テーブルが図に無く、リレーションを作れない。クエリで落とさず C# 側で弾くのは、
+    /// 「黙って消えた」ではなく警告として告げるため。
+    /// </para>
     /// </remarks>
     private const string ForeignKeysSql =
         @"
@@ -145,7 +180,11 @@ SELECT
     kcu.REFERENCED_TABLE_NAME AS ref_table, kcu.REFERENCED_COLUMN_NAME AS ref_column,
     kcu.ORDINAL_POSITION AS ordinal,
     rc.DELETE_RULE AS delete_action,
-    rc.UPDATE_RULE AS update_action
+    rc.UPDATE_RULE AS update_action,
+    kcu.REFERENCED_TABLE_SCHEMA AS ref_schema,
+    -- 範囲内かどうかの判定は MySQL 自身に任せる（DB 名の照合順序・大文字小文字の扱いが環境依存のため、
+    -- C# 側で接続先 DB 名と文字列比較すると環境によって全 FK を取りこぼす）
+    CASE WHEN kcu.REFERENCED_TABLE_SCHEMA = DATABASE() THEN 1 ELSE 0 END AS ref_in_scope
 FROM information_schema.KEY_COLUMN_USAGE kcu
 JOIN information_schema.REFERENTIAL_CONSTRAINTS rc
     ON rc.CONSTRAINT_SCHEMA = kcu.CONSTRAINT_SCHEMA
@@ -154,9 +193,15 @@ WHERE kcu.CONSTRAINT_SCHEMA = DATABASE() AND kcu.REFERENCED_TABLE_NAME IS NOT NU
 ORDER BY kcu.CONSTRAINT_NAME, kcu.ORDINAL_POSITION;";
 
     /// <summary>テーブル一覧・テーブルコメントを読み込み、テーブル名をキーとするエントリ辞書を構築する</summary>
+    /// <remarks>
+    /// 辞書は 5 方言共通の大文字小文字非依存だが、MySQL も <c>lower_case_table_names = 0</c>
+    /// （Linux の既定）では <c>Dup</c> と <c>dup</c> が共存する。黙って上書きすると 1 エンティティへ潰れて
+    /// 両テーブルの列が混ざるため、後着（<c>BINARY TABLE_NAME</c> 昇順で後ろ）を取り込まず警告として告げる。
+    /// </remarks>
     private static async Task<Dictionary<string, SchemaTableEntry>> LoadTablesAsync(
         MySqlConnection conn,
         int commandTimeoutSeconds,
+        List<SchemaImportWarning> warnings,
         CancellationToken ct
     )
     {
@@ -168,7 +213,21 @@ ORDER BY kcu.CONSTRAINT_NAME, kcu.ORDINAL_POSITION;";
         {
             var name = reader.GetString(0);
             var comment = reader.IsDBNull(1) ? string.Empty : reader.GetString(1);
-            var entry = new SchemaTableEntry
+
+            if (dict.TryGetValue(name, out var existing))
+            {
+                warnings.Add(
+                    new SchemaImportWarning(
+                        SchemaImportWarningKind.TableNameCollision,
+                        name,
+                        name,
+                        existing.Entity.TableName
+                    )
+                );
+                continue;
+            }
+
+            dict[name] = new SchemaTableEntry
             {
                 Key = name,
                 Entity = new Entity
@@ -178,12 +237,24 @@ ORDER BY kcu.CONSTRAINT_NAME, kcu.ORDINAL_POSITION;";
                     Description = comment,
                 },
             };
-
-            dict[entry.Key] = entry;
         }
 
         return dict;
     }
+
+    /// <summary>取込対象として採用したテーブルを、大文字小文字まで一致させて引く</summary>
+    /// <remarks>
+    /// テーブル辞書は 5 方言共通の大文字小文字非依存なので、素で引くと「衝突して捨てたほうのテーブル」の
+    /// 列・制約が、採用したほうのエンティティへ吸い寄せられて混ざる。information_schema が返す名前は
+    /// どのクエリでも同じ実体名なので、ここで序数一致まで求めても正当な行を取りこぼすことはない。
+    /// </remarks>
+    private static bool TryGetExactTable(
+        Dictionary<string, SchemaTableEntry> tables,
+        string tableName,
+        [NotNullWhen(true)] out SchemaTableEntry? entry
+    ) =>
+        tables.TryGetValue(tableName, out entry)
+        && string.Equals(entry.Key, tableName, StringComparison.Ordinal);
 
     /// <summary>各テーブルへカラム定義を読み込み、COLUMN_TYPE をそのまま型表記として追加する</summary>
     private static async Task LoadColumnsAsync(
@@ -200,7 +271,7 @@ ORDER BY kcu.CONSTRAINT_NAME, kcu.ORDINAL_POSITION;";
         {
             var table = reader.GetString(0);
 
-            if (!tables.TryGetValue(table, out var entry))
+            if (!TryGetExactTable(tables, table, out var entry))
             {
                 continue;
             }
@@ -240,7 +311,7 @@ ORDER BY kcu.CONSTRAINT_NAME, kcu.ORDINAL_POSITION;";
 
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
-            if (!tables.TryGetValue(reader.GetString(0), out var entry))
+            if (!TryGetExactTable(tables, reader.GetString(0), out var entry))
             {
                 continue;
             }
@@ -261,10 +332,13 @@ ORDER BY kcu.CONSTRAINT_NAME, kcu.ORDINAL_POSITION;";
         MySqlConnection conn,
         Dictionary<string, SchemaTableEntry> tables,
         int commandTimeoutSeconds,
+        List<SchemaImportWarning> warnings,
         CancellationToken ct
     )
     {
         var builder = new ForeignKeyRelationshipBuilder();
+        // 取込範囲外を参照する FK は制約単位で 1 度だけ告げる（複合 FK は行が複数出るため）
+        var reportedOutOfScope = new HashSet<string>(StringComparer.Ordinal);
 
         await using (var cmd = DbCommands.Create(conn, ForeignKeysSql, commandTimeoutSeconds))
         await using (var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false))
@@ -282,6 +356,34 @@ ORDER BY kcu.CONSTRAINT_NAME, kcu.ORDINAL_POSITION;";
                 var updateAction = ForeignKeyReferentialActionHelper.Parse(
                     reader.IsDBNull(7) ? null : reader.GetString(7)
                 );
+
+                // 参照先が接続先 DB の外＝図に親テーブルが無いのでリレーションを作れない。除外して告げる
+                if (Convert.ToInt32(reader.GetValue(9)) == 0)
+                {
+                    if (reportedOutOfScope.Add(fkName))
+                    {
+                        var refSchema = reader.IsDBNull(8) ? "" : reader.GetString(8);
+                        warnings.Add(
+                            new SchemaImportWarning(
+                                SchemaImportWarningKind.ForeignKeyOutsideScope,
+                                parentKey,
+                                fkName,
+                                $"{refSchema}.{refKey}"
+                            )
+                        );
+                    }
+
+                    continue;
+                }
+
+                // 衝突して捨てたテーブルが両端のどちらかなら、そのリレーションは作らない
+                if (
+                    !TryGetExactTable(tables, parentKey, out _)
+                    || !TryGetExactTable(tables, refKey, out _)
+                )
+                {
+                    continue;
+                }
 
                 builder.Add(
                     fkName,
@@ -314,6 +416,13 @@ ORDER BY kcu.CONSTRAINT_NAME, kcu.ORDINAL_POSITION;";
             while (await reader.ReadAsync(ct).ConfigureAwait(false))
             {
                 var key = reader.GetString(0);
+
+                // 衝突して捨てたテーブルの制約を、採用したほうへ付け替えない
+                if (!TryGetExactTable(tables, key, out _))
+                {
+                    continue;
+                }
+
                 var indexName = reader.GetString(1);
                 var col = reader.GetString(2);
                 builder.Add(key, indexName, col, indexName);

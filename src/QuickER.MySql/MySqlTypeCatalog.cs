@@ -213,6 +213,14 @@ public sealed partial class MySqlTypeCatalog : ITypeCatalog
                 return true;
 
             case CanonicalTypeKind.Decimal:
+                // 負のスケール（PostgreSQL / Oracle の「100 の倍数へ丸める」宣言）は書き出せない。
+                // MySQL は負のスケールを受け付けない（`ERROR 1064` = 構文エラー）。
+                // ここで true を返すと、対象 DBMS の切替が実行できない DDL を黙って作る
+                if (canonical.Scale is < 0)
+                {
+                    return false;
+                }
+
                 nativeType = FormatPrecisionScale("decimal", canonical.Precision, canonical.Scale);
                 return true;
 

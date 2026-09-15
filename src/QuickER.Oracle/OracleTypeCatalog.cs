@@ -45,8 +45,11 @@ public sealed partial class OracleTypeCatalog : ITypeCatalog
     // 括弧内には長さ / 精度 / スケールを取る。TIMESTAMP は "TIMESTAMP(6) WITH TIME ZONE" のように
     // 括弧が名称の途中に入るため、suffix（括弧後の語）は括弧グループの内側にのみ現れるよう定義する。
     // こうすることで、括弧が無い単語型（"BINARY_FLOAT" 等）は name が全体を取り込む。
+    // 長さの後ろの単位語（VARCHAR2(50 CHAR) の BYTE / CHAR）も受理する。正規型は長さの単位を持たないため
+    // 解釈では捨てるが、受理しないと TryParse ごと失敗して型トークンが列から丸ごと消える
+    // （単位まで含めた元の表記は CanonicalTypeTokenAttacher の verbatim 併記が保つ）。
     [GeneratedRegex(
-        @"^\s*(?<name>[a-zA-Z_][a-zA-Z0-9_ ]*?)\s*(\(\s*(?<arg1>-?\d+)\s*(,\s*(?<arg2>-?\d+)\s*)?\)\s*(?<suffix>[a-zA-Z][a-zA-Z0-9_ ]*?)?)?\s*$",
+        @"^\s*(?<name>[a-zA-Z_][a-zA-Z0-9_ ]*?)\s*(\(\s*(?<arg1>-?\d+|\*)\s*(?<unit>byte|char)?\s*(,\s*(?<arg2>-?\d+)\s*)?\)\s*(?<suffix>[a-zA-Z][a-zA-Z0-9_ ]*?)?)?\s*$",
         RegexOptions.IgnoreCase
     )]
     private static partial Regex TypePattern();
@@ -274,17 +277,26 @@ public sealed partial class OracleTypeCatalog : ITypeCatalog
             return true;
         }
 
-        if (!TryParseTypeArg(arg1, out var precision))
+        // NUMBER(*,s) は「精度は最大」の宣言。正規型に「最大精度」を表す値が無いため精度未指定として読む
+        // （書き戻すと NUMBER になり元の表記と一致しないので、元の表記は verbatim 併記が保つ）
+        int? precision = null;
+
+        if (!string.Equals(arg1, "*", StringComparison.Ordinal))
         {
-            canonical = null!;
-            return false;
+            if (!TryParseTypeArg(arg1, out var parsedPrecision))
+            {
+                canonical = null!;
+                return false;
+            }
+
+            precision = parsedPrecision;
         }
 
         int? scale = null;
 
         if (arg2 is not null)
         {
-            if (!TryParseTypeArg(arg2, out var parsedScale))
+            if (!TryParseScaleArg(arg2, out var parsedScale))
             {
                 canonical = null!;
                 return false;
@@ -293,8 +305,10 @@ public sealed partial class OracleTypeCatalog : ITypeCatalog
             scale = parsedScale;
         }
 
-        // スケールが指定され 0 超なら固定小数点（Decimal(p,s)）として扱う
-        if (scale is > 0)
+        // スケールが指定され 0 以外なら固定小数点（Decimal(p,s)）として扱う。
+        // 負のスケールも「精度による整数型振り分け」ではなく Decimal(p,s) 側＝宣言どおりに保つ
+        // （NUMBER(10,-2) を NUMBER(10) と読むと Int32 に化けて丸め単位が黙って消える）
+        if (scale is not null and not 0)
         {
             canonical = new CanonicalType(
                 CanonicalTypeKind.Decimal,
@@ -364,8 +378,23 @@ public sealed partial class OracleTypeCatalog : ITypeCatalog
     }
 
     /// <summary>型引数の数値を解析する。負数・int 範囲外は失敗（変換不能）として扱う</summary>
+    /// <remarks>
+    /// 長さ・精度に負数はあり得ないため符号を通さない（<c>VARCHAR2(-5)</c> / <c>NUMBER(-5)</c> は変換不能）。
+    /// 符号を許すのはスケール引数だけ＝<see cref="TryParseScaleArg"/>。
+    /// </remarks>
     private static bool TryParseTypeArg(string text, out int value) =>
         int.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out value);
+
+    /// <summary>スケール引数の数値を解析する。ここだけ負数を許す</summary>
+    /// <remarks>
+    /// Oracle の <c>NUMBER(p,s)</c> はスケールに負数を取れる（<c>NUMBER(10,-2)</c> = 100 の倍数へ丸める）。
+    /// 符号を弾くと実在の列が変換不能になり、生成 Entity から型トークンが丸ごと消える。
+    /// この許可は「スケールを読む 3 箇所」（当クラス / <c>PostgreSqlTypeCatalog</c> /
+    /// <c>CanonicalTypeToken</c>）で揃っている必要がある＝片肺だと
+    /// 「取込は通るがトークンの読み戻しで落ちる」形で静かに壊れる。
+    /// </remarks>
+    private static bool TryParseScaleArg(string text, out int value) =>
+        int.TryParse(text, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out value);
 
     /// <summary>Decimal を <c>NUMBER</c> / <c>NUMBER(p)</c> / <c>NUMBER(p,s)</c> へ整形する</summary>
     private static string FormatNumber(int? precision, int? scale)

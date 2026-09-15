@@ -260,7 +260,7 @@ public static partial class CanonicalTypeToken
 
         if (arg2 is not null)
         {
-            if (!TryParseArg(arg2, out var parsedScale))
+            if (!TryParseScaleArg(arg2, out var parsedScale))
             {
                 canonical = null!;
                 return false;
@@ -298,4 +298,14 @@ public static partial class CanonicalTypeToken
     /// <summary>数値引数を解析する。<c>max</c>・負数・範囲外は失敗として扱う（長さの <c>max</c> は呼び出し側で先に処理する）</summary>
     private static bool TryParseArg(string text, out int value) =>
         int.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out value);
+
+    /// <summary>スケール引数を解析する。ここだけ負数を許す</summary>
+    /// <remarks>
+    /// <c>decimal(10,-2)</c> は PostgreSQL / Oracle に実在する宣言（100 の倍数へ丸める）。トークンは
+    /// <see cref="Format"/> がそのまま書き下ろすため、読み戻しで符号を弾くと C# リバースが
+    /// 自分で書いたトークンを解釈できない。この許可は「スケールを読む 3 箇所」
+    /// （当クラス / <c>PostgreSqlTypeCatalog</c> / <c>OracleTypeCatalog</c>）で揃っている必要がある。
+    /// </remarks>
+    private static bool TryParseScaleArg(string text, out int value) =>
+        int.TryParse(text, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out value);
 }

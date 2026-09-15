@@ -34,10 +34,17 @@ namespace QuickER.Provider;
 ///   （型の直後は列定義の続きなので <c>int NOT NULL</c> がそのまま有効な DDL になり、図の宣言と食い違う）。
 ///   <c>#</c> を語の構成文字から外しているのは、MySQL では <c>#</c> が行末コメントの開始で、<c>int#</c> が
 ///   通ると <c>MODIFY COLUMN</c> の後続句（NOT NULL / COMMENT / AFTER）が黙って消えるため</item>
-///   <item>各語の直後に置ける括弧引数（<c>(max)</c> / <c>(n)</c> / <c>(p,s)</c>・Oracle の単位語
-///   <c>(10 BYTE)</c> を含む）。例 <c>nvarchar(max)</c> / <c>decimal(10,2)</c> /
-///   <c>TIMESTAMP(6) WITH TIME ZONE</c> / <c>INTERVAL DAY(2) TO SECOND(6)</c> / <c>int(10) unsigned</c></item>
-///   <item>末尾の配列表記 <c>[]</c>（PostgreSQL）。例 <c>integer[]</c></item>
+///   <item>各語の直後に置ける括弧引数。引数は<b>数値または語</b>（文字・数字・<c>_</c>）を 1 つか 2 つで、
+///   さらに Oracle の単位語（<c>(10 BYTE)</c>）を後ろに置ける。例 <c>nvarchar(max)</c> /
+///   <c>decimal(10,2)</c> / <c>TIMESTAMP(6) WITH TIME ZONE</c> / <c>INTERVAL DAY(2) TO SECOND(6)</c> /
+///   <c>int(10) unsigned</c>。引数に語を許すのは <c>max</c> のためだけでなく、PostGIS の
+///   <c>geometry(Point,4326)</c> / <c>geography(MultiPolygon)</c> のように<b>実在の型が語引数を取る</b>ため
+///   （数値限定にすると、PostGIS を使う DB を取り込んだ図が<b>その 1 列のせいで丸ごと</b> DDL も同期も
+///   生成できなくなる＝入口の検証は図全体を止める）。語には引用符・空白・記号を含めないので、
+///   通す文字の集合は「語・数字・カンマ・<c>*</c>」のまま閉じている（<c>*</c> は Oracle の
+///   <c>NUMBER(*,2)</c>＝「精度は最大・スケールは 2」のための 1 文字で、文を終わらせも文字列を開きもしない）</item>
+///   <item>末尾の配列表記 <c>[]</c>（PostgreSQL）。多次元のため繰り返せる。例 <c>integer[]</c> /
+///   <c>integer[][]</c></item>
 ///   <item>MySQL の値リスト型 <c>enum('a','b')</c> / <c>set('x','y')</c>。引用符はここだけ許し、
 ///   中身は「<c>'</c> と <c>\</c> と制御文字を含まない文字列（<c>''</c> による <c>'</c> の表現は可）」に限る
 ///   （MySQL の取込は <c>COLUMN_TYPE</c> を無加工で持ち帰るため、弾くと enum 列のある実 DB が同期できなくなる）</item>
@@ -215,10 +222,11 @@ public static partial class SqlTypeText
         );
     }
 
-    // 語 ＋ 省略可能な括弧引数（max / 数値 / 数値,数値・Oracle の BYTE / CHAR 単位語つき）の空白区切りの並び、
-    // 末尾に省略可能な配列表記 []。区切りは空白のみ（改行・タブは通さない＝1 行で書ける表記だけを許す）。
+    // 語 ＋ 省略可能な括弧引数（数値 / 語＝max・PostGIS の Point 等・Oracle の BYTE / CHAR 単位語つき）の
+    // 空白区切りの並び、末尾に省略可能な配列表記 []（多次元のため繰り返し可）。
+    // 区切りは空白のみ（改行・タブは通さない＝1 行で書ける表記だけを許す）。
     [GeneratedRegex(
-        @"^[\p{L}_][\p{L}\p{Nd}_$]*(?: ?\( ?(?:max|[+-]?\d{1,10})(?: ?, ?[+-]?\d{1,10})?(?: +[\p{L}][\p{L}\p{Nd}_]*)? ?\))?(?: +[\p{L}_][\p{L}\p{Nd}_$]*(?: ?\( ?(?:max|[+-]?\d{1,10})(?: ?, ?[+-]?\d{1,10})?(?: +[\p{L}][\p{L}\p{Nd}_]*)? ?\))?)*(?: ?\[ ?\])?$",
+        @"^[\p{L}_][\p{L}\p{Nd}_$]*(?: ?\( ?(?:[+-]?\d{1,10}|\*|[\p{L}_][\p{L}\p{Nd}_]*)(?: ?, ?(?:[+-]?\d{1,10}|\*|[\p{L}_][\p{L}\p{Nd}_]*))?(?: +[\p{L}][\p{L}\p{Nd}_]*)? ?\))?(?: +[\p{L}_][\p{L}\p{Nd}_$]*(?: ?\( ?(?:[+-]?\d{1,10}|\*|[\p{L}_][\p{L}\p{Nd}_]*)(?: ?, ?(?:[+-]?\d{1,10}|\*|[\p{L}_][\p{L}\p{Nd}_]*))?(?: +[\p{L}][\p{L}\p{Nd}_]*)? ?\))?)*(?: ?\[ ?\])*$",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
     private static partial Regex SafeTypePattern();

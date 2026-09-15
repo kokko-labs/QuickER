@@ -448,4 +448,75 @@ public sealed class SqliteDdlRoundTripIntegrationTests
         importedChild.Columns.Single(c => c.Name == "a_ref").IsForeignKey.Should().BeTrue();
         importedChild.Columns.Single(c => c.Name == "b_ref").IsForeignKey.Should().BeTrue();
     }
+
+    /// <summary>
+    /// 実 DB のスキーマを取込み、その図から DDL を再生成して<b>再適用できる</b>こと、
+    /// 再取込した結果が 1 回目と一致する（不動点である）ことを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 「取り込めた」だけでは不十分で、持ち帰った型表記がその方言の DDL として通らなければ、
+    /// その図は DDL 出力にも差分同期にも使えない（PostgreSQL の <c>numeric(10,2046)</c> のように
+    /// 再適用すらできない表記が実在した）。ここでは QuickER が作ったのではない生 DDL を起点にする。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Integration] A: 取込→DDL 再生成→再適用が成功し、再取込が 1 回目と一致する"
+    )]
+    public async Task ImportedSchema_RegeneratedDdl_CanBeReapplied()
+    {
+        using var db = SqliteTempDatabase.Create();
+
+        // SQLite は宣言型をそのまま保持するため、他方言由来の表記が混ざった図が実在しうる。
+        // 非数値引数の型（NVARCHAR(MAX) 等）は SQLite の型名文法に合わないため、
+        // 起点の生 DDL でも SqliteDdlGenerator と同じく型名ごとクォートして書く
+        const string SourceDdl = """
+            CREATE TABLE "vendor" (
+                "id" INTEGER NOT NULL,
+                "code" NVARCHAR(20) NOT NULL,
+                CONSTRAINT "PK_vendor" PRIMARY KEY ("id"),
+                CONSTRAINT "UQ_vendor_code" UNIQUE ("code")
+            );
+            CREATE TABLE "measurement" (
+                "id" INTEGER NOT NULL,
+                "vendor_id" INTEGER NULL,
+                "exact_v" DECIMAL(12,4) NULL,
+                "payload" "VARBINARY(MAX)" NULL,
+                "taken_at" DATETIME2(7) NULL,
+                "clock" TIME(3) NULL,
+                "note" "NVARCHAR(MAX)" NULL,
+                CONSTRAINT "PK_measurement" PRIMARY KEY ("id"),
+                CONSTRAINT "FK_measurement_vendor" FOREIGN KEY ("vendor_id")
+                    REFERENCES "vendor" ("id") ON DELETE SET NULL
+            );
+            """;
+
+        await db.ApplyDdlAsync(SourceDdl, Ct);
+
+        List<Entity> firstEntities;
+        List<Relationship> firstRelationships;
+
+        await using (var conn = await db.OpenReadOnlyConnectionAsync(Ct))
+        {
+            var imported = await new SqliteSchemaImporter().ImportAsync(conn, Ct);
+            firstEntities = imported.Entities.ToList();
+            firstRelationships = imported.Relationships.ToList();
+        }
+
+        var regenerated = new SqliteDdlGenerator().Build(
+            new ErDiagram { Entities = firstEntities, Relationships = firstRelationships }
+        );
+
+        await db.ResetSchemaAsync(Ct);
+
+        await db.ApplyDdlAsync(regenerated, Ct);
+
+        await using var reconn = await db.OpenReadOnlyConnectionAsync(Ct);
+        var second = await new SqliteSchemaImporter().ImportAsync(reconn, Ct);
+
+        SchemaReapplyAssertions.ShouldRoundTrip(
+            firstEntities,
+            firstRelationships,
+            second.Entities,
+            second.Relationships
+        );
+    }
 }

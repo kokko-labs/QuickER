@@ -456,4 +456,81 @@ public sealed class OracleDdlRoundTripIntegrationTests(OracleContainerFixture fi
         importedChild.Columns.Single(c => c.Name == "a_ref").IsForeignKey.Should().BeTrue();
         importedChild.Columns.Single(c => c.Name == "b_ref").IsForeignKey.Should().BeTrue();
     }
+
+    /// <summary>
+    /// 実 DB のスキーマを取込み、その図から DDL を再生成して<b>再適用できる</b>こと、
+    /// 再取込した結果が 1 回目と一致する（不動点である）ことを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 「取り込めた」だけでは不十分で、持ち帰った型表記がその方言の DDL として通らなければ、
+    /// その図は DDL 出力にも差分同期にも使えない（PostgreSQL の <c>numeric(10,2046)</c> のように
+    /// 再適用すらできない表記が実在した）。ここでは QuickER が作ったのではない生 DDL を起点にする。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Integration] A: 取込→DDL 再生成→再適用が成功し、再取込が 1 回目と一致する"
+    )]
+    public async Task ImportedSchema_RegeneratedDdl_CanBeReapplied()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        // 方言の癖のある型（負のスケール・長さの単位語・時間帯つきタイムスタンプ）を含める
+        const string SourceDdl = """
+            CREATE TABLE "VENDOR" (
+                "ID" NUMBER(10) NOT NULL,
+                "CODE" VARCHAR2(20) NOT NULL,
+                CONSTRAINT "PK_VENDOR" PRIMARY KEY ("ID"),
+                CONSTRAINT "UQ_VENDOR_CODE" UNIQUE ("CODE")
+            );
+            CREATE TABLE "MEASUREMENT" (
+                "ID" NUMBER(10) NOT NULL,
+                "VENDOR_ID" NUMBER(10) NULL,
+                "ROUNDED" NUMBER(10,-2) NULL,
+                "EXACT_V" NUMBER(12,4) NULL,
+                "PLAIN" NUMBER(9,0) NULL,
+                "NAME_CHARS" VARCHAR2(50 CHAR) NULL,
+                "NAME_BYTES" VARCHAR2(50) NULL,
+                "FIXED_CHARS" CHAR(10 CHAR) NULL,
+                "TAKEN_AT" TIMESTAMP(3) NULL,
+                "TAKEN_AT_TZ" TIMESTAMP(6) WITH TIME ZONE NULL,
+                "PAYLOAD" RAW(16) NULL,
+                "NOTE" CLOB NULL,
+                CONSTRAINT "PK_MEASUREMENT" PRIMARY KEY ("ID"),
+                CONSTRAINT "FK_MEASUREMENT_VENDOR" FOREIGN KEY ("VENDOR_ID")
+                    REFERENCES "VENDOR" ("ID") ON DELETE SET NULL
+            );
+            COMMENT ON TABLE "MEASUREMENT" IS 'raw measurements';
+            COMMENT ON COLUMN "MEASUREMENT"."ROUNDED" IS 'rounded to hundreds';
+            """;
+
+        await fixture.ExecuteAsync(SourceDdl, Ct);
+
+        List<Entity> firstEntities;
+        List<Relationship> firstRelationships;
+
+        await using (var conn = await fixture.OpenConnectionAsync(Ct))
+        {
+            var imported = await new OracleSchemaImporter().ImportAsync(conn, Ct);
+            firstEntities = imported.Entities.ToList();
+            firstRelationships = imported.Relationships.ToList();
+        }
+
+        var regenerated = new OracleDdlGenerator().Build(
+            new ErDiagram { Entities = firstEntities, Relationships = firstRelationships }
+        );
+
+        await fixture.ResetSchemaAsync(Ct);
+
+        await fixture.ExecuteAsync(regenerated, Ct);
+
+        await using var reconn = await fixture.OpenConnectionAsync(Ct);
+        var second = await new OracleSchemaImporter().ImportAsync(reconn, Ct);
+
+        SchemaReapplyAssertions.ShouldRoundTrip(
+            firstEntities,
+            firstRelationships,
+            second.Entities,
+            second.Relationships
+        );
+    }
 }

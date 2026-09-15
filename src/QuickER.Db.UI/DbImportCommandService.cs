@@ -60,6 +60,9 @@ public sealed class DbImportCommandService
             return;
         }
 
+        // 取込が最後まで成功したときだけ非 null になる（確認キャンセル・例外では null のまま）
+        IReadOnlyList<SchemaImportWarning>? completedWarnings = null;
+
         try
         {
             var connectionString = picked.Provider.BuildConnectionString(picked.Settings);
@@ -97,10 +100,7 @@ public sealed class DbImportCommandService
                 Queries = merged.SurvivingQueries.ToList(),
             };
             _host.ReplaceDiagram(diagram);
-
-            // 外部（DB）からの取込はファイル取込と同水準の出来事なので、完了もモーダルで知らせる
-            // （ER 図ファイル自身の保存・開くはステータスバー、との使い分け）
-            _dialogs.ShowInformation(Strings.Db_ImportCompleted, Strings.Common_Complete);
+            completedWarnings = result.Warnings;
         }
         catch (Exception ex)
         {
@@ -108,6 +108,16 @@ public sealed class DbImportCommandService
                 string.Format(Strings.Db_ImportFailed, ex.Message),
                 Strings.Common_Error
             );
+            return;
+        }
+
+        // 外部（DB）からの取込はファイル取込と同水準の出来事なので、完了もモーダルで知らせる
+        // （ER 図ファイル自身の保存・開くはステータスバー、との使い分け）。
+        // 通知を try の外へ置くのは、警告整形の不具合（未知の種別など）が catch に拾われて
+        // 「取込に失敗しました」へ化けるのを防ぐため＝取込は既に成功している
+        if (completedWarnings is not null)
+        {
+            NotifyImportCompleted(completedWarnings);
         }
     }
 
@@ -175,6 +185,90 @@ public sealed class DbImportCommandService
         }
 
         return builder.ToString();
+    }
+
+    /// <summary>取込の完了を知らせる。宣言どおりに写し取れなかった箇所があれば内訳を添える</summary>
+    /// <remarks>
+    /// 単文の完了は <c>ShowInformation</c>、内訳・警告を添えるときは <c>ShowInformationDetails</c>
+    /// （<see cref="IDialogService"/> の XmlDoc が正本の規則）。警告ゼロの取込は従来どおり単文。
+    /// </remarks>
+    private void NotifyImportCompleted(IReadOnlyList<SchemaImportWarning> warnings)
+    {
+        if (warnings.Count == 0)
+        {
+            _dialogs.ShowInformation(Strings.Db_ImportCompleted, Strings.Common_Complete);
+            return;
+        }
+
+        // 詳細領域はスクロール可能なため全件を畳まず載せる（DialogItemList.Format の 30 件畳みは
+        // スクロールしない標準 MessageBox 用＝コード取込・エクスポート欠落告知と同じ流儀）
+        var details = string.Join(
+            Environment.NewLine,
+            warnings.Select(warning => "  • " + DescribeImportWarning(warning))
+        );
+
+        _dialogs.ShowInformationDetails(
+            Strings.Db_ImportCompleted
+                + Environment.NewLine
+                + Environment.NewLine
+                + Strings.Db_ImportWarningsHeader,
+            details,
+            Strings.Common_Complete
+        );
+    }
+
+    /// <summary>言語中立の取込警告を UI 言語の 1 行へ整形する</summary>
+    /// <remarks>
+    /// <see cref="SchemaImportWarning.Subject"/> / <see cref="SchemaImportWarning.Detail"/> の意味は
+    /// <see cref="SchemaImportWarningKind"/> ごとに決まる（各 Kind の XmlDoc が正本）。
+    /// </remarks>
+    private static string DescribeImportWarning(SchemaImportWarning warning)
+    {
+        // 名前は DB 由来の任意文字列で改行を含み得る。1 行 1 件の内訳を崩さないよう畳んでおく
+        var table = SqlComment.Sanitize(warning.TableName);
+        var subject = SqlComment.Sanitize(warning.Subject);
+        var detail = SqlComment.Sanitize(warning.Detail);
+
+        return warning.Kind switch
+        {
+            SchemaImportWarningKind.DomainTypeFlattened => string.Format(
+                Strings.Db_ImportWarningDomainTypeFlattened,
+                table,
+                subject,
+                detail
+            ),
+            SchemaImportWarningKind.TableColumnsUnavailable => string.Format(
+                Strings.Db_ImportWarningTableColumnsUnavailable,
+                table
+            ),
+            SchemaImportWarningKind.ForeignKeyOutsideScope => string.Format(
+                Strings.Db_ImportWarningForeignKeyOutsideScope,
+                table,
+                subject,
+                detail
+            ),
+            SchemaImportWarningKind.TableNameCollision => string.Format(
+                Strings.Db_ImportWarningTableNameCollision,
+                subject,
+                detail
+            ),
+            SchemaImportWarningKind.ColumnTypeNotEmittable => string.Format(
+                Strings.Db_ImportWarningColumnTypeNotEmittable,
+                table,
+                subject,
+                detail
+            ),
+            SchemaImportWarningKind.PartitionDefinitionLost => string.Format(
+                Strings.Db_ImportWarningPartitionDefinitionLost,
+                table
+            ),
+            // 未知の種別を黙って空行にしない（ConcurrencyModes.Validated と同じ流儀）
+            _ => throw new ArgumentOutOfRangeException(
+                nameof(warning),
+                warning.Kind,
+                "Unknown schema import warning kind."
+            ),
+        };
     }
 
     /// <summary>壊れクエリの名前を 1 行 1 件で列挙した文字列へ整形する（件数が多いときは上限で畳む）</summary>

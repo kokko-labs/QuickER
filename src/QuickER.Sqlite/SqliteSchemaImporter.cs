@@ -41,6 +41,7 @@ public class SqliteSchemaImporter : ISchemaImporter
             Relationships = result.Relationships,
             AuxiliaryObjects = result.AuxiliaryObjects,
             TableCreateSql = result.TableCreateSql,
+            Warnings = result.Warnings,
         };
     }
 
@@ -52,6 +53,9 @@ public class SqliteSchemaImporter : ISchemaImporter
 
         /// <summary>取得したリレーション一覧</summary>
         public List<Relationship> Relationships { get; init; } = new();
+
+        /// <summary>取込で宣言どおりには写し取れなかった箇所の警告</summary>
+        public List<SchemaImportWarning> Warnings { get; init; } = new();
 
         /// <summary>取得した補助オブジェクト（インデックス・トリガー・テーブルレベル一意制約）</summary>
         public List<SchemaAuxiliaryObject> AuxiliaryObjects { get; init; } = new();
@@ -93,12 +97,18 @@ public class SqliteSchemaImporter : ISchemaImporter
         var aux = await LoadAuxiliaryObjectsAsync(conn, tables, commandTimeoutSeconds, ct)
             .ConfigureAwait(false);
 
+        // DDL へ出せない型表記は、後で DDL / 同期を叩いた瞬間に図全体を止める。取込完了時に名指しする
+        var warnings = SchemaImportWarnings
+            .DetectUnemittableColumnTypes(tables.Values.Select(entry => entry.Entity))
+            .ToList();
+
         return new SchemaResult
         {
             Entities = tables.Values.Select(t => t.Entity).ToList(),
             Relationships = rels,
             AuxiliaryObjects = aux,
             TableCreateSql = tableCreateSql,
+            Warnings = warnings,
         };
     }
 

@@ -564,6 +564,36 @@ namespace QuickER.Db.UI.Resources {
             }
         }
 
+        public static string Db_ImportWarningsHeader {
+            get {
+                return ResourceManager.GetString("Db_ImportWarningsHeader", resourceCulture);
+            }
+        }
+
+        public static string Db_ImportWarningDomainTypeFlattened {
+            get {
+                return ResourceManager.GetString("Db_ImportWarningDomainTypeFlattened", resourceCulture);
+            }
+        }
+
+        public static string Db_ImportWarningTableColumnsUnavailable {
+            get {
+                return ResourceManager.GetString("Db_ImportWarningTableColumnsUnavailable", resourceCulture);
+            }
+        }
+
+        public static string Db_ImportWarningForeignKeyOutsideScope {
+            get {
+                return ResourceManager.GetString("Db_ImportWarningForeignKeyOutsideScope", resourceCulture);
+            }
+        }
+
+        public static string Db_ImportWarningTableNameCollision {
+            get {
+                return ResourceManager.GetString("Db_ImportWarningTableNameCollision", resourceCulture);
+            }
+        }
+
         public static string Db_SyncWriteBack {
             get {
                 return ResourceManager.GetString("Db_SyncWriteBack", resourceCulture);
@@ -575,5 +605,17 @@ namespace QuickER.Db.UI.Resources {
                 return ResourceManager.GetString("Db_SyncTitle", resourceCulture);
             }
         }
+        public static string Db_ImportWarningColumnTypeNotEmittable {
+            get {
+                return ResourceManager.GetString("Db_ImportWarningColumnTypeNotEmittable", resourceCulture);
+            }
+        }
+
+        public static string Db_ImportWarningPartitionDefinitionLost {
+            get {
+                return ResourceManager.GetString("Db_ImportWarningPartitionDefinitionLost", resourceCulture);
+            }
+        }
+
     }
 }

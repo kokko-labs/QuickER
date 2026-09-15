@@ -53,6 +53,59 @@ public class OracleTypeCatalogTests
         canonical.Scale.Should().Be(2);
     }
 
+    [Fact(DisplayName = "NUMBER(p,-s)（負のスケール）も Decimal として解析され同じ表記へ戻る")]
+    public void TryParse_NumberWithNegativeScale_RoundTrips()
+    {
+        Catalog.TryParse("NUMBER(10,-2)", out var canonical).Should().BeTrue();
+
+        // 負のスケールが「精度による整数型振り分け」へ落ちると NUMBER(10) ＝ Int32 に化けて丸め単位が消える
+        canonical.Kind.Should().Be(CanonicalTypeKind.Decimal);
+        canonical.Precision.Should().Be(10);
+        canonical.Scale.Should().Be(-2);
+
+        Catalog.TryFormat(canonical, out var native).Should().BeTrue();
+        native.Should().Be("NUMBER(10,-2)");
+    }
+
+    [Fact(DisplayName = "NUMBER(*,s)（精度は最大）も解析できる（精度は未指定として読む）")]
+    public void TryParse_NumberWithMaxPrecision()
+    {
+        // 受理しないと TryParse ごと失敗し、列から型トークンが丸ごと消える。
+        // 正規型に「最大精度」を表す値が無いため精度は未指定として読み、元の表記は verbatim 併記が保つ
+        Catalog.TryParse("NUMBER(*,2)", out var canonical).Should().BeTrue();
+
+        canonical.Kind.Should().Be(CanonicalTypeKind.Decimal);
+        canonical.Precision.Should().BeNull();
+        canonical.Scale.Should().Be(2);
+    }
+
+    [Fact(DisplayName = "符号を許すのはスケールだけ（負の長さ・精度は従来どおり変換不能）")]
+    public void TryParse_NegativeLengthOrPrecision_StillFails()
+    {
+        Catalog.TryParse("NUMBER(-5)", out _).Should().BeFalse();
+        Catalog.TryParse("VARCHAR2(-5)", out _).Should().BeFalse();
+        Catalog.TryParse("NUMBER(-10,2)", out _).Should().BeFalse();
+    }
+
+    [Theory(
+        DisplayName = "長さの単位語（BYTE / CHAR）付きの表記も解析できる（単位は正規型に無いため捨てる）"
+    )]
+    [InlineData("VARCHAR2(50 CHAR)", CanonicalTypeKind.AnsiString, 50)]
+    [InlineData("VARCHAR2(50 BYTE)", CanonicalTypeKind.AnsiString, 50)]
+    [InlineData("CHAR(10 CHAR)", CanonicalTypeKind.AnsiFixedString, 10)]
+    public void TryParse_LengthWithUnitKeyword(
+        string nativeType,
+        CanonicalTypeKind expectedKind,
+        int expectedLength
+    )
+    {
+        // 受理しないと TryParse ごと失敗し、列から型トークンが丸ごと消える
+        Catalog.TryParse(nativeType, out var canonical).Should().BeTrue();
+
+        canonical.Kind.Should().Be(expectedKind);
+        canonical.Length.Should().Be(expectedLength);
+    }
+
     [Fact(DisplayName = "NUMBER(p)（整数型に該当しない精度）は Decimal(p,0) として解析される")]
     public void TryParse_NumberOtherPrecision_ResolvesDecimalWithScaleZero()
     {

@@ -32,6 +32,7 @@ public class SqlServerSchemaImporter : ISchemaImporter
         {
             Entities = result.Entities,
             Relationships = result.Relationships,
+            Warnings = result.Warnings,
         };
     }
 
@@ -43,6 +44,9 @@ public class SqlServerSchemaImporter : ISchemaImporter
 
         /// <summary>取得したリレーション一覧</summary>
         public List<Relationship> Relationships { get; init; } = new();
+
+        /// <summary>取込で宣言どおりには写し取れなかった箇所の警告</summary>
+        public List<SchemaImportWarning> Warnings { get; init; } = new();
     }
 
     /// <summary>指定の接続設定で接続を開きスキーマを取得する</summary>
@@ -81,10 +85,16 @@ public class SqlServerSchemaImporter : ISchemaImporter
         var rels = await LoadForeignKeysAsync(conn, tables, commandTimeoutSeconds, ct)
             .ConfigureAwait(false);
 
+        // DDL へ出せない型表記は、後で DDL / 同期を叩いた瞬間に図全体を止める。取込完了時に名指しする
+        var warnings = SchemaImportWarnings
+            .DetectUnemittableColumnTypes(tables.Values.Select(entry => entry.Entity))
+            .ToList();
+
         return new SchemaResult
         {
             Entities = tables.Values.Select(t => t.Entity).ToList(),
             Relationships = rels,
+            Warnings = warnings,
         };
     }
 

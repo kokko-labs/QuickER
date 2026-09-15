@@ -457,4 +457,83 @@ public sealed class PostgreSqlDdlRoundTripIntegrationTests(PostgreSqlContainerFi
         importedChild.Columns.Single(c => c.Name == "a_ref").IsForeignKey.Should().BeTrue();
         importedChild.Columns.Single(c => c.Name == "b_ref").IsForeignKey.Should().BeTrue();
     }
+
+    /// <summary>
+    /// 実 DB のスキーマを取込み、その図から DDL を再生成して<b>再適用できる</b>こと、
+    /// 再取込した結果が 1 回目と一致する（不動点である）ことを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 「取り込めた」だけでは不十分で、持ち帰った型表記がその方言の DDL として通らなければ、
+    /// その図は DDL 出力にも差分同期にも使えない（PostgreSQL の <c>numeric(10,2046)</c> のように
+    /// 再適用すらできない表記が実在した）。ここでは QuickER が作ったのではない生 DDL を起点にする。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Integration] A: 取込→DDL 再生成→再適用が成功し、再取込が 1 回目と一致する"
+    )]
+    public async Task ImportedSchema_RegeneratedDdl_CanBeReapplied()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        // 方言の癖のある型（負のスケール・ビット長・時間帯つき時刻・配列・区間）を含める
+        const string SourceDdl = """
+            CREATE TABLE "vendor" (
+                "id" integer NOT NULL,
+                "code" varchar(20) NOT NULL,
+                CONSTRAINT "PK_vendor" PRIMARY KEY ("id"),
+                CONSTRAINT "UQ_vendor_code" UNIQUE ("code")
+            );
+            CREATE TABLE "measurement" (
+                "id" integer NOT NULL,
+                "vendor_id" integer NULL,
+                "rounded" numeric(10,-2) NULL,
+                "exact_v" numeric(12,4) NULL,
+                "plain" numeric(9,0) NULL,
+                "flags" bit(8) NULL,
+                "varflags" bit varying(16) NULL,
+                "taken_at" timestamp(3) NULL,
+                "taken_at_tz" timestamptz(3) NULL,
+                "clock" time(3) with time zone NULL,
+                "span" interval day to second(3) NULL,
+                "tags" varchar(20)[] NULL,
+                "counts" integer[] NULL,
+                "note" text NULL,
+                CONSTRAINT "PK_measurement" PRIMARY KEY ("id"),
+                CONSTRAINT "FK_measurement_vendor" FOREIGN KEY ("vendor_id")
+                    REFERENCES "vendor" ("id") ON DELETE SET NULL
+            );
+            COMMENT ON TABLE "measurement" IS 'raw measurements';
+            COMMENT ON COLUMN "measurement"."rounded" IS 'rounded to hundreds';
+            """;
+
+        await fixture.ExecuteAsync(SourceDdl, Ct);
+
+        List<Entity> firstEntities;
+        List<Relationship> firstRelationships;
+
+        await using (var conn = await fixture.OpenConnectionAsync(Ct))
+        {
+            var imported = await new PostgreSqlSchemaImporter().ImportAsync(conn, Ct);
+            firstEntities = imported.Entities.ToList();
+            firstRelationships = imported.Relationships.ToList();
+        }
+
+        var regenerated = new PostgreSqlDdlGenerator().Build(
+            new ErDiagram { Entities = firstEntities, Relationships = firstRelationships }
+        );
+
+        await fixture.ResetSchemaAsync(Ct);
+
+        await fixture.ExecuteAsync(regenerated, Ct);
+
+        await using var reconn = await fixture.OpenConnectionAsync(Ct);
+        var second = await new PostgreSqlSchemaImporter().ImportAsync(reconn, Ct);
+
+        SchemaReapplyAssertions.ShouldRoundTrip(
+            firstEntities,
+            firstRelationships,
+            second.Entities,
+            second.Relationships
+        );
+    }
 }

@@ -378,6 +378,30 @@ namespace QuickER.Cli.Resources {
             }
         }
 
+        public static string Cli_ImportWarningDomainTypeFlattened {
+            get {
+                return ResourceManager.GetString("Cli_ImportWarningDomainTypeFlattened", resourceCulture);
+            }
+        }
+
+        public static string Cli_ImportWarningTableColumnsUnavailable {
+            get {
+                return ResourceManager.GetString("Cli_ImportWarningTableColumnsUnavailable", resourceCulture);
+            }
+        }
+
+        public static string Cli_ImportWarningForeignKeyOutsideScope {
+            get {
+                return ResourceManager.GetString("Cli_ImportWarningForeignKeyOutsideScope", resourceCulture);
+            }
+        }
+
+        public static string Cli_ImportWarningTableNameCollision {
+            get {
+                return ResourceManager.GetString("Cli_ImportWarningTableNameCollision", resourceCulture);
+            }
+        }
+
         public static string Cli_GenerationAborted {
             get {
                 return ResourceManager.GetString("Cli_GenerationAborted", resourceCulture);
@@ -455,5 +479,17 @@ namespace QuickER.Cli.Resources {
                 return ResourceManager.GetString("Cli_SchemaNotDiagramDocument", resourceCulture);
             }
         }
+        public static string Cli_ImportWarningColumnTypeNotEmittable {
+            get {
+                return ResourceManager.GetString("Cli_ImportWarningColumnTypeNotEmittable", resourceCulture);
+            }
+        }
+
+        public static string Cli_ImportWarningPartitionDefinitionLost {
+            get {
+                return ResourceManager.GetString("Cli_ImportWarningPartitionDefinitionLost", resourceCulture);
+            }
+        }
+
     }
 }

@@ -336,10 +336,71 @@ public static class CliApp
             return null;
         }
 
+        // 宣言どおりに写し取れなかった箇所は stderr へ（取込自体は成功なので stdout の成果物は出す）
+        foreach (var warning in imported.Warnings)
+        {
+            stderr.WriteLine(DescribeImportWarning(warning));
+        }
+
         return new ErDiagram
         {
             Entities = imported.Entities.ToList(),
             Relationships = imported.Relationships.ToList(),
+        };
+    }
+
+    /// <summary>言語中立の取込警告を UI 言語の 1 行へ整形する</summary>
+    /// <remarks>
+    /// <see cref="SchemaImportWarning.Subject"/> / <see cref="SchemaImportWarning.Detail"/> の意味は
+    /// <see cref="SchemaImportWarningKind"/> ごとに決まる（各 Kind の XmlDoc が正本）。
+    /// GUI 側（<c>DbImportCommandService</c>）と同じ種別を、CLI 自身の resx で整形する。
+    /// </remarks>
+    private static string DescribeImportWarning(SchemaImportWarning warning)
+    {
+        // 名前は DB 由来の任意文字列で改行を含み得る。stderr の 1 行 1 件を崩さないよう畳んでおく
+        var table = SqlComment.Sanitize(warning.TableName);
+        var subject = SqlComment.Sanitize(warning.Subject);
+        var detail = SqlComment.Sanitize(warning.Detail);
+
+        return warning.Kind switch
+        {
+            SchemaImportWarningKind.DomainTypeFlattened => string.Format(
+                Strings.Cli_ImportWarningDomainTypeFlattened,
+                table,
+                subject,
+                detail
+            ),
+            SchemaImportWarningKind.TableColumnsUnavailable => string.Format(
+                Strings.Cli_ImportWarningTableColumnsUnavailable,
+                table
+            ),
+            SchemaImportWarningKind.ForeignKeyOutsideScope => string.Format(
+                Strings.Cli_ImportWarningForeignKeyOutsideScope,
+                table,
+                subject,
+                detail
+            ),
+            SchemaImportWarningKind.TableNameCollision => string.Format(
+                Strings.Cli_ImportWarningTableNameCollision,
+                subject,
+                detail
+            ),
+            SchemaImportWarningKind.ColumnTypeNotEmittable => string.Format(
+                Strings.Cli_ImportWarningColumnTypeNotEmittable,
+                table,
+                subject,
+                detail
+            ),
+            SchemaImportWarningKind.PartitionDefinitionLost => string.Format(
+                Strings.Cli_ImportWarningPartitionDefinitionLost,
+                table
+            ),
+            // 未知の種別を黙って空行にしない（ConcurrencyModes.Validated と同じ流儀）
+            _ => throw new ArgumentOutOfRangeException(
+                nameof(warning),
+                warning.Kind,
+                "Unknown schema import warning kind."
+            ),
         };
     }
 

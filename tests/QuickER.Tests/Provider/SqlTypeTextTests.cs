@@ -83,6 +83,21 @@ public class SqlTypeTextTests
     [InlineData("bit varying")]
     [InlineData("timestamptz(6)")]
     [InlineData("numeric(10, 2)")]
+    // 負のスケール（100 の倍数へ丸める）は PostgreSQL / Oracle の実在宣言で、取込がそのまま持ち帰る
+    [InlineData("numeric(10,-2)")]
+    [InlineData("bit(8)")]
+    [InlineData("bit varying(16)")]
+    [InlineData("interval day to second(3)")]
+    [InlineData("time(3) with time zone")]
+    [InlineData("varchar(20)[]")]
+    // 多次元配列（format_type は次元を出さないが、図の型は手入力・他ツール由来でもあり得る）
+    [InlineData("integer[][]")]
+    // PostGIS の型は括弧引数に語を取る。数値限定だと、この 1 列のせいで図全体の DDL 生成が止まる
+    [InlineData("geometry")]
+    [InlineData("geometry(Point,4326)")]
+    [InlineData("geometry(MultiPolygon)")]
+    [InlineData("geography(Point,4326)")]
+    [InlineData("geometry(PointZ,4326)")]
     [InlineData("_int4")]
     [InlineData("jsonb")]
     [InlineData("integer[]")]
@@ -96,6 +111,8 @@ public class SqlTypeTextTests
     [InlineData("longblob")]
     // Oracle
     [InlineData("NUMBER(10,2)")]
+    [InlineData("NUMBER(10,-2)")]
+    [InlineData("NUMBER(*,2)")]
     [InlineData("TIMESTAMP(6) WITH TIME ZONE")]
     [InlineData("TIMESTAMP(6) WITH LOCAL TIME ZONE")]
     [InlineData("INTERVAL DAY(2) TO SECOND(6)")]

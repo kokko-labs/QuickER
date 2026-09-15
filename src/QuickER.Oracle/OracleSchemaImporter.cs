@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -39,6 +40,7 @@ public class OracleSchemaImporter : ISchemaImporter
         {
             Entities = result.Entities,
             Relationships = result.Relationships,
+            Warnings = result.Warnings,
         };
     }
 
@@ -50,6 +52,9 @@ public class OracleSchemaImporter : ISchemaImporter
 
         /// <summary>取得したリレーション一覧</summary>
         public List<Relationship> Relationships { get; init; } = new();
+
+        /// <summary>取込で宣言どおりには写し取れなかった箇所の警告</summary>
+        public List<SchemaImportWarning> Warnings { get; init; } = new();
     }
 
     /// <summary>既に開かれた接続でスキーマを取得する（テストや接続再利用向け）</summary>
@@ -66,7 +71,9 @@ public class OracleSchemaImporter : ISchemaImporter
         int commandTimeoutSeconds = DbCommands.DefaultTimeoutSeconds
     )
     {
-        var tables = await LoadTablesAsync(conn, commandTimeoutSeconds, ct).ConfigureAwait(false);
+        var warnings = new List<SchemaImportWarning>();
+        var tables = await LoadTablesAsync(conn, commandTimeoutSeconds, warnings, ct)
+            .ConfigureAwait(false);
         await LoadColumnsAsync(conn, tables, commandTimeoutSeconds, ct).ConfigureAwait(false);
         await LoadPrimaryKeysAsync(conn, tables, commandTimeoutSeconds, ct).ConfigureAwait(false);
         await LoadDescriptionsAsync(conn, tables, commandTimeoutSeconds, ct).ConfigureAwait(false);
@@ -75,11 +82,31 @@ public class OracleSchemaImporter : ISchemaImporter
             .ConfigureAwait(false);
         var rels = await LoadForeignKeysAsync(conn, tables, commandTimeoutSeconds, ct)
             .ConfigureAwait(false);
+        await LoadOutOfScopeForeignKeysAsync(conn, commandTimeoutSeconds, warnings, ct)
+            .ConfigureAwait(false);
+
+        // 列が 1 本も取れなかったテーブルは DDL を生成できないため、黙って通さず名指しで告げる
+        warnings.AddRange(
+            tables
+                .Values.Where(entry => entry.Entity.Columns.Count == 0)
+                .Select(entry => new SchemaImportWarning(
+                    SchemaImportWarningKind.TableColumnsUnavailable,
+                    entry.Entity.TableName
+                ))
+        );
+
+        // DDL へ出せない型表記は、後で DDL / 同期を叩いた瞬間に図全体を止める。取込完了時に名指しする
+        warnings.AddRange(
+            SchemaImportWarnings.DetectUnemittableColumnTypes(
+                tables.Values.Select(entry => entry.Entity)
+            )
+        );
 
         return new SchemaResult
         {
             Entities = tables.Values.Select(t => t.Entity).ToList(),
             Relationships = rels,
+            Warnings = warnings,
         };
     }
 
@@ -87,35 +114,57 @@ public class OracleSchemaImporter : ISchemaImporter
 
     /// <summary>自スキーマの通常テーブル一覧を取得するクエリ</summary>
     /// <remarks>
+    /// <para>
     /// USER_ ビューは所有オブジェクトのみを返すため、ALL_ ビューと違い owner での絞り込みが不要。
     /// ユーザー定義テーブルに限定するため、ごみ箱の <c>BIN$...</c>（<c>dropped = 'YES'</c>）・
     /// ドメインインデックス等の二次オブジェクト（<c>secondary = 'Y'</c>）・ネステッドテーブル・
-    /// IOT オーバーフローセグメント（<c>SYS_IOT_OVER_...</c>）は除外する
+    /// IOT オーバーフローセグメント（<c>SYS_IOT_OVER_...</c>）は除外する。
+    /// </para>
+    /// <para>
+    /// 一時表（<c>temporary = 'Y'</c>）とマテリアライズドビューのコンテナ表も除外する。
+    /// どちらも <c>user_tables</c> には通常テーブルとして現れるが、実体はセッション作業域とビューの結果で、
+    /// ER 図のエンティティではない（「ビューは取り込まない」という取込範囲の宣言に実装を合わせる）。
+    /// </para>
     /// </remarks>
     private const string TablesSql =
         @"SELECT table_name FROM user_tables
 WHERE dropped = 'NO'
   AND secondary = 'N'
   AND nested = 'NO'
+  AND temporary = 'N'
   AND (iot_type IS NULL OR iot_type = 'IOT')
-ORDER BY table_name";
+  AND table_name NOT IN (SELECT mview_name FROM user_mviews)
+-- NLSSORT の BINARY 指定は、セッションの NLS_SORT 次第で DUP と 小文字の dup の順序が変わるため
+-- （衝突時にどちらを採るかを決定的にする）
+ORDER BY NLSSORT(table_name, 'NLS_SORT=BINARY')";
 
     /// <summary>自スキーマ全テーブルのカラム定義を序数順に取得するクエリ</summary>
     /// <remarks>
+    /// <para>
     /// <c>char_length</c> は CHAR / VARCHAR2 / NCHAR / NVARCHAR2 系のみ有効な文字数であり、
     /// <c>RAW</c> 等のバイト列型では常に 0 になる。バイト長が必要な型のために <c>data_length</c> も取得する。
+    /// </para>
+    /// <para>
+    /// <c>char_used</c> は長さの単位（<c>'B'</c>=バイト / <c>'C'</c>=文字）。<c>VARCHAR2(50 CHAR)</c> と
+    /// <c>VARCHAR2(50)</c> はマルチバイト文字セットでは別物なので、単位語まで含めて持ち帰る。
+    /// </para>
     /// </remarks>
     private const string ColumnsSql =
-        @"SELECT table_name, column_name, data_type, data_precision, data_scale, char_length, nullable, column_id, data_length
+        @"SELECT table_name, column_name, data_type, data_precision, data_scale, char_length, nullable, column_id, data_length, char_used
 FROM user_tab_columns
 ORDER BY table_name, column_id";
 
     /// <summary>主キー制約の構成列を序数順に取得するクエリ</summary>
+    /// <remarks>
+    /// <c>status = 'ENABLED'</c> で絞るのは、DISABLE された制約は実際には一意性も参照整合性も強制されず、
+    /// 図へ取り込むと「DB には無い保証」を宣言してしまうため（ENABLE 済みの制約だけが実在する制約）。
+    /// PK / UNIQUE / FK の 3 クエリで同じ規則を用いる。
+    /// </remarks>
     private const string PrimaryKeysSql =
         @"SELECT cc.table_name, cc.column_name, cc.position
 FROM user_constraints c
 JOIN user_cons_columns cc ON c.constraint_name = cc.constraint_name
-WHERE c.constraint_type = 'P'
+WHERE c.constraint_type = 'P' AND c.status = 'ENABLED'
 ORDER BY cc.table_name, cc.position";
 
     /// <summary>UNIQUE 制約の構成列を宣言順に取得するクエリ（モデルの一意制約・1 対 1 判定に用いる）</summary>
@@ -127,13 +176,14 @@ ORDER BY cc.table_name, cc.position";
         @"SELECT cc.table_name, cc.constraint_name, cc.column_name, cc.position
 FROM user_constraints c
 JOIN user_cons_columns cc ON c.constraint_name = cc.constraint_name
-WHERE c.constraint_type = 'U'
+WHERE c.constraint_type = 'U' AND c.status = 'ENABLED'
 ORDER BY cc.table_name, cc.constraint_name, cc.position";
 
     /// <summary>外部キーの親子テーブル・列・削除アクションを取得するクエリ</summary>
     /// <remarks>
     /// <c>delete_rule</c> は CASCADE / SET NULL / NO ACTION を表す。
     /// 子側は <c>user_cons_columns</c>、親側は参照先制約 <c>r_constraint_name</c> の構成列を position で突き合わせる。
+    /// <c>status = 'ENABLED'</c> の理由は <see cref="PrimaryKeysSql"/> と同じ。
     /// </remarks>
     private const string ForeignKeysSql =
         @"SELECT
@@ -148,8 +198,21 @@ FROM user_constraints c
 JOIN user_cons_columns cc ON c.constraint_name = cc.constraint_name
 JOIN user_constraints rc ON c.r_constraint_name = rc.constraint_name AND c.r_owner = rc.owner
 JOIN user_cons_columns rcc ON rc.constraint_name = rcc.constraint_name AND cc.position = rcc.position
-WHERE c.constraint_type = 'R'
+WHERE c.constraint_type = 'R' AND c.status = 'ENABLED'
 ORDER BY c.constraint_name, cc.position";
+
+    /// <summary>取込範囲（接続ユーザーの自スキーマ）の外を参照する外部キーを列挙するクエリ</summary>
+    /// <remarks>
+    /// <see cref="ForeignKeysSql"/> は親側を <c>user_constraints</c>（＝自スキーマ）へ内部結合しているため、
+    /// 他スキーマを参照する FK は結果から自然に消える。消えること自体は正しい（参照先テーブルが図に無い）が、
+    /// 従来は無告知だったので、ここで拾って警告に載せる。<c>USER_</c> ビューの <c>owner</c> は常に接続ユーザー
+    /// なので、<c>r_owner &lt;&gt; owner</c> がそのまま「範囲外への参照」を意味する。
+    /// </remarks>
+    private const string OutOfScopeForeignKeysSql =
+        @"SELECT c.constraint_name, c.table_name, c.r_owner
+FROM user_constraints c
+WHERE c.constraint_type = 'R' AND c.status = 'ENABLED' AND c.r_owner <> c.owner
+ORDER BY c.constraint_name";
 
     /// <summary>テーブルコメントを取得するクエリ</summary>
     /// <remarks>COMMENT ON TABLE 未設定のテーブルは comments が NULL になるため、ここで除外する</remarks>
@@ -162,9 +225,15 @@ ORDER BY c.constraint_name, cc.position";
         "SELECT table_name, column_name, comments FROM user_col_comments WHERE comments IS NOT NULL";
 
     /// <summary>テーブル一覧を読み込み、テーブル名をキーとするエントリ辞書を構築する</summary>
+    /// <remarks>
+    /// 辞書は 5 方言共通の大文字小文字非依存だが、Oracle は引用識別子で <c>"dup"</c> と <c>DUP</c> を
+    /// 共存させられる。黙って上書きすると 1 エンティティへ潰れて両テーブルの列が混ざるため、
+    /// 後着（<c>table_name</c> 昇順で後ろ）を取り込まず警告として告げる。
+    /// </remarks>
     private static async Task<Dictionary<string, SchemaTableEntry>> LoadTablesAsync(
         OracleConnection conn,
         int commandTimeoutSeconds,
+        List<SchemaImportWarning> warnings,
         CancellationToken ct
     )
     {
@@ -175,17 +244,71 @@ ORDER BY c.constraint_name, cc.position";
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
             var name = reader.GetString(0);
-            var entry = new SchemaTableEntry
+
+            if (dict.TryGetValue(name, out var existing))
+            {
+                warnings.Add(
+                    new SchemaImportWarning(
+                        SchemaImportWarningKind.TableNameCollision,
+                        name,
+                        name,
+                        existing.Entity.TableName
+                    )
+                );
+                continue;
+            }
+
+            dict[name] = new SchemaTableEntry
             {
                 Key = name,
                 Entity = new Entity { TableName = name, Columns = new List<Column>() },
             };
-
-            dict[entry.Key] = entry;
         }
 
         return dict;
     }
+
+    /// <summary>取込範囲外を参照する外部キーを拾い、除外したことを警告として積む</summary>
+    private static async Task LoadOutOfScopeForeignKeysAsync(
+        OracleConnection conn,
+        int commandTimeoutSeconds,
+        List<SchemaImportWarning> warnings,
+        CancellationToken ct
+    )
+    {
+        await using var cmd = DbCommands.Create(
+            conn,
+            OutOfScopeForeignKeysSql,
+            commandTimeoutSeconds
+        );
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            warnings.Add(
+                new SchemaImportWarning(
+                    SchemaImportWarningKind.ForeignKeyOutsideScope,
+                    reader.GetString(1),
+                    reader.GetString(0),
+                    reader.GetString(2)
+                )
+            );
+        }
+    }
+
+    /// <summary>取込対象として採用したテーブルを、大文字小文字まで一致させて引く</summary>
+    /// <remarks>
+    /// テーブル辞書は 5 方言共通の大文字小文字非依存なので、素で引くと「衝突して捨てたほうのテーブル」の
+    /// 列・制約・説明が、採用したほうのエンティティへ吸い寄せられて混ざる。USER_ ビューが返す名前は
+    /// どのクエリでも同じ実体名なので、ここで序数一致まで求めても正当な行を取りこぼすことはない。
+    /// </remarks>
+    private static bool TryGetExactTable(
+        Dictionary<string, SchemaTableEntry> tables,
+        string tableName,
+        [NotNullWhen(true)] out SchemaTableEntry? entry
+    ) =>
+        tables.TryGetValue(tableName, out entry)
+        && string.Equals(entry.Key, tableName, StringComparison.Ordinal);
 
     /// <summary>各テーブルへカラム定義を読み込み、型表記を整形して追加する</summary>
     private static async Task LoadColumnsAsync(
@@ -202,7 +325,7 @@ ORDER BY c.constraint_name, cc.position";
         {
             var table = reader.GetString(0);
 
-            if (!tables.TryGetValue(table, out var entry))
+            if (!TryGetExactTable(tables, table, out var entry))
             {
                 continue;
             }
@@ -219,6 +342,7 @@ ORDER BY c.constraint_name, cc.position";
                 StringComparison.OrdinalIgnoreCase
             );
             int? dataLength = reader.IsDBNull(8) ? null : Convert.ToInt32(reader.GetValue(8));
+            var charUsed = reader.IsDBNull(9) ? null : reader.GetString(9);
 
             var col = new Column
             {
@@ -228,7 +352,8 @@ ORDER BY c.constraint_name, cc.position";
                     dataPrecision,
                     dataScale,
                     charLength,
-                    dataLength
+                    dataLength,
+                    charUsed
                 ),
                 IsNullable = isNullable,
             };
@@ -251,7 +376,7 @@ ORDER BY c.constraint_name, cc.position";
 
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
-            if (!tables.TryGetValue(reader.GetString(0), out var entry))
+            if (!TryGetExactTable(tables, reader.GetString(0), out var entry))
             {
                 continue;
             }
@@ -279,7 +404,10 @@ ORDER BY c.constraint_name, cc.position";
 
             while (await reader.ReadAsync(ct).ConfigureAwait(false))
             {
-                if (tables.TryGetValue(reader.GetString(0), out var entry) && !reader.IsDBNull(1))
+                if (
+                    TryGetExactTable(tables, reader.GetString(0), out var entry)
+                    && !reader.IsDBNull(1)
+                )
                 {
                     entry.Entity.Description = reader.GetString(1);
                 }
@@ -293,7 +421,7 @@ ORDER BY c.constraint_name, cc.position";
 
             while (await reader.ReadAsync(ct).ConfigureAwait(false))
             {
-                if (!tables.TryGetValue(reader.GetString(0), out var entry))
+                if (!TryGetExactTable(tables, reader.GetString(0), out var entry))
                 {
                     continue;
                 }
@@ -336,6 +464,15 @@ ORDER BY c.constraint_name, cc.position";
                 reader.IsDBNull(6) ? null : reader.GetString(6)
             );
 
+            // 衝突して捨てたテーブルが両端のどちらかなら、そのリレーションは作らない
+            if (
+                !TryGetExactTable(tables, childKey, out _)
+                || !TryGetExactTable(tables, refKey, out _)
+            )
+            {
+                continue;
+            }
+
             builder.Add(
                 fkName,
                 childKey,
@@ -368,6 +505,13 @@ ORDER BY c.constraint_name, cc.position";
             while (await reader.ReadAsync(ct).ConfigureAwait(false))
             {
                 var key = reader.GetString(0);
+
+                // 衝突して捨てたテーブルの制約を、採用したほうへ付け替えない
+                if (!TryGetExactTable(tables, key, out _))
+                {
+                    continue;
+                }
+
                 var constraintName = reader.GetString(1);
                 var col = reader.GetString(2);
                 builder.Add(key, constraintName, col, constraintName);
@@ -396,13 +540,20 @@ ORDER BY c.constraint_name, cc.position";
     /// <c>char_length</c> は CHAR / VARCHAR2 / NCHAR / NVARCHAR2 系のみ有効な文字数で、
     /// <c>RAW</c> 等のバイト列型では常に 0 を返すため、そちらは <paramref name="dataLength"/>（バイト長）を用いる。
     /// </para>
+    /// <para>
+    /// <paramref name="charUsed"/> が <c>'C'</c>（文字単位）のとき <c>VARCHAR2</c> / <c>CHAR</c> には単位語を
+    /// 付けて <c>VARCHAR2(50 CHAR)</c> と書き出す。既定の <c>'B'</c>（バイト単位）は単位語なし＝従来どおりの表記。
+    /// <c>NVARCHAR2</c> / <c>NCHAR</c> は常に文字単位で <c>char_used</c> も <c>'C'</c> を返すが、
+    /// Oracle の構文が単位語を受け付けないため付けない。
+    /// </para>
     /// </remarks>
     public static string FormatDataType(
         string dataType,
         int? dataPrecision,
         int? dataScale,
         int? charLength,
-        int? dataLength = null
+        int? dataLength = null,
+        string? charUsed = null
     )
     {
         var upper = dataType.ToUpperInvariant();
@@ -418,18 +569,30 @@ ORDER BY c.constraint_name, cc.position";
             case "NUMBER":
                 if (dataPrecision is null)
                 {
-                    return "NUMBER";
+                    // NUMBER(*,s) は「精度は最大・スケールは s」の宣言で、data_precision が null・
+                    // data_scale が非 null で返る。早期 return するとスケードが落ちて素の NUMBER に化ける
+                    return dataScale is not null and not 0 ? $"NUMBER(*,{dataScale})" : "NUMBER";
                 }
 
-                // スケール 0 は精度のみ、0 超はスケールも付与する
-                return dataScale is > 0
+                // スケール 0 と未指定は user_tab_columns 上で区別できないため精度のみ。
+                // 負のスケール（NUMBER(10,-2) = 100 の倍数へ丸める）は宣言どおりに書き出す
+                return dataScale is not null and not 0
                     ? $"NUMBER({dataPrecision},{dataScale})"
                     : $"NUMBER({dataPrecision})";
 
-            case "NVARCHAR2":
             case "VARCHAR2":
-            case "NCHAR":
             case "CHAR":
+                if (charLength is null)
+                {
+                    return upper;
+                }
+
+                return string.Equals(charUsed, "C", StringComparison.OrdinalIgnoreCase)
+                    ? $"{upper}({charLength} CHAR)"
+                    : $"{upper}({charLength})";
+
+            case "NVARCHAR2":
+            case "NCHAR":
                 return charLength is null ? upper : $"{upper}({charLength})";
 
             case "RAW":

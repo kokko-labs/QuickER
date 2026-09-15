@@ -220,6 +220,18 @@
   <data name="Cli_SchemaImportFailed" xml:space="preserve">
     <value>データベースからのスキーマ取得に失敗しました: {0}</value>
   </data>
+  <data name="Cli_ImportWarningDomainTypeFlattened" xml:space="preserve">
+    <value>警告: {0}.{1} はドメイン型「{2}」の基底型として取り込みました（図はドメイン型を持たないため、その CHECK 制約は失われます）。</value>
+  </data>
+  <data name="Cli_ImportWarningTableColumnsUnavailable" xml:space="preserve">
+    <value>警告: {0} の列を 1 つも取得できませんでした。列なしのテーブルとして取り込んでいます。接続ユーザーがこのテーブルへアクセスできるか確認してください。</value>
+  </data>
+  <data name="Cli_ImportWarningForeignKeyOutsideScope" xml:space="preserve">
+    <value>警告: {0} の外部キー「{1}」は取込範囲外の「{2}」を参照しているため、リレーションを作成していません。</value>
+  </data>
+  <data name="Cli_ImportWarningTableNameCollision" xml:space="preserve">
+    <value>警告: 「{0}」は「{1}」と大文字小文字だけが違うため取り込みませんでした（取込は両者を区別できません）。</value>
+  </data>
   <data name="Cli_SchemaReadFailed" xml:space="preserve">
     <value>スキーマファイルを読み取れません: {0}（{1}）</value>
   </data>
@@ -258,5 +270,11 @@
   </data>
   <data name="Cli_UnhandledError" xml:space="preserve">
     <value>エラー: {0}</value>
+  </data>
+  <data name="Cli_ImportWarningPartitionDefinitionLost" xml:space="preserve">
+    <value>警告: {0} は通常テーブルとして取り込みました。図はパーティションを持たないため、生成 DDL はパーティションなしで作成します。</value>
+  </data>
+  <data name="Cli_ImportWarningColumnTypeNotEmittable" xml:space="preserve">
+    <value>警告: {0}.{1} の型「{2}」は SQL へ安全に書き出せない表記です。直すまで、DDL 生成とスキーマ同期は図全体を拒否します。</value>
   </data>
 </root>

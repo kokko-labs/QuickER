@@ -26,9 +26,12 @@ public sealed partial class PostgreSqlTypeCatalog : ITypeCatalog
     public string DefaultDataType => "integer";
 
     // 型名は英字・アンダースコアと空白を許容する（"double precision" 等の複数語型名に対応）。
-    // 末尾の括弧内には長さ / 精度 / スケールを取る。配列型を弾くため型名側に "[" "]" は含めない。
+    // 括弧内には長さ / 精度 / スケールを取る。配列型を弾くため型名側に "[" "]" は含めない。
+    // PostgreSQL も Oracle と同様に修飾子が名称の途中へ入る形（"timestamp(3) without time zone"）を取るため、
+    // suffix（括弧後の語）を括弧グループの内側に持つ。取込は正規化して短縮表記を渡すのでここは通らないが、
+    // GUI で正準表記を手入力した図・他ツール由来の図が解析不能にならないための受理形の拡張。
     [GeneratedRegex(
-        @"^\s*(?<name>[a-zA-Z_][a-zA-Z0-9_ ]*?)\s*(\(\s*(?<arg1>-?\d+)\s*(,\s*(?<arg2>-?\d+)\s*)?\))?\s*$",
+        @"^\s*(?<name>[a-zA-Z_][a-zA-Z0-9_ ]*?)\s*(\(\s*(?<arg1>-?\d+)\s*(,\s*(?<arg2>-?\d+)\s*)?\)\s*(?<suffix>[a-zA-Z][a-zA-Z0-9_ ]*?)?)?\s*$",
         RegexOptions.IgnoreCase
     )]
     private static partial Regex TypePattern();
@@ -54,9 +57,12 @@ public sealed partial class PostgreSqlTypeCatalog : ITypeCatalog
             return false;
         }
 
-        // 複数語型名（"double precision" 等）は空白を 1 個へ畳み込み、小文字化して別名解決する
+        // 複数語型名（"double precision" / "timestamp(3) without time zone" 等）は括弧の前後を連結し、
+        // 空白を 1 個へ畳み込み、小文字化して別名解決する
+        var namePart = match.Groups["name"].Value.Trim();
+        var suffixPart = match.Groups["suffix"].Success ? match.Groups["suffix"].Value.Trim() : "";
         var rawName = WhitespacePattern()
-            .Replace(match.Groups["name"].Value.Trim(), " ")
+            .Replace((namePart + " " + suffixPart).Trim(), " ")
             .ToLowerInvariant();
         var name = NormalizeAlias(rawName);
         string? arg1 = match.Groups["arg1"].Success ? match.Groups["arg1"].Value : null;
@@ -306,7 +312,7 @@ public sealed partial class PostgreSqlTypeCatalog : ITypeCatalog
 
         if (arg2 is not null)
         {
-            if (!TryParseTypeArg(arg2, out var parsedScale))
+            if (!TryParseScaleArg(arg2, out var parsedScale))
             {
                 canonical = null!;
                 return false;
@@ -346,8 +352,22 @@ public sealed partial class PostgreSqlTypeCatalog : ITypeCatalog
     }
 
     /// <summary>型引数の数値を解析する。負数・int 範囲外は失敗（変換不能）として扱う</summary>
+    /// <remarks>
+    /// 長さ・精度に負数はあり得ないため符号を通さない（<c>varchar(-5)</c> は変換不能）。
+    /// 符号を許すのはスケール引数だけ＝<see cref="TryParseScaleArg"/>。
+    /// </remarks>
     private static bool TryParseTypeArg(string text, out int value) =>
         int.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out value);
+
+    /// <summary>スケール引数の数値を解析する。ここだけ負数を許す</summary>
+    /// <remarks>
+    /// PostgreSQL の <c>numeric(p,s)</c> はスケールに負数を取れる（<c>numeric(10,-2)</c> = 100 の倍数へ丸める）。
+    /// この許可は「スケールを読む 3 箇所」（当クラス / <c>OracleTypeCatalog</c> /
+    /// <c>CanonicalTypeToken</c>）で揃っている必要がある＝片肺だと
+    /// 「取込は通るがトークンの読み戻しで落ちる」形で静かに壊れる。
+    /// </remarks>
+    private static bool TryParseScaleArg(string text, out int value) =>
+        int.TryParse(text, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out value);
 
     /// <summary>可変長文字列を varchar(n) または text（max）へ整形する</summary>
     private static string FormatVarcharOrText(int? length)

@@ -234,4 +234,106 @@ public class ResxKeyParityTests
     /// <summary>resx の <c>&lt;data name="..."&gt;</c> エントリのキー集合を読み出す</summary>
     private static HashSet<string> ReadKeys(string resxPath) =>
         NeutralResxFiles.ReadEntries(resxPath).Select(entry => entry.Name).ToHashSet();
+
+    /// <summary>
+    /// 同じキーの中立（英語）と日本語で、書式指定子（<c>{0}</c> / <c>{1}</c> …）の使用集合が一致することを検証する。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>string.Format</c> は<b>余剰の引数を黙って捨てる</b>ため、日本語訳で <c>{2}</c> を書き忘れても
+    /// 例外にならず、その項目だけ情報が欠けた文面が出る（逆に中立側だけが少ないときも同じ）。
+    /// キー集合の一致では捕まらないので、指定子の集合まで突き合わせる。
+    /// </para>
+    /// <para>
+    /// 見るのは<b>集合</b>であって出現順・回数ではない（訳文は語順を変えるのが普通で、同じ指定子を
+    /// 2 回書くのも正当）。<c>{{</c> はリテラルの波括弧なので数えない。
+    /// </para>
+    /// </remarks>
+    [Fact(DisplayName = "中立 resx と .ja.resx で書式指定子の使用集合が一致する")]
+    public void NeutralAndJapaneseResx_UseTheSameFormatPlaceholders()
+    {
+        var pairs = EnumerateResxPairs().ToList();
+
+        pairs.Should().NotBeEmpty("検証対象の中立 resx / .ja.resx ペアが 1 つも見つからない");
+
+        foreach (var pair in pairs)
+        {
+            var neutral = NeutralResxFiles
+                .ReadEntries(pair.NeutralPath)
+                .ToDictionary(entry => entry.Name, entry => entry.Value, StringComparer.Ordinal);
+            var japanese = NeutralResxFiles
+                .ReadEntries(pair.SatellitePath)
+                .ToDictionary(entry => entry.Name, entry => entry.Value, StringComparer.Ordinal);
+
+            foreach (var (key, neutralValue) in neutral)
+            {
+                if (!japanese.TryGetValue(key, out var japaneseValue))
+                {
+                    // キー欠落は NeutralAndJapaneseResx_HaveIdenticalKeySets の担当
+                    continue;
+                }
+
+                FormatPlaceholders(japaneseValue)
+                    .Should()
+                    .BeEquivalentTo(
+                        FormatPlaceholders(neutralValue),
+                        $"{pair.SatellitePath} のキー '{key}' は中立と同じ書式指定子を使うべき"
+                            + "（string.Format は余剰引数を黙って捨てるため、欠落は実行時エラーにならない）"
+                    );
+            }
+        }
+    }
+
+    /// <summary>文面から書式指定子の番号の集合を取り出す（<c>{{</c> はリテラルなので数えない）</summary>
+    private static HashSet<int> FormatPlaceholders(string? text)
+    {
+        var found = new HashSet<int>();
+
+        if (string.IsNullOrEmpty(text))
+        {
+            return found;
+        }
+
+        for (var i = 0; i < text.Length; i++)
+        {
+            if (text[i] != '{')
+            {
+                continue;
+            }
+
+            // "{{" はリテラルの "{"。2 文字まとめて読み飛ばす
+            if (i + 1 < text.Length && text[i + 1] == '{')
+            {
+                i++;
+                continue;
+            }
+
+            var end = text.IndexOf('}', i + 1);
+
+            if (end < 0)
+            {
+                continue;
+            }
+
+            // 書式指定（{0:N2} / {0,-5}）は番号だけを見る
+            var body = text[(i + 1)..end];
+            var numberLength = 0;
+
+            while (numberLength < body.Length && char.IsAsciiDigit(body[numberLength]))
+            {
+                numberLength++;
+            }
+
+            if (
+                numberLength > 0
+                && (numberLength == body.Length || body[numberLength] is ':' or ',')
+                && int.TryParse(body[..numberLength], out var index)
+            )
+            {
+                found.Add(index);
+            }
+        }
+
+        return found;
+    }
 }

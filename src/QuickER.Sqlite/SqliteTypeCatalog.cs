@@ -200,6 +200,14 @@ public sealed partial class SqliteTypeCatalog : ITypeCatalog
                 return true;
 
             case CanonicalTypeKind.Decimal:
+                // 負のスケール（PostgreSQL / Oracle の「100 の倍数へ丸める」宣言）は書き出せない。
+                // SQLite の DECIMAL は NUMERIC アフィニティの宣言でしかなく、丸めの単位という概念を持たない（宣言自体は通るが意味が無い）。
+                // ここで true を返すと、対象 DBMS の切替が実行できない DDL を黙って作る
+                if (canonical.Scale is < 0)
+                {
+                    return false;
+                }
+
                 nativeType = FormatPrecisionScale("DECIMAL", canonical.Precision, canonical.Scale);
                 return true;
 

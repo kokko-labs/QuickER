@@ -320,10 +320,31 @@
   <data name="Db_ImportCompleted" xml:space="preserve">
     <value>データベースの取り込みが完了しました。</value>
   </data>
+  <data name="Db_ImportWarningsHeader" xml:space="preserve">
+    <value>スキーマの一部は、宣言どおりの形では取り込めませんでした:</value>
+  </data>
+  <data name="Db_ImportWarningDomainTypeFlattened" xml:space="preserve">
+    <value>{0}.{1}: ドメイン型「{2}」の基底型として取り込みました（図はドメイン型を持たないため、その CHECK 制約は失われます）。</value>
+  </data>
+  <data name="Db_ImportWarningTableColumnsUnavailable" xml:space="preserve">
+    <value>{0}: 列を 1 つも取得できませんでした。列なしのテーブルとして取り込んでいます。接続ユーザーがこのテーブルへアクセスできるか確認してください。</value>
+  </data>
+  <data name="Db_ImportWarningForeignKeyOutsideScope" xml:space="preserve">
+    <value>{0}: 外部キー「{1}」は取込範囲外の「{2}」を参照しているため、リレーションを作成していません。</value>
+  </data>
+  <data name="Db_ImportWarningTableNameCollision" xml:space="preserve">
+    <value>「{0}」は「{1}」と大文字小文字だけが違うため取り込みませんでした（取込は両者を区別できません）。</value>
+  </data>
   <data name="Db_SyncWriteBack" xml:space="preserve">
     <value>現在のダイアグラムを既存 DB に書き戻し (差分 ALTER 実行)</value>
   </data>
   <data name="Db_SyncTitle" xml:space="preserve">
     <value>データベースと同期</value>
+  </data>
+  <data name="Db_ImportWarningColumnTypeNotEmittable" xml:space="preserve">
+    <value>{0}.{1}: 型「{2}」は SQL へ安全に書き出せない表記です。直すまで、DDL 生成とスキーマ同期は図全体を拒否します。</value>
+  </data>
+  <data name="Db_ImportWarningPartitionDefinitionLost" xml:space="preserve">
+    <value>{0}: 通常テーブルとして取り込みました。図はパーティションを持たないため、生成 DDL はパーティションなしで作成します。</value>
   </data>
 </root>

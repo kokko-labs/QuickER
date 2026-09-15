@@ -2,7 +2,12 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using AwesomeAssertions;
+using QuickER.MySql;
+using QuickER.Oracle;
+using QuickER.PostgreSql;
 using QuickER.Provider;
+using QuickER.Sqlite;
+using QuickER.SqlServer;
 
 namespace QuickER.Tests.Provider;
 
@@ -67,12 +72,68 @@ public class CanonicalTypeTokenTests
         parsed.Should().Be(canonical);
     }
 
+    /// <summary>
+    /// 負のスケールを書き出せるのは PostgreSQL / Oracle だけ（5 方言を 1 つの表で固定する）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>numeric(10,-2)</c> / <c>NUMBER(10,-2)</c> は「100 の倍数へ丸める」実在の宣言で、取込はそのまま
+    /// 持ち帰る。しかし SQL Server は <c>Msg 1002</c>、MySQL は <c>ERROR 1064</c> でこの宣言を拒否し
+    /// （実 DB で確認済み）、SQLite の <c>DECIMAL</c> は NUMERIC アフィニティの宣言でしかなく丸めの単位を
+    /// 持たない。3 方言とも <c>TryFormat</c> が <c>false</c> を返して<b>対象 DBMS 切替の変換不能一覧に載る</b>
+    /// のが正しい姿で、<c>true</c> を返すと実行できない（または意味を持たない）DDL を黙って作る。
+    /// </para>
+    /// <para>
+    /// 正のスケールは 5 方言とも従来どおり書き出せること（負のスケールだけを弾いていること）も併せて見る。
+    /// </para>
+    /// </remarks>
+    [Fact(DisplayName = "負のスケールを書き出せるのは PostgreSQL / Oracle だけ")]
+    public void NegativeScale_IsFormattableOnlyByPostgreSqlAndOracle()
+    {
+        var catalogs = new (string Dialect, ITypeCatalog Catalog, bool SupportsNegativeScale)[]
+        {
+            ("SqlServer", new SqlServerTypeCatalog(), false),
+            ("MySql", new MySqlTypeCatalog(), false),
+            ("Sqlite", new SqliteTypeCatalog(), false),
+            ("PostgreSql", new PostgreSqlTypeCatalog(), true),
+            ("Oracle", new OracleTypeCatalog(), true),
+        };
+
+        var negative = new CanonicalType(CanonicalTypeKind.Decimal, Precision: 10, Scale: -2);
+        var positive = new CanonicalType(CanonicalTypeKind.Decimal, Precision: 10, Scale: 2);
+
+        foreach (var (dialect, catalog, supportsNegativeScale) in catalogs)
+        {
+            catalog
+                .TryFormat(negative, out var negativeText)
+                .Should()
+                .Be(
+                    supportsNegativeScale,
+                    $"{dialect} が decimal(10,-2) を書き出せるかは方言の実力どおりであること"
+                );
+
+            if (supportsNegativeScale)
+            {
+                negativeText.Should().Contain("-2", $"{dialect} はスケールの符号を落とさないこと");
+            }
+
+            catalog
+                .TryFormat(positive, out _)
+                .Should()
+                .BeTrue($"{dialect} は正のスケールを従来どおり書き出せること");
+        }
+    }
+
     /// <summary>decimal の精度・スケール（p,s / p / 無指定）の正書法と往復</summary>
     [Theory(DisplayName = "decimal の精度スケールのトークン正書法と往復")]
     [InlineData(10, 2, "decimal(10,2)")]
     [InlineData(18, 0, "decimal(18,0)")]
     [InlineData(10, null, "decimal(10)")]
     [InlineData(null, null, "decimal")]
+    // 負のスケール（PostgreSQL / Oracle に実在する「100 の倍数へ丸める」宣言）。
+    // 読み戻しで符号を弾くと、C# リバースが自分で書いたトークンを解釈できなくなる
+    [InlineData(10, -2, "decimal(10,-2)")]
+    [InlineData(5, -1, "decimal(5,-1)")]
     public void Decimal_FormatAndRoundTrip(int? precision, int? scale, string expectedToken)
     {
         var canonical = new CanonicalType(

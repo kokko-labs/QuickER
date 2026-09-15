@@ -40,8 +40,11 @@ public sealed class OracleContainerFixture : IAsyncLifetime
     /// <summary>コンテナの既定ユーザー名</summary>
     private const string Username = "oracle";
 
-    /// <summary>コンテナの既定パスワード</summary>
+    /// <summary>コンテナの既定パスワード（アプリユーザーと SYS / SYSTEM で共通）</summary>
     private const string Password = "oracle";
+
+    /// <summary>スキーマ（ユーザー）を作れる管理ユーザー名</summary>
+    private const string SystemUsername = "system";
 
     /// <summary>共有する Oracle コンテナ（Docker 不在時は起動されないため <c>null</c>）</summary>
     private OracleContainer? _container;
@@ -55,6 +58,15 @@ public sealed class OracleContainerFixture : IAsyncLifetime
     /// <summary>コンテナへの ADO.NET 接続文字列（<see cref="IsAvailable"/> が <c>true</c> のときのみ有効）</summary>
     public string ConnectionString { get; private set; } = string.Empty;
 
+    /// <summary>
+    /// SYSTEM（管理ユーザー）としての接続文字列。スキーマを 1 つ増やす必要があるテストだけが使う。
+    /// </summary>
+    /// <remarks>
+    /// これで作った別スキーマのオブジェクトは <see cref="ResetSchemaAsync"/> の対象外（自スキーマしか消さない）
+    /// なので、使うテストは自分で後始末すること。
+    /// </remarks>
+    public string SystemConnectionString { get; private set; } = string.Empty;
+
     /// <summary>コンテナを起動する。Docker 不在・起動失敗は握りつぶし <see cref="IsAvailable"/> を <c>false</c> にする</summary>
     /// <remarks>初回はイメージ pull が GB 級のため数分かかることがある</remarks>
     public async ValueTask InitializeAsync()
@@ -64,9 +76,15 @@ public sealed class OracleContainerFixture : IAsyncLifetime
             _container = new OracleBuilder("gvenzl/oracle-free:23-slim-faststart")
                 .WithUsername(Username)
                 .WithPassword(Password)
+                // SYS / SYSTEM のパスワードを固定する。アプリユーザー（CONNECT + RESOURCE 相当）は
+                // CREATE USER できないため、「別スキーマを参照する外部キー」を作るテストが
+                // SYSTEM で 2 つ目のスキーマを用意できるようにするための逃がし口
+                // （MySQL フィクスチャの RootConnectionString と同じ流儀）
+                .WithEnvironment("ORACLE_PASSWORD", Password)
                 .Build();
             await _container.StartAsync().ConfigureAwait(false);
             ConnectionString = BuildAdoConnectionString();
+            SystemConnectionString = BuildAdoConnectionString(SystemUsername);
             IsAvailable = true;
         }
         catch (Exception ex) when (!DockerRequirement.IsStrict)
@@ -125,7 +143,19 @@ public sealed class OracleContainerFixture : IAsyncLifetime
     /// ODP.NET は複数文を 1 コマンドで実行できないため、<see cref="SplitStatements"/> で文単位に分割し、
     /// 通常文は末尾 <c>;</c> を除去、PL/SQL 無名ブロック（DECLARE / BEGIN 開始）は <c>;</c>（<c>END;</c>）を保持したまま順次実行する。
     /// </remarks>
-    public async Task ExecuteAsync(string sql, CancellationToken ct = default)
+    public async Task ExecuteAsync(string sql, CancellationToken ct = default) =>
+        await ExecuteAsAsync(ConnectionString, sql, ct).ConfigureAwait(false);
+
+    /// <summary>SYSTEM（管理ユーザー）として SQL スクリプトを実行する（スキーマの追加・撤去用）</summary>
+    public async Task ExecuteAsSystemAsync(string sql, CancellationToken ct = default) =>
+        await ExecuteAsAsync(SystemConnectionString, sql, ct).ConfigureAwait(false);
+
+    /// <summary>指定の接続文字列で SQL スクリプトを文単位に実行する</summary>
+    private static async Task ExecuteAsAsync(
+        string connectionString,
+        string sql,
+        CancellationToken ct
+    )
     {
         var statements = SplitStatements(sql);
 
@@ -134,7 +164,7 @@ public sealed class OracleContainerFixture : IAsyncLifetime
             return;
         }
 
-        await using var conn = new OracleConnection(ConnectionString);
+        await using var conn = new OracleConnection(connectionString);
         await conn.OpenAsync(ct).ConfigureAwait(false);
 
         foreach (var stmt in statements)
@@ -164,14 +194,14 @@ public sealed class OracleContainerFixture : IAsyncLifetime
     }
 
     /// <summary>コンテナのホスト・ポートから ODP.NET 用の EZConnect 接続文字列を組み立てる</summary>
-    private string BuildAdoConnectionString()
+    private string BuildAdoConnectionString(string? userId = null)
     {
         var container = _container!;
         var b = new OracleConnectionStringBuilder
         {
             DataSource =
                 $"{container.Hostname}:{container.GetMappedPublicPort(1521)}/{ServiceName}",
-            UserID = Username,
+            UserID = userId ?? Username,
             Password = Password,
         };
         return b.ConnectionString;
