@@ -96,7 +96,13 @@ public partial class DbConnectionDialogViewModel : ObservableObject
     [ObservableProperty]
     private string _commandTimeout = DbCommands.DefaultTimeoutSeconds.ToString();
 
-    /// <summary>サービス名（Oracle 固有・将来使用）</summary>
+    /// <summary>サービス名（Oracle 固有）</summary>
+    /// <remarks>
+    /// 入力欄は無い＝ダイアログからは常に空で、Oracle のサービス名は「データベース名」欄の値が担う
+    /// （<c>OracleConnectionStringFactory</c> が EZConnect の <c>host:port/service</c> を組むとき、
+    /// 非空の ServiceName を優先し、空なら Database で代用する）。保持するのは保存済みプロファイル
+    /// （connections.json）が持ち得る値を接続設定まで運ぶため。
+    /// </remarks>
     [ObservableProperty]
     private string _serviceName = string.Empty;
 
@@ -195,7 +201,7 @@ public partial class DbConnectionDialogViewModel : ObservableObject
     /// この 2 方言だけが <see cref="DbSslMode"/> をそのまま表す接続文字列キーワードを持つ。
     /// SQL Server はサーバー証明書の信頼チェックが対応する面で、Oracle / SQLite には対応する面が無い
     /// （理由は <see cref="DbSslMode"/> の注記を参照）。方言名を定数でなく文字列で書くのは、
-    /// このプロジェクトが PostgreSQL / MySQL のプロバイダを参照しないため（<see cref="ShowServiceName"/> と同じ）。
+    /// このプロジェクトが PostgreSQL / MySQL のプロバイダを参照しないため（<see cref="ShowOracleEncryptionNote"/> と同じ）。
     /// </remarks>
     public bool ShowSslMode => SelectedProvider?.Name is "postgresql" or "mysql";
 
@@ -206,9 +212,6 @@ public partial class DbConnectionDialogViewModel : ObservableObject
     /// 他方言（TLS 欄・証明書信頼チェック）と対称に画面へ出す。
     /// </remarks>
     public bool ShowOracleEncryptionNote => SelectedProvider?.Name == "oracle";
-
-    /// <summary>サービス名入力欄を表示するか（Oracle 固有・現状は常に非表示）</summary>
-    public bool ShowServiceName => SelectedProvider?.Name == "oracle";
 
     /// <summary>ファイルパス入力欄を表示するか（SQLite 固有。ファイル型 DB の接続に用いる）</summary>
     public bool ShowFilePath => SelectedProvider?.Name == SqliteProvider.ProviderName;
@@ -280,7 +283,6 @@ public partial class DbConnectionDialogViewModel : ObservableObject
         OnPropertyChanged(nameof(ShowTrustServerCertificate));
         OnPropertyChanged(nameof(ShowSslMode));
         OnPropertyChanged(nameof(ShowOracleEncryptionNote));
-        OnPropertyChanged(nameof(ShowServiceName));
         OnPropertyChanged(nameof(ShowFilePath));
         OnPropertyChanged(nameof(ShowCreateNewFile));
         OnPropertyChanged(nameof(ShowServerFields));

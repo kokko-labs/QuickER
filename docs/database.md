@@ -22,7 +22,7 @@ The "DB Import" button on the toolbar opens the "Import from Database" connectio
 
 ### Specifying the connection
 
-- **Server-type DBMS** — specify the target DB, host, port (leave empty for the dialect's default), database name, user name, and password. For SQL Server you can also choose the authentication mode (Windows / SQL Server) and "Trust the server certificate (TrustServerCertificate)". Oracle has a service-name field
+- **Server-type DBMS** — specify the target DB, host, port (leave empty for the dialect's default), database name, user name, and password. For SQL Server you can also choose the authentication mode (Windows / SQL Server) and "Trust the server certificate (TrustServerCertificate)". For Oracle, the value of the database-name field is used as the service name (the connection is built as EZConnect `host:port/service`)
 - **Encryption (SSL Mode)** — for PostgreSQL and MySQL, how strongly the connection requires TLS. It defaults to "Unspecified", which leaves the keyword off the connection string and the decision to the driver; see the note below. It is saved per connection profile, and profiles written before this setting existed load as "Unspecified"
 - **SQLite** — specify the file path via "Browse" (import works on existing files only)
 - **Command timeout** — how long a single schema-import or sync statement may run. It defaults to 60 seconds and applies to every dialect including SQLite; `0` means no limit (the ADO.NET convention). A blank field, a non-numeric entry, or a negative value is rejected by both OK and *Test Connection*, so the dialog never falls back to the default behind your back. It is saved per connection profile, and profiles written before this setting existed load with the default
