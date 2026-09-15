@@ -228,6 +228,60 @@ namespace QuickER.Db.UI.Resources {
             }
         }
 
+        public static string DbConnection_SslMode {
+            get {
+                return ResourceManager.GetString("DbConnection_SslMode", resourceCulture);
+            }
+        }
+
+        public static string DbConnection_SslModeTooltip {
+            get {
+                return ResourceManager.GetString("DbConnection_SslModeTooltip", resourceCulture);
+            }
+        }
+
+        public static string DbConnection_SslMode_Unspecified {
+            get {
+                return ResourceManager.GetString("DbConnection_SslMode_Unspecified", resourceCulture);
+            }
+        }
+
+        public static string DbConnection_SslMode_Disable {
+            get {
+                return ResourceManager.GetString("DbConnection_SslMode_Disable", resourceCulture);
+            }
+        }
+
+        public static string DbConnection_SslMode_Prefer {
+            get {
+                return ResourceManager.GetString("DbConnection_SslMode_Prefer", resourceCulture);
+            }
+        }
+
+        public static string DbConnection_SslMode_Require {
+            get {
+                return ResourceManager.GetString("DbConnection_SslMode_Require", resourceCulture);
+            }
+        }
+
+        public static string DbConnection_SslMode_VerifyCa {
+            get {
+                return ResourceManager.GetString("DbConnection_SslMode_VerifyCa", resourceCulture);
+            }
+        }
+
+        public static string DbConnection_SslMode_VerifyFull {
+            get {
+                return ResourceManager.GetString("DbConnection_SslMode_VerifyFull", resourceCulture);
+            }
+        }
+
+        public static string DbConnection_OracleEncryptionNote {
+            get {
+                return ResourceManager.GetString("DbConnection_OracleEncryptionNote", resourceCulture);
+            }
+        }
+
         public static string DbConnection_CommandTimeoutInvalid {
             get {
                 return ResourceManager.GetString("DbConnection_CommandTimeoutInvalid", resourceCulture);

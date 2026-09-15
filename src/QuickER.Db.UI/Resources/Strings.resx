@@ -145,6 +145,33 @@
   <data name="DbConnection_CommandTimeoutTooltip" xml:space="preserve">
     <value>How long a single schema import / sync statement may run. 0 means no limit</value>
   </data>
+  <data name="DbConnection_SslMode" xml:space="preserve">
+    <value>Encryption (SSL Mode)</value>
+  </data>
+  <data name="DbConnection_SslModeTooltip" xml:space="preserve">
+    <value>How strongly the connection requires TLS. "Unspecified" leaves it to the driver, whose default for both PostgreSQL and MySQL encrypts when it can but does not check the server certificate. Choose VerifyCa or VerifyFull to have the certificate checked</value>
+  </data>
+  <data name="DbConnection_SslMode_Unspecified" xml:space="preserve">
+    <value>Unspecified (driver default: no certificate check)</value>
+  </data>
+  <data name="DbConnection_SslMode_Disable" xml:space="preserve">
+    <value>Disable (no encryption)</value>
+  </data>
+  <data name="DbConnection_SslMode_Prefer" xml:space="preserve">
+    <value>Prefer (encrypt if available, no certificate check)</value>
+  </data>
+  <data name="DbConnection_SslMode_Require" xml:space="preserve">
+    <value>Require (encryption required, no certificate check)</value>
+  </data>
+  <data name="DbConnection_SslMode_VerifyCa" xml:space="preserve">
+    <value>VerifyCa (encryption required, verify the CA)</value>
+  </data>
+  <data name="DbConnection_SslMode_VerifyFull" xml:space="preserve">
+    <value>VerifyFull (verify the CA and the host name)</value>
+  </data>
+  <data name="DbConnection_OracleEncryptionNote" xml:space="preserve">
+    <value>Oracle connects over plaintext TCP by default. Turning TLS on needs a tcps:// data source and a different port, so it cannot be set here — see the documentation.</value>
+  </data>
   <data name="DbConnection_CommandTimeoutInvalid" xml:space="preserve">
     <value>Enter an integer of 0 (no limit) or greater for the command timeout.</value>
   </data>

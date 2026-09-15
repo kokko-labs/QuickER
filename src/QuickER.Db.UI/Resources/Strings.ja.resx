@@ -145,6 +145,33 @@
   <data name="DbConnection_CommandTimeoutTooltip" xml:space="preserve">
     <value>スキーマ取込・同期の SQL 1 文が実行できる時間です。0 は無制限を意味します</value>
   </data>
+  <data name="DbConnection_SslMode" xml:space="preserve">
+    <value>暗号化 (SSL Mode)</value>
+  </data>
+  <data name="DbConnection_SslModeTooltip" xml:space="preserve">
+    <value>接続に TLS をどこまで要求するかを指定します。「Unspecified」はドライバ既定に委ねます（PostgreSQL・MySQL とも既定は「可能なら暗号化するがサーバー証明書は検証しない」）。証明書の検証まで求める場合は VerifyCa / VerifyFull を選びます</value>
+  </data>
+  <data name="DbConnection_SslMode_Unspecified" xml:space="preserve">
+    <value>Unspecified（ドライバ既定・証明書を検証しない）</value>
+  </data>
+  <data name="DbConnection_SslMode_Disable" xml:space="preserve">
+    <value>Disable（暗号化しない）</value>
+  </data>
+  <data name="DbConnection_SslMode_Prefer" xml:space="preserve">
+    <value>Prefer（可能なら暗号化・証明書を検証しない）</value>
+  </data>
+  <data name="DbConnection_SslMode_Require" xml:space="preserve">
+    <value>Require（暗号化必須・証明書を検証しない）</value>
+  </data>
+  <data name="DbConnection_SslMode_VerifyCa" xml:space="preserve">
+    <value>VerifyCa（暗号化必須・CA を検証）</value>
+  </data>
+  <data name="DbConnection_SslMode_VerifyFull" xml:space="preserve">
+    <value>VerifyFull（CA とホスト名を検証）</value>
+  </data>
+  <data name="DbConnection_OracleEncryptionNote" xml:space="preserve">
+    <value>Oracle は既定で平文 TCP 接続です。TLS を使うには tcps:// のデータソースとポート変更が必要なため、ここでは設定できません（ドキュメントを参照）。</value>
+  </data>
   <data name="DbConnection_CommandTimeoutInvalid" xml:space="preserve">
     <value>コマンドタイムアウトには 0（無制限）以上の整数を入力してください。</value>
   </data>

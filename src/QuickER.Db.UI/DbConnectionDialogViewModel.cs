@@ -77,6 +77,14 @@ public partial class DbConnectionDialogViewModel : ObservableObject
     [ObservableProperty]
     private bool _trustServerCertificate = true;
 
+    /// <summary>TLS（通信路の暗号化）の要求水準（PostgreSQL / MySQL 固有）</summary>
+    /// <remarks>
+    /// 初期値は <see cref="DbSslMode.Unspecified"/>＝接続文字列へキーワードを載せずドライバ既定に委ねる
+    /// （この設定を追加する前と同じ接続になる）。
+    /// </remarks>
+    [ObservableProperty]
+    private DbSslMode _sslMode = DbSslMode.Unspecified;
+
     /// <summary>コマンド実行タイムアウト（秒。<c>0</c> は無制限）。入力テキストと同期する</summary>
     /// <remarks>
     /// スキーマ取込・スキーマ同期の各 SQL に適用する（接続確立までの時間とは別物）。
@@ -160,6 +168,45 @@ public partial class DbConnectionDialogViewModel : ObservableObject
     /// <summary>サーバー証明書信頼チェックを表示するか（SQL Server 固有）</summary>
     public bool ShowTrustServerCertificate => ShowAuthMode;
 
+    /// <summary>TLS 要求水準の選択肢（値＋ローカライズ済み表示名）</summary>
+    /// <param name="Mode">要求水準</param>
+    /// <param name="Display">一覧に表示する文字列（例: VerifyFull（CA とホスト名を検証））</param>
+    public sealed record SslModeListItem(DbSslMode Mode, string Display);
+
+    /// <summary>TLS 要求水準の選択肢一覧</summary>
+    /// <remarks>
+    /// 認証方式（<see cref="AuthMode"/>）は列挙値をそのまま表示するのに対し、ここだけ表示名を翻訳するのは
+    /// 非対称だが意図的。<c>Require</c>（暗号化するが証明書を検証しない）と <c>VerifyCa</c> の差こそが
+    /// この設定の存在理由で、生の列挙名からはその差が読み取れない——選んだ水準の意味が
+    /// ツールチップを開かずに読めることを、列挙表示の対称性より優先する。
+    /// </remarks>
+    public IReadOnlyList<SslModeListItem> SslModes { get; } =
+    [
+        new(DbSslMode.Unspecified, Strings.DbConnection_SslMode_Unspecified),
+        new(DbSslMode.Disable, Strings.DbConnection_SslMode_Disable),
+        new(DbSslMode.Prefer, Strings.DbConnection_SslMode_Prefer),
+        new(DbSslMode.Require, Strings.DbConnection_SslMode_Require),
+        new(DbSslMode.VerifyCa, Strings.DbConnection_SslMode_VerifyCa),
+        new(DbSslMode.VerifyFull, Strings.DbConnection_SslMode_VerifyFull),
+    ];
+
+    /// <summary>TLS 要求水準の選択欄を表示するか（PostgreSQL / MySQL 固有）</summary>
+    /// <remarks>
+    /// この 2 方言だけが <see cref="DbSslMode"/> をそのまま表す接続文字列キーワードを持つ。
+    /// SQL Server はサーバー証明書の信頼チェックが対応する面で、Oracle / SQLite には対応する面が無い
+    /// （理由は <see cref="DbSslMode"/> の注記を参照）。方言名を定数でなく文字列で書くのは、
+    /// このプロジェクトが PostgreSQL / MySQL のプロバイダを参照しないため（<see cref="ShowServiceName"/> と同じ）。
+    /// </remarks>
+    public bool ShowSslMode => SelectedProvider?.Name is "postgresql" or "mysql";
+
+    /// <summary>Oracle の「既定は平文接続」注記を表示するか（Oracle 固有）</summary>
+    /// <remarks>
+    /// Oracle だけ暗号化について画面上の手掛かりが何も無いと、他方言と同じく暗号化されていると
+    /// 誤解したまま資格情報を平文で流すことになる。設定できない以上、せめて既定がどうなっているかは
+    /// 他方言（TLS 欄・証明書信頼チェック）と対称に画面へ出す。
+    /// </remarks>
+    public bool ShowOracleEncryptionNote => SelectedProvider?.Name == "oracle";
+
     /// <summary>サービス名入力欄を表示するか（Oracle 固有・現状は常に非表示）</summary>
     public bool ShowServiceName => SelectedProvider?.Name == "oracle";
 
@@ -231,6 +278,8 @@ public partial class DbConnectionDialogViewModel : ObservableObject
         OnPropertyChanged(nameof(ShowUserId));
         OnPropertyChanged(nameof(ShowPassword));
         OnPropertyChanged(nameof(ShowTrustServerCertificate));
+        OnPropertyChanged(nameof(ShowSslMode));
+        OnPropertyChanged(nameof(ShowOracleEncryptionNote));
         OnPropertyChanged(nameof(ShowServiceName));
         OnPropertyChanged(nameof(ShowFilePath));
         OnPropertyChanged(nameof(ShowCreateNewFile));
@@ -284,6 +333,7 @@ public partial class DbConnectionDialogViewModel : ObservableObject
         AuthMode = profile.AuthMode;
         UserId = profile.UserId;
         TrustServerCertificate = profile.TrustServerCertificate;
+        SslMode = profile.SslMode;
         ServiceName = profile.ServiceName;
         FilePath = profile.FilePath;
         CommandTimeout = profile.CommandTimeoutSeconds.ToString();
@@ -309,6 +359,7 @@ public partial class DbConnectionDialogViewModel : ObservableObject
             AuthMode = AuthMode,
             UserId = UserId,
             TrustServerCertificate = TrustServerCertificate,
+            SslMode = SslMode,
             ServiceName = ServiceName,
             FilePath = FilePath,
             CommandTimeoutSeconds = ParseCommandTimeout() ?? DbCommands.DefaultTimeoutSeconds,
@@ -399,6 +450,7 @@ public partial class DbConnectionDialogViewModel : ObservableObject
             UserId = UserId,
             Password = Password,
             TrustServerCertificate = TrustServerCertificate,
+            SslMode = SslMode,
             ServiceName = ServiceName,
             FilePath = FilePath,
             CommandTimeoutSeconds = ParseCommandTimeout() ?? DbCommands.DefaultTimeoutSeconds,

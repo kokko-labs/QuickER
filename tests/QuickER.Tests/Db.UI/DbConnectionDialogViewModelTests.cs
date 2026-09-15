@@ -1,8 +1,12 @@
 using System.IO;
+using System.Linq;
 using AwesomeAssertions;
 using QuickER.Db.UI;
 using QuickER.Db.UI.Resources;
 using QuickER.Gui.Abstractions;
+using QuickER.MySql;
+using QuickER.Oracle;
+using QuickER.PostgreSql;
 using QuickER.Provider;
 using QuickER.Sqlite;
 using QuickER.SqlServer;
@@ -24,6 +28,18 @@ public class DbConnectionDialogViewModelTests : IDisposable
     /// <summary>SQL Server と SQLite を登録したレジストリ（SQLite 分岐の検証用）</summary>
     private static readonly DatabaseProviderRegistry RegistryWithSqlite = new(
         new IDatabaseProvider[] { new SqlServerProvider(), new SqliteProvider() }
+    );
+
+    /// <summary>全方言を登録したレジストリ（方言ごとの条件表示の検証用）</summary>
+    private static readonly DatabaseProviderRegistry RegistryWithAllDialects = new(
+        new IDatabaseProvider[]
+        {
+            new SqlServerProvider(),
+            new PostgreSqlProvider(),
+            new MySqlProvider(),
+            new OracleProvider(),
+            new SqliteProvider(),
+        }
     );
 
     /// <summary>一時保存先フォルダを作成する</summary>
@@ -634,4 +650,106 @@ public class DbConnectionDialogViewModelTests : IDisposable
         vm.Result.Should().BeNull();
         vm.StatusMessage.Should().Be(Strings.DbConnection_CommandTimeoutInvalid);
     }
+
+    /// <summary>TLS 要求水準の選択欄は、対応する接続文字列キーワードを持つ 2 方言でのみ表示することを検証する</summary>
+    [Theory(DisplayName = "TLS 要求水準の欄は PostgreSQL / MySQL でのみ表示する")]
+    [InlineData("postgresql", true)]
+    [InlineData("mysql", true)]
+    [InlineData("sqlserver", false)]
+    [InlineData("sqlite", false)]
+    public void ShowSslMode_OnlyForDialectsWithKeyword(string dbms, bool expected)
+    {
+        var vm = CreateAllDialectVm(CreateStore());
+        vm.SelectedProvider = RegistryWithAllDialects.Get(dbms);
+
+        vm.ShowSslMode.Should().Be(expected);
+    }
+
+    /// <summary>TLS 要求水準の初期値が「未指定」＝ドライバ既定であることを検証する（既定挙動不変の入口）</summary>
+    [Fact(DisplayName = "TLS 要求水準の初期値は未指定")]
+    public void SslMode_DefaultsToUnspecified()
+    {
+        var vm = CreateAllDialectVm(CreateStore());
+
+        vm.SslMode.Should().Be(DbSslMode.Unspecified);
+        vm.ToSettings().SslMode.Should().Be(DbSslMode.Unspecified);
+    }
+
+    /// <summary>TLS 要求水準がプロファイル選択で入力欄へ反映され、確定内容にも載ることを検証する</summary>
+    [Fact(DisplayName = "TLS 要求水準は保存済み接続から復元され確定内容へ載る")]
+    public void SslMode_RestoredFromProfile_AndFlowsIntoResult()
+    {
+        var store = CreateStore();
+        store.Upsert(
+            new SqlConnectionProfile
+            {
+                Name = "PG",
+                Dbms = "postgresql",
+                Server = "pg01",
+                Database = "shop",
+                SslMode = DbSslMode.VerifyFull,
+            },
+            password: ""
+        );
+
+        var vm = CreateAllDialectVm(store);
+        vm.SelectedProfileItem = vm.Profiles[0];
+
+        vm.SslMode.Should().Be(DbSslMode.VerifyFull);
+
+        vm.OkCommand.Execute(null);
+
+        vm.Result.Should().NotBeNull();
+        vm.Result!.SslMode.Should().Be(DbSslMode.VerifyFull);
+        // 前回接続としても記録され、次回ダイアログで復元される
+        new DbConnectionDialogViewModel(
+            RegistryWithAllDialects,
+            DbConnectionDialogMode.Import,
+            fixedProvider: null,
+            store
+        )
+            .SslMode.Should()
+            .Be(DbSslMode.VerifyFull);
+    }
+
+    /// <summary>
+    /// TLS 要求水準の選択肢が、全 6 値をローカライズ済みの表示名付きで並べることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 表示名が列挙名そのままだと <c>Require</c>（証明書を検証しない）と <c>VerifyCa</c> の差が
+    /// 画面から読み取れない——この設定の存在理由が伝わらないため、resx 由来であることを固定する。
+    /// </remarks>
+    [Fact(DisplayName = "TLS 要求水準の選択肢は全 6 値をローカライズ済み表示名で並べる")]
+    public void SslModes_ExposeLocalizedDisplayNames()
+    {
+        var vm = CreateAllDialectVm(CreateStore());
+
+        vm.SslModes.Select(i => i.Mode).Should().Equal(Enum.GetValues<DbSslMode>());
+        vm.SslModes.Should().OnlyContain(i => !string.IsNullOrWhiteSpace(i.Display));
+        vm.SslModes.Single(i => i.Mode == DbSslMode.VerifyFull)
+            .Display.Should()
+            .Be(Strings.DbConnection_SslMode_VerifyFull);
+        // 生の列挙名そのままではない＝意味が読める表示になっている
+        vm.SslModes.Single(i => i.Mode == DbSslMode.Require)
+            .Display.Should()
+            .NotBe(nameof(DbSslMode.Require));
+    }
+
+    /// <summary>Oracle 選択時だけ「既定は平文接続」の注記を出すことを検証する</summary>
+    [Theory(DisplayName = "Oracle の平文接続の注記は Oracle でのみ表示する")]
+    [InlineData("oracle", true)]
+    [InlineData("postgresql", false)]
+    [InlineData("sqlserver", false)]
+    [InlineData("sqlite", false)]
+    public void ShowOracleEncryptionNote_OnlyForOracle(string dbms, bool expected)
+    {
+        var vm = CreateAllDialectVm(CreateStore());
+        vm.SelectedProvider = RegistryWithAllDialects.Get(dbms);
+
+        vm.ShowOracleEncryptionNote.Should().Be(expected);
+    }
+
+    /// <summary>全方言を登録した取込モードの ViewModel を生成する</summary>
+    private DbConnectionDialogViewModel CreateAllDialectVm(SqlConnectionProfileStore store) =>
+        new(RegistryWithAllDialects, DbConnectionDialogMode.Import, fixedProvider: null, store);
 }

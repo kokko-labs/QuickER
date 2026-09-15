@@ -23,11 +23,45 @@ The "DB Import" button on the toolbar opens the "Import from Database" connectio
 ### Specifying the connection
 
 - **Server-type DBMS** — specify the target DB, host, port (leave empty for the dialect's default), database name, user name, and password. For SQL Server you can also choose the authentication mode (Windows / SQL Server) and "Trust the server certificate (TrustServerCertificate)". Oracle has a service-name field
+- **Encryption (SSL Mode)** — for PostgreSQL and MySQL, how strongly the connection requires TLS. It defaults to "Unspecified", which leaves the keyword off the connection string and the decision to the driver; see the note below. It is saved per connection profile, and profiles written before this setting existed load as "Unspecified"
 - **SQLite** — specify the file path via "Browse" (import works on existing files only)
 - **Command timeout** — how long a single schema-import or sync statement may run. It defaults to 60 seconds and applies to every dialect including SQLite; `0` means no limit (the ADO.NET convention). A blank field, a non-numeric entry, or a negative value is rejected by both OK and *Test Connection*, so the dialog never falls back to the default behind your back. It is saved per connection profile, and profiles written before this setting existed load with the default
 - **Test Connection** — runs a real schema fetch and reports the number of tables detected
 
 > **Note:** "Trust the server certificate (TrustServerCertificate)" is checked by default so that local or containerized SQL Server instances with self-signed certificates work out of the box. This setting skips server certificate validation, so when connecting to a production or remote server that has a properly issued certificate, uncheck it to keep man-in-the-middle detection effective. The setting is saved per connection profile.
+
+#### Encryption in transit, per dialect
+
+Database credentials travel over this connection, so it is worth knowing what each dialect does when you change nothing.
+
+| Dialect | Default when nothing is set | How to require certificate validation |
+| --- | --- | --- |
+| SQL Server | Encrypted, **certificate not validated** (TrustServerCertificate is checked) | Uncheck "Trust the server certificate" |
+| PostgreSQL | Npgsql's own default, which encrypts when the server supports it but **does not validate the certificate** | Set **Encryption (SSL Mode)** to `VerifyCa` or `VerifyFull` |
+| MySQL | MySqlConnector's own default, same shape: encrypts when it can, **no validation** | Set **Encryption (SSL Mode)** to `VerifyCa` or `VerifyFull` |
+| Oracle | **Plaintext TCP** | Not offered in the dialog — see below |
+| SQLite | Not applicable (a local file) | — |
+
+The **Encryption (SSL Mode)** values mean:
+
+- `Unspecified` — write no keyword at all and leave the decision to the driver (the default; the connection is exactly what it was before this setting existed)
+- `Disable` — never encrypt
+- `Prefer` — encrypt when the server supports it, without validating the certificate
+- `Require` — refuse to connect unencrypted, still without validating the certificate
+- `VerifyCa` — require encryption and validate that the certificate chains to a trusted CA
+- `VerifyFull` — `VerifyCa` plus a check that the certificate belongs to the host you asked for
+
+`Require` protects against passive eavesdropping only: without validation, a man in the middle can present any certificate. `VerifyFull` is the setting to use against a server that has a properly issued certificate.
+
+**Oracle** is deliberately not offered this choice, because the managed driver's TLS does not have this shape. It is switched on by the protocol prefix of the data source (`tcps://host:2484/service`) rather than by a connection-string keyword, which means the listener port has to change with it; TCPS always validates the certificate chain, so there is no equivalent of `Require`; and there is no negotiated mode, so there is no equivalent of `Prefer`. When you need TLS to an Oracle database, use `quicker scaffold --connection`, which passes the connection string through untouched:
+
+```
+quicker scaffold --connection "Data Source=tcps://db.example.com:2484/ORCLPDB1?ssl_server_dn_match=true;User Id=app;Password=***" --out ./Generated --provider oracle
+```
+
+On Windows, the trusted CA is taken from the host's own certificate store (the Microsoft certificate store), so an Oracle wallet is not required; on other platforms the driver falls back to the system OpenSSL trust store, and a wallet may still be needed depending on how the host is set up. `ssl_server_dn_match=true` is what makes the driver check that the certificate belongs to the server you asked for. Its default has varied between driver versions — in the versions this was checked against it is off, which makes a bare `tcps://` closer to `VerifyCa` than to `VerifyFull` — so state it explicitly rather than relying on the default, and confirm the behaviour against the driver version you ship. Oracle's *native network encryption* is a separate mechanism that is configured outside the connection string and authenticates no server, so it is not a substitute.
+
+For `quicker scaffold` against PostgreSQL or MySQL there is no separate option either: `SSL Mode` is an ordinary connection-string keyword, so put it in `--connection` (`...;SSL Mode=VerifyFull`).
 
 ### Connection profiles
 

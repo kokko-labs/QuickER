@@ -3,6 +3,7 @@ using System.Threading.Tasks;
 using AwesomeAssertions;
 using MySqlConnector;
 using QuickER.MySql;
+using QuickER.Provider;
 using QuickER.Tests.Integration;
 
 namespace QuickER.Tests.Integration.Dialects;
@@ -38,5 +39,43 @@ public sealed class MySqlConnectionStringFactoryIntegrationTests(MySqlContainerF
 
         System.Convert.ToInt32(scalar).Should().Be(1);
         conn.State.Should().Be(System.Data.ConnectionState.Open);
+    }
+
+    /// <summary>
+    /// TLS 要求水準が実際にドライバまで届いていることを、実コンテナへの接続可否の差で検証する。
+    /// </summary>
+    /// <remarks>
+    /// テストコンテナの証明書は自己署名（あるいは TLS 自体が無効）なので、
+    /// <see cref="DbSslMode.VerifyFull"/> はどちらの構成でも必ず失敗する。一方
+    /// <see cref="DbSslMode.Disable"/> は接続できる。この差が出ること自体が
+    /// 「接続文字列へ載せたキーワードが無視されていない」ことの実 DB での証明になる
+    /// （文字列生成だけの単体テストでは、キーワード名の綴り違い等を捕まえられない）。
+    /// </remarks>
+    [Fact(DisplayName = "[Integration] D: TLS 要求水準が実接続の可否を変える")]
+    public async Task Build_SslMode_ReachesTheDriver()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+
+        var disabled = fixture.ToDbConnectionSettings();
+        disabled.SslMode = DbSslMode.Disable;
+
+        await using (var conn = new MySqlConnection(MySqlConnectionStringFactory.Build(disabled)))
+        {
+            await conn.OpenAsync(Ct);
+            conn.State.Should().Be(System.Data.ConnectionState.Open);
+        }
+
+        var verifyFull = fixture.ToDbConnectionSettings();
+        verifyFull.SslMode = DbSslMode.VerifyFull;
+
+        await using var strict = new MySqlConnection(
+            MySqlConnectionStringFactory.Build(verifyFull)
+        );
+
+        // 型はドライバ自身の例外まで絞る（実測: MySqlException "SSL Authentication Error"）。
+        // 素の Exception だと NullReference 等の無関係な失敗でも緑になる。なお「たまたま別の理由で
+        // 失敗しただけ」でないことは、直前の Disable が同じ設定オブジェクトから接続に成功していること
+        // ＝差分が SSL Mode だけであることが示す
+        await Assert.ThrowsAnyAsync<MySqlException>(() => strict.OpenAsync(Ct));
     }
 }

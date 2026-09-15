@@ -8,6 +8,8 @@ QuickER の利用者に影響する変更を記録します。形式は [Keep a 
 
 ### Added
 
+- **アプリ — PostgreSQL・MySQL の接続で TLS を要求できる** — 接続ダイアログにこの 2 方言向けの**暗号化 (SSL Mode)** 欄を追加しました（`Unspecified` / `Disable` / `Prefer` / `Require` / `VerifyCa` / `VerifyFull`・接続プロファイルごとに保存）。既定は `Unspecified` で、接続文字列へキーワードを一切書かず判断をドライバへ委ねます＝既存プロファイルの接続内容は変わりません。これが重要なのは、両ドライバの既定が「暗号化はするが**サーバー証明書を検証しない**」＝盗聴は防げても中間者は防げない状態だからです。証明書を検証させるには `VerifyCa` / `VerifyFull` を選びます。SQL Server は同じ判断を従来から「サーバー証明書を信頼する」として出しており、SQLite には暗号化する通信がありません。Oracle は欄を設けず文書で案内します——管理対象ドライバの TLS はキーワードではなくデータソースのプロトコル接頭辞（`tcps://host:2484/service`）とリスナーポートで切り替わり、`Prefer` や `Require` に当たる形も無いためです。ダイアログで Oracle を選ぶとその旨を注記します（欄が無いことと「黙って暗号化されている」ことは画面上で区別が付かないため）。`quicker scaffold` は接続文字列をそのまま受け取るので、`SSL Mode=VerifyFull` や Oracle の `tcps://` データソースは `--connection` へ直接書けます。方言ごとの既定の挙動は [docs/database.ja.md](docs/database.ja.md) の表にまとめました
+
 - **生成コード — 値オブジェクトが `IFormattable` を実装** — `price.ToString("N2")`（culture 指定のオーバーロードあり）が内包値を書式化するほか、文字列補間・`string.Format`・WPF バインディングの StringFormat の書式指定子が内包値へ届くようになります。書式指定子が無いときの結果は常に `ToString()` と同じ（`ToString()` の override が書式なしの表示を従来どおり支配）で、内包値が書式化できない型（string・byte[]・bool）も同様に書式を無視します（合成書式の一般規約と同じ）
 
 - **生成コード — EditModel の定型を「列テーブル」駆動にしました** — 生成される EditModel は列ごとに `EditModelColumn<TSelf>`（2 つの名前・必須かどうか・確定値と入力文字列のコンパイル済みアクセサ）を新設の `EditModelBaseCore<TSelf>.EditModelColumns` で公開し、必須入力チェック・入力の書き戻し・行編集のスナップショット・重複エラーの割り当ては基底クラスに 1 回だけ書かれるようになりました（従来はクラスごと・列ごとに展開）。生成コードが委譲する新しい基底メンバーはほかに `EditModelBaseCore.BeginLoad` / `EndLoad`・`GetChildren` / `SetChildren`・`CheckDatabaseUniquenessAsync` です。格納の仕方（確定値フィールド・入力文字列フィールド・バインディング setter）は一切変えておらず、観測できる意味論もすべて同じで、EditModel と Mapper の生成量が 30〜36% 減ります（EditModel クラス 1 つあたり約 190 行、Mapper 1 つあたり約 28 行）

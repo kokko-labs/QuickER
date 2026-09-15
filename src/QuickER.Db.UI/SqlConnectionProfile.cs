@@ -38,6 +38,13 @@ public class SqlConnectionProfile
     /// <summary>サーバー証明書を信頼するかどうか（SQL Server 固有）</summary>
     public bool TrustServerCertificate { get; set; } = true;
 
+    /// <summary>TLS（通信路の暗号化）の要求水準（PostgreSQL / MySQL 固有）</summary>
+    /// <remarks>
+    /// キーを持たない旧プロファイル JSON は既定値（<see cref="DbSslMode.Unspecified"/>＝接続文字列へ
+    /// キーワードを載せない）で読み込まれる＝既存プロファイルの接続内容は変わらない。
+    /// </remarks>
+    public DbSslMode SslMode { get; set; } = DbSslMode.Unspecified;
+
     /// <summary>サービス名（Oracle 固有・将来使用）</summary>
     public string ServiceName { get; set; } = string.Empty;
 
@@ -65,6 +72,7 @@ public class SqlConnectionProfile
             UserId = UserId,
             Password = password,
             TrustServerCertificate = TrustServerCertificate,
+            SslMode = SslMode,
             ServiceName = ServiceName,
             FilePath = FilePath,
             CommandTimeoutSeconds = CommandTimeoutSeconds,

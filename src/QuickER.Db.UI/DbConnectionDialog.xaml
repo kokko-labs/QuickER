@@ -53,6 +53,7 @@
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
     </Grid.RowDefinitions>
 
     <!-- 保存済みプロファイル -->
@@ -307,16 +308,50 @@
       Visibility="{Binding ShowTrustServerCertificate, Converter={StaticResource BoolToVisibilityConverter}}"
     />
 
-    <!-- コマンドタイムアウト: SQL 1 文の実行時間。SQLite を含む全方言に効くため常に表示する -->
+    <!-- TLS 要求水準: 対応する接続文字列キーワードを持つ PostgreSQL / MySQL でのみ表示する -->
     <TextBlock
       Grid.Row="12"
+      Grid.Column="0"
+      Text="{x:Static resources:Strings.DbConnection_SslMode}"
+      VerticalAlignment="Center"
+      Margin="0,4"
+      Visibility="{Binding ShowSslMode, Converter={StaticResource BoolToVisibilityConverter}}"
+    />
+    <!-- 表示名はローカライズ済み（VM の SslModes）。列挙値そのままだと Require と VerifyCa の差が読めない -->
+    <ComboBox
+      Grid.Row="12"
+      Grid.Column="1"
+      Margin="0,4"
+      Style="{StaticResource FormComboBox}"
+      ItemsSource="{Binding SslModes}"
+      DisplayMemberPath="Display"
+      SelectedValuePath="Mode"
+      SelectedValue="{Binding SslMode}"
+      ToolTip="{x:Static resources:Strings.DbConnection_SslModeTooltip}"
+      Visibility="{Binding ShowSslMode, Converter={StaticResource BoolToVisibilityConverter}}"
+    />
+
+    <!-- Oracle: TLS は設定できないため、既定が平文であることだけ他方言と対称に告げる -->
+    <TextBlock
+      Grid.Row="12"
+      Grid.ColumnSpan="2"
+      Margin="0,4"
+      TextWrapping="Wrap"
+      Foreground="{StaticResource HeaderText}"
+      Text="{x:Static resources:Strings.DbConnection_OracleEncryptionNote}"
+      Visibility="{Binding ShowOracleEncryptionNote, Converter={StaticResource BoolToVisibilityConverter}}"
+    />
+
+    <!-- コマンドタイムアウト: SQL 1 文の実行時間。SQLite を含む全方言に効くため常に表示する -->
+    <TextBlock
+      Grid.Row="13"
       Grid.Column="0"
       Text="{x:Static resources:Strings.DbConnection_CommandTimeout}"
       VerticalAlignment="Center"
       Margin="0,4"
     />
     <TextBox
-      Grid.Row="12"
+      Grid.Row="13"
       Grid.Column="1"
       Margin="0,4"
       Style="{StaticResource FormInput}"
@@ -325,7 +360,7 @@
     />
 
     <TextBlock
-      Grid.Row="13"
+      Grid.Row="14"
       Grid.ColumnSpan="2"
       Margin="0,6"
       TextWrapping="Wrap"
@@ -334,7 +369,7 @@
     />
 
     <StackPanel
-      Grid.Row="14"
+      Grid.Row="15"
       Grid.ColumnSpan="2"
       Orientation="Horizontal"
       HorizontalAlignment="Right"

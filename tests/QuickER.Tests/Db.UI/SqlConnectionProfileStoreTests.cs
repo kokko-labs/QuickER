@@ -390,4 +390,106 @@ public class SqlConnectionProfileStoreTests : IDisposable
         lastUsed.Value.Profile.TrustServerCertificate.Should().BeFalse();
         lastUsed.Value.Password.Should().Be("secret");
     }
+
+    /// <summary>TLS 要求水準がプロファイルの保存・読込で保たれることを検証する</summary>
+    [Fact(DisplayName = "TLS 要求水準はプロファイルの往復で保たれる")]
+    public void SslMode_RoundTrip_IsPreserved()
+    {
+        var store = CreateStore();
+        var profile = new SqlConnectionProfile
+        {
+            Name = "PG",
+            Dbms = "postgresql",
+            Server = "pg01",
+            Database = "shop",
+            SslMode = DbSslMode.VerifyFull,
+        };
+
+        store.Upsert(profile, password: "");
+        store.SaveLastUsed(profile, password: "");
+
+        store.LoadAll()[0].SslMode.Should().Be(DbSslMode.VerifyFull);
+        store.LoadLastUsed()!.Value.Profile.SslMode.Should().Be(DbSslMode.VerifyFull);
+        profile.ToSettings("").SslMode.Should().Be(DbSslMode.VerifyFull);
+    }
+
+    /// <summary>TLS 要求水準が JSON へ<b>名前で</b>書かれることを検証する</summary>
+    /// <remarks>
+    /// 整数で保存すると、将来 <see cref="DbSslMode"/> の途中へメンバーを挿入した瞬間、保存済みの
+    /// 設定が無言で別の水準として読み直される（<c>5</c> が VerifyFull から VerifyCa へずれる）。
+    /// 名前で保存していればその事故が起きない。
+    /// </remarks>
+    [Fact(DisplayName = "TLS 要求水準は JSON へ名前で保存される")]
+    public void SslMode_IsPersistedByName()
+    {
+        var store = CreateStore();
+        store.Upsert(
+            new SqlConnectionProfile
+            {
+                Name = "PG",
+                Dbms = "postgresql",
+                SslMode = DbSslMode.VerifyFull,
+            },
+            password: ""
+        );
+
+        var json = File.ReadAllText(store.ConnectionsPath);
+
+        json.Should().Contain("\"sslMode\": \"VerifyFull\"");
+        json.Should().NotContain("\"sslMode\": 5");
+    }
+
+    /// <summary>
+    /// 整数で書かれた TLS 要求水準（名前保存へ切り替える前のファイル）も、従来どおり読めることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// System.Text.Json の既定（<c>allowIntegerValues: true</c>）に依存する後方互換。
+    /// ここが壊れると、既に保存済みの検証要求が読み込み失敗で既定へ落ちる。
+    /// </remarks>
+    [Fact(DisplayName = "整数で書かれた旧 TLS 要求水準も読める")]
+    public void SslMode_WrittenAsInteger_IsStillReadable()
+    {
+        var store = CreateStore();
+        Directory.CreateDirectory(_tempFolder);
+        File.WriteAllText(
+            store.ConnectionsPath,
+            """
+            {
+              "profiles": [
+                { "name": "Legacy", "dbms": "postgresql", "server": "pg01", "sslMode": 5 }
+              ]
+            }
+            """
+        );
+
+        store.LoadAll()[0].SslMode.Should().Be(DbSslMode.VerifyFull);
+    }
+
+    /// <summary>
+    /// TLS 要求水準のキーを持たない旧 JSON が、既定（未指定＝ドライバ既定）で読み込まれることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// この 1 点が「既存プロファイルの接続が黙って変わらない」ことの保証にあたる（既定が
+    /// <see cref="DbSslMode.Unspecified"/> ＝接続文字列へキーワードを載せない）。
+    /// </remarks>
+    [Fact(DisplayName = "TLS 要求水準を持たない旧プロファイル JSON は未指定として読み込まれる")]
+    public void LegacyJsonWithoutSslMode_LoadsAsUnspecified()
+    {
+        var store = CreateStore();
+        Directory.CreateDirectory(_tempFolder);
+        File.WriteAllText(
+            store.ConnectionsPath,
+            """
+            {
+              "profiles": [
+                { "name": "Legacy", "dbms": "postgresql", "server": "pg01", "database": "shop" }
+              ],
+              "lastUsed": { "name": "Legacy", "dbms": "postgresql", "server": "pg01", "database": "shop" }
+            }
+            """
+        );
+
+        store.LoadAll()[0].SslMode.Should().Be(DbSslMode.Unspecified);
+        store.LoadLastUsed()!.Value.Profile.SslMode.Should().Be(DbSslMode.Unspecified);
+    }
 }
