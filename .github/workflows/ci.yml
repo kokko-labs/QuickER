@@ -56,7 +56,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: .NET SDK をセットアップ
-        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5.4.0
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: global.json
 
@@ -78,7 +78,7 @@ jobs:
         # SDK 版の正本は global.json（rollForward: latestPatch）。フロート指定（10.0.x）だと
         # ランナーの SDK 更新（フィーチャーバンド跳ね）が新警告を持ち込み、TreatWarningsAsErrors で
         # 自分のコミットと無関係に CI が赤くなるため、更新のタイミングを global.json の書き換えに固定する
-        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5.4.0
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: global.json
 

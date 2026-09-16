@@ -39,7 +39,7 @@ jobs:
         # ままだと「インストールする版＝最新」「使う版＝global.json の解決」がねじれ、
         # ランナーのパッチ版次第で配布バイナリが手元の再現ビルドとバイト一致しなくなる
         # （v0.1.0 の検証で実測＝ハッシュ照合で済む確認が API 面比較の遠回りになった）
-        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5.4.0
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: global.json
 
