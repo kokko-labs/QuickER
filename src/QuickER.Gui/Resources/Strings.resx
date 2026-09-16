@@ -566,6 +566,12 @@
   <data name="Confirm_ExternalChangeReload" xml:space="preserve">
     <value>The file was changed by another program. Reload it? (Reloading discards your unsaved changes.)</value>
   </data>
+  <data name="Confirm_OverwriteExternalChange" xml:space="preserve">
+    <value>The file has been changed by another program since it was last loaded or saved. Overwrite it with the current diagram? (The other program's changes will be lost.)</value>
+  </data>
+  <data name="Confirm_OverwriteNewerFormat" xml:space="preserve">
+    <value>This file was saved in a newer format than this version of QuickER supports. Overwriting it now writes the current format, and the data this version cannot represent will be lost. Overwrite anyway?</value>
+  </data>
   <data name="Relationship_DuplicateMessage" xml:space="preserve">
     <value>A relationship with the same association already exists. Please edit the existing relationship.</value>
   </data>
@@ -616,6 +622,9 @@
   </data>
   <data name="Open_Failed" xml:space="preserve">
     <value>Failed to open '{0}'. The file is not a QuickER diagram, or it is corrupted or unreadable. The current diagram was kept.</value>
+  </data>
+  <data name="Open_DuplicateId" xml:space="preserve">
+    <value>Failed to open '{0}'. The file uses the same identifier for more than one table or column, which makes the diagram impossible to save. Edit the JSON by hand to give each one its own identifier. The current diagram was kept.</value>
   </data>
   <data name="Save_Failed" xml:space="preserve">
     <value>Failed to save. Your changes were kept as unsaved; try saving again or save to another location.</value>

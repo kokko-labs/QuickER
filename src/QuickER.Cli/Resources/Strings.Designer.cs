@@ -479,6 +479,11 @@ namespace QuickER.Cli.Resources {
                 return ResourceManager.GetString("Cli_SchemaNotDiagramDocument", resourceCulture);
             }
         }
+        public static string Cli_SchemaDuplicateId {
+            get {
+                return ResourceManager.GetString("Cli_SchemaDuplicateId", resourceCulture);
+            }
+        }
         public static string Cli_ImportWarningColumnTypeNotEmittable {
             get {
                 return ResourceManager.GetString("Cli_ImportWarningColumnTypeNotEmittable", resourceCulture);

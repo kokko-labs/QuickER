@@ -206,6 +206,11 @@ public static class CliApp
                         Strings.Cli_SchemaNotDiagramDocument,
                         schemaFile.FullName
                     ),
+                    DocumentLoadError.DuplicateId => string.Format(
+                        Strings.Cli_SchemaDuplicateId,
+                        schemaFile.FullName,
+                        exception!.Message
+                    ),
                     _ => throw new ArgumentOutOfRangeException(nameof(error), error, null),
                 }
             );

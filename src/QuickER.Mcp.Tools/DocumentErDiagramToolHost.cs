@@ -162,6 +162,8 @@ public static partial class DocumentErDiagramToolHost
                 $"Diagram file '{file}' is not valid JSON: {exception!.Message}",
             DocumentLoadError.NotDiagramDocument =>
                 $"Diagram file '{file}' is not a DiagramDocument (expected an object with 'Version' and 'Schema'). Refusing to treat unrelated JSON as a diagram.",
+            DocumentLoadError.DuplicateId =>
+                $"Diagram file '{file}' uses the same identifier for more than one table or column, so it cannot be loaded: {exception!.Message}",
             _ => throw new ArgumentOutOfRangeException(nameof(error), error, null),
         };
 

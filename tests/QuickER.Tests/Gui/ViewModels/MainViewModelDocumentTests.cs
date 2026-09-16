@@ -1,6 +1,7 @@
 using System.IO;
 using System.Security.Cryptography;
 using AwesomeAssertions;
+using QuickER.Documents;
 using QuickER.Gui.Abstractions;
 using QuickER.Model;
 using QuickER.Resources;
@@ -300,6 +301,56 @@ public class MainViewModelDocumentTests : IDisposable
         vm2.CurrentFilePath.Should().Be(path);
         vm2.IsDirty.Should().BeTrue("前回未保存の状態を引き継ぐ");
         vm2.WindowTitle.Should().Be("Dirty* - QuickER");
+    }
+
+    /// <summary>Id が重複する自動保存ファイルは復元せず、空の図で起動することを検証する</summary>
+    /// <remarks>
+    /// 重複 Id の図を復元してしまうと、上書き保存も自動保存も以後すべて失敗し、対象 DBMS の切替では
+    /// 未処理例外→緊急保存も同じ理由で失敗、という最悪経路へそのまま入る。復元経路だけ検証の外に
+    /// 置かないため、読込は形式検証込みの <see cref="JsonStorageService.TryLoad"/> を通す。
+    /// </remarks>
+    [Fact(DisplayName = "復元: Id が重複する自動保存ファイルは復元しない")]
+    public void Restore_DuplicateIds_StartsWithEmptyDiagram()
+    {
+        var autoSave = Path.Combine(_folder, "last_diagram.json");
+        var duplicated = Guid.NewGuid();
+
+        JsonStorageService.Save(
+            autoSave,
+            new DiagramDocument
+            {
+                Schema = new ErDiagram
+                {
+                    Entities =
+                    {
+                        new Entity
+                        {
+                            TableName = "Orders",
+                            Columns =
+                            {
+                                new Column { Id = duplicated, Name = "OrderId" },
+                            },
+                        },
+                        new Entity
+                        {
+                            TableName = "OrderLines",
+                            Columns =
+                            {
+                                new Column { Id = duplicated, Name = "LineId" },
+                            },
+                        },
+                    },
+                },
+                Layout = null,
+            }
+        );
+
+        var vm = new MainViewModel();
+        vm.UsePersistenceForTests(new GuiAppSettingsStore(_folder), autoSave);
+        vm.Initialize();
+
+        vm.Entities.Should().BeEmpty("重複 Id の作業状態は復元しない");
+        vm.CurrentFilePath.Should().BeNull();
     }
 
     /// <summary>ER 図ファイル自身の保存は、モーダルではなくステータスバーの一時通知で知らせることを検証する</summary>

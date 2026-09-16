@@ -262,7 +262,10 @@ public partial class MainViewModel : IDiagramTransferHost
 
         // 破損（不正 JSON）・非 DiagramDocument は現状維持し、次の変更イベントで再試行する
         // （控えめな一時通知のため、ここでは失敗の原因までは見せない）
-        if (!TryLoadDiagramDocument(CurrentFilePath, out var document, out _) || document is null)
+        if (
+            !TryLoadDiagramDocument(CurrentFilePath, out var document, out _, out _)
+            || document is null
+        )
         {
             NotifyStatus(Strings.Status_ExternalReloadFailed);
             return false;
@@ -296,37 +299,41 @@ public partial class MainViewModel : IDiagramTransferHost
     /// <summary>ファイルを DiagramDocument として妥当か検証したうえで読み込む（破損・非文書は false）</summary>
     /// <param name="path">読み込むファイルのフルパス</param>
     /// <param name="document">読み込んだ文書（失敗時は null）</param>
+    /// <param name="kind">失敗の種別（成功時は <see cref="DocumentLoadError.None"/>）</param>
     /// <param name="error">
-    /// 失敗の原因となった例外（IO エラー・不正 JSON）。形式検証で弾いた場合と成功時は null。
+    /// 失敗の原因となった例外（IO エラー・不正 JSON・Id 重複）。形式検証で弾いた場合と成功時は null。
     /// 呼び出し側は「原因を持つ失敗」だけ他の失敗通知と同じく例外メッセージを連結して見せる。
     /// </param>
     /// <remarks>
-    /// 形式検証は <see cref="JsonStorageService.TryLoad"/> に委ね、ここは失敗種別を
-    /// 「原因を持つ失敗（例外あり）」と「形式検証で弾いた失敗（例外なし）」の 2 値へ畳むだけを担う。
+    /// 検証は <see cref="JsonStorageService.TryLoad"/> に委ね、ここは種別と原因例外をそのまま
+    /// 呼び出し側へ渡すだけを担う（種別ごとの文言は呼び出し側の責務）。
     /// </remarks>
     private static bool TryLoadDiagramDocument(
         string path,
         out DiagramDocument? document,
+        out DocumentLoadError kind,
         out Exception? error
     )
     {
         error = null;
+        kind = DocumentLoadError.None;
 
         try
         {
-            if (JsonStorageService.TryLoad(path, out document, out _, out var exception))
+            if (JsonStorageService.TryLoad(path, out document, out kind, out var exception))
             {
                 return true;
             }
 
-            // IO エラー・不正 JSON は原因を持ち帰る（形式検証で弾いた場合は exception が null）
+            // IO エラー・不正 JSON・Id 重複は原因を持ち帰る（形式検証で弾いた場合は exception が null）
             error = exception;
             return false;
         }
         catch (Exception ex)
         {
-            // 形式検証を通ったあとの逆直列化失敗（プロパティの型不一致など）も現状維持で扱う
+            // TryLoad が分類し切れない想定外の失敗も現状維持で扱う（防御）
             document = null;
+            kind = DocumentLoadError.InvalidJson;
             error = ex;
             return false;
         }
@@ -564,7 +571,15 @@ public partial class MainViewModel : IDiagramTransferHost
 
         try
         {
-            var document = JsonStorageService.Load(_autoSavePath);
+            // 復元も形式検証込みの経路を通す。手編集・外部の書き換えで Id が重複した作業状態を
+            // 復元すると、以後の上書き保存も自動保存も失敗し続ける（＝作業を保存する手段が消える）
+            if (
+                !JsonStorageService.TryLoad(_autoSavePath, out var document, out _, out _)
+                || document is null
+            )
+            {
+                return;
+            }
 
             SetCurrentProviderFromDbms(document.Schema.TargetDbms);
             LoadDocumentIntoDiagram(document);
@@ -742,9 +757,20 @@ public partial class MainViewModel : IDiagramTransferHost
     /// (2) 監視の再開直後にディスクと 1 回だけ突き合わせる（一時停止中に届いた変更イベントは
     /// 捨てられ、デバウンスも再スケジュールされないため、拾い直す経路をここに置く）。
     /// </para>
+    /// <para>
+    /// 書き込みの前には <see cref="ConfirmOverwriteBeforeSave"/> で「上書きして失うものが無いか」を
+    /// ディスクの現状から確かめる（保存後の再照合は自分が書いた内容と一致するため、外部の内容を
+    /// 黙って上書きしたことは後からでは分からない）。
+    /// </para>
     /// </remarks>
     private void SaveToPath(string path)
     {
+        // 書き込みを始める前に、上書きで失うものが無いかをディスクの現状から確かめる
+        if (!ConfirmOverwriteBeforeSave(path))
+        {
+            return;
+        }
+
         _fileWatcher.Suspend();
         var saved = false;
 
@@ -779,6 +805,129 @@ public partial class MainViewModel : IDiagramTransferHost
         }
     }
 
+    /// <summary>上書きで失うものが無いかをディスクの現状から確かめ、保存へ進んでよいかを返す</summary>
+    /// <param name="path">保存先のフルパス</param>
+    /// <returns>保存へ進んでよい場合 true（キャンセルされた場合は false＝保存しない）</returns>
+    /// <remarks>
+    /// <para>
+    /// 判定材料は<b>すべてディスク上のファイル</b>から採り、VM に状態を持たない。将来版を開いたことを
+    /// フラグで覚える方式では、(1) 図を丸ごと置き換えても現在パスは遷移しない（DB 取込・AI 生成は
+    /// パスを維持する）ため置換後の保存で確認が消え、(2) 起動時の作業状態復元でフラグが戻らず、
+    /// (3) 別セッション・別プロセスが将来版で書いたファイルには最初から効かない。ディスクを見る方式は
+    /// この 3 つを同じ 1 つの判定で塞ぐ。
+    /// </para>
+    /// <para>
+    /// 規則は 2 つで、効く範囲が違う。
+    /// <list type="number">
+    /// <item><b>将来版の書き戻し</b>は保存先がどのファイルでも確認する（相手のファイルにだけ残っている
+    /// 未対応データを、この版の形式で書き潰すため。判定は
+    /// <see cref="JsonStorageService.TryReadFormatVersion"/>＝逆直列化を通さない軽い読み取り）。</item>
+    /// <item><b>外部変更の上書き</b>は「いま開いているファイル」のときだけ確認する（最終既知ハッシュと
+    /// いう比較対象を持つのがその 1 つだけのため）。クリーン時の自動再読込は破損 JSON・将来版・
+    /// 型不一致では失敗して一時通知を残すだけで、文書はクリーン・最終既知ハッシュは旧値のまま残る。
+    /// ここで確かめないと、その次の上書き保存が外部の新しい内容を黙って消す（保存後の再照合は
+    /// 自分が書いた内容と一致するため検知できない）。</item>
+    /// </list>
+    /// </para>
+    /// <para>
+    /// 確認は<b>多くとも 1 回</b>。両方立つときは失うものが大きい将来版の文言だけを出す
+    /// （確認を 2 つ続けて出すと、どちらも「はい」で流される形骸化した確認になるため）。
+    /// </para>
+    /// <para>
+    /// 照合してから書き込むまでの隙間に外部が書く余地（TOCTOU）は残るが、保存後の再照合
+    /// （<see cref="CheckExternalChangeAgainstDisk"/>）がその窓を拾うため許容する。
+    /// </para>
+    /// </remarks>
+    private bool ConfirmOverwriteBeforeSave(string path)
+    {
+        // 新規作成される保存先は誰の内容も消さない（版も読めない）
+        if (!File.Exists(path))
+        {
+            return true;
+        }
+
+        if (IsNewerFormatOnDisk(path))
+        {
+            return _dialogs.ConfirmWarning(
+                Strings.Confirm_OverwriteNewerFormat,
+                Strings.Common_Confirm
+            );
+        }
+
+        // 外部変更の照合は「いま開いているファイル」限定（別ファイルには比較すべき最終既知ハッシュが無い）
+        if (!IsCurrentDocumentPath(path) || !HasDiskDivergedFromLastKnown(path))
+        {
+            return true;
+        }
+
+        return _dialogs.ConfirmWarning(
+            Strings.Confirm_OverwriteExternalChange,
+            Strings.Common_Confirm
+        );
+    }
+
+    /// <summary>ディスク上のファイルを、この版の形式で書き戻すと情報を落とす相手として扱うか</summary>
+    /// <remarks>
+    /// 版を名乗っていないファイル（破損・JSON でない・<c>Version</c> キーなし）は対象外。
+    /// 版を名乗っているのに解釈できない値（<c>"2"</c>・<c>2.0</c> など、この版が書かない形）は
+    /// <b>確認する側へ倒す</b>＝別の版か手編集のファイルであり、黙って現行形式で書き潰さない。
+    /// </remarks>
+    private static bool IsNewerFormatOnDisk(string path) =>
+        JsonStorageService.TryReadFormatVersion(path, out var version)
+        && (version is null || version > DiagramDocument.CurrentVersion);
+
+    /// <summary>指定パスが現在紐付いている文書と同じファイルか（フルパス正規化・大文字小文字を区別しない）</summary>
+    /// <remarks>
+    /// 「名前を付けて保存」で同じファイルを選び直した場合も上書きになるため、コマンドではなくパスで判定する。
+    /// </remarks>
+    private bool IsCurrentDocumentPath(string path) =>
+        !string.IsNullOrEmpty(CurrentFilePath)
+        && string.Equals(
+            NormalizePath(path),
+            NormalizePath(CurrentFilePath),
+            StringComparison.OrdinalIgnoreCase
+        );
+
+    /// <summary>パスをフルパスへ正規化する（正規化できないパスは素の文字列を返す）</summary>
+    /// <remarks>
+    /// 不正なパスでも例外を出さない（この後の書き込みが失敗として扱う＝保存経路の例外処理へ委ねる）。
+    /// </remarks>
+    private static string NormalizePath(string path)
+    {
+        try
+        {
+            return Path.GetFullPath(path);
+        }
+        catch (Exception ex)
+            when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return path;
+        }
+    }
+
+    /// <summary>ディスク上の内容が、最終既知ハッシュとも「続行」で無視したハッシュとも違うか</summary>
+    /// <remarks>
+    /// ファイルが無い（削除された）場合と算出不能（IO エラー）の場合は保存を妨げない
+    /// ＝前者は新規作成と同じで、後者はここで止めても状況が良くならない。
+    /// </remarks>
+    private bool HasDiskDivergedFromLastKnown(string path)
+    {
+        if (!File.Exists(path))
+        {
+            return false;
+        }
+
+        var currentHash = DocumentContentHash.TryCompute(path);
+
+        if (currentHash is null)
+        {
+            return false;
+        }
+
+        return !string.Equals(currentHash, _lastKnownFileHash, StringComparison.Ordinal)
+            && !string.Equals(currentHash, _ignoredExternalHash, StringComparison.Ordinal);
+    }
+
     /// <summary>JSON ファイルからダイアグラムを読み込み、現在の図と置換する（ダイアログ表示）</summary>
     /// <remarks>
     /// 読込は現在の図を丸ごと置き換えるため、失うものがあるときは他の置換経路と同じ確認
@@ -809,15 +958,19 @@ public partial class MainViewModel : IDiagramTransferHost
             return;
         }
 
-        // 破損 JSON・非 DiagramDocument JSON・IO 失敗は現状維持のうえ通知する
+        // 破損 JSON・非 DiagramDocument JSON・Id 重複・IO 失敗は現状維持のうえ通知する
         if (
-            !TryLoadDiagramDocument(picked.Path, out var document, out var error)
+            !TryLoadDiagramDocument(picked.Path, out var document, out var kind, out var error)
             || document is null
         )
         {
-            // 原因を持つ失敗（IO エラー・不正 JSON）は他の失敗通知と同じ流儀で例外メッセージを連結する。
-            // 形式検証で弾いた場合は例外が無いため、本文が挙げる原因候補だけを示す
-            var message = string.Format(Strings.Open_Failed, picked.Path);
+            // 原因を持つ失敗（IO エラー・不正 JSON・Id 重複）は他の失敗通知と同じ流儀で例外メッセージを
+            // 連結する。形式検証で弾いた場合は例外が無いため、本文が挙げる原因候補だけを示す。
+            // Id 重複だけは復旧手段が JSON の手編集しかないため、そう案内する専用の文言を使う
+            var message =
+                kind == DocumentLoadError.DuplicateId
+                    ? string.Format(Strings.Open_DuplicateId, picked.Path)
+                    : string.Format(Strings.Open_Failed, picked.Path);
 
             if (error is not null)
             {

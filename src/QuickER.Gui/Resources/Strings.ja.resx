@@ -579,6 +579,12 @@
   <data name="Confirm_ExternalChangeReload" xml:space="preserve">
     <value>ファイルが外部のプログラムで変更されました。再読込しますか？（再読込すると未保存の変更は破棄されます。）</value>
   </data>
+  <data name="Confirm_OverwriteExternalChange" xml:space="preserve">
+    <value>このファイルは、最後に読み込む／保存してから外部のプログラムで変更されています。現在の図で上書きしますか？（外部の変更は失われます。）</value>
+  </data>
+  <data name="Confirm_OverwriteNewerFormat" xml:space="preserve">
+    <value>このファイルは、このバージョンの QuickER が対応するより新しいフォーマットで保存されています。いま上書きすると現行のフォーマットで書き出され、このバージョンが表現できないデータは失われます。上書きしますか？</value>
+  </data>
   <data name="Relationship_DuplicateMessage" xml:space="preserve">
     <value>同じ関係のリレーションはすでに存在します。既存のリレーションを編集してください。</value>
   </data>
@@ -629,6 +635,9 @@
   </data>
   <data name="Open_Failed" xml:space="preserve">
     <value>'{0}' を開けませんでした。QuickER の図ファイルではないか、破損しているか、読み取れません。現在の図はそのまま維持しました。</value>
+  </data>
+  <data name="Open_DuplicateId" xml:space="preserve">
+    <value>'{0}' を開けませんでした。複数のテーブルまたは列が同じ識別子を使っており、この図は保存できません。JSON を手で編集して、それぞれに別の識別子を与えてください。現在の図はそのまま維持しました。</value>
   </data>
   <data name="Save_Failed" xml:space="preserve">
     <value>保存できませんでした。変更は未保存のまま維持しています。もう一度保存するか、別の場所へ保存してください。</value>

@@ -1266,6 +1266,21 @@ namespace QuickER.Resources {
                 return ResourceManager.GetString("Open_Failed", resourceCulture);
             }
         }
+        public static string Open_DuplicateId {
+            get {
+                return ResourceManager.GetString("Open_DuplicateId", resourceCulture);
+            }
+        }
+        public static string Confirm_OverwriteExternalChange {
+            get {
+                return ResourceManager.GetString("Confirm_OverwriteExternalChange", resourceCulture);
+            }
+        }
+        public static string Confirm_OverwriteNewerFormat {
+            get {
+                return ResourceManager.GetString("Confirm_OverwriteNewerFormat", resourceCulture);
+            }
+        }
 
         public static string Save_Failed {
             get {

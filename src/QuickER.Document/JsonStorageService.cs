@@ -25,6 +25,15 @@ public enum DocumentLoadError
 
     /// <summary>JSON としては妥当だが、ER 図の保存形式（<c>Version</c>・<c>Schema</c>）ではなかった</summary>
     NotDiagramDocument,
+
+    /// <summary>
+    /// 保存形式としては妥当だが、エンティティ Id または列 Id が重複しており図として扱えなかった
+    /// </summary>
+    /// <remarks>
+    /// 重複箇所（テーブル名・列名・重複した Id）は <c>exception</c> のメッセージが名指しする。
+    /// 手で直す以外に復旧手段が無いため、表示側は必ずその内容まで見せること。
+    /// </remarks>
+    DuplicateId,
 }
 
 /// <summary>ER 図を JSON ファイルへ保存・読み込みするトップレベルサービス</summary>
@@ -107,12 +116,20 @@ public static class JsonStorageService
 
     /// <summary>ER 図の保存形式として妥当か検証したうえでファイルから保存文書を読み込む</summary>
     /// <remarks>
-    /// 検証は「読み取り → JSON 解析 → ルートが <c>Version</c>・<c>Schema</c> を持つ JSON オブジェクトか」の
-    /// 3 段で、<see cref="JsonStorageService"/> の読込仕様に合わせキー名の大文字小文字は区別する。
-    /// 無関係な JSON（例 <c>package.json</c>）を「空図」として読み込み、誤解釈・上書きするのを防ぐ。
+    /// 検証は「読み取り → JSON 解析 → ルートが <c>Version</c>・<c>Schema</c> を持つ JSON オブジェクトか
+    /// → 逆直列化 → 版番号 → Id の重複」の順で、<see cref="JsonStorageService"/> の読込仕様に合わせ
+    /// キー名の大文字小文字は区別する。無関係な JSON（例 <c>package.json</c>）を「空図」として読み込み、
+    /// 誤解釈・上書きするのを防ぐ。
     /// <para>
     /// フォーマット版の判定（<see cref="DiagramDocument.IsNewerFormat"/>）は含まない。新フォーマットを
     /// 拒否するか警告して続行するかは経路ごとに異なるため、読み込んだ文書を見て呼び出し側が決める。
+    /// </para>
+    /// <para>
+    /// <b>逆直列化とルートキーの評価も try の内側で行う。</b>JSON のキー重複は
+    /// <see cref="JsonNode"/> の遅延評価のため <see cref="JsonNode.Parse(string, JsonNodeOptions?, JsonDocumentOptions)"/>
+    /// では出ず、ルートオブジェクトのキーへ最初に触れた時点で <see cref="ArgumentException"/> として現れる。
+    /// プロパティの型不一致（<see cref="JsonException"/>）も含め、これらを外へ漏らすと呼び出し側は
+    /// 種別を持てず「読めなかった」以上のことを言えなくなる。
     /// </para>
     /// </remarks>
     /// <param name="path">読み込むファイルパス</param>
@@ -120,7 +137,8 @@ public static class JsonStorageService
     /// <param name="error">失敗の種別（成功時は <see cref="DocumentLoadError.None"/>）</param>
     /// <param name="exception">
     /// 失敗の原因となった例外。<see cref="DocumentLoadError.ReadFailed"/>・
-    /// <see cref="DocumentLoadError.InvalidJson"/> のときだけ非 null で、形式検証で弾いた場合と成功時は null。
+    /// <see cref="DocumentLoadError.InvalidJson"/>・<see cref="DocumentLoadError.DuplicateId"/>
+    /// のときだけ非 null で、形式検証で弾いた場合と成功時は null。
     /// </param>
     /// <returns>読み込めた場合は <c>true</c></returns>
     public static bool TryLoad(
@@ -147,27 +165,159 @@ public static class JsonStorageService
             return false;
         }
 
-        JsonNode? root;
+        DiagramDocument loaded;
 
         try
         {
-            root = JsonNode.Parse(json);
+            var root = JsonNode.Parse(json);
+
+            // ルートキーへ最初に触れるのはここ（キー重複の ArgumentException が出るのもここ）
+            if (
+                root is not JsonObject obj
+                || obj["Version"] is null
+                || obj["Schema"] is not JsonObject
+            )
+            {
+                error = DocumentLoadError.NotDiagramDocument;
+                return false;
+            }
+
+            loaded = Deserialize(json);
         }
-        catch (JsonException ex)
+        catch (Exception ex) when (ex is JsonException or ArgumentException)
         {
             error = DocumentLoadError.InvalidJson;
             exception = ex;
             return false;
         }
 
-        if (root is not JsonObject obj || obj["Version"] is null || obj["Schema"] is not JsonObject)
+        // 版番号は 1 始まり。0・負数を黙って受理すると、Version キーを持つだけの無関係な JSON が
+        // 「この版より古い文書」として通り、保存で図ファイルへ化ける
+        if (loaded.Version < 1)
         {
             error = DocumentLoadError.NotDiagramDocument;
             return false;
         }
 
-        document = Deserialize(json);
+        // Id の重複は修復せず拒否する（理由は FindDuplicateId）
+        if (FindDuplicateId(loaded.Schema) is { } duplicate)
+        {
+            error = DocumentLoadError.DuplicateId;
+            exception = new InvalidDataException(duplicate);
+            return false;
+        }
+
+        document = loaded;
         return true;
+    }
+
+    /// <summary>エンティティ Id・列 Id の重複を探し、最初に見つかった重複の説明を返す（無ければ null）</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>修復はしない。</b>重複 Id を持つ図ファイルを作る経路はアプリ側に無く（GUI・MCP ツール・
+    /// 各種取込はいずれも新しい Guid を採る）、起こるのは JSON の手編集だけなので、Id を勝手に
+    /// 張り替えて意味を推測するより、どこが重複しているかを名指しして読込を断るほうが直せる。
+    /// </para>
+    /// <para>
+    /// 検査対象はエンティティ Id と列 Id の 2 つだけ（列 Id は同一テーブル内とテーブル間の双方を見る）。
+    /// この 2 つは辞書のキーにされ、リレーション・一意制約・主キー順・クエリからの参照先にもなるため、
+    /// 重複したまま読み込むと上書き保存（レイアウト辞書の構築）が毎回失敗し、例外を握り潰す自動保存も
+    /// 一度も成功しない＝作業内容を保存する手段が両方とも消える。リレーション・一意制約・クエリ自身の
+    /// Id は参照も辞書化もされないため検査しない。
+    /// </para>
+    /// <para>
+    /// 説明文は例外メッセージと同じ扱いで英語固定とし、利用者向けの見出しは表示側（GUI の resx・
+    /// CLI / MCP の応答文言）が付ける。
+    /// </para>
+    /// </remarks>
+    private static string? FindDuplicateId(ErDiagram schema)
+    {
+        var tableByEntityId = new Dictionary<Guid, string>();
+        var ownerByColumnId = new Dictionary<Guid, (string Table, string Column)>();
+
+        foreach (var entity in schema.Entities)
+        {
+            if (tableByEntityId.TryGetValue(entity.Id, out var existingTable))
+            {
+                return $"Duplicate entity Id '{entity.Id}' is used by table '{existingTable}' and table '{entity.TableName}'.";
+            }
+
+            tableByEntityId.Add(entity.Id, entity.TableName);
+
+            var columnsInEntity = new Dictionary<Guid, string>();
+
+            foreach (var column in entity.Columns)
+            {
+                // 同一テーブル内の重複（テーブル間の検査とは別に見る＝報告する情報が違う）
+                if (columnsInEntity.TryGetValue(column.Id, out var siblingColumn))
+                {
+                    return $"Duplicate column Id '{column.Id}' in table '{entity.TableName}' is used by column '{siblingColumn}' and column '{column.Name}'.";
+                }
+
+                columnsInEntity.Add(column.Id, column.Name);
+
+                // テーブルをまたぐ重複（列は図の全体で一意でなければ参照の引き当てが割れる）
+                if (ownerByColumnId.TryGetValue(column.Id, out var owner))
+                {
+                    return $"Duplicate column Id '{column.Id}' is used by column '{owner.Column}' of table '{owner.Table}' and column '{column.Name}' of table '{entity.TableName}'.";
+                }
+
+                ownerByColumnId.Add(column.Id, (entity.TableName, column.Name));
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>ファイルの保存フォーマット版（ルートの <c>Version</c>）だけを読み取る</summary>
+    /// <remarks>
+    /// <b>意図的に軽い。</b>ルートを <see cref="JsonNode"/> として読んで <c>Version</c> を見るだけで、
+    /// 逆直列化も Id の重複検査も通さない。用途は「これから上書きするファイルが、この版で書き戻すと
+    /// 情報を落とす相手か」を保存のたびに確かめること（<see cref="DiagramDocument.IsNewerFormat"/> と
+    /// 同じ判定を、文書を読み込まずに行う）で、保存経路へ重い検証を持ち込むためのものではない。
+    /// <para>
+    /// 戻り値は 3 状態を区別する。<c>false</c>＝版を名乗っていない（ファイル不在・読み取り失敗・
+    /// JSON でない・<c>Version</c> キーが無い）。<c>true</c> かつ <paramref name="version"/> が非 null＝
+    /// その版。<c>true</c> かつ <c>null</c>＝<b>版を名乗っているのに解釈できない</b>
+    /// （<c>"2"</c>・<c>2.0</c>・<see cref="int"/> に収まらない値。この版が書く形ではないので、
+    /// 別の版か手編集のファイル）。
+    /// </para>
+    /// <para>
+    /// 解釈できない版を「将来版ではない」と読むと、保存先が現在の文書でない場合（「名前を付けて保存」で
+    /// 既存ファイルを選んだ場合）に内容ハッシュ照合の網も掛からず、確認なしで上書きしてしまう。
+    /// 呼び出し側は安全側＝確認する側へ倒すこと。
+    /// </para>
+    /// </remarks>
+    /// <param name="path">読み取るファイルパス</param>
+    /// <param name="version">読み取った保存フォーマット版（版を名乗っているが解釈できない場合は <c>null</c>）</param>
+    /// <returns>ルートが <c>Version</c> キーを持っていた場合は <c>true</c></returns>
+    public static bool TryReadFormatVersion(string path, out int? version)
+    {
+        version = null;
+
+        try
+        {
+            if (
+                JsonNode.Parse(File.ReadAllText(path)) is not JsonObject root
+                || root["Version"] is not JsonValue value
+            )
+            {
+                return false;
+            }
+
+            // 版を名乗ってはいるので true。int として読めたときだけ値を持ち帰る
+            if (value.TryGetValue(out int parsed))
+            {
+                version = parsed;
+            }
+
+            return true;
+        }
+        catch
+        {
+            // 版が読めないことは呼び出し側の主処理（保存）を妨げない
+            return false;
+        }
     }
 
     /// <summary>JSON 文字列を保存文書へ逆直列化し、非 null 契約を満たすよう正規化する</summary>
