@@ -1600,18 +1600,26 @@ Points worth knowing:
 
 You can additionally output an API-reference Markdown that shares the base name of the generated code. Enable it with the "Output an API reference (.g.md)" checkbox in the GUI's generation dialog, or the CLI's `--generate-api-docs` flag (**default OFF**). It can always be chosen independently of the DB-access selection (None / QuickER Repository / EF Core Repository).
 
-When enabled, one `.g.md` with the same base name as the `.g.cs` is output (e.g. `EcOrder.g.cs` → `EcOrder.g.md`). In per-category split mode it becomes the fixed name `ApiDocs.g.md` (the Japanese version is `ApiDocs.ja.g.md`), in the same style as the fixed names such as `Entities.g.cs`. The contents are as follows.
+When enabled, the Markdown shares the base name of the `.g.cs`: the English version is `.g.md` and the Japanese version is `.ja.g.md` (e.g. `EcOrder.g.cs` → `EcOrder.g.md` / `EcOrder.ja.g.md`). In per-category split mode they become the fixed names `ApiDocs.g.md` / `ApiDocs.ja.g.md`, in the same style as the fixed names such as `Entities.g.cs`. The contents are as follows.
 
 - A list of entities and, for each entity, a property table (including the DB type token, such as `string(50)` / `decimal(10,2)`).
 - The repository contracts (`IRepository<TEntity, TKey>` and the per-entity interfaces) — included only in a configuration that generates the Repository contracts.
 - Usage examples of DI registration, CRUD, and queries — likewise included only in a configuration that generates the Repository contracts (these sections are omitted when DB access is "None").
 - A generated-file layout table.
 
-**English is the canonical version.** If you also want a Japanese version, enable the GUI's sub-checkbox "Also output a Japanese version", or the CLI's `--api-docs-ja` flag (config key `IncludeJapaneseApiDocs`) (**default OFF**; requires `--generate-api-docs`). When enabled, a `.ja.g.md` is produced alongside the canonical English `.g.md` (e.g. `EcOrder.g.cs` → `EcOrder.ja.g.md`).
+The language is chosen with the GUI's "Language" option (English / Japanese / Both), or the CLI's `--api-docs-lang` flag (config key `ApiDocsLanguage`, values `English` / `Japanese` / `Both`; **default `English`**; requires `--generate-api-docs`).
+
+| `ApiDocsLanguage` | Files written |
+|---|---|
+| `English` | `EcOrder.g.md` |
+| `Japanese` | `EcOrder.ja.g.md` |
+| `Both` | `EcOrder.g.md` and `EcOrder.ja.g.md` |
+
+The Japanese version keeps the `.ja.g.md` name even when it is the only one written, so switching the language never renames a file. Both versions have the same structure and contents; only the headings and prose differ. In the settings file the value is a name and is case-insensitive (`"ApiDocsLanguage": "Japanese"`).
 
 By default the Markdown lands in the output directory itself. `--api-docs-subdir` (config key `ApiDocsSubdirectory`) moves it into a subfolder, as a relative path under the output directory (e.g. `docs`; several segments are allowed, absolute paths and `..` are rejected). This works in every output mode — with layered output it keeps the documentation out of the layer projects.
 
-The file name can be changed with `--api-docs-file` (config key `ApiDocsFileName`) — for example `--api-docs-file Api.md` yields `Api.g.md` (and `Api.ja.g.md` for the Japanese version). The extension is normalized to `.g.md`, so `Api`, `Api.md`, and `Api.g.md` all give the same result (overwriting is restricted to `.g.md` / `.g.cs`, so the extension is not left to the input). An explicit name wins in every output mode; when it is blank you get the derived name as before (the output file base name, or `ApiDocs.g.md` when files are split). Only a file name is accepted — a value containing path separators is a generation error (choosing the folder is `--api-docs-subdir`'s job). In the GUI it is the "Output file name" box below "Output subfolder"; **when the box is empty, the name that will actually be used is shown in grey** (it follows the output file name and the output mode).
+The file name can be changed with `--api-docs-file` (config key `ApiDocsFileName`) — for example `--api-docs-file Api.md` yields `Api.g.md` (and `Api.ja.g.md` for the Japanese version). The extension is normalized to `.g.md`, so `Api`, `Api.md`, and `Api.g.md` all give the same result (overwriting is restricted to `.g.md` / `.g.cs`, so the extension is not left to the input). An explicit name wins in every output mode; when it is blank you get the derived name as before (the output file base name, or `ApiDocs.g.md` when files are split). Only a file name is accepted — a value containing path separators is a generation error (choosing the folder is `--api-docs-subdir`'s job). In the GUI it is the "Output file name" box below "Output subfolder"; **when the box is empty, the name that will actually be used is shown in grey** (it follows the output file name, the output mode, and the language).
 
 `.g.md` / `.ja.g.md` are auto-generated files. They are overwritten on regeneration, so do not edit them directly.
 

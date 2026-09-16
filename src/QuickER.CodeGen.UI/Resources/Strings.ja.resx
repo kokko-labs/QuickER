@@ -151,8 +151,17 @@
   <data name="CodeGen_GenerateApiDocs" xml:space="preserve">
     <value>API リファレンス (.g.md) を出力する</value>
   </data>
-  <data name="CodeGen_IncludeJapaneseApiDocs" xml:space="preserve">
-    <value>日本語版を出力する</value>
+  <data name="CodeGen_ApiDocsLanguage" xml:space="preserve">
+    <value>言語</value>
+  </data>
+  <data name="CodeGen_ApiDocsLanguageEnglish" xml:space="preserve">
+    <value>英語</value>
+  </data>
+  <data name="CodeGen_ApiDocsLanguageJapanese" xml:space="preserve">
+    <value>日本語</value>
+  </data>
+  <data name="CodeGen_ApiDocsLanguageBoth" xml:space="preserve">
+    <value>両方</value>
   </data>
   <data name="CodeGen_ApiDocsSubdirectory" xml:space="preserve">
     <value>出力先サブフォルダ</value>
@@ -167,7 +176,7 @@
     <value>API リファレンス Markdown の出力ファイル名。空ならグレーで表示している名前（出力ファイル名から導出。分割出力時は固定名 ApiDocs.g.md）になります。拡張子は .g.md へ正規化され、日本語版は同じベース名の .ja.g.md です。ファイル名だけを指定してください（フォルダは上の欄で指定します）。</value>
   </data>
   <data name="CodeGen_ApiDocsTooltip" xml:space="preserve">
-    <value>スキーマに即した API リファレンス Markdown（英語）を 1 つ追加出力します。ファイル名は非分割時 {ベース名}.g.md・分割時 ApiDocs.g.md（再生成で上書き）</value>
+    <value>スキーマに即した API リファレンス Markdown を、下で選んだ言語で追加出力します。ファイル名は英語版 {ベース名}.g.md・日本語版 {ベース名}.ja.g.md、分割時は ApiDocs.g.md / ApiDocs.ja.g.md（再生成で上書き）</value>
   </data>
   <data name="CodeGen_ExcludeUnboundedBinary" xml:space="preserve">
     <value>無制限バイナリ列を取得しない (varbinary(max) / BLOB)</value>

@@ -381,28 +381,69 @@ public class CSharpGenerationDialogViewModelTests
     }
 
     /// <summary>
-    /// API リファレンス出力（GenerateApiDocs）を OFF にすると、下位の日本語版併産
-    /// （IncludeJapaneseApiDocs）も OFF に連動することを検証する（無効化＋チェック残りの見かけ矛盾を防ぐ）
+    /// 言語ラジオ 3 つが ApiDocsLanguage と相互に同期し、外れた側の false 通知では言語が変わらないことを検証する
     /// </summary>
-    [Fact(DisplayName = "API リファレンス出力 OFF で日本語版併産も OFF に連動する")]
-    public void GenerateApiDocs_Off_TurnsOffJapaneseApiDocs()
+    [Fact(DisplayName = "API リファレンスの言語ラジオは ApiDocsLanguage と同期する")]
+    public void ApiDocsLanguageRadios_SyncWithLanguage()
+    {
+        var vm = CreateViewModel(out _);
+
+        vm.ApiDocsLanguage.Should().Be(ApiDocsLanguage.English, "既定は英語");
+        vm.ApiDocsEnglish.Should().BeTrue();
+
+        var changed = new List<string?>();
+        vm.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+
+        vm.ApiDocsJapanese = true;
+        vm.ApiDocsLanguage.Should().Be(ApiDocsLanguage.Japanese);
+        vm.ApiDocsEnglish.Should().BeFalse();
+        vm.ApiDocsBoth.Should().BeFalse();
+        changed
+            .Should()
+            .Contain([
+                nameof(vm.ApiDocsEnglish),
+                nameof(vm.ApiDocsJapanese),
+                nameof(vm.ApiDocsBoth),
+                nameof(vm.ApiDocsFileNameHint),
+            ]);
+
+        // WPF のラジオは外れた側へ false を書き戻す。それで言語が変わってはいけない
+        vm.ApiDocsEnglish = false;
+        vm.ApiDocsLanguage.Should().Be(ApiDocsLanguage.Japanese);
+
+        vm.ApiDocsBoth = true;
+        vm.ApiDocsLanguage.Should().Be(ApiDocsLanguage.Both);
+        vm.ToOptions().ApiDocsLanguage.Should().Be(ApiDocsLanguage.Both);
+    }
+
+    /// <summary>
+    /// API リファレンス出力を OFF にしても言語の選択は保持され、再び ON にしたとき元の言語で出ることを検証する
+    /// （隠れている間の値は GenerateApiDocs=false のため生成に効かない）
+    /// </summary>
+    [Fact(DisplayName = "API リファレンス出力 OFF でも言語の選択は保持される")]
+    public void GenerateApiDocs_Off_KeepsLanguage()
     {
         var vm = CreateViewModel(out _);
 
         vm.GenerateApiDocs = true;
-        vm.IncludeJapaneseApiDocs = true;
+        vm.ApiDocsJapanese = true;
 
-        // 親を OFF にすると子（日本語版併産）も OFF に戻る
         vm.GenerateApiDocs = false;
-        vm.IncludeJapaneseApiDocs.Should().BeFalse("親 OFF で子も OFF に連動する");
+        vm.ApiDocsLanguage.Should().Be(ApiDocsLanguage.Japanese);
+
+        vm.GenerateApiDocs = true;
+        vm.ApiDocsJapanese.Should().BeTrue();
     }
 
     /// <summary>
-    /// 外部編集された設定ファイルが「親 OFF＋子 ON」の組み合わせでも、復元時に
-    /// 「親 OFF なら子も OFF」の UI 不変条件へクランプされることを検証する
+    /// 保存した言語が復元され、外部編集で未定義の数値が入っていた場合はどのラジオも選ばれない表示にならず
+    /// 既定（英語）へ戻ることを検証する
     /// </summary>
-    [Fact(DisplayName = "設定復元時は親 OFF なら日本語版併産もクランプして OFF になる")]
-    public void IncludeJapaneseApiDocs_RestoreClampsToGenerateApiDocs()
+    [Theory(DisplayName = "設定復元時は言語を復元し、未定義の値は英語へ戻す")]
+    [InlineData(ApiDocsLanguage.Japanese, ApiDocsLanguage.Japanese)]
+    [InlineData(ApiDocsLanguage.Both, ApiDocsLanguage.Both)]
+    [InlineData((ApiDocsLanguage)99, ApiDocsLanguage.English)]
+    public void ApiDocsLanguage_RestoresSavedValue(ApiDocsLanguage saved, ApiDocsLanguage expected)
     {
         var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
 
@@ -410,17 +451,12 @@ public class CSharpGenerationDialogViewModelTests
         {
             var store = new CSharpGenerationSettingsStore(folder);
             store.Save(
-                new CSharpGenerationSettings
-                {
-                    GenerateApiDocs = false,
-                    IncludeJapaneseApiDocs = true,
-                }
+                new CSharpGenerationSettings { GenerateApiDocs = true, ApiDocsLanguage = saved }
             );
 
             var vm = new CSharpGenerationDialogViewModel(store);
 
-            vm.GenerateApiDocs.Should().BeFalse();
-            vm.IncludeJapaneseApiDocs.Should().BeFalse("親 OFF の保存値は子もクランプして復元する");
+            vm.ApiDocsLanguage.Should().Be(expected);
         }
         finally
         {
@@ -2148,9 +2184,15 @@ public class CSharpGenerationDialogViewModelTests
         vm.OutputPath = @"C:\temp\Other.g.cs";
         vm.ApiDocsFileNameHint.Should().Be("Other.g.md");
 
+        // 言語に追従する（日本語だけなら .ja.g.md・両方なら 2 つを「 / 」区切り）
+        vm.ApiDocsLanguage = ApiDocsLanguage.Japanese;
+        vm.ApiDocsFileNameHint.Should().Be("Other.ja.g.md");
+        vm.ApiDocsLanguage = ApiDocsLanguage.Both;
+        vm.ApiDocsFileNameHint.Should().Be("Other.g.md / Other.ja.g.md");
+
         // 分割出力では固定名になる
         vm.SplitFilesByCategory = true;
-        vm.ApiDocsFileNameHint.Should().Be("ApiDocs.g.md");
+        vm.ApiDocsFileNameHint.Should().Be("ApiDocs.g.md / ApiDocs.ja.g.md");
 
         // 明示指定があるとプレースホルダは出さない
         vm.ApiDocsFileName = "Reference";

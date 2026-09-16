@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## プロジェクト概要
 
-QuickER は WPF 製の ER 図デザイナ。DB スキーマのインポート／DDL 生成（SQL Server / PostgreSQL / MySQL / Oracle / SQLite の5方言）、Scriban テンプレートによる C# コード生成、AI チャットによる図の操作（MCP サーバ内蔵）、外部 AI エージェント向け stdio MCP サーバ（CLI `quicker mcp`）を持つ。コメント・コミットメッセージは日本語。ただし**生成物（.g.cs の XmlDoc・コメント・実行時例外メッセージ、.g.md）に埋め込む固定文は英語が正本**（製品の中立言語＝resx の中立と同じ英語。テンプレート `Templates/CSharpRuntime/*.scriban` 内の全コメントは生成出力そのものなので英語で書く。図の Description 由来のユーザーデータは無加工。API リファレンスは `IncludeJapaneseApiDocs`／CLI `--api-docs-ja` で日本語版 `{ベース名}.ja.g.md` を併産可能＝テンプレート対訳ペア `ApiReferenceDoc.scriban`/`ApiReferenceDoc.ja.scriban` は構造パリティテストが同時更新を強制。生成出力の CJK 混入は GeneratedOutputEnglishGuardTests が検知）。**samples/ 配下は手書きコード（Program.cs のコメント・出力・データ）・図の Description も英語**（生成物と同居する国際向けショーケースのため。サンプルの README.ja.md のみ日本語）。
+QuickER は WPF 製の ER 図デザイナ。DB スキーマのインポート／DDL 生成（SQL Server / PostgreSQL / MySQL / Oracle / SQLite の5方言）、Scriban テンプレートによる C# コード生成、AI チャットによる図の操作（MCP サーバ内蔵）、外部 AI エージェント向け stdio MCP サーバ（CLI `quicker mcp`）を持つ。コメント・コミットメッセージは日本語。ただし**生成物（.g.cs の XmlDoc・コメント・実行時例外メッセージ、.g.md）に埋め込む固定文は英語が正本**（製品の中立言語＝resx の中立と同じ英語。テンプレート `Templates/CSharpRuntime/*.scriban` 内の全コメントは生成出力そのものなので英語で書く。図の Description 由来のユーザーデータは無加工。API リファレンスは `ApiDocsLanguage`（English / Japanese / Both）／CLI `--api-docs-lang` で日本語版 `{ベース名}.ja.g.md` だけ・両方も出力可能＝テンプレート対訳ペア `ApiReferenceDoc.scriban`/`ApiReferenceDoc.ja.scriban` は構造パリティテストが同時更新を強制。生成出力の CJK 混入は GeneratedOutputEnglishGuardTests が検知）。**samples/ 配下は手書きコード（Program.cs のコメント・出力・データ）・図の Description も英語**（生成物と同居する国際向けショーケースのため。サンプルの README.ja.md のみ日本語）。
 
 ## コマンド
 

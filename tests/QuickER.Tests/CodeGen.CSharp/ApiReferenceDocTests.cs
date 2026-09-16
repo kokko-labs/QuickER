@@ -179,7 +179,7 @@ public sealed class ApiReferenceDocTests
         {
             OutputFileName = "EcOrder.g.cs",
             GenerateApiDocs = true,
-            IncludeJapaneseApiDocs = true,
+            ApiDocsLanguage = ApiDocsLanguage.Both,
             SplitFilesByCategory = true,
         };
 
@@ -401,16 +401,20 @@ public sealed class ApiReferenceDocTests
         markdown.Should().NotContain("## データアクセス API");
     }
 
-    [Fact(
-        DisplayName = "IncludeJapaneseApiDocs=true で英語 .g.md と日本語 .ja.g.md の 2 ファイルが出る"
-    )]
-    public void JapaneseOptIn_EmitsBothEnglishAndJapaneseFiles()
+    [Theory(DisplayName = "ApiDocsLanguage が指す言語の Markdown だけが英語→日本語の順で出る")]
+    [InlineData(ApiDocsLanguage.English, new[] { "EcOrder.g.md" })]
+    [InlineData(ApiDocsLanguage.Japanese, new[] { "EcOrder.ja.g.md" })]
+    [InlineData(ApiDocsLanguage.Both, new[] { "EcOrder.g.md", "EcOrder.ja.g.md" })]
+    public void ApiDocsLanguage_EmitsOnlySelectedLanguages(
+        ApiDocsLanguage language,
+        string[] expectedFileNames
+    )
     {
         var options = new CodeGenerationOptions
         {
             OutputFileName = "EcOrder.g.cs",
             GenerateApiDocs = true,
-            IncludeJapaneseApiDocs = true,
+            ApiDocsLanguage = language,
             GenerateRepositories = true,
         };
 
@@ -423,7 +427,84 @@ public sealed class ApiReferenceDocTests
             )
             .Select(file => file.FileName)
             .Should()
-            .BeEquivalentTo(["EcOrder.g.md", "EcOrder.ja.g.md"]);
+            .Equal(expectedFileNames);
+    }
+
+    [Fact(DisplayName = "ApiDocsLanguage の既定は English（英語版だけ）")]
+    public void ApiDocsLanguage_DefaultsToEnglish()
+    {
+        new CodeGenerationOptions().ApiDocsLanguage.Should().Be(ApiDocsLanguage.English);
+    }
+
+    [Fact(DisplayName = "日本語だけのとき、.ja.g.md は両方出すときと同じ日本語の内容になる")]
+    public void JapaneseOnly_ContentMatchesJapaneseOfBoth()
+    {
+        var japaneseOnly = Generate(
+            BuildDiagram(),
+            new CodeGenerationOptions
+            {
+                GenerateApiDocs = true,
+                ApiDocsLanguage = ApiDocsLanguage.Japanese,
+                GenerateRepositories = true,
+            }
+        );
+        var both = Generate(
+            BuildDiagram(),
+            new CodeGenerationOptions
+            {
+                GenerateApiDocs = true,
+                ApiDocsLanguage = ApiDocsLanguage.Both,
+                GenerateRepositories = true,
+            }
+        );
+
+        japaneseOnly.HasErrors.Should().BeFalse();
+        EnglishMarkdownFile(japaneseOnly).Should().BeNull();
+        var markdown = JapaneseMarkdownFile(japaneseOnly)!.Content;
+        markdown.Should().Contain("## データアクセス API");
+        markdown.Should().Be(JapaneseMarkdownFile(both)!.Content);
+    }
+
+    [Fact(
+        DisplayName = "未定義の ApiDocsLanguage は生成時診断エラーで止まり、Markdown もコードも出ない"
+    )]
+    public void ApiDocsLanguage_Undefined_IsDiagnosticError()
+    {
+        var result = Generate(
+            BuildDiagram(),
+            new CodeGenerationOptions
+            {
+                GenerateApiDocs = true,
+                ApiDocsLanguage = (ApiDocsLanguage)99,
+            }
+        );
+
+        result.HasErrors.Should().BeTrue();
+        result
+            .Diagnostics.Should()
+            .ContainSingle(diagnostic =>
+                diagnostic.Severity == GenerationDiagnosticSeverity.Error
+                && diagnostic.Message.Contains("ApiDocsLanguage")
+                && diagnostic.Message.Contains("99")
+            );
+        result.Files.Should().BeEmpty();
+    }
+
+    [Fact(
+        DisplayName = "GenerateApiDocs=false なら未定義の ApiDocsLanguage でもエラーにしない（意味を持たないため）"
+    )]
+    public void ApiDocsLanguage_Undefined_WithoutApiDocs_IsIgnored()
+    {
+        var result = Generate(
+            BuildDiagram(),
+            new CodeGenerationOptions
+            {
+                GenerateApiDocs = false,
+                ApiDocsLanguage = (ApiDocsLanguage)99,
+            }
+        );
+
+        result.HasErrors.Should().BeFalse();
     }
 
     [Fact(DisplayName = "日本語版（.ja.g.md）は日本語の見出しと DI 説明を含む")]
@@ -432,7 +513,7 @@ public sealed class ApiReferenceDocTests
         var options = new CodeGenerationOptions
         {
             GenerateApiDocs = true,
-            IncludeJapaneseApiDocs = true,
+            ApiDocsLanguage = ApiDocsLanguage.Both,
             GenerateRepositories = true,
         };
 
@@ -451,14 +532,14 @@ public sealed class ApiReferenceDocTests
     }
 
     [Fact(
-        DisplayName = "GenerateApiDocs=false のとき IncludeJapaneseApiDocs=true でも Markdown は一切出ない"
+        DisplayName = "GenerateApiDocs=false のとき ApiDocsLanguage=Both でも Markdown は一切出ない"
     )]
-    public void JapaneseOptIn_WithoutApiDocs_EmitsNoMarkdown()
+    public void ApiDocsLanguage_WithoutApiDocs_EmitsNoMarkdown()
     {
         var options = new CodeGenerationOptions
         {
             GenerateApiDocs = false,
-            IncludeJapaneseApiDocs = true,
+            ApiDocsLanguage = ApiDocsLanguage.Both,
         };
 
         var result = Generate(BuildDiagram(), options);
@@ -481,7 +562,7 @@ public sealed class ApiReferenceDocTests
             new CodeGenerationOptions
             {
                 GenerateApiDocs = true,
-                IncludeJapaneseApiDocs = true,
+                ApiDocsLanguage = ApiDocsLanguage.Both,
                 ApiDocsSubdirectory = "docs",
             }
         );
@@ -569,7 +650,7 @@ public sealed class ApiReferenceDocTests
             {
                 OutputFileName = "EcOrder.g.cs",
                 GenerateApiDocs = true,
-                IncludeJapaneseApiDocs = true,
+                ApiDocsLanguage = ApiDocsLanguage.Both,
                 ApiDocsFileName = fileName,
             }
         );
@@ -588,7 +669,7 @@ public sealed class ApiReferenceDocTests
             {
                 OutputFileName = "EcOrder.g.cs",
                 GenerateApiDocs = true,
-                IncludeJapaneseApiDocs = true,
+                ApiDocsLanguage = ApiDocsLanguage.Both,
                 SplitFilesByCategory = true,
                 ApiDocsFileName = "Reference",
             }
@@ -673,7 +754,7 @@ public sealed class ApiReferenceDocTests
             {
                 OutputFileName = "EcOrder.g.cs",
                 GenerateApiDocs = true,
-                IncludeJapaneseApiDocs = true,
+                ApiDocsLanguage = ApiDocsLanguage.Both,
             }
         );
 
@@ -682,27 +763,41 @@ public sealed class ApiReferenceDocTests
         JapaneseMarkdownFile(result)!.FileName.Should().Be("EcOrder.ja.g.md");
     }
 
-    [Fact(
-        DisplayName = "ResolveApiDocsFileName は実出力のファイル名と一致する（GUI プレースホルダの正）"
+    [Theory(
+        DisplayName = "ResolveApiDocsFileNames は実出力のファイル名の並びと一致する（GUI プレースホルダの正）"
     )]
-    public void ResolveApiDocsFileName_MatchesEmittedName()
+    [InlineData(ApiDocsLanguage.English, false)]
+    [InlineData(ApiDocsLanguage.Japanese, false)]
+    [InlineData(ApiDocsLanguage.Both, false)]
+    [InlineData(ApiDocsLanguage.English, true)]
+    [InlineData(ApiDocsLanguage.Japanese, true)]
+    [InlineData(ApiDocsLanguage.Both, true)]
+    public void ResolveApiDocsFileNames_MatchesEmittedNames(
+        ApiDocsLanguage language,
+        bool splitFilesByCategory
+    )
     {
         var options = new CodeGenerationOptions
         {
             OutputFileName = "EcOrder.g.cs",
             GenerateApiDocs = true,
+            ApiDocsLanguage = language,
+            SplitFilesByCategory = splitFilesByCategory,
         };
 
         var result = Generate(BuildDiagram(), options);
 
+        result.HasErrors.Should().BeFalse();
         CSharpCodeGenerationService
-            .ResolveApiDocsFileName(options)
+            .ResolveApiDocsFileNames(options)
             .Should()
-            .Be(MarkdownFile(result)!.FileName);
-        CSharpCodeGenerationService
-            .ResolveApiDocsFileName(options with { SplitFilesByCategory = true })
-            .Should()
-            .Be("ApiDocs.g.md");
+            .Equal(
+                result
+                    .Files.Where(file =>
+                        file.FileName.EndsWith(".g.md", StringComparison.OrdinalIgnoreCase)
+                    )
+                    .Select(file => file.FileName)
+            );
     }
 
     [Fact(DisplayName = "GeneratedFileWriter は .g.md をサブフォルダへ書き出せる")]

@@ -520,24 +520,21 @@
                   ToolTip="{x:Static res:Strings.CodeGen_ApiDocsTooltip}"
                 />
                 <!--
-                  下位オプション（日本語版の併産・出力先サブフォルダ）は API リファレンス出力 ON のときだけ表示する
-                  （層フォルダ欄と同じ流儀＝使わない構成では欄ごと畳む。親 OFF 時の値は VM 側がクランプ／無視する）
+                  下位オプション（言語・出力先サブフォルダ・出力ファイル名）は API リファレンス出力 ON のときだけ表示する
+                  （層フォルダ欄と同じ流儀＝使わない構成では欄ごと畳む。親 OFF の間も値は保持するが生成には効かない）
                 -->
                 <StackPanel
                   Margin="18,8,0,0"
                   Visibility="{Binding GenerateApiDocs, Converter={StaticResource BoolToVisibilityConverter}}"
                 >
-                  <CheckBox
-                    Content="{x:Static res:Strings.CodeGen_IncludeJapaneseApiDocs}"
-                    IsChecked="{Binding IncludeJapaneseApiDocs}"
-                  />
-                  <!-- API リファレンスの出力先サブフォルダ（空＝出力フォルダ直下）と出力ファイル名（空＝導出名） -->
-                  <Grid Margin="0,8,0,0">
+                  <!-- 出力言語（排他選択）・出力先サブフォルダ（空＝出力フォルダ直下）・出力ファイル名（空＝導出名） -->
+                  <Grid>
                     <Grid.ColumnDefinitions>
                       <ColumnDefinition Width="130" />
                       <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
                     <Grid.RowDefinitions>
+                      <RowDefinition Height="Auto" />
                       <RowDefinition Height="Auto" />
                       <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
@@ -546,18 +543,47 @@
                       Grid.Column="0"
                       VerticalAlignment="Center"
                       Style="{StaticResource FieldLabel}"
+                      Text="{x:Static res:Strings.CodeGen_ApiDocsLanguage}"
+                    />
+                    <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal">
+                      <RadioButton
+                        Margin="0,0,18,0"
+                        Content="{x:Static res:Strings.CodeGen_ApiDocsLanguageEnglish}"
+                        GroupName="ApiDocsLanguage"
+                        IsChecked="{Binding ApiDocsEnglish}"
+                      />
+                      <RadioButton
+                        Margin="0,0,18,0"
+                        Content="{x:Static res:Strings.CodeGen_ApiDocsLanguageJapanese}"
+                        GroupName="ApiDocsLanguage"
+                        IsChecked="{Binding ApiDocsJapanese}"
+                      />
+                      <RadioButton
+                        Content="{x:Static res:Strings.CodeGen_ApiDocsLanguageBoth}"
+                        GroupName="ApiDocsLanguage"
+                        IsChecked="{Binding ApiDocsBoth}"
+                      />
+                    </StackPanel>
+
+                    <TextBlock
+                      Grid.Row="1"
+                      Grid.Column="0"
+                      Margin="0,8,8,0"
+                      VerticalAlignment="Center"
+                      Style="{StaticResource FieldLabel}"
                       Text="{x:Static res:Strings.CodeGen_ApiDocsSubdirectory}"
                     />
                     <TextBox
-                      Grid.Row="0"
+                      Grid.Row="1"
                       Grid.Column="1"
+                      Margin="0,8,0,0"
                       Style="{StaticResource FormInput}"
                       Text="{Binding ApiDocsSubdirectory, UpdateSourceTrigger=PropertyChanged}"
                       ToolTip="{x:Static res:Strings.CodeGen_ApiDocsSubdirectoryToolTip}"
                     />
 
                     <TextBlock
-                      Grid.Row="1"
+                      Grid.Row="2"
                       Grid.Column="0"
                       Margin="0,8,8,0"
                       VerticalAlignment="Center"
@@ -568,7 +594,7 @@
                       空欄のときは導出される既定名をグレーで重ねて見せる（プレースホルダ）。
                       入力があるとその名前で固定されるため、既定へ戻すには欄を空にする
                     -->
-                    <Grid Grid.Row="1" Grid.Column="1" Margin="0,8,0,0">
+                    <Grid Grid.Row="2" Grid.Column="1" Margin="0,8,0,0">
                       <TextBox
                         Style="{StaticResource FormInput}"
                         Text="{Binding ApiDocsFileName, UpdateSourceTrigger=PropertyChanged}"

@@ -2,6 +2,7 @@ using System.CommandLine;
 using System.CommandLine.Parsing;
 using System.Text.Json.Nodes;
 using QuickER.Cli.Resources;
+using QuickER.CodeGen.CSharp;
 
 namespace QuickER.Cli;
 
@@ -140,7 +141,12 @@ internal sealed class GenerationOptionSet
         // ランタイム・ドキュメント
         AddBool("UseRuntimePackages", "--use-runtime-packages", Strings.Cli_Opt_UseRuntimePackages);
         AddBool("GenerateApiDocs", "--generate-api-docs", Strings.Cli_Opt_GenerateApiDocs);
-        AddBool("IncludeJapaneseApiDocs", "--api-docs-ja", Strings.Cli_Opt_IncludeJapaneseApiDocs);
+        AddString(
+            "ApiDocsLanguage",
+            "--api-docs-lang",
+            Strings.Cli_Opt_ApiDocsLanguage,
+            Enum.GetNames<ApiDocsLanguage>()
+        );
         AddString("ApiDocsSubdirectory", "--api-docs-subdir", Strings.Cli_Opt_ApiDocsSubdirectory);
         AddString("ApiDocsFileName", "--api-docs-file", Strings.Cli_Opt_ApiDocsFileName);
 
@@ -223,8 +229,29 @@ internal sealed class GenerationOptionSet
     }
 
     /// <summary>文字列フラグを追加する</summary>
-    private void AddString(string key, string flag, string description) =>
-        _stringFlags.Add((key, new Option<string?>(flag) { Description = description }));
+    /// <param name="key">上書きする設定キー</param>
+    /// <param name="flag">CLI フラグ名</param>
+    /// <param name="description">ヘルプに出す説明</param>
+    /// <param name="allowedValues">
+    /// 取り得る値が決まっているキー（列挙値）の値一覧。指定するとヘルプに候補が出て、それ以外の値は
+    /// パース時点でエラーになる（設定 JSON のデシリアライズまで持ち越さない）
+    /// </param>
+    private void AddString(
+        string key,
+        string flag,
+        string description,
+        IReadOnlyList<string>? allowedValues = null
+    )
+    {
+        var option = new Option<string?>(flag) { Description = description };
+
+        if (allowedValues is not null)
+        {
+            option.AcceptOnlyFromAmong([.. allowedValues]);
+        }
+
+        _stringFlags.Add((key, option));
+    }
 
     /// <summary>三値 bool フラグを追加する</summary>
     private void AddBool(string key, string flag, string description) =>

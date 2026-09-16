@@ -148,10 +148,10 @@ public class CSharpGenerationSettings
     public bool GenerateApiDocs { get; set; }
 
     /// <summary>
-    /// 日本語版 API リファレンス Markdown（.ja.g.md）も併産するか（既定 false）。
-    /// 実効は <see cref="GenerateApiDocs"/> が true のときに限る（正本は英語）
+    /// API リファレンス Markdown を出力する言語（既定 英語）。
+    /// <see cref="GenerateApiDocs"/> が true のときのみ実効
     /// </summary>
-    public bool IncludeJapaneseApiDocs { get; set; }
+    public ApiDocsLanguage ApiDocsLanguage { get; set; } = ApiDocsLanguage.English;
 
     /// <summary>
     /// API リファレンス Markdown の出力先サブフォルダ（出力ディレクトリからの相対パス）。空なら直下（既定）。
@@ -238,7 +238,7 @@ public class CSharpGenerationSettings
             GenerateRemoteContracts = GenerateRemoteContracts,
             GenerateRemoteServices = GenerateRemoteServices,
             GenerateApiDocs = GenerateApiDocs,
-            IncludeJapaneseApiDocs = IncludeJapaneseApiDocs,
+            ApiDocsLanguage = ApiDocsLanguage,
             // 空＝直下は null へ畳む（生成側の既定＝出力ディレクトリ直下に任せる）
             ApiDocsSubdirectory = NullIfEmpty(ApiDocsSubdirectory),
             // 空＝導出名も同様に null へ畳む（生成側の導出に任せる）

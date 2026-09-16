@@ -572,6 +572,155 @@ public class CliAppTests
         }
     }
 
+    /// <summary>--api-docs-lang Japanese では日本語版 .ja.g.md だけが出力されることを検証する</summary>
+    [Fact(DisplayName = "--api-docs-lang Japanese は日本語版の API リファレンスだけを出力する")]
+    public async Task Generate_ApiDocsLangJapanese_WritesJapaneseOnly()
+    {
+        var (schemaPath, outDir, root) = CreateSampleSchema();
+
+        try
+        {
+            var exit = await CliApp.InvokeAsync([
+                "generate",
+                "--schema",
+                schemaPath,
+                "--out",
+                outDir,
+                "--output-path",
+                "Sample.g.cs",
+                "--generate-api-docs",
+                "--api-docs-lang",
+                "Japanese",
+            ]);
+
+            exit.Should().Be(0);
+            Directory
+                .GetFiles(outDir, "*.g.md")
+                .Select(Path.GetFileName)
+                .Should()
+                .Equal("Sample.ja.g.md");
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>設定ファイルの ApiDocsLanguage は名前（大文字小文字非依存）で読まれることを検証する</summary>
+    [Fact(DisplayName = "--config の ApiDocsLanguage は名前で指定でき大文字小文字を区別しない")]
+    public async Task Generate_ConfigApiDocsLanguage_ReadsNameCaseInsensitively()
+    {
+        var (schemaPath, outDir, root) = CreateSampleSchema();
+        var configPath = Path.Combine(root, "quicker.json");
+        File.WriteAllText(
+            configPath,
+            """{ "OutputFileName": "Sample.g.cs", "GenerateApiDocs": true, "ApiDocsLanguage": "both" }"""
+        );
+
+        try
+        {
+            var exit = await CliApp.InvokeAsync(
+                ["generate", "--schema", schemaPath, "--out", outDir, "--config", configPath],
+                new StringWriter(),
+                new StringWriter()
+            );
+
+            exit.Should().Be(0);
+            Directory
+                .GetFiles(outDir, "*.g.md")
+                .Select(Path.GetFileName)
+                .Should()
+                .BeEquivalentTo("Sample.g.md", "Sample.ja.g.md");
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>--api-docs-lang に候補外の値を渡すと、パースエラーで何も出力しないことを検証する</summary>
+    [Fact(DisplayName = "--api-docs-lang の候補外の値はパースエラーで生成しない")]
+    public async Task Generate_ApiDocsLangInvalid_FailsWithoutOutput()
+    {
+        var (schemaPath, outDir, root) = CreateSampleSchema();
+
+        try
+        {
+            var exit = await CliApp.InvokeAsync(
+                [
+                    "generate",
+                    "--schema",
+                    schemaPath,
+                    "--out",
+                    outDir,
+                    "--generate-api-docs",
+                    "--api-docs-lang",
+                    "French",
+                ],
+                new StringWriter(),
+                new StringWriter()
+            );
+
+            exit.Should().NotBe(0);
+            Directory.Exists(outDir).Should().BeFalse();
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// 廃止したキー IncludeJapaneseApiDocs は読み替えず未知キーとして警告し、既定の英語版だけを出力することを検証する
+    /// （黙って効かなくなるのでなく、警告で気づけることの担保）
+    /// </summary>
+    [Fact(
+        DisplayName = "--config の旧キー IncludeJapaneseApiDocs は未知キー警告になり英語版だけが出る"
+    )]
+    public async Task Generate_ConfigRemovedIncludeJapaneseApiDocs_WarnsAsUnknownKey()
+    {
+        var (schemaPath, outDir, root) = CreateSampleSchema();
+        var configPath = Path.Combine(root, "quicker.json");
+        File.WriteAllText(
+            configPath,
+            """{ "OutputFileName": "Sample.g.cs", "GenerateApiDocs": true, "IncludeJapaneseApiDocs": true }"""
+        );
+        var stderr = new StringWriter();
+
+        try
+        {
+            var exit = await CliApp.InvokeAsync(
+                ["generate", "--schema", schemaPath, "--out", outDir, "--config", configPath],
+                new StringWriter(),
+                stderr
+            );
+
+            exit.Should().Be(0);
+            stderr.ToString().Should().Contain("IncludeJapaneseApiDocs");
+            Directory
+                .GetFiles(outDir, "*.g.md")
+                .Select(Path.GetFileName)
+                .Should()
+                .Equal("Sample.g.md");
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
     /// <summary>未対応プロバイダを指定すると終了コード 1 を返すことを検証する</summary>
     [Fact(DisplayName = "未対応プロバイダ指定は終了コード 1")]
     public async Task Generate_UnknownProvider_ReturnsError()

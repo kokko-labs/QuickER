@@ -151,8 +151,17 @@
   <data name="CodeGen_GenerateApiDocs" xml:space="preserve">
     <value>Output an API reference (.g.md)</value>
   </data>
-  <data name="CodeGen_IncludeJapaneseApiDocs" xml:space="preserve">
-    <value>Also output a Japanese version</value>
+  <data name="CodeGen_ApiDocsLanguage" xml:space="preserve">
+    <value>Language</value>
+  </data>
+  <data name="CodeGen_ApiDocsLanguageEnglish" xml:space="preserve">
+    <value>English</value>
+  </data>
+  <data name="CodeGen_ApiDocsLanguageJapanese" xml:space="preserve">
+    <value>Japanese</value>
+  </data>
+  <data name="CodeGen_ApiDocsLanguageBoth" xml:space="preserve">
+    <value>Both</value>
   </data>
   <data name="CodeGen_ApiDocsSubdirectory" xml:space="preserve">
     <value>Output subfolder</value>
@@ -167,7 +176,7 @@
     <value>File name for the API reference Markdown. Blank = the name shown in grey (derived from the output file name; the fixed ApiDocs.g.md when files are split). The extension is normalized to .g.md and the Japanese version reuses the same base name. File names only — use the subfolder box above for the folder.</value>
   </data>
   <data name="CodeGen_ApiDocsTooltip" xml:space="preserve">
-    <value>Additionally outputs one API reference Markdown (in English) for the diagram's schema. The file is named {baseName}.g.md, or ApiDocs.g.md in split mode (overwritten on regeneration)</value>
+    <value>Additionally outputs an API reference Markdown for the diagram's schema, in the language chosen below. The English version is named {baseName}.g.md and the Japanese version {baseName}.ja.g.md, or ApiDocs.g.md / ApiDocs.ja.g.md in split mode (overwritten on regeneration)</value>
   </data>
   <data name="CodeGen_ExcludeUnboundedBinary" xml:space="preserve">
     <value>Do not fetch unbounded binary columns (varbinary(max) / BLOB)</value>

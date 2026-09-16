@@ -147,7 +147,7 @@ public class CSharpGenerationCommandServiceTests
                     OutputFileName = "Sample.g.cs",
                     CodeSubdirectory = "Generated",
                     GenerateApiDocs = true,
-                    IncludeJapaneseApiDocs = true,
+                    ApiDocsLanguage = ApiDocsLanguage.Both,
                     ApiDocsSubdirectory = "docs",
                 },
                 output.Path

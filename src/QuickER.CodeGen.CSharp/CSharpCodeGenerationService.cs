@@ -323,7 +323,8 @@ public sealed class CSharpCodeGenerationService
         var specs = GeneratedFilePlanner.Plan(options);
         var files = RenderFiles(model, options, specs, packageGuidanceLines);
 
-        // API リファレンス Markdown（既定 OFF）。ON のとき、その図のスキーマに即した英語の .g.md を追加する。
+        // API リファレンス Markdown（既定 OFF）。ON のとき、その図のスキーマに即した .g.md / .ja.g.md を
+        // ApiDocsLanguage が指す言語の分だけ追加する（英語→日本語の順）。
         // ここは検証エラーで早期 return した後の経路のため、Files が空になる場合は Markdown も出ない（自然に乗る）。
         if (options.GenerateApiDocs)
         {
@@ -332,24 +333,14 @@ public sealed class CSharpCodeGenerationService
                 ? null
                 : options.ApiDocsSubdirectory.Trim();
 
-            files.Add(
-                new GeneratedFile
-                {
-                    FileName = ApiDocsFileName(options),
-                    RelativeDirectory = apiDocsSubdirectory,
-                    Content = _apiDocRenderer.Render(model, options, ApiDocLanguage.English),
-                }
-            );
-
-            // IncludeJapaneseApiDocs が ON のときだけ、日本語版（.ja.g.md）を併産する。
-            if (options.IncludeJapaneseApiDocs)
+            foreach (var (language, fileName) in ApiDocsOutputs(options))
             {
                 files.Add(
                     new GeneratedFile
                     {
-                        FileName = JapaneseApiDocsFileName(options),
+                        FileName = fileName,
                         RelativeDirectory = apiDocsSubdirectory,
-                        Content = _apiDocRenderer.Render(model, options, ApiDocLanguage.Japanese),
+                        Content = _apiDocRenderer.Render(model, options, language),
                     }
                 );
             }
@@ -692,6 +683,7 @@ public sealed class CSharpCodeGenerationService
         ValidateCodeSubdirectory(options, diagnostics);
         ValidateApiDocsSubdirectory(options, diagnostics);
         ValidateApiDocsFileName(options, diagnostics);
+        ValidateApiDocsLanguage(options, diagnostics);
 
         if (diagram.Entities.Count == 0)
         {
@@ -1405,6 +1397,47 @@ public sealed class CSharpCodeGenerationService
     }
 
     /// <summary>
+    /// API リファレンスの出力言語（<see cref="CodeGenerationOptions.ApiDocsLanguage"/>）が定義済みの値かを検証する
+    /// </summary>
+    /// <remarks>
+    /// 設定 JSON は数値でも列挙値を受け付けるため、未定義の値（例: <c>99</c>）が届き得る。検証しないと
+    /// <see cref="RenderLanguagesOf"/> の例外が生成全体を落とすので、どのオプションの値が悪いかを名指しして止める。
+    /// </remarks>
+    private static void ValidateApiDocsLanguage(
+        CodeGenerationOptions options,
+        ICollection<GenerationDiagnostic> diagnostics
+    )
+    {
+        if (options.GenerateApiDocs && !Enum.IsDefined(options.ApiDocsLanguage))
+        {
+            diagnostics.Add(
+                GenerationDiagnostic.Error(
+                    string.Format(
+                        Strings.CodeGen_Error_InvalidApiDocsLanguage,
+                        (int)options.ApiDocsLanguage,
+                        string.Join(", ", Enum.GetNames<ApiDocsLanguage>())
+                    )
+                )
+            );
+        }
+    }
+
+    /// <summary>
+    /// 出力する言語の組み合わせを、描画する言語の並び（英語→日本語の順）へ分解する
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">未定義の値（生成前の診断が止めるため通常は到達しない）</exception>
+    private static IReadOnlyList<ApiDocRenderLanguage> RenderLanguagesOf(
+        ApiDocsLanguage language
+    ) =>
+        language switch
+        {
+            ApiDocsLanguage.English => [ApiDocRenderLanguage.English],
+            ApiDocsLanguage.Japanese => [ApiDocRenderLanguage.Japanese],
+            ApiDocsLanguage.Both => [ApiDocRenderLanguage.English, ApiDocRenderLanguage.Japanese],
+            _ => throw new ArgumentOutOfRangeException(nameof(language), language, null),
+        };
+
+    /// <summary>
     /// API リファレンスの出力ファイル名として妥当か（単一のファイル名で、ベース名が空でないか）を判定する
     /// </summary>
     /// <remarks>
@@ -1502,17 +1535,36 @@ public sealed class CSharpCodeGenerationService
     private const string SplitApiDocsBaseName = "ApiDocs";
 
     /// <summary>
-    /// 現在のオプションで実際に出力される API リファレンス Markdown（英語版）のファイル名を返す。
+    /// 現在のオプションで実際に出力される API リファレンス Markdown のファイル名を、出力順（英語→日本語）で返す。
     /// </summary>
     /// <remarks>
     /// GUI が「未指定のときに使われる既定名」をプレースホルダとして見せるための公開口。
-    /// 生成本体と同じ導出（<see cref="ApiDocsFileName"/>）を通すため、表示と実出力がずれない。
+    /// 生成本体と同じ一覧（<see cref="ApiDocsOutputs"/>）を読むため、表示と実出力がずれない。
+    /// <see cref="CodeGenerationOptions.GenerateApiDocs"/> の ON/OFF は見ない（欄が表示されるのは ON のときだけのため）。
     /// </remarks>
-    public static string ResolveApiDocsFileName(CodeGenerationOptions options)
+    /// <exception cref="ArgumentOutOfRangeException"><see cref="CodeGenerationOptions.ApiDocsLanguage"/> が未定義の値</exception>
+    public static IReadOnlyList<string> ResolveApiDocsFileNames(CodeGenerationOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
-        return ApiDocsFileName(options);
+        return ApiDocsOutputs(options).Select(output => output.FileName).ToList();
     }
+
+    /// <summary>
+    /// 出力する API リファレンス Markdown の「描画言語とファイル名」の組を、出力順（英語→日本語）で返す
+    /// （生成本体と <see cref="ResolveApiDocsFileNames"/> が共有する唯一の正）
+    /// </summary>
+    private static IEnumerable<(ApiDocRenderLanguage Language, string FileName)> ApiDocsOutputs(
+        CodeGenerationOptions options
+    ) =>
+        RenderLanguagesOf(options.ApiDocsLanguage)
+            .Select(language =>
+                (
+                    language,
+                    language == ApiDocRenderLanguage.Japanese
+                        ? JapaneseApiDocsFileName(options)
+                        : ApiDocsFileName(options)
+                )
+            );
 
     /// <summary>API リファレンス Markdown の拡張子サフィックス（英語版）</summary>
     private const string ApiDocsSuffix = ".g.md";

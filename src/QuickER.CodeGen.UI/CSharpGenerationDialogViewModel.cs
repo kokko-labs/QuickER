@@ -273,24 +273,55 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     [ObservableProperty]
     private bool _generateApiDocs;
 
-    /// <summary>API リファレンス出力を OFF にしたら、下位の日本語版併産チェックも OFF に連動させる（無効化＋残チェックの見かけ矛盾を防ぐ）</summary>
-    partial void OnGenerateApiDocsChanged(bool value)
+    /// <summary>
+    /// API リファレンス Markdown を出力する言語（既定 英語）。
+    /// </summary>
+    /// <remarks>
+    /// <see cref="GenerateApiDocs"/> の下位オプションで、欄は API リファレンス出力が ON のときだけ表示する。
+    /// 親を OFF にしても値は保持する（隠れた値は生成に効かない＝<see cref="GenerateApiDocs"/> が false なら何も出ない）。
+    /// 画面は 3 つのラジオ（<see cref="ApiDocsEnglish"/> / <see cref="ApiDocsJapanese"/> / <see cref="ApiDocsBoth"/>）で選ぶ。
+    /// </remarks>
+    [ObservableProperty]
+    private ApiDocsLanguage _apiDocsLanguage = ApiDocsLanguage.English;
+
+    /// <summary>API リファレンスを英語版だけ出力する（言語ラジオ）</summary>
+    public bool ApiDocsEnglish
     {
-        if (!value)
+        get => ApiDocsLanguage == ApiDocsLanguage.English;
+        set => SelectApiDocsLanguage(value, ApiDocsLanguage.English);
+    }
+
+    /// <summary>API リファレンスを日本語版だけ出力する（言語ラジオ）</summary>
+    public bool ApiDocsJapanese
+    {
+        get => ApiDocsLanguage == ApiDocsLanguage.Japanese;
+        set => SelectApiDocsLanguage(value, ApiDocsLanguage.Japanese);
+    }
+
+    /// <summary>API リファレンスを英語版と日本語版の両方出力する（言語ラジオ）</summary>
+    public bool ApiDocsBoth
+    {
+        get => ApiDocsLanguage == ApiDocsLanguage.Both;
+        set => SelectApiDocsLanguage(value, ApiDocsLanguage.Both);
+    }
+
+    /// <summary>ラジオが選ばれたときだけ言語を切り替える（外れた側の false 通知では何もしない）</summary>
+    private void SelectApiDocsLanguage(bool selected, ApiDocsLanguage language)
+    {
+        if (selected)
         {
-            IncludeJapaneseApiDocs = false;
+            ApiDocsLanguage = language;
         }
     }
 
-    /// <summary>
-    /// 日本語版 API リファレンス Markdown（.ja.g.md）も併産するかどうか（既定 OFF。正本は英語）。
-    /// </summary>
-    /// <remarks>
-    /// <see cref="GenerateApiDocs"/> の下位オプションで、API リファレンス出力が ON のときのみ選べる
-    /// （XAML 側で IsEnabled を <see cref="GenerateApiDocs"/> に連動・親を OFF にするとこの値も OFF に戻る）。
-    /// </remarks>
-    [ObservableProperty]
-    private bool _includeJapaneseApiDocs;
+    /// <summary>言語が変わったら 3 つのラジオと、言語で変わる出力ファイル名のプレースホルダを追従させる</summary>
+    partial void OnApiDocsLanguageChanged(ApiDocsLanguage value)
+    {
+        OnPropertyChanged(nameof(ApiDocsEnglish));
+        OnPropertyChanged(nameof(ApiDocsJapanese));
+        OnPropertyChanged(nameof(ApiDocsBoth));
+        OnPropertyChanged(nameof(ApiDocsFileNameHint));
+    }
 
     /// <summary>
     /// API リファレンス Markdown の出力先サブフォルダ（出力フォルダからの相対パス。空＝直下）。
@@ -314,20 +345,23 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     public bool ShowApiDocsFileNameHint => string.IsNullOrWhiteSpace(ApiDocsFileName);
 
     /// <summary>
-    /// 出力ファイル名を指定しなかったときに使われるファイル名（プレースホルダ表示用）
+    /// 出力ファイル名を指定しなかったときに使われるファイル名（プレースホルダ表示用。複数言語は「 / 」区切り）
     /// </summary>
     /// <remarks>
-    /// 導出は生成本体と同じ経路（<see cref="CSharpCodeGenerationService.ResolveApiDocsFileName"/>）へ委ね、
+    /// 導出は生成本体と同じ経路（<see cref="CSharpCodeGenerationService.ResolveApiDocsFileNames"/>）へ委ね、
     /// 明示指定を外したオプションを渡して「空欄なら何になるか」を求める（表示と実出力がずれない）。
-    /// 出力ファイル名・出力モードの変更に追従する（<see cref="RaiseDerivedChanged"/> と
-    /// <see cref="OnOutputPathChanged"/> が通知する）
+    /// 出力ファイル名・出力モード・言語の変更に追従する（<see cref="RaiseDerivedChanged"/>・
+    /// <see cref="OnOutputPathChanged"/>・<see cref="OnApiDocsLanguageChanged"/> が通知する）
     /// </remarks>
     public string ApiDocsFileNameHint =>
-        CSharpCodeGenerationService.ResolveApiDocsFileName(
-            ToOptions() with
-            {
-                ApiDocsFileName = null,
-            }
+        string.Join(
+            " / ",
+            CSharpCodeGenerationService.ResolveApiDocsFileNames(
+                ToOptions() with
+                {
+                    ApiDocsFileName = null,
+                }
+            )
         );
 
     /// <summary>出力ファイル名欄の入力有無でプレースホルダの表示が切り替わる</summary>
@@ -874,9 +908,11 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             GenerateRemoteServices = settings.GenerateRemoteServices;
             // API リファレンス出力は DB アクセス選択とは独立のため、保存値をそのまま復元する
             GenerateApiDocs = settings.GenerateApiDocs;
-            // 日本語版 API リファレンスの併産は「親 OFF なら子も OFF」の UI 不変条件に合わせてクランプして復元する
-            // （外部編集された設定ファイルの親 OFF＋子 ON の組み合わせで、無効なのにチェック済みの表示になるのを防ぐ）
-            IncludeJapaneseApiDocs = settings.GenerateApiDocs && settings.IncludeJapaneseApiDocs;
+            // 出力言語は保存値を復元する。外部編集で未定義の数値が入っていたら、どのラジオも選ばれていない
+            // 表示にならないよう既定（英語）へ戻す
+            ApiDocsLanguage = Enum.IsDefined(settings.ApiDocsLanguage)
+                ? settings.ApiDocsLanguage
+                : ApiDocsLanguage.English;
             // API リファレンスの出力先サブフォルダは保存値をそのまま復元する（空＝直下が既定・プリフィルなし）
             ApiDocsSubdirectory = settings.ApiDocsSubdirectory;
             // 出力ファイル名も同様に保存値をそのまま復元する（空＝導出名。プレースホルダで既定名を見せる）
@@ -1020,7 +1056,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             GenerateRemoteContracts = ShowRemoteContracts && GenerateRemoteContracts,
             GenerateRemoteServices = ShowRemoteContracts && GenerateRemoteServices,
             GenerateApiDocs = GenerateApiDocs,
-            IncludeJapaneseApiDocs = IncludeJapaneseApiDocs,
+            ApiDocsLanguage = ApiDocsLanguage,
             ApiDocsSubdirectory = ApiDocsSubdirectory.Trim(),
             ApiDocsFileName = ApiDocsFileName.Trim(),
             ExcludeUnboundedBinaryColumns = ExcludeUnboundedBinaryColumns,

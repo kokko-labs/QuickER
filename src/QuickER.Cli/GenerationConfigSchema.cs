@@ -236,14 +236,15 @@ public static class GenerationConfigSchema
             "boolean",
             false,
             "Runtime & documentation",
-            "Also output an API reference Markdown ({base name}.g.md, English canonical) alongside the generated code."
+            "Also output an API reference Markdown alongside the generated code; ApiDocsLanguage chooses English ({base name}.g.md), Japanese ({base name}.ja.g.md), or both."
         ),
         new(
-            "IncludeJapaneseApiDocs",
-            "boolean",
-            false,
+            "ApiDocsLanguage",
+            "string",
+            nameof(ApiDocsLanguage.English),
             "Runtime & documentation",
-            "Also produce the Japanese API reference Markdown ({base name}.ja.g.md); has no effect unless GenerateApiDocs is true."
+            "Language of the API reference Markdown: English writes {base name}.g.md, Japanese writes {base name}.ja.g.md only, Both writes the two. Has no effect unless GenerateApiDocs is true.",
+            Enum.GetNames<ApiDocsLanguage>()
         ),
         new(
             "ApiDocsSubdirectory",

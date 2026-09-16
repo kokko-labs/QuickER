@@ -113,6 +113,27 @@ public sealed class GenerationConfigSchemaTests
             .BeEquivalentTo("sqlserver", "sqlite");
     }
 
+    /// <summary>列挙型のキーは allowedValues に全メンバー名を過不足なく載せる（候補の書き漏れを検知）</summary>
+    [Fact(DisplayName = "列挙型のキーの allowedValues は列挙体のメンバー名と一致する")]
+    public void EnumKeys_AllowedValues_MatchEnumNames()
+    {
+        var byName = RecognizedProperties.ToDictionary(p => p.Name);
+        var enumKeys = GenerationConfigSchema
+            .Keys.Where(key => byName[key.Name].PropertyType.IsEnum)
+            .ToList();
+
+        enumKeys.Should().NotBeEmpty();
+
+        foreach (var key in enumKeys)
+        {
+            key.AllowedValues.Should()
+                .Equal(
+                    Enum.GetNames(byName[key.Name].PropertyType),
+                    $"'{key.Name}' の allowedValues は列挙体のメンバーと一致するはず"
+                );
+        }
+    }
+
     /// <summary>ツールの実行デリゲート経由（引数なし）でも同じカタログ JSON が返る</summary>
     [Fact(DisplayName = "get_generation_config_schema は file 引数なしで実行できる")]
     public void Execute_WithoutFileArgument_ReturnsCatalog()
@@ -149,7 +170,8 @@ public sealed class GenerationConfigSchemaTests
             return "boolean";
         }
 
-        if (type == typeof(string))
+        // 列挙値は設定 JSON にメンバー名（文字列）で書く
+        if (type == typeof(string) || type.IsEnum)
         {
             return "string";
         }
@@ -162,9 +184,12 @@ public sealed class GenerationConfigSchemaTests
         return type.Name;
     }
 
-    /// <summary>既定値を比較しやすい形へ正規化する（IEnumerable&lt;string&gt; は要素列へ）</summary>
+    /// <summary>既定値を比較しやすい形へ正規化する（IEnumerable&lt;string&gt; は要素列へ・列挙値はメンバー名へ）</summary>
     private static object? NormalizeDefault(object? value) =>
-        value is IEnumerable enumerable && value is not string
-            ? enumerable.Cast<object?>().ToList()
-            : value;
+        value switch
+        {
+            Enum member => member.ToString(),
+            IEnumerable enumerable and not string => enumerable.Cast<object?>().ToList(),
+            _ => value,
+        };
 }

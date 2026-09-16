@@ -198,6 +198,12 @@ namespace QuickER.CodeGen.CSharp.Resources {
             }
         }
 
+        public static string CodeGen_Error_InvalidApiDocsLanguage {
+            get {
+                return ResourceManager.GetString("CodeGen_Error_InvalidApiDocsLanguage", resourceCulture);
+            }
+        }
+
         public static string CodeGen_Error_LayerDirectoryOutsideOutput {
             get {
                 return ResourceManager.GetString("CodeGen_Error_LayerDirectoryOutsideOutput", resourceCulture);

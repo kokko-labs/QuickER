@@ -7,19 +7,22 @@ using Scriban.Runtime;
 
 namespace QuickER.CodeGen.CSharp;
 
-/// <summary>API リファレンス Markdown を描画する言語（英語＝正本 / 日本語＝併産）</summary>
-internal enum ApiDocLanguage
+/// <summary>
+/// API リファレンス Markdown を 1 回の描画で使うテンプレートの言語
+/// （出力する言語の組み合わせ <see cref="ApiDocsLanguage"/> を、描画単位の 1 言語へ分解したもの）
+/// </summary>
+internal enum ApiDocRenderLanguage
 {
-    /// <summary>英語（正本・既定）</summary>
+    /// <summary>英語（テンプレートの正本）</summary>
     English,
 
-    /// <summary>日本語（<see cref="CodeGenerationOptions.IncludeJapaneseApiDocs"/> 有効時の併産）</summary>
+    /// <summary>日本語（英語テンプレートの対訳）</summary>
     Japanese,
 }
 
 /// <summary>
 /// 生成モデルとオプションから、その図のスキーマに即した API リファレンス Markdown を描画するレンダラー。
-/// 英語を正本（既定）とし、言語指定で日本語版も描画できる。
+/// 英語テンプレートを正本（既定）とし、言語指定で日本語版も描画できる。
 /// </summary>
 /// <remarks>
 /// <para>
@@ -90,18 +93,20 @@ internal sealed class ApiReferenceDocRenderer
     public string Render(
         CSharpGenerationModel model,
         CodeGenerationOptions options,
-        ApiDocLanguage language = ApiDocLanguage.English
+        ApiDocRenderLanguage language = ApiDocRenderLanguage.English
     )
     {
         // C# 側で組み立てる文言（ナビゲーション種別・DI 登録説明・パッケージ案内見出し）を解決する明示カルチャ。
         // 英語（正本）は中立リソース＝不変カルチャ、日本語は ja サテライトを使う。CurrentUICulture には依存しない。
         var culture =
-            language == ApiDocLanguage.Japanese
+            language == ApiDocRenderLanguage.Japanese
                 ? CultureInfo.GetCultureInfo("ja")
                 : CultureInfo.InvariantCulture;
 
         var parsedTemplate =
-            language == ApiDocLanguage.Japanese ? ParsedJapaneseTemplate : ParsedEnglishTemplate;
+            language == ApiDocRenderLanguage.Japanese
+                ? ParsedJapaneseTemplate
+                : ParsedEnglishTemplate;
 
         // 共通契約（Repository 契約・データアクセス API）が生成されるか。QuickER 版 Repository・EF Core・
         // インメモリのいずれかが有効なら契約が出るため、データアクセス節・使い方節を出力する。

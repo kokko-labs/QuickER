@@ -172,8 +172,8 @@
   <data name="Cli_Opt_GenerateApiDocs" xml:space="preserve">
     <value>Additionally output one API reference Markdown ({baseName}.g.md) (overrides the settings file)</value>
   </data>
-  <data name="Cli_Opt_IncludeJapaneseApiDocs" xml:space="preserve">
-    <value>Also output the Japanese API reference Markdown ({base}.ja.g.md; requires --generate-api-docs) (overrides the settings file)</value>
+  <data name="Cli_Opt_ApiDocsLanguage" xml:space="preserve">
+    <value>Language of the API reference Markdown: English ({base}.g.md), Japanese ({base}.ja.g.md only), or Both (requires --generate-api-docs) (overrides the settings file)</value>
   </data>
   <data name="Cli_Opt_ApiDocsSubdirectory" xml:space="preserve">
     <value>Output subfolder for the API reference Markdown, relative to the output directory (e.g. docs; blank = the output directory itself; requires --generate-api-docs) (overrides the settings file)</value>

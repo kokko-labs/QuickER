@@ -1599,18 +1599,26 @@ GUI では生成ダイアログの「出力先」欄で、出力先パスのす�
 
 生成コードと同名ベースの API リファレンス Markdown を追加出力できます。GUI の生成ダイアログの「API リファレンス (.g.md) を出力する」チェック、または CLI の `--generate-api-docs` フラグで有効化します（**既定 OFF**）。DB アクセスの選択（なし / QuickER 版 Repository / EF Core 版 Repository）とは独立して、常に選択できます。
 
-有効化すると、`.g.cs` と同じベース名の `.g.md` が 1 つ出力されます（例: `EcOrder.g.cs` → `EcOrder.g.md`）。カテゴリ別分割モードでは `Entities.g.cs` 等の固定名と同じ流儀の固定名 `ApiDocs.g.md`（日本語版は `ApiDocs.ja.g.md`）になります。内容は次のとおりです。
+有効化すると、`.g.cs` と同じベース名の Markdown が出力されます。英語版は `.g.md`、日本語版は `.ja.g.md` です（例: `EcOrder.g.cs` → `EcOrder.g.md` / `EcOrder.ja.g.md`）。カテゴリ別分割モードでは `Entities.g.cs` 等の固定名と同じ流儀の固定名 `ApiDocs.g.md` / `ApiDocs.ja.g.md` になります。内容は次のとおりです。
 
 - エンティティ一覧と、各エンティティのプロパティ表（DB 型トークン込み。`string(50)` / `decimal(10,2)` など）
 - Repository 契約（`IRepository<TEntity, TKey>` と各エンティティのインターフェイス）— Repository 契約を生成する構成でのみ含まれます
 - DI 登録・CRUD・クエリの使い方例 — 同じく Repository 契約を生成する構成でのみ含まれます（DB アクセス「なし」ではこれらの節は省略されます）
 - 生成ファイル構成表
 
-**英語が正本です。** 日本語版も併産したい場合は、GUI の下位チェック「日本語版を出力する」、または CLI の `--api-docs-ja` フラグ（設定キー `IncludeJapaneseApiDocs`）を有効化します（**既定 OFF**・`--generate-api-docs` が前提）。有効化すると、英語正本の `.g.md` に加えて `.ja.g.md` が併産されます（例: `EcOrder.g.cs` → `EcOrder.ja.g.md`）。
+出力する言語は、GUI の「言語」（英語 / 日本語 / 両方）、または CLI の `--api-docs-lang` フラグ（設定キー `ApiDocsLanguage`、値は `English` / `Japanese` / `Both`、**既定 `English`**、`--generate-api-docs` が前提）で選びます。
+
+| `ApiDocsLanguage` | 出力されるファイル |
+|---|---|
+| `English` | `EcOrder.g.md` |
+| `Japanese` | `EcOrder.ja.g.md` |
+| `Both` | `EcOrder.g.md` と `EcOrder.ja.g.md` |
+
+日本語版だけを出力するときもファイル名は `.ja.g.md` のままなので、言語を切り替えてもファイル名は変わりません。英語版と日本語版は構成・内容が同じで、見出しと説明文だけが違います。設定ファイルでは値を名前で書き、大文字小文字は区別しません（`"ApiDocsLanguage": "Japanese"`）。
 
 Markdown は既定で出力ディレクトリ直下に出ます。`--api-docs-subdir`（設定キー `ApiDocsSubdirectory`）で出力ディレクトリからの相対パスのサブフォルダへ移せます（例: `docs`・複数階層可・絶対パスと `..` は拒否）。全出力モードで有効で、層別出力ではドキュメントを層プロジェクトの外へ寄せる用途に使えます。
 
-ファイル名は `--api-docs-file`（設定キー `ApiDocsFileName`）で変えられます（例: `--api-docs-file Api.md` → `Api.g.md`／日本語版は `Api.ja.g.md`）。拡張子は `.g.md` へ正規化されるため、`Api` / `Api.md` / `Api.g.md` のどれを渡しても結果は同じです（生成物の上書きは `.g.md` / `.g.cs` だけに限っているため、拡張子は指定に委ねません）。指定は出力モードに依らず優先され、未指定なら従来どおりの導出名（非分割＝出力ファイル名のベース名／分割＝`ApiDocs.g.md`）になります。指定できるのはファイル名だけで、パス区切りを含む指定は生成時エラーです（置き場を決めるのは `--api-docs-subdir` の役割）。GUI では「出力先サブフォルダ」の下の「出力ファイル名」欄で指定し、**空欄のときは実際に使われる名前がグレーで表示されます**（出力ファイル名・出力モードの変更に追従します）。
+ファイル名は `--api-docs-file`（設定キー `ApiDocsFileName`）で変えられます（例: `--api-docs-file Api.md` → `Api.g.md`／日本語版は `Api.ja.g.md`）。拡張子は `.g.md` へ正規化されるため、`Api` / `Api.md` / `Api.g.md` のどれを渡しても結果は同じです（生成物の上書きは `.g.md` / `.g.cs` だけに限っているため、拡張子は指定に委ねません）。指定は出力モードに依らず優先され、未指定なら従来どおりの導出名（非分割＝出力ファイル名のベース名／分割＝`ApiDocs.g.md`）になります。指定できるのはファイル名だけで、パス区切りを含む指定は生成時エラーです（置き場を決めるのは `--api-docs-subdir` の役割）。GUI では「出力先サブフォルダ」の下の「出力ファイル名」欄で指定し、**空欄のときは実際に使われる名前がグレーで表示されます**（出力ファイル名・出力モード・言語の変更に追従します）。
 
 `.g.md` / `.ja.g.md` は自動生成ファイルです。再生成で上書きされるため、直接編集しないでください。
 

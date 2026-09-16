@@ -240,9 +240,27 @@ namespace QuickER.CodeGen.UI.Resources {
             }
         }
 
-        public static string CodeGen_IncludeJapaneseApiDocs {
+        public static string CodeGen_ApiDocsLanguage {
             get {
-                return ResourceManager.GetString("CodeGen_IncludeJapaneseApiDocs", resourceCulture);
+                return ResourceManager.GetString("CodeGen_ApiDocsLanguage", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_ApiDocsLanguageEnglish {
+            get {
+                return ResourceManager.GetString("CodeGen_ApiDocsLanguageEnglish", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_ApiDocsLanguageJapanese {
+            get {
+                return ResourceManager.GetString("CodeGen_ApiDocsLanguageJapanese", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_ApiDocsLanguageBoth {
+            get {
+                return ResourceManager.GetString("CodeGen_ApiDocsLanguageBoth", resourceCulture);
             }
         }
 

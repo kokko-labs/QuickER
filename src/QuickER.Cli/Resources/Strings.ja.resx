@@ -172,8 +172,8 @@
   <data name="Cli_Opt_GenerateApiDocs" xml:space="preserve">
     <value>API リファレンス Markdown（{ベース名}.g.md）を 1 つ追加出力する（設定ファイルを上書き）</value>
   </data>
-  <data name="Cli_Opt_IncludeJapaneseApiDocs" xml:space="preserve">
-    <value>日本語版 API リファレンス Markdown（{ベース名}.ja.g.md）も出力する（--generate-api-docs が前提。設定ファイルを上書き）</value>
+  <data name="Cli_Opt_ApiDocsLanguage" xml:space="preserve">
+    <value>API リファレンス Markdown の言語: English（{ベース名}.g.md）・Japanese（{ベース名}.ja.g.md のみ）・Both（両方）（--generate-api-docs が前提。設定ファイルを上書き）</value>
   </data>
   <data name="Cli_Opt_ApiDocsSubdirectory" xml:space="preserve">
     <value>API リファレンス Markdown の出力先サブフォルダ（出力ディレクトリからの相対パス。例: docs・空＝直下。--generate-api-docs が前提。設定ファイルを上書き）</value>
