@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.IO;
 using QuickER.CodeGen.CSharp;
 using QuickER.CodeGen.UI.Resources;
 using QuickER.Extensibility;
@@ -116,16 +117,18 @@ public sealed class CSharpGenerationCommandService
             }
 
             var writer = new GeneratedFileWriter();
-            writer.WriteFiles(
+            var writtenPaths = writer.WriteFiles(
                 string.IsNullOrWhiteSpace(dialogResult.OutputDirectory)
                     ? Environment.CurrentDirectory
                     : dialogResult.OutputDirectory,
                 result
             );
 
-            // 診断一覧と PackageReference 案内は「詳細」としてまとめ、空行区切りで連結する。
+            // 書き出したファイルの一覧・診断一覧・PackageReference 案内を「詳細」としてまとめ、空行区切りで連結する。
+            // ファイル一覧を先頭に置くのは、生成コードのサブフォルダと API リファレンスのサブフォルダのように
+            // 出力先が分かれる構成でも、どこに何が出たかを完了時点で確かめられるようにするため。
             // パッケージ参照モードのときは、必要な PackageReference をコピー可能な形で詳細へ続けて載せる。
-            var detailSections = new List<string>();
+            var detailSections = new List<string> { BuildWrittenFilesSection(writtenPaths) };
             var diagnostics = BuildGenerationDiagnosticsMessage(result);
             if (!string.IsNullOrWhiteSpace(diagnostics))
             {
@@ -146,21 +149,12 @@ public sealed class CSharpGenerationCommandService
                 );
             }
 
-            // 詳細（診断一覧・PackageReference 案内）がある場合はコピー可能な専用ダイアログで提示し、
-            // 詳細が無い（診断ゼロかつパッケージ案内なし）場合は単文の完了通知で知らせる
-            // （単文の完了通知に大型ダイアログは出さない）。
-            if (detailSections.Count > 0)
-            {
-                _dialogs.ShowInformationDetails(
-                    Strings.Csharp_GeneratedSuccess,
-                    string.Join(Environment.NewLine + Environment.NewLine, detailSections),
-                    Strings.Common_Complete
-                );
-            }
-            else
-            {
-                _dialogs.ShowInformation(Strings.Csharp_GeneratedSuccess, Strings.Common_Complete);
-            }
+            // 詳細には常にファイル一覧が載るため、コピー可能な詳細ダイアログで提示する
+            _dialogs.ShowInformationDetails(
+                Strings.Csharp_GeneratedSuccess,
+                string.Join(Environment.NewLine + Environment.NewLine, detailSections),
+                Strings.Common_Complete
+            );
         }
         catch (Exception ex)
         {
@@ -195,6 +189,20 @@ public sealed class CSharpGenerationCommandService
 
         return mappers;
     }
+
+    /// <summary>
+    /// 書き出したファイルの一覧を、見出し＋1 行 1 ファイル（絶対パス・書き出し順）の詳細セクションへ整形する
+    /// </summary>
+    /// <remarks>
+    /// 詳細ダイアログはスクロールできるため件数では畳まない（分割出力でも全ファイルを確かめられるようにする）。
+    /// </remarks>
+    private static string BuildWrittenFilesSection(IReadOnlyList<string> writtenPaths) =>
+        string.Join(
+            Environment.NewLine,
+            writtenPaths
+                .Select(path => "  " + Path.GetFullPath(path))
+                .Prepend(Strings.Csharp_OutputFilesHeader)
+        );
 
     /// <summary>コード生成の診断（警告・エラー）を 1 つのメッセージ文字列へ整形する</summary>
     private static string BuildGenerationDiagnosticsMessage(CodeGenerationResult result) =>

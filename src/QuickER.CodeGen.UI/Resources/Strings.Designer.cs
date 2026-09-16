@@ -876,6 +876,12 @@ namespace QuickER.CodeGen.UI.Resources {
             }
         }
 
+        public static string Csharp_OutputFilesHeader {
+            get {
+                return ResourceManager.GetString("Csharp_OutputFilesHeader", resourceCulture);
+            }
+        }
+
         public static string Csharp_GenerationFailed {
             get {
                 return ResourceManager.GetString("Csharp_GenerationFailed", resourceCulture);

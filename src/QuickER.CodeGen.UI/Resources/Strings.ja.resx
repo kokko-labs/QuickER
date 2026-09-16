@@ -498,6 +498,9 @@
   <data name="Csharp_GeneratedSuccess" xml:space="preserve">
     <value>C# コードの生成が完了しました。</value>
   </data>
+  <data name="Csharp_OutputFilesHeader" xml:space="preserve">
+    <value>出力したファイル:</value>
+  </data>
   <data name="Csharp_GenerationFailed" xml:space="preserve">
     <value>C# コードを生成できませんでした。</value>
   </data>

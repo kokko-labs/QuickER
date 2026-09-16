@@ -498,6 +498,9 @@ You can pass this file directly to the CLI as --config.</value>
   <data name="Csharp_GeneratedSuccess" xml:space="preserve">
     <value>C# code generation completed.</value>
   </data>
+  <data name="Csharp_OutputFilesHeader" xml:space="preserve">
+    <value>Output files:</value>
+  </data>
   <data name="Csharp_GenerationFailed" xml:space="preserve">
     <value>Failed to generate C# code.</value>
   </data>

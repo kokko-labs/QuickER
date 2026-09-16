@@ -92,9 +92,9 @@ public class CSharpGenerationCommandServiceTests
         presenter.LastProvider.Should().BeOfType<SqlServerProvider>();
     }
 
-    /// <summary>成功かつ詳細が無い（診断ゼロ・パッケージ案内なし）場合は、従来の単文完了通知へフォールバックする</summary>
-    [Fact(DisplayName = "生成成功・詳細なしは ShowInformation にフォールバック")]
-    public void Run_SuccessWithoutDetails_FallsBackToShowInformation()
+    /// <summary>診断ゼロ・パッケージ案内なしでも、書き出したファイルの一覧を詳細ダイアログで提示する</summary>
+    [Fact(DisplayName = "生成成功・診断なしでも ShowInformationDetails に出力ファイル一覧を載せる")]
+    public void Run_SuccessWithoutDiagnostics_ShowsWrittenFiles()
     {
         using var output = new TempOutputDirectory();
         var dialogs = new StubDialogService();
@@ -105,7 +105,11 @@ public class CSharpGenerationCommandServiceTests
         };
         var presenter = new FakeCSharpPresenter(
             new CSharpGenerationDialogResult(
-                new CodeGenerationOptions { RootNamespace = "Sample.Domain" },
+                new CodeGenerationOptions
+                {
+                    RootNamespace = "Sample.Domain",
+                    OutputFileName = "Sample.g.cs",
+                },
                 output.Path
             )
         );
@@ -113,13 +117,60 @@ public class CSharpGenerationCommandServiceTests
 
         service.Run();
 
-        // 詳細が無いため、大型の詳細ダイアログは出さず単文の完了通知に落ちる
-        dialogs.InformationDetailsMessages.Should().BeEmpty();
-        dialogs
-            .InformationMessages.Should()
-            .ContainSingle()
-            .Which.Should()
-            .Be(CodeGenStrings.Csharp_GeneratedSuccess);
+        dialogs.InformationMessages.Should().BeEmpty();
+        var entry = dialogs.InformationDetailsMessages.Should().ContainSingle().Subject;
+        entry.Message.Should().Be(CodeGenStrings.Csharp_GeneratedSuccess);
+        entry
+            .Details.Should()
+            .StartWith(CodeGenStrings.Csharp_OutputFilesHeader)
+            .And.Contain(Path.Combine(output.Path, "Sample.g.cs"));
+    }
+
+    /// <summary>
+    /// 生成コードと API リファレンスが別のサブフォルダへ出る構成で、両方の実際の書き出し先が一覧に載る
+    /// </summary>
+    [Fact(DisplayName = "出力ファイル一覧はサブフォルダ込みの実際の書き出し先を示す")]
+    public void Run_WithSubdirectories_ListsActualWrittenPaths()
+    {
+        using var output = new TempOutputDirectory();
+        var dialogs = new StubDialogService();
+        var host = new StubErDiagramHost
+        {
+            DiagramToReturn = DiagramWithEntity(),
+            ProvidersToReturn = SqlServerRegistry(),
+        };
+        var presenter = new FakeCSharpPresenter(
+            new CSharpGenerationDialogResult(
+                new CodeGenerationOptions
+                {
+                    RootNamespace = "Sample.Domain",
+                    OutputFileName = "Sample.g.cs",
+                    CodeSubdirectory = "Generated",
+                    GenerateApiDocs = true,
+                    IncludeJapaneseApiDocs = true,
+                    ApiDocsSubdirectory = "docs",
+                },
+                output.Path
+            )
+        );
+        var service = new CSharpGenerationCommandService(host, dialogs, presenter);
+
+        service.Run();
+
+        var expected = new[]
+        {
+            Path.Combine(output.Path, "Generated", "Sample.g.cs"),
+            Path.Combine(output.Path, "docs", "Sample.g.md"),
+            Path.Combine(output.Path, "docs", "Sample.ja.g.md"),
+        };
+        var details = dialogs.InformationDetailsMessages.Should().ContainSingle().Subject.Details;
+
+        foreach (var path in expected)
+        {
+            // 一覧に載ったパスは実在するファイルそのもの（書き出し結果から組み立てている）
+            File.Exists(path).Should().BeTrue();
+            details.Should().Contain(path);
+        }
     }
 
     /// <summary>生成エラー時は、導入文（message）と診断一覧（details）を分けてエラー詳細ダイアログで提示する</summary>
