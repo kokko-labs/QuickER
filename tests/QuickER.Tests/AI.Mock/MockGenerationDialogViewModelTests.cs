@@ -55,6 +55,9 @@ public class MockGenerationDialogViewModelTests
 
         public MockProjectTarget? CapturedTarget { get; private set; }
 
+        /// <summary>進捗の出し方を差し替えるスクリプト（null なら 1 行だけ出す）</summary>
+        public Action<Action<string>>? ProgressScript { get; set; }
+
         /// <summary>最後に渡された最終ビルドの確認 seam（VM が配線しているかの検証用）</summary>
         public Func<IReadOnlyList<string>, bool>? CapturedConfirmBuild { get; private set; }
 
@@ -89,7 +92,14 @@ public class MockGenerationDialogViewModelTests
             CapturedBackend = backend;
             CapturedModel = model;
             CapturedModelProvider = modelProvider;
-            onProgress("進捗: 生成中...\n");
+            if (ProgressScript is null)
+            {
+                onProgress("進捗: 生成中...\n");
+            }
+            else
+            {
+                ProgressScript(onProgress);
+            }
 
             return Task.FromResult(
                 new MockProjectGenerationResult(
@@ -201,7 +211,11 @@ public class MockGenerationDialogViewModelTests
         FakeMockProjectGenerator generator,
         string baseFolder,
         string mockFolder
-    ) CreateVmWithGenerator(ErDiagram diagram, StubDialogService? dialogs = null)
+    ) CreateVmWithGenerator(
+        ErDiagram diagram,
+        StubDialogService? dialogs = null,
+        Action<Action>? scheduleLogFlush = null
+    )
     {
         var baseFolder = Path.Combine(
             Path.GetTempPath(),
@@ -226,7 +240,9 @@ public class MockGenerationDialogViewModelTests
             mockProjectGenerator: generator,
             dialogService: dialogs ?? new StubDialogService(),
             apiKeyLoader: keyStore.Load,
-            apiKeySaver: keyStore.Save
+            apiKeySaver: keyStore.Save,
+            // 進捗ログの反映予約は既定で実行しない＝反映は生成完了時の全量反映だけになり、時間に依存しない
+            scheduleLogFlush: scheduleLogFlush ?? (_ => { })
         );
 
         return (vm, engineBox, generator, baseFolder, mockFolder);
@@ -1336,6 +1352,136 @@ public class MockGenerationDialogViewModelTests
             await vm.GenerateMockProjectCommand.ExecuteAsync(null);
 
             vm.MockGenLog.Should().Contain(MockStrings.Mock_OutputFolderNotEmpty.Trim());
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>
+    /// 多数の差分を流しても、進捗ログの変更通知は差分ごとに出ず（反映の予約は 1 件にまとまる）、
+    /// 完了後のログは差分の連結と一致することを検証する。
+    /// </summary>
+    [Fact(DisplayName = "進捗ログは差分ごとに通知せず、完了時に全量を反映する")]
+    public async Task GenerateMockProject_ManyDeltas_CoalescesNotificationsAndFlushesAll()
+    {
+        var scheduled = new List<Action>();
+        var (vm, engineBox, generator, baseFolder, mockFolder) = CreateVmWithGenerator(
+            NonEmptyDiagram(),
+            scheduleLogFlush: scheduled.Add
+        );
+
+        try
+        {
+            await vm.RefreshMockGenAvailabilityAsync();
+            await SaveScreenOnClaudeCode(vm, engineBox, mockFolder);
+            vm.OutputFolder = Path.Combine(baseFolder, "out");
+            vm.ProjectName = "AcmeMock";
+
+            var deltas = Enumerable.Range(0, 1000).Select(i => $"delta {i}\n").ToArray();
+            generator.ProgressScript = onProgress =>
+            {
+                foreach (var delta in deltas)
+                {
+                    onProgress(delta);
+                }
+            };
+
+            var logNotifications = 0;
+            vm.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName == nameof(MockGenerationDialogViewModel.MockGenLog))
+                {
+                    logNotifications++;
+                }
+            };
+
+            await vm.GenerateMockProjectCommand.ExecuteAsync(null);
+
+            // 通知は差分ごとに出ず（完了時の全量反映の分だけ）、反映の予約は実行されていない間 1 件にまとまる
+            logNotifications.Should().BeLessThan(10);
+            scheduled.Should().HaveCount(1);
+            vm.MockGenLog.Should().Be(string.Concat(deltas));
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>
+    /// 予約した反映が実行されると途中までの全量が見え、その後の追記は新しい予約を積むことを検証する。
+    /// </summary>
+    [Fact(DisplayName = "反映の実行後に届いた差分は再び予約され、完了時に全量が揃う")]
+    public async Task GenerateMockProject_FlushDuringRun_ReschedulesForLaterDeltas()
+    {
+        var scheduled = new List<Action>();
+        var (vm, engineBox, generator, baseFolder, mockFolder) = CreateVmWithGenerator(
+            NonEmptyDiagram(),
+            scheduleLogFlush: scheduled.Add
+        );
+
+        try
+        {
+            await vm.RefreshMockGenAvailabilityAsync();
+            await SaveScreenOnClaudeCode(vm, engineBox, mockFolder);
+            vm.OutputFolder = Path.Combine(baseFolder, "out");
+            vm.ProjectName = "AcmeMock";
+
+            string? logAfterFirstFlush = null;
+            generator.ProgressScript = onProgress =>
+            {
+                onProgress("a");
+                onProgress("b");
+                scheduled.Single()();
+                logAfterFirstFlush = vm.MockGenLog;
+                onProgress("c");
+            };
+
+            await vm.GenerateMockProjectCommand.ExecuteAsync(null);
+
+            logAfterFirstFlush.Should().Be("ab");
+            scheduled.Should().HaveCount(2);
+            vm.MockGenLog.Should().Be("abc");
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>
+    /// 生成が例外で終わっても、それまでの差分と失敗の記録が完了時に全量反映されることを検証する。
+    /// </summary>
+    [Fact(DisplayName = "例外で終わった生成でも進捗ログは全量反映される")]
+    public async Task GenerateMockProject_Throws_FlushesDeltasAndError()
+    {
+        var (vm, engineBox, generator, baseFolder, mockFolder) = CreateVmWithGenerator(
+            NonEmptyDiagram()
+        );
+
+        try
+        {
+            await vm.RefreshMockGenAvailabilityAsync();
+            await SaveScreenOnClaudeCode(vm, engineBox, mockFolder);
+            vm.OutputFolder = Path.Combine(baseFolder, "out");
+            vm.ProjectName = "AcmeMock";
+
+            generator.ProgressScript = onProgress =>
+            {
+                onProgress("before failure\n");
+                throw new InvalidOperationException("boom");
+            };
+
+            await vm.GenerateMockProjectCommand.ExecuteAsync(null);
+
+            vm.MockGenLog.Should()
+                .Be(
+                    "before failure\n"
+                        + string.Format(MockStrings.Mock_GenerationErrorLogFormat, "boom")
+                );
+            vm.IsMockGenInProgress.Should().BeFalse();
         }
         finally
         {

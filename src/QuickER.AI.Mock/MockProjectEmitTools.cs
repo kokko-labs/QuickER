@@ -117,7 +117,8 @@ public static class MockProjectEmitTools
     /// </para>
     /// <para>
     /// 拒否条件（いずれも英語メッセージで失敗を返す）:
-    /// 空パス／絶対パス・ドライブ文字・先頭スラッシュ／<c>".."</c>／保護フォルダのセグメント配下／
+    /// 空パス／絶対パス・ドライブ文字・先頭スラッシュ／<c>".."</c>／末尾が <c>.</c> または空白のセグメント・
+    /// <c>~</c> を含むセグメント（保護フォルダ名のすり抜け防止）／保護フォルダのセグメント配下（正規化の前後で照合）／
     /// <c>README-QuickER.md</c>／<c>NuGet.Config</c>（パッケージソース設定の追加禁止）／
     /// 拡張子 <c>.sln</c>・<c>.csproj</c>（スキャフォールドが作成済みのため上書き不可）／
     /// 実効の許可集合に無い拡張子（拡張子なしを含む）／正規化後に出力フォルダ外へ出るパス。
@@ -172,15 +173,35 @@ public static class MockProjectEmitTools
                 );
             }
 
-            // スキャフォールドが所有するフォルダ（データ層・デザイン仕様）とビルドの入出力フォルダは保護する
-            if (BlockedFolderNames.Contains(segment, StringComparer.OrdinalIgnoreCase))
+            // Windows はセグメント末尾の "." と空白を落として開く（"Generated./x.cs" は Generated/ への書き込みになる）
+            // ため、保護フォルダ名との照合をすり抜けられないよう末尾が "." / 空白のセグメントを拒否する
+            // （カレントフォルダを表す "." 単独は除く）
+            if (segment != "." && (segment[^1] == '.' || char.IsWhiteSpace(segment[^1])))
             {
                 return new EmitPathResult(
                     false,
                     string.Empty,
                     string.Empty,
-                    $"path is not writable (protected '{segment}/' folder): {path}"
+                    $"path segments must not end with '.' or whitespace: {path}"
                 );
+            }
+
+            // 8.3 短縮名（"GENERA~1" 等）は実在フォルダの別名として解決され、保護フォルダ名との照合では
+            // 見分けられないため、"~" を含むセグメントを拒否する
+            if (segment.Contains('~', StringComparison.Ordinal))
+            {
+                return new EmitPathResult(
+                    false,
+                    string.Empty,
+                    string.Empty,
+                    $"path must not contain '~' (short 8.3 names are not allowed): {path}"
+                );
+            }
+
+            // スキャフォールドが所有するフォルダ（データ層・デザイン仕様）とビルドの入出力フォルダは保護する
+            if (FindBlockedFolder([segment]) is { } blocked)
+            {
+                return ProtectedFolderRejection(blocked, path);
             }
         }
 
@@ -261,8 +282,44 @@ public static class MockProjectEmitTools
             );
         }
 
+        // 正規化後の出力フォルダ相対セグメントでも保護フォルダを照合する（上のセグメント検査の二重化＝
+        // 正規化が名前を書き換える経路を、照合する側の想定から独立に塞ぐ）
+        if (FindBlockedFolderInNormalizedPath(baseFull, full) is { } normalizedBlocked)
+        {
+            return ProtectedFolderRejection(normalizedBlocked, path);
+        }
+
         return new EmitPathResult(true, relative, full, string.Empty);
     }
+
+    /// <summary>
+    /// 正規化済みの絶対パスを出力フォルダ相対のセグメントへ分け、保護フォルダ名に一致する最初のものを返す（無ければ null）。
+    /// </summary>
+    /// <param name="baseFull">正規化済みの出力フォルダ</param>
+    /// <param name="full">正規化済みの提出先（出力フォルダ配下であることは確認済み）</param>
+    internal static string? FindBlockedFolderInNormalizedPath(string baseFull, string full) =>
+        FindBlockedFolder(
+            Path.GetRelativePath(baseFull, full)
+                .Split(
+                    [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+                    StringSplitOptions.RemoveEmptyEntries
+                )
+        );
+
+    /// <summary>セグメント列のうち保護フォルダ名（大文字小文字を無視）に一致する最初のものを返す（無ければ null）</summary>
+    private static string? FindBlockedFolder(IEnumerable<string> segments) =>
+        segments.FirstOrDefault(segment =>
+            BlockedFolderNames.Contains(segment, StringComparer.OrdinalIgnoreCase)
+        );
+
+    /// <summary>保護フォルダへの提出を拒否する結果を作る</summary>
+    private static EmitPathResult ProtectedFolderRejection(string segment, string path) =>
+        new(
+            false,
+            string.Empty,
+            string.Empty,
+            $"path is not writable (protected '{segment}/' folder): {path}"
+        );
 
     /// <summary>実効の許可拡張子（プロファイルの宣言と <see cref="SupportedEmitExtensions"/> の積）を昇順で返す</summary>
     /// <remarks>順序を固定するのは、拒否メッセージに載る列挙が呼び出しごとに揺れないようにするため。</remarks>

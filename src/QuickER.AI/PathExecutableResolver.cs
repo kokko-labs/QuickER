@@ -44,19 +44,18 @@ public static class PathExecutableResolver
                 continue;
             }
 
+            var trimmed = directory.Trim();
+
+            // 相対パスの PATH 要素（"." など）は読み飛ばす＝解決結果がカレントフォルダ次第で変わり、
+            // 呼び出し側へフルパスを返すという約束が崩れるため
+            if (!Path.IsPathFullyQualified(trimmed))
+            {
+                continue;
+            }
+
             foreach (var candidate in candidates)
             {
-                string fullPath;
-
-                try
-                {
-                    fullPath = Path.Combine(directory.Trim(), candidate);
-                }
-                catch (ArgumentException)
-                {
-                    // 不正な文字を含む PATH 要素は読み飛ばす
-                    continue;
-                }
+                var fullPath = Path.Combine(trimmed, candidate);
 
                 if (fileExists(fullPath))
                 {

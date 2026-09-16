@@ -133,6 +133,13 @@ public sealed class DotnetBuildRunner : IBuildRunner
     }
 
     /// <summary>dotnet 起動用の <see cref="ProcessStartInfo"/> を BOM なし UTF-8 出力で生成する</summary>
+    /// <remarks>
+    /// <c>dotnet</c> は名前のまま渡し、codex / claude / copilot のように PATH から自前で解決したフルパスにはしない。
+    /// 名前だけの起動では <see cref="Process.Start()"/> が <c>.exe</c> を補って探すため <c>.cmd</c> / <c>.bat</c> を
+    /// 拾わない（実測で確認）のに対し、共有の PATH 走査（<c>PathExecutableResolver</c>）は <c>.cmd</c> も候補にする＝
+    /// PATH の前方に <c>dotnet.cmd</c> があるとバッチ経由の起動へ化け、引数ガードの無い経路が開く。
+    /// SDK の解決は <c>dotnet.exe</c>（muxer）自身の置き場所から行われるので、フルパス化で得るものも無い。
+    /// </remarks>
     private static ProcessStartInfo CreateStartInfo(string workingDirectory)
     {
         var utf8NoBom = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);

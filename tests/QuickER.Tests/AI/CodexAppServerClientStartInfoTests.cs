@@ -1,3 +1,5 @@
+using System.ComponentModel;
+using System.IO;
 using AwesomeAssertions;
 using QuickER.AI;
 using AiStrings = QuickER.AI.Resources.Strings;
@@ -11,6 +13,33 @@ namespace QuickER.Tests.AI;
 public class CodexAppServerClientStartInfoTests
 {
     private const string Arguments = "app-server --listen stdio://";
+
+    [Fact]
+    public void ResolveLaunch_解決済みのexeはフルパスのまま起動に使う()
+    {
+        // 名前だけ（"codex"）へ戻さない＝探索を Process.Start に委ねない（防御の二重化）
+        var (fileName, arguments) = CodexAppServerClient.ResolveLaunch(@"C:\tools\codex.exe");
+
+        fileName.Should().Be(@"C:\tools\codex.exe");
+        arguments.Should().Be(Arguments);
+    }
+
+    [Fact]
+    public void ResolveLaunch_cmdシムはシステムフォルダのcmdをフルパスで起動する()
+    {
+        var (fileName, arguments) = CodexAppServerClient.ResolveLaunch(@"C:\npm\codex.cmd");
+
+        fileName.Should().Be(Path.Combine(Environment.SystemDirectory, "cmd.exe"));
+        arguments.Should().Be($"/d /s /c \"\"C:\\npm\\codex.cmd\" {Arguments}\"");
+    }
+
+    [Fact]
+    public void ResolveLaunch_未検出なら名前だけの起動と同じWin32Exceptionで失敗する()
+    {
+        var act = () => CodexAppServerClient.ResolveLaunch(null);
+
+        act.Should().Throw<Win32Exception>().Which.NativeErrorCode.Should().Be(2);
+    }
 
     [Fact]
     public void ResolveStartInfo_exeは直接起動する()
@@ -32,7 +61,7 @@ public class CodexAppServerClientStartInfoTests
             Arguments
         );
 
-        fileName.Should().Be("cmd.exe");
+        fileName.Should().Be(Path.Combine(Environment.SystemDirectory, "cmd.exe"));
         arguments.Should().Be($"/d /s /c \"\"C:\\Program Files\\nodejs\\codex.cmd\" {Arguments}\"");
     }
 

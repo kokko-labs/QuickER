@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Text.Json;
@@ -165,6 +166,9 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
     /// <summary>ログアウトの JSON-RPC メソッド名</summary>
     private const string LogoutAccountMethod = "account/logout";
 
+    /// <summary>codex CLI が PATH に無いときに起動失敗として返す Win32 エラーコード（ERROR_FILE_NOT_FOUND）</summary>
+    private const int ErrorFileNotFound = 2;
+
     /// <summary>stdin への書き込みを直列化するロック（並行送信で JSON 行が混在するのを防ぐ）</summary>
     private readonly SemaphoreSlim _writeLock = new(1, 1);
 
@@ -251,9 +255,7 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
             return;
         }
 
-        var executablePath = "codex";
-        var appServerArguments = BuildArguments(string.Empty);
-        var (fileName, arguments) = ResolveStartInfo(executablePath, appServerArguments);
+        var (fileName, arguments) = ResolveLaunch(CodexCliLocator.ResolveExecutablePath());
 
         var startInfo = new ProcessStartInfo
         {
@@ -1370,61 +1372,41 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
         return $"app-server --listen stdio://{suffix}".Trim();
     }
 
+    /// <summary>PATH から解決した codex の実体から、app-server の起動に使う実行ファイル名と引数を決める</summary>
+    /// <remarks>
+    /// 起動は解決済みのフルパスで行い、名前だけを渡して探索を <see cref="Process.Start()"/> に委ねない
+    /// （防御の二重化。実測では .NET 10 の Process.Start はカレントフォルダ・<c>WorkingDirectory</c> を探さない）。
+    /// </remarks>
+    /// <param name="resolvedPath">PATH から解決した実行ファイルのフルパス（未検出なら null）</param>
+    /// <exception cref="Win32Exception">
+    /// codex が見つからない場合（名前だけで起動したときに Process.Start が投げるのと同じ ERROR_FILE_NOT_FOUND）
+    /// </exception>
+    internal static (string fileName, string arguments) ResolveLaunch(string? resolvedPath) =>
+        ResolveStartInfo(
+            resolvedPath ?? throw new Win32Exception(ErrorFileNotFound),
+            BuildArguments(string.Empty)
+        );
+
     /// <summary>プロセス起動に使う実行ファイル名と引数を決定する</summary>
     /// <remarks>
     /// codex コマンドの実体が .cmd / .bat（npm のシム等）の場合、<c>UseShellExecute = false</c> では直接起動できないため
     /// cmd.exe /c でラップして stdin/stdout のリダイレクトを機能させる。ラップと入力の検証は
-    /// <see cref="BatchShimProcessGuard"/>（3 バックエンド共有）が担い、ここは PATH からの実体解決だけを行う
-    /// （拡張子で起動方法が決まるため、相対指定のままではシムかどうかを判定できない）。
+    /// <see cref="BatchShimProcessGuard"/>（3 バックエンド共有）が担う。シムでなければ解決済みのフルパスを
+    /// そのまま起動に使う（PATH の解決は <see cref="CodexCliLocator"/> が claude / copilot と同じ規則で行う）。
     /// </remarks>
+    /// <param name="resolvedPath">PATH から解決済みの実行ファイルのフルパス</param>
+    /// <param name="appServerArguments">app-server の起動引数</param>
     internal static (string fileName, string arguments) ResolveStartInfo(
-        string executablePath,
+        string resolvedPath,
         string appServerArguments
-    )
-    {
-        string resolvedPath = executablePath;
-
-        if (!Path.IsPathRooted(executablePath))
-        {
-            // 相対指定の場合は PATH を走査して実体を特定する（拡張子で起動方法を判定するため）
-            foreach (
-                var dir in (Environment.GetEnvironmentVariable("PATH") ?? string.Empty).Split(
-                    Path.PathSeparator
-                )
-            )
-            {
-                foreach (var ext in new[] { ".cmd", ".bat", ".exe", string.Empty })
-                {
-                    var candidate = Path.Combine(dir, executablePath + ext);
-
-                    if (File.Exists(candidate))
-                    {
-                        resolvedPath = candidate;
-                        break;
-                    }
-                }
-
-                if (resolvedPath != executablePath)
-                {
-                    break;
-                }
-            }
-        }
-
-        if (!BatchShimProcessGuard.IsBatchShim(resolvedPath))
-        {
-            // シムでなければ（.exe 等）解決前の指定をそのまま渡す＝ProcessStartInfo が安全に扱う
-            return (executablePath, appServerArguments);
-        }
-
-        return BatchShimProcessGuard.WrapCommandLine(
+    ) =>
+        BatchShimProcessGuard.WrapCommandLine(
             resolvedPath,
             appServerArguments,
             Strings.Codex_PathHasQuote,
             Strings.Codex_ArgHasCmdMeta,
             Strings.Codex_ArgHasNewline
         );
-    }
 
     /// <summary>JSON-RPC エラーレスポンスの error 要素からユーザー向けエラーメッセージを組み立てる</summary>
     private static string BuildErrorMessage(JsonElement errorElement)

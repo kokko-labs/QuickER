@@ -213,8 +213,27 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     private string _mockGenInstructions = string.Empty;
 
     /// <summary>モックプロジェクト生成の進捗ログ（追記式・自動スクロール表示）</summary>
+    /// <remarks>
+    /// 追記は <see cref="AppendMockGenLog"/> のバッファへ溜め、まとめて反映する（差分ごとに通知しない）。
+    /// 生成の完了時には必ず全量を反映するため、完了後に読む値は追記した内容の連結と一致する。
+    /// </remarks>
     [ObservableProperty]
     private string _mockGenLog = string.Empty;
+
+    /// <summary>進捗ログの反映を遅らせる間隔（この間に届いた差分は 1 回の変更通知にまとめる）</summary>
+    private static readonly TimeSpan MockGenLogFlushInterval = TimeSpan.FromMilliseconds(200);
+
+    /// <summary>進捗ログのバッファと予約状態を守るロック（差分は生成器のスレッドから届く）</summary>
+    private readonly object _mockGenLogLock = new();
+
+    /// <summary>未反映分を含む進捗ログの全量</summary>
+    private readonly StringBuilder _mockGenLogBuffer = new();
+
+    /// <summary>反映の予約が既に積まれているか（積まれていれば追記だけして新たに予約しない）</summary>
+    private bool _isMockGenLogFlushScheduled;
+
+    /// <summary>進捗ログの反映を後で実行するよう予約する seam（テストでは手動で実行する）</summary>
+    private readonly Action<Action> _scheduleMockGenLogFlush;
 
     /// <summary>claude CLI が検出済みか（第2ステップの有効条件）</summary>
     [ObservableProperty]
@@ -421,6 +440,10 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     /// <param name="apiKeySaver">
     /// API キー保存 seam（省略時は <see cref="ApiKeyStore.Save(string, string)"/>）。<see cref="Connection"/> へ透過する
     /// </param>
+    /// <param name="scheduleLogFlush">
+    /// 進捗ログの反映を予約する seam（省略時は <see cref="MockGenLogFlushInterval"/> 後にスレッドプールで実行する）。
+    /// 渡された処理はどのスレッドから呼んでもよい（UI スレッドへの移送は処理側が行う）
+    /// </param>
     public MockGenerationDialogViewModel(
         IMockDiagramSource diagramSource,
         IUiDispatcher dispatcher,
@@ -434,11 +457,24 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         ChatAttachmentFactory.ImageShrinker? imageShrinker = null,
         IDialogService? dialogService = null,
         Func<string, string?>? apiKeyLoader = null,
-        Action<string, string>? apiKeySaver = null
+        Action<string, string>? apiKeySaver = null,
+        Action<Action>? scheduleLogFlush = null
     )
     {
         _diagramSource = diagramSource;
         _dispatcher = dispatcher;
+        _scheduleMockGenLogFlush =
+            scheduleLogFlush
+            ?? (
+                flush =>
+                    _ = Task.Delay(MockGenLogFlushInterval)
+                        .ContinueWith(
+                            _ => flush(),
+                            CancellationToken.None,
+                            TaskContinuationOptions.None,
+                            TaskScheduler.Default
+                        )
+            );
         _files = files ?? new WpfFileDialogService();
         _dialogs = dialogService ?? new MessageBoxDialogService();
 
@@ -1033,7 +1069,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         OutputFolder = string.Empty;
         ProjectName = DefaultProjectName;
         MockGenInstructions = string.Empty;
-        MockGenLog = string.Empty;
+        ClearMockGenLog();
         MockGenCompleted = false;
         MockGenSucceeded = false;
 
@@ -1102,7 +1138,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         var modelProvider =
             backend == ErChatBackendKind.Codex ? Connection.CodexModelProvider : string.Empty;
 
-        MockGenLog = string.Empty;
+        ClearMockGenLog();
         MockGenCompleted = false;
         MockGenSucceeded = false;
         IsMockGenInProgress = true;
@@ -1132,7 +1168,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
                     backend,
                     model,
                     modelProvider,
-                    delta => RunOnUi(() => AppendMockGenLog(delta)),
+                    AppendMockGenLog,
                     ConfirmVerificationBuild,
                     _mockGenCts.Token
                 )
@@ -1149,6 +1185,8 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         }
         finally
         {
+            // 間引いて未反映の差分を、完了状態へ移る前に全量反映する（完了ダイアログの時点でログが欠けない）
+            FlushMockGenLog();
             _mockGenCts?.Dispose();
             _mockGenCts = null;
             IsMockGenInProgress = false;
@@ -1291,8 +1329,58 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         }
     }
 
-    /// <summary>進捗ログへ追記する</summary>
-    private void AppendMockGenLog(string text) => MockGenLog += text;
+    /// <summary>進捗ログへ追記する（反映はまとめて行う）</summary>
+    /// <remarks>
+    /// 差分ごとに <see cref="MockGenLog"/> を連結し直すと、長時間の生成で文字列の再確保が O(n²) になり、
+    /// 変更通知（とビューの自動スクロール）も差分の数だけ走る。そこでバッファへ追記し、未反映の予約が
+    /// 無いときだけ反映を 1 件予約する＝予約が実行されるまでに届いた差分は 1 回の通知にまとまる。
+    /// 生成器のスレッドから直接呼ばれる（呼び出し元を UI スレッドで待たせない）。
+    /// </remarks>
+    private void AppendMockGenLog(string text)
+    {
+        lock (_mockGenLogLock)
+        {
+            _mockGenLogBuffer.Append(text);
+
+            if (_isMockGenLogFlushScheduled)
+            {
+                return;
+            }
+
+            _isMockGenLogFlushScheduled = true;
+        }
+
+        _scheduleMockGenLogFlush(() => RunOnUi(FlushMockGenLog));
+    }
+
+    /// <summary>バッファの全量を <see cref="MockGenLog"/> へ反映する（UI スレッドで呼ぶ）</summary>
+    /// <remarks>
+    /// 予約済みフラグを下ろしてから反映するので、以後の追記は新しい予約を積む。後から実行された古い予約は
+    /// 同じ全量を読むだけで、値が変わらなければ変更通知も出ない。
+    /// </remarks>
+    private void FlushMockGenLog()
+    {
+        string text;
+
+        lock (_mockGenLogLock)
+        {
+            text = _mockGenLogBuffer.ToString();
+            _isMockGenLogFlushScheduled = false;
+        }
+
+        MockGenLog = text;
+    }
+
+    /// <summary>進捗ログを空にする（バッファと表示の両方）</summary>
+    private void ClearMockGenLog()
+    {
+        lock (_mockGenLogLock)
+        {
+            _mockGenLogBuffer.Clear();
+        }
+
+        MockGenLog = string.Empty;
+    }
 
     /// <summary>claude CLI・dotnet SDK の検出状態を取得して第2ステップの有効条件へ反映する</summary>
     public async Task RefreshMockGenAvailabilityAsync()

@@ -53,6 +53,16 @@ public static class BatchShimProcessGuard
     /// <summary>引数・パスのどちらでも拒否する改行（cmd の <c>%*</c> 展開が最初の 1 つで行を切る）</summary>
     private static readonly char[] NewlineCharacters = ['\r', '\n'];
 
+    /// <summary>
+    /// 包み直しに使う <c>cmd.exe</c> のフルパス（システムフォルダ直下）。
+    /// </summary>
+    /// <remarks>
+    /// 素の <c>"cmd.exe"</c> を渡さないのは防御の二重化。実測（.NET 10・Windows 11）では
+    /// <see cref="Process.Start()"/> は名前だけの <c>FileName</c> をカレントフォルダ・<c>WorkingDirectory</c> から
+    /// 探さないが、同名の exe を置かれ得る場所から拾う余地を探索規則の実装に委ねず、起動する実体を固定する。
+    /// </remarks>
+    public static string CmdExePath => Path.Combine(Environment.SystemDirectory, "cmd.exe");
+
     /// <summary>指定パスが <c>.cmd</c> / <c>.bat</c> シムか（拡張子で判定・大文字小文字は無視）</summary>
     /// <param name="executablePath">判定する実行ファイルパス</param>
     public static bool IsBatchShim(string? executablePath)
@@ -116,7 +126,7 @@ public static class BatchShimProcessGuard
         }
 
         // バッチファイルは cmd.exe /c 経由で起動しないとリダイレクトが機能しない
-        return ("cmd.exe", $"/d /s /c \"\"{resolvedPath}\" {arguments}\"");
+        return (CmdExePath, $"/d /s /c \"\"{resolvedPath}\" {arguments}\"");
     }
 
     /// <summary>
@@ -180,7 +190,7 @@ public static class BatchShimProcessGuard
         commandLine.Append('"');
 
         startInfo.ArgumentList.Clear();
-        startInfo.FileName = "cmd.exe";
+        startInfo.FileName = CmdExePath;
         startInfo.Arguments = commandLine.ToString();
     }
 

@@ -169,6 +169,59 @@ public class MockProjectEmitToolsTests
         result.Error.Should().Contain("folder");
     }
 
+    /// <summary>
+    /// Windows がセグメント末尾の "." / 空白を落として開く・8.3 短縮名で実在フォルダを指せることを使った
+    /// 保護フォルダのすり抜けが拒否されることを検証する
+    /// </summary>
+    [Theory(DisplayName = "末尾 . / 空白・8.3 短縮名による保護フォルダのすり抜けは拒否")]
+    [InlineData("Generated./x.cs")]
+    [InlineData("Generated /x.cs")]
+    [InlineData("MockApp/Generated. ./Entities.cs")]
+    [InlineData("MockApp/obj../Evil.cs")]
+    [InlineData("MockApp/bin\t/x.cs")]
+    [InlineData("GENERA~1/x.cs")]
+    [InlineData("MockApp/OBJ~1/Evil.cs")]
+    [InlineData("design./mock/x.cs")]
+    [InlineData("MockApp/Pages./Orders.xaml")]
+    [InlineData("MockApp/Views/Order.xaml.")]
+    public void ResolveEmitPath_RejectsProtectedFolderAliases(string path)
+    {
+        var result = MockProjectEmitTools.ResolveEmitPath(Work, Wpf, path);
+
+        result.Ok.Should().BeFalse();
+        result.Error.Should().NotBeNullOrWhiteSpace();
+    }
+
+    /// <summary>
+    /// すり抜け対策の後も、正当な UI 層のパス（カレントフォルダ "." で始まるもの・名前の途中にドットを含むもの）は通ることを検証する
+    /// </summary>
+    [Theory(DisplayName = "正当な UI 層パスは引き続き通る")]
+    [InlineData("./MockApp/Views/OrderList.xaml")]
+    [InlineData("MockApp/Views/Order.Detail.xaml.cs")]
+    [InlineData("MockApp/Generated.Views/OrderList.xaml")]
+    public void ResolveEmitPath_AllowsLegitimatePathsAfterAliasGuards(string path)
+    {
+        MockProjectEmitTools.ResolveEmitPath(Work, Wpf, path).Ok.Should().BeTrue();
+        MockProjectEmitTools
+            .ResolveEmitPath(Work, Blazor, "Components/Pages/Orders.razor")
+            .Ok.Should()
+            .BeTrue();
+    }
+
+    /// <summary>正規化後の出力フォルダ相対セグメントでも保護フォルダを照合する（セグメント検査の二重化）ことを検証する</summary>
+    [Theory(DisplayName = "正規化後のパスでも保護フォルダを検出する")]
+    [InlineData(@"C:\work\out\MockApp\Generated\Entities.cs", "Generated")]
+    [InlineData(@"C:\work\out\obj\x.cs", "obj")]
+    [InlineData(@"C:\work\out\MockApp\DESIGN\mock\x.cs", "DESIGN")]
+    [InlineData(@"C:\work\out\MockApp\Views\OrderList.xaml", null)]
+    public void FindBlockedFolderInNormalizedPath_DetectsProtectedSegments(
+        string full,
+        string? expected
+    )
+    {
+        MockProjectEmitTools.FindBlockedFolderInNormalizedPath(Work, full).Should().Be(expected);
+    }
+
     /// <summary>拡張子のないファイルは拒否されることを検証する</summary>
     [Theory(DisplayName = "拡張子なしのファイルは拒否")]
     [InlineData("MockApp/Dockerfile")]

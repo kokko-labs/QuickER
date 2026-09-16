@@ -86,4 +86,23 @@ public class CodexCliLocatorTests
 
         resolved.Should().Be(expected);
     }
+
+    /// <summary>
+    /// 相対パスの PATH 要素は、カレントフォルダに候補があっても採用せず後続を走査することを検証する
+    /// （解決結果は常にフルパス＝起動する実体がカレントフォルダ次第で変わらない）
+    /// </summary>
+    [Fact(DisplayName = "PATH の相対要素は読み飛ばしてフルパスだけを返す")]
+    public void ResolveExecutablePath_SkipsRelativeEntries()
+    {
+        var expected = Path.Combine(FakeBinDirectory, PrimaryCandidate);
+        var pathValue = string.Join(Path.PathSeparator, ".", "bin", FakeBinDirectory);
+
+        // 相対の候補はすべて「存在する」扱いにする＝相対要素を読み飛ばさなければ ".\codex.exe" が返る
+        var resolved = CodexCliLocator.ResolveExecutablePath(
+            pathValue,
+            candidate => !Path.IsPathFullyQualified(candidate) || candidate == expected
+        );
+
+        resolved.Should().Be(expected);
+    }
 }

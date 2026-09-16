@@ -38,7 +38,7 @@ public class ClaudeCodeProcessClientStartInfoTests
 
         ClaudeCodeProcessClient.ApplyBatchShimGuard(startInfo);
 
-        startInfo.FileName.Should().Be("cmd.exe");
+        startInfo.FileName.Should().Be(Path.Combine(Environment.SystemDirectory, "cmd.exe"));
         startInfo.ArgumentList.Should().BeEmpty();
         startInfo.Arguments.Should().Contain(@"""C:\npm\claude.cmd""");
     }
@@ -185,7 +185,7 @@ public class ClaudeCodeProcessClientStartInfoTests
         {
             ClaudeCodeProcessClient.ApplyBatchShimGuard(startInfo);
 
-            startInfo.FileName.Should().Be("cmd.exe");
+            startInfo.FileName.Should().Be(Path.Combine(Environment.SystemDirectory, "cmd.exe"));
             startInfo.Arguments.Should().Contain($"\"{path}\"").And.NotContain("\n");
         }
         finally

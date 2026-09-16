@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.IO;
 using AwesomeAssertions;
 using QuickER.AI;
 
@@ -19,6 +20,21 @@ public class BatchShimProcessGuardTests
     private const string MetaCharFormat = "arg has meta '{0}': {1}";
     private const string EnvExpansionFormat = "arg has percent: {0}";
     private const string NewlineFormat = "arg has newline: {0}";
+
+    /// <summary>包み直しの起動先として期待する、システムフォルダ直下の cmd.exe のフルパス</summary>
+    /// <remarks>製品側のプロパティを参照せず独立に組み立てる（プロパティ自体の変異を検出するため）。</remarks>
+    private static string SystemCmdExe => Path.Combine(Environment.SystemDirectory, "cmd.exe");
+
+    // ---- CmdExePath ----
+
+    [Fact]
+    public void CmdExePath_システムフォルダ直下のcmdをフルパスで指す()
+    {
+        // 名前だけの "cmd.exe" を渡さない＝起動する実体を探索規則に委ねず固定する（防御の二重化）
+        BatchShimProcessGuard.CmdExePath.Should().Be(SystemCmdExe);
+        Path.IsPathFullyQualified(BatchShimProcessGuard.CmdExePath).Should().BeTrue();
+        File.Exists(BatchShimProcessGuard.CmdExePath).Should().BeTrue();
+    }
 
     // ---- IsBatchShim ----
 
@@ -61,7 +77,7 @@ public class BatchShimProcessGuardTests
             NewlineFormat
         );
 
-        fileName.Should().Be("cmd.exe");
+        fileName.Should().Be(SystemCmdExe);
         arguments
             .Should()
             .Be(
@@ -164,7 +180,7 @@ public class BatchShimProcessGuardTests
 
         BatchShimProcessGuard.Apply(startInfo, PathQuoteFormat, EnvExpansionFormat, NewlineFormat);
 
-        startInfo.FileName.Should().Be("cmd.exe");
+        startInfo.FileName.Should().Be(SystemCmdExe);
 
         // ArgumentList と Arguments の併用は Process.Start が拒否するため、必ず片方だけになっている
         startInfo.ArgumentList.Should().BeEmpty();
