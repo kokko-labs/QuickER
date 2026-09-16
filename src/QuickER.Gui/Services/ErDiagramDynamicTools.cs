@@ -34,6 +34,7 @@ public static class ErDiagramDynamicTools
                 "add_relationship" => AddRelationship(arguments, viewModel),
                 "remove_relationship" => RemoveRelationship(arguments, viewModel),
                 "set_column_property" => SetColumnProperty(arguments, viewModel),
+                "set_primary_key" => SetPrimaryKey(arguments, viewModel),
                 "set_unique_constraint" => SetUniqueConstraint(arguments, viewModel),
                 "remove_unique_constraint" => RemoveUniqueConstraint(arguments, viewModel),
                 _ => (string.Format(Strings.Tool_Unsupported, toolName), false),
@@ -697,6 +698,44 @@ public static class ErDiagramDynamicTools
                     : r.ConstraintName!
             )
         );
+
+    /// <summary>テーブルの主キーを指定列（指定順）へ置き換える</summary>
+    /// <remarks>
+    /// 照合キーはテーブルのみ（主キーはテーブルに高々 1 つのため常に全体置換）。膜・順序・NULL 許容の
+    /// 正規化規則は <c>MainViewModel.ApplyPrimaryKey</c> が持ち、ファイル実行ホストと意味論を揃える。
+    /// 履歴化は専用コマンド（<c>SetPrimaryKeyCommand</c>）が担う
+    /// </remarks>
+    private static (string, bool) SetPrimaryKey(JsonElement args, MainViewModel vm)
+    {
+        var tableName = GetString(args, "table_name");
+
+        if (string.IsNullOrWhiteSpace(tableName))
+        {
+            return (Strings.Tool_TableNameRequired, false);
+        }
+
+        var entity = vm.Entities.FirstOrDefault(e =>
+            string.Equals(e.TableName, tableName, StringComparison.OrdinalIgnoreCase)
+        );
+
+        if (entity is null)
+        {
+            return (string.Format(Strings.Tool_TableNotFound, tableName), false);
+        }
+
+        var (columns, error) = ResolveConstraintColumns(entity, args);
+
+        if (error is not null)
+        {
+            return (error, false);
+        }
+
+        vm.ApplyPrimaryKey(entity, columns!);
+
+        var columnText = string.Join(", ", columns!.Select(column => column.Name));
+
+        return (string.Format(Strings.Tool_PrimaryKeySet, entity.TableName, columnText), true);
+    }
 
     /// <summary>一意制約を定義する（同じ列集合の制約があれば名前・列順を差し替え、無ければ追加する）</summary>
     /// <remarks>

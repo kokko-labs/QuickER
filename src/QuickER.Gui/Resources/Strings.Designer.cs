@@ -676,9 +676,27 @@ namespace QuickER.Resources {
             }
         }
         
-        public static string Property_PrimaryKeyOrderLabel {
+        public static string Property_PrimaryKeyOrderHeader {
             get {
-                return ResourceManager.GetString("Property_PrimaryKeyOrderLabel", resourceCulture);
+                return ResourceManager.GetString("Property_PrimaryKeyOrderHeader", resourceCulture);
+            }
+        }
+
+        public static string Property_PrimaryKeyOrderHint {
+            get {
+                return ResourceManager.GetString("Property_PrimaryKeyOrderHint", resourceCulture);
+            }
+        }
+
+        public static string Property_MovePrimaryKeyColumnUpTooltip {
+            get {
+                return ResourceManager.GetString("Property_MovePrimaryKeyColumnUpTooltip", resourceCulture);
+            }
+        }
+
+        public static string Property_MovePrimaryKeyColumnDownTooltip {
+            get {
+                return ResourceManager.GetString("Property_MovePrimaryKeyColumnDownTooltip", resourceCulture);
             }
         }
 
@@ -1030,6 +1048,18 @@ namespace QuickER.Resources {
         public static string Undo_ChangeUniqueConstraintColumns {
             get {
                 return ResourceManager.GetString("Undo_ChangeUniqueConstraintColumns", resourceCulture);
+            }
+        }
+
+        public static string Undo_SetPrimaryKey {
+            get {
+                return ResourceManager.GetString("Undo_SetPrimaryKey", resourceCulture);
+            }
+        }
+
+        public static string Undo_ReorderPrimaryKeyColumns {
+            get {
+                return ResourceManager.GetString("Undo_ReorderPrimaryKeyColumns", resourceCulture);
             }
         }
 
@@ -2079,6 +2109,12 @@ namespace QuickER.Resources {
         public static string Tool_UniqueConstraintDuplicateColumn {
             get {
                 return ResourceManager.GetString("Tool_UniqueConstraintDuplicateColumn", resourceCulture);
+            }
+        }
+
+        public static string Tool_PrimaryKeySet {
+            get {
+                return ResourceManager.GetString("Tool_PrimaryKeySet", resourceCulture);
             }
         }
 

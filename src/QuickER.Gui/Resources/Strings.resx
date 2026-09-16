@@ -350,8 +350,17 @@
   <data name="Property_ReorderHint" xml:space="preserve">
     <value>Drag rows to change their order.</value>
   </data>
-  <data name="Property_PrimaryKeyOrderLabel" xml:space="preserve">
-    <value>Primary key:</value>
+  <data name="Property_PrimaryKeyOrderHeader" xml:space="preserve">
+    <value>Primary key order</value>
+  </data>
+  <data name="Property_PrimaryKeyOrderHint" xml:space="preserve">
+    <value>PRIMARY KEY column order. Choose its columns with the PK checkbox above.</value>
+  </data>
+  <data name="Property_MovePrimaryKeyColumnUpTooltip" xml:space="preserve">
+    <value>Move this column up in the key</value>
+  </data>
+  <data name="Property_MovePrimaryKeyColumnDownTooltip" xml:space="preserve">
+    <value>Move this column down in the key</value>
   </data>
   <data name="Property_UniqueConstraintsHeader" xml:space="preserve">
     <value>Unique constraints</value>
@@ -499,6 +508,12 @@
   </data>
   <data name="Undo_ChangeUniqueConstraintColumns" xml:space="preserve">
     <value>Change unique constraint columns</value>
+  </data>
+  <data name="Undo_SetPrimaryKey" xml:space="preserve">
+    <value>Change primary key</value>
+  </data>
+  <data name="Undo_ReorderPrimaryKeyColumns" xml:space="preserve">
+    <value>Reorder primary key columns</value>
   </data>
   <data name="Undo_DuplicateEntity" xml:space="preserve">
     <value>Duplicate: {0}</value>
@@ -1022,6 +1037,9 @@
   </data>
   <data name="Tool_UniqueConstraintDuplicateColumn" xml:space="preserve">
     <value>Column '{0}' is listed more than once in columns.</value>
+  </data>
+  <data name="Tool_PrimaryKeySet" xml:space="preserve">
+    <value>Set primary key on table '{0}' (columns: {1}).</value>
   </data>
   <data name="Tool_UniqueConstraintAdded" xml:space="preserve">
     <value>Added unique constraint on table '{0}' (columns: {1}).</value>

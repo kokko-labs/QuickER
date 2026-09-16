@@ -2235,16 +2235,81 @@
                 </Grid>
               </Border>
 
-              <!-- 主キー順の表示: 複合主キーのときだけ、DDL の PRIMARY KEY 句へ出る実効順を読み取り専用で示す
-                   （並びの編集 UI は持たない＝取込などで付いた順序情報の確認用） -->
-              <TextBlock
-                Style="{StaticResource PropertyHintText}"
-                Margin="4,0,4,10"
+              <!-- 主キー順カード: 複合主キーのときだけ出し、DDL の PRIMARY KEY 句へ出る実効順を ↑ / ↓ で並び替える。
+                   ここが扱うのは順序だけで、どの列を主キーにするか（膜）は上のカラム一覧の PK チェックが握る -->
+              <Border
+                Style="{StaticResource PropertyCard}"
                 Visibility="{Binding SelectedEntity.IsCompositePrimaryKey, Converter={StaticResource BoolToVisibilityConverter}}"
               >
-                <Run Text="{x:Static resources:Strings.Property_PrimaryKeyOrderLabel}" />
-                <Run Text="{Binding SelectedEntity.PrimaryKeyOrderText, Mode=OneWay}" />
-              </TextBlock>
+                <StackPanel>
+                  <TextBlock
+                    Style="{StaticResource PropertyCardTitle}"
+                    Text="{x:Static resources:Strings.Property_PrimaryKeyOrderHeader}"
+                  />
+                  <TextBlock
+                    Style="{StaticResource PropertyHintText}"
+                    Margin="0,0,0,10"
+                    Text="{x:Static resources:Strings.Property_PrimaryKeyOrderHint}"
+                  />
+
+                  <ItemsControl
+                    x:Name="PrimaryKeyOrderItems"
+                    ItemsSource="{Binding SelectedEntity.PrimaryKeyMembers}"
+                  >
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate>
+                        <Grid Margin="0,0,0,4">
+                          <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                          </Grid.ColumnDefinitions>
+                          <TextBlock
+                            Grid.Column="0"
+                            VerticalAlignment="Center"
+                            TextTrimming="CharacterEllipsis"
+                            Text="{Binding Column.Name}"
+                          />
+                          <Button
+                            Grid.Column="1"
+                            Style="{StaticResource PropertyIconButton}"
+                            ToolTip="{x:Static resources:Strings.Property_MovePrimaryKeyColumnUpTooltip}"
+                            IsEnabled="{Binding CanMoveUp}"
+                            Command="{Binding DataContext.MovePrimaryKeyColumnUpCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                            CommandParameter="{Binding}"
+                          >
+                            <TextBlock
+                              Text="&#8593;"
+                              FontSize="14"
+                              FontWeight="Bold"
+                              HorizontalAlignment="Center"
+                              VerticalAlignment="Center"
+                              TextAlignment="Center"
+                            />
+                          </Button>
+                          <Button
+                            Grid.Column="2"
+                            Style="{StaticResource PropertyIconButton}"
+                            ToolTip="{x:Static resources:Strings.Property_MovePrimaryKeyColumnDownTooltip}"
+                            IsEnabled="{Binding CanMoveDown}"
+                            Command="{Binding DataContext.MovePrimaryKeyColumnDownCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                            CommandParameter="{Binding}"
+                          >
+                            <TextBlock
+                              Text="&#8595;"
+                              FontSize="14"
+                              FontWeight="Bold"
+                              HorizontalAlignment="Center"
+                              VerticalAlignment="Center"
+                              TextAlignment="Center"
+                            />
+                          </Button>
+                        </Grid>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </StackPanel>
+              </Border>
 
               <!-- UNIQUE 制約カード: 制約の追加・削除・制約名編集と、列選択コンボボックスの行による構成列編集。
                    本体は開閉可能（既定はエンティティ選択時に「制約あり＝開く・なし＝畳む」で決まる） -->

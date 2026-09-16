@@ -12,7 +12,8 @@ namespace QuickER.Tests.Mcp.Tools;
 /// <summary>
 /// 同一のツール呼び出し列を (a) GUI 側 <see cref="ErDiagramDynamicTools"/>＋<see cref="MainViewModel"/> と
 /// (b) <see cref="DocumentErDiagramToolHost"/>＋一時ファイル の両経路へ流し、結果の意味モデル
-/// （エンティティ名・列の名前/型/PK/NULL/説明・一意制約の名前/構成列・リレーションの端点/種別）と各呼び出しの成否が
+/// （エンティティ名・列の名前/型/PK/NULL/説明・主キーの実効順/保存された順序リスト・一意制約の名前/構成列・
+/// リレーションの端点/種別）と各呼び出しの成否が
 /// 一致することを検証するパリティテスト。Guid は両経路で新規生成されるため突合には使わず、名前で対応付ける。
 /// </summary>
 public sealed class ErDiagramToolHostParityTests : IDisposable
@@ -51,13 +52,21 @@ public sealed class ErDiagramToolHostParityTests : IDisposable
     /// <summary>比較用の一意制約スナップショット（名前と構成列名を宣言順で保持する）</summary>
     private sealed record UniqueSnap(string Name, List<string> Columns);
 
-    /// <summary>比較用のエンティティスナップショット</summary>
+    /// <summary>
+    /// 比較用のエンティティスナップショット。主キーは実効順の列名と、保存された順序リストの列名写像の両方で持つ
+    /// （実効順だけでは順序がリストで明示されているか列順フォールバックかが見えないため）
+    /// </summary>
     private sealed record EntitySnap(
         string TableName,
         string Description,
         List<ColumnSnap> Columns,
-        List<UniqueSnap> UniqueConstraints
+        List<UniqueSnap> UniqueConstraints,
+        List<string> PrimaryKeyOrder,
+        List<string> StoredPrimaryKeyColumnIds
     );
+
+    /// <summary>解決できない列 Guid（削除済み列の残り）を表すプレースホルダ</summary>
+    private const string UnresolvedColumn = "?";
 
     /// <summary>比較用のリレーションスナップショット（端点は名前・種別は文字列・列ペアは「親列→子列」の宣言順）</summary>
     private sealed record RelSnap(
@@ -73,7 +82,7 @@ public sealed class ErDiagramToolHostParityTests : IDisposable
     )]
     public void GuiAndDocumentHosts_ProduceEquivalentModel()
     {
-        // ER 図操作 11 ツール全部を通る代表シナリオ（末尾に失敗系も含め成否パリティも確認する）
+        // ER 図操作 12 ツールを通る代表シナリオ（末尾に失敗系も含め成否パリティも確認する）
         var scenario = new (string Tool, object Args)[]
         {
             ("add_entity", new { table_name = "Customer" }),
@@ -382,6 +391,89 @@ public sealed class ErDiagramToolHostParityTests : IDisposable
                 "remove_relationship",
                 new { source_table = "TenantRegion", target_table = "TenantUser" }
             ),
+            // 主キーの宣言的置換（順序逆転・昇格・降格・失敗系）
+            ("add_entity", new { table_name = "KeyOrder" }),
+            (
+                "add_column",
+                new
+                {
+                    table_name = "KeyOrder",
+                    column_name = "KeyA",
+                    data_type = "int",
+                    is_primary_key = true,
+                    is_nullable = false,
+                }
+            ),
+            (
+                "add_column",
+                new
+                {
+                    table_name = "KeyOrder",
+                    column_name = "KeyB",
+                    data_type = "nvarchar(10)",
+                    is_primary_key = true,
+                    is_nullable = false,
+                }
+            ),
+            (
+                "add_column",
+                new
+                {
+                    table_name = "KeyOrder",
+                    column_name = "Extra",
+                    data_type = "nvarchar(20)",
+                    is_primary_key = false,
+                    is_nullable = true,
+                }
+            ),
+            // 列宣言順と逆の複合主キー（膜は変わらず順序だけが動く）
+            (
+                "set_primary_key",
+                new { table_name = "KeyOrder", columns = new[] { "KeyB", "KeyA" } }
+            ),
+            // 非主キーの NULL 許容列を昇格（両ホストとも NOT NULL へ正規化する）
+            (
+                "set_primary_key",
+                new { table_name = "KeyOrder", columns = new[] { "Extra", "KeyB", "KeyA" } }
+            ),
+            // 降格（外れた Extra の NULL 許容は据え置き＝昇格時に落ちた false のまま）。
+            // 最後に成功する主キー設定は列宣言順（KeyA, KeyB）と食い違う並びにする＝
+            // 指定順を無視して宣言順で書く実装を最終状態の比較で検知できるようにする
+            (
+                "set_primary_key",
+                new { table_name = "KeyOrder", columns = new[] { "KeyB", "KeyA" } }
+            ),
+            // 主キー付きの列追加で is_nullable を省略（両ホストとも NULL 不可へ正規化する）
+            (
+                "add_column",
+                new
+                {
+                    table_name = "KeyOrder",
+                    column_name = "KeyC",
+                    data_type = "int",
+                    is_primary_key = true,
+                }
+            ),
+            // 失敗系（空配列・存在しない列・同じ列の重複指定）
+            ("set_primary_key", new { table_name = "KeyOrder", columns = Array.Empty<string>() }),
+            (
+                "set_primary_key",
+                new { table_name = "KeyOrder", columns = new[] { "NoSuchColumn" } }
+            ),
+            (
+                "set_primary_key",
+                new { table_name = "KeyOrder", columns = new[] { "KeyA", "keya" } }
+            ),
+            // 主キー列への NULL 許容指定（両ホストとも NULL 不可へ正規化する＝モデルを食い違わせない）
+            (
+                "set_column_property",
+                new
+                {
+                    table_name = "KeyOrder",
+                    column_name = "KeyA",
+                    is_nullable = true,
+                }
+            ),
         };
 
         var vm = new MainViewModel();
@@ -443,6 +535,11 @@ public sealed class ErDiagramToolHostParityTests : IDisposable
                         u.Name,
                         u.ColumnIds.Select(id => e.Columns.First(c => c.Id == id).Name).ToList()
                     ))
+                    .ToList(),
+                e.GetPrimaryKeyColumnsInOrder().Select(c => c.Name).ToList(),
+                e.PrimaryKeyColumnIds.Select(id =>
+                        e.Columns.FirstOrDefault(c => c.Id == id)?.Name ?? UnresolvedColumn
+                    )
                     .ToList()
             ))
             .ToList();
@@ -467,6 +564,11 @@ public sealed class ErDiagramToolHostParityTests : IDisposable
                             ?? string.Empty,
                         u.ColumnIds.Select(id => e.Columns.First(c => c.Id == id).Name).ToList()
                     ))
+                    .ToList(),
+                e.GetPrimaryKeyColumnsInOrder().Select(c => c.Name).ToList(),
+                e.PrimaryKeyColumnIds.Select(id =>
+                        e.Columns.FirstOrDefault(c => c.Id == id)?.Name ?? UnresolvedColumn
+                    )
                     .ToList()
             ))
             .ToList();

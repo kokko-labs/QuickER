@@ -35,7 +35,7 @@ public sealed class DocumentErDiagramToolSetTests : IDisposable
     }
 
     [Fact(
-        DisplayName = "Create はカタログ 12 ツール（クエリ定義 3 含む）＋create_diagram を公開する"
+        DisplayName = "Create はカタログ 15 ツール（クエリ定義 3 含む）＋create_diagram を公開する"
     )]
     public void Create_ExposesAllTools()
     {

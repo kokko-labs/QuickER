@@ -1071,6 +1071,91 @@ public partial class MainViewModel : ObservableObject, IDisposable
         UndoRedo.Execute(new ChangeUniqueConstraintColumnsCommand(constraint, before, after));
     }
 
+    /// <summary>テーブルの主キーを指定列（指定順）へ Undo 可能な置き換えとして適用する</summary>
+    /// <param name="entity">対象のエンティティ</param>
+    /// <param name="ordered">新しい主キー構成列（実効順・1 列以上）</param>
+    /// <remarks>
+    /// 膜（<see cref="ColumnViewModel.IsPrimaryKey"/>）と順序
+    /// （<see cref="EntityViewModel.PrimaryKeyColumnIds"/>）を 1 回の履歴で差し替える。
+    /// 主キーへ入る列は NULL 不可へ正規化し、主キーから外れる列の NULL 許容は据え置く
+    /// （外したことが NULL 許容の変更まで意味しないため。MCP のファイル実行ホストと同じ規則）。
+    /// </remarks>
+    internal void ApplyPrimaryKey(EntityViewModel entity, IReadOnlyList<ColumnViewModel> ordered)
+    {
+        var afterOrder = ordered.Select(column => column.Id).ToList();
+        var keyColumnIds = new HashSet<Guid>(afterOrder);
+        var before = new List<(ColumnViewModel Column, bool IsPrimaryKey, bool IsNullable)>();
+        var after = new List<(ColumnViewModel Column, bool IsPrimaryKey, bool IsNullable)>();
+
+        foreach (var column in entity.Columns)
+        {
+            var isPrimaryKey = keyColumnIds.Contains(column.Id);
+
+            // 膜が動く列だけを往復対象にする（据え置きの列へ書き戻すと不要な通知が出る）
+            if (isPrimaryKey == column.IsPrimaryKey)
+            {
+                continue;
+            }
+
+            before.Add((column, column.IsPrimaryKey, column.IsNullable));
+            after.Add((column, isPrimaryKey, isPrimaryKey ? false : column.IsNullable));
+        }
+
+        var beforeOrder = entity.PrimaryKeyColumnIds.ToList();
+
+        // 実質的な変化がなければ履歴を汚さない。比較は実効順ではなく保存中の順序リストと膜で行う
+        // （実効順で比べると「順序リストが空の図へ同じ並びを明示＝ピン留め」という実変更を取りこぼす）
+        if (before.Count == 0 && beforeOrder.SequenceEqual(afterOrder))
+        {
+            return;
+        }
+
+        UndoRedo.Execute(
+            new SetPrimaryKeyCommand(
+                entity,
+                before,
+                after,
+                beforeOrder,
+                afterOrder,
+                action => _changeTracker.RunWithoutTracking(action)
+            )
+        );
+    }
+
+    /// <summary>主キー構成列を 1 つ上へ移動する（Undo 可能）</summary>
+    [RelayCommand]
+    private void MovePrimaryKeyColumnUp(PrimaryKeyMemberViewModel? member) =>
+        MovePrimaryKeyColumn(member, -1);
+
+    /// <summary>主キー構成列を 1 つ下へ移動する（Undo 可能）</summary>
+    [RelayCommand]
+    private void MovePrimaryKeyColumnDown(PrimaryKeyMemberViewModel? member) =>
+        MovePrimaryKeyColumn(member, 1);
+
+    /// <summary>主キー構成列の実効順で、指定行を <paramref name="offset"/> 分だけ入れ替える</summary>
+    /// <remarks>適用先は行が持つ所有エンティティ（選択状態には依存しない）。範囲外への移動は何もしない</remarks>
+    private void MovePrimaryKeyColumn(PrimaryKeyMemberViewModel? member, int offset)
+    {
+        if (member is null)
+        {
+            return;
+        }
+
+        var entity = member.Owner;
+        var ordered = entity.GetPrimaryKeyColumnsInOrder();
+        var index = ordered.IndexOf(member.Column);
+        var target = index + offset;
+
+        if (index < 0 || target < 0 || target >= ordered.Count)
+        {
+            return;
+        }
+
+        (ordered[index], ordered[target]) = (ordered[target], ordered[index]);
+
+        ApplyPrimaryKey(entity, ordered);
+    }
+
     /// <summary>カラム選択の変化に応じてカラム操作系コマンドの実行可否を更新する</summary>
     partial void OnSelectedColumnChanged(ColumnViewModel? value)
     {

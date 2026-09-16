@@ -363,8 +363,17 @@
   <data name="Property_ReorderHint" xml:space="preserve">
     <value>行のドラッグで並び順を変更できます。</value>
   </data>
-  <data name="Property_PrimaryKeyOrderLabel" xml:space="preserve">
-    <value>主キー:</value>
+  <data name="Property_PrimaryKeyOrderHeader" xml:space="preserve">
+    <value>主キーの順序</value>
+  </data>
+  <data name="Property_PrimaryKeyOrderHint" xml:space="preserve">
+    <value>PRIMARY KEY 句の列順です。主キーにする列は上の PK チェックで選びます。</value>
+  </data>
+  <data name="Property_MovePrimaryKeyColumnUpTooltip" xml:space="preserve">
+    <value>この列をキーの前へ移動</value>
+  </data>
+  <data name="Property_MovePrimaryKeyColumnDownTooltip" xml:space="preserve">
+    <value>この列をキーの後ろへ移動</value>
   </data>
   <data name="Property_UniqueConstraintsHeader" xml:space="preserve">
     <value>UNIQUE 制約</value>
@@ -512,6 +521,12 @@
   </data>
   <data name="Undo_ChangeUniqueConstraintColumns" xml:space="preserve">
     <value>UNIQUE 制約の構成列変更</value>
+  </data>
+  <data name="Undo_SetPrimaryKey" xml:space="preserve">
+    <value>主キーの変更</value>
+  </data>
+  <data name="Undo_ReorderPrimaryKeyColumns" xml:space="preserve">
+    <value>主キーの列順変更</value>
   </data>
   <data name="Undo_DuplicateEntity" xml:space="preserve">
     <value>複製: {0}</value>
@@ -1035,6 +1050,9 @@
   </data>
   <data name="Tool_UniqueConstraintDuplicateColumn" xml:space="preserve">
     <value>カラム '{0}' が columns に重複して指定されています。</value>
+  </data>
+  <data name="Tool_PrimaryKeySet" xml:space="preserve">
+    <value>テーブル '{0}' の主キーを設定しました（列: {1}）。</value>
   </data>
   <data name="Tool_UniqueConstraintAdded" xml:space="preserve">
     <value>テーブル '{0}' に一意制約（構成列: {1}）を追加しました。</value>

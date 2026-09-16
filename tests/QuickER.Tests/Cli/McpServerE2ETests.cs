@@ -62,7 +62,7 @@ public class McpServerE2ETests
         }
     }
 
-    [Fact(DisplayName = "quicker mcp は stdio で往復し 16 ツールを公開する")]
+    [Fact(DisplayName = "quicker mcp は stdio で往復し 19 ツールを公開する")]
     public async Task McpServer_RoundTripsOverStdio()
     {
         File.Exists(CliDllPath)
@@ -104,7 +104,7 @@ public class McpServerE2ETests
                 .ServerInstructions.Should()
                 .Contain("PascalCase", "初期化時にサーバ使用指針（設計既定ルール）が返される");
 
-            // --- ListTools: 18 ツール（ER 9 ＋ 一意制約 2 ＋ create_diagram ＋ クエリ定義 3 ＋ generate_csharp ＋ generate_ddl ＋ get_generation_config_schema） ---
+            // --- ListTools: 19 ツール（ER 9 ＋ 主キー 1 ＋ 一意制約 2 ＋ create_diagram ＋ クエリ定義 3 ＋ generate_csharp ＋ generate_ddl ＋ get_generation_config_schema） ---
             var tools = await client.ListToolsAsync(cancellationToken: cts.Token);
             var toolNames = tools.Select(t => t.Name).ToHashSet();
 
@@ -122,6 +122,7 @@ public class McpServerE2ETests
                         "set_column_property",
                         "add_relationship",
                         "remove_relationship",
+                        "set_primary_key",
                         "set_unique_constraint",
                         "remove_unique_constraint",
                         "create_diagram",
@@ -135,7 +136,7 @@ public class McpServerE2ETests
                     Diagnostics(stderrLines)
                 );
 
-            // 情報系ツール get_generation_config_schema だけは file 引数を取らず、他 17 ツールは file 必須
+            // 情報系ツール get_generation_config_schema だけは file 引数を取らず、他 18 ツールは file 必須
             const string schemaTool = "get_generation_config_schema";
 
             foreach (var tool in tools)
@@ -302,6 +303,20 @@ public class McpServerE2ETests
             );
             addRelationship.isError.Should().BeFalse(addRelationship.text);
 
+            // --- set_primary_key: 列宣言順と食い違う複合主キーを stdio 越しに定義できる ---
+            var setPrimaryKey = await CallAsync(
+                client,
+                "set_primary_key",
+                new()
+                {
+                    ["file"] = diagramFile,
+                    ["table_name"] = "Order",
+                    ["columns"] = new[] { "CustomerId", "OrderId" },
+                },
+                cts.Token
+            );
+            setPrimaryKey.isError.Should().BeFalse(setPrimaryKey.text);
+
             // --- get_diagram_summary: 内容確認 ---
             var summary = await CallAsync(
                 client,
@@ -318,6 +333,8 @@ public class McpServerE2ETests
             summary.text.Should().Contain("UQ_Customer_Email (Email)");
             // 複合外部キーは列ペアが宣言順で並ぶ
             summary.text.Should().Contain("FK: (Id → CustomerId, Email → CustomerEmail)");
+            // 複合主キーの並びは列宣言順と食い違うときだけ注記される
+            summary.text.Should().Contain("Primary key order: CustomerId, OrderId");
 
             // --- set_query: 名前付きクエリ定義（DSL・件数・パラメータ付き） ---
             var setQuery = await CallAsync(

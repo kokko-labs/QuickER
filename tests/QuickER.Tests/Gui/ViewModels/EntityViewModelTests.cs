@@ -153,14 +153,20 @@ public class EntityViewModelTests
         return new EntityViewModel(model, new EntityLayout { Width = 220 });
     }
 
-    /// <summary>複合主キーの表示テキストが実効順になることを検証する</summary>
-    [Fact(DisplayName = "主キー順の表示テキストは実効順の列名を並べる")]
-    public void PrimaryKeyOrderText_UsesEffectiveOrder()
+    /// <summary>複合主キーの並び替え行が実効順になることを検証する</summary>
+    [Fact(DisplayName = "主キーの並び替え行は実効順の列を並べる")]
+    public void PrimaryKeyMembers_UseEffectiveOrder()
     {
         var entity = NewCompositeKeyEntity();
 
         entity.IsCompositePrimaryKey.Should().BeTrue();
-        entity.PrimaryKeyOrderText.Should().Be("b, a");
+        entity.PrimaryKeyMembers.Select(m => m.Column.Name).Should().Equal("b", "a");
+
+        // 端の行は上下移動できない（ボタンの IsEnabled の元）
+        entity.PrimaryKeyMembers[0].CanMoveUp.Should().BeFalse();
+        entity.PrimaryKeyMembers[0].CanMoveDown.Should().BeTrue();
+        entity.PrimaryKeyMembers[1].CanMoveUp.Should().BeTrue();
+        entity.PrimaryKeyMembers[1].CanMoveDown.Should().BeFalse();
     }
 
     /// <summary>単一主キーでは複合フラグが立たない（＝表示されない）ことを検証する</summary>
@@ -170,30 +176,74 @@ public class EntityViewModelTests
         NewEntityWithMixedColumns().IsCompositePrimaryKey.Should().BeFalse();
     }
 
-    /// <summary>主キーの切替・列のリネーム・列の並び替えで主キー順表示が再通知されることを検証する</summary>
-    [Fact(DisplayName = "主キー切替・リネーム・並び替えで主キー順表示が再通知される")]
-    public void PrimaryKeyOrder_RaisesPropertyChanged_OnColumnChanges()
+    /// <summary>主キーの切替・列のリネーム・列の並び替えで並び替え行が追従することを検証する</summary>
+    [Fact(DisplayName = "主キー切替・リネーム・並び替えで主キーの並び替え行が追従する")]
+    public void PrimaryKeyMembers_FollowColumnChanges()
     {
         var entity = NewCompositeKeyEntity();
         var changed = new List<string?>();
         entity.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
 
-        // 主キーの解除（構成列が変わる）
+        // 主キーの解除（構成列が変わる＝行が 1 本減る）
         entity.Columns[1].IsPrimaryKey = false;
         changed.Should().Contain(nameof(EntityViewModel.IsCompositePrimaryKey));
-        changed.Should().Contain(nameof(EntityViewModel.PrimaryKeyOrderText));
         entity.IsCompositePrimaryKey.Should().BeFalse();
+        entity.PrimaryKeyMembers.Select(m => m.Column.Name).Should().Equal("a");
 
-        // 列のリネーム（表示名が変わる）
+        // 列のリネーム（表示名は行が持つ ColumnViewModel の通知で届く）
         entity.Columns[1].IsPrimaryKey = true;
-        changed.Clear();
         entity.Columns[0].Name = "renamed";
-        changed.Should().Contain(nameof(EntityViewModel.PrimaryKeyOrderText));
-        entity.PrimaryKeyOrderText.Should().Be("b, renamed");
+        entity.PrimaryKeyMembers.Select(m => m.Column.Name).Should().Equal("b", "renamed");
 
         // 列の並び替え（実効順の第 2 キーが表示順のため追従が要る）
-        changed.Clear();
         entity.Columns.Move(0, 1);
-        changed.Should().Contain(nameof(EntityViewModel.PrimaryKeyOrderText));
+        entity.PrimaryKeyMembers.Select(m => m.Column.Name).Should().Equal("b", "renamed");
+    }
+
+    /// <summary>
+    /// 並び替え行の増減が末尾でのみ吸収され、残る行のインスタンスが使い回されることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 毎回作り直すと ItemsControl のコンテナが再生成され、↑ ボタンの連打中にフォーカスが落ちる。
+    /// ビルドでも型検査でも出ない性質のため参照一致で固定する。
+    /// </remarks>
+    [Fact(DisplayName = "主キーの並び替え行は再構築されても行インスタンスを使い回す")]
+    public void PrimaryKeyMembers_ReuseRowInstances()
+    {
+        var entity = NewCompositeKeyEntity();
+        var first = entity.PrimaryKeyMembers[0];
+        var second = entity.PrimaryKeyMembers[1];
+
+        // 並び替え（行数は同じ＝両方の行が生き残る）
+        entity.SetPrimaryKeyColumnIds([entity.Columns[0].Id, entity.Columns[1].Id]);
+        entity.PrimaryKeyMembers[0].Should().BeSameAs(first);
+        entity.PrimaryKeyMembers[1].Should().BeSameAs(second);
+        entity.PrimaryKeyMembers.Select(m => m.Column.Name).Should().Equal("a", "b");
+
+        // 膜を 1 本外す（末尾で吸収＝先頭行は生き残る）
+        entity.Columns[1].IsPrimaryKey = false;
+        entity.PrimaryKeyMembers.Should().ContainSingle().Which.Should().BeSameAs(first);
+
+        // 戻すと末尾へ足される（先頭行は依然として同じインスタンス）
+        entity.Columns[1].IsPrimaryKey = true;
+        entity.PrimaryKeyMembers[0].Should().BeSameAs(first);
+        entity.PrimaryKeyMembers.Select(m => m.Column.Name).Should().Equal("a", "b");
+    }
+
+    /// <summary>保持中の順序リストそのものを渡しても順序が失われないことを検証する</summary>
+    /// <remarks>
+    /// <see cref="EntityViewModel.PrimaryKeyColumnIds"/> は内部リストを直接返すため、それを差し替えの引数に
+    /// 渡すと「消してから読む」形になり、何も読めずに空になり得る。
+    /// </remarks>
+    [Fact(DisplayName = "主キー順の差し替えへ保持中のリスト自身を渡しても順序が保たれる")]
+    public void SetPrimaryKeyColumnIds_PassingOwnList_KeepsOrder()
+    {
+        var entity = NewCompositeKeyEntity();
+        var before = entity.PrimaryKeyColumnIds.ToList();
+
+        entity.SetPrimaryKeyColumnIds(entity.PrimaryKeyColumnIds);
+
+        entity.PrimaryKeyColumnIds.Should().Equal(before);
+        entity.PrimaryKeyMembers.Select(m => m.Column.Name).Should().Equal("b", "a");
     }
 }

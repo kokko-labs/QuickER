@@ -759,18 +759,19 @@ public class ErDiagramDynamicToolsTests
     }
 
     /// <summary>
-    /// ツール説明文（英語）に複合主キー禁止と、複合外部キーの指定方法が含まれることを検証する
-    /// （AI への指示はツール説明文経由のため）
+    /// ツール説明文（英語）に複合主キーの扱い（コード生成器が非対応・宣言は set_primary_key）と、
+    /// 複合外部キーの指定方法が含まれることを検証する（AI への指示はツール説明文経由のため）
     /// </summary>
-    [Fact(DisplayName = "ツール説明文に複合PK禁止と複合FKの指定方法が含まれる")]
-    public void GetDefinitions_DescriptionsContainCompositeKeyProhibition()
+    [Fact(DisplayName = "ツール説明文に複合PKの扱いと複合FKの指定方法が含まれる")]
+    public void GetDefinitions_DescriptionsContainCompositeKeyGuidance()
     {
         var definitions = ErDiagramToolCatalog.GetDefinitions();
 
         definitions
             .Single(d => d.Name == "add_column")
             .Description.Should()
-            .Contain("composite primary keys are not allowed");
+            .Contain("the C# code generator does not")
+            .And.Contain("set_primary_key");
         definitions
             .Single(d => d.Name == "add_relationship")
             .Description.Should()

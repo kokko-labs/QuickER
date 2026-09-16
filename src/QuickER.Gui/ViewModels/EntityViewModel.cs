@@ -73,13 +73,34 @@ public partial class EntityViewModel : ObservableObject
     /// </remarks>
     public ObservableCollection<UniqueConstraintViewModel> UniqueConstraints { get; }
 
-    /// <summary>主キー構成列の順序（意味モデル <see cref="Entity.PrimaryKeyColumnIds"/> のパススルー）</summary>
+    /// <summary>主キー構成列の順序（意味モデル <see cref="Entity.PrimaryKeyColumnIds"/> と同じ順序の正本）</summary>
     /// <remarks>
-    /// 編集 UI を持たないため <see cref="Memo"/> と同じく読込値をそのまま保持して書き戻す。
+    /// 膜（どの列が主キーか）の正本は <see cref="ColumnViewModel.IsPrimaryKey"/> で、ここは順序の上書き情報。
+    /// 差し替えは <see cref="SetPrimaryKeyColumnIds"/>（Undo コマンドからの唯一の適用点）が行う。
     /// 列削除・主キー切替に合わせた掃除は行わない（読み手が
     /// <see cref="Entity.GetPrimaryKeyColumnsInOrder"/> で解決不能な ID・非主キー列を無視するため）。
     /// </remarks>
     private readonly List<Guid> _primaryKeyColumnIds;
+
+    /// <summary>主キー構成列の順序（宣言順。読み手の <see cref="GetPrimaryKeyColumnsInOrder"/> が第 1 キーに使う）</summary>
+    internal IReadOnlyList<Guid> PrimaryKeyColumnIds => _primaryKeyColumnIds;
+
+    /// <summary>主キーの構成・並びを丸ごと差し替える（Undo コマンドからの適用点）</summary>
+    /// <param name="columnIds">新しい主キー構成列の Guid（実効順）</param>
+    /// <remarks>
+    /// 膜（<see cref="ColumnViewModel.IsPrimaryKey"/>）は呼び出し側が別途設定する。ここが受け持つのは順序だけ。
+    /// 引数は消去より先に確定させる（<see cref="PrimaryKeyColumnIds"/> は内部リストを直接返すため、
+    /// それ自身が渡されると消去後に読む形になり空になる）。
+    /// </remarks>
+    internal void SetPrimaryKeyColumnIds(IEnumerable<Guid> columnIds)
+    {
+        var ids = columnIds.ToList();
+
+        _primaryKeyColumnIds.Clear();
+        _primaryKeyColumnIds.AddRange(ids);
+
+        NotifyPrimaryKeyOrderChanged();
+    }
 
     /// <summary>主キー構成列を実効順（DDL の <c>PRIMARY KEY</c> 句へ出力する並び）で取り出す</summary>
     /// <returns><see cref="ColumnViewModel.IsPrimaryKey"/> が <c>true</c> の列を実効順に並べたリスト</returns>
@@ -120,15 +141,53 @@ public partial class EntityViewModel : ObservableObject
     /// <remarks>プロパティパネルの主キー順表示の表示可否に用いる派生プロパティ</remarks>
     public bool IsCompositePrimaryKey => GetPrimaryKeyColumnsInOrder().Count >= 2;
 
-    /// <summary>主キー構成列を実効順に並べたカンマ区切りの列名（読み取り専用表示用）</summary>
-    public string PrimaryKeyOrderText =>
-        string.Join(", ", GetPrimaryKeyColumnsInOrder().Select(c => c.Name));
+    /// <summary>主キー構成列の並び替え行（実効順。プロパティパネルの主キーカードが表示・操作する）</summary>
+    /// <remarks>正本は膜（<see cref="ColumnViewModel.IsPrimaryKey"/>）＋順序（<see cref="PrimaryKeyColumnIds"/>）で、この行リストはその導出表示</remarks>
+    public ObservableCollection<PrimaryKeyMemberViewModel> PrimaryKeyMembers { get; }
 
     /// <summary>主キーの構成・並び・列名の変化を主キー順表示へ通知する</summary>
     private void NotifyPrimaryKeyOrderChanged()
     {
         OnPropertyChanged(nameof(IsCompositePrimaryKey));
-        OnPropertyChanged(nameof(PrimaryKeyOrderText));
+
+        // カラム構築中（コンストラクター内）は行リストが未生成のため触らない
+        if (PrimaryKeyMembers is not null)
+        {
+            SyncPrimaryKeyMembers();
+        }
+    }
+
+    /// <summary>実効順の主キー列一覧に合わせて並び替え行を作り直す</summary>
+    /// <remarks>
+    /// 行の増減は末尾でのみ吸収し、既存の行インスタンスは使い回す（毎回作り直さない）。
+    /// ItemsControl のコンテナ再生成を避け、クリックしたボタンのコンテナを破棄しないことで、
+    /// キーボードフォーカスをカード内の有効なボタンに留める（作り直すとフォーカスがカードの外へ失われる）。
+    /// 行 i は常に実効順で i 番目の列を指すため、↑ / ↓ ボタンは列でなく位置に紐づく＝
+    /// 同じボタンを続けて押すと、押すたびにその時点で当該位置にある列が動く。
+    /// </remarks>
+    private void SyncPrimaryKeyMembers()
+    {
+        var columns = GetPrimaryKeyColumnsInOrder();
+
+        while (PrimaryKeyMembers.Count > columns.Count)
+        {
+            PrimaryKeyMembers.RemoveAt(PrimaryKeyMembers.Count - 1);
+        }
+
+        while (PrimaryKeyMembers.Count < columns.Count)
+        {
+            PrimaryKeyMembers.Add(
+                new PrimaryKeyMemberViewModel(this, columns[PrimaryKeyMembers.Count])
+            );
+        }
+
+        for (var i = 0; i < PrimaryKeyMembers.Count; i++)
+        {
+            var member = PrimaryKeyMembers[i];
+            member.ApplyColumn(columns[i]);
+            member.CanMoveUp = i > 0;
+            member.CanMoveDown = i < columns.Count - 1;
+        }
     }
 
     /// <summary>配下の一意制約の編集行で、ユーザーが構成列を選び直したときに発火するイベント</summary>
@@ -229,7 +288,7 @@ public partial class EntityViewModel : ObservableObject
         _memo = model.Memo;
         _description = model.Description ?? string.Empty;
         _titleBackgroundColor = EntityTitleColorPalette.Normalize(layout.TitleBackgroundColor);
-        // 主キーの順序は編集対象ではないため、モデルのリストを防御コピーして保持するだけにする
+        // 順序の正本はモデル側のリスト。防御コピーして保持し、編集は SetPrimaryKeyColumnIds が行う
         _primaryKeyColumnIds = new List<Guid>(model.PrimaryKeyColumnIds);
         Columns = new ObservableCollection<ColumnViewModel>(
             model.Columns.Select(c => new ColumnViewModel(c))
@@ -241,6 +300,10 @@ public partial class EntityViewModel : ObservableObject
         {
             column.PropertyChanged += OnColumnPropertyChanged;
         }
+
+        // 主キーの並び替え行は実効順の解決でカラム一覧を参照するため、カラムの構築後に組み立てる
+        PrimaryKeyMembers = new ObservableCollection<PrimaryKeyMemberViewModel>();
+        SyncPrimaryKeyMembers();
 
         // 一意制約は構成列候補の生成でカラム一覧を参照するため、カラムの構築後に読み込む
         UniqueConstraints = new ObservableCollection<UniqueConstraintViewModel>(

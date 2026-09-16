@@ -2,8 +2,8 @@ namespace QuickER.Mcp;
 
 /// <summary>
 /// ER 図操作ツールの定義（スキーマ）の正本。エンティティ・カラム・リレーションの追加／削除／変更・
-/// 一意制約の定義／削除・図の要約取得（11 ツール）に加え、名前付きクエリの定義／一覧／削除（set_query /
-/// list_queries / remove_query）を含む 14 ツールを、外部 AI エージェント向けの中立言語（英語）で記述する。
+/// 主キーの定義・一意制約の定義／削除・図の要約取得（12 ツール）に加え、名前付きクエリの定義／一覧／削除（set_query /
+/// list_queries / remove_query）を含む 15 ツールを、外部 AI エージェント向けの中立言語（英語）で記述する。
 /// </summary>
 /// <remarks>
 /// 実行（VM 操作）は app 側が担う。各 LLM SDK 形式（OpenAI / Anthropic）への変換は
@@ -22,7 +22,7 @@ public static class ErDiagramToolCatalog
         + "Design guidelines (defaults - follow the user's explicit instructions when they differ):\n"
         + "- Before modifying an existing diagram, call get_diagram_summary to see its current state (and list_queries when working with named queries).\n"
         + "- Naming: unless the user requests a different convention, use PascalCase singular table names (e.g., Customer, OrderItem). When the diagram already has tables, match their existing naming style (casing and singular/plural) instead.\n"
-        + "- Give each table exactly one primary key column, added first with add_column is_primary_key=true (composite primary keys are not supported by the code generator).\n"
+        + "- Give each table exactly one primary key column, added first with add_column is_primary_key=true (composite primary keys are not supported by the code generator, though the diagram and the generated DDL are). When the user does want a composite key, declare its columns and their order with set_primary_key.\n"
         + "- Add foreign key columns with is_primary_key=false (usually is_nullable=false), then define the reference with add_relationship, giving source_columns and target_columns explicitly. The two arrays are parallel and must have the same length; a single entry each is the usual single-column foreign key, and two or more entries define a composite foreign key. Add foreign keys with different roles as separate relationships.\n"
         + "- Unique constraints: set_unique_constraint is an upsert keyed by (table_name, set of columns); the primary key already enforces uniqueness of its own columns, so add one only for other columns or column combinations that must be unique.\n"
         + "- Named queries: set_query is an upsert keyed by (table_name, query_name); definitions are validated before saving.\n"
@@ -92,7 +92,7 @@ public static class ErDiagramToolCatalog
             {
                 Name = "add_column",
                 Description =
-                    "Adds a column to the specified table. Each table has exactly one primary key column (composite primary keys are not allowed). If you need multiple key-like columns, add the second and later ones with is_primary_key=false and define the references with add_relationship.",
+                    "Adds a column to the specified table. Give each table exactly one primary key column: a second one is not rejected, and the diagram, the generated DDL and the schema sync all support a composite key, but the C# code generator does not. To declare a composite key - or to change which columns the key is made of, and in which order - call set_primary_key. A primary key column is always NOT NULL, so is_nullable is ignored when is_primary_key=true (to allow NULL, first take the column out of the key with set_primary_key). Columns that point at another table are not part of this table's primary key: add them as ordinary columns with is_primary_key=false and define the reference with add_relationship.",
                 DeferLoading = false,
                 InputSchema = new
                 {
@@ -180,7 +180,7 @@ public static class ErDiagramToolCatalog
             {
                 Name = "set_column_property",
                 Description =
-                    "Changes a column's properties (description, data type, nullability) in the specified table. Specify at least one of description, data_type, or is_nullable.",
+                    "Changes a column's properties (description, data type, nullability) in the specified table. Specify at least one of description, data_type, or is_nullable. A primary key column is always NOT NULL, so is_nullable is ignored for it (to allow NULL, first take the column out of the key with set_primary_key).",
                 DeferLoading = false,
                 InputSchema = new
                 {
@@ -287,6 +287,32 @@ public static class ErDiagramToolCatalog
                         },
                     },
                     required = new[] { "source_table", "target_table" },
+                },
+            },
+            new ToolDefinition
+            {
+                Name = "set_primary_key",
+                Description =
+                    "Sets the primary key of a table. Matched by table_name alone: a table has at most one primary key, so this call always replaces the current one - the listed columns become the key in the order given, and any other column of the table stops being part of it. Column order matters here (unlike set_unique_constraint): it is the order of the generated PRIMARY KEY constraint and of the index behind it, and get_diagram_summary reports it whenever it differs from the table's column order. The listed columns are also made NOT NULL, because a primary key column cannot be null; a column dropped from the key keeps the nullability it had. Nothing is checked against relationships: dropping a column that a relationship references from the key leaves that foreign key pointing at a column no key or unique constraint covers, and the generated DDL then fails when applied - keep such a column in the key, or cover it with set_unique_constraint. At least one column is required, so this tool cannot leave a table without a primary key. A single-column key needs this tool only to move the key to a different column - add_column is_primary_key=true already defines one.",
+                DeferLoading = false,
+                InputSchema = new
+                {
+                    type = "object",
+                    properties = new
+                    {
+                        table_name = new
+                        {
+                            type = "string",
+                            description = "Name of the table whose primary key is set.",
+                        },
+                        columns = new
+                        {
+                            type = "array",
+                            description = "Names of the columns that make up the primary key, in key order. Every name must be an existing column of this table, and the same column cannot be listed twice.",
+                            items = new { type = "string" },
+                        },
+                    },
+                    required = new[] { "table_name", "columns" },
                 },
             },
             new ToolDefinition

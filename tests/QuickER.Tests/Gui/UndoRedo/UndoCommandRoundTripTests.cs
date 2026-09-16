@@ -75,6 +75,7 @@ public class UndoCommandRoundTripTests
             [typeof(AddUniqueConstraintCommand)] = BuildAddUniqueConstraint,
             [typeof(RemoveUniqueConstraintCommand)] = BuildRemoveUniqueConstraint,
             [typeof(ChangeUniqueConstraintColumnsCommand)] = BuildChangeUniqueConstraintColumns,
+            [typeof(SetPrimaryKeyCommand)] = BuildSetPrimaryKey,
             [typeof(ChangeRelationshipColumnPairsCommand)] = BuildChangeRelationshipColumnPairs,
             [typeof(ChangeTargetDbmsCommand)] = BuildChangeTargetDbms,
         };
@@ -502,6 +503,37 @@ public class UndoCommandRoundTripTests
         );
     }
 
+    private static UndoScenario BuildSetPrimaryKey()
+    {
+        var entity = NewEntity("T");
+
+        // 膜の入れ替え（id を外し memo を昇格）＋順序の明示。memo は NULL 許容なので
+        // 「昇格で NOT NULL へ落ち、Undo で NULL 許容が戻る」ことも往復の物差しに入る
+        var before = new List<(ColumnViewModel, bool, bool)>
+        {
+            (entity.Columns[0], true, false),
+            (entity.Columns[2], false, true),
+        };
+        var after = new List<(ColumnViewModel, bool, bool)>
+        {
+            (entity.Columns[0], false, false),
+            (entity.Columns[2], true, false),
+        };
+
+        return new UndoScenario(
+            new SetPrimaryKeyCommand(
+                entity,
+                before,
+                after,
+                [.. entity.PrimaryKeyColumnIds],
+                [entity.Columns[2].Id],
+                // 本番は変更追跡の抑止デリゲートを渡す。ここでは素通しで同じ意味になる
+                action => action()
+            ),
+            () => Describe(entity)
+        );
+    }
+
     private static UndoScenario BuildChangeRelationshipColumnPairs()
     {
         var main = new MainViewModel();
@@ -727,6 +759,9 @@ public class UndoCommandRoundTripTests
             .Append(entity.Memo)
             .Append(',')
             .Append(entity.Description)
+            .Append(",pkOrder=")
+            // 主キーの順序も Undo が往復させる状態（膜が動かない並べ替えはここにしか現れない）
+            .Append(string.Join('/', entity.PrimaryKeyColumnIds))
             .Append(")\n");
 
         foreach (var column in entity.Columns)

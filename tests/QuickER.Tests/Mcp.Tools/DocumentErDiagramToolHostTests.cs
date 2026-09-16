@@ -341,6 +341,32 @@ public sealed class DocumentErDiagramToolHostTests : IDisposable
         column.IsNullable.Should().BeFalse();
     }
 
+    [Fact(DisplayName = "add_column は is_nullable 省略でも主キー列を NULL 不可にする")]
+    public void AddColumn_PrimaryKeyWithoutNullableFlag_IsNotNullable()
+    {
+        var file = PathFor("d.json");
+        Exec(DocumentErDiagramToolHost.CreateDiagramToolName, file, new { target_dbms = "sqlite" });
+        Exec("add_entity", file, new { table_name = "Book" });
+
+        // is_nullable 省略の既定は「NULL 許容」だが、主キー列では NULL 不可が優先される
+        // （GUI 側 ColumnViewModel も同じ強制を行う＝両ホストのモデルを一致させる）
+        Exec(
+            "add_column",
+            file,
+            new
+            {
+                table_name = "Book",
+                column_name = "BookId",
+                data_type = "int",
+                is_primary_key = true,
+            }
+        );
+
+        var column = JsonStorageService.Load(file).Schema.Entities.Single().Columns.Single();
+        column.IsPrimaryKey.Should().BeTrue();
+        column.IsNullable.Should().BeFalse();
+    }
+
     [Fact(DisplayName = "add_column は存在しないテーブルをエラーにする")]
     public void AddColumn_UnknownTable_ReturnsError()
     {
@@ -435,6 +461,52 @@ public sealed class DocumentErDiagramToolHostTests : IDisposable
             .Columns.Single(c => c.Name == "Title");
         column.DataType.Should().Be("nvarchar(500)");
         column.IsNullable.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// 主キー列への <c>is_nullable=true</c> が NULL 不可へ正規化されることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// GUI 側の <c>ColumnViewModel.IsNullable</c> は主キー列の NULL 許容を握り潰すため、ここで素通しすると
+    /// 同じ呼び出しで両ホストのモデルが無言で食い違う（保存した図を GUI で開くと黙って戻る）。
+    /// </remarks>
+    [Fact(DisplayName = "set_column_property は主キー列の NULL 許容を NULL 不可へ正規化する")]
+    public void SetColumnProperty_PrimaryKeyColumn_StaysNotNullable()
+    {
+        var file = PathFor("d.json");
+        Exec(DocumentErDiagramToolHost.CreateDiagramToolName, file, new { target_dbms = "sqlite" });
+        Exec("add_entity", file, new { table_name = "Book" });
+        Exec(
+            "add_column",
+            file,
+            new
+            {
+                table_name = "Book",
+                column_name = "BookId",
+                data_type = "int",
+                is_primary_key = true,
+                is_nullable = false,
+            }
+        );
+
+        var (_, success) = Exec(
+            "set_column_property",
+            file,
+            new
+            {
+                table_name = "Book",
+                column_name = "BookId",
+                is_nullable = true,
+            }
+        );
+
+        success.Should().BeTrue();
+        JsonStorageService
+            .Load(file)
+            .Schema.Entities.Single()
+            .Columns.Single(c => c.Name == "BookId")
+            .IsNullable.Should()
+            .BeFalse();
     }
 
     // ---------------- relationship operations ----------------
@@ -855,15 +927,12 @@ public sealed class DocumentErDiagramToolHostTests : IDisposable
 
         if (reversePrimaryKeyOrder)
         {
-            // 主キーの順序を設定するツールは無いため、文書を直接書き換えて実効順を逆にする
-            var document = JsonStorageService.Load(file);
-            var parent = document.Schema.Entities.Single(e => e.TableName == "TenantRegion");
-            parent.PrimaryKeyColumnIds = parent
-                .Columns.Where(c => c.IsPrimaryKey)
-                .Reverse()
-                .Select(c => c.Id)
-                .ToList();
-            JsonStorageService.Save(file, document);
+            // 列宣言順（TenantId → RegionCode）と逆の実効順をツール経由で宣言する
+            Exec(
+                "set_primary_key",
+                file,
+                new { table_name = "TenantRegion", columns = new[] { "RegionCode", "TenantId" } }
+            );
         }
 
         return file;

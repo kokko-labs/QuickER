@@ -59,6 +59,7 @@ public static partial class DocumentErDiagramToolHost
                 "set_column_property" => Mutate(file, doc => SetColumnProperty(doc, arguments)),
                 "add_relationship" => Mutate(file, doc => AddRelationship(doc, arguments)),
                 "remove_relationship" => Mutate(file, doc => RemoveRelationship(doc, arguments)),
+                "set_primary_key" => Mutate(file, doc => SetPrimaryKey(doc, arguments)),
                 "set_unique_constraint" => Mutate(file, doc => SetUniqueConstraint(doc, arguments)),
                 "remove_unique_constraint" => Mutate(
                     file,
@@ -386,6 +387,10 @@ public static partial class DocumentErDiagramToolHost
         var isNullable =
             !args.TryGetProperty("is_nullable", out var isNullEl)
             || isNullEl.ValueKind != JsonValueKind.False;
+
+        // 主キー列は NULL 不可（GUI 側の ColumnViewModel も同じ強制を行う）
+        isNullable = isPk ? false : isNullable;
+
         var desc = GetString(args, "description") ?? string.Empty;
 
         entity.Columns.Add(
@@ -558,7 +563,8 @@ public static partial class DocumentErDiagramToolHost
             && isNullEl.ValueKind is JsonValueKind.True or JsonValueKind.False
         )
         {
-            column.IsNullable = isNullEl.GetBoolean();
+            // 主キー列は NULL 不可（GUI 側の ColumnViewModel も同じ強制を行う）
+            column.IsNullable = column.IsPrimaryKey ? false : isNullEl.GetBoolean();
             changed.Add("nullability");
         }
 
@@ -896,6 +902,58 @@ public static partial class DocumentErDiagramToolHost
             )
         );
 
+    // ---------------- primary key operations ----------------
+
+    /// <summary>テーブルの主キーを指定列（指定順）へ置き換える</summary>
+    /// <remarks>
+    /// 照合キーはテーブルのみ（主キーはテーブルに高々 1 つのため常に全体置換）。膜（どの列が主キーか）は
+    /// <see cref="Column.IsPrimaryKey"/>、順序は <see cref="Entity.PrimaryKeyColumnIds"/> へ書く。
+    /// 列挙された列は NULL 不可へ正規化し、主キーから外れた列の NULL 許容は据え置く
+    /// （外したことが NULL 許容の変更まで意味しないため）。
+    /// </remarks>
+    private static (string, bool) SetPrimaryKey(DiagramDocument document, JsonElement args)
+    {
+        var tableName = GetString(args, "table_name");
+
+        if (string.IsNullOrWhiteSpace(tableName))
+        {
+            return ("table_name is required.", false);
+        }
+
+        var entity = FindEntity(document.Schema, tableName);
+
+        if (entity is null)
+        {
+            return ($"Table '{tableName}' not found.", false);
+        }
+
+        var (columns, error) = ResolveConstraintColumns(entity, args);
+
+        if (error is not null)
+        {
+            return (error, false);
+        }
+
+        var keyColumnIds = new HashSet<Guid>(columns!.Select(column => column.Id));
+
+        foreach (var column in entity.Columns)
+        {
+            column.IsPrimaryKey = keyColumnIds.Contains(column.Id);
+
+            // 主キー列は NULL 不可（DB 側の制約）。外れた列の NULL 許容は触らない
+            if (column.IsPrimaryKey)
+            {
+                column.IsNullable = false;
+            }
+        }
+
+        entity.PrimaryKeyColumnIds = columns!.Select(column => column.Id).ToList();
+
+        var columnText = string.Join(", ", columns!.Select(column => column.Name));
+
+        return ($"Set primary key on table '{entity.TableName}' (columns: {columnText}).", true);
+    }
+
     // ---------------- unique constraint operations ----------------
 
     /// <summary>一意制約を定義する（同じ列集合の制約があれば名前・列順を差し替え、無ければ追加する）</summary>
@@ -1000,6 +1058,10 @@ public static partial class DocumentErDiagramToolHost
     }
 
     /// <summary><c>columns</c> 引数（列名の配列）をエンティティのカラムへ解決する</summary>
+    /// <remarks>
+    /// UNIQUE 制約ツールと主キーツールで共用する（空配列・列不在・列の重複という検証内容は制約の種別に
+    /// 依存しないため、エラー文言も種別を名乗らない）。
+    /// </remarks>
     /// <returns>解決したカラム（宣言順）と、失敗時のエラーテキスト</returns>
     private static (List<Column>? Columns, string? Error) ResolveConstraintColumns(
         Entity entity,
