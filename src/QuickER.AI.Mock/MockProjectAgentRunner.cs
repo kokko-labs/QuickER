@@ -11,11 +11,15 @@ namespace QuickER.AI.Mock;
 /// </remarks>
 public interface IBuildRunner
 {
-    /// <summary>指定フォルダで <c>dotnet build</c> を実行し、成否と結合出力（stdout+stderr）を返す</summary>
-    /// <param name="workingDirectory">ビルド対象フォルダ（プロジェクトを含む）</param>
+    /// <summary>指定したソリューションを <c>dotnet build</c> でビルドし、成否と結合出力（stdout+stderr）を返す</summary>
+    /// <param name="solutionFilePath">
+    /// ビルド対象のソリューション（<c>{出力フォルダ}/{プロジェクト名}.sln</c>）のフルパス。
+    /// フォルダ指定でなくパスを明示するのは、出力フォルダに別のソリューションがあると
+    /// フォルダ指定のビルドが MSB1011（対象が一意に決まらない）で落ちるため。
+    /// </param>
     /// <param name="cancellationToken">キャンセルトークン</param>
     Task<BuildRunResult> BuildAsync(
-        string workingDirectory,
+        string solutionFilePath,
         CancellationToken cancellationToken = default
     );
 
@@ -73,12 +77,36 @@ public sealed class MockProjectAgentRunner
     /// <summary>ログファイル名（出力フォルダ直下）</summary>
     public const string LogFileName = "quickr-mock-generation.log";
 
-    /// <summary>全体タイムアウトの既定（30 分）</summary>
+    /// <summary>エージェント実行のタイムアウトの既定（30 分）</summary>
+    /// <remarks>
+    /// 掛かるのは実行器（Claude Code / Codex / Copilot / API キー）が UI を書いている間だけで、
+    /// そのあとの最終ビルドは <see cref="DefaultBuildTimeout"/> が別に持つ。
+    /// したがってランの最長は両者の和（既定で 40 分）になる——意図的に独立させている。
+    /// エージェントを打ち切った時点で成果物は中途半端なので最終ビルドは走らず、
+    /// 逆に「エージェントが時間ぎりぎりまで書いた」場合でも検証ビルドには
+    /// 十分な時間を与えたい（残り時間で切ると、正しく書けた生成物が検証されないまま失敗扱いになる）。
+    /// </remarks>
     public static readonly TimeSpan DefaultTimeout = TimeSpan.FromMinutes(30);
+
+    /// <summary>最終ビルド（<c>dotnet build</c>）専用タイムアウトの既定（10 分）</summary>
+    /// <remarks>
+    /// 全体タイムアウト（<see cref="DefaultTimeout"/>）はエージェントの実行までしか掛からないため、
+    /// 最終ビルドにも独立した上限を置く（これが無いと、応答しない <c>dotnet</c> でランが永久に終わらない）。
+    /// <para>
+    /// 値の根拠（実測・SDK 10.0.401 / Windows 11 26200）: スキャフォールドと同形の Blazor Web App
+    /// （<c>Microsoft.NET.Sdk.Web</c>・net10.0・<c>Microsoft.Data.Sqlite</c> 参照）のソリューションを、
+    /// パッケージキャッシュ（<c>NUGET_PACKAGES</c>）と HTTP キャッシュ（<c>NUGET_HTTP_CACHE_PATH</c>）を
+    /// 両方とも空フォルダへ向けた「完全コールド」状態でビルドして 6.8 秒（復元込み・本実装の引数一式つき）。
+    /// 10 分はその約 88 倍で、遅い回線・遅い端末・画面数の多い生成物を見込んでも十分な余裕がある一方、
+    /// 「終わらないビルド」は確実に打ち切れる。
+    /// </para>
+    /// </remarks>
+    public static readonly TimeSpan DefaultBuildTimeout = TimeSpan.FromMinutes(10);
 
     private readonly IMockProjectAgent _agent;
     private readonly IBuildRunner _buildRunner;
     private readonly TimeSpan _timeout;
+    private readonly TimeSpan _buildTimeout;
     private readonly MockProjectTargetProfile _profile;
 
     /// <summary>実行中ターンのキャンセル起点（中断・タイムアウトで発火）</summary>
@@ -89,16 +117,19 @@ public sealed class MockProjectAgentRunner
     /// <param name="buildRunner">最終ビルド検証器</param>
     /// <param name="timeout">全体タイムアウト（省略時は <see cref="DefaultTimeout"/>）</param>
     /// <param name="profile">生成ターゲットのプロファイル（要求へ添える・UI 成果物の検索パターン。省略時は WPF）</param>
+    /// <param name="buildTimeout">最終ビルド専用タイムアウト（省略時は <see cref="DefaultBuildTimeout"/>）</param>
     public MockProjectAgentRunner(
         IMockProjectAgent agent,
         IBuildRunner buildRunner,
         TimeSpan? timeout = null,
-        MockProjectTargetProfile? profile = null
+        MockProjectTargetProfile? profile = null,
+        TimeSpan? buildTimeout = null
     )
     {
         _agent = agent;
         _buildRunner = buildRunner;
         _timeout = timeout ?? DefaultTimeout;
+        _buildTimeout = buildTimeout ?? DefaultBuildTimeout;
         _profile = profile ?? MockProjectTargetProfile.Wpf;
     }
 
@@ -197,6 +228,9 @@ public sealed class MockProjectAgentRunner
         var timedOut = false;
         var canceled = false;
 
+        // 最終ビルドが専用タイムアウトで打ち切られたか（結果としてはタイムアウト扱いだが文言を分ける）
+        var buildTimedOut = false;
+
         try
         {
             outcome = await _agent.RunAsync(request, Emit, token).ConfigureAwait(false);
@@ -238,9 +272,14 @@ public sealed class MockProjectAgentRunner
             );
         }
 
-        // 成果物の軽い検証（csproj と UI 成果物が存在するか）
+        // 成果物の軽い検証（csproj と UI 成果物が存在するか）。
+        // 探索範囲はプロジェクトフォルダ配下に限る（出力フォルダに同居する無関係な csproj で合格させない）。
+        var projectDirectory = MockProjectScaffoldService.GetProjectDirectory(
+            outputDirectory,
+            projectName
+        );
         var artifactsPresent =
-            !timedOut && !canceled && HasArtifacts(outputDirectory, _profile.UiFileSearchPattern);
+            !timedOut && !canceled && HasArtifacts(projectDirectory, _profile.UiFileSearchPattern);
 
         if (!timedOut && !canceled)
         {
@@ -257,12 +296,32 @@ public sealed class MockProjectAgentRunner
 
         if (!timedOut && !canceled && artifactsPresent)
         {
+            // ビルド中間物を捨ててから検証する。obj/ に残った *.targets / *.props は
+            // Microsoft.Common.targets のワイルドカード import で読み込まれる（実測で確認）ため、
+            // AI が書いたものがこのビルドで実行され得る。前回実行の古い状態を持ち込まない意味もある。
+            //
+            // 削除したあとビルドが始まるまでに、実行器の子プロセス（Codex の app-server・Copilot）が
+            // 残っていれば理屈の上では書き戻せる。閉じるには実行器を破棄してから削除する順序が要るが、
+            // 破棄の責務は呼び出し側（VM）にあり、ここでは持てない。Phase 3 の変更検知と同じ種類の
+            // 残余として扱う（Claude Code はターン終了時にプロセスが終わっているため該当しない）。
+            DeleteBuildOutputs(projectDirectory);
+
             EmitLine(Strings.Mock_Run_BuildVerify);
+
+            // 最終ビルドには専用のタイムアウトを掛ける（全体タイムアウトはエージェント実行までで解けている）
+            using var buildCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            buildCts.CancelAfter(_buildTimeout);
 
             try
             {
                 var buildResult = await _buildRunner
-                    .BuildAsync(outputDirectory, cancellationToken)
+                    .BuildAsync(
+                        MockProjectScaffoldService.GetSolutionFilePath(
+                            outputDirectory,
+                            projectName
+                        ),
+                        buildCts.Token
+                    )
                     .ConfigureAwait(false);
                 buildSucceeded = buildResult.Success;
 
@@ -277,17 +336,37 @@ public sealed class MockProjectAgentRunner
             }
             catch (OperationCanceledException)
             {
-                canceled = true;
-                EmitLine(Strings.Mock_Run_BuildVerifyCanceled);
+                // 外部トークンが立っていなければ、打ち切ったのは最終ビルドのタイムアウト
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    canceled = true;
+                    EmitLine(Strings.Mock_Run_BuildVerifyCanceled);
+                }
+                else
+                {
+                    buildTimedOut = true;
+                    EmitLine(
+                        string.Format(
+                            Strings.Mock_Run_BuildTimedOutFormat,
+                            _buildTimeout.TotalMinutes.ToString("0")
+                        )
+                    );
+                }
             }
         }
 
         var success =
-            !timedOut && !canceled && outcome.Success && artifactsPresent && buildSucceeded;
+            !timedOut
+            && !buildTimedOut
+            && !canceled
+            && outcome.Success
+            && artifactsPresent
+            && buildSucceeded;
 
         var message = BuildResultMessage(
             success,
             timedOut,
+            buildTimedOut,
             canceled,
             outcome,
             artifactsPresent,
@@ -302,7 +381,8 @@ public sealed class MockProjectAgentRunner
             ClientSucceeded: outcome.Success,
             ArtifactsPresent: artifactsPresent,
             BuildSucceeded: buildSucceeded,
-            TimedOut: timedOut,
+            // 最終ビルドの打ち切りもタイムアウトとして報告する（利用者から見れば時間切れは 1 種類）
+            TimedOut: timedOut || buildTimedOut,
             Canceled: canceled,
             Message: message,
             LogPath: logPath
@@ -316,28 +396,77 @@ public sealed class MockProjectAgentRunner
         _runCts?.Cancel();
     }
 
-    /// <summary>出力フォルダに csproj と UI 成果物（ターゲットの検索パターン）が存在するかを軽く検証する</summary>
-    private static bool HasArtifacts(string outputDirectory, string uiFileSearchPattern)
+    /// <summary>プロジェクトフォルダに csproj と UI 成果物（ターゲットの検索パターン）が存在するかを軽く検証する</summary>
+    /// <remarks>
+    /// 走査は共有ヘルパー <see cref="MockProjectFiles"/> へ委譲する（アクセス拒否で落ちない・
+    /// <c>obj</c> / <c>bin</c> を数えない・範囲はプロジェクトフォルダ配下だけ）。
+    /// </remarks>
+    private static bool HasArtifacts(string projectDirectory, string uiFileSearchPattern) =>
+        MockProjectFiles.HasAny(projectDirectory, "*.csproj")
+        && MockProjectFiles.HasAny(projectDirectory, uiFileSearchPattern);
+
+    /// <summary>
+    /// 最終ビルドの前にビルド中間物（<c>obj</c> / <c>bin</c>）を削除する。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>obj/{プロジェクト}.csproj.*.targets</c> / <c>*.props</c> は <c>Microsoft.Common.targets</c> の
+    /// ワイルドカード import で読み込まれるため、AI がそこへ書いたターゲットは最終ビルドで実行される
+    /// （実測で確認。<c>nuget.g.targets</c> だけは復元が作り直すが、同じワイルドカードに当たる別名は残る）。
+    /// 削除してからビルドすれば実行されない。
+    /// </para>
+    /// <para>
+    /// 対象が reparse point（ジャンクション・シンボリックリンク）のときはリンクだけを外し、リンク先には触れない
+    /// （<see cref="Directory.Delete(string, bool)"/> 自体もリンクを辿らないが、明示チェックで二重化する）。
+    /// </para>
+    /// </remarks>
+    private static void DeleteBuildOutputs(string projectDirectory)
     {
-        if (!Directory.Exists(outputDirectory))
+        foreach (var name in BuildOutputDirectoryNames)
         {
-            return false;
+            TryDeleteDirectory(Path.Combine(projectDirectory, name));
         }
+    }
 
-        var hasCsproj = Directory
-            .EnumerateFiles(outputDirectory, "*.csproj", SearchOption.AllDirectories)
-            .Any();
-        var hasUiFile = Directory
-            .EnumerateFiles(outputDirectory, uiFileSearchPattern, SearchOption.AllDirectories)
-            .Any();
+    /// <summary>ビルド中間物のフォルダ名</summary>
+    private static readonly string[] BuildOutputDirectoryNames = ["obj", "bin"];
 
-        return hasCsproj && hasUiFile;
+    /// <summary>フォルダを削除する（reparse point はリンクだけ外す・失敗はビルド検証を妨げない）</summary>
+    private static void TryDeleteDirectory(string path)
+    {
+        try
+        {
+            var info = new DirectoryInfo(path);
+
+            if (!info.Exists)
+            {
+                return;
+            }
+
+            if (info.Attributes.HasFlag(FileAttributes.ReparsePoint))
+            {
+                // リンク先の中身は別物なので消さない（リンクの実体だけを外す）
+                info.Delete(recursive: false);
+                return;
+            }
+
+            info.Delete(recursive: true);
+        }
+        catch (IOException)
+        {
+            // 掴まれている等で消せない場合はそのままビルドへ進む
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // 権限不足も同じ扱い
+        }
     }
 
     /// <summary>結果メッセージを組み立てる</summary>
     private static string BuildResultMessage(
         bool success,
         bool timedOut,
+        bool buildTimedOut,
         bool canceled,
         MockProjectAgentOutcome outcome,
         bool artifactsPresent,
@@ -352,6 +481,11 @@ public sealed class MockProjectAgentRunner
         if (timedOut)
         {
             return Strings.Mock_Result_TimedOut;
+        }
+
+        if (buildTimedOut)
+        {
+            return Strings.Mock_Result_BuildTimedOut;
         }
 
         if (canceled)

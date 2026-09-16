@@ -193,6 +193,33 @@ public class ClaudeCodeMockProjectAgentTests
         outcome.NotLoggedIn.Should().BeTrue();
     }
 
+    /// <summary>
+    /// キャンセル済みトークンでは、クライアントが（OCE を畳んだ）失敗結果を返しても
+    /// <see cref="OperationCanceledException"/> を投げることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// クライアントは中断を「Success=false・Error=null」の失敗結果へ畳む（チャットの中断表示のための規約）。
+    /// エージェントがそれをそのまま返すと、共有オーケストレーターの timedOut / canceled が立たず、
+    /// タイムアウト・中断が「不明なエラー」として報告され、成果物があれば最終ビルドまで進んでしまう。
+    /// 他の 3 バックエンド（Codex / Copilot / API キー）は OCE を伝播するため、非対称にもなる。
+    /// </remarks>
+    [Fact(DisplayName = "キャンセル済みなら失敗結果でも OperationCanceledException を投げる")]
+    public async Task RunAsync_Canceled_ThrowsOperationCanceled()
+    {
+        // クライアントは OCE を投げず、中断を失敗結果（Error=null）へ畳んで返す
+        var client = new FakeClaudeCodeClient
+        {
+            Outcome = new ClaudeCodeTurnOutcome(false, null, null, false),
+        };
+        var agent = new ClaudeCodeMockProjectAgent(client);
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        var act = async () => await agent.RunAsync(Request(), _ => { }, cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
     /// <summary>可用性がクライアントへ委譲され、中断でクライアントの Interrupt が呼ばれることを検証する</summary>
     [Fact(DisplayName = "可用性はクライアントへ委譲・中断で Interrupt を呼ぶ")]
     public async Task AvailabilityAndInterrupt_DelegateToClient()

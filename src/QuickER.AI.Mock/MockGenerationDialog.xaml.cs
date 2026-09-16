@@ -148,9 +148,14 @@ public partial class MockGenerationDialog : Window
     }
 
     /// <summary>アプリ終了時などにウィンドウを実際に閉じる</summary>
+    /// <remarks>
+    /// 閉じる前に実行中の処理を打ち切る（放置すると claude / codex / copilot / dotnet の子プロセスが
+    /// 孤児として残る）。中断はベストエフォートで、完了は待たない。
+    /// </remarks>
     public void ForceClose()
     {
         _isForceClosing = true;
+        ViewModel.RequestInterrupt();
         ViewModel.SaveSettings();
         Close();
     }

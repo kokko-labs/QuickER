@@ -87,6 +87,13 @@ public interface IClaudeCodeClient : IAsyncDisposable
     bool IsAvailable();
 
     /// <summary>1 ターンを実行する。アシスタントのテキストは <paramref name="onAssistantText"/> で逐次通知する</summary>
+    /// <remarks>
+    /// キャンセルされた場合は <see cref="OperationCanceledException"/> を投げず、
+    /// <c>Success=false, Error=null</c> の失敗結果へ畳んで返す（<see cref="ClaudeCodeProcessClient"/> はプロセスを kill する）。
+    /// チャットの中断を「エラー」として表示しないための規約で、3 エンジン（API キー / Codex / Claude Code）で共通。
+    /// 中断とエラーを区別したい呼び出し側は、戻り値を受けたあとで自分のトークンを見ること
+    /// （例: <c>ClaudeCodeMockProjectAgent.RunAsync</c>）。
+    /// </remarks>
     Task<ClaudeCodeTurnOutcome> RunTurnAsync(
         string prompt,
         string? resumeSessionId,

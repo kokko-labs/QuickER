@@ -1070,18 +1070,24 @@ public partial class MockGenerationDialogViewModel : ObservableObject
             : MockGenInstructions.Trim();
 
         var outputFolder = OutputFolder.Trim();
-
-        // 非空フォルダのときは上書きの確認案内をログへ出す（破壊的削除はしない。既存ファイルは温存）
-        if (
-            Directory.Exists(outputFolder)
-            && Directory.EnumerateFileSystemEntries(outputFolder).Any()
-        )
-        {
-            AppendMockGenLog(Strings.Mock_OutputFolderNotEmpty);
-        }
-
         var diagram = _diagramSource.GetDiagram();
         var projectName = ProjectName.Trim();
+
+        // 出力フォルダに既存のファイル・フォルダがあれば、何が上書きされるかを一覧で見せて確認する。
+        // キャンセルなら出力フォルダには一切書き込まない（スキャフォールドへ入らない）。
+        var scan = MockProjectOverwriteScanner.Scan(outputFolder, projectName);
+
+        if (
+            scan.RequiresConfirmation
+            && !_dialogs.ConfirmWarningDetails(
+                Strings.Mock_OverwriteConfirm_Message,
+                string.Join(Environment.NewLine, scan.ExistingPaths),
+                Strings.Mock_WindowTitle
+            )
+        )
+        {
+            return;
+        }
 
         // 選択バックエンド別にモデル・プロバイダーを選ぶ（Codex のみプロバイダーを渡す。
         // API キーはエンジンファクトリがモデル・キーを閉じ込めるため、ここで渡す値はログ表示用）
@@ -1101,6 +1107,12 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         MockGenSucceeded = false;
         IsMockGenInProgress = true;
         StatusMessage = Strings.Mock_GeneratingProject;
+
+        // 上書きの案内はログのクリアより後に出す（先に出すとこの直後のクリアで消えて一度も見えない）
+        if (scan.RequiresConfirmation)
+        {
+            AppendMockGenLog(Strings.Mock_OutputFolderNotEmpty);
+        }
 
         _mockGenCts = new CancellationTokenSource();
 
@@ -1188,6 +1200,45 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         _mockGenCts?.Cancel();
         await _mockProjectGenerator.InterruptAsync().ConfigureAwait(true);
     }
+
+    /// <summary>
+    /// アプリ終了などの同期的な終了経路から、実行中の処理をベストエフォートで打ち切る。
+    /// </summary>
+    /// <remarks>
+    /// ウィンドウを閉じるだけでは、モックプロジェクト生成が起動した claude / codex / copilot / dotnet の
+    /// 子プロセスが孤児として残る。終了経路は同期のため完了は待たず（kill 相当までは求めない）、
+    /// 中断要求を出すところまでを行う。
+    /// </remarks>
+    public void RequestInterrupt()
+    {
+        if (IsMockGenInProgress)
+        {
+            try
+            {
+                _mockGenCts?.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+                // 生成が同時に終わって破棄済みなら何もしない
+            }
+
+            Forget(_mockProjectGenerator.InterruptAsync());
+        }
+
+        if (IsTurnInProgress && _session is not null)
+        {
+            Forget(_session.InterruptAsync());
+        }
+    }
+
+    /// <summary>完了を待たない中断要求の後始末（失敗しても終了処理を妨げない）</summary>
+    private static void Forget(Task task) =>
+        task.ContinueWith(
+            static completed => _ = completed.Exception,
+            CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted,
+            TaskScheduler.Default
+        );
 
     /// <summary>出力フォルダをエクスプローラで開く</summary>
     [RelayCommand(CanExecute = nameof(ShowOpenFolder))]

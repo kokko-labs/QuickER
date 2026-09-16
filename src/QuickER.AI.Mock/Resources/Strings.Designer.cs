@@ -444,6 +444,12 @@ namespace QuickER.AI.Mock.Resources {
             }
         }
 
+        public static string Mock_OverwriteConfirm_Message {
+            get {
+                return ResourceManager.GetString("Mock_OverwriteConfirm_Message", resourceCulture);
+            }
+        }
+
         public static string Mock_GeneratingProject {
             get {
                 return ResourceManager.GetString("Mock_GeneratingProject", resourceCulture);
@@ -603,6 +609,18 @@ namespace QuickER.AI.Mock.Resources {
         public static string Mock_Run_BuildVerifyCanceled {
             get {
                 return ResourceManager.GetString("Mock_Run_BuildVerifyCanceled", resourceCulture);
+            }
+        }
+
+        public static string Mock_Run_BuildTimedOutFormat {
+            get {
+                return ResourceManager.GetString("Mock_Run_BuildTimedOutFormat", resourceCulture);
+            }
+        }
+
+        public static string Mock_Result_BuildTimedOut {
+            get {
+                return ResourceManager.GetString("Mock_Result_BuildTimedOut", resourceCulture);
             }
         }
 

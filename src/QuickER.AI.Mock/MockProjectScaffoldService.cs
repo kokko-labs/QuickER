@@ -58,6 +58,27 @@ public sealed class MockProjectScaffoldService
     /// <summary>C# プロジェクトのソリューション種別 GUID（.sln の Project 行に埋め込む固定値）</summary>
     private const string CSharpProjectTypeGuid = "FAE04EC0-301F-11D3-BF4B-00C04F79EFBC";
 
+    /// <summary>
+    /// プロジェクトフォルダ（<c>{出力フォルダ}/{プロジェクト名}/</c>）のパスを返す。
+    /// </summary>
+    /// <remarks>
+    /// 出力レイアウトの正本。<see cref="Scaffold"/> 自身に加えて、成果物の探索範囲（<see cref="MockProjectAgentRunner"/>・
+    /// 各エージェント）と上書き確認（<see cref="MockProjectOverwriteScanner"/>）が同じ規則を共有するため、
+    /// 組み立てをここ 1 箇所に置く。
+    /// </remarks>
+    public static string GetProjectDirectory(string outputDirectory, string projectName) =>
+        Path.Combine(outputDirectory, projectName);
+
+    /// <summary>
+    /// ソリューションファイル（<c>{出力フォルダ}/{プロジェクト名}.sln</c>）のパスを返す。
+    /// </summary>
+    /// <remarks>
+    /// <see cref="GetProjectDirectory"/> と同じく出力レイアウトの正本。最終ビルドはこのパスを明示して
+    /// 実行する（フォルダ指定のままだと、出力フォルダに別のソリューションがあるときに MSB1011 で落ちる）。
+    /// </remarks>
+    public static string GetSolutionFilePath(string outputDirectory, string projectName) =>
+        Path.Combine(outputDirectory, $"{projectName}.sln");
+
     private readonly DatabaseProviderRegistry _providers;
 
     /// <summary>プロバイダレジストリを注入して生成する</summary>
@@ -112,7 +133,7 @@ public sealed class MockProjectScaffoldService
         var repositoryDialect = ResolveRepositoryDialect(diagram.TargetDbms);
 
         // Visual Studio 標準構成: プロジェクト一式はプロジェクトフォルダ配下、ソリューションは出力フォルダ直下へ出す
-        var projectDirectory = Path.Combine(outputDirectory, projectName);
+        var projectDirectory = GetProjectDirectory(outputDirectory, projectName);
         Directory.CreateDirectory(projectDirectory);
 
         var options = BuildOptions(generatedNamespace, repositoryDialect);
@@ -137,7 +158,7 @@ public sealed class MockProjectScaffoldService
         CopyMockFolder(mockFolder, designFolderPath, written);
 
         // ソリューションはプロジェクトを 1 つ参照する最小構成で出力フォルダ直下へ出す（GUID は名前から決定的に導出）
-        var solutionFilePath = Path.Combine(outputDirectory, $"{projectName}.sln");
+        var solutionFilePath = GetSolutionFilePath(outputDirectory, projectName);
         WriteText(solutionFilePath, BuildSolution(projectName), written);
 
         return new MockProjectScaffoldResult(

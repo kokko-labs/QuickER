@@ -1167,6 +1167,154 @@ public class MockGenerationDialogViewModelTests
         }
     }
 
+    /// <summary>
+    /// 既存の生成物がある出力フォルダでは、上書きされるものを一覧で見せて確認することを検証する。
+    /// </summary>
+    [Fact(DisplayName = "既存の生成物があれば上書き確認を出す")]
+    public async Task GenerateMockProject_ExistingArtifacts_ConfirmsOverwrite()
+    {
+        var dialogs = new StubDialogService { ConfirmResult = true };
+        var (vm, engineBox, generator, baseFolder, mockFolder) = CreateVmWithGenerator(
+            NonEmptyDiagram(),
+            dialogs
+        );
+
+        try
+        {
+            await vm.RefreshMockGenAvailabilityAsync();
+            await SaveScreenOnClaudeCode(vm, engineBox, mockFolder);
+
+            var outFolder = Path.Combine(baseFolder, "out");
+            Directory.CreateDirectory(Path.Combine(outFolder, "AcmeMock"));
+            File.WriteAllText(Path.Combine(outFolder, "AcmeMock.sln"), "old");
+            vm.OutputFolder = outFolder;
+            vm.ProjectName = "AcmeMock";
+
+            await vm.GenerateMockProjectCommand.ExecuteAsync(null);
+
+            // 確認は詳細つき（判断材料の一覧を添える確認＝ConfirmWarningDetails）で出す
+            dialogs.WarningConfirmDetailsMessages.Should().ContainSingle();
+            var (message, details, _) = dialogs.WarningConfirmDetailsMessages[0];
+            message.Should().Be(MockStrings.Mock_OverwriteConfirm_Message);
+            details.Should().Contain("AcmeMock.sln");
+            details.Should().Contain("AcmeMock" + Path.DirectorySeparatorChar);
+
+            // OK なら生成へ進む
+            generator.GenerateCallCount.Should().Be(1);
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>
+    /// 上書き確認をキャンセルすると生成へ進まず、出力フォルダにも一切書き込まないことを検証する。
+    /// </summary>
+    [Fact(DisplayName = "上書き確認のキャンセルで生成せず出力フォルダも変えない")]
+    public async Task GenerateMockProject_OverwriteCanceled_DoesNotGenerate()
+    {
+        var dialogs = new StubDialogService { ConfirmResult = false };
+        var (vm, engineBox, generator, baseFolder, mockFolder) = CreateVmWithGenerator(
+            NonEmptyDiagram(),
+            dialogs
+        );
+
+        try
+        {
+            await vm.RefreshMockGenAvailabilityAsync();
+            await SaveScreenOnClaudeCode(vm, engineBox, mockFolder);
+
+            var outFolder = Path.Combine(baseFolder, "out");
+            Directory.CreateDirectory(outFolder);
+            File.WriteAllText(Path.Combine(outFolder, "AcmeMock.sln"), "old");
+            vm.OutputFolder = outFolder;
+            vm.ProjectName = "AcmeMock";
+
+            await vm.GenerateMockProjectCommand.ExecuteAsync(null);
+
+            dialogs.WarningConfirmDetailsMessages.Should().ContainSingle();
+            generator.GenerateCallCount.Should().Be(0);
+            // 出力フォルダは手つかず（既存ファイルのみ・内容も変わらない）
+            Directory
+                .EnumerateFileSystemEntries(outFolder)
+                .Select(Path.GetFileName)
+                .Should()
+                .Equal("AcmeMock.sln");
+            File.ReadAllText(Path.Combine(outFolder, "AcmeMock.sln")).Should().Be("old");
+            vm.IsMockGenInProgress.Should().BeFalse();
+            vm.MockGenCompleted.Should().BeFalse();
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>
+    /// 上書きの案内がログのクリアより後に出て、生成後もログに残っていることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 以前はログへ書いた直後に <c>MockGenLog = string.Empty</c> がそれを消しており、案内が一度も見えなかった。
+    /// </remarks>
+    [Fact(DisplayName = "上書きの案内は生成後もログに残る")]
+    public async Task GenerateMockProject_OverwriteNotice_SurvivesLogReset()
+    {
+        var dialogs = new StubDialogService { ConfirmResult = true };
+        var (vm, engineBox, generator, baseFolder, mockFolder) = CreateVmWithGenerator(
+            NonEmptyDiagram(),
+            dialogs
+        );
+
+        try
+        {
+            generator.ResultSuccess = true;
+            await vm.RefreshMockGenAvailabilityAsync();
+            await SaveScreenOnClaudeCode(vm, engineBox, mockFolder);
+
+            var outFolder = Path.Combine(baseFolder, "out");
+            Directory.CreateDirectory(Path.Combine(outFolder, "AcmeMock"));
+            vm.OutputFolder = outFolder;
+            vm.ProjectName = "AcmeMock";
+
+            await vm.GenerateMockProjectCommand.ExecuteAsync(null);
+
+            vm.MockGenLog.Should().Contain(MockStrings.Mock_OutputFolderNotEmpty.Trim());
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>
+    /// 終了経路の中断要求が、実行中の生成を打ち切って実行器へ転送されることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// ウィンドウを閉じるだけでは claude / codex / copilot / dotnet の子プロセスが孤児として残る。
+    /// </remarks>
+    [Fact(DisplayName = "終了時の中断要求は実行中の生成を打ち切る")]
+    public void RequestInterrupt_InProgress_InterruptsGenerator()
+    {
+        var (vm, _, generator, baseFolder, _) = CreateVmWithGenerator(NonEmptyDiagram());
+
+        try
+        {
+            // 実行中でなければ何もしない（終了のたびに実行器を触らない）
+            vm.RequestInterrupt();
+            generator.Interrupted.Should().BeFalse();
+
+            vm.IsMockGenInProgress = true;
+            vm.RequestInterrupt();
+
+            generator.Interrupted.Should().BeTrue();
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
     /// <summary>生成失敗時はフォルダ表示せず完了フラグのみ立つことを検証する</summary>
     [Fact(DisplayName = "生成失敗ではフォルダを開くボタンを出さない")]
     public async Task GenerateMockProject_FailureHidesOpenFolder()

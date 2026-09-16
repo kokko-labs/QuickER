@@ -16,19 +16,39 @@ public sealed class DotnetBuildRunner : IBuildRunner
 {
     /// <inheritdoc />
     public async Task<BuildRunResult> BuildAsync(
-        string workingDirectory,
+        string solutionFilePath,
         CancellationToken cancellationToken = default
     )
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
+        ArgumentException.ThrowIfNullOrWhiteSpace(solutionFilePath);
 
-        // 警告も検出したいので警告をエラー扱いにはせず、通常のビルドで終了コードを見る。
-        // -nologo と -clp:NoSummary は付けず、ログはそのまま保全する（診断性優先）。
+        return await RunAsync(CreateBuildStartInfo(solutionFilePath), cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// 最終ビルド（<c>dotnet build {ソリューション}</c>）の起動情報を組み立てる。
+    /// </summary>
+    /// <remarks>
+    /// 引数の並びはガードテスト（<c>DotnetBuildRunnerArgumentsTests</c>）が固定する。
+    /// 警告も検出したいので警告をエラー扱いにはせず、通常のビルドで終了コードを見る。
+    /// <c>-nologo</c> と <c>-clp:NoSummary</c> は付けず、ログはそのまま保全する（診断性優先）。
+    /// </remarks>
+    internal static ProcessStartInfo CreateBuildStartInfo(string solutionFilePath)
+    {
+        // cwd はソリューションの置き場（＝出力フォルダ）にする。対象はパスで明示するため、
+        // cwd に何があってもビルド対象は自分のソリューション 1 つに決まる。
+        var workingDirectory =
+            Path.GetDirectoryName(Path.GetFullPath(solutionFilePath)) ?? Path.GetTempPath();
         var startInfo = CreateStartInfo(workingDirectory);
         startInfo.ArgumentList.Add("build");
+        // ビルド対象のソリューションを明示する（フォルダ指定だと、出力フォルダに別のソリューション・
+        // プロジェクトがあるときに MSB1011 で落ちる）。
+        startInfo.ArgumentList.Add(solutionFilePath);
         AddSelfContainedBuildProperties(startInfo);
+        AddIsolationArguments(startInfo);
 
-        return await RunAsync(startInfo, cancellationToken).ConfigureAwait(false);
+        return startInfo;
     }
 
     /// <summary>
@@ -48,6 +68,10 @@ public sealed class DotnetBuildRunner : IBuildRunner
     /// 5 つとも実測でプロジェクト単体ビルド・ソリューションビルドの双方に効くことを確認済み。
     /// バージョン確認（<c>dotnet --version</c>）にはプロジェクト評価が無いため付けない。
     /// </para>
+    /// <para>
+    /// 祖先の <c>global.json</c> / <c>NuGet.Config</c> は無効化しない（SDK のピンと
+    /// 社内フィードの喪失という副作用のほうが大きいため）。この非対称は docs/ai-chat.md の注意節が正本。
+    /// </para>
     /// </remarks>
     private static void AddSelfContainedBuildProperties(ProcessStartInfo startInfo)
     {
@@ -56,6 +80,38 @@ public sealed class DotnetBuildRunner : IBuildRunner
         startInfo.ArgumentList.Add("-p:ImportDirectorySolutionProps=false");
         startInfo.ArgumentList.Add("-p:ImportDirectorySolutionTargets=false");
         startInfo.ArgumentList.Add("-p:ImportDirectoryPackagesProps=false");
+    }
+
+    /// <summary>
+    /// AI が書いたコードを「ビルド検証の瞬間に実行させない」ための隔離引数を付与する。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>-noAutoResponse</c>: MSBuild は既定で <c>MSBuild.rsp</c> / <c>Directory.Build.rsp</c> を
+    /// 自動で読み込み、そこに書かれた引数を実際のコマンドラインの前へ差し込む。実測（SDK 10.0.401）では、
+    /// 出力フォルダに置いた <c>Directory.Build.rsp</c> の <c>-logger:&lt;DLL&gt;</c> が採用され、
+    /// 指定したアセンブリをビルドプロセスへ読み込ませられることを確認した（MSBuild 自身が
+    /// 「この switch は Directory.Build.rsp 由来」と報告する）。<c>-noAutoResponse</c> を付けると
+    /// rsp は 1 つも読まれない。
+    /// <para>
+    /// なお上の 5 プロパティ自体は rsp から打ち消せない（同じ <c>-p</c> は後勝ちで、こちらの指定が後ろに来る＝
+    /// 実測で確認）。塞いでいるのは <c>-logger</c> のような**加算される** switch と、こちらが固定していない
+    /// プロパティの経路。
+    /// </para>
+    /// </para>
+    /// <para>
+    /// <c>-nodeReuse:false</c> / <c>-p:UseSharedCompilation=false</c>: MSBuild ノードと Roslyn の
+    /// コンパイラサーバーはビルド後も常駐して次のビルドへ再利用される。AI が書いたタスク DLL・
+    /// アナライザをその常駐プロセスに残さないため、いずれもプロセスを使い捨てにする。
+    /// 実測のコストは 1 回のビルドあたり約 1.7 秒 → 約 3.3 秒（キャッシュ温・<c>obj</c>/<c>bin</c> 削除後の
+    /// 3 回平均）で、生成 1 回につき 1 度しか走らないため許容する。
+    /// </para>
+    /// </remarks>
+    private static void AddIsolationArguments(ProcessStartInfo startInfo)
+    {
+        startInfo.ArgumentList.Add("-noAutoResponse");
+        startInfo.ArgumentList.Add("-nodeReuse:false");
+        startInfo.ArgumentList.Add("-p:UseSharedCompilation=false");
     }
 
     /// <inheritdoc />

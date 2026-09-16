@@ -255,8 +255,15 @@ The conversation, the mock folder selection, and the mock project generation inp
     <value>Select the output folder for the mock project</value>
   </data>
   <data name="Mock_OutputFolderNotEmpty" xml:space="preserve">
-    <value>Note: The output folder is not empty. Existing files are kept and generated files are added.
+    <value>Note: The output folder is not empty. Files with the same name as the generated ones are overwritten.
 </value>
+  </data>
+  <data name="Mock_OverwriteConfirm_Message" xml:space="preserve">
+    <value>The output folder already contains the files and folders listed below.
+
+Generation overwrites the solution, the csproj, README-QuickER.md, Generated/ and design/mock/ with the same names. Any other file is left as it is.
+
+Do you want to continue?</value>
   </data>
   <data name="Mock_GeneratingProject" xml:space="preserve">
     <value>Generating the mock project...</value>
@@ -353,6 +360,13 @@ See the log for details:
   </data>
   <data name="Mock_Run_BuildVerifyCanceled" xml:space="preserve">
     <value>Final build verification was canceled.</value>
+  </data>
+  <data name="Mock_Run_BuildTimedOutFormat" xml:space="preserve">
+    <value>
+== The final build was aborted due to timeout ({0} min) ==</value>
+  </data>
+  <data name="Mock_Result_BuildTimedOut" xml:space="preserve">
+    <value>The final build did not finish within the time limit, so it was aborted. The generated files and the log remain in the output folder.</value>
   </data>
   <data name="Mock_Result_Success" xml:space="preserve">
     <value>Mock project generation completed (build success confirmed).</value>

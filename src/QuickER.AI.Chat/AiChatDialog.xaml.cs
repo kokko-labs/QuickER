@@ -69,9 +69,14 @@ public partial class AiChatDialog : Window
     }
 
     /// <summary>アプリ終了時などにウィンドウを実際に閉じる</summary>
+    /// <remarks>
+    /// 閉じる前に実行中のターンを打ち切る（放置すると CLI バックエンドの子プロセスが孤児として残る）。
+    /// 中断はベストエフォートで、完了は待たない。
+    /// </remarks>
     public void ForceClose()
     {
         _isForceClosing = true;
+        ViewModel.RequestInterrupt();
         ViewModel.SaveSettings();
         Close();
     }

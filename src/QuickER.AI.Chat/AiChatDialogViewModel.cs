@@ -429,6 +429,31 @@ public partial class AiChatDialogViewModel : ObservableObject
         await _engine.InterruptAsync().ConfigureAwait(true);
     }
 
+    /// <summary>
+    /// アプリ終了などの同期的な終了経路から、実行中のターンをベストエフォートで打ち切る。
+    /// </summary>
+    /// <remarks>
+    /// ウィンドウを閉じるだけでは、CLI バックエンド（claude / codex / copilot）の子プロセスが
+    /// 孤児として残る。終了経路は同期のため完了は待たず、中断要求を出すところまでを行う。
+    /// </remarks>
+    public void RequestInterrupt()
+    {
+        if (!IsTurnInProgress)
+        {
+            return;
+        }
+
+        // 完了は待たない。失敗しても終了処理は妨げない（例外はここで観測して握り潰す）
+        _engine
+            .InterruptAsync()
+            .ContinueWith(
+                static completed => _ = completed.Exception,
+                CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted,
+                TaskScheduler.Default
+            );
+    }
+
     // ── Codex 認証コマンド ──
 
     /// <summary>Codex の ChatGPT ブラウザログインを開始する</summary>

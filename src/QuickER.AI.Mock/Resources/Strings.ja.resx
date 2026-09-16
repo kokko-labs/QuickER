@@ -255,8 +255,15 @@
     <value>モックプロジェクトの出力先フォルダを選択</value>
   </data>
   <data name="Mock_OutputFolderNotEmpty" xml:space="preserve">
-    <value>※ 出力フォルダは空ではありません。既存ファイルは残したまま生成物を追加します。
+    <value>※ 出力フォルダは空ではありません。生成物と同名のファイルは上書きされます。
 </value>
+  </data>
+  <data name="Mock_OverwriteConfirm_Message" xml:space="preserve">
+    <value>出力フォルダには、以下のファイル・フォルダが既にあります。
+
+生成すると、ソリューション・csproj・README-QuickER.md・Generated/・design/mock/ は同名で上書きされます。それ以外のファイルはそのまま残ります。
+
+続行しますか？</value>
   </data>
   <data name="Mock_GeneratingProject" xml:space="preserve">
     <value>モックプロジェクトを生成しています...</value>
@@ -353,6 +360,13 @@
   </data>
   <data name="Mock_Run_BuildVerifyCanceled" xml:space="preserve">
     <value>最終ビルドの検証が中断されました。</value>
+  </data>
+  <data name="Mock_Run_BuildTimedOutFormat" xml:space="preserve">
+    <value>
+== 最終ビルドがタイムアウト（{0} 分）により打ち切られました ==</value>
+  </data>
+  <data name="Mock_Result_BuildTimedOut" xml:space="preserve">
+    <value>最終ビルドが時間内に終わらなかったため打ち切りました。生成されたファイルとログは出力フォルダに残っています。</value>
   </data>
   <data name="Mock_Result_Success" xml:space="preserve">
     <value>モックプロジェクトの生成が完了しました（ビルド成功を確認）。</value>

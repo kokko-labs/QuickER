@@ -149,7 +149,11 @@ public sealed class CopilotMockProjectAgent : IMockProjectAgent
             //    無限ループを避けるため 2 回目以降は促さない（失敗ターン・キャンセルでもここへは来ない）。
             if (
                 outcome.Success
-                && !HasAnyUiFile(request.WorkingDirectory, request.Profile.UiFileSearchPattern)
+                && !HasAnyUiFile(
+                    request.WorkingDirectory,
+                    request.ProjectName,
+                    request.Profile.UiFileSearchPattern
+                )
             )
             {
                 onProgress(Strings.Mock_AutoContinueNotice);
@@ -204,20 +208,20 @@ public sealed class CopilotMockProjectAgent : IMockProjectAgent
             ),
         };
 
-    /// <summary>作業フォルダ配下に UI 成果物ファイルが 1 つでも存在するかを判定する（承認待ちで止まった兆候の検出用）</summary>
+    /// <summary>プロジェクトフォルダ配下に UI 成果物ファイルが 1 つでも存在するかを判定する（承認待ちで止まった兆候の検出用）</summary>
     /// <remarks>
     /// スキャフォールドはデータ層のみ（UI 層は生成しない）ため、成功ターン後に UI 成果物（WPF なら *.xaml）が
     /// 皆無なら「計画提示だけで終わった（実装未着手）」疑いが濃い。検索パターンはターゲットのプロファイルが与える。
+    /// 走査は共有ヘルパー <see cref="MockProjectFiles"/> へ委譲する（アクセス拒否で落ちない・obj / bin を数えない・
+    /// 範囲はプロジェクトフォルダ配下だけ＝出力フォルダに同居する無関係なファイルで誤検知しない）。
     /// </remarks>
-    private static bool HasAnyUiFile(string workingDirectory, string uiFileSearchPattern)
-    {
-        if (string.IsNullOrWhiteSpace(workingDirectory) || !Directory.Exists(workingDirectory))
-        {
-            return false;
-        }
-
-        return Directory
-            .EnumerateFiles(workingDirectory, uiFileSearchPattern, SearchOption.AllDirectories)
-            .Any();
-    }
+    private static bool HasAnyUiFile(
+        string outputDirectory,
+        string projectName,
+        string uiFileSearchPattern
+    ) =>
+        MockProjectFiles.HasAny(
+            MockProjectScaffoldService.GetProjectDirectory(outputDirectory, projectName),
+            uiFileSearchPattern
+        );
 }

@@ -25,7 +25,7 @@ public class CodexMockProjectAgentTests
     private static string CreateFolderWithXaml()
     {
         var folder = NewTempFolder();
-        File.WriteAllText(Path.Combine(folder, "App.xaml"), "<Application/>");
+        WriteUiFile(folder, "App.xaml", "<Application/>");
         return folder;
     }
 
@@ -33,7 +33,7 @@ public class CodexMockProjectAgentTests
     private static string CreateFolderWithRazor()
     {
         var folder = NewTempFolder();
-        File.WriteAllText(Path.Combine(folder, "Home.razor"), "@page \"/\"");
+        WriteUiFile(folder, "Home.razor", "@page \"/\"");
         return folder;
     }
 
@@ -52,6 +52,20 @@ public class CodexMockProjectAgentTests
             Profile: profile ?? MockProjectTargetProfile.Wpf,
             ModelProvider: modelProvider
         );
+
+    /// <summary>
+    /// UI 成果物ファイルをプロジェクトフォルダ（<c>{作業フォルダ}/AcmeMock/</c>）配下へ書き出す。
+    /// </summary>
+    /// <remarks>
+    /// 自動続行ナッジの判定はプロジェクトフォルダ配下だけを見る（出力フォルダに同居する無関係な
+    /// ファイルで「実装が進んだ」と誤判定しないため）。テストの配置も実レイアウトに合わせる。
+    /// </remarks>
+    private static void WriteUiFile(string workingDirectory, string fileName, string content)
+    {
+        var project = Path.Combine(workingDirectory, "AcmeMock");
+        Directory.CreateDirectory(project);
+        File.WriteAllText(Path.Combine(project, fileName), content);
+    }
 
     /// <summary>一時作業フォルダを作る（*.xaml 有無で自動続行ナッジの判定を切り替えるため）</summary>
     private static string NewTempFolder()
@@ -299,7 +313,7 @@ public class CodexMockProjectAgentTests
     public async Task RunAsync_XamlPresent_DoesNotNudge()
     {
         var folder = NewTempFolder();
-        File.WriteAllText(Path.Combine(folder, "App.xaml"), "<Application/>");
+        WriteUiFile(folder, "App.xaml", "<Application/>");
 
         var client = new FakeCodexAppServerClient();
         client.AutoTurnCompletions.Enqueue(("completed", null));

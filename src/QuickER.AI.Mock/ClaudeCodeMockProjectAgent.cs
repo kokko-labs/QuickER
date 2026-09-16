@@ -15,7 +15,8 @@ namespace QuickER.AI.Mock;
 /// <para>
 /// 進捗テキストは <c>onProgress</c> で逐次転送する。全体タイムアウト・成果物検証・独立ビルド・ログ保全は
 /// 呼び出し側の <see cref="MockProjectAgentRunner"/> が担う。キャンセルは <see cref="OperationCanceledException"/>
-/// をそのまま伝播させ、タイムアウトと中断の区別は呼び出し側へ委ねる。
+/// として伝播させ（クライアントは OCE を失敗結果へ畳むため、ターン後にトークンを見て投げ直す）、
+/// タイムアウトと中断の区別は呼び出し側へ委ねる。
 /// </para>
 /// </remarks>
 public sealed class ClaudeCodeMockProjectAgent : IMockProjectAgent
@@ -57,10 +58,16 @@ public sealed class ClaudeCodeMockProjectAgent : IMockProjectAgent
             request.AdditionalInstructions
         );
 
-        // キャンセル（タイムアウト・中断）は OperationCanceledException として呼び出し側へ伝播させる
         var outcome = await _client
             .RunTurnAsync(prompt, resumeSessionId: null, options, onProgress, cancellationToken)
             .ConfigureAwait(false);
+
+        // キャンセル（タイムアウト・中断）は OperationCanceledException として呼び出し側へ伝播させる。
+        // クライアント側はチャットの中断表示のために OCE を「失敗結果」へ畳む（ClaudeCodeProcessClient.RunTurnAsync）ので、
+        // ここでトークンを見て投げ直さないと、他の 3 バックエンドと違ってタイムアウト・中断が
+        // 「不明なエラー」として報告され、成果物があれば最終ビルドまで進んでしまう。
+        // プロセスを kill して正常終了した経路（＝例外が一切出ない）もこの 1 行が拾う。
+        cancellationToken.ThrowIfCancellationRequested();
 
         return new MockProjectAgentOutcome(outcome.Success, outcome.Error, outcome.NotLoggedIn);
     }

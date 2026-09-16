@@ -45,6 +45,9 @@ public sealed class ApiKeyMockProjectAgent : IMockProjectAgent, IErDiagramToolHo
     /// <summary>出力フォルダ（相対パスの基点＝ソリューション直下）</summary>
     private string _workingDirectory = string.Empty;
 
+    /// <summary>中間ビルドの対象ソリューション（<c>{出力フォルダ}/{プロジェクト名}.sln</c>）</summary>
+    private string _solutionFilePath = string.Empty;
+
     /// <summary>生成ターゲットのプロファイル（emit_file の許可拡張子の宣言元）</summary>
     private MockProjectTargetProfile? _targetProfile;
 
@@ -90,6 +93,11 @@ public sealed class ApiKeyMockProjectAgent : IMockProjectAgent, IErDiagramToolHo
         ArgumentNullException.ThrowIfNull(onProgress);
 
         _workingDirectory = request.WorkingDirectory;
+        // 中間ビルドの対象は自分のソリューション（出力フォルダに別のソリューションがあっても対象が揺れない）
+        _solutionFilePath = MockProjectScaffoldService.GetSolutionFilePath(
+            request.WorkingDirectory,
+            request.ProjectName
+        );
         _onProgress = onProgress;
         _emittedFiles.Clear();
         _lastTurnResult = new ErChatTurnResult(true, null);
@@ -189,7 +197,7 @@ public sealed class ApiKeyMockProjectAgent : IMockProjectAgent, IErDiagramToolHo
             // 中間ビルド（IBuildRunner）。成功→成功、失敗→修正ターン 1 回だけ→再ビルドして成否を反映
             EmitLine(Strings.Mock_ApiRun_Build);
             var build = await _buildRunner
-                .BuildAsync(_workingDirectory, cancellationToken)
+                .BuildAsync(_solutionFilePath, cancellationToken)
                 .ConfigureAwait(false);
 
             if (build.Success)
@@ -217,7 +225,7 @@ public sealed class ApiKeyMockProjectAgent : IMockProjectAgent, IErDiagramToolHo
             // 修正ターン後に再ビルドし、その成否を Outcome へ反映する（自己申告を正直にする）
             EmitLine(Strings.Mock_ApiRun_Rebuild);
             var rebuild = await _buildRunner
-                .BuildAsync(_workingDirectory, cancellationToken)
+                .BuildAsync(_solutionFilePath, cancellationToken)
                 .ConfigureAwait(false);
 
             if (rebuild.Success)
@@ -585,8 +593,8 @@ public sealed class ApiKeyMockProjectAgent : IMockProjectAgent, IErDiagramToolHo
             return "(the data layer could not be found)";
         }
 
-        var files = Directory
-            .EnumerateFiles(generatedDir, "*.cs", SearchOption.AllDirectories)
+        var files = MockProjectFiles
+            .Enumerate(generatedDir, "*.cs")
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
