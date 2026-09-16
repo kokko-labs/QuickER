@@ -33,7 +33,7 @@ Columns are edited inline in the "Columns" grid of the properties panel.
 - **Reordering** — drag rows to change the order
 - **Copy / paste** — Ctrl+C / Ctrl+V work per column on the grid
 
-Express a composite primary key by checking PK on multiple columns.
+Express a composite primary key by checking PK on multiple columns; the properties panel then shows the key's column order as a read-only "Primary key:" line. For a diagram built in the editor, that order follows the column order in the grid (drag rows to change it). A diagram imported from a database carries the constraint's own declared order instead — reordering columns then no longer changes the key's order, and there is no editor for the order itself (re-import from the database to change it).
 
 ### Unique constraints
 

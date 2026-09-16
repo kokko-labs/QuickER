@@ -68,6 +68,15 @@ public static class MockSchemaSerializer
                 builder.AppendLine(FormatColumn(column));
             }
 
+            // 主キーの並びが列の並びと食い違うときだけ、実効順を明示する（一致していれば重ねて示す情報が無い）
+            var primaryKeyOrder = entity.GetReorderedPrimaryKeyColumnNames();
+
+            if (primaryKeyOrder is not null)
+            {
+                builder.AppendLine();
+                builder.AppendLine($"Primary key order: {string.Join(", ", primaryKeyOrder)}");
+            }
+
             builder.AppendLine();
         }
     }

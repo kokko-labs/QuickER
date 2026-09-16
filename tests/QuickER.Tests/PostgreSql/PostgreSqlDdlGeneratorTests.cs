@@ -417,4 +417,35 @@ public class PostgreSqlDdlGeneratorTests
 
         new PostgreSqlDdlGenerator().Build(diagram).Should().NotContain("UNIQUE");
     }
+
+    /// <summary>主キーの順序上書きが <c>PRIMARY KEY</c> 句の列順へ反映されることを検証する</summary>
+    [Fact(DisplayName = "Build: 複合 PK は PrimaryKeyColumnIds の順で出力される")]
+    public void Build_CompositePrimaryKey_FollowsPrimaryKeyColumnIds()
+    {
+        var a = new Column
+        {
+            Name = "a",
+            DataType = "integer",
+            IsPrimaryKey = true,
+            IsNullable = false,
+        };
+        var b = new Column
+        {
+            Name = "b",
+            DataType = "integer",
+            IsPrimaryKey = true,
+            IsNullable = false,
+        };
+        var entity = new Entity
+        {
+            TableName = "pair",
+            Columns = { a, b },
+            // 列宣言順（a → b）とは逆の主キー順
+            PrimaryKeyColumnIds = [b.Id, a.Id],
+        };
+
+        var sql = new PostgreSqlDdlGenerator().Build(new ErDiagram { Entities = { entity } });
+
+        sql.Should().Contain("PRIMARY KEY (\"b\", \"a\")");
+    }
 }

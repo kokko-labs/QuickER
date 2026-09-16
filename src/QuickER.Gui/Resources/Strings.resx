@@ -350,6 +350,9 @@
   <data name="Property_ReorderHint" xml:space="preserve">
     <value>Drag rows to change their order.</value>
   </data>
+  <data name="Property_PrimaryKeyOrderLabel" xml:space="preserve">
+    <value>Primary key:</value>
+  </data>
   <data name="Property_UniqueConstraintsHeader" xml:space="preserve">
     <value>Unique constraints</value>
   </data>
@@ -1001,6 +1004,9 @@
   </data>
   <data name="Tool_RelationshipUnnamedConstraint" xml:space="preserve">
     <value>(unnamed)</value>
+  </data>
+  <data name="Tool_Summary_PrimaryKeyOrder" xml:space="preserve">
+    <value>Primary key order: {0}</value>
   </data>
   <data name="Tool_Summary_UniqueConstraintsHeader" xml:space="preserve">
     <value>Unique constraints:</value>

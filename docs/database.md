@@ -70,7 +70,7 @@ Connection settings can be saved under a name and recalled later from "Saved Con
 ### What gets imported
 
 - Tables (views, temporary tables, and the container tables behind materialized views are excluded) and columns (type, length, precision, nullability)
-- Primary keys. A composite key is modeled as a flag on each column rather than as an ordered list of its own, so generated DDL emits its columns in the order they are declared in the table — which is not necessarily the order the original constraint used
+- Primary keys, preserving a composite key's own column order. `PRIMARY KEY (b, a)` imports as exactly that, and generated DDL emits the constraint's declared order — not the order the columns happen to appear in the table — so the column order of the backing index survives the round trip
 - Foreign keys (including the constraint name and the ON DELETE / ON UPDATE referential actions). When the FK columns on the referencing side themselves form that table's primary key or a unique constraint, the relationship is classified as one-to-one. A foreign key made up of multiple columns is imported with every column pair, in declaration order. SQLite does not persist FK constraint names, so a constraint name is synthesized on import
 - Table and column descriptions (SQL Server's MS_Description extended properties, PostgreSQL's `obj_description` / `col_description`, MySQL's `TABLE_COMMENT` / `COLUMN_COMMENT`, and Oracle's `user_tab_comments` / `user_col_comments`). SQLite has no description mechanism and is out of scope
 
@@ -120,7 +120,7 @@ For how to pair your existing entity assets with the generated code after import
 The diagram is a design model, not a copy of the database. What it models is exactly what round-trips:
 
 - Tables and columns (type, length, precision, nullability)
-- Primary keys, as a flag on each column (a composite key's own column order is not modeled — see [What gets imported](#what-gets-imported))
+- Primary keys, including a composite key's own column order
 - Foreign keys with their column pairs, constraint name, and referential actions
 - UNIQUE constraints
 - Table and column descriptions
@@ -153,7 +153,7 @@ The "DB Sync" button on the toolbar opens the "DB Schema Sync (Apply Diff)" dial
 - Adding and dropping tables
 - Adding, altering (type, nullability), and dropping columns
 - Adding and dropping foreign keys
-- Changing the primary key (adding or removing it, or changing its column set)
+- Changing the primary key (adding or removing it, or changing its column set or column order)
 - Setting, updating, and removing table and column descriptions (SQLite is out of scope)
 - Changes to the column order (syncable on SQLite / MySQL)
 
@@ -173,7 +173,7 @@ Column order is compared as the relative order of the columns common to both sid
 
 ### Primary key sync
 
-Changing a table's primary key in the diagram (adding or removing it, or changing the set of key columns) is detected as a single per-table diff item, unselected by default. The old primary-key constraint is located by querying the database catalog at run time, so imported databases with arbitrary constraint names work. The script drops the old key first, applies any selected column alterations, and then adds the new key, so a change that also makes the old key column nullable succeeds in one sync.
+Changing a table's primary key in the diagram (adding or removing it, or changing the set or order of its key columns) is detected as a single per-table diff item, unselected by default. The old primary-key constraint is located by querying the database catalog at run time, so imported databases with arbitrary constraint names work. The script drops the old key first, applies any selected column alterations, and then adds the new key, so a change that also makes the old key column nullable succeeds in one sync.
 
 Foreign keys that reference the changed primary key are dropped and re-created automatically around the change (on SQL Server, the same applies when altering a column that participates in a foreign key). If a referenced column is no longer part of the new key, the confirmation dialog warns that re-creating those foreign keys may fail: on SQL Server and PostgreSQL such a failure rolls the whole script back, while on MySQL / Oracle it can leave the foreign keys dropped (partially applied).
 

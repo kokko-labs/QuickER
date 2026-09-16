@@ -45,6 +45,36 @@ internal static class SchemaReapplyAssertions
             );
     }
 
+    /// <summary>指定テーブルの主キーが、期待した列順で取り込まれたことを表明する</summary>
+    /// <param name="entities">取込結果のエンティティ一覧</param>
+    /// <param name="tableName">検証対象のテーブル名</param>
+    /// <param name="expectedColumnNames">起点 DDL の <c>PRIMARY KEY</c> 句が宣言した列名の並び</param>
+    /// <remarks>
+    /// <see cref="ShouldRoundTrip"/> の不動点表明だけでは主キーの列順は守れない。
+    /// 取込が列順を落とすと、再生成した DDL も再取込もそろって列宣言順になり、
+    /// 1 回目と 2 回目が一致してしまうためである（＝順序を落としたことが観測できない）。
+    /// 起点 DDL が宣言した並びと突き合わせてはじめて、列宣言順と食い違う複合主キーの順序を検証できる。
+    /// </remarks>
+    public static void ShouldHavePrimaryKeyOrder(
+        IReadOnlyList<Entity> entities,
+        string tableName,
+        params string[] expectedColumnNames
+    )
+    {
+        var entity = entities.Single(e =>
+            string.Equals(e.TableName, tableName, StringComparison.OrdinalIgnoreCase)
+        );
+
+        entity
+            .GetPrimaryKeyColumnsInOrder()
+            .Select(c => c.Name)
+            .Should()
+            .Equal(
+                (IEnumerable<string>)expectedColumnNames,
+                "複合主キーの列順は、起点 DDL の PRIMARY KEY 句の並びどおりに取り込まれること"
+            );
+    }
+
     /// <summary>エンティティを名前ベースの比較可能な形へ射影する</summary>
     private static object Project(IReadOnlyList<Entity> entities) =>
         entities
@@ -63,6 +93,9 @@ internal static class SchemaReapplyAssertions
                         c.Description,
                     })
                     .ToList(),
+                // 主キーは実効順（PRIMARY KEY 句へ出力する並び）を見る。
+                // BeEquivalentTo はコレクションの順序を既定で無視するため、列名を連結した 1 文字列にして順序差を検出する
+                PrimaryKey = string.Join(",", e.GetPrimaryKeyColumnsInOrder().Select(c => c.Name)),
                 // 制約名は合成名との揺れがあるため構成列だけを見る（列集合照合は差分同期と同じ流儀）
                 UniqueConstraints = e
                     .UniqueConstraints.Select(u =>

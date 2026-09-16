@@ -676,6 +676,12 @@ namespace QuickER.Resources {
             }
         }
         
+        public static string Property_PrimaryKeyOrderLabel {
+            get {
+                return ResourceManager.GetString("Property_PrimaryKeyOrderLabel", resourceCulture);
+            }
+        }
+
         public static string Property_UniqueConstraintsHeader {
             get {
                 return ResourceManager.GetString("Property_UniqueConstraintsHeader", resourceCulture);
@@ -2037,6 +2043,12 @@ namespace QuickER.Resources {
         public static string Tool_RelationshipUnnamedConstraint {
             get {
                 return ResourceManager.GetString("Tool_RelationshipUnnamedConstraint", resourceCulture);
+            }
+        }
+
+        public static string Tool_Summary_PrimaryKeyOrder {
+            get {
+                return ResourceManager.GetString("Tool_Summary_PrimaryKeyOrder", resourceCulture);
             }
         }
 

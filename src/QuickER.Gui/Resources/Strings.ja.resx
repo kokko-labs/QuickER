@@ -363,6 +363,9 @@
   <data name="Property_ReorderHint" xml:space="preserve">
     <value>行のドラッグで並び順を変更できます。</value>
   </data>
+  <data name="Property_PrimaryKeyOrderLabel" xml:space="preserve">
+    <value>主キー:</value>
+  </data>
   <data name="Property_UniqueConstraintsHeader" xml:space="preserve">
     <value>UNIQUE 制約</value>
   </data>
@@ -1014,6 +1017,9 @@
   </data>
   <data name="Tool_RelationshipUnnamedConstraint" xml:space="preserve">
     <value>(名前なし)</value>
+  </data>
+  <data name="Tool_Summary_PrimaryKeyOrder" xml:space="preserve">
+    <value>主キー順: {0}</value>
   </data>
   <data name="Tool_Summary_UniqueConstraintsHeader" xml:space="preserve">
     <value>一意制約:</value>

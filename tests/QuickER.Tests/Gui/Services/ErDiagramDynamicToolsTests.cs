@@ -2,8 +2,10 @@ using System.Text.Json;
 using AwesomeAssertions;
 using QuickER.AI;
 using QuickER.Mcp;
+using QuickER.Model;
 using QuickER.Services;
 using QuickER.ViewModels;
+using GuiStrings = QuickER.Resources.Strings;
 
 namespace QuickER.Tests.Gui.Services;
 
@@ -536,6 +538,57 @@ public class ErDiagramDynamicToolsTests
 
         success.Should().BeTrue();
         result.Should().Contain("FK: (TenantId → TenantRef, RegionCode → RegionRef)");
+    }
+
+    /// <summary>複合主キーのエンティティ 1 件を持つ VM を用意する</summary>
+    /// <param name="reversePrimaryKeyOrder">true なら主キーの実効順を列宣言順の逆へ上書きする</param>
+    private static MainViewModel CreateVmWithCompositeKey(bool reversePrimaryKeyOrder)
+    {
+        var vm = CreateVm();
+        var tenantId = new Column
+        {
+            Name = "TenantId",
+            DataType = "int",
+            IsPrimaryKey = true,
+        };
+        var regionCode = new Column
+        {
+            Name = "RegionCode",
+            DataType = "nvarchar(10)",
+            IsPrimaryKey = true,
+        };
+        var entity = new Entity { TableName = "TenantRegion", Columns = { tenantId, regionCode } };
+
+        if (reversePrimaryKeyOrder)
+        {
+            entity.PrimaryKeyColumnIds = [regionCode.Id, tenantId.Id];
+        }
+
+        vm.Entities.Add(new EntityViewModel(entity));
+
+        return vm;
+    }
+
+    /// <summary>主キー順の注記が「列宣言順と食い違うときだけ」出ることを検証する</summary>
+    [Fact(DisplayName = "get_diagram_summary は主キー順が列宣言順と食い違うときだけ注記する")]
+    public void GetDiagramSummary_ShowsPrimaryKeyOrderOnlyWhenItDiffers()
+    {
+        // 文言は表示言語に追従するため、期待値も resx から組み立てる
+        var label = GuiStrings.Tool_Summary_PrimaryKeyOrder.Replace("{0}", string.Empty).Trim();
+
+        Exec(CreateVmWithCompositeKey(reversePrimaryKeyOrder: true), "get_diagram_summary", new { })
+            .Result.Should()
+            .Contain(
+                string.Format(GuiStrings.Tool_Summary_PrimaryKeyOrder, "RegionCode, TenantId")
+            );
+
+        Exec(
+            CreateVmWithCompositeKey(reversePrimaryKeyOrder: false),
+            "get_diagram_summary",
+            new { }
+        )
+            .Result.Should()
+            .NotContain(label);
     }
 
     /// <summary>複合主キーの親テーブルと、対応する子テーブルを用意する</summary>

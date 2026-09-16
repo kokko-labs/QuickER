@@ -176,7 +176,7 @@ public sealed class SqliteSyncScriptBuilder : SyncScriptBuilderBase
         // 末尾へまとめて出す制約行（PK → UNIQUE → FK）を収集する
         var trailingConstraints = new List<string>();
 
-        var pks = definition.Columns.Where(c => c.IsPrimaryKey).ToList();
+        var pks = definition.GetPrimaryKeyColumnsInOrder();
 
         if (pks.Count > 0)
         {

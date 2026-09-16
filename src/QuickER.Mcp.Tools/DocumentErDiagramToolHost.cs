@@ -293,6 +293,7 @@ public static partial class DocumentErDiagramToolHost
                 sb.AppendLine($"  - {col.Name}: {col.DataType}{flagsText}{colDesc}");
             }
 
+            AppendPrimaryKeyOrder(sb, entity.GetReorderedPrimaryKeyColumnNames());
             AppendUniqueConstraints(sb, entity);
         }
 
@@ -1063,6 +1064,20 @@ public static partial class DocumentErDiagramToolHost
         return entity.UniqueConstraints.FirstOrDefault(constraint =>
             target.SetEquals(constraint.ColumnIds)
         );
+    }
+
+    /// <summary>要約テキストへ主キーの実効順を追記する（列宣言順と食い違うときだけ）</summary>
+    /// <param name="orderedNames">
+    /// <see cref="Entity.GetReorderedPrimaryKeyColumnNames"/> の結果（<c>null</c>＝食い違いなしで追記しない）
+    /// </param>
+    private static void AppendPrimaryKeyOrder(StringBuilder sb, List<string>? orderedNames)
+    {
+        if (orderedNames is null)
+        {
+            return;
+        }
+
+        sb.AppendLine($"  Primary key order: {string.Join(", ", orderedNames)}");
     }
 
     /// <summary>要約テキストへエンティティの一意制約（解決済み名＋構成列）を追記する</summary>

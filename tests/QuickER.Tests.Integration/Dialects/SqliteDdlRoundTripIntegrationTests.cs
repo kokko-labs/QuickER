@@ -458,6 +458,10 @@ public sealed class SqliteDdlRoundTripIntegrationTests
     /// その図は DDL 出力にも差分同期にも使えない（PostgreSQL の <c>numeric(10,2046)</c> のように
     /// 再適用すらできない表記が実在した）。ここでは QuickER が作ったのではない生 DDL を起点にする。
     /// </remarks>
+    /// <remarks>
+    /// 列宣言順と食い違う並びの複合主キー（<c>composite_key</c>）を含め、主キーの<b>列順</b>が
+    /// 往復で保たれることも検証対象とする。
+    /// </remarks>
     [Fact(
         DisplayName = "[Integration] A: 取込→DDL 再生成→再適用が成功し、再取込が 1 回目と一致する"
     )]
@@ -487,6 +491,12 @@ public sealed class SqliteDdlRoundTripIntegrationTests
                 CONSTRAINT "FK_measurement_vendor" FOREIGN KEY ("vendor_id")
                     REFERENCES "vendor" ("id") ON DELETE SET NULL
             );
+            CREATE TABLE "composite_key" (
+                "region_code" NVARCHAR(10) NOT NULL,
+                "tenant_id" INTEGER NOT NULL,
+                "label" NVARCHAR(50) NULL,
+                CONSTRAINT "PK_composite_key" PRIMARY KEY ("tenant_id", "region_code")
+            );
             """;
 
         await db.ApplyDdlAsync(SourceDdl, Ct);
@@ -500,6 +510,14 @@ public sealed class SqliteDdlRoundTripIntegrationTests
             firstEntities = imported.Entities.ToList();
             firstRelationships = imported.Relationships.ToList();
         }
+
+        // 列宣言順（region_code, tenant_id）と食い違う主キーの並びが取込で保たれること
+        SchemaReapplyAssertions.ShouldHavePrimaryKeyOrder(
+            firstEntities,
+            "composite_key",
+            "tenant_id",
+            "region_code"
+        );
 
         var regenerated = new SqliteDdlGenerator().Build(
             new ErDiagram { Entities = firstEntities, Relationships = firstRelationships }
@@ -518,5 +536,57 @@ public sealed class SqliteDdlRoundTripIntegrationTests
             second.Entities,
             second.Relationships
         );
+    }
+
+    /// <summary>
+    /// 参照先列を省略した FK（<c>REFERENCES t</c> 形）が複合主キーを参照するとき、
+    /// 構成列が seq 順に主キーの実効順（宣言された並び）へ対応付くことを検証する。
+    /// </summary>
+    /// <remarks>
+    /// SQLite の暗黙参照は親テーブルの主キーを構成順に参照する（<c>foreign_key_list</c> の
+    /// <c>to</c> が NULL・<c>seq</c> が構成列番号）。親の主キーが列宣言順と食い違う並びでも、
+    /// seq 位置の主キー列と正しくペア化されなければならない。
+    /// </remarks>
+    [Fact(DisplayName = "[Integration] A: 参照先列省略の FK は複合主キーへ seq 順で対応付く")]
+    public async Task Import_ImplicitForeignKeyToCompositePrimaryKey_PairsBySequence()
+    {
+        using var db = SqliteTempDatabase.Create();
+
+        // 親は列宣言順 (region_code, tenant_id)・主キーは (tenant_id, region_code)＝列順と食い違う並び。
+        // 子の FK は参照先列を書かない暗黙参照で、構成列は主キーの並びに対応する
+        const string SourceDdl = """
+            CREATE TABLE "composite_key" (
+                "region_code" NVARCHAR(10) NOT NULL,
+                "tenant_id" INTEGER NOT NULL,
+                CONSTRAINT "PK_composite_key" PRIMARY KEY ("tenant_id", "region_code")
+            );
+            CREATE TABLE "assignment" (
+                "id" INTEGER NOT NULL,
+                "t_ref" INTEGER NOT NULL,
+                "r_ref" NVARCHAR(10) NOT NULL,
+                CONSTRAINT "PK_assignment" PRIMARY KEY ("id"),
+                FOREIGN KEY ("t_ref", "r_ref") REFERENCES "composite_key"
+            );
+            """;
+
+        await db.ApplyDdlAsync(SourceDdl, Ct);
+
+        await using var conn = await db.OpenReadOnlyConnectionAsync(Ct);
+        var imported = await new SqliteSchemaImporter().ImportAsync(conn, Ct);
+
+        var parent = imported.Entities.Single(e => e.TableName == "composite_key");
+        var child = imported.Entities.Single(e => e.TableName == "assignment");
+        var relationship = imported.Relationships.Single();
+
+        // 親側は主キーの実効順 (tenant_id, region_code)・子側は FK の宣言順 (t_ref, r_ref) が対応する
+        relationship
+            .ColumnPairs.Select(pair =>
+                (
+                    Source: parent.Columns.Single(c => c.Id == pair.SourceColumnId).Name,
+                    Target: child.Columns.Single(c => c.Id == pair.TargetColumnId).Name
+                )
+            )
+            .Should()
+            .Equal(("tenant_id", "t_ref"), ("region_code", "r_ref"));
     }
 }

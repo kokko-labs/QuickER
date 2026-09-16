@@ -715,9 +715,9 @@ public class SchemaDiffService
     private static string FormatColumnList(IEnumerable<string> columnNames) =>
         string.Join(", ", columnNames);
 
-    /// <summary>主キー列の名前を、エンティティの列定義順で取り出す（順序も比較対象にするため List で返す）</summary>
+    /// <summary>主キー列の名前を実効順（<see cref="Entity.GetPrimaryKeyColumnsInOrder"/>）で取り出す（順序も比較対象にするため List で返す）</summary>
     private static List<string> PrimaryKeyColumnNames(Entity entity) =>
-        entity.Columns.Where(c => c.IsPrimaryKey).Select(c => c.Name).ToList();
+        entity.GetPrimaryKeyColumnsInOrder().Select(c => c.Name).ToList();
 
     /// <summary>主キー構成（列の順序付き集合）が同一かを判定する（列名の比較規則は列差分と同じ大文字小文字無視）</summary>
     private static bool IsSamePrimaryKey(IReadOnlyList<string> live, IReadOnlyList<string> target)

@@ -748,4 +748,24 @@ public class SqlServerSyncScriptBuilderTests
     {
         BuildAddTable(BuildUniqueEntity()).Should().NotContain("UNIQUE");
     }
+
+    /// <summary>主キーの順序上書きが付与文の列順へ反映されることを検証する</summary>
+    [Fact(DisplayName = "AlterPrimaryKey は PrimaryKeyColumnIds の順で複合 PK を付与する")]
+    public void AlterPrimaryKey_FollowsPrimaryKeyColumnIds()
+    {
+        // 列宣言順は (OrderId, LineNo)。主キーの実効順だけを逆に指定する
+        var target = PkTarget("Order", "OrderId", "LineNo");
+        target.PrimaryKeyColumnIds =
+        [
+            target.Columns.First(c => c.Name == "LineNo").Id,
+            target.Columns.First(c => c.Name == "OrderId").Id,
+        ];
+
+        var sql = BuildScript(new SqlServerSyncScriptBuilder(), new[] { AlterPk("Order", target) });
+
+        sql.Should()
+            .Contain(
+                "ALTER TABLE [Order] ADD CONSTRAINT [PK_Order] PRIMARY KEY ([LineNo], [OrderId]);"
+            );
+    }
 }

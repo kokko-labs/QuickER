@@ -5990,4 +5990,62 @@ public class CSharpCodeGenerationServiceTests
         // ファイル糖衣は全機能面を対象にする
         content.Should().Contain("this IDocumentRepository repository");
     }
+
+    /// <summary>複合主キーの列を 2 つ持つエンティティ 1 件のダイアグラムを生成する（主キーの順序はテスト側で与える）</summary>
+    /// <param name="reversePrimaryKeyOrder">
+    /// <c>true</c> のとき、列宣言順（a → b）とは逆の主キー順を <see cref="Entity.PrimaryKeyColumnIds"/> で指定する
+    /// </param>
+    private static ErDiagram CompositeKeyDiagram(bool reversePrimaryKeyOrder)
+    {
+        var a = new Column
+        {
+            Id = Guid.NewGuid(),
+            Name = "a",
+            DataType = "int",
+            IsPrimaryKey = true,
+            IsNullable = false,
+        };
+        var b = new Column
+        {
+            Id = Guid.NewGuid(),
+            Name = "b",
+            DataType = "int",
+            IsPrimaryKey = true,
+            IsNullable = false,
+        };
+        var entity = new Entity
+        {
+            Id = Guid.NewGuid(),
+            TableName = "pairs",
+            Columns = [a, b],
+            PrimaryKeyColumnIds = reversePrimaryKeyOrder ? [b.Id, a.Id] : [],
+        };
+
+        return new ErDiagram { Entities = [entity] };
+    }
+
+    /// <summary>EF Core の <c>HasKey</c> が主キーの実効順（順序上書き）に従うことを検証する</summary>
+    [Fact]
+    public void Generate_EfCore_CompositeKey_ShouldFollowPrimaryKeyColumnOrder()
+    {
+        var options = new CodeGenerationOptions
+        {
+            RootNamespace = "Sample.Domain",
+            GenerateEfCoreRepositories = true,
+        };
+
+        // 順序指定なし＝列宣言順
+        new CSharpCodeGenerationService()
+            .Generate(CompositeKeyDiagram(reversePrimaryKeyOrder: false), options)
+            .Files[0]
+            .Content.Should()
+            .Contain("entity.HasKey(e => new { e.A, e.B });");
+
+        // 順序指定あり＝上書きした並び
+        new CSharpCodeGenerationService()
+            .Generate(CompositeKeyDiagram(reversePrimaryKeyOrder: true), options)
+            .Files[0]
+            .Content.Should()
+            .Contain("entity.HasKey(e => new { e.B, e.A });");
+    }
 }

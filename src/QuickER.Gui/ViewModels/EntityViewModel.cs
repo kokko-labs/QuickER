@@ -73,6 +73,64 @@ public partial class EntityViewModel : ObservableObject
     /// </remarks>
     public ObservableCollection<UniqueConstraintViewModel> UniqueConstraints { get; }
 
+    /// <summary>主キー構成列の順序（意味モデル <see cref="Entity.PrimaryKeyColumnIds"/> のパススルー）</summary>
+    /// <remarks>
+    /// 編集 UI を持たないため <see cref="Memo"/> と同じく読込値をそのまま保持して書き戻す。
+    /// 列削除・主キー切替に合わせた掃除は行わない（読み手が
+    /// <see cref="Entity.GetPrimaryKeyColumnsInOrder"/> で解決不能な ID・非主キー列を無視するため）。
+    /// </remarks>
+    private readonly List<Guid> _primaryKeyColumnIds;
+
+    /// <summary>主キー構成列を実効順（DDL の <c>PRIMARY KEY</c> 句へ出力する並び）で取り出す</summary>
+    /// <returns><see cref="ColumnViewModel.IsPrimaryKey"/> が <c>true</c> の列を実効順に並べたリスト</returns>
+    /// <remarks>
+    /// 意味モデル側の <see cref="Entity.GetPrimaryKeyColumnsInOrder"/> と同一の merge 規則
+    /// （保持中の順序リスト内の位置を第 1 キー、表示順を第 2 キーとする安定ソート）で並べる。
+    /// 一方だけを変えると図の見え方と DDL の並びが静かに食い違うため、規則を変えるときは両方を直す。
+    /// </remarks>
+    internal List<ColumnViewModel> GetPrimaryKeyColumnsInOrder()
+    {
+        // 列 ID → 順序リスト内の位置。重複 ID は先勝ち（先に現れた位置を採る）
+        var orderById = new Dictionary<Guid, int>(_primaryKeyColumnIds.Count);
+
+        for (var i = 0; i < _primaryKeyColumnIds.Count; i++)
+        {
+            orderById.TryAdd(_primaryKeyColumnIds[i], i);
+        }
+
+        return Columns
+            .Where(c => c.IsPrimaryKey)
+            .OrderBy(c => orderById.TryGetValue(c.Id, out var index) ? index : int.MaxValue)
+            .ToList();
+    }
+
+    /// <summary>主キーの実効順が列宣言順と食い違うときに限り、実効順の主キー列名を返す</summary>
+    /// <returns>食い違う場合は <see cref="GetPrimaryKeyColumnsInOrder"/> の列名一覧、一致する場合は <c>null</c></returns>
+    /// <remarks>意味モデル側の <see cref="Entity.GetReorderedPrimaryKeyColumnNames"/> と同一の判定</remarks>
+    internal List<string>? GetReorderedPrimaryKeyColumnNames()
+    {
+        var ordered = GetPrimaryKeyColumnsInOrder();
+        var declared = Columns.Where(c => c.IsPrimaryKey);
+
+        // 実効順は表示順の安定ソートなので、参照の並びが一致するかどうかだけで食い違いを判定できる
+        return ordered.SequenceEqual(declared) ? null : ordered.Select(c => c.Name).ToList();
+    }
+
+    /// <summary>主キーが複合（実効主キー列が 2 本以上）かどうか</summary>
+    /// <remarks>プロパティパネルの主キー順表示の表示可否に用いる派生プロパティ</remarks>
+    public bool IsCompositePrimaryKey => GetPrimaryKeyColumnsInOrder().Count >= 2;
+
+    /// <summary>主キー構成列を実効順に並べたカンマ区切りの列名（読み取り専用表示用）</summary>
+    public string PrimaryKeyOrderText =>
+        string.Join(", ", GetPrimaryKeyColumnsInOrder().Select(c => c.Name));
+
+    /// <summary>主キーの構成・並び・列名の変化を主キー順表示へ通知する</summary>
+    private void NotifyPrimaryKeyOrderChanged()
+    {
+        OnPropertyChanged(nameof(IsCompositePrimaryKey));
+        OnPropertyChanged(nameof(PrimaryKeyOrderText));
+    }
+
     /// <summary>配下の一意制約の編集行で、ユーザーが構成列を選び直したときに発火するイベント</summary>
     /// <remarks>Undo 可能なコマンドとして履歴化するのは <see cref="MainViewModel"/> の責務</remarks>
     internal event EventHandler<UniqueConstraintMemberViewModel>? UniqueConstraintMemberSelectionEdited;
@@ -171,6 +229,8 @@ public partial class EntityViewModel : ObservableObject
         _memo = model.Memo;
         _description = model.Description ?? string.Empty;
         _titleBackgroundColor = EntityTitleColorPalette.Normalize(layout.TitleBackgroundColor);
+        // 主キーの順序は編集対象ではないため、モデルのリストを防御コピーして保持するだけにする
+        _primaryKeyColumnIds = new List<Guid>(model.PrimaryKeyColumnIds);
         Columns = new ObservableCollection<ColumnViewModel>(
             model.Columns.Select(c => new ColumnViewModel(c))
         );
@@ -246,10 +306,13 @@ public partial class EntityViewModel : ObservableObject
             RefreshUniqueConstraintColumnFlags();
         }
 
+        // 主キー順の表示はカラムの増減・並び替えで変わる（実効順の第 2 キーが表示順のため）
+        NotifyPrimaryKeyOrderChanged();
+
         InvalidateDisplayHeight();
     }
 
-    /// <summary>カラムの説明変更時に表示高さキャッシュを無効化し、名前変更を一意制約の表示へ伝える</summary>
+    /// <summary>カラムの説明変更時に表示高さキャッシュを無効化し、名前・主キー変更を派生表示へ伝える</summary>
     private void OnColumnPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName is nameof(ColumnViewModel.Description))
@@ -261,6 +324,12 @@ public partial class EntityViewModel : ObservableObject
         if (e.PropertyName is nameof(ColumnViewModel.Name))
         {
             NotifyUniqueConstraintNames();
+        }
+
+        // 主キー順の表示は構成列（PK トグル）と表示名（リネーム）の双方に追従する
+        if (e.PropertyName is nameof(ColumnViewModel.IsPrimaryKey) or nameof(ColumnViewModel.Name))
+        {
+            NotifyPrimaryKeyOrderChanged();
         }
     }
 
@@ -349,6 +418,7 @@ public partial class EntityViewModel : ObservableObject
             Description = Description ?? string.Empty,
             Columns = Columns.Select(c => c.ToModel()).ToList(),
             UniqueConstraints = UniqueConstraints.Select(c => c.ToModel()).ToList(),
+            PrimaryKeyColumnIds = _primaryKeyColumnIds.ToList(),
         };
 
     /// <summary>現在の視覚情報（座標・幅・色）をレイアウトへコピーして返す</summary>

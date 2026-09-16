@@ -777,6 +777,148 @@ public sealed class DocumentErDiagramToolHostTests : IDisposable
         reloaded.Schema.Queries.Should().ContainSingle(q => q.Name == "GetAllBooks");
     }
 
+    // ---------------- 主キーの実効順 ----------------
+
+    /// <summary>
+    /// 複合主キーの親 TenantRegion（列宣言順 TenantId, RegionCode）と、同名の外部キー列候補を持つ
+    /// 子 TenantUser を作成した図ファイルを用意する
+    /// </summary>
+    /// <param name="name">ファイル名</param>
+    /// <param name="reversePrimaryKeyOrder">true なら親の主キー実効順を列宣言順の逆へ上書きする</param>
+    private string CreateCompositeKeyFile(string name, bool reversePrimaryKeyOrder)
+    {
+        var file = PathFor(name);
+        Exec(DocumentErDiagramToolHost.CreateDiagramToolName, file, new { target_dbms = "sqlite" })
+            .Success.Should()
+            .BeTrue();
+
+        Exec("add_entity", file, new { table_name = "TenantRegion" });
+        Exec(
+            "add_column",
+            file,
+            new
+            {
+                table_name = "TenantRegion",
+                column_name = "TenantId",
+                data_type = "int",
+                is_primary_key = true,
+                is_nullable = false,
+            }
+        );
+        Exec(
+            "add_column",
+            file,
+            new
+            {
+                table_name = "TenantRegion",
+                column_name = "RegionCode",
+                data_type = "nvarchar(10)",
+                is_primary_key = true,
+                is_nullable = false,
+            }
+        );
+        Exec("add_entity", file, new { table_name = "TenantUser" });
+        Exec(
+            "add_column",
+            file,
+            new
+            {
+                table_name = "TenantUser",
+                column_name = "TenantUserId",
+                data_type = "int",
+                is_primary_key = true,
+                is_nullable = false,
+            }
+        );
+        Exec(
+            "add_column",
+            file,
+            new
+            {
+                table_name = "TenantUser",
+                column_name = "TenantId",
+                data_type = "int",
+                is_nullable = false,
+            }
+        );
+        Exec(
+            "add_column",
+            file,
+            new
+            {
+                table_name = "TenantUser",
+                column_name = "RegionCode",
+                data_type = "nvarchar(10)",
+                is_nullable = false,
+            }
+        );
+
+        if (reversePrimaryKeyOrder)
+        {
+            // 主キーの順序を設定するツールは無いため、文書を直接書き換えて実効順を逆にする
+            var document = JsonStorageService.Load(file);
+            var parent = document.Schema.Entities.Single(e => e.TableName == "TenantRegion");
+            parent.PrimaryKeyColumnIds = parent
+                .Columns.Where(c => c.IsPrimaryKey)
+                .Reverse()
+                .Select(c => c.Id)
+                .ToList();
+            JsonStorageService.Save(file, document);
+        }
+
+        return file;
+    }
+
+    [Fact(DisplayName = "add_relationship の自動ペア化は親主キーの実効順に従う")]
+    public void AddRelationship_AutoPairs_FollowPrimaryKeyOrder()
+    {
+        var file = CreateCompositeKeyFile("pk-order-pairs.json", reversePrimaryKeyOrder: true);
+
+        Exec(
+            "add_relationship",
+            file,
+            new
+            {
+                source_table = "TenantRegion",
+                target_table = "TenantUser",
+                relationship_type = "OneToMany",
+            }
+        )
+            .Success.Should()
+            .BeTrue();
+
+        var schema = JsonStorageService.Load(file).Schema;
+        var parent = schema.Entities.Single(e => e.TableName == "TenantRegion");
+        var relationship = schema.Relationships.Single();
+
+        relationship
+            .ColumnPairs.Select(pair =>
+                parent.Columns.Single(c => c.Id == pair.SourceColumnId).Name
+            )
+            .Should()
+            .Equal("RegionCode", "TenantId");
+    }
+
+    [Fact(DisplayName = "get_diagram_summary は主キー順が列宣言順と食い違うときだけ注記する")]
+    public void GetDiagramSummary_ShowsPrimaryKeyOrderOnlyWhenItDiffers()
+    {
+        var reordered = CreateCompositeKeyFile(
+            "pk-order-summary.json",
+            reversePrimaryKeyOrder: true
+        );
+        var natural = CreateCompositeKeyFile(
+            "pk-natural-summary.json",
+            reversePrimaryKeyOrder: false
+        );
+
+        Exec("get_diagram_summary", reordered, new { })
+            .Result.Should()
+            .Contain("Primary key order: RegionCode, TenantId");
+        Exec("get_diagram_summary", natural, new { })
+            .Result.Should()
+            .NotContain("Primary key order");
+    }
+
     /// <summary>JsonStorageService をそのまま使い、任意バージョンの文書をファイルへ保存する</summary>
     private static void SaveRaw(string file, DiagramDocument document) =>
         JsonStorageService.Save(file, document);

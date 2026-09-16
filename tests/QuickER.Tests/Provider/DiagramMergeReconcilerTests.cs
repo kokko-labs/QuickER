@@ -627,4 +627,46 @@ public class DiagramMergeReconcilerTests
         merged.SurvivingQueries.Should().BeEmpty();
         merged.BrokenQueries.Should().ContainSingle().Which.Name.Should().Be("Orphan");
     }
+
+    /// <summary>主キーの順序 Guid が、列 Id の書換えに追従することを検証する</summary>
+    /// <remarks>
+    /// 追従しないと順序指定が解決不能になり、実効順が黙って列宣言順へ戻る
+    /// （マージ取込のたびに複合主キーの並びが失われる）
+    /// </remarks>
+    [Fact(DisplayName = "主キーの順序 Guid が列 Id の書換えに追従する")]
+    public void Reconcile_NameMatch_RemapsPrimaryKeyColumnIds()
+    {
+        var currentAId = Guid.NewGuid();
+        var currentBId = Guid.NewGuid();
+        var current = new ErDiagram
+        {
+            Entities = { Ent(Guid.NewGuid(), "Pair", Col(currentAId, "a"), Col(currentBId, "b")) },
+        };
+
+        // 取込結果は同名・同名列だが Id は新規。順序は列宣言順（a → b）とは逆
+        var importedA = Col(Guid.NewGuid(), "a");
+        var importedB = Col(Guid.NewGuid(), "b");
+        importedA.IsPrimaryKey = true;
+        importedB.IsPrimaryKey = true;
+        var importedEntity = Ent(Guid.NewGuid(), "Pair", importedA, importedB);
+        importedEntity.PrimaryKeyColumnIds = [importedB.Id, importedA.Id];
+
+        var merged = DiagramMergeReconciler.Reconcile(
+            current,
+            new[] { importedEntity },
+            Array.Empty<Relationship>(),
+            preserveExistingMemo: true
+        );
+
+        merged
+            .Entities[0]
+            .PrimaryKeyColumnIds.Should()
+            .Equal([currentBId, currentAId], "主キーの順序は現在図の列 Guid を指すべき");
+        merged
+            .Entities[0]
+            .GetPrimaryKeyColumnsInOrder()
+            .Select(c => c.Name)
+            .Should()
+            .Equal("b", "a");
+    }
 }

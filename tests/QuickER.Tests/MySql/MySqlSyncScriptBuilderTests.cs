@@ -1271,4 +1271,21 @@ public class MySqlSyncScriptBuilderTests
 
         sql.Should().NotContain("rc.UNIQUE_CONSTRAINT_SCHEMA");
     }
+
+    /// <summary>主キーの順序上書きが付与文の列順へ反映されることを検証する</summary>
+    [Fact(DisplayName = "AlterPrimaryKey は PrimaryKeyColumnIds の順で複合 PK を付与する")]
+    public void AlterPrimaryKey_FollowsPrimaryKeyColumnIds()
+    {
+        // 列宣言順は (order_id, line_no)。主キーの実効順だけを逆に指定する
+        var target = PkTarget("orders", "order_id", "line_no");
+        target.PrimaryKeyColumnIds =
+        [
+            target.Columns.First(c => c.Name == "line_no").Id,
+            target.Columns.First(c => c.Name == "order_id").Id,
+        ];
+
+        var sql = Build(AlterPk("orders", target));
+
+        sql.Should().Contain("ALTER TABLE `orders` ADD PRIMARY KEY (`line_no`, `order_id`);");
+    }
 }

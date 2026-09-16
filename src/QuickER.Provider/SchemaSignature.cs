@@ -32,6 +32,9 @@ public static class SchemaSignature
                             + ")"
                         )
                     )
+                    // 主キーは構成列の順序も DDL の意味を変えるため、実効順の列名を署名へ含める
+                    + "#PK:"
+                    + string.Join("+", x.GetPrimaryKeyColumnsInOrder().Select(c => c.Name))
                     + "#"
                     + UniqueConstraintPart(x)
                 )

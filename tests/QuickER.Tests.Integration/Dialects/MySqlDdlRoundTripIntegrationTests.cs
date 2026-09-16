@@ -435,6 +435,10 @@ public sealed class MySqlDdlRoundTripIntegrationTests(MySqlContainerFixture fixt
     /// その図は DDL 出力にも差分同期にも使えない（PostgreSQL の <c>numeric(10,2046)</c> のように
     /// 再適用すらできない表記が実在した）。ここでは QuickER が作ったのではない生 DDL を起点にする。
     /// </remarks>
+    /// <remarks>
+    /// 列宣言順と食い違う並びの複合主キー（<c>composite_key</c>）を含め、主キーの<b>列順</b>が
+    /// 往復で保たれることも検証対象とする。
+    /// </remarks>
     [Fact(
         DisplayName = "[Integration] A: 取込→DDL 再生成→再適用が成功し、再取込が 1 回目と一致する"
     )]
@@ -465,6 +469,12 @@ public sealed class MySqlDdlRoundTripIntegrationTests(MySqlContainerFixture fixt
                 CONSTRAINT `FK_measurement_vendor` FOREIGN KEY (`vendor_id`)
                     REFERENCES `vendor` (`id`) ON DELETE SET NULL
             ) COMMENT='raw measurements';
+            CREATE TABLE `composite_key` (
+                `region_code` varchar(10) NOT NULL,
+                `tenant_id` int NOT NULL,
+                `label` varchar(50) NULL,
+                PRIMARY KEY (`tenant_id`, `region_code`)
+            );
             """;
 
         await fixture.ExecuteAsync(SourceDdl, Ct);
@@ -478,6 +488,14 @@ public sealed class MySqlDdlRoundTripIntegrationTests(MySqlContainerFixture fixt
             firstEntities = imported.Entities.ToList();
             firstRelationships = imported.Relationships.ToList();
         }
+
+        // 列宣言順（region_code, tenant_id）と食い違う主キーの並びが取込で保たれること
+        SchemaReapplyAssertions.ShouldHavePrimaryKeyOrder(
+            firstEntities,
+            "composite_key",
+            "tenant_id",
+            "region_code"
+        );
 
         var regenerated = new MySqlDdlGenerator().Build(
             new ErDiagram { Entities = firstEntities, Relationships = firstRelationships }

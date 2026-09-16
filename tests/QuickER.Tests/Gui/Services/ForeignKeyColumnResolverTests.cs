@@ -1,5 +1,7 @@
 using AwesomeAssertions;
+using QuickER.Model;
 using QuickER.Services;
+using QuickER.ViewModels;
 
 namespace QuickER.Tests.Gui.Services;
 
@@ -214,5 +216,99 @@ public class ForeignKeyColumnResolverTests
         names.Should().Contain("customer_orders_id");
         names.Should().Contain("CustomerOrderId");
         names.Should().Contain("customer_order_id");
+    }
+
+    /// <summary>親の複合主キー（列宣言順 TenantId, RegionCode）と、同名の外部キー列を持つ子を組み立てる</summary>
+    private static (Entity Parent, Entity Child) BuildCompositeKeyPair()
+    {
+        var tenantId = new Column
+        {
+            Name = "TenantId",
+            DataType = "int",
+            IsPrimaryKey = true,
+        };
+        var regionCode = new Column
+        {
+            Name = "RegionCode",
+            DataType = "nvarchar(10)",
+            IsPrimaryKey = true,
+        };
+        var parent = new Entity { TableName = "TenantRegion", Columns = { tenantId, regionCode } };
+        var child = new Entity
+        {
+            TableName = "TenantUser",
+            Columns =
+            {
+                new Column
+                {
+                    Name = "TenantUserId",
+                    DataType = "int",
+                    IsPrimaryKey = true,
+                },
+                new Column { Name = "TenantId", DataType = "int" },
+                new Column { Name = "RegionCode", DataType = "nvarchar(10)" },
+            },
+        };
+
+        // 主キーの実効順を列宣言順の逆（RegionCode, TenantId）へ上書きする
+        parent.PrimaryKeyColumnIds = [regionCode.Id, tenantId.Id];
+
+        return (parent, child);
+    }
+
+    /// <summary>自動ペア化（ViewModel 版）が親主キーの実効順に従うことを検証する</summary>
+    [Fact(DisplayName = "自動ペア化（ViewModel 版）は親主キーの実効順で列ペアを作る")]
+    public void ResolveColumnPairs_ViewModel_FollowsPrimaryKeyOrder()
+    {
+        var (parentModel, childModel) = BuildCompositeKeyPair();
+        var parent = new EntityViewModel(parentModel);
+        var child = new EntityViewModel(childModel);
+
+        var pairs = ForeignKeyColumnResolver.ResolveColumnPairs(
+            parent,
+            child,
+            Array.Empty<RelationshipViewModel>()
+        );
+
+        pairs
+            .Select(pair => parent.Columns.Single(c => c.Id == pair.SourceColumnId).Name)
+            .Should()
+            .Equal("RegionCode", "TenantId");
+    }
+
+    /// <summary>自動ペア化（意味モデル版）が親主キーの実効順に従うことを検証する</summary>
+    [Fact(DisplayName = "自動ペア化（意味モデル版）は親主キーの実効順で列ペアを作る")]
+    public void ResolveColumnPairs_Model_FollowsPrimaryKeyOrder()
+    {
+        var (parent, child) = BuildCompositeKeyPair();
+
+        var pairs = ForeignKeyColumnResolver.ResolveColumnPairs(
+            parent,
+            child,
+            Array.Empty<Relationship>()
+        );
+
+        pairs
+            .Select(pair => parent.Columns.Single(c => c.Id == pair.SourceColumnId).Name)
+            .Should()
+            .Equal("RegionCode", "TenantId");
+    }
+
+    /// <summary>既定キー列の解決（引数 3 つの overload）が実効順の先頭 PK を使うことを検証する</summary>
+    [Fact(DisplayName = "既定キー列の解決は実効順で先頭の主キー列を使う")]
+    public void ResolveTargetColumn_DefaultKey_UsesFirstColumnInPrimaryKeyOrder()
+    {
+        var (parentModel, childModel) = BuildCompositeKeyPair();
+        var parent = new EntityViewModel(parentModel);
+        var child = new EntityViewModel(childModel);
+
+        // 実効順の先頭は RegionCode のため、②（参照元キー列と同名）で RegionCode 列が選ばれる
+        var resolved = ForeignKeyColumnResolver.ResolveTargetColumn(
+            parent,
+            child,
+            Array.Empty<RelationshipViewModel>()
+        );
+
+        resolved!.Name.Should().Be("RegionCode");
     }
 }

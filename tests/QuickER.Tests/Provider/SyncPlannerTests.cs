@@ -2344,4 +2344,110 @@ public class SyncPlannerTests
         plan.Rebuilds.Should().ContainSingle();
         plan.Warnings.Should().BeEmpty();
     }
+
+    // ---------------- 再構築時の主キー順序（PrimaryKeyColumnIds）の張り直し ----------------
+
+    /// <summary>主キー 2 列（a・b）と通常列 memo を持つテーブルを作る（主キーの順序はテスト側で与える）</summary>
+    private static Entity PairTable(string[] pkOrder)
+    {
+        var a = new Column
+        {
+            Name = "a",
+            DataType = "INT",
+            IsPrimaryKey = pkOrder.Contains("a"),
+            IsNullable = false,
+        };
+        var b = new Column
+        {
+            Name = "b",
+            DataType = "INT",
+            IsPrimaryKey = pkOrder.Contains("b"),
+            IsNullable = false,
+        };
+        var entity = new Entity { TableName = "pair", Columns = { a, b, Col("memo", "TEXT") } };
+
+        entity.PrimaryKeyColumnIds = pkOrder
+            .Select(name => entity.Columns.First(c => c.Name == name).Id)
+            .ToList();
+
+        return entity;
+    }
+
+    /// <summary>
+    /// 選択された AlterPrimaryKey により、合成後定義の主キー順序が target の実効順（列名写像）へ張り直ることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// target は live とは別の図＝列 Guid の空間が違うため、live 由来の順序リストをそのまま残すと
+    /// 上書きした主キーの膜と順序が食い違う（実効順が黙って列宣言順へ落ちる）。
+    /// </remarks>
+    [Fact(
+        DisplayName = "再構築: 選択された AlterPrimaryKey は主キー順序を target の実効順へ張り直す"
+    )]
+    public void Rebuild_SelectedAlterPrimaryKey_RemapsPrimaryKeyOrder()
+    {
+        // live の主キー順は (a, b)、target は (b, a)
+        var live = PairTable(["a", "b"]);
+        var target = PairTable(["b", "a"]);
+
+        var plan = new SyncPlanner().BuildPlan(
+            [
+                new SchemaDiffItem
+                {
+                    Kind = SchemaDiffKind.AlterPrimaryKey,
+                    TableName = "pair",
+                    Entity = target,
+                    IsSelected = true,
+                },
+            ],
+            RebuildCaps,
+            new SyncPlanContext { LiveEntities = [live] }
+        );
+
+        var rb = plan.Rebuilds.Should().ContainSingle().Which;
+        var newDef = rb.NewDefinition;
+
+        // 順序リストは合成後定義の列 Guid を指す（live・target いずれの Guid でもない）
+        newDef
+            .PrimaryKeyColumnIds.Should()
+            .Equal(
+                newDef.Columns.First(c => c.Name == "b").Id,
+                newDef.Columns.First(c => c.Name == "a").Id
+            );
+        newDef.GetPrimaryKeyColumnsInOrder().Select(c => c.Name).Should().Equal("b", "a");
+    }
+
+    /// <summary>AlterPrimaryKey が未選択なら主キーの順序が live の複製のまま残ることを検証する</summary>
+    [Fact(DisplayName = "再構築: AlterPrimaryKey が未選択なら主キー順序は live のまま")]
+    public void Rebuild_UnselectedAlterPrimaryKey_KeepsLivePrimaryKeyOrder()
+    {
+        // live の主キー順は (b, a)。target の (a, b) は選択されていないので適用されない
+        var live = PairTable(["b", "a"]);
+        var target = PairTable(["a", "b"]);
+
+        var plan = new SyncPlanner().BuildPlan(
+            [
+                new SchemaDiffItem
+                {
+                    Kind = SchemaDiffKind.AlterPrimaryKey,
+                    TableName = "pair",
+                    Entity = target,
+                    IsSelected = false,
+                },
+                // 再構築そのものは別の選択済み差分（通常列の型変更）で起こす
+                new SchemaDiffItem
+                {
+                    Kind = SchemaDiffKind.AlterColumn,
+                    TableName = "pair",
+                    ColumnName = "memo",
+                    Column = Col("memo", "NVARCHAR(200)"),
+                    IsSelected = true,
+                },
+            ],
+            RebuildCaps,
+            new SyncPlanContext { LiveEntities = [live] }
+        );
+
+        var rb = plan.Rebuilds.Should().ContainSingle().Which;
+        rb.NewDefinition.GetPrimaryKeyColumnsInOrder().Select(c => c.Name).Should().Equal("b", "a");
+    }
 }

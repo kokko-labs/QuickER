@@ -126,6 +126,46 @@ public class MockSchemaSerializerTests
         text.Should().Contain("one-to-many");
     }
 
+    /// <summary>複合主キー 1 テーブルだけの ER 図を組み立てる（実効順は任意で列宣言順の逆へ上書きする）</summary>
+    private static ErDiagram BuildCompositeKeyDiagram(bool reversePrimaryKeyOrder)
+    {
+        var tenantId = new Column
+        {
+            Name = "TenantId",
+            DataType = "int",
+            IsPrimaryKey = true,
+        };
+        var regionCode = new Column
+        {
+            Name = "RegionCode",
+            DataType = "nvarchar(10)",
+            IsPrimaryKey = true,
+        };
+        var entity = new Entity { TableName = "TenantRegion", Columns = { tenantId, regionCode } };
+
+        if (reversePrimaryKeyOrder)
+        {
+            entity.PrimaryKeyColumnIds = [regionCode.Id, tenantId.Id];
+        }
+
+        return new ErDiagram { Entities = { entity } };
+    }
+
+    /// <summary>主キー順の注記が「列宣言順と食い違うときだけ」出ることを検証する</summary>
+    [Fact(DisplayName = "主キー順の注記は列宣言順と食い違うときだけ出る")]
+    public void Serialize_ShowsPrimaryKeyOrderOnlyWhenItDiffers()
+    {
+        MockSchemaSerializer
+            .Serialize(BuildCompositeKeyDiagram(reversePrimaryKeyOrder: true))
+            .Should()
+            .Contain("Primary key order: RegionCode, TenantId");
+
+        MockSchemaSerializer
+            .Serialize(BuildCompositeKeyDiagram(reversePrimaryKeyOrder: false))
+            .Should()
+            .NotContain("Primary key order");
+    }
+
     /// <summary>空の ER 図でも例外なく「テーブル未定義」の記述を返すことを検証する</summary>
     [Fact(DisplayName = "空の ER 図はテーブル未定義の記述を返す")]
     public void Serialize_EmptyDiagram_DescribesNoTables()

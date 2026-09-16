@@ -111,7 +111,8 @@ public static class ForeignKeyColumnResolver
 
     /// <summary>親の主キー全列を順に対応付けた既定の列ペア一覧を組み立てる（ViewModel 版）</summary>
     /// <remarks>
-    /// 親の主キー列を宣言順に辿り、列ごとに命名マッチで子列を引き当てる。引き当てられなかった列はペアに
+    /// 親の主キー列を実効順（<see cref="EntityViewModel.GetPrimaryKeyColumnsInOrder"/>）で辿り、列ごとに
+    /// 命名マッチで子列を引き当てる。引き当てられなかった列はペアに
     /// 含めず、複数の親列が同じ子列へ寄った場合は後続をペアなしにする（1 つの子列を 2 度使う外部キーは
     /// 作れないため）。リレーション作成フローと AI ツール（列省略時）の共通正本
     /// </remarks>
@@ -125,7 +126,7 @@ public static class ForeignKeyColumnResolver
         var pairs = new List<RelationshipColumnPair>();
         var usedTargetColumnIds = new HashSet<Guid>();
 
-        foreach (var sourceKeyColumn in source.Columns.Where(column => column.IsPrimaryKey))
+        foreach (var sourceKeyColumn in source.GetPrimaryKeyColumnsInOrder())
         {
             var targetColumn = ResolveTargetColumn(source, target, sourceKeyColumn, relationships);
 
@@ -142,7 +143,9 @@ public static class ForeignKeyColumnResolver
 
     /// <summary>親の主キー全列を順に対応付けた既定の列ペア一覧を組み立てる（意味モデル版）</summary>
     /// <remarks>
-    /// ViewModel 版と同一の意味論。列情報を持たない取込形式（Mermaid）が同じ既定解決を得るために用いる
+    /// ViewModel 版と同一の意味論（親の主キー列も実効順
+    /// <see cref="Entity.GetPrimaryKeyColumnsInOrder"/> で辿る）。
+    /// 列情報を持たない取込形式（Mermaid）が同じ既定解決を得るために用いる
     /// </remarks>
     public static List<RelationshipColumnPair> ResolveColumnPairs(
         Entity source,
@@ -158,7 +161,7 @@ public static class ForeignKeyColumnResolver
         var pairs = new List<RelationshipColumnPair>();
         var usedTargetColumnIds = new HashSet<Guid>();
 
-        foreach (var sourceKeyColumn in source.Columns.Where(column => column.IsPrimaryKey))
+        foreach (var sourceKeyColumn in source.GetPrimaryKeyColumnsInOrder())
         {
             var candidates = target
                 .Columns.Select(column => new CandidateColumn(
@@ -195,7 +198,7 @@ public static class ForeignKeyColumnResolver
         return pairs;
     }
 
-    /// <summary>参照元キー列を既定（PK 列）として参照先の外部キー列を解決する</summary>
+    /// <summary>参照元キー列を既定（実効順で先頭の PK 列）として参照先の外部キー列を解決する</summary>
     public static ColumnViewModel? ResolveTargetColumn(
         EntityViewModel source,
         EntityViewModel target,
@@ -205,7 +208,7 @@ public static class ForeignKeyColumnResolver
         return ResolveTargetColumn(
             source,
             target,
-            source.Columns.FirstOrDefault(c => c.IsPrimaryKey),
+            source.GetPrimaryKeyColumnsInOrder().FirstOrDefault(),
             existingRelationships
         );
     }

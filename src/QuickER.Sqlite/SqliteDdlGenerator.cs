@@ -104,7 +104,7 @@ public sealed partial class SqliteDdlGenerator : DdlGeneratorBase
         IReadOnlyDictionary<Guid, List<ResolvedForeignKey>> foreignKeysByChild
     )
     {
-        var pks = entity.Columns.Where(c => c.IsPrimaryKey).ToList();
+        var pks = entity.GetPrimaryKeyColumnsInOrder();
         var fks = foreignKeysByChild.TryGetValue(entity.Id, out var list)
             ? list
             : new List<ResolvedForeignKey>();

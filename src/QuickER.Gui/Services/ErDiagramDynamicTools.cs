@@ -93,6 +93,7 @@ public static class ErDiagramDynamicTools
                 sb.AppendLine($"  - {col.Name}: {col.DataType}{flagsText}{colDesc}");
             }
 
+            AppendPrimaryKeyOrder(sb, entity);
             AppendUniqueConstraints(sb, entity);
         }
 
@@ -894,6 +895,25 @@ public static class ErDiagramDynamicTools
 
         return entity.UniqueConstraints.FirstOrDefault(constraint =>
             target.SetEquals(constraint.ColumnIds)
+        );
+    }
+
+    /// <summary>要約テキストへ主キーの実効順を追記する（列宣言順と食い違うときだけ）</summary>
+    /// <remarks>
+    /// 判定は <see cref="EntityViewModel.GetReorderedPrimaryKeyColumnNames"/>（意味モデル側と同一）で、
+    /// 文言はチャット結果の他の行と同じく resx（表示言語に追従）で解決する
+    /// </remarks>
+    private static void AppendPrimaryKeyOrder(StringBuilder sb, EntityViewModel entity)
+    {
+        var orderedNames = entity.GetReorderedPrimaryKeyColumnNames();
+
+        if (orderedNames is null)
+        {
+            return;
+        }
+
+        sb.AppendLine(
+            $"  {string.Format(Strings.Tool_Summary_PrimaryKeyOrder, string.Join(", ", orderedNames))}"
         );
     }
 

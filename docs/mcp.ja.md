@@ -44,7 +44,7 @@ stdio トランスポートに対応した MCP クライアントであれば利
 | ツール | 引数 | 説明 |
 |---|---|---|
 | `create_diagram` | `target_dbms` ✅（`sqlserver` / `postgresql` / `mysql` / `oracle` / `sqlite`） | 指定した対象 DBMS の新規の空図ファイルを作成する。ファイルが既に存在する場合は失敗する（このツールは新規作成専用）。親ディレクトリが存在しない場合も失敗する（ディレクトリは作成しない） |
-| `get_diagram_summary` | — | 図のテーブル・カラム・一意制約・リレーションをテキストで一覧する。リレーションの各行には列ペアと制約名が付く（`Customer → Order (OneToMany, FK: (CustomerId → CustomerId)) [FK_Order_Customer]`）ため、複合外部キーは構成ペアが宣言順にすべて並ぶ |
+| `get_diagram_summary` | — | 図のテーブル・カラム・一意制約・リレーションをテキストで一覧する。リレーションの各行には列ペアと制約名が付く（`Customer → Order (OneToMany, FK: (CustomerId → CustomerId)) [FK_Order_Customer]`）ため、複合外部キーは構成ペアが宣言順にすべて並ぶ。複合主キー自身の列順序がテーブルの列順と食い違うときは、そのテーブルのブロックに `Primary key order: …` 行が付く（一致していれば出ない） |
 | `add_entity` | `table_name` ✅, `description` | 新しいテーブルを追加する（カラムは作成しない） |
 | `remove_entity` | `table_name` ✅ | テーブルを、接続するリレーションごと削除する |
 | `add_column` | `table_name` ✅, `column_name` ✅, `data_type` ✅, `is_primary_key`, `is_nullable`, `description` | テーブルへカラムを追加する。主キー列は各テーブルにちょうど 1 つにする。ツールは 2 本目を拒否しないが、コード生成器が複合主キーに対応していない |

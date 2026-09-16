@@ -1044,11 +1044,19 @@ public sealed class SyncPlanner
     }
 
     /// <summary>
-    /// 選択された AlterPrimaryKey があれば、合成後の各列の主キー指定を target の構成で上書きする。
+    /// 選択された AlterPrimaryKey があれば、合成後の各列の主キー指定と主キーの順序を target の構成で上書きする。
     /// </summary>
     /// <remarks>
-    /// 上書きするのは <see cref="Column.IsPrimaryKey"/> のみで、列の型・NULL 許容などは他差分の選択状況に従う
+    /// <para>
+    /// 上書きするのは <see cref="Column.IsPrimaryKey"/> と <see cref="Entity.PrimaryKeyColumnIds"/> のみで、
+    /// 列の型・NULL 許容などは他差分の選択状況に従う
     /// （未選択の AlterColumn を主キー変更のついでに適用してしまわないため）。AlterPrimaryKey が未選択なら何もしない。
+    /// </para>
+    /// <para>
+    /// target は live とは別の図＝列 Guid の空間が違うため、順序は target の実効順を列名で
+    /// 合成後定義の列へ写像して作り直す（合成後定義に無い列名は読み飛ばす）。
+    /// live 由来の順序リストをそのまま残すと、上書きした主キーの膜と順序が食い違う。
+    /// </para>
     /// </remarks>
     private static void ApplySelectedPrimaryKeyChange(
         Entity newDef,
@@ -1062,15 +1070,20 @@ public sealed class SyncPlanner
             return;
         }
 
-        var pkNames = alterPk
-            .Entity.Columns.Where(c => c.IsPrimaryKey)
-            .Select(c => c.Name)
-            .ToHashSet(TableComparer);
+        var targetPkColumns = alterPk.Entity.GetPrimaryKeyColumnsInOrder();
+        var pkNames = targetPkColumns.Select(c => c.Name).ToHashSet(TableComparer);
 
         foreach (var column in newDef.Columns)
         {
             column.IsPrimaryKey = pkNames.Contains(column.Name);
         }
+
+        // target の実効順を列名で合成後定義の列 Guid へ写像し直す
+        newDef.PrimaryKeyColumnIds = targetPkColumns
+            .Select(pk => newDef.Columns.FirstOrDefault(c => TableComparer.Equals(c.Name, pk.Name)))
+            .Where(c => c is not null)
+            .Select(c => c!.Id)
+            .ToList();
     }
 
     /// <summary>

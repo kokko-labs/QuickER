@@ -23,7 +23,7 @@ namespace QuickER.Provider;
 public static class TableConstraintLineBuilder
 {
     /// <summary>制約行（<c>PRIMARY KEY</c> → <c>UNIQUE</c> の順）を組み立てる</summary>
-    /// <param name="entity">対象エンティティ（主キー列・一意制約の正本）</param>
+    /// <param name="entity">対象エンティティ（主キー列・一意制約の正本。主キーの並びは実効順＝<see cref="Entity.GetPrimaryKeyColumnsInOrder"/>）</param>
     /// <param name="tableName">制約名の基にするテーブル名</param>
     /// <param name="quoteSimpleName">カラム名を方言のクォート方式でクォートする関数</param>
     /// <param name="quoteConstraintName">制約名を方言のクォート方式でクォートする関数（エスケープ込み）</param>
@@ -38,7 +38,7 @@ public static class TableConstraintLineBuilder
     )
     {
         var lines = new List<string>();
-        var pks = entity.Columns.Where(c => c.IsPrimaryKey).ToList();
+        var pks = entity.GetPrimaryKeyColumnsInOrder();
 
         // PRIMARY KEY 制約（複合 PK 対応のため列定義とは分離して出力）
         if (pks.Count > 0)

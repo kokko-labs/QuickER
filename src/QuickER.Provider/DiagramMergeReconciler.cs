@@ -137,6 +137,13 @@ public static class DiagramMergeReconciler
                     constraint.ColumnIds[i] = MapId(columnIdMap, constraint.ColumnIds[i]);
                 }
             }
+
+            // 主キーの順序も列 Id 参照のため追従させる
+            // （追従させないと順序指定が解決不能になり、実効順が黙って列宣言順へ戻る）
+            for (var i = 0; i < entity.PrimaryKeyColumnIds.Count; i++)
+            {
+                entity.PrimaryKeyColumnIds[i] = MapId(columnIdMap, entity.PrimaryKeyColumnIds[i]);
+            }
         }
 
         // リレーションの参照 Id も対応表で追従書き換えする（両端エンティティ・両端列）

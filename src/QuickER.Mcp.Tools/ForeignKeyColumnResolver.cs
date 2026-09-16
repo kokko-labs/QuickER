@@ -27,7 +27,8 @@ internal static class ForeignKeyColumnResolver
     /// <param name="target">参照先（子）エンティティ</param>
     /// <param name="existingRelationships">既存リレーション一覧（参照先として使用済みの列を候補から除外するために用いる）</param>
     /// <remarks>
-    /// GUI の作成フロー（<c>MainViewModel.BuildInitialColumnPairs</c>）と同一の意味論。親の主キー列を宣言順に
+    /// GUI の作成フロー（<c>MainViewModel.BuildInitialColumnPairs</c>）と同一の意味論。親の主キー列を実効順
+    /// （<see cref="Entity.GetPrimaryKeyColumnsInOrder"/>）で
     /// 辿り、列ごとに <see cref="ResolveTargetColumn"/> で子列を引き当てる。引き当てられなかった列はペアに
     /// 含めず、複数の親列が同じ子列へ寄った場合は後続をペアなしにする（1 つの子列を 2 度使う外部キーは作れない）
     /// </remarks>
@@ -41,7 +42,7 @@ internal static class ForeignKeyColumnResolver
         var pairs = new List<RelationshipColumnPair>();
         var usedTargetColumnIds = new HashSet<Guid>();
 
-        foreach (var sourceKeyColumn in source.Columns.Where(column => column.IsPrimaryKey))
+        foreach (var sourceKeyColumn in source.GetPrimaryKeyColumnsInOrder())
         {
             var targetColumn = ResolveTargetColumn(source, target, sourceKeyColumn, relationships);
 

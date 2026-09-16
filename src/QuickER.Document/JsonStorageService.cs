@@ -217,6 +217,9 @@ public static class JsonStorageService
             entity.Columns = Compact(entity.Columns);
             entity.UniqueConstraints = Compact(entity.UniqueConstraints);
 
+            // 主キーの順序も値型リストのため、リスト自体の null だけ既定値（＝列宣言順）へ寄せる
+            entity.PrimaryKeyColumnIds ??= new List<Guid>();
+
             // ColumnIds は値型リストのため要素の null を持てない。リスト自体の null だけ既定値へ寄せる
             foreach (var constraint in entity.UniqueConstraints)
             {

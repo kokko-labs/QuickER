@@ -166,6 +166,7 @@ ORDER BY name;";
     /// <remarks>
     /// table_info の列は cid / name / type（宣言型）/ notnull / dflt_value / pk（PK なら構成順の 1 始まり）。
     /// 宣言型はそのまま <see cref="Column.DataType"/> へ保持する（SQLite は verbatim に保存するため）。
+    /// 行は cid（列定義順）で返るため、主キーの構成順は pk 値の昇順へ並べ替えてから記録する。
     /// </remarks>
     private static async Task LoadColumnsAndPrimaryKeyAsync(
         SqliteConnection conn,
@@ -180,6 +181,9 @@ ORDER BY name;";
             commandTimeoutSeconds
         );
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+
+        // 主キー構成列を (pk 値, 列) で集め、読み終えてから構成順に並べ替える
+        var primaryKeyColumns = new List<(long Ordinal, Column Column)>();
 
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
@@ -201,6 +205,16 @@ ORDER BY name;";
 
             entry.Entity.Columns.Add(col);
             entry.ColumnsByName[colName] = col;
+
+            if (pkOrdinal > 0)
+            {
+                primaryKeyColumns.Add((pkOrdinal, col));
+            }
+        }
+
+        foreach (var (_, column) in primaryKeyColumns.OrderBy(pair => pair.Ordinal))
+        {
+            entry.Entity.PrimaryKeyColumnIds.Add(column.Id);
         }
     }
 
@@ -311,6 +325,7 @@ ORDER BY name;";
             while (await reader.ReadAsync(ct).ConfigureAwait(false))
             {
                 var id = reader.GetInt64(0);
+                var seq = reader.GetInt64(1); // 同一 FK 内の構成列番号（0 始まり）
                 var refTable = reader.GetString(2); // 参照先（親）テーブル
                 var fromCol = reader.GetString(3); // 子側（FK 保有）列
                 var toCol = reader.IsDBNull(4) ? null : reader.GetString(4); // 親側列
@@ -321,8 +336,9 @@ ORDER BY name;";
                     reader.IsDBNull(6) ? null : reader.GetString(6)
                 );
 
-                // 参照先列（to）が NULL の場合は親テーブルの主キーを参照する（SQLite の暗黙参照）
-                var refCol = toCol ?? ResolvePrimaryKeyColumn(tables, refTable);
+                // 参照先列（to）が NULL の場合は親テーブルの主キーを参照する（SQLite の暗黙参照）。
+                // 暗黙参照の構成列は seq 順に主キーの実効順と対応するため、seq で引き当てる
+                var refCol = toCol ?? ResolvePrimaryKeyColumn(tables, refTable, seq);
 
                 if (refCol is null)
                 {
@@ -405,10 +421,17 @@ ORDER BY name;";
         return aux;
     }
 
-    /// <summary>参照先テーブルの主キー先頭列名を解決する（参照先列が省略された FK 用のフォールバック）</summary>
+    /// <summary>参照先テーブルの主キー構成列名を解決する（参照先列が省略された FK 用のフォールバック）</summary>
+    /// <remarks>
+    /// <c>REFERENCES t</c> 形の暗黙参照は親テーブルの主キーを構成順に参照するため、
+    /// <c>foreign_key_list</c> の <c>seq</c>（0 始まり）で実効順
+    /// （<see cref="Entity.GetPrimaryKeyColumnsInOrder"/>）の同じ位置の列を引き当てる。
+    /// 範囲外（主キーの列数と FK の列数が食い違う不正なスキーマ）は解決不能として null を返す。
+    /// </remarks>
     private static string? ResolvePrimaryKeyColumn(
         Dictionary<string, SchemaTableEntry> tables,
-        string tableName
+        string tableName,
+        long seq
     )
     {
         if (!tables.TryGetValue(tableName, out var entry))
@@ -416,6 +439,8 @@ ORDER BY name;";
             return null;
         }
 
-        return entry.Entity.Columns.FirstOrDefault(c => c.IsPrimaryKey)?.Name;
+        var pks = entry.Entity.GetPrimaryKeyColumnsInOrder();
+
+        return seq >= 0 && seq < pks.Count ? pks[(int)seq].Name : null;
     }
 }

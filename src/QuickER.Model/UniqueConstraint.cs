@@ -8,7 +8,8 @@ namespace QuickER.Model;
 /// </summary>
 /// <remarks>
 /// 構成列は <see cref="Column.Id"/> の一覧で保持し、順序は宣言順（DDL へ出力する列の並び）を表す。
-/// 主キーは <see cref="Column.IsPrimaryKey"/> が表現するため、ここには含めない。
+/// 主キーはどの列が構成列かを <see cref="Column.IsPrimaryKey"/> が、その順序を
+/// <see cref="Entity.PrimaryKeyColumnIds"/> が表現するため、ここには含めない。
 /// </remarks>
 public class UniqueConstraint
 {

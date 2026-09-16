@@ -379,4 +379,34 @@ public class SqliteSyncScriptBuilderTests
         // 非数値引数の型は "NVARCHAR(MAX)" とクォートされ syntax error を避ける
         script.Should().Contain("\"payload\" \"NVARCHAR(MAX)\"");
     }
+
+    /// <summary>再構築の CREATE TABLE が主キーの順序上書き（実効順）に従うことを検証する</summary>
+    [Fact(DisplayName = "再構築の PRIMARY KEY 句は PrimaryKeyColumnIds の順で出力される")]
+    public void Rebuild_PrimaryKeyClause_FollowsPrimaryKeyColumnIds()
+    {
+        var a = Pk("a");
+        var b = Pk("b");
+        var definition = new Entity
+        {
+            TableName = "pair",
+            Columns = { a, b },
+            // 列宣言順（a → b）とは逆の主キー順
+            PrimaryKeyColumnIds = [b.Id, a.Id],
+        };
+
+        var plan = new SyncPlan
+        {
+            Rebuilds =
+            [
+                new TableRebuildPlan
+                {
+                    TableName = "pair",
+                    NewDefinition = definition,
+                    CreateOnly = true,
+                },
+            ],
+        };
+
+        Build(plan).Should().Contain("PRIMARY KEY (\"b\", \"a\")");
+    }
 }

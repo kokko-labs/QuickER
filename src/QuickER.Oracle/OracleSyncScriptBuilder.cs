@@ -235,11 +235,12 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
     /// <summary>主キー変更の付与フェーズ（新主キー制約の ADD）文を生成する（解除のみなら null）</summary>
     /// <remarks>
     /// 新しい主キー構成は <see cref="SchemaDiffItem.Entity"/>（target 側エンティティ）の主キー列を
-    /// 列定義順に読み、制約名は CREATE TABLE と同じ <c>PK_{テーブル名}</c> 規則で組み立てる。
+    /// 実効順（<see cref="Entity.GetPrimaryKeyColumnsInOrder"/>）で読み、
+    /// 制約名は CREATE TABLE と同じ <c>PK_{テーブル名}</c> 規則で組み立てる。
     /// </remarks>
     private static string? BuildAddPrimaryKey(SchemaDiffItem item)
     {
-        var pks = item.Entity?.Columns.Where(c => c.IsPrimaryKey).ToList() ?? [];
+        var pks = item.Entity?.GetPrimaryKeyColumnsInOrder() ?? [];
 
         // 新しい主キー列が無い（＝主キーの解除のみ）場合は付与文を出さない
         if (pks.Count == 0)

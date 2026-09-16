@@ -116,4 +116,45 @@ public class SchemaSignatureTests
 
         Sign(a).Should().Be(Sign(b));
     }
+
+    // ---------------- 主キーの順序 ----------------
+
+    /// <summary>2 列とも主キーにしたエンティティを生成する（順序指定はテスト側で足す）</summary>
+    private static Entity BuildCompositeKeyEntity()
+    {
+        var entity = BuildEntity();
+        entity.Columns[0].IsPrimaryKey = true;
+        entity.Columns[1].IsPrimaryKey = true;
+
+        return entity;
+    }
+
+    /// <summary>主キーの順序だけが違えば署名が変わることを検証する</summary>
+    [Fact(DisplayName = "Compute: 主キーの順序が違えば署名が変わる")]
+    public void Compute_DifferentPrimaryKeyOrder_ChangesSignature()
+    {
+        var a = BuildCompositeKeyEntity();
+        a.PrimaryKeyColumnIds = [a.Columns[0].Id, a.Columns[1].Id];
+
+        var b = BuildCompositeKeyEntity();
+        b.PrimaryKeyColumnIds = [b.Columns[1].Id, b.Columns[0].Id];
+
+        Sign(a).Should().NotBe(Sign(b));
+    }
+
+    /// <summary>
+    /// 順序リストが空の図と、同じ並びを明示指定した図の署名が一致することを検証する
+    /// （既存図と再取込図で不要な置換確認を出さないための要件）
+    /// </summary>
+    [Fact(DisplayName = "Compute: 順序リスト空と同順の明示指定は署名が一致する")]
+    public void Compute_EmptyListAndMatchingExplicitOrder_SameSignature()
+    {
+        var withoutOrder = BuildCompositeKeyEntity();
+
+        var withOrder = BuildCompositeKeyEntity();
+        // 列宣言順と同じ並びを明示指定する
+        withOrder.PrimaryKeyColumnIds = [withOrder.Columns[0].Id, withOrder.Columns[1].Id];
+
+        Sign(withoutOrder).Should().Be(Sign(withOrder));
+    }
 }

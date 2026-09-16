@@ -404,7 +404,10 @@ WHERE "
         }
     }
 
-    /// <summary>主キー構成列に IsPrimaryKey を立て、NULL 不可へ補正する</summary>
+    /// <summary>主キー構成列に IsPrimaryKey を立て、NULL 不可へ補正し、構成順を記録する</summary>
+    /// <remarks>
+    /// 構成順はクエリの <c>ORDER BY</c>（<c>conkey</c> の序数昇順）に任せ、到着順でそのまま積む。
+    /// </remarks>
     private static async Task LoadPrimaryKeysAsync(
         NpgsqlConnection conn,
         Dictionary<string, SchemaTableEntry> tables,
@@ -426,6 +429,7 @@ WHERE "
             {
                 col.IsPrimaryKey = true;
                 col.IsNullable = false;
+                entry.Entity.PrimaryKeyColumnIds.Add(col.Id);
             }
         }
     }

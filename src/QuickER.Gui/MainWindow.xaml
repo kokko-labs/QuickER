@@ -2235,6 +2235,17 @@
                 </Grid>
               </Border>
 
+              <!-- 主キー順の表示: 複合主キーのときだけ、DDL の PRIMARY KEY 句へ出る実効順を読み取り専用で示す
+                   （並びの編集 UI は持たない＝取込などで付いた順序情報の確認用） -->
+              <TextBlock
+                Style="{StaticResource PropertyHintText}"
+                Margin="4,0,4,10"
+                Visibility="{Binding SelectedEntity.IsCompositePrimaryKey, Converter={StaticResource BoolToVisibilityConverter}}"
+              >
+                <Run Text="{x:Static resources:Strings.Property_PrimaryKeyOrderLabel}" />
+                <Run Text="{Binding SelectedEntity.PrimaryKeyOrderText, Mode=OneWay}" />
+              </TextBlock>
+
               <!-- UNIQUE 制約カード: 制約の追加・削除・制約名編集と、列選択コンボボックスの行による構成列編集。
                    本体は開閉可能（既定はエンティティ選択時に「制約あり＝開く・なし＝畳む」で決まる） -->
               <Border Style="{StaticResource PropertyCard}">

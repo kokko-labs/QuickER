@@ -999,4 +999,81 @@ public class SchemaDiffServiceTests
 
         diff.Items.Should().NotContain(i => i.Kind == SchemaDiffKind.AddUniqueConstraint);
     }
+
+    // ---------------- 主キーの順序（PrimaryKeyColumnIds）の差分 ----------------
+
+    /// <summary>
+    /// <see cref="PkTbl"/> と同じテーブルに、主キーの順序上書き（<see cref="Entity.PrimaryKeyColumnIds"/>）を与えて組み立てる。
+    /// </summary>
+    /// <param name="columns">列名（この順序がそのまま列定義順）</param>
+    /// <param name="pkOrder">主キーにする列名（この順序が実効順になる）</param>
+    private static Entity PkTblOrdered(string name, string[] columns, params string[] pkOrder)
+    {
+        var e = PkTbl(name, columns, pkOrder);
+
+        e.PrimaryKeyColumnIds = pkOrder
+            .Select(pk =>
+                e.Columns.First(c =>
+                    string.Equals(c.Name, pk, StringComparison.OrdinalIgnoreCase)
+                ).Id
+            )
+            .ToList();
+
+        return e;
+    }
+
+    /// <summary>列定義順が同一でも主キーの順序だけが違えば AlterPrimaryKey になることを検証する</summary>
+    [Fact(DisplayName = "主キーの順序だけが違えば AlterPrimaryKey になる")]
+    public void PrimaryKeyOrderOnlyDifference_AlterPrimaryKey()
+    {
+        // 列定義順はどちらも (a, b)。主キーの実効順だけが (b, a) と (a, b) で食い違う
+        var live = new List<Entity> { PkTblOrdered("Pair", ["a", "b"], "b", "a") };
+        var target = new List<Entity> { PkTblOrdered("Pair", ["a", "b"], "a", "b") };
+
+        var diff = new SchemaDiffService().Compute(
+            live,
+            new List<Relationship>(),
+            target,
+            new List<Relationship>()
+        );
+
+        var item = diff.Items.Should().ContainSingle().Which;
+        item.Kind.Should().Be(SchemaDiffKind.AlterPrimaryKey);
+        item.TableName.Should().Be("Pair");
+    }
+
+    /// <summary>双方が同じ主キー順序を持つなら差分が出ないことを検証する</summary>
+    [Fact(DisplayName = "主キーの順序が双方同一なら差分は出ない")]
+    public void SamePrimaryKeyOrder_NoDiff()
+    {
+        var live = new List<Entity> { PkTblOrdered("Pair", ["a", "b"], "b", "a") };
+        var target = new List<Entity> { PkTblOrdered("Pair", ["a", "b"], "b", "a") };
+
+        var diff = new SchemaDiffService().Compute(
+            live,
+            new List<Relationship>(),
+            target,
+            new List<Relationship>()
+        );
+
+        diff.Items.Should().BeEmpty();
+    }
+
+    /// <summary>順序リストが空の側は列宣言順へフォールバックし、同順なら差分が出ないことを検証する</summary>
+    [Fact(DisplayName = "順序リスト空 vs 同順の明示指定では差分が出ない")]
+    public void EmptyListVersusMatchingExplicitOrder_NoDiff()
+    {
+        // live は順序リストなし（＝列宣言順 (a, b)）、target は同じ並びを明示指定
+        var live = new List<Entity> { PkTbl("Pair", ["a", "b"], "a", "b") };
+        var target = new List<Entity> { PkTblOrdered("Pair", ["a", "b"], "a", "b") };
+
+        var diff = new SchemaDiffService().Compute(
+            live,
+            new List<Relationship>(),
+            target,
+            new List<Relationship>()
+        );
+
+        diff.Items.Should().BeEmpty();
+    }
 }

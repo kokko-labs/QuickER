@@ -51,8 +51,9 @@ internal sealed partial class CSharpGenerationModelBuilder
                 EntityClassName = _nameConverter.ToEntityClassName(entity.TableName),
                 // Fluent の ToTable("...") へ C# リテラルとして埋め込むためエスケープする（[Table] と同じ規則）
                 TableName = EscapeNameForCSharpString(entity.TableName),
+                // 複合キーの HasKey は並びが意味を持つため、主キー列は実効順で取り出す
                 KeyPropertyNames = entity
-                    .Columns.Where(column => column.IsPrimaryKey)
+                    .GetPrimaryKeyColumnsInOrder()
                     .Select(column => _nameConverter.ToPropertyName(column.Name))
                     .ToList(),
                 Properties = entity.Columns.Select(BuildEfCorePropertyConfig).ToList(),
