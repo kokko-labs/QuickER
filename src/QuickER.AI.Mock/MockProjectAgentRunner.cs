@@ -41,6 +41,9 @@ public readonly record struct BuildRunResult(bool Success, string Output);
 /// <param name="Canceled">利用者が中断したか</param>
 /// <param name="Message">結果メッセージ（成功理由・失敗理由）</param>
 /// <param name="LogPath">実行ログを書き出したパス</param>
+/// <param name="BuildDeclined">
+/// 最終ビルド直前の確認を利用者が取り消したため、ビルドを実行しなかったか（＝成果物は未検証のまま完了）
+/// </param>
 public sealed record MockProjectAgentResult(
     bool Success,
     bool ClientSucceeded,
@@ -49,7 +52,8 @@ public sealed record MockProjectAgentResult(
     bool TimedOut,
     bool Canceled,
     string Message,
-    string LogPath
+    string LogPath,
+    bool BuildDeclined = false
 );
 
 /// <summary>
@@ -108,6 +112,7 @@ public sealed class MockProjectAgentRunner
     private readonly TimeSpan _timeout;
     private readonly TimeSpan _buildTimeout;
     private readonly MockProjectTargetProfile _profile;
+    private readonly Func<IReadOnlyList<string>, bool>? _confirmBuild;
 
     /// <summary>実行中ターンのキャンセル起点（中断・タイムアウトで発火）</summary>
     private CancellationTokenSource? _runCts;
@@ -118,12 +123,19 @@ public sealed class MockProjectAgentRunner
     /// <param name="timeout">全体タイムアウト（省略時は <see cref="DefaultTimeout"/>）</param>
     /// <param name="profile">生成ターゲットのプロファイル（要求へ添える・UI 成果物の検索パターン。省略時は WPF）</param>
     /// <param name="buildTimeout">最終ビルド専用タイムアウト（省略時は <see cref="DefaultBuildTimeout"/>）</param>
+    /// <param name="confirmBuild">
+    /// 最終ビルド直前の確認（引数＝UI 層のソース・静的資産以外で追加・変更されたファイルの相対パス）。
+    /// true を返したときだけビルドを実行する。<see langword="null"/> は「確認する手段が無い」を意味し、
+    /// 対象の変更があればビルドしない（未検証として完了する）＝黙って承認へ倒さない。
+    /// <see cref="IMockProjectAgent.FinalBuildEscapesSandbox"/> が false の実行器では呼ばれない。
+    /// </param>
     public MockProjectAgentRunner(
         IMockProjectAgent agent,
         IBuildRunner buildRunner,
         TimeSpan? timeout = null,
         MockProjectTargetProfile? profile = null,
-        TimeSpan? buildTimeout = null
+        TimeSpan? buildTimeout = null,
+        Func<IReadOnlyList<string>, bool>? confirmBuild = null
     )
     {
         _agent = agent;
@@ -131,6 +143,7 @@ public sealed class MockProjectAgentRunner
         _timeout = timeout ?? DefaultTimeout;
         _buildTimeout = buildTimeout ?? DefaultBuildTimeout;
         _profile = profile ?? MockProjectTargetProfile.Wpf;
+        _confirmBuild = confirmBuild;
     }
 
     /// <summary>エージェント（バックエンド）が利用可能か（Claude Code なら claude CLI の解決可否）</summary>
@@ -210,6 +223,12 @@ public sealed class MockProjectAgentRunner
         EmitLine(Strings.Mock_Run_Start);
         EmitLine(string.Format(Strings.Mock_Run_OutputFolderFormat, outputDirectory));
         EmitLine(string.Format(Strings.Mock_Run_ProjectNameFormat, projectName));
+
+        // 最終ビルドが実行器にとって境界越えになる場合だけ、スキャフォールド直後（＝ここ）の状態を記録する。
+        // 記録するのは内容のハッシュで、更新日時やサイズでは比べない（書き換えたあとで日時は戻せる）。
+        var boundarySnapshot = _agent.FinalBuildEscapesSandbox
+            ? MockProjectBuildBoundary.Snapshot.Capture(outputDirectory, projectName)
+            : null;
 
         var request = new MockProjectAgentRequest(
             WorkingDirectory: outputDirectory,
@@ -294,6 +313,9 @@ public sealed class MockProjectAgentRunner
         // タイムアウト・中断時、または成果物が無いときはビルドを試みない。
         var buildSucceeded = false;
 
+        // 最終ビルド直前の確認を利用者が取り消したか（成果物は残るが未検証として完了する）
+        var buildDeclined = false;
+
         if (!timedOut && !canceled && artifactsPresent)
         {
             // ビルド中間物を捨ててから検証する。obj/ に残った *.targets / *.props は
@@ -306,6 +328,18 @@ public sealed class MockProjectAgentRunner
             // 残余として扱う（Claude Code はターン終了時にプロセスが終わっているため該当しない）。
             DeleteBuildOutputs(projectDirectory);
 
+            // 削除の「後」に差分を取る（obj / bin は消える側なので検知の対象に含めない）。
+            // 実行器が書いた「ビルドが設定として読み得るファイル」があれば、実行する前に利用者へ見せる。
+            buildDeclined = !ConfirmBuildBoundary(
+                boundarySnapshot,
+                outputDirectory,
+                projectName,
+                EmitLine
+            );
+        }
+
+        if (!timedOut && !canceled && artifactsPresent && !buildDeclined)
+        {
             EmitLine(Strings.Mock_Run_BuildVerify);
 
             // 最終ビルドには専用のタイムアウトを掛ける（全体タイムアウトはエージェント実行までで解けている）
@@ -368,6 +402,7 @@ public sealed class MockProjectAgentRunner
             timedOut,
             buildTimedOut,
             canceled,
+            buildDeclined,
             outcome,
             artifactsPresent,
             buildSucceeded
@@ -385,7 +420,8 @@ public sealed class MockProjectAgentRunner
             TimedOut: timedOut || buildTimedOut,
             Canceled: canceled,
             Message: message,
-            LogPath: logPath
+            LogPath: logPath,
+            BuildDeclined: buildDeclined
         );
     }
 
@@ -462,12 +498,64 @@ public sealed class MockProjectAgentRunner
         }
     }
 
+    /// <summary>
+    /// 最終ビルド直前に、実行器が書いた「ビルドが設定として読み得るファイル」を検知して利用者へ確認する。
+    /// </summary>
+    /// <param name="snapshot">
+    /// スキャフォールド直後のスナップショット（<see langword="null"/> は
+    /// <see cref="IMockProjectAgent.FinalBuildEscapesSandbox"/> が false＝検知の対象外）
+    /// </param>
+    /// <param name="outputDirectory">出力フォルダ</param>
+    /// <param name="projectName">プロジェクト名</param>
+    /// <param name="emitLine">ログ・進捗への 1 行出力</param>
+    /// <returns>最終ビルドを実行してよいか（false なら未検証で完了する）</returns>
+    /// <remarks>
+    /// 変更が無ければ何も尋ねない。変更があれば一覧をログへ残したうえで確認を出し、確認する手段が
+    /// 与えられていない（<c>confirmBuild</c> が null）ときは承認しない＝配線漏れが「黙って承認」へ
+    /// 倒れないようにする。
+    /// </remarks>
+    private bool ConfirmBuildBoundary(
+        MockProjectBuildBoundary.Snapshot? snapshot,
+        string outputDirectory,
+        string projectName,
+        Action<string> emitLine
+    )
+    {
+        if (snapshot is null)
+        {
+            return true;
+        }
+
+        var changed = snapshot.DetectUnexpectedChanges(outputDirectory, projectName);
+
+        if (changed.Count == 0)
+        {
+            return true;
+        }
+
+        emitLine(Strings.Mock_Run_BuildBoundaryChanges);
+
+        foreach (var path in changed)
+        {
+            emitLine("  " + path);
+        }
+
+        if (_confirmBuild?.Invoke(changed) == true)
+        {
+            return true;
+        }
+
+        emitLine(Strings.Mock_Run_BuildDeclined);
+        return false;
+    }
+
     /// <summary>結果メッセージを組み立てる</summary>
     private static string BuildResultMessage(
         bool success,
         bool timedOut,
         bool buildTimedOut,
         bool canceled,
+        bool buildDeclined,
         MockProjectAgentOutcome outcome,
         bool artifactsPresent,
         bool buildSucceeded
@@ -509,6 +597,12 @@ public sealed class MockProjectAgentRunner
         if (!artifactsPresent)
         {
             return Strings.Mock_Result_ArtifactsMissing;
+        }
+
+        // 確認の取り消しはエージェント自身の失敗より後に見る（実行が失敗していればそちらが原因）
+        if (buildDeclined)
+        {
+            return Strings.Mock_Result_BuildNotVerified;
         }
 
         if (!buildSucceeded)

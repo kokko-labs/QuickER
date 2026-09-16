@@ -56,6 +56,13 @@ public sealed class CodexMockProjectAgent : IMockProjectAgent
     public bool IsAvailable() => CodexCliLocator.IsAvailable();
 
     /// <inheritdoc />
+    /// <remarks>
+    /// <c>sandbox=workspace-write</c> で動くため、出力フォルダの csproj などビルド設定を書ける一方、
+    /// サンドボックスの外でコマンドを実行する権限は持たない。最終ビルドはその外側で走るので true。
+    /// </remarks>
+    public bool FinalBuildEscapesSandbox => true;
+
+    /// <inheritdoc />
     public async Task<MockProjectAgentOutcome> RunAsync(
         MockProjectAgentRequest request,
         Action<string> onProgress,

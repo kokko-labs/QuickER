@@ -265,6 +265,13 @@
 
 続行しますか？</value>
   </data>
+  <data name="Mock_BuildConfirm_Message" xml:space="preserve">
+    <value>生成したプロジェクトを検証するため、QuickER は AI の CLI のサンドボックスの外側で、あなたの権限で `dotnet build` を実行します。
+
+AI が次のファイルを書きました（UI 層のソース・静的資産ではありません）。この中にビルド・設定ファイル（csproj・global.json・*.csproj.user 等）が含まれている場合、検証ビルドはそれを読み込んで記述どおりに実行します。
+
+内容を確認して、検証ビルドを実行するかどうかを選んでください。キャンセルすると、プロジェクトを未検証のまま生成を終了します。</value>
+  </data>
   <data name="Mock_GeneratingProject" xml:space="preserve">
     <value>モックプロジェクトを生成しています...</value>
   </data>
@@ -285,6 +292,12 @@
     <value>{0}
 
 出力フォルダ:
+{1}</value>
+  </data>
+  <data name="Mock_GenResultNotVerifiedBodyFormat" xml:space="preserve">
+    <value>{0}
+
+詳細はログを確認してください:
 {1}</value>
   </data>
   <data name="Mock_GenResultFailureBodyFormat" xml:space="preserve">
@@ -352,6 +365,13 @@
     <value>
 == 最終ビルドを検証します（dotnet build） ==</value>
   </data>
+  <data name="Mock_Run_BuildBoundaryChanges" xml:space="preserve">
+    <value>
+AI が次のファイルを書きました（UI 層のソース・静的資産ではありません）:</value>
+  </data>
+  <data name="Mock_Run_BuildDeclined" xml:space="preserve">
+    <value>確認が取り消されたため、最終ビルドは実行しませんでした。</value>
+  </data>
   <data name="Mock_Run_BuildSucceeded" xml:space="preserve">
     <value>最終ビルド: 成功しました。</value>
   </data>
@@ -397,6 +417,9 @@
   </data>
   <data name="Mock_Result_BuildFailed" xml:space="preserve">
     <value>最終ビルドが失敗しました。生成物とログは出力フォルダに残っています。</value>
+  </data>
+  <data name="Mock_Result_BuildNotVerified" xml:space="preserve">
+    <value>生成は終わりましたが、確認が取り消されたため最終ビルドを実行しておらず、プロジェクトは未検証です。生成物とログは出力フォルダに残っています。自分でビルド・実行する前に内容を確認してください。</value>
   </data>
   <data name="Mock_Result_Failed" xml:space="preserve">
     <value>生成に失敗しました。ログを確認してください。</value>

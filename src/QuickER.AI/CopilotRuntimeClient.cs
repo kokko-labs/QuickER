@@ -172,7 +172,7 @@ public sealed class CopilotRuntimeClient : ICopilotRuntimeClient
             : options.WorkingDirectory.Trim();
         // 組込みツールを許可するときだけ、自動承認の基準フォルダを持つ（それ以外は空＝何も承認しない）
         _approvalRoot = options.AllowWorkspaceTools
-            ? NormalizeRoot(sessionDirectory)
+            ? CopilotWorkspacePermissionPolicy.NormalizeRoot(sessionDirectory)
             : string.Empty;
 
         var config = new SessionConfig
@@ -425,71 +425,47 @@ public sealed class CopilotRuntimeClient : ICopilotRuntimeClient
     }
 #pragma warning restore GHCP001
 
-    /// <summary>許可要求が作業フォルダ配下に収まっているか（種別ごとに対象パスを見て判定する）</summary>
+    /// <summary>許可要求が作業フォルダ配下に収まっているか（判定は <see cref="CopilotWorkspacePermissionPolicy"/>）</summary>
     private bool IsWithinWorkspace(PermissionRequest request) =>
-        request switch
-        {
-            PermissionRequestWrite write => write.RequestSandboxBypass != true
-                && IsUnderApprovalRoot(write.FileName),
-            PermissionRequestRead read => read.RequestSandboxBypass != true
-                && IsUnderApprovalRoot(read.Path),
-            // シェルは、コマンド文から抽出された参照パスがすべて配下なら承認する
-            // （パスを伴わない dotnet build 等は作業フォルダで動くため承認対象）
-            PermissionRequestShell shell => shell.RequestSandboxBypass != true
-                && (
-                    shell.PossiblePaths is null or { Length: 0 }
-                    || shell.PossiblePaths.All(IsUnderApprovalRoot)
-                ),
-            // URL 取得・MCP・拡張・メモリ・カスタムツール等はモック生成に不要なため承認しない
-            _ => false,
-        };
+        CopilotWorkspacePermissionPolicy.IsWithinWorkspace(request, _approvalRoot);
 
-    /// <summary>パスが自動承認の基準フォルダ配下か（相対パスは基準フォルダから解決する）</summary>
-    private bool IsUnderApprovalRoot(string? path)
-    {
-        if (_approvalRoot.Length == 0 || string.IsNullOrWhiteSpace(path))
-        {
-            return false;
-        }
-
-        string full;
-
-        try
-        {
-            // 相対パスはセッションの作業フォルダ基準。".." を含む脱出は GetFullPath が正規化して露見する
-            full = NormalizeRoot(Path.Combine(_approvalRoot, path));
-        }
-        catch (Exception)
-        {
-            // 不正な文字などで解決できないパスは承認しない
-            return false;
-        }
-
-        return string.Equals(full, _approvalRoot, StringComparison.OrdinalIgnoreCase)
-            || full.StartsWith(
-                _approvalRoot + Path.DirectorySeparatorChar,
-                StringComparison.OrdinalIgnoreCase
-            );
-    }
-
-    /// <summary>パスを絶対パスへ正規化し、末尾の区切り文字を落とす（前方一致判定の基準を揃える）</summary>
-    private static string NormalizeRoot(string path) =>
-        Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
-
-    /// <summary>拒否した許可要求の表示名を組み立てる（種別＋ツール名。判別できなければ種別のみ）</summary>
-    private static string DescribePermissionRequest(PermissionRequest request)
+    /// <summary>拒否した許可要求の表示名を組み立てる（種別＋ツール名／コマンド文。判別できなければ種別のみ）</summary>
+    /// <remarks>
+    /// シェル要求はツール名を持たないため、代わりにコマンド文を添える（何を拒否したのかが分からないと、
+    /// ヘッドレス実行が途中で止まった理由をログから追えない）。長いコマンド文は末尾を切り詰める。
+    /// </remarks>
+    internal static string DescribePermissionRequest(PermissionRequest request)
     {
         var kind = string.IsNullOrWhiteSpace(request.Kind) ? "permission" : request.Kind;
 
-        var toolName = request switch
+        var detail = request switch
         {
             PermissionRequestCustomTool custom => custom.ToolName,
             PermissionRequestMcp mcp => mcp.ToolName,
             PermissionRequestHook hook => hook.ToolName,
+            PermissionRequestShell shell => Truncate(shell.FullCommandText),
             _ => null,
         };
 
-        return string.IsNullOrWhiteSpace(toolName) ? kind : $"{kind}: {toolName}";
+        return string.IsNullOrWhiteSpace(detail) ? kind : $"{kind}: {detail}";
+    }
+
+    /// <summary>拒否ログへ載せるコマンド文の最大長</summary>
+    private const int DeclinedCommandTextLimit = 200;
+
+    /// <summary>コマンド文を 1 行へ畳んで切り詰める（ログ 1 行の体裁を保つ）</summary>
+    private static string? Truncate(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return null;
+        }
+
+        var folded = text.ReplaceLineEndings(" ").Trim();
+
+        return folded.Length <= DeclinedCommandTextLimit
+            ? folded
+            : folded[..DeclinedCommandTextLimit] + "…";
     }
 
     /// <summary>接続済みのクライアントを取り出す（未接続なら例外）</summary>

@@ -46,6 +46,7 @@ public class MockGenerationDialogTests
             string model,
             string modelProvider,
             Action<string> onProgress,
+            Func<IReadOnlyList<string>, bool>? confirmBuild = null,
             CancellationToken cancellationToken = default
         ) =>
             Task.FromResult(

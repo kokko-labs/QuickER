@@ -11,12 +11,17 @@ namespace QuickER.AI.Mock;
 /// <param name="OutputDirectory">出力フォルダ（成功・失敗を問わず成果物とログが残る）</param>
 /// <param name="LogPath">実行ログのパス（生成まで到達しなかった場合は null）</param>
 /// <param name="Interrupted">利用者自身の中断で終了したか（true のとき VM は完了ダイアログを出さない）</param>
+/// <param name="BuildDeclined">
+/// 最終ビルド前の確認を利用者が取り消したか（true のとき <paramref name="Success"/> は false だが、
+/// 失敗ではなく利用者自身の選択＝VM は完了をエラーとして報告しない）
+/// </param>
 public sealed record MockProjectGenerationResult(
     bool Success,
     string Message,
     string OutputDirectory,
     string? LogPath,
-    bool Interrupted = false
+    bool Interrupted = false,
+    bool BuildDeclined = false
 );
 
 /// <summary>
@@ -76,6 +81,12 @@ public interface IMockProjectGenerator
     /// <param name="model">モデルエイリアス（空なら既定）</param>
     /// <param name="modelProvider">モデルプロバイダー（Codex 用。空なら既定。Claude Code は無視する）</param>
     /// <param name="onProgress">進捗テキストの逐次転送先</param>
+    /// <param name="confirmBuild">
+    /// 最終ビルド直前の確認（引数＝UI 層のソース・静的資産以外で追加・変更されたファイルの相対パス）。
+    /// 最終ビルドはエージェントのサンドボックスの外・ユーザー権限で走るため、エージェントがビルド設定を
+    /// 書ける実行器（Codex / Copilot）では、実行してよいかをここで尋ねる。<see langword="null"/> は
+    /// 「確認する手段が無い」で、対象の変更があればビルドせず未検証として完了する。
+    /// </param>
     /// <param name="cancellationToken">キャンセルトークン</param>
     Task<MockProjectGenerationResult> GenerateAsync(
         ErDiagram diagram,
@@ -88,6 +99,7 @@ public interface IMockProjectGenerator
         string model,
         string modelProvider,
         Action<string> onProgress,
+        Func<IReadOnlyList<string>, bool>? confirmBuild = null,
         CancellationToken cancellationToken = default
     );
 
@@ -197,6 +209,7 @@ public sealed class MockProjectGenerator : IMockProjectGenerator
         string model,
         string modelProvider,
         Action<string> onProgress,
+        Func<IReadOnlyList<string>, bool>? confirmBuild = null,
         CancellationToken cancellationToken = default
     )
     {
@@ -223,7 +236,9 @@ public sealed class MockProjectGenerator : IMockProjectGenerator
             _agentFactory(backend),
             _buildRunner,
             _timeout,
-            profile
+            profile,
+            buildTimeout: null,
+            confirmBuild: confirmBuild
         );
         _activeRunner = runner;
 
@@ -247,7 +262,9 @@ public sealed class MockProjectGenerator : IMockProjectGenerator
                 OutputDirectory: outputDirectory,
                 LogPath: result.LogPath,
                 // ユーザー自身の中断（タイムアウトは含めない）を VM へ伝える
-                Interrupted: result.Canceled
+                Interrupted: result.Canceled,
+                // 最終ビルドの確認取り消しも利用者自身の選択＝VM の提示先の選択に使う
+                BuildDeclined: result.BuildDeclined
             );
         }
         finally

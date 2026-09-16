@@ -265,6 +265,13 @@ Generation overwrites the solution, the csproj, README-QuickER.md, Generated/ an
 
 Do you want to continue?</value>
   </data>
+  <data name="Mock_BuildConfirm_Message" xml:space="preserve">
+    <value>Before verifying the generated project, QuickER runs `dotnet build` outside the AI CLI's sandbox, with your own permissions.
+
+The AI wrote the files listed below, which are not UI-layer sources or static assets. If any of them is a build or configuration file (a csproj, global.json, *.csproj.user and the like), the verification build reads it and runs what it says.
+
+Review them, then choose whether to run the verification build. If you cancel, generation finishes with the project left unverified.</value>
+  </data>
   <data name="Mock_GeneratingProject" xml:space="preserve">
     <value>Generating the mock project...</value>
   </data>
@@ -285,6 +292,12 @@ An error occurred during generation: {0}
     <value>{0}
 
 Output folder:
+{1}</value>
+  </data>
+  <data name="Mock_GenResultNotVerifiedBodyFormat" xml:space="preserve">
+    <value>{0}
+
+See the log for details:
 {1}</value>
   </data>
   <data name="Mock_GenResultFailureBodyFormat" xml:space="preserve">
@@ -352,6 +365,13 @@ See the log for details:
     <value>
 == Verifying the final build (dotnet build) ==</value>
   </data>
+  <data name="Mock_Run_BuildBoundaryChanges" xml:space="preserve">
+    <value>
+The AI wrote these files, which are not UI-layer sources or static assets:</value>
+  </data>
+  <data name="Mock_Run_BuildDeclined" xml:space="preserve">
+    <value>The final build was not run because the confirmation was canceled.</value>
+  </data>
   <data name="Mock_Run_BuildSucceeded" xml:space="preserve">
     <value>Final build: succeeded.</value>
   </data>
@@ -397,6 +417,9 @@ See the log for details:
   </data>
   <data name="Mock_Result_BuildFailed" xml:space="preserve">
     <value>The final build failed. The generated files and log remain in the output folder.</value>
+  </data>
+  <data name="Mock_Result_BuildNotVerified" xml:space="preserve">
+    <value>Generation finished, but the project is NOT verified: the final build was skipped because you canceled the confirmation. The generated files and the log remain in the output folder; review them before you build or run the project yourself.</value>
   </data>
   <data name="Mock_Result_Failed" xml:space="preserve">
     <value>Generation failed. Please check the log.</value>

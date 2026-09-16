@@ -28,7 +28,14 @@ public class MockProjectAgentRunnerTests
         public bool Interrupted { get; private set; }
         public bool Available { get; set; } = true;
 
+        /// <summary>
+        /// 最終ビルドが境界越えになると宣言するか（既定 false＝Claude Code / API キー相当）。
+        /// </summary>
+        public bool EscapesSandbox { get; set; }
+
         public bool IsAvailable() => Available;
+
+        public bool FinalBuildEscapesSandbox => EscapesSandbox;
 
         public Task<MockProjectAgentOutcome> RunAsync(
             MockProjectAgentRequest request,

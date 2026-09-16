@@ -46,6 +46,27 @@ public interface IMockProjectAgent
     /// <summary>このエージェント（バックエンド）が利用可能か</summary>
     bool IsAvailable();
 
+    /// <summary>
+    /// 最終ビルドをサンドボックスの外で実行することが、この実行器にとって新しい境界越えになるか。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 最終ビルドは QuickER がユーザー権限で（実行器のサンドボックスの外で）実行する。実行器が自分の
+    /// サンドボックス内で csproj などのビルド設定を書ける場合、そのビルドは実行器に与えられていない
+    /// 権限でその内容を実行することになる＝ここが唯一の境界越えの地点なので、true を宣言した実行器の
+    /// ランでは <see cref="MockProjectAgentRunner"/> がビルド直前に変更を検知して利用者へ確認する。
+    /// </para>
+    /// <para>
+    /// false になるのは次の 2 通り。(a) 実行器自身が任意のコマンドを実行できる（Claude Code の
+    /// 無制限 <c>Bash</c>）＝最終ビルドで新しく越える境界が無い。(b) 実行器がそもそもビルド設定を
+    /// 書けない（API キー方式の拡張子ホワイトリスト）。
+    /// </para>
+    /// <para>
+    /// バックエンド名で分岐させないための宣言であり、ランナーはこの値だけを見る。
+    /// </para>
+    /// </remarks>
+    bool FinalBuildEscapesSandbox { get; }
+
     /// <summary>スキャフォールド済みフォルダに対して UI 層を生成させる</summary>
     /// <param name="request">生成要求（出力フォルダ・プロジェクト名・追加指示・モデル）</param>
     /// <param name="onProgress">進捗テキストの逐次転送先</param>

@@ -83,6 +83,14 @@ public sealed class ApiKeyMockProjectAgent : IMockProjectAgent, IErDiagramToolHo
     public bool IsAvailable() => true;
 
     /// <inheritdoc />
+    /// <remarks>
+    /// 提出できるのは拡張子ホワイトリスト（<see cref="MockProjectEmitTools.ResolveEmitPath"/>）を通った
+    /// UI 層のソースだけで、csproj・<c>global.json</c> のようなビルド設定は構造的に書けない。
+    /// 最終ビルドが実行し得るものをこの実行器は生み出せないので false。
+    /// </remarks>
+    public bool FinalBuildEscapesSandbox => false;
+
+    /// <inheritdoc />
     public async Task<MockProjectAgentOutcome> RunAsync(
         MockProjectAgentRequest request,
         Action<string> onProgress,

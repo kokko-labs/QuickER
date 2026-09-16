@@ -41,6 +41,14 @@ public sealed class CopilotMockProjectAgent : IMockProjectAgent
     public bool IsAvailable() => _client.IsAvailable();
 
     /// <inheritdoc />
+    /// <remarks>
+    /// 自動承認するのは出力フォルダ配下のファイル操作と、パスを伴わない <c>dotnet</c> コマンドだけ
+    /// （<see cref="CopilotWorkspacePermissionPolicy"/>）。出力フォルダの csproj などビルド設定は書ける一方、
+    /// その外でのコマンド実行は承認されない。最終ビルドはその外側で走るので true。
+    /// </remarks>
+    public bool FinalBuildEscapesSandbox => true;
+
+    /// <inheritdoc />
     public async Task<MockProjectAgentOutcome> RunAsync(
         MockProjectAgentRequest request,
         Action<string> onProgress,

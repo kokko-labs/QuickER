@@ -1133,6 +1133,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
                     model,
                     modelProvider,
                     delta => RunOnUi(() => AppendMockGenLog(delta)),
+                    ConfirmVerificationBuild,
                     _mockGenCts.Token
                 )
                 .ConfigureAwait(true);
@@ -1174,6 +1175,22 @@ public partial class MockGenerationDialogViewModel : ObservableObject
                 Strings.Mock_WindowTitle
             );
         }
+        else if (result.BuildDeclined)
+        {
+            // 検証ビルドを実行しなかったのは利用者自身の選択で、失敗が起きたわけではない
+            // （Error アイコンは「すでに発生した失敗の報告」専用＝IDialogService の規約）。
+            // 成果物は残っているので、未検証であることと確認先だけを案内する。
+            _dialogs.ShowInformation(
+                string.Format(
+                    Strings.Mock_GenResultNotVerifiedBodyFormat,
+                    result.Message,
+                    string.IsNullOrWhiteSpace(result.LogPath)
+                        ? result.OutputDirectory
+                        : result.LogPath
+                ),
+                Strings.Mock_WindowTitle
+            );
+        }
         else
         {
             // 失敗はログパス（無ければ出力フォルダ）を添えて詳細確認へ誘導する
@@ -1189,6 +1206,28 @@ public partial class MockGenerationDialogViewModel : ObservableObject
             );
         }
     }
+
+    /// <summary>
+    /// 最終ビルド（検証ビルド）を実行してよいかを、変更されたファイルの一覧つきで確認する。
+    /// </summary>
+    /// <param name="changedPaths">UI 層のソース・静的資産以外で追加・変更されたファイルの相対パス</param>
+    /// <remarks>
+    /// 最終ビルドは AI の CLI のサンドボックスの外・ユーザー権限で走るため、AI が書いたビルド設定を
+    /// そのまま実行し得る。判断材料（何が書かれたか）を全件見せる必要があるので、件数を畳まない
+    /// <see cref="IDialogService.ConfirmWarningDetails"/> を使う。
+    /// <para>
+    /// 呼び出しはランナーのスレッド（UI スレッドではない）から来るため、
+    /// <see cref="IUiDispatcher.Invoke{T}"/> で UI スレッドへ移して待つ。
+    /// </para>
+    /// </remarks>
+    private bool ConfirmVerificationBuild(IReadOnlyList<string> changedPaths) =>
+        _dispatcher.Invoke(() =>
+            _dialogs.ConfirmWarningDetails(
+                Strings.Mock_BuildConfirm_Message,
+                string.Join(Environment.NewLine, changedPaths),
+                Strings.Mock_WindowTitle
+            )
+        );
 
     /// <summary>モックプロジェクト生成の中断起点</summary>
     private CancellationTokenSource? _mockGenCts;

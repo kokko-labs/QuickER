@@ -37,6 +37,9 @@ public class MockGenerationDialogViewModelTests
         /// <summary>返す結果の中断フラグ（true でユーザー中断＝VM は完了ダイアログを出さない）</summary>
         public bool ResultInterrupted { get; set; }
 
+        /// <summary>返す結果の「最終ビルドの確認を取り消した」フラグ（利用者自身の選択＝失敗ではない）</summary>
+        public bool ResultBuildDeclined { get; set; }
+
         public bool Interrupted { get; private set; }
         public int GenerateCallCount { get; private set; }
         public string? CapturedOutputFolder { get; private set; }
@@ -51,6 +54,9 @@ public class MockGenerationDialogViewModelTests
         [MockProjectTarget.Blazor, MockProjectTarget.Wpf];
 
         public MockProjectTarget? CapturedTarget { get; private set; }
+
+        /// <summary>最後に渡された最終ビルドの確認 seam（VM が配線しているかの検証用）</summary>
+        public Func<IReadOnlyList<string>, bool>? CapturedConfirmBuild { get; private set; }
 
         public bool IsAgentAvailable(ErChatBackendKind backend) =>
             backend == ErChatBackendKind.Codex ? CodexAvailable : ClaudeAvailable;
@@ -69,10 +75,12 @@ public class MockGenerationDialogViewModelTests
             string model,
             string modelProvider,
             Action<string> onProgress,
+            Func<IReadOnlyList<string>, bool>? confirmBuild = null,
             CancellationToken cancellationToken = default
         )
         {
             GenerateCallCount++;
+            CapturedConfirmBuild = confirmBuild;
             CapturedOutputFolder = outputDirectory;
             CapturedProjectName = projectName;
             CapturedTarget = target;
@@ -89,7 +97,8 @@ public class MockGenerationDialogViewModelTests
                     ResultSuccess ? "完了しました。" : "失敗しました。",
                     outputDirectory,
                     Path.Combine(outputDirectory, "quickr-mock-generation.log"),
-                    ResultInterrupted
+                    ResultInterrupted,
+                    ResultBuildDeclined
                 )
             );
         }
@@ -1128,6 +1137,53 @@ public class MockGenerationDialogViewModelTests
         }
     }
 
+    /// <summary>
+    /// 最終ビルドの確認 seam が生成器へ配線され、呼ぶと一覧つきの警告確認ダイアログになることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 配線が外れると、ランナー側は「確認する手段が無い」として最終ビルドを見送る（黙って承認はしない）ため、
+    /// 検証ビルドが常に走らなくなる＝生成が静かに未検証で終わる。
+    /// </remarks>
+    [Fact(DisplayName = "最終ビルドの確認 seam を生成器へ配線する")]
+    public async Task GenerateMockProject_WiresBuildConfirmation()
+    {
+        var dialogs = new StubDialogService { ConfirmResult = true };
+        var (vm, engineBox, generator, baseFolder, mockFolder) = CreateVmWithGenerator(
+            NonEmptyDiagram(),
+            dialogs
+        );
+
+        try
+        {
+            await vm.RefreshMockGenAvailabilityAsync();
+            await SaveScreenOnClaudeCode(vm, engineBox, mockFolder);
+            vm.OutputFolder = Path.Combine(baseFolder, "out");
+            vm.ProjectName = "AcmeMock";
+
+            await vm.GenerateMockProjectCommand.ExecuteAsync(null);
+
+            generator.CapturedConfirmBuild.Should().NotBeNull();
+
+            // 確認を実際に呼ぶと、警告確認ダイアログへ「一覧を畳まない詳細」として渡る
+            generator
+                .CapturedConfirmBuild!(["global.json", "AcmeMock/AcmeMock.csproj.user"])
+                .Should()
+                .BeTrue();
+
+            var (message, details, _) = dialogs.WarningConfirmDetailsMessages[^1];
+            message.Should().Be(MockStrings.Mock_BuildConfirm_Message);
+            details.Should().Contain("global.json").And.Contain("AcmeMock.csproj.user");
+
+            // 取り消しはそのまま false として返る
+            dialogs.ConfirmResult = false;
+            generator.CapturedConfirmBuild!(["global.json"]).Should().BeFalse();
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
     /// <summary>生成実行で状態遷移・進捗転送・成功時のフォルダ表示が起きることを検証する</summary>
     [Fact(DisplayName = "生成実行で進捗転送・成功でフォルダ表示")]
     public async Task GenerateMockProject_TransitionsAndForwardsProgress()
@@ -1452,6 +1508,48 @@ public class MockGenerationDialogViewModelTests
                 .Which.Should()
                 .Contain("quickr-mock-generation.log");
             dialogs.InformationMessages.Should().BeEmpty();
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>
+    /// 最終ビルドの確認を取り消して終わったときは、エラーではなく情報ダイアログで案内することを検証する。
+    /// </summary>
+    /// <remarks>
+    /// ビルドを実行しなかったのは利用者自身の選択で、失敗が起きたわけではない。
+    /// Error アイコンは「すでに発生した失敗の報告」専用（<c>IDialogService</c> の規約）なので、
+    /// 未検証で終わったことと確認先（ログ）を情報として案内する。
+    /// </remarks>
+    [Fact(DisplayName = "検証ビルドの取り消しはエラーでなく情報で案内する")]
+    public async Task GenerateMockProject_BuildDeclined_ShowsInformationDialog()
+    {
+        var dialogs = new StubDialogService();
+        var (vm, engineBox, generator, baseFolder, mockFolder) = CreateVmWithGenerator(
+            NonEmptyDiagram(),
+            dialogs
+        );
+
+        try
+        {
+            // 未検証で完了＝Success は false だが、原因は利用者自身の取り消し
+            generator.ResultSuccess = false;
+            generator.ResultBuildDeclined = true;
+            await vm.RefreshMockGenAvailabilityAsync();
+            await SaveScreenOnClaudeCode(vm, engineBox, mockFolder);
+            vm.OutputFolder = Path.Combine(baseFolder, "out");
+            vm.ProjectName = "AcmeMock";
+
+            await vm.GenerateMockProjectCommand.ExecuteAsync(null);
+
+            dialogs.ErrorMessages.Should().BeEmpty();
+            dialogs
+                .InformationMessages.Should()
+                .ContainSingle()
+                .Which.Should()
+                .Contain("quickr-mock-generation.log");
         }
         finally
         {
