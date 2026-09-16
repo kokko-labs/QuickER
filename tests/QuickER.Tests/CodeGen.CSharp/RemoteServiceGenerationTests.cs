@@ -90,6 +90,54 @@ public class RemoteServiceGenerationTests
     private static string FormatDiagnostics(CodeGenerationResult result) =>
         string.Join(" / ", result.Diagnostics.Select(d => $"{d.Severity}: {d.Message}"));
 
+    /// <summary>
+    /// 出力ファイル名が <c>.g.cs</c> で終わらなくても、サーバー実装は正規化後の本体名と対になり、
+    /// API リファレンスの生成ファイル構成表も同じ名前を載せることを検証する（単一方言・マルチ方言の両レイアウト）
+    /// </summary>
+    [Theory(
+        DisplayName = "出力ファイル名の正規化はサーバー実装名と API リファレンスの構成表にも効く"
+    )]
+    [InlineData("Shop.cs", "Shop", false)]
+    [InlineData("Shop", "Shop", false)]
+    [InlineData("  Shop.cs  ", "Shop", false)]
+    [InlineData("Shop.G.CS", "Shop", false)]
+    [InlineData("Shop.cs", "Shop", true)]
+    public void Generate_NonGeneratedSuffixOutputFileName_ServerFileNameFollowsNormalizedMain(
+        string outputFileName,
+        string expectedBaseName,
+        bool multiDialect
+    )
+    {
+        var result = Generate(
+            CreateDiagram(),
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Test.Ns",
+                OutputFileName = outputFileName,
+                GenerateRepositories = true,
+                GenerateRemoteServices = true,
+                RepositoryDialects = multiDialect ? ["sqlserver", "sqlite"] : ["sqlserver"],
+                GenerateApiDocs = true,
+            }
+        );
+
+        result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
+
+        // 大文字小文字違いの .g.cs は正規化で書き換えないため、本体名は入力どおり（前後空白のみ除去）
+        var mainName = outputFileName.Trim().EndsWith(".g.cs", StringComparison.OrdinalIgnoreCase)
+            ? outputFileName.Trim()
+            : expectedBaseName + ".g.cs";
+        result
+            .Files.Select(f => f.FileName)
+            .Should()
+            .Equal(mainName, expectedBaseName + ".RemoteServer.g.cs", expectedBaseName + ".g.md");
+
+        // 構成表は正規化前の名前（Shop.cs 等）を載せず、実際に書き出す名前を載せる
+        var doc = result.Files.Single(f => f.FileName.EndsWith(".g.md")).Content;
+        doc.Should().Contain(mainName).And.Contain(expectedBaseName + ".RemoteServer.g.cs");
+        doc.Should().NotContain(expectedBaseName + ".cs");
+    }
+
     /// <summary>ON: サーバー実装が別ファイルへ出力され、本体にクライアント実装が同梱されることを検証する</summary>
     [Fact(DisplayName = "ON: 本体＋{ベース名}.RemoteServer.g.cs の 2 ファイルが出力される")]
     public void Generate_RemoteServices_EmitsClientInMainAndServerInSeparateFile()

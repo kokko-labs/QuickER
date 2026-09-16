@@ -482,6 +482,9 @@ public static class GeneratedFilePlanner
 
         if (!options.EffectiveSplitFilesByCategory)
         {
+            // 非分割のファイル名はすべてこの正規化済みの名前から作る（本体とサーバー実装の名前がずれない唯一の正）
+            var outputFileName = NormalizeOutputFileName(options.OutputFileName);
+
             // 非分割: 全バケットを 1 ファイルへ。マルチ方言時は Repository を「契約スペック＋方言別実装スペック」へ
             // 展開し、同一ファイル名で連結する（RenderFiles が block namespace で連結・using を先頭へ集約）。
             if (!repositoryMultiDialectInlineLayout)
@@ -490,7 +493,7 @@ public static class GeneratedFilePlanner
                 {
                     new()
                     {
-                        FileName = options.OutputFileName,
+                        FileName = outputFileName,
                         NamespaceName = ResolveRootNamespace(options),
                         Buckets = active,
                         CrossNamespaceUsings = [],
@@ -513,7 +516,7 @@ public static class GeneratedFilePlanner
             specs.Add(
                 new GeneratedFileSpec
                 {
-                    FileName = options.OutputFileName,
+                    FileName = outputFileName,
                     NamespaceName = root,
                     Buckets = active,
                     CrossNamespaceUsings = [],
@@ -530,7 +533,7 @@ public static class GeneratedFilePlanner
                 specs.Add(
                     BuildDialectRepositorySpec(
                         options,
-                        options.OutputFileName,
+                        outputFileName,
                         repositoryNamespace,
                         dialect,
                         root
@@ -912,8 +915,32 @@ public static class GeneratedFilePlanner
             : fileName;
 
     /// <summary>非分割時のサーバー実装ファイル名（例: <c>MyApp.g.cs</c> → <c>MyApp.RemoteServer.g.cs</c>）</summary>
+    /// <remarks>
+    /// 本体と同じ正規化（<see cref="NormalizeOutputFileName"/>）を先に通すため、<c>MyApp.cs</c> / <c>MyApp</c> を
+    /// 渡しても本体 <c>MyApp.g.cs</c> と対になる <c>MyApp.RemoteServer.g.cs</c> になる。
+    /// </remarks>
     public static string RemoteServerFileName(string outputFileName) =>
-        $"{StripGeneratedCSharpSuffix(outputFileName)}.RemoteServer{GeneratedCSharpSuffix}";
+        $"{StripGeneratedCSharpSuffix(NormalizeOutputFileName(outputFileName))}.RemoteServer{GeneratedCSharpSuffix}";
+
+    /// <summary>出力ファイル名が空白のときに使う既定名</summary>
+    internal const string DefaultOutputFileName = "QuickEREntities.g.cs";
+
+    /// <summary>
+    /// 非分割時の出力ファイル名を <c>.g.cs</c> 拡張子へ正規化する
+    /// </summary>
+    /// <remarks>
+    /// <see cref="GeneratedFileWriter"/> が <c>.g.cs</c> 以外の上書きを拒否するため、空白なら既定名、
+    /// <c>.g.cs</c> で終わらなければ拡張子を 1 つ外して <c>.g.cs</c> を付ける（例: <c>MyApp.cs</c> → <c>MyApp.g.cs</c>）。
+    /// 本体・サーバー実装・API リファレンスのベース名はすべてこの結果から作る。
+    /// </remarks>
+    internal static string NormalizeOutputFileName(string? fileName)
+    {
+        var value = string.IsNullOrWhiteSpace(fileName) ? DefaultOutputFileName : fileName.Trim();
+
+        return value.EndsWith(GeneratedCSharpSuffix, StringComparison.OrdinalIgnoreCase)
+            ? value
+            : Path.GetFileNameWithoutExtension(value) + GeneratedCSharpSuffix;
+    }
 
     /// <summary>
     /// リモートサービス生成（<see cref="CodeGenerationOptions.GenerateRemoteServices"/>）時に、サーバー実装の

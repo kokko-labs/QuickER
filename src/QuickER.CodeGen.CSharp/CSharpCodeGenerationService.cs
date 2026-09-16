@@ -412,7 +412,7 @@ public sealed class CSharpCodeGenerationService
     {
         var files = new List<GeneratedFile>();
 
-        foreach (var group in specs.GroupBy(spec => SanitizeFileName(spec.FileName)))
+        foreach (var group in specs.GroupBy(spec => spec.FileName))
         {
             var members = group.ToList();
 
@@ -1498,24 +1498,6 @@ public sealed class CSharpCodeGenerationService
         );
     }
 
-    /// <summary>
-    /// 出力ファイル名を ".g.cs" 拡張子に正規化する
-    /// </summary>
-    /// <remarks>
-    /// <see cref="GeneratedFileWriter"/> が ".g.cs" 以外の上書きを拒否するため、
-    /// 空白なら既定名、それ以外は拡張子を ".g.cs" に置き換えて手書きファイルの誤上書きを防ぐ
-    /// </remarks>
-    private static string SanitizeFileName(string fileName)
-    {
-        var value = string.IsNullOrWhiteSpace(fileName) ? "QuickEREntities.g.cs" : fileName.Trim();
-        return value.EndsWith(
-            GeneratedFilePlanner.GeneratedCSharpSuffix,
-            StringComparison.OrdinalIgnoreCase
-        )
-            ? value
-            : Path.GetFileNameWithoutExtension(value) + GeneratedFilePlanner.GeneratedCSharpSuffix;
-    }
-
     /// <summary>分割出力時の API リファレンス Markdown の固定ベース名（カテゴリ別固定名の流儀に合わせる）</summary>
     private const string SplitApiDocsBaseName = "ApiDocs";
 
@@ -1543,7 +1525,7 @@ public sealed class CSharpCodeGenerationService
     /// </summary>
     /// <remarks>
     /// <see cref="CodeGenerationOptions.ApiDocsFileName"/> の指定があればそれ（拡張子は ".g.md" へ正規化）を
-    /// 出力モードに依らず優先する。空白なら既定の導出で、非分割時は <see cref="SanitizeFileName"/> で
+    /// 出力モードに依らず優先する。空白なら既定の導出で、非分割時は <see cref="GeneratedFilePlanner.NormalizeOutputFileName"/> で
     /// ".g.cs" に正規化した <see cref="CodeGenerationOptions.OutputFileName"/> の
     /// 末尾を ".g.md" に置換する（例: <c>EcOrder.g.cs</c> → <c>EcOrder.g.md</c>＝生成コードと同じベース名・拡張子で
     /// ドキュメントと判別する）。分割時（<see cref="CodeGenerationOptions.SplitFilesByCategory"/>）は <c>Entities.g.cs</c> 等の
@@ -1587,7 +1569,7 @@ public sealed class CSharpCodeGenerationService
         }
 
         return GeneratedFilePlanner.StripGeneratedCSharpSuffix(
-            SanitizeFileName(options.OutputFileName)
+            GeneratedFilePlanner.NormalizeOutputFileName(options.OutputFileName)
         );
     }
 
