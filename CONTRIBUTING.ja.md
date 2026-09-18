@@ -34,7 +34,12 @@ QuickER は個人開発の OSS です。Issue・Pull Request を歓迎します�
   $env:QUICKER_REGEN_FIXTURES=1; dotnet test tests/QuickER.Tests/QuickER.Tests.csproj --filter "FullyQualifiedName~Drift"; $env:QUICKER_REGEN_FIXTURES=$null
   ```
 
-- 利用者に影響する変更は CHANGELOG の Unreleased 欄へ追記してください——[CHANGELOG.md](CHANGELOG.md)（英語）と [CHANGELOG.ja.md](CHANGELOG.ja.md)（日本語）の**両方**。粒度は「利用者から見た 1 変更」（おおむね機能ブランチ 1 本）で 1 エントリとし、該当する見出し（`### Added` / `### Changed` / `### Fixed` / `### Removed`）の下へ置きます（見出しが無ければ作成）。太字要約の先頭には変更が届く相手を付けます——アプリ自身の挙動（GUI・CLI・DB 取込/同期・MCP サーバ）なら `アプリ — `、生成コード・ランタイムパッケージの変更（読者側で再生成や追随作業が要り得るもの）なら `生成コード — `、本当に両方へ跨るときだけ `アプリ・生成コード — `（英語ファイルは `App — ` / `Generated code — ` / `App & generated code — `）。内部リファクタリング・テストのみの変更は不要なため、この欄が空のままになることもあります（想定内です）
+- 利用者に影響する変更は CHANGELOG の Unreleased 欄へ追記してください——[CHANGELOG.md](CHANGELOG.md)（英語）と [CHANGELOG.ja.md](CHANGELOG.ja.md)（日本語）の**両方**です。内部リファクタリング・テストのみの変更は不要なため、この欄が空のままになることもあります（想定内です）。書き方は次のとおりです
+  - **見出し**: 種類の見出し（`### Breaking changes` / `### Added` / `### Changed` / `### Security` / `### Fixed` / `### Removed`。見出しは日本語版も英語のまま）の下を、分野の小見出し（`#### 図の編集・ファイル` / `#### DB 取込` / `#### DB 同期・DDL` / `#### C# コード取込` / `#### コード生成ダイアログ` / `#### 生成コード` / `#### 双方向同期` / `#### AI チャット・モック生成` / `#### CLI・MCP` / `#### 配布・設定` / `#### ライセンス` など）で分けます。無ければ作成します
+  - **1 エントリの長さ**: 太字の要約と、1〜3 文の本文です。本文に書くのは「何が変わったか」と「利用者が何をすればよいか」だけで、理由や内部の仕組みは docs（利用者向け）か CLAUDE.md（開発者向け）へ書き、必要ならリンクします
+  - **破壊的変更**: `### Breaking changes` にだけ書き（他の節へ重ねて書かない）、移行手順を 1〜2 文で添えます
+  - **まとめ方**: 同じ話題の変更は既存のエントリへ統合します。Unreleased の期間中に入れた機能をその期間中に直した場合は、利用者はその不具合を見ていないのでエントリにしません
+  - **要点**: リリース時、欄の先頭に 3〜5 行の要点を置きます
 
 アーキテクチャと「壊すと静かに回帰する不変条件」は [CLAUDE.md](CLAUDE.md) にまとまっています。
 
