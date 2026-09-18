@@ -1637,4 +1637,4 @@ Markdown は既定で出力ディレクトリ直下に出ます。`--api-docs-su
 
 ## ライセンス注記
 
-コード生成エンジン（`QuickER.CodeGen.CSharp` / `CodeGen.UI` / `Cli`）には [PolyForm Noncommercial 1.0.0](../LICENSE-NC.md) **＋追加許諾**が適用されます。この追加許諾により、**現行リリースは商用利用を含め全員無料**です。提供方針（基本生成＝Entity / EditModel / Mapper を含む恒久無料の許諾と将来の有償化の可能性）は[ライセンスガイド](../LICENSING.ja.md)を参照してください。**生成されたコードとランタイムパッケージ（MIT）はあなたの成果物側**です。[LICENSE-NC.md](../LICENSE-NC.md) は生成物の利用・改変・配布・販売について、目的を問わず恒久的で取消不能な許諾を全員に与えており、クレジット表記も不要です。
+コード生成エンジン（`QuickER.CodeGen.CSharp` / `CodeGen.UI` / `Cli`）には [PolyForm Noncommercial 1.0.0](../LICENSE-NC.md) **＋追加許諾**が適用されます。この追加許諾により、**現行リリースは商用利用を含め全員無料**です。提供方針（将来の有償化の可能性を含む）は[ライセンスガイド](../LICENSING.ja.md)を参照してください。**生成されたコードとランタイムパッケージ（MIT）はあなたの成果物側**です。[LICENSE-NC.md](../LICENSE-NC.md) は生成物の利用・改変・配布・販売について、目的を問わず恒久的で取消不能な許諾を全員に与えており、クレジット表記も不要です。
