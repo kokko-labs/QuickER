@@ -10,7 +10,7 @@ This page explains QuickER's license structure in plain language, with examples.
 - Thanks to those grants, the **current releases are free for everyone, including commercial use**.
 - **Code that QuickER generates is yours** — no restrictions, no attribution required.
 - What the grants do **not** cover: commercially **modifying** the NC-covered source code, or **redistributing** modified versions.
-- Future versions may introduce paid licensing for some features; four standing commitments limit what can change (see [The future](#the-future)).
+- Future versions may introduce paid licensing for some features; three standing commitments limit what can change (see [The future](#the-future)).
 
 ## Which license applies where
 
@@ -55,12 +55,11 @@ Everything QuickER produces from your diagrams — C# code (including the inline
 
 ## The future
 
-Future versions may introduce paid licensing for some features (for example, separately licensed Pro features). Whatever changes, four commitments stand:
+Future versions may introduce paid licensing for some features (for example, separately licensed Pro features). Any feature of the NC-covered projects may be affected, including the C# code generation and the AI features. Whatever changes, three commitments stand:
 
-1. The basic generation of Entity / EditModel / Mapper remains free permanently, including commercial use.
-2. Personal and non-commercial use of the existing features remains free.
-3. Rights granted for a released version are never withdrawn retroactively — the version you already use keeps its grants forever.
-4. Any move to paid licensing will be announced in advance, with a transition period for existing users.
+1. Personal and non-commercial use of the existing features remains free.
+2. Rights granted for a released version are never withdrawn retroactively — the version you already use keeps its grants forever.
+3. Any move to paid licensing will be announced in advance, with a transition period for existing users.
 
 ## FAQ
 

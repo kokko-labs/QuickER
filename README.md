@@ -425,7 +425,6 @@ The current releases are free for everyone, including commercial use of the offi
 
 Future versions may introduce paid licensing for some features (for example, separately licensed Pro features). Whatever changes, the following commitments stand:
 
-- The basic generation of Entity / EditModel / Mapper remains free permanently, including commercial use.
 - Personal and non-commercial use of the existing features remains free.
 - Rights granted for a released version are never withdrawn retroactively.
 - Any move to paid licensing will be announced in advance, with a transition period for existing users.
