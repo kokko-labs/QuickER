@@ -252,7 +252,10 @@ public sealed class LayeredOutputTests
             .OnlyContain(file => file.RelativeDirectory == null);
     }
 
-    /// <summary>namespace 宣言と using 行を取り除く（層分け ON/OFF のコード本体一致を比較するため）</summary>
+    /// <summary>
+    /// namespace 宣言・using 行と、それらを含む本文から計算される内容ハッシュの行を取り除く
+    /// （層分け ON/OFF のコード本体一致を比較するため）
+    /// </summary>
     private static string StripNamespaceLines(string content) =>
         string.Join(
             '\n',
@@ -261,6 +264,10 @@ public sealed class LayeredOutputTests
                 .Where(line =>
                     !line.TrimStart().StartsWith("using ", StringComparison.Ordinal)
                     && !line.TrimStart().StartsWith("namespace ", StringComparison.Ordinal)
+                    && !line.StartsWith(
+                        GeneratedContentHash.HashLinePrefix,
+                        StringComparison.Ordinal
+                    )
                 )
         );
 

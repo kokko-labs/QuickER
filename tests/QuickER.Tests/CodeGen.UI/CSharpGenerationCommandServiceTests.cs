@@ -227,6 +227,89 @@ public class CSharpGenerationCommandServiceTests
         dialogs.ErrorDetailsMessages.Should().BeEmpty();
     }
 
+    /// <summary>1 ファイル出力の生成を 1 回実行し、書き出したファイルのパスを返す（上書き確認テストの前準備）</summary>
+    private static (CSharpGenerationCommandService Service, string GeneratedPath) GenerateOnce(
+        StubDialogService dialogs,
+        string outputDirectory
+    )
+    {
+        var host = new StubErDiagramHost
+        {
+            DiagramToReturn = DiagramWithEntity(),
+            ProvidersToReturn = SqlServerRegistry(),
+        };
+        var presenter = new FakeCSharpPresenter(
+            new CSharpGenerationDialogResult(
+                new CodeGenerationOptions
+                {
+                    RootNamespace = "Sample.Domain",
+                    OutputFileName = "Sample.g.cs",
+                },
+                outputDirectory
+            )
+        );
+        var service = new CSharpGenerationCommandService(host, dialogs, presenter);
+
+        service.Run();
+
+        return (service, Path.Combine(outputDirectory, "Sample.g.cs"));
+    }
+
+    [Fact(
+        DisplayName = "上書き確認: 手で編集された生成ファイルがあれば一覧を示し、キャンセルなら何も書かない"
+    )]
+    public void Run_EditedFileAndCancel_KeepsEditsAndShowsNothingElse()
+    {
+        using var output = new TempOutputDirectory();
+        var dialogs = new StubDialogService();
+        var (service, generatedPath) = GenerateOnce(dialogs, output.Path);
+        var edited = File.ReadAllText(generatedPath) + "// hand-written\r\n";
+        File.WriteAllText(generatedPath, edited);
+        dialogs.InformationDetailsMessages.Clear();
+        dialogs.ConfirmResult = false;
+
+        service.Run();
+
+        var confirm = dialogs.WarningConfirmDetailsMessages.Should().ContainSingle().Subject;
+        confirm.Message.Should().Be(CodeGenStrings.Csharp_ModifiedFilesIntro);
+        confirm.Title.Should().Be(CodeGenStrings.Csharp_ModifiedFilesTitle);
+        confirm.Details.Should().Be(generatedPath);
+        File.ReadAllText(generatedPath).Should().Be(edited, "キャンセルでは上書きしない");
+        dialogs.InformationDetailsMessages.Should().BeEmpty("完了の通知も出さない");
+        dialogs.ErrorMessages.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "上書き確認: OK を選ぶと編集済みファイルを上書きして完了を通知する")]
+    public void Run_EditedFileAndConfirm_Overwrites()
+    {
+        using var output = new TempOutputDirectory();
+        var dialogs = new StubDialogService();
+        var (service, generatedPath) = GenerateOnce(dialogs, output.Path);
+        var original = File.ReadAllText(generatedPath);
+        File.WriteAllText(generatedPath, original + "// hand-written\r\n");
+        dialogs.InformationDetailsMessages.Clear();
+
+        service.Run();
+
+        dialogs.WarningConfirmDetailsMessages.Should().ContainSingle();
+        File.ReadAllText(generatedPath).Should().Be(original);
+        dialogs.InformationDetailsMessages.Should().ContainSingle();
+    }
+
+    [Fact(DisplayName = "上書き確認: 編集されていなければ確認を出さずに再生成する")]
+    public void Run_UneditedFile_RegeneratesWithoutConfirmation()
+    {
+        using var output = new TempOutputDirectory();
+        var dialogs = new StubDialogService();
+        var (service, _) = GenerateOnce(dialogs, output.Path);
+        dialogs.InformationDetailsMessages.Clear();
+
+        service.Run();
+
+        dialogs.WarningConfirmDetailsMessages.Should().BeEmpty();
+        dialogs.InformationDetailsMessages.Should().ContainSingle();
+    }
+
     /// <summary>指定した確定結果を返し、渡されたプロバイダを記録するダイアログ提示フェイク</summary>
     private sealed class FakeCSharpPresenter(CSharpGenerationDialogResult? result)
         : ICSharpGenerationDialogPresenter

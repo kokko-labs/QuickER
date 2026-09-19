@@ -32,8 +32,11 @@ quicker generate --schema diagram.json --out ./Generated --provider sqlserver --
 | `--out <dir>` | ✅ | 生成コードの出力先フォルダ |
 | `--provider <name>` | | 対象データベースの種類。`sqlserver`（既定）/ `postgresql` / `mysql` / `oracle` / `sqlite` |
 | `--config <file>` | | 生成オプション設定ファイル（quicker.json）。下記参照 |
+| `--force` | | 生成後に手で編集された生成ファイルがあっても上書きする |
 
 これらに加えて、**設定ファイル（quicker.json）の全キーは同名の kebab-case フラグとして指定でき**、設定ファイルより優先されます（優先順位: **CLI フラグ ＞ 設定ファイル ＞ 既定値**）。フラグ名はキーの機械的な kebab-case 変換で、例えば `rootNamespace` → `--root-namespace`、`generateRepositories` → `--generate-repositories`、`splitFilesByCategory` → `--split-files-by-category`、`outputPath` → `--output-path` です。ただし機械的変換の例外があります。API リファレンス関連の 3 キーと生成コードのサブフォルダは短い綴りで、`ApiDocsLanguage` → `--api-docs-lang`・`ApiDocsSubdirectory` → `--api-docs-subdir`・`ApiDocsFileName` → `--api-docs-file`・`CodeSubdirectory` → `--code-subdir` です。また正準キー `OutputFileName` には専用フラグがなく `--output-path`（そのファイル名部分のみが使われる）を使います。bool キーは**三値**で、`--flag`（値なし）＝ `true`、`--flag false` ＝ `false`、未指定＝設定ファイルの値になります。各キーの意味は下記「設定ファイル」の表を参照してください（`--repository-dialects` はカンマ区切りの方言リストで、未指定時は `--provider` の方言から単一導出します）。
+
+置き換え対象の `.g.cs` が生成後に手で編集されていると、`generate` は何も書かず、編集されたファイルの一覧を標準エラーへ出して終了コード `2` で終わります（その他の失敗は `1`）。編集内容を `partial` クラスなどの別ファイルへ移すか、破棄してよければ `--force` を付けて再実行してください。何を編集とみなすかは[生成ファイルのヘッダー](code-generation.ja.md#生成ファイルのヘッダー)を参照してください。
 
 ## quicker scaffold
 
@@ -47,7 +50,7 @@ quicker scaffold --connection "Server=.;Database=Shop;Integrated Security=true;T
 |---|:-:|---|
 | `--connection <string>` | ✅ | 接続文字列（形式は `--provider` の DBMS に従う） |
 
-そのほかのオプション（`--out` / `--config` / `--provider`、および設定キーと同名の kebab-case フラグ群）は `generate` と同じです。
+そのほかのオプション（`--out` / `--config` / `--provider` / `--force`、および設定キーと同名の kebab-case フラグ群）は `generate` と同じです。
 
 ## quicker reverse
 

@@ -84,6 +84,12 @@ namespace QuickER.Cli.Resources {
             }
         }
 
+        public static string Cli_Opt_Force {
+            get {
+                return ResourceManager.GetString("Cli_Opt_Force", resourceCulture);
+            }
+        }
+
         public static string Cli_Cmd_Generate {
             get {
                 return ResourceManager.GetString("Cli_Cmd_Generate", resourceCulture);
@@ -405,6 +411,18 @@ namespace QuickER.Cli.Resources {
         public static string Cli_GenerationAborted {
             get {
                 return ResourceManager.GetString("Cli_GenerationAborted", resourceCulture);
+            }
+        }
+
+        public static string Cli_ModifiedFilesDetected {
+            get {
+                return ResourceManager.GetString("Cli_ModifiedFilesDetected", resourceCulture);
+            }
+        }
+
+        public static string Cli_ModifiedFilesForceHint {
+            get {
+                return ResourceManager.GetString("Cli_ModifiedFilesForceHint", resourceCulture);
             }
         }
 

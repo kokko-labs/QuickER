@@ -104,6 +104,7 @@ public static class CliApp
             Required = true,
         };
         var config = new Option<FileInfo>("--config") { Description = Strings.Cli_Opt_Config };
+        var force = ForceOption();
         var provider = ProviderOption();
         var generation = new GenerationOptionSet();
 
@@ -112,6 +113,7 @@ public static class CliApp
             schema,
             output,
             config,
+            force,
             provider,
         };
 
@@ -129,6 +131,7 @@ public static class CliApp
                     parseResult.GetValue(provider)!,
                     parseResult,
                     generation,
+                    parseResult.GetValue(force),
                     stdout,
                     stderr,
                     cancellationToken
@@ -145,6 +148,7 @@ public static class CliApp
         string providerName,
         ParseResult parseResult,
         GenerationOptionSet generation,
+        bool force,
         TextWriter stdout,
         TextWriter stderr,
         CancellationToken cancellationToken
@@ -163,6 +167,7 @@ public static class CliApp
             config,
             parseResult,
             generation,
+            force,
             stdout,
             stderr,
             // generate の図取得は同期（JSON 読込）。プロバイダは使わないため受け取るだけ
@@ -254,6 +259,7 @@ public static class CliApp
             Description = Strings.Cli_Opt_CommandTimeout,
             DefaultValueFactory = _ => DbCommands.DefaultTimeoutSeconds,
         };
+        var force = ForceOption();
         var provider = ProviderOption();
         var generation = new GenerationOptionSet();
 
@@ -263,6 +269,7 @@ public static class CliApp
             output,
             config,
             commandTimeout,
+            force,
             provider,
         };
 
@@ -281,6 +288,7 @@ public static class CliApp
                     parseResult.GetValue(provider)!,
                     parseResult,
                     generation,
+                    parseResult.GetValue(force),
                     stdout,
                     stderr,
                     cancellationToken
@@ -298,6 +306,7 @@ public static class CliApp
         string providerName,
         ParseResult parseResult,
         GenerationOptionSet generation,
+        bool force,
         TextWriter stdout,
         TextWriter stderr,
         CancellationToken cancellationToken
@@ -308,6 +317,7 @@ public static class CliApp
             config,
             parseResult,
             generation,
+            force,
             stdout,
             stderr,
             (provider, ct) =>
@@ -565,4 +575,11 @@ public static class CliApp
             Description = Strings.Cli_Opt_Provider,
             DefaultValueFactory = _ => SqlServerProvider.ProviderName,
         };
+
+    /// <summary>
+    /// 生成後に手で編集された生成ファイルも上書きする <c>--force</c>（generate / scaffold が共有する）。
+    /// 付けないときは、編集済みのファイルが 1 つでもあれば何も書かずに止める
+    /// </summary>
+    private static Option<bool> ForceOption() =>
+        new("--force") { Description = Strings.Cli_Opt_Force };
 }

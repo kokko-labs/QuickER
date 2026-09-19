@@ -73,6 +73,9 @@
   <data name="Cli_Opt_Config" xml:space="preserve">
     <value>Generation option settings file (quicker.json)</value>
   </data>
+  <data name="Cli_Opt_Force" xml:space="preserve">
+    <value>Overwrite generated files even if they have been edited by hand since they were generated</value>
+  </data>
   <data name="Cli_Cmd_Generate" xml:space="preserve">
     <value>Generate C# code from an ER diagram JSON</value>
   </data>
@@ -246,6 +249,12 @@
   </data>
   <data name="Cli_GenerationAborted" xml:space="preserve">
     <value>Aborted due to a generation error.</value>
+  </data>
+  <data name="Cli_ModifiedFilesDetected" xml:space="preserve">
+    <value>Nothing was written. The following generated files have been edited by hand since they were generated:</value>
+  </data>
+  <data name="Cli_ModifiedFilesForceHint" xml:space="preserve">
+    <value>To keep your changes, move them into a separate file (for example, a partial class) first. To overwrite the edited files, run again with --force.</value>
   </data>
   <data name="Cli_GeneratedFile" xml:space="preserve">
     <value>Generated: {0}</value>

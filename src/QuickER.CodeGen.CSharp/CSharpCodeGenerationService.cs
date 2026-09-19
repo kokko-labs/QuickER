@@ -323,6 +323,18 @@ public sealed class CSharpCodeGenerationService
         var specs = GeneratedFilePlanner.Plan(options);
         var files = RenderFiles(model, options, specs, packageGuidanceLines);
 
+        // 全 .g.cs のヘッダーへ生成元の版と内容ハッシュを刻む（再生成時の手編集検出に使う）。
+        // 刻むのは描画・連結がすべて済んだ後の 1 箇所だけ＝ハッシュが最終的に書き出す本文と必ず一致する
+        var generatorVersion = RuntimePackages.ResolveGuidanceVersion();
+        files = files
+            .Select(file => new GeneratedFile
+            {
+                FileName = file.FileName,
+                RelativeDirectory = file.RelativeDirectory,
+                Content = GeneratedContentHash.Stamp(file.Content, generatorVersion),
+            })
+            .ToList();
+
         // API リファレンス Markdown（既定 OFF）。ON のとき、その図のスキーマに即した .g.md / .ja.g.md を
         // ApiDocsLanguage が指す言語の分だけ追加する（英語→日本語の順）。
         // ここは検証エラーで早期 return した後の経路のため、Files が空になる場合は Markdown も出ない（自然に乗る）。

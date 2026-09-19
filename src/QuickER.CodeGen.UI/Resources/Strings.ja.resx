@@ -504,6 +504,14 @@
   <data name="Csharp_WarningTitle" xml:space="preserve">
     <value>C# 生成の警告</value>
   </data>
+  <data name="Csharp_ModifiedFilesIntro" xml:space="preserve">
+    <value>次の生成ファイルは、生成後に手で編集されています。このまま生成すると、編集内容は上書きされて失われます。
+
+変更を残す場合は、キャンセルして別のファイル（partial クラスなど）へ移してから生成してください。上書きしますか？</value>
+  </data>
+  <data name="Csharp_ModifiedFilesTitle" xml:space="preserve">
+    <value>編集済みの生成ファイルの上書き</value>
+  </data>
   <data name="Csharp_GeneratedSuccess" xml:space="preserve">
     <value>C# コードの生成が完了しました。</value>
   </data>
