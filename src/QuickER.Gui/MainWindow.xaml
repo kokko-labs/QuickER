@@ -881,6 +881,7 @@
         <!--
           設定: クリックで ContextMenu を開く。言語切替（サブメニュー）は選択で設定を保存し、
           再起動反映方式のため「再起動後に反映」を通知する。更新確認トグルは次回起動から効く。
+          末尾の「バージョン情報」はダイアログを開くだけで設定は持たない。
           キャプション・ツールチップは resx 参照。
           ContextMenu は配置対象の DataContext（MainViewModel）を引き継いでチェック状態を束縛する。
         -->
@@ -924,6 +925,12 @@
                 Header="{x:Static resources:Strings.Settings_CheckUpdatesOnStartup}"
                 IsCheckable="True"
                 IsChecked="{Binding UpdateSettings.IsCheckOnStartupEnabled, Mode=TwoWay}"
+              />
+              <Separator />
+              <!-- バージョン情報（版・実行環境・著作権・リポジトリを示すダイアログ） -->
+              <MenuItem
+                Header="{x:Static resources:Strings.About_MenuItem}"
+                Command="{Binding ShowAboutCommand}"
               />
             </ContextMenu>
           </Button.ContextMenu>

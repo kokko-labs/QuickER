@@ -137,7 +137,7 @@ namespace QuickER.Resources {
         }
 
         /// <summary>
-        ///   Application settings (display language, update check) に類似しているローカライズされた文字列を検索します。
+        ///   Application settings (display language, update check, version info) に類似しているローカライズされた文字列を検索します。
         /// </summary>
         public static string Settings_Tooltip {
             get {
@@ -151,6 +151,87 @@ namespace QuickER.Resources {
         public static string Settings_CheckUpdatesOnStartup {
             get {
                 return ResourceManager.GetString("Settings_CheckUpdatesOnStartup", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   About QuickER に類似しているローカライズされた文字列を検索します。
+        /// </summary>
+        public static string About_MenuItem {
+            get {
+                return ResourceManager.GetString("About_MenuItem", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   About QuickER に類似しているローカライズされた文字列を検索します。
+        /// </summary>
+        public static string About_Title {
+            get {
+                return ResourceManager.GetString("About_Title", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Version {0} に類似しているローカライズされた文字列を検索します。
+        /// </summary>
+        public static string About_Version {
+            get {
+                return ResourceManager.GetString("About_Version", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Repository:  に類似しているローカライズされた文字列を検索します。
+        /// </summary>
+        public static string About_Repository {
+            get {
+                return ResourceManager.GetString("About_Repository", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Documentation:  に類似しているローカライズされた文字列を検索します。
+        /// </summary>
+        public static string About_Documentation {
+            get {
+                return ResourceManager.GetString("About_Documentation", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Copy version info に類似しているローカライズされた文字列を検索します。
+        /// </summary>
+        public static string About_CopyVersionInfo {
+            get {
+                return ResourceManager.GetString("About_CopyVersionInfo", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Copied. に類似しているローカライズされた文字列を検索します。
+        /// </summary>
+        public static string About_Copied {
+            get {
+                return ResourceManager.GetString("About_Copied", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Could not copy. Try again. に類似しているローカライズされた文字列を検索します。
+        /// </summary>
+        public static string About_CopyFailed {
+            get {
+                return ResourceManager.GetString("About_CopyFailed", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Could not open the link. に類似しているローカライズされた文字列を検索します。
+        /// </summary>
+        public static string About_OpenLinkFailed {
+            get {
+                return ResourceManager.GetString("About_OpenLinkFailed", resourceCulture);
             }
         }
 
