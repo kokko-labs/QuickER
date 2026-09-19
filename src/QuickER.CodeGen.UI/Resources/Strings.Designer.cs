@@ -888,6 +888,18 @@ namespace QuickER.CodeGen.UI.Resources {
             }
         }
 
+        public static string Csharp_ModifiedFilesIntro {
+            get {
+                return ResourceManager.GetString("Csharp_ModifiedFilesIntro", resourceCulture);
+            }
+        }
+
+        public static string Csharp_ModifiedFilesTitle {
+            get {
+                return ResourceManager.GetString("Csharp_ModifiedFilesTitle", resourceCulture);
+            }
+        }
+
         public static string Csharp_GeneratedSuccess {
             get {
                 return ResourceManager.GetString("Csharp_GeneratedSuccess", resourceCulture);

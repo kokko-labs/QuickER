@@ -73,6 +73,9 @@
   <data name="Cli_Opt_Config" xml:space="preserve">
     <value>生成オプション設定ファイル（quicker.json）</value>
   </data>
+  <data name="Cli_Opt_Force" xml:space="preserve">
+    <value>生成後に手で編集された生成ファイルがあっても上書きする</value>
+  </data>
   <data name="Cli_Cmd_Generate" xml:space="preserve">
     <value>ER 図 JSON から C# コードを生成する</value>
   </data>
@@ -246,6 +249,12 @@
   </data>
   <data name="Cli_GenerationAborted" xml:space="preserve">
     <value>生成エラーのため中止しました。</value>
+  </data>
+  <data name="Cli_ModifiedFilesDetected" xml:space="preserve">
+    <value>何も書き出していません。次の生成ファイルは、生成後に手で編集されています:</value>
+  </data>
+  <data name="Cli_ModifiedFilesForceHint" xml:space="preserve">
+    <value>変更を残す場合は、別のファイル（partial クラスなど）へ移してから生成してください。編集を破棄して上書きする場合は --force を付けて再実行してください。</value>
   </data>
   <data name="Cli_GeneratedFile" xml:space="preserve">
     <value>生成: {0}</value>

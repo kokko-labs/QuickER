@@ -53,6 +53,11 @@ public static class CodeGenToolSet
                         @enum = new[] { "sqlserver", "postgresql", "mysql", "oracle", "sqlite" },
                         description = "Target DBMS/provider (optional; defaults to the diagram's target DBMS, or sqlserver if unspecified).",
                     },
+                    force = new
+                    {
+                        type = "boolean",
+                        description = "Overwrite generated files even if they have been edited by hand since they were generated (optional; default false). Without it, generation writes nothing and lists the edited files when any exist. Set it only after the user confirms their edits can be discarded; otherwise move the edits into a separate file (for example, a partial class) first.",
+                    },
                 },
                 required = new[] { "out_dir" },
             },
@@ -210,6 +215,19 @@ public static class CodeGenToolSet
             config = new FileInfo(configPath);
         }
 
+        // 省略時は false。真偽値以外は黙って既定へ倒さず拒否する（上書きの指定を取り違えない）
+        var force = false;
+
+        if (args.TryGetProperty("force", out var forceEl))
+        {
+            if (forceEl.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+            {
+                return ("force must be a boolean (true or false).", false);
+            }
+
+            force = forceEl.GetBoolean();
+        }
+
         // 生成コアの診断（stderr）と生成ファイル一覧（stdout）を StringWriter で直接受け取る
         // （Console を差し替えない＝並列実行中の他テスト・他ツールと競合しない）
         var buffer = new StringWriter();
@@ -222,6 +240,7 @@ public static class CodeGenToolSet
                 document.Schema,
                 config,
                 new DirectoryInfo(outDir),
+                force,
                 buffer,
                 buffer
             );
@@ -233,6 +252,20 @@ public static class CodeGenToolSet
         }
 
         var diagnostics = buffer.ToString();
+
+        if (exitCode == GenerationExecutor.ModifiedFilesExitCode)
+        {
+            // CLI の --force 案内の代わりに、このツールでの上書き方法を英語で添える
+            return (
+                Combine(
+                    diagnostics,
+                    "C# code generation wrote nothing because the files listed above have been edited by hand since they were generated. "
+                        + "Ask the user whether their edits can be discarded. If so, call generate_csharp again with force: true; "
+                        + "otherwise move the edits into a separate file (for example, a partial class) first."
+                ),
+                false
+            );
+        }
 
         if (exitCode != 0)
         {

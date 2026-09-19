@@ -27,6 +27,16 @@ internal static class GenerationExecutor
         new SqliteProvider(),
     ]);
 
+    /// <summary>
+    /// 書き込み先に生成後に手で編集された生成ファイルがあり、上書きの指定（<c>force</c>）も無かったため
+    /// 何も書かずに止めたことを表す終了コード
+    /// </summary>
+    /// <remarks>
+    /// 失敗一般（1）と区別できるよう専用の値にする（CI のスクリプトが「生成物が手で直されている」を判別できる）。
+    /// 上書きの指定方法の案内は入口ごとに違うため、呼び出し側（CLI＝<c>--force</c>・MCP＝<c>force</c> 引数）が出す。
+    /// </remarks>
+    public const int ModifiedFilesExitCode = 2;
+
     /// <summary>プロバイダ名を共有レジストリで解決する（未対応名は登録済み名を列挙した例外）</summary>
     /// <remarks>reverse コマンドなど、生成パイプラインを経由しないコマンドが型カタログを得るために使う</remarks>
     internal static IDatabaseProvider ResolveProvider(string providerName) =>
@@ -48,6 +58,7 @@ internal static class GenerationExecutor
         FileInfo? config,
         ParseResult parseResult,
         GenerationOptionSet generation,
+        bool force,
         TextWriter stdout,
         TextWriter stderr,
         Func<IDatabaseProvider, CancellationToken, Task<ErDiagram?>> resolveDiagram,
@@ -96,7 +107,22 @@ internal static class GenerationExecutor
             return 1;
         }
 
-        return GenerateWithResolvedOptions(provider, diagram, options, output, stdout, stderr);
+        var exitCode = GenerateWithResolvedOptions(
+            provider,
+            diagram,
+            options,
+            output,
+            force,
+            stdout,
+            stderr
+        );
+
+        if (exitCode == ModifiedFilesExitCode)
+        {
+            stderr.WriteLine(Strings.Cli_ModifiedFilesForceHint);
+        }
+
+        return exitCode;
     }
 
     /// <summary>
@@ -115,12 +141,21 @@ internal static class GenerationExecutor
         ErDiagram diagram,
         FileInfo? config,
         DirectoryInfo output,
+        bool force,
         TextWriter stdout,
         TextWriter stderr
     )
     {
         var options = GenerationConfigLoader.LoadOptions(config, provider, stderr);
-        return GenerateWithResolvedOptions(provider, diagram, options, output, stdout, stderr);
+        return GenerateWithResolvedOptions(
+            provider,
+            diagram,
+            options,
+            output,
+            force,
+            stdout,
+            stderr
+        );
     }
 
     /// <summary>解決済みオプションで方言別マッパを解決し、生成・書き出しを行う共通コア</summary>
@@ -129,6 +164,7 @@ internal static class GenerationExecutor
         ErDiagram diagram,
         CodeGenerationOptions options,
         DirectoryInfo output,
+        bool force,
         TextWriter stdout,
         TextWriter stderr
     )
@@ -141,7 +177,7 @@ internal static class GenerationExecutor
             diagram,
             options
         );
-        return WriteResult(result, output, options, stdout, stderr);
+        return WriteResult(result, output, options, force, stdout, stderr);
     }
 
     /// <summary>
@@ -168,13 +204,20 @@ internal static class GenerationExecutor
 
     /// <summary>生成結果の診断を表示し、エラーが無ければファイルを書き出す。終了コードを返す</summary>
     /// <remarks>
+    /// <para>
+    /// <paramref name="force"/> が偽のとき、生成後に手で編集された既存ファイル（<see cref="GeneratedFileWriter.FindModifiedFiles"/>）
+    /// があれば一覧を stderr へ出し、何も書かずに <see cref="ModifiedFilesExitCode"/> を返す。
+    /// </para>
+    /// <para>
     /// <paramref name="options"/>.<see cref="CodeGenerationOptions.UseRuntimePackages"/> が有効な場合、
     /// 生成成功後に必要な PackageReference の案内（<see cref="RuntimePackageReferenceGuidance"/>）を続けて出力する。
+    /// </para>
     /// </remarks>
     private static int WriteResult(
         CodeGenerationResult result,
         DirectoryInfo output,
         CodeGenerationOptions options,
+        bool force,
         TextWriter stdout,
         TextWriter stderr
     )
@@ -190,8 +233,29 @@ internal static class GenerationExecutor
             return 1;
         }
 
+        var writer = new GeneratedFileWriter();
+
+        // 生成後に手で編集された既存ファイルは、上書きの指定が無い限り 1 つも書かずに止める
+        // （一部だけ書くと生成物どうしが食い違うため、判定は書き出しより前に全ファイル分まとめて行う）
+        if (!force)
+        {
+            var modifiedPaths = writer.FindModifiedFiles(output.FullName, result);
+
+            if (modifiedPaths.Count > 0)
+            {
+                stderr.WriteLine(Strings.Cli_ModifiedFilesDetected);
+
+                foreach (var path in modifiedPaths)
+                {
+                    stderr.WriteLine($"  {path}");
+                }
+
+                return ModifiedFilesExitCode;
+            }
+        }
+
         Directory.CreateDirectory(output.FullName);
-        var written = new GeneratedFileWriter().WriteFiles(output.FullName, result);
+        var written = writer.WriteFiles(output.FullName, result);
 
         foreach (var file in written)
         {

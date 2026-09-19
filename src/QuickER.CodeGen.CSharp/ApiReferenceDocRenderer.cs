@@ -131,6 +131,8 @@ internal sealed class ApiReferenceDocRenderer
         var scriptObject = new ScriptObject
         {
             ["namespace_name"] = model.NamespaceName,
+            // 生成元の版（.g.cs ヘッダーの版の行と同じ値。言語に依らず同じ英語のメタ行で出す）
+            ["generator_version"] = RuntimePackages.ResolveGuidanceVersion(),
             ["entities"] = entities,
             ["has_contract"] = hasContract,
             // 値オブジェクトの生値変換・partial フックの案内を出すか（VO 生成時のみ）。

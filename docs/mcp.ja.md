@@ -83,7 +83,7 @@ stdio トランスポートに対応した MCP クライアントであれば利
 
 | ツール | 引数 | 説明 |
 |---|---|---|
-| `generate_csharp` | `out_dir` ✅, `config`, `provider` | `quicker generate` と同一の経路で C# コード（Entity / EditModel / Mapper / Repository など）を出力先ディレクトリへ生成する。`config` は生成設定 JSON の中身ではなく、既存ファイルの**パス**（`quicker generate --config` と同じ意味。存在しないパスは失敗する。[CLI リファレンス](cli.ja.md#設定ファイルquickerjson)を参照）。`config` の全キーは `get_generation_config_schema` で取得できる |
+| `generate_csharp` | `out_dir` ✅, `config`, `provider`, `force` | `quicker generate` と同一の経路で C# コード（Entity / EditModel / Mapper / Repository など）を出力先ディレクトリへ生成する。`config` は生成設定 JSON の中身ではなく、既存ファイルの**パス**（`quicker generate --config` と同じ意味。存在しないパスは失敗する。[CLI リファレンス](cli.ja.md#設定ファイルquickerjson)を参照）。`config` の全キーは `get_generation_config_schema` で取得できる。置き換え対象の `.g.cs` が生成後に手で編集されていると、何も書かずに編集されたファイルの一覧を返して失敗する。上書きするには `force: true` を渡す（[生成ファイルのヘッダー](code-generation.ja.md#生成ファイルのヘッダー)を参照） |
 | `generate_ddl` | `out_file` ✅, `provider` | DDL（CREATE TABLE / 外部キー）の SQL スクリプトを生成し、`.sql` ファイルへ書き出す |
 | `get_generation_config_schema` | *(なし)* | 設定 JSON（`quicker.json`。`generate_csharp` の `config` はこのファイルへのパスを渡す）で有効な全キーを機械可読 JSON で返す。各キーの名前・型・既定値・分類・取り得る値・説明に加え、キー間のルールと例を含む。docs を参照せずに config を書けるようにするためのツール。`file` 引数を取らない唯一のツール |
 

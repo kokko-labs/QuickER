@@ -32,8 +32,11 @@ quicker generate --schema diagram.json --out ./Generated --provider sqlserver --
 | `--out <dir>` | ✅ | The output folder for the generated code |
 | `--provider <name>` | | Target database type. `sqlserver` (default) / `postgresql` / `mysql` / `oracle` / `sqlite` |
 | `--config <file>` | | Generation option settings file (quicker.json). See below |
+| `--force` | | Overwrite generated files even if they have been edited by hand since they were generated |
 
 In addition to these, **every key in the settings file (quicker.json) can be specified as a same-named kebab-case flag**, and such flags take precedence over the settings file (priority: **CLI flag > settings file > default**). A flag name is the mechanical kebab-case conversion of the key; for example `rootNamespace` → `--root-namespace`, `generateRepositories` → `--generate-repositories`, `splitFilesByCategory` → `--split-files-by-category`, `outputPath` → `--output-path`. There are exceptions to the mechanical conversion: the three API-reference keys and the code subfolder key use shorter spellings — `ApiDocsLanguage` → `--api-docs-lang`, `ApiDocsSubdirectory` → `--api-docs-subdir`, `ApiDocsFileName` → `--api-docs-file` — `CodeSubdirectory` → `--code-subdir` — and the canonical key `OutputFileName` has no flag of its own; use `--output-path` (only its file-name part is used). Bool keys are **three-valued**: `--flag` (no value) = `true`, `--flag false` = `false`, and omitting it = the value from the settings file. For the meaning of each key, see the "Settings file" table below (`--repository-dialects` is a comma-separated list of dialects; when omitted, a single dialect is derived from the `--provider` dialect).
+
+If a `.g.cs` about to be replaced has been edited by hand since it was generated, `generate` writes nothing, lists the edited files on stderr and exits with code `2` (other failures exit with `1`). Move the edits into a separate file, such as a `partial` class, or run again with `--force` to discard them. See [The generated file header](code-generation.md#the-generated-file-header) for what counts as an edit.
 
 ## quicker scaffold
 
@@ -47,7 +50,7 @@ quicker scaffold --connection "Server=.;Database=Shop;Integrated Security=true;T
 |---|:-:|---|
 | `--connection <string>` | ✅ | The connection string (the format follows the DBMS of `--provider`) |
 
-The other options (`--out` / `--config` / `--provider`, and the kebab-case flags named after the settings keys) are the same as for `generate`.
+The other options (`--out` / `--config` / `--provider` / `--force`, and the kebab-case flags named after the settings keys) are the same as for `generate`.
 
 ## quicker reverse
 

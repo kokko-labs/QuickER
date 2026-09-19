@@ -117,12 +117,27 @@ public sealed class CSharpGenerationCommandService
             }
 
             var writer = new GeneratedFileWriter();
-            var writtenPaths = writer.WriteFiles(
-                string.IsNullOrWhiteSpace(dialogResult.OutputDirectory)
-                    ? Environment.CurrentDirectory
-                    : dialogResult.OutputDirectory,
-                result
-            );
+            var outputDirectory = string.IsNullOrWhiteSpace(dialogResult.OutputDirectory)
+                ? Environment.CurrentDirectory
+                : dialogResult.OutputDirectory;
+
+            // 生成後に手で編集された既存ファイルがあれば、上書きする前に一覧を見せて確認する
+            // （キャンセルなら何も書かない＝編集内容はディスクに残る）
+            var modifiedPaths = writer.FindModifiedFiles(outputDirectory, result);
+
+            if (
+                modifiedPaths.Count > 0
+                && !_dialogs.ConfirmWarningDetails(
+                    Strings.Csharp_ModifiedFilesIntro,
+                    string.Join(Environment.NewLine, modifiedPaths),
+                    Strings.Csharp_ModifiedFilesTitle
+                )
+            )
+            {
+                return;
+            }
+
+            var writtenPaths = writer.WriteFiles(outputDirectory, result);
 
             // 書き出したファイルの一覧・診断一覧・PackageReference 案内を「詳細」としてまとめ、空行区切りで連結する。
             // ファイル一覧を先頭に置くのは、生成コードのサブフォルダと API リファレンスのサブフォルダのように

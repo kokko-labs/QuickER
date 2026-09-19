@@ -504,6 +504,14 @@ You can pass this file directly to the CLI as --config.</value>
   <data name="Csharp_WarningTitle" xml:space="preserve">
     <value>C# Generation Warning</value>
   </data>
+  <data name="Csharp_ModifiedFilesIntro" xml:space="preserve">
+    <value>The following generated files have been edited by hand since they were generated. Generating now will overwrite these edits.
+
+To keep your changes, cancel and move them into a separate file (for example, a partial class) first. Do you want to overwrite the files?</value>
+  </data>
+  <data name="Csharp_ModifiedFilesTitle" xml:space="preserve">
+    <value>Overwrite Edited Generated Files</value>
+  </data>
   <data name="Csharp_GeneratedSuccess" xml:space="preserve">
     <value>C# code generation completed.</value>
   </data>
