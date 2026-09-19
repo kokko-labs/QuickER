@@ -660,6 +660,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     // ---------------- Commands ----------------
 
+    /// <summary>設定メニューの「バージョン情報」から、アプリの版と実行環境を示すダイアログを表示する</summary>
+    [RelayCommand]
+    private void ShowAbout() => _appDialogs.ShowAboutDialog(AboutInfo.Current());
+
     /// <summary>確認のうえダイアグラムを空にする</summary>
     [RelayCommand]
     private void NewDiagram()

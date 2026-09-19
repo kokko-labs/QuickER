@@ -410,6 +410,8 @@ public class MainViewModelTargetDbmsTests
     private sealed class NoopAppDialogService : IAppDialogService
     {
         public PrintOptions? ShowPrintOptionsDialog(string? defaultTitle) => null;
+
+        public void ShowAboutDialog(AboutInfo info) { }
     }
 
     private sealed class NoopFileDialogService : IFileDialogService

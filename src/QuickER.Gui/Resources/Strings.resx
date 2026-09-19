@@ -90,10 +90,37 @@
     <value>Settings</value>
   </data>
   <data name="Settings_Tooltip" xml:space="preserve">
-    <value>Application settings (display language, update check)</value>
+    <value>Application settings (display language, update check, version info)</value>
   </data>
   <data name="Settings_CheckUpdatesOnStartup" xml:space="preserve">
     <value>Check for updates on startup</value>
+  </data>
+  <data name="About_MenuItem" xml:space="preserve">
+    <value>About QuickER</value>
+  </data>
+  <data name="About_Title" xml:space="preserve">
+    <value>About QuickER</value>
+  </data>
+  <data name="About_Version" xml:space="preserve">
+    <value>Version {0}</value>
+  </data>
+  <data name="About_Repository" xml:space="preserve">
+    <value>Repository: </value>
+  </data>
+  <data name="About_Documentation" xml:space="preserve">
+    <value>Documentation: </value>
+  </data>
+  <data name="About_CopyVersionInfo" xml:space="preserve">
+    <value>Copy version info</value>
+  </data>
+  <data name="About_Copied" xml:space="preserve">
+    <value>Copied.</value>
+  </data>
+  <data name="About_CopyFailed" xml:space="preserve">
+    <value>Could not copy. Try again.</value>
+  </data>
+  <data name="About_OpenLinkFailed" xml:space="preserve">
+    <value>Could not open the link.</value>
   </data>
   <data name="Common_Cancel" xml:space="preserve">
     <value>Cancel</value>

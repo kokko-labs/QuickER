@@ -101,12 +101,48 @@
     <comment>ツールバーの設定ボタンのキャプション</comment>
   </data>
   <data name="Settings_Tooltip" xml:space="preserve">
-    <value>アプリの設定（表示言語・更新確認）</value>
+    <value>アプリの設定（表示言語・更新確認・バージョン情報）</value>
     <comment>設定ボタンのツールチップ</comment>
   </data>
   <data name="Settings_CheckUpdatesOnStartup" xml:space="preserve">
     <value>起動時に更新を確認する</value>
     <comment>設定メニューの更新確認トグル</comment>
+  </data>
+  <data name="About_MenuItem" xml:space="preserve">
+    <value>バージョン情報</value>
+    <comment>設定メニューのバージョン情報ダイアログを開く項目</comment>
+  </data>
+  <data name="About_Title" xml:space="preserve">
+    <value>バージョン情報</value>
+    <comment>バージョン情報ダイアログのタイトル</comment>
+  </data>
+  <data name="About_Version" xml:space="preserve">
+    <value>バージョン {0}</value>
+    <comment>バージョン情報ダイアログの版の行（{0} は版番号）</comment>
+  </data>
+  <data name="About_Repository" xml:space="preserve">
+    <value>リポジトリ: </value>
+    <comment>リポジトリへのリンクの前置き</comment>
+  </data>
+  <data name="About_Documentation" xml:space="preserve">
+    <value>ドキュメント: </value>
+    <comment>ドキュメントの目次へのリンクの前置き（リンク先は表示言語に合わせる）</comment>
+  </data>
+  <data name="About_CopyVersionInfo" xml:space="preserve">
+    <value>版情報をコピー</value>
+    <comment>版・ビルド・ランタイム・OS をクリップボードへコピーするボタン</comment>
+  </data>
+  <data name="About_Copied" xml:space="preserve">
+    <value>コピーしました。</value>
+    <comment>コピー成功の表示</comment>
+  </data>
+  <data name="About_CopyFailed" xml:space="preserve">
+    <value>コピーできませんでした。もう一度お試しください。</value>
+    <comment>クリップボードを開けなかったときの表示</comment>
+  </data>
+  <data name="About_OpenLinkFailed" xml:space="preserve">
+    <value>リンクを開けませんでした。</value>
+    <comment>ブラウザーでリンクを開けなかったときの表示</comment>
   </data>
   <data name="Common_Cancel" xml:space="preserve">
     <value>キャンセル</value>

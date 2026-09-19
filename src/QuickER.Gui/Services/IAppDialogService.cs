@@ -9,7 +9,7 @@ namespace QuickER.Services;
 public sealed record PrintOptions(PrintSizeMode SizeMode, string Title, bool IncludeTimestamp);
 
 /// <summary>
-/// アプリ固有のモーダルダイアログ（印刷オプション）の表示を抽象化するインターフェイス
+/// アプリ固有のモーダルダイアログ（印刷オプション・バージョン情報）の表示を抽象化するインターフェイス
 /// </summary>
 /// <remarks>
 /// メッセージボックスは <see cref="Gui.Abstractions.IDialogService"/>、ファイル選択は
@@ -22,6 +22,10 @@ public interface IAppDialogService
     /// <summary>印刷オプション（サイズモード・タイトル・日時印字）の選択ダイアログを表示する（キャンセル時は null）</summary>
     /// <param name="defaultTitle">タイトル入力欄の初期値（最後に保存／読込した文書名。未保存なら null）</param>
     PrintOptions? ShowPrintOptionsDialog(string? defaultTitle);
+
+    /// <summary>バージョン情報ダイアログを表示する（閉じるまで戻らない）</summary>
+    /// <param name="info">表示する版・実行環境・著作権・リポジトリ</param>
+    void ShowAboutDialog(AboutInfo info);
 }
 
 /// <summary>WPF の <c>Views.*</c> ウィンドウを用いた <see cref="IAppDialogService"/> の既定実装</summary>
@@ -36,5 +40,13 @@ public sealed class WpfAppDialogService : IAppDialogService
         };
 
         return dialog.ShowDialog() == true ? dialog.Result : null;
+    }
+
+    /// <inheritdoc />
+    public void ShowAboutDialog(AboutInfo info)
+    {
+        var dialog = new Views.AboutDialog(info) { Owner = Application.Current?.MainWindow };
+
+        dialog.ShowDialog();
     }
 }
