@@ -439,7 +439,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             ClearUndoRedoHistory();
         }
 
-        // 図全体が置き換わったので、View 側で fit-to-window を要求する（開く・取込・DB取込・復元の共通点）
+        // 図全体が置き換わったので fit-to-window を要求する（開く・取込・DB取込・復元の共通点）。
+        // 図が現れた経路は読める大きさ（等倍）を優先する＝縮小しない
         RequestFitToWindow();
     }
 
@@ -1599,8 +1600,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             Strings.Toolbar_ArrangeGrid
         );
 
-        // 整列後の全体像が収まるよう fit-to-window を要求する
-        RequestFitToWindow();
+        // 整列は「並べ直した結果を確かめる」操作なので、全体が収まるまで縮小してよい
+        RequestFitToWindow(allowShrink: true);
     }
 
     /// <summary>エンティティをリレーション階層に基づくツリー状に整列する（Undo 可能）</summary>
@@ -1612,8 +1613,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             Strings.Toolbar_ArrangeTree
         );
 
-        // 整列後の全体像が収まるよう fit-to-window を要求する
-        RequestFitToWindow();
+        // 整列は「並べ直した結果を確かめる」操作なので、全体が収まるまで縮小してよい
+        RequestFitToWindow(allowShrink: true);
     }
 
     /// <summary>エンティティを力学モデルで配置し、リレーション線が水平/垂直に近づくよう整列する（Undo 可能）</summary>
@@ -1625,8 +1626,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             Strings.Toolbar_ArrangeForce
         );
 
-        // 整列後の全体像が収まるよう fit-to-window を要求する
-        RequestFitToWindow();
+        // 整列は「並べ直した結果を確かめる」操作なので、全体が収まるまで縮小してよい
+        RequestFitToWindow(allowShrink: true);
     }
 
     /// <summary>AI によるER図の新規生成直後に、表示幅調整と格子整列をまとめて適用する（履歴には積まない）</summary>
@@ -1648,7 +1649,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             RefreshCanvasSize();
         });
 
-        // AI 生成直後の初期配置が収まるよう fit-to-window を要求する
+        // 図が新しく現れた経路なので読める大きさ（等倍）を優先する＝縮小しない
         RequestFitToWindow();
     }
 

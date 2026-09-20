@@ -76,6 +76,8 @@ Highlights of this release:
 
 - **The display toggles have moved into a "View" group on the toolbar** — "Descriptions," "Nullability" and "Compact" now live in the popup that button opens, together with the two new panel toggles. The popup stays open while you flip them, so the toolbar stays on one line as more toggles are added
 
+- **Diagrams now open at 100%** — a diagram too large for the window used to be shrunk to 80%, which made the text hard to read. It now stays at actual size and you scroll to the rest. This covers opening, importing, DB import, AI generation and session restore. Rearranging, on the other hand, is about checking the result, so the three arrange commands and "Fit to window" shrink until the whole diagram fits (down to 50%, the same floor as manual zoom; "Fit to window" previously stopped at 80% and did not show all of a large diagram). A diagram that does not fit now starts at its top-left corner instead of its center
+
 #### License
 
 - **The permanent commercial-use grant for the basic generation of Entity / EditModel / Mapper is withdrawn for future versions** — the additional grants in [LICENSE-NC.md](LICENSE-NC.md) (QuickER-specific terms version 2.0) now fold into a single interim grant, so any feature may become paid in a future version. The current release remains free for everyone, commercial use included. QuickER 0.1.0 keeps the version 1.0 terms

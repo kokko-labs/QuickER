@@ -176,14 +176,20 @@ public partial class MainWindow : Window
     }
 
     /// <summary>fit-to-window 要求を受けてバウンディングボックスから倍率とスクロール位置を計算・適用する</summary>
-    private void OnFitToWindowRequested(object? sender, EventArgs e)
+    private void OnFitToWindowRequested(object? sender, FitToWindowRequest e)
     {
         // 読込直後などレイアウト未確定のタイミングに備え、1 拍置いてから実寸で計算する
-        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(ApplyFitToWindow));
+        Dispatcher.BeginInvoke(
+            DispatcherPriority.Loaded,
+            new Action(() => ApplyFitToWindow(e.AllowShrink))
+        );
     }
 
-    /// <summary>現在のエンティティ全体が余白込みで収まる倍率とスクロール位置を適用する</summary>
-    private void ApplyFitToWindow()
+    /// <summary>現在のエンティティ全体に合わせて倍率とスクロール位置を適用する</summary>
+    /// <param name="allowShrink">
+    /// true なら収まるまで縮小する（明示の「全体を表示」）。false なら等倍のまま表示する（自動 fit）。
+    /// </param>
+    private void ApplyFitToWindow(bool allowShrink)
     {
         var bounds = ComputeEntitiesBounds();
         var viewport = new Size(
@@ -191,7 +197,12 @@ public partial class MainWindow : Window
             DiagramScrollViewer.ViewportHeight
         );
 
-        var fit = ViewportCalculator.CalculateFit(bounds, viewport, FitMargin);
+        var fit = ViewportCalculator.CalculateFit(
+            bounds,
+            viewport,
+            FitMargin,
+            allowShrink ? ViewportCalculator.MinZoom : ViewportCalculator.NoShrinkMinZoom
+        );
 
         // 中央基準補正が二重に走らないよう、fit の倍率適用はマウス補正と同じ抑止フラグで囲う
         CanvasViewportBehavior.SuppressCenterZoomCorrection = true;
