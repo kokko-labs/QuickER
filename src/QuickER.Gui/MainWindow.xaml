@@ -713,11 +713,13 @@
           >
             <StackPanel>
               <TextBlock Style="{StaticResource ToolBarIcon}" Text="◫" />
-              <TextBlock Style="{StaticResource ToolBarCaption}">
-                <!-- 2 つの Run は改行で区切らない（XAML が要素間の空白を 1 つ差し込み、
-                     リテラル先頭の空白と重なって二重になる）。区切りはリテラル側の 1 つだけ -->
-                <Run Text="{x:Static resources:Strings.Toolbar_ViewGroup}" /><Run Text=" ▾" />
-              </TextBlock>
+              <!-- 区切りの空白は StringFormat で 1 つだけ与える。Run を 2 つ並べる書き方だと、
+                   要素間の改行を XAML が空白 1 つへ畳むぶんがリテラルの空白へ加算されて二重になり、
+                   1 行へ寄せて避けても csharpier の XAML 整形が改行へ戻してしまう -->
+              <TextBlock
+                Style="{StaticResource ToolBarCaption}"
+                Text="{Binding Source={x:Static resources:Strings.Toolbar_ViewGroup}, StringFormat={}{0} ▾}"
+              />
             </StackPanel>
           </ToggleButton>
           <Popup
@@ -828,11 +830,13 @@
           >
             <StackPanel>
               <TextBlock Style="{StaticResource ToolBarIcon}" Text="▦" />
-              <TextBlock Style="{StaticResource ToolBarCaption}">
-                <!-- 2 つの Run は改行で区切らない（XAML が要素間の空白を 1 つ差し込み、
-                     リテラル先頭の空白と重なって二重になる）。区切りはリテラル側の 1 つだけ -->
-                <Run Text="{x:Static resources:Strings.Toolbar_ArrangeGroup}" /><Run Text=" ▾" />
-              </TextBlock>
+              <!-- 区切りの空白は StringFormat で 1 つだけ与える。Run を 2 つ並べる書き方だと、
+                   要素間の改行を XAML が空白 1 つへ畳むぶんがリテラルの空白へ加算されて二重になり、
+                   1 行へ寄せて避けても csharpier の XAML 整形が改行へ戻してしまう -->
+              <TextBlock
+                Style="{StaticResource ToolBarCaption}"
+                Text="{Binding Source={x:Static resources:Strings.Toolbar_ArrangeGroup}, StringFormat={}{0} ▾}"
+              />
             </StackPanel>
           </ToggleButton>
           <Popup
