@@ -22,8 +22,10 @@ namespace QuickER.Tests.Gui.Behaviors;
 /// （クリーンな文書がコミットでダーティ化し、外部変更の分岐が自動再読込から確認ダイアログへ化ける）。
 /// </para>
 /// <para>
-/// 進行中状態は静的フィールドで保持されるため、同じ状態を触るテストは
-/// <c>CanvasInteractionState</c> コレクションで直列化する（xunit はコレクション内を並列実行しない）。
+/// 進行中状態は静的フィールドで保持されるが、UI スレッドの持ち物として <c>[ThreadStatic]</c> が
+/// 付いているため、並列実行される他クラスのテストとは互いに干渉しない（下の隔離テストが固定）。
+/// 同じ状態を書くテストクラスどうしは <c>CanvasInteractionState</c> コレクションで直列化する
+/// （xunit はコレクション内を並列実行しない）。
 /// </para>
 /// </remarks>
 [Collection("CanvasInteractionState")]
@@ -170,6 +172,94 @@ public class DragBehaviorCancelTests : IDisposable
             RubberBandBehavior.IsSelectionActiveForTests.Should().BeFalse();
             main.IsRubberBandVisible.Should().BeFalse("矩形は消す");
             entity.IsSelected.Should().BeFalse("交差していても選択は確定しない");
+        });
+    }
+
+    /// <summary>進行中状態がスレッドごとに独立しており、他スレッドのキャンセルで消えないことを検証する</summary>
+    /// <remarks>
+    /// 進行中状態からフィールドの <c>[ThreadStatic]</c> を外すと、外部変更を処理する並列テスト
+    /// （<c>HandleExternalModification</c> を通るものすべて）のキャンセルが、こちらのドラッグを
+    /// 途中で消してしまう。消えたことは後続の表明でしか分からないので散発的な失敗に化ける。
+    /// </remarks>
+    [Fact(DisplayName = "ドラッグの進行中状態はスレッドごとに独立する")]
+    public void InteractionState_IsIsolatedPerThread()
+    {
+        var entity = CreateEntity("A", 10, 20);
+        DragBehavior.BeginInteractionForTests(entity, startX: 10, startY: 20);
+
+        // ドラッグ中の逐次反映を模す
+        entity.X = 330;
+        entity.Y = 260;
+
+        var sawInteraction = true;
+        var other = new Thread(() =>
+        {
+            sawInteraction = DragBehavior.IsInteractionActiveForTests;
+
+            try
+            {
+                DragBehavior.CancelActiveDrag();
+            }
+            catch
+            {
+                // 隔離が壊れていると他スレッドの UI 要素へ触れて落ちる。
+                // 未処理例外はテストホストごと落として失敗を読めなくするため、ここで握る
+                // （壊れていることは下の表明が報告する）
+            }
+        });
+        other.Start();
+        other.Join();
+
+        sawInteraction.Should().BeFalse("別スレッドからは進行中に見えない");
+        DragBehavior
+            .IsInteractionActiveForTests.Should()
+            .BeTrue("他スレッドのキャンセルでは消えない");
+        entity.X.Should().Be(330, "他スレッドのキャンセルは座標を戻さない");
+
+        DragBehavior.CancelActiveDrag();
+
+        entity.X.Should().Be(10, "自スレッドのキャンセルは従来どおり戻す");
+        entity.Y.Should().Be(20);
+    }
+
+    /// <summary>ラバーバンドの進行中状態もスレッドごとに独立することを検証する</summary>
+    [Fact(DisplayName = "ラバーバンドの進行中状態はスレッドごとに独立する")]
+    public void SelectionState_IsIsolatedPerThread()
+    {
+        WpfApplicationTestSupport.RunSta(() =>
+        {
+            var main = new MainViewModel();
+            var surface = new Grid { DataContext = main };
+            main.IsRubberBandVisible = true;
+
+            RubberBandBehavior.BeginSelectionForTests(surface);
+
+            var sawSelection = true;
+            var other = new Thread(() =>
+            {
+                sawSelection = RubberBandBehavior.IsSelectionActiveForTests;
+
+                try
+                {
+                    RubberBandBehavior.CancelActiveSelection();
+                }
+                catch
+                {
+                    // 上と同じ理由（隔離が壊れていると他スレッドの UI 要素へ触れて落ちる）
+                }
+            });
+            other.Start();
+            other.Join();
+
+            sawSelection.Should().BeFalse("別スレッドからは進行中に見えない");
+            RubberBandBehavior
+                .IsSelectionActiveForTests.Should()
+                .BeTrue("他スレッドのキャンセルでは消えない");
+            main.IsRubberBandVisible.Should().BeTrue("他スレッドのキャンセルは矩形を消さない");
+
+            RubberBandBehavior.CancelActiveSelection();
+
+            main.IsRubberBandVisible.Should().BeFalse("自スレッドのキャンセルは従来どおり消す");
         });
     }
 }
