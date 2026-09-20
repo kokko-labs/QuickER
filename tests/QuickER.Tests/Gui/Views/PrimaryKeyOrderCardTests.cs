@@ -1,13 +1,10 @@
-using System.IO;
-using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
 using AwesomeAssertions;
 using QuickER.Model;
-using QuickER.Services;
-using QuickER.Tests.TestSupport;
 using QuickER.ViewModels;
 using Xunit;
+using static QuickER.Tests.TestSupport.WpfApplicationTestSupport;
 
 namespace QuickER.Tests.Gui.Views;
 
@@ -26,86 +23,7 @@ public class PrimaryKeyOrderCardTests
     [Fact(DisplayName = "主キー順カード: 複合主キーで行が実体化し、↑ ボタンで実効順が入れ替わる")]
     public void PrimaryKeyOrderCard_RowWiring()
     {
-        Exception? captured = null;
-
-        // MainWindow ctor の Initialize() が実 %LOCALAPPDATA% の自動保存を復元し、Close の AutoSave が
-        // 書き戻すため、永続化先を一時フォルダへ隔離する（実ユーザーデータの読み書きを断つ）
-        var folder = Path.Combine(
-            Path.GetTempPath(),
-            "quicker-pkorder-card-" + Guid.NewGuid().ToString("N")
-        );
-        Directory.CreateDirectory(folder);
-
-        try
-        {
-            RunPrimaryKeyOrderCardScenario(folder, ref captured);
-        }
-        finally
-        {
-            try
-            {
-                Directory.Delete(folder, recursive: true);
-            }
-            catch
-            {
-                // 後始末の失敗はテスト結果に影響させない
-            }
-        }
-
-        captured.Should().BeNull();
-    }
-
-    /// <summary>STA スレッド上で実ウィンドウを表示し、主キー順カードの配線を検証する本体</summary>
-    private static void RunPrimaryKeyOrderCardScenario(string folder, ref Exception? captured)
-    {
-        Exception? threadCaptured = null;
-
-        var thread = new Thread(() =>
-        {
-            try
-            {
-                WpfApplicationTestSupport.EnsureApplicationResources();
-
-                var vm = new MainViewModel();
-                vm.UsePersistenceForTests(
-                    new GuiAppSettingsStore(folder),
-                    Path.Combine(folder, "last_diagram.json")
-                );
-                var window = new MainWindow(vm)
-                {
-                    // 画面外・非アクティブで表示する（開発者のデスクトップを妨げない）
-                    WindowStartupLocation = WindowStartupLocation.Manual,
-                    Left = -4000,
-                    Top = -4000,
-                    ShowActivated = false,
-                };
-
-                window.Show();
-                window.UpdateLayout();
-                DoEvents();
-
-                try
-                {
-                    AssertPrimaryKeyOrderCard(vm, window);
-                }
-                finally
-                {
-                    window.Close();
-                    DoEvents();
-                }
-            }
-            catch (Exception ex)
-            {
-                threadCaptured = ex;
-            }
-        });
-
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.IsBackground = true;
-        thread.Start();
-        thread.Join();
-
-        captured = threadCaptured;
+        RunInIsolatedWindow(AssertPrimaryKeyOrderCard);
     }
 
     /// <summary>表示済みウィンドウ上で主キー順カードの実体化とコマンド配線を検証する</summary>
@@ -242,16 +160,5 @@ public class PrimaryKeyOrderCardTests
                 yield return descendant;
             }
         }
-    }
-
-    /// <summary>保留中のディスパッチャ処理（レイアウト・束縛反映）を流し切る</summary>
-    private static void DoEvents()
-    {
-        var frame = new System.Windows.Threading.DispatcherFrame();
-        System.Windows.Threading.Dispatcher.CurrentDispatcher.BeginInvoke(
-            System.Windows.Threading.DispatcherPriority.ApplicationIdle,
-            new Action(() => frame.Continue = false)
-        );
-        System.Windows.Threading.Dispatcher.PushFrame(frame);
     }
 }

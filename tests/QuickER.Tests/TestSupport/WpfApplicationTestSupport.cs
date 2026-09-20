@@ -142,14 +142,13 @@ internal static class WpfApplicationTestSupport
                         new GuiAppSettingsStore(folder),
                         Path.Combine(folder, "last_diagram.json")
                     );
-                    var window = new MainWindow(vm)
-                    {
-                        // 画面外・非アクティブで表示する（開発者のデスクトップを妨げない）
-                        WindowStartupLocation = WindowStartupLocation.Manual,
-                        Left = -4000,
-                        Top = -4000,
-                        ShowActivated = false,
-                    };
+                    var window = CreateMainWindow(vm);
+
+                    // 画面外・非アクティブで表示する（開発者のデスクトップを妨げない）
+                    window.WindowStartupLocation = WindowStartupLocation.Manual;
+                    window.Left = -4000;
+                    window.Top = -4000;
+                    window.ShowActivated = false;
 
                     window.Show();
                     window.UpdateLayout();
@@ -190,6 +189,28 @@ internal static class WpfApplicationTestSupport
 
         captured.Should().BeNull(captured?.ToString());
     }
+
+    /// <summary>
+    /// <c>MainWindow</c> を XAML（BAML）ロードの直列化つきで生成する。テストから
+    /// <c>new MainWindow(...)</c> を直に書かず、必ずこの窓口を通すこと。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>MainWindow</c> の <c>InitializeComponent</c> は BAML を読む。WPF の XAML 解析は
+    /// 内部の <see cref="System.Collections.Concurrent.ConcurrentDictionary{TKey, TValue}"/> を
+    /// 破壊的に触る経路があり、複数の STA テストクラスが同時に読むと
+    /// <c>XamlParseException: The given key '…' was not present in the dictionary.</c>
+    /// （内側は <see cref="KeyNotFoundException"/>）で散発的に落ちる。
+    /// </para>
+    /// <para>
+    /// 全件実行では再現しないが、CLAUDE.md が勧める単一テストクラスの <c>--filter</c> 実行では
+    /// 実際に 6 回中 3〜4 回落ちた（2026-09-20 実測）。ダイアログ側は
+    /// <see cref="LoadXamlComponent{T}(Func{T})"/> で既に直列化されていたので、
+    /// <c>MainWindow</c> も同じゲートへ通して塞ぐ。
+    /// </para>
+    /// </remarks>
+    public static MainWindow CreateMainWindow(MainViewModel viewModel) =>
+        LoadXamlComponent(() => new MainWindow(viewModel));
 
     /// <summary>保留中のディスパッチャ処理（束縛・レイアウト）を流し切る</summary>
     public static void DoEvents()
