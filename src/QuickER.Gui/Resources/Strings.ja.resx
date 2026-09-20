@@ -247,7 +247,7 @@
     <value>表示</value>
   </data>
   <data name="Toolbar_ViewGroupTooltip" xml:space="preserve">
-    <value>表示に関する切り替え</value>
+    <value>表示の切り替え: パネル・表示項目・全画面</value>
   </data>
   <data name="Toolbar_ArrangeGroup" xml:space="preserve">
     <value>整列</value>
@@ -469,7 +469,7 @@
     <value>空欄なら DDL 生成時に UQ_{テーブル}_{列…} を合成します</value>
   </data>
   <data name="Property_UniqueConstraintsToggleTooltip" xml:space="preserve">
-    <value>UNIQUE 制約の一覧を開閉します</value>
+    <value>UNIQUE 制約の一覧を開閉</value>
   </data>
   <data name="Property_Memo" xml:space="preserve">
     <value>メモ</value>

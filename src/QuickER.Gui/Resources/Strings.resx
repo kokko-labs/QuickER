@@ -225,7 +225,7 @@
     <value>View</value>
   </data>
   <data name="Toolbar_ViewGroupTooltip" xml:space="preserve">
-    <value>Display toggles</value>
+    <value>Display toggles: panels, diagram details, full screen</value>
   </data>
   <data name="Toolbar_ArrangeGroup" xml:space="preserve">
     <value>Arrange</value>
