@@ -237,6 +237,12 @@
   <data name="Toolbar_FullScreenTooltip" xml:space="preserve">
     <value>ウィンドウの枠を隠して画面いっぱいに広げる（F11）</value>
   </data>
+  <data name="Toolbar_ExitApp" xml:space="preserve">
+    <value>終了</value>
+  </data>
+  <data name="Toolbar_ExitAppTooltip" xml:space="preserve">
+    <value>QuickER を終了する（タイトルバーが隠れる全画面表示のときだけ表示）</value>
+  </data>
   <data name="Toolbar_ViewGroup" xml:space="preserve">
     <value>表示</value>
   </data>

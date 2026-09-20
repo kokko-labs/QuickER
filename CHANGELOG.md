@@ -49,7 +49,7 @@ Highlights of this release:
 
 - **The side panels can now be collapsed** — "Toolbox" (F9) and "Property panel" (F10), in the toolbar's new "View" group, hide the panels on the left and right so the canvas can use the whole window. A width you set by dragging the property panel's edge comes back when you show it again, and both states are restored on the next launch. Collapsing the toolbox while a relationship is being created also cancels that mode, because its notice and cancel button live in that panel
 
-- **F11 now switches to full screen** — the window frame is hidden and the window fills the screen. The toolbar and status bar stay, so combining it with the panel toggles (F9 / F10) leaves you with just the canvas. It is also in the toolbar's "View" group, and it is the one display state that is not restored on the next launch
+- **F11 now switches to full screen** — the window frame is hidden and the window fills the screen. The toolbar and status bar stay, so combining it with the panel toggles (F9 / F10) leaves you with just the canvas. It is also in the toolbar's "View" group, and it is the one display state that is not restored on the next launch. With the title bar hidden, an "Exit" button takes its place at the right end of the toolbar
 
 #### DB import & connections
 

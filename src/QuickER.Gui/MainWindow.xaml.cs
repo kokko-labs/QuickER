@@ -153,6 +153,17 @@ public partial class MainWindow : Window
         Keyboard.Focus(DiagramScrollViewer);
     }
 
+    /// <summary>全画面表示中の終了ボタン。タイトルバーの × と同じくウィンドウを閉じる</summary>
+    /// <remarks>
+    /// 全画面ではタイトルバーごと隠れるため × が無い。閉じる経路は <see cref="Window.Close"/> に揃え、
+    /// <see cref="MainWindow_Closing"/> の自動保存を必ず通す。<b>確認は出さない</b>＝代わりを務める
+    /// タイトルバーの × が確認を出さないため（未保存の変更は自動保存と復旧に委ねる既存の設計）。
+    /// </remarks>
+    private void ExitAppButton_Click(object sender, RoutedEventArgs e)
+    {
+        Close();
+    }
+
     /// <summary>ウィンドウ終了時に自動保存を行う</summary>
     /// <remarks>
     /// フィーチャーモジュール（AI チャット・モック生成など）のモードレスウィンドウ後始末は、

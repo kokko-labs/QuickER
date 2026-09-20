@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -228,6 +229,76 @@ public class PanelVisibilityTests
                 vm.SelectedEntity.Columns[0]
                     .Name.Should()
                     .Be("NewName", "セル編集中に畳んでも入力を捨ててはいけない");
+            }
+        );
+    }
+
+    /// <summary>
+    /// 全画面のときだけツールバー右端に終了ボタンが出て、押すとウィンドウが閉じることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 全画面ではタイトルバーごと隠れるため × が無い。その代わりを務めるので、押したときの経路は
+    /// <see cref="Window.Close"/>（＝自動保存を通る）に揃える。確認は出さない（元の × が出さないため）。
+    /// このテストは <c>Closing</c> を取り消して実際には閉じない（後始末はヘルパーに任せる）。
+    /// </remarks>
+    [Fact(DisplayName = "全画面表示: 終了ボタンは全画面のときだけ出て、押すと閉じる経路を通る")]
+    public void FullScreen_ExitButton_IsShownAndClosesWindow()
+    {
+        RunInIsolatedWindow(
+            (vm, window) =>
+            {
+                var exitButton = (Button)window.FindName("ExitAppButton")!;
+
+                exitButton
+                    .Visibility.Should()
+                    .Be(Visibility.Collapsed, "通常表示では × が出ている");
+
+                vm.IsFullScreen = true;
+                DoEvents();
+                exitButton.Visibility.Should().Be(Visibility.Visible);
+
+                var closing = 0;
+                void Cancel(object? sender, CancelEventArgs e)
+                {
+                    closing++;
+                    e.Cancel = true;
+                }
+
+                window.Closing += Cancel;
+
+                try
+                {
+                    exitButton.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent, exitButton));
+                    DoEvents();
+                }
+                finally
+                {
+                    window.Closing -= Cancel;
+                }
+
+                closing.Should().Be(1, "タイトルバーの × と同じく Closing（自動保存）を通る");
+
+                // タブ順には入れない。ツールバーへ Tab を入れた一撃目が「終了」になると、
+                // 確認を出さない設計と相まって Space / Enter でそのままアプリが終わる。
+                // タイトルバーの × はクライアント領域のタブ順に入らないので、そこへ揃える
+                exitButton.IsTabStop.Should().BeFalse();
+
+                var firstToolbarButton = FindVisualChildren<Button>(window)
+                    .First(button => ReferenceEquals(button.Command, vm.NewDiagramCommand));
+                firstToolbarButton.Focus();
+                DoEvents();
+                firstToolbarButton.MoveFocus(
+                    new TraversalRequest(FocusNavigationDirection.Previous)
+                );
+                DoEvents();
+
+                Keyboard
+                    .FocusedElement.Should()
+                    .NotBeSameAs(exitButton, "ツールバーの手前へ戻っても終了ボタンには止まらない");
+
+                vm.IsFullScreen = false;
+                DoEvents();
+                exitButton.Visibility.Should().Be(Visibility.Collapsed);
             }
         );
     }
