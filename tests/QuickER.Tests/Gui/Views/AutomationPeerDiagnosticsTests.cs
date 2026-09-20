@@ -103,7 +103,7 @@ public class AutomationPeerDiagnosticsTests
                 new GuiAppSettingsStore(folder),
                 Path.Combine(folder, "last_diagram.json")
             );
-            var window = new MainWindow(vm);
+            var window = WpfApplicationTestSupport.CreateMainWindow(vm);
 
             // 隔離により Initialize() は何も復元しないが、計測条件を明示するため初期状態を整える
             vm.Relationships.Clear();
