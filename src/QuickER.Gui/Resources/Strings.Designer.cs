@@ -393,7 +393,43 @@ namespace QuickER.Resources {
                 return ResourceManager.GetString("Toolbar_CompactViewTooltip", resourceCulture);
             }
         }
-        
+
+        public static string Toolbar_ToggleToolbox {
+            get {
+                return ResourceManager.GetString("Toolbar_ToggleToolbox", resourceCulture);
+            }
+        }
+
+        public static string Toolbar_ToggleToolboxTooltip {
+            get {
+                return ResourceManager.GetString("Toolbar_ToggleToolboxTooltip", resourceCulture);
+            }
+        }
+
+        public static string Toolbar_TogglePropertyPanel {
+            get {
+                return ResourceManager.GetString("Toolbar_TogglePropertyPanel", resourceCulture);
+            }
+        }
+
+        public static string Toolbar_TogglePropertyPanelTooltip {
+            get {
+                return ResourceManager.GetString("Toolbar_TogglePropertyPanelTooltip", resourceCulture);
+            }
+        }
+
+        public static string Toolbar_ViewGroup {
+            get {
+                return ResourceManager.GetString("Toolbar_ViewGroup", resourceCulture);
+            }
+        }
+
+        public static string Toolbar_ViewGroupTooltip {
+            get {
+                return ResourceManager.GetString("Toolbar_ViewGroupTooltip", resourceCulture);
+            }
+        }
+
         public static string Toolbar_ArrangeGroup {
             get {
                 return ResourceManager.GetString("Toolbar_ArrangeGroup", resourceCulture);

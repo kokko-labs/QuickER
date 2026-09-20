@@ -178,6 +178,19 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private bool _isUniqueConstraintCardExpanded;
 
+    /// <summary>左のツールボックスを表示するかどうか（ツールバー・F9 から切替。既定は表示）</summary>
+    /// <remarks>状態は GUI 設定へ永続化し、次回起動時に復元する</remarks>
+    [ObservableProperty]
+    private bool _isToolboxVisible = true;
+
+    /// <summary>右のプロパティパネルを表示するかどうか（ツールバー・F10 から切替。既定は表示）</summary>
+    /// <remarks>
+    /// 非表示中にエンティティを選択しても自動では出さない（図を広く見るために畳んでいるため）。
+    /// 状態は GUI 設定へ永続化し、次回起動時に復元する
+    /// </remarks>
+    [ObservableProperty]
+    private bool _isPropertyPanelVisible = true;
+
     /// <summary><see cref="ShowNullabilityInDiagram"/> のバッキングフィールド（既定は表示）</summary>
     private bool _showNullabilityInDiagram = true;
 
@@ -615,6 +628,28 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         RefreshCanvasSize();
     }
+
+    /// <summary>左のツールボックスを畳むときは、リレーション作成モードも中断する</summary>
+    /// <remarks>
+    /// 作成モードであることを示すヒントと「キャンセル」ボタンはツールボックス内にしかなく、
+    /// Esc も（作成途中の始点を巻き戻さないため）モードを解除しない。畳んだまま残すと、
+    /// 画面のどこにも表示されないモードだけが生き続けることになる。
+    /// </remarks>
+    partial void OnIsToolboxVisibleChanged(bool value)
+    {
+        if (!value)
+        {
+            CancelRelationshipMode();
+        }
+    }
+
+    /// <summary>左のツールボックスの表示・非表示を切り替える（F9）</summary>
+    [RelayCommand]
+    private void ToggleToolbox() => IsToolboxVisible = !IsToolboxVisible;
+
+    /// <summary>右のプロパティパネルの表示・非表示を切り替える（F10）</summary>
+    [RelayCommand]
+    private void TogglePropertyPanel() => IsPropertyPanelVisible = !IsPropertyPanelVisible;
 
     /// <summary>ER 図上のカラム行に NULL 許容を表示するかどうか（ツールバーから切替）</summary>
     /// <remarks>変更時に全エンティティへ設定を伝播する必要があるため、生成属性を使わず手動実装とする</remarks>

@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
 using System.Windows.Threading;
 using QuickER.Behaviors;
 using QuickER.Services;
@@ -100,12 +101,53 @@ public partial class MainWindow : Window
     /// <summary>整列ポップアップ内の項目クリック。コマンド実行に続けてポップアップを閉じる</summary>
     /// <remarks>
     /// 展開中にトグル自身を再クリックすると「自動クローズ→同じクリックで再トグル→即再展開」となるが
-    /// （StaysOpen=False の既知挙動）、実質「開いたまま」で違和感が小さく、閉じる手段は外側クリック・
-    /// Esc・項目クリックで足りるため、タイミング依存の抑止ガードは意図的に設けない（シンプル優先）。
+    /// （StaysOpen=False の既知挙動）、実質「開いたまま」で違和感が小さく、閉じる手段は外側クリックと
+    /// 項目クリックで足りるため、タイミング依存の抑止ガードは意図的に設けない（シンプル優先）。
+    /// キーボードフォーカスは本体側に残るため Esc では閉じない（実機で確認済み・表示グループも同じ）。
     /// </remarks>
     private void ArrangePopupItem_Click(object sender, RoutedEventArgs e)
     {
         ArrangeGroupToggle.IsChecked = false;
+    }
+
+    /// <summary>畳まれたパネルに論理フォーカスを残さず、キャンバス側へ移す</summary>
+    /// <remarks>
+    /// <para>
+    /// プロパティパネルの入力欄は <c>UpdateSourceTrigger=LostFocus</c> で、確定はフォーカスが外れた
+    /// 瞬間に起きる。ところが <see cref="UIElement.Visibility"/> を Collapsed にしてもキーボード
+    /// フォーカスがウィンドウへ移るだけで、<b>論理フォーカスは入力欄に残る</b>ため
+    /// <see cref="UIElement.LostFocus"/> が発火せず、入力途中の値が束縛へ渡らない。
+    /// </para>
+    /// <para>
+    /// 放置すると「パネルには打ち替えた文字列が出ているのにモデルは旧値」という食い違いが残り、
+    /// 別のエンティティを選んだ時点で入力が黙って消える（保存されるのは旧値）。畳む経路のうち
+    /// ツールバー経由はボタンへフォーカスが移って先に確定するため、これが要るのは F9 / F10 の経路。
+    /// </para>
+    /// <para>
+    /// 入力欄を持たないツールボックス側にも同じ配線をしてあるのは、あとから入力欄を足したときに
+    /// 同じ取りこぼしが静かに復活しないようにするため。
+    /// </para>
+    /// </remarks>
+    private void CollapsiblePanel_IsVisibleChanged(
+        object sender,
+        DependencyPropertyChangedEventArgs e
+    )
+    {
+        if (e.NewValue is true || sender is not Visual panel)
+        {
+            return;
+        }
+
+        if (
+            FocusManager.GetFocusedElement(this) is not Visual focused
+            || !panel.IsAncestorOf(focused)
+        )
+        {
+            return;
+        }
+
+        // キャンバス側へ移すことで LostFocus が発火し、入力途中の値が束縛へ確定する
+        Keyboard.Focus(DiagramScrollViewer);
     }
 
     /// <summary>ウィンドウ終了時に自動保存を行う</summary>

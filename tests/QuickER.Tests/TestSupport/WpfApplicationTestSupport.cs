@@ -1,8 +1,12 @@
+using System.IO;
 using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Threading;
 using AwesomeAssertions;
 using QuickER.Converters;
+using QuickER.Services;
+using QuickER.ViewModels;
 
 namespace QuickER.Tests.TestSupport;
 
@@ -93,5 +97,108 @@ internal static class WpfApplicationTestSupport
                 resources.Add("CountToVisibilityConverter", new CountToVisibilityConverter());
             }
         }
+    }
+
+    /// <summary>
+    /// 永続化を一時フォルダへ隔離したうえで、画面外に実 <c>MainWindow</c> を表示して検証を実行する。
+    /// </summary>
+    /// <param name="assert">表示済みウィンドウに対する検証</param>
+    /// <param name="seed">ウィンドウ生成前に設定ファイルを用意する処理（不要なら null）</param>
+    /// <remarks>
+    /// <para>
+    /// 束縛・配線・フォーカスの検証は、束縛先を間違えても WPF が無言で何もしないため
+    /// ヘッドレスな VM テストでは守れず、実ウィンドウの <c>Show</c> を要する。
+    /// </para>
+    /// <para>
+    /// <c>MainWindow</c> の ctor は実 <c>%LOCALAPPDATA%</c> の作業状態を復元し、<c>Close</c> の
+    /// 自動保存が書き戻すため、永続化先を一時フォルダへ隔離して実ユーザーデータの読み書きを断つ。
+    /// </para>
+    /// </remarks>
+    public static void RunInIsolatedWindow(
+        Action<MainViewModel, MainWindow> assert,
+        Action<string>? seed = null
+    )
+    {
+        Exception? captured = null;
+
+        var folder = Path.Combine(
+            Path.GetTempPath(),
+            "quicker-window-" + Guid.NewGuid().ToString("N")
+        );
+        Directory.CreateDirectory(folder);
+
+        try
+        {
+            seed?.Invoke(folder);
+
+            var thread = new Thread(() =>
+            {
+                try
+                {
+                    EnsureApplicationResources();
+
+                    var vm = new MainViewModel();
+                    vm.UsePersistenceForTests(
+                        new GuiAppSettingsStore(folder),
+                        Path.Combine(folder, "last_diagram.json")
+                    );
+                    var window = new MainWindow(vm)
+                    {
+                        // 画面外・非アクティブで表示する（開発者のデスクトップを妨げない）
+                        WindowStartupLocation = WindowStartupLocation.Manual,
+                        Left = -4000,
+                        Top = -4000,
+                        ShowActivated = false,
+                    };
+
+                    window.Show();
+                    window.UpdateLayout();
+                    DoEvents();
+
+                    try
+                    {
+                        assert(vm, window);
+                    }
+                    finally
+                    {
+                        window.Close();
+                        DoEvents();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    captured = ex;
+                }
+            });
+
+            thread.SetApartmentState(ApartmentState.STA);
+            thread.IsBackground = true;
+            thread.Start();
+            thread.Join();
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(folder, recursive: true);
+            }
+            catch
+            {
+                // 後始末の失敗はテスト結果に影響させない
+            }
+        }
+
+        captured.Should().BeNull(captured?.ToString());
+    }
+
+    /// <summary>保留中のディスパッチャ処理（束縛・レイアウト）を流し切る</summary>
+    public static void DoEvents()
+    {
+        var frame = new DispatcherFrame();
+        Dispatcher.CurrentDispatcher.BeginInvoke(
+            DispatcherPriority.ApplicationIdle,
+            new Action(() => frame.Continue = false)
+        );
+        Dispatcher.PushFrame(frame);
     }
 }

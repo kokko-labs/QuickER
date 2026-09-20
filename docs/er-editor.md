@@ -2,7 +2,7 @@
 
 *English | [日本語](er-editor.ja.md)*
 
-QuickER's main window has three panes. On the left is the "Toolbox" (creating entities and relationships), in the middle the canvas, and on the right the "Properties" panel (editing the selected element); the boundary between the middle and the right can be resized by dragging. Elements are edited not through dialogs but directly in the properties panel after selecting them.
+QuickER's main window has three panes. On the left is the "Toolbox" (creating entities and relationships), in the middle the canvas, and on the right the "Properties" panel (editing the selected element); the boundary between the middle and the right can be resized by dragging. Elements are edited not through dialogs but directly in the properties panel after selecting them. Both side panels can be collapsed from the toolbar (F9 / F10), so you can hide them and keep only the canvas when you want a wide view of the diagram.
 
 ## Entities
 
@@ -47,6 +47,8 @@ On the canvas, a column that belongs to a constraint is marked `UQ` in the key c
 
 Press "One-to-One," "One-to-Many," or "Many-to-Many" in the toolbox to enter creation mode, then click the two entities in turn to commit it. Clicking the same entity twice creates a self-referencing relationship. On creation, **every primary key column of the source is paired with a matching column on the target**, each looked up by name, and the constraint name is generated in the form `FK_<target>_<source>`. A source column with no matching target column is simply left out of the mapping (fill it in from the properties panel), and no target column is used twice.
 
+The toolbox shows that creation mode is active and offers a "Cancel" button for it. Collapsing the toolbox during creation mode also cancels the mode, because neither the notice nor the cancel button is visible once the panel is gone.
+
 If a relationship with the same start and end points already exists, the new one is rejected as a duplicate — select and edit the existing relationship instead. Only the direction that matches is treated as a duplicate, so B → A can still be created when A → B exists.
 
 ### Editing properties
@@ -71,7 +73,8 @@ Two supplementary notes:
 - **Minimap** — enabled with the status-bar toggle. Shown at the bottom right when the diagram does not fit in the viewport; click / drag to move the view
 - **Search** — Ctrl+F searches table and column names by partial match (case-insensitive). Enter moves to the next match, clicking a candidate jumps to it, and Esc closes the search
 - **Relationship highlighting** — selecting an entity or relationship emphasizes the connected elements and dims the unrelated ones
-- **Display toggles** — "Compact" on the toolbar (collapses column rows other than PK / FK), "Descriptions," and "Nullability." All three states are restored on the next launch
+- **Display toggles** — "View" on the toolbar opens a popup with five toggles: "Toolbox," "Property panel," "Descriptions," "Nullability," and "Compact" (collapses column rows other than PK / FK). The popup stays open as you flip them and closes when you click outside it. All five states are restored on the next launch
+- **Panel visibility** — "Toolbox" (F9) and "Property panel" (F10) collapse the left and right panels. The canvas takes over the space, and if you have resized the property panel by dragging, that width comes back when you show it again. Selecting an entity while the panel is hidden does not reopen it. Both states are restored on the next launch
 - **Auto-arrange** — the toolbar's "Grid," "Tree," and "Free" (places entities with a force-directed model, arranging them so that relationship lines come close to horizontal or vertical), plus "Auto Width" (adjusts widths so column names and types do not overlap)
 
 ## Multi-select and bulk operations
@@ -115,6 +118,7 @@ When the file of the open diagram is modified externally (by the MCP server or a
 | Esc | Clear the entity selection / close the search |
 | Ctrl+F | Search |
 | Ctrl+P | Print |
+| F9 / F10 | Show or hide the toolbox / property panel |
 | Ctrl+0 / Ctrl+Shift+0 | Zoom 100% / fit to window |
 | Ctrl++ / Ctrl+- | Zoom in / zoom out |
 

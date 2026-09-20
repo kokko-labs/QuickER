@@ -896,6 +896,71 @@ public class MainViewModelTests
         }
     }
 
+    /// <summary>初期化時に左右パネルの表示状態が自動保存から復元されることを検証する</summary>
+    [Fact(DisplayName = "左右パネルの表示状態は自動保存から復元される")]
+    public void Initialize_RestoresPanelVisibility()
+    {
+        var folder = Path.Combine(
+            Path.GetTempPath(),
+            "quicker-mainvm-" + Guid.NewGuid().ToString("N")
+        );
+        Directory.CreateDirectory(folder);
+
+        try
+        {
+            var vm = CreateIsolatedPersistenceViewModel(folder);
+
+            // 既定は両方とも表示
+            vm.IsToolboxVisible.Should().BeTrue();
+            vm.IsPropertyPanelVisible.Should().BeTrue();
+
+            vm.IsToolboxVisible = false;
+            vm.IsPropertyPanelVisible = false;
+            vm.AutoSave();
+
+            var restored = CreateIsolatedPersistenceViewModel(folder);
+            restored.Initialize();
+
+            restored.IsToolboxVisible.Should().BeFalse();
+            restored.IsPropertyPanelVisible.Should().BeFalse();
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(folder, recursive: true);
+            }
+            catch
+            {
+                // 後始末の失敗はテスト結果に影響させない
+            }
+        }
+    }
+
+    /// <summary>ツールボックスを畳むとリレーション作成モードが中断されることを検証する</summary>
+    /// <remarks>
+    /// 作成モードの表示と「キャンセル」ボタンはツールボックス内にしかなく、Esc でも解除されない。
+    /// 畳んだまま残すと、画面のどこにも現れないモードだけが生き続ける。
+    /// </remarks>
+    [Fact(DisplayName = "ツールボックスを畳むとリレーション作成モードは中断される")]
+    public void HidingToolbox_CancelsRelationshipMode()
+    {
+        var vm = new MainViewModel();
+        vm.AddEntityCommand.Execute(null);
+        vm.AddEntityCommand.Execute(null);
+        vm.StartAddOneToManyCommand.Execute(null);
+        vm.OnEntityClicked(vm.Entities[0]);
+
+        vm.IsRelationshipMode.Should().BeTrue();
+        vm.PendingRelationshipSource.Should().NotBeNull();
+
+        vm.IsToolboxVisible = false;
+
+        vm.IsRelationshipMode.Should().BeFalse();
+        vm.PendingRelationshipSource.Should().BeNull();
+        vm.Relationships.Should().BeEmpty();
+    }
+
     /// <summary>簡易表示の切替が全エンティティへ伝播することを検証する</summary>
     [Fact(DisplayName = "簡易表示の切替は全エンティティへ伝播する")]
     public void IsCompactViewInDiagram_PropagatesToAllEntities()
