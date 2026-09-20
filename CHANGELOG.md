@@ -47,6 +47,8 @@ Highlights of this release:
 
 - **A composite primary key now keeps and can edit its own column order** — schema import for all five dialects reads the order `PRIMARY KEY (b, a)` declares, and DDL, sync scripts and EF Core's `HasKey` emit it in that order too. A table with two or more key columns gets a "Primary key order" card in the properties panel for reordering them, and the AI tools gain `set_primary_key`, which sets the primary key together with its column order. Once a diagram states the order explicitly, reordering columns no longer changes the key's order. The DBML / Mermaid / Excel documents and the C# code import do not carry the order, and opening and saving the diagram with 0.1.0 drops it
 
+- **The side panels can now be collapsed** — "Toolbox" (F9) and "Property panel" (F10), in the toolbar's new "View" group, hide the panels on the left and right so the canvas can use the whole window. A width you set by dragging the property panel's edge comes back when you show it again, and both states are restored on the next launch. Collapsing the toolbox while a relationship is being created also cancels that mode, because its notice and cancel button live in that panel
+
 #### DB import & connections
 
 - **PostgreSQL and MySQL connections can ask for a TLS level** — pick one in the connection dialog's "Encryption (SSL Mode)" field. The default, `Unspecified`, connects exactly as before. Both drivers default to encrypting without validating the server certificate, so choose `VerifyCa` or `VerifyFull` to have it checked. What each dialect does, Oracle included, is summarized in [docs/database.md](docs/database.md)
@@ -67,6 +69,10 @@ Highlights of this release:
 - **The Settings button (⚙) has an About QuickER entry** — it shows the version, the .NET runtime, the copyright and links to the repository and the documentation, and copies the version details for bug reports with one click
 
 ### Changed
+
+#### Diagram editing & files
+
+- **The display toggles have moved into a "View" group on the toolbar** — "Descriptions," "Nullability" and "Compact" now live in the popup that button opens, together with the two new panel toggles. The popup stays open while you flip them, so the toolbar stays on one line as more toggles are added
 
 #### License
 

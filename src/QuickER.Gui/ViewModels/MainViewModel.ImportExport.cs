@@ -532,6 +532,11 @@ public partial class MainViewModel : IDiagramTransferHost
                 ShowNullability = ShowNullabilityInDiagram,
                 IsCompactView = IsCompactViewInDiagram,
             };
+            settings.Panels = new PanelVisibilitySettings
+            {
+                IsToolboxVisible = IsToolboxVisible,
+                IsPropertyPanelVisible = IsPropertyPanelVisible,
+            };
             settings.CurrentDocument = new CurrentDocumentSettings
             {
                 FilePath = CurrentFilePath,
@@ -563,6 +568,10 @@ public partial class MainViewModel : IDiagramTransferHost
         ShowColumnDescriptionsInDiagram = diagramView.ShowColumnDescriptions;
         ShowNullabilityInDiagram = diagramView.ShowNullability;
         IsCompactViewInDiagram = diagramView.IsCompactView;
+
+        var panels = settings.Panels;
+        IsToolboxVisible = panels.IsToolboxVisible;
+        IsPropertyPanelVisible = panels.IsPropertyPanelVisible;
 
         if (!File.Exists(_autoSavePath))
         {

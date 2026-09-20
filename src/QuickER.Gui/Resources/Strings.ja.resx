@@ -219,6 +219,24 @@
   <data name="Toolbar_CompactViewTooltip" xml:space="preserve">
     <value>ER 図のカラム行を PK/FK のみに絞って簡易表示</value>
   </data>
+  <data name="Toolbar_ToggleToolbox" xml:space="preserve">
+    <value>ツールボックス</value>
+  </data>
+  <data name="Toolbar_ToggleToolboxTooltip" xml:space="preserve">
+    <value>左のツールボックスの表示・非表示を切り替える（F9）</value>
+  </data>
+  <data name="Toolbar_TogglePropertyPanel" xml:space="preserve">
+    <value>プロパティパネル</value>
+  </data>
+  <data name="Toolbar_TogglePropertyPanelTooltip" xml:space="preserve">
+    <value>右のプロパティパネルの表示・非表示を切り替える（F10）</value>
+  </data>
+  <data name="Toolbar_ViewGroup" xml:space="preserve">
+    <value>表示</value>
+  </data>
+  <data name="Toolbar_ViewGroupTooltip" xml:space="preserve">
+    <value>表示トグル: ツールボックス / プロパティパネル / 説明表示 / NULL表示 / 簡易表示</value>
+  </data>
   <data name="Toolbar_ArrangeGroup" xml:space="preserve">
     <value>整列</value>
   </data>

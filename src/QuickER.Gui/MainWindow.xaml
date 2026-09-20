@@ -35,6 +35,10 @@
     <KeyBinding Key="F" Modifiers="Control" Command="{Binding OpenSearchCommand}" />
     <KeyBinding Key="P" Modifiers="Control" Command="{Binding PrintDiagramCommand}" />
 
+    <!-- 左右パネルの表示切替（ER 図を広く見るために畳む） -->
+    <KeyBinding Key="F9" Command="{Binding ToggleToolboxCommand}" />
+    <KeyBinding Key="F10" Command="{Binding TogglePropertyPanelCommand}" />
+
     <!-- ズーム: Ctrl+0=100% / Ctrl+Shift+0=fit / Ctrl+Plus・Minus でズーム（OemPlus/Add・OemMinus/Subtract 両対応） -->
     <KeyBinding Key="D0" Modifiers="Control" Command="{Binding ResetZoomCommand}" />
     <KeyBinding Key="D0" Modifiers="Control+Shift" Command="{Binding FitToWindowCommand}" />
@@ -665,45 +669,112 @@
           </StackPanel>
         </Button>
         <Rectangle Style="{StaticResource ToolBarSeparator}" />
+        <!--
+          表示グループ: 表示トグル 5 種を 1 ボタンへ集約し、クリックで直下のポップアップに展開する
+          （ツールバー幅の節約）。整列グループと違い項目クリックでは閉じない＝状態のトグルを
+          続けて切り替えられるようにする（閉じるのはポップアップの外側のクリック。
+          キーボードフォーカスは本体に残るため Esc では閉じない＝整列グループと同じ）。
+          5 つとも効果が画面そのものに出る（カラム行の増減・パネルの有無）ため、
+          ツールバー上で ON / OFF を示さなくても現在の状態は分かる。
+        -->
         <ToggleButton
+          x:Name="ViewGroupToggle"
           Style="{StaticResource ToolBarLabelToggleButton}"
-          IsChecked="{Binding ShowColumnDescriptionsInDiagram, Mode=TwoWay}"
-          ToolTip="{x:Static resources:Strings.Toolbar_ShowDescriptionsTooltip}"
+          MinWidth="54"
+          ToolTip="{x:Static resources:Strings.Toolbar_ViewGroupTooltip}"
         >
           <StackPanel>
-            <TextBlock Style="{StaticResource ToolBarIcon}" Text="💬" />
-            <TextBlock
-              Style="{StaticResource ToolBarCaption}"
-              Text="{x:Static resources:Strings.Toolbar_ShowDescriptions}"
-            />
+            <TextBlock Style="{StaticResource ToolBarIcon}" Text="◫" />
+            <TextBlock Style="{StaticResource ToolBarCaption}">
+              <Run Text="{x:Static resources:Strings.Toolbar_ViewGroup}" />
+              <Run Text=" ▾" />
+            </TextBlock>
           </StackPanel>
         </ToggleButton>
-        <ToggleButton
-          Style="{StaticResource ToolBarLabelToggleButton}"
-          IsChecked="{Binding ShowNullabilityInDiagram, Mode=TwoWay}"
-          ToolTip="{x:Static resources:Strings.Toolbar_ShowNullabilityTooltip}"
+        <Popup
+          x:Name="ViewPopup"
+          IsOpen="{Binding IsChecked, ElementName=ViewGroupToggle, Mode=TwoWay}"
+          PlacementTarget="{Binding ElementName=ViewGroupToggle}"
+          Placement="Bottom"
+          StaysOpen="False"
         >
-          <StackPanel>
-            <TextBlock Style="{StaticResource ToolBarIcon}" Text="∅" />
-            <TextBlock
-              Style="{StaticResource ToolBarCaption}"
-              Text="{x:Static resources:Strings.Toolbar_ShowNullability}"
-            />
-          </StackPanel>
-        </ToggleButton>
-        <ToggleButton
-          Style="{StaticResource ToolBarLabelToggleButton}"
-          IsChecked="{Binding IsCompactViewInDiagram, Mode=TwoWay}"
-          ToolTip="{x:Static resources:Strings.Toolbar_CompactViewTooltip}"
-        >
-          <StackPanel>
-            <TextBlock Style="{StaticResource ToolBarIcon}" Text="▤" />
-            <TextBlock
-              Style="{StaticResource ToolBarCaption}"
-              Text="{x:Static resources:Strings.Toolbar_CompactView}"
-            />
-          </StackPanel>
-        </ToggleButton>
+          <Border
+            Background="White"
+            BorderBrush="#D1D5DB"
+            BorderThickness="1"
+            CornerRadius="4"
+            Padding="2"
+          >
+            <StackPanel Orientation="Horizontal">
+              <!-- 左右パネルの表示トグル（ER 図を広く見るために畳む）。状態は次回起動時に復元される -->
+              <ToggleButton
+                Style="{StaticResource ToolBarLabelToggleButton}"
+                IsChecked="{Binding IsToolboxVisible, Mode=TwoWay}"
+                ToolTip="{x:Static resources:Strings.Toolbar_ToggleToolboxTooltip}"
+              >
+                <StackPanel>
+                  <TextBlock Style="{StaticResource ToolBarIcon}" Text="◧" />
+                  <TextBlock
+                    Style="{StaticResource ToolBarCaption}"
+                    Text="{x:Static resources:Strings.Toolbar_ToggleToolbox}"
+                  />
+                </StackPanel>
+              </ToggleButton>
+              <ToggleButton
+                Style="{StaticResource ToolBarLabelToggleButton}"
+                IsChecked="{Binding IsPropertyPanelVisible, Mode=TwoWay}"
+                ToolTip="{x:Static resources:Strings.Toolbar_TogglePropertyPanelTooltip}"
+              >
+                <StackPanel>
+                  <TextBlock Style="{StaticResource ToolBarIcon}" Text="◨" />
+                  <TextBlock
+                    Style="{StaticResource ToolBarCaption}"
+                    Text="{x:Static resources:Strings.Toolbar_TogglePropertyPanel}"
+                  />
+                </StackPanel>
+              </ToggleButton>
+              <ToggleButton
+                Style="{StaticResource ToolBarLabelToggleButton}"
+                IsChecked="{Binding ShowColumnDescriptionsInDiagram, Mode=TwoWay}"
+                ToolTip="{x:Static resources:Strings.Toolbar_ShowDescriptionsTooltip}"
+              >
+                <StackPanel>
+                  <TextBlock Style="{StaticResource ToolBarIcon}" Text="💬" />
+                  <TextBlock
+                    Style="{StaticResource ToolBarCaption}"
+                    Text="{x:Static resources:Strings.Toolbar_ShowDescriptions}"
+                  />
+                </StackPanel>
+              </ToggleButton>
+              <ToggleButton
+                Style="{StaticResource ToolBarLabelToggleButton}"
+                IsChecked="{Binding ShowNullabilityInDiagram, Mode=TwoWay}"
+                ToolTip="{x:Static resources:Strings.Toolbar_ShowNullabilityTooltip}"
+              >
+                <StackPanel>
+                  <TextBlock Style="{StaticResource ToolBarIcon}" Text="∅" />
+                  <TextBlock
+                    Style="{StaticResource ToolBarCaption}"
+                    Text="{x:Static resources:Strings.Toolbar_ShowNullability}"
+                  />
+                </StackPanel>
+              </ToggleButton>
+              <ToggleButton
+                Style="{StaticResource ToolBarLabelToggleButton}"
+                IsChecked="{Binding IsCompactViewInDiagram, Mode=TwoWay}"
+                ToolTip="{x:Static resources:Strings.Toolbar_CompactViewTooltip}"
+              >
+                <StackPanel>
+                  <TextBlock Style="{StaticResource ToolBarIcon}" Text="▤" />
+                  <TextBlock
+                    Style="{StaticResource ToolBarCaption}"
+                    Text="{x:Static resources:Strings.Toolbar_CompactView}"
+                  />
+                </StackPanel>
+              </ToggleButton>
+            </StackPanel>
+          </Border>
+        </Popup>
         <Rectangle Style="{StaticResource ToolBarSeparator}" />
         <!-- 整列グループ: 整列 3 種＋幅自動を 1 ボタンへ集約し、クリックで直下のポップアップに展開する（ツールバー幅の節約） -->
         <ToggleButton
@@ -1007,12 +1078,27 @@
       </DockPanel>
     </Border>
 
-    <Grid>
+    <Grid x:Name="MainContentGrid">
+      <!--
+        左右のパネルは畳める（ツールバーのトグル・F9 / F10）。中身を Collapsed にするだけでは
+        列が宣言幅を占有し続けるため、列そのものを CollapsibleColumnBehavior で 0 幅にする。
+        スプリッタの列も畳まないと、プロパティパネルを隠したあとに 5px の帯が残る。
+      -->
       <Grid.ColumnDefinitions>
-        <ColumnDefinition Width="200" />
+        <ColumnDefinition
+          Width="200"
+          beh:CollapsibleColumnBehavior.IsExpanded="{Binding IsToolboxVisible}"
+        />
         <ColumnDefinition Width="*" />
-        <ColumnDefinition Width="5" />
-        <ColumnDefinition Width="560" MinWidth="300" />
+        <ColumnDefinition
+          Width="5"
+          beh:CollapsibleColumnBehavior.IsExpanded="{Binding IsPropertyPanelVisible}"
+        />
+        <ColumnDefinition
+          Width="560"
+          MinWidth="300"
+          beh:CollapsibleColumnBehavior.IsExpanded="{Binding IsPropertyPanelVisible}"
+        />
       </Grid.ColumnDefinitions>
 
       <!-- GridSplitter: ER図とプロパティパネルの境界ドラッグ -->
@@ -1022,6 +1108,7 @@
         HorizontalAlignment="Stretch"
         Background="{StaticResource DividerBrush}"
         Cursor="SizeWE"
+        Visibility="{Binding IsPropertyPanelVisible, Converter={StaticResource BoolToVisibilityConverter}}"
       />
 
       <!-- 左: ツールボックス -->
@@ -1030,6 +1117,8 @@
         Background="{StaticResource SidebarBg}"
         BorderBrush="{StaticResource DividerBrush}"
         BorderThickness="0,0,1,0"
+        Visibility="{Binding IsToolboxVisible, Converter={StaticResource BoolToVisibilityConverter}}"
+        IsVisibleChanged="CollapsiblePanel_IsVisibleChanged"
       >
         <ScrollViewer VerticalScrollBarVisibility="Auto">
           <StackPanel Margin="12,10,12,12">
@@ -1903,6 +1992,8 @@
         Background="{StaticResource SidebarBg}"
         BorderBrush="{StaticResource DividerBrush}"
         BorderThickness="1,0,0,0"
+        Visibility="{Binding IsPropertyPanelVisible, Converter={StaticResource BoolToVisibilityConverter}}"
+        IsVisibleChanged="CollapsiblePanel_IsVisibleChanged"
       >
         <ScrollViewer VerticalScrollBarVisibility="Auto">
           <StackPanel Margin="12,10,12,12">

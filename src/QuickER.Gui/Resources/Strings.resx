@@ -197,6 +197,24 @@
   <data name="Toolbar_CompactViewTooltip" xml:space="preserve">
     <value>Compact view showing only PK/FK columns in the ER diagram</value>
   </data>
+  <data name="Toolbar_ToggleToolbox" xml:space="preserve">
+    <value>Toolbox</value>
+  </data>
+  <data name="Toolbar_ToggleToolboxTooltip" xml:space="preserve">
+    <value>Show or hide the toolbox on the left (F9)</value>
+  </data>
+  <data name="Toolbar_TogglePropertyPanel" xml:space="preserve">
+    <value>Property panel</value>
+  </data>
+  <data name="Toolbar_TogglePropertyPanelTooltip" xml:space="preserve">
+    <value>Show or hide the property panel on the right (F10)</value>
+  </data>
+  <data name="Toolbar_ViewGroup" xml:space="preserve">
+    <value>View</value>
+  </data>
+  <data name="Toolbar_ViewGroupTooltip" xml:space="preserve">
+    <value>Display toggles: toolbox / property panel / descriptions / nullability / compact</value>
+  </data>
   <data name="Toolbar_ArrangeGroup" xml:space="preserve">
     <value>Arrange</value>
   </data>

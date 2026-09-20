@@ -24,6 +24,9 @@ public class GuiAppSettings
     /// <summary>ダイアグラム上の表示トグル（自動保存で書き込まれ、次回起動時に復元する）</summary>
     public DiagramViewSettings DiagramView { get; set; } = new();
 
+    /// <summary>メイン画面の左右パネルの表示状態（自動保存で書き込まれ、次回起動時に復元する）</summary>
+    public PanelVisibilitySettings Panels { get; set; } = new();
+
     /// <summary>
     /// 現在編集中の文書メタ（紐付くファイルパス・最終既知ファイルハッシュ・ダーティ状態）。
     /// 自動保存の作業状態（last_diagram.json）とは別に、どのファイルに紐付いているかを記録する。
@@ -60,6 +63,21 @@ public class DiagramViewSettings
 
     /// <summary>ダイアグラム上で簡易表示（PK/FK カラムのみ）を行うかどうか</summary>
     public bool IsCompactView { get; set; }
+}
+
+/// <summary>メイン画面の左右パネルの表示状態（次回起動時に復元する自動保存対象）</summary>
+/// <remarks>
+/// 図の描き方を変える <see cref="DiagramViewSettings"/> とは別概念（画面の広さの話）のため、
+/// セクションを分けている。いずれも既定は表示＝このキーを持たない既存の設定ファイルは
+/// 従来どおり両パネルが出た状態で読み込まれる。
+/// </remarks>
+public class PanelVisibilitySettings
+{
+    /// <summary>左のツールボックスを表示するかどうか</summary>
+    public bool IsToolboxVisible { get; set; } = true;
+
+    /// <summary>右のプロパティパネルを表示するかどうか</summary>
+    public bool IsPropertyPanelVisible { get; set; } = true;
 }
 
 /// <summary>
