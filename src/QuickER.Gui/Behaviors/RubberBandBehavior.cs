@@ -34,21 +34,27 @@ public static class RubberBandBehavior
     /// <summary>ドラッグ開始とみなす移動量の閾値（px。<see cref="DragBehavior"/> のクリック閾値と揃える）</summary>
     private const double DragThreshold = 3.0;
 
-    // 内部状態は静的フィールドで保持する（同時にラバーバンド可能な面は 1 つに限られる前提）
+    // 内部状態は静的フィールドで保持する（同時にラバーバンド可能な面は 1 つに限られる前提）。
+    // [ThreadStatic] の理由は DragBehavior と同じ（状態は UI スレッドの持ち物）。
 
     /// <summary>ドラッグ対象の要素（DiagramCanvas）</summary>
+    [ThreadStatic]
     private static FrameworkElement? _surface;
 
     /// <summary>押下時のキャンバス座標</summary>
+    [ThreadStatic]
     private static Point _origin;
 
     /// <summary>ボタン押下後・閾値判定待ちかどうか</summary>
+    [ThreadStatic]
     private static bool _pending;
 
     /// <summary>ラバーバンドが成立して選択矩形を描画中かどうか</summary>
+    [ThreadStatic]
     private static bool _active;
 
     /// <summary>Ctrl 押下（既存選択への追加）でドラッグを開始したかどうか</summary>
+    [ThreadStatic]
     private static bool _additive;
 
     // ---------- 添付プロパティ ----------

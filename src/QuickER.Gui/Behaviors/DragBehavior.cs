@@ -64,36 +64,61 @@ public static class DragBehavior
     public static UndoRedoManager? GetUndoRedoManager(DependencyObject d) =>
         (UndoRedoManager?)d.GetValue(UndoRedoManagerProperty);
 
-    // 内部状態は静的フィールドで保持する 同時にドラッグ可能な要素は 1 つに限られる前提
+    // 内部状態は静的フィールドで保持する（同時にドラッグ可能な要素は 1 つに限られる前提）。
+    // 状態は UI スレッドの持ち物なので [ThreadStatic] を付ける。本番はドラッグ処理（ルーティング
+    // イベント）もキャンセル（Dispatcher 経由の外部変更処理）も単一 UI スレッド上なので意味は変わらず、
+    // 並列実行されるテストのスレッド間で状態を奪い合わなくなる（DragBehaviorCancelTests が固定）。
 
     /// <summary>ドラッグ開始時のキャンバス座標系マウス位置</summary>
+    [ThreadStatic]
     private static Point _startMouse;
 
-    /// <summary>ドラッグ開始時の対象 X / Y 座標</summary>
+    /// <summary>ドラッグ開始時の対象 X 座標</summary>
+    [ThreadStatic]
     private static double _startX;
+
+    /// <summary>ドラッグ開始時の対象 Y 座標</summary>
+    [ThreadStatic]
     private static double _startY;
 
     /// <summary>移動ドラッグ中かどうか</summary>
+    [ThreadStatic]
     private static bool _isDragging;
 
     /// <summary>右端グリップによるリサイズ中かどうか</summary>
+    [ThreadStatic]
     private static bool _isResizing;
 
     /// <summary>リサイズ開始時の幅</summary>
+    [ThreadStatic]
     private static double _startWidth;
 
     /// <summary>ドラッグ中の要素</summary>
+    [ThreadStatic]
     private static FrameworkElement? _draggedElement;
 
     /// <summary>ドラッグ中要素に対応するエンティティ ViewModel</summary>
+    [ThreadStatic]
     private static EntityViewModel? _draggedVm;
 
     /// <summary>グループ移動中かどうか（選択済みメンバーを Ctrl なしで押下したとき）</summary>
+    [ThreadStatic]
     private static bool _isGroupDragging;
 
     /// <summary>グループ移動対象メンバーとドラッグ開始時の座標（押下対象を含む全選択メンバー）</summary>
-    private static List<(EntityViewModel Entity, double StartX, double StartY)> _groupMembers =
-        new();
+    [ThreadStatic]
+    private static List<(EntityViewModel Entity, double StartX, double StartY)>? _groupMembers;
+
+    /// <summary>グループ移動メンバーの読み書き窓口</summary>
+    /// <remarks>
+    /// <see cref="ThreadStaticAttribute"/> を付けたフィールドの初期化子は最初のスレッドでしか
+    /// 走らないため、フィールドは null 許容にして「null＝空」をここで吸収する。
+    /// </remarks>
+    private static List<(EntityViewModel Entity, double StartX, double StartY)> GroupMembers
+    {
+        get => _groupMembers ??= new();
+        set => _groupMembers = value;
+    }
 
     /// <summary>右端リサイズグリップの幅 (px)</summary>
     private const double GripWidth = 8;
@@ -185,7 +210,7 @@ public static class DragBehavior
         _startX = vm.X;
         _startY = vm.Y;
         _isGroupDragging = false;
-        _groupMembers = new List<(EntityViewModel, double, double)>();
+        GroupMembers = new List<(EntityViewModel, double, double)>();
 
         // 右端グリップ範囲の押下はリサイズ、それ以外は移動として扱う
         var local = e.GetPosition(fe);
@@ -213,7 +238,7 @@ public static class DragBehavior
             )
             {
                 _isGroupDragging = true;
-                _groupMembers = main.SelectedEntities.Select(m => (m, m.X, m.Y)).ToList();
+                GroupMembers = main.SelectedEntities.Select(m => (m, m.X, m.Y)).ToList();
             }
         }
 
@@ -268,11 +293,11 @@ public static class DragBehavior
             var rawDeltaX = pos.X - _startMouse.X;
             var rawDeltaY = pos.Y - _startMouse.Y;
 
-            var minX = _groupMembers.Min(m => m.StartX);
-            var minY = _groupMembers.Min(m => m.StartY);
+            var minX = GroupMembers.Min(m => m.StartX);
+            var minY = GroupMembers.Min(m => m.StartY);
             var (deltaX, deltaY) = MainViewModel.ClampGroupDelta(minX, minY, rawDeltaX, rawDeltaY);
 
-            foreach (var member in _groupMembers)
+            foreach (var member in GroupMembers)
             {
                 member.Entity.X = member.StartX + deltaX;
                 member.Entity.Y = member.StartY + deltaY;
@@ -328,12 +353,12 @@ public static class DragBehavior
         var oldWidth = _startWidth;
         var wasResizing = _isResizing;
         var wasGroupDragging = _isGroupDragging;
-        var groupMembers = _groupMembers;
+        var groupMembers = GroupMembers;
 
         _isDragging = false;
         _isResizing = false;
         _isGroupDragging = false;
-        _groupMembers = new List<(EntityViewModel, double, double)>();
+        GroupMembers = new List<(EntityViewModel, double, double)>();
         _draggedElement = null;
         _draggedVm = null;
 
@@ -449,7 +474,7 @@ public static class DragBehavior
         var startWidth = _startWidth;
         var wasResizing = _isResizing;
         var wasGroupDragging = _isGroupDragging;
-        var groupMembers = _groupMembers;
+        var groupMembers = GroupMembers;
         var wasActive = _isDragging || _isResizing;
 
         // 後続の MouseUp / MouseMove / LostMouseCapture を素通りさせるため、
@@ -457,7 +482,7 @@ public static class DragBehavior
         _isDragging = false;
         _isResizing = false;
         _isGroupDragging = false;
-        _groupMembers = new List<(EntityViewModel, double, double)>();
+        GroupMembers = new List<(EntityViewModel, double, double)>();
         _draggedElement = null;
         _draggedVm = null;
 
@@ -527,7 +552,7 @@ public static class DragBehavior
         _isResizing = resizing;
         _isDragging = !resizing;
         _isGroupDragging = !resizing && groupMembers is not null;
-        _groupMembers = groupMembers is null
+        GroupMembers = groupMembers is null
             ? new List<(EntityViewModel, double, double)>()
             : groupMembers.Select(m => (m.Entity, m.StartX, m.StartY)).ToList();
     }
