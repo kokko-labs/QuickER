@@ -38,6 +38,7 @@
     <!-- 左右パネルの表示切替（ER 図を広く見るために畳む） -->
     <KeyBinding Key="F9" Command="{Binding ToggleToolboxCommand}" />
     <KeyBinding Key="F10" Command="{Binding TogglePropertyPanelCommand}" />
+    <KeyBinding Key="F11" Command="{Binding ToggleFullScreenCommand}" />
 
     <!-- ズーム: Ctrl+0=100% / Ctrl+Shift+0=fit / Ctrl+Plus・Minus でズーム（OemPlus/Add・OemMinus/Subtract 両対応） -->
     <KeyBinding Key="D0" Modifiers="Control" Command="{Binding ResetZoomCommand}" />
@@ -769,6 +770,20 @@
                   <TextBlock
                     Style="{StaticResource ToolBarCaption}"
                     Text="{x:Static resources:Strings.Toolbar_CompactView}"
+                  />
+                </StackPanel>
+              </ToggleButton>
+              <!-- 全画面表示だけは永続化しない（枠の無い状態で起動すると原因が分からず戸惑うため） -->
+              <ToggleButton
+                Style="{StaticResource ToolBarLabelToggleButton}"
+                IsChecked="{Binding IsFullScreen, Mode=TwoWay}"
+                ToolTip="{x:Static resources:Strings.Toolbar_FullScreenTooltip}"
+              >
+                <StackPanel>
+                  <TextBlock Style="{StaticResource ToolBarIcon}" Text="⤢" />
+                  <TextBlock
+                    Style="{StaticResource ToolBarCaption}"
+                    Text="{x:Static resources:Strings.Toolbar_FullScreen}"
                   />
                 </StackPanel>
               </ToggleButton>

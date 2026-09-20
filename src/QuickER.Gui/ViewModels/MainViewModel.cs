@@ -191,6 +191,16 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private bool _isPropertyPanelVisible = true;
 
+    /// <summary>全画面表示（ウィンドウの枠を隠して画面いっぱいに広げる）かどうか（ツールバー・F11 から切替）</summary>
+    /// <remarks>
+    /// 隠すのはウィンドウの枠だけで、ツールバーとステータスバーは残す。パネルの表示切替（F9 / F10）と
+    /// 重ねれば「キャンバスだけ」も作れるため、この 1 つで全部を隠す必要はない。ツールバーが残ることは
+    /// 「表示」グループのトグルから解除できるという意味でもある（枠が消えて閉じるボタンが無くなるため）。
+    /// パネルの表示状態と違い**永続化しない**＝枠の無い状態で起動すると原因が分からず戸惑うため。
+    /// </remarks>
+    [ObservableProperty]
+    private bool _isFullScreen;
+
     /// <summary><see cref="ShowNullabilityInDiagram"/> のバッキングフィールド（既定は表示）</summary>
     private bool _showNullabilityInDiagram = true;
 
@@ -650,6 +660,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// <summary>右のプロパティパネルの表示・非表示を切り替える（F10）</summary>
     [RelayCommand]
     private void TogglePropertyPanel() => IsPropertyPanelVisible = !IsPropertyPanelVisible;
+
+    /// <summary>全画面表示を切り替える（F11）</summary>
+    [RelayCommand]
+    private void ToggleFullScreen() => IsFullScreen = !IsFullScreen;
 
     /// <summary>ER 図上のカラム行に NULL 許容を表示するかどうか（ツールバーから切替）</summary>
     /// <remarks>変更時に全エンティティへ設定を伝播する必要があるため、生成属性を使わず手動実装とする</remarks>

@@ -231,11 +231,17 @@
   <data name="Toolbar_TogglePropertyPanelTooltip" xml:space="preserve">
     <value>右のプロパティパネルの表示・非表示を切り替える（F10）</value>
   </data>
+  <data name="Toolbar_FullScreen" xml:space="preserve">
+    <value>全画面</value>
+  </data>
+  <data name="Toolbar_FullScreenTooltip" xml:space="preserve">
+    <value>ウィンドウの枠を隠して画面いっぱいに広げる（F11）</value>
+  </data>
   <data name="Toolbar_ViewGroup" xml:space="preserve">
     <value>表示</value>
   </data>
   <data name="Toolbar_ViewGroupTooltip" xml:space="preserve">
-    <value>表示トグル: ツールボックス / プロパティパネル / 説明表示 / NULL表示 / 簡易表示</value>
+    <value>表示トグル: ツールボックス / プロパティパネル / 説明表示 / NULL表示 / 簡易表示 / 全画面</value>
   </data>
   <data name="Toolbar_ArrangeGroup" xml:space="preserve">
     <value>整列</value>

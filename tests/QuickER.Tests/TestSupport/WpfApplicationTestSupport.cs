@@ -113,6 +113,11 @@ internal static class WpfApplicationTestSupport
     /// <c>MainWindow</c> の ctor は実 <c>%LOCALAPPDATA%</c> の作業状態を復元し、<c>Close</c> の
     /// 自動保存が書き戻すため、永続化先を一時フォルダへ隔離して実ユーザーデータの読み書きを断つ。
     /// </para>
+    /// <para>
+    /// 画面外へ置くのは開発者のデスクトップを妨げないためだが、<b>全画面表示を扱うテストだけは
+    /// 実際に主モニタへ最大化される</b>（最大化する以上は避けられない）。<c>ShowActivated=false</c> の
+    /// ままなのでフォアグラウンドは奪わず、直後に解除される。
+    /// </para>
     /// </remarks>
     public static void RunInIsolatedWindow(
         Action<MainViewModel, MainWindow> assert,

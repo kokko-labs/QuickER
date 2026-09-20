@@ -73,7 +73,8 @@ Two supplementary notes:
 - **Minimap** — enabled with the status-bar toggle. Shown at the bottom right when the diagram does not fit in the viewport; click / drag to move the view
 - **Search** — Ctrl+F searches table and column names by partial match (case-insensitive). Enter moves to the next match, clicking a candidate jumps to it, and Esc closes the search
 - **Relationship highlighting** — selecting an entity or relationship emphasizes the connected elements and dims the unrelated ones
-- **Display toggles** — "View" on the toolbar opens a popup with five toggles: "Toolbox," "Property panel," "Descriptions," "Nullability," and "Compact" (collapses column rows other than PK / FK). The popup stays open as you flip them and closes when you click outside it. All five states are restored on the next launch
+- **Display toggles** — "View" on the toolbar opens a popup with six toggles: "Toolbox," "Property panel," "Descriptions," "Nullability," "Compact" (collapses column rows other than PK / FK), and "Full screen." The popup stays open as you flip them and closes when you click outside it. Every state except full screen is restored on the next launch
+- **Full screen** — "Full screen" (F11) hides the window frame and fills the screen. The toolbar and status bar stay, so combining it with the panel toggles below leaves you with just the canvas. Exit with F11 or the same toggle in the "View" group; this is the one state that is not restored on the next launch
 - **Panel visibility** — "Toolbox" (F9) and "Property panel" (F10) collapse the left and right panels. The canvas takes over the space, and if you have resized the property panel by dragging, that width comes back when you show it again. Selecting an entity while the panel is hidden does not reopen it. Both states are restored on the next launch
 - **Auto-arrange** — the toolbar's "Grid," "Tree," and "Free" (places entities with a force-directed model, arranging them so that relationship lines come close to horizontal or vertical), plus "Auto Width" (adjusts widths so column names and types do not overlap)
 
@@ -119,6 +120,7 @@ When the file of the open diagram is modified externally (by the MCP server or a
 | Ctrl+F | Search |
 | Ctrl+P | Print |
 | F9 / F10 | Show or hide the toolbox / property panel |
+| F11 | Toggle full screen |
 | Ctrl+0 / Ctrl+Shift+0 | Zoom 100% / fit to window |
 | Ctrl++ / Ctrl+- | Zoom in / zoom out |
 
