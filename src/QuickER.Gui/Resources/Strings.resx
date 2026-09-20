@@ -177,7 +177,7 @@
     <value>Duplicate</value>
   </data>
   <data name="Toolbar_DuplicateTooltip" xml:space="preserve">
-    <value>Duplicate (Ctrl+D)</value>
+    <value>Duplicate the selected entity (Ctrl+D)</value>
   </data>
   <data name="Toolbar_ShowDescriptions" xml:space="preserve">
     <value>Descriptions</value>
@@ -201,13 +201,13 @@
     <value>Toolbox</value>
   </data>
   <data name="Toolbar_ToggleToolboxTooltip" xml:space="preserve">
-    <value>Show or hide the toolbox on the left (F9)</value>
+    <value>Show or hide the toolbox (F9)</value>
   </data>
   <data name="Toolbar_TogglePropertyPanel" xml:space="preserve">
     <value>Property panel</value>
   </data>
   <data name="Toolbar_TogglePropertyPanelTooltip" xml:space="preserve">
-    <value>Show or hide the property panel on the right (F10)</value>
+    <value>Show or hide the property panel (F10)</value>
   </data>
   <data name="Toolbar_FullScreen" xml:space="preserve">
     <value>Full screen</value>
@@ -219,13 +219,13 @@
     <value>Exit</value>
   </data>
   <data name="Toolbar_ExitAppTooltip" xml:space="preserve">
-    <value>Exit QuickER (shown in full screen, where the title bar is hidden)</value>
+    <value>Exit QuickER</value>
   </data>
   <data name="Toolbar_ViewGroup" xml:space="preserve">
     <value>View</value>
   </data>
   <data name="Toolbar_ViewGroupTooltip" xml:space="preserve">
-    <value>Display toggles: toolbox / property panel / descriptions / nullability / compact / full screen</value>
+    <value>Display toggles</value>
   </data>
   <data name="Toolbar_ArrangeGroup" xml:space="preserve">
     <value>Arrange</value>
@@ -249,7 +249,7 @@
     <value>Free</value>
   </data>
   <data name="Toolbar_ArrangeForceTooltip" xml:space="preserve">
-    <value>Roughly place by relationship connections, then align to a grid</value>
+    <value>Place by relationship connections, then align to a grid</value>
   </data>
   <data name="Toolbar_AutoWidth" xml:space="preserve">
     <value>Auto Width</value>
@@ -297,7 +297,7 @@
     <value>Zoom out (Ctrl+-)</value>
   </data>
   <data name="Status_ZoomResetTooltip" xml:space="preserve">
-    <value>Click to reset to 100% (Ctrl+0)</value>
+    <value>Reset to 100% (Ctrl+0)</value>
   </data>
   <data name="Status_ZoomInTooltip" xml:space="preserve">
     <value>Zoom in (Ctrl++)</value>
@@ -333,7 +333,7 @@
     <value>Add Entity</value>
   </data>
   <data name="Toolbox_AddEntityTooltip" xml:space="preserve">
-    <value>Add a new table to the canvas</value>
+    <value>Add a new entity to the diagram</value>
   </data>
   <data name="Toolbox_RemoveEntity" xml:space="preserve">
     <value>Delete Entity</value>
@@ -348,19 +348,19 @@
     <value>One-to-One</value>
   </data>
   <data name="Toolbox_OneToOneTooltip" xml:space="preserve">
-    <value>Switch to one-to-one relationship creation mode</value>
+    <value>Create a one-to-one relationship</value>
   </data>
   <data name="Toolbox_OneToMany" xml:space="preserve">
     <value>One-to-Many</value>
   </data>
   <data name="Toolbox_OneToManyTooltip" xml:space="preserve">
-    <value>Create a one-to-many relationship representing a parent-child relationship</value>
+    <value>Create a one-to-many (parent-child) relationship</value>
   </data>
   <data name="Toolbox_ManyToMany" xml:space="preserve">
     <value>Many-to-Many</value>
   </data>
   <data name="Toolbox_ManyToManyTooltip" xml:space="preserve">
-    <value>Create a many-to-many relationship assuming a junction table</value>
+    <value>Create a many-to-many relationship via a junction table</value>
   </data>
   <data name="Toolbox_RemoveRelationship" xml:space="preserve">
     <value>Delete Relationship</value>
@@ -390,7 +390,7 @@
     <value>Description</value>
   </data>
   <data name="Property_DescriptionTooltip" xml:space="preserve">
-    <value>Synchronized with SQL Server's MS_Description</value>
+    <value>Synchronized with the database's comment (except SQLite)</value>
   </data>
   <data name="Property_TitleBackground" xml:space="preserve">
     <value>Title Background</value>

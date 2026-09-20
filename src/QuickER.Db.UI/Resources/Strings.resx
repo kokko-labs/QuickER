@@ -363,7 +363,7 @@ Do you want to run this against {0}?</value>
     <value>"{0}" was not imported because it differs from "{1}" only in letter case, and the import cannot keep both apart.</value>
   </data>
   <data name="Db_SyncWriteBack" xml:space="preserve">
-    <value>Write the current diagram back to the existing DB (apply diff ALTER)</value>
+    <value>Write the current diagram back to the existing DB (review the diff before applying)</value>
   </data>
   <data name="Db_SyncTitle" xml:space="preserve">
     <value>Sync with Database</value>

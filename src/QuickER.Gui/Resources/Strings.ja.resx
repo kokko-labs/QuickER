@@ -199,7 +199,7 @@
     <value>複製</value>
   </data>
   <data name="Toolbar_DuplicateTooltip" xml:space="preserve">
-    <value>複製 (Ctrl+D)</value>
+    <value>選択中のエンティティを複製 (Ctrl+D)</value>
   </data>
   <data name="Toolbar_ShowDescriptions" xml:space="preserve">
     <value>説明表示</value>
@@ -223,31 +223,31 @@
     <value>ツールボックス</value>
   </data>
   <data name="Toolbar_ToggleToolboxTooltip" xml:space="preserve">
-    <value>左のツールボックスの表示・非表示を切り替える（F9）</value>
+    <value>ツールボックスの表示・非表示 (F9)</value>
   </data>
   <data name="Toolbar_TogglePropertyPanel" xml:space="preserve">
     <value>プロパティパネル</value>
   </data>
   <data name="Toolbar_TogglePropertyPanelTooltip" xml:space="preserve">
-    <value>右のプロパティパネルの表示・非表示を切り替える（F10）</value>
+    <value>プロパティパネルの表示・非表示 (F10)</value>
   </data>
   <data name="Toolbar_FullScreen" xml:space="preserve">
     <value>全画面</value>
   </data>
   <data name="Toolbar_FullScreenTooltip" xml:space="preserve">
-    <value>ウィンドウの枠を隠して画面いっぱいに広げる（F11）</value>
+    <value>ウィンドウの枠を隠して画面いっぱいに表示 (F11)</value>
   </data>
   <data name="Toolbar_ExitApp" xml:space="preserve">
     <value>終了</value>
   </data>
   <data name="Toolbar_ExitAppTooltip" xml:space="preserve">
-    <value>QuickER を終了する（タイトルバーが隠れる全画面表示のときだけ表示）</value>
+    <value>QuickER を終了</value>
   </data>
   <data name="Toolbar_ViewGroup" xml:space="preserve">
     <value>表示</value>
   </data>
   <data name="Toolbar_ViewGroupTooltip" xml:space="preserve">
-    <value>表示トグル: ツールボックス / プロパティパネル / 説明表示 / NULL表示 / 簡易表示 / 全画面</value>
+    <value>表示に関する切り替え</value>
   </data>
   <data name="Toolbar_ArrangeGroup" xml:space="preserve">
     <value>整列</value>
@@ -271,7 +271,7 @@
     <value>整列(自由)</value>
   </data>
   <data name="Toolbar_ArrangeForceTooltip" xml:space="preserve">
-    <value>リレーションの繋がりで大まかな配置を決めてから格子に揃えて整列</value>
+    <value>リレーションの繋がりで配置してから格子に揃える</value>
   </data>
   <data name="Toolbar_AutoWidth" xml:space="preserve">
     <value>幅自動</value>
@@ -319,7 +319,7 @@
     <value>ズームアウト (Ctrl+-)</value>
   </data>
   <data name="Status_ZoomResetTooltip" xml:space="preserve">
-    <value>クリックで 100% に戻す (Ctrl+0)</value>
+    <value>100% に戻す (Ctrl+0)</value>
   </data>
   <data name="Status_ZoomInTooltip" xml:space="preserve">
     <value>ズームイン (Ctrl++)</value>
@@ -355,13 +355,13 @@
     <value>エンティティ追加</value>
   </data>
   <data name="Toolbox_AddEntityTooltip" xml:space="preserve">
-    <value>新しいテーブルをキャンバスに追加します</value>
+    <value>新しいエンティティを図に追加</value>
   </data>
   <data name="Toolbox_RemoveEntity" xml:space="preserve">
     <value>エンティティ削除</value>
   </data>
   <data name="Toolbox_RemoveEntityTooltip" xml:space="preserve">
-    <value>選択中のエンティティをダイアグラムから削除します</value>
+    <value>選択中のエンティティを図から削除</value>
   </data>
   <data name="Toolbox_RelationshipSection" xml:space="preserve">
     <value>リレーションシップ</value>
@@ -370,25 +370,25 @@
     <value>1 対 1</value>
   </data>
   <data name="Toolbox_OneToOneTooltip" xml:space="preserve">
-    <value>1 対 1 のリレーションを作成します</value>
+    <value>1 対 1 のリレーションを作成</value>
   </data>
   <data name="Toolbox_OneToMany" xml:space="preserve">
     <value>1 対 多</value>
   </data>
   <data name="Toolbox_OneToManyTooltip" xml:space="preserve">
-    <value>親子関係を表す 1 対 多 のリレーションを作成します</value>
+    <value>親子関係を表す 1 対 多 のリレーションを作成</value>
   </data>
   <data name="Toolbox_ManyToMany" xml:space="preserve">
     <value>多 対 多</value>
   </data>
   <data name="Toolbox_ManyToManyTooltip" xml:space="preserve">
-    <value>中間テーブルを想定した 多 対 多 のリレーションを作成します</value>
+    <value>中間テーブルを想定した 多 対 多 のリレーションを作成</value>
   </data>
   <data name="Toolbox_RemoveRelationship" xml:space="preserve">
     <value>リレーション削除</value>
   </data>
   <data name="Toolbox_RemoveRelationshipTooltip" xml:space="preserve">
-    <value>選択中のリレーションを削除します</value>
+    <value>選択中のリレーションを削除</value>
   </data>
   <data name="Toolbox_RelationshipModeHint" xml:space="preserve">
     <value>リレーション作成中: 2つのエンティティを順番にクリックしてください。同じエンティティを2回クリックすると自己参照リレーションを作成できます。</value>
@@ -412,7 +412,7 @@
     <value>説明</value>
   </data>
   <data name="Property_DescriptionTooltip" xml:space="preserve">
-    <value>SQL Server の MS_Description と同期します</value>
+    <value>DB のコメントと同期します（SQLite を除く）</value>
   </data>
   <data name="Property_TitleBackground" xml:space="preserve">
     <value>タイトル背景</value>
