@@ -363,7 +363,7 @@
     <value>「{0}」は「{1}」と大文字小文字だけが違うため取り込みませんでした（取込は両者を区別できません）。</value>
   </data>
   <data name="Db_SyncWriteBack" xml:space="preserve">
-    <value>現在のダイアグラムを既存 DB に書き戻し (差分 ALTER 実行)</value>
+    <value>現在の図を既存 DB へ書き戻す（差分を確認してから実行）</value>
   </data>
   <data name="Db_SyncTitle" xml:space="preserve">
     <value>データベースと同期</value>

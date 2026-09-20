@@ -453,7 +453,7 @@
     <value>コード取込</value>
   </data>
   <data name="Toolbar_ReverseFromCodeTooltip" xml:space="preserve">
-    <value>IncludeDataAnnotations ON で生成した C# ファイルを現在の図へ取り込む</value>
+    <value>QuickER で生成した C# ファイルを現在の図へ取り込む</value>
   </data>
   <data name="Reverse_FileFilter" xml:space="preserve">
     <value>C# ソース (*.cs)|*.cs|すべてのファイル (*.*)|*.*</value>
@@ -478,7 +478,7 @@
     <value>コード生成</value>
   </data>
   <data name="Toolbar_GenerateCSharpTooltip" xml:space="preserve">
-    <value>現在の ER 図から C# Entity / BindingModel を生成</value>
+    <value>現在の ER 図から C# コードを生成</value>
   </data>
   <data name="Toolbar_QueryDefinitions" xml:space="preserve">
     <value>クエリ定義</value>

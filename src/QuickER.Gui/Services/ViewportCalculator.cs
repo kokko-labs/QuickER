@@ -13,15 +13,20 @@ namespace QuickER.Services;
 public static class ViewportCalculator
 {
     /// <summary>ズーム倍率の下限（50%）</summary>
+    /// <remarks>
+    /// 明示の「全体を表示」もここまで縮小する（名前どおり全体を見せるのが役目なので、
+    /// 手動ズームより手前で頭打ちにしない）。自動 fit だけは <see cref="NoShrinkMinZoom"/>。
+    /// </remarks>
     public const double MinZoom = 0.5;
 
-    /// <summary>fit-to-window（自動全体表示）で採用する倍率の下限（80%）</summary>
+    /// <summary>自動 fit で採用する倍率の下限（100%＝縮小しない）</summary>
     /// <remarks>
-    /// 手動ズーム（<see cref="MinZoom"/>=50%）より高く設定する。読込・整列直後の自動 fit が
-    /// 図を小さく縮めすぎると文字が読めず「小さすぎる初期表示」になるため、
-    /// 自動で縮むのは 80% までとし、それ以上の縮小はユーザーの手動操作に委ねる。
+    /// 図が新しく現れた直後（開く・取込・DB 取込・AI 生成・復元）は「読めること」を優先し、
+    /// 収まらなくても等倍のまま表示して残りはスクロールに委ねる。利用者が並べ直した経路
+    /// （明示の「全体を表示」・整列）は <see cref="MinZoom"/> 側で、線引きの正本は
+    /// <c>MainViewModel.RequestFitToWindow</c> の remarks。
     /// </remarks>
-    public const double FitMinZoom = 0.8;
+    public const double NoShrinkMinZoom = 1.0;
 
     /// <summary>ズーム倍率の上限（200%）</summary>
     public const double MaxZoom = 2.0;
@@ -87,15 +92,21 @@ public static class ViewportCalculator
     /// <param name="contentBounds">整列対象コンテンツのバウンディングボックス（余白を含まない論理座標）</param>
     /// <param name="viewport">ビューポート（表示領域）のサイズ（px）</param>
     /// <param name="margin">コンテンツ周囲に確保する余白（論理座標 px）</param>
-    /// <returns>(倍率, オフセット)。コンテンツをビューポート中央に配置する</returns>
+    /// <returns>(倍率, オフセット)。収まる軸は中央寄せ・収まらない軸は余白込みの左上寄せ</returns>
     /// <remarks>
     /// 空図やゼロサイズのビューポートでは 100% ＋ 原点を返す。
     /// fit は「収まるよう縮小する」操作であり、小さい図を等倍超へ拡大すると
-    /// 文字が巨大化して不自然なため、倍率は <see cref="FitMinZoom"/>（80%）〜100% にクランプする。
-    /// 80% でも収まらない大きい図はコンテンツ中央を基準に一部が見える状態となり、
-    /// さらに全体を見たい場合は手動ズーム（下限 <see cref="MinZoom"/>=20%）かミニマップに委ねる。
+    /// 文字が巨大化して不自然なため、倍率は <paramref name="minZoom"/>〜100% にクランプする。
+    /// 下限でも収まらない大きい図は、収まらない軸だけ余白込みの左上を原点に合わせ（読み始めを
+    /// 決定的にするため）残りはスクロールに委ねる。さらに縮めたい場合は手動ズーム
+    /// （下限 <see cref="MinZoom"/>=50%）かミニマップに委ねる。
     /// </remarks>
-    public static ViewportFit CalculateFit(Rect contentBounds, Size viewport, double margin)
+    public static ViewportFit CalculateFit(
+        Rect contentBounds,
+        Size viewport,
+        double margin,
+        double minZoom = MinZoom
+    )
     {
         // 空図・不正入力は等倍・原点で返す（ズーム操作の意味がないため）
         if (
@@ -113,10 +124,10 @@ public static class ViewportCalculator
         var contentWidth = contentBounds.Width + margin * 2;
         var contentHeight = contentBounds.Height + margin * 2;
 
-        // 幅・高さ双方が収まる倍率を採用する（拡大はせず上限は等倍、自動縮小の下限は 80%）
+        // 幅・高さ双方が収まる倍率を採用する（拡大はせず上限は等倍・下限は呼び出し側の方針）
         var zoom = Math.Clamp(
             Math.Min(viewport.Width / contentWidth, viewport.Height / contentHeight),
-            FitMinZoom,
+            minZoom,
             1.0
         );
 
@@ -124,12 +135,36 @@ public static class ViewportCalculator
         var centerX = contentBounds.X + contentBounds.Width / 2;
         var centerY = contentBounds.Y + contentBounds.Height / 2;
 
-        // コンテンツ中心がビューポート中央に来るようオフセットを決める
-        var offsetX = centerX * zoom - viewport.Width / 2;
-        var offsetY = centerY * zoom - viewport.Height / 2;
+        // 収まる軸は中央寄せ、収まらない軸は余白込みの左上を原点に合わせる。
+        // 収まらないのに中央へ寄せると、開いた直後に図の「真ん中」が映って
+        // 左上から読み始められない（縮小しない自動 fit では画面外が増えるため顕著）
+        var offsetX = AxisOffset(
+            contentWidth * zoom,
+            viewport.Width,
+            centerX * zoom,
+            (contentBounds.X - margin) * zoom
+        );
+        var offsetY = AxisOffset(
+            contentHeight * zoom,
+            viewport.Height,
+            centerY * zoom,
+            (contentBounds.Y - margin) * zoom
+        );
 
         return new ViewportFit(zoom, new Vector(Math.Max(0, offsetX), Math.Max(0, offsetY)));
     }
+
+    /// <summary>1 軸ぶんのスクロールオフセットを求める（収まるなら中央寄せ・収まらないなら先頭寄せ）</summary>
+    /// <param name="scaledContent">余白込みコンテンツの拡大後の長さ（px）</param>
+    /// <param name="viewport">ビューポートの長さ（px）</param>
+    /// <param name="scaledCenter">コンテンツ中心の拡大後座標（px）</param>
+    /// <param name="scaledStart">余白込みコンテンツ先頭の拡大後座標（px）</param>
+    private static double AxisOffset(
+        double scaledContent,
+        double viewport,
+        double scaledCenter,
+        double scaledStart
+    ) => scaledContent <= viewport ? scaledCenter - viewport / 2 : scaledStart;
 
     /// <summary>
     /// 新規エンティティの配置位置を、現在表示中のビューポート内に収まるように求める
@@ -192,7 +227,7 @@ public static class ViewportCalculator
     /// <param name="margin">コンテンツ周囲に確保する余白（論理座標 px）</param>
     /// <returns>順方向（コンテンツ→ミニマップ）／逆方向（ミニマップ→コンテンツ）の両変換を担う射影</returns>
     /// <remarks>
-    /// <see cref="CalculateFit"/> は 80%〜100% にクランプするためミニマップ用途には流用できない。
+    /// <see cref="CalculateFit"/> は下限つきでクランプするためミニマップ用途には流用できない。
     /// こちらは縦横比を保つ一様スケールで、拡大・縮小いずれもクランプせず、
     /// 余白込みコンテンツをミニマップ枠の中央に収める。空図・不正入力では等倍・原点の射影を返す。
     /// </remarks>

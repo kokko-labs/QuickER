@@ -225,4 +225,27 @@ public class MainViewModelViewportTests
     }
 
     // StubDialogService / StubFileDialogService は共有版（QuickER.Tests.TestDoubles）を使用する
+
+    /// <summary>並べ直した経路だけが縮小を許し、図が現れた経路は許さないことを検証する</summary>
+    /// <remarks>
+    /// すべて同じイベントで View へ届くため、区別を落とすと「全体を表示」「整列」が効かなくなるか、
+    /// 図を開いた直後に縮んで文字が読めなくなるかのどちらかが静かに起きる。
+    /// </remarks>
+    [Fact(DisplayName = "FitToWindow: 明示と整列は縮小を許し、図の置換は許さない")]
+    public void FitToWindow_AllowShrink_DiffersByTrigger()
+    {
+        var vm = new MainViewModel();
+        var requests = new List<FitToWindowRequest>();
+        vm.FitToWindowRequested += (_, e) => requests.Add(e);
+
+        vm.FitToWindowCommand.Execute(null);
+        vm.AddEntityCommand.Execute(null);
+        vm.AutoLayoutGridCommand.Execute(null);
+        vm.ReplaceDiagramFromModule(new ErDiagram());
+
+        requests.Should().HaveCount(3);
+        requests[0].AllowShrink.Should().BeTrue("明示の「全体を表示」は収まるまで縮小する");
+        requests[1].AllowShrink.Should().BeTrue("整列は並べ直した結果を確かめる操作なので縮小する");
+        requests[2].AllowShrink.Should().BeFalse("図が現れた経路は等倍のまま表示する");
+    }
 }

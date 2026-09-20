@@ -20,7 +20,7 @@ public partial class MainViewModel
 
     /// <summary>fit-to-window の実行を View（コードビハインド）へ要求するイベント</summary>
     /// <remarks>スクロールオフセットとビューポート実寸を持つのは View 側のため、計算・適用はそこで行う</remarks>
-    public event EventHandler? FitToWindowRequested;
+    public event EventHandler<FitToWindowRequest>? FitToWindowRequested;
 
     /// <summary><see cref="ViewportContentBounds"/> のバッキングフィールド</summary>
     private Rect _viewportContentBounds = Rect.Empty;
@@ -111,22 +111,42 @@ public partial class MainViewModel
     private void ResetZoom() => ZoomLevel = 1.0;
 
     /// <summary>fit-to-window を要求する（実計算・適用は View 側で行う）</summary>
+    /// <remarks>
+    /// 明示操作なので、収まるまで縮小してよい（自動 fit との違いはここだけ）。
+    /// </remarks>
     [RelayCommand]
-    private void FitToWindow() => RequestFitToWindow();
+    private void FitToWindow() => RequestFitToWindow(allowShrink: true);
 
     /// <summary><see cref="FitToWindowRequested"/> を発火して View へ fit を要求する</summary>
+    /// <param name="allowShrink">
+    /// true なら全体が収まるまで縮小する。false＝既定は縮小せず等倍のまま表示し、収まらないぶんは
+    /// スクロールに委ねる。
+    /// </param>
     /// <remarks>
+    /// <para>
+    /// 線引きは「<b>利用者が現在の図を並べ直した</b>（明示の「全体を表示」・整列 3 種）＝結果を
+    /// 確かめる操作なので全体を見せる」対「<b>図が新しく現れた</b>（開く・取込・DB 取込・AI 生成・
+    /// 復元）＝まず読める大きさ（等倍）で出し、残りはスクロールに委ねる」。
+    /// </para>
+    /// <para>
     /// ファイル読込・取込・自動整列・AI 生成の直後にも共通で呼び出す。
     /// 外部変更の再読込経路（ステージ B）ではビューポート（ズーム・スクロール）を維持するため、
     /// <see cref="_suppressFitToWindow"/> が立っている間は要求を発火しない。
+    /// </para>
     /// </remarks>
-    private void RequestFitToWindow()
+    private void RequestFitToWindow(bool allowShrink = false)
     {
         if (_suppressFitToWindow)
         {
             return;
         }
 
-        FitToWindowRequested?.Invoke(this, EventArgs.Empty);
+        FitToWindowRequested?.Invoke(this, new FitToWindowRequest(allowShrink));
     }
 }
+
+/// <summary>fit-to-window 要求の内容（縮小してよいかどうか）</summary>
+/// <param name="AllowShrink">
+/// true なら全体が収まるまで縮小する（明示の「全体を表示」）。false なら等倍のまま表示する（自動 fit）。
+/// </param>
+public readonly record struct FitToWindowRequest(bool AllowShrink);

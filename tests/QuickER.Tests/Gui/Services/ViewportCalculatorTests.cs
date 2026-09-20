@@ -183,25 +183,92 @@ public class ViewportCalculatorTests
         fit.Zoom.Should().Be(1.0);
     }
 
-    /// <summary>巨大コンテンツでも自動 fit の倍率が下限 80% を下回らないことを検証する</summary>
-    [Fact(DisplayName = "CalculateFit: 倍率は fit 専用下限 80% でクランプ")]
-    public void CalculateFit_ClampsToFitMinZoom()
+    /// <summary>巨大コンテンツでも明示の「全体を表示」が下限 50% を下回らないことを検証する</summary>
+    [Fact(DisplayName = "CalculateFit: 倍率は手動ズーム下限 50% でクランプ")]
+    public void CalculateFit_ClampsToMinZoom()
     {
-        // 理論倍率が 80% を下回る大きいコンテンツは FitMinZoom で頭打ち
-        // （それ以上の縮小は手動ズーム＝MinZoom 50% やミニマップに委ねる）
+        // 理論倍率が 50% を下回る大きいコンテンツは MinZoom で頭打ち
+        // （それ以上の縮小はミニマップに委ねる）
         var bounds = new Rect(0, 0, 100000, 100000);
         var fit = ViewportCalculator.CalculateFit(bounds, new Size(500, 500), 0);
 
-        fit.Zoom.Should().Be(ViewportCalculator.FitMinZoom);
+        fit.Zoom.Should().Be(ViewportCalculator.MinZoom);
     }
 
-    /// <summary>fit の下限（80%）が手動ズームの下限（50%）より高いことを固定する</summary>
-    [Fact(DisplayName = "CalculateFit: fit 下限は手動ズーム下限より高い")]
-    public void FitMinZoom_IsHigherThanManualMinZoom()
+    /// <summary>明示 fit の下限が手動ズームの下限と同じであることを固定する</summary>
+    [Fact(DisplayName = "CalculateFit: 明示 fit の下限は手動ズーム下限と同じ")]
+    public void ExplicitFitFloor_MatchesManualMinZoom()
     {
-        // 自動で縮む限界（読める大きさ）＞ 手動で縮める限界、の関係を仕様として固定する
-        ViewportCalculator.FitMinZoom.Should().Be(0.8);
-        ViewportCalculator.FitMinZoom.Should().BeGreaterThan(ViewportCalculator.MinZoom);
+        // 「全体を表示」は名前どおり全体を見せるのが役目なので、手動で縮められる限界より
+        // 手前で頭打ちにしない（fit 専用の下限は設けない）。自動 fit だけが別の下限を使う
+        ViewportCalculator.MinZoom.Should().Be(0.5);
+        ViewportCalculator.NoShrinkMinZoom.Should().BeGreaterThan(ViewportCalculator.MinZoom);
+    }
+
+    /// <summary>図が現れた経路の fit は収まらなくても縮小せず等倍のままであることを検証する</summary>
+    /// <remarks>
+    /// 開いた直後に縮小すると、大きい図では文字が読めない大きさで初期表示される。
+    /// 下限を等倍にして「読めること」を優先し、収まらないぶんはスクロールへ委ねる。
+    /// </remarks>
+    [Fact(DisplayName = "CalculateFit: 自動 fit は縮小せず 100% のまま")]
+    public void CalculateFit_NoShrink_KeepsIdentityZoom()
+    {
+        var bounds = new Rect(0, 0, 100000, 100000);
+
+        var fit = ViewportCalculator.CalculateFit(
+            bounds,
+            new Size(500, 500),
+            0,
+            ViewportCalculator.NoShrinkMinZoom
+        );
+
+        fit.Zoom.Should().Be(1.0);
+        ViewportCalculator.NoShrinkMinZoom.Should().Be(1.0);
+    }
+
+    /// <summary>収まらない軸は中央でなく余白込みの左上へ寄せることを検証する</summary>
+    /// <remarks>
+    /// 中央寄せのままだと、開いた直後に図の「真ん中」が映って左上から読み始められない。
+    /// 縮小しない自動 fit では画面外が増えるぶん、この差がそのまま初期表示の使い勝手になる。
+    /// </remarks>
+    [Fact(DisplayName = "CalculateFit: 収まらない軸は左上へ寄せる")]
+    public void CalculateFit_WhenContentOverflows_AlignsToTopLeft()
+    {
+        var bounds = new Rect(300, 400, 5000, 5000);
+        const double margin = 50;
+
+        var fit = ViewportCalculator.CalculateFit(
+            bounds,
+            new Size(800, 600),
+            margin,
+            ViewportCalculator.NoShrinkMinZoom
+        );
+
+        // 等倍なので、余白込みの左上（300-50, 400-50）がそのままスクロール位置になる
+        fit.Offset.X.Should().BeApproximately(bounds.X - margin, 1e-9);
+        fit.Offset.Y.Should().BeApproximately(bounds.Y - margin, 1e-9);
+    }
+
+    /// <summary>片方の軸だけ収まらない場合に、軸ごとに寄せ方が切り替わることを検証する</summary>
+    [Fact(DisplayName = "CalculateFit: 収まる軸は中央・収まらない軸は先頭で独立に決まる")]
+    public void CalculateFit_MixedOverflow_DecidesPerAxis()
+    {
+        // 幅だけ大きく、高さはビューポートに収まる配置
+        var bounds = new Rect(300, 400, 5000, 100);
+        const double margin = 50;
+        var viewport = new Size(800, 600);
+
+        var fit = ViewportCalculator.CalculateFit(
+            bounds,
+            viewport,
+            margin,
+            ViewportCalculator.NoShrinkMinZoom
+        );
+
+        fit.Offset.X.Should().BeApproximately(bounds.X - margin, 1e-9, "収まらない軸は先頭へ");
+
+        var screenCenterY = (bounds.Y + bounds.Height / 2) * fit.Zoom - fit.Offset.Y;
+        screenCenterY.Should().BeApproximately(viewport.Height / 2, 1e-6, "収まる軸は中央へ");
     }
 
     /// <summary>空図（空矩形）は等倍・原点を返すことを検証する</summary>
